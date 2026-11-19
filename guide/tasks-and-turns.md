@@ -213,7 +213,7 @@ Anyone whose access lists a department can give it a task in the tracker. It goe
 
 ## Who approves what reaches the main branch?
 
-The department's commit rule says whether main acceptance or a release needs approval. With no rule set, neither needs an approval card. When approval is required, the person responsible for the department can approve the exact commit on the task, as can the orchestrator acting for the owner.
+The department's commit rule says whether main acceptance or a release needs approval. With no rule set, neither needs an approval card. When approval is required, the person responsible for the department can approve the exact commit on the task, as can the orchestrator acting for the owner. A release that brings work no check covers is the exception: whatever the rule, it is recorded only after a person approves it on a card that lists exactly that work, and autonomous release never approves it.
 
 The head still accepts the exact checked candidate and Hornhoof verifies it is included in the observed main commit. To release a turn, record the release before main moves. A whole test run must have passed on the exact commit of the turn branch. Main must be able to fast-forward to it, and the version tag must name that same commit.
 

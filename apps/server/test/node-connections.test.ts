@@ -528,7 +528,7 @@ describe('who gets the history of a machine', () => {
     const [acme] = await db.select().from(companies);
     const [sales] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'sales', roleCode: 'SAL' }).returning();
     const owner = await invitePerson(app, ceo, { name: 'Ann', email: 'ann@acme.com', access: { departments: [sales!.id] } });
-    const stranger = await invitePerson(app, ceo, { name: 'Max', email: 'max@acme.com', access: { departments: [sales!.id] } });
+    const stranger = await invitePerson(app, ceo, { name: 'Leo', email: 'leo@moonfern.example', access: { departments: [sales!.id] } });
     expect((await history(app, ceo, machineId)).statusCode).toBe(200);
     expect((await history(app, whole, machineId)).statusCode).toBe(200);
 

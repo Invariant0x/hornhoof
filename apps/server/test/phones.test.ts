@@ -6,17 +6,26 @@ import { as, until } from './helpers.js';
 import { phoneCompany } from './phone-fixture.js';
 import { agents, companyPhones } from '../src/db/schema.js';
 
-it('reports readiness for a registered phone and checks again when the node comes back', async () => {
-  let issues: PhoneReadinessIssue[] = ['lock'];
+it('shows unread brightness and accepts a later check with brightness above the floor', async () => {
+  let issues: PhoneReadinessIssue[] = ['lock', 'brightness'];
   const c = await phoneCompany({ readiness: () => issues });
   const made = await c.addPhone();
   expect(made.statusCode).toBe(201);
-  expect(made.json().readiness).toEqual(['lock']);
+  expect(made.json().readiness).toEqual(['lock', 'brightness']);
   expect(c.calls[1]).toMatchObject({ type: 'phone.baseline', binding: { phoneId: made.json().id, hardwareKey: 'a'.repeat(64) } });
   const list = () => c.app.inject({ url: '/api/phones', ...as(c.claraSession) });
+  // The current node returns only unresolved issues when brightness is at or above its floor.
   issues = [];
   c.hello();
   await until(async () => (await list()).json().phones[0].readiness?.length === 0);
+});
+
+it('asks for a node update before running a baseline that could lower brightness', async () => {
+  const c = await phoneCompany({ readiness: () => [], legacyBaseline: true });
+  const made = await c.addPhone();
+  expect(made.statusCode).toBe(201);
+  expect(made.json().readiness).toEqual(['nodeUpdate']);
+  expect(c.calls.some(m => m.type === 'phone.baseline')).toBe(false);
 });
 
 it('lets any person register their network phone on a company machine, with an owner', async () => {

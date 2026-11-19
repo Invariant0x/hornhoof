@@ -40,7 +40,7 @@ describe('comments use the employee input path', () => {
     await c.db.update(agents).set({ model: 'claude-opus-5-5' }).where(eq(agents.id, c.agent.id));
     const [reviewer] = await c.db.insert(agents).values({ companyId: c.companyId, departmentId: c.dev.id, kind: 'worker', roleKey: 'DEV-REV', name: 'Rita', model: 'claude-opus-5-5', subscriptionId: c.sub.id, skills: ['dev-review-diff'] }).returning();
     const task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checked retry', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, resultKind: 'code', small: true, reviewerAgentId: reviewer!.id, paths: ['logic/totals.ts'] })).task;
-    c.ctx.readCommit = async () => ({ branch: `task-${task.number}`, commitSha: HEAD });
+    c.ctx.readCommit = async (_repo, want) => ('branch' in want && want.branch === 'main' ? { branch: 'main', commitSha: BASE } : { branch: `task-${task.number}`, commitSha: HEAD });
     c.ctx.readCompare = async (_repo, refs) => ({ complete: true, baseSha: refs.base, headSha: refs.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
     await submit(c.ctx, c.agent.id, task.id, { summary: 'Implemented', evidence: 'Checked', review: { baseCommit: BASE } });
     const head = await c.run(c.head.id);

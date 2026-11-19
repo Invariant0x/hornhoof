@@ -223,11 +223,12 @@ describe('the release step while the turn branch goes on', () => {
 });
 
 describe('whether everything a release brings was checked', () => {
+  /* The person approves the release as it stands, on a card that names what it brings that no check covers. */
   const coverage = async (change: (f: Awaited<ReturnType<typeof releasing>>) => Promise<void> | void) => {
     const f = await releasing();
     const run = await f.fullRun();
-    await f.approve();
     await change(f);
+    await f.approve();
     const result = await f.recordRelease({ runId: run.id });
     expect(result.isError).toBe(false);
     return recorded(result.text);

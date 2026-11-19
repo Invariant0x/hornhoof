@@ -21,8 +21,8 @@ const EVENTS_REPLY: [number, unknown] = [
 ];
 
 const DEPT_OWNER_ME: Me = {
-  person: { id: 'p-max', companyId: 'c1', name: 'Max', email: 'max@acme.com', title: 'CMO', status: 'active', scopeKind: 'listed', isOwner: false },
-  company: { id: 'c1', name: 'Northwind' },
+  person: { id: 'p-leo', companyId: 'c1', name: 'Leo', email: 'leo@moonfern.example', title: 'CMO', status: 'active', scopeKind: 'listed', isOwner: false },
+  company: { id: 'c1', name: 'Moonfern' },
   canDecideCompany: false,
 };
 
@@ -330,7 +330,7 @@ describe('department owner answering head on a large company', () => {
   it('shows the retry card instead of crashing #root when /api/me returns a cut-off or partial 200 response', async () => {
     mockApi({
       'GET /api/setup': [200, { needed: false }],
-      'GET /api/me': [200, { person: { id: 'p-max' } }],
+      'GET /api/me': [200, { person: { id: 'p-leo' } }],
     });
 
     const { container } = render(

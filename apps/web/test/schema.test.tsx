@@ -257,20 +257,24 @@ describe('the department schema', () => {
     expect(schemaLayout(dept(TEAM, ROLES), 2, natural)).toEqual(schemaLayout(dept(TEAM, ROLES), 2));
   });
 
-  it('stacks a card whose words take more lines by its measured height, and its frame, spine and the schema grow with it', () => {
+  it('gives every card of the department the height the most words need, and stacks the cards, frames and spines by it', () => {
     const plain = schemaLayout(dept(TEAM, ROLES), 0);
-    const s = schemaLayout(dept(TEAM, ROLES), 0, { cards: { felix: 130 } });
+    const s = schemaLayout(dept(TEAM, ROLES), 0, { cards: { felix: 130, rita: 100 } });
     const fe = s.frames[1]!;
     const [felix, fiona] = fe.members;
     expect([felix!.y, felix!.h, felix!.cy]).toEqual([FT + FHEAD, 130, FT + FHEAD + 65]);
-    expect([fiona!.y, fiona!.h, fiona!.cy]).toEqual([FT + FHEAD + 130 + PY - CH, CH, FT + FHEAD + 130 + PY - CH + CH / 2]);
-    expect(fe.h).toBe(FHEAD + 130 + PY - CH + PY + 8);
+    expect([fiona!.y, fiona!.h, fiona!.cy]).toEqual([FT + FHEAD + 130 + PY - CH, 130, FT + FHEAD + 130 + PY - CH + 65]);
+    expect(fe.h).toBe(FHEAD + 2 * (130 + PY - CH) + 8);
     expect(s.h).toBe(FT + fe.h);
+    /* The head of Development's word for #1489: one height for every chip of the department, the tallest one's. */
+    expect(s.frames.flatMap(f => f.members.map(m => m.h))).toEqual(TEAM.slice(1).map(() => 130));
+    expect(s.frames.map(f => f.members.map(m => m.y))).toEqual(plain.frames.map(f => f.members.map((m, i) => m.y + i * (130 - CH))));
     expect(s.lines).toContainEqual({ cls: 'tick', pts: [[fe.x + 10, felix!.cy], [felix!.x, felix!.cy]] });
     expect(s.lines).toContainEqual({ cls: 'tr', pts: [[fe.x + 10, BUS], [fe.x + 10, fiona!.cy]] });
     expect(stepPaths(s).toMember('fiona')!.at(-1)).toEqual([fiona!.x + 14, fiona!.cy]);
-    /* The other frames stay where they were. */
-    expect(s.frames.filter(f => f !== fe)).toEqual(plain.frames.filter(f => f.key !== 'DEV-FE'));
+    /* The frames stand where they stood, each as tall as its cards now are. */
+    expect(s.frames.map(f => [f.key, f.x])).toEqual(plain.frames.map(f => [f.key, f.x]));
+    expect(s.frames.map(f => f.h)).toEqual(plain.frames.map(f => f.h + f.members.length * (130 - CH)));
   });
 
   it("starts a frame's cards under its heading when the heading wraps to more lines, and a call frame grows under it", () => {

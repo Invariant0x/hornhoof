@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PhoneFrame, PhoneGrant, PhoneReply } from '@hornhoof/protocol';
 import { PhoneAdb, type AdbCall } from '../src/phones/adb.js';
@@ -29,7 +30,7 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 /* A fake adb: answers from records and keeps every call our code made. */
-function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { firstRead?: () => Promise<void>; readMs?: number[]; fields?: string[]; failure?: boolean; failOn?: string; typingMs?: number; revokeOnType?: boolean; unplugOnType?: boolean } = {}) {
+function phone(png = SCREEN, serial = SERIAL, baseline: string | ((script: string) => string) = '', input: { firstRead?: () => Promise<void>; readMs?: number[]; fields?: string[]; failure?: boolean; failOn?: string; typingMs?: number; revokeOnType?: boolean; unplugOnType?: boolean } = {}) {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const calls: AdbCall[] = [];
@@ -59,7 +60,7 @@ function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { firstRead?
     if (input.typingMs && /input text|KEYCODE_ENTER/.test(call.input ?? '')) vi.setSystemTime(Date.now() + input.typingMs);
     if (a.endsWith('screencap -p')) return png;
     if (a.endsWith('pm path com.android.adbkeyboard')) return Buffer.from('package:/data/app/adbkeyboard/base.apk\n');
-    if (a.endsWith('shell sh')) return Buffer.from(baseline);
+    if (a.endsWith('shell sh')) return Buffer.from(typeof baseline === 'function' ? baseline(call.input ?? '') : baseline);
     return Buffer.alloc(0);
   });
   const out: (PhoneReply | PhoneFrame)[] = [];
@@ -72,6 +73,43 @@ function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { firstRead?
   return { phones, calls, grant, act, reply, shells, open: () => phones.handle({ type: 'phone.open', requestId: id(5), grant }) };
 }
 
+/* Run our readiness script against recorded-style Android answers without a device. */
+const brightnessCommands = String.raw`
+exec 3>&1
+settings() {
+  if [ "$1" = --user ]; then shift 2; fi
+  case "$1:$3" in
+    get:screen_brightness) echo "$HH_TEST_BRIGHTNESS" ;;
+    get:screen_brightness_mode) echo "$HH_TEST_BRIGHTNESS_MODE" ;;
+    put:screen_brightness) echo "brightness write: $4" >&3; [ "$HH_TEST_REJECT_BRIGHTNESS" = 1 ] || HH_TEST_BRIGHTNESS=$4 ;;
+    put:screen_brightness_mode) echo "brightness mode write: $4" >&3; HH_TEST_BRIGHTNESS_MODE=$4 ;;
+    get:stay_on_while_plugged_in) echo 7 ;;
+    get:screen_off_timeout) echo 2147483647 ;;
+    get:sleep_timeout|get:attentive_timeout) echo -1 ;;
+    *) echo 0 ;;
+  esac
+}
+dumpsys() {
+  case "$1:$2" in
+    power:) printf 'mWakefulness=Awake\nadaptive=false\n%s\n' "$HH_TEST_POWER_LIMIT" ;;
+    window:) echo 'mCurrentFocus=example.test/.Main' ;;
+    deviceidle:whitelist) echo 'system,example.test' ;;
+    deviceidle:enabled) echo 0 ;;
+    *) return 1 ;;
+  esac
+}
+cmd() {
+  case "$*" in
+    'overlay lookup android android:integer/config_screenBrightnessSettingMaximum') echo "$HH_TEST_OVERLAY_LIMIT" ;;
+    'package query-activities --components --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER') echo 'example.test/.Main' ;;
+    *) return 1 ;;
+  esac
+}
+locksettings() { echo true; }
+pm() { return 1; }
+wm() { :; }
+`;
+
 afterEach(() => { vi.useRealTimers(); });
 
 describe('phone messages on the execution node', () => {
@@ -82,7 +120,7 @@ describe('phone messages on the execution node', () => {
     expect(check?.input).toContain('stay_on_while_plugged_in 7');
     expect(check?.input).toContain('screen_off_timeout 2147483647');
     expect(check?.input).toContain('screen_brightness_mode 0');
-    expect(check?.input).toContain('screen_brightness 0 brightness');
+    expect(check?.input).not.toContain('screen_brightness 0 brightness');
     expect(check?.input).toContain('settings --user current get');
     expect(check?.input).toContain('locksettings get-disabled');
     expect(check?.input).toContain('locksettings set-disabled true');
@@ -97,6 +135,41 @@ describe('phone messages on the execution node', () => {
     await p.phones.handle({ type: 'phone.baseline', requestId: id(2), binding: { ...p.grant.binding, hardwareKey: 'b'.repeat(64) } });
     expect(p.reply(2)?.status).toBe('needs_person');
     expect(p.calls.filter(c => c.args.join(' ').endsWith('shell sh'))).toHaveLength(1);
+  });
+
+  it.each([
+    { scenario: 'raises 40 to 102 on a 255 range', max: '255', current: '40', writes: ['brightness write: 102'] },
+    { scenario: 'rounds 40% of a 4095 range to 1638', max: '4095', current: '500', writes: ['brightness write: 1638'] },
+    { scenario: 'rounds a fractional target up', max: '4097', current: '500', writes: ['brightness write: 1639'] },
+    { scenario: 'keeps a higher manual brightness', max: '255', current: '110', writes: [] },
+    { scenario: 'keeps brightness at the floor', max: '255', current: '102', writes: [] },
+    { scenario: 'keeps manual mode even above the floor', max: '255', current: '180', mode: '1', writes: ['brightness mode write: 0'] },
+    { scenario: 'reads the integer Android resource when the power dump has a float', max: '1.0', overlay: '255', current: '30', writes: ['brightness write: 102'] },
+    { scenario: 'leaves brightness and mode alone when the maximum is unreadable', max: '1.0', current: '60', mode: '1', writes: [], issues: ['brightness'] },
+    { scenario: 'leaves an unreadable current brightness alone', max: '255', current: 'null', writes: [], issues: ['brightness'] },
+    { scenario: 'reports a raise the phone did not apply', max: '255', current: '40', reject: true, writes: ['brightness write: 102'], issues: ['brightness'] },
+  ])('$scenario', async ({ max, overlay, current, mode, reject, writes, issues }) => {
+    let output = '';
+    const p = phone(SCREEN, SERIAL, script => {
+      const result = spawnSync('sh', [], {
+        input: brightnessCommands + script,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          HH_TEST_POWER_LIMIT: max === '1.0' ? '  mScreenBrightnessMaximum=1.0' : `  mScreenBrightnessSettingMaximum=${max}`,
+          HH_TEST_OVERLAY_LIMIT: overlay ?? '',
+          HH_TEST_BRIGHTNESS: current,
+          HH_TEST_BRIGHTNESS_MODE: mode ?? '0',
+          HH_TEST_REJECT_BRIGHTNESS: reject ? '1' : '0',
+        },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      output = result.stdout;
+      return output;
+    });
+    await p.phones.handle({ type: 'phone.baseline', requestId: id(1), binding: p.grant.binding });
+    expect(output.split('\n').filter(line => /^brightness (mode )?write:/.test(line))).toEqual(writes);
+    expect(p.reply(1)).toMatchObject({ status: 'ok', readiness: issues ?? [] });
   });
 
   it('leaves the phone alone while an agent holds a session', async () => {
