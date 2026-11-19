@@ -36,7 +36,6 @@ const org = (): Org => ({
 });
 
 type Box = { x: number; y: number; width: number; height: number };
-const meets = (a: Box, b: Box) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
 /* The version as it shows on the screen: a closed menu names it too, in other words. */
 const mark = (page: Page): Locator => page.getByText(TEXT, { exact: true }).filter({ visible: true });

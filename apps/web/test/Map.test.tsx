@@ -362,7 +362,7 @@ describe('Map', () => {
   /* The map runs to the bottom of the screen and names the running build over its own corner, in the room its bars leave
      free; it holds the place while the company loads, so the footer row never comes and goes under it (#1590). */
   it('names the running build over the corner of its room, from the moment it opens, and not behind a department', async () => {
-    let answer = (_: [number, unknown]) => {};
+    let answer: (reply: [number, unknown]) => void = () => {};
     mockApi({ 'GET /api/org': () => new Promise(done => (answer = done)), 'GET /api/version': [200, { version: '0.39.1', commit: 'a276aa6c0ffee' }] });
     const { container, rerender } = render(<MapScreen {...PROPS} />);
     expect(container.querySelector('.map[aria-busy="true"] > .map-version')).toBeInTheDocument();
