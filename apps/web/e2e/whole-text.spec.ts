@@ -104,9 +104,13 @@ async function checkSchema(page: Page) {
   return { head, chips };
 }
 
+/* The API fixture, the company of these words, and the version the app root asks for and the updates its shell asks for
+   once, which the fixture does not answer. */
 async function serve(page: Page, org: Org) {
   await serveApi(page);
   await page.route('**/api/org', route => route.fulfill({ json: org }));
+  await page.route('**/api/version', route => route.fulfill({ json: { version: '0.34.4', commit: 'whole-text' } }));
+  await page.route('**/api/updates', route => route.fulfill({ json: { current: { version: '0.34.4', commit: 'whole-text' }, available: false, latest: null, updater: { status: null, waiting: null } } }));
 }
 
 /* Two frames after the fonts, so what measures the words has measured them. */
