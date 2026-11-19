@@ -1,12 +1,13 @@
 import type { EchelonStage, EchelonStep, HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
-import { skippedAuthorReview, type Route } from './route-records.js';
+import { changeRoute, skippedAuthorReview, type Route } from './route-records.js';
 import { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import { reviewSkip, type AuthorReviewSkip } from './author-check.js';
 import { checkerFor, departmentHead, NO_DEPARTMENT_CHECKER, uncheckable } from './echelons-assign.js';
 import { candidateReceivedAt } from './echelons-candidates.js';
 import type { CheckerIdentity } from './echelons-policy.js';
-import { refuse, type Task, type Wake } from './state.js';
+import { refuse, type Moved, type Task, type Tx, type Wake } from './state.js';
+import { move } from './transitions.js';
 
 function advancedSteps(route: Route, next: EchelonStep, owner: CheckerIdentity | null, candidateId: string, receivedId: string): EchelonStep[] {
   return route.state.stages.map((step): EchelonStep => {
@@ -67,6 +68,19 @@ export async function reviewReplacement(ctx: Pick<Ctx, 'db'>, task: Task, route:
     return step;
   });
   return forwardHandoff(ctx, task, { ...route, state: { ...route.state, stage: 'development', stages } }, candidate);
+}
+
+/* A candidate already in flight under the old policy must reach Review before it can be accepted. */
+export async function reopenAuthorReview(ctx: Pick<Ctx, 'db' | 'bus'>, task: Task, route: Route, candidate: HandedCandidate, agentId: string, held: (tx: Tx) => Promise<unknown>): Promise<Moved> {
+  const next = await reviewReplacement(ctx, task, route, candidate);
+  const row = await move(ctx, task, next.set, {
+    kind: 'report', actor: { agentId }, text: 'Review is required because this candidate used the old author-check skip.',
+    data: { reviewRequired: { candidateId: candidate.id, routeRevision: route.revision } }, returned: true,
+  }, async tx => {
+    await held(tx);
+    await changeRoute(tx, route, next.state);
+  }, next.wakes);
+  return { task: row, wakes: next.wakes };
 }
 
 export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate): Promise<Handoff> {

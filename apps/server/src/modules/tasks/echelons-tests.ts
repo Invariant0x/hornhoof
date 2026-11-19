@@ -4,7 +4,9 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, taskEvents } from '../../db/schema.js';
 import { currentCandidate, producedCandidate } from './echelons-candidates.js';
-import { AUTHOR_CHECK_PASSED, changeRoute, type Route } from './route-records.js';
+import { AUTHOR_CHECK_PASSED, changeRoute, skippedAuthorReview, type Route } from './route-records.js';
+import { REVIEW_SKIP_ENABLED } from './author-check.js';
+import { reopenAuthorReview } from './echelons-handoff.js';
 import { checkingIdentity, departmentHead, heldCheckingIdentity } from './echelons-assign.js';
 import { isTestPath, RepoPath, ReviewSha } from './review-schema.js';
 import { captureReview, exactComparison, type Review } from './review-context.js';
@@ -139,6 +141,9 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
   await checkingIdentity({ db: ctx.db }, task, route, candidate);
   if (!done) return failedVerificationReport(ctx, task, route, agentId, summary, input.data, candidate);
   if (input.data.delta !== undefined) throw refuse(400, 'task_invalid', 'A passing Tests report cannot carry a return delta.');
+  if (!REVIEW_SKIP_ENABLED && skippedAuthorReview(route.state)) {
+    return reopenAuthorReview(ctx, task, route, candidate, agentId, tx => heldCheckingIdentity(tx, task, route, candidate));
+  }
   const headId = await departmentHead(ctx.db, task);
   const wakes = [{ agentId: headId, taskId: task.id, why: 'reviewed' as const }];
   const state: Route['state'] = { ...route.state, phase: 'ready', assignment: null, stages: route.state.stages.map(step => step.stage === 'tests' ? { ...step, status: 'complete', candidateId: candidate.id } : step) };

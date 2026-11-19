@@ -14,6 +14,9 @@ import { AUTHOR_CHECK_PASSED, routeOf, skippedAuthorReview, type Route } from '.
 import { loadTask, refuse, type Task, type Tx } from './state.js';
 import { headOf, integrationTarget } from './turn-integration.js';
 
+/* Keep Review mandatory until the evidence for a skip can be trusted. This has no runtime override. */
+export const REVIEW_SKIP_ENABLED: boolean = false;
+
 const Requested = z.strictObject({
   pin: AuthorCheckPin, routeRevision: z.number().int().positive(), node: z.string(), verifyCherryPick: z.boolean(),
 });
@@ -64,6 +67,7 @@ async function pinCheck(ctx: Ctx, task: Task, route: Route, agentId: string) {
 const invalidRequest = () => refuse(409, 'task_invalid', 'Only the active Development owner of a code task with Review pending can request check:author.');
 
 export async function requestAuthorCheck(ctx: Ctx, agentId: string, jobId: string, taskId: string) {
+  if (!REVIEW_SKIP_ENABLED) throw refuse(409, 'task_invalid', 'The author check for skipping Review is disabled.');
   const task = await loadTask(ctx.db, taskId);
   const route = await routeOf(ctx.db, task);
   if (!mayRequest(task, route, agentId)) throw invalidRequest();
@@ -94,6 +98,7 @@ async function connectedRequest(tx: Tx, task: Task, node: NodeIdentity, result: 
 }
 
 export async function recordAuthorCheck(ctx: Reader, node: NodeIdentity, result: AuthorCheckDone): Promise<void> {
+  if (!REVIEW_SKIP_ENABLED) return;
   await ctx.db.transaction(async tx => {
     const [task] = await tx.select().from(tasks).where(eq(tasks.id, result.taskId)).for('no key update');
     if (!task) return;
@@ -140,7 +145,7 @@ function receiptRows(db: Reader['db'], task: Task) {
 }
 
 export async function reviewSkip(ctx: RepositoryReader, task: Task, candidate: EchelonCandidate): Promise<AuthorReviewSkip | null> {
-  if (candidate.producedBy.stage !== 'development') return null;
+  if (!REVIEW_SKIP_ENABLED || candidate.producedBy.stage !== 'development') return null;
   const repository = await repositoryHash(ctx, task);
   if (!repository) return null;
   const events = await receiptRows(ctx.db, task);
