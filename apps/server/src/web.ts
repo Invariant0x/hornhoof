@@ -1,12 +1,19 @@
 import fastifyStatic from '@fastify/static';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import type { Fallback } from './errors.js';
 
 const LONG_CACHE = 'public, max-age=31536000, immutable';
 
 export const hasWebApp = (dir: string): boolean => existsSync(join(dir, 'index.html'));
+
+/* The build of the web app this server serves, for a page nobody is signed in on to reload itself once it changes: the
+   sha256 of index.html, which anyone gets at / and can hash alike. It changes with every build of the app, as the page
+   names its hashed files, and with nothing else. Null with no web app to serve. */
+export const pageBuild = (dir: string): string | null =>
+  hasWebApp(dir) ? createHash('sha256').update(readFileSync(join(dir, 'index.html'))).digest('base64url') : null;
 
 /* No other site may show Hornhoof inside its own page, where a person could be tricked into clicking, and browsers take
    every response as the type it is sent with instead of guessing. The built app runs only its own script files, so an

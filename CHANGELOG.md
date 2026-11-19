@@ -11,6 +11,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - Map cards and the department screen show every word in any language: cards grow together, far zoom moves nothing, words break with hyphens and the hint keeps its own room.
 - People on the map show their whole name and title in any language: their chips wrap with hyphens and each row grows to its tallest chip.
+- A tab whose session ended goes to the sign-in screen at once, and a tab nobody is signed in on reloads by itself once Hornhoof runs another version.
 
 ## [0.39.1] - 2026-11-19
 

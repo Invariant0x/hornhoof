@@ -32,11 +32,21 @@ async function fetchOrigin(path: string, init: RequestInit = {}): Promise<Respon
   }
 }
 
-/* A session the server no longer knows is over on this device too: the person's key goes with it. A wrong password is no
-   such end. */
+const signedOut = new Set<() => void>();
+
+/* Calls back each time the server answers that this page's session is over; the returned function stops it. */
+export function onSignedOut(listener: () => void): () => void {
+  signedOut.add(listener);
+  return () => void signedOut.delete(listener);
+}
+
+/* A session the server no longer knows is over on this device too: the person's key goes with it, and the page hears of
+   it. A wrong password is no such end. */
 async function failed(status: number, data: unknown): Promise<ApiFailure> {
   const why = failure(status, data);
-  if (status === 401 && why.reason === 'signed_out') await forgetOwnerKey();
+  if (status !== 401 || why.reason !== 'signed_out') return why;
+  await forgetOwnerKey();
+  for (const listener of [...signedOut]) listener();
   return why;
 }
 
@@ -63,7 +73,7 @@ async function respond<T>(path: string, init: RequestInit): Promise<T> {
 
 async function respondText(path: string): Promise<string> {
   const res = await fetchOrigin(path);
-  if (!res.ok) throw failure(res.status, await res.json().catch(() => null));
+  if (!res.ok) throw await failed(res.status, await res.json().catch(() => null));
   return res.text();
 }
 
@@ -118,7 +128,7 @@ function finalizeStreamResult(bytes: Uint8Array, expected: number | null, stream
 
 async function respondBytes(path: string, signal?: AbortSignal): Promise<{ bytes: Uint8Array; complete: boolean; error: string | null }> {
   const res = await fetchOrigin(path, signal ? { signal } : {});
-  if (!res.ok) throw failure(res.status, await res.json().catch(() => null));
+  if (!res.ok) throw await failed(res.status, await res.json().catch(() => null));
   const expected = expectedByteLength(res);
   if (!res.body) return readArrayBufferResult(res, expected);
   const { bytes, streamError } = await readBodyChunks(res.body.getReader());
@@ -173,7 +183,7 @@ async function tryChange<T>(path: string, init: RequestInit): Promise<Tried<T>> 
   const data = await wholeJson(res);
   if (res.ok) return data === undefined ? { lost: new ApiFailure(0, 'network', ''), waitMs: waitOf(res) } : { value: data as T };
   if (passes(res.status, data)) return { lost: failure(res.status, data ?? null), waitMs: waitOf(res) };
-  throw failure(res.status, data ?? null);
+  throw await failed(res.status, data ?? null);
 }
 
 const pause = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
