@@ -15,6 +15,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Japanese names and titles on the map's people chips break between phrases, so no single character is left alone on a line.
 - A node that waits for its work to end before an update holds new turns for at most 45 minutes (`NODE_UPDATE_WAIT_MS`): then it updates, and each turn it cut runs once more after the restart. The orchestrator hears once when a wait passes half an hour.
 - A tab whose session ended goes to the sign-in screen at once, and a tab nobody is signed in on reloads by itself once Hornhoof runs another version.
+- After the sign-in code, a plan's card and its sign-in window show that it is connecting, with the step its machine is at and the time since the code, until it is ready, for every program. A connection that fails says why and what to do; one past 10 minutes (`SIGNIN_CONNECT_MS`) says it takes longer than usual, with Try again and Stop.
 
 ## [0.39.2] - 2026-11-19
 
