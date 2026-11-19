@@ -10,6 +10,8 @@ import { APP, killProcessGroup, pidAlive, runOnce, type Stand, stand, UPDATER_DI
 
 const SLEEP_STUB = fileURLToPath(new URL('./updater-stubs/sleep', import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
+const NOW_SEC = 1_795_000_000;
+const CLOCK = { STUB_COMPUTER_NOW: String(NOW_SEC) };
 
 function treePids(rootPid: number): number[] {
   const out = spawnSync('ps', ['-eo', 'pid=,ppid='], { encoding: 'utf8' }).stdout;
@@ -29,19 +31,55 @@ function treePids(rootPid: number): number[] {
 describe('updater, the computer', () => {
   const HELPER = `${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`;
   /* The watch over a command counts its seconds as the stubs let them pass, with no clock. */
-  const env = { HORNHOOF_COMPUTER_IMAGE: HELPER, STUB_WATCH: '1' };
+  const env = { ...CLOCK, HORNHOOF_COMPUTER_IMAGE: HELPER, STUB_WATCH: '1' };
   function access(s: Stand, untilSec: number) {
-    writeFileSync(join(s.control, 'computer.json'), JSON.stringify({ untilSec, until: new Date(untilSec * 1000).toISOString(), asked: null }));
+    writeFileSync(join(s.computerControl, 'computer.json'), JSON.stringify({ untilSec, until: new Date(untilSec * 1000).toISOString(), asked: null }));
   }
   function command(s: Stand, id: string, run: string, timeout = 60) {
-    mkdirSync(join(s.control, 'computer'), { recursive: true });
-    writeFileSync(join(s.control, 'computer', `${id}.json`), JSON.stringify({ id, command: run, timeout }));
+    mkdirSync(join(s.computerControl, 'computer'), { recursive: true });
+    writeFileSync(join(s.computerControl, 'computer', `${id}.json`), JSON.stringify({ id, command: run, timeout }));
   }
   const answer = (s: Stand, id: string) => {
-    const file = join(s.control, 'computer', `${id}.out.json`);
+    const file = join(s.computerControl, 'computer', `${id}.out.json`);
     return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
   };
-  const later = () => Math.floor(Date.now() / 1000) + 3600;
+  const later = () => NOW_SEC + 3600;
+
+  it('logs and ignores shared computer files while a keeper request runs', async () => {
+    const s = stand();
+    const shared = join(s.control, 'computer');
+    mkdirSync(shared);
+    writeFileSync(join(shared, 'shared.json'), JSON.stringify({ id: 'shared', command: 'private sample', timeout: 30 }));
+    writeFileSync(join(shared, 'old.started'), '');
+    access(s, later());
+    command(s, 'keeper', 'recorded sample');
+    const r = await runOnce(s, null, env);
+    expect(r.code).toBe(0);
+    expect(r.calls.filter(call => call.startsWith('docker start'))).toEqual(['docker start -a hornhoof-computer-keeper']);
+    expect(r.calls).not.toContainEqual(expect.stringContaining('hornhoof-computer-shared'));
+    expect(r.calls).not.toContainEqual(expect.stringContaining('hornhoof-computer-old'));
+    expect(r.out).toContain('Computer request refused: it came from the shared control folder.');
+    expect(r.out).not.toMatch(/private sample|shared\.json/);
+    expect(readdirSync(shared).sort()).toEqual(['old.started', 'shared.json']);
+    expect(answer(s, 'keeper')).toEqual({ id: 'keeper', exit: 0, output: 'ran: recorded sample\n' });
+  });
+
+  /* What the app could write before: an open window and a request in the shared folder, which an older updater ran as
+     root, and a start marker, which made it stop a command. */
+  it('runs and stops nothing the app drops into the shared control folder, even with an open shared window', async () => {
+    const s = stand();
+    const shared = join(s.control, 'computer');
+    mkdirSync(shared);
+    writeFileSync(join(s.control, 'computer.json'), JSON.stringify({ untilSec: later(), until: null, asked: null }));
+    writeFileSync(join(shared, 'dropped.json'), JSON.stringify({ id: 'dropped', command: 'private sample', timeout: 30 }));
+    writeFileSync(join(shared, 'k1.started'), '');
+    const r = await runOnce(s, null, env);
+    expect(r.code).toBe(0);
+    expect(r.calls.filter(call => call.startsWith('docker'))).toEqual([]);
+    expect(r.out.match(/Computer request refused: it came from the shared control folder\./g)).toHaveLength(1);
+    expect(r.out).not.toMatch(/private sample|dropped/);
+    expect(readdirSync(shared).sort()).toEqual(['dropped.json', 'k1.started']);
+  });
 
   it('runs a command as root on the computer, with its files at /host and its Docker, and answers with the output and exit code', async () => {
     const s = stand();
@@ -55,27 +93,28 @@ describe('updater, the computer', () => {
     expect(made).toBeGreaterThanOrEqual(0);
     expect(r.calls.indexOf('docker start -a hornhoof-computer-c1')).toBeGreaterThan(made);
     expect(answer(s, 'c1')).toEqual({ id: 'c1', exit: 3, output: 'ran: uname -a\n' });
-    expect(existsSync(join(s.control, 'computer', 'c1.started'))).toBe(false);
+    expect(existsSync(join(s.computerControl, 'computer', 'c1.started'))).toBe(false);
     /* An answered command does not run again: the stub's log keeps the first run only. */
     expect((await runOnce(s, null, env)).calls.filter(c => c.startsWith('docker start'))).toHaveLength(1);
   });
 
   it('runs nothing while access is closed or over, and says so', async () => {
     const s = stand();
-    access(s, Math.floor(Date.now() / 1000) - 1);
-    command(s, 'c2', 'rm -rf /host/etc');
+    access(s, NOW_SEC - 1);
+    command(s, 'c2', 'recorded sample');
     const r = await runOnce(s, null, env);
     expect(r.calls.filter(c => c.startsWith('docker'))).toEqual([]);
     expect(answer(s, 'c2')).toEqual({ id: 'c2', exit: 126, output: 'Access to the computer is closed.\n' });
     /* Closed while its container was being made: it never starts. */
     const u = stand();
     access(u, later());
-    command(u, 'c8', 'rm -rf /host/var/lib/docker');
+    command(u, 'c8', 'recorded sample');
     const raced = await runOnce(u, null, { ...env, STUB_CLOSE_ON_CREATE: '1' });
     expect(raced.calls).toContain('docker rm -f hornhoof-computer-c8');
     expect(raced.calls.filter(c => c.startsWith('docker start'))).toEqual([]);
     expect(answer(u, 'c8')).toMatchObject({ exit: 125, output: expect.stringContaining('Stopped: access to the computer was closed.') });
     const t = stand();
+    writeFileSync(join(t.control, 'computer.json'), JSON.stringify({ untilSec: later() }));
     command(t, 'c3', 'uname -a');
     expect((await runOnce(t, null, env)).calls.filter(c => c.startsWith('docker'))).toEqual([]);
     expect(answer(t, 'c3')).toMatchObject({ exit: 126 });
@@ -94,7 +133,7 @@ describe('updater, the computer', () => {
     const s = stand();
     access(s, later());
     command(s, 'c6', 'apt-get upgrade -y', 60);
-    const close = 'if [ -f "$HORNHOOF_CONTROL_DIR/computer/c6.started" ]; then echo "{}" > "$HORNHOOF_CONTROL_DIR/computer.json"; fi';
+    const close = 'if [ -f "$HORNHOOF_COMPUTER_CONTROL_DIR/computer/c6.started" ]; then echo "{}" > "$HORNHOOF_COMPUTER_CONTROL_DIR/computer.json"; fi';
     const r = await runOnce(s, null, { ...env, STUB_COMPUTER_RUNS: '1', STUB_DURING_SLEEP: close });
     expect(r.calls).toContain('docker rm -f hornhoof-computer-c6');
     expect(answer(s, 'c6')).toMatchObject({ id: 'c6', exit: 125, output: expect.stringContaining('Stopped: access to the computer was closed.') });
@@ -104,7 +143,7 @@ describe('updater, the computer', () => {
     const s = stand();
     access(s, later());
     command(s, 'c8', 'recorded sample', 4);
-    const forget = 'if [ -f "$HORNHOOF_CONTROL_DIR/computer/c8.started" ]; then echo "computer watch" >> "$STUB_LOG"; rm -f "$HORNHOOF_CONTROL_DIR/computer/c8.json"; fi';
+    const forget = 'if [ -f "$HORNHOOF_COMPUTER_CONTROL_DIR/computer/c8.started" ]; then echo "computer watch" >> "$STUB_LOG"; rm -f "$HORNHOOF_COMPUTER_CONTROL_DIR/computer/c8.json"; fi';
     const r = await runOnce(s, null, { ...env, STUB_COMPUTER_RUNS: '1', STUB_DURING_SLEEP: forget });
     expect(r.calls.filter(line => line === 'computer watch')).toEqual(['computer watch']);
     expect(r.calls).toContain('docker rm -f hornhoof-computer-c8');
@@ -115,19 +154,19 @@ describe('updater, the computer', () => {
     const s = stand();
     access(s, later());
     command(s, 'c7', 'apt-get upgrade -y');
-    writeFileSync(join(s.control, 'computer', 'c7.started'), '');
+    writeFileSync(join(s.computerControl, 'computer', 'c7.started'), '');
     const r = await runOnce(s, null, env);
     expect(r.calls).toEqual(['docker rm -f hornhoof-computer-c7']);
     expect(answer(s, 'c7')).toMatchObject({ id: 'c7', exit: 125, output: expect.stringContaining('The updater restarted while this command ran') });
-    expect(existsSync(join(s.control, 'computer', 'c7.started'))).toBe(false);
+    expect(existsSync(join(s.computerControl, 'computer', 'c7.started'))).toBe(false);
   });
 
   it('stops a command it started whose request the app took back', async () => {
     const s = stand();
-    mkdirSync(join(s.control, 'computer'));
-    writeFileSync(join(s.control, 'computer', 'c9.started'), '');
+    mkdirSync(join(s.computerControl, 'computer'));
+    writeFileSync(join(s.computerControl, 'computer', 'c9.started'), '');
     expect((await runOnce(s, null, env)).calls).toEqual(['docker rm -f hornhoof-computer-c9']);
-    expect(readdirSync(join(s.control, 'computer'))).toEqual([]);
+    expect(readdirSync(join(s.computerControl, 'computer'))).toEqual([]);
   });
 
   it('leaves alone a command file whose name is not a plain id', async () => {
@@ -276,11 +315,11 @@ describe('updater, the computer', () => {
         `}`,
         `const s = stand();`,
         `const holdFile = ${JSON.stringify(holdFile)};`,
-        `const untilSec = Math.floor(Date.now() / 1000) + 3600;`,
-        `writeFileSync(join(s.control, 'computer.json'), JSON.stringify({ untilSec, until: new Date(untilSec * 1000).toISOString(), asked: null }));`,
-        `mkdirSync(join(s.control, 'computer'), { recursive: true });`,
-        `writeFileSync(join(s.control, 'computer', 'c1.json'), JSON.stringify({ id: 'c1', command: 'sleep 600', timeout: 600 }));`,
-        `void runOnce(s, null, { HORNHOOF_COMPUTER_IMAGE: APP + '-updater@' + UPDATER_DIGESTS['0.4.0'], STUB_WATCH: '1', STUB_COMPUTER_HOLD: holdFile }).catch(() => {});`,
+        `const untilSec = ${NOW_SEC + 3600};`,
+        `writeFileSync(join(s.computerControl, 'computer.json'), JSON.stringify({ untilSec, until: new Date(untilSec * 1000).toISOString(), asked: null }));`,
+        `mkdirSync(join(s.computerControl, 'computer'), { recursive: true });`,
+        `writeFileSync(join(s.computerControl, 'computer', 'c1.json'), JSON.stringify({ id: 'c1', command: 'sleep 600', timeout: 600 }));`,
+        `void runOnce(s, null, { HORNHOOF_COMPUTER_IMAGE: APP + '-updater@' + UPDATER_DIGESTS['0.4.0'], STUB_WATCH: '1', STUB_COMPUTER_NOW: '${CLOCK.STUB_COMPUTER_NOW}', STUB_COMPUTER_HOLD: holdFile }).catch(() => {});`,
         `await eventually(() => existsSync(holdFile) && readFileSync(holdFile, 'utf8').includes('\\n'));`,
         `const [dockerPid, updaterPid] = readFileSync(holdFile, 'utf8').trim().split(/\\s+/).map(Number);`,
         `const pids = [...new Set([dockerPid, ...tree(updaterPid)])];`,
@@ -308,11 +347,11 @@ if (abortHold && abortRecord) {
 
     it('fails while updater.sh and its watch run', async () => {
       const s = stand();
-      const untilSec = Math.floor(Date.now() / 1000) + 3600;
-      writeFileSync(join(s.control, 'computer.json'), JSON.stringify({ untilSec, until: new Date(untilSec * 1000).toISOString(), asked: null }));
-      mkdirSync(join(s.control, 'computer'), { recursive: true });
-      writeFileSync(join(s.control, 'computer', 'c1.json'), JSON.stringify({ id: 'c1', command: 'sleep 600', timeout: 600 }));
-      void runOnce(s, null, { HORNHOOF_COMPUTER_IMAGE: `${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`, STUB_WATCH: '1', STUB_COMPUTER_HOLD: holdFile }).catch(() => {});
+      const untilSec = NOW_SEC + 3600;
+      writeFileSync(join(s.computerControl, 'computer.json'), JSON.stringify({ untilSec, until: new Date(untilSec * 1000).toISOString(), asked: null }));
+      mkdirSync(join(s.computerControl, 'computer'), { recursive: true });
+      writeFileSync(join(s.computerControl, 'computer', 'c1.json'), JSON.stringify({ id: 'c1', command: 'sleep 600', timeout: 600 }));
+      void runOnce(s, null, { ...CLOCK, HORNHOOF_COMPUTER_IMAGE: `${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`, STUB_WATCH: '1', STUB_COMPUTER_HOLD: holdFile }).catch(() => {});
       await eventually(() => existsSync(holdFile) && readFileSync(holdFile, 'utf8').includes('\n'));
       const [dockerPid, updaterPid] = readFileSync(holdFile, 'utf8').trim().split(/\s+/).map(Number);
       const pids = [...new Set([dockerPid!, ...treePids(updaterPid!)])];

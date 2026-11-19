@@ -58,6 +58,11 @@ const ownerOf = (owners: ReadonlyMap<string, string>, departmentId: string) => o
 
 const teamField = (teamId: string | null) => (teamId ? { teamId } : {});
 
+/* Whether a department or one of its products keeps a repository is everyone's, as its work tree says: work without one goes
+   in as documents. Where it is stays with the people who set it. */
+const keepsRepository = (depts: readonly Pick<typeof departments.$inferSelect, 'id' | 'parentId' | 'repoUrl'>[], id: string) =>
+  depts.some(d => (d.id === id || d.parentId === id) && Boolean(d.repoUrl));
+
 /* Until when a plan is at its limit, from what it last read. */
 const limitOfPlan = (plan?: { limits: Limits | null; limitsUpdatedAt: Date | null }) => limitUntil(plan?.limits ?? null, plan?.limitsUpdatedAt ?? null);
 
@@ -274,6 +279,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           products: depts.filter(p => p.parentId === d.id).map(p => ({ id: p.id, name: deptName(p), repository: repositoryOf(p) })),
           current: currentOf(d.id),
           repository: repositoryOf(d),
+          keepsRepository: keepsRepository(depts, d.id),
           repoHost: repoHostOf(d),
           teams: allTeams
             .filter(t => t.departmentId === d.id)

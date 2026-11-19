@@ -345,19 +345,25 @@ async function sendTurnAlarm(ctx: Ctx, s: SilentTurn, unavailable: ReadonlySet<s
   if (to) await dispatchAlarm(ctx, s, to, now, quietCase(s, now));
 }
 
-/* Let free Operations staff hear first, then the orchestrator, then the employee's department head. */
+/* Let free Operations staff hear first, then the orchestrator, then the employee's department head. When all of them are
+   busy, the head of Operations, or else a program operator, still hears behind its work, so no alarm goes unheard. */
 export async function screenReader(ctx: Ctx, companyId: string, of: string, unavailable: ReadonlySet<string>): Promise<Agent | null> {
-  const canHear = async (agent: Agent) => agent.companyId === companyId && agent.id !== of && !agent.switchedOffAt
-    && !unavailable.has(agent.id) && Boolean(await liveSubscription(ctx, agent.id));
-  for (const agent of await operationsStaff(ctx, companyId)) if (await canHear(agent)) return agent;
+  const reachable = async (agent: Agent) => agent.companyId === companyId && agent.id !== of && !agent.switchedOffAt
+    && Boolean(await liveSubscription(ctx, agent.id));
+  const canHear = async (agent: Agent) => !unavailable.has(agent.id) && await reachable(agent);
+  const staff = await operationsStaff(ctx, companyId);
+  for (const agent of staff) if (await canHear(agent)) return agent;
 
   const [orchestrator] = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
   if (orchestrator && await canHear(orchestrator)) return orchestrator;
-  if (!of) return null;
+  if (of) {
+    const [employee] = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), eq(agents.id, of)));
+    const head = employee && await headOf(ctx, employee);
+    if (head && await canHear(head)) return head;
+  }
 
-  const [employee] = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), eq(agents.id, of)));
-  const head = employee && await headOf(ctx, employee);
-  return head && await canHear(head) ? head : null;
+  for (const agent of [...staff.filter(a => a.kind === 'head'), ...staff.filter(a => a.kind !== 'head')]) if (await reachable(agent)) return agent;
+  return null;
 }
 
 /* One call when the quiet begins and one more each time it doubles, so a program nobody brought back is looked at again.

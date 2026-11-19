@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { versionParts } from '../release/versions.mjs';
 
 /* global fetch, AbortSignal, URL, Buffer */
@@ -15,13 +16,23 @@ const REVISION = 'org.opencontainers.image.revision';
 const READ_MS = 20_000;
 const COMMIT = /^[0-9a-f]{40}$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
-const MANIFESTS = [
+const INDEX_TYPES = [
   'application/vnd.oci.image.index.v1+json',
   'application/vnd.docker.distribution.manifest.list.v2+json',
+];
+const IMAGE_TYPES = [
   'application/vnd.oci.image.manifest.v1+json',
   'application/vnd.docker.distribution.manifest.v2+json',
-].join(', ');
+];
+const MANIFESTS = [...INDEX_TYPES, ...IMAGE_TYPES].join(', ');
+const REDIRECTS = [301, 302, 303, 307, 308];
+const MISSING = Symbol('missing');
 const env = process.env;
+
+const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const isCommit = value => typeof value === 'string' && value.length === 40 && COMMIT.test(value);
+const isDigest = value => typeof value === 'string' && value.length === 71 && DIGEST.test(value);
+const isName = value => typeof value === 'string' && value.length > 0;
 
 export const imageOf = version => `ghcr.io/${IMAGE}:${version}`;
 
@@ -56,18 +67,30 @@ function imageVerdict({ job, sha, version, tag, image }) {
   return { verdict: 'new', why: `Version ${version} has no published images yet${tagged}, so ${DOES[job].new}.` };
 }
 
-/* A request that says in plain words when nothing answered in time or at all. */
+/* A request never follows redirects automatically, including when it carries GitHub or registry credentials. */
 async function reach(who, url, options = {}) {
+  let res;
   try {
-    return await fetch(url, { ...options, signal: AbortSignal.timeout(READ_MS) });
+    res = await fetch(url, { ...options, redirect: 'manual', signal: AbortSignal.timeout(READ_MS) });
   } catch (error) {
     throw new Error(error?.name === 'TimeoutError' ? `${who} did not answer within ${READ_MS / 1000} seconds` : `${who} could not be reached`);
   }
+  if (res.redirected) throw new Error(`${who} answered through an unexpected redirect`);
+  return res;
 }
 
-async function bodyOf(res, who, path) {
+async function bodyOf(res, who, path, digest) {
+  let bytes;
   try {
-    return await res.json();
+    bytes = Buffer.from(await res.arrayBuffer());
+  } catch {
+    throw new Error(`${who} could not finish its answer for ${path}`);
+  }
+  if (digest && `sha256:${createHash('sha256').update(bytes).digest('hex')}` !== digest) {
+    throw new Error(`${who} answered ${path} with content that does not match its digest`);
+  }
+  try {
+    return JSON.parse(bytes.toString('utf8'));
   } catch {
     throw new Error(`${who} answered ${path} with something that is not JSON`);
   }
@@ -76,39 +99,47 @@ async function bodyOf(res, who, path) {
 /* GitHub says so in its headers when a 403 or 429 comes from its rate limit. */
 export const rateNote = res => (res.headers.get('x-ratelimit-remaining') === '0' ? ', as its rate limit is used up' : '');
 
-/* One object of the repository through GitHub's API, null when GitHub has none. */
+/* One object of the repository through GitHub's API, or MISSING after a direct 404. */
 async function fromGitHub(path) {
   const res = await reach('GitHub', `${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}/${path}`, {
     headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', ...(env.GITHUB_TOKEN ? { authorization: `Bearer ${env.GITHUB_TOKEN}` } : {}) },
   });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`GitHub answered ${res.status} for ${path}${rateNote(res)}`);
+  if (res.status === 404) return MISSING;
+  if (res.status !== 200) throw new Error(`GitHub answered ${res.status} for ${path}${rateNote(res)}`);
   return bodyOf(res, 'GitHub', path);
 }
 
 /* What a git object of GitHub's API names, when it is a commit or a tag object; anything else ends the lookup. */
 export function namedBy(tag, object) {
-  if (!['commit', 'tag'].includes(object?.type) || !COMMIT.test(object.sha)) throw new Error(`the tag ${tag} is not on a commit`);
+  if (!['commit', 'tag'].includes(object?.type) || !isCommit(object.sha)) throw new Error(`the tag ${tag} is not on a commit`);
   return object;
 }
 
 async function tagObject(tag, sha) {
   const found = await fromGitHub(`git/tags/${sha}`);
-  if (!found) throw new Error(`GitHub has no tag object for ${tag}`);
+  if (found === MISSING) throw new Error(`GitHub has no tag object for ${tag}`);
+  if (!isObject(found) || found.sha !== sha) throw new Error(`GitHub gave an invalid tag object for ${tag}`);
   return namedBy(tag, found.object);
 }
 
 /* The commit the tag is on, through at most four annotated tag objects; null without the tag. */
 async function tagCommit(tag) {
   const ref = await fromGitHub(`git/ref/tags/${tag}`);
-  if (!ref) return null;
+  if (ref === MISSING) return null;
+  if (!isObject(ref) || ref.ref !== `refs/tags/${tag}`) throw new Error(`GitHub gave an invalid tag reference for ${tag}`);
   let object = namedBy(tag, ref.object);
   for (let depth = 0; object.type === 'tag' && depth < 4; depth += 1) object = await tagObject(tag, object.sha);
   return namedBy(tag, object.type === 'commit' ? object : null).sha;
 }
 
-const registryUrl = () => new URL(env.HORNHOOF_REGISTRY_URL || 'https://ghcr.io');
-let bearer = null;
+async function releaseExists(tag) {
+  const release = await fromGitHub(`releases/tags/${tag}`);
+  if (release === MISSING) return false;
+  if (!isObject(release) || release.tag_name !== tag || !Number.isSafeInteger(release.id) || release.id <= 0) {
+    throw new Error(`GitHub gave an invalid release for ${tag}`);
+  }
+  return true;
+}
 
 /* Where the registry sends for a token to pull with, from its WWW-Authenticate answer: only a realm of the registry itself,
    as the workflow's token goes there. */
@@ -126,74 +157,119 @@ export const signIn = (actor, token) => (token ? { authorization: `Basic ${Buffe
 
 export function tokenIn(body) {
   const token = body?.token || body?.access_token;
-  if (typeof token !== 'string' || !token) throw new Error('the registry gave no token');
+  if (typeof token !== 'string' || !token || /\s/.test(token)) throw new Error('the registry gave no token');
   return token;
 }
 
-async function pullToken(challenge) {
-  const res = await reach('the registry', tokenRealm(challenge, registryUrl()), { headers: signIn(env.GITHUB_ACTOR, env.GITHUB_TOKEN) });
-  if (!res.ok) throw new Error(`the registry answered ${res.status} for a token`);
+async function pullToken(challenge, registryUrl) {
+  const res = await reach('the registry', tokenRealm(challenge, registryUrl), { headers: signIn(env.GITHUB_ACTOR, env.GITHUB_TOKEN) });
+  if (res.status !== 200) throw new Error(`the registry answered ${res.status} for a token`);
   return tokenIn(await bodyOf(res, 'the registry', 'a token'));
 }
 
-async function registryAnswer(url, accept) {
-  const headers = { accept, ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) };
-  const res = await reach('the registry', url, { headers, redirect: 'manual' });
-  if (res.status !== 401 || bearer) return res;
+async function registryAnswer(registry, url, accept) {
+  const headers = { accept, ...(registry.bearer ? { authorization: `Bearer ${registry.bearer}` } : {}) };
+  const res = await reach('the registry', url, { headers });
+  if (res.status !== 401 || registry.bearer) return res;
   await res.body?.cancel();
-  bearer = await pullToken(res.headers.get('www-authenticate') ?? '');
-  return registryAnswer(url, accept);
+  registry.bearer = await pullToken(res.headers.get('www-authenticate') ?? '', registry.url);
+  return registryAnswer(registry, url, accept);
 }
 
-/* A manifest or blob of the app image, null when the registry has none. A blob served from elsewhere is fetched there
-   without any token. */
-async function fromRegistry(path, accept) {
-  const url = new URL(`/v2/${IMAGE}/${path}`, registryUrl());
-  let res = await registryAnswer(url, accept);
-  const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
-  if (location) {
+function storageUrl(res, from, path) {
+  const location = res.headers.get('location');
+  const url = location ? URL.parse(location, from) : null;
+  if (url?.protocol !== 'https:' || url.username || url.password) throw new Error(`the registry gave an invalid redirect for ${path}`);
+  return url;
+}
+
+/* Only a direct 404 proves absence. A digest lets the registry delegate one read, without forwarding any credentials. */
+async function fromRegistry(registry, kind, reference, accept) {
+  const path = `${kind}/${reference}`;
+  const url = new URL(`/v2/${IMAGE}/${path}`, registry.url);
+  let res = await registryAnswer(registry, url, accept);
+  if (res.status === 404) return MISSING;
+  const digest = isDigest(reference) ? reference : undefined;
+  if (REDIRECTS.includes(res.status)) {
     await res.body?.cancel();
-    res = await reach('the registry', new URL(location, url));
+    if (!digest) throw new Error(`the registry redirected the version lookup for ${path}`);
+    res = await reach('registry storage', storageUrl(res, url, path), { headers: { accept } });
+    if (res.status !== 200) throw new Error(`registry storage answered ${res.status} for ${path}`);
   }
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`the registry answered ${res.status} for ${path}`);
-  return bodyOf(res, 'the registry', path);
+  if (res.status !== 200) throw new Error(`the registry answered ${res.status} for ${path}`);
+  return bodyOf(res, 'the registry', path, digest);
 }
 
-async function required(path, accept, what) {
-  const found = await fromRegistry(path, accept);
-  if (!found) throw new Error(`the registry has no ${what} of ${path}`);
+async function required(registry, kind, digest, accept, what) {
+  const found = await fromRegistry(registry, kind, digest, accept);
+  if (found === MISSING) throw new Error(`the registry has no ${what} at ${digest}`);
   return found;
 }
 
 export function digestOf(reference, what) {
-  if (!DIGEST.test(reference?.digest)) throw new Error(`the registry names no ${what}`);
+  if (!isDigest(reference?.digest)) throw new Error(`the registry names no ${what}`);
   return reference.digest;
 }
 
+const namesPlatform = platform => isObject(platform) && isName(platform.os) && isName(platform.architecture);
 /* The image of one platform in an index, as each platform's image carries the same labels; attestations name no platform. */
-export const platformOf = index => index.manifests.find(entry => entry.platform && entry.platform.os !== 'unknown');
+export const platformOf = index => index.manifests.find(({ platform }) =>
+  namesPlatform(platform) && platform.os !== 'unknown' && platform.architecture !== 'unknown');
 
-/* The revision label of an image configuration, '' when it carries none. */
-export const revisionIn = config => config?.config?.Labels?.[REVISION] ?? '';
+/* The revision label of a valid image configuration, '' when it carries none. */
+export function revisionIn(config) {
+  if (!isObject(config) || !isName(config.architecture) || !isName(config.os) ||
+      config.rootfs?.type !== 'layers' || !Array.isArray(config.rootfs.diff_ids) || !config.rootfs.diff_ids.every(isDigest) ||
+      (config.config !== undefined && !isObject(config.config))) {
+    throw new Error('the registry gave an invalid image configuration');
+  }
+  const labels = config.config?.Labels;
+  if (labels !== undefined && !isObject(labels)) throw new Error('the registry gave invalid image labels');
+  const revision = labels?.[REVISION];
+  if (revision === undefined) return '';
+  if (!isCommit(revision)) throw new Error('the registry gave an invalid image revision');
+  return revision;
+}
 
-/* The manifest of one image: the version's own, or that of a platform when the version names an index of them. */
-const imageManifest = top => (Array.isArray(top.manifests) ? required(`manifests/${digestOf(platformOf(top), 'image of a platform')}`, MANIFESTS, 'image') : top);
+function hasDescriptors(list) {
+  return Array.isArray(list) && list.every(entry => isDigest(entry?.digest));
+}
+
+function configDigest(manifest) {
+  if (!isObject(manifest) || manifest.schemaVersion !== 2 || manifest.manifests !== undefined || !hasDescriptors(manifest.layers) ||
+      (manifest.mediaType !== undefined && !IMAGE_TYPES.includes(manifest.mediaType))) {
+    throw new Error('the registry gave an invalid image manifest');
+  }
+  return digestOf(manifest.config, 'image configuration');
+}
+
+/* An index names a platform manifest by its digest. */
+function platformDigest(index) {
+  if (index.schemaVersion !== 2 || index.config !== undefined || index.layers !== undefined || !hasDescriptors(index.manifests) ||
+      !index.manifests.every(({ platform }) => platform === undefined || namesPlatform(platform)) ||
+      (index.mediaType !== undefined && !INDEX_TYPES.includes(index.mediaType))) {
+    throw new Error('the registry gave an invalid image index');
+  }
+  return digestOf(platformOf(index), 'image of a platform');
+}
 
 /* The revision label of the published app image of the version: null when it is not published, '' when it carries none. */
 async function imageRevision(version) {
-  const top = await fromRegistry(`manifests/${version}`, MANIFESTS);
-  if (!top) return null;
-  const manifest = await imageManifest(top);
-  return revisionIn(await required(`blobs/${digestOf(manifest.config, 'image configuration')}`, '*/*', 'configuration'));
+  const registry = { url: new URL(env.HORNHOOF_REGISTRY_URL || 'https://ghcr.io'), bearer: null };
+  const top = await fromRegistry(registry, 'manifests', version, MANIFESTS);
+  if (top === MISSING) return null;
+  const manifest = top?.manifests === undefined ? top : await required(registry, 'manifests', platformDigest(top), MANIFESTS, 'image');
+  return revisionIn(await required(registry, 'blobs', configDigest(manifest), '*/*', 'configuration'));
 }
 
 /* What each job must know: the images job of a run by hand nothing, release the tag and its release, the rest the tag and
    the published images. */
-async function factsFor(job, event, version) {
+async function factsFor({ job, event, sha, version }) {
   if (job === 'images' && event !== 'push') return {};
-  const tag = await tagCommit(`v${version}`);
-  if (job === 'release') return { tag, release: (await fromGitHub(`releases/tags/v${version}`)) !== null };
+  const name = `v${version}`;
+  const tag = await tagCommit(name);
+  if (tag && tag !== sha) return { tag };
+  if (job === 'release') return { tag, release: await releaseExists(name) };
   return { tag, image: await imageRevision(version) };
 }
 
@@ -201,11 +277,11 @@ async function factsFor(job, event, version) {
 export const unknownOf = (version, reason) => ({ verdict: 'unknown', why: `Could not tell whether version ${version} is out: ${reason}. This job stops and builds, moves and releases nothing; run it again once that is fixed.` });
 
 export async function versionOut({ job, event, sha, version }) {
-  if (!COMMIT.test(sha ?? '')) throw new Error(`${sha} is not a commit`);
+  if (!isCommit(sha)) throw new Error(`${sha} is not a commit`);
   versionParts(version);
   let facts;
   try {
-    facts = await factsFor(job, event, version);
+    facts = await factsFor({ job, event, sha, version });
   } catch (error) {
     return unknownOf(version, error.message);
   }

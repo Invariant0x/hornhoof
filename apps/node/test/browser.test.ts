@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -21,6 +21,11 @@ import { setCheckClient, withCheckSlot } from '../src/check-queue.js';
 import { FIRST_UID } from '../src/isolation.js';
 import * as programs from '../src/providers/process.js';
 import { eventually } from '../../../test-support/eventually.mjs';
+
+vi.mock('node:fs', async original => {
+  const real = await original<typeof import('node:fs')>();
+  return { ...real, openSync: vi.fn(real.openSync), fstatSync: vi.fn(real.fstatSync) };
+});
 
 /* Playwright's browsers stand in for themselves only in the tests of preparing them; elsewhere they are ready at once. */
 const browsersReady = async () => ({ ok: true as const, status: 'not_needed' as const });
@@ -179,10 +184,21 @@ describe('startup tool readiness', () => {
 });
 
 describe('playwrightVersionIn', () => {
-  it('limits regex input to one line while reading a pnpm workspace lockfile', () => {
-    const lock = readFileSync(new URL('./fixtures/browser/pnpm-lock.yaml', import.meta.url), 'utf8');
+  const npmLock = JSON.stringify({ dependencies: { playwright: { version: '1.65.1' } } });
+  const pnpmLock = readFileSync(new URL('./fixtures/browser/pnpm-lock.yaml', import.meta.url), 'utf8');
+  const yarnLock = [
+    '# yarn lockfile v1',
+    `# ${'ordinary comment text '.repeat(2048)}`.trimEnd(),
+    '"@playwright/test@^1.63.0", "@playwright/test@^1.65.0":',
+    '  version "1.65.1"',
+  ].join('\n');
+
+  it.each([
+    ['pnpm-lock.yaml', pnpmLock],
+    ['yarn.lock', yarnLock],
+  ])('limits regex input to one line in %s', (name, lock) => {
     const repo = makeTemp();
-    writeFileSync(join(repo, 'pnpm-lock.yaml'), lock);
+    writeFileSync(join(repo, name), lock);
     const longestLine = Math.max(...lock.split('\n').map(line => line.length));
     const exec = RegExp.prototype.exec;
     let longestRegexInput = 0;
@@ -199,6 +215,51 @@ describe('playwrightVersionIn', () => {
 
     expect(version).toBe('1.65.1');
     expect(longestRegexInput).toBeLessThanOrEqual(longestLine);
+  });
+
+  const lockfiles = [
+    ['package-lock.json', npmLock],
+    ['npm-shrinkwrap.json', npmLock],
+    ['pnpm-lock.yaml', pnpmLock],
+    ['yarn.lock', yarnLock],
+  ];
+
+  it.each(lockfiles)('refuses to follow a lockfile link for %s', (name, lock) => {
+    const repo = makeTemp();
+    const file = join(repo, name);
+    const target = join(repo, 'sample');
+    writeFileSync(target, lock);
+    symlinkSync(target, file);
+
+    expect(playwrightVersionIn(repo)).toBeNull();
+  });
+
+  it.each(lockfiles)('refuses oversized descriptor metadata for %s', (name, lock) => {
+    const repo = makeTemp();
+    const file = join(repo, name);
+    writeFileSync(file, lock);
+    vi.mocked(fstatSync).mockReturnValueOnce(Object.assign(statSync(file), { size: 16 * 1024 * 1024 + 1 }));
+
+    expect(playwrightVersionIn(repo)).toBeNull();
+  });
+
+  it('opens lockfiles without following links or blocking and rejects a nonregular descriptor', () => {
+    const repo = makeTemp();
+    const file = join(repo, 'package-lock.json');
+    writeFileSync(file, npmLock);
+    vi.mocked(fstatSync).mockReturnValueOnce(statSync(repo));
+
+    expect(playwrightVersionIn(repo)).toBeNull();
+    expect(openSync).toHaveBeenCalledWith(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  });
+
+  it('refuses a lockfile that grows beyond the descriptor size observed before reading', () => {
+    const repo = makeTemp();
+    const file = join(repo, 'package-lock.json');
+    writeFileSync(file, npmLock);
+    vi.mocked(fstatSync).mockReturnValueOnce(Object.assign(statSync(file), { size: npmLock.length - 1 }));
+
+    expect(playwrightVersionIn(repo)).toBeNull();
   });
 
   it('skips a pnpm workspace link and reads the next Playwright entry with CRLF line endings', () => {

@@ -1728,7 +1728,7 @@ export const ru: Messages = {
       turnkey: 'Без этапов: сотрудник сам делает ее от начала до конца',
       findings: { heading: 'Находки по этапам', unique: n => `Уникальных находок: ${n}`, reported: n => `Найдено: ${n}`, confirmed: n => `Подтверждено: ${n}` },
       heading: 'Маршрут задачи',
-      stages: { architecture: 'Architecture', development: 'Development', review: 'Review', cleanup: 'Cleanup', security: 'Security', tests: 'Tests' },
+      stages: { architecture: 'Архитектура', development: 'Разработка', review: 'Проверка', cleanup: 'Уборка лишнего', security: 'Безопасность', tests: 'Тесты' },
       documentStages: { architecture: 'План', development: 'Работа', review: 'Проверка', security: 'Проверка риска' },
       documentReady: 'Проверено, ждет приемки руководителя',
       phases: { active: 'В работе', waiting: 'Нужен исполнитель', escalated: 'У руководителя для решения', ready: 'Готово к слиянию', done: 'Завершено', cancelled: 'Отменено' },
