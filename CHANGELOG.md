@@ -13,6 +13,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - People on the map show their whole name and title in any language: their chips wrap with hyphens and each row grows to its tallest chip.
 - On a phone the map opens with names readable and a department opens on its head card; both scroll to an edge and stop clear of the floating buttons, and nothing scrolls under them.
 
+### Changed
+
+- The map runs to the bottom of the screen, with the version as small muted text in its bottom end corner, clear of its buttons and of the bars along a phone's bottom; other screens keep the version in the row below them.
+
 ## [0.39.1] - 2026-11-19
 
 ### Fixed

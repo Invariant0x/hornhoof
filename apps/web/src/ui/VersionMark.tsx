@@ -29,8 +29,16 @@ const shortCommit = (commit?: string) => commit?.slice(0, 7) || '?';
 export const versionText = ({ version, commit }: Version) => `${version} (${shortCommit(commit)})`;
 export const buildText = (build: Version & { tag: string }) => versionText({ version: build.version || build.tag, commit: build.commit });
 
-/* The running build has a footer below the screen. */
+/* The running build has a footer below the screen, in a row of its own so it covers nothing; the map names it over its own
+   corner instead. */
 export function VersionMark() {
   const version = useVersion();
   return version && <footer className="version-mark">{versionText(version)}</footer>;
+}
+
+/* The running build over the map, in the bottom end corner of the room its bars leave free. It stands on the map from the
+   moment the map opens, even before the build answers, so the footer row never comes and goes under the map (#1590). */
+export function MapVersion() {
+  const version = useVersion();
+  return <p className="map-version">{version && versionText(version)}</p>;
 }
