@@ -120,29 +120,44 @@ function versionInNpmLock(file: string): string | null {
   return null;
 }
 
-function versionInTextLock(file: string, pattern: RegExp): string | null {
+function versionInTextLock(file: string, versionIn: (text: string) => string | undefined): string | null {
   if (!existsSync(file)) return null;
   try {
-    const match = pattern.exec(readFileSync(file, 'utf8'));
-    return safeVersion(match?.[1]);
+    return safeVersion(versionIn(readFileSync(file, 'utf8')));
   } catch {
     return null;
   }
+}
+
+function versionInPnpmLock(lock: string): string | undefined {
+  let packageIndent = Infinity;
+  let fieldIndent = Infinity;
+  for (const rawLine of lock.split('\n')) {
+    const line = rawLine.trimStart();
+    if (!line || line.startsWith('#')) continue;
+    const indent = rawLine.length - line.length;
+
+    // Stay inside a Playwright entry and read only its immediate fields.
+    if (indent <= packageIndent) {
+      packageIndent = /^(['"]?)(?:@playwright\/test|playwright)\1:$/.test(line.trimEnd()) ? indent : Infinity;
+      fieldIndent = Infinity;
+    } else if (indent <= fieldIndent) {
+      fieldIndent = indent;
+      const version = /^version:[ \t]*['"]?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(line)?.[1];
+      if (version) return version;
+    }
+  }
+  return undefined;
 }
 
 export function playwrightVersionIn(repoDir: string): string | null {
   for (const name of ['package-lock.json', 'npm-shrinkwrap.json']) {
     if (existsSync(join(repoDir, name))) return versionInNpmLock(join(repoDir, name));
   }
-  const pnpm = versionInTextLock(
-    join(repoDir, 'pnpm-lock.yaml'),
-    /(?:@playwright\/test|playwright)['"]?:\s*\n(?:\s+[^\n]+\n)*?\s+version:\s*['"]?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/,
-  );
+  const pnpm = versionInTextLock(join(repoDir, 'pnpm-lock.yaml'), versionInPnpmLock);
   if (pnpm) return pnpm;
-  return versionInTextLock(
-    join(repoDir, 'yarn.lock'),
-    /["']?(?:@playwright\/test|playwright)@[^"'\n:]+["']?:\n\s+version\s+["']?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/,
-  );
+  return versionInTextLock(join(repoDir, 'yarn.lock'), text =>
+    /["']?(?:@playwright\/test|playwright)@[^"'\n:]+["']?:\n\s+version\s+["']?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(text)?.[1]);
 }
 
 function readPackageVersion(pkgDir: string): string | null {
