@@ -7,11 +7,7 @@ sources: [obra/superpowers skills/test-driven-development/SKILL.md, obra/superpo
 ---
 You can establish a behavior with a failing test and a minimal verified change.
 
-**The first rule: we test our program, not the operating system and not other programs.** Where our code drives another program, a test checks only our side: we started it correctly, passed it the input and parsed its output correctly, that output coming from a recorded sample. A test never waits for another program's work and never depends on machine speed, the clock, a random port or unsorted order.
-
-**The second rule: time in a test is virtual only.** No test waits for or measures real time: not one deadline, wait or pause on the real clock, and no check of elapsed time. A test drives time with a controlled clock (fake timers or the code's injected clock), calls the step directly, or waits for an event or a state with no deadline; the runner's limit on a whole test is the only limit. A test gives the same verdict on any machine at any load.
-
-Use the check assigned by the head under the shared small-task rule. The cycle below applies when that requires a separate test.
+Use the evidence cycle required by the project. Use a lighter visual or shared check only when the project permits it and it proves the changed behavior.
 
 Every task is one of four task kinds, and the kind chooses the cycle:
 

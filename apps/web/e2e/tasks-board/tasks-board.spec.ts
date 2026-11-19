@@ -49,12 +49,13 @@ async function inside(page: Page, what: string) {
 }
 
 /* What a finger presses is at least 44 px high, and a link that stands alone at least 44 px wide too, even with two letters,
-   on a phone and on any touch screen. A mouse on a wide screen takes the layout's sizes, never under 24 px (WCAG 2.5.8). */
-const LINKS = '.tr-title, .tr-card-title .linkish, .tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish';
+   on a phone and on any touch screen. A mouse on a wide screen takes the layout's sizes, never under 24 px (WCAG 2.5.8). A
+   board card is pressed anywhere on it, as the mockup's card is one button: its title's press covers the card. */
+const LINKS = '.tr-title, .tr-card-body, .tr-crumbs .linkish, .tp-path .linkish';
 async function touchable(page: Page, what: string) {
   const finger = page.viewportSize()!.width <= 760 || await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
   const least = finger ? 43.5 : 23.5;
-  for (const [name, height] of await page.locator(`.tr-item, .tr-views label, .tr-add-view, .tr-chip, .tr-menu:visible, .tr-row-caret, .tr-goal-link, .tr-canvas .zbtn, ${LINKS}`).evaluateAll(els =>
+  for (const [name, height] of await page.locator(`.tr-item, .tr-unfold, .tr-views label, .tr-chip, .tr-menu:visible, .tr-row-caret, .tr-goal-link, .tr-canvas .zbtn, ${LINKS}`).evaluateAll(els =>
     els.filter(e => e.getClientRects().length).map(e => [`${e.className} ${e.textContent}`, e.getBoundingClientRect().height] as const))) {
     expect(height, `${what}: ${name}`).toBeGreaterThanOrEqual(least);
   }
@@ -79,7 +80,8 @@ for (const { lang, skin } of LOOKS) for (const width of [1440, 375]) {
     /* The list starts with work in progress and names the people, goal, due day and subtasks. */
     const list = page.getByRole('region', { name: t.tracker.views.list, exact: true });
     await expect(list.getByRole('heading', { level: 2 }).first()).toHaveAccessibleName(new RegExp(`^${t.tracker.groups.working}:`));
-    const payments = list.getByRole('listitem', { name: named('Take card payments'), exact: true });
+    /* Its own line: its subtasks stand open under it, as in the mockup. */
+    const payments = list.getByRole('listitem', { name: named('Take card payments'), exact: true }).locator(':scope > .tr-cells');
     await expect(payments.getByRole('img', { name: 'Hana' })).toBeVisible();
     await expect(payments.getByRole('img', { name: 'Ivan', exact: true })).toBeVisible();
     if (width <= 760) {
@@ -155,7 +157,7 @@ test('pans and zooms the graph with a drag and the zoom bar, and opens a card fr
   await canvas.getByRole('button', { name: new RegExp(`^#${payments.number} Take card payments`) }).click();
   await expect(page).toHaveURL(new RegExp(`/tasks/${payments.id}$`));
   const card = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
-  await openTaskAction(card, t, t.tracker.card.graphFromHere);
+  await card.getByRole('button', { name: t.tracker.card.graphFromHere }).click();
   await expect(page).toHaveURL(new RegExp(`/tasks\\?root=${payments.id}&view=graph$`));
   const crumbs = page.getByRole('navigation', { name: t.tracker.graph.path });
   await expect(crumbs.locator('[aria-current]')).toHaveText(named('Take card payments'));
@@ -164,25 +166,21 @@ test('pans and zooms the graph with a drag and the zoom bar, and opens a card fr
 });
 
 for (const dir of ['ltr', 'rtl'] as const) {
-  test(`puts the card at the end side, beside the work and not over it: ${dir}`, async ({ page }, info) => {
+  test(`puts the card at the end side as the mockup's drawer, over the work and not narrowing it: ${dir}`, async ({ page }, info) => {
     const t = MESSAGES.en;
     await serveTasksBoard(page);
     await open(page, 'en', 1440, `/tasks?department=${DEV.id}`);
     await page.evaluate(d => { document.documentElement.dir = d; }, dir);
     const row = page.getByRole('region', { name: t.tracker.views.list, exact: true }).getByRole('listitem', { name: named('Take card payments'), exact: true });
-    await row.locator('.tr-title').click();
+    const before = (await page.locator('.tr-main').boundingBox())!;
+    await row.locator(':scope > .tr-cells .tr-title').click();
     const card = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
-    await openTaskAction(card, t, t.tasks.details);
     const path = card.getByRole('navigation', { name: t.tracker.card.path });
     await expect(path.getByRole('listitem')).toHaveText([GOALS[0]!.title, GOALS[1]!.title]);
     const [panel, main] = [(await card.boundingBox())!, (await page.locator('.tr-main').boundingBox())!];
-    if (dir === 'ltr') {
-      expect(Math.round(1440 - (panel.x + panel.width))).toBe(16);
-      expect(main.x + main.width).toBeLessThanOrEqual(panel.x);
-    } else {
-      expect(Math.round(panel.x)).toBe(16);
-      expect(main.x).toBeGreaterThanOrEqual(panel.x + panel.width);
-    }
+    expect(Math.round(panel.width)).toBe(460);
+    expect(Math.round(dir === 'ltr' ? 1440 - (panel.x + panel.width) : panel.x)).toBe(0);
+    expect(Math.round(main.width)).toBe(Math.round(before.width));
     expect(await sideways(page)).toBeLessThanOrEqual(0);
     await capture(page, info, `card-${dir}-1440`);
   });
@@ -225,8 +223,7 @@ for (const dir of ['ltr', 'rtl'] as const) {
     await shot('light-chips');
     await view(page, t, t.tracker.views.board);
     const card = page.getByRole('region', { name: t.tracker.views.board, exact: true }).getByRole('article', { name: named('Take card payments'), exact: true });
-    for (const fact of await card.locator('.tr-card-facts li').all()) await expect(fact).toHaveAttribute('dir', 'auto');
-    expect(await card.locator('.tr-card-facts li').first().evaluate(el => getComputedStyle(el).direction)).toBe('ltr');
+    expect(await card.locator('.tr-card-meta > [dir="auto"]').first().evaluate(el => getComputedStyle(el).direction)).toBe('ltr');
     await card.locator('.tr-card-title .linkish').click();
     const panel = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
     await openTaskAction(panel, t, t.tasks.details);
@@ -236,8 +233,10 @@ for (const dir of ['ltr', 'rtl'] as const) {
 }
 
 /* The lowest contrast of a box's border against what lies on either side of it: its own ground inside, the ground under it
-   outside, and the glow of its ring over that ground when it has one. */
-const borderContrast = (locator: Locator) => locator.evaluate(el => {
+   outside, and the glow of its ring over that ground when it has one. A board card draws its line as the mockup's does, as
+   its own fill 1 px around the surface of its body, so its cut corners keep the line: with fill, that fill is the line and
+   the body's surface the ground inside. */
+const borderContrast = (locator: Locator, line: 'border' | 'fill' = 'border') => locator.evaluate((el, line) => {
   const parse = (value: string): number[] => {
     const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/.exec(value);
     return m ? [Number(m[1]), Number(m[2]), Number(m[3]), m[4] === undefined ? 1 : Number(m[4])] : [0, 0, 0, 0];
@@ -249,11 +248,16 @@ const borderContrast = (locator: Locator) => locator.evaluate(el => {
   for (let at = el.parentElement; at; at = at.parentElement) layers.push(parse(getComputedStyle(at).backgroundColor));
   const outside = layers.reverse().reduce((under, top) => over(top, under), [255, 255, 255, 1]);
   const style = getComputedStyle(el);
+  if (line === 'fill') {
+    const fill = over(parse(style.backgroundColor), outside);
+    const body = over(parse(getComputedStyle(el.firstElementChild!).backgroundColor), fill);
+    return Math.min(ratio(fill, body), ratio(fill, outside));
+  }
   const ring = /rgba?\([^)]*\)/.exec(style.boxShadow);
   const grounds = [over(parse(style.backgroundColor), outside), outside, ...(ring ? [over(parse(ring[0]), outside)] : [])];
   const border = parse(style.borderTopColor);
   return Math.min(...grounds.map(ground => ratio(over(border, ground), ground)));
-});
+}, line);
 
 /* For each element, whether the day of the date in its words stands left of its month on the screen, as "20 Nov" reads in
    both directions; null where the date is not in its words. */
@@ -274,12 +278,12 @@ async function inOrder(locator: Locator, date: string, what: string) {
 }
 
 /* The width a card gives its words, its path and its facts, is the card less its padding and the same 18 px of room for a
-   scrollbar in every engine, whatever the engine's own bar takes of it: 344 px in a card of 400 px. */
+   scrollbar in every engine, whatever the engine's own bar takes of it: 405 px in the drawer of 460 px with its 1 px edge. */
 async function cardWords(page: Page, what: string) {
   const card = page.locator('.acard');
   const inner = await card.evaluate(el => el.clientWidth);
-  if (page.viewportSize()!.width === 1440) expect(inner, what).toBe(398);
-  const boxes = await card.locator('.tp-path, .tp-facts').evaluateAll(els => els.map(e => e.getBoundingClientRect().width));
+  if (page.viewportSize()!.width === 1440) expect(inner, what).toBe(459);
+  const boxes = await card.locator('.tp-path, .tp-card-facts').evaluateAll(els => els.map(e => e.getBoundingClientRect().width));
   expect(boxes, what).toHaveLength(2);
   for (const width of boxes) expect(Math.abs(width - (inner - 18 - 18 - 18)), `${what}: ${width} of ${inner}`).toBeLessThanOrEqual(1);
 }
@@ -328,17 +332,17 @@ for (const dir of ['ltr', 'rtl'] as const) for (const { width, touch } of [{ wid
     await view(page, t, t.tracker.views.board);
     const board = page.getByRole('region', { name: t.tracker.views.board, exact: true });
     const payments = board.getByRole('article', { name: named('Take card payments'), exact: true });
-    await inOrder(payments.locator('.tr-card-facts li'), '20 Nov', `board ${look}`);
+    await inOrder(payments.locator('.tr-card-meta > [dir="auto"]'), '20 Nov', `board ${look}`);
     await touchable(page, `board ${look}`);
     await payments.locator('.tr-card-title .linkish').click();
     const card = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
     await openTaskAction(card, t, t.tasks.details);
     await expect(card.getByRole('navigation', { name: t.tracker.card.path })).toContainText(GOALS[1]!.title);
     await expect(page.locator('.tr-card.on')).toHaveCount(1);
-    expect(await borderContrast(page.locator('.tr-card.on')), `chosen card ${look}`).toBeGreaterThanOrEqual(3);
-    expect(await page.locator('.tr-card.on').evaluate(el => getComputedStyle(el).borderTopColor)).toBe(await cyanInk());
+    expect(await borderContrast(page.locator('.tr-card.on'), 'fill'), `chosen card ${look}`).toBeGreaterThanOrEqual(3);
+    expect(await page.locator('.tr-card.on').evaluate(el => getComputedStyle(el).backgroundColor)).toBe(await cyanInk());
     if (width === 1440) await closeUp(page.locator('.tr-card.on'), 'card-chosen');
-    await inOrder(card.locator('.tp-facts bdi'), '20 Nov', `task card ${look}`);
+    await inOrder(card.locator('.tp-card-facts dd'), '20 Nov', `task card ${look}`);
     await cardWords(page, `task card ${look}`);
     await shot('board-card');
 
@@ -371,7 +375,7 @@ for (const dir of ['ltr', 'rtl'] as const) for (const { width, touch } of [{ wid
     await page.locator('[data-node="g2"]').click();
     const goal = page.getByRole('complementary', { name: GOALS[1]!.title, exact: true });
     await expect(goal.getByRole('navigation', { name: t.tracker.card.path })).toContainText(GOALS[0]!.title);
-    await inOrder(goal.locator('.tp-facts dd'), '10 Nov', `goal card ${look}`);
+    await inOrder(goal.locator('.tp-card-facts dd'), '10 Nov', `goal card ${look}`);
     await cardWords(page, `goal card ${look}`);
     await shot('goal-card');
 
@@ -388,16 +392,15 @@ for (const dir of ['ltr', 'rtl'] as const) for (const { width, touch } of [{ wid
     await touchable(page, `card path ${look}`);
     await shot('card-path');
 
-    /* The goals of the person, and the people of a department in the left panel. */
-    await visit('/tasks');
-    await expect(page.locator('.tr-goals .linkish').filter({ hasText: new RegExp(`^${SHORT}$`) })).toBeVisible();
+    /* The goals page, and the employees of a department in the left panel. */
+    await visit('/tasks?show=goals');
+    await expect(page.locator('.tr-goal-title').filter({ hasText: new RegExp(`^${SHORT}$`) })).toBeVisible();
     await touchable(page, `goals ${look}`);
     await shot('goals');
     await visit(`/tasks?department=${DEV.id}`);
     if (width === 375) await page.getByRole('button', { name: t.tracker.side.open, exact: true }).click();
-    /* A department's employees are folded under its name in the left panel. */
-    await page.locator('.tr-dept-body summary').filter({ hasText: t.tracker.side.employees }).click();
-    const people = page.locator('.tr-people .linkish').first();
+    /* A department's employees stand open under its name in the left panel, each with the task it is on. */
+    const people = page.locator('.tr-people .tr-item').first();
     await expect(people).toBeVisible();
     await people.scrollIntoViewIfNeeded();
     await touchable(page, `people ${look}`);
@@ -466,19 +469,19 @@ for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
     await serveTasksBoard(page);
     await serveShortNames(page);
 
-    /* The person's own tasks: a goal reads with its number and its progress in words. */
-    await visit('/tasks');
-    const goals = page.getByRole('region', { name: t.tracker.yourGoals, exact: true });
-    const big = goals.getByRole('listitem').filter({ hasText: GOALS[0]!.title });
-    await readsInOrder(big.locator('.linkish'), ['500', 'shops', 'card'], `goal ${look}`);
-    await readsInOrder(big.locator('.goal-progress small'), ['212', 'of', '500', 'shops'], `goal's progress ${look}`);
-    await atStart(big.locator('.goal-progress small'), dir, `goal's progress ${look}`);
+    /* The goals page: a goal reads with its number and its progress in words. */
+    await visit('/tasks?show=goals');
+    const goals = page.getByRole('region', { name: t.tracker.side.allGoals, exact: true });
+    const big = goals.getByRole('listitem', { name: GOALS[0]!.title, exact: true });
+    await readsInOrder(big.locator('.tr-goal-title').first(), ['500', 'shops', 'card'], `goal ${look}`);
+    await readsInOrder(big.locator('.goal-progress small').first(), ['212', 'of', '500', 'shops'], `goal's progress ${look}`);
+    await atStart(big.locator('.goal-progress small').first(), dir, `goal's progress ${look}`);
     await shot('goals');
 
     /* A person's task in the left panel: its number, then its name. */
     await visit(`/tasks?department=${DEV.id}`);
     if (width === 375) await page.getByRole('button', { name: t.tracker.side.open, exact: true }).click();
-    const task = page.locator('.tr-people .linkish').first();
+    const task = page.locator('.tr-people .tr-item small').first();
     await task.scrollIntoViewIfNeeded();
     await readsInOrder(task, ['#', SHORT], `person's task ${look}`);
     await shot('people');
@@ -488,13 +491,14 @@ for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
        it is wide the names stand above the list and each value at the start side of its column. */
     const row = page.getByRole('region', { name: t.tracker.views.list, exact: true }).getByRole('listitem', { name: named('Take card payments'), exact: true });
     await row.scrollIntoViewIfNeeded();
-    /* Executor, responsible, priority, goal and due. */
-    const cells = row.locator('.tr-cells > .tr-cell');
-    await expect(cells).toHaveCount(5);
+    /* Executor, responsible, goal and due, the mockup's columns. */
+    const cells = row.locator(':scope > .tr-cells > .tr-cell');
+    await expect(cells).toHaveCount(4);
     for (const cell of await cells.all()) {
       const value = (await cell.locator('.tr-v').textContent())!;
       const parts = await cell.evaluate(el => [...el.children].map(c => { const r = c.getBoundingClientRect(); return { left: r.left, right: r.right, shown: getComputedStyle(c).position !== 'absolute' }; }));
-      const box = await cell.evaluate(el => { const r = el.getBoundingClientRect(); return [r.left, r.right]; });
+      /* The column's room for words: the cell less the mockup's 8 px at each side. */
+      const box = await cell.evaluate(el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return [r.left + parseFloat(s.paddingLeft), r.right - parseFloat(s.paddingRight)]; });
       const [name, words] = parts as [typeof parts[0], typeof parts[0]];
       if (name.shown) {
         expect(name.right, `${value}: its name before it ${look}`).toBeLessThanOrEqual(words.left);
@@ -565,11 +569,11 @@ for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
     /* The cards of a company goal with its smaller goals and no tasks yet, and of a goal past its date with a task and a
        history. */
     for (const goal of [GOALS[0]!, GOALS[1]!]) {
-      await visit('/tasks');
-      await page.getByRole('region', { name: t.tracker.yourGoals, exact: true }).getByRole('button', { name: goal.title, exact: true }).click();
+      await visit('/tasks?show=goals');
+      await page.getByRole('region', { name: t.tracker.side.allGoals, exact: true }).getByRole('link', { name: goal.title, exact: true }).click();
       const card = page.getByRole('complementary', { name: goal.title, exact: true });
-      await expect(card.getByRole('heading', { level: 3 })).toHaveText(goal.title);
-      await expect(card.getByRole('region', { name: t.tracker.card.tasks })).toBeVisible();
+      await expect(card.getByRole('heading', { level: 2 })).toHaveText(goal.title);
+      await expect(card.getByRole('region', { name: t.tracker.card.under })).toBeVisible();
       if (goal.id === GOALS[1]!.id) await expect(card.getByText(GOAL_NOTE)).toBeVisible();
       expect.soft(await outOfOrder(card), `goal ${goal.id} ${look}`).toEqual([]);
       await shot(`goal-${goal.id}`);
@@ -617,8 +621,8 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     const goal = GOALS[1]!;
     await serveTasksBoard(page);
     await serveGoalHistory(page, [{ kind: 'edited', text: '', data: { fields: [UNNAMED] }, by: { kind: 'person', id: 'p1', name: 'Ivan' }, at: '2026-11-15T10:00:00.000Z' }]);
-    await open(page, lang, 1440, '/tasks');
-    await page.getByRole('region', { name: t.tracker.yourGoals, exact: true }).getByRole('button', { name: goal.title, exact: true }).click();
+    await open(page, lang, 1440, '/tasks?show=goals');
+    await page.getByRole('region', { name: t.tracker.side.allGoals, exact: true }).getByRole('link', { name: goal.title, exact: true }).click();
     const history = page.getByRole('complementary', { name: goal.title, exact: true }).getByRole('list', { name: t.tracker.card.history });
     /* Its four lines, set, the date moved, the note and an edit of a name without words, are there; each edit is read
        once, so a wrong word fails at once. */
@@ -653,6 +657,47 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     await expect(side).toBeHidden();
     await expect(page.getByRole('heading', { level: 1 })).toHaveText(t.tracker.where.working);
     await inside(page, `working ${lang}`);
+  });
+}
+
+/* The mockup's one way to make something: the + beside Tasks opens what the person may make, in rows of the card's menu
+   inside the left panel, in every language, at a desk and in the phone's drawer, also mirrored right to left. The department
+   has no head yet, so the menu says so and offers no task. A choice closes the menu and the drawer and opens its form. */
+for (const lang of LANGUAGES.map(l => l.id)) for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
+  test(`makes everything from the + beside Tasks: ${lang} ${dir} ${width}`, async ({ page }, info) => {
+    const t = MESSAGES[lang];
+    await serveTasksBoard(page);
+    await open(page, lang, width, `/tasks?department=${DEV.id}`);
+    await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+    if (width === 375) await page.getByRole('button', { name: t.tracker.side.open, exact: true }).click();
+    const side = page.getByRole('navigation', { name: t.tracker.side.label });
+    const plus = side.getByRole('button', { name: t.tracker.side.create, exact: true });
+    expect(Math.round((await plus.boundingBox())!.height)).toBe(width === 375 ? 44 : 30);
+    await plus.click();
+    const menu = side.getByRole('group', { name: t.tracker.side.create, exact: true });
+    const items = menu.getByRole('button');
+    await expect(items).toHaveText([t.tracker.actions.newGoal, t.tracker.actions.newPipeline, t.tasks.writeOrchestrator]);
+    await expect(items.first()).toBeFocused();
+    const note = menu.getByText(t.dept.needsHead, { exact: true });
+    await expect(note).toBeVisible();
+    const panel = (await side.boundingBox())!;
+    for (const item of [...await items.all(), note]) {
+      const box = (await item.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(panel.x - 1);
+      expect(box.x + box.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
+      if (item !== note) expect(box.height).toBeGreaterThanOrEqual(43.5);
+      expect(await item.evaluate(el => el.scrollWidth <= el.clientWidth && getComputedStyle(el).textOverflow !== 'ellipsis')).toBe(true);
+    }
+    expect(await sideways(page)).toBeLessThanOrEqual(0);
+    await capture(page, info, `make-${lang}-${dir}-${width}`);
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(plus).toBeFocused();
+    await plus.click();
+    await menu.getByRole('button', { name: t.tracker.actions.newGoal, exact: true }).click();
+    await expect(menu).toBeHidden();
+    if (width === 375) await expect(side).toBeHidden();
+    await expect(page.getByRole('form', { name: t.tracker.actions.newGoal, exact: true })).toBeVisible();
   });
 }
 

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType, type RefObject } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, useT } from '../i18n';
 import { notOpened, useOrg } from '../org';
 import { forgetOwnerKey } from '../owner-key';
 import type { Me, Org } from '../types';
-import { LogoMark } from '../ui/icons';
+import { ListIcon, LogoMark, MachineIcon, MapIcon, PeopleIcon, PlugIcon } from '../ui/icons';
 import { Idents } from '../ui/Idents';
 import { FirstContact } from '../ui/FirstContact';
 import { RecoveryBanner } from '../ui/RecoveryBanner';
@@ -36,9 +36,11 @@ import { takeEscape } from '../ui/escape';
 import { placeOf, useRoute, type Route, type SettingsGroup, type TrackerPlace } from '../routes';
 import { departmentIsMissing, RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { GuardBoundary, LightNotice } from '../ui/GuardBoundary';
+import { guardedResizeObserver } from '../guard';
 
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements' | 'inbox';
 const TABS: Exclude<Tab, 'improvements' | 'inbox'>[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
+const TAB_ICONS: Record<(typeof TABS)[number], ComponentType> = { map: MapIcon, tasks: ListIcon, people: PeopleIcon, subscriptions: PlugIcon, machines: MachineIcon };
 const ACCOUNT_DIALOGS = ['about', 'versions', 'settings'] as const;
 type AccountDialogName = (typeof ACCOUNT_DIALOGS)[number];
 
@@ -151,24 +153,70 @@ function CompanyPage({ tab, improvements, inbox, onTask, onHome }: {
   return null;
 }
 
-function ShellTabs({ tab, waiting, navigate }: { tab: Route['kind']; waiting: number; navigate: ReturnType<typeof useRoute>['navigate'] }) {
+/* The section tabs keep their words while all of them fit one line in the room the top bar leaves them: in the middle,
+   clear of the logo, the department's name beside it and the account, or from the start of the row on a phone with no logo.
+   Else each tab shows its icon and keeps its name as its label and tooltip. What the words need is measured as they are
+   shown, once for each set of words and when the fonts arrive; the room at every resize. The strip's half width goes to
+   the page as --tabs-half, for the department's name. */
+function useTabsFit(words: string, crumbs: number) {
+  const bar = useRef<HTMLElement>(null), nav = useRef<HTMLElement>(null), brand = useRef<HTMLDivElement>(null), side = useRef<HTMLDivElement>(null);
+  const [icons, setIcons] = useState(false);
+  const [fonts, setFonts] = useState(false);
+  const need = useRef<{ words: string; px: number } | null>(null);
+  const key = `${words}|${fonts}`;
+  useEffect(() => {
+    let on = true;
+    void document.fonts?.ready.then(() => on && setFonts(true));
+    return () => { on = false; };
+  }, []);
+  useLayoutEffect(() => {
+    const top = bar.current, strip = nav.current;
+    if (!top || !strip) return;
+    const decide = () => {
+      if (!top.clientWidth) return;
+      if (!icons) need.current = { words: key, px: strip.scrollWidth };
+      else if (need.current?.words !== key) {
+        setIcons(false);
+        return;
+      }
+      const gap = parseFloat(getComputedStyle(top).columnGap) || 0;
+      const logo = brand.current?.offsetWidth ?? 0;
+      const start = (logo ? logo + gap : 0) + (crumbs ? crumbs + gap : 0);
+      const end = (side.current?.offsetWidth ?? 0) + gap;
+      const room = logo ? top.clientWidth - 2 * Math.max(start, end) : top.clientWidth - start - end;
+      setIcons(need.current!.px > room);
+      top.parentElement?.style.setProperty('--tabs-half', `${strip.offsetWidth / 2}px`);
+    };
+    decide();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = guardedResizeObserver(decide, 'tabs');
+    observer.observe(top);
+    return () => observer.disconnect();
+  }, [icons, key, crumbs]);
+  return { bar, nav, brand, side, icons };
+}
+
+function ShellTabs({ tab, waiting, navigate, fit }: { tab: Route['kind']; waiting: number; navigate: ReturnType<typeof useRoute>['navigate']; fit: ReturnType<typeof useTabsFit> }) {
   const t = useT();
   return (
-    <nav className="tabs glass" aria-label={t.shell.sections}>
+    <nav ref={fit.nav} className="tabs glass" data-fit={fit.icons ? 'icons' : undefined} aria-label={t.shell.sections}>
       {TABS.map(id => {
         const count = id === 'tasks' ? waiting : 0;
+        const name = count ? t.tasks.navWaiting(count) : t.shell.tabs[id];
+        const Icon = TAB_ICONS[id];
         return (
           <button
             key={id}
             type="button"
             className={tab === id ? 'on' : ''}
             aria-current={tab === id ? 'page' : undefined}
-            aria-label={count ? t.tasks.navWaiting(count) : undefined}
+            aria-label={count || fit.icons ? name : undefined}
+            title={fit.icons ? name : undefined}
             onClick={() => {
               navigate({ kind: id });
             }}
           >
-            {t.shell.tabs[id]}
+            {fit.icons ? <Icon /> : t.shell.tabs[id]}
             {count > 0 && <span className="nav-count" aria-hidden="true">{count}</span>}
           </button>
         );
@@ -177,15 +225,15 @@ function ShellTabs({ tab, waiting, navigate }: { tab: Route['kind']; waiting: nu
   );
 }
 
-function ShellAccount({ me, menu, setMenu, company, inbox, navigate, openAccount, onSignOut, onContact, toDecide, account, accountButton }: {
+function ShellAccount({ me, menu, setMenu, company, inbox, navigate, openAccount, onSignOut, onContact, toDecide, account, accountButton, side }: {
   me: Me; menu: boolean; setMenu: (open: boolean) => void; company: boolean; inbox: boolean;
   navigate: ReturnType<typeof useRoute>['navigate']; openAccount: (next: Route) => void;
   onSignOut: () => void; onContact: () => void; toDecide: number;
-  account: RefObject<HTMLDivElement | null>; accountButton: RefObject<HTMLButtonElement | null>;
+  account: RefObject<HTMLDivElement | null>; accountButton: RefObject<HTMLButtonElement | null>; side: RefObject<HTMLDivElement | null>;
 }) {
   const t = useT();
   return (
-    <div className="tb-right">
+    <div className="tb-right" ref={side}>
       <div className="account" ref={account}>
         <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
           {me.person.name.trim().charAt(0).toUpperCase()}
@@ -252,9 +300,10 @@ function DepartmentFallback({ deptId, org, orgFailure }: { deptId: string | null
   return deptId && !org && failure === null ? <div className="dview" aria-busy="true"><div className="dcanvas" /></div> : null;
 }
 
-function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire }: MapRouteProps & {
+function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire, onCrumbs }: MapRouteProps & {
   deptId: string | null; denied: boolean; org: Org | null; orgFailure: unknown; shown: string | null; panel: 'window' | 'task' | null;
   openTask: (id: string) => void; openTracker: (departmentId: string) => void; openDepartment: (id: string) => void; onHire: (dept: Department) => void;
+  onCrumbs: (px: number) => void;
 }) {
   if (tab !== 'map' || denied || missingDepartment) return null;
   if (!dept) return <DepartmentFallback deptId={deptId} org={org} orgFailure={orgFailure} />;
@@ -274,6 +323,7 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
       onOpenTracker={openTracker}
       onOpenDepartment={openDepartment}
       onHire={() => onHire(dept)}
+      onCrumbs={onCrumbs}
     />
   );
 }
@@ -336,6 +386,9 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const account = useRef<HTMLDivElement>(null);
   const accountButton = useRef<HTMLButtonElement>(null);
   const closeContact = useCallback(() => { setContact(false); accountButton.current?.focus(); }, []);
+  /* How wide a department's name stands beside the logo, which the tabs leave room for. */
+  const [crumbs, setCrumbs] = useState(0);
+  const fit = useTabsFit(`${TABS.map(id => t.shell.tabs[id]).join('|')}|${decisions.waiting}`, crumbs);
 
   useEffect(() => {
     if (!menu) return;
@@ -369,13 +422,13 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
     <AgentWindowContext value={openAgent}>
     <UpdateSaysIt value={updateSaysIt}>
     <div className="shell">
-      <header className="topbar">
-        <div className="tb-brand glass">
+      <header className="topbar" ref={fit.bar}>
+        <div className="tb-brand glass" ref={fit.brand}>
           <LogoMark />
           <span className="sr">{me.company.name}</span>
         </div>
-        <ShellTabs tab={tab} waiting={decisions.waiting} navigate={navigate} />
-        <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} inbox={inbox} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} onContact={() => setContact(true)} toDecide={toDecide} account={account} accountButton={accountButton} />
+        <ShellTabs tab={tab} waiting={decisions.waiting} navigate={navigate} fit={fit} />
+        <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} inbox={inbox} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} onContact={() => setContact(true)} toDecide={toDecide} account={account} accountButton={accountButton} side={fit.side} />
       </header>
       {/* The bars of the shell stand first in the page, each in its own row under the header, and what the page shows
           comes after them. */}
@@ -391,7 +444,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
         </GuardBoundary>
         <GuardBoundary block="department" reset={deptId}>
-        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onHire={dept => {
+        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onCrumbs={setCrumbs} onHire={dept => {
           setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
           openAgent('orchestrator');
         }} />

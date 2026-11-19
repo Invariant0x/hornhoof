@@ -872,6 +872,8 @@ describe('updates', () => {
     const told = async () => (await db.select(only(jobs, 'prompt')).from(jobs).where(eq(jobs.agentId, orchestrator.id))).map(j => j.prompt);
     await until(async () => (await told()).length > 0);
     expect((await told())[0]).toMatch(/^Hornhoof called off the update to 0\.4\.1: the agents did not finish within 5 minutes\. No running work was stopped/);
+    expect((await told())[0]).toContain('Check the affected turns and how they can resume');
+    expect((await told())[0]).not.toContain('CEO');
 
     /* The next request starts afresh, and the called-off one is no longer shown. */
     await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });

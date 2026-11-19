@@ -13,4 +13,4 @@ sources: [anthropics/financial-services plugins/agent-plugins/model-builder/skil
 6. **Scenarios**: base, downside and upside made by changing drivers, never by editing results. Show the runway in months for each.
 7. **Hygiene**: inputs in one place and one colour, no typed numbers inside formulas, one formula per row across all months, units and currency in every label.
 
-Add a one-page summary: what the model says, the three assumptions that matter most, and what would prove them wrong. Before it leaves the company, a checker who did not make it must rebuild the key numbers from source records with SQL or a script, before reading the maker's workings, and confirm they match. Assumptions stay labelled and separate from actuals. Humans alone approve commitments, post entries, make payments and file returns; a model author does none of these.
+Summarize the conclusion, assumptions that could change it and what would prove them wrong. Keep assumptions separate from actuals. Identify the material figures, source records and tolerance for the independent release check.

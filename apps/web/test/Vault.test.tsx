@@ -11,7 +11,7 @@ const NOT_CEO = { ...ME, person: { ...ME.person, id: 'p3', isOwner: false, scope
 const LOG = [
   { id: 'l1', kind: 'taken', person: null, agent: { id: 'a2', name: 'Nora' }, task: { id: 't', number: 42 }, at: '2030-01-01T10:00:00.000Z' },
   { id: 'l2', kind: 'taken', person: null, agent: { id: 'a2', name: 'Nora' }, task: null, at: '2030-01-01T09:40:00.000Z' },
-  { id: 'l3', kind: 'changed', person: null, agent: { id: 'a1', name: 'David AI' }, task: null, at: '2030-01-01T09:30:00.000Z' },
+  { id: 'l3', kind: 'changed', person: null, agent: { id: 'a1', name: 'Ferris AI' }, task: null, at: '2030-01-01T09:30:00.000Z' },
   { id: 'l4', kind: 'created', person: { id: 'p2', name: 'Maria' }, agent: null, task: null, at: '2030-01-01T09:00:00.000Z' },
 ];
 
@@ -19,7 +19,7 @@ const open = (me = ME) => render(<Settings me={me} group="passwords" onClose={()
 
 describe('the Passwords group of the settings', () => {
   it('lists each sign-in with its site, login and who added it, and never a password', async () => {
-    mockApi({ 'GET /api/vault': [200, { entries: [ENTRY, { ...ENTRY, id: 'v2', name: 'CRM', hasCode: false, createdBy: { id: 'a1', name: 'David AI' } }, { ...ENTRY, id: 'v3', name: 'Shop', createdBy: null }] }] });
+    mockApi({ 'GET /api/vault': [200, { entries: [ENTRY, { ...ENTRY, id: 'v2', name: 'CRM', hasCode: false, createdBy: { id: 'a1', name: 'Ferris AI' } }, { ...ENTRY, id: 'v3', name: 'Shop', createdBy: null }] }] });
     open();
     const dialog = await screen.findByRole('dialog', { name: 'Settings' });
     expect(within(dialog).getByRole('heading', { name: 'Passwords' })).toBeInTheDocument();
@@ -28,7 +28,7 @@ describe('the Passwords group of the settings', () => {
     expect(within(dialog).getAllByText('Login: team@acme.test. With a one-time code.')).toHaveLength(2);
     expect(within(dialog).getByText('Login: team@acme.test.')).toBeInTheDocument();
     expect(within(dialog).getByText(/^Added by Maria, /)).toBeInTheDocument();
-    expect(within(dialog).getByText(/^Added by David AI, /)).toBeInTheDocument();
+    expect(within(dialog).getByText(/^Added by Ferris AI, /)).toBeInTheDocument();
     expect(within(dialog).getByText(/^Added 01\/01\/2030/)).toBeInTheDocument();
     expect(dialog.querySelector('input[type=password]')).toBeNull();
   });
@@ -135,7 +135,7 @@ describe('the Passwords group of the settings', () => {
     await user.click(await screen.findByRole('button', { name: 'History' }));
     expect(await screen.findByText('Nora took it for task #42.')).toBeInTheDocument();
     expect(screen.getByText('Nora took it.')).toBeInTheDocument();
-    expect(screen.getByText('David AI changed it.')).toBeInTheDocument();
+    expect(screen.getByText('Ferris AI changed it.')).toBeInTheDocument();
     expect(screen.getByText('Maria added it.')).toBeInTheDocument();
     expect(screen.queryByText(/taken|created|changed\b(?! it)/)).toBeNull();
   });
@@ -149,7 +149,7 @@ describe('the Passwords group of the settings', () => {
     await user.click(await screen.findByRole('button', { name: 'История' }));
     expect(await screen.findByText('Nora: взято для задачи #42.')).toBeInTheDocument();
     expect(screen.getByText('Nora: взято.')).toBeInTheDocument();
-    expect(screen.getByText('David AI: изменено.')).toBeInTheDocument();
+    expect(screen.getByText('Ferris AI: изменено.')).toBeInTheDocument();
     expect(screen.getByText('Maria: добавлено.')).toBeInTheDocument();
   });
 });

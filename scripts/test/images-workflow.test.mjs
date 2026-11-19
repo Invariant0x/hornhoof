@@ -105,8 +105,8 @@ test('the release job looks whether the version is released, and makes the relea
 });
 
 test('the publish job moves tags on the runner and with the BuildKit the build variables name, as the images are built', () => {
-  assert.match(images.publish, /runs-on: \$\{\{ \(github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.head\.repo\.full_name == github\.repository\) && vars\.BUILD_RUNS_ON && fromJSON\(vars\.BUILD_RUNS_ON\) \|\| 'ubuntu-latest' \}\}\n/);
-  assert.match(images.publish, /driver: \$\{\{ vars\.BUILDKIT_ENDPOINT && 'remote' \|\| 'docker-container' \}\}\n\s+endpoint: \$\{\{ vars\.BUILDKIT_ENDPOINT \}\}\n/);
+  assert.match(images.publish, /runs-on: \$\{\{ github\.event\.repository\.private && \(github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.head\.repo\.full_name == github\.repository\) && vars\.BUILD_RUNS_ON && fromJSON\(vars\.BUILD_RUNS_ON\) \|\| 'ubuntu-latest' \}\}\n/);
+  assert.match(images.publish, /driver: \$\{\{ github\.event\.repository\.private && vars\.BUILDKIT_ENDPOINT && 'remote' \|\| 'docker-container' \}\}\n\s+endpoint: \$\{\{ github\.event\.repository\.private && vars\.BUILDKIT_ENDPOINT \|\| '' \}\}\n/);
 });
 
 test('the job that may move tags does not keep the checkout token', () => {
@@ -174,7 +174,7 @@ test('the tests run in the parts the first job chose, and as the whole suite in 
 });
 
 /* hornhoof.org/install.sh is the command the website gives, so it follows each release. */
-test('a new release starts the workflow that puts its installer on the website, which anyone may also run by hand', () => {
+test('a new release starts the workflow that puts its installer on the website, which maintainers may also run from main', () => {
   const step = images.release.slice(images.release.indexOf('Create the release, and its tag when it has none'));
   assert.ok(step.indexOf('gh workflow run installer-site.yml') > step.indexOf('gh release create'), step);
   assert.match(images.release, /actions: write/);

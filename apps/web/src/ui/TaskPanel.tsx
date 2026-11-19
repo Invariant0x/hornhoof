@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { HIDDEN } from '@hornhoof/protocol/redaction';
 import { errorText, useLanguage, useT } from '../i18n';
@@ -7,7 +7,7 @@ import { routePath } from '../routes';
 import { placeName, useGoals, usePipelines, useTask } from '../tasks';
 import { graphPath } from '../tracker';
 import { humanStatus, isClosed } from '../task-tree';
-import type { GoalView, Org, TaskDetail, WaitingRequest } from '../types';
+import type { GoalView, Org, TaskDetail, TaskStatus, WaitingRequest } from '../types';
 import { Field } from './Field';
 import { useLoadFailure } from './LoadFailure';
 import { TaskEdit } from './TrackerForms';
@@ -16,11 +16,12 @@ import { FoldedMarkdown, Markdown } from './Markdown';
 import { Requests, wordsAnswer } from './Requests';
 import { PanelFrame } from './SidePanels';
 import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
-import { fullTextOf, LogParagraph, proseErrorText, TaskFiles } from './TaskAttachments';
+import { fullTextOf, LogParagraph, Material, proseErrorText, TaskFiles } from './TaskAttachments';
 import { HideSecret } from './HideSecret';
 import { PhoneRecordings } from './PhoneRecordings';
 import { FullTaskLog, ShortTaskLog } from './TaskHistory';
-import { PriorityWord } from './TrackerMarks';
+import { STATE_CLASS } from './TaskActivity';
+import { PersonMark, PriorityWord } from './TrackerMarks';
 import { TaskWorkflow, TaskFindings } from './TaskWorkflow';
 
 /* What waits for the person in this task. */
@@ -101,7 +102,8 @@ function TaskQuestionsSection({ requests }: { requests: TaskDetail['requests'] }
   );
 }
 
-/* Where the task belongs: the goals above it, from the company's, and the task it is part of. Each opens its own card. */
+/* Where the task belongs: the goals above it, from the company's, each with the goal's mark, and the task it is part of, each
+   followed by the mark that leads on to the card itself. Each opens its own card. */
 export function CardPath({ goals, parent, onOpenGoal, onOpen }: { goals: { id: string; title: string }[]; parent?: { id: string; number: number; title: string } | null; onOpenGoal?: (id: string) => void; onOpen: (id: string) => void }) {
   const t = useT();
   if (!goals.length && !parent) return null;
@@ -109,12 +111,32 @@ export function CardPath({ goals, parent, onOpenGoal, onOpen }: { goals: { id: s
     <nav className="tp-path" aria-label={t.tracker.card.path}>
       <ol>
         {goals.map(g => (
-          <li key={g.id}>{onOpenGoal ? <button className="linkish" type="button" dir="auto" onClick={() => onOpenGoal(g.id)}>{g.title}</button> : <span dir="auto">{g.title}</span>}</li>
+          <li key={g.id}>{onOpenGoal ? <button className="linkish tp-goal" type="button" dir="auto" onClick={() => onOpenGoal(g.id)}>{g.title}</button> : <span className="tp-goal" dir="auto">{g.title}</span>}</li>
         ))}
         {parent && <li><button className="linkish" type="button" dir="auto" onClick={() => onOpen(parent.id)}>#{parent.number} {parent.title}</button></li>}
       </ol>
     </nav>
   );
+}
+
+/* A status in words on a pill of its colour, as the list's groups and the board's columns show it. */
+export function StatusPill({ state, children }: { state: string; children: ReactNode }) {
+  return <span className={`tr-status-pill ${state}`}>{children}</span>;
+}
+
+/* How much of a task or a goal is done, as a thin bar under its title. */
+export function CardBar({ done, total, label }: { done: number; total: number; label: string }) {
+  return (
+    <span className="tp-bar" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
+      <i style={{ inlineSize: `${total ? (done * 100) / total : 0}%` }} />
+    </span>
+  );
+}
+
+/* The person who answers for a task or a goal: their mark and their name. */
+export function Answers({ person }: { person: { id: string; name: string } | null | undefined }) {
+  const t = useT();
+  return person ? <><PersonMark person={person} decorative /><bdi>{person.name}</bdi></> : <>{t.tracker.nobody}</>;
 }
 
 /* A fact under its name, the name labelling it for screen readers. */
@@ -133,69 +155,107 @@ export function DueDay({ due }: { due: { text: string; late: boolean } }) {
   return <span className={due.late ? 'tp-late' : undefined} dir="auto">{due.text}</span>;
 }
 
-function TaskFacts({ task, asksYou, onOpen }: { task: TaskDetail; asksYou: boolean; onOpen: (id: string) => void }) {
+/* Who answers for it and who does it, its pipeline and its due day with how long it is in its status, a name beside each. */
+function CardFacts({ task, status }: { task: TaskDetail; status: ReturnType<typeof humanStatus> }) {
   const t = useT();
   const { language } = useLanguage();
-  const words = t.tracker.card;
-  const due = dueText(t, language, task);
-  const related = [
-    ...(task.parent ? [{ ...task.parent, relation: words.path }] : []),
-    ...task.after.map(item => ({ ...item, relation: words.waitsFor })),
-    ...(task.neededFor ?? []).map(item => ({ ...item, relation: words.neededFor })),
-    ...task.subtasks.map(item => ({ ...item, relation: t.tasks.subtasks })),
-  ];
-
-  return (
-    <div className="tp-facts muted" role="group" aria-label={words.facts}>
-      <span>{t.tracker.groups[humanStatus(task, asksYou)]}</span>{' · '}
-      <span>{words.executor}: <bdi>{task.executor?.name ?? task.assignee?.name ?? t.tracker.nobody}</bdi></span>{' · '}
-      <span>{words.responsible}: <bdi>{task.responsible?.name ?? t.tracker.nobody}</bdi></span>{' · '}
-      {due && <><span>{words.due}: <bdi>{due.text}</bdi></span>{' · '}</>}
-      <bdi dir="ltr">#{task.number}</bdi>
-      {related.map(item => (
-        <Fragment key={item.id}>
-          {' · '}<a href={routePath({ kind: 'tasks', id: item.id })} title={item.relation} onClick={event => {
-            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-            event.preventDefault();
-            onOpen(item.id);
-          }}><bdi>#{item.number} {item.title}</bdi></a>
-        </Fragment>
-      ))}
-    </div>
-  );
-}
-
-function TaskDetails({ task, waiting, leads, onOpen, onChanged }: { task: TaskDetail; waiting: Waiting; leads: Leads; onOpen: (id: string) => void; onChanged: () => void }) {
-  const t = useT();
-  const { org } = useOrg();
-  const { goals } = useGoals(!!task.goal);
   const { pipelines } = usePipelines(!!task.pipelineId);
   const pipeline = pipelines?.find(p => p.id === task.pipelineId);
   const stage = pipeline?.stages.find(s => s.id === task.pipelineStageId);
   const words = t.tracker.card;
+  const due = dueText(t, language, task);
+  const inStatus = task.time ? words.inStatus(t.tracker.groups[status], spanText(t, sinceSeconds(task.time.inStatusSince))) : null;
+  return (
+    <div role="group" aria-label={words.facts}>
+      <dl className="tp-card-facts">
+        <Fact name={words.responsible}><Answers person={task.responsible} /></Fact>
+        <Fact name={words.executor}><bdi>{task.executor?.name ?? task.assignee?.name ?? t.tracker.nobody}</bdi></Fact>
+        {pipeline && <Fact name={words.pipeline}>{stage ? words.pipelineStage(pipeline.name, stage.name) : pipeline.name}</Fact>}
+        {due ? <Fact name={words.due}><DueDay due={due} />{inStatus && ` · ${inStatus}`}</Fact> : inStatus && <Fact name={words.time}>{inStatus}</Fact>}
+      </dl>
+    </div>
+  );
+}
+
+type Related = { id: string; number: number; title: string; status: TaskStatus };
+
+/* A task this card leads to: its status ring and its number and title, opening its own card. */
+function TaskLink({ item, title, onOpen }: { item: Related; title?: string; onOpen: (id: string) => void }) {
+  return (
+    <a className="tp-link" href={routePath({ kind: 'tasks', id: item.id })} title={title} onClick={event => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      onOpen(item.id);
+    }}>
+      <span className={`tr-status-dot ${STATE_CLASS[humanStatus(item)]}`} aria-hidden="true" />
+      <bdi>#{item.number} {item.title}</bdi>
+    </a>
+  );
+}
+
+/* The tasks under this one, how many of them are done, each with its status. */
+function Subtasks({ task, onOpen }: { task: TaskDetail; onOpen: (id: string) => void }) {
+  const t = useT();
+  if (!task.subtasks.length) return null;
+  const done = task.subtasks.filter(sub => sub.status === 'done').length;
+  return (
+    <section className="tp-sec" aria-label={t.tasks.subtasks}>
+      <h3>{t.tracker.card.subtasks(done, task.subtasks.length)}</h3>
+      <ul className="tp-rows">
+        {task.subtasks.map(sub => (
+          <li className="tp-row" key={sub.id}>
+            <TaskLink item={sub} title={t.tasks.subtasks} onOpen={onOpen} />
+            <small>{t.tracker.groups[humanStatus(sub)]}</small>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/* What this task waits for and what waits for it, each with its status. */
+function Relations({ task, onOpen }: { task: TaskDetail; onOpen: (id: string) => void }) {
+  const t = useT();
+  const words = t.tracker.card;
+  const links = [
+    ...task.after.map(item => ({ item, word: t.tracker.graph.waitsFor, title: words.waitsFor })),
+    ...(task.neededFor ?? []).map(item => ({ item, word: t.tracker.graph.neededFor, title: words.neededFor })),
+  ];
+  if (!links.length) return null;
+  return (
+    <section className="tp-sec" aria-label={words.relations}>
+      <h3>{words.relations}</h3>
+      <ul className="tp-rows">
+        {links.map(({ item, word, title }) => {
+          const status = humanStatus(item);
+          return (
+            <li className="tp-row" key={`${title}-${item.id}`}>
+              <span className="tp-row-main"><span className="tp-rel">{word}</span><TaskLink item={item} title={title} onOpen={onOpen} /></span>
+              <StatusPill state={STATE_CLASS[status]}>{t.tracker.groups[status]}</StatusPill>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function TaskDetails({ task, waiting, onOpen, onChanged }: { task: TaskDetail; waiting: Waiting; onOpen: (id: string) => void; onChanged: () => void }) {
+  const t = useT();
+  const { org } = useOrg();
+  const words = t.tracker.card;
   const meta = [placeName(t, org, task.department), task.product?.name, task.turn !== null ? t.tasks.turn(task.turn) : null].filter(Boolean).join(' / ');
-  const time = task.time;
+  const worked = task.time?.workSeconds ?? 0;
   const masked = [task.title, task.brief, task.body, ...task.log.flatMap(entry => [entry.text, JSON.stringify(entry.data)])].some(text => text?.includes(HIDDEN));
 
   return (
     <>
-      <CardPath goals={goalChain(task.goal?.id, goals)} onOpenGoal={leads.onOpenGoal} onOpen={onOpen} />
       {meta && <p className="muted">{meta}</p>}
       <WorkLabels task={task} />
       {task.createdBy && <p className="muted">{t.tasks.givenBy(task.createdBy.name)}</p>}
-      {task.why && (
-        <section className="tp-why" aria-label={words.why}>
-          <h4>{words.why}</h4>
-          <p dir="auto">{task.why}</p>
-        </section>
-      )}
       <dl className="facts" aria-label={words.facts}>
         <Fact name={t.tracker.priority.label}><PriorityWord task={task} /></Fact>
-        {pipeline && <Fact name={words.pipeline}>{stage ? `${pipeline.name}: ${stage.name}` : pipeline.name}</Fact>}
-        {time && <Fact name={words.time}>
-          {words.inStatus(t.tracker.groups[humanStatus(task, waiting.requests.some(request => request.canAnswer))], spanText(t, sinceSeconds(time.inStatusSince)))}
-          {time.workSeconds > 0 && <small>{words.worked(spanText(t, time.workSeconds))}</small>}
-        </Fact>}
+        {worked > 0 && <Fact name={words.time}>{words.worked(spanText(t, worked))}</Fact>}
       </dl>
       <TaskWorkflow workflow={task.echelons} task={task} org={org} />
       <TaskFindings findings={task.echelonFindings} workflow={task.echelons} />
@@ -210,34 +270,21 @@ function TaskDetails({ task, waiting, leads, onOpen, onChanged }: { task: TaskDe
 
 const LINK = /https?:\/\/[^\s<>()"']+[^\s<>()"'.,;:!?]/g;
 
-const hasMaterials = (task: TaskDetail) => !!task.files?.length || task.log.some(entry =>
-  (entry.kind === 'report' && entry.text) || (entry.kind === 'comment' && entry.text.match(LINK)),
-);
-
 /* What the work brought: its files, the last report on it, and the links people and employees left in comments. */
 function Materials({ task }: { task: TaskDetail }) {
   const t = useT();
+  const words = t.tracker.card;
   const report = [...task.log].reverse().find(e => e.kind === 'report' && e.text);
   const links = [...new Set(task.log.filter(e => e.kind === 'comment').flatMap(e => e.text.match(LINK) ?? []))];
   if (!task.files?.length && !report && !links.length) return null;
   return (
-    <section className="tp-materials" aria-label={t.tracker.card.materials}>
-      <h4>{t.tracker.card.materials}</h4>
-      <TaskFiles files={task.files} />
-      {report && (
-        <div>
-          <h5>{t.tracker.card.report}</h5>
-          <LogParagraph text={report.text} fullRef={fullTextOf(report.data, 'text')} />
-        </div>
-      )}
-      {links.length > 0 && (
-        <div>
-          <h5>{t.tracker.card.links}</h5>
-          <ul className="tp-subs">
-            {links.map(href => <li key={href}><a className="req-link" href={href} target="_blank" rel="noopener noreferrer">{href}</a></li>)}
-          </ul>
-        </div>
-      )}
+    <section className="tp-sec" aria-label={words.materials}>
+      <h3>{words.materials}</h3>
+      <ul className="tp-mats">
+        <TaskFiles files={task.files} />
+        {report && <Material kind={words.materialKinds.report}><LogParagraph text={report.text} fullRef={fullTextOf(report.data, 'text')} /></Material>}
+        {links.map(href => <Material key={href} kind={words.materialKinds.link} href={href} name={href}><span dir="ltr">{href}</span></Material>)}
+      </ul>
     </section>
   );
 }
@@ -247,16 +294,20 @@ export function goalChain(id: string | null | undefined, goals: GoalView[] | und
   return graphPath({ goal: id }, goals ?? [], []);
 }
 
-type View = 'menu' | 'details' | 'materials' | 'log' | 'edit' | 'comment' | 'cancel' | 'pause' | 'secret';
+type View = 'menu' | 'details' | 'log' | 'edit' | 'comment' | 'cancel' | 'pause' | 'secret';
 
 function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: { task: TaskDetail; onOpen: (id: string) => void; onClose: () => void; active: boolean; onChanged: () => void; waiting: Waiting; leads: Leads }) {
   const t = useT();
   const { org } = useOrg();
+  const { goals } = useGoals(!!task.goal);
   const [view, setView] = useState<View | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const selection = useRef('');
   const menuId = useId();
   const asksYou = waiting.requests.some(request => request.canAnswer);
+  const status = humanStatus(task, asksYou);
+  const words = t.tracker.card;
+  const done = task.subtasks.filter(sub => sub.status === 'done').length;
   const closeMenu = () => {
     selection.current = '';
     setView(null);
@@ -270,7 +321,9 @@ function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: 
 
   return (
     <>
-      <header className="ac-head tp-head">
+      <header className="tp-head">
+        <CardPath goals={goalChain(task.goal?.id, goals)} parent={task.parent} onOpenGoal={leads.onOpenGoal} onOpen={onOpen} />
+        <p className="tp-kind">{task.parentId || task.parent ? words.kinds.subtask : words.kinds.task}</p>
         <div className="tp-title">
           <h2 className="tp-heading" dir="auto">{task.title}</h2>
           <button className="tp-menu-button" type="button" ref={trigger} aria-label={t.tasks.taskActions} aria-expanded={view !== null} aria-controls={view ? menuId : undefined}
@@ -279,22 +332,29 @@ function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: 
             <span aria-hidden="true">…</span>
           </button>
         </div>
-        <TaskFacts task={task} asksYou={asksYou} onOpen={onOpen} />
+        <p className="tp-state"><StatusPill state={STATE_CLASS[status]}>{t.tracker.groups[status]}</StatusPill></p>
+        {task.why && <p className="tp-why" dir="auto">{task.why}</p>}
+        {task.subtasks.length > 0 && <CardBar done={done} total={task.subtasks.length} label={t.tracker.list.subtasks(done, task.subtasks.length)} />}
       </header>
       <TaskMenu id={menuId} task={task} view={view} selection={selection.current} onView={next => {
         if (next !== 'secret') selection.current = '';
         setView(next);
-      }} onClose={closeMenu} onOpen={onOpen} onChanged={onChanged} waiting={waiting} leads={leads} />
+      }} onClose={closeMenu} onOpen={onOpen} onChanged={onChanged} waiting={waiting} />
+      <CardFacts task={task} status={status} />
+      {leads.onGraph && <div className="tp-acts"><button className="gbtn" type="button" onClick={() => leads.onGraph?.({ task: task.id })}><span aria-hidden="true">⑂</span>{words.graphFromHere}</button></div>}
       {task.brief && <p className="tp-brief" dir="auto">{task.brief}</p>}
       {task.body && <FoldedMarkdown text={task.body} />}
-      <ShortTaskLog task={task} asksYou={asksYou} />
+      <Subtasks task={task} onOpen={onOpen} />
+      <Relations task={task} onOpen={onOpen} />
+      <Materials task={task} />
+      <ShortTaskLog task={task} asksYou={asksYou} heading={words.history} />
       <TaskWaitingSection inline waiting={waiting} org={org} onOpen={onOpen} onChanged={onChanged} />
     </>
   );
 }
 
-function TaskMenu({ id, task, view, selection, onView, onClose, onOpen, onChanged, waiting, leads }: {
-  id: string; task: TaskDetail; view: View | null; selection: string; onView: (view: View) => void; onClose: () => void; onOpen: (id: string) => void; onChanged: () => void; waiting: Waiting; leads: Leads;
+function TaskMenu({ id, task, view, selection, onView, onClose, onOpen, onChanged, waiting }: {
+  id: string; task: TaskDetail; view: View | null; selection: string; onView: (view: View) => void; onClose: () => void; onOpen: (id: string) => void; onChanged: () => void; waiting: Waiting;
 }) {
   const t = useT();
   const [text, setText] = useState('');
@@ -359,9 +419,7 @@ function TaskMenu({ id, task, view, selection, onView, onClose, onOpen, onChange
       {view === 'menu' && (
         <div className="tp-menu-list">
           <button className="linkish" type="button" onClick={() => select('details')}>{t.tasks.details}</button>
-          {hasMaterials(task) && <button className="linkish" type="button" onClick={() => select('materials')}>{words.materials}</button>}
           {task.log.length > 0 && <button className="linkish" type="button" onClick={() => select('log')}>{t.tasks.fullLog}</button>}
-          {leads.onGraph && <button className="linkish" type="button" onClick={() => leads.onGraph?.({ task: task.id })}>{words.graphFromHere}</button>}
           {task.mayHideSecret && <button className="linkish" type="button" onClick={() => select('secret')}>{t.tasks.hideSecret.action}</button>}
           {mayEdit && <button className="linkish" type="button" onClick={() => select('edit')}>{words.edit}</button>}
           {mayAct && <button className="linkish" type="button" onClick={() => select('comment')}>{t.tasks.comment}</button>}
@@ -375,8 +433,7 @@ function TaskMenu({ id, task, view, selection, onView, onClose, onOpen, onChange
           {mayAct && <button className="linkish" type="button" onClick={() => select('cancel')}>{t.tasks.cancelTask}</button>}
         </div>
       )}
-      {view === 'details' && <TaskDetails task={task} waiting={waiting} leads={leads} onOpen={onOpen} onChanged={onChanged} />}
-      {view === 'materials' && <Materials task={task} />}
+      {view === 'details' && <TaskDetails task={task} waiting={waiting} onOpen={onOpen} onChanged={onChanged} />}
       {view === 'log' && <FullTaskLog task={task} onChanged={onChanged} />}
       {view === 'secret' && task.mayHideSecret && <HideSecret taskId={task.id} onChanged={onChanged} onClose={back} initialValue={selection} />}
       {view === 'edit' && mayEdit && <TaskEdit task={{ ...task, version, revision }} onCancel={back} onDone={done} onReload={onChanged} />}
@@ -435,9 +492,10 @@ export function TaskPanel({ taskId, kind, onClose, onOpen, onHome, onOpenGoal, o
   const failure = useLoadFailure(readFailure);
   const title = task ? `#${task.number} ${task.title}` : t.tasks.heading;
   const shown = task && !unavailableFailure(failure);
+  const kinds = t.tracker.card.kinds;
   useEscapeCloses(onClose, active && !shown);
   return (
-    <PanelFrame label={title} heading="" busy={!task && failure === null} kind={kind} onClose={onClose}>
+    <PanelFrame label={title} heading={task ? t.tracker.card.bar(task.parentId || task.parent ? kinds.subtask : kinds.task, task.number) : ''} plain busy={!task && failure === null} kind={kind} onClose={onClose}>
       {failure !== null && (unavailableFailure(failure) ? <RouteUnavailable onHome={onHome} /> : <p className="alert" role="alert">{errorText(t, failure)}</p>)}
       {shown && <TaskBody key={task.id} task={task} onOpen={onOpen} onClose={onClose} active={active} onChanged={load} waiting={waiting} leads={{ onOpenGoal, onGraph }} />}
     </PanelFrame>

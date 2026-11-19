@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { decryptSecret } from '../src/crypto/secrets.js';
 import { assistants, people, vaultEntries, vaultLog } from '../src/db/schema.js';
-import { as, mcp } from './helpers.js';
+import { createEntry } from '../src/modules/vault/store.js';
+import { as } from './helpers.js';
 import { vaultCompany } from './vault-fixture.js';
 
 const PASSWORD = 'pw-marker-3c41e7';
@@ -107,8 +108,7 @@ describe('the company vault for people', () => {
     await c.db.insert(assistants).values({ personId: aidePerson!.id, companyId: c.companyId, program: 'avaclone', agentId: c.aide.id });
     const taken = { companyId: c.companyId, entryId: id, entryName: 'Partner site', site: 'https://partner.example/login', kind: 'taken' as const, taskId: c.task.id };
     await c.db.insert(vaultLog).values([{ ...taken, agentId: c.aide.id }, { ...taken, agentId: c.nora.id }]);
-    const { token } = await c.startTurn(c.aide.id);
-    expect((await (await mcp(c.app, token)).callTool({ name: 'vault_save', arguments: entry({ name: 'Aide added' }) })).isError).toBeUndefined();
+    await createEntry(c.app.ctx, c.companyId, { agentId: c.aide.id }, { ...entry(), name: 'Aide added' });
 
     const seen = async (session: string) => {
       const log = await c.app.inject({ url: `/api/vault/${id}/log`, ...as(session) });

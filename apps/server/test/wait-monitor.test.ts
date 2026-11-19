@@ -59,6 +59,14 @@ describe('waiting cycles', () => {
     expect(await waitCycles(c.ctx, c.now)).toEqual([]);
   });
 
+  it('does not report a work dependency with a scheduled check as a waiting cycle', async () => {
+    const c = await cycle(2);
+    const [task] = await c.db.select().from(tasks).where(eq(tasks.id, c.work[0]!.id));
+    await c.db.update(tasks).set({ status: 'working', externalWait: { ...task!.externalWait!, work: true } }).where(eq(tasks.id, task!.id));
+    await checkWaitHealth(c.ctx, c.now);
+    expect(await c.messages(c.orchestrator.id)).toEqual([]);
+  });
+
   it('reports a recreated cycle as a new incident', async () => {
     const c = await cycle(2);
     await checkWaitHealth(c.ctx, c.now);

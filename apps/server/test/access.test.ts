@@ -105,7 +105,7 @@ describe('access by departments', () => {
   it('puts a person with two departments next to the CEO on the map', async () => {
     const { app, ceo, sales, marketing, social } = await company();
     await invite(app, ceo, { name: 'Oleg', email: 'oleg@acme.com', access: { departments: [sales.id, marketing.id] } });
-    await invite(app, ceo, { name: 'Kate', email: 'kate@acme.com', access: { departments: [sales.id] } });
+    await invite(app, ceo, { name: 'Elin', email: 'elin@acme.com', access: { departments: [sales.id] } });
     await invite(app, ceo, { name: 'Sasha', email: 'sasha@acme.com', access: { teams: [social.id] } });
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
     expect(org.people.map((p: { name: string; deputy: boolean }) => [p.name, p.deputy])).toEqual([
@@ -113,7 +113,7 @@ describe('access by departments', () => {
       ['Oleg', true],
     ]);
     const byName = Object.fromEntries(org.departments.map((d: { name: string; people: { name: string }[] }) => [d.name, d.people.map(p => p.name)]));
-    expect(byName).toEqual({ Sales: ['Kate'], Marketing: ['Sasha'] });
+    expect(byName).toEqual({ Sales: ['Elin'], Marketing: ['Sasha'] });
   });
 
   it("sends a department's live events only to people who reach it and own the agent's plan", async () => {
@@ -121,10 +121,10 @@ describe('access by departments', () => {
     await listen(app);
     const [seller] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Seller', model: '', departmentId: sales.id }).returning();
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales.id] } });
-    const kate = await invitePerson(app, ceo, { name: 'Kate', email: 'kate@acme.com', access: { departments: [marketing.id] } });
+    const elin = await invitePerson(app, ceo, { name: 'Elin', email: 'elin@acme.com', access: { departments: [marketing.id] } });
     await ownPlan(db, 'maria@acme.com', seller!.id);
     /* Each stream listens from the moment it answers: the server takes the bus in the same step it sends the headers. */
-    const streams = await Promise.all([ceo, maria, kate].map(t => openStream(app, t)));
+    const streams = await Promise.all([ceo, maria, elin].map(t => openStream(app, t)));
     await appendEvent(app.ctx, { companyId, agentId: seller!.id, kind: 'text', data: { text: 'Two schools signed.' } });
     app.ctx.bus.publish(companyId, { type: 'org' });
     await until(() => streams.every(s => s.messages.some(m => m.type === 'org')));

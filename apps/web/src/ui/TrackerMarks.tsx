@@ -18,8 +18,12 @@ function toneOf(id: string): Tone {
   return PALETTE[hash % PALETTE.length]!;
 }
 
+/* The first letters of the name's first words; a name of fewer words gives the first letters of its first word, as the
+   mockup's LR for Lead Researcher and BR for Bruno. */
 function initials(name: string, count: number): string {
-  return name.trim().split(/\s+/).slice(0, count).map(word => Array.from(word)[0] ?? '').join('').toLocaleUpperCase();
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const letters = words.length >= count ? words.slice(0, count).map(word => Array.from(word)[0]!) : Array.from(words[0] ?? '').slice(0, count);
+  return letters.join('').toLocaleUpperCase();
 }
 
 export function DepartmentMark({ id, name, template }: { id: string; name: string; template?: string | null }) {

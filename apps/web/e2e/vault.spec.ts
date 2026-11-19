@@ -17,7 +17,7 @@ const ENTRIES = [
     login: 'team.northern.region@acme.example', hasCode: true, createdBy: { id: 'p2', name: 'Maria' }, createdAt: '2030-01-01T09:00:00.000Z',
   },
   {
-    id: 'v2', name: 'CRM', site: 'https://crm.example', login: 'sales@acme.example', hasCode: false, createdBy: { id: 'a1', name: 'David AI' }, createdAt: '2030-01-02T09:00:00.000Z',
+    id: 'v2', name: 'CRM', site: 'https://crm.example', login: 'sales@acme.example', hasCode: false, createdBy: { id: 'a1', name: 'Ferris AI' }, createdAt: '2030-01-02T09:00:00.000Z',
   },
 ];
 

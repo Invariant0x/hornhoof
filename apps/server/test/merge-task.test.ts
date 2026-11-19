@@ -46,7 +46,7 @@ describe('the task a merge leaves the orchestrator', () => {
     const body = made.body;
     expect(body).toContain('What marat-mac did from ');
     expect(body).toContain(' UTC is brought back as far as its records prove.');
-    expect(body).toContain('To settle: 2 for you; 0 for the CEO');
+    expect(body).toContain('To settle: 2 for you; 0 proposed permanent deletions for the CEO.');
     expect(body).toContain('Task #4 here was #3 on marat-mac.');
     expect(body).toContain('Task #4 was worked on as task-3 on marat-mac until 3 Nov 14:20 UTC');
     expect(body).toContain('task #1 "Here": title: here "Here", there "There"');
@@ -59,7 +59,7 @@ describe('the task a merge leaves the orchestrator', () => {
     expect(await s.db.select(idOnly(tasks)).from(tasks).where(eq(tasks.assigneeAgentId, s.orchestrator.id))).toHaveLength(1);
   });
 
-  it("tells the orchestrator only how many are the CEO's", async () => {
+  it('includes reversible people and access conflicts while withholding their protected details', async () => {
     const s = await mergeApp();
     const [maria] = await s.db.insert(people).values({ ...s.on, name: 'Maria', email: 'maria@acme.test', status: 'invited', scopeKind: 'company' }).returning();
     await s.db.insert(invites).values({ tokenHash: 't'.repeat(64), companyId: s.acme.id, personId: maria!.id, createdBy: s.owner.id, expiresAt: new Date('2026-12-01T00:00:00Z') });
@@ -73,16 +73,14 @@ describe('the task a merge leaves the orchestrator', () => {
     const { id } = await s.merge(fork);
     expect((await s.conflicts(id)).map(conflict => conflict.tbl)).toEqual(['invites', 'people', 'tasks']);
     const body = await bodyOf(s.db, [id]);
-    expect(body).toContain('To settle: 1 for you; 2 for the CEO (people, access, plans, machines or protected records), which wait on his screen.');
-    /* But for that one sentence, nothing of them: no value, no name, no table. */
-    const rest = body.replace('(people, access, plans, machines or protected records)', '');
-    for (const hidden of ['maria', 'Maria', 'people', 'invites', 't'.repeat(64)]) expect(rest).not.toContain(hidden);
+    expect(body).toContain('To settle: 3 for you; 0 proposed permanent deletions for the CEO.');
+    for (const hidden of ['maria', 'Maria', ', people:', ', invites:', 't'.repeat(64)]) expect(body).not.toContain(hidden);
     expect(body).toContain('task #1 "Here"');
     /* A task nobody worked on there has no code to move. */
     expect(body).not.toContain('Code:');
-    /* A conflict carried from a build that had a table this one has no rule for is the CEO's too, and stops nothing. */
+    /* A conflict carried from a build that had a table this one has no rule for also needs investigation. */
     await s.db.execute(sql`INSERT INTO net.merge_conflicts (merge, carried, tbl, key, op, kind, topic, why) VALUES (${id}, gen_random_uuid(), 'a_table_of_another_build', '{"id": "1"}'::jsonb, 'insert', 'refused', 'work', 'x')`);
-    expect(await bodyOf(s.db, [id])).toContain('To settle: 1 for you; 3 for the CEO');
+    expect(await bodyOf(s.db, [id])).toContain('To settle: 4 for you; 0 proposed permanent deletions for the CEO.');
   });
 
   it('joins a second merge into the open task', async () => {

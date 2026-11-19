@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { LanguageProvider } from '../src/i18n';
+import { LANGUAGES, LanguageProvider } from '../src/i18n';
 import type { StructureItem } from '../src/types';
 import { StructureCard } from '../src/ui/StructureCard';
 import { mockApi } from './api-mock';
@@ -61,7 +61,7 @@ describe('StructureCard', () => {
   it('offers the missing templates with the default ticks when building by hand', async () => {
     const calls = mockApi({ 'POST /api/departments/build': [201, { created: [], removed: [] }] });
     render(<StructureCard manual={{ existing: ['operations', 'sales'] }} departments={[]} onCorrect={noop} />);
-    expect(screen.getAllByRole('checkbox').filter(b => b.hasAttribute('data-template'))).toHaveLength(8);
+    expect(screen.getAllByRole('checkbox').filter(b => b.hasAttribute('data-template'))).toHaveLength(9);
     const ticked = screen.getAllByRole('checkbox').filter(b => b.hasAttribute('data-template') && (b as HTMLInputElement).checked).map(b => b.getAttribute('data-template'));
     expect(ticked).toEqual(['development', 'marketing', 'business_development']);
     fireEvent.click(screen.getByRole('button', { name: 'Create departments (3)' }));
@@ -75,6 +75,25 @@ describe('StructureCard', () => {
     expect(screen.getByText('Finance')).toBeInTheDocument();
     expect(screen.getByText('Remove')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Apply changes (1)' })).toBeInTheDocument();
+  });
+
+  it.each(LANGUAGES)('offers Video production by hand in $name and creates it with its people', async ({ id }) => {
+    const labels = {
+      en: { department: 'Video production', create: 'Create departments (1)' },
+      ru: { department: 'Производство видео', create: 'Создать отделы (1)' },
+    }[id];
+    localStorage.setItem('hh-lang', id);
+    try {
+      const calls = mockApi({ 'POST /api/departments/build': [201, { created: ['video'], removed: [] }] });
+      render(<LanguageProvider><StructureCard manual={{ existing: ['operations', 'development', 'marketing', 'sales', 'business_development'] }} departments={[]} onCorrect={noop} /></LanguageProvider>);
+      const video = screen.getByRole('checkbox', { name: new RegExp(labels.department) });
+      expect(video).not.toBeChecked();
+      fireEvent.click(video);
+      fireEvent.click(screen.getByRole('button', { name: labels.create }));
+      await vi.waitFor(() => expect(calls[0]?.body).toEqual({ items: [{ template: 'video_production', staff: true, note: '' }] }));
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
   });
 
   it('locks itself once applied and tells the window', async () => {

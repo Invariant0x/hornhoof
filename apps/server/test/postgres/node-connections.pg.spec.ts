@@ -15,7 +15,7 @@ async function machineWithNode(fixture: PostgresFixture) {
   const one = async (text: string, values: unknown[] = []) => (await fixture.admin.query<{ id: string }>(text, values)).rows[0]!.id;
   const company = await one("INSERT INTO companies (name) VALUES ('Built-in connections') RETURNING id");
   const person = await one("INSERT INTO people (company_id, name, email, status, scope_kind) VALUES ($1, 'Ivan', 'ivan@example.test', 'active', 'company') RETURNING id", [company]);
-  const machine = await one("INSERT INTO machines (company_id, person_id, machine_key, hostname, network_id) VALUES ($1, $2, 'home-api-key', 'home-api', $3) RETURNING id", [company, person, MACHINE]);
+  const machine = await one("INSERT INTO machines (company_id, person_id, machine_key, hostname, network_id) VALUES ($1, $2, 'test-server-key', 'test-server', $3) RETURNING id", [company, person, MACHINE]);
   const node = await one("INSERT INTO nodes (company_id, machine_id, status) VALUES ($1, $2, 'ready') RETURNING id", [company, machine]);
   return { company, machine, node };
 }
@@ -68,5 +68,5 @@ it("writes the connections of a machine's built-in node on its machine with no n
     { id: first, machine_id: machine, node_id: null, cause: 'network', close_code: 1006, report: said },
     { id: second, machine_id: machine, node_id: null, cause: null, close_code: null, report: null },
   ]);
-  expect(vi.mocked(ctx.log.info).mock.calls.at(-1)).toEqual([{ machine: 'home-api', node: 'builtin', offlineMs: 10_000 }, 'A node connected.']);
+  expect(vi.mocked(ctx.log.info).mock.calls.at(-1)).toEqual([{ machine: 'test-server', node: 'builtin', offlineMs: 10_000 }, 'A node connected.']);
 });

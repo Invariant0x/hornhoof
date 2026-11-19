@@ -11,7 +11,7 @@ export async function checkedWaitTarget(ctx: Ctx, companyId: string, waiter: str
     eq(agents.id, on.employee), eq(agents.companyId, companyId), ne(agents.kind, 'assistant'), isNull(agents.removedAt), isNull(agents.switchedOffAt),
   ));
   // An id in capitals finds the same employee, so the one found is compared too.
-  if (on.employee === waiter || target?.id === waiter) throw refuse(400, 'task_invalid', 'Name another employee to wait for.');
-  if (!target || !(await liveSubscription(ctx, target.id))) throw refuse(400, 'task_invalid', 'That employee cannot take work. Name an available employee or an external event.');
+  if (on.employee === waiter || target?.id === waiter) throw refuse(400, 'task_invalid', 'Name another employee, or leave the employee out when tracking your own work.');
+  if (!target || !(await liveSubscription(ctx, target.id))) throw refuse(400, 'task_invalid', 'That employee cannot take work. Name an available employee.');
   return { kind: 'employee', employee: target.id, name: target.name };
 }

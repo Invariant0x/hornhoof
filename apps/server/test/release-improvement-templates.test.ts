@@ -31,10 +31,10 @@ it('rejects blocking improvement metadata and unknown executable trigger pattern
   cpSync(fileURLToPath(new URL('../../../templates', import.meta.url)), dir, { recursive: true });
   const perf = join(dir, 'roles/development/DEV-PERF.md');
   const original = readFileSync(perf, 'utf8');
-  writeFileSync(perf, original.replace('blocking: false', 'blocking: true'));
+  writeFileSync(perf, original.replace('skills:', 'improvementLanes: [{ id: release-performance, blocking: true }]\nskills:'));
   expect(() => loadTemplates(dir)).toThrow(/improvementLanes/);
   writeFileSync(perf, original);
   const sec = join(dir, 'roles/development/DEV-SEC.md');
-  writeFileSync(sec, readFileSync(sec, 'utf8').replace('diffPatterns: [route, sql, subprocess]', 'diffPatterns: [custom-regex]'));
+  writeFileSync(sec, readFileSync(sec, 'utf8').replace('skills:', 'gateTriggers: { diffPatterns: [custom-regex] }\nskills:'));
   expect(() => loadTemplates(dir)).toThrow(/gateTriggers/);
 });

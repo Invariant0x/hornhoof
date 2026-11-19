@@ -1,10 +1,9 @@
 name: Installer on the website
 
 # The website gives the command curl -fsSL https://hornhoof.org/install.sh | bash -s -- server, so its install.sh follows
-# each release. The release job of Images starts this run once it made a release, and anyone may start it by hand: it
+# each release. The release job of Images starts this run once it made a release, and a maintainer may start it from main: it
 # puts the install.sh of the latest release on the website, whole, and checks that the website serves exactly that file.
-# The website takes it through a key it trusts for nothing else. The secret EDGE_INSTALL_KEY holds that key, the variable
-# EDGE_INSTALL_HOST names the user and host it goes to, and the variable EDGE_KNOWN_HOSTS holds the host's own key.
+# The installer-site environment holds the upload key, the SSH address and the expected host key.
 on:
   workflow_dispatch:
 
@@ -18,8 +17,9 @@ concurrency:
 
 jobs:
   send:
-    # The build runner BUILD_RUNS_ON names, as for the release: its image carries the SSH client this job needs.
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    environment: installer-site
+    runs-on: ${{ github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     steps:
       - name: Find the latest release
         id: latest
@@ -33,8 +33,8 @@ jobs:
       - name: Put its install.sh on the website
         env:
           EDGE_INSTALL_KEY: ${{ secrets.EDGE_INSTALL_KEY }}
-          EDGE_INSTALL_HOST: ${{ vars.EDGE_INSTALL_HOST }}
-          EDGE_KNOWN_HOSTS: ${{ vars.EDGE_KNOWN_HOSTS }}
+          EDGE_INSTALL_HOST: ${{ secrets.EDGE_INSTALL_HOST }}
+          EDGE_KNOWN_HOSTS: ${{ secrets.EDGE_KNOWN_HOSTS }}
           TAG: ${{ steps.latest.outputs.tag }}
         run: |
           if [ -z "$EDGE_INSTALL_KEY" ] || [ -z "$EDGE_INSTALL_HOST" ] || [ -z "$EDGE_KNOWN_HOSTS" ]; then
@@ -43,10 +43,10 @@ jobs:
           fi
           command -v ssh > /dev/null || { echo "::error::This runner has no SSH client (openssh-client), so hornhoof.org keeps its old install.sh."; exit 1; }
           umask 077
+          trap 'rm -f "$RUNNER_TEMP/edge-key" "$RUNNER_TEMP/edge-known-hosts"' EXIT
           printf '%s\n' "$EDGE_INSTALL_KEY" > "$RUNNER_TEMP/edge-key"
           printf '%s\n' "$EDGE_KNOWN_HOSTS" > "$RUNNER_TEMP/edge-known-hosts"
           ssh -i "$RUNNER_TEMP/edge-key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/edge-known-hosts" \
             "$EDGE_INSTALL_HOST" < scripts/install.sh
-          rm -f "$RUNNER_TEMP/edge-key"
           curl -fsSL https://hornhoof.org/install.sh | cmp - scripts/install.sh
           echo "hornhoof.org/install.sh is the one of $TAG."

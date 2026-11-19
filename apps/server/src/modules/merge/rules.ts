@@ -52,6 +52,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ...each(['program_instances', 'program_deliveries', 'program_operator_cases', 'program_operator_signals'], skip('work')),
   /* An answer a bot still owed when its database was set aside is not sent later, out of its time. */
   telegram_replies: skip('work'),
+  /* The leader keeps its own last observation of each chat's language. */
+  telegram_chat_languages: skip('work'),
   /* What an assistant was told, and what is still being collected for it, is the feed of the database that leads: its
      numbers are that database's own, and an answer collected in one that was set aside is not told later. */
   ...each(['assistant_events', 'assistant_seqs', 'assistant_replies', 'assistant_requests'], skip('work')),
@@ -93,8 +95,6 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ...each(['recovery_keys', 'certificates', 'authority', 'peer_secrets', 'public_links'], rows('access')),
   /* A bot's token is a way from outside to an agent of the company. */
   telegram_bots: rows('access'),
-  /* The language a person writes to a bot in is a setting of that chat, compared like any row. */
-  telegram_chat_languages: rows('work'),
   /* An assistant's key is a way in from outside, under its owner's rights. */
   assistants: rows('access'),
   /* The key of a git host is a way out to an account of the company's, and so is the Google key that makes its sheets. */
@@ -198,10 +198,8 @@ export function ceosConflict(table: string): boolean {
   return CEO_TOPICS.includes(ruleOf(table).topic);
 }
 
-/* The screen groups a conflict by its topic. An older build may have kept one for a table this build lacks. */
-export function ceos(table: string): boolean {
+/* Keep protected details out of a task's brief. The merge tool redacts them by column. */
+export function protectedSummary(table: string): boolean {
   const rule = TABLE_RULES[table];
   return !rule || CEO_TOPICS.includes(rule.topic);
 }
-/* The tables whose conflicts the orchestrator settles. */
-export const ORCHESTRATORS_TABLES = (): string[] => Object.keys(TABLE_RULES).filter(table => !ceos(table));

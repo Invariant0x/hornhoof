@@ -2,6 +2,8 @@ import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { taskRoute } from '../test/task-route';
 import type { Locator, Page, Request } from '@playwright/test';
 import type { Messages } from '../src/i18n';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 import type { AgentCardView, BackupsView, Briefing, Decisions, Improvement, Me, Org, SwitchWord, TaskDetail, TaskLine, TokenPeriods, TurnView } from '../src/types';
 
 /* A company with one department and a running turn of enough tasks to scroll, answered in the page as the server would. */
@@ -183,6 +185,18 @@ export async function openTaskCard(page: Page, number: number) {
   await search.fill(String(number));
   await page.locator('.tr-found').getByRole('listitem', { name: new RegExp(`^#${number} `) }).first().locator('.tr-title').click();
   await search.fill('');
+}
+
+/* The orchestrator opens from the + beside Tasks in the tracker's left panel, the mockup's one way to make something; a
+   phone opens the panel's drawer first. */
+export async function writeToOrchestrator(page: Page, language: 'en' | 'ru' = 'en') {
+  const t = language === 'en' ? en : ru;
+  const side = page.locator('nav.tr-side');
+  await side.waitFor({ state: 'attached' });
+  const drawer = page.locator('.tr-top .tr-menu');
+  if (await drawer.isVisible()) await drawer.click();
+  await side.getByRole('button', { name: t.tracker.side.create, exact: true }).click();
+  await side.getByRole('group', { name: t.tracker.side.create, exact: true }).getByRole('button', { name: t.tasks.writeOrchestrator, exact: true }).click();
 }
 
 export async function openTaskAction(panel: Locator, t: Pick<Messages, 'tasks'>, action?: string) {

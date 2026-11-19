@@ -6,7 +6,7 @@ import { factsOf, type Facts, type Query, type TableFacts } from './facts.js';
 import { queryOf } from './leader.js';
 import { differing } from './plan.js';
 import { parkedNodes, parkedOf, rowsByKeys, type Row } from './read.js';
-import { SOFT_REFS, TABLE_RULES, ceos, ruleOf } from './rules.js';
+import { SOFT_REFS, TABLE_RULES, ruleOf } from './rules.js';
 import { nameOf, valueWords } from './words.js';
 
 /* here keeps the leader's row as it is, there takes the source's side, value writes the picker's own for one conflict. */
@@ -26,7 +26,7 @@ const OWNERS_ALONE = "Only the machine's owner changes its computer access on it
 
 type ConflictRow = {
   id: string; merge: string; label: string; path: string | null; tbl: string; key: Record<string, unknown>; op: 'insert' | 'update' | 'delete'; kind: string; topic: string;
-  task_id: string | null; cols: string[]; here: Row | null; there: Row | null; at: string | Date | null; created_at: string | Date; picked: Take | null;
+  task_id: string | null; cols: string[]; here: Row | null; there: Row | null; at: string | Date | null; created_at: string | Date; picked: Take | null; would_delete: boolean;
 };
 
 /* Why a conflict stays open; said to whoever picked. */
@@ -51,7 +51,9 @@ function where(f: PickFilter & { settled?: boolean; after?: string }, params: un
   return said.length > 0 ? said.join(' AND ') : 'true';
 }
 
-const SELECT = `SELECT c.id, c.merge, m.label, m.path, c.tbl, c.key, c.op, c.kind, c.topic, c.task_id, c.cols, c.here, c.there, c.at, c.created_at, c.picked
+export const DELETION_CONFLICT = `(c.op = 'delete' OR (c.tbl = 'people' AND coalesce(c.there->>'removed_at', '') <> '' AND coalesce(c.here->>'removed_at', '') = ''))`;
+
+const SELECT = `SELECT c.id, c.merge, m.label, m.path, c.tbl, c.key, c.op, c.kind, c.topic, c.task_id, c.cols, c.here, c.there, c.at, c.created_at, c.picked, ${DELETION_CONFLICT} AS would_delete
   FROM net.merge_conflicts c JOIN net.merges m ON m.id = c.merge`;
 const ORDER = 'ORDER BY COALESCE(c.at, c.created_at), c.id';
 
@@ -73,7 +75,7 @@ export async function conflictsOf(db: Db, f: PickFilter & { settled?: boolean; a
     const words = (side: Row | null): Record<string, string> | null => (side ? Object.fromEntries(cols.map(column => [column, valueWords(row.tbl, column, side[column])])) : null);
     return {
       id: row.id, merge: row.merge, label: row.label, table: row.tbl, topic: row.topic, what: nameOf(row.tbl, row.here ?? row.there, row.key), kind: row.kind, cols: row.cols,
-      here: words(row.here), there: words(row.there), at: iso(row.at), task: (row.task_id && tasks.get(row.task_id)) || null, whose: (permanentDeletion(row, 'there') || ceos(row.tbl)) ? ('ceo' as const) : ('orchestrator' as const), picked: row.picked,
+      here: words(row.here), there: words(row.there), at: iso(row.at), task: (row.task_id && tasks.get(row.task_id)) || null, whose: row.would_delete ? ('ceo' as const) : ('orchestrator' as const), picked: row.picked,
     };
   });
   return { conflicts, more: rows.length > limit };
@@ -133,10 +135,10 @@ async function unitOf(q: Query, facts: Facts, conflict: ConflictRow, take: 'ther
 }
 
 function permanentDeletion(conflict: ConflictRow, take: 'there' | 'value', value?: Record<string, unknown>): boolean {
+  if (take === 'there') return conflict.would_delete;
   if (conflict.op === 'delete') return true;
   if (conflict.tbl !== 'people') return false;
-  const changed = take === 'there' ? conflict.there : value;
-  return Boolean(changed?.removed_at && !conflict.here?.removed_at);
+  return Boolean(value?.removed_at && !conflict.here?.removed_at);
 }
 
 /* Everything a pick must hold to before it writes; it throws why not. */

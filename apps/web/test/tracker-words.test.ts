@@ -122,6 +122,13 @@ describe('what a task is waiting for', () => {
   const person = { kind: 'person', id: 'ivan', name: 'Иван Король' } as const;
   const reviewer = { kind: 'agent', id: 'hana', name: 'Hana' } as const;
 
+  it('shows a progress check as running work in both languages', () => {
+    const nextCheck = '2026-11-20T15:00:00.000Z';
+    const task = { status: 'working' as const, executor, time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind: 'work' as const, who: owner, reason: 'CI', since, nextCheck }] } };
+    expect(waitText(en, task, now)).toMatch(/^CI is in progress\. Next check:/);
+    expect(waitText(ru, task, now)).toMatch(/^В работе: CI\. Следующая проверка:/);
+  });
+
   it.each([
     ['person', person, null, 'Waits for Иван Король, 20 minutes', 'Ждет Иван Король 20 минут'],
     ['after', owner, '#42', 'After #42', 'После #42'],

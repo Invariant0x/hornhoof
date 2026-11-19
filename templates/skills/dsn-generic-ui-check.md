@@ -7,7 +7,7 @@ sources: []
 ---
 Assess the assigned interface against its approved direction and user task. Return a verdict of distinct, borderline or generic, supported by screenshots.
 
-Count these signs:
+Use these patterns as prompts for inspection:
 
 - [ ] A centred hero with a large headline, gradient and two buttons without a task-based reason.
 - [ ] Repeated identical icon, title and two-line cards.
@@ -18,6 +18,6 @@ Count these signs:
 - [ ] The same section height and rhythm throughout.
 - [ ] Nothing memorable about the product's own content or interaction.
 
-Also check that the approved direction is visible, at least one element is specific to the product, and density, type and colour follow the user's task. Three or more signs, or no element of the product's own, is a fail under this check. Give the reason and suggested correction for each finding; do not treat the score as permission to bypass the design system or accessibility.
+Give a finding when evidence shows a choice harms the user's task, obscures important information or breaks the approved design direction. Explain the observable effect and give a correction within the design system.
 
 For a task-assigned independent review, the checker is not the author and does not redesign the item under review. Deliver the findings through the task's route.

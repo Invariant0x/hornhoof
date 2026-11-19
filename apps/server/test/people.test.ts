@@ -120,13 +120,13 @@ describe('GET /api/people', () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
     const { departmentId, teamId } = await addTeam(db);
-    await invite(app, ceo, { name: 'Kate', email: 'kate@acme.com', title: 'Head of marketing', access: { departments: [departmentId] } });
+    await invite(app, ceo, { name: 'Elin', email: 'elin@acme.com', title: 'Head of marketing', access: { departments: [departmentId] } });
     await invite(app, ceo, { name: 'Sasha', email: 'sasha@acme.com', title: 'SMM', access: { teams: [teamId] } });
     const res = await app.inject({ url: '/api/people', ...as(ceo) });
     expect(res.statusCode).toBe(200);
     type Seen = { name: string; access: { whole: boolean; departments: { name: string }[]; teams: { name: string }[] } };
     const reach = Object.fromEntries(res.json().people.map((p: Seen) => [p.name, p.access.whole ? 'whole' : [...p.access.departments, ...p.access.teams].map(x => x.name).join(', ')]));
-    expect(reach).toEqual({ Ivan: 'whole', Kate: 'Marketing', Sasha: 'Social' });
+    expect(reach).toEqual({ Ivan: 'whole', Elin: 'Marketing', Sasha: 'Social' });
     const owners = res.json().people.filter((p: { isOwner: boolean }) => p.isOwner).map((p: { name: string }) => p.name);
     expect(owners).toEqual(['Ivan']);
     expect(res.body).not.toContain('scrypt');
@@ -136,14 +136,14 @@ describe('GET /api/people', () => {
   it('lists only people from the session company', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
-    await invite(app, ceo, { name: 'Kate', email: 'kate@acme.com', title: 'Head of marketing', access: { whole: true } });
+    await invite(app, ceo, { name: 'Elin', email: 'elin@acme.com', title: 'Head of marketing', access: { whole: true } });
     const [otherCompany] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();
     await db.insert(people).values({ companyId: otherCompany!.id, name: 'Other person', email: 'other@example.test', title: 'Other title', status: 'active', scopeKind: 'company' });
 
     const res = await app.inject({ url: '/api/people', ...as(ceo) });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json().people.map((p: { name: string }) => p.name)).toEqual(['Ivan', 'Kate']);
+    expect(res.json().people.map((p: { name: string }) => p.name)).toEqual(['Ivan', 'Elin']);
     expect(res.body).not.toContain('other@example.test');
     expect(res.body).not.toContain('Other title');
   });

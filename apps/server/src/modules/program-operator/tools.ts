@@ -19,14 +19,14 @@ async function checked<T>(run: () => Promise<T>) {
 /* The orchestrator's and Operations' look at any employee's program, and their hands on it. */
 export function registerProgramAccessTools(server: McpServer, ctx: Ctx, caller: OperatorCaller): void {
   server.registerTool('program_screen', {
-    description: "See the program of any employee, of any department, plan or machine, as it is now: a picture, its text, whether it works or stands, the tool it runs, the question it asks (the subscription owner's own too), what its input line holds (empty, words Hornhoof typed, words a person typed, unreadable) and whether words Hornhoof gave it never went in. Only the values of secrets are masked. It opens no program. The snapshot it returns takes one program_keys within 30 seconds.",
+    description: 'Read another employee’s existing program screen: image, visible text, activity, open question and input line state. Secret values are masked. For your own program or a personal assistant, use its own recovery path. Use the returned snapshot once with program_keys while it is fresh.',
     inputSchema: { employee: z.uuid() },
   }, input => checked(async () => {
     const { png, ...view } = await readProgramView(ctx, caller, input);
     return { content: [...text(view).content, { type: 'image' as const, mimeType: 'image/png', data: png.toString('base64') }] };
   }));
   server.registerTool('program_keys', {
-    description: 'Type into the program a fresh program_screen showed, as a person at its terminal would. text goes in first as a paste, then keys one after another, by their tmux names: Enter, Escape, Tab, BSpace, Up, Down, PageUp, a letter, C-u to clear the input line, C-c, M-b. Any key, any text, and any question answered, the owner\'s own too. Give a reason; on a permission or protected question say decision allowed or denied. Hornhoof writes who, why, the keys and the text with secrets masked in the employee\'s log. A lost result is unknown and is never sent again: look again before you repeat it.',
+    description: 'Type into the program shown by a fresh program_screen. The tool pastes text first and then sends the keys. Give a reason and record allowed or denied when you decide a permission question. Ask the account holder for their personal consent or terms when required. A person makes payments and signs for the company. Use vault values only in protected sign-in fields. After a lost result, inspect the screen before acting again.',
     inputSchema: { employee: z.uuid(), snapshot: z.string().min(16).max(128), keys: z.array(z.string().min(1).max(40)).max(PROGRAM_INPUT_KEYS).optional(), text: z.string().min(1).max(PROGRAM_INPUT_TEXT).optional(), reason: z.string().trim().min(1).max(1000), decision: z.enum(['allowed', 'denied']).optional() },
   }, input => checked(async () => text(await sendProgramInput(ctx, caller, input))));
 }

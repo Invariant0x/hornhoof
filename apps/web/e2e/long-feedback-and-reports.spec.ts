@@ -400,14 +400,12 @@ for (const lang of LANGUAGES) {
         const panel = page.locator('aside');
         await expect(panel).toBeVisible();
 
-        await openTaskAction(panel, t, t.tracker.card.materials);
-        /* Files section shows clean plain-words filenames without 64-char sha256 noise. */
-        const filesRegion = panel.getByRole('region', { name: t.tasks.files });
+        /* The card's materials show clean plain-words filenames without 64-char sha256 noise. */
+        const filesRegion = panel.getByRole('region', { name: t.tracker.card.materials });
         await expect(filesRegion).toBeVisible();
-        await expect(filesRegion.getByRole('link', { name: 'verdict-text.txt' })).toBeVisible();
-        await expect(filesRegion.getByRole('link', { name: 'submitted-text.txt' })).toBeVisible();
-        await expect(filesRegion.getByRole('link', { name: 'submitted-evidence.txt' })).toBeVisible();
-        await expect(filesRegion.getByRole('link', { name: 'audit-checklist.txt' })).toBeVisible();
+        for (const name of ['verdict-text.txt', 'submitted-text.txt', 'submitted-evidence.txt', 'audit-checklist.txt']) {
+          await expect(filesRegion.getByRole('link', { name: t.tracker.card.openIt(name) })).toBeVisible();
+        }
         await expect(panel).not.toContainText(sc.verdictSha256);
         await expect(panel).not.toContainText('[Full text](/api/attachments/');
 

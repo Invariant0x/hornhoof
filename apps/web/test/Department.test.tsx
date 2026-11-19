@@ -3,13 +3,14 @@ import { unisolated } from './bidi';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { LanguageProvider } from '../src/i18n';
+import { LANGUAGES, LanguageProvider, type Language, type Messages } from '../src/i18n';
+import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { Shell } from '../src/screens/Shell';
 import { DepartmentView } from '../src/screens/Department';
 import { schemaLayout, stepPaths } from '../src/screens/schema';
 import { RepoSettings } from '../src/ui/RepoSettings';
-import { useDepartmentTree } from '../src/tasks';
+import { localPipeline, useDepartmentTree } from '../src/tasks';
 import { toD } from '../src/ui/wires';
 import type { DepartmentTree, Employee, Me, Org, ProgramView } from '../src/types';
 import { CARD, decisions, DEV_ORG, DEV_TREE, REVIEW_TREE, TREE_ORG, ME, mockApi, REQUESTS, ROSTER, TASKS } from './api-mock';
@@ -27,6 +28,15 @@ const REPO = { url: 'https://github.com/acme/app.git', branch: 'main', tokenLast
 /* Lena reaches Development by its own line in her access; Kira reaches only Sales. */
 const LENA = { id: 'p6', name: 'Lena', email: 'lena@acme.com', title: 'Product lead', status: 'active' as const, isOwner: false, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }], teams: [] } };
 const listed = (id: string, name: string): Me => ({ ...ME, person: { ...ME.person, id, name, scopeKind: 'listed', isOwner: false } });
+
+const messages: Record<Language, Messages> = { en, ru };
+/* The shortest and the longest shipped language by the words of a route, and every right to left one. */
+const routeLocales = LANGUAGES.map(({ id }) => {
+  const route = messages[id].pipelineCatalog['development-changes'];
+  return { id, length: [route.name, ...Object.values(route.stages)].join('').length };
+}).sort((a, b) => a.length - b.length);
+const checkedLocales = [...new Set([routeLocales[0]!.id, routeLocales.at(-1)!.id,
+  ...LANGUAGES.map(({ id }) => id).filter(id => /^(ar|fa|he|ur)(-|$)/.test(id))])];
 
 function shell(routes: Record<string, unknown> = {}, org: Org = DEV_ORG, me: Me = ME) {
   const calls = mockApi({
@@ -129,6 +139,45 @@ describe('Department view', () => {
     expect(screen.queryByRole('region', { name: 'Software changes' })).toBeNull();
     expect(screen.queryByText('Build the change')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Staff map' })).toBeNull();
+  });
+
+  it.each(checkedLocales)('names the video draft, keeper and edit stages in %s', language => {
+    const [dev] = DEV_ORG.departments;
+    const draft = { id: 'draft', parentId: null, name: 'Generate draft shots', ownerRole: 'VID-GEN', owner: null, position: 0, oneShot: { fanOut: 2, judge: true } };
+    const keeper = { id: 'keeper', parentId: draft.id, name: 'Check shot continuity', ownerRole: 'VID-KEEP', owner: null, position: 1 };
+    const edit = { id: 'edit', parentId: keeper.id, name: 'Edit the draft cut', ownerRole: 'VID-EDIT', owner: null, position: 2 };
+    const pipeline = { id: 'video', department: { id: dev!.id, name: 'Video production' }, catalogKey: 'video-production', name: 'Video production',
+      why: '', archived: false, version: 1, isDefault: true, stages: [draft, keeper, edit] };
+    const copy = {
+      en: ['Video production', 'Generate draft shots', 'Check shot continuity', 'Edit the draft cut'],
+      ru: ['Производство видео', 'Создать черновые кадры', 'Проверить согласованность кадров', 'Смонтировать черновик'],
+    }[language];
+    const local = localPipeline(messages[language], pipeline);
+    expect([local.name, ...local.stages.map(stage => stage.name)]).toEqual(copy);
+  });
+
+  it.each(checkedLocales)('localizes the long video pipeline and its use in %s', language => {
+    localStorage.setItem('hh-lang', language);
+    const [dev] = DEV_ORG.departments;
+    const copy = {
+      en: {
+        name: 'Long video production', why: 'For a film, a series or a work with many scenes or places.',
+        stages: ['Write the brief', 'Write the story and make a production guide', 'Break down sequences and scenes', 'Prove the hardest moment',
+          'Make the scenes', 'Assemble the cut', 'Finish color, sound and titles', 'Check the whole work', 'Prepare and deliver the final version'],
+      },
+      ru: {
+        name: 'Производство длинного видео', why: 'Для фильма, сериала или видео с множеством сцен или мест действия.',
+        stages: ['Написать задание', 'Написать историю и собрать справочник', 'Разбить историю на эпизоды и сцены', 'Проверить самый сложный момент',
+          'Сделать сцены', 'Собрать монтаж', 'Доработать цвет, звук и титры', 'Проверить всю работу', 'Подготовить и передать финальную версию'],
+      },
+    };
+    const pipeline = { id: 'long-video', department: { id: dev!.id, name: 'Video production' }, catalogKey: 'video-long-work',
+      name: copy.en.name, why: copy.en.why, archived: false, version: 1,
+      stages: copy.en.stages.map((name, position) => ({ id: String(position), parentId: position ? String(position - 1) : null, name, position, ownerRole: null, owner: null })) };
+    const local = localPipeline(messages[language], pipeline);
+    expect(local.why).toBe(copy[language].why);
+    expect(local.name).toBe(copy[language].name);
+    expect(local.stages.map(stage => stage.name)).toEqual(copy[language].stages);
   });
 
   /* On a right to left page the dot of "No head yet." and of the map's hint stays at the end of the words (Design #1186). */
@@ -1391,8 +1440,179 @@ it('measures wrapped actions for the tree floor and hides a ticker under 220 pix
   act(() => callbacks.forEach(fn => fn()));
   expect(root.querySelector('.ticker')).not.toBeInTheDocument();
   vi.stubGlobal('innerWidth', 360);
+  /* On a phone the zoom, the line of what happened and the bar stand in one dock: the tree ends above all of it. */
+  Object.defineProperty(root.querySelector('.dv-dock')!, 'offsetTop', { configurable: true, value: 440 });
   act(() => callbacks.forEach(fn => fn()));
-  expect(root.style.getPropertyValue('--tree-bottom')).toBe('208px');
+  expect(root.style.getPropertyValue('--tree-bottom')).toBe('268px');
+});
+
+describe('the department bar', () => {
+  const PHONE = '(max-width: 760px)';
+  const TOOLS = ['Tree', 'Speed', 'Department tasks', 'About the department'];
+
+  function observed() {
+    const callbacks: (() => void)[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { callbacks.push(callback); }
+      observe() {}
+      disconnect() {}
+    });
+    return () => act(() => callbacks.forEach(fn => fn()));
+  }
+
+  async function open(width?: number) {
+    if (width) vi.stubGlobal('innerWidth', width);
+    const user = userEvent.setup();
+    shell(treeRoute(), TREE_ORG);
+    await flyIn(user);
+    return { user, acts: document.querySelector<HTMLElement>('.dv-acts')! };
+  }
+
+  /* Each tool as the bar shows it: its name, its tooltip, its words on the screen and its icons. */
+  const tools = (acts: HTMLElement) =>
+    [...acts.querySelectorAll('.dv-tools > button')].map(b => [b.getAttribute('aria-label'), b.getAttribute('title'), b.textContent, b.querySelectorAll('svg').length]);
+
+  it.each([375, 320])('shows the tools on a %ipx phone as named icons in one group, and Hire in words at its end', async width => {
+    const { acts } = await open(width);
+    expect(acts).toHaveAttribute('data-fit', 'icons');
+    expect(tools(acts)).toEqual(TOOLS.map(name => [name, name, '', 1]));
+    for (const name of TOOLS) expect(within(acts).getByRole('button', { name })).toHaveClass('hbtn', 'ib');
+    const hire = within(acts).getByRole('button', { name: '+ Hire' });
+    expect(hire).toHaveTextContent('+ Hire');
+    expect(acts.lastElementChild).toBe(hire);
+  });
+
+  it('opens the same drawers and pages from the icons on a phone', async () => {
+    const { user, acts } = await open(375);
+    expect(acts).toHaveAttribute('data-fit', 'icons');
+    await user.click(screen.getByRole('button', { name: 'About the department' }));
+    expect(screen.getByRole('complementary', { name: 'About the department' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'About the department' })).toHaveAttribute('aria-expanded', 'true');
+    await user.click(screen.getByRole('button', { name: 'Department tasks' }));
+    expect(location.pathname + location.search).toBe('/tasks?department=d2');
+  });
+
+  it('keeps the words of the tools on a wide screen while they fit beside the zoom, and icons when they do not', async () => {
+    const measure = observed();
+    const { acts } = await open();
+    const root = document.querySelector<HTMLElement>('.dview')!;
+    expect(acts).not.toHaveAttribute('data-fit');
+    expect(within(acts).getByRole('button', { name: 'Department tasks' })).not.toHaveAttribute('title');
+    expect(within(acts).getByRole('button', { name: 'Department tasks' })).toHaveTextContent('Department tasks');
+    /* A language twice as long: the bar wants 900 px, and 1000 px of screen leave 772 after the zoom and the edge. */
+    Object.defineProperty(root, 'clientWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(acts, 'scrollWidth', { configurable: true, value: 900 });
+    measure();
+    expect(acts).toHaveAttribute('data-fit', 'icons');
+    expect(tools(acts)).toEqual(TOOLS.map(name => [name, name, '', 1]));
+    Object.defineProperty(root, 'clientWidth', { configurable: true, value: 1440 });
+    measure();
+    expect(acts).not.toHaveAttribute('data-fit');
+    expect(within(acts).getByRole('button', { name: 'About the department' })).toHaveTextContent('About the department');
+  });
+
+  it('stands the zoom, the line of what happened and the bar one over the other on a phone, the line across the width', async () => {
+    await open(375);
+    const dock = document.querySelector('.dview .dv-dock')!;
+    expect([...dock.children].map(c => c.className.split(' ')[0])).toEqual(['dv-zoom', 'ticker', 'dv-acts']);
+    expect(dock.querySelectorAll('.dv-zoom > .zoom')).toHaveLength(1);
+    /* On a wide screen the dock draws nothing of its own: the zoom, the line and the bar keep their places. */
+    expect(decl('.dv-dock', 'display')).toBe('contents');
+    expect(decl('.dv-zoom', 'display')).toBe('contents');
+    expect(decl('.dv-dock', 'display', PHONE)).toBe('flex');
+    expect(decl('.dv-dock', 'flex-direction', PHONE)).toBe('column');
+    expect(decl('.dv-dock', 'position', PHONE)).toBe('absolute');
+    expect(decl('.dv-dock', 'inset-inline', PHONE)).toBe('16px');
+    expect(decl('.dv-dock', 'inset-block-end', PHONE)).toBe('16px');
+    expect(decl('.dv-dock', 'gap', PHONE)).toBe('8px');
+    for (const part of ['.dv-dock .zoom', '.dv-dock > .ticker', '.dv-dock > .dv-acts']) expect(decl(part, 'position', PHONE)).toBe('static');
+    /* The zoom keeps out and in and Show everything, at its end: a finger does not pinch the schema. */
+    expect(decl('.dv-dock .zoom', 'align-self', PHONE)).toBe('flex-end');
+    expect(decl('.dv-dock .zv', 'display', PHONE)).toBe('none');
+    /* The line wraps its words over as many lines as it needs. */
+    expect(decl('.dv-dock > .ticker', 'white-space', PHONE)).toBe('normal');
+    expect(decl('.dv-dock > .ticker', 'overflow', PHONE)).toBe('visible');
+    expect(decl('.dv-dock > .ticker', 'max-width', PHONE)).toBe('none');
+    expect(decl('.dv-dock .ticker .tx', 'overflow', PHONE)).toBe('visible');
+    expect(decl('.dv-dock .ticker .tx', 'text-overflow', PHONE)).toBe('clip');
+    expect(decl('.dv-dock .ticker .tx', 'overflow-wrap', PHONE)).toBe('break-word');
+    /* A line of several rows keeps its dot and time on the first row; one row still stands in the middle of 44 px. */
+    expect(decl('.dv-dock > .ticker', 'align-items', PHONE)).toBe('flex-start');
+    expect(decl('.dv-dock > .ticker', 'padding-block', PHONE)).toBe('max(8px, calc((44px - 1lh) / 2))');
+    expect(decl('.dv-dock .ticker .live', 'margin-block-start', PHONE)).toBe('calc((1lh - 7px) / 2)');
+  });
+
+  it('puts the zoom of the tree in the same dock, the only zoom on the screen', async () => {
+    const { user } = await open(375);
+    await user.click(screen.getByRole('button', { name: 'Tree' }));
+    await screen.findByRole('group', { name: 'Tree of turn 3' });
+    const dock = document.querySelector('.dview .dv-dock')!;
+    expect([...dock.children].map(c => c.className.split(' ')[0])).toEqual(['dv-zoom', 'ticker', 'dv-acts']);
+    expect(document.querySelectorAll('.dview .zoom')).toHaveLength(1);
+    expect(within(dock.querySelector<HTMLElement>('.dv-zoom')!).getByRole('button', { name: 'Show everything' })).toBeInTheDocument();
+  });
+
+  it('draws the icons as one strip of 44 px cells, and puts Hire at the end, on its own row when it does not fit', () => {
+    const icons = '.dv-acts[data-fit="icons"]';
+    expect(decl('.dv-tools', 'display')).toBe('contents');
+    expect(decl(`${icons} .dv-tools`, 'display')).toBe('flex');
+    expect(decl(`${icons} .dv-tools`, 'outline')).toBe('1px solid var(--line)');
+    expect(decl(`${icons} .dv-tools`, 'outline-offset')).toBe('-1px');
+    expect(decl(`${icons} .dv-tools`, 'border')).toBe('0');
+    expect(decl(`${icons} .dv-tools > .hbtn`, 'border')).toBe('0');
+    expect(decl(`${icons} .dv-tools > .hbtn`, 'background')).toBe('none');
+    expect(decl(`${icons} .dv-tools > .hbtn + .hbtn`, 'border-inline-start')).toBe('1px solid var(--line)');
+    expect(decl('.hbtn.ib', 'width')).toBe('44px');
+    expect(decl('.hbtn.ib', 'height')).toBe('44px');
+    expect(decl(`${icons} > .btn`, 'margin-inline-start')).toBe('auto');
+    expect(decl('.dv-acts', 'flex-wrap', PHONE)).toBe('wrap');
+    /* Words of a tool stay on one line while they show; when they do not fit, the tools turn to icons. */
+    expect(decl('.hbtn', 'white-space')).toBe('nowrap');
+  });
+
+  it('lets the name of the department wrap on a phone, and starts the tree and the drawers under it', () => {
+    expect(decl('.crumbs h2', 'white-space', PHONE)).toBe('normal');
+    expect(decl('.crumbs h2', 'overflow', PHONE)).toBe('visible');
+    expect(decl('.crumbs h2', 'overflow-wrap', PHONE)).toBe('break-word');
+    expect(decl('.crumbs', 'height', PHONE)).toBe('auto');
+    expect(decl('.crumb', 'height', PHONE)).toBe('auto');
+    expect(decl('.crumb', 'min-height', PHONE)).toBe('44px');
+    expect(decl('.dv-drawer', 'top', PHONE)).toBe('var(--tree-top, 116px)');
+    expect(decl('.tview', 'top', PHONE)).toBe('var(--tree-top, 116px)');
+  });
+
+  it('measures where the name of the department ends for the tree and drawers on a phone', async () => {
+    const measure = observed();
+    await open(375);
+    const root = document.querySelector<HTMLElement>('.dview')!;
+    Object.defineProperties(root.querySelector('.crumbs')!, { offsetTop: { configurable: true, value: 64 }, offsetHeight: { configurable: true, value: 70 } });
+    measure();
+    expect(root.style.getPropertyValue('--tree-top')).toBe('142px');
+  });
+
+  it('tells the top bar how much room its name takes beside the logo on a wide screen', async () => {
+    const measure = observed();
+    await open();
+    const root = document.querySelector<HTMLElement>('.dview')!;
+    const crumbs = root.querySelector<HTMLElement>('.crumbs')!;
+    const name = crumbs.querySelector<HTMLElement>('h2')!;
+    const bar = document.querySelector<HTMLElement>('.topbar')!;
+    const nav = screen.getByRole('navigation', { name: 'Sections' });
+    Object.defineProperty(root, 'clientWidth', { configurable: true, value: 1024 });
+    Object.defineProperty(bar, 'clientWidth', { configurable: true, value: 992 });
+    Object.defineProperty(document.querySelector('.tb-brand')!, 'offsetWidth', { configurable: true, value: 44 });
+    Object.defineProperty(document.querySelector('.tb-right')!, 'offsetWidth', { configurable: true, value: 44 });
+    Object.defineProperty(nav, 'scrollWidth', { configurable: true, value: 400 });
+    /* The name wants 120 px more than the 220 it has: 340 px after the 44 px logo leave the centred tabs 992 - 2 * 384 = 224. */
+    Object.defineProperty(crumbs, 'offsetWidth', { configurable: true, value: 220 });
+    Object.defineProperties(name, { scrollWidth: { configurable: true, value: 240 }, clientWidth: { configurable: true, value: 120 } });
+    measure();
+    expect(nav).toHaveAttribute('data-fit', 'icons');
+    /* A name that fits its 220 px leaves them 992 - 2 * 264 = 464, room for their 400 px of words. */
+    Object.defineProperty(name, 'scrollWidth', { configurable: true, value: 120 });
+    measure();
+    expect(nav).not.toHaveAttribute('data-fit');
+  });
 });
 
 it('keeps a dismissed agent window from Speed closed after live data changes', async () => {
