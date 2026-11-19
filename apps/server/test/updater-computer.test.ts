@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { eventually } from '../../../test-support/eventually.mjs';
-import { APP, JQ, killProcessGroup, pidAlive, runOnce, type Stand, stand, UPDATER_DIGESTS } from './updater-fixture.js';
+import { APP, JQ, killProcessGroup, pidAlive, runOnce, type Stand, stand, startLoop, UPDATER_DIGESTS } from './updater-fixture.js';
 
 const SLEEP_STUB = fileURLToPath(new URL('./updater-stubs/sleep', import.meta.url));
 const STUBS = fileURLToPath(new URL('./updater-stubs/', import.meta.url));
@@ -195,6 +195,57 @@ describe('updater, the computer', () => {
     expect((await runOnce(s, null, env)).code).toBe(0);
     expect(lstatSync(join(s.computerControl, 'alive')).isSymbolicLink()).toBe(true);
     expect(existsSync(target)).toBe(false);
+  });
+
+  /* Bash opens a redirect target through a link without O_EXCL once it has seen something there that is not a regular
+     file, so the keeper could swap a link in at that moment. A missing heartbeat is made in a private folder and renamed
+     into place instead: here a link appears at the last moment before that rename, and the rename replaces it. */
+  it('makes a missing computer heartbeat in a private folder and renames it over a link put there at the last moment', async () => {
+    const s = stand();
+    const outside = join(s.dir, 'outside');
+    mkdirSync(outside);
+    const target = join(outside, 'recorded-target');
+    const tools = join(s.dir, 'racing');
+    mkdirSync(tools);
+    const moves = join(s.dir, 'moves');
+    writeFileSync(
+      join(tools, 'mv'),
+      `#!/bin/sh\nlast=\nfor a in "$@"; do last=$a; done\nprintf '%s\\n' "$*" >> '${moves}'\n` +
+        `case "$last" in ../alive) ln -s '${target}' ../alive ;; esac\nexec /bin/mv "$@"\n`,
+      { mode: 0o755 },
+    );
+    const r = await runOnce(s, null, { ...env, PATH: `${tools}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin` });
+    expect(r.code).toBe(0);
+    expect(readFileSync(moves, 'utf8')).toContain('./alive ../alive');
+    expect(lstatSync(join(s.computerControl, 'alive')).isFile()).toBe(true);
+    expect(existsSync(target)).toBe(false);
+    expect(readdirSync(s.computerControl).filter(name => name.startsWith('.alive.'))).toEqual([]);
+  });
+
+  /* The app can write the control folder and so make its own heartbeat there fail; that never stops the updater, nor the
+     keeper's heartbeat in the computer volume. */
+  it('starts and writes the computer heartbeat when the app links its own heartbeat where nothing can be made', async () => {
+    const s = stand();
+    const target = join(s.dir, 'missing', 'recorded-target');
+    symlinkSync(target, join(s.control, 'alive'));
+    const r = await runOnce(s, null, env);
+    expect(r.code).toBe(0);
+    expect(lstatSync(join(s.computerControl, 'alive')).isFile()).toBe(true);
+    expect(existsSync(join(s.dir, 'missing'))).toBe(false);
+  });
+
+  it('keeps the computer heartbeat going after the app breaks its own heartbeat', async () => {
+    const s = stand();
+    const keeper = join(s.computerControl, 'alive');
+    /* No watch: the heartbeat's wait passes at once, as a wait the updater makes outside a command does here. */
+    startLoop(s);
+    await eventually(() => existsSync(keeper));
+    rmSync(join(s.control, 'alive'), { force: true });
+    symlinkSync(join(s.dir, 'missing', 'recorded-target'), join(s.control, 'alive'));
+    rmSync(keeper);
+    await eventually(() => existsSync(keeper));
+    expect(lstatSync(keeper).isFile()).toBe(true);
+    expect(existsSync(join(s.dir, 'missing'))).toBe(false);
   });
 
   it('runs a command as root on the computer, with its files at /host and its Docker, and answers with the output and exit code', async () => {

@@ -40,15 +40,42 @@ computer_clear_legacy() (
   if [ "$removed" -gt 0 ]; then printf 'Removed %s files from the old computer queue.\n' "$removed" >&2; fi
 )
 
-computer_heartbeat() {
-  local marker="$COMPUTER_CONTROL/alive"
-  [ ! -L "$marker" ] || return 0
-  if [ -f "$marker" ]; then
-    # -c: BusyBox touch -h would create a marker missing by now, through a link put there in the meantime.
-    touch -c -h -- "$marker" 2> /dev/null || true
-  elif [ ! -e "$marker" ]; then
-    (set -o noclobber; : > "$marker") 2> /dev/null || true
+# move_over <file> <name>: rename a file over a name in the same folder, replacing a link there instead of following it.
+move_over() {
+  if [[ "$OSTYPE" == darwin* ]]; then
+    mv -fh -- "$1" "$2"
+  else
+    mv -fT -- "$1" "$2"
   fi
+}
+
+# The keeper's sign that this updater runs, in the computer volume. A missing one is made in a private folder and renamed
+# into place: bash opens a redirect target through a link once it has seen something there that is not a regular file,
+# so the keeper could swap a link in at that moment.
+computer_heartbeat() (
+  local here temporary
+  cd -P -- "$COMPUTER_CONTROL" 2> /dev/null || exit 0
+  [ ! -L ./alive ] || exit 0
+  if [ -f ./alive ]; then
+    # -c: BusyBox touch -h would create a marker missing by now, through a link put there in the meantime.
+    touch -c -h -- ./alive 2> /dev/null || true
+    exit 0
+  fi
+  [ ! -e ./alive ] || exit 0
+  here=$(physical_dir) && temporary=$(mktemp -d .alive.XXXXXXXX 2> /dev/null) || exit 0
+  (
+    cd -P -- "./$temporary" && [ "$(physical_dir)" = "${here%/}/$temporary" ] && [ -O . ] || exit 1
+    trap 'rm -f -- ./alive' EXIT
+    (set -o noclobber; : > ./alive) && [ ! -L ../alive ] && [ ! -e ../alive ] && move_over ./alive ../alive
+  ) 2> /dev/null || true
+  rmdir -- "./${temporary:?}" 2> /dev/null || true
+)
+
+# Both heartbeats, the keeper's first. The app can write the control folder and so break its own heartbeat there; that
+# never stops the updater or the keeper's.
+heartbeats() {
+  computer_heartbeat || true
+  touch "$CONTROL/alive" 2> /dev/null || true
 }
 
 # The updater trusts the leader keeper for standing access. A compromised leader keeper can still issue commands
@@ -74,11 +101,7 @@ computer_answer() {
       set -o noclobber
       tail -c "$COMPUTER_OUTPUT" "$3" | jq -Rs --arg id "$1" --argjson exit "$2" '{id: $id, exit: $exit, output: .}' > ./answer || exit 1
       [ ! -L "../$file" ] && [ ! -e "../$file" ] || exit 1
-      if [[ "$OSTYPE" == darwin* ]]; then
-        mv -fh -- ./answer "../$file"
-      else
-        mv -fT -- ./answer "../$file"
-      fi
+      move_over ./answer "../$file"
     ) 2> /dev/null && published=1
     rmdir -- "./${temporary:?}" 2> /dev/null || true
   fi
