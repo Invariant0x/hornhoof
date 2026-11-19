@@ -84,7 +84,7 @@ import { TerminalRelay } from './modules/terminals/relay.js';
 import { terminalRoutes } from './modules/terminals/routes.js';
 import { Challenges, challengeRoutes } from './modules/tls/challenges.js';
 import { LinkTls } from './modules/tls/manager.js';
-import { addSecurityHeaders, hasWebApp, serveWebApp, webAppRoutes } from './web.js';
+import { addSecurityHeaders, hasWebApp, pageBuild, serveWebApp, webAppRoutes } from './web.js';
 
 export type { Db } from './db/client.js';
 import { fromOwnPages } from './auth/origin.js';
@@ -195,6 +195,7 @@ declare module 'fastify' {
    not started. */
 function publicRoutes(app: FastifyInstance, { config, db, mode }: Ctx): void {
   const { version, commit, migrations } = config;
+  const build = pageBuild(config.webDist);
   app.get('/api/health', async (req, reply) => {
     const ok = mode.current() !== 'off';
     if (!ok) reply.code(503);
@@ -204,6 +205,8 @@ function publicRoutes(app: FastifyInstance, { config, db, mode }: Ctx): void {
     if (req.overLink) await requirePerson(req, db);
     return { version, commit, migrations };
   });
+  /* No more than the page at / tells anyone: a signed-out page learns from it that it is not the page served now. */
+  if (build) app.get('/api/build', async (_req, reply) => reply.header('cache-control', 'no-store').send({ build }));
   app.get('/robots.txt', async (_req, reply) => reply.type('text/plain; charset=utf-8').send('User-agent: *\nDisallow: /\n'));
 }
 
