@@ -6,7 +6,7 @@ import type { TrackerPlace } from '../routes';
 import { searchTasks } from '../task-search';
 import { placeName, useGoals, usePipelines, useTaskDepartments, useTasks, useWaitCards } from '../tasks';
 import { doerOf, filterTasks, graphPath, graphTree, mine, pipelineTree, pruneGoals, TRACKER_VIEWS, waitingOn, workingNow, BOARD_STATUSES, boardStatus, type Crumb, type GraphNode, type WorkFilter } from '../tracker';
-import type { Decisions, Me, MergeDecision, Org, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskLine } from '../types';
+import type { Decisions, Me, MergeDecision, Org, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskLine, WaitCard } from '../types';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
@@ -70,6 +70,9 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   /* The tasks that wait for that person. */
   tasks: TaskLine[];
   recipient: string;
+  /* The cards Hornhoof kept for the viewer, which the screen also counts. */
+  kept: WaitCard[] | undefined;
+  onCardsSeen: () => void;
 };
 
 type Shown = Pick<Decisions, 'requests' | 'proposals'> & { merges: MergeDecision[] };
@@ -152,12 +155,11 @@ function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () 
 /* What waits for the person: what agents ask, the orchestrator's cards, the cards Hornhoof
    kept for them, and the tasks that wait for them. For another person, only theirs, with the filter in sight when it may be
    taken off. */
-function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, tasks, recipient, ...rest }: Waiting) {
+function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, tasks, recipient, kept, onCardsSeen, ...rest }: Waiting) {
   const t = useT();
   const [failure, setFailure] = useState<unknown>(null);
-  const { cards: kept, load: reloadCards } = useWaitCards();
   const shown = shownOf(decisions, personId);
-  const cards = personId ? [] : (kept ?? []);
+  const cards = keptShown(kept, personId);
   const name = mapPeople(rest.org).find(p => p.id === personId)?.name ?? t.tasks.someone;
 
   return (
@@ -165,7 +167,7 @@ function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, t
       <h2>{t.tasks.waiting}</h2>
       {personId && onClearPerson && <PersonFilter name={name} onClear={onClearPerson} />}
       <DecisionList shown={shown} onFailure={setFailure} {...rest} />
-      <WaitCards cards={cards} onOpenTask={rest.onOpenTask} onSeen={reloadCards} />
+      <WaitCards cards={cards} onOpenTask={rest.onOpenTask} onSeen={onCardsSeen} />
       {tasks.length > 0 && <WaitingTasks tasks={tasks} recipient={recipient} heading={personId ? t.tracker.waitTasksOf(name) : t.tracker.waitTasks} onOpenTask={rest.onOpenTask} />}
       {decisions && shownNone(shown) && !cards.length && !tasks.length && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
       <DecisionsFailure failure={decisionsFailure} onRetry={rest.onDecisionsChanged} />
@@ -192,10 +194,13 @@ function WaitingTasks({ tasks, recipient, heading, onOpenTask }: { tasks: TaskLi
   );
 }
 
-/* A task with a question counts once, alongside decisions that have no task. */
-function countOf(s: Shown, tasks: TaskLine[]): number {
+/* The kept cards are the viewer's own, so they show only while no other person is picked. */
+const keptShown = (kept: WaitCard[] | undefined, personId: string | null) => (personId ? [] : (kept ?? []));
+
+/* What Waits for me shows, counted: a task with a question once, alongside decisions that have no task and the kept cards. */
+function countOf(s: Shown, tasks: TaskLine[], cards: WaitCard[]): number {
   const taskIds = new Set([...s.requests.map(r => r.task.id), ...tasks.map(task => task.id)]);
-  return taskIds.size + s.proposals.length + s.merges.length;
+  return taskIds.size + s.proposals.length + s.merges.length + cards.length;
 }
 
 /* Which part of the tracker a place is: what waits for a person, the turns, the goals, the due dates, or work to look at as a
@@ -339,6 +344,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   }
 
   const all = tasks ?? [];
+  const { cards: kept, load: reloadCards } = useWaitCards();
   const goals = goalList ?? [];
   const pipelines = pipelineList ?? [];
   const people = mapPeople(org);
@@ -454,6 +460,8 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
       onClearPerson={clearPerson}
       tasks={waitsOnWho}
       recipient={recipient}
+      kept={kept}
+      onCardsSeen={reloadCards}
       onOpenTask={onOpenTask}
       onOpenAgent={onOpenAgent}
       onOpenOrchestrator={onOpenOrchestrator}
@@ -491,7 +499,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
         goals={goals}
         tasks={all}
         onOpenAgent={onOpenAgent}
-        counts={{ waits: countOf(shownOf(decisions, recipient), waitsOnWho), failures: failures.length + machinesAway.filter(machine => !machine.back).length, mine: own.tasks.length, working: working.length }}
+        counts={{ waits: countOf(shownOf(decisions, decisionsOf), waitsOnWho, keptShown(kept, decisionsOf)), failures: failures.length + machinesAway.filter(machine => !machine.back).length, mine: own.tasks.length, working: working.length }}
         create={create}
         open={drawer}
         onClose={() => setDrawer(false)}

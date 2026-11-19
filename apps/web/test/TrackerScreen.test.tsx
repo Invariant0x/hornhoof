@@ -611,6 +611,22 @@ it('fits the lists directly beside the main header with its breadcrumb, viewer a
   expect(screen.getByRole('group', { name: 'Filters' })).toContainElement(screen.getByRole('combobox', { name: 'Status' }));
 });
 
+/* The CEO sees on Waits for me what agents ask the people the CEO decides for too, as the assistant CEO's question, and the
+   cards Hornhoof kept: the count beside it is what the page shows. */
+it('counts on Waits for me everything the page shows under it', async () => {
+  shell('/tasks?show=waits', {
+    'GET /api/requests': [200, decisions([{
+      id: 'r2', text: 'Which header?', kind: 'question', task: { ...LOGIN, department: LOGIN.department }, ownerPersonId: 'p-assistant', canAnswer: true,
+      agent: BRUNO, commit: null, commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: LOGIN.createdAt,
+    }])],
+    'GET /api/wait-cards': [200, { cards: [{ id: 'c1', about: 'late', taskId: null, number: null, kind: null, level: null, at: LOGIN.createdAt, turn: null, tag: null }], next: null }],
+  });
+  const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+  await within(waiting).findByText('Which header?');
+  const side = screen.getByRole('navigation', { name: 'Task lists' });
+  expect(within(side).getByRole('button', { name: 'Waits for me 2' })).toBeInTheDocument();
+});
+
 it('counts a task with a question once and counts failed tasks separately', async () => {
   const user = userEvent.setup();
   const fail = line({ id: 'fail', number: 77, title: 'Lost machine', status: 'waiting', externalWait: {
