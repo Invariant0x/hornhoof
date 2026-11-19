@@ -359,6 +359,22 @@ describe('Map', () => {
     expect(container.querySelector('.ticker')).not.toBeInTheDocument();
   });
 
+  /* The map runs to the bottom of the screen and names the running build over its own corner, in the room its bars leave
+     free; it holds the place while the company loads, so the footer row never comes and goes under it (#1590). */
+  it('names the running build over the corner of its room, from the moment it opens, and not behind a department', async () => {
+    let answer = (_: [number, unknown]) => {};
+    mockApi({ 'GET /api/org': () => new Promise(done => (answer = done)), 'GET /api/version': [200, { version: '0.39.1', commit: 'a276aa6c0ffee' }] });
+    const { container, rerender } = render(<MapScreen {...PROPS} />);
+    expect(container.querySelector('.map[aria-busy="true"] > .map-version')).toBeInTheDocument();
+    await waitFor(() => expect(container.querySelector('.map-version')).toHaveTextContent('0.39.1 (a276aa6)'));
+    answer([200, ORG_WITH_TEAMS]);
+    await screen.findByText('Marketing');
+    await waitFor(() => expect(container.querySelector('.map > .map-room > .map-version')).toHaveTextContent('0.39.1 (a276aa6)'));
+    expect(container.querySelectorAll('.map-version')).toHaveLength(1);
+    rerender(<MapScreen {...PROPS} inside />);
+    expect(container.querySelector('.map-version')).not.toBeInTheDocument();
+  });
+
   it('shows the zoom as a percentage across short and three-digit scales', async () => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
     const { container } = render(<MapScreen {...PROPS} />);
