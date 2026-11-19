@@ -47,6 +47,7 @@ async function readPin(read: Ctx['readCommit'], repo: RepoAddress, want: CommitW
   try { at = await read(repo, want, 5_000); }
   catch { throw refuse(409, 'repo_invalid', 'The repository could not be read, so the submission has no commit. Try again.'); }
   if ('problem' in at) throw refuse(409, 'repo_invalid', at.problem);
+  if (at.tag) throw refuse(409, 'repo_invalid', `${at.branch} is a tag of the repository, not a branch. Push the branch of the change.`);
   if (!ReviewSha.safeParse(at.commitSha).success) throw refuse(409, 'repo_invalid', `The branch ${at.branch} has no full commit name.`);
   if (named && named !== at.commitSha) throw refuse(409, 'task_changed', `The branch ${at.branch} is at ${at.commitSha}, not at the named commit ${named}. Push it or name the head.`);
   return { commit: at.commitSha, branch: at.branch, status: 'pinned', reason: null };

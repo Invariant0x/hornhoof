@@ -35,6 +35,7 @@ import { wakeNotice } from './notification.js';
 import { notStep } from '../tools/steps.js';
 import { releaseJobPhones } from '../phones/queue.js';
 import { callEnded, oneShotStageNote } from '../calls/calls.js';
+import { uncheckedLines, type UncheckedItem } from './unchecked.js';
 
 type Agent = typeof agents.$inferSelect;
 
@@ -43,7 +44,7 @@ type RouteKind = ReturnType<typeof routeSnapshot>['resultKind'];
 /* What finishes the task for whoever holds it, and what to do when that cannot happen. */
 function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: string; stuck: string } {
   if (task.assigneeAgentId === agentId && kind === 'turnkey') return {
-    finish: 'carry its task scope end to end alone on its task branch, checking what you touched with local tests, as the full run happens once at release; it goes through no echelons and nobody else is called onto it; close it with report done true and the evidence',
+    finish: 'carry its task scope end to end alone on its task branch, checking what you touched with local tests, as the full run happens once at release; it goes through no echelons and nobody else is called onto it; close it with report done true and the evidence, naming in turnkey the exact commit you checked and fast-forwarded the turn branch to and the commit your branch started from',
     stuck: 'use blocked',
   };
   if (task.assigneeAgentId === agentId && kind === 'document') return {
@@ -247,6 +248,12 @@ export async function wakeLeftBehind(ctx: Ctx, now = new Date()): Promise<number
 
 /* Requests reach their current addressee: a person through the orchestrator's plain words, or an internal stuck resolver
    directly. Typed into its turn when it works, else its own turn, one per request. */
+/* What a release brings that no check covers: people see it next to Approve, apart from these words, so the explanation says
+   in plain words that it is there and never stands in for it. */
+const uncheckedNote = (unchecked: UncheckedItem[] | null): string => unchecked?.length
+  ? `\n\nNext to Approve, Hornhoof shows people what this release brings that no check covers (${unchecked.length}):\n${uncheckedLines(unchecked).map(line => `- ${line}`).join('\n')}\nSay in plain words that the card lists it and that they approve it only if they accept each item.`
+  : '';
+
 async function explanationText(ctx: Ctx, w: Wake, request: typeof requests.$inferSelect, asker: string, task: Task): Promise<string | null> {
   const ref = `#${task.number} "${task.title}"`;
   let text: string;
@@ -260,7 +267,7 @@ async function explanationText(ctx: Ctx, w: Wake, request: typeof requests.$infe
   } else {
     const what = request.kind === 'stuck'
       ? `Hornhoof stopped waking ${asker} on ${ref} and waits for people to say how it goes on (request ${request.id}). Hornhoof noted: ${request.text}`
-      : `${asker} asks people on ${ref} (request ${request.id}, a ${request.kind}):\n\n${quote(request.text)}`;
+      : `${asker} asks people on ${ref} (request ${request.id}, a ${request.kind}):\n\n${quote(request.text)}${uncheckedNote(request.unchecked)}`;
     text = `${what}\n\nBefore a person answers, find out what it needs: read the task with "task", and ask ${asker} with "message_employee" when its words are not enough. ` +
       `Resolve ordinary work you can handle using your standing authority. If the question still needs the person's own answer, use explain_request with request ${request.id} in the recipient's language. ` +
       'Say what the work is for, what they need to supply and what each choice changes. Preserve any required human decision, including the CEO\'s yes for an irreversible deletion.';

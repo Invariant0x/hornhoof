@@ -5,6 +5,7 @@ import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS
 import type { OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
 import type { NamedTurn, UpdateCalledOff, UpdateRequest } from '../modules/updates/control.js';
+import type { UncheckedItem } from '../modules/tasks/unchecked.js';
 import type { TaskPriority, UnitFingerprint } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
@@ -1482,6 +1483,10 @@ export const requests = pgTable(
     ...questionColumns(),
     text: text('text').notNull(),
     commit: text('commit'),
+    /* On the approval of a release commit, what that release brings that no check covers, as Hornhoof found it when the card was
+       asked: the server alone writes it, apart from the words of whoever asked, and people see it next to Approve. A release that
+       brings any takes only the approval of a card that names exactly that. Null on every other card. */
+    unchecked: jsonb('unchecked').$type<UncheckedItem[]>(),
     /* Null together on legacy sources; no private file/disclosure metadata here. */
     materialRevision: bigint('material_revision', { mode: 'number' }),
     materialDigest: text('material_digest'),

@@ -1837,6 +1837,19 @@ export const en = {
     /* A person's answer the orchestrator gave of its own. */
     byOrchestrator: 'decided by the orchestrator',
     note: 'Note, if any',
+    /* On the approval of a release, what it brings that no check covers, as Hornhoof keeps it apart from the words above. */
+    unchecked: {
+      heading: (n: number) => `What this release brings that no check covers: ${n} ${n === 1 ? 'item' : 'items'}`,
+      accept: 'Approve only if you accept each of these.',
+      unread: (base: string, commit: string) => `Hornhoof could not read every commit between main at ${base} and ${commit}.`,
+      holderOff: (task: number) => `#${task}: the employee who did and checked this work alone is switched off or removed.`,
+      noCandidate: (task: number) => `#${task}: no checked version of it, and it is not work its employee did and checked alone.`,
+      checker: (task: number, commit: string) => `#${task}: a checker of ${commit} is switched off, removed or its own author, or did not pass it.`,
+      taskUnread: (task: number) => `Hornhoof could not read every commit of #${task}.`,
+      unpinned: (task: number) => `#${task} was closed before such work named the commit its employee checked, so none of its commits counts as checked.`,
+      merge: (commit: string) => `${commit} is a merge made outside every checked change.`,
+      commit: (commit: string) => `${commit} came in without any check.`,
+    },
     choiceNote: 'Comment or feedback',
     choiceHint: 'Pick an option above, or send feedback without picking one.',
     sendFeedback: 'Send without choosing',

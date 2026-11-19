@@ -18,7 +18,8 @@ import { producedCandidate, currentCandidate, currentHanded, requireRepairHistor
 import { acceptDocument, documentHandIn } from './echelons-document.js';
 import { submittedHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
-import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons } from './turnkey.js';
+import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons, type TurnkeyChecked } from './turnkey.js';
+import { sortedUnchecked, type UncheckedItem } from './unchecked.js';
 import { openTurnOf } from './turn-department.js';
 import { createRoute, departmentStages, documentCheck, skippedData } from './echelons-store.js';
 import { routeOf, changeRoute, cancelRoutes, endRoutes, type Route } from './route-records.js';
@@ -468,7 +469,7 @@ async function reportToResolver(ctx: Live, agentId: string, task: Task, summary:
   return { task: row, wakes };
 }
 
-type ReportInput = { done: boolean; summary: string; verification?: Verification; acceptance?: AcceptanceInput };
+type ReportInput = { done: boolean; summary: string; verification?: Verification; acceptance?: AcceptanceInput; turnkey?: TurnkeyChecked };
 type ReportStage = 'acceptance' | 'tests' | 'architecture' | 'coordination' | 'turnkey';
 
 function reportedStage(route: Route, done: boolean): ReportStage | null {
@@ -490,7 +491,7 @@ async function reportStage(ctx: Live, task: Task, route: Route, agentId: string,
     case 'coordination': return coordinationReport(ctx, task, route, agentId, input.summary);
     case 'turnkey':
       if (input.verification || input.acceptance) throw turnkeyWork(task);
-      return turnkeyReport(ctx, task, route, agentId, input.summary);
+      return turnkeyReport(ctx, task, route, agentId, input.summary, input.turnkey);
   }
 }
 
@@ -499,6 +500,7 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: Repo
   refusePaused(task);
   const route = await routeOf(ctx.db, task);
   const stage = reportedStage(route, r.done);
+  if (r.turnkey && stage !== 'turnkey') throw refuse(400, 'task_invalid', `turnkey names what the holder of turnkey work checked as it closes it, and #${task.number} is no such report.`);
   if (stage) return reportStage(ctx, task, route, agentId, r, stage);
   if (isStaged(route.state.resultKind)) throw refuse(400, 'task_invalid', 'Use the current executable stage command, or blocked when work cannot continue. A report cannot bypass Review and Tests.');
   requireReporter(task, agentId);
@@ -852,6 +854,9 @@ export type Ask = {
   goal?: NewGoal;
   /* The server's own: what must be kept in the step that makes the request. No tool passes it. */
   onCreated?: (tx: Tx, request: Request) => Promise<void>;
+  /* The server's own, on the approval of a release commit: what that release brings that no check covers, as Hornhoof read it
+     as the card was asked. No tool input passes it; people see it next to Approve. */
+  unchecked?: UncheckedItem[];
 };
 
 /* An approval of a commit lets it into the release, whatever the agent says it is about. */
@@ -859,6 +864,9 @@ const topicOf = (q: Ask): DecisionTopic | null => (q.commit ? 'release' : (q.top
 
 /* An approval says what it approves: an exact commit, or what a department's policy asks it about. */
 const namesItsWork = (q: Ask): boolean => q.approval !== undefined || COMMIT.test(q.commit ?? '');
+
+/* What a release brings that no check covers, kept only on the approval of its commit, in one order. */
+const uncheckedOf = (q: Ask): UncheckedItem[] | null => (q.unchecked?.length && q.kind === 'approval' && q.commit ? sortedUnchecked(q.unchecked) : null);
 
 const approvalColumns = (a: Ask['approval']) => ({ approvalChannel: a?.channel ?? null, approvalKind: a?.kind ?? null, approvalAmount: a?.amount ?? null });
 
@@ -873,6 +881,7 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
   const options = q.kind === 'choice' ? (q.options ?? []) : [];
   if (q.kind === 'choice' && (options.length < 2 || options.length > 4)) throw refuse(400, 'task_invalid', 'A choice offers 2 to 4 ways.');
   if (q.kind !== 'choice' && q.options?.length) throw refuse(400, 'task_invalid', 'Ways to pick from make a choice; a choice names no commit.');
+  const unchecked = uncheckedOf(q);
   const pictures = [...(q.images ?? []), ...options.flatMap(o => (o.image ? [o.image] : []))];
   await checkPictures(ctx.db, task.companyId, agentId, pictures);
   let request: Request | undefined;
@@ -887,6 +896,7 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
         kind: q.kind,
         text: q.text.trim(),
         commit: q.commit ?? null,
+        unchecked,
         options,
         link: q.link ?? null,
         decisionTopic: topicOf(q),

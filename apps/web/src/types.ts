@@ -631,11 +631,23 @@ export type MaterialStampView = {
   hasMaterials?: boolean;
 };
 
+/* What a release brings that no check covers, one item each, as Hornhoof wrote it on the approval card of the release: the
+   commits between main and the release it could not all read, work whose checker or holder is off, work with no checked
+   version, and commits or merges no checked work brought. */
+export type UncheckedItem =
+  | { kind: 'unread'; base: string; commit: string }
+  | { kind: 'holder_off' | 'no_candidate' | 'task_unread' | 'unpinned'; task: number }
+  | { kind: 'checker'; task: number; commit: string }
+  | { kind: 'merge' | 'commit'; commit: string };
+
 export type WaitingRequest = MaterialStampView & {
   id: string;
   kind: 'question' | 'choice' | 'approval' | 'stuck';
   text: string;
   commit: string | null;
+  /* On the approval of a release, what it brings that no check covers, apart from the words above; shown next to Approve. An
+     older server sends none. */
+  unchecked?: UncheckedItem[] | null;
   /* The commit on GitHub, when the repository is there. */
   commitUrl: string | null;
   /* Pictures the agent shows, by id; a choice's ways may carry their own. */
