@@ -7,6 +7,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Fixed
+
+- Map cards and the department screen show every word in any language: cards grow together, far zoom moves nothing, words break with hyphens and the hint keeps its own room.
+
 ## [0.34.5] - 2026-11-19
 
 ### Fixed

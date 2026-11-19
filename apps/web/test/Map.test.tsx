@@ -10,6 +10,7 @@ import { arcEnd } from '../src/hub-turns';
 import { arrangeMap } from '../src/map-arrange';
 import { DEV_ORG, ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, SUBS, TURN } from './api-mock';
 import { fakeStream } from './fake-stream';
+import { decl, rulesFor } from './css';
 
 const claude = SUBS[0]!;
 const PROPS = { me: ME, windowOpen: false, onOpenOrchestrator: () => {} };
@@ -111,6 +112,41 @@ describe('Map', () => {
     const withCalls = arrangeMap({ ...DEV_ORG, departments: [many] }).depts[0]!;
     expect(ordinary.h).toBe(160);
     expect(withCalls).toEqual(ordinary);
+  });
+
+  it('makes every card of the map as tall as the most words of one need, never shorter than it was, the rows still apart', () => {
+    const four = { ...DEV_ORG, departments: ['d1', 'd2', 'd3', 'd4'].map(id => dept({ id })) };
+    expect(arrangeMap(four, {}, {}, 100).depts.map(d => d.h)).toEqual([160, 160, 160, 160]);
+    for (const need of [230, 500]) {
+      const tall = arrangeMap(four, {}, {}, need).depts;
+      expect(tall.map(d => [d.w, d.h])).toEqual(Array(4).fill([280, need]));
+      for (const a of tall) for (const b of tall) if (a !== b && a.x === b.x) expect(Math.max(a.y, b.y) - Math.min(a.y + a.h, b.y + b.h)).toBeGreaterThanOrEqual(32);
+    }
+  });
+
+  it('grows the cards of the map with the words of the card that has the most, and cuts or hides no word of any', async () => {
+    const long = 'Development of payments and receipts kept for years in every country';
+    /* jsdom lays nothing out: a card left to its words measures 230 px with the long name and 120 px without it. */
+    const tall = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      if (!this.matches('.map .dept') || this.style.height !== 'auto') return 0;
+      return this.textContent!.includes(long) ? 230 : 120;
+    });
+    onTestFinished(() => tall.mockRestore());
+    const [dev] = DEV_ORG.departments;
+    mockApi({ 'GET /api/org': [200, { ...DEV_ORG, departments: [{ ...dev!, name: long }, dept({ id: 'd9', name: 'Sales' })] }] });
+    const { container } = render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
+    await screen.findByRole('button', { name: new RegExp(`^${long}`) });
+    await waitFor(() => expect([...container.querySelectorAll<HTMLElement>('.map .dept')].map(c => c.style.height)).toEqual(['230px', '230px']));
+    for (const selector of ['.dname', '.dept .row2', '.dept .detail', '.dept .now', '.dept .now > span', '.ticker', '.ticker .tx'])
+      for (const rule of rulesFor(selector)) {
+        expect.soft(rule.decls['text-overflow'], `${selector} ends in no ellipsis`).not.toBe('ellipsis');
+        expect.soft(rule.decls['white-space'], `${selector} wraps`).not.toBe('nowrap');
+        expect.soft(rule.decls.overflow, `${selector} hides nothing`).not.toBe('hidden');
+      }
+    for (const selector of ['.dname', '.dept .detail', '.dept .now > span', '.dt-cnt']) expect.soft(decl(selector, 'overflow-wrap'), selector).toBe('break-word');
+    /* The Head of Design's word for #1489 (#1539, N4): words break by the syllables of the page's language, with a hyphen. */
+    expect(decl('button.dept', 'hyphens')).toBe('auto');
+    expect(decl('button.dept', '-webkit-hyphens')).toBe('auto');
   });
 
   it('shows the orchestrator, the company people and the empty state on first run', async () => {

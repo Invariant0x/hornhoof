@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { render } from '@testing-library/react';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { api, ApiFailure } from '../src/api';
-import { detectLanguage, errorText, plural } from '../src/i18n';
+import { detectLanguage, errorText, LanguageProvider, plural } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { mockApi } from './api-mock';
@@ -11,6 +12,21 @@ describe('detectLanguage', () => {
     expect(detectLanguage(null, ['de-DE'])).toBe('en');
     expect(detectLanguage('en', ['ru'])).toBe('en');
     expect(detectLanguage('xx', ['ru'])).toBe('ru');
+  });
+});
+
+/* The Head of Design's word for #1489 (#1539, N4): the page names its language, so a browser breaks its words by that
+   language's syllables, with a hyphen. */
+describe('the language of the page', () => {
+  it.each(['en', 'ru'] as const)("names the chosen language on the page's root from the start: %s", language => {
+    localStorage.setItem('hh-lang', language);
+    document.documentElement.lang = '';
+    onTestFinished(() => {
+      localStorage.removeItem('hh-lang');
+      document.documentElement.lang = '';
+    });
+    render(<LanguageProvider><p>{language}</p></LanguageProvider>);
+    expect(document.documentElement.lang).toBe(language);
   });
 });
 

@@ -6,7 +6,8 @@ import type { Point } from '../ui/wires';
    department at its right, the bus from the head to every frame, the pipeline between stages with a numbered gate before each
    check, then a frame per role. Work goes left to right: design, ordinary work, each check in order, then the final check.
    Only sub-units and observers stand apart from the pipeline. Cards, headings and chips keep these sizes at the least and
-   grow with their words, as measured on the screen; everything under a taller one moves down with it. */
+   grow with their words, as measured on the screen; every chip takes the height the most words need, and everything under
+   a taller one moves down with it. */
 export const FW = 280, GS = 44, G = 150, CW = 240, CH = 84, PY = 96, HW = 380, HH = 184, PW = 220, PH = 56;
 export const BUS = HH + 44, RY = BUS + 44, CY = BUS + 84, FT = CY + 50, FHEAD = 100, REP = 92;
 /* From the bottom of a frame's heading to its first card. */
@@ -51,14 +52,15 @@ export type Schema = {
 const outX = (f: Frame) => f.x + FW - 30;
 const inX = (f: Frame) => f.x + 30;
 
-/* Where a frame's cards stand: from under its heading down, each under the one above by its measured height. */
-type Room = { ft: number; sizes: Sizes };
+/* Where a frame's cards stand: from under its heading down, each under the one above, all as tall as the chip whose words
+   need the most room. */
+type Room = { ft: number; chip: number; sizes: Sizes };
 const headOf = (room: Room, key: string) => Math.max(FHEAD, (room.sizes.headings?.[key] ?? 0) + HEAD_ROOM);
 
 function placeMembers(held: Employee[], x: number, room: Room, key: string): Placed[] {
   let y = room.ft + headOf(room, key);
   return held.map(e => {
-    const h = Math.max(CH, room.sizes.cards?.[e.id] ?? 0);
+    const h = room.chip;
     const placed = { e, x: x + 20, y, h, cy: y + h / 2 };
     y += h + PY - CH;
     return placed;
@@ -162,7 +164,7 @@ export function schemaLayout(d: Department, people: number, sizes: Sizes = {}): 
   const head = d.employees.find(e => e.kind === 'head') ?? null;
   const hh = Math.max(HH, sizes.head ?? 0);
   const bus = hh + BUS - HH, ry = hh + RY - HH, cy = hh + CY - HH, ft = hh + FT - HH;
-  const room: Room = { ft, sizes };
+  const room: Room = { ft, chip: Math.max(CH, ...Object.values(sizes.cards ?? {})), sizes };
   const { teamFrames, members, startX, teamEnd } = splitMembers(d, room);
   const known = new Map(d.roles.filter(r => members.some(e => e.roleId === r.id)).map(r => [r.id, r]));
   const loose = members.filter(e => !e.roleId || !known.has(e.roleId));

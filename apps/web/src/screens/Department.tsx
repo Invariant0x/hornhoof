@@ -6,7 +6,7 @@ import { useStream } from '../live';
 import { useDepartmentTree } from '../tasks';
 import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { Bar, percent } from '../ui/Bar';
-import { Chip, agentWorking, doingLine, modelLine, Switch, STATUS_CLASS } from '../ui/Chip';
+import { Chip, agentWorking, doingLine, Listed, modelParts, Switch, STATUS_CLASS } from '../ui/Chip';
 import { CANVAS_NARROW as NARROW, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, BackIcon, InfoIcon, ListIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
@@ -25,7 +25,7 @@ import { OneShotMarks } from '../ui/TaskWorkflow';
 import { TreeView } from './TreeView';
 import { useOpenAgent } from './AgentWindowContext';
 import { SpeedPanel } from './SpeedPanel';
-import { arrowD, FW, HH, HW, PH, PW, leadsStage, schemaLayout, stepPaths, type Frame, type Line, type Schema, type Sizes } from './schema';
+import { arrowD, CH, FW, HH, HW, PH, PW, leadsStage, schemaLayout, stepPaths, type Frame, type Line, type Schema, type Sizes } from './schema';
 import { takeEscape } from '../ui/escape';
 import { guardedResizeObserver, useRenderGuard } from '../guard';
 
@@ -76,22 +76,26 @@ type Props = {
   onCrumbs?(px: number): void;
 };
 
-/* What the cards drawn from a schema measure: its head, each frame's heading and cards, and the people's chips, in its order. */
+/* What the cards drawn from a schema measure: its head, each frame's heading and cards, and the people's chips, in its order.
+   Every chip stands as tall as the tallest one, so each is measured as tall as its own words need it, for a moment. */
 function measureSchema(world: HTMLElement, s: Schema): Sizes {
   const tall = (el: Element | null | undefined) => (el instanceof HTMLElement ? el.offsetHeight : 0);
   const frames = world.querySelectorAll(':scope > .slayer > .frame');
+  const chips = s.frames.map((_, i) => [...(frames[i]?.querySelectorAll<HTMLElement>(':scope > .slayer > .dept-chip') ?? [])]);
+  const set = chips.flat().map(chip => [chip, chip.style.minHeight] as const);
+  for (const [chip] of set) chip.style.minHeight = `${CH}px`;
   const cards: Record<string, number> = {}, headings: Record<string, number> = {};
   s.frames.forEach((f, i) => {
-    const chips = frames[i]?.querySelectorAll(':scope > .slayer > .dept-chip');
     headings[f.key] = tall(frames[i]?.querySelector('.fh'));
-    f.members.forEach((m, k) => (cards[m.e.id] = tall(chips?.[k])));
+    f.members.forEach((m, k) => (cards[m.e.id] = tall(chips[i]?.[k])));
   });
+  for (const [chip, was] of set) chip.style.minHeight = was;
   const head = world.querySelector(':scope > .slayer > :is(.sslot, .shead)');
   return { head: tall(head), cards, headings, people: [...world.querySelectorAll(':scope > .pchip')].map(tall) };
 }
 
-/* The schema as its cards measure on the screen: measured before the first paint and again whenever the company, the words or
-   the zoom's look change, and when a card grows or shrinks on its own, as its fonts arrive. */
+/* The schema as its cards measure on the screen: measured before the first paint and again whenever the company or the words
+   change, and when a card or a line of a chip grows or shrinks on its own, as its fonts arrive. Far zoom changes no size. */
 function useMeasuredSchema(d: Department, people: number, redraw: string) {
   const [sizes, setSizes] = useState<Sizes>(UNMEASURED);
   const s = useMemo(() => schemaLayout(d, people, sizes), [d, people, sizes]);
@@ -106,7 +110,7 @@ function useMeasuredSchema(d: Department, people: number, redraw: string) {
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = guardedResizeObserver(measure, 'department-cards');
-    for (const card of el.querySelectorAll(':scope > .slayer > .frame :is(.fh, .dept-chip), :scope > .slayer > :is(.sslot, .shead), :scope > .pchip')) observer.observe(card);
+    for (const card of el.querySelectorAll(':scope > .slayer > .frame :is(.fh, .dept-chip, .dept-chip .edge-in > *), :scope > .slayer > :is(.sslot, .shead), :scope > .pchip')) observer.observe(card);
     return () => observer.disconnect();
   }, [s, redraw]);
   return { s, world, measured: sizes !== UNMEASURED };
@@ -119,8 +123,22 @@ const COVER = { window: 688, task: LEFT_PANEL_COVER } as const;
 const MIN_K = 0.15, MAX_K = 2;
 /* Below this scale the schema shows colors instead of text. */
 const FAR_K = 0.55;
-/* The schema opens at least this large, from its left edge, when it does not fit the screen. */
-const START_K = 0.62;
+/* The Head of Design's word for #1489: a department opens with its chips read at once, their 13.5 px names drawn 11 px tall or
+   more, on a phone too; a schema that does not fit so opens at this size from its left edge, and the canvas scrolls it. */
+export const READABLE_K = 0.82;
+
+/* Where the schema stands in the room of its canvas, from the canvas's left, as wide and tall as it is, with what its bottom
+   keeps for the zoom, the line of what happened as tall as that may grow and the tools. Whole, between the top bar and that
+   room, when Show everything asks for it or when it fits so at a readable size; otherwise readable, from its top left. */
+export function schemaView(room: { left: number; width: number; height: number; bottom: number }, size: { right: number; h: number }, whole: boolean) {
+  const padTop = 76, padBottom = Math.max(76, room.bottom), padX = 48;
+  const bw = size.right + 80, bh = size.h + 40;
+  const fitK = Math.max(MIN_K, Math.min((room.width - padX * 2) / bw, (room.height - padTop - padBottom) / bh, 1));
+  const k = whole || fitK >= READABLE_K ? fitK : READABLE_K;
+  const x = k === fitK ? (room.width - bw * k) / 2 + 40 * k : padX + 40 * k;
+  const y = k === fitK ? padTop + (room.height - padTop - padBottom - bh * k) / 2 + 20 * k : padTop + 20 * k;
+  return { k, x: room.left + x, y };
+}
 const PULSE_SPEED = 160;
 const FLASH_MS = 1400;
 
@@ -160,7 +178,9 @@ function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { 
             <ProviderMark provider={head.provider} />
           </span>
           <span className="hn">{head.name}</span>
-          <span className="meta">{[role && role !== head.name ? role : null, modelLine(t, head)].filter(Boolean).join(', ')}</span>
+          <span className="meta">
+            <Listed parts={[...(role && role !== head.name ? [role] : []), ...modelParts(t, head)]} />
+          </span>
           <span className="meta" dir="auto">{stats}</span>
           <span className="hx">
             <span className="st">{t.dept.status[head.status]}</span>
@@ -237,6 +257,47 @@ function DrawerHead({ title, onClose }: { title: string; onClose(): void }) {
   );
 }
 
+/* The line of what happened, in its own direction: as many lines as its words take, up to three. A longer one folds to three,
+   and its own button at the end of the first row unfolds it whole and folds it again. It is measured folded, as it shows. */
+function HintLine({ said }: { said: Said }) {
+  const t = useT();
+  const id = useId();
+  const fold = useRef<HTMLSpanElement>(null), words = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+  const [long, setLong] = useState(false);
+  const text = said?.text ?? t.dept.hint;
+  useLayoutEffect(() => {
+    setOpen(false);
+    const box = fold.current, line = words.current;
+    if (!box || !line) return;
+    const measure = () => {
+      if (box.classList.contains('folded')) setLong(line.offsetHeight > box.clientHeight + 1);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = guardedResizeObserver(measure, 'department-hint');
+    observer.observe(line);
+    return () => observer.disconnect();
+  }, [said?.key]);
+  const toggle = open ? t.dept.hintLess : t.dept.hintMore;
+  return (
+    <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
+      <span className="live" />
+      {said && <span className="tt">{said.at}</span>}
+      <span ref={fold} id={id} className={`tx-fold${open ? '' : ' folded'}`}>
+        <span ref={words} key={said?.key ?? 0} className="tx in" dir="auto" title={text}>
+          {text}
+        </span>
+      </span>
+      {long && (
+        <button className="zbtn tx-more" type="button" aria-expanded={open} aria-controls={id} aria-label={toggle} title={toggle} onClick={() => setOpen(!open)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={open ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'} /></svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* The zoom bar and the gap after it, along the bottom of a wide screen, where the ticker starts. */
 const ZOOM_ROOM = 212;
 
@@ -261,6 +322,8 @@ function oneLineOverflow(title: HTMLElement): number {
 function useDepartmentSpace(language: string, panel: Props['panel'], tools: string, onCrumbs?: (px: number) => void) {
   const root = useRef<HTMLDivElement>(null), dock = useRef<HTMLDivElement>(null), actions = useRef<HTMLDivElement>(null), crumbs = useRef<HTMLElement>(null);
   const [space, setSpace] = useState({ right: 16, bottom: 228, top: 116, tickerHidden: false });
+  /* What Show everything leaves free at the bottom: the dock, with the line of what happened as tall as it shows folded. */
+  const fitBottom = useRef(76);
   const tickerHidden = space.tickerHidden;
   const [icons, setIcons] = useState(false);
   const need = useRef<{ words: string; px: number } | null>(null);
@@ -282,6 +345,10 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
       const line = el.querySelector<HTMLElement>(':scope > .dv-dock > .ticker');
       const bottom = phone ? (el.clientHeight ? el.clientHeight - (dock.current ?? acts).offsetTop + 8 : 228)
         : Math.max(76, el.clientHeight && line ? el.clientHeight - line.offsetTop + 16 : 0);
+      /* The line of what happened keeps its own room: as much as it shows folded, three lines, whatever it says now. */
+      const fold = line?.querySelector<HTMLElement>(':scope > .tx-fold.folded');
+      const most = fold ? parseFloat(getComputedStyle(fold).maxHeight) : NaN;
+      fitBottom.current = bottom + (fold && most > fold.offsetHeight ? most - fold.offsetHeight : 0);
       const name = crumbs.current, title = name?.querySelector('h2');
       const top = phone ? (name?.offsetHeight ? name.offsetTop + name.offsetHeight + 8 : 116)
         : Math.max(68, name?.offsetHeight ? name.offsetTop + name.offsetHeight + 12 : 0);
@@ -302,7 +369,7 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
   }, [panel, icons, words, onCrumbs, tickerHidden]);
   useEffect(() => () => onCrumbs?.(0), [onCrumbs]);
   const style = { '--ticker-right': `${space.right}px`, '--tree-bottom': `${space.bottom}px`, '--tree-top': `${space.top}px` } as CSSProperties;
-  return { root, dock, actions, crumbs, style, icons, tickerHidden: space.tickerHidden };
+  return { root, dock, actions, crumbs, style, icons, tickerHidden: space.tickerHidden, fitBottom };
 }
 
 /* Inside a department: the head above the current task stages and their owners. Tasks, the repository, products and
@@ -351,7 +418,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   const box = useRef<HTMLDivElement>(null);
   const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, `${d.id}:${tree}`, { min: MIN_K, max: MAX_K });
   const far = view.k < FAR_K;
-  const { s, world, measured } = useMeasuredSchema(d, reach.length, `${language}|${far}|${tree}`);
+  const { s, world, measured } = useMeasuredSchema(d, reach.length, `${language}|${tree}`);
   const paths = useMemo(() => stepPaths(s), [s]);
   const covered = panel ? COVER[panel] : 0;
   const size = useRef(s);
@@ -359,21 +426,16 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
     size.current = s;
   }, [s]);
 
-  /* Opens at a readable size from the left when the schema is wider than the screen; Fit shows all of it. */
+  /* Opens at a readable size from the left when the schema does not fit so; Fit shows all of it. */
+  const fitBottom = chrome.fitBottom;
   const place = useCallback(
     (whole: boolean) => {
       const el = box.current;
       if (!el || !el.clientWidth) return;
       const { left, width } = canvasSpace(el.clientWidth, panel === 'window' ? 0 : covered, panel === 'window' ? covered : 0);
-      const padTop = 76, padBottom = 76, padX = 48;
-      const bw = size.current.right + 80, bh = size.current.h + 40;
-      const fitK = Math.max(MIN_K, Math.min((width - padX * 2) / bw, (el.clientHeight - padTop - padBottom) / bh, 1));
-      const k = whole || fitK >= START_K ? fitK : START_K;
-      const x = k === fitK ? (width - bw * k) / 2 + 40 * k : padX + 40 * k;
-      const y = k === fitK ? padTop + (el.clientHeight - padTop - padBottom - bh * k) / 2 + 20 * k : padTop + 20 * k;
-      setView({ k, x: left + x, y, smooth: true });
+      setView({ ...schemaView({ left, width, height: el.clientHeight, bottom: fitBottom.current }, size.current, whole), smooth: true });
     },
-    [covered, panel, setView],
+    [covered, panel, setView, fitBottom],
   );
 
   /* The schema is placed again when its frames or their staff change, and once its cards are first measured, not when a card
@@ -539,7 +601,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
                   onChange={ev => flipRole(f.role!.title[language], f.members.map(m => m.e))(ev.target.checked)}
                 />
               )}
-              <div className="slayer">{f.members.map(m => <Chip key={m.e.id} e={shown(m.e)} x={m.x - f.x} y={m.y - s.ft} on={selected === m.e.id} lead={leadsStage(m.e)} flash={flashing.has(m.e.id)} serverNow={serverNow} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />)}</div>
+              <div className="slayer">{f.members.map(m => <Chip key={m.e.id} e={shown(m.e)} x={m.x - f.x} y={m.y - s.ft} h={m.h} on={selected === m.e.id} lead={leadsStage(m.e)} flash={flashing.has(m.e.id)} serverNow={serverNow} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />)}</div>
             </div>
           ))}
           </section>
@@ -620,15 +682,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
         {/* The schema's zoom, or the tree's, which the tree puts here. */}
         <div className="dv-zoom" ref={setZoomSlot}>{!tree && <ZoomBar k={view.k} onZoom={zoomAt} onFit={() => place(true)} />}</div>
         {/* An open panel takes the room the ticker needs. */}
-        {!panel && !chrome.tickerHidden && (
-          <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
-            <span className="live" />
-            {said && <span className="tt">{said.at}</span>}
-            <span key={said?.key ?? 0} className="tx in" title={said?.text ?? t.dept.hint}>
-              {said?.text ?? t.dept.hint}
-            </span>
-          </div>
-        )}
+        {!panel && !chrome.tickerHidden && <HintLine said={said} />}
         <div className="dv-acts" ref={chrome.actions} data-fit={chrome.icons ? 'icons' : undefined} onPointerDown={e => e.stopPropagation()}>
           <div className="dv-tools glass">
             <button className="hbtn glass ib" type="button" aria-label={treeButton} title={treeButton} onClick={() => setTree(!tree)}>{tree ? <MapIcon /> : <TreeIcon />}</button>

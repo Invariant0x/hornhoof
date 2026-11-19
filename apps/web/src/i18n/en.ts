@@ -1567,6 +1567,8 @@ export const en = {
       [`${working} of ${total} ${plural('en', total, { one: 'agent', other: 'agents' })} working`, `${roles} ${plural('en', roles, { one: 'role', other: 'roles' })}`].join(', '),
     agents: (n: number) => (n ? `${n} ${plural('en', n, { one: 'agent', other: 'agents' })}` : 'Nobody yet'),
     hint: 'Work goes left to right through the gates. Whoever leads a stage now is marked in its role.',
+    hintMore: 'Show all of it',
+    hintLess: 'Show less',
     about: 'About the department',
     tasksButton: 'Department tasks',
     leads: 'Leads the department',

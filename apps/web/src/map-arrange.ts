@@ -9,10 +9,11 @@ import type { Point } from './ui/wires';
 /* World coordinates: people on top, the orchestrator in the middle, departments in two columns around him. */
 export const W = 1200, H = 900, CX = W / 2, CY = 420, HUB = 120;
 const CHIP_W = 160, CHIP_H = 56, CHIP_GAP = 20;
-/* A card grows by its turn strip while any department works in the turn, so every card of the map stays the same size. */
+/* A card grows by its turn strip while any department works in the turn, and to what the card of the most words needs, so
+   every card of the map stays the same size. */
 const DEPT_W = 280, DEPT_H = 160, DEPT_H_TURN = 196;
-/* Up to two rows sit at the four corners; more rows stack evenly around the hub, this far apart, and never closer than
-   ROW_GAP between the cards. */
+/* Up to two rows sit at the four corners, further out when the cards grow taller; more rows stack evenly around the hub, this
+   far apart. Cards never come closer than ROW_GAP. */
 const CORNER = 220, ROW = 220, ROW_GAP = 32;
 /* Room between the people and the top row, and above whatever comes below the hub or the lowest row. */
 export const GAP = 28;
@@ -25,13 +26,17 @@ export type DeptSpot = { x: number; y: number; w: number; h: number; path: Point
 
 /* How far above or below the hub each row's middle sits. */
 function rowOffsets(rows: number, h: number): number[] {
-  if (rows <= 2) return [-CORNER, CORNER].slice(0, rows);
+  if (rows <= 2) {
+    const corner = Math.max(CORNER, (h + ROW_GAP) / 2);
+    return [-corner, corner].slice(0, rows);
+  }
   const step = Math.max(ROW, h + ROW_GAP);
   return Array.from({ length: rows }, (_, r) => (r - (rows - 1) / 2) * step);
 }
 
-/* How tall the cards of the map are: taller for the turn strip while any department works in the turn. */
-const cardHeight = (org: Org): number => (workingTurns(org.departments).length ? DEPT_H_TURN : DEPT_H);
+/* How tall the cards of the map are: taller for the turn strip while any department works in the turn, and as tall as the
+   words of one need, as measured on the screen. */
+const cardHeight = (org: Org, need: number): number => Math.max(workingTurns(org.departments).length ? DEPT_H_TURN : DEPT_H, need);
 
 /* Departments fill the left and right columns in turn, top row first. A row level with the hub runs straight out; the others
    run out under the hub, turn up or down beside it and come into the near side of their card, all at right angles. */
@@ -133,9 +138,10 @@ type Bendable = { key: string; from: Rect; to: Rect; ends: string[]; home: boole
 /* Where every block of the map stands for this person, and the lines between them. Nothing moved, it is the map as the map
    places it. A moved block keeps its lines at right angles: a line whose ends stand as placed keeps its way unless a moved
    block now stands across it; any other is routed again, around the blocks in its way. A person docked beside a department
-   goes with it. A line the person bent runs through its bends, and the others join it where they run beside it. */
-export function arrangeMap(org: Org, placed: Placed = {}, bends: Bends = {}): MapArrangement {
-  const n = org.departments.length, h = cardHeight(org);
+   goes with it. A line the person bent runs through its bends, and the others join it where they run beside it. need: how
+   tall the card of the most words needs to be. */
+export function arrangeMap(org: Org, placed: Placed = {}, bends: Bends = {}, need = 0): MapArrangement {
+  const n = org.departments.length, h = cardHeight(org, need);
   const spots = deptLayout(n, h);
   const hubHome = { x: CX - HUB, y: CY - HUB, w: 2 * HUB, h: 2 * HUB };
   const hub = placedAt(placed, HUB_KEY, hubHome);
