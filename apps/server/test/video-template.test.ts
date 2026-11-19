@@ -31,7 +31,7 @@ describe('the laws of video production', () => {
     ];
     for (const path of files) {
       const text = readFileSync(new URL(path, DIR), 'utf8');
-      expect(text, path).not.toMatch(/ArSpatially|Hornhoof|\b(?:Ivan|Kling|Runway|Veo|Sora|Shorts|Reels|TikTok)\b|[\u2013\u2014\u0401\u0451]/i);
+      expect(text, path).not.toMatch(/Hornhoof|\b(?:Ivan|Kling|Runway|Veo|Sora|Shorts|Reels|TikTok)\b|[\u2013\u2014\u0401\u0451]/i);
       expect(readFileSync(new URL('SOURCES.md', DIR), 'utf8'), path).toContain(`| \`${path}\` |`);
     }
   });

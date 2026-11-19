@@ -474,7 +474,7 @@ an account the company has, so no password passes through it.
 ### Added
 
 - outbound_account_add connects one more mail account to a channel with the settings of an account the company already
-  has, sending from its own address, like kate@ next to hello@; the settings go from one account to the other inside
+  has, sending from its own address, like news@ next to hello@; the settings go from one account to the other inside
   Hornhoof and never through a model. outbound_account_bind makes an employee the one who writes from an account. Both
   are the orchestrator's; a new password or another server a person still gives on the channel's screen.
 
@@ -494,7 +494,7 @@ an account the company has, so no password passes through it.
 - Навыки оркестратора и блокнота говорят то же: ограничения записаны в блокноте компании, остальное делается без
   просьб о подтверждении.
 - outbound_account_add подключает к каналу еще один почтовый ящик с настройками ящика, который у компании уже есть, со
-  своим адресом отправителя, например kate@ рядом с hello@; настройки переходят из ящика в ящик внутри Hornhoof и не
+  своим адресом отправителя, например news@ рядом с hello@; настройки переходят из ящика в ящик внутри Hornhoof и не
   проходят через модель. outbound_account_bind назначает сотрудника, который пишет с ящика. Оба инструмента у
   оркестратора; новый пароль или другой сервер по-прежнему вводит человек на экране канала.
 
