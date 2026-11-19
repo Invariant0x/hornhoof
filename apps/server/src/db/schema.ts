@@ -2295,6 +2295,12 @@ export const certificates = pgTable('certificates', {
   createdAt: createdAt(),
 }).enableRLS();
 
+/* A restore may predate a revoked certificate and its machine. Keep the serial independently until it expires. */
+export const revokedCertificateSerials = pgTable('revoked_certificate_serials', {
+  serial: text('serial').primaryKey(),
+  until: timestamp('until', { withTimezone: true }).notNull(),
+}, t => [index('revoked_certificate_serials_until').on(t.until)]).enableRLS();
+
 /* visit: the relay's key for a visitor of the link, with the link's name, as JSON. */
 export const PEER_SECRET_KINDS = ['data', 'app', 'visit'] as const;
 

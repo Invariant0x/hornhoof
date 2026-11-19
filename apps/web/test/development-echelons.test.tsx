@@ -19,18 +19,18 @@ async function panel(task = ECHELON_TASK, language = 'en') {
 }
 
 describe('the required echelon presentation', () => {
-  it.each(['en', 'ru'])('shows the ordered route with English stage names in %s', async language => {
+  it.each(['en', 'ru'])('shows the ordered route with the stage names of %s', async language => {
     await panel(ECHELON_TASK, language);
     const route = await screen.findByRole('list', { name: language === 'ru' ? 'Маршрут задачи' : 'Task workflow' });
     const stages = within(route).getAllByRole('listitem');
-    expect(stages.map(li => li.querySelector('b')!.textContent)).toEqual(['Architecture', 'Development', 'Review', 'Security', 'Tests']);
+    expect(stages.map(li => li.querySelector('b')!.textContent)).toEqual(language === 'ru' ? ['Архитектура', 'Разработка', 'Проверка', 'Безопасность', 'Тесты'] : ['Architecture', 'Development', 'Review', 'Security', 'Tests']);
     expect(stages[0]).toHaveClass('skipped');
     expect(stages[0]).toHaveTextContent('Small task');
     expect(stages[2]).toHaveAttribute('aria-current', 'step');
     expect(await within(stages[2]!).findByText(language === 'ru' ? 'Исполнитель: Rita' : 'Owner: Rita')).toBeInTheDocument();
     expect(stages[3]).toHaveTextContent('Not required');
     expect(route).not.toHaveTextContent('Backend engineer');
-    expect(route).not.toHaveTextContent('Cleanup');
+    expect(route).not.toHaveTextContent(language === 'ru' ? 'Уборка лишнего' : 'Cleanup');
   });
 
   it('shows optional Cleanup only where the head inserted it after Review', async () => {
