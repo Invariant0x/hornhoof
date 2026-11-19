@@ -102,6 +102,8 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     };
     /* Only people who see the whole company and a department's owner set its repositories, so only they read where they are. */
     const repositoryOf = (d: (typeof depts)[number]) => (reach.whole || reach.owns?.has(d.parentId ?? d.id) ? repoView(d) : null);
+    /* Whether it or one of its products keeps one is everyone's, as its work tree says: work without one goes in as documents. */
+    const keepsRepository = (d: (typeof depts)[number]) => depts.some(p => (p.id === d.id || p.parentId === d.id) && Boolean(p.repoUrl));
     /* And the key of the git host Hornhoof creates its repositories with, never the key itself. */
     const hosts = await hostsOf(db, me.companyId);
     const repoHostOf = (d: (typeof depts)[number]) => (reach.whole || reach.owns?.has(d.id) ? hosts(d.id) : null);
@@ -274,6 +276,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           products: depts.filter(p => p.parentId === d.id).map(p => ({ id: p.id, name: deptName(p), repository: repositoryOf(p) })),
           current: currentOf(d.id),
           repository: repositoryOf(d),
+          keepsRepository: keepsRepository(d),
           repoHost: repoHostOf(d),
           teams: allTeams
             .filter(t => t.departmentId === d.id)
