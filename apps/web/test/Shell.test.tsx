@@ -216,7 +216,7 @@ describe('Shell', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Talk to the orchestrator' });
     expect(within(dialog).getByText('What would you like me to do?')).toBeInTheDocument();
     const user = userEvent.setup();
-    await user.click(await within(dialog).findByRole('button', { name: 'Set up Accounting for my bills and papers' }));
+    await user.click(await within(dialog).findByRole('button', { name: 'Set up a way to manage household bills and records' }));
     expect(await within(dialog).findByText('Where do you keep your bills?')).toBeInTheDocument();
     expect(calls).toContainEqual({ method: 'POST', path: '/api/orchestrator/first-contact', body: { offer: 'householdBooks', language: 'en' } });
     await user.click(within(dialog).getByRole('button', { name: 'Close' }));
