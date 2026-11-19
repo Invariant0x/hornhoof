@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { fsyncSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -11,6 +11,11 @@ import { exitsCleanly, installPackage, interactiveLogin, runProgram } from '../s
 import { PassThrough } from 'node:stream';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'hh-iso-'));
+
+vi.mock('node:fs', async importOriginal => {
+  const real = await importOriginal<typeof import('node:fs')>();
+  return { ...real, fsyncSync: vi.fn(real.fsyncSync), readFileSync: vi.fn(real.readFileSync), writeFileSync: vi.fn(real.writeFileSync) };
+});
 
 /* What each program was started as. A program asked to run as another user than this test's gets the system's answer to a
    node that is not root, recorded: the system refuses. */
@@ -53,6 +58,63 @@ describe('userFor', () => {
 
   it('gives no user when the node does not run as root', () => {
     expect(userFor(tmp(), 'sub-a', false)).toBeNull();
+  });
+
+  it.each([
+    ['truncated JSON', '{"sub-a":'],
+    ['an array', '[20000]'],
+    ['a nonnumeric UID', '{"sub-a":"20000"}'],
+    ['a UID outside the node range', '{"sub-a":0}'],
+    ['a repeated UID', '{"sub-a":20000,"sub-b":20000}'],
+  ])('stops allocation and leaves users.json in place when it contains %s', (_reason, saved) => {
+    const dir = tmp();
+    const file = join(dir, 'users.json');
+    writeFileSync(file, saved, { mode: 0o600 });
+
+    expect(() => userFor(dir, 'sub-c', true)).toThrow(/invalid users\.json/i);
+    expect(readFileSync(file, 'utf8')).toBe(saved);
+  });
+
+  it('stops allocation and preserves the mapping when users.json cannot be read', () => {
+    const dir = tmp();
+    const file = join(dir, 'users.json');
+    const saved = '{"sub-a":20000}';
+    writeFileSync(file, saved, { mode: 0o600 });
+    vi.mocked(readFileSync).mockImplementationOnce(() => { throw Object.assign(new Error('permission denied'), { code: 'EACCES' }); });
+
+    expect(() => userFor(dir, 'sub-b', true)).toThrow(/cannot read users\.json.*permission denied/i);
+    expect(readFileSync(file, 'utf8')).toBe(saved);
+  });
+
+  it('keeps the last complete mapping when a write stops partway through', async () => {
+    const dir = tmp();
+    const file = join(dir, 'users.json');
+    userFor(dir, 'sub-a', true);
+    const saved = readFileSync(file, 'utf8');
+    const real = await vi.importActual<typeof import('node:fs')>('node:fs');
+    vi.mocked(writeFileSync).mockImplementationOnce((target, data) => {
+      real.writeFileSync(target, String(data).slice(0, 6));
+      throw Object.assign(new Error('no space left'), { code: 'ENOSPC' });
+    });
+
+    expect(() => userFor(dir, 'sub-b', true)).toThrow(/no space left/i);
+    expect(readFileSync(file, 'utf8')).toBe(saved);
+    expect(readdirSync(dir)).toEqual(['users.json']);
+    expect(userFor(dir, 'sub-b', true)).toEqual({ uid: 20001, gid: 20001 });
+    expect(userFor(dir, 'sub-a', true)).toEqual({ uid: 20000, gid: 20000 });
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it('keeps the last complete mapping when flushing the temporary file fails', () => {
+    const dir = tmp();
+    const file = join(dir, 'users.json');
+    userFor(dir, 'sub-a', true);
+    const saved = readFileSync(file, 'utf8');
+    vi.mocked(fsyncSync).mockImplementationOnce(() => { throw Object.assign(new Error('flush failed'), { code: 'EIO' }); });
+
+    expect(() => userFor(dir, 'sub-b', true)).toThrow(/flush failed/i);
+    expect(readFileSync(file, 'utf8')).toBe(saved);
+    expect(readdirSync(dir)).toEqual(['users.json']);
   });
 });
 
