@@ -14,7 +14,7 @@ import { QuestionButton, STATE_CLASS, StateWord, WaitLine } from './TaskActivity
 import { GOAL_CLASS, goalProgress } from './GoalPanel';
 
 /* How a view opens a task's card and marks the open one. asksYou: an open question on a task is the person's to answer. */
-export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; questionAt?: (id: string) => string | undefined; onOpenGoal?: (id: string) => void; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined; stageOwner?: (stage: PipelineStage) => string | undefined };
+export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; questionAt?: (id: string) => string | undefined; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined; stageOwner?: (stage: PipelineStage) => string | undefined };
 
 /* A value of a row with its name, which shows beside it only where the row is too narrow for the names above the list. The
    pair keeps its own direction, so "Executor: Hana" reads in that order right to left, and so does the value alone, so the
@@ -57,8 +57,6 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
   const waits = taskWaits(task);
   const prerequisites = new Set(waits.flatMap(wait => wait.kind === 'after' && wait.reason ? [wait.reason] : []));
   const needed = (relations.get(task.number) ?? []).filter(other => other.department && other.department.id !== task.department?.id);
-  /* A subtask serves its task's goal, which the task's row already names. */
-  const goal = depth === 0 ? task.goal : null;
   const executor = doerOf(task);
   const route = task.echelons;
   const ghostStage = route.phase === 'active' && route.stage && route.oneShot?.[route.stage];
@@ -95,15 +93,6 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
           {ghostStage && <WorkerMark kind="ghost" className="tr-stage-ghost" />}
         </Cell>
         <Cell name={words.responsible} person>{task.responsible ? <PersonMark person={task.responsible} /> : t.tracker.nobody}</Cell>
-        <Cell name={words.goal}>
-          {goal && (
-            <a className="linkish tr-goal-link" dir="auto" href={routePath({ kind: 'tasks', card: 'goal', id: goal.id })} onClick={e => {
-              if (!rows.onOpenGoal || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-              e.preventDefault();
-              rows.onOpenGoal(goal.id);
-            }}>{goal.title}</a>
-          )}
-        </Cell>
         <Cell name={words.due}>{due && <span className={due.late ? 'tp-late' : undefined}>{due.text}</span>}</Cell>
       </div>
       {hasChildren && (
@@ -121,7 +110,7 @@ function ListHead() {
   const words = t.tracker.list;
   return (
     <div className="tr-cells tr-head" aria-hidden="true">
-      <span>{words.task}</span><span>{words.executor}</span><span>{words.responsible}</span><span>{words.goal}</span><span>{words.due}</span>
+      <span>{words.task}</span><span>{words.executor}</span><span>{words.responsible}</span><span>{words.due}</span>
     </div>
   );
 }
@@ -274,7 +263,7 @@ function GoalRow({ tree, onOpenGoal, depth = 0 }: { tree: GoalTree; onOpenGoal: 
             </span>
           </div>
         </div>
-        <span className="tr-cell tr-cell-wide" dir="auto"><span className="tr-k">{words.progress}</span><span className="tr-v"><GoalProgressCell goal={goal} /></span></span>
+        <span className="tr-cell" dir="auto"><span className="tr-k">{words.progress}</span><span className="tr-v"><GoalProgressCell goal={goal} /></span></span>
         <Cell name={words.responsible} person><PersonMark person={goal.responsible} /></Cell>
         <Cell name={words.due}>{due && <span className={due.late ? 'tp-late' : undefined}>{due.text}</span>}</Cell>
       </div>
@@ -312,7 +301,7 @@ export function TrackerGoals({ goals, label, empty, onOpenGoal }: { goals: GoalV
                 </h2>
                 {i === 0 && (
                   <div className="tr-cells tr-head" aria-hidden="true">
-                    <span>{words.task}</span><span className="tr-cell-wide">{words.progress}</span><span>{words.responsible}</span><span>{words.due}</span>
+                    <span>{words.task}</span><span>{words.progress}</span><span>{words.responsible}</span><span>{words.due}</span>
                   </div>
                 )}
                 <div><ul className="tr-rows">{group.trees.map(tree => <GoalRow key={tree.goal.id} tree={tree} onOpenGoal={onOpenGoal} />)}</ul></div>

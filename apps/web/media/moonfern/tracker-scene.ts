@@ -66,7 +66,7 @@ function trackerWords(t: Messages, view: 'tasks' | 'board' | 'turns'): string[] 
   }
   const controls = [...Object.values(views), filters.group(), filters.executor, filters.responsible, ...Object.values(statuses)];
   return view === 'tasks'
-    ? [...common, ...controls, filters.showSubtasks, list.task, list.executor, list.responsible, list.goal, list.due,
+    ? [...common, ...controls, filters.showSubtasks, list.task, list.executor, list.responsible, list.due,
       list.subtasks(1, 3), ...Object.values(t.tracker.priority), t.tracker.nobody, t.tracker.noGoal, t.tracker.wait.employee(''), t.tracker.wait.detail('', ''),
       t.tracker.card.executor, t.tracker.card.responsible, t.tracker.card.due, t.tasks.taskActions, t.tasks.log]
     : [...common, ...controls, board.subtasks(1, 1), board.empty, t.tracker.wait.question,
@@ -295,7 +295,7 @@ async function listRowGeometry(row: Locator) {
         const mark = value.querySelector('.tr-mark');
         return {
           start: start(cell), width: cell.getBoundingClientRect().width, top: cell.getBoundingClientRect().top,
-          center: mark ? center(mark) : firstLineCenter(value.querySelector('.tr-goal-link') ?? value),
+          center: mark ? center(mark) : firstLineCenter(value),
         };
       }),
     };
@@ -327,7 +327,8 @@ async function assertListRows(list: Locator, parent: Locator, leaf: Locator, wid
       aligns(fact.start, short.facts[index]!.start);
       aligns(fact.center, long.titleCenter);
     }
-    expect(long.nameWidth).toBeGreaterThan(long.facts.reduce((width, fact) => width + fact.width, 0));
+    /* The task takes two thirds of the line at least, its three facts the rest. */
+    expect(long.nameWidth).toBeGreaterThanOrEqual(2 * long.facts.reduce((width, fact) => width + fact.width, 0) - 1);
   } else {
     await expect(list.locator('.tr-head')).toBeHidden();
     for (const row of [long, short]) {

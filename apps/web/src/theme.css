@@ -2033,15 +2033,12 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 :root[data-scheme="light"] :is(.tr-node.goal, .tr-node.on, button.tr-node:hover) { border-color: var(--cyan-ink); }
 :root[data-scheme="light"] .tr-card.on { background: var(--cyan-ink); }
 .tr-found > h2 { margin: 0; font-size: 15px; }
-/* The goals page: the list's rows, a goal's mark in the accent, its progress over the two middle columns. */
+/* The goals page: the list's rows, a goal's mark in the accent, its progress in the executor's column. */
 .tr-goal-mark { display: grid; place-items: center; flex: none; inline-size: 14px; block-size: max(var(--row), 1lh); color: var(--cyan-ink); }
 .tr-goal-mark .ic { inline-size: 14px; block-size: 14px; }
 .tr-goals-page .goal-progress { grid-template-columns: minmax(0, 1fr); gap: 4px; max-inline-size: none; font-size: 12px; }
 .tr-goals-page .goal-progress small { overflow-wrap: normal; }
 .tr-goal-title { text-decoration: none; }
-@container tr-list (width > 640px) {
-  .tr-cell-wide { grid-column: span 2; }
-}
 .tr-found { display: grid; gap: 10px; min-width: 0; }
 .tr-waits { display: grid; gap: 6px; }
 .tr-waits h3 { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
@@ -2132,8 +2129,8 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-status-pill.review { --tr-tone: var(--tracker-palette-violet); }
 
 /* The list as mockup 10's table: a coloured pill and a count over each status, the names of the columns once under the
-   first pill, then one line per task in the mockup's shares of 44, 14, 14, 14 and 14 percent, each never narrower than its
-   longest word or mark. A row is the mockup's 37px: what is pressed in it is 24px high for a mouse, 6px above and below and
+   first pill, then one line per task: the task over two thirds of the width, its executor, responsible and due date over a
+   ninth each, each never narrower than its longest word or mark. A row is the mockup's 37px: what is pressed in it is 24px high for a mouse, 6px above and below and
    a line. A subtask stands 36px further in, under its task. */
 .tr-list { --row: var(--tracker-target-fine); container: tr-list / inline-size; display: grid; min-inline-size: 0; }
 .tr-list-grid, .tr-group, .tr-rows, .tr-row { min-inline-size: 0; }
@@ -2178,15 +2175,14 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-line .badge { white-space: normal; }
 .tr-line > .act { block-size: auto; min-block-size: max(var(--row), 24px); padding: 0 8px; font-size: 12px; }
 .tr-relation { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; max-inline-size: 100%; overflow-wrap: anywhere; }
-.tr-goal-link { display: inline-flex; align-items: center; min-block-size: var(--row); max-inline-size: 100%; font-size: 12px; color: var(--cyan-ink); text-align: inherit; text-decoration: none; overflow-wrap: anywhere; }
-.tr-goal-link:is(:hover, :focus-visible) { text-decoration: underline; }
 .tr-row-line .tp-late { color: var(--pink-ink); font-weight: 600; }
 .tr-cell { min-inline-size: 0; overflow-wrap: anywhere; }
 .tr-k { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .tr-v { display: block; min-inline-size: 0; color: var(--ink); }
 .tr-id-name { display: none; }
-@container tr-list (width > 640px) {
-  .tr-list-grid { display: grid; grid-template-columns: minmax(min-content, 44fr) repeat(4, minmax(min-content, 14fr)); }
+@container tr-list (width > 960px) {
+  /* The task takes two thirds of the width; the executor, the responsible and the due date share the rest. */
+  .tr-list-grid { display: grid; grid-template-columns: minmax(min-content, 6fr) repeat(3, minmax(min-content, 1fr)); }
   .tr-group, .tr-group > div, .tr-rows, .tr-row, .tr-cells { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
   .tr-group-head { grid-column: 1 / -1; }
   .tr-group > [hidden], .tr-rows[hidden] { display: none; }
@@ -2194,7 +2190,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .tr-cells:dir(rtl) > .tr-cell > .tr-v:dir(ltr), .tr-cells:dir(ltr) > .tr-cell > .tr-v:dir(rtl) { justify-content: flex-end; text-align: end; }
 }
 /* A narrow list puts each fact under the title, after its name. */
-@container tr-list (max-width: 640px) {
+@container tr-list (max-width: 960px) {
   .tr-head { display: none; }
   .tr-row-line { grid-template-columns: minmax(0, 1fr); row-gap: 4px; }
   .tr-task-name { padding-inline-start: calc(8px + min(var(--tr-depth) * 16px, 12%)); }
