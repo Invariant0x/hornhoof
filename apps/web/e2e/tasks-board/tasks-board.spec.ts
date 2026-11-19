@@ -165,26 +165,7 @@ test('pans and zooms the graph with a drag and the zoom bar, and opens a card fr
   await expect(page).toHaveURL(/\/tasks\?goal=g2&view=graph$/);
 });
 
-for (const dir of ['ltr', 'rtl'] as const) {
-  test(`puts the card at the end side as the mockup's drawer, over the work and not narrowing it: ${dir}`, async ({ page }, info) => {
-    const t = MESSAGES.en;
-    await serveTasksBoard(page);
-    await open(page, 'en', 1440, `/tasks?department=${DEV.id}`);
-    await page.evaluate(d => { document.documentElement.dir = d; }, dir);
-    const row = page.getByRole('region', { name: t.tracker.views.list, exact: true }).getByRole('listitem', { name: named('Take card payments'), exact: true });
-    const before = (await page.locator('.tr-main').boundingBox())!;
-    await row.locator(':scope > .tr-cells .tr-title').click();
-    const card = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
-    const path = card.getByRole('navigation', { name: t.tracker.card.path });
-    await expect(path.getByRole('listitem')).toHaveText([GOALS[0]!.title, GOALS[1]!.title]);
-    const [panel, main] = [(await card.boundingBox())!, (await page.locator('.tr-main').boundingBox())!];
-    expect(Math.round(panel.width)).toBe(460);
-    expect(Math.round(dir === 'ltr' ? 1440 - (panel.x + panel.width) : panel.x)).toBe(0);
-    expect(Math.round(main.width)).toBe(Math.round(before.width));
-    expect(await sideways(page)).toBeLessThanOrEqual(0);
-    await capture(page, info, `card-${dir}-1440`);
-  });
-}
+/* Where the card stands and the room the work keeps beside it: desktop-room.spec.ts. */
 
 /* The colour a role of the skin gives words, as the engine computes it. */
 const roleColor = (page: Page, role: string) => page.evaluate(r => {

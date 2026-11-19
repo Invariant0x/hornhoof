@@ -126,6 +126,9 @@ const MIN_K = 0.15, MAX_K = 2;
 const FAR_K = 0.55;
 /* The schema opens at least this large, from its left edge, when it does not fit the screen. */
 const START_K = 0.62;
+/* The schema opens this far from the top of the screen, and at least this far inside its canvas, which starts under the band
+   of the top bar and the department's name. */
+const TOP_ROOM = 76, CANVAS_EDGE = 8;
 const PULSE_SPEED = 160;
 const FLASH_MS = 1400;
 
@@ -370,7 +373,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
       const el = box.current;
       if (!el || !el.clientWidth) return;
       const { left, width } = canvasSpace(el.clientWidth, panel === 'window' ? 0 : covered, panel === 'window' ? covered : 0);
-      const padTop = 76, padBottom = 76, padX = 48;
+      const padTop = Math.max(CANVAS_EDGE, TOP_ROOM - el.offsetTop), padBottom = 76, padX = 48;
       const bw = size.current.right + 80, bh = size.current.h + 40;
       const fitK = Math.max(MIN_K, Math.min((width - padX * 2) / bw, (el.clientHeight - padTop - padBottom) / bh, 1));
       const k = whole || fitK >= START_K ? fitK : START_K;

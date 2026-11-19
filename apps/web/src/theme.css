@@ -1333,6 +1333,9 @@ button.chip-btn.attn { --glow: var(--amber); --frame: var(--amber); }
   position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
   background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 22px 22px;
 }
+/* The top bar and the department's name keep a band of their own over the page's background, and the schema starts under
+   it, as the tree does: it opens and fits clear of the bar, and a part dragged or zoomed up goes out of sight at its edge. */
+.dcanvas { inset-block-start: var(--tree-top, var(--header-room)); }
 .dcanvas:active { cursor: grabbing; }
 .dcanvas .wires .tick { fill: none; stroke: var(--line2); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
 .wires .ko { fill: none; stroke: var(--bg); stroke-width: 7; vector-effect: non-scaling-stroke; }
@@ -2076,6 +2079,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   /* The least a pointer target takes: 24 px for a mouse (WCAG 2.5.8), 44 px for a finger. */
   --tracker-target-fine: 24px;
   --tracker-target-touch: 44px;
+  /* The card's width on a wide screen, and the room the strips of minimized windows keep at the right edge beside it. */
+  --tracker-card-size: 460px;
+  --tracker-strips-room: 32px;
 }
 :root[data-scheme='light'] {
   --tracker-mark-ink: var(--ink);
@@ -2180,8 +2186,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-k { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .tr-v { display: block; min-inline-size: 0; color: var(--ink); }
 .tr-id-name { display: none; }
-@container tr-list (width > 960px) {
-  /* The task takes two thirds of the width; the executor, the responsible and the due date share the rest. */
+@container tr-list (width > 640px) {
+  /* The task takes two thirds of the width; the executor, the responsible and the due date share the rest. Beside the open
+     card on a wide screen too, as Design's amendment of mockup 10 has it (#1556): the narrow list is for 640 px and under. */
   .tr-list-grid { display: grid; grid-template-columns: minmax(min-content, 6fr) repeat(3, minmax(min-content, 1fr)); }
   .tr-group, .tr-group > div, .tr-rows, .tr-row, .tr-cells { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
   .tr-group-head { grid-column: 1 / -1; }
@@ -2190,7 +2197,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .tr-cells:dir(rtl) > .tr-cell > .tr-v:dir(ltr), .tr-cells:dir(ltr) > .tr-cell > .tr-v:dir(rtl) { justify-content: flex-end; text-align: end; }
 }
 /* A narrow list puts each fact under the title, after its name. */
-@container tr-list (max-width: 960px) {
+@container tr-list (max-width: 640px) {
   .tr-head { display: none; }
   .tr-row-line { grid-template-columns: minmax(0, 1fr); row-gap: 4px; }
   .tr-task-name { padding-inline-start: calc(8px + min(var(--tr-depth) * 16px, 12%)); }
@@ -2284,14 +2291,17 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .tr-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
 .tr-legend .wait { color: var(--amber-ink); }
 
-/* The card as mockup 10's drawer. On the tracker it lies at the end side from under the top bar to the bottom, over the work
-   without narrowing it; on a phone it takes the whole screen under the top bar. Its bar names what it is; its body goes from
-   the path, the kind, the title, the status, why and the bar, through the facts and the graph from here, to its sections. */
+/* The card as mockup 10's drawer. On the tracker it lies at the end side from under the top bar to the bottom, and the work
+   takes the room left beside it: the page ends where the card starts, so the list reflows there and its titles wrap instead
+   of running under the card. On a phone it takes the whole screen under the top bar. Its bar names what it is; its body goes
+   from the path, the kind, the title, the status, why and the bar, through the facts and the graph from here, to its sections. */
 @media (min-width: 761px) {
-  .body.tracker-page ~ .acard.at-end { inset-block: 68px 0; inset-inline-start: auto; inset-inline-end: 0; inline-size: 460px; max-inline-size: 100vw; border: 0; border-inline-start: 1px solid var(--line2); box-shadow: -12px 0 30px var(--shadow); }
+  .body.tracker-page ~ .acard.at-end { inset-block: 68px 0; inset-inline-start: auto; inset-inline-end: 0; inline-size: var(--tracker-card-size); max-inline-size: 100vw; border: 0; border-inline-start: 1px solid var(--line2); box-shadow: -12px 0 30px var(--shadow); }
   .body.tracker-page ~ .acard.at-end:dir(rtl) { box-shadow: 12px 0 30px var(--shadow); }
+  .body.tracker-page:has(~ .acard.at-end) { inset-inline-end: var(--tracker-card-size); }
   /* The strips of minimized windows stand at the right edge; the drawer leaves them in reach beside it. */
-  .shell:has(.agent-strips:not(:empty)) .body.tracker-page ~ .acard.at-end:dir(ltr) { inset-inline-end: 32px; }
+  .shell:has(.agent-strips:not(:empty)) .body.tracker-page ~ .acard.at-end:dir(ltr) { inset-inline-end: var(--tracker-strips-room); }
+  .shell:has(.agent-strips:not(:empty)) .body.tracker-page:has(~ .acard.at-end):dir(ltr) { inset-inline-end: calc(var(--tracker-card-size) + var(--tracker-strips-room)); }
 }
 @media (max-width: 760px) {
   .body.tracker-page ~ .acard.at-end { inset: 68px 0 0; inline-size: auto; max-inline-size: none; border: 0; box-shadow: none; }
