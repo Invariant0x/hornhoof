@@ -457,6 +457,58 @@ describe('the keeper of backups', () => {
     expect(s.keeper.store().has(led.id)).toBe(true);
   });
 
+  /* B, a machine that holds the data and led before, with a certificate of its own, and a fork it sealed that the
+     server's keeper took from it. */
+  async function ledFrom(s: Awaited<ReturnType<typeof stand>>) {
+    await s.keeper.round();
+    const authority = (await authorityOf(s.db, s.config))!;
+    const b = await s.worker('studio', { role: 'data' });
+    const key = machineKey();
+    const issued = await issueCertificate(authority, { machineId: b, role: 'data', signKey: key.publicPem });
+    await s.db.insert(certificates).values({ serial: issued.serial, machineId: b, until: issued.until });
+    const held = { machine: b, role: 'data' as const, certPem: issued.certPem, authorityPem: authority.certPem, until: issued.until.toISOString() };
+    const peer = (machine: string): Peer => ({ machine, role: 'data', serial: issued.serial, until: issued.until, address: '127.0.0.1' });
+    const fork = () => s.head({ key, held, reason: 'fork' });
+    const led = await fork();
+    expect(await s.keeper.takeLed(peer(b), led.id, Readable.from([led.travels()]))).toBe(201);
+    return { b, peer, fork, led };
+  }
+
+  it('gives a bundle it holds to no machine but its signer', async () => {
+    const s = await stand();
+    const own = await s.bundle();
+    const { b, peer, led } = await ledFrom(s);
+    const records = () => s.asked.filter(call => call === 'POST /api/network/backups').length;
+    const before = records();
+    /* Another machine that holds the data sends a bundle under the id of one held here: B's fork, or the server's own
+       bundle. It is refused here, the app is not asked to record it under that machine's name, and both stay. */
+    const c = await s.worker('laptop', { role: 'data' });
+    expect(await s.keeper.takeLed(peer(c), led.id, Readable.from([led.travels()]))).toBe(403);
+    expect(await s.keeper.takeLed(peer(c), own, Readable.from([led.travels()]))).toBe(403);
+    expect(await s.keeper.takeLed(peer(b), own, Readable.from([led.travels()]))).toBe(403);
+    expect(records()).toBe(before);
+    expect([s.keeper.store().has(led.id), s.keeper.store().has(own)]).toEqual([true, true]);
+    /* Its signer sends it again, and it is recorded as before. */
+    expect(await s.keeper.takeLed(peer(b), led.id, Readable.from([led.travels()]))).toBe(200);
+    expect([s.keeper.store().has(led.id), s.keeper.store().has(own), (await bundleRow(s.db, led.id))?.id]).toEqual([true, true, led.id]);
+  });
+
+  it('keeps a bundle it held whatever the app answers, and drops only one the refused request brought', async () => {
+    const s = await stand();
+    const { b, peer, fork, led } = await ledFrom(s);
+    /* Its signer sends it again and the app refuses the record: the answer is the app's, and the bundle stays. */
+    for (const status of [400, 403, 409]) {
+      s.said.record = status;
+      expect(await s.keeper.takeLed(peer(b), led.id, Readable.from([led.travels()]))).toBe(status);
+      expect(s.keeper.store().has(led.id)).toBe(true);
+    }
+    /* A bundle this very request brought, which the app would not have: nothing of it stays. */
+    const fresh = await fork();
+    s.said.record = 400;
+    expect(await s.keeper.takeLed(peer(b), fresh.id, Readable.from([fresh.travels()]))).toBe(400);
+    expect([s.keeper.store().has(fresh.id), s.keeper.store().has(led.id)]).toEqual([false, true]);
+  });
+
   it('makes nothing while it does not lead', async () => {
     const s = await stand();
     s.said.leads = false;

@@ -8,7 +8,7 @@ import { idOnly, only } from '../../db/selections.js';
 import type { Mode } from '../keeper/state.js';
 import type { Db } from '../../db/client.js';
 import { MIGRATIONS } from '../../db/client.js';
-import { certificates, companies, computerRuns, departments, invites, machineAccess, machines, PEER_SECRET_KINDS, peerSecrets, people, personAccess, publicLinks, recoveryKeys, sessions, teams } from '../../db/schema.js';
+import { assistants, certificates, companies, computerRuns, departments, invites, machineAccess, machines, PEER_SECRET_KINDS, peerSecrets, people, personAccess, publicLinks, recoveryKeys, sessions, teams } from '../../db/schema.js';
 import { ApiError, loggable, type ErrorReason } from '../../errors.js';
 import { writeChoice } from '../merge/kept.js';
 import { authorityOf, findThisMachine } from '../network/store.js';
@@ -61,9 +61,9 @@ export function readRestoreStatus(controlDir: string): RestoreStatus | null {
 }
 
 /* Who may get in now, put into a database that was restored from an earlier time: a restore never brings back a person
-   who was disabled or removed since, a password that was changed, a machine that was disconnected or a recovery file that was
-   replaced. Removed accounts leave a record even if the backup predates them. Owners' machine settings carry forward;
-   employee computer grants and sessions end. */
+   who was disabled or removed since, a password that was changed, a machine that was disconnected, a recovery file that was
+   replaced or an assistant's key that was revoked or replaced. Removed accounts leave a record even if the backup predates
+   them. Owners' machine settings carry forward; employee computer grants and sessions end. */
 export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   const { db } = ctx;
   const [company] = await db.select(idOnly(companies)).from(companies).limit(1);
@@ -114,6 +114,7 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   const now = new Date();
   if (carry.serials.length > 0) await db.update(certificates).set({ revokedAt: now }).where(and(inArray(certificates.serial, carry.serials), isNull(certificates.revokedAt)));
   await carryRecoveryKeys(db, company.id, carry, known, now);
+  await carryAssistantKeys(db, carry);
   await db.transaction(async tx => {
     await tx.delete(machineAccess);
     await tx.update(computerRuns).set({ state: 'lost' }).where(inArray(computerRuns.state, ['waiting', 'sent']));
@@ -169,6 +170,19 @@ async function carryRecoveryKeys(db: Db, companyId: string, carry: Carry, known:
       const row = { recipient: key.recipient, linkPrint: key.linkPrint, linkName: key.linkName, linkUrl: key.linkUrl, madeBy, madeAt: new Date(key.madeAt), retiredAt: key.retiredAt ? new Date(key.retiredAt) : null };
       await tx.delete(recoveryKeys).where(and(eq(recoveryKeys.recipient, key.recipient), ne(recoveryKeys.id, key.id)));
       await tx.insert(recoveryKeys).values({ id: key.id, companyId, ...row }).onConflictDoUpdate({ target: recoveryKeys.id, set: row });
+    }
+  });
+}
+
+/* The assistants' keys as they were when the old database closed: a key revoked or replaced since opens nothing, and
+   the one that opened something then works on. An assistant made since is not in the restored database, nor is its key. */
+async function carryAssistantKeys(db: Db, carry: Carry): Promise<void> {
+  const keys = carry.assistantKeys;
+  if (!keys) return;
+  await db.transaction(async tx => {
+    await tx.update(assistants).set({ keyHash: null, keyCreatedAt: null, wakeSecretEnc: null }).where(isNotNull(assistants.keyHash));
+    for (const key of keys) {
+      await tx.update(assistants).set({ keyHash: key.keyHash, keyCreatedAt: timeOf(key.keyCreatedAt), wakeSecretEnc: key.wakeSecretEnc }).where(eq(assistants.personId, key.personId));
     }
   });
 }
