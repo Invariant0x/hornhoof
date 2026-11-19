@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { orchestratorStatus, deptLayout, pulsePath, MapScreen } from '../src/screens/Map';
+import { orchestratorStatus, deptLayout, pulsePath, MapScreen, writtenIn } from '../src/screens/Map';
 import type { SubView } from '../src/types';
 import { LanguageProvider } from '../src/i18n';
 import type { Department, Employee, Me } from '../src/types';
@@ -1463,6 +1463,21 @@ describe('Map', () => {
     expect(shots(container, 'a')[0]!.closest('[data-mask]')).toHaveAttribute('data-mask', mask);
     expect(container.querySelectorAll('.map-live .way-seg').length).toBeGreaterThan(3);
   });
+});
+
+/* #1580: words are Japanese when they hold hiragana or katakana, which only Japanese writes. Kanji alone may be Chinese, and
+   Latin letters are any language: the page's language speaks for them. */
+describe('writtenIn', () => {
+  it.each([
+    ['財務と経理の責任者', 'ja'],
+    ['レナ', 'ja'],
+    ['ブルーノ・ロッシ', 'ja'],
+    ['最高経営責任者', undefined],
+    ['开发部负责人', undefined],
+    ['Lena', undefined],
+    ['Финансы', undefined],
+    ['', undefined],
+  ])('%s is %s', (words, lang) => expect(writtenIn(words)).toBe(lang));
 });
 
 describe('deptLayout', () => {
