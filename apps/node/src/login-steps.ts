@@ -14,6 +14,9 @@ const seconds = (ms: number) => Math.round(ms / 1000);
 
 type ProgressOptions = { send(m: NodeMessage): void; log(line: string): void };
 
+/* Reads what a plan can do once its program signed in, saying each step. */
+export type ReadPlan = (step: (s: SigninStep) => void) => Promise<void>;
+
 /* The steps of one sign-in after its code, as Hornhoof hears them, and in the node's log when the code came, when the plan
    was ready and how long each step took. A sign-in that said no step yet says nothing when it ends. */
 export class SignInProgress {
@@ -42,6 +45,35 @@ export class SignInProgress {
     this.opts.log(`Sign-in: failed ${seconds(Date.now() - this.first)} s after the code: ${error}${line ? ` ${line}` : ''}`);
     this.opts.send({ type: 'login.step', step: 'failed', error, line });
     this.reset();
+  }
+
+  /* What the node sends, noting on the way how a sign-in in Hornhoof's window ended. */
+  passing(send: (m: NodeMessage) => void): (m: NodeMessage) => void {
+    return m => {
+      if (m.type === 'login.done') this.ended(m.ok);
+      send(m);
+    };
+  }
+
+  /* Once the program signed in: the node reads what the plan can do, saying each step, and then the plan is ready. */
+  async readPlan(read: ReadPlan): Promise<void> {
+    try {
+      await read(step => this.step(step));
+      this.ended(true);
+    } catch (err) {
+      this.opts.log(`Could not read the plan after its sign-in: ${err instanceof Error ? err.message : String(err)}`);
+      this.failed(SIGNIN_ERRORS.broke, null);
+    }
+  }
+
+  /* Hornhoof asks again after a connection that failed or took too long: whether the program is signed in, then the plan.
+     A node that holds no sign-in has none to check. */
+  async checkAgain({ holds, signedIn, read }: { holds: boolean; signedIn(): Promise<boolean>; read: ReadPlan }): Promise<void> {
+    if (!holds) return;
+    this.step('checking');
+    if (!(await signedIn().catch(() => false))) return this.failed(SIGNIN_ERRORS.signedOut, null);
+    this.step('signed_in');
+    await this.readPlan(read);
   }
 
   /* The sign-in ended: kept, with the plan read, or not, which login.done says to Hornhoof itself. */
@@ -77,13 +109,14 @@ export function stepsFile(dir: string) {
   let last: SigninStep | null = null;
   const write = (entry: object) => appendFileSync(path, JSON.stringify({ run, ...entry }) + '\n');
   return {
-    get begun() {
-      return last !== null;
-    },
     step(step: SigninStep) {
       if (step === last) return;
       last = step;
       write({ step });
+    },
+    /* A step that only follows the code, such as the first setup: said once a step was. */
+    after(step: SigninStep) {
+      if (last !== null) this.step(step);
     },
     failed(error: string, line: string | null) {
       if (last === null) return;
@@ -121,8 +154,10 @@ function wholeLines(path: string): Line[] {
 type WatchOptions = {
   dir: string;
   progress: SignInProgress;
+  /* Whether this node holds its program's sign-in; one that does not has no install window to watch. */
+  holds: boolean;
   /* Once the program signed in: the node reads what the plan can do, saying each step. */
-  signedIn(step: (s: SigninStep) => void): Promise<void>;
+  signedIn: ReadPlan;
   everyMs?: number;
 };
 
@@ -143,6 +178,7 @@ export class StepWatch {
   }
 
   start(): void {
+    if (!this.opts.holds) return;
     this.timer ??= setInterval(() => void this.look(), this.opts.everyMs ?? 1000);
     this.timer.unref?.();
   }
@@ -176,12 +212,6 @@ export class StepWatch {
     const { progress } = this.opts;
     if (entry.step === 'failed') return progress.failed(entry.error, entry.line);
     progress.step(entry.step);
-    if (entry.step !== 'signed_in') return;
-    try {
-      await this.opts.signedIn(step => progress.step(step));
-      progress.ended(true);
-    } catch {
-      progress.failed(SIGNIN_ERRORS.broke, null);
-    }
+    if (entry.step === 'signed_in') await progress.readPlan(this.opts.signedIn);
   }
 }
