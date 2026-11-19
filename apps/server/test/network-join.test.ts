@@ -1,18 +1,21 @@
-import { generateKeyPairSync, sign, verify, X509Certificate, type KeyObject } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { generateKeyPairSync, randomUUID, sign, verify, X509Certificate, type KeyObject } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join as joinPath } from 'node:path';
+import * as x509 from '@peculiar/x509';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { decryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { certificates, companies, machineOnline, machines, machineTickets, nodeCodes, peerSecrets, people } from '../src/db/schema.js';
+import { certificates, companies, machineOnline, machines, machineTickets, nodeCodes, peerSecrets, people, revokedCertificateSerials } from '../src/db/schema.js';
+import { RESTORE_CARRY, RESTORE_STATUS, Restores } from '../src/modules/backups/restore.js';
+import type { Carry } from '../src/modules/backups/types.js';
 import { rank } from '../src/modules/copies/order.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { certFacts, issuedBy } from '../src/modules/network/authority.js';
 import { companyFolder, issueTicket, onlineShare, renewedMessage, renewMessage, visitorKeyOf, workerView, type WorkerView } from '../src/modules/network/join.js';
 import { joinMessage } from '../src/modules/network/join-proof.js';
-import { peerSecret } from '../src/modules/network/store.js';
+import { peerSecret, revokedSerials } from '../src/modules/network/store.js';
 import { fakeRelay } from './fake-relay.js';
 import { as, invitePerson, setUpCompany, testApp, TEST_SECRET, until } from './helpers.js';
 
@@ -98,6 +101,48 @@ const authorityKey = (authorityPem: string) => new X509Certificate(authorityPem)
 function signedBy(authorityPem: string, ask: { machine: string; serial: string; at: string }, answer: { payload: string; signature: string }): boolean {
   return verify(null, Buffer.from(renewedMessage(ask.machine, ask.serial, ask.at, answer.payload)), authorityKey(authorityPem), Buffer.from(answer.signature, 'base64'));
 }
+
+it('keeps a serial whose certificate is absent from the restored bundle in the signed list', async () => {
+  const c = await company();
+  expect((await c.serverCertificate()).statusCode).toBe(200);
+  const [leader] = await c.db.select().from(machines).where(eq(machines.networkId, HOST_ID));
+  const serial = 'bb02';
+  const expires = new Date('2099-01-01T00:00:00.000Z');
+  const closed = new Date('2026-11-01T00:00:00.000Z');
+  const carrySql = readFileSync(new URL('../../updater/carry.sql', import.meta.url), 'utf8');
+  const readCarry = async () => {
+    const result = await c.db.execute(sql.raw(carrySql)) as { rows: Record<string, unknown>[] };
+    return Object.values(result.rows[0]!)[0] as Carry;
+  };
+  await c.db.insert(certificates).values({ serial, machineId: leader!.id, until: expires, revokedAt: closed });
+  const fromClosingDatabase = await readCarry();
+  /* The bundle predates this certificate, so the new leader has no certificate row for it. */
+  await c.db.delete(certificates).where(eq(certificates.serial, serial));
+  const restore = async (carry: Carry) => {
+    const attempt = randomUUID();
+    writeFileSync(joinPath(c.control, RESTORE_CARRY), JSON.stringify({ attempt, carry }));
+    writeFileSync(joinPath(c.control, RESTORE_STATUS), JSON.stringify({
+      attempt, id: randomUUID(), state: 'done', step: 'start', at: closed.toISOString(), kept: null,
+    }));
+    await new Restores(c.app.ctx).afterSwap();
+  };
+  await restore(fromClosingDatabase);
+
+  const response = await c.peers();
+  expect(response.statusCode).toBe(200);
+  const view = response.json() as { authorityPem: string; crlPem: string; revoked: string[] };
+  expect(view.revoked).toContain(serial);
+  const crl = new x509.X509Crl(view.crlPem);
+  expect(crl.entries?.map(entry => entry.serialNumber.toLowerCase())).toContain(serial);
+  expect(await crl.verify({ publicKey: new x509.X509Certificate(view.authorityPem).publicKey })).toBe(true);
+  expect(await revokedSerials(c.db, expires)).not.toContain(serial);
+  const carriedAgain = await readCarry();
+  expect(carriedAgain.revokedSerials?.map(row => ({ serial: row.serial, until: new Date(row.until) }))).toEqual([{ serial, until: expires }]);
+  /* A later restore of the earlier bundle has neither the certificate nor its detached serial. */
+  await c.db.delete(revokedCertificateSerials).where(eq(revokedCertificateSerials.serial, serial));
+  await restore(carriedAgain);
+  expect(await revokedSerials(c.db, closed)).toEqual([serial]);
+});
 
 describe('joining the company as a machine', () => {
   it('answers a new installer with the core and a ticket', async () => {

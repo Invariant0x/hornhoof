@@ -8,9 +8,10 @@ import { idOnly, only } from '../../db/selections.js';
 import type { Mode } from '../keeper/state.js';
 import type { Db } from '../../db/client.js';
 import { MIGRATIONS } from '../../db/client.js';
-import { assistants, certificates, companies, computerRuns, departments, invites, machineAccess, machines, nodes, PEER_SECRET_KINDS, peerSecrets, people, personAccess, publicLinks, recoveryKeys, sessions, teams } from '../../db/schema.js';
+import { assistants, certificates, companies, computerRuns, departments, invites, machineAccess, machines, machineTickets, nodeCodes, nodes, PEER_SECRET_KINDS, peerSecrets, people, personAccess, publicLinks, recoveryKeys, revokedCertificateSerials, sessions, teams } from '../../db/schema.js';
 import { ApiError, loggable, type ErrorReason } from '../../errors.js';
 import { writeChoice } from '../merge/kept.js';
+import { CERT_DAYS } from '../network/authority.js';
 import { authorityOf, findThisMachine } from '../network/store.js';
 import { disconnectMachines } from '../nodes/disconnect.js';
 import { liveNode, settlePlans } from '../nodes/nodes.js';
@@ -66,6 +67,9 @@ export function readRestoreStatus(controlDir: string): RestoreStatus | null {
    replaced or an assistant's or node's key that was revoked, cleared or replaced. Removed accounts leave a record even if
    the backup predates them. Owners' machine settings carry forward; employee computer grants and sessions end. */
 export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
+  const { assistantKeys, nodeKeys } = carry;
+  /* An older updater may have omitted keys. With an incomplete view, require fresh keys for both kinds. */
+  const completeKeys = Array.isArray(assistantKeys) && Array.isArray(nodeKeys);
   const { db } = ctx;
   const [company] = await db.select(idOnly(companies)).from(companies).limit(1);
   if (!company) return;
@@ -113,10 +117,10 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   }).where(eq(machines.id, machine.id));
   await carryLink(db, company.id, carry);
   const now = new Date();
-  if (carry.serials.length > 0) await db.update(certificates).set({ revokedAt: now }).where(and(inArray(certificates.serial, carry.serials), isNull(certificates.revokedAt)));
+  await carryRevocations(db, carry, now);
   await carryRecoveryKeys(db, company.id, carry, known, now);
-  await carryAssistantKeys(db, carry);
-  await carryNodeKeys(db, carry);
+  await carryAssistantKeys(db, completeKeys ? assistantKeys : []);
+  await carryNodeKeys(db, completeKeys ? nodeKeys : []);
   await db.transaction(async tx => {
     await tx.delete(machineAccess);
     await tx.update(computerRuns).set({ state: 'lost' }).where(inArray(computerRuns.state, ['waiting', 'sent']));
@@ -139,6 +143,28 @@ function holdsNow(machine: Carry['machines'][number]): Partial<typeof machines.$
 /* A time as the database that closed gave it, written back whole: through a Date it would lose its microseconds, and
    the restored row would differ from the one that database holds when it is merged. */
 const timeOf = (text: string) => sql<Date>`${text}::timestamptz`;
+
+async function carryRevocations(db: Db, carry: Carry, now: Date): Promise<void> {
+  const serials = [...new Set([...carry.serials, ...(carry.revokedSerials ?? []).map(row => row.serial)])];
+  if (!serials.length) return;
+  await db.transaction(async tx => {
+    await tx.update(certificates).set({ revokedAt: now }).where(and(inArray(certificates.serial, serials), isNull(certificates.revokedAt)));
+    let revocations: { serial: string; until: Date | ReturnType<typeof timeOf> }[];
+    if (carry.revokedSerials) {
+      revocations = carry.revokedSerials.map(row => ({ serial: row.serial, until: timeOf(row.until) }));
+    } else {
+      /* Older carries gave no expiry. Where the bundle has no certificate, keep the serial for a full certificate lifetime. */
+      const known = await tx.select({ serial: certificates.serial, until: certificates.until }).from(certificates).where(inArray(certificates.serial, serials));
+      const expiries = new Map(known.map(row => [row.serial, row.until]));
+      const later = new Date(now.getTime() + CERT_DAYS * 86_400_000);
+      revocations = serials.map(serial => ({ serial, until: expiries.get(serial) ?? later }));
+    }
+    if (revocations.length > 0) await tx.insert(revokedCertificateSerials).values(revocations).onConflictDoUpdate({
+      target: revokedCertificateSerials.serial,
+      set: { until: sql`GREATEST(${revokedCertificateSerials.until}, excluded.until)` },
+    });
+  });
+}
 
 /* The link and the secrets of the peer services as they were when the old database closed: the key the relay takes
    now, a change of it that was under way, and secrets no machine that left knows. A company that has no link now gets
@@ -178,9 +204,7 @@ async function carryRecoveryKeys(db: Db, companyId: string, carry: Carry, known:
 
 /* The assistants' keys as they were when the old database closed: a key revoked or replaced since opens nothing, and
    the one that opened something then works on. An assistant made since is not in the restored database, nor is its key. */
-async function carryAssistantKeys(db: Db, carry: Carry): Promise<void> {
-  const keys = carry.assistantKeys;
-  if (!keys) return;
+async function carryAssistantKeys(db: Db, keys: NonNullable<Carry['assistantKeys']>): Promise<void> {
   await db.transaction(async tx => {
     await tx.update(assistants).set({ keyHash: null, keyCreatedAt: null, wakeSecretEnc: null }).where(isNotNull(assistants.keyHash));
     for (const key of keys) {
@@ -193,9 +217,7 @@ async function carryAssistantKeys(db: Db, carry: Carry): Promise<void> {
    a new key since opens nothing with the bundle's key, and the key that opened it then works on. A node that lost its key
    signs in again, and the plans of the nodes whose keys were set are settled as when a node signs out. A node made since
    is not in the restored database, nor is its key. */
-async function carryNodeKeys(db: Db, carry: Carry): Promise<void> {
-  const keys = carry.nodeKeys;
-  if (!keys) return;
+async function carryNodeKeys(db: Db, keys: NonNullable<Carry['nodeKeys']>): Promise<void> {
   const keeps = new Set(keys.map(key => key.id));
   await db.transaction(async tx => {
     const had = await tx.update(nodes).set({ keyHash: null }).where(liveNode).returning({ id: nodes.id, subscriptionId: nodes.subscriptionId });
@@ -381,7 +403,10 @@ export class Restores {
     const status = carried ? controlJson<RestoreStatus>(dir, RESTORE_STATUS) : readRestoreStatus(dir);
     const swapped = status !== null && (status.state === 'done' || (status.state === 'running' && status.step === 'start'));
     if (carried) {
-      if (swapped && status.attempt === carried.attempt && carried.carry) await applyCarry(this.ctx, carried.carry);
+      if (swapped && status.attempt === carried.attempt) {
+        if (!carried.carry) throw new Error('The restore carry is missing. Use a current updater to restore this backup.');
+        await applyCarry(this.ctx, carried.carry);
+      }
       rmSync(join(dir, RESTORE_CARRY), { force: true });
     }
     if (swapped) await this.mark(status);
@@ -397,6 +422,15 @@ export class Restores {
      updater from before merges says no time of the dump: its restore is marked all the same, with the time its status
      was written, since what waited to go outside is told from what was written since by the mark alone. */
   private async mark(status: RestoreStatus): Promise<void> {
-    await this.ctx.db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, kept) VALUES (${status.attempt}, ${status.id}, ${status.dumpedAt ?? status.at}::timestamptz, ${status.kept}) ON CONFLICT (attempt) DO NOTHING`);
+    await this.ctx.db.transaction(async tx => {
+      const { rows } = await tx.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, kept)
+        VALUES (${status.attempt}, ${status.id}, ${status.dumpedAt ?? status.at}::timestamptz, ${status.kept})
+        ON CONFLICT (attempt) DO NOTHING RETURNING attempt`) as { rows: { attempt: string }[] };
+      if (!rows.length) return;
+      /* A dump can predate the use of these credentials even when there is no carry. */
+      const usedAt = sql`now()`;
+      await tx.update(machineTickets).set({ usedAt }).where(isNull(machineTickets.usedAt));
+      await tx.update(nodeCodes).set({ usedAt }).where(isNull(nodeCodes.usedAt));
+    });
   }
 }
