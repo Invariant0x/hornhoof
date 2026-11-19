@@ -2,7 +2,7 @@ import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, taskEvents, tasks, teams } from '../src/db/schema.js';
 import { report } from '../src/modules/tasks/engine.js';
-import { fixture } from './development-echelons-fixture.js';
+import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 
 describe('the task a turnkey task was made under', () => {
   it('closes with its owner\'s report once the turnkey work under it is done', async () => {
@@ -12,7 +12,7 @@ describe('the task a turnkey task was made under', () => {
     await f.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, player.id));
     const group = (await f.create({ title: 'The work of a turnkey turn', assigneeAgentId: f.head.id, executor: false, resultKind: 'coordination' })).task;
     const { task } = await f.create({ parentId: group.id, assigneeAgentId: player.id, reviewerAgentId: undefined, securityAgentId: undefined, testsAgentId: undefined, body: 'Change logic/totals.ts.' });
-    await report(f.ctx, player.id, task.id, { done: true, summary: 'Merged and released, checks in the log.' });
+    await report(f.ctx, player.id, task.id, { done: true, summary: 'Merged and released, checks in the log.', turnkey: { commit: HEAD, baseCommit: BASE } });
 
     const closed = await report(f.ctx, f.head.id, group.id, { done: true, summary: 'The turnkey work under it is done.' });
     expect(closed.task).toMatchObject({ status: 'done' });

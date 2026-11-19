@@ -160,6 +160,23 @@ describe('the simple task card', () => {
     expect(card.getByRole('list', { name: 'Log' })).not.toHaveTextContent(mine.text);
   });
 
+  /* B2 of #1569: the card a person approves in the task shows no "In more detail", so the list Hornhoof keeps of what a release
+     brings that no check covers shows there next to Approve, apart from the plain words. */
+  it('shows next to Approve on the card in the task what a release brings that no check covers, under plain words without it', async () => {
+    const user = userEvent.setup();
+    const stray = '1'.repeat(40);
+    const task = { ...REQUESTS[1]!.task, id: 't12', number: 12, title: TASK_DETAIL.title };
+    const release = { ...REQUESTS[1]!, task, explained: 'The release of the turn is ready. Approve it to let it go to main.', unchecked: [{ kind: 'commit' as const, commit: stray }] };
+    shell({ 'GET /api/requests': [200, decisions([release])] });
+    const panel = await openTask(user);
+    const waiting = within(panel).getByRole('region', { name: 'Waiting for your answer' });
+    const list = within(waiting).getByRole('region', { name: 'What this release brings that no check covers: 1 item' });
+    expect(list).toHaveTextContent(`${stray} came in without any check.`);
+    expect(list).toHaveTextContent('Approve only if you accept each of these.');
+    const approve = within(waiting).getByRole('button', { name: 'Approve' });
+    expect(list.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('puts a current wait in the log, shows why and the materials, and keeps other task details in the menu', async () => {
     const user = userEvent.setup();
     const task = {
