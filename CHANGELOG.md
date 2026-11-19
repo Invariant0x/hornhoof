@@ -19,6 +19,22 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A release commit that changes only the package versions and the release notes takes the passed test mark of the commit before it, so GitHub builds its images without running the whole test suite again.
 - A plan's card in Subscriptions & API shows its settings and fallback plans across the whole card, numbers the fallback plans and shows each model's whole name, and keeps one filled button among its actions, with Remove set apart at the end.
 
+## [0.34.7] - 2026-11-19
+
+### Changed
+
+- The task list has no Goal column any more: the task takes two thirds of the line, and its goal shows on the task card.
+
+### Fixed
+
+- The + beside Tasks makes a task on every tracker page, Waits for me and My tasks included, and asks which department gets it.
+
+## [0.34.6] - 2026-11-19
+
+### Fixed
+
+- The count beside Waits for me matches what the page shows under it, questions for the people you decide for and kept cards included.
+
 ## [0.34.5] - 2026-11-19
 
 ### Fixed

@@ -1,5 +1,5 @@
 import { TASK_PRIORITIES, type TaskPriority } from '@hornhoof/protocol';
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { Department, TaskDetail } from '../types';
@@ -13,10 +13,12 @@ type Props = {
   head: string | null;
   onCreated: (task: TaskDetail) => void;
   onCancel: () => void;
+  /* Where the task goes, when the person picks the department in the form. */
+  place?: ReactNode;
 };
 
 /* A task for a department from a person: it goes to the department's head, for one of its products or the whole department. */
-export function NewTask({ department: d, pipelineId, showPriority = false, head, onCreated, onCancel }: Props) {
+export function NewTask({ department: d, pipelineId, showPriority = false, head, onCreated, onCancel, place }: Props) {
   const t = useT();
   const [title, setTitle] = useState('');
   const [brief, setBrief] = useState('');
@@ -39,7 +41,7 @@ export function NewTask({ department: d, pipelineId, showPriority = false, head,
         department: d.id,
         ...(pipelineId !== undefined ? { pipeline: pipelineId } : {}),
         ...(priority === 'normal' ? {} : { priority }),
-        ...(product ? { product } : {}),
+        ...(product && d.products.some(x => x.id === product) ? { product } : {}),
       });
       onCreated(task);
     } catch (err) {
@@ -50,6 +52,7 @@ export function NewTask({ department: d, pipelineId, showPriority = false, head,
 
   return (
     <form className="new-task" onSubmit={e => void create(e)}>
+      {place}
       <p className="muted">{t.dept.goesTo(head)}</p>
       <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={120} required autoFocus />}</Field>
       <Field label={t.dept.brief}>{p => <input {...p} value={brief} onChange={e => setBrief(e.target.value)} maxLength={600} />}</Field>
