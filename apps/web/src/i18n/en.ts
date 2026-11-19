@@ -686,6 +686,10 @@ export const en = {
     resetsIn: (duration: string) => `resets in ${duration}`,
     /* A limit's cell in the list: its used share, then when it resets. */
     usedAndReset: (share: string, reset: string) => `${share}, ${reset}`,
+    /* The limits of one group of a plan's models, by the name its provider gives the group, as Gemini Models. */
+    groupLimits: (group: string) => `Limits: ${group}`,
+    /* A limit's cell in the list for a plan that keeps its limits by model group: the group, then what it used. */
+    groupShare: (group: string, share: string) => `${group}: ${share}`,
     resetUnknown: 'Reset time unknown',
     limitReached: (duration: string | null) => (duration ? `Limit reached, resets in ${duration}` : 'Limit reached'),
     notOnPlan: 'Not on this plan',

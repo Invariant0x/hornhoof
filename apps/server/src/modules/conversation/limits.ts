@@ -1,4 +1,4 @@
-import { currentLimits, type Limits } from '@hornhoof/protocol';
+import { currentLimits, limitsForModel, modelGroup, type LimitGroup, type Limits } from '@hornhoof/protocol';
 import type { Ctx } from '../../app.js';
 /* When the plan's limit starts over, while the plan is at it: the latest reset of a full window still to come. A plan at
    its limit that says no reset holds nothing, so its turns go out and fail as before rather than wait forever. */
@@ -8,6 +8,11 @@ export function limitUntil(limits: Limits | null, updatedAt: string | Date | nul
   const resets = current.windows.filter(w => (w.utilization === null || w.utilization >= 1) && w.resetsAt).map(w => w.resetsAt!);
   return resets.length ? resets.reduce((a, b) => (Date.parse(a) >= Date.parse(b) ? a : b)) : null;
 }
+
+/* Until when the plan is at its limit for turns on this model: by the limits of the model's group where the plan keeps them
+   by group, else of the plan as a whole, whose fullest window speaks for every model. */
+export const modelLimitUntil = (plan: { limits: Limits | null; limitsUpdatedAt: Date | null }, model: string | null, now = Date.now()): string | null =>
+  limitUntil(limitsForModel(plan.limits, model), plan.limitsUpdatedAt, now);
 
 /* When a window of the plan that used the share set for task turns starts over: the latest such reset still to come. */
 export function budgetUntil(limits: Limits | null, budget: number | null, updatedAt: string | Date | null, now = Date.now()): string | null {
@@ -30,15 +35,31 @@ export function againIn(text: string, now: number): string | null {
   return ms ? new Date(now + ms).toISOString() : null;
 }
 
+type Window = Limits['windows'][number];
+
+/* A part of the plan's limits with the window full until then, in place of the one it had of that name. */
+function fullWindow<T extends { status: Limits['status']; windows: Window[] }>(part: T, full: Window): T {
+  return { ...part, status: 'rejected', windows: [...part.windows.filter(w => w.name !== full.name), full] };
+}
+
 /* The plan's limits once a turn ended on a refusal for its usage limit, or null when it did not: the window it names is
-   full until the time the program gives, the reset the plan said before, or a quarter of an hour. */
-export function refusedLimits(output: string, limits: Limits | null, now = Date.now(), usageLimit = false): Limits | null {
+   full until the time the program gives, the reset the plan said before, or a quarter of an hour. A turn on a model of a
+   known group fills that group's window, and the plan's, which speaks for its fullest group; the other groups keep theirs. */
+export function refusedLimits(output: string, limits: Limits | null, now = Date.now(), usageLimit = false, model: string | null = null): Limits | null {
   const end = output.slice(-1500);
   if (!usageLimit && !REFUSED.test(end)) return null;
   const name = /\b(?:weekly|7-day|seven-day)\b/i.test(end) ? 'seven_day' : 'five_hour';
-  const known = limits?.windows.find(w => w.name === name)?.resetsAt;
+  const group: LimitGroup | null = limits ? modelGroup(limits.groups, model) : null;
+  const known = (group ?? limits)?.windows.find(w => w.name === name)?.resetsAt;
   const resetsAt = againIn(end, now) ?? (known && Date.parse(known) > now ? known : new Date(now + LIMIT_PROBE_MS).toISOString());
-  return { ...limits, status: 'rejected', windows: [...(limits?.windows ?? []).filter(w => w.name !== name), { name, utilization: 1, resetsAt }] };
+  const full = { name, utilization: 1, resetsAt };
+  const plan = fullWindow({ ...limits, status: limits?.status ?? 'allowed', windows: limits?.windows ?? [] }, group ? laterOf(limits?.windows.find(w => w.name === name), full) : full);
+  return group ? { ...plan, groups: limits!.groups!.map(g => (g === group ? fullWindow(g, full) : g)) } : plan;
+}
+
+/* The plan's window speaks for its fullest group: one already full until later stays as it is. */
+function laterOf(known: Window | undefined, full: Window): Window {
+  return known && (known.utilization ?? 0) >= 1 && known.resetsAt && full.resetsAt && Date.parse(known.resetsAt) > Date.parse(full.resetsAt) ? known : full;
 }
 
 /* Wakes the agent's line once its plan's limit starts over. */

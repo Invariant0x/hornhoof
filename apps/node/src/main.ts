@@ -160,7 +160,10 @@ function merged(known: Limits | null, news: Limits, fromPage = false): Limits {
     ? [...news.windows, ...kept]
     : [...known.windows.map(w => fresh.get(w.name) ?? w), ...news.windows.filter(w => !known.windows.some(k => k.name === w.name))];
   const complete = Boolean(news.complete || known.complete);
-  return { status: kept.some(windowFull) ? 'rejected' : news.status, windows: windows.slice(0, 8), ...(complete ? { complete: true } : {}) };
+  /* Model groups come whole with a reading of every window; a reading without them says nothing of the groups, which then
+     wait for the next one, the plan going by its fullest window meanwhile. */
+  const groups = news.complete && news.groups ? { groups: news.groups } : {};
+  return { status: kept.some(windowFull) ? 'rejected' : news.status, windows: windows.slice(0, 8), ...(complete ? { complete: true } : {}), ...groups };
 }
 
 /* What the node knows of the plan's limits, and whether Hornhoof has heard its last reading. Hornhoof counts them fresh from

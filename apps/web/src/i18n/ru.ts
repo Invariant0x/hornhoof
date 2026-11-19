@@ -708,6 +708,8 @@ export const ru: Messages = {
     lessThanMinute: 'менее минуты',
     resetsIn: duration => `до сброса ${duration}`,
     usedAndReset: (share, reset) => `${share}, ${reset}`,
+    groupLimits: group => `Лимиты: ${group}`,
+    groupShare: (group, share) => `${group}: ${share}`,
     resetUnknown: 'Время сброса неизвестно',
     limitReached: duration => (duration ? `Лимит исчерпан, до сброса ${duration}` : 'Лимит исчерпан'),
     notOnPlan: 'Нет у этого тарифа',

@@ -552,6 +552,66 @@ describe('the orchestrator\'s conversation', () => {
     expect((await state(app, ceo)).limitUntil).toBeNull();
   });
 
+  /* Made-up limits of a plan whose provider keeps them by model group, as Antigravity's /usage tells them. */
+  const groupedLimits = (geminiWeek: number, othersWeek: number, resetsAt: string) => {
+    const part = (used: number) => ({ status: used >= 1 ? ('rejected' as const) : ('allowed' as const), windows: [{ name: 'seven_day', utilization: used, resetsAt }], complete: true });
+    const gemini = { name: 'Gemini Models', about: 'Models within this group: Gemini Flash, Gemini Pro', ...part(geminiWeek) };
+    const others = { name: 'Claude and GPT models', about: 'Models within this group: Claude Opus, Claude Sonnet, GPT-OSS', ...part(othersWeek) };
+    return { ...part(Math.max(geminiWeek, othersWeek)), groups: [gemini, others] };
+  };
+
+  it("holds only the turns on a model whose own group of the plan's limits is used up", async () => {
+    const { app, ceo, mac } = await onMac('0.5.0', 'antigravity');
+    await until(async () => (await state(app, ceo)).ready);
+    const [orchestrator] = await app.ctx.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const onModel = (model: string) => app.ctx.db.update(agents).set({ model }).where(eq(agents.id, orchestrator!.id));
+    await onModel('claude-sonnet-5-5');
+    const resetsAt = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    mac.send({ type: 'status', loggedIn: true, limits: groupedLimits(0.06, 1, resetsAt) });
+    await until(async () => (await state(app, ceo)).limitUntil === resetsAt);
+    expect((await say(app, ceo, 'Go on')).statusCode).toBe(202);
+    expect(await quiet(mac)).toBe(0);
+    expect((await state(app, ceo)).queued).toBe(1);
+
+    /* On a Gemini model the same plan takes the turn: its group has most of its week left. */
+    await onModel('gemini-4-argon');
+    expect((await state(app, ceo)).limitUntil).toBeNull();
+    await pump(app.ctx, orchestrator!.id);
+    expect((await nextRun(mac)).prompt).toBe(`${IVAN_TO_ORCHESTRATOR}Ivan (CEO): Go on`);
+    /* A model of no known group goes by the plan's fullest window, as before. */
+    await onModel('kimi-k3');
+    expect((await state(app, ceo)).limitUntil).toBe(resetsAt);
+  });
+
+  it("fills only the group of the model a turn ran on when the program says it ran out of that group's limit", async () => {
+    const { app, ceo, mac } = await onMac('0.5.0', 'antigravity');
+    await until(async () => (await state(app, ceo)).ready);
+    const [orchestrator] = await app.ctx.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const onModel = (model: string) => app.ctx.db.update(agents).set({ model }).where(eq(agents.id, orchestrator!.id));
+    await onModel('gemini-4-argon');
+    const weekEnds = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    mac.send({ type: 'status', loggedIn: true, limits: groupedLimits(0.5, 0.2, weekEnds) });
+    await until(async () => (await app.ctx.db.select(only(subscriptions, 'limits')).from(subscriptions).where(eq(subscriptions.provider, 'antigravity')))[0]?.limits?.groups !== undefined);
+    await say(app, ceo, 'First');
+    const first = await nextRun(mac);
+    const now = stillClock();
+    mac.send({ type: 'job.done', jobId: first.jobId, ok: false, sessionId: 'sess-g', result: '', tail: 'You have hit your usage limit. Try again in 2h.', error: 'agent_failed', failure: { kind: 'usage_limit', text: 'You have hit your usage limit.', retryable: false } });
+    const until2h = new Date(now + 2 * 3_600_000).toISOString();
+    await until(async () => (await state(app, ceo)).limitUntil === until2h);
+    const [sub] = await app.ctx.db.select(only(subscriptions, 'limits')).from(subscriptions).where(eq(subscriptions.provider, 'antigravity'));
+    expect(sub!.limits).toMatchObject({
+      status: 'rejected',
+      windows: [{ name: 'seven_day', utilization: 0.5 }, { name: 'five_hour', utilization: 1, resetsAt: until2h }],
+      groups: [
+        { name: 'Gemini Models', status: 'rejected', windows: [{ name: 'seven_day', utilization: 0.5 }, { name: 'five_hour', utilization: 1, resetsAt: until2h }] },
+        { name: 'Claude and GPT models', status: 'allowed', windows: [{ name: 'seven_day', utilization: 0.2 }] },
+      ],
+    });
+    /* A Claude model of the same plan is not held. */
+    await onModel('claude-sonnet-5-5');
+    expect((await state(app, ceo)).limitUntil).toBeNull();
+  });
+
   it.each(['claude', 'codex', 'kimi', 'antigravity'])('does not hold %s turns on a stale rejection, even with a future reset', async provider => {
     const { app, ceo, mac, node } = await onMac('0.5.0', provider);
     await until(async () => (await state(app, ceo)).ready);

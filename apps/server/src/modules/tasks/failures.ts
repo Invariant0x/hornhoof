@@ -7,7 +7,7 @@ import { agentEvents, agents, jobs, nodes, people, subscriptions, tasks } from '
 import { idOnly, only } from '../../db/selections.js';
 import { agentState } from '../conversation/state.js';
 import { enqueueTurn, insertTurn } from '../conversation/queue.js';
-import { limitUntil } from '../conversation/limits.js';
+import { modelLimitUntil } from '../conversation/limits.js';
 import { onAgent } from '../conversation/line.js';
 import { turnAgain } from './again.js';
 import { repeatedTurn } from '../conversation/turn-words.js';
@@ -163,7 +163,8 @@ async function retryPassingFailure(ctx: Ctx, job: Job, taskTurn?: TaskTurn): Pro
 
 async function holdFailedTurn(ctx: Ctx, job: Job, taskTurn?: TaskTurn): Promise<void> {
   const [plan] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
-  const reset = limitUntil(plan?.limits ?? null, plan?.limitsUpdatedAt ?? null);
+  const [agent] = job.agentId ? await ctx.db.select(only(agents, 'model')).from(agents).where(eq(agents.id, job.agentId)) : [];
+  const reset = plan ? modelLimitUntil(plan, agent?.model ?? null) : null;
   const next = OWNER_STEP[job.failure!.kind] ?? `The plan holds its turns until its usage limit resets${reset ? ` at ${reset}` : ''}, then this turn goes on.`;
   await retryTurn(ctx, job, null, next, taskTurn);
 }
