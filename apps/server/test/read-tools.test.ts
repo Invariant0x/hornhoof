@@ -113,9 +113,11 @@ describe('the tools of an agent on a machine that only reads', () => {
     const before = (await s.db.select().from(jobs).where(eq(jobs.id, s.job.id)))[0];
     const stamped = await s.tools({ 'x-hornhoof-invocation': randomUUID(), 'x-hornhoof-via': 'keeper' });
     expect((await s.call(stamped, 'tasks')).isError).toBeFalsy();
-    expect((await s.call(stamped, 'remember', { text: 'A note.' })).isError).toBe(true);
-    expect(await s.call(stamped, 'vault_save', { name: 'Refused', site: 'https://example.test', login: 'test', password: 'private-read-marker' }))
-      .toEqual({ isError: true, content: [{ type: 'text', text: CUT_OFF }] });
+    expect(await s.call(stamped, 'remember', { text: 'A note.' })).toEqual({ isError: true, content: [{ type: 'text', text: CUT_OFF }] });
+    /* An old call that carries a password is refused there too, without echoing it, and opens no private turn. */
+    const old = await s.call(stamped, 'vault_save', { name: 'Refused', site: 'https://example.test', login: 'test', password: 'private-read-marker' });
+    expect(old.isError).toBe(true);
+    expect(JSON.stringify(old)).not.toContain('private-read-marker');
     expect(privateTurn(s.db, s.job.id)).toBeUndefined();
     expect(await s.db.select().from(toolCalls)).toEqual([]);
     expect((await s.db.select().from(jobs).where(eq(jobs.id, s.job.id)))[0]).toEqual(before);
