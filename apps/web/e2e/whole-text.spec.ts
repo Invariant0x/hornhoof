@@ -734,6 +734,12 @@ for (const look of LOOKS.filter(l => l.width === 375)) {
     });
     expect.soft(chipNames.length, 'the map opens with people chips in view').toBeGreaterThan(0);
     expect.soft(Math.min(...chipNames), 'the map opens with people chip names at least 11 px tall').toBeGreaterThanOrEqual(10.99);
+    /* As in #1596: it opens centred across on the hub. */
+    const across = await page.evaluate(() => {
+      const hub = document.querySelector('.map .hub-art')!.getBoundingClientRect(), room = document.querySelector('.map .map-room')!.getBoundingClientRect();
+      return Math.abs(hub.left + hub.width / 2 - (room.left + room.width / 2));
+    });
+    expect.soft(across, 'the map opens centred across on the hub').toBeLessThanOrEqual(1);
     await scrollsClear(page, 'map', shot);
 
     await page.locator('.map .zoom').getByRole('button', { name: look.lang === 'en' ? 'Show everything' : 'Показать все' }).click();
