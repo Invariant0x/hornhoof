@@ -11,6 +11,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - Map cards and the department screen show every word in any language: cards grow together, far zoom moves nothing, words break with hyphens and the hint keeps its own room.
 - People on the map show their whole name and title in any language: their chips wrap with hyphens and each row grows to its tallest chip.
+- On a phone the map opens with names readable and a department opens on its head card; both scroll to an edge and stop clear of the floating buttons, and nothing scrolls under them.
 - A plan with separate limits for groups of models, as Antigravity's Gemini and its Claude and GPT models, keeps each group's limits: a used-up group holds only the turns and fallbacks on its own models, and the plan's card shows every group with what it used and when it resets.
 
 ## [0.39.1] - 2026-11-19
