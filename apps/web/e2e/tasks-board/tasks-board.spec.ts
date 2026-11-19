@@ -55,7 +55,7 @@ const LINKS = '.tr-title, .tr-card-body, .tr-crumbs .linkish, .tp-path .linkish'
 async function touchable(page: Page, what: string) {
   const finger = page.viewportSize()!.width <= 760 || await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
   const least = finger ? 43.5 : 23.5;
-  for (const [name, height] of await page.locator(`.tr-item, .tr-unfold, .tr-views label, .tr-chip, .tr-menu:visible, .tr-row-caret, .tr-goal-link, .tr-canvas .zbtn, ${LINKS}`).evaluateAll(els =>
+  for (const [name, height] of await page.locator(`.tr-item, .tr-unfold, .tr-views label, .tr-chip, .tr-menu:visible, .tr-row-caret, .tr-canvas .zbtn, ${LINKS}`).evaluateAll(els =>
     els.filter(e => e.getClientRects().length).map(e => [`${e.className} ${e.textContent}`, e.getBoundingClientRect().height] as const))) {
     expect(height, `${what}: ${name}`).toBeGreaterThanOrEqual(least);
   }

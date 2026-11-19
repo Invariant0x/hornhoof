@@ -2388,7 +2388,7 @@ export const ru: Messages = {
     waitTasks: 'Задачи, которые ждут вас',
     waitTasksOf: (name: string) => `Задачи, которые ждут ответа (${name})`,
     priority: { label: 'Приоритет', urgent: 'Срочно', high: 'Высокий', normal: 'Обычный', low: 'Низкий' },
-    list: { task: 'Название', executor: 'Исполнитель', responsible: 'Ответственный', goal: 'Цель', due: 'Срок', progress: 'Прогресс', parts: 'Части этой цели', subtasks: (done: number, total: number) => `Подзадачи: готово ${done} из ${total}`,
+    list: { task: 'Название', executor: 'Исполнитель', responsible: 'Ответственный', due: 'Срок', progress: 'Прогресс', parts: 'Части этой цели', subtasks: (done: number, total: number) => `Подзадачи: готово ${done} из ${total}`,
       group: (status: string, count: number) => `${status}: ${count}`,
       neededFor: (number: number, department: string) => `нужна для #${number} ${department}`,
     },
