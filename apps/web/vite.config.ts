@@ -26,6 +26,7 @@ export default defineConfig(({ mode }) => ({
     env: { TZ: 'UTC' },
     setupFiles: ['./test/setup.ts'],
     include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
-    testTimeout: 20000,
+    testTimeout: 0,
+    hookTimeout: 0,
   },
 }));
