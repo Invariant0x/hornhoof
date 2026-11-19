@@ -7,6 +7,16 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+## [0.34.7] - 2026-11-19
+
+### Changed
+
+- The task list has no Goal column any more: the task takes two thirds of the line, and its goal shows on the task card.
+
+### Fixed
+
+- The + beside Tasks makes a task on every tracker page, Waits for me and My tasks included, and asks which department gets it.
+
 ## [0.34.6] - 2026-11-19
 
 ### Fixed
