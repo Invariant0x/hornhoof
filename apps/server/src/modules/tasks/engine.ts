@@ -12,7 +12,7 @@ import { submitAtTests, testsReport, type Verification } from './echelons-tests.
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
-import { checkerFor, checkingIdentity, hasChecker, heldCheckingIdentity, producerIdentity } from './echelons-assign.js';
+import { checkerFor, checkingIdentity, hasChecker, heldCheckingIdentity, keptFromReview, producerIdentity } from './echelons-assign.js';
 import { producedCandidate, currentCandidate, currentHanded, requireRepairHistory } from './echelons-candidates.js';
 import { acceptDocument, documentHandIn } from './echelons-document.js';
 import { submittedHandoff } from './echelons-handoff.js';
@@ -676,7 +676,8 @@ async function waitingRouteChecker(ctx: Live, task: Task, route: Route) {
   if (route.state.phase !== 'waiting' || !route.state.candidateId || !route.state.stage) return null;
   const ability = route.state.abilities[route.state.stage];
   if (!ability) return null;
-  return checkerFor(ctx, task, (await currentHanded(ctx.db, task, route)).producedBy, ability, null);
+  const handed = await currentHanded(ctx.db, task, route);
+  return checkerFor(ctx, task, handed.producedBy, ability, null, undefined, await keptFromReview(ctx.db, task, route.state.stage, handed));
 }
 
 export async function resumeWaitingRoutes(ctx: Live, actor: Actor, agent: Leaver, text: string): Promise<{ wakes: Wake[] }> {

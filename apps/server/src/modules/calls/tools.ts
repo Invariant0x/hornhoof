@@ -35,7 +35,7 @@ export function registerCallTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         task: TaskRef,
         branch: Branch.optional().describe("A branch of the task's repository each call gets a fresh clone of. Left out, a call starts in an empty folder."),
         verdict: z.boolean().optional().describe('true: each call ends its answer with a verdict, pass or not, and why.'),
-        judge: z.string().trim().min(1).optional().describe('Instructions for the judge. It sees the workers’ inputs and answers after the batch ends. It has no repository checkout.'),
+        judge: z.string().trim().min(1).optional().describe('Instructions for the judge. It sees the workers\' inputs and answers after the batch ends. It has no repository checkout.'),
         minutes: z.number().int().min(1).max(Math.floor(MAX_JOB_TIMEOUT_MS / 60_000)).optional().describe('The time limit of each call in minutes. Leave it out to run until the call answers or is stopped.'),
         wait: z.boolean().optional().describe('true returns the batch summary in this call when work finishes. If the caller stops listening first, the summary can wake it on the open task.'),
       },

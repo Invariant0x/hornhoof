@@ -2,6 +2,7 @@ import { pathInScope } from './review-schema.js';
 import { randomUUID } from 'node:crypto';
 import { DocumentCandidate, EchelonCandidate, type HandedCandidate, type EchelonStage } from '@hornhoof/protocol/echelons';
 import { and, desc, eq, sql } from 'drizzle-orm';
+import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import type { Ctx } from '../../app.js';
 import type { Tx } from './state.js';
@@ -43,6 +44,45 @@ export const currentDocument = (db: Db | Tx, task: Task, route: Route): Promise<
 /* What the current stage holds, a commit or a document as the route of the task hands it in. */
 export const currentHanded = (db: Db | Tx, task: Task, route: Route): Promise<EchelonCandidate | DocumentCandidate> =>
   route.state.resultKind === 'document' ? currentDocument(db, task, route) : currentCandidate(db, task, route);
+
+/* A candidate as far as its lineage goes: what it grew from and who produced it. */
+const Link = z.object({ id: z.string(), parentId: z.string().nullable(), producedBy: z.object({ agentId: z.string() }) });
+type Links = Map<string, { parentId: string | null; producers: string[] }>;
+
+/* Every candidate handed in on the task, with the producer it names and the agent whose submission recorded it. */
+async function candidateLinks(db: Db | Tx, task: Task): Promise<Links> {
+  const rows = await db.select({ data: taskEvents.data, agentId: taskEvents.agentId }).from(taskEvents)
+    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.companyId, task.companyId), eq(taskEvents.kind, 'submitted'), sql`${taskEvents.data} ? 'candidate'`));
+  const links: Links = new Map();
+  for (const row of rows) {
+    const link = Link.safeParse(row.data.candidate);
+    if (!link.success) continue;
+    const producers = [...(links.get(link.data.id)?.producers ?? []), link.data.producedBy.agentId, ...(row.agentId ? [row.agentId] : [])];
+    links.set(link.data.id, { parentId: link.data.parentId, producers });
+  }
+  return links;
+}
+
+/* Who produced a candidate and every candidate it grew from, with the task's executor: the original developer stays a producer
+   where a later stage repaired its work. Where the chain breaks, every producer of the task counts. */
+function producersFrom(links: Links, from: string | null, executor: string | null): Set<string> {
+  const found = new Set<string>(executor ? [executor] : []);
+  const seen = new Set<string>();
+  for (let id = from; id !== null && !seen.has(id);) {
+    seen.add(id);
+    const link = links.get(id);
+    for (const agentId of link ? link.producers : [...links.values()].flatMap(each => each.producers)) found.add(agentId);
+    id = link ? link.parentId : null;
+  }
+  return found;
+}
+
+/* The producers of the lineage of a candidate, also one handed in now and not recorded yet. */
+export async function lineageProducers(db: Db | Tx, task: Task, candidate: HandedCandidate | null): Promise<Set<string>> {
+  const links = await candidateLinks(db, task);
+  if (candidate) links.set(candidate.id, { parentId: candidate.parentId, producers: [...(links.get(candidate.id)?.producers ?? []), candidate.producedBy.agentId] });
+  return producersFrom(links, candidate?.id ?? null, task.executorAgentId);
+}
 
 /* Whose work the current stage checks: the producer of what it received, also once Tests took the main line into it. */
 export async function checkedProducer(db: Db | Tx, task: Task, route: Route, candidate: HandedCandidate): Promise<CheckerIdentity> {

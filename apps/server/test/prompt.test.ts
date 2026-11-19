@@ -248,7 +248,7 @@ describe("what employees wrote, in another agent's turn", () => {
 
   it('uses the department’s way of working to assign tasks', () => {
     const prompt = wakePrompt({ kind: 'head' }, task, { taskId: 't', agentId: 'a', why: 'assigned' });
-    expect(prompt).toContain('department’s route');
+    expect(prompt).toContain('department\'s route');
     expect(prompt).not.toContain('generalist developer');
   });
 

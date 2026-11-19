@@ -86,7 +86,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'build_structure',
-    'Applies requested changes to the company structure. Get the CEO’s yes before an irreversible deletion. Use brief to describe the company when it changes. ' +
+    'Applies requested changes to the company structure. Get the CEO\'s yes before an irreversible deletion. Use brief to describe the company when it changes. ' +
       'Each item is a new department { template, name?, note?, products?, teams?, staff? } (name only when a template is used a second time; staff defaults to true) or a change { department, note?, products?, teams?, remove? }: ' +
       'products are added, teams creates sub-units by name or renames ({ id, name }) / removes ({ id, remove: true }) existing sub-units (moving their employees back to the pipeline), remove takes a department without employees away with its products. proposalId applies a card you proposed. ' +
       'You apply it as the company owner in any turn.',
@@ -97,7 +97,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'hire',
-    'Carries out the department’s staffing decisions. Each person is { role, name?, product?, model?, subscription?, skills?: { on, off } }: ' +
+    'Carries out the department\'s staffing decisions. Each person is { role, name?, product?, model?, subscription?, skills?: { on, off } }: ' +
       'left out, the name is the role\'s title, the model is Default, the subscription is the first one that serves the department and runs the role, and the skills are the role\'s. ' +
       'Call staffing_options first. A department has one head. proposalId: the staff card this hires from, so it closes. ' +
       'You apply it as the company owner in any turn.',
@@ -111,7 +111,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'set_repository',
-    'Connects a department’s repository. Give its HTTPS address, main branch and commit author. Use vaultEntry by name if the repository needs a credential. Use fullTestCommand for the whole test suite. A run of that command can publish hornhoof/tests on the exact checked commit if the repository permits writing commit statuses.',
+    'Connects a department\'s repository. Give its HTTPS address, main branch and commit author. Use vaultEntry by name if the repository needs a credential. Use fullTestCommand for the whole test suite. A run of that command can publish hornhoof/tests on the exact checked commit if the repository permits writing commit statuses.',
     { department: Id('department'), ...RepoBody.omit({ token: true }).shape, vaultEntry: VaultEntry },
     async ({ department, vaultEntry, ...body }) => {
       const credential = await repositoryCredential(ctx, job.companyId, body.url, vaultEntry);
@@ -182,7 +182,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'explain_request',
-    'Puts what an employee asks into the recipient’s language and plain words. Say what the work is for, what they need to supply and what each choice changes.',
+    'Puts what an employee asks into the recipient\'s language and plain words. Say what the work is for, what they need to supply and what each choice changes.',
     { request: Id('request'), text: z.string().min(1).max(3000) },
     ({ request, text }) => ({ method: 'POST', url: `/api/requests/${request}/explained`, payload: { text } }),
   );

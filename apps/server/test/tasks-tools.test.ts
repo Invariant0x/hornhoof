@@ -139,7 +139,7 @@ describe('task tools', () => {
     expect(add).toContain('hh-lead-tasks');
     expect(add).not.toContain('only when the CEO says now');
     const prompt = wakePrompt({ kind: 'head' }, { number: 1, title: 'Payments', executorAgentId: null } as unknown as Task, { agentId: head.id, taskId: 't', why: 'assigned' });
-    expect(prompt).toContain('Use the department’s route and assign each part to someone with the abilities to deliver it.');
+    expect(prompt).toContain('Use the department\'s route and assign each part to someone with the abilities to deliver it.');
     expect(prompt).toContain('Give independent parts out together with create_task under parent 1. Use the checks each result requires and report the accepted results.');
     expect(prompt).not.toMatch(/2-4|two to four|pieces to different members/);
   });

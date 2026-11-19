@@ -485,7 +485,7 @@ class TaskTools {
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
           'With commit, an unset rule needs no approval. An approval card shows which passed test run checked that commit, or that none did. If its department enabled autonomousRelease and that commit has a green whole run of its release with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
-          'Ask a person when their own judgment or information is indispensable. Resolve ordinary work through the responsible department or the orchestrator. Only irreversible deletion needs the CEO’s yes. Keep credentials out of the question and answer; ask the person to save a missing sign-in in the vault and name the entry.',
+          'Ask a person when their own judgment or information is indispensable. Resolve ordinary work through the responsible department or the orchestrator. Only irreversible deletion needs the CEO\'s yes. Keep credentials out of the question and answer; ask the person to save a missing sign-in in the vault and name the entry.',
         inputSchema: {
           task: Ref,
           question: z.string().trim().min(1).max(2000),
@@ -509,7 +509,7 @@ class TaskTools {
           this.plain(task, question);
           const reply = await commitReply(this.ctx, task, this.job.agentId, question, commit, options);
           if (reply) return reply;
-          if (commit && person) throw refuse(400, 'task_invalid', 'The department’s commit rule determines who approves it.');
+          if (commit && person) throw refuse(400, 'task_invalid', 'The department\'s commit rule determines who approves it.');
           const recipient = person ? await this.questionRecipient(person) : undefined;
           if (!recipient && !commit && topic && !['task', 'employee', 'repositories', 'release'].includes(topic)) {
             throw refuse(400, 'task_invalid', 'Resolve the request through the department or the orchestrator. If only a person can answer, name them.');
