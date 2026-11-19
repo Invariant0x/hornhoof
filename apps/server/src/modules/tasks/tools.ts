@@ -4,6 +4,7 @@ import { agentTaskDetail } from './agent-sight.js';
 import { Verification } from './echelons-tests.js';
 import { AcceptanceInput } from './echelons-accept.js';
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
+import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
 import { ECHELON_STAGES } from '@hornhoof/protocol/echelons';
 import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -56,6 +57,13 @@ const say = (text: string, isError = false) => ({ content: [{ type: 'text' as co
 /* Agents read role names in English, the language of their instructions. */
 const english = (_k: string, v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) && 'en' in v && 'ru' in v && Object.keys(v).length === 2 ? (v as { en: string }).en : v);
 const json = (value: unknown) => say(JSON.stringify(value, english));
+
+/* A task of another department a company watchdog inspects, every word of it with no credential and no private path, as
+   failures and agents give that work to whoever may not open it, and cleaned before its log is cut. */
+const cleaned = <T>(detail: T): T => JSON.parse(JSON.stringify(detail, (key, value: unknown) => {
+  const shown = english(key, value);
+  return typeof shown === 'string' ? cleanDiagnostic(shown) : shown;
+})) as T;
 
 /* One task's answer stays within this, so a long log does not fill the agent's context. */
 export const TASK_ANSWER = 40_000;
@@ -380,7 +388,10 @@ class TaskTools {
       },
       async ({ task: ref }) =>
         this.find(ref, true).then(
-          async ({ agent, task }) => say(fitted({ ...await agentTaskDetail(this.ctx, agent, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id), ...await earlierWork(this.ctx, agent, task) })),
+          async ({ agent, task }) => {
+            const detail = { ...await agentTaskDetail(this.ctx, agent, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id), ...await earlierWork(this.ctx, agent, task) };
+            return say(fitted(sees(agent, task) ? detail : cleaned(detail)));
+          },
           (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
         ),
     );

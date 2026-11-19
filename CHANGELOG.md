@@ -43,6 +43,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Tasks wait for a person's answer, while running work gets a scheduled progress check.
 - Task handoffs and setup messages describe the actual checking route, release rules and staffing.
 - Agents can page through their open tasks, and the company watchdog can inspect stalled work across departments.
+- When a watchdog reads another department's task, the passwords, tokens and home folder paths in it stay hidden.
 - Agents can give out work and ask necessary questions without a quota per turn.
 - Pull requests from forks run without access to private runners or installer credentials.
 
