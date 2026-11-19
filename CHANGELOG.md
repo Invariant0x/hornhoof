@@ -7,6 +7,14 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+## [0.34.2] - 2026-11-19
+
+### Fixed
+
+- Departments open on their staff schema again, with one-shot calls as diamonds in their stage cards.
+- Tracker column headings keep their words whole instead of breaking them letter by letter.
+- Goal cards show their progress bar across the card and the count on one line under it.
+
 ## [0.34.1] - 2026-11-18
 
 ### Fixed
