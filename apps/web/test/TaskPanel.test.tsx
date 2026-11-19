@@ -373,10 +373,11 @@ describe('a task', () => {
     const panel = await openTask(user);
     await openTaskAction(user, panel, language === 'ru' ? ru.tasks.details : en.tasks.details);
     const workflow = within(panel).getByRole('list', { name: language === 'ru' ? 'Маршрут задачи' : 'Task workflow' });
-    expect(within(workflow).getAllByRole('listitem').map(li => li.querySelector('b')!.textContent)).toEqual(['Architecture', 'Development', 'Review', 'Security', 'Tests']);
-    expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('Review');
+    const stages = language === 'ru' ? ['Архитектура', 'Разработка', 'Проверка', 'Безопасность', 'Тесты'] : ['Architecture', 'Development', 'Review', 'Security', 'Tests'];
+    expect(within(workflow).getAllByRole('listitem').map(li => li.querySelector('b')!.textContent)).toEqual(stages);
+    expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent(stages[2]!);
     expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent(language === 'ru' ? 'Исполнитель: Rita' : 'Owner: Rita');
-    expect(workflow).not.toHaveTextContent('Cleanup');
+    expect(workflow).not.toHaveTextContent(language === 'ru' ? 'Уборка лишнего' : 'Cleanup');
   });
 
   it('keeps submission evidence, verdicts and comments in the full log', async () => {
@@ -407,8 +408,8 @@ describe('a task', () => {
       log: [...TASK_DETAIL.log, { kind: 'started', text: '#9 is done, so it starts now.', data: {}, by: null, at: '2026-10-30T09:00:00.000Z' }],
     };
     for (const [lang, words] of [
-      ['en', { workflow: 'Task workflow', phase: 'Waiting for an owner', after: 'Waits for', started: 'Hornhoof started it once what it waited for was done' }],
-      ['ru', { workflow: 'Маршрут задачи', phase: 'Нужен исполнитель', after: 'Ждет', started: 'Hornhoof запустил ее, когда то, чего она ждала, было готово' }],
+      ['en', { workflow: 'Task workflow', stage: 'Development', phase: 'Waiting for an owner', after: 'Waits for', started: 'Hornhoof started it once what it waited for was done' }],
+      ['ru', { workflow: 'Маршрут задачи', stage: 'Разработка', phase: 'Нужен исполнитель', after: 'Ждет', started: 'Hornhoof запустил ее, когда то, чего она ждала, было готово' }],
     ] as const) {
       localStorage.setItem('hh-lang', lang);
       const user = userEvent.setup();
@@ -429,7 +430,7 @@ describe('a task', () => {
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
       await openTaskAction(user, panel, lang === 'ru' ? ru.tasks.details : en.tasks.details);
       const workflow = within(panel).getByRole('list', { name: words.workflow });
-      expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('Development');
+      expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent(words.stage);
       expect(within(panel).getByRole('status')).toHaveTextContent(words.phase);
       const facts = within(panel).getByRole('group', { name: lang === 'ru' ? ru.tracker.card.facts : en.tracker.card.facts });
       expect(within(facts).getByRole('link', { name: '#9 Pick a payment provider' })).toHaveAttribute('title', words.after);
