@@ -38,7 +38,7 @@ test('a test of test runs reads no test of the server by the patterns of the pro
 test('a scenario follows every screen of the app, and a screen takes every scenario but no test of another group', async () => {
   for (const path of ['apps/web/src/ui/Briefing.tsx', 'apps/web/src/screens/About.tsx', 'apps/web/src/theme.css']) {
     const changed = await changedBy(path);
-    assert.deepEqual(unitsOf('browser', 'browser-matrix').filter(unit => !changed.has(unit)), [], path);
+    assert.deepEqual(unitsOf('browser', 'browser-matrix', 'browser-engines').filter(unit => !changed.has(unit)), [], path);
     strays(changed, 'server', 'node', 'protocol');
   }
 });
