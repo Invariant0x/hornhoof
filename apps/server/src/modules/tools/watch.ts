@@ -54,10 +54,11 @@ function employeesTasks(db: Db, companyId: string) {
    person's work too. */
 const employeesWork = (db: Db, companyId: string) => and(employees(), employeesTasks(db, companyId));
 
-/* A message to a person's own assistant that did not go in names that assistant, so it stays out too. */
+/* A message to a person's own assistant that did not go in names that assistant, so it stays out too, its id matched as
+   the sender wrote it, capitals or not. */
 function notToAssistants(db: Db, companyId: string) {
   const assistants = db.select({ id: sql<string>`${agents.id}::text` }).from(agents).where(assistantsOf(companyId));
-  return notInArray(sql`${agentEvents.data}->'undelivered'->>'recipient'`, assistants);
+  return notInArray(sql`lower(${agentEvents.data}->'undelivered'->>'recipient')`, assistants);
 }
 
 /* Who reads failures, to know whose work it may open. */

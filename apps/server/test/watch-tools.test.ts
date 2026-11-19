@@ -713,10 +713,13 @@ describe('tools a skill grants', () => {
     const sender = { companyId: acme.id, agentId: bruno.id };
     await keepUndelivered(app.ctx, sender, { reason: 'personal_assistant', recipient: ava!.id, task: null });
     await keepUndelivered(app.ctx, sender, { reason: 'switched_off', recipient: hana.id, task: null });
+    /* An id goes in with capitals too, and its refusal keeps it as it was written. */
+    const client = await mcp(app, TOKEN);
+    expect((await call(client, 'message_employee', { employee: ava!.id.toUpperCase(), text: 'Hello.' })).isError).toBe(true);
 
-    const out = JSON.parse((await call(await mcp(app, TOKEN), 'failures', { hours: 6 })).content[0]!.text);
+    const out = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text);
     expect(out.undelivered).toEqual([expect.objectContaining({ agent: 'Bruno', recipient: hana.id, to: 'Hana', reason: 'switched_off' })]);
-    for (const word of [ava!.id, 'Ava', 'personal_assistant']) expect.soft(JSON.stringify(out)).not.toContain(word);
+    for (const word of [ava!.id, ava!.id.toUpperCase(), 'Ava', 'personal_assistant']) expect.soft(JSON.stringify(out)).not.toContain(word);
   });
 
   /* An employee's work on a task a person's own assistant holds or does is that person's work too, as task views keep it. */
