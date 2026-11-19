@@ -11,6 +11,7 @@ import { rank } from '../src/modules/copies/order.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { certFacts, issuedBy } from '../src/modules/network/authority.js';
 import { companyFolder, issueTicket, onlineShare, renewedMessage, renewMessage, visitorKeyOf, workerView, type WorkerView } from '../src/modules/network/join.js';
+import { joinMessage } from '../src/modules/network/join-proof.js';
 import { peerSecret } from '../src/modules/network/store.js';
 import { fakeRelay } from './fake-relay.js';
 import { as, invitePerson, setUpCompany, testApp, TEST_SECRET, until } from './helpers.js';
@@ -63,13 +64,15 @@ async function company(env: NodeJS.ProcessEnv = {}) {
     const said = (await join(await command(token), { core: true, ...computer })).json() as { machine: { id: string }; core: { ticket: string } };
     return { machine: said.machine.id, ticket: said.core.ticket };
   };
-  const redeem = (ticket: string, machineKey: string, signKey: string, networkId = hostIdOf(machineKey), more: object = {}) =>
-    app.inject({ method: 'POST', url: '/api/network/join', payload: { ticket, networkId, signKey }, ...more });
+  const redeem = (ticket: string, machineKey: string, keys: Keys, networkId = hostIdOf(machineKey), more: object = {}) => {
+    const signature = sign(null, Buffer.from(joinMessage(ticket, networkId)), keys.privateKey).toString('base64');
+    return app.inject({ method: 'POST', url: '/api/network/join', payload: { ticket, networkId, signKey: keys.pem, signature }, ...more });
+  };
   /* A worker: the computer joined, and its keeper redeemed the ticket with a key of its own. */
   const worker = async (computer: typeof MAC = MAC, token = ceo): Promise<Worker> => {
     const { ticket } = await cored(computer, token);
     const keys = newKeys();
-    const said = (await redeem(ticket, computer.machineId, keys.pem)).json() as Joined;
+    const said = (await redeem(ticket, computer.machineId, keys)).json() as Joined;
     return { machine: said.machine, keys, serial: certFacts(said.certPem).serial, authorityPem: said.authorityPem, view: said.view };
   };
   /* Each renewal is of a later moment than the one before. */
@@ -144,6 +147,28 @@ describe('joining the company as a machine', () => {
     expect(await byHand.db.select().from(machineTickets)).toEqual([]);
   });
 
+  it('requires a signature for the ticket, computer and public key', async () => {
+    const c = await company();
+    const { machine, ticket } = await c.cored();
+    const keys = newKeys();
+    const networkId = hostIdOf(MAC.machineId);
+    const payload = { ticket, networkId, signKey: keys.pem };
+    const ask = (signature?: string) => c.app.inject({ method: 'POST', url: '/api/network/join', payload: { ...payload, signature } });
+
+    expect((await ask()).statusCode).toBe(400);
+    const otherTicket = await issueTicket(c.db, machine);
+    const proofs = [
+      sign(null, Buffer.from(joinMessage(ticket, networkId)), newKeys().privateKey),
+      sign(null, Buffer.from(joinMessage(otherTicket, networkId)), keys.privateKey),
+      sign(null, Buffer.from(joinMessage(ticket, hostIdOf(LAPTOP.machineId))), keys.privateKey),
+    ];
+    for (const proof of proofs) expect(errorOf(await ask(proof.toString('base64')))).toBe('join_refused');
+    expect(await c.rowOf(machine)).toMatchObject({ networkId: null, role: null, signKey: null });
+    expect(await c.db.select().from(certificates).where(eq(certificates.machineId, machine))).toEqual([]);
+    expect(await c.db.select().from(machineTickets).where(eq(machineTickets.ticketHash, hashToken(ticket)))).toMatchObject([{ usedAt: null }]);
+    expect((await c.redeem(ticket, MAC.machineId, keys)).statusCode).toBe(200);
+  });
+
   it('joins once with a ticket', async () => {
     const c = await company();
     await c.serverCertificate();
@@ -152,13 +177,13 @@ describe('joining the company as a machine', () => {
     const keys = newKeys();
 
     /* The ticket binds one computer: an id that is not that computer's is refused, and the ticket stays good. */
-    const elsewhere = await c.redeem(ticket, MAC.machineId, keys.pem, hostIdOf('another-0009-abcd'));
+    const elsewhere = await c.redeem(ticket, MAC.machineId, keys, hostIdOf('another-0009-abcd'));
     expect(elsewhere.statusCode).toBe(409);
     expect(errorOf(elsewhere)).toBe('machine_taken');
     expect(await c.rowOf(machine)).toMatchObject({ networkId: null, role: null, signKey: null });
     expect(await c.db.select().from(certificates).where(eq(certificates.machineId, machine))).toEqual([]);
 
-    const res = await c.redeem(ticket, MAC.machineId, keys.pem);
+    const res = await c.redeem(ticket, MAC.machineId, keys);
     expect(res.statusCode).toBe(200);
     const said = res.json() as Joined;
     expect(said).toMatchObject({ machine, role: 'worker' });
@@ -171,32 +196,24 @@ describe('joining the company as a machine', () => {
     const first = certFacts(said.certPem).serial;
     expect(await c.db.select().from(certificates).where(eq(certificates.machineId, machine))).toMatchObject([{ serial: first, revokedAt: null }]);
 
-    /* Whoever else got hold of the ticket comes too late. */
-    const again = await c.redeem(ticket, MAC.machineId, newKeys().pem);
+    /* A signed retry still gets a new-command prompt and leaves exactly one certificate. */
+    const again = await c.redeem(ticket, MAC.machineId, keys);
     expect(again.statusCode).toBe(410);
     expect(again.json().error).toEqual({ code: 'gone', message: 'This join ticket was used or has expired. Run the command from Hornhoof again.', reason: 'ticket_used' });
-    expect((await c.redeem('x'.repeat(43), MAC.machineId, keys.pem)).statusCode).toBe(410);
+    expect(errorOf(await c.redeem(ticket, MAC.machineId, newKeys()))).toBe('ticket_used');
+    expect((await c.redeem('x'.repeat(43), MAC.machineId, keys)).statusCode).toBe(410);
     const expired = await issueTicket(c.db, machine, new Date(Date.now() - 25 * 3_600_000));
-    expect(errorOf(await c.redeem(expired, MAC.machineId, keys.pem))).toBe('ticket_used');
+    expect(errorOf(await c.redeem(expired, MAC.machineId, keys))).toBe('ticket_used');
     expect(await c.db.select().from(certificates).where(eq(certificates.machineId, machine))).toHaveLength(1);
     expect((await c.rowOf(machine)).signKey).toBe(keys.pem);
 
-    /* The keeper that redeemed it and lost the answer asks again with the same key, and is answered again: with the
-       ticket spent and no certificate it would have no way in. Once the ticket's day is over, no more. */
-    const lost = await c.redeem(ticket, MAC.machineId, keys.pem);
-    expect(lost.statusCode).toBe(200);
-    expect(certFacts((lost.json() as Joined).certPem)).toMatchObject({ machineId: machine, role: 'worker' });
-    await c.db.update(machineTickets).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(machineTickets.ticketHash, hashToken(ticket)));
-    expect(errorOf(await c.redeem(ticket, MAC.machineId, keys.pem))).toBe('ticket_used');
-    await c.db.update(certificates).set({ revokedAt: new Date() }).where(eq(certificates.serial, certFacts((lost.json() as Joined).certPem).serial));
-
     /* The same key again changes nothing that works; a new key, as after the core was installed anew, ends what the old
        key held. */
-    const sameKey = await c.redeem(await issueTicket(c.db, machine), MAC.machineId, keys.pem);
+    const sameKey = await c.redeem(await issueTicket(c.db, machine), MAC.machineId, keys);
     expect(sameKey.statusCode).toBe(200);
     expect(await c.db.select().from(certificates).where(and(eq(certificates.machineId, machine), isNull(certificates.revokedAt)))).toHaveLength(2);
     const other = newKeys();
-    const newKey = (await c.redeem(await issueTicket(c.db, machine), MAC.machineId, other.pem)).json() as Joined;
+    const newKey = (await c.redeem(await issueTicket(c.db, machine), MAC.machineId, other)).json() as Joined;
     const live = await c.db.select().from(certificates).where(and(eq(certificates.machineId, machine), isNull(certificates.revokedAt)));
     expect(live.map(row => row.serial)).toEqual([certFacts(newKey.certPem).serial]);
     expect(newKey.view.revoked).toContain(first);
@@ -212,24 +229,24 @@ describe('joining the company as a machine', () => {
     const second = await c.cored(MAC, maria);
     expect(second.machine).not.toBe(first.machine);
     const keys = newKeys();
-    const taken = await c.redeem(second.ticket, MAC.machineId, keys.pem);
+    const taken = await c.redeem(second.ticket, MAC.machineId, keys);
     expect(taken.statusCode).toBe(409);
     expect(taken.json().error).toMatchObject({ code: 'conflict', reason: 'machine_taken' });
     expect(await c.rowOf(second.machine)).toMatchObject({ networkId: null, role: null });
     expect((await c.disconnect(first.machine)).statusCode).toBe(204);
-    expect((await c.redeem(second.ticket, MAC.machineId, keys.pem)).statusCode).toBe(200);
+    expect((await c.redeem(second.ticket, MAC.machineId, keys)).statusCode).toBe(200);
     expect(await c.rowOf(second.machine)).toMatchObject({ networkId: hostIdOf(MAC.machineId), role: 'worker' });
 
     /* A ticket goes with its machine. */
     const laptop = await c.cored(LAPTOP);
     expect((await c.disconnect(laptop.machine)).statusCode).toBe(204);
-    expect(errorOf(await c.redeem(laptop.ticket, LAPTOP.machineId, keys.pem))).toBe('ticket_used');
+    expect(errorOf(await c.redeem(laptop.ticket, LAPTOP.machineId, keys))).toBe('ticket_used');
 
     /* A person disabled between the command and the keeper's first start. */
     const tower = { ...LAPTOP, machineId: 'tower-0003-abcd', hostname: 'tower' };
     const theirs = await c.cored(tower, maria);
     await c.db.update(people).set({ status: 'disabled' }).where(eq(people.email, 'maria@acme.com'));
-    const refused = await c.redeem(theirs.ticket, tower.machineId, keys.pem);
+    const refused = await c.redeem(theirs.ticket, tower.machineId, keys);
     expect(refused.statusCode).toBe(410);
     expect(await c.db.select().from(machineTickets).where(and(eq(machineTickets.machineId, theirs.machine), isNull(machineTickets.usedAt)))).toHaveLength(1);
     expect(await c.rowOf(theirs.machine)).toMatchObject({ networkId: null, role: null });
@@ -299,9 +316,9 @@ describe('joining the company as a machine', () => {
     expect(viewOf(await c.renew(w, {}, { remoteAddress: '203.0.113.9', headers: { 'x-forwarded-proto': 'https' } }))).not.toHaveProperty('link');
 
     /* The join's own answer goes by the same rule. */
-    const overHttp = (await c.redeem(await issueTicket(c.db, w.machine), MAC.machineId, w.keys.pem)).json() as Joined;
+    const overHttp = (await c.redeem(await issueTicket(c.db, w.machine), MAC.machineId, w.keys)).json() as Joined;
     expect(overHttp.view).not.toHaveProperty('link');
-    const overHttps = (await c.redeem(await issueTicket(c.db, w.machine), MAC.machineId, w.keys.pem, undefined, OVER_HTTPS)).json() as Joined;
+    const overHttps = (await c.redeem(await issueTicket(c.db, w.machine), MAC.machineId, w.keys, undefined, OVER_HTTPS)).json() as Joined;
     expect(overHttps.view.link).toEqual(secure.link);
   });
 
@@ -362,7 +379,7 @@ describe('joining the company as a machine', () => {
     expect((await c.peers(keeperOf(w.machine))).json()).not.toHaveProperty('link');
     /* Nothing is handed out by a machine that does not lead. */
     const ticket = await issueTicket(c.db, w.machine);
-    const waiting = await c.redeem(ticket, MAC.machineId, w.keys.pem);
+    const waiting = await c.redeem(ticket, MAC.machineId, w.keys);
     expect(waiting.statusCode).toBe(503);
     expect((await c.renew(w, { serial: 'ab12' })).statusCode).toBe(503);
   });
@@ -589,7 +606,7 @@ describe('joining the company as a machine', () => {
     const offered = await c.app.inject({ method: 'POST', url: `/api/machines/${machine}/core`, ...as(c.ceo) });
     expect(offered.statusCode).toBe(201);
     const keys = newKeys();
-    const said = (await c.redeem(ticket, MAC.machineId, keys.pem)).json() as Joined;
+    const said = (await c.redeem(ticket, MAC.machineId, keys)).json() as Joined;
     const w: Worker = { machine, keys, serial: certFacts(said.certPem).serial, authorityPem: said.authorityPem, view: said.view };
     const second = certFacts((JSON.parse(((await c.renew(w, { serial: 'ab12' }, OVER_HTTPS)).json() as { payload: string }).payload) as { certPem: string }).certPem).serial;
     const unused = await issueTicket(c.db, machine);
@@ -614,7 +631,7 @@ describe('joining the company as a machine', () => {
     expect(await c.rowOf(machine)).toMatchObject({ networkId: null });
     expect((await c.rowOf(machine)).revokedAt).not.toBeNull();
     expect(await c.db.select().from(machineTickets).where(isNull(machineTickets.usedAt))).toEqual([]);
-    expect(errorOf(await c.redeem(unused, MAC.machineId, keys.pem))).toBe('ticket_used');
+    expect(errorOf(await c.redeem(unused, MAC.machineId, keys))).toBe('ticket_used');
     const late = await c.join(codeOf((offered.json() as { command: string }).command), { core: true });
     expect(late.statusCode).toBe(410);
     expect(errorOf(late)).toBe('code_used');
@@ -672,7 +689,7 @@ describe('joining the company as a machine', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatch(/^core hornhoof-[a-z]{6} [A-Za-z0-9_-]{43} 8080 /);
     const ticket = lines[0]!.split(' ')[2]!;
-    expect((await c.redeem(ticket, MAC.machineId, newKeys().pem)).statusCode).toBe(200);
+    expect((await c.redeem(ticket, MAC.machineId, newKeys())).statusCode).toBe(200);
 
     const full = await offer(old.machine.id);
     expect(full.statusCode).toBe(409);
