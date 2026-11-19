@@ -498,6 +498,20 @@ describe('making work in a department', () => {
     expect(await card('#25 Refund API')).toBeInTheDocument();
   });
 
+  it('makes a task from the + on any page, asking which department gets it', async () => {
+    const user = userEvent.setup();
+    const made = detail(line({ id: 't25', number: 25, title: 'Refund API', status: 'open' }));
+    const calls = shell('/tasks?show=waits', { 'POST /api/tasks': [201, { task: made }], 'GET /api/tasks/t25': [200, { task: made }] });
+    await screen.findByRole('region', { name: 'Waiting for you' });
+    await user.click((await makeMenu(user)).getByRole('button', { name: 'New task' }));
+    expect(screen.getByLabelText('Department')).toHaveDisplayValue('Development');
+    expect(screen.getByText('Dana, the head, gets it and splits it among the department.')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Title'), 'Refund API');
+    await user.click(screen.getByRole('button', { name: 'Create task' }));
+    await waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === '/api/tasks')?.body).toMatchObject({ title: 'Refund API', department: 'd2' }));
+    expect(await card('#25 Refund API')).toBeInTheDocument();
+  });
+
   it('gives a group task its pipeline and the priority chosen in the form', async () => {
     const user = userEvent.setup();
     const made = detail(line({ id: 't25', number: 25, title: 'New payment option', pipelineId: 'pl1', priority: 'high' }));
