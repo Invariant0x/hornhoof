@@ -7,10 +7,22 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-11-19
+
 ### Fixed
 
 - A version whose tag reaches GitHub with main still gets its images built, published and released: a version counts as out only once its images are published, and as released once its tag has a release.
 - When GitHub or the image registry answers with an error or cannot be reached, a release stops and says why, and leaves the latest images and the releases as they are.
+- Review stays required after a return from Tests, and no one who produced a task's candidates reviews it.
+- Revoked node and assistant keys stay revoked after a restore.
+- A starting node closes the last node's terminal server before it listens.
+- During an update, the shell's bars and the map's controls stand clear of the header and of each other.
+- Text typed on a phone goes in paced lines, and a failed text says where it stopped.
+
+### Added
+
+- The node image carries an Arabic font, so its browsers draw joined Arabic.
+- Network join tickets are signed and work once.
 
 ### Changed
 
@@ -18,16 +30,18 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Test parts renew their time budget as they produce output or results. The node stops a silent part using its files' recorded times, or when the part reaches an explicit upper limit.
 - A release commit that changes only the package versions and the release notes takes the passed test mark of the commit before it, so GitHub builds its images without running the whole test suite again.
 - A plan's card in Subscriptions & API shows its settings and fallback plans across the whole card, numbers the fallback plans and shows each model's whole name, and keeps one filled button among its actions, with Remove set apart at the end.
+- On a Russian screen, task stages carry Russian names.
+- A silence alarm goes to an available fallback when the head of Operations is busy.
 
 ## [0.34.7] - 2026-11-19
-
-### Changed
-
-- The task list has no Goal column any more: the task takes two thirds of the line, and its goal shows on the task card.
 
 ### Fixed
 
 - The + beside Tasks makes a task on every tracker page, Waits for me and My tasks included, and asks which department gets it.
+
+### Changed
+
+- The task list has no Goal column any more: the task takes two thirds of the line, and its goal shows on the task card.
 
 ## [0.34.6] - 2026-11-19
 
