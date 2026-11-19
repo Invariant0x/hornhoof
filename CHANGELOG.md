@@ -7,6 +7,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+## [0.34.6] - 2026-11-19
+
+### Fixed
+
+- The count beside Waits for me matches what the page shows under it, questions for the people you decide for and kept cards included.
+
 ## [0.34.5] - 2026-11-19
 
 ### Fixed
