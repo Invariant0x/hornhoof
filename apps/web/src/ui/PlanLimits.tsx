@@ -14,12 +14,24 @@ function WindowName({ name }: { name: string }) {
   return <bdi>{piece && <bdi dir="ltr">{piece}</bdi>}{words}</bdi>;
 }
 
-function LimitGauge({ sub, name, limits, now }: { sub: SubView; name: string; limits: Limits | null; now: number }) {
+/* A window of a part of the plan's limits: the window, its used share where it is known, and when it resets. */
+function windowUse(limits: Limits | null, name: string) {
+  const w = limits?.windows.find(w => w.name === name);
+  return { w, used: w?.utilization ?? null, at: w?.resetsAt ?? null };
+}
+
+/* What a window with no known share says: that the plan does not have it where the plan names every window it has, else
+   what is known of its data. */
+function NoShare({ sub, limits, named }: { sub: SubView; limits: Limits | null; named: boolean }) {
   const t = useT();
   const { language } = useLanguage();
-  const w = limits?.windows.find(w => w.name === name);
-  const used = w?.utilization ?? null;
-  const figure = used === null ? (limits?.complete && !w ? t.subs.notOnPlan : unknownLimitData(t, language, sub)) : <bdi dir="ltr"><Share>{`${percent(used)}%`}</Share></bdi>;
+  return <>{limits?.complete && !named ? t.subs.notOnPlan : unknownLimitData(t, language, sub)}</>;
+}
+
+function LimitGauge({ sub, name, limits, now }: { sub: SubView; name: string; limits: Limits | null; now: number }) {
+  const t = useT();
+  const { w, used } = windowUse(limits, name);
+  const figure = used === null ? <NoShare sub={sub} limits={limits} named={Boolean(w)} /> : <bdi dir="ltr"><Share>{`${percent(used)}%`}</Share></bdi>;
   return <Gauge label={<WindowName name={name} />} figure={figure} unit={used === null ? undefined : t.cards.used} empty={used === null} used={used} sub={w && <ResetTime at={w.resetsAt} now={now} />} />;
 }
 
@@ -64,18 +76,26 @@ export function PlanLimitParts({ sub, now }: { sub: SubView; now: number }) {
   return <GroupParts sub={sub} groups={groups} now={now} />;
 }
 
-/* One window of a part of the plan's limits in the list: its used share, then when it resets. */
-function LimitLine({ sub, name, limits, now, group }: { sub: SubView; name: string; limits: Limits | null; now: number; group?: string }) {
+/* A window's used share, then when it resets, as one phrase of the dictionary, whole in the direction of its words: the
+   separator stays by the share it follows. */
+function UsedAndReset({ used, at, now }: { used: number; at: string | null; now: number }) {
   const t = useT();
-  const { language } = useLanguage();
-  const w = limits?.windows.find(w => w.name === name);
-  const used = w?.utilization ?? null;
-  const unknown = used === null && (limits?.complete && !w ? t.subs.notOnPlan : unknownLimitData(t, language, sub));
-  /* One phrase of the dictionary, whole in the direction of its words: the separator stays by the share it follows. */
-  const share = <b><bdi dir="ltr">{used === null ? '' : `${percent(used)}%`}</bdi></b>;
-  const words = used === null ? null : <Phrase words={t.subs.usedAndReset} values={[share, <ResetWords at={w?.resetsAt ?? null} now={now} />]} />;
-  if (group === undefined) return used === null ? <span className="cell-na">{unknown}</span> : <span className="cell-lim"><Bar used={used} /><span><bdi>{words}</bdi></span></span>;
-  return <span className="cell-lim">{used !== null && <Bar used={used} />}<span><bdi><Phrase words={t.subs.groupShare} values={[<bdi dir="auto">{group}</bdi>, words ?? unknown]} /></bdi></span></span>;
+  return <Phrase words={t.subs.usedAndReset} values={[<b><bdi dir="ltr">{`${percent(used)}%`}</bdi></b>, <ResetWords at={at} now={now} />]} />;
+}
+
+/* One window of the plan's limits in the list: its used share, then when it resets. */
+function LimitLine({ sub, name, limits, now }: { sub: SubView; name: string; limits: Limits | null; now: number }) {
+  const { w, used, at } = windowUse(limits, name);
+  if (used === null) return <span className="cell-na"><NoShare sub={sub} limits={limits} named={Boolean(w)} /></span>;
+  return <span className="cell-lim"><Bar used={used} /><span><bdi><UsedAndReset used={used} at={at} now={now} /></bdi></span></span>;
+}
+
+/* One window of a group of the plan's models in the list: the group's name, then its used share and reset. */
+function GroupLine({ sub, name, limits, now, group }: { sub: SubView; name: string; limits: Limits; now: number; group: string }) {
+  const t = useT();
+  const { w, used, at } = windowUse(limits, name);
+  const words = used === null ? <NoShare sub={sub} limits={limits} named={Boolean(w)} /> : <UsedAndReset used={used} at={at} now={now} />;
+  return <span className="cell-lim">{used !== null && <Bar used={used} />}<span><bdi><Phrase words={t.subs.groupShare} values={[<bdi dir="auto">{group}</bdi>, words]} /></bdi></span></span>;
 }
 
 export function LimitCell({ sub, name, now }: { sub: SubView; name: string; now: number }) {
@@ -84,6 +104,6 @@ export function LimitCell({ sub, name, now }: { sub: SubView; name: string; now:
   const limits = currentPlanLimits(sub, now);
   const groups = groupsOf(limits);
   if (!groups.length) return <LimitLine sub={sub} name={name} limits={limits} now={now} />;
-  return <ul className="where-list">{groups.map(group => <li key={group.name}><LimitLine sub={sub} name={name} limits={groupLimits(group)} now={now} group={group.name} /></li>)}</ul>;
+  return <ul className="where-list">{groups.map(group => <li key={group.name}><GroupLine sub={sub} name={name} limits={groupLimits(group)} now={now} group={group.name} /></li>)}</ul>;
 }
 

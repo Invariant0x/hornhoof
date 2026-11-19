@@ -42,24 +42,37 @@ function fullWindow<T extends { status: Limits['status']; windows: Window[] }>(p
   return { ...part, status: 'rejected', windows: [...part.windows.filter(w => w.name !== full.name), full] };
 }
 
+/* The window a refusal names: the week where its words say so, else the five hours. */
+const refusedWindow = (end: string): string => (/\b(?:weekly|7-day|seven-day)\b/i.test(end) ? 'seven_day' : 'five_hour');
+
+/* Until when a refused window is full: the time the program gives, the reset said before while it is still ahead, or a
+   quarter of an hour. */
+function refusedUntil(end: string, known: string | null | undefined, now: number): string {
+  if (known && Date.parse(known) > now) return againIn(end, now) ?? known;
+  return againIn(end, now) ?? new Date(now + LIMIT_PROBE_MS).toISOString();
+}
+
+/* The plan's limits as a whole, none yet where it told none. */
+const wholePlan = (limits: Limits | null): Limits => ({ ...limits, status: limits?.status ?? 'allowed', windows: limits?.windows ?? [] });
+
 /* The plan's limits once a turn ended on a refusal for its usage limit, or null when it did not: the window it names is
    full until the time the program gives, the reset the plan said before, or a quarter of an hour. A turn on a model of a
    known group fills that group's window, and the plan's, which speaks for its fullest group; the other groups keep theirs. */
 export function refusedLimits(output: string, limits: Limits | null, now = Date.now(), usageLimit = false, model: string | null = null): Limits | null {
   const end = output.slice(-1500);
   if (!usageLimit && !REFUSED.test(end)) return null;
-  const name = /\b(?:weekly|7-day|seven-day)\b/i.test(end) ? 'seven_day' : 'five_hour';
-  const group: LimitGroup | null = limits ? modelGroup(limits.groups, model) : null;
-  const known = (group ?? limits)?.windows.find(w => w.name === name)?.resetsAt;
-  const resetsAt = againIn(end, now) ?? (known && Date.parse(known) > now ? known : new Date(now + LIMIT_PROBE_MS).toISOString());
-  const full = { name, utilization: 1, resetsAt };
-  const plan = fullWindow({ ...limits, status: limits?.status ?? 'allowed', windows: limits?.windows ?? [] }, group ? laterOf(limits?.windows.find(w => w.name === name), full) : full);
-  return group ? { ...plan, groups: limits!.groups!.map(g => (g === group ? fullWindow(g, full) : g)) } : plan;
+  const plan = wholePlan(limits);
+  const name = refusedWindow(end);
+  const group: LimitGroup | null = modelGroup(plan.groups, model);
+  const full = { name, utilization: 1, resetsAt: refusedUntil(end, (group ?? plan).windows.find(w => w.name === name)?.resetsAt, now) };
+  if (!group) return fullWindow(plan, full);
+  return { ...fullWindow(plan, laterOf(plan.windows.find(w => w.name === name), full)), groups: plan.groups!.map(g => (g === group ? fullWindow(g, full) : g)) };
 }
 
-/* The plan's window speaks for its fullest group: one already full until later stays as it is. */
-function laterOf(known: Window | undefined, full: Window): Window {
-  return known && (known.utilization ?? 0) >= 1 && known.resetsAt && full.resetsAt && Date.parse(known.resetsAt) > Date.parse(full.resetsAt) ? known : full;
+/* The plan's window speaks for its fullest group: one already full until later than the group's stays as it is. */
+function laterOf(known: Window | undefined, full: Window & { resetsAt: string }): Window {
+  const fullUntil = known && (known.utilization ?? 0) >= 1 && known.resetsAt ? Date.parse(known.resetsAt) : 0;
+  return fullUntil > Date.parse(full.resetsAt) ? known! : full;
 }
 
 /* Wakes the agent's line once its plan's limit starts over. */
