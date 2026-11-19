@@ -1,3 +1,5 @@
+import { AuthorCheckDone, AuthorCheckRun } from './author-check.js';
+export { AuthorCheckDone, AuthorCheckRun, AuthorCheckPin, docsOnly } from './author-check.js';
 export * from './department-mode.js';
 export * from './tool-privacy.js';
 export * from './external-operations.js';
@@ -355,7 +357,7 @@ export type NodeReconnect = z.infer<typeof NodeReconnect>;
    server confirms it, so a restart on either side loses none and applies none twice. The rest are snapshots or live
    answers that are worth nothing late: hello, load, status, the terminal's screens, turn.open, agent.start, agent.said,
    agent.restarted and node.stopping. */
-export const NUMBERED = ['job.started', 'job.event', 'job.done', 'tests.started', 'tests.silent', 'tests.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard'] as const;
+export const NUMBERED = ['job.started', 'job.event', 'job.done', 'tests.started', 'tests.silent', 'tests.done', 'author_check.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard'] as const;
 /* Optional, so a build that does not number still talks to one that does. */
 const MessageNumber = z.number().int().min(1).optional();
 /* The header of the upgrade answer of a server that sends ack. */
@@ -386,6 +388,7 @@ export const HELLO_IDS_BEFORE_ACKS = 100;
 const WorkError = z.string().max(2000).nullable().optional();
 
 const NodeMessage = z.discriminatedUnion('type', [
+  AuthorCheckDone,
   CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced, PhoneReply, PhoneFrame,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
@@ -623,6 +626,7 @@ function validTestMode(message: { command: string; commitSha?: string | null; en
 export const MAX_JOB_TIMEOUT_MS = 2 ** 31 - 1;
 
 const ServerMessage = z.discriminatedUnion('type', [
+  AuthorCheckRun,
   CheckQueueReply, PhoneProbe, PhoneList, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke,
   z.object({
     type: z.literal('job.run'),

@@ -34,7 +34,9 @@ concurrency:
 jobs:
   # A passed test run leaves the status hornhoof/tests on the commit it checked: Hornhoof's own, or GitHub's through the
   # passed job below. With a success there, or on the second parent of a merge with the same tree, GitHub need not run
-  # the tests again; whatever it cannot tell, they run.
+  # the tests again. Nor does it for a release commit, which changes over its one parent only the versions
+  # `npm run release:version` writes and CHANGELOG.md, when that parent has a success and the release check, the one check
+  # that reads those files, passes on the commit in this job. Whatever it cannot tell, they run.
   # Without one, this job chooses the tests, as an author's check does (.hornhoof/author-check.md): those the change since
   # the nearest commit whose tests passed reaches. A change the selector cannot tell, or one that reaches every suite whole,
   # runs the whole suite, and so does a choice that fails.

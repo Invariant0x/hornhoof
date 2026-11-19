@@ -1,14 +1,17 @@
 import type { EchelonStage, EchelonStep, HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
-import type { Route } from './route-records.js';
+import { skippedAuthorReview, type Route } from './route-records.js';
+import { EchelonCandidate } from '@hornhoof/protocol/echelons';
+import { reviewSkip, type AuthorReviewSkip } from './author-check.js';
 import { checkerFor, departmentHead, NO_DEPARTMENT_CHECKER, uncheckable } from './echelons-assign.js';
+import { candidateReceivedAt } from './echelons-candidates.js';
 import type { CheckerIdentity } from './echelons-policy.js';
 import { refuse, type Task, type Wake } from './state.js';
 
-function advancedSteps(route: Route, next: EchelonStep, owner: CheckerIdentity | null, candidateId: string): EchelonStep[] {
+function advancedSteps(route: Route, next: EchelonStep, owner: CheckerIdentity | null, candidateId: string, receivedId: string): EchelonStep[] {
   return route.state.stages.map((step): EchelonStep => {
     if (step.stage === route.state.stage) return { ...step, status: 'complete', candidateId };
-    if (step.stage === next.stage) return { ...step, status: owner ? 'active' : 'pending', ownerAgentId: owner?.agentId ?? null, reason: owner ? null : 'eligible_owner_required', inputCandidateId: candidateId };
+    if (step.stage === next.stage) return { ...step, status: owner ? 'active' : 'pending', ownerAgentId: owner?.agentId ?? null, reason: owner ? null : 'eligible_owner_required', inputCandidateId: receivedId };
     return step;
   });
 }
@@ -34,7 +37,37 @@ async function readyHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, cand
 }
 
 /* skipped: the checks passed over on the way, as nobody in the department can do them. */
-type Handoff = { state: Route['state']; set: Partial<Task>; wakes: Wake[]; skipped: EchelonStage[] };
+type Handoff = { state: Route['state']; set: Partial<Task>; wakes: Wake[]; skipped: EchelonStage[]; authorCheckSkip?: AuthorReviewSkip };
+
+export async function submittedHandoff(ctx: Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'config'>>, task: Task, route: Route, candidate: HandedCandidate): Promise<Handoff> {
+  if (skippedAuthorReview(route.state)) return reviewReplacement(ctx, task, route, candidate);
+  if (route.state.stage !== 'development') return forwardHandoff(ctx, task, route, candidate);
+  const review = route.state.stages.find(step => step.stage === 'review' && step.status === 'pending');
+  const risky = task.riskClass !== null && task.riskClass !== 'none';
+  if (risky && !route.state.stages.some(step => step.stage === 'security' && step.status === 'pending')) {
+    return forwardHandoff(ctx, task, route, candidate);
+  }
+  const parsed = EchelonCandidate.safeParse(candidate);
+  const skip = review && parsed.success ? await reviewSkip(ctx, task, parsed.data) : null;
+  if (!skip) return forwardHandoff(ctx, task, route, candidate);
+  const stages = route.state.stages.map(step => step === review
+    ? { ...step, status: 'skipped' as const, reason: skip.reason, inputCandidateId: candidate.id }
+    : step);
+  const next = await forwardHandoff(ctx, task, { ...route, state: { ...route.state, stages } }, candidate);
+  return { ...next, authorCheckSkip: skip };
+}
+
+/* A replacement has a different submission and cannot inherit the old Review exception. */
+export async function reviewReplacement(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate): Promise<Handoff> {
+  const review = skippedAuthorReview(route.state);
+  const stages = route.state.stages.map((step): EchelonStep => {
+    if (step === review || (step.stage !== 'architecture' && step.stage !== 'development' && step.status !== 'skipped')) {
+      return { ...step, status: 'pending', reason: null, inputCandidateId: null, candidateId: null };
+    }
+    return step;
+  });
+  return forwardHandoff(ctx, task, { ...route, state: { ...route.state, stage: 'development', stages } }, candidate);
+}
 
 export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate): Promise<Handoff> {
   const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
@@ -45,7 +78,8 @@ export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Ro
   for (const next of ahead) {
     const ability = route.state.abilities[next.stage];
     if (!ability) throw refuse(409, 'task_invalid', 'This stage needs its authorized work assignment.');
-    const owner = await checkerFor(ctx, task, candidate.producedBy, ability, next.ownerAgentId);
+    const received = await candidateReceivedAt(ctx.db, task, route, candidate, next.stage);
+    const owner = await checkerFor(ctx, task, received.producedBy, ability, next.ownerAgentId);
     if (!owner && await uncheckable(ctx.db, task, next.stage, ability, route.state.security)) {
       stages = stages.map(step => step.stage === next.stage ? { ...step, status: 'skipped', reason: NO_DEPARTMENT_CHECKER, ownerAgentId: null } : step);
       skipped.push(next.stage);
@@ -53,7 +87,7 @@ export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Ro
     }
     const current: Route = { ...route, state: { ...route.state, stages } };
     const state: Route['state'] = { ...route.state, stage: next.stage, phase: owner ? 'active' : 'waiting', candidateId: candidate.id, assignment: owner,
-      stages: advancedSteps(current, next, owner, candidate.id),
+      stages: advancedSteps(current, next, owner, candidate.id, received.id),
     };
     return { state, set: handoffTask(next.stage, owner), wakes: [await handoffWake(ctx, task, next.stage, owner)], skipped };
   }

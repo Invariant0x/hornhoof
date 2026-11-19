@@ -52,7 +52,15 @@ Exit code 0 means nothing failed, 1 a stage failed, 2 it could not be judged: a 
 
 ## What it prints
 
-The tools write to the log as they run, with `STAGE <name> <status> exit=<n|null> secs=<n> reason=<code>` after each stage. The last line is `AUTHOR_CHECK <json>`, the record of the check. It has no `runId` and each stage has `partId: null`: the record is for whoever ran the command, and the server stores none. Null in `numbers` means unknown, never zero.
+The tools write to the log as they run, with `STAGE <name> <status> exit=<n|null> secs=<n> reason=<code>` after each stage. The last line is `AUTHOR_CHECK <json>`, the record of the check. It has no `runId` and each stage has `partId: null`: the record is for whoever ran the command. A null number on its own means unknown.
+
+For a code task in Development, `check_author` requests the same check on the
+node in a separate checkout of the pushed commit. The server pins the repository,
+candidate SHA and base. It keeps the node's receipt on that task. A green receipt
+with CRAP below 10 can replace Review for a small task, a change entirely under
+`docs/` or a patch that matches a commit in the turn or main. The Review exception
+is for that SHA. A replacement candidate goes to Review unless it qualifies with
+its own receipt. Required Security and Tests still run.
 
 ## Nothing runs on submit
 

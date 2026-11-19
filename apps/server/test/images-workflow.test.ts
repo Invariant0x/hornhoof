@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -13,6 +13,7 @@ import { listenIn } from '../../../test-support/ports.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const SCRIPT = join(ROOT, 'scripts/tests-mark.mjs');
+const RELEASE_VERSION = join(ROOT, 'scripts/release-version.mjs');
 const WORKFLOW = readFileSync(join(ROOT, '.github/workflows/images.yml'), 'utf8');
 /* The runners the repository variable names, GitHub's machines without it, and always for a pull request from a fork. */
 const TRUSTED = "(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)";
@@ -202,6 +203,149 @@ describe('whether a mark spares this commit the tests', () => {
       const octopus = git(dir, 'commit-tree', `${second}^{tree}`, '-p', third, '-p', second, '-p', 'main~1', '-m', 'octopus');
       const hub = await github({ [second]: MARKED });
       expect((await decide(dir, octopus, hub.api)).out).toBe(NOT_PROVED);
+    });
+  });
+
+  describe('a release commit', () => {
+    const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
+    const NOTES = '# Changelog\n\n## [Unreleased]\n\n### Fixed\n\n- A cart keeps its items.\n\n## [0.5.0] - 2026-11-04\n\n### Fixed\n\n- A checkout issue.\n';
+    const CART = { name: '@shop/cart', version: '0.5.0', dependencies: { 'left-pad': '^1.3.0' } };
+    const statusOf = (sha: string) => `/repos/acme/shop/commits/${sha}/status?per_page=100`;
+
+    function write(dir: string, path: string, text: string) {
+      mkdirSync(dirname(join(dir, path)), { recursive: true });
+      writeFileSync(join(dir, path), text);
+    }
+
+    /* A repository with workspaces, as release:version reads it; its one commit is the parent of the release. */
+    function shop() {
+      const dir = folder();
+      git(dir, 'init', '--quiet', '--initial-branch=main');
+      write(dir, 'package.json', json({ name: 'shop', version: '0.5.0', workspaces: ['packages/*'] }));
+      write(dir, 'packages/cart/package.json', json(CART));
+      write(dir, 'packages/cart/index.js', 'export const cart = [];\n');
+      write(dir, 'package-lock.json', json({
+        name: 'shop',
+        version: '0.5.0',
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          '': { name: 'shop', version: '0.5.0', workspaces: ['packages/*'] },
+          'node_modules/@shop/cart': { resolved: 'packages/cart', link: true },
+          'node_modules/left-pad': { version: '1.3.0' },
+          'packages/cart': CART,
+        },
+      }));
+      write(dir, 'CHANGELOG.md', NOTES);
+      git(dir, 'add', '--all');
+      git(dir, 'commit', '--quiet', '-m', 'cart');
+      return { dir, parent: git(dir, 'rev-parse', 'HEAD') };
+    }
+
+    /* The release commit as a release is made: `npm run release:version -- turn 6`, then the notes of 0.6.0 under their heading. */
+    function release(dir: string, more: () => void = () => {}, heading = '## [0.6.0] - 2026-11-18') {
+      execFileSync(process.execPath, [RELEASE_VERSION, 'turn', '6'], { cwd: dir, stdio: 'ignore' });
+      write(dir, 'CHANGELOG.md', NOTES.replace('## [Unreleased]\n', `## [Unreleased]\n\n${heading}\n`));
+      more();
+      git(dir, 'commit', '--quiet', '--all', '-m', 'Release 0.6.0: version and its notes');
+      return git(dir, 'rev-parse', 'HEAD');
+    }
+
+    it('takes the passed mark of its parent when it changes only the versions release:version writes and the notes', async () => {
+      const { dir, parent } = shop();
+      const sha = release(dir);
+      const hub = await github({ [parent]: MARKED });
+      const { out, said } = await decide(dir, sha, hub.api);
+      expect(out).toBe(PROVED);
+      expect(hub.asked.map(a => a.url)).toEqual([statusOf(sha), statusOf(parent)]);
+      expect(said).toContain(parent);
+    });
+
+    it('takes it for the real release 0.34.1 over 209274b1, its patch applied as git made it', async () => {
+      const fixture = JSON.parse(readFileSync(join(ROOT, 'apps/server/test/fixtures/release-0.34.1.json'), 'utf8')) as { files: Record<string, string>; patch: string };
+      const dir = folder();
+      git(dir, 'init', '--quiet', '--initial-branch=main');
+      for (const [path, text] of Object.entries(fixture.files)) write(dir, path, text);
+      git(dir, 'add', '--all');
+      git(dir, 'commit', '--quiet', '-m', 'Keep no scrollbar room beside the tracker lists drawer on a phone');
+      const parent = git(dir, 'rev-parse', 'HEAD');
+      const patch = join(folder(), 'release.patch');
+      writeFileSync(patch, fixture.patch);
+      git(dir, 'apply', patch);
+      git(dir, 'commit', '--quiet', '--all', '-m', 'Release 0.34.1: version and its notes');
+      const hub = await github({ [parent]: MARKED });
+      expect((await decide(dir, git(dir, 'rev-parse', 'HEAD'), hub.api)).out).toBe(PROVED);
+    });
+
+    it('runs the tests when one more line changed beside them, and GitHub is not asked of its parent', async () => {
+      const { dir, parent } = shop();
+      const sha = release(dir, () => write(dir, 'packages/cart/index.js', 'export const cart = [1];\n'));
+      const hub = await github({ [parent]: MARKED });
+      const { out, said } = await decide(dir, sha, hub.api);
+      expect(out).toBe(NOT_PROVED);
+      expect(said).toContain('packages/cart/index.js');
+      expect(hub.asked.map(a => a.url)).toEqual([statusOf(sha)]);
+    });
+
+    it('runs the tests when a package.json also bumps a dependency', async () => {
+      const { dir, parent } = shop();
+      const sha = release(dir, () => {
+        const manifest = JSON.parse(readFileSync(join(dir, 'packages/cart/package.json'), 'utf8')) as typeof CART;
+        write(dir, 'packages/cart/package.json', json({ ...manifest, dependencies: { 'left-pad': '^1.3.1' } }));
+      });
+      const hub = await github({ [parent]: MARKED });
+      expect((await decide(dir, sha, hub.api)).out).toBe(NOT_PROVED);
+    });
+
+    it.each([['no mark', []], ['a failure', [{ context: 'hornhoof/tests', state: 'failure' }]]])('runs the tests when its parent has %s', async (_what, marks) => {
+      const { dir, parent } = shop();
+      const sha = release(dir);
+      const hub = await github({ [parent]: marks });
+      expect((await decide(dir, sha, hub.api)).out).toBe(NOT_PROVED);
+    });
+
+    it('runs the tests for a merge, even one that brings in only versions and notes over a parent with a passed mark', async () => {
+      const { dir, parent } = shop();
+      git(dir, 'checkout', '--quiet', '-b', 'release');
+      release(dir);
+      git(dir, 'checkout', '--quiet', 'main');
+      git(dir, 'merge', '--quiet', '--no-ff', '-m', 'merge', 'release');
+      const hub = await github({ [parent]: MARKED });
+      expect((await decide(dir, git(dir, 'rev-parse', 'HEAD'), hub.api)).out).toBe(NOT_PROVED);
+    });
+
+    it('runs the tests when its release check fails, as the tests would', async () => {
+      const { dir, parent } = shop();
+      const sha = release(dir, () => {}, '## [0.6.0] on 18 November');
+      const hub = await github({ [parent]: MARKED });
+      const { out, said } = await decide(dir, sha, hub.api);
+      expect(out).toBe(NOT_PROVED);
+      expect(said).toContain('release check');
+      expect(hub.asked.map(a => a.url)).toEqual([statusOf(sha)]);
+    });
+
+    it('takes it as well when another commit is checked out, as the choice of tests asks of the commits before it', async () => {
+      const { dir, parent } = shop();
+      const sha = release(dir);
+      git(dir, 'checkout', '--quiet', parent);
+      const hub = await github({ [parent]: MARKED });
+      expect((await decide(dir, sha, hub.api)).out).toBe(PROVED);
+    });
+
+    it('runs the tests for the first commit, which has no parent to take a mark from', async () => {
+      const dir = repository();
+      const hub = await github({});
+      const { out, said } = await decide(dir, git(dir, 'rev-parse', 'main'), hub.api);
+      expect(out).toBe(NOT_PROVED);
+      expect(said).toContain('first commit');
+    });
+
+    it('runs the release check on the files of that commit, not on those checked out', async () => {
+      const { dir, parent } = shop();
+      const sha = release(dir, () => {}, '## [0.6.0] on 18 November');
+      git(dir, 'checkout', '--quiet', parent);
+      const hub = await github({ [parent]: MARKED });
+      expect((await decide(dir, sha, hub.api)).out).toBe(NOT_PROVED);
     });
   });
 

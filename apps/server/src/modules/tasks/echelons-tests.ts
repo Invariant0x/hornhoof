@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, taskEvents } from '../../db/schema.js';
 import { currentCandidate, producedCandidate } from './echelons-candidates.js';
-import { changeRoute, type Route } from './route-records.js';
+import { AUTHOR_CHECK_PASSED, changeRoute, type Route } from './route-records.js';
 import { checkingIdentity, departmentHead, heldCheckingIdentity } from './echelons-assign.js';
 import { isTestPath, RepoPath, ReviewSha } from './review-schema.js';
 import { captureReview, exactComparison, type Review } from './review-context.js';
@@ -95,7 +95,7 @@ function resetStepForReturn(step: Route['state']['stages'][number], executorId: 
   if (step.stage === 'development') {
     return { ...step, status: executorId ? 'active' : 'pending', ownerAgentId: executorId, reason: executorId ? null : 'eligible_owner_required', inputCandidateId: candidateId };
   }
-  if (step.status === 'skipped') return step;
+  if (step.status === 'skipped' && step.reason !== AUTHOR_CHECK_PASSED) return step;
   return { ...step, status: 'pending', reason: null, inputCandidateId: null, candidateId: null };
 }
 

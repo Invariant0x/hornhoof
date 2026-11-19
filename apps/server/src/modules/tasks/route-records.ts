@@ -6,6 +6,12 @@ import { ApiError } from '../../errors.js';
 import { type Task, type Tx } from './state.js';
 export type Route = typeof taskRoutes.$inferSelect;
 
+export const AUTHOR_CHECK_PASSED = 'author_check_passed';
+
+export function skippedAuthorReview(state: Route['state']) {
+  return state.stages.find(step => step.stage === 'review' && step.status === 'skipped' && step.reason === AUTHOR_CHECK_PASSED);
+}
+
 export async function routeOf(db: Db | Tx, task: Pick<Task, 'id' | 'companyId'>): Promise<Route> {
   const [route] = await db.select().from(taskRoutes).where(and(eq(taskRoutes.taskId, task.id), eq(taskRoutes.companyId, task.companyId)));
   if (!route) throw new ApiError(409, 'conflict', 'This task has no required route. Complete the documented release data preparation.', 'task_invalid');
