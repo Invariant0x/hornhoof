@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from '@playwright/test';
 import type { Org } from '../src/types';
 import { serveApi } from './api';
 import { captureWith } from './capture';
@@ -181,20 +181,55 @@ async function bareBreaks(page: Page, frames: string, texts: string): Promise<st
   ), { frames, texts });
 }
 
-/* Right to left words that are letter-spaced, which tears the joined letters of Arabic apart. */
-async function spacedRtl(page: Page, frames: string): Promise<string[]> {
-  return page.evaluate(frames => {
-    const rtl = /[֐-ࣿיִ-﷿ﹰ-﻿]/;
-    return [...document.querySelectorAll(frames)].flatMap(frame => {
-      const spaced: string[] = [];
-      const walk = document.createTreeWalker(frame, NodeFilter.SHOW_TEXT);
-      for (let node = walk.nextNode(); node; node = walk.nextNode()) {
-        const el = node.parentElement!, spacing = getComputedStyle(el).letterSpacing;
-        if (rtl.test(node.textContent ?? '') && el.getClientRects().length && spacing !== 'normal' && parseFloat(spacing) !== 0) spaced.push(`${el.className}: ${(node.textContent ?? '').trim().slice(0, 24)}: letter-spacing ${spacing}`);
+/* Role names that are letter-spaced on a right to left page, or in Arabic, Persian or Hebrew, where spacing tears joined
+   letters apart: the page's language is set to each for a moment and given back. Only the style is read; how the fonts of
+   a machine join letters is not judged. */
+async function spacedRoles(page: Page, roles: string, rtl: boolean): Promise<string[]> {
+  return page.evaluate(({ roles, rtl }) => {
+    const root = document.documentElement, lang = root.lang;
+    const spaced: string[] = [];
+    const read = (where: string) => {
+      for (const role of document.querySelectorAll<HTMLElement>(roles)) {
+        const spacing = getComputedStyle(role).letterSpacing;
+        if (spacing !== 'normal' && parseFloat(spacing) !== 0) spaced.push(`${where}: ${(role.textContent ?? '').trim().slice(0, 24)}: letter-spacing ${spacing}`);
       }
-      return spaced;
-    });
-  }, frames);
+    };
+    if (rtl) read('dir rtl');
+    for (const other of ['ar', 'fa', 'he']) {
+      root.lang = other;
+      read(`lang ${other}`);
+    }
+    root.lang = lang;
+    return spaced;
+  }, { roles, rtl });
+}
+
+/* The room above the line of what the head does, in the layout's own pixels: from the end of the line before it to its
+   top. */
+async function roomAboveDoing(page: Page): Promise<number> {
+  return page.locator('.dview .shead .hx').first().evaluate(hx => {
+    const card = hx.closest('.shead') as HTMLElement;
+    const scale = card.getBoundingClientRect().height / card.offsetHeight;
+    return (hx.getBoundingClientRect().top - hx.previousElementSibling!.getBoundingClientRect().bottom) / scale;
+  });
+}
+
+/* The same room on the head card of the English words, opened on a page of its own of the same width in the same browser. */
+async function englishRoomAboveDoing(browser: Browser, app: string, width: number): Promise<number> {
+  const context = await browser.newContext({ viewport: { width, height: width === 375 ? 812 : 900 }, reducedMotion: 'reduce', timezoneId: 'UTC' });
+  try {
+    const page = await context.newPage();
+    await page.addInitScript(() => localStorage.setItem('hh-lang', 'en'));
+    await serve(page, wholeTextOrg('en'));
+    await page.goto(app);
+    await expect(page.locator('.map .dept')).toHaveCount(4);
+    await page.locator('.map .dept').first().evaluate(card => (card as HTMLElement).click());
+    await expect(page.locator('.dview .dcanvas')).toBeVisible();
+    await settle(page);
+    return await roomAboveDoing(page);
+  } finally {
+    await context.close();
+  }
 }
 
 /* Words of a line that no element inside it isolates from the words around them, as <bdi> does. */
@@ -255,7 +290,7 @@ async function settle(page: Page) {
 
 for (const look of LOOKS) {
   const name = `${look.script}-${look.dir}-${look.width}`;
-  test(`every word on the map's department cards, the department's cards and its hint: ${look.script}, ${look.dir}, ${look.width}px`, async ({ page, browserName }, info) => {
+  test(`every word on the map's department cards, the department's cards and its hint: ${look.script}, ${look.dir}, ${look.width}px`, async ({ page, browser, browserName }, info) => {
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
     page.on('console', m => {
@@ -281,10 +316,10 @@ for (const look of LOOKS) {
     for (const gap of await columnGaps(page)) expect.soft(gap, 'cards of a column stay apart').toBeGreaterThanOrEqual(32);
     if (look.script === 'en' || look.script === 'ru') expect.soft(cards[0]!.h, 'words that fit keep the old card').toBe(160);
     /* The Head of Design's word for #1489 (#1539, N4 and N5): the page names its language, words break by its syllables
-       with a hyphen, and right to left words are never letter-spaced. */
+       with a hyphen, and a role's name is not letter-spaced right to left or in Arabic, Persian or Hebrew. */
     expect.soft(await page.evaluate(() => document.documentElement.lang), 'the page names its language').toBe(look.lang);
     expect.soft(await bareBreaks(page, '.map .dept .edge-in', '.dname, .cnt, .role, .detail, .now > span'), 'words of the map break with a hyphen').toEqual([]);
-    expect.soft(await spacedRtl(page, '.map .dept'), 'right to left words of the map are not letter-spaced').toEqual([]);
+    expect.soft(await spacedRoles(page, '.map .dept .role', look.dir === 'rtl'), 'role names of the map are not letter-spaced right to left').toEqual([]);
 
     /* The department: its head card, role frames and member chips, and the hint at its foot. */
     /* A card can stand under the top bar on a phone: it is pressed as a person's tap on it would press it. */
@@ -306,8 +341,14 @@ for (const look of LOOKS) {
     const { head, chips } = await checkSchema(page);
     const department = '.dview .dcanvas, .dview .ticker';
     expect.soft(await bareBreaks(page, department, '.role, .hn, .meta, .st, .hx-task, .hc > span, .fn, .fa, .fc, .mn, .r2, .r3, .tx'), 'words of the department break with a hyphen').toEqual([]);
-    expect.soft(await spacedRtl(page, department), 'right to left words of the department are not letter-spaced').toEqual([]);
+    expect.soft(await spacedRoles(page, '.dview .role', look.dir === 'rtl'), 'role names of the department are not letter-spaced right to left').toEqual([]);
     if (look.dir === 'rtl') expect.soft(await unisolated(page, '.dview .shead .meta', ['Opus 5.5', 'default effort']), 'the head\'s role line isolates its model and effort').toEqual([]);
+    /* The Head of Design's word for #1489 (#1539): the head card keeps the room above the line of what the head does as the
+       English words have it, within 1 px, so a card that takes more lines grows by them. */
+    if (look.script !== 'en') {
+      const room = await roomAboveDoing(page), english = await englishRoomAboveDoing(browser, new URL('/', page.url()).href, look.width);
+      expect.soft(Math.abs(room - english), `the room above what the head does, ${room.toFixed(1)} px, as in English, ${english.toFixed(1)} px`).toBeLessThanOrEqual(1);
+    }
     /* English fits the old boxes, so the schema stands exactly as it did. Russian cuts the model line of a chip by about a
        pixel in 0.34.4: there the head card and the chips may grow a line, only as far as the words need (checked above for
        every look). */
