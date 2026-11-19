@@ -13,7 +13,7 @@ export const nodeHeldLong = (ctx: Ctx, node: NodeIdentity): boolean => states.ge
 /* Whether a new turn of this role stays off the node. While the node waits, only a program operator's goes in, since a
    program there may wait for its answer; its case ends within OPERATOR_CASE_MS, so it does not hold the wait longer.
    Every other turn, the orchestrator's and the heads' too, goes to another node or waits for this one to come back, so
-   the work on it ends however long it runs. A node that restarts takes nothing once its stop began: a node closes its
+   the work on it ends, or the wait reaches its limit and the node updates anyway. A node that restarts takes nothing once its stop began: a node closes its
    link as it stops, and one that comes back with a new boot ends the restart in its hello. While its link is ready, its
    stop has not begun, as when the updater told it is free went away: the orchestrator and the heads come in past the
    limit then. */
