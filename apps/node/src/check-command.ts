@@ -16,6 +16,8 @@ const Frame = z.discriminatedUnion('type', [
   z.object({ type: z.literal('error'), message: z.string() }),
   /* The node's word that the slot or the turn of a waiting command ended. */
   z.object({ type: z.literal('stop'), message: z.string() }),
+  /* Nothing to say yet: the stream is alive while the command waits for its slot or runs under it. */
+  z.object({ type: z.literal('alive') }),
 ]);
 type Frame = z.infer<typeof Frame>;
 
@@ -29,7 +31,7 @@ async function write(stream: Writable, bytes: string | Buffer): Promise<void> {
 async function show(frame: Frame): Promise<number | null> {
   switch (frame.type) {
     case 'queued': await write(process.stderr, `Waiting for a machine check slot. Position ${frame.position}.\n`); return null;
-    case 'slot': case 'unavailable': return null;
+    case 'slot': case 'unavailable': case 'alive': return null;
     case 'stdout': await write(process.stdout, Buffer.from(frame.data, 'base64')); return null;
     case 'stderr': await write(process.stderr, Buffer.from(frame.data, 'base64')); return null;
     case 'error': case 'stop': throw new Error(frame.message);
@@ -37,12 +39,26 @@ async function show(frame: Frame): Promise<number | null> {
   }
 }
 
+/* The connection to the bridge failed. Node's fetch says only "terminated" then; why is in its cause, such as the node
+   going away ("other side closed"). */
+class BridgeGone extends Error {
+  constructor(readonly why: string) { super(`The connection to the node's machine check bridge ended (${why}).`); }
+}
+
+function read(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<ReadableStreamReadResult<Uint8Array>> {
+  return reader.read().catch((error: unknown) => {
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+    const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+    throw new BridgeGone(cause instanceof Error ? cause.message : String(cause));
+  });
+}
+
 /* The bridge's frames as they come. */
 async function* frames(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<Frame> {
   const decoder = new TextDecoder();
   let pending = '';
   for (;;) {
-    const chunk = await reader.read();
+    const chunk = await read(reader);
     if (chunk.done) return;
     pending += decoder.decode(chunk.value, { stream: true });
     if (pending.length > 4 * 1024 * 1024) throw new Error('The check bridge frame is too large.');
@@ -76,7 +92,9 @@ async function slot(command: string[], env: NodeJS.ProcessEnv, signal: AbortSign
   if (!response.ok || !response.body) throw new Error(`The machine check bridge answered ${response.status}.`);
   const rest = frames(response.body.getReader());
   for (;;) {
-    const next = await rest.next();
+    const next = await rest.next().catch((error: unknown) => {
+      throw error instanceof BridgeGone ? new Error(`The connection to the node's machine check bridge ended before the command got a slot (${error.why}).`) : error;
+    });
     if (next.done) throw new Error('The machine check bridge ended before admission.');
     if (next.value.type === 'unavailable') return undefined;
     if (next.value.type === 'slot') return { lease: next.value.lease, rest };
