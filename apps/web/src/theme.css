@@ -1628,8 +1628,9 @@ body:has(.dview) .version-mark { display: none; }
 }
 :is(.plan-settings, .plan-fallbacks) > h4 { margin: 0; font-size: 14px; }
 .plan-fallbacks .part-note { font-size: inherit; overflow-wrap: anywhere; }
-/* A field of the card is as wide as what it shows, up to the band, with its caret on its end side. Its value wraps rather
-   than ending in dots: the select itself is clear over a copy of its value that can take more lines. */
+/* A field of the card is as wide as what it shows, up to the band, with its caret on its end side, and 44 px high as
+   every field of the screen. Its value wraps rather than ending in dots: the select itself is clear over a copy of its
+   value that can take more lines. Its focus is the page's ring, not the glow of a field being typed in. */
 .plan-settings .field, .plan-settings .select-wrap { justify-self: start; max-inline-size: 100%; }
 :is(.plan-settings, .plan-fallbacks) .field { gap: 6px; }
 .plan-fallbacks .field { gap: 4px; }
@@ -1640,15 +1641,19 @@ body:has(.dview) .version-mark { display: none; }
   inline-size: 8px; block-size: 8px; border: solid var(--muted); border-width: 0 2px 2px 0; transform: rotate(45deg); pointer-events: none;
 }
 :is(.plan-settings, .plan-fallbacks) .select-wrap > select {
-  inline-size: 100%; block-size: auto; min-block-size: 40px; padding-block: 8px; padding-inline: 12px 32px;
+  inline-size: 100%; block-size: auto; min-block-size: 44px; padding-block: 8px; padding-inline: 12px 32px;
   background-image: none; font-size: 14px; line-height: 1.45;
 }
+:is(.plan-settings, .plan-fallbacks) .select-wrap > select:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; border-color: var(--line2); box-shadow: none; }
+/* A name keeps its own direction, and stands on the start side of the page's: an English model on a page written right to
+   left starts at the right, as a phrase isolated in its own direction does elsewhere. */
+:is(.plan-settings, .plan-fallbacks) bdi { text-align: -webkit-match-parent; text-align: match-parent; }
 .model-select { grid-template-areas: "value"; }
 .model-select > select, .model-select > .model-value { grid-area: value; }
 .plan-fallbacks .model-select > select { z-index: 1; block-size: 100%; background-color: transparent; color: transparent; }
 .model-select option { background-color: var(--surface2); color: var(--ink); }
 .model-value {
-  display: grid; align-items: center; min-inline-size: 0; min-block-size: 40px; padding-block: 8px; padding-inline: 12px 32px;
+  display: grid; align-items: center; min-inline-size: 0; min-block-size: 44px; padding-block: 8px; padding-inline: 12px 32px;
   border: 1px solid transparent; background: var(--surface2); color: var(--ink); text-align: start; overflow-wrap: anywhere;
 }
 /* A model whose name is long opens its whole names as radio buttons under the field, as no browser's menu shows them whole. */
@@ -1703,14 +1708,20 @@ body:has(.dview) .version-mark { display: none; }
    16 px and a line of its height between it and the rest. */
 .plan-card-actions .btn.ghost.danger { box-shadow: inset 0 0 0 1px var(--pink-ink); }
 .plan-card-actions .btn.ghost.danger:hover { box-shadow: inset 0 0 0 1px var(--pink); }
-.plan-card-actions .form-foot > .plan-remove { position: relative; margin-inline-start: 8px; overflow: visible; }
-.plan-card-actions .form-foot > .plan-remove:not(:first-child)::before {
+.plan-card-actions .form-foot > .plan-remove { position: relative; overflow: visible; }
+.plan-card-actions .form-foot > .plan-remove.apart { margin-inline-start: 8px; }
+.plan-card-actions .form-foot > .plan-remove.apart::before {
   content: ""; position: absolute; inset-block: 0; inset-inline-start: -9px; inline-size: 1px; background: var(--line);
 }
+/* When the actions do not fit in one row with each label whole, as on a phone, they stand in two columns of one width,
+   their labels wrapping inside them, and Remove ends the second column. While the foot is measured, each button is as
+   wide as its label on one line. */
+.plan-card-actions .form-foot.two-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.plan-card-actions .form-foot.two-columns > .btn { inline-size: auto; max-inline-size: none; }
+.plan-card-actions .form-foot.two-columns > .plan-remove { grid-column: -2; }
+.plan-card-actions .form-foot.measuring { display: flex; flex-wrap: nowrap; }
+.plan-card-actions .form-foot.measuring > .btn { flex: none; inline-size: max-content; max-inline-size: none; white-space: nowrap; }
 .btn[aria-disabled="true"] { cursor: not-allowed; opacity: .45; filter: none; }
-@media (max-width: 760px), (pointer: coarse) {
-  :is(.plan-settings, .plan-fallbacks) .select-wrap > select, .model-value { min-block-size: 44px; }
-}
 .ac-obsolete { max-width: 100%; font-size: 12.5px; color: var(--muted); }
 .ac-failure summary { cursor: pointer; overflow-wrap: anywhere; }
 .ac-failure pre { margin: 6px 0 0; padding: 8px 10px; max-height: 160px; overflow: auto; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-family: var(--f-mono); font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }

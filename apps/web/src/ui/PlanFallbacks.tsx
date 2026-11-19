@@ -118,8 +118,8 @@ function FallbackControls({ fallback, plan, list, first, last, onChange }: Item)
   );
 }
 
-/* A model's name longer than this does not fit whole on one line of the narrowest field, the one of a 320 px phone, where a
-   browser's own menu of choices cuts it: the field then opens a list of whole names under itself instead. */
+/* About as many characters as one line of the model field holds on a 375 px phone. A browser's own menu of choices cuts a
+   longer name there, so a field with one opens a list of whole names under itself instead. */
 const LONG_MODEL = 30;
 
 type ModelOption = { id: string; name: string };

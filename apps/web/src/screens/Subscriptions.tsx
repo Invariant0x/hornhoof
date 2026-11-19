@@ -1,5 +1,5 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
@@ -330,9 +330,32 @@ function RemoveButtons({ sub: s, me, controls: c }: PlanProps) {
   return removable(s, me) ? <button className="act danger" type="button" aria-label={t.subs.removeLabel(subName(t, s))} onClick={() => c.setConfirm(s.id)}>{t.subs.remove}</button> : null;
 }
 
+/* Whether a foot's buttons stand in one row with each label on one line, measured as the foot is laid out: each button
+   is as wide as its words on one line while the foot is measured, and back as it was before anything is drawn. */
+function useOneRow(foot: RefObject<HTMLDivElement | null>, actions: string): boolean {
+  const [one, setOne] = useState(true);
+  useLayoutEffect(() => {
+    const row = foot.current;
+    if (!row || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      row.classList.add('measuring');
+      const buttons = [...row.children].map(b => b.getBoundingClientRect().width + parseFloat(getComputedStyle(b).marginInlineStart));
+      const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+      row.classList.remove('measuring');
+      setOne(buttons.reduce((sum, w) => sum + w, 0) + gap * (buttons.length - 1) <= row.clientWidth + 0.5);
+    };
+    const watch = new ResizeObserver(measure);
+    watch.observe(row);
+    void document.fonts?.ready.then(measure);
+    return () => watch.disconnect();
+  }, [foot, actions]);
+  return one;
+}
+
 /* The foot of a working plan's card: what its test says, then its actions on one end edge. The first of them is the one
    filled button, Run a test when the plan can run one; Remove ends the foot, apart from the rest. While Remove asks, its
-   question stands in the foot's place, and Cancel gives the focus back to Remove. */
+   question stands in the foot's place, and Cancel gives the focus back to Remove. When they do not fit in one row with each
+   label whole, they stand in two matched columns, Remove in the end one. */
 function PlanFoot(props: PlanProps) {
   const t = useT();
   const { sub: s, me, controls: c } = props;
@@ -340,6 +363,10 @@ function PlanFoot(props: PlanProps) {
   const remove = removable(s, me);
   const removeButton = useRef<HTMLButtonElement>(null);
   const question = useRef<HTMLDivElement>(null);
+  const row = useRef<HTMLDivElement>(null);
+  const oneRow = useOneRow(row, `${actions.map(a => a.text).join(' ')} ${remove} ${c.asking}`);
+  /* In two columns Remove ends the second; it has a button beside it when an odd number of actions comes before it. */
+  const apart = actions.length > 0 && (oneRow || actions.length % 2 === 1);
   const asked = useRef(false);
   useEffect(() => {
     if (c.asking) question.current?.querySelector<HTMLButtonElement>('button.ghost')?.focus();
@@ -352,9 +379,9 @@ function PlanFoot(props: PlanProps) {
       {c.test && <TestResult test={c.test} />}
       <SignInNote note={c.note} />
       {c.asking ? <div className="plan-ask" ref={question}><RemoveAsk sub={s} controls={c} /></div> : (actions.length > 0 || remove) && (
-        <div className="form-foot">
+        <div className={oneRow ? 'form-foot' : 'form-foot two-columns'} ref={row}>
           {actions.map((a, i) => <ActionButton key={a.key} action={a} className={i === 0 ? 'btn' : 'btn ghost'} />)}
-          {remove && <button ref={removeButton} className="btn ghost danger plan-remove" type="button" aria-label={t.subs.removeLabel(subName(t, s))} onClick={() => c.setConfirm(s.id)}>{t.subs.remove}</button>}
+          {remove && <button ref={removeButton} className={apart ? 'btn ghost danger plan-remove apart' : 'btn ghost danger plan-remove'} type="button" aria-label={t.subs.removeLabel(subName(t, s))} onClick={() => c.setConfirm(s.id)}>{t.subs.remove}</button>}
         </div>
       )}
     </div>

@@ -11,6 +11,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - A computer can run several test parts at once when its memory and cores fit their workers, with an optional upper limit in `MAX_RUNS_PER_HOST`.
 - Test parts renew their time budget as they produce output or results. The node stops a silent part using its files' recorded times, or when the part reaches an explicit upper limit.
+- A plan's card in Subscriptions & API shows its settings and fallback plans across the whole card, numbers the fallback plans and shows each model's whole name, and keeps one filled button among its actions, with Remove set apart at the end.
 
 ## [0.34.1] - 2026-11-18
 
