@@ -7,6 +7,16 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+## [0.34.3] - 2026-11-19
+
+### Fixed
+
+- A machine check waiting for its slot, or running under one, no longer stops after five minutes with only the word "terminated".
+
+### Changed
+
+- Tests no longer fail for being slow: a test fails only on a wrong result, and a real hang is ended by the run's own limit.
+
 ## [0.34.2] - 2026-11-19
 
 ### Fixed
