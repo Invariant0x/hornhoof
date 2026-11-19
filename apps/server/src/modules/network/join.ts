@@ -16,8 +16,9 @@ import { copyOrder } from '../copies/slots.js';
 import type { CopyOrder } from '../keeper/copy.js';
 import { Server } from '../link/client.js';
 import { tunnelSettings } from '../link/link.js';
-import { CERT_DAYS, RENEW_AFTER_DAYS, type Issued } from './authority.js';
+import { CERT_DAYS, readEd25519PublicKey, RENEW_AFTER_DAYS, type Issued } from './authority.js';
 import type { Go, LeaderBuild } from './follow.js';
+import { joinMessage } from './join-proof.js';
 import { renewedMessage, renewMessage, type Signed } from './renewal.js';
 import { authorityOf, certify, makeAuthorityOnce, networkMachine, peerSecret, revokedSerials } from './store.js';
 
@@ -37,6 +38,7 @@ const VISITOR_KEY_EVERY_MS = 60_000;
 
 export const notAMachine = () => new ApiError(404, 'not_found', "This machine is not one of the company's network.", 'not_a_machine');
 const ticketUsed = () => new ApiError(410, 'gone', 'This join ticket was used or has expired. Run the command from Hornhoof again.', 'ticket_used');
+const joinRefused = () => new ApiError(401, 'unauthorized', 'This join request is not signed by the machine.', 'join_refused');
 const machineTaken = () => new ApiError(409, 'conflict', 'This computer is in the company under another row already. Disconnect that one first.', 'machine_taken');
 const renewRefused = () => new ApiError(401, 'unauthorized', 'This renewal is not signed by the machine, or is too old.', 'renew_refused');
 const notLeading = () => new ApiError(503, 'unavailable', 'This server does not lead the company now. Try again in a few seconds.');
@@ -242,27 +244,31 @@ function shareOf(createdAt: Date, days: { day: string; seconds: number }[], now:
   return Math.min(1, Math.max(0, (online * 1000) / length));
 }
 
-type JoinAsk = { ticket: string; networkId: string; signKey: string };
+type JoinAsk = { ticket: string; networkId: string; signKey: string; signature: string };
 type Certified = { machine: string; role: MachineRole; issued: Issued; authorityPem: string };
 
 /* A machine's keeper redeems its ticket: the ticket's machine becomes a worker of the network under the id of its
    computer, with the key the keeper holds, and gets its first certificate. The ticket works once, for the computer it
-   was made on, while its machine is connected and its person active; a refusal writes nothing. A keeper whose answer was
-   lost on the way asks again with the same key and is answered again, for as long as the ticket's day lasts: with the
-   ticket spent and no certificate it would have no way in. A computer has one row in the network: a second person's row
-   on it waits until the first is disconnected. */
+   was made on, while its machine is connected and its person active. The key must sign the request, and the claim rolls
+   back if the certificate cannot be issued. A computer has one row in the network: a second person's row on it waits
+   until the first is disconnected. */
 export async function redeemTicket(ctx: Ctx, ask: JoinAsk): Promise<Certified> {
   if (ctx.mode.current() !== 'lead') throw notLeading();
-  const now = new Date();
+  const key = readEd25519PublicKey(ask.signKey);
+  if (!key || !verify(null, Buffer.from(joinMessage(ask.ticket, ask.networkId)), key, Buffer.from(ask.signature, 'base64'))) throw joinRefused();
+  const signKey = key.export({ type: 'spki', format: 'pem' }).toString();
   const hash = hashToken(ask.ticket);
   const join = ctx.db.transaction(async tx => {
     /* The machine's row first and the ticket after it, as Disconnect takes them: the other way round the two would wait
        on each other. */
     const [named] = await tx.select(only(machineTickets, 'machineId')).from(machineTickets).where(eq(machineTickets.ticketHash, hash));
     const row = named ? await lockLiveMachine(tx, named.machineId) : null;
-    const [ticket] = row ? await tx.select().from(machineTickets).where(eq(machineTickets.ticketHash, hash)).for('update') : [];
-    if (!row || !ticket || ticket.expiresAt <= now) throw ticketUsed();
-    if (ticket.usedAt && row.signKey !== ask.signKey) throw ticketUsed();
+    if (!row) throw ticketUsed();
+    const now = new Date();
+    const [claimed] = await tx.update(machineTickets).set({ usedAt: now })
+      .where(and(eq(machineTickets.ticketHash, hash), isNull(machineTickets.usedAt), gt(machineTickets.expiresAt, now)))
+      .returning({ ticketHash: machineTickets.ticketHash });
+    if (!claimed) throw ticketUsed();
     const [person] = await tx.select(only(people, 'status')).from(people).where(eq(people.id, row.personId));
     if (person?.status !== 'active') throw ticketUsed();
     if (ask.networkId !== hostIdOf(row.machineKey)) throw machineTaken();
@@ -271,12 +277,11 @@ export async function redeemTicket(ctx: Ctx, ask: JoinAsk): Promise<Certified> {
     const holders = await tx.select({ id: machines.id, revokedAt: machines.revokedAt }).from(machines).where(and(eq(machines.networkId, ask.networkId), ne(machines.id, row.id)));
     if (holders.some(holder => !holder.revokedAt)) throw machineTaken();
     if (holders.length > 0) await tx.update(machines).set({ networkId: null }).where(inArray(machines.id, holders.map(holder => holder.id)));
-    if (!ticket.usedAt) await tx.update(machineTickets).set({ usedAt: now }).where(eq(machineTickets.ticketHash, hash));
-    await tx.update(machines).set({ networkId: ask.networkId, role: 'worker', signKey: ask.signKey }).where(eq(machines.id, row.id));
+    await tx.update(machines).set({ networkId: ask.networkId, role: 'worker', signKey }).where(eq(machines.id, row.id));
     /* A core installed anew has a new key, and what the old key held ends with it. */
-    if (row.signKey && row.signKey !== ask.signKey) await tx.update(certificates).set({ revokedAt: now }).where(and(eq(certificates.machineId, row.id), isNull(certificates.revokedAt)));
+    if (row.signKey && row.signKey !== signKey) await tx.update(certificates).set({ revokedAt: now }).where(and(eq(certificates.machineId, row.id), isNull(certificates.revokedAt)));
     const authority = await makeAuthorityOnce(tx, ctx.config, row.companyId);
-    const issued = await certify(tx, authority, { id: row.id, role: 'worker', signKey: ask.signKey });
+    const issued = await certify(tx, authority, { id: row.id, role: 'worker', signKey });
     return { machine: row.id, role: 'worker' as const, issued, authorityPem: authority.certPem };
   });
   return join.catch((err: unknown) => {

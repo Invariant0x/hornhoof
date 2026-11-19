@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { NodeMessage } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import { agentEvents, attachments, computerRuns, jobs, taskEvents, toolCalls, vaultEntries, vaultLog } from '../src/db/schema.js';
+import { agentEvents, agents, attachments, computerRuns, jobs, taskEvents, toolCalls, vaultEntries, vaultLog } from '../src/db/schema.js';
 import { INVOCATION } from '../src/modules/tools/calls.js';
 import { appendTurnEvent } from '../src/modules/events/store.js';
 import { failOpenJobs, handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -164,6 +164,23 @@ describe('the vault for agents', () => {
     expect(uploaded.json().error.reason).toBe('attachment_invalid');
     expect(await c.db.select().from(attachments)).toEqual([]);
     expect(uploaded.body).not.toContain(PASSWORD);
+  });
+
+  it('refuses a generic API write after a restart loses the vault masks', async () => {
+    const c = await setUp();
+    const { token, job } = await c.startTurn(c.orchestrator.id);
+    expect(answer(await replay(c, token, 'vault_entry', { entry: 'Partner site' }, randomUUID()))).toMatchObject({ password: PASSWORD });
+    expect(privateTurn(c.db, job.id)?.values.text(PASSWORD)).toBe('[hidden]');
+    forgetPrivateTurn(c.db, job.id);
+
+    const refused = await replay(c, token, 'api', {
+      method: 'PATCH', path: `/api/agents/${c.nora.id}`, body: { name: `Name with ${PASSWORD}` },
+    }, randomUUID());
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0]!.text).toContain('End this turn and start a new one');
+    const [row] = await c.db.select({ name: agents.name }).from(agents).where(eq(agents.id, c.nora.id));
+    expect(row?.name).toBe(c.nora.name);
+    expect((await replay(c, token, 'company', {}, randomUUID())).isError).toBeUndefined();
   });
 
   it.each([false, true])('keeps node-masked output readable after a server restart; failed: %s', async failed => {

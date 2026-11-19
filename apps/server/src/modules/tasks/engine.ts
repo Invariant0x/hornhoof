@@ -9,13 +9,14 @@ import { nudgeTrackerKeepers } from '../tracker/nudge.js';
 import { writeEdit, type TaskEdit } from '../tracker/edit.js';
 import { holdPlace } from '../tracker/pipelines.js';
 import { submitAtTests, testsReport, type Verification } from './echelons-tests.js';
+import { requireBaseOnLine } from './echelons-main.js';
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
-import { checkerFor, checkingIdentity, hasChecker, heldCheckingIdentity, producerIdentity } from './echelons-assign.js';
+import { checkerFor, checkingIdentity, hasChecker, heldCheckingIdentity, keptFromReview, producerIdentity } from './echelons-assign.js';
 import { producedCandidate, currentCandidate, currentHanded, requireRepairHistory } from './echelons-candidates.js';
 import { acceptDocument, documentHandIn } from './echelons-document.js';
-import { forwardHandoff } from './echelons-handoff.js';
+import { submittedHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
 import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons } from './turnkey.js';
 import { openTurnOf } from './turn-department.js';
@@ -407,7 +408,7 @@ function requireSubmissionStage(task: Task, route: Route): void {
 }
 
 /* The commit as it is handed in: read from the repository, inside the paths the head approved, and on top of what the
-   stage received. */
+   stage received. Development names the base every later stage keeps, so it starts on a line its department releases. */
 async function commitHandIn(ctx: Live, agentId: string, task: Task, route: Route, r: Submission) {
   const prior = route.state.candidateId ? await currentCandidate(ctx.db, task, route) : null;
   const checkerStage = route.state.stage !== 'development';
@@ -416,6 +417,7 @@ async function commitHandIn(ctx: Live, agentId: string, task: Task, route: Route
   if (prior && checkerStage) await checkingIdentity(ctx, task, route, prior);
   const candidate = producedCandidate(route, producer, review);
   if (prior) await requireRepairHistory(ctx, task, prior, candidate);
+  if (!checkerStage) await requireBaseOnLine(ctx, task, candidate.baseCommit);
   return { input: checkerStage ? prior : null, candidate, review };
 }
 
@@ -425,11 +427,11 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   requireSubmissionStage(task, route);
   if (route.state.stage === 'tests') return submitAtTests(ctx, agentId, task, route, r, operation);
   const { input, candidate, review } = route.state.resultKind === 'document' ? await documentHandIn(ctx, agentId, task, route, r) : await commitHandIn(ctx, agentId, task, route, r);
-  const next = await forwardHandoff(ctx, task, route, candidate);
+  const next = await submittedHandoff(ctx, task, route, candidate);
   const unstuck = stuckGoes(ctx, task);
   const row = await move(ctx, task, next.set, {
     kind: 'submitted', actor: { agentId }, text: r.summary, returned: true,
-    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...skippedData(next.skipped) },
+    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...(next.authorCheckSkip ? { authorCheckSkip: next.authorCheckSkip } : {}), ...skippedData(next.skipped) },
   }, async tx => {
     if (input) await heldCheckingIdentity(tx, task, route, input);
     await changeRoute(tx, route, next.state);
@@ -676,7 +678,8 @@ async function waitingRouteChecker(ctx: Live, task: Task, route: Route) {
   if (route.state.phase !== 'waiting' || !route.state.candidateId || !route.state.stage) return null;
   const ability = route.state.abilities[route.state.stage];
   if (!ability) return null;
-  return checkerFor(ctx, task, (await currentHanded(ctx.db, task, route)).producedBy, ability, null);
+  const handed = await currentHanded(ctx.db, task, route);
+  return checkerFor(ctx, task, handed.producedBy, ability, null, undefined, await keptFromReview(ctx.db, task, route.state.stage, handed));
 }
 
 export async function resumeWaitingRoutes(ctx: Live, actor: Actor, agent: Leaver, text: string): Promise<{ wakes: Wake[] }> {

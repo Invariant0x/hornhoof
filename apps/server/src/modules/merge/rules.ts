@@ -90,6 +90,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   person_access: rows('access'),
   /* A copy cannot extend the leader's computer access. */
   machine_access: skip('access'),
+  /* The leader carries certificate revocations itself when it restores. */
+  revoked_certificate_serials: skip('access'),
   ...each(['recovery_keys', 'certificates', 'authority', 'peer_secrets', 'public_links'], rows('access')),
   /* A bot's token is a way from outside to an agent of the company. */
   telegram_bots: rows('access'),

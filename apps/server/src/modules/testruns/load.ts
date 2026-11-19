@@ -8,6 +8,7 @@ import type { Db } from '../../db/client.js';
 import { nodes, subscriptions, testRuns } from '../../db/schema.js';
 import { nodeIdentity, type NodeHub, type NodeIdentity, type SaidLoad } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
+import { latestReport } from '../nodes/host-load.js';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the timestamp from the public load
 const plain = ({ at: _, ...load }: SaidLoad): NodeLoad => load;
@@ -17,13 +18,12 @@ const plain = ({ at: _, ...load }: SaidLoad): NodeLoad => load;
 export function together(loads: (SaidLoad | null)[]): NodeLoad | null {
   const said = loads.filter((l): l is SaidLoad => l !== null);
   if (!said.length) return null;
-  const newest = said.reduce((a, b) => (b.at > a.at ? b : a));
+  const newest = latestReport(said)!;
   return { ...plain(newest), tests: said.reduce((n, l) => n + l.tests, 0), jobs: said.reduce((n, l) => n + l.jobs, 0) };
 }
 
 /* A part runs on one node, whose local limits count; jobs and tests still belong to the whole machine. */
-export function forRun(own: SaidLoad | null, loads: (SaidLoad | null)[]): NodeLoad | null {
-  const combined = together(loads);
+export function forRun(own: SaidLoad | null, combined: NodeLoad | null): NodeLoad | null {
   return own && combined ? { ...combined, cpus: own.cpus, load: own.load, memFree: own.memFree, memTotal: own.memTotal } : null;
 }
 
@@ -47,23 +47,23 @@ export function machineState(hub: NodeHub, ids: string[]): { online: boolean; lo
 
 type ProductRun = typeof testRuns.$inferSelect;
 type RunPlace = import('./runs.js').Place;
-function productCapable(ctx: Ctx, place: RunPlace, run: Pick<ProductRun, 'environmentSnapshot'>, need: number): boolean {
+function productCapable(ctx: Ctx, place: RunPlace, run: Pick<ProductRun, 'environmentSnapshot'>): boolean {
   const capabilities = testCapabilities(ctx, place.node);
   if (capabilities.testEnvironmentVersion !== 1 || nodeHeld(ctx, place.node) || !ctx.hub.isReady(place.node) || ctx.hub.noRunsOf(place.node)) return false;
-  if (!place.load || availableMemory(place.load) < need) return false;
+  if (!place.load) return false;
   return !run.environmentSnapshot || runsInClass(run.environmentSnapshot, capabilities.testRuntimes ?? []);
 }
 async function siblingPlaces(ctx: Ctx, place: RunPlace): Promise<RunPlace[]> {
   if (place.builtin) return [place];
   const siblings = await ctx.db.select(idOnly(nodes)).from(nodes).leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId)).where(and(eq(nodes.machineId, place.machineId!), liveNode, isNull(subscriptions.removedAt))).orderBy(asc(nodes.createdAt), asc(nodes.id));
-  const loads = siblings.map(node => ctx.hub.loadOf(nodeIdentity(node.id)));
-  return siblings.map(node => ({ ...place, node: nodeIdentity(node.id), nodeId: node.id, load: forRun(ctx.hub.loadOf(nodeIdentity(node.id)), loads) }));
+  return siblings.map(node => ({ ...place, node: nodeIdentity(node.id), nodeId: node.id, load: forRun(ctx.hub.loadOf(nodeIdentity(node.id)), place.load) }));
 }
 export async function productPlaces(ctx: Ctx, open: RunPlace[], run: ProductRun, need = 0): Promise<RunPlace[]> {
   if (!run.environmentRequest) return open;
   const selected: RunPlace[] = [];
   for (const place of open) {
-    const chosen = (await siblingPlaces(ctx, place)).find(candidate => productCapable(ctx, candidate, run, need));
+    const ready = (await siblingPlaces(ctx, place)).filter(candidate => productCapable(ctx, candidate, run));
+    const chosen = ready.find(candidate => availableMemory(candidate.load!) >= need) ?? ready[0];
     if (chosen) selected.push(chosen);
   }
   return selected;
@@ -72,7 +72,7 @@ export async function productPlaces(ctx: Ctx, open: RunPlace[], run: ProductRun,
 export async function harnessPlaces(ctx: Ctx, open: RunPlace[]): Promise<RunPlace[]> {
   const selected: RunPlace[] = [];
   for (const place of open) {
-    const chosen = (await siblingPlaces(ctx, place)).find(candidate => productCapable(ctx, candidate, { environmentSnapshot: null }, 0));
+    const chosen = (await siblingPlaces(ctx, place)).find(candidate => productCapable(ctx, candidate, { environmentSnapshot: null }));
     if (chosen && testCapabilities(ctx, chosen.node).testHarness === 1) selected.push(chosen);
   }
   return selected;

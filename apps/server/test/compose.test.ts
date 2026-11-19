@@ -13,11 +13,14 @@ type Service = {
   command?: string[];
   restart?: string;
   ports?: string[];
-  volumes?: string[];
+  volumes?: (string | { type: string; source?: string; target: string; read_only?: boolean })[];
   networks?: string[];
   depends_on?: DependsOn;
   environment?: Record<string, string>;
   security_opt?: string[];
+  cap_add?: string[];
+  cap_drop?: string[];
+  privileged?: boolean;
 };
 function hasCompose(): boolean {
   try {
@@ -32,6 +35,7 @@ const composePath = fileURLToPath(new URL('../../../compose.yaml', import.meta.u
 const composeText = readFileSync(composePath, 'utf8');
 const compose = parse(composeText) as { services: Record<string, Service> };
 const { front, keeper, migrate, app, db } = compose.services as Record<string, Service>;
+const workerOverlay = parse(readFileSync(fileURLToPath(new URL('../../../compose.worker.yaml', import.meta.url)), 'utf8')) as { services: Record<string, Partial<Service>> };
 
 /* Compose fills `${NAME:-default}` when NAME is unset or empty, and stops on `${NAME:?message}` then. */
 function fill(value: string, env: Record<string, string>): string {
@@ -95,7 +99,7 @@ describe('front, keeper and migrate', () => {
        machine with no node of the server's, would stop the keeper as it starts. */
     expect(keeper!.environment).toMatchObject({ HORNHOOF_NODE_KEY: '${NODE_KEY:-}', HORNHOOF_SURVIVOR_S: '${HORNHOOF_SURVIVOR_S:-}', HORNHOOF_LINK_PROBE: '${HORNHOOF_LINK_PROBE:-}' });
     /* Its own volume holds the machine's key, which no other service reads. */
-    expect(keeper!.volumes).toEqual(['control:/control', 'keeper:/keeper']);
+    expect(keeper!.volumes).toEqual(['control:/control', 'keeper:/keeper', 'computer:/keeper/computer-control']);
     expect(Object.keys((parse(composeText) as { volumes: Record<string, unknown> }).volumes)).toContain('keeper');
     for (const [name, service] of Object.entries(compose.services)) if (name !== 'keeper') expect(JSON.stringify(service.volumes ?? []), name).not.toContain('keeper:');
     /* It hears which ports the machine publishes, to report them, and publishes the web port no more than before. */
@@ -109,6 +113,7 @@ describe('front, keeper and migrate', () => {
     const dockerfile = readFileSync(fileURLToPath(new URL('../../../Dockerfile', import.meta.url)), 'utf8');
     expect(dockerfile).toMatch(/mkdir [^\n]*\/control[^\n]* \/keeper/);
     expect(dockerfile).toContain('COPY --from=deps --chown=node:node /keeper /keeper');
+    expect(dockerfile).toContain('COPY --from=deps --chown=node:node /computer /keeper/computer-control');
   });
 
   /* The keeper reads the link with the app's own functions, so these Config fields must come out the same in both. */
@@ -165,12 +170,10 @@ describe('the compose file', () => {
   });
 
   it('keeps every service for a server, and the data services out on a worker', () => {
-    const overlayText = readFileSync(fileURLToPath(new URL('../../../compose.worker.yaml', import.meta.url)), 'utf8');
-    const overlay = parse(overlayText) as { services: Record<string, unknown> };
     expect(composeText).not.toMatch(/^\s*profiles:/m);
     /* A machine that keeps a copy turns the data services on, and still runs no built-in node: no setting names the
        profile that one is in. */
-    expect(overlay.services).toEqual({ db: { profiles: ['data'] }, migrate: { profiles: ['data'] }, app: { profiles: ['data'] }, node: { profiles: ['builtin'] } });
+    expect(workerOverlay.services).toEqual({ db: { profiles: ['data'] }, migrate: { profiles: ['data'] }, app: { profiles: ['data'] }, node: { profiles: ['builtin'] } });
     /* The migrate service sees whether the machine keeps a copy, and can write nothing there. */
     expect(migrate!.volumes).toEqual(['control:/control:ro']);
     expect(migrate!.environment).toMatchObject({ HORNHOOF_CONTROL_DIR: '/control' });
@@ -218,6 +221,44 @@ describe('the compose file', () => {
     expect(services('compose.yaml', 'compose.worker.yaml')).toEqual(['app', 'db', 'front', 'keeper', 'migrate', 'updater']);
     writeFileSync(join(dir, '.env'), '');
     expect(services('compose.yaml')).toEqual(['app', 'db', 'front', 'keeper', 'migrate', 'node', 'updater']);
+  });
+});
+
+describe('computer volume isolation', () => {
+  /* Every overlay service is checked above to add only a profile. The data and builtin profiles use these mounts
+     and capabilities when either service runs on a machine that joined. */
+  const workerServices = Object.fromEntries(Object.entries(compose.services).map(([name, service]) => [name, { ...service, ...workerOverlay.services[name] }]));
+
+  it.each([
+    { variant: 'server', services: compose.services },
+    { variant: 'worker', services: workerServices },
+  ])('isolates the computer volume in the $variant compose', ({ services }) => {
+    expect(services.keeper!.volumes).toEqual(['control:/control', 'keeper:/keeper', 'computer:/keeper/computer-control']);
+    expect(services.updater!.volumes).toContain('computer:/computer');
+    expect(services.app!.volumes).toEqual([
+      'control:/control',
+      { type: 'tmpfs', target: '/control/computer', read_only: true },
+      'harness:/harness',
+      'files:/files',
+    ]);
+    expect(services.node!.volumes).toEqual(['nodedata:/data']);
+    /* By the volume each mount takes, in the short and the long form alike. */
+    const sources = (service: Service) => (service.volumes ?? []).map(volume => (typeof volume === 'string' ? volume.split(':')[0] : volume.source));
+    const mounting = Object.entries(services).filter(([, service]) => sources(service).includes('computer')).map(([name]) => name);
+    expect(mounting.sort()).toEqual(['keeper', 'updater']);
+    for (const service of [services.app!, services.node!]) {
+      expect(JSON.stringify(service.volumes)).not.toContain('docker.sock');
+      expect(service).not.toHaveProperty('use_api_socket', true);
+      expect(service.privileged ?? false).toBe(false);
+    }
+    expect(services.app!.cap_add).toBeUndefined();
+    expect(services.node!.cap_drop).toEqual(['ALL']);
+    expect(services.node!.cap_add).toEqual(['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETUID', 'SETGID', 'KILL']);
+  });
+
+  it('sets the owner when the updater image initializes the computer volume', () => {
+    const dockerfile = readFileSync(fileURLToPath(new URL('../../updater/Dockerfile', import.meta.url)), 'utf8');
+    expect(dockerfile).toContain('mkdir /computer && chown 1000:1000 /computer');
   });
 });
 

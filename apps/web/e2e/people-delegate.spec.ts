@@ -121,14 +121,15 @@ for (const lang of ['en', 'ru'] as const) {
 }
 
 test('a long name wraps at its words on a phone, and the mark stays whole on its line', async ({ page }) => {
-  const long: PersonView = { id: 'p5', name: 'Maximiliana Wolkenstein-Rodenegg von Schwarzenberg-Hohenlohe', email: 'max@acme.com', title: 'CMO', status: 'active', isOwner: false, isCeoDelegate: true, access: WHOLE };
+  const long: PersonView = { id: 'p5', name: 'Maya Chen Alderbrook-Riverstone Willowmere-Cedarfield-Park', email: 'maya@moonfern.example', title: 'CMO', status: 'active', isOwner: false, isCeoDelegate: true, access: WHOLE };
   const errors = await openPeople(page, 'en', 'light', 375, [...PEOPLE, long]);
   const table = page.locator('table.ptable');
   const markOf = (name: string) => table.locator('.pname', { hasText: name }).getByRole('img', { name: en.people.ceoDelegate, exact: true });
   const short = await box(markOf('Ruth'));
-  const mark = await box(markOf('Schwarzenberg'));
-  const line = await box(table.locator('.pname', { hasText: 'Schwarzenberg' }));
-  const cell = await box(table.locator('.pname', { hasText: 'Schwarzenberg' }).locator('xpath=ancestor::td[1]'));
+  const longName = table.locator('.pname', { hasText: long.name });
+  const mark = await box(markOf(long.name));
+  const line = await box(longName);
+  const cell = await box(longName.locator('xpath=ancestor::td[1]'));
   expect(line.height, 'the long name takes more than one line').toBeGreaterThan(short.height * 1.5);
   expect(Math.abs(mark.height - short.height), 'the mark stays one line').toBeLessThanOrEqual(1);
   expect(Math.abs(mark.width - short.width), 'the mark keeps its width').toBeLessThanOrEqual(1);

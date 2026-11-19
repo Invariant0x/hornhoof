@@ -131,42 +131,6 @@ describe('the map while departments work in the turn', () => {
   });
 });
 
-describe('cards as tall as their words need', () => {
-  const company = (n: number): Org => ({ ...ORG4, departments: Array.from({ length: n }, (_, i) => dept({ id: ID(i + 1), name: `Department ${i + 1}` })) });
-
-  it('keeps the map exactly as it is while the words fit the cards', () => {
-    for (const need of [0, 120, 160]) expect(arrangeMap(ORG4, {}, {}, need)).toEqual(arrangeMap(ORG4));
-  });
-
-  it('gives every card the height the tallest one needs, in whole pixels, with its width, and keeps the rows 32 apart', () => {
-    for (const n of [2, 4, 6, 9]) {
-      const arr = arrangeMap(company(n), {}, {}, 429.2);
-      expect(arr.depts.map(d => [d.w, d.h])).toEqual(Array(n).fill([280, 430]));
-      for (const d of arr.depts) expect(blockOf(arr, deptKey(d.id))).toEqual({ x: d.x, y: d.y, w: 280, h: 430 });
-      for (const a of arr.depts)
-        for (const b of arr.depts)
-          if (a !== b && a.x === b.x) expect(Math.max(a.y, b.y) - Math.min(a.y + a.h, b.y + b.h)).toBeGreaterThanOrEqual(32);
-      /* Each trace ends in the middle of its card's near side, the people stand clear above the top row, and every line
-         keeps clear of the blocks it does not join. */
-      for (const d of arr.depts) expect(d.path[d.path.length - 1]).toEqual([d.x < 600 ? d.x + d.w : d.x, d.y + d.h / 2]);
-      const topRow = Math.min(...arr.depts.map(d => d.y));
-      for (const p of arr.top) expect(topRow - (p.y + p.h)).toBe(28);
-      for (const w of ways(arr)) expect(crossesOthers(arr, w.pts, w.ends ?? [])).toBe(false);
-    }
-  });
-
-  it('grows a card taller than its turn strip needs, and keeps a moved card where it was put', () => {
-    const working: Org = { ...ORG4, turn: { id: 'u3', number: 3, goal: 'Ship payments' }, departments: ORG4.departments.map((d, i) => ({ ...d, turnProgress: i ? null : { turnNumber: 3, done: 1, total: 2 } })) };
-    expect(arrangeMap(working, {}, {}, 180).depts.map(d => d.h)).toEqual(Array(4).fill(196));
-    const arr = arrangeMap(working, { [deptKey(D1)]: { x: 100, y: 700 } }, {}, 250);
-    const sales = blockOf(arr, deptKey(D1));
-    expect(sales).toEqual({ x: 100, y: 700, w: 280, h: 250 });
-    const trace = arr.depts.find(d => d.id === D1)!.path;
-    expect(square(trace)).toBe(true);
-    expect(onEdge(trace[trace.length - 1]!, sales)).toBe(true);
-  });
-});
-
 describe('a block moved on the map', () => {
   it('takes a department to where it was put, with its docked people, and runs its lines there at right angles', () => {
     const before = arrangeMap(ORG4);
@@ -395,5 +359,67 @@ describe('a click on a line', () => {
     expect(bendAt(trace, [[516, 301]], [450, 198], 4)).toEqual([[516, 301], [450, 200]]);
     expect(bendAt(trace, [[450, 200]], [516, 350], 4)).toEqual([[516, 350], [450, 200]]);
     expect(bendAt(trace, [[516, 380], [450, 200]], [513, 300], 4)).toEqual([[516, 380], [516, 300], [450, 200]]);
+  });
+});
+
+describe('the map whose people chips grow with their words', () => {
+  const person = (id: string, name: string) => ({ ...PEOPLE[2]!, id, name, title: '', status: 'active' as const });
+  /* Six departments with three people beside Sales and three beside Design, the next card of its column, and Gus between
+     the two, besides the people of the six-department map. */
+  const CROWD: Org = {
+    ...SIX_ORG,
+    people: [...SIX_ORG.people, deputy('g1', 'Gus', [0, 2])],
+    departments: SIX_ORG.departments.map((d, i) => ({ ...d, people: i === 0 ? [dan, person('a1', 'Ada'), person('a2', 'Ari')] : i === 2 ? ['b1', 'b2', 'b3'].map(id => person(id, id)) : [] })),
+  };
+  const overlapping = (arr: MapArrangement) => arr.blocks.flatMap((a, i) => arr.blocks.slice(i + 1).flatMap(b => (
+    a.rect.x < right(b.rect) && b.rect.x < right(a.rect) && a.rect.y < bottom(b.rect) && b.rect.y < bottom(a.rect) ? [`${a.key} over ${b.key}`] : []
+  )));
+
+  it('keeps every block and line as it was while the words fit the old chips', () => {
+    for (const org of [SIX_ORG, CROWD, ORG4]) {
+      expect(arrangeMap(org, {}, {}, 0, { top: 56, dept: 48 })).toEqual(arrangeMap(org));
+      expect(arrangeMap(org, {}, {}, 0, { top: 31.2, dept: 20 })).toEqual(arrangeMap(org));
+    }
+  });
+
+  it('gives the whole-company row one height, the tallest chip\'s in whole pixels, 28 px above the cards and its bus under it', () => {
+    const arr = arrangeMap(SIX_ORG, {}, {}, 0, { top: 90.2 });
+    expect(arr.top.map(p => [p.w, p.h])).toEqual(arr.top.map(() => [160, 91]));
+    const topRow = Math.min(...arr.depts.map(d => d.y));
+    for (const p of arr.top) expect(topRow - (p.y + p.h)).toBe(28);
+    expect(arr.bus!.via[1]).toBe(arr.top[0]!.y + 91 + 14);
+    for (const p of arr.top) expect(arr.bus!.lines.flat()).toContainEqual([p.x + 80, p.y + 91]);
+    expect(arr.depts.map(d => [d.x, d.y])).toEqual(arrangeMap(SIX_ORG).depts.map(d => [d.x, d.y]));
+  });
+
+  it('gives every department person\'s chip the height of the tallest one', () => {
+    const arr = arrangeMap(SIX_ORG, {}, {}, 0, { dept: 70 });
+    expect(arr.people.chips.map(c => [c.w, c.h])).toEqual(arr.people.chips.map(() => [156, 70]));
+    expect(overlapping(arr)).toEqual([]);
+  });
+
+  it('moves the rows of cards apart for tall chips beside them, so nothing stands over anything and every line runs across and down', () => {
+    for (const dept of [70, 120]) {
+      const arr = arrangeMap(CROWD, {}, {}, 0, { top: 100, dept });
+      expect(overlapping(arr), `${dept} px`).toEqual([]);
+      for (const pts of lines(arr)) expect(square(pts)).toBe(true);
+      for (const r of arr.people.routes) expect(crossesOthers(arr, r.pts, [deptKey(r.deptId), personKey(r.personId)]), `${r.personId} to ${r.deptId}`).toBe(false);
+    }
+    const old = arrangeMap(CROWD), tall = arrangeMap(CROWD, {}, {}, 0, { dept: 120 });
+    expect(tall.depts[2]!.y - tall.depts[0]!.y).toBeGreaterThan(old.depts[2]!.y - old.depts[0]!.y);
+  });
+
+  it('makes every card as tall as the chips docked beside one, each docked chip\'s line straight into the side of its card', () => {
+    for (const [dept, h] of [[48, 160], [50, 166], [70, 226], [120, 376]] as const) {
+      const arr = arrangeMap(CROWD, {}, {}, 0, { dept });
+      expect(arr.depts.map(d => d.h), `${dept} px`).toEqual(arr.depts.map(() => h));
+      for (const id of [DAN, 'a1', 'a2', 'b1', 'b2', 'b3']) {
+        const [route, ...more] = arr.people.routes.filter(r => r.personId === id);
+        expect(more).toEqual([]);
+        expect(route!.pts).toHaveLength(2);
+        expect(onEdge(route!.pts[0]!, blockOf(arr, deptKey(route!.deptId)))).toBe(true);
+        expect(onEdge(route!.pts[1]!, blockOf(arr, personKey(id)))).toBe(true);
+      }
+    }
   });
 });

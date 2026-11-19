@@ -61,17 +61,19 @@ export async function makeAuthority(companyId: string, now: Date = new Date()): 
 }
 
 // Node's createPublicKey also takes a private key or a certificate and derives the public key, so the label decides first.
-function readSpki(signKey: string): KeyObject | null {
+export function readEd25519PublicKey(signKey: string): KeyObject | null {
   try {
-    return SPKI_PEM.test(signKey) ? createPublicKey(signKey) : null;
+    if (!SPKI_PEM.test(signKey)) return null;
+    const key = createPublicKey(signKey);
+    return key.asymmetricKeyType === 'ed25519' ? key : null;
   } catch {
     return null;
   }
 }
 
 function ed25519PublicKey(signKey: string): webcrypto.CryptoKey {
-  const key = readSpki(signKey);
-  if (key?.asymmetricKeyType !== 'ed25519') throw new Error(NOT_ED25519);
+  const key = readEd25519PublicKey(signKey);
+  if (!key) throw new Error(NOT_ED25519);
   return key.toCryptoKey(ED25519, true, ['verify']);
 }
 

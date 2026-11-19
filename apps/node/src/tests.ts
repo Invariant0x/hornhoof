@@ -19,6 +19,7 @@ import { namedWorkers, partShare, vitestWorkers } from './vitest-workers.js';
 import { collectKept, parseFailedTests, parseFileReport, parseMutationReport, readJobFile, REPORT_BYTES, restoreKept, type FailedTest } from './test-report.js';
 import { gitEnv } from './workspace.js';
 import { currentCheckLease } from './check-queue.js';
+import { deadlineSignal, deadlineTimer } from './test-context.js';
 
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 export type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
@@ -119,7 +120,7 @@ const killGroup = (pid: number | undefined, signal: NodeJS.Signals) => {
 /* What a part's commands get of the machine: its programs, its browsers and the grammars its quality tools parse with, which
    the image keeps in place so that they fetch nothing. Nothing else of the node's own environment. */
 const MACHINE_TOOLS = ['TREE_SITTER_LANGUAGE_PACK_CACHE_DIR'];
-function partBase(root: string, dir: string, checkLease?: string): Record<string, string> {
+export function partBase(root: string, dir: string, checkLease?: string): Record<string, string> {
   const tools = Object.fromEntries(MACHINE_TOOLS.flatMap(key => (process.env[key] ? [[key, process.env[key]]] : [])));
   const path = process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin';
   const check: Record<string, string> = checkLease ? { PATH: [join(dir, 'tools', 'bin'), path].join(delimiter), HH_CHECK_SLOT: checkLease } : { PATH: path };
@@ -138,7 +139,7 @@ function runIn(bin: string, args: string[], o: { cwd: string; env: NodeJS.Proces
       killGroup(child.pid, 'SIGTERM');
       hard = setTimeout(() => killGroup(child.pid, 'SIGKILL'), KILL_AFTER_MS);
     };
-    const timer = setTimeout(() => stop('timeout'), Math.max(0, o.deadline - Date.now()));
+    const timer = deadlineTimer(o.deadline, () => stop('timeout'));
     const abort = () => stop('cancelled');
     if (o.signal?.aborted) abort();
     else o.signal?.addEventListener('abort', abort, { once: true });
@@ -401,10 +402,29 @@ function partWorkers(options: Pick<Options, 'cpus' | 'load' | 'memFree' | 'env'>
   return String(vitestWorkers(partShare({ cpus, load, memFree })));
 }
 
-function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox: string, workers: string): NodeJS.ProcessEnv {
+function workerEnv(msg: TestRun, options: Options): Record<string, string> {
+  if (msg.vitestWorkers !== undefined) {
+    const workers = String(msg.vitestWorkers);
+    return { VITEST_MAX_WORKERS: workers, HH_VITEST_MAX_WORKERS: workers };
+  }
+  return msg.kind === 'work' ? {} : { VITEST_MAX_WORKERS: partWorkers(options) };
+}
+
+function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox: string, workers: Record<string, string>): NodeJS.ProcessEnv {
   const parts = { HH_PART: String(msg.part), HH_PARTS: String(msg.parts) };
-  if (msg.kind === 'work') return { ...base, NO_COLOR: '1', ...parts, HH_IN: inbox, HH_OUT: outbox };
-  return { ...base, CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', VITEST_MAX_WORKERS: workers, ...parts, HH_TEST_PART: String(msg.part), HH_TEST_PARTS: String(msg.parts) };
+  if (msg.kind === 'work') return { ...base, NO_COLOR: '1', ...parts, HH_IN: inbox, HH_OUT: outbox, ...workers };
+  return { ...base, CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', ...workers, ...parts, HH_TEST_PART: String(msg.part), HH_TEST_PARTS: String(msg.parts) };
+}
+
+function partStopReporter(msg: TestRun, out: Output): (ended: Ended) => TestError | null {
+  return ended => {
+    if (ended.stopped === 'timeout') {
+      const kind = msg.kind === 'work' ? 'command' : 'tests';
+      out.line(`The ${kind} did not finish within ${within(msg.timeoutMs ?? GIT_TIMEOUT_MS)}.`);
+    }
+    if (ended.stopped === 'cancelled') out.line('Stopped.');
+    return ended.stopped;
+  };
 }
 
 /* One part of a run, which always ends with a tests.done: the commit Hornhoof pinned, or else the branch if there is one,
@@ -414,7 +434,7 @@ function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox
 export async function runTests(msg: TestRun, options: Options): Promise<TestsDone> {
   if (msg.environment) return runProductPart(msg, options);
   const { dir, user, hidden, signal, proc = '/proc', files, prepareRepoBrowser = repoDir => ensureRepoBrowser(dir, repoDir, user) } = options;
-  const deadline = Date.now() + msg.timeoutMs;
+  const deadline = partDeadline(msg);
   const work = msg.kind === 'work';
   const parts = partsFolder(dir);
   const root = join(parts, msg.partId);
@@ -430,11 +450,7 @@ export async function runTests(msg: TestRun, options: Options): Promise<TestsDon
   let error: TestError | null = null;
   let ran = false;
   const harnessEnv: Record<string, string> = {};
-  const stoppedBy = (ended: Ended): TestError | null => {
-    if (ended.stopped === 'timeout') out.line(`The ${work ? 'command' : 'tests'} did not finish within ${within(msg.timeoutMs)}.`);
-    if (ended.stopped === 'cancelled') out.line('Stopped.');
-    return ended.stopped;
-  };
+  const stoppedBy = partStopReporter(msg, out);
   try {
     mkdirSync(parts, { recursive: true });
     remove(root);
@@ -480,7 +496,7 @@ export async function runTests(msg: TestRun, options: Options): Promise<TestsDon
             out.line('Stopped.');
             error = 'cancelled';
           } else if (Date.now() >= deadline) {
-            out.line(`The task's files did not come within ${within(msg.timeoutMs)}.`);
+            out.line(`The task's files did not come within ${within(msg.timeoutMs!)}.`);
             error = 'timeout';
           } else {
             out.line(`The task's file ${name} could not be fetched: ${err instanceof Error ? err.message : String(err)}`);
@@ -493,7 +509,8 @@ export async function runTests(msg: TestRun, options: Options): Promise<TestsDon
     }
     if (!error) {
       out.line(`$ ${msg.command}`);
-      const env = { ...commandEnv(base, msg, inbox, outbox, partWorkers(options)), ...harnessEnv };
+      const workers = workerEnv(msg, options);
+      const env = { ...commandEnv(base, msg, inbox, outbox, workers), ...harnessEnv, ...(msg.vitestWorkers === undefined ? {} : workers) };
       const ended = await runIn('/bin/bash', ['-c', msg.command], { cwd: repo, env, user, deadline, signal, out });
       ran = true;
       error = stoppedBy(ended);
@@ -684,7 +701,10 @@ async function leaveWorktreeFolder(root: string, staging: string, handed: { tree
   remove(root);
 }
 
-const productSignal = (signal: AbortSignal | undefined, deadline: number): AbortSignal => AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))]);
+const productSignal = (signal: AbortSignal | undefined, deadline: number): AbortSignal => deadlineSignal(signal ?? new AbortController().signal, deadline);
+/* Queued tests get their stop from the part clock. Work commands keep their own fixed deadline. */
+const partDeadline = (msg: TestRun): number =>
+  msg.kind !== 'work' && msg.silenceMs !== undefined ? Infinity : Date.now() + (msg.timeoutMs ?? Infinity);
 /* index: the suite's place in the part; shared: its report is the one report of suites that ran as one command. */
 type SuiteReport = { suiteId: string; selected: string[]; path: string; failed: boolean; index: number; shared?: true };
 /* builder: the user its builds run as, when not the one of test runs. */
@@ -710,7 +730,7 @@ async function productPhase<T>(state: ProductState, phase: keyof TestEnvironment
   state.options.activity?.();
   return result;
 }
-async function stopTestUser(user: JobUser, proc = '/proc'): Promise<void> {
+export async function stopTestUser(user: JobUser, proc = '/proc'): Promise<void> {
   killUser(user.uid, proc);
   while (productUserAlive(user.uid, proc)) {
     killUser(user.uid, proc);
@@ -950,7 +970,7 @@ async function executeProduct(msg: TestRun, state: ProductState, hidden: string[
     await productPhase(state, 'servicesMs', () => prepareBrowsers(description, state.repo, state.options.prepareRepoBrowser ?? (folder => ensureRepoBrowser(state.options.dir, folder, state.user))));
     const prepared = await productPhase(state, 'environmentMs', () => prepareEnvironment(description, dependencies, context)); state.receipt.environments = prepared.receipts;
     services = await productPhase(state, 'servicesMs', () => openEnvironment(prepared, context));
-    await productPhase(state, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', VITEST_MAX_WORKERS: partWorkers(state.options) }));
+    await productPhase(state, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', ...workerEnv(msg, state.options) }));
   } finally {
     await timedPhase(state.receipt, 'cleanupMs', async () => { try { await services?.close(); } finally { await stopTestUser(state.user, state.options.proc); } });
     collectProductResults(execution, state, msg.kept ?? []);
@@ -964,7 +984,7 @@ async function productState(msg: TestRun, options: Options, out: Output): Promis
   const execution = TestExecution.parse(msg.environment), { description } = execution.snapshot, scope = msg.repositoryScope;
   if (msg.commitSha !== description.commitSha || !scope || scope.companyId !== description.repositoryScope.companyId || scope.repositoryOwnerId !== description.repositoryScope.repositoryOwnerId || scope.repoUrlHash !== description.repositoryScope.repoUrlHash) environmentError('description_mismatch', 'The assigned source differs from the pinned environment.');
   await productDescription(description);
-  const identity = productUser(options.user), root = join(partsFolder(options.dir), msg.partId), deadline = Date.now() + msg.timeoutMs;
+  const identity = productUser(options.user), root = join(partsFolder(options.dir), msg.partId), deadline = partDeadline(msg);
   return { ...identity, root, repo: join(root, 'repo'), out, deadline, signal: productSignal(options.signal, deadline), options, receipt: receiptFor(execution), exitCode: null, reports: [], files: [], failed: [], kept: [], base: partBase(root, options.dir, currentCheckLease()) };
 }
 async function productFolders(state: PreparationState): Promise<void> {

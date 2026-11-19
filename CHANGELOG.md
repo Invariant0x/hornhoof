@@ -7,6 +7,65 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Fixed
+
+- Map cards and the department screen show every word in any language: cards grow together, far zoom moves nothing, words break with hyphens and the hint keeps its own room.
+- People on the map show their whole name and title in any language: their chips wrap with hyphens and each row grows to its tallest chip.
+
+## [0.39.1] - 2026-11-19
+
+### Fixed
+
+- The phone readiness check keeps the screen visibly bright, at about 40% of the phone's own brightness range, and never lowers a brightness a person set higher.
+
+## [0.39.0] - 2026-11-19
+
+### Fixed
+
+- A version whose tag reaches GitHub with main still gets its images built, published and released: a version counts as out only once its images are published, and as released once its tag has a release.
+- When GitHub or the image registry answers with an error or cannot be reached, a release stops and says why, and leaves the latest images and the releases as they are.
+- Review stays required after a return from Tests, and no one who produced a task's candidates reviews it.
+- Revoked node and assistant keys stay revoked after a restore.
+- A starting node closes the last node's terminal server before it listens.
+- During an update, the shell's bars and the map's controls stand clear of the header and of each other.
+- Text typed on a phone goes in paced lines, and a failed text says where it stopped.
+
+### Added
+
+- The node image carries an Arabic font, so its browsers draw joined Arabic.
+- Network join tickets are signed and work once.
+
+### Changed
+
+- A computer can run several test parts at once when its memory and cores fit their workers, with an optional upper limit in `MAX_RUNS_PER_HOST`.
+- Test parts renew their time budget as they produce output or results. The node stops a silent part using its files' recorded times, or when the part reaches an explicit upper limit.
+- A release commit that changes only the package versions and the release notes takes the passed test mark of the commit before it, so GitHub builds its images without running the whole test suite again.
+- A plan's card in Subscriptions & API shows its settings and fallback plans across the whole card, numbers the fallback plans and shows each model's whole name, and keeps one filled button among its actions, with Remove set apart at the end.
+- On a Russian screen, task stages carry Russian names.
+- A silence alarm goes to an available fallback when the head of Operations is busy.
+
+## [0.34.7] - 2026-11-19
+
+### Fixed
+
+- The + beside Tasks makes a task on every tracker page, Waits for me and My tasks included, and asks which department gets it.
+
+### Changed
+
+- The task list has no Goal column any more: the task takes two thirds of the line, and its goal shows on the task card.
+
+## [0.34.6] - 2026-11-19
+
+### Fixed
+
+- The count beside Waits for me matches what the page shows under it, questions for the people you decide for and kept cards included.
+
+## [0.34.5] - 2026-11-19
+
+### Fixed
+
+- Department cards, the head card, role frames and the hint show every word and grow taller instead of cutting text.
+
 ## [0.34.4] - 2026-11-19
 
 ### Fixed
@@ -43,6 +102,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Tasks wait for a person's answer, while running work gets a scheduled progress check.
 - Task handoffs and setup messages describe the actual checking route, release rules and staffing.
 - Agents can page through their open tasks, and the company watchdog can inspect stalled work across departments.
+- When a watchdog reads another department's task, the passwords, tokens and home folder paths in it stay hidden.
 - Agents can give out work and ask necessary questions without a quota per turn.
 - Pull requests from forks run without access to private runners or installer credentials.
 
@@ -455,7 +515,7 @@ an account the company has, so no password passes through it.
 ### Added
 
 - outbound_account_add connects one more mail account to a channel with the settings of an account the company already
-  has, sending from its own address, like kate@ next to hello@; the settings go from one account to the other inside
+  has, sending from its own address, like news@ next to hello@; the settings go from one account to the other inside
   Hornhoof and never through a model. outbound_account_bind makes an employee the one who writes from an account. Both
   are the orchestrator's; a new password or another server a person still gives on the channel's screen.
 
@@ -475,7 +535,7 @@ an account the company has, so no password passes through it.
 - Навыки оркестратора и блокнота говорят то же: ограничения записаны в блокноте компании, остальное делается без
   просьб о подтверждении.
 - outbound_account_add подключает к каналу еще один почтовый ящик с настройками ящика, который у компании уже есть, со
-  своим адресом отправителя, например kate@ рядом с hello@; настройки переходят из ящика в ящик внутри Hornhoof и не
+  своим адресом отправителя, например news@ рядом с hello@; настройки переходят из ящика в ящик внутри Hornhoof и не
   проходят через модель. outbound_account_bind назначает сотрудника, который пишет с ящика. Оба инструмента у
   оркестратора; новый пароль или другой сервер по-прежнему вводит человек на экране канала.
 

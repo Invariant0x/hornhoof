@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { ApiFailure } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
@@ -6,7 +6,7 @@ import type { TrackerPlace } from '../routes';
 import { searchTasks } from '../task-search';
 import { placeName, useGoals, usePipelines, useTaskDepartments, useTasks, useWaitCards } from '../tasks';
 import { doerOf, filterTasks, graphPath, graphTree, mine, pipelineTree, pruneGoals, TRACKER_VIEWS, waitingOn, workingNow, BOARD_STATUSES, boardStatus, type Crumb, type GraphNode, type WorkFilter } from '../tracker';
-import type { Decisions, GoalView, Me, MergeDecision, Org, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskLine } from '../types';
+import type { Decisions, Department, Me, MergeDecision, Org, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard } from '../types';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
@@ -42,6 +42,28 @@ type Props = {
   onOpenOrchestrator?: () => void;
 };
 
+/* The page stays where the person scrolled it as the card opens or closes and the work narrows for it or widens back (no
+   anchoring moves it: overflow-anchor: none, and WebKit has none). Only when the row or card of that task would leave the
+   screen, as the titles above it wrap anew, does the page scroll, as little as brings it whole into sight. */
+const rowOf = (id: string) => [...document.querySelectorAll<HTMLElement>('.tracker [data-task]')].find(row => row.dataset.task === id) ?? null;
+function useRowInSight(selected: string | null) {
+  const last = useRef(selected);
+  useLayoutEffect(() => {
+    const id = selected ?? last.current;
+    const changed = last.current !== selected;
+    last.current = selected;
+    const row = changed && id ? rowOf(id) : null;
+    const line = row?.querySelector<HTMLElement>(':scope > .tr-cells') ?? row;
+    const page = row?.closest<HTMLElement>('.body');
+    if (!line || !page) return;
+    const [at, view] = [line.getBoundingClientRect(), page.getBoundingClientRect()];
+    const top = view.top + page.clientTop, bottom = top + page.clientHeight;
+    /* Whole pixels, rounded out: WebKit keeps a whole scroll offset and would leave a part of a pixel out of sight. */
+    if (at.top < top) page.scrollTop -= Math.ceil(top - at.top);
+    else if (at.bottom > bottom) page.scrollTop += Math.min(Math.ceil(at.bottom - bottom), Math.floor(at.top - top));
+  }, [selected]);
+}
+
 function TaskSearch({ query, onChange }: { query: string; onChange: (query: string) => void }) {
   const t = useT();
   const input = useRef<HTMLInputElement>(null);
@@ -70,6 +92,9 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   /* The tasks that wait for that person. */
   tasks: TaskLine[];
   recipient: string;
+  /* The cards Hornhoof kept for the viewer, which the screen also counts. */
+  kept: WaitCard[] | undefined;
+  onCardsSeen: () => void;
 };
 
 type Shown = Pick<Decisions, 'requests' | 'proposals'> & { merges: MergeDecision[] };
@@ -152,12 +177,11 @@ function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () 
 /* What waits for the person: what agents ask, the orchestrator's cards, the cards Hornhoof
    kept for them, and the tasks that wait for them. For another person, only theirs, with the filter in sight when it may be
    taken off. */
-function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, tasks, recipient, ...rest }: Waiting) {
+function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, tasks, recipient, kept, onCardsSeen, ...rest }: Waiting) {
   const t = useT();
   const [failure, setFailure] = useState<unknown>(null);
-  const { cards: kept, load: reloadCards } = useWaitCards();
   const shown = shownOf(decisions, personId);
-  const cards = personId ? [] : (kept ?? []);
+  const cards = keptShown(kept, personId);
   const name = mapPeople(rest.org).find(p => p.id === personId)?.name ?? t.tasks.someone;
 
   return (
@@ -165,7 +189,7 @@ function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, t
       <h2>{t.tasks.waiting}</h2>
       {personId && onClearPerson && <PersonFilter name={name} onClear={onClearPerson} />}
       <DecisionList shown={shown} onFailure={setFailure} {...rest} />
-      <WaitCards cards={cards} onOpenTask={rest.onOpenTask} onSeen={reloadCards} />
+      <WaitCards cards={cards} onOpenTask={rest.onOpenTask} onSeen={onCardsSeen} />
       {tasks.length > 0 && <WaitingTasks tasks={tasks} recipient={recipient} heading={personId ? t.tracker.waitTasksOf(name) : t.tracker.waitTasks} onOpenTask={rest.onOpenTask} />}
       {decisions && shownNone(shown) && !cards.length && !tasks.length && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
       <DecisionsFailure failure={decisionsFailure} onRetry={rest.onDecisionsChanged} />
@@ -192,10 +216,13 @@ function WaitingTasks({ tasks, recipient, heading, onOpenTask }: { tasks: TaskLi
   );
 }
 
-/* A task with a question counts once, alongside decisions that have no task. */
-function countOf(s: Shown, tasks: TaskLine[]): number {
+/* The kept cards are the viewer's own, so they show only while no other person is picked. */
+const keptShown = (kept: WaitCard[] | undefined, personId: string | null) => (personId ? [] : (kept ?? []));
+
+/* What Waits for me shows, counted: a task with a question once, alongside decisions that have no task and the kept cards. */
+function countOf(s: Shown, tasks: TaskLine[], cards: WaitCard[]): number {
   const taskIds = new Set([...s.requests.map(r => r.task.id), ...tasks.map(task => task.id)]);
-  return taskIds.size + s.proposals.length + s.merges.length;
+  return taskIds.size + s.proposals.length + s.merges.length + cards.length;
 }
 
 /* Which part of the tracker a place is: what waits for a person, the turns, the goals, the due dates, or work to look at as a
@@ -276,24 +303,52 @@ function ViewTabs({ value, onChange }: { value: (typeof TRACKER_VIEWS)[number]; 
 
 type Making = 'task' | 'goal' | 'pipeline' | 'editPipeline' | null;
 
+/* The departments the person may give a task: where the server says they plan, and a head takes it. */
+function plannable(places: TaskDepartments | undefined, org: Org | null): Department[] {
+  return (org?.departments ?? []).filter(d => places?.departments.find(p => p.id === d.id)?.mayPlan && d.employees.some(e => e.kind === 'head'));
+}
+
 /* What a person may make where they are: a task for the department through its head, a goal of the department or of the
-   company, and the department's pipelines, where the server says they plan. A department without a head says so. */
+   company, and the department's pipelines, where the server says they plan. A department without a head says so. Away from
+   a department, a task goes to one the person picks. */
 function mayMake(places: TaskDepartments | undefined, org: Org | null, department: string | null, pipeline: Pipeline | null): { kinds: NonNullable<Making>[]; needsHead: boolean } {
-  const known = department ? org?.departments.find(d => d.id === department) : undefined;
-  const plans = department === null ? !!places?.mayPlanCompany : !!places?.departments.find(d => d.id === department)?.mayPlan;
-  if (department === 'none' || !plans || (department && !known)) return { kinds: [], needsHead: false };
-  const head = !!known?.employees.some(e => e.kind === 'head');
+  if (department === null) {
+    const kinds: NonNullable<Making>[] = [];
+    if (plannable(places, org).length) kinds.push('task');
+    if (places?.mayPlanCompany) kinds.push('goal');
+    return { kinds, needsHead: false };
+  }
+  const known = org?.departments.find(d => d.id === department);
+  if (!known || !places?.departments.find(d => d.id === department)?.mayPlan) return { kinds: [], needsHead: false };
+  const head = known.employees.some(e => e.kind === 'head');
   const kinds: NonNullable<Making>[] = [];
-  if (known && head) kinds.push('task');
-  kinds.push('goal');
-  if (known) kinds.push('pipeline');
-  if (known && pipeline?.mayEdit) kinds.push('editPipeline');
-  return { kinds, needsHead: !!known && !head };
+  if (head) kinds.push('task');
+  kinds.push('goal', 'pipeline');
+  if (pipeline?.mayEdit) kinds.push('editPipeline');
+  return { kinds, needsHead: !head };
+}
+
+/* A task from a page of no department: the form starts with which of them gets it, the first by default. */
+function NewTaskAnywhere({ departments, onCancel, onCreated }: { departments: Department[]; onCancel: () => void; onCreated: (task: TaskDetail) => void }) {
+  const t = useT();
+  const [id, setId] = useState(departments[0]?.id);
+  const department = departments.find(d => d.id === id) ?? departments[0];
+  if (!department) return null;
+  const place = (
+    <Field label={t.tasks.department}>
+      {p => (
+        <select {...p} value={department.id} onChange={e => setId(e.target.value)}>
+          {departments.map(d => <option key={d.id} value={d.id}>{deptLabel(t, d)}</option>)}
+        </select>
+      )}
+    </Field>
+  );
+  return <TrackerNewTask department={department} place={place} onCancel={onCancel} onCreated={onCreated} />;
 }
 
 /* The form of what the person chose to make from the + beside Tasks. */
-function MakeHere({ org, department, pipeline, loose, making, setMaking, onOpenTask }: {
-  org: Org | null; department: string | null; pipeline: Pipeline | null; loose: boolean; making: Making; setMaking: (m: Making) => void; onOpenTask: (id: string) => void;
+function MakeHere({ org, places, department, pipeline, loose, making, setMaking, onOpenTask }: {
+  org: Org | null; places: TaskDepartments | undefined; department: string | null; pipeline: Pipeline | null; loose: boolean; making: Making; setMaking: (m: Making) => void; onOpenTask: (id: string) => void;
 }) {
   const t = useT();
   const known = department ? org?.departments.find(d => d.id === department) : undefined;
@@ -303,6 +358,7 @@ function MakeHere({ org, department, pipeline, loose, making, setMaking, onOpenT
   return (
     <>
       {making === 'task' && known && <TrackerNewTask department={known} pipelineId={loose ? null : pipeline?.id} onCancel={close} onCreated={task => { close(); onOpenTask(task.id); }} />}
+      {making === 'task' && department === null && <NewTaskAnywhere departments={plannable(places, org)} onCancel={close} onCreated={task => { close(); onOpenTask(task.id); }} />}
       {making === 'goal' && <GoalForm department={named} onCancel={close} onDone={close} />}
       {making === 'pipeline' && known && <PipelineForm department={known} onCancel={close} onDone={close} />}
       {making === 'editPipeline' && known && pipeline && <PipelineForm key={pipeline.id} pipeline={pipeline} department={known} onCancel={close} onDone={close} />}
@@ -324,6 +380,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const [drawer, setDrawer] = useState(false);
   const [query, setQuery] = useState('');
   const [chips, setChips] = useState<Chips>({});
+  useRowInSight(selected);
   const [stageMode, setStageMode] = useState<boolean | null>(null);
   const [showSubtasks, setShowSubtasks] = useState(true);
   const [making, setMaking] = useState<Making>(null);
@@ -339,6 +396,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   }
 
   const all = tasks ?? [];
+  const { cards: kept, load: reloadCards } = useWaitCards();
   const goals = goalList ?? [];
   const pipelines = pipelineList ?? [];
   const people = mapPeople(org);
@@ -359,7 +417,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const place_ = (p: TaskLine['department']) => placeName(t, org, p);
   const employees = new Map(org?.departments.flatMap(d => d.employees.map(e => [e.id, e] as const)));
   const rows: Rows = {
-    selected, onOpenTask, onOpenGoal, asksYou, questionAt, placeName: place_,
+    selected, onOpenTask, asksYou, questionAt, placeName: place_,
     departmentTemplate: id => places?.departments.find(d => d.id === id)?.templateKey ?? org?.departments.find(d => d.id === id)?.templateKey,
     turnkeyOf: id => employees.get(id)?.turnkey,
     stageOwner: (stage: PipelineStage) => org?.departments.flatMap(d => d.roles).find(r => r.id === stage.ownerRole)?.title[language] ?? stage.owner?.name,
@@ -454,6 +512,8 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
       onClearPerson={clearPerson}
       tasks={waitsOnWho}
       recipient={recipient}
+      kept={kept}
+      onCardsSeen={reloadCards}
       onOpenTask={onOpenTask}
       onOpenAgent={onOpenAgent}
       onOpenOrchestrator={onOpenOrchestrator}
@@ -462,11 +522,13 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
     />
   );
   const empty = section.kind === 'mine' ? t.tracker.noMine : section.kind === 'working' ? t.tracker.nothingWorking : t.tracker.noTasks;
-  const makesHere = section.kind === 'mine' || section.kind === 'department' || section.kind === 'company' || section.kind === 'goals';
   const makeDepartment = departmentId ?? (other ? 'none' : null);
-  const makeHere = makesHere && <MakeHere org={org} department={makeDepartment} pipeline={pipeline} loose={place.pipeline === 'none'} making={making} setMaking={setMaking} onOpenTask={onOpenTask} />;
-  /* The mockup's one way to make something: the + beside Tasks, with what the person may make here and the orchestrator. */
-  const can = makesHere ? mayMake(places, org, makeDepartment, pipeline) : { kinds: [], needsHead: false };
+  const makeHere = <MakeHere org={org} places={places} department={makeDepartment} pipeline={pipeline} loose={place.pipeline === 'none'} making={making} setMaking={setMaking} onOpenTask={onOpenTask} />;
+  /* Pages that are not a list of work hold what is being made above what they show. */
+  const makeOnTop = found || section.kind === 'waits' || section.kind === 'due' || section.kind === 'turns';
+  /* The mockup's one way to make something: the + beside Tasks, on every page, with what the person may make there and the
+     orchestrator. */
+  const can = mayMake(places, org, makeDepartment, pipeline);
   const makeWords = { task: t.tracker.actions.newTask, goal: t.tracker.actions.newGoal, pipeline: t.tracker.actions.newPipeline, editPipeline: t.tracker.actions.editPipeline };
   const create = {
     note: can.needsHead ? t.dept.needsHead : undefined,
@@ -491,7 +553,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
         goals={goals}
         tasks={all}
         onOpenAgent={onOpenAgent}
-        counts={{ waits: countOf(shownOf(decisions, recipient), waitsOnWho), failures: failures.length + machinesAway.filter(machine => !machine.back).length, mine: own.tasks.length, working: working.length }}
+        counts={{ waits: countOf(shownOf(decisions, decisionsOf), waitsOnWho, keptShown(kept, decisionsOf)), failures: failures.length + machinesAway.filter(machine => !machine.back).length, mine: own.tasks.length, working: working.length }}
         create={create}
         open={drawer}
         onClose={() => setDrawer(false)}
@@ -523,6 +585,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
           <div className="tr-search"><TaskSearch query={query} onChange={setQuery} /></div>
         </header>
         {broken !== null && <p className="alert" role="alert">{errorText(t, broken)}</p>}
+        {makeOnTop && makeHere}
         {found ? (
           <>
             <section className="tr-found" aria-label={t.tracker.search.results}>

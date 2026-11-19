@@ -41,6 +41,7 @@ async function releaseFixture(options: { product?: boolean } = {}) {
   let branchCommit = CANDIDATE;
   let fastForward = true;
   let compareProblem: string | null = null;
+  let capped = false;
   const branchHeads = new Map<string, string>();
   const nonMainBases = new Map<string, Set<string>>();
 
@@ -56,6 +57,8 @@ async function releaseFixture(options: { product?: boolean } = {}) {
       return { complete: false, reason: 'not-an-ancestor' };
     }
     if (want.base === mainCommit && !fastForward) return { complete: false, reason: 'Branch diverged from main.' };
+    /* GitHub listed 300 files of the comparison: it proves the line, never the files. */
+    if (capped) return { complete: false, reason: 'too-many-files', lineage: { baseSha: want.base, headSha: want.head, commits: [] } };
     return { complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' };
   };
 
@@ -301,6 +304,9 @@ async function releaseFixture(options: { product?: boolean } = {}) {
     },
     setCompareProblem: (problem: string | null) => {
       compareProblem = problem;
+    },
+    setCapped: (on: boolean) => {
+      capped = on;
     },
     markNonMainBase: (baseSha: string, descendants: string[] = []) => {
       nonMainBases.set(baseSha, new Set(descendants));
@@ -601,6 +607,24 @@ describe('autonomous release for exact commits to main', () => {
     const blind = await headCall('ask_person', { task: blindTask.number, question: 'Ship blind?', commit: CANDIDATE });
     expect(blind.text).toContain('waits for a person');
     expect((await f.journal()).json().entries).toEqual([]);
+  });
+
+  it('auto-approves where main moved by more files than GitHub lists, as the comparisons still prove the base and the fast-forward', async () => {
+    const f = await releaseFixture();
+    expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
+    await f.verifyThroughEchelons();
+    await f.runProductSuite({ commit: CANDIDATE });
+    const { call: headCall } = await f.openTools(f.head);
+    f.setCapped(true);
+    const releaseTask = (await f.coordinating('Release after a large main', f.task));
+    const asked = await headCall('ask_person', { task: releaseTask.number, question: 'Release to main.', commit: CANDIDATE });
+    expect(asked.text).not.toContain('waits for a person');
+    expect((await f.journal()).json().entries).toHaveLength(1);
+
+    /* A capped comparison of a branch that is no fast-forward still proves nothing. */
+    f.setFastForward(false);
+    const diverged = (await f.coordinating('Diverged after a large main', f.task));
+    expect((await headCall('ask_person', { task: diverged.number, question: 'Ship diverged?', commit: CANDIDATE })).text).toContain('waits for a person');
   });
 
   it('lets a signed-in person who runs a department turn its own autonomous release on and off, and no other department\'s', async () => {
@@ -1057,16 +1081,18 @@ describe('autonomous release for exact commits to main', () => {
        and a green full run, yet review.baseCommit = NETWORK_BASE is NOT an ancestor of origin/main (MAIN_BASE). */
     const NETWORK_BASE = 'c'.repeat(40);
     const NET_TURN_SHA = 'd'.repeat(40);
-    f.markNonMainBase(NETWORK_BASE, [NET_TURN_SHA]);
     f.setBranchHead('release-0.24.0', NET_TURN_SHA);
 
     const netTurnTask = (await f.create({ small: true, productId: f.productId, title: 'Branch from network-1 in same turn', paths: ['logic/totals.ts'] })).task;
     expect(netTurnTask.turnId).toBeNull();
+    /* A hand-in refuses a base main does not hold: this one was handed in while main still held it, as before that check or
+       before main was rewritten, so autonomous release meets it on its own. */
     await submit(f.ctx, f.author.id, netTurnTask.id, {
       summary: 'Built on network-1 base.',
       evidence: 'Checks.',
       review: { baseCommit: NETWORK_BASE, branch: 'release-0.24.0' },
     });
+    f.markNonMainBase(NETWORK_BASE, [NET_TURN_SHA]);
     await verdict(f.ctx, f.reviewer.id, netTurnTask.id, {
       pass: true,
       comment: 'Reviewed diff from network-1 only.',
@@ -1104,16 +1130,17 @@ describe('autonomous release for exact commits to main', () => {
        and NET_OUT_SHA is fast-forward from MAIN_BASE, while review.baseCommit = NETWORK_BASE (from network-1) is NOT an ancestor of origin/main. */
     const NETWORK_BASE = '3'.repeat(40);
     const NET_OUT_SHA = '5'.repeat(40);
-    f.markNonMainBase(NETWORK_BASE, [NET_OUT_SHA]);
     f.setBranch(NET_OUT_SHA);
 
     const outVerdictTask = await f.createMainCodeTask({ title: 'Out-of-turn task started from network-1', paths: ['logic/totals.ts'] });
     expect(outVerdictTask.turnId).toBeNull();
+    /* Handed in while main still held its base, as above. */
     await submit(f.ctx, f.author.id, outVerdictTask.id, {
       summary: 'Network work outside a turn: do not merge to main.',
       evidence: 'Checks.',
       review: { baseCommit: NETWORK_BASE },
     });
+    f.markNonMainBase(NETWORK_BASE, [NET_OUT_SHA]);
     await verdict(f.ctx, f.reviewer.id, outVerdictTask.id, {
       pass: true,
       comment: 'Reviewed only against network-1.',

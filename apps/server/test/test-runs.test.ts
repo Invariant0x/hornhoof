@@ -42,7 +42,8 @@ describe('a test run', () => {
     expect(started.text).toContain('Test run 1');
     const first = await nextOf(ann.node, 'tests.run');
     const second = await nextOf(ivan.node, 'tests.run');
-    expect(first).toMatchObject({ repo: { url: 'https://github.com/acme/shop.git', token: 'ghp_shop0123456789' }, branch: 'main', commitSha: TEST_COMMIT, task: c.task.number, command: 'npm test -- --shard=1/2', part: 1, parts: 2, timeoutMs: 30 * 60_000 });
+    expect(first).toMatchObject({ repo: { url: 'https://github.com/acme/shop.git', token: 'ghp_shop0123456789' }, branch: 'main', commitSha: TEST_COMMIT, task: c.task.number, command: 'npm test -- --shard=1/2', part: 1, parts: 2, silenceMs: 60 * 60_000 });
+    expect(first.timeoutMs).toBeUndefined();
     expect(second).toMatchObject({ command: 'npm test -- --shard=2/2', part: 2, parts: 2 });
     ann.node.send({ type: 'tests.started', partId: first.partId });
     ann.node.send(done(first, { log: 'ok 12 tests\n' }));
@@ -129,7 +130,21 @@ describe('a test run', () => {
     expect(await gets(c.app.ctx, ivan.node, 'tests.cancel')).toBe(false);
     await checkTestTimes(c.app.ctx, new Date(Date.now() + 15 * 60_000));
     expect(await nextOf(ivan.node, 'tests.cancel')).toEqual({ type: 'tests.cancel', partId: run.partId });
-    expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 failed[\s\S]*did not end within 5 min/);
+    expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 failed[\s\S]*upper time limit of 5 min/);
+  });
+
+  it('shows silence as the reason when its node stops a test part', async () => {
+    const c = await company();
+    const machine = await c.machine(c.ceo, 'silent-machine');
+    const { call } = await c.turn(c.bruno);
+    await call('run_tests', { branch: 'main', command: 'make test' });
+    const part = await nextOf(machine.node, 'tests.run');
+    machine.node.send(done(part, { ok: false, error: 'silent', exitCode: null, log: 'The test part stopped after too long in silence.' }));
+    await nextOf(machine.node, 'tests.ack');
+    const result = JSON.parse((await call('test_run', { run: 1 })).text);
+    expect(result.parts[0]).toMatchObject({
+      status: 'failed', why: expect.stringContaining('without output or results'), end: expect.stringContaining('silence'),
+    });
   });
 
   it('keeps a machine-queued part out of execution timeout until tests.started', async () => {

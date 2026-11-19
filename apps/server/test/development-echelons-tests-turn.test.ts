@@ -11,8 +11,11 @@ import { echelonsTurn } from './helpers.js';
    by fast-forward, so the Tests owner merges the turn branch into the candidate branch and hands the merge in. */
 const TURN_HEAD = '7'.repeat(40), MERGED = 'e'.repeat(40), TURN_LATER = '8'.repeat(40), ELSEWHERE = '9'.repeat(40), OTHER_HEAD = '6'.repeat(40);
 const OWN = ['logic/totals.ts'], FROM_TURN = ['logic/rates.ts'];
+/* The paths of a comparison, or CAPPED where GitHub listed 300 of its files and so proved only that the head holds the base. */
+const CAPPED = 'capped';
+type Change = string[] | typeof CAPPED;
 
-async function turnWentOn(more: Record<string, string[]> = {}) {
+async function turnWentOn(more: Record<string, Change> = {}) {
   const f = await testsFixture();
   const [turn] = await f.db.select().from(turns).where(and(eq(turns.departmentId, f.task.departmentId!), eq(turns.status, 'open')));
   const turnBranch = `turn-${turn!.number}`;
@@ -21,12 +24,13 @@ async function turnWentOn(more: Record<string, string[]> = {}) {
     const branch = 'branch' in want ? want.branch : 'task-1';
     return { branch, commitSha: heads[branch] ?? MERGED };
   };
-  const changes: Record<string, string[]> = {
+  const changes: Record<string, Change> = {
     [`${BASE}..${TURN_HEAD}`]: FROM_TURN, [`${TURN_HEAD}..${TURN_HEAD}`]: [], [`${TURN_HEAD}..${MERGED}`]: OWN, [`${HEAD}..${MERGED}`]: FROM_TURN,
     [`${BASE}..${MERGED}`]: [...OWN, ...FROM_TURN], [`${MERGED}..${MERGED}`]: [], ...more,
   };
   f.ctx.readCompare = async (_repo, refs) => {
     const paths = changes[`${refs.base}..${refs.head}`];
+    if (paths === CAPPED) return { complete: false, reason: 'too-many-files', lineage: { baseSha: refs.base, headSha: refs.head, commits: [] } };
     return paths ? { complete: true, baseSha: refs.base, headSha: refs.head, paths, diff: '@@ -1 +1 @@\n-old\n+new' } : { complete: false, reason: 'not-an-ancestor' };
   };
   const took = (baseCommit = TURN_HEAD) => submit(f.ctx, f.tester.id, f.task.id, { summary: `Took ${turnBranch} in.`, evidence: `Merged origin/${turnBranch} into task-1; named tests of the change pass.`, review: { baseCommit } });
@@ -94,6 +98,33 @@ describe('Tests takes the open turn of its department into a candidate, as it ta
     f.heads[f.turnBranch] = TURN_LATER;
     await expect(f.took()).rejects.toMatchObject({ status: 409,
       message: `${f.turnBranch} went on to ${TURN_LATER}, which ${MERGED} does not hold. Take ${f.turnBranch} in again: it takes the candidate only by fast-forward.` });
+    await f.unchanged();
+  });
+});
+
+describe('Tests takes in a turn that changed more files than GitHub lists of a comparison', () => {
+  const LINE = Array.from({ length: 301 }, (_, i) => `logic/turn/${i}.ts`);
+  const blob = (path: string, content: string) => ({ path, type: 'blob', mode: '100644', sha: content.repeat(40) });
+  const files = (line: string, own: string) => [...LINE.map(path => blob(path, line)), blob('logic/totals.ts', own)];
+  async function largeTurn(merged = files('2', '1')) {
+    const f = await turnWentOn({ [`${BASE}..${TURN_HEAD}`]: CAPPED, [`${HEAD}..${MERGED}`]: CAPPED });
+    const trees: Record<string, ReturnType<typeof files>> = { [BASE]: files('0', '0'), [HEAD]: files('0', '1'), [TURN_HEAD]: files('2', '0'), [MERGED]: merged };
+    f.ctx.readTree = async (_repo, commit) => trees[commit] ? { complete: true, paths: trees[commit].map(e => e.path), entries: trees[commit] } : { complete: false, reason: 'tree-unavailable' };
+    return f;
+  }
+
+  it('keeps the merge as the candidate when it changes only what the turn brought', async () => {
+    const f = await largeTurn();
+    await f.took();
+    expect((await f.detail()).log.findLast(event => event.kind === 'submitted')?.data).toMatchObject({
+      candidate: { baseCommit: TURN_HEAD, commit: MERGED, paths: OWN }, tookTurn: { branch: f.turnBranch, from: BASE, to: TURN_HEAD },
+    });
+  });
+
+  it('refuses a merge that changes the candidate beyond what the turn brought, naming the change', async () => {
+    const f = await largeTurn([...files('2', '1'), blob('logic/extra.ts', '5')]);
+    await expect(f.took()).rejects.toMatchObject({ status: 409,
+      message: `The merge changes what ${f.turnBranch} did not bring: logic/extra.ts. Take in only ${f.turnBranch}; a failed check of the candidate's own change is reported with done false.` });
     await f.unchanged();
   });
 });

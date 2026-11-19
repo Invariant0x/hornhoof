@@ -15,7 +15,7 @@ test('tree.gif: readable Development work tree filling width, idle pickup, merge
 
   await page.goto('/');
   await mapDepartment(page, 'Development').click();
-  await expect(page.getByRole('region', { name: 'Department structure' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Department schema', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Tree', exact: true }).click();
   const scroll = page.getByRole('region', { name: 'Work tree', exact: true });
   await expect(scroll).toBeVisible();
@@ -42,32 +42,33 @@ test('tree.gif: readable Development work tree filling width, idle pickup, merge
   }
 
   /* Snapshot 0 (14:20): Tessa is idle, Owen waits for #221, Priya asks a question, Iris and Liam work. */
-  await page.waitForTimeout(900);
+  await page.waitForTimeout(1000);
 
   /* Snapshot 1 (14:24): idle Tessa picks up #235, Liam merges #226 up into turn-6 and cuts #241. */
   await advanceTo(1, 't-226');
-  await page.waitForTimeout(1050);
+  await page.waitForTimeout(1000);
 
   /* Snapshot 2 (14:28): Iris merges #221 up into turn-6, Owen unblocks #227, turn review #242 opens. */
   await advanceTo(2, 't-221');
-  await page.waitForTimeout(1050);
+  await page.waitForTimeout(800);
 
   /* Pan gently down so the four reviewers come into view, then post clean verdicts on review #242. */
   await smoothDrag(page, scroll, 0, -260, 6, 32, dragAnchor);
   await page.mouse.move(8, 8);
   await advanceTo(3, 'r-242');
-  await page.waitForTimeout(900);
+  await page.waitForTimeout(950);
 
   /* Pan smoothly back to the top lanes, open Iris's window and slide out Card: Iris. */
   await smoothDrag(page, scroll, 0, 260, 6, 32, dragAnchor);
   await page.mouse.move(8, 8);
   await page.locator('.tv-labs').getByRole('button', { name: /Iris/ }).click();
-  await page.getByRole('dialog', { name: /^Iris/ }).getByRole('button', { name: 'Iris', exact: true }).click();
+  /* The name opens the window. It carries the mark of Iris's program, so the button's name starts with Iris and goes on. */
+  await page.getByRole('dialog', { name: /^Iris/ }).getByRole('button', { name: /^Iris/ }).click();
   const agentWin = page.getByRole('complementary', { name: /^Iris/ });
   await expect(agentWin).toBeVisible();
   await agentWin.getByRole('button', { name: 'Card', exact: true }).click();
   await expect(agentWin.getByRole('complementary', { name: 'Card: Iris', exact: true })).toBeVisible();
-  await page.waitForTimeout(1100);
+  await page.waitForTimeout(1050);
 
   /* Close Iris's window and restore Snapshot 0 so the first and last frames match cleanly. */
   await agentWin.getByRole('button', { name: 'Close', exact: true }).and(agentWin.locator('.window-close')).click();

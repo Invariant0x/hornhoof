@@ -1,9 +1,11 @@
+import { REVIEW_SKIP_ENABLED, requestAuthorCheck } from './author-check.js';
 import { idOnly } from '../../db/selections.js';
 import { earlierWork } from '../departments/branches.js';
 import { agentTaskDetail } from './agent-sight.js';
 import { Verification } from './echelons-tests.js';
 import { AcceptanceInput } from './echelons-accept.js';
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
+import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
 import { ECHELON_STAGES } from '@hornhoof/protocol/echelons';
 import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -24,7 +26,7 @@ import { Text } from './long-text.js';
 import { agentSeesTask as sees, taskLines, type TaskDetail } from './views.js';
 import { taskByRef } from './lookup.js';
 import { editTurn, giveTasks, turnName, turnRows, type Scope } from './turns.js';
-import { recordRelease } from './releases.js';
+import { recordRelease, uncheckedInRelease, uncheckedWords } from './releases.js';
 import { topDepartment } from './turn-department.js';
 import { setUrgent } from './urgency.js';
 import { ceoPrincipal, departmentPrincipal, standingPrincipal } from '../conversation/decision-context.js';
@@ -56,6 +58,13 @@ const say = (text: string, isError = false) => ({ content: [{ type: 'text' as co
 /* Agents read role names in English, the language of their instructions. */
 const english = (_k: string, v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) && 'en' in v && 'ru' in v && Object.keys(v).length === 2 ? (v as { en: string }).en : v);
 const json = (value: unknown) => say(JSON.stringify(value, english));
+
+/* A task of another department a company watchdog inspects, every word of it with no credential and no private path, as
+   failures and agents give that work to whoever may not open it, and cleaned before its log is cut. */
+const cleaned = <T>(detail: T): T => JSON.parse(JSON.stringify(detail, (key, value: unknown) => {
+  const shown = english(key, value);
+  return typeof shown === 'string' ? cleanDiagnostic(shown) : shown;
+})) as T;
 
 /* One task's answer stays within this, so a long log does not fill the agent's context. */
 export const TASK_ANSWER = 40_000;
@@ -95,11 +104,13 @@ type Question = { kind: 'question' | 'approval' | 'choice'; text: string; topic?
 const HumanRecipient = z.uuid().describe('The person who can supply the missing answer, by id. For a missing sign-in, ask them to add it to the vault and give only the entry name.');
 
 /* What people read of a question, and what its asker hears besides: an approval says what test runs say of its commit as it
-   is asked, which the answer says again as it comes. */
-async function questionWords(db: Ctx['db'], task: Task, question: string, commit?: string): Promise<{ text: string; told: string }> {
+   is asked, which the answer says again as it comes, and the approval of a release names what it brings that no check covers. */
+async function questionWords(db: Ctx['db'], task: Task, question: string, commit?: string, unchecked?: string[] | null): Promise<{ text: string; told: string }> {
   if (!commit) return { text: question, told: '' };
   const said = proofLine(await commitProof(db, task, commit));
-  return { text: `${question}\n\nHornhoof checked as this was asked. ${said}`, told: ` ${said}` };
+  const named = unchecked?.length ? `\n\n${uncheckedWords(unchecked)}` : '';
+  const told = unchecked?.length ? ` The card names what the release brings that no check covers: ${unchecked.length}.` : '';
+  return { text: `${question}\n\nHornhoof checked as this was asked. ${said}${named}`, told: ` ${said}${told}` };
 }
 
 /* Keep the outgoing question with the person responsible for its decision card. */
@@ -108,8 +119,14 @@ async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, 
   await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
 }
 
-async function commitReply(ctx: Ctx, task: Task, agentId: string, question: string, commit?: string, options?: unknown[]) {
-  if (!commit || options?.length) return null;
+/* What the release of the commit an approval is asked of brings that no check covers; a choice names no commit. */
+const uncheckedAsked = (ctx: Ctx, task: Task, commit?: string, options?: unknown[]): Promise<string[] | null> =>
+  commit && !options?.length ? uncheckedInRelease(ctx, task, commit) : Promise.resolve(null);
+
+/* An approval of a commit that the department's rule or autonomous release lets go, where it does. A release that brings
+   what no check covers always goes to a person, who sees that on the card. */
+async function commitReply(ctx: Ctx, task: Task, agentId: string, question: string, commit?: string, options?: unknown[], unchecked?: string[] | null) {
+  if (!commit || options?.length || unchecked?.length) return null;
   if (!(await commitApprovalRequired(ctx.db, task.companyId, task.departmentId))) {
     mayAsk(task, agentId);
     refusePaused(task);
@@ -218,6 +235,7 @@ class TaskTools {
   }
 
   private registerExecutionTools(): void {
+    this.registerAuthorCheck();
     this.registerSubmit();
     this.registerBlocked();
     this.registerVerdict();
@@ -380,7 +398,10 @@ class TaskTools {
       },
       async ({ task: ref }) =>
         this.find(ref, true).then(
-          async ({ agent, task }) => say(fitted({ ...await agentTaskDetail(this.ctx, agent, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id), ...await earlierWork(this.ctx, agent, task) })),
+          async ({ agent, task }) => {
+            const detail = { ...await agentTaskDetail(this.ctx, agent, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id), ...await earlierWork(this.ctx, agent, task) };
+            return say(fitted(sees(agent, task) ? detail : cleaned(detail)));
+          },
           (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
         ),
     );
@@ -471,8 +492,8 @@ class TaskTools {
           "Ask only once every instruction and material the question promises is ready, attached to it instead of a pointer to a task's log, and let one sender ask it once. " +
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
-          'With commit, an unset rule needs no approval. An approval card shows which passed test run checked that commit, or that none did. If its department enabled autonomousRelease and that commit has a green whole run of its release with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
-          'Ask a person when their own judgment or information is indispensable. Resolve ordinary work through the responsible department or the orchestrator. Only irreversible deletion needs the CEO’s yes. Keep credentials out of the question and answer; ask the person to save a missing sign-in in the vault and name the entry.',
+          'With commit, an unset rule needs no approval, except for a release that brings what no check covers: a person approves it on a card that names exactly that. An approval card shows which passed test run checked that commit, or that none did. If its department enabled autonomousRelease and that commit has a green whole run of its release with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
+          'Ask a person when their own judgment or information is indispensable. Resolve ordinary work through the responsible department or the orchestrator. Only irreversible deletion needs the CEO\'s yes. Keep credentials out of the question and answer; ask the person to save a missing sign-in in the vault and name the entry.',
         inputSchema: {
           task: Ref,
           question: z.string().trim().min(1).max(2000),
@@ -494,16 +515,17 @@ class TaskTools {
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, question);
-          const reply = await commitReply(this.ctx, task, this.job.agentId, question, commit, options);
+          const unchecked = await uncheckedAsked(this.ctx, task, commit, options);
+          const reply = await commitReply(this.ctx, task, this.job.agentId, question, commit, options, unchecked);
           if (reply) return reply;
-          if (commit && person) throw refuse(400, 'task_invalid', 'The department’s commit rule determines who approves it.');
+          if (commit && person) throw refuse(400, 'task_invalid', 'The department\'s commit rule determines who approves it.');
           const recipient = person ? await this.questionRecipient(person) : undefined;
           if (!recipient && !commit && topic && !['task', 'employee', 'repositories', 'release'].includes(topic)) {
             throw refuse(400, 'task_invalid', 'Resolve the request through the department or the orchestrator. If only a person can answer, name them.');
           }
           const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
           const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
-          const { text, told } = await questionWords(this.db, task, question, commit);
+          const { text, told } = await questionWords(this.db, task, question, commit, unchecked);
           const moved = await ask(this.ctx, this.job.agentId, task.id, { kind, text, ...(commit ? { commit, approval: { channel: 'commit', kind: 'commit', amount: null } } : {}), images, options: ways, link: link ?? null, topic, ...(recipient ? { recipientPersonId: recipient } : {}), ...(plan ? { plan } : {}) });
           await recordQuestion(this.ctx, this.job, task, { kind, text, topic: commit ? 'release' : topic, ...(recipient ? { recipient } : {}) });
           return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
@@ -635,7 +657,7 @@ class TaskTools {
       'release_turn',
       {
         description:
-          "Records the release of your department's open turn before main moves, on the release task you hold: commit is a commit of the turn branch turn-<number>, its head or one the branch went past while it was checked, runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own. The department's commit rule says whether the task needs approval of that exact commit. An unset rule needs no approval. When required, ask_person with commit asks the person responsible, or the orchestrator can answer for the owner. With autonomous release on, proof of each change can satisfy the approval rule and is recorded in its log. It uses an independent checker or, for turnkey work, the holder's own review, security check and tests. " +
+          "Records the release of your department's open turn before main moves, on the release task you hold: commit is a commit of the turn branch turn-<number>, its head or one the branch went past while it was checked, runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own. The department's commit rule says whether the task needs approval of that exact commit. An unset rule needs no approval, but a release that brings what no check covers is recorded only once a person approved a card naming exactly that, whatever the rule, and autonomous release never approves it. When required, ask_person with commit asks the person responsible, or the orchestrator can answer for the owner. With autonomous release on, proof of each change can satisfy the approval rule and is recorded in its log. It uses an independent checker or, for turnkey work, the holder's own review, security check and tests. " +
           'It says what the release brings, whether each of its commits was checked, and which results of the turn it leaves out because they joined the branch after the commit. The turn branch never stops for a release: keep taking finished work into it. Then fast-forward main to the commit and tag it vX.Y.Z, the next version of your department\'s repository after its own last version tag, which the answer names, or its first version tag where it has none: the tag closes the turn, and what the release left out goes into the next turn, whose branch you create from the head of this one.',
         inputSchema: { task: Ref, commit: z.string().regex(/^[a-f0-9]{40}$/).describe('The exact commit of the turn branch that the whole run checked.'), runId: z.uuid().describe('A passed whole run of that commit.') },
       },
@@ -652,7 +674,7 @@ class TaskTools {
     this.server.registerTool(
       'create_task',
       {
-        description: 'Assigns one whole result in your department. Code follows Architecture (unless small or shared with its Development owner), Development, mandatory Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and the product whose repository it changes when that is not the department\'s own; one task changes one repository, so a change across repositories is a task per repository. checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. A document is files, not code, even where the department keeps a repository: no paths and no commit, its holder attaches the files and hands them in with submit, and the head closes it with report. A task given to a member of a turnkey team goes through no echelons, whatever its text says: its holder does it end to end alone and closes it with report, with no checker, Cleanup or paths; everybody else\'s goes through the route of its department. No task is in a turn until its result is accepted into the open turn\'s branch. Never write the echelons into a task\'s text: the route is the server\'s.',
+        description: 'Assigns one whole result in your department. Code follows Architecture (unless small or shared with its Development owner), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and the product whose repository it changes when that is not the department\'s own; one task changes one repository, so a change across repositories is a task per repository. checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. A document is files, not code, even where the department keeps a repository: no paths and no commit, its holder attaches the files and hands them in with submit, and the head closes it with report. A task given to a member of a turnkey team goes through no echelons, whatever its text says: its holder does it end to end alone and closes it with report, with no checker, Cleanup or paths; everybody else\'s goes through the route of its department. No task is in a turn until its result is accepted into the open turn\'s branch. Never write the echelons into a task\'s text: the route is the server\'s.',
         inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), architectAgentId: z.uuid().optional().describe('Optional distinct Architecture owner; when omitted or equal to executor, Architecture collapses into Development.'), resultKind: z.enum(['code', 'document', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: Product.optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional(), ...TrackerFields },
       },
       async input =>
@@ -748,11 +770,24 @@ class TaskTools {
     );
   }
 
+  private registerAuthorCheck(): void {
+    this.server.registerTool('check_author', {
+      description: REVIEW_SKIP_ENABLED
+        ? 'Requests check:author on the pushed Development candidate. The server pins the candidate and the current turn or main base. The node records the result on the task. Use the returned baseCommit for submit after this check finishes.'
+        : 'Disabled. Submit the candidate for Review.',
+      inputSchema: z.strictObject({ task: Ref }),
+    }, async ({ task: ref }) => this.run(async () => {
+      const { task } = await this.find(ref);
+      const result = await requestAuthorCheck(this.ctx, this.job.agentId, this.job.id, task.id);
+      return { text: JSON.stringify(result) };
+    }));
+  }
+
   private registerSubmit(): void {
     this.server.registerTool(
       'submit',
       {
-        description: 'Hands the current Development or checking-stage candidate forward. Where task.echelons says document: attach the files to the task, give summary and evidence, and name no review. Review and Security fix findings themselves on the same branch, without returning to the author. At Tests, submit a new test-only repair on the same branch and base: the delta from the current candidate may change only test, tests or e2e directories, or *.test.* and *.spec.* files. Source repairs use report with done false and verification.delta, preserving the task and candidate history. When the candidate\'s own change passed and it only needs the main line, or the open turn branch of its department that went on (the turn takes a candidate only by fast-forward), its owner merges that line into the candidate branch and submits the merge with review.baseCommit naming the commit taken in: the candidate stays at Tests to be checked again. summary: what you did; evidence: the command you ran and what it printed, the link, the check. review.baseCommit is the commit the change starts from. The server reads the head of the branch named after the task (task-<number> or the only task-<number>-...), or of review.branch when the work is on another branch; a repair stays on the branch of the candidate it repairs. review.commit, when given, must be that head. Without a readable commit the submission is refused with the reason. Check the change before handing it forward. Submitting starts no test run.',
+        description: 'Hands the current Development or checking-stage candidate forward. Where task.echelons says document: attach the files to the task, give summary and evidence, and name no review. Review and Security fix findings themselves on the same branch, without returning to the author. At Tests, submit a new test-only repair on the same branch and base: the delta from the current candidate may change only test, tests or e2e directories, or *.test.* and *.spec.* files. Source repairs use report with done false and verification.delta, preserving the task and candidate history. When the candidate\'s own change passed and it only needs the main line, or the open turn branch of its department that went on (the turn takes a candidate only by fast-forward), its owner merges that line into the candidate branch and submits the merge with review.baseCommit naming the commit taken in: the candidate stays at Tests to be checked again, unless its previous Review was skipped on an author receipt. A new commit then needs Review. summary: what you did; evidence: the command you ran and what it printed, the link, the check. review.baseCommit is the commit the change starts from. The server reads the head of the branch named after the task (task-<number> or the only task-<number>-...), or of review.branch when the work is on another branch; a repair stays on the branch of the candidate it repairs. review.commit, when given, must be that head. Without a readable commit the submission is refused with the reason. Check the change before handing it forward. Submitting starts no test run.',
         inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional(), operationId: z.uuid().optional() },
       },
       async ({ task: ref, summary, evidence, review, operationId }) =>

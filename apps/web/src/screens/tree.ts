@@ -83,8 +83,8 @@ export type TreeLayout = {
 type Drawing = { tree: DepartmentTree; layout: TreeLayout; turnY: number };
 const R = 8;
 
-/* A plate is the size of an employee's chip on the map, on every screen and beside any number of others: the tree moves and
-   zooms instead of squeezing it. Every lane keeps that fixed size, with long text clipped inside it. */
+/* A plate is at least the size of an employee's chip on the map, on every screen and beside any number of others: the tree
+   moves and zooms instead of squeezing it. A plate whose words take more lines is as tall as it measures, and its row with it. */
 const PLATE_HEIGHT = { axis: 0, main: 32, turn: 40, lane: CH };
 const PLATE_WIDTH = CW;
 export const plateKey = (row: Pick<TreeRow, 'type' | 'agent'>): string => row.agent?.id ?? row.type;
@@ -164,8 +164,11 @@ function orderedLanes(tree: DepartmentTree, agentOrder: string[]): Lane[] {
   return lanesOf(tree).sort((a, b) => rank(a.agent!.id) - rank(b.agent!.id));
 }
 
-function rowsOf(tree: DepartmentTree, agentOrder: string[] = []): TreeRow[] {
-  const sized = (row: Lane): TreeRow => ({ ...row, y: 0, h: plateHeight(row) + plateRoom(row) * 2 });
+/* plates: what each plate measures on the screen, by its key; one not measured yet keeps its natural size. */
+export type PlateSizes = Record<string, number>;
+
+function rowsOf(tree: DepartmentTree, agentOrder: string[] = [], plates: PlateSizes = {}): TreeRow[] {
+  const sized = (row: Lane): TreeRow => ({ ...row, y: 0, h: Math.max(plateHeight(row), plates[plateKey(row)] ?? 0) + plateRoom(row) * 2 });
   const rows: TreeRow[] = [{ type: 'axis', y: 0, h: 32 }];
   if (tree.repository) rows.push(sized({ type: 'main', pick: { kind: 'main' } }), sized({ type: 'turn', pick: { kind: 'turn' } }));
   rows.push(...orderedLanes(tree, agentOrder).map(sized));
@@ -363,8 +366,8 @@ function rowTargets(layout: TreeLayout) {
   }
 }
 
-export function treeLayout(tree: DepartmentTree, box: { width: number; phone: boolean; agentOrder?: string[] }, zoom: number): TreeLayout {
-  const from = windowStart(tree), rows = rowsOf(tree, box.agentOrder);
+export function treeLayout(tree: DepartmentTree, box: { width: number; phone: boolean; agentOrder?: string[] }, zoom: number, plates: PlateSizes = {}): TreeLayout {
+  const from = windowStart(tree), rows = rowsOf(tree, box.agentOrder, plates);
   const labelWidth = PLATE_WIDTH + 10, tail = box.phone ? 108 : 168;
   /* On a phone the time axis starts in what is left beside the plates, so the fork of a young turn is on the screen. */
   const available = Math.max(box.phone ? 64 : 140, box.width - labelWidth - tail - 12);

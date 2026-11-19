@@ -34,14 +34,24 @@ describe('a candidate with a file too large for GitHub to show', () => {
     });
   });
 
-  it('still takes a patch GitHub cut short, or a list of 300 files, for no comparison', async () => {
+  it('still takes a patch GitHub cut short, or a list of 300 files, for no comparison, which proves only the line', async () => {
     const repo = { url: 'https://github.com/acme/shop.git', token: '' };
+    const lineage = { baseSha: BASE, headSha: FIRST, commits: [{ sha: FIRST, parents: [] }] };
     answering(comparison([{ filename: 'logic/totals.ts', patch: '@@ -3 +3 @@\n+new', additions: 5, deletions: 0 }]));
-    expect(await readCompare(repo, { base: BASE, head: FIRST })).toEqual({ complete: false, reason: 'incomplete-comparison' });
+    expect(await readCompare(repo, { base: BASE, head: FIRST })).toEqual({ complete: false, reason: 'incomplete-comparison', lineage });
     answering(comparison(Array.from({ length: 300 }, (_, i) => ({ filename: `logic/f${i}.ts`, patch: '+a', additions: 1, deletions: 0 }))));
-    expect(await readCompare(repo, { base: BASE, head: FIRST })).toEqual({ complete: false, reason: 'incomplete-comparison' });
+    expect(await readCompare(repo, { base: BASE, head: FIRST })).toEqual({ complete: false, reason: 'too-many-files', lineage });
     answering({ base_commit: { sha: BASE }, commits: [{ sha: FIRST }], total_commits: 1, status: 'ahead' });
     expect(await readCompare(repo, { base: BASE, head: FIRST })).toEqual({ complete: false, reason: 'incomplete-comparison' });
+  });
+
+  it('refuses plainly a candidate whose change has more files than GitHub lists, and records nothing', async () => {
+    const f = await fixture();
+    f.ctx.readCompare = readCompare;
+    answering(comparison(Array.from({ length: 300 }, (_, i) => ({ filename: `logic/f${i}.ts`, patch: '+a', additions: 1, deletions: 0 }))));
+    await expect(submit(f.ctx, f.author.id, f.task.id, { summary: 'Done', evidence: 'Checks', review: { baseCommit: BASE } })).rejects.toMatchObject({ status: 409,
+      message: `GitHub lists at most 300 files of a comparison, and the change from ${BASE} to ${FIRST} has that many or more, so it cannot be read whole. Check that review.baseCommit is the commit the change starts from, or hand in a smaller change.` });
+    expect(await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.task.id), eq(taskEvents.kind, 'submitted')))).toEqual([]);
   });
 
   it('refuses a candidate whose file without a patch lies outside the paths the head approved, and records nothing', async () => {

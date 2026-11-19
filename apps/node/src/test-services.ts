@@ -4,7 +4,7 @@ import { closeSync, constants, existsSync, fchmodSync, fchownSync, fstatSync, fs
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { redact } from './redact.js';
 import type { JobUser } from './isolation.js';
-import { checkDeadline } from './test-context.js';
+import { checkDeadline, deadlineTimer } from './test-context.js';
 import { signalProcessGroup } from './process-group.js';
 import { copyServiceSource, copyServiceTree, withServiceDirectory, writeServiceFile } from './test-service-files.js';
 
@@ -275,7 +275,7 @@ function launch(program: string, args: string[], cwd: string, env: Record<string
     hard ??= setTimeout(() => stopChild('SIGKILL'), stopMs);
     drain.force();
   };
-  const timer = setTimeout(interrupt, Math.max(1, context.deadline - Date.now()));
+  const timer = deadlineTimer(context.deadline, interrupt);
   context.signal.addEventListener('abort', interrupt, { once: true });
   if (context.signal.aborted) interrupt();
   const result = new Promise<ChildResult>((resolve, reject) => {
@@ -505,7 +505,7 @@ function lockDescriptor(fd: number, context: ServiceContext): Promise<void> {
       failure = new Error('Service lock cancelled or deadline exceeded');
       child.kill('SIGKILL');
     };
-    const timer = setTimeout(interrupt, Math.max(1, context.deadline - Date.now()));
+    const timer = deadlineTimer(context.deadline, interrupt);
     context.signal.addEventListener('abort', interrupt, { once: true });
     if (context.signal.aborted) interrupt();
     child.once('error', error => { failure = error; });

@@ -1,20 +1,23 @@
 import { workingTurns } from './hub-turns';
-import { grownTo } from './ui/natural-height';
-import { peopleLayout, rowCenters, wirePeople, type PeopleLayout, type PersonChip, type PersonRoute } from './map-people';
+import { dockedRoom, peopleLayout, PH, rowCenters, wirePeople, type DockRoom, type PeopleLayout, type PersonChip, type PersonRoute } from './map-people';
 import { joinRoads, roadForks, type Way } from './map-roads';
 import { departmentPeople, wholeCompanyPeople } from './org';
 import type { Org } from './types';
 import { along, orthoRoute, orthoThrough, type Rect } from './ui/ortho';
 import type { Point } from './ui/wires';
 
-/* World coordinates: people on top, the orchestrator in the middle, departments in two columns around him. */
+/* World coordinates: people on top, the orchestrator in the middle, departments in two columns around him. A chip of the
+   whole-company row is CHIP_W wide and at least CHIP_H tall: every chip of the row is as tall as the one whose words need
+   the most, as the map measures them. */
 export const W = 1200, H = 900, CX = W / 2, CY = 420, HUB = 120;
 const CHIP_W = 160, CHIP_H = 56, CHIP_GAP = 20;
-/* A card grows by its turn strip while any department works in the turn, and as far as the words of the tallest card need,
-   so every card of the map stays the same size. */
+/* A card grows by its turn strip while any department works in the turn, to what the card of the most words needs and to the
+   stack of people docked beside one card, so every card of the map stays the same size and each docked chip's line runs
+   straight into the side of its card. */
 const DEPT_W = 280, DEPT_H = 160, DEPT_H_TURN = 196;
-/* Up to two rows sit at the four corners; more rows stack evenly around the hub, this far apart, and never closer than
-   ROW_GAP between the cards. */
+/* Up to two rows sit at the four corners, further out when the cards grow taller; more rows stack evenly around the hub, this
+   far apart. Cards never come closer than ROW_GAP, and a person between two cards of a column keeps clear of the people
+   docked beside them. */
 const CORNER = 220, ROW = 220, ROW_GAP = 32;
 /* Room between the people and the top row, and above whatever comes below the hub or the lowest row. */
 export const GAP = 28;
@@ -24,23 +27,27 @@ const BEND = 84, INNER = 210;
 export const HALO = 260, START_H = 120;
 
 export type DeptSpot = { x: number; y: number; w: number; h: number; path: Point[] };
+const NO_ROOM: DockRoom = { stack: 0, gutter: 0 };
 
-/* How far above or below the hub each row's middle sits: two rows at the corners, or further apart for cards too tall for
-   them. */
-function rowOffsets(rows: number, h: number): number[] {
-  const step = Math.max(ROW, h + ROW_GAP);
-  if (rows <= 2) return [-1, 1].slice(0, rows).map(side => side * Math.max(CORNER, step / 2));
+/* How far above or below the hub each row's middle sits. */
+function rowOffsets(rows: number, h: number, room = NO_ROOM): number[] {
+  const apart = Math.max(h + ROW_GAP, room.stack + room.gutter);
+  if (rows <= 2) {
+    const corner = Math.max(CORNER, apart / 2);
+    return [-corner, corner].slice(0, rows);
+  }
+  const step = Math.max(ROW, apart);
   return Array.from({ length: rows }, (_, r) => (r - (rows - 1) / 2) * step);
 }
 
-/* How tall the cards of the map are: taller for the turn strip while any department works in the turn, and taller still
-   when the words of a card need it. */
-const cardHeight = (org: Org, need: number): number => grownTo(workingTurns(org.departments).length ? DEPT_H_TURN : DEPT_H, need);
+/* How tall the cards of the map are: taller for the turn strip while any department works in the turn, and as tall as the
+   words of one need, as measured on the screen. */
+const cardHeight = (org: Org, need: number): number => Math.max(workingTurns(org.departments).length ? DEPT_H_TURN : DEPT_H, need);
 
 /* Departments fill the left and right columns in turn, top row first. A row level with the hub runs straight out; the others
    run out under the hub, turn up or down beside it and come into the near side of their card, all at right angles. */
-export function deptLayout(n: number, h = DEPT_H): DeptSpot[] {
-  const offsets = rowOffsets(Math.ceil(n / 2), h);
+export function deptLayout(n: number, h = DEPT_H, room = NO_ROOM): DeptSpot[] {
+  const offsets = rowOffsets(Math.ceil(n / 2), h, room);
   return Array.from({ length: n }, (_, i) => {
     const side = i % 2 ? 1 : -1;
     const midY = CY + offsets[Math.floor(i / 2)]!;
@@ -55,11 +62,11 @@ export function deptLayout(n: number, h = DEPT_H): DeptSpot[] {
   });
 }
 
-/* The people sit just above the top row, and their bus runs 14 below them. */
-function chipsTop(n: number, h = DEPT_H): number {
-  return CY + Math.min(-CORNER, rowOffsets(Math.ceil(n / 2), h)[0] ?? -CORNER) - h / 2 - GAP - CHIP_H;
+/* The people sit just above the top row, ch tall, and their bus runs 14 below them. */
+function chipsTop(n: number, h = DEPT_H, room = NO_ROOM, ch = CHIP_H): number {
+  return CY + Math.min(-CORNER, rowOffsets(Math.ceil(n / 2), h, room)[0] ?? -CORNER) - h / 2 - GAP - ch;
 }
-export const busY = (n: number, h = DEPT_H) => chipsTop(n, h) + CHIP_H + 14;
+export const busY = (n: number, h = DEPT_H, room = NO_ROOM, ch = CHIP_H) => chipsTop(n, h, room, ch) + ch + 14;
 const chipCenters = (n: number) => rowCenters(n, CHIP_W, CHIP_GAP);
 
 /* A block of the map, as a person's arrangement names it. */
@@ -78,6 +85,9 @@ export const routeKey = (personId: string, deptId: string) => `${personKey(perso
 export type Bends = Record<string, Point[]>;
 /* A line a person may bend: its name, its points as drawn, and the blocks it joins, the people's row named as its line. */
 export type MapLine = { key: string; pts: Point[]; ends: [string, string] };
+/* How tall the chip of the most words needs to be, as measured on the screen: in the whole-company row and among the
+   department people. A chip is never shorter than it was before its words wrapped. */
+export type ChipNeed = { top?: number; dept?: number };
 
 export type Block = { key: string; rect: Rect };
 /* via: the dot where the trace turns towards its card, on the trace the map draws itself. */
@@ -138,10 +148,16 @@ type Bendable = { key: string; from: Rect; to: Rect; ends: string[]; home: boole
    places it. A moved block keeps its lines at right angles: a line whose ends stand as placed keeps its way unless a moved
    block now stands across it; any other is routed again, around the blocks in its way. A person docked beside a department
    goes with it. A line the person bent runs through its bends, and the others join it where they run beside it. need: how
-   tall the card with the most words needs to be, as the map measured it. */
-export function arrangeMap(org: Org, placed: Placed = {}, bends: Bends = {}, need = 0): MapArrangement {
-  const n = org.departments.length, h = cardHeight(org, need);
-  const spots = deptLayout(n, h);
+   tall the card of the most words needs to be; chipNeed: how tall the chips of the most words need to be. Every chip of a
+   row takes that height, in whole pixels; the cards grow to the chips docked beside one, and the rows move apart for a chip
+   between two cards of a column. */
+export function arrangeMap(org: Org, placed: Placed = {}, bends: Bends = {}, need = 0, chipNeed: ChipNeed = {}): MapArrangement {
+  const n = org.departments.length, ch = Math.max(CHIP_H, Math.ceil(chipNeed.top ?? 0)), ph = Math.max(PH, Math.ceil(chipNeed.dept ?? 0));
+  const deptPeople = departmentPeople(org);
+  const spotOf = (all: DeptSpot[]) => org.departments.map((d, i) => ({ id: d.id, ...all[i]! }));
+  const words = cardHeight(org, need), room = dockedRoom(spotOf(deptLayout(n, words)), deptPeople, ph);
+  const h = Math.max(words, room.stack);
+  const spots = deptLayout(n, h, room);
   const hubHome = { x: CX - HUB, y: CY - HUB, w: 2 * HUB, h: 2 * HUB };
   const hub = placedAt(placed, HUB_KEY, hubHome);
   const hubMoved = !samePlace(hub, hubHome);
@@ -154,13 +170,13 @@ export function arrangeMap(org: Org, placed: Placed = {}, bends: Bends = {}, nee
   const deptById = new Map(org.departments.map((d, i) => [d.id, depts[i]!]));
 
   const topPeople = wholeCompanyPeople(org);
-  const top = chipsTop(n, h), bus = busY(n, h), centers = chipCenters(topPeople.length);
+  const top = chipsTop(n, h, room, ch), bus = busY(n, h, room, ch), centers = chipCenters(topPeople.length);
   const tops: (Placing & { id: string })[] = topPeople.map((p, i) => {
-    const home = { x: centers[i]! - CHIP_W / 2, y: top, w: CHIP_W, h: CHIP_H };
+    const home = { x: centers[i]! - CHIP_W / 2, y: top, w: CHIP_W, h: ch };
     return { id: p.id, key: personKey(p.id), home, rect: placedAt(placed, personKey(p.id), home) };
   });
 
-  const base = peopleLayout(org.departments.map((d, i) => ({ id: d.id, ...spots[i]! })), departmentPeople(org));
+  const base = peopleLayout(spotOf(spots), deptPeople, ph);
   const routesOf = (id: string) => base.routes.filter(r => r.personId === id);
   /* A person docked beside one department goes where it goes. */
   const chips: (Placing & { id: string; home: PersonChip; rect: PersonChip })[] = base.chips.map(c => {
@@ -190,7 +206,7 @@ export function arrangeMap(org: Org, placed: Placed = {}, bends: Bends = {}, nee
      reaches, and goes around a block moved into its way. */
   const stay = tops.filter(t => samePlace(t.rect, t.home));
   const xs = stay.map(t => t.rect.x + CHIP_W / 2);
-  const under = (x: number): Point => [x, top + CHIP_H];
+  const under = (x: number): Point => [x, top + ch];
   let arrangedBus: Bus | null = null;
   let fromHub: Point[] = [];
   if (xs.length) {

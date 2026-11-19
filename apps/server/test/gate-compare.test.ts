@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readCompare, readMerged, readTree } from '../src/modules/testruns/compare.js';
+import { heldLineage, readCompare, readMerged, readTree, treePaths } from '../src/modules/testruns/compare.js';
+import { exactComparison } from '../src/modules/tasks/review-context.js';
+import { branchHolds } from '../src/modules/tasks/turn-integration.js';
 
 const sha = 'a'.repeat(40);
 const fixture = (files: { filename: string; previous_filename?: string; patch?: string; additions: number; deletions: number }[] = [{ filename: 'src/view.ts', patch: '+const title = "Saved";', additions: 1, deletions: 0 }]) => ({ base_commit: { sha: 'b'.repeat(40) }, commits: [{ sha }], total_commits: 1, status: 'ahead', files });
@@ -36,6 +38,46 @@ describe('trusted repository comparison', () => {
     const body = Object.keys(change).length ? { ...fixture(), ...change } : {};
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))));
     expect(await readCompare(repo, { base: 'main', head: 'turn-8' })).toMatchObject({ complete: false });
+  });
+
+  it('never reads a file list GitHub capped at 300 as clean, yet proves by its status and commits that the head holds the base', async () => {
+    const files = Array.from({ length: 300 }, (_, i) => ({ filename: `src/${i}.ts`, patch: '+x', additions: 1, deletions: 0 }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(fixture(files)))));
+    const read = await readCompare(repo, { base: 'main', head: 'turn-8' });
+    expect(read).toEqual({ complete: false, reason: 'too-many-files', lineage: { baseSha: 'b'.repeat(40), headSha: sha, commits: [{ sha, parents: [] }] } });
+    expect(exactComparison(read, 'b'.repeat(40), sha)).toBe(false);
+    expect(heldLineage(read, 'b'.repeat(40), sha)).toEqual({ baseSha: 'b'.repeat(40), headSha: sha, commits: [{ sha, parents: [] }] });
+    /* The commits it proves are those of the two named commits, never of others. */
+    expect(heldLineage(read, sha, sha)).toBeNull();
+    expect(heldLineage(read, 'b'.repeat(40), 'c'.repeat(40))).toBeNull();
+  });
+
+  it('reads every commit of a long comparison whose files GitHub capped, and proves nothing where the commits are short', async () => {
+    const files = Array.from({ length: 300 }, (_, i) => ({ filename: `src/${i}.ts`, patch: '+x', additions: 1, deletions: 0 }));
+    const page1 = Array.from({ length: 250 }, () => ({ sha: '1'.repeat(40), parents: [{ sha: 'b'.repeat(40) }] }));
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith('&page=2')
+      ? { commits: [{ sha, parents: [{ sha: '1'.repeat(40) }] }], total_commits: 251 }
+      : { ...fixture(files), commits: page1, total_commits: 251 }))));
+    const read = await readCompare(repo, { base: 'main', head: 'turn-8' });
+    expect(read).toMatchObject({ complete: false, reason: 'too-many-files', lineage: { baseSha: 'b'.repeat(40), headSha: sha } });
+    expect(!read.complete && read.lineage?.commits?.length).toBe(251);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...fixture(files), commits: page1, total_commits: 251 }))));
+    expect(await readCompare(repo, { base: 'main', head: 'turn-8' })).toEqual({ complete: false, reason: 'incomplete-comparison' });
+  });
+
+  it('proves the line of a comparison whose patch GitHub cut short, but takes none of its files', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(fixture([{ filename: 'a.ts', patch: '+cut', additions: 10, deletions: 0 }])))));
+    const read = await readCompare(repo, { base: 'main', head: 'turn-8' });
+    expect(read).toEqual({ complete: false, reason: 'incomplete-comparison', lineage: { baseSha: 'b'.repeat(40), headSha: sha, commits: [{ sha, parents: [] }] } });
+    expect('paths' in read).toBe(false);
+  });
+
+  it.each(['behind', 'diverged'])('proves no line for a %s comparison with a capped file list', async status => {
+    const files = Array.from({ length: 300 }, (_, i) => ({ filename: `src/${i}.ts`, patch: '+x', additions: 1, deletions: 0 }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...fixture(files), status }))));
+    const read = await readCompare(repo, { base: 'main', head: 'turn-8' });
+    expect(read).toEqual({ complete: false, reason: 'not-an-ancestor' });
+    expect(heldLineage(read, 'b'.repeat(40), sha)).toBeNull();
   });
 
   it('pins an identical comparison and fails closed when a non-identical result names no head commit', async () => {
@@ -128,5 +170,26 @@ describe('a GitHub answer past its size', () => {
       expect(await read()).toEqual(want);
       expect(answer.pulled()).toBeLessThanOrEqual(CAP + 4 * 1024 * 1024);
     }
+  });
+});
+
+describe("a commit's files with what each holds", () => {
+  it('names the mode, kind and content of every file and submodule, and only where GitHub names them all', () => {
+    const tree = [{ path: 'apps', type: 'tree', mode: '040000', sha: '1'.repeat(40) }, { path: 'apps/a.ts', type: 'blob', mode: '100644', sha: '2'.repeat(40) }, { path: 'vendor/lib', type: 'commit', mode: '160000', sha: '3'.repeat(40) }];
+    expect(treePaths({ truncated: false, tree })).toEqual({ complete: true, paths: ['apps/a.ts'],
+      entries: [{ path: 'apps/a.ts', type: 'blob', mode: '100644', sha: '2'.repeat(40) }, { path: 'vendor/lib', type: 'commit', mode: '160000', sha: '3'.repeat(40) }] });
+    expect(treePaths({ truncated: false, tree: [{ path: 'apps/a.ts', type: 'blob' }] })).toEqual({ complete: true, paths: ['apps/a.ts'] });
+    expect(treePaths({ truncated: true, tree })).toEqual({ complete: false, reason: 'incomplete-tree' });
+  });
+});
+
+describe('a branch holds a commit, however many files lie between them', () => {
+  const at = { url: 'https://github.com/acme/shop.git', branch: 'main', token: '' };
+  const capped = (base: string, head: string) => ({ complete: false as const, reason: 'too-many-files', lineage: { baseSha: base, headSha: head, commits: [] } });
+  it('takes the line of a capped comparison where GitHub could not say by status, and nothing else', async () => {
+    const head = 'c'.repeat(40);
+    expect(await branchHolds({ readMerged: async () => null, readCompare: async (_repo, refs) => capped(refs.base, refs.head) }, at, head, sha)).toBe(true);
+    expect(await branchHolds({ readMerged: async () => null, readCompare: async () => capped(sha, 'd'.repeat(40)) }, at, head, sha)).toBe(false);
+    expect(await branchHolds({ readMerged: async () => null, readCompare: async () => ({ complete: false, reason: 'not-an-ancestor' }) }, at, head, sha)).toBe(false);
   });
 });

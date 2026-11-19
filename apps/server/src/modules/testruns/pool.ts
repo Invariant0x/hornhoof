@@ -7,15 +7,15 @@ import { agents, machines, people, tasks, testParts, testRuns } from '../../db/s
 import { builtinOf, nodeIdentity, ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { builtinName } from '../nodes/builtin.js';
 import { builtinMachine, shownMachine } from '../nodes/nodes.js';
-import { availableMemory } from './capacity.js';
-import { machineNodes, machineState, together } from './load.js';
+import { computerKey, runBlock, type RunBlock } from './capacity.js';
+import { machineNodes, machineState, productPlaces, together } from './load.js';
+import { needOf, partBudget, type PartNeed } from './part-budget.js';
 import { loaded } from './pick.js';
-import { browserHeldRun, commandFor, lostLine, needOf, placesOf, reaches, targetOf, type Place } from './runs.js';
+import { browserHeldRun, commandFor, lostLine, placesOf, reaches, targetOf, type Place } from './runs.js';
 
 type Run = typeof testRuns.$inferSelect;
 type Row = { part: typeof testParts.$inferSelect; run: Run; task: number; agent: string };
 
-const GIB = 1024 ** 3;
 /* The pool shows what runs, not how: a longer command is cut. */
 const SHOWN_COMMAND = 200;
 /* Machines named for one reason a part waits; the rest are counted. */
@@ -46,8 +46,25 @@ async function targetIn(ctx: Ctx, targets: Targets, run: Run) {
   return targets.get(run.id)!;
 }
 
+function whyNoRoom(places: Place[], need: PartNeed, memoryGb: number, limit?: number): string {
+  const reasons: Record<RunBlock, string[]> = { node: [], memory: [], cores: [], limit: [] };
+  for (const place of places) {
+    const block = runBlock(place, need, limit);
+    if (block === null) return 'A machine is free for it: it goes out in a moment.';
+    reasons[block].push(place.name);
+  }
+  return [
+    reasons.node.length ? `The node's test user is busy: ${names(reasons.node)}.` : '',
+    reasons.memory.length ? `Short of the ${memoryGb} GB of free memory it needs: ${names(reasons.memory)}.` : '',
+    reasons.cores.length ? `Short of free cores (needs ${need.cores}): ${names(reasons.cores)}.` : '',
+    reasons.limit.length ? `At the configured limit of ${limit} parts: ${names(reasons.limit)}.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 /* Why no machine took a waiting part in the last round, from the machines online now. */
-async function whyWaits(ctx: Ctx, places: Place[], run: Run, targets: Targets): Promise<string> {
+async function whyWaits(ctx: Ctx, places: Place[], { run, part }: Row, targets: Targets): Promise<string> {
   const target = await targetIn(ctx, targets, run);
   if (!target) return 'Its repository is gone: it ends with the next round.';
   const heldReason = await browserHeldRun(ctx, run.companyId, places, run, target.department);
@@ -58,21 +75,12 @@ async function whyWaits(ctx: Ctx, places: Place[], run: Run, targets: Targets): 
   if (!reach.length) return `No lent machine online belongs to someone who reaches ${target.department ? 'its department' : 'the whole company'}.`;
   const able = run.kind === 'work' ? reach.filter(p => p.works) : reach;
   if (!able.length) return 'The lent machines online that may take it run a node too old for work: update their node.';
-  const need = needOf(run, target.department);
-  const [busy, hot, short]: string[][] = [[], [], []];
-  for (const p of able) {
-    if (p.busy) busy.push(p.name);
-    else if (p.load && loaded(p.load)) hot.push(p.name);
-    else if (!p.load || availableMemory(p.load) < need * GIB) short.push(p.name);
-    else return 'A machine is free for it: it goes out in a moment.';
-  }
-  return [
-    busy.length ? `Running another part: ${names(busy)}.` : '',
-    hot.length ? `Loaded: ${names(hot)}.` : '',
-    short.length ? `Short of the ${need} GB of free memory it needs: ${names(short)}.` : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const memoryGb = needOf(run, target.department);
+  const need = partBudget(memoryGb, run.environmentSnapshot?.description.manifest, part.environmentSelection?.selection);
+  const candidates = await productPlaces(ctx, able, run, need.memoryBytes);
+  if (!candidates.length) return 'No lent machine online has the test runtimes this part needs.';
+  const planned = part.lost.length ? [] : candidates.filter(place => computerKey(place) === part.environmentSelection?.computer);
+  return whyNoRoom(planned.length ? planned : candidates, need, memoryGb, ctx.config.runsPerHost);
 }
 
 /* The company's machines, each with how busy it is and the parts of runs it runs, the built-in node, and the parts that
@@ -110,7 +118,7 @@ export async function poolOf(ctx: Ctx, who: Person) {
   const targets = new Map<string, Awaited<ReturnType<typeof targetOf>>>();
   const waiting = [];
   for (const row of whole ? open.filter(r => r.part.status === 'queued') : []) {
-    waiting.push({ ...view(row), waitingSince: row.part.queuedAt.toISOString(), why: await whyWaits(ctx, places, row.run, targets) });
+    waiting.push({ ...view(row), waitingSince: row.part.queuedAt.toISOString(), why: await whyWaits(ctx, places, row, targets) });
   }
   const own = ownBuiltin(ctx.config);
   const builtinLoad = loadOf([own]);

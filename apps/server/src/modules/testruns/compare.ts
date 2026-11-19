@@ -6,12 +6,18 @@ import { bodyWithin } from './bounded.js';
 type OmittedPatch = { path: string; additions: number; deletions: number };
 /* A commit between the two, with the commits it was made on: a merge has two or more. */
 type ComparedCommit = { sha: string; parents: string[] };
-export type CompareResult = { complete: true; baseSha: string; headSha: string; paths: string[]; diff: string; omitted?: OmittedPatch[]; commits?: ComparedCommit[] } | { complete: false; reason: string };
+/* What a comparison proves however many files it lists: that head holds base, and every commit between them. */
+type Lineage = { baseSha: string; headSha: string; commits?: ComparedCommit[] };
+/* A comparison GitHub could not list whole names no paths. Where its status and commits still prove the line, it keeps that
+   lineage, which proves no change of any file. */
+export type CompareResult = { complete: true; baseSha: string; headSha: string; paths: string[]; diff: string; omitted?: OmittedPatch[]; commits?: ComparedCommit[] } | { complete: false; reason: string; lineage?: Lineage };
 export type CompareReader = (repo: RepoAddress, refs: { base: string; head: string }, timeoutMs?: number) => Promise<CompareResult>;
 const Sha = z.string().regex(/^[a-f0-9]{40}$/);
 const File = z.object({ filename: z.string().min(1), previous_filename: z.string().optional(), patch: z.string().optional(), additions: z.number().int().nonnegative(), deletions: z.number().int().nonnegative() });
 const Commit = z.object({ sha: Sha, parents: z.array(z.object({ sha: Sha })).default([]) });
-const Comparison = z.object({ base_commit: z.object({ sha: Sha }), commits: z.array(Commit), total_commits: z.number().int().nonnegative(), status: z.enum(['ahead', 'behind', 'diverged', 'identical']), files: z.array(File).max(299) });
+const Comparison = z.object({ base_commit: z.object({ sha: Sha }), commits: z.array(Commit), total_commits: z.number().int().nonnegative(), status: z.enum(['ahead', 'behind', 'diverged', 'identical']), files: z.array(File) });
+/* GitHub lists at most this many files of a comparison, so a list this long may be cut short. */
+const FILES_LISTED = 300;
 const MoreCommits = z.object({ commits: z.array(Commit), total_commits: z.number().int().nonnegative() });
 /* GitHub lists at most this many commits on a page of a comparison, and the server reads no more pages than this. */
 const COMMITS_PER_PAGE = 250;
@@ -37,10 +43,6 @@ function completePatch(file: z.infer<typeof File>): boolean {
   return lines.filter(line => line.startsWith('+')).length === file.additions && lines.filter(line => line.startsWith('-')).length === file.deletions;
 }
 
-function completeInventory(data: z.infer<typeof Comparison>): boolean {
-  return data.total_commits === data.commits.length && data.files.every(completePatch);
-}
-
 function comparisonHead(data: z.infer<typeof Comparison>): string | null {
   return data.commits.at(-1)?.sha ?? (data.status === 'identical' ? data.base_commit.sha : null);
 }
@@ -52,16 +54,25 @@ function comparedPaths(file: z.infer<typeof File>): string[] {
 const patchOrName = (file: z.infer<typeof File>): string =>
   file.patch ?? `GitHub shows no patch of ${file.filename}: ${file.additions} lines added, ${file.deletions} removed.`;
 
+/* The line is proved by the status and every commit; the change only by a file list GitHub did not cap and whole patches. */
 function parsedComparison(body: unknown): CompareResult {
   const parsed = Comparison.safeParse(body);
-  if (!parsed.success || !completeInventory(parsed.data)) return { complete: false, reason: 'incomplete-comparison' };
+  if (!parsed.success || parsed.data.total_commits !== parsed.data.commits.length) return { complete: false, reason: 'incomplete-comparison' };
   const data = parsed.data;
   if (data.status !== 'ahead' && data.status !== 'identical') return { complete: false, reason: 'not-an-ancestor' };
   const headSha = comparisonHead(data);
   if (!headSha) return { complete: false, reason: 'incomplete-comparison' };
+  const lineage = { baseSha: data.base_commit.sha, headSha, commits: data.commits.map(commit => ({ sha: commit.sha, parents: commit.parents.map(parent => parent.sha) })) };
+  if (data.files.length >= FILES_LISTED) return { complete: false, reason: 'too-many-files', lineage };
+  if (!data.files.every(completePatch)) return { complete: false, reason: 'incomplete-comparison', lineage };
   const omitted = data.files.filter(file => file.patch === undefined).map(file => ({ path: file.filename, additions: file.additions, deletions: file.deletions }));
-  return { complete: true, baseSha: data.base_commit.sha, headSha, paths: data.files.flatMap(comparedPaths), diff: data.files.map(patchOrName).join('\n'), omitted,
-    commits: data.commits.map(commit => ({ sha: commit.sha, parents: commit.parents.map(parent => parent.sha) })) };
+  return { complete: true, ...lineage, paths: data.files.flatMap(comparedPaths), diff: data.files.map(patchOrName).join('\n'), omitted };
+}
+
+/* That head holds base, as a whole comparison of the two proves it, or one whose files GitHub listed only in part. */
+export function heldLineage(result: CompareResult, base: string, head: string): Lineage | null {
+  const lineage = result.complete ? result : result.lineage;
+  return lineage?.baseSha === base && lineage.headSha === head ? lineage : null;
 }
 
 /* GitHub's answers are read no further than this, as a repository's refs are: a larger one is too large to take. */
@@ -99,8 +110,8 @@ async function laterCommits(repo: RepoAddress, path: string, first: z.infer<type
   return commits;
 }
 
-/* GitHub caps comparisons at 300 files and may omit a large/binary patch. A cap or
-   missing lines mean unknown, never a clean diff. Every commit between the two is read, page by page. */
+/* GitHub caps comparisons at 300 files and may omit a large/binary patch. A cap or missing lines mean an unknown change,
+   never a clean diff, though the line may still be proved. Every commit between the two is read, page by page. */
 export const readCompare: CompareReader = async (repo, refs, timeoutMs = 10_000) => {
   try {
     const path = `compare/${encodeURIComponent(refs.base)}...${encodeURIComponent(refs.head)}?per_page=${COMMITS_PER_PAGE}`;
@@ -131,15 +142,19 @@ export const readMerged: MergeReader = async (repo, refs, timeoutMs = 10_000) =>
   } catch { return null; }
 };
 
-/* The files of a commit, every one: GitHub cuts a long list short and says so, and a cut list is no list. */
-type TreeAt = { complete: true; paths: string[] } | { complete: false; reason: string };
+/* The files of a commit, every one: GitHub cuts a long list short and says so, and a cut list is no list. entries names what
+   each file and submodule holds, its mode and content, where GitHub named that for every one. */
+type TreeEntry = { path: string; type: string; mode: string; sha: string };
+export type TreeAt = { complete: true; paths: string[]; entries?: TreeEntry[] } | { complete: false; reason: string };
 export type TreeReader = (repo: RepoAddress, commitSha: string, timeoutMs?: number) => Promise<TreeAt>;
-const Tree = z.object({ truncated: z.boolean(), tree: z.array(z.object({ path: z.string().min(1), type: z.string() })) });
+const Tree = z.object({ truncated: z.boolean(), tree: z.array(z.object({ path: z.string().min(1), type: z.string(), mode: z.string().min(1).optional(), sha: z.string().min(1).optional() })) });
 
 export function treePaths(body: unknown): TreeAt {
   const parsed = Tree.safeParse(body);
   if (!parsed.success || parsed.data.truncated) return { complete: false, reason: 'incomplete-tree' };
-  return { complete: true, paths: parsed.data.tree.filter(entry => entry.type === 'blob').map(entry => entry.path) };
+  const paths = parsed.data.tree.filter(entry => entry.type === 'blob').map(entry => entry.path);
+  const entries = parsed.data.tree.filter(entry => entry.type !== 'tree').map(({ path, type, mode, sha }) => mode && sha ? { path, type, mode, sha } : null);
+  return entries.every((entry): entry is TreeEntry => entry !== null) ? { complete: true, paths, entries } : { complete: true, paths };
 }
 
 export const readTree: TreeReader = async (repo, commitSha, timeoutMs = 10_000) => {

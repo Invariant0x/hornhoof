@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { LANGUAGES, type Language } from '../src/i18n/index';
 import { ru } from '../src/i18n/ru';
@@ -75,6 +75,16 @@ async function turned(page: Page, rtl: boolean) {
 
 type Box = { x: number; y: number; width: number; height: number };
 type Bar = Box & { what: string; onTop: boolean };
+
+/* Where one part of the page stands, read once the state it belongs to has come: a part that is not on the page then, or
+   is on it more than once, fails the test at once and names itself. A wait for it would wait as long as the run lets it,
+   as a box of the map did once the map's workspace was gone. */
+async function boxOf(locator: Locator, what: string): Promise<Box> {
+  expect(await locator.count(), `${what} is on the page once`).toBe(1);
+  const box = await locator.boundingBox();
+  expect(box, `${what} takes room on the page`).not.toBeNull();
+  return box!;
+}
 const meet = (a: Box, b: Box) => a.x < b.x + b.width - 0.5 && b.x < a.x + a.width - 0.5 && a.y < b.y + b.height - 0.5 && b.y < a.y + a.height - 0.5;
 
 /* What stands where: the parts of the header on screen (the mark gives its place to the tabs on a phone), every bar of
@@ -168,8 +178,8 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     expect(await page.getByRole('alert').count()).toBe(0);
     /* The open map starts after the panel, so the panel cannot cover a map control. */
     expect(rowsHold(await places(page, t), width)).toEqual([]);
-    const mapBox = (await page.locator('.map-workspace').boundingBox())!;
-    const panelBox = (await panel.boundingBox())!;
+    const mapBox = await boxOf(page.locator('.map'), 'the map');
+    const panelBox = await boxOf(panel, 'the update panel');
     expect(mapBox.y).toBeGreaterThanOrEqual(panelBox.y + panelBox.height - 0.5);
     expect(problems).toEqual([]);
   });
@@ -219,7 +229,7 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     await turned(page, rtl);
     const people = await places(page, t);
     expect(rowsHold(people, width)).toEqual([]);
-    const top = (await heading.boundingBox())!;
+    const top = await boxOf(heading, 'the heading of People');
     expect(top.y, 'the heading stands under the panel').toBeGreaterThanOrEqual(people.bars[0]!.y + people.bars[0]!.height - 0.5);
     if (pictured) await shot(page, info.outputPath(`failure-people-${name.replaceAll(' ', '-')}.png`));
     /* Scrolled, the page and its bars pass under the band at the top, never over it: nothing shows around the glass
@@ -246,7 +256,7 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     await turned(page, rtl);
     const tasks = await places(page, t);
     expect(rowsHold(tasks, width)).toEqual([]);
-    expect((await tracker.boundingBox())!.y, 'the tracker stands under the panel').toBeGreaterThanOrEqual(tasks.bars[0]!.y + tasks.bars[0]!.height - 0.5);
+    expect((await boxOf(tracker, 'the tracker')).y, 'the tracker stands under the panel').toBeGreaterThanOrEqual(tasks.bars[0]!.y + tasks.bars[0]!.height - 0.5);
 
     for (const [tab, title] of [['machines', t.machines.heading], ['subscriptions', t.subs.heading]] as const) {
       await sections.getByRole('button', { name: t.shell.tabs[tab], exact: true }).click();
@@ -257,7 +267,7 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
       await turned(page, rtl);
       const screen = await places(page, t);
       expect(rowsHold(screen, width)).toEqual([]);
-      expect((await heading.boundingBox())!.y).toBeGreaterThanOrEqual(screen.bars[0]!.y + screen.bars[0]!.height - 0.5);
+      expect((await boxOf(heading, `the heading of ${tab}`)).y).toBeGreaterThanOrEqual(screen.bars[0]!.y + screen.bars[0]!.height - 0.5);
     }
     expect(problems).toEqual([]);
   });

@@ -1,4 +1,4 @@
-import type { Department, DeptRole, Employee, Org } from '../src/types';
+import type { Department, DeptRole, Employee, Org, PersonView } from '../src/types';
 import { taskRoute } from '../test/task-route';
 import { ME } from './api';
 
@@ -6,6 +6,9 @@ import { ME } from './api';
    translation and right to left Arabic, plus Japanese for a script with no spaces. Pseudo strings only test the rule; they
    are not translations. */
 export type Script = 'en' | 'ru' | 'pseudo' | 'cjk' | 'rtl';
+
+/* A person of the map: a name and a title; with no title the map says in its place what the person looks after. */
+type Who = [name: string, title: string];
 
 type Words = {
   depts: [string, string, string, string];
@@ -16,6 +19,11 @@ type Words = {
   roles: { head: string; dev: string; devAbout: string; review: string; reviewAbout: string; test: string; testAbout: string };
   people: [string, string, string, string];
   memberTask: string;
+  /* The map's people chips: the whole-company row on top, one person beside the second department and two beside the fourth,
+     and three deputies, two placed under the lowest row and one between the two cards of the right column. */
+  leaders: [Who, Who, Who];
+  deptPeople: [Who, Who, Who];
+  deputies: [Who, Who, Who];
 };
 
 const ACCENTS: Record<string, string> = {
@@ -37,6 +45,9 @@ const EN: Words = {
   roles: { head: 'Head of development', dev: 'Developer', devAbout: 'Writes the code and its tests.', review: 'Code reviewer', reviewAbout: 'Reads every change.', test: 'Test engineer', testAbout: 'Checks the turn.' },
   people: ['Bruno', 'Dina', 'Rita', 'Tom'],
   memberTask: 'Card form',
+  leaders: [['Mira', 'CEO'], ['Oskar', ''], ['Lena', 'Finance']],
+  deptPeople: [['Ivo', ''], ['Nora', 'Support lead'], ['Pavel', '']],
+  deputies: [['Sana', 'Partners'], ['Teo', 'Operations'], ['Alma', 'Customers']],
 };
 
 const RU: Words = {
@@ -48,6 +59,9 @@ const RU: Words = {
   roles: { head: 'Глава разработки', dev: 'Разработчик', devAbout: 'Пишет код и тесты к нему.', review: 'Ревьюер кода', reviewAbout: 'Читает каждое изменение.', test: 'Инженер по тестированию', testAbout: 'Проверяет ход.' },
   people: ['Бруно', 'Дина', 'Рита', 'Том'],
   memberTask: 'Форма карты',
+  leaders: [['Мира', 'Генеральный директор'], ['Оскар', ''], ['Лена', 'Финансы']],
+  deptPeople: [['Иво', ''], ['Нора', 'Ведущая поддержки'], ['Павел', '']],
+  deputies: [['Сана', 'Партнеры'], ['Тео', 'Операционный отдел'], ['Альма', 'Клиенты']],
 };
 
 const LONG: Words = {
@@ -72,6 +86,9 @@ const LONG: Words = {
   },
   people: [`${pseudo('Bruno')} ${LONG_WORD}`, pseudo('Dina Vasilievna'), pseudo('Rita'), pseudo('Tom')],
   memberTask: pseudo('Card form that checks the number and the date before it sends them'),
+  leaders: [[`${pseudo('Mira Konstantinova')} ${LONG_WORD}`, pseudo('Chief executive officer')], [pseudo('Oskar'), ''], [pseudo('Lena'), pseudo('Finance and accounting')]],
+  deptPeople: [[pseudo('Ivo'), ''], [pseudo('Nora Vasilievna'), `${pseudo('Support lead')} ${LONG_WORD}`], [pseudo('Pavel'), '']],
+  deputies: [[pseudo('Sana'), pseudo('Partners and resellers')], [pseudo('Teo'), pseudo('Operations')], [pseudo('Alma'), pseudo('Customers and their contracts')]],
 };
 
 const CJK: Words = {
@@ -83,6 +100,9 @@ const CJK: Words = {
   roles: { head: '開発部長', dev: '決済の開発者と領収書の担当者', devAbout: '決済のコードとそのテストを書きます。', review: 'コードレビュー担当', reviewAbout: 'すべての変更を読みます。', test: 'テスト担当', testAbout: 'リリース前にすべてのマシンで確認します。' },
   people: ['ブルーノ', 'ディナ', 'リタ', 'トム'],
   memberTask: 'カード番号と日付を送信前に確認するカードフォーム',
+  leaders: [['ミラ', '最高経営責任者'], ['オスカー', ''], ['レナ', '財務と経理の責任者']],
+  deptPeople: [['イヴォ', ''], ['ノラ', 'サポートチームのリーダー'], ['パヴェル', '']],
+  deputies: [['サナ', 'パートナーと販売代理店'], ['テオ', '業務運営'], ['アルマ', '顧客と契約の担当者']],
 };
 
 const RTL: Words = {
@@ -94,6 +114,9 @@ const RTL: Words = {
   roles: { head: 'رئيس التطوير', dev: 'مطور أنظمة الدفع', devAbout: 'يكتب الشيفرة واختباراتها.', review: 'مراجع الشيفرة', reviewAbout: 'يقرأ كل تغيير.', test: 'مهندس الاختبار', testAbout: 'يفحص الدورة قبل إصدارها.' },
   people: ['برونو', 'دينا', 'ريتا', 'توم'],
   memberTask: 'نموذج البطاقة الذي يفحص الرقم والتاريخ قبل إرسالهما',
+  leaders: [['ميرا', 'الرئيسة التنفيذية'], ['أوسكار', ''], ['لينا', 'المالية والمحاسبة']],
+  deptPeople: [['إيفو', ''], ['نورا', 'قائدة فريق الدعم'], ['بافل', '']],
+  deputies: [['سنا', 'الشركاء والموزعون'], ['تيو', 'العمليات'], ['ألما', 'العملاء وعقودهم']],
 };
 
 export const WORDS: Record<Script, Words> = { en: EN, ru: RU, pseudo: LONG, cjk: CJK, rtl: RTL };
@@ -113,6 +136,12 @@ const employee = (id: string, name: string, roleId: string, over: Partial<Employ
 });
 
 const NOW = '2026-11-05T12:00:00.000Z';
+
+/* Someone of the map with no decisions waiting, seeing the whole company unless the department list says what they reach. */
+const person = (id: string, [name, title]: Who, departments: { id: string; name: string }[] = []): PersonView => ({
+  id, name, email: `${id}@example.com`, title, status: 'active', isOwner: false, pendingDecisions: null,
+  access: { whole: !departments.length, departments, teams: [] },
+});
 
 /* A company of four departments; the first, d2 as the routes of the API fixture answer it, has a head and staff in three
    stages and works on a task. */
@@ -137,11 +166,22 @@ export function wholeTextOrg(script: Script): Org {
     agents: { total: employees.length, working: employees.filter(e => e.status === 'working').length },
     products: [], teams: [], people: [], employees, roles: employees.length ? roles : [], workLines: [], reworkAt: null, ...more,
   });
+  /* The department people stand beside the second and the fourth department, so the first, whose screen the checks open,
+     keeps its own. */
+  const own = (i: number) => [{ id: `d${i + 2}`, name: w.depts[i]! }];
   const departments = [
     dept(0, staff, { products: w.products.split(/[,、،]\s*/).map((name, i) => ({ id: `p${i}`, name })), current: { id: 't12', number: 12, title: w.task } }),
-    dept(1, [employee('m1', w.people[1], 'R-DEV')], { current: { id: 't20', number: 20, title: w.memberTask } }),
+    dept(1, [employee('m1', w.people[1], 'R-DEV')], { current: { id: 't20', number: 20, title: w.memberTask }, people: [person('n1', w.deptPeople[0], own(1))] }),
     dept(2, []),
-    dept(3, [employee('s1', w.people[3], 'R-DEV')]),
+    dept(3, [employee('s1', w.people[3], 'R-DEV')], { people: [person('n2', w.deptPeople[1], own(3)), person('n3', w.deptPeople[2], own(3))] }),
   ];
-  return { company: ME.company, orchestrator: null, agents: { total: 7, working: 2 }, people: [], serverNow: NOW, departments };
+  /* Deputies reach the departments they look after by the list the map reads, and no department's screen by their access. */
+  const deputy = (id: string, who: Who, of: string[]) => ({ ...person(id, who, []), access: { whole: false, departments: [], teams: [] }, deputy: true, departments: of });
+  const people = [
+    ...w.leaders.map((who, i) => person(`l${i + 1}`, who)),
+    deputy('v1', w.deputies[0], ['d3', 'd4']),
+    deputy('v2', w.deputies[1], ['d4', 'd5']),
+    deputy('v3', w.deputies[2], ['d3', 'd5']),
+  ];
+  return { company: ME.company, orchestrator: null, agents: { total: 7, working: 2 }, people, serverNow: NOW, departments };
 }

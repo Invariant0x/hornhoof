@@ -83,12 +83,18 @@ describe('the simple task card', () => {
     expect(card.getAllByRole('button')).toHaveLength(4);
   });
 
-  it('draws the card as the mockup drawer over the tracker and the full screen on a phone', () => {
+  it('draws the card as the mockup drawer beside the tracker and the full screen on a phone', () => {
     const drawer = '.body.tracker-page ~ .acard.at-end';
-    expect.soft(decl(drawer, 'inline-size', '(min-width: 761px)')).toBe('460px');
+    expect.soft(decl(':root', '--tracker-card-size')).toBe('460px');
+    expect.soft(decl(':root', '--tracker-strips-room')).toBe('32px');
+    expect.soft(decl(drawer, 'inline-size', '(min-width: 761px)')).toBe('var(--tracker-card-size)');
     expect.soft(decl(drawer, 'inset-inline-end', '(min-width: 761px)')).toBe('0');
-    /* Minimized windows keep their strips at the right edge in reach beside it. */
-    expect.soft(decl('.shell:has(.agent-strips:not(:empty)) .body.tracker-page ~ .acard.at-end:dir(ltr)', 'inset-inline-end', '(min-width: 761px)')).toBe('32px');
+    /* The page ends where the card starts, so the work reflows beside it instead of running under it. */
+    expect.soft(decl('.body.tracker-page:has(~ .acard.at-end)', 'inset-inline-end', '(min-width: 761px)')).toBe('var(--tracker-card-size)');
+    /* Minimized windows keep their strips at the right edge in reach beside it, and the page ends before both. */
+    expect.soft(decl('.shell:has(.agent-strips:not(:empty)) .body.tracker-page ~ .acard.at-end:dir(ltr)', 'inset-inline-end', '(min-width: 761px)')).toBe('var(--tracker-strips-room)');
+    expect.soft(decl('.shell:has(.agent-strips:not(:empty)) .body.tracker-page:has(~ .acard.at-end):dir(ltr)', 'inset-inline-end', '(min-width: 761px)'))
+      .toBe('calc(var(--tracker-card-size) + var(--tracker-strips-room))');
     expect.soft(decl(drawer, 'border-inline-start', '(min-width: 761px)')).toBe('1px solid var(--line2)');
     expect.soft(decl(drawer, 'inset', '(max-width: 760px)')).toBe('68px 0 0');
     expect.soft(decl('.body.with-task .tracker', 'padding-inline-end', '(min-width: 1100px)')).toBeUndefined();
@@ -410,10 +416,11 @@ describe('a task', () => {
     const panel = await openTask(user);
     await openTaskAction(user, panel, language === 'ru' ? ru.tasks.details : en.tasks.details);
     const workflow = within(panel).getByRole('list', { name: language === 'ru' ? 'Маршрут задачи' : 'Task workflow' });
-    expect(within(workflow).getAllByRole('listitem').map(li => li.querySelector('b')!.textContent)).toEqual(['Architecture', 'Development', 'Review', 'Security', 'Tests']);
-    expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('Review');
+    const stages = language === 'ru' ? ['Архитектура', 'Разработка', 'Проверка', 'Безопасность', 'Тесты'] : ['Architecture', 'Development', 'Review', 'Security', 'Tests'];
+    expect(within(workflow).getAllByRole('listitem').map(li => li.querySelector('b')!.textContent)).toEqual(stages);
+    expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent(stages[2]!);
     expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent(language === 'ru' ? 'Исполнитель: Rita' : 'Owner: Rita');
-    expect(workflow).not.toHaveTextContent('Cleanup');
+    expect(workflow).not.toHaveTextContent(language === 'ru' ? 'Уборка лишнего' : 'Cleanup');
   });
 
   it('keeps submission evidence, verdicts and comments in the full log', async () => {
@@ -444,8 +451,8 @@ describe('a task', () => {
       log: [...TASK_DETAIL.log, { kind: 'started', text: '#9 is done, so it starts now.', data: {}, by: null, at: '2026-10-30T09:00:00.000Z' }],
     };
     for (const [lang, words] of [
-      ['en', { workflow: 'Task workflow', phase: 'Waiting for an owner', after: 'Waits for', started: 'Hornhoof started it once what it waited for was done' }],
-      ['ru', { workflow: 'Маршрут задачи', phase: 'Нужен исполнитель', after: 'Ждет', started: 'Hornhoof запустил ее, когда то, чего она ждала, было готово' }],
+      ['en', { workflow: 'Task workflow', stage: 'Development', phase: 'Waiting for an owner', after: 'Waits for', started: 'Hornhoof started it once what it waited for was done' }],
+      ['ru', { workflow: 'Маршрут задачи', stage: 'Разработка', phase: 'Нужен исполнитель', after: 'Ждет', started: 'Hornhoof запустил ее, когда то, чего она ждала, было готово' }],
     ] as const) {
       localStorage.setItem('hh-lang', lang);
       const user = userEvent.setup();
@@ -466,7 +473,7 @@ describe('a task', () => {
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
       await openTaskAction(user, panel, lang === 'ru' ? ru.tasks.details : en.tasks.details);
       const workflow = within(panel).getByRole('list', { name: words.workflow });
-      expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('Development');
+      expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent(words.stage);
       expect(within(panel).getByRole('status')).toHaveTextContent(words.phase);
       const links = within(panel).getByRole('region', { name: lang === 'ru' ? ru.tracker.card.relations : en.tracker.card.relations });
       expect(within(links).getByRole('link', { name: '#9 Pick a payment provider' })).toHaveAttribute('title', words.after);

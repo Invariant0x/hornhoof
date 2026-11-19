@@ -1,4 +1,4 @@
-import type { CheckQueueReply } from '@hornhoof/protocol';
+import type { CheckQueueReply, TestError } from '@hornhoof/protocol';
 import type { OperatorServerMessage, ProgramNodeMessage, ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import { CheckClient } from './check-client.js';
 import { configureCheckCommands, installCheckCommand, type CheckCommandGuard } from './check-command-runner.js';
@@ -70,18 +70,42 @@ export async function runQueuedPart(message: Parameters<typeof runTests>[0], run
 }
 
 async function watchPart(message: Parameters<typeof runTests>[0], runPart: typeof runTests, options: PartOptions, signal: AbortSignal): Promise<TestsDone> {
-  if (!message.silenceMs || !options.onSilent) return runPart(message, { ...options, signal });
-  const report = options.onSilent;
-  let armed = true;
-  const timer = setTimeout(() => { armed = false; report(); }, message.silenceMs);
-  timer.unref();
-  const stop = () => { armed = false; clearTimeout(timer); };
-  signal.addEventListener('abort', stop, { once: true });
+  if (message.silenceMs === undefined || signal.aborted) return runPart(message, { ...options, signal });
+  const test = message.kind !== 'work';
+  const clock = new AbortController();
+  const running = AbortSignal.any([signal, clock.signal]);
+  const quiet = quietClock(message.silenceMs, () => {
+    if (test) clock.abort('silent');
+    options.onSilent?.();
+  });
+  const upper = test && message.timeoutMs !== undefined
+    ? setTimeout(() => clock.abort('upper_limit'), message.timeoutMs).unref() : undefined;
+  const stop = () => { quiet.stop(); clearTimeout(upper); };
+  running.addEventListener('abort', stop, { once: true });
   try {
-    return await runPart(message, { ...options, signal, activity: () => { if (armed) timer.refresh(); } });
+    /* Browser preparation and other local children also see the part's stop through the inherited lease. */
+    const done = await withCheckSlot(partSignal => runPart(message, {
+      ...options, signal: partSignal, activity: quiet.activity,
+    }), { signal: running });
+    return clock.signal.aborted ? timedOut(done, clock.signal.reason as ClockError) : done;
   } finally {
-    stop(); signal.removeEventListener('abort', stop);
+    stop(); running.removeEventListener('abort', stop);
   }
+}
+
+function quietClock(ms: number, expire: () => void): { activity: () => void; stop: () => void } {
+  let armed = true;
+  const timer = setTimeout(() => { armed = false; expire(); }, ms).unref();
+  return {
+    activity: () => { if (armed) timer.refresh(); },
+    stop: () => { armed = false; clearTimeout(timer); },
+  };
+}
+
+type ClockError = Extract<TestError, 'silent' | 'upper_limit'>;
+function timedOut(done: TestsDone, error: ClockError): TestsDone {
+  const why = error === 'silent' ? 'The test part stopped after too long in silence.' : 'The test part reached its upper limit.';
+  return { ...done, ok: false, error, log: `${done.log.trimEnd()}\n${why}\n` };
 }
 
 /* No checkout exists at this boundary. Never authorize a script using files left by an older attempt. */

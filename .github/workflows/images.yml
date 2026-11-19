@@ -34,7 +34,9 @@ concurrency:
 jobs:
   # A passed test run leaves the status hornhoof/tests on the commit it checked: Hornhoof's own, or GitHub's through the
   # passed job below. With a success there, or on the second parent of a merge with the same tree, GitHub need not run
-  # the tests again; whatever it cannot tell, they run.
+  # the tests again. Nor does it for a release commit, which changes over its one parent only the versions
+  # `npm run release:version` writes and CHANGELOG.md, when that parent has a success and the release check, the one check
+  # that reads those files, passes on the commit in this job. Whatever it cannot tell, they run.
   # Without one, this job chooses the tests, as an author's check does (.hornhoof/author-check.md): those the change since
   # the nearest commit whose tests passed reaches. A change the selector cannot tell, or one that reaches every suite whole,
   # runs the whole suite, and so does a choice that fails.
@@ -219,20 +221,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      # Most pushes to main carry no new version: one whose version is out already builds nothing. A run by hand builds.
+      # A version is out once ghcr.io/invariant0x/hornhoof:<version> holds the images of this commit; its git tag alone
+      # does not say so, as it may come with main before anything is built. A push of a version that is out builds
+      # nothing; one whose tag or images belong to another commit stops with why. A run by hand builds.
+      # scripts/version-out.mjs says it for this job, the publish job and the release job alike.
       - id: fresh
         name: Look whether this version is out already
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EVENT: ${{ github.event_name }}
-        run: |
-          version=$(node -p "require('./package.json').version")
-          if [ "$EVENT" = push ] && gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$version" --silent 2> /dev/null; then
-            echo "Version $version is out already, so this push builds no images."
-            echo "version=out" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=new" >> "$GITHUB_OUTPUT"
-          fi
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/version-out.mjs images
       # The product version, the commit's title, how many database migrations the build carries, and the node build:
       # the last commit that changed the node image's files, which needs the whole history checked out above.
       - id: build
@@ -308,19 +305,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # Every push to main comes here, and most carry no new version: one whose version is out already moves nothing.
+      # A version whose images are published already moves nothing, by the same rule as the images job.
       - id: fresh
         name: Look whether this version is out already
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          version=$(node -p "require('./package.json').version")
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$version" --silent 2> /dev/null; then
-            echo "Version $version is out already, so this commit carries no new version and nothing moves."
-            echo "version=out" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=new" >> "$GITHUB_OUTPUT"
-          fi
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/version-out.mjs publish
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         if: ${{ steps.fresh.outputs.version == 'new' }}
         with:
@@ -392,17 +382,21 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - name: Create the version tag and release
+      # A version is released once its tag has a GitHub release. A tag that came with main on this commit gets its
+      # release here; a tag on another commit stops the job with why.
+      - id: fresh
+        name: Look whether this version is released already
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/version-out.mjs release
+      - name: Create the release, and its tag when it has none
+        if: ${{ steps.fresh.outputs.version == 'new' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           version=$(node -p "require('./package.json').version")
-          tag="v$version"
-          if git rev-parse --verify --quiet "refs/tags/$tag"; then
-            echo "$tag already exists; no new release."
-            exit 0
-          fi
           node scripts/release-notes.mjs "$version" > "$RUNNER_TEMP/release-notes.md"
-          gh release create "$tag" --target "$GITHUB_SHA" --title "Hornhoof $version" --notes-file "$RUNNER_TEMP/release-notes.md"
+          # A tag that is there already is on this commit, as the step before found, and the release takes it as it is.
+          gh release create "v$version" --target "$GITHUB_SHA" --title "Hornhoof $version" --notes-file "$RUNNER_TEMP/release-notes.md"
           # The website's install.sh follows the release (installer-site.yml).
           gh workflow run installer-site.yml --repo "$GITHUB_REPOSITORY" --ref main

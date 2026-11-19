@@ -56,7 +56,7 @@ async function fixture(turnNumber = 3, preparation = false, full = true) {
   const start = async ({ minutes, ...request }: { suite?: string; minutes?: number }, given?: ReturnType<typeof fingerprints> | null, branch = `turn-${turnNumber}`, described = runtimes) => {
     const prints = given === undefined ? [...fingerprints(), ...(preparation ? [{ ...PREPARATION_UNIT, fingerprint: print('e') }] : [])] : given;
     number += 1;
-    const [run] = await db.insert(testRuns).values({ companyId, departmentId: department!.id, taskId: task!.id, agentId: agent!.id, jobId: job!.id, number, branch, command: '', commitSha: TEST_COMMIT, timeoutMs: (minutes ?? 10) * 60_000,
+    const [run] = await db.insert(testRuns).values({ companyId, departmentId: department!.id, taskId: task!.id, agentId: agent!.id, jobId: job!.id, number, branch, command: '', commitSha: TEST_COMMIT, timeoutMs: (minutes ?? 0) * 60_000,
       environmentRequest: newEnvironmentRequest(scope, { mode: 'product', ...request }, minutes) }).returning();
     await pumpTests(app.ctx);
     const [stored] = await db.select().from(testRuns).where(eq(testRuns.id, run!.id));
@@ -242,16 +242,15 @@ describe('reusing green test results', () => {
     expect((await f.runOf(second)).status).toBe('passed');
   });
 
-  /* A part that runs into its limit sends the whole release check again, so the first run takes an hour a part and at least two. */
-  it('gives each part of the first run of a release an hour when no limit was asked and splits it in two on one machine, and keeps a limit that was asked', async () => {
+  it('splits the first release run into two on one machine and stores only an explicit upper limit', async () => {
     const f = await fixture(5);
     const full = await f.start({});
-    expect((await f.runOf(full)).timeoutMs).toBe(3_600_000);
+    expect((await f.runOf(full)).timeoutMs).toBe(0);
     expect((await f.partsOf(full)).filter(part => part.environmentSelection!.selection.kind === 'batch')).toHaveLength(2);
     expect(await f.ranFiles(full)).toEqual(FILES);
     expect((await f.runOf(await f.start({ minutes: 45 }, undefined, 'turn-6'))).timeoutMs).toBe(45 * 60_000);
     await f.finish(full);
-    expect((await f.runOf(await f.start({}))).timeoutMs).toBe(600_000);
+    expect((await f.runOf(await f.start({}))).timeoutMs).toBe(0);
   });
 
   it('gives no part to a node of other runtimes than its run was described on, and keeps no green result from a receipt that names others', async () => {

@@ -1,33 +1,24 @@
 import { isStaged, type EchelonStage } from '@hornhoof/protocol/echelons';
 import type { Department, DeptRole, Employee, Team } from '../types';
-import { grownTo } from '../ui/natural-height';
 import type { Point } from '../ui/wires';
 
 /* A department's schema in world pixels. From the top: the head with the people who reach the
    department at its right, the bus from the head to every frame, the pipeline between stages with a numbered gate before each
    check, then a frame per role. Work goes left to right: design, ordinary work, each check in order, then the final check.
-   Only sub-units and observers stand apart from the pipeline. */
+   Only sub-units and observers stand apart from the pipeline. Cards, headings and chips keep these sizes at the least and
+   grow with their words, as measured on the screen; every chip takes the height the most words need, and everything under
+   a taller one moves down with it. */
 export const FW = 280, GS = 44, G = 150, CW = 240, CH = 84, PY = 96, HW = 380, HH = 184, PW = 220, PH = 56;
 export const BUS = HH + 44, RY = BUS + 44, CY = BUS + 84, FT = CY + 50, FHEAD = 100, REP = 92;
+/* From the bottom of a frame's heading to its first card. */
+export const HEAD_ROOM = 20;
 const PEOPLE_Y = 12, PEOPLE_STEP = 66;
-/* Under a role's heading, 12 to its first chip, as between its chips, and 1 for the frame's line above the heading. */
-const HEADING_ROOM = 13;
 
-/* How tall the words of the schema need its boxes to be, as the screen measured them: the head card, the tallest chip and
-   the tallest heading of a role. */
-export type WordsNeed = { head: number; chip: number; heading: number };
-/* The heights the schema stands on: the head card, every chip and every role's heading, the step from one chip to the next,
-   and the levels of the bus, the pipeline's gates, the pipeline and the frames' tops under the head. With words that fit,
-   the constants above. */
-export type Size = { head: number; chip: number; heading: number; row: number; bus: number; ry: number; cy: number; ft: number };
+/* What the cards measure on the screen, in world pixels. head: the head's card; cards: an employee's card by its id;
+   headings: a frame's heading by the frame's key; people: each person's chip in order. What is not measured keeps its size. */
+export type Sizes = { head?: number; cards?: Record<string, number>; headings?: Record<string, number>; people?: number[] };
 
-export function schemaSize(need: Partial<WordsNeed> = {}): Size {
-  const head = grownTo(HH, need.head ?? 0), chip = grownTo(CH, need.chip ?? 0), heading = grownTo(FHEAD, (need.heading ?? 0) + HEADING_ROOM);
-  const bus = head + BUS - HH;
-  return { head, chip, heading, row: chip + PY - CH, bus, ry: bus + RY - BUS, cy: bus + CY - BUS, ft: bus + FT - BUS };
-}
-
-export type Placed = { e: Employee; x: number; y: number; cy: number };
+export type Placed = { e: Employee; x: number; y: number; h: number; cy: number };
 /* key: the role's id, 'team:<id>' for a sub-unit frame, or '' for the frame of employees whose role the department does not know. */
 /* check: the frame stands behind a gate, as every check after the ordinary work does. */
 export type Frame = { key: string; role: DeptRole | null; team?: Team | null; oneShot?: OneShotStage; x: number; h: number; stage: number; check?: boolean; members: Placed[] };
@@ -35,7 +26,6 @@ export type Frame = { key: string; role: DeptRole | null; team?: Team | null; on
 export type Line = { cls: 'tr' | 'tick' | 'pl' | 'gate'; pts: Point[]; arrow?: boolean };
 
 export type Schema = {
-  size: Size;
   head: Employee | null;
   hx: number;
   /* The frames' width and the bottom of the tallest one; right: where the content ends, the people's chips included. */
@@ -49,28 +39,49 @@ export type Schema = {
   /* Diamonds on the pipeline before each check, numbered from the first one. */
   gates: { x: number; n: number }[];
   report: { pts: Point[]; label: Point } | null;
-  /* The top left of each person's chip. */
+  /* The head's card, the bus under it, the pipeline and the top of the frames, all under the head as tall as it measures. */
+  hh: number;
+  bus: number;
+  cy: number;
+  ft: number;
+  /* The top left of each person's chip, and its height. */
   people: Point[];
+  peopleH: number[];
 };
 
 const outX = (f: Frame) => f.x + FW - 30;
 const inX = (f: Frame) => f.x + 30;
 
-const placeMembers = (z: Size, held: Employee[], x: number): Placed[] =>
-  held.map((e, i) => ({ e, x: x + 20, y: z.ft + z.heading + i * z.row, cy: z.ft + z.heading + i * z.row + z.chip / 2 }));
+/* Where a frame's cards stand: from under its heading down, each under the one above, all as tall as the chip whose words
+   need the most room. */
+type Room = { ft: number; chip: number; sizes: Sizes };
+const headOf = (room: Room, key: string) => Math.max(FHEAD, (room.sizes.headings?.[key] ?? 0) + HEAD_ROOM);
 
-/* A frame holds its heading and a row per chip, one at least, and 8 under the last. */
-const frameHeight = (z: Size, chips: number) => z.heading + Math.max(1, chips) * z.row + 8;
+function placeMembers(held: Employee[], x: number, room: Room, key: string): Placed[] {
+  let y = room.ft + headOf(room, key);
+  return held.map(e => {
+    const h = room.chip;
+    const placed = { e, x: x + 20, y, h, cy: y + h / 2 };
+    y += h + PY - CH;
+    return placed;
+  });
+}
+
+/* A frame of cards ends under the last one; an empty one keeps room for one. */
+const membersHeight = (room: Room, key: string, members: Placed[]) =>
+  headOf(room, key) + (members.length ? members.reduce((n, m) => n + m.h + PY - CH, 0) : PY) + 8;
+
+function memberFrame(room: Room, frame: Omit<Frame, 'h' | 'members'>, held: Employee[]): Frame {
+  const members = placeMembers(held, frame.x, room, frame.key);
+  return { ...frame, h: membersHeight(room, frame.key, members), members };
+}
 
 /* Each sub-unit gets its own frame at the left, outside the pipeline stages. */
-function splitMembers(d: Department, z: Size) {
+function splitMembers(d: Department, room: Room) {
   const all = d.employees.filter(e => e.kind !== 'head');
   const teamIds = new Set(d.teams.map(t => t.id));
-  const teamFrames: Frame[] = d.teams.map((team, i) => {
-    const held = all.filter(e => e.teamId === team.id);
-    const x = i * (FW + GS);
-    return { key: `team:${team.id}`, role: null, team, x, h: frameHeight(z, held.length), stage: -1, members: placeMembers(z, held, x) };
-  });
+  const teamFrames: Frame[] = d.teams.map((team, i) =>
+    memberFrame(room, { key: `team:${team.id}`, role: null, team, x: i * (FW + GS), stage: -1 }, all.filter(e => e.teamId === team.id)));
   const last = teamFrames[teamFrames.length - 1];
   const teamEnd = last ? last.x + FW : 0;
   return { teamFrames, members: all.filter(e => !e.teamId || !teamIds.has(e.teamId)), startX: last ? teamEnd + G : 0, teamEnd };
@@ -122,30 +133,43 @@ function pipelineGroups(known: ReadonlyMap<string, DeptRole>, loose: Employee[],
   return { groups, firstCheck };
 }
 
-/* A 280 px frame with heading padding holds thirteen 14 px marks with 3 px gaps. */
-const callFrameHeight = (z: Size, { fanOut, judge }: OneShotStage) => z.heading + Math.ceil((fanOut + Number(judge)) / 13) * 17;
+/* A 280 px frame with heading padding holds thirteen 14 px marks with 3 px gaps; a heading of more lines makes it taller. */
+const callFrameHeight = (room: Room, key: string, { fanOut, judge }: OneShotStage) =>
+  Math.max(FHEAD + Math.ceil((fanOut + Number(judge)) / 13) * 17, (room.sizes.headings?.[key] ?? 0) + HEAD_ROOM);
 
 /* Whoever leads a stage of a task now: it stays in its role's frame and is marked there. */
 export const leadsStage = (e: Employee): boolean => Boolean(e.task && isStaged(e.task.echelons.resultKind) && e.task.echelons.ownerAgentId === e.id && e.task.echelons.phase === 'active');
 
 /* Observers sit beside the pipeline, like sub-unit frames, and hang on the head's bus as every frame does. */
-function observerFrames(z: Size, known: ReadonlyMap<string, DeptRole>, members: Employee[], startX: number): Frame[] {
-  return [...known.values()].filter(r => r.schema === 'observer').map((role, i) => {
-    const x = startX + i * (FW + GS);
-    const held = members.filter(e => e.roleId === role.id);
-    return { key: role.id, role, x, h: frameHeight(z, held.length), stage: -1, members: placeMembers(z, held, x) };
-  });
+function observerFrames(known: ReadonlyMap<string, DeptRole>, members: Employee[], startX: number, room: Room): Frame[] {
+  return [...known.values()].filter(r => r.schema === 'observer').map((role, i) =>
+    memberFrame(room, { key: role.id, role, x: startX + i * (FW + GS), stage: -1 }, members.filter(e => e.roleId === role.id)));
 }
 
-/* need: how tall the words of the head card, the chips and the headings need them; without it, the sizes they always had. */
-export function schemaLayout(d: Department, people: number, need: Partial<WordsNeed> = {}): Schema {
-  const z = schemaSize(need);
+/* The people's chips at the right of the head, one under another by their measured heights. */
+function peopleChips(x: number, people: number, sizes: Sizes) {
+  const at: Point[] = [], heights: number[] = [];
+  let y = PEOPLE_Y;
+  for (let k = 0; k < people; k++) {
+    const h = Math.max(PH, sizes.people?.[k] ?? 0);
+    at.push([x, y]);
+    heights.push(h);
+    y += h + PEOPLE_STEP - PH;
+  }
+  /* The report passes under the last chip as far as it passes under one alone. */
+  return { at, heights, middles: at.map(([, top], k) => top + heights[k]! / 2), report: (people ? y - PEOPLE_STEP + PH : PEOPLE_Y + PH) + REP - PEOPLE_Y - PH };
+}
+
+export function schemaLayout(d: Department, people: number, sizes: Sizes = {}): Schema {
   const head = d.employees.find(e => e.kind === 'head') ?? null;
-  const { teamFrames, members, startX, teamEnd } = splitMembers(d, z);
+  const hh = Math.max(HH, sizes.head ?? 0);
+  const bus = hh + BUS - HH, ry = hh + RY - HH, cy = hh + CY - HH, ft = hh + FT - HH;
+  const room: Room = { ft, chip: Math.max(CH, ...Object.values(sizes.cards ?? {})), sizes };
+  const { teamFrames, members, startX, teamEnd } = splitMembers(d, room);
   const known = new Map(d.roles.filter(r => members.some(e => e.roleId === r.id)).map(r => [r.id, r]));
   const loose = members.filter(e => !e.roleId || !known.has(e.roleId));
   const { groups, firstCheck } = pipelineGroups(known, loose, oneShotStagesOf(d));
-  const observers = observerFrames(z, known, members, startX);
+  const observers = observerFrames(known, members, startX, room);
   const lastObserver = observers[observers.length - 1];
   const outsideEnd = lastObserver ? lastObserver.x + FW : teamEnd;
   const pipelineStart = lastObserver ? outsideEnd + G : startX;
@@ -158,16 +182,8 @@ export function schemaLayout(d: Department, people: number, need: Partial<WordsN
     starts.push(x);
     const frames = group.map(g => {
       const held = g.oneShot ? [] : g.role ? members.filter(e => e.roleId === g.role!.id) : loose;
-      const frame: Frame = {
-        key: g.key,
-        role: g.role,
-        oneShot: g.oneShot,
-        x,
-        h: g.oneShot ? callFrameHeight(z, g.oneShot) : frameHeight(z, held.length),
-        stage: k,
-        check: k >= firstCheck,
-        members: placeMembers(z, held, x),
-      };
+      const placed = memberFrame(room, { key: g.key, role: g.role, oneShot: g.oneShot, x, stage: k, check: k >= firstCheck }, held);
+      const frame: Frame = g.oneShot ? { ...placed, h: callFrameHeight(room, g.key, g.oneShot) } : placed;
       x += FW + GS;
       return frame;
     });
@@ -178,7 +194,7 @@ export function schemaLayout(d: Department, people: number, need: Partial<WordsN
   const stageFrames = stages.flat();
   const frames = [...teamFrames, ...observers, ...stageFrames];
   const w = ends.length ? ends[ends.length - 1]! : outsideEnd;
-  const h = z.ft + Math.max(0, ...frames.map(f => f.h));
+  const h = ft + Math.max(0, ...frames.map(f => f.h));
   /* Over the middle of all the frames, sub-units and observers included; a narrow department keeps the head whole. */
   const hx = Math.max(HW / 2, w / 2);
 
@@ -188,35 +204,36 @@ export function schemaLayout(d: Department, people: number, need: Partial<WordsN
   const gates: Schema['gates'] = [];
   for (let k = 1; k < stages.length; k++) {
     const sx = (ends[k - 1]! + starts[k]!) / 2;
-    lines.push({ cls: 'gate', pts: [[sx, z.ry + 16], [sx, h]] });
+    lines.push({ cls: 'gate', pts: [[sx, ry + 16], [sx, h]] });
     if (k >= firstCheck) gates.push({ x: sx, n: gates.length + 1 });
   }
   /* The head leads every frame, a sub-unit's and an observer's too: down to the bus, along it, and down each frame's spine
      to its chips. */
   if (frames.length) {
-    lines.push({ cls: 'tr', pts: [[hx, z.head], [hx, z.bus]] });
-    lines.push({ cls: 'tr', pts: [[Math.min(hx, frames[0]!.x + 10), z.bus], [Math.max(hx, frames[frames.length - 1]!.x + 10), z.bus]] });
+    lines.push({ cls: 'tr', pts: [[hx, hh], [hx, bus]] });
+    lines.push({ cls: 'tr', pts: [[Math.min(hx, frames[0]!.x + 10), bus], [Math.max(hx, frames[frames.length - 1]!.x + 10), bus]] });
     for (const f of frames) {
-      const end = f.members.length ? f.members[f.members.length - 1]!.cy : z.ft + 40;
-      lines.push({ cls: 'tr', pts: [[f.x + 10, z.bus], [f.x + 10, end]] });
+      const end = f.members.length ? f.members[f.members.length - 1]!.cy : ft + 40;
+      lines.push({ cls: 'tr', pts: [[f.x + 10, bus], [f.x + 10, end]] });
       for (const m of f.members) lines.push({ cls: 'tick', pts: [[f.x + 10, m.cy], [m.x, m.cy]] });
-      vias.push([f.x + 10, z.bus]);
+      vias.push([f.x + 10, bus]);
     }
-    vias.push([hx, z.bus]);
+    vias.push([hx, bus]);
   }
 
   const px = hx + HW / 2 + 40;
+  const chips = peopleChips(px, people, sizes);
   if (people) {
-    lines.push({ cls: 'tr', pts: [[hx + HW / 2, 40], [px - 14, 40], [px - 14, 40 + (people - 1) * PEOPLE_STEP]] });
-    for (let k = 0; k < people; k++) lines.push({ cls: 'tick', pts: [[px - 14, 40 + k * PEOPLE_STEP], [px, 40 + k * PEOPLE_STEP]] });
+    lines.push({ cls: 'tr', pts: [[hx + HW / 2, 40], [px - 14, 40], [px - 14, chips.middles[people - 1]!]] });
+    for (const m of chips.middles) lines.push({ cls: 'tick', pts: [[px - 14, m], [px, m]] });
   }
 
   /* The pipeline: each stage's outputs meet on one line and go down into the next stage's inputs. */
   for (let k = 0; k < stages.length - 1; k++) {
     const a = stages[k]!, b = stages[k + 1]!;
-    for (const f of a) lines.push({ cls: 'pl', pts: [[outX(f), z.ft], [outX(f), z.cy]] });
-    lines.push({ cls: 'pl', pts: [[Math.min(...a.map(outX)), z.cy], [Math.max(...b.map(inX)), z.cy]] });
-    for (const f of b) lines.push({ cls: 'pl', pts: [[inX(f), z.cy], [inX(f), z.ft]], arrow: true });
+    for (const f of a) lines.push({ cls: 'pl', pts: [[outX(f), ft], [outX(f), cy]] });
+    lines.push({ cls: 'pl', pts: [[Math.min(...a.map(outX)), cy], [Math.max(...b.map(inX)), cy]] });
+    for (const f of b) lines.push({ cls: 'pl', pts: [[inX(f), cy], [inX(f), ft]], arrow: true });
   }
 
   /* The report: from the last stage frame up and over into the head, or straight up when the head sits above it. Over, it
@@ -225,15 +242,14 @@ export function schemaLayout(d: Department, people: number, need: Partial<WordsN
   const last = stageFrames[stageFrames.length - 1];
   if (head && last) {
     const ox = outX(last), edge = hx + HW / 2;
-    const ry = REP + Math.max(0, people - 1) * PEOPLE_STEP, under = (z.head + z.bus) / 2;
-    if (ox <= edge) report = { pts: [[ox, z.ft], [ox, z.head]], label: [ox, (z.ft + z.head) / 2] };
-    else if (ry < z.head) report = { pts: [[ox, z.ft], [ox, ry], [edge, ry]], label: [(ox + edge) / 2, ry] };
-    else report = { pts: [[ox, z.ft], [ox, under], [edge - 30, under], [edge - 30, z.head]], label: [ox, (z.ft + under) / 2] };
+    const rep = chips.report, under = (hh + bus) / 2;
+    if (ox <= edge) report = { pts: [[ox, ft], [ox, hh]], label: [ox, (ft + hh) / 2] };
+    else if (rep < hh) report = { pts: [[ox, ft], [ox, rep], [edge, rep]], label: [(ox + edge) / 2, rep] };
+    else report = { pts: [[ox, ft], [ox, under], [edge - 30, under], [edge - 30, hh]], label: [ox, (ft + under) / 2] };
   }
 
-  const peopleAt: Point[] = Array.from({ length: people }, (_, k) => [px, PEOPLE_Y + k * PEOPLE_STEP]);
   const right = Math.max(w, hx + HW / 2, people ? px + PW : 0);
-  return { size: z, head, hx, w, h, right, frames, stages, lines, vias, gates, report, people: peopleAt };
+  return { head, hx, w, h, right, frames, stages, lines, vias, gates, report, hh, bus, cy, ft, people: chips.at, peopleH: chips.heights };
 }
 
 type Spot = { f: Frame; m: Placed };
@@ -241,16 +257,15 @@ type Spot = { f: Frame; m: Placed };
 /* From the head down to the bus, along it to the frame's spine and down that to the employee, in any frame. */
 function memberDown(s: Schema, at: Spot | null): Point[] | null {
   if (!at) return null;
-  const sx = at.f.x + 10, { head, bus } = s.size;
-  return [[s.hx, head - 30], [s.hx, bus], [sx, bus], [sx, at.m.cy], [at.m.x + 14, at.m.cy]];
+  const sx = at.f.x + 10;
+  return [[s.hx, s.hh - 30], [s.hx, s.bus], [sx, s.bus], [sx, at.m.cy], [at.m.x + 14, at.m.cy]];
 }
 
 function memberOnward(s: Schema, at: Spot | null): Point[] | null {
   if (!at) return null;
   if (at.f.stage < 0) return [...memberDown(s, at)!].reverse();
   const next = s.stages[at.f.stage + 1];
-  const { ft, cy } = s.size;
-  if (next) return [[outX(at.f), ft], [outX(at.f), cy], [inX(next[0]!), cy], [inX(next[0]!), ft]];
+  if (next) return [[outX(at.f), s.ft], [outX(at.f), s.cy], [inX(next[0]!), s.cy], [inX(next[0]!), s.ft]];
   return s.report?.pts ?? null;
 }
 

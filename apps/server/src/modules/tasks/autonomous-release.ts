@@ -17,7 +17,7 @@ import { routeOf, type Route } from './route-records.js';
 import { comment } from './comments.js';
 import { loadTask, mayAsk, type Moved, type Task, type Tx } from './state.js';
 import { refusePaused } from './pause.js';
-import { exactComparison } from './review-context.js';
+import { heldLineage } from '../testruns/compare.js';
 
 const RELEASE_BRANCH_RE = /^release-\d+\.\d+\.\d+$/;
 
@@ -421,8 +421,7 @@ async function verifiedIndependentVerdict(db: QueryDb, askingTask: Task, reposit
 async function verifiedAncestorSha(ctx: Reader, repo: Repo, base: string, head: string): Promise<boolean> {
   if (!ctx.readCompare) return false;
   try {
-    const compared = await ctx.readCompare(repo, { base, head }, 10_000);
-    return exactComparison(compared, base, head);
+    return !!heldLineage(await ctx.readCompare(repo, { base, head }, 10_000), base, head);
   } catch {
     return false;
   }

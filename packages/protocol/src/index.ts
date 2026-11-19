@@ -1,3 +1,5 @@
+import { AuthorCheckDone, AuthorCheckRun } from './author-check.js';
+export { AuthorCheckDone, AuthorCheckRun, AuthorCheckPin, docsOnly } from './author-check.js';
 export * from './department-mode.js';
 export * from './tool-privacy.js';
 export * from './external-operations.js';
@@ -22,7 +24,8 @@ export * from './phones.js';
 import { PhoneProbe, PhoneList, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke, PhoneReply, PhoneFrame } from './phones.js';
 import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
 import { API_PROTOCOLS, PROVIDER_IDS, type ProviderId } from './providers.js';
-export { CHECK_LEASE_MS, checkCapacity, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
+export { CHECK_LEASE_MS, checkCapacity, fitsCheck, freeCores, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
+export { TEST_WORKER_BYTES, vitestMemoryWorkers } from './test-workers.js';
 
 export { NODE_LOG_BYTES, NODE_LOG_LINES, NodeExit, NodeLog, NodeStopReason } from './node-exit.js';
 
@@ -63,7 +66,7 @@ export const isProgramOwnPrompt = (text: string): boolean => /^\s*<(?:task-notif
 
 /* Why a part of a run ended other than with its command passing: it failed, ran out of time, was stopped, the branch
    could not be cloned, or the task's files could not be fetched. */
-export const TEST_ERRORS = ['failed', 'timeout', 'cancelled', 'clone_failed', 'files_failed'] as const;
+export const TEST_ERRORS = ['failed', 'timeout', 'silent', 'upper_limit', 'cancelled', 'clone_failed', 'files_failed'] as const;
 export type TestError = (typeof TEST_ERRORS)[number];
 /* The most parts a run splits into, and the most of each part's log a node sends: its start and its end. */
 export const MAX_TEST_PARTS = 10;
@@ -355,7 +358,7 @@ export type NodeReconnect = z.infer<typeof NodeReconnect>;
    server confirms it, so a restart on either side loses none and applies none twice. The rest are snapshots or live
    answers that are worth nothing late: hello, load, status, the terminal's screens, turn.open, agent.start, agent.said,
    agent.restarted and node.stopping. */
-export const NUMBERED = ['job.started', 'job.event', 'job.done', 'tests.started', 'tests.silent', 'tests.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard'] as const;
+export const NUMBERED = ['job.started', 'job.event', 'job.done', 'tests.started', 'tests.silent', 'tests.done', 'author_check.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard'] as const;
 /* Optional, so a build that does not number still talks to one that does. */
 const MessageNumber = z.number().int().min(1).optional();
 /* The header of the upgrade answer of a server that sends ack. */
@@ -371,6 +374,13 @@ export const MCP_CONNECTING: readonly string[] = ['server/discover', 'initialize
 /* How many runs or parts a hello may list. A node lists the ends it has not had confirmed too, and never drops those, so
    the bound is the outbox's own; at a uuid's 39 bytes both lists leave half of the socket's 4 MiB for the rest. */
 export const HELLO_IDS_MAX = 20_000;
+/* This belongs to the node's check queue, outside public machine load. A sequence starts over on each socket. */
+const CheckLeaseSnapshot = z.object({
+  sequence: z.number().int().positive(),
+  ids: z.array(z.uuid()).max(HELLO_IDS_MAX),
+});
+export type CheckLeaseSnapshot = z.infer<typeof CheckLeaseSnapshot>;
+const CheckLeases = CheckLeaseSnapshot.optional().catch(undefined);
 /* A server that sends no ack drops a hello that lists more than this. */
 export const HELLO_IDS_BEFORE_ACKS = 100;
 
@@ -379,6 +389,7 @@ export const HELLO_IDS_BEFORE_ACKS = 100;
 const WorkError = z.string().max(2000).nullable().optional();
 
 const NodeMessage = z.discriminatedUnion('type', [
+  AuthorCheckDone,
   CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced, PhoneReply, PhoneFrame,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
@@ -395,6 +406,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     /* It answers phone.list with what its adb lists of the phones asked about. Without it, its phones show as its computer does. */
     phoneList: z.boolean().optional(),
     phoneBaseline: z.boolean().optional(),
+    /* Its phone baseline preserves brightness at or above the device's floor. */
+    phoneBrightnessFloor: z.boolean().optional(),
     /* The node runs parts of other work too, not only of test runs. */
     work: z.boolean().optional(),
     /* Why the node takes no part of any run: a part runs only as a user of the node's own, which this one lacks. */
@@ -407,6 +420,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     browserError: BrowserError.nullable().optional(),
     workError: WorkError,
     load: Load.optional(),
+    checkLeases: CheckLeases,
     live: Live,
     tests: z.array(z.string()).max(HELLO_IDS_MAX).optional(),
     /* The key Hornhoof seals this node's sign-ins to; the private half never leaves the node. */
@@ -424,7 +438,7 @@ const NodeMessage = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('node.stopping'), startedAt: z.iso.datetime(), exit: NodeExit }),
   z.object({ type: z.literal('node.reconnect'), ...NodeReconnect.shape }),
-  z.object({ type: z.literal('load'), ...Load.shape, live: Live }),
+  z.object({ type: z.literal('load'), ...Load.shape, checkLeases: CheckLeases, live: Live }),
   z.object({ type: z.literal('tests.waiting'), partId: z.string(), position: z.number().int().positive() }),
   z.object({ type: z.literal('tests.started'), partId: z.string(), n: MessageNumber }),
   z.object({ type: z.literal('tests.silent'), partId: Id, n: MessageNumber }),
@@ -615,6 +629,7 @@ function validTestMode(message: { command: string; commitSha?: string | null; en
 export const MAX_JOB_TIMEOUT_MS = 2 ** 31 - 1;
 
 const ServerMessage = z.discriminatedUnion('type', [
+  AuthorCheckRun,
   CheckQueueReply, PhoneProbe, PhoneList, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke,
   z.object({
     type: z.literal('job.run'),
@@ -708,9 +723,12 @@ const ServerMessage = z.discriminatedUnion('type', [
     kept: KeptFiles.optional(),
     part: z.number().int().min(1).max(MAX_TEST_PARTS),
     parts: z.number().int().min(1).max(MAX_TEST_PARTS),
-    timeoutMs: z.number().int().positive().max(2 ** 31 - 1),
+    /* A wall-clock limit, if requested. A test's quiet budget renews whenever the node sees progress. */
+    timeoutMs: z.number().int().positive().max(2 ** 31 - 1).optional(),
     silenceMs: z.number().int().positive().max(2 ** 31 - 1).optional(),
-  }).refine(validTestMode, 'A product selection and a manual command are mutually exclusive.'),
+    vitestWorkers: z.number().int().positive().max(4096).optional(),
+  }).refine(validTestMode, 'A product selection and a manual command are mutually exclusive.')
+    .refine(message => message.timeoutMs !== undefined || (message.kind !== 'work' && message.silenceMs !== undefined), 'A run part needs a wall or quiet time limit.'),
   z.object({ type: z.literal('tests.cancel'), partId: Id }),
   /* Hornhoof has the part's end: the node stops sending it again after each reconnect. */
   z.object({ type: z.literal('tests.ack'), partId: Id }),

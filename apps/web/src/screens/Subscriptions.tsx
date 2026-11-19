@@ -1,5 +1,5 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
@@ -140,7 +140,7 @@ function PlanMachines({ sub: s, now }: { sub: SubView; now: number }) {
   const { language } = useLanguage();
   if (s.kind === 'api_key') return <ul className="plist"><li><MachineMark /><span className="nm"><b>{t.subs.builtin}</b><small>{t.cards.builtinSmall}</small></span></li></ul>;
   const line = signinLine(t, language, s);
-  return <>{s.machines.length ? <ul className="plist" aria-label={t.subs.machinesOf(subName(t, s))}>{s.machines.map(m => <li key={m.id}><MachineMark /><span className="nm"><b>{m.hostname}</b><small>{s.owner.name}, {planStateOnMachine(t, language, m, s.limits, now, s.limitsUpdatedAt)}</small></span></li>)}</ul> : <p className="part-note">{t.subs.noMachine}</p>}{line && <p className="part-note">{line}</p>}</>;
+  return <>{s.machines.length ? <ul className="plist" aria-label={t.subs.machinesOf(subName(t, s))}>{s.machines.map(m => <li key={m.id}><MachineMark /><span className="nm"><b>{m.hostname}</b><small>{s.owner.name}, {planStateOnMachine(t, language, m, s.limits, now, s.limitsUpdatedAt)}</small></span></li>)}</ul> : <p className="part-note" dir="auto">{t.subs.noMachine}</p>}{line && <p className="part-note" dir="auto">{line}</p>}</>;
 }
 
 /* What the head of the card says under the state: until when a plan at its limit waits, or where an offline plan waits. */
@@ -260,64 +260,132 @@ type PlanControls = {
 
 type PlanProps = { sub: SubView; me: Me; controls: PlanControls };
 
+/* The share of the plan's limits its tasks may use, a field under its label in a band of its own. */
 function PlanSettings({ sub: s, me, controls }: PlanProps) {
   const t = useT();
+  const heading = useId();
+  const field = useId();
   const editable = s.owner.id === me.person.id || me.person.scopeKind === 'company';
-  const select = (
-    <select className="sel" aria-label={t.subs.shareLabel(subName(t, s))} value={s.budget === null ? '' : String(s.budget)} onChange={e => controls.setBudget(s, e.target.value ? Number(e.target.value) : null)}>
-      <option value="">{t.subs.shareAll}</option>
-      {SHARES.map(n => <option key={n} value={String(n)}>{`${n}%`}</option>)}
-    </select>
+  return (
+    <section className="plan-settings" aria-labelledby={heading}>
+      <h4 id={heading}>{t.tables.settings}</h4>
+      <div className="field">
+        {editable ? <>
+          <label htmlFor={field}>{t.subs.share}</label>
+          <span className="select-wrap">
+            <select id={field} className="sel" aria-label={t.subs.shareLabel(subName(t, s))} value={s.budget === null ? '' : String(s.budget)} onChange={e => controls.setBudget(s, e.target.value ? Number(e.target.value) : null)}>
+              <option value="">{t.subs.shareAll}</option>
+              {SHARES.map(n => <option key={n} value={String(n)}>{`${n}%`}</option>)}
+            </select>
+          </span>
+        </> : <>
+          <span className="label">{t.subs.share}</span>
+          <span>{s.budget === null ? t.subs.shareAll : `${s.budget}%`}</span>
+        </>}
+      </div>
+    </section>
   );
-  return <>
-    {s.kind === 'personal' && <Part title={t.tables.settings}><Facts items={[[t.subs.share, editable ? select : s.budget === null ? t.subs.shareAll : `${s.budget}%`]]} /></Part>}
-    <Part title={t.subs.fallbacks}><PlanFallbacks sub={s} plans={controls.plans} editable={editable || changesApi(s, me)} onChange={list => controls.setFallbacks(s, list)} /></Part>
-  </>;
 }
 
-function TestButtons({ sub: s, me, controls: c }: PlanProps) {
-  const t = useT();
+/* One action of a plan: its words, its name that says which plan, and whether it is busy now, as a test that runs. */
+type Action = { key: string; text: string; label: string; run: () => unknown; busy?: boolean };
+
+function testActions(t: Messages, { sub: s, me, controls: c }: PlanProps): Action[] {
   const name = subName(t, s);
-  return <>
-    {s.online && <button className="act" type="button" aria-label={t.subs.runTestLabel(name)} disabled={c.test?.phase === 'running'} onClick={() => c.runTest(s)}>{t.subs.runTest}</button>}
-    {me.person.scopeKind === 'company' && s.place.kind === 'company' && !s.isOrchestrator && <button className="act" type="button" aria-label={t.subs.useForOrchestratorLabel(name)} onClick={() => c.makeOrchestrator(s)}>{t.subs.useForOrchestrator}</button>}
-  </>;
+  return [
+    ...(s.online ? [{ key: 'test', text: t.subs.runTest, label: t.subs.runTestLabel(name), run: () => c.runTest(s), busy: c.test?.phase === 'running' }] : []),
+    ...(me.person.scopeKind === 'company' && s.place.kind === 'company' && !s.isOrchestrator ? [{ key: 'orchestrator', text: t.subs.useForOrchestrator, label: t.subs.useForOrchestratorLabel(name), run: () => c.makeOrchestrator(s) }] : []),
+  ];
 }
 
-function SignInButton({ sub: s, me, controls: c }: PlanProps) {
-  const t = useT();
+function signInAction(t: Messages, { sub: s, me, controls: c }: PlanProps): Action | null {
   if (s.owner.id !== me.person.id || s.kind !== 'personal' || c.signing || !s.machines.some(m => m.online) || !TERMINAL_SIGNIN.has(s.provider)) return null;
   const again = s.signedInOnce && s.status === 'ready';
   const name = subName(t, s);
-  return <button className="act" type="button" aria-label={again ? t.subs.signInAgainLabel(name) : t.subs.signInLabel(name)} onClick={() => c.signIn(s, again)}>{again ? t.subs.signInAgain : t.subs.signIn}</button>;
+  return { key: 'signin', text: again ? t.subs.signInAgain : t.subs.signIn, label: again ? t.subs.signInAgainLabel(name) : t.subs.signInLabel(name), run: () => c.signIn(s, again) };
 }
 
-function KeyButton({ sub: s, me, controls: c }: PlanProps) {
-  const t = useT();
+function keyAction(t: Messages, { sub: s, me, controls: c }: PlanProps): Action | null {
   if (s.owner.id !== me.person.id || s.kind !== 'personal' || !isKeyPlan(s.provider) || !s.machines.length || c.keying) return null;
-  return <button className="act" type="button" aria-label={t.subs.pasteKeyLabel(subName(t, s))} onClick={() => c.setKeyFor(s.id)}>{t.subs.pasteKey}</button>;
+  return { key: 'key', text: t.subs.pasteKey, label: t.subs.pasteKeyLabel(subName(t, s)), run: () => c.setKeyFor(s.id) };
 }
 
 /* Company scope changes an API connection's name, models and place, and so does a person who runs the department it serves. */
 const changesApi = (s: SubView, me: Me) => s.kind === 'api_key' && (me.person.scopeKind === 'company' || s.canChange === true);
 
-function EditButton({ sub: s, me, controls: c }: PlanProps) {
-  const t = useT();
+function editAction(t: Messages, { sub: s, me, controls: c }: PlanProps): Action | null {
   if (!changesApi(s, me) || c.editing) return null;
-  return <button className="act" type="button" aria-label={t.subs.editApiLabel(subName(t, s))} onClick={() => c.setEditFor(s.id)}>{t.subs.editApi}</button>;
+  return { key: 'edit', text: t.subs.editApi, label: t.subs.editApiLabel(subName(t, s)), run: () => c.setEditFor(s.id) };
 }
+
+/* A busy action keeps its focus and its place, and does nothing until it is done. */
+function ActionButton({ action: a, className }: { action: Action; className: string }) {
+  return <button className={className} type="button" aria-label={a.label} aria-disabled={a.busy || undefined} onClick={() => { if (!a.busy) a.run(); }}>{a.text}</button>;
+}
+
+const removable = (s: SubView, me: Me) => s.owner.id === me.person.id || me.person.scopeKind === 'company' || changesApi(s, me);
 
 function RemoveButtons({ sub: s, me, controls: c }: PlanProps) {
   const t = useT();
-  const name = subName(t, s);
-  const mine = s.owner.id === me.person.id;
-  return <>
-    {(mine || me.person.scopeKind === 'company' || changesApi(s, me)) && <button className="act danger" type="button" aria-label={t.subs.removeLabel(name)} onClick={() => c.setConfirm(s.id)}>{t.subs.remove}</button>}
-  </>;
+  return removable(s, me) ? <button className="act danger" type="button" aria-label={t.subs.removeLabel(subName(t, s))} onClick={() => c.setConfirm(s.id)}>{t.subs.remove}</button> : null;
 }
 
-function PlanButtons(props: PlanProps) {
-  return <div className="machine-actions"><TestButtons {...props} /><EditButton {...props} /><SignInButton {...props} /><KeyButton {...props} /><RemoveButtons {...props} /></div>;
+/* Whether a foot's buttons stand in one row with each label on one line, measured as the foot is laid out: each button
+   is as wide as its words on one line while the foot is measured, and back as it was before anything is drawn. */
+function useOneRow(foot: RefObject<HTMLDivElement | null>, actions: string): boolean {
+  const [one, setOne] = useState(true);
+  useLayoutEffect(() => {
+    const row = foot.current;
+    if (!row || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      row.classList.add('measuring');
+      const buttons = [...row.children].map(b => b.getBoundingClientRect().width + parseFloat(getComputedStyle(b).marginInlineStart));
+      const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+      row.classList.remove('measuring');
+      setOne(buttons.reduce((sum, w) => sum + w, 0) + gap * (buttons.length - 1) <= row.clientWidth + 0.5);
+    };
+    const watch = new ResizeObserver(measure);
+    watch.observe(row);
+    void document.fonts?.ready.then(measure);
+    return () => watch.disconnect();
+  }, [foot, actions]);
+  return one;
+}
+
+/* The foot of a working plan's card: what its test says, then its actions on one end edge. The first of them is the one
+   filled button, Run a test when the plan can run one; Remove ends the foot, apart from the rest. While Remove asks, its
+   question stands in the foot's place, and Cancel gives the focus back to Remove. When they do not fit in one row with each
+   label whole, they stand in two matched columns, Remove in the end one. */
+function PlanFoot(props: PlanProps) {
+  const t = useT();
+  const { sub: s, me, controls: c } = props;
+  const actions = [...testActions(t, props), editAction(t, props), signInAction(t, props), keyAction(t, props)].filter((a): a is Action => a !== null);
+  const remove = removable(s, me);
+  const removeButton = useRef<HTMLButtonElement>(null);
+  const question = useRef<HTMLDivElement>(null);
+  const row = useRef<HTMLDivElement>(null);
+  const oneRow = useOneRow(row, `${actions.map(a => a.text).join(' ')} ${remove} ${c.asking}`);
+  /* In two columns Remove ends the second; it has a button beside it when an odd number of actions comes before it. */
+  const apart = actions.length > 0 && (oneRow || actions.length % 2 === 1);
+  const asked = useRef(false);
+  useEffect(() => {
+    if (c.asking) question.current?.querySelector<HTMLButtonElement>('button.ghost')?.focus();
+    else if (asked.current) removeButton.current?.focus();
+    asked.current = c.asking;
+  }, [c.asking]);
+  if (!actions.length && !remove && !c.test && !c.note) return null;
+  return (
+    <div className="plan-card-actions">
+      {c.test && <TestResult test={c.test} />}
+      <SignInNote note={c.note} />
+      {c.asking ? <div className="plan-ask" ref={question}><RemoveAsk sub={s} controls={c} /></div> : (actions.length > 0 || remove) && (
+        <div className={oneRow ? 'form-foot' : 'form-foot two-columns'} ref={row}>
+          {actions.map((a, i) => <ActionButton key={a.key} action={a} className={i === 0 ? 'btn' : 'btn ghost'} />)}
+          {remove && <button ref={removeButton} className={apart ? 'btn ghost danger plan-remove apart' : 'btn ghost danger plan-remove'} type="button" aria-label={t.subs.removeLabel(subName(t, s))} onClick={() => c.setConfirm(s.id)}>{t.subs.remove}</button>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function PlanExtra({ sub: s, controls: c }: Omit<PlanProps, 'me'>) {
@@ -390,7 +458,7 @@ function PlanFix(props: PlanProps) {
       {!c.note?.command && s.owner.id === me.person.id && <PlanSteps sub={s} command={c.command} signing={Boolean(c.signing)} />}
       <SubscriptionInstall sub={s} ownerId={me.person.id} command={c.command} onNew={() => c.newCommand(s)} />
       <SignInNote note={c.note} />
-      <div className="machine-actions"><SignInButton {...props} /><KeyButton {...props} /><RemoveButtons {...props} /></div>
+      <div className="machine-actions">{[signInAction(t, props), keyAction(t, props)].map(a => a && <ActionButton key={a.key} action={a} className="act" />)}<RemoveButtons {...props} /></div>
       <RemoveAsk sub={s} controls={c} />
     </section>
   );
@@ -410,12 +478,10 @@ function PlanWorking({ sub: s, me, controls, now }: PlanProps & { now: number })
     <section className="blk blk-side">
       <h4>{t.cards.machinesOf}</h4>
       <PlanMachines sub={s} now={now} />
-      <PlanSettings sub={s} me={me} controls={controls} />
-      <PlanButtons sub={s} me={me} controls={controls} />
-      <SignInNote note={controls.note} />
-      <RemoveAsk sub={s} controls={controls} />
-      {controls.test && <TestResult test={controls.test} />}
     </section>
+    {s.kind === 'personal' && <PlanSettings sub={s} me={me} controls={controls} />}
+    <PlanFallbacks sub={s} plans={controls.plans} editable={s.owner.id === me.person.id || me.person.scopeKind === 'company' || changesApi(s, me)} onChange={list => controls.setFallbacks(s, list)} />
+    <PlanFoot sub={s} me={me} controls={controls} />
   </>;
 }
 

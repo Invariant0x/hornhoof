@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
@@ -130,17 +130,21 @@ it('carries a standing command from the authenticated route to an updated pinned
   const c = await company();
   const controlDir = mkdtempSync(join(tmpdir(), 'hh-standing-computer-'));
   onTestFinished(() => rmSync(controlDir, { recursive: true, force: true }));
-  const alive = join(controlDir, 'alive');
-  writeFileSync(alive, '');
-  utimesSync(alive, new Date(), new Date());
+  const keeperDir = join(controlDir, 'keeper');
+  const computerControl = join(keeperDir, 'computer-control');
+  mkdirSync(keeperDir);
+  const now = new Date('2026-11-10T10:00:00.000Z');
   const carrier = new ComputerCarrier({
-    controlDir, dir: controlDir, machine: c.machine.networkId!, pin: () => c.publicKey, trustApp: false, log: () => {},
+    dir: keeperDir, machine: c.machine.networkId!, pin: () => c.publicKey, trustApp: false, log: () => {}, now: () => now,
     ask: async (method, url, payload) => {
       const res = await c.app.inject({ method, url, ...c.keeper, payload: JSON.stringify(payload), headers: { ...c.keeper.headers, 'content-type': 'application/json' } });
       return { status: res.statusCode, body: res.body ? res.json() : null };
     },
   });
   carrier.prepare();
+  const alive = join(computerControl, 'alive');
+  writeFileSync(alive, '');
+  utimesSync(alive, now, now);
   await carrier.tick();
   const by = { remoteAddress: c.keeper.remoteAddress, headers: { [VIA]: c.machine.id } };
   expect((await c.app.inject({ url: '/api/network/computer?standing=1&updater=1', ...by })).statusCode).toBe(403);
@@ -148,7 +152,7 @@ it('carries a standing command from the authenticated route to an updated pinned
   expect(await client.callTool({ name: 'computer', arguments: command })).not.toHaveProperty('isError', true);
   await carrier.tick();
   const [run] = await c.db.select().from(computerRuns);
-  const file = join(controlDir, 'computer', run!.id);
+  const file = join(computerControl, 'computer', run!.id);
   expect(JSON.parse(readFileSync(`${file}.json`, 'utf8'))).toMatchObject({ command: command.command });
   writeFileSync(`${file}.out.json`, JSON.stringify({ id: run!.id, exit: 0, output: 'recorded output' }));
   await carrier.tick();
@@ -156,5 +160,5 @@ it('carries a standing command from the authenticated route to an updated pinned
   expect(await client.callTool({ name: 'computer_result', arguments: { id: run!.id } })).toMatchObject({ content: [{ text: 'Exit code 0.\nrecorded output' }] });
   await c.change('close');
   await carrier.tick();
-  expect(JSON.parse(readFileSync(join(controlDir, 'computer.json'), 'utf8'))).toMatchObject({ untilSec: null });
+  expect(JSON.parse(readFileSync(join(computerControl, 'computer.json'), 'utf8'))).toMatchObject({ untilSec: null });
 });

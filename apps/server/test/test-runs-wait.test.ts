@@ -8,7 +8,7 @@ import { agentEvents, agents, jobs, pendingWakes, people, taskEvents, tasks, tas
 import { checkExternalWaits, waitFor } from '../src/modules/tasks/external-wait.js';
 import { checkTestTimes, pumpTests } from '../src/modules/testruns/runs.js';
 import { until } from './helpers.js';
-import { company, done, idle, nextOf, reportHost } from './test-runs-company.js';
+import { company, done, GIB, idle, nextOf, reportHost } from './test-runs-company.js';
 
 const anHour = () => new Date(Date.now() + 3_600_000).toISOString();
 
@@ -100,7 +100,8 @@ describe('a run that ends while the one who started it waits', () => {
       await waitingOn(c, run, { minutes: 5 });
       await nextOf(ivan.node, 'tests.run');
       await checkTestTimes(c.app.ctx, new Date(Date.now() + 15 * 60_000));
-      await endedOnce(c, new RegExp(`${run.name} 1 failed[\\s\\S]*did not end within 5 min`));
+      const cause = run.tool === 'run_tests' ? 'reached the upper time limit of 5 min' : 'did not end within 5 min';
+      await endedOnce(c, new RegExp(`${run.name} 1 failed[\\s\\S]*${cause}`));
     });
 
     it('ends the wait and wakes the agent once when someone else stops it', async () => {
@@ -430,8 +431,8 @@ describe('a run that ends while the one who started it waits', () => {
       await policy(c, 'host_slot', 60_000);
       const one = await c.planless(c.ceo, 'container-one');
       const other = await c.planless(c.ceo, 'container-two');
-      reportHost(c, one.nodeId, 'linux');
-      reportHost(c, other.nodeId, 'linux');
+      reportHost(c, one.nodeId, 'linux', { hostMemFree: 4 * GIB });
+      reportHost(c, other.nodeId, 'linux', { hostMemFree: 4 * GIB });
       const { call } = await c.turn(c.bruno);
       await call('run_tests', { branch: 'main', command: 'make one' });
       await nextOf(one.node, 'tests.run');

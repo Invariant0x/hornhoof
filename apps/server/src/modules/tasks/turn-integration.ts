@@ -4,7 +4,7 @@ import { companies, turnReleases, turns } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { refuse, type Task, type Tx } from './state.js';
-import { exactComparison } from './review-context.js';
+import { heldLineage } from '../testruns/compare.js';
 import { ensureOpenTurn, openTurnOf } from './turn-department.js';
 import { newerVersion, versionsNewestFirst } from './turn-tags.js';
 
@@ -35,14 +35,14 @@ export async function integrationTarget(ctx: Reader, task: Pick<Task, 'companyId
 }
 
 /* A branch at head holds commit: it is there, or the branch went on from it. GitHub says so by the status of their comparison,
-   however many files it has; where it cannot, only a whole comparison proves it. Anything unread proves nothing. */
-export async function branchHolds(ctx: Reader, repo: Repo, head: string, commit: string): Promise<boolean> {
+   however many files it has; where it cannot, the line of their full comparison proves it. Anything unread proves nothing. */
+export async function branchHolds(ctx: Partial<Pick<Ctx, 'readMerged' | 'readCompare'>>, repo: Repo, head: string, commit: string): Promise<boolean> {
   if (head === commit) return true;
   try {
     const merged = await ctx.readMerged?.(repo, { base: head, head: commit }, 10_000);
     if (merged !== undefined && merged !== null) return merged;
     const compared = await ctx.readCompare?.(repo, { base: commit, head }, 10_000);
-    return !!compared && exactComparison(compared, commit, head);
+    return !!compared && !!heldLineage(compared, commit, head);
   } catch {
     return false;
   }

@@ -2,6 +2,8 @@ import { and, eq } from 'drizzle-orm';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, departments, jobs, tasks, teams, testParts, testRuns, turns } from '../src/db/schema.js';
 import { answer, ask, createTask, report } from '../src/modules/tasks/engine.js';
+import { uncheckedInRelease, uncheckedWords } from '../src/modules/tasks/releases.js';
+import type { Task } from '../src/modules/tasks/state.js';
 import type { Ctx } from '../src/app.js';
 import { testsFixture } from './development-echelons-verification.js';
 import { BASE } from './development-echelons-fixture.js';
@@ -17,6 +19,8 @@ export type Repository = {
   holds: Record<string, string[]>;
   between: Record<string, { sha: string; parents: string[] }[]>;
   cut: Set<string>;
+  /* Comparisons whose files GitHub capped at 300: they prove the line and its commits, never the files. */
+  capped?: Set<string>;
   made?: { branch: string; commit: string }[];
   refusing?: string;
   hold?: () => Promise<void>;
@@ -35,7 +39,7 @@ export function serveEach(ctx: Ctx, repoAt: (url: string) => Repository): void {
     const repo = repoAt(at.url);
     const branch = 'branch' in want ? want.branch : `task-${want.task}`;
     const commitSha = repo.heads[branch] ?? repo.tags[branch];
-    return commitSha ? { branch, commitSha } : { problem: `The repository has no branch ${branch}.` };
+    return commitSha ? { branch, commitSha } : { problem: `The repository has no branch ${branch}.`, missing: true };
   };
   ctx.readCompare = async (at, want) => {
     const repo = repoAt(at.url);
@@ -44,6 +48,7 @@ export function serveEach(ctx: Ctx, repoAt: (url: string) => Repository): void {
     if (!contains(repo, want.head, want.base)) return { complete: true, baseSha: want.base, headSha: 'f'.repeat(40), paths: [], diff: '', commits: [] };
     /* A comparison cut short reads as GitHub's: too many commits to page through. */
     if (repo.cut.has(key)) return { complete: false, reason: 'incomplete-comparison' };
+    if (repo.capped?.has(key)) return { complete: false, reason: 'too-many-files', lineage: { baseSha: want.base, headSha: want.head, commits } };
     return { complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new', commits };
   };
   ctx.readMerged = async (at, want) => contains(repoAt(at.url), want.base, want.head);
@@ -79,6 +84,13 @@ export async function readyInTurn() {
 }
 
 type RunOf = { departmentId: string; taskId: string; agentId: string; jobId: string };
+
+/* The words of an approval card of a release commit, as ask_person and request_approval write them: what the release brings
+   that no check covers, which the release takes only the approval of a card naming. */
+export async function approvalText(ctx: Ctx, task: Task, question: string, commit: string): Promise<string> {
+  const unchecked = await uncheckedInRelease(ctx, task, commit);
+  return unchecked?.length ? `${question}\n\n${uncheckedWords(unchecked)}` : question;
+}
 
 /* The release of the open turn: a task its head holds to release it, the full run on the release commit and the person's
    approval of it, asked through the release tool of a head. */
@@ -120,8 +132,9 @@ export async function releasing() {
     }));
     return run!;
   };
+  /* The person approves the card of commit as the release tools open it: naming what it brings that no check covers. */
   const approve = async (commit = R) => {
-    const asked = await ask(f.ctx, f.head.id, release!.id, { kind: 'approval', text: `Release turn ${f.turn.number}: main to ${commit}.`, commit });
+    const asked = await ask(f.ctx, f.head.id, release!.id, { kind: 'approval', text: await approvalText(f.ctx, release!, `Release turn ${f.turn.number}: main to ${commit}.`, commit), commit });
     await answer(f.ctx, { personId: f.claude.ownerPersonId }, asked.request.id, { approve: true });
     return asked.request;
   };

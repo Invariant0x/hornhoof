@@ -319,9 +319,19 @@ function Install-Hornhoof([string[]]$Words, $Console) {
     throw "Could not download $helper. Check the internet connection, then run this command again."
   }
 
+  # The run of install.sh ends with it, but what install.sh keeps outlasts it: its own folder and the folder of the
+  # company's core, with that core's settings and compose files, which the next run and a removal look for. They are in a
+  # volume of Docker's own, mounted at the path Docker keeps it at: the core's updater mounts its folder by that path,
+  # which Docker reads on its own side, so both see the same files.
+  $volume = 'hornhoof-windows'
+  $null = Test-Docker volume create $volume
+  $kept = Get-DockerText volume inspect --format '{{.Mountpoint}}' $volume
+  if ($LASTEXITCODE -ne 0 -or $kept -cnotmatch '^/[A-Za-z0-9._/-]+$') { throw "Docker Desktop could not keep the folder Hornhoof keeps the company's core in. Restart Docker Desktop, then run this command again." }
+
   $passed = Get-HostFacts
   $passed['HORNHOOF_SERVER'] = $server
-  $passed['HORNHOOF_HOME'] = '/hornhoof'
+  $passed['HORNHOOF_HOME'] = "$kept/.hornhoof"
+  $passed['HORNHOOF_DIR'] = "$kept/hornhoof"
   $passed['HORNHOOF_MACHINE'] = Get-MachineKey
   # install.sh leaves the step done here to this script, and writes each sign-in link to /tmp/hornhoof-open-url.
   $passed['HORNHOOF_FROM_WINDOWS'] = '1'
@@ -330,7 +340,7 @@ function Install-Hornhoof([string[]]$Words, $Console) {
   # A terminal that is not a console, as the PowerShell ISE, gets no sign-in here: install.sh then says how to sign in.
   $run = @('run', '--rm', '-i')
   if (-not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected) { $run += '-t' }
-  $run += @('--name', $container, '--hostname', (Get-ComputerName), '-v', '//var/run/docker.sock:/var/run/docker.sock')
+  $run += @('--name', $container, '--hostname', (Get-ComputerName), '-v', '//var/run/docker.sock:/var/run/docker.sock', '-v', "$($volume):$kept")
   foreach ($name in $passed.Keys) { $run += @('-e', $name) }
   $run += @('--entrypoint', 'sh', $helper, '-c', $inside, 'install')
   if ($Words) { $run += $Words }

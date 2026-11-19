@@ -1,7 +1,8 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agents, tasks, teams } from '../src/db/schema.js';
 import { report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
+import { readCommit } from '../src/modules/testruns/refs.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { as } from './helpers.js';
@@ -31,6 +32,31 @@ describe('a task of a turnkey team never enters the echelons', () => {
     expect(closed.task).toMatchObject({ status: 'done', assigneeAgentId: null });
     expect((await f.detail(task.id)).echelons).toMatchObject({ resultKind: 'turnkey', phase: 'done', stages: [] });
     for (const id of [f.reviewer.id, f.security.id, f.tester.id, f.author.id]) expect(closed.wakes.map(wake => wake.agentId)).not.toContain(id);
+  });
+
+  it.each([500, 503, 'network'] as const)('keeps the task open when GitHub lookup fails with %s', async failure => {
+    const f = await turnkeyFixture();
+    const { task } = await f.give();
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(() => failure === 'network'
+      ? Promise.reject(new Error('Network unavailable')) : Promise.resolve(new Response(null, { status: failure })));
+    onTestFinished(() => { fetch.mockRestore(); });
+    f.ctx.readCommit = readCommit;
+
+    await expect(report(f.ctx, f.player.id, task.id, { done: true, summary: 'Checked.' })).rejects.toMatchObject({
+      status: 409, reason: 'task_changed', message: expect.stringContaining('Try again.') as unknown,
+    });
+    expect((await f.detail(task.id)).echelons.phase).toBe('active');
+  });
+
+  it('can close work without a branch when GitHub returns 404', async () => {
+    const f = await turnkeyFixture();
+    const { task } = await f.give();
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
+    onTestFinished(() => { fetch.mockRestore(); });
+    f.ctx.readCommit = readCommit;
+
+    const closed = await report(f.ctx, f.player.id, task.id, { done: true, summary: 'Checked.' });
+    expect(closed.task).toMatchObject({ status: 'done', turnId: null });
   });
 
   it('tells whoever gave it when its holder cannot go on, and calls nobody else onto it', async () => {

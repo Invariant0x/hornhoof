@@ -1,11 +1,11 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import type { LineState } from '@hornhoof/protocol/map';
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
 import { arcD, dashLength, hubSectors, litSquares, sectorFill, sharePercent, TURN_CELLS, workingTurns, type WorkingTurn } from '../hub-turns';
-import { arrangedBounds, arrangeMap, bendAt, deptKey, GAP, H, HALO, HUB, HUB_KEY, PEOPLE_LINE, personKey, W, type DeptSpot, type MapArrangement, type MapLine, type TopPerson } from '../map-arrange';
+import { arrangedBounds, arrangeMap, bendAt, deptKey, GAP, H, HALO, HUB, HUB_KEY, PEOPLE_LINE, personKey, W, type ChipNeed, type DeptSpot, type MapArrangement, type MapLine, type TopPerson } from '../map-arrange';
 import { useMapLayout } from '../map-layout';
 import { drawOnce } from '../map-roads';
 import type { PeopleLayout, PersonChip } from '../map-people';
@@ -26,7 +26,6 @@ import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
 import { clock } from './Subscriptions';
 import { guardedResizeObserver, useRenderGuard } from '../guard';
-import { useNaturalHeight } from '../ui/natural-height';
 
 export { deptLayout, type DeptSpot } from '../map-arrange';
 
@@ -539,6 +538,61 @@ function usePauseHiddenMap(box: { current: HTMLDivElement | null }, inside: bool
   }, [box, inside, shown]);
 }
 
+/* How tall the card of the most words needs to be: each department card is left to its words for a moment and measured.
+   Measured before the first paint, again when the company or the words change, and when a part of a card grows or shrinks
+   on its own, as its fonts arrive. */
+function useCardNeed(box: { current: HTMLDivElement | null }, org: Org | null, language: string): number {
+  const [need, setNeed] = useState(0);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || !org) return;
+    const measure = () => {
+      const cards = [...el.querySelectorAll<HTMLElement>(':scope > .world > .dept')];
+      const set = cards.map(card => card.style.height);
+      for (const card of cards) card.style.height = 'auto';
+      const most = Math.max(0, ...cards.map(card => card.offsetHeight));
+      cards.forEach((card, i) => (card.style.height = set[i]!));
+      setNeed(most);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = guardedResizeObserver(measure, 'map-cards');
+    for (const part of el.querySelectorAll(':scope > .world > .dept .edge-in > *')) observer.observe(part);
+    return () => observer.disconnect();
+  }, [box, org, language]);
+  return need;
+}
+
+/* How tall the people chips of the most words need to be, in the whole-company row and among the department people: each
+   chip is left to its words for a moment and measured in the layout's own pixels, and given its height back before anything
+   is drawn. Measured as the company or the words change, and when the words of a chip take another height on their own, as
+   its fonts arrive. */
+function useChipNeed(box: { current: HTMLDivElement | null }, org: Org | null, language: string): ChipNeed {
+  const [need, setNeed] = useState<ChipNeed>({});
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || !org) return;
+    const tallest = (list: string) => {
+      const chips = [...el.querySelectorAll<HTMLElement>(`:scope > .world > ${list} > li`)];
+      const set = chips.map(chip => chip.style.height);
+      for (const chip of chips) chip.style.height = 'auto';
+      const most = Math.max(0, ...chips.map(chip => parseFloat(getComputedStyle(chip).height) || 0));
+      chips.forEach((chip, i) => (chip.style.height = set[i]!));
+      return most;
+    };
+    const measure = () => {
+      const top = tallest('.chips'), dept = tallest('.dept-chips');
+      setNeed(was => (was.top === top && was.dept === dept ? was : { top, dept }));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = guardedResizeObserver(measure, 'map-people');
+    for (const words of el.querySelectorAll(':scope > .world > :is(.chips, .dept-chips) .chip .edge-in > span')) observer.observe(words);
+    return () => observer.disconnect();
+  }, [box, org, language]);
+  return need;
+}
+
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
 type Props = { me: Me; windowOpen: boolean; leftPanelOpen?: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void; onOpenDecisions?(personId: string): void; onHome?: () => void };
 
@@ -581,13 +635,11 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   }, [layout.bends, bending]);
   /* The department whose card the pointer or the keyboard is on, so the hub shows its turn. */
   const [pointed, setPointed] = useState<string | null>(null);
-  /* Every card of the map is as tall as the one with the most words needs: measured when the words change, never for a drag. */
-  const cardWords = org ? [language, ...org.departments.map(d => [deptLabel(t, d), deptDetail(t, d), d.current ? `${d.current.number} ${d.current.title}` : '', d.employees.length, d.agents.total, JSON.stringify(d.turnProgress ?? null)].join('|'))].join('\n') : '';
-  const cardNeed = useNaturalHeight(box, '.dept', '.dept .edge-in > *', cardWords, 'map-cards');
-  const arr = useMemo(
-    () => (org ? arrangeMap(org, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed, bends, cardNeed) : null),
-    [org, layout.placed, moving, bends, cardNeed],
-  );
+  /* Every card of the map is as tall as the words of the card that has the most need, and every people chip of a row as
+     the words of the chip that has the most. */
+  const need = useCardNeed(box, org, language);
+  const chipNeed = useChipNeed(box, org, language);
+  const arr = useMemo(() => (org ? arrangeMap(org, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed, bends, need, chipNeed) : null), [org, layout.placed, moving, bends, need, chipNeed]);
   /* Pulses and Fit read the map as it stands, without waiting for it to settle. */
   const arrRef = useRef(arr);
   arrRef.current = arr;
@@ -682,9 +734,10 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   }, [inside, setView]);
 
   /* Until the view is the person's own, the map shows all of itself: as it opens, as the arrangement comes from the server or
-     is put back, and as the screen changes size. Live changes of the company, the orchestrator's window, the left panel and
-     moving a block leave the view alone. */
+     is put back, as its cards and people chips grow with their words, and as the screen changes size. Live changes of the
+     company, the orchestrator's window, the left panel and moving a block leave the view alone. */
   const shown = !!arr;
+  const cardH = arr?.depts[0]?.h ?? 0, chipH = `${arr?.top[0]?.h ?? 0}:${arr?.people.chips[0]?.h ?? 0}`;
   usePauseHiddenMap(box, inside, shown);
   useEffect(() => {
     if (!shown || inside) return;
@@ -697,7 +750,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     const ro = guardedResizeObserver(auto, 'map');
     ro.observe(el);
     return () => ro.disconnect();
-  }, [shown, inside, layout.version, mine]);
+  }, [shown, inside, layout.version, mine, cardH, chipH]);
 
   /* The person's own view stays for the next visit; the flight into a department is not theirs. */
   useEffect(() => {
