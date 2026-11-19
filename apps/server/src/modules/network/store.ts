@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gt, isNotNull, isNull, like, ne, sql } from 'drizzl
 import type { Config } from '../../config.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
-import { authority, certificates, companies, machines, peerSecrets, people, type MachineRole } from '../../db/schema.js';
+import { authority, certificates, companies, machines, peerSecrets, people, revokedCertificateSerials, type MachineRole } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { issueCertificate, makeAuthority, type Authority, type Issued } from './authority.js';
@@ -86,7 +86,11 @@ export async function certify(tx: Db, by: Authority, holder: { id: string; role:
 
 /* The serials revoked and not yet expired, sorted: what a peer must refuse now. */
 export async function revokedSerials(db: Db, now = new Date()): Promise<string[]> {
-  const rows = await db.select(only(certificates, 'serial')).from(certificates).where(and(isNotNull(certificates.revokedAt), gt(certificates.until, now))).orderBy(asc(certificates.serial));
+  const carried = db.select(only(revokedCertificateSerials, 'serial')).from(revokedCertificateSerials)
+    .where(gt(revokedCertificateSerials.until, now));
+  const rows = await db.select(only(certificates, 'serial')).from(certificates)
+    .where(and(isNotNull(certificates.revokedAt), gt(certificates.until, now)))
+    .union(carried).orderBy(sql`serial`);
   return rows.map(row => row.serial);
 }
 

@@ -19,10 +19,10 @@ describe('visible echelon finding metrics', () => {
     const metrics = await screen.findByRole('region', { name: language === 'ru' ? 'Находки по этапам' : 'Findings by stage' });
     expect(metrics).toHaveTextContent(language === 'ru' ? 'Уникальных находок: 2' : 'Unique findings: 2');
     expect(metrics).toHaveTextContent(language === 'ru' ? 'Подтверждено: 1' : 'Confirmed: 1');
-    const review = within(metrics).getByText('Review').parentElement!;
-    const security = within(metrics).getByText('Security').parentElement!;
+    const review = within(metrics).getByText(language === 'ru' ? 'Проверка' : 'Review').parentElement!;
+    const security = within(metrics).getByText(language === 'ru' ? 'Безопасность' : 'Security').parentElement!;
     expect(review).toHaveTextContent(language === 'ru' ? 'Найдено: 2' : 'Reported: 2');
     expect(security).toHaveTextContent(language === 'ru' ? 'Найдено: 1' : 'Reported: 1');
-    expect(metrics).not.toHaveTextContent('Cleanup');
+    expect(metrics).not.toHaveTextContent(language === 'ru' ? 'Уборка лишнего' : 'Cleanup');
   });
 });

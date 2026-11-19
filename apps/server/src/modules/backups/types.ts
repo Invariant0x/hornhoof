@@ -57,20 +57,19 @@ export type Carry = {
   /* role, dataLeftAt, uploadState: whether the machine holds the company's data now, and what one that stopped still
      owes. An updater of the build before says none of the three, and the restored row keeps its own. */
   machines: { id: string; revoked: boolean; lendsTests: boolean; keepsBackups: boolean; computerClosed?: boolean | null; role?: 'data' | 'worker' | null; dataLeftAt?: string | null; uploadState?: 'waiting' | 'received' | 'kept' | null }[];
-  /* The certificates revoked. */
+  /* Older updaters carried names alone. Keep the list readable by older servers. */
   serials: string[];
+  /* Live revocations from both the certificate rows and earlier restores. */
+  revokedSerials?: { serial: string; until: string }[];
   recoveryKeys: { id: string; recipient: string; linkPrint: string | null; linkName: string | null; linkUrl: string | null; madeBy: string; madeAt: string; retiredAt: string | null }[];
   /* The company's link as the relay takes it now, each secret sealed as it is stored; null: it has none now. And the
      secrets of the peer services, sealed the same way. Left out by an updater of the build before, and then the
      restored database keeps what the bundle has. */
   link?: { name: string; url: string; hidden?: boolean; keyEnc: string; nextKeyEnc: string | null; tunnelEnc: string; createdAt: string } | null;
   peerSecrets?: { kind: string; secretEnc: string; createdAt?: string }[];
-  /* The assistants' keys that open something now, each signing secret sealed as it is stored: a key revoked or
-     replaced since the bundle opens nothing after a restore. Left out by an updater of the build before, and then the
-     restored database keeps the keys the bundle has. */
+  /* The assistants' keys that open something now, each signing secret sealed as it is stored.
+     If either list is absent, both kinds of key are cleared. */
   assistantKeys?: { personId: string; keyHash: string; keyCreatedAt: string; wakeSecretEnc: string }[];
-  /* The nodes' keys that open something now: a node that signed out, was taken back or joined again with a new key since
-     the bundle opens nothing with the bundle's key after a restore. Left out by an updater of the build before, and then
-     the restored database keeps the keys the bundle has. */
+  /* The nodes' keys that open something now. An empty list means none may be restored. */
   nodeKeys?: { id: string; keyHash: string }[];
 };

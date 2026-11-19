@@ -16,6 +16,12 @@ SELECT jsonb_build_object(
   'link', (SELECT jsonb_build_object('name', name, 'url', url, 'hidden', hidden, 'keyEnc', key_enc, 'nextKeyEnc', next_key_enc, 'tunnelEnc', tunnel_enc, 'createdAt', created_at) FROM public_links LIMIT 1),
   'peerSecrets', COALESCE((SELECT jsonb_agg(jsonb_build_object('kind', kind, 'secretEnc', secret_enc, 'createdAt', created_at)) FROM peer_secrets), '[]'::jsonb),
   'serials', COALESCE((SELECT jsonb_agg(serial) FROM certificates WHERE revoked_at IS NOT NULL), '[]'::jsonb),
+  'revokedSerials', COALESCE((SELECT jsonb_agg(jsonb_build_object('serial', serial, 'until', expires) ORDER BY serial)
+    FROM (SELECT serial, max(expires) AS expires FROM (
+      SELECT serial, "until" AS expires FROM certificates WHERE revoked_at IS NOT NULL AND "until" > now()
+      UNION ALL
+      SELECT serial, "until" AS expires FROM revoked_certificate_serials WHERE "until" > now()
+    ) AS live_revocations GROUP BY serial) AS revoked), '[]'::jsonb),
   'recoveryKeys', COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'id', id, 'recipient', recipient, 'linkPrint', link_print, 'linkName', link_name, 'linkUrl', link_url, 'madeBy', made_by, 'madeAt', created_at, 'retiredAt', retired_at))
     FROM recovery_keys), '[]'::jsonb),

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { digestOf, imageOf, namedBy, platformOf, rateNote, revisionIn, signIn, tokenIn, tokenRealm, unknownOf, verdictOf } from '../github-tests/version-out.mjs';
+import { createHash } from 'node:crypto';
+import { digestOf, imageOf, namedBy, platformOf, rateNote, revisionIn, signIn, tokenIn, tokenRealm, unknownOf, verdictOf, versionOut } from '../github-tests/version-out.mjs';
 /* global Response, Buffer, URL */
 
 const SHA = 'a'.repeat(40);
@@ -119,9 +120,173 @@ test('an index gives the image of its first real platform, not an attestation', 
   assert.equal(platformOf({ manifests: [{ digest: 'x', platform: { os: 'unknown' } }] }), undefined);
 });
 
-test('an image configuration gives its revision label, or nothing when it carries none', () => {
-  assert.equal(revisionIn({ config: { Labels: { 'org.opencontainers.image.revision': SHA } } }), SHA);
-  for (const config of [{ config: { Labels: {} } }, { config: {} }, {}, null]) assert.equal(revisionIn(config), '', JSON.stringify(config));
+const runtime = { architecture: 'amd64', os: 'linux', rootfs: { type: 'layers', diff_ids: [] } };
+const revisionLabel = 'org.opencontainers.image.revision';
+
+test('a valid image configuration gives its revision label or confirms it is missing', () => {
+  assert.equal(revisionIn({ ...runtime, config: { Labels: { [revisionLabel]: SHA } } }), SHA);
+  for (const config of [{ ...runtime, config: { Labels: {} } }, { ...runtime, config: {} }, runtime]) assert.equal(revisionIn(config), '');
+  for (const config of [{}, null, { ...runtime, config: { Labels: [] } }, { ...runtime, config: { Labels: { [revisionLabel]: [SHA] } } }]) {
+    assert.throws(() => revisionIn(config), /invalid image/, JSON.stringify(config));
+  }
+});
+
+const API_URL = 'https://api.example.invalid';
+const REPOSITORY = 'example/hornhoof';
+const REGISTRY_URL = 'https://registry.example.invalid';
+const API = `${API_URL}/repos/${REPOSITORY}`;
+const GIT_REF = `${API}/git/ref/tags/v${VERSION}`;
+const RELEASE = `${API}/releases/tags/v${VERSION}`;
+const IMAGE = `${REGISTRY_URL}/v2/invariant0x/hornhoof`;
+const MANIFEST = `${IMAGE}/manifests/${VERSION}`;
+const STORAGE = 'https://storage.example.invalid/object';
+const HTTP = status => new Response(null, { status });
+const refAt = (sha, type = 'commit') => Response.json({ ref: `refs/tags/v${VERSION}`, object: { type, sha } });
+
+/* Replies are recorded samples. The mock also checks the exact list of requests after every case. */
+function recorded(t, replies) {
+  const settings = {
+    GITHUB_API_URL: API_URL,
+    GITHUB_REPOSITORY: REPOSITORY,
+    GITHUB_TOKEN: 'fixture-token',
+    GITHUB_ACTOR: 'fixture-actor',
+    HORNHOOF_REGISTRY_URL: REGISTRY_URL,
+  };
+  const original = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
+  Object.assign(process.env, settings);
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', (url, options) => {
+    const [expected, response] = replies[requests.length] ?? [];
+    requests.push({ url: String(url), ...options });
+    if (String(url) !== expected) throw new Error('unexpected fixture request');
+    if (response instanceof Error) throw response;
+    return response;
+  });
+  t.after(() => {
+    for (const [key, value] of Object.entries(original)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    assert.deepEqual(requests.map(({ url }) => url), replies.map(([url]) => url));
+    assert.ok(requests.every(({ redirect }) => redirect === 'manual'));
+  });
+  return requests;
+}
+
+async function stopsUnknown(job, reason) {
+  const { verdict, why } = await versionOut({ job, ...PUSH });
+  assert.equal(verdict, 'unknown');
+  assert.match(why, reason);
+  assert.match(why, /This job stops/);
+}
+
+test('a confirmed direct 404 keeps the new-version path open', async t => {
+  recorded(t, [[GIT_REF, HTTP(404)], [MANIFEST, HTTP(404)]]);
+  assert.equal((await versionOut({ job: 'publish', ...PUSH })).verdict, 'new');
+});
+
+test('a version manifest redirect stops at the registry response', async t => {
+  recorded(t, [[GIT_REF, refAt(SHA)], [MANIFEST, Response.redirect(STORAGE, 307)]]);
+  await stopsUnknown('publish', /redirected the version lookup/);
+});
+
+test('a successful version response must have a supported manifest shape', async t => {
+  for (const [name, body] of [['null', null], ['bare object', {}], ['empty string', '']]) {
+    await t.test(name, async sample => {
+      recorded(sample, [[GIT_REF, refAt(SHA)], [MANIFEST, Response.json(body)]]);
+      await stopsUnknown('publish', /invalid image manifest/);
+    });
+  }
+});
+
+test('an invalid success or an ordinary GitHub failure stops the job', async t => {
+  for (const [name, response, reason] of [
+    ['null reference', Response.json(null), /invalid tag reference/],
+    ['invalid JSON', new Response('<html>'), /not JSON/],
+    ['partial success', HTTP(206), /answered 206/],
+    ['temporary failure', HTTP(503), /answered 503/],
+    ['unreachable', new Error('fixture network error'), /could not be reached/],
+    ['redirect', Response.redirect(STORAGE, 301), /answered 301/],
+  ]) {
+    await t.test(name, async sample => {
+      const requests = recorded(sample, [[GIT_REF, response]]);
+      await stopsUnknown('publish', reason);
+      assert.equal(requests[0].headers.authorization, 'Bearer fixture-token');
+    });
+  }
+});
+
+test('a confirmed tag on another commit stops without a registry read', async t => {
+  recorded(t, [[GIT_REF, refAt(OTHER)]]);
+  assert.equal((await versionOut({ job: 'publish', ...PUSH })).verdict, 'stop');
+});
+
+test('a release lookup requires a matching tag and release id from GitHub', async t => {
+  for (const [name, response, expected] of [
+    ['present', Response.json({ tag_name: `v${VERSION}`, id: 1 }), 'out'],
+    ['absent', HTTP(404), 'new'],
+    ['wrong tag', Response.json({ tag_name: 'v1.0.0', id: 1 }), 'unknown'],
+    ['no id', Response.json({ tag_name: `v${VERSION}` }), 'unknown'],
+    ['null release', Response.json(null), 'unknown'],
+  ]) {
+    await t.test(name, async sample => {
+      recorded(sample, [[GIT_REF, refAt(OTHER, 'tag')], [`${API}/git/tags/${OTHER}`, Response.json({ sha: OTHER, object: { type: 'commit', sha: SHA } })], [RELEASE, response]]);
+      assert.equal((await versionOut({ job: 'release', ...PUSH })).verdict, expected);
+    });
+  }
+});
+
+const contentDigest = bytes => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+const config = JSON.stringify({ ...runtime, config: { Labels: { [revisionLabel]: SHA } } });
+const configId = contentDigest(config);
+const manifest = { schemaVersion: 2, config: { digest: configId }, layers: [] };
+const blobUrl = `${IMAGE}/blobs/${configId}`;
+const askToken = () => new Response(null, {
+  status: 401,
+  headers: { 'www-authenticate': `Bearer realm="${REGISTRY_URL}/token"` },
+});
+
+test('a registry token request stops at a redirect', async t => {
+  const requests = recorded(t, [[GIT_REF, HTTP(404)], [MANIFEST, askToken()], [`${REGISTRY_URL}/token`, Response.redirect(STORAGE, 307)]]);
+  await stopsUnknown('publish', /answered 307 for a token/);
+  assert.equal(requests[2].headers.authorization, signIn('fixture-actor', 'fixture-token').authorization);
+});
+
+test('a confirmed image may read a digest from storage without credentials', async t => {
+  const image = JSON.stringify(manifest);
+  const imageId = contentDigest(image);
+  const index = { schemaVersion: 2, manifests: [{ digest: imageId, platform: { architecture: 'amd64', os: 'linux' } }] };
+  const requests = recorded(t, [
+    [GIT_REF, refAt(SHA)], [MANIFEST, askToken()], [`${REGISTRY_URL}/token`, Response.json({ token: 'pull' })],
+    [MANIFEST, Response.json(index)], [`${IMAGE}/manifests/${imageId}`, new Response(image)],
+    [blobUrl, Response.redirect(STORAGE, 307)], [STORAGE, new Response(config)],
+  ]);
+  assert.equal((await versionOut({ job: 'publish', ...PUSH })).verdict, 'out');
+  assert.equal(requests[5].headers.authorization, 'Bearer pull');
+  assert.equal(requests[6].headers.authorization, undefined);
+});
+
+test('a digest redirect needs a secure storage URL with no credentials', async t => {
+  for (const location of ['http://storage.example.invalid/object', 'https://example:fixture@storage.example.invalid/object']) {
+    await t.test(location, async sample => {
+      recorded(sample, [[GIT_REF, refAt(SHA)], [MANIFEST, Response.json(manifest)], [blobUrl, Response.redirect(location, 307)]]);
+      await stopsUnknown('publish', /invalid redirect/);
+    });
+  }
+});
+
+test('a delegated digest read needs a valid response that matches the digest', async t => {
+  for (const [name, response, reason] of [
+    ['missing', HTTP(404), /storage answered 404/],
+    ['ordinary failure', HTTP(503), /storage answered 503/],
+    ['second redirect', Response.redirect('https://elsewhere.example.invalid/object', 302), /storage answered 302/],
+    ['wrong bytes', new Response('{}'), /does not match its digest/],
+  ]) {
+    await t.test(name, async sample => {
+      recorded(sample, [[GIT_REF, refAt(SHA)], [MANIFEST, Response.json(manifest)], [blobUrl, Response.redirect(STORAGE, 307)], [STORAGE, response]]);
+      await stopsUnknown('publish', reason);
+    });
+  }
 });
 
 test('no message has an em dash or a dash between words', () => {

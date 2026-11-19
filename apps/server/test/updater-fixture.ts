@@ -114,7 +114,7 @@ export function tempUpdaterDir(prefix: string): string {
   return dir;
 }
 
-export type Stand = { dir: string; control: string; server: string; log: string };
+export type Stand = { dir: string; control: string; computerControl: string; server: string; log: string };
 
 /* The digest of each build as the registry has it now, and of the node and updater images made with it. The app asks
    for the build it read and for those images, by digest. */
@@ -129,15 +129,17 @@ export const refs = (tag: string) => `HORNHOOF_APP_REF=${APP}@${DIGESTS[tag]} HO
 export function stand(env = 'HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\n'): Stand {
   const dir = tempUpdaterDir('hh-updater-');
   const control = join(dir, 'control');
+  const computerControl = join(dir, 'computer-control');
   const server = join(dir, 'srv');
   mkdirSync(control);
+  mkdirSync(computerControl);
   mkdirSync(server);
   writeFileSync(join(server, '.env'), env);
   writeFileSync(join(dir, 'running'), 'aaa');
   writeFileSync(join(dir, 'migrations'), '20');
   const log = join(dir, 'stub.log');
   writeFileSync(log, '');
-  return { dir, control, server, log };
+  return { dir, control, computerControl, server, log };
 }
 
 export async function runUpdater(args: string[], env: Record<string, string>): Promise<{ code: number | null; out: string }> {
@@ -192,6 +194,7 @@ const standEnv = (s: Stand, env: Record<string, string>) => ({
   STUB_DIGESTS: Object.entries(DIGESTS).map(([tag, digest]) => `${tag}=${digest}`).join(' '),
   STUB_RUNNING_IMAGES: `app=${APP}@${DIGESTS['0.4.0']} node=${APP}-node@${NODE_DIGESTS['0.4.0']} updater=${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`,
   HORNHOOF_CONTROL_DIR: s.control,
+  HORNHOOF_COMPUTER_CONTROL_DIR: s.computerControl,
   HORNHOOF_SERVER_DIR: s.server,
   /* A machine whose installer wrote its system down, as every machine set up by this build has: a Mac, where the updater
      looks at nothing of the computer. A test of what it learns by itself gives an empty system, or Linux. */

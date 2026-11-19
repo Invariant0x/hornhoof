@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { api, ApiFailure } from '../src/api';
-import { detectLanguage, errorText, plural } from '../src/i18n';
+import { ECHELON_STAGES } from '@hornhoof/protocol/echelons';
+import { detectLanguage, DICTIONARIES, errorText, LANGUAGES, plural, type Language } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { mockApi } from './api-mock';
@@ -49,6 +50,19 @@ describe('Russian vocabulary', () => {
     expect(textsOf(ru).filter(t => /[\u0451\u0401]/.test(t))).toEqual([]);
     expect(textsOf(en).filter(t => t.includes('\u2014'))).toEqual([]);
     expect(textsOf(ru).filter(t => t.includes('\u2014'))).toEqual([]);
+  });
+});
+
+describe('Stage names', () => {
+  /* A stage whose word a language truly spells as English does; none so far. */
+  const SAME_AS_ENGLISH: Partial<Record<Language, readonly string[]>> = {};
+
+  it('are in the own words of every shipped language, as call frames and task workflows show them', () => {
+    const stages = (t: typeof en) => ({ ...Object.fromEntries(ECHELON_STAGES.map(s => [s, t.tasks.echelons.stages[s]])), ...Object.fromEntries(Object.entries(t.tasks.echelons.documentStages).map(([s, w]) => [`document.${s}`, w])) });
+    const english = stages(en);
+    const leftovers = LANGUAGES.filter(l => l.id !== 'en').flatMap(({ id }) =>
+      Object.entries(stages(DICTIONARIES[id])).filter(([stage, word]) => !word.trim() || (word === english[stage] && !SAME_AS_ENGLISH[id]?.includes(stage))).map(([stage, word]) => `${id} ${stage}: ${word}`));
+    expect(leftovers).toEqual([]);
   });
 });
 
