@@ -668,7 +668,11 @@ describe('tools a skill grants', () => {
     const { app, db, acme, sub, dev, bruno, task } = await company(['ops-failure-review']);
     const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
     const [ava] = await db.insert(agents).values({ companyId: acme.id, kind: 'assistant', name: 'Ava', model: '', subscriptionId: sub.id }).returning();
-    const [own] = await db.insert(tasks).values({ companyId: acme.id, number: 900, title: 'Letter to the landlord', departmentId: dev.id, status: 'blocked', assigneeAgentId: ava!.id, executorAgentId: ava!.id }).returning();
+    /* The assistant holds one task and does another that an employee holds: either is that person's work. */
+    const [own] = await db.insert(tasks).values([
+      { companyId: acme.id, number: 900, title: 'Letter to the landlord', departmentId: dev.id, status: 'blocked', assigneeAgentId: ava!.id },
+      { companyId: acme.id, number: 901, title: 'Receipt for the landlord', departmentId: dev.id, status: 'blocked', assigneeAgentId: bruno.id, executorAgentId: ava!.id },
+    ]).returning();
     await db.insert(taskEvents).values({ companyId: acme.id, taskId: own!.id, kind: 'blocked', agentId: ava!.id, text: 'Waits for the tenancy deposit sum.' });
     await blocked(app.ctx, bruno.id, task.id, 'Waits for the bank.');
     const turn = { companyId: acme.id, subscriptionId: sub.id, kind: 'conversation' as const, prompt: 'x', timeoutMs: 1, status: 'failed' as const };
