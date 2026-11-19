@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from './api';
 import { everyVisible } from './guard';
 import { latestAnswers } from './live';
+import { page } from './updates';
 
 /* How often a page that is seen asks which build the server runs. */
 export const BUILD_POLL_MS = 5 * 60_000;
@@ -35,4 +36,13 @@ export function useNewBuild(): boolean {
     };
   }, []);
   return newer;
+}
+
+/* A tab nobody is signed in on takes the server's new build at once; one a person works on keeps what they typed until
+   their session ends. */
+export function useReloadToNewBuild(working: boolean) {
+  const newBuild = useNewBuild();
+  useEffect(() => {
+    if (newBuild && !working) page.reload();
+  }, [newBuild, working]);
 }

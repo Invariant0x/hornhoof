@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiFailure, onSignedOut } from './api';
-import { useNewBuild } from './build';
+import { useReloadToNewBuild } from './build';
 import { errorText, useT } from './i18n';
 import { forgetOrg } from './org';
 import { forgetRequestDrafts } from './ui/Requests';
@@ -12,7 +12,6 @@ import type { Me } from './types';
 import { Card } from './ui/Card';
 import { VersionMark } from './ui/VersionMark';
 import { parseRoute } from './routes';
-import { page } from './updates';
 
 type Screen =
   | { kind: 'loading' }
@@ -64,13 +63,7 @@ function validMe(me: Me | null): Me {
 function Screens() {
   const t = useT();
   const [screen, show] = useScreen();
-  const newBuild = useNewBuild();
-
-  /* A tab nobody is signed in on takes the server's new build at once; one a person works on keeps what they typed
-     until their session ends. */
-  useEffect(() => {
-    if (newBuild && screen.kind !== 'shell') page.reload();
-  }, [newBuild, screen.kind]);
+  useReloadToNewBuild(screen.kind === 'shell');
 
   const decide = useCallback(async (welcome = false) => {
     const route = parseRoute(window.location.pathname);
