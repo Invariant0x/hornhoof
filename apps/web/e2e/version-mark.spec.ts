@@ -144,9 +144,15 @@ for (const look of LOOKS) {
     const version = mark(page);
     const style = await version.evaluate(el => {
       const s = getComputedStyle(el);
-      return { size: s.fontSize, color: s.color, ground: s.backgroundColor, lines: [s.borderTopWidth, s.borderBottomWidth, s.borderLeftWidth, s.borderRightWidth], taps: s.pointerEvents };
+      return {
+        size: s.fontSize, color: s.color, ground: s.backgroundColor, lines: [s.borderTopWidth, s.borderBottomWidth, s.borderLeftWidth, s.borderRightWidth],
+        taps: s.pointerEvents, reads: `${s.direction} ${s.unicodeBidi}`,
+      };
     });
-    expect(style).toEqual({ size: '12px', color: await tokenColor(page, '--muted'), ground: 'rgba(0, 0, 0, 0)', lines: ['0px', '0px', '0px', '0px'], taps: 'none' });
+    /* The build is a name: it reads left to right on a page right to left too, its brackets where they belong. */
+    expect(style).toEqual({
+      size: '12px', color: await tokenColor(page, '--muted'), ground: 'rgba(0, 0, 0, 0)', lines: ['0px', '0px', '0px', '0px'], taps: 'none', reads: 'ltr isolate',
+    });
 
     /* In the bottom end corner: right on a page left to right, left on one right to left. */
     const at = await box(version);

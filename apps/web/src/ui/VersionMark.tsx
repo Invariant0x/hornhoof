@@ -36,9 +36,10 @@ export function VersionMark() {
   return version && <footer className="version-mark">{versionText(version)}</footer>;
 }
 
-/* The running build over the map, in the bottom end corner of the room its bars leave free. It stands on the map from the
-   moment the map opens, even before the build answers, so the footer row never comes and goes under the map (#1590). */
+/* The running build over the map, in the bottom end corner of the room its bars leave free, read left to right on any page.
+   It stands on the map from the moment the map opens, even before the build answers, so the footer row never comes and goes
+   under the map (#1590). */
 export function MapVersion() {
   const version = useVersion();
-  return <p className="map-version">{version && versionText(version)}</p>;
+  return <p className="map-version">{version && <bdi dir="ltr">{versionText(version)}</bdi>}</p>;
 }
