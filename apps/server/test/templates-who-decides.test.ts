@@ -92,6 +92,8 @@ describe('what the company does itself, and what waits for a person', () => {
     expect(SECURITY).toMatch(/The orchestrator changes people, access, plans, machines, repositories, the public link and updates in any turn, for whoever asked, an employee too/);
     expect(SECURITY).toMatch(/Paying and signing in the company's name wait for a person, and deleting for good waits for the CEO's yes/);
     expect(SECURITY).toMatch(/He always acts as the company's owner, in a turn and between turns/);
+    /* The orchestrator's shell runs inside Hornhoof on the server's machine, so closing access does not keep him from root there. */
+    expect(SECURITY).toMatch(/server's own machine[\s\S]*orchestrator[\s\S]*root there even while access is closed/);
     expect(SECURITY).toMatch(/While access is open, the orchestrator works there in any turn of his and between turns\. Another agent never works there in a turn whose last words came from a person other than the CEO, the CEO delegate or the machine's owner/);
   });
 
