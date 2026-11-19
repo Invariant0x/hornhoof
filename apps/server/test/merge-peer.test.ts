@@ -32,6 +32,8 @@ await (await openTestDb()).client.close();
 
 type MergeRow = { id: string; source: string; label: string; status: string; path: string | null; fork: string | null; tries: number; error: string | null; machine: string | null; merged_at: string | null; done_at: string | null };
 const rowsOf = async <T>(db: Db, query: ReturnType<typeof sql>): Promise<T[]> => ((await db.execute(query)) as unknown as { rows: T[] }).rows;
+/* The merge itself, taken before any test spies on it: a spy one test leaves behind would otherwise call itself. */
+const realRunMerge = apply.runMerge;
 const NETWORK_ID = `99bb2233aabbccdd${'2'.repeat(48)}`;
 const PORT = 45_678;
 /* The machine id the old leader's own node ran under. */
@@ -139,6 +141,31 @@ describe("the old database of a copy on another machine", () => {
     expect(merge).toMatchObject({ status: 'merged' });
     expect(merge!.path).not.toBeNull();
     expect(await s.db.select().from(departments).where(eq(departments.id, mine!.id))).toHaveLength(1);
+  });
+
+  it('checks a copy again on each try after its merge was applied, and never takes it by its ids then', async () => {
+    const s = await stand();
+    let mine: { id: string } | undefined;
+    /* A department that reached the copy and that the leader lacks: the merge goes the whole way. */
+    await s.copied(async old => ([mine] = await old.db.insert(departments).values({ companyId: s.acme.id, name: 'Only there', roleCode: 'THERE' }).returning()));
+    s.door(true);
+    const run = vi.spyOn(apply, 'runMerge').mockImplementation(async (...args) => {
+      const done = await realRunMerge(...args);
+      /* A merge that applied and left a row behind, with nothing in the journal to account for it. */
+      await s.opened.client.exec(`SET session_replication_role = replica; DELETE FROM departments WHERE id = '${mine!.id}'; SET session_replication_role = DEFAULT`);
+      return done;
+    });
+    onTestFinished(() => run.mockRestore());
+    const missing = `Not complete yet: departments ${JSON.stringify({ id: mine!.id })}`;
+    await s.look();
+    expect((await s.merges())[0]).toMatchObject({ status: 'applied', tries: 1, error: missing, merged_at: null });
+    /* The next try is due: it checks again, and what the merge recorded of the copy's journal stands for none of its rows. */
+    await s.db.execute(sql`UPDATE net.merges SET tried_at = tried_at - interval '2 hours'`);
+    await s.look();
+    expect((await s.merges())[0]).toMatchObject({ status: 'applied', tries: 2, error: missing, merged_at: null });
+    expect(run).toHaveBeenCalledTimes(1);
+    /* The machine is not told it may drop the old database. */
+    expect(await copyOrder(s.app.ctx, s.machine)).toMatchObject({ old: 'waiting' });
   });
 
   it('takes a handed database as one that never wrote', async () => {
