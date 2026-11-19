@@ -32,7 +32,11 @@ enter_computer_queue() {
 # Clear the old queue at startup. Unlink queue entries without opening them or descending into directories.
 computer_clear_legacy() (
   local file removed=0
-  enter_computer_queue "$CONTROL" || return 0
+  [ -L "$CONTROL/computer" ] || [ -e "$CONTROL/computer" ] || return 0
+  if ! enter_computer_queue "$CONTROL" || [ "$(stat -c %u . 2> /dev/null || stat -f %u . 2> /dev/null)" != 1000 ]; then
+    printf '%s\n' 'Skipped the old computer queue: expected a directory owned by UID 1000.' >&2
+    return 0
+  fi
   for file in ./*.json ./*.json.new ./*.started; do
     [ -L "$file" ] || [ -f "$file" ] || continue
     if rm -f -- "${file:?}" 2> /dev/null; then removed=$((removed + 1)); fi
@@ -49,11 +53,33 @@ move_over() {
   fi
 }
 
-# The keeper's sign that this updater runs, in the computer volume. A missing one is made in a private folder and renamed
-# into place: bash opens a redirect target through a link once it has seen something there that is not a regular file,
-# so the keeper could swap a link in at that moment.
+# computer_publish <name> <kind> <writer> [args]: write in a private folder, then rename the complete file.
+# The updater never opens the destination to write it. A link or a pipe in its place cannot redirect or block the write.
+computer_publish() (
+  local file="$1" kind="$2" here temporary target status=0
+  shift 2
+  [ ! -L "$file" ] && [ ! -e "$file" ] || exit 1
+  target="../$file"
+  if [[ "$OSTYPE" == linux* ]]; then
+    # Keep the destination in the entered directory even if the private folder is moved.
+    exec 9< . || exit 1
+    target="/proc/self/fd/9/$file"
+  fi
+  here=$(physical_dir) && temporary=$(mktemp -d ".$kind.XXXXXXXX") || exit 1
+  (
+    cd -P -- "./$temporary" && [ "$(physical_dir)" = "${here%/}/$temporary" ] && [ -O . ] || exit 1
+    trap 'rm -f -- "./${kind:?}"' EXIT
+    umask 022
+    set -o noclobber
+    "$@" > "./$kind" || exit 1
+    [ ! -L "$target" ] && [ ! -e "$target" ] && move_over "./$kind" "$target"
+  ) || status=$?
+  rmdir -- "./${temporary:?}" 2> /dev/null || true
+  exit "$status"
+)
+
+# The keeper's sign that this updater runs, in the computer volume.
 computer_heartbeat() (
-  local here temporary
   cd -P -- "$COMPUTER_CONTROL" 2> /dev/null || exit 0
   [ ! -L ./alive ] || exit 0
   if [ -f ./alive ]; then
@@ -61,14 +87,7 @@ computer_heartbeat() (
     touch -c -h -- ./alive 2> /dev/null || true
     exit 0
   fi
-  [ ! -e ./alive ] || exit 0
-  here=$(physical_dir) && temporary=$(mktemp -d .alive.XXXXXXXX 2> /dev/null) || exit 0
-  (
-    cd -P -- "./$temporary" && [ "$(physical_dir)" = "${here%/}/$temporary" ] && [ -O . ] || exit 1
-    trap 'rm -f -- ./alive' EXIT
-    (set -o noclobber; : > ./alive) && [ ! -L ../alive ] && [ ! -e ../alive ] && move_over ./alive ../alive
-  ) 2> /dev/null || true
-  rmdir -- "./${temporary:?}" 2> /dev/null || true
+  computer_publish alive alive : 2> /dev/null || true
 )
 
 # Both heartbeats, the keeper's first. The app can write the control folder and so break its own heartbeat there; that
@@ -87,25 +106,16 @@ computer_open() {
   [ "$until" -gt "$(date +%s)" ]
 }
 
+computer_answer_json() {
+  tail -c "$COMPUTER_OUTPUT" "$3" | jq -Rs --arg id "$1" --argjson exit "$2" '{id: $id, exit: $exit, output: .}'
+}
+
 # computer_answer <id> <exit code> <output file>: the end of the output, written whole and then moved. It fails when
 # no answer is in place, as on a full volume, so the caller keeps the command's mark.
 computer_answer() {
-  local file="$1.out.json" temporary queue published=''
-  [ ! -L "$file" ] && [ ! -e "$file" ] || return 0
-  # Create the answer inside a private temporary directory on this volume, then publish the whole file.
-  if queue=$(physical_dir) && temporary=$(mktemp -d .answer.XXXXXXXX 2> /dev/null); then
-    (
-      cd -P -- "./$temporary" && [ "$(physical_dir)" = "${queue%/}/$temporary" ] && [ -O . ] || exit 1
-      trap 'rm -f -- ./answer' EXIT
-      umask 022
-      set -o noclobber
-      tail -c "$COMPUTER_OUTPUT" "$3" | jq -Rs --arg id "$1" --argjson exit "$2" '{id: $id, exit: $exit, output: .}' > ./answer || exit 1
-      [ ! -L "../$file" ] && [ ! -e "../$file" ] || exit 1
-      move_over ./answer "../$file"
-    ) 2> /dev/null && published=1
-    rmdir -- "./${temporary:?}" 2> /dev/null || true
-  fi
-  [ -z "$published" ] || return 0
+  local file="$1.out.json"
+  if [ ! -L "$file" ] && [ -f "$file" ]; then return 0; fi
+  if computer_publish "$file" answer computer_answer_json "$@" 2> /dev/null; then return 0; fi
   printf '%s\n' 'Computer answer refused: it could not be published safely.' >&2
   return 1
 }
@@ -158,7 +168,7 @@ computer_runs() (
     timeout=$(jq -r '.timeout // empty' "$file" 2> /dev/null || true)
     case "$timeout" in '' | *[!0-9]*) timeout=300 ;; esac
     if [ "$timeout" -lt 1 ] || [ "$timeout" -gt "$COMPUTER_MAX" ]; then timeout=300; fi
-    if ! { [ ! -L "$started" ] && [ ! -e "$started" ] && (set -o noclobber; : > "$started"); } 2> /dev/null; then
+    if ! computer_publish "$id.started" started : 2> /dev/null; then
       printf '%s\n' 'Computer request refused: its start marker could not be created.' >&2
       rm -f -- "${out:?}"
       continue
