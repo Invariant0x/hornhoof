@@ -95,7 +95,7 @@ describe('the lab', () => {
       });
     /* The machine's own files are at /host: the name it reads there is its own. */
     expect(await ended(await run('cat /host/etc/hostname'))).toBe('done|0|m2');
-    const settings = async () => JSON.parse(ok(await m2.exec(`cd ${folder} && docker compose exec -T keeper cat /control/computer.json`), 'computer.json')) as { untilSec: number | null; by: string };
+    const settings = async () => JSON.parse(ok(await m2.exec(`cd ${folder} && docker compose exec -T keeper cat /keeper/computer-control/computer.json`), 'computer.json')) as { untilSec: number | null; by: string };
     expect(await settings()).toMatchObject({ untilSec: expect.any(Number), by: 'keeper' });
 
     /* Closed by its owner, nothing runs there: a command that comes then never starts. */

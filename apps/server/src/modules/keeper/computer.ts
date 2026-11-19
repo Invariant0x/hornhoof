@@ -16,7 +16,7 @@ export const ASK_MS = 10_000;
 const ALIVE_MS = 30_000;
 /* The grant the keeper holds, and the ones that ended, each until its own end, so none opens the machine twice. */
 export const GRANTS_FILE = 'grants.json';
-const LEGACY_FILE = 'computer.legacy.json';
+const COMPUTER_CONTROL = 'computer-control';
 /* As many held commands as one ask names. */
 const HELD_MOST = 8;
 
@@ -24,7 +24,7 @@ const HELD_MOST = 8;
 export type ComputerAsk = (method: 'GET' | 'POST', path: string, body?: unknown, signal?: AbortSignal) => Promise<{ status: number; body: unknown }>;
 
 export type ComputerCarrierOptions = {
-  /* The folder the keeper shares with its updater, and the keeper's own. */
+  /* The shared status folder, and the keeper's own folder with its private updater channel mounted inside. */
   controlDir: string;
   dir: string;
   /* This machine's id in the company's network, which a grant names. */
@@ -100,12 +100,11 @@ export class ComputerCarrier {
   }
 
   private file(name: string): string {
-    return join(this.opts.controlDir, name);
+    return join(this.opts.dir, COMPUTER_CONTROL, name);
   }
 
-  /* What an app from before access was per machine wrote goes aside, by one rename and never over one set aside
-     before, and the machine is closed until the app that leads has taken it over. What a keeper wrote stays, so a
-     restart stops no command; the minute without an answer counts from here. */
+  /* The private channel starts closed on update. What a keeper already wrote there stays on restart. The minute
+     without an answer counts from here. */
   prepare(): void {
     if (this.prepared) return;
     this.prepared = true;
@@ -113,8 +112,7 @@ export class ComputerCarrier {
     try {
       mkdirSync(this.file('computer'), { recursive: true });
       const said = readJson(this.file('computer.json')) as { by?: unknown } | null;
-      if (said && said.by === undefined && !existsSync(this.file(LEGACY_FILE))) renameSync(this.file('computer.json'), this.file(LEGACY_FILE));
-      if (!said || said.by === undefined) this.write(CLOSED);
+      if (said?.by !== 'keeper') this.write(CLOSED);
     } catch (err) {
       this.opts.log(`Could not prepare the control folder for computer access: ${reasonOf(err)}`);
     }
@@ -167,7 +165,7 @@ export class ComputerCarrier {
 
   private updaterAlive(): boolean {
     try {
-      return Date.now() - statSync(this.file('alive')).mtimeMs < ALIVE_MS;
+      return Date.now() - statSync(join(this.opts.controlDir, 'alive')).mtimeMs < ALIVE_MS;
     } catch {
       return false;
     }
