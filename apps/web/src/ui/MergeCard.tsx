@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { useLanguage, useT } from '../i18n';
 import type { MergeConflict, MergeDecision, MergePicked } from '../types';
+import { WaitsForNote } from './DecidedBy';
 
 const when = (language: string, iso: string): string => new Date(iso).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -76,7 +77,7 @@ export function MergeCard({ merge, onChange, onFailure, waitsFor }: { merge: Mer
   return (
     <section className="t-card" aria-label={title}>
       <h4>{title}</h4>
-      {waitsFor && <p className="muted">{waitsFor}</p>}
+      <WaitsForNote text={waitsFor} />
       <p className="t-card-brief">{t.merge.needsYou(conflicts?.length ?? merge.open)}</p>
       {left.length > 0 && (
         /* The server writes why in English; another language says that it happened. */

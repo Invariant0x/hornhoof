@@ -2,7 +2,7 @@ import { DEPARTMENT_TEMPLATES } from '@hornhoof/protocol/catalog';
 import { useState } from 'react';
 import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import type { DecidedBy, MaterialStampView, NewItem, Org, StructureItem, TemplateKey } from '../types';
-import { Decides, frozenBy } from './DecidedBy';
+import { Decides, frozenBy, WaitsForNote } from './DecidedBy';
 import { ProposalMaterialsSection, useProposalCardPost, useProposalMaterials } from './RequestMaterials';
 
 type Props = {
@@ -174,7 +174,7 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
   return (
     <div className={sent ? 't-card done' : 't-card'}>
       <h4>{t.card.title}</h4>
-      {waitsFor && <p className="muted">{waitsFor}</p>}
+      <WaitsForNote text={waitsFor} />
       <ProposalMaterialsSection state={proposalMaterials} />
       {items.map((item, i) => (
         <StructureRow key={i} item={item} checked={ticks[i]!} disabled={rowDisabled} departments={departments} t={t} onToggle={next => toggleRow(i, next)} />

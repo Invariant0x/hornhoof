@@ -153,12 +153,8 @@ export async function servePeopleWaits(page: Page) {
     asked('r3', 'Call the shop owners back', MARIA_QUESTION, { agent: { id: ROSA.id, name: ROSA.name }, ownerPersonId: MARIA.id, decidedBy: { kind: 'department_and_ceo', department: SALES } }),
   ];
   const decisions: Decisions = { ...DECISIONS, requests, counts: { byPerson: { [IVAN.id]: 1, [MARIA.id]: 1, 'p-max': 1 }, byAgent: { [HANA.id]: 2, [ROSA.id]: 1 }, total: 2 } };
-  await page.route('**/api/**', route => {
-    const path = new URL(route.request().url()).pathname;
-    if (path === '/api/org') return route.fulfill({ json: { ...ORG, people } });
-    if (path === '/api/requests') return route.fulfill({ json: decisions });
-    return route.fallback();
-  });
+  await page.route('**/api/org', route => route.fulfill({ json: { ...ORG, people } }));
+  await page.route('**/api/requests', route => route.fulfill({ json: decisions }));
 }
 
 /* The shortest words a link of the tracker holds: the goal Refunds and the task Gift cards are called QA, and Hana in

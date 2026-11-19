@@ -250,6 +250,19 @@ type Section =
   | { kind: 'waits' | 'people' | 'failures' | 'turns' | 'mine' | 'working' | 'company' | 'goals' | 'due' }
   | { kind: 'department' | 'responsible' | 'goal' | 'root'; id: string };
 
+/* What waits for people in the company is for those who see the whole company; anyone else asking for it by its address
+   gets what waits for them. */
+const placeFor = (place: TrackerPlace, company: boolean): TrackerPlace => (company || place.show !== 'people' ? place : { ...place, show: 'waits' });
+
+/* The number beside what waits for people in the company, only for those who see it. */
+const peopleCount = (decisions: Decisions | undefined, tasks: TaskLine[], company: boolean) => (company ? waitsCount(shownDecisions(decisions, 'everyone'), tasks, []) : undefined);
+
+/* The pages whose list is what waits; those that show it, under their work too; and those that hold what is being made above
+   what they show, as they are not a list of work. */
+const WAIT_PAGES = new Set<Section['kind']>(['waits', 'people']);
+const WAITS_SHOWN = new Set<Section['kind']>(['waits', 'people', 'mine']);
+const MAKE_ON_TOP = new Set<Section['kind']>(['waits', 'people', 'due', 'turns']);
+
 function sectionOf(place: TrackerPlace): Section {
   if (place.show) return { kind: place.show };
   if (place.department) return { kind: 'department', id: place.department };
@@ -388,10 +401,8 @@ function MakeHere({ org, places, department, pipeline, loose, making, setMaking,
 /* The tracker keeps the same task and goal cards across its views. */
 export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, onDecisionsChanged, selected, onOpenTask, onOpenGoal, onOpenAgent, onOpenOrchestrator, onHome }: Props) {
   const t = useT();
-  /* What waits for people in the company is for those who see the whole company; anyone else asking for it by its address
-     gets what waits for them. */
   const company = me.person.scopeKind === 'company';
-  const place: TrackerPlace = company || asked.show !== 'people' ? asked : { ...asked, show: 'waits' };
+  const place = placeFor(asked, company);
   const { language } = useLanguage();
   const sideId = useId();
   const { org } = useOrg();
@@ -528,7 +539,20 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   if (unavailableFailure(mainFailure)) return <RouteUnavailable onHome={onHome} />;
   const broken = mainFailure ?? shownLoadFailure(tracked(goalsFailure), updateSaysIt) ?? shownLoadFailure(tracked(pipelinesFailure), updateSaysIt);
   const clearPerson = () => onPlace({ ...place, personId: undefined });
-  const waiting = (
+  /* What waits: for people in the company on their page, else for the person. */
+  const waiting = section.kind === 'people' ? (
+    <WaitingForPeople
+      decisions={decisions}
+      decisionsFailure={decisionsFailure}
+      onDecisionsChanged={onDecisionsChanged}
+      tasks={waitsOnPeople}
+      onOpenTask={onOpenTask}
+      onOpenAgent={onOpenAgent}
+      onOpenOrchestrator={onOpenOrchestrator}
+      org={org}
+      place={place_}
+    />
+  ) : (
     <WaitingForYou
       decisions={decisions}
       decisionsFailure={decisionsFailure}
@@ -547,24 +571,10 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       place={place_}
     />
   );
-  const peopleWaiting = (
-    <WaitingForPeople
-      decisions={decisions}
-      decisionsFailure={decisionsFailure}
-      onDecisionsChanged={onDecisionsChanged}
-      tasks={waitsOnPeople}
-      onOpenTask={onOpenTask}
-      onOpenAgent={onOpenAgent}
-      onOpenOrchestrator={onOpenOrchestrator}
-      org={org}
-      place={place_}
-    />
-  );
   const empty = section.kind === 'mine' ? t.tracker.noMine : section.kind === 'working' ? t.tracker.nothingWorking : t.tracker.noTasks;
   const makeDepartment = departmentId ?? (other ? 'none' : null);
   const makeHere = <MakeHere org={org} places={places} department={makeDepartment} pipeline={pipeline} loose={place.pipeline === 'none'} making={making} setMaking={setMaking} onOpenTask={onOpenTask} />;
-  /* Pages that are not a list of work hold what is being made above what they show. */
-  const makeOnTop = found || section.kind === 'waits' || section.kind === 'people' || section.kind === 'due' || section.kind === 'turns';
+  const makeOnTop = found || MAKE_ON_TOP.has(section.kind);
   /* The mockup's one way to make something: the + beside Tasks, on every page, with what the person may make there and the
      orchestrator. */
   const can = mayMake(places, org, makeDepartment, pipeline);
@@ -594,7 +604,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
         onOpenAgent={onOpenAgent}
         counts={{
           waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf, me.person.id)), waitsOnWho, keptShown(kept, decisionsOf)),
-          people: company ? waitsCount(shownDecisions(decisions, 'everyone'), waitsOnPeople, []) : undefined,
+          people: peopleCount(decisions, waitsOnPeople, company),
           failures: failures.length + machinesAway.filter(machine => !machine.back).length,
           mine: own.tasks.length,
           working: working.length,
@@ -638,11 +648,9 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
               {found.length ? <TrackerFound tasks={found} all={all} rows={rows} /> : <p className="muted" role="status">{t.tasks.noSearchResults}</p>}
             </section>
             {/* A search leaves what waits for the person where it was. */}
-            {(section.kind === 'waits' || section.kind === 'mine') && waiting}
-            {section.kind === 'people' && peopleWaiting}
+            {WAITS_SHOWN.has(section.kind) && waiting}
           </>
-        ) : section.kind === 'waits' ? waiting
-          : section.kind === 'people' ? peopleWaiting
+        ) : WAIT_PAGES.has(section.kind) ? waiting
           : section.kind === 'goals' ? (
             <>
               {/* Until the goals come, the page says it is loading rather than that there are none. */}

@@ -4,7 +4,7 @@ import { errorText, useLanguage, useT, type Language, type Messages } from '../i
 import { PROVIDER_NAMES } from '../providers';
 import type { DecidedBy, MaterialStampView, ProviderId, RoleOption, Roster, Serving, StaffLine } from '../types';
 import { BusyLabel } from './BusyLabel';
-import { DecidedByNote, frozenBy } from './DecidedBy';
+import { DecidedByNote, frozenBy, WaitsForNote } from './DecidedBy';
 import { AlertIcon, StaffIcon } from './icons';
 import { ProposalMaterialsSection, useProposalCardPost, useProposalMaterials } from './RequestMaterials';
 
@@ -323,7 +323,7 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
   return (
     <div className={sent ? 't-card staff done' : 't-card staff'}>
       <h4><StaffIcon />{t.staff.title(department.name)}</h4>
-      {waitsFor && <p className="muted">{waitsFor}</p>}
+      <WaitsForNote text={waitsFor} />
       {proposal?.brief && <p className="t-card-brief">{proposal.brief}</p>}
       <ProposalMaterialsSection state={proposalMaterials} />
       <StaffNoServingNote roster={roster} sent={sent} t={t} />

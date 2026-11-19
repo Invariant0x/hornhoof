@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
-import type { GoalView, Me, Org, Pipeline, TaskDetail, TaskLine, TaskLogLine, WaitingRequest } from '../src/types';
+import type { GoalView, Me, Org, Pipeline, ProposalDecision, TaskDetail, TaskLine, TaskLogLine, WaitingRequest } from '../src/types';
 import { decisions, DEV_ORG, ME, mockApi, TASK_DETAIL, TURN } from './api-mock';
 import { decl } from './css';
 import { taskRoute } from './task-route';
@@ -720,6 +720,22 @@ describe('what waits for people', () => {
     expect(tasks).toHaveTextContent('#24 Fix the login page');
     expect(tasks).toHaveTextContent('Waits for Ivan');
     expect(screen.queryByRole('region', { name: 'Waiting for you' })).not.toBeInTheDocument();
+  });
+
+  it("says on the orchestrator's card and on a merge whom they wait for, and counts each once", async () => {
+    const structure: ProposalDecision = { id: 'pr1', kind: 'structure', agent: { id: 'a1', name: 'Orchestrator' }, department: null, brief: 'Add Support.', items: [{ template: 'support', checked: true, note: 'Answers customers.' }], at: LOGIN.createdAt, ownerPersonId: IVAN.id, canAnswer: true };
+    const merge = { id: 'm1', label: 'the database from before the restore', after: null, open: 1, ownerPersonId: IVAN.id };
+    shell('/tasks?show=people', {
+      'GET /api/requests': [200, decisions([], { proposals: [structure], merges: [merge] })],
+      'GET /api/merges/m1/conflicts': [200, { conflicts: [] }],
+    });
+    const people = await screen.findByRole('region', { name: /^Waiting for (you|people)$/ });
+    expect(people).toHaveAccessibleName('Waiting for people');
+    expect((await within(people).findByRole('heading', { name: 'Company structure' })).parentElement).toHaveTextContent('Waiting for: Ivan');
+    expect(within(people).getByRole('region', { name: 'the database from before the restore' })).toHaveTextContent('Waiting for: Ivan');
+    /* The card, the merge and the login page, which waits for Ivan. */
+    const side = screen.getByRole('navigation', { name: 'Task lists' });
+    expect(within(side).getByRole('button', { name: 'Waiting for people 3' })).toBeInTheDocument();
   });
 
   it('says so when nothing waits for people', async () => {
