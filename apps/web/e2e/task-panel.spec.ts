@@ -81,12 +81,12 @@ const PANELS: { name: string; go: (page: Page) => Promise<void>; content: (page:
   {
     name: 'a task from the list',
     go: openTasks,
-    /* The tracker's view tabs keep their place and width, from the first view to Add view; the line under them belongs to the
-       work beside them, which narrows for the card. */
+    /* The tracker's view tabs keep their place and width, from List to Graph: the card opens over the work, as the mockup's
+       drawer does, and narrows nothing. */
     content: async page => {
-      await expect(page.locator('.tr-add-view')).toBeVisible();
+      await expect(page.locator('.tr-views label').last()).toBeVisible();
       return page.locator('.tr-views').evaluate(views => {
-        const boxes = [...views.querySelectorAll(':scope > label, :scope > .tr-add-view')].map(tab => tab.getBoundingClientRect());
+        const boxes = [...views.querySelectorAll(':scope > label')].map(tab => tab.getBoundingClientRect());
         const x = Math.min(...boxes.map(b => b.left));
         return { x, width: Math.max(...boxes.map(b => b.right)) - x };
       });

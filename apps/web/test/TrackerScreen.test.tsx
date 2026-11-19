@@ -95,6 +95,8 @@ it('marks the whole department row and keeps its pipeline disclosure independent
   expect(department).toHaveAttribute('aria-current', 'page');
   expect(department.parentElement).toHaveClass('on');
   expect(department.parentElement).toContainElement(toggle);
+  /* The caret stands first, then the department's mark and name, as in the mockup. */
+  expect(department.parentElement!.firstElementChild).toBe(toggle);
   expect(department.querySelector('.tr-dept-mark')).toBeInTheDocument();
   expect(await side.findByRole('button', { name: pipeline })).toBeInTheDocument();
 
@@ -126,16 +128,15 @@ describe('My tasks and View as', () => {
     shell();
     const list = await main();
     await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#23 Refund button', '#24 Fix the login page']));
-    expect(screen.getByRole('region', { name: 'Your goals' })).toHaveTextContent('500 subscribers');
-    expect(screen.getByRole('region', { name: 'Your goals' })).not.toHaveTextContent('Card payments');
+    /* Goals have their own page: none of them is piled into the tasks. */
+    expect(screen.queryByRole('region', { name: 'Your goals' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Waiting for you' })).toBeInTheDocument();
     await user.selectOptions(screen.getByRole('combobox', { name: 'View as' }), 'p2');
     expect(location.search).toBe('?person=p2');
-    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#21 Take card payments']));
-    expect(screen.getByRole('region', { name: 'Goals of Maria' })).toHaveTextContent('Card payments');
-    /* Her subtasks wait folded under their task. */
-    await user.click(within(rowOf(list, '#21 Take card payments')).getByRole('button', { name: 'Subtasks: 0 of 1 done' }));
-    expect(rowOf(list, '#22 Card form')).toBeInTheDocument();
+    /* Her subtasks stand open under their task, as "Subtasks: show" says. */
+    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#21 Take card payments', '#22 Card form']));
+    expect(screen.queryByRole('region', { name: 'Goals of Maria' })).not.toBeInTheDocument();
   });
 
   it('offers View as only to the CEO and the CEO delegate', async () => {
@@ -149,8 +150,6 @@ describe('My tasks and View as', () => {
     const list = await main();
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('My tasks');
     await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#23 Refund button', '#24 Fix the login page']));
-    expect(screen.getByRole('region', { name: 'Your goals' })).toHaveTextContent('500 subscribers');
-    expect(screen.queryByRole('region', { name: 'Goals of Maria' })).not.toBeInTheDocument();
     expect(screen.queryByText('Decisions for Maria')).not.toBeInTheDocument();
   });
 
@@ -177,8 +176,7 @@ describe('My tasks and View as', () => {
   it("opens another person's screen from the address for the CEO delegate", async () => {
     shell('/tasks?person=p2', {}, { ...ME, person: { ...ME.person, isOwner: false, isCeoDelegate: true } });
     const list = await main();
-    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#21 Take card payments']));
-    expect(screen.getByRole('region', { name: 'Goals of Maria' })).toHaveTextContent('Card payments');
+    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#21 Take card payments', '#22 Card form']));
   });
 
   it('shows people with wait counts and opens department goals, dates and tasks without a pipeline', async () => {
@@ -187,16 +185,26 @@ describe('My tasks and View as', () => {
       ...TASKS, line({ id: 'dated', number: 42, title: 'Deliver the list', dueAt: '2026-12-01T00:00:00.000Z' }),
     ] }] });
     const side = await screen.findByRole('navigation', { name: 'Task lists' });
-    expect(within(side).getByRole('heading', { name: 'Company people' })).toBeInTheDocument();
+    expect(within(side).getByRole('heading', { name: 'Responsible' })).toBeInTheDocument();
     await act(async () => {});
     const ivan = within(side).getByRole('button', { name: 'Ivan 1' });
     expect(ivan.querySelector('.tr-avatar')).toBeInTheDocument();
     expect(ivan.querySelector('.tr-count')).toHaveClass('attention');
+    /* Under each name, what the person answers for: the CEO the whole company, Maria her department. */
+    expect(ivan).toHaveAccessibleDescription('CEO, whole company');
+    expect(within(side).getByRole('button', { name: 'Maria' })).toHaveAccessibleDescription('Development');
     expect(within(side).getByRole('button', { name: /^My tasks / }).querySelector('.tr-count')).not.toHaveClass('attention');
     const dept = within(side).getByRole('button', { name: 'Development' });
     expect(dept.querySelector('.tr-dept-mark')).toBeInTheDocument();
-    await user.click(within(side).getByRole('button', { name: 'Department goals' }));
-    expect(screen.getByRole('region', { name: 'Department goals' })).toHaveTextContent('Card payments');
+    /* A department says who answers for it and how many of its employees work now. */
+    expect(dept).toHaveAccessibleDescription('Maria answers 2 working');
+    await user.click(within(side).getByRole('button', { name: 'Department goals 1' }));
+    const goals = screen.getByRole('region', { name: 'Department goals' });
+    expect(goals).toHaveTextContent('Card payments');
+    expect(goals).not.toHaveTextContent('500 subscribers');
+    expect(within(goals).getByRole('progressbar', { name: '1 of 2 tasks done' })).toBeInTheDocument();
+    /* The goals page is not a view of tasks: it has no view tabs. */
+    expect(screen.queryByRole('group', { name: 'View' })).not.toBeInTheDocument();
     await user.click(within(side).getByRole('button', { name: 'Without a pipeline' }));
     const list = screen.getByRole('region', { name: 'List' });
     expect(within(list).getByRole('listitem', { name: '#42 Deliver the list' })).toBeInTheDocument();
@@ -218,7 +226,7 @@ describe('My tasks and View as', () => {
 });
 
 describe('the views and the card', () => {
-  it('keeps the pipeline breadcrumb and search with the picker, and opens the added view controls', async () => {
+  it('keeps the pipeline breadcrumb and search with the picker, and only the three views of the mockup', async () => {
     const user = userEvent.setup();
     shell('/tasks?department=d2&pipeline=pl1');
     await act(async () => {});
@@ -231,8 +239,10 @@ describe('the views and the card', () => {
     expect(location.search).toBe('?department=d2&pipeline=pl1&person=p2');
     expect(screen.getByRole('heading', { level: 1, name: 'Development / Payments way' })).toBeInTheDocument();
     const tabs = screen.getByRole('group', { name: 'View' });
-    expect(within(tabs).getAllByRole('radio').map(tab => tab.parentElement?.textContent)).toEqual(['List', 'Board', 'Due dates', 'Goals', 'Pipeline diagram']);
-    expect(tabs.querySelectorAll('svg')).toHaveLength(6);
+    /* List, Board and Graph, as the mockup's tabs, nothing more on the row. */
+    expect(within(tabs).getAllByRole('radio').map(tab => tab.parentElement?.textContent)).toEqual(['List', 'Board', 'Graph']);
+    expect(tabs.querySelectorAll('svg')).toHaveLength(3);
+    expect(within(tabs).queryByRole('button')).toBeNull();
     const filters = screen.getByRole('group', { name: 'Filters' });
     expect(filters).toHaveTextContent('Group: status');
     const toggle = within(filters).getByRole('button', { name: 'Subtasks: show' });
@@ -240,21 +250,18 @@ describe('the views and the card', () => {
     expect(toggle).toHaveTextContent('Subtasks: hide');
     await user.selectOptions(within(filters).getByLabelText('Goal'), 'g2');
     expect(filters).toHaveTextContent('Goal: Card payments');
-    await user.click(within(tabs).getByRole('radio', { name: 'Due dates' }));
-    expect(screen.getByRole('region', { name: 'Due dates' })).toHaveTextContent('No tasks here have a due date.');
-    await user.click(within(tabs).getByRole('button', { name: 'Add view' }));
-    expect(screen.getByText('There are no saved views yet.')).toBeInTheDocument();
   });
 
-  it('orders list tasks by priority and shows it in the row and the card', async () => {
+  it('orders list tasks by priority and shows it on the card, the row keeping the mockup columns', async () => {
     const user = userEvent.setup();
     const high = line({ ...PAY, priority: 'high' });
     const normal = line({ id: 't25', number: 25, title: 'Later task' });
     shell('/tasks?department=d2', { 'GET /api/tasks?status=all': [200, { tasks: [normal, high] }], 'GET /api/tasks/t21': [200, { task: detail(high) }] });
     const list = await main();
     await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#21 Take card payments', '#25 Later task']));
-    expect(rowOf(list, '#21 Take card payments')).toHaveTextContent('High');
-    expect(rowOf(list, '#25 Later task')).toHaveTextContent('Normal');
+    /* The mockup's list has no priority column: the order tells it, and the card names it. */
+    expect(rowOf(list, '#21 Take card payments')).not.toHaveTextContent('High');
+    expect(rowOf(list, '#25 Later task')).not.toHaveTextContent('Normal');
     await user.click(within(list).getByRole('button', { name: 'Take card payments' }));
     const panel = await card('#21 Take card payments');
     await openTaskAction(user, panel, 'Details');
@@ -303,32 +310,36 @@ describe('the views and the card', () => {
     shell('/tasks?department=d2&pipeline=pl1&view=board');
     const board = await main();
     await waitFor(() => expect(within(board).getAllByRole('region').map(r => r.getAttribute('aria-label'))).toEqual(['Not started', 'Build', 'Check', 'Done']));
-    expect(within(within(board).getByRole('region', { name: 'Build' })).getByRole('article', { name: '#21 Take card payments' })).toBeInTheDocument();
+    const build = within(board).getByRole('region', { name: 'Build' });
+    expect(within(build).getByRole('article', { name: '#21 Take card payments' })).toBeInTheDocument();
+    /* A stage's pill, its count and the role that holds it, as in the mockup's column heads. */
+    expect(within(build).getByRole('heading', { level: 2 })).toHaveTextContent('Build 1 Backend engineer');
+    expect(within(build).getByText('Build')).toHaveClass('tr-status-pill');
+    expect(within(within(board).getByRole('region', { name: 'Check' })).getByRole('heading', { level: 2 })).toHaveTextContent('Head of development');
   });
 
   it('opens a subtask in its own card, and says what the task is for, who answers for it and what waits for it', async () => {
     const user = userEvent.setup();
     shell('/tasks/t21');
     const panel = await card('#21 Take card payments');
-    await openTaskAction(user, panel, 'Details');
     const path = await within(panel).findByRole('navigation', { name: 'Where it belongs' });
-    expect(path).toHaveTextContent('500 subscribers');
+    await waitFor(() => expect(path).toHaveTextContent('500 subscribers'));
     expect(path).toHaveTextContent('Card payments');
     expect(panel).toHaveTextContent('Shops sell online.');
     const facts = within(within(panel).getByRole('group', { name: 'Facts' }));
-    expect(facts.getByText('Maria')).toBeInTheDocument();
-    expect(within(panel).getByRole('definition', { name: 'Pipeline' })).toHaveTextContent('Payments way: Build');
-    expect(facts.getByRole('link', { name: '#23 Refund button' })).toHaveAttribute('title', 'Needed for');
-    await user.click(facts.getByRole('link', { name: '#22 Card form' }));
+    expect(facts.getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Maria');
+    await waitFor(() => expect(facts.getByRole('definition', { name: 'Pipeline' })).toHaveTextContent('Payments way · stage Build'));
+    expect(within(within(panel).getByRole('region', { name: 'Links' })).getByRole('link', { name: '#23 Refund button' })).toHaveAttribute('title', 'Needed for');
+    await user.click(within(within(panel).getByRole('region', { name: 'Subtasks' })).getByRole('link', { name: '#22 Card form' }));
     const sub = await card('#22 Card form');
-    expect(within(within(sub).getByRole('group', { name: 'Facts' })).getByRole('link', { name: '#21 Take card payments' })).toBeInTheDocument();
+    expect(within(within(sub).getByRole('navigation', { name: 'Where it belongs' })).getByRole('button', { name: '#21 Take card payments' })).toBeInTheDocument();
   });
 
   it('re-roots the graph from a card, with a breadcrumb back up to every goal', async () => {
     const user = userEvent.setup();
     shell('/tasks/t21');
     const panel = await card('#21 Take card payments');
-    await openTaskAction(user, panel, 'Graph from here');
+    await user.click(within(panel).getByRole('button', { name: 'Graph from here' }));
     expect(location.search).toBe('?root=t21&view=graph');
     const graph = await main();
     const crumbs = within(graph).getByRole('navigation', { name: 'Graph from' });
@@ -361,7 +372,7 @@ describe('the views and the card', () => {
     await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#23 Refund button', '#24 Fix the login page', '#22 Card form']));
     await user.click(screen.getByRole('radio', { name: 'Board' }));
     const board = await main();
-    expect(within(board).getByRole('article', { name: '#23 Refund button' })).toHaveTextContent('Does it: Bruno');
+    expect(within(within(board).getByRole('article', { name: '#23 Refund button' })).getByRole('img', { name: 'Bruno' })).toHaveClass('tr-executor');
   });
 
   it("counts a task's subtasks over all the work under it, those done and those others answer for too", async () => {
@@ -369,7 +380,8 @@ describe('the views and the card', () => {
     const form = line({ id: 't27', number: 27, title: 'Refund form', parentId: 't23', goal: SERVES, responsible: MARIA });
     shell('/tasks?view=board', { 'GET /api/tasks?status=all': [200, { tasks: [...TASKS, mail, form] }] });
     const board = await main();
-    await waitFor(() => expect(within(board).getByRole('article', { name: '#23 Refund button' })).toHaveTextContent('subtasks: 1 of 2'));
+    await waitFor(() => expect(within(board).getByRole('article', { name: '#23 Refund button' })).toHaveTextContent('1 of 2'));
+    expect(within(within(board).getByRole('article', { name: '#23 Refund button' })).getByTitle('Subtasks: 1 of 2 done')).toBeInTheDocument();
   });
 
   it('sends an edit with the version it read, and says in words why it was refused', async () => {
@@ -420,15 +432,21 @@ describe('a goal', () => {
   it('opens in the same panel with its progress, smaller goals and tasks, and is edited with its version', async () => {
     const user = userEvent.setup();
     const calls = shell('/tasks', { 'PATCH /api/goals/g1': [200, { goal: { ...COMPANY_GOAL, current: 230 } }] });
-    const goals = await screen.findByRole('region', { name: 'Your goals' });
-    await user.click(within(goals).getByRole('button', { name: '500 subscribers' }));
+    await user.click(within(await screen.findByRole('navigation', { name: 'Task lists' })).getByRole('button', { name: 'Goals 2' }));
+    expect(location.search).toBe('?show=goals');
+    const goals = await screen.findByRole('region', { name: 'Goals' });
+    await user.click(within(goals).getByRole('link', { name: '500 subscribers' }));
     expect(location.pathname + location.search).toBe('/tasks/g1?card=goal');
     const panel = await card('500 subscribers');
-    expect(within(panel).getByText('Company goal')).toBeInTheDocument();
+    expect(within(panel).getByText('Company goal', { selector: '.tp-kind' })).toBeInTheDocument();
+    expect(within(panel).getByText('Active', { selector: '.tr-status-pill' })).toHaveClass('working');
     expect(within(panel).getByRole('progressbar', { name: '212 of 500 subscribers' })).toBeInTheDocument();
-    await user.click(within(within(panel).getByRole('region', { name: 'Smaller goals' })).getByRole('button', { name: 'Card payments' }));
+    expect(within(within(panel).getByRole('group', { name: 'Facts' })).getByRole('definition', { name: 'Progress' })).toHaveTextContent('212 of 500 subscribers');
+    const under = within(panel).getByRole('region', { name: 'Tasks and goals under it' });
+    expect(within(under).getByRole('heading')).toHaveTextContent('Tasks and goals under it · 0 of 1');
+    await user.click(within(under).getByRole('button', { name: 'Card payments' }));
     const smaller = await card('Card payments');
-    expect(within(within(smaller).getByRole('region', { name: 'Tasks' })).getAllByRole('button').map(b => b.textContent)).toEqual(['#21 Take card payments', '#23 Refund button']);
+    await waitFor(() => expect(within(within(smaller).getByRole('region', { name: 'Tasks and goals under it' })).getAllByRole('button').map(b => b.textContent)).toEqual(['#21 Take card payments', '#23 Refund button']));
     await user.click(within(within(smaller).getByRole('navigation', { name: 'Where it belongs' })).getByRole('button', { name: '500 subscribers' }));
     const big = await card('500 subscribers');
     await user.click(within(big).getByRole('button', { name: 'Edit' }));
@@ -479,8 +497,9 @@ describe('making work in a department', () => {
     const user = userEvent.setup();
     const made = detail(line({ id: 't25', number: 25, title: 'New payment option', pipelineId: 'pl1', priority: 'high' }));
     const calls = shell('/tasks?department=d2&pipeline=pl1', { 'POST /api/tasks': [201, { task: made }], 'GET /api/tasks/t25': [200, { task: made }] });
-    const list = await main();
-    await user.click(within(list).getByRole('button', { name: 'Add task' }));
+    await main();
+    /* The + beside the panel's title, as in the mockup. */
+    await user.click(within(screen.getByRole('navigation', { name: 'Task lists' })).getByRole('button', { name: 'Add task' }));
     await user.type(screen.getByLabelText('Title'), 'New payment option');
     await user.selectOptions(screen.getByLabelText('Priority'), 'high');
     await user.click(screen.getByRole('button', { name: 'Create task' }));
@@ -671,14 +690,16 @@ it.each(waitLanguages.flatMap(words => [
   }
 });
 
-it('keeps complete names together inside board facts', async () => {
+it('shows the people of a board card as the mockup avatars, named in full', async () => {
   const responsible = { ...MARIA, name: 'Sam Rivera' };
   const executor = { ...BRUNO, name: 'Lee Chen' };
   shell('/tasks?department=d2&view=board', { 'GET /api/tasks?status=all': [200, { tasks: [{ ...PAY, responsible, executor }] }] });
   const record = within(await screen.findByRole('article', { name: '#21 Take card payments' }));
   expect(screen.getByRole('button', { name: 'Failures 0' })).toBeInTheDocument();
-  expect(record.getByText('Sam Rivera', { selector: 'bdi' }).parentElement).toHaveTextContent('Answers for it: Sam Rivera');
-  expect(record.getByText('Lee Chen', { selector: 'bdi' }).parentElement).toHaveTextContent('Does it: Lee Chen');
+  /* The mockup's pair of avatars: the employee's letters in a square, the person's in a circle, each named in full. */
+  expect(record.getByRole('img', { name: 'Sam Rivera' })).toHaveClass('tr-avatar');
+  expect(record.getByRole('img', { name: 'Lee Chen' })).toHaveClass('tr-executor');
+  expect(record.getByRole('img', { name: 'Lee Chen' }).parentElement).toHaveClass('tr-avatars');
 });
 
 it.each([
@@ -699,4 +720,62 @@ it.each([
   expect(build).toHaveTextContent('Take card payments');
   expect(build).not.toHaveTextContent('Check the card form');
   expect(within(board).getByRole('region', { name: failures })).toHaveTextContent(phrase);
+});
+
+describe('the left panel and the goals page', () => {
+  it("keeps the mockup's order and puts what the product adds after it", async () => {
+    shell('/tasks?department=d2');
+    const side = within(await screen.findByRole('navigation', { name: 'Task lists' }));
+    await act(async () => {});
+    const order = ['Waits for me', 'My tasks', 'Working now', 'Ivan', 'Maria', 'Development', 'Department goals', 'Pipelines', 'Payments way', 'Without a pipeline', 'Employees', 'Dana', 'Bruno',
+      'Goals', 'Due dates', 'Failures', "The orchestrator's own work", 'Turns and releases'];
+    const items = order.map(name => side.getByRole('button', { name: new RegExp(`^${name.replace(/'/g, '.')}( |$)`) }));
+    for (const [i, item] of items.entries()) if (i) expect.soft(items[i - 1]!.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING, order[i]).toBeTruthy();
+    expect(side.getAllByRole('heading').map(h => h.textContent)).toEqual(['Tasks', 'Responsible', 'Departments']);
+    /* An employee at work shows the task it is on; the panel opens it. */
+    expect(side.getByRole('button', { name: 'Bruno' })).toHaveAccessibleDescription('#21 Take card payments');
+    expect(side.getByRole('button', { name: /^Working now/ }).querySelector('.tr-count')).toHaveClass('working');
+  });
+
+  it('draws the panel at the mockup sizes', () => {
+    expect.soft(decl('.tracker', 'grid-template-columns')).toBe('clamp(270px, 18.75vw, 360px) minmax(0, 1fr)');
+    expect.soft(decl('.tr-side', 'padding')).toBe('12px 8px 20px');
+    expect.soft(decl('.tr-side-title', 'font')).toBe('600 18px var(--f-display)');
+    expect.soft(decl('.tr-side-title', 'margin')).toBe('2px 8px 10px');
+    expect.soft(decl('.tr-new', 'inline-size')).toBe('30px');
+    expect.soft(decl('.tr-item', 'min-block-size')).toBe('32px');
+    expect.soft(decl('.tr-item', 'min-block-size', '(pointer: coarse)')).toBe('44px');
+    expect.soft(decl('.tr-item', 'padding')).toBe('4px 8px');
+    expect.soft(decl('.tr-item', 'font-size')).toBe('13.5px');
+    /* 8px between the icon, the name and the end, 2px between lines when the end goes under the name. */
+    expect.soft(decl('.tr-item', 'gap')).toBe('2px 8px');
+    expect.soft(decl('.tr-side-heading', 'font')).toBe('600 12px var(--f-body)');
+    expect.soft(decl('.tr-side-heading', 'margin')).toBe('14px 8px 4px');
+    expect.soft(decl('.tr-item > .tr-badge', 'font')).toBe('600 11px var(--f-body)');
+    expect.soft(decl('.tr-item > .tr-badge', 'border-radius')).toBe('10px');
+    expect.soft(decl('.tr-item small', 'font-size')).toBe('11.5px');
+    expect.soft(decl('.tr-l1', 'padding-inline-start')).toBe('30px');
+    expect.soft(decl('.tr-l2', 'padding-inline-start')).toBe('52px');
+    expect.soft(decl(':is(.tr-live, .tr-waitd, .tr-idle)', 'inline-size')).toBe('8px');
+    /* The top: where-you-are in 600 16px of the display face, the views in 600 13.5px with 10px by 12px, the chips in 12.5px with 3px by 10px. */
+    expect.soft(decl('.tr-where', 'font')).toBe('600 16px var(--f-display)');
+    expect.soft(decl('.tr-views label', 'font')).toBe('600 13.5px var(--f-display)');
+    expect.soft(decl('.tr-views label', 'padding')).toBe('10px 12px');
+    expect.soft(decl('.tr-chip', 'font-size')).toBe('12.5px');
+    expect.soft(decl('.tr-chip', 'padding')).toBe('3px 10px');
+  });
+
+  it("lists the company's goals with their progress and opens a goal's card", async () => {
+    const user = userEvent.setup();
+    shell('/tasks?show=goals');
+    const goals = await screen.findByRole('region', { name: 'Goals' });
+    expect(screen.getByRole('heading', { level: 1, name: 'Goals' })).toBeInTheDocument();
+    const company = within(goals).getByRole('listitem', { name: '500 subscribers' });
+    expect(within(company).getByRole('progressbar', { name: '212 of 500 subscribers' })).toBeInTheDocument();
+    expect(within(company).getByRole('img', { name: 'Ivan' })).toHaveClass('tr-avatar');
+    /* A smaller goal stands under the goal it is part of. */
+    expect(within(company).getByRole('listitem', { name: 'Card payments' })).toBeInTheDocument();
+    await user.click(within(company).getByRole('link', { name: '500 subscribers' }));
+    expect(location.pathname + location.search).toBe('/tasks/g1?card=goal');
+  });
 });

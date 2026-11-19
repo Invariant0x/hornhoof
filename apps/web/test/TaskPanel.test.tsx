@@ -35,7 +35,7 @@ async function openTask(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('the simple task card', () => {
-  it('uses the standard panel heading size for a long title', async () => {
+  it('titles the card in the 20 px display type of the mockup and wraps a long title', async () => {
     const user = userEvent.setup();
     const title = 'Keep every part of a task visible, including a long title and its actions';
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, title } }] });
@@ -45,28 +45,61 @@ describe('the simple task card', () => {
     const heading = panel.getByRole('heading', { name: title });
     expect.soft(heading).toHaveClass('tp-heading');
     expect.soft(heading.tagName).toBe('H2');
-    expect.soft(decl('h2', 'font-size')).toBe('18px');
+    expect.soft(decl('.tp-heading', 'font')).toBe('600 20px/1.25 var(--f-display)');
     expect(decl('.tp-heading', 'overflow-wrap')).toBe('anywhere');
   });
 
-  it('shows the title, plain facts, brief, body and log in order', async () => {
+  it('shows the path, kind, title, status, why and facts at the top, then the brief, body, subtasks and history', async () => {
     const user = userEvent.setup();
     shell({ 'GET /api/tasks/t12': [200, { task: {
       ...TASK_DETAIL, why: 'Accept card payments.', responsible: { id: 'p1', name: 'Ivan' }, dueAt: '2099-11-20T00:00:00.000Z',
+      time: { inStatusSince: '2026-11-10T09:00:00.000Z', workSeconds: 0, waitsOn: [] },
     } }] });
     const panel = await openTask(user);
     const card = within(panel);
+    /* The bar names the kind and number, without the window lights. */
+    expect(panel.querySelector('.t-bar')).toHaveTextContent('Subtask #12');
+    expect(panel.querySelector('.t-bar .lights')).toBeNull();
+    const path = card.getByRole('navigation', { name: 'Where it belongs' });
+    expect(within(path).getByRole('button', { name: '#10 Payments' })).toBeInTheDocument();
+    const kind = card.getByText('Subtask', { selector: '.tp-kind' });
+    const pill = card.getByText('Review', { selector: '.tr-status-pill' });
+    expect(pill).toHaveClass('review');
     const facts = card.getByRole('group', { name: 'Facts' });
-    expect(facts).toHaveTextContent(/Review.*Executor: Bruno.*Responsible: Ivan.*Due: 20 Nov.*#12/);
-    expect(facts.querySelector('.tstate, .badge')).toBeNull();
-    expect(within(facts).getByRole('link', { name: '#13 Refunds' })).toBeInTheDocument();
-    const content = [card.getByRole('heading', { name: 'Checkout API' }), facts, card.getByText('Take card payments.'), card.getByText('card token'), card.getByRole('list', { name: 'Log' })];
+    expect(within(facts).getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Ivan');
+    expect(within(facts).getByRole('definition', { name: 'Responsible' }).querySelector('.tr-avatar')).toBeInTheDocument();
+    expect(within(facts).getByRole('definition', { name: 'Executor' })).toHaveTextContent('Bruno');
+    expect(within(facts).getByRole('definition', { name: 'Due' })).toHaveTextContent(/^20 Nov · Review for/);
+    const subtasks = card.getByRole('region', { name: 'Subtasks' });
+    expect(within(subtasks).getByRole('heading', { name: 'Subtasks · 0 of 1' })).toBeInTheDocument();
+    expect(within(subtasks).getByRole('link', { name: '#13 Refunds' })).toBeInTheDocument();
+    const content = [path, kind, card.getByRole('heading', { name: 'Checkout API' }), pill, card.getByText('Accept card payments.'), facts,
+      card.getByRole('button', { name: 'Graph from here' }), card.getByText('Take card payments.'), card.getByText('card token'), subtasks, card.getByRole('list', { name: 'Log' })];
     for (const [index, element] of content.slice(1).entries()) {
       expect(content[index]!.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
-    expect(card.getAllByRole('heading').map(heading => heading.textContent)).toEqual(['Checkout API']);
-    expect(card.getAllByRole('button').map(button => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['Close', 'Task actions']);
-    expect(panel).not.toHaveTextContent('Accept card payments.');
+    expect(card.getAllByRole('heading').map(heading => heading.textContent)).toEqual(['Checkout API', 'Subtasks · 0 of 1', 'History']);
+    for (const [i, name] of ['Close', '#10 Payments', 'Task actions', 'Graph from here'].entries()) expect(card.getAllByRole('button')[i]).toHaveAccessibleName(name);
+    expect(card.getAllByRole('button')).toHaveLength(4);
+  });
+
+  it('draws the card as the mockup drawer over the tracker and the full screen on a phone', () => {
+    const drawer = '.body.tracker-page ~ .acard.at-end';
+    expect.soft(decl(drawer, 'inline-size', '(min-width: 761px)')).toBe('460px');
+    expect.soft(decl(drawer, 'inset-inline-end', '(min-width: 761px)')).toBe('0');
+    expect.soft(decl(drawer, 'border-inline-start', '(min-width: 761px)')).toBe('1px solid var(--line2)');
+    expect.soft(decl(drawer, 'inset', '(max-width: 760px)')).toBe('68px 0 0');
+    expect.soft(decl('.body.with-task .tracker', 'padding-inline-end', '(min-width: 1100px)')).toBeUndefined();
+    expect.soft(decl('.acard.plain > .t-bar', 'min-block-size')).toBe('38px');
+    expect.soft(decl('.acard.plain > .ac-body', 'padding')).toBe('16px 18px 24px');
+    expect.soft(decl('.acard.plain > .ac-body', 'gap')).toBe('16px');
+    expect.soft(decl('.tp-kind', 'font')).toBe('600 11px var(--f-body)');
+    expect.soft(decl('.tp-kind', 'letter-spacing')).toBe('.06em');
+    expect.soft(decl('.tp-card-facts', 'gap')).toBe('7px 10px');
+    expect.soft(decl('.tp-card-facts', 'font-size')).toBe('13px');
+    expect.soft(decl('.tp-sec > h3', 'font')).toBe('600 13px var(--f-display)');
+    expect.soft(decl('.gbtn', 'min-block-size')).toBe('32px');
+    expect(decl('.tp-row', 'border-block-end')).toBe('1px solid var(--line)');
   });
 
   it('folds a long description and opens it with one More control', async () => {
@@ -119,7 +152,7 @@ describe('the simple task card', () => {
     expect(card.getByRole('list', { name: 'Log' })).not.toHaveTextContent(mine.text);
   });
 
-  it('puts a current wait in the log and keeps other task details in the menu', async () => {
+  it('puts a current wait in the log, shows why and the materials, and keeps other task details in the menu', async () => {
     const user = userEvent.setup();
     const task = {
       ...TASK_DETAIL, why: 'Accept card payments.', independentPart: { reason: 'The same author owns every file.' },
@@ -129,19 +162,20 @@ describe('the simple task card', () => {
     shell({ 'GET /api/tasks/t12': [200, { task }] });
     const card = within(await openTask(user));
     expect(card.getByRole('list', { name: 'Log' })).toHaveTextContent(task.externalWait.reason);
-    expect(card.queryByText(task.why)).not.toBeInTheDocument();
-    expect(card.queryByText(task.independentPart.reason)).not.toBeInTheDocument();
-    expect(card.queryByRole('link', { name: 'contract.txt' })).not.toBeInTheDocument();
-    await user.click(card.getByRole('button', { name: 'Task actions' }));
-    await user.click(card.getByRole('button', { name: 'Details' }));
     expect(card.getByText(task.why)).toBeInTheDocument();
+    const materials = card.getByRole('region', { name: 'Materials' });
+    expect(within(materials).getByText('File', { selector: '.tp-mat-kind' })).toBeInTheDocument();
+    expect(within(materials).getByText('contract.txt')).toBeInTheDocument();
+    expect(within(materials).getByRole('link', { name: 'Open contract.txt' })).toHaveAttribute('href', expect.stringContaining('f1'));
+    expect(card.queryByText(task.independentPart.reason)).not.toBeInTheDocument();
+    await user.click(card.getByRole('button', { name: 'Task actions' }));
+    expect(card.queryByRole('button', { name: 'Materials' })).not.toBeInTheDocument();
+    await user.click(card.getByRole('button', { name: 'Details' }));
     expect(card.getByText(task.independentPart.reason)).toBeInTheDocument();
-    await user.click(card.getByRole('button', { name: 'Back to actions' }));
-    await user.click(card.getByRole('button', { name: 'Materials' }));
-    expect(card.getByRole('link', { name: 'contract.txt' })).toBeInTheDocument();
+    expect(card.getAllByText(task.why)).toHaveLength(1);
   });
 
-  it('keeps edit, urgency and the graph behind the title menu', async () => {
+  it('keeps edit and urgency behind the title menu and the graph in sight', async () => {
     const user = userEvent.setup();
     const task = { ...TASK_DETAIL, parentId: null, parent: null, mayEdit: true, mayPause: true, version: 2, revision: 4 };
     const calls = shell({
@@ -166,6 +200,7 @@ describe('the simple task card', () => {
     expect(calls.find(c => c.method === 'PUT' && c.path === '/api/tasks/t12/urgent')?.body).toEqual({ urgent: true });
     await waitFor(() => expect(card.queryByRole('button', { name: 'Make urgent' })).not.toBeInTheDocument());
     await user.click(card.getByRole('button', { name: 'Task actions' }));
+    expect(within(card.getByRole('group', { name: 'Task actions' })).queryByRole('button', { name: 'Graph from here' })).not.toBeInTheDocument();
     await user.click(card.getByRole('button', { name: 'Graph from here' }));
     expect(location.search).toBe('?root=t12&view=graph');
   });
@@ -431,9 +466,11 @@ describe('a task', () => {
       const workflow = within(panel).getByRole('list', { name: words.workflow });
       expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('Development');
       expect(within(panel).getByRole('status')).toHaveTextContent(words.phase);
-      const facts = within(panel).getByRole('group', { name: lang === 'ru' ? ru.tracker.card.facts : en.tracker.card.facts });
-      expect(within(facts).getByRole('link', { name: '#9 Pick a payment provider' })).toHaveAttribute('title', words.after);
-      expect(within(facts).getByRole('link', { name: '#11 Cart page' })).toHaveAttribute('title', words.after);
+      const links = within(panel).getByRole('region', { name: lang === 'ru' ? ru.tracker.card.relations : en.tracker.card.relations });
+      expect(within(links).getByRole('link', { name: '#9 Pick a payment provider' })).toHaveAttribute('title', words.after);
+      expect(within(links).getByRole('link', { name: '#11 Cart page' })).toHaveAttribute('title', words.after);
+      expect(within(links).getAllByText(words.after.toLowerCase(), { selector: '.tp-rel' })).toHaveLength(2);
+      expect(within(links).getByText(lang === 'ru' ? 'Готово' : 'Done', { selector: '.tr-status-pill' })).toHaveClass('done');
       expect(panel).toHaveTextContent(words.started);
       unmount();
       localStorage.removeItem('hh-lang');

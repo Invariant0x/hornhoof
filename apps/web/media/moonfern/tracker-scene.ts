@@ -69,7 +69,7 @@ function trackerWords(t: Messages, view: 'tasks' | 'board' | 'turns'): string[] 
     ? [...common, ...controls, filters.showSubtasks, list.task, list.executor, list.responsible, list.goal, list.due, list.addTask,
       list.subtasks(1, 3), ...Object.values(t.tracker.priority), t.tracker.nobody, t.tracker.noGoal, t.tracker.wait.employee(''), t.tracker.wait.detail('', ''),
       t.tracker.card.executor, t.tracker.card.responsible, t.tracker.card.due, t.tasks.taskActions, t.tasks.log]
-    : [...common, ...controls, board.executor, board.responsible, board.subtasks(1, 1), board.empty, t.tracker.wait.question,
+    : [...common, ...controls, board.subtasks(1, 1), board.empty, t.tracker.wait.question,
       t.tracker.groups.waitingYou, t.tracker.time.minutes(49), t.tracker.wait.failedRun('17', false)];
 }
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useT, type Messages } from '../i18n';
 import type { TaskFile } from '../types';
@@ -116,32 +116,32 @@ export function LogParagraph({ text, fullRef, prefix = '', className }: { text: 
   );
 }
 
+/* A material the work brought: what it is, its name, and a way to open it. */
+export function Material({ kind, children, href, name, download }: { kind: string; children: ReactNode; href?: string; name?: string; download?: string }) {
+  const t = useT();
+  return (
+    <li className="tp-mat">
+      <div className="tp-mat-text"><span className="tp-mat-kind">{kind}</span>{children}</div>
+      {href && name && (
+        <a className="req-link tp-mat-open" href={href} aria-label={t.tracker.card.openIt(name)} download={download} target={download ? undefined : '_blank'} rel={download ? undefined : 'noopener noreferrer'}>
+          {t.tracker.card.open}
+        </a>
+      )}
+    </li>
+  );
+}
+
+/* The task's files among its materials: each name with its size, a text Hornhoof kept of a long field opening to be read and
+   any other file downloading under its own name. */
 export function TaskFiles({ files }: { files?: TaskFile[] }) {
   const t = useT();
-  if (!files?.length) return null;
-  return (
-    <section aria-label={t.tasks.files}>
-      <h4>{t.tasks.files}</h4>
-      <ul className="tp-subs">
-        {files.map(f => {
-          const autoText = AUTO_TEXT_FILE.test(f.name);
-          const name = displayFileName(f.name);
-          return (
-            <li key={f.id}>
-              <a
-                className="req-link"
-                href={attachmentPath(f.id)}
-                download={autoText ? undefined : name}
-                target={autoText ? '_blank' : undefined}
-                rel={autoText ? 'noopener noreferrer' : undefined}
-              >
-                {f.big ? `${name} · ${t.tasks.bigFile}` : name}
-              </a>
-              <small>{formatFileSize(t, f.size)}</small>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
+  return (files ?? []).map(f => {
+    const autoText = AUTO_TEXT_FILE.test(f.name);
+    const name = displayFileName(f.name);
+    return (
+      <Material key={f.id} kind={t.tracker.card.materialKinds.file} href={attachmentPath(f.id)} name={name} download={autoText ? undefined : name}>
+        <span dir="auto">{f.big ? `${name} · ${t.tasks.bigFile}` : name}</span> <small>{formatFileSize(t, f.size)}</small>
+      </Material>
+    );
+  });
 }

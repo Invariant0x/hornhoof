@@ -4,7 +4,7 @@ import { humanStatus, isClosed, taskTrees, taskWaits, type Asks, type HumanStatu
 import type { Employee, GoalView, Org, Pipeline, PipelineStage, TaskLine } from './types';
 
 /* Ways to look at the same work. */
-export const TRACKER_VIEWS = ['list', 'board', 'due', 'goals', 'graph'] as const;
+export const TRACKER_VIEWS = ['list', 'board', 'graph'] as const;
 export type TrackerView = (typeof TRACKER_VIEWS)[number];
 
 /* The state columns and the status filter use the same groups. */
@@ -198,7 +198,7 @@ export function pipelineTree(pipeline: Pipeline, tasks: TaskLine[]): GraphNode[]
 }
 
 /* The width and least height of a node and the steps between levels and rows, in the units of the canvas. */
-export const NODE = { w: 290, h: 56, dx: 330, dy: 66, pad: 20 };
+export const NODE = { w: 290, h: 52, dx: 330, dy: 62, pad: 20 };
 export type Placed = { node: GraphNode; x: number; y: number; h: number; depth: number };
 export type Layout = { nodes: Placed[]; parts: { from: string; to: string }[]; waits: { from: string; to: string }[]; width: number; height: number };
 

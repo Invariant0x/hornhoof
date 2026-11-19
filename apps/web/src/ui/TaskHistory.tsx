@@ -211,7 +211,8 @@ function currentHolds(t: Messages, task: TaskDetail, when: (at: string) => strin
   return steps;
 }
 
-export function ShortTaskLog({ task, asksYou }: { task: TaskDetail; asksYou: boolean }) {
+/* heading: the name the card gives its history, over the steps. */
+export function ShortTaskLog({ task, asksYou, heading }: { task: TaskDetail; asksYou: boolean; heading?: string }) {
   const t = useT();
   const { language } = useLanguage();
   const words = useLogWords();
@@ -227,7 +228,8 @@ export function ShortTaskLog({ task, asksYou }: { task: TaskDetail; asksYou: boo
   const extra = Math.max(0, steps.length - RECENT_STEPS);
 
   return (
-    <section className="tp-history" aria-label={t.tasks.log}>
+    <section className="tp-history tp-sec" aria-label={t.tasks.log}>
+      {heading && <h3>{heading}</h3>}
       {extra > 0 && (
         <button className="t-link tp-disclosure" type="button" aria-controls={id} aria-expanded={earlier} onClick={() => setEarlier(!earlier)}>
           {earlier ? t.tasks.showLess : t.tasks.earlierSteps}
