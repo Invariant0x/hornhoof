@@ -64,7 +64,7 @@ describe('what a department and its products keep for their agents', () => {
       ],
     });
     expect(bruno.read().repositoryRules).toContain('read its own rules first (AGENTS.md, CLAUDE.md, CONTRIBUTING.md, README.md)');
-    expect(bruno.read().repositoryRules).toContain('The company’s authority and safety rules still govern');
+    expect(bruno.read().repositoryRules).toContain('The company\'s authority and safety rules still govern');
     expect(bruno.read().repositoryRules).toContain('Apply any approval the department explicitly requires');
     for (const other of ['Billing keeps its own plan', 'billing.git', 'Marketing speaks plainly', 'ghp_']) expect(bruno.text).not.toContain(other);
 

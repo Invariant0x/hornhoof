@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { UUID } from '../../net/proxy.js';
@@ -12,7 +12,7 @@ const CLOSED_EVERY_MS = 15_000;
 const DEAF_MS = 60_000;
 /* How long one request may take. */
 export const ASK_MS = 10_000;
-/* The updater is alive when it touched its file within this, as the app took it before. */
+/* The updater is alive when it touched its private heartbeat within this. */
 const ALIVE_MS = 30_000;
 /* The grant the keeper holds, and the ones that ended, each until its own end, so none opens the machine twice. */
 export const GRANTS_FILE = 'grants.json';
@@ -24,8 +24,7 @@ const HELD_MOST = 8;
 export type ComputerAsk = (method: 'GET' | 'POST', path: string, body?: unknown, signal?: AbortSignal) => Promise<{ status: number; body: unknown }>;
 
 export type ComputerCarrierOptions = {
-  /* The shared status folder, and the keeper's own folder with its private updater channel mounted inside. */
-  controlDir: string;
+  /* The keeper's own folder with its private updater channel mounted inside. */
   dir: string;
   /* This machine's id in the company's network, which a grant names. */
   machine: string;
@@ -66,7 +65,7 @@ function nonceOf(grant: { payload: string } | null): string | null {
    then, so no grant signed before that second is taken. */
 const Grants = z.object({ held: SignedGrant.nullable(), spent: z.array(z.object({ nonce: z.string(), until: z.number() })), since: z.number().optional() });
 type Grants = z.infer<typeof Grants>;
-const Out = z.object({ exit: z.number().int().min(0).max(255), output: z.string() });
+const Out = z.object({ exit: z.number().int().min(0).max(255), output: z.string().max(30_000) });
 
 type Settings = { untilSec: number | null; until: string | null; asked: null; by: 'keeper' };
 const CLOSED: Settings = { untilSec: null, until: null, asked: null, by: 'keeper' };
@@ -165,7 +164,9 @@ export class ComputerCarrier {
 
   private updaterAlive(): boolean {
     try {
-      return Date.now() - statSync(join(this.opts.controlDir, 'alive')).mtimeMs < ALIVE_MS;
+      const heartbeat = lstatSync(this.file('alive'));
+      const age = this.now().getTime() - heartbeat.mtime.getTime();
+      return heartbeat.isFile() && age >= 0 && age < ALIVE_MS;
     } catch {
       return false;
     }
