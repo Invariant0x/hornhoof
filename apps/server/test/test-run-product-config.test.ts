@@ -25,7 +25,7 @@ describe('canonical versioned product configuration', () => {
     expect(commands).toContainEqual({ program: 'shellcheck', args: ['scripts/install.sh', 'scripts/node-build.sh'], cwd: '.' });
   });
   it('uses the explicit native adapter for Vitest while retaining the other framework command', () => {
-    const current = manifest(), others = ['release-scripts', 'browser', 'browser-matrix', 'mutation'];
+    const current = manifest(), others = ['release-scripts', 'browser', 'browser-matrix', 'browser-engines', 'mutation'];
     for (const suite of current.suites.filter(suite => !others.includes(suite.id))) {
       expect(suite.split.kind).toBe('vitest-shard'); expect(suite.run.cwd).toBe('.');
       expect(suite.run.args).toContain('vitest.product.config.mjs');
@@ -38,12 +38,34 @@ describe('canonical versioned product configuration', () => {
     const current = manifest(), suitesOf = (profile: string) => current.profiles.find(item => item.id === profile)!.requiredSuiteIds;
     /* everyTurns stays for the servers and nodes before 0.24.0 that run this repository's checks: nothing runs by it. */
     expect(current.execution?.fullRun).toEqual({ everyTurns: 5, replaces: 'final', profile: 'full' });
-    for (const heavy of ['browser', 'browser-matrix', 'mutation']) expect(suitesOf('fast')).not.toContain(heavy);
+    for (const heavy of ['browser', 'browser-matrix', 'browser-engines', 'mutation']) expect(suitesOf('fast')).not.toContain(heavy);
     expect(suitesOf('final')).toEqual(expect.arrayContaining(['browser', 'mutation']));
     expect(suitesOf('final')).not.toContain('browser-matrix');
+    expect(suitesOf('final')).not.toContain('browser-engines');
     expect([...suitesOf('full')].sort()).toEqual(current.suites.map(suite => suite.id).sort());
     expect(current.suites.find(suite => suite.id === 'mutation')?.keep).toEqual(['.metrics/mutate']);
   });
+  /* The shell's bars during an update were checked in three engines only on the machine of whoever ran their config by hand.
+     Chromium runs the spec in the browser suites, as playwright.config.ts takes every spec; Firefox and WebKit run it in the
+     full run of every release, by the spec's own config. */
+  it('runs the bars of the shell in Firefox and WebKit in the full run of a release, by the config of their spec', () => {
+    const current = manifest(), engines = current.suites.find(suite => suite.id === 'browser-engines');
+    const config = readFileSync(new URL('../../web/e2e/maintenance-error-bar.config.ts', import.meta.url), 'utf8');
+    expect(engines).toMatchObject({ root: 'apps/web/e2e', files: ['apps/web/e2e/maintenance-error-bar.spec.ts'], split: { kind: 'argv-files' }, profiles: ['full'], scenarioSources: 'apps/web/src' });
+    expect(engines!.run).toEqual({
+      program: 'npx', args: ['--no-install', 'playwright', 'test', '--config=e2e/maintenance-error-bar.config.ts', '--project=bars-firefox', '--project=bars-webkit', '--workers=2', '--pass-with-no-tests'], cwd: 'apps/web',
+    });
+    for (const project of ['bars-chromium', 'bars-firefox', 'bars-webkit']) expect(config).toContain(`name: '${project}'`);
+    expect(config).toContain("testMatch: 'maintenance-error-bar.spec.ts'");
+    expect(config).toContain('fullyParallel: true');
+    expect(current.suites.find(suite => suite.id === 'browser')!.files).toEqual(['apps/web/e2e/**/*.spec.ts']);
+    expect(current.profiles.find(item => item.id === 'full')!.requiredSuiteIds).toContain('browser-engines');
+    /* What reruns the browser suites reruns this one too, and a change of its config reruns it alone. */
+    const rules = current.impact.fullPackageGlobs;
+    for (const rule of rules.filter(rule => rule.suiteIds.includes('browser-matrix'))) expect(rule.suiteIds).toContain('browser-engines');
+    expect(rules.filter(rule => rule.globs.includes('apps/web/e2e/maintenance-error-bar.config.ts'))).toEqual([{ globs: ['apps/web/e2e/maintenance-error-bar.config.ts'], suiteIds: ['browser-engines'] }]);
+  });
+
   it('declares the product config and out-of-graph adapter as full-package impact inputs', () => {
     const current = manifest(), globs = current.impact.fullPackageGlobs.flatMap(entry => entry.globs);
     expect(globs).toContain('vitest.product.config.mjs'); expect(globs).toContain('apps/server/test/planned-vitest-sequencer.ts');
