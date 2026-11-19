@@ -1,8 +1,8 @@
 import { sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 
-/* Who reviewed a candidate it produced, or that grew from one it produced: the Review owner now or planned (current), or a
-   Review verdict or repair already recorded (past), with the candidate it checked. */
+/* A producer who was assigned to Review a candidate of its lineage: the surviving owner (current), or a displaced owner,
+   verdict or repair already recorded (past), with the candidate it was given. */
 export type ProducerReview = { agentId: string; candidateId: string | null; at: 'current' | 'past' };
 export type ReviewIndependenceRoute = {
   companyId: string; taskId: string; number: number; status: string; stage: string | null; phase: string;
@@ -12,7 +12,7 @@ export type ReviewIndependenceRoute = {
 /* One read of the in-flight routes with a Review stage that still carry the old author-check skip of #1217, or whose current or
    past Review owner produced a candidate in the lineage of what it checked. The lineage is the checked candidate and every
    candidate it grew from, with the task's executor; where the chain breaks, every producer of the task counts. Closed work
-   ('done', 'cancelled') keeps its record and is left out. It reads only, so it runs as it is on a live database too. */
+   ('done', 'cancelled') keeps its record and is left out. Assignments displaced before they were recorded may be unknown. */
 export const REVIEW_INDEPENDENCE_SQL = `WITH RECURSIVE live AS (
   SELECT t.company_id, t.id AS task_id, t.number, t.status, t.executor_agent_id::text AS executor, r.state,
     jsonb_path_exists(r.state, '$.stages[*] ? (@.stage == "review" && @.status == "skipped" && @.reason == "author_check_passed")') AS old_review_skip
@@ -23,7 +23,9 @@ export const REVIEW_INDEPENDENCE_SQL = `WITH RECURSIVE live AS (
   SELECT e.task_id, e.data->'candidate'->>'id' AS id, e.data->'candidate'->>'parentId' AS parent_id,
     e.data->'candidate'->'producedBy'->>'stage' AS stage, e.data->'candidate'->'producedBy'->>'agentId' AS producer, e.agent_id::text AS submitter
   FROM task_events e JOIN live l ON l.task_id = e.task_id AND l.company_id = e.company_id
-  WHERE e.kind = 'submitted' AND jsonb_typeof(e.data->'candidate') = 'object'
+  WHERE e.kind = 'submitted' AND jsonb_typeof(e.data->'candidate'->'id') = 'string'
+    AND jsonb_typeof(e.data->'candidate'->'parentId') IN ('string', 'null')
+    AND jsonb_typeof(e.data->'candidate'->'producedBy'->'agentId') = 'string'
 ), reviews AS (
   SELECT l.task_id, s->>'ownerAgentId' AS agent_id, coalesce(s->>'inputCandidateId', l.state->>'candidateId') AS checked, 'current' AS at
   FROM live l CROSS JOIN LATERAL jsonb_array_elements(l.state->'stages') s
@@ -31,6 +33,12 @@ export const REVIEW_INDEPENDENCE_SQL = `WITH RECURSIVE live AS (
   UNION
   SELECT l.task_id, l.state->'assignment'->>'agentId', l.state->>'candidateId', 'current'
   FROM live l WHERE l.state->>'stage' = 'review' AND l.state->'assignment'->>'agentId' IS NOT NULL
+  UNION
+  SELECT e.task_id, e.data->'pastReviewOwner'->>'agentId', e.data->'pastReviewOwner'->>'candidateId', 'past'
+  FROM task_events e JOIN live l ON l.task_id = e.task_id AND l.company_id = e.company_id
+  WHERE e.kind = 'comment' AND e.agent_id IS NULL AND e.person_id IS NULL
+    AND jsonb_typeof(e.data->'pastReviewOwner'->'agentId') = 'string'
+    AND jsonb_typeof(e.data->'pastReviewOwner'->'candidateId') IN ('string', 'null')
   UNION
   SELECT e.task_id, e.agent_id::text, e.data->>'candidateId', 'past'
   FROM task_events e JOIN live l ON l.task_id = e.task_id AND l.company_id = e.company_id

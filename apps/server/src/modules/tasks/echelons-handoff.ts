@@ -67,7 +67,7 @@ export async function reviewReplacement(ctx: Pick<Ctx, 'db'>, task: Task, route:
     }
     return step;
   });
-  return forwardHandoff(ctx, task, { ...route, state: { ...route.state, stage: 'development', stages } }, candidate);
+  return forwardHandoff(ctx, task, { ...route, state: { ...route.state, stage: 'development', stages } }, candidate, true);
 }
 
 /* A candidate already in flight under the old policy must reach Review before it can be accepted. */
@@ -83,7 +83,7 @@ export async function reopenAuthorReview(ctx: Pick<Ctx, 'db' | 'bus'>, task: Tas
   return { task: row, wakes: next.wakes };
 }
 
-export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate): Promise<Handoff> {
+export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate, requireReview = false): Promise<Handoff> {
   const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
   const ahead = route.state.stages.slice(at + 1).filter(step => step.status !== 'skipped');
   if (!ahead.length && route.state.stage === 'tests') throw refuse(409, 'task_invalid', 'Tests must verify the final candidate before integration.');
@@ -97,7 +97,8 @@ export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Ro
     const excluded = await keptFromReview(ctx.db, task, next.stage, candidate);
     const named = next.ownerAgentId && !excluded.has(next.ownerAgentId) ? next.ownerAgentId : null;
     const owner = await checkerFor(ctx, task, received.producedBy, ability, named, undefined, excluded);
-    if (!owner && await uncheckable(ctx.db, task, next.stage, ability, route.state.security)) {
+    const requiredReview = requireReview && next.stage === 'review';
+    if (!owner && !requiredReview && await uncheckable(ctx.db, task, next.stage, ability, route.state.security)) {
       stages = stages.map(step => step.stage === next.stage ? { ...step, status: 'skipped', reason: NO_DEPARTMENT_CHECKER, ownerAgentId: null } : step);
       skipped.push(next.stage);
       continue;

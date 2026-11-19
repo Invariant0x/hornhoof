@@ -1,7 +1,8 @@
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { taskEvents, taskRoutes, tasks } from '../src/db/schema.js';
-import { report, submit, verdict } from '../src/modules/tasks/engine.js';
+import { agentIdentity } from '../src/modules/tasks/echelons-assign.js';
+import { report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { reviewIndependenceInventory } from '../src/modules/tasks/review-independence.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 
@@ -99,7 +100,7 @@ describe('the review independence inventory', () => {
     expect(again).toMatchObject({ stage: 'review', ownerAgentId: second.id });
     await changeState(f, returned.id, state => ({ ...state, stages: state.stages.map(step => step.stage === 'review' ? { ...step, ownerAgentId: f.reviewer.id } : step) }));
 
-    /* A Review verdict naming a candidate the task has no record of: every producer of the task counts. */
+    /* Review verdicts naming missing or incomplete candidate links fall back to every recognized producer. */
     const { task: unknown } = await f.create({ small: true });
     f.atCommit(HEAD);
     await submit(f.ctx, f.author.id, unknown.id, code);
@@ -107,8 +108,13 @@ describe('the review independence inventory', () => {
     f.atCommit(FIX);
     await submit(f.ctx, f.reviewer.id, unknown.id, { ...code, summary: 'Fix the boundary.' });
     const missing = '00000000-0000-4000-8000-000000000001';
+    const partial = '00000000-0000-4000-8000-000000000002';
+    await f.db.insert(taskEvents).values({ companyId: unknown.companyId, taskId: unknown.id, kind: 'submitted', agentId: f.author.id,
+      data: { candidate: { id: partial, producedBy: { agentId: f.author.id, stage: 'development' } } } });
     await f.db.insert(taskEvents).values({ companyId: unknown.companyId, taskId: unknown.id, kind: 'verdict', agentId: f.reviewer.id, text: 'Reviewed.',
       data: { pass: true, stage: 'review', candidateId: missing, reviewedCommit: FIX } });
+    await f.db.insert(taskEvents).values({ companyId: unknown.companyId, taskId: unknown.id, kind: 'verdict', agentId: f.reviewer.id, text: 'Reviewed.',
+      data: { pass: true, stage: 'review', candidateId: partial, reviewedCommit: FIX } });
 
     const before = await everything(f);
     const found = await reviewIndependenceInventory(f.db);
@@ -122,7 +128,10 @@ describe('the review independence inventory', () => {
       { ...row(past.task), oldReviewSkip: false, producerReviews: [{ agentId: f.author.id, candidateId: past.candidateId, at: 'past' }] },
       { ...row(secured, 'review', 'review'), oldReviewSkip: false, producerReviews: [{ agentId: f.author.id, candidateId: repair.candidateId, at: 'current' }] },
       { ...row(returned, 'review', 'review'), oldReviewSkip: false, producerReviews: [{ agentId: f.reviewer.id, candidateId: again.candidateId, at: 'current' }] },
-      { ...row(unknown), oldReviewSkip: false, producerReviews: [{ agentId: f.reviewer.id, candidateId: missing, at: 'past' }] },
+      { ...row(unknown), oldReviewSkip: false, producerReviews: [
+        { agentId: f.reviewer.id, candidateId: missing, at: 'past' },
+        { agentId: f.reviewer.id, candidateId: partial, at: 'past' },
+      ] },
     ]);
   });
 
@@ -130,5 +139,21 @@ describe('the review independence inventory', () => {
     const f = await fixture();
     await atTests(f);
     expect(await reviewIndependenceInventory(f.db)).toEqual([]);
+  });
+
+  it('retains a displaced Review owner even before a verdict or repair', async () => {
+    const f = await fixture();
+    await submit(f.ctx, f.author.id, f.task.id, code);
+    const author = await agentIdentity(f.db, f.task.companyId, f.author.id);
+    await changeState(f, f.task.id, state => ({ ...state, assignment: author,
+      stages: state.stages.map(step => step.stage === 'review' ? { ...step, ownerAgentId: f.author.id } : step) }));
+    await f.db.update(tasks).set({ assigneeAgentId: f.author.id }).where(eq(tasks.id, f.task.id));
+    const { candidateId } = (await f.detail()).echelons;
+
+    await updateTask(f.ctx, f.head.id, f.task.id, { ownerAgentId: f.reviewer.id });
+
+    expect(await reviewIndependenceInventory(f.db)).toMatchObject([{
+      taskId: f.task.id, producerReviews: [{ agentId: f.author.id, candidateId, at: 'past' }],
+    }]);
   });
 });

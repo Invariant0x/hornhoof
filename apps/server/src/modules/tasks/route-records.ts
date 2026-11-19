@@ -4,6 +4,7 @@ import { taskRoutes } from '../../db/schema.js';
 import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
 import { type Task, type Tx } from './state.js';
+import { ownNote } from './events.js';
 export type Route = typeof taskRoutes.$inferSelect;
 
 export const AUTHOR_CHECK_PASSED = 'author_check_passed';
@@ -46,4 +47,14 @@ export async function changeRoute(tx: Tx, before: Route, state: Route['state'], 
   const [changed] = await tx.update(taskRoutes).set({ state, paths, revision: before.revision + 1 })
     .where(and(eq(taskRoutes.taskId, before.taskId), eq(taskRoutes.companyId, before.companyId), eq(taskRoutes.revision, before.revision))).returning({ id: taskRoutes.taskId });
   if (!changed) throw new ApiError(409, 'conflict', 'The route changed meanwhile. Read the task again.', 'task_changed');
+  const previous = before.state.stages.find(step => step.stage === 'review' && step.status === 'active');
+  if (!previous?.ownerAgentId) return;
+  const next = state.stages.find(step => step.stage === 'review');
+  if (next?.ownerAgentId === previous.ownerAgentId && next.inputCandidateId === previous.inputCandidateId
+    && (next.status === 'active' || next.status === 'complete')) return;
+  /* A displaced owner may have left no verdict or repair. Keep the assignment with the route change. */
+  await ownNote(tx, { id: before.taskId, companyId: before.companyId }, {
+    kind: 'comment', text: 'The previous Review assignment was recorded.',
+    data: { pastReviewOwner: { agentId: previous.ownerAgentId, candidateId: previous.inputCandidateId } },
+  });
 }

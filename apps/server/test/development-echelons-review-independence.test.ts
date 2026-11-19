@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, taskEvents, taskRoutes, tasks, turns } from '../src/db/schema.js';
+import { agents, departments, taskEvents, taskRoutes, tasks, turns } from '../src/db/schema.js';
 import { agentIdentity } from '../src/modules/tasks/echelons-assign.js';
 import { report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { backOn } from '../src/modules/tasks/wake.js';
@@ -162,6 +162,18 @@ describe('a passing verdict on a route that still carries the old skip', () => {
     expect(state.stages.find(step => step.stage === 'review')).toMatchObject({ status: 'active', reason: null });
     const [event] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.task.id), eq(taskEvents.kind, 'verdict'), eq(taskEvents.agentId, f.security.id)));
     expect(event?.data).toMatchObject({ pass: true, stage: 'security', reviewRequired: { candidateId } });
+  });
+
+  it('waits for independent Review even where the department normally allows unstaffed checks to skip', async () => {
+    const f = await legacy('security');
+    await f.db.update(departments).set({ templateKey: 'design' }).where(eq(departments.id, f.task.departmentId!));
+    await f.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, f.reviewer.id));
+
+    const moved = await verdict(f.ctx, f.security.id, f.task.id, pass(HEAD));
+
+    expect(moved.task).toMatchObject({ status: 'waiting', assigneeAgentId: null });
+    expect(await f.detail()).toMatchObject({ stage: 'review', phase: 'waiting', ownerAgentId: null });
+    expect(await f.reviewStep()).toMatchObject({ status: 'pending', reason: 'eligible_owner_required' });
   });
 });
 
