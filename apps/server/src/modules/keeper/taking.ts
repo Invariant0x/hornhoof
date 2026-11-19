@@ -178,23 +178,26 @@ export type TakerOptions = {
   log: (line: string) => void;
 };
 
+/* What is done the first time it is asked, and never again. */
+function once(act: () => void): () => void {
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    act();
+  };
+}
+
 /* In the follow keeper of the machine the server moves to: it answers the keeper that hands the server over. An offer
    is taken only from the machine its link names as the leader, and only while its copy is ready and follows; the go
    only from the machine that offered, before the deadline and while its apply worker runs. With the go written down
    and its subscription stopped, the keeper ends and starts again as the one that takes over. The deadline is counted
    on this machine's own clock from the moment the offer came, so two clocks that differ change nothing. */
 export class Taker {
-  /* This keeper was told to end, once. */
-  private ended = false;
+  /* The keeper ends, to start again as the one that takes the server; however often this is asked, it ends once. */
+  private readonly end = once(() => this.opts.exit());
 
   constructor(private readonly opts: TakerOptions) {}
-
-  /* The keeper ends, to start again as the one that takes the server; however often this is asked, it ends once. */
-  private end(): void {
-    if (this.ended) return;
-    this.ended = true;
-    this.opts.exit();
-  }
 
   private now(): number {
     return this.opts.now?.() ?? Date.now();
@@ -342,7 +345,8 @@ export class Promoter {
   private failing = false;
   /* This keeper gave the server back, and is to end: it never leads on, beside the machine that leads again. */
   private gaveBack = false;
-  private ended = false;
+  /* The keeper ends, to start again as one that follows; however often this is asked, it ends once. */
+  private readonly end = once(() => this.opts.exit());
 
   constructor(private readonly opts: PromoterOptions) {}
 
@@ -352,13 +356,6 @@ export class Promoter {
 
   private paths(): Paths {
     return { dir: this.opts.dir, sql: this.opts.sql, subscription: this.opts.subscription, now: () => this.now(), log: this.opts.log };
-  }
-
-  /* The keeper ends, to start again as one that follows; however often this is asked, it ends once. */
-  private end(): void {
-    if (this.ended) return;
-    this.ended = true;
-    this.opts.exit();
   }
 
   async start(): Promise<void> {
