@@ -131,17 +131,19 @@ const FAR_K = 0.55;
 /* The Head of Design's word for #1489: a department opens with its chips read at once, their 13.5 px names drawn 11 px tall or
    more, on a phone too; a schema that does not fit so opens at this size from its left edge, and the canvas scrolls it. */
 export const READABLE_K = 0.82;
-
-/* The top bar floats over this much of the top of the screen. */
-const HEADER_ROOM = 76;
+/* The schema opens this far from the top of the screen, and at least this far inside its canvas, which starts under the band
+   of the top bar and the department's name (#1556): top is how far down the screen the canvas starts. */
+const TOP_ROOM = 76, CANVAS_EDGE = 8;
 
 /* Where the schema stands in the room of its canvas, from the canvas's left, as wide and tall as it is, with what its bottom
    keeps for the zoom, the line of what happened as tall as that may grow and the tools, and what its top keeps for the bars
    over it. Whole, between them, when Show everything asks for it or when it fits so at a readable size; otherwise readable,
    from its top left, or on a phone, onHead, with the head's card in the middle across and its top at the top of the room:
-   the Head of Design's word for #1554. hx: the middle of the head's card in the schema. */
-export function schemaView(room: { left: number; width: number; height: number; bottom: number; top?: number }, size: { right: number; h: number; hx?: number }, whole: boolean, onHead = false) {
-  const padTop = room.top ?? HEADER_ROOM, padBottom = room.top === undefined ? Math.max(76, room.bottom) : room.bottom, padX = 48;
+   the Head of Design's word for #1554. top: how far down the screen the canvas starts (#1556). free: on a phone, the top of
+   the room the bars leave free as measured in the canvas, and then bottom is what Show everything keeps free at its foot.
+   hx: the middle of the head's card in the schema. */
+export function schemaView(room: { left: number; width: number; height: number; bottom: number; top?: number; free?: number }, size: { right: number; h: number; hx?: number }, whole: boolean, onHead = false) {
+  const padTop = room.free ?? Math.max(CANVAS_EDGE, TOP_ROOM - (room.top ?? 0)), padBottom = room.free === undefined ? Math.max(76, room.bottom) : room.bottom, padX = 48;
   const bw = size.right + 80, bh = size.h + 40;
   const fitK = Math.max(MIN_K, Math.min((room.width - padX * 2) / bw, (room.height - padTop - padBottom) / bh, 1));
   const k = whole || fitK >= READABLE_K ? fitK : READABLE_K;
@@ -447,7 +449,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
       if (!el || !el.clientWidth || !root) return null;
       const space = canvasSpace(el.clientWidth, panel === 'window' ? 0 : covered, panel === 'window' ? covered : 0);
       const bars = root.querySelectorAll(':scope > .crumbs, :scope > .dv-dock :is(.zoom, .ticker, .dv-acts)');
-      return { space, room: freeRoom(el, bars, space, { top: HEADER_ROOM - el.offsetTop, side }) };
+      return { space, room: freeRoom(el, bars, space, { top: TOP_ROOM - el.offsetTop, side }) };
     },
     [covered, panel, chrome.root],
   );
@@ -467,8 +469,8 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
       const { left, width } = at.space, phone = el.clientWidth <= NARROW;
       const below = (el.offsetParent?.clientHeight ?? el.clientHeight) - el.offsetTop - el.clientHeight;
       const room = phone
-        ? { left, width, height: el.clientHeight, top: at.room.y0, bottom: Math.max(FLOAT_GAP, fitBottom.current - below) }
-        : { left, width, height: el.clientHeight, bottom: fitBottom.current };
+        ? { left, width, height: el.clientHeight, free: at.room.y0, bottom: Math.max(FLOAT_GAP, fitBottom.current - below) }
+        : { left, width, height: el.clientHeight, bottom: fitBottom.current, top: el.offsetTop };
       setView({ ...schemaView(room, size.current, whole, phone), smooth: true });
     },
     [setView, fitBottom, roomOf],

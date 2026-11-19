@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { ApiFailure } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
@@ -41,6 +41,28 @@ type Props = {
   /* Only for people who see the whole company: they are the ones who write to him. */
   onOpenOrchestrator?: () => void;
 };
+
+/* The page stays where the person scrolled it as the card opens or closes and the work narrows for it or widens back (no
+   anchoring moves it: overflow-anchor: none, and WebKit has none). Only when the row or card of that task would leave the
+   screen, as the titles above it wrap anew, does the page scroll, as little as brings it whole into sight. */
+const rowOf = (id: string) => [...document.querySelectorAll<HTMLElement>('.tracker [data-task]')].find(row => row.dataset.task === id) ?? null;
+function useRowInSight(selected: string | null) {
+  const last = useRef(selected);
+  useLayoutEffect(() => {
+    const id = selected ?? last.current;
+    const changed = last.current !== selected;
+    last.current = selected;
+    const row = changed && id ? rowOf(id) : null;
+    const line = row?.querySelector<HTMLElement>(':scope > .tr-cells') ?? row;
+    const page = row?.closest<HTMLElement>('.body');
+    if (!line || !page) return;
+    const [at, view] = [line.getBoundingClientRect(), page.getBoundingClientRect()];
+    const top = view.top + page.clientTop, bottom = top + page.clientHeight;
+    /* Whole pixels, rounded out: WebKit keeps a whole scroll offset and would leave a part of a pixel out of sight. */
+    if (at.top < top) page.scrollTop -= Math.ceil(top - at.top);
+    else if (at.bottom > bottom) page.scrollTop += Math.min(Math.ceil(at.bottom - bottom), Math.floor(at.top - top));
+  }, [selected]);
+}
 
 function TaskSearch({ query, onChange }: { query: string; onChange: (query: string) => void }) {
   const t = useT();
@@ -358,6 +380,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const [drawer, setDrawer] = useState(false);
   const [query, setQuery] = useState('');
   const [chips, setChips] = useState<Chips>({});
+  useRowInSight(selected);
   const [stageMode, setStageMode] = useState<boolean | null>(null);
   const [showSubtasks, setShowSubtasks] = useState(true);
   const [making, setMaking] = useState<Making>(null);

@@ -677,11 +677,11 @@ describe('Department view', () => {
     /* The Head of Design's word for #1554: on a phone a department opens on its head card, in the middle across, its top at
        the top of the room under the department's name, whatever room the bars leave at the top. */
     it('opens a schema too wide for a phone on its head card, centred, at the top of the room', () => {
-      for (const top of [8, 116]) {
-        const view = schemaView({ ...phone, top }, { right: 1200, h: 700, hx: 600 }, false, true);
+      for (const free of [8, 116]) {
+        const view = schemaView({ ...phone, free }, { right: 1200, h: 700, hx: 600 }, false, true);
         expect(view.k).toBe(READABLE_K);
         expect(view.x + 600 * view.k).toBe(375 / 2);
-        expect(view.y).toBe(top);
+        expect(view.y).toBe(free);
       }
       /* A schema that fits, and Show everything, stand whole as before. */
       const fits = { right: 200, h: 200, hx: 100 };

@@ -61,7 +61,7 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
   const route = task.echelons;
   const ghostStage = route.phase === 'active' && route.stage && route.oneShot?.[route.stage];
   return (
-    <li className="tr-row" aria-label={`#${task.number} ${task.title}`}>
+    <li className="tr-row" aria-label={`#${task.number} ${task.title}`} data-task={task.id}>
       <div className={`tr-cells tr-row-line${rows.selected === task.id ? ' on' : ''}`} style={{ '--tr-depth': depth } as CSSProperties}>
         <div className="tr-task-name">
           <div className="tr-name">
@@ -178,7 +178,7 @@ function BoardCard({ tree, rows }: { tree: TaskTree; rows: Rows }) {
   const status = humanStatus(task, asksYou);
   const executor = doerOf(task);
   return (
-    <article className={`tr-card ${STATE_CLASS[status]}${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
+    <article className={`tr-card ${STATE_CLASS[status]}${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`} data-task={task.id}>
       <div className="tr-card-body">
         <h3 className="tr-card-title">
           <button className="linkish" type="button" dir="auto" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
