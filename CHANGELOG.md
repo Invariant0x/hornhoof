@@ -17,6 +17,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A tab whose session ended goes to the sign-in screen at once, and a tab nobody is signed in on reloads by itself once Hornhoof runs another version.
 - A plan with separate limits for groups of models, as Antigravity's Gemini and its Claude and GPT models, keeps each group's limits: a used-up group holds only the turns and fallbacks on its own models, and the plan's card shows every group with what it used and when it resets.
 
+## [0.39.2] - 2026-11-19
+
+### Fixed
+
+- A department opened while a banner shows over the map now fills the screen instead of splitting it with the map.
+
 ## [0.39.1] - 2026-11-19
 
 ### Fixed
