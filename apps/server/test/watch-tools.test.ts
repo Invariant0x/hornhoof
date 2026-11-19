@@ -5,7 +5,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import type { Db } from '../src/db/client.js';
-import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, tasks, type ExternalWait } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, taskEvents, tasks, type ExternalWait } from '../src/db/schema.js';
 import { blocked, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, ownPlan } from './helpers.js';
 import { agentState, enqueueTurn, GONE_ALONG } from '../src/modules/conversation/queue.js';
@@ -660,5 +660,49 @@ describe('tools a skill grants', () => {
       { kind: 'stuck', agent: 'Bruno', task: task.number, text: 'Ended 3 turns in a row on #1 without moving it.', status: 'open', answer: null, lastTurn: 'This content can’t be shown.' },
       { kind: 'question', agent: 'Bruno', task: task.number, text: 'Which payment provider?', status: 'answered', answer: 'Stripe', lastTurn: null },
     ]);
+  });
+
+  /* A person's own assistant works for that person alone, so agents leaves it out; failures does too, in every part, while
+     an employee's same work still shows. */
+  it("leave a person's own assistant out of failures as agents does: its failed turns, blocked tasks, stumbles, stops and undelivered words", async () => {
+    const { app, db, acme, sub, dev, bruno, task } = await company(['ops-failure-review']);
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    const [ava] = await db.insert(agents).values({ companyId: acme.id, kind: 'assistant', name: 'Ava', model: '', subscriptionId: sub.id }).returning();
+    /* The assistant holds one task and does another that an employee holds: either is that person's work. */
+    const [own] = await db.insert(tasks).values([
+      { companyId: acme.id, number: 900, title: 'Letter to the landlord', departmentId: dev.id, status: 'blocked', assigneeAgentId: ava!.id },
+      { companyId: acme.id, number: 901, title: 'Receipt for the landlord', departmentId: dev.id, status: 'blocked', assigneeAgentId: bruno.id, executorAgentId: ava!.id },
+    ]).returning();
+    await db.insert(taskEvents).values({ companyId: acme.id, taskId: own!.id, kind: 'blocked', agentId: ava!.id, text: 'Waits for the tenancy deposit sum.' });
+    await blocked(app.ctx, bruno.id, task.id, 'Waits for the bank.');
+    const turn = { companyId: acme.id, subscriptionId: sub.id, kind: 'conversation' as const, prompt: 'x', timeoutMs: 1, status: 'failed' as const };
+    const [avaTurn] = await db.insert(jobs).values([
+      { ...turn, agentId: ava!.id, taskId: own!.id, error: 'agent_failed', tail: 'Dear landlord, about the rent', startedAt: ago(16), finishedAt: ago(15) },
+      { ...turn, agentId: ava!.id, error: 'timeout', tail: 'Private diary of the owner', finishedAt: ago(14) },
+      { ...turn, agentId: bruno.id, taskId: task.id, error: 'timeout', tail: 'npm test hung', finishedAt: ago(30) },
+    ]).returning();
+    const event = (agentId: string, kind: 'tool' | 'tool_result', data: object, jobId: string | null = null) => ({ companyId: acme.id, agentId, jobId, kind, data, createdAt: ago(13) });
+    const undelivered = (reason: string) => ({ ok: false, summary: `Not delivered: reason ${reason}, recipient ${bruno.id}, task none.`, undelivered: { reason, recipient: bruno.id, task: null } });
+    await db.insert(agentEvents).values([
+      event(ava!.id, 'tool_result', { ok: false, summary: 'bash: line 1: rg: command not found' }, avaTurn!.id),
+      event(ava!.id, 'tool', { name: 'Bash', input: 'pip install --user landlordpkg' }, avaTurn!.id),
+      event(ava!.id, 'tool_result', undelivered('agent_not_ready')),
+      event(bruno.id, 'tool_result', { ok: false, summary: 'bash: line 1: ps: command not found' }),
+      event(bruno.id, 'tool', { name: 'Bash', input: 'pip install --user pyyaml' }),
+      event(bruno.id, 'tool_result', undelivered('switched_off')),
+    ]);
+    await db.insert(requests).values([
+      { companyId: acme.id, taskId: own!.id, agentId: ava!.id, kind: 'question', text: 'Should the letter name the deposit?', createdAt: ago(12) },
+      { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'question', text: 'Which payment provider?', createdAt: ago(11) },
+    ]);
+
+    const out = JSON.parse((await call(await mcp(app, TOKEN), 'failures', { hours: 6 })).content[0]!.text);
+    expect.soft(out.failed, 'failed').toEqual([expect.objectContaining({ agent: 'Bruno', tail: 'npm test hung' })]);
+    expect.soft(out.blocked, 'blocked').toEqual([expect.objectContaining({ number: task.number, holder: 'Bruno' })]);
+    expect.soft(out.missing, 'missing').toEqual([expect.objectContaining({ what: 'ps', agents: ['Bruno'] })]);
+    expect.soft(out.installed, 'installed').toEqual([expect.objectContaining({ command: 'pip install --user pyyaml', agents: ['Bruno'] })]);
+    expect.soft(out.stops, 'stops').toEqual([expect.objectContaining({ agent: 'Bruno', text: 'Which payment provider?' })]);
+    expect.soft(out.undelivered, 'undelivered').toEqual([expect.objectContaining({ agent: 'Bruno', reason: 'switched_off' })]);
+    for (const word of ['Ava', 'landlord', 'diary', 'deposit', 'agent_not_ready']) expect.soft(JSON.stringify(out)).not.toContain(word);
   });
 });

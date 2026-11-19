@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { X509Certificate, X509Crl } from '@peculiar/x509';
 import { z } from 'zod';
 import type { Client, TunnelSettings } from '../link/tunnel.js';
 import { holdThroughOneEmptyRead, TunnelKeeper } from '../link/tunnel.js';
@@ -19,6 +20,7 @@ import type { Mode } from './state.js';
 
 export const CRL_FILE = 'crl.json';
 const PEER_EVERY_MS = 5000;
+const CRL_RENEW_BEFORE_MS = 30 * 24 * 60 * 60 * 1000;
 const FRPC_EVERY_MS = 3000;
 const FRPC_RESTART_MS = 2000;
 const LOOPBACK = '127.0.0.1';
@@ -44,6 +46,7 @@ type Answer = z.infer<typeof Answer>;
 /* The authority's list as the keeper holds it: the list, and the serials it names. */
 const HeldCrl = z.object({ serials: z.array(z.string()), crlPem: z.string() });
 type HeldCrl = z.infer<typeof HeldCrl>;
+type CrlValidity = { authorityPem: string; from: number; until: number };
 
 export type PeerPorts = { peer: number; peerApp: number };
 type PeerLinkOptions = {
@@ -77,7 +80,31 @@ type PeerLinkOptions = {
   log: (line: string) => void;
 };
 
-const sameSerials = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && [...a].sort().join() === [...b].sort().join();
+function sameSerials(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sorted = [...b].sort();
+  return [...a].sort().every((serial, index) => serial === sorted[index]);
+}
+
+async function verifyList(held: HeldCrl, authorityPem: string | null): Promise<CrlValidity | null> {
+  if (!authorityPem) return null;
+  try {
+    const authority = new X509Certificate(authorityPem);
+    const list = new X509Crl(held.crlPem);
+    const from = list.thisUpdate.getTime();
+    const until = list.nextUpdate?.getTime();
+    if (!until || !(from < until) || list.issuer !== authority.subject) return null;
+    if (!sameSerials(held.serials, list.entries.map(entry => entry.serialNumber.toLowerCase()))) return null;
+    if (!(await list.verify({ publicKey: authority.publicKey }))) return null;
+    return { authorityPem, from, until };
+  } catch {
+    return null;
+  }
+}
+
+function currentAt(list: CrlValidity | null, now: number): list is CrlValidity {
+  return list !== null && list.from <= now && now < list.until;
+}
 
 export function readHeldCrl(dir: string): HeldCrl | null {
   try {
@@ -98,6 +125,8 @@ export class PeerLink {
   private server: PeerServer | null = null;
   private tunnel: TunnelKeeper<PeerServices> | null = null;
   private crl: HeldCrl | null;
+  private verifiedList: CrlValidity | null = null;
+  private readonly reportedRevoked = new Set<string>();
   private answer: Answer | null = null;
   private lastSettings: TunnelSettings | null = null;
   private timer: NodeJS.Timeout | null = null;
@@ -127,9 +156,9 @@ export class PeerLink {
     return this.answer;
   }
 
-  /* The serials the app named revoked, else the held list's. */
+  /* Refuse the held serials and any reported since, until a verified list takes their place. */
   revoked(): ReadonlySet<string> {
-    return new Set(this.answer?.revoked ?? this.crl?.serials ?? []);
+    return new Set([...(this.crl?.serials ?? []), ...this.reportedRevoked]);
   }
 
   /* Every byte its peer server wrote to each machine's streams so far; none before it listens. */
@@ -168,7 +197,7 @@ export class PeerLink {
     try {
       const res = await askApp(this.opts.app, 'GET', '/api/network/peers', undefined, this.stopping.signal);
       if (!res.ok) throw new Error(`the app answered ${res.status}`);
-      this.take(Answer.parse(res.json()));
+      await this.take(Answer.parse(res.json()));
       this.readFails = false;
     } catch {
       if (!this.readFails && !this.stopped) this.opts.log(READ_FAILED);
@@ -176,11 +205,13 @@ export class PeerLink {
     }
   }
 
-  private take(answer: Answer): void {
+  private async take(answer: Answer): Promise<void> {
     if (this.stopped) return;
     this.answer = answer;
+    for (const serial of answer.revoked) this.reportedRevoked.add(serial);
     const certificateCurrent = this.checkCertificate(answer);
-    const listCurrent = this.checkList(answer);
+    const listCurrent = await this.checkList(answer);
+    if (this.stopped) return;
     if (certificateCurrent && listCurrent) this.open();
     this.server?.refresh();
   }
@@ -197,14 +228,30 @@ export class PeerLink {
     return false;
   }
 
-  /* A new list is taken when the serials revoked now differ from the held list's, which only the app that leads signs. */
-  private checkList(answer: Answer): boolean {
-    if (answer.crlPem && (!this.crl || !sameSerials(this.crl.serials, answer.revoked))) this.keepList({ serials: answer.revoked, crlPem: answer.crlPem });
-    return this.crl !== null && sameSerials(this.crl.serials, answer.revoked);
+  /* Each read gets a freshly signed list from the leading app. Renew the held list early even when no serial changed. */
+  private async checkList(answer: Answer): Promise<boolean> {
+    if (this.crl && this.verifiedList?.authorityPem !== answer.authorityPem) {
+      this.verifiedList = await verifyList(this.crl, answer.authorityPem);
+    }
+    const now = Date.now();
+    const held = this.verifiedList;
+    const same = this.crl !== null && sameSerials(this.crl.serials, answer.revoked);
+    if (answer.crlPem && (!same || !currentAt(held, now) || held.until - now <= CRL_RENEW_BEFORE_MS)) {
+      const incoming = { serials: answer.revoked, crlPem: answer.crlPem };
+      const checked = await verifyList(incoming, answer.authorityPem);
+      if (this.stopped) return false;
+      if (currentAt(checked, Date.now()) && (!held || (checked.from >= held.from && (!same || checked.until > held.until)))) {
+        this.keepList(incoming, checked);
+        return true;
+      }
+    }
+    return same && currentAt(held, Date.now());
   }
 
-  private keepList(crl: HeldCrl): void {
+  private keepList(crl: HeldCrl, verified: CrlValidity): void {
     this.crl = crl;
+    this.verifiedList = verified;
+    this.reportedRevoked.clear();
     try {
       writePrivately(join(this.opts.dir, CRL_FILE), JSON.stringify(crl));
     } catch (err) {

@@ -25,7 +25,7 @@ const isPrivateAddress = (address: string): boolean => isPrivate(address) || add
 
 const SignKey = z.string().min(1).max(1024);
 const CertificateBody = z.object({ signKey: SignKey });
-const JoinBody = z.object({ ticket: z.string().length(43), networkId: z.string().regex(NETWORK_ID), signKey: SignKey });
+const JoinBody = z.object({ ticket: z.base64url().length(43), networkId: z.string().regex(NETWORK_ID), signKey: SignKey, signature: z.base64().length(88) });
 const RenewBody = z.object({ machine: z.uuid(), serial: z.string().regex(/^[0-9a-f]{1,64}$/), at: z.iso.datetime(), signature: z.string().min(1).max(200) });
 const Port = z.number().int().min(1).max(65535);
 const Measure = z.number().int().min(0).max(600_000);
@@ -289,9 +289,8 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
     return reply.code(204).send();
   });
 
-  /* A machine's keeper comes here once, before it has a certificate, with the ticket its join command brought. Whoever
-     holds the ticket is that machine, so nothing else is asked. The link's secrets go only into an answer that travels
-     over TLS; a keeper that joined over plain HTTP reads them through its peer link. */
+  /* A machine's keeper comes here once with the ticket its join command brought and a signature from its key.
+     The link's secrets go only into an answer that travels over TLS. */
   app.post('/api/network/join', async req => {
     const { machine, role, issued, authorityPem } = await redeemTicket(ctx, JoinBody.parse(req.body));
     const view = viewFor(await workerView(ctx, machine), await cameOverHttps(req, config));

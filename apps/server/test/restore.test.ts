@@ -20,6 +20,9 @@ import { openTestDb, prepareSharedDatabase } from './helpers-db.js';
 /* The embedded database opens as the file is collected, so its cold start is no test's time. */
 await prepareSharedDatabase();
 
+/* What the updater runs on the database a restore replaces, read from where its image takes it. */
+const CARRY = readFileSync(new URL('../../updater/carry.sql', import.meta.url), 'utf8');
+
 const folder = () => mkdtempSync(join(tmpdir(), 'hh-restore-'));
 type Refusal = { error: { reason: string; message: string } };
 
@@ -301,6 +304,50 @@ describe('a restore from a backup', () => {
     };
     await applyCarry(app.ctx, carry);
     expect(await db.select().from(people).where(eq(people.id, id))).toMatchObject([{ id, name: 'Dana', removedAt: new Date(removedAt), status: 'disabled', email: null }]);
+  });
+
+  it("keeps an assistant's key revoked or replaced since the bundle closed, and a key that still works working", async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    const assistant = async (name: string) => {
+      const added = await app.inject({ method: 'POST', url: '/api/people/assistants', payload: { name, owner: owner!.id, program: 'other' }, ...as(ceo) });
+      expect(added.statusCode).toBe(201);
+      return added.json().person.id as string;
+    };
+    const keyFor = async (id: string) => {
+      const made = await app.inject({ method: 'POST', url: `/api/people/${id}/key`, ...as(ceo) });
+      expect(made.statusCode).toBe(201);
+      return made.json().key as string;
+    };
+    const opens = async (key: string) => (await app.inject({ url: '/api/assistant/me', headers: { authorization: `Bearer ${key}` } })).statusCode;
+    const keys = async () => (await db.select({ personId: assistants.personId, keyHash: assistants.keyHash, keyCreatedAt: assistants.keyCreatedAt, wakeSecretEnc: assistants.wakeSecretEnc }).from(assistants)).sort((a, b) => a.personId.localeCompare(b.personId));
+    const [revoked, replaced, kept] = [await assistant('Ava'), await assistant('Bo'), await assistant('Cy')];
+    const [older, before, stays] = [await keyFor(revoked), await keyFor(replaced), await keyFor(kept)];
+    const bundled = await keys();
+    /* Since the bundle, Ava's key was revoked and Bo's replaced, and the old database closes with that. */
+    expect((await app.inject({ method: 'DELETE', url: `/api/people/${revoked}/key`, ...as(ceo) })).statusCode).toBe(200);
+    const newer = await keyFor(replaced);
+    const closing = await keys();
+    const carry = Object.values(((await db.execute(sql.raw(CARRY))) as unknown as { rows: Record<string, unknown>[] }).rows[0]!)[0] as Carry;
+    /* The restored database has the keys of the bundle. */
+    for (const row of bundled) await db.update(assistants).set(row).where(eq(assistants.personId, row.personId));
+    expect(await opens(older)).toBe(200);
+
+    /* A carry of an updater from before says nothing of the keys, and leaves them as the bundle has them. */
+    const { assistantKeys, ...fromBefore } = carry;
+    await applyCarry(app.ctx, fromBefore);
+    expect(await keys()).toEqual(bundled);
+    /* An assistant made after the bundle is not in the restored database, and its key opens nothing there. */
+    const madeSince = { personId: randomUUID(), keyHash: hashToken('made since'), keyCreatedAt: new Date().toISOString(), wakeSecretEnc: 'sealed' };
+    await applyCarry(app.ctx, { ...carry, assistantKeys: [...assistantKeys ?? [], madeSince] });
+    expect(await opens(older)).toBe(401);
+    expect(await opens(before)).toBe(401);
+    expect(await opens(newer)).toBe(200);
+    expect(await opens(stays)).toBe(200);
+    /* Each key is the row the old database closed with, its signing secret sealed as it was stored. */
+    expect(await keys()).toEqual(closing);
+    expect(await db.select().from(assistants).where(eq(assistants.personId, madeSince.personId))).toEqual([]);
   });
 
   it('keeps who holds the data and the link', async () => {
