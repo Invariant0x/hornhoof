@@ -69,4 +69,8 @@ export type Carry = {
      replaced since the bundle opens nothing after a restore. Left out by an updater of the build before, and then the
      restored database keeps the keys the bundle has. */
   assistantKeys?: { personId: string; keyHash: string; keyCreatedAt: string; wakeSecretEnc: string }[];
+  /* The nodes' keys that open something now: a node that signed out, was taken back or joined again with a new key since
+     the bundle opens nothing with the bundle's key after a restore. Left out by an updater of the build before, and then
+     the restored database keeps the keys the bundle has. */
+  nodeKeys?: { id: string; keyHash: string }[];
 };
