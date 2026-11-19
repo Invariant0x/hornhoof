@@ -1,8 +1,8 @@
 -- Who may get in now, read from the database a restore replaces, after cutover.sql in the same session: the restored
--- database brings back no person who was disabled or removed since, no machine that was disconnected and no key that was
--- replaced. With it, who holds the company's data now, and the link as the relay takes it now with the secrets of the
--- peer services, each sealed as it is stored: a machine that stopped holding the data holds it no more after a restore,
--- and a key or a secret it knew opens nothing. One line of JSON.
+-- database brings back no person who was disabled or removed since, no machine that was disconnected, no key that was
+-- replaced and no assistant's key that was revoked or replaced. With it, who holds the company's data now, and the link
+-- as the relay takes it now with the secrets of the peer services, each sealed as it is stored: a machine that stopped
+-- holding the data holds it no more after a restore, and a key or a secret it knew opens nothing. One line of JSON.
 SELECT jsonb_build_object(
   'people', COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'id', p.id, 'status', p.status, 'passwordHash', p.password_hash, 'scopeKind', p.scope_kind, 'isOwner', p.is_owner, 'isCeoDelegate', p.is_ceo_delegate,
@@ -17,4 +17,6 @@ SELECT jsonb_build_object(
   'serials', COALESCE((SELECT jsonb_agg(serial) FROM certificates WHERE revoked_at IS NOT NULL), '[]'::jsonb),
   'recoveryKeys', COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'id', id, 'recipient', recipient, 'linkPrint', link_print, 'linkName', link_name, 'linkUrl', link_url, 'madeBy', made_by, 'madeAt', created_at, 'retiredAt', retired_at))
-    FROM recovery_keys), '[]'::jsonb));
+    FROM recovery_keys), '[]'::jsonb),
+  'assistantKeys', COALESCE((SELECT jsonb_agg(jsonb_build_object('personId', person_id, 'keyHash', key_hash, 'keyCreatedAt', key_created_at, 'wakeSecretEnc', wake_secret_enc))
+    FROM assistants WHERE key_hash IS NOT NULL), '[]'::jsonb));
