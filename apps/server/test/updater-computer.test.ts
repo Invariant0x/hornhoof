@@ -64,6 +64,23 @@ describe('updater, the computer', () => {
     expect(answer(s, 'keeper')).toEqual({ id: 'keeper', exit: 0, output: 'ran: recorded sample\n' });
   });
 
+  /* What the app could write before: an open window and a request in the shared folder, which an older updater ran as
+     root, and a start marker, which made it stop a command. */
+  it('runs and stops nothing the app drops into the shared control folder, even with an open shared window', async () => {
+    const s = stand();
+    const shared = join(s.control, 'computer');
+    mkdirSync(shared);
+    writeFileSync(join(s.control, 'computer.json'), JSON.stringify({ untilSec: later(), until: null, asked: null }));
+    writeFileSync(join(shared, 'dropped.json'), JSON.stringify({ id: 'dropped', command: 'private sample', timeout: 30 }));
+    writeFileSync(join(shared, 'k1.started'), '');
+    const r = await runOnce(s, null, env);
+    expect(r.code).toBe(0);
+    expect(r.calls.filter(call => call.startsWith('docker'))).toEqual([]);
+    expect(r.out.match(/Computer request refused: it came from the shared control folder\./g)).toHaveLength(1);
+    expect(r.out).not.toMatch(/private sample|dropped/);
+    expect(readdirSync(shared).sort()).toEqual(['dropped.json', 'k1.started']);
+  });
+
   it('runs a command as root on the computer, with its files at /host and its Docker, and answers with the output and exit code', async () => {
     const s = stand();
     access(s, later());

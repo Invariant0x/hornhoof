@@ -13,7 +13,7 @@ type Service = {
   command?: string[];
   restart?: string;
   ports?: string[];
-  volumes?: (string | { type: string; target: string; read_only?: boolean })[];
+  volumes?: (string | { type: string; source?: string; target: string; read_only?: boolean })[];
   networks?: string[];
   depends_on?: DependsOn;
   environment?: Record<string, string>;
@@ -95,7 +95,7 @@ describe('front, keeper and migrate', () => {
        machine with no node of the server's, would stop the keeper as it starts. */
     expect(keeper!.environment).toMatchObject({ HORNHOOF_NODE_KEY: '${NODE_KEY:-}', HORNHOOF_SURVIVOR_S: '${HORNHOOF_SURVIVOR_S:-}', HORNHOOF_LINK_PROBE: '${HORNHOOF_LINK_PROBE:-}' });
     /* Its own volume holds the machine's key, which no other service reads. */
-    expect(keeper!.volumes).toEqual(expect.arrayContaining(['control:/control', 'keeper:/keeper']));
+    expect(keeper!.volumes).toEqual(['control:/control', 'keeper:/keeper', 'computer:/keeper/computer-control']);
     expect(Object.keys((parse(composeText) as { volumes: Record<string, unknown> }).volumes)).toContain('keeper');
     for (const [name, service] of Object.entries(compose.services)) if (name !== 'keeper') expect(JSON.stringify(service.volumes ?? []), name).not.toContain('keeper:');
     /* It hears which ports the machine publishes, to report them, and publishes the web port no more than before. */
@@ -108,10 +108,10 @@ describe('front, keeper and migrate', () => {
   it('shares writable computer requests only between the keeper and updater', () => {
     expect(keeper!.volumes).toContain('computer:/keeper/computer-control');
     expect(compose.services.updater!.volumes).toContain('computer:/computer');
-    for (const [name, service] of Object.entries(compose.services)) {
-      if (name === 'keeper' || name === 'updater') continue;
-      expect(JSON.stringify(service.volumes ?? []), name).not.toContain('computer:');
-    }
+    /* By the volume each mount takes, in the short and the long form alike. */
+    const sources = (service: Service) => (service.volumes ?? []).map(volume => (typeof volume === 'string' ? volume.split(':')[0] : volume.source));
+    const mounting = Object.entries(compose.services).filter(([, service]) => sources(service).includes('computer')).map(([name]) => name);
+    expect(mounting.sort()).toEqual(['keeper', 'updater']);
     expect(app!.volumes).toContainEqual({ type: 'tmpfs', target: '/control/computer', read_only: true });
   });
 
