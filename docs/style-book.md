@@ -465,7 +465,7 @@ Real sources in the repository:
 | Place | Rule | Reason | Owner | Until |
 |---|---|---|---|---|
 | `Remove` in the notebook, `ui/Notebook.tsx` | Destructive actions ask for confirmation, `templates/skills/dsn-ui-rules.md` | Development decided that it is not a defect | Development | Reviewed by 2027-02-05 |
-| Compact labels of the map, the ticker and `.chip` | No ellipsis on text, section 6 | Existing compact labels with their own ellipsis, as the screen inventory records; panel text gets no such right | Development | Reviewed by 2027-02-05 |
+| The ticker: one moving line, with the full text on hover or tap | No ellipsis on text, section 6 | Head of Design's decision of 2026-11-19: the exception covers only the ticker. Map captions and `.chip` are out of the exception, so the general wrap rule applies to them | Development | Reviewed by 2027-02-05 |
 | Close button of a panel | Touch target of 44 px, section 3 | The panel bar is 38 px; a change of the bar is its own work | Design | Reviewed by 2027-02-05 |
 | Name in the terminal bar: cut with an ellipsis in Russian at 375 px | No ellipsis on text, section 6 | The terminal bar keeps its own rule of fitting its window | Development | Reviewed by 2027-02-05 |
 

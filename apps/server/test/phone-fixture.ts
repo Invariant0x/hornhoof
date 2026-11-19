@@ -12,7 +12,7 @@ await prepareSharedDatabase();
    adds the phone, Sam of the other department and Olaf of another company. With lists, its node says it answers what its
    adb lists, and answers from the devices a scenario gives it. With readiness, its node checks phone settings and answers
    with what readiness gives, or that it could not reach the phone when it gives null. */
-export async function phoneCompany(options: { lists?: boolean; readiness?: () => PhoneReadinessIssue[] | null } = {}) {
+export async function phoneCompany(options: { lists?: boolean; readiness?: () => PhoneReadinessIssue[] | null; legacyBaseline?: boolean } = {}) {
   const { readiness } = options;
   const { app, db } = await testApp({ NODE_KEY: 'v'.repeat(40) });
   /* Lease expiry moves only when a scenario moves this injected clock. */
@@ -79,7 +79,10 @@ export async function phoneCompany(options: { lists?: boolean; readiness?: () =>
       else answerList(m);
     }
   });
-  const hello = () => node.send({ type: 'hello', version: '0.31.0', loggedIn: true, running: [], phones: true, ...(options.lists ? { phoneList: true } : {}), ...(readiness ? { phoneBaseline: true } : {}) });
+  const hello = () => node.send({ type: 'hello', version: '0.31.0', loggedIn: true, running: [], phones: true,
+    ...(options.lists ? { phoneList: true } : {}), ...(readiness ? { phoneBaseline: true } : {}),
+    ...(readiness && !options.legacyBaseline ? { phoneBrightnessFloor: true } : {}),
+  });
   hello();
   await until(async () => Boolean((await db.select().from(nodes).where(eq(nodes.id, executor!.id)))[0]?.lastSeenAt));
   const addPhone = (session = claraSession) => app.inject({ method: 'POST', url: '/api/phones', ...as(session), payload: { machineId: machine!.id, endpoint: '192.168.1.80:5555', name: 'Clara phone' } });

@@ -7,7 +7,7 @@ import { LANGUAGES, LanguageProvider, type Language, type Messages } from '../sr
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { Shell } from '../src/screens/Shell';
-import { DepartmentView } from '../src/screens/Department';
+import { DepartmentView, READABLE_K, schemaView } from '../src/screens/Department';
 import { schemaLayout, stepPaths } from '../src/screens/schema';
 import { RepoSettings } from '../src/ui/RepoSettings';
 import { localPipeline, useDepartmentTree } from '../src/tasks';
@@ -546,9 +546,16 @@ describe('Department view', () => {
       }
     /* Words break between them, and only a word longer than the whole line breaks inside itself; a model's name may be its
        identifier, which breaks wherever it has to. */
-    for (const selector of ['.fn', '.fa', '.shead .hn', '.shead .meta', '.shead .hx-task', '.schip .mn', '.schip .st', '.schip .r3', '.pchip .pn b', '.pchip .pn span'])
+    for (const selector of ['.fn', '.fa', '.shead .hn', '.shead .meta', '.shead .hx-task', '.schip .mn', '.schip .st', '.schip .r2', '.schip .r3', '.pchip .pn b', '.pchip .pn span'])
       expect.soft(decl(selector, 'overflow-wrap'), selector).toBe('break-word');
-    expect(decl('.schip .r2', 'overflow-wrap')).toBe('anywhere');
+    /* The Head of Design's word for #1489 (#1539, N4): a word breaks by the syllables of the page's language, with a hyphen,
+       on the schema and in the line of what happened, and a role's name is not letter-spaced right to left or in Arabic,
+       Persian or Hebrew, where spacing tears joined letters apart. */
+    for (const selector of ['.dcanvas', '.ticker']) {
+      expect.soft(decl(selector, 'hyphens'), selector).toBe('auto');
+      expect.soft(decl(selector, '-webkit-hyphens'), selector).toBe('auto');
+    }
+    for (const selector of ['[dir="rtl"] .role', '.role:lang(ar)', '.role:lang(fa)', '.role:lang(he)']) expect.soft(decl(selector, 'letter-spacing'), selector).toBe('0');
     /* A state of more words than the row has room for goes under the name, the name keeps a line of its own. */
     expect(decl('.schip .r1', 'flex-wrap')).toBe('wrap');
     expect(decl('.schip .r3 .ast', 'white-space')).toBe('normal');
@@ -593,9 +600,11 @@ describe('Department view', () => {
     expect(card.querySelector('.r2')).toHaveTextContent(`${model}, default effort, Anthropic`);
     expect(card.querySelector('.r3')).toHaveTextContent(`#12 ${title}`);
     const slot = (name: RegExp) => within(frame).getByRole('button', { name }).closest<HTMLElement>('.dept-chip')!;
-    expect([slot(/Bruno/).style.height, slot(/Bruno/).style.minHeight]).toEqual(['', '84px']);
     await waitFor(() => expect(parseFloat(slot(/Vera/).style.top) - parseFloat(slot(/Bruno/).style.top)).toBe(150 + 12));
-    expect(parseFloat(frame.style.height)).toBe(100 + 150 + 12 + 96 + 8);
+    /* The head of Development's word for #1489: every chip of the department takes the height of the tallest one. */
+    expect([slot(/Bruno/).style.height, slot(/Bruno/).style.minHeight]).toEqual(['', '150px']);
+    expect([slot(/Vera/).style.height, slot(/Vera/).style.minHeight]).toEqual(['', '150px']);
+    expect(parseFloat(frame.style.height)).toBe(100 + 2 * (150 + 12) + 8);
     /* The line from the frame's spine meets the card in its middle. */
     const spine = parseFloat(frame.style.left) + 10, middle = parseFloat(frame.style.top) + parseFloat(slot(/Bruno/).style.top) + 75;
     expect([...document.querySelectorAll('.dview .wires path.tick')].map(p => p.getAttribute('d'))).toContain(`M ${spine} ${middle} L ${spine + 10} ${middle}`);
@@ -617,6 +626,69 @@ describe('Department view', () => {
     await waitFor(() => expect(frame.style.top).toBe(`${362 + 240 - 184}px`));
     const people = [...schema.querySelectorAll<HTMLElement>('.pchip')];
     expect(people.map(p => [p.style.top, p.style.height, p.style.minHeight])).toEqual([['12px', '', '56px'], [`${12 + 90 + 10}px`, '', '56px']]);
+  });
+
+  /* The Head of Design's word for #1489 (#1539): the head card keeps the room above the line of what the head does as the
+     English words have it, so a card of more lines grows by them instead of taking that room. */
+  it('keeps the room above what the head does fixed, as English has it, instead of what the card leaves over', () => {
+    for (const rule of rulesFor('.shead .hx')) expect.soft(rule.decls['margin-top'], 'no room left over').toBeUndefined();
+    expect(decl('.shead .hx', 'margin-block-start')).toBe('10px');
+    expect(decl('.shead .edge-in', 'gap')).toBe('4px');
+  });
+
+  /* By the head of Development's word for #1489: far zoom shows colours on the chips and changes the size of nothing, so
+     role names keep their size and no card or chip moves. */
+  it('changes the size of no word in far zoom, so nothing moves', () => {
+    for (const selector of ['.far .fn', '.far .fa', '.far .fc', '.far .schip .r2', '.far .schip .r3', '.far .schip .st'])
+      for (const rule of rulesFor(selector)) {
+        expect.soft(rule.decls['font-size'], selector).toBeUndefined();
+        expect.soft(rule.decls.display, selector).toBeUndefined();
+      }
+    expect(decl('.far .fa', 'visibility')).toBe('hidden');
+  });
+
+  it("isolates each part of the head's and a chip's model line, so a right to left page keeps its order", async () => {
+    const user = userEvent.setup();
+    shell();
+    await flyIn(user);
+    const head = screen.getByRole('region', { name: 'Head' });
+    const line = head.querySelector<HTMLElement>('.meta')!;
+    expect(line.textContent!.split(', ').length).toBeGreaterThan(2);
+    expect([...line.querySelectorAll('bdi')].map(b => b.textContent)).toEqual(line.textContent!.split(', '));
+    const chip = within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ }).querySelector('.r2')!;
+    expect([...chip.querySelectorAll('bdi')].map(b => b.textContent)).toEqual(chip.textContent!.split(', '));
+  });
+
+  /* The Head of Design's word for #1489 (#1539, N3): the department opens with its chips read at once, their names 11 px
+     tall or more on the screen, on a phone too, and the canvas scrolls what does not fit; Show everything still shows all
+     of it, far as that may be. N2: Show everything keeps the schema clear of the room kept at the bottom. */
+  describe('where the schema stands', () => {
+    const name = px(decl('.schip .mn', 'font-size'));
+    const phone = { left: 0, width: 375, height: 812, bottom: 228 };
+
+    it('opens a schema too wide for the screen at a size its chip names are read at, from its top left', () => {
+      const view = schemaView(phone, { right: 1200, h: 700 }, false);
+      expect(name * view.k).toBeGreaterThanOrEqual(11);
+      expect(view).toEqual({ k: READABLE_K, x: 48 + 40 * READABLE_K, y: 76 + 20 * READABLE_K });
+      /* Wide or narrow, a schema that does not fit opens as readable. */
+      expect(name * schemaView({ left: 0, width: 1440, height: 900, bottom: 76 }, { right: 3000, h: 900 }, false).k).toBeGreaterThanOrEqual(11);
+    });
+
+    it('opens a schema that fits whole, as Show everything shows it', () => {
+      const room = { left: 0, width: 1440, height: 900, bottom: 76 };
+      expect(schemaView(room, { right: 1220, h: 662 }, false)).toEqual(schemaView(room, { right: 1220, h: 662 }, true));
+      expect(schemaView(room, { right: 1220, h: 662 }, false).k).toBe(1);
+    });
+
+    it('shows all of a schema with Show everything, far as that may be, above the room kept at the bottom', () => {
+      const size = { right: 1200, h: 700 };
+      const view = schemaView(phone, size, true);
+      expect(view.k).toBeLessThan(READABLE_K);
+      expect(view.x - 40 * view.k + (size.right + 80) * view.k).toBeLessThanOrEqual(phone.width);
+      expect(view.y - 20 * view.k + (size.h + 40) * view.k).toBeLessThanOrEqual(phone.height - phone.bottom);
+      const tall = schemaView({ ...phone, width: 1440 }, { right: 600, h: 1400 }, true);
+      expect(tall.y - 20 * tall.k + 1440 * tall.k).toBeLessThanOrEqual(phone.height - phone.bottom);
+    });
   });
 
   it("says what an employee waits for in a few words that fit next to its name, in both languages", async () => {
@@ -1602,19 +1674,23 @@ describe('the department bar', () => {
     expect(decl('.dv-dock .zoom', 'align-self', PHONE)).toBe('flex-end');
     expect(decl('.dv-dock .zv', 'display', PHONE)).toBe('none');
     /* The line wraps its words over as many lines as it needs, on a phone and on a wide screen alike, where it grows up
-       from the bottom between the zoom and the tools. */
-    expect(decl('.dv-dock > .ticker', 'white-space')).toBe('normal');
-    expect(decl('.dv-dock > .ticker', 'overflow')).toBe('visible');
+       from the bottom between the zoom and the tools, as the orchestrator's line does on the map. */
+    expect(decl('.ticker', 'white-space')).toBe('normal');
+    expect(decl('.ticker', 'overflow')).toBe('visible');
     expect(decl('.dview .ticker', 'max-width')).toBe('none');
-    expect(decl('.dv-dock .ticker .tx', 'overflow')).toBe('visible');
-    expect(decl('.dv-dock .ticker .tx', 'text-overflow')).toBe('clip');
-    expect(decl('.dv-dock .ticker .tx', 'overflow-wrap')).toBe('break-word');
-    for (const part of ['.dv-dock > .ticker', '.dv-dock .ticker .tx', '.dv-dock .ticker .live'])
+    expect(decl('.ticker .tx', 'overflow-wrap')).toBe('break-word');
+    for (const part of ['.ticker', '.ticker .tx'])
+      for (const rule of rulesFor(part)) {
+        expect.soft(rule.decls['text-overflow'], part).not.toBe('ellipsis');
+        expect.soft(rule.decls.overflow, part).not.toBe('hidden');
+        expect.soft(rule.decls['white-space'], part).not.toBe('nowrap');
+      }
+    for (const part of ['.ticker', '.dv-dock > .ticker', '.ticker .tx', '.dv-dock .ticker .tx', '.ticker .live', '.dv-dock .ticker .live'])
       expect(rulesFor(part).filter(r => r.media === PHONE && ['white-space', 'overflow', 'text-overflow', 'overflow-wrap', 'align-items', 'padding-block', 'margin-block-start'].some(p => p in r.decls))).toEqual([]);
     /* A line of several rows keeps its dot and time on the first row; one row still stands in the middle of 44 px. */
-    expect(decl('.dv-dock > .ticker', 'align-items')).toBe('flex-start');
-    expect(decl('.dv-dock > .ticker', 'padding-block')).toBe('max(8px, calc((44px - 1lh) / 2))');
-    expect(decl('.dv-dock .ticker .live', 'margin-block-start')).toBe('calc((1lh - 7px) / 2)');
+    expect(decl('.ticker', 'align-items')).toBe('flex-start');
+    expect(decl('.ticker', 'padding-block')).toBe('max(8px, calc((44px - 1lh) / 2))');
+    expect(decl('.ticker .live', 'margin-block-start')).toBe('calc((1lh - 7px) / 2)');
   });
 
   it('ends the tree, the drawers and the hint of an empty schema above a line of what happened that grows on a wide screen', async () => {
@@ -1634,6 +1710,42 @@ describe('the department bar', () => {
     for (const part of ['.tview', '.dv-drawer']) expect(decl(part, 'bottom')).toBe('var(--tree-bottom, 76px)');
     expect(decl('.dv-empty', 'bottom')).toBe('var(--tree-bottom, 76px)');
   });
+
+  /* The Head of Design's word for #1489 (#1539, N2): the line of what happened takes at most three lines; a longer one folds
+     to three, and its own button unfolds it whole and folds it again. */
+  it.each([['en', 'Show all of it', 'Show less'], ['ru', ru.dept.hintMore, ru.dept.hintLess]] as const)(
+    'folds a line of what happened longer than three lines, and unfolds it whole by its button (%s)', async (language, more, less) => {
+      localStorage.setItem('hh-lang', language);
+      onTestFinished(() => localStorage.removeItem('hh-lang'));
+      const measure = observed();
+      const user = userEvent.setup();
+      shell(treeRoute(), TREE_ORG);
+      await user.click(await screen.findByRole('button', { name: new RegExp(`^${language === 'en' ? 'Development' : 'Разработка'}`) }));
+      const ticker = await waitFor(() => document.querySelector<HTMLElement>('.dview .ticker')!);
+      const fold = ticker.querySelector<HTMLElement>('.tx-fold')!, words = ticker.querySelector<HTMLElement>('.tx')!;
+      /* The words read in their own direction, and a line that fits has nothing to unfold. */
+      expect(words).toHaveAttribute('dir', 'auto');
+      expect(fold).toHaveClass('folded');
+      Object.defineProperty(fold, 'clientHeight', { configurable: true, value: 57 });
+      Object.defineProperty(words, 'offsetHeight', { configurable: true, value: 57 });
+      measure();
+      expect(ticker.querySelector('button')).toBeNull();
+      /* Six lines: three show, and the button says what it does. */
+      Object.defineProperty(words, 'offsetHeight', { configurable: true, value: 114 });
+      measure();
+      const button = within(ticker).getByRole('button', { name: more });
+      expect(button).toHaveAttribute('aria-expanded', 'false');
+      expect(button).toHaveAttribute('aria-controls', fold.id);
+      await user.click(button);
+      expect(fold).not.toHaveClass('folded');
+      expect(within(ticker).getByRole('button', { name: less })).toHaveAttribute('aria-expanded', 'true');
+      await user.click(within(ticker).getByRole('button', { name: less }));
+      expect(fold).toHaveClass('folded');
+      /* Folded, it shows three lines and hides the rest until it is unfolded. */
+      expect(decl('.ticker .tx-fold.folded', 'max-block-size')).toBe('3lh');
+      expect(decl('.ticker .tx-fold.folded', 'overflow')).toBe('hidden');
+      expect([en.dept.hintMore, en.dept.hintLess]).toEqual(['Show all of it', 'Show less']);
+    });
 
   it('puts the zoom of the tree in the same dock, the only zoom on the screen', async () => {
     const { user } = await open(375);

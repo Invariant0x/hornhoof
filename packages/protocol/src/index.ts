@@ -406,6 +406,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     /* It answers phone.list with what its adb lists of the phones asked about. Without it, its phones show as its computer does. */
     phoneList: z.boolean().optional(),
     phoneBaseline: z.boolean().optional(),
+    /* Its phone baseline preserves brightness at or above the device's floor. */
+    phoneBrightnessFloor: z.boolean().optional(),
     /* The node runs parts of other work too, not only of test runs. */
     work: z.boolean().optional(),
     /* Why the node takes no part of any run: a part runs only as a user of the node's own, which this one lacks. */

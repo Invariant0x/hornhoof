@@ -626,14 +626,17 @@ select:disabled { opacity: .55; }
 .chips { left: 0; top: 0; margin: 0; padding: 0; list-style: none; }
 .chips > li { position: absolute; }
 .chips li > .edge { height: 100%; }
-.chip > .edge-in { display: flex; align-items: center; gap: 10px; padding: 0 14px; }
+/* A person's chip on the map: their name and what they do. Every word stays: the words wrap at the start edge and break with a
+   hyphen by the syllables of the page's language, and every chip of a row is as tall as the one whose words need the most,
+   as the map measures them. Words that fit stand in the middle of the old 160 by 56 and 156 by 48. */
+.chip > .edge-in { display: flex; align-items: center; gap: 10px; padding: 8px 14px; }
 .chip .ic { width: 18px; height: 18px; }
-.chip span { display: grid; min-width: 0; line-height: 1.2; }
-.chip b { font-family: var(--f-display); font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chip small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip span { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; line-height: 1.2; text-align: start; -webkit-hyphens: auto; hyphens: auto; }
+.chip b { font-family: var(--f-display); font-size: 14px; font-weight: 600; overflow-wrap: break-word; }
+.chip small { color: var(--muted); font-size: 12px; overflow-wrap: break-word; }
 .dept-chips { left: 0; top: 0; margin: 0; padding: 0; list-style: none; }
 .dept-chips > li { position: absolute; }
-.dept-chips .chip > .edge-in { gap: 8px; padding: 0 10px; }
+.dept-chips .chip > .edge-in { gap: 8px; padding: 6px 10px; }
 .dept-chips .chip .ic { width: 16px; height: 16px; }
 /* The orchestrator hub: a turning dashed ring, a half gauge of 24 segments and the share of agents at work. */
 .hub { color: var(--ink); border-radius: 50%; }
@@ -667,30 +670,34 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .hub.on .hub-ring { stroke: var(--cyan); }
 .start { position: absolute; width: 520px; box-sizing: border-box; padding: 16px 18px 18px; display: grid; justify-items: center; gap: 14px; text-align: center; border: 1px dashed var(--line2); background: var(--surface); }
 .start p { margin: 0; color: var(--muted); }
-/* A department card: name and agents at work, code and products, then what goes on. */
+/* A department card: name and agents at work, code and products, then what goes on. Every word stays: the words wrap, and
+   every card of the map is as tall as the card whose words need the most, as the map measures them. */
 .dept > .edge { height: 100%; }
 .dept .edge-in { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
 .edge > .corner { position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-left: 2px solid var(--cyan); border-top: 2px solid var(--cyan); pointer-events: none; }
 .dept .row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.dept .row2 { display: flex; align-items: center; gap: 8px; font-size: 13px; white-space: nowrap; overflow: hidden; }
-.dept .detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
-.dept .now { margin-top: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; }
-.dept .now i { flex: none; width: 6px; height: 6px; background: var(--idle); }
+.dept .row2 { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.dept .detail { min-width: 0; color: var(--muted); overflow-wrap: break-word; }
+/* A line of several rows keeps its square on the first row. */
+.dept .now { margin-top: auto; display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--muted); }
+.dept .now i { flex: none; width: 6px; height: 6px; margin-block-start: calc((1lh - 6px) / 2); background: var(--idle); }
 .dept .now.task { color: var(--ink); }
 .dept .now.task i { background: var(--cyan); }
-.dept .now > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dept .now > span { min-width: 0; overflow-wrap: break-word; }
 /* A department working in the turn shows it at the bottom of its card: the turn, the tasks done out of all and twenty squares. */
 .dept.tall .edge-in { gap: 7px; }
 .dept.tall .now { margin-top: 0; }
 .dept-turn { margin-top: auto; display: grid; gap: 6px; padding: 7px 9px 8px; background: var(--surface2); border: 1px solid color-mix(in srgb, var(--line) 85%, transparent); border-left: 2px solid var(--cyan); }
 .dt-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 8px; font-variant-numeric: tabular-nums; }
 .dt-turn { flex: none; font-family: var(--f-display); font-size: 12px; font-weight: 600; line-height: 1.2; color: var(--cyan-ink); }
-.dt-cnt { min-width: 0; font-size: 11.5px; line-height: 1.2; color: var(--muted); overflow-wrap: anywhere; }
+.dt-cnt { min-width: 0; font-size: 11.5px; line-height: 1.2; color: var(--muted); overflow-wrap: break-word; }
 .sq-bar.dept-sq { display: flex; width: 100%; justify-content: space-between; }
 .sq-bar.dept-sq i { flex: none; width: 7px; height: 7px; background: color-mix(in srgb, var(--line2) 55%, var(--idle)); }
 .sq-bar.dept-sq i.on { background: var(--cyan); }
 .role { font-family: var(--f-display); font-size: 12px; font-weight: 600; letter-spacing: .08em; color: var(--cyan-ink); }
-.dname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--f-display); font-size: 20px; font-weight: 600; }
+/* Spacing tears the joined letters of Arabic, Persian and Hebrew apart: a role's name right to left is not letter-spaced. */
+[dir="rtl"] .role, .role:lang(ar), .role:lang(fa), .role:lang(he) { letter-spacing: 0; }
+.dname { min-width: 0; overflow-wrap: break-word; font-family: var(--f-display); font-size: 20px; font-weight: 600; }
 .cnt { flex: none; font-family: var(--f-display); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .cnt b { color: var(--ink); font-weight: 600; }
 /* Zoom bottom left and the orchestrator's line bottom middle. */
@@ -723,11 +730,24 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .zbtn:hover { color: var(--cyan-ink); }
 .zbtn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .zv { flex: none; box-sizing: border-box; min-inline-size: 52px; padding-inline: 8px; white-space: nowrap; text-align: center; font-family: var(--f-body); font-size: 13px; font-weight: 500; line-height: 1.45; color: var(--muted); font-variant-numeric: tabular-nums; }
-.ticker { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; min-height: 44px; max-width: calc(100% - 2 * 240px); padding: 0 16px; font-size: 13px; white-space: nowrap; overflow: hidden; }
-.ticker .live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); animation: blink 1.6s ease-in-out infinite; }
+/* The orchestrator's line on the map and the line of what happened in a department wrap their words over as many lines as
+   they need, growing up from the bottom, and break a word with a hyphen, by the syllables of the page's language. A line of
+   several rows keeps its dot and time on the first row; one row still stands in the middle of 44 px. */
+.ticker {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: flex-start; gap: 10px; min-height: 44px;
+  max-width: calc(100% - 2 * 240px); padding: 8px 16px; padding-block: max(8px, calc((44px - 1lh) / 2)); font-size: 13px; white-space: normal; overflow: visible;
+  -webkit-hyphens: auto; hyphens: auto;
+}
+.map > .ticker { width: max-content; }
+.ticker .live { flex: none; width: 7px; height: 7px; margin-block-start: calc((1lh - 7px) / 2); border-radius: 50%; background: var(--cyan); animation: blink 1.6s ease-in-out infinite; }
 .ticker .live.off { background: var(--amber); animation: none; }
 .ticker .tt { flex: none; font-family: var(--f-display); color: var(--muted); }
-.ticker .tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ticker .tx { display: block; min-width: 0; overflow-wrap: break-word; }
+/* A department's line shows three lines at most: a longer one folds there, and its button at the end of the first row, 44 px
+   to touch, unfolds it whole. */
+.ticker .tx-fold { flex: 1 1 auto; min-width: 0; }
+.ticker .tx-fold.folded { max-block-size: 3lh; overflow: hidden; }
+.ticker .tx-more { margin-block: calc((1lh - 44px) / 2); margin-inline-end: -12px; }
 .ticker .tc { flex: none; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ticker .tc .bar { width: 48px; }
 .ticker .te { flex: none; font-size: 12px; color: var(--muted); }
@@ -1288,7 +1308,7 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 @media (prefers-reduced-motion: reduce) { .t-log > * { animation: none; } }
 
 /* A department card on the map opens the department. */
-button.dept { padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.dept { padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; -webkit-hyphens: auto; hyphens: auto; }
 button.dept:hover > .edge, button.dept:focus-visible > .edge { background: var(--cyan); }
 /* While someone works the frame breathes cyan, while the department waits for people it breathes amber, and it flashes
    once when work reaches or leaves it. Both layers animate opacity outside .edge's clip-path so WebKit composites them. */
@@ -1331,7 +1351,7 @@ button.chip-btn.attn { --glow: var(--amber); --frame: var(--amber); }
 @keyframes dvin { from { opacity: 0; } }
 .dcanvas {
   position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
-  background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 22px 22px;
+  background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 22px 22px; -webkit-hyphens: auto; hyphens: auto;
 }
 /* The top bar and the department's name keep a band of their own over the page's background, and the schema starts under
    it, as the tree does: it opens and fits clear of the bar, and a part dragged or zoomed up goes out of sight at its edge. */
@@ -1371,9 +1391,8 @@ button.chip-btn.attn { --glow: var(--amber); --frame: var(--amber); }
 .fn { font-family: var(--f-display); font-size: 18px; font-weight: 600; line-height: 1.2; overflow-wrap: break-word; }
 .fa { font-size: 13px; overflow-wrap: break-word; }
 .fc { font-size: 12px; color: var(--muted); }
-.far .fn { font-size: calc(18px * var(--k, 1)); }
-.far .fc { font-size: calc(12px * var(--k, 1)); }
-.far .fa { display: none; }
+/* Far out, a frame keeps every size, so nothing moves: what a role does steps back as the lines of its chips do. */
+.far .fa { visibility: hidden; }
 /* The head on top and an employee's chip: name and what it does, its model, its task. Every word stays: a card is at least
    its own size and grows with its lines, its slot a grid the card fills, and the schema lays out what each one measures. */
 .shead, .schip { display: block; padding: 0; border: 0; background: none; font: inherit; color: var(--ink); text-align: left; }
@@ -1385,7 +1404,9 @@ button.shead, button.schip { cursor: pointer; }
 .shead .hn { font-family: var(--f-display); font-size: 26px; font-weight: 600; line-height: 1.15; overflow-wrap: break-word; }
 .shead .meta { font-size: 12.5px; color: var(--muted); overflow-wrap: break-word; }
 /* The state, the program's mark and the task share a row while they fit; the task goes under them when it does not. */
-.shead .hx { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: 13px; }
+/* The room above it stays as the English words leave it on a card of their own height, in every language: a card of more
+   lines grows by them. */
+.shead .hx { margin-block-start: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: 13px; }
 .shead .hx .st { flex: 0 1 auto; min-width: 0; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
 .shead .hx .ast { flex: 0 1 auto; }
 .shead .hx-task { min-width: 0; overflow-wrap: break-word; }
@@ -1405,7 +1426,7 @@ button.shead, button.schip { cursor: pointer; }
    fit beside the name goes under it, at the same end. */
 .schip .mn { flex: 1 1 auto; min-width: 0; max-width: calc(100% - 22px); font-family: var(--f-display); font-size: 13.5px; font-weight: 600; overflow-wrap: break-word; }
 .schip .st { flex: 0 1 auto; min-width: 0; margin-inline-start: auto; font-size: 11.5px; color: var(--muted); overflow-wrap: break-word; }
-.schip .r2 { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.schip .r2 { font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
 .schip .r3 { font-size: 13px; overflow-wrap: break-word; }
 .schip.s-i .r3, .schip.s-o .r3 { color: var(--muted); }
 .s-w .r1 .ic { color: var(--cyan); animation: blink 2.2s ease-in-out infinite; }
@@ -1485,13 +1506,8 @@ body:has(.dview) .version-mark { display: none; }
 /* A form keeps the footer below it: the footer's row comes from the screen, so a footer that went with a form would move
    every window and panel fixed there (#1384). A phone shows no version at all; About names it there. */
 @media (max-width: 760px) { .version-mark { display: none; } }
-/* The line of what changed sits between the zoom and the actions and wraps its words over as many lines as it needs, growing
-   up from the bottom. A line of several rows keeps its dot and time on the first row; one row still stands in the middle of
-   44 px. */
+/* The line of what changed sits between the zoom and the actions. */
 .dview .ticker { left: 212px; right: var(--ticker-right, 16px); transform: none; max-width: none; }
-.dv-dock > .ticker { align-items: flex-start; padding: 8px 16px; padding-block: max(8px, calc((44px - 1lh) / 2)); white-space: normal; overflow: visible; }
-.dv-dock .ticker .live { margin-block-start: calc((1lh - 7px) / 2); }
-.dv-dock .ticker .tx { overflow: visible; text-overflow: clip; overflow-wrap: break-word; }
 .dv-drawer { position: absolute; z-index: 4; }
 .dv-drawer, .acard { top: 68px; left: 16px; bottom: 76px; width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
 /* The drawer starts under the department's name and ends above the line of what happened, as the department measures them. */

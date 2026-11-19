@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PH, PW, peopleLayout, rowCenters, wirePeople, type DeptPersonInput, type Spot } from '../src/map-people';
+import { dockedRoom, PH, PW, peopleLayout, rowCenters, wirePeople, type DeptPersonInput, type Spot } from '../src/map-people';
 import { bridgeWires } from '../src/map-people-bridges';
 import { deptLayout } from '../src/screens/Map';
 import type { Point } from '../src/ui/wires';
@@ -87,8 +87,8 @@ function startsOnDept(pt: Point, s: Spot): boolean {
   return onVert || onBottom;
 }
 
-function assertPlanarScene(spots: (Spot & { path: Point[] })[], people: DeptPersonInput[]) {
-  const layout = peopleLayout(spots, people);
+function assertPlanarScene(spots: (Spot & { path: Point[] })[], people: DeptPersonInput[], ph = PH) {
+  const layout = peopleLayout(spots, people, ph);
   const byId = new Map(spots.map(s => [s.id, s]));
 
   expect(layout.chips.map(c => c.id).sort()).toEqual(people.map(p => p.id).sort());
@@ -155,6 +155,14 @@ function assertClearChips(layout: ReturnType<typeof peopleLayout>) {
       }
     }
   }
+}
+
+/* Chips that stand over another chip or over a card. */
+function overChips(layout: ReturnType<typeof peopleLayout>, spots: Spot[]): string[] {
+  const boxes = [...layout.chips, ...spots];
+  return boxes.flatMap((a, i) => boxes.slice(i + 1).flatMap(b => (
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h ? [`${a.id} over ${b.id}`] : []
+  )));
 }
 
 describe('peopleLayout', () => {
@@ -308,5 +316,48 @@ describe('bridges between the lines of different people', () => {
     expect(bridgeWires([road, wire('b', [[0, 0], [70, 0], [70, 30]])]).gaps).toEqual([]);
     expect(bridgeWires([road, wire('b', [[50, 50], [50, 0], [80, 0]])]).gaps).toEqual([]);
     expect(bridgeWires([road, wire('c', [[50, -50], [50, 50]])]).gaps).toEqual([{ personId: 'c', pts: [[50, -6], [50, expect.closeTo(6)]] }]);
+  });
+});
+
+describe('peopleLayout with chips as tall as their words need', () => {
+  const ids = ['sls', 'mkt', 'prd', 'eng', 'sup', 'fin'];
+  /* Three people beside every card, one in the gutter of each column and four under the lowest row. */
+  const crowd: DeptPersonInput[] = [
+    ...ids.flatMap(id => [0, 1, 2].map(i => ({ id: `${id}:${i}`, departments: [id] }))),
+    { id: 'omar', departments: ['sls', 'prd'] },
+    { id: 'teo', departments: ['mkt', 'eng'] },
+    { id: 'ines', departments: ['sls', 'eng'] },
+    { id: 'nina', departments: ['sls', 'sup'] },
+    { id: 'vera', departments: ['mkt', 'eng', 'fin'] },
+    { id: 'mira', departments: ['sup', 'fin'] },
+  ];
+  /* The cards as the map lays them out for chips of this height: as tall as the stack docked beside one, and the rows apart
+     as far as the people beside them need. */
+  const roomy = (ph: number) => {
+    const room = dockedRoom(spotsFor(ids), crowd, ph);
+    return deptLayout(ids.length, Math.max(160, room.stack), room).map((s, i) => ({ ...s, id: ids[i]! }));
+  };
+
+  it('needs no more room than the cards and the gaps between them while the chips keep 48 px', () => {
+    expect(dockedRoom(spotsFor(ids), crowd)).toEqual({ stack: 3 * PH + 2 * 8, gutter: PH + 12 });
+    expect(roomy(PH)).toEqual(spotsFor(ids));
+    expect(dockedRoom(spotsFor(ids), [{ id: 'nina', departments: ['sls', 'sup'] }])).toEqual({ stack: 0, gutter: 0 });
+  });
+
+  it('stacks the chips beside a card by their height, 8 px apart around its middle', () => {
+    const spots = roomy(90);
+    const layout = peopleLayout(spots, crowd, 90);
+    const sls = spots[0]!, mid = sls.y + sls.h / 2;
+    expect([0, 1, 2].map(i => layout.chips.find(c => c.id === `sls:${i}`))).toEqual([0, 1, 2].map(i => ({ id: `sls:${i}`, x: sls.x - 40 - PW, y: mid + (i - 1) * 98 - 45, w: PW, h: 90 })));
+    expect(layout.chips.every(c => c.w === PW && c.h === 90)).toBe(true);
+  });
+
+  it('moves the rows apart so that no chip stands over another or over a card, every line clear', () => {
+    for (const ph of [64, 90, 140]) {
+      const spots = roomy(ph);
+      const layout = assertPlanarScene(spots, crowd, ph);
+      expect(overChips(layout, spots), `${ph} px`).toEqual([]);
+      assertClearChips(layout);
+    }
   });
 });

@@ -28,7 +28,8 @@ export async function fixture() {
   const task = (await createTask(ctx, { agentId: head.id }, { title: 'Keep totals', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: author.id, executor: true, small: true, reviewerAgentId: reviewer.id, paths: ['logic/totals.ts'] })).task;
   let commit = FIRST;
   ctx.readCompare = async (_repo, refs) => ({ complete: true, baseSha: refs.base, headSha: refs.head, paths: ['logic/totals.ts'], diff: '@@ -3 +3 @@\n-old\n+new' });
-  ctx.readCommit = async () => ({ branch: `task-${task.number}`, commitSha: commit });
+  /* The task branch is at commit, main at the base the candidate starts from. */
+  ctx.readCommit = async (_repo, want) => ('branch' in want && want.branch === 'main' ? { branch: 'main', commitSha: BASE } : { branch: `task-${task.number}`, commitSha: commit });
   const event = async (kind: 'submitted' | 'verdict') => (await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, kind))).orderBy(taskEvents.id)).at(-1)!;
   let toolNumber = 0;
   const tools = async (actor = reviewer) => {

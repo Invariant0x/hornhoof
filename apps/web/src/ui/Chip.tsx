@@ -1,4 +1,4 @@
-import { memo, type MouseEvent } from 'react';
+import { Fragment, memo, type MouseEvent } from 'react';
 import { useT } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import type { Employee, EmployeeStatus } from '../types';
@@ -19,10 +19,25 @@ export const taskText = (e: Employee, t: ReturnType<typeof useT>) => {
   return `${stage}#${e.task.number} ${e.task.title}`;
 };
 
-export function modelLine(t: ReturnType<typeof useT>, e: Employee): string {
+export function modelParts(t: ReturnType<typeof useT>, e: Employee): string[] {
   /* Hornhoof names the level whenever it knows it, the Default's too; else it says the program picks it. */
   const effort = e.effort ? t.agent.effortLine(t.agent.efforts[e.effort] ?? e.effort) : e.provider && t.agent.effortDefault;
-  return [e.modelName || e.model || t.agent.default, effort, e.provider && PROVIDER_NAMES[e.provider]].filter(Boolean).join(', ');
+  return [e.modelName || e.model || t.agent.default, effort, e.provider && PROVIDER_NAMES[e.provider]].filter((part): part is string => !!part);
+}
+
+/* The parts of a line one after another, each isolated in its own direction, so a model's name such as "Opus 5.5" and its
+   effort keep their order and their numbers on a right to left page. */
+export function Listed({ parts }: { parts: string[] }) {
+  return (
+    <>
+      {parts.map((part, i) => (
+        <Fragment key={i}>
+          {i > 0 && ', '}
+          <bdi>{part}</bdi>
+        </Fragment>
+      ))}
+    </>
+  );
 }
 
 /* What an employee's third line says: its task, or why it has none. */
@@ -53,12 +68,12 @@ export function Switch({ e, onSwitch }: { e: Employee; onSwitch?(on: boolean): v
 }
 
 /* lead: the employee leads a stage of a task now, and its chip is marked in its role's frame. An employee with no
-   subscription yet is drawn grey, and its last line asks for one. The chip is CW wide and at least CH tall, taller when its
-   words take more lines; what holds it lays out the height it measures. */
-export const Chip = memo(function Chip({ e, x, y, on, lead = false, flash, serverNow, onOpen, onSwitch, row }: { e: Employee; x: number; y: number; on: boolean; lead?: boolean; flash: boolean; serverNow?: string; onOpen(event: MouseEvent<HTMLButtonElement>): void; onSwitch?(on: boolean): void; row?: string }) {
+   subscription yet is drawn grey, and its last line asks for one. The chip is CW wide and at least h tall, CH unless what
+   holds it says, taller when its words take more lines; what holds it lays out the height it measures. */
+export const Chip = memo(function Chip({ e, x, y, h = CH, on, lead = false, flash, serverNow, onOpen, onSwitch, row }: { e: Employee; x: number; y: number; h?: number; on: boolean; lead?: boolean; flash: boolean; serverNow?: string; onOpen(event: MouseEvent<HTMLButtonElement>): void; onSwitch?(on: boolean): void; row?: string }) {
   const t = useT();
   return (
-    <div className={`sslot dept-chip${e.on ? '' : ' off'}${e.on && e.status === 'off' ? ' no-plan' : ''}${onSwitch ? ' has-sw' : ''}`} data-row={row} style={{ left: x, top: y, width: CW, minHeight: CH }}>
+    <div className={`sslot dept-chip${e.on ? '' : ' off'}${e.on && e.status === 'off' ? ' no-plan' : ''}${onSwitch ? ' has-sw' : ''}`} data-row={row} style={{ left: x, top: y, width: CW, minHeight: h }}>
       <button
         type="button"
         className={`schip ${STATUS_CLASS[e.status]}${on ? ' on' : ''}${lead ? ' lead' : ''}${flash ? ' flash' : ''}`}
@@ -72,7 +87,9 @@ export const Chip = memo(function Chip({ e, x, y, on, lead = false, flash, serve
             <ProviderMark provider={e.provider} />
             <span className="st" title={t.dept.status[e.status]}>{t.dept.status[e.status]}</span>
           </span>
-          <span className="r2">{modelLine(t, e)}</span>
+          <span className="r2">
+            <Listed parts={modelParts(t, e)} />
+          </span>
           <span className="r3">
             <AgentState agent={agentWorking(e)} serverNow={serverNow} />
             {doingLine(t, e)}
