@@ -1851,6 +1851,11 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-view-as .field-control { flex: 0 1 auto; max-inline-size: 100%; min-inline-size: 0; }
 .tr-top .task-search input { padding-inline: 12px 44px; }
 .tr-top .task-search .zbtn { inset-inline: auto 0; inset-block-start: 0; }
+/* The mockup's search: 34px high in 13px for a mouse on a wide screen; a finger keeps the form's own height. */
+@media (min-width: 761px) and (pointer: fine) {
+  .tr-top .task-search input { block-size: 34px; min-block-size: 0; font-size: 13px; }
+  .tr-top .task-search .zbtn { block-size: 34px; }
+}
 .tr-bar { display: grid; min-inline-size: 0; }
 /* The mockup's .vtabs: 600 13.5px with 10px by 12px, a 2px line under the chosen one. */
 .tr-views { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0 2px; min-inline-size: 0; margin: 0; padding: 0 20px; border: 0; border-block-end: 1px solid var(--line); }

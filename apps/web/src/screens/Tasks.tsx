@@ -521,7 +521,9 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
         ) : section.kind === 'waits' ? waiting
           : section.kind === 'goals' ? (
             <>
-              <TrackerGoals goals={shownGoals} label={departmentId ? t.tracker.side.goals : t.tracker.side.allGoals} empty={t.tracker.noGoals} onOpenGoal={onOpenGoal} />
+              {/* Until the goals come, the page says it is loading rather than that there are none. */}
+              {goalList ? <TrackerGoals goals={shownGoals} label={departmentId ? t.tracker.side.goals : t.tracker.side.allGoals} empty={t.tracker.noGoals} onOpenGoal={onOpenGoal} />
+                : !goalsFailure && <p className="muted" role="status">{t.common.loading}</p>}
               {makeHere}
             </>
           )

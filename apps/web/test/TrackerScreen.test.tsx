@@ -770,7 +770,7 @@ describe('the left panel and the goals page', () => {
     shell('/tasks?show=goals');
     const goals = await screen.findByRole('region', { name: 'Goals' });
     expect(screen.getByRole('heading', { level: 1, name: 'Goals' })).toBeInTheDocument();
-    const company = within(goals).getByRole('listitem', { name: '500 subscribers' });
+    const company = await within(goals).findByRole('listitem', { name: '500 subscribers' });
     expect(within(company).getByRole('progressbar', { name: '212 of 500 subscribers' })).toBeInTheDocument();
     expect(within(company).getByRole('img', { name: 'Ivan' })).toHaveClass('tr-avatar');
     /* A smaller goal stands under the goal it is part of. */
