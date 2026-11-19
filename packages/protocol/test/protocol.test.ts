@@ -184,6 +184,13 @@ describe('test runs', () => {
   const RUN = { type: 'tests.run', partId: 'p-1', repo: { url: 'https://github.com/acme/shop.git', token: 'ghp_x' }, branch: 'task-12-checkout', task: 12, command: 'npm test', part: 1, parts: 2, timeoutMs: 1_800_000 };
   const parse = (m: object) => parseServerMessage(JSON.stringify(m));
 
+  it('takes a quiet budget alone for tests and requires a wall limit for work', () => {
+    const quiet = { ...RUN, timeoutMs: undefined, silenceMs: 60_000 };
+    expect(parse(quiet)).toMatchObject({ silenceMs: 60_000 });
+    expect(parse({ ...quiet, silenceMs: undefined })).toBeNull();
+    expect(parse({ ...quiet, kind: 'work' })).toBeNull();
+  });
+
   it("carry a node's load in its hello and on their own, with the parts it runs", () => {
     expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: LOAD, tests: ['p-1'] }))).toMatchObject({ load: LOAD, tests: ['p-1'] });
     expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD }))).toEqual({ type: 'load', ...LOAD });
@@ -842,6 +849,8 @@ describe('numbered node messages', () => {
       'tests.started': { type: 'tests.started', partId: 'p' },
       'tests.silent': { type: 'tests.silent', partId: '8b1f6e1c-2d1c-4c9e-9a53-0f1d7f3f5a11' },
       'tests.done': { type: 'tests.done', partId: 'p', ok: true, exitCode: 0, error: null, commit: null, log: '' },
+      'author_check.done': { type: 'author_check.done', requestId: '11d23430-dcac-4ff4-a284-573eb0ebbe12',
+        taskId: 'e188bf5c-28a1-4378-94b5-1ad1756b849c', commit: 'a'.repeat(40), crap: 2, cherryPick: null },
       'cred.sealed': { type: 'cred.sealed', kind: 'claude_token', version: 1, envelopes: [] },
       'login.done': { type: 'login.done', ok: true, error: null },
       'agent.context': { type: 'agent.context', agentKey: 'a', used: 0.5 },
@@ -853,7 +862,7 @@ describe('numbered node messages', () => {
       'agent.restarted': { type: 'agent.restarted', agentKey: 'a', jobId: 'j', ok: true, reason: null },
       'node.stopping': { type: 'node.stopping', startedAt: '2026-11-04T10:00:00.000Z', exit: { kind: 'planned', reason: 'stopped', startedAt: null, at: null, log: '' } },
     };
-    expect([...protocol.NUMBERED]).toEqual(['job.started', 'job.event', 'job.done', 'tests.started', 'tests.silent', 'tests.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard']);
+    expect([...protocol.NUMBERED]).toEqual(['job.started', 'job.event', 'job.done', 'tests.started', 'tests.silent', 'tests.done', 'author_check.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard']);
     for (const [type, sample] of Object.entries(samples)) {
       const parsed = nodeMessage({ ...sample, n: 7 });
       expect(parsed, type).not.toBeNull();

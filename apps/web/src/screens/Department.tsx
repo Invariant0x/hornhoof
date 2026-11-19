@@ -22,6 +22,7 @@ import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
 import { employeeKind, WorkerMark } from '../ui/WorkerMark';
 import { OneShotMarks } from '../ui/TaskWorkflow';
+import { stageName } from '../ui/stage-name';
 import { TreeView } from './TreeView';
 import { useOpenAgent } from './AgentWindowContext';
 import { SpeedPanel } from './SpeedPanel';
@@ -31,8 +32,12 @@ import { guardedResizeObserver, useRenderGuard } from '../guard';
 
 export { employeeGroups };
 
-const frameTitle = (f: Frame, language: 'en' | 'ru', t: ReturnType<typeof useT>) =>
-  f.oneShot ? t.tasks.echelons.stages[f.oneShot.stage] : f.team ? f.team.name : f.role ? f.role.title[language] : t.dept.others;
+/* A department with no repository hands its work in as documents, so its call frames read the plain stage names its
+   tasks do. */
+const workOf = (d: Pick<Department, 'keepsRepository'>) => ({ resultKind: d.keepsRepository === false ? 'document' as const : 'code' as const });
+
+const frameTitle = (f: Frame, language: 'en' | 'ru', t: ReturnType<typeof useT>, d: Pick<Department, 'keepsRepository'>) =>
+  f.oneShot ? stageName(t, workOf(d), f.oneShot.stage) : f.team ? f.team.name : f.role ? f.role.title[language] : t.dept.others;
 
 function frameDescription(role: NonNullable<Frame['role']>, language: 'en' | 'ru', t: ReturnType<typeof useT>): string {
   if (role.schema === 'final_check') return t.dept.finalTurnCheck;
@@ -40,14 +45,14 @@ function frameDescription(role: NonNullable<Frame['role']>, language: 'en' | 'ru
   return role.description[language] ?? '';
 }
 
-function FrameHeading({ frame: f, language, canGive, calls }: { frame: Frame; language: 'en' | 'ru'; canGive: boolean; calls?: Department['calls'] }) {
+function FrameHeading({ frame: f, language, canGive, department }: { frame: Frame; language: 'en' | 'ru'; canGive: boolean; department: Pick<Department, 'calls' | 'keepsRepository'> }) {
   const t = useT();
   return (
     <Edge cut={14} corner>
       <span className={`fh${f.role && canGive ? ' has-sw' : ''}`}>
-        <span className="fn">{frameTitle(f, language, t)}</span>
+        <span className="fn">{frameTitle(f, language, t, department)}</span>
         {f.role && <span className="fa">{frameDescription(f.role, language, t)}</span>}
-        {f.oneShot ? <OneShotMarks stage={f.oneShot} calls={calls} /> : <span className="fc">{t.dept.agents(f.members.length)}</span>}
+        {f.oneShot ? <OneShotMarks stage={f.oneShot} calls={department.calls} /> : <span className="fc">{t.dept.agents(f.members.length)}</span>}
       </span>
     </Edge>
   );
@@ -588,8 +593,8 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
           <section aria-labelledby={`${id}-members`} className="slayer">
           <h3 id={`${id}-members`} className="sr">{t.dept.members}</h3>
           {s.frames.map(f => (
-            <div key={f.key || 'others'} className={`frame${f.check ? ' gt' : ''}${f.oneShot ? ' frame-calls' : ''}`} role="group" aria-label={frameTitle(f, language, t)} style={{ left: f.x, top: s.ft, width: FW, height: f.h }}>
-              <FrameHeading frame={f} language={language} canGive={canGive} calls={d.calls} />
+            <div key={f.key || 'others'} className={`frame${f.check ? ' gt' : ''}${f.oneShot ? ' frame-calls' : ''}`} role="group" aria-label={frameTitle(f, language, t, d)} style={{ left: f.x, top: s.ft, width: FW, height: f.h }}>
+              <FrameHeading frame={f} language={language} canGive={canGive} department={d} />
               {f.role && canGive && (
                 <input
                   type="checkbox"

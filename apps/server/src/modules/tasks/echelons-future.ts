@@ -3,7 +3,7 @@ import { and, eq, isNotNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents } from '../../db/schema.js';
 import { enqueueTurn } from '../conversation/queue.js';
-import { agentIdentity, checkerFor, stageStaff } from './echelons-assign.js';
+import { agentIdentity, checkerFor, keptFromReview, PRODUCER_REVIEW, stageStaff } from './echelons-assign.js';
 import { currentHanded } from './echelons-candidates.js';
 import { reviewEligibility, type CheckerIdentity } from './echelons-policy.js';
 import type { Route } from './route-records.js';
@@ -21,6 +21,8 @@ async function futureProducer(ctx: Reader, task: Task, route: Route): Promise<Ch
   return authorId ? agentIdentity(ctx.db, task.companyId, authorId) : null;
 }
 
+const handedSoFar = async (ctx: Reader, task: Task, route: Route) => route.state.candidateId ? currentHanded(ctx.db, task, route) : null;
+
 /* Naming an owner narrows the same selection used by an automatic replacement. */
 export async function futureOwner(ctx: Reader, task: Task, route: Route, stage: EchelonStage, named: string | null, roleKey?: string | null): Promise<string | null> {
   const ability = route.state.abilities[stage];
@@ -30,14 +32,16 @@ export async function futureOwner(ctx: Reader, task: Task, route: Route, stage: 
     if (named) throw refuse(409, 'task_invalid', 'The planned producer needs a known model capability before a future checker can be assigned.');
     return null;
   }
-  if (named) await requireIndependentChecker(ctx, task, producer, named);
-  return (await checkerFor(ctx, task, producer, ability, named, roleKey))?.agentId ?? null;
+  const excluded = await keptFromReview(ctx.db, task, stage, await handedSoFar(ctx, task, route));
+  if (named) await requireIndependentChecker(ctx, task, producer, named, excluded);
+  return (await checkerFor(ctx, task, producer, ability, named, roleKey, excluded))?.agentId ?? null;
 }
 
-async function requireIndependentChecker(ctx: Reader, task: Task, producer: CheckerIdentity, named: string): Promise<void> {
+async function requireIndependentChecker(ctx: Reader, task: Task, producer: CheckerIdentity, named: string, excluded: ReadonlySet<string>): Promise<void> {
   const checker = await agentIdentity(ctx.db, task.companyId, named);
   const reason = checker ? reviewEligibility(producer, checker) : null;
   if (reason) throw refuse(409, 'task_invalid', reason === 'self_review' ? 'The producer cannot check its own result.' : 'The checker model is weaker than the producer model.');
+  if (excluded.has(named)) throw refuse(409, 'task_invalid', PRODUCER_REVIEW);
 }
 
 /* Only pending stages after the current one move; current work and completed history keep their own rules. */

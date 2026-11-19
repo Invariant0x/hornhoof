@@ -845,6 +845,34 @@ describe('PeerServer', () => {
     expect(await statusOf(none)).toBe(404);
   });
 
+  it('does what a switch wants done after its answer also when the stream that carried it is gone first', async () => {
+    const asked = deferred();
+    const answered = deferred<{ status: number; body: object; after?: () => void }>();
+    const done: string[] = [];
+    const stand = await standUp({
+      switches: {
+        handle: async () => {
+          asked.resolve();
+          return answered.promise;
+        },
+      },
+    });
+    const door = await stand.open('peer');
+    const served: http2.ServerHttp2Stream[] = [];
+    door.tls.on('stream', stream => void served.push(stream));
+    const stream = clientOf(stand, door.port, stand.data).request({ ':method': 'POST', ':path': '/peer/switch/abort', 'content-type': 'application/json' });
+    stream.on('error', ignore);
+    stream.end(JSON.stringify({ switch: INVOCATION }));
+    await asked.promise;
+    /* The peer leaves while what it asked is being done: the answer has nowhere to go, and what was done stands. */
+    stream.close(http2.constants.NGHTTP2_CANCEL);
+    await until(() => served[0]?.closed === true);
+    answered.resolve({ status: 200, body: { ok: true }, after: () => void done.push('after') });
+    /* What handles the answer goes on in promises alone, which all settle before the next turn of the event loop. */
+    await new Promise(resolve => setImmediate(resolve));
+    expect(done).toEqual(['after']);
+  });
+
   it('answers anything else with 404, and a door that cannot connect with 502', async () => {
     const stand = await standUp({ door: { connect: () => Promise.reject(new Error('No door.')) } });
     const door = await stand.open('peer');

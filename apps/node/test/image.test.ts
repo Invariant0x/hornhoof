@@ -94,6 +94,18 @@ describe('the node image', () => {
     expect(runtime.indexOf('RUN curl --version')).toBeLessThan(runtime.indexOf('USER node'));
   });
 
+  it("draws Arabic joined in the image's browsers with Noto Sans Arabic, and fails the build when sans-serif Arabic does not reach it", () => {
+    expect(installed).toContain('fonts-noto-core');
+    const conf = readFileSync(new URL('../fonts/66-noto-sans-arabic.conf', import.meta.url), 'utf8');
+    expect(conf).toMatch(/<alias>\s*<family>sans-serif<\/family>\s*<prefer><family>Noto Sans Arabic<\/family><\/prefer>\s*<\/alias>/);
+    const copy = 'COPY apps/node/fonts/66-noto-sans-arabic.conf /etc/fonts/conf.d/66-noto-sans-arabic.conf\n';
+    expect(runtime).toContain(copy);
+    const check = runtime.slice(runtime.indexOf(copy) + copy.length);
+    expect(check).toMatch(/^RUN fc-cache \\\n {2}&& fc-list :lang=ar family \| grep -qx 'Noto Sans Arabic' \\\n {2}&& fc-match 'sans-serif:lang=ar' \| grep -q '\^NotoSansArabic-Regular'\n/);
+    expect(runtime.indexOf(copy)).toBeGreaterThan(runtime.indexOf('RUN apt-get update'));
+    expect(runtime.indexOf(copy)).toBeLessThan(runtime.indexOf('USER node'));
+  });
+
   it('installs the GitHub CLI in the runtime stage at a pinned version with verified per-arch SHA-256 and checks gh --version', () => {
     const version = runtime.match(/ARG GH_VERSION=(\d+\.\d+\.\d+)\n/)?.[1];
     const amd64Sha = runtime.match(/ARG GH_AMD64_SHA256=([0-9a-f]{64})\n/)?.[1];

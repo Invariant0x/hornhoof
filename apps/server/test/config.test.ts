@@ -5,9 +5,9 @@ import { LETS_ENCRYPT } from '../src/modules/tls/acme.js';
 import { TEST_SECRET } from './helpers-basic.js';
 
 describe('loadConfig', () => {
-  it('limits simultaneous parts on one host to a positive whole number, one by default', () => {
-    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).runsPerHost).toBe(1);
-    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, MAX_RUNS_PER_HOST: '' }).runsPerHost).toBe(1);
+  it('allows an optional upper limit for simultaneous parts on one host', () => {
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).runsPerHost).toBeUndefined();
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, MAX_RUNS_PER_HOST: '' }).runsPerHost).toBeUndefined();
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, MAX_RUNS_PER_HOST: '2' }).runsPerHost).toBe(2);
     for (const MAX_RUNS_PER_HOST of ['0', '-1', '1.5', 'two', '1001']) {
       expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, MAX_RUNS_PER_HOST })).toThrow('MAX_RUNS_PER_HOST must be a whole number between 1 and 1000.');

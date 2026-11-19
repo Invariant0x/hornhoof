@@ -9,12 +9,12 @@ const WHOLE = { whole: true, departments: [], teams: [] };
 const NONE = { whole: false, departments: [], teams: [] };
 const AVA: PersonView = {
   id: 'h1', name: 'Ava', email: null, title: 'Personal assistant', status: 'active', isOwner: false, access: NONE,
-  assistant: { owner: { id: 'p2', name: 'Maximiliana Wolkenstein-Rodenegg' }, program: 'openclaw', eventsUrl: 'http://192.168.1.5:18789/hooks/wake', skillsUrl: null, key: null, agent: null },
+  assistant: { owner: { id: 'p2', name: 'Maya Chen Alderbrook-Riverstone' }, program: 'openclaw', eventsUrl: 'http://192.168.1.5:18789/hooks/wake', skillsUrl: null, key: null, agent: null },
 };
 /* The CEO, a person with a long name, and her assistant, with a key made already. */
 const PEOPLE: PersonView[] = [
   { id: 'p1', name: 'Ivan', email: 'ivan@acme.com', title: 'CEO', status: 'active', isOwner: true, access: WHOLE },
-  { id: 'p2', name: 'Maximiliana Wolkenstein-Rodenegg', email: 'max@acme.com', title: 'CMO', status: 'active', isOwner: false, access: WHOLE },
+  { id: 'p2', name: 'Maya Chen Alderbrook-Riverstone', email: 'maya@moonfern.example', title: 'CMO', status: 'active', isOwner: false, access: WHOLE },
   { ...AVA, assistant: { ...AVA.assistant!, key: { createdAt: '2026-11-11T10:00:00.000Z' } } },
 ];
 const KEY = `hha_${'K7x-Qp'.repeat(7)}a`;

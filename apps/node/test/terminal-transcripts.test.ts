@@ -135,6 +135,21 @@ describe("Kimi Code's session log", () => {
     expect(kimiWire({ type: 'turn.ended', agentId: 'main', turnId: 3, reason: 'blocked' })).toEqual({ events: [], failed: 'blocked' });
   });
 
+  /* Kimi Code 2.6.3 starts turns of its own: once a bash job it ran in the background ends, and once it ended a turn to go
+     on with words steered into it. Its log says so in the trigger and origin of the turn's prompt. */
+  it('tells a turn Kimi started of its own from one it was given, and words steered into a turn', () => {
+    const words = [{ type: 'text', text: 'Go on with the build.' }];
+    expect(kimiWire({ type: 'turn.prompt', agentId: 'main', input: words, origin: { kind: 'task', taskId: 'bash-1', status: 'completed' }, trigger: 'notify' }))
+      .toEqual({ events: [], started: true, prompt: 'Go on with the build.', own: 'wake' });
+    expect(kimiWire({ type: 'turn.prompt', agentId: 'main', input: words, origin: { kind: 'user' }, trigger: 'notify' }))
+      .toEqual({ events: [], started: true, prompt: 'Go on with the build.', own: 'steer' });
+    expect(kimiWire({ type: 'turn.prompt', agentId: 'main', input: words, origin: { kind: 'user' }, trigger: 'normal' }))
+      .toEqual({ events: [], started: true, prompt: 'Go on with the build.' });
+    expect(kimiWire({ type: 'prompt.steered', agentId: 'main', input: words })).toEqual({ events: [], steer: 'queued' });
+    expect(kimiWire({ type: 'turn.steer', agentId: 'main', turnId: 4, input: words })).toEqual({ events: [], steer: 'taken' });
+    expect(kimiWire({ type: 'prompt.steered', agentId: 'sub-1', input: words })).toEqual({ events: [] });
+  });
+
   it("leaves out bookkeeping and other agents' turns", () => {
     expect(kimiWire({ type: 'metadata', protocol_version: '1.5' })).toEqual({ events: [] });
     expect(kimiWire({ type: 'usage.record', agentId: 'main' })).toEqual({ events: [] });

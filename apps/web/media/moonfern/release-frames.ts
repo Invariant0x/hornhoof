@@ -1,4 +1,4 @@
-import { expect, type Browser, type Page, type TestInfo } from '@playwright/test';
+import { expect, type Browser, type Locator, type Page, type TestInfo } from '@playwright/test';
 import type { Messages } from '../../src/i18n';
 import { MOONFERN_ORG } from './agents';
 import { FRAME_SIZES, FRAME_THEMES, frameLanguages } from './frame-languages';
@@ -10,16 +10,11 @@ type Save = (name: string) => Promise<Buffer>;
 type View = 'map' | 'starter' | 'agent';
 const shellWords = (t: Messages) => [t.shell.tabs.map, t.shell.tabs.tasks, t.shell.tabs.people, t.shell.tabs.subscriptions, t.shell.tabs.machines];
 const departments = (t: Messages) => MOONFERN_ORG.departments.map(dept => t.templates[dept.templateKey!].name);
-const starterRoutes = ['development-changes', 'development-docs', 'development-release'] as const;
 
 const viewWords: Record<View, (t: Messages) => string[]> = {
   map: t => [...shellWords(t), ...departments(t), t.map.orchestrator, t.map.agentsWorking, t.map.teams(1), t.map.wholeCompany],
-  starter: t => [...shellWords(t), t.templates.development.name, t.dept.products, t.tracker.side.pipelines, t.dept.members, t.dept.noModelYet,
-    t.dept.status.off, t.dept.tasksButton, t.dept.about, t.dept.hire, t.workers.slot(1), t.workers.slot(2), t.workers.slot(3), t.workers.judge, t.workers.idle,
-    ...starterRoutes.flatMap(key => {
-      const pipeline = t.pipelineCatalog[key];
-      return [pipeline.name, ...Object.values(pipeline.stages)];
-    })],
+  starter: t => [...shellWords(t), t.templates.development.name, t.dept.tasksButton, t.dept.about, t.dept.hire, t.dept.reportLine, t.dept.gate(1),
+    t.dept.agents(1), ...Object.values(t.tasks.echelons.stages)],
   agent: t => [...shellWords(t), t.window.card, t.window.stop, t.window.showTerminal, t.window.chat.earlier, t.window.chat.steps(2), t.window.chat.send],
 };
 
@@ -48,23 +43,55 @@ async function starterFrames(page: Page, t: Messages, save: Save) {
   expect((await submitted).postDataJSON()).toMatchObject({ template: 'startup', orchestrator: { mode: 'later' } });
   await page.getByRole('dialog', { name: t.firstContact.title }).getByRole('button', { name: t.firstContact.close }).click();
 
+  /* The department opens on its staff schema, with the one-shot stages of its default route as frames of idle diamonds. */
   await mapDepartment(page, t.templates.development.name).click();
-  const structure = page.getByRole('region', { name: t.dept.structure, exact: true });
-  await expect(structure.getByText('Product 1', { exact: true })).toBeVisible();
-  const guides = structure.getByRole('region', { name: t.pipelineCatalog['development-docs'].name, exact: true });
-  const stage = guides.locator('.dv-stage').filter({ has: page.getByRole('heading', { name: t.pipelineCatalog['development-docs'].stages['Check examples'], exact: true }) });
-  await expect(stage.getByRole('img', { name: t.workers.permanent, exact: true })).toBeVisible();
-  await expect(stage.locator('[data-worker-kind="ghost"].idle')).toHaveCount(4);
-  await expect(stage.getByText(t.dept.noModelYet, { exact: true })).toBeVisible();
-  expect(await structure.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+  const schema = page.getByRole('region', { name: t.dept.schema, exact: true });
+  const stage = schema.locator('.frame-calls').first();
+  await expect(stage.locator('[data-worker-kind="ghost"]').first()).toBeVisible();
+  await expect(stage.locator('[data-worker-kind="ghost"]:not(.idle)')).toHaveCount(0);
   await save('starter-department');
-  await stage.evaluate(element => element.scrollIntoView({ block: 'center', inline: 'nearest' }));
+  await centreIn(page, schema, stage);
+  await expect(stage).toBeInViewport({ ratio: 1 });
   await save('starter-stage');
+}
+
+/* Pan the schema by presses on its empty background until a part of it stands in the middle of the screen. Each pull stays
+   inside the schema, so a far part takes a few of them. WebKit selects the page's words under a pull, and a press on a
+   selection drags the selection instead of the schema, so none is left before a pull or in the picture. */
+async function centreIn(page: Page, schema: Locator, part: Locator) {
+  const unselect = () => page.evaluate(() => getSelection()?.removeAllRanges());
+  for (let pull = 0; pull < 12; pull++) {
+    await unselect();
+    const [area, box] = await Promise.all([schema.boundingBox(), part.boundingBox()]);
+    if (!area || !box) throw new Error('the schema or its part has no box');
+    const clamp = (d: number, room: number) => Math.max(-room, Math.min(room, Math.round(d)));
+    const by = {
+      x: clamp(area.x + area.width / 2 - (box.x + box.width / 2), area.width * 0.6),
+      y: clamp(area.y + area.height / 2 - (box.y + box.height / 2), area.height * 0.6),
+    };
+    if (Math.abs(by.x) < 4 && Math.abs(by.y) < 4) break;
+    const start = await page.evaluate(({ area: { x, y, width, height }, by }) => {
+      const bare = (px: number, py: number) => ['dcanvas', 'world'].some(name => document.elementFromPoint(px, py)?.classList.contains(name));
+      const [left, right] = [x + 8 + Math.max(0, -by.x), x + width - 8 - Math.max(0, by.x)];
+      const [top, bottom] = [y + 8 + Math.max(0, -by.y), y + height - 8 - Math.max(0, by.y)];
+      for (let py = bottom; py >= top; py -= 12) {
+        for (let px = left; px <= right; px += 12) if (bare(px, py)) return { x: px, y: py };
+      }
+      return null;
+    }, { area, by });
+    if (!start) throw new Error('the schema shows no bare background to pull it by');
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(start.x + by.x, start.y + by.y, { steps: 4 });
+    await page.mouse.up();
+  }
+  await unselect();
 }
 
 async function agentFrames(page: Page, t: Messages, save: Save) {
   await mapDepartment(page, t.templates.development.name).click();
-  await page.getByRole('region', { name: t.dept.structure }).getByRole('button', { name: 'Iris', exact: true }).click();
+  const schema = page.getByRole('region', { name: t.dept.schema, exact: true });
+  await schema.getByRole('button').filter({ has: page.getByText('Iris', { exact: true }) }).click();
   const agent = page.getByRole('complementary', { name: /^Iris/ });
   await expect(agent.getByRole('log', { name: t.window.chat.conversation })).toContainText('Working on #221');
   await expect(agent.getByRole('button', { name: t.window.computerClose })).toHaveCount(0);

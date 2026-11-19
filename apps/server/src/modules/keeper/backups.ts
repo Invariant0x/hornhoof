@@ -83,6 +83,9 @@ export class BackupKeeper {
   private newestSeen: number | null = null;
   /* When it last asked for the dump of each database set aside before a merge. */
   private readonly forkAskedAt = new Map<string, number>();
+  /* The forks of other machines the app said it has a record of, to a request that brought one: a refused request
+     never removes a bundle that has one. */
+  private readonly recordedLed = new Set<string>();
 
   constructor(private readonly opts: BackupKeeperOptions) {
     this.bundles = new BundleStore(join(opts.dir, BUNDLES_DIR));
@@ -164,7 +167,10 @@ export class BackupKeeper {
 
   /* A machine that holds the data and led before gives what its database held, sealed as a fork and signed with its
      own certificate. It is taken only from that very machine, and recorded with the app under its name; the status
-     says how that went. */
+     says how that went. A bundle held here already passes the same checks: only its signer sends it again, and no
+     answer to any request removes it. Each request for one id runs alone, from the look whether the bundle is here to
+     what is left of it once the app answered: a request refused after another one's copy of the same new bundle was
+     recorded never takes that copy for its own. */
   async takeLed(peer: Peer, id: string, body: Readable): Promise<number> {
     const view = this.last;
     const held = this.opts.held();
@@ -172,29 +178,38 @@ export class BackupKeeper {
       body.destroy();
       return 403;
     }
-    let head = this.bundles.list().find(bundle => bundle.id === id)?.head;
-    if (!head) {
-      let refused = false;
-      try {
-        head = (await this.bundles.take(
-          body,
-          said => {
-            const manifest = checkHead(said, { authorityPem: held.authorityPem, company: view.company });
-            refused = manifest.signer !== peer.machine || manifest.reason !== 'fork';
-            if (refused) throw new BundleRefused('role', 'This bundle is not a fork its sender signed.');
-            return manifest;
-          },
-          { id },
-        )).head;
-      } catch {
-        body.destroy();
-        return refused ? 403 : 400;
+    return this.bundles.alone(id, () => this.intakeLed(peer, id, body, view, held));
+  }
+
+  private async intakeLed(peer: Peer, id: string, body: Readable, view: MakerView, held: HeldCertificate): Promise<number> {
+    let refused = false;
+    const sentBy = (said: string) => {
+      const manifest = checkHead(said, { authorityPem: held.authorityPem, company: view.company });
+      if (manifest.signer !== peer.machine || manifest.reason !== 'fork') {
+        refused = true;
+        throw new BundleRefused('role', 'This bundle is not a fork its sender signed.');
       }
-    } else body.destroy();
+      return manifest;
+    };
+    const stored = this.bundles.list().find(bundle => bundle.id === id);
+    let head: string;
+    try {
+      if (stored) body.destroy();
+      /* No other request of this id stores it meanwhile, as this one runs alone for it. */
+      head = stored?.head ?? (await this.bundles.take(body, sentBy, { id, inside: id })).head;
+      sentBy(head);
+    } catch {
+      body.destroy();
+      return refused ? 403 : 400;
+    }
     const recorded = await this.opts.ask('POST', '/api/network/backups', { head, from: peer.machine }, this.stopping.signal).catch(() => null);
-    if (recorded?.status === 200 || recorded?.status === 201) return recorded.status;
-    /* The app would not have it: nothing of it stays here. */
-    if (recorded && recorded.status >= 400 && recorded.status < 500) this.bundles.remove(id);
+    if (recorded?.status === 200 || recorded?.status === 201) {
+      this.recordedLed.add(id);
+      return recorded.status;
+    }
+    /* The app would not have what this request brought, and has no record of it as far as this keeper heard: nothing
+       of it stays here. */
+    if (!stored && recorded && recorded.status >= 400 && recorded.status < 500 && !this.recordedLed.has(id) && !Object.hasOwn(view.holders, id)) this.bundles.remove(id);
     return recorded?.status ?? 503;
   }
 

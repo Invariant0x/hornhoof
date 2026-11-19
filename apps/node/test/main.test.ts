@@ -18,6 +18,7 @@ import { prepareNodeStop } from '../src/lifecycle.js';
 import { Outbox } from '../src/outbox.js';
 import { ProgramUpdates } from '../src/program-updates.js';
 import { antigravityAdapter } from '../src/providers/antigravity.js';
+import { Bridge } from '../src/terminal/bridge.js';
 import { TerminalHost, type TermJob } from '../src/terminal/host.js';
 import { StreamMask } from '../src/terminal/mask.js';
 import { claudeProgram } from '../src/providers/claude-terminal.js';
@@ -430,6 +431,42 @@ describe('a node that runs agents in terminals', () => {
     } finally {
       node?.stop();
       stopAll.mockRestore(); start.mockRestore(); stop.mockRestore(); run.mockRestore();
+    }
+  });
+
+  /* A node that runs on a machine of its own leaves its tmux server running when it stops or dies, and its agents' programs
+     in it keep the address of the bridge that went with it. The next node ends that server, and with it every pane, before
+     its new bridge takes a call: no program from before the restart is left to call it. tmux never runs here: the test
+     answers the node's kill-server when it says, and only the node's order is checked. */
+  it('ends the tmux server the last node left, with every program in it, before its new bridge listens', async () => {
+    const server = await fakeServer(), dir = nodeDir(server.url);
+    const tmux = new Tmux({ env: { HOME: dir } });
+    const order: string[] = [];
+    /* The first of the two steps the node takes, whichever it is. */
+    let stepped!: () => void, end!: () => void;
+    const first = new Promise<void>(resolve => { stepped = resolve; });
+    const ended = new Promise<void>(resolve => { end = resolve; });
+    const run = vi.spyOn(tmux, 'run').mockImplementation(async args => {
+      if (args[0] !== 'kill-server') return '';
+      order.push('kill-server');
+      stepped();
+      await ended;
+      order.push('server ended');
+      return '';
+    });
+    const listen = vi.spyOn(Bridge.prototype, 'start').mockImplementation(async () => { order.push('bridge listens'); stepped(); });
+    let node: Awaited<ReturnType<typeof runNode>> | undefined;
+    try {
+      const starting = runNode({ dir, adapter, log: () => {}, terminal: { tmux, program: claudeProgram, bin: 'claude', home: dir, signedOut: /not logged in/i } });
+      await first;
+      await new Promise(resolve => { setImmediate(resolve); });
+      expect(order).toEqual(['kill-server']);
+      end();
+      node = await starting;
+      expect(order).toEqual(['kill-server', 'server ended', 'bridge listens']);
+    } finally {
+      node?.stop();
+      run.mockRestore(); listen.mockRestore();
     }
   });
 
@@ -1203,12 +1240,15 @@ describe('runNode', () => {
     const node = await runNode({ dir: nodeDir(server.url), adapter: slow, log: () => {}, loadMs: 40 });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
-    expect(server.received[0]!.load).toMatchObject({ cpus: expect.any(Number), load: expect.any(Number), memFree: expect.any(Number), memTotal: expect.any(Number), tests: 0, jobs: 0 });
+    expect(server.received[0]).toMatchObject({
+      load: { cpus: expect.any(Number), load: expect.any(Number), memFree: expect.any(Number), memTotal: expect.any(Number), tests: 0, jobs: 0 },
+      checkLeases: { sequence: 1, ids: [] },
+    });
     server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'job.started'));
     await vi.advanceTimersByTimeAsync(40);
     await server.wait(() => server.received.some(m => m.type === 'load' && m.jobs === 1));
-    expect(server.received.find(m => m.type === 'load')).toMatchObject({ cpus: expect.any(Number), memTotal: expect.any(Number), tests: 0 });
+    expect(server.received.find(m => m.type === 'load')).toMatchObject({ cpus: expect.any(Number), memTotal: expect.any(Number), tests: 0, checkLeases: { sequence: 2, ids: [] } });
     /* It runs no programs in terminals, so it names none. */
     expect(server.received.filter(m => m.type === 'hello' || m.type === 'load').every(m => !('live' in m))).toBe(true);
     server.send({ type: 'job.cancel', jobId: 'j1' });

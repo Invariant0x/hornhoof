@@ -76,7 +76,7 @@ function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: 
   if (task.executorAgentId) return `${ref} is yours to do. ${READ_TASK} Do the work, then ${finish}. If you cannot go on, ${stuck}; if only a person can answer, use ask_person.`;
   if (agent.kind === 'orchestrator') return `${ref} is yours. ${READ_TASK} Lay the work out as tasks for the departments with add_tasks, and report it when every part is done.`;
   if (agent.kind === 'worker') return `${ref} is yours to do. ${READ_TASK} Do the assigned work and report its concrete checked result. If you cannot go on, use blocked; if only a person can answer, use ask_person.`;
-  return `${ref} is your department's. ${READ_TASK} Use the department’s route and assign each part to someone with the abilities to deliver it. Give independent parts out together with create_task under parent ${task.number}. Use the checks each result requires and report the accepted results.`;
+  return `${ref} is your department's. ${READ_TASK} Use the department's route and assign each part to someone with the abilities to deliver it. Give independent parts out together with create_task under parent ${task.number}. Use the checks each result requires and report the accepted results.`;
 }
 
 const waitEndedPrompt = (task: Task, text?: string): string =>
@@ -262,8 +262,8 @@ async function explanationText(ctx: Ctx, w: Wake, request: typeof requests.$infe
       ? `Hornhoof stopped waking ${asker} on ${ref} and waits for people to say how it goes on (request ${request.id}). Hornhoof noted: ${request.text}`
       : `${asker} asks people on ${ref} (request ${request.id}, a ${request.kind}):\n\n${quote(request.text)}`;
     text = `${what}\n\nBefore a person answers, find out what it needs: read the task with "task", and ask ${asker} with "message_employee" when its words are not enough. ` +
-      `Resolve ordinary work you can handle using your standing authority. If the question still needs the person’s own answer, use explain_request with request ${request.id} in the recipient’s language. ` +
-      'Say what the work is for, what they need to supply and what each choice changes. Preserve any required human decision, including the CEO’s yes for an irreversible deletion.';
+      `Resolve ordinary work you can handle using your standing authority. If the question still needs the person's own answer, use explain_request with request ${request.id} in the recipient's language. ` +
+      'Say what the work is for, what they need to supply and what each choice changes. Preserve any required human decision, including the CEO\'s yes for an irreversible deletion.';
   }
   return text;
 }

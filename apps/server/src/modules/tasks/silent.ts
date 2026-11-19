@@ -345,13 +345,25 @@ async function sendTurnAlarm(ctx: Ctx, s: SilentTurn, unavailable: ReadonlySet<s
   if (to) await dispatchAlarm(ctx, s, to, now, quietCase(s, now));
 }
 
-/* Whoever hears of a quiet program must see its screen: a free program operator, or else the head of Operations, or else
-   an operator at work. Never the employee whose program it is. */
+/* Let free Operations staff hear first, then the orchestrator, then the employee's department head. When all of them are
+   busy, the head of Operations, or else a program operator, still hears behind its work, so no alarm goes unheard. */
 export async function screenReader(ctx: Ctx, companyId: string, of: string, unavailable: ReadonlySet<string>): Promise<Agent | null> {
-  const staff: Agent[] = [];
-  for (const a of await operationsStaff(ctx, companyId)) if (a.id !== of && await liveSubscription(ctx, a.id)) staff.push(a);
-  const operators = staff.filter(a => a.kind === 'worker');
-  return operators.find(a => !unavailable.has(a.id)) ?? staff.find(a => a.kind === 'head') ?? operators[0] ?? null;
+  const reachable = async (agent: Agent) => agent.companyId === companyId && agent.id !== of && !agent.switchedOffAt
+    && Boolean(await liveSubscription(ctx, agent.id));
+  const canHear = async (agent: Agent) => !unavailable.has(agent.id) && await reachable(agent);
+  const staff = await operationsStaff(ctx, companyId);
+  for (const agent of staff) if (await canHear(agent)) return agent;
+
+  const [orchestrator] = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
+  if (orchestrator && await canHear(orchestrator)) return orchestrator;
+  if (of) {
+    const [employee] = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), eq(agents.id, of)));
+    const head = employee && await headOf(ctx, employee);
+    if (head && await canHear(head)) return head;
+  }
+
+  for (const agent of [...staff.filter(a => a.kind === 'head'), ...staff.filter(a => a.kind !== 'head')]) if (await reachable(agent)) return agent;
+  return null;
 }
 
 /* One call when the quiet begins and one more each time it doubles, so a program nobody brought back is looked at again.

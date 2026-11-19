@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { UUID } from '../../net/proxy.js';
@@ -12,11 +12,11 @@ const CLOSED_EVERY_MS = 15_000;
 const DEAF_MS = 60_000;
 /* How long one request may take. */
 export const ASK_MS = 10_000;
-/* The updater is alive when it touched its file within this, as the app took it before. */
+/* The updater is alive when it touched its private heartbeat within this. */
 const ALIVE_MS = 30_000;
 /* The grant the keeper holds, and the ones that ended, each until its own end, so none opens the machine twice. */
 export const GRANTS_FILE = 'grants.json';
-const LEGACY_FILE = 'computer.legacy.json';
+const COMPUTER_CONTROL = 'computer-control';
 /* As many held commands as one ask names. */
 const HELD_MOST = 8;
 
@@ -24,8 +24,7 @@ const HELD_MOST = 8;
 export type ComputerAsk = (method: 'GET' | 'POST', path: string, body?: unknown, signal?: AbortSignal) => Promise<{ status: number; body: unknown }>;
 
 export type ComputerCarrierOptions = {
-  /* The folder the keeper shares with its updater, and the keeper's own. */
-  controlDir: string;
+  /* The keeper's own folder with its private updater channel mounted inside. */
   dir: string;
   /* This machine's id in the company's network, which a grant names. */
   machine: string;
@@ -66,7 +65,7 @@ function nonceOf(grant: { payload: string } | null): string | null {
    then, so no grant signed before that second is taken. */
 const Grants = z.object({ held: SignedGrant.nullable(), spent: z.array(z.object({ nonce: z.string(), until: z.number() })), since: z.number().optional() });
 type Grants = z.infer<typeof Grants>;
-const Out = z.object({ exit: z.number().int().min(0).max(255), output: z.string() });
+const Out = z.object({ exit: z.number().int().min(0).max(255), output: z.string().max(30_000) });
 
 type Settings = { untilSec: number | null; until: string | null; asked: null; by: 'keeper' };
 const CLOSED: Settings = { untilSec: null, until: null, asked: null, by: 'keeper' };
@@ -100,12 +99,11 @@ export class ComputerCarrier {
   }
 
   private file(name: string): string {
-    return join(this.opts.controlDir, name);
+    return join(this.opts.dir, COMPUTER_CONTROL, name);
   }
 
-  /* What an app from before access was per machine wrote goes aside, by one rename and never over one set aside
-     before, and the machine is closed until the app that leads has taken it over. What a keeper wrote stays, so a
-     restart stops no command; the minute without an answer counts from here. */
+  /* The private channel starts closed on update. What a keeper already wrote there stays on restart. The minute
+     without an answer counts from here. */
   prepare(): void {
     if (this.prepared) return;
     this.prepared = true;
@@ -113,8 +111,7 @@ export class ComputerCarrier {
     try {
       mkdirSync(this.file('computer'), { recursive: true });
       const said = readJson(this.file('computer.json')) as { by?: unknown } | null;
-      if (said && said.by === undefined && !existsSync(this.file(LEGACY_FILE))) renameSync(this.file('computer.json'), this.file(LEGACY_FILE));
-      if (!said || said.by === undefined) this.write(CLOSED);
+      if (said?.by !== 'keeper') this.write(CLOSED);
     } catch (err) {
       this.opts.log(`Could not prepare the control folder for computer access: ${reasonOf(err)}`);
     }
@@ -167,7 +164,9 @@ export class ComputerCarrier {
 
   private updaterAlive(): boolean {
     try {
-      return Date.now() - statSync(this.file('alive')).mtimeMs < ALIVE_MS;
+      const heartbeat = lstatSync(this.file('alive'));
+      const age = this.now().getTime() - heartbeat.mtime.getTime();
+      return heartbeat.isFile() && age >= 0 && age < ALIVE_MS;
     } catch {
       return false;
     }

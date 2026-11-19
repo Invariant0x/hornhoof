@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { CheckSlotQueue, checkCapacity, type ServerMessage } from '@hornhoof/protocol';
+import { CheckSlotQueue, checkCapacity, fitsCheck, type ServerMessage } from '@hornhoof/protocol';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { CheckClient } from '../src/check-client.js';
 import { checkCommand } from '../src/check-command.js';
@@ -43,7 +43,7 @@ it('runs a nested hh-check in part 124/2 while another request waits on the load
   const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
   onTestFinished(() => { vi.unstubAllGlobals(); });
 
-  const running = runQueuedPart(part, runTests, { dir, hidden: [], user: null }, () => {}, () => {});
+  const running = runQueuedPart({ ...part, vitestWorkers: 2 }, runTests, { dir, hidden: [], user: null, env: { HH_VITEST_MAX_WORKERS: '7' } }, () => {}, () => {});
   await partSpawned.promise;
   const earlierStarted = deferred(), finishEarlier = deferred();
   const earlier = withCheckSlot(async () => { earlierStarted.resolve(); await finishEarlier.promise; });
@@ -53,6 +53,7 @@ it('runs a nested hh-check in part 124/2 while another request waits on the load
   await independentQueued.promise;
   vi.setSystemTime(new Date('2026-11-18T09:23:48.526Z'));
   const env = spawn.mock.calls[0]![2].env as NodeJS.ProcessEnv;
+  expect(env).toMatchObject({ VITEST_MAX_WORKERS: '2', HH_VITEST_MAX_WORKERS: '2' });
   const nested = checkCommand(['--', 'recorded-check'], env).then(code => ({ code }), error => ({ error: String(error) }));
   child.emit('exit', 7, null);
   expect(await nested).toEqual({ code: 7 });
@@ -68,6 +69,36 @@ it('runs a nested hh-check in part 124/2 while another request waits on the load
 function processRecord() {
   return Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() });
 }
+
+it('starts two two-worker parts on the recorded home-api host without waiting for either to finish', async () => {
+  const home = { cpus: 8, load: 0, memFree: 94 * 2 ** 30 };
+  const queue = new CheckSlotQueue(() => Infinity, (held, cores) => fitsCheck(home.cpus, home.load, held, cores));
+  const held = new Map<string, () => void>();
+  const client = new CheckClient(frame => {
+    if (frame.type === 'check.release') { held.get(frame.id)?.(); return true; }
+    void queue.withSlot(() => new Promise<void>(resolve => {
+      held.set(frame.id, resolve);
+      client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 });
+    }), { cores: 2, onPosition: position => client.receive({ type: 'check.state', id: frame.id, state: 'queued', position }) });
+    return true;
+  });
+  setCheckClient(client); client.online(true);
+  onTestFinished(() => setCheckClient(null));
+  const started: string[] = [], end = deferred();
+  const ids = [part.partId, '10000000-0000-4000-8000-000000000125'];
+  const runs = ids.map(partId => runQueuedPart({ ...part, partId, vitestWorkers: 2 }, async message => {
+    started.push(message.partId);
+    await end.promise;
+    return { type: 'tests.done', partId: message.partId, ok: true, exitCode: 0, error: null, commit: null, log: '' };
+  }, { dir: '/recorded/home-api', hidden: [], user: null }, () => {}, () => {}));
+  try {
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(started.sort()).toEqual(ids);
+  } finally {
+    end.resolve();
+    await Promise.all(runs);
+  }
+});
 
 it.each(['silent', 'active'] as const)('observes part activity through its quiet budget when %s', async activity => {
   vi.useFakeTimers({ now: 0 });
@@ -94,5 +125,59 @@ it.each(['silent', 'active'] as const)('observes part activity through its quiet
   parent.emit('exit', 0, null); parent.emit('close');
   expect((await running).ok).toBe(true);
   expect(reports).toEqual(activity === 'silent' ? [message.partId] : []);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it.each(['progress', 'silence', 'upper limit'] as const)('applies the test part clock on %s', async scenario => {
+  vi.useFakeTimers({ now: 0 });
+  const dir = mkdtempSync(join(tmpdir(), 'hh-part-clock-'));
+  onTestFinished(() => { setCheckClient(null); vi.useRealTimers(); vi.restoreAllMocks(); rmSync(dir, { recursive: true, force: true }); });
+  const client = new CheckClient(frame => {
+    if (frame.type === 'check.acquire') queueMicrotask(() => client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 }));
+    return true;
+  });
+  setCheckClient(client); client.online(true);
+
+  const parent = Object.assign(processRecord(), { pid: 1234 });
+  const partSpawned = deferred(), onSilent = vi.fn();
+  const kill = vi.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
+    if (signal === 'SIGTERM') queueMicrotask(() => { parent.emit('exit', null, 'SIGTERM'); parent.emit('close'); });
+    return true;
+  });
+  spawn.mockImplementation((bin: string) => {
+    if (bin === '/bin/bash') { partSpawned.resolve(); return parent; }
+    const git = processRecord();
+    queueMicrotask(() => { git.emit('exit', 0, null); git.emit('close'); });
+    return git;
+  });
+  const quiet = 60_000;
+  const message = {
+    ...part, kind: 'tests' as const, repo: { url: 'https://example.test/recorded.git', token: '' }, branch: 'main',
+    silenceMs: quiet, timeoutMs: scenario === 'upper limit' ? 2 * quiet : undefined,
+  };
+  const running = runQueuedPart(message, runTests, { dir, hidden: [], user: null, onSilent, prepareRepoBrowser: async () => {} }, () => {}, () => {});
+  await partSpawned.promise;
+  if (scenario === 'silence') {
+    await vi.advanceTimersByTimeAsync(quiet - 1);
+    expect(onSilent).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onSilent).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(-parent.pid, 'SIGTERM');
+  } else {
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(quiet / 2);
+      parent.stdout.write('one file passed\n');
+    }
+    expect(kill).not.toHaveBeenCalled();
+    expect(onSilent).not.toHaveBeenCalled();
+    if (scenario === 'upper limit') {
+      await vi.advanceTimersByTimeAsync(quiet / 2);
+      expect(kill).toHaveBeenCalledWith(-parent.pid, 'SIGTERM');
+    }
+  }
+  if (scenario === 'progress') { parent.emit('exit', 0, null); parent.emit('close'); }
+  const result = await running;
+  if (scenario === 'progress') expect(result).toMatchObject({ ok: true, error: null });
+  else expect(result).toMatchObject({ ok: false, error: scenario === 'silence' ? 'silent' : 'upper_limit', log: expect.stringContaining(scenario) });
   expect(vi.getTimerCount()).toBe(0);
 });

@@ -10,7 +10,6 @@ import type { ToolJob } from '../tools/job.js';
 import { queuedRunState } from '../nodes/check-slot-view.js';
 import { repoAt } from '../departments/repository.js';
 import { harnessState } from './harness.js';
-import { FULL_RUN_MINUTES } from './describe.js';
 import { startRun, stopRun } from './runs.js';
 import { taskFor } from './run-records.js';
 import { TEST_MINUTES, TEST_MINUTES_MAX, WORK_MEMORY_GB } from './constants.js';
@@ -35,7 +34,7 @@ const TaskRef = (what: string) =>
 const Parts = z.number().int().min(1).max(MAX_TEST_PARTS).optional().describe('How many parts to split it into; 1 by default.');
 const Minutes = z.number().int().min(1).max(TEST_MINUTES_MAX).optional().describe(`The time limit of each part, ${TEST_MINUTES} minutes by default.`);
 const TestMinutes = z.number().int().min(1).max(TEST_MINUTES_MAX).optional()
-  .describe(`The time limit of each part, ${TEST_MINUTES} minutes by default and ${FULL_RUN_MINUTES} for the first run of a release. A run goes out in as many parts as keep each within three quarters of it by what its files took before, the first run of a release in 2 at least: at once on free machines, one after another on one.`);
+  .describe('Optional upper time limit for each part. The node stops a part after too long without new output or results, using recorded file durations or one hour if there are none. The first run of a release plans at least 2 parts, at once on free machines and one after another on one.');
 
 /* Whole suites and assigned non-check work use the free machines. Checks of a change stay in its owner's workspace. */
 export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
@@ -43,7 +42,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     'run_tests',
     {
       description:
-        'Runs release checks on main, the repository’s configured main line, a turn branch or a release branch. Use selected local tests to check a change during a task. ' +
+        'Runs release checks on main, the repository\'s configured main line, a turn branch or a release branch. Use selected local tests to check a change during a task. ' +
         'A full release run can reuse passing results from the same release with matching reusable evidence. Without that evidence it runs the selected profile. A whole product run or the exact declared full command can publish hornhoof/tests on the pinned commit. ' +
         `Hornhoof pins the commit the branch is at now, readies the product's harness, and wakes you on the task with the result; with command it runs that command instead, split into up to ${MAX_TEST_PARTS} parts with {part} and {parts} in it.`,
       inputSchema: {

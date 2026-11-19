@@ -1,6 +1,6 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { CheckCoordinator } from '../src/modules/nodes/check-slots-queue.js';
-import type { CheckQueueReply } from '@hornhoof/protocol';
+import { LOAD_MS, type CheckQueueReply } from '@hornhoof/protocol';
 
 const a = '10000000-0000-4000-8000-000000000001';
 const b = '10000000-0000-4000-8000-000000000002';
@@ -8,6 +8,23 @@ const c = '10000000-0000-4000-8000-000000000003';
 const tick = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 
 describe('physical machine admission across subscription nodes', () => {
+  it('starts two weighted parts on one 8-core host and keeps a five-core check waiting', async () => {
+    const sent: CheckQueueReply[] = [];
+    const queue = new CheckCoordinator({ warmupMs: 0, now: () => 0, send: (_node, reply) => { sent.push(reply); } });
+    onTestFinished(() => queue.close());
+    queue.node('normal', 'home-api', { cpus: 8, load: 0 });
+    queue.node('builtin', 'home-api', { cpus: 8, load: 0 });
+    queue.acquire('normal', { type: 'check.acquire', id: a, label: 'browser part' }, 2);
+    queue.acquire('builtin', { type: 'check.acquire', id: b, label: 'another browser part' }, 2);
+    queue.acquire('normal', { type: 'check.acquire', id: c, label: 'author check' });
+    await tick();
+    expect(queue.inspect('builtin')).toMatchObject({ holders: [{ request: { id: a } }, { request: { id: b } }], queue: [{ request: { id: c } }] });
+    expect(sent.filter(reply => reply.state === 'running').map(reply => reply.id)).toEqual([a, b]);
+    queue.release('builtin', b);
+    await tick();
+    expect(sent.filter(reply => reply.state === 'running').map(reply => reply.id)).toEqual([a, b, c]);
+  });
+
   it('reads holders and FIFO waiters without admitting, releasing or changing a claim', async () => {
     vi.useFakeTimers({ now: 1000 });
     onTestFinished(() => { vi.useRealTimers(); });
@@ -194,5 +211,71 @@ describe('a machine whose connection drops keeps its leases for 90 s', () => {
     expect(sent.filter(s => s.node === 'other' && s.reply.state !== 'ended')).toEqual([]);
     queue.release('other', a); await tick();
     expect(ended()).toEqual([`other ${a}`]);
+  });
+});
+
+describe('running check leases reported by a live node', () => {
+  async function setup() {
+    vi.useFakeTimers({ now: 1000 });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const sent: CheckQueueReply[] = [];
+    const queue = new CheckCoordinator({ warmupMs: 0, send: (_node, reply) => { sent.push(reply); } });
+    onTestFinished(() => queue.close());
+    const machine = { cpus: 1, load: 0 };
+    queue.node('one', 'host', machine);
+    queue.node('two', 'host', machine);
+    queue.acquire('one', { type: 'check.acquire', id: a, label: 'running' });
+    queue.acquire('two', { type: 'check.acquire', id: b, label: 'waiting' });
+    await tick();
+    const load = (node: string, sequence: number, ids: string[], receivedAt = Date.now()) => {
+      const report = { ...machine, at: Date.now(), checkLeases: { sequence, ids, receivedAt } };
+      queue.node(node, 'host', report);
+    };
+    const holders = () => queue.inspect('one')!.holders.map(entry => entry.request.id);
+    return { queue, machine, load, holders, sent };
+  }
+
+  it('ends an unheld lease of a live node so its FIFO waiter starts', async () => {
+    const { load, holders, sent } = await setup();
+    expect(holders()).toEqual([a]);
+    vi.setSystemTime(1001 + LOAD_MS);
+    load('one', 1, []);
+    await tick();
+    expect(holders()).toEqual([b]);
+    expect(sent).toContainEqual({ type: 'check.state', id: a, state: 'ended', position: 0 });
+  });
+
+  it('keeps a grant issued between building a snapshot and its arrival, and grants within the grace', async () => {
+    const snapshotBuiltBeforeGrant = { sequence: 1, ids: [] };
+    const { load, holders } = await setup();
+    vi.setSystemTime(1001 + 2 * LOAD_MS);
+    // The grant was sent at 1000. The earlier snapshot arrived at 1001 but waited to be applied.
+    load('one', snapshotBuiltBeforeGrant.sequence, snapshotBuiltBeforeGrant.ids, 1001);
+    load('one', 2, [], 1000 + LOAD_MS);
+    await tick();
+    expect(holders()).toEqual([a]);
+  });
+
+  it('ignores an older or duplicate snapshot even when it arrives later', async () => {
+    const { load, holders } = await setup();
+    const earlier = 1001 + LOAD_MS;
+    vi.setSystemTime(earlier + LOAD_MS);
+    load('one', 2, [a]);
+    load('one', 2, []);
+    vi.setSystemTime(earlier + LOAD_MS + 1);
+    load('one', 1, []);
+    await tick();
+    expect(holders()).toEqual([a]);
+  });
+
+  it('keeps a reported lease, a lease of another node, and a lease when the old node omits the list', async () => {
+    const { queue, machine, load, holders } = await setup();
+    vi.setSystemTime(1001 + LOAD_MS);
+    load('one', 1, [a]);
+    load('two', 1, []);
+    queue.node('one', 'host', machine);
+    await tick();
+    expect(holders()).toEqual([a]);
+    expect(queue.inspect('one')!.queue.map(entry => entry.request.id)).toEqual([b]);
   });
 });

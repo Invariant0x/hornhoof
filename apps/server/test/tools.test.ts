@@ -80,7 +80,7 @@ describe('/mcp', () => {
     expect(description('run_tests')).toContain('matching reusable evidence');
     expect(description('start_calls')).toContain('read full answers with calls');
     expect(description('phone_action')).toContain('Use social networks through their phone apps at a human pace.');
-    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['approval_policy', 'ask_person', 'blocked', 'briefing', 'calls', 'comment', 'company', 'computer', 'computer_result', 'confirm_finding', 'create_google_sheet', 'end_wait', 'goals', 'inbox', 'inbox_mark', 'machines', 'message_employee', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'release_turn', 'replan_wait', 'report', 'request_approval', 'run_tests', 'run_work', 'send_telegram_file', 'start_calls', 'stop_calls', 'stop_tests', 'stop_work', 'submit', 'task', 'tasks', 'test_harness', 'test_run', 'track_work', 'vault_entries', 'vault_entry', 'verdict', 'wait_for', 'work_run']);
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['approval_policy', 'ask_person', 'blocked', 'briefing', 'calls', 'check_author', 'comment', 'company', 'computer', 'computer_result', 'confirm_finding', 'create_google_sheet', 'end_wait', 'goals', 'inbox', 'inbox_mark', 'machines', 'message_employee', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'release_turn', 'replan_wait', 'report', 'request_approval', 'run_tests', 'run_work', 'send_telegram_file', 'start_calls', 'stop_calls', 'stop_tests', 'stop_work', 'submit', 'task', 'tasks', 'test_harness', 'test_run', 'track_work', 'vault_entries', 'vault_entry', 'verdict', 'wait_for', 'work_run']);
   });
 
   it('describes the company with the templates and no email addresses', async () => {
@@ -88,7 +88,7 @@ describe('/mcp', () => {
     await job('running');
     await db.update(companies).set({ brief: 'Characters for schools.' }).where(eq(companies.id, companyId));
     const [dev] = await db.insert(departments).values({ companyId, name: null, templateKey: 'development', roleCode: 'DEV', about: 'Two products' }).returning();
-    const [mascot] = await db.insert(departments).values({ companyId, name: 'Mascot', roleCode: 'DEV', parentId: dev!.id, repoUrl: 'https://github.com/acme/mascot.git', repoBranch: 'release', repoTokenEnc: 'sealed', repoTokenLast4: '2222' }).returning();
+    const [mascot] = await db.insert(departments).values({ companyId, name: 'Mascot', roleCode: 'DEV', parentId: dev!.id, repoUrl: 'https://github.com/acme/mascot.git', repoBranch: 'release', repoTokenEnc: 'sealed', repoTokenLast4: 'Wq9z' }).returning();
     const [sub] = await db.select().from(subscriptions);
     const [bruno, hana] = await db
       .insert(agents)
@@ -101,7 +101,8 @@ describe('/mcp', () => {
     const client = await mcp(app, TOKEN);
     const raw = text(await client.callTool({ name: 'company', arguments: {} }));
     expect(raw).not.toMatch(/@/);
-    expect(raw).not.toMatch(/sealed|2222/);
+    /* The token's last four are no hex digits, so no id of the answer holds them by chance. */
+    expect(raw).not.toMatch(/sealed|Wq9z/);
     const view = JSON.parse(raw);
     expect(view).toMatchObject({
       name: 'Acme',

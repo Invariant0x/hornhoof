@@ -339,8 +339,9 @@ for (const { lang, skin, width, dir } of OWNER_LOOKS) {
     await expect(card.getByRole('button', { name: t.subs.editApiLabel(name), exact: true })).toBeVisible();
     await expect(remove).toBeVisible();
     expect(await fits(page)).toBe(true);
-    expect.soft(await offences(card, { danger: [t.subs.remove], groups: '.machine-actions' })).toEqual([]);
-    measured.push({ browser: browserName, look, screen: 'subscriptions card', sizes: await sizes(card, { side: '.blk-side', actions: '.machine-actions', action: '.machine-actions > button' }) });
+    /* A working plan's actions stand in the foot of its card since #1444. */
+    expect.soft(await offences(card, { danger: [t.subs.remove], groups: '.plan-card-actions .form-foot' })).toEqual([]);
+    measured.push({ browser: browserName, look, screen: 'subscriptions card', sizes: await sizes(card, { side: '.blk-side', actions: '.plan-card-actions .form-foot', action: '.plan-card-actions .form-foot > button' }) });
     await wholePage(page, info.outputPath(`subs-card-${look}-${browserName}.png`));
 
     /* The keyboard reaches Remove and shows where it is. */
@@ -349,7 +350,7 @@ for (const { lang, skin, width, dir } of OWNER_LOOKS) {
     await page.keyboard.press('Tab');
     await expect(remove).toBeFocused();
     expect(await focusRing(page)).toBe('ring');
-    await around(page, card.locator('.machine-actions'), info.outputPath(`subs-focus-${look}-${browserName}.png`));
+    await around(page, card.locator('.plan-card-actions .form-foot'), info.outputPath(`subs-focus-${look}-${browserName}.png`));
 
     await page.getByRole('button', { name: t.subs.connectApi, exact: true }).click();
     const form = page.getByRole('form', { name: t.subs.connectApi });

@@ -261,7 +261,7 @@ test('only what changed in code goes to each tool', async () => {
   const result = await runStages(given({ changes }), ports);
   assert.deepEqual(named(ports, 'npx').find(call => call.args.includes('eslint')).args.slice(2), ['apps/node/src/a.ts']);
   assert.deepEqual(named(ports, 'dryer')[0].args, ['apps/node/src/a.ts']);
-  assert.deepEqual(result.record.scope.paths, ['docs/a.md', 'apps/node/src/gone.ts', 'apps/node/src/a.ts']);
+  assert.deepEqual(result.record.scope.paths, ['docs/a.md', 'apps/node/src/gone.ts', 'apps/node/src/a.ts', 'apps/node/src/b.ts']);
 });
 
 test('a change with no code has nothing to lint, type, score or compare, and that does not fail it', async () => {

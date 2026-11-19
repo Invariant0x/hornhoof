@@ -18,8 +18,8 @@ export type Config = {
   nodeKey?: string;
   nodePingMs: number;
   streamPingMs: number;
-  /* Parts of runs that may run at once on one physical computer. */
-  runsPerHost: number;
+  /* Optional upper limit on parts running at once on one physical computer. */
+  runsPerHost: number | undefined;
   /* The running build: the product version, its commit, and how many database migrations it carries. */
   version: string;
   commit: string;
@@ -105,7 +105,7 @@ const Env = z.object({
   PORT: wholeNumber(1, 65535, 'PORT must be a number between 1 and 65535.'),
   NODE_PING_MS: milliseconds('NODE_PING_MS', 1, '20000'),
   STREAM_PING_MS: milliseconds('STREAM_PING_MS', 1, '25000'),
-  MAX_RUNS_PER_HOST: wholeNumber(1, 1000, 'MAX_RUNS_PER_HOST must be a whole number between 1 and 1000.').default(1),
+  MAX_RUNS_PER_HOST: wholeNumber(1, 1000, 'MAX_RUNS_PER_HOST must be a whole number between 1 and 1000.'),
   UPDATE_CHECK_MS: milliseconds('UPDATE_CHECK_MS', 0, '1800000'),
   /* How long the orchestrator and the heads wait for a machine next to install the server's build, and for a node an
      updater was told is free while it does not stop. Replacing a free node takes under a minute. A node that waits for

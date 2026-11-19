@@ -11,14 +11,15 @@ import { productPlaces, scopeKey, testCapabilities } from './load.js';
 export { noteTestCapabilities, scopeKey, testCapabilities } from './load.js';
 import { canReach } from '../../auth/access.js';
 import { refuse } from '../tasks/state.js';
-import { TEST_MEMORY_GB } from '../departments/repository.js';
 import { computerKey } from './capacity.js';
 import { pickMachine } from './pick.js';
+import { needOf, partBudget } from './part-budget.js';
 import { partSpread, planProductParts, type ProductPlan } from './plan-product.js';
+import { unitKey } from './plan-environment.js';
 import type { PlanningHistory } from './plan-history.js';
 import { measuredHistory } from './plan-measured.js';
 import { runPurpose } from './purpose.js';
-import { AWAY_MS, WAIT_MS } from './constants.js';
+import { AWAY_MS, TEST_MINUTES, WAIT_MS } from './constants.js';
 export { productReceipt } from './receipts.js';
 import { reuseFor, runModeOf, type ReuseDecision, type RunMode } from './reuse.js';
 
@@ -70,27 +71,37 @@ function snapshotFor(description: EnvironmentDescription): EnvironmentSnapshot {
 function requestedSuiteIds(snapshot: EnvironmentSnapshot, requested?: string): string[] {
   return requested ? [requested] : snapshot.description.manifest.profiles.find(profile => profile.id === snapshot.profile)!.requiredSuiteIds;
 }
-function productLeaves(snapshot: EnvironmentSnapshot, requested?: string): TestEnvironmentSelection[] {
+function productLeaves(snapshot: EnvironmentSnapshot, requested: string | undefined, history: PlanningHistory | null): TestEnvironmentSelection[] {
   const { manifest } = snapshot.description;
   const inventory = requestedUnits(snapshot, requested);
   const ids = requestedSuiteIds(snapshot, requested);
+  const budget = suiteEstimate(history);
   const leaves: TestEnvironmentSelection[] = [];
   for (const suiteId of ids) {
     const selection = { kind: 'suite' as const, suiteId, files: inventory.filter(unit => unit.suiteId === suiteId).map(unit => unit.file) };
     TestExecution.parse({ snapshot, selection });
-    leaves.push({ selection, after: [] });
+    leaves.push({ selection, after: [], ...budget(suiteId, selection.files) });
     if (manifest.suites.find(suite => suite.id === suiteId)!.finalChecks?.length) leaves.push({ selection: { kind: 'final', suiteId, files: [] }, after: [leaves.length] });
   }
   if (leaves.length > MAX_TEST_PARTS) throw new Error('The product plan exceeds the supported part count.');
   return leaves;
 }
+function suiteEstimate(history: PlanningHistory | null) {
+  const { durations, costs, unknownFileMs } = planningCosts(history);
+  const known = new Map(durations.map(time => [unitKey(time), time.ms]));
+  return (suiteId: string, files: string[]): { estimatedMs?: number } => {
+    const times = files.map(file => known.get(unitKey({ suiteId, file })));
+    if (times.every(ms => ms === undefined)) return {};
+    return { estimatedMs: times.reduce<number>((total, ms) => total + (ms ?? unknownFileMs), costs.setupMs + costs.collectMs) };
+  };
+}
 /* The computers free now that may run a part of the run. */
 async function freeProductMachines(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot): Promise<string[]> {
   const sources = planningSources.get(ctx);
   if (!sources) return [];
-  const target = await sources.target(run), need = (run.memoryGb ?? target?.department?.repoTestMemoryGb ?? TEST_MEMORY_GB) * 1024 ** 3;
-  const places = await productPlaces(ctx, await sources.open(run.companyId), { ...run, environmentSnapshot: snapshot }, need);
-  const free = places.filter(place => pickMachine([{ ...place, reaches: descriptionEligible(ctx, place, target) }], need) !== null);
+  const target = await sources.target(run), need = partBudget(needOf(run, target?.department ?? null));
+  const places = await productPlaces(ctx, await sources.open(run.companyId), { ...run, environmentSnapshot: snapshot }, need.memoryBytes);
+  const free = places.filter(place => pickMachine([{ ...place, reaches: descriptionEligible(ctx, place, target) }], need, ctx.config.runsPerHost) !== null);
   return [...new Set(free.map(computerKey))].sort();
 }
 function requestedUnits(snapshot: EnvironmentSnapshot, requested?: string): EnvironmentDescription['inventory'] {
@@ -103,18 +114,16 @@ function planningCosts(history: PlanningHistory | null | undefined) {
   return { durations: history?.durations ?? [], costs: history?.costs ?? { setupMs: 10_000, collectMs: 1000 }, unknownFileMs: history?.unknownFileMs ?? 30_000,
     ...(history?.preparationMs ? { preparationMs: history.preparationMs } : {}) };
 }
-/* The full run checks a release, and a part of it that runs into its limit sends all of it again: unless the run asked for a limit, each
-   part has an hour. */
-export const FULL_RUN_MINUTES = 60;
-function partLimitMs(run: Run, mode: RunMode): number {
-  return mode?.mode === 'full' && run.environmentRequest?.minutes === undefined ? Math.max(run.timeoutMs, FULL_RUN_MINUTES * 60_000) : run.timeoutMs;
+/* Keep release batches at a planned size and let the node renew the quiet budget while its part makes progress. */
+function spreadFor(run: Run, mode: RunMode): ReturnType<typeof partSpread> {
+  const full = mode?.mode === 'full';
+  return partSpread(full, run.timeoutMs || (full ? 60 : TEST_MINUTES) * 60_000);
 }
-const spreadFor = (run: Run, mode: RunMode) => partSpread(mode?.mode === 'full', run.timeoutMs);
 async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot, reuse: ReuseDecision, mode: RunMode): Promise<{ leaves: TestEnvironmentSelection[]; plan: ProductPlan | null }> {
   const requested = run.environmentRequest!.suite;
-  if (!snapshot.description.manifest.execution) return { leaves: productLeaves(snapshot, requested), plan: null };
-  const units = requestedUnits(snapshot, requested);
   const history = await (planningPorts.get(ctx)?.history ?? measuredHistory(ctx))(run, snapshot);
+  if (!snapshot.description.manifest.execution) return { leaves: productLeaves(snapshot, requested, history), plan: null };
+  const units = requestedUnits(snapshot, requested);
   const free = await freeProductMachines(ctx, run, snapshot);
   const plan = await planProductParts({ snapshot, expectedCommitSha: run.commitSha!, purpose: runPurpose(snapshot, requested), units, reuse,
     ...planningCosts(history), ...spreadFor(run, mode),
@@ -158,14 +167,13 @@ async function addParts(tx: Pick<Ctx['db'], 'insert'>, run: Run, leaves: TestEnv
   if (leaves.length) await tx.insert(testParts).values(leaves.map((environmentSelection, index) => ({ companyId: run.companyId, runId: run.id, part: index + 1, environmentSelection })));
 }
 async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, snapshot: EnvironmentSnapshot, leaves: TestEnvironmentSelection[], plan: ProductPlan | null, fileCache: TestRunFileCache | null): Promise<boolean> {
-  const { timeoutMs } = run;
   const description = snapshot.description;
   return ctx.db.transaction(async tx => {
     const [locked] = await tx.select().from(testRuns).where(requestMatches(run.id, message.requestId)).for('update');
     if (!locked || locked.environmentRequest?.problem) return false;
     if (locked.commitSha !== description.commitSha || scopeKey(locked.environmentRequest!.repositoryScope) !== scopeKey(description.repositoryScope)) throw new DescriptionMismatch('The locked run differs from the planned source.');
     if (plan) await planningPorts.get(ctx)?.record?.(tx, locked, plan);
-    await tx.update(testRuns).set({ environmentSnapshot: snapshot, environmentHash: description.manifestHash, parts: leaves.length, fileCache, timeoutMs }).where(eq(testRuns.id, run.id));
+    await tx.update(testRuns).set({ environmentSnapshot: snapshot, environmentHash: description.manifestHash, parts: leaves.length, fileCache }).where(eq(testRuns.id, run.id));
     await addParts(tx, run, leaves);
     return true;
   });
@@ -185,9 +193,8 @@ async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, valu
   const problem = unrunnable(snapshot);
   if (problem) return problem;
   const reuse = await reuseFor(ctx, mode, snapshot, mode ? requestedUnits(snapshot, request.suite) : [], prints);
-  const limited = { ...run, timeoutMs: partLimitMs(run, mode) };
-  const { leaves, plan } = await plannedLeaves(ctx, limited, snapshot, reuse.decision, mode);
-  const saved = await storeDescription(ctx, limited, message, snapshot, leaves, plan, reuse.fileCache);
+  const { leaves, plan } = await plannedLeaves(ctx, run, snapshot, reuse.decision, mode);
+  const saved = await storeDescription(ctx, run, message, snapshot, leaves, plan, reuse.fileCache);
   if (saved && plan) ctx.log.info({ runId: run.id, commitSha: description.commitSha, parts: leaves.length, reason: plan.reason, durableReason: planningPorts.get(ctx)?.record !== undefined }, 'Product test part plan');
   return null;
 }

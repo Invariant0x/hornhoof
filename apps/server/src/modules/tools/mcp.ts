@@ -162,7 +162,7 @@ function registerOrchestratorTools(server: McpServer, ctx: Ctx, app: FastifyInst
     'propose_staff',
     {
       description:
-        'Prepares an optional preview of staffing changes. Use hire to carry out the department’s staffing decision directly. ' +
+        'Prepares an optional preview of staffing changes. Use hire to carry out the department\'s staffing decision directly. ' +
         'brief: what the department will do first, in one to three sentences. Each person is { role, name?, product?, model?, subscription?, skills?: { on, off }, checked }: ' +
         'role and product ids from staffing_options, model one the subscription runs (left out for Default), skills only where they differ from the role. A newer card for the same department replaces the older one. ' +
         'The roles staffing_options marks required are always on the card, ticked; a role with a holder is not hired again, so propose what the department needs on top.',

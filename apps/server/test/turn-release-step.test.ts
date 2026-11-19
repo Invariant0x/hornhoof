@@ -256,6 +256,10 @@ describe('whether everything a release brings was checked', () => {
     expect(result).toMatchObject({ covered: false, uncovered: [expect.stringContaining(BASE)] });
   });
 
+  it('covers a release by its commits where GitHub listed only 300 of the files it brings', async () => {
+    expect(await coverage(f => { (f.repo.capped ??= new Set()).add(`${BASE}..${f.R}`); })).toMatchObject({ covered: true, uncovered: [] });
+  });
+
   it('does not cover a release whose comparison came back cut short', async () => {
     expect(await coverage(f => { f.repo.cut.add(`${BASE}..${f.R}`); })).toMatchObject({ covered: false });
   });

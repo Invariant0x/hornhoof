@@ -7,7 +7,8 @@ import { offlineMachine } from '../nodes/offline.js';
 import { worksIn } from '../departments/inside.js';
 import { ApiError } from '../../errors.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
-import { only } from '../../db/selections.js';
+import type { Db } from '../../db/client.js';
+import { idOnly, only } from '../../db/selections.js';
 import { answerBy, wrote } from '../conversation/prompt.js';
 import { agentState } from '../conversation/state.js';
 import { carrierOf, enqueueTurn, reconnecting } from '../conversation/queue.js';
@@ -37,6 +38,28 @@ type TaskSight = Parameters<typeof agentSeesTask>[1];
 type Failure = { kind: string; text: string } | null;
 /* What of a task decides whether a reader may open it, read beside its work. */
 const SIGHT = { status: tasks.status, departmentId: tasks.departmentId, assigneeAgentId: tasks.assigneeAgentId, executorAgentId: tasks.executorAgentId };
+
+/* A person's own assistant works for that person alone, not for the company: what watches the company reads only its
+   employees. */
+const employees = () => ne(agents.kind, 'assistant');
+const assistantsOf = (companyId: string) => and(eq(agents.companyId, companyId), eq(agents.kind, 'assistant'));
+
+/* Every task but the work of a person's own assistant, held or done, as task views keep it (tasks/visibility.ts). */
+function employeesTasks(db: Db, companyId: string) {
+  const assistants = db.select(idOnly(agents)).from(agents).where(assistantsOf(companyId));
+  return and(...[tasks.assigneeAgentId, tasks.executorAgentId].map(id => or(isNull(id), notInArray(id, assistants))));
+}
+
+/* What an employee did on no task or on the company's work: its work on a task an assistant holds or does is that
+   person's work too. */
+const employeesWork = (db: Db, companyId: string) => and(employees(), employeesTasks(db, companyId));
+
+/* A message to a person's own assistant that did not go in names that assistant, so it stays out too, its id matched as
+   the sender wrote it, capitals or not. */
+function notToAssistants(db: Db, companyId: string) {
+  const assistants = db.select({ id: sql<string>`${agents.id}::text` }).from(agents).where(assistantsOf(companyId));
+  return notInArray(sql`lower(${agentEvents.data}->'undelivered'->>'recipient')`, assistants);
+}
 
 /* Who reads failures, to know whose work it may open. */
 const readerOf = async (ctx: Ctx, agentId: string): Promise<Reader | undefined> =>
@@ -275,7 +298,7 @@ async function undeliveredSince(ctx: Pick<Ctx, 'db'>, companyId: string, since: 
     .innerJoin(agents, eq(agents.id, agentEvents.agentId))
     .leftJoin(jobs, eq(jobs.id, agentEvents.jobId))
     .leftJoin(tasks, eq(tasks.id, jobs.taskId))
-    .where(and(eq(agentEvents.companyId, companyId), eq(agentEvents.kind, 'tool_result'), sql`${agentEvents.data}->'undelivered' is not null`, gte(agentEvents.createdAt, since)))
+    .where(and(eq(agentEvents.companyId, companyId), employeesWork(ctx.db, companyId), eq(agentEvents.kind, 'tool_result'), sql`${agentEvents.data}->'undelivered' is not null`, notToAssistants(ctx.db, companyId), gte(agentEvents.createdAt, since)))
     .orderBy(desc(agentEvents.seq))
     .limit(UNDELIVERED_MAX);
   const staff = new Map((await ctx.db.select({ id: agents.id, name: agents.name }).from(agents).where(eq(agents.companyId, companyId))).map(a => [a.id, a.name]));
@@ -318,7 +341,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           'The words of work you may not open, as task shows it, come with no credential and no private path in them.',
       },
       async () => {
-        const staff = await db.select().from(agents).where(and(eq(agents.companyId, job.companyId), ne(agents.kind, 'assistant'), isNull(agents.removedAt)));
+        const staff = await db.select().from(agents).where(and(eq(agents.companyId, job.companyId), employees(), isNull(agents.removedAt)));
         const ids = staff.map(a => a.id);
         if (!ids.length) return json([]);
         const names = await deptNames();
@@ -398,14 +421,14 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           .from(jobs)
           .innerJoin(agents, eq(agents.id, jobs.agentId))
           .leftJoin(tasks, eq(tasks.id, jobs.taskId))
-          .where(and(eq(jobs.companyId, job.companyId), eq(jobs.status, 'failed'), or(isNull(jobs.error), notInArray(jobs.error, [...STOPPED_ON_PURPOSE, ...ENDED_UNSENT])), gte(jobs.finishedAt, hoursAgo(hours))))
+          .where(and(eq(jobs.companyId, job.companyId), employeesWork(db, job.companyId), eq(jobs.status, 'failed'), or(isNull(jobs.error), notInArray(jobs.error, [...STOPPED_ON_PURPOSE, ...ENDED_UNSENT])), gte(jobs.finishedAt, hoursAgo(hours))))
           .orderBy(desc(jobs.finishedAt))
           .limit(FAILED_MAX);
         const stuck = await db
           .select({ id: tasks.id, holderId: tasks.assigneeAgentId, number: tasks.number, title: tasks.title, holder: agents.name, since: tasks.updatedAt, sight: SIGHT })
           .from(tasks)
           .leftJoin(agents, eq(agents.id, tasks.assigneeAgentId))
-          .where(and(eq(tasks.companyId, job.companyId), eq(tasks.status, 'blocked')))
+          .where(and(eq(tasks.companyId, job.companyId), eq(tasks.status, 'blocked'), employeesTasks(db, job.companyId)))
           .orderBy(tasks.updatedAt);
         const blocked = [];
         for (const { id, holderId, sight, ...task } of stuck) {
@@ -437,7 +460,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             .innerJoin(agents, eq(agents.id, agentEvents.agentId))
             .leftJoin(jobs, eq(jobs.id, agentEvents.jobId))
             .leftJoin(tasks, eq(tasks.id, jobs.taskId))
-            .where(and(eq(agentEvents.companyId, job.companyId), eq(agentEvents.kind, kind), gte(agentEvents.createdAt, since), sql`${agentEvents.data}->>${field} ~* ${hint}`))
+            .where(and(eq(agentEvents.companyId, job.companyId), employeesWork(db, job.companyId), eq(agentEvents.kind, kind), gte(agentEvents.createdAt, since), sql`${agentEvents.data}->>${field} ~* ${hint}`))
             .orderBy(desc(agentEvents.seq))
             .limit(STUMBLES_MAX)
             .then(rows => seenBy(rows, reader));
@@ -448,7 +471,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           .from(requests)
           .innerJoin(agents, eq(agents.id, requests.agentId))
           .innerJoin(tasks, eq(tasks.id, requests.taskId))
-          .where(and(eq(requests.companyId, job.companyId), inArray(requests.kind, ['question', 'stuck']), gte(requests.createdAt, since)))
+          .where(and(eq(requests.companyId, job.companyId), employeesWork(db, job.companyId), inArray(requests.kind, ['question', 'stuck']), gte(requests.createdAt, since)))
           .orderBy(desc(requests.createdAt))
           .limit(STOPS_MAX);
         const stops = [];

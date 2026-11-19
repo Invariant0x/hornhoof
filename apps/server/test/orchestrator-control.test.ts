@@ -274,7 +274,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect(asked!.prompt).toContain(request.id);
     expect(asked!.prompt).toContain('\n> JWT or sessions for /checkout?');
     expect(asked!.prompt).toContain('explain_request');
-    expect(asked!.prompt).toContain('the recipient’s language');
+    expect(asked!.prompt).toContain('the recipient\'s language');
     expect(asked!.prompt).not.toContain('unless the CEO told you');
     /* People see that the orchestrator is on it while its turn waits or runs. */
     expect((await app.inject({ url: '/api/requests', ...as(ceo) })).json().requests).toMatchObject([{ id: request.id, explained: null, explaining: true }]);

@@ -1668,14 +1668,106 @@ body:has(.dview) .version-mark { display: none; }
 .offline-plan { display: grid; gap: 8px; min-width: 0; }
 .offline-moves { display: flex; flex-wrap: wrap; gap: 8px; }
 .offline-moves .btn { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: start; }
-/* A plan's fallback plans in their order: each name on its own line, its model and its moves after it, the moves wrapping
-   below the model as one group when tight. */
-.plan-fallbacks { display: grid; gap: 8px; min-inline-size: 0; font-size: 13.5px; }
-.plan-fallbacks > small { font-size: 12.5px; color: var(--muted); }
-.fallback-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
-.fallback-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-inline-size: 0; }
-.fallback-name { flex: 1 0 100%; min-inline-size: 0; overflow-wrap: anywhere; }
-.fallback-moves { display: flex; flex-wrap: wrap; gap: 8px; }
+/* The lower part of a working plan's card (#1444, Design's variant B of #1432): its settings, its fallback plans and its
+   actions, each a band across the card under its blocks, with a block's line and room above it. */
+.blocks > :is(.plan-settings, .plan-fallbacks, .plan-card-actions) {
+  grid-column: 1 / -1; display: grid; gap: 8px; align-content: start; min-inline-size: 0;
+  padding-block-start: 12px; border-block-start: 1px solid var(--line);
+}
+:is(.plan-settings, .plan-fallbacks) > h4 { margin: 0; font-size: 14px; }
+.plan-fallbacks .part-note { font-size: inherit; overflow-wrap: anywhere; }
+/* A field of the card is as wide as what it shows, up to the band, with its caret on its end side, and 44 px high as
+   every field of the screen. Its value wraps rather than ending in dots: the select itself is clear over a copy of its
+   value that can take more lines. Its focus is the page's ring, not the glow of a field being typed in. Its list and caret
+   are the card's alone: :where() keeps them as light as the page's own list, which stays at most 360 px with its arrow. */
+.plan-settings .field, .plan-settings .select-wrap { justify-self: start; max-inline-size: 100%; }
+:is(.plan-settings, .plan-fallbacks) .field { gap: 6px; }
+.plan-fallbacks .field { gap: 4px; }
+:is(.plan-settings, .plan-fallbacks) .field > :is(label, .label) { font-size: 13px; font-weight: 500; color: var(--muted); }
+:where(.plan-settings, .plan-fallbacks) .select-wrap { position: relative; display: grid; min-inline-size: 0; max-inline-size: 100%; }
+:where(.plan-settings, .plan-fallbacks) .select-wrap::after {
+  content: ""; position: absolute; z-index: 2; inset-inline-end: 12px; inset-block-start: calc(50% - 6px);
+  inline-size: 8px; block-size: 8px; border: solid var(--muted); border-width: 0 2px 2px 0; transform: rotate(45deg); pointer-events: none;
+}
+:is(.plan-settings, .plan-fallbacks) .select-wrap > select {
+  inline-size: 100%; block-size: auto; min-block-size: 44px; padding-block: 8px; padding-inline: 12px 32px;
+  background-image: none; font-size: 14px; line-height: 1.45;
+}
+:is(.plan-settings, .plan-fallbacks) .select-wrap > select:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; border-color: var(--line2); box-shadow: none; }
+.model-select { grid-template-areas: "value"; }
+.model-select > select, .model-select > .model-value { grid-area: value; }
+.plan-fallbacks .model-select > select { z-index: 1; block-size: 100%; background-color: transparent; color: transparent; }
+.model-select option { background-color: var(--surface2); color: var(--ink); }
+.model-value {
+  display: grid; align-items: center; min-inline-size: 0; min-block-size: 44px; padding-block: 8px; padding-inline: 12px 32px;
+  border: 1px solid transparent; background: var(--surface2); color: var(--ink); text-align: start; overflow-wrap: anywhere;
+}
+/* A model whose name is long opens its whole names as radio buttons under the field, as no browser's menu shows them whole. */
+.model-disclosure { display: grid; gap: 8px; min-inline-size: 0; }
+.model-trigger { inline-size: 100%; padding: 0; border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; text-align: start; }
+.model-trigger > .model-value { border: 0; }
+.model-trigger:hover, .model-choice:hover { border-color: var(--cyan-ink); }
+.model-disclosure > .choice-list { margin: 0; padding: 0; border: 0; }
+.plan-fallbacks .choice-list { display: grid; gap: 8px; min-inline-size: 0; margin: 0; padding: 0; list-style: none; }
+.model-choice {
+  display: flex; align-items: center; gap: 8px; min-inline-size: 0; min-block-size: 44px; padding: 8px 12px;
+  border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; overflow-wrap: anywhere;
+}
+.model-choice > input { flex: none; inline-size: 16px; block-size: 16px; margin: 0; accent-color: var(--cyan-ink); }
+.model-choice:has(input:checked) { border-color: var(--cyan-ink); }
+.model-choice:has(input:focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+@media (forced-colors: active) {
+  .plan-fallbacks .model-select > select { forced-color-adjust: none; color: transparent; border-color: ButtonText; }
+  .model-select option { color: CanvasText; background-color: Canvas; }
+}
+/* The fallback plans in their order, numbered. On a narrow card a plan's name, its model and its moves stand one under the
+   other past its number, the moves at the end edge; on a card of 700 px and more they stand in one row on shared columns. */
+.fallback-list { display: grid; margin: 0; padding: 0; list-style: none; min-inline-size: 0; }
+.fallback-list > .entry {
+  display: grid; grid-template-columns: 24px minmax(0, 1fr); grid-template-areas: "position plan" ". model" ". moves";
+  gap: 8px; align-items: start; min-inline-size: 0;
+}
+.fallback-list > .entry:not(:last-child) { padding-block-end: 8px; }
+.fallback-list > .entry + .entry { padding-block-start: 8px; border-block-start: 1px solid var(--line); }
+.fallback-position {
+  grid-area: position; display: grid; place-items: center; inline-size: 24px; min-block-size: 24px;
+  border: 1px solid var(--line2); font-family: var(--f-display); font-size: 13px; font-weight: 600; line-height: 1.4; font-variant-numeric: tabular-nums;
+}
+.fallback-name { grid-area: plan; min-inline-size: 0; font-weight: 600; overflow-wrap: anywhere; }
+.fallback-model { grid-area: model; min-inline-size: 0; }
+.fallback-moves { grid-area: moves; }
+.plan-fallbacks .fallback-moves { flex-wrap: nowrap; }
+.plan-fallbacks .fallback-moves > .act { flex: none; inline-size: 44px; block-size: 44px; min-block-size: 44px; padding: 0; justify-content: center; }
+.plan-fallbacks .fallback-moves > .act.danger { border-color: var(--pink-ink); }
+.plan-fallbacks .fallback-moves .ic, .fallback-add .ic { width: 16px; height: 16px; }
+@container card (min-width: 700px) {
+  .fallback-list > .entry {
+    grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr) max-content; grid-template-areas: "position plan model moves";
+    column-gap: 16px; align-items: center;
+  }
+}
+.fallback-add { display: grid; justify-items: end; gap: 8px; min-inline-size: 0; }
+.fallback-add > .btn { max-inline-size: 100%; padding: 8px 12px; white-space: normal; overflow-wrap: anywhere; }
+.fallback-add > .choice-list { inline-size: min(100%, 560px); }
+.fallback-add .choice-list .act { inline-size: 100%; justify-content: flex-start; text-align: start; }
+/* The card's actions: one filled button, the rest framed, and Remove last in the attention colour, its frame too, with
+   16 px and a line of its height between it and the rest. */
+.plan-card-actions .btn.ghost.danger { box-shadow: inset 0 0 0 1px var(--pink-ink); }
+.plan-card-actions .btn.ghost.danger:hover { box-shadow: inset 0 0 0 1px var(--pink); }
+.plan-card-actions .form-foot > .plan-remove { position: relative; overflow: visible; }
+.plan-card-actions .form-foot > .plan-remove.apart { margin-inline-start: 8px; }
+.plan-card-actions .form-foot > .plan-remove.apart::before {
+  content: ""; position: absolute; inset-block: 0; inset-inline-start: -9px; inline-size: 1px; background: var(--line);
+}
+/* When the actions do not fit in one row with each label whole, as on a phone, they stand in two columns of one width,
+   their labels wrapping inside them, and Remove ends the second column. While the foot is measured, each button is as
+   wide as its label on one line. */
+.plan-card-actions .form-foot.two-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.plan-card-actions .form-foot.two-columns > .btn { inline-size: auto; max-inline-size: none; }
+.plan-card-actions .form-foot.two-columns > .plan-remove { grid-column: -2; }
+.plan-card-actions .form-foot.measuring { display: flex; flex-wrap: nowrap; }
+.plan-card-actions .form-foot.measuring > .btn { flex: none; inline-size: max-content; max-inline-size: none; white-space: nowrap; }
+.btn[aria-disabled="true"] { cursor: not-allowed; opacity: .45; filter: none; }
 .ac-obsolete { max-width: 100%; font-size: 12.5px; color: var(--muted); }
 .ac-failure summary { cursor: pointer; overflow-wrap: anywhere; }
 .ac-failure pre { margin: 6px 0 0; padding: 8px 10px; max-height: 160px; overflow: auto; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-family: var(--f-mono); font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1957,15 +2049,12 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 :root[data-scheme="light"] :is(.tr-node.goal, .tr-node.on, button.tr-node:hover) { border-color: var(--cyan-ink); }
 :root[data-scheme="light"] .tr-card.on { background: var(--cyan-ink); }
 .tr-found > h2 { margin: 0; font-size: 15px; }
-/* The goals page: the list's rows, a goal's mark in the accent, its progress over the two middle columns. */
+/* The goals page: the list's rows, a goal's mark in the accent, its progress in the executor's column. */
 .tr-goal-mark { display: grid; place-items: center; flex: none; inline-size: 14px; block-size: max(var(--row), 1lh); color: var(--cyan-ink); }
 .tr-goal-mark .ic { inline-size: 14px; block-size: 14px; }
 .tr-goals-page .goal-progress { grid-template-columns: minmax(0, 1fr); gap: 4px; max-inline-size: none; font-size: 12px; }
 .tr-goals-page .goal-progress small { overflow-wrap: normal; }
 .tr-goal-title { text-decoration: none; }
-@container tr-list (width > 640px) {
-  .tr-cell-wide { grid-column: span 2; }
-}
 .tr-found { display: grid; gap: 10px; min-width: 0; }
 .tr-waits { display: grid; gap: 6px; }
 .tr-waits h3 { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
@@ -2056,8 +2145,8 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-status-pill.review { --tr-tone: var(--tracker-palette-violet); }
 
 /* The list as mockup 10's table: a coloured pill and a count over each status, the names of the columns once under the
-   first pill, then one line per task in the mockup's shares of 44, 14, 14, 14 and 14 percent, each never narrower than its
-   longest word or mark. A row is the mockup's 37px: what is pressed in it is 24px high for a mouse, 6px above and below and
+   first pill, then one line per task: the task over two thirds of the width, its executor, responsible and due date over a
+   ninth each, each never narrower than its longest word or mark. A row is the mockup's 37px: what is pressed in it is 24px high for a mouse, 6px above and below and
    a line. A subtask stands 36px further in, under its task. */
 .tr-list { --row: var(--tracker-target-fine); container: tr-list / inline-size; display: grid; min-inline-size: 0; }
 .tr-list-grid, .tr-group, .tr-rows, .tr-row { min-inline-size: 0; }
@@ -2102,15 +2191,14 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-line .badge { white-space: normal; }
 .tr-line > .act { block-size: auto; min-block-size: max(var(--row), 24px); padding: 0 8px; font-size: 12px; }
 .tr-relation { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; max-inline-size: 100%; overflow-wrap: anywhere; }
-.tr-goal-link { display: inline-flex; align-items: center; min-block-size: var(--row); max-inline-size: 100%; font-size: 12px; color: var(--cyan-ink); text-align: inherit; text-decoration: none; overflow-wrap: anywhere; }
-.tr-goal-link:is(:hover, :focus-visible) { text-decoration: underline; }
 .tr-row-line .tp-late { color: var(--pink-ink); font-weight: 600; }
 .tr-cell { min-inline-size: 0; overflow-wrap: anywhere; }
 .tr-k { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .tr-v { display: block; min-inline-size: 0; color: var(--ink); }
 .tr-id-name { display: none; }
-@container tr-list (width > 640px) {
-  .tr-list-grid { display: grid; grid-template-columns: minmax(min-content, 44fr) repeat(4, minmax(min-content, 14fr)); }
+@container tr-list (width > 960px) {
+  /* The task takes two thirds of the width; the executor, the responsible and the due date share the rest. */
+  .tr-list-grid { display: grid; grid-template-columns: minmax(min-content, 6fr) repeat(3, minmax(min-content, 1fr)); }
   .tr-group, .tr-group > div, .tr-rows, .tr-row, .tr-cells { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
   .tr-group-head { grid-column: 1 / -1; }
   .tr-group > [hidden], .tr-rows[hidden] { display: none; }
@@ -2118,7 +2206,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .tr-cells:dir(rtl) > .tr-cell > .tr-v:dir(ltr), .tr-cells:dir(ltr) > .tr-cell > .tr-v:dir(rtl) { justify-content: flex-end; text-align: end; }
 }
 /* A narrow list puts each fact under the title, after its name. */
-@container tr-list (max-width: 640px) {
+@container tr-list (max-width: 960px) {
   .tr-head { display: none; }
   .tr-row-line { grid-template-columns: minmax(0, 1fr); row-gap: 4px; }
   .tr-task-name { padding-inline-start: calc(8px + min(var(--tr-depth) * 16px, 12%)); }

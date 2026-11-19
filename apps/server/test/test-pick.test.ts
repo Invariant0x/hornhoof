@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computerKey, latestHost } from '../src/modules/testruns/capacity.js';
+import { computerKey, latestHost, NO_PARTS } from '../src/modules/testruns/capacity.js';
 import { freedom, pickMachine, type Spot } from '../src/modules/testruns/pick.js';
 
 const GIB = 1024 ** 3;
@@ -8,10 +8,11 @@ const spot = (key: string, over: Partial<Spot> = {}, load: Partial<NonNullable<S
   lent: true,
   reaches: true,
   busy: false,
+  usage: NO_PARTS,
   load: { cpus: 8, load: 4, memFree: 8 * GIB, memTotal: 16 * GIB, tests: 0, jobs: 0, ...load },
   ...over,
 });
-const NEED = 4 * GIB;
+const NEED = { memoryBytes: 4 * GIB, cores: 1 };
 
 describe('picking a machine for a test run', () => {
   it('keeps an offline legacy place separate from a reported host with the same name', () => {
@@ -42,7 +43,7 @@ describe('picking a machine for a test run', () => {
   });
 
   it('takes no part on a loaded host, even when its container has idle processors', () => {
-    expect(pickMachine([spot('container', {}, { load: 0, ...{ hostCpus: 16, hostLoad: 14.4 } })], NEED)).toBeNull();
+    expect(pickMachine([spot('container', {}, { load: 0, ...{ hostCpus: 16, hostLoad: 15.4 } })], NEED)).toBeNull();
   });
 
   it('takes the one with the most free processor and memory', () => {
@@ -76,9 +77,9 @@ describe('picking a machine for a test run', () => {
     expect(pickMachine([...left, spot('fits', {}, { load: 7, memFree: 4 * GIB })], NEED)?.key).toBe('fits');
   });
 
-  it('gives nothing new to a loaded machine, whose processors are busy nine tenths of the time or more', () => {
+  it('gives nothing new to a machine with fewer free cores than the part uses', () => {
     expect(pickMachine([spot('loaded', {}, { load: 7.2 })], NEED)).toBeNull();
-    expect(pickMachine([spot('big', {}, { cpus: 64, load: 60 })], NEED)).toBeNull();
+    expect(pickMachine([spot('big', {}, { cpus: 64, load: 60 })], { ...NEED, cores: 5 })).toBeNull();
     expect(pickMachine([spot('loaded', {}, { load: 7.2 }), spot('busy', {}, { load: 7 })], NEED)?.key).toBe('busy');
   });
 });

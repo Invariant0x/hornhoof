@@ -81,7 +81,8 @@ if [ "${1:-}" = --take-over ]; then
   exit 0
 fi
 mkdir -p "$CONTROL"
-touch "$CONTROL/alive"
+heartbeats
+computer_clear_legacy
 interrupted
 finish_become
 if [ "${1:-}" = --once ]; then
@@ -102,7 +103,7 @@ if [ "${1:-}" = --once ]; then
   exit 0
 fi
 # alive stays fresh through long downloads too, and commands on the computer do not wait for an update.
-(while sleep 5; do touch "$CONTROL/alive"; done) &
+(while sleep 5; do heartbeats; done) &
 ALIVE=$!
 # A command that went wrong does not end the loop.
 (while true; do

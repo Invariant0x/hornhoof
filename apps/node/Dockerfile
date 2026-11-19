@@ -101,8 +101,9 @@ COPY --from=browser /opt/browser-packages /opt/browser-packages
 # procps gives agents ps and free, python-is-python3 the python that scripts call, and python3-pil Pillow for image checks.
 # zip packs what unzip unpacks; python3-yaml, python3-pip and python3-pytest give Python scripts YAML, pip and the usual test runner.
 # tini runs first in the container and ends the processes left without a parent, which the node never waits for.
+# fonts-noto-core gives browsers Noto Sans Arabic, so right-to-left screenshots show joined Arabic letters.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates curl gpg ripgrep jq file tmux tini procps util-linux unzip zip binutils patch iproute2 time python3 python3-venv python-is-python3 python3-pil python3-yaml python3-pip python3-pytest $(cat /opt/browser-packages) \
+  && apt-get install -y --no-install-recommends git ca-certificates curl gpg ripgrep jq file tmux tini procps util-linux unzip zip binutils patch iproute2 time python3 python3-venv python-is-python3 python3-pil python3-yaml python3-pip python3-pytest fonts-noto-core $(cat /opt/browser-packages) \
   && install -d /usr/share/keyrings \
   && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/keyrings/postgresql-pgdg.asc \
   && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
@@ -149,6 +150,11 @@ RUN printf '%s\n' 'deb https://deb.debian.org/debian bookworm-backports main' > 
 RUN curl --version | grep -qw smtps && curl --version | grep -qw imaps \
   && python3 -c 'import email.message, imaplib, mimetypes, smtplib, ssl'
 ENV PATH=/usr/lib/postgresql/17/bin:$PATH
+# Arabic falls back to Noto Sans Arabic, not to FreeMono or Unifont, which leave its letters unjoined; the build fails without it.
+COPY apps/node/fonts/66-noto-sans-arabic.conf /etc/fonts/conf.d/66-noto-sans-arabic.conf
+RUN fc-cache \
+  && fc-list :lang=ar family | grep -qx 'Noto Sans Arabic' \
+  && fc-match 'sans-serif:lang=ar' | grep -q '^NotoSansArabic-Regular'
 COPY apps/node/service-runtime-smoke.mjs /app/apps/node/service-runtime-smoke.mjs
 RUN node /app/apps/node/service-runtime-smoke.mjs
 COPY --from=quality /opt/hornhoof/ub /opt/hornhoof/ub

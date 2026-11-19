@@ -57,6 +57,9 @@ async function sourceAt(ctx: Reader, repo: RepoAddress, commit: string, input?: 
   let compared: Awaited<ReturnType<NonNullable<Ctx['readCompare']>>> | null = null;
   try { compared = ctx.readCompare ? await ctx.readCompare(repo, { base: input.baseCommit, head: commit }, 10_000) : null; }
   catch { /* An incomplete source is refused below, never an invented inventory. */ }
+  if (compared && !compared.complete && compared.reason === 'too-many-files') {
+    throw refuse(409, 'repo_invalid', `GitHub lists at most 300 files of a comparison, and the change from ${input.baseCommit} to ${commit} has that many or more, so it cannot be read whole. Check that review.baseCommit is the commit the change starts from, or hand in a smaller change.`);
+  }
   if (!compared || !exactComparison(compared, input.baseCommit, commit)) throw refuse(409, 'repo_invalid', `The change from ${input.baseCommit} to ${commit} could not be compared. Check that the base is in the branch's history.`);
   return { baseCommit: input.baseCommit, commit, paths: [...new Set(compared.paths)], changedLines: comparedLines(compared) };
 }

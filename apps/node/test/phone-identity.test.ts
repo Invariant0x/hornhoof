@@ -12,7 +12,7 @@ function phone() {
     connect: vi.fn(async () => 'connected' as const), pair: vi.fn(async () => 'paired' as const),
     devices: vi.fn(async () => [{ serial, status: 'device' as const, model: null }]),
     identity: vi.fn(async () => 'a'.repeat(64)), tree: vi.fn(async () => ''),
-    screenshot: vi.fn(async () => Buffer.from('unreadable recorded picture')), act: vi.fn(async () => {}),
+    screenshot: vi.fn(async () => Buffer.from('unreadable recorded picture')), act: vi.fn(async () => {}), type: vi.fn(async () => ({ next: 0 })),
     readiness: vi.fn(async () => []),
   };
   const replies: PhoneReply[] = [];

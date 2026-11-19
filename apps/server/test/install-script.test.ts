@@ -93,6 +93,55 @@ describe('install.sh', () => {
       expect(r.calls.find(c => c.endsWith('wait-update'))).toContain('--add-host host.docker.internal:host-gateway');
     });
 
+    it('keeps every --add-host of a node that reaches the core on this computer, and a node without one stays without', () => {
+      /* A node joined on the server's own computer ("core-here") carries the company's address on its label and reaches
+         the core's front through host.docker.internal, which only its own --add-host names. */
+      const other = 'hornhoof-kimi-22222222';
+      const r = install({
+        args: [],
+        env: { STUB_CONTAINERS: `${name}=${SERVER} ${other}=${SERVER}`, STUB_EXTRA_HOSTS: `${name}=host.docker.internal:host-gateway ${name}=mirror.lan:10.0.0.7` },
+      });
+      expect(r.code).toBe(0);
+      const of = (node: string) => r.calls.filter(c => c.includes(`-v ${node}:/data`) && (c.startsWith('docker run -d') || c.endsWith('wait-update')));
+      expect(of(name)).toHaveLength(2);
+      for (const call of of(name)) {
+        expect(call.match(/--add-host \S+/g)).toEqual(['--add-host host.docker.internal:host-gateway', '--add-host mirror.lan:10.0.0.7']);
+      }
+      expect(of(other)).toHaveLength(2);
+      for (const call of of(other)) expect(call).not.toContain('--add-host');
+    });
+
+    it('names each host once when a node on a server on this computer had it already', () => {
+      const r = install({ args: [], env: { HORNHOOF_SERVER: 'http://localhost:8080', STUB_CONTAINERS: `${name}=http://localhost:8080`, STUB_EXTRA_HOSTS: `${name}=host.docker.internal:host-gateway` } });
+      expect(r.code).toBe(0);
+      expect(r.calls.find(c => c.startsWith('docker run -d'))!.match(/--add-host \S+/g)).toEqual(['--add-host host.docker.internal:host-gateway']);
+    });
+
+    describe('whose host names cannot be kept', () => {
+      /* A new container without its --add-host could lose its way to the core, so the update stops before the node is
+         touched: no wait, no stop, no rename, no new container, and the old one goes on running. */
+      const changed = (calls: string[]) =>
+        calls.filter(c => c.includes(name) && (c.includes('prepare-stop') || c.endsWith(' wait-update') || /^docker (stop|rename|update|rm|run -d) /.test(c)));
+      const unread = { STUB_EXTRA_HOSTS: `${name}=host.docker.internal:host-gateway`, STUB_EXTRA_HOSTS_UNREAD: name };
+
+      it.each([
+        ['an update', []],
+        ['an urgent update', ['--urgent']],
+      ])('stops %s when Docker does not say them, and leaves the node running as it was', (_, args) => {
+        const r = update(unread, args);
+        expect(r.code).toBe(1);
+        expect(r.out).toContain(`Could not read the host names ${name} was started with, so ${name} stays as it is and goes on running.`);
+        expect(changed(r.calls)).toEqual([]);
+      });
+
+      it('stops the same way for a host name it cannot pass on as it is', () => {
+        const r = update({ STUB_EXTRA_HOSTS: `${name}=host.docker.internal:host-gateway ${name}=mirror.lan:[fd00::7]` });
+        expect(r.code).toBe(1);
+        expect(r.out).toContain(`${name} was started with a host name this installer cannot carry over, so ${name} stays as it is and goes on running.`);
+        expect(changed(r.calls)).toEqual([]);
+      });
+    });
+
     it('leaves the node and its turns on a server from before this wait, and says why', () => {
       const r = update({ STUB_WAIT_UPDATE: '3' });
       expect(r.code).toBe(1);
@@ -690,6 +739,48 @@ describe('install.sh', () => {
     expect(runs.find(c => c.includes('--name hornhoof-kimi-22222222'))).toMatch(/--label hornhoof\.server=https:\/\/hh\.acme\.test .*hornhoof-node:0\.4\.1$/);
     expect(runs.find(c => c.includes('--name hornhoof-kimi-22222222'))).not.toContain('--add-host');
     expect(r.calls).toContain('docker pull ghcr.io/invariant0x/hornhoof-node:0.4.1');
+  });
+
+  it("keeps the --add-host of a node that joined on the server's own computer when the updater moves it", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=https://hh.acme.test\nHORNHOOF_PORT=8081\n');
+    /* Both nodes carry the company's public address; only the one that joined here ("core-here") reaches the front
+       through host.docker.internal. */
+    const r = install({
+      args: ['server'],
+      env: {
+        HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2',
+        HORNHOOF_SERVER_DIR: dir,
+        HORNHOOF_VERSION: '0.4.1',
+        STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=https://hh.acme.test hornhoof-kimi-22222222=https://hh.acme.test',
+        STUB_EXTRA_HOSTS: 'hornhoof-claude-1c07dac4=host.docker.internal:host-gateway',
+      },
+    });
+    expect(r.code).toBe(0);
+    const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+    expect(runs).toHaveLength(2);
+    expect(runs.find(c => c.includes('--name hornhoof-claude-1c07dac4'))!.match(/--add-host \S+/g)).toEqual(['--add-host host.docker.internal:host-gateway']);
+    expect(runs.find(c => c.includes('--name hornhoof-kimi-22222222'))).not.toContain('--add-host');
+  });
+
+  it('leaves a node whose host names Docker does not say running as it was when the updater moves the nodes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=https://hh.acme.test\nHORNHOOF_PORT=8081\n');
+    const node = 'hornhoof-claude-1c07dac4';
+    const r = install({
+      args: ['server'],
+      env: {
+        HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2',
+        HORNHOOF_SERVER_DIR: dir,
+        HORNHOOF_VERSION: '0.4.1',
+        STUB_CONTAINERS: `${node}=https://hh.acme.test`,
+        STUB_EXTRA_HOSTS: `${node}=host.docker.internal:host-gateway`,
+        STUB_EXTRA_HOSTS_UNREAD: node,
+      },
+    });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(`Could not read the host names ${node} was started with, so ${node} stays as it is and goes on running.`);
+    expect(r.calls.filter(c => c.includes(node) && (c.includes('prepare-stop') || /^docker (stop|rename|update|rm|run -d) /.test(c)))).toEqual([]);
   });
 
   it("leaves the built-in node and this server's plan nodes running when the node image did not change", () => {

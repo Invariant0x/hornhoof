@@ -533,6 +533,41 @@ host_env() {
   done < <(host_facts "$1")
 }
 
+# node_hosts <name>: the --add-host words of a node, in NODE_HOSTS: the one for a server on localhost, and every one its
+# container has now. A node joined on the server's own computer reaches the core's front through host.docker.internal
+# while its label names the company's own address, so only its container says it needs that name. Each host once.
+# It ends with 1 when the container is there but Docker does not say its hosts, and with 2 when one of them is not a word
+# it passes on: a new container without them could lose its way to the core.
+NODE_HOSTS=()
+node_hosts() {
+  local host hosts seen=' '
+  NODE_HOSTS=()
+  if ! hosts=$("${DOCKER[@]}" inspect --format '{{range .HostConfig.ExtraHosts}}{{println .}}{{end}}' "$1" 2> /dev/null); then
+    # A node that has no container yet has no hosts to keep.
+    if "${DOCKER[@]}" inspect --format '{{.Id}}' "$1" > /dev/null 2>&1; then return 1; fi
+    hosts=''
+  fi
+  if [ -n "$LOCAL_SERVER" ]; then hosts=$(printf 'host.docker.internal:host-gateway\n%s' "$hosts"); fi
+  while IFS= read -r host; do
+    [ -n "$host" ] || continue
+    [[ "$host" =~ ^[A-Za-z0-9._-]+[:=][A-Za-z0-9.:_-]+$ ]] || return 2
+    case "$seen" in *" $host "*) continue ;; esac
+    seen="$seen$host "
+    NODE_HOSTS+=(--add-host "$host")
+  done <<< "$hosts"
+}
+
+# keep_hosts <name>: node_hosts, or the update stops here, before anything of the node is touched, and it goes on running.
+keep_hosts() {
+  local code=0
+  node_hosts "$1" || code=$?
+  case "$code" in
+    0) ;;
+    2) fail "$1 was started with a host name this installer cannot carry over, so $1 stays as it is and goes on running. Without it, it could lose its way to the company's core." ;;
+    *) fail "Could not read the host names $1 was started with, so $1 stays as it is and goes on running. Without them, it could lose its way to the company's core. Run this command again." ;;
+  esac
+}
+
 STARTED=''
 prepare_node_stop() {
   local name=$1 reason=$2
@@ -575,6 +610,7 @@ restore_old_node() {
 # start_node <name> <id> <provider> [key]: the key goes into the node's volume through stdin, never on a command line.
 start_node() {
   local name=$1 id=$2 provider=$3 key=${4:-} old='' started=1
+  keep_hosts "$name"
   if [ -n "$key" ]; then
     printf '%s %s %s %s\n' "$NODE_SERVER" "$id" "$provider" "$key" |
       "${DOCKER[@]}" run --rm -i --network none --user 0:0 --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges -v "$name:/data" "$IMAGE" set-key ||
@@ -595,14 +631,13 @@ start_node() {
       "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
     fi
   fi
-  # shellcheck disable=SC2086 # the two --add-host words appear only for a server on localhost
   # Root inside the container only: the node runs its agents as a user of their own, keeps its key and programs from
   # them and checks which agent calls its tools. Nothing from the host is mounted and no new privileges can be gained.
   # Docker's AppArmor profile on newer Linux, as Debian 13, would stop that root from looking into and stopping its
   # agents' programs, so the node runs outside it; Docker skips the option where AppArmor is off, as on a Mac.
   "${DOCKER[@]}" run -d --name "$name" --label "$LABEL=$id" --label "$SERVER_LABEL=$SERVER" --restart unless-stopped --cap-drop ALL \
     --user 0:0 --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add KILL --cap-add SETGID --cap-add SETUID --cap-add SYS_PTRACE \
-    --security-opt no-new-privileges --security-opt apparmor=unconfined --shm-size 2g -v "$name:/data" ${LOCAL_SERVER:+--add-host} ${LOCAL_SERVER:+host.docker.internal:host-gateway} \
+    --security-opt no-new-privileges --security-opt apparmor=unconfined --shm-size 2g -v "$name:/data" ${NODE_HOSTS[@]+"${NODE_HOSTS[@]}"} \
     ${HOST_ENV[@]+"${HOST_ENV[@]}"} "$IMAGE" > /dev/null || started=''
   if [ -z "$started" ] || ! node_healthy "$name"; then
     restore_old_node "$name" "$old"
@@ -619,11 +654,12 @@ start_node() {
 # The server lets go of the node soon after nobody asks, so stopping this changes nothing.
 wait_for_node() {
   local name=$1 code=0
+  # It reaches the server the way the node does. A node whose hosts cannot be kept is not asked about, nor moved.
+  keep_hosts "$name"
   [ -z "$URGENT" ] || return 0
   [ "$("${DOCKER[@]}" inspect --format '{{.State.Running}}' "$name" 2> /dev/null)" != false ] || return 0
-  # shellcheck disable=SC2086 # the two --add-host words appear only for a server on localhost
   "${DOCKER[@]}" run --rm --cap-drop ALL --user 0:0 --cap-add DAC_OVERRIDE --security-opt no-new-privileges -v "$name:/data:ro" \
-    ${LOCAL_SERVER:+--add-host} ${LOCAL_SERVER:+host.docker.internal:host-gateway} "$IMAGE" wait-update || code=$?
+    ${NODE_HOSTS[@]+"${NODE_HOSTS[@]}"} "$IMAGE" wait-update || code=$?
   [ "$code" -ne 0 ] || return 0
   LEFT="$LEFT $name"
   if [ "$code" -eq 3 ]; then

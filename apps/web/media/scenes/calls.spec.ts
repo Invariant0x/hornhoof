@@ -35,9 +35,10 @@ test('calls.gif: thirty stage diamonds, then their answers and judge in the full
   await expect(marketing.locator('.cells .cell').first()).toBeVisible();
   await expect(marketing.locator('[data-worker-kind="ghost"]')).toHaveCount(0);
   await marketing.click();
-  const structure = page.getByRole('region', { name: 'Department structure' });
-  const route = structure.getByRole('region', { name: CARE_PIPELINE.name });
-  const stage = route.locator('.dv-stage').filter({ has: page.getByRole('heading', { name: 'Write the care pages', exact: true }) });
+  /* The staff schema draws the one-shot stage of Marketing's default route, Houseplant care guides, as a frame of its own
+     named after the stage, with a diamond for each of its thirty calls and one for the judge. */
+  const schema = page.getByRole('region', { name: 'Department schema', exact: true });
+  const stage = schema.getByRole('group', { name: 'Development', exact: true });
   const marks = stage.locator('[data-worker-kind="ghost"]');
   await expect(marks).toHaveCount(31);
   await expect(marks.and(stage.locator('.running'))).toHaveCount(12);
@@ -53,8 +54,7 @@ test('calls.gif: thirty stage diamonds, then their answers and judge in the full
     await page.waitForTimeout(800);
   }
   const judgeMark = stage.getByRole('img', { name: /Judge call\. Running$/ });
-  await expect(judgeMark).toBeVisible();
-  await smoothScrollTo(page, judgeMark, 480, 10, 30);
+  await expect(judgeMark).toBeInViewport();
   await page.waitForTimeout(650);
 
   /* The task's history: each call's brief, input and answer, and the judge's verdict on all thirty. */
@@ -74,8 +74,7 @@ test('calls.gif: thirty stage diamonds, then their answers and judge in the full
 
   /* Back to the opening stage and call counts. */
   await card.getByRole('button', { name: 'Close', exact: true }).click();
-  await expect(structure).toBeVisible();
-  await structure.evaluate(element => { element.scrollTop = 0; });
+  await expect(schema).toBeVisible();
   api.setOrg(withCalls(0, 12));
   await pushStream(page, { type: 'org' });
   await page.mouse.move(8, 8);
