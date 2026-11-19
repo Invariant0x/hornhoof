@@ -467,7 +467,6 @@ export class Keeper {
     /* The server's own keeper takes its app's word while it holds no key of its owner: the database is its own. */
     this.carrier = opts.config.machineId
       ? new ComputerCarrier({
-          controlDir: opts.config.controlDir,
           dir: opts.dir ?? KEEPER_DIR,
           machine: opts.config.machineId,
           ask: (method, path, body, signal) => askApp(opts.app, method, path, body, signal).then(answerOf),
