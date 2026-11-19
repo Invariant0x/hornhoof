@@ -14,8 +14,9 @@ test('a tab closes the task, history restores it, and the task and the agent win
   await page.setViewportSize({ width: 1440, height: 900 });
   await openTasks(page);
   await openTask(page, 1);
+  /* The card is the mockup's drawer, at the very end of the screen. */
   const card = await box(panelOf(page, 1));
-  expect(card.x + card.width).toBe(1424);
+  expect(card.x + card.width).toBe(1440);
   await page.getByRole('navigation').getByRole('button', { name: 'Map', exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(panelOf(page, 1)).toHaveCount(0);
@@ -238,8 +239,9 @@ for (const lang of CHECKED_LOCALES) {
         await expect(panel.getByRole('heading', { name: LONG_PART })).toBeVisible();
         const trigger = panel.getByRole('button', { name: t.tasks.taskActions });
         const target = await box(trigger);
-        expect(target.width).toBe(44);
-        expect(target.height).toBe(44);
+        /* 44 px for a finger on a phone, the card's 32 px for a mouse. */
+        expect(target.width).toBe(width <= 760 ? 44 : 32);
+        expect(target.height).toBe(width <= 760 ? 44 : 32);
         await panel.getByRole('button', { name: t.tasks.moreDescription, exact: true }).click();
         await expect(panel.locator('.tp-body').getByText(LONG_PART)).toBeVisible();
         await panel.getByRole('button', { name: t.tasks.earlierSteps, exact: true }).click();

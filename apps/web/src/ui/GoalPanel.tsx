@@ -129,7 +129,7 @@ function GoalBody({ goal, log, onOpen, onOpenGoal, onGraph, onChanged }: Omit<Pr
       <div role="group" aria-label={words.facts}>
         <dl className="tp-card-facts">
           <Fact name={words.responsible}><Answers person={goal.responsible} /></Fact>
-          {progress ? <Fact name={words.progress}>{progress.label}{due && ` · ${t.tracker.graph.until(due.text)}`}</Fact>
+          {progress ? <Fact name={words.progress}><span dir="auto">{progress.label}</span>{due && <>{' · '}<span dir="auto">{t.tracker.graph.until(due.text)}</span></>}</Fact>
             : due && <Fact name={words.due}><span className={due.late ? 'tp-late' : undefined} dir="auto">{due.text}</span></Fact>}
         </dl>
       </div>

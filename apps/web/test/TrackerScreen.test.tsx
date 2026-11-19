@@ -744,7 +744,7 @@ describe('the left panel and the goals page', () => {
     expect.soft(decl('.tr-side-title', 'margin')).toBe('2px 8px 10px');
     expect.soft(decl('.tr-new', 'inline-size')).toBe('30px');
     expect.soft(decl('.tr-item', 'min-block-size')).toBe('32px');
-    expect.soft(decl('.tr-item', 'min-block-size', '(pointer: coarse)')).toBe('44px');
+    expect.soft(decl('.tr-item', 'min-block-size', '(max-width: 760px), (pointer: coarse)')).toBe('44px');
     expect.soft(decl('.tr-item', 'padding')).toBe('4px 8px');
     expect.soft(decl('.tr-item', 'font-size')).toBe('13.5px');
     /* 8px between the icon, the name and the end, 2px between lines when the end goes under the name. */

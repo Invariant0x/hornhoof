@@ -80,7 +80,8 @@ for (const { lang, skin } of LOOKS) for (const width of [1440, 375]) {
     /* The list starts with work in progress and names the people, goal, due day and subtasks. */
     const list = page.getByRole('region', { name: t.tracker.views.list, exact: true });
     await expect(list.getByRole('heading', { level: 2 }).first()).toHaveAccessibleName(new RegExp(`^${t.tracker.groups.working}:`));
-    const payments = list.getByRole('listitem', { name: named('Take card payments'), exact: true });
+    /* Its own line: its subtasks stand open under it, as in the mockup. */
+    const payments = list.getByRole('listitem', { name: named('Take card payments'), exact: true }).locator(':scope > .tr-cells');
     await expect(payments.getByRole('img', { name: 'Hana' })).toBeVisible();
     await expect(payments.getByRole('img', { name: 'Ivan', exact: true })).toBeVisible();
     if (width <= 760) {
@@ -172,7 +173,7 @@ for (const dir of ['ltr', 'rtl'] as const) {
     await page.evaluate(d => { document.documentElement.dir = d; }, dir);
     const row = page.getByRole('region', { name: t.tracker.views.list, exact: true }).getByRole('listitem', { name: named('Take card payments'), exact: true });
     const before = (await page.locator('.tr-main').boundingBox())!;
-    await row.locator('.tr-title').click();
+    await row.locator(':scope > .tr-cells .tr-title').click();
     const card = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
     const path = card.getByRole('navigation', { name: t.tracker.card.path });
     await expect(path.getByRole('listitem')).toHaveText([GOALS[0]!.title, GOALS[1]!.title]);
@@ -232,8 +233,10 @@ for (const dir of ['ltr', 'rtl'] as const) {
 }
 
 /* The lowest contrast of a box's border against what lies on either side of it: its own ground inside, the ground under it
-   outside, and the glow of its ring over that ground when it has one. */
-const borderContrast = (locator: Locator) => locator.evaluate(el => {
+   outside, and the glow of its ring over that ground when it has one. A board card draws its line as the mockup's does, as
+   its own fill 1 px around the surface of its body, so its cut corners keep the line: with fill, that fill is the line and
+   the body's surface the ground inside. */
+const borderContrast = (locator: Locator, line: 'border' | 'fill' = 'border') => locator.evaluate((el, line) => {
   const parse = (value: string): number[] => {
     const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/.exec(value);
     return m ? [Number(m[1]), Number(m[2]), Number(m[3]), m[4] === undefined ? 1 : Number(m[4])] : [0, 0, 0, 0];
@@ -245,11 +248,16 @@ const borderContrast = (locator: Locator) => locator.evaluate(el => {
   for (let at = el.parentElement; at; at = at.parentElement) layers.push(parse(getComputedStyle(at).backgroundColor));
   const outside = layers.reverse().reduce((under, top) => over(top, under), [255, 255, 255, 1]);
   const style = getComputedStyle(el);
+  if (line === 'fill') {
+    const fill = over(parse(style.backgroundColor), outside);
+    const body = over(parse(getComputedStyle(el.firstElementChild!).backgroundColor), fill);
+    return Math.min(ratio(fill, body), ratio(fill, outside));
+  }
   const ring = /rgba?\([^)]*\)/.exec(style.boxShadow);
   const grounds = [over(parse(style.backgroundColor), outside), outside, ...(ring ? [over(parse(ring[0]), outside)] : [])];
   const border = parse(style.borderTopColor);
   return Math.min(...grounds.map(ground => ratio(over(border, ground), ground)));
-});
+}, line);
 
 /* For each element, whether the day of the date in its words stands left of its month on the screen, as "20 Nov" reads in
    both directions; null where the date is not in its words. */
@@ -331,8 +339,8 @@ for (const dir of ['ltr', 'rtl'] as const) for (const { width, touch } of [{ wid
     await openTaskAction(card, t, t.tasks.details);
     await expect(card.getByRole('navigation', { name: t.tracker.card.path })).toContainText(GOALS[1]!.title);
     await expect(page.locator('.tr-card.on')).toHaveCount(1);
-    expect(await borderContrast(page.locator('.tr-card.on')), `chosen card ${look}`).toBeGreaterThanOrEqual(3);
-    expect(await page.locator('.tr-card.on').evaluate(el => getComputedStyle(el).borderTopColor)).toBe(await cyanInk());
+    expect(await borderContrast(page.locator('.tr-card.on'), 'fill'), `chosen card ${look}`).toBeGreaterThanOrEqual(3);
+    expect(await page.locator('.tr-card.on').evaluate(el => getComputedStyle(el).backgroundColor)).toBe(await cyanInk());
     if (width === 1440) await closeUp(page.locator('.tr-card.on'), 'card-chosen');
     await inOrder(card.locator('.tp-card-facts dd'), '20 Nov', `task card ${look}`);
     await cardWords(page, `task card ${look}`);
@@ -484,12 +492,13 @@ for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
     const row = page.getByRole('region', { name: t.tracker.views.list, exact: true }).getByRole('listitem', { name: named('Take card payments'), exact: true });
     await row.scrollIntoViewIfNeeded();
     /* Executor, responsible, goal and due, the mockup's columns. */
-    const cells = row.locator('.tr-cells > .tr-cell');
+    const cells = row.locator(':scope > .tr-cells > .tr-cell');
     await expect(cells).toHaveCount(4);
     for (const cell of await cells.all()) {
       const value = (await cell.locator('.tr-v').textContent())!;
       const parts = await cell.evaluate(el => [...el.children].map(c => { const r = c.getBoundingClientRect(); return { left: r.left, right: r.right, shown: getComputedStyle(c).position !== 'absolute' }; }));
-      const box = await cell.evaluate(el => { const r = el.getBoundingClientRect(); return [r.left, r.right]; });
+      /* The column's room for words: the cell less the mockup's 8 px at each side. */
+      const box = await cell.evaluate(el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return [r.left + parseFloat(s.paddingLeft), r.right - parseFloat(s.paddingRight)]; });
       const [name, words] = parts as [typeof parts[0], typeof parts[0]];
       if (name.shown) {
         expect(name.right, `${value}: its name before it ${look}`).toBeLessThanOrEqual(words.left);
