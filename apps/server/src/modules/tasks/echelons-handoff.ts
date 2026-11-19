@@ -2,6 +2,8 @@ import type { EchelonStage, EchelonStep, HandedCandidate } from '@hornhoof/proto
 import type { Ctx } from '../../app.js';
 import { changeRoute, skippedAuthorReview, type Route } from './route-records.js';
 import { EchelonCandidate } from '@hornhoof/protocol/echelons';
+import { and, eq, sql } from 'drizzle-orm';
+import { taskEvents } from '../../db/schema.js';
 import { reviewSkip, type AuthorReviewSkip } from './author-check.js';
 import { checkerFor, departmentHead, keptFromReview, NO_DEPARTMENT_CHECKER, uncheckable } from './echelons-assign.js';
 import { candidateReceivedAt } from './echelons-candidates.js';
@@ -37,6 +39,14 @@ async function readyHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, cand
   return { state, set: { status: 'open', assigneeAgentId: headId, silent: 0 }, wakes: [{ agentId: headId, taskId: task.id, why: 'reviewed' }] };
 }
 
+/* Whether a submission of the task once went past Review on an author check: a Tests return clears that skip from the route,
+   and every later candidate of the task still waits for independent Review. */
+async function usedAuthorReviewSkip(db: Ctx['db'], task: Task): Promise<boolean> {
+  const [skipped] = await db.select({ id: taskEvents.id }).from(taskEvents).where(and(eq(taskEvents.companyId, task.companyId),
+    eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'submitted'), sql`${taskEvents.data} ? 'authorCheckSkip'`)).limit(1);
+  return Boolean(skipped);
+}
+
 /* skipped: the checks passed over on the way, as nobody in the department can do them. */
 type Handoff = { state: Route['state']; set: Partial<Task>; wakes: Wake[]; skipped: EchelonStage[]; authorCheckSkip?: AuthorReviewSkip };
 
@@ -45,12 +55,13 @@ export async function submittedHandoff(ctx: Pick<Ctx, 'db'> & Partial<Pick<Ctx, 
   if (route.state.stage !== 'development') return forwardHandoff(ctx, task, route, candidate);
   const review = route.state.stages.find(step => step.stage === 'review' && step.status === 'pending');
   const risky = task.riskClass !== null && task.riskClass !== 'none';
+  const requireReview = await usedAuthorReviewSkip(ctx.db, task);
   if (risky && !route.state.stages.some(step => step.stage === 'security' && step.status === 'pending')) {
-    return forwardHandoff(ctx, task, route, candidate);
+    return forwardHandoff(ctx, task, route, candidate, requireReview);
   }
   const parsed = EchelonCandidate.safeParse(candidate);
   const skip = review && parsed.success ? await reviewSkip(ctx, task, parsed.data) : null;
-  if (!skip) return forwardHandoff(ctx, task, route, candidate);
+  if (!skip) return forwardHandoff(ctx, task, route, candidate, requireReview);
   const stages = route.state.stages.map(step => step === review
     ? { ...step, status: 'skipped' as const, reason: skip.reason, inputCandidateId: candidate.id }
     : step);

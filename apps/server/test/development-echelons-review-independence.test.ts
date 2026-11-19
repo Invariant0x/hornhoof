@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, taskEvents, taskRoutes, tasks, turns } from '../src/db/schema.js';
@@ -170,6 +171,28 @@ describe('a passing verdict on a route that still carries the old skip', () => {
     await f.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, f.reviewer.id));
 
     const moved = await verdict(f.ctx, f.security.id, f.task.id, pass(HEAD));
+
+    expect(moved.task).toMatchObject({ status: 'waiting', assigneeAgentId: null });
+    expect(await f.detail()).toMatchObject({ stage: 'review', phase: 'waiting', ownerAgentId: null });
+    expect(await f.reviewStep()).toMatchObject({ status: 'pending', reason: 'eligible_owner_required' });
+  });
+});
+
+describe('a Tests return on a route that used the old skip', () => {
+  it('waits for independent Review on resubmission where the department normally allows unstaffed checks to skip', async () => {
+    const f = await legacy('tests');
+    const atTests = await f.detail();
+    /* The old policy recorded the skip on the submission it let past Review. */
+    const [submitted] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.task.id), eq(taskEvents.kind, 'submitted'), eq(taskEvents.agentId, f.author.id)));
+    await f.db.update(taskEvents).set({ data: { ...submitted!.data, authorCheckSkip: { receiptId: randomUUID(), candidateId: atTests.candidateId, reason: 'author_check_passed' } } })
+      .where(eq(taskEvents.id, submitted!.id));
+    await f.db.update(departments).set({ templateKey: 'design' }).where(eq(departments.id, f.task.departmentId!));
+    await f.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, f.reviewer.id));
+    await report(f.ctx, f.tester.id, f.task.id, { done: false, summary: 'The source needs fixing.', verification: { candidateId: atTests.candidateId!, revision: atTests.revision, delta: 'logic/totals.ts: handle the empty input.' } });
+    expect(await f.reviewStep()).toMatchObject({ status: 'pending', reason: null });
+    f.atCommit(FIX);
+
+    const moved = await submit(f.ctx, f.author.id, f.task.id, { ...code, summary: 'Handle the empty input.' });
 
     expect(moved.task).toMatchObject({ status: 'waiting', assigneeAgentId: null });
     expect(await f.detail()).toMatchObject({ stage: 'review', phase: 'waiting', ownerAgentId: null });
