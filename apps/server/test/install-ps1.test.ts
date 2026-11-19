@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -165,6 +165,19 @@ function Invoke-RestMethod { param($Uri)
 }
 `;
 
+/* The commands of this machine the fake Windows may use: every one in these folders but Docker's own. */
+function systemTools(dir: string, from = ['/usr/bin', '/bin']) {
+  const tools = join(dir, 'system');
+  mkdirSync(tools, { recursive: true });
+  for (const folder of from) {
+    for (const name of existsSync(folder) ? readdirSync(folder) : []) {
+      if (!/^docker/.test(name) && !existsSync(join(tools, name))) symlinkSync(join(folder, name), join(tools, name));
+    }
+  }
+  return tools;
+}
+let machineTools: string | undefined;
+
 type Run = { args?: string[]; env?: Record<string, string>; docker?: boolean; app?: boolean; winget?: boolean; home?: string; dir?: string; command?: string };
 
 function windows(script: string, { args = ['--join', CODE], env = {}, docker = true, app = false, winget = false, home, dir = mkdtempSync(join(tmpdir(), 'hh-ps1-')), command }: Run = {}) {
@@ -198,7 +211,7 @@ function windows(script: string, { args = ['--join', CODE], env = {}, docker = t
     encoding: 'utf8',
     timeout: 60_000,
     env: {
-      PATH: `${bin}:/usr/bin:/bin`,
+      PATH: `${bin}:${(machineTools ??= systemTools(mkdtempSync(join(tmpdir(), 'hh-ps1-tools-'))))}`,
       HOME: home ?? join(dir, 'home'),
       TMPDIR: dir,
       ProgramFiles: programs,
@@ -228,6 +241,17 @@ const installs = (done: string[]) => done.filter(line => /^(winget|installer|dow
 /* The installer this server serves, fetched once for the scenarios that need no other. */
 let servedScript: Promise<string> | undefined;
 const script = () => (servedScript ??= served().then(res => res.body));
+
+/* The fake Windows runs on whatever machine runs the tests, and a GitHub machine has Docker of its own in /usr/bin: the
+   installer must still see a computer without Docker when a scenario has none. */
+describe('the commands the fake Windows may use', () => {
+  it("are this machine's own, with no Docker among them", () => {
+    const machine = mkdtempSync(join(tmpdir(), 'hh-ps1-machine-'));
+    for (const name of ['sh', 'cp', 'docker', 'docker-compose']) writeFileSync(join(machine, name), '#!/bin/sh\n', { mode: 0o755 });
+    const tools = systemTools(mkdtempSync(join(tmpdir(), 'hh-ps1-tools-')), [machine]);
+    expect(readdirSync(tools).sort()).toEqual(['cp', 'sh']);
+  });
+});
 
 describe.runIf(PWSH)('install.ps1 in PowerShell', () => {
   it("runs the server's install.sh in the updater image of its build with this computer's Docker, the words of the command and the computer's key", async () => {
