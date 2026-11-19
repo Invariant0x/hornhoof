@@ -54,7 +54,7 @@ const signal = () => AbortSignal.timeout(READ_MS);
 /* One object of the repository through GitHub's API, null when GitHub has none. */
 async function fromGitHub(path) {
   const res = await fetch(`${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}/${path}`, {
-    headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${env.GITHUB_TOKEN}`, 'x-github-api-version': '2022-11-28' },
+    headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', ...(env.GITHUB_TOKEN ? { authorization: `Bearer ${env.GITHUB_TOKEN}` } : {}) },
     signal: signal(),
   });
   if (res.status === 404) return null;
@@ -85,8 +85,8 @@ async function pullToken(challenge) {
   const realm = new URL(fields.realm);
   if (realm.origin !== registryUrl().origin) throw new Error(`the registry sends for a token to ${realm.origin}, which is not its own`);
   for (const key of ['service', 'scope']) if (fields[key]) realm.searchParams.set(key, fields[key]);
-  const basic = Buffer.from(`${env.GITHUB_ACTOR || 'github-actions'}:${env.GITHUB_TOKEN ?? ''}`).toString('base64');
-  const res = await fetch(realm, { headers: { authorization: `Basic ${basic}` }, signal: signal() });
+  const basic = env.GITHUB_TOKEN ? { authorization: `Basic ${Buffer.from(`${env.GITHUB_ACTOR || 'github-actions'}:${env.GITHUB_TOKEN}`).toString('base64')}` } : {};
+  const res = await fetch(realm, { headers: basic, signal: signal() });
   if (!res.ok) throw new Error(`the registry answered ${res.status} for a token`);
   const body = await res.json();
   const token = body.token ?? body.access_token;
