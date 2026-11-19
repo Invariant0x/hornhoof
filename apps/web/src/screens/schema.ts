@@ -1,4 +1,4 @@
-import { isStaged } from '@hornhoof/protocol/echelons';
+import { isStaged, type EchelonStage } from '@hornhoof/protocol/echelons';
 import type { Department, DeptRole, Employee, Team } from '../types';
 import type { Point } from '../ui/wires';
 
@@ -13,7 +13,7 @@ const PEOPLE_Y = 12, PEOPLE_STEP = 66;
 export type Placed = { e: Employee; x: number; y: number; cy: number };
 /* key: the role's id, 'team:<id>' for a sub-unit frame, or '' for the frame of employees whose role the department does not know. */
 /* check: the frame stands behind a gate, as every check after the ordinary work does. */
-export type Frame = { key: string; role: DeptRole | null; team?: Team | null; x: number; h: number; stage: number; check?: boolean; members: Placed[] };
+export type Frame = { key: string; role: DeptRole | null; team?: Team | null; oneShot?: OneShotStage; x: number; h: number; stage: number; check?: boolean; members: Placed[] };
 /* tr: the bus from the head; tick: from a spine to a chip; pl: the pipeline and the report; gate: between stages. */
 export type Line = { cls: 'tr' | 'tick' | 'pl' | 'gate'; pts: Point[]; arrow?: boolean };
 
@@ -55,13 +55,37 @@ function splitMembers(d: Department) {
   return { teamFrames, members: all.filter(e => !e.teamId || !teamIds.has(e.teamId)), startX: last ? teamEnd + G : 0, teamEnd };
 }
 
-type Group = { role: DeptRole | null; key: string }[];
+/* A one-shot stage of the department's route: its calls start from zero each time and show as diamonds in its frame. */
+export type OneShotStage = { stage: EchelonStage; fanOut: number; judge: boolean; ownerRole?: string; gate?: number | null };
+
+/* The one-shot stages of the department's default route, or of its first route when none is the default, in route order. */
+export function oneShotStagesOf(d: Department): OneShotStage[] {
+  const routes = (d.pipelines ?? []).filter(p => !p.archived);
+  const route = routes.find(p => p.isDefault) ?? routes[0];
+  const seen = new Set<EchelonStage>();
+  return (route?.stages ?? []).flatMap(s => {
+    if (!s.oneShot || !s.echelon || seen.has(s.echelon)) return [];
+    seen.add(s.echelon);
+    const gate = s.ownerRole ? d.roles.find(r => r.id === s.ownerRole)?.gate : undefined;
+    return [{ stage: s.echelon, fanOut: s.oneShot.fanOut, judge: s.oneShot.judge, ...(s.ownerRole ? { ownerRole: s.ownerRole } : {}), ...(gate !== undefined ? { gate } : {}) }];
+  });
+}
+
+type Group = { role: DeptRole | null; key: string; oneShot?: OneShotStage }[];
 
 /* Role metadata decides the pipeline, in the order of the development stages: design, ordinary work, each check in its order,
    then the final check. Every check after the work is a numbered gate the work passes in turn. */
-function pipelineGroups(known: ReadonlyMap<string, DeptRole>, loose: Employee[]) {
+function pipelineGroups(known: ReadonlyMap<string, DeptRole>, loose: Employee[], oneShots: OneShotStage[]) {
   const roles = [...known.values()].filter(r => r.schema !== 'observer');
-  const frames = roles.map(role => ({ key: role.id, role, gate: role.gate, schema: role.schema }));
+  const entries = roles.map(role => ({ key: role.id, role, gate: role.gate, schema: role.schema }));
+  const lastGate = Math.max(0, ...roles.map(r => r.gate ?? 0), ...oneShots.map(s => s.gate ?? 0));
+  const calls = oneShots.map((oneShot, i) => {
+    const owner = roles.find(r => r.id === oneShot.ownerRole);
+    const early = oneShot.stage === 'architecture' || oneShot.stage === 'development';
+    const gate = oneShot.gate === undefined ? (early ? null : lastGate + i + 1) : oneShot.gate;
+    return { key: `one-shot:${oneShot.stage}`, role: null, oneShot, gate, schema: owner?.schema ?? (oneShot.stage === 'architecture' ? 'before_work' : null) };
+  });
+  const frames = [...entries, ...calls];
   const before = frames.filter(f => f.schema === 'before_work');
   const plain = frames.filter(f => f.gate === null && !f.schema);
   const checks = frames.filter(f => f.gate !== null && !f.schema);
@@ -76,6 +100,9 @@ function pipelineGroups(known: ReadonlyMap<string, DeptRole>, loose: Employee[])
   if (final.length) groups.push(final);
   return { groups, firstCheck };
 }
+
+/* A 280 px frame with heading padding holds thirteen 14 px marks with 3 px gaps. */
+const callFrameHeight = ({ fanOut, judge }: OneShotStage) => FHEAD + Math.ceil((fanOut + Number(judge)) / 13) * 17;
 
 /* Whoever leads a stage of a task now: it stays in its role's frame and is marked there. */
 export const leadsStage = (e: Employee): boolean => Boolean(e.task && isStaged(e.task.echelons.resultKind) && e.task.echelons.ownerAgentId === e.id && e.task.echelons.phase === 'active');
@@ -94,7 +121,7 @@ export function schemaLayout(d: Department, people: number): Schema {
   const { teamFrames, members, startX, teamEnd } = splitMembers(d);
   const known = new Map(d.roles.filter(r => members.some(e => e.roleId === r.id)).map(r => [r.id, r]));
   const loose = members.filter(e => !e.roleId || !known.has(e.roleId));
-  const { groups, firstCheck } = pipelineGroups(known, loose);
+  const { groups, firstCheck } = pipelineGroups(known, loose, oneShotStagesOf(d));
   const observers = observerFrames(known, members, startX);
   const lastObserver = observers[observers.length - 1];
   const outsideEnd = lastObserver ? lastObserver.x + FW : teamEnd;
@@ -107,12 +134,13 @@ export function schemaLayout(d: Department, people: number): Schema {
   for (const [k, group] of groups.entries()) {
     starts.push(x);
     const frames = group.map(g => {
-      const held = g.role ? members.filter(e => e.roleId === g.role!.id) : loose;
+      const held = g.oneShot ? [] : g.role ? members.filter(e => e.roleId === g.role!.id) : loose;
       const frame: Frame = {
         key: g.key,
         role: g.role,
+        oneShot: g.oneShot,
         x,
-        h: FHEAD + Math.max(1, held.length) * PY + 8,
+        h: g.oneShot ? callFrameHeight(g.oneShot) : FHEAD + Math.max(1, held.length) * PY + 8,
         stage: k,
         check: k >= firstCheck,
         members: placeMembers(held, x),

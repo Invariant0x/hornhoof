@@ -14,6 +14,14 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A release commit that changes only the package versions and the release notes takes the passed test mark of the commit before it, so GitHub builds its images without running the whole test suite again.
 - A plan's card in Subscriptions & API shows its settings and fallback plans across the whole card, numbers the fallback plans and shows each model's whole name, and keeps one filled button among its actions, with Remove set apart at the end.
 
+## [0.34.2] - 2026-11-19
+
+### Fixed
+
+- Departments open on their staff schema again, with one-shot calls as diamonds in their stage cards.
+- Tracker column headings keep their words whole instead of breaking them letter by letter.
+- Goal cards show their progress bar across the card and the count on one line under it.
+
 ## [0.34.1] - 2026-11-18
 
 ### Fixed
