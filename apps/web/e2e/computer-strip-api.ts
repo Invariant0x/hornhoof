@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import type { ComputerAccessView } from '../src/types';
-import { chooseTerminal, serveApi } from './api';
+import { chooseTerminal, serveApi, writeToOrchestrator } from './api';
 
 /* The orchestrator's window with its terminal, and access to a machine as the server keeps it. */
 
@@ -18,14 +18,14 @@ export const MANY: ComputerAccessView[] = Array.from({ length: 12 }, (_, i) => v
 
 export const WORDS = {
   en: {
-    orchestrator: 'Orchestrator', write: 'Write to the orchestrator', tasks: 'Tasks',
+    orchestrator: 'Orchestrator', tasks: 'Tasks',
     open: 'Access to node-a', asks: 'The orchestrator asks for access to node-a', second: 'Access to node-b',
     close: 'Close access', openDay: 'Open for a day', notNow: 'Not now', more: 'More about access to node-a',
     others: 'Other machines with access: 1', oneMore: '1 more', decided: 'Decided by the CEO or the CEO delegate.',
     what: /For a day it runs commands as root on node-a/, until: /Access to node-a is open until/,
   },
   ru: {
-    orchestrator: 'Оркестратор', write: 'Написать оркестратору', tasks: 'Задачи',
+    orchestrator: 'Оркестратор', tasks: 'Задачи',
     open: 'Доступ к машине node-a', asks: 'Оркестратор просит доступ к машине node-a', second: 'Доступ к машине node-b',
     close: 'Закрыть доступ', openDay: 'Открыть на сутки', notNow: 'Не сейчас', more: 'Подробнее о доступе к машине node-a',
     others: 'Другие машины с доступом: 1', oneMore: 'еще 1', decided: /заместитель/,
@@ -82,7 +82,7 @@ export async function openWindow(page: Page, { lang, theme, width }: Settings, f
   await page.goto('/');
   const words = WORDS[lang];
   await page.getByRole('navigation').getByRole('button', { name: words.tasks, exact: true }).click();
-  await page.getByRole('button', { name: words.write, exact: true }).click();
+  await writeToOrchestrator(page, lang);
   const window = page.getByRole('complementary', { name: words.orchestrator, exact: true });
   await expect(window).toBeVisible();
   return { words, window, errors, posts };

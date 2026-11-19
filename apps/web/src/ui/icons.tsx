@@ -198,10 +198,11 @@ const TRACKER_ICONS = {
   branch: <path d="M4 2v5a3 3 0 0 0 3 3h5m-2-2 2 2-2 2M4 7v7" />,
   add: <path d="M8 3v10M3 8h10" />,
   chevron: <path d="m6 3 5 5-5 5" />,
+  employees: <><circle cx="8" cy="8" r="6" /><circle cx="8" cy="8" r="2.5" fill="currentColor" /></>,
 };
 
-export function TrackerIcon({ name }: { name: keyof typeof TRACKER_ICONS }) {
-  return <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">{TRACKER_ICONS[name]}</svg>;
+export function TrackerIcon({ name, className }: { name: keyof typeof TRACKER_ICONS; className?: string }) {
+  return <svg className={className ? `ic ${className}` : 'ic'} viewBox="0 0 16 16" aria-hidden="true">{TRACKER_ICONS[name]}</svg>;
 }
 
 export function PriorityArrow() {

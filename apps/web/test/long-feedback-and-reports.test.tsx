@@ -224,8 +224,8 @@ describe('long 12,000-character feedback, answers, and full report reading', () 
   });
 
   it.each([
-    ['en', { readFull: 'Read in full', showLess: 'Show less', files: 'Files', questions: 'Questions', evidence: 'Evidence', verdictLink: 'Open file (verdict-comment.txt, 14 KB)', evLink: 'Open file (submit-evidence.txt, 13 KB)', smallSize: '512 B', mbSize: '2.5 MB' }],
-    ['ru', { readFull: 'Показать полностью', showLess: 'Свернуть', files: 'Файлы', questions: 'Вопросы', evidence: 'Доказательства', verdictLink: 'Открыть файл (verdict-comment.txt, 14 КБ)', evLink: 'Открыть файл (submit-evidence.txt, 13 КБ)', smallSize: '512 Б', mbSize: '2.5 МБ' }],
+    ['en', { readFull: 'Read in full', showLess: 'Show less', files: 'Materials', openFile: 'Open summary-note.txt', questions: 'Questions', evidence: 'Evidence', verdictLink: 'Open file (verdict-comment.txt, 14 KB)', evLink: 'Open file (submit-evidence.txt, 13 KB)', smallSize: '512 B', mbSize: '2.5 MB' }],
+    ['ru', { readFull: 'Показать полностью', showLess: 'Свернуть', files: 'Материалы', openFile: 'Открыть summary-note.txt', questions: 'Вопросы', evidence: 'Доказательства', verdictLink: 'Открыть файл (verdict-comment.txt, 14 КБ)', evLink: 'Открыть файл (submit-evidence.txt, 13 КБ)', smallSize: '512 Б', mbSize: '2.5 МБ' }],
   ] as const)(
     'reads full 12,000-char verdict text, submit evidence, task files, and inline choice answer in TaskPanel (%s) without technical noise',
     async (lang, words) => {
@@ -314,10 +314,10 @@ describe('long 12,000-character feedback, answers, and full report reading', () 
       expect(questionsSection.textContent).toContain('[ANSWER-INLINE:HEAD]');
       expect(questionsSection.textContent).toContain('[ANSWER-INLINE:TAIL]');
 
-      /* 2. Task files section shows plain file names, links, and formatted sizes. */
-      await openTaskAction(user, panel, t.tracker.card.materials);
+      /* 2. The card's materials show plain file names, links to open them, and formatted sizes. */
       const filesRegion = within(panel).getByRole('region', { name: words.files });
-      const noteLink = within(filesRegion).getByRole('link', { name: 'summary-note.txt' });
+      expect(filesRegion).toHaveTextContent('summary-note.txt');
+      const noteLink = within(filesRegion).getByRole('link', { name: words.openFile });
       expect(noteLink).toHaveAttribute('href', '/api/attachments/att%2Fnote%201');
       expect(noteLink).toHaveClass('req-link');
       expect(filesRegion).toHaveTextContent(words.smallSize);
@@ -619,10 +619,9 @@ describe('long 12,000-character feedback, answers, and full report reading', () 
     );
 
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
-    await openTaskAction(user, panel, ru.tracker.card.materials);
-    const filesSection = within(panel).getByRole('region', { name: 'Файлы' });
-    expect(within(filesSection).getByRole('link', { name: 'verdict-text.txt' })).toHaveAttribute('href', '/api/attachments/att-hash');
-    expect(within(filesSection).getByRole('link', { name: 'audit-notes.txt' })).toHaveAttribute('href', '/api/attachments/att-notes');
+    const filesSection = within(panel).getByRole('region', { name: 'Материалы' });
+    expect(within(filesSection).getByRole('link', { name: 'Открыть verdict-text.txt' })).toHaveAttribute('href', '/api/attachments/att-hash');
+    expect(within(filesSection).getByRole('link', { name: 'Открыть audit-notes.txt' })).toHaveAttribute('href', '/api/attachments/att-notes');
 
     await openTaskAction(user, panel, ru.tasks.fullLog);
     expect(panel.textContent).toContain('Начало полного вердикта по задаче…');

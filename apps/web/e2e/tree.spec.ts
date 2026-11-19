@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { serveApi } from './api';
+import { serveApi, writeToOrchestrator } from './api';
 import { wholeTurn } from './whole-turn';
 import { serveTree } from './tree-api';
 
@@ -201,7 +201,7 @@ for (const lang of ['en', 'ru'] as const) {
     });
     await page.goto('/');
     await page.getByRole('button', { name: lang === 'en' ? 'Tasks' : 'Задачи', exact: true }).click();
-    await page.getByRole('button', { name: lang === 'en' ? 'Write to the orchestrator' : 'Написать оркестратору', exact: true }).click();
+    await writeToOrchestrator(page, lang);
     const panel = page.getByRole('complementary', { name: lang === 'en' ? 'Orchestrator' : 'Оркестратор' });
     await expect(panel.getByText('Checkout is ready.', { exact: true })).toBeVisible();
     await expect(panel.locator('.t-line')).toHaveCount(2);

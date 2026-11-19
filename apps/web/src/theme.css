@@ -1817,65 +1817,76 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .release-fold .goal-fold > span { display: flex; flex-wrap: wrap; gap: 0 8px; }
 .release-fold .goal-fold b { color: var(--ink); }
 .waiting { display: grid; gap: 10px; }
-/* The tracker, as shown in "Tracker" in the style book: the left panel, then the main area with where the person is,
-   the view and its filters and the work, and the card at the end side. On a phone the left panel is a drawer over the page,
-   the board's columns stand one under another and the card takes the whole width. */
-.tracker { display: grid; grid-template-columns: clamp(220px, 15vw, 280px) minmax(0, 1fr); column-gap: 16px; align-items: start; margin: 0; padding-inline-end: 16px; box-sizing: border-box; }
-@media (min-width: 1100px) { .body.with-task .tracker { padding-inline-end: 432px; } }
-/* The tracker's work narrows for a card and widens back, which WebKit's scroll anchoring answers by moving the page: the page
-   stays where the person scrolled it. */
-.body.tracker-page { inset-block-start: calc(var(--bar-top) + var(--bar-size)); container-type: size; overflow-anchor: none; scrollbar-gutter: stable; }
+/* The tracker, as mockup 10 draws it and as shown in "Tracker" in the style book: the left panel a share of the width
+   from 270px, then the main area with where the person is, the view and its filters and the work, each band its full width
+   with 20px inside; the card a drawer over the end side. On a phone the left panel is a drawer over the page, the board's
+   columns stand one under another and the card takes the whole screen. */
+.tracker { display: grid; grid-template-columns: clamp(270px, 18.75vw, 360px) minmax(0, 1fr); align-items: start; margin: 0; box-sizing: border-box; }
+/* The page stays where the person scrolled it when the work below changes, which WebKit's scroll anchoring would answer by
+   moving the page. */
+.body.tracker-page { inset-block-start: var(--header-room); container-type: size; overflow-anchor: none; scrollbar-gutter: stable; }
 .body.tracker-page::before { content: none; }
 /* The tracker stands right under the header, which leaves a bar of the shell above it a gap of its own. */
 .body.tracker-page > :is(.update-banner, .alert, .guard-stop):first-child { margin-block-start: var(--bar-gap); }
-@media (min-width: 761px) {
-  .body.tracker-page ~ .acard.at-end { inset-inline-start: auto; inset-inline-end: 16px; }
-}
-.tr-side { position: sticky; inset-block-start: 0; display: grid; gap: 8px; align-content: start; min-inline-size: 0; block-size: 100cqb; overflow: auto; overflow-wrap: break-word; scrollbar-gutter: stable; padding: 12px; box-sizing: border-box; background: var(--surface); border-inline-end: 1px solid var(--line); }
-.tr-side-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 8px; font: 600 18px var(--f-display); }
-.tr-new { margin-inline-start: auto; border: 1px solid var(--line2); background: var(--surface2); }
-.tr-new:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-.tr-side > h2 { margin: 10px 0 0; padding-inline: 10px; font-size: 12px; font-weight: 600; color: var(--muted); }
-.tr-side .tr-side-close { display: none; margin-inline-start: auto; }
-.tr-items, .tr-dept-body ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; min-width: 0; }
-.tr-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; inline-size: 100%; min-block-size: 44px; margin: 0; padding: 6px 10px; box-sizing: border-box; border: 0; border-inline-start: 3px solid transparent; background: none; color: var(--ink); font: inherit; font-size: 14px; text-align: start; overflow-wrap: inherit; cursor: pointer; }
-:is(.tr-item, .tr-dept-head):hover { background: var(--surface2); }
-:is(.tr-item, .tr-dept-head).on { border-inline-start-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); font-weight: 600; }
+/* The mockup's .side: the panel's surface, 12px by 8px inside, its rows of 32px for a mouse (44px for a finger, below). */
+.tr-side { position: sticky; inset-block-start: 0; display: block; min-inline-size: 0; block-size: 100cqb; overflow: auto; overflow-wrap: break-word; scrollbar-gutter: stable; padding: 12px 8px 20px; box-sizing: border-box; background: var(--surface); border-inline-end: 1px solid var(--line); border-block-start: 1px solid var(--line); }
+.tr-side-title { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-block-size: 30px; margin: 2px 8px 10px; font: 600 18px var(--f-display); }
+.tr-side-title > h2 { flex: 1 1 auto; min-inline-size: 0; margin: 0; font: inherit; }
+.tr-new { --cut: calc(5px * var(--cut-k)); display: grid; place-items: center; flex: none; inline-size: 30px; block-size: 30px; margin: 0; padding: 0; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; cursor: pointer; clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }
+.tr-new:hover { border-color: var(--cyan); color: var(--cyan-ink); }
+.tr-new:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
+/* What the + offers, as the card's menu rows in a raised box under the title, as wide as the panel so any language wraps. */
+.tr-new-menu { position: absolute; z-index: 20; inset-block-start: calc(100% + 4px); inset-inline: 0; display: grid; grid-template-columns: minmax(0, 1fr); padding: 4px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 8px 24px var(--shadow); font: 400 14px/1.45 var(--f-body); }
+.tr-new-menu > p { margin: 0; padding: 8px 12px; overflow-wrap: anywhere; }
+.tr-side-heading { margin: 14px 8px 4px; font: 600 12px var(--f-body); color: var(--muted); overflow-wrap: break-word; }
+.tr-side .tr-side-close { display: none; }
+.tr-items { display: grid; margin: 0; padding: 0; list-style: none; min-inline-size: 0; }
+.tr-items > li { min-inline-size: 0; }
+/* The mockup's .si: its icon in an 18px column, its name, and its count or words at the end; when the row is tight, what
+   stands at the end goes under the name as a whole. */
+.tr-item { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; inline-size: 100%; min-block-size: 32px; margin: 0; padding: 4px 8px; box-sizing: border-box; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13.5px; text-align: start; overflow-wrap: inherit; cursor: pointer; }
+.tr-item:hover { background: var(--surface2); }
+.tr-item.on { background: var(--glow); color: var(--cyan-ink); box-shadow: inset 2px 0 0 var(--cyan); }
+.tr-item.on:dir(rtl) { box-shadow: inset -2px 0 0 var(--cyan); }
 .tr-item:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
-.tr-item-name { display: flex; align-items: center; gap: 8px; min-inline-size: 0; }
+.tr-item.more { font-size: 12.5px; color: var(--muted); }
+.tr-item-name { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-inline-size: 0; }
 .tr-item-name > span:last-child { min-inline-size: 0; }
-.tr-item-name > .ic, .tr-side-caption > .ic { color: var(--muted); }
-.tr-item.on .tr-item-name > .ic { color: currentColor; }
-.tr-count { font-family: var(--f-display); font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
-.tr-badge { min-inline-size: 20px; padding-inline: 4px; border: 1px solid var(--line2); border-radius: 1em; text-align: center; }
-.tr-badge.attention { border-color: var(--pink); background: var(--pink); color: var(--on-pink); }
-.tr-side-caption { display: flex; align-items: center; gap: 8px; }
-.tr-dept-body .tr-pipelines { padding-inline-start: 12px; }
+.tr-item-name > :first-child:not(:last-child) { flex: none; }
+.tr-item-name > .ic { inline-size: 18px; color: var(--muted); }
+.tr-item-text { display: flex; flex-direction: column; min-inline-size: 0; line-height: 1.25; }
+.tr-item small { font-size: 11.5px; color: var(--muted); }
+.tr-item-end { margin-inline-start: auto; font-size: 11.5px; color: var(--muted); }
+.tr-item-end.working { color: var(--ok); }
+.tr-item-name > .tr-pipe-ic { color: var(--cyan-ink); }
+/* A long pipeline name wraps; its chevron stays beside the first line. */
 .tr-pipelines .tr-item-name > .ic { align-self: start; margin-block-start: max(0px, calc((1lh - 14px) / 2)); }
-.tr-dept-body summary { padding: 4px 10px; color: var(--muted); cursor: pointer; }
-.tr-dept-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-inline-size: 0; border-inline-start: 3px solid transparent; }
-.tr-dept-head > .tr-item { grid-template-columns: minmax(0, 1fr); align-self: stretch; padding-inline-end: 0; border: 0; background: none; color: inherit; font-weight: inherit; }
-.tr-unfold { margin: 0; color: inherit; }
-.tr-unfold .chev { inline-size: 12px; block-size: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; transition: transform .15s; }
-.tr-unfold[aria-expanded="true"] .chev { transform: rotate(90deg); }
-[dir="rtl"] .tr-unfold .chev { transform: scaleX(-1); }
-[dir="rtl"] .tr-unfold[aria-expanded="true"] .chev { transform: scaleX(-1) rotate(90deg); }
+.tr-l1 { padding-inline-start: 30px; }
+.tr-l2 { padding-inline-start: 52px; }
+/* A count at the end: digits in the muted ink, a quiet badge in a line, a pink badge for what needs the person, the green of
+   work going on. */
+.tr-item > .tr-count { margin-inline-start: auto; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tr-item > .tr-count.working { color: var(--ok); }
+.tr-item > .tr-badge { min-inline-size: 18px; padding: 0 6px; box-sizing: border-box; border: 1px solid var(--line2); border-radius: 10px; font: 600 11px var(--f-body); color: var(--muted); text-align: center; }
+.tr-item > .tr-badge.attention { border-color: var(--pink); background: var(--pink); color: var(--on-pink); }
+/* The mockup's dots of an employee: green with a halo at work, amber waiting, a ring when free. */
+:is(.tr-live, .tr-waitd, .tr-idle) { flex: none; box-sizing: border-box; inline-size: 8px; block-size: 8px; border-radius: 50%; }
+.tr-live { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
+.tr-waitd { background: var(--amber); }
+.tr-idle { border: 1px solid var(--line2); }
+.tr-dept-head { position: relative; min-inline-size: 0; }
+.tr-dept-head > .tr-item { padding-inline-start: 34px; }
+.tr-unfold { position: absolute; inset-block-start: 0; inset-inline-start: 0; z-index: 1; display: grid; place-items: center; inline-size: 24px; block-size: 32px; margin: 0; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
+.tr-unfold:hover { color: var(--cyan-ink); }
 .tr-unfold:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
-.tr-dept-body { display: grid; gap: 4px; min-width: 0; margin-inline-start: 10px; padding-inline-start: 8px; border-inline-start: 1px solid var(--line2); }
-.tr-dept-body h3 { margin: 8px 0 0; padding-inline: 10px; font-size: 12px; font-weight: 600; color: var(--muted); }
-.tr-dept-body > p { margin: 0; padding-inline: 10px; font-size: 12.5px; }
-.tr-dept-body > .goal-fold { margin-inline-start: 10px; }
-.tr-people li { display: grid; gap: 2px; min-width: 0; padding: 6px 10px; font-size: 13px; }
-.tr-person { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
-.tr-person b { min-inline-size: 0; font-weight: 600; }
-.tr-people .linkish { justify-self: start; min-inline-size: 0; font-size: 12.5px; overflow-wrap: inherit; }
-.tr-side .goal-fold > span { overflow-wrap: inherit; }
-.tr-turns { padding-block-start: 8px; border-block-start: 1px solid var(--line); }
-.tr-main { container: tr-main / inline-size; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-content: start; min-inline-size: 0; padding-block: 8px 48px; }
-.tr-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-inline-size: 0; padding-block-end: 10px; border-block-end: 1px solid var(--line); }
-.tr-write { justify-self: end; max-inline-size: 100%; }
+.tr-unfold[aria-expanded="false"] .tr-caret { margin-block-start: 0; border-block-start-color: transparent; border-inline-start-color: currentColor; margin-inline-start: 3px; }
+.tr-more { margin-block-start: 14px; padding-block-start: 10px; border-block-start: 1px solid var(--line); }
+/* The main area: each band its whole width, with 20px inside. */
+.tr-main { container: tr-main / inline-size; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; min-inline-size: 0; padding-block-end: 30px; border-block-start: 1px solid var(--line); }
+.tr-main > :not(.tr-top, .tr-bar) { inline-size: auto; margin: 6px 20px 0; }
+.tr-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-inline-size: 0; padding: 10px 20px; border-block-end: 1px solid var(--line); }
 .tr-menu { display: none; }
-.tr-where { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-inline-size: 0; margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+.tr-where { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-inline-size: 0; margin: 0; font: 600 16px var(--f-display); overflow-wrap: anywhere; }
 @container tr-main (min-width: 760px) {
   .tr-top { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, max-content) minmax(160px, 1fr); }
   .tr-top .tr-search { grid-column: 3; justify-self: end; inline-size: min(100%, 280px); }
@@ -1885,35 +1896,46 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-search { flex: 1 1 160px; max-inline-size: 280px; min-inline-size: 0; margin-inline-start: auto; }
 .tr-search .field > label { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); }
 .tr-view-as { max-inline-size: 100%; min-inline-size: 0; }
-.tr-view-as .field { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.tr-view-as .field { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12.5px; color: var(--muted); }
 .tr-view-as .field-control { flex: 0 1 auto; max-inline-size: 100%; min-inline-size: 0; }
 .tr-top .task-search input { padding-inline: 12px 44px; }
 .tr-top .task-search .zbtn { inset-inline: auto 0; inset-block-start: 0; }
-.tr-bar { display: grid; gap: 8px; min-inline-size: 0; }
-.tr-views { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0 4px; min-inline-size: 0; margin: 0; padding: 0; border: 0; border-block-end: 1px solid var(--line); }
-.tr-views label, .tr-add-view { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; max-inline-size: 100%; min-block-size: 40px; margin: 0; padding: 6px 12px; border: 0; border-block-end: 2px solid transparent; background: none; color: var(--muted); font: 600 14px var(--f-display); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+/* The mockup's search: 34px high in 13px for a mouse on a wide screen; a finger keeps the form's own height. */
+@media (min-width: 761px) and (pointer: fine) {
+  .tr-top .task-search input { block-size: 34px; min-block-size: 0; font-size: 13px; }
+  .tr-top .task-search .zbtn { block-size: 34px; }
+}
+.tr-bar { display: grid; min-inline-size: 0; }
+/* The mockup's .vtabs: 600 13.5px with 10px by 12px, a 2px line under the chosen one. */
+.tr-views { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0 2px; min-inline-size: 0; margin: 0; padding: 0 20px; border: 0; border-block-end: 1px solid var(--line); }
+.tr-views label { position: relative; display: inline-flex; align-items: center; gap: 6px; max-inline-size: 100%; margin: 0; padding: 10px 12px; box-sizing: border-box; border: 0; border-block-end: 2px solid transparent; background: none; color: var(--muted); font: 600 13.5px var(--f-display); text-align: start; overflow-wrap: break-word; cursor: pointer; }
 .tr-views label.on { border-block-end-color: var(--tracker-working-ring); color: var(--ink); }
-.tr-views label:hover, .tr-add-view:hover { color: var(--ink); background: var(--surface2); }
+.tr-views label:hover { color: var(--ink); }
 .tr-views label:focus-within, .tr-chip:focus-within { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
-.tr-view-empty { margin: 0; padding: 8px 12px; border: 1px solid var(--line); overflow-wrap: anywhere; }
-.tr-chips { display: flex; flex-wrap: wrap; gap: 8px; min-inline-size: 0; }
-.tr-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; max-inline-size: 100%; min-block-size: 32px; margin: 0; padding: 4px 10px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); font: inherit; font-size: 13px; color: var(--muted); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
-.tr-chip:hover { color: var(--ink); }
+/* The mockup's .tools and .tchip: 12.5px chips with 3px by 10px in a line on the raised surface. */
+.tr-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-inline-size: 0; padding: 10px 20px 4px; font-size: 12.5px; color: var(--muted); }
+.tr-bar:has(.tr-chips) + * { margin-block-start: 0; }
+.tr-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; max-inline-size: 100%; margin: 0; padding: 3px 10px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); font: inherit; font-size: 12.5px; color: var(--ink); text-align: start; overflow-wrap: break-word; cursor: pointer; }
+.tr-chip:hover { border-color: var(--cyan); }
 .tr-chip.on { border-color: var(--tracker-working-ring); color: var(--cyan-ink); }
-.tr-person-picker { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; inline-size: max-content; max-inline-size: min(100%, 180px); min-block-size: 40px; padding: 6px 10px; border: 1px solid var(--line2); background: var(--surface2); overflow-wrap: anywhere; }
+.tr-person-picker { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; inline-size: max-content; max-inline-size: min(100%, 180px); min-block-size: 36px; padding: 0 12px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: 600 13px var(--f-display); overflow-wrap: anywhere; }
 .tr-person-picker .ic { transform: rotate(90deg); }
 .tr-person-picker:focus-within { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .tr-chip select, .tr-person-picker select { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; font: inherit; }
 /* In the light skin a cyan line on white is too faint for a border: a chosen card or node, a goal's node and a node under
    the pointer draw their border in the ink of the accent, as chips and views do through --tracker-working-ring. */
-:root[data-scheme="light"] :is(.tr-node.goal, .tr-node.on, button.tr-node:hover, .tr-card.on) { border-color: var(--cyan-ink); }
-.tr-goals { display: grid; gap: 8px; min-width: 0; }
-.tr-goals > h2, .tr-found > h2 { margin: 0; font-size: 15px; }
-.tr-goals ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
-.tr-goals li { display: grid; gap: 6px; min-width: 0; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); }
-.tr-goals .linkish { justify-self: start; font-weight: 600; overflow-wrap: anywhere; }
-.tr-goals .goal-progress { grid-template-columns: minmax(0, 1fr); gap: 4px; max-width: none; }
-.tr-goals .goal-progress small { overflow-wrap: normal; }
+:root[data-scheme="light"] :is(.tr-node.goal, .tr-node.on, button.tr-node:hover) { border-color: var(--cyan-ink); }
+:root[data-scheme="light"] .tr-card.on { background: var(--cyan-ink); }
+.tr-found > h2 { margin: 0; font-size: 15px; }
+/* The goals page: the list's rows, a goal's mark in the accent, its progress over the two middle columns. */
+.tr-goal-mark { display: grid; place-items: center; flex: none; inline-size: 14px; block-size: max(var(--row), 1lh); color: var(--cyan-ink); }
+.tr-goal-mark .ic { inline-size: 14px; block-size: 14px; }
+.tr-goals-page .goal-progress { grid-template-columns: minmax(0, 1fr); gap: 4px; max-inline-size: none; font-size: 12px; }
+.tr-goals-page .goal-progress small { overflow-wrap: normal; }
+.tr-goal-title { text-decoration: none; }
+@container tr-list (width > 640px) {
+  .tr-cell-wide { grid-column: span 2; }
+}
 .tr-found { display: grid; gap: 10px; min-width: 0; }
 .tr-waits { display: grid; gap: 6px; }
 .tr-waits h3 { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
@@ -1962,13 +1984,18 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   background: color-mix(in srgb, var(--tr-tone) var(--tracker-mark-strength), var(--surface));
   color: var(--tracker-mark-ink);
 }
-.tr-mark { display: inline-grid; place-items: center; flex: none; min-inline-size: 20px; min-block-size: 20px; padding-inline: 2px; font-size: 12px; font-weight: 600; line-height: 1.1; }
+.tr-mark { display: inline-grid; place-items: center; flex: none; box-sizing: border-box; min-inline-size: 20px; min-block-size: 20px; padding-inline: 2px; font-size: 12px; font-weight: 600; line-height: 1.1; }
+/* The mockup's .av: 22px with the page's colour around it, a circle for a person and a 4px square for an employee. */
+.tr-mark:is(.tr-avatar, .tr-executor) { min-inline-size: 22px; min-block-size: 22px; border: 2px solid var(--bg); font: 600 10.5px var(--f-body); }
 .tr-avatar { border-radius: 50%; }
-.tr-executor { border-radius: 2px; }
+.tr-executor { border-radius: 4px; }
+.tr-avatars { display: inline-flex; align-items: center; }
+.tr-avatars > .tr-mark ~ .tr-mark { margin-inline-start: -6px; }
+/* The mockup's .dep: 18px, its letter in 600 11px of the display face, its corners cut by 4px. */
+.tr-mark.tr-dept-mark { min-inline-size: 18px; min-block-size: 18px; font: 600 11px var(--f-display); }
 .tr-executor[data-worker-kind='generalist'] { display: inline-flex; align-items: center; gap: 2px; }
 .tr-executor .worker-mark[data-worker-kind='generalist'] { inline-size: 10px; block-size: 10px; color: inherit; }
 .tr-stage-ghost { margin-inline-start: 4px; vertical-align: middle; }
-.tr-relation .tr-dept-mark { min-inline-size: 16px; min-block-size: 16px; font-size: 11px; }
 .tr-mark[data-tone='accent'] { --tr-tone: var(--tracker-palette-accent); }
 .tr-mark[data-tone='warning'] { --tr-tone: var(--tracker-palette-warning); }
 .tr-mark[data-tone='attention'] { --tr-tone: var(--tracker-palette-attention); }
@@ -1990,162 +2017,238 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   --cut: calc(4px * var(--cut-k));
   clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
 }
+/* The mockup's .pill: the status in capitals on its colour, 600 12px of the display face, its corners cut by 5px. */
+.tr-status-pill { --tr-tone: var(--line2); --cut: calc(5px * var(--cut-k)); display: inline-flex; align-items: center; max-inline-size: 100%; box-sizing: border-box; padding: 3px 10px; font: 600 12px var(--f-display); letter-spacing: .03em; text-transform: uppercase; overflow-wrap: anywhere; }
+.tr-status-pill.working { --tr-tone: var(--tracker-palette-accent); }
+.tr-status-pill:is(.waiting, .you) { --tr-tone: var(--tracker-palette-warning); }
+.tr-status-pill:is(.blocked, .failure) { --tr-tone: var(--tracker-palette-attention); }
+.tr-status-pill.done { --tr-tone: var(--tracker-palette-success); }
+.tr-status-pill.review { --tr-tone: var(--tracker-palette-violet); }
 
-/* The list uses the same column tracks for the heading and every row, including work under another task. */
+/* The list as mockup 10's table: a coloured pill and a count over each status, the names of the columns once under the
+   first pill, then one line per task in the mockup's shares of 44, 14, 14, 14 and 14 percent, each never narrower than its
+   longest word or mark. A row is the mockup's 37px: what is pressed in it is 24px high for a mouse, 6px above and below and
+   a line. A subtask stands 36px further in, under its task. */
 .tr-list { --row: var(--tracker-target-fine); container: tr-list / inline-size; display: grid; min-inline-size: 0; }
 .tr-list-grid, .tr-group, .tr-rows, .tr-row { min-inline-size: 0; }
-.tr-group { border-block-end: 1px solid var(--line); }
-.tr-group-head { margin: 0; padding-block-start: 8px; font-size: 14px; }
-.tr-group-toggle, .tr-add-task { display: flex; align-items: center; gap: 8px; min-block-size: 36px; max-inline-size: 100%; margin: 0; padding: 4px 8px; border: 0; background: none; color: var(--muted); font: inherit; text-align: start; overflow-wrap: anywhere; cursor: pointer; }
-.tr-group-toggle:hover, .tr-add-task:hover { background: var(--surface2); color: var(--cyan-ink); }
-.tr-group-arrow { inline-size: 0; block-size: 0; border: 4px solid transparent; border-inline-start-color: currentColor; }
-.tr-group-toggle[aria-expanded="true"] .tr-group-arrow { border-inline-start-color: transparent; border-block-start-color: currentColor; }
-.tr-status-pill { --tr-tone: var(--muted); padding: 2px 8px; text-transform: uppercase; }
-.tr-group.working .tr-status-pill { --tr-tone: var(--tracker-palette-accent); }
-.tr-group.waiting .tr-status-pill, .tr-group.you .tr-status-pill { --tr-tone: var(--tracker-palette-warning); }
-.tr-group:is(.blocked, .failure) .tr-status-pill { --tr-tone: var(--tracker-palette-attention); }
-.tr-group.done .tr-status-pill { --tr-tone: var(--tracker-palette-success); }
-.tr-group.review .tr-status-pill { --tr-tone: var(--tracker-palette-violet); }
+.tr-group-head { margin: 14px 0 4px; font-size: inherit; }
+.tr-group-toggle { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; max-inline-size: 100%; min-block-size: var(--row); margin: 0; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+.tr-group-toggle:hover .tr-count { color: var(--ink); }
+.tr-group-toggle:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.tr-group-toggle .tr-count { font: 13px var(--f-body); color: var(--muted); }
 .tr-rows { display: grid; margin: 0; padding: 0; list-style: none; }
-.tr-cells { display: grid; align-items: start; row-gap: 4px; min-inline-size: 0; padding: 8px; border-inline-start: 3px solid transparent; border-block-end: 1px solid var(--line); font-size: 13px; }
-.tr-row-line.on { border-inline-start-color: var(--cyan); background: var(--glow); }
-.tr-head { font-size: 12px; font-weight: 600; color: var(--muted); overflow-wrap: anywhere; }
-.tr-task-name, .tr-head-name { display: grid; grid-template-columns: var(--row) 14px minmax(0, 1fr); gap: 4px 8px; min-inline-size: 0; }
-.tr-task-name { padding-inline-start: min(calc(var(--tr-depth) * 16px), 18%); }
-.tr-name { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: start; }
-.tr-head-name > span, .tr-task-name > :is(.tr-meta, .tr-question, .tr-relation) { grid-column: 3; }
-.tr-task-name > .tr-relation { justify-self: start; }
-.tr-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-inline-size: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.tr-meta .tr-wait { font-size: inherit; }
-.tr-meta .badge { white-space: normal; }
-.tr-row-caret { display: grid; place-items: center; min-block-size: max(var(--row), 1lh); margin: 0; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
-.tr-row-caret:hover { color: var(--cyan-ink); background: var(--surface2); }
-.tr-row-caret[aria-expanded="true"] .ic { transform: rotate(90deg); }
-[dir="rtl"] .tr-row-caret[aria-expanded="false"] .ic, [dir="rtl"] .tr-pipelines .ic { transform: scaleX(-1); }
-.tr-branch-count { display: inline-flex; align-items: center; gap: 4px; }
 .tr-rows[hidden] { display: none; }
-.tr-status-dot { inline-size: 14px; block-size: 14px; margin-block-start: calc((max(var(--row), 1lh) - 14px) / 2); border: 2px solid var(--muted); border-radius: 50%; }
+.tr-cells { position: relative; display: grid; align-items: center; min-inline-size: 0; padding: 6px 0; border-block-end: 1px solid var(--line); font-size: 13.5px; }
+.tr-cells > * { padding-inline: 8px; }
+.tr-row-line:hover { background: var(--surface); }
+.tr-row-line.on { background: var(--glow); }
+.tr-row-line.on::before { content: ''; position: absolute; inset-block: 0; inset-inline-start: 0; inline-size: 2px; background: var(--cyan); }
+.tr-head { font: 500 12px var(--f-body); color: var(--muted); padding-block: 6px; }
+.tr-head > span { min-inline-size: 0; overflow-wrap: normal; }
+.tr-task-name { min-inline-size: 0; padding-inline-start: calc(8px + min(var(--tr-depth) * 36px, 30%)); }
+.tr-name { display: flex; align-items: flex-start; gap: 8px; min-inline-size: 0; }
+.tr-line { display: flex; flex: 1 1 0; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-inline-size: 0; }
+.tr-row-caret { display: grid; place-items: center start; flex: none; inline-size: 18px; block-size: max(var(--row), 1lh); margin: 0; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.tr-row-caret:hover { color: var(--cyan-ink); }
+.tr-row-caret:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
+.tr-caret { inline-size: 0; block-size: 0; border: 3.5px solid transparent; border-block-start-color: currentColor; margin-block-start: 3px; }
+.tr-row-caret[aria-expanded="false"] .tr-caret { margin-block-start: 0; border-block-start-color: transparent; border-inline-start-color: currentColor; margin-inline-start: 3px; }
+.tr-status-dot { flex: none; box-sizing: border-box; inline-size: 14px; block-size: 14px; margin-block-start: max(0px, calc((max(var(--row), 1lh) - 14px) / 2)); border: 2px solid var(--line2); border-radius: 50%; }
 .tr-status-dot.working { border-color: var(--tracker-working-ring); }
 .tr-status-dot.waiting, .tr-status-dot.you { border-color: var(--tracker-waiting-ring); }
-.tr-status-dot:is(.blocked, .failure) { border-color: var(--pink-ink); }
+.tr-status-dot:is(.blocked, .failure) { border-color: var(--pink); }
 .tr-status-dot.review { border-color: var(--tracker-palette-violet); }
 .tr-status-dot.done { border-color: var(--ok); background: var(--ok); }
 .tr-status-dot.open, .tr-status-dot.cancelled { border-style: dashed; }
-.tr-row-line .tp-late { color: var(--pink-ink); }
+.tr-title { min-block-size: var(--row); min-inline-size: var(--row); max-inline-size: 100%; margin: 0; color: var(--ink); text-align: start; font-weight: 400; overflow-wrap: anywhere; }
+.tr-title:hover { color: var(--cyan-ink); }
+.tr-branch-count { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--muted); }
+.tr-line .tr-no { font: 12px var(--f-mono); color: var(--muted); }
 .tr-no { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.tr-title, .tr-goal-link { display: block; min-inline-size: min(var(--row), 100%); min-block-size: var(--row); max-inline-size: 100%; }
-.tr-title, .tr-goal-link, .tr-v { padding-block: max(0px, calc((var(--row) - 1lh) / 2)); }
-.tr-title { justify-self: start; margin: 0; color: var(--ink); text-align: start; font-weight: 500; overflow-wrap: anywhere; }
-.tr-title:hover, .tr-goal-link { color: var(--cyan-ink); }
-.tr-goal-link { inline-size: fit-content; text-align: inherit; text-decoration: none; overflow-wrap: anywhere; }
+.tr-line :is(.tr-wait, .tr-relation) { font: 600 11px var(--f-body); padding: 1px 6px; border: 1px solid var(--line2); color: var(--muted); }
+.tr-line .tr-wait.person { padding: 0; border: 0; font-size: inherit; color: var(--pink-ink); }
+.tr-line .tr-wait.scheduled { color: var(--cyan-ink); }
+.tr-line .tr-wait.failure { color: var(--pink-ink); }
+.tr-line .badge { white-space: normal; }
+.tr-line > .act { block-size: auto; min-block-size: max(var(--row), 24px); padding: 0 8px; font-size: 12px; }
+.tr-relation { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; max-inline-size: 100%; overflow-wrap: anywhere; }
+.tr-goal-link { display: inline-flex; align-items: center; min-block-size: var(--row); max-inline-size: 100%; font-size: 12px; color: var(--cyan-ink); text-align: inherit; text-decoration: none; overflow-wrap: anywhere; }
 .tr-goal-link:is(:hover, :focus-visible) { text-decoration: underline; }
-.tr-relation { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; max-inline-size: 100%; padding: 2px 6px; border: 1px solid var(--line2); color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.tr-row-line .tp-late { color: var(--pink-ink); font-weight: 600; }
 .tr-cell { min-inline-size: 0; overflow-wrap: anywhere; }
 .tr-k { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.tr-v { display: block; min-inline-size: 0; color: var(--muted); }
+.tr-v { display: block; min-inline-size: 0; color: var(--ink); }
 .tr-id-name { display: none; }
 @container tr-list (width > 640px) {
-  .tr-list-grid { display: grid; grid-template-columns: minmax(0, 1fr) repeat(2, fit-content(var(--tracker-target-fine))) fit-content(12%) fit-content(20%) fit-content(12%); column-gap: 12px; }
-  .tr-cell.tr-cell-person { min-inline-size: min-content; }
-  .tr-cell-person .tr-mark { white-space: nowrap; }
-  .tr-head > span { min-inline-size: min-content; overflow-wrap: normal; }
+  .tr-list-grid { display: grid; grid-template-columns: minmax(min-content, 44fr) repeat(4, minmax(min-content, 14fr)); }
   .tr-group, .tr-group > div, .tr-rows, .tr-row, .tr-cells { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
-  .tr-group-head, .tr-add-task { grid-column: 1 / -1; }
-  .tr-add-task { justify-self: start; }
+  .tr-group-head { grid-column: 1 / -1; }
   .tr-group > [hidden], .tr-rows[hidden] { display: none; }
-  .tr-v:has(> .tr-goal-link) { display: flex; padding-block: 0; }
-  .tr-v:has(> .tr-mark, > .tr-stage-ghost) { display: flex; flex-wrap: wrap; align-items: center; min-block-size: var(--row); padding-block: 0; }
+  .tr-v:has(> .tr-mark, > .tr-stage-ghost) { display: flex; flex-wrap: wrap; align-items: center; }
   .tr-cells:dir(rtl) > .tr-cell > .tr-v:dir(ltr), .tr-cells:dir(ltr) > .tr-cell > .tr-v:dir(rtl) { justify-content: flex-end; text-align: end; }
 }
+/* A narrow list puts each fact under the title, after its name. */
 @container tr-list (max-width: 640px) {
   .tr-head { display: none; }
-  .tr-row-line { --row: var(--tracker-target-touch); grid-template-columns: var(--row) 14px minmax(0, 1fr); column-gap: 8px; padding-inline-start: calc(8px + min(var(--tr-depth) * 8px, 12%)); }
-  .tr-task-name { grid-column: 1 / -1; grid-template-columns: subgrid; padding-inline-start: 0; }
-  .tr-cell { display: flex; grid-column: 3; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; }
+  .tr-row-line { grid-template-columns: minmax(0, 1fr); row-gap: 4px; }
+  .tr-task-name { padding-inline-start: calc(8px + min(var(--tr-depth) * 16px, 12%)); }
+  .tr-cell { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; padding-inline-start: calc(30px + min(var(--tr-depth) * 16px, 12%)); }
   /* A name and its value in their own direction stand where the page's words start, as an isolated phrase does. */
   .tr-cells:dir(rtl) > .tr-cell:dir(ltr) { justify-content: flex-end; }
   .tr-cell:has(.tr-v:empty) { display: none; }
   .tr-k { position: static; inline-size: auto; block-size: auto; overflow: visible; clip: auto; white-space: normal; color: var(--muted); }
   .tr-k::after { content: ':'; }
-  .tr-v { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; max-inline-size: 100%; padding-block: 0; color: var(--ink); }
+  .tr-v { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; max-inline-size: 100%; }
   .tr-id-name { display: inline; min-inline-size: 0; overflow-wrap: anywhere; }
-  .tr-name { font-size: 16px; }
 }
 
-.tr-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: start; min-inline-size: 0; }
-.tr-columns[data-layout="row"] { grid-template-columns: repeat(var(--tr-column-count), minmax(0, 1fr)); }
-.tr-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-content: start; min-inline-size: 0; padding: 10px; background: var(--surface2); border: 1px solid var(--line); }
-.tr-col-head { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: baseline; gap: 4px 8px; margin: 0; font-size: 14px; text-align: start; }
+/* The board as mockup 10's: its columns side by side in shares of the width while each keeps 160px, one under another when
+   they do not; a column the panel's surface in a line, 8px inside, its head a pill with the count and, for a stage, the
+   role that holds it; a card a line around the raised surface with cut corners, 9px by 10px inside. */
+.tr-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-items: start; min-inline-size: 0; padding-block-start: 8px; }
+.tr-columns[data-layout="row"] { grid-template-columns: repeat(var(--tr-column-count), minmax(0, 270px)); }
+.tr-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-content: start; min-inline-size: 0; padding: 8px; background: var(--surface); border: 1px solid var(--line); }
+.tr-col-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; font-size: inherit; text-align: start; }
 .tr-col-head > span { min-inline-size: 0; }
+.tr-col-head .tr-count { margin: 0; font: 13px var(--f-body); color: var(--muted); }
+.tr-col-who { margin-inline-start: auto; font-size: 11.5px; color: var(--muted); }
 .tr-col > p { margin: 0; font-size: 12.5px; }
-.tr-card { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-inline-size: 0; padding: 8px; padding-inline-start: 10px; background: var(--surface); border: 1px solid var(--line); line-height: 1.4; }
+.tr-card { --cut: calc(8px * var(--cut-k)); display: block; min-inline-size: 0; padding: 1px; background: var(--line); clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }
 .tr-col, .tr-card { overflow-wrap: break-word; }
-.tr-card::before { content: ''; position: absolute; inset-block: -1px; inset-inline-start: -1px; inline-size: 3px; background: var(--line2); }
-.tr-card.working::before, .tr-card.review::before { background: var(--cyan); }
-.tr-card.waiting::before, .tr-card.blocked::before { background: var(--amber); }
-.tr-card.failure::before, .tr-node.failure::before { background: var(--pink); }
-.tr-card.done::before { background: var(--ok); }
-.tr-card.on { border-color: var(--cyan); }
-.tr-card-title { margin: 0; font-family: var(--f-body); font-size: 13px; font-weight: 500; line-height: inherit; }
-.tr-card-title .linkish { display: grid; grid-template-columns: minmax(0, 1fr); align-content: center; gap: 2px; inline-size: 100%; min-block-size: 44px; color: var(--ink); text-align: start; }
-.tr-card-title .tr-no { font-weight: 400; }
+.tr-card:hover, .tr-card.on { background: var(--cyan); }
+.tr-card-body { position: relative; display: flex; flex-direction: column; gap: 7px; min-inline-size: 0; padding: 9px 10px; background: var(--surface2); clip-path: inherit; }
+.tr-card-title { margin: 0; font: 600 13.5px/1.3 var(--f-body); }
+.tr-card-title .linkish { display: block; inline-size: 100%; margin: 0; padding: 0; color: var(--ink); font: inherit; text-align: start; overflow-wrap: anywhere; }
+.tr-card-title .linkish::after { content: ''; position: absolute; inset: 0; }
 .tr-card-title .linkish:hover { color: var(--cyan-ink); }
-.tr-card-activity:empty { display: none; }
-:is(.tracker, .tp-state) .tstate { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
-.tr-card .tstate { font-size: 11px; padding: 2px 6px; overflow-wrap: break-word; }
+.tr-card-body > :not(.tr-card-title) { position: relative; z-index: 1; }
+.tr-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-inline-size: 0; font-size: 12px; color: var(--muted); }
+.tr-card-meta .tp-late { color: var(--pink-ink); font-weight: 600; }
+.tr-card-meta > .tr-branch-count { font-size: inherit; }
+.tracker .tstate { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+.tr-card .tstate { align-self: flex-start; font-size: 11px; padding: 2px 6px; overflow-wrap: break-word; }
 .tstate.failure { color: var(--pink-ink); border-color: currentColor; }
-.tr-card-facts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
-.tr-card-person { display: inline-block; max-inline-size: 100%; vertical-align: top; }
-.tr-card .tr-wait { display: block; font-size: inherit; overflow-wrap: inherit; }
-.tr-card > .entry-actions > .act { inline-size: max-content; min-inline-size: 44px; padding: 4px 6px; font-size: 12px; }
+.tr-card .tr-wait { font: 600 11px var(--f-body); padding: 1px 6px; border: 1px solid var(--line2); color: var(--muted); overflow-wrap: inherit; }
+.tr-card .tr-wait.person { padding: 0; border: 0; font-size: inherit; color: var(--pink-ink); }
+.tr-card .tr-wait.failure { color: var(--pink-ink); }
+.tr-card-body > .entry-actions > .act { inline-size: max-content; block-size: auto; min-block-size: 28px; min-inline-size: 44px; padding: 4px 8px; font-size: 12px; }
 
-/* The graph: the breadcrumb back up, what to draw with a pipeline, and the map's canvas with its zoom bar. */
-.tr-graph { display: grid; gap: 10px; min-width: 0; }
-.tr-crumbs ol, .tp-path ol { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
-.tr-crumbs li, .tp-path li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
-.tr-crumbs li + li::before, .tp-path li + li::before { content: '/'; color: var(--muted); }
-.tr-crumbs .linkish, .tp-path .linkish { overflow-wrap: anywhere; }
+/* The graph as mockup 10 draws it: where it grows from and the way back up to the whole goal, what to draw with a pipeline,
+   the canvas on its dotted ground with its zoom bar, and under it what the lines mean. */
+.tr-graph { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-inline-size: 0; }
+.tr-gtop { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-inline-size: 0; margin-block-start: 8px; }
+.tr-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-inline-size: 0; font: 600 13.5px var(--f-display); overflow-wrap: break-word; }
+.tr-crumbs ol { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-inline-size: 0; margin: 0; padding: 0; list-style: none; }
+.tr-crumbs li { display: inline-flex; align-items: center; gap: 6px; min-inline-size: 0; }
+.tr-crumbs li + li::before { content: '›'; color: var(--muted); }
+.tr-crumbs .linkish { font: inherit; color: var(--cyan-ink); overflow-wrap: anywhere; }
 /* A link that stands alone takes a finger: at least 44 px high and 44 px wide, even of two letters, its words at its start
    and in the middle of its height as before. Links inside a line of words keep the line's height. A board card's title has
-   its own rule: the card's whole width and 44 px high. */
-:is(.tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish) { display: inline-flex; align-items: center; min-inline-size: 44px; min-block-size: 44px; }
-.tr-crumbs [aria-current] { font-weight: 600; }
+   its own rule: the card's whole width and 44 px high. The graph's and the card's paths keep the tracker's fine size for a
+   mouse and take a finger's on a phone or a touch screen. */
+:is(.tr-crumbs, .tp-path) .linkish { display: inline-flex; align-items: center; min-inline-size: var(--tracker-target-fine); min-block-size: var(--tracker-target-fine); }
 .tr-modes { max-width: 420px; }
 .tr-modes label { min-height: 44px; padding: 6px 8px; text-align: center; overflow-wrap: anywhere; }
-.tr-canvas { position: relative; height: clamp(360px, calc(100vh - 300px), 900px); min-width: 0; overflow: hidden; background: var(--bg); border: 1px solid var(--line); }
+.tr-canvas { position: relative; block-size: max(420px, calc(100vh - 318px)); min-inline-size: 0; overflow: hidden; background: var(--bg); border: 1px solid var(--line); }
 .tr-map:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
-.tr-wires .part { fill: none; stroke: var(--line2); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
-.tr-wires .wait path { fill: none; stroke: var(--amber-ink); stroke-width: 1.4; stroke-dasharray: 6 5; vector-effect: non-scaling-stroke; }
-.tr-wires .wait text { fill: var(--amber-ink); font-family: var(--f-body); font-size: 12px; }
-.tr-node { position: absolute; display: grid; align-content: center; gap: 2px; margin: 0; padding: 6px 10px; padding-inline-start: 14px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface); color: var(--ink); font: inherit; text-align: start; }
+.tr-wires .part { fill: none; stroke: var(--line2); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.tr-wires .wait path { fill: none; stroke: var(--amber); stroke-width: 1; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+.tr-wires marker path { fill: var(--amber-ink); stroke: none; }
+.tr-wires .wait text { fill: var(--amber-ink); font-family: var(--f-body); font-size: 11px; }
+/* A node: its status as a strip at the start, its number and title, a line of what it is at, and a goal's bar. */
+.tr-node { position: absolute; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 2px; margin: 0; padding: 7px 12px 8px; box-sizing: border-box; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-size: 12.5px; line-height: 1.3; text-align: start; }
+.tr-node:has(.tr-node-bar) { padding-block-end: 5px; }
 button.tr-node { cursor: pointer; }
-.tr-node::before { content: ''; position: absolute; inset-block: 0; inset-inline-start: 0; width: 4px; background: var(--line2); }
+.tr-node::before { content: ''; position: absolute; inset-block: -1px; inset-inline-start: -1px; inline-size: 4px; background: var(--line2); }
 .tr-node.working::before, .tr-node.review::before { background: var(--cyan); }
 .tr-node.waiting::before, .tr-node.blocked::before { background: var(--amber); }
 .tr-node.done::before { background: var(--ok); }
-.tr-node.goal { border-color: var(--cyan); background: var(--surface2); }
+.tr-node.goal { border: 1px dashed var(--cyan); background: var(--surface2); }
 .tr-node.plain { border-style: dashed; background: var(--surface2); }
-.tr-node.on, button.tr-node:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
+/* The mockup's chosen node: a 2 px line, its words staying where they were. */
+.tr-node.on { border-width: 2px; border-color: var(--cyan); padding: 6px 11px 7px; }
+.tr-node.on:has(.tr-node-bar) { padding-block-end: 4px; }
+.tr-node.on::before { inset-block: -2px; inset-inline-start: -2px; }
+button.tr-node:hover { border-color: var(--cyan); }
 button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-.tr-node-title { font-size: 13px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
-.tr-node-title b { color: var(--muted); font-weight: 500; }
-.tr-node small:not(.tr-wait) { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+.tr-node-title { font-size: 12.5px; font-weight: 400; overflow-wrap: anywhere; }
+.tr-node.goal .tr-node-title { font: 600 13.5px/1.3 var(--f-display); color: var(--cyan-ink); }
+.tr-node.plain .tr-node-title { font-weight: 600; }
+.tr-node-no { font-size: 11.5px; font-weight: 400; color: var(--muted); }
+.tr-node-meta { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+.tr-node-meta .tr-wait { font-size: inherit; }
+.tr-node-bar { display: block; block-size: 3px; margin-block-start: 2px; background: var(--idle); }
+.tr-node-bar > i { display: block; block-size: 100%; background: var(--cyan); }
+.tr-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+.tr-legend .wait { color: var(--amber-ink); }
 
-/* The card: the path, the kind, the state with its marks, why, the facts and the ways from it. */
-.tp-path { min-width: 0; }
-.tp-type { font-size: 12.5px; }
-.tp-state { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.tp-why p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.tp-leads { justify-content: flex-start; }
-.tp-materials { display: grid; gap: 10px; }
-.tp-materials h5 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
-.tp-head { justify-items: stretch; }
-.tp-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
-.tp-heading { overflow-wrap: anywhere; }
-.tp-menu-button { display: grid; place-items: center; inline-size: 44px; block-size: 44px; margin: 0; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 18px; cursor: pointer; }
+/* The card as mockup 10's drawer. On the tracker it lies at the end side from under the top bar to the bottom, over the work
+   without narrowing it; on a phone it takes the whole screen under the top bar. Its bar names what it is; its body goes from
+   the path, the kind, the title, the status, why and the bar, through the facts and the graph from here, to its sections. */
+@media (min-width: 761px) {
+  .body.tracker-page ~ .acard.at-end { inset-block: 68px 0; inset-inline-start: auto; inset-inline-end: 0; inline-size: 460px; max-inline-size: 100vw; border: 0; border-inline-start: 1px solid var(--line2); box-shadow: -12px 0 30px var(--shadow); }
+  .body.tracker-page ~ .acard.at-end:dir(rtl) { box-shadow: 12px 0 30px var(--shadow); }
+  /* The strips of minimized windows stand at the right edge; the drawer leaves them in reach beside it. */
+  .shell:has(.agent-strips:not(:empty)) .body.tracker-page ~ .acard.at-end:dir(ltr) { inset-inline-end: 32px; }
+}
+@media (max-width: 760px) {
+  .body.tracker-page ~ .acard.at-end { inset: 68px 0 0; inline-size: auto; max-inline-size: none; border: 0; box-shadow: none; }
+}
+.acard.plain > .t-bar { height: auto; min-block-size: 38px; padding-block: 2px; padding-inline: 14px 6px; justify-content: space-between; }
+.acard.plain > .t-bar > span { text-align: start; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.acard.plain > .ac-body { gap: 16px; padding: 16px 18px 24px; padding-inline-end: calc(18px + max(0px, 18px - var(--sb, 0px))); }
+.tp-head { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; min-inline-size: 0; }
+.tp-path { justify-self: stretch; min-inline-size: 0; font-size: 12.5px; color: var(--muted); }
+.tp-path ol { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 0; padding: 0; list-style: none; }
+.tp-path li { display: inline-flex; align-items: center; gap: 6px; min-inline-size: 0; overflow-wrap: anywhere; }
+.tp-path li::after { content: '›'; }
+/* The goal's mark is drawn, not said: a reader hears the goal's name alone. */
+.tp-path .tp-goal::before { content: '◎'; content: '◎' / ''; margin-inline-end: .35em; }
+.tp-path .linkish { font: inherit; color: var(--cyan-ink); text-align: start; overflow-wrap: anywhere; }
+.tp-kind { margin: 8px 0 0; font: 600 11px var(--f-body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); overflow-wrap: break-word; }
+.tp-head > .tp-kind:first-child { margin-block-start: 0; }
+.tp-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; justify-self: stretch; margin-block: 4px 8px; }
+.tp-heading { margin: 0; font: 600 20px/1.25 var(--f-display); overflow-wrap: anywhere; }
+.tp-head > .tp-heading { margin-block: 4px 8px; }
+.tp-menu-button { display: grid; place-items: center; inline-size: 32px; block-size: 32px; margin: 0; margin-block-start: -4px; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 18px; cursor: pointer; }
 .tp-menu-button:hover, .tp-menu-button[aria-expanded='true'] { background: var(--surface2); color: var(--cyan-ink); }
-.tp-head .tp-facts { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
-.tp-head .tp-facts a { color: var(--cyan-ink); }
+.tp-state { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; max-inline-size: 100%; }
+.tp-why { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tp-bar { display: block; justify-self: stretch; block-size: 4px; margin-block-start: 8px; background: var(--idle); }
+.tp-bar > i { display: block; block-size: 100%; background: var(--cyan); }
+/* The facts: a name beside each, the names' column a share of the width that never breaks inside a word. */
+.tp-card-facts { display: grid; grid-template-columns: minmax(min-content, 1fr) minmax(0, 2.6fr); gap: 7px 10px; margin: 0; font-size: 13px; }
+.tp-card-facts dt { color: var(--muted); overflow-wrap: break-word; }
+.tp-card-facts dd { margin: 0; min-inline-size: 0; overflow-wrap: anywhere; }
+.tp-card-facts dd > .tr-mark { margin-inline-end: 6px; vertical-align: middle; }
+.gbtn { --cut: calc(5px * var(--cut-k)); display: inline-flex; align-items: center; gap: .35em; max-inline-size: 100%; min-block-size: 32px; margin: 0; padding: 5px 12px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: 600 13px var(--f-display); text-align: start; overflow-wrap: anywhere; cursor: pointer; clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }
+.gbtn:hover { border-color: var(--cyan); color: var(--cyan-ink); }
+.gbtn:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
+/* The card's ways on: the graph from here across the width as in the mockup, and beside it what else the person may do. */
+.tp-acts { display: flex; flex-wrap: wrap; gap: 8px; min-inline-size: 0; }
+.tp-acts > .gbtn { flex: 1 1 auto; }
+.tp-sec { display: grid; grid-template-columns: minmax(0, 1fr); min-inline-size: 0; }
+.tp-sec > h3 { margin: 0 0 6px; font: 600 13px var(--f-display); color: var(--muted); overflow-wrap: break-word; }
+.tp-rows, .tp-mats { display: grid; margin: 0; padding: 0; list-style: none; }
+.tp-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-inline-size: 0; padding-block: 6px; border-block-end: 1px solid var(--line); font-size: 13px; }
+.tp-row > small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.tp-row-main { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-inline-size: 0; }
+.tp-row .tp-link { display: inline-flex; align-items: center; gap: 8px; min-inline-size: 0; min-block-size: var(--tracker-target-fine); color: var(--ink); font: inherit; text-align: start; text-decoration: none; overflow-wrap: anywhere; }
+.tp-row .tp-link:hover { color: var(--cyan-ink); text-decoration: underline; }
+.tp-row .tp-link .tr-status-dot { margin: 0; }
+.tp-mats { gap: 6px; }
+.tp-mat { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-inline-size: 0; padding: 7px 10px; border: 1px solid var(--line); font-size: 13px; }
+.tp-mat-text { flex: 1 1 12em; min-inline-size: 0; overflow-wrap: anywhere; }
+.tp-mat-text p { margin: 0; white-space: pre-wrap; }
+.tp-mat-kind { display: block; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.tp-mat-open { color: var(--cyan-ink); font-size: 13px; text-decoration: underline; }
+@media (max-width: 760px), (pointer: coarse) {
+  :is(.tr-crumbs, .tp-path) .linkish, .tp-row .tp-link, .tp-mat-open { min-block-size: var(--tracker-target-touch); }
+  :is(.tr-crumbs, .tp-path) .linkish { min-inline-size: var(--tracker-target-touch); }
+  .tp-mat-open { display: inline-flex; align-items: center; }
+  .gbtn, .tp-menu-button { min-block-size: var(--tracker-target-touch); }
+  .tp-menu-button { inline-size: var(--tracker-target-touch); block-size: var(--tracker-target-touch); margin-block-start: -10px; }
+}
 .tp-menu { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding-block: 8px; border-block: 1px solid var(--line); }
 .tp-menu-list { display: grid; grid-template-columns: minmax(0, 1fr); }
 .tp-menu-list .linkish { min-block-size: 44px; margin: 0; padding: 8px 12px; text-align: start; overflow-wrap: anywhere; }
@@ -2160,22 +2263,36 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
    layout's sizes, none under 24 by 24 px (WCAG 2.5.8; the subtask caret is that floor). Both sizes are tokens of the
    tracker's own, --tracker-target-touch and --tracker-target-fine. */
 @media (max-width: 760px), (pointer: coarse) {
-  .tr-views label, .tr-add-view, .tr-chip, .tr-group-toggle, .tr-add-task, .tr-person-picker { min-block-size: var(--tracker-target-touch); }
+  .tr-views label, .tr-chip, .tr-group-toggle, .tr-person-picker, .tr-new { min-block-size: var(--tracker-target-touch); }
+  .tr-new { inline-size: var(--tracker-target-touch); }
+  .tr-card-title .linkish { min-block-size: var(--tracker-target-touch); }
+  .tr-card-body > .entry-actions > .act { min-block-size: var(--tracker-target-touch); }
   .tr-list { --row: var(--tracker-target-touch); }
+}
+
+/* A finger gets 44px rows in the left panel, on a touch screen and in the phone's drawer; a mouse on a wider screen keeps
+   the mockup's 32px. */
+@media (max-width: 760px), (pointer: coarse) {
+  .tr-item { min-block-size: 44px; }
+  .tr-unfold { inline-size: 30px; block-size: 44px; inset-inline-start: 0; }
 }
 
 @media (max-width: 760px) {
   /* No room is kept for a scrollbar beside the lists drawer: where none is drawn, as with hidden scrollbars, that room was
      an empty strip of the page beside the drawer, past the room the drawer leaves at its end. */
   .body.tracker-page { inset-block-start: 68px; scrollbar-gutter: auto; }
-  .tracker { grid-template-columns: minmax(0, 1fr); padding-inline: 12px; }
+  .tracker { grid-template-columns: minmax(0, 1fr); }
+  .tr-top { padding: 10px 12px; }
+  .tr-views { padding-inline: 12px; }
+  .tr-chips { padding-inline: 12px; }
+  .tr-main > :not(.tr-top, .tr-bar) { margin-inline: 12px; }
   .tr-search { flex: 1 1 100%; max-inline-size: none; margin-inline-start: 0; }
   .tr-where { flex: 1 1 200px; }
   .tr-view-as { flex: 1 1 100%; }
   /* The lists as a drawer down to the bottom of the screen, so nothing of the page shows under it. */
   .tr-side, .tr-main { grid-area: 1 / 1; }
-  .tr-side { display: none; z-index: 8; margin-inline: -12px 4px; box-shadow: 0 24px 60px var(--shadow); }
-  .tr-side.open { display: grid; }
+  .tr-side { display: none; z-index: 8; margin-inline-end: 16px; box-shadow: 0 24px 60px var(--shadow); }
+  .tr-side.open { display: block; }
   .tr-side .tr-side-close { display: inline-grid; }
   .tr-menu { display: inline-flex; justify-self: start; min-height: 44px; }
   .tr-canvas { height: calc(100vh - 220px); min-height: 320px; }
@@ -2403,9 +2520,8 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .tp-body .md :is(ul, ol), .tp-menu .md :is(ul, ol) { padding-inline: 20px 0; }
 .tp-body .md pre, .tp-menu .md pre { margin: 0; white-space: pre-wrap; }
 .tp-disclosure { min-block-size: 44px; margin: 0; justify-self: start; text-align: start; overflow-wrap: anywhere; }
-.tp-history { display: grid; grid-template-columns: minmax(0, 1fr); }
-.tp-steps { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
-.tp-steps time { color: var(--muted); font-size: 12px; }
+.tp-steps { display: grid; gap: 8px; margin: 0; padding: 0; padding-inline-start: 12px; border-inline-start: 1px solid var(--line2); list-style: none; font-size: 12.5px; }
+.tp-steps time { color: var(--muted); }
 .tp-subs, .tp-log { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .tp-subs li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 8px; min-inline-size: 0; }
 .tp-subs .linkish { min-inline-size: 0; max-inline-size: 100%; text-align: start; overflow-wrap: anywhere; }
