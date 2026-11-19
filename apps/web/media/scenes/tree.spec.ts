@@ -62,7 +62,8 @@ test('tree.gif: readable Development work tree filling width, idle pickup, merge
   await smoothDrag(page, scroll, 0, 260, 6, 32, dragAnchor);
   await page.mouse.move(8, 8);
   await page.locator('.tv-labs').getByRole('button', { name: /Iris/ }).click();
-  await page.getByRole('dialog', { name: /^Iris/ }).getByRole('button', { name: 'Iris', exact: true }).click();
+  /* The name opens the window. It carries the mark of Iris's program, so the button's name starts with Iris and goes on. */
+  await page.getByRole('dialog', { name: /^Iris/ }).getByRole('button', { name: /^Iris/ }).click();
   const agentWin = page.getByRole('complementary', { name: /^Iris/ });
   await expect(agentWin).toBeVisible();
   await agentWin.getByRole('button', { name: 'Card', exact: true }).click();

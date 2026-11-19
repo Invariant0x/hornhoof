@@ -393,6 +393,7 @@ export async function serveOakLane(page: Page): Promise<OakLaneController> {
     const pathname = url.pathname;
 
     if (pathname === '/api/stream') return;
+    if (pathname in QUIET) return route.fulfill({ json: QUIET[pathname] });
     if (pathname === '/api/version') return route.fulfill({ json: { version: '0.7.0', commit: '070f4e2' } });
     if (pathname === '/api/updates') {
       return route.fulfill({
