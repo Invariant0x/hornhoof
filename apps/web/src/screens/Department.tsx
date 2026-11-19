@@ -26,7 +26,7 @@ import { stageName } from '../ui/stage-name';
 import { TreeView } from './TreeView';
 import { useOpenAgent } from './AgentWindowContext';
 import { SpeedPanel } from './SpeedPanel';
-import { arrowD, CY, FT, FW, HH, HW, PH, PW, leadsStage, schemaLayout, stepPaths, type Frame, type Line, type Schema } from './schema';
+import { arrowD, FW, HH, HW, PH, PW, leadsStage, schemaLayout, stepPaths, type Frame, type Line, type Schema, type Sizes } from './schema';
 import { takeEscape } from '../ui/escape';
 import { guardedResizeObserver, useRenderGuard } from '../guard';
 
@@ -81,6 +81,44 @@ type Props = {
   onCrumbs?(px: number): void;
 };
 
+/* What the cards drawn from a schema measure: its head, each frame's heading and cards, and the people's chips, in its order. */
+function measureSchema(world: HTMLElement, s: Schema): Sizes {
+  const tall = (el: Element | null | undefined) => (el instanceof HTMLElement ? el.offsetHeight : 0);
+  const frames = world.querySelectorAll(':scope > .slayer > .frame');
+  const cards: Record<string, number> = {}, headings: Record<string, number> = {};
+  s.frames.forEach((f, i) => {
+    const chips = frames[i]?.querySelectorAll(':scope > .slayer > .dept-chip');
+    headings[f.key] = tall(frames[i]?.querySelector('.fh'));
+    f.members.forEach((m, k) => (cards[m.e.id] = tall(chips?.[k])));
+  });
+  const head = world.querySelector(':scope > .slayer > :is(.sslot, .shead)');
+  return { head: tall(head), cards, headings, people: [...world.querySelectorAll(':scope > .pchip')].map(tall) };
+}
+
+/* The schema as its cards measure on the screen: measured before the first paint and again whenever the company, the words or
+   the zoom's look change, and when a card grows or shrinks on its own, as its fonts arrive. */
+function useMeasuredSchema(d: Department, people: number, redraw: string) {
+  const [sizes, setSizes] = useState<Sizes>(UNMEASURED);
+  const s = useMemo(() => schemaLayout(d, people, sizes), [d, people, sizes]);
+  const world = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = world.current;
+    if (!el) return;
+    const measure = () => {
+      const next = measureSchema(el, s);
+      setSizes(was => (JSON.stringify(was) === JSON.stringify(next) ? was : next));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = guardedResizeObserver(measure, 'department-cards');
+    for (const card of el.querySelectorAll(':scope > .slayer > .frame :is(.fh, .dept-chip), :scope > .slayer > :is(.sslot, .shead), :scope > .pchip')) observer.observe(card);
+    return () => observer.disconnect();
+  }, [s, redraw]);
+  return { s, world, measured: sizes !== UNMEASURED };
+}
+
+const UNMEASURED: Sizes = {};
+
 /* The agent window is on the right, settings and task details on the left. */
 const COVER = { window: 688, task: LEFT_PANEL_COVER } as const;
 const MIN_K = 0.15, MAX_K = 2;
@@ -102,7 +140,7 @@ const taskText = (e: Employee) => (e.task ? `#${e.task.number} ${e.task.title}` 
 function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { d: Department; head: Employee | null; stats: string; on: boolean; flash: boolean; serverNow?: string; onOpen(id: string): void; onSwitch?(on: boolean): void }) {
   const t = useT();
   const { language } = useLanguage();
-  const style = { left: 0, top: 0, width: HW, height: HH };
+  const style = { left: 0, top: 0, width: HW, minHeight: HH };
   if (!head)
     return (
       <div className="shead empty" style={style}>
@@ -210,13 +248,25 @@ const ZOOM_ROOM = 212;
 /* A tool shown as its icon keeps its name as its label and tooltip. */
 const named = (icons: boolean, name: string) => (icons ? { 'aria-label': name, title: name } : {});
 
-/* Wrapped actions determine the tree's floor and the ticker's remaining room. On a phone the tools show as icons, and on a
-   wide screen too when their words do not fit between the zoom and the edge: what the words need is measured as they are
-   shown, once for each language and set of tools. On a phone the name of the department stands under the top bar and the
-   tree and drawers start under it; on a wide screen it stands beside the logo, and the top bar is told how wide it is. */
+/* How much wider than its room the department's name is on one line: the top bar gives it that much more room before it wraps. */
+function oneLineOverflow(title: HTMLElement): number {
+  const plaque = title.parentElement!, was = [title.style.whiteSpace, plaque.style.flexWrap];
+  title.style.whiteSpace = 'nowrap';
+  plaque.style.flexWrap = 'nowrap';
+  const over = title.scrollWidth - title.clientWidth;
+  [title.style.whiteSpace, plaque.style.flexWrap] = was as [string, string];
+  return over;
+}
+
+/* Wrapped actions and the words of the line of what happened determine the tree's floor and the ticker's remaining room. On a
+   phone the tools show as icons, and on a wide screen too when their words do not fit between the zoom and the edge: what the
+   words need is measured as they are shown, once for each language and set of tools. On a phone the name of the department
+   stands under the top bar; on a wide screen it stands beside the logo, and the top bar is told how wide it is. The tree and
+   drawers start under it on both. */
 function useDepartmentSpace(language: string, panel: Props['panel'], tools: string, onCrumbs?: (px: number) => void) {
   const root = useRef<HTMLDivElement>(null), dock = useRef<HTMLDivElement>(null), actions = useRef<HTMLDivElement>(null), crumbs = useRef<HTMLElement>(null);
   const [space, setSpace] = useState({ right: 16, bottom: 228, top: 116, tickerHidden: false });
+  const tickerHidden = space.tickerHidden;
   const [icons, setIcons] = useState(false);
   const need = useRef<{ words: string; px: number } | null>(null);
   const words = `${language}|${tools}`;
@@ -233,21 +283,28 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
       }
       setIcons(phone || (!!el.clientWidth && need.current!.px > width - ZOOM_ROOM - 16));
       const right = phone ? 16 : acts.offsetWidth + 32;
-      const bottom = phone && el.clientHeight ? el.clientHeight - (dock.current ?? acts).offsetTop + 8 : 228;
+      /* A wide screen ends the tree and the drawers 16 px above the line of what happened, which grows up with its words. */
+      const line = el.querySelector<HTMLElement>(':scope > .dv-dock > .ticker');
+      const bottom = phone ? (el.clientHeight ? el.clientHeight - (dock.current ?? acts).offsetTop + 8 : 228)
+        : Math.max(76, el.clientHeight && line ? el.clientHeight - line.offsetTop + 16 : 0);
       const name = crumbs.current, title = name?.querySelector('h2');
-      const top = phone && name?.offsetHeight ? name.offsetTop + name.offsetHeight + 8 : 116;
+      const top = phone ? (name?.offsetHeight ? name.offsetTop + name.offsetHeight + 8 : 116)
+        : Math.max(68, name?.offsetHeight ? name.offsetTop + name.offsetHeight + 12 : 0);
       setSpace({ right, bottom, top, tickerHidden: !phone && width - right - ZOOM_ROOM < 220 });
-      onCrumbs?.(phone || !name ? 0 : name.offsetWidth + (title ? title.scrollWidth - title.clientWidth : 0));
+      onCrumbs?.(phone || !name ? 0 : name.offsetWidth + (title ? oneLineOverflow(title) : 0));
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = guardedResizeObserver(measure, 'department-actions');
     observer.observe(el);
     observer.observe(acts);
-    /* On a phone the dock grows with the words of the line in it. */
+    /* On a phone the dock grows with the words of the line in it; on a wide screen the line and the name grow by themselves. */
     if (dock.current) observer.observe(dock.current);
+    const line = el.querySelector(':scope > .dv-dock > .ticker');
+    if (line) observer.observe(line);
+    if (crumbs.current) observer.observe(crumbs.current);
     return () => observer.disconnect();
-  }, [panel, icons, words, onCrumbs]);
+  }, [panel, icons, words, onCrumbs, tickerHidden]);
   useEffect(() => () => onCrumbs?.(0), [onCrumbs]);
   const style = { '--ticker-right': `${space.right}px`, '--tree-bottom': `${space.bottom}px`, '--tree-top': `${space.top}px` } as CSSProperties;
   return { root, dock, actions, crumbs, style, icons, tickerHidden: space.tickerHidden };
@@ -296,11 +353,16 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
     return () => document.removeEventListener('keydown', close);
   }, [drawer]);
 
-  const s = useMemo(() => schemaLayout(d, reach.length), [d, reach.length]);
-  const paths = useMemo(() => stepPaths(s), [s]);
   const box = useRef<HTMLDivElement>(null);
   const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, `${d.id}:${tree}`, { min: MIN_K, max: MAX_K });
+  const far = view.k < FAR_K;
+  const { s, world, measured } = useMeasuredSchema(d, reach.length, `${language}|${far}|${tree}`);
+  const paths = useMemo(() => stepPaths(s), [s]);
   const covered = panel ? COVER[panel] : 0;
+  const size = useRef(s);
+  useLayoutEffect(() => {
+    size.current = s;
+  }, [s]);
 
   /* Opens at a readable size from the left when the schema is wider than the screen; Fit shows all of it. */
   const place = useCallback(
@@ -309,16 +371,19 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
       if (!el || !el.clientWidth) return;
       const { left, width } = canvasSpace(el.clientWidth, panel === 'window' ? 0 : covered, panel === 'window' ? covered : 0);
       const padTop = 76, padBottom = 76, padX = 48;
-      const bw = s.right + 80, bh = s.h + 40;
+      const bw = size.current.right + 80, bh = size.current.h + 40;
       const fitK = Math.max(MIN_K, Math.min((width - padX * 2) / bw, (el.clientHeight - padTop - padBottom) / bh, 1));
       const k = whole || fitK >= START_K ? fitK : START_K;
       const x = k === fitK ? (width - bw * k) / 2 + 40 * k : padX + 40 * k;
       const y = k === fitK ? padTop + (el.clientHeight - padTop - padBottom - bh * k) / 2 + 20 * k : padTop + 20 * k;
       setView({ k, x: left + x, y, smooth: true });
     },
-    [s.right, s.h, covered, panel, setView],
+    [covered, panel, setView],
   );
 
+  /* The schema is placed again when its frames or their staff change, and once its cards are first measured, not when a card
+     grows by a line: the layout of its natural sizes says when. */
+  const natural = useMemo(() => schemaLayout(d, reach.length), [d, reach.length]);
   useEffect(() => {
     place(false);
     const el = box.current;
@@ -326,7 +391,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
     const ro = guardedResizeObserver(() => place(false), 'department');
     ro.observe(el);
     return () => ro.disconnect();
-  }, [place, tree]);
+  }, [place, tree, natural.right, natural.h, measured]);
 
   /* The line from the head to each employee: blue while it works on the head's task, yellow for five minutes after it gave
      a result back, as the server keeps them. */
@@ -444,7 +509,6 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
 
   const working = d.employees.filter(e => e.status === 'working').length;
   const stats = t.dept.stats(working, d.employees.length, d.roles.filter(role => role.kind === 'member').length);
-  const far = view.k < FAR_K;
   const worldStyle = {
     width: s.right,
     height: s.h,
@@ -463,11 +527,11 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
       ) : <div className="tview"><p className="tv-empty glass">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</p></div>)}
       {!tree && (
       <div className={`dcanvas${far ? ' far' : ''}`} ref={box} role="region" aria-label={t.dept.schema} {...handlers}>
-        <div className="world" style={worldStyle}>
+        <div className="world" ref={world} style={worldStyle}>
           <section aria-labelledby={`${id}-members`} className="slayer">
           <h3 id={`${id}-members`} className="sr">{t.dept.members}</h3>
           {s.frames.map(f => (
-            <div key={f.key || 'others'} className={`frame${f.check ? ' gt' : ''}${f.oneShot ? ' frame-calls' : ''}`} role="group" aria-label={frameTitle(f, language, t, d)} style={{ left: f.x, top: FT, width: FW, height: f.h }}>
+            <div key={f.key || 'others'} className={`frame${f.check ? ' gt' : ''}${f.oneShot ? ' frame-calls' : ''}`} role="group" aria-label={frameTitle(f, language, t, d)} style={{ left: f.x, top: s.ft, width: FW, height: f.h }}>
               <FrameHeading frame={f} language={language} canGive={canGive} department={d} />
               {f.role && canGive && (
                 <input
@@ -480,7 +544,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
                   onChange={ev => flipRole(f.role!.title[language], f.members.map(m => m.e))(ev.target.checked)}
                 />
               )}
-              <div className="slayer">{f.members.map(m => <Chip key={m.e.id} e={shown(m.e)} x={m.x - f.x} y={m.y - FT} on={selected === m.e.id} lead={leadsStage(m.e)} flash={flashing.has(m.e.id)} serverNow={serverNow} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />)}</div>
+              <div className="slayer">{f.members.map(m => <Chip key={m.e.id} e={shown(m.e)} x={m.x - f.x} y={m.y - s.ft} on={selected === m.e.id} lead={leadsStage(m.e)} flash={flashing.has(m.e.id)} serverNow={serverNow} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />)}</div>
             </div>
           ))}
           </section>
@@ -492,7 +556,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
             ))}
             {lines('pl')}
             {s.gates.map(g => (
-              <path key={g.x} className="gd" d={`M ${g.x} ${CY - 7} L ${g.x + 7} ${CY} L ${g.x} ${CY + 7} L ${g.x - 7} ${CY} Z`} />
+              <path key={g.x} className="gd" d={`M ${g.x} ${s.cy - 7} L ${g.x + 7} ${s.cy} L ${g.x} ${s.cy + 7} L ${g.x - 7} ${s.cy} Z`} />
             ))}
             {s.report && <Wire l={{ cls: 'pl', pts: s.report.pts, arrow: true }} />}
             <MemberLines s={s} toMember={paths.toMember} stateOf={stateOf} still={still} />
@@ -501,7 +565,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
             ))}
           </svg>
           {s.gates.map(g => (
-            <span key={g.x} className="gl" style={{ left: g.x, top: CY + 12 }}>
+            <span key={g.x} className="gl" style={{ left: g.x, top: s.cy + 12 }}>
               {t.dept.gate(g.n)}
             </span>
           ))}
@@ -527,8 +591,8 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
             />
           </section>
           {reach.map((p, k) => (
-            <div key={p.id} className="pchip" style={{ left: s.people[k]![0], top: s.people[k]![1], width: PW, height: PH }}>
-              <PersonButton person={p} frame={{ w: PW, h: PH, cut: 8 }} onOpen={() => openDecisions(p.id)}>
+            <div key={p.id} className="pchip" style={{ left: s.people[k]![0], top: s.people[k]![1], width: PW, minHeight: PH }}>
+              <PersonButton person={p} frame={{ w: PW, h: s.peopleH[k]!, cut: 8 }} onOpen={() => openDecisions(p.id)}>
                 <Edge cut={8} halo>
                   <PersonIcon />
                   <span className="pn">

@@ -535,16 +535,88 @@ describe('Department view', () => {
     await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('needs a decision'));
   });
 
-  it("keeps an employee's whole name on its chip, and lets the state give way when the row is short", () => {
-    /* The name does not shrink below its own width, and takes at most part of the row; the state takes what is left
-       and ends in an ellipsis when that is too little. */
-    expect(decl('.schip .mn', 'flex')).toMatch(/^\d+ 0 /);
-    expect(decl('.schip .mn', 'max-width')).toBeDefined();
-    expect(decl('.schip .st', 'flex')).toMatch(/^0 1 /);
-    expect(decl('.schip .st', 'min-width')).toBe('0');
-    expect(decl('.schip .st', 'overflow')).toBe('hidden');
-    expect(decl('.schip .st', 'text-overflow')).toBe('ellipsis');
-    expect(decl('.schip .st', 'white-space')).toBe('nowrap');
+  it('wraps the words of the cards, the frames, the head and the people, and cuts or hides none of them', () => {
+    const texts = ['.fn', '.fa', '.shead .hn', '.shead .meta', '.shead .hx', '.shead .hx-task', '.schip .r1', '.schip .mn', '.schip .st', '.schip .r2', '.schip .r3', '.pchip .pn b', '.pchip .pn span'];
+    for (const selector of texts)
+      for (const rule of rulesFor(selector)) {
+        expect.soft(rule.decls['text-overflow'], `${selector} ends in no ellipsis`).not.toBe('ellipsis');
+        expect.soft(rule.decls['-webkit-line-clamp'], `${selector} keeps every line`).toBeUndefined();
+        expect.soft(rule.decls['white-space'], `${selector} wraps`).not.toBe('nowrap');
+        expect.soft(rule.decls.overflow, `${selector} hides nothing`).not.toBe('hidden');
+      }
+    /* Words break between them, and only a word longer than the whole line breaks inside itself; a model's name may be its
+       identifier, which breaks wherever it has to. */
+    for (const selector of ['.fn', '.fa', '.shead .hn', '.shead .meta', '.shead .hx-task', '.schip .mn', '.schip .st', '.schip .r3', '.pchip .pn b', '.pchip .pn span'])
+      expect.soft(decl(selector, 'overflow-wrap'), selector).toBe('break-word');
+    expect(decl('.schip .r2', 'overflow-wrap')).toBe('anywhere');
+    /* A state of more words than the row has room for goes under the name, the name keeps a line of its own. */
+    expect(decl('.schip .r1', 'flex-wrap')).toBe('wrap');
+    expect(decl('.schip .r3 .ast', 'white-space')).toBe('normal');
+    /* The cards stand at least their old size and keep their width: their slot is a grid of one column its card fills, a
+       word longer than the card included. */
+    for (const slot of ['.sslot', '.pchip', '.shead.empty']) {
+      expect.soft(decl(slot, 'display'), slot).toBe('grid');
+      expect.soft(decl(slot, 'grid-template-columns'), slot).toBe('minmax(0, 1fr)');
+    }
+  });
+
+  it("wraps an agent's name and task in the speed drawer instead of cutting them", () => {
+    for (const selector of ['.dv-drawer.spd .spl-r .who b', '.dv-drawer.spd .spl-r .who small']) {
+      for (const rule of rulesFor(selector)) {
+        expect.soft(rule.decls['text-overflow'], selector).not.toBe('ellipsis');
+        expect.soft(rule.decls['white-space'], selector).not.toBe('nowrap');
+        expect.soft(rule.decls.overflow, selector).not.toBe('hidden');
+      }
+      expect(decl(selector, 'overflow-wrap'), selector).toBe('break-word');
+      expect(decl(selector, 'min-width'), selector).toBe('0');
+    }
+    expect(decl('.dv-drawer.spd .spl-r .who', 'flex-wrap')).toBe('wrap');
+  });
+
+  it('shows a long model name and a long task title whole on a card that grows with them, and moves the cards under it down', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const [dana, bruno] = dev!.employees;
+    const model = 'Claude Sonnet 5.5 with the longest context window and extended thinking preview';
+    const title = 'Move the checkout to the new payment_provider_and_keep_every_old_receipt_readable in both languages for years';
+    const long = { ...bruno!, modelName: model, status: 'working' as const, task: { id: 't12', number: 12, title, echelons: taskRoute() } };
+    const vera = { ...bruno!, id: 'b2', name: 'Vera' };
+    /* jsdom lays nothing out: the card with the long words measures 150 px and the rest nothing, so they keep their size. */
+    const tall = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('dept-chip') && this.textContent!.includes(title) ? 150 : 0;
+    });
+    onTestFinished(() => tall.mockRestore());
+    shell({}, { ...DEV_ORG, departments: [{ ...dev!, employees: [dana!, long, vera] }] });
+    await flyIn(user);
+    const frame = within(screen.getByRole('region', { name: 'Department schema' })).getByRole('group', { name: 'Backend engineer' });
+    const card = within(frame).getByRole('button', { name: /Bruno/ });
+    expect(card.querySelector('.r2')).toHaveTextContent(`${model}, default effort, Anthropic`);
+    expect(card.querySelector('.r3')).toHaveTextContent(`#12 ${title}`);
+    const slot = (name: RegExp) => within(frame).getByRole('button', { name }).closest<HTMLElement>('.dept-chip')!;
+    expect([slot(/Bruno/).style.height, slot(/Bruno/).style.minHeight]).toEqual(['', '84px']);
+    await waitFor(() => expect(parseFloat(slot(/Vera/).style.top) - parseFloat(slot(/Bruno/).style.top)).toBe(150 + 12));
+    expect(parseFloat(frame.style.height)).toBe(100 + 150 + 12 + 96 + 8);
+    /* The line from the frame's spine meets the card in its middle. */
+    const spine = parseFloat(frame.style.left) + 10, middle = parseFloat(frame.style.top) + parseFloat(slot(/Bruno/).style.top) + 75;
+    expect([...document.querySelectorAll('.dview .wires path.tick')].map(p => p.getAttribute('d'))).toContain(`M ${spine} ${middle} L ${spine + 10} ${middle}`);
+  });
+
+  it('moves the frames down under a head card that grows with its words, and stacks the people by their chips', async () => {
+    const user = userEvent.setup();
+    const tall = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.dview .sslot') && this.querySelector('.shead')) return 240;
+      return this.matches('.dview .pchip') ? 90 : 0;
+    });
+    onTestFinished(() => tall.mockRestore());
+    shell({}, { ...DEV_ORG, departments: [{ ...DEV_ORG.departments[0]!, people: [LENA, { ...LENA, id: 'p7', name: 'Mira' }] }] });
+    await flyIn(user);
+    const schema = screen.getByRole('region', { name: 'Department schema' });
+    const head = schema.querySelector<HTMLElement>('.sslot:has(> .shead)')!;
+    expect([head.style.height, head.style.minHeight]).toEqual(['', '184px']);
+    const frame = within(schema).getByRole('group', { name: 'Backend engineer' });
+    await waitFor(() => expect(frame.style.top).toBe(`${362 + 240 - 184}px`));
+    const people = [...schema.querySelectorAll<HTMLElement>('.pchip')];
+    expect(people.map(p => [p.style.top, p.style.height, p.style.minHeight])).toEqual([['12px', '', '56px'], [`${12 + 90 + 10}px`, '', '56px']]);
   });
 
   it("says what an employee waits for in a few words that fit next to its name, in both languages", async () => {
@@ -1529,17 +1601,38 @@ describe('the department bar', () => {
     /* The zoom keeps out and in and Show everything, at its end: a finger does not pinch the schema. */
     expect(decl('.dv-dock .zoom', 'align-self', PHONE)).toBe('flex-end');
     expect(decl('.dv-dock .zv', 'display', PHONE)).toBe('none');
-    /* The line wraps its words over as many lines as it needs. */
-    expect(decl('.dv-dock > .ticker', 'white-space', PHONE)).toBe('normal');
-    expect(decl('.dv-dock > .ticker', 'overflow', PHONE)).toBe('visible');
-    expect(decl('.dv-dock > .ticker', 'max-width', PHONE)).toBe('none');
-    expect(decl('.dv-dock .ticker .tx', 'overflow', PHONE)).toBe('visible');
-    expect(decl('.dv-dock .ticker .tx', 'text-overflow', PHONE)).toBe('clip');
-    expect(decl('.dv-dock .ticker .tx', 'overflow-wrap', PHONE)).toBe('break-word');
+    /* The line wraps its words over as many lines as it needs, on a phone and on a wide screen alike, where it grows up
+       from the bottom between the zoom and the tools. */
+    expect(decl('.dv-dock > .ticker', 'white-space')).toBe('normal');
+    expect(decl('.dv-dock > .ticker', 'overflow')).toBe('visible');
+    expect(decl('.dview .ticker', 'max-width')).toBe('none');
+    expect(decl('.dv-dock .ticker .tx', 'overflow')).toBe('visible');
+    expect(decl('.dv-dock .ticker .tx', 'text-overflow')).toBe('clip');
+    expect(decl('.dv-dock .ticker .tx', 'overflow-wrap')).toBe('break-word');
+    for (const part of ['.dv-dock > .ticker', '.dv-dock .ticker .tx', '.dv-dock .ticker .live'])
+      expect(rulesFor(part).filter(r => r.media === PHONE && ['white-space', 'overflow', 'text-overflow', 'overflow-wrap', 'align-items', 'padding-block', 'margin-block-start'].some(p => p in r.decls))).toEqual([]);
     /* A line of several rows keeps its dot and time on the first row; one row still stands in the middle of 44 px. */
-    expect(decl('.dv-dock > .ticker', 'align-items', PHONE)).toBe('flex-start');
-    expect(decl('.dv-dock > .ticker', 'padding-block', PHONE)).toBe('max(8px, calc((44px - 1lh) / 2))');
-    expect(decl('.dv-dock .ticker .live', 'margin-block-start', PHONE)).toBe('calc((1lh - 7px) / 2)');
+    expect(decl('.dv-dock > .ticker', 'align-items')).toBe('flex-start');
+    expect(decl('.dv-dock > .ticker', 'padding-block')).toBe('max(8px, calc((44px - 1lh) / 2))');
+    expect(decl('.dv-dock .ticker .live', 'margin-block-start')).toBe('calc((1lh - 7px) / 2)');
+  });
+
+  it('ends the tree, the drawers and the hint of an empty schema above a line of what happened that grows on a wide screen', async () => {
+    const measure = observed();
+    await open(1440);
+    const root = document.querySelector<HTMLElement>('.dview')!;
+    const ticker = root.querySelector<HTMLElement>('.ticker')!;
+    Object.defineProperties(root, { clientWidth: { configurable: true, value: 1440 }, clientHeight: { configurable: true, value: 900 } });
+    /* One line, 44 px from 16 px over the bottom: they end where they always did. */
+    Object.defineProperty(ticker, 'offsetTop', { configurable: true, value: 900 - 16 - 44 });
+    measure();
+    expect(root.style.getPropertyValue('--tree-bottom')).toBe('76px');
+    /* Three lines: 16 px over its top. */
+    Object.defineProperty(ticker, 'offsetTop', { configurable: true, value: 900 - 16 - 80 });
+    measure();
+    expect(root.style.getPropertyValue('--tree-bottom')).toBe(`${16 + 80 + 16}px`);
+    for (const part of ['.tview', '.dv-drawer']) expect(decl(part, 'bottom')).toBe('var(--tree-bottom, 76px)');
+    expect(decl('.dv-empty', 'bottom')).toBe('var(--tree-bottom, 76px)');
   });
 
   it('puts the zoom of the tree in the same dock, the only zoom on the screen', async () => {
@@ -1571,12 +1664,9 @@ describe('the department bar', () => {
   });
 
   it('lets the name of the department wrap on a phone, and starts the tree and the drawers under it', () => {
-    expect(decl('.crumbs h2', 'white-space', PHONE)).toBe('normal');
-    expect(decl('.crumbs h2', 'overflow', PHONE)).toBe('visible');
-    expect(decl('.crumbs h2', 'overflow-wrap', PHONE)).toBe('break-word');
-    expect(decl('.crumbs', 'height', PHONE)).toBe('auto');
-    expect(decl('.crumb', 'height', PHONE)).toBe('auto');
-    expect(decl('.crumb', 'min-height', PHONE)).toBe('44px');
+    /* The name wraps on every screen; a phone gives it the whole width under the top bar. */
+    for (const prop of ['white-space', 'overflow', 'text-overflow', 'overflow-wrap']) expect(decl('.crumbs h2', prop, PHONE)).toBeUndefined();
+    expect(decl('.crumbs', 'max-width', PHONE)).toBe('calc(100% - 32px)');
     expect(decl('.dv-drawer', 'top', PHONE)).toBe('var(--tree-top, 116px)');
     expect(decl('.tview', 'top', PHONE)).toBe('var(--tree-top, 116px)');
   });
@@ -1588,6 +1678,25 @@ describe('the department bar', () => {
     Object.defineProperties(root.querySelector('.crumbs')!, { offsetTop: { configurable: true, value: 64 }, offsetHeight: { configurable: true, value: 70 } });
     measure();
     expect(root.style.getPropertyValue('--tree-top')).toBe('142px');
+  });
+
+  it('wraps a name of the department too long for its room on a wide screen, and starts the tree and drawers under it', async () => {
+    const measure = observed();
+    await open(1440);
+    const root = document.querySelector<HTMLElement>('.dview')!;
+    const crumbs = root.querySelector<HTMLElement>('.crumbs')!;
+    Object.defineProperties(crumbs, { offsetTop: { configurable: true, value: 12 }, offsetHeight: { configurable: true, value: 44 } });
+    measure();
+    expect(root.style.getPropertyValue('--tree-top')).toBe('68px');
+    Object.defineProperty(crumbs, 'offsetHeight', { configurable: true, value: 70 });
+    measure();
+    expect(root.style.getPropertyValue('--tree-top')).toBe(`${12 + 70 + 12}px`);
+    for (const part of ['.tview', '.dv-drawer']) expect(decl(part, 'top')).toBe('var(--tree-top, 68px)');
+    expect(decl('.crumbs h2', 'white-space')).toBe('normal');
+    expect(decl('.crumbs h2', 'overflow-wrap')).toBe('break-word');
+    for (const rule of rulesFor('.crumbs h2')) expect([rule.decls.overflow, rule.decls['text-overflow']]).not.toContain('hidden');
+    for (const rule of rulesFor('.crumbs h2')) expect(rule.decls['text-overflow']).not.toBe('ellipsis');
+    expect([decl('.crumbs', 'height'), decl('.crumbs', 'align-items'), decl('.crumb', 'height'), decl('.crumb', 'min-height')]).toEqual(['auto', 'flex-start', 'auto', '44px']);
   });
 
   it('tells the top bar how much room its name takes beside the logo on a wide screen', async () => {
