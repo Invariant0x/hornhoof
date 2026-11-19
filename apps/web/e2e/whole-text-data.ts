@@ -114,7 +114,8 @@ const employee = (id: string, name: string, roleId: string, over: Partial<Employ
 
 const NOW = '2026-11-05T12:00:00.000Z';
 
-/* A company of four departments; the first has a head and staff in three stages and works on a task. */
+/* A company of four departments; the first, d2 as the routes of the API fixture answer it, has a head and staff in three
+   stages and works on a task. */
 export function wholeTextOrg(script: Script): Org {
   const w = WORDS[script];
   const task = (id: string, number: number, title: string) => ({ id, number, title, echelons: taskRoute('development', 'b1') });
@@ -132,7 +133,7 @@ export function wholeTextOrg(script: Script): Org {
     role('R-TEST', w.roles.test, w.roles.testAbout, 'member', null, 'final_check'),
   ];
   const dept = (i: number, employees: Employee[], more: Partial<Department> = {}): Department => ({
-    id: `d${i + 1}`, name: w.depts[i]!, templateKey: null, roleCode: ['DEV', 'MKT', 'SAL', 'SUP'][i]!, about: '',
+    id: `d${i + 2}`, name: w.depts[i]!, templateKey: null, roleCode: ['DEV', 'MKT', 'SAL', 'SUP'][i]!, about: '',
     agents: { total: employees.length, working: employees.filter(e => e.status === 'working').length },
     products: [], teams: [], people: [], employees, roles: employees.length ? roles : [], workLines: [], reworkAt: null, ...more,
   });

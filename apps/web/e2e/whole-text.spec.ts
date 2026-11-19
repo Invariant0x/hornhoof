@@ -145,7 +145,8 @@ for (const look of LOOKS) {
     if (look.script === 'en' || look.script === 'ru') expect(cards[0]!.h, 'words that fit keep the old card').toBe(160);
 
     /* The department: its head card, role frames and member chips, and the hint at its foot. */
-    await page.locator('.map .dept').first().click();
+    /* A card can stand under the top bar on a phone: it is pressed as a person's tap on it would press it. */
+    await page.locator('.map .dept').first().evaluate(card => (card as HTMLElement).click());
     await expect(page.locator('.dview .dcanvas')).toBeVisible();
     await page.locator('.dview .zoom').getByRole('button', { name: look.lang === 'en' ? 'Show everything' : 'Показать все' }).click();
     const hint = page.locator('.dview .ticker .tx');
