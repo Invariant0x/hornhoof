@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page, type TestInfo } from '@playwright/test';
 import type { Org } from '../src/types';
 import { serveApi } from './api';
 import { captureWith } from './capture';
@@ -355,6 +355,165 @@ async function zoomToChips(page: Page, chips: string) {
   }
 }
 
+/* What floats over each canvas, the top bar and the department's name along its top, and the zoom, the line of what happened,
+   the tools and Put back along its bottom; and the blocks that may not stand under any of it: cards and people chips. */
+const FLOATING = {
+  map: '.topbar > *, .map .zoom, .map > .ticker, .map-arrange',
+  department: '.topbar > *, .dview .crumbs, .dview .zoom, .dview .ticker, .dview .dv-acts',
+} as const;
+const BLOCKS = {
+  map: '.map .dept, .map .chips > li, .map .dept-chips > li',
+  department: '.dview .shead, .dview .frame .dept-chip, .dview .pchip',
+} as const;
+type Screen = keyof typeof FLOATING;
+const CANVAS: Record<Screen, string> = { map: '.map', department: '.dview .dcanvas' };
+const EDGES = ['left', 'right', 'top', 'bottom'] as const;
+
+/* What a person sees of each block: the part of it inside every box that clips it and inside the screen. Which blocks stand
+   under something floating over the canvas, within 1 px, and which show whole and clear of all of it, by their order. */
+async function inView(page: Page, screen: Screen): Promise<{ under: string[]; whole: number[] }> {
+  return page.evaluate(({ blocks, floating }) => {
+    const seen = (el: Element) => {
+      const r = el.getBoundingClientRect();
+      let box = { l: r.left, t: r.top, r: r.right, b: r.bottom };
+      const cut = (c: { left: number; top: number; right: number; bottom: number }) => {
+        box = { l: Math.max(box.l, c.left), t: Math.max(box.t, c.top), r: Math.min(box.r, c.right), b: Math.min(box.b, c.bottom) };
+      };
+      for (let up = el.parentElement; up; up = up.parentElement) if (getComputedStyle(up).overflow !== 'visible') cut(up.getBoundingClientRect());
+      cut({ left: 0, top: 0, right: innerWidth, bottom: innerHeight });
+      return { box, r };
+    };
+    const over = [...document.querySelectorAll(floating)].map(el => ({ el, r: el.getBoundingClientRect() })).filter(f => f.r.width > 0 && f.r.height > 0);
+    const name = (el: Element) => `${String(el.className).split(' ')[0]} "${(el.textContent ?? '').trim().slice(0, 16)}"`;
+    const under: string[] = [], whole: number[] = [];
+    [...document.querySelectorAll(blocks)].forEach((el, i) => {
+      const { box: s, r } = seen(el);
+      if (s.r - s.l <= 1 || s.b - s.t <= 1) return;
+      const hit = over.filter(f => s.l < f.r.right - 1 && f.r.left < s.r - 1 && s.t < f.r.bottom - 1 && f.r.top < s.b - 1);
+      under.push(...hit.map(f => `${name(el)} under ${name(f.el)}`));
+      if (!hit.length && s.l <= r.left + 1 && s.r >= r.right - 1 && s.t <= r.top + 1 && s.b >= r.bottom - 1) whole.push(i);
+    });
+    return { under, whole };
+  }, { blocks: BLOCKS[screen], floating: FLOATING[screen] });
+}
+
+/* The bare canvas a person's hand presses and drags by dx, dy: clear of cards, chips, the handles of lines and what floats
+   over the canvas, where the drag stays on the part of the canvas the screen shows, as much of it as that lets. Whether the
+   world moved. */
+async function dragBy(page: Page, screen: Screen, dx: number, dy: number): Promise<boolean> {
+  const start = await page.evaluate(({ canvas, floating, dx, dy }) => {
+    let box = document.querySelector(canvas)!.getBoundingClientRect();
+    for (const room of document.querySelectorAll(`${canvas} > .map-room`)) box = room.getBoundingClientRect();
+    const over = [...document.querySelectorAll(floating)].map(el => el.getBoundingClientRect());
+    const busy = 'button, a, input, label, li, .dept, .chip, .hub, .shead, .sslot, .dept-chip, .pchip, .frame, .bend, [role="button"], [role="checkbox"]';
+    const [left, top, right, bottom] = [Math.max(box.left, 0), Math.max(box.top, 0), Math.min(box.right, innerWidth), Math.min(box.bottom, innerHeight)];
+    const reach = (from: number, by: number, start: number, end: number) => (by > 0 ? (end - 4 - from) / by : by < 0 ? (from - start - 4) / -by : 1);
+    let best: { x: number; y: number; f: number } | null = null;
+    for (let y = top + 6; y < bottom - 6; y += 10) {
+      for (let x = left + 6; x < right - 6; x += 10) {
+        if (over.some(r => x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 4 && y <= r.bottom + 4)) continue;
+        const hit = document.elementFromPoint(x, y);
+        if (!hit || !hit.closest(canvas) || hit.closest(busy)) continue;
+        const f = Math.min(1, reach(x, dx, left, right), reach(y, dy, top, bottom));
+        if (!best || f > best.f) best = { x, y, f };
+      }
+    }
+    return best && best.f * Math.hypot(dx, dy) >= 20 ? best : null;
+  }, { canvas: CANVAS[screen], floating: FLOATING[screen], dx, dy });
+  if (!start) return false;
+  const world = page.locator(`${CANVAS[screen]} .world`);
+  const before = await world.boundingBox();
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x + dx * start.f, start.y + dy * start.f, { steps: 8 });
+  await page.mouse.up();
+  await settle(page);
+  const after = await world.boundingBox();
+  return Math.abs(after!.x - before!.x) >= 0.5 || Math.abs(after!.y - before!.y) >= 0.5;
+}
+
+/* The canvas dragged towards one side until it moves no more: dragged to the right, its left edge comes into view. Whether it
+   stopped, that is whether the canvas has that edge. */
+async function scrollToEdge(page: Page, screen: Screen, edge: (typeof EDGES)[number]): Promise<boolean> {
+  const [dx, dy] = ({ left: [320, 0], right: [-320, 0], top: [0, 320], bottom: [0, -320] } as const)[edge];
+  for (let turn = 0; turn < 16; turn++) if (!(await dragBy(page, screen, dx, dy))) return true;
+  return false;
+}
+
+/* The canvas dragged as a person brings one card or chip, by its order, to the middle of what the canvas shows: whether it
+   then shows whole, clear of all that floats over it. */
+async function scrollToBlock(page: Page, screen: Screen, i: number): Promise<boolean> {
+  for (let turn = 0; turn < 8; turn++) {
+    const [dx, dy] = await page.evaluate(({ blocks, canvas, i }) => {
+      const r = document.querySelectorAll(blocks)[i]!.getBoundingClientRect();
+      let room = document.querySelector(canvas)!.getBoundingClientRect();
+      for (const inner of document.querySelectorAll(`${canvas} > .map-room`)) room = inner.getBoundingClientRect();
+      const top = Math.max(room.top, 0), bottom = Math.min(room.bottom, innerHeight);
+      return [(room.left + room.right) / 2 - (r.left + r.right) / 2, (top + bottom) / 2 - (r.top + r.bottom) / 2];
+    }, { blocks: BLOCKS[screen], canvas: CANVAS[screen], i });
+    if (Math.hypot(dx, dy) >= 1 && !(await dragBy(page, screen, dx, dy))) break;
+    if ((await inView(page, screen)).whole.includes(i)) return true;
+  }
+  return (await inView(page, screen)).whole.includes(i);
+}
+
+/* Where a phone's canvas cuts what it shows, against the bars as they stand now: its top 8 px under the lowest bar along the
+   top, its bottom 8 px over the highest along the bottom, within 1 px, across the whole width in either direction. */
+const CUTS: Record<Screen, { cut: string; top: string; bottom: string; line: string }> = {
+  map: { cut: '.map .map-room', top: '.topbar > *', bottom: '.map .zoom, .map > .ticker, .map-arrange', line: '.map > .ticker .tx' },
+  department: { cut: '.dview .dcanvas', top: '.topbar > *, .dview .crumbs', bottom: '.dview .dv-dock :is(.zoom, .ticker, .dv-acts)', line: '.dview .ticker .tx' },
+};
+async function cutAt(page: Page, screen: Screen) {
+  return page.evaluate(({ cut, top, bottom }) => {
+    const rects = (s: string) => [...document.querySelectorAll(s)].map(el => el.getBoundingClientRect()).filter(r => r.width > 0 && r.height > 0);
+    const c = document.querySelector(cut)!.getBoundingClientRect();
+    return { top: c.top, bottom: c.bottom, left: c.left, right: c.right, width: innerWidth, under: Math.max(...rects(top).map(r => r.bottom)), over: Math.min(...rects(bottom).map(r => r.top)) };
+  }, CUTS[screen]);
+}
+
+/* The head of Development's word for #1554: the cut follows the bars' real height, as measured, not a constant. As it stands
+   and again after the line of what happened grows by a long text, the cut stands 8 px clear of the bars, and nothing stands
+   under them. */
+async function cutFollowsBars(page: Page, screen: Screen) {
+  const check = async (when: string) => {
+    const at = await cutAt(page, screen);
+    expect.soft(Math.abs(at.top - (at.under + 8)), `${screen}, ${when}: the cut stands 8 px under the bars along the top`).toBeLessThanOrEqual(1);
+    expect.soft(Math.abs(at.bottom - (at.over - 8)), `${screen}, ${when}: the cut stands 8 px over the bars along the bottom`).toBeLessThanOrEqual(1);
+    expect.soft([at.left, at.right], `${screen}, ${when}: the cut runs across the whole width`).toEqual([0, at.width]);
+    expect.soft((await inView(page, screen)).under, `${screen}, ${when}: nothing under what floats over it`).toEqual([]);
+    return at;
+  };
+  const before = await check('as it stands');
+  await page.locator(CUTS[screen].line).first().evaluate((el, text) => { el.textContent = text; }, LONG_HINT);
+  await settle(page);
+  const after = await check('after the line grows');
+  expect.soft(before.over - after.over, `${screen}: the line grew taller, so the check means something`).toBeGreaterThan(10);
+}
+
+/* The canvas as it opens, at each of its edges in turn, and then brought to each card and chip a person has not seen whole
+   yet: nothing stands under what floats over it anywhere, it stops at every edge, and every card and chip shows whole. */
+async function scrollsClear(page: Page, screen: Screen, shot: (where: string) => Promise<void>) {
+  const all = await page.locator(BLOCKS[screen]).count();
+  const whole = new Set<number>();
+  const opened = await inView(page, screen);
+  expect.soft(opened.under, `${screen}: nothing under what floats over it as it opens`).toEqual([]);
+  opened.whole.forEach(i => whole.add(i));
+  for (const edge of EDGES) {
+    expect.soft(await scrollToEdge(page, screen, edge), `${screen}: the canvas stops at its ${edge} edge`).toBe(true);
+    await shot(edge);
+    const at = await inView(page, screen);
+    expect.soft(at.under, `${screen}: nothing under what floats over it at the ${edge} edge`).toEqual([]);
+    at.whole.forEach(i => whole.add(i));
+  }
+  for (let i = 0; i < all; i++) {
+    if (whole.has(i)) continue;
+    expect.soft(await scrollToBlock(page, screen, i), `${screen}: card or chip ${i} can be scrolled into view whole`).toBe(true);
+    const at = await inView(page, screen);
+    expect.soft(at.under, `${screen}: nothing under what floats over it, scrolled to card or chip ${i}`).toEqual([]);
+    at.whole.forEach(j => whole.add(j));
+  }
+}
+
 /* The API fixture, the company of these words, and the version the app root asks for and the updates its shell asks for
    once, which the fixture does not answer. */
 async function serve(page: Page, org: Org) {
@@ -517,6 +676,90 @@ for (const look of LOOKS) {
     }
     expect.soft(await cutTexts(page, chips, 'b, small'), 'every word near').toEqual([]);
 
+    expect.soft(errors).toEqual([]);
+  });
+}
+
+/* The Head of Design's rule for #1539 (19.11), for #1554: on a phone the company map opens with a card's name drawn at least
+   11 px tall in every language and scrolls; a department opens on its head card, centred on it at the top edge of the room
+   under the top bar and its name. On both, no card or chip stands under what floats over the canvas, as it opens and at each
+   edge it is scrolled to, and Show everything still shows the whole map. */
+for (const look of LOOKS.filter(l => l.width === 375)) {
+  const name = `${look.script}-${look.dir}-${look.width}`;
+  const open = async (page: Page) => {
+    await page.setViewportSize({ width: look.width, height: 812 });
+    await page.addInitScript(({ lang, dir }) => {
+      localStorage.setItem('hh-lang', lang);
+      document.addEventListener('DOMContentLoaded', () => { document.documentElement.dir = dir; });
+    }, look);
+    await serve(page, wholeTextOrg(look.script));
+    await page.goto('/');
+    await expect(page.locator('.map .dept')).toHaveCount(4);
+    await page.evaluate(d => { document.documentElement.dir = d; }, look.dir);
+    await settle(page);
+  };
+  /* Pictures for Design: as it opens and after Show everything in every engine, at each edge in Chromium. */
+  const pictures = (page: Page, info: TestInfo, browserName: string, what: string) => async (where: string) => {
+    if (browserName !== 'chromium' && where !== 'open' && where !== 'all') return;
+    await shoot(page, info, `${what}-${where}-${browserName}-${name}`);
+  };
+  const errorsOf = (page: Page) => {
+    const errors: string[] = [];
+    page.on('pageerror', e => errors.push(e.message));
+    page.on('console', m => {
+      if (m.type() === 'error') errors.push(m.text());
+    });
+    return errors;
+  };
+
+  test(`the map on a phone opens readable and scrolls to every card: ${look.script}, ${look.dir}`, async ({ page, browserName }, info) => {
+    const errors = errorsOf(page);
+    await open(page);
+    const shot = pictures(page, info, browserName, `phone-map`);
+    await shot('open');
+    const names = await page.locator('.map .dept .dname').evaluateAll(all => {
+      const world = document.querySelector<HTMLElement>('.map .world')!;
+      const k = world.getBoundingClientRect().width / world.offsetWidth;
+      return all.map(el => parseFloat(getComputedStyle(el).fontSize) * k);
+    });
+    expect.soft(Math.min(...names), 'the map opens with card names at least 11 px tall').toBeGreaterThanOrEqual(10.99);
+    await scrollsClear(page, 'map', shot);
+
+    await page.locator('.map .zoom').getByRole('button', { name: look.lang === 'en' ? 'Show everything' : 'Показать все' }).click();
+    await settle(page);
+    await shot('all');
+    const all = await inView(page, 'map');
+    expect.soft(all.under, 'Show everything puts nothing under what floats').toEqual([]);
+    expect.soft(all.whole.length, 'Show everything shows every card and chip whole').toBe(await page.locator(BLOCKS.map).count());
+    await cutFollowsBars(page, 'map');
+    expect.soft(errors).toEqual([]);
+  });
+
+  /* The department in English, Russian and the long pseudo translation, and, by the head of Development's word, right to left. */
+  if (look.script === 'cjk') continue;
+  test(`a department on a phone opens on its head card and scrolls clear of what floats: ${look.script}, ${look.dir}`, async ({ page, browserName }, info) => {
+    const errors = errorsOf(page);
+    await open(page);
+    /* A card can stand under the top bar on a phone: it is pressed as a person's tap on it would press it. */
+    await page.locator('.map .dept').first().evaluate(card => (card as HTMLElement).click());
+    await expect(page.locator('.dview .dcanvas')).toBeVisible();
+    await settle(page);
+    const shot = pictures(page, info, browserName, `phone-department`);
+    await shot('open');
+    const at = await page.evaluate(() => {
+      const box = (el: Element | null) => el!.getBoundingClientRect();
+      const head = box(document.querySelector('.dview .shead')), canvas = box(document.querySelector('.dview .dcanvas'));
+      const top = Math.max(...[...document.querySelectorAll('.topbar > *, .dview .crumbs')].map(box).filter(r => r.height > 0).map(r => r.bottom));
+      return { middle: head.left + head.width / 2 - (canvas.left + canvas.width / 2), below: head.top - top, left: head.left, right: innerWidth - head.right };
+    });
+    expect.soft(Math.abs(at.middle), `the head card is centred, ${at.middle.toFixed(1)} px off`).toBeLessThanOrEqual(1);
+    expect.soft(at.below, 'the head card stands under the department\'s name').toBeGreaterThanOrEqual(0);
+    expect.soft(at.below, 'the head card stands at the top edge').toBeLessThanOrEqual(24);
+    expect.soft(Math.min(at.left, at.right), 'the head card shows whole across the screen').toBeGreaterThanOrEqual(0);
+    const head = await page.locator(BLOCKS.department).evaluateAll(all => all.findIndex(el => el.matches('.shead')));
+    expect.soft((await inView(page, 'department')).whole, 'the head card shows whole as it opens').toContain(head);
+    await scrollsClear(page, 'department', shot);
+    await cutFollowsBars(page, 'department');
     expect.soft(errors).toEqual([]);
   });
 }
