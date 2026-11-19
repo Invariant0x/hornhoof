@@ -34,6 +34,7 @@ const closed = (runs: object[] = []) => ({ status: 200, body: { access: null, ru
 function stand(over: { pin?: string | null; trustApp?: boolean } = {}) {
   const controlDir = mkdtempSync(join(tmpdir(), 'hh-control-'));
   const dir = mkdtempSync(join(tmpdir(), 'hh-keeper-'));
+  const computerControl = join(dir, 'computer-control');
   const asked: { method: string; path: string; body?: unknown }[] = [];
   const said = { get: closed() as Answer, post: { status: 204, body: null } as Answer };
   let now = START;
@@ -47,13 +48,13 @@ function stand(over: { pin?: string | null; trustApp?: boolean } = {}) {
   };
   const make = () => new ComputerCarrier({ controlDir, dir, machine: MACHINE, ask, pin: () => over.pin ?? null, trustApp: over.trustApp ?? over.pin === undefined, log: line => lines.push(line), now: () => new Date(now), openEveryMs: 5, closedEveryMs: 50, askMs: 30 });
   const alive = () => writeFileSync(join(controlDir, 'alive'), '');
-  const settings = () => JSON.parse(readFileSync(join(controlDir, 'computer.json'), 'utf8')) as { untilSec: number | null; until: string | null; asked: null; by: string };
-  const files = () => (existsSync(join(controlDir, 'computer')) ? readdirSync(join(controlDir, 'computer')).sort() : []);
+  const settings = () => JSON.parse(readFileSync(join(computerControl, 'computer.json'), 'utf8')) as { untilSec: number | null; until: string | null; asked: null; by: string };
+  const files = () => (existsSync(join(computerControl, 'computer')) ? readdirSync(join(computerControl, 'computer')).sort() : []);
   const put = (name: string, content: object | string = '') => {
-    mkdirSync(join(controlDir, 'computer'), { recursive: true });
-    writeFileSync(join(controlDir, 'computer', name), typeof content === 'string' ? content : JSON.stringify(content));
+    mkdirSync(join(computerControl, 'computer'), { recursive: true });
+    writeFileSync(join(computerControl, 'computer', name), typeof content === 'string' ? content : JSON.stringify(content));
   };
-  return { controlDir, dir, asked, said, lines, make, alive, settings, files, put, advance: (ms: number) => void (now += ms), nowS: () => Math.floor(now / 1000) };
+  return { controlDir, dir, computerControl, asked, said, lines, make, alive, settings, files, put, advance: (ms: number) => void (now += ms), nowS: () => Math.floor(now / 1000) };
 }
 
 const CLOSED = { untilSec: null, until: null, asked: null, by: 'keeper' };
@@ -89,7 +90,7 @@ describe("a machine's keeper and its computer access", () => {
     expect(s.asked[0]).toMatchObject({ method: 'GET', path: '/api/network/computer?standing=1&updater=1&held=' });
     expect(s.settings()).toEqual({ untilSec: until_, until: new Date(until_ * 1000).toISOString(), asked: null, by: 'keeper' });
     expect(s.files()).toEqual([`${id}.json`]);
-    expect(JSON.parse(readFileSync(join(s.controlDir, 'computer', `${id}.json`), 'utf8'))).toEqual({ id, command: 'uname -a', timeout: 30 });
+    expect(JSON.parse(readFileSync(join(s.computerControl, 'computer', `${id}.json`), 'utf8'))).toEqual({ id, command: 'uname -a', timeout: 30 });
     /* It names what it holds from then on, and posts the updater's answer, after which both files go. */
     s.said.get = open(until_);
     s.put(`${id}.out.json`, { id, exit: 3, output: 'Linux\n' });
@@ -138,7 +139,8 @@ describe("a machine's keeper and its computer access", () => {
   it('closes what it wrote before a restart, once it has heard nothing for a minute', async () => {
     const s = stand();
     const until_ = s.nowS() + 3600;
-    writeFileSync(join(s.controlDir, 'computer.json'), JSON.stringify({ untilSec: until_, until: new Date(until_ * 1000).toISOString(), asked: null, by: 'keeper' }));
+    mkdirSync(s.computerControl);
+    writeFileSync(join(s.computerControl, 'computer.json'), JSON.stringify({ untilSec: until_, until: new Date(until_ * 1000).toISOString(), asked: null, by: 'keeper' }));
     const carrier = s.make();
     carrier.prepare();
     /* A restart stops no command: what the keeper wrote before stays. */
@@ -230,19 +232,26 @@ describe("a machine's keeper and its computer access", () => {
     expect(server.settings().untilSec).toBe(until_);
   });
 
-  it("moves an older app's file aside, once", async () => {
+  it('starts closed and leaves the old shared window and requests in place on update', async () => {
     const s = stand();
     const until_ = s.nowS() + 3600;
-    const old = { untilSec: until_, until: new Date(until_ * 1000).toISOString(), asked: { reason: 'Look.', at: '2026-11-10T09:00:00.000Z' } };
+    const old = { untilSec: until_, until: new Date(until_ * 1000).toISOString(), asked: null, by: 'keeper' };
+    const id = randomUUID();
+    const shared = join(s.controlDir, 'computer');
+    mkdirSync(shared);
     writeFileSync(join(s.controlDir, 'computer.json'), JSON.stringify(old));
-    s.make().prepare();
-    expect(JSON.parse(readFileSync(join(s.controlDir, 'computer.legacy.json'), 'utf8'))).toEqual(old);
+    writeFileSync(join(shared, `${id}.json`), '{}');
+    const carrier = s.make();
+    carrier.prepare();
     expect(s.settings()).toEqual(CLOSED);
-    /* What was set aside already is never written over. */
-    writeFileSync(join(s.controlDir, 'computer.json'), JSON.stringify({ untilSec: null, until: null, asked: null }));
-    s.make().prepare();
-    expect(JSON.parse(readFileSync(join(s.controlDir, 'computer.legacy.json'), 'utf8'))).toEqual(old);
-    expect(s.settings()).toEqual(CLOSED);
+    expect(s.files()).toEqual([]);
+    s.said.get = { status: 200, body: { access: { standing: true }, runs: [] } };
+    await carrier.tick();
+    expect(s.settings().untilSec).toBeGreaterThan(s.nowS());
+    expect(s.asked[0]!.path).toContain('&held=');
+    expect(s.asked[0]!.path).not.toContain(id);
+    expect(JSON.parse(readFileSync(join(s.controlDir, 'computer.json'), 'utf8'))).toEqual(old);
+    expect(readdirSync(shared)).toEqual([`${id}.json`]);
   });
 
   it('stops without a late write, and closed', async () => {

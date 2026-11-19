@@ -1,0 +1,7 @@
+#!/bin/sh
+# Fix the computer access clock when the caller supplies a virtual time.
+if [ -n "${STUB_COMPUTER_NOW:-}" ] && [ "$#" -eq 1 ] && [ "$1" = +%s ]; then
+  printf '%s\n' "$STUB_COMPUTER_NOW"
+else
+  exec /bin/date "$@"
+fi

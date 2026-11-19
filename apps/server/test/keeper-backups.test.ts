@@ -2,16 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import { gzipSync } from 'node:zlib';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { openBundle, type BundleSecrets } from '../src/modules/backups/bundle.js';
 import { certificates } from '../src/db/schema.js';
 import { bundleRow, bundleRows } from '../src/modules/backups/records.js';
 import { FORK_KEEP_MS, REPORT_MAX, REPORTED_BUNDLES } from '../src/modules/backups/types.js';
-import { BackupKeeper, BUNDLE_EVERY_MS, DUMP_GAP_MS, DUMP_LIFE_MS, type Ask } from '../src/modules/keeper/backups.js';
+import { BackupKeeper, BUNDLE_EVERY_MS, BUNDLES_DIR, DUMP_GAP_MS, DUMP_LIFE_MS, type Ask } from '../src/modules/keeper/backups.js';
 import { bundleSecrets } from '../src/modules/keeper/keeper.js';
 import { saveLink } from '../src/modules/link/link.js';
 import { issueCertificate } from '../src/modules/network/authority.js';
@@ -507,6 +507,34 @@ describe('the keeper of backups', () => {
     s.said.record = 400;
     expect(await s.keeper.takeLed(peer(b), fresh.id, Readable.from([fresh.travels()]))).toBe(400);
     expect([s.keeper.store().has(fresh.id), s.keeper.store().has(led.id)]).toEqual([false, true]);
+  });
+
+  it('never lets a refused delivery of a new bundle remove the copy another delivery of it got recorded', async () => {
+    const s = await stand();
+    const { b, peer, fork } = await ledFrom(s);
+    /* Two deliveries of one new fork at once: the second has not sent its bundle yet when the first is recorded, and
+       then B's certificate is revoked, so the app refuses the second. The copy the first brought and its record stay. */
+    const fresh = await fork();
+    const first = s.keeper.takeLed(peer(b), fresh.id, Readable.from([fresh.travels()]));
+    const later = new PassThrough();
+    const second = s.keeper.takeLed(peer(b), fresh.id, later);
+    expect(await first).toBe(201);
+    await s.db.update(certificates).set({ revokedAt: new Date() }).where(eq(certificates.machineId, b));
+    later.end(fresh.travels());
+    expect(await second).toBe(403);
+    expect([s.keeper.store().has(fresh.id), (await bundleRow(s.db, fresh.id))?.id]).toEqual([true, fresh.id]);
+  });
+
+  it('gives two deliveries of one new bundle at once one copy, recorded once', async () => {
+    const s = await stand();
+    const { b, peer, fork } = await ledFrom(s);
+    const fresh = await fork();
+    const later = new PassThrough();
+    const answers = Promise.all([s.keeper.takeLed(peer(b), fresh.id, Readable.from([fresh.travels()])), s.keeper.takeLed(peer(b), fresh.id, later)]);
+    later.end(fresh.travels());
+    expect((await answers).sort()).toEqual([200, 201]);
+    expect([s.keeper.store().has(fresh.id), (await bundleRow(s.db, fresh.id))?.id]).toEqual([true, fresh.id]);
+    expect(readdirSync(join(s.dir, BUNDLES_DIR)).filter(name => name.startsWith(fresh.id)).sort()).toEqual([`${fresh.id}.age`, `${fresh.id}.head`]);
   });
 
   it('makes nothing while it does not lead', async () => {
