@@ -28,6 +28,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - The map runs to the bottom of the screen, with the version as small muted text in its bottom end corner, clear of its buttons and of the bars along a phone's bottom; other screens keep the version in the row below them.
 
+## [0.39.4] - 2026-11-20
+
+### Fixed
+
+- A node no longer refuses the hooks of an agent's own program as callers outside its terminal after the program gave up on one, so its Hornhoof tools stay connected.
+
 ## [0.39.3] - 2026-11-19
 
 ### Fixed
