@@ -101,11 +101,11 @@ describe('Claude Code in a terminal', () => {
     /* Claude Code runs each command in a shell of its own and ends that shell when it gives up on it: exec makes the shell
        the hook, so the hook ends with it instead of calling the bridge as an orphan no pane holds. */
     expect(settings.hooks.Stop[0].hooks[0].command).toBe('exec hh-hook stop');
-    expect(settings.hooks.StopFailure).toEqual([{ hooks: [{ type: 'command', command: 'exec hh-hook stop' }] }]);
+    expect(settings.hooks.StopFailure).toEqual([{ hooks: [{ type: 'command', command: 'exec hh-hook stop', timeout: 60 }] }]);
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('exec hh-hook prompt');
     expect(settings.hooks.SessionStart[0].hooks[0].command).toBe('exec hh-hook start');
     /* After compacting its conversation it hears to read the company again. */
-    expect(settings.hooks.SessionStart[1]).toEqual({ matcher: 'compact', hooks: [{ type: 'command', command: 'exec hh-hook compact' }] });
+    expect(settings.hooks.SessionStart[1]).toEqual({ matcher: 'compact', hooks: [{ type: 'command', command: 'exec hh-hook compact', timeout: 60 }] });
     expect(settings.statusLine).toEqual({ type: 'command', command: 'exec hh-hook status' });
     const commands = [...Object.values(settings.hooks as Record<string, { hooks: { command: string }[] }[]>).flat().flatMap(entry => entry.hooks.map(h => h.command)), settings.statusLine.command];
     expect(commands.filter(c => !/^exec hh-hook [a-z]+$/.test(c))).toEqual([]);
@@ -282,7 +282,7 @@ describe('Antigravity CLI in a terminal', () => {
     const first = agyProgram.launch({ ...base, sessionId: null, model: 'gemini-4-argon', effort: 'high' });
     expect(first.command).toEqual(['/t/agy', '--model', 'gemini-4-argon', '--effort', 'high', ...trust]);
     expect(first.sessionId).toBeNull();
-    expect(first.env).toEqual({ HOME: '/h', AGY_CLI_DISABLE_AUTO_UPDATE: 'true', HH_BRIDGE: URLS.hookUrl, HH_ATTACH_URL: URLS.attachUrl, HH_ATTACH_PASS: 'bridge', COLORTERM: 'truecolor' });
+    expect(first.env).toEqual({ HOME: '/h', AGY_CLI_DISABLE_AUTO_UPDATE: 'true', HH_BRIDGE: URLS.hookUrl, HH_ATTACH_URL: URLS.attachUrl, HH_ATTACH_PASS: 'bridge', COLORTERM: 'truecolor', HH_HOOK_LIMITS: '{"*":30000}' });
     const again = agyProgram.launch({ ...base, sessionId: 'conversation-1', model: null });
     expect(again.command).toEqual(['/t/agy', '--conversation', 'conversation-1', ...trust]);
     expect(again.sessionId).toBe('conversation-1');
@@ -447,13 +447,14 @@ describe('lifecycle hooks in launch settings', () => {
   it('configures Claude tool, permission and session ends', () => {
     const settings = JSON.parse(arg(claudeProgram.launch(launch).command, '--settings')!);
     for (const [name, event] of Object.entries({ PreToolUse: 'tool', PostToolUse: 'tooldone', PostToolUseFailure: 'toolfail', PermissionRequest: 'ask', SessionEnd: 'end' })) {
-      expect(settings.hooks[name]).toEqual([{ hooks: [{ type: 'command', command: `exec hh-hook ${event}` }] }]);
+      expect(settings.hooks[name]).toEqual([{ hooks: [{ type: 'command', command: `exec hh-hook ${event}`, timeout: 60 }] }]);
     }
   });
   it('configures exactly the five Codex hooks with inline TOML and bypasses hook trust', () => {
     const command = codexProgram.launch(launch).command;
     expect(command).toContain('--dangerously-bypass-hook-trust');
-    expect(command.filter(s => s.startsWith('hooks.'))).toEqual(Object.entries({ Stop: 'stop', Interrupt: 'interrupt', PreToolUse: 'tool', PostToolUse: 'tooldone', SessionEnd: 'end' }).map(([name, event]) => `hooks.${name}=[{hooks=[{type="command",command="hh-hook ${event}"}]}]`));
+    const short = new Set(['Interrupt', 'SessionEnd']);
+    expect(command.filter(s => s.startsWith('hooks.'))).toEqual(Object.entries({ Stop: 'stop', Interrupt: 'interrupt', PreToolUse: 'tool', PostToolUse: 'tooldone', SessionEnd: 'end' }).map(([name, event]) => `hooks.${name}=[{hooks=[{type="command",command="hh-hook ${event}"${short.has(name) ? ',timeout=3' : ''}}]}]`));
   });
   it('upgrades the two existing Kimi hooks once, including both stop events', async () => {
     const home = mkdtempSync(join(tmpdir(), 'hh-kimi-hooks-'));
@@ -464,5 +465,34 @@ describe('lifecycle hooks in launch settings', () => {
     const config = readFileSync(join(home, 'config.toml'), 'utf8');
     expect([...config.matchAll(/event = "([^"]+)"/g)].map(m => m[1])).toEqual(['SessionStart', 'UserPromptSubmit', 'UserPromptQueued', 'Stop', 'StopFailure', 'Interrupt', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'SessionEnd']);
     expect(config).not.toContain('SessionHeartbeat');
+  });
+});
+
+/* Each program ends a hook it ran past its own limit. hh-hook waits less than that, and learns the limit from its
+   environment, by event, with '*' for the rest. */
+describe('how long each program lets the hooks of the node run', () => {
+  const launch = { bin: '/t/program', home: '/h', workDir: '/w', sessionId: null, model: null, instructionsFile: null, urls: URLS };
+  const limits = (env: Record<string, string>) => JSON.parse(env.HH_HOOK_LIMITS ?? 'null');
+
+  it('gives every hook of Claude Code a minute, which its prompt and session end hooks otherwise lack', () => {
+    const { command, env } = claudeProgram.launch(launch);
+    const { hooks } = JSON.parse(arg(command, '--settings')!) as { hooks: Record<string, { hooks: { timeout?: number }[] }[]> };
+    const entries = Object.values(hooks).flat().flatMap(entry => entry.hooks);
+    expect(entries.length).toBeGreaterThan(9);
+    expect(entries.filter(h => h.timeout !== 60)).toEqual([]);
+    expect(limits(env)).toEqual({ '*': 60_000 });
+  });
+
+  it("raises Codex's interrupt and session end hooks to the three seconds it allows them, and tells hh-hook so", () => {
+    const { command, env } = codexProgram.launch(launch);
+    expect(command).toContain('hooks.Interrupt=[{hooks=[{type="command",command="hh-hook interrupt",timeout=3}]}]');
+    expect(command).toContain('hooks.SessionEnd=[{hooks=[{type="command",command="hh-hook end",timeout=3}]}]');
+    expect(command).toContain('hooks.Stop=[{hooks=[{type="command",command="hh-hook stop"}]}]');
+    expect(limits(env)).toEqual({ '*': 600_000, interrupt: 3_000, end: 3_000 });
+  });
+
+  it("tells hh-hook the thirty seconds Kimi and Antigravity give a hook", () => {
+    expect(limits(kimiProgram.launch(launch).env)).toEqual({ '*': 30_000 });
+    expect(limits(agyProgram.launch(launch).env)).toEqual({ '*': 30_000 });
   });
 });
