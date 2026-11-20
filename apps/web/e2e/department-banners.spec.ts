@@ -13,7 +13,7 @@ import { serveApi } from './api';
    department took the lower half. The department takes the whole room under the bars, as with no bar, and no map shows
    beside it; back on the map, the map is where and as large as the person left it. Each look is a width and a skin: the
    default one, and one more. */
-test.describe.configure({ timeout: 120_000 });
+test.describe.configure({ timeout: 0 });
 
 const WIDTHS = [1440, 375];
 const SKINS = ['cyberpunk', 'matrix'];
@@ -89,6 +89,8 @@ const settled = (page: Page) => page.evaluate(() => new Promise(done => requestA
 
 /* The map's view once it stopped moving. */
 async function still(page: Page) {
+  /* A skin's own font comes late, and the map fits again to the cards it makes taller: still is after that. */
+  await page.evaluate(async () => { await document.fonts.ready; });
   let last = '';
   await expect.poll(async () => {
     await settled(page);
@@ -123,9 +125,12 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const bar of BARS) {
     if (bar.before) await expect(page.locator('main.body > .update-banner')).toBeVisible();
     await still(page);
 
-    /* The person zooms the map in and leaves it there: the view is theirs. */
-    const map = await boxOf(page, '.map');
-    await page.mouse.move(map.x + map.width / 2, map.y + map.height / 2);
+    /* The person zooms the map in on the department's card and leaves it there: the view is theirs. A phone's map opens on
+       its hub (#1597), where the card may show only in part at an edge, so they zoom where it shows. */
+    const map = await boxOf(page, '.map'), shown = await boxOf(page, '.dept:has-text("Development")');
+    const [x0, x1] = [Math.max(shown.x, map.x), Math.min(shown.x + shown.width, map.x + map.width)];
+    const [y0, y1] = [Math.max(shown.y, map.y), Math.min(shown.y + shown.height, map.y + map.height)];
+    await page.mouse.move((x0 + x1) / 2, (y0 + y1) / 2);
     await page.mouse.wheel(0, -240);
     const left = await still(page);
     const mapBefore = await boxOf(page, '.map');

@@ -12,7 +12,7 @@ TAKEN_OVER="This build's updater goes on with the update."
 taken_over() {
   local i=0
   while true; do
-    case "$(jq -r '.log // empty' "$CONTROL/status.json" 2> /dev/null || true)" in *"$TAKEN_OVER"*) return 0 ;; esac
+    case "$(take "$CONTROL/status.json" quiet jq -r '.log // empty' || true)" in *"$TAKEN_OVER"*) return 0 ;; esac
     [ "$i" -lt "$TAKE_OVER_WAIT" ] || return 1
     i=$((i + 1))
     sleep 1

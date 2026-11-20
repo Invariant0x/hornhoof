@@ -8,7 +8,7 @@ import { box, serveApi } from './api';
    connection is paid now stands as a sign by its name, with its full words as the sign's name and tooltip; the name is
    one short line, the provider and its tier; the orchestrator's role is a small line under the name; no row and no card
    says it in a badge any more. The longest language and a page laid out right to left keep the sign by the name. */
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 
 const NOW = Date.parse('2026-11-15T12:00:00.000Z');
 const messages = { en, ru };

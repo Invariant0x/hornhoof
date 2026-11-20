@@ -86,8 +86,10 @@ migrations_to_run() {
 # keeper_said <file> <field>: a field of the answer the server's keeper left for this very update; fails while there
 # is none of this update.
 keeper_said() {
-  [ "$(jq -r '.id // empty' "$CONTROL/$1" 2> /dev/null || true)" = "$ID" ] || return 1
-  jq -r ".$2 // empty" "$CONTROL/$1" 2> /dev/null || true
+  local said
+  said=$(take "$CONTROL/$1" || true)
+  [ "$(jq -r '.id // empty' <<< "$said" 2> /dev/null || true)" = "$ID" ] || return 1
+  jq -r ".$2 // empty" <<< "$said" 2> /dev/null || true
 }
 
 # The machines that keep a copy of the company promise to wait for the update: the server's keeper asks them, and says
@@ -175,6 +177,58 @@ project_containers() {
     --format '{{.ID}} {{.Label "com.docker.compose.service"}}' 2> /dev/null || true
 }
 
+# A compose run cut short, as one whose command on the computer was stopped halfway, leaves containers it made and never
+# started, and the machine stands without them: a node finds no front, and nothing would start them. Those of this
+# server's own project start again as compose made them, each said, once the same ones stood so for UNSTARTED_AFTER
+# seconds with no update and no command under way, so a compose run that is still going finishes first. None of a service
+# that runs is started beside it, nothing is made again, and the updater's own is left to its swap. Migrations, and on
+# the machine whose database the company writes the app that needs them, start only by an update, which saves the
+# database first. A container made on purpose and left unstarted, as by compose create, starts too: no step of this
+# stack makes one. The first time each set was seen stays in the control folder, so a restart of the updater keeps it;
+# that folder is shared with the app and the keeper, so the note is read with take and written with publish, which
+# never follow a link at its name.
+UNSTARTED_AFTER=300
+start_unstarted() {
+  local seen="$CONTROL/unstarted" project states running services='' service now noted since role left=' updater migrate '
+  [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ] || return 0
+  if update_running || [ -f "$SERVER_DIR/backups/update.json" ] || computer_busy; then
+    rm -f "$seen"
+    return 0
+  fi
+  [ "$(path_kind)" != lead ] || left=' updater migrate app '
+  project=$(compose_project)
+  states=$(docker ps -a --filter "label=com.docker.compose.project=$project" --format '{{.Label "com.docker.compose.service"}} {{.State}}' 2> /dev/null) || return 0
+  running=" $(printf '%s\n' "$states" | awk '$2 == "running" { print $1 }' | tr '\n' ' ') "
+  for service in $(printf '%s\n' "$states" | awk '$2 == "created" { print $1 }' | sort -u); do
+    [[ "$service" =~ ^[a-z][a-z0-9_-]{0,62}$ ]] || continue
+    case "$left$running" in *" $service "*) continue ;; esac
+    services="$services $service"
+  done
+  services=${services# }
+  if [ -z "$services" ]; then
+    rm -f "$seen"
+    return 0
+  fi
+  now=$(date +%s)
+  noted=$(take "$seen" || true)
+  since=${noted%% *}
+  if [ "${noted#* }" != "$services" ] || ! [[ "$since" =~ ^[0-9]+$ ]]; then
+    publish "$seen" over printf '%s %s\n' "$now" "$services" || true
+    return 0
+  fi
+  [ "$((now - since))" -ge "$UNSTARTED_AFTER" ] || return 0
+  for service in $services; do say "Starting $service, whose container was made and never started."; done
+  # Under the role the settings name: this updater's own environment holds the one it was started with.
+  role=$(env_value HORNHOOF_ROLE)
+  # shellcheck disable=SC2086 # services is a space-separated list of plain service names.
+  if HORNHOOF_ROLE="${role:-$ROLE}" compose up -d --no-build --no-deps --no-recreate $services > /dev/null 2>&1; then
+    rm -f "$seen"
+  else
+    say "Could not start $services."
+    publish "$seen" over printf '%s %s\n' "$now" "$services" || true
+  fi
+}
+
 # remove_unnamed <compose file>: containers of services that file does not name go before its installer runs, since a
 # build from before front could not take the web port while front holds it, and drop_orphans comes only after an
 # install that worked. A file without the updater would take this updater for one of them, so then nothing goes.
@@ -192,7 +246,8 @@ remove_unnamed() {
 # run_installer <tag> <app> <node> <updater>: the installer of that build. It takes as long as it takes: no clock ends it.
 run_installer() {
   local tag=$1 dir="$WORK/$1"
-  HORNHOOF_CONTROL_DIR="$CONTROL" HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATER_REV="$UPDATER_REV" HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
+  installer_control "$WORK/control" || true
+  HORNHOOF_CONTROL_DIR="$WORK/control" HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATER_REV="$UPDATER_REV" HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
     HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" HORNHOOF_NODES_FREE="$NODES_FREE" HORNHOOF_NODES_ONLY="$NODES_ONLY" bash "$dir/install.sh" "$(install_mode)" >> "$WORK/install.log" 2>&1
 }
 
@@ -325,10 +380,11 @@ save_and_install() {
 
 # Whether the keeper passed on the company server's word for this very request, and the word still stands.
 told_to_go() {
-  local id commit until
-  id=$(jq -r '.id // empty' "$CONTROL/go.json" 2> /dev/null || true)
-  commit=$(jq -r '.commit // empty' "$CONTROL/go.json" 2> /dev/null || true)
-  until=$(jq -r '.until // 0 | floor' "$CONTROL/go.json" 2> /dev/null || true)
+  local word id commit until
+  word=$(take "$CONTROL/go.json" || true)
+  id=$(jq -r '.id // empty' <<< "$word" 2> /dev/null || true)
+  commit=$(jq -r '.commit // empty' <<< "$word" 2> /dev/null || true)
+  until=$(jq -r '.until // 0 | floor' <<< "$word" 2> /dev/null || true)
   case "$until" in '' | *[!0-9]*) return 1 ;; esac
   [ "$id" = "$ID" ] && [ "$commit" = "$TAG" ] && [ "$until" -gt "$(date +%s)" ]
 }
@@ -342,7 +398,7 @@ wait_turn() {
   step wait "Waiting for its turn to install."
   while true; do
     if told_to_go; then return 0; fi
-    if [ "$(jq -r '.id // empty' "$CONTROL/request.json" 2> /dev/null || true)" != "$ID" ]; then
+    if [ "$(take "$CONTROL/request.json" quiet jq -r '.id // empty' || true)" != "$ID" ]; then
       stop_with failed "A newer build came first, so this one was left." finished
       return 1
     fi
@@ -399,7 +455,7 @@ warn_subnet_overlap() {
   addrs=$(
     {
       env_value HORNHOOF_ADDRESSES | tr ',' '\n'
-      if [ -f "$CONTROL/addresses.json" ]; then jq -r '.addresses[]? // empty' "$CONTROL/addresses.json" 2> /dev/null || true; fi
+      take "$CONTROL/addresses.json" quiet jq -r '.addresses[]? // empty' || true
     } | awk 'NF'
   )
   [ -n "$addrs" ] || return 0
@@ -529,19 +585,19 @@ go_back() {
 }
 
 handle_request() {
-  local id tag digest node updater done_id
-  [ -f "$CONTROL/request.json" ] || return 0
-  id=$(jq -r '.id // empty' "$CONTROL/request.json" 2> /dev/null || true)
+  local request id tag digest node updater done_id
+  request=$(take "$CONTROL/request.json") || return 0
+  id=$(jq -r '.id // empty' <<< "$request" 2> /dev/null || true)
   case "$id" in '' | *[!A-Za-z0-9-]*) return 0 ;; esac
-  done_id=$(jq -r '.id // empty' "$CONTROL/status.json" 2> /dev/null || true)
+  done_id=$(take "$CONTROL/status.json" quiet jq -r '.id // empty' || true)
   [ "$id" != "$done_id" ] || return 0
   ID=$id
-  VERSION=$(jq -r '.version // empty' "$CONTROL/request.json" | tr -cd 'A-Za-z0-9._ -' | cut -c1-64)
-  tag=$(jq -r '.tag // empty' "$CONTROL/request.json")
-  digest=$(jq -r '.digest // empty' "$CONTROL/request.json")
-  node=$(jq -r '.nodeDigest // empty' "$CONTROL/request.json")
-  updater=$(jq -r '.updaterDigest // empty' "$CONTROL/request.json")
-  NODES_FREE=$(jq -r 'if .immediate == true or .urgent == true then "1" else "" end' "$CONTROL/request.json")
+  VERSION=$(jq -r '.version // empty' <<< "$request" | tr -cd 'A-Za-z0-9._ -' | cut -c1-64)
+  tag=$(jq -r '.tag // empty' <<< "$request")
+  digest=$(jq -r '.digest // empty' <<< "$request")
+  node=$(jq -r '.nodeDigest // empty' <<< "$request")
+  updater=$(jq -r '.updaterDigest // empty' <<< "$request")
+  NODES_FREE=$(jq -r 'if .immediate == true or .urgent == true then "1" else "" end' <<< "$request")
   WORK=$(mktemp -d)
   update "$tag" "$digest" "$node" "$updater"
   rm -rf "$WORK"
