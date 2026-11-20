@@ -9,11 +9,28 @@ it('reserves a footer row for the version outside the screen and its fixed panel
 });
 
 /* The footer's row is taken from the screen above it, so a footer that comes and goes moves every window and panel fixed
-   there: it hides only for a whole screen, never because a form or a panel opened in one (#1384). */
+   there: it hides only for a whole screen, never because a form or a panel opened in one (#1384). The map shows the version
+   over its own corner instead (#1590). */
 it('hides the version footer only for a whole screen, the map or a phone', () => {
   const hiding = RULES.filter(rule => rule.decls.display === 'none').flatMap(rule =>
     rule.selectors.filter(selector => selector.endsWith('.version-mark')).map(selector => `${rule.media ?? 'any width'}: ${selector}`));
-  expect(hiding).toEqual(['any width: body:has(.dview) .version-mark', '(max-width: 760px): .version-mark']);
+  expect(hiding).toEqual([
+    'any width: .app-layout:has(.map-version) > .version-mark',
+    'any width: body:has(.dview) .version-mark',
+    '(max-width: 760px): .version-mark',
+  ]);
+});
+
+/* Over the map the version is small muted text in the bottom end corner of the room its bars leave free, mirrored right to
+   left, raised by what it measures over a bar in its column, with nothing around it, and a tap goes through it to the map
+   (#1590). */
+it('floats the version over the end corner of the map, out of the way of taps', () => {
+  const rules = rulesFor('.map-version');
+  expect(rules.map(rule => rule.media)).toEqual([null]);
+  expect(rules[0]!.decls).toEqual({
+    position: 'absolute', 'inset-block-end': 'calc(4px + var(--lift, 0px))', 'inset-inline-end': '12px', margin: '0', color: 'var(--muted)', 'font-size': '12px',
+    'pointer-events': 'none', 'user-select': 'none',
+  });
 });
 
 function paddingRightPx(selector: string): number | undefined {
