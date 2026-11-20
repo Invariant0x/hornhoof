@@ -108,3 +108,40 @@ for (const look of LOOKS) {
     expect(errors).toEqual([]);
   });
 }
+
+/* Each number of the card with the unit or word it goes with, as "14 h", "1 online" or "Input 0", that lands on two lines:
+   a pair whose pieces of text do not share one line box (#1601). */
+async function splitPairs(card: Locator): Promise<string[]> {
+  return card.evaluate(root => {
+    const out: string[] = [];
+    const oneLine = (range: Range) => {
+      const tops = [...range.getClientRects()].filter(r => r.width > 0).map(r => r.top + r.height / 2);
+      return Math.max(...tops) - Math.min(...tops) < 2;
+    };
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (const pair of (node.textContent ?? '').matchAll(/\d+[  ]\p{L}+|\p{L}+:[  ]\d+/gu)) {
+        const range = document.createRange();
+        range.setStart(node, pair.index);
+        range.setEnd(node, pair.index + pair[0].length);
+        if (!oneLine(range)) out.push(pair[0]);
+      }
+    }
+    for (const label of root.querySelectorAll('.gauge .g-s > span')) {
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      if (!oneLine(range)) out.push(label.textContent ?? '');
+    }
+    return out;
+  });
+}
+
+for (const look of LOOKS.filter(look => look.width === 375)) {
+  test(`keeps each number of the card on one line with its unit, and still wraps between them, in ${lookName(look)}`, async ({ page }) => {
+    const { card, errors } = await opened(page, look);
+    expect(await splitPairs(card)).toEqual([]);
+    /* A reset longer than its tile wraps between its pieces, "4 days" over "14 h", and nothing of the card is cut for it. */
+    expect(await whole(card)).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+}
