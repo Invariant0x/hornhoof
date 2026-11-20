@@ -271,8 +271,8 @@ tar_members() {
     head=$(od -An -v -tx1 -j "$at" -N 512 -- "$archive" | tr -d ' \n') && [ "${#head}" = 1024 ] || return 1
     if [ "${head:0:2}" = 00 ]; then
       # A block with no name ends the archive; BusyBox tar reads on past one such block, so only zeros may follow.
-      [ "$(tail -c "+$((at + 1))" -- "$archive" | tr -d '\000' | head -c 1 | wc -c)" -eq 0 ]
-      return
+      [ "$(tail -c "+$((at + 1))" -- "$archive" | tr -d '\000' | head -c 1 | wc -c)" -eq 0 ] || return 1
+      return 0
     fi
     count=$((count + 1))
     [ "$count" -le "$UPLOAD_MOST" ] || return 2
@@ -308,7 +308,7 @@ tar_members() {
 # keeper put it in, and unpacked into a folder of the updater's own, only once the headers of the archive itself say
 # that it holds nothing else.
 unpack_upload() {
-  local file=$1 dir=$2 max=$3 archive="$2.tar" n members kind names name item links count=0 status=0 read=0
+  local file=$1 dir=$2 max=$3 archive="$2.tar" n members kind names name item links count=0 status=0 listed=0
   UPLOAD_WHY='The folder to unpack the upload in could not be made.'
   (umask 077 && mkdir "$dir") || return 1
   UPLOAD_WHY='The upload unpacks to more than it may.'
@@ -317,11 +317,11 @@ unpack_upload() {
   [ "$n" -le "$max" ] || return 1
   UPLOAD_WHY='The upload cannot be read.'
   [ "$status" -eq 0 ] || return 1
-  members=$(tar_members "$archive") || read=$?
+  members=$(tar_members "$archive") || listed=$?
   UPLOAD_WHY='The upload holds a file that is no table of the company.'
-  [ "$read" -ne 2 ] || return 1
+  [ "$listed" -ne 2 ] || return 1
   UPLOAD_WHY='The upload cannot be read.'
-  [ "$read" -eq 0 ] && [ -n "$members" ] || return 1
+  [ "$listed" -eq 0 ] && [ -n "$members" ] || return 1
   UPLOAD_WHY='The upload holds a file that is no table of the company.'
   while read -r kind name; do
     plain_table "${name%.csv}" && [ "$name" != "${name%.csv}" ] || return 1

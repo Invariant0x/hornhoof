@@ -299,7 +299,8 @@ restore_run() {
   restore_stop
   # The copy of the dump goes as soon as it is loaded, or could not be: it is kept through no later step.
   load_copy "$DBC" "$WORK/restore.sql.gz" || status=$?
-  rm -f -- "$WORK/restore.sql.gz"
+  # Never a stop here, with the company down: rm -rf of the folder at the end takes a copy this could not.
+  rm -f -- "$WORK/restore.sql.gz" || true
   if [ "$status" -ne 0 ]; then
     restore_undo 'The backup did not load, so nothing changed.' load
     return 0
