@@ -617,10 +617,10 @@ select:disabled { opacity: .55; }
 .map-room > .world { top: calc(-1 * var(--map-top, 0px)); }
 /* The running build over the map, in the bottom end corner of that room, where the footer row stood its text before (#1590):
    small muted text and nothing more, which a tap goes through to the map. On a phone the room ends over the bars along the
-   bottom, so it stands on them; on a wide screen the room is the whole map, so it sits in the corner of the window, or on the
-   bar that stands there, as the zoom does right to left: --lift is how far it measures it must rise. */
+   bottom, so it stands on them; on a wide screen the room is the whole map, so it sits in the corner of the window. No bar
+   stands in that corner: the zoom and Put back stand at the start, the orchestrator's line in the middle (#1622). */
 .map-version {
-  position: absolute; inset-block-end: calc(4px + var(--lift, 0px)); inset-inline-end: 12px; margin: 0; color: var(--muted); font-size: 12px;
+  position: absolute; inset-block-end: 4px; inset-inline-end: 12px; margin: 0; color: var(--muted); font-size: 12px;
   pointer-events: none; user-select: none;
 }
 .world > * { position: absolute; }
@@ -720,6 +720,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .cnt b { color: var(--ink); font-weight: 600; }
 /* Zoom bottom left and the orchestrator's line bottom middle. */
 .zoom { position: absolute; left: 16px; bottom: 16px; max-inline-size: calc(100% - 32px); display: flex; align-items: center; }
+/* On the map the zoom stands at the start of the bottom, mirrored on a page right to left as the rest of the layout is; the
+   other canvases keep it at the left, beside bars they place from the left (#1622). */
+.map > .zoom { inset-inline: 16px auto; }
 /* A block's grip over its top left corner, 44 px to touch at any zoom: nothing drawn, only the pointer shows it, and the ring of
    the keyboard's focus; the map's corners are not mirrored. */
 .grip { box-sizing: border-box; margin: 0; padding: 0; border: 0; background: none; cursor: move; touch-action: none; transform-origin: 50% 50%; }
@@ -740,8 +743,8 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
   .bend { width: 44px; height: 44px; margin: -22px 0 0 -22px; }
   .bend:focus-visible { outline-offset: -14px; }
 }
-/* Put back as it was, and a move that was not saved, above the zoom. */
-.map-arrange { position: absolute; left: 16px; bottom: 76px; display: grid; justify-items: start; gap: 8px; max-width: calc(100% - 32px); }
+/* Put back as it was, and a move that was not saved, above the zoom, at the start of the bottom as the zoom is (#1622). */
+.map-arrange { position: absolute; inset-inline-start: 16px; bottom: 76px; display: grid; justify-items: start; gap: 8px; max-width: calc(100% - 32px); }
 .map-arrange .alert { margin: 0; }
 .map-arrange .btn { min-height: 44px; background: var(--hud); }
 .zbtn { flex: none; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: none; color: var(--ink); cursor: pointer; }
@@ -2709,6 +2712,8 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .tview .tv-in > svg { display: block; flex: none; }
 /* Agent lanes use the shared fixed-size Chip; these are the trunk plates only. */
 .tview .tv-labs .dept-chip { position: absolute; }
+/* Each lane's place: it moves down when a plate above grows, and its chip stands in it unchanged. */
+.tview .tv-labs .tv-lane { position: absolute; left: 0; }
 .tview .lchip { --cut: 8px; position: absolute; left: 0; right: 10px; display: grid; box-sizing: border-box; padding: 1px; border: 0; background: var(--line2); cursor: pointer; text-align: left; clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k))); }
 .tview .lchip > .in { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 7px 12px; background: var(--hud); clip-path: inherit; }
 .tview .lchip:hover { background: var(--muted); }

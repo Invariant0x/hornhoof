@@ -43,7 +43,10 @@ const readPlates = (page: Page) => page.locator('.tv-labs .dept-chip, .tv-labs .
     trunk: plate.classList.contains('tk'),
     size: [plate.offsetWidth, plate.offsetHeight],
     fonts: { name: font('.mn, b'), task: font('.r2'), state: font('.r3') },
-    clipped: [plate, ...parts].filter(el => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1).map(el => el.className),
+    /* Only a box that can cut what it holds: an inline one has no client size, and Firefox still gives it the scroll size of
+       its words (#1595). The rows around it, which could cut them, are checked. */
+    clipped: [plate, ...parts].filter(el => getComputedStyle(el).display !== 'inline')
+      .filter(el => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1).map(el => el.className),
     /* The halo of a framed button shows its glow only while the card is busy or waits, and its ring only on keyboard focus:
        those two layers draw no part of the plate, so their display none hides nothing of it. Every other part is checked. */
     hidden: parts.filter(el => !el.matches('.halo > .halo-glow, .halo > .halo-ring') && getComputedStyle(el).display === 'none').map(el => el.className),
