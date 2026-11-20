@@ -61,10 +61,10 @@ export function RecoveryQuestion({ children, again = false }: { children?: React
   const only = copies[0];
   return (
     <div className="update-banner question-banner glass" role="group" aria-label={q.title}>
-      <p>{copies.length === 1 && only ? q.oneCopy(leader, heard, named(only.host, only.networkId), clock(language, only.reach)) : q.moreCopies(leader, heard)}</p>
-      {question.waiting && new Date(question.waiting).getTime() > Date.now() && <p>{q.waiting(leader)}</p>}
+      <p dir="auto">{copies.length === 1 && only ? q.oneCopy(leader, heard, named(only.host, only.networkId), clock(language, only.reach)) : q.moreCopies(leader, heard)}</p>
+      {question.waiting && new Date(question.waiting).getTime() > Date.now() && <p dir="auto">{q.waiting(leader)}</p>}
       {went === question.since ? (
-        <p>{q.goingOn}</p>
+        <p dir="auto">{q.goingOn}</p>
       ) : view.canAnswer ? (
         <>
           <div className="entry-actions" role="group" aria-label={q.answers}>
@@ -73,12 +73,12 @@ export function RecoveryQuestion({ children, again = false }: { children?: React
             ))}
             <button className="btn ghost" type="button" disabled={busy} onClick={() => void send('/api/network/question/wait', {})}>{q.wait(leader)}</button>
           </div>
-          <p className="question-note">{q.warning(leader)}</p>
+          <p className="question-note" dir="auto">{q.warning(leader)}</p>
         </>
       ) : (
-        <p className="question-note">{q.ceoOnly}</p>
+        <p className="question-note" dir="auto">{q.ceoOnly}</p>
       )}
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      {failure !== null && <p className="alert" role="alert"><span dir="auto">{errorText(t, failure)}</span></p>}
     </div>
   );
 }

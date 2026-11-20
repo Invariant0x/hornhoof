@@ -24,7 +24,7 @@ export function RecoveryBanner({ me, again, onOpen }: { me: Me; again?: unknown;
   if (!owner || !view?.recoveryNeeded) return null;
   return (
     <div className="update-banner glass" role="status" aria-label={t.backups.title}>
-      <span>{view.linkChanged ? t.backups.bannerLink : t.backups.banner}</span>
+      <span dir="auto">{view.linkChanged ? t.backups.bannerLink : t.backups.banner}</span>
       <button className="btn small" type="button" onClick={onOpen}>{t.backups.openSettings}</button>
     </div>
   );
