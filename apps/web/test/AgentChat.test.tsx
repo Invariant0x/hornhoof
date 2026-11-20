@@ -1,9 +1,10 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import type { EventView } from '../src/types';
+import { LOAD_LIMIT_MS } from '../src/ui/Loading';
 import { CARD, DEV_ORG, ME, mockApi, ORG } from './api-mock';
 
 /* xterm needs a real canvas; the window only has to know the terminal is there. */
@@ -132,11 +133,54 @@ describe("an agent's window opens as a chat", () => {
     let comes: (answer: [number, unknown]) => void = () => {};
     const state = new Promise<[number, unknown]>(resolve => (comes = resolve));
     mockApi({ 'GET /api/agents/b1': () => new Promise(() => {}), 'GET /api/agents/b1/events?last=300': () => state });
-    render(<LanguageProvider><AgentWindow me={ME} org={org} agentId="b1" onClose={() => {}} /></LanguageProvider>);
+    const { container } = render(<LanguageProvider><AgentWindow me={ME} org={org} agentId="b1" onClose={() => {}} /></LanguageProvider>);
     expect(screen.getByRole('button', { name: 'Chat' })).toHaveTextContent('Chat');
-    expect(screen.getByRole('status', { name: 'Terminal' })).toHaveTextContent('Opening the Codex terminal…');
+    expect(within(container.querySelector<HTMLElement>('.t-term')!).getByRole('status')).toHaveTextContent('Opening the Codex terminal…');
     await act(async () => comes([200, { events: [], state: WITH_TERMINAL }]));
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
+  });
+
+  /* 20.11: the terminal's place drew a big mark of its own; now it names the program beside the shared mark, and when its
+     state does not come it says why, or that it takes longer than usual, with Try again, never a mark that turns on. */
+  it('opens the terminal beside the shared mark, with no mark of its own', () => {
+    localStorage.setItem('hh-agent-view', 'terminal');
+    const { container } = open({ [`GET ${EVENTS}?last=300`]: () => new Promise(() => {}) });
+    const place = container.querySelector<HTMLElement>('.t-term')!;
+    expect(within(place).getByRole('status')).toHaveTextContent(/^Opening the \w+ terminal…$/);
+    expect(place.querySelectorAll('.waiting-mark')).toHaveLength(1);
+    expect(place.querySelectorAll('.spinner:not(.waiting-mark)')).toHaveLength(0);
+  });
+
+  it('says why the terminal could not open, with Try again, which asks for its state again and opens it', async () => {
+    localStorage.setItem('hh-agent-view', 'terminal');
+    let asked = 0;
+    const failed = [500, { error: { code: 'internal', message: 'The server could not answer.' } }];
+    const { container } = open({ [`GET ${EVENTS}?last=300`]: () => (++asked === 1 ? failed : [200, { events: [], state: WITH_TERMINAL }]) });
+    const place = within(container.querySelector<HTMLElement>('.t-term')!);
+    expect(await place.findByRole('alert')).not.toBeEmptyDOMElement();
+    expect(container.querySelector('.t-term .waiting-mark')).toBeNull();
+    fireEvent.click(place.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
+    expect(asked).toBe(2);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('says the terminal takes longer than usual past the one limit of its load, with Try again, which asks again', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    localStorage.setItem('hh-agent-view', 'terminal');
+    let asked = 0;
+    const { container } = open({ [`GET ${EVENTS}?last=300`]: () => { asked++; return new Promise(() => {}); } });
+    await act(async () => { vi.advanceTimersByTime(LOAD_LIMIT_MS - 1); });
+    const place = within(container.querySelector<HTMLElement>('.t-term')!);
+    expect(place.queryByRole('alert')).not.toBeInTheDocument();
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(place.getByRole('alert')).toHaveTextContent('Taking longer than usual');
+    expect(container.querySelector('.t-term .waiting-mark')).toBeNull();
+    const before = asked;
+    fireEvent.click(place.getByRole('button', { name: 'Try again' }));
+    await act(async () => {});
+    expect(asked).toBe(before + 1);
+    expect(place.getByRole('status')).toHaveTextContent(/^Opening the \w+ terminal…$/);
   });
 
   it('says the terminal cannot be shown here when the agent works on a machine that does not show it', async () => {

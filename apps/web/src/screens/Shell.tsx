@@ -10,6 +10,7 @@ import { FirstContact } from '../ui/FirstContact';
 import { RecoveryBanner } from '../ui/RecoveryBanner';
 import { SwitchBanner } from '../ui/SwitchBanner';
 import { LoadFailure, UpdateSaysIt, useLoadFailure } from '../ui/LoadFailure';
+import { LoadState, onTop, useLoad } from '../ui/Loading';
 import { UpdateBanner } from '../ui/UpdateBanner';
 import { UpdateCut } from '../ui/UpdateCut';
 import { useVersion, versionText } from '../ui/VersionMark';
@@ -294,19 +295,21 @@ function MapWorkspace({ tab, me, dept, deptId, denied, missingDepartment, panel,
   );
 }
 
-/* A department still loading, or one whose load the update holds: the panel says so, and the load asks again after it. */
-function DepartmentFallback({ deptId, org, orgFailure }: { deptId: string | null; org: Org | null; orgFailure: unknown }) {
-  const failure = useLoadFailure(orgFailure);
-  return deptId && !org && failure === null ? <div className="dview" aria-busy="true"><div className="dcanvas" /></div> : null;
+/* A department whose company is still coming stands with the shared indicator where it will be, and says why with Try
+   again when it does not come. One the update holds keeps the indicator: the panel says why, and the load asks again
+   after it. */
+function DepartmentFallback({ deptId, org, orgFailure, loadOrg }: { deptId: string | null; org: Org | null; orgFailure: unknown; loadOrg(): void }) {
+  const load = useLoad([{ data: org, failure: orgFailure, load: loadOrg }]);
+  return deptId && !org ? <div className="dview" aria-busy={load.phase !== 'failed'}><div className="dcanvas dview-wait"><LoadState load={load} /></div></div> : null;
 }
 
-function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire, onCrumbs }: MapRouteProps & {
-  deptId: string | null; denied: boolean; org: Org | null; orgFailure: unknown; shown: string | null; panel: 'window' | 'task' | null;
+function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, loadOrg, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire, onCrumbs }: MapRouteProps & {
+  deptId: string | null; denied: boolean; org: Org | null; orgFailure: unknown; loadOrg(): void; shown: string | null; panel: 'window' | 'task' | null;
   openTask: (id: string) => void; openTracker: (departmentId: string) => void; openDepartment: (id: string) => void; onHire: (dept: Department) => void;
   onCrumbs: (px: number) => void;
 }) {
   if (tab !== 'map' || denied || missingDepartment) return null;
-  if (!dept) return <DepartmentFallback deptId={deptId} org={org} orgFailure={orgFailure} />;
+  if (!dept) return <DepartmentFallback deptId={deptId} org={org} orgFailure={orgFailure} loadOrg={loadOrg} />;
   return (
     <DepartmentView
       key={dept.id}
@@ -346,7 +349,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const windows = useAgentWindows(null);
   /* A task's panel stands on the left, on its own: it and a window on the screen take each other's place. */
   const [staff, setStaff] = useState<StaffAsk | null>(null);
-  const { org, failure: orgFailure } = useOrg(windows.ids.length > 0 || taskId !== null || deptId !== null);
+  const { org, failure: orgFailure, load: loadOrg } = useOrg(windows.ids.length > 0 || taskId !== null || deptId !== null);
   const orchestratorId = org?.orchestrator?.id;
   if (orchestratorId && windows.ids.includes(orchestratorId)) windows.nameOrchestrator(orchestratorId);
   const { open: openWindow, hide: hideWindow } = windows;
@@ -438,13 +441,14 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount({ kind: 'settings', group: 'company' })} />
         </SwitchBanner>
         <AgentWindowError shown={windows.shown} org={org} failure={orgFailure} />
-        {deptId && !unavailableFailure(orgFailure) && <LoadFailure failure={orgFailure} />}
+        {/* Before the company came, the department says it where it will stand. */}
+        {deptId && !unavailableFailure(orgFailure) && <LoadFailure failure={onTop(org, orgFailure)} />}
         {(route.kind === 'unavailable' || route.kind === 'invite' || missingDepartment || denied) && <RouteUnavailable onHome={goHome} />}
         <GuardBoundary block="map" reset={deptId}>
           <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
         </GuardBoundary>
         <GuardBoundary block="department" reset={deptId}>
-        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onCrumbs={setCrumbs} onHire={dept => {
+        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} loadOrg={loadOrg} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onCrumbs={setCrumbs} onHire={dept => {
           setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
           openAgent('orchestrator');
         }} />

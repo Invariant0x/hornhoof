@@ -48,9 +48,9 @@ const atPath = (path: string) => async (page: Page) => { await page.goto(path, {
 /* The department opens at its own address; a button of its tools opens what the test holds. */
 const inDepartment = (button: (lang: Lang) => string) => async (page: Page, lang: Lang) => {
   await page.goto(`/departments/${DEPARTMENT_ID}`, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: button(lang), exact: true }).click();
+  await page.locator('.dv-tools').getByRole('button', { name: button(lang), exact: true }).click();
 };
-const departmentShown = (page: Page, lang: Lang, button: string) => [sections(page, lang), page.locator('.crumb h2'), page.getByRole('button', { name: button, exact: true })];
+const departmentShown = (page: Page, lang: Lang, button: string) => [sections(page, lang), page.locator('.crumb h2'), page.locator('.dv-tools').getByRole('button', { name: button, exact: true })];
 
 /* A screen whose data the test holds back: where it opens, which answer is held, the blocks it shows before that answer,
    where the indicator stands, and what the answer brings. */

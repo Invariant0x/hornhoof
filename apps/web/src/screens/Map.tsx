@@ -16,6 +16,7 @@ import { Bar, percent } from '../ui/Bar';
 import { CANVAS_NARROW, CANVAS_ZOOM_LIMITS, DRAG_PX, FLOAT_GAP, LEFT_PANEL_COVER, SIDE_GAP, canvasSpace, freeRoom, usePanZoom, ZoomBar, type Box, type Edges, type View } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { useLoadFailure } from '../ui/LoadFailure';
+import { LoadState, useLoad, type Load } from '../ui/Loading';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
 import { PeopleBridgeMasks, peopleMask } from '../ui/PeopleWires';
@@ -636,6 +637,24 @@ function useMapRoom(box: { current: HTMLDivElement | null }, bars: string): CSSP
 /* Where the map stands in the free room of its canvas, b its bounds in the world: whole, as large as it fits up to 115%,
    when Show everything asks for it or when it fits so at a readable size; otherwise readable and centred across on the
    middle of the company, the hub, from its top when it is taller than the room. */
+/* One load of the map: the company and the person's arrangement. ready: the company, once both came, for what the map
+   draws, measures and places; null before. An arrangement that fails to come leaves the map as it places itself; only one
+   still on its way holds the map. */
+function useMapLoad(org: Org | null, failure: unknown, loadOrg: () => void, layout: { arrived: boolean; load(): void }) {
+  const load = useLoad([{ data: org, failure, load: loadOrg }, { data: layout.arrived || null, failure: null, load: layout.load }]);
+  return { load, ready: load.phase === 'done' ? org : null };
+}
+
+/* What the map shows in its place before it can draw itself: where the route leads nowhere, the shared indicator while the
+   company and the person's arrangement come, why they did not with Try again, or a failure of a later look at the company;
+   null once there is a map to draw. It draws only once both came, so no block moves after the first frame. */
+function mapStandIn(t: Messages, failure: unknown, load: Load, onHome?: () => void) {
+  if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
+  if (load.phase !== 'done') return <div className="map map-wait" aria-busy={load.phase !== 'failed'}><LoadState load={load} /></div>;
+  if (failure !== null) return <p className="alert" role="alert">{errorText(t, failure)}</p>;
+  return null;
+}
+
 export function mapView(room: Box, b: Box, whole: boolean): { k: number; x: number; y: number } {
   const w = Math.max(1, room.x1 - room.x0), h = Math.max(1, room.y1 - room.y0), bw = b.x1 - b.x0, bh = b.y1 - b.y0;
   const fitK = Math.min(w / bw, h / bh, 1.15);
@@ -655,7 +674,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const still = useReducedMotion();
   const wirePrefix = useId();
   const company = me.person.scopeKind === 'company';
-  const { org, failure: loadFailure } = useOrg();
+  const { org, failure: loadFailure, load: loadOrg } = useOrg();
   /* While the update panel says the server takes no changes, the map keeps what it last showed. */
   const failure = useLoadFailure(loadFailure);
   const [shots, setShots] = useState<Shot[]>([]);
@@ -679,6 +698,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const flashTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   /* Where this person put blocks, and the block their hand moves now. */
   const layout = useMapLayout();
+  const { load: mapLoad, ready } = useMapLoad(org, loadFailure, loadOrg, layout);
   const [moving, setMoving] = useState<{ key: string; at: At } | null>(null);
   /* The bend the hand moves now: on which line, which of its bends, and where. */
   const [bending, setBending] = useState<{ line: string; i: number; at: Point } | null>(null);
@@ -690,9 +710,9 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const [pointed, setPointed] = useState<string | null>(null);
   /* Every card of the map is as tall as the words of the card that has the most need, and every people chip of a row as
      the words of the chip that has the most. */
-  const need = useCardNeed(box, org, language);
-  const chipNeed = useChipNeed(box, org, language);
-  const arr = useMemo(() => (org ? arrangeMap(org, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed, bends, need, chipNeed) : null), [org, layout.placed, moving, bends, need, chipNeed]);
+  const need = useCardNeed(box, ready, language);
+  const chipNeed = useChipNeed(box, ready, language);
+  const arr = useMemo(() => (ready ? arrangeMap(ready, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed, bends, need, chipNeed) : null), [ready, layout.placed, moving, bends, need, chipNeed]);
   /* Pulses and Fit read the map as it stands, without waiting for it to settle. */
   const arrRef = useRef(arr);
   arrRef.current = arr;
@@ -779,12 +799,12 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   };
 
   /* Show everything when whole; otherwise as the map opens, readable. */
-  const fit = useCallback((whole: boolean) => {
+  const fit = useCallback((whole: boolean, smooth = true) => {
     const shown = arrRef.current, room = roomOf(FIT_SIDE);
     if (!room || !org || !shown || inside) return;
     const v = mapView(room, arrangedBounds(shown, org), whole);
     setMinZoom(Math.min(MIN_K, v.k));
-    setView({ ...v, smooth: true });
+    setView({ ...v, smooth });
   }, [org, inside, setView, roomOf]);
   const fitRef = useRef(fit);
   fitRef.current = fit;
@@ -804,10 +824,13 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const roomStyle = useMapRoom(box, `${shown}|${windowOpen}|${putBack}`);
   const cardH = arr?.depts[0]?.h ?? 0, chipH = `${arr?.top[0]?.h ?? 0}:${arr?.people.chips[0]?.h ?? 0}`;
   usePauseHiddenMap(box, inside, shown);
-  useEffect(() => {
+  /* Before the first frame, so the map is drawn where it stands; it moves there only after that. */
+  const placedOnce = useRef(false);
+  useLayoutEffect(() => {
     if (!shown || inside) return;
     const auto = () => {
-      if (!mine() && !back.current) fitRef.current(false);
+      if (!mine() && !back.current) fitRef.current(false, placedOnce.current);
+      placedOnce.current = true;
     };
     auto();
     const el = box.current;
@@ -845,9 +868,8 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     timers.current.add(timer);
   }
 
-  if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
-  if (failure !== null) return <p className="alert" role="alert">{errorText(t, failure)}</p>;
-  if (!org || !arr) return <div className="map" aria-busy="true" />;
+  const standIn = mapStandIn(t, failure, mapLoad, onHome);
+  if (standIn || !org || !arr) return standIn ?? <div className="map" aria-busy="true" />;
 
   const depts = org.departments;
   const sub = org.orchestrator?.subscription ?? null;

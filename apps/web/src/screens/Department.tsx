@@ -4,6 +4,7 @@ import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { useStream } from '../live';
 import { useDepartmentTree } from '../tasks';
+import { LoadState, useLoad } from '../ui/Loading';
 import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { Bar, percent } from '../ui/Bar';
 import { Chip, agentWorking, doingLine, Listed, modelParts, Switch, STATUS_CLASS } from '../ui/Chip';
@@ -229,6 +230,13 @@ function DeptApprovals({ department, shown }: { department: Department; shown: b
 
 type Drawer = 'about' | 'speed' | 'hire';
 
+/* The department's work tree, for its tree and its speed drawer: while either is open, the shared indicator where it will
+   stand, then why it did not come with Try again. Closed, nothing waits for it and no limit counts. */
+function useTreeLoad(departmentId: string, on: boolean) {
+  const { tree, failure, load } = useDepartmentTree(departmentId, on);
+  return { tree, load: useLoad(on ? [{ data: tree, failure, load }] : []) };
+}
+
 const drawerTitle = (t: ReturnType<typeof useT>, drawer: Drawer | null): string =>
   ({ speed: t.dept.speed, hire: t.dept.hiring, about: t.dept.about })[drawer ?? 'about'];
 
@@ -416,7 +424,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   const runs = canGive;
   const [tree, setTree] = useState(false);
   const [drawer, setDrawer] = useState<Drawer | null>(null);
-  const { tree: workTree, failure: treeFailure } = useDepartmentTree(d.id, tree || drawer === 'speed');
+  const { tree: workTree, load: treeLoad } = useTreeLoad(d.id, tree || drawer === 'speed');
   const openAgent = useOpenAgent();
   const chrome = useDepartmentSpace(language, panel, runs ? 'hire' : '', onCrumbs);
   const [zoomSlot, setZoomSlot] = useState<HTMLDivElement | null>(null);
@@ -621,7 +629,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
     <div className="dview" ref={chrome.root} style={chrome.style}>
       {tree && (workTree ? (
         <TreeView tree={workTree} department={d} onOpenTask={onOpenTask} zoomSlot={zoomSlot} />
-      ) : <div className="tview"><p className="tv-empty glass">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</p></div>)}
+      ) : <div className="tview tview-wait"><LoadState load={treeLoad} /></div>)}
       {!tree && (
       <div className={`dcanvas${far ? ' far' : ''}`} ref={box} role="region" aria-label={t.dept.schema} {...handlers}>
         <div className="world" ref={world} style={worldStyle}>
@@ -746,7 +754,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
       {drawer && (
         <aside className={`dv-drawer${drawer === 'speed' ? ' spd' : ''}`} aria-label={drawerName}>
           <DrawerHead title={drawerName} onClose={() => setDrawer(null)} />
-          {drawer === 'speed' ? (workTree ? <SpeedPanel tree={workTree} department={d} onAgent={openAgent} /> : <div className="dv-drawer-b">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</div>) : (
+          {drawer === 'speed' ? (workTree ? <SpeedPanel tree={workTree} department={d} onAgent={openAgent} /> : <div className="dv-drawer-b"><LoadState load={treeLoad} /></div>) : (
           <div className="dv-drawer-b">
             {drawer === 'hire' && runs && <StaffCard department={{ id: d.id, name: deptLabel(t, d) }} onDone={() => setDrawer(null)} onHide={() => setDrawer(null)} />}
             {drawer === 'about' && (
