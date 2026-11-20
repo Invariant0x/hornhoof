@@ -30,7 +30,7 @@ export function UpdateProgress({ version, step, starting = false, offline = fals
   return (
     <div className={`uprog${back ? ' back' : ''}`}>
       <span className="spinner" aria-hidden="true" />
-      <b>{t.updates.running(version)}</b>
+      <b dir="auto">{t.updates.running(version)}</b>
       <span
         className="uprog-bar"
         role="progressbar"
@@ -44,7 +44,7 @@ export function UpdateProgress({ version, step, starting = false, offline = fals
           <i key={s} className={i < at ? 'done' : i === at ? 'now' : ''} />
         ))}
       </span>
-      <span className="uprog-text">{label}</span>
+      <span className="uprog-text" dir="auto">{label}</span>
     </div>
   );
 }

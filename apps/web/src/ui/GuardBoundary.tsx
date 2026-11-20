@@ -12,7 +12,7 @@ function GuardStop({ storm, float, onRestart }: { storm: boolean; float: boolean
   const t = useT();
   return (
     <div className={float ? 'guard-stop float' : 'guard-stop'} role="alert">
-      <p>{storm ? t.guard.stopped : t.guard.failed}</p>
+      <p dir="auto">{storm ? t.guard.stopped : t.guard.failed}</p>
       <button className="btn" type="button" onClick={onRestart}>
         {t.guard.restart}
       </button>

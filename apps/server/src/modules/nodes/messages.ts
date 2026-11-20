@@ -13,7 +13,7 @@ import { said } from '../conversation/live.js';
 import { keepLeftInput } from '../conversation/left-input.js';
 import { unheard } from '../conversation/unheard.js';
 import { clearNodeWords, holdForWords, pump, pumpWaiting, startProgram, wordsSettled } from '../conversation/queue.js';
-import { limitUntil, refusedLimits } from '../conversation/limits.js';
+import { budgetUntil, limitUntil, refusedLimits } from '../conversation/limits.js';
 import { nodeOfAgent } from '../conversation/placement.js';
 import { onAgent } from '../conversation/line.js';
 import { workStarts } from '../org/map-state.js';
@@ -44,7 +44,7 @@ import { holdNotStarted, noteWorkFolder } from '../program-operator/not-started.
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
 import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
 import { tryPlaceWaiting } from '../subscriptions/waiting.js';
-import { fallBackFrom, heldUntil } from '../subscriptions/fallback.js';
+import { fallBackFrom } from '../subscriptions/fallback.js';
 import { closeCheck, openCheck } from '../tools/outside.js';
 import { phoneNodeGone } from '../phones/rpc.js';
 const OPEN_JOBS = ['queued', 'running'] as const;
@@ -187,23 +187,27 @@ async function afterReading(ctx: Ctx, planId: string, reading: Limits, now: Date
 
 async function savePlanMetadata(ctx: Ctx, planId: string, msg: Extract<NodeMessage, { type: 'status' }>, now: Date): Promise<void> {
   if (!msg.limits && !msg.models) return;
-  const held = msg.limits ? await planHeldNow(ctx, planId) : true;
+  const before = msg.limits ? await heldParts(ctx, planId) : null;
   await ctx.db
     .update(subscriptions)
     .set({ ...(msg.limits ? await afterReading(ctx, planId, msg.limits, now) : {}), ...(msg.models ? { models: msg.models } : {}) })
     .where(and(eq(subscriptions.id, planId), isNull(subscriptions.removedAt)));
-  if (!held) await fallBackIfHeld(ctx, planId);
+  if (before) await fallBackIfHeld(ctx, planId, before);
 }
 
-/* Whether the plan holds a worker's turns back now: at its limit, or past the share set for tasks. */
-async function planHeldNow(ctx: Ctx, planId: string): Promise<boolean> {
+/* Which parts of the plan hold a worker's turns back now, at their limit or past the share set for tasks: '' the plan as a
+   whole, which speaks for its fullest group and for models of no known group, and each of its model groups by name. */
+async function heldParts(ctx: Ctx, planId: string): Promise<string[]> {
   const [plan] = await ctx.db.select({ limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt, budget: subscriptions.budget }).from(subscriptions).where(eq(subscriptions.id, planId));
-  return Boolean(plan && heldUntil(plan, 'worker'));
+  if (!plan) return [];
+  const parts: { key: string; limits: Limits | null }[] = [{ key: '', limits: plan.limits }, ...(plan.limits?.groups ?? []).map(g => ({ key: `group:${g.name}`, limits: g }))];
+  return parts.filter(p => limitUntil(p.limits, plan.limitsUpdatedAt) ?? budgetUntil(p.limits, plan.budget, plan.limitsUpdatedAt)).map(p => p.key);
 }
 
-/* A plan that has just come to its limit or its share for tasks sends everyone on it to a fallback at once. */
-async function fallBackIfHeld(ctx: Ctx, planId: string | null): Promise<void> {
-  if (planId && (await planHeldNow(ctx, planId))) await fallBackFrom(ctx, planId);
+/* A plan of which a part has just come to its limit or its share for tasks sends everyone on it whose turns that holds to a
+   fallback at once: each goes by its own model's group. before: the parts that held turns back already. */
+async function fallBackIfHeld(ctx: Ctx, planId: string | null, before: string[] = []): Promise<void> {
+  if (planId && (await heldParts(ctx, planId)).some(part => !before.includes(part))) await fallBackFrom(ctx, planId);
 }
 
 const planState = async (ctx: Ctx, id: string) =>
@@ -433,8 +437,9 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
          map says until when. */
       let refused: string | null = null;
       if (finished.length && (msg.failure?.kind === 'usage_limit' || (!msg.failure && msg.error === 'agent_failed' && id.kind === 'node'))) {
-        const [sub] = await db.select({ id: subscriptions.id, limits: subscriptions.limits }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).where(eq(jobs.id, msg.jobId));
-        const held = sub && refusedLimits(`${msg.result}\n${msg.tail}`, sub.limits ?? null, now.getTime(), msg.failure?.kind === 'usage_limit');
+        /* The turn ran on its agent's model, whose group of the plan's limits the refusal fills. */
+        const [sub] = await db.select({ id: subscriptions.id, limits: subscriptions.limits, model: agents.model }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).leftJoin(agents, eq(agents.id, jobs.agentId)).where(eq(jobs.id, msg.jobId));
+        const held = sub && refusedLimits(`${msg.result}\n${msg.tail}`, sub.limits ?? null, now.getTime(), msg.failure?.kind === 'usage_limit', sub.model);
         if (held) {
           await db.update(subscriptions).set({ limits: held, limitsUpdatedAt: now }).where(eq(subscriptions.id, sub.id));
           for (const { companyId } of finished) ctx.bus.publish(companyId, { type: 'org' });

@@ -250,25 +250,50 @@ function windowRank(name: string): number {
   return at >= 0 ? at : WINDOW_ORDER.length;
 }
 
-function collectAgyWindows(groups: unknown[]): AgyWindow[] {
+const byRank = (windows: Iterable<AgyWindow>): AgyWindow[] => [...windows].sort((a, b) => windowRank(a.name) - windowRank(b.name)).slice(0, 8);
+
+/* One group's windows, one by name with the fuller bucket speaking where a group names one twice. */
+function groupWindows(group: unknown): AgyWindow[] {
   const byName = new Map<string, AgyWindow>();
-  for (const group of groups) {
-    const buckets = isRecord(group) && Array.isArray(group.buckets) ? group.buckets : [];
-    for (const entry of buckets) {
-      const w = agyBucket(entry);
-      if (w) byName.set(w.name, byName.has(w.name) ? fullerWindow(byName.get(w.name)!, w) : w);
-    }
+  const buckets = isRecord(group) && Array.isArray(group.buckets) ? group.buckets : [];
+  for (const entry of buckets) {
+    const w = agyBucket(entry);
+    if (w) byName.set(w.name, byName.has(w.name) ? fullerWindow(byName.get(w.name)!, w) : w);
   }
-  return [...byName.values()].sort((a, b) => windowRank(a.name) - windowRank(b.name)).slice(0, 8);
+  return byRank(byName.values());
+}
+
+function collectAgyWindows(groups: AgyWindow[][]): AgyWindow[] {
+  const byName = new Map<string, AgyWindow>();
+  for (const w of groups.flat()) byName.set(w.name, byName.has(w.name) ? fullerWindow(byName.get(w.name)!, w) : w);
+  return byRank(byName.values());
+}
+
+const statusOf = (windows: AgyWindow[]): Limits['status'] => (windows.some(w => w.utilization >= 1) ? 'rejected' : 'allowed');
+const agyText = (raw: unknown, max: number): string => (typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim().slice(0, max).trim() : '');
+
+/* Each group with windows as agy names it and says what it holds, while there are several and agy names every one: a
+   group with no name could not be told apart, and the plan then goes by its fullest window alone, as before. */
+function agyLimitGroups(groups: unknown[], windows: AgyWindow[][]): NonNullable<Limits['groups']> | null {
+  const named = groups.flatMap((group, i) => {
+    if (!windows[i]!.length) return [];
+    const record = isRecord(group) ? group : {};
+    const about = agyText(record.description, 300);
+    return [{ name: agyText(record.name, 80), ...(about ? { about } : {}), status: statusOf(windows[i]!), windows: windows[i]!, complete: true }];
+  });
+  return named.length > 1 && named.length <= 8 && named.every(g => g.name) ? named : null;
 }
 
 /* The plan's limits from `agy --print=/usage --output-format json`: each group's remaining share and reset time turned
-   into used shares by window, with the fuller group speaking for each window. */
+   into used shares by window. Each group keeps its own, and the fuller group speaks for each window of the plan as a
+   whole, which a model of no known group, and an older server, go by. */
 export function agyUsageLimits(page: unknown): Limits | null {
-  const groups = agyUsageGroups(page);
-  const windows = groups ? collectAgyWindows(groups) : [];
+  const groups = agyUsageGroups(page) ?? [];
+  const byGroup = groups.map(groupWindows);
+  const windows = collectAgyWindows(byGroup);
   if (!windows.length) return null;
-  return { status: windows.some(w => w.utilization >= 1) ? 'rejected' : 'allowed', windows, complete: true };
+  const limitGroups = agyLimitGroups(groups, byGroup);
+  return { status: statusOf(windows), windows, complete: true, ...(limitGroups ? { groups: limitGroups } : {}) };
 }
 
 type AgyLimitsOptions = { bin?: string; home: string; tools: string; user?: JobUser | null; timeoutMs?: number; signal?: AbortSignal };

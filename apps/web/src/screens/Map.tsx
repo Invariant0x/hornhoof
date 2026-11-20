@@ -16,6 +16,7 @@ import { Bar, percent } from '../ui/Bar';
 import { CANVAS_NARROW, CANVAS_ZOOM_LIMITS, DRAG_PX, FLOAT_GAP, LEFT_PANEL_COVER, SIDE_GAP, canvasSpace, freeRoom, usePanZoom, ZoomBar, type Box, type Edges, type View } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { useLoadFailure } from '../ui/LoadFailure';
+import { MapVersion } from '../ui/VersionMark';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
 import { PeopleBridgeMasks, peopleMask } from '../ui/PeopleWires';
@@ -847,7 +848,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
 
   if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
   if (failure !== null) return <p className="alert" role="alert">{errorText(t, failure)}</p>;
-  if (!org || !arr) return <div className="map" aria-busy="true" />;
+  if (!org || !arr) return <div className="map" aria-busy="true"><MapVersion /></div>;
 
   const depts = org.departments;
   const sub = org.orchestrator?.subscription ?? null;
@@ -1083,6 +1084,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
             )),
           )}
         </div>
+        <MapVersion off={inside} />
       </div>
 
       <ZoomBar

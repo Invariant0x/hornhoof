@@ -7,7 +7,7 @@ import { accessEmpty, accessInput, AccessPicker, accessText } from '../ui/Access
 import { CopyButton } from '../ui/CopyButton';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
-import { LoadState, onTop, useLoad } from '../ui/Loading';
+import { LoadState, useLoad } from '../ui/Loading';
 import { latestAnswers, useStream } from '../live';
 import { Field } from '../ui/Field';
 import { NOT_A_LOGIN } from '../ui/SecretInput';
@@ -586,7 +586,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
         onClose={closePerson}
       />
       {panel?.kind === 'delete' && <DeleteAsk person={panel.person} onYes={() => removePerson(panel.person)} onClose={() => setPanel(null)} />}
-      <LoadFailure failure={onTop(people, loadFailure)} />
+      <LoadFailure failure={people ? loadFailure : null} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       <LoadState load={peopleLoad} />
 

@@ -9,7 +9,7 @@ import { Bar, Share } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
-import { LoadState, onTop, useLoad } from '../ui/Loading';
+import { LoadState, useLoad } from '../ui/Loading';
 import { latestAnswers, useStream } from '../live';
 import { CardBlock, CardFrame, CardHead, EmptyBox, Facts, Gauge, MachineMark, Part } from '../ui/Cards';
 import { ProviderMark } from '../ui/icons';
@@ -850,7 +850,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           onCancel={() => void cancelMachine(activeCommand.id)}
         />
       )}
-      <LoadFailure failure={onTop(machines, loadFailure)} />
+      <LoadFailure failure={machines ? loadFailure : null} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       {certificateEnds && <CertificateWarning ends={certificateEnds} />}
       <LoadState load={machinesLoad} />

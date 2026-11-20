@@ -9,11 +9,38 @@ it('reserves a footer row for the version outside the screen and its fixed panel
 });
 
 /* The footer's row is taken from the screen above it, so a footer that comes and goes moves every window and panel fixed
-   there: it hides only for a whole screen, never because a form or a panel opened in one (#1384). */
+   there: it hides only for a whole screen, never because a form or a panel opened in one (#1384). The map shows the version
+   over its own corner instead (#1590). */
 it('hides the version footer only for a whole screen, the map or a phone', () => {
   const hiding = RULES.filter(rule => rule.decls.display === 'none').flatMap(rule =>
     rule.selectors.filter(selector => selector.endsWith('.version-mark')).map(selector => `${rule.media ?? 'any width'}: ${selector}`));
-  expect(hiding).toEqual(['any width: body:has(.dview) .version-mark', '(max-width: 760px): .version-mark']);
+  expect(hiding).toEqual([
+    'any width: .app-layout:has(.map-version) > .version-mark',
+    'any width: body:has(.dview) .version-mark',
+    '(max-width: 760px): .version-mark',
+  ]);
+});
+
+/* Over the map the version is small muted text in the bottom end corner of the room its bars leave free, mirrored right to
+   left, with nothing around it, and a tap goes through it to the map (#1590). The map's bars stand at the start and in the
+   middle in either direction, so none stands in that corner to raise it over (#1622). */
+it('floats the version over the end corner of the map, out of the way of taps', () => {
+  const rules = rulesFor('.map-version');
+  expect(rules.map(rule => rule.media)).toEqual([null]);
+  expect(rules[0]!.decls).toEqual({
+    position: 'absolute', 'inset-block-end': '4px', 'inset-inline-end': '12px', margin: '0', color: 'var(--muted)', 'font-size': '12px',
+    'pointer-events': 'none', 'user-select': 'none',
+  });
+});
+
+/* The map's zoom and Put back over it stand at the start of its bottom, so a page right to left mirrors them as it mirrors
+   the rest of the layout; left to right they stay where they stood. The other canvases keep their zoom at the left, beside
+   bars they place from the left (#1622). */
+it("stands the map's zoom and Put back at the start of its bottom, mirrored right to left", () => {
+  expect(decl('.zoom', 'left')).toBe('16px');
+  expect(decl('.map > .zoom', 'inset-inline')).toBe('16px auto');
+  expect(decl('.map-arrange', 'inset-inline-start')).toBe('16px');
+  expect(decl('.map-arrange', 'left')).toBeUndefined();
 });
 
 function paddingRightPx(selector: string): number | undefined {
@@ -84,6 +111,9 @@ it("paints what an agent does from the theme's tokens, and an alarm and the fram
   /* The tree's shared Chip keeps the state badge whole: on one line where it fits, else wrapped inside its frame, and the
      task's words wrap after it. */
   expect(decl('.tview .tv-labs .dept-chip', 'position')).toBe('absolute');
+  /* #1595: a lane moves by the place that holds its chip. */
+  expect(decl('.tview .tv-labs .tv-lane', 'position')).toBe('absolute');
+  expect(decl('.tview .tv-labs .tv-lane', 'left')).toBe('0');
   expect(decl('.ast', 'flex')).toBe('none');
   expect(decl('.ast', 'white-space')).toBe('nowrap');
   expect(decl('.schip .r3 .ast', 'margin-right')).toBe('6px');

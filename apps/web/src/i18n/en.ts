@@ -77,8 +77,8 @@ export const en = {
     loading: 'Loading…',
     /* Something under way that took longer than its one limit: it may still finish. */
     tooLong: 'Taking longer than usual',
-    /* What to do about a screen's data that takes longer than usual. */
-    stillComing: 'It may still come. Try again, or wait a little longer.',
+    /* Asks again for what failed or takes longer than usual. */
+    retry: 'Retry',
     somethingWrong: 'Something went wrong.',
     next: 'Next',
     back: 'Back',
@@ -96,6 +96,26 @@ export const en = {
     title: 'Title',
     atLeast10: 'At least 10 characters.',
     useAtLeast10: 'Use at least 10 characters.',
+  },
+  /* A screen's data while it comes (style book 1.5, section 4): the words beside the ring, and for a load that failed one
+     whole sentence of what failed and why, then what to do. */
+  load: {
+    tasks: 'Loading tasks…',
+    task: 'Loading the task…',
+    limits: 'Loading limits…',
+    failed: {
+      offline: 'Could not load: no connection to the server.',
+      timeout: 'Could not load: the server did not answer in 30 seconds.',
+      server: 'Could not load: something went wrong on the server.',
+      provider: 'Could not load the limits: the provider did not answer.',
+    },
+    hint: {
+      offline: 'Check the internet connection, then press "Retry".',
+      timeout: 'What is already on the screen stays. Press "Retry" to ask again.',
+      server: 'What is already on the screen stays. If "Retry" does not help, try again in a few minutes.',
+      provider: 'The rest of the card works. Press "Retry" to ask the provider again.',
+    },
+    slowHint: 'You can wait or press "Retry".',
   },
   app: {
     notResponding: 'Hornhoof is not responding',
@@ -690,6 +710,10 @@ export const en = {
     resetsIn: (duration: string) => `resets in ${duration}`,
     /* A limit's cell in the list: its used share, then when it resets. */
     usedAndReset: (share: string, reset: string) => `${share}, ${reset}`,
+    /* The limits of one group of a plan's models, by the name its provider gives the group, as Gemini Models. */
+    groupLimits: (group: string) => `Limits: ${group}`,
+    /* A limit's cell in the list for a plan that keeps its limits by model group: the group, then what it used. */
+    groupShare: (group: string, share: string) => `${group}: ${share}`,
     resetUnknown: 'Reset time unknown',
     limitReached: (duration: string | null) => (duration ? `Limit reached, resets in ${duration}` : 'Limit reached'),
     notOnPlan: 'Not on this plan',
@@ -771,6 +795,7 @@ export const en = {
       noProgram: 'The program could not be installed on this machine, so nothing changed. Check the machine\'s internet connection and free disk space, then try again.',
       other: 'The sign-in did not finish, so nothing changed. Try again.',
       signedOut: 'The program on this machine is not signed in, so nothing changed.',
+      noAnswer: 'Could not connect: your computer stopped answering.',
     },
     /* A plan connecting after its sign-in code: the step its node reports, the time since the code, and what to do when it
        failed or takes too long. */
@@ -788,15 +813,22 @@ export const en = {
       seconds: (s: number) => `${s} s`,
       minutes: (m: number, s: number) => `${m} min ${s} s`,
       passed: (time: string) => `${time} since the code`,
+      /* How far the plan got on its way to work, over the bar of the steps done. */
+      progress: (n: number, total: number) => `Step ${n} of ${total}`,
+      nowTitle: 'Now',
+      keepOn: 'Keep the computer on; this page moves on by itself.',
+      /* A minute with no new step from the machine. */
+      slowHint: 'A step usually takes under a minute. Check that your computer is on and online.',
       next: {
         signInAgain: 'Sign in again. Nothing changed on the plan.',
         installWindow: (host: string) => `Run the install command on ${host} again and sign in there.`,
+        noAnswer: 'Check that the computer is on and online, then press "Retry".',
       },
-      tooLongNext: (minutes: number) => `Connecting has taken more than ${minutes} min. It may still finish. Try again, or stop and come back to it later.`,
-      retry: 'Try again',
-      retryLabel: (name: string) => `Try connecting ${name} again`,
+      retryLabel: (name: string) => `Retry connecting ${name}`,
       cancel: 'Stop',
       cancelLabel: (name: string) => `Stop connecting ${name}`,
+      /* Said once by the plan's status as it turns ready; its card shows no such line. */
+      ready: (name: string) => `${name}: done. Agents on this plan can work now.`,
     },
     pasteKey: 'Paste the key',
     pasteKeyLabel: (name: string) => `Paste the key for ${name}`,
@@ -815,6 +847,8 @@ export const en = {
       key: (program: string) => `Paste your ${program} key`,
       ready: 'Ready: agents on this plan can work',
       done: '(done)',
+      current: '(now)',
+      failedMark: '(did not work)',
       now: {
         run: 'Copy the command below, paste it into Terminal on a Mac or Linux or into PowerShell on Windows, and press Enter. This page moves on by itself once your computer connects.',
         newCommand: 'Press "Make a new command" below, then run the new command on your computer.',
@@ -1832,10 +1866,7 @@ export const en = {
     machineAwayImportant: (names: string) => `Among them: ${names}.`,
     machineAwayDo: 'What to do: switch it on and plug it in, sign in to the account, check that Docker has started.',
     machineBack: (host: string, at: string) => `Machine ${host} is back: ${at}.`,
-    /* The decisions screen opened from a person's card shows theirs until the filter is taken off. */
-    decisionsFor: (name: string) => `Decisions for ${name}`,
     someone: 'this person',
-    showAll: "Show everyone's decisions",
     nothingFor: (name: string) => `Nothing waits for a decision from ${name}.`,
     asks: (agent: string) => `${agent} asks`,
     asksApproval: (agent: string) => `${agent} asks you to approve a commit`,
@@ -1874,6 +1905,7 @@ export const en = {
       checker: (task: number, commit: string) => `#${task}: a checker of ${commit} is switched off, removed or its own author, or did not pass it.`,
       taskUnread: (task: number) => `Hornhoof could not read every commit of #${task}.`,
       unpinned: (task: number) => `#${task} was closed before such work named the commit its employee checked, so none of its commits counts as checked.`,
+      unstarted: (task: number) => `#${task}: there is no record of where this work started, so none of its commits counts as checked.`,
       merge: (commit: string) => `${commit} is a merge made outside every checked change.`,
       commit: (commit: string) => `${commit} came in without any check.`,
     },

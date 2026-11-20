@@ -76,6 +76,9 @@ const NO_TOKENS: TokenPeriods = { today: NO_TURNS, week: NO_TURNS, month: NO_TUR
 
 const ROUTES: Record<string, unknown> = {
   '/api/setup': { needed: false },
+  /* The build the server runs, which every page asks as it opens and every five minutes after (#1592): always the same, so
+     no page reloads itself. */
+  '/api/build': { build: 'e2e-build' },
   '/api/me': ME,
   '/api/org': ORG,
   '/api/requests': DECISIONS,

@@ -42,7 +42,7 @@ function WaitNoteBody({ note, onCallOff, onSeen }: { note: WaitNote; onCallOff: 
   if ('waiting' in note) {
     return (
       <>
-        <span>{t.updates.waiting(versionText(note.waiting), hour(note.waiting.until))}</span>
+        <span dir="auto">{t.updates.waiting(versionText(note.waiting), hour(note.waiting.until))}</span>
         <button className="btn small ghost" type="button" onClick={onCallOff}>{t.updates.callOff}</button>
       </>
     );
@@ -50,7 +50,7 @@ function WaitNoteBody({ note, onCallOff, onSeen }: { note: WaitNote; onCallOff: 
   const why = { deadline: t.updates.calledOff, cancelled: t.updates.cancelled, failed: t.updates.notPassed }[note.calledOff.reason];
   return (
     <>
-      <span>{why(versionText(note.calledOff), hour(note.calledOff.at))}</span>
+      <span dir="auto">{why(versionText(note.calledOff), hour(note.calledOff.at))}</span>
       <button className="btn small ghost" type="button" onClick={() => onSeen(note.calledOff.at)}>{t.updates.ok}</button>
     </>
   );
@@ -107,7 +107,7 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
   } else if (status && stored(SEEN) !== status.id) {
     body = (
       <>
-        <span>{t.updates.result(versionedStatus(status), versionText(view.current))}</span>
+        <span dir="auto">{t.updates.result(versionedStatus(status), versionText(view.current))}</span>
         {status.state !== 'done' && <button className="btn small ghost" type="button" onClick={onDetails}>{t.updates.details}</button>}
         <button className="btn small ghost" type="button" onClick={() => hide(SEEN, status.id)}>{t.updates.ok}</button>
       </>
@@ -116,7 +116,7 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
     const latest = view.latest;
     body = (
       <>
-        <span>{t.updates.out(buildText(latest), latest.title)}</span>
+        <span dir="auto">{t.updates.out(buildText(latest), latest.title)}</span>
         <button className="btn small" type="button" disabled={updates.asking} onClick={() => void act(() => updates.update('latest', false))}>{t.updates.update}</button>
         <button className="btn small ghost" type="button" disabled={updates.asking} onClick={() => void act(() => updates.update('latest', true))}>{t.updates.whenIdle}</button>
         <button className="btn small ghost" type="button" onClick={() => hide(LATER, latest.commit)}>{t.updates.later}</button>
@@ -127,7 +127,7 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
   return (
     <div className="update-banner glass" role="status" aria-label={t.updates.label}>
       {body}
-      {failure !== null && <p className="update-error" role="alert">{errorText(t, failure)}</p>}
+      {failure !== null && <p className="update-error" role="alert" dir="auto">{errorText(t, failure)}</p>}
     </div>
   );
 }

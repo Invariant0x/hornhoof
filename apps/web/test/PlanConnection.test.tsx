@@ -6,8 +6,7 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { Subscriptions } from '../src/screens/Subscriptions';
 import type { Connecting, SubView } from '../src/types';
-import { PlanConnection, passedWords } from '../src/ui/PlanConnection';
-import { Stalled, Waiting } from '../src/ui/Waiting';
+import { PlanConnection, READY_SAID_MS, ReadySaid, passedWords } from '../src/ui/PlanConnection';
 import { ME, mockApi, SUBS } from './api-mock';
 import { fakeStream } from './fake-stream';
 import { openAll, rowOf, waitFor } from './subscriptions-helpers';
@@ -55,21 +54,6 @@ describe('the time since the sign-in code', () => {
   });
 });
 
-describe('something under way, and something stalled', () => {
-  it('shows a turning mark only while something is under way, with what it is at as a status', () => {
-    const { container } = render(<Waiting what="Getting the models" detail="1 min 5 s since the code" />);
-    expect(screen.getByRole('status').textContent).toBe('Getting the models1 min 5 s since the code');
-    expect(container.querySelectorAll('.waiting-mark')).toHaveLength(1);
-  });
-
-  it('says why it stalled as an alert, then what to do, with Try again first and no mark', () => {
-    const { container } = render(<Stalled tone="late" reason="Taking longer than usual" next="Try again, or stop." retry={{ text: 'Try again', label: 'Try connecting Codex again', run: () => {} }} cancel={{ text: 'Stop', run: () => {} }} />);
-    expect(screen.getByRole('alert').textContent).toBe('Taking longer than usual');
-    expect(screen.getAllByRole('button').map(b => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['Try connecting Codex again', 'Stop']);
-    expect(container.querySelectorAll('.waiting-mark')).toHaveLength(0);
-  });
-});
-
 describe('a plan connecting after its sign-in code, on its card', () => {
   const shown = (sub: SubView, c: Connecting) => {
     const onRetry = vi.fn();
@@ -80,16 +64,46 @@ describe('a plan connecting after its sign-in code, on its card', () => {
   const words = en.subs.connection;
   const passed = words.passed(words.minutes(1, 5));
 
-  it('says the step its node reports and the time since the code, with nothing to press', () => {
+  it('says the step its node reports as the status, then the time since the code outside it, with the ring in the marker of its sign-in, the third of four steps', () => {
     const { part } = shown(CODEX, at('connecting', 'models'));
-    expect(within(part).getByRole('status').textContent).toBe(`${words.steps.models}${passed}`);
+    expect(within(part).getByRole('status').textContent).toBe(`${words.steps.models}.`);
+    expect(part.querySelector('.conn-at')?.textContent).toBe(`${words.steps.models}. ${passed}`);
+    expect(part.querySelector('.conn-at > .conn-time')?.textContent).toBe(passed);
+    expect(part.querySelector('.conn-time')?.closest('[role="status"], [aria-live]')).toBeNull();
+    expect(part.textContent).toContain(words.keepOn);
+    expect(within(part).getByRole('progressbar').getAttribute('aria-valuenow')).toBe('2');
+    expect(part.querySelector('.conn-prog')?.textContent).toBe(words.progress(3, 4));
+    const steps = within(part).getAllByRole('listitem');
+    expect(steps.map(s => s.className)).toEqual(['done', 'done', 'now', 'next']);
+    expect(steps[2]!.getAttribute('aria-current')).toBe('step');
+    expect(steps[2]!.textContent).toBe(`${en.subs.steps.signIn('Codex')} ${en.subs.steps.current}`);
+    expect(part.querySelectorAll('.spinner')).toHaveLength(1);
+    expect(steps[2]!.querySelector('.conn-mk .spinner')).not.toBeNull();
     expect(within(part).queryAllByRole('button')).toEqual([]);
   });
 
-  it('says why it failed, to sign in again from Hornhoof, with Try again and Stop', () => {
+  /* Design #1656: the time is not said every second. The status changes, and a screen reader speaks, with the step alone. */
+  it('counts the time each second outside the status, which changes with the step alone', () => {
+    const view = (now: number, step: Connecting['step']) => <LanguageProvider><PlanConnection sub={CODEX} connecting={at('connecting', step)} now={now} onRetry={() => {}} onCancel={() => {}} /></LanguageProvider>;
+    const { rerender } = render(view(NOW, 'models'));
+    const status = screen.getByRole('status');
+    rerender(view(NOW + 1000, 'models'));
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status.textContent).toBe(`${words.steps.models}.`);
+    expect(document.querySelector('.conn-time')?.textContent).toBe(words.passed(words.minutes(1, 6)));
+    rerender(view(NOW + 2000, 'limits'));
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status.textContent).toBe(`${words.steps.limits}.`);
+  });
+
+  it('says why it failed, to sign in again from Hornhoof, with Retry and Stop, and the step that did not work in pink', () => {
     const { part, onRetry, onCancel } = shown(CODEX, at('failed', 'checking', { error: 'The program did not take the new sign-in, so nothing changed.' }));
-    expect(within(part).getByRole('alert').textContent).toBe(en.subs.signInErrors.notTaken);
-    expect(part.textContent).toContain(words.next.signInAgain);
+    const failed = within(part).getByRole('alert');
+    expect(failed.querySelector('.lf-t')?.textContent).toBe(en.subs.signInErrors.notTaken);
+    expect(failed.querySelector('.lf-h')?.textContent).toBe(words.next.signInAgain);
+    expect(within(part).getAllByRole('listitem')[2]!.className).toBe('bad');
+    expect(part.querySelectorAll('.spinner')).toHaveLength(0);
+    expect(within(failed).getAllByRole('button').map(b => b.textContent)).toEqual([en.common.retry, words.cancel]);
     fireEvent.click(within(part).getByRole('button', { name: words.retryLabel('Codex') }));
     fireEvent.click(within(part).getByRole('button', { name: words.cancelLabel('Codex') }));
     expect(onRetry).toHaveBeenCalledTimes(1);
@@ -99,16 +113,35 @@ describe('a plan connecting after its sign-in code, on its card', () => {
   it('sends a program that signs in on its machine back to the install window there', () => {
     render(<LanguageProvider><PlanConnection sub={AGY} connecting={at('failed', 'checking', { error: null, code: 1, line: 'Antigravity CLI did not finish signing in.' })} now={NOW} onRetry={() => {}} onCancel={() => {}} /></LanguageProvider>);
     const part = screen.getByRole('group', { name: words.label('Antigravity') });
-    expect(within(part).getByRole('alert').textContent).toBe(en.subs.signInEnded(1, 'Antigravity CLI did not finish signing in.'));
+    expect(within(part).getByRole('alert').querySelector('.lf-t')?.textContent).toBe(en.subs.signInEnded(1, 'Antigravity CLI did not finish signing in.'));
     expect(part.textContent).toContain(words.next.installWindow('dev-laptop'));
   });
 
-  it('past its one limit says it takes longer than usual, how long the limit is, and where it got to', () => {
+  it('says a connection past its deadline failed as its computer stopped answering, and to check the computer', () => {
+    const { part } = shown(CODEX, at('failed', 'models', { error: SIGNIN_ERRORS.noAnswer }));
+    const failed = within(part).getByRole('alert');
+    expect(failed.querySelector('.lf-t')?.textContent).toBe(en.subs.signInErrors.noAnswer);
+    expect(failed.querySelector('.lf-h')?.textContent).toBe(words.next.noAnswer);
+    expect(ru.subs.signInErrors.noAnswer).toBe('Не удалось подключить: машина перестала отвечать.');
+  });
+
+  it('a minute with no new step says it takes longer than usual, where it got to, with Retry and Stop, the ring staying in its marker alone', () => {
     const { part } = shown(CODEX, at('too_long', 'models'));
-    expect(within(part).getByRole('alert').textContent).toBe(en.common.tooLong);
-    expect(part.textContent).toContain(words.tooLongNext(10));
+    const slow = part.querySelector('.load-fail.slow')!;
+    expect(slow.getAttribute('role')).toBe('status');
+    expect(slow.querySelector('.lf-t')?.textContent).toBe(en.common.tooLong);
+    expect(slow.querySelector('.lf-h')?.textContent).toBe(words.slowHint);
     expect(part.textContent).toContain(`${words.steps.models}. ${passed}`);
-    expect(part.querySelectorAll('.waiting-mark')).toHaveLength(0);
+    expect(slow.querySelector('.spinner')).toBeNull();
+    expect(part.querySelectorAll('.conn-mk .spinner')).toHaveLength(1);
+    expect(within(part).getAllByRole('button').map(b => b.textContent)).toEqual([en.common.retry, words.cancel]);
+  });
+
+  it('counts the key as the third step of a plan that takes one', () => {
+    const KIMI: SubView = { ...CODEX, id: 's-kimi', provider: 'kimi', label: 'Kimi' };
+    render(<LanguageProvider><PlanConnection sub={KIMI} connecting={at('connecting', 'checking')} now={NOW} onRetry={() => {}} onCancel={() => {}} /></LanguageProvider>);
+    const part = screen.getByRole('group', { name: words.label('Kimi') });
+    expect(within(part).getAllByRole('listitem')[2]!.textContent).toContain(en.subs.steps.key('Kimi'));
   });
 });
 
@@ -179,5 +212,44 @@ describe('the plans screen while a plan connects', () => {
     fireEvent.click(within(part('Antigravity')!).getByRole('button', { name: en.subs.connection.cancelLabel('Antigravity') }));
     await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => c.path)).toEqual(['/api/subscriptions/s-agy/connecting/retry', '/api/subscriptions/s-agy/connecting/cancel']));
     await waitFor(() => expect(part('Antigravity')).toBeNull());
+  });
+});
+
+/* Design #1656: a plan's ready card has no "Done" line; its status says once that it is ready. The status is there, empty,
+   while the plan connects, so the words come as a change a screen reader says; a little later they go with it. */
+describe('a plan that turns ready after connecting', () => {
+  afterEach(() => vi.useRealTimers());
+  const said = (sub: SubView) => <LanguageProvider><ReadySaid sub={sub} /></LanguageProvider>;
+  const connecting: SubView = { ...CODEX, status: 'needs_login', connecting: at('connecting', 'models') };
+  const ready: SubView = { ...CODEX, status: 'ready', connecting: null };
+
+  it('keeps its status empty while it connects, says once that it is ready, then leaves no status', () => {
+    vi.useFakeTimers();
+    const { rerender } = render(said(connecting));
+    const status = screen.getByRole('status');
+    expect(status.textContent).toBe('');
+    /* The machine said the connection ended; the plans are not read again yet. */
+    rerender(said({ ...connecting, connecting: null }));
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status.textContent).toBe('');
+    rerender(said(ready));
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status.textContent).toBe(en.subs.connection.ready('Codex'));
+    act(() => { vi.advanceTimersByTime(READY_SAID_MS - 1); });
+    expect(status.textContent).toBe(en.subs.connection.ready('Codex'));
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(screen.queryByRole('status')).toBeNull();
+    rerender(said({ ...ready }));
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('says nothing for a plan that was ready without connecting here', () => {
+    render(said(ready));
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('says it with the plan name, in each language', () => {
+    expect(en.subs.connection.ready('Codex')).toBe('Codex: done. Agents on this plan can work now.');
+    expect(ru.subs.connection.ready('Codex')).toBe('Codex: готово. Агенты на этом тарифе уже могут работать.');
   });
 });

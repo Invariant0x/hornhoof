@@ -9,7 +9,7 @@ import { personColumns, requirePerson } from '../../auth/session.js';
 import { agents, companies, departments, people, personAccess, subscriptions, teams, turns } from '../../db/schema.js';
 import { employeeOrder } from '../agents/order.js';
 import { agentWork } from '../agents/work.js';
-import { limitUntil } from '../conversation/limits.js';
+import { modelLimitUntil } from '../conversation/limits.js';
 import { planHeld, planHoldView } from '../conversation/state.js';
 import { programNode } from '../conversation/placement.js';
 import { repoView } from '../departments/repository.js';
@@ -63,8 +63,8 @@ const teamField = (teamId: string | null) => (teamId ? { teamId } : {});
 const keepsRepository = (depts: readonly Pick<typeof departments.$inferSelect, 'id' | 'parentId' | 'repoUrl'>[], id: string) =>
   depts.some(d => (d.id === id || d.parentId === id) && Boolean(d.repoUrl));
 
-/* Until when a plan is at its limit, from what it last read. */
-const limitOfPlan = (plan?: { limits: Limits | null; limitsUpdatedAt: Date | null }) => limitUntil(plan?.limits ?? null, plan?.limitsUpdatedAt ?? null);
+/* Until when a plan is at its limit for turns on the model, from what it last read. */
+const limitOfPlan = (model: string, plan?: { limits: Limits | null; limitsUpdatedAt: Date | null }) => (plan ? modelLimitUntil(plan, model) : null);
 
 /* A line runs between two agents: it shows when both of its ends are known. */
 const linesSeen = (viewer: AgentViewer, lines: readonly MapLine[]) => lines.filter(l => knowsAgentId(viewer, l.upstreamAgentId) && knowsAgentId(viewer, l.downstreamAgentId));
@@ -249,7 +249,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         ...agentProgramState(ctx, running.find(j => j.agentId === orchestrator.id)),
         ...failures.get(orchestrator.id)!,
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
-        limitUntil: limitOfPlan(orchestrator.subscriptionId ? subs.get(orchestrator.subscriptionId) : undefined),
+        limitUntil: limitOfPlan(orchestrator.model, orchestrator.subscriptionId ? subs.get(orchestrator.subscriptionId) : undefined),
         held: holds.get(orchestrator.id)!,
         /* Whether he has a plan to work on, which everyone may know; which plan it is goes only to those who open him. */
         planned: Boolean(orchestrator.subscriptionId && subs.has(orchestrator.subscriptionId)),
