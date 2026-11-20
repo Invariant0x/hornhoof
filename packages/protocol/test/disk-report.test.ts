@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DISK_PARTS, DiskReport, parseNodeMessage } from '../src/index.js';
+import { DISK_PARTS, DiskReport, MachineReplicas, parseNodeMessage } from '../src/index.js';
 
 const GB = 1e9;
 const LOAD = { cpus: 8, load: 1.5, memFree: 4 * GB, memTotal: 16 * GB, tests: 0, jobs: 2 };
@@ -65,5 +65,15 @@ describe("a node's disk report", () => {
 
   it('keeps no part it does not know', () => {
     expect(DiskReport.parse({ ...DISK, parts: { ...DISK.parts, photos: GB } }).parts).toEqual(DISK.parts);
+  });
+});
+
+describe('the replica part of a machine disk report', () => {
+  it('carries the count, total bytes and the visible companies', () => {
+    const replicas = { count: 1, bytes: 4096, companies: [{ name: 'Example Company', bytes: 4096 }] };
+    expect(MachineReplicas.parse(replicas)).toEqual(replicas);
+    expect(MachineReplicas.parse({ count: 0, bytes: 0, companies: [] })).toEqual({ count: 0, bytes: 0, companies: [] });
+    expect(MachineReplicas.safeParse({ ...replicas, count: 1.5 }).success).toBe(false);
+    expect(MachineReplicas.safeParse({ ...replicas, companies: [{ name: 'Example Company', bytes: -1 }] }).success).toBe(false);
   });
 });
