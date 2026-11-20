@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiFailure } from '../src/api';
 import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
+import { UpdateSaysIt } from '../src/ui/LoadFailure';
 import { LOAD_LIMIT_MS, LoadState, useLoad, type LoadPart } from '../src/ui/Loading';
 
 /* One load of a screen from its parts: the shared indicator while they come, then nothing once all came; a part that
@@ -74,6 +76,16 @@ describe('one load of a screen', () => {
     rerender(<Shown parts={[{ ...failed, data: [], failure: null }]} />);
     expect(screen.queryByRole('alert')).toBeNull();
     expect(container.querySelector('.phase')?.textContent).toBe('done');
+  });
+
+  it('waits with no alarm for a part the update holds back while the update panel says it, and says it when the panel does not', () => {
+    const refused = new ApiFailure(503, 'unavailable', 'Hornhoof is installing an update.', 'maintenance');
+    const { rerender } = render(<UpdateSaysIt.Provider value={true}><Shown parts={[part(undefined, refused)]} /></UpdateSaysIt.Provider>);
+    expect(screen.getByRole('status').textContent).toBe(en.common.loading);
+    later(LOAD_LIMIT_MS * 3);
+    expect(screen.queryByRole('alert')).toBeNull();
+    rerender(<UpdateSaysIt.Provider value={false}><Shown parts={[part(undefined, refused)]} /></UpdateSaysIt.Provider>);
+    expect(screen.getByRole('alert')).toBeTruthy();
   });
 
   it('says nothing of a part that failed after its data came', () => {
