@@ -478,6 +478,24 @@ describe('Map', () => {
     expect(transform()).toBe(first);
   });
 
+  it('zooms with the wheel once it is drawn, also when the arrangement came after the company', async () => {
+    /* #1620: the map stands only once the company and the arrangement came, so the wheel must reach the map then, not
+       the room that held its place while the company alone was there. */
+    let arrive = () => {};
+    const kept = new Promise<[number, unknown]>(resolve => (arrive = () => resolve([200, { blocks: {} }])));
+    mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'GET /api/map/layout': () => kept });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await act(async () => {});
+    await act(async () => {});
+    expect(container.querySelector('.world')).toBeNull();
+    await act(async () => arrive());
+    await screen.findByText('Marketing');
+    const label = () => container.querySelector('.zoom .zv')!.textContent;
+    const before = label();
+    fireEvent.wheel(container.querySelector('.map:not(.map-wait)')!, { deltaY: -400, clientX: 200, clientY: 200 });
+    expect(label(), 'the wheel zooms the map that is drawn').not.toBe(before);
+  });
+
   it.each([375, 1440])('fits the company clear of a left panel at %ipx', async width => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
     const { container } = render(<MapScreen {...PROPS} leftPanelOpen />);

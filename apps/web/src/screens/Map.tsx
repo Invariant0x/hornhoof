@@ -692,7 +692,11 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const box = useRef<HTMLDivElement>(null);
   /* What the hand scrolls: the map as it stands, between the bars floating over it. */
   const edges = useRef<() => Edges | null>(() => null);
-  const { view, setView, zoomAt, handlers, dragged, touched } = usePanZoom(box, org, { min: minZoom, max: MAX_K }, kept ?? undefined, () => edges.current());
+  /* Where this person put blocks, and the one load of the company and that arrangement. */
+  const layout = useMapLayout();
+  const { load: mapLoad, ready } = useMapLoad(org, loadFailure, loadOrg, layout);
+  /* The wheel finds the map once it stands, which is once both came (#1620), not as soon as the company did. */
+  const { view, setView, zoomAt, handlers, dragged, touched } = usePanZoom(box, ready, { min: minZoom, max: MAX_K }, kept ?? undefined, () => edges.current());
   /* Whether the view is the person's own: kept from before, shown with Fit, or dragged or zoomed. Only the person moves it
      then; until then the map shows all of itself, or readable. */
   const chose = useRef(!!kept);
@@ -704,9 +708,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const held = useRef<{ m: Extract<LiveMessage, { type: 'pulse' }>; at: number }[]>([]);
   const [flashing, setFlashing] = useState<Set<string>>(new Set());
   const flashTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  /* Where this person put blocks, and the block their hand moves now. */
-  const layout = useMapLayout();
-  const { load: mapLoad, ready } = useMapLoad(org, loadFailure, loadOrg, layout);
+  /* The block the person's hand moves now. */
   const [moving, setMoving] = useState<{ key: string; at: At } | null>(null);
   /* The bend the hand moves now: on which line, which of its bends, and where. */
   const [bending, setBending] = useState<{ line: string; i: number; at: Point } | null>(null);
