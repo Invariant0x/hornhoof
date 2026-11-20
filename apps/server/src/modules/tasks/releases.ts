@@ -131,8 +131,9 @@ async function commitsBetween(ctx: Reader, repo: Repo, base: string, head: strin
 }
 
 /* Turnkey work as its report closed it: start is the commit its holder named as where its branch started, none on a report
-   from before holders named it. */
-type Turnkey = { report: string; live: boolean; start: string | null };
+   from before holders named it; workStart the head of the turn branch, or main's, as the server read it when the work started,
+   none where it could not or the work started before the server noted it. */
+type Turnkey = { report: string; live: boolean; start: string | null; workStart: string | null };
 type Accepted = { task: Task; commit: string; candidate: EchelonCandidate | null; verdicts: string[]; checkersLive: boolean; turnkey: Turnkey | null };
 
 /* What each result of the turn was accepted as, and the passing verdicts of its last checkers on that exact commit. Turnkey work
@@ -164,10 +165,10 @@ type Closing = Pick<typeof taskEvents.$inferSelect, 'id' | 'agentId' | 'data'>;
 /* Turnkey work as the last report of its holder closed it, joining it to the turn branch: whether that holder is at work, and
    the commit it named as where its branch started. None where that report closed nothing. */
 async function turnkeyOf(db: Ctx['db'], report: Closing): Promise<Turnkey | null> {
-  const integration = report.data.integration as { commit?: string; start?: string } | undefined;
+  const integration = report.data.integration as { commit?: string; start?: string; workStart?: string | null } | undefined;
   if (report.data.done !== true || !integration?.commit || !report.agentId) return null;
   const atWork = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.id, report.agentId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
-  return { report: String(report.id), live: atWork.length > 0, start: integration.start ?? null };
+  return { report: String(report.id), live: atWork.length > 0, start: integration.start ?? null, workStart: integration.workStart ?? null };
 }
 
 async function candidateOf(db: Ctx['db'], task: Task, candidateId: string): Promise<EchelonCandidate | null> {
@@ -218,14 +219,17 @@ async function coverage(ctx: Reader, repo: Repo, base: string, commit: string, r
   return uncovered;
 }
 
-/* The line each turnkey work's holder checked: from the commit it named down to where its branch started. */
-const turnkeyLines = (results: Accepted[]) => results.flatMap(r => (r.turnkey?.start ? [{ tip: r.commit, start: r.turnkey.start }] : []));
+/* The line each turnkey work's holder checked: from the commit it named down to where its branch started, never under where
+   the turn branch was as the work started. Work with either start missing has none. */
+const turnkeyLines = (results: Accepted[]) => results.flatMap(r => (r.turnkey?.start && r.turnkey.workStart ? [{ tip: r.commit, start: r.turnkey.start, workStart: r.turnkey.workStart }] : []));
 
-/* What turnkey work leaves to a person by itself: a holder off since, or a report that named nothing it checked. */
+/* What turnkey work leaves to a person by itself: a holder off since, a report that named nothing it checked, or work whose
+   start the server has no record of. */
 function turnkeyGaps(task: Task, turnkey: Turnkey): UncheckedItem[] {
   return [
     ...(turnkey.live ? [] : [{ kind: 'holder_off' as const, task: task.number }]),
     ...(turnkey.start ? [] : [{ kind: 'unpinned' as const, task: task.number }]),
+    ...(!turnkey.start || turnkey.workStart ? [] : [{ kind: 'unstarted' as const, task: task.number }]),
   ];
 }
 
@@ -287,15 +291,16 @@ async function releaseApproval(db: Ctx['db'] | Tx, at: ReleaseAt, hold = false):
 
 type Compared = { sha: string; parents: string[] };
 
-/* The commits over main that turnkey work brings, from the commit each holder checked (tip) and the commit its branch started
-   from (start), and the commits other results brought (others). Its own are the commits down the first parents of its tip, to
-   one the start holds, another result brought or main holds. A merge on its branch took the turn branch in from its other side,
+/* The commits over main that turnkey work brings, from the commit each holder checked (tip), the commit its branch started
+   from (start) and where the turn branch was as its work started (workStart), and the commits other results brought (others).
+   Its own are the commits down the first parents of its tip, to one the start or workStart holds, another result brought or
+   main holds. A merge on its branch took the turn branch in from its other side,
    which is not its own; a commit on top of its tip, or a merge on the turn branch that joined it there, is no commit it checked. */
-function turnkeyCommits(brought: Compared[], lines: { tip: string; start: string }[], others: Set<string>): Set<string> {
+function turnkeyCommits(brought: Compared[], lines: { tip: string; start: string; workStart: string }[], others: Set<string>): Set<string> {
   const at = new Map(brought.map(c => [c.sha, c]));
   const own = new Set<string>();
-  for (const { tip, start } of lines) {
-    const under = heldWithin(at, [start]);
+  for (const { tip, start, workStart } of lines) {
+    const under = heldWithin(at, [start, workStart]);
     const line = new Set<string>();
     for (let sha = tip; at.has(sha) && !others.has(sha) && !under.has(sha) && !line.has(sha); sha = at.get(sha)!.parents[0] ?? '') line.add(sha);
     for (const sha of line) own.add(sha);

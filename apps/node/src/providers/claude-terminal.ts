@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { inLane, type Limits } from '@hornhoof/protocol';
 import { ownFs, type AgentFs } from '../agent-fs.js';
 import { CRED_FILES } from '../credentials.js';
-import { bridgeEnv, hook, readJson, type TermProgram } from '../terminal/programs.js';
+import { bridgeEnv, hook, hookCommand, readJson, type TermProgram } from '../terminal/programs.js';
 import { claudeUsageLimits } from '../terminal/transcripts.js';
 import { CLAUDE_UNSIGNED } from './claude-attribution.js';
 import { readPrivate } from './process.js';
@@ -38,7 +38,7 @@ export const claudeProgram: TermProgram = {
       /* After compacting its conversation, Claude Code adds what hh-hook compact prints, which sends it back to its tools. */
       hooks: { SessionStart: [...hook('start'), { matcher: 'compact', ...hook('compact')[0]! }], UserPromptSubmit: hook('prompt'), Stop: hook('stop'), StopFailure: hook('stop'), PreToolUse: hook('tool'), PostToolUse: hook('tooldone'), PostToolUseFailure: hook('toolfail'), PermissionRequest: hook('ask'), SessionEnd: hook('end') },
       /* The status line hears the plan's limits; it shows nothing. */
-      statusLine: { type: 'command', command: 'hh-hook status' },
+      statusLine: { type: 'command', command: hookCommand('status') },
     };
     const command = [
       bin,

@@ -19,13 +19,21 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - After the sign-in code, a plan's card and its sign-in window show that it is connecting, with its steps, the step its machine is at and the time since the code, until it is ready, for every program. A minute with no new step (`SIGNIN_SLOW_MS`) says it takes longer than usual; at 10 minutes (`SIGNIN_CONNECT_MS`) it fails and says why and what to do, each with Retry and Stop.
 - The tracker, the task card, the plans screen and a plan card's tokens hold the room of their data while it comes, with one loading ring from 400 ms, and nothing already shown moves when it comes. At 10 seconds a load says it takes longer than usual, at 30 seconds it gives up and says why, and an error says why at once, each with Retry. A section says that it has nothing only once all of it came.
 - The map, a department with its tree and speed, and an employee's window show the same loading indicator where their data will stand. The map is drawn only once the company and the person's own arrangement came, so its blocks no longer jump into place. A department opened at its own address keeps back, the plate of its name and its tools while its company comes, so a failure there has a way out. Their loads say why they failed, or that they take longer than usual, as the tracker's do. None of them says it is empty, such as a conversation with no messages yet, while something it shows is still on its way.
+- On a page right to left, the map's zoom and Put back stand at the right, mirrored as the rest of the layout is.
 - A plan with separate limits for groups of models, as Antigravity's Gemini and its Claude and GPT models, keeps each group's limits: a used-up group holds only the turns and fallbacks on its own models, and the plan's card shows every group with what it used and when it resets.
 - In a page that reads right to left, an English line of a bar over the map ends with its full stop instead of starting with it, and the bar stays mirrored.
 - A number on a plan's card stays on one line with its unit or the word it goes with, as "14 h", "1 online" or "Input 0", in every language; a reset still wraps between its parts.
+- A release no longer counts as checked a commit that turnkey work was built on but its employee did not make: Hornhoof notes where the turn branch was as the work starts, refuses a start named under it, lists work whose start it has no record of for a person, and a tag named like main never stands for main.
 
 ### Changed
 
 - The map runs to the bottom of the screen, with the version as small muted text in its bottom end corner, clear of its buttons and of the bars along a phone's bottom; other screens keep the version in the row below them.
+
+## [0.39.4] - 2026-11-20
+
+### Fixed
+
+- A node no longer refuses the hooks of an agent's own program as callers outside its terminal after the program gave up on one, so its Hornhoof tools stay connected.
 
 ## [0.39.3] - 2026-11-19
 

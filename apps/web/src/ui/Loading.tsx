@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type Dispatch, type MutableRefObject, type ReactNode, type SetStateAction } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type Dispatch, type MutableRefObject, type ReactNode, type SetStateAction } from 'react';
 import { ApiFailure } from '../api';
 import { errorText, useT, type Messages } from '../i18n';
 import { LogoMark } from './icons';
@@ -255,23 +255,41 @@ function useArrived(phase: Load['phase']): boolean {
 
 /* The held room of a part of a screen: what it holds is drawn at its final size, the skeleton while the data comes, then the
    data, which fades in. Past 10 s or failed, the block that says so takes the room's place, and the room keeps its size
-   under it, unseen. After Retry the focus stays in the room, never on the top of the page. */
-type HoldProps = { load: Load; className?: string; words?: [string, string]; slowHint?: string; children?: ReactNode };
+   under it, unseen; a room that keeps what it holds (keep) shows the block in its own line instead, with LoadLine, and the
+   rest stays (Design #1656). After Retry the focus stays in the room, never on the top of the page. */
+type HoldProps = { load: Load; className?: string; words?: [string, string]; slowHint?: string; keep?: boolean; children?: ReactNode };
 
-export function Hold({ load, className, words, slowHint, children }: HoldProps) {
+/* Retry from inside a room, which keeps the focus in it. */
+const RoomRetry = createContext<(() => void) | null>(null);
+
+const stalled = (load: Load) => load.phase === 'slow' || load.phase === 'failed';
+const roomClass = (className?: string) => (className ? `load-hold ${className}` : 'load-hold');
+const holdsClass = (off: boolean, arrived: boolean) => (off ? 'load-gone' : arrived ? 'load-in arrive' : 'load-in');
+
+export function Hold({ load, className, words, slowHint, keep, children }: HoldProps) {
   const room = useRef<HTMLDivElement>(null);
   const arrived = useArrived(load.phase);
-  const off = load.phase === 'slow' || load.phase === 'failed';
+  const off = !keep && stalled(load);
   const retry = () => {
     load.retry();
     room.current?.focus({ preventScroll: true });
   };
   return (
-    <div ref={room} className={className ? `load-hold ${className}` : 'load-hold'} tabIndex={-1} aria-busy={load.phase === 'loading' || load.phase === 'slow'}>
-      <div className={off ? 'load-gone' : arrived ? 'load-in arrive' : 'load-in'} aria-hidden={off || undefined}>{children}</div>
+    <div ref={room} className={roomClass(className)} tabIndex={-1} aria-busy={load.phase === 'loading' || load.phase === 'slow'}>
+      <RoomRetry.Provider value={retry}>
+        <div className={holdsClass(off, arrived)} aria-hidden={off || undefined}>{children}</div>
+      </RoomRetry.Provider>
       {off && <LoadFail load={load} onRetry={retry} words={words} slowHint={slowHint} />}
     </div>
   );
+}
+
+/* The line of a room that keeps what it holds where its ring stands: the ring and its words while the data comes, then past
+   10 s or once failed why, with Retry, in the same place, while the rest of the room stays. */
+export function LoadLine({ load, words, live }: { load: Load; words?: ReactNode; live?: boolean }) {
+  const retry = useContext(RoomRetry) ?? load.retry;
+  if (stalled(load)) return <LoadFail load={load} onRetry={retry} />;
+  return <Busy ring={load.ring} words={words} live={live} />;
 }
 
 /* Where a part of a screen's data will stand while it comes, with no skeleton of its own: the ring and its words, then why

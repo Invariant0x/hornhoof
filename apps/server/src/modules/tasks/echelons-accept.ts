@@ -43,8 +43,10 @@ const noMainApproval = () => refuse(403, 'decision_not_allowed', 'The department
 type ObservedHead = Awaited<ReturnType<Ctx['readCommit']>>;
 type Repository = Parameters<Ctx['readCommit']>[0];
 
+/* The branch is at the commit, as the repository says it now. A tag of its name is no branch, as a ref written where the
+   branch was deleted would otherwise be. */
 function matchesObservedHead(value: ObservedHead, branch: string, commit: string): boolean {
-  return !('problem' in value) && value.branch === branch && value.commitSha === commit;
+  return !('problem' in value) && !value.tag && value.branch === branch && value.commitSha === commit;
 }
 
 async function requireInclusion(ctx: Reader, repository: Repository, candidate: string, integration: string): Promise<void> {

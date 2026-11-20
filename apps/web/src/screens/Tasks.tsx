@@ -137,8 +137,8 @@ function HeldWork({ load, view, list, shown, children }: { load: Load; view: str
   const done = load.phase === 'done';
   const rows = useHeldRows(list, done && view === 'list' ? shown : null);
   return (
-    <Hold load={load} className="tr-hold">
-      {done ? children : view === 'list' ? <HeldList rows={rows} ring={load.ring} /> : <Busy ring={load.ring} words={t.load.tasks} />}
+    <Hold load={load} className="tr-hold" keep={view === 'list'}>
+      {done ? children : view === 'list' ? <HeldList rows={rows} load={load} /> : <Busy ring={load.ring} words={t.load.tasks} />}
     </Hold>
   );
 }

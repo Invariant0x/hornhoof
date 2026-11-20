@@ -24,14 +24,31 @@ function readStdin() {
   });
 }
 
+/* The process that ran this hook, as the hook started. A program gives up on a hook by ending the process it started, and
+   only that one, as Claude Code does with a status line a newer one overtook: a hook that outlived it belongs to no program
+   any more, and the node refuses it as a caller outside the agent's pane. It ends at once instead and says nothing, as its
+   program asked. One let go before it even started is already init's: no program runs as init. */
+const PARENT = process.ppid;
+const letGo = () => process.ppid !== PARENT || process.ppid === 1;
+
+function endOnceLetGo() {
+  setInterval(() => {
+    if (letGo()) process.exit(0);
+  }, 50).unref();
+}
+
+/* The hook goes only while its program still holds it. */
+const sendWhileHeld = (event, body) => (letGo() ? null : sendHook(event, body));
+
 async function main() {
   const event = process.argv[2];
   /* Written before the exit below cuts a pipe short. */
   if (event === 'compact') return new Promise(resolve => process.stdout.write(`${AFTER_COMPACT}\n`, () => resolve()));
   const url = process.env.HH_BRIDGE;
   if (!event || !url || !/^[a-z]+$/.test(event)) return;
+  endOnceLetGo();
   const body = process.argv[3] ?? (await readStdin());
-  const res = await sendHook(event, body || '{}');
+  const res = await sendWhileHeld(event, body || '{}');
   if (!res) return;
   return print(await answerOf(event, res));
 }
