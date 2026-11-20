@@ -1,5 +1,4 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { ApiFailure } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import type { TrackerPlace } from '../routes';
@@ -12,7 +11,7 @@ import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
 import { DepartmentMark } from '../ui/TrackerMarks';
 import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
-import { Busy, Hold, LoadState, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
+import { Busy, Hold, LoadState, noneYet, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
 import { MachineAway } from '../ui/MachineAway';
 import { MergeCard } from '../ui/MergeCard';
 import { Requests, wordsAnswer } from '../ui/Requests';
@@ -48,7 +47,6 @@ type Props = {
    screen, as the titles above it wrap anew, does the page scroll, as little as brings it whole into sight. */
 const rowOf = (id: string) => [...document.querySelectorAll<HTMLElement>('.tracker [data-task]')].find(row => row.dataset.task === id) ?? null;
 /* A server without goals, pipelines or kept cards yet answers that it has none, which is no failure. */
-const noneYet = (f: unknown) => f instanceof ApiFailure && f.status === 404;
 const tracked = (f: unknown) => (noneYet(f) ? null : f);
 
 /* A list as a part of the tracker's load, the goals or the kept cards: a server without it yet has none. */
