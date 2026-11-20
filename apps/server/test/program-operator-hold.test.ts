@@ -361,15 +361,67 @@ it('calls only who can release it: never the head of a part of Operations in pla
 
 const FREE: Omit<OperatorRecoveryState, 'type' | 'agentKey' | 'jobId' | 'instance' | 'request'> = { program: 'here', current: null, generation: 7, input: 'empty', wait: null, runningTool: false, retrying: false, busy: false };
 
+function showRecoveryState(c: Held, facts: Partial<typeof FREE> | null): void {
+  c.sent.mockImplementation((_node, frame) => {
+    if (frame.type === 'program.recovery_state_get' && facts) queueMicrotask(() => receiveOperatorReply(c.ctx, c.identity, { type: 'program.recovery_state', ...c.program, request: frame.request, ...FREE, current: c.program.instance, ...facts }));
+    return true;
+  });
+}
+
+it.each<[string, Partial<typeof FREE>]>([
+  ['an idle program', {}],
+  ['no program', { program: 'gone', current: null, input: 'unknown' }],
+])('automatically releases the unavailable operator hold with %s and restarts the queue', async (_screen, facts) => {
+  const c = await held();
+  const head = await hire(c, 'Operations lead', 'head', 'OPS-HEAD');
+  showRecoveryState(c, facts);
+  const waiting = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Later words.', createdBy: null });
+  expect(await c.jobOf(waiting)).toMatchObject({ status: 'queued' });
+  expect(await c.row()).toMatchObject({ recoveryHold: true, resolution: { outcome: 'operator_unavailable' } });
+
+  await checkOperatorHealth(c.ctx, new Date(+c.now + 6 * MINUTE));
+  await checkOperatorHealth(c.ctx, new Date(+c.now + 7 * MINUTE));
+
+  const children = await c.children();
+  expect(children).toHaveLength(1);
+  expect(children[0]).toMatchObject({ status: 'running' });
+  expect(await c.row()).toMatchObject({ status: 'resolved', recoveryHold: false, continuationJobId: children[0]!.id });
+  expect(await turnsWith(c, head.id, c.incident.id)).toEqual([]);
+});
+
+it.each<[string, Partial<typeof FREE>]>([
+  ['a question', { wait: 'permission' }],
+  ['a person’s unsent words', { input: 'text' }],
+])('keeps the unavailable operator hold with %s and writes each responder once', async (_screen, facts) => {
+  const c = await held();
+  const head = await hire(c, 'Operations lead', 'head', 'OPS-HEAD');
+  const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const waiting = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Later words.', createdBy: null });
+  showRecoveryState(c, facts);
+  await checkOperatorHealth(c.ctx, new Date(+c.now + 6 * MINUTE));
+  await checkOperatorHealth(c.ctx, new Date(+c.now + 7 * MINUTE));
+
+  expect(await c.row()).toMatchObject({ recoveryHold: true });
+  expect(await c.jobOf(waiting)).toMatchObject({ status: 'queued' });
+  const heldSince = c.incident.escalatedAt!.toISOString();
+  for (const responder of [orchestrator!, head]) {
+    const calls = await turnsWith(c, responder.id, c.incident.id);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.prompt).toContain(c.agent.name);
+    expect(calls[0]!.prompt).toContain(heldSince);
+  }
+
+  showRecoveryState(c, {});
+  await checkOperatorHealth(c.ctx, new Date(+c.now + 8 * MINUTE));
+  expect(await c.row()).toMatchObject({ recoveryHold: false });
+});
+
 /* The tool of Operations, with the node answering what it sees right now. */
 async function release(facts: Partial<typeof FREE> | null = {}, roleKey = 'OPS-PROGRAM', kind: 'worker' | 'head' = 'worker') {
   const c = await held();
   const rob = await hire(c, 'Rob', kind, roleKey);
   const [turn] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: rob.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Look at the hold.', timeoutMs: 1000, status: 'running' }).returning();
-  c.sent.mockImplementation((_node, frame) => {
-    if (frame.type === 'program.recovery_state_get' && facts) queueMicrotask(() => receiveOperatorReply(c.ctx, c.identity, { type: 'program.recovery_state', ...c.program, request: frame.request, ...FREE, current: c.program.instance, ...facts }));
-    return true;
-  });
+  showRecoveryState(c, facts);
   const caller = { id: turn!.id, companyId: c.companyId, agentId: rob.id };
   const call = (reason = 'The program stands ready and the words wait.') => releaseRecoveryHold(c.ctx, caller, { case: c.incident.id, reason });
   const audits = async () => (await c.db.select().from(agentEvents).where(sql`${agentEvents.data}->'recoveryRelease' is not null`)).map(event => (event.data as { recoveryRelease: unknown }).recoveryRelease);
