@@ -3512,6 +3512,120 @@ th.k-prio .sorth { white-space: nowrap; }
 .guard-stop { max-inline-size: 520px; margin-block: 0 var(--bar-gap); margin-inline: auto; border-inline-start: 3px solid var(--pink-ink); }
 .guard-stop.float { position: fixed; z-index: 30; inset-inline-end: 16px; inset-block-end: 72px; max-inline-size: min(520px, calc(100% - 32px)); margin: 0; }
 .light-note { position: fixed; z-index: 30; inset-inline-start: 16px; inset-block-end: 72px; max-inline-size: min(520px, calc(100% - 32px)); }
+/* Papyrus and carved sandstone surface treatment across every screen when a theme declares data-surface="papyrus".
+   Uses only semantic and world tokens via background-image and inset shadows, keeping layout geometry and contrast intact. */
+:where(:root[data-surface='papyrus']) body {
+  background-image:
+    radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--surface) 42%, transparent), transparent 68%),
+    repeating-linear-gradient(90deg, transparent 0 18px, color-mix(in srgb, var(--line) 14%, transparent) 18px 19px),
+    repeating-linear-gradient(0deg, transparent 0 26px, color-mix(in srgb, var(--line) 11%, transparent) 26px 27px);
+}
+:where(:root[data-surface='papyrus']) .edge > .edge-in,
+:where(:root[data-surface='papyrus']) .dialog,
+:where(:root[data-surface='papyrus']) .acard,
+:where(:root[data-surface='papyrus']) .dv-drawer,
+:where(:root[data-surface='papyrus']) .orch,
+:where(:root[data-surface='papyrus']) .side-panel,
+:where(:root[data-surface='papyrus']) .skin-card,
+:where(:root[data-surface='papyrus']) .skins-guide,
+:where(:root[data-surface='papyrus']) .phone-form,
+:where(:root[data-surface='papyrus']) .account-menu,
+:where(:root[data-surface='papyrus']) .tr-side,
+:where(:root[data-surface='papyrus']) .tr-col,
+:where(:root[data-surface='papyrus']) .tr-card,
+:where(:root[data-surface='papyrus']) .wcard,
+:where(:root[data-surface='papyrus']) .ptable,
+:where(:root[data-surface='papyrus']) .dt {
+  background-image:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 55%, transparent), color-mix(in srgb, var(--surface2) 32%, transparent)),
+    repeating-linear-gradient(0deg, transparent 0 14px, color-mix(in srgb, var(--line) 10%, transparent) 14px 15px);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--line2) 22%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 88%, transparent);
+}
+:where(:root[data-surface='papyrus']) .dialog,
+:where(:root[data-surface='papyrus']) .account-menu,
+:where(:root[data-surface='papyrus']) .orch,
+:where(:root[data-surface='papyrus']) .acard,
+:where(:root[data-surface='papyrus']) .dv-drawer {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--line2) 28%, transparent),
+    inset 0 2px 0 color-mix(in srgb, var(--amber) 34%, transparent),
+    0 12px 28px var(--shadow);
+}
+:where(:root[data-surface='papyrus']) .dialog > header,
+:where(:root[data-surface='papyrus']) .t-bar,
+:where(:root[data-surface='papyrus']) .dv-drawer-h,
+:where(:root[data-surface='papyrus']) .ac-head,
+:where(:root[data-surface='papyrus']) .tr-top,
+:where(:root[data-surface='papyrus']) .form-head,
+:where(:root[data-surface='papyrus']) .g-head,
+:where(:root[data-surface='papyrus']) .ptable th,
+:where(:root[data-surface='papyrus']) .dt th {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface2) 64%, transparent), transparent);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--amber) 42%, transparent);
+}
+:where(:root[data-surface='papyrus']) .tabs.glass,
+:where(:root[data-surface='papyrus']) .tb-brand.glass,
+:where(:root[data-surface='papyrus']) .avatar.glass,
+:where(:root[data-surface='papyrus']) .zoom.glass,
+:where(:root[data-surface='papyrus']) .ticker.glass,
+:where(:root[data-surface='papyrus']) .crumb.glass,
+:where(:root[data-surface='papyrus']) .dv-tools.glass,
+:where(:root[data-surface='papyrus']) .hbtn.glass {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 60%, transparent), color-mix(in srgb, var(--surface2) 44%, transparent));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 90%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--line2) 34%, transparent),
+    0 3px 10px var(--shadow);
+}
+:where(:root[data-surface='papyrus']) .tabs button.on {
+  box-shadow:
+    inset 0 -3px 0 var(--cyan),
+    inset 0 2px 0 color-mix(in srgb, var(--amber) 55%, transparent);
+}
+:where(:root[data-surface='papyrus']) .btn:not(.ghost) {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--on-btn) 14%, transparent), color-mix(in srgb, var(--ink) 16%, transparent));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--on-btn) 30%, transparent),
+    inset 0 -2px 0 color-mix(in srgb, var(--ink) 28%, transparent);
+}
+:where(:root[data-surface='papyrus']) .btn.ghost:not(:hover):not(.on),
+:where(:root[data-surface='papyrus']) .act:not(:hover) {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 50%, transparent), color-mix(in srgb, var(--surface2) 45%, transparent));
+}
+:where(:root[data-surface='papyrus']) .field input,
+:where(:root[data-surface='papyrus']) .field select,
+:where(:root[data-surface='papyrus']) textarea,
+:where(:root[data-surface='papyrus']) .choice,
+:where(:root[data-surface='papyrus']) .kind-card,
+:where(:root[data-surface='papyrus']) .check-card {
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 14%, transparent);
+}
+:where(:root[data-surface='papyrus']) .bar,
+:where(:root[data-surface='papyrus']) .sq-bar.dept-sq,
+:where(:root[data-surface='papyrus']) .strip {
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 18%, transparent);
+}
+:where(:root[data-surface='papyrus']) .bar i,
+:where(:root[data-surface='papyrus']) .sq-bar.dept-sq i.on {
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--amber) 35%, transparent), transparent);
+}
+:where(:root[data-surface='papyrus']) .sum > div,
+:where(:root[data-surface='papyrus']) .spl-r,
+:where(:root[data-surface='papyrus']) .tr-status-pill,
+:where(:root[data-surface='papyrus']) .alert,
+:where(:root[data-surface='papyrus']) .warn-line {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line2) 24%, transparent);
+}
+:where(:root[data-surface='papyrus']) .edge > .corner {
+  border-inline-start-color: var(--amber);
+  border-block-start-color: var(--amber);
+}
+:where(:root[data-surface='papyrus']) .edge {
+  background-color: var(--line2);
+}
+
 /* A page the guard turned light draws nothing that costs a frame: no animation, transition, filter, blur or shadow. */
 :root[data-light] *, :root[data-light] *::before, :root[data-light] *::after {
   animation: none !important; transition: none !important;
