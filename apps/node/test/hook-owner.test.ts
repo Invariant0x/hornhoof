@@ -56,6 +56,37 @@ describe('hook ownership after reparenting to init', () => {
   });
 });
 
+/* Claude Code starts each hook as `/bin/sh -c <command>` in a session of its own with no terminal: only the process tree
+   ties a hook to the agent's program. A hook whose shell the program ended lives on under init with a session whose leader
+   is gone: nothing ties it to any pane, exactly as a process of another agent of the same user that copies that shape. */
+describe("hooks in a session of their own", () => {
+  const shape = JSON.parse(readFileSync(new URL('./fixtures/hook-owner-own-session.json', import.meta.url), 'utf8')) as typeof sample;
+  function holding(holder: number) {
+    const proc = mkdtempSync(join(tmpdir(), 'hh-hook-own-session-'));
+    stops.push(() => rmSync(proc, { recursive: true, force: true }));
+    for (const stat of shape.stats) {
+      const pid = stat.split(' ')[0]!;
+      mkdirSync(join(proc, pid, 'fd'), { recursive: true });
+      writeFileSync(join(proc, pid, 'stat'), stat);
+    }
+    symlinkSync(`socket:[${shape.inode}]`, join(proc, String(holder), 'fd', '7'));
+    return fromAgent(async key => shape.panes[key] ?? [], proc);
+  }
+  const call = (pid?: number): Peer => ({ port: 41101, bridgePort: 35101, acceptedInode: shape.inode, ...(pid === undefined ? {} : { pid }) });
+
+  it.each([122, 131])('accepts the hook %s its program started, under its shell or as it', async holder => {
+    expect(await holding(holder)('own', call(holder))).toBe(true);
+    expect(await holding(holder)('own', call())).toBe(true);
+  });
+
+  it.each([141, 211, 300])('refuses %s: an orphaned hook, another agent\'s hook or a process outside', async holder => {
+    const why: string[] = [];
+    expect(await holding(holder)('own', call(holder), reason => why.push(reason))).toBe(false);
+    expect(why).toEqual(["the caller is not under the agent's pane"]);
+    expect(await holding(holder)('own', call())).toBe(false);
+  });
+});
+
 it('returns a retryable error on tmux failure and rechecks the same connection after recovery', async () => {
   const tmux = new Tmux({ env: { HOME: tmpdir() } });
   const run = vi.spyOn(tmux, 'run').mockRejectedValueOnce(new Error(tmuxError.stderr)).mockRejectedValueOnce(new Error(tmuxError.stderr)).mockResolvedValue(tmuxError.recoveredStdout);
