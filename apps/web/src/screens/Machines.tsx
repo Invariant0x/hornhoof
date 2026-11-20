@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { NodeLoad } from '@hornhoof/protocol';
 import { ApiFailure, api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
@@ -9,13 +9,14 @@ import { Bar, Share } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
-import { LoadState, useLoad } from '../ui/Loading';
+import { doneOf, Idle, useHeldRows, useLoad, type Load } from '../ui/Loading';
 import { latestAnswers, useStream } from '../live';
 import { CardBlock, CardFrame, CardHead, EmptyBox, Facts, Gauge, MachineMark, Part } from '../ui/Cards';
 import { ProviderMark } from '../ui/icons';
 import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
 import { providerFilter, type FilterGroup } from '../ui/TableTools';
-import { SortTable, type TableColumn } from '../ui/SortTable';
+import { HeldTable, SortTable, type TableColumn } from '../ui/SortTable';
+import type { TableSearch } from '../ui/TableTools';
 import { clock, planStateOnMachine, subName } from '../ui/subscription';
 import { MachineAccessBlock } from '../ui/MachineAccessBlock';
 import { useNow } from '../ui/reset';
@@ -105,6 +106,41 @@ function Pool({ loads, online, all }: { loads: NodeLoad[]; online: number; all: 
       </Edge>
     </section>
   );
+}
+
+/* The pool's frame while the machines come: its names at once, idle bars where its figures will stand. */
+function HeldPool() {
+  const t = useT();
+  const idle = <Idle w="6ch" />;
+  return (
+    <section aria-label={t.machines.pool} aria-busy="true">
+      <Edge className="pool" cut={12}>
+        <Facts className="pool-facts" items={[[t.machines.poolOnline, idle], [t.machines.poolCores, idle], [t.machines.poolMemory, idle], [t.machines.poolBusy, idle]]} />
+      </Edge>
+    </section>
+  );
+}
+
+/* A list with no count kept for the session holds this many machines. */
+const HELD_MACHINES = 3;
+
+type BodyProps = {
+  me: Me; shown: MachineView[] | null; load: Load; builtin: BuiltinView | null; pool: ReturnType<typeof machinePool>; copies: CopiesView | null;
+  held: number; columns: TableColumn<MachineRow>[]; search: TableSearch<MachineRow>; table: ReactNode;
+};
+
+/* The machines once they came: the pool, the table or that there are none, where Hornhoof keeps copies, and the phones.
+   While they come, the pool's frame and the table are held in their place (style book 1.5, section 4; Design #1656). */
+function MachinesBody({ me, shown, load, builtin, pool, copies, held, columns, search, table }: BodyProps) {
+  const t = useT();
+  if (!shown) return <><HeldPool /><HeldTable load={load} columns={columns} search={search} rows={held} /></>;
+  return <>
+    <Pool {...pool} />
+    {shown.length === 0 && !builtin ? <p className="muted">{t.machines.noMachines}</p> : table}
+    {/* Under the table: it comes with the machines, so nothing above them moves when they come. */}
+    {copies && <div className="machines-copies"><CopiesLine copies={copies} /></div>}
+    <Phones me={me} machines={shown} />
+  </>;
 }
 
 function MemoryGauge({ load, less }: { load: NodeLoad; less: boolean }) {
@@ -732,8 +768,10 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
     void load();
     return everyVisible(() => void load(), REFRESH_MS);
   }, [load]);
-  /* The machines come with the shared indicator where they will stand, and say why when they do not. */
+  /* The machines come into their held pool and table, which say why when they do not. */
   const machinesLoad = useLoad([{ data: machines, failure: loadFailure, load }]);
+  const shown = doneOf(machines, machinesLoad);
+  const heldMachines = useHeldRows('machines', shown ? shown.length : null) ?? HELD_MACHINES;
   useStream(m => {
     if (m.type === 'reconnected') void load();
   });
@@ -822,6 +860,8 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const activeCommand = liveCommand(command, now);
   const openIds = openCommandIds({ ...addCommands, ...coreCommands }, now);
   const rows = machineRows(machines ?? [], builtin, subs, t.machines.builtin);
+  const columns = machineColumns(t, language, priority);
+  const search: TableSearch<MachineRow> = { placeholder: t.tables.searchMachines, short: t.tables.searchMachinesShort, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount };
   if (unavailableFailure(loadFailure) || unavailableFailure(failure) || (selected && machines && !rows.some(row => row.id === selected))) return <RouteUnavailable onHome={onHome} />;
 
   return (
@@ -837,8 +877,6 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           </div>
         )}
       </header>
-      {/* Under the header, not in it: it comes with the machines, and the header's button stays where it was. */}
-      {copies && <div className="machines-copies"><CopiesLine copies={copies} /></div>}
 
       {activeCommand && (
         <ActiveCommandPanel
@@ -853,27 +891,22 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       <LoadFailure failure={machines ? loadFailure : null} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       {certificateEnds && <CertificateWarning ends={certificateEnds} />}
-      <LoadState load={machinesLoad} />
-
-      {machines && <Pool {...pool} />}
-      {machines && machines.length === 0 && !builtin && <p className="muted">{t.machines.noMachines}</p>}
-      {machines && (machines.length > 0 || builtin) && (
+      <MachinesBody me={me} shown={shown} load={machinesLoad} builtin={builtin} pool={pool} copies={copies} held={heldMachines} columns={columns} search={search} table={(
         <SortTable
           rows={rows}
           selectedId={selected}
           onSelect={onSelect}
-          columns={machineColumns(t, language, priority)}
+          columns={columns}
           name={row => row.hostname}
           openIds={openIds}
           initialSort={{ key: priority ? 'priority' : 'status', direction: 1 }}
-          search={{ placeholder: t.tables.searchMachines, short: t.tables.searchMachinesShort, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
+          search={search}
           filters={machineFilters(t)}
           card={row => <MachineDetails row={row} subs={subs} me={me} now={now} order={{ shown: priority, last: Math.max(1, ...rows.map(one => placeOf(one) ?? 0)), moving }} controls={{
             picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, disconnect, refresh: load, fail: setFailure,
           }} />}
         />
-      )}
-      {machines && <Phones me={me} machines={machines} />}
+      )} />
     </section>
   );
 }

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LANGUAGES, LanguageProvider } from '../src/i18n';
@@ -31,8 +31,14 @@ const card = (name: string) => {
   fireEvent.click(screen.getByRole('button', { name: new RegExp(`^(Open the card of |Открыть карточку )${name}$`) }));
   return screen.getByRole('article', { name });
 };
+/* The machines' own table, once they came: while they come the screen holds a table head of the same columns, busy. */
+const shownTable = () => waitFor(() => {
+  const table = screen.getByRole('table');
+  expect(table.closest('[aria-busy="true"]')).toBeNull();
+  return table;
+});
 const openCard = async (name: string) => {
-  await screen.findByRole('table');
+  await shownTable();
   return card(name);
 };
 const meter = (node: HTMLElement, label: string) => within(node).getByText(label, { selector: '.g-l' }).closest('.gauge')!;
@@ -72,7 +78,7 @@ describe('the link certificate warning', () => {
   it('says nothing while the certificate has 15 days left', async () => {
     const calls = lists({ 'GET /api/link': [200, linkWithCertificate(endsIn(15))] });
     render(<Machines me={ME} />);
-    await screen.findByRole('table');
+    await shownTable();
     await vi.waitFor(() => expect(calls.some(c => c.path === '/api/link')).toBe(true));
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, 0));
@@ -91,7 +97,7 @@ describe('the link certificate warning', () => {
   it('asks nothing about the link for people who do not see the whole company', async () => {
     const calls = lists();
     render(<Machines me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} />);
-    await screen.findByRole('table');
+    await shownTable();
     expect(calls.some(c => c.path === '/api/link')).toBe(false);
   });
 });
@@ -180,10 +186,22 @@ describe('Machines', () => {
     expect(within(card('build-box')).getByText(empty)).toBeInTheDocument();
   });
 
+  it('holds the pool and the table head while the machines come, both busy, and fills them once they came', async () => {
+    let finish!: (reply: [number, unknown]) => void;
+    lists({ 'GET /api/machines': () => new Promise(resolve => { finish = resolve; }) });
+    render(<Machines me={ME} />);
+    expect(screen.getByRole('region', { name: 'All machines together', busy: true })).toBeInTheDocument();
+    expect(screen.getByRole('table').closest('[aria-busy="true"]')).not.toBeNull();
+    expect(screen.getByRole('searchbox')).toBeInTheDocument();
+    await act(async () => { finish([200, { machines: MACHINES, builtin: BUILTIN }]); });
+    expect(within(await shownTable()).getByRole('button', { name: /^Open the card of dev-laptop$/ })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'All machines together', busy: false })).toBeInTheDocument();
+  });
+
   it('shows the whole pool: machines online of all, processor cores, free memory and how busy it is now', async () => {
     lists();
     render(<Machines me={ME} />);
-    const pool = await screen.findByRole('region', { name: 'All machines together' });
+    const pool = await screen.findByRole('region', { name: 'All machines together', busy: false });
     expect(fact(pool, 'Machines online')).toBe('2 of 3');
     expect(fact(pool, 'Processor cores')).toBe('12');
     expect(fact(pool, 'Free memory')).toBe('8.5 of 20 GB');
@@ -210,7 +228,7 @@ describe('Machines', () => {
   it("sets apart only the percent sign of the pool's and the card's shares, to take the text font", async () => {
     lists();
     render(<Machines me={ME} />);
-    const pool = await screen.findByRole('region', { name: 'All machines together' });
+    const pool = await screen.findByRole('region', { name: 'All machines together', busy: false });
     const mac = await openCard('dev-laptop');
     const signs = (node: Element | null | undefined) => [...(node?.querySelectorAll('.pct') ?? [])].map(n => n.textContent);
     const busy = within(pool).getByText('Busy now', { selector: 'dt' }).nextElementSibling;
@@ -272,7 +290,7 @@ describe('Machines', () => {
   it('shows the machine the built-in node runs on as one card, with what runs on either', async () => {
     lists({}, { ...BUILTIN, machine: { id: 'm1', hostname: 'dev-laptop' } });
     render(<Machines me={ME} />);
-    const pool = await screen.findByRole('region', { name: 'All machines together' });
+    const pool = await screen.findByRole('region', { name: 'All machines together', busy: false });
     expect(fact(pool, 'Machines online')).toBe('1 of 2');
     expect(fact(pool, 'Processor cores')).toBe('8');
     expect(fact(pool, 'Free memory')).toBe('6 of 12 GB');
@@ -295,7 +313,7 @@ describe('Machines', () => {
     lists({ 'GET /api/machines': [200, { machines: [machine], builtin: { ...BUILTIN, machine: { id: machine.id, hostname: machine.hostname }, browserError: 'builtin browser reason', drain: { state: 'waiting', turnsLeft: 2, partsLeft: 0, since: '2026-11-04T18:00:00.000Z' } } }] });
     render(<Machines me={ME} />);
     const mac = await openCard('dev-laptop');
-    expect(fact(await screen.findByRole('region', { name: 'All machines together' }), 'Machines online')).toBe('1 of 1');
+    expect(fact(await screen.findByRole('region', { name: 'All machines together', busy: false }), 'Machines online')).toBe('1 of 1');
     expect(meter(mac, 'Processor')).toHaveTextContent('4 cores');
     expect(within(mac).getByText('Online', { selector: '.status' })).toBeInTheDocument();
     expect(within(mac).getByText(/machine browser reason/, { selector: 'p' })).toBeInTheDocument();
@@ -319,7 +337,7 @@ describe('Machines', () => {
     lists({}, null);
     const lead: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } };
     render(<Machines me={lead} />);
-    const pool = await screen.findByRole('region', { name: 'All machines together' });
+    const pool = await screen.findByRole('region', { name: 'All machines together', busy: false });
     expect(fact(pool, 'Machines online')).toBe('1 of 2');
     expect(screen.queryByRole('article', { name: 'Built-in node' })).not.toBeInTheDocument();
   });
@@ -327,7 +345,7 @@ describe('Machines', () => {
   it('shows one table row per machine and toggles cards independently from any cell', async () => {
     lists();
     render(<Machines me={ME} />);
-    await screen.findByRole('table');
+    await shownTable();
     expect(screen.getAllByRole('row').filter(r => r.classList.contains('rm'))).toHaveLength(3);
     expect(screen.queryByRole('article')).not.toBeInTheDocument();
     await userEvent.click(within(screen.getByRole('row', { name: 'dev-laptop' })).getByText('Ivan'));
@@ -450,7 +468,7 @@ describe('Machines', () => {
     active = [];
     inRu.unmount();
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    await screen.findByRole('table');
+    await shownTable();
     expect(screen.queryByText(commandCode(withKey(addCmd.command)))).not.toBeInTheDocument();
   });
 
@@ -522,7 +540,7 @@ describe('Machines', () => {
     localStorage.setItem('hh-lang', language);
     lists();
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    await screen.findByRole('table');
+    await shownTable();
     expect(within(screen.getByRole('row', { name: 'build-box' })).getByTitle(note)).toHaveTextContent(mark);
     expect(within(screen.getByRole('row', { name: 'dev-laptop' })).queryByText(mark)).not.toBeInTheDocument();
     const box = card('build-box');
@@ -546,7 +564,7 @@ describe('Machines', () => {
     let nodes: (string | null)[] = ['3fe094e'.padEnd(40, '1')];
     lists({ 'GET /api/machines': () => [200, { machines: [{ ...MACHINES[0]!, otherBuild: { server, nodes } }, { ...MACHINES[1]!, otherBuild: null }], builtin: BUILTIN }] });
     const view = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    await screen.findByRole('table');
+    await shownTable();
     expect(within(screen.getByRole('row', { name: 'dev-laptop' })).getByTitle(note)).toHaveTextContent(mark);
     expect(within(screen.getByRole('row', { name: 'build-box' })).queryByText(mark)).not.toBeInTheDocument();
     const mac = card('dev-laptop');
@@ -556,13 +574,13 @@ describe('Machines', () => {
     view.unmount();
     nodes = [null];
     const again = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    await screen.findByRole('table');
+    await shownTable();
     expect(within(screen.getByRole('row', { name: 'dev-laptop' })).getByTitle(older)).toHaveTextContent(mark);
     /* Two nodes of two builds name both. */
     again.unmount();
     nodes = ['3fe094e'.padEnd(40, '1'), null];
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    await screen.findByRole('table');
+    await shownTable();
     expect(within(screen.getByRole('row', { name: 'dev-laptop' })).getByTitle(note.replace('3fe094e', `3fe094e, ${language === 'en' ? 'an older one' : 'старая'}`))).toHaveTextContent(mark);
   });
 
@@ -575,7 +593,7 @@ describe('Machines', () => {
     const macPlans = [...MACHINES[0]!.plans, { id: 's-glm', provider: 'glm' as const, status: 'ready' as const, online: false }];
     lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, plans: macPlans, browserError: 'libnss3.so missing' }, { ...MACHINES[1]!, browserError: null }, offlineWithPlan], builtin: { ...BUILTIN, browserError: 'libnss3.so missing' } }] });
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    await screen.findByRole('table');
+    await shownTable();
     const row = screen.getByRole('row', { name: 'dev-laptop' });
     expect(within(row).getByTitle(note)).toHaveTextContent(mark);
     const marks = row.querySelectorAll('.marks > span');
@@ -598,7 +616,7 @@ describe('Machines', () => {
   it('marks no machine when the server does not tell builds apart', async () => {
     lists();
     render(<Machines me={ME} />);
-    await screen.findByRole('table');
+    await shownTable();
     expect(screen.queryByText('Other build')).not.toBeInTheDocument();
   });
 
@@ -610,7 +628,7 @@ describe('Machines', () => {
         <Machines me={ME} />
       </LanguageProvider>,
     );
-    const pool = await screen.findByRole('region', { name: 'Все машины вместе' });
+    const pool = await screen.findByRole('region', { name: 'Все машины вместе', busy: false });
     expect(fact(pool, 'Машин в сети')).toBe('2 из 3');
     expect(fact(pool, 'Свободно памяти')).toBe('8,5 из 20 ГБ');
     const mac = card('dev-laptop');
@@ -660,7 +678,7 @@ describe('Machines', () => {
       [{ number: 1, why: 'server' }, 'The company server runs here'],
     ];
     shown('en', lines.map(([data], n) => ({ ...MACHINES[0]!, id: `c${n}`, hostname: `host-${n}`, data: held(data) })));
-    await screen.findByRole('table');
+    await shownTable();
     for (const [n, [, line]] of lines.entries()) expect(within(card(`host-${n}`)).getByText(line), line).toBeInTheDocument();
   });
 
@@ -673,7 +691,7 @@ describe('Machines', () => {
   it('sorts by priority', async () => {
     const rows = [[3, 'c'], [1, 'a'], [null, 'd'], [2, 'b']] as const;
     const { view } = shown('en', rows.map(([number, hostname]) => ({ ...MACHINES[0]!, id: hostname, hostname, data: held({ number, why: number === 1 ? 'server' : null }) })));
-    await screen.findByRole('table');
+    await shownTable();
     expect(names()).toEqual(['a', 'b', 'c', 'd']);
     expect(screen.getByRole('columnheader', { name: /Priority/ })).toHaveAttribute('aria-sort', 'ascending');
     /* The number in its cell; a machine with none has a dash that says why. */
@@ -683,7 +701,7 @@ describe('Machines', () => {
     /* Someone who does not see the whole company is told nothing of the order. */
     lists({ 'GET /api/machines': [200, { machines: [MACHINES[0]!], builtin: null, priority: false }] });
     render(<Machines me={{ ...ME, person: { ...ME.person, isOwner: false, scopeKind: 'listed' } }} />);
-    await screen.findByRole('table');
+    await shownTable();
     expect(screen.queryByRole('columnheader', { name: /Priority/ })).not.toBeInTheDocument();
     expect(within(card('dev-laptop')).queryByRole('heading', { name: 'Priority' })).not.toBeInTheDocument();
   });
@@ -694,7 +712,7 @@ describe('Machines', () => {
   ])('says why in %s', async (language, lines, under) => {
     const whys = ['always.best_link', 'always.small', 'next', 'handing', 'new', 'often_off.slow_disk'];
     shown(language, whys.map((why, n) => ({ ...MACHINES[0]!, id: `w${n}`, hostname: `host-${n}`, data: held({ number: n + 2, why }) })));
-    await screen.findByRole('table');
+    await shownTable();
     for (const [n, line] of lines.entries()) {
       expect(within(card(`host-${n}`)).getByText(line), line).toBeInTheDocument();
       expect(within(card(`host-${n}`)).getByText(under)).toBeInTheDocument();
@@ -809,7 +827,7 @@ describe('Machines', () => {
     const here = (node: HTMLElement) => within(node).queryByRole('button', { name: 'Move the server here' });
     /* Not on the server's own card, nor on a machine kept from the server or one that cannot take it. */
     const first = moving(null, { over: [{}, {}, { number: null, why: 'out', pin: 'none' }, { number: null, why: null, unfit: { why: 'phone' } }] });
-    await screen.findByRole('table');
+    await shownTable();
     expect([here(card('host-1')), here(card('host-3')), here(card('host-4'))]).toEqual([null, null, null]);
     expect(here(card('host-2'))).toBeInTheDocument();
     first.view.unmount();
@@ -918,7 +936,7 @@ describe('Machines', () => {
       { why: 'no_link' },
     ];
     shown(language, reasons.map((unfit, n) => ({ ...MACHINES[0]!, id: `u${n}`, hostname: `host-${n}`, data: held({ unfit }) })));
-    await screen.findByRole('table');
+    await shownTable();
     for (const [n, line] of lines.entries()) {
       const one = card(`host-${n}`);
       expect(within(one).getByText(line), line).toBeInTheDocument();
@@ -933,7 +951,7 @@ describe('Machines', () => {
     const anna = { ...MACHINES[0]!, id: 'u0', hostname: 'anna-mac', data: held({ unfit: { why: 'scope', person: 'Anna', departments: 0 }, copy: { line: 'ready' } }) };
     const waits = { ...MACHINES[0]!, id: 'u1', hostname: 'next-mac', data: held({}) };
     shown(language, [anna, waits]);
-    await screen.findByRole('table');
+    await shownTable();
     const cell = (hostname: string) => screen.getByRole('button', { name: new RegExp(`${hostname}$`) }).closest('tr')!.querySelector('.k-prio')!;
     /* The dash in the list says the same reason, for whoever points at it or hears it. */
     expect(cell('anna-mac').textContent).toBe(reason);
@@ -959,7 +977,7 @@ describe('Machines', () => {
     /* A company whose only machine is the server's. */
     lists({ 'GET /api/machines': [200, { machines: [], builtin: BUILTIN, priority: true }] });
     render(<Machines me={ME} />);
-    await screen.findByRole('table');
+    await shownTable();
     expect(screen.getByRole('columnheader', { name: /Priority/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open the card of Built-in node' }).closest('tr')!.querySelector('.k-prio')).toHaveTextContent('1');
   });
@@ -1022,7 +1040,7 @@ describe('Machines', () => {
         <Machines me={ME} />
       </LanguageProvider>,
     );
-    expect(fact(await screen.findByRole('region', { name: 'Все машины вместе' }), 'Машин в сети')).toBe('1 из 2');
+    expect(fact(await screen.findByRole('region', { name: 'Все машины вместе', busy: false }), 'Машин в сети')).toBe('1 из 2');
     expect(within(card('dev-laptop')).getByText('Здесь же работает сервер и его встроенная нода: ключи компании и прогоны тестов.')).toBeInTheDocument();
     expect(within(card('dev-laptop')).getByTitle('Сервер компании сейчас работает на этой машине')).toHaveTextContent('Здесь сервер компании');
     expect(within(card('build-box')).queryByText('Здесь сервер компании')).not.toBeInTheDocument();
@@ -1053,7 +1071,7 @@ describe('Machines', () => {
     const extra = { ...MACHINES[1]!, plans: [{ id: 'hidden', provider: 'kimi' as const, status: 'ready' as const, online: false }] };
     lists({ 'GET /api/machines': [200, { machines: [MACHINES[0]!, extra], builtin: BUILTIN }] });
     render(<Machines me={ME} />);
-    await screen.findByRole('table');
+    await shownTable();
     const provider = screen.getByRole('group', { name: 'Provider' });
     const claude = within(provider).getByRole('button', { name: /Claude.*2/ });
     await userEvent.click(claude);
@@ -1072,7 +1090,7 @@ describe('Machines', () => {
     onTestFinished(() => { vi.useRealTimers(); });
     lists({ 'GET /api/machines': [200, { machines: [MACHINES[0]!], builtin: null }] });
     render(<Machines me={ME} />);
-    await screen.findByRole('table');
+    await shownTable();
     expect(screen.queryByRole('group', { name: 'Status' })).not.toBeInTheDocument();
     await userEvent.type(screen.getByRole('searchbox'), 'Bruno');
     await userEvent.click(within(screen.getByRole('group', { name: 'Tests' })).getByRole('button', { name: /^Lent to test runs/ }));
@@ -1342,7 +1360,7 @@ describe('the filter groups and search of Machines (#1020)', () => {
 
   it.each(['en', 'ru'] as const)('in %s starts Provider, Status and Tests with All N (44px, pressed by default) and resets only its own group', async language => {
     showIn(language);
-    await screen.findByRole('table');
+    await shownTable();
     const t = { en, ru }[language];
     const cases = [
       [t.tables.provider, /^Codex/, 1],
@@ -1432,7 +1450,7 @@ describe('the filter groups and search of Machines (#1020)', () => {
     document.documentElement.dir = 'rtl';
     onTestFinished(() => { document.documentElement.removeAttribute('dir'); });
     showIn(language);
-    await screen.findByRole('table');
+    await shownTable();
     const t = { en, ru }[language];
     /* The phones under the machines have loaded, so the machines' count is the one status line. */
     await screen.findByText(t.phones.empty);

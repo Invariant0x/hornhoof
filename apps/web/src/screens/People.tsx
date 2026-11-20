@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
 import { fitTable } from '../ui/fit-table';
@@ -7,7 +7,7 @@ import { accessEmpty, accessInput, AccessPicker, accessText } from '../ui/Access
 import { CopyButton } from '../ui/CopyButton';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
-import { LoadState, useLoad } from '../ui/Loading';
+import { doneOf, Hold, Idle, LoadLine, useHeldRows, useLoad, type Load } from '../ui/Loading';
 import { latestAnswers, useStream } from '../live';
 import { Field } from '../ui/Field';
 import { NOT_A_LOGIN } from '../ui/SecretInput';
@@ -466,6 +466,56 @@ function PeopleHeader({ canManage, panel, onInvite, onAssistant }: { canManage: 
   );
 }
 
+/* The people's table head: drawn at once while they come, and over them once they came. */
+function PeopleHead() {
+  const t = useT();
+  return (
+    <thead>
+      <tr>
+        <th scope="col">{t.people.columns.name}</th>
+        <th scope="col">{t.people.columns.title}</th>
+        <th scope="col">{t.people.columns.access}</th>
+        <th scope="col">{t.people.columns.status}</th>
+        <th scope="col"><span className="sr">{t.people.columns.actions}</span></th>
+      </tr>
+    </thead>
+  );
+}
+
+/* A person while the people come: the name with its note under it, the title, the access and the status as idle bars. */
+function HeldPerson() {
+  return (
+    <tr className="held">
+      <td><span className="pwho"><Idle w="12ch" /><span className="pnote"><Idle w="18ch" /></span></span></td>
+      <td><Idle w="10ch" /></td>
+      <td><Idle w="12ch" /></td>
+      <td><Idle w="6ch" /></td>
+      <td />
+    </tr>
+  );
+}
+
+/* A list with no count kept for the session holds this many people. */
+const HELD_PEOPLE = 3;
+
+/* The people's table while they come (style book 1.5, section 4; Design #1656): its head at once; in its first row the ring
+   and its words, or why the load stalled with Retry; held people under it, as many as it showed last. */
+function HeldPeople({ load, rows, host }: { load: Load; rows: number; host: RefObject<HTMLDivElement | null> }) {
+  return (
+    <Hold load={load} keep className="held-table">
+      <div className="fit" ref={host}>
+        <table className="ptable">
+          <PeopleHead />
+          <tbody>
+            <tr className="held"><td colSpan={5}><LoadLine load={load} /></td></tr>
+            {Array.from({ length: rows - 1 }, (_, i) => <HeldPerson key={i} />)}
+          </tbody>
+        </table>
+      </div>
+    </Hold>
+  );
+}
+
 /* Under the list, and with it, so nothing moves when the list comes: who may act for the CEO, and that agents are elsewhere. */
 function PeopleFoot({ me }: { me: Me }) {
   const t = useT();
@@ -484,7 +534,6 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [askPeople] = useState(latestAnswers);
   const canManage = me.person.scopeKind === 'company';
-  const tableHost = usePeopleTable(people);
 
   const load = useCallback(async () => {
     const fresh = askPeople();
@@ -502,8 +551,11 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
   useEffect(() => {
     void load();
   }, [load]);
-  /* The people come with the shared indicator where they will stand, and say why when they do not. */
+  /* The people come into their held table, which says why when they do not. */
   const peopleLoad = useLoad([{ data: people, failure: loadFailure, load }]);
+  const shown = doneOf(people, peopleLoad);
+  const heldPeople = useHeldRows('people', shown ? shown.length : null) ?? HELD_PEOPLE;
+  const tableHost = usePeopleTable(shown);
   /* After a break, an update among them, the list is read again. */
   useStream(m => {
     if (m.type === 'reconnected') void load();
@@ -588,27 +640,18 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
       {panel?.kind === 'delete' && <DeleteAsk person={panel.person} onYes={() => removePerson(panel.person)} onClose={() => setPanel(null)} />}
       <LoadFailure failure={people ? loadFailure : null} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-      <LoadState load={peopleLoad} />
 
-      {people && (<>
+      {shown ? (<>
         <div className="fit" ref={tableHost}>
           <table className="ptable">
-            <thead>
-              <tr>
-                <th scope="col">{t.people.columns.name}</th>
-                <th scope="col">{t.people.columns.title}</th>
-                <th scope="col">{t.people.columns.access}</th>
-                <th scope="col">{t.people.columns.status}</th>
-                <th scope="col"><span className="sr">{t.people.columns.actions}</span></th>
-              </tr>
-            </thead>
+            <PeopleHead />
             <tbody>
-              {people.map(p => <PersonRow key={p.id} p={p} me={me} org={org} people={people} routed={Boolean(onSelect)} openPerson={openPerson} newLink={newLink} setStatus={setStatus} askDelete={person => setPanel({ kind: 'delete', person })} />)}
+              {shown.map(p => <PersonRow key={p.id} p={p} me={me} org={org} people={shown} routed={Boolean(onSelect)} openPerson={openPerson} newLink={newLink} setStatus={setStatus} askDelete={person => setPanel({ kind: 'delete', person })} />)}
             </tbody>
           </table>
         </div>
         <PeopleFoot me={me} />
-      </>)}
+      </>) : <HeldPeople load={peopleLoad} rows={heldPeople} host={tableHost} />}
     </section>
   );
 }

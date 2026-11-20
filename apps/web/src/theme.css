@@ -784,7 +784,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .people { max-width: 1040px; margin: 0 auto; padding: 16px 16px 48px; display: grid; gap: 18px; }
 .people-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
 .people-head > div { display: grid; gap: 6px; max-width: 60ch; }
-/* Which machines keep copies of the company, under the machines' header once they came. */
+/* Which machines keep copies of the company, under the machines' table once they came. */
 .machines-copies { display: grid; gap: 6px; max-width: 60ch; }
 .panel > .edge-in { padding: 20px; display: grid; gap: 14px; }
 .panel .actions { display: flex; justify-content: flex-end; }
