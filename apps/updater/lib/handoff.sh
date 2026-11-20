@@ -256,11 +256,55 @@ upload_request() {
   rm -f "$request"
 }
 
+# tar_members <archive>: the members of a tar archive, a line each, as its own headers have them and not as a tar makes
+# of them: "file <name>" for a plain file as this updater packs one, and "other <name>" for anything else: a link of either
+# kind, a folder, a device, a pipe, a header that names or changes another member, and a plain file that names a link,
+# which BusyBox tar makes a second name of. A name is given only when it is printable. Fails for an archive whose headers
+# cannot be followed to its end, or that holds anything but zeros after the block that ends it.
+tar_members() {
+  local archive=$1 total at=0 head name size octal kind i pair ch
+  total=$(wc -c < "$archive") || return 1
+  while [ "$at" -lt "$total" ]; do
+    [ "$((total - at))" -ge 512 ] || return 1
+    head=$(od -An -v -tx1 -j "$at" -N 512 -- "$archive" | tr -d ' \n') && [ "${#head}" = 1024 ] || return 1
+    if [ "${head:0:2}" = 00 ]; then
+      # A block with no name ends the archive; BusyBox tar reads on past one such block, so only zeros may follow.
+      [ "$(tail -c "+$((at + 1))" -- "$archive" | tr -d '\000' | head -c 1 | wc -c)" -eq 0 ]
+      return
+    fi
+    name=''
+    for ((i = 0; i < 200; i += 2)); do
+      pair=${head:i:2}
+      [ "$pair" != 00 ] || break
+      if [[ ! "$pair" =~ ^(2[1-9a-f]|[3-6][0-9a-f]|7[0-9a-e])$ ]]; then
+        name=''
+        break
+      fi
+      printf -v ch '%b' "\\x$pair"
+      name+=$ch
+    done
+    # The size, in octal digits and nothing else before the spaces or zeros that end the field.
+    size=${head:248:24}
+    while [ "${size: -2}" = 00 ] || [ "${size: -2}" = 20 ]; do size=${size%??}; done
+    [[ "$size" =~ ^(3[0-7])+$ ]] || return 1
+    octal=''
+    for ((i = 1; i < ${#size}; i += 2)); do octal+=${size:i:1}; done
+    size=$((8#$octal))
+    # Type 0, no name of a link, and no prefix for the name.
+    kind=other
+    if [ "${head:312:2}" = 30 ] && [[ "${head:314:200}${head:690:310}" =~ ^(00)+$ ]]; then kind='file'; fi
+    printf '%s %s\n' "$kind" "$name"
+    at=$((at + 512 + (size + 511) / 512 * 512))
+  done
+  [ "$at" -eq "$total" ]
+}
+
 # unpack_upload <file> <folder> <most bytes>: the files of an upload, each the rows of one table and nothing else: no
 # other name, no folder, no link, and no more than it may unpack to. The upload is taken from the shared folder the
-# keeper put it in, and unpacked into a folder of the updater's own.
+# keeper put it in, and unpacked into a folder of the updater's own, only once the headers of the archive itself say
+# that it holds nothing else.
 unpack_upload() {
-  local file=$1 dir=$2 max=$3 archive="$2.tar" n names name item links status=0
+  local file=$1 dir=$2 max=$3 archive="$2.tar" n members kind names name item links count=0 status=0
   UPLOAD_WHY='The folder to unpack the upload in could not be made.'
   (umask 077 && mkdir "$dir") || return 1
   UPLOAD_WHY='The upload unpacks to more than it may.'
@@ -269,24 +313,31 @@ unpack_upload() {
   [ "$n" -le "$max" ] || return 1
   UPLOAD_WHY='The upload cannot be read.'
   [ "$status" -eq 0 ] || return 1
-  names=$(quiet tar -tf "$archive") && [ -n "$names" ] || return 1
+  members=$(tar_members "$archive") && [ -n "$members" ] || return 1
   UPLOAD_WHY='The upload holds a file that is no table of the company.'
-  while IFS= read -r name; do
+  while read -r kind name; do
     plain_table "${name%.csv}" && [ "$name" != "${name%.csv}" ] || return 1
-  done <<< "$names"
+  done <<< "$members"
+  UPLOAD_WHY='The upload holds a table twice.'
+  [ -z "$(cut -d ' ' -f 2 <<< "$members" | sort | uniq -d)" ] || return 1
   UPLOAD_WHY='The upload holds what is no file.'
-  quiet tar -tvf "$archive" | awk 'substr($0, 1, 1) != "-" { bad=1 } END { exit bad }' || return 1
+  while read -r kind name; do
+    [ "$kind" = file ] || return 1
+  done <<< "$members"
+  # Tar has to see the same members, name by name, or it would unpack what was not looked at.
   UPLOAD_WHY='The upload cannot be read.'
+  names=$(quiet tar -tf "$archive") && [ "$names" = "$(cut -d ' ' -f 2 <<< "$members")" ] || return 1
   (umask 077 && quiet tar -xf "$archive" -C "$dir") || return 1
   UPLOAD_WHY='The upload holds what is no file.'
-  # BusyBox tar, which the updater's image has, lists a second name of a file as a plain file and makes it even to a
-  # file outside the folder, so each file here must have its one name.
+  # And what it made is those files, each with its one name.
   for item in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
     [ -e "$item" ] || [ -L "$item" ] || continue
     name=${item##*/}
     [ ! -L "$item" ] && [ -f "$item" ] && links=$(facts "$item") && links=${links#* } && [ "${links%% *}" = 1 ] &&
       plain_table "${name%.csv}" && [ "$name" != "${name%.csv}" ] || return 1
+    count=$((count + 1))
   done
+  [ "$count" -eq "$(wc -l <<< "$members")" ]
 }
 
 # load_table <database> <file> <table> <columns of the server, one a line>: the rows of one file go into their table,

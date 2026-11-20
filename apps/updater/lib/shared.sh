@@ -129,7 +129,8 @@ take_here() (
     enter_stage "$here" "$temporary" || { refuse_file "$file"; exit 1; }
     trap 'rm -f -- ./taken' EXIT
     if ! before=$(facts "$source") || ! hard_link "$source" ./taken 2> /dev/null || [ -L ./taken ] || [ ! -f ./taken ] ||
-      ! after=$(facts ./taken) || [ "${after%% *}" != "${before%% *}" ] || ! same_file "$before" "$after" "${owner##* }"; then
+      ! after=$(facts ./taken) || [ "${after%% *}" != "${before%% *}" ] || ! same_file "$before" "$after" "${owner##* }" ||
+      { [ -n "${TAKE_ALONE:-}" ] && ! alone "$before" "${owner##* }"; }; then
       refuse_file "$file"
       exit 1
     fi
@@ -169,6 +170,19 @@ same_file() {
 take() (
   entered "${1%/*}" || exit 1
   take_here "${1##*/}" "${@:2}"
+)
+
+# alone <facts> <folder owner>: a file with no other name, the folder owner's, as the keeper writes one.
+alone() {
+  local links=${1#* }
+  [ "${links%% *}" = 1 ] && [ "${1##* }" = "$2" ]
+}
+
+# take_alone <path> [command [args]]: take, only for a file alone at its name, so it is no other file of the folder
+# owner's and no second name of it was made to change it by.
+take_alone() (
+  TAKE_ALONE=1
+  take "$@"
 )
 
 # quiet <command> [args]: a command, with nothing said of what it cannot read, as for what take gives it: a file it

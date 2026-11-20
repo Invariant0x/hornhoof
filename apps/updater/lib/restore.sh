@@ -148,8 +148,7 @@ adopt() {
 restore_swap() {
   local env="$WORK/env.json" out="$WORK/cutover.out" secret node_key relay term machine cluster
   SWAP_LINE="The backup's settings cannot be written, so nothing changed."
-  # The backup's settings, taken from the keeper's folder into the updater's own.
-  (umask 077 && take "$CONTROL/restore/$R_ATTEMPT.env.json" > "$env") || return 1
+  # The backup's settings, as restore_hold took them into the updater's own folder.
   secret=$(setting HORNHOOF_SECRET "$env") && node_key=$(setting NODE_KEY "$env") && relay=$(setting RELAY_URL "$env") || return 1
   SWAP_LINE='The databases could not change places, so nothing changed.'
   restore_stamp || return 1
@@ -278,11 +277,26 @@ restore_left() {
   fi
 }
 
-# restore_run <with carry>: load, swap, start.
+# restore_hold: the dump and the settings are taken from the keeper's folder into the updater's own while the company
+# still runs: each a plain file of the keeper's, alone at its name, so neither a link, a pipe, a second name nor a file
+# put at the name later changes what is restored, and none stops the company for nothing. HOLD_LINE says which was not.
+restore_hold() {
+  HOLD_LINE='The backup cannot be read, so nothing changed.'
+  (umask 077 && take_alone "$CONTROL/restore/$R_ATTEMPT.sql.gz" > "$WORK/restore.sql.gz") || return 1
+  HOLD_LINE="The backup's settings cannot be read, so nothing changed."
+  (umask 077 && take_alone "$CONTROL/restore/$R_ATTEMPT.env.json" > "$WORK/env.json")
+}
+
+# restore_run <with carry>: hold, load, swap, start.
 restore_run() {
   restore_says running load 'Loading the backup.'
+  if ! restore_hold; then
+    restore_wipe
+    restore_ended failed load "$HOLD_LINE"
+    return 0
+  fi
   restore_stop
-  if ! take "$CONTROL/restore/$R_ATTEMPT.sql.gz" load_copy "$DBC" -; then
+  if ! load_copy "$DBC" "$WORK/restore.sql.gz"; then
     restore_undo 'The backup did not load, so nothing changed.' load
     return 0
   fi
@@ -317,7 +331,7 @@ restore_request() {
         ;;
     esac
   fi
-  # Whatever stands at both names, a link or a pipe too, goes on to the load: it takes only a plain file, and says so.
+  # Whatever stands at both names, a link or a pipe too, goes on to restore_hold: it takes only a plain file, and says so.
   for name in "$R_ATTEMPT.sql.gz" "$R_ATTEMPT.env.json"; do
     [ -L "$CONTROL/restore/$name" ] || [ -e "$CONTROL/restore/$name" ] || return 0
   done
