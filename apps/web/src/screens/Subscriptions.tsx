@@ -29,6 +29,7 @@ import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
 import { clock, limitState, planStateOnMachine, shortName, stateOf, subName, TERMINAL_SIGNIN, waitsThere, windowName, windowUsage } from '../ui/subscription';
 import { PlanSteps } from '../ui/PlanSteps';
+import { keepUnits } from '../ui/units';
 import { replaceSubscription } from './subscription-list';
 export { clock } from '../ui/subscription';
 
@@ -47,7 +48,7 @@ function signinLine(t: Messages, language: Language, s: SubView): string | null 
   if (s.kind !== 'personal') return null;
   if (s.signedInOnce) {
     if (s.provider === 'codex' && s.leaseMachine) return t.subs.leaseOn(s.leaseMachine);
-    return t.subs.signedInOnce(s.owner.name, s.machines.filter(m => m.online).length);
+    return keepUnits(t.subs.signedInOnce(s.owner.name, s.machines.filter(m => m.online).length));
   }
   const ready = s.machines.filter(m => m.status === 'ready').map(m => m.hostname);
   return ready.length ? t.subs.signedInOn(new Intl.ListFormat(language, { type: 'conjunction' }).format(ready)) : null;
