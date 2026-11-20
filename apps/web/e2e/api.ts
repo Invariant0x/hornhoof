@@ -75,6 +75,8 @@ const NO_TURNS = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, t
 const NO_TOKENS: TokenPeriods = { today: NO_TURNS, week: NO_TURNS, month: NO_TURNS, all: NO_TURNS };
 
 const ROUTES: Record<string, unknown> = {
+  /* The build the server runs, which every page asks for since #1592: always the same one, so no page reloads itself. */
+  '/api/build': { build: 'e2e-build' },
   '/api/setup': { needed: false },
   '/api/me': ME,
   '/api/org': ORG,

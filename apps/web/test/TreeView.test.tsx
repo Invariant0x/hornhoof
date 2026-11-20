@@ -48,7 +48,9 @@ describe('Tree plates', () => {
   it('grows a lane with a plate whose long task title takes more lines, and moves the lanes under it down', () => {
     const { rerender } = render(view());
     const plates = () => [...document.querySelectorAll<HTMLElement>('.tv-labs .dept-chip')];
-    const tops = plates().map(chip => parseFloat(chip.style.top));
+    /* Where a lane's chip stands: its own offset in the place that holds it, and that place's. */
+    const placed = (chip: HTMLElement) => parseFloat(chip.style.top) + (parseFloat(chip.parentElement!.style.top) || 0);
+    const tops = plates().map(placed);
     expect(tops.length).toBeGreaterThan(1);
     const long = 'Move the checkout to the new payment_provider_and_keep_every_old_receipt_readable in both languages for years';
     /* jsdom lays nothing out: the plate with the long title measures 130 px and the rest nothing, so they keep their size. */
@@ -60,7 +62,7 @@ describe('Tree plates', () => {
     rerender(view(DEV_TREE, { ...department, employees: department.employees.map(e => (e.id === agent ? { ...e, task } : e)) }));
     expect(document.querySelector(`.dept-chip[data-row="${agent}"] .r3`)).toHaveTextContent(`#77 ${long}`);
     expect(rowHeight(agent)).toBe(130 + 12);
-    expect(plates().map(chip => parseFloat(chip.style.top))).toEqual(tops.map((top, i) => (i ? top + 130 - 84 : top)));
+    expect(plates().map(placed)).toEqual(tops.map((top, i) => (i ? top + 130 - 84 : top)));
     expect(plates().map(chip => [chip.style.width, chip.style.minHeight])).toEqual(plates().map(() => ['240px', '84px']));
     tall.mockRestore();
   });
