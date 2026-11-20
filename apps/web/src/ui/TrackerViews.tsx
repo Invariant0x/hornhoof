@@ -12,9 +12,11 @@ import { DepartmentMark, ExecutorMark, PersonMark } from './TrackerMarks';
 import { WorkerMark } from './WorkerMark';
 import { QuestionButton, STATE_CLASS, StateWord, WaitLine } from './TaskActivity';
 import { GOAL_CLASS, goalProgress } from './GoalPanel';
+import { Idle, LoadLine, MAX_HELD_ROWS, type Load } from './Loading';
+import { syncPulses } from './pulse';
 
 /* How a view opens a task's card and marks the open one. asksYou: an open question on a task is the person's to answer. */
-export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; questionAt?: (id: string) => string | undefined; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined; stageOwner?: (stage: PipelineStage) => string | undefined };
+export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; questionAt?: (id: string) => string | undefined; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined; stageOwner?: (stage: PipelineStage) => string | undefined; now?: (id: string) => boolean };
 
 /* A value of a row with its name, which shows beside it only where the row is too narrow for the names above the list. The
    pair keeps its own direction, so "Executor: Hana" reads in that order right to left, and so does the value alone, so the
@@ -43,6 +45,18 @@ function relationsOf(tasks: TaskLine[]): Relations {
   return needed;
 }
 
+/* A row's status dot: its status, and for a task in work an employee works on at this moment a filled core that breathes in
+   the one phase of every such dot, said to a screen reader in one phrase of its own, with no title (Design #1628). */
+function StatusDot({ status, id, now }: { status: ReturnType<typeof humanStatus>; id: string; now: Rows['now'] }) {
+  const t = useT();
+  const dot = useRef<HTMLSpanElement>(null);
+  const pulsing = status === 'working' && Boolean(now?.(id));
+  useLayoutEffect(() => {
+    if (pulsing) syncPulses(dot.current!);
+  }, [pulsing]);
+  return <span ref={dot} className={`tr-status-dot ${STATE_CLASS[status]}${pulsing ? ' now' : ''}`} role="img" aria-label={pulsing ? t.tracker.dot.workingNow : t.tracker.groups[status]} />;
+}
+
 function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tree: TaskTree; rows: Rows; relations: Relations; depth?: number; showSubtasks?: boolean }) {
   const t = useT();
   const { language } = useLanguage();
@@ -61,7 +75,7 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
   const route = task.echelons;
   const ghostStage = route.phase === 'active' && route.stage && route.oneShot?.[route.stage];
   return (
-    <li className="tr-row" aria-label={`#${task.number} ${task.title}`}>
+    <li className="tr-row" aria-label={`#${task.number} ${task.title}`} data-task={task.id}>
       <div className={`tr-cells tr-row-line${rows.selected === task.id ? ' on' : ''}`} style={{ '--tr-depth': depth } as CSSProperties}>
         <div className="tr-task-name">
           <div className="tr-name">
@@ -71,7 +85,7 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
                 <span className="tr-caret" aria-hidden="true" />
               </button>
             )}
-            <span className={`tr-status-dot ${STATE_CLASS[status]}`} role="img" aria-label={t.tracker.groups[status]} />
+            <StatusDot status={status} id={task.id} now={rows.now} />
             <span className="tr-line">
               <button className="linkish tr-title" type="button" dir="auto" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
               {tree.total > 0 && <span className="tr-branch-count" title={words.subtasks(tree.done, tree.total)}><TrackerIcon name="branch" />{tree.total}</span>}
@@ -152,6 +166,61 @@ export function TrackerFound({ tasks, all, rows }: { tasks: TaskLine[]; all: Tas
   );
 }
 
+/* The idle bars of a held row's title, varied so the held list reads as rows of text, not as a grid. */
+const HELD_TITLES = ['58%', '44%', '66%', '38%', '52%'];
+
+/* A row of the list while its task comes: the row's frame at its final size, an idle bar for each value. */
+function HeldRow({ title }: { title: string }) {
+  const words = useT().tracker.list;
+  return (
+    <li className="tr-row">
+      <div className="tr-cells tr-row-line">
+        <div className="tr-task-name"><div className="tr-name"><span className="tr-status-dot" aria-hidden="true" /><span className="tr-line"><span className="tr-title"><Idle w={title} /></span></span></div></div>
+        <Cell name={words.executor} person><Idle w="70%" /></Cell>
+        <Cell name={words.responsible} person><Idle w="64%" /></Cell>
+        <Cell name={words.due}><Idle w="4ch" /></Cell>
+      </div>
+    </li>
+  );
+}
+
+/* How many rows fill the visible part of a list that starts at this place, when the list's own count is not known: one where
+   nothing is laid out yet to measure. */
+function rowsToFill(list: HTMLElement | null): number {
+  const row = list?.querySelector<HTMLElement>('.tr-row:last-child')?.offsetHeight;
+  if (!list || !row) return 1;
+  const top = list.getBoundingClientRect().top;
+  return Math.max(1, Math.min(MAX_HELD_ROWS, Math.ceil((window.innerHeight - top) / row)));
+}
+
+/* The list while its tasks come (style book 1.5, section 4): the names of its columns and its first group's head at once, then
+   as many held rows as it showed last in this tab, or as fill what is in view, the first with the ring and its words. */
+export function HeldList({ rows, load }: { rows: number | null; load: Load }) {
+  const t = useT();
+  const list = useRef<HTMLDivElement>(null);
+  const [fill, setFill] = useState(rows ?? 1);
+  useLayoutEffect(() => {
+    if (rows === null) setFill(rowsToFill(list.current));
+  }, [rows]);
+  const held = rows ?? fill;
+  return (
+    <div ref={list} className="tr-list tr-held">
+      <div className="tr-list-grid">
+        <section className="tr-group">
+          <h2 className="tr-group-head"><span className="tr-group-toggle"><Idle w="9ch" /><span className="tr-count"><Idle w="3ch" /></span></span></h2>
+          <ListHead />
+          <div>
+            <ul className="tr-rows">
+              <li className="tr-row"><div className="tr-cells tr-row-line"><LoadLine load={load} words={t.load.tasks} /></div></li>
+              {Array.from({ length: held - 1 }, (_, i) => <HeldRow key={i} title={HELD_TITLES[i % HELD_TITLES.length]!} />)}
+            </ul>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
 export function TrackerList({ tasks, all, rows, empty, showSubtasks = true }: { tasks: TaskLine[]; all: TaskLine[]; rows: Rows; empty: string; showSubtasks?: boolean }) {
   const t = useT();
   const groups = listGroups(tasks, rows.asksYou, all);
@@ -178,7 +247,7 @@ function BoardCard({ tree, rows }: { tree: TaskTree; rows: Rows }) {
   const status = humanStatus(task, asksYou);
   const executor = doerOf(task);
   return (
-    <article className={`tr-card ${STATE_CLASS[status]}${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
+    <article className={`tr-card ${STATE_CLASS[status]}${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`} data-task={task.id}>
       <div className="tr-card-body">
         <h3 className="tr-card-title">
           <button className="linkish" type="button" dir="auto" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>

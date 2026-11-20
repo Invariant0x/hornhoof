@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join, relative } from 'node:path';
-import { MAX_RUN_FILES, TEST_LOG_BYTES, type ServerMessage } from '@hornhoof/protocol';
+import { MAX_RUN_FILES, RUN_FILE_BYTES, TEST_LOG_BYTES, type ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { clearShared, partFiles, partFolders, putOutputs, removeOldParts, runTests, type PartFiles } from '../src/tests.js';
 import { eventually } from '../../../test-support/eventually.mjs';
@@ -186,6 +186,49 @@ describe('a part of a test run on a node', () => {
     await eventually(() => existsSync(join(dir, 'runs', 'part-1', 'repo', 'going')));
     stop.abort();
     expect(await done).toMatchObject({ ok: false, error: 'cancelled', exitCode: null });
+  });
+
+  it('gives the command an empty output folder, and puts what it leaves there on the task, also when the tests failed', async () => {
+    const { url } = origin();
+    const dir = realpathSync(nodeDir());
+    const { files, put } = taskFiles();
+    const command = 'echo "out=$HH_OUT"; test -z "$(ls -A "$HH_OUT")" && echo empty; echo shot > "$HH_OUT/shot-375.png"; exit 3';
+    const done = await runTests(run(url, { command }), { dir, user: null, hidden: [], files });
+    expect(done).toMatchObject({ ok: false, exitCode: 3, error: 'failed' });
+    expect(done.log).toContain(`out=${join(dir, 'runs', 'part-1', 'out')}\nempty\n`);
+    expect(done.log).toMatch(/Put on the task: shot-375\.png\./);
+    expect(put).toEqual([{ partId: 'part-1', name: 'shot-375.png', text: 'shot\n' }]);
+    expect(readdirSync(join(dir, 'runs'))).toEqual([]);
+  });
+
+  it('puts nothing on the task when Hornhoof calls it off', async () => {
+    const { url } = origin();
+    const stop = new AbortController(), dir = nodeDir();
+    const { files, put } = taskFiles();
+    const done = runTests(run(url, { command: 'echo shot > "$HH_OUT/shot.png"; touch going; sleep 30' }), { dir, user: null, hidden: [], signal: stop.signal, files });
+    await eventually(() => existsSync(join(dir, 'runs', 'part-1', 'repo', 'going')));
+    stop.abort();
+    const result = await done;
+    expect(result).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(result.log).not.toMatch(/Put on the task/);
+    expect(put).toEqual([]);
+    expect(readdirSync(join(dir, 'runs'))).toEqual([]);
+  });
+
+  it('puts on the task only plain files of its own folder up to the size a part may, and at most as many as a part may', async () => {
+    const { url } = origin();
+    const { files, put } = taskFiles();
+    const secret = join(nodeDir(), 'node.key');
+    writeFileSync(secret, 'node-key\n');
+    const many = Array.from({ length: MAX_RUN_FILES + 1 }, (_, i) => `f${String(i).padStart(2, '0')}.txt`);
+    /* A link to a file outside $HH_OUT, a folder with a file in it, and a sparse file one byte over the size, which costs
+       the disk nothing. */
+    const command = `cd "$HH_OUT"; ln -s ${secret} a-link; mkdir a-sub; echo x > a-sub/y; truncate -s ${RUN_FILE_BYTES + 1} big.bin; for f in ${many.join(' ')}; do echo $f > $f; done`;
+    const done = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], files });
+    expect(done.ok).toBe(true);
+    expect(put.map(p => p.name)).toEqual(many.slice(0, MAX_RUN_FILES));
+    expect(put.map(p => p.text).join('')).not.toContain('node-key');
+    expect(done.log).toContain(`Only plain files up to ${RUN_FILE_BYTES / 1024 / 1024} MB go on the task, ${MAX_RUN_FILES} at most; left out: a-link, a-sub, big.bin, ${many.at(-1)}.`);
   });
 
   it("keeps the repository's token and the node's key out of the command and its log, and tells the command its part", async () => {
@@ -459,7 +502,7 @@ describe('a part of other work on a node', () => {
     const root = '/n/runs/part-1';
     expect(partFolders(root, work())).toEqual({ own: root, user: ['home', 'tmp', 'out', 'work'].map(f => join(root, f)) });
     expect(partFolders(root, work({ repo: { url: 'https://x/y.git', token: '' } }))).toEqual({ own: root, user: ['home', 'tmp', 'out', 'in', 'repo'].map(f => join(root, f)) });
-    expect(partFolders(root, work({ kind: undefined, repo: { url: 'https://x/y.git', token: '' } }))).toEqual({ own: root, user: ['home', 'tmp', 'repo'].map(f => join(root, f)) });
+    expect(partFolders(root, work({ kind: undefined, repo: { url: 'https://x/y.git', token: '' } }))).toEqual({ own: root, user: ['home', 'tmp', 'out', 'repo'].map(f => join(root, f)) });
   });
 
   it("puts nothing on the task from an output folder its user does not own", async () => {

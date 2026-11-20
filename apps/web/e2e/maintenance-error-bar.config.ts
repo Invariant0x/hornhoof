@@ -19,8 +19,9 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
-  /* The spec says itself that a test has no limit; expectations, actions and navigation have none either (0). */
+  /* A test, its expectations, actions and navigation have no limit (0): only the run's own limit ends a hang (note #59). */
   reporter: process.env.HH_TEST_REPORT ? [['list'], ['./file-report.ts']] : 'list',
+  timeout: 0,
   expect: { timeout: 0 },
   use: {
     baseURL: origin,

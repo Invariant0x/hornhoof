@@ -28,6 +28,7 @@ import { failOpenJobs } from '../nodes/job-failures.js';
 import { tryPlaceOperator } from '../operations/ensure.js';
 import { loseParts } from '../testruns/runs.js';
 import { onlineIn, subView, subViews } from './views.js';
+import { connectingFor } from './connecting.js';
 import { tryPlaceWaiting } from './waiting.js';
 import { fallBackFrom } from './fallback.js';
 
@@ -304,7 +305,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const visible = kept === null ? all : all.filter(s => s.owner.id === me.id || kept.has(s.id));
     const tokens = await tokensBySubscription(db, me.companyId, ctx.clock(), zone, visible.map(s => s.id));
     return {
-      subscriptions: visible.map(s => ({ ...s, canChange: kept === null || kept.has(s.id), agents: placed.filter(a => a.subscriptionId === s.id).map(a => a.view), tokens: periodsOf(tokens, s.id) })),
+      subscriptions: visible.map(s => ({ ...s, canChange: kept === null || kept.has(s.id), agents: placed.filter(a => a.subscriptionId === s.id).map(a => a.view), tokens: periodsOf(tokens, s.id), connecting: connectingFor(ctx, s.id, me.id) })),
       /* Where this person connects an API key: anywhere (null), or only in the departments they run. */
       apiPlaces: kept === null ? null : await placesRun(me),
     };

@@ -1081,16 +1081,18 @@ describe('autonomous release for exact commits to main', () => {
        and a green full run, yet review.baseCommit = NETWORK_BASE is NOT an ancestor of origin/main (MAIN_BASE). */
     const NETWORK_BASE = 'c'.repeat(40);
     const NET_TURN_SHA = 'd'.repeat(40);
-    f.markNonMainBase(NETWORK_BASE, [NET_TURN_SHA]);
     f.setBranchHead('release-0.24.0', NET_TURN_SHA);
 
     const netTurnTask = (await f.create({ small: true, productId: f.productId, title: 'Branch from network-1 in same turn', paths: ['logic/totals.ts'] })).task;
     expect(netTurnTask.turnId).toBeNull();
+    /* A hand-in refuses a base main does not hold: this one was handed in while main still held it, as before that check or
+       before main was rewritten, so autonomous release meets it on its own. */
     await submit(f.ctx, f.author.id, netTurnTask.id, {
       summary: 'Built on network-1 base.',
       evidence: 'Checks.',
       review: { baseCommit: NETWORK_BASE, branch: 'release-0.24.0' },
     });
+    f.markNonMainBase(NETWORK_BASE, [NET_TURN_SHA]);
     await verdict(f.ctx, f.reviewer.id, netTurnTask.id, {
       pass: true,
       comment: 'Reviewed diff from network-1 only.',
@@ -1128,16 +1130,17 @@ describe('autonomous release for exact commits to main', () => {
        and NET_OUT_SHA is fast-forward from MAIN_BASE, while review.baseCommit = NETWORK_BASE (from network-1) is NOT an ancestor of origin/main. */
     const NETWORK_BASE = '3'.repeat(40);
     const NET_OUT_SHA = '5'.repeat(40);
-    f.markNonMainBase(NETWORK_BASE, [NET_OUT_SHA]);
     f.setBranch(NET_OUT_SHA);
 
     const outVerdictTask = await f.createMainCodeTask({ title: 'Out-of-turn task started from network-1', paths: ['logic/totals.ts'] });
     expect(outVerdictTask.turnId).toBeNull();
+    /* Handed in while main still held its base, as above. */
     await submit(f.ctx, f.author.id, outVerdictTask.id, {
       summary: 'Network work outside a turn: do not merge to main.',
       evidence: 'Checks.',
       review: { baseCommit: NETWORK_BASE },
     });
+    f.markNonMainBase(NETWORK_BASE, [NET_OUT_SHA]);
     await verdict(f.ctx, f.reviewer.id, outVerdictTask.id, {
       pass: true,
       comment: 'Reviewed only against network-1.',

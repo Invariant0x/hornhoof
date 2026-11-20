@@ -15,24 +15,19 @@ HOST_OS="${HORNHOOF_HOST_OS:-}"
 ADDRESSES_EVERY=60
 ADDRESSES_AT=0
 
-# The directory the shell is really in, asked of the system. Bash sets PWD from the path it resolved before it entered,
-# so a link swapped in between would go unseen there, and its own pwd -P reads that same path again.
-physical_dir() {
-  env pwd -P 2> /dev/null
-}
-
 # Check the physical path after entering the queue, then use relative paths in that directory.
 enter_computer_queue() {
-  local here
-  cd -P -- "$1" 2> /dev/null || return 1
-  here=$(physical_dir) || return 1
-  [ ! -L ./computer ] && cd -P -- ./computer 2> /dev/null && [ "$(physical_dir)" = "${here%/}/computer" ]
+  enter_shared "${1%/}/computer"
 }
 
 # Clear the old queue at startup. Unlink queue entries without opening them or descending into directories.
 computer_clear_legacy() (
   local file removed=0
-  enter_computer_queue "$CONTROL" || return 0
+  [ -L "$CONTROL/computer" ] || [ -e "$CONTROL/computer" ] || return 0
+  if ! enter_computer_queue "$CONTROL" || [ "$(stat -c %u . 2> /dev/null || stat -f %u . 2> /dev/null)" != 1000 ]; then
+    printf '%s\n' 'Skipped the old computer queue: expected a directory owned by UID 1000.' >&2
+    return 0
+  fi
   for file in ./*.json ./*.json.new ./*.started; do
     [ -L "$file" ] || [ -f "$file" ] || continue
     if rm -f -- "${file:?}" 2> /dev/null; then removed=$((removed + 1)); fi
@@ -40,72 +35,50 @@ computer_clear_legacy() (
   if [ "$removed" -gt 0 ]; then printf 'Removed %s files from the old computer queue.\n' "$removed" >&2; fi
 )
 
-# move_over <file> <name>: rename a file over a name in the same folder, replacing a link there instead of following it.
-move_over() {
-  if [[ "$OSTYPE" == darwin* ]]; then
-    mv -fh -- "$1" "$2"
-  else
-    mv -fT -- "$1" "$2"
-  fi
+# computer_publish <name> <kind> <writer> [args]: put_in_place a new file in the entered queue; anything at the name
+# already is kept, and the publication fails.
+computer_publish() {
+  put_in_place "$1" "$2" once "${@:3}"
 }
 
-# The keeper's sign that this updater runs, in the computer volume. A missing one is made in a private folder and renamed
-# into place: bash opens a redirect target through a link once it has seen something there that is not a regular file,
-# so the keeper could swap a link in at that moment.
-computer_heartbeat() (
-  local here temporary
-  cd -P -- "$COMPUTER_CONTROL" 2> /dev/null || exit 0
+# heartbeat <folder>: the sign that this updater runs, alive in that folder: the keeper's in the computer volume, the
+# app's in the control folder. A link or anything else that is no file at that name is left alone.
+heartbeat() (
+  enter_shared "$1" || exit 0
   [ ! -L ./alive ] || exit 0
   if [ -f ./alive ]; then
-    # -c: BusyBox touch -h would create a marker missing by now, through a link put there in the meantime.
-    touch -c -h -- ./alive 2> /dev/null || true
+    put_in_place alive alive over : 2> /dev/null || true
     exit 0
   fi
-  [ ! -e ./alive ] || exit 0
-  here=$(physical_dir) && temporary=$(mktemp -d .alive.XXXXXXXX 2> /dev/null) || exit 0
-  (
-    cd -P -- "./$temporary" && [ "$(physical_dir)" = "${here%/}/$temporary" ] && [ -O . ] || exit 1
-    trap 'rm -f -- ./alive' EXIT
-    (set -o noclobber; : > ./alive) && [ ! -L ../alive ] && [ ! -e ../alive ] && move_over ./alive ../alive
-  ) 2> /dev/null || true
-  rmdir -- "./${temporary:?}" 2> /dev/null || true
+  computer_publish alive alive : 2> /dev/null || true
 )
 
 # Both heartbeats, the keeper's first. The app can write the control folder and so break its own heartbeat there; that
 # never stops the updater or the keeper's.
 heartbeats() {
-  computer_heartbeat || true
-  touch "$CONTROL/alive" 2> /dev/null || true
+  heartbeat "$COMPUTER_CONTROL" || true
+  heartbeat "$CONTROL" || true
 }
 
 # The updater trusts the leader keeper for standing access. A compromised leader keeper can still issue commands
 # while the owner's standing access is open. The keeper's time also closes access if it stops refreshing it.
 computer_open() {
   local until
-  until=$(jq -r '.untilSec // 0' "$COMPUTER_CONTROL/computer.json" 2> /dev/null || true)
+  until=$(take "$COMPUTER_CONTROL/computer.json" quiet jq -r '.untilSec // 0' || true)
   case "$until" in '' | *[!0-9]*) return 1 ;; esac
   [ "$until" -gt "$(date +%s)" ]
+}
+
+computer_answer_json() {
+  tail -c "$COMPUTER_OUTPUT" "$3" | jq -Rs --arg id "$1" --argjson exit "$2" '{id: $id, exit: $exit, output: .}'
 }
 
 # computer_answer <id> <exit code> <output file>: the end of the output, written whole and then moved. It fails when
 # no answer is in place, as on a full volume, so the caller keeps the command's mark.
 computer_answer() {
-  local file="$1.out.json" temporary queue published=''
-  [ ! -L "$file" ] && [ ! -e "$file" ] || return 0
-  # Create the answer inside a private temporary directory on this volume, then publish the whole file.
-  if queue=$(physical_dir) && temporary=$(mktemp -d .answer.XXXXXXXX 2> /dev/null); then
-    (
-      cd -P -- "./$temporary" && [ "$(physical_dir)" = "${queue%/}/$temporary" ] && [ -O . ] || exit 1
-      trap 'rm -f -- ./answer' EXIT
-      umask 022
-      set -o noclobber
-      tail -c "$COMPUTER_OUTPUT" "$3" | jq -Rs --arg id "$1" --argjson exit "$2" '{id: $id, exit: $exit, output: .}' > ./answer || exit 1
-      [ ! -L "../$file" ] && [ ! -e "../$file" ] || exit 1
-      move_over ./answer "../$file"
-    ) 2> /dev/null && published=1
-    rmdir -- "./${temporary:?}" 2> /dev/null || true
-  fi
-  [ -z "$published" ] || return 0
+  local file="$1.out.json"
+  if [ ! -L "$file" ] && [ -f "$file" ]; then return 0; fi
+  if computer_publish "$file" answer computer_answer_json "$@" 2> /dev/null; then return 0; fi
   printf '%s\n' 'Computer answer refused: it could not be published safely.' >&2
   return 1
 }
@@ -116,7 +89,7 @@ computer_answer() {
 # nothing runs while access is closed. A command this updater started is marked, so after a restart it never runs a
 # second time, and what still runs of it is stopped.
 computer_runs() (
-  local file id started answer command timeout out name watch code made
+  local file id started answer request command timeout out name watch code made
   enter_computer_queue "$COMPUTER_CONTROL" || return 0
   for file in ./*.started; do
     [ ! -L "$file" ] && [ -f "$file" ] || continue
@@ -128,7 +101,10 @@ computer_runs() (
   done
   for file in ./*.json; do
     case "$file" in *.out.json) continue ;; esac
-    [ ! -L "$file" ] && [ -f "$file" ] || continue
+    if [ -L "$file" ] || [ ! -f "$file" ]; then
+      if [ -L "$file" ] || [ -e "$file" ]; then refuse_file "$file" || true; fi
+      continue
+    fi
     id=$(basename "$file" .json)
     case "$id" in '' | *[!A-Za-z0-9-]*) continue ;; esac
     started="./$id.started"
@@ -154,11 +130,15 @@ computer_runs() (
       rm -f -- "${out:?}"
       continue
     fi
-    command=$(jq -r '.command // empty' "$file" 2> /dev/null || true)
-    timeout=$(jq -r '.timeout // empty' "$file" 2> /dev/null || true)
+    if ! request=$(take_here "$file") || ! command=$(jq -er '.command | strings | select(length > 0)' <<< "$request" 2> /dev/null); then
+      printf '%s\n' 'Computer request refused: no valid command could be read.' >&2
+      rm -f -- "${out:?}"
+      continue
+    fi
+    timeout=$(jq -r '.timeout // empty' <<< "$request" 2> /dev/null || true)
     case "$timeout" in '' | *[!0-9]*) timeout=300 ;; esac
     if [ "$timeout" -lt 1 ] || [ "$timeout" -gt "$COMPUTER_MAX" ]; then timeout=300; fi
-    if ! { [ ! -L "$started" ] && [ ! -e "$started" ] && (set -o noclobber; : > "$started"); } 2> /dev/null; then
+    if ! computer_publish "$id.started" started : 2> /dev/null; then
       printf '%s\n' 'Computer request refused: its start marker could not be created.' >&2
       rm -f -- "${out:?}"
       continue
@@ -226,8 +206,11 @@ learn_host() {
   name=${said#*|}
   case "$system" in '' | *'Docker Desktop'* | *OrbStack*) return 0 ;; esac
   [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$ ]] || name=''
-  jq -cn --arg hostname "$name" '{os: "linux", hostname: $hostname}' > "$CONTROL/host.json.new" 2> /dev/null || return 0
-  mv "$CONTROL/host.json.new" "$CONTROL/host.json"
+  # shellcheck disable=SC2016 # the dollars are jq's own
+  publish "$CONTROL/host.json" over jq -cn --arg hostname "$name" '{os: "linux", hostname: $hostname}' 2> /dev/null || {
+    printf '%s\n' 'Could not write host.json in the control folder.' >&2
+    return 0
+  }
   HOST_OS=linux
 }
 
@@ -282,6 +265,7 @@ write_addresses() {
       }
     ' | jq -Rnc '[inputs | select(length > 0)]' 2> /dev/null
   ) || return 0
-  jq -cn --argjson at "$now" --argjson addresses "$list" '{at: $at, addresses: $addresses}' > "$CONTROL/addresses.json.new" 2> /dev/null || return 0
-  mv "$CONTROL/addresses.json.new" "$CONTROL/addresses.json"
+  # shellcheck disable=SC2016 # the dollars are jq's own
+  publish "$CONTROL/addresses.json" over jq -cn --argjson at "$now" --argjson addresses "$list" '{at: $at, addresses: $addresses}' 2> /dev/null ||
+    printf '%s\n' 'Could not write addresses.json in the control folder.' >&2
 }

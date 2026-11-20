@@ -1,7 +1,9 @@
 import { and, eq } from 'drizzle-orm';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, departments, jobs, tasks, teams, testParts, testRuns, turns } from '../src/db/schema.js';
-import { answer, ask, createTask, report } from '../src/modules/tasks/engine.js';
+import { answer, ask, createTask, report, startWork, type Ask } from '../src/modules/tasks/engine.js';
+import { uncheckedInRelease } from '../src/modules/tasks/releases.js';
+import type { Task } from '../src/modules/tasks/state.js';
 import type { Ctx } from '../src/app.js';
 import { testsFixture } from './development-echelons-verification.js';
 import { BASE } from './development-echelons-fixture.js';
@@ -36,8 +38,11 @@ export function serveEach(ctx: Ctx, repoAt: (url: string) => Repository): void {
   ctx.readCommit = async (at, want) => {
     const repo = repoAt(at.url);
     const branch = 'branch' in want ? want.branch : `task-${want.task}`;
-    const commitSha = repo.heads[branch] ?? repo.tags[branch];
-    return commitSha ? { branch, commitSha } : { problem: `The repository has no branch ${branch}.`, missing: true };
+    const head = repo.heads[branch];
+    if (head) return { branch, commitSha: head };
+    /* As git clone --branch takes a tag of the name where there is no such branch, and says so. */
+    const tagged = repo.tags[branch];
+    return tagged ? { branch, commitSha: tagged, tag: true } : { problem: `The repository has no branch ${branch}.`, missing: true };
   };
   ctx.readCompare = async (at, want) => {
     const repo = repoAt(at.url);
@@ -83,6 +88,13 @@ export async function readyInTurn() {
 
 type RunOf = { departmentId: string; taskId: string; agentId: string; jobId: string };
 
+/* An approval card of a release commit, as ask_person and request_approval open it: Hornhoof names on it, apart from its
+   words, what the release brings that no check covers, which the release takes only the approval of a card naming. */
+export async function approvalCard(ctx: Ctx, task: Task, question: string, commit: string): Promise<Ask> {
+  const unchecked = await uncheckedInRelease(ctx, task, commit);
+  return { kind: 'approval', text: question, commit, ...(unchecked?.length ? { unchecked } : {}) };
+}
+
 /* The release of the open turn: a task its head holds to release it, the full run on the release commit and the person's
    approval of it, asked through the release tool of a head. */
 export async function releasing() {
@@ -123,8 +135,9 @@ export async function releasing() {
     }));
     return run!;
   };
+  /* The person approves the card of commit as the release tools open it: naming what it brings that no check covers. */
   const approve = async (commit = R) => {
-    const asked = await ask(f.ctx, f.head.id, release!.id, { kind: 'approval', text: `Release turn ${f.turn.number}: main to ${commit}.`, commit });
+    const asked = await ask(f.ctx, f.head.id, release!.id, await approvalCard(f.ctx, release!, `Release turn ${f.turn.number}: main to ${commit}.`, commit));
     await answer(f.ctx, { personId: f.claude.ownerPersonId }, asked.request.id, { approve: true });
     return asked.request;
   };
@@ -167,14 +180,31 @@ export function joinedAfterR(f: Releasing, task: number, stray?: { sha: string; 
   return { own: MADE, head: TOP };
 }
 
+/* The holder's turn on its task went out, so its work starts: the server notes where the turn branch and main were then. */
+export async function startTurnkeyWork(f: Pick<Releasing, 'db' | 'ctx' | 'task'>, holder: { id: string; subscriptionId: string | null }, taskId: string): Promise<void> {
+  const [job] = await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: holder.id, subscriptionId: holder.subscriptionId!, taskId, kind: 'conversation', prompt: 'Work', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning();
+  await startWork(f.ctx, job!.id);
+}
+
 /* Turnkey work after R: a member of a turnkey team did it whole on task-N with its own review, security check and tests,
-   joined it to the turn branch and closed it with report. */
+   joined it to the turn branch and closed it with report, naming the commit it checked and where task-N started. Without stray
+   task-N is made on R and the turn branch goes to it by fast-forward; with one, it joins as joinedAfterR says. */
 export async function turnkeyAfterR(f: Releasing, stray?: { sha: string; taken: boolean }) {
   const [team] = await f.db.insert(teams).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, name: 'Lane', turnkey: true }).returning();
   const holder = await f.hire('Player', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
   await f.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, holder.id));
   const { task } = await f.create({ title: 'Turnkey change', assigneeAgentId: holder.id, reviewerAgentId: undefined, securityAgentId: undefined, testsAgentId: undefined });
-  const joined = joinedAfterR(f, task.number, stray);
-  await report(f.ctx, holder.id, task.id, { done: true, summary: 'Merged task-N into the turn branch after my own review, security check and tests.' });
+  await startTurnkeyWork(f, holder, task.id);
+  const joined = stray ? joinedAfterR(f, task.number, stray) : fastForwardedAfterR(f, task.number);
+  const start = stray && !stray.taken ? stray.sha : f.R;
+  await report(f.ctx, holder.id, task.id, { done: true, summary: 'Joined task-N to the turn branch after my own review, security check and tests.', turnkey: { commit: joined.own, baseCommit: start } });
   return { task, holder, ...joined };
+}
+
+/* Work of task-N made on R, and the turn branch fast-forwarded to it. */
+function fastForwardedAfterR(f: Releasing, task: number): { own: string; head: string } {
+  f.repo.holds[MADE] = [f.R, BASE];
+  f.repo.between[`${BASE}..${MADE}`] = [{ sha: f.R, parents: [BASE] }, { sha: MADE, parents: [f.R] }];
+  f.repo.heads[`task-${task}`] = f.repo.heads[f.branch] = MADE;
+  return { own: MADE, head: MADE };
 }

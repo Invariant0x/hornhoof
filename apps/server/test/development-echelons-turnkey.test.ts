@@ -28,7 +28,7 @@ describe('a task of a turnkey team never enters the echelons', () => {
     const { task } = await f.give();
     expect((await f.detail(task.id)).echelons).toMatchObject({ resultKind: 'turnkey', stage: null, stages: [], candidateId: null });
 
-    const closed = await report(f.ctx, f.player.id, task.id, { done: true, summary: 'Merged and released 1.2.3, checks in the log.' });
+    const closed = await report(f.ctx, f.player.id, task.id, { done: true, summary: 'Merged and released 1.2.3, checks in the log.', turnkey: { commit: HEAD, baseCommit: BASE } });
     expect(closed.task).toMatchObject({ status: 'done', assigneeAgentId: null });
     expect((await f.detail(task.id)).echelons).toMatchObject({ resultKind: 'turnkey', phase: 'done', stages: [] });
     for (const id of [f.reviewer.id, f.security.id, f.tester.id, f.author.id]) expect(closed.wakes.map(wake => wake.agentId)).not.toContain(id);

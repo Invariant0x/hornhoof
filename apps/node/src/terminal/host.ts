@@ -96,8 +96,12 @@ type Turn = {
   sourceDelivery?: OperatorDelivery;
   operatorInstance?: string;
   ownActivity?: boolean;
+  /* Hornhoof called the turn off: its program got its Escape, and nothing that comes later stops it again. */
+  calledOff?: boolean;
 };
 type JobError = RunResult['error'];
+/* What the end of a turn Hornhoof gave tells as Hornhoof calls it off. */
+export type CalledOff = { sessionId: string | null; tokens: TurnTokens | null };
 type LiveWords = { turn: Turn; program: TermProgram; text: string; deadline: number; reason?: string; operatorDelivery?: OperatorDelivery };
 type TakenWords = { jobId: string | null; text: string; operatorDelivery?: OperatorDelivery };
 
@@ -187,6 +191,13 @@ type Agent = {
   lastText: string | null;
   /* Kimi's running step has text already, so its next part goes on the same message. */
   stepSaid: boolean;
+  /* Words were steered into Kimi's running turn and it has not taken them into it: Kimi 2.6.3 ends that turn for them and
+     goes on with them in one of its own, which is still the same Hornhoof turn. */
+  steered?: boolean;
+  /* Turns Kimi ended at such a split, whose stop hook may still come: that stop ends no Hornhoof turn. */
+  splitStops?: number;
+  /* Kimi ended a turn at a split and has not started the one it goes on in yet. */
+  splitWaits?: boolean;
   /* A typed turn that ended and waits for the rest of its log. */
   settling: Promise<unknown> | null;
   /* The program was started for a person and nothing was said in it yet: its new session has no log to resume. */
@@ -876,9 +887,15 @@ export class TerminalHost {
     return job.program.kind === 'antigravity' ? this.waitForAgyTurn(a, job) : this.waitTimedTurn(a, job);
   }
 
+  /* While the program works on something of its own or of a person's, Hornhoof hears what it does under this turn's job. A
+     look that is slow to come back holds no wait: its end, deadline and stop still decide when the turn goes in. */
   private async waitTimedTurn(a: Agent, job: TermJob): Promise<void> {
     const deadline = Date.now() + job.input.timeoutMs;
-    for (this.drain(a); a.busy && !job.input.signal?.aborted && Date.now() < deadline; this.drain(a)) await sleep(this.pollMs);
+    const { watch, look } = this.observeProgram(a, job.input.jobId);
+    for (this.drain(a); a.busy && !job.input.signal?.aborted && Date.now() < deadline; this.drain(a)) {
+      await Promise.race([this.reportProgram(a, watch, look), sleep(this.pollMs)]);
+      await sleep(this.pollMs);
+    }
     await a.settling;
     await a.cancelling;
   }
@@ -1521,7 +1538,7 @@ export class TerminalHost {
 
   private async stopTurn(a: Agent, job: TermJob, ended: Deferred<string>): Promise<RunResult> {
     this.intentional(a, 'cancelled');
-    await this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Escape'));
+    if (!a.turn?.calledOff) await this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Escape'));
     await Promise.race([ended.promise, sleep(STOP_WAIT_MS)]);
     a.busy = false;
     return await this.failedTurn(a, job, 'cancelled');
@@ -1771,6 +1788,8 @@ export class TerminalHost {
     a.stopped = false;
     a.pressed = null;
     a.unanswered = null;
+    a.steered = a.splitWaits = false;
+    a.splitStops = 0;
     /* The quiet of a turn counts from its start until the program gives its own sign. */
     a.signAt = Date.now();
   }
@@ -1787,6 +1806,8 @@ export class TerminalHost {
     if (this.endsNoTurn(a)) return;
     const decision = a.ends.end(end.status, this.stoppable(a) || Boolean(blocked && a.turn), id);
     if (decision.conflict) this.logDisagreement(a);
+    /* A turn the program ran of its own, with no Hornhoof turn, is over: the program is free for the next one. */
+    if (!decision.accept && !a.turn) a.busy = false;
     if (!decision.accept) return;
     const unanswered = end.status === 'stopped' ? null : a.unanswered;
     a.unanswered = null;
@@ -2311,10 +2332,32 @@ export class TerminalHost {
       if (a.stepSaid) a.lastText = (before ?? '') + e.text;
       a.stepSaid = true;
     }
+    if (news.steer) a.steered = news.steer === 'queued' && Boolean(a.turn) && !this.overIn(a);
+    if (news.started) a.splitWaits = false;
     if (news.started) this.tookTurn(a, undefined, news.prompt);
     if (news.aborted) this.interrupted(a);
     else if (news.failed !== undefined) this.endTurn(a, { status: 'failed', message: '', failure: isRecord(raw.error) ? FAILURE.kimi(raw.error) : failure('unknown', news.failed) }, undefined, news.blocked);
-    else if (news.ended) this.endTurn(a, { status: 'done', message: a.lastText ?? '' });
+    else if (news.ended && !this.kimiSplit(a)) this.endTurn(a, { status: 'done', message: a.lastText ?? '' });
+  }
+
+  /* Kimi 2.6.3 ends a turn that words were steered into and goes on with them at once, in a turn of its own: the Hornhoof
+     turn runs on through it with its job and tool token, and its end is that turn's end. An older Kimi leaves the words
+     waiting for a next turn instead: a turn it does not go on from within SETTLE_MS ends as it would have. */
+  private kimiSplit(a: Agent): boolean {
+    const turn = a.turn;
+    if (!a.steered || !turn || this.overIn(a)) return false;
+    a.steered = false;
+    a.splitWaits = true;
+    a.splitStops = (a.splitStops ?? 0) + 1;
+    setTimeout(() => this.splitNotGoneOn(a, turn), SETTLE_MS);
+    return true;
+  }
+
+  private splitNotGoneOn(a: Agent, turn: Turn): void {
+    this.drain(a);
+    if (a.turn !== turn || !a.splitWaits) return;
+    a.splitWaits = false;
+    this.endTurn(a, { status: 'done', message: a.lastText ?? '' });
   }
 
   /* Reads the log until the turn's answer is in it. A null message means agy's stop carries no answer to match. */
@@ -2331,9 +2374,17 @@ export class TerminalHost {
     return a.program?.kind !== 'claude' || !answer || a.lastText?.trim() === answer;
   }
 
-  /* Kimi's answer is complete only at turn.ended on its wire. A missing wire end does not hold its hook forever. */
+  /* Kimi's answer is complete only at turn.ended on its wire, or the turn went on past a split there. A missing wire end
+     does not hold its hook forever. */
   private async settleWire(a: Agent, turn: Turn | null): Promise<void> {
-    for (const end = Date.now() + SETTLE_MS; a.turn === turn && turn && !turn.ending && Date.now() < end; await sleep(100)) this.drain(a);
+    for (const end = Date.now() + SETTLE_MS; a.turn === turn && turn && !turn.ending && !a.splitStops && Date.now() < end; await sleep(100)) this.drain(a);
+  }
+
+  /* The stop is of a turn Kimi ended at a split: whether the Hornhoof turn goes on is the split's to say. */
+  private splitStop(a: Agent): boolean {
+    if (!a.splitStops) return false;
+    a.splitStops--;
+    return true;
   }
 
   /* Hornhoof hears how full the context is once it moved by a percent or more, for the bar on the map. */
@@ -2501,7 +2552,7 @@ export class TerminalHost {
     if (a.program?.kind === 'kimi') {
       const turn = a.turn;
       await this.settleWire(a, turn);
-      if (!this.stopIsCurrent(a, turn)) return;
+      if (this.splitStop(a) || !this.stopIsCurrent(a, turn)) return;
     }
     this.completeStop(a, data, id);
   }
@@ -2663,6 +2714,7 @@ export class TerminalHost {
     turn.early = null;
     this.bindTyped(a, turn, m, early);
     turn.opened?.resolve();
+    if (!turn.jobId) return this.notOpened(a, turn);
     /* It ended before Hornhoof named it. */
     if (turn.over) {
       this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId, turn.over.output, turn.over.programOutput, turn.over.failure, turn.over.tokens);
@@ -2680,6 +2732,15 @@ export class TerminalHost {
       if (a.turn === turn) this.bridge.setToken(a.key, m.toolToken);
       for (const e of early) this.typedEvent(turn, e);
     }
+  }
+
+  /* Hornhoof opened no job for what the program took, as for a turn Kimi started of its own: nothing of it has a job to tell
+     or tools to call. It is no Hornhoof turn, and the program works on it until its own end; Hornhoof's next turn waits for
+     that and tells meanwhile what the program does. */
+  private notOpened(a: Agent, turn: Turn): void {
+    if (a.turn !== turn) return;
+    this.endWords(a, turn);
+    a.turn = null;
   }
 
   private bindOperatorTurn(a: Agent, turn: Turn, jobId: string): void {
@@ -3137,16 +3198,37 @@ export class TerminalHost {
     if (a.program?.kind === 'claude' && a.workDir) await this.fs.remove(claudeToolsFile(a.workDir)).catch(() => {});
   }
 
-  /* Hornhoof calls off a turn a person typed: the program stops as on Escape, and the turn ends as stopped. */
+  /* Hornhoof calls off a turn: the program stops as on Escape, and the turn ends as stopped. A turn a person typed tells
+     its end here. One Hornhoof gave waits for no end signal any more, and its node tells its end. A turn called off once,
+     or one this host does not hold, has nothing left to stop. */
   async cancel(jobId: string): Promise<void> {
-    const a = [...this.agents.values()].find(x => x.turn?.typed && x.turn.jobId === jobId);
+    const a = this.holding(jobId);
     if (!a) return;
     this.intentional(a, 'cancelled');
-    this.finishTyped(a, '', 'cancelled');
+    if (a.turn!.typed) this.finishTyped(a, '', 'cancelled');
+    else this.callOff(a, a.turn!);
     /* A session that is gone took its program with it; the turn ends all the same. */
     a.cancelling = this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Escape')).catch(() => {});
     await a.cancelling;
     a.busy = false;
+  }
+
+  /* What the end of a turn Hornhoof gave tells as Hornhoof calls it off now: none for a turn a person typed, which tells
+     its own, or one this host does not hold. */
+  calledOffEnd(jobId: string): CalledOff | null {
+    const a = this.holding(jobId);
+    return a && !a.turn!.typed ? { sessionId: a.sessionId, tokens: a.tally.tokens() } : null;
+  }
+
+  private holding(jobId: string): Agent | undefined {
+    return [...this.agents.values()].find(x => x.turn?.jobId === jobId && !x.turn.calledOff);
+  }
+
+  /* Its run waits for nothing more: it ends as stopped, whatever the program says or leaves unsaid. */
+  private callOff(a: Agent, turn: Turn): void {
+    turn.calledOff = true;
+    a.stopped = true;
+    a.ended?.resolve('');
   }
 
   /* The agent's views hear when its program comes up or goes. */

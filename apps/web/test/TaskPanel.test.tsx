@@ -83,12 +83,18 @@ describe('the simple task card', () => {
     expect(card.getAllByRole('button')).toHaveLength(4);
   });
 
-  it('draws the card as the mockup drawer over the tracker and the full screen on a phone', () => {
+  it('draws the card as the mockup drawer beside the tracker and the full screen on a phone', () => {
     const drawer = '.body.tracker-page ~ .acard.at-end';
-    expect.soft(decl(drawer, 'inline-size', '(min-width: 761px)')).toBe('460px');
+    expect.soft(decl(':root', '--tracker-card-size')).toBe('460px');
+    expect.soft(decl(':root', '--tracker-strips-room')).toBe('32px');
+    expect.soft(decl(drawer, 'inline-size', '(min-width: 761px)')).toBe('var(--tracker-card-size)');
     expect.soft(decl(drawer, 'inset-inline-end', '(min-width: 761px)')).toBe('0');
-    /* Minimized windows keep their strips at the right edge in reach beside it. */
-    expect.soft(decl('.shell:has(.agent-strips:not(:empty)) .body.tracker-page ~ .acard.at-end:dir(ltr)', 'inset-inline-end', '(min-width: 761px)')).toBe('32px');
+    /* The page ends where the card starts, so the work reflows beside it instead of running under it. */
+    expect.soft(decl('.body.tracker-page:has(~ .acard.at-end)', 'inset-inline-end', '(min-width: 761px)')).toBe('var(--tracker-card-size)');
+    /* Minimized windows keep their strips at the right edge in reach beside it, and the page ends before both. */
+    expect.soft(decl('.shell:has(.agent-strips:not(:empty)) .body.tracker-page ~ .acard.at-end:dir(ltr)', 'inset-inline-end', '(min-width: 761px)')).toBe('var(--tracker-strips-room)');
+    expect.soft(decl('.shell:has(.agent-strips:not(:empty)) .body.tracker-page:has(~ .acard.at-end):dir(ltr)', 'inset-inline-end', '(min-width: 761px)'))
+      .toBe('calc(var(--tracker-card-size) + var(--tracker-strips-room))');
     expect.soft(decl(drawer, 'border-inline-start', '(min-width: 761px)')).toBe('1px solid var(--line2)');
     expect.soft(decl(drawer, 'inset', '(max-width: 760px)')).toBe('68px 0 0');
     expect.soft(decl('.body.with-task .tracker', 'padding-inline-end', '(min-width: 1100px)')).toBeUndefined();
@@ -152,6 +158,23 @@ describe('the simple task card', () => {
     expect(panel).not.toHaveTextContent(theirs.text);
     expect(card.getByRole('list', { name: 'Log' })).toHaveTextContent('asked a person');
     expect(card.getByRole('list', { name: 'Log' })).not.toHaveTextContent(mine.text);
+  });
+
+  /* B2 of #1569: the card a person approves in the task shows no "In more detail", so the list Hornhoof keeps of what a release
+     brings that no check covers shows there next to Approve, apart from the plain words. */
+  it('shows next to Approve on the card in the task what a release brings that no check covers, under plain words without it', async () => {
+    const user = userEvent.setup();
+    const stray = '1'.repeat(40);
+    const task = { ...REQUESTS[1]!.task, id: 't12', number: 12, title: TASK_DETAIL.title };
+    const release = { ...REQUESTS[1]!, task, explained: 'The release of the turn is ready. Approve it to let it go to main.', unchecked: [{ kind: 'commit' as const, commit: stray }] };
+    shell({ 'GET /api/requests': [200, decisions([release])] });
+    const panel = await openTask(user);
+    const waiting = within(panel).getByRole('region', { name: 'Waiting for your answer' });
+    const list = within(waiting).getByRole('region', { name: 'What this release brings that no check covers: 1 item' });
+    expect(list).toHaveTextContent(`${stray} came in without any check.`);
+    expect(list).toHaveTextContent('Approve only if you accept each of these.');
+    const approve = within(waiting).getByRole('button', { name: 'Approve' });
+    expect(list.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('puts a current wait in the log, shows why and the materials, and keeps other task details in the menu', async () => {

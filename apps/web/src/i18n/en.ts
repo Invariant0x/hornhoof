@@ -75,6 +75,10 @@ export const en = {
   },
   common: {
     loading: 'Loading…',
+    /* Something under way that took longer than its one limit: it may still finish. */
+    tooLong: 'Taking longer than usual',
+    /* Asks again for what failed or takes longer than usual. */
+    retry: 'Retry',
     somethingWrong: 'Something went wrong.',
     next: 'Next',
     back: 'Back',
@@ -92,6 +96,26 @@ export const en = {
     title: 'Title',
     atLeast10: 'At least 10 characters.',
     useAtLeast10: 'Use at least 10 characters.',
+  },
+  /* A screen's data while it comes (style book 1.5, section 4): the words beside the ring, and for a load that failed one
+     whole sentence of what failed and why, then what to do. */
+  load: {
+    tasks: 'Loading tasks…',
+    task: 'Loading the task…',
+    limits: 'Loading limits…',
+    failed: {
+      offline: 'Could not load: no connection to the server.',
+      timeout: 'Could not load: the server did not answer in 30 seconds.',
+      server: 'Could not load: something went wrong on the server.',
+      provider: 'Could not load the limits: the provider did not answer.',
+    },
+    hint: {
+      offline: 'Check the internet connection, then press "Retry".',
+      timeout: 'What is already on the screen stays. Press "Retry" to ask again.',
+      server: 'What is already on the screen stays. If "Retry" does not help, try again in a few minutes.',
+      provider: 'The rest of the card works. Press "Retry" to ask the provider again.',
+    },
+    slowHint: 'You can wait or press "Retry".',
   },
   app: {
     notResponding: 'Hornhoof is not responding',
@@ -686,6 +710,10 @@ export const en = {
     resetsIn: (duration: string) => `resets in ${duration}`,
     /* A limit's cell in the list: its used share, then when it resets. */
     usedAndReset: (share: string, reset: string) => `${share}, ${reset}`,
+    /* The limits of one group of a plan's models, by the name its provider gives the group, as Gemini Models. */
+    groupLimits: (group: string) => `Limits: ${group}`,
+    /* A limit's cell in the list for a plan that keeps its limits by model group: the group, then what it used. */
+    groupShare: (group: string, share: string) => `${group}: ${share}`,
     resetUnknown: 'Reset time unknown',
     limitReached: (duration: string | null) => (duration ? `Limit reached, resets in ${duration}` : 'Limit reached'),
     notOnPlan: 'Not on this plan',
@@ -766,6 +794,41 @@ export const en = {
       noLogin: 'This machine cannot run the sign-in from Hornhoof. Update its node and try again.',
       noProgram: 'The program could not be installed on this machine, so nothing changed. Check the machine\'s internet connection and free disk space, then try again.',
       other: 'The sign-in did not finish, so nothing changed. Try again.',
+      signedOut: 'The program on this machine is not signed in, so nothing changed.',
+      noAnswer: 'Could not connect: your computer stopped answering.',
+    },
+    /* A plan connecting after its sign-in code: the step its node reports, the time since the code, and what to do when it
+       failed or takes too long. */
+    connection: {
+      label: (name: string) => `Connecting ${name}`,
+      steps: {
+        checking: 'Checking the sign-in',
+        saving: 'Saving the sign-in on the machine',
+        signed_in: 'Signed in. Getting the plan ready',
+        setup: "Checking the program's first setup",
+        account: 'Reading the account and the plan',
+        limits: 'Getting the limits',
+        models: 'Getting the models',
+      },
+      seconds: (s: number) => `${s} s`,
+      minutes: (m: number, s: number) => `${m} min ${s} s`,
+      passed: (time: string) => `${time} since the code`,
+      /* How far the plan got on its way to work, over the bar of the steps done. */
+      progress: (n: number, total: number) => `Step ${n} of ${total}`,
+      nowTitle: 'Now',
+      keepOn: 'Keep the computer on; this page moves on by itself.',
+      /* A minute with no new step from the machine. */
+      slowHint: 'A step usually takes under a minute. Check that your computer is on and online.',
+      next: {
+        signInAgain: 'Sign in again. Nothing changed on the plan.',
+        installWindow: (host: string) => `Run the install command on ${host} again and sign in there.`,
+        noAnswer: 'Check that the computer is on and online, then press "Retry".',
+      },
+      retryLabel: (name: string) => `Retry connecting ${name}`,
+      cancel: 'Stop',
+      cancelLabel: (name: string) => `Stop connecting ${name}`,
+      /* Said once by the plan's status as it turns ready; its card shows no such line. */
+      ready: (name: string) => `${name}: done. Agents on this plan can work now.`,
     },
     pasteKey: 'Paste the key',
     pasteKeyLabel: (name: string) => `Paste the key for ${name}`,
@@ -784,6 +847,8 @@ export const en = {
       key: (program: string) => `Paste your ${program} key`,
       ready: 'Ready: agents on this plan can work',
       done: '(done)',
+      current: '(now)',
+      failedMark: '(did not work)',
       now: {
         run: 'Copy the command below, paste it into Terminal on a Mac or Linux or into PowerShell on Windows, and press Enter. This page moves on by itself once your computer connects.',
         newCommand: 'Press "Make a new command" below, then run the new command on your computer.',
@@ -1571,6 +1636,8 @@ export const en = {
       [`${working} of ${total} ${plural('en', total, { one: 'agent', other: 'agents' })} working`, `${roles} ${plural('en', roles, { one: 'role', other: 'roles' })}`].join(', '),
     agents: (n: number) => (n ? `${n} ${plural('en', n, { one: 'agent', other: 'agents' })}` : 'Nobody yet'),
     hint: 'Work goes left to right through the gates. Whoever leads a stage now is marked in its role.',
+    hintMore: 'Show all of it',
+    hintLess: 'Show less',
     about: 'About the department',
     tasksButton: 'Department tasks',
     leads: 'Leads the department',
@@ -1799,10 +1866,7 @@ export const en = {
     machineAwayImportant: (names: string) => `Among them: ${names}.`,
     machineAwayDo: 'What to do: switch it on and plug it in, sign in to the account, check that Docker has started.',
     machineBack: (host: string, at: string) => `Machine ${host} is back: ${at}.`,
-    /* The decisions screen opened from a person's card shows theirs until the filter is taken off. */
-    decisionsFor: (name: string) => `Decisions for ${name}`,
     someone: 'this person',
-    showAll: "Show everyone's decisions",
     nothingFor: (name: string) => `Nothing waits for a decision from ${name}.`,
     asks: (agent: string) => `${agent} asks`,
     asksApproval: (agent: string) => `${agent} asks you to approve a commit`,
@@ -1831,6 +1895,20 @@ export const en = {
     /* A person's answer the orchestrator gave of its own. */
     byOrchestrator: 'decided by the orchestrator',
     note: 'Note, if any',
+    /* On the approval of a release, what it brings that no check covers, as Hornhoof keeps it apart from the words above. */
+    unchecked: {
+      heading: (n: number) => `What this release brings that no check covers: ${n} ${n === 1 ? 'item' : 'items'}`,
+      accept: 'Approve only if you accept each of these.',
+      unread: (base: string, commit: string) => `Hornhoof could not read every commit between main at ${base} and ${commit}.`,
+      holderOff: (task: number) => `#${task}: the employee who did and checked this work alone is switched off or removed.`,
+      noCandidate: (task: number) => `#${task}: no checked version of it, and it is not work its employee did and checked alone.`,
+      checker: (task: number, commit: string) => `#${task}: a checker of ${commit} is switched off, removed or its own author, or did not pass it.`,
+      taskUnread: (task: number) => `Hornhoof could not read every commit of #${task}.`,
+      unpinned: (task: number) => `#${task} was closed before such work named the commit its employee checked, so none of its commits counts as checked.`,
+      unstarted: (task: number) => `#${task}: there is no record of where this work started, so none of its commits counts as checked.`,
+      merge: (commit: string) => `${commit} is a merge made outside every checked change.`,
+      commit: (commit: string) => `${commit} came in without any check.`,
+    },
     choiceNote: 'Comment or feedback',
     choiceHint: 'Pick an option above, or send feedback without picking one.',
     sendFeedback: 'Send without choosing',
@@ -2381,6 +2459,9 @@ export const en = {
       notStarted: 'Not started', working: 'In work', review: 'Review', waiting: 'Waits for a person', waitingYou: 'Waits for you', failure: 'Failure', stopped: 'Stopped',
       paused: 'Paused', done: 'Done', cancelled: 'Cancelled',
     },
+    /* What a status dot says to a screen reader where an employee works on its task in work at this moment, in one phrase
+       (Design #1628). */
+    dot: { workingNow: 'In work, working now' },
     noGoals: 'No goals here yet.',
     noDates: 'No tasks here have a due date.',
     noTasks: 'No tasks here.',
@@ -2388,6 +2469,13 @@ export const en = {
     nothingWorking: 'Nobody works on a task at this moment.',
     waitTasks: 'Tasks that wait for you',
     waitTasksOf: (name: string) => `Tasks that wait for ${name}`,
+    peopleWaits: {
+      title: 'Waiting for people',
+      waitingFor: (name: string) => `Waiting for: ${name}`,
+      waitingForSomeone: 'Waiting for a person',
+      tasks: 'Tasks that wait for people',
+      nothing: 'Nothing waits for people.',
+    },
     priority: { label: 'Priority', urgent: 'Urgent', high: 'High', normal: 'Normal', low: 'Low' },
     list: { task: 'Name', executor: 'Executor', responsible: 'Responsible', due: 'Due', progress: 'Progress', parts: 'Parts of this goal', subtasks: (done: number, total: number) => `Subtasks: ${done} of ${total} done`,
       group: (status: string, count: number) => `${status}: ${count}`,

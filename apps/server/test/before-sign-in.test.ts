@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -8,6 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
+import { pageBuild } from '../src/web.js';
 import type { Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 import { createTestDb, fixture, invitePerson, SETUP, sessionFrom, TEST_SECRET, TUNNEL, viaLink } from './helpers.js';
@@ -27,6 +29,9 @@ const PUBLIC: Record<string, Origin[]> = {
   'HEAD /api/health': EVERYWHERE,
   'GET /api/version': ['local'],
   'HEAD /api/version': ['local'],
+  /* The hash of the page at /, for a signed-out page to reload itself once the server serves another. */
+  'GET /api/build': EVERYWHERE,
+  'HEAD /api/build': EVERYWHERE,
   'GET /robots.txt': EVERYWHERE,
   'HEAD /robots.txt': EVERYWHERE,
   'GET /api/setup': EVERYWHERE,
@@ -193,6 +198,28 @@ describe('what the link tells a stranger', () => {
     expect(signedIn.statusCode).toBe(200);
     expect(Object.keys(signedIn.json()).sort()).toEqual(['commit', 'migrations', 'version']);
     expect((await app.inject({ url: '/api/version', remoteAddress: '127.0.0.1' })).statusCode).toBe(200);
+  });
+
+  it('gives a signed-out page only the build of the page at / on /api/build, the same locally and over the link', async () => {
+    const { app } = await companyWithPeople();
+    const stranger = await app.inject({ url: '/api/build', ...viaLink() });
+    const local = await app.inject({ url: '/api/build', remoteAddress: '127.0.0.1' });
+    expect(stranger.statusCode).toBe(200);
+    expect(stranger.headers['cache-control']).toBe('no-store');
+    expect(local.body).toBe(stranger.body);
+    /* Nothing but what anyone works out from the page at / alone. */
+    const page = await app.inject({ url: '/', ...viaLink() });
+    expect(page.statusCode).toBe(200);
+    expect(stranger.body).toBe(JSON.stringify({ build: createHash('sha256').update(page.rawPayload).digest('base64url') }));
+  });
+
+  it('names a build only for a web app, the same for the same page and another for another', () => {
+    const one = fakeDist();
+    expect(pageBuild(one)).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(pageBuild(fakeDist())).toBe(pageBuild(one));
+    writeFileSync(join(one, 'index.html'), '<!doctype html><title>Hornhoof</title><div id="root"></div><script src="/assets/app-3c4d.js"></script>');
+    expect(pageBuild(one)).not.toBe(pageBuild(fakeDist()));
+    expect(pageBuild(mkdtempSync(join(tmpdir(), 'hornhoof-no-web-')))).toBeNull();
   });
 
   it('asks search engines to stay away', async () => {

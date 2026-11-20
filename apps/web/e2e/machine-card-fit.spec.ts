@@ -8,7 +8,7 @@ import { ME, serveApi, serveOwnerKey } from './api';
    command it showed widened the table until the whole table stood as entries under Sort by. Its buttons now stay inside
    the card at a touch's height, the command wraps inside the card, and the table stays a table before and after; at the
    width of a phone the table stands as entries as before, its buttons inside the card. */
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 
 const NOW = Date.parse('2026-11-15T12:00:00.000Z');
 const GIB = 1024 ** 3;

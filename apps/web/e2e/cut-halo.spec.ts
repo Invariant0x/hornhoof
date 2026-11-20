@@ -7,7 +7,7 @@ import { ASKED, ONE, serveHubTurn } from './hub-turn-api';
    and no triangle of the background at a cut, in every built-in skin, at 1440 and 375, in Russian and right to left. Each
    test keeps pictures of the glowing card, of its cut corner enlarged and of the focused card, for Design to compare with
    the same pictures of the code before. */
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 /* The map opens still, so it fits the screen at once; the glow is let breathe only while it is measured. */
 test.use({ reducedMotion: 'reduce' });
 

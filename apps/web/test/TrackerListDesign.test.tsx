@@ -8,8 +8,8 @@ import { decl } from './css';
 import { taskRoute } from './task-route';
 
 const department = { id: 'marketing', name: 'Marketing' };
-const executor = { id: 'juno', name: 'Juno Vale', kind: 'worker' as const, role: null };
-const responsible = { id: 'max', name: 'Max' };
+const executor = { id: 'leo', name: 'Leo Park', kind: 'worker' as const, role: null };
+const responsible = { id: 'maya', name: 'Maya' };
 const goal = { id: 'goal', number: 1, title: '500 subscribers' };
 const since = '2026-11-14T12:00:00.000Z';
 
@@ -89,9 +89,9 @@ it('shows typed waits for tasks and people and the other department that needs t
     time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind: 'after', who: null, reason: '#267', since }] } });
   list([blocker, waiting]);
   const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
-  expect(within(row).getByText('Waits for Max, 3 days')).toHaveClass('tr-wait');
+  expect(within(row).getByText('Waits for Maya, 3 days')).toHaveClass('tr-wait');
   expect(within(row).getByText('needed for #413 Sales')).toBeInTheDocument();
-  expect(row).not.toHaveTextContent('waits for Juno');
+  expect(row).not.toHaveTextContent('waits for Leo');
   expect(within(screen.getByRole('listitem', { name: '#413 Send' })).getByText('After #267')).toHaveClass('tr-relation');
   expect(screen.getByRole('button', { name: 'Waits for a person: 1' })).toBeInTheDocument();
 });
@@ -105,8 +105,8 @@ it('uses status shapes and stable identity marks, and leaves priority to the car
   ];
   render(<LanguageProvider><TrackerList tasks={tasks} all={tasks} rows={rows} empty="Empty" /></LanguageProvider>);
   const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
-  expect(within(row).getByRole('img', { name: 'Juno Vale' })).toHaveAttribute('data-program', 'claude');
-  expect(within(row).getByRole('img', { name: 'Max' })).toHaveClass('tr-avatar');
+  expect(within(row).getByRole('img', { name: 'Leo Park' })).toHaveAttribute('data-program', 'claude');
+  expect(within(row).getByRole('img', { name: 'Maya' })).toHaveClass('tr-avatar');
   expect(row.querySelector('.tr-priority')).toBeNull();
   expect(screen.getByRole('img', { name: 'In work' })).toHaveClass('working');
   expect(screen.getByRole('img', { name: 'Done' })).toHaveClass('done');
@@ -130,7 +130,7 @@ it('opens subtasks as a tree under the parent title and keeps child facts in the
   expect(toggle).toHaveAttribute('aria-expanded', 'true');
   const inline = within(parent).getByRole('listitem', { name: '#268 Pick the recipients' });
   expect(inline).not.toHaveTextContent('Low');
-  expect(within(inline).getByRole('img', { name: 'Max' })).toBeInTheDocument();
+  expect(within(inline).getByRole('img', { name: 'Maya' })).toBeInTheDocument();
   await user.click(toggle);
   expect(within(parent).queryByRole('listitem', { name: '#268 Pick the recipients' })).toBeNull();
   await user.click(toggle);
@@ -171,7 +171,7 @@ it('puts the count, number and wait note after the title on its line', () => {
 });
 
 it('draws the rows, rings, pills and chips at the mockup sizes', () => {
-  const desktop = 'tr-list (width > 960px)';
+  const desktop = 'tr-list (width > 640px)';
   expect.soft(decl('.tr-cells', 'grid-template-columns', desktop)).toBe('subgrid');
   /* td: 7px 8px around a 22px avatar, 13.5px, a line under each row, the cells in the middle of its height: a 37px row.
      What is pressed in a row is 24px high for a mouse (WCAG 2.5.8), so 6px above and below keep the row at 37px. Each cell
@@ -191,8 +191,11 @@ it('draws the rows, rings, pills and chips at the mockup sizes', () => {
   expect.soft(decl('.tr-line', 'flex-wrap')).toBe('wrap');
   expect.soft(decl('.tr-task-name', 'padding-inline-start') ?? '').toContain('36px');
   /* .dot: a 14px ring of 2px; .caret 18px; .num 12px mono; .subn 12px; .tg 11px 600 with a border. */
-  expect.soft(decl('.tr-status-dot', 'inline-size')).toBe('14px');
-  expect.soft(decl('.tr-status-dot', 'border')).toBe('2px solid var(--line2)');
+  /* Its size and ring are tokens of their own since the working-now core (#1628): the same 14 px and 2 px. */
+  expect.soft(decl('.tr-status-dot', 'inline-size')).toBe('var(--tracker-dot-size)');
+  expect.soft(decl(':root', '--tracker-dot-size')).toBe('14px');
+  expect.soft(decl('.tr-status-dot', 'border')).toBe('var(--tracker-dot-ring) solid var(--line2)');
+  expect.soft(decl(':root', '--tracker-dot-ring')).toBe('2px');
   expect.soft(decl('.tr-status-dot.open', 'border-style')).toBe('dashed');
   expect.soft(decl('.tr-row-caret', 'inline-size')).toBe('18px');
   expect.soft(decl('.tr-line .tr-no', 'font')).toBe('12px var(--f-mono)');
@@ -220,7 +223,7 @@ it.each([null, 'plan'])('shares the mockup column proportions with selection %s'
   const rows = { selected, onOpenTask: vi.fn() };
   render(<LanguageProvider><TrackerList tasks={[example]} all={[example]} rows={rows} empty="Empty" /></LanguageProvider>);
   const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
-  const desktop = 'tr-list (width > 960px)';
+  const desktop = 'tr-list (width > 640px)';
   const people = '.tr-cell.tr-cell-person';
   for (const name of [executor.name, responsible.name]) {
     expect.soft(within(row).getByRole('img', { name }).closest(people)).toBeInTheDocument();
@@ -243,8 +246,8 @@ it('keeps complete names and labels with long task text in the stacked row', () 
   list([task({ title: longTitle, dueAt: '2020-01-01T00:00:00.000Z' })]);
   const row = screen.getByRole('listitem', { name: `#267 ${longTitle}` });
   expect(within(row).getByRole('button', { name: longTitle })).toBeInTheDocument();
-  expect(within(row).getByText('Juno Vale')).toHaveClass('tr-id-name');
-  expect(within(row).getByText('Max')).toHaveClass('tr-id-name');
+  expect(within(row).getByText('Leo Park')).toHaveClass('tr-id-name');
+  expect(within(row).getByText('Maya')).toHaveClass('tr-id-name');
   const facts = [...row.querySelectorAll('.tr-k')].map(label => label.textContent);
   expect(facts).toEqual(['Executor', 'Responsible', 'Due']);
   expect([...document.querySelectorAll('.tr-head > span')].map(label => label.textContent)).toEqual(['Name', ...facts]);

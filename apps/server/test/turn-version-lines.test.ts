@@ -7,7 +7,7 @@ import { recordRelease, releaseRound } from '../src/modules/tasks/releases.js';
 import { ensureOpenTurn } from '../src/modules/tasks/turn-department.js';
 import { BASE } from './development-echelons-fixture.js';
 import { ownDatabases } from './helpers.js';
-import { releasing, serveEach, type Repository } from './turn-release-fixture.js';
+import { approvalCard, releasing, serveEach, type Repository } from './turn-release-fixture.js';
 
 ownDatabases();
 
@@ -47,7 +47,7 @@ async function siteDepartment(f: Releasing) {
   const releaseAt = async (commit: string) => {
     const open = await openOf(f, department!.id);
     const run = await f.fullRun({ commit, branch: `turn-${open.number}`, of: { departmentId: department!.id, taskId: release.id, agentId: head!.id, jobId: job!.id } });
-    const asked = await ask(f.ctx, head!.id, release.id, { kind: 'approval', text: `Release the site: main to ${commit}.`, commit });
+    const asked = await ask(f.ctx, head!.id, release.id, await approvalCard(f.ctx, release, `Release the site: main to ${commit}.`, commit));
     await answer(f.ctx, { personId: f.claude.ownerPersonId }, asked.request.id, { approve: true });
     return recordRelease(f.ctx, head!.id, companyId, { task: release.number, commit, runId: run.id });
   };

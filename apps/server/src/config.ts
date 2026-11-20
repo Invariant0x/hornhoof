@@ -32,6 +32,12 @@ export type Config = {
   registryUrl?: string;
   updateCheckMs: number;
   nodeLeaderHoldMs: number;
+  /* The longest a node's wait for its update holds new turns. */
+  nodeUpdateWaitMs: number;
+  /* The deadline of a plan's whole connection after its sign-in code: past it, the connection failed. */
+  signinConnectMs: number;
+  /* How long after the last step its node reported a plan's connection takes longer than usual. */
+  signinSlowMs: number;
   /* The folder the app shares with the updater service. */
   controlDir: string;
   /* Role and skill templates, loaded once at start. */
@@ -109,8 +115,21 @@ const Env = z.object({
   UPDATE_CHECK_MS: milliseconds('UPDATE_CHECK_MS', 0, '1800000'),
   /* How long the orchestrator and the heads wait for a machine next to install the server's build, and for a node an
      updater was told is free while it does not stop. Replacing a free node takes under a minute. A node that waits for
-     its work to end before an update takes none of their turns, however long. */
+     its work to end before an update takes none of their turns, up to NODE_UPDATE_WAIT_MS. */
   NODE_LEADER_HOLD_MS: milliseconds('NODE_LEADER_HOLD_MS', 1, '180000').default(180_000),
+  /* The longest a node's wait for its work to end before an update holds new turns, its plan's and the orchestrator's
+     too. Past it the node updates whatever still runs on it, and each turn its restart cut runs once more after it, as
+     after any restart. 45 minutes: the orchestrator hears of a wait at half an hour, and has a quarter of an hour to act. */
+  NODE_UPDATE_WAIT_MS: milliseconds('NODE_UPDATE_WAIT_MS', 1, '2700000').default(2_700_000),
+  /* The deadline of a plan's whole connection after its sign-in code, from the node's first step until the plan is ready:
+     past it the connection failed, and its owner can try again or stop. One deadline for the whole of it, not one per
+     step, which the server alone keeps. 10 minutes: from the waits in the code, a slow Antigravity connection that still
+     works takes about 3 (agy takes the code within 2, then the node reads its models, limits and first setup); no real
+     timings were kept yet, which the node's log now keeps. */
+  SIGNIN_CONNECT_MS: milliseconds('SIGNIN_CONNECT_MS', 1, '600000').default(600_000),
+  /* How long after the last step its node reported a connection takes longer than usual, which its owner hears; each new
+     step starts it over. A minute, by the style book (1.5, section 4, #1611). */
+  SIGNIN_SLOW_MS: milliseconds('SIGNIN_SLOW_MS', 1, '60000').default(60_000),
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
   FEEDBACK_INBOX: z.preprocess(unset, z.enum(['true', 'false'], { error: 'FEEDBACK_INBOX must be true or false.' }).optional()),
@@ -213,7 +232,7 @@ function placesOf(env: NodeJS.ProcessEnv): Pick<Config, 'webDist' | 'installScri
 }
 
 /* Intervals and limits, with their defaults. */
-function limitsOf(set: z.infer<typeof Env>): Pick<Config, 'port' | 'nodePingMs' | 'streamPingMs' | 'runsPerHost' | 'taskFilesBytes' | 'nodeLeaderHoldMs'> {
+function limitsOf(set: z.infer<typeof Env>): Pick<Config, 'port' | 'nodePingMs' | 'streamPingMs' | 'runsPerHost' | 'taskFilesBytes' | 'nodeLeaderHoldMs' | 'nodeUpdateWaitMs' | 'signinConnectMs' | 'signinSlowMs'> {
   return {
     port: set.PORT ?? 8080,
     nodePingMs: set.NODE_PING_MS ?? 20000,
@@ -221,6 +240,9 @@ function limitsOf(set: z.infer<typeof Env>): Pick<Config, 'port' | 'nodePingMs' 
     runsPerHost: set.MAX_RUNS_PER_HOST,
     taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
     nodeLeaderHoldMs: set.NODE_LEADER_HOLD_MS,
+    nodeUpdateWaitMs: set.NODE_UPDATE_WAIT_MS,
+    signinConnectMs: set.SIGNIN_CONNECT_MS,
+    signinSlowMs: set.SIGNIN_SLOW_MS,
   };
 }
 

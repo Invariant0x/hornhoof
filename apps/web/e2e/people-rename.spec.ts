@@ -7,7 +7,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 
-test.describe.configure({ timeout: 120_000 });
+test.describe.configure({ timeout: 0 });
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };

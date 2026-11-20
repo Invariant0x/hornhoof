@@ -77,7 +77,8 @@ for (const { lang, skin } of LOOKS) for (const width of [1440, 375]) {
     await open(page, lang, width, `/tasks?department=${DEV.id}`, skin);
     await expect(page.getByRole('heading', { level: 1, name: `${DEV.name} / ${t.tracker.views.list}` })).toBeVisible();
 
-    /* The list starts with work in progress and names the people, goal, due day and subtasks. */
+    /* The list starts with work in progress and names the people, due day and subtasks. It has no Goal column since 0.34.7:
+       a task's goal is on its card, below. */
     const list = page.getByRole('region', { name: t.tracker.views.list, exact: true });
     await expect(list.getByRole('heading', { level: 2 }).first()).toHaveAccessibleName(new RegExp(`^${t.tracker.groups.working}:`));
     /* Its own line: its subtasks stand open under it, as in the mockup. */
@@ -88,11 +89,19 @@ for (const { lang, skin } of LOOKS) for (const width of [1440, 375]) {
       await expect(payments.getByText('Hana', { exact: true })).toBeVisible();
       await expect(payments.getByText('Ivan', { exact: true })).toBeVisible();
     }
-    await expect(payments).toContainText(GOALS[1]!.title);
+    await expect(payments).not.toContainText(GOALS[1]!.title);
     await expect(payments.getByRole('button', { name: t.tracker.list.subtasks(1, 3) })).toBeVisible();
     await inside(page, `list ${lang} ${skin} ${width}`);
     if (width <= 760) await touchable(page, `list ${lang} ${skin} ${width}`);
     await capture(page, info, `list-${lang}-${skin}-${width}`);
+
+    /* The task's goal, on the card its row opens. */
+    await payments.locator('.tr-title').click();
+    const card = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
+    await openTaskAction(card, t, t.tasks.details);
+    await expect(card.getByRole('navigation', { name: t.tracker.card.path })).toContainText(GOALS[1]!.title);
+    await card.getByRole('button', { name: t.window.close, exact: true }).click();
+    await expect(card).toHaveCount(0);
 
     /* The board: the pipeline's stages when one is chosen, columns by status otherwise, as many side by side as fit. */
     await view(page, t, t.tracker.views.board);
@@ -165,26 +174,7 @@ test('pans and zooms the graph with a drag and the zoom bar, and opens a card fr
   await expect(page).toHaveURL(/\/tasks\?goal=g2&view=graph$/);
 });
 
-for (const dir of ['ltr', 'rtl'] as const) {
-  test(`puts the card at the end side as the mockup's drawer, over the work and not narrowing it: ${dir}`, async ({ page }, info) => {
-    const t = MESSAGES.en;
-    await serveTasksBoard(page);
-    await open(page, 'en', 1440, `/tasks?department=${DEV.id}`);
-    await page.evaluate(d => { document.documentElement.dir = d; }, dir);
-    const row = page.getByRole('region', { name: t.tracker.views.list, exact: true }).getByRole('listitem', { name: named('Take card payments'), exact: true });
-    const before = (await page.locator('.tr-main').boundingBox())!;
-    await row.locator(':scope > .tr-cells .tr-title').click();
-    const card = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
-    const path = card.getByRole('navigation', { name: t.tracker.card.path });
-    await expect(path.getByRole('listitem')).toHaveText([GOALS[0]!.title, GOALS[1]!.title]);
-    const [panel, main] = [(await card.boundingBox())!, (await page.locator('.tr-main').boundingBox())!];
-    expect(Math.round(panel.width)).toBe(460);
-    expect(Math.round(dir === 'ltr' ? 1440 - (panel.x + panel.width) : panel.x)).toBe(0);
-    expect(Math.round(main.width)).toBe(Math.round(before.width));
-    expect(await sideways(page)).toBeLessThanOrEqual(0);
-    await capture(page, info, `card-${dir}-1440`);
-  });
-}
+/* Where the card stands and the room the work keeps beside it: desktop-room.spec.ts. */
 
 /* The colour a role of the skin gives words, as the engine computes it. */
 const roleColor = (page: Page, role: string) => page.evaluate(r => {
@@ -491,9 +481,9 @@ for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
        it is wide the names stand above the list and each value at the start side of its column. */
     const row = page.getByRole('region', { name: t.tracker.views.list, exact: true }).getByRole('listitem', { name: named('Take card payments'), exact: true });
     await row.scrollIntoViewIfNeeded();
-    /* Executor, responsible, goal and due, the mockup's columns. */
+    /* Executor, responsible and due: the mockup's columns but the goal, which is on the task's card since 0.34.7. */
     const cells = row.locator(':scope > .tr-cells > .tr-cell');
-    await expect(cells).toHaveCount(4);
+    await expect(cells).toHaveCount(3);
     for (const cell of await cells.all()) {
       const value = (await cell.locator('.tr-v').textContent())!;
       const parts = await cell.evaluate(el => [...el.children].map(c => { const r = c.getBoundingClientRect(); return { left: r.left, right: r.right, shown: getComputedStyle(c).position !== 'absolute' }; }));

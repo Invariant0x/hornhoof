@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { MAX_JOB_TIMEOUT_MS, cut, lastBytes, repoFolder, type Account, type AgentEvent, type Failure, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage, type TurnTokens } from '@hornhoof/protocol';
 import { ToolPrivacy, type PrivateValues } from '@hornhoof/protocol';
+import type { SigninStep } from '@hornhoof/protocol/signin';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { ensureRepoBrowser, writeBrowserError } from './browser.js';
 import type { JobUser } from './isolation.js';
@@ -53,7 +54,8 @@ export class ProgramNotStarted extends Error {
     super(cause instanceof Error ? cause.message : String(cause), { cause });
   }
 }
-export type LoginIo = { input: NodeJS.ReadableStream; output: NodeJS.WritableStream; urlFile: string };
+/* step: where a sign-in is after its code, for the running node to pass on, when the program shows it. */
+export type LoginIo = { input: NodeJS.ReadableStream; output: NodeJS.WritableStream; urlFile: string; step?: (step: SigninStep) => void };
 
 /* One agent program (Claude Code, Codex, Kimi) as the node drives it. */
 export interface ProviderAdapter {

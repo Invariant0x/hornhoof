@@ -1,11 +1,11 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import type { LineState } from '@hornhoof/protocol/map';
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
 import { arcD, dashLength, hubSectors, litSquares, sectorFill, sharePercent, TURN_CELLS, workingTurns, type WorkingTurn } from '../hub-turns';
-import { arrangedBounds, arrangeMap, bendAt, deptKey, GAP, H, HALO, HUB, HUB_KEY, PEOPLE_LINE, personKey, W, type DeptSpot, type MapArrangement, type MapLine, type TopPerson } from '../map-arrange';
+import { arrangedBounds, arrangeMap, bendAt, deptKey, GAP, H, HALO, HUB, HUB_KEY, PEOPLE_LINE, personKey, W, type ChipNeed, type DeptSpot, type MapArrangement, type MapLine, type TopPerson } from '../map-arrange';
 import { useMapLayout } from '../map-layout';
 import { drawOnce } from '../map-roads';
 import type { PeopleLayout, PersonChip } from '../map-people';
@@ -13,9 +13,10 @@ import { mapPeople, useOrg, wholeCompanyPeople, type MapPerson } from '../org';
 import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
 import { Bar, percent } from '../ui/Bar';
-import { CANVAS_ZOOM_LIMITS, DRAG_PX, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar, type View } from '../ui/canvas';
+import { CANVAS_NARROW, CANVAS_ZOOM_LIMITS, DRAG_PX, FLOAT_GAP, LEFT_PANEL_COVER, SIDE_GAP, canvasSpace, freeRoom, usePanZoom, ZoomBar, type Box, type Edges, type View } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { useLoadFailure } from '../ui/LoadFailure';
+import { MapVersion } from '../ui/VersionMark';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
 import { PeopleBridgeMasks, peopleMask } from '../ui/PeopleWires';
@@ -34,6 +35,17 @@ const GAUGE_SEGMENTS = 24, GAUGE_FROM = 186, GAUGE_TO = 354;
 const { min: MIN_K, max: MAX_K } = CANVAS_ZOOM_LIMITS;
 /* The orchestrator's window covers the right of a wide screen; Fit keeps the company clear of it. */
 const WINDOW_W = 672;
+/* A card's name is drawn 20 px tall. The Head of Design's rule for #1539 (19.11), for #1554: the map opens with it 11 px tall
+   or more at any width and in any language, and scrolls; Show everything may go further out. */
+export const MAP_READABLE_K = 11 / 20;
+/* A people chip's name is drawn 14 px tall (.chip b). Design's note on #1596, for #1597: on a phone the map opens with it 11 px
+   tall as well, and its cards' names larger still. */
+export const PHONE_MAP_READABLE_K = 11 / 14;
+/* The screen's bar floats over the top of the map, the zoom and the line of the orchestrator over its bottom: the map keeps
+   this much room from them at least, and Fit this much from the sides. The screen's bar ends this far down. */
+const MAP_ROOM = { top: 76, bottom: 72 }, FIT_SIDE = 32, TOP_BAR = 56;
+/* What floats over the bottom of the map: the zoom, the line of the orchestrator and Put back. */
+const MAP_BARS = ':scope > .zoom, :scope > .ticker, :scope > .map-arrange';
 const PULSE_SPEED = 100;
 /* How long a pulse waits for its end to appear on the map. */
 const HOLD_MS = 5000;
@@ -350,15 +362,22 @@ function personDetail(t: Messages, p: MapPerson, org: Org): string {
   return p.deputy ? t.map.deputy(accessText(t, p.access, org)) : t.map.wholeCompany;
 }
 
+/* Words that hold hiragana or katakana, which only Japanese writes, are Japanese: marked so, the browser breaks them between
+   their phrases (#1580). Words of kanji alone may be Chinese, and other letters any language: the page's language speaks for
+   them. Only the people chips use it, until the product speaks Japanese itself. */
+const KANA = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
+export const writtenIn = (words: string): 'ja' | undefined => (KANA.test(words) ? 'ja' : undefined);
+
 function PersonChipCard({ org, person, w, h, cut, onOpen }: { org: Org; person: MapPerson; w: number; h: number; cut: number; onOpen(personId: string): void }) {
   const t = useT();
+  const detail = personDetail(t, person, org);
   return (
     <PersonButton person={person} frame={{ w, h, cut }} onOpen={() => onOpen(person.id)}>
       <Edge cut={cut} className="chip" halo>
         <PersonIcon label={t.map.person} />
         <span>
-          <b>{person.name}</b>
-          <small>{personDetail(t, person, org)}</small>
+          <b lang={writtenIn(person.name)}>{person.name}</b>
+          <small lang={writtenIn(detail)}>{detail}</small>
         </span>
       </Edge>
     </PersonButton>
@@ -538,6 +557,101 @@ function usePauseHiddenMap(box: { current: HTMLDivElement | null }, inside: bool
   }, [box, inside, shown]);
 }
 
+/* How tall the card of the most words needs to be: each department card is left to its words for a moment and measured.
+   Measured before the first paint, again when the company or the words change, and when a part of a card grows or shrinks
+   on its own, as its fonts arrive. */
+function useCardNeed(box: { current: HTMLDivElement | null }, org: Org | null, language: string): number {
+  const [need, setNeed] = useState(0);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || !org) return;
+    const measure = () => {
+      const cards = [...el.querySelectorAll<HTMLElement>(':scope > .map-room > .world > .dept')];
+      const set = cards.map(card => card.style.height);
+      for (const card of cards) card.style.height = 'auto';
+      const most = Math.max(0, ...cards.map(card => card.offsetHeight));
+      cards.forEach((card, i) => (card.style.height = set[i]!));
+      setNeed(most);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = guardedResizeObserver(measure, 'map-cards');
+    for (const part of el.querySelectorAll(':scope > .map-room > .world > .dept .edge-in > *')) observer.observe(part);
+    return () => observer.disconnect();
+  }, [box, org, language]);
+  return need;
+}
+
+/* How tall the people chips of the most words need to be, in the whole-company row and among the department people: each
+   chip is left to its words for a moment and measured in the layout's own pixels, and given its height back before anything
+   is drawn. Measured as the company or the words change, and when the words of a chip take another height on their own, as
+   its fonts arrive. */
+function useChipNeed(box: { current: HTMLDivElement | null }, org: Org | null, language: string): ChipNeed {
+  const [need, setNeed] = useState<ChipNeed>({});
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || !org) return;
+    const tallest = (list: string) => {
+      const chips = [...el.querySelectorAll<HTMLElement>(`:scope > .map-room > .world > ${list} > li`)];
+      const set = chips.map(chip => chip.style.height);
+      for (const chip of chips) chip.style.height = 'auto';
+      const most = Math.max(0, ...chips.map(chip => parseFloat(getComputedStyle(chip).height) || 0));
+      chips.forEach((chip, i) => (chip.style.height = set[i]!));
+      return most;
+    };
+    const measure = () => {
+      const top = tallest('.chips'), dept = tallest('.dept-chips');
+      setNeed(was => (was.top === top && was.dept === dept ? was : { top, dept }));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = guardedResizeObserver(measure, 'map-people');
+    for (const words of el.querySelectorAll(':scope > .map-room > .world > :is(.chips, .dept-chips) .chip .edge-in > span')) observer.observe(words);
+    return () => observer.disconnect();
+  }, [box, org, language]);
+  return need;
+}
+
+/* On a phone the map shows its cards and chips only between the screen's bar and the bars along its bottom, FLOAT_GAP clear
+   of each, as a department's schema and tree do there: what scrolls under them goes out of sight, and the dots run on under
+   the glass. Measured as the map opens, as its bars come, go or grow, and as the screen changes size. bars: what says which
+   bars stand now. */
+function useMapRoom(box: { current: HTMLDivElement | null }, bars: string): CSSProperties | undefined {
+  const [room, setRoom] = useState<{ top: number; bottom: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => {
+      const phone = el.clientWidth > 0 && el.clientWidth <= CANVAS_NARROW;
+      const free = phone ? freeRoom(el, el.querySelectorAll(MAP_BARS), { left: 0, width: el.clientWidth }) : null;
+      const next = free && { top: TOP_BAR + FLOAT_GAP, bottom: el.clientHeight - free.y1 };
+      setRoom(was => (was?.top === next?.top && was?.bottom === next?.bottom ? was : next));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = guardedResizeObserver(measure, 'map-room');
+    observer.observe(el);
+    for (const bar of el.querySelectorAll(MAP_BARS)) observer.observe(bar);
+    return () => observer.disconnect();
+  }, [box, bars]);
+  return room ? ({ '--map-top': `${room.top}px`, '--map-bottom': `${room.bottom}px` } as CSSProperties) : undefined;
+}
+
+/* Design on #1597: a map that fits opens no larger than it is drawn, and Show everything shows it so too. */
+export const OPEN_MAX_K = 1, WHOLE_MAX_K = 1;
+
+/* Where the map stands in the free room of its canvas, b its bounds in the world and hub the middle of its hub across.
+   Whole, as large as it fits up to its cap and centred on the whole layout, when Show everything asks for it or when it fits
+   so at a readable size; otherwise readable with the hub in the middle across (Design's decision 2 on #1596, for #1597), from
+   its top when it is taller than the room. readable: the least zoom that is readable. */
+export function mapView(room: Box, b: Box, whole: boolean, readable = MAP_READABLE_K, hub = (b.x0 + b.x1) / 2): { k: number; x: number; y: number } {
+  const w = Math.max(1, room.x1 - room.x0), h = Math.max(1, room.y1 - room.y0), bw = b.x1 - b.x0, bh = b.y1 - b.y0;
+  const fitK = Math.min(w / bw, h / bh, whole ? WHOLE_MAX_K : OPEN_MAX_K);
+  const fits = whole || fitK >= readable, k = fits ? fitK : readable;
+  const y = bh * k <= h + 0.5 ? room.y0 + (h - bh * k) / 2 - b.y0 * k : room.y0 - b.y0 * k;
+  return { k, x: room.x0 + w / 2 - (fits ? (b.x0 + b.x1) / 2 : hub) * k, y };
+}
+
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
 type Props = { me: Me; windowOpen: boolean; leftPanelOpen?: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void; onOpenDecisions?(personId: string): void; onHome?: () => void };
 
@@ -557,9 +671,11 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const [kept] = useState(() => keptView(key));
   const [minZoom, setMinZoom] = useState(() => Math.min(MIN_K, kept?.k ?? MIN_K));
   const box = useRef<HTMLDivElement>(null);
-  const { view, setView, zoomAt, handlers, dragged, touched } = usePanZoom(box, org, { min: minZoom, max: MAX_K }, kept ?? undefined);
+  /* What the hand scrolls: the map as it stands, between the bars floating over it. */
+  const edges = useRef<() => Edges | null>(() => null);
+  const { view, setView, zoomAt, handlers, dragged, touched } = usePanZoom(box, org, { min: minZoom, max: MAX_K }, kept ?? undefined, () => edges.current());
   /* Whether the view is the person's own: kept from before, shown with Fit, or dragged or zoomed. Only the person moves it
-     then; until then the map shows all of itself. */
+     then; until then the map shows all of itself, or readable. */
   const chose = useRef(!!kept);
   const mine = useCallback(() => chose.current || touched(), [touched]);
   /* The view the map flew into a department from, to stand at again when the department closes. */
@@ -580,7 +696,11 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   }, [layout.bends, bending]);
   /* The department whose card the pointer or the keyboard is on, so the hub shows its turn. */
   const [pointed, setPointed] = useState<string | null>(null);
-  const arr = useMemo(() => (org ? arrangeMap(org, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed, bends) : null), [org, layout.placed, moving, bends]);
+  /* Every card of the map is as tall as the words of the card that has the most need, and every people chip of a row as
+     the words of the chip that has the most. */
+  const need = useCardNeed(box, org, language);
+  const chipNeed = useChipNeed(box, org, language);
+  const arr = useMemo(() => (org ? arrangeMap(org, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed, bends, need, chipNeed) : null), [org, layout.placed, moving, bends, need, chipNeed]);
   /* Pulses and Fit read the map as it stands, without waiting for it to settle. */
   const arrRef = useRef(arr);
   arrRef.current = arr;
@@ -651,20 +771,30 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     });
   }, [org, arr, fire]);
 
-  /* Show everything. */
-  const fit = useCallback(() => {
-    const el = box.current;
-    const shown = arrRef.current;
-    if (!el || !el.clientWidth || !org || !shown || inside) return;
-    const { x0, y0, x1, y1 } = arrangedBounds(shown, org);
-    /* The header floats over the top of the map and the zoom over the bottom. */
-    const padX = 32, padTop = 76, padBottom = 72;
-    const { left, width } = canvasSpace(el.clientWidth, leftPanelOpen ? LEFT_PANEL_COVER : 0, windowOpen ? WINDOW_W : 0);
-    const room = Math.max(1, el.clientHeight - padTop - padBottom);
-    const k = Math.min((width - padX * 2) / (x1 - x0), room / (y1 - y0), 1.15);
-    setMinZoom(Math.min(MIN_K, k));
-    setView({ k, x: left + (width - (x1 - x0) * k) / 2 - x0 * k, y: padTop + (room - (y1 - y0) * k) / 2 - y0 * k, smooth: true });
-  }, [org, windowOpen, leftPanelOpen, inside, setView]);
+  /* The room of the map that what floats over it leaves free, side px in from the sides of what the panels leave. */
+  const roomOf = useCallback(
+    (side: number) => {
+      const el = box.current;
+      if (!el || !el.clientWidth) return null;
+      const space = canvasSpace(el.clientWidth, leftPanelOpen ? LEFT_PANEL_COVER : 0, windowOpen ? WINDOW_W : 0);
+      return freeRoom(el, el.querySelectorAll(MAP_BARS), space, { ...MAP_ROOM, side });
+    },
+    [windowOpen, leftPanelOpen],
+  );
+  edges.current = () => {
+    const shown = arrRef.current, room = roomOf(SIDE_GAP);
+    return room && org && shown && !inside ? { content: arrangedBounds(shown, org), room } : null;
+  };
+
+  /* Show everything when whole; otherwise as the map opens, readable. */
+  const fit = useCallback((whole: boolean) => {
+    const shown = arrRef.current, room = roomOf(FIT_SIDE);
+    if (!room || !org || !shown || inside) return;
+    const phone = box.current!.clientWidth <= CANVAS_NARROW;
+    const v = mapView(room, arrangedBounds(shown, org), whole, phone ? PHONE_MAP_READABLE_K : MAP_READABLE_K, shown.hub.x + HUB);
+    setMinZoom(Math.min(MIN_K, v.k));
+    setView({ ...v, smooth: true });
+  }, [org, inside, setView, roomOf]);
   const fitRef = useRef(fit);
   fitRef.current = fit;
 
@@ -674,15 +804,19 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     back.current = null;
   }, [inside, setView]);
 
-  /* Until the view is the person's own, the map shows all of itself: as it opens, as the arrangement comes from the server or
-     is put back, and as the screen changes size. Live changes of the company, the orchestrator's window, the left panel and
-     moving a block leave the view alone. */
+  /* Until the view is the person's own, the map shows all of itself, or as much as it shows readable where all of it would be
+     too small to read: as it opens, as the arrangement comes from the server or is put back, as its cards and people chips
+     grow with their words, and as the screen changes size. Live changes of the company, the orchestrator's window, the left
+     panel and moving a block leave the view alone. */
   const shown = !!arr;
+  const putBack = Object.keys(layout.placed).length > 0 || Object.keys(layout.bends).length > 0 || layout.failed;
+  const roomStyle = useMapRoom(box, `${shown}|${windowOpen}|${putBack}`);
+  const cardH = arr?.depts[0]?.h ?? 0, chipH = `${arr?.top[0]?.h ?? 0}:${arr?.people.chips[0]?.h ?? 0}`;
   usePauseHiddenMap(box, inside, shown);
   useEffect(() => {
     if (!shown || inside) return;
     const auto = () => {
-      if (!mine() && !back.current) fitRef.current();
+      if (!mine() && !back.current) fitRef.current(false);
     };
     auto();
     const el = box.current;
@@ -690,7 +824,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     const ro = guardedResizeObserver(auto, 'map');
     ro.observe(el);
     return () => ro.disconnect();
-  }, [shown, inside, layout.version, mine]);
+  }, [shown, inside, layout.version, mine, cardH, chipH]);
 
   /* The person's own view stays for the next visit; the flight into a department is not theirs. */
   useEffect(() => {
@@ -722,7 +856,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
 
   if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
   if (failure !== null) return <p className="alert" role="alert">{errorText(t, failure)}</p>;
-  if (!org || !arr) return <div className="map" aria-busy="true" />;
+  if (!org || !arr) return <div className="map" aria-busy="true"><MapVersion /></div>;
 
   const depts = org.departments;
   const sub = org.orchestrator?.subscription ?? null;
@@ -814,148 +948,151 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
 
   return (
     <div className="map" ref={box} inert={inside} aria-hidden={inside || undefined} {...handlers}>
-      <div
-        className="world"
-        style={{
-          width: W,
-          height: H,
-          transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`,
-          transition: still || !view.smooth ? 'none' : view.smooth === 'fly' ? `transform ${FLY_MS / 1000}s cubic-bezier(.55,0,.25,1)` : 'transform .8s cubic-bezier(.3,.7,.2,1)',
-        }}
-      >
-        <div className="halo" style={{ left: mx - HALO, top: my - HALO, width: 2 * HALO, height: 2 * HALO }} />
-        {/* --k: how far the map is zoomed, for what has to stay one size on the screen and take the pointer there. */}
-        <svg className="wires" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true" style={{ '--k': view.k } as CSSProperties}>
-          <PeopleBridgeMasks placed={placed} prefix={wirePrefix} />
-          <Roads arr={arr} bends={bent.flatMap(l => bends[l.key]!)} />
-          {workWays.map(w => (
-            <path key={w.id} className={`tr live ${w.tone}`} d={toD(w.pts)} data-work={w.id} />
-          ))}
-          {asked.map(w => (
-            <g key={w.key} mask={peopleMask(placed, wirePrefix, w.id)}>
-              <path className="tr live a" d={toD(w.pts)} data-ask={w.id} />
-            </g>
-          ))}
-          <LineHits lines={arr.lines} title={t.map.addBend} onHit={hitLine} />
-        </svg>
+      <div className="map-room" style={roomStyle}>
+        <div
+          className="world"
+          style={{
+            width: W,
+            height: H,
+            transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`,
+            transition: still || !view.smooth ? 'none' : view.smooth === 'fly' ? `transform ${FLY_MS / 1000}s cubic-bezier(.55,0,.25,1)` : 'transform .8s cubic-bezier(.3,.7,.2,1)',
+          }}
+        >
+          <div className="halo" style={{ left: mx - HALO, top: my - HALO, width: 2 * HALO, height: 2 * HALO }} />
+          {/* --k: how far the map is zoomed, for what has to stay one size on the screen and take the pointer there. */}
+          <svg className="wires" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true" style={{ '--k': view.k } as CSSProperties}>
+            <PeopleBridgeMasks placed={placed} prefix={wirePrefix} />
+            <Roads arr={arr} bends={bent.flatMap(l => bends[l.key]!)} />
+            {workWays.map(w => (
+              <path key={w.id} className={`tr live ${w.tone}`} d={toD(w.pts)} data-work={w.id} />
+            ))}
+            {asked.map(w => (
+              <g key={w.key} mask={peopleMask(placed, wirePrefix, w.id)}>
+                <path className="tr live a" d={toD(w.pts)} data-ask={w.id} />
+              </g>
+            ))}
+            <LineHits lines={arr.lines} title={t.map.addBend} onHit={hitLine} />
+          </svg>
 
-        <div className="map-live" aria-hidden="true" style={{ '--k': view.k } as CSSProperties}>
-          {workWays.map(w => (
-            <MapWayOverlay key={w.id} pts={w.pts} speed={PULSE_SPEED} tone={w.tone} still={still} k={view.k} />
-          ))}
-          {asked.map(w => (
-            <MapWayOverlay key={w.key} pts={w.pts} speed={PULSE_SPEED} tone="a" still={still} k={view.k} gaps={gapsFor(placed, w.id)} />
-          ))}
-          {shots.map(s => (
-            <MapPulse key={s.key} pts={s.pts} speed={s.speed} once tone={s.tone} gaps={gapsFor(placed, s.personId)} mask={peopleMask(placed, wirePrefix, s.personId)} />
-          ))}
-        </div>
-
-        <PeopleRow org={org} people={topPeople} cards={arr.top} onOpen={openDecisions} />
-        <DeptPeopleChips org={org} chips={placed.chips} byId={peopleById} onOpen={openDecisions} />
-
-        {company ? (
-          <button className={`${hubClass}${windowOpen ? ' on' : ''}`} type="button" style={hubPlace} aria-label={t.map.openOrchestrator} onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
-            {hubArt}
-          </button>
-        ) : (
-          <div className={hubClass} style={hubPlace}>
-            {hubArt}
+          <div className="map-live" aria-hidden="true" style={{ '--k': view.k } as CSSProperties}>
+            {workWays.map(w => (
+              <MapWayOverlay key={w.id} pts={w.pts} speed={PULSE_SPEED} tone={w.tone} still={still} k={view.k} />
+            ))}
+            {asked.map(w => (
+              <MapWayOverlay key={w.key} pts={w.pts} speed={PULSE_SPEED} tone="a" still={still} k={view.k} gaps={gapsFor(placed, w.id)} />
+            ))}
+            {shots.map(s => (
+              <MapPulse key={s.key} pts={s.pts} speed={s.speed} once tone={s.tone} gaps={gapsFor(placed, s.personId)} mask={peopleMask(placed, wirePrefix, s.personId)} />
+            ))}
           </div>
-        )}
 
-        {depts.length === 0 && (
-          <div className="start" style={{ left: mx - 260, top: hub.y + hub.h + GAP }}>
-            <p>{t.map.emptyHint}</p>
-            {company && (
-              <button className="btn" type="button" onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
-                {t.map.build}
-              </button>
-            )}
-          </div>
-        )}
+          <PeopleRow org={org} people={topPeople} cards={arr.top} onOpen={openDecisions} />
+          <DeptPeopleChips org={org} chips={placed.chips} byId={peopleById} onOpen={openDecisions} />
 
-        {depts.map((d: Department, i) => (
-          <button
-            key={d.id}
-            type="button"
-            className={`${deptClass(d, flashing.has(d.id))}${turnClass(turns.length > 0, turnOf.has(d.id))}`}
-            style={{ left: spots[i]!.x, top: spots[i]!.y, width: spots[i]!.w, height: spots[i]!.h }}
-            onClick={() => enter(spots[i]!, d.id)}
-            onMouseEnter={() => setPointed(d.id)}
-            onMouseLeave={() => setPointed(p => (p === d.id ? null : p))}
-            onFocus={() => setPointed(d.id)}
-            onBlur={() => setPointed(p => (p === d.id ? null : p))}
-          >
-            <Edge cut={12} corner halo>
-              <span className="row1">
-                <b className="dname">{deptLabel(t, d)}</b>
-                <span className="cnt" title={t.map.deptAgents}>
-                  <b>{d.agents.working}</b>/{d.agents.total}
-                </span>
-              </span>
-              <span className="row2">
-                <span className="role">{d.roleCode}</span>
-                {deptDetail(t, d) && <span className="detail">{deptDetail(t, d)}</span>}
-              </span>
-              <Cells employees={d.employees} onChange={() => flash(d.id)} />
-              {d.current ? (
-                <span className="now task">
-                  <i />
-                  <span>
-                    #{d.current.number} {d.current.title}
-                  </span>
-                </span>
-              ) : (
-                d.agents.total === 0 && (
-                  <span className="now">
-                    <i />
-                    <span>{t.map.noAgents}</span>
-                  </span>
-                )
+          {company ? (
+            <button className={`${hubClass}${windowOpen ? ' on' : ''}`} type="button" style={hubPlace} aria-label={t.map.openOrchestrator} onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
+              {hubArt}
+            </button>
+          ) : (
+            <div className={hubClass} style={hubPlace}>
+              {hubArt}
+            </div>
+          )}
+
+          {depts.length === 0 && (
+            <div className="start" style={{ left: mx - 260, top: hub.y + hub.h + GAP }}>
+              <p>{t.map.emptyHint}</p>
+              {company && (
+                <button className="btn" type="button" onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
+                  {t.map.build}
+                </button>
               )}
-              {turnOf.has(d.id) && <DeptTurn turn={turnOf.get(d.id)!} />}
-            </Edge>
-            {deptAnimates(d, flashing.has(d.id)) && <FrameBreathe w={spots[i]!.w} h={spots[i]!.h} cut={12} corner />}
-          </button>
-        ))}
+            </div>
+          )}
 
-        {arr.blocks.map(b => (
-          <Grip
-            key={b.key}
-            label={t.map.moveBlock(blockName(b.key))}
-            corner={gripCorner(b.key, b.rect)}
-            from={b.rect}
-            k={view.k}
-            onMove={at => setMoving(at && { key: b.key, at })}
-            onPut={at => {
-              setMoving(null);
-              layout.place(b.key, at);
-            }}
-            onTap={tapAt}
-          />
-        ))}
+          {depts.map((d: Department, i) => (
+            <button
+              key={d.id}
+              type="button"
+              className={`${deptClass(d, flashing.has(d.id))}${turnClass(turns.length > 0, turnOf.has(d.id))}`}
+              style={{ left: spots[i]!.x, top: spots[i]!.y, width: spots[i]!.w, height: spots[i]!.h }}
+              onClick={() => enter(spots[i]!, d.id)}
+              onMouseEnter={() => setPointed(d.id)}
+              onMouseLeave={() => setPointed(p => (p === d.id ? null : p))}
+              onFocus={() => setPointed(d.id)}
+              onBlur={() => setPointed(p => (p === d.id ? null : p))}
+            >
+              <Edge cut={12} corner halo>
+                <span className="row1">
+                  <b className="dname">{deptLabel(t, d)}</b>
+                  <span className="cnt" title={t.map.deptAgents}>
+                    <b>{d.agents.working}</b>/{d.agents.total}
+                  </span>
+                </span>
+                <span className="row2">
+                  <span className="role">{d.roleCode}</span>
+                  {deptDetail(t, d) && <span className="detail">{deptDetail(t, d)}</span>}
+                </span>
+                <Cells employees={d.employees} onChange={() => flash(d.id)} />
+                {d.current ? (
+                  <span className="now task">
+                    <i />
+                    <span>
+                      #{d.current.number} {d.current.title}
+                    </span>
+                  </span>
+                ) : (
+                  d.agents.total === 0 && (
+                    <span className="now">
+                      <i />
+                      <span>{t.map.noAgents}</span>
+                    </span>
+                  )
+                )}
+                {turnOf.has(d.id) && <DeptTurn turn={turnOf.get(d.id)!} />}
+              </Edge>
+              {deptAnimates(d, flashing.has(d.id)) && <FrameBreathe w={spots[i]!.w} h={spots[i]!.h} cut={12} corner />}
+            </button>
+          ))}
 
-        {bent.flatMap(l =>
-          bends[l.key]!.map((p, i) => (
-            <Bend
-              key={`${l.key}:${i}`}
-              label={t.map.bend(blockName(l.ends[0]), blockName(l.ends[1]))}
-              at={p}
+          {arr.blocks.map(b => (
+            <Grip
+              key={b.key}
+              label={t.map.moveBlock(blockName(b.key))}
+              corner={gripCorner(b.key, b.rect)}
+              from={b.rect}
               k={view.k}
-              align={alignOn(l, i)}
-              onMove={at => setBending(at && { line: l.key, i, at })}
+              onMove={at => setMoving(at && { key: b.key, at })}
               onPut={at => {
-                setBending(null);
-                layout.bend(l.key, (layout.bends[l.key] ?? []).map((q, j) => (j === i ? at : q)));
+                setMoving(null);
+                layout.place(b.key, at);
               }}
-              onRemove={() => {
-                setBending(null);
-                layout.bend(l.key, (layout.bends[l.key] ?? []).filter((_, j) => j !== i));
-              }}
+              onTap={tapAt}
             />
-          )),
-        )}
+          ))}
+
+          {bent.flatMap(l =>
+            bends[l.key]!.map((p, i) => (
+              <Bend
+                key={`${l.key}:${i}`}
+                label={t.map.bend(blockName(l.ends[0]), blockName(l.ends[1]))}
+                at={p}
+                k={view.k}
+                align={alignOn(l, i)}
+                onMove={at => setBending(at && { line: l.key, i, at })}
+                onPut={at => {
+                  setBending(null);
+                  layout.bend(l.key, (layout.bends[l.key] ?? []).map((q, j) => (j === i ? at : q)));
+                }}
+                onRemove={() => {
+                  setBending(null);
+                  layout.bend(l.key, (layout.bends[l.key] ?? []).filter((_, j) => j !== i));
+                }}
+              />
+            )),
+          )}
+        </div>
+        <MapVersion off={inside} />
       </div>
 
       <ZoomBar
@@ -963,7 +1100,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
         onZoom={f => zoomAt(f)}
         onFit={() => {
           chose.current = true;
-          fit();
+          fit(true);
         }}
       />
       {(arranged || layout.failed) && (

@@ -9,7 +9,7 @@ import { agentState } from '../conversation/state.js';
 import { insertTurn, keepLetter, openTypedTurn, pump, turnRefused } from '../conversation/queue.js';
 import { type TurnMessage } from '../conversation/turn-types.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
-import { limitUntil, refusedLimits } from '../conversation/limits.js';
+import { modelLimitUntil, refusedLimits } from '../conversation/limits.js';
 import { conversationOf, liveSubscription } from '../conversation/placement.js';
 import { onAgent } from '../conversation/line.js';
 import { GONE_ALONG } from '../conversation/constants.js';
@@ -35,6 +35,7 @@ import { wakeNotice } from './notification.js';
 import { notStep } from '../tools/steps.js';
 import { releaseJobPhones } from '../phones/queue.js';
 import { callEnded, oneShotStageNote } from '../calls/calls.js';
+import { uncheckedLines, type UncheckedItem } from './unchecked.js';
 
 type Agent = typeof agents.$inferSelect;
 
@@ -43,7 +44,7 @@ type RouteKind = ReturnType<typeof routeSnapshot>['resultKind'];
 /* What finishes the task for whoever holds it, and what to do when that cannot happen. */
 function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: string; stuck: string } {
   if (task.assigneeAgentId === agentId && kind === 'turnkey') return {
-    finish: 'carry its task scope end to end alone on its task branch, checking what you touched with local tests, as the full run happens once at release; it goes through no echelons and nobody else is called onto it; close it with report done true and the evidence',
+    finish: 'carry its task scope end to end alone on its task branch, checking what you touched with local tests, as the full run happens once at release; it goes through no echelons and nobody else is called onto it; close it with report done true and the evidence, naming in turnkey the exact commit you checked and fast-forwarded the turn branch to and the commit your branch started from',
     stuck: 'use blocked',
   };
   if (task.assigneeAgentId === agentId && kind === 'document') return {
@@ -247,6 +248,12 @@ export async function wakeLeftBehind(ctx: Ctx, now = new Date()): Promise<number
 
 /* Requests reach their current addressee: a person through the orchestrator's plain words, or an internal stuck resolver
    directly. Typed into its turn when it works, else its own turn, one per request. */
+/* What a release brings that no check covers: people see it next to Approve, apart from these words, so the explanation says
+   in plain words that it is there and never stands in for it. */
+const uncheckedNote = (unchecked: UncheckedItem[] | null): string => unchecked?.length
+  ? `\n\nNext to Approve, Hornhoof shows people what this release brings that no check covers (${unchecked.length}):\n${uncheckedLines(unchecked).map(line => `- ${line}`).join('\n')}\nSay in plain words that the card lists it and that they approve it only if they accept each item.`
+  : '';
+
 async function explanationText(ctx: Ctx, w: Wake, request: typeof requests.$inferSelect, asker: string, task: Task): Promise<string | null> {
   const ref = `#${task.number} "${task.title}"`;
   let text: string;
@@ -260,7 +267,7 @@ async function explanationText(ctx: Ctx, w: Wake, request: typeof requests.$infe
   } else {
     const what = request.kind === 'stuck'
       ? `Hornhoof stopped waking ${asker} on ${ref} and waits for people to say how it goes on (request ${request.id}). Hornhoof noted: ${request.text}`
-      : `${asker} asks people on ${ref} (request ${request.id}, a ${request.kind}):\n\n${quote(request.text)}`;
+      : `${asker} asks people on ${ref} (request ${request.id}, a ${request.kind}):\n\n${quote(request.text)}${uncheckedNote(request.unchecked)}`;
     text = `${what}\n\nBefore a person answers, find out what it needs: read the task with "task", and ask ${asker} with "message_employee" when its words are not enough. ` +
       `Resolve ordinary work you can handle using your standing authority. If the question still needs the person's own answer, use explain_request with request ${request.id} in the recipient's language. ` +
       'Say what the work is for, what they need to supply and what each choice changes. Preserve any required human decision, including the CEO\'s yes for an irreversible deletion.';
@@ -593,10 +600,11 @@ async function handQueuedToFree(ctx: Ctx, agent: Agent, task: Task, w: Wake): Pr
 
 const mayCheckTask = (task: Task): boolean => ['open', 'working', 'review'].includes(task.status) && !task.externalWait && !task.paused;
 
-async function planLimitUntil(db: Ctx['db'], subscriptionId: string | null): Promise<string | null> {
+/* Until when the plan the turn ran on is at its limit for its agent's model. */
+async function planLimitUntil(db: Ctx['db'], subscriptionId: string | null, agentId: string): Promise<string | null> {
   if (!subscriptionId) return null;
-  const [sub] = await db.select({ limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt }).from(subscriptions).where(eq(subscriptions.id, subscriptionId));
-  return sub ? limitUntil(sub.limits, sub.limitsUpdatedAt) : null;
+  const [sub] = await db.select({ limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt, model: agents.model }).from(subscriptions).leftJoin(agents, eq(agents.id, agentId)).where(eq(subscriptions.id, subscriptionId));
+  return sub ? modelLimitUntil(sub, sub.model) : null;
 }
 
 async function hasOpenTaskWork(db: Ctx['db'], task: Task): Promise<boolean> {
@@ -704,7 +712,7 @@ async function checkHeld(ctx: Ctx, job: HeldJob, task: Task, worked: boolean): P
   if (await taskMovedInTurn(db, agentId, task, job.startedAt)) return;
   /* A turn that ended at the plan's limit did not stand still: another of its role on another plan takes the work over,
      or the agent goes on once the limit starts over. */
-  const until = await planLimitUntil(db, job.subscriptionId);
+  const until = await planLimitUntil(db, job.subscriptionId, agentId);
   if (until) return resumeAtPlanLimit(ctx, agentId, task, until);
   /* Turns that keep breaking as they start would only break again, and so would turns that keep failing later on: whoever
      gave the task out hears of it, once. So does a turn that did not go out for the length of its instructions, at once,
@@ -787,21 +795,64 @@ async function keepsBreaking(ctx: Ctx, jobId: string): Promise<boolean> {
   return Boolean(row?.job.agentId && await keptBreaking(ctx, row.job.agentId, row.task, row.job));
 }
 
-/* The node stops the program and reports the job as cancelled. A node that is away cannot, so the job ends here. */
+/* How long a node may take to report the end of a turn Stop called off before Hornhoof closes the turn itself (#1695). This
+   is cleanup after a cancel, the one wait on time here (note #71): a node stops its program within seconds, and a node that
+   never reports, being old or stuck, must not hold the employee's queue. */
+export const CANCEL_END_WAIT_MS = 30_000;
+
+/* When this server asked a node to end each turn, by its clock. */
+const cancelsAsked = new WeakMap<Ctx, Map<string, number>>();
+function askedOf(ctx: Ctx): Map<string, number> {
+  let asked = cancelsAsked.get(ctx);
+  if (!asked) cancelsAsked.set(ctx, (asked = new Map()));
+  return asked;
+}
+
+/* The node stops the program and reports the job as cancelled. A node that is away cannot, so the job ends here; one that
+   does not report in CANCEL_END_WAIT_MS gets its job ended by closeUnendedCancels the same way. */
 export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
   const job = await requestCancellation(ctx, jobId);
   if (!job) return;
   await releaseJobPhones(ctx, jobId);
   const node = identityOf(job.sub, job.job.nodeId, job.job.builtinMachine, ownBuiltin(ctx.config));
-  if (node && ctx.hub.send(node, { type: 'job.cancel', jobId })) return;
+  if (node && ctx.hub.send(node, { type: 'job.cancel', jobId })) {
+    askedOf(ctx).set(jobId, Date.now());
+    return;
+  }
+  await closeCancelled(ctx, jobId, job.job.companyId);
+}
+
+/* The turn Stop called off ends here as stopped, as its node reports it; a turn that ended meanwhile is left as it is, so a
+   late report and this never close it twice. */
+async function closeCancelled(ctx: Ctx, jobId: string, companyId: string): Promise<void> {
   const [ended] = await ctx.db
     .update(jobs)
     .set({ status: 'failed', error: 'cancelled', result: 'Stopped.', finishedAt: new Date() })
     .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running')))
     .returning({ id: jobs.id });
   if (!ended) return;
-  await publishWorking(ctx, job.job.companyId);
+  await publishWorking(ctx, companyId);
   await afterJob(ctx, jobId);
+}
+
+/* A turn Stop called off whose node has not reported its end CANCEL_END_WAIT_MS after the ask ends as if no node were there,
+   and the next waiting turn goes out. One this server did not ask about, as after a restart, counts from when it is first
+   seen here. */
+export async function closeUnendedCancels(ctx: Ctx, now: Date): Promise<void> {
+  const open = await ctx.db.select({ id: jobs.id, companyId: jobs.companyId }).from(jobs).where(and(eq(jobs.status, 'running'), eq(jobs.error, 'cancelled')));
+  const asked = keepAsked(askedOf(ctx), open.map(job => job.id), now.getTime());
+  for (const job of open) {
+    if (now.getTime() - asked.get(job.id)! < CANCEL_END_WAIT_MS) continue;
+    asked.delete(job.id);
+    await closeCancelled(ctx, job.id, job.companyId);
+  }
+}
+
+/* The asks of turns still called off, each from when it was asked or first seen; the asks of turns that ended go. */
+function keepAsked(asked: Map<string, number>, open: string[], now: number): Map<string, number> {
+  for (const id of [...asked.keys()]) if (!open.includes(id)) asked.delete(id);
+  for (const id of open) if (!asked.has(id)) asked.set(id, now);
+  return asked;
 }
 
 /* Keep Stop before contacting the node: a delayed stream or completion must not undo the person's request. */

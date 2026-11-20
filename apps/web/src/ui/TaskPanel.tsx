@@ -1,15 +1,16 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { HIDDEN } from '@hornhoof/protocol/redaction';
-import { errorText, useLanguage, useT } from '../i18n';
+import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useOrg } from '../org';
 import { routePath } from '../routes';
-import { placeName, useGoals, usePipelines, useTask } from '../tasks';
+import { knownLine, knownSubtasks, placeName, useGoals, usePipelines, useTask } from '../tasks';
 import { graphPath } from '../tracker';
 import { humanStatus, isClosed } from '../task-tree';
-import type { GoalView, Org, TaskDetail, TaskStatus, WaitingRequest } from '../types';
+import type { GoalView, Org, TaskDetail, TaskLine, TaskStatus, WaitingRequest } from '../types';
 import { Field } from './Field';
 import { useLoadFailure } from './LoadFailure';
+import { Busy, Hold, Idle, LoadState, useLoad, type Load } from './Loading';
 import { TaskEdit } from './TrackerForms';
 import { dueText, sinceSeconds, spanText } from './tracker-words';
 import { FoldedMarkdown, Markdown } from './Markdown';
@@ -156,7 +157,7 @@ export function DueDay({ due }: { due: { text: string; late: boolean } }) {
 }
 
 /* Who answers for it and who does it, its pipeline and its due day with how long it is in its status, a name beside each. */
-function CardFacts({ task, status }: { task: TaskDetail; status: ReturnType<typeof humanStatus> }) {
+function CardFacts({ task, status }: { task: TaskLine; status: ReturnType<typeof humanStatus> }) {
   const t = useT();
   const { language } = useLanguage();
   const { pipelines } = usePipelines(!!task.pipelineId);
@@ -341,7 +342,7 @@ function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: 
         setView(next);
       }} onClose={closeMenu} onOpen={onOpen} onChanged={onChanged} waiting={waiting} />
       <CardFacts task={task} status={status} />
-      {leads.onGraph && <div className="tp-acts"><button className="gbtn" type="button" onClick={() => leads.onGraph?.({ task: task.id })}><span aria-hidden="true">⑂</span>{words.graphFromHere}</button></div>}
+      <GraphFromHere id={task.id} onGraph={leads.onGraph} />
       {task.brief && <p className="tp-brief" dir="auto">{task.brief}</p>}
       {task.body && <FoldedMarkdown text={task.body} />}
       <Subtasks task={task} onOpen={onOpen} />
@@ -485,19 +486,81 @@ export function useEscapeCloses(onClose: () => void, active: boolean): void {
   }, [onClose, active]);
 }
 
-/* kind: where the panel stands, beside the tracker at the end side. */
-export function TaskPanel({ taskId, kind, onClose, onOpen, onHome, onOpenGoal, onGraph, active = true, ...waiting }: { taskId: string; kind?: string; active?: boolean; onHome?: () => void; onClose: () => void; onOpen: (id: string) => void } & Waiting & Leads) {
+/* The way from a card to the graph grown from its task, in the tracker. */
+function GraphFromHere({ id, onGraph }: { id: string; onGraph: Leads['onGraph'] }) {
   const t = useT();
-  const { task, failure: readFailure, load } = useTask(taskId);
-  const failure = useLoadFailure(readFailure);
-  const title = task ? `#${task.number} ${task.title}` : t.tasks.heading;
-  const shown = task && !unavailableFailure(failure);
+  if (!onGraph) return null;
+  return <div className="tp-acts"><button className="gbtn" type="button" onClick={() => onGraph({ task: id })}><span aria-hidden="true">⑂</span>{t.tracker.card.graphFromHere}</button></div>;
+}
+
+const HELD_LINES = ['100%', '92%', '56%'];
+
+/* A task's card while the rest of it comes (style book 1.5, section 4): the title, the status and the facts its row showed are
+   drawn at once and stay; the details after them are held as a tail, with the ring and three idle lines. */
+function HeldTask({ line, load, asksYou, onGraph }: { line: TaskLine; load: Load; asksYou: boolean; onGraph: Leads['onGraph'] }) {
+  const t = useT();
+  const words = t.tracker.card;
+  const status = humanStatus(line, asksYou);
+  const subtasks = knownSubtasks(line.id);
+  const done = subtasks.filter(sub => sub.status === 'done').length;
+  return (
+    <>
+      <header className="tp-head">
+        {(line.goal || line.parentId) && <nav className="tp-path" aria-hidden="true"><ol><li className="tp-path-held"><Idle w="12ch" /></li></ol></nav>}
+        <p className="tp-kind">{line.parentId ? words.kinds.subtask : words.kinds.task}</p>
+        <div className="tp-title"><h2 className="tp-heading" dir="auto">{line.title}</h2><span className="tp-menu-button" aria-hidden="true" /></div>
+        <p className="tp-state"><StatusPill state={STATE_CLASS[status]}>{t.tracker.groups[status]}</StatusPill></p>
+        {line.why && <p className="tp-why" dir="auto">{line.why}</p>}
+        {subtasks.length > 0 && <CardBar done={done} total={subtasks.length} label={t.tracker.list.subtasks(done, subtasks.length)} />}
+      </header>
+      <CardFacts task={line} status={status} />
+      <GraphFromHere id={line.id} onGraph={onGraph} />
+      <Hold load={load} className="tp-tail">
+        <div className="tp-held">
+          <Busy ring={load.ring} words={t.load.task} live={false} />
+          <p>{HELD_LINES.map(w => <span key={w} className="ph-line"><Idle w={w} /></span>)}</p>
+        </div>
+      </Hold>
+    </>
+  );
+}
+
+type PanelProps = { taskId: string; kind?: string; active?: boolean; onHome?: () => void; onClose: () => void; onOpen: (id: string) => void } & Waiting & Leads;
+
+/* What a card shows while its task is not shown: no such task, the row it opened from with its details held, or the ring
+   alone for a card opened with no row read. */
+function NotShown({ line, load, failure, asksYou, onHome, onGraph }: { line: TaskLine | undefined; load: Load; failure: unknown; asksYou: boolean; onHome?: () => void; onGraph: Leads['onGraph'] }) {
+  const t = useT();
+  if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
+  if (line) return <HeldTask line={line} load={load} asksYou={asksYou} onGraph={onGraph} />;
+  return <LoadState load={load} words={t.load.task} />;
+}
+
+/* The task to show once its load is done and the person may see it; until then, nothing. */
+const shownTask = (task: TaskDetail | null | undefined, load: Load, failure: unknown) => (task && load.phase === 'done' && !unavailableFailure(failure) ? task : null);
+
+/* The card's bar: a task or a subtask, and its number, once its row or its details are known. */
+function cardBar(t: Messages, line: TaskLine | null | undefined, task: TaskDetail | null | undefined): string {
+  if (!line) return '';
   const kinds = t.tracker.card.kinds;
+  return t.tracker.card.bar(line.parentId || task?.parent ? kinds.subtask : kinds.task, line.number);
+}
+
+/* kind: where the panel stands, beside the tracker at the end side. */
+export function TaskPanel({ taskId, kind, onClose, onOpen, onHome, onOpenGoal, onGraph, active = true, ...waiting }: PanelProps) {
+  const t = useT();
+  const { task, failure: readFailure, load, cancel } = useTask(taskId);
+  const failure = useLoadFailure(readFailure);
+  const taskLoad = useLoad([{ data: task, failure: readFailure, load, cancel }]);
+  const line = task ?? knownLine(taskId);
+  const title = line ? `#${line.number} ${line.title}` : t.tasks.heading;
+  const shown = shownTask(task, taskLoad, failure);
   useEscapeCloses(onClose, active && !shown);
   return (
-    <PanelFrame label={title} heading={task ? t.tracker.card.bar(task.parentId || task.parent ? kinds.subtask : kinds.task, task.number) : ''} plain busy={!task && failure === null} kind={kind} onClose={onClose}>
-      {failure !== null && (unavailableFailure(failure) ? <RouteUnavailable onHome={onHome} /> : <p className="alert" role="alert">{errorText(t, failure)}</p>)}
-      {shown && <TaskBody key={task.id} task={task} onOpen={onOpen} onClose={onClose} active={active} onChanged={load} waiting={waiting} leads={{ onOpenGoal, onGraph }} />}
+    <PanelFrame label={title} heading={cardBar(t, line, task)} plain kind={kind} onClose={onClose}>
+      {shown && failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      {shown ? <TaskBody key={shown.id} task={shown} onOpen={onOpen} onClose={onClose} active={active} onChanged={load} waiting={waiting} leads={{ onOpenGoal, onGraph }} />
+        : <NotShown line={line} load={taskLoad} failure={failure} asksYou={waiting.requests.some(request => request.canAnswer)} onHome={onHome} onGraph={onGraph} />}
     </PanelFrame>
   );
 }

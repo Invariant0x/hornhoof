@@ -9,11 +9,54 @@ it('reserves a footer row for the version outside the screen and its fixed panel
 });
 
 /* The footer's row is taken from the screen above it, so a footer that comes and goes moves every window and panel fixed
-   there: it hides only for a whole screen, never because a form or a panel opened in one (#1384). */
+   there: it hides only for a whole screen, never because a form or a panel opened in one (#1384). The map shows the version
+   over its own corner instead (#1590). */
 it('hides the version footer only for a whole screen, the map or a phone', () => {
   const hiding = RULES.filter(rule => rule.decls.display === 'none').flatMap(rule =>
     rule.selectors.filter(selector => selector.endsWith('.version-mark')).map(selector => `${rule.media ?? 'any width'}: ${selector}`));
-  expect(hiding).toEqual(['any width: body:has(.dview) .version-mark', '(max-width: 760px): .version-mark']);
+  expect(hiding).toEqual([
+    'any width: .app-layout:has(.map-version) > .version-mark',
+    'any width: body:has(.dview) .version-mark',
+    '(max-width: 760px): .version-mark',
+  ]);
+});
+
+/* Over the map the version is small muted text in the bottom end corner of the room its bars leave free, mirrored right to
+   left, with nothing around it, and a tap goes through it to the map (#1590). The map's bars stand at the start and in the
+   middle in either direction, so none stands in that corner to raise it over (#1622). */
+it('floats the version over the end corner of the map, out of the way of taps', () => {
+  const rules = rulesFor('.map-version');
+  expect(rules.map(rule => rule.media)).toEqual([null]);
+  expect(rules[0]!.decls).toEqual({
+    position: 'absolute', 'inset-block-end': '4px', 'inset-inline-end': '12px', margin: '0', color: 'var(--muted)', 'font-size': '12px',
+    'pointer-events': 'none', 'user-select': 'none',
+  });
+});
+
+/* The zoom of the map, the department and its tree, and the map's Put back over it, stand at the start of the bottom, so a
+   page right to left mirrors them as it mirrors the rest of the layout; left to right they stay where they stood (#1622,
+   #1658). */
+it("stands the canvases' zoom and the map's Put back at the start of the bottom, mirrored right to left", () => {
+  expect(decl('.zoom', 'inset-inline-start')).toBe('16px');
+  expect(decl('.zoom', 'left')).toBeUndefined();
+  expect(rulesFor('.map > .zoom')).toEqual([]);
+  /* The tracker's graph is drawn left to right in either direction, so its zoom stays at the left, by the root. */
+  expect([decl('.tr-canvas > .zoom', 'left'), decl('.tr-canvas > .zoom', 'right')]).toEqual(['16px', 'auto']);
+  expect(decl('.map-arrange', 'inset-inline-start')).toBe('16px');
+  expect(decl('.map-arrange', 'left')).toBeUndefined();
+});
+
+/* The department's line of what happened and its actions follow the zoom along the bottom, and its drawer opens at the start
+   under its name, all mirrored right to left; an agent window keeps its own place, at the left as before (#1658). */
+it("mirrors the department's line, actions and drawer right to left, and leaves a window's place alone", () => {
+  expect(decl('.dview .ticker', 'inset-inline')).toBe('212px var(--ticker-right, 16px)');
+  expect(decl('.dv-acts', 'inset-inline-end')).toBe('16px');
+  expect(decl('.dv-drawer', 'inset-inline-start')).toBe('16px');
+  expect(decl('.dv-drawer', 'inset-inline', '(max-width: 760px)')).toBe('16px');
+  for (const [selector, media] of [['.dview .ticker', null], ['.dv-acts', null], ['.dv-drawer', null], ['.dv-drawer', '(max-width: 760px)']] as const)
+    for (const side of ['left', 'right']) expect(decl(selector, side, media), `${selector} ${side}`).toBeUndefined();
+  expect(decl('.acard', 'left')).toBe('16px');
+  expect(decl('.acard', 'right', '(max-width: 760px)')).toBe('16px');
 });
 
 function paddingRightPx(selector: string): number | undefined {
@@ -84,6 +127,9 @@ it("paints what an agent does from the theme's tokens, and an alarm and the fram
   /* The tree's shared Chip keeps the state badge whole: on one line where it fits, else wrapped inside its frame, and the
      task's words wrap after it. */
   expect(decl('.tview .tv-labs .dept-chip', 'position')).toBe('absolute');
+  /* #1595: a lane moves by the place that holds its chip. */
+  expect(decl('.tview .tv-labs .tv-lane', 'position')).toBe('absolute');
+  expect(decl('.tview .tv-labs .tv-lane', 'left')).toBe('0');
   expect(decl('.ast', 'flex')).toBe('none');
   expect(decl('.ast', 'white-space')).toBe('nowrap');
   expect(decl('.schip .r3 .ast', 'margin-right')).toBe('6px');

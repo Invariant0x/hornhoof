@@ -15,6 +15,8 @@ prepareTemplates();
 const EXTRA = '7'.repeat(40);
 const SIDE = '8'.repeat(40);
 const STRAY = '2'.repeat(40);
+/* The merge on top of the work of task-N after R, as joinedAfterR lays it. */
+const TOP = '6'.repeat(40);
 
 const requireApproval = (f: Awaited<ReturnType<typeof releasing>>) =>
   f.db.insert(approvalPolicies).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, channel: 'commit', mode: 'every' });
@@ -223,11 +225,12 @@ describe('the release step while the turn branch goes on', () => {
 });
 
 describe('whether everything a release brings was checked', () => {
+  /* The person approves the release as it stands, on a card that names what it brings that no check covers. */
   const coverage = async (change: (f: Awaited<ReturnType<typeof releasing>>) => Promise<void> | void) => {
     const f = await releasing();
     const run = await f.fullRun();
-    await f.approve();
     await change(f);
+    await f.approve();
     const result = await f.recordRelease({ runId: run.id });
     expect(result.isError).toBe(false);
     return recorded(result.text);
@@ -335,7 +338,7 @@ describe('the release step with autonomous release on', () => {
   });
 
   /* A member of a turnkey team does its task whole with its own review, security check and tests, and calls no checker:
-     those cover its work, and the merge that joined it to the turn branch with it. */
+     those cover its work, the first-parent line from the commit it named down to where its branch started. */
   it('approves by itself a release that brings turnkey work its holder checked itself, and logs the holder with the checkers', async () => {
     const f = await releasing();
     await autonomous(f);
@@ -350,17 +353,18 @@ describe('the release step with autonomous release on', () => {
     expect(await journal(f)).toEqual([expect.objectContaining({ commitSha: work.head, testRunId: run.id, reviewerName: `${f.reviewer.name}, ${work.holder.name}`, verdictStage: 'review, turnkey' })]);
   });
 
+  /* A merge made on the turn branch is on no first-parent line of a commit a turnkey holder checked: a person sees it too. */
   it.each([
-    ['took in from the turn branch', true],
-    ['was made on, under the merge that joined it', false],
-  ])('still asks a person for a commit pushed straight to the turn branch that turnkey work %s, and logs nothing', async (_how, taken) => {
+    ['took in from the turn branch', true, ''],
+    ['was made on, under the merge that joined it', false, ` ${TOP} is a merge made outside every checked candidate.`],
+  ])('still asks a person for a commit pushed straight to the turn branch that turnkey work %s, and logs nothing', async (_how, taken, join) => {
     const f = await releasing();
     await autonomous(f);
     const work = await turnkeyAfterR(f, { sha: STRAY, taken });
     const run = await f.fullRun({ commit: work.head });
     const result = await f.recordRelease({ commit: work.head, runId: run.id });
     expect(result).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
-    expect(result.text.split('this one brings what was not: ')[1]).toBe(`${STRAY} came in with no accepted candidate.`);
+    expect(result.text.split('this one brings what was not: ')[1]).toBe(`${STRAY} came in with no accepted candidate.${join}`);
     expect(await journal(f)).toEqual([]);
   });
 

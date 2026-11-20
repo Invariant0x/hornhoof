@@ -24,6 +24,7 @@ export * from './phones.js';
 import { PhoneProbe, PhoneList, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke, PhoneReply, PhoneFrame } from './phones.js';
 import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
 import { API_PROTOCOLS, PROVIDER_IDS, type ProviderId } from './providers.js';
+import { SIGNIN_STEPS } from './signin.js';
 export { CHECK_LEASE_MS, checkCapacity, fitsCheck, freeCores, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
 export { TEST_WORKER_BYTES, vitestMemoryWorkers } from './test-workers.js';
 
@@ -103,12 +104,29 @@ const LimitWindow = z.object({
   resetsAt: z.string().max(40).nullable(),
 });
 
-/* Usage windows as the provider reports them, for example five hours and seven days. A complete list names every window
-   the plan has, so one it leaves out is not on the plan; otherwise it tells only what the program said this time. */
-const Limits = z.object({
-  status: z.enum(['allowed', 'warning', 'rejected']),
+const LimitStatus = z.enum(['allowed', 'warning', 'rejected']);
+
+/* The limits of one group of a plan's models, where its provider keeps separate ones, as Antigravity keeps one for Gemini
+   and one for Claude and GPT: its name as the provider gives it, and what the provider says the group holds, in its own
+   words, which a model is matched against. */
+const LimitGroup = z.object({
+  name: z.string().min(1).max(80),
+  about: z.string().max(300).optional(),
+  status: LimitStatus,
   windows: z.array(LimitWindow).max(8),
   complete: z.boolean().optional(),
+});
+export type LimitGroup = z.infer<typeof LimitGroup>;
+
+/* Usage windows as the provider reports them, for example five hours and seven days. A complete list names every window
+   the plan has, so one it leaves out is not on the plan; otherwise it tells only what the program said this time. A plan
+   with model groups has their limits in groups, and its own status and windows speak for the fullest of them, as an older
+   node or server reads a plan: a model of no known group goes by them. */
+const Limits = z.object({
+  status: LimitStatus,
+  windows: z.array(LimitWindow).max(8),
+  complete: z.boolean().optional(),
+  groups: z.array(LimitGroup).max(8).optional(),
 });
 export type Limits = z.infer<typeof Limits>;
 
@@ -119,14 +137,43 @@ const staleSnapshot = (updatedAt: string | Date | null, now: number) => {
   const measuredAt = updatedAt instanceof Date ? updatedAt.getTime() : updatedAt ? Date.parse(updatedAt) : NaN;
   return !Number.isFinite(measuredAt) || now - measuredAt > LIMITS_STALE_MS;
 };
-const rejectionOver = (limits: Limits, windows: Limits['windows']) => limits.status === 'rejected' && limits.windows.some(blockingWindow) && !windows.some(blockingWindow);
+type LimitPart = Pick<Limits, 'status' | 'windows' | 'complete'>;
+const rejectionOver = (limits: LimitPart, windows: Limits['windows']) => limits.status === 'rejected' && limits.windows.some(blockingWindow) && !windows.some(blockingWindow);
+
+/* A plan's or a group's limits as they apply now: expired windows are over. */
+function livePart<T extends LimitPart>(part: T, now: number): T {
+  const windows = part.windows.filter(w => w.resetsAt === null || Number.isNaN(Date.parse(w.resetsAt)) || Date.parse(w.resetsAt) > now);
+  return { ...part, status: rejectionOver(part, windows) ? 'allowed' : part.status, windows, ...(windows.length !== part.windows.length ? { complete: false } : {}) };
+}
 
 /* The last snapshot as it applies now: expired windows are over, and a stale one says nothing current. */
 export function currentLimits(limits: Limits | null, updatedAt: string | Date | null, now = Date.now()): Limits | null {
   if (!limits) return null;
   if (staleSnapshot(updatedAt, now)) return { status: 'allowed', windows: [], complete: false };
-  const windows = limits.windows.filter(w => w.resetsAt === null || Number.isNaN(Date.parse(w.resetsAt)) || Date.parse(w.resetsAt) > now);
-  return { ...limits, status: rejectionOver(limits, windows) ? 'allowed' : limits.status, windows, ...(windows.length !== limits.windows.length ? { complete: false } : {}) };
+  const current = livePart(limits, now);
+  return limits.groups ? { ...current, groups: limits.groups.map(g => livePart(g, now)) } : current;
+}
+
+/* The words of a name, an id or a text, in small letters, without numbers alone. */
+const wordsOf = (text: string): Set<string> => new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length > 1 && !/^\d+$/.test(w)));
+
+/* The group of a model, by the words its provider reports for each group: the one whose own words, those no other group
+   shares, name the model most. None when no group's words name it, two name it as much, or no model is named, so it goes
+   by the plan's fullest window. Neither the number nor the names of the groups matter. */
+export function modelGroup<G extends Pick<LimitGroup, 'name' | 'about'>>(groups: readonly G[] | undefined, model: string | null | undefined): G | null {
+  if (!groups?.length || !model) return null;
+  const said = groups.map(g => wordsOf(`${g.name} ${g.about ?? ''}`));
+  const modelWords = wordsOf(model);
+  const scores = said.map((words, i) => [...words].filter(w => modelWords.has(w) && said.every((other, j) => j === i || !other.has(w))).length);
+  const best = Math.max(...scores);
+  return best > 0 && scores.filter(n => n === best).length === 1 ? groups[scores.indexOf(best)]! : null;
+}
+
+/* The limits a turn on this model goes by: those of its own group, else the plan's, whose fullest window speaks for all. */
+export function limitsForModel(limits: Limits | null, model: string | null | undefined): Limits | null {
+  const group = limits ? modelGroup(limits.groups, model) : null;
+  if (!group) return limits;
+  return { status: group.status, windows: group.windows, ...(group.complete !== undefined ? { complete: group.complete } : {}) };
 }
 
 /* How hard a model thinks, as its program names the level: low, high, max and the like. */
@@ -485,6 +532,9 @@ const NodeMessage = z.discriminatedUnion('type', [
   /* code and line: a sign-in whose program ended early, with its exit code and the last line it said, through the node's
      masks, for its owner to read. */
   z.object({ type: z.literal('login.done'), ok: z.boolean(), error: z.string().max(300).nullable(), code: z.number().int().nullable().optional(), line: z.string().min(1).max(400).nullable().optional(), n: MessageNumber }),
+  /* Where a plan's connection is after its sign-in code, until the plan is ready; failed with why, and the last line its
+     program said through the node's masks. */
+  z.object({ type: z.literal('login.step'), step: z.enum([...SIGNIN_STEPS, 'failed']), error: z.string().max(300).nullable().optional(), line: z.string().min(1).max(400).nullable().optional() }),
   z.object({ type: z.literal('job.started'), jobId: z.string(), n: MessageNumber }),
   /* Which of the turns Hornhoof asked about the node still runs, as its hello would list them. */
   z.object({ type: z.literal('jobs.held'), asked: z.array(z.string()).max(100), held: z.array(z.string()).max(100) }),
@@ -686,6 +736,8 @@ const ServerMessage = z.discriminatedUnion('type', [
   /* Open the plan's sign-in in the login terminal; fresh signs the program out first, for another account. */
   z.object({ type: z.literal('login.start'), fresh: z.boolean() }),
   z.object({ type: z.literal('login.stop') }),
+  /* Check the plan's sign-in on this machine again, saying each step, as after a sign-in in the install window. */
+  z.object({ type: z.literal('login.check') }),
   /* Codex runs on one machine at a time: hold says whether this node is it. */
   z.object({ type: z.literal('cred.lease'), hold: z.boolean() }),
   /* write: the person may type; anyone else watches. agentKey: the agent's folder and session on the node. */

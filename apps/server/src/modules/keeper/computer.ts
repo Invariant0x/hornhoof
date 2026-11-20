@@ -14,6 +14,8 @@ const DEAF_MS = 60_000;
 export const ASK_MS = 10_000;
 /* The updater is alive when it touched its private heartbeat within this. */
 const ALIVE_MS = 30_000;
+/* Tolerate a backward clock step of one updater heartbeat interval. */
+const ALIVE_FUTURE_MS = 5_000;
 /* The grant the keeper holds, and the ones that ended, each until its own end, so none opens the machine twice. */
 export const GRANTS_FILE = 'grants.json';
 const COMPUTER_CONTROL = 'computer-control';
@@ -166,7 +168,7 @@ export class ComputerCarrier {
     try {
       const heartbeat = lstatSync(this.file('alive'));
       const age = this.now().getTime() - heartbeat.mtime.getTime();
-      return heartbeat.isFile() && age >= 0 && age < ALIVE_MS;
+      return heartbeat.isFile() && age >= -ALIVE_FUTURE_MS && age < ALIVE_MS;
     } catch {
       return false;
     }

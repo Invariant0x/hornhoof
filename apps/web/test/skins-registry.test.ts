@@ -3,7 +3,7 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { contrast, CONTRAST_PAIRS, readColor, weakPair } from '../src/skins/contrast';
 import { BUILTIN_SKINS, builtinSkin, DEFAULT_SKIN, ownLook, SHIPPED_FONTS } from '../src/skins/registry';
-import { COLOR_ROLES, COLOR_TOKENS, CUT_TOKEN, declarations, FONT_ROLES, FONT_TOKENS, SKIN_PROPERTIES, type SkinLook } from '../src/skins/roles';
+import { COLOR_ROLES, COLOR_TOKENS, CUT_TOKEN, declarations, FONT_ROLES, FONT_TOKENS, PULSE_TOKEN, SKIN_PROPERTIES, type SkinLook } from '../src/skins/roles';
 import { builtinFile, FILE_FONTS, parseSkin, skinText } from '../src/skins/validate';
 import { RULES } from './css';
 
@@ -176,5 +176,15 @@ describe('one source for the values of a skin', () => {
     expect(set[FONT_TOKENS.mono]).toBe('ui-monospace, monospace');
     expect(set[CUT_TOKEN]).toBe('0.5');
     expect(set['color-scheme']).toBe('light');
+  });
+
+  /* Design #1628: the core of a task worked on now breathes down to the least opacity measured to keep 3:1 on the row, the
+     row under the pointer and the open row in that skin (.45, .46, .42 and .76), with a margin. A person's own skin is not
+     measured, so its core stays full and still. */
+  it('gives the breath of work going on now its weakest core per built-in skin, and a skin of a person\'s own none', () => {
+    const low = (look: SkinLook) => Object.fromEntries(declarations(look))[PULSE_TOKEN];
+    expect(Object.fromEntries(BUILTIN_SKINS.map(skin => [skin.id, low(skin)]))).toEqual({ cyberpunk: '0.55', light: '0.8', matrix: '0.55', pixel: '0.55' });
+    const light = builtinSkin('light')!;
+    expect(low(ownLook({ base: 'light', name: NAMES, scheme: light.scheme, colors: light.colors, fonts: light.fonts, cut: light.cut }))).toBe('1');
   });
 });

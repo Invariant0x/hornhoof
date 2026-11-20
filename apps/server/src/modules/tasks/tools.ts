@@ -26,7 +26,8 @@ import { Text } from './long-text.js';
 import { agentSeesTask as sees, taskLines, type TaskDetail } from './views.js';
 import { taskByRef } from './lookup.js';
 import { editTurn, giveTasks, turnName, turnRows, type Scope } from './turns.js';
-import { recordRelease } from './releases.js';
+import { recordRelease, uncheckedInRelease } from './releases.js';
+import type { UncheckedItem } from './unchecked.js';
 import { topDepartment } from './turn-department.js';
 import { setUrgent } from './urgency.js';
 import { ceoPrincipal, departmentPrincipal, standingPrincipal } from '../conversation/decision-context.js';
@@ -43,7 +44,7 @@ import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { ReviewSha, ReviewSubmission } from './review-context.js';
 import { pipelineFindings, reviewDetails } from './review-details.js';
 import { ConfirmationInput, confirmFinding, IssueInput } from './review-findings.js';
-import { echelonsFor } from './turnkey.js';
+import { CHECKED_COMMIT, echelonsFor, START_COMMIT } from './turnkey.js';
 import { listBacklog } from '../backlog/store.js';
 import { deptName } from '../departments/templates.js';
 import { requireTaskHead } from './echelons-update.js';
@@ -104,11 +105,13 @@ type Question = { kind: 'question' | 'approval' | 'choice'; text: string; topic?
 const HumanRecipient = z.uuid().describe('The person who can supply the missing answer, by id. For a missing sign-in, ask them to add it to the vault and give only the entry name.');
 
 /* What people read of a question, and what its asker hears besides: an approval says what test runs say of its commit as it
-   is asked, which the answer says again as it comes. */
-async function questionWords(db: Ctx['db'], task: Task, question: string, commit?: string): Promise<{ text: string; told: string }> {
+   is asked, which the answer says again as it comes. What the release of that commit brings that no check covers goes on the
+   card apart from these words, and its asker hears how much. */
+async function questionWords(db: Ctx['db'], task: Task, question: string, commit?: string, unchecked?: UncheckedItem[] | null): Promise<{ text: string; told: string }> {
   if (!commit) return { text: question, told: '' };
   const said = proofLine(await commitProof(db, task, commit));
-  return { text: `${question}\n\nHornhoof checked as this was asked. ${said}`, told: ` ${said}` };
+  const told = unchecked?.length ? ` Hornhoof names next to Approve what the release brings that no check covers: ${unchecked.length}.` : '';
+  return { text: `${question}\n\nHornhoof checked as this was asked. ${said}`, told: ` ${said}${told}` };
 }
 
 /* Keep the outgoing question with the person responsible for its decision card. */
@@ -117,8 +120,17 @@ async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, 
   await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
 }
 
-async function commitReply(ctx: Ctx, task: Task, agentId: string, question: string, commit?: string, options?: unknown[]) {
-  if (!commit || options?.length) return null;
+/* What the card keeps apart from its words: what the release of its commit brings that no check covers, where it brings any. */
+const uncheckedCard = (unchecked?: UncheckedItem[] | null): { unchecked?: UncheckedItem[] } => (unchecked?.length ? { unchecked } : {});
+
+/* What the release of the commit an approval is asked of brings that no check covers; a choice names no commit. */
+const uncheckedAsked = (ctx: Ctx, task: Task, commit?: string, options?: unknown[]): Promise<UncheckedItem[] | null> =>
+  commit && !options?.length ? uncheckedInRelease(ctx, task, commit) : Promise.resolve(null);
+
+/* An approval of a commit that the department's rule or autonomous release lets go, where it does. A release that brings
+   what no check covers always goes to a person, who sees that on the card. */
+async function commitReply(ctx: Ctx, task: Task, agentId: string, question: string, commit?: string, options?: unknown[], unchecked?: UncheckedItem[] | null) {
+  if (!commit || options?.length || unchecked?.length) return null;
   if (!(await commitApprovalRequired(ctx.db, task.companyId, task.departmentId))) {
     mayAsk(task, agentId);
     refusePaused(task);
@@ -128,6 +140,12 @@ async function commitReply(ctx: Ctx, task: Task, agentId: string, question: stri
   const auto = await tryAutonomousCommitApproval(ctx, task, agentId, commit, question);
   return auto ? { text: auto.text, moved: auto.moved } : null;
 }
+
+/* What the holder of turnkey work checked: the commit it took into the turn branch, and where its branch started. */
+const TurnkeyInput = z.strictObject({
+  commit: z.string().regex(/^[0-9a-f]{40}$/).describe(`The ${CHECKED_COMMIT}.`),
+  baseCommit: z.string().regex(/^[0-9a-f]{40}$/).describe(`The ${START_COMMIT}. It holds where the turn branch was as your work started.`),
+});
 
 const TurnItem = z.object({ department: z.uuid().optional().describe('Its department; a head may leave it out.'), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('Marks this work and its child tasks urgent.'), ...TrackerFields });
 const Turn = z.number().int().positive().describe('The turn number, like 2.');
@@ -484,7 +502,7 @@ class TaskTools {
           "Ask only once every instruction and material the question promises is ready, attached to it instead of a pointer to a task's log, and let one sender ask it once. " +
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
-          'With commit, an unset rule needs no approval. An approval card shows which passed test run checked that commit, or that none did. If its department enabled autonomousRelease and that commit has a green whole run of its release with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
+          'With commit, an unset rule needs no approval, except for a release that brings what no check covers: a person approves it on a card where Hornhoof names exactly that next to Approve, apart from your words. An approval card shows which passed test run checked that commit, or that none did. If its department enabled autonomousRelease and that commit has a green whole run of its release with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
           'Ask a person when their own judgment or information is indispensable. Resolve ordinary work through the responsible department or the orchestrator. Only irreversible deletion needs the CEO\'s yes. Keep credentials out of the question and answer; ask the person to save a missing sign-in in the vault and name the entry.',
         inputSchema: {
           task: Ref,
@@ -507,7 +525,8 @@ class TaskTools {
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, question);
-          const reply = await commitReply(this.ctx, task, this.job.agentId, question, commit, options);
+          const unchecked = await uncheckedAsked(this.ctx, task, commit, options);
+          const reply = await commitReply(this.ctx, task, this.job.agentId, question, commit, options, unchecked);
           if (reply) return reply;
           if (commit && person) throw refuse(400, 'task_invalid', 'The department\'s commit rule determines who approves it.');
           const recipient = person ? await this.questionRecipient(person) : undefined;
@@ -516,8 +535,8 @@ class TaskTools {
           }
           const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
           const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
-          const { text, told } = await questionWords(this.db, task, question, commit);
-          const moved = await ask(this.ctx, this.job.agentId, task.id, { kind, text, ...(commit ? { commit, approval: { channel: 'commit', kind: 'commit', amount: null } } : {}), images, options: ways, link: link ?? null, topic, ...(recipient ? { recipientPersonId: recipient } : {}), ...(plan ? { plan } : {}) });
+          const { text, told } = await questionWords(this.db, task, question, commit, unchecked);
+          const moved = await ask(this.ctx, this.job.agentId, task.id, { kind, text, ...(commit ? { commit, approval: { channel: 'commit', kind: 'commit', amount: null } } : {}), ...uncheckedCard(unchecked), images, options: ways, link: link ?? null, topic, ...(recipient ? { recipientPersonId: recipient } : {}), ...(plan ? { plan } : {}) });
           await recordQuestion(this.ctx, this.job, task, { kind, text, topic: commit ? 'release' : topic, ...(recipient ? { recipient } : {}) });
           return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
         }),
@@ -648,7 +667,7 @@ class TaskTools {
       'release_turn',
       {
         description:
-          "Records the release of your department's open turn before main moves, on the release task you hold: commit is a commit of the turn branch turn-<number>, its head or one the branch went past while it was checked, runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own. The department's commit rule says whether the task needs approval of that exact commit. An unset rule needs no approval. When required, ask_person with commit asks the person responsible, or the orchestrator can answer for the owner. With autonomous release on, proof of each change can satisfy the approval rule and is recorded in its log. It uses an independent checker or, for turnkey work, the holder's own review, security check and tests. " +
+          "Records the release of your department's open turn before main moves, on the release task you hold: commit is a commit of the turn branch turn-<number>, its head or one the branch went past while it was checked, runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own. The department's commit rule says whether the task needs approval of that exact commit. An unset rule needs no approval, but a release that brings what no check covers is recorded only once a person approved a card naming exactly that, whatever the rule, and autonomous release never approves it. When required, ask_person with commit asks the person responsible, or the orchestrator can answer for the owner. With autonomous release on, proof of each change can satisfy the approval rule and is recorded in its log. It uses an independent checker or, for turnkey work, the holder's own review, security check and tests, which cover only the first-parent line from the commit its holder named down to where its branch started. " +
           'It says what the release brings, whether each of its commits was checked, and which results of the turn it leaves out because they joined the branch after the commit. The turn branch never stops for a release: keep taking finished work into it. Then fast-forward main to the commit and tag it vX.Y.Z, the next version of your department\'s repository after its own last version tag, which the answer names, or its first version tag where it has none: the tag closes the turn, and what the release left out goes into the next turn, whose branch you create from the head of this one.',
         inputSchema: { task: Ref, commit: z.string().regex(/^[a-f0-9]{40}$/).describe('The exact commit of the turn branch that the whole run checked.'), runId: z.uuid().describe('A passed whole run of that commit.') },
       },
@@ -710,14 +729,15 @@ class TaskTools {
     this.server.registerTool(
       'report',
       {
-        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision it checked with local tests, and done false returns a source defect to Development when verification.delta describes the repair, or otherwise gives the failure to the head; the accepting head names the ready candidate/revision and observed integration commit, or nothing but the summary where the result is a document. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report.',
-        inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional(), acceptance: AcceptanceInput.optional() },
+        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision it checked with local tests, and done false returns a source defect to Development when verification.delta describes the repair, or otherwise gives the failure to the head; the accepting head names the ready candidate/revision and observed integration commit, or nothing but the summary where the result is a document. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report. ' +
+          `If you hold turnkey work with a branch of its own, close it with done true and turnkey: commit, the ${CHECKED_COMMIT}, and baseCommit, the ${START_COMMIT}. A release counts as checked only the first-parent line from that commit down to that start, and nothing the turn branch held as the work started: anything else it brings is named for a person to approve.`,
+        inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional(), acceptance: AcceptanceInput.optional(), turnkey: TurnkeyInput.optional() },
       },
-      async ({ task: ref, done, summary, verification, acceptance }) =>
+      async ({ task: ref, done, summary, verification, acceptance, turnkey }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, summary, ...(verification?.delta ? [verification.delta] : []));
-          const moved = await report(this.ctx, this.job.agentId, task.id, { done, summary, verification, acceptance });
+          const moved = await report(this.ctx, this.job.agentId, task.id, { done, summary, verification, acceptance, turnkey });
           return { text: `Reported. ${await this.where(moved.task)}`, moved };
         }),
     );

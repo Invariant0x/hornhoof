@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { orchestratorStatus, deptLayout, pulsePath, MapScreen } from '../src/screens/Map';
+import { orchestratorStatus, deptLayout, pulsePath, MapScreen, writtenIn } from '../src/screens/Map';
 import type { SubView } from '../src/types';
 import { LanguageProvider } from '../src/i18n';
 import type { Department, Employee, Me } from '../src/types';
@@ -10,6 +10,7 @@ import { arcEnd } from '../src/hub-turns';
 import { arrangeMap } from '../src/map-arrange';
 import { DEV_ORG, ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, SUBS, TURN } from './api-mock';
 import { fakeStream } from './fake-stream';
+import { decl, rulesFor } from './css';
 
 const claude = SUBS[0]!;
 const PROPS = { me: ME, windowOpen: false, onOpenOrchestrator: () => {} };
@@ -111,6 +112,58 @@ describe('Map', () => {
     const withCalls = arrangeMap({ ...DEV_ORG, departments: [many] }).depts[0]!;
     expect(ordinary.h).toBe(160);
     expect(withCalls).toEqual(ordinary);
+  });
+
+  it('makes every card of the map as tall as the most words of one need, never shorter than it was, the rows still apart', () => {
+    const four = { ...DEV_ORG, departments: ['d1', 'd2', 'd3', 'd4'].map(id => dept({ id })) };
+    expect(arrangeMap(four, {}, {}, 100).depts.map(d => d.h)).toEqual([160, 160, 160, 160]);
+    for (const need of [230, 500]) {
+      const tall = arrangeMap(four, {}, {}, need).depts;
+      expect(tall.map(d => [d.w, d.h])).toEqual(Array(4).fill([280, need]));
+      for (const a of tall) for (const b of tall) if (a !== b && a.x === b.x) expect(Math.max(a.y, b.y) - Math.min(a.y + a.h, b.y + b.h)).toBeGreaterThanOrEqual(32);
+    }
+  });
+
+  it('grows the cards of the map with the words of the card that has the most, and cuts or hides no word of any', async () => {
+    const long = 'Development of payments and receipts kept for years in every country';
+    /* jsdom lays nothing out: a card left to its words measures 230 px with the long name and 120 px without it. */
+    const tall = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      if (!this.matches('.map .dept') || this.style.height !== 'auto') return 0;
+      return this.textContent!.includes(long) ? 230 : 120;
+    });
+    onTestFinished(() => tall.mockRestore());
+    const [dev] = DEV_ORG.departments;
+    mockApi({ 'GET /api/org': [200, { ...DEV_ORG, departments: [{ ...dev!, name: long }, dept({ id: 'd9', name: 'Sales' })] }] });
+    const { container } = render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
+    await screen.findByRole('button', { name: new RegExp(`^${long}`) });
+    await waitFor(() => expect([...container.querySelectorAll<HTMLElement>('.map .dept')].map(c => c.style.height)).toEqual(['230px', '230px']));
+    for (const selector of ['.dname', '.dept .row2', '.dept .detail', '.dept .now', '.dept .now > span', '.ticker', '.ticker .tx'])
+      for (const rule of rulesFor(selector)) {
+        expect.soft(rule.decls['text-overflow'], `${selector} ends in no ellipsis`).not.toBe('ellipsis');
+        expect.soft(rule.decls['white-space'], `${selector} wraps`).not.toBe('nowrap');
+        expect.soft(rule.decls.overflow, `${selector} hides nothing`).not.toBe('hidden');
+      }
+    for (const selector of ['.dname', '.dept .detail', '.dept .now > span', '.dt-cnt']) expect.soft(decl(selector, 'overflow-wrap'), selector).toBe('break-word');
+    /* The Head of Design's word for #1489 (#1539, N4): words break by the syllables of the page's language, with a hyphen. */
+    expect(decl('button.dept', 'hyphens')).toBe('auto');
+    expect(decl('button.dept', '-webkit-hyphens')).toBe('auto');
+  });
+
+  /* Design's note on #1574 (#1580): a Japanese chip breaks between its phrases, not inside one. The browser finds Japanese
+     phrases only in text marked Japanese, and kana is written only in Japanese; text of kanji alone may be Chinese and is left
+     to the page's language. */
+  it('marks the words of a people chip Japanese when they hold kana, so they break between phrases', async () => {
+    const people = [
+      { ...PEOPLE[0]!, name: 'レナ', title: '財務と経理の責任者' },
+      { ...PEOPLE[1]!, name: 'ミラ', title: '最高経営責任者' },
+    ];
+    mockApi({ 'GET /api/org': [200, { ...ORG, people }] });
+    const { container } = render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
+    await screen.findByText('レナ');
+    const words = [...container.querySelectorAll('.chips .chip :is(b, small)')].map(el => [el.textContent, el.getAttribute('lang')]);
+    expect(Object.fromEntries(words)).toEqual({ レナ: 'ja', 財務と経理の責任者: 'ja', ミラ: 'ja', 最高経営責任者: null });
+    for (const selector of ['.chip b:lang(ja)', '.chip small:lang(ja)']) expect.soft(decl(selector, 'word-break'), selector).toBe('auto-phrase');
+    expect(decl('.chip span', 'hyphens'), 'the other languages keep their hyphens').toBe('auto');
   });
 
   it('shows the orchestrator, the company people and the empty state on first run', async () => {
@@ -323,6 +376,22 @@ describe('Map', () => {
     expect(container.querySelector('.ticker')).not.toBeInTheDocument();
   });
 
+  /* The map runs to the bottom of the screen and names the running build over its own corner, in the room its bars leave
+     free; it holds the place while the company loads, so the footer row never comes and goes under it (#1590). */
+  it('names the running build over the corner of its room, from the moment it opens, and not behind a department', async () => {
+    let answer: (reply: [number, unknown]) => void = () => {};
+    mockApi({ 'GET /api/org': () => new Promise(done => (answer = done)), 'GET /api/version': [200, { version: '0.39.1', commit: 'a276aa6c0ffee' }] });
+    const { container, rerender } = render(<MapScreen {...PROPS} />);
+    expect(container.querySelector('.map[aria-busy="true"] > .map-version')).toBeInTheDocument();
+    await waitFor(() => expect(container.querySelector('.map-version')).toHaveTextContent('0.39.1 (a276aa6)'));
+    answer([200, ORG_WITH_TEAMS]);
+    await screen.findByText('Marketing');
+    await waitFor(() => expect(container.querySelector('.map > .map-room > .map-version')).toHaveTextContent('0.39.1 (a276aa6)'));
+    expect(container.querySelectorAll('.map-version')).toHaveLength(1);
+    rerender(<MapScreen {...PROPS} inside />);
+    expect(container.querySelector('.map-version')).not.toBeInTheDocument();
+  });
+
   it('shows the zoom as a percentage across short and three-digit scales', async () => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
     const { container } = render(<MapScreen {...PROPS} />);
@@ -391,9 +460,13 @@ describe('Map', () => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'GET /api/map/layout': () => kept });
     const { container } = render(<MapScreen {...PROPS} />);
     const marketing = (await screen.findByText('Marketing')).closest<HTMLElement>('.dept')!;
-    const scale = () => Number(/scale\(([^)]+)\)/.exec(container.querySelector<HTMLElement>('.world')!.style.transform)![1]);
-    await waitFor(() => expect(scale()).not.toBe(1));
+    const view = () => container.querySelector<HTMLElement>('.world')!.style.transform;
+    const scale = () => Number(/scale\(([^)]+)\)/.exec(view())![1]);
+    /* A company that fits whole opens no larger than it is drawn (#1597), so the map may open at 100%: its first fit shows
+       in where it stands, not only in its scale. */
+    await waitFor(() => expect(view()).not.toBe('translate(0px, 0px) scale(1)'));
     const first = scale();
+    expect(first, 'the map opens no larger than it is drawn').toBeLessThanOrEqual(1);
     await act(async () => arrive());
     await waitFor(() => expect(marketing.style.top).toBe('1400px'));
     expect(scale()).toBeLessThan(first);
@@ -1410,6 +1483,21 @@ describe('Map', () => {
     expect(shots(container, 'a')[0]!.closest('[data-mask]')).toHaveAttribute('data-mask', mask);
     expect(container.querySelectorAll('.map-live .way-seg').length).toBeGreaterThan(3);
   });
+});
+
+/* #1580: words are Japanese when they hold hiragana or katakana, which only Japanese writes. Kanji alone may be Chinese, and
+   Latin letters are any language: the page's language speaks for them. */
+describe('writtenIn', () => {
+  it.each([
+    ['財務と経理の責任者', 'ja'],
+    ['レナ', 'ja'],
+    ['ブルーノ・ロッシ', 'ja'],
+    ['最高経営責任者', undefined],
+    ['开发部负责人', undefined],
+    ['Lena', undefined],
+    ['Финансы', undefined],
+    ['', undefined],
+  ])('%s is %s', (words, lang) => expect(writtenIn(words)).toBe(lang));
 });
 
 describe('deptLayout', () => {

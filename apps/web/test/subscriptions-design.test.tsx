@@ -240,9 +240,9 @@ describe('the Tokens part of an open card', () => {
     const today = periods(1_250_000).today;
     const tile = within(part).getByRole('group', { name: new RegExp(`${n(language, today.total)} ${tokens}`) });
     expect(tile).toHaveAttribute('title', `${n(language, today.total)} ${tokens}`);
-    expect(tile.textContent).toContain(`${input} ${n(language, today.input)}`);
-    expect(tile.textContent).toContain(`${output} ${n(language, today.output)}`);
-    expect(tile.textContent).toMatch(new RegExp(`${cache} `));
+    expect(tile.textContent).toContain(`${input}\u00a0${n(language, today.input)}`);
+    expect(tile.textContent).toContain(`${output}\u00a0${n(language, today.output)}`);
+    expect(tile.textContent).toMatch(new RegExp(`${cache}\u00a0`));
     expect(within(part).getAllByRole('group', { name: new RegExp(` ${tokens}$`) })).toHaveLength(4);
 
     const models = part.querySelector('.models')!;
@@ -282,7 +282,7 @@ describe('the Tokens part of an open card', () => {
     const counts = periods(1_250_000);
     expect(pieces(cell)).toEqual([`ltr ${tokenCount(language, ROUTER.tokens!.month.total)}`]);
     const words = language === 'en' ? en.subs.tokens : ru.subs.tokens;
-    expect([...part.querySelectorAll('.g-l')].map(pieces)).toEqual((['today', 'week', 'month', 'all'] as const).map(p => [`ltr ${words[p]}`]));
+    expect([...part.querySelectorAll('.g-l')].map(pieces)).toEqual((['today', 'week', 'month', 'all'] as const).map(p => [`ltr ${words[p].replace(/(\d) /, '$1\u00a0')}`]));
     expect([...part.querySelectorAll('.g-f b')].map(pieces)).toEqual((['today', 'week', 'month', 'all'] as const).map(p => [`ltr ${tokenCount(language, counts[p].total)}`]));
     const today = [...part.querySelectorAll('.gauge')][0]!;
     const lines = [...today.querySelectorAll('.g-s > span')];
@@ -290,5 +290,44 @@ describe('the Tokens part of an open card', () => {
     for (const line of lines) expect(line.lastChild?.nodeName, line.textContent!).toBe('BDI');
     const share = new Intl.NumberFormat(language, { style: 'percent' });
     expect([...part.querySelectorAll('.models .dd')].map(pieces)).toEqual(MODELS.map(m => [`ltr ${n(language, m.total)}`, `ltr ${share.format(m.total / 26_250_000)}`]));
+  });
+});
+
+/* Style book 1.5, section 4 (#1611): a plan whose list told no sums holds the room of its Tokens part while the card asks
+   for them, with the ring and its words, and says that there were no turns only once the answer came. A failed ask says
+   why, with Retry. */
+describe('the Tokens part while its tokens come', () => {
+  const route = `GET /api/subscriptions/${SUBS[0]!.id}/tokens?zone=${encodeURIComponent(zone)}`;
+  const BARE = [{ ...SUBS[0]!, tokens: undefined }];
+  const tokensPart = (card: HTMLElement) => [...card.querySelectorAll<HTMLElement>('.blk-facts .part')].find(p => p.querySelector('.part-h')?.textContent === 'Tokens')!;
+
+  it('holds the room with the ring and its words until the answer, never saying that there were no turns before it', async () => {
+    let open: () => void = () => {};
+    const opened = new Promise<void>(go => { open = go; });
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: BARE }], [route]: async () => { await opened; return [200, { tokens: periods(20), models: [] }]; } });
+    show();
+    await screen.findByRole('table');
+    const card = await openCard('Claude');
+    const part = await waitFor(() => tokensPart(card));
+    expect(part.querySelector('.load-hold')).toHaveAttribute('aria-busy', 'true');
+    expect(within(part).getByText('Loading…')).toBeInTheDocument();
+    expect(within(part).queryByText(en.subs.tokens.none)).toBeNull();
+    open();
+    await waitFor(() => expect(part.querySelectorAll('.gauge')).toHaveLength(4), { timeout: 5000 });
+    expect(part.querySelector('.load-hold')).toBeNull();
+  });
+
+  it('says why a failed ask failed, with Retry, which asks again', async () => {
+    let fail = true;
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: BARE }], [route]: () => (fail ? [500, { error: { code: 'internal', message: 'No.' } }] : [200, { tokens: periods(20), models: [] }]) });
+    show();
+    await screen.findByRole('table');
+    const card = await openCard('Claude');
+    const alert = await within(card).findByRole('alert');
+    expect(alert).toHaveTextContent(en.load.failed.server);
+    expect(within(card).queryByText(en.subs.tokens.none)).toBeNull();
+    fail = false;
+    await userEvent.click(within(alert).getByRole('button', { name: en.common.retry }));
+    await waitFor(() => expect(tokensPart(card).querySelectorAll('.gauge')).toHaveLength(4), { timeout: 5000 });
   });
 });

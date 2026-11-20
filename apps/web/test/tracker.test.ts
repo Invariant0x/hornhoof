@@ -1,32 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { boardColumns, filterTasks, graphPath, graphTree, layoutTree, listGroups, mine, NODE, pipelineTree, pruneGoals, shownEmployees, waitingOn, workingNow, type GraphNode } from '../src/tracker';
-import type { Employee, GoalView, Org, Pipeline, TaskLine } from '../src/types';
+import { boardColumns, filterTasks, graphPath, graphTree, layoutTree, listGroups, mine, NODE, personWaited, pipelineTree, pruneGoals, shownDecisions, shownEmployees, waitingOn, waitingOnPeople, waitsCount, workingNow, type GraphNode } from '../src/tracker';
+import type { Decisions, Employee, GoalView, Org, Pipeline, ProposalDecision, TaskLine, WaitingRequest } from '../src/types';
 import { taskRoute } from './task-route';
 
 const DEV = { id: 'd2', name: 'Development' };
-const ELLIS = { id: 'p2', name: 'Ellis' };
-const JUNO = { id: 'p3', name: 'Juno' };
+const SAM = { id: 'p2', name: 'Sam' };
+const LEO = { id: 'p3', name: 'Leo' };
 const BRUNO = { id: 'b1', name: 'Bruno', kind: 'worker' as const, role: null };
 const RITA = { id: 'b2', name: 'Rita', kind: 'worker' as const, role: null };
 
 const task = (over: Partial<TaskLine> & { id: string; number: number }): TaskLine => ({
   echelons: taskRoute(), title: `Task ${over.number}`, brief: '', status: 'working', department: DEV, product: null, assignee: BRUNO, turn: null, parentId: null, waitsFor: [],
-  createdAt: '2026-11-16T08:00:00.000Z', updatedAt: '2026-11-16T09:00:00.000Z', goal: null, responsible: ELLIS, why: '', dueAt: null, pipelineId: null, pipelineStageId: null, ...over,
+  createdAt: '2026-11-16T08:00:00.000Z', updatedAt: '2026-11-16T09:00:00.000Z', goal: null, responsible: SAM, why: '', dueAt: null, pipelineId: null, pipelineStageId: null, ...over,
 });
 const goal = (over: Partial<GoalView> & { id: string; number: number }): GoalView => ({
-  title: `Goal ${over.number}`, why: '', department: DEV, parentId: null, responsible: ELLIS, target: null, current: null, unit: '', dueAt: null, status: 'active', progress: null, done: 0, total: 0, version: 0, ...over,
+  title: `Goal ${over.number}`, why: '', department: DEV, parentId: null, responsible: SAM, target: null, current: null, unit: '', dueAt: null, status: 'active', progress: null, done: 0, total: 0, version: 0, ...over,
 });
 
 /* A company goal, a smaller goal of Development under it, two tasks under the smaller goal and two subtasks of the first;
    the second task waits for the first; one task serves no goal. */
-const BIG = goal({ id: 'g1', number: 1, title: '500 trial sign-ups', department: null, responsible: JUNO });
+const BIG = goal({ id: 'g1', number: 1, title: '500 trial sign-ups', department: null, responsible: LEO });
 const SMALL = goal({ id: 'g2', number: 2, title: 'Invite people to the trial', parentId: 'g1' });
 const OTHER = goal({ id: 'g3', number: 3, title: 'Accounts', status: 'dropped' });
 const GOALS = [BIG, SMALL, OTHER];
 const SERVES = { id: 'g2', number: 2, title: 'Invite people to the trial' };
 const T312 = task({ id: 't312', number: 312, title: 'Find pilot teams', goal: SERVES, pipelineId: 'pl1', pipelineStageId: 's1' });
 const S1 = task({ id: 's1t', number: 313, title: 'List from the directory', status: 'done', parentId: 't312', goal: SERVES });
-const S2 = task({ id: 's2t', number: 314, title: 'List from the forum', status: 'waiting', parentId: 't312', goal: SERVES, assignee: RITA, responsible: JUNO });
+const S2 = task({ id: 's2t', number: 314, title: 'List from the forum', status: 'waiting', parentId: 't312', goal: SERVES, assignee: RITA, responsible: LEO });
 const T319 = task({ id: 't319', number: 319, title: 'Invite the first group', status: 'review', goal: SERVES, waitsFor: [312], pipelineId: 'pl1', pipelineStageId: 's3' });
 const LOOSE = task({ id: 't500', number: 500, title: 'Tidy the inbox', status: 'open', assignee: null, pipelineId: 'pl1' });
 const GONE = task({ id: 't501', number: 501, title: 'Old idea', status: 'cancelled' });
@@ -57,7 +57,7 @@ describe('the list', () => {
   });
 
   it('counts the subtasks of a task over all the work under it, whatever the list shows', () => {
-    /* Ellis's own open tasks leave out the subtask done and Juno's; a status filter leaves out what does not match. */
+    /* Sam's own open tasks leave out the subtask done and Leo's; a status filter leaves out what does not match. */
     const own = listGroups(mine(TASKS, GOALS, 'p2').tasks, undefined, TASKS).find(g => g.status === 'working')!.trees.find(tree => tree.task.id === 't312');
     expect([own!.task.id, own!.done, own!.total]).toEqual(['t312', 1, 2]);
     const working = listGroups(filterTasks(TASKS, { status: 'working' }, GOALS), undefined, TASKS)[0]!.trees.find(tree => tree.task.id === 't312');
@@ -202,5 +202,74 @@ describe('the graph', () => {
     expect(titles([root!])).toEqual([['pl1', [['s1', [['s2'], ['s3']]]]]]);
     const count = (node: GraphNode): Record<string, number> => ({ ...(node.kind === 'stage' || node.kind === 'pipeline' ? { [node.id]: node.count } : {}), ...Object.assign({}, ...node.children.map(count)) });
     expect(count(root!)).toEqual({ pl1: 3, s1: 1, s2: 0, s3: 1 });
+  });
+});
+
+/* Sam, the CEO, looks. Max is asked by name on task 312 and only he answers; Sam is asked by name on task 319; the question on
+   task 314 is for anyone, Leo's as his department's, and Sam may take it too. The orchestrator's card and the merge are
+   Sam's. */
+describe('what waits for people', () => {
+  const MAX = 'p9';
+  const BY_NAME = { kind: 'named_person' as const, department: null };
+  const asked = (id: string, on: TaskLine, over: Partial<WaitingRequest>): WaitingRequest => ({
+    id, kind: 'question', text: 'Which way?', commit: null, commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false,
+    at: '2026-11-16T08:00:00.000Z', agent: { id: BRUNO.id, name: BRUNO.name }, task: { id: on.id, number: on.number, title: on.title, department: DEV },
+    ownerPersonId: SAM.id, canAnswer: true, ...over,
+  });
+  const FOR_MAX = asked('r1', T312, { ownerPersonId: MAX, canAnswer: false, decidedBy: BY_NAME });
+  const FOR_SAM = asked('r2', T319, { decidedBy: BY_NAME });
+  const FOR_ANYONE = asked('r3', S2, { ownerPersonId: LEO.id, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+  const CARD = { id: 'pr1', kind: 'structure', agent: { id: 'a1', name: 'Orchestrator' }, department: null, brief: '', items: [], at: '2026-11-16T08:00:00.000Z', ownerPersonId: SAM.id, canAnswer: true } as ProposalDecision;
+  const MERGE = { id: 'm1', label: 'the database', after: null, open: 1, ownerPersonId: SAM.id };
+  const DECISIONS: Decisions = { requests: [FOR_MAX, FOR_SAM, FOR_ANYONE], proposals: [CARD], merges: [MERGE], counts: { byPerson: {}, byAgent: {}, total: 5 } };
+  const requested = (d: { requests: WaitingRequest[] }) => d.requests.map(r => r.id);
+
+  it("leaves a question asked of another person by name out of the viewer's own decisions, and keeps the rest as they were", () => {
+    const own = shownDecisions(DECISIONS, { viewer: SAM.id });
+    expect(requested(own)).toEqual(['r2', 'r3']);
+    expect(own.proposals).toEqual([CARD]);
+    expect(own.merges).toEqual([MERGE]);
+  });
+
+  it("keeps a question asked of a person by name in that person's decisions, and only theirs", () => {
+    expect(requested(shownDecisions(DECISIONS, { person: MAX }))).toEqual(['r1']);
+    expect(shownDecisions(DECISIONS, { person: MAX }).proposals).toEqual([]);
+    expect(requested(shownDecisions(DECISIONS, { person: LEO.id }))).toEqual(['r3']);
+  });
+
+  it("keeps a question asked of the viewer by name in their own decisions, also when another person looks at the company's", () => {
+    expect(requested(shownDecisions(DECISIONS, { viewer: MAX }))).toEqual(['r1', 'r3']);
+  });
+
+  it('gives everything the viewer sees for the company', () => {
+    const all = shownDecisions(DECISIONS, 'everyone');
+    expect(requested(all)).toEqual(['r1', 'r2', 'r3']);
+    expect(all.proposals).toEqual([CARD]);
+    expect(all.merges).toEqual([MERGE]);
+  });
+
+  it('gives nothing before the first answer, and takes a server without merges', () => {
+    expect(shownDecisions(undefined, 'everyone')).toEqual({ requests: [], proposals: [], merges: [] });
+    const older: Decisions = { requests: DECISIONS.requests, proposals: DECISIONS.proposals, counts: DECISIONS.counts };
+    expect(shownDecisions(older, 'everyone').merges).toEqual([]);
+  });
+
+  it('counts a task with a question once, with the tasks that wait, the cards and the merges', () => {
+    const own = shownDecisions(DECISIONS, { viewer: SAM.id });
+    expect(waitsCount(own, [], [])).toBe(4);
+    expect(waitsCount(own, [T319, LOOSE], [{ id: 'c1' }])).toBe(6);
+    expect(waitsCount(shownDecisions(DECISIONS, 'everyone'), [], [])).toBe(5);
+  });
+
+  it('finds the open tasks that wait for any person, and the first person each waits for', () => {
+    const since = '2026-11-16T08:00:00.000Z';
+    const waits = (over: Partial<TaskLine> & { id: string; number: number }, ...who: ({ kind: 'person' | 'agent'; id: string } | null)[]) =>
+      task({ ...over, time: { inStatusSince: since, workSeconds: 0, waitsOn: who.map(w => ({ kind: w?.kind === 'person' ? 'person' as const : 'review' as const, who: w && { ...w, name: '' }, reason: null, since })) } });
+    const external = task({ id: 'e', number: 5, time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind: 'external', who: null, reason: 'Deployment', since }, { kind: 'person', who: { kind: 'person', id: LEO.id, name: LEO.name }, reason: null, since }] } });
+    const tasks = [waits({ id: 'a', number: 1, status: 'waiting' }, { kind: 'person', id: 'p3' }), waits({ id: 'b', number: 2 }, { kind: 'agent', id: 'p3' }), waits({ id: 'c', number: 3, status: 'done' }, { kind: 'person', id: 'p3' }),
+      waits({ id: 'd', number: 4 }, null), waits({ id: 'p', number: 6, paused: { at: since, reason: 'Holiday', root: 'p' } }, { kind: 'person', id: 'p3' }), external, ...TASKS];
+    expect(ids(waitingOnPeople(tasks))).toEqual(['a', 'e']);
+    expect(personWaited(external)).toBe(LEO.id);
+    expect(personWaited(T312)).toBeUndefined();
   });
 });

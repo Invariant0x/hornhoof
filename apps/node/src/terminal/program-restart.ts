@@ -242,6 +242,8 @@ export class TurnWords {
     if (kind === 'kimi' && (line.agentId === undefined || line.agentId === 'main')) {
       if (line.type === 'prompt.steered') this.queued(contentText(line.input ?? line.prompt), 'wire');
       if (line.type === 'turn.steer' && (!turnId || line.turnId === undefined || String(line.turnId) === turnId)) this.taken(contentText(line.input));
+      /* Kimi 2.6.3 takes steered words by going on with them in a turn of its own. */
+      if (line.type === 'turn.prompt' && line.trigger === 'notify') this.taken(contentText(line.input));
     }
     const p = isRecord(line.payload) ? line.payload : {};
     if (kind === 'codex' && line.type === 'event_msg' && p.type === 'item_completed' && isRecord(p.item) && p.item.type === 'UserMessage'

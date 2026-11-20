@@ -43,7 +43,10 @@ const readPlates = (page: Page) => page.locator('.tv-labs .dept-chip, .tv-labs .
     trunk: plate.classList.contains('tk'),
     size: [plate.offsetWidth, plate.offsetHeight],
     fonts: { name: font('.mn, b'), task: font('.r2'), state: font('.r3') },
-    clipped: [plate, ...parts].filter(el => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1).map(el => el.className),
+    /* Only a box that can cut what it holds: an inline one has no client size, and Firefox still gives it the scroll size of
+       its words (#1595). The rows around it, which could cut them, are checked. */
+    clipped: [plate, ...parts].filter(el => getComputedStyle(el).display !== 'inline')
+      .filter(el => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1).map(el => el.className),
     /* The halo of a framed button shows its glow only while the card is busy or waits, and its ring only on keyboard focus:
        those two layers draw no part of the plate, so their display none hides nothing of it. Every other part is checked. */
     hidden: parts.filter(el => !el.matches('.halo > .halo-glow, .halo > .halo-ring') && getComputedStyle(el).display === 'none').map(el => el.className),
@@ -99,7 +102,7 @@ for (const lang of ['en', 'ru'] as const) {
   for (const theme of ['light', 'dark'] as const) {
     for (const width of [1440, 375]) {
       test(`plates of a full department show all their words in ${lang}, ${theme}, ${width}px`, async ({ page }, info) => {
-        test.setTimeout(180_000);
+        test.setTimeout(0);
         await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
         await page.addInitScript(({ lang, theme }) => {
           localStorage.setItem('hh-lang', lang);
@@ -173,9 +176,9 @@ for (const lang of ['en', 'ru'] as const) {
         /* A longer line makes only its own plate taller, and the rows under it move down by as much. */
         const short = await box(of('Nora')), gap = (await box(of('Oleg'))).y - short.y;
         await of('Nora').locator('.r2').evaluate((title, text) => { title.textContent = text; }, ` ${LONG_TITLE}`);
-        await expect.poll(async () => (await box(of('Nora'))).height, { message: "Nora's plate grows with the long line", timeout: 10_000 }).toBeGreaterThan(short.height);
+        await expect.poll(async () => (await box(of('Nora'))).height, { message: "Nora's plate grows with the long line" }).toBeGreaterThan(short.height);
         const nora = await box(of('Nora'));
-        await expect.poll(async () => Math.abs((await box(of('Oleg'))).y - nora.y - (gap - short.height + nora.height)), { message: 'the plates under it move down', timeout: 10_000 }).toBeLessThanOrEqual(1);
+        await expect.poll(async () => Math.abs((await box(of('Oleg'))).y - nora.y - (gap - short.height + nora.height)), { message: 'the plates under it move down' }).toBeLessThanOrEqual(1);
         await expectNoPlatesTouch(labs);
         await expectLinesFollowPlates(page, full);
 

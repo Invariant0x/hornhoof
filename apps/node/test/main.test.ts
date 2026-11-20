@@ -913,6 +913,9 @@ describe('runNode', () => {
               { id: 'gemini-5h', window: '5h', remaining_fraction: fiveHourRemaining, reset_time: '2026-11-04T21:41:44Z' },
               { id: 'gemini-weekly', window: 'weekly', remaining_fraction: 0.6, reset_time: '2026-11-10T00:41:44Z' },
             ],
+          }, {
+            name: 'Claude and GPT models',
+            buckets: [{ id: '3p-weekly', window: 'weekly', remaining_fraction: 0, reset_time: '2026-11-11T21:19:23Z' }],
           }],
         },
       },
@@ -929,13 +932,15 @@ describe('runNode', () => {
     });
 
     await server.wait(() => server.received.some(m => m.type === 'status' && m.limits !== null));
-    expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toEqual({
+    const fixture = [
+      { name: 'five_hour', utilization: 1 - 0.6985989809036255, resetsAt: '2026-11-04T21:41:44.000Z' },
+      { name: 'seven_day', utilization: 1 - 0.6328346133232117, resetsAt: '2026-11-10T00:41:44.000Z' },
+    ];
+    expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toMatchObject({
       status: 'allowed',
-      windows: [
-        { name: 'five_hour', utilization: 1 - 0.6985989809036255, resetsAt: '2026-11-04T21:41:44.000Z' },
-        { name: 'seven_day', utilization: 1 - 0.6328346133232117, resetsAt: '2026-11-10T00:41:44.000Z' },
-      ],
+      windows: fixture,
       complete: true,
+      groups: [{ name: 'Gemini Models', status: 'allowed', windows: fixture }, { name: 'Claude and GPT models', status: 'allowed' }],
     });
 
     /* A broken source leaves the node running and never fabricates status: rejected. */
@@ -954,13 +959,20 @@ describe('runNode', () => {
     await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j-agy'));
     expect(server.received.filter(m => m.type === 'status').length).toBeGreaterThan(statusesBefore);
     const done = server.received.findIndex(m => m.type === 'job.done' && m.jobId === 'j-agy');
+    /* The reading after a turn keeps each model group: the used-up Claude and GPT week holds none of Gemini's turns. */
+    const gemini = [
+      { name: 'five_hour', utilization: 0.75, resetsAt: '2026-11-04T21:41:44.000Z' },
+      { name: 'seven_day', utilization: 0.4, resetsAt: '2026-11-10T00:41:44.000Z' },
+    ];
+    const others = [{ name: 'seven_day', utilization: 1, resetsAt: '2026-11-11T21:19:23.000Z' }];
     expect(server.received.slice(0, done).filter(m => m.type === 'status').map(m => m.limits)).toContainEqual({
-      status: 'allowed',
-      windows: [
-        { name: 'five_hour', utilization: 0.75, resetsAt: '2026-11-04T21:41:44.000Z' },
-        { name: 'seven_day', utilization: 0.4, resetsAt: '2026-11-10T00:41:44.000Z' },
-      ],
+      status: 'rejected',
+      windows: [gemini[0], others[0]],
       complete: true,
+      groups: [
+        { name: 'Gemini Models', status: 'allowed', windows: gemini, complete: true },
+        { name: 'Claude and GPT models', status: 'rejected', windows: others, complete: true },
+      ],
     });
   });
 
@@ -1231,6 +1243,43 @@ describe('runNode', () => {
     server.send({ type: 'job.cancel', jobId: 'j1' });
     await server.wait(() => server.received.some(m => m.type === 'job.done'));
     expect(server.received.find(m => m.type === 'job.done')).toMatchObject({ jobId: 'j1', ok: false, error: 'cancelled' });
+  });
+
+  it.each([
+    ['a mail turn', { key: 'a1', repo: null }],
+    ['a task turn', { key: 'a1', repo: null, tasks: { open: [7], upTo: 7 } }],
+  ])('ends %s as stopped at once when Hornhoof calls it off while its run still waits, and tells that end only once', async (_turn, workspace) => {
+    const server = await fakeServer();
+    /* The run waits on, as one whose program's end signal the node never heard does, until the test lets it end. */
+    const run: { finish?: () => void } = {};
+    const waits: ProviderAdapter = {
+      ...adapter,
+      run: () => new Promise(done => { run.finish = () => done({ ok: true, sessionId: 'sess-late', result: 'A late answer.', output: '', error: null, limits: null }); }),
+    };
+    const node = await runNode({ dir: nodeDir(server.url), adapter: waits, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: 'sess-1', model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null, workspace });
+    await server.wait(() => run.finish !== undefined);
+    const ends = () => server.received.filter(m => m.type === 'job.done' && m.jobId === 'j1');
+    server.send({ type: 'job.cancel', jobId: 'j1' });
+    await server.barrier('called off');
+    expect(ends()).toEqual([expect.objectContaining({ ok: false, sessionId: 'sess-1', result: 'Stopped.', tail: '', error: 'cancelled' })]);
+    /* Hornhoof confirms that end, the run ends after all, and Hornhoof asks again for a job the node still listed. */
+    server.send({ type: 'job.ack', jobId: 'j1' });
+    run.finish!();
+    const replies = () => server.received.filter(m => m.type === 'jobs.held');
+    const held = async () => {
+      const before = replies().length;
+      server.send({ type: 'jobs.check', jobIds: ['j1'] });
+      await server.wait(() => replies().length > before);
+      return replies().at(-1)!.held as string[];
+    };
+    /* Each look asks the node again, until it holds the job no more. */
+    while ((await held()).length) { /* the run still winds down */ }
+    server.send({ type: 'job.cancel', jobId: 'j1' });
+    await server.barrier('ran out');
+    expect(ends()).toHaveLength(1);
   });
 
   it("says how busy its machine is in hello and every while after, with the agent jobs it runs", async () => {

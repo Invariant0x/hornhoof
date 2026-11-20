@@ -91,8 +91,10 @@ describe('one agent window', () => {
     render(<Shell me={ME} onSignOut={() => {}} />);
     await openList(user, name);
     await user.click(screen.getByRole('button', { name: 'Open Bruno' }));
-    expect(await screen.findByText('Company temporarily unavailable')).toHaveAttribute('role', 'alert');
-    expect(screen.getByText('Company temporarily unavailable')).toHaveFocus();
+    /* The words read in their own direction inside the alert, which stays the paragraph that takes the focus. */
+    const alert = (await screen.findByText('Company temporarily unavailable')).closest('p');
+    expect(alert).toHaveAttribute('role', 'alert');
+    expect(alert).toHaveFocus();
   });
 
   it.each(['Subscriptions & API', 'Machines'])('leaves inaccessible agents as text in %s', async name => {
