@@ -375,6 +375,34 @@ describe('the updater and what a machine held when it stopped holding the data',
     for (const secret of [SECRETS.HORNHOOF_SECRET, SECRETS.NODE_KEY, SECRETS.POSTGRES_PASSWORD]) expect(all.includes(secret)).toBe(false);
   });
 
+  it('keeps an unrelated private folder when clearing named folders', async () => {
+    const s = stand();
+    const unrelated = join(s.control, '.remove.unrelated');
+    mkdirSync(unrelated, { mode: 0o700 });
+    writeFileSync(join(unrelated, 'kept'), 'rows');
+    const r = await runUpdaterStep(s, 'remove_folders dumps');
+    expect(r.code, r.out).toBe(0);
+    expect(existsSync(join(unrelated, 'kept'))).toBe(true);
+  });
+
+  it.each(['dumps', 'dumps/mounted'])('leaves files at the %s mount boundary', async path => {
+    const s = stand();
+    const mounted = join(s.control, path);
+    mkdirSync(mounted, { recursive: true });
+    writeFileSync(join(mounted, 'kept'), 'rows');
+    const r = await runUpdaterStep(s, `
+      directory_mount() {
+        case "$(physical_dir)" in
+          */${path.split('/').at(-1)}) printf '%s\\n' 2 ;;
+          *) printf '%s\\n' 1 ;;
+        esac
+      }
+      remove_folders dumps
+    `);
+    expect(r.code, r.out).toBe(1);
+    expect(readFileSync(join(mounted, 'kept'), 'utf8')).toBe('rows');
+  });
+
   /* The app and the keeper can put a link in a shared folder, or swap a folder in one for a link, at any moment, also
      while the wipe deletes. The wipe deletes nothing through either. Here rm deletes as BusyBox rm -rf does, by whole
      paths, and a folder of dumps is swapped for a link to a folder outside right after its first file went. */
@@ -386,16 +414,19 @@ describe('the updater and what a machine held when it stopped holding the data',
     mkdirSync(sub);
     for (const dir of [outside, sub]) for (const name of ['a', 'b', 'c']) writeFileSync(join(dir, name), 'rows');
     symlinkSync(outside, join(s.control, 'uploads', 'planted'));
-    const r = await runOnce(s, null, { ...COPY, ...stubbed(s, 'rm', 'rm-bypath'), RM_SWAP: `${sub}=${outside}` });
-    expect(readdirSync(outside).sort(), r.out).toEqual(['a', 'b', 'c']);
+    const first = await runOnce(s, null, { ...COPY, ...stubbed(s, 'rm', 'rm-bypath'), RM_SWAP: `${sub}=${outside}` });
+    if (!has(s, 'wiped.json')) {
+      expect(stepOf(s), first.out).toBe('files');
+      const retry = await runOnce(s, null, COPY);
+      expect(retry.code, retry.out).toBe(0);
+    }
+    expect(readdirSync(outside).sort(), first.out).toEqual(['a', 'b', 'c']);
     for (const name of ['dumps', 'restore', 'schema', 'uploads']) expect(has(s, name), name).toBe(false);
     expect(readdirSync(s.control).filter(name => name.startsWith('.'))).toEqual([]);
     expect(has(s, 'wiped.json')).toBe(true);
   });
 
-  /* What empties a folder follows no link either. A folder in it that is swapped for a link once its first file went,
-     as a process that holds the folder open can do even where the wipe moved it, keeps none of its own files, and none
-     outside goes; the link stays, and this says it could not empty the folder, so the wipe tries again. */
+  /* The opened folder is emptied, and the link that took its name remains for the retry. */
   it('empties a folder without following a folder in it swapped for a link meanwhile', async () => {
     const s = stand();
     const outside = join(s.dir, 'outside');

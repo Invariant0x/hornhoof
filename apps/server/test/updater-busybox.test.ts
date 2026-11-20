@@ -72,9 +72,11 @@ function racing(s: Stand, folder: string, outside: string, step: string): string
   racer=$!
   waited=0
   until [ -e '${ready}' ] || [ "$waited" -ge 1000 ]; do /bin/sleep 0.01; waited=$((waited + 1)); done
-  if ${step}; then echo done; else echo 'not done'; fi
+  status=0
+  ${step} || status=$?
   kill "$racer" 2> /dev/null || true
   wait "$racer" 2> /dev/null || true
+  exit "$status"
 `;
 }
 /* How many files the tree's own folder still holds, wherever the racer left it. */
@@ -139,7 +141,12 @@ tests(BUSYBOX ? `the updater with the commands of BusyBox 1.37 (${BUSYBOX})` : '
     const sub = join(s.control, 'dumps', 'sub');
     filled(sub, outside);
     const r = await runUpdaterStep(s, racing(s, sub, outside, 'wipe_step files'), busybox(s).env);
-    expect(r.code, r.out).toBe(0);
+    if (r.code === 1) {
+      const retry = await runUpdaterStep(s, 'wipe_step files', busybox(s).env);
+      expect(retry.code, retry.out).toBe(0);
+    } else {
+      expect(r.code, r.out).toBe(0);
+    }
     expect(readdirSync(outside).length).toBe(MANY);
     expect(existsSync(join(s.control, 'dumps'))).toBe(false);
   });
@@ -151,7 +158,7 @@ tests(BUSYBOX ? `the updater with the commands of BusyBox 1.37 (${BUSYBOX})` : '
     const tree = join(s.dir, 'tree');
     filled(join(tree, 'sub'), outside);
     const r = await runUpdaterStep(s, racing(s, join(tree, 'sub'), outside, `(cd -P -- '${tree}' && clear_here)`), busybox(s).env);
-    expect(r.code, r.out).toBe(0);
+    expect(r.code, r.out).toBe(existsSync(join(tree, 'sub.moved')) ? 1 : 0);
     expect(readdirSync(outside).length).toBe(MANY);
     expect(leftIn(join(tree, 'sub'))).toBe(0);
   });
