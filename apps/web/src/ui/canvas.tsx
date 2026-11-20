@@ -11,8 +11,13 @@ export function canvasSpace(width: number, left: number, right: number): { left:
   return width <= CANVAS_NARROW ? { left: 0, width } : { left, width: width - left - right };
 }
 
-/* smooth: the change came from Fit and glides, or flies into a department; drag and zoom follow the hand at once. */
-export type View = { x: number; y: number; k: number; smooth: boolean | 'fly' };
+/* smooth: the change came from Fit and glides, flies into a department, or follows the bars of the shell as one comes or goes
+   (shift, in the shell's time); drag and zoom follow the hand at once. */
+export type View = { x: number; y: number; k: number; smooth: boolean | 'fly' | 'shift' };
+
+/* Whether two views stand in the same place, to the half pixel. */
+export const sameView = (a: Pick<View, 'x' | 'y' | 'k'>, b: Pick<View, 'x' | 'y' | 'k'>) =>
+  Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.k - b.k) < 1e-4;
 
 /* A box from its top left to its bottom right corner. */
 export type Box = { x0: number; y0: number; x1: number; y1: number };

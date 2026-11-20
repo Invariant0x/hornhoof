@@ -396,6 +396,8 @@ export const en = {
     account: 'Account',
     logOut: 'Log out',
     version: (v: string) => `Version ${v}`,
+    /* On a phone every bar under the top bar after the first shows one line; this opens it whole. */
+    barMore: 'More',
   },
   /* The Themes section of the settings: the built-in themes, a person's own kept in this browser, and how to make one. */
   skins: {

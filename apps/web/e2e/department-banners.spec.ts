@@ -66,7 +66,8 @@ type Box = { x: number; y: number; width: number; height: number };
 const room = (page: Page) => page.evaluate(() => {
   const body = document.querySelector('main.body')!.getBoundingClientRect();
   const bars = [...document.querySelectorAll('main.body > :is(.update-banner, .alert, .guard-stop)')];
-  const top = Math.max(body.top, ...bars.map(bar => bar.getBoundingClientRect().bottom + parseFloat(getComputedStyle(bar).marginBlockEnd || '0')));
+  /* 8 px under the last bar on every screen, though on a phone the bars stand 6 px apart (Design's rule on #1635). */
+  const top = Math.max(body.top, ...bars.map(bar => bar.getBoundingClientRect().bottom + 8));
   return { top, bottom: body.bottom, bars: bars.length };
 });
 /* What a click inside the room under the header and the bars reaches, across the whole width. */
@@ -164,16 +165,33 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const bar of BARS) {
     /* The person zooms the map in on the department's card and leaves it there: the view is theirs. A phone's map opens on
        its hub (#1597), where the card may show only in part at an edge, and the map runs under the header and the bars
        (#1639), so they zoom and then click where the card shows in the room under them. */
-    const shownPart = async () => {
+    const part = async () => {
       const map = await boxOf(page, '.map'), under = await room(page), shown = await boxOf(page, '.dept:has-text("Development")');
       const [x0, x1] = [Math.max(shown.x, map.x), Math.min(shown.x + shown.width, map.x + map.width)];
       const [y0, y1] = [Math.max(shown.y, map.y, under.top), Math.min(shown.y + shown.height, map.y + map.height, under.bottom)];
-      expect(x1 - x0 > 8 && y1 - y0 > 8, "the department's card shows in the room under the bars").toBe(true);
-      return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, card: shown };
+      return { shows: x1 - x0 > 8 && y1 - y0 > 8, x: (x0 + x1) / 2, y: (y0 + y1) / 2, card: shown, middle: { x: (map.x + map.x + map.width) / 2, y: (under.top + under.bottom) / 2 } };
     };
+    const shownPart = async () => {
+      const at = await part();
+      expect(at.shows, "the department's card shows in the room under the bars").toBe(true);
+      return at;
+    };
+    /* Where a tall bar or the edge of the room leaves the card out of the room or at its edge, the person zooms out from the
+       middle of the room, as far as it takes. */
+    const untilShown = async () => {
+      for (let i = 0; i < 4 && !(await part()).shows; i++) {
+        const { middle } = await part();
+        await page.mouse.move(middle.x, middle.y);
+        await page.mouse.wheel(0, 240);
+        await still(page);
+      }
+    };
+    await untilShown();
     const zoomAt = await shownPart();
     await page.mouse.move(zoomAt.x, zoomAt.y);
     await page.mouse.wheel(0, -240);
+    await still(page);
+    await untilShown();
     const left = await still(page);
     const mapBefore = await boxOf(page, '.map');
     expect(mapBefore.y, 'the map starts at the top of the window, under the header and any bar').toBeLessThanOrEqual(0.5);
@@ -184,7 +202,9 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const bar of BARS) {
     const back = page.getByRole('button', { name: en.dept.back, exact: true });
     await expect(back).toBeVisible();
     await expect(page.locator('main.body > :is(.update-banner, .alert, .guard-stop)').first()).toBeVisible();
-    await settled(page);
+    /* The schema glides to its place as the department opens, under the glass of the bars on its way (#1635): it is checked
+       where it stops. */
+    await stillBox(page, '.dview .shead');
     const name = `${info.project.name}-${width}-${skin}-${bar.name.replace(/[^a-z]+/gi, '-').replace(/^-|-$/g, '')}`;
     shot(await page.screenshot(), name);
 
@@ -276,13 +296,15 @@ for (const width of WIDTHS) for (const dir of DIRS) for (const bar of [NO_BAR, .
    that wraps to two lines makes the plate taller, so a card opened over the department starts under its measured bottom:
    on a phone always, on a wide screen where that is lower than under the header or the bars. */
 const LONG_NAME = 'Development of the web app, the map of the company and the task tracker';
-const LONG_NAMED: Org = {
+/* On a wide screen the name plate has the whole width under the menu (#1635): a name takes two lines there only this long. */
+const WIDE_LONG_NAME = `${LONG_NAME}, together with the shell around them, the bars that come and go over the map, the windows that open over a department, and every picture Design checks of each of them`;
+const longNamed = (name: string): Org => ({
   company: ME.company,
   orchestrator: { id: 'a1', name: 'Orchestrator', model: 'claude-opus-5-5', effort: null, subscription: null, context: null, program: null, alarm: null, retry: null, failure: null },
   agents: { total: 1, working: 1 },
   people: [],
-  departments: [{ id: 'd2', name: LONG_NAME, templateKey: null, roleCode: 'CTO', about: '', agents: { total: 1, working: 1 }, products: [], teams: [], people: [], employees: [], roles: [] }],
-};
+  departments: [{ id: 'd2', name, templateKey: null, roleCode: 'CTO', about: '', agents: { total: 1, working: 1 }, products: [], teams: [], people: [], employees: [], roles: [] }],
+});
 for (const width of WIDTHS) for (const dir of DIRS) for (const bar of [NO_BAR, ...BARS.filter(bar => bar.name === 'the update that ended')]) {
   test(`a task card opens 8 px under a department's name of two lines with ${bar.name}, ${width}px ${dir}`, async ({ page }, info) => {
     const errors: string[] = [];
@@ -293,7 +315,7 @@ for (const width of WIDTHS) for (const dir of DIRS) for (const bar of [NO_BAR, .
       localStorage.setItem('hh-theme', 'cyberpunk');
     });
     await serveApi(page);
-    await page.route('**/api/org', route => route.fulfill({ json: LONG_NAMED }));
+    await page.route('**/api/org', route => route.fulfill({ json: longNamed(width > 760 ? WIDE_LONG_NAME : LONG_NAME) }));
     await bar.serve(page);
     await page.goto('/');
     const card = page.locator('.dept', { hasText: LONG_NAME });
@@ -338,7 +360,7 @@ for (const dir of DIRS) for (const bar of [NO_BAR, ...BARS.filter(bar => bar.nam
       localStorage.setItem('hh-theme', 'cyberpunk');
     });
     await serveApi(page);
-    await page.route('**/api/org', route => route.fulfill({ json: LONG_NAMED }));
+    await page.route('**/api/org', route => route.fulfill({ json: longNamed(WIDE_LONG_NAME) }));
     await bar.serve(page);
     await page.goto('/');
     const card = page.locator('.dept', { hasText: LONG_NAME });
@@ -410,10 +432,11 @@ for (const width of WIDTHS) for (const dir of DIRS) for (const skin of SKINS) fo
       expect(layout.y0, `the whole map starts in the room under the bars, at ${top} or lower`).toBeGreaterThanOrEqual(top - 0.5);
       expect(layout.y1, `the whole map ends in the room, above ${under.bottom}`).toBeLessThanOrEqual(under.bottom);
     }
-    /* Design on #1639: the orchestrator's window opens 8 px under a bar while one stands, under the header without one. */
+    /* Design on #1639 and #1635: the orchestrator's window opens 8 px under the last block at the top, a bar while one
+       stands, else the menu, whose blocks end 56 px down on every screen. */
     await page.getByRole('button', { name: en.map.openOrchestrator, exact: true }).click();
     const opened = await boxOf(page, '.orch');
-    const windowTop = bar === NO_BAR ? (width <= 760 ? 56 : 68) : under.top;
+    const windowTop = bar === NO_BAR ? 56 + 8 : under.top;
     expect(Math.abs(opened.y - windowTop), `the orchestrator's window opens at ${windowTop}, not at ${opened.y}`).toBeLessThanOrEqual(1);
     expect(errors).toEqual([]);
   });

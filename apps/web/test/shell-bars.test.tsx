@@ -11,12 +11,17 @@ const placed = (el: Element, top: number, bottom: number) => {
 };
 
 function page(...bars: [string, number, number][]) {
+  return pageApart('8px', ...bars);
+}
+
+/* apart: the gap the bars stand apart, as their margin under them. */
+function pageApart(apart: string, ...bars: [string, number, number][]) {
   const main = document.createElement('main');
   placed(main, 0, 812);
   for (const [kind, top, bottom] of bars) {
     const bar = document.createElement('div');
     bar.className = kind;
-    bar.style.marginBlockEnd = '8px';
+    bar.style.marginBlockEnd = apart;
     placed(bar, top, bottom);
     main.append(bar);
   }
@@ -34,6 +39,12 @@ describe('shellTopOf', () => {
     expect(shellTopOf(page(['update-banner glass', 68, 112.4]))).toBe(121);
     expect(shellTopOf(page(['update-banner glass', 68, 112], ['alert', 120, 160]))).toBe(168);
     expect(shellTopOf(page(['guard-stop', 68, 128]))).toBe(136);
+  });
+
+  /* On a phone the blocks of the menu and the bars stand 6 px apart, and what the page shows still starts 8 px under the last
+     (Design's rule on #1635). */
+  it('starts the room 8 px under the last bar however far apart the bars stand', () => {
+    expect(shellTopOf(pageApart('6px', ['update-banner glass', 62, 110], ['alert', 116, 160]))).toBe(168);
   });
 
   it('has no room of its own while no bar of the shell stands', () => {
@@ -77,19 +88,29 @@ describe('the map and an open department under the bars of the shell', () => {
   /* Design on #1639: a window or a card opens 8 px under the last element at the top: under the bar while one stands, as
      the room under the bars starts, else under the header. An open department's name plate is one too, as tall as its
      name wraps: the shell gives its height and the 8 px under it as --plate-room. The plate starts where the room under
-     the bars does, or beside the logo on a wide screen without a bar. With no department open a phone's card keeps its
-     place, where the name would stand, and a phone's window covers the page under the top bar. */
+     the bars does, or 8 px under the menu without a bar, on every screen (#1635), and so do the windows without one
+     (Design's decision on #1635), a phone's too, which covers the page under that. With no department open a phone's card
+     keeps its place, where the name would stand. */
   it("opens the windows and the cards under the bars, and under an open department's name as tall as it is", () => {
-    const under = 'max(var(--shell-top, 68px), calc(var(--shell-top, 12px) + var(--plate-room, 0px)))';
+    const under = 'calc(var(--shell-top, var(--under-menu)) + var(--plate-room, 0px))';
     expect(decl('.orch', 'top')).toBe(under);
     expect(decl('.agent-strips', 'top')).toBe(under);
     expect(decl('.acard', 'top')).toBe(under);
-    expect(decl('.orch', 'top', '(max-width: 760px)')).toBe('var(--shell-top, 56px)');
-    expect(decl('.acard', 'top', '(max-width: 760px)')).toBe('calc(var(--shell-top, 64px) + var(--plate-room, 52px))');
+    expect(decl('.orch', 'top', '(max-width: 760px)')).toBe('var(--shell-top, var(--under-menu))');
+    expect(decl('.acard', 'top', '(max-width: 760px)')).toBe('calc(var(--shell-top, var(--under-menu)) + var(--plate-room, 52px))');
   });
 
-  it("starts the department's name under the bars while one stands, beside the logo or under the top bar while none does", () => {
-    expect(decl('.crumbs', 'top')).toBe('var(--shell-top, 12px)');
-    expect(decl('.crumbs', 'top', '(max-width: 760px)')).toBe('var(--shell-top, 64px)');
+  /* A page keeps its own opaque header room (#1635 is for the map and the department): its windows and cards open under it
+     as before, or under a bar of the shell while one stands. */
+  it('opens the windows and the cards of a page under its header room, as before', () => {
+    expect(decl('.body.page ~ :is(.orch, .dv-drawer, .acard, .agent-strips)', 'top', '(min-width: 761px)')).toBe('var(--shell-top, 68px)');
+    expect(decl('.body.page ~ .orch', 'top', '(max-width: 760px)')).toBe('var(--shell-top, 56px)');
+  });
+
+  it("starts the department's name under the bars while one stands, and 8 px under the menu while none does, on every screen", () => {
+    expect(decl('.crumbs', 'transform')).toBe('translateY(var(--shell-top, var(--under-menu)))');
+    expect(decl('.crumbs', 'inset-inline-start')).toBe('var(--bar-edge)');
+    expect(decl('.crumbs', 'top', '(max-width: 760px)')).toBeUndefined();
+    expect(decl('.crumbs', 'inset-inline-start', '(max-width: 760px)')).toBeUndefined();
   });
 });

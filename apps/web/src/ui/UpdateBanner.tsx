@@ -2,6 +2,7 @@ import { useLayoutEffect, useState } from 'react';
 import { errorText, useLanguage, useT } from '../i18n';
 import type { UpdateCalledOff, UpdatesView, UpdateWaiting } from '../types';
 import type { Updates } from '../updates';
+import { useBarFold } from './shellBars';
 import { UpdateProgress } from './UpdateProgress';
 import { buildText, versionText } from './VersionMark';
 import { updateTargetText, versionedStatus } from './UpdateVersion';
@@ -69,6 +70,7 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
   const t = useT();
   const [, rerender] = useState(0);
   const [failure, setFailure] = useState<unknown>(null);
+  const fold = useBarFold();
   const showingProgress = showsUpdate(updates);
   useLayoutEffect(() => {
     if (!showingProgress || !onProgressShown) return;
@@ -125,8 +127,9 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
   }
   if (!body) return null;
   return (
-    <div className="update-banner glass" role="status" aria-label={t.updates.label}>
+    <div className={`update-banner glass${fold.open ? ' open' : ''}`} role="status" aria-label={t.updates.label}>
       {body}
+      {fold.more}
       {failure !== null && <p className="update-error" role="alert" dir="auto">{errorText(t, failure)}</p>}
     </div>
   );

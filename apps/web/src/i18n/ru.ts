@@ -421,6 +421,7 @@ export const ru: Messages = {
     account: 'Аккаунт',
     logOut: 'Выйти',
     version: (v: string) => `Версия ${v}`,
+    barMore: 'Еще',
   },
   skins: {
     title: 'Скины оформления',

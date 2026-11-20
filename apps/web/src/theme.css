@@ -284,13 +284,17 @@ select:disabled { opacity: .55; }
 .shell {
   --bar-top: 12px; --bar-edge: 16px; --bar-size: 44px; --bar-gap: 8px;
   --header-room: calc(2 * var(--bar-top) + var(--bar-size));
-  /* The glass of the header and the bars, and how long what stands under the bars takes to move when one comes or goes:
-     Design's #1635 chooses both, here alone (#1639). --shell-top, where the room under the bars starts on the map, the
-     shell measures and sets on itself while a bar stands; --plate-room, the height of an open department's name and the
-     8 px under it, while a department is open. */
-  --bar-glass: var(--hud); --shell-shift: 0s;
+  /* Design's #1635, variant A (#1639): the header, the bars of the shell and the bottom bar are glass blocks of the skin's
+     --hud, .94 in every skin, and what stands under the bars moves in 200 ms when one comes or goes, by transform. What
+     the map and a department show starts --float-gap, 8 px on every screen, under the last block at the top, though on a
+     phone the blocks stand 6 px apart: --under-menu while no bar stands, and --shell-top, which the shell measures and sets
+     on itself, while one does. --plate-room is the height of an open
+     department's name and the 8 px under it, while a department is open. */
+  --bar-glass: var(--hud); --shell-shift: 200ms; --float-gap: 8px;
+  --under-menu: calc(var(--bar-top) + var(--bar-size) + var(--float-gap));
   position: relative; height: 100%;
 }
+@media (prefers-reduced-motion: reduce) { .shell { --shell-shift: 0s; } }
 .topbar {
   position: absolute; z-index: 10; inset-block-start: var(--bar-top); inset-inline: var(--bar-edge);
   display: grid; grid-template-columns: 1fr minmax(0, auto) 1fr; align-items: start; gap: var(--bar-gap);
@@ -312,7 +316,9 @@ select:disabled { opacity: .55; }
 }
 .tabs button + button { border-inline-start: 1px solid var(--line); }
 .tabs button:hover { color: var(--ink); }
-.tabs button.on { color: var(--cyan-ink); background: var(--glow); box-shadow: inset 0 -2px 0 var(--cyan); }
+/* The chosen tab stands on an opaque backing, the accent's glow over the surface: over the glass alone what passes under it
+   would take its ink under 4.5:1 in a light skin (#1635). */
+.tabs button.on { color: var(--cyan-ink); background: linear-gradient(var(--glow), var(--glow)) var(--surface); box-shadow: inset 0 -2px 0 var(--cyan); }
 /* When the words of the tabs do not fit one line, each tab is its icon: cells of the strip's height with the icon in the
    middle, in the tab's own colour, and the count of what waits on the icon's corner. */
 .tabs svg { display: block; flex: none; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: butt; stroke-linejoin: miter; }
@@ -600,6 +606,27 @@ select:disabled { opacity: .55; }
 /* On the map the canvas and an open department fill the window from its top, and the header and the bars of the shell float
    over them (#1639): what they show starts under the last bar, at --shell-top as the shell measures it while a bar stands.
    An open department covers the map it flew in from, which keeps its size and view behind it. */
+/* There each bar is a glass block like the header's (#1635): no shadow, and the map shows between the blocks. A failure keeps
+   the mark at its start. A bar that comes shows from its top down on the curve and in the time what stands under the bars
+   slides on, so the slide never lets the content under the part of the bar already shown: from the menu's bottom, which
+   stands --bar-top above the first bar, or from the bar above, --bar-gap above the next. */
+.body:not(.page) > :is(.update-banner, .alert, .guard-stop) {
+  background: var(--bar-glass); border: 1px solid var(--line); box-shadow: none;
+  animation: bar-in var(--shell-shift) ease-out;
+}
+.body:not(.page) > .alert { border-inline-start: 3px solid var(--pink); }
+.body:not(.page) > .guard-stop { border-inline-start: 3px solid var(--pink-ink); }
+.body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ :is(.update-banner, .alert, .guard-stop) { --bar-above: var(--bar-gap); }
+@keyframes bar-in { from { clip-path: inset(0 0 calc(100% + var(--bar-above, var(--bar-top))) 0); } }
+/* On a phone every bar after the first folds to one line with More, which opens it whole (Design's decision on #1635): two
+   bars would take a third of the screen. More is hidden elsewhere: a .btn's display beats the hidden attribute by itself. */
+.bar-more[hidden] { display: none; }
+@media (max-width: 760px) {
+  .body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) { flex-wrap: nowrap; }
+  .body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) > span { flex: 1 1 auto; min-inline-size: 0; max-block-size: 1lh; overflow: hidden; }
+  .body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) > :not(span, .bar-more) { display: none; }
+  .body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) > .bar-more { display: inline-flex; flex: none; }
+}
 
 /* Map */
 .map { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -1131,12 +1158,10 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .t-card.done label { cursor: default; }
 .t-card.done label > *, .t-card.done h4 { opacity: .6; }
 
-/* What stands under the bars of the shell moves with them as one comes or goes, in the time the shell sets (#1639). */
-.crumbs, .orch, .acard, .agent-strips { transition-property: top; transition-duration: var(--shell-shift, 0s); }
-/* The orchestrator's window: a terminal over the right of the map. Like every window and card, it opens under the header, or
-   8 px under the bars of the shell while one stands over the map, and 8 px under an open department's name where that is
-   lower (#1639). */
-.orch { position: fixed; z-index: 9; top: max(var(--shell-top, 68px), calc(var(--shell-top, 12px) + var(--plate-room, 0px))); right: 16px; bottom: 76px; width: 640px; box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); font-family: var(--f-mono); font-size: 13px; line-height: 1.55; }
+/* The orchestrator's window: a terminal over the right of the map. Like every window and card, it opens 8 px under the last
+   block at the top: the menu, a bar of the shell while one stands over the map, and an open department's name under them
+   (#1639, Design's decision on #1635). */
+.orch { position: fixed; z-index: 9; top: calc(var(--shell-top, var(--under-menu)) + var(--plate-room, 0px)); right: 16px; bottom: 76px; width: 640px; box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); font-family: var(--f-mono); font-size: 13px; line-height: 1.55; }
 .t-bar { flex: none; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 4px 0 14px; border-bottom: 1px solid var(--line); font-family: var(--f-body); font-size: 12.5px; color: var(--muted); }
 .t-bar .lights { flex: none; display: flex; gap: 6px; }
 .t-bar .lights i { width: 10px; height: 10px; border-radius: 50%; background: var(--idle); }
@@ -1385,7 +1410,7 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .notebook-unread p { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .t-st { flex: none; display: flex; justify-content: space-between; gap: 12px; padding: 6px 16px 10px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 .t-st > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 760px) { .orch, .orch.term { left: 0; right: 0; top: var(--shell-top, 56px); bottom: 0; width: auto; border-left: 0; border-right: 0; } }
+@media (max-width: 760px) { .orch, .orch.term { left: 0; right: 0; top: var(--shell-top, var(--under-menu)); bottom: 0; width: auto; border-left: 0; border-right: 0; } }
 @media (prefers-reduced-motion: reduce) { .t-log > * { animation: none; } }
 
 /* A department card on the map opens the department. */
@@ -1434,9 +1459,9 @@ button.chip-btn.attn { --glow: var(--amber); --frame: var(--amber); }
   position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
   background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 22px 22px; -webkit-hyphens: auto; hyphens: auto;
 }
-/* The top bar and the department's name keep a band of their own over the page's background, and the schema starts under
-   it, as the tree does: it opens and fits clear of the bar, and a part dragged or zoomed up goes out of sight at its edge. */
-.dcanvas { inset-block-start: var(--tree-top, var(--header-room)); }
+/* The schema's canvas runs from the top of the window to its bottom, under the top bar, the department's name and the dock,
+   which are glass blocks over it with no band of their own (#1635, which replaces #1556's band). The schema opens and fits
+   clear of them; a part the person drags or zooms there passes under the glass. */
 .dcanvas:active { cursor: grabbing; }
 .dcanvas .wires .tick { fill: none; stroke: var(--line2); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
 .wires .ko { fill: none; stroke: var(--bg); stroke-width: 7; vector-effect: non-scaling-stroke; }
@@ -1560,10 +1585,14 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 .pchip .pn b { font-family: var(--f-display); font-size: 14px; font-weight: 600; overflow-wrap: break-word; }
 .pchip .pn span { font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
 .dv-empty { position: absolute; left: 50%; bottom: var(--tree-bottom, 76px); transform: translateX(-50%); margin: 0; padding: 10px 16px; font-size: 13px; color: var(--muted); }
-/* The department's name next to the logo, its actions bottom right and the drawer they open at the left. A name too long
-   for its room wraps its words, and the tree and the drawers start under it, as the department measures it. While a bar of
-   the shell stands, the name stands under the bars (#1639). */
-.crumbs { position: absolute; z-index: 3; top: var(--shell-top, 12px); inset-inline-start: 68px; display: flex; align-items: flex-start; gap: 8px; height: auto; max-width: calc(50% - var(--tabs-half, 204px) - 76px); min-width: 0; }
+/* The department's name 8 px under the menu, or under the last bar of the shell while one stands, on every screen; its
+   actions bottom right and the drawer they open at the left. A name too long for its room wraps its words, and the tree and
+   the drawers start under it, as the department measures it. It moves with the bars by transform (#1635, #1639). */
+.crumbs {
+  position: absolute; z-index: 3; top: 0; inset-inline-start: var(--bar-edge); display: flex; align-items: flex-start; gap: 8px; height: auto;
+  max-width: calc(100% - 2 * var(--bar-edge)); min-width: 0;
+  transform: translateY(var(--shell-top, var(--under-menu))); transition: transform var(--shell-shift) ease-out;
+}
 .crumbs h2 { min-width: 0; white-space: normal; overflow-wrap: break-word; font-size: 15px; color: var(--cyan-ink); }
 .crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; height: auto; min-height: 44px; box-sizing: border-box; min-width: 0; padding: 8px 14px; color: var(--ink); }
 .dv-acts { position: absolute; z-index: 3; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px; }
@@ -1594,7 +1623,7 @@ body:has(.dview) .version-mark { display: none; }
 /* The line of what changed sits between the zoom and the actions. */
 .dview .ticker { left: 212px; right: var(--ticker-right, 16px); transform: none; max-width: none; }
 .dv-drawer { position: absolute; z-index: 4; }
-.dv-drawer, .acard { top: max(var(--shell-top, 68px), calc(var(--shell-top, 12px) + var(--plate-room, 0px))); left: 16px; bottom: 76px; width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
+.dv-drawer, .acard { top: calc(var(--shell-top, var(--under-menu)) + var(--plate-room, 0px)); left: 16px; bottom: 76px; width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
 /* The drawer starts under the department's name and ends above the line of what happened, as the department measures them. */
 .dv-drawer { top: var(--tree-top, 68px); bottom: var(--tree-bottom, 76px); }
 .dv-drawer-h { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 6px 6px 18px; border-bottom: 1px solid var(--line); }
@@ -1739,6 +1768,10 @@ body:has(.dview) .version-mark { display: none; }
 /* A page has no strip at the bottom: there a card, task or window lies over it down to the bottom of the window, and the page
    keeps its width and place under it. */
 .body.page ~ .acard, .body.page ~ .orch { bottom: 0; }
+/* A page keeps its own opaque header room, which #1635 leaves as it is: its windows and cards open under that room as before,
+   or under a bar of the shell while one stands, where on the map and in a department they open 8 px under the menu. */
+@media (min-width: 761px) { .body.page ~ :is(.orch, .dv-drawer, .acard, .agent-strips) { top: var(--shell-top, 68px); } }
+@media (max-width: 760px) { .body.page ~ .orch { top: var(--shell-top, 56px); } }
 /* The body scrolls with the same 18 px of room at its end for a scrollbar in every browser, so its words are as wide in each:
    --sb is what this browser's scrollbar takes of it (style book section 9). */
 .ac-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-content: start; padding: 16px 18px 20px; padding-inline-end: calc(18px + max(0px, 18px - var(--sb, 0px))); }
@@ -1903,19 +1936,14 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .t-card.staff > .form-foot { margin-block-start: 10px; }
 
 @media (max-width: 760px) {
-  /* The name of the department stands under the top bar, or under the bars of the shell while one stands, and wraps its
-     words; the tree and the drawers start under it, as the department measures it. */
-  .crumbs { top: var(--shell-top, 64px); inset-inline-start: 16px; max-width: calc(100% - 32px); }
   .dv-acts { flex-wrap: wrap; }
   /* The hint of an empty map stands whole above the dock, which may grow to several rows: across the width, 16px above
      its top as the map measures it. */
   .dv-empty { left: 16px; right: 16px; bottom: calc(var(--tree-bottom, 228px) + 8px); transform: none; overflow-wrap: break-word; }
   /* A card opens 8 px under the department's name, as tall as it wraps, below the bars too; with no department open it keeps
      the place where the name would stand. */
-  .dv-drawer, .acard { top: calc(var(--shell-top, 64px) + var(--plate-room, 52px)); bottom: 16px; width: auto; right: 16px; }
+  .dv-drawer, .acard { top: calc(var(--shell-top, var(--under-menu)) + var(--plate-room, 52px)); bottom: 16px; width: auto; right: 16px; }
   .dv-drawer { top: var(--tree-top, 116px); }
-  /* The schema shows between the department's name and the dock, as the tree does: what scrolls under them goes out of sight. */
-  .dcanvas { inset-block: var(--tree-top, 116px) var(--tree-bottom, 228px); }
   .ac-pick, .staff-pick { grid-template-columns: minmax(0, 1fr); }
   .staff-pick { margin-inline-start: 0; }
   /* The dock stands across the bottom: the zoom at its end with out, in and Show everything, the line of what happened
@@ -3418,7 +3446,7 @@ th.k-prio .sorth { white-space: nowrap; }
 .side-panel > .acard { position: static; width: 100%; height: 100%; max-width: none; }
 .side-panel .ac-body > .notebook { padding: 0; overflow: visible; }
 /* Minimized windows: a strip each at the edge, one after another; what the edge cannot hold scrolls. */
-.agent-strips { position: fixed; z-index: 9; top: max(var(--shell-top, 68px), calc(var(--shell-top, 12px) + var(--plate-room, 0px))); right: 0; bottom: 76px; width: 32px; display: flex; flex-direction: column; gap: 4px; overflow: hidden auto; scrollbar-width: none; }
+.agent-strips { position: fixed; z-index: 9; top: calc(var(--shell-top, var(--under-menu)) + var(--plate-room, 0px)); right: 0; bottom: 76px; width: 32px; display: flex; flex-direction: column; gap: 4px; overflow: hidden auto; scrollbar-width: none; }
 .agent-strips:empty { display: none; }
 .agent-strip { flex: none; display: flex; flex-direction: column-reverse; border: 1px solid var(--cyan); box-sizing: border-box; background: var(--surface); }
 .agent-strip-open { display: flex; align-items: center; gap: 6px; min-height: 48px; max-height: 240px; padding: 8px 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; writing-mode: vertical-rl; }

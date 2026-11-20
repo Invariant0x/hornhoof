@@ -13,7 +13,7 @@ import { mapPeople, useOrg, wholeCompanyPeople, type MapPerson } from '../org';
 import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
 import { Bar, percent } from '../ui/Bar';
-import { CANVAS_NARROW, CANVAS_ZOOM_LIMITS, DRAG_PX, FLOAT_GAP, LEFT_PANEL_COVER, SIDE_GAP, canvasSpace, freeRoom, usePanZoom, ZoomBar, type Box, type Edges, type View } from '../ui/canvas';
+import { CANVAS_NARROW, CANVAS_ZOOM_LIMITS, DRAG_PX, FLOAT_GAP, LEFT_PANEL_COVER, SIDE_GAP, canvasSpace, freeRoom, sameView, usePanZoom, ZoomBar, type Box, type Edges, type View } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { useLoadFailure } from '../ui/LoadFailure';
 import { MapVersion } from '../ui/VersionMark';
@@ -678,6 +678,8 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   /* What the hand scrolls: the map as it stands, between the bars floating over it. */
   const edges = useRef<() => Edges | null>(() => null);
   const { view, setView, zoomAt, handlers, dragged, touched } = usePanZoom(box, org, { min: minZoom, max: MAX_K }, kept ?? undefined, () => edges.current());
+  const viewNow = useRef(view);
+  viewNow.current = view;
   /* Whether the view is the person's own: kept from before, shown with Fit, or dragged or zoomed. Only the person moves it
      then; until then the map shows all of itself, or readable. */
   const chose = useRef(!!kept);
@@ -790,15 +792,23 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     return room && org && shown && !inside ? { content: arrangedBounds(shown, org), room } : null;
   };
 
-  /* Show everything when whole; otherwise as the map opens, readable. */
+  /* Show everything when whole; otherwise as the map opens, readable. A fit because a bar of the shell came or went follows
+     the bars in the shell's time (#1635). */
+  const fittedTop = useRef<number | null | undefined>(undefined);
   const fit = useCallback((whole: boolean) => {
     const shown = arrRef.current, room = roomOf(FIT_SIDE);
     if (!room || !org || !shown || inside) return;
     const phone = box.current!.clientWidth <= CANVAS_NARROW;
     const v = mapView(room, arrangedBounds(shown, org), whole, phone ? PHONE_MAP_READABLE_K : MAP_READABLE_K, shown.hub.x + HUB);
     setMinZoom(Math.min(MIN_K, v.k));
-    setView({ ...v, smooth: true });
-  }, [org, inside, setView, roomOf]);
+    const shift = fittedTop.current !== undefined && fittedTop.current !== shellTop;
+    fittedTop.current = shellTop;
+    /* Where it already stands or glides to, it keeps going as it goes: a second look as a resize is watched again must not
+       turn the shell's slide into Fit's glide. */
+    if (sameView(viewNow.current, v)) return;
+    viewNow.current = { ...v, smooth: shift ? 'shift' : true };
+    setView(viewNow.current);
+  }, [org, inside, setView, roomOf, shellTop]);
   const fitRef = useRef(fit);
   fitRef.current = fit;
 
@@ -959,7 +969,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
             width: W,
             height: H,
             transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`,
-            transition: still || !view.smooth ? 'none' : view.smooth === 'fly' ? `transform ${FLY_MS / 1000}s cubic-bezier(.55,0,.25,1)` : 'transform .8s cubic-bezier(.3,.7,.2,1)',
+            transition: still || !view.smooth ? 'none' : view.smooth === 'fly' ? `transform ${FLY_MS / 1000}s cubic-bezier(.55,0,.25,1)` : view.smooth === 'shift' ? 'transform var(--shell-shift) ease-out' : 'transform .8s cubic-bezier(.3,.7,.2,1)',
           }}
         >
           <div className="halo" style={{ left: mx - HALO, top: my - HALO, width: 2 * HALO, height: 2 * HALO }} />

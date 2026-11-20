@@ -155,11 +155,10 @@ function CompanyPage({ tab, improvements, inbox, onTask, onHome }: {
 }
 
 /* The section tabs keep their words while all of them fit one line in the room the top bar leaves them: in the middle,
-   clear of the logo, the department's name beside it and the account, or from the start of the row on a phone with no logo.
-   Else each tab shows its icon and keeps its name as its label and tooltip. What the words need is measured as they are
-   shown, once for each set of words and when the fonts arrive; the room at every resize. The strip's half width goes to
-   the page as --tabs-half, for the department's name. */
-function useTabsFit(words: string, crumbs: number) {
+   clear of the logo and the account, or from the start of the row on a phone with no logo. Else each tab shows its icon and
+   keeps its name as its label and tooltip. What the words need is measured as they are shown, once for each set of words
+   and when the fonts arrive; the room at every resize. An open department's name stands under the menu (#1635). */
+function useTabsFit(words: string) {
   const bar = useRef<HTMLElement>(null), nav = useRef<HTMLElement>(null), brand = useRef<HTMLDivElement>(null), side = useRef<HTMLDivElement>(null);
   const [icons, setIcons] = useState(false);
   const [fonts, setFonts] = useState(false);
@@ -182,18 +181,17 @@ function useTabsFit(words: string, crumbs: number) {
       }
       const gap = parseFloat(getComputedStyle(top).columnGap) || 0;
       const logo = brand.current?.offsetWidth ?? 0;
-      const start = (logo ? logo + gap : 0) + (crumbs ? crumbs + gap : 0);
+      const start = logo ? logo + gap : 0;
       const end = (side.current?.offsetWidth ?? 0) + gap;
       const room = logo ? top.clientWidth - 2 * Math.max(start, end) : top.clientWidth - start - end;
       setIcons(need.current!.px > room);
-      top.parentElement?.style.setProperty('--tabs-half', `${strip.offsetWidth / 2}px`);
     };
     decide();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = guardedResizeObserver(decide, 'tabs');
     observer.observe(top);
     return () => observer.disconnect();
-  }, [icons, key, crumbs]);
+  }, [icons, key]);
   return { bar, nav, brand, side, icons };
 }
 
@@ -308,10 +306,10 @@ function shellVars(shellTop: number | null, plateRoom: number | null): CSSProper
   return { ...(shellTop === null ? {} : { '--shell-top': `${shellTop}px` }), ...(plateRoom === null ? {} : { '--plate-room': `${plateRoom}px` }) } as CSSProperties;
 }
 
-function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire, onCrumbs, onPlate }: MapRouteProps & {
+function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire, onPlate }: MapRouteProps & {
   deptId: string | null; denied: boolean; org: Org | null; orgFailure: unknown; shown: string | null; panel: 'window' | 'task' | null;
   openTask: (id: string) => void; openTracker: (departmentId: string) => void; openDepartment: (id: string) => void; onHire: (dept: Department) => void;
-  onCrumbs: (px: number) => void; onPlate: (room: number | null) => void;
+  onPlate: (room: number | null) => void;
 }) {
   if (tab !== 'map' || denied || missingDepartment) return null;
   if (!dept) return <DepartmentFallback deptId={deptId} org={org} orgFailure={orgFailure} />;
@@ -331,7 +329,6 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
       onOpenTracker={openTracker}
       onOpenDepartment={openDepartment}
       onHire={() => onHire(dept)}
-      onCrumbs={onCrumbs}
       onPlate={onPlate}
     />
   );
@@ -395,9 +392,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const account = useRef<HTMLDivElement>(null);
   const accountButton = useRef<HTMLButtonElement>(null);
   const closeContact = useCallback(() => { setContact(false); accountButton.current?.focus(); }, []);
-  /* How wide a department's name stands beside the logo, which the tabs leave room for. */
-  const [crumbs, setCrumbs] = useState(0);
-  const fit = useTabsFit(`${TABS.map(id => t.shell.tabs[id]).join('|')}|${decisions.waiting}`, crumbs);
+  const fit = useTabsFit(`${TABS.map(id => t.shell.tabs[id]).join('|')}|${decisions.waiting}`);
   /* Where the room under the bars of the shell starts, which the map and an open department start what they show at. */
   const page = useRef<HTMLElement>(null);
   const shellTop = useMeasuredShellTop(page);
@@ -461,7 +456,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
         </GuardBoundary>
         <GuardBoundary block="department" reset={deptId}>
-        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onCrumbs={setCrumbs} onPlate={setPlateRoom} onHire={dept => {
+        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onPlate={setPlateRoom} onHire={dept => {
           setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
           openAgent('orchestrator');
         }} />
