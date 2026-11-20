@@ -4,32 +4,43 @@ import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, programOperatorCases, subscriptions } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { modelLimitUntil } from '../conversation/limits.js';
+import { pump } from '../conversation/queue.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { escalateCase, expireOperatorCases, queueEscalation, syncOperatorCases } from './cases.js';
-import { callOperationsOnHold } from './hold-watch.js';
+import { callOperationsOnHold, callRecoveryResponders, holdWatchDue } from './hold-watch.js';
 import { fromStart, notStartedWords } from './not-started.js';
-import { acceptOperatorRecovery, settleOperatorHold } from './recovery.js';
+import { acceptOperatorRecovery, continueOnceAutomatically, settleOperatorHold } from './recovery.js';
+import { recoveryScreenRefusal, unavailableOperatorHold } from './recovery-state.js';
+import { requestRecoveryState } from './rpc.js';
 import { operatorTransaction } from './transactions.js';
 import { reconcileOperatorFallbacks } from './requeue.js';
 
 const needsHealth = or(eq(programOperatorCases.status, 'open'), eq(programOperatorCases.recoveryHold, true), and(eq(programOperatorCases.status, 'escalated'), isNull(programOperatorCases.escalationJobId)));
+type Case = typeof programOperatorCases.$inferSelect;
 
 /* Deadlines and missing wake recipients are durable; neither process restart nor an empty outbox loses the case. */
 export async function checkOperatorHealth(ctx: Ctx, now = new Date()): Promise<void> {
   await expireOperatorCases(ctx, now);
   await reconcileOperatorFallbacks(ctx, now);
   const entries = await ctx.db.selectDistinct(only(programOperatorCases, 'agentId')).from(programOperatorCases).where(needsHealth);
+  const watch: Case[] = [];
   for (const { agentId } of entries) {
     await operatorTransaction(ctx, async (tx, inside) => {
       await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, agentId)).for('update');
       const rows = await tx.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agentId), needsHealth)).for('update');
-      for (const row of rows) await restoreCase(inside, row, now);
+      for (const row of rows) {
+        const waiting = await restoreCase(inside, row, now);
+        if (waiting) watch.push(waiting);
+      }
     });
     await syncOperatorCases(ctx, agentId, now);
   }
+  /* Request fresh screens without holding database locks or waiting out each silent node in turn. */
+  const screens = await Promise.all(watch.map(async row => ({ row, state: await requestRecoveryState(ctx, row) })));
+  for (const { row, state } of screens) await checkUnavailableHold(ctx, row, state, now);
 }
 
-async function restoreCase(ctx: Ctx, row: typeof programOperatorCases.$inferSelect, now: Date): Promise<void> {
+async function restoreCase(ctx: Ctx, row: Case, now: Date): Promise<Case | undefined> {
   if (row.status === 'open' && !await operatorAvailable(ctx, row)) await escalateCase(ctx, row, 'operator_unavailable', now);
   if (row.status === 'escalated' && !row.escalationJobId) await queueEscalation(ctx, row);
   if (!row.recoveryHold) return;
@@ -39,15 +50,35 @@ async function restoreCase(ctx: Ctx, row: typeof programOperatorCases.$inferSele
     const parsed = OperatorNodeMessage.safeParse(data.operatorEvidence);
     if (parsed.success && parsed.data.type === 'program.recovery_ready') await acceptOperatorRecovery(ctx, parsed.data);
   }
-  await watchHold(ctx, row.id, now);
+  return watchHold(ctx, row.id, now);
 }
 
-async function watchHold(ctx: Ctx, id: string, now: Date): Promise<void> {
-  const stillHeld = async () => (await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.id, id), eq(programOperatorCases.recoveryHold, true))))[0];
-  const held = await stillHeld();
+async function stillHeld(ctx: Ctx, id: string): Promise<Case | undefined> {
+  return (await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.id, id), eq(programOperatorCases.recoveryHold, true))))[0];
+}
+
+async function watchHold(ctx: Ctx, id: string, now: Date): Promise<Case | undefined> {
+  const held = await stillHeld(ctx, id);
   if (held) await settleOperatorHold(ctx, held);
-  const waiting = await stillHeld();
-  if (waiting) await callOperationsOnHold(ctx, waiting, now, fromStart(waiting) ? notStartedWords : undefined);
+  const waiting = await stillHeld(ctx, id);
+  if (!waiting) return;
+  if (unavailableOperatorHold(waiting)) return holdWatchDue(waiting, now) ? waiting : undefined;
+  await callOperationsOnHold(ctx, waiting, now, fromStart(waiting) ? notStartedWords : undefined);
+}
+
+async function checkUnavailableHold(ctx: Ctx, seen: Case, state: Awaited<ReturnType<typeof requestRecoveryState>>, now: Date): Promise<void> {
+  const released = await operatorTransaction(ctx, async (tx, inside) => {
+    await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, seen.agentId)).for('update');
+    const row = await stillHeld(inside, seen.id);
+    if (!row || row.revision !== seen.revision || !unavailableOperatorHold(row)) return false;
+    if (state && !recoveryScreenRefusal(state)) await continueOnceAutomatically(inside, row, state.program);
+    const waiting = await stillHeld(inside, row.id);
+    if (!waiting) return true;
+    await callRecoveryResponders(inside, waiting);
+    return false;
+  });
+  await syncOperatorCases(ctx, seen.agentId, now);
+  if (released) await pump(ctx, seen.agentId);
 }
 
 async function operatorAvailable(ctx: Ctx, row: typeof programOperatorCases.$inferSelect): Promise<boolean> {

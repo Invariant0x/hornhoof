@@ -15,6 +15,7 @@ import { nodeHeld } from '../updates/drain.js';
 import { firstOfRun, outcomeOfOperatorTry } from './failure-run.js';
 import { fromStart } from './not-started.js';
 import { currentOperatorQuestion, liveFailureSignals, qualifyingReasons } from './policy.js';
+import { unavailableOperatorHold } from './recovery-state.js';
 import { operatorTransaction } from './transactions.js';
 import { operatorNotification } from './notifications.js';
 
@@ -278,7 +279,7 @@ async function resolveLiveBefore(ctx: Ctx, agentId: string, ordinal: number): Pr
 }
 
 export async function queueEscalation(ctx: Ctx, row: Case): Promise<void> {
-  if (row.escalationJobId) return;
+  if (row.escalationJobId || unavailableOperatorHold(row)) return;
   const first = await firstOfRun(ctx, row);
   return first ? shareEscalation(ctx, row, first) : openEscalation(ctx, row);
 }
@@ -344,7 +345,7 @@ export async function syncOperatorCases(ctx: Ctx, agentId: string, now = new Dat
 }
 
 async function pumpCaseNotices(ctx: Ctx, row: Case): Promise<void> {
-  for (const id of [row.operatorJobId, row.escalationJobId, row.continuationJobId, row.resolution?.holdCall?.job]) {
+  for (const id of [row.operatorJobId, row.escalationJobId, row.continuationJobId, row.resolution?.holdCall?.job, ...Object.values(row.resolution?.holdNoticeJobs ?? {})]) {
     if (!id) continue;
     const [job] = await ctx.db.select(only(jobs, 'agentId')).from(jobs).where(eq(jobs.id, id));
     if (job?.agentId) await pump(ctx, job.agentId);

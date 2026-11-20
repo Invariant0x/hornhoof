@@ -290,8 +290,14 @@ it('does not hold words whose own delivery showed the program at work', async ()
 const turnsWith = async (c: Held, agentId: string, word: string) =>
   (await c.db.select().from(jobs).where(eq(jobs.agentId, agentId)).orderBy(asc(jobs.createdAt))).filter(job => job.prompt.includes(word) && job.prompt.includes('program_recovery_release'));
 
-it('calls the program operator once for a hold of more than five minutes, with the way to see the program and release it', async () => {
+async function timedOutHold() {
   const c = await held();
+  await c.db.update(programOperatorCases).set({ resolution: { ...c.incident.resolution!, outcome: 'operator_timeout' } }).where(eq(programOperatorCases.id, c.incident.id));
+  return c;
+}
+
+it('calls the program operator once for a hold of more than five minutes, with the way to see the program and release it', async () => {
+  const c = await timedOutHold();
   const rob = await hire(c, 'Rob', 'worker', 'OPS-PROGRAM');
   const since = +(await c.row()).escalatedAt!;
   await checkOperatorHealth(c.ctx, new Date(since + 5 * MINUTE));
@@ -307,7 +313,7 @@ it('calls the program operator once for a hold of more than five minutes, with t
 });
 
 it('calls the head of Operations when the program operator is off, and never the reliability engineer', async () => {
-  const c = await held();
+  const c = await timedOutHold();
   const fixer = await hire(c, 'Fay', 'worker', 'OPS-FIX');
   const rob = await hire(c, 'Rob', 'worker', 'OPS-PROGRAM'), olga = await hire(c, 'Olga', 'head', 'OPS-HEAD');
   await c.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, rob.id));
@@ -318,7 +324,7 @@ it('calls the head of Operations when the program operator is off, and never the
 });
 
 it('never calls the agent that is on hold about itself, nor one that waits on a hold of its own', async () => {
-  const c = await held();
+  const c = await timedOutHold();
   await c.db.update(agents).set({ roleKey: 'OPS-PROGRAM', departmentId: c.watcher.departmentId }).where(eq(agents.id, c.agent.id));
   const olga = await hire(c, 'Olga', 'head', 'OPS-HEAD');
   await checkOperatorHealth(c.ctx, new Date(Date.now() + 6 * MINUTE));
@@ -327,7 +333,7 @@ it('never calls the agent that is on hold about itself, nor one that waits on a 
 });
 
 it('calls the orchestrator when all of Operations is off, and only once', async () => {
-  const c = await held();
+  const c = await timedOutHold();
   const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   await checkOperatorHealth(c.ctx, new Date(Date.now() + 6 * MINUTE));
   await checkOperatorHealth(c.ctx, new Date(Date.now() + 7 * MINUTE));
@@ -335,7 +341,7 @@ it('calls the orchestrator when all of Operations is off, and only once', async 
 });
 
 it('tells the orchestrator to see the program and release it itself, and still calls Operations once it can take it', async () => {
-  const c = await held();
+  const c = await timedOutHold();
   const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   await checkOperatorHealth(c.ctx, new Date(Date.now() + 6 * MINUTE));
   const [told] = await turnsWith(c, orchestrator!.id, c.incident.id);
@@ -350,7 +356,7 @@ it('tells the orchestrator to see the program and release it itself, and still c
 });
 
 it('calls only who can release it: never the head of a part of Operations in place of its head', async () => {
-  const c = await held();
+  const c = await timedOutHold();
   const [part] = await c.db.insert(departments).values({ companyId: c.companyId, name: 'Watch', roleCode: 'WATCH', parentId: c.watcher.departmentId }).returning();
   const [sam] = await c.db.insert(agents).values({ companyId: c.companyId, name: 'Sam', kind: 'head', roleKey: 'WATCH-HEAD', departmentId: part!.id, subscriptionId: c.sub.id, model: '' }).returning();
   const olga = await hire(c, 'Olga', 'head', 'OPS-HEAD');
@@ -374,6 +380,7 @@ it.each<[string, Partial<typeof FREE>]>([
 ])('automatically releases the unavailable operator hold with %s and restarts the queue', async (_screen, facts) => {
   const c = await held();
   const head = await hire(c, 'Operations lead', 'head', 'OPS-HEAD');
+  const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   showRecoveryState(c, facts);
   const waiting = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Later words.', createdBy: null });
   expect(await c.jobOf(waiting)).toMatchObject({ status: 'queued' });
@@ -386,12 +393,14 @@ it.each<[string, Partial<typeof FREE>]>([
   expect(children).toHaveLength(1);
   expect(children[0]).toMatchObject({ status: 'running' });
   expect(await c.row()).toMatchObject({ status: 'resolved', recoveryHold: false, continuationJobId: children[0]!.id });
-  expect(await turnsWith(c, head.id, c.incident.id)).toEqual([]);
+  for (const responder of [orchestrator!, head]) {
+    expect((await c.turnsOf(responder.id)).filter(job => job.prompt.includes(c.incident.id))).toEqual([]);
+  }
 });
 
 it.each<[string, Partial<typeof FREE>]>([
   ['a question', { wait: 'permission' }],
-  ['a person’s unsent words', { input: 'text' }],
+  ["a person's unsent words", { input: 'words' }],
 ])('keeps the unavailable operator hold with %s and writes each responder once', async (_screen, facts) => {
   const c = await held();
   const head = await hire(c, 'Operations lead', 'head', 'OPS-HEAD');
@@ -409,6 +418,8 @@ it.each<[string, Partial<typeof FREE>]>([
     expect(calls).toHaveLength(1);
     expect(calls[0]!.prompt).toContain(c.agent.name);
     expect(calls[0]!.prompt).toContain(heldSince);
+    const [letter] = await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, calls[0]!.id), eq(agentEvents.kind, 'message')));
+    expect(letter?.data).toMatchObject({ text: expect.stringContaining(heldSince) });
   }
 
   showRecoveryState(c, {});
