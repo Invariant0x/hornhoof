@@ -51,9 +51,9 @@ const groupLimits = (group: LimitGroup): Limits => ({ status: group.status, wind
 const groupsOf = (limits: Limits | null): LimitGroup[] => limits?.groups ?? [];
 
 /* The fullest current group speaks for each window. Among equal shares, prefer the reset shown by the plan as a whole. */
-function mainGroups(limits: Limits | null) {
+function mainGroups(limits: Limits) {
   const byWindow = new Map<string, { group: LimitGroup; used: number; matchesReset: boolean }>();
-  const resetByWindow = new Map(limits?.windows.map(w => [w.name, w.resetsAt]));
+  const resetByWindow = new Map(limits.windows.map(w => [w.name, w.resetsAt]));
   for (const group of groupsOf(limits)) {
     for (const { name, utilization: used, resetsAt } of group.windows) {
       if (used === null) continue;
@@ -93,9 +93,8 @@ function GroupParts({ sub, groups, now, main }: { sub: SubView; groups: LimitGro
 export function PlanLimitParts({ sub, now }: { sub: SubView; now: number }) {
   const t = useT();
   const limits = sub.kind === 'api_key' ? null : currentPlanLimits(sub, now);
-  const groups = groupsOf(limits);
-  if (!groups.length) return <Part title={t.subs.limits}><LimitMeters sub={sub} now={now} /></Part>;
-  return <GroupParts sub={sub} groups={groups} now={now} main={mainGroups(limits)} />;
+  if (!limits?.groups?.length) return <Part title={t.subs.limits}><LimitMeters sub={sub} now={now} /></Part>;
+  return <GroupParts sub={sub} groups={limits.groups} now={now} main={mainGroups(limits)} />;
 }
 
 /* A window's used share, then when it resets, as one phrase of the dictionary, whole in the direction of its words: the
@@ -124,9 +123,8 @@ export function LimitCell({ sub, name, now }: { sub: SubView; name: string; now:
   const t = useT();
   if (sub.kind === 'api_key') return <span className="cell-na">{t.subs.noPlanLimits}</span>;
   const limits = currentPlanLimits(sub, now);
-  const groups = groupsOf(limits);
-  if (!groups.length) return <LimitLine sub={sub} name={name} limits={limits} now={now} />;
+  if (!limits?.groups?.length) return <LimitLine sub={sub} name={name} limits={limits} now={now} />;
   const main = mainGroups(limits).get(name)?.group;
-  return <ul className="where-list">{groups.map(group => <li key={group.name}><GroupLine sub={sub} name={name} limits={groupLimits(group)} now={now} group={group.name} showBar={group === main} /></li>)}</ul>;
+  return <ul className="where-list">{limits.groups.map(group => <li key={group.name}><GroupLine sub={sub} name={name} limits={groupLimits(group)} now={now} group={group.name} showBar={group === main} /></li>)}</ul>;
 }
 
