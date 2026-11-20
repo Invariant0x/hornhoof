@@ -8,7 +8,7 @@ import { idOnly, only } from '../../db/selections.js';
 import { nodeIdentity, ownBuiltin } from '../nodes/hub.js';
 import { planNodes } from '../nodes/nodes.js';
 import { insertTurn, pump } from '../conversation/queue.js';
-import { limitUntil } from '../conversation/limits.js';
+import { modelLimitUntil } from '../conversation/limits.js';
 import { takesTurns } from '../conversation/placement.js';
 import { appendEvent } from '../events/store.js';
 import { nodeHeld } from '../updates/drain.js';
@@ -153,7 +153,7 @@ async function pickOperator(ctx: Ctx, companyId: string, target: string) {
     .innerJoin(departments, eq(departments.id, agents.departmentId)).innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId))
     .where(and(eq(agents.companyId, companyId), eq(subscriptions.companyId, companyId), eq(departments.companyId, companyId), eq(departments.templateKey, 'operations'), eq(agents.roleKey, PROGRAM_OPERATOR_ROLE), eq(agents.kind, 'worker'), ne(agents.id, target), isNull(agents.removedAt), isNull(agents.switchedOffAt), isNull(subscriptions.removedAt), eq(subscriptions.status, 'ready'))).orderBy(asc(agents.createdAt));
   for (const { agent, sub } of candidates) {
-    if (!(await planCanTakeTurn(ctx, sub)) || limitUntil(sub.limits, sub.limitsUpdatedAt)) continue;
+    if (!(await planCanTakeTurn(ctx, sub)) || modelLimitUntil(sub, agent.model)) continue;
     const [stuck] = await ctx.db.select(idOnly(programOperatorCases)).from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agent.id), or(eq(programOperatorCases.status, 'open'), eq(programOperatorCases.recoveryHold, true)))).limit(1);
     if (!stuck) return agent;
   }

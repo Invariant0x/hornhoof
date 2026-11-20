@@ -290,17 +290,20 @@ const AT = '2026-11-02T12:00:00.000Z';
 const STRUCTURE: ProposalDecision = { id: 'pr1', kind: 'structure', agent: { id: 'a1', name: 'Orchestrator' }, department: null, brief: 'Add Support.', items: [{ template: 'support', checked: true, note: 'Answers customers.' }], at: AT, ownerPersonId: 'p1', canAnswer: true };
 
 describe('the decisions of one person', () => {
-  it("open from that person's card on the map, with a filter one can see and take off", async () => {
+  it("open from that person's card on the map under a title with their name, and Me takes the filter off", async () => {
     const user = userEvent.setup();
     shell({ 'GET /api/org': [200, counted({ p1: 1, p4: 1 })], 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: 'p4' }, REQUESTS[1]!])] });
     await user.click(await screen.findByRole('button', { name: 'Dan: 1 decision waits' }));
     expect(await screen.findByRole('heading', { level: 1, name: 'Waits for Dan' })).toBeInTheDocument();
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
-    expect(within(waiting).getByText('Decisions for Dan')).toBeInTheDocument();
     expect(within(waiting).getAllByRole('article').map(a => a.getAttribute('aria-label'))).toEqual(['#9 Pick a payment provider']);
-    await user.click(within(waiting).getByRole('button', { name: "Show everyone's decisions" }));
+    /* What waits for other people has its own section, so the title alone names the person, with no way to everyone's
+       decisions. */
+    expect(waiting).not.toHaveTextContent('Decisions for Dan');
+    expect(within(waiting).queryByRole('button', { name: "Show everyone's decisions" })).toBeNull();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'View as' }), 'Me, Ivan');
+    expect(screen.getByRole('heading', { level: 1, name: 'Waits for me' })).toBeInTheDocument();
     expect(within(waiting).getAllByRole('article')).toHaveLength(2);
-    expect(within(waiting).queryByText('Decisions for Dan')).not.toBeInTheDocument();
   });
 
   it('say plainly when nothing waits for that person, and give way to all of them when Tasks is opened by hand', async () => {
@@ -308,12 +311,12 @@ describe('the decisions of one person', () => {
     shell({ 'GET /api/org': [200, counted({ p1: 2 })] });
     await user.click(await screen.findByRole('button', { name: 'Maria: no decisions wait' }));
     const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
-    expect(waiting).toHaveTextContent('Decisions for Maria');
+    expect(screen.getByRole('heading', { level: 1, name: 'Waits for Maria' })).toBeInTheDocument();
     expect(waiting).toHaveTextContent('Nothing waits for a decision from Maria.');
     await user.click(screen.getByRole('button', { name: 'Map' }));
     await user.click(screen.getByRole('button', { name: /^Tasks/ }));
     expect(await within(await screen.findByRole('region', { name: 'Waiting for you' })).findAllByRole('article')).toHaveLength(2);
-    expect(screen.queryByText('Decisions for Maria')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Waits for Maria' })).not.toBeInTheDocument();
   });
 
   it("shows the structure card and counts no machine access decision", async () => {
@@ -608,10 +611,10 @@ describe('cards for the person', () => {
     const user = userEvent.setup();
     shell({ 'GET /api/org': [200, counted({ p1: 1, p4: 1 })], 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: 'p4' }, REQUESTS[1]!])], 'GET /api/wait-cards': [200, { cards: [TAG], next: null }] });
     await user.click(await screen.findByRole('button', { name: 'Dan: 1 decision waits' }));
-    const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
-    expect(within(waiting).getByText('Decisions for Dan')).toBeInTheDocument();
+    await screen.findByRole('region', { name: 'Waiting for you' });
+    expect(screen.getByRole('heading', { level: 1, name: 'Waits for Dan' })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'A version was marked without a release' })).not.toBeInTheDocument();
-    await user.click(within(waiting).getByRole('button', { name: "Show everyone's decisions" }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'View as' }), 'Me, Ivan');
     expect(await screen.findByRole('region', { name: 'A version was marked without a release' })).toBeInTheDocument();
   });
 });

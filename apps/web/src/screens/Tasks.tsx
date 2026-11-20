@@ -86,10 +86,9 @@ function TaskSearch({ query, onChange }: { query: string; onChange: (query: stri
 type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator'> & {
   org: Org | null;
   place: (p: TaskLine['department']) => string;
-  /* Whose: the person looked at, or the viewer with none. filtered: the person is picked by a filter the viewer may take off. */
+  /* Whose: the person looked at, whom the page's title names, or the viewer with none. */
   personId: string | null;
   viewerId: string;
-  onClearPerson?: () => void;
   /* The tasks that wait for that person. */
   tasks: TaskLine[];
   recipient: string;
@@ -102,21 +101,6 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
 const decisionsOfWho = (personId: string | null, viewerId: string): DecisionsOf => (personId ? { person: personId } : { viewer: viewerId });
 
 const shownNone = (s: ShownDecisions) => !s.requests.length && !s.proposals.length && !s.merges.length;
-
-/* The person whose decisions show, with a cross that shows everyone's again. */
-function PersonFilter({ name, onClear }: { name: string; onClear: () => void }) {
-  const t = useT();
-  return (
-    <p className="filter-chip">
-      <span>{t.tasks.decisionsFor(name)}</span>
-      <button className="zbtn" type="button" aria-label={t.tasks.showAll} title={t.tasks.showAll} onClick={onClear}>
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M6 6l12 12M18 6L6 18" />
-        </svg>
-      </button>
-    </p>
-  );
-}
 
 const nothing = () => {};
 
@@ -171,9 +155,9 @@ function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () 
 }
 
 /* What waits for the person: what agents ask, the orchestrator's cards, the cards Hornhoof
-   kept for them, and the tasks that wait for them. For another person, only theirs, with the filter in sight when it may be
-   taken off. */
-function WaitingForYou({ decisions, decisionsFailure, personId, viewerId, onClearPerson, tasks, recipient, kept, onCardsSeen, ...rest }: Waiting) {
+   kept for them, and the tasks that wait for them. For another person, only theirs; the page's title names them, and what
+   waits for everyone else is in Waiting for people. */
+function WaitingForYou({ decisions, decisionsFailure, personId, viewerId, tasks, recipient, kept, onCardsSeen, ...rest }: Waiting) {
   const t = useT();
   const [failure, setFailure] = useState<unknown>(null);
   const shown = shownDecisions(decisions, decisionsOfWho(personId, viewerId));
@@ -183,7 +167,6 @@ function WaitingForYou({ decisions, decisionsFailure, personId, viewerId, onClea
   return (
     <section className="waiting" aria-label={t.tasks.waiting}>
       <h2>{t.tasks.waiting}</h2>
-      {personId && onClearPerson && <PersonFilter name={name} onClear={onClearPerson} />}
       <DecisionList shown={shown} onFailure={setFailure} {...rest} />
       <WaitCards cards={cards} onOpenTask={rest.onOpenTask} onSeen={onCardsSeen} />
       {tasks.length > 0 && <WaitingTasks tasks={tasks} personOf={() => recipient} heading={personId ? t.tracker.waitTasksOf(name) : t.tracker.waitTasks} onOpenTask={rest.onOpenTask} />}
@@ -197,11 +180,13 @@ function WaitingForYou({ decisions, decisionsFailure, personId, viewerId, onClea
 type PeopleWaiting = Pick<Waiting, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place'> & {
   /* The tasks that wait for any person. */
   tasks: TaskLine[];
+  /* The section names itself below the results of a search; the page's title right above names it otherwise. */
+  titled: boolean;
 };
 
 /* What waits for people in the company, for those who see the whole of it: every decision the viewer sees, each saying whom
    it waits for, and the tasks that wait for a person. */
-function WaitingForPeople({ decisions, decisionsFailure, tasks, ...rest }: PeopleWaiting) {
+function WaitingForPeople({ decisions, decisionsFailure, tasks, titled, ...rest }: PeopleWaiting) {
   const t = useT();
   const words = t.tracker.peopleWaits;
   const [failure, setFailure] = useState<unknown>(null);
@@ -213,7 +198,7 @@ function WaitingForPeople({ decisions, decisionsFailure, tasks, ...rest }: Peopl
   };
   return (
     <section className="waiting" aria-label={words.title}>
-      <h2>{words.title}</h2>
+      {titled && <h2>{words.title}</h2>}
       <DecisionList shown={shown} onFailure={setFailure} waitsFor={waitsFor} {...rest} />
       {tasks.length > 0 && <WaitingTasks tasks={tasks} personOf={personWaited} heading={words.tasks} onOpenTask={rest.onOpenTask} />}
       {decisions && shownNone(shown) && !tasks.length && <p className="muted">{words.nothing}</p>}
@@ -538,7 +523,6 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const mainFailure = shownLoadFailure(placesFailure, updateSaysIt) ?? shownLoadFailure(failure, updateSaysIt);
   if (unavailableFailure(mainFailure)) return <RouteUnavailable onHome={onHome} />;
   const broken = mainFailure ?? shownLoadFailure(tracked(goalsFailure), updateSaysIt) ?? shownLoadFailure(tracked(pipelinesFailure), updateSaysIt);
-  const clearPerson = () => onPlace({ ...place, personId: undefined });
   /* What waits: for people in the company on their page, else for the person. */
   const waiting = section.kind === 'people' ? (
     <WaitingForPeople
@@ -546,6 +530,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       decisionsFailure={decisionsFailure}
       onDecisionsChanged={onDecisionsChanged}
       tasks={waitsOnPeople}
+      titled={found !== null}
       onOpenTask={onOpenTask}
       onOpenAgent={onOpenAgent}
       onOpenOrchestrator={onOpenOrchestrator}
@@ -559,7 +544,6 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       onDecisionsChanged={onDecisionsChanged}
       personId={decisionsOf}
       viewerId={me.person.id}
-      onClearPerson={clearPerson}
       tasks={waitsOnWho}
       recipient={recipient}
       kept={kept}
