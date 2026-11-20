@@ -555,7 +555,8 @@ wipe_step() {
       ;;
     files)
       WIPE_WHY='could not remove the files of its database'
-      rm -rf "$CONTROL/dumps" "$CONTROL/restore" "$CONTROL/schema" "$CONTROL/uploads" &&
+      # The app and the keeper can write in these folders, so none is removed by its path: remove_folders follows no link.
+      remove_folders dumps restore schema uploads &&
         rm -f "$SERVER_DIR"/backups/hornhoof-*.sql.gz "$SERVER_DIR"/backups/hornhoof-*.sql.gz.part "$SERVER_DIR"/backups/hornhoof-*.tunnel.json "$CONTROL/schema.json" "$CONTROL/dump.json" "$CONTROL/upload.json"
       ;;
     env)

@@ -235,3 +235,53 @@ remove_in() (
   local name
   for name in "$@"; do rm -f -- "./${name:?}" 2> /dev/null || true; done
 )
+
+# device <path>: the file system what is at the path is on.
+device() {
+  stat -c '%d' -- "$1" 2> /dev/null || stat -f '%d' -- "$1" 2> /dev/null
+}
+
+# clear_here [depth]: empties the folder the shell entered by what it really is. A folder in it is entered the same way,
+# by what it really is and only on the same file system, emptied in a shell of its own, and removed; anything else goes
+# itself, a link too, never what it points to. Nothing is ever deleted by a path that leads through a folder, so a folder
+# swapped for a link meanwhile, even by a process that holds it open, is never followed: the link stays, as does a folder
+# that is no longer what it was. All else goes, and this fails when anything stayed. A tree more than 16 folders deep is
+# left whole below that, as none of the updater's own is.
+clear_here() {
+  local depth=${1:-0} here dev item status=0
+  [ "$depth" -lt 16 ] || return 1
+  here=$(physical_dir) && dev=$(device .) || return 1
+  for item in ./* ./.[!.]* ./..?*; do
+    [ -L "$item" ] || [ -e "$item" ] || continue
+    if [ ! -L "$item" ] && [ -d "$item" ]; then
+      (cd -P -- "$item" 2> /dev/null && [ "$(physical_dir)" = "${here%/}/${item#./}" ] && [ "$(device .)" = "$dev" ] && clear_here "$((depth + 1))") &&
+        rmdir -- "$item" 2> /dev/null || status=1
+    else
+      rm -f -- "$item" 2> /dev/null || status=1
+    fi
+  done
+  return "$status"
+}
+
+# remove_folders <name>...: folders of the control folder go with everything in them, as a wipe removes them. Each is
+# first renamed, which follows no link, into a private folder of the updater's own made beside it, where the app and the
+# keeper cannot reach it by its path, and is emptied there by clear_here; a link at the name goes the same way, itself.
+# A private folder an earlier pass could not empty is emptied too. Fails when anything stayed, so the wipe tries again.
+remove_folders() (
+  local name here private target status=0
+  entered "$CONTROL" && here=$(physical_dir) || exit 1
+  if [[ "$OSTYPE" == linux* ]]; then exec 9< . || exit 1; fi
+  for name in "$@"; do
+    [ -L "./$name" ] || [ -e "./$name" ] || continue
+    private=$(mktemp -d .remove.XXXXXXXX) || { status=1; continue; }
+    target="../$name"
+    # Keep the source in the entered folder even if the private folder is moved.
+    if [[ "$OSTYPE" == linux* ]]; then target="/proc/self/fd/9/$name"; fi
+    (enter_stage "$here" "$private" && move_over "$target" ./gone) || status=1
+  done
+  for private in ./.remove.*; do
+    [ ! -L "$private" ] && [ -d "$private" ] && [ -O "$private" ] || continue
+    (enter_stage "$here" "${private#./}" && clear_here) && rmdir -- "$private" 2> /dev/null || status=1
+  done
+  exit "$status"
+)
