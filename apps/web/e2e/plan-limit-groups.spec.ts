@@ -115,7 +115,18 @@ for (const look of LOOKS) {
       await expect(cell.getByRole('listitem').filter({ hasText: group })).toContainText(t.subs.groupShare(group, t.subs.usedAndReset(share, t.subs.resetsIn(''))).trim());
     }
     expect(await cell.locator('.bar').count()).toBe(1);
-    await expect(cell.getByRole('listitem').filter({ hasText: 'Claude and GPT models' }).locator('.bar')).toBeVisible();
+    const main = cell.getByRole('listitem').filter({ hasText: 'Claude and GPT models' });
+    const bar = main.locator('.bar');
+    await expect(bar).toBeVisible();
+    const [barBox, mainText, previous] = await Promise.all([
+      bar.boundingBox(),
+      main.locator('.cell-lim > span:last-child').boundingBox(),
+      cell.getByRole('listitem').filter({ hasText: 'Gemini Models' }).boundingBox(),
+    ]);
+    const gapToOwnText = mainText!.y - (barBox!.y + barBox!.height);
+    expect(gapToOwnText).toBeGreaterThanOrEqual(0);
+    expect(gapToOwnText).toBeLessThanOrEqual(4);
+    expect(barBox!.y - (previous!.y + previous!.height)).toBeGreaterThanOrEqual(12);
     const card = await openCard(page, look);
     await expect(card.getByRole('heading', { name: t.subs.limits, exact: true })).toHaveCount(0);
     for (const [group, shares] of [['Gemini Models', ['0%', '6%']], ['Claude and GPT models', ['100%', '100%']]] as const) {

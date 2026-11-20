@@ -3274,6 +3274,8 @@ th.k-prio .sorth { white-space: nowrap; }
 .cell-load .bar { width: 64px; flex: 1 1 64px; min-width: 24px; max-width: 64px; }
 .cell-load b, .num { font-weight: 500; font-variant-numeric: tabular-nums; white-space: normal; }
 .cell-lim { display: grid; gap: 4px; min-width: 0; }
+.where-list.limit-groups { gap: 12px; }
+.limit-groups .cell-lim { gap: 0; }
 .cell-lim .bar { width: 80px; }
 .cell-lim span { font-size: 12px; color: var(--muted); }
 .cell-lim b { font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }

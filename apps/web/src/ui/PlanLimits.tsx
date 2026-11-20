@@ -125,6 +125,6 @@ export function LimitCell({ sub, name, now }: { sub: SubView; name: string; now:
   const limits = currentPlanLimits(sub, now);
   if (!limits?.groups?.length) return <LimitLine sub={sub} name={name} limits={limits} now={now} />;
   const main = mainGroups(limits).get(name);
-  return <ul className="where-list">{limits.groups.map(group => <li key={group.name}><GroupLine sub={sub} name={name} limits={groupLimits(group)} now={now} group={group.name} showBar={group === main} /></li>)}</ul>;
+  return <ul className="where-list limit-groups">{limits.groups.map(group => <li key={group.name}><GroupLine sub={sub} name={name} limits={groupLimits(group)} now={now} group={group.name} showBar={group === main} /></li>)}</ul>;
 }
 
