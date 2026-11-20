@@ -58,6 +58,7 @@ import { lifecycleCommand } from './lifecycle-command.js';
 import { heldJobs } from './held-jobs.js';
 import { nodeLog } from './node-log.js';
 import { AuthorChecks } from './author-check.js';
+import { Stops, type HeldJob } from './stops.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -256,9 +257,15 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const holdsSignIn = single !== null && !builtin;
 
   /* Each running job with the way to call it off and the promise of its end, and the same for parts of test runs. */
-  const running = new Map<string, { stop: AbortController; done: Promise<void>; sessionId: string | null }>();
-  /* Jobs whose end a Stop told at once: when their run ends after all, that end is not told again. */
-  const toldStopped = new Set<string>();
+  const running = new Map<string, HeldJob & { done: Promise<void> }>();
+  /* A Stop Hornhoof sends for a job: the node tells its end at once and only once. */
+  const stops = new Stops({
+    held: jobId => running.get(jobId),
+    outside: jobId => outside.stop(jobId),
+    host: () => host,
+    emit: end => emit(end),
+    hold: end => outbox.hold(end),
+  });
   const testing = new Map<string, { stop: AbortController; done: Promise<void> }>();
   /* The messages that change the company's data, numbered and kept in the volume until Hornhoof confirms them, so a
      restart of the node or of Hornhoof loses none. A job's end counts as running until then. */
@@ -510,7 +517,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (m.type === 'jobs.check') return emit(heldJobs(m.jobIds, holds()));
     if (m.type === 'node.log.read') return emit({ type: 'node.log', requestId: m.requestId, log: life.tail() });
     if (m.type === 'phone.probe' || m.type === 'phone.list' || m.type === 'phone.baseline' || m.type === 'phone.open' || m.type === 'phone.action' || m.type === 'phone.renew' || m.type === 'phone.revoke') return phones.handle(m);
-    if (m.type === 'job.cancel') return callOff(m.jobId);
+    if (m.type === 'job.cancel') return stops.callOff(m.jobId);
     // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- job.run is handled right after the switch
     switch (m.type) {
       case 'term.open': {
@@ -566,30 +573,6 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     const done = runOne(m, controller.signal);
     running.set(m.jobId, { stop: controller, done, sessionId: m.sessionId });
     await done;
-  }
-
-  /* Hornhoof calls a job off: its program stops as on Escape, and a job this node runs ends as stopped at once, though its
-     run may still wait for the program to say the turn ended. A turn a person typed tells its end itself; a job the node
-     does not hold has nothing to stop. */
-  async function callOff(jobId: string) {
-    const held = running.get(jobId);
-    held?.stop.abort();
-    outside.stop(jobId);
-    if (held) tellStopped(jobId, held.sessionId);
-    await host?.cancel(jobId);
-  }
-
-  /* The end a Stop tells for a job the node runs, once: with the session and tokens of its turn, when the host has them. */
-  function tellStopped(jobId: string, sessionId: string | null) {
-    if (toldStopped.has(jobId)) return;
-    toldStopped.add(jobId);
-    const end = host?.calledOffEnd(jobId);
-    emit({ type: 'job.done', jobId, ok: false, sessionId: end?.sessionId ?? sessionId, result: 'Stopped.', tail: '', error: 'cancelled', ...(end ? { tokens: end.tokens } : {}) });
-  }
-
-  /* A job's end from the moment it leaves running, unless a Stop told it already. */
-  function holdEnd(done: JobDone) {
-    if (!toldStopped.delete(done.jobId)) outbox.hold(done);
   }
 
   /* A plan's sign-in Hornhoof sealed to this node: opened with its key and kept where the program reads it. What goes into
@@ -692,7 +675,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     const started = m.call ? await calls.enter(signal).then(() => true, () => false) : true;
     const done: JobDone = started ? await runStarted(m, signal) : { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: 'Stopped.', tail: '', error: 'cancelled' };
     /* The end counts as running from here, so a hello while the limits are read does not give the job up. */
-    holdEnd(done);
+    stops.ended(done);
     running.delete(m.jobId);
     /* A turn that ended before its program started may have met a work folder the node cannot write: Hornhoof hears it with
        the status below, before the end of the turn, and gives the node no turn until a write there works again. */

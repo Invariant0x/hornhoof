@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { atTypedWork, atWork, cleanups } from './terminal-host-receipts-helpers.js';
+import { atTypedWork, atWork, cleanups, SESSION } from './terminal-host-receipts-helpers.js';
 
 /* How often the node pressed Escape in the agent's program so far. */
 const escapes = (keys: { mock: { calls: unknown[][] } }) => keys.mock.calls.filter(call => call.slice(1).includes('Escape')).length;
@@ -15,6 +15,8 @@ describe('Hornhoof calls off a turn the node holds', () => {
     const c = await atWork(kind, kind === 'codex' ? 'silent' : 'queued');
     let ended = false;
     void c.running.then(() => { ended = true; });
+    /* What the node tells as the end of a turn Hornhoof gave: the agent's session as the host knows it. */
+    expect(c.host.calledOffEnd('job-receipt')).toMatchObject({ sessionId: SESSION });
     await c.on(c.host.cancel('job-receipt'));
     /* No end signal comes: the turn ends from the call alone, in a few looks of virtual time. */
     await c.pass(100);
@@ -22,6 +24,7 @@ describe('Hornhoof calls off a turn the node holds', () => {
     expect(ended).toBe(true);
     expect(await c.running).toMatchObject({ ok: false, error: 'cancelled' });
     /* Hornhoof asks again for a job a node still lists, and the program says its turn ended after all. */
+    expect(c.host.calledOffEnd('job-receipt')).toBeNull();
     await c.on(c.host.cancel('job-receipt'));
     c.finish();
     await c.pass(100);
@@ -32,6 +35,8 @@ describe('Hornhoof calls off a turn the node holds', () => {
   it('still ends a turn a person typed as stopped, once, after one Escape', async () => {
     const c = await atTypedWork('claude', 'queued');
     const before = escapes(c.keys);
+    /* A turn a person typed tells its own end. */
+    expect(c.host.calledOffEnd('typed')).toBeNull();
     await c.on(c.host.cancel('typed'));
     expect(c.sent.filter(m => m.type === 'job.done' && m.jobId === 'typed')).toEqual([expect.objectContaining({ ok: false, result: 'Stopped.', error: 'cancelled' })]);
     await c.on(c.host.cancel('typed'));
@@ -43,6 +48,7 @@ describe('Hornhoof calls off a turn the node holds', () => {
 
   it('does nothing for a job it does not hold', async () => {
     const c = await atWork('claude', 'queued');
+    expect(c.host.calledOffEnd('another-job')).toBeNull();
     await c.on(c.host.cancel('another-job'));
     await c.pass(100);
     expect(escapes(c.keys)).toBe(0);

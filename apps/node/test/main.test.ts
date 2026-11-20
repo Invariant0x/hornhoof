@@ -1275,7 +1275,8 @@ describe('runNode', () => {
       await server.wait(() => replies().length > before);
       return replies().at(-1)!.held as string[];
     };
-    await server.wait(async () => (await held()).length === 0);
+    /* Each look asks the node again, until it holds the job no more. */
+    while ((await held()).length) { /* the run still winds down */ }
     server.send({ type: 'job.cancel', jobId: 'j1' });
     await server.barrier('ran out');
     expect(ends()).toHaveLength(1);
