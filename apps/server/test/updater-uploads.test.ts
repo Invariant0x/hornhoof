@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, ftruncateSync, linkSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
@@ -242,6 +242,58 @@ describe('the updater and what a machine held when it stopped holding the data',
   });
 
   /* Where the limit is: the headers of a thousand files are read, and none of one more. */
+  /* A file of 8 GiB or more has its size written in base-256, as GNU and BusyBox tar write it: the byte 0x80, then the
+     number in the eleven bytes after it. Such a table is read as the plain file it is. A size in any other such form, or
+     larger than what follows its header, is not read at all. Nor is anything but zeros after the end, also so far into
+     the archive that BusyBox tail, which the updater's image has, takes no number that large: tail here is as limited.
+     The archives are sparse: the table's bytes take no room. */
+  it('reads the size of a table of 8 GiB and more, and no size it cannot be sure of', async () => {
+    const s = stand();
+    const OVER = 8 * 1024 ** 3 + 512;
+    const base256 = (first: number, value: bigint) => {
+      const field = Buffer.alloc(12);
+      field[0] = first;
+      for (let i = 11, v = value; i > 0; i -= 1, v >>= 8n) field[i] = Number(v & 0xffn);
+      return field;
+    };
+    /* One plain table with the size field given, then as many bytes as it says, rounded to blocks, or fewer, the two
+       empty blocks that end an archive, and what comes after them. */
+    const sparse = (name: string, field: Buffer, bytes = OVER, after = '') => {
+      const header = tarOf([{ name: 'public.tasks.csv' }]).subarray(0, 512);
+      field.copy(header, 124);
+      header.fill(' ', 148, 156);
+      let sum = 0;
+      for (const byte of header) sum += byte;
+      header.write(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 'latin1');
+      const fd = openSync(join(s.dir, `${name}.tar`), 'w');
+      writeSync(fd, header);
+      ftruncateSync(fd, 512 + Math.ceil(bytes / 512) * 512 + 1024);
+      if (after) writeSync(fd, after, 512 + Math.ceil(bytes / 512) * 512 + 1024);
+      closeSync(fd);
+    };
+    sparse('over', base256(0x80, BigInt(OVER)));
+    sparse('short', base256(0x80, BigInt(OVER)), OVER - 4096);
+    sparse('negative', base256(0xff, BigInt(OVER)));
+    sparse('flagged', base256(0x81, BigInt(OVER)));
+    sparse('huge', base256(0x80, (1n << 88n) - 1n));
+    sparse('trailing', base256(0x80, BigInt(OVER)), OVER, 'x'.repeat(512));
+    /* The same past the end of a table of 5 GiB, its size in octal. */
+    sparse('octal', Buffer.from('50000000000\0', 'latin1'), 5 * 1024 ** 3, 'x'.repeat(512));
+    const tools = mkdtempSync(join(s.dir, 'tools-'));
+    const TAIL = spawnSync('sh', ['-c', 'command -v tail'], { encoding: 'utf8' }).stdout.trim();
+    writeFileSync(
+      join(tools, 'tail'),
+      `#!/bin/sh\nfor a in "$@"; do n=\${a#+}; case "$n" in *[!0-9]* | '') ;; *) [ "$n" -lt 4294967296 ] || { echo "tail: invalid number '$a'" >&2; exit 1; } ;; esac; done\nexec ${TAIL} "$@"\n`,
+      { mode: 0o755 },
+    );
+    const r = await runUpdaterStep(
+      s,
+      `for f in over short negative flagged huge trailing octal; do e=0; m=$(tar_members "${s.dir}/$f.tar") || e=$?; printf '%s %s %s\\n' "$f" "$e" "$m"; done`,
+      { PATH: `${tools}:${dirname(fileURLToPath(new URL('./updater-stubs/docker', import.meta.url)))}:${dirname(JQ)}:/usr/bin:/bin` },
+    );
+    expect(r.out.split('\n').filter(Boolean)).toEqual(['over 0 file public.tasks.csv', 'short 1 ', 'negative 1 ', 'flagged 1 ', 'huge 1 ', 'trailing 1 file public.tasks.csv', 'octal 1 file public.tasks.csv']);
+  });
+
   it('reads the headers of a thousand files of an upload, and not one more', async () => {
     const s = stand();
     const files = (n: number) => tarOf(Array.from({ length: n }, (_, i) => ({ name: `public.t${i}.csv` })));

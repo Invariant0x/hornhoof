@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { ask, at, JQ, runOnce, stand, type Stand } from './updater-fixture.js';
@@ -315,6 +316,38 @@ describe('updater, restore', () => {
     order(failed);
     await runOnce(failed, null, { STUB_RESTORE: 'fail' });
     expect(statusOf(failed)).toMatchObject({ state: 'failed', dumpedAt: DUMPED });
+  });
+
+  /* The updater's copy of the dump, and the folder it held it in, are its own. Where they cannot be removed, as on a file
+     system that went read-only under it, it says so and goes on: the restore ends as it would, done or undone, and the
+     updater keeps running. */
+  it('goes on when its copy of the dump cannot be removed', async () => {
+    for (const [env, state, step] of [[{ STUB_TERM: '7', ...WITH_CARRY }, 'done', 'start'], [{ STUB_RESTORE: 'fail' }, 'failed', 'load']] as const) {
+      const s = stand(OLD_ENV);
+      order(s);
+      const tools = join(s.dir, 'tools');
+      mkdirSync(tools);
+      writeFileSync(
+        join(tools, 'rm'),
+        [
+          '#!/bin/sh',
+          "fail() { printf 'rm: cannot remove %s: Read-only file system\\n' \"$1\" >&2; exit 1; }",
+          'for a in "$@"; do',
+          `  case "$a" in */restore.sql.gz) fail "$a" ;; '${s.dir}'/tmp.*) [ ! -d "$a" ] || fail "$a" ;; esac`,
+          'done',
+          'exec /bin/rm "$@"',
+          '',
+        ].join('\n'),
+        { mode: 0o755 },
+      );
+      const PATH = `${tools}:${dirname(fileURLToPath(new URL('./updater-stubs/docker', import.meta.url)))}:${dirname(JQ)}:/usr/bin:/bin`;
+      const r = await runOnce(s, null, { ...env, PATH });
+      expect(r.code, r.out).toBe(0);
+      expect(statusOf(s), r.out).toMatchObject({ state, step });
+      expect(r.out.split('\n').filter(line => line.startsWith("Could not remove the updater's copy of the backup"))).toHaveLength(2);
+      if (state === 'failed') expectAsBefore(s, r.calls);
+      else expect(r.calls).toContain('docker compose up -d --no-build app node');
+    }
   });
 
   it('changes nothing when the backup does not load or the database in use does not close', async () => {
