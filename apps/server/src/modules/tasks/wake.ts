@@ -795,21 +795,64 @@ async function keepsBreaking(ctx: Ctx, jobId: string): Promise<boolean> {
   return Boolean(row?.job.agentId && await keptBreaking(ctx, row.job.agentId, row.task, row.job));
 }
 
-/* The node stops the program and reports the job as cancelled. A node that is away cannot, so the job ends here. */
+/* How long a node may take to report the end of a turn Stop called off before Hornhoof closes the turn itself (#1695). This
+   is cleanup after a cancel, the one wait on time here (note #71): a node stops its program within seconds, and a node that
+   never reports, being old or stuck, must not hold the employee's queue. */
+export const CANCEL_END_WAIT_MS = 30_000;
+
+/* When this server asked a node to end each turn, by its clock. */
+const cancelsAsked = new WeakMap<Ctx, Map<string, number>>();
+function askedOf(ctx: Ctx): Map<string, number> {
+  let asked = cancelsAsked.get(ctx);
+  if (!asked) cancelsAsked.set(ctx, (asked = new Map()));
+  return asked;
+}
+
+/* The node stops the program and reports the job as cancelled. A node that is away cannot, so the job ends here; one that
+   does not report in CANCEL_END_WAIT_MS gets its job ended by closeUnendedCancels the same way. */
 export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
   const job = await requestCancellation(ctx, jobId);
   if (!job) return;
   await releaseJobPhones(ctx, jobId);
   const node = identityOf(job.sub, job.job.nodeId, job.job.builtinMachine, ownBuiltin(ctx.config));
-  if (node && ctx.hub.send(node, { type: 'job.cancel', jobId })) return;
+  if (node && ctx.hub.send(node, { type: 'job.cancel', jobId })) {
+    askedOf(ctx).set(jobId, Date.now());
+    return;
+  }
+  await closeCancelled(ctx, jobId, job.job.companyId);
+}
+
+/* The turn Stop called off ends here as stopped, as its node reports it; a turn that ended meanwhile is left as it is, so a
+   late report and this never close it twice. */
+async function closeCancelled(ctx: Ctx, jobId: string, companyId: string): Promise<void> {
   const [ended] = await ctx.db
     .update(jobs)
     .set({ status: 'failed', error: 'cancelled', result: 'Stopped.', finishedAt: new Date() })
     .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running')))
     .returning({ id: jobs.id });
   if (!ended) return;
-  await publishWorking(ctx, job.job.companyId);
+  await publishWorking(ctx, companyId);
   await afterJob(ctx, jobId);
+}
+
+/* A turn Stop called off whose node has not reported its end CANCEL_END_WAIT_MS after the ask ends as if no node were there,
+   and the next waiting turn goes out. One this server did not ask about, as after a restart, counts from when it is first
+   seen here. */
+export async function closeUnendedCancels(ctx: Ctx, now: Date): Promise<void> {
+  const open = await ctx.db.select({ id: jobs.id, companyId: jobs.companyId }).from(jobs).where(and(eq(jobs.status, 'running'), eq(jobs.error, 'cancelled')));
+  const asked = keepAsked(askedOf(ctx), open.map(job => job.id), now.getTime());
+  for (const job of open) {
+    if (now.getTime() - asked.get(job.id)! < CANCEL_END_WAIT_MS) continue;
+    asked.delete(job.id);
+    await closeCancelled(ctx, job.id, job.companyId);
+  }
+}
+
+/* The asks of turns still called off, each from when it was asked or first seen; the asks of turns that ended go. */
+function keepAsked(asked: Map<string, number>, open: string[], now: number): Map<string, number> {
+  for (const id of [...asked.keys()]) if (!open.includes(id)) asked.delete(id);
+  for (const id of open) if (!asked.has(id)) asked.set(id, now);
+  return asked;
 }
 
 /* Keep Stop before contacting the node: a delayed stream or completion must not undo the person's request. */

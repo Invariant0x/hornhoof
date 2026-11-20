@@ -248,9 +248,10 @@ async function mountFixtureRoutes(page: Page) {
       return;
     }
     if (url.pathname === '/api/tasks') {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(tasks) });
+      await route.fulfill({ json: { tasks } });
       return;
     }
+    if (url.pathname === '/api/wait-cards') return route.fulfill({ json: { cards: [] } });
     if (url.pathname === '/api/requests') {
       const payload: Decisions = {
         requests: [legacyChoice, manifestQuestion],
@@ -702,7 +703,8 @@ test('renders real 2-page PDF via bundled pdfjs-dist without OpenAction or exter
     if (url.pathname === '/api/me') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ME_CEO) });
     if (url.pathname === '/api/org') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ORG_FIXTURE) });
     if (url.pathname === '/api/task-departments') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(TASK_DEPARTMENTS) });
-    if (url.pathname === '/api/tasks') return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+    if (url.pathname === '/api/tasks') return route.fulfill({ json: { tasks: [] } });
+    if (url.pathname === '/api/wait-cards') return route.fulfill({ json: { cards: [] } });
     if (url.pathname === '/api/requests') {
       const payload: Decisions = {
         requests: [{

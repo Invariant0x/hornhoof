@@ -7,8 +7,11 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-20
+
 ### Fixed
 
+- Stop ends any turn an employee's node runs, not only one a person typed: the program stops as on Escape and the turn ends as stopped at once, even when the node never heard the program say its turn ended, and that end is told once.
 - Map cards and the department screen show every word in any language: cards grow together, far zoom moves nothing, words break with hyphens and the hint keeps its own room.
 - People on the map show their whole name and title in any language: their chips wrap with hyphens and each row grows to its tallest chip.
 - On a phone the map opens with names readable and a department opens on its head card; both scroll to an edge and stop clear of the floating buttons, and nothing scrolls under them.
@@ -25,11 +28,29 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - In a page that reads right to left, an English line of a bar over the map ends with its full stop instead of starting with it, and the bar stays mirrored.
 - A number on a plan's card stays on one line with its unit or the word it goes with, as "14 h", "1 online" or "Input 0", in every language; a reset still wraps between its parts.
 - A release no longer counts as checked a commit that turnkey work was built on but its employee did not make: Hornhoof notes where the turn branch was as the work starts, refuses a start named under it, lists work whose start it has no record of for a person, and a tag named like main never stands for main.
+- Stop ends a turn even when its machine never reports the end: Hornhoof closes the turn itself at most a minute and a half after Stop, and the employee's waiting messages go out.
+- The updater can no longer be made to overwrite files of the installation, such as its secrets: it does not follow what the app puts in the folders they share, gives an installer it runs a folder of its own, and unpacks from an upload or a restore only plain files whose own header it read, at most 1000 of them.
+- A restore whose dump is a named pipe gets an answer instead of waiting for ever, an archive with data after its end fails as unreadable, and removing a loaded dump's copy never stops the updater.
+- The updater keeps answering while it carries an employee's computer commands.
+- A Kimi Code turn that goes on after words were steered into it keeps its job and its tools, and a turn Kimi starts on its own no longer leaves the next turn waiting silently behind it.
+- A department's schema opens clear of the top bar at every width, and on a screen wider than 760 px the tracker's list, board and graph make room beside an open task card instead of lying under it.
+
+### Added
+
+- People who see the whole company have a tracker section Waiting for people: every decision they see and every task that waits for a person, each saying whom it waits for.
 
 ### Changed
 
 - In the tracker's list, the status dot of a task an employee works on right now has a filled core that breathes slowly, every such dot together; for a person who asked for less motion the core is full and still, and a screen reader hears "In work, working now".
 - The map runs to the bottom of the screen, with the version as small muted text in its bottom end corner, clear of its buttons and of the bars along a phone's bottom; other screens keep the version in the row below them.
+- Waiting for me lists only what waits for you: a question asked of another person by name waits for that person alone. A person's filter names them in the page title, with no chip of its own.
+- A release that brings commits no check covered is recorded only once a person approves a card that lists exactly those commits, shown next to Approve, whatever the commit rule and even under autonomous release. A hand-in's base must already be on main or the open turn, and turnkey work counts only from the commit its holder checked.
+
+## [0.39.5] - 2026-11-20
+
+### Added
+
+- A run_tests part that runs a command gets an empty folder in $HH_OUT, and the plain files it leaves there, such as a browser check's pictures, go on the run's task as test-<run>-<part>-<name>, as run_work's do, whether its tests passed or failed.
 
 ## [0.39.4] - 2026-11-20
 
