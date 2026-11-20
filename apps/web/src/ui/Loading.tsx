@@ -236,7 +236,7 @@ export function Hold({ load, className, words, slowHint, children }: HoldProps) 
   const off = load.phase === 'slow' || load.phase === 'failed';
   const retry = () => {
     load.retry();
-    room.current?.focus();
+    room.current?.focus({ preventScroll: true });
   };
   return (
     <div ref={room} className={className ? `load-hold ${className}` : 'load-hold'} tabIndex={-1} aria-busy={load.phase === 'loading' || load.phase === 'slow'}>
