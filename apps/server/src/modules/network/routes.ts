@@ -8,6 +8,7 @@ import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { REPORT_MAX } from '../backups/types.js';
 import { holdsData } from '../copies/holds.js';
+import { schemaNoticeChanged } from '../copies/schema-failures.js';
 import { copyOrder } from '../copies/slots.js';
 import { isPrivate } from '../keeper/addresses.js';
 import { TABLE_SYNC_SLOT } from '../keeper/slots.js';
@@ -64,6 +65,8 @@ const ReportBody = z.object({
       name: z.string().regex(/^copy_[0-9a-f]{16}_[1-9][0-9]{0,8}$/).nullable(),
       /* led: the number of the term its old database led under, when it led. */
       old: z.object({ attempt: z.number().int().min(1), led: z.number().int().min(0).optional() }).nullable(),
+      /* The first attempt at the schema the updater is still trying to load. */
+      schema: z.object({ attempt: z.number().int().min(1).max(999_999_999), since: z.iso.datetime() }).nullable().optional(),
       /* The leader's slots of its tables whose first copy broke off. */
       left: z.array(z.string().regex(TABLE_SYNC_SLOT)).max(200).optional(),
     })
@@ -100,7 +103,12 @@ const ledOf = (led: number | undefined): number | null => (led !== undefined && 
 
 /* How a machine's row keeps what its keeper said of its copy; a copy that names no subscription keeps the one the row has. */
 function copyColumns(copy: NonNullable<z.infer<typeof ReportBody>['copy']>, copyName: string | null) {
-  return { copyState: copy.state, copyProgress: copy.progress, copyError: copy.error, copyAt: copy.at ? new Date(copy.at) : null, copyName: copy.name ?? copyName ?? null, copyOld: copy.old?.attempt ?? null, copyOldLed: ledOf(copy.old?.led) };
+  const schema = copy.state === 'making' || copy.state === 'remaking' ? copy.schema : null;
+  return {
+    copyState: copy.state, copyProgress: copy.progress, copyError: copy.error, copyAt: copy.at ? new Date(copy.at) : null,
+    copyName: copy.name ?? copyName ?? null, copyOld: copy.old?.attempt ?? null, copyOldLed: ledOf(copy.old?.led),
+    copySchemaSince: schema ? new Date(schema.since) : null, copySchemaAttempt: schema?.attempt ?? null,
+  };
 }
 
 /* networkId: the id the machine's keeper runs under, which the slot a new leader made for its copy is named by. */
@@ -242,7 +250,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
       if ('copyState' in copied) ctx.leftSlots.say(machine.id, copy?.left);
       /* A machine that owed what it held and holds nothing now owes nothing, and its row says nothing of a copy but
          its name: the next copy on that machine starts at the attempt above it, so no name is used twice. */
-      const left = wiped && !who.own && row?.role !== 'data' && row?.uploadState ? { uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyOld: null, copyOldLed: null } : {};
+      const left = wiped && !who.own && row?.role !== 'data' && row?.uploadState ? { uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyOld: null, copyOldLed: null, copySchemaSince: null, copySchemaAttempt: null } : {};
       const [after] = await tx.update(machines).set({ ...said, ...follows, ...pinned, ...copied, ...left, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id)).returning();
       /* The next copy on that machine starts above the last, by the name the row keeps. Should a keeper ever count
          from 1 again all the same, the merges of its old copies give their names up here, and one the leader never
@@ -256,9 +264,15 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
         );
       }
       /* Its turn to install is over once it says so: it runs the build, or the install failed. */
-      return { installed: Boolean(row && after && installs(row, now) && !installs(after, now)), looked: pin !== undefined && pin !== row?.ownerPin, companyId: row?.companyId };
+      return {
+        installed: Boolean(row && after && installs(row, now) && !installs(after, now)),
+        looked: pin !== undefined && pin !== row?.ownerPin,
+        schemaChanged: Boolean(row && after && schemaNoticeChanged(row, after, ctx.clock())),
+        companyId: row?.companyId,
+      };
     });
     if (installed.installed) void releaseHeld(ctx);
+    if (installed.schemaChanged && installed.companyId) ctx.bus.publish(installed.companyId, { type: 'requests', machines: true });
     /* The screens load the machine again when its pinned key changes. */
     if (installed.looked && installed.companyId) ctx.bus.publish(installed.companyId, { type: 'computer' });
     return reply.code(204).send();

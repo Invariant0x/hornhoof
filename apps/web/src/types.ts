@@ -732,6 +732,9 @@ export type MachineAwayCard = {
   important: { name: string; kind: 'orchestrator' | 'head' }[];
 };
 
+/* A machine whose database copy is still waiting for its schema. */
+export type CopySchemaFailureCard = { id: string; hostname: string; since: string; attempt: number };
+
 /* Everything that waits for people as /api/requests shows it to this person, and the counts of all of it: per owner, per
    asking agent and in total. */
 export type Decisions = {
@@ -742,6 +745,7 @@ export type Decisions = {
   /* What merges left for the CEO alone. A server from before merges sends none. */
   merges?: MergeDecision[];
   machinesAway?: MachineAwayCard[];
+  copySchemaFailures?: CopySchemaFailureCard[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
 

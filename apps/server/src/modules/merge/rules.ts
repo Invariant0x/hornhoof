@@ -152,7 +152,7 @@ export const BOOKKEEPING: Readonly<Record<string, readonly string[]>> = {
   machines: [
     'server_order', 'server_why', 'web_port', 'peer_port', 'commit', 'uptime_s', 'fsync_p99_ms', 'disk_free', 'report_at', 'addresses', 'path', 'direct_fails', 'renew_at',
     'update_commit', 'update_state', 'go_commit', 'go_at', 'failed_commit', 'failed_at', 'owner_pin', 'held_backups',
-    'memory', 'cores', 'copy_state', 'copy_progress', 'copy_error', 'copy_at', 'copy_name', 'copy_old', 'copy_old_led', 'data_left_at', 'upload_state', 'link_rtt_ms', 'link_mbps', 'internet_rtt_ms', 'internet_mbps',
+    'memory', 'cores', 'copy_state', 'copy_progress', 'copy_error', 'copy_at', 'copy_name', 'copy_schema_since', 'copy_schema_attempt', 'copy_old', 'copy_old_led', 'data_left_at', 'upload_state', 'link_rtt_ms', 'link_mbps', 'internet_rtt_ms', 'internet_mbps',
   ],
 };
 

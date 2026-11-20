@@ -495,6 +495,9 @@ export const machines = pgTable(
     copyError: text('copy_error', { enum: COPY_ERRORS }),
     copyAt: timestamp('copy_at', { withTimezone: true }),
     copyName: text('copy_name'),
+    /* The first attempt in the current wait for the copy's schema, until that schema loads. */
+    copySchemaSince: timestamp('copy_schema_since', { withTimezone: true }),
+    copySchemaAttempt: integer('copy_schema_attempt'),
     copyOld: integer('copy_old'),
     /* The term under which the old database that waits for its merge led the company; null for one that never led. */
     copyOldLed: bigint('copy_old_led', { mode: 'number' }),
