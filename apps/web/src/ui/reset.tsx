@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Phrase, useT, type Messages } from '../i18n';
 import { everyVisible } from '../guard';
+import { keepUnits } from './units';
 
 const MINUTE = 60_000;
 
@@ -33,11 +34,12 @@ export function useNow(): number {
   return now;
 }
 
-/* The words of a reset as its language writes them, the time in them one piece that reads left to right. */
+/* The words of a reset as its language writes them, the time in them one piece that reads left to right, each number on
+   one line with its unit. */
 export function ResetWords({ at, now }: { at: string | null; now: number }) {
   const t = useT();
   const duration = resetDurationAt(t, at, now);
-  return duration ? <Phrase words={t.subs.resetsIn} values={[<bdi dir="ltr">{duration}</bdi>]} /> : <>{t.subs.resetUnknown}</>;
+  return duration ? <Phrase words={t.subs.resetsIn} values={[<bdi dir="ltr">{keepUnits(duration)}</bdi>]} /> : <>{t.subs.resetUnknown}</>;
 }
 
 /* A reset's line of its own: its words whole, in their own direction, so a page laid out right to left keeps their order. */

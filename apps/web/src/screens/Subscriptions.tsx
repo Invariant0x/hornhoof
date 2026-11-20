@@ -1,6 +1,9 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { api, ApiFailure } from '../api';
+import { useStream } from '../live';
+import { useHeldRows, useLoad, type Load } from '../ui/Loading';
+import { PlanConnection, ReadySaid } from '../ui/PlanConnection';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
 import type { JobView, Me, PlanFallback, ShownCommand, SubView } from '../types';
@@ -18,13 +21,15 @@ import { PayIcon, ProviderMark } from '../ui/icons';
 import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
 import { LimitCell, PlanLimitParts } from '../ui/PlanLimits';
 import { providerFilter, type FilterGroup } from '../ui/TableTools';
-import { SortTable, type TableColumn } from '../ui/SortTable';
+import { HeldTable, SortTable, type TableColumn } from '../ui/SortTable';
+import type { TableSearch } from '../ui/TableTools';
 import { ApiForm } from '../ui/ApiForm';
 import { TokenCount, TokenGauges } from '../ui/Tokens';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
 import { clock, limitState, planStateOnMachine, shortName, stateOf, subName, TERMINAL_SIGNIN, waitsThere, windowName, windowUsage } from '../ui/subscription';
 import { PlanSteps } from '../ui/PlanSteps';
+import { keepUnits } from '../ui/units';
 import { replaceSubscription } from './subscription-list';
 export { clock } from '../ui/subscription';
 
@@ -43,7 +48,7 @@ function signinLine(t: Messages, language: Language, s: SubView): string | null 
   if (s.kind !== 'personal') return null;
   if (s.signedInOnce) {
     if (s.provider === 'codex' && s.leaseMachine) return t.subs.leaseOn(s.leaseMachine);
-    return t.subs.signedInOnce(s.owner.name, s.machines.filter(m => m.online).length);
+    return keepUnits(t.subs.signedInOnce(s.owner.name, s.machines.filter(m => m.online).length));
   }
   const ready = s.machines.filter(m => m.status === 'ready').map(m => m.hostname);
   return ready.length ? t.subs.signedInOn(new Intl.ListFormat(language, { type: 'conjunction' }).format(ready)) : null;
@@ -195,6 +200,15 @@ function subscriptionFilters(t: Messages, now: number, subs: SubView[]): FilterG
   return groups.map(group => ({ ...group, all: t.tables.all }));
 }
 
+/* The search of the plans' table: its hint, its short hint on a phone, the words of a plan it searches, and its count. */
+const plansSearch = (t: Messages, language: Language): TableSearch<SubView> => ({
+  placeholder: t.tables.searchSubscriptions, short: t.tables.searchSubscriptionsShort, text: s => subscriptionSearch(t, language, s), count: t.tables.subscriptionCount,
+});
+
+/* How many plan rows the table holds while they come: as many as it showed last in this tab, else three. */
+const HELD_PLANS = 3;
+const useHeldPlans = (plans: SubView[] | null): number => useHeldRows('plans', plans ? plans.length : null) ?? HELD_PLANS;
+
 function subscriptionSearch(t: Messages, language: Language, s: SubView): string {
   return [subName(t, s), s.last4, programName(s), s.owner.name, s.place.kind === 'company' ? t.people.wholeCompany : s.place.name, s.tier, ...s.accounts.map(a => a.email), ...s.machines.map(m => m.hostname), ...(s.agents ?? []).flatMap(a => [a.name, a.title?.[language]])].join(' ');
 }
@@ -255,6 +269,9 @@ type PlanControls = {
   remove: (sub: SubView) => unknown;
   endSignIn: (signing: Signing, error: string | null) => void;
   stopSignIn: (signing: Signing) => unknown;
+  /* A plan's connection after its sign-in code that failed or takes too long: try it again, or stop it. */
+  retryConnection: (sub: SubView) => unknown;
+  cancelConnection: (sub: SubView) => unknown;
   done: () => void;
 };
 
@@ -388,10 +405,15 @@ function PlanFoot(props: PlanProps) {
   );
 }
 
-function PlanExtra({ sub: s, controls: c }: Omit<PlanProps, 'me'>) {
+/* Its sign-in window when open, which shows the plan's connection after the code; else the connection on the card. The
+   plan's status for the moment it is ready stays through both. */
+function PlanExtra({ sub: s, controls: c, now }: Omit<PlanProps, 'me'> & { now: number }) {
   const on = c.signing;
+  const connection = s.connecting ? <PlanConnection sub={s} connecting={s.connecting} now={now} onRetry={() => c.retryConnection(s)} onCancel={() => c.cancelConnection(s)} /> : null;
   return <>
-    {on && <SignInPanel subId={s.id} program={PROGRAM_NAMES[s.provider]} nodeId={on.nodeId} hostname={on.hostname} onEnd={error => c.endSignIn(on, error)} onStop={() => c.stopSignIn(on)} />}
+    <ReadySaid sub={s} />
+    {on && <SignInPanel subId={s.id} program={PROGRAM_NAMES[s.provider]} nodeId={on.nodeId} hostname={on.hostname} onEnd={error => c.endSignIn(on, error)} onStop={() => c.stopSignIn(on)} connection={connection} />}
+    {!on && connection}
     {c.keying && isKeyPlan(s.provider) && <KeyForm sub={{ ...s, provider: s.provider }} onDone={c.done} onCancel={() => c.setKeyFor(null)} />}
     {c.editing && s.kind === 'api_key' && <ApiForm sub={s} places={c.places} onSaved={c.saved} onCancel={() => c.setEditFor(null)} />}
   </>;
@@ -455,7 +477,7 @@ function PlanFix(props: PlanProps) {
   return (
     <section className="blk blk-fix">
       {!c.note?.command && <p>{fixWords(t, s)}</p>}
-      {!c.note?.command && s.owner.id === me.person.id && <PlanSteps sub={s} command={c.command} signing={Boolean(c.signing)} />}
+      {!c.note?.command && !s.connecting && s.owner.id === me.person.id && <PlanSteps sub={s} command={c.command} signing={Boolean(c.signing)} />}
       <SubscriptionInstall sub={s} ownerId={me.person.id} command={c.command} onNew={() => c.newCommand(s)} />
       <SignInNote note={c.note} />
       <div className="machine-actions">{[signInAction(t, props), keyAction(t, props)].map(a => a && <ActionButton key={a.key} action={a} className="act" />)}<RemoveButtons {...props} /></div>
@@ -491,11 +513,50 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
   return (
     <CardFrame label={`${subName(t, s)}, ${s.owner.name}`} accent={s.isOrchestrator}
       head={<CardHead mark={<ProviderMark provider={s.provider} protocol={s.api?.protocol} />} name={shortName(t, s)} sign={<KindSign kind={s.kind} />} under={s.isOrchestrator && t.subs.orchestrator} state={<SubscriptionStatus sub={s} now={now} />} line={stateLine(t, language, s, now)} />}
-      extra={<PlanExtra sub={s} controls={controls} />}>
+      extra={<PlanExtra sub={s} controls={controls} now={now} />}>
       {needsFix(s, controls.note) ? <PlanFix sub={s} me={me} controls={controls} /> : <PlanWorking sub={s} me={me} controls={controls} now={now} />}
     </CardFrame>
   );
 }
+
+type PlanReads = ReturnType<typeof usePlanCommands>;
+type ConnectionParts = {
+  setSubs: PlanReads['setSubs'];
+  load: PlanReads['load'];
+  run: (action: () => Promise<void>) => Promise<void>;
+  signIn: (sub: SubView, fresh: boolean) => unknown;
+};
+
+/* Where a plan's connection is after its sign-in code comes as its node says it; once it ended, the plans are read again
+   and show ready or what to do. From one that stalled: a plan that signs in from Hornhoof tries again with a new sign-in,
+   one that signs in on its machine has its node check the sign-in there again; or it stops. What stalled goes before the
+   asking, so a step the node says before the answer comes stays. */
+function usePlanConnections({ setSubs, load, run, signIn }: ConnectionParts) {
+  const setConnection = (id: string, connecting: SubView['connecting']) => setSubs(list => list?.map(s => (s.id === id ? { ...s, connecting } : s)) ?? null);
+  useStream(m => {
+    if (m.type !== 'subscription.connecting') return;
+    setConnection(m.subscriptionId, m.connecting);
+    if (m.connecting === null) void load();
+  });
+  const retryConnection = (sub: SubView) =>
+    run(async () => {
+      setConnection(sub.id, null);
+      if (TERMINAL_SIGNIN.has(sub.provider)) await signIn(sub, false);
+      else await api.post(`/api/subscriptions/${sub.id}/connecting/retry`);
+    });
+  const cancelConnection = (sub: SubView) =>
+    run(async () => {
+      setConnection(sub.id, null);
+      await api.post(`/api/subscriptions/${sub.id}/connecting/cancel`);
+    });
+  return { retryConnection, cancelConnection };
+}
+
+/* What could not load, said on top of the page: the plans' own failure stands where they would until they came. */
+/* A screen's data once its load is done, so the ring keeps its least time; until then, none. */
+const doneOf = <T,>(data: T | null, load: Load): T | null => (load.phase === 'done' ? data : null);
+
+const failureOnTop = (subs: SubView[] | null, plans: unknown, commands: unknown) => (subs ? plans ?? commands : commands);
 
 export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   const t = useT();
@@ -524,6 +585,10 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   }, []);
 
   const { subs, setSubs, apiPlaces, commands, load, connected, newCommand: requestCommand, dismissCommand, failure: readFailure, commandsFailure } = usePlanCommands(live);
+  /* The plans come with the shared indicator where they will stand, and say why when they do not. */
+  const plansLoad = useLoad([{ data: subs, failure: readFailure, load }]);
+  const plans = doneOf(subs, plansLoad);
+  const heldPlans = useHeldPlans(plans);
   /* Where this person connects an API key: anywhere with the whole company, else only in the departments they run. */
   const places = me.person.scopeKind === 'company' ? null : apiPlaces ?? [];
   const newCommand = (sub: SubView) => run(() => requestCommand(sub));
@@ -603,6 +668,8 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
     void load();
   };
 
+  const { retryConnection, cancelConnection } = usePlanConnections({ setSubs, load, run, signIn });
+
   const remove = (sub: SubView) =>
     run(async () => {
       setConfirm(null);
@@ -638,18 +705,20 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
         </Edge>
       )}
       <SubscriptionCommandBlocks subscriptions={subs ?? []} commands={commands ?? []} now={now} onDone={(command, id) => void run(() => dismissCommand(command, id))} />
-      <LoadFailure failure={readFailure ?? commandsFailure} />
+      <LoadFailure failure={failureOnTop(subs, readFailure, commandsFailure)} />
+      {!plans && <HeldTable load={plansLoad} columns={subscriptionColumns(t, now)} search={plansSearch(t, language)} rows={heldPlans} />}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
-      {subs && subs.length === 0 && <p className="muted">{t.subs.empty}</p>}
-      {subs && subs.length > 0 && (
+      {/* The plans show once their load is done: until then the ring holds their room for at least its least time. */}
+      {plans && plans.length === 0 && <p className="muted">{t.subs.empty}</p>}
+      {plans && plans.length > 0 && (
         <SortTable
-          rows={subs}
+          rows={plans}
           columns={subscriptionColumns(t, now)}
           name={s => subName(t, s)}
           initialSort={{ key: 'status', direction: 1 }}
-          search={{ placeholder: t.tables.searchSubscriptions, short: t.tables.searchSubscriptionsShort, text: s => subscriptionSearch(t, language, s), count: t.tables.subscriptionCount }}
-          filters={subscriptionFilters(t, now, subs)}
+          search={plansSearch(t, language)}
+          filters={subscriptionFilters(t, now, plans)}
           card={s => <SubscriptionDetails sub={s} me={me} now={now} controls={{
             command: commands ? commandForPlan(commands, s, now) : undefined,
             test: tests[s.id], asking: confirm === s.id,
@@ -658,7 +727,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
             keying: keyFor === s.id,
             editing: editFor === s.id, setEditFor,
             saved: subscription => { setEditFor(null); setSubs(list => replaceSubscription(list, subscription, 'update')); }, places,
-            setBudget, setFallbacks, plans: subs, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, setConfirm, remove, endSignIn, stopSignIn,
+            setBudget, setFallbacks, plans, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, setConfirm, remove, endSignIn, stopSignIn, retryConnection, cancelConnection,
             done: () => { setKeyFor(null); void load(); },
           }} />}
         />

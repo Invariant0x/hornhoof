@@ -44,7 +44,7 @@ import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { ReviewSha, ReviewSubmission } from './review-context.js';
 import { pipelineFindings, reviewDetails } from './review-details.js';
 import { ConfirmationInput, confirmFinding, IssueInput } from './review-findings.js';
-import { echelonsFor } from './turnkey.js';
+import { CHECKED_COMMIT, echelonsFor, START_COMMIT } from './turnkey.js';
 import { listBacklog } from '../backlog/store.js';
 import { deptName } from '../departments/templates.js';
 import { requireTaskHead } from './echelons-update.js';
@@ -143,8 +143,8 @@ async function commitReply(ctx: Ctx, task: Task, agentId: string, question: stri
 
 /* What the holder of turnkey work checked: the commit it took into the turn branch, and where its branch started. */
 const TurnkeyInput = z.strictObject({
-  commit: z.string().regex(/^[0-9a-f]{40}$/).describe('The exact commit of your branch you checked and fast-forwarded the turn branch to.'),
-  baseCommit: z.string().regex(/^[0-9a-f]{40}$/).describe('The commit of main or the turn branch your branch started from.'),
+  commit: z.string().regex(/^[0-9a-f]{40}$/).describe(`The ${CHECKED_COMMIT}.`),
+  baseCommit: z.string().regex(/^[0-9a-f]{40}$/).describe(`The ${START_COMMIT}. It holds where the turn branch was as your work started.`),
 });
 
 const TurnItem = z.object({ department: z.uuid().optional().describe('Its department; a head may leave it out.'), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('Marks this work and its child tasks urgent.'), ...TrackerFields });
@@ -730,7 +730,7 @@ class TaskTools {
       'report',
       {
         description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision it checked with local tests, and done false returns a source defect to Development when verification.delta describes the repair, or otherwise gives the failure to the head; the accepting head names the ready candidate/revision and observed integration commit, or nothing but the summary where the result is a document. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report. ' +
-          'The holder of turnkey work with a branch of its own closes it with done true and turnkey: commit, the exact commit it checked and fast-forwarded the turn branch to, and baseCommit, the commit of main or the turn branch its branch started from. A release counts as checked only the first-parent line from that commit down to that start: anything else it brings is named for a person to approve.',
+          `If you hold turnkey work with a branch of its own, close it with done true and turnkey: commit, the ${CHECKED_COMMIT}, and baseCommit, the ${START_COMMIT}. A release counts as checked only the first-parent line from that commit down to that start, and nothing the turn branch held as the work started: anything else it brings is named for a person to approve.`,
         inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional(), acceptance: AcceptanceInput.optional(), turnkey: TurnkeyInput.optional() },
       },
       async ({ task: ref, done, summary, verification, acceptance, turnkey }) =>

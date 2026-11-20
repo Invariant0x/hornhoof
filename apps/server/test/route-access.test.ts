@@ -46,7 +46,7 @@ const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'recovering', path: /^\/api\/recovery\/challenge$/, rule: 'on a server with no company that was given a recovery file: answers only a challenge that file opens, and nothing else' },
   { name: 'proven', path: /^\/api\/recovery\/bundles\/:id$/, rule: 'the proof of a challenge this server answered, made for that bundle, or the first setup code' },
   { name: 'openInvite', path: /^\/api\/invites\/:token(?:\/accept)?$/, rule: 'valid invitation token' },
-  { name: 'ownPlan', path: /^\/api\/subscriptions\/:id\/signin(?:\/(?:stop|terminal))?$/, rule: 'human subscription owner, or the orchestrator' },
+  { name: 'ownPlan', path: /^\/api\/subscriptions\/:id\/(?:signin(?:\/(?:stop|terminal))?|connecting\/(?:cancel|retry))$/, rule: 'human subscription owner, or the orchestrator' },
   { name: 'ownScreen', path: /^\/api\/nodes\/commands(?:\/:id\/hide)?$/, rule: 'human owner of install commands, or the orchestrator acting for them' },
   { name: 'requireCompanyPerson', path: /^\/api\/(?:updates|link|feedback\/inbox|feedback\/repeats)(?:\/.*)?$/, rule: 'human company scope' },
   { name: 'person', path: /^\/api\/improvements(?:\/:id\/(?:take|dismiss))?$/, rule: 'human company scope' },

@@ -65,7 +65,7 @@ export function SwitchBanner({ children }: { children?: ReactNode }) {
   }, [readSwitched, moving]);
 
   const nameOf = (id: string | null | undefined): string | null => (id ? (hosts.current.get(id) ?? null) : null);
-  const line = (text: string) => <div className="update-banner glass" role="status" aria-label={t.switch.label}><span>{text}</span></div>;
+  const line = (text: string) => <div className="update-banner glass" role="status" aria-label={t.switch.label}><span dir="auto">{text}</span></div>;
   /* A question that stands is the CEO's to answer, whatever else moves. */
   if (word?.moving && !word.question) {
     const [from, to] = [nameOf(word.from), nameOf(word.to)];
@@ -75,7 +75,7 @@ export function SwitchBanner({ children }: { children?: ReactNode }) {
   const said = switched && closedId() !== switched.id ? switched : null;
   const after = said && (
     <div className="update-banner glass" role="status" aria-label={t.switch.label}>
-      <span>
+      <span dir="auto">
         {said.kind === 'takeover' && said.reason === 'disk_full' ? t.switched.diskFull(said.from, said.to)
           : said.kind === 'takeover' ? t.switched.takeover(said.to, said.from, clock(language, said.heard))
             : said.kind === 'ceo' ? t.switched.ceo(said.to, clock(language, said.reach))
