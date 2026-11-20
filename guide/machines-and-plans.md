@@ -144,6 +144,8 @@ Of those who fit, the one hired first takes the task. The task gets one note: wh
 
 Hornhoof learns about the limit from the plan's own figures, or from the error its program prints, like Kimi's 429 or Codex's "hit your usage limit". When the program names no time, Hornhoof waits for the reset the plan's own figures named, if that is still ahead, and otherwise tries again after a quarter of an hour.
 
+Some plans keep separate limits for groups of their models: Antigravity keeps one for its Gemini models and one for its Claude and GPT models. Hornhoof keeps each group's limits as the plan reports them, and the plan's card shows every group under its own name, with what it used and when it resets. A group at its limit holds only the turns on its own models, and a fallback that runs a model of a group with room still takes employees. A model Hornhoof cannot place in a group goes by the plan's fullest limit, as before. The plan shows as at its limit only while every group is.
+
 ## Keep part of a plan for yourself
 
 Next to each plan's limits, "Tasks may use" sets the share of every limit window that task turns may spend: from 50 to 90 percent, or the whole limit.

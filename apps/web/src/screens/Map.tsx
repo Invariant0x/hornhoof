@@ -17,6 +17,7 @@ import { CANVAS_NARROW, CANVAS_ZOOM_LIMITS, DRAG_PX, FLOAT_GAP, LEFT_PANEL_COVER
 import { Edge } from '../ui/Edge';
 import { useLoadFailure } from '../ui/LoadFailure';
 import { LoadState, useLoad, type Load } from '../ui/Loading';
+import { MapVersion } from '../ui/VersionMark';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
 import { PeopleBridgeMasks, peopleMask } from '../ui/PeopleWires';
@@ -658,7 +659,7 @@ function useMapLoad(org: Org | null, failure: unknown, loadOrg: () => void, layo
    null once there is a map to draw. It draws only once both came, so no block moves after the first frame. */
 function mapStandIn(t: Messages, failure: unknown, load: Load, onHome?: () => void) {
   if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
-  if (load.phase !== 'done') return <div className="map map-wait" aria-busy={load.phase !== 'failed'}><LoadState load={load} /></div>;
+  if (load.phase !== 'done') return <div className="map map-wait" aria-busy={load.phase !== 'failed'}><LoadState load={load} form="screen" /><MapVersion /></div>;
   if (failure !== null) return <p className="alert" role="alert">{errorText(t, failure)}</p>;
   return null;
 }
@@ -822,7 +823,8 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
      panel and moving a block leave the view alone. */
   const shown = !!arr;
   const putBack = Object.keys(layout.placed).length > 0 || Object.keys(layout.bends).length > 0 || layout.failed;
-  const roomStyle = useMapRoom(box, `${shown}|${windowOpen}|${putBack}`);
+  const barsShown = `${shown}|${windowOpen}|${putBack}`;
+  const roomStyle = useMapRoom(box, barsShown);
   const cardH = arr?.depts[0]?.h ?? 0, chipH = `${arr?.top[0]?.h ?? 0}:${arr?.people.chips[0]?.h ?? 0}`;
   usePauseHiddenMap(box, inside, shown);
   /* Before the first frame, so the map is first drawn where it stands and does not move there. */
@@ -868,7 +870,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   }
 
   const standIn = mapStandIn(t, failure, mapLoad, onHome);
-  if (standIn || !org || !arr) return standIn ?? <div className="map" aria-busy="true" />;
+  if (standIn || !org || !arr) return standIn ?? <div className="map" aria-busy="true"><MapVersion /></div>;
 
   const depts = org.departments;
   const sub = org.orchestrator?.subscription ?? null;
@@ -1104,6 +1106,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
             )),
           )}
         </div>
+        <MapVersion bars={MAP_BARS} shown={barsShown} off={inside} />
       </div>
 
       <ZoomBar

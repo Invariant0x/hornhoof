@@ -1,9 +1,9 @@
 import { orchestratorOf } from './turn-records.js';
-import { limitUntil, budgetUntil } from './limits.js';
+import { budgetUntil, modelLimitUntil } from './limits.js';
 import { placement, outdated, holdsWork, liveSubscription, programNode, conversationOf, lookRoom, type Placement } from './placement.js';
 import { countOnly, idOnly } from '../../db/selections.js';
 import type { MachineDrain } from '@hornhoof/protocol';
-import { type Limits } from '@hornhoof/protocol';
+import { limitsForModel, type Limits } from '@hornhoof/protocol';
 import { and, asc, eq, isNotNull, ne, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs } from '../../db/schema.js';
@@ -41,16 +41,17 @@ export type AgentState = FailureState & {
   alarm: TurnAlarm | null;
 };
 
-export type PlanAgent = { id: string; kind: string };
+/* model: the one it runs on, whose group of the plan's limits holds its turns; '' for its program's default. */
+export type PlanAgent = { id: string; kind: string; model: string };
 export type Plan = { limits: Limits | null; limitsUpdatedAt: Date | null; budget: number | null };
 export type HeldPlanTurn = PlanHold & { job: typeof jobs.$inferSelect };
 
-export const workerBudgetUntil = (agent: { kind: string }, sub: Plan): string | null => agent.kind === 'worker' ? budgetUntil(sub.limits, sub.budget, sub.limitsUpdatedAt) : null;
+export const workerBudgetUntil = (agent: { kind: string; model: string }, sub: Plan): string | null => agent.kind === 'worker' ? budgetUntil(limitsForModel(sub.limits, agent.model), sub.budget, sub.limitsUpdatedAt) : null;
 
 /* The oldest turn the plan really holds. Heads and the orchestrator keep coordinating work above the task share. */
 export async function planHeld(ctx: Ctx, agent: PlanAgent, sub: Plan | null | undefined): Promise<HeldPlanTurn | null> {
   if (!sub) return null;
-  const until = limitUntil(sub.limits, sub.limitsUpdatedAt);
+  const until = modelLimitUntil(sub, agent.model);
   const spent = workerBudgetUntil(agent, sub);
   const reason = until ? 'limit' : spent ? 'budget' : null;
   if (!reason) return null;
@@ -97,14 +98,14 @@ export async function drainInTheWay(ctx: Ctx, agent: { nodeId: string | null } |
 }
 
 /* What its plan holds back now. */
-export const planHolds = (sub: Awaited<ReturnType<typeof liveSubscription>>, kind: string) => ({
-  limitUntil: sub ? limitUntil(sub.limits, sub.limitsUpdatedAt) : null,
-  budgetUntil: sub ? workerBudgetUntil({ kind }, sub) : null,
+export const planHolds = (sub: Awaited<ReturnType<typeof liveSubscription>>, agent: { kind: string; model: string }) => ({
+  limitUntil: sub ? modelLimitUntil(sub, agent.model) : null,
+  budgetUntil: sub ? workerBudgetUntil(agent, sub) : null,
 });
 
 export async function planState(ctx: Ctx, agent: PlanAgent | undefined, sub: Awaited<ReturnType<typeof liveSubscription>>): Promise<Pick<AgentState, 'limitUntil' | 'budgetUntil' | 'held'>> {
   return {
-    ...planHolds(sub, agent?.kind ?? 'worker'),
+    ...planHolds(sub, agent ?? { kind: 'worker', model: '' }),
     held: agent ? planHoldView(await planHeld(ctx, agent, sub)) : null,
   };
 }
@@ -118,7 +119,7 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const [running] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   const [waiting] = await ctx.db.select(countOnly()).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued')));
   const sub = await liveSubscription(ctx, agentId);
-  const [agent] = sub ? await ctx.db.select({ id: agents.id, kind: agents.kind, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId)) : [];
+  const [agent] = sub ? await ctx.db.select({ id: agents.id, kind: agents.kind, model: agents.model, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId)) : [];
   const reason: AgentState['reason'] = !sub || !agent ? 'no_subscription' : await waitsFor(ctx, agent, sub);
   const place = sub && agent ? await placement(ctx, agent, sub, lookRoom(ctx, agent)) : null;
   const shown = await shownNode(ctx, agentId, place);

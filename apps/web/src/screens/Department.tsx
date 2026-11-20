@@ -629,7 +629,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
     <div className="dview" ref={chrome.root} style={chrome.style}>
       {tree && (workTree ? (
         <TreeView tree={workTree} department={d} onOpenTask={onOpenTask} zoomSlot={zoomSlot} />
-      ) : <div className="tview tview-wait"><LoadState load={treeLoad} /></div>)}
+      ) : <div className="tview tview-wait"><LoadState load={treeLoad} form="screen" /></div>)}
       {!tree && (
       <div className={`dcanvas${far ? ' far' : ''}`} ref={box} role="region" aria-label={t.dept.schema} {...handlers}>
         <div className="world" ref={world} style={worldStyle}>

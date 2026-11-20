@@ -371,7 +371,7 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
           </div>
           <SubUnitField card={card} inputId={`${id}-team`} editable={editable} onChange={team => void change({ team })} />
         </div>
-        {card.subscription && <LimitMeters sub={card.subscription} now={now} />}
+        {card.subscription && <LimitMeters sub={card.subscription} now={now} model={card.model} />}
         {saved && (
           <p className="ac-note" role="status">
             {t.agent.applies}

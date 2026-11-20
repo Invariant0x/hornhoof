@@ -300,7 +300,7 @@ function MapWorkspace({ tab, me, dept, deptId, denied, missingDepartment, panel,
    after it. */
 function DepartmentFallback({ deptId, org, orgFailure, loadOrg }: { deptId: string | null; org: Org | null; orgFailure: unknown; loadOrg(): void }) {
   const load = useLoad([{ data: org, failure: orgFailure, load: loadOrg }]);
-  return deptId && !org ? <div className="dview" aria-busy={load.phase !== 'failed'}><div className="dcanvas dview-wait"><LoadState load={load} /></div></div> : null;
+  return deptId && !org ? <div className="dview" aria-busy={load.phase !== 'failed'}><div className="dcanvas dview-wait"><LoadState load={load} form="screen" /></div></div> : null;
 }
 
 function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, loadOrg, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire, onCrumbs }: MapRouteProps & {

@@ -12,6 +12,7 @@ import { DepartmentMark, ExecutorMark, PersonMark } from './TrackerMarks';
 import { WorkerMark } from './WorkerMark';
 import { QuestionButton, STATE_CLASS, StateWord, WaitLine } from './TaskActivity';
 import { GOAL_CLASS, goalProgress } from './GoalPanel';
+import { Busy, Idle, MAX_HELD_ROWS } from './Loading';
 
 /* How a view opens a task's card and marks the open one. asksYou: an open question on a task is the person's to answer. */
 export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; questionAt?: (id: string) => string | undefined; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined; stageOwner?: (stage: PipelineStage) => string | undefined };
@@ -147,6 +148,61 @@ export function TrackerFound({ tasks, all, rows }: { tasks: TaskLine[]; all: Tas
       <div className="tr-list-grid">
         <ListHead />
         <ul className="tr-rows">{tasks.map(task => <ListRow key={task.id} tree={{ task, children: [], done: 0, total: 0, progress: 0 }} rows={rows} relations={relations} />)}</ul>
+      </div>
+    </div>
+  );
+}
+
+/* The idle bars of a held row's title, varied so the held list reads as rows of text, not as a grid. */
+const HELD_TITLES = ['58%', '44%', '66%', '38%', '52%'];
+
+/* A row of the list while its task comes: the row's frame at its final size, an idle bar for each value. */
+function HeldRow({ title }: { title: string }) {
+  const words = useT().tracker.list;
+  return (
+    <li className="tr-row">
+      <div className="tr-cells tr-row-line">
+        <div className="tr-task-name"><div className="tr-name"><span className="tr-status-dot" aria-hidden="true" /><span className="tr-line"><span className="tr-title"><Idle w={title} /></span></span></div></div>
+        <Cell name={words.executor} person><Idle w="70%" /></Cell>
+        <Cell name={words.responsible} person><Idle w="64%" /></Cell>
+        <Cell name={words.due}><Idle w="4ch" /></Cell>
+      </div>
+    </li>
+  );
+}
+
+/* How many rows fill the visible part of a list that starts at this place, when the list's own count is not known: one where
+   nothing is laid out yet to measure. */
+function rowsToFill(list: HTMLElement | null): number {
+  const row = list?.querySelector<HTMLElement>('.tr-row:last-child')?.offsetHeight;
+  if (!list || !row) return 1;
+  const top = list.getBoundingClientRect().top;
+  return Math.max(1, Math.min(MAX_HELD_ROWS, Math.ceil((window.innerHeight - top) / row)));
+}
+
+/* The list while its tasks come (style book 1.5, section 4): the names of its columns and its first group's head at once, then
+   as many held rows as it showed last in this tab, or as fill what is in view, the first with the ring and its words. */
+export function HeldList({ rows, ring }: { rows: number | null; ring: boolean }) {
+  const t = useT();
+  const list = useRef<HTMLDivElement>(null);
+  const [fill, setFill] = useState(rows ?? 1);
+  useLayoutEffect(() => {
+    if (rows === null) setFill(rowsToFill(list.current));
+  }, [rows]);
+  const held = rows ?? fill;
+  return (
+    <div ref={list} className="tr-list tr-held">
+      <div className="tr-list-grid">
+        <section className="tr-group">
+          <h2 className="tr-group-head"><span className="tr-group-toggle"><Idle w="9ch" /><span className="tr-count"><Idle w="3ch" /></span></span></h2>
+          <ListHead />
+          <div>
+            <ul className="tr-rows">
+              <li className="tr-row"><div className="tr-cells tr-row-line"><Busy ring={ring} words={t.load.tasks} /></div></li>
+              {Array.from({ length: held - 1 }, (_, i) => <HeldRow key={i} title={HELD_TITLES[i % HELD_TITLES.length]!} />)}
+            </ul>
+          </div>
+        </section>
       </div>
     </div>
   );

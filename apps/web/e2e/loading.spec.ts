@@ -326,6 +326,6 @@ test.describe('map arrangement', () => {
     hold.release();
     await expect(page.getByRole('button', { name: /^Development/ })).toBeVisible();
     await expect(page.locator('.map').getByRole('alert')).toHaveCount(0);
-    await expect(page.locator('.map').getByRole('button', { name: t.app.tryAgain, exact: true })).toHaveCount(0);
+    await expect(page.locator('.map').getByRole('button', { name: t.common.retry, exact: true })).toHaveCount(0);
   });
 });

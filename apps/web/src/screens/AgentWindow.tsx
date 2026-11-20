@@ -17,7 +17,6 @@ import { CEO_DECIDES } from '../ui/DecidedBy';
 import { Markdown } from '../ui/Markdown';
 import { Inbox, useInboxCount } from '../ui/Inbox';
 import { LoadState, onTop, useLoad, type Load, type LoadPart } from '../ui/Loading';
-import { Waiting } from '../ui/Waiting';
 import { Notebook } from '../ui/Notebook';
 import { framedPanel, type WindowPanel } from '../ui/SidePanels';
 import { StaffCard } from '../ui/StaffCard';
@@ -248,13 +247,13 @@ function useWindowLoad(o: WindowLoadOf) {
 }
 
 /* Where the conversation or the terminal will stand while the window's load comes: the terminal names the program it
-   opens beside the shared mark, until its load stalls. */
+   opens beside the shared ring, until its load stalls. */
 function WindowWait({ load, terminal, program }: { load: Load; terminal: boolean; program: string }) {
   const t = useT();
   if (!terminal) return <div className="t-log t-wait"><LoadState load={load} /></div>;
   return (
     <div className="t-term">
-      <div className="t-load">{load.phase === 'loading' ? <Waiting what={t.window.opening(program)} /> : <LoadState load={load} />}</div>
+      <div className="t-load"><LoadState load={load} words={t.window.opening(program)} /></div>
     </div>
   );
 }

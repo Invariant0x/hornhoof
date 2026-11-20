@@ -2,7 +2,7 @@ import { sendNext } from './dispatch.js';
 import { workerBudgetUntil, planHeld, type PlanAgent, type Plan, type HeldPlanTurn } from './state.js';
 import { type Turn, type TurnMessage, type Along, type Queued, type Sending } from './turn-types.js';
 import { runsNow, NoSubscription } from './turn-records.js';
-import { limitUntil, resets } from './limits.js';
+import { modelLimitUntil, resets } from './limits.js';
 import { holdsWork, agentOnNode, liveSubscription, nodeOfAgent, conversationOf, type AgentTarget } from './placement.js';
 import { onAgent } from './line.js';
 import { TURN_TIMEOUT_MS, INBOX_PROMPT, GONE_ALONG } from './constants.js';
@@ -422,7 +422,7 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
     const { agent, sub } = on;
     if (await resumesOperator(ctx, agent, node)) return true;
     /* Task turns and the inbox's turn of an agent that is switched off wait for it to be on and start nothing. */
-    const waiting = and(eq(jobs.status, 'queued'), limitUntil(sub.limits, sub.limitsUpdatedAt) ? programStart : agent.switchedOffAt ? peopleTurns : undefined);
+    const waiting = and(eq(jobs.status, 'queued'), modelLimitUntil(sub, agent.model) ? programStart : agent.switchedOffAt ? peopleTurns : undefined);
     const [open] = await db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), or(eq(jobs.status, 'running'), waiting))).limit(1);
     if (open) return false;
     await insertTurn(ctx, { companyId: agent.companyId, agentId, prompt: '', createdBy: null });
@@ -563,7 +563,7 @@ function turnsThatMayGo(agent: PlanAgent & { switchedOffAt: Date | null }, until
 async function dueTurn(ctx: Ctx, agent: PlanAgent & { name: string; switchedOffAt: Date | null }, sub: Plan) {
   /* Real turns wait for the limit; an empty start can still open the saved program. Past the share set for tasks only
      workers' task turns wait. */
-  const until = limitUntil(sub.limits, sub.limitsUpdatedAt);
+  const until = modelLimitUntil(sub, agent.model);
   const spent = workerBudgetUntil(agent, sub);
   const reset = until ?? spent;
   if (reset) pumpAt(ctx, agent.id, reset);
@@ -627,7 +627,7 @@ export { WORKER_COMPACT_WINDOW, FULL_COMPACT_WINDOW, TURN_TIMEOUT_MS, STOPPED_ON
 export { onAgent } from './line.js';
 export { takesTurns, agentOnNode, liveSubscription, nodeOfAgent, programNode, programPlan, conversationOf, goesElsewhere, windowNode } from './placement.js';
 export type { ProgramNode } from './placement.js';
-export { limitUntil, budgetUntil, refusedLimits } from './limits.js';
+export { limitUntil, budgetUntil, modelLimitUntil, refusedLimits } from './limits.js';
 export { turnGoingOn, NoSubscription, orchestratorOf } from './turn-records.js';
 export type { TurnMessage } from './turn-types.js';
 export { agentState, planHoldView, planHeld, planWaitsFor, orchestratorState } from './state.js';

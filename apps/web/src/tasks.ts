@@ -11,7 +11,7 @@ import { everyVisible } from './guard';
 const hasBody = <B,>(body: B | null | undefined, fresh: () => boolean): body is B => body !== null && body !== undefined && fresh();
 
 /* Fetches the path, again whenever a stream message says it may have changed. undefined until the first answer. */
-export function useLive<T>(path: string | null, pick: (body: never) => T, wanted: (m: LiveMessage) => boolean): { data: T | undefined; failure: unknown; load: () => void } {
+export function useLive<T>(path: string | null, pick: (body: never) => T, wanted: (m: LiveMessage) => boolean): { data: T | undefined; failure: unknown; load: () => void; cancel: () => void } {
   const [data, setData] = useState<T | undefined>(undefined);
   const [failure, setFailure] = useState<unknown>(null);
   const latest = useRef(path);
@@ -21,16 +21,20 @@ export function useLive<T>(path: string | null, pick: (body: never) => T, wanted
   /* Answers can come back out of order; one older than the answer on screen is dropped. */
   const asked = useRef(0);
   const shown = useRef(0);
+  /* The last ask, which a load given up at its limit stops: its answer, or its failure, no longer counts. */
+  const running = useRef<AbortController | null>(null);
 
   const ask = useCallback(() => {
     if (!path) return Promise.resolve();
     const n = ++asked.current;
+    const control = new AbortController();
+    running.current = control;
     const fresh = () => {
-      if (latest.current !== path || n < shown.current) return false;
+      if (control.signal.aborted || latest.current !== path || n < shown.current) return false;
       shown.current = n;
       return true;
     };
-    return api.get<never>(path).then(
+    return api.get<never>(path, control.signal).then(
       body => {
         if (!hasBody(body, fresh)) return;
         setData(pickRef.current(body));
@@ -56,8 +60,9 @@ export function useLive<T>(path: string | null, pick: (body: never) => T, wanted
   });
 
   const load = useCallback(() => void ask(), [ask]);
+  const cancel = useCallback(() => running.current?.abort(), []);
 
-  return { data, failure, load };
+  return { data, failure, load, cancel };
 }
 
 /* department: any of the company's, or none for the work given to the orchestrator itself; left out, all the person reads. */
@@ -67,10 +72,24 @@ export const tasksPath = (f: TaskFilter) => `/api/tasks?status=${f.status}${f.de
 
 const taskSource = (filter: TaskFilter, enabled: boolean): string | null => enabled ? tasksPath(filter) : null;
 
+/* The task lines this tab has read, by id: a task's card opens with the title, the status and the facts its row showed,
+   while the rest of the task comes. */
+const knownLines = new Map<string, TaskLine>();
+
+function known(lines: TaskLine[]): TaskLine[] {
+  for (const line of lines) knownLines.set(line.id, line);
+  return lines;
+}
+
+export const knownLine = (id: string): TaskLine | undefined => knownLines.get(id);
+
+/* The subtasks of a task among the lines this tab has read. */
+export const knownSubtasks = (id: string): TaskLine[] => [...knownLines.values()].filter(line => line.parentId === id);
+
 /* Tasks the person reaches, as the tracker lists them. */
 export function useTasks(filter: TaskFilter, enabled = true) {
-  const { data, failure, load } = useLive(taskSource(filter, enabled), (b: { tasks: TaskLine[] }) => b.tasks, m => m.type === 'task');
-  return { tasks: data, failure, load };
+  const { data, failure, load, cancel } = useLive(taskSource(filter, enabled), (b: { tasks: TaskLine[] }) => known(b.tasks), m => m.type === 'task');
+  return { tasks: data, failure, load, cancel };
 }
 
 /* The departments whose tasks the person reads, which can change with their access. */
@@ -81,14 +100,14 @@ export function useTaskDepartments() {
 
 /* One task with its gates, subtasks and log. */
 export function useTask(id: string) {
-  const { data, failure, load } = useLive(`/api/tasks/${id}`, (b: { task: TaskDetail }) => b.task, m => m.type === 'task' || m.type === 'requests');
-  return { task: data, failure, load };
+  const { data, failure, load, cancel } = useLive(`/api/tasks/${id}`, (b: { task: TaskDetail }) => b.task, m => m.type === 'task' || m.type === 'requests');
+  return { task: data, failure, load, cancel };
 }
 
 /* The company's goals with their progress, fetched again when a goal or a task changes, as tasks move a goal's progress. */
 export function useGoals(enabled = true) {
-  const { data, failure, load } = useLive(enabled ? '/api/goals' : null, (b: { goals: GoalView[] }) => b.goals, m => m.type === 'tracker' || m.type === 'task');
-  return { goals: data, failure, load };
+  const { data, failure, load, cancel } = useLive(enabled ? '/api/goals' : null, (b: { goals: GoalView[] }) => b.goals, m => m.type === 'tracker' || m.type === 'task');
+  return { goals: data, failure, load, cancel };
 }
 
 /* One goal with its history. */
