@@ -69,7 +69,10 @@ const Grants = z.object({ held: SignedGrant.nullable(), spent: z.array(z.object(
 type Grants = z.infer<typeof Grants>;
 const Out = z.object({ exit: z.number().int().min(0).max(255), output: z.string().max(30_000) });
 
-type Settings = { untilSec: number | null; until: string | null; asked: null; by: 'keeper' };
+/* stopped: closed by a keeper as it stopped, which hears no close any more. Its updater starts nothing then, and lets a
+   command already under way run on for a while, until a keeper speaks again: a command that recreates the keeper, as
+   an installer does, would otherwise end itself halfway and leave the machine's containers made but never started. */
+type Settings = { untilSec: number | null; until: string | null; asked: null; by: 'keeper'; stopped?: true };
 const CLOSED: Settings = { untilSec: null, until: null, asked: null, by: 'keeper' };
 
 /* Carries a machine's computer access between the app that leads and the machine's own updater. It asks the app for the
@@ -137,12 +140,12 @@ export class ComputerCarrier {
   }
 
   /* Ends the round in flight, writes nothing of it, and leaves the machine closed: a keeper that asks no more cannot
-     hear a close. */
+     hear a close. It says it stopped, so a command under way outlives a restart of the keeper (Settings). */
   async stop(): Promise<void> {
     this.stopping.abort();
     if (this.timer) clearTimeout(this.timer);
     await this.round?.catch(() => undefined);
-    this.write(CLOSED, true);
+    this.write({ ...CLOSED, stopped: true }, true);
   }
 
   private async oneRound(): Promise<number> {

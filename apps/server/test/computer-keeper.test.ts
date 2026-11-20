@@ -316,6 +316,36 @@ describe("a machine's keeper and its computer access", () => {
     answer(open(Math.floor(START / 1000) + 3600, null, [{ id, command: 'true', timeout: 30 }]));
     await Promise.all([round, stopping]);
     expect(s.files()).toEqual([]);
+    /* Closed, and said to be closed by a keeper that stopped: its updater lets a command already under way run on
+       until a keeper speaks again, as one that recreates the keeper would otherwise end itself halfway. */
+    expect(s.settings()).toEqual({ ...CLOSED, stopped: true });
+  });
+
+  it('keeps the word of a keeper that stopped until it hears the app, and then says open or closed as ever', async () => {
+    const s = stand();
+    const before = s.make();
+    before.prepare();
+    s.said.get = { status: 200, body: { access: { standing: true }, runs: [] } };
+    await before.tick();
+    await before.stop();
+    expect(s.settings()).toEqual({ ...CLOSED, stopped: true });
+    /* The keeper of the same machine started again: nothing it said yet, so the stopped one's word stands. */
+    const after = s.make();
+    after.prepare();
+    expect(s.settings()).toEqual({ ...CLOSED, stopped: true });
+    await after.tick();
+    expect(s.settings().untilSec).toBeGreaterThan(s.nowS());
+    expect(s.settings()).not.toHaveProperty('stopped');
+    s.said.get = closed();
+    await after.tick();
+    expect(s.settings()).toEqual(CLOSED);
+    /* One that cannot hear the app for its minute closes as ever: no command runs on past that. */
+    await after.stop();
+    const deaf = s.make();
+    deaf.prepare();
+    s.said.get = { status: 503, body: null };
+    s.advance(61_000);
+    await deaf.tick();
     expect(s.settings()).toEqual(CLOSED);
   });
 
