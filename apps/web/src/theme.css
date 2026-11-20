@@ -2182,8 +2182,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   --tracker-card-size: 460px;
   --tracker-strips-room: 32px;
   /* The status dot and the filled core of a task worked on now, and that core's breath (style book 1.6, section 4 "Working
-     now"; Design #1628): dbreathe's 2.6 s, down to the core's weakest opacity. That is 1, no swing, until a skin's own value
-     is measured at 3:1 or more on the row, the row under the pointer and the open row. No colour here (note #72). */
+     now"; Design #1628): dbreathe's 2.6 s, down to the core's weakest opacity. Each skin sets that in src/skins/registry.ts,
+     measured at 3:1 or more on the row, the row under the pointer and the open row; 1 here, no swing, until a skin is on
+     the page. No colour here (note #72). */
   --tracker-dot-size: 14px;
   --tracker-dot-ring: 2px;
   --tracker-dot-core: 6px;
@@ -2191,9 +2192,6 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   --tracker-pulse-ease: ease-in-out;
   --tracker-pulse-low: 1;
 }
-/* Per skin, not per scheme: the least that keeps 3:1 differs per skin (.45, .46, .42 and .76), and each value keeps a margin. */
-:root[data-theme='cyberpunk'], :root[data-theme='matrix'], :root[data-theme='pixel'] { --tracker-pulse-low: .55; }
-:root[data-theme='light'] { --tracker-pulse-low: .8; }
 :root[data-scheme='light'] {
   --tracker-mark-ink: var(--ink);
   --tracker-mark-strength: 30%;

@@ -6,13 +6,14 @@ const declsOf = (selector: string, media: string | null = null) => Object.assign
 
 /* Design #1628 (style book 1.6, section 4 "Working now", spec sections 3 and 7): the dot of a task an employee works on now
    has a filled core in its ring's colour. Only the core's top layer breathes, on the product's dbreathe, down to a weakest
-   opacity set per skin, 1 for a skin not measured yet; nothing breathes for a person who asked for less motion. */
-it('sizes and times the working-now dot with tokens of its own, with no colour in them, its weakest core set per skin', () => {
+   opacity each skin sets in the registry (skins-registry.test), 1 here for a page no skin reached yet; nothing breathes for
+   a person who asked for less motion. */
+it('sizes and times the working-now dot with tokens of its own, with no colour in them and no weakest core of a skin', () => {
   expect(declsOf(':root')).toMatchObject({
     '--tracker-dot-size': '14px', '--tracker-dot-ring': '2px', '--tracker-dot-core': '6px',
     '--tracker-pulse-time': '2.6s', '--tracker-pulse-ease': 'ease-in-out', '--tracker-pulse-low': '1',
   });
-  expect(['cyberpunk', 'matrix', 'pixel', 'light'].map(skin => declsOf(`:root[data-theme='${skin}']`)['--tracker-pulse-low'])).toEqual(['.55', '.55', '.55', '.8']);
+  expect(RULES.filter(rule => rule.selectors.some(selector => /data-(theme|scheme)/.test(selector)) && '--tracker-pulse-low' in rule.decls)).toEqual([]);
 });
 
 it('draws a still core in the ring of a task worked on now and breathes only its top layer, never under reduced motion', () => {
