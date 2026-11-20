@@ -281,10 +281,13 @@ for (const screen of SCREENS) {
       await expect(retry).toBeFocused();
       expect(await retry.evaluate(el => { const s = getComputedStyle(el); return [el.matches(':focus-visible'), s.outlineStyle, s.outlineWidth]; })).toEqual([true, 'solid', '2px']);
       const asked = hold.asked();
+      const before = await boxesOf(screen.shown(page, 'en'));
       await retry.press('Enter');
       await expect.poll(hold.asked).toBeGreaterThan(asked);
       await expect(busyOf(screen, page)).not.toHaveClass(/unseen/);
       await expect(roomOf(screen, page)).toBeFocused();
+      /* The focus goes to the room without scrolling it into view: nothing shown moves. */
+      expectSameBoxes(await boxesOf(screen.shown(page, 'en')), before);
       const answered = hold.answered();
       hold.release();
       await answered;
