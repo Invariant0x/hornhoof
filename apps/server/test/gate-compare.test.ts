@@ -186,6 +186,16 @@ describe("a commit's files with what each holds", () => {
 describe('a branch holds a commit, however many files lie between them', () => {
   const at = { url: 'https://github.com/acme/shop.git', branch: 'main', token: '' };
   const capped = (base: string, head: string) => ({ complete: false as const, reason: 'too-many-files', lineage: { baseSha: base, headSha: head, commits: [] } });
+  it.each([403, 429])('reports the GitHub limit and its UTC reset on HTTP %s', async status => {
+    const reset = Date.UTC(2030, 0, 1, 23, 45) / 1000;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status, headers: {
+      'x-ratelimit-remaining': '0',
+      'x-ratelimit-reset': String(reset),
+    } })));
+    await expect(branchHolds({ readMerged, readCompare }, at, 'e'.repeat(40), sha))
+      .rejects.toThrow('request limit is used up until 23:45 UTC');
+  });
+
   it('takes the line of a capped comparison where GitHub could not say by status, and nothing else', async () => {
     const head = 'c'.repeat(40);
     expect(await branchHolds({ readMerged: async () => null, readCompare: async (_repo, refs) => capped(refs.base, refs.head) }, at, head, sha)).toBe(true);
