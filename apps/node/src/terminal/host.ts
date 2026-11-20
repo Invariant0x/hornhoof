@@ -32,7 +32,7 @@ import { findKimiWire, prepareKimi } from '../providers/kimi-terminal.js';
 import { FAILURE, failure } from './failures.js';
 import { TurnEnds, hookCalls, claudeEnd, stopIsLate, type TurnEnd } from './turn-signals.js';
 import { busy, enterPending, hasSettled, idleRefusal, RETIRED, stale, type IdleEvidence, type RetireResult } from './program-retire.js';
-import { claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
+import { claudeTook, claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
 import { CALLS } from './tool-calls.js';
 import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import type { RecordingCursor } from './recordings.js';
@@ -1076,7 +1076,7 @@ export class TerminalHost {
   private async typePlainPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
     a.fresh = false;
     a.took = false;
-    a.typing = prompt;
+    this.typingNow(a, prompt);
     if (typedSinceStart(a) && !(await this.freeOfPerson(a, job))) return this.inputNotFree(a, job);
     a.ownerTyped = false;
     await this.opts.tmux.paste(a.name, prompt);
@@ -1199,7 +1199,8 @@ export class TerminalHost {
   }
 
   private async deliverOperatorPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
-    a.fresh = false; a.took = false; a.typing = prompt; a.ownerTyped = false;
+    a.fresh = false; a.took = false; a.ownerTyped = false;
+    this.typingNow(a, prompt);
     const failed = await this.pasteOperatorPrompt(a, job, prompt);
     return failed ?? this.waitOperatorReceipt(a, job, prompt);
   }
@@ -2082,6 +2083,25 @@ export class TerminalHost {
   private claudeReceivedWords(a: Agent, line: Record<string, unknown>): void {
     const receipt = claudeWordReceipt(line, a.enqueuedWords);
     if (receipt && !this.knownClaudeWord(a, receipt) && receipt.state === 'queued') this.ownerQueued(a, receipt.text);
+    this.claudeTookTyped(a, line);
+  }
+
+  /* Hornhoof's words go in from here. What the program logged before is read first, while no words wait, so no entry of it
+     counts as their receipt. */
+  private typingNow(a: Agent, words: string): void {
+    this.drain(a);
+    a.typing = words;
+  }
+
+  /* Claude's transcript records the words Hornhoof typed as it takes them: the receipt its prompt hook gives, should Claude
+     have given up on that hook, as on a busy machine, and the node take the program's own end for another turn's. Words
+     Claude queued and dequeued have their own receipts. */
+  private claudeTookTyped(a: Agent, line: Record<string, unknown>): void {
+    const typed = a.typing;
+    if (typed == null || a.dequeued || !a.turn || this.overIn(a) || !claudeTook(line, typed)) return;
+    if (!this.takeRetainedAssignment(a, typed)) a.turn.words.taken(typed);
+    a.typing = null;
+    this.tookTurn(a);
   }
 
   private knownClaudeWord(a: Agent, receipt: NonNullable<ReturnType<typeof claudeWordReceipt>>): boolean {
@@ -2887,7 +2907,7 @@ export class TerminalHost {
     const text = [note, ...turn.words.pending()].filter(Boolean).join('\n\n');
     turn.words.replay(text);
     a.took = false;
-    a.typing = text;
+    this.typingNow(a, text);
     await this.inputLane(a, () => this.opts.tmux.paste(a.name, text));
     const pastedAt = Date.now();
     a.pastedAt = pastedAt;

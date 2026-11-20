@@ -1,5 +1,6 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RunResult } from '../src/runner.js';
+import { claudeTook } from '../src/terminal/program-restart.js';
 import { atWork, cleanups } from './terminal-host-receipts-helpers.js';
 
 /* Claude Code gives up on a hook as on a status line a newer one overtook: the prompt hook that would say it took Hornhoof's
@@ -22,6 +23,21 @@ function settled(running: Promise<RunResult>) {
   void running.then(done => { result = done; });
   return () => result;
 }
+
+describe('an entry of Claude that shows it took these words', () => {
+  it.each([
+    ['the words as its text', userSaid(WORDS), true],
+    ['the words with space around them', userSaid(`\n${WORDS} `), true],
+    ['the words in text parts', userSaid([{ type: 'text', text: 'Go ' }, { type: 'text', text: 'on.' }]), true],
+    ['a note Claude adds of its own', { ...userSaid(WORDS), isMeta: true }, false],
+    ['the words said in another role', { type: 'user', message: { role: 'assistant', content: WORDS } }, false],
+    ['the words beside a part of another kind', userSaid([{ type: 'text', text: WORDS }, { type: 'image', source: {} }]), false],
+    ['no words at all', userSaid([]), false],
+    ['an entry with no message', { type: 'user' }, false],
+  ])('%s', (_what, line, took) => {
+    expect(claudeTook(line, WORDS)).toBe(took);
+  });
+});
 
 /* The program came back mid-turn and Hornhoof typed the turn's words again; no hook said the program took them. */
 async function retyped() {
@@ -67,9 +83,8 @@ it.each([
 it('takes no entry from before the words went in as their receipt', async () => {
   const c = await atWork('claude', 'silent');
   const a = c.host['agents'].get('receipt')!;
-  /* The same words, said earlier in the conversation. */
+  /* The same words, said earlier in the conversation, in the log still unread as Hornhoof types them again. */
   c.record(userSaid(WORDS));
-  c.drain();
   await c.on(c.host['replayWords'](a, a.turn!, WORDS));
   const result = settled(c.running);
   c.finish();
