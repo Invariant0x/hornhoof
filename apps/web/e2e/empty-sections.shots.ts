@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
-import { ELSEWHERE, FAIL_MS, HEADED_ORG, NO_DECISIONS, openTracker, RING_DELAY_MS, RING_MIN_MS, shownEmpty, SLOW_MS, type Look } from './empty-sections';
+import { ELSEWHERE, FAIL_MS, HEADED_ORG, NO_DECISIONS, openTracker, RING_DELAY_MS, shownEmpty, SLOW_MS, type Look } from './empty-sections';
 import { stretch } from './pseudo-text';
 import { TASKS } from './tasks-board/api';
 
@@ -48,8 +48,10 @@ for (const place of PLACES) {
           const look: Look = { ...tongue.look, width, theme };
           const answers = { ...NONE, '/api/tasks': { tasks: place.tasks } };
           await openTracker(page, place.path, look, answers, place.held ? ['/api/tasks'] : []);
+          /* Only a held place moves the clock, once the page asked for what it holds. Any other place moves none: its loads
+             end as their answers come, while a ring that showed would hold them for its least time, which the paused clock
+             never ends, should the page ask while the clock moves. */
           if (place.run) await page.clock.runFor(place.run);
-          else await page.clock.runFor(RING_MIN_MS);
           await place.shown(page);
           if ('pseudo' in tongue) await stretch(page.locator('.tr-main'));
           await page.screenshot({ path: `${OUT}/${browserName}-${place.name}-${width}-${theme}-${tongue.name}.png`, fullPage: true, animations: 'disabled' });
