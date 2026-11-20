@@ -9,6 +9,7 @@ import { Bar, Share } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
+import { LoadState, onTop, useLoad } from '../ui/Loading';
 import { latestAnswers, useStream } from '../live';
 import { CardBlock, CardFrame, CardHead, EmptyBox, Facts, Gauge, MachineMark, Part } from '../ui/Cards';
 import { ProviderMark } from '../ui/icons';
@@ -731,6 +732,8 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
     void load();
     return everyVisible(() => void load(), REFRESH_MS);
   }, [load]);
+  /* The machines come with the shared indicator where they will stand, and say why when they do not. */
+  const machinesLoad = useLoad([{ data: machines, failure: loadFailure, load }]);
   useStream(m => {
     if (m.type === 'reconnected') void load();
   });
@@ -827,7 +830,6 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
         <div>
           <h1>{t.machines.heading}</h1>
           <p className="muted">{t.machines.intro}</p>
-          {copies && <CopiesLine copies={copies} />}
         </div>
         {!activeCommand && (
           <div className="head-actions">
@@ -835,6 +837,8 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           </div>
         )}
       </header>
+      {/* Under the header, not in it: it comes with the machines, and the header's button stays where it was. */}
+      {copies && <div className="machines-copies"><CopiesLine copies={copies} /></div>}
 
       {activeCommand && (
         <ActiveCommandPanel
@@ -846,9 +850,10 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           onCancel={() => void cancelMachine(activeCommand.id)}
         />
       )}
-      <LoadFailure failure={loadFailure} />
+      <LoadFailure failure={onTop(machines, loadFailure)} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       {certificateEnds && <CertificateWarning ends={certificateEnds} />}
+      <LoadState load={machinesLoad} />
 
       {machines && <Pool {...pool} />}
       {machines && machines.length === 0 && !builtin && <p className="muted">{t.machines.noMachines}</p>}

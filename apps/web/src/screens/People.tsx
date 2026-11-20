@@ -7,6 +7,7 @@ import { accessEmpty, accessInput, AccessPicker, accessText } from '../ui/Access
 import { CopyButton } from '../ui/CopyButton';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
+import { LoadState, onTop, useLoad } from '../ui/Loading';
 import { latestAnswers, useStream } from '../live';
 import { Field } from '../ui/Field';
 import { NOT_A_LOGIN } from '../ui/SecretInput';
@@ -465,6 +466,15 @@ function PeopleHeader({ canManage, panel, onInvite, onAssistant }: { canManage: 
   );
 }
 
+/* Under the list, and with it, so nothing moves when the list comes: who may act for the CEO, and that agents are elsewhere. */
+function PeopleFoot({ me }: { me: Me }) {
+  const t = useT();
+  return <>
+    {me.person.isOwner && <p className="muted">{t.people.ceoDelegate}: {t.people.ceoDelegateHint}</p>}
+    <p className="muted people-foot"><AgentIcon /> {t.people.agentsNote}</p>
+  </>;
+}
+
 export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; onRenamed?: (name: string) => void } & CardRoute) {
   const t = useT();
   const [people, setPeople] = useState<PersonView[] | null>(null);
@@ -492,6 +502,8 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
   useEffect(() => {
     void load();
   }, [load]);
+  /* The people come with the shared indicator where they will stand, and say why when they do not. */
+  const peopleLoad = useLoad([{ data: people, failure: loadFailure, load }]);
   /* After a break, an update among them, the list is read again. */
   useStream(m => {
     if (m.type === 'reconnected') void load();
@@ -574,10 +586,11 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
         onClose={closePerson}
       />
       {panel?.kind === 'delete' && <DeleteAsk person={panel.person} onYes={() => removePerson(panel.person)} onClose={() => setPanel(null)} />}
-      <LoadFailure failure={loadFailure} />
+      <LoadFailure failure={onTop(people, loadFailure)} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      <LoadState load={peopleLoad} />
 
-      {people && (
+      {people && (<>
         <div className="fit" ref={tableHost}>
           <table className="ptable">
             <thead>
@@ -594,9 +607,8 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
             </tbody>
           </table>
         </div>
-      )}
-      {me.person.isOwner && <p className="muted">{t.people.ceoDelegate}: {t.people.ceoDelegateHint}</p>}
-      <p className="muted people-foot"><AgentIcon /> {t.people.agentsNote}</p>
+        <PeopleFoot me={me} />
+      </>)}
     </section>
   );
 }

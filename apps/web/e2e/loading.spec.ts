@@ -48,6 +48,8 @@ type Screen = {
   shown(page: Page, lang: Lang): Locator[];
   place(page: Page): Locator;
   arrived(page: Page, lang: Lang): Locator;
+  /* What else the screen reads, as the server answers it. */
+  serves?: Record<string, unknown>;
 };
 
 const byTab = (tab: 'people' | 'machines' | 'subscriptions') => async (page: Page, lang: Lang) => {
@@ -82,7 +84,7 @@ const SCREENS: Screen[] = [
     answer: route => route.fulfill({ json: { people: [PERSON] } }),
     shown: (page, lang) => [page.getByRole('navigation').first(), page.getByRole('heading', { level: 1, name: words(lang).people.heading, exact: true }), page.getByRole('button', { name: words(lang).people.invitePerson, exact: true })],
     place: page => page.locator('section.people:not(.machines)'),
-    arrived: page => page.getByRole('cell', { name: 'Mira Stone' }),
+    arrived: page => page.getByRole('cell', { name: 'Mira Stone', exact: true }),
   },
   {
     name: 'machines',
@@ -92,6 +94,7 @@ const SCREENS: Screen[] = [
     shown: (page, lang) => [page.getByRole('navigation').first(), page.getByRole('heading', { level: 1, name: words(lang).machines.heading, exact: true }), page.getByRole('button', { name: words(lang).machines.connect, exact: true })],
     place: page => page.locator('section.machines'),
     arrived: (page, lang) => page.getByText(words(lang).machines.noMachines, { exact: true }),
+    serves: { '/api/subscriptions': { subscriptions: [] } },
   },
 ];
 
@@ -106,6 +109,7 @@ async function openHeld(page: Page, screen: Screen, look: { lang: Lang; theme: s
     localStorage.setItem('hh-theme', theme);
   }, look);
   await serveApi(page);
+  for (const [path, json] of Object.entries(screen.serves ?? {})) await page.route(url => pathOf(url) === path, route => route.fulfill({ json }));
   let asked = 0;
   let fail = false;
   let open: () => void = () => {};
