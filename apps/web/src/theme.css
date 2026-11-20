@@ -615,6 +615,14 @@ select:disabled { opacity: .55; }
    sight under the bars, as on a department's schema and tree there. The world keeps its place on the map. */
 .map-room { position: absolute; inset: var(--map-top, 0px) 0 var(--map-bottom, 0px); overflow: hidden; }
 .map-room > .world { top: calc(-1 * var(--map-top, 0px)); }
+/* The running build over the map, in the bottom end corner of that room, where the footer row stood its text before (#1590):
+   small muted text and nothing more, which a tap goes through to the map. On a phone the room ends over the bars along the
+   bottom, so it stands on them; on a wide screen the room is the whole map, so it sits in the corner of the window, or on the
+   bar that stands there, as the zoom does right to left: --lift is how far it measures it must rise. */
+.map-version {
+  position: absolute; inset-block-end: calc(4px + var(--lift, 0px)); inset-inline-end: 12px; margin: 0; color: var(--muted); font-size: 12px;
+  pointer-events: none; user-select: none;
+}
 .world > * { position: absolute; }
 .wires { left: 0; top: 0; pointer-events: none; overflow: visible; }
 .wires .tr { fill: none; stroke: var(--line2); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
@@ -1520,10 +1528,13 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 .dv-acts[data-fit="icons"] .dv-tools > .hbtn { border: 0; background: none; }
 .dv-acts[data-fit="icons"] .dv-tools > .hbtn + .hbtn { border-inline-start: 1px solid var(--line); }
 .dv-acts[data-fit="icons"] > .btn { margin-inline-start: auto; padding-block: 8px; }
+/* The map runs to the bottom of the screen and names the version over its own corner (#1590). */
+.app-layout:has(.map-version) > .version-mark { display: none; }
 /* The actions take the corner the version sits in on the map. */
 body:has(.dview) .version-mark { display: none; }
 /* A form keeps the footer below it: the footer's row comes from the screen, so a footer that went with a form would move
-   every window and panel fixed there (#1384). A phone shows no version at all; About names it there. */
+   every window and panel fixed there (#1384). A phone shows no footer; About names the version there, and the map over its
+   corner. */
 @media (max-width: 760px) { .version-mark { display: none; } }
 /* The line of what changed sits between the zoom and the actions. */
 .dview .ticker { left: 212px; right: var(--ticker-right, 16px); transform: none; max-width: none; }
@@ -2454,9 +2465,6 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .wait-card.turn_summary { border-inline-start-color: var(--cyan-ink); }
 .wait-card h3 { font-size: 14px; }
 .wait-card p { margin: 0; }
-/* The person whose decisions show, with a cross that shows everyone's again. */
-.filter-chip { justify-self: start; display: inline-flex; align-items: center; gap: 2px; max-width: 100%; margin: 0; padding-left: 12px; border: 1px solid var(--amber); background: var(--surface); font-size: 13px; font-weight: 600; }
-.filter-chip > span { min-width: 0; overflow-wrap: anywhere; }
 .imps { display: grid; gap: 10px; }
 .imp { display: grid; gap: 8px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-inline-start: 3px solid var(--amber); }
 .imp-taken { border-inline-start-color: var(--cyan); }

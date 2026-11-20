@@ -690,6 +690,10 @@ export const en = {
     resetsIn: (duration: string) => `resets in ${duration}`,
     /* A limit's cell in the list: its used share, then when it resets. */
     usedAndReset: (share: string, reset: string) => `${share}, ${reset}`,
+    /* The limits of one group of a plan's models, by the name its provider gives the group, as Gemini Models. */
+    groupLimits: (group: string) => `Limits: ${group}`,
+    /* A limit's cell in the list for a plan that keeps its limits by model group: the group, then what it used. */
+    groupShare: (group: string, share: string) => `${group}: ${share}`,
     resetUnknown: 'Reset time unknown',
     limitReached: (duration: string | null) => (duration ? `Limit reached, resets in ${duration}` : 'Limit reached'),
     notOnPlan: 'Not on this plan',
@@ -1832,10 +1836,7 @@ export const en = {
     machineAwayImportant: (names: string) => `Among them: ${names}.`,
     machineAwayDo: 'What to do: switch it on and plug it in, sign in to the account, check that Docker has started.',
     machineBack: (host: string, at: string) => `Machine ${host} is back: ${at}.`,
-    /* The decisions screen opened from a person's card shows theirs until the filter is taken off. */
-    decisionsFor: (name: string) => `Decisions for ${name}`,
     someone: 'this person',
-    showAll: "Show everyone's decisions",
     nothingFor: (name: string) => `Nothing waits for a decision from ${name}.`,
     asks: (agent: string) => `${agent} asks`,
     asksApproval: (agent: string) => `${agent} asks you to approve a commit`,

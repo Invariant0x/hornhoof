@@ -17,6 +17,17 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A tab whose session ended goes to the sign-in screen at once, and a tab nobody is signed in on reloads by itself once Hornhoof runs another version.
 - After the sign-in code, a plan's card and its sign-in window show that it is connecting, with the step its machine is at and the time since the code, until it is ready, for every program. A connection that fails says why and what to do; one past 10 minutes (`SIGNIN_CONNECT_MS`) says it takes longer than usual, with Try again and Stop.
 - The tracker and the plans screen show one loading indicator where their data will stand, and nothing already shown moves when it comes. A load that fails says why, and one past 20 seconds says it takes longer than usual, each with Try again.
+- A plan with separate limits for groups of models, as Antigravity's Gemini and its Claude and GPT models, keeps each group's limits: a used-up group holds only the turns and fallbacks on its own models, and the plan's card shows every group with what it used and when it resets.
+
+### Changed
+
+- The map runs to the bottom of the screen, with the version as small muted text in its bottom end corner, clear of its buttons and of the bars along a phone's bottom; other screens keep the version in the row below them.
+
+## [0.39.3] - 2026-11-19
+
+### Fixed
+
+- On a phone, a department's head card no longer opens under the department's name: it starts 8 px below it, with or without a banner over the map.
 
 ## [0.39.2] - 2026-11-19
 

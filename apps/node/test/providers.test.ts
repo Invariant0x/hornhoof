@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { CLAUDE_ALIASES, type AgentEvent, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+import { CLAUDE_ALIASES, limitsForModel, type AgentEvent, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { adapterFor, programFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
@@ -32,6 +32,27 @@ const KIMI_SESSION = 'k1m1c0de-0000-4000-8000-000000000001';
 const AGY_NEW = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
 const AGY_RESUMED = '9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f';
 const AGY_FLAGS = ['--output-format', 'stream-json', '--print-timeout', '0s', '--dangerously-skip-permissions'];
+/* What fixtures/agy-usage.json, agy's real /usage output, tells of the plan: the fuller group speaks for the plan as a whole,
+   and each group keeps its own windows. */
+const AGY_GEMINI_WINDOWS = [
+  { name: 'five_hour', utilization: 1 - 0.6985989809036255, resetsAt: '2026-11-04T21:41:44.000Z' },
+  { name: 'seven_day', utilization: 1 - 0.6328346133232117, resetsAt: '2026-11-10T00:41:44.000Z' },
+];
+const AGY_FIXTURE_LIMITS = {
+  status: 'allowed',
+  windows: AGY_GEMINI_WINDOWS,
+  complete: true,
+  groups: [
+    { name: 'Gemini Models', about: 'Models within this group: Gemini Flash, Gemini Pro', status: 'allowed', windows: AGY_GEMINI_WINDOWS, complete: true },
+    {
+      name: 'Claude and GPT models',
+      about: 'Models within this group: Claude Opus, Claude Sonnet, GPT-OSS',
+      status: 'allowed',
+      windows: [{ name: 'five_hour', utilization: 0, resetsAt: '2026-11-05T02:19:23.000Z' }, { name: 'seven_day', utilization: 0, resetsAt: '2026-11-11T21:19:23.000Z' }],
+      complete: true,
+    },
+  ],
+};
 /* Codex reads AGENTS.md only up to project_doc_max_bytes, 32 KiB unless set. */
 const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', '-c', 'project_doc_max_bytes=1048576', '-c', 'check_for_update_on_startup=false'];
 
@@ -760,16 +781,8 @@ describe('Antigravity CLI', () => {
 
   it("reads the plan's windows, used shares and resets from agy's real /usage output", () => {
     const raw = readFileSync(new URL('./fixtures/agy-usage.json', import.meta.url), 'utf8');
-    const expected = {
-      status: 'allowed',
-      windows: [
-        { name: 'five_hour', utilization: 1 - 0.6985989809036255, resetsAt: '2026-11-04T21:41:44.000Z' },
-        { name: 'seven_day', utilization: 1 - 0.6328346133232117, resetsAt: '2026-11-10T00:41:44.000Z' },
-      ],
-      complete: true,
-    };
-    expect(agyUsageLimits(raw)).toEqual(expected);
-    expect(agyUsageLimits(JSON.parse(raw))).toEqual(expected);
+    expect(agyUsageLimits(raw)).toEqual(AGY_FIXTURE_LIMITS);
+    expect(agyUsageLimits(JSON.parse(raw))).toEqual(AGY_FIXTURE_LIMITS);
 
     /* Across model groups, the fuller bucket speaks for each window, and a full or disabled bucket marks the plan at its limit. */
     const exhausted = {
@@ -833,16 +846,47 @@ describe('Antigravity CLI', () => {
     }
   });
 
+  it("keeps each model group's limits as agy reports them, with the plan as a whole at its fullest group", () => {
+    /* Made-up numbers in the shape of a plan whose Claude and GPT models used their week while Gemini has most of it. */
+    const usage = (groups: unknown[]) => ({ status: 'SUCCESS', command: { name: 'usage', data: { groups } } });
+    const gemini = { name: 'Gemini Models', description: 'Models within this group: Gemini Flash, Gemini Pro', buckets: [{ window: 'weekly', remaining_fraction: 0.94, reset_time: '2026-11-24T10:00:00Z' }, { window: '5h', remaining_fraction: 1, reset_time: '2026-11-19T22:00:00Z' }] };
+    const others = { name: 'Claude and GPT models', description: 'Models within this group: Claude Opus, Claude Sonnet, GPT-OSS', buckets: [{ window: 'weekly', remaining_fraction: 0, reset_time: '2026-11-22T08:00:00Z' }, { window: '5h', disabled: true, reset_time: '2026-11-19T23:00:00Z' }] };
+    const geminiWindows = [{ name: 'five_hour', utilization: 0, resetsAt: '2026-11-19T22:00:00.000Z' }, { name: 'seven_day', utilization: 1 - 0.94, resetsAt: '2026-11-24T10:00:00.000Z' }];
+    const otherWindows = [{ name: 'five_hour', utilization: 1, resetsAt: '2026-11-19T23:00:00.000Z' }, { name: 'seven_day', utilization: 1, resetsAt: '2026-11-22T08:00:00.000Z' }];
+    const limits = agyUsageLimits(usage([gemini, others]))!;
+    expect(limits).toEqual({
+      status: 'rejected',
+      windows: otherWindows,
+      complete: true,
+      groups: [
+        { name: 'Gemini Models', about: 'Models within this group: Gemini Flash, Gemini Pro', status: 'allowed', windows: geminiWindows, complete: true },
+        { name: 'Claude and GPT models', about: 'Models within this group: Claude Opus, Claude Sonnet, GPT-OSS', status: 'rejected', windows: otherWindows, complete: true },
+      ],
+    });
+    expect(limitsForModel(limits, 'gemini-4-argon')?.status).toBe('allowed');
+    expect(limitsForModel(limits, 'claude-sonnet-5-5')?.status).toBe('rejected');
+
+    /* Three groups with other names, and no description, work the same way. */
+    const bucket = (left: number) => [{ window: 'weekly', remaining_fraction: left, reset_time: '2026-11-24T10:00:00Z' }];
+    const three = agyUsageLimits(usage([{ name: 'Swift tier', buckets: bucket(0.5) }, { name: 'Deep tier', buckets: bucket(0) }, { name: 'Open weights', buckets: bucket(0.9) }]))!;
+    expect(three.groups?.map(g => [g.name, g.status])).toEqual([['Swift tier', 'allowed'], ['Deep tier', 'rejected'], ['Open weights', 'allowed']]);
+    expect(three).toMatchObject({ status: 'rejected', windows: [{ name: 'seven_day', utilization: 1 }] });
+    expect(limitsForModel(three, 'swift-3')?.status).toBe('allowed');
+    expect(limitsForModel(three, 'deep-2')?.status).toBe('rejected');
+    /* A model of no known group gets the fullest window of the plan, as before. */
+    expect(limitsForModel(three, 'kimi-k3')?.status).toBe('rejected');
+
+    /* A plan with a single group, and groups with no name to tell them by, read as before: the plan as a whole. */
+    expect(agyUsageLimits(usage([gemini]))).toEqual({ status: 'allowed', windows: geminiWindows, complete: true });
+    expect(agyUsageLimits(usage([{ buckets: gemini.buckets }, { name: ' ', buckets: others.buckets }]))).toEqual({ status: 'rejected', windows: otherWindows, complete: true });
+    /* A group agy names past what Hornhoof keeps is cut to fit, never refused. */
+    const long = agyUsageLimits(usage([{ ...gemini, name: 'G'.repeat(200), description: 'd'.repeat(900) }, others]))!;
+    expect(long.groups?.[0]).toMatchObject({ name: 'G'.repeat(80), about: 'd'.repeat(300) });
+  });
+
   it("asks agy for the plan's limits with no turn, and gives nothing when signed out or when agy fails", async () => {
     const a = adapter('antigravity');
-    expect(await a.limits!()).toEqual({
-      status: 'allowed',
-      windows: [
-        { name: 'five_hour', utilization: 1 - 0.6985989809036255, resetsAt: '2026-11-04T21:41:44.000Z' },
-        { name: 'seven_day', utilization: 1 - 0.6328346133232117, resetsAt: '2026-11-10T00:41:44.000Z' },
-      ],
-      complete: true,
-    });
+    expect(await a.limits!()).toEqual(AGY_FIXTURE_LIMITS);
     expect(lastRun().argv).toEqual(['--print=/usage', '--output-format', 'json']);
     expect(lastRun().cwd).toBe(join(home, '.hh-limits'));
     expect(lastRun().env).toMatchObject({ HOME: home, AGY_CLI_DISABLE_AUTO_UPDATE: 'true' });

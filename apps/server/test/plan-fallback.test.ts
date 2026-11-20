@@ -27,7 +27,7 @@ async function atWork() {
   await echelonsTurn(c.db, c.companyId);
   const plan = async (label: string, provider: 'openai_api' | 'anthropic_api' = 'openai_api') =>
     (await c.db.insert(subscriptions).values({ companyId: c.companyId, provider, kind: 'api_key', targetKind: 'any', label, status: 'ready', ownerPersonId: c.sub.ownerPersonId }).returning())[0]!;
-  const personal = async (label: string, provider: 'codex' | 'claude' = 'codex') => {
+  const personal = async (label: string, provider: 'codex' | 'claude' | 'antigravity' = 'codex') => {
     const [sub] = await c.db.insert(subscriptions).values({ companyId: c.companyId, provider, kind: 'personal', label, status: 'ready', ownerPersonId: c.sub.ownerPersonId }).returning();
     const [box] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: `machine-of-${label}`, hostname: `${label.toLowerCase()}-box` }).returning();
     await c.db.insert(nodes).values({ companyId: c.companyId, machineId: box!.id, subscriptionId: sub!.id, status: 'ready', version: '0.29.2', keyHash: `key-of-${label}` });
@@ -142,6 +142,28 @@ describe('a plan at its limit', () => {
     await c.fail(c.first.id, usageLimit);
 
     expect(await c.agentOf(c.agent.id)).toMatchObject({ subscriptionId: named.id, model: 'gpt-6-luna' });
+  });
+
+  it.each([
+    { model: 'gemini-4-argon', goesTo: 'Antigravity' },
+    { model: 'claude-sonnet-5-5', goesTo: 'Spare' },
+  ])('takes a fallback by the group of the model it would run there: $model goes to $goesTo', async ({ model, goesTo }) => {
+    const c = await atWork();
+    const agy = await c.personal('Antigravity', 'antigravity');
+    await c.db.update(subscriptions).set({ models: [{ id: 'gemini-4-argon', name: 'Gemini 4 Argon' }, { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' }] }).where(eq(subscriptions.id, agy.id));
+    /* Made-up numbers: its Claude and GPT models used their week, its Gemini models have most of theirs. */
+    const week = (used: number) => ({ status: used >= 1 ? ('rejected' as const) : ('allowed' as const), windows: [{ name: 'seven_day', utilization: used, resetsAt: c.resetsAt() }], complete: true });
+    await c.limits(agy.id, {
+      ...week(1),
+      groups: [
+        { name: 'Gemini Models', about: 'Models within this group: Gemini Flash, Gemini Pro', ...week(0.06) },
+        { name: 'Claude and GPT models', about: 'Models within this group: Claude Opus, Claude Sonnet, GPT-OSS', ...week(1) },
+      ],
+    });
+    await c.db.update(subscriptions).set({ fallbacks: [{ subscription: agy.id, model }, { subscription: c.spare.id, model: null }] }).where(eq(subscriptions.id, c.sub.id));
+    await c.fail(c.first.id, usageLimit);
+
+    expect(await c.agentOf(c.agent.id)).toMatchObject(goesTo === 'Spare' ? { subscriptionId: c.spare.id } : { subscriptionId: agy.id, model });
   });
 
   it('moves the workers past the share set for tasks and keeps the head, who may go on above it', async () => {

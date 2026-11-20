@@ -19,7 +19,7 @@ import { SignInPanel } from '../ui/SignInPanel';
 import { CardFrame, CardHead, Facts, MachineMark, NameWithSign, Part } from '../ui/Cards';
 import { PayIcon, ProviderMark } from '../ui/icons';
 import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
-import { LimitCell, LimitMeters } from '../ui/PlanLimits';
+import { LimitCell, PlanLimitParts } from '../ui/PlanLimits';
 import { providerFilter, type FilterGroup } from '../ui/TableTools';
 import { SortTable, type TableColumn } from '../ui/SortTable';
 import { ApiForm } from '../ui/ApiForm';
@@ -479,7 +479,7 @@ function PlanWorking({ sub: s, me, controls, now }: PlanProps & { now: number })
   return <>
     <section className="blk blk-facts">
       <h4>{t.cards.aboutPlan}</h4>
-      <Part title={t.subs.limits}><LimitMeters sub={s} now={now} /></Part>
+      <PlanLimitParts sub={s} now={now} />
       <Part title={t.subs.tokens.title}><TokenGauges sub={s} /></Part>
       <PlanAccount sub={s} />
     </section>
