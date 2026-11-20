@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
-import { ELSEWHERE, FAIL_MS, NO_DECISIONS, openTracker, RING_DELAY_MS, RING_MIN_MS, shownEmpty, SLOW_MS, type Look } from './empty-sections';
+import { ELSEWHERE, FAIL_MS, HEADED_ORG, NO_DECISIONS, openTracker, RING_DELAY_MS, RING_MIN_MS, shownEmpty, SLOW_MS, type Look } from './empty-sections';
 import { stretch } from './pseudo-text';
 import { TASKS } from './tasks-board/api';
 
@@ -12,7 +12,8 @@ test.describe.configure({ timeout: 120_000 });
 const OUT = `${process.env.HH_OUT ?? 'e2e/results'}/empty-sections-shots`;
 mkdirSync(OUT, { recursive: true });
 
-const NONE = { '/api/requests': NO_DECISIONS, '/api/wait-cards': { cards: [], next: null }, '/api/goals': { goals: [] } };
+/* Development has a head, so the person may make a task where the spec offers it. */
+const NONE = { '/api/org': HEADED_ORG, '/api/requests': NO_DECISIONS, '/api/wait-cards': { cards: [], next: null }, '/api/goals': { goals: [] } };
 const TONGUES = [
   { name: 'en', look: { lang: 'en' } },
   { name: 'ru', look: { lang: 'ru' } },
