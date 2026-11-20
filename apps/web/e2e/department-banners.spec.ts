@@ -158,3 +158,64 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const bar of BARS) {
     expect(errors).toEqual([]);
   });
 }
+
+/* On a phone a bar over the map moved the department down under it, and the department's name plate came down over its
+   head card: "No head yet." stood hidden under "← Development CTO". The head card opens 8 px under the name plate, with any
+   bar and with none, at both widths, and the name stands at the start of the line in both directions. */
+const NO_BAR: (typeof BARS)[number] = { name: 'no bar', before: false, serve: async () => {} };
+const DIRS = ['ltr', 'rtl'] as const;
+/* Where a box stands until it stops moving: the schema glides to its place as the department opens. */
+async function stillBox(page: Page, selector: string) {
+  let last = '';
+  await expect.poll(async () => {
+    await settled(page);
+    const now = JSON.stringify(await page.locator(selector).boundingBox());
+    const same = now === last;
+    last = now;
+    return same;
+  }).toBe(true);
+  return JSON.parse(last) as Box;
+}
+
+for (const width of WIDTHS) for (const dir of DIRS) for (const bar of [NO_BAR, ...BARS]) {
+  test(`the head card opens 8 px under the department's name with ${bar.name}, ${width}px ${dir}`, async ({ page }, info) => {
+    const errors: string[] = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.setViewportSize({ width, height: HEIGHT });
+    await page.addInitScript(() => {
+      localStorage.setItem('hh-lang', 'en');
+      localStorage.setItem('hh-theme', 'cyberpunk');
+    });
+    await serveApi(page);
+    const arm = await bar.serve(page);
+    await page.goto('/');
+    const card = page.locator('.dept', { hasText: 'Development' });
+    await expect(card).toBeVisible();
+    if (bar.before) await expect(page.locator('main.body > .update-banner')).toBeVisible();
+    if (dir === 'rtl') await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
+    await still(page);
+
+    arm?.();
+    await card.click();
+    await expect(page.getByRole('button', { name: en.dept.back, exact: true })).toBeVisible();
+    if (bar !== NO_BAR) await expect(page.locator('main.body > :is(.update-banner, .alert, .guard-stop)').first()).toBeVisible();
+    else await expect(page.locator('main.body > :is(.update-banner, .alert, .guard-stop)')).toHaveCount(0);
+    const nameText = page.locator('.dview .shead .hn');
+    await expect(nameText).toHaveText(en.dept.noHead);
+    const head = await stillBox(page, '.dview .shead');
+    const plate = await boxOf(page, '.dview .crumbs');
+    expect(await page.locator('.dview .crumbs').evaluate(e => getComputedStyle(e).direction), 'the department reads in this direction').toBe(dir);
+    /* Still, so a look that did not change is the same picture byte for byte: the blinking dot of the line stands still. */
+    shot(await page.screenshot({ animations: 'disabled' }), `head-${info.project.name}-${width}-${dir}-${bar.name.replace(/[^a-z]+/gi, '-').replace(/^-|-$/g, '')}`);
+
+    expect(head.y, `the head card starts at ${head.y}, 8 px under the name plate's bottom at ${plate.y + plate.height}`).toBeGreaterThanOrEqual(plate.y + plate.height + 8 - 0.5);
+    /* Every word of the head card shows: what a click at the middle of "No head yet." reaches is the head card. */
+    const words = await boxOf(page, '.dview .shead .hn');
+    expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('.shead'), { x: words.x + words.width / 2, y: words.y + words.height / 2 }), '"No head yet." is not under anything').toBe(true);
+    /* The name stands at the start of the line: the left in ltr, the right in rtl, as far from that edge in both. */
+    const start = await page.locator('.dview .crumbs').evaluate(e => parseFloat(getComputedStyle(e).insetInlineStart));
+    const fromStart = dir === 'rtl' ? width - (plate.x + plate.width) : plate.x;
+    expect(Math.abs(fromStart - start), `the name plate stands ${start} px from the ${dir === 'rtl' ? 'right' : 'left'} edge, not ${fromStart}`).toBeLessThanOrEqual(1);
+    expect(errors).toEqual([]);
+  });
+}
