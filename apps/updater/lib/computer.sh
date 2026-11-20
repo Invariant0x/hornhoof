@@ -82,8 +82,13 @@ computer_busy() {
 }
 
 # Whether access was closed by a keeper as it stopped, and no keeper has said anything since: such a keeper hears no close.
+# Access for a time that had ended by then holds nothing: the keeper says when it ends in accessUntil.
 computer_keeper_stopped() {
-  [ "$(take "$COMPUTER_CONTROL/computer.json" quiet jq -r '.stopped == true' || true)" = true ]
+  local now
+  now=$(date +%s)
+  # shellcheck disable=SC2016 # $now is jq's, given with --argjson.
+  [ "$(take "$COMPUTER_CONTROL/computer.json" quiet jq -r --argjson now "$now" \
+    '.stopped == true and (if has("accessUntil") then ((.accessUntil | type) == "number" and .accessUntil > $now) else true end)' || true)" = true ]
 }
 
 computer_answer_json() {

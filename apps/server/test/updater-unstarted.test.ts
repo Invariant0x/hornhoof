@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { until } from './helpers-basic.js';
@@ -91,6 +91,29 @@ describe('the updater, for containers that were made and never started', () => {
     sawAt(copy, NOW - 600, 'app db front keeper');
     await step(copy, { STUB_PROJECT_STATES: states });
     expect(calls(copy)).toEqual([LOOK, 'docker compose up -d --no-build --no-deps --no-recreate app db front keeper', 'up as HORNHOOF_ROLE=data']);
+  });
+
+  /* The control folder is shared with the app and the keeper, so a link may stand at the name of the updater's note: the
+     note replaces the link and never writes through it, as the round notes the set and as a failed start notes it again. */
+  it('writes its note over a link in its place, never into the file the link names', async () => {
+    const s = stand(ENV);
+    const note = join(s.control, 'unstarted');
+    const settings = join(s.dir, 'settings.env');
+    writeFileSync(settings, 'HORNHOOF_SECRET=sample\n');
+    symlinkSync(settings, note);
+    const r = await step(s);
+    expect(r.code).toBe(0);
+    expect(readFileSync(settings, 'utf8')).toBe('HORNHOOF_SECRET=sample\n');
+    expect(lstatSync(note).isSymbolicLink()).toBe(false);
+    expect(seen(s)).toBe(`${NOW} db front keeper`);
+
+    rmSync(note);
+    sawAt(s, NOW - 300, 'db front keeper');
+    const failed = await step(s, { STUB_NO_RECREATE_UP: 'fail', STUB_ON_UP: `rm -f '${note}' && ln -s '${settings}' '${note}'` });
+    expect(failed.out).toContain('Could not start db front keeper.');
+    expect(readFileSync(settings, 'utf8')).toBe('HORNHOOF_SECRET=sample\n');
+    expect(lstatSync(note).isSymbolicLink()).toBe(false);
+    expect(seen(s)).toBe(`${NOW} db front keeper`);
   });
 
   it('looks at nothing while an update or a command on the computer is under way, and forgets what it saw', async () => {

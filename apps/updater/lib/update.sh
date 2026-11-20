@@ -183,7 +183,10 @@ project_containers() {
 # seconds with no update and no command under way, so a compose run that is still going finishes first. None of a service
 # that runs is started beside it, nothing is made again, and the updater's own is left to its swap. Migrations, and on
 # the machine whose database the company writes the app that needs them, start only by an update, which saves the
-# database first. The first time each set was seen stays in the control folder, so a restart of the updater keeps it.
+# database first. A container made on purpose and left unstarted, as by compose create, starts too: no step of this
+# stack makes one. The first time each set was seen stays in the control folder, so a restart of the updater keeps it;
+# that folder is shared with the app and the keeper, so the note is read with take and written with publish, which
+# never follow a link at its name.
 UNSTARTED_AFTER=300
 start_unstarted() {
   local seen="$CONTROL/unstarted" project states running services='' service now noted since role left=' updater migrate '
@@ -207,10 +210,10 @@ start_unstarted() {
     return 0
   fi
   now=$(date +%s)
-  noted=$(cat "$seen" 2> /dev/null || true)
+  noted=$(take "$seen" || true)
   since=${noted%% *}
   if [ "${noted#* }" != "$services" ] || ! [[ "$since" =~ ^[0-9]+$ ]]; then
-    (umask 077 && printf '%s %s\n' "$now" "$services" > "$seen") || true
+    publish "$seen" over printf '%s %s\n' "$now" "$services" || true
     return 0
   fi
   [ "$((now - since))" -ge "$UNSTARTED_AFTER" ] || return 0
@@ -222,7 +225,7 @@ start_unstarted() {
     rm -f "$seen"
   else
     say "Could not start $services."
-    (umask 077 && printf '%s %s\n' "$now" "$services" > "$seen") || true
+    publish "$seen" over printf '%s %s\n' "$now" "$services" || true
   fi
 }
 

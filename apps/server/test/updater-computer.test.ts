@@ -474,6 +474,25 @@ describe('updater, the computer', () => {
       expect(answer(s, 'c15')).toMatchObject({ id: 'c15', exit: 125, output: expect.stringContaining('Stopped: access to the computer was closed.') });
     });
 
+    it('runs on no further than the end of access for a time, which a keeper that stopped says', async () => {
+      const ended = stand();
+      access(ended, later());
+      command(ended, 'c16', 'bash install.sh', 600);
+      const past = JSON.stringify({ untilSec: null, until: null, asked: null, by: 'keeper', stopped: true, accessUntil: NOW_SEC });
+      const r = await runOnce(ended, null, { ...env, STUB_COMPUTER_RUNS: '1', STUB_DURING_SLEEP: keepers(ended, 'c16', { 1: past }) });
+      expect(r.calls).toContain('docker rm -f hornhoof-computer-c16');
+      expect(ranUntil(ended)).toBe(1);
+
+      const running = stand();
+      access(running, later());
+      command(running, 'c17', 'bash install.sh', 600);
+      const ahead = JSON.stringify({ untilSec: null, until: null, asked: null, by: 'keeper', stopped: true, accessUntil: NOW_SEC + 1 });
+      const open = JSON.stringify({ untilSec: later(), until: null, asked: null, by: 'keeper' });
+      const kept = await runOnce(running, null, { ...env, STUB_COMPUTER_RUNS: '1', STUB_DURING_SLEEP: keepers(running, 'c17', { 1: ahead, 6: open }, 8) });
+      expect(kept.calls).not.toContain('docker rm -f hornhoof-computer-c17');
+      expect(answer(running, 'c17')).toEqual({ id: 'c17', exit: 0, output: 'ran: bash install.sh\n' });
+    });
+
     it('stops the command when no keeper speaks again for two minutes', async () => {
       const s = stand();
       access(s, later());

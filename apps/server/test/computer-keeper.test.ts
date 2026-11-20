@@ -316,9 +316,50 @@ describe("a machine's keeper and its computer access", () => {
     answer(open(Math.floor(START / 1000) + 3600, null, [{ id, command: 'true', timeout: 30 }]));
     await Promise.all([round, stopping]);
     expect(s.files()).toEqual([]);
-    /* Closed, and said to be closed by a keeper that stopped: its updater lets a command already under way run on
-       until a keeper speaks again, as one that recreates the keeper would otherwise end itself halfway. */
-    expect(s.settings()).toEqual({ ...CLOSED, stopped: true });
+    /* Closed as ever: this keeper had opened nothing, so no command runs on under its word. */
+    expect(s.settings()).toEqual(CLOSED);
+  });
+
+  /* Said to be closed by a keeper that stopped, only where access was open: its updater lets a command already under
+     way run on until a keeper speaks again, as one that recreates the keeper would otherwise end itself halfway. Access
+     for a time says when it ends, and no command runs on past that; standing access has no end. */
+  it('says it stopped only where access was open, and when that access ends', async () => {
+    const standing = stand();
+    const one = standing.make();
+    one.prepare();
+    standing.said.get = { status: 200, body: { access: { standing: true }, runs: [] } };
+    await one.tick();
+    await one.stop();
+    expect(standing.settings()).toEqual({ ...CLOSED, stopped: true });
+
+    const timed = stand();
+    const two = timed.make();
+    two.prepare();
+    timed.said.get = open(timed.nowS() + 600);
+    await two.tick();
+    await two.stop();
+    expect(timed.settings()).toEqual({ ...CLOSED, stopped: true, accessUntil: timed.nowS() + 600 });
+
+    const mine = await owner();
+    const granted = stand({ pin: mine.publicKey });
+    const three = granted.make();
+    three.prepare();
+    /* The earlier of what its owner signed and what the app says, as it opened. */
+    granted.said.get = open(granted.nowS() + 2 * 3600, await mine.grant({ until: granted.nowS() + 3600 }));
+    await three.tick();
+    expect(granted.settings().untilSec).toBe(granted.nowS() + 3600);
+    await three.stop();
+    expect(granted.settings()).toEqual({ ...CLOSED, stopped: true, accessUntil: granted.nowS() + 3600 });
+
+    const shut = stand();
+    const four = shut.make();
+    four.prepare();
+    shut.said.get = open(shut.nowS() + 600);
+    await four.tick();
+    shut.said.get = closed();
+    await four.tick();
+    await four.stop();
+    expect(shut.settings()).toEqual(CLOSED);
   });
 
   it('keeps the word of a keeper that stopped until it hears the app, and then says open or closed as ever', async () => {
