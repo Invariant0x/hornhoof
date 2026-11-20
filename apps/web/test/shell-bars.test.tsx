@@ -74,6 +74,16 @@ describe('the map and an open department under the bars of the shell', () => {
     expect(decl('.dview', 'inset')).toBe('0');
   });
 
+  /* Design on #1639: while a bar stands, the windows open 8 px under it, as the room under the bars starts; without one they
+     stay under the header. On a phone the card keeps its place under the department's name. */
+  it('opens the windows and the cards under the bars while one stands', () => {
+    expect(decl('.orch', 'top')).toBe('var(--shell-top, 68px)');
+    expect(decl('.agent-strips', 'top')).toBe('var(--shell-top, 68px)');
+    expect(decl('.acard', 'top')).toBe('var(--shell-top, 68px)');
+    expect(decl('.orch', 'top', '(max-width: 760px)')).toBe('var(--shell-top, 56px)');
+    expect(decl('.acard', 'top', '(max-width: 760px)')).toBe('calc(var(--shell-top, 64px) + 52px)');
+  });
+
   it("starts the department's name under the bars while one stands, beside the logo or under the top bar while none does", () => {
     expect(decl('.crumbs', 'top')).toBe('var(--shell-top, 12px)');
     expect(decl('.crumbs', 'top', '(max-width: 760px)')).toBe('var(--shell-top, 64px)');

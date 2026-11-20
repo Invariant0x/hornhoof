@@ -284,6 +284,10 @@ select:disabled { opacity: .55; }
 .shell {
   --bar-top: 12px; --bar-edge: 16px; --bar-size: 44px; --bar-gap: 8px;
   --header-room: calc(2 * var(--bar-top) + var(--bar-size));
+  /* The glass of the header and the bars, and how long what stands under the bars takes to move when one comes or goes:
+     Design's #1635 chooses both, here alone (#1639). --shell-top, where the room under the bars starts on the map, the
+     shell measures and sets on itself while a bar stands. */
+  --bar-glass: var(--hud); --shell-shift: 0s;
   position: relative; height: 100%;
 }
 .topbar {
@@ -294,7 +298,7 @@ select:disabled { opacity: .55; }
 .topbar > * { pointer-events: auto; }
 /* Glass floats over the canvas, whose dots and signals move every frame: a blur under it is drawn again every frame and
    stalls the page. The dense --hud of every skin stands in for it. */
-.glass { background: var(--hud); border: 1px solid var(--line); }
+.glass { background: var(--bar-glass, var(--hud)); border: 1px solid var(--line); }
 .tb-brand { justify-self: start; display: flex; align-items: center; justify-content: center; width: var(--bar-size); height: var(--bar-size); }
 .tb-brand svg { width: 24px; height: 24px; flex: none; }
 /* The strip's frame is drawn over its tabs rather than around them, so each tab is a target of the strip's whole 44px. */
@@ -1069,8 +1073,11 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .t-card.done label { cursor: default; }
 .t-card.done label > *, .t-card.done h4 { opacity: .6; }
 
-/* The orchestrator's window: a terminal over the right of the map. */
-.orch { position: fixed; z-index: 9; top: 68px; right: 16px; bottom: 76px; width: 640px; box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); font-family: var(--f-mono); font-size: 13px; line-height: 1.55; }
+/* What stands under the bars of the shell moves with them as one comes or goes, in the time the shell sets (#1639). */
+.crumbs, .orch, .acard, .agent-strips { transition-property: top; transition-duration: var(--shell-shift, 0s); }
+/* The orchestrator's window: a terminal over the right of the map. Like every window and card, it opens under the header, or
+   8 px under the bars of the shell while one stands over the map (#1639). */
+.orch { position: fixed; z-index: 9; top: var(--shell-top, 68px); right: 16px; bottom: 76px; width: 640px; box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); font-family: var(--f-mono); font-size: 13px; line-height: 1.55; }
 .t-bar { flex: none; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 4px 0 14px; border-bottom: 1px solid var(--line); font-family: var(--f-body); font-size: 12.5px; color: var(--muted); }
 .t-bar .lights { flex: none; display: flex; gap: 6px; }
 .t-bar .lights i { width: 10px; height: 10px; border-radius: 50%; background: var(--idle); }
@@ -1319,7 +1326,7 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .notebook-unread p { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .t-st { flex: none; display: flex; justify-content: space-between; gap: 12px; padding: 6px 16px 10px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 .t-st > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 760px) { .orch, .orch.term { left: 0; right: 0; top: 56px; bottom: 0; width: auto; border-left: 0; border-right: 0; } }
+@media (max-width: 760px) { .orch, .orch.term { left: 0; right: 0; top: var(--shell-top, 56px); bottom: 0; width: auto; border-left: 0; border-right: 0; } }
 @media (prefers-reduced-motion: reduce) { .t-log > * { animation: none; } }
 
 /* A department card on the map opens the department. */
@@ -1528,7 +1535,7 @@ body:has(.dview) .version-mark { display: none; }
 /* The line of what changed sits between the zoom and the actions. */
 .dview .ticker { left: 212px; right: var(--ticker-right, 16px); transform: none; max-width: none; }
 .dv-drawer { position: absolute; z-index: 4; }
-.dv-drawer, .acard { top: 68px; left: 16px; bottom: 76px; width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
+.dv-drawer, .acard { top: var(--shell-top, 68px); left: 16px; bottom: 76px; width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
 /* The drawer starts under the department's name and ends above the line of what happened, as the department measures them. */
 .dv-drawer { top: var(--tree-top, 68px); bottom: var(--tree-bottom, 76px); }
 .dv-drawer-h { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 6px 6px 18px; border-bottom: 1px solid var(--line); }
@@ -1844,7 +1851,8 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   /* The hint of an empty map stands whole above the dock, which may grow to several rows: across the width, 16px above
      its top as the map measures it. */
   .dv-empty { left: 16px; right: 16px; bottom: calc(var(--tree-bottom, 228px) + 8px); transform: none; overflow-wrap: break-word; }
-  .dv-drawer, .acard { top: 116px; bottom: 16px; width: auto; right: 16px; }
+  /* A card keeps its place under where the department's name stands, below the bars too. */
+  .dv-drawer, .acard { top: calc(var(--shell-top, 64px) + 52px); bottom: 16px; width: auto; right: 16px; }
   .dv-drawer { top: var(--tree-top, 116px); }
   /* The schema shows between the department's name and the dock, as the tree does: what scrolls under them goes out of sight. */
   .dcanvas { inset-block: var(--tree-top, 116px) var(--tree-bottom, 228px); }
@@ -3310,7 +3318,7 @@ th.k-prio .sorth { white-space: nowrap; }
 .side-panel > .acard { position: static; width: 100%; height: 100%; max-width: none; }
 .side-panel .ac-body > .notebook { padding: 0; overflow: visible; }
 /* Minimized windows: a strip each at the edge, one after another; what the edge cannot hold scrolls. */
-.agent-strips { position: fixed; z-index: 9; top: 68px; right: 0; bottom: 76px; width: 32px; display: flex; flex-direction: column; gap: 4px; overflow: hidden auto; scrollbar-width: none; }
+.agent-strips { position: fixed; z-index: 9; top: var(--shell-top, 68px); right: 0; bottom: 76px; width: 32px; display: flex; flex-direction: column; gap: 4px; overflow: hidden auto; scrollbar-width: none; }
 .agent-strips:empty { display: none; }
 .agent-strip { flex: none; display: flex; flex-direction: column-reverse; border: 1px solid var(--cyan); box-sizing: border-box; background: var(--surface); }
 .agent-strip-open { display: flex; align-items: center; gap: 6px; min-height: 48px; max-height: 240px; padding: 8px 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; writing-mode: vertical-rl; }

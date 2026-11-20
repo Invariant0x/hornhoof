@@ -315,6 +315,11 @@ for (const width of WIDTHS) for (const dir of DIRS) for (const skin of SKINS) fo
       expect(layout.y0, `the whole map starts in the room under the bars, at ${top} or lower`).toBeGreaterThanOrEqual(top - 0.5);
       expect(layout.y1, `the whole map ends in the room, above ${under.bottom}`).toBeLessThanOrEqual(under.bottom);
     }
+    /* Design on #1639: the orchestrator's window opens 8 px under a bar while one stands, under the header without one. */
+    await page.getByRole('button', { name: en.map.openOrchestrator, exact: true }).click();
+    const opened = await boxOf(page, '.orch');
+    const windowTop = bar === NO_BAR ? (width <= 760 ? 56 : 68) : under.top;
+    expect(Math.abs(opened.y - windowTop), `the orchestrator's window opens at ${windowTop}, not at ${opened.y}`).toBeLessThanOrEqual(1);
     expect(errors).toEqual([]);
   });
 }

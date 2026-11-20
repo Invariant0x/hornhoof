@@ -426,7 +426,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
     <AgentWindowContext value={openAgent}>
     <UpdateSaysIt value={updateSaysIt}>
     <ShellTop value={shellTop}>
-    <div className="shell">
+    <div className="shell" style={tab !== 'map' || shellTop === null ? undefined : ({ '--shell-top': `${shellTop}px` } as CSSProperties)}>
       <header className="topbar" ref={fit.bar}>
         <div className="tb-brand glass" ref={fit.brand}>
           <LogoMark />
@@ -436,8 +436,9 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} inbox={inbox} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} onContact={() => setContact(true)} toDecide={toDecide} account={account} accountButton={accountButton} side={fit.side} />
       </header>
       {/* The bars of the shell stand first in the page, each in its own row under the header, and what the page shows
-          comes after them. On the map they float over it and an open department, which start under them. */}
-      <main ref={page} style={shellTop === null ? undefined : ({ '--shell-top': `${shellTop}px` } as CSSProperties)} className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}${tab === 'tasks' ? ' tracker-page' : ''}`}>
+          comes after them. On the map they float over it and an open department, which start under them, and the windows
+          and cards open under them too: the shell says where with --shell-top. */}
+      <main ref={page} className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}${tab === 'tasks' ? ' tracker-page' : ''}`}>
         <SwitchBanner>
           {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} onProgressShown={setUpdateSaysIt} />}
           <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount({ kind: 'settings', group: 'company' })} />
