@@ -266,3 +266,48 @@ describe('what the updater reads in the folders it shares with the app and the k
     expect(readdirSync(s.control).sort()).toEqual(['other.json', 'status.json']);
   });
 });
+
+/* An installer the updater runs reads the machine's addresses in its control folder, as install.sh does to warn of a
+   subnet that covers the machine's own network. It is given a folder of the updater's own instead, with the addresses
+   taken from the shared one, so it opens nothing the app or the keeper put there. */
+describe('the control folder of an installer the updater runs', () => {
+  const READER = 'f="${HORNHOOF_CONTROL_DIR:-/control}/addresses.json"\nif [ -r "$f" ]; then printf \'read: %s\\n\' "$(grep -oE \'[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+\' "$f" | tr \'\\n\' \' \')"; fi\n';
+  const RUNS = [
+    { how: 'for the nodes of a worker', step: 'INSTALLER="$TMPDIR/installer"; worker_nodes; cat "$CONTROL/nodes.log"' },
+    { how: 'for an update', step: 'WORK="$TMPDIR/work"; mkdir -p "$WORK/0.4.1"; cp "$TMPDIR/installer" "$WORK/0.4.1/install.sh"; run_installer 0.4.1 app node updater; cat "$WORK/install.log"' },
+  ];
+  function installer(s: Stand) {
+    writeFileSync(join(s.dir, 'installer'), READER);
+    writeFileSync(join(s.server, '.env'), `HORNHOOF_VERSION=0.4.0\n${refs('0.4.0').split(' ').join('\n')}\n`);
+  }
+
+  it.each(RUNS)('gives it the addresses the updater wrote, $how', async ({ step }) => {
+    const s = stand();
+    installer(s);
+    writeFileSync(join(s.control, 'addresses.json'), json({ at: 1, addresses: ['192.0.2.10'] }));
+    const r = await runUpdaterStep(s, step);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('read: 192.0.2.10');
+  });
+
+  it.each(RUNS)('gives it nothing through a link at them, $how', async ({ step }) => {
+    const s = stand();
+    installer(s);
+    const outside = join(s.dir, 'outside.json');
+    writeFileSync(outside, json({ addresses: ['198.51.100.7'] }), { mode: 0o600 });
+    symlinkSync(outside, join(s.control, 'addresses.json'));
+    const r = await runUpdaterStep(s, step);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('Refused addresses.json: it is not a plain file.');
+    expect(r.out).not.toContain('198.51.100.7');
+  });
+
+  it.each(RUNS)('runs it at once with a named pipe at them, $how', async ({ step }) => {
+    const s = stand();
+    installer(s);
+    fifo(join(s.control, 'addresses.json'));
+    const r = await runUpdaterStep(s, step);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('Refused addresses.json: it is not a plain file.');
+  }, 8_000);
+});
