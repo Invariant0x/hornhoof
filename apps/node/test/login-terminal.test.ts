@@ -107,6 +107,35 @@ describe("a plan's sign-in in a terminal on the node", () => {
     expect(existsSync(join(s.home, '.hh-login'))).toBe(false);
   });
 
+  it('says each step after the code before it says the sign-in is done: checking it, then saving it', async () => {
+    const s = signIn();
+    await s.login.start(false);
+    s.ends(printed(80), 0);
+    await until(() => Boolean(s.done()));
+    expect(s.done()).toMatchObject({ ok: true });
+    expect(s.sent.flatMap(m => (m.type === 'login.step' ? [m.step] : []))).toEqual(['checking', 'saving']);
+    const order = s.sent.map(m => m.type);
+    expect(order.indexOf('login.step')).toBeLessThan(order.indexOf('status'));
+    expect(order.lastIndexOf('login.step')).toBeLessThan(order.indexOf('login.done'));
+  });
+
+  it('says only that it checked a sign-in it could not keep, then why it ended', async () => {
+    const s = signIn();
+    await s.login.start(false);
+    s.ends(printed(200).replace(TOKEN, 'sk-ant-oat01-short'), 0);
+    await until(() => Boolean(s.done()));
+    expect(s.sent.flatMap(m => (m.type === 'login.step' ? [m.step] : []))).toEqual(['checking']);
+    expect(s.done()).toMatchObject({ ok: false, error: SIGNIN_ERRORS.unfinished });
+  });
+
+  it('says no step of a sign-in whose program ended before the code', async () => {
+    const s = signIn();
+    await s.login.start(false);
+    s.ends('', 1);
+    await until(() => Boolean(s.done()));
+    expect(s.sent.some(m => m.type === 'login.step')).toBe(false);
+  });
+
   it('that fails says so in plain words and keeps nothing', async () => {
     const s = signIn();
     await s.login.start(false);

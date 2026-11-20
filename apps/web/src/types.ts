@@ -3,6 +3,7 @@ import type { EchelonFindingsView, EchelonStage } from '@hornhoof/protocol/echel
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
 import type { ExternalWait, TaskWaitFact, WaitSourceKind } from '@hornhoof/protocol/waits';
+import type { SigninStep } from '@hornhoof/protocol/signin';
 import type { Notification } from '@hornhoof/protocol';
 import type { ConnectionEnd, DepartmentTurnProgress, FailureKind, Limits, MachineDrain, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
@@ -76,6 +77,20 @@ export type AccessInput = { whole: true } | { departments: string[]; teams: stri
 /* A plan's state on one machine: waiting for the login there, for the first setup of its program, or ready. */
 export type PlanStatus = 'needs_login' | 'needs_setup' | 'ready';
 
+/* A plan's connection after its sign-in code, as its node says it, for its owner: the step it is at, since when and until
+   when it may take, and why it failed. */
+export type Connecting = {
+  nodeId: string;
+  hostname: string;
+  state: 'connecting' | 'failed' | 'too_long';
+  step: SigninStep;
+  since: string;
+  until: string;
+  error: string | null;
+  code: number | null;
+  line: string | null;
+};
+
 export type SubView = {
   id: string;
   provider: ProviderId;
@@ -116,6 +131,8 @@ export type SubView = {
   target?: { kind: 'orchestrator' | 'department' | 'team' | 'any'; id: string | null } | null;
   /* What its turns used, in the list alone, with today counted in UTC: an open card asks for its own day. */
   tokens?: TokenPeriods;
+  /* Its connection after the sign-in code, for its owner; none when there is none. */
+  connecting?: Connecting | null;
   /* In the list alone: this person changes and removes this API connection, as one of the whole company or as one who runs
      the department it serves. */
   canChange?: boolean;
@@ -467,7 +484,9 @@ export type StreamMessage =
   | { type: 'backlog'; spot: { departmentId: string | null } }
   | { type: 'context'; agentId: string; used: number }
   /* A plan's owner finished or gave up a sign-in on one of its machines; only the owner hears it. */
-  | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; code?: number | null; line?: string | null; owner: string };
+  | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; code?: number | null; line?: string | null; owner: string }
+  /* Where a plan's connection is after its sign-in code, or none once it ended; only the owner hears it. */
+  | { type: 'subscription.connecting'; subscriptionId: string; connecting: Connecting | null; owner: string };
 
 export type TaskStatus = 'open' | 'working' | 'review' | 'waiting' | 'blocked' | 'done' | 'cancelled';
 export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker' | 'assistant'; role: Lang | null };

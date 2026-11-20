@@ -1,5 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { ApiFailure } from '../api';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import type { TrackerPlace } from '../routes';
@@ -12,6 +11,7 @@ import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
 import { DepartmentMark } from '../ui/TrackerMarks';
 import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
+import { Busy, Hold, LoadState, noneYet, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
 import { MachineAway } from '../ui/MachineAway';
 import { MergeCard } from '../ui/MergeCard';
 import { Requests, wordsAnswer } from '../ui/Requests';
@@ -19,7 +19,7 @@ import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { GoalForm, PipelineForm, TrackerNewTask } from '../ui/TrackerForms';
 import { TrackerSide } from '../ui/TrackerSide';
-import { TrackerBoard, TrackerFound, TrackerGoals, TrackerGraph, TrackerList, type Rows } from '../ui/TrackerViews';
+import { HeldList, TrackerBoard, TrackerFound, TrackerGoals, TrackerGraph, TrackerList, type Rows } from '../ui/TrackerViews';
 import { TurnsAndReleases } from '../ui/TurnsAndReleases';
 import { waitText } from '../ui/tracker-words';
 import { WaitCards } from '../ui/WaitCards';
@@ -46,6 +46,21 @@ type Props = {
    anchoring moves it: overflow-anchor: none, and WebKit has none). Only when the row or card of that task would leave the
    screen, as the titles above it wrap anew, does the page scroll, as little as brings it whole into sight. */
 const rowOf = (id: string) => [...document.querySelectorAll<HTMLElement>('.tracker [data-task]')].find(row => row.dataset.task === id) ?? null;
+/* A server without goals, pipelines or kept cards yet answers that it has none, which is no failure. */
+const tracked = (f: unknown) => (noneYet(f) ? null : f);
+
+/* A list as a part of the tracker's load, the goals or the kept cards: a server without it yet has none. */
+const listPart = (list: unknown, failure: unknown, load: () => unknown): LoadPart => ({ data: list ?? (noneYet(failure) ? [] : undefined), failure: tracked(failure), load });
+
+type TrackerReads = { places: unknown; tasks: unknown; tasksFailure: unknown; goals: unknown; goalsFailure: unknown; pipelinesFailure: unknown };
+
+/* What the tracker could not load, said on top of the page. What the work and the goals did not bring stands where they
+   would instead, while they have not come. */
+function brokenOf(r: TrackerReads, updateSaysIt: boolean): unknown {
+  const shown = (f: unknown) => shownLoadFailure(f, updateSaysIt);
+  return shown(r.places) ?? (r.tasks ? shown(r.tasksFailure) : null) ?? (r.goals ? shown(tracked(r.goalsFailure)) : null) ?? shown(tracked(r.pipelinesFailure));
+}
+
 function useRowInSight(selected: string | null) {
   const last = useRef(selected);
   useLayoutEffect(() => {
@@ -95,6 +110,9 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   /* The cards Hornhoof kept for the viewer, which the screen also counts. */
   kept: WaitCard[] | undefined;
   onCardsSeen: () => void;
+  /* What else the section waits for before it says anything, its tasks among them; live: it is the page's one status. */
+  sources: LoadPart[];
+  live: boolean;
 };
 
 /* What waits lists the decisions of the person picked, or with none the viewer's own. */
@@ -103,6 +121,27 @@ const decisionsOfWho = (personId: string | null, viewerId: string): DecisionsOf 
 const shownNone = (s: ShownDecisions) => !s.requests.length && !s.proposals.length && !s.merges.length;
 
 const nothing = () => {};
+
+/* Tasks a search found or that have a date, once the tasks came: until then the room holds the indicator, so it never says
+   that there are none while they may still come. */
+function FoundList({ load, tasks, all, rows, none }: { load: Load; tasks: TaskLine[]; all: TaskLine[]; rows: Rows; none: string }) {
+  const t = useT();
+  const shown = tasks.length ? <TrackerFound tasks={tasks} all={all} rows={rows} /> : <p className="muted" role="status">{none}</p>;
+  return <Hold load={load}>{load.phase === 'done' ? shown : <Busy ring={load.ring} words={t.load.tasks} />}</Hold>;
+}
+
+/* The work of a view, held while it comes (style book 1.5, section 4): the list holds its rows at their final size, as many
+   as it showed last in this tab; the board and the graph hold the ring where they will stand. Once it came, it fades in. */
+function HeldWork({ load, view, list, shown, children }: { load: Load; view: string; list: string; shown: number; children: ReactNode }) {
+  const t = useT();
+  const done = load.phase === 'done';
+  const rows = useHeldRows(list, done && view === 'list' ? shown : null);
+  return (
+    <Hold load={load} className="tr-hold" keep={view === 'list'}>
+      {done ? children : view === 'list' ? <HeldList rows={rows} load={load} /> : <Busy ring={load.ring} words={t.load.tasks} />}
+    </Hold>
+  );
+}
 
 /* Who takes a card this person may not take; nothing for one they take. */
 const lockOf = (card: ProposalDecision) => (card.canAnswer ? undefined : (card.decidedBy ?? CEO_DECIDES));
@@ -154,42 +193,69 @@ function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () 
   </div>;
 }
 
-/* What waits for the person: what agents ask, the orchestrator's cards, the cards Hornhoof
-   kept for them, and the tasks that wait for them. For another person, only theirs; the page's title names them, and what
-   waits for everyone else is in Waiting for people. */
-function WaitingForYou({ decisions, decisionsFailure, personId, viewerId, tasks, recipient, kept, onCardsSeen, ...rest }: Waiting) {
+/* What waits for the person, once all of it came: what agents ask, the orchestrator's cards, the cards Hornhoof kept for them,
+   and the tasks that wait for them, or that nothing does. */
+function WaitingForYouBody({ decisions, personId, viewerId, tasks, recipient, kept, onCardsSeen, onFailure, ...rest }: Omit<Waiting, 'sources' | 'live' | 'decisionsFailure'> & { onFailure: (failure: unknown) => void }) {
   const t = useT();
-  const [failure, setFailure] = useState<unknown>(null);
   const shown = shownDecisions(decisions, decisionsOfWho(personId, viewerId));
   const cards = keptShown(kept, personId);
   const name = mapPeople(rest.org).find(p => p.id === personId)?.name ?? t.tasks.someone;
-
   return (
-    <section className="waiting" aria-label={t.tasks.waiting}>
-      <h2>{t.tasks.waiting}</h2>
-      <DecisionList shown={shown} onFailure={setFailure} {...rest} />
+    <>
+      <DecisionList shown={shown} onFailure={onFailure} {...rest} />
       <WaitCards cards={cards} onOpenTask={rest.onOpenTask} onSeen={onCardsSeen} />
       {tasks.length > 0 && <WaitingTasks tasks={tasks} personOf={() => recipient} heading={personId ? t.tracker.waitTasksOf(name) : t.tracker.waitTasks} onOpenTask={rest.onOpenTask} />}
-      {decisions && shownNone(shown) && !cards.length && !tasks.length && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
-      <DecisionsFailure failure={decisionsFailure} onRetry={rest.onDecisionsChanged} />
+      {shownNone(shown) && !cards.length && !tasks.length && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
+    </>
+  );
+}
+
+/* A section of what waits, under its heading: the shared indicator in its room until every source of it came (the decisions,
+   and what else it names), so it never says that nothing waits while something may still come; then what came, which fades
+   in. A failure of what came before stays by its section. */
+function WaitingSection({ label, heading, load, live, decisions, decisionsFailure, onRetry, failure, children }: {
+  label: string; heading: ReactNode; load: Load; live: boolean; decisions: Decisions | undefined; decisionsFailure: unknown; onRetry: () => void; failure: unknown; children: ReactNode;
+}) {
+  const t = useT();
+  return (
+    <section className="waiting" aria-label={label}>
+      {heading}
+      <Hold load={load} className="waiting-hold">
+        {load.phase === 'done' ? children : <Busy ring={load.ring} live={live} />}
+      </Hold>
+      {decisions && <DecisionsFailure failure={decisionsFailure} onRetry={onRetry} />}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
     </section>
   );
 }
 
-type PeopleWaiting = Pick<Waiting, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place'> & {
+/* What waits for the person. For another person, only theirs; the page's title names them, and what waits for everyone else
+   is in Waiting for people. */
+function WaitingForYou({ sources, live, decisionsFailure, ...rest }: Waiting) {
+  const t = useT();
+  const [failure, setFailure] = useState<unknown>(null);
+  const load = useLoad([{ data: rest.decisions, failure: decisionsFailure, load: rest.onDecisionsChanged }, ...sources]);
+  return (
+    <WaitingSection label={t.tasks.waiting} heading={<h2>{t.tasks.waiting}</h2>} load={load} live={live} decisions={rest.decisions} decisionsFailure={decisionsFailure} onRetry={rest.onDecisionsChanged} failure={failure}>
+      <WaitingForYouBody {...rest} onFailure={setFailure} />
+    </WaitingSection>
+  );
+}
+
+type PeopleWaiting = Pick<Waiting, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place' | 'sources' | 'live'> & {
   /* The tasks that wait for any person. */
   tasks: TaskLine[];
   /* The section names itself below the results of a search; the page's title right above names it otherwise. */
   titled: boolean;
 };
 
-/* What waits for people in the company, for those who see the whole of it: every decision the viewer sees, each saying whom
-   it waits for, and the tasks that wait for a person. */
-function WaitingForPeople({ decisions, decisionsFailure, tasks, titled, ...rest }: PeopleWaiting) {
+/* What waits for people in the company, for those who see the whole of it, once all of it came: every decision the viewer
+   sees, each saying whom it waits for, and the tasks that wait for a person. */
+function WaitingForPeople({ decisions, decisionsFailure, tasks, titled, sources, live, ...rest }: PeopleWaiting) {
   const t = useT();
   const words = t.tracker.peopleWaits;
   const [failure, setFailure] = useState<unknown>(null);
+  const load = useLoad([{ data: decisions, failure: decisionsFailure, load: rest.onDecisionsChanged }, ...sources]);
   const shown = shownDecisions(decisions, 'everyone');
   const people = mapPeople(rest.org);
   const waitsFor = (personId: string) => {
@@ -197,14 +263,11 @@ function WaitingForPeople({ decisions, decisionsFailure, tasks, titled, ...rest 
     return name ? words.waitingFor(name) : words.waitingForSomeone;
   };
   return (
-    <section className="waiting" aria-label={words.title}>
-      {titled && <h2>{words.title}</h2>}
+    <WaitingSection label={words.title} heading={titled && <h2>{words.title}</h2>} load={load} live={live} decisions={decisions} decisionsFailure={decisionsFailure} onRetry={rest.onDecisionsChanged} failure={failure}>
       <DecisionList shown={shown} onFailure={setFailure} waitsFor={waitsFor} {...rest} />
       {tasks.length > 0 && <WaitingTasks tasks={tasks} personOf={personWaited} heading={words.tasks} onOpenTask={rest.onOpenTask} />}
-      {decisions && shownNone(shown) && !tasks.length && <p className="muted">{words.nothing}</p>}
-      <DecisionsFailure failure={decisionsFailure} onRetry={rest.onDecisionsChanged} />
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-    </section>
+      {shownNone(shown) && !tasks.length && <p className="muted">{words.nothing}</p>}
+    </WaitingSection>
   );
 }
 
@@ -392,9 +455,14 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const sideId = useId();
   const { org } = useOrg();
   const { taskDepartments: places, failure: placesFailure } = useTaskDepartments();
-  const { tasks, failure } = useTasks({ status: 'all' });
+  const { tasks, failure, load: loadTasks, cancel: cancelTasks } = useTasks({ status: 'all' });
   const updateSaysIt = useUpdateSaysIt();
-  const { goals: goalList, failure: goalsFailure } = useGoals();
+  const { goals: goalList, failure: goalsFailure, load: loadGoals } = useGoals();
+  /* The work and the goals come with the shared indicator where they will stand, and say why when they do not. A server
+     without goals yet answers that it has none. */
+  const taskPart: LoadPart = { data: tasks, failure, load: loadTasks, cancel: cancelTasks };
+  const tasksLoad = useLoad([taskPart]);
+  const goalsLoad = useLoad([listPart(goalList, goalsFailure, loadGoals)]);
   const { pipelines: pipelineList, failure: pipelinesFailure } = usePipelines();
   const [drawer, setDrawer] = useState(false);
   const [query, setQuery] = useState('');
@@ -415,7 +483,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   }
 
   const all = tasks ?? [];
-  const { cards: kept, load: reloadCards } = useWaitCards();
+  const { cards: kept, failure: keptFailure, load: reloadCards } = useWaitCards();
   const goals = goalList ?? [];
   const pipelines = pipelineList ?? [];
   const people = mapPeople(org);
@@ -519,10 +587,9 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   })();
 
   /* A server without goals and pipelines yet answers that it has none: the tracker shows the tasks without them. */
-  const tracked = (f: unknown) => (f instanceof ApiFailure && f.status === 404 ? null : f);
   const mainFailure = shownLoadFailure(placesFailure, updateSaysIt) ?? shownLoadFailure(failure, updateSaysIt);
   if (unavailableFailure(mainFailure)) return <RouteUnavailable onHome={onHome} />;
-  const broken = mainFailure ?? shownLoadFailure(tracked(goalsFailure), updateSaysIt) ?? shownLoadFailure(tracked(pipelinesFailure), updateSaysIt);
+  const broken = brokenOf({ places: placesFailure, tasks, tasksFailure: failure, goals: goalList, goalsFailure, pipelinesFailure }, updateSaysIt);
   /* What waits: for people in the company on their page, else for the person. */
   const waiting = section.kind === 'people' ? (
     <WaitingForPeople
@@ -531,6 +598,8 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       onDecisionsChanged={onDecisionsChanged}
       tasks={waitsOnPeople}
       titled={found !== null}
+      sources={[taskPart]}
+      live={WAIT_PAGES.has(section.kind)}
       onOpenTask={onOpenTask}
       onOpenAgent={onOpenAgent}
       onOpenOrchestrator={onOpenOrchestrator}
@@ -548,6 +617,8 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       recipient={recipient}
       kept={kept}
       onCardsSeen={reloadCards}
+      sources={[{ ...taskPart, quiet: section.kind === 'mine' }, listPart(kept, keptFailure, reloadCards)]}
+      live={WAIT_PAGES.has(section.kind)}
       onOpenTask={onOpenTask}
       onOpenAgent={onOpenAgent}
       onOpenOrchestrator={onOpenOrchestrator}
@@ -629,7 +700,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
           <>
             <section className="tr-found" aria-label={t.tracker.search.results}>
               <h2>{t.tracker.search.results}</h2>
-              {found.length ? <TrackerFound tasks={found} all={all} rows={rows} /> : <p className="muted" role="status">{t.tasks.noSearchResults}</p>}
+              <FoundList load={tasksLoad} tasks={found} all={all} rows={rows} none={t.tasks.noSearchResults} />
             </section>
             {/* A search leaves what waits for the person where it was. */}
             {WAITS_SHOWN.has(section.kind) && waiting}
@@ -638,17 +709,17 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
           : section.kind === 'goals' ? (
             <>
               {/* Until the goals come, the page says it is loading rather than that there are none. */}
-              {goalList ? <TrackerGoals goals={shownGoals} label={departmentId ? t.tracker.side.goals : t.tracker.side.allGoals} empty={t.tracker.noGoals} onOpenGoal={onOpenGoal} />
-                : !goalsFailure && <p className="muted" role="status">{t.common.loading}</p>}
+              {goalList && goalsLoad.phase === 'done' ? <TrackerGoals goals={shownGoals} label={departmentId ? t.tracker.side.goals : t.tracker.side.allGoals} empty={t.tracker.noGoals} onOpenGoal={onOpenGoal} />
+                : <LoadState load={goalsLoad} />}
               {makeHere}
             </>
           )
           : section.kind === 'due' ? (
             <section className="tr-found" aria-label={t.tracker.side.dates}>
-              {work.length ? <TrackerFound tasks={[...work].sort((a, b) => a.dueAt!.localeCompare(b.dueAt!))} all={all} rows={rows} /> : <p className="muted">{t.tracker.noDates}</p>}
+              <FoundList load={tasksLoad} tasks={[...work].sort((a, b) => a.dueAt!.localeCompare(b.dueAt!))} all={all} rows={rows} none={t.tracker.noDates} />
             </section>
           )
-          : section.kind === 'turns' ? <TurnsAndReleases tasks={tasks} places={places} rows={{ selected, onOpenTask, asksYou, questionAt, place: task => [task.department ? place_(task.department) : t.tracker.side.orchestrator, task.product?.name].filter(Boolean).join(' / ') }} />
+          : section.kind === 'turns' ? <TurnsAndReleases tasks={taskPart} places={places} rows={{ selected, onOpenTask, asksYou, questionAt, place: task => [task.department ? place_(task.department) : t.tracker.side.orchestrator, task.product?.name].filter(Boolean).join(' / ') }} />
           : (
             <>
               <div className="tr-bar">
@@ -658,12 +729,11 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
               </div>
               {section.kind === 'failures' && <MachineAway machines={machinesAway} />}
               {makeHere}
-              {!tasks && broken === null && <p className="muted" role="status">{t.common.loading}</p>}
-              {tasks && (
-                view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} empty={empty} showSubtasks={showSubtasks} />
+              <HeldWork load={tasksLoad} view={view} list={`${sectionKey}|${view}|${JSON.stringify(chips)}`} shown={work.length}>
+                {view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} empty={empty} showSubtasks={showSubtasks} />
                 : view === 'board' ? <TrackerBoard tasks={work} all={all} pipeline={pipeline} cancelled={false} rows={rows} />
-                : <TrackerGraph forest={forest} crumbs={crumbs} top={section.kind === 'department' ? departmentName : t.tracker.graph.all} onCrumb={toCrumb} rows={rows} onOpenGoal={onOpenGoal} stages={pipeline ? { on: stages, onChange: setStageMode } : undefined} />
-              )}
+                : <TrackerGraph forest={forest} crumbs={crumbs} top={section.kind === 'department' ? departmentName : t.tracker.graph.all} onCrumb={toCrumb} rows={rows} onOpenGoal={onOpenGoal} stages={pipeline ? { on: stages, onChange: setStageMode } : undefined} />}
+              </HeldWork>
               {section.kind === 'mine' && waiting}
             </>
           )}

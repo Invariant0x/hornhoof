@@ -7,6 +7,10 @@ import { requirePerson, type Person } from '../../auth/session.js';
 import type { StreamMessage } from './bus.js';
 import { heardBy, heardInFull } from './stream-view.js';
 
+/* What is said of a plan's sign-in, which goes only to the plan's owner. */
+type OwnersOnly = Extract<StreamMessage, { type: 'subscription.signin' | 'subscription.connecting' }>;
+const ownersOnly = (m: StreamMessage): m is OwnersOnly => m.type === 'subscription.signin' || m.type === 'subscription.connecting';
+
 /* Whether a message is for this person at all, by where they reach and what is theirs. A task goes to everyone of the
    company, who sees all of its work; the rest that names a place goes where the person reaches. */
 function isFor(m: StreamMessage, me: Person, access: Access): boolean {
@@ -14,7 +18,7 @@ function isFor(m: StreamMessage, me: Person, access: Access): boolean {
   /* It carries nothing, so every person's screens load the access that is theirs to see; a head acting for anyone sees
      none of it. */
   if (m.type === 'computer' && me.viaHead) return false;
-  return m.type !== 'subscription.signin' || m.owner === me.id;
+  return !ownersOnly(m) || m.owner === me.id;
 }
 
 /* One Server-Sent Events stream per open page. What is said of an agent or its work goes only to people who see them. */

@@ -1,5 +1,6 @@
 import type { Spot } from '../../auth/access.js';
 import type { EventView } from './store.js';
+import type { ConnectingView } from '../subscriptions/connecting.js';
 
 /* Who a pulse runs between: places on the map, or two agents inside one department, which its card shows. */
 export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string } | { kind: 'agent'; id: string; departmentId: string };
@@ -43,7 +44,9 @@ export type StreamMessage =
   /* The orchestrator's request for the computer the server runs on, or its access, changed; only the CEO hears it. */
   | { type: 'computer' }
   /* How a plan's sign-in on one of its machines ended; it goes to the plan's owner alone. */
-  | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; code: number | null; line: string | null; owner: string };
+  | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; code: number | null; line: string | null; owner: string }
+  /* A plan's connection after its sign-in code, for its owner; none once it ended. */
+  | { type: 'subscription.connecting'; subscriptionId: string; connecting: ConnectingView | null; owner: string };
 
 /* In-process fan-out per company. One server process serves one deployment, so nothing crosses processes. */
 export class EventBus {

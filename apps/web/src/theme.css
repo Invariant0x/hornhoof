@@ -377,7 +377,8 @@ select:disabled { opacity: .55; }
 /* An update under way: a turning ring, the version, four steps with the current one moving, and what it does now. */
 .uprog { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 13px; }
 .uprog > b { font-weight: 600; }
-.spinner { flex: none; width: 16px; height: 16px; box-sizing: border-box; border: 2px solid var(--idle); border-top-color: var(--cyan); border-radius: 50%; animation: spin .9s linear infinite; }
+.spinner { flex: none; width: 16px; height: 16px; box-sizing: border-box; border: 2px solid var(--idle); border-block-start-color: var(--cyan-ink); border-radius: 50%; animation: spin .9s linear infinite; }
+.spinner.lg { width: 32px; height: 32px; border-width: 3px; }
 .uprog-bar { display: flex; gap: 3px; }
 .uprog-bar i { width: 34px; height: 6px; background: var(--idle); }
 .uprog-bar i.done { background: var(--cyan); }
@@ -931,6 +932,59 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .signin-line.warn { color: var(--amber-ink); }
 /* A plan's sign-in terminal under its row: the program's own screen, which needs room for its links and code. */
 .signin { display: grid; gap: 8px; }
+/* A screen's data while it comes (ui/Loading.tsx, style book 1.5 section 4, #1611). One ring per part with its words; the
+   held room at its final size, with 8 px idle bars for text still coming; the block that says a load takes longer than usual
+   or failed in that room's place, keeping its size. Before the ring's 400 ms the room shows its frames alone. */
+.load-busy { display: flex; align-items: center; gap: 8px; min-block-size: 24px; color: var(--muted); font: 400 13px/1.45 var(--f-body); }
+.load-busy > span:last-child { min-inline-size: 0; overflow-wrap: anywhere; }
+.load-boot { display: grid; justify-items: center; gap: 16px; max-inline-size: min(100%, 60ch); margin: auto; text-align: center; }
+.load-boot > .load-mark { width: 48px; height: 48px; }
+.load-boot > .load-boot-t { margin: 0; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.load-screen { min-block-size: 100%; place-items: center; }
+.load-mark .mk-dome { fill: none; stroke: var(--cyan); stroke-width: 2.4; }
+.load-mark .mk-base { stroke: var(--ink); stroke-width: 2.4; }
+.load-mark .mk-dot { fill: var(--ink); }
+.ph { display: inline-block; inline-size: var(--w, 60%); max-inline-size: 100%; block-size: 8px; vertical-align: middle; background: var(--idle); }
+.ph-line { display: block; }
+.unseen, .unseen .ph, .load-hold[aria-busy="true"]:has(.unseen) .ph { visibility: hidden; }
+.load-hold { display: grid; min-inline-size: 0; }
+.load-hold:focus { outline: none; }
+.load-hold > * { grid-area: 1 / 1; min-inline-size: 0; }
+.load-hold > .load-gone { visibility: hidden; }
+.load-hold > .load-fail { align-self: start; }
+/* A held table spaces its search, count line and table as the screen around it does, so they stand where they will. */
+.held-table, .held-table > .load-in { gap: inherit; }
+.held-table > .load-in { display: grid; }
+.arrive { animation: arrive .12s ease-out both; }
+@keyframes arrive { from { opacity: 0; } }
+.load-fail { display: grid; gap: 8px; max-inline-size: 60ch; padding: 12px 14px; border-inline-start: 3px solid var(--pink); background: var(--surface2); color: var(--ink); font-family: var(--f-body); font-size: 14px; text-align: start; }
+.load-fail.slow { border-inline-start-color: var(--amber); }
+.load-fail > p { margin: 0; min-inline-size: 0; overflow-wrap: anywhere; }
+.load-fail > .lf-t { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.load-fail > .lf-h { color: var(--muted); font-size: 13px; }
+.load-fail .lf-name { white-space: nowrap; }
+.load-fail > .entry-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.load-fail .btn { min-block-size: 44px; min-inline-size: 44px; padding: 8px 12px; line-height: 1.4; }
+/* A plan's connection after its sign-in code (ui/PlanConnection.tsx, style book 1.5 section 4): "Step 3 of 4" over the bar of
+   the steps done, the steps with 24 px markers, the ring in the marker of the one Hornhoof works on, then what happens now.
+   Every word wraps inside its card, however narrow. */
+.plan-connection { display: grid; gap: 16px; min-width: 0; }
+.conn-prog { display: grid; gap: 6px; }
+.conn-prog > p { margin: 0; color: var(--muted); font-size: 13px; }
+.conn-steps { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.conn-steps > li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: start; min-width: 0; }
+.conn-steps > li > span:last-child { padding-block: 2px; overflow-wrap: anywhere; }
+.conn-steps > .next > span:last-child { color: var(--muted); }
+.conn-mk { display: grid; place-items: center; width: 24px; height: 24px; box-sizing: border-box; border: 1px solid var(--line2); color: var(--muted); font: 600 12px/1 var(--f-display); }
+.conn-steps > .done > .conn-mk { border-color: var(--ok); color: var(--ok); }
+.conn-steps > .now > .conn-mk { border-color: var(--cyan); }
+.conn-steps > .bad > .conn-mk { border-color: var(--pink); color: var(--pink-ink); }
+.conn-now { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.conn-now > h4 { margin: 0; }
+.conn-now > p { margin: 0; overflow-wrap: anywhere; }
+.conn-now > .conn-keep { color: var(--muted); font-size: 13px; }
+/* The time since the code in digits of one width, so the line does not shift as it counts (Design #1656). */
+.conn-time { font-variant-numeric: tabular-nums; }
 .signin h3 { margin: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; }
 .signin p { margin: 0; font-size: 12.5px; }
 .signin .t-term { height: 360px; }
@@ -1968,6 +2022,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .release-fold .goal-fold > span { display: flex; flex-wrap: wrap; gap: 0 8px; }
 .release-fold .goal-fold b { color: var(--ink); }
 .waiting { display: grid; gap: 10px; }
+.waiting > .load-hold > .load-in { display: grid; gap: 10px; }
 /* The tracker, as mockup 10 draws it and as shown in "Tracker" in the style book: the left panel a share of the width
    from 270px, then the main area with where the person is, the view and its filters and the work, each band its full width
    with 20px inside; the card a drawer over the end side. On a phone the left panel is a drawer over the page, the board's
@@ -2035,6 +2090,8 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 /* The main area: each band its whole width, with 20px inside. */
 .tr-main { container: tr-main / inline-size; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; min-inline-size: 0; padding-block-end: 30px; border-block-start: 1px solid var(--line); }
 .tr-main > :not(.tr-top, .tr-bar) { inline-size: auto; margin: 6px 20px 0; }
+/* What waits stands apart from the list or the search results above it, so its heading does not sit on their last line. */
+.tr-main > :is(.tr-hold, .tr-found) + .waiting { margin-block-start: 24px; }
 .tr-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-inline-size: 0; padding: 10px 20px; border-block-end: 1px solid var(--line); }
 .tr-menu { display: none; }
 .tr-where { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-inline-size: 0; margin: 0; font: 600 16px var(--f-display); overflow-wrap: anywhere; }
@@ -2225,6 +2282,18 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-relation { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; max-inline-size: 100%; overflow-wrap: anywhere; }
 .tr-row-line .tp-late { color: var(--pink-ink); font-weight: 600; }
 .tr-cell { min-inline-size: 0; overflow-wrap: anywhere; }
+/* The list while its tasks come: rows of the real frame, with idle bars for their text (ui/TrackerViews.tsx HeldList). */
+.tr-held .tr-status-dot { border-color: var(--idle); }
+.tr-held .tr-title { display: flex; flex: 1 1 auto; align-items: center; }
+.tr-held .tr-group-toggle { cursor: default; }
+.tr-held .tr-row-line > .load-busy { grid-column: 1 / -1; padding-inline: 8px; }
+/* Past 10 s or once failed, the block that says so stands in the first held row, over the whole width (Design #1656). */
+.tr-held .tr-row-line > .load-fail { grid-column: 1 / -1; margin-block: 6px; }
+/* A task's card while its details come: a held line of its path, and the details as a tail (ui/TaskPanel.tsx HeldTask). */
+.tp-path-held { min-block-size: var(--tracker-target-fine); }
+.tp-path-held::after { content: none; }
+.tp-held { display: grid; gap: 8px; align-content: start; }
+.tp-held > p { margin: 0; font-size: 14px; line-height: 1.45; }
 .tr-k { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .tr-v { display: block; min-inline-size: 0; color: var(--ink); }
 .tr-id-name { display: none; }

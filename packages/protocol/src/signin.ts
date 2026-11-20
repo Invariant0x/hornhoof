@@ -7,6 +7,16 @@ export const SIGNIN_ERRORS = {
   broke: 'The sign-in failed on this machine, so nothing changed.',
   noLogin: 'This machine cannot run the sign-in for its plan from Hornhoof.',
   noProgram: 'The program could not be installed on this machine, so nothing changed.',
+  signedOut: 'The program on this machine is not signed in, so nothing changed.',
+  /* The server's: the connection passed its deadline with the plan not ready. */
+  noAnswer: 'The machine stopped answering before the plan was ready.',
 } as const;
 
 export type SigninError = keyof typeof SIGNIN_ERRORS;
+
+/* What a node does after a plan's sign-in code, in order, as it says it in login.step until the plan is ready: it checks
+   the sign-in, keeps it, hears the program signed in when that happened in the install window, looks at the program's
+   first setup, reads the account, the limits and the models. failed ends it, with why. */
+export const SIGNIN_STEPS = ['checking', 'saving', 'signed_in', 'setup', 'account', 'limits', 'models'] as const;
+
+export type SigninStep = (typeof SIGNIN_STEPS)[number];
