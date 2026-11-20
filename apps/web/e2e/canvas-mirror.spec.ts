@@ -4,12 +4,13 @@ import { captureWith } from './capture';
 import { DEV, serveTasksBoard } from './tasks-board/api';
 import { serveTree } from './tree-api';
 
-/* The zoom of the department's schema and tree and of the tracker's graph stands at the start of its canvas's bottom, mirrored
-   on a page right to left as the rest of the layout is. The department's line of what happened and its actions follow it
-   along the bottom, and its Speed and About drawer opens at the start, under its name. Left to right nothing moves. Agent
-   windows stand at the right in either direction, so with one open the actions keep away from it: after the zoom left to
-   right, at the end right to left, and the mirrored zoom stays clear of it (#1658). Each look is shot before any check; shots
-   go to HH_SCREENSHOT_DIR when it is set. Made-up companies. */
+/* The zoom of the department's schema and tree stands at the start of its canvas's bottom, mirrored on a page right to left
+   as the rest of the layout is; the tracker's graph, drawn left to right in either direction, keeps its zoom at the left.
+   The department's line of what happened and its actions follow the zoom along the bottom, and its Speed and About drawer
+   opens at the start, under its name. Left to right nothing moves. Agent windows stand at the right in either direction, so
+   with one open the actions keep away from it: after the zoom left to right, at the end right to left, and the mirrored zoom
+   stays clear of it (#1658). Each look is shot before any check; shots go to HH_SCREENSHOT_DIR when it is set. Made-up
+   companies. */
 
 const capture = captureWith('canvas-mirror', process.env.HH_SCREENSHOT_DIR);
 type Dir = 'ltr' | 'rtl';
@@ -157,21 +158,37 @@ for (const skin of SKINS) for (const height of [900, 640]) {
   });
 }
 
+/* The tracker's graph is drawn left to right in either direction, its root at the left and its leaves at the right, so its
+   zoom stays at the left of its canvas, over the side by the root, where it covers no node when the graph opens: mirrored,
+   it would lie over the leaves. Mirroring the graph is a job of its own (#1658, Design's verdict in #1668). */
 for (const skin of SKINS) for (const size of [WIDE, PHONE]) {
-  test(`the tracker graph's zoom stands at the start of its canvas, mirrored right to left: ${skin} ${size.width}`, async ({ context }, info) => {
+  test(`the tracker graph keeps its zoom at the left of its canvas in either direction, over no node: ${skin} ${size.width}`, async ({ context }, info) => {
     const page = { ltr: await tracker(context, size, 'ltr', skin), rtl: await tracker(context, size, 'rtl', skin) };
     for (const dir of ['ltr', 'rtl'] as const) {
       await expect(page[dir].getByRole('region', { name: en.tracker.graph.canvas }).locator('.tr-node').first()).toBeVisible();
       /* On a phone the canvas runs below the fold: its zoom is brought into sight, as a person scrolls to it. */
       await page[dir].locator('.tr-canvas .zoom').scrollIntoViewIfNeeded();
-      await still(page[dir], '.tr-canvas, .tr-canvas .zoom, .tr-canvas .world');
+      await still(page[dir], '.tr-canvas, .tr-canvas .zoom, .tr-canvas .world, .tr-canvas .tr-node');
       if (info.project.name.includes('chromium')) await capture(page[dir], info, `tracker-${skin}-${dir}-${size.width}`);
     }
     const at = async (selector: string) => ({ ltr: await box(page.ltr, selector), rtl: await box(page.rtl, selector) });
     const canvas = await at('.tr-canvas'), zoom = await at('.tr-canvas .zoom');
-    near(zoom.ltr.x - canvas.ltr.x, EDGE + FRAME, 'the zoom from the canvas\'s left, left to right');
-    near(canvas.ltr.y + canvas.ltr.height - (zoom.ltr.y + zoom.ltr.height), EDGE + FRAME, 'the zoom from the canvas\'s bottom, left to right');
     mirrored('the canvas', canvas.ltr, canvas.rtl, size.width);
-    mirrored('the zoom', zoom.ltr, zoom.rtl, size.width);
+    for (const dir of ['ltr', 'rtl'] as const) {
+      /* What the canvas shows of each node, its words inside it, meets no floating control. */
+      const nodes = await page[dir].locator('.tr-canvas .tr-node').evaluateAll(els => els.map(e => {
+        const r = e.getBoundingClientRect();
+        return { name: (e.textContent ?? '').trim().slice(0, 40), box: { x: r.x, y: r.y, width: r.width, height: r.height } };
+      }));
+      expect(nodes.length, `${dir}: the graph's nodes`).toBeGreaterThan(0);
+      const frame = canvas[dir];
+      const seen = (b: Box): Box => {
+        const x = Math.max(b.x, frame.x), y = Math.max(b.y, frame.y);
+        return { x, y, width: Math.max(0, Math.min(b.x + b.width, frame.x + frame.width) - x), height: Math.max(0, Math.min(b.y + b.height, frame.y + frame.height) - y) };
+      };
+      expect(nodes.filter(n => meets(seen(n.box), zoom[dir])).map(n => n.name), `${dir} ${size.width}: nodes under the zoom`).toEqual([]);
+      near(zoom[dir].x - canvas[dir].x, EDGE + FRAME, `the zoom from the canvas's left, ${dir}`);
+      near(canvas[dir].y + canvas[dir].height - (zoom[dir].y + zoom[dir].height), EDGE + FRAME, `the zoom from the canvas's bottom, ${dir}`);
+    }
   });
 }
