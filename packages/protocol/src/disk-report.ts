@@ -36,3 +36,12 @@ export const DiskReport = z.object({
     .optional(),
 });
 export type DiskReport = z.infer<typeof DiskReport>;
+
+/* The server adds this to the machine's disk view from keeper measurements. Bytes are part of Docker's volumes.
+   Companies lists only those the server can name for the viewer. The node's own disk report carries no company names. */
+export const MachineReplicas = z.object({
+  count: z.number().int().min(0),
+  bytes: Bytes,
+  companies: z.array(z.object({ name: z.string(), bytes: Bytes })),
+});
+export type MachineReplicas = z.infer<typeof MachineReplicas>;
