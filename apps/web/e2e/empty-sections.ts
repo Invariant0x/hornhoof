@@ -50,23 +50,47 @@ async function holdBack(page: Page, at: string, json: unknown): Promise<Held> {
   return { asked: () => asked, release: () => open(), again: () => { gate = new Promise<void>(go => { open = go; }); } };
 }
 
-/* The tracker in a look, on the test's clock, paused: it moves only as far as a test moves it. answers: what the server
-   answers instead of the board's mock, by path; held: the paths whose answers wait for the test. */
-export async function openTracker(page: Page, path: string, look: Look, answers: Record<string, unknown>, held: string[] = []): Promise<Record<string, Held>> {
+/* Sets the page's language, theme and direction before it loads. It runs in the page, so it takes nothing from here. */
+function dressPage({ lang, theme, dir }: { lang: string; theme: string; dir: string }) {
+  localStorage.setItem('hh-lang', lang);
+  localStorage.setItem('hh-theme', theme);
+  if (dir === 'rtl') document.addEventListener('DOMContentLoaded', () => { document.documentElement.dir = 'rtl'; });
+}
+
+/* The test's clock, paused, and the look: its width, language, theme and direction, Cyberpunk left to right unless it says. */
+async function wearLook(page: Page, look: Look): Promise<void> {
   await page.clock.install({ time: T0 });
   await page.clock.pauseAt(T0 + 1000);
   await page.setViewportSize({ width: look.width, height: 900 });
-  await page.addInitScript(({ lang, theme, dir }) => {
-    localStorage.setItem('hh-lang', lang);
-    localStorage.setItem('hh-theme', theme);
-    if (dir === 'rtl') document.addEventListener('DOMContentLoaded', () => { document.documentElement.dir = 'rtl'; });
-  }, { lang: look.lang, theme: look.theme ?? 'cyberpunk', dir: look.dir ?? 'ltr' });
-  await serveTasksBoard(page);
-  for (const [at, json] of Object.entries(answers)) if (!held.includes(at)) await page.route(url => pathOf(url) === at, route => route.fulfill({ json }));
+  await page.addInitScript(dressPage, { theme: 'cyberpunk', dir: 'ltr', ...look });
+}
+
+/* What the server answers at once instead of the board's mock, by path, save the held paths. */
+async function answerAt(page: Page, answers: Record<string, unknown>, held: string[]): Promise<void> {
+  for (const [at, json] of Object.entries(answers).filter(([path]) => !held.includes(path))) await page.route(url => pathOf(url) === at, route => route.fulfill({ json }));
+}
+
+/* The answer of each held path, held back until the test lets it go. */
+async function holdAll(page: Page, answers: Record<string, unknown>, held: string[]): Promise<Record<string, Held>> {
   const holds: Record<string, Held> = {};
   for (const at of held) holds[at] = await holdBack(page, at, answers[at]);
+  return holds;
+}
+
+/* Until the page asked for each held path. */
+async function untilAsked(holds: Record<string, Held>): Promise<void> {
+  for (const hold of Object.values(holds)) await expect.poll(hold.asked).toBeGreaterThan(0);
+}
+
+/* The tracker in a look, on the test's clock, paused: it moves only as far as a test moves it. answers: what the server
+   answers instead of the board's mock, by path; held: the paths whose answers wait for the test. */
+export async function openTracker(page: Page, path: string, look: Look, answers: Record<string, unknown>, held: string[] = []): Promise<Record<string, Held>> {
+  await wearLook(page, look);
+  await serveTasksBoard(page);
+  await answerAt(page, answers, held);
+  const holds = await holdAll(page, answers, held);
   await page.goto(path, { waitUntil: 'domcontentloaded' });
-  for (const at of held) await expect.poll(holds[at]!.asked).toBeGreaterThan(0);
+  await untilAsked(holds);
   return holds;
 }
 
