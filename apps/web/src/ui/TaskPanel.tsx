@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { HIDDEN } from '@hornhoof/protocol/redaction';
-import { errorText, useLanguage, useT } from '../i18n';
+import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useOrg } from '../org';
 import { routePath } from '../routes';
 import { knownLine, knownSubtasks, placeName, useGoals, usePipelines, useTask } from '../tasks';
@@ -536,6 +536,16 @@ function NotShown({ line, load, failure, asksYou, onHome, onGraph }: { line: Tas
   return <LoadState load={load} words={t.load.task} />;
 }
 
+/* The task to show once its load is done and the person may see it; until then, nothing. */
+const shownTask = (task: TaskDetail | null | undefined, load: Load, failure: unknown) => (task && load.phase === 'done' && !unavailableFailure(failure) ? task : null);
+
+/* The card's bar: a task or a subtask, and its number, once its row or its details are known. */
+function cardBar(t: Messages, line: TaskLine | null | undefined, task: TaskDetail | null | undefined): string {
+  if (!line) return '';
+  const kinds = t.tracker.card.kinds;
+  return t.tracker.card.bar(line.parentId || task?.parent ? kinds.subtask : kinds.task, line.number);
+}
+
 /* kind: where the panel stands, beside the tracker at the end side. */
 export function TaskPanel({ taskId, kind, onClose, onOpen, onHome, onOpenGoal, onGraph, active = true, ...waiting }: PanelProps) {
   const t = useT();
@@ -544,11 +554,10 @@ export function TaskPanel({ taskId, kind, onClose, onOpen, onHome, onOpenGoal, o
   const taskLoad = useLoad([{ data: task, failure: readFailure, load, cancel }]);
   const line = task ?? knownLine(taskId);
   const title = line ? `#${line.number} ${line.title}` : t.tasks.heading;
-  const shown = task && taskLoad.phase === 'done' && !unavailableFailure(failure) ? task : null;
-  const kinds = t.tracker.card.kinds;
+  const shown = shownTask(task, taskLoad, failure);
   useEscapeCloses(onClose, active && !shown);
   return (
-    <PanelFrame label={title} heading={line ? t.tracker.card.bar(line.parentId || task?.parent ? kinds.subtask : kinds.task, line.number) : ''} plain kind={kind} onClose={onClose}>
+    <PanelFrame label={title} heading={cardBar(t, line, task)} plain kind={kind} onClose={onClose}>
       {shown && failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       {shown ? <TaskBody key={shown.id} task={shown} onOpen={onOpen} onClose={onClose} active={active} onChanged={load} waiting={waiting} leads={{ onOpenGoal, onGraph }} />
         : <NotShown line={line} load={taskLoad} failure={failure} asksYou={waiting.requests.some(request => request.canAnswer)} onHome={onHome} onGraph={onGraph} />}

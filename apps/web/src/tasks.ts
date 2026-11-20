@@ -1,5 +1,5 @@
 import type { DepartmentPipeline } from '@hornhoof/protocol/pipeline-report';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { api } from './api';
 import { useStream, type LiveMessage } from './live';
 import { refetcher } from './refetch';
@@ -11,6 +11,16 @@ import { everyVisible } from './guard';
 const hasBody = <B,>(body: B | null | undefined, fresh: () => boolean): body is B => body !== null && body !== undefined && fresh();
 
 /* Fetches the path, again whenever a stream message says it may have changed. undefined until the first answer. */
+/* Whether the answer to ask n still counts, and if so it is the one on screen: its ask was not stopped, the path is still the
+   one asked, and no newer answer is on screen. */
+function freshness(control: AbortController, latest: MutableRefObject<string | null>, path: string, n: number, shown: MutableRefObject<number>) {
+  return () => {
+    if (control.signal.aborted || latest.current !== path || n < shown.current) return false;
+    shown.current = n;
+    return true;
+  };
+}
+
 export function useLive<T>(path: string | null, pick: (body: never) => T, wanted: (m: LiveMessage) => boolean): { data: T | undefined; failure: unknown; load: () => void; cancel: () => void } {
   const [data, setData] = useState<T | undefined>(undefined);
   const [failure, setFailure] = useState<unknown>(null);
@@ -29,11 +39,7 @@ export function useLive<T>(path: string | null, pick: (body: never) => T, wanted
     const n = ++asked.current;
     const control = new AbortController();
     running.current = control;
-    const fresh = () => {
-      if (control.signal.aborted || latest.current !== path || n < shown.current) return false;
-      shown.current = n;
-      return true;
-    };
+    const fresh = freshness(control, latest, path, n, shown);
     return api.get<never>(path, control.signal).then(
       body => {
         if (!hasBody(body, fresh)) return;
