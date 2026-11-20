@@ -267,7 +267,7 @@ function AgentWindowError({ shown, org, failure }: { shown: string | null; org: 
   const said = useLoadFailure(failure);
   useEffect(() => { message.current?.focus(); }, [shown, org, said]);
   if (!shown || org || said === null) return null;
-  return <p ref={message} tabIndex={-1} className="alert" role="alert">{errorText(t, said)}</p>;
+  return <p ref={message} tabIndex={-1} className="alert" role="alert"><span dir="auto">{errorText(t, said)}</span></p>;
 }
 
 type Department = Org['departments'][number];
