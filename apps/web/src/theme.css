@@ -1762,6 +1762,7 @@ body:has(.dview) .version-mark { display: none; }
 }
 :is(.plan-settings, .plan-fallbacks) > h4 { margin: 0; font-size: 14px; }
 .plan-fallbacks .part-note { font-size: inherit; overflow-wrap: anywhere; }
+.plan-fallbacks { --fallback-control-size: 44px; --fallback-control-gap: 8px; }
 /* A field of the card is as wide as what it shows, up to the band, with its caret on its end side, and 44 px high as
    every field of the screen. Its value wraps rather than ending in dots: the select itself is clear over a copy of its
    value that can take more lines. Its focus is the page's ring, not the glow of a field being typed in. Its list and caret
@@ -1782,18 +1783,20 @@ body:has(.dview) .version-mark { display: none; }
 :is(.plan-settings, .plan-fallbacks) .select-wrap > select:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; border-color: var(--line2); box-shadow: none; }
 .model-select { grid-template-areas: "value"; }
 .model-select > select, .model-select > .model-value { grid-area: value; }
-.plan-fallbacks .model-select > select { z-index: 1; block-size: 100%; background-color: transparent; color: transparent; }
+.plan-fallbacks .model-select > select { z-index: 1; block-size: 100%; min-block-size: var(--fallback-control-size); background-color: transparent; color: transparent; }
 .model-select option { background-color: var(--surface2); color: var(--ink); }
 .model-value {
-  display: grid; align-items: center; min-inline-size: 0; min-block-size: 44px; padding-block: 8px; padding-inline: 12px 32px;
+  display: grid; align-items: center; min-inline-size: 0; min-block-size: var(--fallback-control-size); padding-block: 8px; padding-inline: 12px 32px;
   border: 1px solid transparent; background: var(--surface2); color: var(--ink); text-align: start; overflow-wrap: anywhere;
 }
 /* A model whose name is long opens its whole names as radio buttons under the field, as no browser's menu shows them whole. */
-.model-disclosure { display: grid; gap: 8px; min-inline-size: 0; }
-.model-trigger { inline-size: 100%; padding: 0; border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; text-align: start; }
-.model-trigger > .model-value { border: 0; }
+.model-trigger {
+  appearance: none; inline-size: 100%; min-block-size: var(--fallback-control-size); padding: 0;
+  border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; text-align: start;
+}
+.model-trigger > .model-value { min-block-size: 0; border: 0; }
 .model-trigger:hover, .model-choice:hover { border-color: var(--cyan-ink); }
-.model-disclosure > .choice-list { margin: 0; padding: 0; border: 0; }
+.fallback-model > .choice-list { grid-area: choices; border: 0; }
 .plan-fallbacks .choice-list { display: grid; gap: 8px; min-inline-size: 0; margin: 0; padding: 0; list-style: none; }
 .model-choice {
   display: flex; align-items: center; gap: 8px; min-inline-size: 0; min-block-size: 44px; padding: 8px 12px;
@@ -1806,12 +1809,12 @@ body:has(.dview) .version-mark { display: none; }
   .plan-fallbacks .model-select > select { forced-color-adjust: none; color: transparent; border-color: ButtonText; }
   .model-select option { color: CanvasText; background-color: Canvas; }
 }
-/* The fallback plans in their order, numbered. On a narrow card a plan's name, its model and its moves stand one under the
-   other past its number, the moves at the end edge; on a card of 700 px and more they stand in one row on shared columns. */
+/* On narrow cards the actions sit below the model to leave room for its full name. On wide cards they share the field's
+   row; the label and expanded options have their own rows, so neither shifts the buttons away from the field. */
 .fallback-list { display: grid; margin: 0; padding: 0; list-style: none; min-inline-size: 0; }
 .fallback-list > .entry {
-  display: grid; grid-template-columns: 24px minmax(0, 1fr); grid-template-areas: "position plan" ". model" ". moves";
-  gap: 8px; align-items: start; min-inline-size: 0;
+  display: grid; grid-template-columns: 24px minmax(0, 1fr); grid-template-areas: "position plan" ". model";
+  gap: var(--fallback-control-gap); align-items: start; min-inline-size: 0;
 }
 .fallback-list > .entry:not(:last-child) { padding-block-end: 8px; }
 .fallback-list > .entry + .entry { padding-block-start: 8px; border-block-start: 1px solid var(--line); }
@@ -1821,16 +1824,26 @@ body:has(.dview) .version-mark { display: none; }
 }
 .fallback-name { grid-area: plan; min-inline-size: 0; font-weight: 600; overflow-wrap: anywhere; }
 .fallback-model { grid-area: model; min-inline-size: 0; }
-.fallback-moves { grid-area: moves; }
-.plan-fallbacks .fallback-moves { flex-wrap: nowrap; }
-.plan-fallbacks .fallback-moves > .act { flex: none; inline-size: 44px; block-size: 44px; min-block-size: 44px; padding: 0; justify-content: center; }
+.plan-fallbacks .fallback-model.field { grid-template-areas: "label" "control" "moves"; }
+.plan-fallbacks .fallback-model.field:has(> .choice-list) { grid-template-areas: "label" "control" "choices" "moves"; }
+.fallback-model > label { grid-area: label; }
+.fallback-model > .select-wrap { grid-area: control; }
+.plan-fallbacks .fallback-moves { grid-area: moves; align-self: center; flex-wrap: nowrap; gap: var(--fallback-control-gap); }
+.plan-fallbacks .fallback-moves > .act {
+  flex: none; inline-size: var(--fallback-control-size); block-size: var(--fallback-control-size); min-block-size: var(--fallback-control-size);
+  padding: 0; justify-content: center;
+}
 .plan-fallbacks .fallback-moves > .act.danger { border-color: var(--pink-ink); }
 .plan-fallbacks .fallback-moves .ic, .fallback-add .ic { width: 16px; height: 16px; }
 @container card (min-width: 700px) {
   .fallback-list > .entry {
-    grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr) max-content; grid-template-areas: "position plan model moves";
+    grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr) max-content; grid-template-areas: "position plan model model";
     column-gap: 16px; align-items: center;
   }
+  .plan-fallbacks .fallback-model.field {
+    grid-template-columns: subgrid; column-gap: normal; grid-template-areas: "label label" "control moves";
+  }
+  .plan-fallbacks .fallback-model.field:has(> .choice-list) { grid-template-areas: "label label" "control moves" "choices choices"; }
 }
 .fallback-add { display: grid; justify-items: end; gap: 8px; min-inline-size: 0; }
 .fallback-add > .btn { max-inline-size: 100%; padding: 8px 12px; white-space: normal; overflow-wrap: anywhere; }
