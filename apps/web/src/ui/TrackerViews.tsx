@@ -13,9 +13,10 @@ import { WorkerMark } from './WorkerMark';
 import { QuestionButton, STATE_CLASS, StateWord, WaitLine } from './TaskActivity';
 import { GOAL_CLASS, goalProgress } from './GoalPanel';
 import { Idle, LoadLine, MAX_HELD_ROWS, type Load } from './Loading';
+import { syncPulses } from './pulse';
 
 /* How a view opens a task's card and marks the open one. asksYou: an open question on a task is the person's to answer. */
-export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; questionAt?: (id: string) => string | undefined; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined; stageOwner?: (stage: PipelineStage) => string | undefined };
+export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; questionAt?: (id: string) => string | undefined; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined; stageOwner?: (stage: PipelineStage) => string | undefined; now?: (id: string) => boolean };
 
 /* A value of a row with its name, which shows beside it only where the row is too narrow for the names above the list. The
    pair keeps its own direction, so "Executor: Hana" reads in that order right to left, and so does the value alone, so the
@@ -42,6 +43,18 @@ function relationsOf(tasks: TaskLine[]): Relations {
     }
   }
   return needed;
+}
+
+/* A row's status dot: its status, and for a task in work an employee works on at this moment a filled core that breathes in
+   the one phase of every such dot, said to a screen reader in one phrase of its own, with no title (Design #1628). */
+function StatusDot({ status, id, now }: { status: ReturnType<typeof humanStatus>; id: string; now: Rows['now'] }) {
+  const t = useT();
+  const dot = useRef<HTMLSpanElement>(null);
+  const pulsing = status === 'working' && Boolean(now?.(id));
+  useLayoutEffect(() => {
+    if (pulsing) syncPulses(dot.current!);
+  }, [pulsing]);
+  return <span ref={dot} className={`tr-status-dot ${STATE_CLASS[status]}${pulsing ? ' now' : ''}`} role="img" aria-label={pulsing ? t.tracker.dot.workingNow : t.tracker.groups[status]} />;
 }
 
 function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tree: TaskTree; rows: Rows; relations: Relations; depth?: number; showSubtasks?: boolean }) {
@@ -72,7 +85,7 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
                 <span className="tr-caret" aria-hidden="true" />
               </button>
             )}
-            <span className={`tr-status-dot ${STATE_CLASS[status]}`} role="img" aria-label={t.tracker.groups[status]} />
+            <StatusDot status={status} id={task.id} now={rows.now} />
             <span className="tr-line">
               <button className="linkish tr-title" type="button" dir="auto" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
               {tree.total > 0 && <span className="tr-branch-count" title={words.subtasks(tree.done, tree.total)}><TrackerIcon name="branch" />{tree.total}</span>}
