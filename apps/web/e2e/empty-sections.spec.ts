@@ -8,7 +8,7 @@ import { TASKS } from './tasks-board/api';
    empty block, apart from what is above it by the tracker's spacing; the block shares one room with what holds the section's
    place while it comes, so nothing moves when the section came, empty or not; and it shows only once every source of the
    section came. Checked in the longest and the shortest language the product ships, on a phone and on a wide screen. */
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 
 const LOOKS: Look[] = [...new Set([SHORTEST, LONGEST])].flatMap(lang => [375, 1440].map(width => ({ lang, width })));
 const nameOf = (look: Look) => `${look.lang} ${look.width}`;

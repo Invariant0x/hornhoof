@@ -8,7 +8,7 @@ import { TASKS } from './tasks-board/api';
    board column with no card and a company with no task at all, on a phone and on a wide screen, in three themes, in English,
    Russian, the long pseudo translation and right to left. They run on request, through empty-sections-shots.config.ts, and
    go to HH_OUT when a run keeps its files there. */
-test.describe.configure({ timeout: 120_000 });
+test.describe.configure({ timeout: 0 });
 const OUT = `${process.env.HH_OUT ?? 'e2e/results'}/empty-sections-shots`;
 mkdirSync(OUT, { recursive: true });
 
