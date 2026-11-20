@@ -3,7 +3,7 @@ import { openAfter, type Live } from './state.js';
 import { nudgeTrackerKeepers } from '../tracker/nudge.js';
 import { and, eq, sql } from 'drizzle-orm';
 import { jobs, tasks } from '../../db/schema.js';
-import { workStartOf } from './turnkey.js';
+import { workStartNote } from './turnkey.js';
 /* A turn on a task went out: an open task is being worked on now. Turnkey work notes where the turn branch and main were then,
    which every start its holder names must hold. */
 export async function startWork(ctx: Live, jobId: string): Promise<void> {
@@ -13,14 +13,14 @@ export async function startWork(ctx: Live, jobId: string): Promise<void> {
   const [task] = await ctx.db.select({ id: tasks.id, companyId: tasks.companyId, productId: tasks.productId, departmentId: tasks.departmentId, status: tasks.status, assigneeAgentId: tasks.assigneeAgentId, after: tasks.after })
     .from(tasks).where(eq(tasks.id, job.taskId));
   if (!task || (await openAfter(ctx.db, task)).length) return;
-  const start = task.status === 'open' && task.assigneeAgentId === job.agentId ? await workStartOf(ctx, task) : null;
+  const start = await workStartNote(ctx, task, job.agentId);
   const row = await ctx.db.transaction(async tx => {
     const [started] = await tx
       .update(tasks)
       .set({ status: 'working', version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(and(eq(tasks.id, job.taskId!), eq(tasks.status, 'open'), eq(tasks.assigneeAgentId, job.agentId!)))
       .returning();
-    if (started) await note(tx, started, { kind: 'status', actor: { agentId: job.agentId! }, data: { fromStatus: 'open', toStatus: 'working', ...(start ? { start } : {}) } });
+    if (started) await note(tx, started, { kind: 'status', actor: { agentId: job.agentId! }, data: { fromStatus: 'open', toStatus: 'working', ...start } });
     return started;
   });
   if (!row) return;

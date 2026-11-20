@@ -247,6 +247,28 @@ describe('the report that closes turnkey work', () => {
     expect(closed!.data).toMatchObject({ integration: { commit: SECOND, start: OWN, workStart: f.R } });
   });
 
+  it('notes main where the turn branch is not made yet, and holds a start named to that', async () => {
+    const f = await releasing();
+    delete f.repo.heads[f.branch];
+    const work = await turnkeyTask(f);
+    const [started] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, work.task.id), eq(taskEvents.kind, 'status')));
+    expect(started!.data).toMatchObject({ start: { turn: f.turn.number, turnHead: null, main: BASE } });
+    lay(f, [{ sha: OWN, parents: [f.R] }], { [f.branch]: OWN, [work.branch]: OWN });
+    await work.done({ commit: OWN, baseCommit: f.R });
+    const [closed] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, work.task.id), eq(taskEvents.kind, 'report')));
+    expect(closed!.data).toMatchObject({ integration: { commit: OWN, start: f.R, workStart: BASE } });
+  });
+
+  it('notes nothing where a tag stands in the name of the turn branch as the work starts', async () => {
+    const f = await releasing();
+    f.repo.tags[f.branch] = f.R;
+    delete f.repo.heads[f.branch];
+    const work = await turnkeyTask(f);
+    const [started] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, work.task.id), eq(taskEvents.kind, 'status')));
+    expect(started!.data).toMatchObject({ toStatus: 'working' });
+    expect(started!.data).not.toHaveProperty('start');
+  });
+
   it('takes the commit and its start through the report tool', async () => {
     const f = await releasing();
     const work = await turnkeyTask(f);

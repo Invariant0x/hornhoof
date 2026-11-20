@@ -77,17 +77,39 @@ async function headAt(readCommit: NonNullable<Live['readCommit']>, repo: Repo, b
   }
 }
 
+type StartingTask = Pick<Task, 'id' | 'companyId' | 'productId' | 'departmentId' | 'status' | 'assigneeAgentId'>;
+
+/* What the status note of work that starts now keeps of where it started: turnkey work of a department that releases turns,
+   taken up by its holder, keeps where the turn branch and main were. */
+export async function workStartNote(ctx: Live, task: StartingTask, agentId: string): Promise<{ start?: WorkStart }> {
+  if (task.status !== 'open' || task.assigneeAgentId !== agentId) return {};
+  const start = await workStartOf(ctx, task);
+  return start ? { start } : {};
+}
+
 /* Where turnkey work of a department that releases turns starts from, read as its work starts: none for other work, for work of
    a repository with no turns, or where the head of the turn branch could not be read. The holder's branch starts there or
    later, so nothing the turn branch held then is its own. */
-export async function workStartOf(ctx: Live, task: Pick<Task, 'id' | 'companyId' | 'productId' | 'departmentId'>): Promise<WorkStart | null> {
+async function workStartOf(ctx: Live, task: StartingTask): Promise<WorkStart | null> {
   if (!ctx.config || !ctx.readCommit) return null;
-  const [route] = await ctx.db.select(only(taskRoutes, 'state')).from(taskRoutes).where(and(eq(taskRoutes.taskId, task.id), eq(taskRoutes.companyId, task.companyId)));
+  const at = await turnkeyRepo(ctx.db, ctx.config, task);
+  return at ? readWorkStart(ctx.readCommit, at.repo, at.turn) : null;
+}
+
+type Turn = NonNullable<Awaited<ReturnType<typeof openTurnOf>>>;
+
+/* The repository and open turn, if any, of turnkey work of a department that releases turns. */
+async function turnkeyRepo(db: Live['db'], config: NonNullable<Live['config']>, task: StartingTask): Promise<{ repo: Repo; turn: Turn | null } | null> {
+  const [route] = await db.select(only(taskRoutes, 'state')).from(taskRoutes).where(and(eq(taskRoutes.taskId, task.id), eq(taskRoutes.companyId, task.companyId)));
   if (route?.state.resultKind !== 'turnkey') return null;
-  const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]);
+  const found = await repoAt({ db, config }, [task.productId, task.departmentId]);
   if (!found || found.department.parentId) return null;
-  const turn = await openTurnOf(ctx.db, task.companyId, found.department.id);
-  const [turnHead, main] = await Promise.all([turn ? headAt(ctx.readCommit, found.repo, `turn-${turn.number}`) : null, headAt(ctx.readCommit, found.repo, found.repo.branch)]);
+  return { repo: found.repo, turn: await openTurnOf(db, task.companyId, found.department.id) };
+}
+
+/* The heads of the turn branch and main now: none where the turn branch could not be read, or neither is there. */
+async function readWorkStart(readCommit: NonNullable<Live['readCommit']>, repo: Repo, turn: Turn | null): Promise<WorkStart | null> {
+  const [turnHead, main] = await Promise.all([turn ? headAt(readCommit, repo, `turn-${turn.number}`) : null, headAt(readCommit, repo, repo.branch)]);
   if (turnHead === undefined || (!turnHead && !main)) return null;
   return { turn: turn?.number ?? null, turnHead, main: main ?? null };
 }

@@ -20,19 +20,24 @@ export type UncheckedItem =
   | { kind: 'merge'; commit: string }
   | { kind: 'commit'; commit: string };
 
+type Kind = UncheckedItem['kind'];
+
+/* Each kind of item as agents and the release record read it. */
+const LINES: { [K in Kind]: (item: Extract<UncheckedItem, { kind: K }>) => string } = {
+  unread: item => `The commits between main ${item.base} and ${item.commit} could not all be read.`,
+  holder_off: item => `#${item.task}: the holder of this turnkey work, whose own checks cover it, is off or removed.`,
+  no_candidate: item => `#${item.task} has no checked candidate and is no turnkey work its holder closed.`,
+  checker: item => `#${item.task}: a checker of ${item.commit} is off, removed or its author, or passed no verdict on it.`,
+  task_unread: item => `The commits of #${item.task} could not all be read.`,
+  unpinned: item => `#${item.task} was closed before turnkey work named the commit its holder checked and where it started, so none of its commits counts as checked.`,
+  unstarted: item => `#${item.task}: where this turnkey work started is not on record, so none of its commits counts as checked.`,
+  merge: item => `${item.commit} is a merge made outside every checked candidate.`,
+  commit: item => `${item.commit} came in with no accepted candidate.`,
+};
+
 /* The item as agents and the release record read it. */
 export function uncheckedLine(item: UncheckedItem): string {
-  switch (item.kind) {
-    case 'unread': return `The commits between main ${item.base} and ${item.commit} could not all be read.`;
-    case 'holder_off': return `#${item.task}: the holder of this turnkey work, whose own checks cover it, is off or removed.`;
-    case 'no_candidate': return `#${item.task} has no checked candidate and is no turnkey work its holder closed.`;
-    case 'checker': return `#${item.task}: a checker of ${item.commit} is off, removed or its author, or passed no verdict on it.`;
-    case 'task_unread': return `The commits of #${item.task} could not all be read.`;
-    case 'unpinned': return `#${item.task} was closed before turnkey work named the commit its holder checked and where it started, so none of its commits counts as checked.`;
-    case 'unstarted': return `#${item.task}: where this turnkey work started is not on record, so none of its commits counts as checked.`;
-    case 'merge': return `${item.commit} is a merge made outside every checked candidate.`;
-    case 'commit': return `${item.commit} came in with no accepted candidate.`;
-  }
+  return (LINES[item.kind] as (item: UncheckedItem) => string)(item);
 }
 
 /* The items in one order, the same each time for the same list, as the card keeps them. */
