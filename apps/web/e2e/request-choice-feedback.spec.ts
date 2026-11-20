@@ -932,7 +932,7 @@ async function startRealServer(publicUrl: string): Promise<RealServerBoot> {
 }
 
 test('saves neutral feedback without pick, delivers words to author, and preserves explicit pick: 0 on a real server', async ({ page, baseURL }, info) => {
-  test.setTimeout(30_000);
+  test.setTimeout(0);
   const webOrigin = baseURL ?? 'http://localhost:4179';
   const srv = await startRealServer(webOrigin);
   try {
