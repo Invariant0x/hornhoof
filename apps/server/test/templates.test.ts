@@ -238,6 +238,19 @@ describe('templates', () => {
     expect(body('dev-release-improvements')).toMatch(/comparable conditions[\s\S]*agreed baseline/i);
   });
 
+  /* Task checks clogged the few check machines and slowed releases: a task's check runs only its own tests and its browser
+     files in Chromium alone, as the turn's whole release run checks all three engines and everything else together. */
+  it("keeps a task's check to its own tests in Chromium, one run of a task at a time, and lets a running run finish", () => {
+    const policy = body('dev-testing-policy');
+    expect(policy).toMatch(/Our screens stay\.[^\n]*three engines stay[^\n]*task's check[^\n]*Chromium only[^\n]*Firefox and WebKit run once per turn, in the turn's whole release run/);
+    expect(policy).toMatch(/T2: [^\n]*task's check[^\n]*runs only that task's files and the tests selected for them[^\n]*no whole suite and no extra parts/);
+    expect(policy).toMatch(/T12: Let a running run finish\.[^\n]*small fix[^\n]*wait for its result and fix from it[^\n]*Stop a run only when it is broken[^\n]*wrong command[^\n]*wrong commit/);
+    expect(policy).toMatch(/T13: [^\n]*at most one run[^\n]*queued or running/);
+    expect(templates.skills.get('dev-testing-policy')!.description.en).toContain('T1 to T13');
+    expect(body('hh-run-checks')).toMatch(/task's own run holds only its files and their tests[^.]*Chromium only[\s\S]*at most one run of a task queued or running[\s\S]*small fix[\s\S]*Stop only a broken run/);
+    for (const id of ['dev-browser-check', 'dev-frontend-ui', 'dev-e2e-tests']) expect(body(id), id).toMatch(/Chromium only[^.]*Firefox and WebKit[^.]*turn's whole release run/);
+  });
+
   it('keeps Security and red-team scopes distinct and uses task-assigned review and acceptance', () => {
     expect(templates.roles.get('DEV-RED')!.skills.map(s => s.id)).not.toContain('dev-threat-model');
     for (const id of ['DEV-RED', 'DEV-SEC']) {
