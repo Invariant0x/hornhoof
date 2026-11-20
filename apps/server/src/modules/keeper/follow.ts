@@ -11,7 +11,7 @@ import type { BundleSecrets } from '../backups/bundle.js';
 import type { MakerView } from '../backups/types.js';
 import { ageKey } from './age-key.js';
 import { Beats, type Beat } from './beats.js';
-import { CopyMaker, type CopyMakerOptions, type CopyReport } from './copy.js';
+import { CopyMaker, NEXT_DB, type CopyMakerOptions, type CopyReport } from './copy.js';
 import { KEEPER_PORTS } from './doors.js';
 import type { FollowConfig } from './follow-config.js';
 import { Leaving, type LeavingOptions } from './leave.js';
@@ -201,10 +201,7 @@ export class FollowKeeper {
       ownApp: { target: opts.app, afterMs: opts.ownAppAfterMs ?? OWN_APP_AFTER_MS },
       updating: () => this.updating.holds(),
       switchMore: () => ({ cut: this.watcher.cut(), question: this.asking !== null }),
-      extraReport: () => {
-        const copy = this.maker.report();
-        return copy ? { copy } : {};
-      },
+      extraReport: () => this.replicaReport(),
       copying: () => pouring(this.maker.report()),
       onView: view => this.heard(view),
       ...opts.worker,
@@ -374,6 +371,16 @@ export class FollowKeeper {
     await this.working;
     await Promise.all([this.tunnel?.stop(), this.server?.close().catch(() => undefined), this.door.close(), this.peerDoor.stop(), this.worker.stop(), this.maker.stop()]);
     await this.copySql.close().catch(() => undefined);
+  }
+
+  private async replicaReport(): Promise<{ copy?: CopyReport; replicaBytes?: number }> {
+    const copy = this.maker.report();
+    const measured = await this.copySql.query<{ bytes: number }>(
+      `SELECT COALESCE(SUM(pg_database_size(oid)), 0)::float8 AS bytes FROM pg_database
+       WHERE datname IN ($1, $2) OR datname ~ '^hornhoof_old_[0-9]{8}t[0-9]{6}$'`, [COPY_DB, NEXT_DB],
+    ).catch(() => undefined);
+    const bytes = measured?.rows[0]?.bytes;
+    return { ...(copy ? { copy } : {}), ...(bytes === undefined ? {} : { replicaBytes: bytes }) };
   }
 
   private diskFree(): number | null {

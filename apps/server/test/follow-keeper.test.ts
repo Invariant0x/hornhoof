@@ -26,7 +26,7 @@ import { PEERS_FILE } from '../src/modules/keeper/worker.js';
 import { HOLD } from '../src/net/proxy.js';
 import { issueCertificate, makeAuthority, makeCrl } from '../src/modules/network/authority.js';
 import { renewedMessage } from '../src/modules/network/renewal.js';
-import { TEST_SECRET, until as untilState } from './helpers.js';
+import { as, TEST_SECRET, until as untilState } from './helpers.js';
 import { ask, company, folder, heldIn, HOST_ID, hostIdOf, MAC, prepareCompany, SLEEPER, worker, workerRound, type Company } from './worker-keeper-fixture.js';
 import { controlledTime, fetchApp, manualTime, registerStep, until } from './worker-keeper-time.js';
 
@@ -259,6 +259,19 @@ describe('the keeper of a machine that keeps a copy', () => {
     expect(JSON.parse(readFileSync(join(f.config.controlDir, 'schema.json'), 'utf8'))).toMatchObject({ attempt: 1, database: 'hornhoof', port: 7432 });
     for (const line of f.lines) expect(line).not.toContain(TEST_SECRET);
   });
+  it('sends the local replica size to the server', async () => {
+    const c = await company();
+    const sql = () => ({
+      query: async <R>(text: string) => ({ rows: (text.includes('pg_database_size') ? [{ bytes: 4096 }] : []) as R[] }),
+      close: async () => undefined,
+    });
+    const f = await follower(c, { sql });
+    await rounds(5, 30);
+    const res = await c.app.inject({ url: '/api/machines', ...as(c.ceo) });
+    const view = res.json() as { machines: { id: string; replicas?: { bytes: number } }[] };
+    expect(view.machines.find(row => row.id === f.machine)?.replicas).toMatchObject({ bytes: 4096 });
+  });
+
   it('measures nothing of its disk while it makes its copy', async () => {
     /* Pouring the copy in is what keeps the disk busy then: a probe would only measure that. */
     const c = await company();
