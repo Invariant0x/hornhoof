@@ -320,8 +320,12 @@ describe('the boundary a receipt counts from', () => {
   it("stays at the start of a new session's log the program has not written yet", () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'hh-tail-new-')));
     cleanups.push(async () => rmSync(dir, { recursive: true, force: true }));
-    const tail = new LineTail(join(dir, 'new.jsonl'));
+    const tail = new LineTail(join(dir, 'new.jsonl'), { empty: true });
     expect(tail.read()).toEqual([]);
     expect(tail.mark()).not.toBeNull();
+    /* A log read from its start that is not there is no known end: it may be one that went missing. */
+    const other = new LineTail(join(dir, 'other.jsonl'));
+    expect(other.read()).toEqual([]);
+    expect(other.mark()).toBeNull();
   });
 });

@@ -34,7 +34,7 @@ import { TurnEnds, hookCalls, claudeEnd, stopIsLate, type TurnEnd } from './turn
 import { busy, enterPending, hasSettled, idleRefusal, RETIRED, stale, type IdleEvidence, type RetireResult } from './program-retire.js';
 import { claudeTook, claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
 import { CALLS } from './tool-calls.js';
-import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
+import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type LogMark, type WireNews } from './transcripts.js';
 import type { RecordingCursor } from './recordings.js';
 import { envFile, type Tmux } from './tmux.js';
 import { holdsWords, LostWords } from './lost-words.js';
@@ -135,8 +135,8 @@ type Agent = {
   ownerTyped?: boolean;
   /* The prompt Hornhoof typed, until the program's prompt hook says what it got. */
   typing?: string | null;
-  /* The log whose new entries can be the receipt of what Hornhoof types: the one read up to the moment it went in. */
-  receiptLog?: LineTail | null;
+  /* Where the log stood as Hornhoof's words went in: only what it reads on from there can be their receipt. */
+  receiptFrom?: LogMark | null;
   limits: Limits | null;
   /* How full the context is as Hornhoof last heard it, and how many tokens Kimi's model takes in it. */
   contextUsed: number | null;
@@ -1971,7 +1971,7 @@ export class TerminalHost {
   private tailFor(a: Agent, fresh = false): LineTail | null {
     if (a.program?.kind === 'antigravity') a.agyRead = agySteps();
     const file = this.transcriptFile(a);
-    return file ? new LineTail(file, { fromEnd: !fresh }) : null;
+    return file ? new LineTail(file, fresh ? { empty: true } : { fromEnd: true }) : null;
   }
 
   private transcriptFile(a: Agent): string | null {
@@ -2081,7 +2081,12 @@ export class TerminalHost {
   }
 
   private takeOperatorOriginal(a: Agent, line: Record<string, unknown>): void {
-    if (this.operator?.enabled(a.key) && line.type === 'user' && isRecord(line.message)) a.turn?.words.takeOriginal(contentText(line.message.content));
+    if (this.assignmentMayGoIn(a) && line.type === 'user' && isRecord(line.message)) a.turn?.words.takeOriginal(contentText(line.message.content));
+  }
+
+  /* While Hornhoof's words wait to go in, what the program takes is a person's: never the delivery of an assignment. */
+  private assignmentMayGoIn(a: Agent): boolean {
+    return Boolean(this.operator?.enabled(a.key)) && !a.promptWaits;
   }
 
   private claudeReceivedWords(a: Agent, line: Record<string, unknown>): void {
@@ -2092,15 +2097,16 @@ export class TerminalHost {
 
   /* Hornhoof's words go in from here. What the program logged before is read first, while no words wait, so no entry of it
      counts as their receipt. A program that comes back is read from the end of its log the node marked as it came up, and
-     the node reads nothing before the words go in. A log whose end it could not find then can hold earlier entries, and
-     gives no receipt; nor does the log of a session the program changes to later, which is read from its start. This
+     the node reads nothing before the words go in. A log whose end it could not find then, or that stopped inside a line,
+     can hold earlier entries, and gives no receipt; nor does a log a look fails at later, or the log of a session the
+     program changes to, which is read from its start. This
      takes Claude's --resume to go on in the same file, adding to it and copying no earlier entry into it once up, as the
      transcripts of Claude Code up to 2.1.329 on a node show: one file across launches and versions, with no entry of
      another session and no words of the user twice. */
   private typingNow(a: Agent, words: string): void {
     this.drain(a);
     a.typing = words;
-    a.receiptLog = a.tail?.bounded ? a.tail : null;
+    a.receiptFrom = a.tail?.mark() ?? null;
   }
 
   /* Claude's transcript records the words Hornhoof typed as it takes them: the receipt its prompt hook gives, should Claude
@@ -2123,7 +2129,7 @@ export class TerminalHost {
   }
 
   private readUpToTyping(a: Agent): boolean {
-    return a.tail != null && a.tail === a.receiptLog;
+    return Boolean(a.receiptFrom && a.tail?.holds(a.receiptFrom));
   }
 
   private knownClaudeWord(a: Agent, receipt: NonNullable<ReturnType<typeof claudeWordReceipt>>): boolean {

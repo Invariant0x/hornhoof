@@ -5,44 +5,77 @@ import type { Calls } from './tool-calls.js';
 import { contentText, inputText, isoFrom, isRecord, toolName } from '../providers/events.js';
 import { codexFailure } from './failures.js';
 
+/* Where a tail stood as words went in: what it reads on from there, with no failed look since, was written after. */
+export type LogMark = { readonly tail: LineTail; readonly failed: number };
+
 /* Follows a log file a program appends to, a whole line at a time. */
 export class LineTail {
   private offset: number;
   /* The start of a line the program has not ended yet. It waits as bytes, since a read can stop inside a letter. */
   private partial = Buffer.alloc(0);
-  /* Whether it knows the end of the file as it read last: what it reads from now on was written from now on. A file to
-     follow from its end that it could not find has no known end until it reads it. */
+  /* Whether its last look found where the file ends. A log followed from its start is known once read, one followed from
+     its end once found; the log of a session that starts now is empty until the program writes it. */
   private known: boolean;
+  private waitsForFile: boolean;
+  /* Its looks at the file that failed, all told. */
+  private failed = 0;
 
   constructor(
     private readonly file: string,
-    { fromEnd = false }: { fromEnd?: boolean } = {},
+    { fromEnd = false, empty = false }: { fromEnd?: boolean; empty?: boolean } = {},
   ) {
     const size = fromEnd ? sizeOf(file) : 0;
     this.offset = size ?? 0;
-    this.known = size !== null;
+    this.waitsForFile = empty;
+    this.known = empty || (fromEnd && size !== null);
   }
 
-  get bounded(): boolean { return this.known; }
+  /* None while it does not know where the file ends, or the start of a line it read is not ended yet. */
+  mark(): LogMark | null {
+    return this.known && this.partial.length === 0 ? { tail: this, failed: this.failed } : null;
+  }
+
+  holds(mark: LogMark): boolean {
+    return mark.tail === this && mark.failed === this.failed;
+  }
 
   read(): string[] {
     const size = sizeOf(this.file);
-    if (size === null) return [];
+    if (size === null) {
+      this.missed();
+      return [];
+    }
     this.known = true;
+    this.waitsForFile = false;
     if (size <= this.offset) return [];
     const buf = Buffer.alloc(size - this.offset);
-    const fd = openSync(this.file, 'r');
     let got: number;
     try {
-      got = readSync(fd, buf, 0, buf.length, this.offset);
-    } finally {
-      closeSync(fd);
+      got = readAt(this.file, buf, this.offset);
+    } catch (error) {
+      this.missed();
+      throw error;
     }
     this.offset += got;
     const bytes = Buffer.concat([this.partial, buf.subarray(0, got)]);
     const end = bytes.lastIndexOf(0x0a) + 1;
     this.partial = Buffer.from(bytes.subarray(end));
     return bytes.subarray(0, end).toString('utf8').split('\n').filter(l => l.trim());
+  }
+
+  private missed(): void {
+    if (this.waitsForFile) return;
+    this.known = false;
+    this.failed++;
+  }
+}
+
+function readAt(file: string, buf: Buffer, at: number): number {
+  const fd = openSync(file, 'r');
+  try {
+    return readSync(fd, buf, 0, buf.length, at);
+  } finally {
+    closeSync(fd);
   }
 }
 
