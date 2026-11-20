@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { APP, DIGESTS, JQ, runOnce, stand, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
 
@@ -45,6 +46,14 @@ function packed(s: Stand, id: string, files: Record<string, string>, more: (dir:
   if (!existsSync(file)) throw new Error(`The test could not pack an upload: ${made.stderr}`);
   return file;
 }
+/* BusyBox tar, which the updater's image has, lists a second name of a file as a plain file ("-rw-r--r-- ... name -> first",
+   where GNU tar starts the line with h), and makes it even to a file outside the folder. The updater runs it instead. */
+const TAR = spawnSync('sh', ['-c', 'command -v tar'], { encoding: 'utf8' }).stdout.trim();
+const busyboxTar = (s: Stand) => {
+  const tools = mkdtempSync(join(s.dir, 'tools-'));
+  writeFileSync(join(tools, 'tar'), `#!/bin/sh\ncase "$1" in -tvf) ${TAR} "$@" | sed 's/^h/-/' ;; *) exec ${TAR} "$@" ;; esac\n`, { mode: 0o755 });
+  return { PATH: `${tools}:${dirname(fileURLToPath(new URL('./updater-stubs/docker', import.meta.url)))}:${dirname(JQ)}:/usr/bin:/bin` };
+};
 const TASKS = 'id,title\n1,first\n2,"two\n\\.\nDROP DATABASE hornhoof;"\n';
 const JOURNAL = 'id,tbl\n7,tasks\n';
 const load = (s: Stand, id: string, file: string, over: object = {}) =>
@@ -190,7 +199,7 @@ describe('the updater and what a machine held when it stopped holding the data',
   });
 
   it('refuses what is not the data of a table', async () => {
-    type Case = { name: string; files?: Record<string, string>; more?: (dir: string) => string[]; over?: object; env?: Record<string, string>; line: string; noDatabase?: boolean };
+    type Case = { name: string; files?: Record<string, string>; more?: (dir: string) => string[]; over?: object; env?: Record<string, string>; busybox?: boolean; line: string; noDatabase?: boolean };
     const cases: Case[] = [
       { name: 'a file of statements', files: { 'public.tasks.csv': TASKS, 'x.sql': 'DROP DATABASE hornhoof;' }, line: 'The upload holds a file that is no table of the company.', noDatabase: true },
       { name: 'a file of another schema', files: { 'pg_catalog.pg_authid.csv': 'rolname\nx\n' }, line: 'The upload holds a file that is no table of the company.', noDatabase: true },
@@ -206,6 +215,14 @@ describe('the updater and what a machine held when it stopped holding the data',
         name: 'two names of one file',
         files: { 'public.tasks.csv': TASKS },
         more: dir => (linkSync(join(dir, 'public.tasks.csv'), join(dir, 'net.journal.csv')), ['net.journal.csv']),
+        line: 'The upload holds what is no file.',
+        noDatabase: true,
+      },
+      {
+        name: 'two names of one file, as BusyBox lists them',
+        files: { 'public.tasks.csv': TASKS },
+        more: dir => (linkSync(join(dir, 'public.tasks.csv'), join(dir, 'net.journal.csv')), ['net.journal.csv']),
+        busybox: true,
         line: 'The upload holds what is no file.',
         noDatabase: true,
       },
@@ -227,7 +244,7 @@ describe('the updater and what a machine held when it stopped holding the data',
           ? (mkdirSync(join(s.control, 'uploads')), writeFileSync(join(s.control, 'uploads', `${NID}-${id}.tar.gz`), 'not packed'), join(s.control, 'uploads', `${NID}-${id}.tar.gz`))
           : packed(s, id, one.files ?? {}, one.more);
       load(s, id, file, one.over);
-      const r = await runOnce(s, null, one.env);
+      const r = await runOnce(s, null, one.busybox ? { ...busyboxTar(s), ...one.env } : one.env);
       expect(listed(s, 'uploads'), one.name).toEqual([`${NID}-${id}.failed`]);
       expect(readFileSync(join(s.control, 'uploads', `${NID}-${id}.failed`), 'utf8').trim(), one.name).toBe(one.line);
       expect(r.out, one.name).toContain(`Could not load what a machine uploaded: ${one.line}`);

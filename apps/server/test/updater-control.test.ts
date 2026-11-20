@@ -263,6 +263,26 @@ describe('what the updater reads in the folders it shares with the app and the k
     expect(readdirSync(s.control)).toEqual(['status.json']);
   });
 
+  /* What root publishes there is root's, with one name, and everyone may read it. Where Linux lets anyone give a file a
+     second name (fs.protected_hardlinks=0, its default without systemd), only such a file of root's is taken: one only
+     root may read could be another of root's files under the name. */
+  it.each([
+    { why: 'where hard links are protected', protect: 'return 0', taken: ['7 1 644 0', '8 1 600 0'], refused: ['9 2 644 0'] },
+    { why: 'where anyone may link any file', protect: 'return 1', taken: ['7 1 644 0', '6 1 4755 0'], refused: ['8 1 600 0', '5 1 640 0', '9 2 644 0'] },
+  ])('takes a file of root with one name $why, and only what everyone may read where anyone may link', async ({ protect, taken, refused }) => {
+    const s = stand();
+    const after = (facts: string) => facts.replace(/^(\S+) (\d+)/, (_, inode: string, links: string) => `${inode} ${Number(links) + 1}`);
+    const step = [
+      `hardlinks_protected() { ${protect}; }`,
+      ...taken.map(facts => `same_file '${facts}' '${after(facts)}' 1000 && printf 'taken: %s\\n' '${facts}'`),
+      ...refused.map(facts => `same_file '${facts}' '${after(facts)}' 1000 || printf 'refused: %s\\n' '${facts}'`),
+      'true',
+    ].join('\n');
+    const r = await runUpdaterStep(s, step);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out.split('\n').filter(Boolean).sort()).toEqual([...taken.map(facts => `taken: ${facts}`), ...refused.map(facts => `refused: ${facts}`)].sort());
+  });
+
   /* The second name is made on the file system of the shared folder itself. Where it cannot be made, as across file
      systems (EXDEV), or is not of the file that was looked at, or the file is nobody's it may be, nothing is read. */
   function tool(s: Stand, name: string, script: string) {
@@ -275,7 +295,7 @@ describe('what the updater reads in the folders it shares with the app and the k
     { why: 'a second name across file systems', name: 'ln', script: "printf 'ln: failed to create hard link: Invalid cross-device link\\n' >&2\nexit 1\n" },
     { why: 'a second name of another file', name: 'ln', script: 'last=\nfor a in "$@"; do last=$a; done\nexec /bin/ln -- "$STAND_IN" "$last"\n' },
     { why: 'an owner who is neither root nor the folder owner', name: 'stat', script: 'out=$(/usr/bin/stat "$@") || exit\ncase "$*" in *taken) printf \'%s 4242\\n\' "${out% *}" ;; *) printf \'%s\\n\' "$out" ;; esac\n' },
-    { why: 'no name more than it had', name: 'stat', script: 'out=$(/usr/bin/stat "$@") || exit\ncase "$*" in *taken) set -- $out; printf \'%s %s %s\\n\' "$1" "$(($2 - 1))" "$3" ;; *) printf \'%s\\n\' "$out" ;; esac\n' },
+    { why: 'no name more than it had', name: 'stat', script: 'out=$(/usr/bin/stat "$@") || exit\ncase "$*" in *taken) set -- $out; inode=$1 links=$2; shift 2; printf \'%s %s %s\\n\' "$inode" "$((links - 1))" "$*" ;; *) printf \'%s\\n\' "$out" ;; esac\n' },
   ])('reads nothing by $why', async ({ name, script }) => {
     const s = stand();
     const other = join(s.control, 'other.json');
