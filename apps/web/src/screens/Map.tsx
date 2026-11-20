@@ -637,6 +637,14 @@ function useMapRoom(box: { current: HTMLDivElement | null }, bars: string): CSSP
 /* Where the map stands in the free room of its canvas, b its bounds in the world: whole, as large as it fits up to 115%,
    when Show everything asks for it or when it fits so at a readable size; otherwise readable and centred across on the
    middle of the company, the hub, from its top when it is taller than the room. */
+export function mapView(room: Box, b: Box, whole: boolean): { k: number; x: number; y: number } {
+  const w = Math.max(1, room.x1 - room.x0), h = Math.max(1, room.y1 - room.y0), bw = b.x1 - b.x0, bh = b.y1 - b.y0;
+  const fitK = Math.min(w / bw, h / bh, 1.15);
+  const k = whole ? fitK : Math.max(fitK, MAP_READABLE_K);
+  const y = bh * k <= h + 0.5 ? room.y0 + (h - bh * k) / 2 - b.y0 * k : room.y0 - b.y0 * k;
+  return { k, x: room.x0 + (w - bw * k) / 2 - b.x0 * k, y };
+}
+
 /* One load of the map: the company and the person's arrangement. ready: the company, once both came, for what the map
    draws, measures and places; null before. An arrangement that fails to come leaves the map as it places itself; only one
    still on its way holds the map. */
@@ -653,14 +661,6 @@ function mapStandIn(t: Messages, failure: unknown, load: Load, onHome?: () => vo
   if (load.phase !== 'done') return <div className="map map-wait" aria-busy={load.phase !== 'failed'}><LoadState load={load} /></div>;
   if (failure !== null) return <p className="alert" role="alert">{errorText(t, failure)}</p>;
   return null;
-}
-
-export function mapView(room: Box, b: Box, whole: boolean): { k: number; x: number; y: number } {
-  const w = Math.max(1, room.x1 - room.x0), h = Math.max(1, room.y1 - room.y0), bw = b.x1 - b.x0, bh = b.y1 - b.y0;
-  const fitK = Math.min(w / bw, h / bh, 1.15);
-  const k = whole ? fitK : Math.max(fitK, MAP_READABLE_K);
-  const y = bh * k <= h + 0.5 ? room.y0 + (h - bh * k) / 2 - b.y0 * k : room.y0 - b.y0 * k;
-  return { k, x: room.x0 + (w - bw * k) / 2 - b.x0 * k, y };
 }
 
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
