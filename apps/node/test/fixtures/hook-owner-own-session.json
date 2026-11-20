@@ -1,0 +1,16 @@
+{
+  "origin": "Synthetic Linux proc sample in the shape a live node showed on 20.11.2026: Claude Code starts each hook as /bin/sh -c in a session of its own with no terminal; pids, names and numbers are made up",
+  "inode": "9101",
+  "panes": { "own": [100], "other": [200] },
+  "stats": [
+    "1 (init) S 0 1 1 0 -1 4194560 100 0 0 0",
+    "100 (claude) S 1 100 100 34817 100 4194560 100 0 0 0",
+    "121 (sh) S 100 121 121 0 -1 4194560 100 0 0 0",
+    "122 (node) S 121 121 121 0 -1 4194560 100 0 0 0",
+    "131 (node) S 100 131 131 0 -1 4194560 100 0 0 0",
+    "141 (node) S 1 140 140 0 -1 4194560 100 0 0 0",
+    "200 (claude) S 1 200 200 34818 200 4194560 100 0 0 0",
+    "211 (node) S 200 211 211 0 -1 4194560 100 0 0 0",
+    "300 (node) S 1 300 300 0 -1 4194560 100 0 0 0"
+  ]
+}

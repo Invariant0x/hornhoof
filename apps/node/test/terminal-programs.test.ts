@@ -98,13 +98,17 @@ describe('Claude Code in a terminal', () => {
     expect(command).toContain('--strict-mcp-config');
     expect(arg(command, '--mcp-config')).toBe('/w/a1/.hh-mcp.json');
     const settings = JSON.parse(arg(command, '--settings')!);
-    expect(settings.hooks.Stop[0].hooks[0].command).toBe('hh-hook stop');
-    expect(settings.hooks.StopFailure).toEqual([{ hooks: [{ type: 'command', command: 'hh-hook stop' }] }]);
-    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('hh-hook prompt');
-    expect(settings.hooks.SessionStart[0].hooks[0].command).toBe('hh-hook start');
+    /* Claude Code runs each command in a shell of its own and ends that shell when it gives up on it: exec makes the shell
+       the hook, so the hook ends with it instead of calling the bridge as an orphan no pane holds. */
+    expect(settings.hooks.Stop[0].hooks[0].command).toBe('exec hh-hook stop');
+    expect(settings.hooks.StopFailure).toEqual([{ hooks: [{ type: 'command', command: 'exec hh-hook stop' }] }]);
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('exec hh-hook prompt');
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toBe('exec hh-hook start');
     /* After compacting its conversation it hears to read the company again. */
-    expect(settings.hooks.SessionStart[1]).toEqual({ matcher: 'compact', hooks: [{ type: 'command', command: 'hh-hook compact' }] });
-    expect(settings.statusLine).toEqual({ type: 'command', command: 'hh-hook status' });
+    expect(settings.hooks.SessionStart[1]).toEqual({ matcher: 'compact', hooks: [{ type: 'command', command: 'exec hh-hook compact' }] });
+    expect(settings.statusLine).toEqual({ type: 'command', command: 'exec hh-hook status' });
+    const commands = [...Object.values(settings.hooks as Record<string, { hooks: { command: string }[] }[]>).flat().flatMap(entry => entry.hooks.map(h => h.command)), settings.statusLine.command];
+    expect(commands.filter(c => !/^exec hh-hook [a-z]+$/.test(c))).toEqual([]);
     expect(arg(command, '--append-system-prompt-file')).toBe('/w/a1/.hh-instructions.md');
     expect(arg(command, '--model')).toBe('opus');
     expect(env).toMatchObject({ CLAUDE_CONFIG_DIR: '/h', HH_BRIDGE: URLS.hookUrl, HH_ATTACH_URL: URLS.attachUrl, COLORTERM: 'truecolor' });
@@ -134,7 +138,7 @@ describe('Claude Code in a terminal', () => {
       const { command } = claudeProgram.launch({ bin: 'claude', home: '/h', workDir: '/w', sessionId, model: null, instructionsFile: null, urls: URLS });
       expect(command).not.toContain('--plugin-dir');
       const { hooks } = JSON.parse(arg(command, '--settings')!) as { hooks: Record<string, { hooks: { command: string }[] }[]> };
-      for (const command of Object.values(hooks).flat().flatMap(entry => entry.hooks.map(h => h.command))) expect(command).toMatch(/^hh-hook [a-z]+$/);
+      for (const command of Object.values(hooks).flat().flatMap(entry => entry.hooks.map(h => h.command))) expect(command).toMatch(/^exec hh-hook [a-z]+$/);
     }
   });
 
@@ -443,7 +447,7 @@ describe('lifecycle hooks in launch settings', () => {
   it('configures Claude tool, permission and session ends', () => {
     const settings = JSON.parse(arg(claudeProgram.launch(launch).command, '--settings')!);
     for (const [name, event] of Object.entries({ PreToolUse: 'tool', PostToolUse: 'tooldone', PostToolUseFailure: 'toolfail', PermissionRequest: 'ask', SessionEnd: 'end' })) {
-      expect(settings.hooks[name]).toEqual([{ hooks: [{ type: 'command', command: `hh-hook ${event}` }] }]);
+      expect(settings.hooks[name]).toEqual([{ hooks: [{ type: 'command', command: `exec hh-hook ${event}` }] }]);
     }
   });
   it('configures exactly the five Codex hooks with inline TOML and bypasses hook trust', () => {
