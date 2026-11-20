@@ -1905,6 +1905,7 @@ export const en = {
       checker: (task: number, commit: string) => `#${task}: a checker of ${commit} is switched off, removed or its own author, or did not pass it.`,
       taskUnread: (task: number) => `Hornhoof could not read every commit of #${task}.`,
       unpinned: (task: number) => `#${task} was closed before such work named the commit its employee checked, so none of its commits counts as checked.`,
+      unstarted: (task: number) => `#${task}: there is no record of where this work started, so none of its commits counts as checked.`,
       merge: (commit: string) => `${commit} is a merge made outside every checked change.`,
       commit: (commit: string) => `${commit} came in without any check.`,
     },
