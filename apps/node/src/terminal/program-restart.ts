@@ -79,10 +79,19 @@ export function claudeWordReceipt(line: Record<string, unknown>, enqueued: strin
    the user too, but as its result, and what Claude itself says is its own. Only these words, exactly, are these words;
    space around them is no part of them. */
 export function claudeTook(line: Record<string, unknown>, words: string): boolean {
-  if (line.type !== 'user' || line.isMeta === true || !isRecord(line.message) || line.message.role !== 'user') return false;
-  const content = line.message.content;
-  const parts: unknown[] = typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : [];
-  return parts.length > 0 && parts.every(part => isRecord(part) && part.type === 'text') && contentText(content) === words.trim();
+  const message = userMessage(line);
+  return message !== null && onlyText(message.content) && contentText(message.content) === words.trim();
+}
+
+/* The message of an entry the user wrote, never a note Claude adds of its own. */
+function userMessage(line: Record<string, unknown>): Record<string, unknown> | null {
+  if (line.type !== 'user' || line.isMeta === true || !isRecord(line.message)) return null;
+  return line.message.role === 'user' ? line.message : null;
+}
+
+function onlyText(content: unknown): boolean {
+  if (typeof content === 'string') return true;
+  return Array.isArray(content) && content.length > 0 && content.every(part => isRecord(part) && part.type === 'text');
 }
 
 /* Keys are not receipts. Keep each live message until the program takes it, including across a restart. */
