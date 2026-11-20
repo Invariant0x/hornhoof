@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType, type CSSProperties, type RefObject } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, useT } from '../i18n';
 import { notOpened, useOrg } from '../org';
@@ -9,6 +9,7 @@ import { Idents } from '../ui/Idents';
 import { FirstContact } from '../ui/FirstContact';
 import { RecoveryBanner } from '../ui/RecoveryBanner';
 import { SwitchBanner } from '../ui/SwitchBanner';
+import { ShellTop, useMeasuredShellTop } from '../ui/shellBars';
 import { LoadFailure, UpdateSaysIt, useLoadFailure } from '../ui/LoadFailure';
 import { UpdateBanner } from '../ui/UpdateBanner';
 import { UpdateCut } from '../ui/UpdateCut';
@@ -389,6 +390,9 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   /* How wide a department's name stands beside the logo, which the tabs leave room for. */
   const [crumbs, setCrumbs] = useState(0);
   const fit = useTabsFit(`${TABS.map(id => t.shell.tabs[id]).join('|')}|${decisions.waiting}`, crumbs);
+  /* Where the room under the bars of the shell starts, which the map and an open department start what they show at. */
+  const page = useRef<HTMLElement>(null);
+  const shellTop = useMeasuredShellTop(page);
 
   useEffect(() => {
     if (!menu) return;
@@ -421,6 +425,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   return (
     <AgentWindowContext value={openAgent}>
     <UpdateSaysIt value={updateSaysIt}>
+    <ShellTop value={shellTop}>
     <div className="shell">
       <header className="topbar" ref={fit.bar}>
         <div className="tb-brand glass" ref={fit.brand}>
@@ -431,8 +436,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} inbox={inbox} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} onContact={() => setContact(true)} toDecide={toDecide} account={account} accountButton={accountButton} side={fit.side} />
       </header>
       {/* The bars of the shell stand first in the page, each in its own row under the header, and what the page shows
-          comes after them. */}
-      <main className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}${tab === 'tasks' ? ' tracker-page' : ''}`}>
+          comes after them. On the map they float over it and an open department, which start under them. */}
+      <main ref={page} style={shellTop === null ? undefined : ({ '--shell-top': `${shellTop}px` } as CSSProperties)} className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}${tab === 'tasks' ? ' tracker-page' : ''}`}>
         <SwitchBanner>
           {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} onProgressShown={setUpdateSaysIt} />}
           <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount({ kind: 'settings', group: 'company' })} />
@@ -507,6 +512,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
       <AccountDialog route={!accountDialog || (!company && accountDialog === 'versions') ? null : route} me={currentMe} updates={updates} inbox={inbox} onHome={goHome} onRenamed={setSelfName} onGroup={group => switchOverlay(group ? { kind: 'settings', group } : { kind: 'settings' })} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
       {company && updates.cut && <UpdateCut cut={updates.cut} updates={updates} />}
     </div>
+    </ShellTop>
     </UpdateSaysIt>
     </AgentWindowContext>
   );

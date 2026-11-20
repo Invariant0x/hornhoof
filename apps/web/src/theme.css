@@ -591,15 +591,9 @@ select:disabled { opacity: .55; }
 .body > .update-banner { margin-inline: auto; max-inline-size: calc(100% - 2 * var(--bar-edge)); overflow-wrap: anywhere; }
 .body > .guard-stop { position: relative; z-index: 9; }
 .body.page > :is(.update-banner, .alert, .guard-stop) { z-index: auto; }
-/* On the map, the canvas fills the room after any shell bars. Without a bar it still reaches behind the header. An open
-   department takes that room alone: the map it flew in from keeps its size and view out of the row, and shows nowhere,
-   not even behind the header and the bars. */
-.body:not(.page):has(> :is(.update-banner, .alert, .guard-stop)) { display: flex; flex-direction: column; }
-.body:not(.page)::before, .body:not(.page) > :is(.update-banner, .alert, .guard-stop) { flex: none; }
-.body:not(.page):has(> :is(.update-banner, .alert, .guard-stop)) > :is(.map:not([inert]), .dview) {
-  position: relative; inset: auto; flex: 1; min-block-size: var(--bar-size);
-}
-.body:not(.page):has(> :is(.update-banner, .alert, .guard-stop)) > .map[inert] { visibility: hidden; }
+/* On the map the canvas and an open department fill the window from its top, and the header and the bars of the shell float
+   over them (#1639): what they show starts under the last bar, at --shell-top as the shell measures it while a bar stands.
+   An open department covers the map it flew in from, which keeps its size and view behind it. */
 
 /* Map */
 .map { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -638,6 +632,9 @@ select:disabled { opacity: .55; }
 .pt { pointer-events: none; }
 .pt.k { fill: var(--ink); }
 .halo { border-radius: 50%; background: radial-gradient(circle, var(--glow), transparent 68%); pointer-events: none; }
+/* The hub's glow stands where the map puts it, left and top from the world's corner, in either direction: the inset of a
+   button's halo would pull it to the world's right edge right to left (#1639). */
+.world > .halo { inset: auto; }
 .chips { left: 0; top: 0; margin: 0; padding: 0; list-style: none; }
 .chips > li { position: absolute; }
 .chips li > .edge { height: 100%; }
@@ -1498,8 +1495,9 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 .pchip .pn span { font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
 .dv-empty { position: absolute; left: 50%; bottom: var(--tree-bottom, 76px); transform: translateX(-50%); margin: 0; padding: 10px 16px; font-size: 13px; color: var(--muted); }
 /* The department's name next to the logo, its actions bottom right and the drawer they open at the left. A name too long
-   for its room wraps its words, and the tree and the drawers start under it, as the department measures it. */
-.crumbs { position: absolute; z-index: 3; top: 12px; inset-inline-start: 68px; display: flex; align-items: flex-start; gap: 8px; height: auto; max-width: calc(50% - var(--tabs-half, 204px) - 76px); min-width: 0; }
+   for its room wraps its words, and the tree and the drawers start under it, as the department measures it. While a bar of
+   the shell stands, the name stands under the bars (#1639). */
+.crumbs { position: absolute; z-index: 3; top: var(--shell-top, 12px); inset-inline-start: 68px; display: flex; align-items: flex-start; gap: 8px; height: auto; max-width: calc(50% - var(--tabs-half, 204px) - 76px); min-width: 0; }
 .crumbs h2 { min-width: 0; white-space: normal; overflow-wrap: break-word; font-size: 15px; color: var(--cyan-ink); }
 .crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; height: auto; min-height: 44px; box-sizing: border-box; min-width: 0; padding: 8px 14px; color: var(--ink); }
 .dv-acts { position: absolute; z-index: 3; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px; }
@@ -1839,9 +1837,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .t-card.staff > .form-foot { margin-block-start: 10px; }
 
 @media (max-width: 760px) {
-  /* The name of the department stands under the top bar and wraps its words; the tree and the drawers start under it, as the
-     department measures it. */
-  .crumbs { top: 64px; inset-inline-start: 16px; max-width: calc(100% - 32px); }
+  /* The name of the department stands under the top bar, or under the bars of the shell while one stands, and wraps its
+     words; the tree and the drawers start under it, as the department measures it. */
+  .crumbs { top: var(--shell-top, 64px); inset-inline-start: 16px; max-width: calc(100% - 32px); }
   .dv-acts { flex-wrap: wrap; }
   /* The hint of an empty map stands whole above the dock, which may grow to several rows: across the width, 16px above
      its top as the map measures it. */

@@ -25,6 +25,7 @@ import { OneShotMarks } from '../ui/TaskWorkflow';
 import { stageName } from '../ui/stage-name';
 import { TreeView } from './TreeView';
 import { useOpenAgent } from './AgentWindowContext';
+import { useShellTop } from '../ui/shellBars';
 import { SpeedPanel } from './SpeedPanel';
 import { arrowD, CH, FW, HH, HW, PH, PW, leadsStage, schemaLayout, stepPaths, type Frame, type Line, type Schema, type Sizes } from './schema';
 import { takeEscape } from '../ui/escape';
@@ -341,6 +342,8 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
   const [icons, setIcons] = useState(false);
   const need = useRef<{ words: string; px: number } | null>(null);
   const words = `${language}|${tools}`;
+  /* While a bar of the shell stands, the name stands under the bars rather than beside the logo. */
+  const shellTop = useShellTop();
   useLayoutEffect(() => {
     const el = root.current, acts = actions.current;
     if (!el || !acts) return;
@@ -366,7 +369,7 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
       const top = phone ? (name?.offsetHeight ? name.offsetTop + name.offsetHeight + 8 : 116)
         : Math.max(68, name?.offsetHeight ? name.offsetTop + name.offsetHeight + 12 : 0);
       setSpace({ right, bottom, top, tickerHidden: !phone && width - right - ZOOM_ROOM < 220 });
-      onCrumbs?.(phone || !name ? 0 : name.offsetWidth + (title ? oneLineOverflow(title) : 0));
+      onCrumbs?.(phone || !name || shellTop !== null ? 0 : name.offsetWidth + (title ? oneLineOverflow(title) : 0));
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
@@ -379,7 +382,7 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
     if (line) observer.observe(line);
     if (crumbs.current) observer.observe(crumbs.current);
     return () => observer.disconnect();
-  }, [panel, icons, words, onCrumbs, tickerHidden]);
+  }, [panel, icons, words, onCrumbs, tickerHidden, shellTop]);
   useEffect(() => () => onCrumbs?.(0), [onCrumbs]);
   const style = { '--ticker-right': `${space.right}px`, '--tree-bottom': `${space.bottom}px`, '--tree-top': `${space.top}px` } as CSSProperties;
   return { root, dock, actions, crumbs, style, icons, tickerHidden: space.tickerHidden, fitBottom };

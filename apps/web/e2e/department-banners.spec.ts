@@ -10,9 +10,9 @@ import { serveApi } from './api';
 /* A department opened from the map while a bar of the shell hangs over the map, as everyone saw it on 0.39.1: after each
    update until its OK is pressed, in a new company until its recovery file is saved, while a newer build waits, and when
    the company's reload fails. The map flew into the department's card and stayed in the upper half at that zoom, and the
-   department took the lower half. The department takes the whole room under the bars, as with no bar, and no map shows
-   beside it; back on the map, the map is where and as large as the person left it. Each look is a width and a skin: the
-   default one, and one more. */
+   department took the lower half. The department takes the whole window, as with no bar, with the header and the bars
+   floating over it and what it shows starting under them (#1639), and no map shows beside it; back on the map, the map is
+   where and as large as the person left it. Each look is a width and a skin: the default one, and one more. */
 test.describe.configure({ timeout: 120_000 });
 
 const WIDTHS = [1440, 375];
@@ -32,6 +32,14 @@ const BARS: { name: string; before: boolean; serve: (page: Page) => Promise<(() 
   {
     name: 'the update that ended', before: true,
     serve: async page => { await page.route('**/api/updates', route => route.fulfill({ json: { ...quiet(), updater: { present: true, status: { id: 'u39', version: '0.39.1', commit: CURRENT.commit, state: 'done', step: 'finished', log: '', at: '2026-11-19T19:00:00.000Z' }, waiting: null, calledOff: null } } satisfies UpdatesView })); },
+  },
+  {
+    /* An update that waits for the agents of the nodes to finish their turns, with the way to call it off (#1594). */
+    name: 'an update waiting for the agents', before: true,
+    serve: async page => {
+      const waiting = { version: '0.39.4', commit: 'd'.repeat(40), since: '2026-11-20T02:00:00.000Z', until: '2026-11-20T02:30:00.000Z', turns: [{ agent: 'Ada', task: 12 }], lost: [] };
+      await page.route('**/api/updates', route => route.fulfill({ json: { ...quiet(), updater: { present: true, status: null, waiting, calledOff: null } } satisfies UpdatesView }));
+    },
   },
   {
     name: 'a newer build', before: true,
@@ -61,6 +69,34 @@ const room = (page: Page) => page.evaluate(() => {
   const top = Math.max(body.top, ...bars.map(bar => bar.getBoundingClientRect().bottom + parseFloat(getComputedStyle(bar).marginBlockEnd || '0')));
   return { top, bottom: body.bottom, bars: bars.length };
 });
+/* What a click inside the room under the header and the bars reaches, across the whole width. */
+const roomBox = (b: Box, under: { top: number; bottom: number }): Box => ({ x: b.x, y: under.top, width: b.width, height: under.bottom - under.top });
+/* Every part of what the selector finds that shows in the window, clipped as the boxes around it clip it, and lies under the
+   header's blocks or a bar of the shell: a word there could not be read. */
+const underBars = (page: Page, selector: string) => page.evaluate(sel => {
+  const over = [...document.querySelectorAll('main.body > :is(.update-banner, .alert, .guard-stop), .topbar > *')]
+    .map(el => ({ el, r: el.getBoundingClientRect() })).filter(({ r }) => r.width && r.height);
+  const seen: string[] = [];
+  for (const el of document.querySelectorAll<HTMLElement>(sel)) {
+    const r = el.getBoundingClientRect();
+    let [left, top, right, bottom] = [Math.max(r.left, 0), Math.max(r.top, 0), Math.min(r.right, innerWidth), Math.min(r.bottom, innerHeight)];
+    for (let up = el.parentElement; up; up = up.parentElement) {
+      const style = getComputedStyle(up);
+      if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
+      const c = up.getBoundingClientRect();
+      [left, top, right, bottom] = [Math.max(left, c.left), Math.max(top, c.top), Math.min(right, c.right), Math.min(bottom, c.bottom)];
+    }
+    if (right - left < 1 || bottom - top < 1) continue;
+    for (const { el: bar, r: b } of over) {
+      if (left < b.right - 0.5 && right > b.left + 0.5 && top < b.bottom - 0.5 && bottom > b.top + 0.5)
+        seen.push(`${el.className.toString().split(' ')[0]} "${(el.textContent ?? '').trim().slice(0, 24)}" at ${Math.round(top)}–${Math.round(bottom)} under ${bar.className.toString().split(' ')[0]} at ${Math.round(b.top)}–${Math.round(b.bottom)}`);
+    }
+  }
+  return seen;
+}, selector);
+/* What the map and an open department show that a bar could hide. */
+const MAP_CONTENT = '.map:not([inert]) .world :is(.dept, .hub, .chip)';
+const DEPARTMENT_CONTENT = '.dview :is(.crumbs, .shead, .pchip, .llab)';
 const boxOf = async (page: Page, selector: string): Promise<Box> => {
   const found = await page.locator(selector).boundingBox();
   expect(found, `${selector} takes room on the page`).not.toBeNull();
@@ -134,7 +170,7 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const bar of BARS) {
     await page.mouse.wheel(0, -240);
     const left = await still(page);
     const mapBefore = await boxOf(page, '.map');
-    if (bar.before) expect(mapBefore.y, 'the map starts under the bar').toBeGreaterThanOrEqual((await room(page)).top - 0.5);
+    expect(mapBefore.y, 'the map starts at the top of the window, under the header and any bar').toBeLessThanOrEqual(0.5);
 
     arm?.();
     await card.click();
@@ -148,10 +184,13 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const bar of BARS) {
     const under = await room(page);
     const department = await boxOf(page, '.dview');
     expect(under.bars, 'a bar shows over the department').toBeGreaterThan(0);
-    expect(Math.abs(department.y - under.top), `the department starts right under the bars at ${under.top}, not at ${department.y}`).toBeLessThanOrEqual(1);
+    expect(department.y, 'the department starts at the top of the window, under the header and the bars').toBeLessThanOrEqual(0.5);
     expect(Math.abs(department.y + department.height - under.bottom), `the department reaches the bottom of the page at ${under.bottom}`).toBeLessThanOrEqual(1);
     expect(department.width).toBeGreaterThanOrEqual(width - 1);
-    expect(await reached(page, department), 'only the department shows in its room, no map beside it').toEqual(Array(25).fill('department'));
+    expect(await reached(page, roomBox(department, under)), 'only the department shows in the room under the bars, no map beside it').toEqual(Array(25).fill('department'));
+    const plate = await boxOf(page, '.dview .crumbs');
+    expect(plate.y, `the department's name starts under the bars at ${under.top}, not at ${plate.y}`).toBeGreaterThanOrEqual(under.top - 0.5);
+    expect(await underBars(page, DEPARTMENT_CONTENT), 'nothing the department shows lies under the bars').toEqual([]);
     expect(await mapOutside(page), 'no part of the map shows outside the department, behind the header or the bars either').toBe(false);
 
     await back.click();
@@ -217,10 +256,65 @@ for (const width of WIDTHS) for (const dir of DIRS) for (const bar of [NO_BAR, .
     /* Every word of the head card shows: what a click at the middle of "No head yet." reaches is the head card. */
     const words = await boxOf(page, '.dview .shead .hn');
     expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('.shead'), { x: words.x + words.width / 2, y: words.y + words.height / 2 }), '"No head yet." is not under anything').toBe(true);
+    expect(await underBars(page, DEPARTMENT_CONTENT), 'nothing the department shows lies under the header or the bars').toEqual([]);
     /* The name stands at the start of the line: the left in ltr, the right in rtl, as far from that edge in both. */
     const start = await page.locator('.dview .crumbs').evaluate(e => parseFloat(getComputedStyle(e).insetInlineStart));
     const fromStart = dir === 'rtl' ? width - (plate.x + plate.width) : plate.x;
     expect(Math.abs(fromStart - start), `the name plate stands ${start} px from the ${dir === 'rtl' ? 'right' : 'left'} edge, not ${fromStart}`).toBeLessThanOrEqual(1);
+    expect(errors).toEqual([]);
+  });
+}
+
+/* Ivan's word on 0.39.2 and 0.39.3, for #1639: a bar of the shell took a row of its own and moved the map down under it, so
+   the header stood apart from the map. The map's dots and lines reach the top of the window, the header and the bars float
+   over them, nothing the map shows lies under them, and the map opens with its hub in the middle across of the room under
+   them (#1597). Each look is a width, a direction, a skin and a bar: an update that ended, one that waits for the agents,
+   and none. */
+const FLOATING = [NO_BAR, ...BARS.filter(bar => bar.name === 'the update that ended' || bar.name === 'an update waiting for the agents')];
+for (const width of WIDTHS) for (const dir of DIRS) for (const skin of SKINS) for (const bar of FLOATING) {
+  test(`the map runs under the header and ${bar.name} to the top of the window, its hub in the middle of the room under them, ${width}px ${dir} ${skin}`, async ({ page }, info) => {
+    const errors: string[] = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.setViewportSize({ width, height: HEIGHT });
+    await page.addInitScript(({ skin, dir }) => {
+      localStorage.setItem('hh-lang', 'en');
+      localStorage.setItem('hh-theme', skin);
+      document.addEventListener('DOMContentLoaded', () => { document.documentElement.dir = dir; });
+    }, { skin, dir });
+    await serveApi(page);
+    await bar.serve(page);
+    await page.goto('/');
+    await expect(page.locator('.dept', { hasText: 'Development' })).toBeVisible();
+    if (bar === NO_BAR) await expect(page.locator('main.body > :is(.update-banner, .alert, .guard-stop)')).toHaveCount(0);
+    else await expect(page.locator('main.body > .update-banner')).toBeVisible();
+    await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+    await still(page);
+    shot(await page.screenshot({ animations: 'disabled' }), `map-${info.project.name}-${width}-${dir}-${skin}-${bar.name.replace(/[^a-z]+/gi, '-').replace(/^-|-$/g, '')}`);
+
+    const map = await boxOf(page, '.map'), under = await room(page);
+    expect(map.y, 'the map starts at the top of the window, under the header and any bar').toBeLessThanOrEqual(0.5);
+    expect(Math.abs(map.y + map.height - under.bottom), `the map reaches the bottom of the page at ${under.bottom}`).toBeLessThanOrEqual(1);
+    expect(await underBars(page, MAP_CONTENT), 'nothing the map shows lies under the header or the bars').toEqual([]);
+    /* The room the map opens in starts under the header, or under the bars and the gap after them while one stands. */
+    const header = await boxOf(page, '.topbar');
+    const top = bar === NO_BAR ? header.y + header.height + 8 : under.top;
+    const hub = await boxOf(page, '.map .hub-art:not(.hub-spin)'), glow = await boxOf(page, '.map .world > .halo');
+    expect(Math.abs(glow.x + glow.width / 2 - (hub.x + hub.width / 2)), "the hub's glow stands around the hub, in either direction").toBeLessThanOrEqual(1);
+    expect(hub.y, `the hub starts in the room under the header and the bars, at ${top} or lower`).toBeGreaterThanOrEqual(top - 0.5);
+    /* By Design's rule on #1597 a phone's map, which never fits whole at a readable size, opens with its hub in the middle
+       across; a wide screen's fits, and opens whole in the room with the middle of all of it there: the hub's glow, its
+       cards and its people. */
+    const layout = await page.evaluate(() => {
+      const boxes = (selector: string) => [...document.querySelectorAll(selector)].map(el => el.getBoundingClientRect());
+      const glow = boxes('.map .world > .halo'), blocks = boxes('.map .world :is(.dept, .hub, .chips, .dept-chips)'), across = [...glow, ...blocks];
+      return { x0: Math.min(...across.map(r => r.left)), x1: Math.max(...across.map(r => r.right)), y0: Math.min(...blocks.map(r => r.top)), y1: Math.max(...blocks.map(r => r.bottom)) };
+    });
+    const across = width <= 760 ? hub.x + hub.width / 2 : (layout.x0 + layout.x1) / 2;
+    expect(Math.abs(across - width / 2), `the map stands in the middle across of the room, ${(across - width / 2).toFixed(1)} px off`).toBeLessThanOrEqual(1);
+    if (width > 760) {
+      expect(layout.y0, `the whole map starts in the room under the bars, at ${top} or lower`).toBeGreaterThanOrEqual(top - 0.5);
+      expect(layout.y1, `the whole map ends in the room, above ${under.bottom}`).toBeLessThanOrEqual(under.bottom);
+    }
     expect(errors).toEqual([]);
   });
 }
