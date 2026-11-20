@@ -42,8 +42,8 @@ const words = (lang: Lang) => (lang === 'en' ? en : ru);
 type Words = ReturnType<typeof words>;
 
 /* A screen whose data the test holds back: where it opens, which answer is held, the blocks it shows before that answer,
-   the place of its held room, and what the answer brings. busy: the words beside its ring; live: they are the screen's one
-   status; cancels: the screen stops its ask when it gives it up. */
+   the place of its held room, and what the answer brings. busy: the words beside its ring; form: where it stands; live:
+   they are the screen's one status; cancels: the screen stops its ask when it gives it up. */
 type Screen = {
   name: string;
   held: string;
@@ -53,6 +53,8 @@ type Screen = {
   place(page: Page): Locator;
   arrived(page: Page, lang: Lang): Locator;
   busy?: (t: Words) => string;
+  /* screen: its ring stands in the middle of a whole screen's body, under the static mark, with its words under it. */
+  form?: 'screen';
   live?: boolean;
   cancels?: boolean;
   /* What else the screen reads, as the server answers it. */
@@ -190,6 +192,13 @@ async function expectBeside(mark: Locator, words: Locator) {
   expect(m.y + m.height / 2).toBeLessThan(w.y + w.height);
 }
 
+/* On a whole screen the ring stands over its words, across their middle. */
+async function expectAbove(mark: Locator, words: Locator) {
+  const [m, w] = await boxesOf([mark, words]);
+  expect(m.y + m.height).toBeLessThanOrEqual(w.y);
+  expect(Math.abs(m.x + m.width / 2 - (w.x + w.width / 2))).toBeLessThanOrEqual(1);
+}
+
 /* Each box within half a pixel of the other. */
 function expectSameBoxes(after: { x: number; y: number; width: number; height: number }[], before: typeof after) {
   expect(after).toHaveLength(before.length);
@@ -200,7 +209,8 @@ function expectSameBoxes(after: { x: number; y: number; width: number; height: n
 
 const EN: Look = { lang: 'en', theme: 'cyberpunk', width: 1440 };
 const busyWords = (screen: Screen, t: Words) => screen.busy?.(t) ?? t.common.loading;
-const busyOf = (screen: Screen, page: Page) => screen.place(page).locator('.load-busy').first();
+const BUSY = '.load-busy, .load-boot';
+const busyOf = (screen: Screen, page: Page) => screen.place(page).locator(screen.form === 'screen' ? '.load-boot' : '.load-busy').first();
 const roomOf = (screen: Screen, page: Page) => screen.place(page).locator('.load-hold').first();
 
 for (const screen of SCREENS) {
@@ -220,7 +230,8 @@ for (const screen of SCREENS) {
       await page.clock.runFor(1);
       await expect(busy).not.toHaveClass(/unseen/);
       await expect(busy.locator('.spinner')).toBeVisible();
-      await expectBeside(busy.locator('.spinner'), busy.getByText(busyWords(screen, t), { exact: true }));
+      if (screen.form === 'screen') await expectAbove(busy.locator('.spinner'), busy.getByText(busyWords(screen, t), { exact: true }));
+      else await expectBeside(busy.locator('.spinner'), busy.getByText(busyWords(screen, t), { exact: true }));
       await expect(roomOf(screen, page)).toHaveAttribute('aria-busy', 'true');
       await expect(screen.arrived(page, 'en')).toHaveCount(0);
       const answered = hold.answered();
@@ -232,7 +243,7 @@ for (const screen of SCREENS) {
       await expect(screen.arrived(page, 'en')).toHaveCount(0);
       await page.clock.runFor(2);
       await expect(screen.arrived(page, 'en')).toBeVisible();
-      await expect(screen.place(page).locator('.load-busy')).toHaveCount(0);
+      await expect(screen.place(page).locator(BUSY)).toHaveCount(0);
       expectSameBoxes(await boxesOf(screen.shown(page, 'en')), before);
     });
 
@@ -242,7 +253,7 @@ for (const screen of SCREENS) {
       hold.release();
       await answered;
       await expect(screen.arrived(page, 'en')).toBeVisible();
-      await expect(screen.place(page).locator('.load-busy:not(.unseen)')).toHaveCount(0);
+      await expect(screen.place(page).locator('.load-busy:not(.unseen), .load-boot:not(.unseen)')).toHaveCount(0);
     });
 
     test('says at 10 s that it takes longer than usual with the ring still turning, gives the ask up at 30 s and says why, and Retry asks again with the ring at once, the focus in the room', async ({ page }) => {
@@ -292,7 +303,7 @@ for (const screen of SCREENS) {
       const failed = screen.place(page).getByRole('alert');
       await expect(failed.locator('.lf-t')).toHaveText(t.load.failed.server);
       await expect(failed.locator('.lf-h')).toHaveText(t.load.hint.server);
-      await expect(screen.place(page).locator('.load-busy:not(.unseen)')).toHaveCount(0);
+      await expect(screen.place(page).locator('.load-busy:not(.unseen), .load-boot:not(.unseen)')).toHaveCount(0);
       const asked = hold.asked();
       hold.failing(false);
       await failed.getByRole('button', { name: t.common.retry, exact: true }).click();

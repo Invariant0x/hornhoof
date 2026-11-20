@@ -148,11 +148,12 @@ export function useLoad(parts: LoadPart[]): Load {
 }
 
 /* What failed and what to do, each one whole sentence: the load given up at 30 s, no connection, an error answer that names
-   its own reason, or any other error answer. */
+   its own reason, as a refusal while Hornhoof installs an update does, or any other error answer. */
 export function failWords(t: Messages, failure: unknown): [string, string] {
   const words = t.load;
   if (failure === TIMED_OUT) return [words.failed.timeout, words.hint.timeout];
   if (failure instanceof ApiFailure && failure.status === 0) return [words.failed.offline, words.hint.offline];
+  if (failure instanceof ApiFailure && failure.reason === 'maintenance') return [errorText(t, failure), words.hint.server];
   if (failure instanceof ApiFailure && failure.status < 500 && failure.code !== 'internal') return [errorText(t, failure), words.hint.server];
   return [words.failed.server, words.hint.server];
 }

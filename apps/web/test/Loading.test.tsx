@@ -156,6 +156,12 @@ describe('why a load failed', () => {
     expect(said(new ApiFailure(403, 'forbidden', 'You do not have access to this.'))).toEqual(['You do not have access to this.', en.load.hint.server]);
   });
 
+  /* #1620: the map, under no update panel, said a refusal for an update as something gone wrong on the server. */
+  it('says a refusal while Hornhoof installs an update in its own words, where no update panel says it', () => {
+    const refused = new ApiFailure(503, 'unavailable', 'Hornhoof is installing an update and takes no changes until it ends.', 'maintenance');
+    expect(said(refused)).toEqual([en.errors.maintenance, en.load.hint.server]);
+  });
+
   it('after Retry counts only a new failure while the part is asked again, and says nothing of a part that failed after it came', () => {
     const first = new Error('first');
     const failed = part(undefined, first);
