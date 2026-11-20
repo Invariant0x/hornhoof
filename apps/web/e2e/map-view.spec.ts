@@ -20,22 +20,19 @@ const settled = (page: Page) => page.evaluate(() => new Promise(done => requestA
 test.describe('the view of the company map', () => {
   test.use({ viewport: { width: 1440, height: 1000 } });
 
-  test('stays where the person zoomed and moved it while the company changes live, the arrangement comes and the window resizes, and after a reload', async ({ page }) => {
+  test('opens with the arrangement in place, and stays where the person zoomed and moved it while the company changes live and the window resizes, and after a reload', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
     page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
     let working = 0, streams = 0;
-    let goLive = () => {}, arrive = () => {};
-    const live = new Promise<void>(done => (goLive = done)), kept = new Promise<void>(done => (arrive = done));
+    let goLive = () => {};
+    const live = new Promise<void>(done => (goLive = done));
     await serveApi(page);
     await page.route('**/api/org', route => route.fulfill({ json: org(working) }));
     await page.route('**/api/version', route => route.fulfill({ json: { version: '0.18.8', commit: 'map-view' } }));
     await page.route('**/api/updates', route => route.fulfill({ json: { current: { version: '0.18.8', commit: 'map-view' }, available: false, latest: null, updater: { status: null, waiting: null } } }));
-    /* The arrangement this person keeps on the server comes only once they have moved the view. */
-    await page.route('**/api/map/layout', async route => {
-      await kept;
-      return route.fulfill({ json: { blocks: { [`dept:${DEV}`]: { x: 900, y: 900 } } } });
-    });
+    /* The arrangement this person keeps on the server. The map is drawn only once it came (#1620), so no block moves to it. */
+    await page.route('**/api/map/layout', route => route.fulfill({ json: { blocks: { [`dept:${DEV}`]: { x: 900, y: 900 } } } }));
     /* The first stream brings the news that three agents started work, once the person has moved the view; the next stays
        open with nothing to say. */
     await page.route('**/api/stream', async route => {
@@ -47,6 +44,9 @@ test.describe('the view of the company map', () => {
     });
     await page.goto('/');
     await expect(page.locator('.dept')).toHaveCount(2);
+    /* Development stands where the arrangement keeps it from the first frame the map is drawn. */
+    const development = page.locator('.dept', { hasText: 'Development' });
+    expect(await development.evaluate((e: HTMLElement) => [e.style.left, e.style.top])).toEqual(['900px', '900px']);
     /* The map shows all of itself as it first opens. */
     await expect.poll(() => view(page)).not.toBe('translate(0px, 0px) scale(1)');
     const first = await scale(page);
@@ -76,12 +76,6 @@ test.describe('the view of the company map', () => {
     /* Agents start work, and the map takes the company again; the view stays. */
     goLive();
     await expect(page.locator('.hub-num')).toHaveText('3/4');
-    await settled(page);
-    expect(await view(page)).toBe(mine);
-    /* The arrangement comes from the server; the block moves, the view stays. */
-    arrive();
-    const development = page.locator('.dept', { hasText: 'Development' });
-    await expect.poll(() => development.evaluate((e: HTMLElement) => [e.style.left, e.style.top])).toEqual(['900px', '900px']);
     await settled(page);
     expect(await view(page)).toBe(mine);
     /* The window gets narrower; the view stays. */

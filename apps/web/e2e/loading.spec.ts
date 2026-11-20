@@ -2,7 +2,8 @@ import { mkdirSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { CopiesView, MachineView, PersonView, SubView, WaitCard } from '../src/types';
+import type { CopiesView, DepartmentTree, EventView, MachineView, PersonView, SubView, WaitCard } from '../src/types';
+import { agentRoutes } from './agent-window-api';
 import { serveApi, TASKS } from './api';
 import { stretch } from './pseudo-text';
 
@@ -49,6 +50,26 @@ const LATE: WaitCard = { id: 'c1', about: 'late', taskId: null, number: null, ki
 type Lang = 'en' | 'ru';
 const words = (lang: Lang) => (lang === 'en' ? en : ru);
 type Words = ReturnType<typeof words>;
+
+/* The department's work tree of the running turn, with nobody's time in it yet: the tree and the speed drawer show it. */
+const TREE: DepartmentTree = {
+  now: '2026-11-19T23:00:00.000Z', turn: { id: 'u3', number: 3, branch: 'turn-3', startedAt: '2026-11-19T21:00:00.000Z' }, repository: true,
+  lines: [], time: [], idle: [],
+};
+/* Bruno of the department, who works on a plan of the CEO's, his card, and one line of his conversation. */
+const EMPLOYEE_ROUTES = agentRoutes({ awake: false, hasTask: false, messages: [], connections: 0 });
+const LINE: EventView = { seq: 1, kind: 'text', data: { text: 'The checkout form checks the card number before it sends it.' }, jobId: 'j1', person: null, at: '2026-11-19T22:00:00.000Z' };
+const AWAKE = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0, terminal: false, canType: true, turnRefused: null };
+
+const sections = (page: Page, lang: Lang) => page.getByRole('navigation', { name: words(lang).shell.sections, exact: true });
+const atPath = (path: string) => async (page: Page) => { await page.goto(path, { waitUntil: 'domcontentloaded' }); };
+/* The department opens at its own address; a button of its tools opens what the test holds. */
+const inDepartment = (button: (lang: Lang) => string) => async (page: Page, lang: Lang) => {
+  await page.goto(`/departments/${DEPARTMENT_ID}`, { waitUntil: 'domcontentloaded' });
+  await page.locator('.dv-tools').getByRole('button', { name: button(lang), exact: true }).click();
+};
+const backOf = (page: Page, lang: Lang) => page.locator('.crumbs').getByRole('button', { name: words(lang).dept.back, exact: true });
+const departmentShown = (page: Page, lang: Lang, button: string) => [sections(page, lang), page.locator('.crumb h2'), page.locator('.dv-tools').getByRole('button', { name: button, exact: true })];
 
 /* A screen whose data the test holds back: where it opens, which answer is held, the blocks it shows before that answer,
    the place of its held room, and what the answer brings. busy: the words beside its ring; form: where it stands; live:
@@ -144,6 +165,63 @@ const SCREENS: Screen[] = [
     shown: (page, lang) => [page.getByRole('navigation').first(), page.locator('h1.tr-where'), page.locator('section.waiting').getByRole('heading', { name: words(lang).tasks.waiting, exact: true })],
     place: page => page.locator('section.waiting'),
     arrived: page => page.locator('section.waiting .wait-card'),
+  },
+  {
+    name: 'map',
+    form: 'screen',
+    held: '/api/org',
+    open: atPath('/'),
+    answer: route => route.fallback(),
+    shown: (page, lang) => [sections(page, lang)],
+    place: page => page.locator('.map'),
+    arrived: (page, lang) => page.getByRole('button', { name: words(lang).map.openOrchestrator, exact: true }),
+  },
+  {
+    name: 'department',
+    form: 'screen',
+    held: '/api/org',
+    open: atPath(`/departments/${DEPARTMENT_ID}`),
+    answer: route => route.fallback(),
+    /* Back and the bottom bar stand from the first frame; only the schema's body waits (Design on #1654). */
+    shown: (page, lang) => [sections(page, lang), backOf(page, lang), page.locator('.dv-acts')],
+    place: page => page.locator('.dview'),
+    arrived: (page, lang) => page.getByRole('region', { name: words(lang).dept.schema, exact: true }),
+  },
+  {
+    name: 'department-tree',
+    form: 'screen',
+    held: `/api/departments/${DEPARTMENT_ID}/tree`,
+    open: inDepartment(lang => words(lang).dept.treeButton),
+    cancels: true,
+    answer: route => route.fulfill({ json: { tree: TREE } }),
+    /* The tool that opened the tree now takes back to the schema. */
+    shown: (page, lang) => departmentShown(page, lang, words(lang).dept.mapButton),
+    place: page => page.locator('.tview'),
+    arrived: (page, lang) => page.getByRole('region', { name: words(lang).dept.treeCanvas, exact: true }),
+  },
+  {
+    name: 'department-speed',
+    held: `/api/departments/${DEPARTMENT_ID}/tree`,
+    open: inDepartment(lang => words(lang).dept.speed),
+    cancels: true,
+    answer: route => route.fulfill({ json: { tree: TREE } }),
+    shown: (page, lang) => [...departmentShown(page, lang, words(lang).dept.speed), page.locator('.dv-drawer .dv-drawer-h')],
+    place: page => page.locator('aside.dv-drawer'),
+    arrived: page => page.locator('aside.dv-drawer dl.sum'),
+  },
+  {
+    name: 'employee-window',
+    held: '/api/agents/b1/events',
+    /* His window opens from his chip on the department's schema; his history and state are what it waits for. */
+    open: async (page, lang) => {
+      await page.goto(`/departments/${DEPARTMENT_ID}`, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('region', { name: words(lang).dept.members, exact: true }).getByRole('button', { name: /Bruno/ }).click();
+    },
+    answer: route => route.fulfill({ json: { events: [LINE], state: AWAKE } }),
+    shown: (page, lang) => [sections(page, lang), page.locator('aside.orch .t-bar'), page.getByRole('button', { name: words(lang).window.close, exact: true })],
+    place: page => page.locator('.agent-conversation'),
+    arrived: (page, lang) => page.getByRole('log', { name: words(lang).window.chat.conversation, exact: true }),
+    serves: { '/api/org': EMPLOYEE_ROUTES['/api/org'], '/api/agents/b1': EMPLOYEE_ROUTES['/api/agents/b1'] },
   },
   {
     name: 'people',
@@ -367,7 +445,8 @@ for (const screen of SCREENS) {
       const ring = busyOf(screen, page).locator('.spinner');
       await expect(ring).toBeVisible();
       await expect(busyOf(screen, page)).toHaveText(busyWords(screen, words('en')));
-      expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
+      /* Nothing runs; the map's signal dots behind a department are paused there. */
+      expect(await page.evaluate(() => document.getAnimations().filter(a => a.playState === 'running').length)).toBe(0);
       /* A quarter of the ring is its arc. */
       const colours = await ring.evaluate(el => { const s = getComputedStyle(el); return [s.borderTopColor, s.borderRightColor]; });
       expect(colours[0]).not.toBe(colours[1]);
@@ -549,6 +628,127 @@ for (const screen of SCREENS) for (const look of LOOKS) {
     await shot('ready');
   });
 }
+
+/* 20.11: the map drew itself before the person's arrangement came, and then every block it moved jumped to its place.
+   The map now stands where it will be only once both the company and the arrangement came; an arrangement that fails to
+   come leaves the map as it places itself, as before. */
+test.describe('map arrangement', () => {
+  async function holdLayout(page: Page) {
+    await page.clock.install({ time: Date.parse('2026-11-19T23:00:00Z') });
+    await page.setViewportSize({ width: EN.width, height: 900 });
+    await page.addInitScript(() => localStorage.setItem('hh-lang', 'en'));
+    await serveApi(page);
+    let open: () => void = () => {};
+    const gate = new Promise<void>(go => { open = go; });
+    let fail = false;
+    await page.route(url => pathOf(url) === '/api/map/layout', async route => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      await gate;
+      if (fail) return route.fulfill({ status: 500, json: { error: { code: 'internal', message: 'The server could not answer.' } } });
+      return route.fulfill({ json: { blocks: { [`dept:${DEPARTMENT_ID}`]: { x: 40, y: 700 } } } });
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    return { release: () => open(), failing: () => { fail = true; } };
+  }
+
+  test('the map waits for the arrangement, then shows its blocks where the person put them, and they stay', async ({ page }) => {
+    const t = words('en');
+    const hold = await holdLayout(page);
+    const waiting = page.locator('.map').getByRole('status').filter({ hasText: t.common.loading });
+    await expect(waiting).toBeVisible();
+    const department = page.getByRole('button', { name: /^Development/ });
+    await expect(department).toHaveCount(0);
+    hold.release();
+    await expect(department).toBeVisible();
+    await expect(waiting).toHaveCount(0);
+    const placed = await department.boundingBox();
+    await page.clock.runFor(2_000);
+    expect(await department.boundingBox()).toEqual(placed);
+  });
+
+  test('an arrangement that fails to come leaves the map as it places itself, with nothing to try again', async ({ page }) => {
+    const t = words('en');
+    const hold = await holdLayout(page);
+    await expect(page.locator('.map').getByRole('status').filter({ hasText: t.common.loading })).toBeVisible();
+    hold.failing();
+    hold.release();
+    await expect(page.getByRole('button', { name: /^Development/ })).toBeVisible();
+    await expect(page.locator('.map').getByRole('alert')).toHaveCount(0);
+    await expect(page.locator('.map').getByRole('button', { name: t.common.retry, exact: true })).toHaveCount(0);
+  });
+});
+
+/* 20.11, Design on #1654: a department opened at its own address drew nothing but the indicator while the company came, so
+   back, its name and its tools jumped in once it came, and a failure left no way out. What it knows without waiting stands
+   at once: back, which works throughout, the plate of its name with an idle bar, its tools, disabled until the company
+   came, and the room of Hire. Only the schema's body waits. */
+test.describe('department while its company comes', () => {
+  const DEPT = SCREENS.find(s => s.name === 'department')!;
+  const plate = (page: Page) => page.locator('.crumbs .crumb');
+  const tools = (page: Page) => page.locator('.dv-tools button');
+  const hire = (page: Page) => page.locator('.dv-acts > .btn');
+  async function expectWaiting(page: Page) {
+    await expect(backOf(page, 'en')).toBeEnabled();
+    await expect(plate(page).locator('.ph')).toHaveCount(1);
+    await expect(tools(page)).toHaveCount(4);
+    for (const tool of await tools(page).all()) await expect(tool).toBeDisabled();
+    /* A person of the whole company may hire: the room of Hire holds its button, disabled with the tools. */
+    await expect(hire(page)).toBeDisabled();
+    /* The zoom waits with them, muted as they are. */
+    const muted = (block: Locator) => block.evaluate(el => getComputedStyle(el).opacity);
+    expect(await muted(page.locator('.dv-zoom .zoom'))).toBe(await muted(tools(page).first()));
+    expect(await muted(tools(page).first())).not.toBe('1');
+  }
+  async function expectCame(page: Page) {
+    await expect(DEPT.arrived(page, 'en')).toBeVisible();
+    await expect(plate(page).locator('h2')).toHaveText('Development');
+    for (const tool of await tools(page).all()) await expect(tool).toBeEnabled();
+    await expect(hire(page)).toBeEnabled();
+  }
+
+  test('draws back, the plate of its name, its tools and the room of Hire at once, and the plate keeps its place and height', async ({ page }) => {
+    const hold = await openHeld(page, DEPT, EN);
+    await expectWaiting(page);
+    const before = (await plate(page).boundingBox())!;
+    const answered = hold.answered();
+    hold.release();
+    await answered;
+    await page.clock.runFor(RING_MIN_MS);
+    await expectCame(page);
+    const after = (await plate(page).boundingBox())!;
+    for (const side of ['x', 'y', 'height'] as const) expect(Math.abs(after[side] - before[side])).toBeLessThanOrEqual(0.5);
+  });
+
+  test('keeps its tools waiting through a failure, until Retry brings the company', async ({ page }) => {
+    const t = words('en');
+    const hold = await openHeld(page, DEPT, EN);
+    hold.failing(true);
+    const failed = hold.answered();
+    hold.release();
+    await failed;
+    await expect(DEPT.place(page).locator('.load-fail')).toHaveAttribute('role', 'alert');
+    await expectWaiting(page);
+    hold.failing(false);
+    await DEPT.place(page).getByRole('button', { name: t.common.retry, exact: true }).click();
+    const again = hold.answered();
+    hold.release();
+    await again;
+    await page.clock.runFor(RING_MIN_MS);
+    await expectCame(page);
+  });
+
+  test('leaves for the map by back while its load failed', async ({ page }) => {
+    const hold = await openHeld(page, DEPT, EN);
+    hold.failing(true);
+    const failed = hold.answered();
+    hold.release();
+    await failed;
+    await expect(DEPT.place(page).locator('.load-fail')).toHaveAttribute('role', 'alert');
+    await backOf(page, 'en').click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/');
+    await expect(page.locator('.dview')).toHaveCount(0);
+  });
+});
 
 /* No pseudo-long language ships, so the test keeps its own (Design #1656): the words of each state of a load about twice as
    long as the English wrap inside their blocks and the screen, on a phone and a desktop. */

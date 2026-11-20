@@ -76,7 +76,7 @@ describe('the company every screen shows', () => {
       /* One turn of the event loop: the answer's promise chain has no timer in it, so it has run its course. */
       await new Promise(r => setImmediate(r));
     });
-    expect(asking.result.current).toEqual({ org: working(1), failure: null });
+    expect(asking.result.current).toEqual({ org: working(1), failure: null, load: expect.any(Function) });
     expect(idle.result.current.org).toEqual(working(1));
   });
 
@@ -122,7 +122,7 @@ describe('the company every screen shows', () => {
     const asking = renderHook(() => useOrg());
     await waitFor(() => expect(asking.result.current.org).toEqual(working(1)));
     act(() => forgetOrg());
-    expect(asking.result.current).toEqual({ org: null, failure: null });
+    expect(asking.result.current).toEqual({ org: null, failure: null, load: expect.any(Function) });
     expect(idle.result.current.org).toBeNull();
   });
 

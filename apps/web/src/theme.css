@@ -604,6 +604,9 @@ select:disabled { opacity: .55; }
 
 /* Map */
 .map { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+/* The map's place, the department's and its tree's while their data comes: the shared indicator, or why it stalled with
+   Try again, in the middle of where the data will stand, its words wrapping however narrow the screen. */
+.map.map-wait, .dcanvas.dview-wait, .tview.tview-wait { display: grid; grid-template-columns: minmax(0, 60ch); place-content: center; padding: 16px; cursor: default; }
 .map::before {
   content: ''; position: absolute; inset: 0; pointer-events: none;
   background-image: radial-gradient(var(--dot) 1px, transparent 1px);
@@ -1147,6 +1150,9 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .t-bar .panel-count { margin: 0; font-weight: 600; line-height: 1; white-space: nowrap; pointer-events: none; }
 .t-bar svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .t-log { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 12px; }
+/* The conversation's place while the window's load comes. */
+.t-log.t-wait { justify-content: center; align-items: center; }
+.t-log.t-wait > * { max-width: 60ch; }
 .t-log > * { animation: tin .45s ease-out; }
 @keyframes tin { from { opacity: 0; transform: translateY(4px); } }
 .t-line { display: grid; gap: 12px; }
@@ -1287,10 +1293,10 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .t-copy:hover:not(:disabled) { color: var(--cyan-ink); background: var(--glow); }
 .t-copy:disabled { color: var(--muted); cursor: default; }
 .t-load { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: #15191F; color: #dcdcdc; font-family: var(--f-body); font-size: 15px; }
-.t-load .spinner { width: 44px; height: 44px; border-width: 3px; border-color: #2b323b; border-top-color: #dcdcdc; }
+.t-load > .spinner { width: 44px; height: 44px; border-width: 3px; border-color: #2b323b; border-top-color: #dcdcdc; }
 /* Why the terminal cannot show now, in place of it. */
 .t-load p { max-width: 60ch; margin: 0; padding: 0 24px; text-align: center; overflow-wrap: anywhere; }
-@media (prefers-reduced-motion: reduce) { .t-load .spinner { animation-duration: 3s; } }
+@media (prefers-reduced-motion: reduce) { .t-load > .spinner { animation-duration: 3s; } }
 .t-cards { flex: none; max-height: 45%; overflow: auto; padding: 10px 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
 /* Access to machines: a line each, no taller than one row of the window's header, however narrow the screen. */
 /* Earlier lines of a conversation come above the oldest one kept. */
@@ -1575,6 +1581,9 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 /* The tools in words stand apart. As icons they make one strip of 44 px cells drawn like the section tabs, and Hire stands
    after them at the end of the row, on a row of its own when it does not fit. */
 .dv-tools { display: contents; }
+/* While the company comes the department's tools stand at their size and wait, muted, as a disabled button does (#1620). */
+.dv-tools > .hbtn:disabled { cursor: not-allowed; opacity: .45; }
+.dv-zoom[inert] > .zoom { opacity: .45; }
 .dv-acts[data-fit="icons"] .dv-tools { display: flex; border: 0; outline: 1px solid var(--line); outline-offset: -1px; }
 .dv-acts[data-fit="icons"] .dv-tools > .hbtn { border: 0; background: none; }
 .dv-acts[data-fit="icons"] .dv-tools > .hbtn + .hbtn { border-inline-start: 1px solid var(--line); }
