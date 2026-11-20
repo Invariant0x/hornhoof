@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DISK_PARTS, DiskReport, parseNodeMessage } from '../src/index.js';
+import { DISK_PARTS, DiskReport, MachineReplicas, parseNodeMessage } from '../src/index.js';
 
 const GB = 1e9;
 const LOAD = { cpus: 8, load: 1.5, memFree: 4 * GB, memTotal: 16 * GB, tests: 0, jobs: 2 };
@@ -24,6 +24,15 @@ describe("a node's disk report", () => {
     expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.41.0', loggedIn: true, running: [], load: { ...LOAD, disk: DISK } }))).toMatchObject({ load: { ...LOAD, disk: DISK } });
   });
 
+  it("names the work it keeps because it can't be restored, biggest first, and leaves the list out where it keeps none", () => {
+    const kept = [
+      { part: 'workingCopies', agent: '479e2112-3e30-40a7-89a2-2e6786f56a70', path: 'hornhoof', task: 1750, bytes: 9 * GB, why: 'uncommitted' },
+      { part: 'workingCopies', agent: 'f7863b74-d43d-49db-9d48-774326e62283', path: 'scratch/copy', task: null, bytes: 2 * GB, why: 'unpushed' },
+    ];
+    expect(load({ disk: { ...DISK, kept } })).toEqual({ type: 'load', ...LOAD, disk: { ...DISK, kept } });
+    expect(DiskReport.parse(DISK).kept).toBeUndefined();
+  });
+
   it('is left out by an older node, and the load stands without it', () => {
     expect(load({})).toEqual({ type: 'load', ...LOAD });
   });
@@ -43,6 +52,11 @@ describe("a node's disk report", () => {
       { ...DISK, cleaned: Array.from({ length: 51 }, () => DISK.cleaned[0]) },
       { ...DISK, threshold: undefined },
       { ...DISK, docker: { total: 200 * GB, free: 15 * GB } },
+      { ...DISK, kept: [{ part: 'workingCopies', agent: 'a', path: 'x', task: 1, bytes: GB, why: 'dirty' }] },
+      { ...DISK, kept: [{ part: 'workingCopies', agent: 'a', path: 'x'.repeat(301), task: 1, bytes: GB, why: 'unpushed' }] },
+      { ...DISK, kept: [{ part: 'workingCopies', agent: 'a'.repeat(65), path: 'x', task: 1, bytes: GB, why: 'unpushed' }] },
+      { ...DISK, kept: [{ part: 'workingCopies', agent: 'a', path: 'x', task: 0, bytes: GB, why: 'unpushed' }] },
+      { ...DISK, kept: Array.from({ length: 51 }, () => ({ part: 'workingCopies', agent: 'a', path: 'x', task: null, bytes: GB, why: 'unpushed' })) },
       'full',
     ]) {
       expect(load({ disk: bad })).toEqual({ type: 'load', ...LOAD });
@@ -51,5 +65,15 @@ describe("a node's disk report", () => {
 
   it('keeps no part it does not know', () => {
     expect(DiskReport.parse({ ...DISK, parts: { ...DISK.parts, photos: GB } }).parts).toEqual(DISK.parts);
+  });
+});
+
+describe('the replica part of a machine disk report', () => {
+  it('carries the count, total bytes and the visible companies', () => {
+    const replicas = { count: 1, bytes: 4096, companies: [{ name: 'Example Company', bytes: 4096 }] };
+    expect(MachineReplicas.parse(replicas)).toEqual(replicas);
+    expect(MachineReplicas.parse({ count: 0, bytes: 0, companies: [] })).toEqual({ count: 0, bytes: 0, companies: [] });
+    expect(MachineReplicas.safeParse({ ...replicas, count: 1.5 }).success).toBe(false);
+    expect(MachineReplicas.safeParse({ ...replicas, companies: [{ name: 'Example Company', bytes: -1 }] }).success).toBe(false);
   });
 });
