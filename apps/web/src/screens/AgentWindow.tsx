@@ -227,15 +227,24 @@ function TerminalPlace({ t, state, program }: { t: Messages; state: Orchestrator
 type WindowLoadOf = {
   terminal: boolean; orchestrator: boolean; state: OrchestratorState | null; card: AgentCardView | null; historyIn: boolean;
   failure: unknown; historyFailure: unknown; cardFailure: unknown; catchUp(): Promise<void>; loadCard(): void;
+  ownsCommands: boolean; commandsIn: boolean; loadCommands(): Promise<void>;
 };
 
+/* What the conversation waits for besides its history, so it never says it is empty while one of them still comes: an
+   employee's card, and the CEO's machine commands in the orchestrator's window. Commands that fail to come count as none,
+   as before. */
+function chatParts(o: WindowLoadOf): LoadPart[] {
+  const card: LoadPart[] = o.orchestrator ? [] : [{ data: o.card, failure: o.cardFailure, load: o.loadCard }];
+  const commands: LoadPart[] = o.ownsCommands ? [{ data: o.commandsIn || null, failure: null, load: () => void o.loadCommands() }] : [];
+  return [...card, ...commands];
+}
+
 /* What the window waits for before it shows the agent: his state for the terminal; for the conversation his whole history
-   and, for an employee, his card. said: what went wrong to say under the cards, what the person did first, then a look
-   that failed after the window showed him; before that, the load says it where he will stand. */
-function useWindowLoad({ terminal, orchestrator, state, card, historyIn, failure, historyFailure, cardFailure, catchUp, loadCard }: WindowLoadOf) {
-  const history: LoadPart = { data: terminal ? state : historyIn || null, failure: historyFailure, load: () => void catchUp() };
-  const own: LoadPart[] = terminal || orchestrator ? [] : [{ data: card, failure: cardFailure, load: loadCard }];
-  return { load: useLoad([history, ...own]), said: failure ?? onTop(state, historyFailure ?? cardFailure) };
+   and the parts above. said: what went wrong to say under the cards, what the person did first, then a look that failed
+   after the window showed him; before that, the load says it where he will stand. */
+function useWindowLoad(o: WindowLoadOf) {
+  const history: LoadPart = { data: o.terminal ? o.state : o.historyIn || null, failure: o.historyFailure, load: () => void o.catchUp() };
+  return { load: useLoad([history, ...(o.terminal ? [] : chatParts(o))]), said: o.failure ?? onTop(o.state, o.historyFailure ?? o.cardFailure) };
 }
 
 /* Where the conversation or the terminal will stand while the window's load comes: the terminal names the program it
@@ -328,6 +337,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* The machine commands he asked Hornhoof for. They are the CEO's alone: only the CEO's screen gets them, and shows them
      here, apart from his conversation. */
   const [commands, setCommands] = useState<ShownCommand[]>([]);
+  const [commandsIn, setCommandsIn] = useState(false);
   const ownsCommands = orchestrator && me.person.isOwner;
   /* What the terminal has to say, at the foot of the window with the other notes. */
   const [termNotes, setTermNotes] = useState<WindowNote[]>([]);
@@ -376,7 +386,9 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const loadCommands = useCallback(async () => {
     if (!ownsCommands) return;
     const res = await api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null);
-    if (mounted.current && res) setCommands(res.commands.filter(commandBlockOpen));
+    if (!mounted.current) return;
+    if (res) setCommands(res.commands.filter(commandBlockOpen));
+    setCommandsIn(true);
   }, [ownsCommands]);
 
   const hideCommand = (id: string) =>
@@ -532,10 +544,11 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* The map already knows an employee's program, before its card comes. */
   const provider = sub?.provider ?? org.departments.flatMap(d => d.employees).find(e => e.id === agentId)?.provider;
   const program = windowProgram(sub, provider);
-  /* The terminal opens as soon as the agent's state says it can, without waiting for the card. */
-  const opens = terminal && state !== null;
-  const chat = known && !terminal && historyIn;
-  const { load: windowLoad, said } = useWindowLoad({ terminal, orchestrator, state, card, historyIn, failure, historyFailure, cardFailure, catchUp, loadCard });
+  /* The terminal opens as soon as the agent's state says it can, without waiting for the card; the conversation once all it
+     waits for came. */
+  const { load: windowLoad, said } = useWindowLoad({ terminal, orchestrator, state, card, historyIn, failure, historyFailure, cardFailure, catchUp, loadCard, ownsCommands, commandsIn, loadCommands });
+  const opens = terminal && windowLoad.phase === 'done';
+  const chat = known && !terminal && windowLoad.phase === 'done';
   /* A terminal takes its words and pictures itself; only a window without one has a line to write in. */
   const dragging = usePictureDrop(box, chat, state?.ready ?? false, pictures.add);
 

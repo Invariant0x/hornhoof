@@ -459,7 +459,8 @@ describe('department owner answering head on a large company', () => {
       );
 
       expect(await screen.findByRole('region', { name: 'Department schema' })).toBeInTheDocument();
-      expect(container.querySelectorAll('.map circle.pt').length).toBeGreaterThan(0);
+      /* The map behind it is drawn once its arrangement came too (#1620), which may be a moment after the department. */
+      await waitFor(() => expect(container.querySelectorAll('.map circle.pt').length).toBeGreaterThan(0));
       expect(container.querySelectorAll('.map animateMotion')).toHaveLength(0);
       expect(paused).toBe(1);
       expect(played).toBe(0);

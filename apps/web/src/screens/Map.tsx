@@ -798,13 +798,14 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     return room && org && shown && !inside ? { content: arrangedBounds(shown, org), room } : null;
   };
 
-  /* Show everything when whole; otherwise as the map opens, readable. */
-  const fit = useCallback((whole: boolean) => {
+  /* Show everything when whole; otherwise as the map opens, readable. smooth: it moves there, as when the person asks; the
+     map placing itself stands there at once, so it never glides after its first frame. */
+  const fit = useCallback((whole: boolean, smooth = true) => {
     const shown = arrRef.current, room = roomOf(FIT_SIDE);
     if (!room || !org || !shown || inside) return;
     const v = mapView(room, arrangedBounds(shown, org), whole);
     setMinZoom(Math.min(MIN_K, v.k));
-    setView({ ...v, smooth: true });
+    setView({ ...v, smooth });
   }, [org, inside, setView, roomOf]);
   const fitRef = useRef(fit);
   fitRef.current = fit;
@@ -828,7 +829,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   useLayoutEffect(() => {
     if (!shown || inside) return;
     const auto = () => {
-      if (!mine() && !back.current) fitRef.current(false);
+      if (!mine() && !back.current) fitRef.current(false, false);
     };
     auto();
     const el = box.current;
