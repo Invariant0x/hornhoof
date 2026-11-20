@@ -7,6 +7,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+## [0.39.5] - 2026-11-20
+
+### Added
+
+- A run_tests part that runs a command gets an empty folder in $HH_OUT, and the plain files it leaves there, such as a browser check's pictures, go on the run's task as test-<run>-<part>-<name>, as run_work's do, whether its tests passed or failed.
+
 ## [0.39.4] - 2026-11-20
 
 ### Fixed
