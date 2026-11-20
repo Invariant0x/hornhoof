@@ -655,7 +655,7 @@ function useMapLoad(org: Org | null, failure: unknown, loadOrg: () => void, layo
 }
 
 /* What the map shows in its place before it can draw itself: where the route leads nowhere, the shared indicator while the
-   company and the person's arrangement come, why they did not with Try again, or a failure of a later look at the company;
+   company and the person's arrangement come, why they did not with Retry, or a failure of a later look at the company;
    null once there is a map to draw. It draws only once both came, so no block moves after the first frame. */
 function mapStandIn(t: Messages, failure: unknown, load: Load, onHome?: () => void) {
   if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;

@@ -10,7 +10,7 @@ import { FirstContact } from '../ui/FirstContact';
 import { RecoveryBanner } from '../ui/RecoveryBanner';
 import { SwitchBanner } from '../ui/SwitchBanner';
 import { LoadFailure, UpdateSaysIt, useLoadFailure } from '../ui/LoadFailure';
-import { LoadState, onTop, useLoad } from '../ui/Loading';
+import { LoadState, onTop, useLoad, type Load } from '../ui/Loading';
 import { UpdateBanner } from '../ui/UpdateBanner';
 import { UpdateCut } from '../ui/UpdateCut';
 import { useVersion, versionText } from '../ui/VersionMark';
@@ -295,12 +295,10 @@ function MapWorkspace({ tab, me, dept, deptId, denied, missingDepartment, panel,
   );
 }
 
-/* A department whose company is still coming stands with the shared indicator where it will be, and says why with Try
-   again when it does not come. One the update holds keeps the indicator: the panel says why, and the load asks again
-   after it. */
-function DepartmentFallback({ deptId, org, orgFailure, loadOrg }: { deptId: string | null; org: Org | null; orgFailure: unknown; loadOrg(): void }) {
-  const load = useLoad([{ data: org, failure: orgFailure, load: loadOrg }]);
-  return deptId && !org ? <div className="dview" aria-busy={load.phase !== 'failed'}><div className="dcanvas dview-wait"><LoadState load={load} form="screen" /></div></div> : null;
+/* A department whose company is still coming stands with the shared indicator where it will be, and says why with Retry
+   when it does not come. One the update holds keeps the indicator: the panel says why, and the load asks again after it. */
+function DepartmentWait({ load }: { load: Load }) {
+  return <div className="dview" aria-busy={load.phase !== 'failed'}><div className="dcanvas dview-wait"><LoadState load={load} form="screen" /></div></div>;
 }
 
 function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, loadOrg, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire, onCrumbs }: MapRouteProps & {
@@ -308,8 +306,11 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
   openTask: (id: string) => void; openTracker: (departmentId: string) => void; openDepartment: (id: string) => void; onHire: (dept: Department) => void;
   onCrumbs: (px: number) => void;
 }) {
+  /* The department shows once its load is done, not as soon as the company is there, so the ring keeps its least time. */
+  const load = useLoad(deptId ? [{ data: org, failure: orgFailure, load: loadOrg }] : []);
   if (tab !== 'map' || denied || missingDepartment) return null;
-  if (!dept) return <DepartmentFallback deptId={deptId} org={org} orgFailure={orgFailure} loadOrg={loadOrg} />;
+  if (load.phase !== 'done') return <DepartmentWait load={load} />;
+  if (!dept) return null;
   return (
     <DepartmentView
       key={dept.id}

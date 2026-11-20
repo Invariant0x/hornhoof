@@ -231,10 +231,12 @@ function DeptApprovals({ department, shown }: { department: Department; shown: b
 type Drawer = 'about' | 'speed' | 'hire';
 
 /* The department's work tree, for its tree and its speed drawer: while either is open, the shared indicator where it will
-   stand, then why it did not come with Try again. Closed, nothing waits for it and no limit counts. */
+   stand, then why it did not come with Retry. Closed, nothing waits for it and no limit counts. */
 function useTreeLoad(departmentId: string, on: boolean) {
   const { tree, failure, load, cancel } = useDepartmentTree(departmentId, on);
-  return { tree, load: useLoad(on ? [{ data: tree, failure, load, cancel }] : []) };
+  const treeLoad = useLoad(on ? [{ data: tree, failure, load, cancel }] : []);
+  /* The tree shows once its load is done, not as soon as it came, so the ring keeps its least time. */
+  return { tree: treeLoad.phase === 'done' ? tree : undefined, load: treeLoad };
 }
 
 const drawerTitle = (t: ReturnType<typeof useT>, drawer: Drawer | null): string =>
