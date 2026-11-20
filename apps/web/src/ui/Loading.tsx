@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { errorText, useT } from '../i18n';
+import { shownLoadFailure, useUpdateSaysIt } from './LoadFailure';
 import { Stalled, Waiting } from './Waiting';
 
 /* The longest one load of a screen takes, all of its parts together, before the person hears it takes longer than usual.
@@ -14,22 +15,35 @@ export type Load = { phase: 'loading' | 'late' | 'failed' | 'done'; failure: unk
 
 const missingOf = (parts: LoadPart[]) => parts.filter(p => p.data === undefined || p.data === null);
 
-/* One load of a screen from its parts. A failure from before the last Try again no longer counts: the part is asked again. */
+type Seen = { failed: unknown; loading: boolean; timed: boolean };
+
+/* Where the parts that have not come are: the first failure to say, if any, then whether they are still coming, and whether
+   the limit counts. A failure from before the last Try again no longer counts, as the part is asked again. A part that
+   waits for Hornhoof's update, which the update panel already says, is still coming, and no limit counts while it waits. */
+function seen(missing: LoadPart[], before: Set<unknown>, updateSaysIt: boolean): Seen {
+  const failures = missing.map(p => shownLoadFailure(p.failure, updateSaysIt));
+  const failed = failures.find(f => f && !before.has(f)) ?? null;
+  const updating = missing.some((p, i) => p.failure && !failures[i]);
+  const loading = missing.length > 0 && !failed;
+  return { failed, loading, timed: loading && !updating };
+}
+
+/* One load of a screen from its parts. */
 export function useLoad(parts: LoadPart[], limitMs = LOAD_LIMIT_MS): Load {
   const [round, setRound] = useState(0);
   const [late, setLate] = useState(false);
   const before = useRef(new Set<unknown>());
+  const updateSaysIt = useUpdateSaysIt();
   const missing = missingOf(parts);
-  const failed = missing.find(p => p.failure && !before.current.has(p.failure));
-  const loading = missing.length > 0 && !failed;
+  const { failed, loading, timed } = seen(missing, before.current, updateSaysIt);
   useEffect(() => {
-    if (!loading) return;
+    if (!timed) return;
     const timer = setTimeout(() => setLate(true), limitMs);
     return () => {
       clearTimeout(timer);
       setLate(false);
     };
-  }, [loading, round, limitMs]);
+  }, [timed, round, limitMs]);
   const retry = () => {
     for (const p of missing) {
       if (p.failure) before.current.add(p.failure);
@@ -37,7 +51,7 @@ export function useLoad(parts: LoadPart[], limitMs = LOAD_LIMIT_MS): Load {
     }
     setRound(r => r + 1);
   };
-  if (failed) return { phase: 'failed', failure: failed.failure, retry };
+  if (failed) return { phase: 'failed', failure: failed, retry };
   if (loading) return { phase: late ? 'late' : 'loading', failure: null, retry };
   return { phase: 'done', failure: null, retry };
 }
