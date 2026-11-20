@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
 import type { PlaywrightTestConfig } from '@playwright/test';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -13,11 +15,14 @@ vi.mock('node:url', async original => {
   return { ...url, fileURLToPath: (href: string | URL) => new url.URL(String(href)).pathname };
 });
 type Limits = Pick<PlaywrightTestConfig, 'timeout' | 'expect' | 'use'>;
-const CONFIGS = {
-  ...import.meta.glob<{ default: PlaywrightTestConfig }>('../playwright.config.ts'),
-  ...import.meta.glob<{ default: PlaywrightTestConfig }>('../e2e/**/*.config.ts'),
-};
-const SOURCES = import.meta.glob<string>(['../e2e/**/*.ts', '!../e2e/**/*.config.ts', '!../e2e/results/**'], { query: '?raw', import: 'default', eager: true });
+/* The files are listed when the test runs, not by import.meta.glob: Vitest keeps a transformed test file in its module
+   cache, list and all, so a config added later would go unseen until this file changed. */
+const WEB = resolve(__dirname, '..');
+const filesUnder = (dir: string): string[] =>
+  readdirSync(dir, { withFileTypes: true }).flatMap(entry => (entry.isDirectory() ? (entry.name === 'results' ? [] : filesUnder(join(dir, entry.name))) : [join(dir, entry.name)]));
+const E2E = filesUnder(join(WEB, 'e2e')).filter(path => path.endsWith('.ts'));
+const CONFIGS = ['playwright.config.ts', ...E2E.filter(path => path.endsWith('.config.ts')).map(path => relative(WEB, path))];
+const SOURCES = E2E.filter(path => !path.endsWith('.config.ts'));
 
 /* The limits a config or a project gives a test, an expectation, an action and a navigation. Playwright gives none to an
    action or a navigation it says nothing of, but 30 s to a test and 5 s to an expectation. */
@@ -30,13 +35,12 @@ const LIMIT = /\b(?:test|it)\.setTimeout\((?!\s*0\s*\))|[Tt]imeout:(?!\s*0\b)/;
 
 describe('the time limits of the web app’s browser tests', () => {
   it('are looked for in every config and every spec', () => {
-    expect(Object.keys(CONFIGS)).toContain('../playwright.config.ts');
-    expect(Object.keys(CONFIGS).filter(path => path.startsWith('../e2e/')).length).toBeGreaterThan(30);
-    expect(Object.keys(SOURCES).filter(path => path.endsWith('.spec.ts')).length).toBeGreaterThan(100);
+    expect(CONFIGS.filter(path => path.startsWith('e2e/')).length).toBeGreaterThan(30);
+    expect(SOURCES.filter(path => path.endsWith('.spec.ts')).length).toBeGreaterThan(100);
   });
 
-  it.each(Object.keys(CONFIGS))('are none in %s, for a test, an expectation, an action and a navigation', async path => {
-    const config = (await CONFIGS[path]!()).default;
+  it.each(CONFIGS)('are none in %s, for a test, an expectation, an action and a navigation', async path => {
+    const config = ((await import(/* @vite-ignore */ join(WEB, path))) as { default: PlaywrightTestConfig }).default;
     const own = limitsOf(config);
     expect({ ...own, action: own.action ?? 0, navigation: own.navigation ?? 0 }).toEqual(NO_LIMITS);
     /* A project keeps the config's limits, or says 0 itself. */
@@ -44,7 +48,7 @@ describe('the time limits of the web app’s browser tests', () => {
   });
 
   it('are set by no spec or helper', () => {
-    const limited = Object.entries(SOURCES).flatMap(([path, text]) => text.split('\n').flatMap((line, i) => (LIMIT.test(line) ? [`${path}:${i + 1}: ${line.trim()}`] : [])));
+    const limited = SOURCES.flatMap(path => readFileSync(path, 'utf8').split('\n').flatMap((line, i) => (LIMIT.test(line) ? [`${relative(WEB, path)}:${i + 1}: ${line.trim()}`] : [])));
     expect(limited).toEqual([]);
   });
 });
