@@ -289,6 +289,7 @@ restore_hold() {
 
 # restore_run <with carry>: hold, load, swap, start.
 restore_run() {
+  local status=0
   restore_says running load 'Loading the backup.'
   if ! restore_hold; then
     restore_wipe
@@ -296,7 +297,10 @@ restore_run() {
     return 0
   fi
   restore_stop
-  if ! load_copy "$DBC" "$WORK/restore.sql.gz"; then
+  # The copy of the dump goes as soon as it is loaded, or could not be: it is kept through no later step.
+  load_copy "$DBC" "$WORK/restore.sql.gz" || status=$?
+  rm -f -- "$WORK/restore.sql.gz"
+  if [ "$status" -ne 0 ]; then
     restore_undo 'The backup did not load, so nothing changed.' load
     return 0
   fi

@@ -260,9 +260,11 @@ upload_request() {
 # of them: "file <name>" for a plain file as this updater packs one, and "other <name>" for anything else: a link of either
 # kind, a folder, a device, a pipe, a header that names or changes another member, and a plain file that names a link,
 # which BusyBox tar makes a second name of. A name is given only when it is printable. Fails for an archive whose headers
-# cannot be followed to its end, or that holds anything but zeros after the block that ends it.
+# cannot be followed to its end, or that holds anything but zeros after the block that ends it; with 2 for one of more
+# members than UPLOAD_MOST, read no further, as each header costs a command.
+UPLOAD_MOST=1000
 tar_members() {
-  local archive=$1 total at=0 head name size octal kind i pair ch
+  local archive=$1 total at=0 count=0 head name size octal kind i pair ch
   total=$(wc -c < "$archive") || return 1
   while [ "$at" -lt "$total" ]; do
     [ "$((total - at))" -ge 512 ] || return 1
@@ -272,6 +274,8 @@ tar_members() {
       [ "$(tail -c "+$((at + 1))" -- "$archive" | tr -d '\000' | head -c 1 | wc -c)" -eq 0 ]
       return
     fi
+    count=$((count + 1))
+    [ "$count" -le "$UPLOAD_MOST" ] || return 2
     name=''
     for ((i = 0; i < 200; i += 2)); do
       pair=${head:i:2}
@@ -304,7 +308,7 @@ tar_members() {
 # keeper put it in, and unpacked into a folder of the updater's own, only once the headers of the archive itself say
 # that it holds nothing else.
 unpack_upload() {
-  local file=$1 dir=$2 max=$3 archive="$2.tar" n members kind names name item links count=0 status=0
+  local file=$1 dir=$2 max=$3 archive="$2.tar" n members kind names name item links count=0 status=0 read=0
   UPLOAD_WHY='The folder to unpack the upload in could not be made.'
   (umask 077 && mkdir "$dir") || return 1
   UPLOAD_WHY='The upload unpacks to more than it may.'
@@ -313,7 +317,11 @@ unpack_upload() {
   [ "$n" -le "$max" ] || return 1
   UPLOAD_WHY='The upload cannot be read.'
   [ "$status" -eq 0 ] || return 1
-  members=$(tar_members "$archive") && [ -n "$members" ] || return 1
+  members=$(tar_members "$archive") || read=$?
+  UPLOAD_WHY='The upload holds a file that is no table of the company.'
+  [ "$read" -ne 2 ] || return 1
+  UPLOAD_WHY='The upload cannot be read.'
+  [ "$read" -eq 0 ] && [ -n "$members" ] || return 1
   UPLOAD_WHY='The upload holds a file that is no table of the company.'
   while read -r kind name; do
     plain_table "${name%.csv}" && [ "$name" != "${name%.csv}" ] || return 1
