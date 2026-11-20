@@ -91,6 +91,15 @@ async function openPlans(page: Page, look: Look, list: SubView[]): Promise<Opene
   return { posted, plans, terminal: () => terminal, connect };
 }
 
+/* Moves the page's clock on. The plans screen reads its plans again on the way, every 5 s; that answer is in before the
+   test says anything new, so it cannot put back an older step after a newer one. */
+async function later(page: Page, ms: number) {
+  const reread = page.waitForResponse(r => pathOf(r.url()) === '/api/subscriptions');
+  await page.clock.fastForward(ms);
+  await reread;
+  await page.evaluate(() => new Promise(done => { const c = new MessageChannel(); c.port1.onmessage = () => done(null); c.port2.postMessage(0); }));
+}
+
 const say = (page: Page, m: object) => page.evaluate(data => (window as unknown as { hhSay(data: string): void }).hhSay(data), JSON.stringify(m));
 
 /* The connection's part of the plan's card, by its name. */
@@ -136,7 +145,7 @@ test.describe('a plan connecting after its sign-in code', () => {
     await expectBeside(shown.locator('.waiting-mark'), shown.getByText(t.subs.connection.steps.checking, { exact: true }));
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.checking);
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.passed(t.subs.connection.seconds(0)));
-    await page.clock.fastForward(65_000);
+    await later(page, 65_000);
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.passed(t.subs.connection.minutes(1, 5)));
     await opened.connect('codex', connection('saving'));
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.saving);
@@ -161,7 +170,7 @@ test.describe('a plan connecting after its sign-in code', () => {
     const shown = part(page, EN, 'antigravity');
     await expect(shown.locator('.waiting-mark')).toBeVisible();
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.checking);
-    await page.clock.fastForward(2 * MINUTE + 10_000);
+    await later(page, 2 * MINUTE + 10_000);
     await opened.connect('antigravity', connection('signed_in'));
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.signed_in);
     await opened.connect('antigravity', connection('limits'));
@@ -208,7 +217,7 @@ test.describe('a plan connecting after its sign-in code', () => {
       await opened.connect(provider, connection('models'));
       const shown = part(page, EN, provider);
       await expect(shown.locator('.waiting-mark')).toBeVisible();
-      await page.clock.fastForward(LIMIT);
+      await later(page, LIMIT);
       await opened.connect(provider, connection('models', 'too_long'));
       await expect(shown.getByRole('alert')).toHaveText(t.common.tooLong);
         await expect(shown).toContainText(t.subs.connection.tooLongNext(10));
@@ -280,7 +289,7 @@ for (const look of LOOKS) {
       }
       if (state === 'connecting') {
         await opened.connect('antigravity', connection('account'));
-        await page.clock.fastForward(MINUTE + 5_000);
+        await later(page, MINUTE + 5_000);
         await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.account);
         await expectBeside(shown.locator('.waiting-mark'), shown.getByText(t.subs.connection.steps.account, { exact: true }));
       }
