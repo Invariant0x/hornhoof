@@ -288,9 +288,9 @@ tar_members() {
       printf -v ch '%b' "\\x$pair"
       name+=$ch
     done
-    # The size, in octal digits and nothing else before the spaces or zeros that end the field. From 8 GiB, GNU and
-    # BusyBox tar write it in base-256 instead: the byte 0x80, then the number in the eleven bytes after it. That number
-    # is read only while it is no more than what follows the header, so it can neither run over nor overflow.
+    # The size, in octal digits before the spaces or zeros that end the field. Large sizes use base-256 instead
+    # (GNU tar from 8 GiB, BusyBox tar with GNU extensions from 64 GiB): 0x80, then the number in eleven bytes.
+    # That number is read only while it fits in the bytes after the header, so it can neither run over nor overflow.
     size=${head:248:24}
     if [ "${size:0:2}" = 80 ]; then
       left=$((total - at - 512))

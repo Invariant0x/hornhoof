@@ -241,9 +241,8 @@ describe('the updater and what a machine held when it stopped holding the data',
     expect(made(r.calls)).toBe(false);
   });
 
-  /* Where the limit is: the headers of a thousand files are read, and none of one more. */
-  /* A file of 8 GiB or more has its size written in base-256, as GNU and BusyBox tar write it: the byte 0x80, then the
-     number in the eleven bytes after it. Such a table is read as the plain file it is. A size in any other such form, or
+  /* A table with a base-256 size, as GNU tar can write it from 8 GiB, is read as the plain file it is.
+     The byte 0x80 is followed by the number in eleven bytes. A size in any other such form, or
      larger than what follows its header, is not read at all. Nor is anything but zeros after the end, also so far into
      the archive that BusyBox tail, which the updater's image has, takes no number that large: tail here is as limited.
      The archives are sparse: the table's bytes take no room. */
@@ -294,6 +293,7 @@ describe('the updater and what a machine held when it stopped holding the data',
     expect(r.out.split('\n').filter(Boolean)).toEqual(['over 0 file public.tasks.csv', 'short 1 ', 'negative 1 ', 'flagged 1 ', 'huge 1 ', 'trailing 1 file public.tasks.csv', 'octal 1 file public.tasks.csv']);
   });
 
+  /* Where the limit is: the headers of a thousand files are read, and none of one more is decoded. */
   it('reads the headers of a thousand files of an upload, and not one more', async () => {
     const s = stand();
     const files = (n: number) => tarOf(Array.from({ length: n }, (_, i) => ({ name: `public.t${i}.csv` })));

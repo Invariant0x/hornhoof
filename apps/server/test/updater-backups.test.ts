@@ -320,7 +320,7 @@ describe('updater, restore', () => {
 
   /* The updater's copy of the dump, and the folder it held it in, are its own. Where they cannot be removed, as on a file
      system that went read-only under it, it says so and goes on: the restore ends as it would, done or undone, and the
-     updater keeps running. */
+     updater keeps running even if writing the warning reports an error. */
   it('goes on when its copy of the dump cannot be removed', async () => {
     for (const [env, state, step] of [[{ STUB_TERM: '7', ...WITH_CARRY }, 'done', 'start'], [{ STUB_RESTORE: 'fail' }, 'failed', 'load']] as const) {
       const s = stand(OLD_ENV);
@@ -341,7 +341,17 @@ describe('updater, restore', () => {
         { mode: 0o755 },
       );
       const PATH = `${tools}:${dirname(fileURLToPath(new URL('./updater-stubs/docker', import.meta.url)))}:${dirname(JQ)}:/usr/bin:/bin`;
-      const r = await runOnce(s, null, { ...env, PATH });
+      const logFailure = join(s.dir, 'cleanup-log.sh');
+      writeFileSync(logFailure, [
+        'printf() {',
+        '  builtin printf "$@" || return',
+        '  case "${2-}" in',
+        '    "Could not remove the updater\'s copy of the backup"*) return 1 ;;',
+        '  esac',
+        '}',
+        '',
+      ].join('\n'));
+      const r = await runOnce(s, null, { ...env, PATH, ...(state === 'failed' ? { BASH_ENV: logFailure } : {}) });
       expect(r.code, r.out).toBe(0);
       expect(statusOf(s), r.out).toMatchObject({ state, step });
       expect(r.out.split('\n').filter(line => line.startsWith("Could not remove the updater's copy of the backup"))).toHaveLength(2);
