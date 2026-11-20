@@ -44,6 +44,26 @@ async function bobsMachine() {
   return { app, db, ceo, bob, carol, node, machine: joined.machine.id as string, bobId: (me.person?.id ?? me.id) as string };
 }
 
+/* Bob's machine worker-2 with his Claude and Codex plans, each with its node connected and saying nothing of its disk yet. */
+async function twoPlans() {
+  const { app } = await testApp({ NODE_PING_MS });
+  onTestFinished(() => app.close());
+  const url = await listen(app);
+  const ceo = await setUpCompany(app);
+  const connected = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude', 'codex'] }, ...as(ceo) })).json();
+  const plans = connected.subscriptions as { id: string; provider: string }[];
+  const code = (connected.command as string).split('--join ')[1];
+  const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'linux-0002-abcd', hostname: 'worker-2', os: 'linux', arch: 'x86_64' } })).json();
+  const nodes = joined.nodes as { key: string; subscriptionId?: string; subscription?: string }[];
+  const plug = async (provider: string) => {
+    const plan = plans.find(p => p.provider === provider)!.id;
+    const node = await connectNode(url, nodes.find(n => (n.subscriptionId ?? n.subscription) === plan)!.key);
+    node.send({ type: 'hello', version: '0.41.0', loggedIn: true, running: [], load: load() });
+    return { plan, node };
+  };
+  return { app, ceo, claude: await plug('claude'), codex: await plug('codex') };
+}
+
 const cardsOf = async (app: FastifyInstance, token: string): Promise<Card[]> => {
   const answer = await app.inject({ url: '/api/requests', ...as(token) });
   expect(answer.statusCode).toBe(200);
@@ -62,6 +82,19 @@ describe("a machine's disk", () => {
     await says(app, ceo, node, ROOMY);
     expect(await diskOn(app, ceo)).toEqual(ROOMY);
     expect(await diskOn(app, bob)).toEqual(ROOMY);
+  });
+
+  it("adds up what each node measures in its own folder, and names each node's working folders by its plan, the biggest first", async () => {
+    const { app, ceo, claude, codex } = await twoPlans();
+    const own = { workingCopies: 12 * GB, recordings: 2 * GB, checkTemp: 5 * GB };
+    claude.node.send({ ...load({ ...ROOMY, parts: { images: 60 * GB, volumes: 50 * GB, ...own } }), tests: 1 });
+    codex.node.send({ ...load({ ...ROOMY, parts: { images: 60 * GB, volumes: 50 * GB, workingCopies: 20 * GB, checkTemp: GB }, cleaned: [] }), tests: 2 });
+    /* Both nodes' words are in once the machine counts the tests of both. */
+    const machine = async () => (await app.inject({ url: '/api/machines', ...as(ceo) })).json().machines[0];
+    await until(async () => (await machine())?.load?.tests === 3);
+    const shown = await machine();
+    expect(shown.load.disk.parts).toEqual({ images: 60 * GB, volumes: 50 * GB, workingCopies: 32 * GB, recordings: 2 * GB, checkTemp: 6 * GB });
+    expect(shown.folders).toEqual([{ plan: codex.plan, bytes: 20 * GB }, { plan: claude.plan, bytes: 12 * GB }]);
   });
 
   it('shows nothing of the disk of a node too old to say it', async () => {

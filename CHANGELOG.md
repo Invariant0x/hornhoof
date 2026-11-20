@@ -13,7 +13,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Added
 
-- A machine's card shows its disk and Hornhoof's share of it part by part, the largest first, with the copies of company databases it holds, and a machine short of space gives its owner and the CEO one card with the numbers, what it already removed and what it did not remove because a person needs to check it; the card goes by itself once there is room.
+- A machine's card shows its disk and Hornhoof's share of it part by part, the largest first, with the employees' working folders of each of its nodes and the copies of company databases it holds, each counted once inside the volumes, and a machine short of space gives its owner and the CEO one card with the numbers, what it already removed and what it did not remove because a person needs to check it; the card goes by itself once there is room.
 
 ## [0.40.0] - 2026-11-20
 

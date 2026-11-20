@@ -31,11 +31,14 @@ const DISK: DiskReport = {
   ],
 };
 const MACHINE: MachineView = {
-  id: 'm1', hostname: HOST, os: 'darwin', arch: 'arm64', owner: OWNER, online: true, lastSeenAt: null, plans: [],
+  id: 'm1', hostname: HOST, os: 'darwin', arch: 'arm64', owner: OWNER, online: true, lastSeenAt: null,
+  plans: [{ id: 's-claude', provider: 'claude', status: 'ready', online: true }, { id: 's-codex', provider: 'codex', status: 'ready', online: true }],
   load: { cpus: 10, load: 1, memFree: 10 * GIB, memTotal: 12 * GIB, jobs: 0, tests: 0, cpuModel: 'Apple M2 Pro', diskFree: DISK.free, diskTotal: DISK.total, disk: DISK },
   lendsTests: true, running: { agents: [], parts: [] },
   /* Two copies of company databases inside the volumes, one of them a company the server serves, with a long name. */
   replicas: { count: 2, bytes: 38.6 * GIB, companies: [{ name: 'Northwind Logistics & Cold Chain International', bytes: 21.4 * GIB }] },
+  /* The working copies node by node: its two plans' and its own node's, 17.3 GB together. */
+  folders: [{ plan: 's-claude', bytes: 11.9 * GIB }, { plan: 's-codex', bytes: 5.4 * GIB }, { plan: null, bytes: 0 }],
 };
 const LOW: MachineLowCard = { id: 'm1', hostname: HOST, owner: OWNER, since: DISK.low!.since, disk: DISK, names: { '00000000-0000-4000-8000-0000000000a1': 'Theodora Vasilievna-Brightwater' } };
 const SUBS: SubView[] = [];
@@ -72,7 +75,8 @@ async function diskPart(page: Page, t: Messages): Promise<{ card: Locator; part:
   await page.getByRole('button', { name: t.tables.openCard(HOST), exact: true }).click();
   const card = page.getByRole('article', { name: HOST });
   const part = card.locator('section.part', { has: page.getByRole('heading', { name: t.machines.diskParts.title, exact: true }) });
-  await expect(part.locator('.disk-parts li')).toHaveCount(Object.keys(DISK.parts).length + 1);
+  /* Every part but the working copies, which stand node by node, and the copies of company databases. */
+  await expect(part.locator('.disk-parts li')).toHaveCount(Object.keys(DISK.parts).length - 1 + MACHINE.folders!.length + 1);
   await page.evaluate(() => document.fonts.ready);
   return { card, part };
 }

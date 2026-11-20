@@ -6,7 +6,8 @@ import { Machines } from '../src/screens/Machines';
 import { MACHINES, ME, mockApi, SUBS } from './api-mock';
 
 const GIB = 1024 ** 3;
-/* A made-up Mac's disk: 120 GB free of 460, Hornhoof's 132 GB by part, and Docker's own disk inside its virtual machine. */
+/* A made-up Mac's disk: 120 GB free of 460, Hornhoof's 113 GB by part, and Docker's own disk inside its virtual machine. The
+   nodes' own folders, 19 GB of working copies, recordings and check temp files, are inside the 30 GB of volumes. */
 const DISK: DiskReport = {
   total: 460 * GIB,
   free: 120 * GIB,
@@ -21,11 +22,14 @@ const LOW: DiskReport = { ...DISK, free: 40 * GIB, low: { since: '2026-11-20T10:
 /* Two copies of company databases on the machine, inside Docker's volumes; the server names the one company it serves. */
 const REPLICAS: MachineReplicas = { count: 2, bytes: 14 * GIB, companies: [{ name: 'Acme Robotics', bytes: 14 * GIB }] };
 
-const withDisk = (disk: DiskReport | undefined, replicas?: MachineReplicas) =>
+type Folders = { plan: string | null; bytes: number }[];
+const withDisk = (disk: DiskReport | undefined, replicas?: MachineReplicas, folders?: Folders) =>
   mockApi({
     'GET /api/subscriptions': [200, { subscriptions: SUBS }],
-    'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, load: { ...MACHINES[0]!.load!, ...(disk ? { disk } : {}) }, ...(replicas ? { replicas } : {}) }], builtin: null }],
+    'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, load: { ...MACHINES[0]!.load!, ...(disk ? { disk } : {}) }, ...(replicas ? { replicas } : {}), ...(folders ? { folders } : {}) }], builtin: null }],
   });
+/* The working copies of the laptop's two plans' nodes, 12 GB together, and of its own node, which has none. */
+const FOLDERS: Folders = [{ plan: 's-codex', bytes: 8 * GIB }, { plan: 's-claude', bytes: 4 * GIB }, { plan: null, bytes: 0 }];
 
 async function laptop() {
   await screen.findByRole('table');
@@ -38,15 +42,15 @@ const rows = (part: HTMLElement) => within(part).getAllByRole('listitem').map(ro
 afterEach(() => localStorage.clear());
 
 describe("a machine's disk on its card", () => {
-  it("shows what Hornhoof takes by part, all of it together, everything else and Docker's own disk", async () => {
+  it("shows what Hornhoof takes by part, all of it together, counting the nodes' folders once in the volumes, everything else and Docker's own disk", async () => {
     withDisk(DISK);
     render(<Machines me={ME} />);
     const disk = partOf(await laptop(), 'Disk by part');
     /* Largest first, each bar on the scale of the whole disk. */
-    expect(rows(disk)).toEqual(['Images60 GB', 'Volumes30 GB', 'Build cache20 GB', 'Working copies12 GB', 'Check temp files5 GB', 'Containers3 GB', 'Terminal recordings2 GB']);
+    expect(rows(disk)).toEqual(['Images60 GB', 'Volumes30 GB', 'Build cache20 GB', 'Working copies, in the volumes12 GB', 'Check temp files, in the volumes5 GB', 'Containers3 GB', 'Terminal recordings, in the volumes2 GB']);
     expect(within(disk).getAllByRole('listitem').map(row => row.querySelector('.bar i')?.getAttribute('style'))).toEqual(['width: 13%;', 'width: 7%;', 'width: 4%;', 'width: 3%;', 'width: 1%;', 'width: 1%;', 'width: 0%;']);
-    expect(within(disk).getByText('Hornhoof in all: 132 GB of 460 GB')).toBeInTheDocument();
-    expect(within(disk).getByText('Everything else: 208 GB')).toBeInTheDocument();
+    expect(within(disk).getByText('Hornhoof in all: 113 GB of 460 GB')).toBeInTheDocument();
+    expect(within(disk).getByText('Everything else: 227 GB')).toBeInTheDocument();
     expect(within(disk).getByText("Docker's own disk: 85 GB free of 200 GB")).toBeInTheDocument();
   });
 
@@ -55,9 +59,9 @@ describe("a machine's disk on its card", () => {
     withDisk(DISK);
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
     const disk = partOf(await laptop(), 'Диск по частям');
-    expect(rows(disk)).toEqual(['Образы60 ГБ', 'Тома30 ГБ', 'Кэш сборки20 ГБ', 'Рабочие копии12 ГБ', 'Временные файлы проверок5 ГБ', 'Контейнеры3 ГБ', 'Записи терминалов2 ГБ']);
-    expect(within(disk).getByText('Hornhoof всего: 132 ГБ из 460 ГБ')).toBeInTheDocument();
-    expect(within(disk).getByText('Все остальное: 208 ГБ')).toBeInTheDocument();
+    expect(rows(disk)).toEqual(['Образы60 ГБ', 'Тома30 ГБ', 'Кэш сборки20 ГБ', 'Рабочие копии, в томах12 ГБ', 'Временные файлы проверок, в томах5 ГБ', 'Контейнеры3 ГБ', 'Записи терминалов, в томах2 ГБ']);
+    expect(within(disk).getByText('Hornhoof всего: 113 ГБ из 460 ГБ')).toBeInTheDocument();
+    expect(within(disk).getByText('Все остальное: 227 ГБ')).toBeInTheDocument();
     expect(within(disk).getByText('Свой диск Docker: свободно 85 ГБ из 200 ГБ')).toBeInTheDocument();
   });
 
@@ -65,11 +69,35 @@ describe("a machine's disk on its card", () => {
     withDisk(DISK, REPLICAS);
     render(<Machines me={ME} />);
     const disk = partOf(await laptop(), 'Disk by part');
-    expect(rows(disk)).toEqual(['Images60 GB', 'Volumes30 GB', 'Build cache20 GB', 'Company database copies, in the volumes: 2 (Acme Robotics)14 GB', 'Working copies12 GB', 'Check temp files5 GB', 'Containers3 GB', 'Terminal recordings2 GB']);
+    expect(rows(disk)).toEqual(['Images60 GB', 'Volumes30 GB', 'Build cache20 GB', 'Company database copies, in the volumes: 2 (Acme Robotics)14 GB', 'Working copies, in the volumes12 GB', 'Check temp files, in the volumes5 GB', 'Containers3 GB', 'Terminal recordings, in the volumes2 GB']);
     const copies = within(disk).getAllByRole('listitem')[3]!;
     expect(copies.querySelector('.bar i')?.getAttribute('style')).toBe('width: 3%;');
     expect([...copies.querySelectorAll('.dp-n bdi')].map(name => name.textContent)).toEqual(['Acme Robotics']);
-    expect(within(disk).getByText('Hornhoof in all: 132 GB of 460 GB')).toBeInTheDocument();
+    expect(within(disk).getByText('Hornhoof in all: 113 GB of 460 GB')).toBeInTheDocument();
+  });
+
+  it("shows the employees' working folders of each node as a row of its own, named by its plan, the biggest first, in the volumes", async () => {
+    withDisk(DISK, undefined, FOLDERS);
+    render(<Machines me={ME} />);
+    const disk = partOf(await laptop(), 'Disk by part');
+    expect(rows(disk)).toEqual([
+      'Images60 GB', 'Volumes30 GB', 'Build cache20 GB', "Employees' working folders on Codex, in the volumes8 GB", 'Check temp files, in the volumes5 GB',
+      "Employees' working folders on Claude, in the volumes4 GB", 'Containers3 GB', 'Terminal recordings, in the volumes2 GB', "Employees' working folders on the machine's own node, in the volumes0 GB",
+    ]);
+    expect([...disk.querySelectorAll('.dp-n bdi')].map(name => name.textContent)).toEqual(['Codex', 'Claude']);
+    expect(within(disk).getAllByRole('listitem')[3]!.querySelector('.bar i')?.getAttribute('style')).toBe('width: 2%;');
+    expect(within(disk).getByText('Hornhoof in all: 113 GB of 460 GB')).toBeInTheDocument();
+  });
+
+  it("says each node's working folders in Russian", async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    withDisk(DISK, undefined, FOLDERS);
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    const disk = partOf(await laptop(), 'Диск по частям');
+    expect(rows(disk)).toEqual([
+      'Образы60 ГБ', 'Тома30 ГБ', 'Кэш сборки20 ГБ', 'Рабочие папки сотрудников на Codex, в томах8 ГБ', 'Временные файлы проверок, в томах5 ГБ',
+      'Рабочие папки сотрудников на Claude, в томах4 ГБ', 'Контейнеры3 ГБ', 'Записи терминалов, в томах2 ГБ', 'Рабочие папки сотрудников на собственной ноде машины, в томах0 ГБ',
+    ]);
   });
 
   it('says the copies in Russian, and says none when the machine holds none', async () => {

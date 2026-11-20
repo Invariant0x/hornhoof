@@ -920,6 +920,9 @@ export type MachineView = {
   load: NodeLoad | null;
   /* The copies of company databases it holds, inside Docker's volumes: none while unmeasured. Older servers omit it. */
   replicas?: MachineReplicas | null;
+  /* The employees' working folders of each of its nodes, by the plan the node serves (none for the machine's own node), the
+     biggest first: none of a node that says nothing of its disk. Older servers omit it. */
+  folders?: { plan: string | null; bytes: number }[];
   /* Takes the company's test runs when it is the freest machine. */
   lendsTests: boolean;
   running: Running;

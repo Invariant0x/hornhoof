@@ -22,7 +22,7 @@ import { MachineConnections } from '../ui/MachineConnections';
 import { ProgramVersions } from '../ui/ProgramVersions';
 import { TickBox } from '../ui/TickBox';
 import { DrainLine, DrainMark } from '../ui/MachineDrain';
-import { DiskParts, gigabytes, LowDisk } from '../ui/MachineDisk';
+import { DiskParts, gigabytes, LowDisk, type FolderRow } from '../ui/MachineDisk';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 import { addablePlans, machinePool, machineRows, type MachineRow } from './machine-rows';
 import { everyVisible } from '../guard';
@@ -36,6 +36,14 @@ const SMALLER = 1.1;
 const CERT_WARNING_MS = 14 * 24 * 3600_000;
 
 const SYSTEMS: Record<string, string> = { darwin: 'macOS', linux: 'Linux' };
+
+/* Each node's working folders by the name of the plan it serves, as its card names the plan; none for the machine's own node. */
+const folderRows = (t: Messages, row: MachineRow, subs: SubView[]): FolderRow[] =>
+  (row.folders ?? []).map(({ plan, bytes }) => {
+    const sub = subs.find(s => s.id === plan);
+    const provider = row.plans.find(p => p.id === plan)?.provider;
+    return { plan: sub ? [subName(t, sub), sub.tier].filter(Boolean).join(' ') : provider ? PROVIDER_NAMES[provider] : null, bytes };
+  });
 
 const busyShare = (load: number, cpus: number) => Math.min(100, Math.round((load / Math.max(1, cpus)) * 100));
 
@@ -652,7 +660,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
           {row.checkError && <p className="machine-note">{row.checkError}</p>}
           <NetworkPlace row={row} />
         </Part>
-        {row.online && row.load?.disk && <DiskParts disk={row.load.disk} replicas={row.replicas ?? null} />}
+        {row.online && row.load?.disk && <DiskParts disk={row.load.disk} replicas={row.replicas ?? null} folders={folderRows(t, row, subs)} />}
       </section>
       <RunningNow title={t.machines.runningNow} label={t.machines.runningOn(row.hostname)} agents={row.running.agents} parts={row.running.parts} online={row.online} me={me} />
       <section className="blk blk-side">

@@ -970,6 +970,11 @@ export const en = {
       other: (gb: string) => `Everything else: ${gb} GB`,
       /* The copies of company databases, already inside the volumes, then the companies the server can name. */
       replicas: (count: number) => `Company database copies, in the volumes: ${count}`,
+      /* The working folders of the employees on one node, by the plan it serves, or of the machine's own node, which has none. */
+      folders: (plan: string) => `Employees' working folders on ${plan}`,
+      ownNode: "Employees' working folders on the machine's own node",
+      /* A part a node keeps in its own folder, which is a Docker volume, so it is already inside the volumes. */
+      inVolumes: (name: string) => `${name}, in the volumes`,
       docker: (free: string, total: string) => `Docker's own disk: ${free} GB free of ${total} GB`,
       low: (since: string) => `Short of disk space since ${since}: it takes no new checks or builds until space is back. Its turns go on.`,
       mark: 'Low on disk',

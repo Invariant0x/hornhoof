@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DISK_PARTS, DiskReport, MachineReplicas, parseNodeMessage } from '../src/index.js';
+import { DISK_PARTS, DiskReport, MachineReplicas, NODE_DISK_PARTS, parseNodeMessage } from '../src/index.js';
 
 const GB = 1e9;
 const LOAD = { cpus: 8, load: 1.5, memFree: 4 * GB, memTotal: 16 * GB, tests: 0, jobs: 2 };
@@ -17,6 +17,10 @@ const load = (more: object) => parseNodeMessage(JSON.stringify({ type: 'load', .
 describe("a node's disk report", () => {
   it("names the parts of the disk that are Hornhoof's, in the order the screens show them", () => {
     expect(DISK_PARTS).toEqual(['images', 'containers', 'volumes', 'buildCache', 'workingCopies', 'recordings', 'checkTemp']);
+  });
+
+  it('names the parts each node measures in its own folder, apart from what the whole machine shares', () => {
+    expect(NODE_DISK_PARTS).toEqual(['workingCopies', 'recordings', 'checkTemp']);
   });
 
   it('comes with the load of a newer node, in its hello and on its own', () => {

@@ -6,6 +6,10 @@ import { z } from 'zod';
 export const DISK_PARTS = ['images', 'containers', 'volumes', 'buildCache', 'workingCopies', 'recordings', 'checkTemp'] as const;
 export const DiskPart = z.enum(DISK_PARTS);
 export type DiskPart = z.infer<typeof DiskPart>;
+/* The parts each node measures in its own folder, /data, apart from the rest, which the whole machine shares: the same in the
+   report of every node on it. A node's folder is a Docker volume of its own, so where the volumes are measured these are
+   inside them. */
+export const NODE_DISK_PARTS = ['workingCopies', 'recordings', 'checkTemp'] as const satisfies readonly DiskPart[];
 
 const Bytes = z.number().int().min(0);
 /* How many of its latest removals a node names, and how many of the copies it keeps. */
