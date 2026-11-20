@@ -236,52 +236,59 @@ remove_in() (
   for name in "$@"; do rm -f -- "./${name:?}" 2> /dev/null || true; done
 )
 
-# device <path>: the file system what is at the path is on.
-device() {
-  stat -c '%d' -- "$1" 2> /dev/null || stat -f '%d' -- "$1" 2> /dev/null
+# The mount of the opened directory. On Linux a bind mount can have the same device number, so use its mount ID.
+# The updater's macOS shell tests use the device number.
+directory_mount() (
+  local field value
+  if [[ "$OSTYPE" != linux* ]]; then
+    stat -f '%d' -- . 2> /dev/null
+    exit
+  fi
+  exec 8< . || exit 1
+  while read -r field value; do
+    [ "$field" = mnt_id: ] || continue
+    case "$value" in '' | *[!0-9]*) exit 1 ;; esac
+    printf '%s\n' "$value"
+    exit
+  done < /proc/self/fdinfo/8
+  exit 1
+)
+
+# Remove a direct entry. Walk a directory only from its own working directory on the parent's mount.
+# A link is unlinked by its name, and a directory left after a failed walk stays for the next pass.
+clear_entry() {
+  local item=$1 here=$2 mount=$3 depth=$4 actual child_mount
+  [ -L "$item" ] || [ -e "$item" ] || return 0
+  if [ ! -L "$item" ] && [ -d "$item" ]; then
+    (
+      cd -P -- "$item" 2> /dev/null &&
+        actual=$(physical_dir) && [ "$actual" = "${here%/}/${item#./}" ] &&
+        child_mount=$(directory_mount) && [ "$child_mount" = "$mount" ] &&
+        clear_here "$((depth + 1))"
+    ) && rmdir -- "$item" 2> /dev/null
+  else
+    rm -f -- "$item" 2> /dev/null
+  fi
 }
 
-# clear_here [depth]: empties the folder the shell entered by what it really is. A folder in it is entered the same way,
-# by what it really is and only on the same file system, emptied in a shell of its own, and removed; anything else goes
-# itself, a link too, never what it points to. Nothing is ever deleted by a path that leads through a folder, so a folder
-# swapped for a link meanwhile, even by a process that holds it open, is never followed: the link stays, as does a folder
-# that is no longer what it was. All else goes, and this fails when anything stayed. A tree more than 16 folders deep is
-# left whole below that, as none of the updater's own is.
+# clear_here [depth]: empties the opened folder by direct names, within the updater's supported tree depth.
 clear_here() {
-  local depth=${1:-0} here dev item status=0
+  local depth=${1:-0} here mount item status=0
   [ "$depth" -lt 16 ] || return 1
-  here=$(physical_dir) && dev=$(device .) || return 1
+  here=$(physical_dir) && mount=$(directory_mount) || return 1
   for item in ./* ./.[!.]* ./..?*; do
-    [ -L "$item" ] || [ -e "$item" ] || continue
-    if [ ! -L "$item" ] && [ -d "$item" ]; then
-      (cd -P -- "$item" 2> /dev/null && [ "$(physical_dir)" = "${here%/}/${item#./}" ] && [ "$(device .)" = "$dev" ] && clear_here "$((depth + 1))") &&
-        rmdir -- "$item" 2> /dev/null || status=1
-    else
-      rm -f -- "$item" 2> /dev/null || status=1
-    fi
+    clear_entry "$item" "$here" "$mount" "$depth" || status=1
   done
   return "$status"
 }
 
-# remove_folders <name>...: folders of the control folder go with everything in them, as a wipe removes them. Each is
-# first renamed, which follows no link, into a private folder of the updater's own made beside it, where the app and the
-# keeper cannot reach it by its path, and is emptied there by clear_here; a link at the name goes the same way, itself.
-# A private folder an earlier pass could not empty is emptied too. Fails when anything stayed, so the wipe tries again.
+# remove_folders <name>...: clear only the named entries of the control folder. Keep an incomplete tree at its name
+# so the files step can try again without relying on private directory names in the shared parent.
 remove_folders() (
-  local name here private target status=0
-  entered "$CONTROL" && here=$(physical_dir) || exit 1
-  if [[ "$OSTYPE" == linux* ]]; then exec 9< . || exit 1; fi
+  local name here mount status=0
+  entered "$CONTROL" && here=$(physical_dir) && mount=$(directory_mount) || exit 1
   for name in "$@"; do
-    [ -L "./$name" ] || [ -e "./$name" ] || continue
-    private=$(mktemp -d .remove.XXXXXXXX) || { status=1; continue; }
-    target="../$name"
-    # Keep the source in the entered folder even if the private folder is moved.
-    if [[ "$OSTYPE" == linux* ]]; then target="/proc/self/fd/9/$name"; fi
-    (enter_stage "$here" "$private" && move_over "$target" ./gone) || status=1
-  done
-  for private in ./.remove.*; do
-    [ ! -L "$private" ] && [ -d "$private" ] && [ -O "$private" ] || continue
-    (enter_stage "$here" "${private#./}" && clear_here) && rmdir -- "$private" 2> /dev/null || status=1
+    clear_entry "./${name:?}" "$here" "$mount" 0 || status=1
   done
   exit "$status"
 )

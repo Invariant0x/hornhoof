@@ -555,7 +555,7 @@ wipe_step() {
       ;;
     files)
       WIPE_WHY='could not remove the files of its database'
-      # The app and the keeper can write in these folders, so none is removed by its path: remove_folders follows no link.
+      # Remove the shared trees by direct names from opened directories on the control mount.
       remove_folders dumps restore schema uploads &&
         rm -f "$SERVER_DIR"/backups/hornhoof-*.sql.gz "$SERVER_DIR"/backups/hornhoof-*.sql.gz.part "$SERVER_DIR"/backups/hornhoof-*.tunnel.json "$CONTROL/schema.json" "$CONTROL/dump.json" "$CONTROL/upload.json"
       ;;
