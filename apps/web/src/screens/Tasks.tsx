@@ -503,8 +503,10 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const asksYou = (id: string) => questions.has(id);
   const place_ = (p: TaskLine['department']) => placeName(t, org, p);
   const employees = new Map(org?.departments.flatMap(d => d.employees.map(e => [e.id, e] as const)));
+  const working = workingNow(all, org);
+  const workingIds = new Set(working.map(task => task.id));
   const rows: Rows = {
-    selected, onOpenTask, asksYou, questionAt, placeName: place_,
+    selected, onOpenTask, asksYou, questionAt, placeName: place_, now: id => workingIds.has(id),
     departmentTemplate: id => places?.departments.find(d => d.id === id)?.templateKey ?? org?.departments.find(d => d.id === id)?.templateKey,
     turnkeyOf: id => employees.get(id)?.turnkey,
     stageOwner: (stage: PipelineStage) => org?.departments.flatMap(d => d.roles).find(r => r.id === stage.ownerRole)?.title[language] ?? stage.owner?.name,
@@ -517,7 +519,6 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
     },
   };
   const own = mine(all, goals, who);
-  const working = workingNow(all, org);
   const waitsOnWho = waitingOn(all, recipient);
   const waitsOnPeople = waitingOnPeople(all);
   const failures = all.filter(task => boardStatus(task) === 'failure');

@@ -2185,6 +2185,16 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   /* The card's width on a wide screen, and the room the strips of minimized windows keep at the right edge beside it. */
   --tracker-card-size: 460px;
   --tracker-strips-room: 32px;
+  /* The status dot and the filled core of a task worked on now, and that core's breath (style book 1.6, section 4 "Working
+     now"; Design #1628): dbreathe's 2.6 s, down to the core's weakest opacity. Each skin sets that in src/skins/registry.ts,
+     measured at 3:1 or more on the row, the row under the pointer and the open row; 1 here, no swing, until a skin is on
+     the page. No colour here (note #72). */
+  --tracker-dot-size: 14px;
+  --tracker-dot-ring: 2px;
+  --tracker-dot-core: 6px;
+  --tracker-pulse-time: 2.6s;
+  --tracker-pulse-ease: ease-in-out;
+  --tracker-pulse-low: 1;
 }
 :root[data-scheme='light'] {
   --tracker-mark-ink: var(--ink);
@@ -2265,13 +2275,28 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-row-caret:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
 .tr-caret { inline-size: 0; block-size: 0; border: 3.5px solid transparent; border-block-start-color: currentColor; margin-block-start: 3px; }
 .tr-row-caret[aria-expanded="false"] .tr-caret { margin-block-start: 0; border-block-start-color: transparent; border-inline-start-color: currentColor; margin-inline-start: 3px; }
-.tr-status-dot { flex: none; box-sizing: border-box; inline-size: 14px; block-size: 14px; margin-block-start: max(0px, calc((max(var(--row), 1lh) - 14px) / 2)); border: 2px solid var(--line2); border-radius: 50%; }
+.tr-status-dot {
+  flex: none; position: relative; box-sizing: border-box; inline-size: var(--tracker-dot-size); block-size: var(--tracker-dot-size);
+  margin-block-start: max(0px, calc((max(var(--row), 1lh) - var(--tracker-dot-size)) / 2)); border: var(--tracker-dot-ring) solid var(--line2); border-radius: 50%;
+}
 .tr-status-dot.working { border-color: var(--tracker-working-ring); }
 .tr-status-dot.waiting, .tr-status-dot.you { border-color: var(--tracker-waiting-ring); }
 .tr-status-dot:is(.blocked, .failure) { border-color: var(--pink); }
 .tr-status-dot.review { border-color: var(--tracker-palette-violet); }
 .tr-status-dot.done { border-color: var(--ok); background: var(--ok); }
 .tr-status-dot.open, .tr-status-dot.cancelled { border-style: dashed; }
+/* A task in work an employee works on now: a filled core in the ring's colour, always there, which is the difference with
+   motion or without (::before, at the weakest opacity); over it the same core breathes on dbreathe, 0 to 1 and back, so
+   the core as a whole goes from --tracker-pulse-low to 1. The ring never moves; nothing leaves the 14 px box or scales. Every
+   such dot breathes in one phase from the wall clock (ui/pulse.ts). */
+.tr-status-dot.working.now::before, .tr-status-dot.working.now::after {
+  content: ''; position: absolute; inset: 0; margin: auto; inline-size: var(--tracker-dot-core); block-size: var(--tracker-dot-core);
+  border-radius: 50%; background: var(--tracker-working-ring); pointer-events: none;
+}
+.tr-status-dot.working.now::before { opacity: var(--tracker-pulse-low); }
+.tr-status-dot.working.now::after { opacity: 1; animation: dbreathe var(--tracker-pulse-time) var(--tracker-pulse-ease) infinite; }
+/* Still for less motion, by its own rule as well as the page's: the full core. */
+@media (prefers-reduced-motion: reduce) { .tr-status-dot.working.now::after { animation: none; } }
 .tr-title { min-block-size: var(--row); min-inline-size: var(--row); max-inline-size: 100%; margin: 0; color: var(--ink); text-align: start; font-weight: 400; overflow-wrap: anywhere; }
 .tr-title:hover { color: var(--cyan-ink); }
 .tr-branch-count { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--muted); }

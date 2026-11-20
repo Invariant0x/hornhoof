@@ -191,8 +191,11 @@ it('draws the rows, rings, pills and chips at the mockup sizes', () => {
   expect.soft(decl('.tr-line', 'flex-wrap')).toBe('wrap');
   expect.soft(decl('.tr-task-name', 'padding-inline-start') ?? '').toContain('36px');
   /* .dot: a 14px ring of 2px; .caret 18px; .num 12px mono; .subn 12px; .tg 11px 600 with a border. */
-  expect.soft(decl('.tr-status-dot', 'inline-size')).toBe('14px');
-  expect.soft(decl('.tr-status-dot', 'border')).toBe('2px solid var(--line2)');
+  /* Its size and ring are tokens of their own since the working-now core (#1628): the same 14 px and 2 px. */
+  expect.soft(decl('.tr-status-dot', 'inline-size')).toBe('var(--tracker-dot-size)');
+  expect.soft(decl(':root', '--tracker-dot-size')).toBe('14px');
+  expect.soft(decl('.tr-status-dot', 'border')).toBe('var(--tracker-dot-ring) solid var(--line2)');
+  expect.soft(decl(':root', '--tracker-dot-ring')).toBe('2px');
   expect.soft(decl('.tr-status-dot.open', 'border-style')).toBe('dashed');
   expect.soft(decl('.tr-row-caret', 'inline-size')).toBe('18px');
   expect.soft(decl('.tr-line .tr-no', 'font')).toBe('12px var(--f-mono)');
