@@ -4,6 +4,8 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { SubView } from '../src/types';
 import { serveApi } from './api';
+import type { DepartmentTree, EventView } from '../src/types';
+import { agentRoutes } from './agent-window-api';
 
 /* The one department serveApi answers with, whose tasks the tracker lists. */
 const DEPARTMENT_ID = 'd2';
@@ -31,6 +33,25 @@ const PLAN = {
 type Lang = 'en' | 'ru';
 const words = (lang: Lang) => (lang === 'en' ? en : ru);
 
+/* The department's work tree of the running turn, with nobody's time in it yet: the tree and the speed drawer show it. */
+const TREE: DepartmentTree = {
+  now: '2026-11-19T23:00:00.000Z', turn: { id: 'u3', number: 3, branch: 'turn-3', startedAt: '2026-11-19T21:00:00.000Z' }, repository: true,
+  lines: [], time: [], idle: [],
+};
+/* Bruno of the department, who works on a plan of the CEO's, his card, and one line of his conversation. */
+const EMPLOYEE_ROUTES = agentRoutes({ awake: false, hasTask: false, messages: [], connections: 0 });
+const LINE: EventView = { seq: 1, kind: 'text', data: { text: 'The checkout form checks the card number before it sends it.' }, jobId: 'j1', person: null, at: '2026-11-19T22:00:00.000Z' };
+const AWAKE = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0, terminal: false, canType: true, turnRefused: null };
+
+const sections = (page: Page, lang: Lang) => page.getByRole('navigation', { name: words(lang).shell.sections, exact: true });
+const atPath = (path: string) => async (page: Page) => { await page.goto(path, { waitUntil: 'domcontentloaded' }); };
+/* The department opens at its own address; a button of its tools opens what the test holds. */
+const inDepartment = (button: (lang: Lang) => string) => async (page: Page, lang: Lang) => {
+  await page.goto(`/departments/${DEPARTMENT_ID}`, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: button(lang), exact: true }).click();
+};
+const departmentShown = (page: Page, lang: Lang, button: string) => [sections(page, lang), page.locator('.crumb h2'), page.getByRole('button', { name: button, exact: true })];
+
 /* A screen whose data the test holds back: where it opens, which answer is held, the blocks it shows before that answer,
    where the indicator stands, and what the answer brings. */
 type Screen = {
@@ -41,6 +62,13 @@ type Screen = {
   shown(page: Page, lang: Lang): Locator[];
   place(page: Page): Locator;
   arrived(page: Page, lang: Lang): Locator;
+  /* What else the screen reads, as the server answers it. */
+  serves?: Record<string, unknown>;
+};
+
+const byTab = (tab: 'people' | 'machines' | 'subscriptions') => async (page: Page, lang: Lang) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('navigation').getByRole('button', { name: words(lang).shell.tabs[tab], exact: true }).click();
 };
 
 const SCREENS: Screen[] = [
@@ -57,14 +85,62 @@ const SCREENS: Screen[] = [
   {
     name: 'subscriptions',
     held: '/api/subscriptions',
-    open: async (page, lang) => {
-      await page.goto('/', { waitUntil: 'domcontentloaded' });
-      await page.getByRole('navigation').getByRole('button', { name: words(lang).shell.tabs.subscriptions, exact: true }).click();
-    },
+    open: byTab('subscriptions'),
     answer: route => route.fulfill({ json: { subscriptions: [PLAN], apiPlaces: null } }),
     shown: (page, lang) => [page.getByRole('navigation').first(), page.getByRole('heading', { level: 1, name: words(lang).subs.heading, exact: true })],
     place: page => page.locator('section.subs'),
     arrived: (page, lang) => page.getByRole('button', { name: words(lang).tables.openCard('Codex'), exact: true }),
+  },
+  {
+    name: 'map',
+    held: '/api/org',
+    open: atPath('/'),
+    answer: route => route.fallback(),
+    shown: (page, lang) => [sections(page, lang)],
+    place: page => page.locator('.map'),
+    arrived: (page, lang) => page.getByRole('button', { name: words(lang).map.openOrchestrator, exact: true }),
+  },
+  {
+    name: 'department',
+    held: '/api/org',
+    open: atPath(`/departments/${DEPARTMENT_ID}`),
+    answer: route => route.fallback(),
+    shown: (page, lang) => [sections(page, lang)],
+    place: page => page.locator('.dview'),
+    arrived: (page, lang) => page.getByRole('region', { name: words(lang).dept.schema, exact: true }),
+  },
+  {
+    name: 'department-tree',
+    held: `/api/departments/${DEPARTMENT_ID}/tree`,
+    open: inDepartment(lang => words(lang).dept.treeButton),
+    answer: route => route.fulfill({ json: { tree: TREE } }),
+    /* The tool that opened the tree now takes back to the schema. */
+    shown: (page, lang) => departmentShown(page, lang, words(lang).dept.mapButton),
+    place: page => page.locator('.tview'),
+    arrived: (page, lang) => page.getByRole('region', { name: words(lang).dept.treeCanvas, exact: true }),
+  },
+  {
+    name: 'department-speed',
+    held: `/api/departments/${DEPARTMENT_ID}/tree`,
+    open: inDepartment(lang => words(lang).dept.speed),
+    answer: route => route.fulfill({ json: { tree: TREE } }),
+    shown: (page, lang) => [...departmentShown(page, lang, words(lang).dept.speed), page.locator('.dv-drawer .dv-drawer-h')],
+    place: page => page.locator('aside.dv-drawer'),
+    arrived: page => page.locator('aside.dv-drawer dl.sum'),
+  },
+  {
+    name: 'employee-window',
+    held: '/api/agents/b1/events',
+    /* His window opens from his chip on the department's schema; his history and state are what it waits for. */
+    open: async (page, lang) => {
+      await page.goto(`/departments/${DEPARTMENT_ID}`, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('region', { name: words(lang).dept.members, exact: true }).getByRole('button', { name: /Bruno/ }).click();
+    },
+    answer: route => route.fulfill({ json: { events: [LINE], state: AWAKE } }),
+    shown: (page, lang) => [sections(page, lang), page.locator('aside.orch .t-bar'), page.getByRole('button', { name: words(lang).window.close, exact: true })],
+    place: page => page.locator('.agent-conversation'),
+    arrived: (page, lang) => page.getByRole('log', { name: words(lang).window.chat.conversation, exact: true }),
+    serves: { '/api/org': EMPLOYEE_ROUTES['/api/org'], '/api/agents/b1': EMPLOYEE_ROUTES['/api/agents/b1'] },
   },
 ];
 
@@ -79,6 +155,7 @@ async function openHeld(page: Page, screen: Screen, look: { lang: Lang; theme: s
     localStorage.setItem('hh-theme', theme);
   }, look);
   await serveApi(page);
+  for (const [path, json] of Object.entries(screen.serves ?? {})) await page.route(url => pathOf(url) === path, route => route.fulfill({ json }));
   let asked = 0;
   let fail = false;
   let open: () => void = () => {};
@@ -203,3 +280,52 @@ for (const screen of SCREENS) for (const look of LOOKS) {
     await shot('loaded');
   });
 }
+
+/* 20.11: the map drew itself before the person's arrangement came, and then every block it moved jumped to its place.
+   The map now stands where it will be only once both the company and the arrangement came; an arrangement that fails to
+   come leaves the map as it places itself, as before. */
+test.describe('map arrangement', () => {
+  async function holdLayout(page: Page) {
+    await page.clock.install({ time: Date.parse('2026-11-19T23:00:00Z') });
+    await page.setViewportSize({ width: EN.width, height: 900 });
+    await page.addInitScript(() => localStorage.setItem('hh-lang', 'en'));
+    await serveApi(page);
+    let open: () => void = () => {};
+    const gate = new Promise<void>(go => { open = go; });
+    let fail = false;
+    await page.route(url => pathOf(url) === '/api/map/layout', async route => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      await gate;
+      if (fail) return route.fulfill({ status: 500, json: { error: { code: 'internal', message: 'The server could not answer.' } } });
+      return route.fulfill({ json: { blocks: { [`dept:${DEPARTMENT_ID}`]: { x: 40, y: 700 } } } });
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    return { release: () => open(), failing: () => { fail = true; } };
+  }
+
+  test('the map waits for the arrangement, then shows its blocks where the person put them, and they stay', async ({ page }) => {
+    const t = words('en');
+    const hold = await holdLayout(page);
+    const waiting = page.locator('.map').getByRole('status').filter({ hasText: t.common.loading });
+    await expect(waiting).toBeVisible();
+    const department = page.getByRole('button', { name: /^Development/ });
+    await expect(department).toHaveCount(0);
+    hold.release();
+    await expect(department).toBeVisible();
+    await expect(waiting).toHaveCount(0);
+    const placed = await department.boundingBox();
+    await page.clock.runFor(2_000);
+    expect(await department.boundingBox()).toEqual(placed);
+  });
+
+  test('an arrangement that fails to come leaves the map as it places itself, with nothing to try again', async ({ page }) => {
+    const t = words('en');
+    const hold = await holdLayout(page);
+    await expect(page.locator('.map').getByRole('status').filter({ hasText: t.common.loading })).toBeVisible();
+    hold.failing();
+    hold.release();
+    await expect(page.getByRole('button', { name: /^Development/ })).toBeVisible();
+    await expect(page.locator('.map').getByRole('alert')).toHaveCount(0);
+    await expect(page.locator('.map').getByRole('button', { name: t.app.tryAgain, exact: true })).toHaveCount(0);
+  });
+});

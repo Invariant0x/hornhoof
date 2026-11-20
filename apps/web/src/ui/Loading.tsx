@@ -56,6 +56,10 @@ export function useLoad(parts: LoadPart[], limitMs = LOAD_LIMIT_MS): Load {
   return { phase: 'done', failure: null, retry };
 }
 
+/* A failure of a load said on top of the page: only once the data came. Before that, the load says it where the data would
+   stand. */
+export const onTop = (data: unknown, failure: unknown): unknown => (data === undefined || data === null ? null : failure);
+
 /* Where a screen's data will stand while it comes: the shared indicator, then why it stalled with Try again, then nothing
    once it all came. */
 export function LoadState({ load }: { load: Load }) {
