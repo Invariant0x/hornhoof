@@ -1088,21 +1088,37 @@ describe('what waits says that nothing waits only once all of it came', () => {
 describe('the dot of work going on now', () => {
   const dotOf = (list: HTMLElement, name: string) => rowOf(list, name).querySelector('.tr-status-dot')!;
 
+  /* Design #1628: a pulsing dot's label is one whole phrase of its own, and no dot has a title, which some screen readers
+     would read a second time. */
   it.each([
-    ['en', en.tracker.groups.working, 'working now'],
-    ['ru', ru.tracker.groups.working, 'работают сейчас'],
-  ])('marks only the task an employee works on now, and says so to a screen reader, in %s', async (language, inWork, now) => {
+    ['en', en.tracker.groups.working, 'In work, working now'],
+    ['ru', ru.tracker.groups.working, 'В работе, сейчас работают'],
+  ])('marks only the task an employee works on now, and says so to a screen reader in one phrase, in %s', async (language, inWork, now) => {
     localStorage.setItem('hh-lang', language);
     try {
       shell('/tasks?show=company');
       const list = await screen.findByRole('region', { name: (language === 'en' ? en : ru).tracker.views.list });
       await waitFor(() => expect(dotOf(list, '#21 Take card payments')).toHaveClass('now'));
-      expect(dotOf(list, '#21 Take card payments')).toHaveAccessibleName(`${inWork}, ${now}`);
+      expect((language === 'en' ? en : ru).tracker.dot.workingNow).toBe(now);
+      expect(dotOf(list, '#21 Take card payments')).toHaveAccessibleName(now);
       expect(dotOf(list, '#23 Refund button')).not.toHaveClass('now');
-      expect(dotOf(list, '#23 Refund button').getAttribute('aria-label')).not.toContain(now);
+      expect(dotOf(list, '#23 Refund button')).toHaveAccessibleName(inWork);
+      expect([...list.querySelectorAll('.tr-status-dot[title]')]).toEqual([]);
     } finally {
       localStorage.clear();
     }
+  });
+
+  /* Design #1628: only a task in work gets the core. One that waits for a person keeps its own ring, though an employee
+     works on it now. */
+  it('marks no task outside work, even one an employee works on now', async () => {
+    const on = (task: { id: string; number: number; title: string }) => ({ status: 'working' as const, task: { ...task, echelons: taskRoute() } });
+    const both: Org = { ...DEV_ORG, departments: DEV_ORG.departments.map(d => ({ ...d, employees: d.employees.map(e => (e.id === 'b1' ? { ...e, ...on({ id: 't21', number: 21, title: 'Take card payments' }) } : e.id === 'b0' ? { ...e, ...on({ id: 't24', number: 24, title: 'Fix the login page' }) } : e)) })) };
+    shell('/tasks?show=company', { 'GET /api/org': () => [200, both] });
+    const list = await main();
+    await waitFor(() => expect(dotOf(list, '#21 Take card payments')).toHaveClass('now'));
+    expect(dotOf(list, '#24 Fix the login page')).not.toHaveClass('now');
+    expect(dotOf(list, '#24 Fix the login page')).toHaveAccessibleName(en.tracker.groups.waiting);
   });
 
   it('starts and stops as the company says who works on what, with no reload', async () => {
