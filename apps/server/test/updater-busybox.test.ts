@@ -42,17 +42,41 @@ function filled(...dirs: string[]): void {
     }
   }
 }
-/* A step of the updater while a process of the app swaps the folder for a link to outside, by its path, as soon as
-   anything in it is gone. The step ends whether or not that ever happens. */
-const racing = (folder: string, outside: string, step: string) => `
-  ( until [ ! -e '${folder}/f1' ] || [ "$(ls '${folder}' 2> /dev/null | wc -l)" -lt ${MANY} ]; do :; done
-    mv -T '${folder}' '${folder}.moved' 2> /dev/null && ln -s '${outside}' '${folder}' ) &
+/* A process of the app that swaps the folder for a link to outside, by its path, the moment the first file the folder
+   lists is gone. BusyBox find and rm go through a folder in the order it lists, so that is the first file they delete
+   there. The racer watches that one name in a tight loop, so even a fast delete of the whole folder cannot finish
+   before the swap; a racer that started a command per look lost that race on a fast machine. */
+const RACER = `const fs = require('node:fs');
+const [folder, outside, ready] = process.argv.slice(2);
+const list = fs.opendirSync(folder);
+const first = \`\${folder}/\${list.readSync().name}\`;
+list.closeSync();
+fs.writeFileSync(ready, '');
+const end = Date.now() + 60000;
+while (fs.existsSync(first)) if (Date.now() > end) process.exit(0);
+try {
+  fs.renameSync(folder, \`\${folder}.moved\`);
+  fs.symlinkSync(outside, folder);
+} catch {
+  /* The folder went before the racer could move it, as the updater moves a folder away before it deletes in it. */
+}
+`;
+/* A step of the updater with that racer at work. The step starts once the racer watches, and ends whether or not the
+   swap ever happens. */
+function racing(s: Stand, folder: string, outside: string, step: string): string {
+  const racer = join(s.dir, 'racer.cjs');
+  const ready = join(s.dir, 'racer.ready');
+  writeFileSync(racer, RACER);
+  return `
+  '${process.execPath}' '${racer}' '${folder}' '${outside}' '${ready}' &
   racer=$!
-  /bin/sleep 0.2
+  waited=0
+  until [ -e '${ready}' ] || [ "$waited" -ge 1000 ]; do /bin/sleep 0.01; waited=$((waited + 1)); done
   if ${step}; then echo done; else echo 'not done'; fi
   kill "$racer" 2> /dev/null || true
   wait "$racer" 2> /dev/null || true
 `;
+}
 /* How many files the tree's own folder still holds, wherever the racer left it. */
 const leftIn = (folder: string) =>
   [folder, `${folder}.moved`].filter(dir => existsSync(dir) && !lstatSync(dir).isSymbolicLink()).reduce((sum, dir) => sum + readdirSync(dir).length, 0);
@@ -103,7 +127,7 @@ tests(BUSYBOX ? `the updater with the commands of BusyBox 1.37 (${BUSYBOX})` : '
     const outside = join(s.dir, 'outside');
     const sub = join(s.control, 'dumps', 'sub');
     filled(sub, outside);
-    const r = await runUpdaterStep(s, racing(sub, outside, 'sweep_dumps'), busybox(s).env);
+    const r = await runUpdaterStep(s, racing(s, sub, outside, 'sweep_dumps'), busybox(s).env);
     expect(r.code, r.out).toBe(0);
     expect(readdirSync(outside).length).toBe(MANY);
   });
@@ -114,7 +138,7 @@ tests(BUSYBOX ? `the updater with the commands of BusyBox 1.37 (${BUSYBOX})` : '
     const outside = join(s.dir, 'outside');
     const sub = join(s.control, 'dumps', 'sub');
     filled(sub, outside);
-    const r = await runUpdaterStep(s, racing(sub, outside, 'wipe_step files'), busybox(s).env);
+    const r = await runUpdaterStep(s, racing(s, sub, outside, 'wipe_step files'), busybox(s).env);
     expect(r.code, r.out).toBe(0);
     expect(readdirSync(outside).length).toBe(MANY);
     expect(existsSync(join(s.control, 'dumps'))).toBe(false);
@@ -126,7 +150,7 @@ tests(BUSYBOX ? `the updater with the commands of BusyBox 1.37 (${BUSYBOX})` : '
     const outside = join(s.dir, 'outside');
     const tree = join(s.dir, 'tree');
     filled(join(tree, 'sub'), outside);
-    const r = await runUpdaterStep(s, racing(join(tree, 'sub'), outside, `(cd -P -- '${tree}' && clear_here)`), busybox(s).env);
+    const r = await runUpdaterStep(s, racing(s, join(tree, 'sub'), outside, `(cd -P -- '${tree}' && clear_here)`), busybox(s).env);
     expect(r.code, r.out).toBe(0);
     expect(readdirSync(outside).length).toBe(MANY);
     expect(leftIn(join(tree, 'sub'))).toBe(0);
