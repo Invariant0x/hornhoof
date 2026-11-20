@@ -391,7 +391,8 @@ describe('department owner answering head on a large company', () => {
       );
 
       expect(await screen.findByRole('region', { name: 'Department schema' })).toBeInTheDocument();
-      expect(paused).toBeGreaterThan(0);
+      /* The map behind it is drawn once its own load is done (#1620), which may be a moment after the department. */
+      await waitFor(() => expect(paused).toBeGreaterThan(0));
       expect(unpaused).toBe(0);
 
       fireEvent.click(screen.getByRole('button', { name: 'Back to the map' }));

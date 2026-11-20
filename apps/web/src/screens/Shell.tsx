@@ -298,7 +298,15 @@ function MapWorkspace({ tab, me, dept, deptId, denied, missingDepartment, panel,
 /* A department whose company is still coming stands with the shared indicator where it will be, and says why with Retry
    when it does not come. One the update holds keeps the indicator: the panel says why, and the load asks again after it. */
 function DepartmentWait({ load }: { load: Load }) {
+  if (load.phase === 'done') return null;
   return <div className="dview" aria-busy={load.phase !== 'failed'}><div className="dcanvas dview-wait"><LoadState load={load} form="screen" /></div></div>;
+}
+
+/* The load of a department's company. ready: the department once its load is done, not as soon as the company is there,
+   so the ring keeps its least time; null before, and for a department the company does not have. */
+function useDepartmentLoad(dept: Department | undefined, deptId: string | null, org: Org | null, failure: unknown, loadOrg: () => void) {
+  const load = useLoad(deptId ? [{ data: org, failure, load: loadOrg }] : []);
+  return { load, ready: load.phase === 'done' ? dept : null };
 }
 
 function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, loadOrg, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire, onCrumbs }: MapRouteProps & {
@@ -306,16 +314,14 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
   openTask: (id: string) => void; openTracker: (departmentId: string) => void; openDepartment: (id: string) => void; onHire: (dept: Department) => void;
   onCrumbs: (px: number) => void;
 }) {
-  /* The department shows once its load is done, not as soon as the company is there, so the ring keeps its least time. */
-  const load = useLoad(deptId ? [{ data: org, failure: orgFailure, load: loadOrg }] : []);
+  const { load, ready } = useDepartmentLoad(dept, deptId, org, orgFailure, loadOrg);
   if (tab !== 'map' || denied || missingDepartment) return null;
-  if (load.phase !== 'done') return <DepartmentWait load={load} />;
-  if (!dept) return null;
+  if (!ready) return <DepartmentWait load={load} />;
   return (
     <DepartmentView
-      key={dept.id}
+      key={ready.id}
       me={me}
-      department={dept}
+      department={ready}
       deputies={org?.people ?? []}
       selected={shown}
       panel={panel}
@@ -326,7 +332,7 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
       onOpenDecisions={openDecisions}
       onOpenTracker={openTracker}
       onOpenDepartment={openDepartment}
-      onHire={() => onHire(dept)}
+      onHire={() => onHire(ready)}
       onCrumbs={onCrumbs}
     />
   );
