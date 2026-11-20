@@ -68,9 +68,10 @@ describe('the tracker', () => {
     const user = userEvent.setup();
     shell({ 'GET /api/turns': [200, { turns: [] }], [`GET ${ALL}`]: [200, { tasks: [] }] });
     await openTasks(user);
-    expect(await screen.findByText('No open tasks to answer for.')).toBeInTheDocument();
+    expect(await screen.findByText('The company has no tasks yet.')).toBeInTheDocument();
+    expect(screen.getByText('Create the first one.')).toBeInTheDocument();
     await goTo(user, 'Turns and releases');
-    expect(await screen.findByText(/No turns and no tasks yet/)).toBeInTheDocument();
+    expect(await screen.findByText('No turns or releases yet.')).toBeInTheDocument();
   });
 
   it('answers a question and takes it off the list', async () => {
@@ -601,7 +602,7 @@ describe('cards for the person', () => {
     });
     await openTasks(user);
     const card = await screen.findByRole('region', { name: 'A version was marked without a release' });
-    expect(screen.queryByText('Nothing waits for you.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Nothing waits for your answer.')).not.toBeInTheDocument();
     await user.click(within(card).getByRole('button', { name: 'Got it' }));
     await waitFor(() => expect(calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/api/wait-cards/c1/ack' })));
     await waitFor(() => expect(screen.queryByRole('region', { name: 'A version was marked without a release' })).not.toBeInTheDocument());

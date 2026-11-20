@@ -2090,14 +2090,41 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 /* The main area: each band its whole width, with 20px inside. */
 .tr-main { container: tr-main / inline-size; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; min-inline-size: 0; padding-block-end: 30px; border-block-start: 1px solid var(--line); }
 .tr-main > :not(.tr-top, .tr-bar) { inline-size: auto; margin: 6px 20px 0; }
+/* The tracker's spacing for what a section holds (Design #1633, style book 1.7 section 4): between one section and the next;
+   between the icon, the words and the action of a quiet block; inside a row's cell; the top of an empty block; a row of the
+   list for a mouse, which sizes the empty block. */
+.tr-main { --sec-gap: 24px; --quiet-gap: 10px; --cell-pad: 8px; --empty-top: 16px; --quiet-row: calc(var(--tracker-target-fine) + 13px); }
 /* What waits stands apart from the list or the search results above it, so its heading does not sit on their last line. */
-.tr-main > :is(.tr-hold, .tr-found) + .waiting { margin-block-start: 24px; }
-/* A section that holds nothing (ui/EmptyState.tsx, #1638): apart from the filters or the heading above it, its picture, its
-   words and the one thing to do, in the middle of its room. Its look is its own classes; Design #1633 sets the final one. */
-.empty-state { display: grid; justify-items: center; gap: 8px; margin-block-start: 24px; padding: 24px 16px; text-align: center; }
-.empty-state-art { display: grid; place-items: center; color: var(--muted); }
-.empty-state-art > .ic { width: 32px; height: 32px; }
-.empty-state-text { margin: 0; max-inline-size: 48ch; color: var(--muted); overflow-wrap: anywhere; }
+.tr-main > :is(.tr-hold, .tr-found) + .waiting { margin-block-start: var(--sec-gap); }
+/* The room of a section (ui/EmptyState.tsx Room, #1638): what holds its place while it comes, its empty block and what came
+   share one grid cell, so loading and empty stand at one height; a layer not shown keeps its size unseen. The empty block
+   fills the room, its words at its top. */
+.room { container: room / inline-size; display: grid; min-inline-size: 0; }
+.room > .room-layer { grid-area: 1 / 1; min-inline-size: 0; align-self: start; }
+.room > .room-layer.off { visibility: hidden; }
+.room > .room-empty { display: grid; align-self: stretch; }
+.waiting .room > .room-layer:not(.room-empty) { display: grid; gap: 10px; }
+/* A section that holds nothing: 2 rows of the list high, 4 where it is narrow; the section's icon, the fact and its hint at
+   its start, 16 px under its top; the one thing to do at its end, in the middle of its height, or under the words where the
+   room is narrow. */
+.empty-state { --quiet-rows: 2; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: minmax(0, 1fr); gap: var(--quiet-gap); align-items: start; min-block-size: calc(var(--quiet-rows) * var(--quiet-row)); padding: var(--empty-top) var(--cell-pad) 7px; box-sizing: border-box; border-block-end: 1px solid var(--line); text-align: start; }
+.empty-state-icon.ic { inline-size: 20px; block-size: 20px; color: var(--muted); }
+.empty-state-t { display: grid; gap: 2px; grid-column: 2; margin: 0; min-inline-size: 0; overflow-wrap: anywhere; }
+.empty-state-t > b { color: var(--ink); font: 600 15px/1.3 var(--f-display); }
+.empty-state-t > span { color: var(--muted); font: 400 13.5px/1.45 var(--f-body); }
+.empty-state-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; grid-column: 3; grid-row: 1; align-self: center; }
+.empty-state-acts > .btn { min-block-size: 44px; min-inline-size: 44px; padding: 8px 12px; line-height: 1.4; }
+@container room (max-width: 559px) {
+  .empty-state { --quiet-rows: 4; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: none; align-content: start; }
+  .empty-state-acts { grid-column: 1 / -1; grid-row: auto; }
+}
+/* A company with no tasks at all: its first view, under the Hornhoof mark, in the middle. */
+.empty-state.first { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; justify-items: center; align-content: center; padding-block: 32px 24px; border: 0; text-align: center; }
+.empty-state.first > .load-mark { inline-size: 48px; block-size: 48px; }
+.empty-state.first > :is(.empty-state-t, .empty-state-acts) { grid-column: 1; grid-row: auto; }
+.empty-state.first > .empty-state-t { max-inline-size: 48ch; }
+/* A compact place, as a board column: one line, no icon. */
+.empty-line { margin: 0; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
 .tr-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-inline-size: 0; padding: 10px 20px; border-block-end: 1px solid var(--line); }
 .tr-menu { display: none; }
 .tr-where { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-inline-size: 0; margin: 0; font: 600 16px var(--f-display); overflow-wrap: anywhere; }
@@ -2293,8 +2320,21 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-held .tr-title { display: flex; flex: 1 1 auto; align-items: center; }
 .tr-held .tr-group-toggle { cursor: default; }
 .tr-held .tr-row-line > .load-busy { grid-column: 1 / -1; padding-inline: 8px; }
-/* Past 10 s or once failed, the block that says so stands in the first held row, over the whole width (Design #1656). */
-.tr-held .tr-row-line > .load-fail { grid-column: 1 / -1; margin-block: 6px; }
+/* Past 10 s or once failed, the block that says so covers the first held rows, 2 or 4 where narrow, as the empty block would,
+   and the rest stay (Design #1633 on #1656): one line on a wide list, Retry at its end; under its words where narrow. */
+.tr-held-rows { --quiet-rows: 2; display: grid; min-inline-size: 0; }
+.tr-held-rows > * { grid-area: 1 / 1; min-inline-size: 0; }
+.tr-held-rows.stalled > .tr-rows > .tr-row:nth-child(-n+2) { visibility: hidden; }
+.tr-held-rows > .load-fail { grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--quiet-gap); row-gap: 2px; align-content: center; align-self: start; min-block-size: calc(var(--quiet-rows) * (var(--row) + 13px)); max-inline-size: none; padding: 6px var(--cell-pad) 7px calc(var(--cell-pad) - 3px); box-sizing: border-box; }
+.tr-held-rows > .load-fail > p { grid-column: 1; }
+.tr-held-rows > .load-fail > .entry-actions { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+@container room (max-width: 559px) {
+  .tr-held-rows { --quiet-rows: 4; }
+  .tr-held-rows.stalled > .tr-rows > .tr-row:nth-child(-n+4) { visibility: hidden; }
+  .tr-held-rows > .load-fail { grid-template-columns: minmax(0, 1fr); }
+  .tr-held-rows > .load-fail > .entry-actions { grid-column: 1; grid-row: auto; }
+}
+@container room (min-width: 560px) { .tr-narrow-only { display: none; } }
 /* A task's card while its details come: a held line of its path, and the details as a tail (ui/TaskPanel.tsx HeldTask). */
 .tp-path-held { min-block-size: var(--tracker-target-fine); }
 .tp-path-held::after { content: none; }

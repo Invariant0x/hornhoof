@@ -10,9 +10,9 @@ import { CEO_DECIDES } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
 import { DepartmentMark } from '../ui/TrackerMarks';
-import { EmptyState, type EmptyAction } from '../ui/EmptyState';
+import { EmptyState, Room, type EmptyAction } from '../ui/EmptyState';
 import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
-import { Busy, Hold, LoadState, noneYet, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
+import { Busy, Hold, noneYet, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
 import { MachineAway } from '../ui/MachineAway';
 import { MergeCard } from '../ui/MergeCard';
 import { Requests, wordsAnswer } from '../ui/Requests';
@@ -128,11 +128,18 @@ const DONE_PART: LoadPart = { data: true, failure: null, load: nothing };
 
 type ListKind = Section['kind'];
 
-/* The picture of the empty block of a place's work, by what the place lists. */
-const EMPTY_PICTURE: Record<ListKind, 'mine' | 'employees' | 'failure' | 'list'> = {
-  mine: 'mine', working: 'employees', failures: 'failure',
-  waits: 'list', people: 'list', turns: 'list', company: 'list', goals: 'list', due: 'list', department: 'list', responsible: 'list', goal: 'list', root: 'list',
+/* What an empty place of work stands for: its section, or the company's work in Board view. */
+type EmptyKind = ListKind | 'board';
+
+/* The icon of the empty block of a place, by what the place lists (Design #1633). */
+const EMPTY_ICON: Record<EmptyKind, 'mine' | 'waits' | 'employees' | 'failure' | 'branch' | 'list' | 'goals' | 'dates' | 'pipeline' | 'board'> = {
+  mine: 'mine', waits: 'waits', people: 'employees', failures: 'failure', turns: 'branch', working: 'employees', company: 'list', goals: 'goals',
+  due: 'dates', department: 'pipeline', responsible: 'mine', goal: 'goals', root: 'branch', board: 'board',
 };
+
+/* The places where a new task belongs to the list looked at, so their empty block offers to make one; lists that report on
+   others or on time offer nothing. */
+const MAKES_TASKS = new Set<EmptyKind>(['mine', 'company', 'department', 'goal', 'board']);
 
 /* The company as a part of a load: who works now comes with it, and it reads itself again as it changes. */
 const orgPart = (org: Org | null, failure: unknown): LoadPart => ({ data: org ?? undefined, failure, load: nothing });
@@ -143,26 +150,48 @@ function workParts(place: TrackerPlace, kind: ListKind, goals: LoadPart, org: Lo
   return [place.view === 'graph' || place.goal ? goals : DONE_PART, kind === 'working' ? org : DONE_PART];
 }
 
-/* What the empty block of a place's work says. */
-const emptyWords = (t: ReturnType<typeof useT>, kind: ListKind) => (kind === 'mine' ? t.tracker.noMine : kind === 'working' ? t.tracker.nothingWorking : t.tracker.noTasks);
+type Empty = { kind: ListKind; view: string; graphEmpty: string; firstView: boolean; offer?: EmptyAction };
+
+/* What the empty block of a place's work says: for a company with no tasks at all, its first view under the Hornhoof mark;
+   for an empty graph, that it has nothing to draw; else the fact of its section, its hint where it has one, and the one thing
+   to do where a new task belongs to it. */
+function emptyWork(t: ReturnType<typeof useT>, { kind, view, graphEmpty, firstView, offer }: Empty): ReactNode {
+  if (firstView) return <EmptyState form="first" text={t.tracker.empty.company} hint={t.tracker.emptyHint.company} action={offer} />;
+  if (view === 'graph') return <EmptyState icon="branch" text={graphEmpty} />;
+  const shown: EmptyKind = view === 'board' && kind === 'company' ? 'board' : kind;
+  return <EmptyState icon={EMPTY_ICON[shown]} text={t.tracker.empty[shown]} hint={t.tracker.emptyHint[shown]} action={MAKES_TASKS.has(shown) ? offer : undefined} />;
+}
+
+/* Whether the work of a place holds nothing: a graph draws the goals as well, so it holds nothing only with none of either. */
+const holdsNone = (view: string, forest: GraphNode[], work: TaskLine[]) => (view === 'graph' ? !forest.length : !work.length);
+
+/* Whether the whole company has no task yet, for one who sees the whole of it: the first view of the tracker. */
+const noTaskYet = (company: boolean, tasks: TaskLine[] | null | undefined) => company && tasks?.length === 0;
 
 /* Tasks a search found or that have a date, once the tasks came: until then the room holds the indicator, so it never says
    that there are none while they may still come. */
-function FoundList({ load, tasks, all, rows, none, picture }: { load: Load; tasks: TaskLine[]; all: TaskLine[]; rows: Rows; none: string; picture: 'list' | 'dates' }) {
+function FoundList({ load, tasks, all, rows, empty }: { load: Load; tasks: TaskLine[]; all: TaskLine[]; rows: Rows; empty: ReactNode }) {
   const t = useT();
-  const shown = tasks.length ? <TrackerFound tasks={tasks} all={all} rows={rows} /> : <EmptyState picture={picture} text={none} status />;
-  return <Hold load={load}>{load.phase === 'done' ? shown : <Busy ring={load.ring} words={t.load.tasks} />}</Hold>;
+  return (
+    <Hold load={load}>
+      <Room done={load.phase === 'done'} none={!tasks.length} held={<Busy ring={load.ring} words={t.load.tasks} />} empty={empty}>
+        <TrackerFound tasks={tasks} all={all} rows={rows} />
+      </Room>
+    </Hold>
+  );
 }
 
-/* The work of a view, held while it comes (style book 1.5, section 4): the list holds its rows at their final size, as many
-   as it showed last in this tab; the board and the graph hold the ring where they will stand. Once it came, it fades in. */
-function HeldWork({ load, view, list, shown, children }: { load: Load; view: string; list: string; shown: number; children: ReactNode }) {
+/* The work of a view, held while it comes (style book 1.7, section 4): the list holds its rows at their final size, as many
+   as it showed last in this tab, or the empty block's height; the board and the graph hold the ring where they will stand.
+   Its empty block shares the room, and shows only once all of it came. Once it came, it fades in. */
+function HeldWork({ load, view, list, shown, none, empty, children }: { load: Load; view: string; list: string; shown: number; none: boolean; empty: ReactNode; children: ReactNode }) {
   const t = useT();
   const done = load.phase === 'done';
   const rows = useHeldRows(list, done && view === 'list' ? shown : null);
+  const held = view === 'list' ? <HeldList rows={rows} load={load} /> : <Busy ring={load.ring} words={t.load.tasks} />;
   return (
     <Hold load={load} className="tr-hold" keep={view === 'list'}>
-      {done ? children : view === 'list' ? <HeldList rows={rows} load={load} /> : <Busy ring={load.ring} words={t.load.tasks} />}
+      <Room done={done} none={none} held={held} empty={empty} list={list}>{children}</Room>
     </Hold>
   );
 }
@@ -229,23 +258,22 @@ function WaitingForYouBody({ decisions, personId, viewerId, tasks, recipient, ke
       <DecisionList shown={shown} onFailure={onFailure} {...rest} />
       <WaitCards cards={cards} onOpenTask={rest.onOpenTask} onSeen={onCardsSeen} />
       {tasks.length > 0 && <WaitingTasks tasks={tasks} personOf={() => recipient} heading={personId ? t.tracker.waitTasksOf(name) : t.tracker.waitTasks} onOpenTask={rest.onOpenTask} />}
-      {shownNone(shown) && !cards.length && !tasks.length && <EmptyState picture="waits" text={personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting} />}
     </>
   );
 }
 
 /* A section of what waits, under its heading: the shared indicator in its room until every source of it came (the decisions,
    and what else it names), so it never says that nothing waits while something may still come; then what came, which fades
-   in. A failure of what came before stays by its section. */
-function WaitingSection({ label, heading, load, live, decisions, decisionsFailure, onRetry, failure, children }: {
-  label: string; heading: ReactNode; load: Load; live: boolean; decisions: Decisions | undefined; decisionsFailure: unknown; onRetry: () => void; failure: unknown; children: ReactNode;
+   in, or its empty block, none: nothing came. A failure of what came before stays by its section. */
+function WaitingSection({ label, heading, load, live, none, empty, decisions, decisionsFailure, onRetry, failure, children }: {
+  label: string; heading: ReactNode; load: Load; live: boolean; none: boolean; empty: ReactNode; decisions: Decisions | undefined; decisionsFailure: unknown; onRetry: () => void; failure: unknown; children: ReactNode;
 }) {
   const t = useT();
   return (
     <section className="waiting" aria-label={label}>
       {heading}
       <Hold load={load} className="waiting-hold">
-        {load.phase === 'done' ? children : <Busy ring={load.ring} live={live} />}
+        <Room done={load.phase === 'done'} none={none} held={<Busy ring={load.ring} live={live} />} empty={empty}>{children}</Room>
       </Hold>
       {decisions && <DecisionsFailure failure={decisionsFailure} onRetry={onRetry} />}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
@@ -259,8 +287,12 @@ function WaitingForYou({ sources, live, decisionsFailure, ...rest }: Waiting) {
   const t = useT();
   const [failure, setFailure] = useState<unknown>(null);
   const load = useLoad([{ data: rest.decisions, failure: decisionsFailure, load: rest.onDecisionsChanged }, ...sources]);
+  const none = shownNone(shownDecisions(rest.decisions, decisionsOfWho(rest.personId, rest.viewerId))) && !keptShown(rest.kept, rest.personId).length && !rest.tasks.length;
+  const empty = rest.personId
+    ? <EmptyState icon="waits" text={t.tasks.nothingFor(mapPeople(rest.org).find(p => p.id === rest.personId)?.name ?? t.tasks.someone)} />
+    : <EmptyState icon="waits" text={t.tracker.empty.waits} hint={t.tracker.emptyHint.waits} />;
   return (
-    <WaitingSection label={t.tasks.waiting} heading={<h2>{t.tasks.waiting}</h2>} load={load} live={live} decisions={rest.decisions} decisionsFailure={decisionsFailure} onRetry={rest.onDecisionsChanged} failure={failure}>
+    <WaitingSection label={t.tasks.waiting} heading={<h2>{t.tasks.waiting}</h2>} load={load} live={live} none={none} empty={empty} decisions={rest.decisions} decisionsFailure={decisionsFailure} onRetry={rest.onDecisionsChanged} failure={failure}>
       <WaitingForYouBody {...rest} onFailure={setFailure} />
     </WaitingSection>
   );
@@ -287,10 +319,10 @@ function WaitingForPeople({ decisions, decisionsFailure, tasks, titled, sources,
     return name ? words.waitingFor(name) : words.waitingForSomeone;
   };
   return (
-    <WaitingSection label={words.title} heading={titled && <h2>{words.title}</h2>} load={load} live={live} decisions={decisions} decisionsFailure={decisionsFailure} onRetry={rest.onDecisionsChanged} failure={failure}>
+    <WaitingSection label={words.title} heading={titled && <h2>{words.title}</h2>} load={load} live={live} none={shownNone(shown) && !tasks.length}
+      empty={<EmptyState icon="employees" text={t.tracker.empty.people} hint={t.tracker.emptyHint.people} />} decisions={decisions} decisionsFailure={decisionsFailure} onRetry={rest.onDecisionsChanged} failure={failure}>
       <DecisionList shown={shown} onFailure={setFailure} waitsFor={waitsFor} {...rest} />
       {tasks.length > 0 && <WaitingTasks tasks={tasks} personOf={personWaited} heading={words.tasks} onOpenTask={rest.onOpenTask} />}
-      {shownNone(shown) && !tasks.length && <EmptyState picture="employees" text={words.nothing} />}
     </WaitingSection>
   );
 }
@@ -431,6 +463,9 @@ function mayMake(places: TaskDepartments | undefined, org: Org | null, departmen
   if (pipeline?.mayEdit) kinds.push('editPipeline');
   return { kinds, needsHead: !head };
 }
+
+/* Making a task as the one thing to do about an empty list, where the person may make one here. */
+const offerTask = (kinds: Making[], label: string, onClick: () => void): EmptyAction | undefined => (kinds.includes('task') ? { label, onClick } : undefined);
 
 /* A task from a page of no department: the form starts with which of them gets it, the first by default. */
 function NewTaskAnywhere({ departments, onCancel, onCreated }: { departments: Department[]; onCancel: () => void; onCreated: (task: TaskDetail) => void }) {
@@ -668,10 +703,10 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
     ],
   };
   const shownGoals = goals.filter(g => g.status !== 'dropped' && (!departmentId || g.department?.id === departmentId));
-  /* The one thing to do about an empty list, where the person may: make what the list would hold. */
-  const offer = (kind: 'task' | 'goal'): EmptyAction | undefined => (can.kinds.includes(kind) ? { label: makeWords[kind], onClick: () => setMaking(kind) } : undefined);
-  const empty = <EmptyState picture={EMPTY_PICTURE[section.kind]} text={emptyWords(t, section.kind)} action={offer('task')} />;
   const { forest, crumbs } = view === 'graph' ? graph() : { forest: [], crumbs: [] };
+  /* The one thing to do about an empty list, where the person may: make a task here, in the form the + beside Tasks opens. */
+  const offer = offerTask(can.kinds, t.tracker.empty.create, () => setMaking('task'));
+  const empty = emptyWork(t, { kind: section.kind, view, graphEmpty: t.tracker.graph.empty, firstView: noTaskYet(company, tasks), offer });
 
   return (
     <div className="tracker fit">
@@ -729,7 +764,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
           <>
             <section className="tr-found" aria-label={t.tracker.search.results}>
               <h2>{t.tracker.search.results}</h2>
-              <FoundList load={tasksLoad} tasks={found} all={all} rows={rows} none={t.tasks.noSearchResults} picture="list" />
+              <FoundList load={tasksLoad} tasks={found} all={all} rows={rows} empty={<EmptyState icon="list" text={t.tasks.noSearchResults} status />} />
             </section>
             {/* A search leaves what waits for the person where it was. */}
             {WAITS_SHOWN.has(section.kind) && waiting}
@@ -738,14 +773,17 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
           : section.kind === 'goals' ? (
             <>
               {/* Until the goals come, the page says it is loading rather than that there are none. */}
-              {goalList && goalsLoad.phase === 'done' ? <TrackerGoals goals={shownGoals} label={departmentId ? t.tracker.side.goals : t.tracker.side.allGoals} empty={<EmptyState picture="goals" text={t.tracker.noGoals} action={offer('goal')} />} onOpenGoal={onOpenGoal} />
-                : <LoadState load={goalsLoad} />}
+              <Hold load={goalsLoad}>
+                <Room done={goalsLoad.phase === 'done'} none={!shownGoals.length} held={<Busy ring={goalsLoad.ring} />} empty={<EmptyState icon="goals" text={t.tracker.empty.goals} hint={t.tracker.emptyHint.goals} />}>
+                  <TrackerGoals goals={shownGoals} label={departmentId ? t.tracker.side.goals : t.tracker.side.allGoals} onOpenGoal={onOpenGoal} />
+                </Room>
+              </Hold>
               {makeHere}
             </>
           )
           : section.kind === 'due' ? (
             <section className="tr-found" aria-label={t.tracker.side.dates}>
-              <FoundList load={tasksLoad} tasks={[...work].sort((a, b) => a.dueAt!.localeCompare(b.dueAt!))} all={all} rows={rows} none={t.tracker.noDates} picture="dates" />
+              <FoundList load={tasksLoad} tasks={[...work].sort((a, b) => a.dueAt!.localeCompare(b.dueAt!))} all={all} rows={rows} empty={<EmptyState icon="dates" text={t.tracker.empty.due} />} />
             </section>
           )
           : section.kind === 'turns' ? <TurnsAndReleases tasks={taskPart} places={places} rows={{ selected, onOpenTask, asksYou, questionAt, place: task => [task.department ? place_(task.department) : t.tracker.side.orchestrator, task.product?.name].filter(Boolean).join(' / ') }} />
@@ -758,8 +796,8 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
               </div>
               {section.kind === 'failures' && <MachineAway machines={machinesAway} />}
               {makeHere}
-              <HeldWork load={workLoad} view={view} list={`${sectionKey}|${view}|${JSON.stringify(chips)}`} shown={work.length}>
-                {view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} empty={empty} showSubtasks={showSubtasks} />
+              <HeldWork load={workLoad} view={view} list={`${sectionKey}|${view}|${JSON.stringify(chips)}`} shown={work.length} none={holdsNone(view, forest, work)} empty={empty}>
+                {view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} showSubtasks={showSubtasks} />
                 : view === 'board' ? <TrackerBoard tasks={work} all={all} pipeline={pipeline} cancelled={false} rows={rows} />
                 : <TrackerGraph forest={forest} crumbs={crumbs} top={section.kind === 'department' ? departmentName : t.tracker.graph.all} onCrumb={toCrumb} rows={rows} onOpenGoal={onOpenGoal} stages={pipeline ? { on: stages, onChange: setStageMode } : undefined} />}
               </HeldWork>

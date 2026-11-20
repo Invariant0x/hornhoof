@@ -125,7 +125,7 @@ function Releases({ tasks, turns, rows, department, places }: { tasks: TaskLine[
         </>
       ) : (
         <>
-          {!preparing.length && !released.length && <EmptyState picture="pipeline" text={t.tasks.board.nothingYet} />}
+          {!preparing.length && !released.length && <EmptyState icon="branch" text={t.tracker.empty.turns} />}
           {preparing.map(next => <NextRelease key={next.turn.id} next={next} rows={rows} />)}
           {released.length > 0 && (
             <BoardSection heading={t.tasks.board.closedReleases}>

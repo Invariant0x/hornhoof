@@ -728,9 +728,11 @@ test('says what to do when there is no work yet, and when a search finds nothing
   await page.route('**/api/tasks?*', route => route.fulfill({ json: { tasks: [] } }));
   await page.route('**/api/turns', route => route.fulfill({ json: { turns: [] } }));
   await open(page, 'en', 1440, '/tasks');
-  await expect(page.getByText(t.tracker.noMine)).toBeVisible();
+  /* A company with no task at all opens on its first view, which says how to start (Design #1633). */
+  await expect(page.getByText(t.tracker.empty.company)).toBeVisible();
+  await expect(page.getByText(t.tracker.emptyHint.company!)).toBeVisible();
   await page.getByRole('navigation', { name: t.tracker.side.label }).getByRole('button', { name: t.tracker.side.turns, exact: true }).click();
-  await expect(page.getByText(t.tasks.board.nothingYet)).toBeVisible();
+  await expect(page.getByText(t.tracker.empty.turns)).toBeVisible();
   await page.getByRole('searchbox', { name: t.tasks.search }).fill('anything');
   await expect(page.locator('.tr-found').getByRole('status')).toHaveText(t.tasks.noSearchResults);
 });

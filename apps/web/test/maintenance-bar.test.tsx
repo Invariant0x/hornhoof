@@ -114,8 +114,9 @@ describe('a maintenance refusal while the update panel shows', () => {
     'GET /api/pipelines': [200, { pipelines: [] }],
   };
   it.each([
-    /* The tracker opens on the person's own tasks, which the list it read again shows as none. */
-    ['Tasks', '/api/tasks?status=all', () => screen.getByText('No open tasks to answer for.')],
+    /* The tracker opens on the person's own tasks, which the list it read again shows as none: its empty block is no longer
+       the unseen layer that holds the room while the list comes. */
+    ['Tasks', '/api/tasks?status=all', () => expect(screen.getByText('No open task is yours to answer for.').closest('.room-layer')).not.toHaveClass('off')],
     ['People', '/api/people', () => screen.getByRole('cell', { name: 'Maria' })],
     ['Machines', '/api/machines', () => screen.getAllByText(MACHINES[0]!.hostname)[0]!],
     ['Subscriptions & API', '/api/subscriptions', () => screen.getAllByText(SUBS[0]!.label)[0]!],

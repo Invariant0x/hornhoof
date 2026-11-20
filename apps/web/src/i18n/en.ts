@@ -1827,7 +1827,6 @@ export const en = {
       outsideAbout: 'Work that does not change the program: replies to customers, letters, checks. It does not go into a release.',
       noneOutside: 'Nothing outside releases right now.',
       noneInTurn: 'No goals in this release yet.',
-      nothingYet: 'No turns and no tasks yet. Tell the orchestrator or a department head what to do, and the work shows up here.',
       pickDepartment: 'Pick a department of yours above to see its list for later turns.',
     },
     navWaiting: (n: number) => `Tasks, ${n} waiting for you`,
@@ -1841,7 +1840,6 @@ export const en = {
       task: 'Task',
     },
     waiting: 'Waiting for you',
-    nothingWaiting: 'Nothing waits for you.',
     /* Cards Hornhoof kept for the person until they say they saw them, in their words. */
     cards: {
       open: 'Open task',
@@ -2458,11 +2456,34 @@ export const en = {
       notStarted: 'Not started', working: 'In work', review: 'Review', waiting: 'Waits for a person', waitingYou: 'Waits for you', failure: 'Failure', stopped: 'Stopped',
       paused: 'Paused', done: 'Done', cancelled: 'Cancelled',
     },
-    noGoals: 'No goals here yet.',
-    noDates: 'No tasks here have a due date.',
-    noTasks: 'No tasks here.',
-    noMine: 'No open tasks to answer for.',
-    nothingWorking: 'Nobody works on a task at this moment.',
+    /* What a section of the tracker says once all of it came and it holds nothing (Design #1633, style book 1.7 section 4):
+       the fact, then where it helps a hint, each a whole sentence of its own. company: also the first view of a company with
+       no tasks at all; board: the company's work in Board view; create: the one thing to do about it, where it fits. */
+    empty: {
+      mine: 'No open task is yours to answer for.',
+      waits: 'Nothing waits for your answer.',
+      people: 'Nothing waits for people.',
+      failures: 'No task has failed.',
+      turns: 'No turns or releases yet.',
+      working: 'Nobody works on a task right now.',
+      company: 'The company has no tasks yet.',
+      goals: 'No goals here yet.',
+      due: 'No task here has a due date.',
+      department: 'This department has no tasks yet.',
+      responsible: 'This person answers for no open task.',
+      goal: 'No tasks serve this goal yet.',
+      root: 'This task has no subtasks yet.',
+      board: 'No tasks on the board yet.',
+      create: 'Create task',
+    },
+    emptyHint: {
+      mine: 'Tasks you answer for will show here.',
+      waits: 'Questions and approvals for you will show here.',
+      people: 'Questions from employees to people will show here.',
+      failures: 'A task that stops on a failure will show here.',
+      company: 'Create the first one.',
+      goals: 'A goal gathers tasks around one result.',
+    } as Partial<Record<'mine' | 'waits' | 'people' | 'failures' | 'turns' | 'working' | 'company' | 'goals' | 'due' | 'department' | 'responsible' | 'goal' | 'root' | 'board', string>>,
     waitTasks: 'Tasks that wait for you',
     waitTasksOf: (name: string) => `Tasks that wait for ${name}`,
     peopleWaits: {
@@ -2470,7 +2491,6 @@ export const en = {
       waitingFor: (name: string) => `Waiting for: ${name}`,
       waitingForSomeone: 'Waiting for a person',
       tasks: 'Tasks that wait for people',
-      nothing: 'Nothing waits for people.',
     },
     priority: { label: 'Priority', urgent: 'Urgent', high: 'High', normal: 'Normal', low: 'Low' },
     list: { task: 'Name', executor: 'Executor', responsible: 'Responsible', due: 'Due', progress: 'Progress', parts: 'Parts of this goal', subtasks: (done: number, total: number) => `Subtasks: ${done} of ${total} done`,

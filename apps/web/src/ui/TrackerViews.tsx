@@ -13,7 +13,7 @@ import { WorkerMark } from './WorkerMark';
 import { QuestionButton, STATE_CLASS, StateWord, WaitLine } from './TaskActivity';
 import { GOAL_CLASS, goalProgress } from './GoalPanel';
 import { EmptyState } from './EmptyState';
-import { Idle, LoadLine, MAX_HELD_ROWS, type Load } from './Loading';
+import { Busy, Idle, LoadLine, MAX_HELD_ROWS, type Load } from './Loading';
 
 /* How a view opens a task's card and marks the open one. asksYou: an open question on a task is the person's to answer. */
 export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; questionAt?: (id: string) => string | undefined; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined; stageOwner?: (stage: PipelineStage) => string | undefined };
@@ -158,10 +158,10 @@ export function TrackerFound({ tasks, all, rows }: { tasks: TaskLine[]; all: Tas
 const HELD_TITLES = ['58%', '44%', '66%', '38%', '52%'];
 
 /* A row of the list while its task comes: the row's frame at its final size, an idle bar for each value. */
-function HeldRow({ title }: { title: string }) {
+function HeldRow({ title, narrow }: { title: string; narrow?: boolean }) {
   const words = useT().tracker.list;
   return (
-    <li className="tr-row">
+    <li className={narrow ? 'tr-row tr-narrow-only' : 'tr-row'}>
       <div className="tr-cells tr-row-line">
         <div className="tr-task-name"><div className="tr-name"><span className="tr-status-dot" aria-hidden="true" /><span className="tr-line"><span className="tr-title"><Idle w={title} /></span></span></div></div>
         <Cell name={words.executor} person><Idle w="70%" /></Cell>
@@ -172,36 +172,32 @@ function HeldRow({ title }: { title: string }) {
   );
 }
 
-/* How many rows fill the visible part of a list that starts at this place, when the list's own count is not known: one where
-   nothing is laid out yet to measure. */
-function rowsToFill(list: HTMLElement | null): number {
-  const row = list?.querySelector<HTMLElement>('.tr-row:last-child')?.offsetHeight;
-  if (!list || !row) return 1;
-  const top = list.getBoundingClientRect().top;
-  return Math.max(1, Math.min(MAX_HELD_ROWS, Math.ceil((window.innerHeight - top) / row)));
-}
+/* A held list with no count of its own holds the empty block's height: 2 rows, or 4 where the list is narrow (Design #1633,
+   amending #1611), so the most likely outcome, an empty list, moves nothing. Rows past the 2 a wide list holds show only
+   where it is narrow. */
+const QUIET_ROWS = 2;
+const QUIET_ROWS_NARROW = 4;
 
-/* The list while its tasks come (style book 1.5, section 4): the names of its columns and its first group's head at once, then
-   as many held rows as it showed last in this tab, or as fill what is in view, the first with the ring and its words. */
+/* The list while its tasks come (style book 1.7, section 4): the names of its columns and its first group's head at once, then
+   as many held rows as it showed last in this tab, or the empty block's height, the first with the ring and its words. Past
+   10 s or once failed, the block that says so covers the first rows (2, or 4 where narrow) and the rest stay. */
 export function HeldList({ rows, load }: { rows: number | null; load: Load }) {
   const t = useT();
-  const list = useRef<HTMLDivElement>(null);
-  const [fill, setFill] = useState(rows ?? 1);
-  useLayoutEffect(() => {
-    if (rows === null) setFill(rowsToFill(list.current));
-  }, [rows]);
-  const held = rows ?? fill;
+  const stalled = load.phase === 'slow' || load.phase === 'failed';
+  const count = Math.min(MAX_HELD_ROWS, Math.max(rows ?? 0, QUIET_ROWS_NARROW));
+  const wide = Math.max(rows ?? 0, QUIET_ROWS);
   return (
-    <div ref={list} className="tr-list tr-held">
+    <div className="tr-list tr-held">
       <div className="tr-list-grid">
         <section className="tr-group">
           <h2 className="tr-group-head"><span className="tr-group-toggle"><Idle w="9ch" /><span className="tr-count"><Idle w="3ch" /></span></span></h2>
           <ListHead />
-          <div>
+          <div className={stalled ? 'tr-held-rows stalled' : 'tr-held-rows'}>
             <ul className="tr-rows">
-              <li className="tr-row"><div className="tr-cells tr-row-line"><LoadLine load={load} words={t.load.tasks} /></div></li>
-              {Array.from({ length: held - 1 }, (_, i) => <HeldRow key={i} title={HELD_TITLES[i % HELD_TITLES.length]!} />)}
+              <li className="tr-row"><div className="tr-cells tr-row-line"><Busy ring={load.ring && !stalled} words={t.load.tasks} live={!stalled} /></div></li>
+              {Array.from({ length: count - 1 }, (_, i) => <HeldRow key={i} title={HELD_TITLES[i % HELD_TITLES.length]!} narrow={i + 1 >= wide} />)}
             </ul>
+            {stalled && <LoadLine load={load} />}
           </div>
         </section>
       </div>
@@ -209,18 +205,16 @@ export function HeldList({ rows, load }: { rows: number | null; load: Load }) {
   );
 }
 
-/* empty: what the list says once it came and holds nothing, its empty block. */
-export function TrackerList({ tasks, all, rows, empty, showSubtasks = true }: { tasks: TaskLine[]; all: TaskLine[]; rows: Rows; empty: ReactNode; showSubtasks?: boolean }) {
+/* The list of a place's work, once it came and holds something: its room says when it holds nothing. */
+export function TrackerList({ tasks, all, rows, showSubtasks = true }: { tasks: TaskLine[]; all: TaskLine[]; rows: Rows; showSubtasks?: boolean }) {
   const t = useT();
   const groups = listGroups(tasks, rows.asksYou, all);
   const relations = relationsOf(all);
   return (
     <section className="tr-list" aria-label={t.tracker.views.list}>
-      {groups.length ? (
-        <div className="tr-list-grid">
-          {groups.map((group, i) => <Group key={group.status} group={group} rows={rows} relations={relations} showSubtasks={showSubtasks} head={i === 0} />)}
-        </div>
-      ) : empty}
+      <div className="tr-list-grid">
+        {groups.map((group, i) => <Group key={group.status} group={group} rows={rows} relations={relations} showSubtasks={showSubtasks} head={i === 0} />)}
+      </div>
     </section>
   );
 }
@@ -275,7 +269,7 @@ function Column({ column, rows }: { column: BoardColumn; rows: Rows }) {
         <span className="tr-count">{column.cards.length}</span>
         {who && <>{' '}<span className="tr-col-who" dir="auto">{who}</span></>}
       </h2>
-      {column.cards.length ? column.cards.map(card => <BoardCard key={card.task.id} tree={card} rows={rows} />) : <p className="muted">{t.tracker.board.empty}</p>}
+      {column.cards.length ? column.cards.map(card => <BoardCard key={card.task.id} tree={card} rows={rows} />) : <EmptyState form="line" text={t.tracker.board.empty} />}
     </section>
   );
 }
@@ -335,8 +329,8 @@ function GoalRow({ tree, onOpenGoal, depth = 0 }: { tree: GoalTree; onOpenGoal: 
 }
 
 /* The goals page: the goals given as the list's rows, the smaller ones under the goal they are part of, grouped by their
-   state under the same pills, the names of the columns under the first pill. */
-export function TrackerGoals({ goals, label, empty, onOpenGoal }: { goals: GoalView[]; label: string; empty: ReactNode; onOpenGoal: (id: string) => void }) {
+   state under the same pills, the names of the columns under the first pill. Its room says when there are none. */
+export function TrackerGoals({ goals, label, onOpenGoal }: { goals: GoalView[]; label: string; onOpenGoal: (id: string) => void }) {
   const t = useT();
   const words = t.tracker.list;
   const ids = new Set(goals.map(g => g.id));
@@ -346,28 +340,26 @@ export function TrackerGoals({ goals, label, empty, onOpenGoal }: { goals: GoalV
   const groups = (['active', 'reached'] as const).map(status => ({ status, trees: top.filter(tree => tree.goal.status === status) })).filter(g => g.trees.length);
   return (
     <section className="tr-list tr-goals-page" aria-label={label}>
-      {groups.length ? (
-        <div className="tr-list-grid">
-          {groups.map((group, i) => {
-            const name = t.tracker.goal.statuses[group.status]!;
-            const heading = words.group(name, group.trees.length);
-            const state = group.status === 'active' ? 'working' : 'done';
-            return (
-              <section key={group.status} className={`tr-group ${state}`} aria-label={heading}>
-                <h2 className="tr-group-head" aria-label={heading}>
-                  <span className="tr-group-toggle"><span className={`tr-status-pill ${state}`}>{name}</span><span className="tr-count">{group.trees.length}</span></span>
-                </h2>
-                {i === 0 && (
-                  <div className="tr-cells tr-head" aria-hidden="true">
-                    <span>{words.task}</span><span>{words.progress}</span><span>{words.responsible}</span><span>{words.due}</span>
-                  </div>
-                )}
-                <div><ul className="tr-rows">{group.trees.map(tree => <GoalRow key={tree.goal.id} tree={tree} onOpenGoal={onOpenGoal} />)}</ul></div>
-              </section>
-            );
-          })}
-        </div>
-      ) : empty}
+      <div className="tr-list-grid">
+        {groups.map((group, i) => {
+          const name = t.tracker.goal.statuses[group.status]!;
+          const heading = words.group(name, group.trees.length);
+          const state = group.status === 'active' ? 'working' : 'done';
+          return (
+            <section key={group.status} className={`tr-group ${state}`} aria-label={heading}>
+              <h2 className="tr-group-head" aria-label={heading}>
+                <span className="tr-group-toggle"><span className={`tr-status-pill ${state}`}>{name}</span><span className="tr-count">{group.trees.length}</span></span>
+              </h2>
+              {i === 0 && (
+                <div className="tr-cells tr-head" aria-hidden="true">
+                  <span>{words.task}</span><span>{words.progress}</span><span>{words.responsible}</span><span>{words.due}</span>
+                </div>
+              )}
+              <div><ul className="tr-rows">{group.trees.map(tree => <GoalRow key={tree.goal.id} tree={tree} onOpenGoal={onOpenGoal} />)}</ul></div>
+            </section>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -513,7 +505,7 @@ function Canvas({ forest, rows, onOpenGoal }: { forest: GraphNode[]; rows: Rows;
     e.preventDefault();
     e.stopPropagation();
   };
-  if (!layout.nodes.length) return <EmptyState picture="branch" text={t.tracker.graph.empty} />;
+  if (!layout.nodes.length) return <EmptyState icon="branch" text={t.tracker.graph.empty} />;
   const right = Math.max(...layout.nodes.map(p => p.x + NODE.w));
   const width = Math.max(layout.width, layout.waits.length ? right + LANE.first + layout.waits.length * LANE.step + LANE.room : 0);
   const arrow = `tr-arrow-${marker.replace(/[^A-Za-z0-9_-]/g, '')}`;
