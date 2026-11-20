@@ -4,6 +4,7 @@ import type { Limits } from '@hornhoof/protocol';
 import { ownFs, type AgentFs } from '../agent-fs.js';
 import { bridgeEnv, readJson, type TermProgram } from '../terminal/programs.js';
 import { kimiUsageLimits } from '../terminal/transcripts.js';
+import { KIMI_MCP_START } from './mcp-start.js';
 import { KIMI_NO_AUTO_UPDATE } from './session-updates.js';
 
 /* Kimi Code in a native terminal: how it launches, the files it reads first, where it logs and its plan's limits. */
@@ -47,7 +48,7 @@ const KIMI_HOOKS = [
 export async function prepareKimi(home: string, workDir: string, mcpUrl: string, fs: AgentFs = ownFs): Promise<void> {
   const dir = join(workDir, '.kimi-code');
   await fs.mkdir(dir);
-  await fs.write(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { hornhoof: { transport: 'http', url: mcpUrl } } }, null, 2));
+  await fs.write(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { hornhoof: { transport: 'http', url: mcpUrl, ...KIMI_MCP_START } } }, null, 2));
   const file = join(home, 'config.toml');
   /* A home that was never signed in has none yet. */
   const config = (await fs.read(file)) ?? '';

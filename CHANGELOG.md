@@ -9,6 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- An employee's program waits two minutes for Hornhoof's tools to connect as it starts, not 30 seconds: Claude Code (`MCP_TIMEOUT`, unless the node was started with one), Codex and Kimi Code. One that still gave up before Hornhoof answered ends its turn as one without tools, which Hornhoof repeats, and the next turn starts it again in its session, where it connects.
 - On a page right to left, the tracker's graph is drawn mirrored too: its root at the right, each level further to the left, the lines of what a task waits for on the left with their words beside the waiting task, and its zoom at the right as on the other canvases.
 
 ## [0.40.0] - 2026-11-20
