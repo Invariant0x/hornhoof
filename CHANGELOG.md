@@ -15,6 +15,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Japanese names and titles on the map's people chips break between phrases, so no single character is left alone on a line.
 - A node that waits for its work to end before an update holds new turns for at most 45 minutes (`NODE_UPDATE_WAIT_MS`): then it updates, and each turn it cut runs once more after the restart. The orchestrator hears once when a wait passes half an hour.
 - A tab whose session ended goes to the sign-in screen at once, and a tab nobody is signed in on reloads by itself once Hornhoof runs another version.
+- On a page right to left, the map's zoom and Put back stand at the right, mirrored as the rest of the layout is.
 - A plan with separate limits for groups of models, as Antigravity's Gemini and its Claude and GPT models, keeps each group's limits: a used-up group holds only the turns and fallbacks on its own models, and the plan's card shows every group with what it used and when it resets.
 
 ### Changed
