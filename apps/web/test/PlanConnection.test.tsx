@@ -1,5 +1,5 @@
 import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
@@ -147,6 +147,23 @@ describe('the plans screen while a plan connects', () => {
     fireEvent.click(within(part('Codex')!).getByRole('button', { name: en.subs.connection.retryLabel('Codex') }));
     await waitFor(() => expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/subscriptions/s-codex/signin', body: { fresh: false } }));
     await waitFor(() => expect(part('Codex')).toBeNull());
+  });
+
+  it('keeps the new connection its node reports while Try again is still being answered', async () => {
+    const stream = fakeStream();
+    let answer: () => void = () => {};
+    const answered = new Promise<void>(go => { answer = go; });
+    const calls = mockApi({ ...routes(AGY), 'POST /api/subscriptions/s-agy/connecting/retry': async () => { await answered; return [204, undefined]; } });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    tell(stream, AGY, at('too_long', 'models'));
+    fireEvent.click(within(part('Antigravity')!).getByRole('button', { name: en.subs.connection.retryLabel('Antigravity') }));
+    await waitFor(() => expect(calls.some(c => c.path === '/api/subscriptions/s-agy/connecting/retry')).toBe(true));
+    tell(stream, AGY, at('connecting', 'checking'));
+    await act(async () => { answer(); await answered; });
+    /* The answer is read and Try again ends, a few turns of the event loop later. */
+    for (let turn = 0; turn < 5; turn++) await act(async () => { await new Promise<void>(go => setImmediate(go)); });
+    expect(within(part('Antigravity')!).getByRole('status').textContent).toContain(en.subs.connection.steps.checking);
   });
 
   it('has the node check a plan that signs in on its machine again, or stops it', async () => {
