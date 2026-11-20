@@ -399,6 +399,17 @@ describe('updater, restore', () => {
     expect(readFileSync(outside, 'utf8')).toBe(JSON.stringify(NEW));
   });
 
+  /* The updater's copy of the dump, a whole company's data, goes once it is loaded: it is not kept through the swap. */
+  it('keeps its copy of the dump no longer than the load', async () => {
+    const s = stand(OLD_ENV);
+    order(s);
+    const seen = join(s.dir, 'seen');
+    const r = await runOnce(s, null, { ...WITH_CARRY, STUB_ON_CUTOVER: `find ${s.dir} -name restore.sql.gz -o -name env.json > ${seen}` });
+    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'done' });
+    expect(r.calls.some(call => call.includes('PGAPPNAME=hornhoof-cutover'))).toBe(true);
+    expect(text(seen).trim().split('\n').map(path => path.split('/').at(-1))).toEqual(['env.json']);
+  });
+
   it.each([
     { what: 'the dump', name: `${ATTEMPT}.sql.gz`, line: DUMP_LINE },
     { what: 'the settings', name: `${ATTEMPT}.env.json`, line: SETTINGS_LINE },
@@ -419,10 +430,12 @@ describe('updater, restore', () => {
     const other = { HORNHOOF_SECRET: `${'C'.repeat(43)}=`, NODE_KEY: 'q'.repeat(40), RELAY_URL: 'https://other.hornhoof.test' };
     writeFileSync(join(s.dir, 'other.sql.gz'), gzipSync('-- a dump of the hornhoof database\n-- migrations 5\n-- copy 9\n'));
     writeFileSync(join(s.dir, 'other.env.json'), JSON.stringify(other));
-    const swap = `mv -f ${join(s.dir, 'other.sql.gz')} ${file(s, 'restore', `${ATTEMPT}.sql.gz`)} 2>/dev/null; mv -f ${join(s.dir, 'other.env.json')} ${file(s, 'restore', `${ATTEMPT}.env.json`)} 2>/dev/null; true`;
+    const swap = `mv -f ${join(s.dir, 'other.sql.gz')} ${file(s, 'restore', `${ATTEMPT}.sql.gz`)} && mv -f ${join(s.dir, 'other.env.json')} ${file(s, 'restore', `${ATTEMPT}.env.json`)}`;
     const r = await runOnce(s, null, { ...WITH_CARRY, STUB_ON_STOP: swap });
     expect(r.code).toBe(0);
     expect(r.calls.some(call => call.startsWith('docker compose stop'))).toBe(true);
+    /* The other files did take both names while the company stopped. */
+    expect([existsSync(join(s.dir, 'other.sql.gz')), existsSync(join(s.dir, 'other.env.json'))]).toEqual([false, false]);
     expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'done' });
     expect(database(s, 'hornhoof')).toBe('18');
     expect(envOf(s)).toBe(NEW_ENV);
