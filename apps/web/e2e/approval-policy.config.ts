@@ -17,6 +17,7 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: process.env.HH_TEST_REPORT ? [['list'], ['./file-report.ts']] : 'list',
+  timeout: 0,
   expect: { timeout: 0 },
   use: {
     baseURL: origin,

@@ -18,8 +18,9 @@
 #   computer.sh   the orchestrator's commands on this computer, and what the computer is
 #   nodes.sh      the nodes of this server, on this computer and on others
 #
-# They share state.sh, the state of an update that a stop never loses, and server.sh, the server's folder, settings,
-# compose project, images and database.
+# They share state.sh, the state of an update that a stop never loses, server.sh, the server's folder, settings,
+# compose project, images and database, and shared.sh, how the updater writes and reads the files of the folders it
+# shares with the app and the keeper.
 #
 # This is revision 2, which each installer hears as HORNHOOF_UPDATER_REV and the note of an update keeps. An older
 # updater says no revision, so an installer that needs this one takes over (take-over.sh).
@@ -49,6 +50,8 @@ ONCE=''
 # The parts, in lib next to this file, or beside the statements of a restore in the updater's image.
 PARTS="$(dirname "${BASH_SOURCE[0]}")/lib"
 [ -f "$PARTS/state.sh" ] || PARTS="$SQL_DIR/lib"
+# shellcheck source=lib/shared.sh
+. "$PARTS/shared.sh"
 # shellcheck source=lib/state.sh
 . "$PARTS/state.sh"
 # shellcheck source=lib/server.sh

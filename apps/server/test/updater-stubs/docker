@@ -272,8 +272,10 @@ case "$1 $2" in
       # The session that stays on the database a restore closes. It answers once the connections are off: the term,
       # machine and cluster of that database, and STUB_CARRY when it was asked who may get in. STUB_CUTOVER=fail: it
       # never gets onto the database; left: another session would not end.
+      # STUB_ON_CUTOVER: a command run as it starts, to look at the updater's folders then.
       *' PGAPPNAME=hornhoof-cutover '*)
         asked=$(cat)
+        [ -z "${STUB_ON_CUTOVER:-}" ] || sh -c "$STUB_ON_CUTOVER" < /dev/null
         [ "${STUB_CUTOVER:-ok}" = fail ] && { echo 'psql: error: connection refused' >&2; exit 2; }
         touch "$STUB_STATE/cutover-open"
         looks=0
@@ -338,8 +340,14 @@ case "$1 $2" in
       # STUB_PULL=images: the app image comes, the other images of its compose file do not.
       compose)
         case " $* " in
+          # STUB_ON_STOP: a command run as the services stop, as another writer of the shared folders could act then.
+          *' stop '*) [ -z "${STUB_ON_STOP:-}" ] || sh -c "$STUB_ON_STOP" < /dev/null ;;
           *' down '*) [ -z "${STUB_NETWORKS:-}" ] || printf 'none' > "$STUB_STATE/networks" ;;
-          *' up '*) networks_up "$(compose_file "$@")" || exit 1 ;;
+          # STUB_ON_UP: a command run as services start, to look at the updater's folders then.
+          *' up '*)
+            [ -z "${STUB_ON_UP:-}" ] || sh -c "$STUB_ON_UP" < /dev/null
+            networks_up "$(compose_file "$@")" || exit 1
+            ;;
         esac
         case " $* " in
           *' pull '*)

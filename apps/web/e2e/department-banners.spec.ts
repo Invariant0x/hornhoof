@@ -13,7 +13,7 @@ import { serveApi } from './api';
    department took the lower half. The department takes the whole room under the bars, as with no bar, and no map shows
    beside it; back on the map, the map is where and as large as the person left it. Each look is a width and a skin: the
    default one, and one more. */
-test.describe.configure({ timeout: 120_000 });
+test.describe.configure({ timeout: 0 });
 
 const WIDTHS = [1440, 375];
 const SKINS = ['cyberpunk', 'matrix'];

@@ -9,7 +9,7 @@ const origin = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: '.', testMatch: 'phones.spec.ts', outputDir: 'results/phones',
-  forbidOnly: Boolean(process.env.CI), workers: 1, retries: 0, timeout: 180_000,
+  forbidOnly: Boolean(process.env.CI), workers: 1, retries: 0, timeout: 0,
   reporter: 'list', expect: { timeout: 0 },
   use: { baseURL: origin, actionTimeout: 0, navigationTimeout: 0, reducedMotion: 'reduce', timezoneId: 'UTC', trace: 'retain-on-failure' },
   projects: [

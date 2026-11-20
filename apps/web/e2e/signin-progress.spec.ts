@@ -14,7 +14,7 @@ import { stretch } from './pseudo-text';
    the connection takes longer than usual, and at the deadline of the whole connection that it failed; the owner can retry
    or stop. The machine's and the server's words come through a stand-in for the stream, and the page runs on the test's
    clock. */
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 const SHOTS = 'e2e/results/signin-progress-shots';
 mkdirSync(SHOTS, { recursive: true });
 

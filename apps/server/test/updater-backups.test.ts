@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -28,7 +29,8 @@ describe('updater, backups', () => {
     expect(said(join(dumps(s), `${ID}.json`)).at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
     /* For the keeper alone: it runs as the control folder's owner, and reads and deletes what root wrote. */
     expect([mode(dumps(s)), mode(join(dumps(s), `${ID}.sql.gz`)), mode(join(dumps(s), `${ID}.json`))]).toEqual([0o700, 0o600, 0o600]);
-    for (const path of [dumps(s), join(dumps(s), `${ID}.sql.gz.part`), join(dumps(s), `${ID}.json.new`)]) expect(r.calls).toContain(`chown ${owner(s)} ${path}`);
+    /* The folder once it is entered, and each file in the private folder it is written in, before it is renamed into place. */
+    for (const path of ['./keeper', `./${ID}.sql.gz`, `./${ID}.json`]) expect(r.calls).toContain(`chown ${owner(s)} ${path}`);
     expect(existsSync(join(s.control, 'dump.json'))).toBe(false);
     expect(readdirSync(dumps(s)).sort()).toEqual([`${ID}.json`, `${ID}.sql.gz`]);
 
@@ -285,7 +287,7 @@ describe('updater, restore', () => {
     /* Who may get in now, for the keeper alone. */
     expect(json(file(s, 'restore-carry.json'))).toEqual({ attempt: ATTEMPT, carry: CARRY });
     expect(statSync(file(s, 'restore-carry.json')).mode & 0o777).toBe(0o600);
-    expect(r.calls).toContain(`chown ${owner(s)} ${file(s, 'restore-carry.json.new')}`);
+    expect(r.calls).toContain(`chown ${owner(s)} ./restore-carry.json`);
     expect(readdirSync(file(s, 'restore'))).toEqual([]);
     for (const gone of ['restore.json', 'restore-journal.json', 'recovery-link.json']) expect(existsSync(file(s, gone)), gone).toBe(false);
     /* No secret was on a command line. */
@@ -355,6 +357,92 @@ describe('updater, restore', () => {
     expect(r.calls.filter(call => call === 'up with the carry')).toHaveLength(1);
     /* The restored one went only while the old one was kept under its own name. */
     expect(at(r.calls, `docker exec dbcid psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q -c ${ALONE} -c DROP DATABASE hornhoof WITH (FORCE)`)).toBeGreaterThan(at(r.calls, 'docker compose up'));
+  });
+
+  /* The keeper's folder of a restore can be written by the app too. Both files of a backup are taken into the updater's
+     own folder before anything stops: a named pipe or a link in the place of either, or a file with another name too,
+     ends the restore while the company still runs, and nothing comes in from elsewhere. */
+  function expectUntouched(s: Stand, calls: string[]) {
+    expect([database(s, 'hornhoof'), database(s, 'hornhoof_restore'), closed(s, 'hornhoof')]).toEqual(['20', null, false]);
+    expect(envOf(s)).toBe(OLD_ENV);
+    expect(readdirSync(file(s, 'restore'))).toEqual([]);
+    for (const gone of ['restore.json', 'restore-journal.json']) expect(existsSync(file(s, gone)), gone).toBe(false);
+    expect(calls.filter(call => call.startsWith('docker compose stop') || call.startsWith('docker compose up'))).toEqual([]);
+  }
+  const DUMP_LINE = 'The backup cannot be read, so nothing changed.';
+  const SETTINGS_LINE = "The backup's settings cannot be read, so nothing changed.";
+
+  it('ends a restore whose dump is a named pipe at once, before anything stops', async () => {
+    const s = stand(OLD_ENV);
+    order(s);
+    const dump = file(s, 'restore', `${ATTEMPT}.sql.gz`);
+    rmSync(dump);
+    expect(spawnSync('mkfifo', [dump]).status).toBe(0);
+    const r = await runOnce(s, null, WITH_CARRY);
+    expect(r.out).toContain(`Refused ${ATTEMPT}.sql.gz: it is not a plain file.`);
+    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'failed', step: 'load', line: DUMP_LINE });
+    expectUntouched(s, r.calls);
+  }, 10_000);
+
+  it("takes no settings through a link in the place of the backup's, and stops nothing", async () => {
+    const s = stand(OLD_ENV);
+    order(s);
+    const outside = join(s.dir, 'outside.json');
+    writeFileSync(outside, JSON.stringify(NEW), { mode: 0o600 });
+    const settings = file(s, 'restore', `${ATTEMPT}.env.json`);
+    rmSync(settings);
+    symlinkSync(outside, settings);
+    const r = await runOnce(s, null, WITH_CARRY);
+    expect(r.out).toContain(`Refused ${ATTEMPT}.env.json: it is not a plain file.`);
+    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'failed', step: 'load', line: SETTINGS_LINE });
+    expectUntouched(s, r.calls);
+    expect(readFileSync(outside, 'utf8')).toBe(JSON.stringify(NEW));
+  });
+
+  /* The updater's copy of the dump, a whole company's data, goes once the load ends, loaded or not: it is kept through
+     neither the swap nor the way back. Its copy of the settings, which the swap still reads, is there to show the look saw
+     the updater's own folder. */
+  it.each([
+    { what: 'it loaded', at: 'STUB_ON_CUTOVER', env: WITH_CARRY, state: 'done' },
+    { what: 'it did not load', at: 'STUB_ON_UP', env: { STUB_RESTORE: 'fail' }, state: 'failed' },
+  ])('keeps its copy of the dump no longer than the load, when $what', async ({ at, env, state }) => {
+    const s = stand(OLD_ENV);
+    order(s);
+    const seen = join(s.dir, 'seen');
+    await runOnce(s, null, { ...env, [at]: `find ${s.dir} -name restore.sql.gz -o -name env.json > ${seen}` });
+    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state });
+    expect(text(seen).trim().split('\n').map(path => path.split('/').at(-1))).toEqual(['env.json']);
+  });
+
+  it.each([
+    { what: 'the dump', name: `${ATTEMPT}.sql.gz`, line: DUMP_LINE },
+    { what: 'the settings', name: `${ATTEMPT}.env.json`, line: SETTINGS_LINE },
+  ])('takes $what only with one name, and stops nothing otherwise', async ({ name, line }) => {
+    const s = stand(OLD_ENV);
+    order(s);
+    linkSync(file(s, 'restore', name), join(s.dir, 'second-name'));
+    const r = await runOnce(s, null, WITH_CARRY);
+    expect(r.out).toContain(`Refused ${name}: it is not a plain file.`);
+    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'failed', step: 'load', line });
+    expectUntouched(s, r.calls);
+  });
+
+  /* What loads and what goes into .env is what was looked at: files put at both names once the company stops change nothing. */
+  it('restores the backup as it was taken, whatever stands at its names after', async () => {
+    const s = stand(OLD_ENV);
+    order(s);
+    const other = { HORNHOOF_SECRET: `${'C'.repeat(43)}=`, NODE_KEY: 'q'.repeat(40), RELAY_URL: 'https://other.hornhoof.test' };
+    writeFileSync(join(s.dir, 'other.sql.gz'), gzipSync('-- a dump of the hornhoof database\n-- migrations 5\n-- copy 9\n'));
+    writeFileSync(join(s.dir, 'other.env.json'), JSON.stringify(other));
+    const swap = `mv -f ${join(s.dir, 'other.sql.gz')} ${file(s, 'restore', `${ATTEMPT}.sql.gz`)} && mv -f ${join(s.dir, 'other.env.json')} ${file(s, 'restore', `${ATTEMPT}.env.json`)}`;
+    const r = await runOnce(s, null, { ...WITH_CARRY, STUB_ON_STOP: swap });
+    expect(r.code).toBe(0);
+    expect(r.calls.some(call => call.startsWith('docker compose stop'))).toBe(true);
+    /* The other files did take both names while the company stopped. */
+    expect([existsSync(join(s.dir, 'other.sql.gz')), existsSync(join(s.dir, 'other.env.json'))]).toEqual([false, false]);
+    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'done' });
+    expect(database(s, 'hornhoof')).toBe('18');
+    expect(envOf(s)).toBe(NEW_ENV);
   });
 
   it('refuses settings it cannot write', async () => {

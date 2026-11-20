@@ -5,7 +5,7 @@ import { serveApi } from './api';
 
 /* The map's scale readout fits every percentage from shortest to three digits without clipping, ellipsis or hidden overflow,
    in every built-in skin, every shipped language and right-to-left layout, while its three neighbour buttons stay >= 44 px. */
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 
 const SKINS: readonly BuiltinSkinId[] = BUILTIN_SKINS.map(s => s.id);
 

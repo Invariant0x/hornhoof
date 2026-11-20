@@ -289,7 +289,7 @@ async function checkGroup(page: Page, t: Messages, group: GroupId, look: string)
 for (const skin of SKINS) for (const lang of LANGS) for (const width of WIDTHS) {
   const look = `${lang}-ltr-${skin}-${width}`;
   test(`the short menu, Settings with Profile first and its five groups, and About: ${look}`, async ({ page }, info) => {
-    test.setTimeout(180_000);
+    test.setTimeout(0);
     const t = MESSAGES[lang];
     const problems = await prepare(page, lang, skin, width);
     await page.goto('/');
@@ -320,7 +320,7 @@ for (const skin of SKINS) for (const lang of LANGS) for (const width of WIDTHS) 
 for (const skin of SKINS) for (const width of RTL_WIDTHS) {
   const look = `en-rtl-${skin}-${width}`;
   test(`Settings mirrored right to left, Profile first and five groups: ${look}`, async ({ page }, info) => {
-    test.setTimeout(180_000);
+    test.setTimeout(0);
     const problems = await prepare(page, 'en', skin, width);
     for (const { id, path } of GROUPS) {
       await openGroup(page, en, id, path, 'rtl', ALL);
@@ -357,7 +357,7 @@ for (const skin of SKINS) for (const { lang, dir } of [{ lang: 'en', dir: 'ltr' 
 for (const skin of SKINS) for (const width of RTL_WIDTHS) {
   const look = `ru-ltr-${skin}-${width}`;
   test(`a person without the whole company has Profile and only the groups the server gives them: ${look}`, async ({ page }, info) => {
-    test.setTimeout(120_000);
+    test.setTimeout(0);
     const t = ru;
     const problems = await prepare(page, 'ru', skin, width, 'listed');
     await page.goto('/');

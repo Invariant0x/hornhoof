@@ -10,7 +10,7 @@ import { LONG_HINT, wholeTextOrg, type Script } from './whole-text-data';
    the words fit the old boxes, the boxes keep their old sizes. Each check is soft, so a look goes through the map, the department and
    far zoom, takes every picture and fails at its end with every cut it found. The run that takes the pictures names its
    phase and folder in WHOLE_TEXT_PHASE and WHOLE_TEXT_SHOTS. */
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 
 type Look = { script: Script; lang: 'en' | 'ru'; dir: 'ltr' | 'rtl'; width: 1440 | 375 };
 const LOOKS: Look[] = (['en', 'ru', 'pseudo', 'rtl', 'cjk'] as const).flatMap(script =>

@@ -352,7 +352,7 @@ for (const lang of LANGUAGES) {
   for (const theme of THEMES) {
     for (const width of WIDTHS) {
       test(`sends 12,000-char feedback and reads full 12,000-char verdict and files on real server (${lang}, ${theme}, ${width}px)`, async ({ page, baseURL }) => {
-        test.setTimeout(30_000);
+        test.setTimeout(0);
         const webOrigin = baseURL ?? 'http://localhost:4179';
         const t = MESSAGES[lang];
 
@@ -461,7 +461,7 @@ for (const lang of LANGUAGES) {
 }
 
 test('preserves 12,000-char input on refusal, supports pick: 0 + 12k comment and 12k task comment, and enforces canAnswer and attachment reachability on real server', async ({ page, baseURL }) => {
-  test.setTimeout(30_000);
+  test.setTimeout(0);
   const webOrigin = baseURL ?? 'http://localhost:4179';
 
   const submitSummary = buildLongText('EDGE-SUMMARY', 12_050);

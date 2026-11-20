@@ -205,6 +205,23 @@ const standEnv = (s: Stand, env: Record<string, string>) => ({
   ...env,
 });
 
+/* One step of the updater, as shell after its parts are loaded, with the same folders and stubs as a whole pass. */
+export function runUpdaterStep(s: Stand, step: string, env: Record<string, string> = {}): Promise<{ code: number | null; out: string }> {
+  const script = `
+    CONTROL=$HORNHOOF_CONTROL_DIR
+    SERVER_DIR=$HORNHOOF_SERVER_DIR
+    IMAGE=$HORNHOOF_IMAGE
+    NODE_IMAGE=$HORNHOOF_IMAGE-node
+    UPDATER_IMAGE=$HORNHOOF_IMAGE-updater
+    ROLE='' ONCE=1 UPDATER_REV=2 SQL_DIR=$HORNHOOF_SQL_DIR
+    for part in "$1"*.sh; do . "$part"; done
+    ${step}
+  `;
+  const child = spawn('bash', ['-euo', 'pipefail', '-c', script, 'updater-step', PARTS], { stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: standEnv(s, env) });
+  endWith(child);
+  return finished(child);
+}
+
 const callsOf = (s: Stand) => readFileSync(s.log, 'utf8').trim().split('\n').filter(Boolean);
 const statusOf = (s: Stand) => {
   try {
