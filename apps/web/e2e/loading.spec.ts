@@ -84,7 +84,8 @@ const SCREENS: Screen[] = [
     answer: route => route.fulfill({ json: { people: [PERSON] } }),
     shown: (page, lang) => [page.getByRole('navigation').first(), page.getByRole('heading', { level: 1, name: words(lang).people.heading, exact: true }), page.getByRole('button', { name: words(lang).people.invitePerson, exact: true })],
     place: page => page.locator('section.people:not(.machines)'),
-    arrived: page => page.getByRole('cell', { name: 'Mira Stone', exact: true }),
+    /* The person's name opens their card, on a phone's stacked rows as in the table. */
+    arrived: page => page.getByRole('button', { name: 'Mira Stone', exact: true }),
   },
   {
     name: 'machines',
