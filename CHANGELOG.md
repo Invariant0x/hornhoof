@@ -11,6 +11,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - On a page right to left, the tracker's graph is drawn mirrored too: its root at the right, each level further to the left, the lines of what a task waits for on the left with their words beside the waiting task, and its zoom at the right as on the other canvases.
 
+### Added
+
+- A machine's card shows its disk and Hornhoof's share of it part by part, the largest first, and a machine short of space gives its owner and the CEO one card with the numbers, what it already removed and what it keeps because it can't be restored; it goes by itself once there is room.
+
 ## [0.40.0] - 2026-11-20
 
 ### Fixed
