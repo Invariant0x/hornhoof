@@ -4,7 +4,7 @@ import type { AddressInfo, Socket } from 'node:net';
 import { privateToolCall, toolPrivacy, type ToolPrivacyPolicy } from '@hornhoof/protocol';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { OwnerUnknown, socketOf, type Capture, type Owns, type Peer } from './peer.js';
+import { CALLER_LEFT, OwnerUnknown, socketOf, type Capture, type Owns, type Peer } from './peer.js';
 import { serveCheckCommand } from '../check-command-runner.js';
 import { HookCalls } from './hook-calls.js';
 import { HookFailures, type HookRejected } from './hook-failures.js';
@@ -45,6 +45,10 @@ const HOOKS = new Set(['start', 'prompt', 'invocation', 'queued', 'stop', 'statu
 /* What the owner check found for a connection: its agent's program, or why not. */
 type Verdict = { owner: true } | { owner: false; why: string };
 const FORWARD = ['content-type', 'content-length', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
+
+/* Why a call was refused, for the node's log and Hornhoof: a caller that left before its check is said apart from a check
+   that found the caller is not the agent's. */
+const refusal = (why: string) => (why === CALLER_LEFT ? why : why ? `owner check failed: ${why}` : 'owner check failed');
 
 /* The agent's secret a program sends as a bearer token to the tools address that carries none. */
 function bearerSecret(req: IncomingMessage): string | undefined {
@@ -231,7 +235,7 @@ export class Bridge {
     if (found instanceof OwnerUnknown) return this.notOwned(res, key, kind, event, 502, `owner check unavailable: ${found.message}`);
     if (found.owner) return true;
     if (kind === 'hook' && event) this.options.unowned?.(key, event);
-    return this.notOwned(res, key, kind, event, 403, found.why ? `owner check failed: ${found.why}` : 'owner check failed');
+    return this.notOwned(res, key, kind, event, 403, refusal(found.why));
   }
 
   /* Use only recognized event and call names in rejection logs. */

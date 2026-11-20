@@ -7,6 +7,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Fixed
+
+- On a heavily loaded machine a node no longer refuses an agent's own hooks as callers outside its terminal: it checks a caller the moment its call arrives, each hook waits for the node as long as its program allows, and a caller that left before its check is refused under that reason.
+
 ## [0.40.0] - 2026-11-20
 
 ### Fixed
