@@ -399,14 +399,18 @@ describe('updater, restore', () => {
     expect(readFileSync(outside, 'utf8')).toBe(JSON.stringify(NEW));
   });
 
-  /* The updater's copy of the dump, a whole company's data, goes once it is loaded: it is not kept through the swap. */
-  it('keeps its copy of the dump no longer than the load', async () => {
+  /* The updater's copy of the dump, a whole company's data, goes once the load ends, loaded or not: it is kept through
+     neither the swap nor the way back. Its copy of the settings, which the swap still reads, is there to show the look saw
+     the updater's own folder. */
+  it.each([
+    { what: 'it loaded', at: 'STUB_ON_CUTOVER', env: WITH_CARRY, state: 'done' },
+    { what: 'it did not load', at: 'STUB_ON_UP', env: { STUB_RESTORE: 'fail' }, state: 'failed' },
+  ])('keeps its copy of the dump no longer than the load, when $what', async ({ at, env, state }) => {
     const s = stand(OLD_ENV);
     order(s);
     const seen = join(s.dir, 'seen');
-    const r = await runOnce(s, null, { ...WITH_CARRY, STUB_ON_CUTOVER: `find ${s.dir} -name restore.sql.gz -o -name env.json > ${seen}` });
-    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'done' });
-    expect(r.calls.some(call => call.includes('PGAPPNAME=hornhoof-cutover'))).toBe(true);
+    await runOnce(s, null, { ...env, [at]: `find ${s.dir} -name restore.sql.gz -o -name env.json > ${seen}` });
+    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state });
     expect(text(seen).trim().split('\n').map(path => path.split('/').at(-1))).toEqual(['env.json']);
   });
 

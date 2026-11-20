@@ -343,7 +343,11 @@ case "$1 $2" in
           # STUB_ON_STOP: a command run as the services stop, as another writer of the shared folders could act then.
           *' stop '*) [ -z "${STUB_ON_STOP:-}" ] || sh -c "$STUB_ON_STOP" < /dev/null ;;
           *' down '*) [ -z "${STUB_NETWORKS:-}" ] || printf 'none' > "$STUB_STATE/networks" ;;
-          *' up '*) networks_up "$(compose_file "$@")" || exit 1 ;;
+          # STUB_ON_UP: a command run as services start, to look at the updater's folders then.
+          *' up '*)
+            [ -z "${STUB_ON_UP:-}" ] || sh -c "$STUB_ON_UP" < /dev/null
+            networks_up "$(compose_file "$@")" || exit 1
+            ;;
         esac
         case " $* " in
           *' pull '*)

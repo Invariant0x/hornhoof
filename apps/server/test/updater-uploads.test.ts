@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { APP, DIGESTS, JQ, runOnce, stand, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
+import { APP, DIGESTS, JQ, runOnce, runUpdaterStep, stand, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
 
 /* A machine that keeps a copy of the company's data, and the company server it uploads to. */
 const OWN_IMAGE = `${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`;
@@ -239,6 +239,19 @@ describe('the updater and what a machine held when it stopped holding the data',
     expect(tar.calls().filter(call => /^-\w*x/.test(call))).toEqual([]);
     expect([readFileSync(outside, 'utf8'), statSync(outside).nlink]).toEqual([JOURNAL, 1]);
     expect(made(r.calls)).toBe(false);
+  });
+
+  /* Where the limit is: the headers of a thousand files are read, and none of one more. */
+  it('reads the headers of a thousand files of an upload, and not one more', async () => {
+    const s = stand();
+    const files = (n: number) => tarOf(Array.from({ length: n }, (_, i) => ({ name: `public.t${i}.csv` })));
+    writeFileSync(join(s.dir, 'most.tar'), files(1000));
+    writeFileSync(join(s.dir, 'over.tar'), files(1001));
+    const r = await runUpdaterStep(
+      s,
+      `for f in most over; do e=0; m=$(tar_members "${s.dir}/$f.tar") || e=$?; printf '%s %s %s\\n' "$f" "$(printf '%s\\n' "$m" | grep -c '^file ')" "$e"; done`,
+    );
+    expect(r.out.trim().split('\n')).toEqual(['most 1000 0', 'over 1000 2']);
   });
 
   it('loads nothing from a named pipe in the place of an upload, and goes on at once', async () => {
