@@ -34,6 +34,8 @@ const MACHINE: MachineView = {
   id: 'm1', hostname: HOST, os: 'darwin', arch: 'arm64', owner: OWNER, online: true, lastSeenAt: null, plans: [],
   load: { cpus: 10, load: 1, memFree: 10 * GIB, memTotal: 12 * GIB, jobs: 0, tests: 0, cpuModel: 'Apple M2 Pro', diskFree: DISK.free, diskTotal: DISK.total, disk: DISK },
   lendsTests: true, running: { agents: [], parts: [] },
+  /* Two copies of company databases inside the volumes, one of them a company the server serves, with a long name. */
+  replicas: { count: 2, bytes: 38.6 * GIB, companies: [{ name: 'Northwind Logistics & Cold Chain International', bytes: 21.4 * GIB }] },
 };
 const LOW: MachineLowCard = { id: 'm1', hostname: HOST, owner: OWNER, since: DISK.low!.since, disk: DISK, names: { '00000000-0000-4000-8000-0000000000a1': 'Theodora Vasilievna-Brightwater' } };
 const SUBS: SubView[] = [];
@@ -70,7 +72,7 @@ async function diskPart(page: Page, t: Messages): Promise<{ card: Locator; part:
   await page.getByRole('button', { name: t.tables.openCard(HOST), exact: true }).click();
   const card = page.getByRole('article', { name: HOST });
   const part = card.locator('section.part', { has: page.getByRole('heading', { name: t.machines.diskParts.title, exact: true }) });
-  await expect(part.locator('.disk-parts li')).toHaveCount(Object.keys(DISK.parts).length);
+  await expect(part.locator('.disk-parts li')).toHaveCount(Object.keys(DISK.parts).length + 1);
   await page.evaluate(() => document.fonts.ready);
   return { card, part };
 }

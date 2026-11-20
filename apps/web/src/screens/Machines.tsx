@@ -652,7 +652,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
           {row.checkError && <p className="machine-note">{row.checkError}</p>}
           <NetworkPlace row={row} />
         </Part>
-        {row.online && row.load?.disk && <DiskParts disk={row.load.disk} />}
+        {row.online && row.load?.disk && <DiskParts disk={row.load.disk} replicas={row.replicas ?? null} />}
       </section>
       <RunningNow title={t.machines.runningNow} label={t.machines.runningOn(row.hostname)} agents={row.running.agents} parts={row.running.parts} online={row.online} me={me} />
       <section className="blk blk-side">

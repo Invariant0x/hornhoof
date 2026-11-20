@@ -5,7 +5,7 @@ import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from 
 import type { ExternalWait, TaskWaitFact, WaitSourceKind } from '@hornhoof/protocol/waits';
 import type { SigninStep } from '@hornhoof/protocol/signin';
 import type { Notification } from '@hornhoof/protocol';
-import type { ConnectionEnd, DepartmentTurnProgress, DiskReport, FailureKind, Limits, MachineDrain, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { ConnectionEnd, DepartmentTurnProgress, DiskReport, FailureKind, Limits, MachineDrain, MachineReplicas, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { RiskClass, WorkKind } from '@hornhoof/protocol/pipeline-report';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
@@ -918,6 +918,8 @@ export type MachineView = {
   plans: { id: string; provider: ProviderId; status: PlanStatus; online: boolean }[];
   /* What its nodes said last about how busy it is; none while no node of it is connected. */
   load: NodeLoad | null;
+  /* The copies of company databases it holds, inside Docker's volumes: none while unmeasured. Older servers omit it. */
+  replicas?: MachineReplicas | null;
   /* Takes the company's test runs when it is the freest machine. */
   lendsTests: boolean;
   running: Running;
@@ -1031,7 +1033,7 @@ export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add' | 'co
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
 /* webPort: where the company opens on the server's own machine. refusedBy: the machines on the server's network whose
    connections it did not take. Older servers omit both. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; checkError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null };
+export type BuiltinView = { online: boolean; load: NodeLoad | null; replicas?: MachineReplicas | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; checkError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null };
 
 export type JobView = {
   id: string;

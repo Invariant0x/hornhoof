@@ -1,4 +1,4 @@
-import type { DiskReport } from '@hornhoof/protocol';
+import type { DiskReport, MachineReplicas } from '@hornhoof/protocol';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -18,10 +18,13 @@ const DISK: DiskReport = {
 };
 const LOW: DiskReport = { ...DISK, free: 40 * GIB, low: { since: '2026-11-20T10:00:00.000Z' } };
 
-const withDisk = (disk: DiskReport | undefined) =>
+/* Two copies of company databases on the machine, inside Docker's volumes; the server names the one company it serves. */
+const REPLICAS: MachineReplicas = { count: 2, bytes: 14 * GIB, companies: [{ name: 'Acme Robotics', bytes: 14 * GIB }] };
+
+const withDisk = (disk: DiskReport | undefined, replicas?: MachineReplicas) =>
   mockApi({
     'GET /api/subscriptions': [200, { subscriptions: SUBS }],
-    'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, load: { ...MACHINES[0]!.load!, ...(disk ? { disk } : {}) } }], builtin: null }],
+    'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, load: { ...MACHINES[0]!.load!, ...(disk ? { disk } : {}) }, ...(replicas ? { replicas } : {}) }], builtin: null }],
   });
 
 async function laptop() {
@@ -56,6 +59,25 @@ describe("a machine's disk on its card", () => {
     expect(within(disk).getByText('Hornhoof всего: 132 ГБ из 460 ГБ')).toBeInTheDocument();
     expect(within(disk).getByText('Все остальное: 208 ГБ')).toBeInTheDocument();
     expect(within(disk).getByText('Свой диск Docker: свободно 85 ГБ из 200 ГБ')).toBeInTheDocument();
+  });
+
+  it("shows the copies of company databases as a part of its own, the companies named, and counts them once, in the volumes", async () => {
+    withDisk(DISK, REPLICAS);
+    render(<Machines me={ME} />);
+    const disk = partOf(await laptop(), 'Disk by part');
+    expect(rows(disk)).toEqual(['Images60 GB', 'Volumes30 GB', 'Build cache20 GB', 'Company database copies, in the volumes: 2 (Acme Robotics)14 GB', 'Working copies12 GB', 'Check temp files5 GB', 'Containers3 GB', 'Terminal recordings2 GB']);
+    const copies = within(disk).getAllByRole('listitem')[3]!;
+    expect(copies.querySelector('.bar i')?.getAttribute('style')).toBe('width: 3%;');
+    expect([...copies.querySelectorAll('.dp-n bdi')].map(name => name.textContent)).toEqual(['Acme Robotics']);
+    expect(within(disk).getByText('Hornhoof in all: 132 GB of 460 GB')).toBeInTheDocument();
+  });
+
+  it('says the copies in Russian, and says none when the machine holds none', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    withDisk(DISK, { count: 0, bytes: 0, companies: [] });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    const disk = partOf(await laptop(), 'Диск по частям');
+    expect(rows(disk)).toContain('Копии баз компаний, в томах: 00 ГБ');
   });
 
   it("leaves out what the node could not measure, and Docker's own disk where Docker has none", async () => {

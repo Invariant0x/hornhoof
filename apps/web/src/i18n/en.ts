@@ -968,6 +968,8 @@ export const en = {
       size: (gb: string) => `${gb} GB`,
       all: (gb: string, total: string) => `Hornhoof in all: ${gb} GB of ${total} GB`,
       other: (gb: string) => `Everything else: ${gb} GB`,
+      /* The copies of company databases, already inside the volumes, then the companies the server can name. */
+      replicas: (count: number) => `Company database copies, in the volumes: ${count}`,
       docker: (free: string, total: string) => `Docker's own disk: ${free} GB free of ${total} GB`,
       low: (since: string) => `Short of disk space since ${since}: it takes no new checks or builds until space is back. Its turns go on.`,
       mark: 'Low on disk',
@@ -1885,7 +1887,7 @@ export const en = {
     machineLowTakes: (parts: string) => `Hornhoof takes: ${parts}.`,
     machineLowCleaned: (parts: string) => `Removed in the last 24 hours: ${parts}.`,
     machineLowGoesOn: 'It keeps running its turns, but takes no new checks or builds until space is back.',
-    machineLowKept: "Kept, because it can't be restored",
+    machineLowKept: 'Not removed: a person needs to check it',
     machineLowKeptRow: (task: number | null, gb: string, why: string) => `${task === null ? '' : `task ${task}, `}${gb} GB, ${why}`,
     machineLowKeptWhy: { uncommitted: 'changes not committed', unpushed: 'commits not pushed' },
     machineLowDo: 'What to do: remove files you no longer need from this machine, or give Docker more disk space.',

@@ -98,7 +98,7 @@ describe('a machine short of disk space, as its people read it', () => {
   it("lists the work it keeps because it can't be restored, biggest first: whose, where, for which task, how big and why", () => {
     shown([KEEPS]);
     const card = screen.getByRole('region', { name: 'Machine studio-laptop (Lisa) is low on disk space' });
-    const kept = within(card).getByRole('list', { name: "Kept, because it can't be restored" });
+    const kept = within(card).getByRole('list', { name: 'Not removed: a person needs to check it' });
     expect(within(kept).getAllByRole('listitem').map(row => row.textContent)).toEqual([
       'Theo, hornhoof-1750: task 1750, 9 GB, changes not committed',
       `${STRAY}, scratch/copy: 2.5 GB, commits not pushed`,
@@ -109,7 +109,7 @@ describe('a machine short of disk space, as its people read it', () => {
   it('says what it keeps in Russian', () => {
     localStorage.setItem('hh-lang', 'ru');
     shown([KEEPS]);
-    const kept = screen.getByRole('list', { name: 'Оставлено, потому что не восстановить' });
+    const kept = screen.getByRole('list', { name: 'Не убрано, нужна проверка человека' });
     expect(within(kept).getAllByRole('listitem').map(row => row.textContent)).toEqual([
       'Theo, hornhoof-1750: задача 1750, 9 ГБ, изменения не закоммичены',
       `${STRAY}, scratch/copy: 2,5 ГБ, коммиты не отправлены`,
