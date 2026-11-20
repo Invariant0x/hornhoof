@@ -51,7 +51,7 @@ const groupLimits = (group: LimitGroup): Limits => ({ status: group.status, wind
 const groupsOf = (limits: Limits | null): LimitGroup[] => limits?.groups ?? [];
 
 /* The fullest current group speaks for each window. Among equal shares, prefer the reset shown by the plan as a whole. */
-function mainGroups(limits: Limits) {
+function mainGroups(limits: Limits): ReadonlyMap<string, LimitGroup> {
   const byWindow = new Map<string, { group: LimitGroup; used: number; matchesReset: boolean }>();
   const resetByWindow = new Map(limits.windows.map(w => [w.name, w.resetsAt]));
   for (const group of groupsOf(limits)) {
@@ -64,7 +64,7 @@ function mainGroups(limits: Limits) {
       }
     }
   }
-  return byWindow;
+  return new Map([...byWindow].map(([name, { group }]) => [name, group]));
 }
 
 /* The plan's limits on an employee's card: those of the group of its model where the plan keeps them by group, each
@@ -80,10 +80,10 @@ export function LimitMeters({ sub, now, model }: { sub: SubView; now: number; mo
 }
 
 /* Each group's limits in a part of its own, under the group's name. */
-function GroupParts({ sub, groups, now, main }: { sub: SubView; groups: LimitGroup[]; now: number; main?: ReturnType<typeof mainGroups> }) {
+function GroupParts({ sub, groups, now, main }: { sub: SubView; groups: LimitGroup[]; now: number; main?: ReadonlyMap<string, LimitGroup> }) {
   const t = useT();
   return <>{groups.map(group => {
-    const barFor = main && ((name: string) => main.get(name)?.group === group);
+    const barFor = main && ((name: string) => main.get(name) === group);
     return <Part key={group.name} title={t.subs.groupLimits(group.name)}><Gauges sub={sub} limits={groupLimits(group)} now={now} barFor={barFor} /></Part>;
   })}</>;
 }
@@ -124,7 +124,7 @@ export function LimitCell({ sub, name, now }: { sub: SubView; name: string; now:
   if (sub.kind === 'api_key') return <span className="cell-na">{t.subs.noPlanLimits}</span>;
   const limits = currentPlanLimits(sub, now);
   if (!limits?.groups?.length) return <LimitLine sub={sub} name={name} limits={limits} now={now} />;
-  const main = mainGroups(limits).get(name)?.group;
+  const main = mainGroups(limits).get(name);
   return <ul className="where-list">{limits.groups.map(group => <li key={group.name}><GroupLine sub={sub} name={name} limits={groupLimits(group)} now={now} group={group.name} showBar={group === main} /></li>)}</ul>;
 }
 
