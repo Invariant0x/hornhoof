@@ -13,6 +13,9 @@ export const RING_MIN_MS = 500;
 export const SLOW_MS = 10_000;
 export const FAIL_MS = 30_000;
 
+/* A server without a list or a sum yet answers that it has none (404): a part that came, empty. */
+export const noneYet = (f: unknown) => f instanceof ApiFailure && f.status === 404;
+
 /* A part of a screen's data: undefined or null until its first answer; failure: why its last ask failed; load asks again;
    cancel, where it can, stops the ask still running. quiet: another part of the same screen already says its failure and
    its time, so here it is only awaited, and the screen says it once. */

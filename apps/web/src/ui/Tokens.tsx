@@ -3,31 +3,38 @@ import { api } from '../api';
 import { useLanguage, useT, type Language, type Messages } from '../i18n';
 import type { ModelTokens, SubView, TokenPeriods, TokenSum } from '../types';
 import { Gauge } from './Cards';
+import { LoadState, noneYet, useLoad, type LoadPart } from './Loading';
 import { tokenCount } from './token-count';
 
 const PERIODS = ['today', 'week', 'month', 'all'] as const;
 
 type Tokens = { tokens: TokenPeriods; models: ModelTokens[] };
+/* A server that keeps no tokens for the plan: an answer, with nothing to show. */
+const NONE = 'none';
 
 const viewerZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-/* What a subscription's turns used, its today from midnight where the viewer is, and its 30 days by model. The list's
-   sums, whose day is UTC's, stand in until the card's own answer comes, and again when a new turn adds to them. An older
-   server tells no models. */
-function useTokens(sub: SubView): Tokens | null {
-  const [own, setOwn] = useState<Tokens | null>(null);
+/* What a subscription's turns used, its today from midnight where the viewer is, and its 30 days by model, as a part of
+   the card's load. The list's sums, whose day is UTC's, stand in until the card's own answer comes, and again when a new
+   turn adds to them. An older server tells no models. */
+function useTokens(sub: SubView): LoadPart & { data: Tokens | typeof NONE | null } {
+  const [own, setOwn] = useState<Tokens | typeof NONE | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
+  const [round, setRound] = useState(0);
   const turns = sub.tokens?.all.turns;
   useEffect(() => {
     let live = true;
+    setFailure(null);
     api.get<{ tokens: TokenPeriods; models?: ModelTokens[] }>(`/api/subscriptions/${sub.id}/tokens?zone=${encodeURIComponent(viewerZone())}`).then(
       answer => live && setOwn({ tokens: answer.tokens, models: answer.models ?? [] }),
-      () => {},
+      error => live && (noneYet(error) ? setOwn(o => o ?? NONE) : setFailure(error)),
     );
     return () => {
       live = false;
     };
-  }, [sub.id, turns]);
-  return own ?? (sub.tokens ? { tokens: sub.tokens, models: [] } : null);
+  }, [sub.id, turns, round]);
+  const sums = sub.tokens ? { tokens: sub.tokens, models: [] } : null;
+  return { data: own === NONE ? (sums ?? NONE) : (own ?? sums), failure, load: () => setRound(r => r + 1) };
 }
 
 /* A figure in one piece that reads left to right, its number with its unit or percent sign, so a page laid out right to
@@ -71,8 +78,12 @@ function ModelShares({ sub, models }: { sub: SubView; models: ModelTokens[] }) {
 export function TokenGauges({ sub }: { sub: SubView }) {
   const t = useT();
   const { language } = useLanguage();
-  const own = useTokens(sub);
-  if (!own) return <p className="part-note">{t.subs.tokens.none}</p>;
+  const part = useTokens(sub);
+  const load = useLoad([part]);
+  const own = part.data;
+  /* Until the tokens came, their room holds the ring: it never says that there were no turns before the answer. */
+  if (load.phase !== 'done') return <LoadState load={load} />;
+  if (!own || own === NONE) return <p className="part-note">{t.subs.tokens.none}</p>;
   const { tokens, models } = own;
   return <>
     <div className="gauges">

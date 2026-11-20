@@ -119,7 +119,9 @@ async function wholeInside(page: Page, shown: Locator, width: number) {
   const box = (await shown.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(width);
-  expect(await shown.evaluate(el => [el, ...el.querySelectorAll('*')].every(e => e.scrollWidth <= e.clientWidth + 1))).toBe(true);
+  /* Each block that overflows its own width, named by its tag and classes, so a failure says which one. Words only a
+     screen reader reads are 1 px wide on purpose. */
+  expect(await shown.evaluate(el => [el, ...el.querySelectorAll('*')].filter(e => !e.closest('.sr') && e.scrollWidth > e.clientWidth + 1).map(e => `${e.tagName.toLowerCase()}.${[...e.classList].join('.')} ${e.scrollWidth}>${e.clientWidth}`))).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 }
 
@@ -127,10 +129,12 @@ async function wholeInside(page: Page, shown: Locator, width: number) {
 const ringOf = (shown: Locator) => shown.locator('.conn-steps > .now .conn-mk > .spinner');
 const nowStep = (shown: Locator) => shown.locator('.conn-steps > .now > span:last-child');
 
-/* The turning mark stands before the words, on their first line, not above them. */
-async function expectBeside(mark: Locator, words: Locator) {
+/* The turning mark stands before the words, on their first line, not above them: on their left, or on their right on a
+   page laid out right to left. */
+async function expectBeside(mark: Locator, words: Locator, dir: 'ltr' | 'rtl' = 'ltr') {
   const [m, w] = await Promise.all([mark.boundingBox(), words.boundingBox()]);
-  expect(m!.x + m!.width).toBeLessThanOrEqual(w!.x);
+  if (dir === 'rtl') expect(m!.x).toBeGreaterThanOrEqual(w!.x + w!.width);
+  else expect(m!.x + m!.width).toBeLessThanOrEqual(w!.x);
   expect(m!.y + m!.height / 2).toBeGreaterThan(w!.y);
   expect(m!.y + m!.height / 2).toBeLessThan(w!.y + w!.height);
 }
@@ -327,7 +331,7 @@ for (const look of LOOKS) {
         await opened.connect('antigravity', connection('account'));
         await later(page, MINUTE + 5_000);
         await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.account);
-        await expectBeside(ringOf(shown), nowStep(shown));
+        await expectBeside(ringOf(shown), nowStep(shown), look.dir);
       }
       if (state === 'failed') {
         await opened.connect('antigravity', connection('checking', 'failed', { error: 'The sign-in ended before it finished, so nothing changed.', line: 'Antigravity CLI did not finish signing in.' }));
