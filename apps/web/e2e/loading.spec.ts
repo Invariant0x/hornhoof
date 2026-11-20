@@ -399,7 +399,8 @@ for (const screen of SCREENS) {
       const ring = busyOf(screen, page).locator('.spinner');
       await expect(ring).toBeVisible();
       await expect(busyOf(screen, page)).toHaveText(busyWords(screen, words('en')));
-      expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
+      /* Nothing runs; the map's signal dots behind a department are paused there. */
+      expect(await page.evaluate(() => document.getAnimations().filter(a => a.playState === 'running').length)).toBe(0);
       /* A quarter of the ring is its arc. */
       const colours = await ring.evaluate(el => { const s = getComputedStyle(el); return [s.borderTopColor, s.borderRightColor]; });
       expect(colours[0]).not.toBe(colours[1]);
