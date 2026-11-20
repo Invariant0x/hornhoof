@@ -2,12 +2,12 @@ import { lstat, readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import type { TaskStates } from '@hornhoof/protocol';
 import { closedCopies, type CloneRun } from '../task-copies.js';
-import { folderBytes, type Cleaner } from './clean.js';
+import { folderBytes, type Cleaner, type Stay } from './clean.js';
 import { dropDependencies } from './dependencies.js';
 
 /* A finished task's working copy that stays because work in it is on no remote: whose it is, where in that agent's folder,
    which task, what it takes, and why, for a person to see. */
-export type KeptCopy = { agent: string; path: string; task: number; bytes: number; why: 'uncommitted' | 'unpushed' };
+export type KeptCopy = Stay & { task: number };
 
 type Options = {
   dir: string;

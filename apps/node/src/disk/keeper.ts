@@ -1,4 +1,4 @@
-import type { DiskReport } from '@hornhoof/protocol';
+import { DISK_KEPT_MAX, type DiskReport } from '@hornhoof/protocol';
 import type { Cleaner } from './clean.js';
 import { DiskCleaned, DiskLow, diskThreshold, type DiskSettings, type Removal } from './state.js';
 
@@ -53,7 +53,8 @@ export class DiskKeeper {
     }
     const free = Math.min(disk.free, disk.total), threshold = diskThreshold(disk.total, settings);
     const low = this.lowState.after([{ free, threshold }], at);
-    this.last = { total: disk.total, free, threshold, parts, low, cleaned: this.removed.list(at) };
+    const kept = cleaners.flatMap(c => (c.kept?.() ?? []).map(stay => ({ part: c.part, ...stay }))).sort((a, b) => b.bytes - a.bytes).slice(0, DISK_KEPT_MAX);
+    this.last = { total: disk.total, free, threshold, parts, low, cleaned: this.removed.list(at), kept };
     return this.last;
   }
 

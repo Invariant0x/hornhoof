@@ -1,11 +1,14 @@
 import { execFile } from 'node:child_process';
 import { readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { DiskPart } from '@hornhoof/protocol';
+import type { DiskPart, DiskReport } from '@hornhoof/protocol';
+
+/* What a cleaning leaves because it cannot come back, as the disk report names it, without its part. */
+export type Stay = Omit<NonNullable<DiskReport['kept']>[number], 'part'>;
 
 /* One part of Hornhoof's share of a disk: what it takes now, and the cleaning that removes what of it can come back. clean
-   says how many bytes it freed. */
-export type Cleaner = { part: DiskPart; size(): Promise<number>; clean(): Promise<number> };
+   says how many bytes it freed; kept, where a part has it, what its last cleaning left because it cannot come back. */
+export type Cleaner = { part: DiskPart; size(): Promise<number>; clean(): Promise<number>; kept?(): Stay[] };
 
 /* What a folder takes on its disk, in bytes, as du counts it: the blocks of its files, on that disk alone, never following
    a link. A folder that is not there takes nothing. du runs apart, so a folder of a million files never holds the node up. */

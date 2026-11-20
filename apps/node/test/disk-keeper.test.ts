@@ -110,3 +110,20 @@ describe("a part's cleaning that fails", () => {
     expect(lines.some(line => line.includes('recordings') && line.includes('no access'))).toBe(true);
   });
 });
+
+describe('what a cleaning leaves because it cannot come back', () => {
+  it('is named for a person with its part, biggest first, the 50 biggest', async () => {
+    const stays = Array.from({ length: 60 }, (_, i) => ({ agent: 'agent-a', path: `shop-${i + 1}`, task: i + 1, bytes: (i + 1) * MB, why: 'uncommitted' as const }));
+    const copies = { part: 'workingCopies' as const, size: async () => 0, clean: async () => 0, kept: () => stays };
+    const keeper = new DiskKeeper({ disk: async () => ({ total: 10 * MB, free: 9 * MB }), settings: NEEDS_3_MB, cleaners: [copies], now: () => at });
+    const report = await keeper.pass();
+    expect(report?.kept).toHaveLength(50);
+    expect(report?.kept?.[0]).toEqual({ part: 'workingCopies', agent: 'agent-a', path: 'shop-60', task: 60, bytes: 60 * MB, why: 'uncommitted' });
+    expect(report?.kept?.[49]?.path).toBe('shop-11');
+  });
+
+  it('is empty where nothing stays', async () => {
+    const keeper = new DiskKeeper({ disk: async () => ({ total: 10 * MB, free: 9 * MB }), settings: NEEDS_3_MB, cleaners: [], now: () => at });
+    expect((await keeper.pass())?.kept).toEqual([]);
+  });
+});
