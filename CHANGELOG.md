@@ -26,6 +26,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - In a page that reads right to left, an English line of a bar over the map ends with its full stop instead of starting with it, and the bar stays mirrored.
 - A number on a plan's card stays on one line with its unit or the word it goes with, as "14 h", "1 online" or "Input 0", in every language; a reset still wraps between its parts.
 - A release no longer counts as checked a commit that turnkey work was built on but its employee did not make: Hornhoof notes where the turn branch was as the work starts, refuses a start named under it, lists work whose start it has no record of for a person, and a tag named like main never stands for main.
+- Stop ends a turn even when its machine never reports the end: Hornhoof closes the turn itself at most a minute and a half after Stop, and the employee's waiting messages go out.
 
 ### Changed
 
