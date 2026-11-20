@@ -79,6 +79,18 @@ function rootDone(fields: Map<string, string> | null): boolean {
   return fields !== null && !fields.has('kind') && fields.get('state') === 'done' && fields.get('app') === 'kimi-code';
 }
 
+/* The row of each program's prompt. agy's empty prompt is a row of its own; its answers sit above it among the person's. */
+const PROMPT_ROW: Record<Exclude<Kind, 'kimi'>, RegExp> = { claude: /^[ \t]*❯[^\n]*$/gm, codex: /^[ \t]*›[^\n]*$/gm, antigravity: /^[ \t]*>[ \t]*$/gm };
+
+/* What the program shows above its empty prompt once it finished an answer: that answer with the row that says it is done.
+   None while it works or holds a draft, and none of Kimi, whose screen alone proves no finished answer. */
+export function completedAnswer(kind: Kind, screen: string): string | null {
+  if (kind === 'kimi' || !idleScreen(kind, screen)) return null;
+  const plain = stripEscapes(screen);
+  const prompt = [...plain.matchAll(PROMPT_ROW[kind])].at(-1);
+  return prompt ? plain.slice(0, prompt.index).trimEnd() : null;
+}
+
 /* Keep the completed response in the continuity proof, excluding Kimi's rotating toolbar below its current input. */
 export function completionText(kind: Kind, screen: string, output = ''): string | null {
   if (!idleScreen(kind, screen, output)) return null;

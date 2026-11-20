@@ -23,7 +23,7 @@ import { eraseKeys, flat, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, type
 import { ViewSessions } from './views.js';
 import { SessionPrivacy } from './privacy.js';
 import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
-import { ProgramWatch, READY, REPORT_MS, completionText, programState, type Pending } from './program-state.js';
+import { ProgramWatch, READY, REPORT_MS, completedAnswer, completionText, programState, type Pending } from './program-state.js';
 import type { LaunchSpec, TermProgram } from './programs.js';
 import { agyTranscript, prepareAgy } from '../providers/antigravity-terminal.js';
 import { acceptClaudeDialogs, claudeToolsFile, claudeTranscript, writeClaudeTools } from '../providers/claude-terminal.js';
@@ -205,6 +205,10 @@ type Agent = {
   completionStart: Promise<RecordingCursor | null> | null;
   /* Interruption notices already on screen when this turn started belong to older turns. */
   interruptions: number;
+  /* The finished answer the program showed as Hornhoof's last words went in, and the one its last look showed while no end of
+     the turn came: an end lost on the way shows as a new answer that stays. */
+  shownAnswer: string | null;
+  lostAnswer: string | null;
   /* The running turn's tool calls the program began and did not end yet, by id, oldest first. */
   calls: Map<string, Pending>;
   closedCalls: Set<string>;
@@ -512,7 +516,12 @@ export class TerminalHost {
   }
 
   private completionBlocked(a: Agent): boolean {
-    return !a.took || a.typing != null || Boolean(a.calls.size || a.question || a.operatorQuestion || a.retry || a.restarting);
+    return !a.took || a.typing != null || this.holdsTurn(a);
+  }
+
+  /* Something the program has not finished, or Hornhoof's restart of it: no screen tells the turn is over meanwhile. */
+  private holdsTurn(a: Agent): boolean {
+    return Boolean(a.calls.size || a.question || a.operatorQuestion || a.retry || a.restarting);
   }
 
   /* The program by the identity the server knows it by, so that a look binds the input to the program it showed. */
@@ -626,7 +635,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, completionStart: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, completionStart: null, interruptions: 0, shownAnswer: null, lostAnswer: null, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
       this.agents.set(key, a);
     }
     return a;
@@ -1079,6 +1088,7 @@ export class TerminalHost {
     a.typing = prompt;
     if (typedSinceStart(a) && !(await this.freeOfPerson(a, job))) return this.inputNotFree(a, job);
     a.ownerTyped = false;
+    await this.answerBeforeWords(a);
     await this.opts.tmux.paste(a.name, prompt);
     await sleep(pasteWait(prompt));
     await this.opts.tmux.keys(a.name, 'Enter');
@@ -1546,6 +1556,41 @@ export class TerminalHost {
     watch.look(now, screen, call, this.programRunning(a), a.signAt, a.retry);
     if (this.atInterruption(a, screen)) this.interrupted(a);
     this.agyFailed(a);
+    this.lostEnd(a, screen);
+  }
+
+  /* What the program shows as its finished answer as Hornhoof's words go in: the same answer later is still that one. */
+  private async answerBeforeWords(a: Agent): Promise<void> {
+    const kind = a.program?.kind;
+    a.shownAnswer = kind ? completedAnswer(kind, await this.opts.tmux.screen(a.name, 0, true).catch(() => '')) : null;
+    a.lostAnswer = null;
+  }
+
+  /* The program shows a finished answer at its empty prompt, one it did not show as Hornhoof's words went in, two looks in a
+     row, with nothing pending, while no end of the turn came: the hook that said it took the words, or the one that said it
+     stopped, was lost on the way, as a hook a busy machine refuses is, and the node took the program's own end for another
+     turn's. The turn is over as done. The program's own ends come first: this only reads the looks the turn makes anyway. */
+  private lostEnd(a: Agent, screen: string): void {
+    const answer = this.newAnswer(a, screen);
+    const seen = a.lostAnswer;
+    a.lostAnswer = answer;
+    if (answer === null || answer !== seen) return;
+    this.log(`Agent ${a.key} (${a.program!.kind}): its program shows its answer done at an empty prompt, and no end of its turn came. Hornhoof ends the turn as done.`);
+    if (a.typing != null) this.wordsShownTaken(a, a.typing);
+    if (!this.stoppable(a)) this.tookTurn(a);
+    this.endTurn(a, { status: 'done', message: a.lastText ?? '' });
+  }
+
+  private newAnswer(a: Agent, screen: string): string | null {
+    if (!a.program || !a.turn || this.overIn(a) || a.personWords || this.holdsTurn(a)) return null;
+    const answer = completedAnswer(a.program.kind, screen);
+    return answer === a.shownAnswer ? null : answer;
+  }
+
+  /* An answer to the words shows they went in, as the hook that was lost would have said. */
+  private wordsShownTaken(a: Agent, words: string): void {
+    a.turn?.words.taken(words);
+    a.typing = null;
   }
 
   /* agy's turn is under way from when its prompt is on the way, whether agy still works on other words or is about to take it:
@@ -2888,6 +2933,7 @@ export class TerminalHost {
     turn.words.replay(text);
     a.took = false;
     a.typing = text;
+    await this.answerBeforeWords(a);
     await this.inputLane(a, () => this.opts.tmux.paste(a.name, text));
     const pastedAt = Date.now();
     a.pastedAt = pastedAt;
