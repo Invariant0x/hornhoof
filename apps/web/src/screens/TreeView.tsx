@@ -248,15 +248,28 @@ function labelClass(row: TreeRow, selected: TreePick | null): string {
 
 type LaneChipProps = Pick<CanvasProps, 'select'> & { row: TreeRow; employee: Employee; serverNow: string; on: boolean };
 
-function sameLaneChip(a: LaneChipProps, b: LaneChipProps): boolean {
+/* The same lane showing the same words, wherever its row stands. */
+function samePlate(a: LaneChipProps, b: LaneChipProps): boolean {
   return JSON.stringify(a.employee) === JSON.stringify(b.employee) && a.serverNow === b.serverNow && a.on === b.on && a.select === b.select
-    && plateKey(a.row) === plateKey(b.row) && a.row.y === b.row.y && pickKey(a.row.pick!) === pickKey(b.row.pick!);
+    && plateKey(a.row) === plateKey(b.row) && pickKey(a.row.pick!) === pickKey(b.row.pick!);
 }
 
-const LaneChip = memo(function LaneChip({ row, employee, serverNow, on, select }: LaneChipProps) {
-  const open = useCallback((event: MouseEvent<HTMLButtonElement>) => select(row.pick!, event), [row, select]);
-  return <Chip row={plateKey(row)} e={employee} x={0} y={row.y + plateRoom(row)} on={on} flash={false} serverNow={serverNow} onOpen={open} />;
+const sameLaneChip = (a: LaneChipProps, b: LaneChipProps): boolean => samePlate(a, b) && a.row.y === b.row.y;
+
+/* A lane's chip stands in a place of its own at the top of its row. When a plate above grows with its words, the lanes under
+   it move down by their places alone, and their chips are not drawn again (#1595). */
+const LaneChip = memo(function LaneChip(props: LaneChipProps) {
+  return (
+    <div className="tv-lane" style={{ top: props.row.y }}>
+      <LanePlate {...props} />
+    </div>
+  );
 }, sameLaneChip);
+
+const LanePlate = memo(function LanePlate({ row, employee, serverNow, on, select }: LaneChipProps) {
+  const open = useCallback((event: MouseEvent<HTMLButtonElement>) => select(row.pick!, event), [row, select]);
+  return <Chip row={plateKey(row)} e={employee} x={0} y={plateRoom(row)} on={on} flash={false} serverNow={serverNow} onOpen={open} />;
+}, samePlate);
 
 function RowLabel({ row, tree, department, selected, select }: Omit<CanvasProps, 'layout'> & { row: TreeRow }) {
   if (row.agent) {
@@ -391,7 +404,7 @@ function useMeasuredPlates(root: RefObject<HTMLDivElement | null>, layout: TreeL
   useLayoutEffect(() => {
     const labels = root.current?.querySelector('.tv-labs');
     if (!labels) return;
-    const shown = [...labels.querySelectorAll<HTMLElement>(':scope > [data-row]')];
+    const shown = [...labels.querySelectorAll<HTMLElement>(':scope > [data-row], :scope > .tv-lane > [data-row]')];
     const measure = () => {
       const next: PlateSizes = Object.fromEntries(shown.map(el => [el.dataset.row!, el.offsetHeight]));
       setPlates(was => (JSON.stringify(was) === JSON.stringify(next) ? was : next));
