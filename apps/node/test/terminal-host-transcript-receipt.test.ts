@@ -245,24 +245,27 @@ describe('the end of the log the receipt comes from', () => {
 it("keeps an operator's assignment to deliver when Claude takes the same words of a person's while it waits", async () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'hh-operator-wait-')));
   cleanups.push(async () => rmSync(dir, { recursive: true, force: true }));
-  const c = await liveTerminal('claude', 'queued', { watched: true, operator: { dir, connected: () => true, send: () => true } });
+  /* The operator takes only an agent and jobs named by UUIDs. */
+  const key = randomUUID();
+  const c = await liveTerminal('claude', 'queued', { key, jobId: randomUUID(), watched: true, operator: { dir, connected: () => true, send: () => true } });
   c.finish();
   await c.on(c.running);
-  const a = c.host['agents'].get('receipt')!;
+  const a = c.host['agents'].get(key)!;
   const ASSIGNMENT = 'From Hornhoof: check the checkout.';
   const idle = () => `────────────\n❯ ${c.input()}\n────────────\n  ? for shortcuts\n`;
   /* The program is ready as the turn begins, then answers the person while the assignment waits to go in: no input shows
      until it is done. */
   let answering = true;
   c.screen.mockImplementation(async () => (answering && a.promptWaits ? '✻ Answering…\n' : idle()));
-  const turn = c.host.run({ ...job('receipt', ASSIGNMENT, { jobId: 'job-assignment', workDir: a.workDir, sessionId: a.sessionId }), home: a.home, operatorDelivery: { id: randomUUID(), ordinal: 2 } });
+  const turn = c.host.run({ ...job(key, ASSIGNMENT, { jobId: randomUUID(), workDir: a.workDir, sessionId: a.sessionId }), home: a.home, operatorDelivery: { id: randomUUID(), ordinal: 2 } });
   void turn.catch(() => {});
   /* No test here has a time limit: wait a bounded while for the assignment to wait, and say so if it never does. */
   for (let step = 0; step < 400 && !a.promptWaits; step++) await c.pass(5);
   expect(a.promptWaits).toBe(true);
   c.record(userSaid(ASSIGNMENT));
   c.host['drain'](a);
-  expect(c.host['operator']!.recorded('receipt')).toBe(false);
+  expect(c.host['operator']!.enabled(key)).toBe(true);
+  expect(c.host['operator']!.recorded(key)).toBe(false);
   expect(a.turn?.words.originalPending()).toBe(true);
   expect(a.typing).toBe(ASSIGNMENT);
   answering = false;
