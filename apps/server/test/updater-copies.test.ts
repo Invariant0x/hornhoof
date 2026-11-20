@@ -229,8 +229,13 @@ describe('the updater of a worker that is given the data', () => {
     expect(refused.calls.some(c => c.includes('pg_dump') || c.includes('ON_ERROR_STOP'))).toBe(false);
     expect(has(full, 'schema.json')).toBe(false);
 
-    /* A schema that cannot be read or loaded leaves a line, and nothing of the dump. */
-    for (const [fails, line] of [[{ STUB_SCHEMA: 'fail' }, "The company server's schema could not be read."], [{ STUB_RESTORE: 'fail' }, 'The schema could not be loaded into the database.']] as const) {
+    /* A schema that cannot be read or loaded leaves a line, and nothing of the dump. The line of a load says what
+       psql said, without the place in the dump, which no log would show otherwise. */
+    for (const [fails, line] of [
+      [{ STUB_SCHEMA: 'fail' }, "The company server's schema could not be read."],
+      [{ STUB_RESTORE: 'fail' }, 'The schema could not be loaded into the database: psql: error: out of disk space'],
+      [{ STUB_RESTORE: 'role', STUB_MISSING_ROLE: 'acme_reader' }, 'The schema could not be loaded into the database: ERROR:  role "acme_reader" does not exist'],
+    ] as const) {
       const broken = stand(copy);
       request(broken, { attempt: 2 });
       await runOnce(broken, null, { ...env, ...fails });
@@ -246,5 +251,56 @@ describe('the updater of a worker that is given the data', () => {
       expect(dropped.calls.some(c => c.includes('pg_dump') || c.includes('ON_ERROR_STOP')), JSON.stringify(bad)).toBe(false);
       expect(has(odd, 'schema.json'), JSON.stringify(bad)).toBe(false);
     }
+  });
+
+  /* The leader's app gives its own roles row policies as it runs, and its schema keeps them: a copy whose cluster has
+     none of those roles yet could never load it whole. Each role a policy names is made first, with no login and no
+     right, in the same transaction as the schema, so the copy keeps every policy the leader has. */
+  it("makes the roles the leader's policies name, then loads the schema whole", async () => {
+    const copy = `${WORKER_ENV.replace('HORNHOOF_ROLE=worker', 'HORNHOOF_ROLE=data')}COMPOSE_PROFILES=data,builtin\n`;
+    const password = 'the-replica-password';
+    const request = (s: Stand) => {
+      writeFileSync(join(s.control, 'replica.json'), '{}');
+      writeFileSync(join(s.control, 'schema.json'), JSON.stringify({ attempt: 3, database: 'hornhoof_next', port: 7432, password }), { mode: 0o600 });
+    };
+    const env = { ...WORKER, HORNHOOF_ROLE: 'data' };
+    const s = stand(copy);
+    request(s);
+    const r = await runOnce(s, null, { ...env, STUB_POLICY_ROLES: 'acme_reader|acme_auditor' });
+    /* Asked of the leader through the keeper's door, as the role that only reads, before the schema is read. */
+    const roles = r.calls.findIndex(c => c === "docker exec -e PGPASSWORD dbcid psql -h keeper -p 7432 -U hornhoof_replica -d hornhoof -At -c SELECT DISTINCT r FROM pg_policies, unnest(roles) AS r WHERE r <> 'public' ORDER BY 1");
+    expect(roles).toBeGreaterThan(-1);
+    expect(roles).toBeLessThan(r.calls.findIndex(c => c.includes(' pg_dump ')));
+    expect(r.calls.filter(c => c === 'psql had its password')).toHaveLength(1);
+    expect(readFileSync(join(s.dir, 'loaded'), 'utf8')).toBe(
+      [
+        'DO $roles$ BEGIN',
+        `IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'acme_reader') THEN CREATE ROLE "acme_reader" NOLOGIN; END IF;`,
+        `IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'acme_auditor') THEN CREATE ROLE "acme_auditor" NOLOGIN; END IF;`,
+        'END $roles$;',
+        '-- the schema of hornhoof',
+        '-- the rows of drizzle.__drizzle_migrations',
+        'REVOKE ALL ON ALL FUNCTIONS IN SCHEMA net FROM PUBLIC;',
+        '',
+      ].join('\n'),
+    );
+    expect(r.calls).toContain('docker exec -i dbcid psql -U hornhoof -1 -v ON_ERROR_STOP=1 -d hornhoof_next');
+    expect(readdirSync(join(s.control, 'schema'))).toEqual(['3.done']);
+    expect([r.out, ...r.calls].join('\n').includes(password)).toBe(false);
+
+    /* A name that is not a plain role's stands in no statement: nothing is loaded, and the line says why. */
+    for (const odd of ['acme" SUPERUSER; --', 'Acme', 'a reader', `x${'y'.repeat(63)}`]) {
+      const bad = stand(copy);
+      request(bad);
+      const refused = await runOnce(bad, null, { ...env, STUB_POLICY_ROLES: `acme_reader|${odd}` });
+      expect(readFileSync(join(bad.control, 'schema', '3.failed'), 'utf8').trim(), odd).toBe("The company server's schema names a role that is not a plain name.");
+      expect(refused.calls.some(c => c.includes(' pg_dump ') || c.includes('ON_ERROR_STOP')), odd).toBe(false);
+      expect(existsSync(join(bad.dir, 'loaded')), odd).toBe(false);
+    }
+    /* The leader that cannot be asked leaves the line of a schema that could not be read. */
+    const deaf = stand(copy);
+    request(deaf);
+    await runOnce(deaf, null, { ...env, STUB_SCHEMA: 'fail' });
+    expect(readFileSync(join(deaf.control, 'schema', '3.failed'), 'utf8').trim()).toBe("The company server's schema could not be read.");
   });
 });

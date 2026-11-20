@@ -719,12 +719,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .dname { min-width: 0; overflow-wrap: break-word; font-family: var(--f-display); font-size: 20px; font-weight: 600; }
 .cnt { flex: none; font-family: var(--f-display); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .cnt b { color: var(--ink); font-weight: 600; }
-/* The zoom at the start of a canvas's bottom, mirrored on a page right to left as the rest of the layout is (#1622, #1658),
-   and the orchestrator's line bottom middle. */
+/* The zoom at the start of a canvas's bottom, mirrored on a page right to left as the rest of the layout is, the tracker's
+   graph mirrored with it, its root at the start (#1622, #1658, #1670), and the orchestrator's line bottom middle. */
 .zoom { position: absolute; inset-inline-start: 16px; bottom: 16px; max-inline-size: calc(100% - 32px); display: flex; align-items: center; }
-/* The tracker's graph is drawn left to right in either direction, its root at the left, so its zoom stays at the left, over the
-   side by the root; mirrored it would lie over the leaves (#1658, until the graph mirrors). */
-.tr-canvas > .zoom { left: 16px; right: auto; }
 /* A block's grip over its top left corner, 44 px to touch at any zoom: nothing drawn, only the pointer shows it, and the ring of
    the keyboard's focus; the map's corners are not mirrored. */
 .grip { box-sizing: border-box; margin: 0; padding: 0; border: 0; background: none; cursor: move; touch-action: none; transform-origin: 50% 50%; }
@@ -785,6 +782,8 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .people { max-width: 1040px; margin: 0 auto; padding: 16px 16px 48px; display: grid; gap: 18px; }
 .people-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
 .people-head > div { display: grid; gap: 6px; max-width: 60ch; }
+/* Which machines keep copies of the company, under the machines' table once they came. */
+.machines-copies { display: grid; gap: 6px; max-width: 60ch; }
 .panel > .edge-in { padding: 20px; display: grid; gap: 14px; }
 .panel .actions { display: flex; justify-content: flex-end; }
 /* A card with a form for people, assistants, hiring and plans: 24 px inside and 16 px between blocks, 16
@@ -956,6 +955,8 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 /* A held table spaces its search, count line and table as the screen around it does, so they stand where they will. */
 .held-table, .held-table > .load-in { gap: inherit; }
 .held-table > .load-in { display: grid; }
+/* The filter buttons' row of a held table keeps the size it took last in this tab, if it showed (TableTools, Design #1667). */
+.held-table .tools-r2 { min-block-size: var(--tools-room, 0px); }
 .arrive { animation: arrive .12s ease-out both; }
 @keyframes arrive { from { opacity: 0; } }
 .load-fail { display: grid; gap: 8px; max-inline-size: 60ch; padding: 12px 14px; border-inline-start: 3px solid var(--pink); background: var(--surface2); color: var(--ink); font-family: var(--f-body); font-size: 14px; text-align: start; }

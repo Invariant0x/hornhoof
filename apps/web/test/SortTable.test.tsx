@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { expect, it } from 'vitest';
-import { SortTable, type TableColumn } from '../src/ui/SortTable';
+import { afterEach, expect, it, vi } from 'vitest';
+import { HeldTable, SortTable, type TableColumn } from '../src/ui/SortTable';
 import { decl } from './css';
 
 type Row = { id: string; name: string; load: number | null };
@@ -176,4 +176,28 @@ it('gives sort headers and row name buttons 44px touch targets, compact row padd
   }
   expect(decl('.tbl-frame:has(:focus-visible)', 'clip-path')).toBe('none');
   expect(decl('.tbl-frame:has(:focus-visible) > .edge-in', 'clip-path')).toBe('none');
+});
+
+afterEach(() => sessionStorage.clear());
+
+/* Design #1667 (style book 1.7, "last known size"): a list whose filter buttons showed holds their size on its next load in the
+   same tab; a list never shown, or one with no room name, holds none. */
+it('holds the size its filter buttons took last in this tab while the list comes again, and none before they showed', () => {
+  const search = { placeholder: 'Find machine', text: (r: Row) => r.name, count: (n: number) => `${n} machines`, room: 'boxes' };
+  const loading = { phase: 'loading' as const, ring: true, failure: null, asked: 1, retry: () => {} };
+  const held = () => render(<HeldTable load={loading} columns={columns} search={search} rows={2} />);
+  const room = (view: ReturnType<typeof render>) => (view.container.querySelector('.tools-r2') as HTMLElement).style.getPropertyValue('--tools-room');
+  const first = held();
+  expect(room(first)).toBe('0px');
+  first.unmount();
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ height: 44 } as DOMRect);
+  const shown = render(<SortTable rows={rows} columns={columns} name={r => r.name} initialSort={{ key: 'name', direction: 1 }} card={() => null} search={search}
+    filters={[{ key: 'state', label: 'State', values: r => [r.load === null ? 'Offline' : 'Online'], text: value => value }]} />);
+  shown.unmount();
+  vi.restoreAllMocks();
+  const next = held();
+  expect(room(next)).toBe('44px');
+  next.unmount();
+  const unnamed = render(<HeldTable load={loading} columns={columns} search={{ ...search, room: undefined }} rows={2} />);
+  expect(room(unnamed)).toBe('');
 });

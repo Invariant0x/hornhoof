@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { SubView, WaitCard } from '../src/types';
+import type { CopiesView, MachineView, PersonView, SubView, WaitCard } from '../src/types';
 import { serveApi, TASKS } from './api';
 import { stretch } from './pseudo-text';
 
@@ -35,6 +35,14 @@ const PLAN = {
   machines: [{ id: 'm1', hostname: 'dev-laptop', status: 'ready', online: true }], api: null, models: [], target: null, connecting: null,
 } as unknown as SubView;
 
+const PERSON: PersonView = {
+  id: 'p2', name: 'Mira Stone', email: 'mira@example.com', title: 'Designer', status: 'active', isOwner: false,
+  access: { whole: true, departments: [], teams: [] },
+};
+/* A machine of the company, and a copy of Hornhoof kept on another one, which the machines screen says once they came. It
+   lends no tests and has no plan, so its table shows no filter buttons: those come with the data they count. */
+const BOX: MachineView = { id: 'm1', hostname: 'hq-box', os: 'linux', arch: 'x86_64', owner: { id: 'p1', name: 'Ivan' }, online: true, lastSeenAt: null, plans: [], load: null, lendsTests: false, running: { agents: [], parts: [] } };
+const COPIES: CopiesView = { leader: 'hq-box', copies: [{ hostname: 'spare-box', sync: true }], onlySince: null };
 /* A card Hornhoof kept for the person: a task that took longer than it should. */
 const LATE: WaitCard = { id: 'c1', about: 'late', taskId: null, number: null, kind: null, level: null, at: '2026-11-19T22:00:00.000Z', turn: null, tag: null } as unknown as WaitCard;
 
@@ -136,6 +144,31 @@ const SCREENS: Screen[] = [
     shown: (page, lang) => [page.getByRole('navigation').first(), page.locator('h1.tr-where'), page.locator('section.waiting').getByRole('heading', { name: words(lang).tasks.waiting, exact: true })],
     place: page => page.locator('section.waiting'),
     arrived: page => page.locator('section.waiting .wait-card'),
+  },
+  {
+    name: 'people',
+    held: '/api/people',
+    open: byTab('people'),
+    answer: route => route.fulfill({ json: { people: [PERSON] } }),
+    /* Its table's head is drawn at once and stays where it is when the people come (Design #1656). */
+    shown: (page, lang) => [page.getByRole('navigation').first(), page.getByRole('heading', { level: 1, name: words(lang).people.heading, exact: true }),
+      page.getByRole('button', { name: words(lang).people.invitePerson, exact: true }), page.locator('section.people:not(.machines) table.ptable thead')],
+    place: page => page.locator('section.people:not(.machines)'),
+    /* The person's name opens their card, on a phone's stacked rows as in the table. */
+    arrived: page => page.getByRole('button', { name: 'Mira Stone', exact: true }),
+  },
+  {
+    name: 'machines',
+    held: '/api/machines',
+    open: byTab('machines'),
+    answer: route => route.fulfill({ json: { machines: [BOX], copies: COPIES } }),
+    /* The pool's frame, the search field and the table's head are drawn at once and stay where they are (Design #1656). */
+    shown: (page, lang) => [page.getByRole('navigation').first(), page.getByRole('heading', { level: 1, name: words(lang).machines.heading, exact: true }),
+      page.getByRole('button', { name: words(lang).machines.connect, exact: true }), page.locator('section.machines .pool'),
+      page.locator('section.machines input[type=search]'), page.locator('section.machines table.dt thead')],
+    place: page => page.locator('section.machines'),
+    arrived: (page, lang) => page.getByRole('button', { name: words(lang).tables.openCard('hq-box'), exact: true }),
+    serves: { '/api/subscriptions': { subscriptions: [] } },
   },
 ];
 
@@ -418,6 +451,55 @@ test.describe('the plans while they come', () => {
     const rows = room.locator('table.dt tbody tr');
     expect(await rows.count()).toBeGreaterThan(1);
     await expectKeptRoom(page, rows.first(), [room.locator('table.dt thead'), rows.nth(1), room.getByPlaceholder(t.tables.searchSubscriptions)]);
+  });
+});
+
+test.describe('the people and the machines while they come', () => {
+  const screenOf = (name: string) => SCREENS.find(screen => screen.name === name)!;
+
+  test('people: draw their table head at once, hold person rows, and keep them past 10 s and once given up', async ({ page }) => {
+    await openHeld(page, screenOf('people'), EN);
+    const room = page.locator('section.people .load-hold');
+    await expect(room.locator('table.ptable thead th').first()).toBeVisible();
+    const rows = room.locator('table.ptable tbody tr');
+    expect(await rows.count()).toBeGreaterThan(1);
+    await expectKeptRoom(page, rows.first(), [room.locator('table.ptable thead'), rows.nth(1)]);
+  });
+
+  test('machines: draw the pool, the search field, the count line and the table head at once, hold machine rows, and keep them past 10 s and once given up', async ({ page }) => {
+    const t = words('en');
+    await openHeld(page, screenOf('machines'), EN);
+    const room = page.locator('section.machines .load-hold');
+    await expect(page.locator('section.machines .pool')).toBeVisible();
+    await expect(room.getByPlaceholder(t.tables.searchMachines)).toBeVisible();
+    await expect(room.locator('p.result')).toBeVisible();
+    await expect(room.locator('table.dt thead th').first()).toBeVisible();
+    const rows = room.locator('table.dt tbody tr');
+    expect(await rows.count()).toBeGreaterThan(1);
+    await expectKeptRoom(page, rows.first(), [room.locator('table.dt thead'), rows.nth(1), page.locator('section.machines .pool')]);
+  });
+
+  /* Design #1667 (style book 1.7, "last known size"): the filter buttons count the machines, so the first load of the
+     screen cannot know them and the table moves down once when they come. Once shown in this tab, their row keeps its room
+     on the next load, and nothing moves when they come again. */
+  test('machines: hold the room of their filter buttons on the next load in this tab, once they showed them', async ({ page }) => {
+    const both: Screen = { ...screenOf('machines'), answer: route => route.fulfill({ json: { machines: [BOX, { ...BOX, id: 'm2', hostname: 'lab-box', online: false }], copies: COPIES } }) };
+    const head = page.locator('section.machines table.dt thead');
+    const hold = await openHeld(page, both, EN);
+    hold.release();
+    await expect(page.locator('section.machines .tools-r2 .fgroup').first()).toBeVisible();
+    const shown = await boxesOf([head]);
+    hold.failing(false);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.clock.runFor(RING_DELAY_MS);
+    await expect(page.locator('section.machines .load-hold table.dt thead')).toBeVisible();
+    expectSameBoxes(await boxesOf([head]), shown);
+    const answered = hold.answered();
+    hold.release();
+    await answered;
+    await page.clock.runFor(RING_MIN_MS);
+    await expect(page.locator('section.machines .tools-r2 .fgroup').first()).toBeVisible();
+    expectSameBoxes(await boxesOf([head]), shown);
   });
 });
 
