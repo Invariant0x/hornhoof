@@ -89,6 +89,8 @@ const settled = (page: Page) => page.evaluate(() => new Promise(done => requestA
 
 /* The map's view once it stopped moving. */
 async function still(page: Page) {
+  /* A skin's own font comes late, and the map fits again to the cards it makes taller: still is after that. */
+  await page.evaluate(async () => { await document.fonts.ready; });
   let last = '';
   await expect.poll(async () => {
     await settled(page);
