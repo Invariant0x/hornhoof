@@ -2,6 +2,7 @@ import { PROGRAM_SCREEN_MAX, type NodeMessage, type PrivateValues, type ProgramE
 import type { ProgramRetry } from '@hornhoof/protocol/map';
 import { redact } from '../redact.js';
 import { agyPrompt, atEmptyPrompt } from './input.js';
+import { flat } from './left-input.js';
 import { stripEscapes } from '../providers/process.js';
 import type { TermProgram } from './programs.js';
 
@@ -79,16 +80,20 @@ function rootDone(fields: Map<string, string> | null): boolean {
   return fields !== null && !fields.has('kind') && fields.get('state') === 'done' && fields.get('app') === 'kimi-code';
 }
 
-/* The row of each program's prompt. agy's empty prompt is a row of its own; its answers sit above it among the person's. */
-const PROMPT_ROW: Record<Exclude<Kind, 'kimi'>, RegExp> = { claude: /^[ \t]*❯[^\n]*$/gm, codex: /^[ \t]*›[^\n]*$/gm, antigravity: /^[ \t]*>[ \t]*$/gm };
+/* The row of the prompt of each program that shows its finished answer right above it. */
+const PROMPT_ROW = { claude: /^[ \t]*❯[^\n]*$/gm, codex: /^[ \t]*›[^\n]*$/gm };
+/* A rule row: drawn at the width of the screen, so another size draws it anew. */
+const RULE_ROW = /^[ \t─━═]*$/gm;
 
-/* What the program shows above its empty prompt once it finished an answer: that answer with the row that says it is done.
-   None while it works or holds a draft, and none of Kimi, whose screen alone proves no finished answer. */
+/* What Claude Code or Codex shows above its empty prompt once it finished an answer: that answer with the row that says it
+   is done, its words in one line and its rule rows left out, as a screen of another size wraps and draws them anew. None
+   while it works or holds a draft, and none of Kimi, whose screen alone proves no finished answer, or of Antigravity,
+   which ends a turn only once its whole conversation is idle. */
 export function completedAnswer(kind: Kind, screen: string): string | null {
-  if (kind === 'kimi' || !idleScreen(kind, screen)) return null;
+  if ((kind !== 'claude' && kind !== 'codex') || !idleScreen(kind, screen)) return null;
   const plain = stripEscapes(screen);
   const prompt = [...plain.matchAll(PROMPT_ROW[kind])].at(-1);
-  return prompt ? plain.slice(0, prompt.index).trimEnd() : null;
+  return prompt ? flat(plain.slice(0, prompt.index).replace(RULE_ROW, '')) : null;
 }
 
 /* Keep the completed response in the continuity proof, excluding Kimi's rotating toolbar below its current input. */
