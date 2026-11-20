@@ -691,8 +691,9 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
       <LoadState load={plansLoad} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
-      {subs && subs.length === 0 && <p className="muted">{t.subs.empty}</p>}
-      {subs && subs.length > 0 && (
+      {/* The plans show once their load is done: until then the ring holds their room for at least its least time. */}
+      {subs && plansLoad.phase === 'done' && subs.length === 0 && <p className="muted">{t.subs.empty}</p>}
+      {subs && plansLoad.phase === 'done' && subs.length > 0 && (
         <SortTable
           rows={subs}
           columns={subscriptionColumns(t, now)}

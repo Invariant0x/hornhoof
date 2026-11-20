@@ -8,6 +8,8 @@ export const SIGNIN_ERRORS = {
   noLogin: 'This machine cannot run the sign-in for its plan from Hornhoof.',
   noProgram: 'The program could not be installed on this machine, so nothing changed.',
   signedOut: 'The program on this machine is not signed in, so nothing changed.',
+  /* The server's: the connection passed its deadline with the plan not ready. */
+  noAnswer: 'The machine stopped answering before the plan was ready.',
 } as const;
 
 export type SigninError = keyof typeof SIGNIN_ERRORS;

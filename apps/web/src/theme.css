@@ -961,15 +961,24 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .load-fail > .lf-h { color: var(--muted); font-size: 13px; }
 .load-fail > .entry-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .load-fail .btn { min-block-size: 44px; min-inline-size: 44px; padding: 8px 12px; line-height: 1.4; }
-/* Something under way, or why it stalled with the ways on (ui/Waiting.tsx): a plan's connection after its sign-in code
-   among them. Every word wraps inside its card, however narrow. */
-.plan-connection, .stalled { display: grid; gap: 8px; min-width: 0; }
-.stalled p { margin: 0; }
-.under-way > b, .under-way > .uprog-text, .stalled p { min-width: 0; overflow-wrap: anywhere; }
-/* The words stay beside the mark and wrap there; how long it has taken goes under them. Its own name, as the tracker's
-   .waiting is a section of work waiting for people. */
-.under-way > b { flex: 1 1 0; }
-.under-way > .uprog-text { flex-basis: 100%; }
+/* A plan's connection after its sign-in code (ui/PlanConnection.tsx, style book 1.5 section 4): "Step 3 of 4" over the bar of
+   the steps done, the steps with 24 px markers, the ring in the marker of the one Hornhoof works on, then what happens now.
+   Every word wraps inside its card, however narrow. */
+.plan-connection { display: grid; gap: 16px; min-width: 0; }
+.conn-prog { display: grid; gap: 6px; }
+.conn-prog > p { margin: 0; color: var(--muted); font-size: 13px; }
+.conn-steps { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.conn-steps > li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: start; min-width: 0; }
+.conn-steps > li > span:last-child { padding-block: 2px; overflow-wrap: anywhere; }
+.conn-steps > .next > span:last-child { color: var(--muted); }
+.conn-mk { display: grid; place-items: center; width: 24px; height: 24px; box-sizing: border-box; border: 1px solid var(--line2); color: var(--muted); font: 600 12px/1 var(--f-display); }
+.conn-steps > .done > .conn-mk { border-color: var(--ok); color: var(--ok); }
+.conn-steps > .now > .conn-mk { border-color: var(--cyan); }
+.conn-steps > .bad > .conn-mk { border-color: var(--pink); color: var(--pink-ink); }
+.conn-now { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.conn-now > h4 { margin: 0; }
+.conn-now > p { margin: 0; overflow-wrap: anywhere; }
+.conn-now > .conn-keep { color: var(--muted); font-size: 13px; }
 .signin h3 { margin: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; }
 .signin p { margin: 0; font-size: 12.5px; }
 .signin .t-term { height: 360px; }
@@ -2010,6 +2019,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .release-fold .goal-fold > span { display: flex; flex-wrap: wrap; gap: 0 8px; }
 .release-fold .goal-fold b { color: var(--ink); }
 .waiting { display: grid; gap: 10px; }
+.waiting > .load-hold > .load-in { display: grid; gap: 10px; }
 /* The tracker, as mockup 10 draws it and as shown in "Tracker" in the style book: the left panel a share of the width
    from 270px, then the main area with where the person is, the view and its filters and the work, each band its full width
    with 20px inside; the card a drawer over the end side. On a phone the left panel is a drawer over the page, the board's
@@ -2077,6 +2087,8 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 /* The main area: each band its whole width, with 20px inside. */
 .tr-main { container: tr-main / inline-size; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; min-inline-size: 0; padding-block-end: 30px; border-block-start: 1px solid var(--line); }
 .tr-main > :not(.tr-top, .tr-bar) { inline-size: auto; margin: 6px 20px 0; }
+/* What waits stands apart from the list or the search results above it, so its heading does not sit on their last line. */
+.tr-main > :is(.tr-hold, .tr-found) + .waiting { margin-block-start: 24px; }
 .tr-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-inline-size: 0; padding: 10px 20px; border-block-end: 1px solid var(--line); }
 .tr-menu { display: none; }
 .tr-where { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-inline-size: 0; margin: 0; font: 600 16px var(--f-display); overflow-wrap: anywhere; }

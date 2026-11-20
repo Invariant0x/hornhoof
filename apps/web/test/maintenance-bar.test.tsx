@@ -8,6 +8,7 @@ import type { GoalView, UpdatesView } from '../src/types';
 import { DeptBranches } from '../src/ui/DeptBranches';
 import { UpdateSaysIt } from '../src/ui/LoadFailure';
 import { page } from '../src/updates';
+import { en } from '../src/i18n/en';
 import { MACHINES, ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, SUBS, TASK_DETAIL, TASKS } from './api-mock';
 import { userEvent, waitFor } from './subscriptions-helpers';
 
@@ -191,7 +192,7 @@ describe('a maintenance refusal while the update panel shows', () => {
     await userEvent.click(tab('Tasks'));
     await waitFor(() => expect(asked('/api/task-departments')).toBeGreaterThan(0));
     await takenIn();
-    expect(bars()).toEqual(['Something went wrong.']);
+    expect(bars()).toEqual([expect.stringContaining(en.load.failed.server)]);
   });
 
   it('clears and retries the subscription command load when only that request was refused', async () => {

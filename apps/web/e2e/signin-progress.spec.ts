@@ -7,9 +7,12 @@ import { serveApi } from './api';
 
 /* 19.11: after the sign-in code, nothing on the plan's card changed while its program connected, and an Antigravity plan
    took so long that its owner could not tell whether it worked or hung. From the first step its node reports until the
-   plan is ready, its card and its sign-in window show a turning ring, the step in plain words and the time since the code;
-   then the ready card. A failure says why and what to do; past the one limit of the whole connection the owner can try
-   again or stop. The machine's words come through a stand-in for the stream, and the page runs on the test's clock. */
+   plan is ready, its card and its sign-in window show its steps with the ring in the marker of its sign-in (style book
+   1.5, section 4, #1611), and what happens now: the step its machine is at in plain words and the time since the code;
+   then the ready card. A failure says why and what to do. The server keeps the times: a minute with no new step it says
+   the connection takes longer than usual, and at the deadline of the whole connection that it failed; the owner can retry
+   or stop. The machine's and the server's words come through a stand-in for the stream, and the page runs on the test's
+   clock. */
 test.describe.configure({ timeout: 180_000 });
 const SHOTS = 'e2e/results/signin-progress-shots';
 mkdirSync(SHOTS, { recursive: true });
@@ -38,7 +41,7 @@ const connection = (step: string, state: State = 'connecting', more: { error?: s
   error: more.error ?? null, code: null, line: more.line ?? null,
 });
 
-type Look = { lang: 'en' | 'ru'; theme: 'cyberpunk' | 'light'; width: number };
+type Look = { lang: 'en' | 'ru'; theme: 'cyberpunk' | 'light' | 'matrix'; width: number; dir?: 'rtl' };
 const words = (look: { lang: 'en' | 'ru' }) => (look.lang === 'en' ? en : ru);
 
 const pathOf = (url: URL | string) => new URL(url.toString()).pathname;
@@ -54,9 +57,10 @@ async function openPlans(page: Page, look: Look, list: SubView[]): Promise<Opene
   await page.clock.install({ time: T0 });
   await page.clock.pauseAt(CODE_AT);
   await page.setViewportSize({ width: look.width, height: 900 });
-  await page.addInitScript(({ lang, theme }) => {
+  await page.addInitScript(({ lang, theme, dir }) => {
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
+    if (dir === 'rtl') document.addEventListener('DOMContentLoaded', () => { document.documentElement.dir = 'rtl'; });
     const streams: EventTarget[] = [];
     class Stream extends EventTarget {
       static readonly CLOSED = 2;
@@ -119,6 +123,10 @@ async function wholeInside(page: Page, shown: Locator, width: number) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 }
 
+/* The ring in the marker of the step Hornhoof works on, and that step's words. */
+const ringOf = (shown: Locator) => shown.locator('.conn-steps > .now .conn-mk > .spinner');
+const nowStep = (shown: Locator) => shown.locator('.conn-steps > .now > span:last-child');
+
 /* The turning mark stands before the words, on their first line, not above them. */
 async function expectBeside(mark: Locator, words: Locator) {
   const [m, w] = await Promise.all([mark.boundingBox(), words.boundingBox()]);
@@ -141,8 +149,11 @@ test.describe('a plan connecting after its sign-in code', () => {
     await expect(part(page, EN, 'codex')).toHaveCount(0);
     await opened.connect('codex', connection('checking'));
     const shown = window.getByRole('group', { name: t.subs.connection.label('Codex'), exact: true });
-    await expect(shown.locator('.waiting-mark')).toBeVisible();
-    await expectBeside(shown.locator('.waiting-mark'), shown.getByText(t.subs.connection.steps.checking, { exact: true }));
+    await expect(ringOf(shown)).toBeVisible();
+    await expect(shown.locator('.spinner')).toHaveCount(1);
+    await expect(nowStep(shown)).toContainText(t.subs.steps.signIn('Codex'));
+    await expect(shown.locator('.conn-prog > p')).toHaveText(t.subs.connection.progress(3, 4));
+    await expectBeside(ringOf(shown), nowStep(shown));
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.checking);
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.passed(t.subs.connection.seconds(0)));
     await later(page, 65_000);
@@ -154,7 +165,7 @@ test.describe('a plan connecting after its sign-in code', () => {
     await expect(window).toHaveCount(0);
     await opened.connect('codex', connection('models'));
     await expect(part(page, EN, 'codex').getByRole('status')).toContainText(t.subs.connection.steps.models);
-    await expect(part(page, EN, 'codex').locator('.waiting-mark')).toBeVisible();
+    await expect(ringOf(part(page, EN, 'codex'))).toBeVisible();
     opened.plans.now = [plan('codex', 'ready')];
     await opened.connect('codex', null);
     await expect(part(page, EN, 'codex')).toHaveCount(0);
@@ -168,7 +179,7 @@ test.describe('a plan connecting after its sign-in code', () => {
     await expect(part(page, EN, 'antigravity')).toHaveCount(0);
     await opened.connect('antigravity', connection('checking'));
     const shown = part(page, EN, 'antigravity');
-    await expect(shown.locator('.waiting-mark')).toBeVisible();
+    await expect(ringOf(shown)).toBeVisible();
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.checking);
     await later(page, 2 * MINUTE + 10_000);
     await opened.connect('antigravity', connection('signed_in'));
@@ -182,15 +193,16 @@ test.describe('a plan connecting after its sign-in code', () => {
     await expect(page.getByRole('heading', { name: t.cards.aboutPlan, exact: true })).toBeVisible();
   });
 
-  test('Codex: a failed connection says why and what to do, with no ring, and Try again signs in again', async ({ page }) => {
+  test('Codex: a failed connection says why and what to do, with no ring, and Retry signs in again', async ({ page }) => {
     const t = words(EN);
     const opened = await openPlans(page, EN, [plan('codex', 'needs_login')]);
     await openCard(page, EN, 'codex');
     await opened.connect('codex', connection('checking', 'failed', { error: 'The program did not take the new sign-in, so nothing changed.' }));
     const shown = part(page, EN, 'codex');
-    await expect(shown.getByRole('alert')).toHaveText(t.subs.signInErrors.notTaken);
-    await expect(shown).toContainText(t.subs.connection.next.signInAgain);
-    await expect(shown.locator('.waiting-mark')).toHaveCount(0);
+    await expect(shown.getByRole('alert').locator('.lf-t')).toHaveText(t.subs.signInErrors.notTaken);
+    await expect(shown.getByRole('alert').locator('.lf-h')).toHaveText(t.subs.connection.next.signInAgain);
+    await expect(shown.locator('.spinner')).toHaveCount(0);
+    await expect(shown.locator('.conn-steps > li').nth(2)).toHaveClass('bad');
     await shown.getByRole('button', { name: t.subs.connection.retryLabel('Codex'), exact: true }).click();
     await expect.poll(() => opened.posted).toContain('/api/subscriptions/s-codex/signin');
     await expect(page.locator('.signin').getByRole('heading', { name: t.subs.signingIn(HOST), exact: true })).toBeVisible();
@@ -206,25 +218,30 @@ test.describe('a plan connecting after its sign-in code', () => {
     const shown = part(page, EN, 'antigravity');
     await expect(shown.getByRole('alert')).toContainText(line);
     await expect(shown).toContainText(t.subs.connection.next.installWindow(HOST));
-    await expect(shown.locator('.waiting-mark')).toHaveCount(0);
+    await expect(shown.locator('.spinner')).toHaveCount(0);
   });
 
   for (const provider of ['codex', 'antigravity'] as const) {
-    test(`${NAMES[provider]}: past the limit of the whole connection the owner sees it, and can try again, with a visible focus ring, or stop`, async ({ page }) => {
+    test(`${NAMES[provider]}: a minute with no new step the owner hears it takes longer than usual, and can retry, with a visible focus ring, or stop`, async ({ page }) => {
       const t = words(EN);
       const opened = await openPlans(page, EN, [plan(provider, 'needs_login')]);
       await openCard(page, EN, provider);
       await opened.connect(provider, connection('models'));
       const shown = part(page, EN, provider);
-      await expect(shown.locator('.waiting-mark')).toBeVisible();
-      await later(page, LIMIT);
+      await expect(ringOf(shown)).toBeVisible();
+      await later(page, MINUTE);
       await opened.connect(provider, connection('models', 'too_long'));
-      await expect(shown.getByRole('alert')).toHaveText(t.common.tooLong);
-        await expect(shown).toContainText(t.subs.connection.tooLongNext(10));
+      const slow = shown.locator('.load-fail.slow');
+      await expect(slow).toHaveAttribute('role', 'status');
+      await expect(slow.locator('.lf-t')).toHaveText(t.common.tooLong);
+      await expect(slow.locator('.lf-h')).toHaveText(t.subs.connection.slowHint);
       await expect(shown).toContainText(t.subs.connection.steps.models);
-      await expect(shown.locator('.waiting-mark')).toHaveCount(0);
+      /* The ask still runs, so the ring stays, in the step's marker alone. */
+      await expect(ringOf(shown)).toBeVisible();
+      await expect(shown.locator('.spinner')).toHaveCount(1);
       const retry = shown.getByRole('button', { name: t.subs.connection.retryLabel(NAMES[provider]), exact: true });
       const cancel = shown.getByRole('button', { name: t.subs.connection.cancelLabel(NAMES[provider]), exact: true });
+      await expect(retry).toHaveText(t.common.retry);
       await expect(cancel).toBeVisible();
       await cancel.focus();
       await page.keyboard.press('Shift+Tab');
@@ -232,7 +249,7 @@ test.describe('a plan connecting after its sign-in code', () => {
       const ring = await retry.evaluate(el => { const s = getComputedStyle(el); return { visible: el.matches(':focus-visible'), style: s.outlineStyle, width: s.outlineWidth }; });
       expect(ring).toEqual({ visible: true, style: 'solid', width: '2px' });
       if (provider === 'antigravity') {
-        /* Try again has its node check the sign-in again: the plan connects anew, with no way to stop it until it stalls. */
+        /* Retry has its node check the sign-in again: the plan connects anew, with no way to stop it until it stalls. */
         await retry.press('Enter');
         await expect.poll(() => opened.posted).toContain('/api/subscriptions/s-antigravity/connecting/retry');
         await opened.connect(provider, connection('checking'));
@@ -246,12 +263,27 @@ test.describe('a plan connecting after its sign-in code', () => {
     });
   }
 
+  test('past the deadline of the whole connection it failed: the computer stopped answering, what to check, Retry and Stop', async ({ page }) => {
+    const t = words(EN);
+    const opened = await openPlans(page, EN, [plan('antigravity', 'needs_login')]);
+    await openCard(page, EN, 'antigravity');
+    await opened.connect('antigravity', connection('models'));
+    const shown = part(page, EN, 'antigravity');
+    await later(page, LIMIT);
+    await opened.connect('antigravity', connection('models', 'failed', { error: 'The machine stopped answering before the plan was ready.' }));
+    const failed = shown.getByRole('alert');
+    await expect(failed.locator('.lf-t')).toHaveText(t.subs.signInErrors.noAnswer);
+    await expect(failed.locator('.lf-h')).toHaveText(t.subs.connection.next.noAnswer);
+    await expect(shown.locator('.spinner')).toHaveCount(0);
+    await expect(failed.getByRole('button')).toHaveText([t.common.retry, t.subs.connection.cancel]);
+  });
+
   test('the ring turns only for a person who did not ask for less motion', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     const opened = await openPlans(page, EN, [plan('antigravity', 'needs_login')]);
     await openCard(page, EN, 'antigravity');
     await opened.connect('antigravity', connection('checking'));
-    const ring = part(page, EN, 'antigravity').locator('.waiting-mark');
+    const ring = ringOf(part(page, EN, 'antigravity'));
     await expect(ring).toBeVisible();
     expect(await ring.evaluate(el => getComputedStyle(el).animationName)).toBe('none');
     await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -260,12 +292,16 @@ test.describe('a plan connecting after its sign-in code', () => {
 });
 
 /* The pictures for the check against the style book: each state of an Antigravity plan, on a phone and a desktop, in both
-   languages and two skins. The longest words of each state wrap inside the card. */
-const LOOKS: Look[] = (['en', 'ru'] as const).flatMap(lang => (['cyberpunk', 'light'] as const).flatMap(theme => [375, 1440].map(width => ({ lang, theme, width }))));
+   languages and the three skins Design checks, and Russian, the longest, turned right to left. The longest words of each
+   state wrap inside the card. */
+const LOOKS: Look[] = [
+  ...(['en', 'ru'] as const).flatMap(lang => (['cyberpunk', 'light', 'matrix'] as const).flatMap(theme => [375, 1440].map(width => ({ lang, theme, width })))),
+  ...[375, 1440].map(width => ({ lang: 'ru' as const, theme: 'cyberpunk' as const, width, dir: 'rtl' as const })),
+];
 const STATES = ['connecting', 'ready', 'failed', 'too_long'] as const;
 
 for (const look of LOOKS) {
-  const name = `${look.lang}-${look.theme}-${look.width}`;
+  const name = `${look.lang}-${look.theme}-${look.width}${look.dir ? `-${look.dir}` : ''}`;
   test(`each state of a connection wraps inside its card ${name}`, async ({ page, browserName }) => {
     const t = words(look);
     const errors: string[] = [];
@@ -291,7 +327,7 @@ for (const look of LOOKS) {
         await opened.connect('antigravity', connection('account'));
         await later(page, MINUTE + 5_000);
         await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.account);
-        await expectBeside(shown.locator('.waiting-mark'), shown.getByText(t.subs.connection.steps.account, { exact: true }));
+        await expectBeside(ringOf(shown), nowStep(shown));
       }
       if (state === 'failed') {
         await opened.connect('antigravity', connection('checking', 'failed', { error: 'The sign-in ended before it finished, so nothing changed.', line: 'Antigravity CLI did not finish signing in.' }));
@@ -299,8 +335,7 @@ for (const look of LOOKS) {
       }
       if (state === 'too_long') {
         await opened.connect('antigravity', connection('models', 'too_long'));
-        await expect(shown.getByRole('alert')).toHaveText(t.common.tooLong);
-        await expect(shown).toContainText(t.subs.connection.tooLongNext(10));
+        await expect(shown.locator('.load-fail.slow .lf-t')).toHaveText(t.common.tooLong);
         await shown.getByRole('button', { name: t.subs.connection.cancelLabel('Antigravity'), exact: true }).focus();
         await page.keyboard.press('Shift+Tab');
       }

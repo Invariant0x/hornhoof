@@ -1,11 +1,11 @@
 import type { NodeMessage } from '@hornhoof/protocol';
-import type { SigninStep } from '@hornhoof/protocol/signin';
+import { SIGNIN_ERRORS, type SigninStep } from '@hornhoof/protocol/signin';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { machines, nodes, subscriptions } from '../../db/schema.js';
 import { liveNode } from '../nodes/nodes.js';
 
-/* How often the server looks whether a connection went past its limit. */
+/* How often the server looks whether a connection takes longer than usual or went past its deadline. */
 export const CONNECT_ROUND_MS = 1000;
 
 type State = 'connecting' | 'failed' | 'too_long';
@@ -24,9 +24,9 @@ export type ConnectingView = {
   line: string | null;
 };
 
-/* readyBefore: the plan was ready when its connection began, as when its owner signs it in again; signedIn: its program
-   took the new sign-in. */
-type Connection = ConnectingView & { plan: string; companyId: string; owner: string; untilMs: number; readyBefore: boolean; signedIn: boolean };
+/* stepAtMs: when its node said its last step; readyBefore: the plan was ready when its connection began, as when its owner
+   signs it in again; signedIn: its program took the new sign-in. */
+type Connection = ConnectingView & { plan: string; companyId: string; owner: string; untilMs: number; stepAtMs: number; readyBefore: boolean; signedIn: boolean };
 
 /* The connections of this server's plans by plan. They live as long as the server: after a restart the plan shows its
    state, and its node says the next step. */
@@ -57,8 +57,9 @@ async function planOf(ctx: Ctx, nodeId: string) {
 
 type StepMessage = Extract<NodeMessage, { type: 'login.step' }>;
 
-/* A node said where its plan's connection is. The first step after the code starts it, and its limit, which is of the whole
-   connection: later steps move neither. A step after a failure starts a new one. */
+/* A node said where its plan's connection is. The first step after the code starts it, and its deadline, which is of the
+   whole connection: later steps do not move it. Each step starts over the time after which the connection takes longer
+   than usual, and one that took longer goes on. A step after a failure starts a new connection. */
 export async function connectionStep(ctx: Ctx, nodeId: string, msg: StepMessage): Promise<void> {
   const node = await planOf(ctx, nodeId);
   if (!node) return;
@@ -69,9 +70,11 @@ export async function connectionStep(ctx: Ctx, nodeId: string, msg: StepMessage)
   if (!c) {
     const now = ctx.clock();
     const untilMs = now + ctx.config.signinConnectMs;
-    c = { plan: node.plan, companyId: node.companyId, owner: node.owner, nodeId, hostname: node.hostname, state: 'connecting', step: msg.step, since: new Date(now).toISOString(), until: new Date(untilMs).toISOString(), untilMs, error: null, code: null, line: null, readyBefore: node.status === 'ready', signedIn: false };
+    c = { plan: node.plan, companyId: node.companyId, owner: node.owner, nodeId, hostname: node.hostname, state: 'connecting', step: msg.step, since: new Date(now).toISOString(), until: new Date(untilMs).toISOString(), untilMs, stepAtMs: now, error: null, code: null, line: null, readyBefore: node.status === 'ready', signedIn: false };
     all.set(node.plan, c);
   }
+  c.state = 'connecting';
+  c.stepAtMs = ctx.clock();
   c.step = msg.step;
   c.nodeId = nodeId;
   c.hostname = node.hostname;
@@ -116,13 +119,17 @@ export function connectionCleared(ctx: Ctx, plan: string): Connection | null {
   return c;
 }
 
-/* A connection past its limit takes too long: its owner hears it, and it still ends if its plan gets ready. */
+/* A connection whose node said no step for a while takes longer than usual: its owner hears it, and it still ends if its plan
+   gets ready. One past its deadline failed, as its machine stopped answering in time. */
 export function connectionRound(ctx: Ctx): void {
   const now = ctx.clock();
   for (const c of connections(ctx).values()) {
-    if (c.state !== 'connecting' || now < c.untilMs) continue;
-    c.state = 'too_long';
-    tell(ctx, c, viewOf(c));
+    if (c.state === 'failed') continue;
+    if (now >= c.untilMs) failed(ctx, c, SIGNIN_ERRORS.noAnswer, null, null);
+    else if (c.state === 'connecting' && now >= c.stepAtMs + ctx.config.signinSlowMs) {
+      c.state = 'too_long';
+      tell(ctx, c, viewOf(c));
+    }
   }
 }
 

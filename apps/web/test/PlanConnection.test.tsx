@@ -7,7 +7,6 @@ import { ru } from '../src/i18n/ru';
 import { Subscriptions } from '../src/screens/Subscriptions';
 import type { Connecting, SubView } from '../src/types';
 import { PlanConnection, passedWords } from '../src/ui/PlanConnection';
-import { Stalled, Waiting } from '../src/ui/Waiting';
 import { ME, mockApi, SUBS } from './api-mock';
 import { fakeStream } from './fake-stream';
 import { openAll, rowOf, waitFor } from './subscriptions-helpers';
@@ -55,21 +54,6 @@ describe('the time since the sign-in code', () => {
   });
 });
 
-describe('something under way, and something stalled', () => {
-  it('shows a turning mark only while something is under way, with what it is at as a status', () => {
-    const { container } = render(<Waiting what="Getting the models" detail="1 min 5 s since the code" />);
-    expect(screen.getByRole('status').textContent).toBe('Getting the models1 min 5 s since the code');
-    expect(container.querySelectorAll('.waiting-mark')).toHaveLength(1);
-  });
-
-  it('says why it stalled as an alert, then what to do, with Try again first and no mark', () => {
-    const { container } = render(<Stalled tone="late" reason="Taking longer than usual" next="Try again, or stop." retry={{ text: 'Try again', label: 'Try connecting Codex again', run: () => {} }} cancel={{ text: 'Stop', run: () => {} }} />);
-    expect(screen.getByRole('alert').textContent).toBe('Taking longer than usual');
-    expect(screen.getAllByRole('button').map(b => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['Try connecting Codex again', 'Stop']);
-    expect(container.querySelectorAll('.waiting-mark')).toHaveLength(0);
-  });
-});
-
 describe('a plan connecting after its sign-in code, on its card', () => {
   const shown = (sub: SubView, c: Connecting) => {
     const onRetry = vi.fn();
@@ -80,16 +64,29 @@ describe('a plan connecting after its sign-in code, on its card', () => {
   const words = en.subs.connection;
   const passed = words.passed(words.minutes(1, 5));
 
-  it('says the step its node reports and the time since the code, with nothing to press', () => {
+  it('says the step its node reports and the time since the code as the status, with the ring in the marker of its sign-in, the third of four steps', () => {
     const { part } = shown(CODEX, at('connecting', 'models'));
-    expect(within(part).getByRole('status').textContent).toBe(`${words.steps.models}${passed}`);
+    expect(within(part).getByRole('status').textContent).toBe(`${words.steps.models}. ${passed}`);
+    expect(part.textContent).toContain(words.keepOn);
+    expect(within(part).getByRole('progressbar').getAttribute('aria-valuenow')).toBe('2');
+    expect(part.querySelector('.conn-prog')?.textContent).toBe(words.progress(3, 4));
+    const steps = within(part).getAllByRole('listitem');
+    expect(steps.map(s => s.className)).toEqual(['done', 'done', 'now', 'next']);
+    expect(steps[2]!.getAttribute('aria-current')).toBe('step');
+    expect(steps[2]!.textContent).toBe(`${en.subs.steps.signIn('Codex')} ${en.subs.steps.current}`);
+    expect(part.querySelectorAll('.spinner')).toHaveLength(1);
+    expect(steps[2]!.querySelector('.conn-mk .spinner')).not.toBeNull();
     expect(within(part).queryAllByRole('button')).toEqual([]);
   });
 
-  it('says why it failed, to sign in again from Hornhoof, with Try again and Stop', () => {
+  it('says why it failed, to sign in again from Hornhoof, with Retry and Stop, and the step that did not work in pink', () => {
     const { part, onRetry, onCancel } = shown(CODEX, at('failed', 'checking', { error: 'The program did not take the new sign-in, so nothing changed.' }));
-    expect(within(part).getByRole('alert').textContent).toBe(en.subs.signInErrors.notTaken);
-    expect(part.textContent).toContain(words.next.signInAgain);
+    const failed = within(part).getByRole('alert');
+    expect(failed.querySelector('.lf-t')?.textContent).toBe(en.subs.signInErrors.notTaken);
+    expect(failed.querySelector('.lf-h')?.textContent).toBe(words.next.signInAgain);
+    expect(within(part).getAllByRole('listitem')[2]!.className).toBe('bad');
+    expect(part.querySelectorAll('.spinner')).toHaveLength(0);
+    expect(within(failed).getAllByRole('button').map(b => b.textContent)).toEqual([en.common.retry, words.cancel]);
     fireEvent.click(within(part).getByRole('button', { name: words.retryLabel('Codex') }));
     fireEvent.click(within(part).getByRole('button', { name: words.cancelLabel('Codex') }));
     expect(onRetry).toHaveBeenCalledTimes(1);
@@ -99,16 +96,35 @@ describe('a plan connecting after its sign-in code, on its card', () => {
   it('sends a program that signs in on its machine back to the install window there', () => {
     render(<LanguageProvider><PlanConnection sub={AGY} connecting={at('failed', 'checking', { error: null, code: 1, line: 'Antigravity CLI did not finish signing in.' })} now={NOW} onRetry={() => {}} onCancel={() => {}} /></LanguageProvider>);
     const part = screen.getByRole('group', { name: words.label('Antigravity') });
-    expect(within(part).getByRole('alert').textContent).toBe(en.subs.signInEnded(1, 'Antigravity CLI did not finish signing in.'));
+    expect(within(part).getByRole('alert').querySelector('.lf-t')?.textContent).toBe(en.subs.signInEnded(1, 'Antigravity CLI did not finish signing in.'));
     expect(part.textContent).toContain(words.next.installWindow('dev-laptop'));
   });
 
-  it('past its one limit says it takes longer than usual, how long the limit is, and where it got to', () => {
+  it('says a connection past its deadline failed as its computer stopped answering, and to check the computer', () => {
+    const { part } = shown(CODEX, at('failed', 'models', { error: SIGNIN_ERRORS.noAnswer }));
+    const failed = within(part).getByRole('alert');
+    expect(failed.querySelector('.lf-t')?.textContent).toBe(en.subs.signInErrors.noAnswer);
+    expect(failed.querySelector('.lf-h')?.textContent).toBe(words.next.noAnswer);
+    expect(ru.subs.signInErrors.noAnswer).toBe('Не удалось подключить: компьютер перестал отвечать.');
+  });
+
+  it('a minute with no new step says it takes longer than usual, where it got to, with Retry and Stop, the ring staying in its marker alone', () => {
     const { part } = shown(CODEX, at('too_long', 'models'));
-    expect(within(part).getByRole('alert').textContent).toBe(en.common.tooLong);
-    expect(part.textContent).toContain(words.tooLongNext(10));
+    const slow = part.querySelector('.load-fail.slow')!;
+    expect(slow.getAttribute('role')).toBe('status');
+    expect(slow.querySelector('.lf-t')?.textContent).toBe(en.common.tooLong);
+    expect(slow.querySelector('.lf-h')?.textContent).toBe(words.slowHint);
     expect(part.textContent).toContain(`${words.steps.models}. ${passed}`);
-    expect(part.querySelectorAll('.waiting-mark')).toHaveLength(0);
+    expect(slow.querySelector('.spinner')).toBeNull();
+    expect(part.querySelectorAll('.conn-mk .spinner')).toHaveLength(1);
+    expect(within(part).getAllByRole('button').map(b => b.textContent)).toEqual([en.common.retry, words.cancel]);
+  });
+
+  it('counts the key as the third step of a plan that takes one', () => {
+    const KIMI: SubView = { ...CODEX, id: 's-kimi', provider: 'kimi', label: 'Kimi' };
+    render(<LanguageProvider><PlanConnection sub={KIMI} connecting={at('connecting', 'checking')} now={NOW} onRetry={() => {}} onCancel={() => {}} /></LanguageProvider>);
+    const part = screen.getByRole('group', { name: words.label('Kimi') });
+    expect(within(part).getAllByRole('listitem')[2]!.textContent).toContain(en.subs.steps.key('Kimi'));
   });
 });
 
