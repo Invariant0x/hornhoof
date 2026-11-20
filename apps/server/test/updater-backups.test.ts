@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chownSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { ask, at, JQ, runOnce, stand, stubbed, type Stand } from './updater-fixture.js';
+import { ask, at, JQ, runOnce, runUpdaterStep, stand, stubbed, type Stand } from './updater-fixture.js';
 
 const ID = '0f0f0f0f-0000-4000-8000-00000000000a';
 const dumps = (s: Stand) => join(s.control, 'dumps');
@@ -159,6 +159,58 @@ describe('updater, backups', () => {
     expect(r.out).toContain('Deleted a database dump that was not sealed within a day.');
     /* A machine with no such folder is left alone. */
     expect((await runOnce(stand(), null)).out).not.toContain('Deleted a database dump');
+  });
+
+  it('sweeps a stale direct file of another owner and leaves a direct link target intact', async () => {
+    const s = stand();
+    mkdirSync(dumps(s));
+    const old = new Date(Date.now() - 25 * 3_600_000);
+    const stale = join(dumps(s), 'old.sql.gz');
+    const outside = join(s.dir, 'kept.sql.gz');
+    for (const file of [stale, outside]) {
+      writeFileSync(file, 'rows');
+      utimesSync(file, old, old);
+    }
+    symlinkSync(outside, join(dumps(s), 'link.sql.gz'));
+    /* A privileged fixture gives the stale file a real different UID. Otherwise model the keeper's UID. */
+    const nativeOwner = process.getuid?.() === 0;
+    if (nativeOwner) chownSync(stale, 1234, statSync(stale).gid);
+    const keeper = nativeOwner ? statSync(dumps(s)).uid : 0;
+    expect(statSync(stale).uid).not.toBe(keeper);
+    const step = nativeOwner ? 'sweep_dumps' : "facts() { printf '%s\\n' '1 1 700 0'; }; sweep_dumps";
+    const r = await runUpdaterStep(s, step);
+    expect(r.code, r.out).toBe(0);
+    expect(existsSync(stale)).toBe(false);
+    expect(readFileSync(outside, 'utf8')).toBe('rows');
+  });
+
+  it('rejects a dumps directory owned by a different user', async () => {
+    const s = stand();
+    mkdirSync(dumps(s));
+    const file = join(dumps(s), 'old.sql.gz');
+    const old = new Date(Date.now() - 25 * 3_600_000);
+    writeFileSync(file, 'rows');
+    utimesSync(file, old, old);
+    const r = await runUpdaterStep(s, `
+      facts() {
+        case "$(physical_dir)" in
+          */dumps) printf '%s\\n' '1 1 700 1234' ;;
+          *) printf '%s\\n' '2 1 700 1000' ;;
+        esac
+      }
+      sweep_dumps
+    `);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('Refused dumps: it is not a keeper folder.');
+    expect(readFileSync(file, 'utf8')).toBe('rows');
+  });
+
+  it('logs a dangling link in place of dumps and skips the sweep', async () => {
+    const s = stand();
+    symlinkSync(join(s.dir, 'missing'), dumps(s));
+    const r = await runUpdaterStep(s, 'sweep_dumps');
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('Refused dumps: it is not a plain folder.');
   });
 
   /* The app can swap a folder in dumps for a link at any moment, also while the sweep runs, here right before rm does.
