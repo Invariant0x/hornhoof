@@ -1572,7 +1572,7 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 .dv-tools { display: contents; }
 /* While the company comes the department's tools stand at their size and wait, muted, as a disabled button does (#1620). */
 .dv-tools > .hbtn:disabled { cursor: not-allowed; opacity: .45; }
-.dv-zoom[inert] { opacity: .45; }
+.dv-zoom[inert] > .zoom { opacity: .45; }
 .dv-acts[data-fit="icons"] .dv-tools { display: flex; border: 0; outline: 1px solid var(--line); outline-offset: -1px; }
 .dv-acts[data-fit="icons"] .dv-tools > .hbtn { border: 0; background: none; }
 .dv-acts[data-fit="icons"] .dv-tools > .hbtn + .hbtn { border-inline-start: 1px solid var(--line); }

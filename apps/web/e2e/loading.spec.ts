@@ -561,6 +561,10 @@ test.describe('department while its company comes', () => {
     for (const tool of await tools(page).all()) await expect(tool).toBeDisabled();
     /* A person of the whole company may hire: the room of Hire holds its button, disabled with the tools. */
     await expect(hire(page)).toBeDisabled();
+    /* The zoom waits with them, muted as they are. */
+    const muted = (block: Locator) => block.evaluate(el => getComputedStyle(el).opacity);
+    expect(await muted(page.locator('.dv-zoom .zoom'))).toBe(await muted(tools(page).first()));
+    expect(await muted(tools(page).first())).not.toBe('1');
   }
   async function expectCame(page: Page) {
     await expect(DEPT.arrived(page, 'en')).toBeVisible();
