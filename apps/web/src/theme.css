@@ -591,12 +591,15 @@ select:disabled { opacity: .55; }
 .body > .update-banner { margin-inline: auto; max-inline-size: calc(100% - 2 * var(--bar-edge)); overflow-wrap: anywhere; }
 .body > .guard-stop { position: relative; z-index: 9; }
 .body.page > :is(.update-banner, .alert, .guard-stop) { z-index: auto; }
-/* On the map, the canvas fills the room after any shell bars. Without a bar it still reaches behind the header. */
+/* On the map, the canvas fills the room after any shell bars. Without a bar it still reaches behind the header. An open
+   department takes that room alone: the map it flew in from keeps its size and view out of the row, and shows nowhere,
+   not even behind the header and the bars. */
 .body:not(.page):has(> :is(.update-banner, .alert, .guard-stop)) { display: flex; flex-direction: column; }
 .body:not(.page)::before, .body:not(.page) > :is(.update-banner, .alert, .guard-stop) { flex: none; }
-.body:not(.page):has(> :is(.update-banner, .alert, .guard-stop)) > :is(.map-workspace:not([inert]), .map, .dview) {
+.body:not(.page):has(> :is(.update-banner, .alert, .guard-stop)) > :is(.map:not([inert]), .dview) {
   position: relative; inset: auto; flex: 1; min-block-size: var(--bar-size);
 }
+.body:not(.page):has(> :is(.update-banner, .alert, .guard-stop)) > .map[inert] { visibility: hidden; }
 
 /* Map */
 .map { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }

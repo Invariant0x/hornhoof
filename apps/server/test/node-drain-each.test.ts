@@ -178,9 +178,9 @@ describe('each node on the server computer is replaced on its own', () => {
 });
 
 describe('a node that waits for an update takes no new turn', () => {
-  /* However long it waits: past an hour and a half, and within the time running work counts as live while its node is
-     heard from. */
-  const LONG_MS = 95 * 60_000;
+  /* Up to the limit of its wait: a minute short of the 45 minutes it holds new turns, within the time running work counts as
+     live while its node is heard from. Past it, node-drain-limit.test.ts. */
+  const LONG_MS = 44 * 60_000;
   type Fixture = Awaited<ReturnType<typeof computer>>;
   const askFor = (f: Fixture, key: string) => () => f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${key}` }, payload: {} });
 
@@ -194,7 +194,7 @@ describe('a node that waits for an update takes no new turn', () => {
     await vi.advanceTimersByTimeAsync(ROUND);
   }
 
-  it("keeps new turns off the only node of a plan however long it waits, the orchestrator's and a head's too, and sends them there once it is updated", async () => {
+  it("keeps new turns off the only node of a plan up to the limit of its wait, the orchestrator's and a head's too, and sends them there once it is updated", async () => {
     const f = await computer();
     const google = await f.plan('antigravity');
     const id = { kind: 'node' as const, nodeId: google.nodeId };
@@ -279,7 +279,7 @@ describe('a node that waits for an update takes no new turn', () => {
     expect(await f.statusOf(held)).toMatchObject({ status: 'queued' });
   });
 
-  it('keeps a head off the built-in node however long it waits, when the company key runs it', async () => {
+  it('keeps a head off the built-in node up to the limit of its wait, when the company key runs it', async () => {
     const f = await computer();
     const builtin = await f.online(NODE_KEY);
     await until(() => f.app.ctx.hub.isReady(BUILTIN));

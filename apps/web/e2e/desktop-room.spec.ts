@@ -323,6 +323,68 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }])
   }
 }
 
+/* Design's condition on accepting #1558 (#1581): a title's column is never narrower than the longest word of its title, so a
+   word wraps only where it is longer than a line can be, and nothing in the cell runs over. Russian and pseudo-locale words
+   are long; the card open at 1280 px narrows the list, and 644 px is a list just above the 640 px where its narrow layout
+   starts. */
+const RU_LONG: TaskLine = { ...LONG, title: 'Переподключить высокопроизводительные платёжные терминалы достопримечательностей к новому поставщику' };
+const WORDY: Look[] = [
+  { lang: 'ru', scheme: 'dark', text: 'plain', dir: 'ltr' },
+  { lang: 'en', scheme: 'light', text: 'pseudo', dir: 'ltr' },
+];
+const wordyTasks = (look: Look): TaskLine[] => (look.lang === 'ru' ? [RU_LONG, ...TASKS] : boardTasks(look));
+
+/* Each row's title: the room its line gives the title's words, the widest of those words alone on one line, and whether
+   the cell or the title runs over its box. */
+const titleRoom = (page: Page) => page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.tr-list li.tr-row > .tr-cells > .tr-task-name')].flatMap(cell => {
+  const line = cell.querySelector<HTMLElement>('.tr-line'), title = cell.querySelector<HTMLElement>('.tr-title');
+  if (!line || !title || !cell.getClientRects().length) return [];
+  const probe = title.appendChild(document.createElement('span'));
+  probe.style.cssText = 'position: absolute; visibility: hidden; white-space: nowrap;';
+  const widths = [...(title.firstChild?.textContent ?? '').matchAll(/\S+/g)].map(m => { probe.textContent = m[0]; return probe.getBoundingClientRect().width; });
+  probe.remove();
+  return [{ name: (title.textContent ?? '').slice(0, 40), room: line.getBoundingClientRect().width, word: Math.max(0, ...widths), over: cell.scrollWidth > cell.clientWidth + 1 || title.scrollWidth > title.clientWidth + 1 }];
+}));
+
+async function wholeWords(page: Page, what: string) {
+  const rows = await titleRoom(page);
+  expect(rows.length, what).toBeGreaterThan(20);
+  expect(rows.filter(x => x.room + 0.5 < x.word).map(x => `${x.name}: ${Math.round(x.room)} < ${Math.round(x.word)}`), `${what}: columns narrower than a word`).toEqual([]);
+  expect(rows.filter(x => x.over).map(x => x.name), `${what}: titles running over their cell`).toEqual([]);
+}
+
+for (const look of WORDY) {
+  const t: Messages = MESSAGES[look.lang];
+  test(`keeps every title's column as wide as its longest word: ${named(look)}`, async ({ page }, info) => {
+    const tasks = wordyTasks(look);
+    await serveBoard(page, tasks);
+    await open(page, look, { width: 1280, height: 800 }, `/tasks?department=${DEV.id}`);
+    const list = page.getByRole('region', { name: t.tracker.views.list, exact: true });
+    const first = list.getByRole('listitem', { name: `#900 ${tasks[0]!.title}`, exact: true });
+    await expect(first).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+
+    /* The card open at 1280 px. */
+    await first.locator(':scope > .tr-cells .tr-title').click({ force: true });
+    const card = page.locator('.acard.at-end');
+    await expect(card.getByRole('heading', { name: tasks[0]!.title, exact: true })).toBeVisible();
+    await still(page, '.tr-list .tr-title, .acard.at-end');
+    await wholeWords(page, `card open at 1280 ${named(look)}`);
+    await capture(page, info, `words-card-${look.lang}-${look.text}-1280-${info.project.name}`);
+    await card.getByRole('button', { name: t.window.close, exact: true }).click({ force: true });
+    await expect(card).toHaveCount(0);
+
+    /* A list 644 px wide, with the table's columns: the left panel keeps its width below 1440 px of screen. */
+    const width = () => page.locator('.tr-list').evaluate(e => e.getBoundingClientRect().width);
+    await page.setViewportSize({ width: 1280 + Math.round(644 - await width()), height: 800 });
+    await still(page, '.tr-list .tr-title');
+    expect(Math.round(await width())).toBe(644);
+    await expect(page.locator('.tr-list .tr-head').first()).toBeVisible();
+    await wholeWords(page, `list of 644 px ${named(look)}`);
+    await capture(page, info, `words-list-${look.lang}-${look.text}-644-${info.project.name}`);
+  });
+}
+
 test('lays the card over the whole screen under the top bar on a phone: en light 375', async ({ page }, info) => {
   const look: Look = { lang: 'en', scheme: 'light', text: 'plain', dir: 'ltr' };
   const tasks = boardTasks(look);
