@@ -14,8 +14,9 @@ export const SLOW_MS = 10_000;
 export const FAIL_MS = 30_000;
 
 /* A part of a screen's data: undefined or null until its first answer; failure: why its last ask failed; load asks again;
-   cancel, where it can, stops the ask still running. */
-export type LoadPart = { data: unknown; failure: unknown; load(): unknown; cancel?(): void };
+   cancel, where it can, stops the ask still running. quiet: another part of the same screen already says its failure and
+   its time, so here it is only awaited, and the screen says it once. */
+export type LoadPart = { data: unknown; failure: unknown; load(): unknown; cancel?(): void; quiet?: boolean };
 
 /* Where a screen's load is: coming, taking longer than usual, failed with why, or all come. ring: the ring may show now.
    asked: how many times Retry asked again. */
@@ -66,13 +67,14 @@ type Asked = { round: number; byRetry: boolean };
 
 /* Where the parts that have not come are: the first failure to say, if any, then whether they are still coming, and whether
    the limits count. A failure from before the last Retry no longer counts, as the part is asked again. A part that waits for
-   Hornhoof's update, which the update panel already says, is still coming, and no limit counts while it waits. */
+   Hornhoof's update, which the update panel already says, or a quiet part, which another part of the screen says, is still
+   coming, and no limit counts while it waits. */
 function seen(missing: LoadPart[], before: Set<unknown>, updateSaysIt: boolean): Seen {
-  const failures = missing.map(p => shownLoadFailure(p.failure, updateSaysIt));
+  const failures = missing.map(p => (p.quiet ? null : shownLoadFailure(p.failure, updateSaysIt)));
   const failed = failures.find(f => f && !before.has(f)) ?? null;
-  const updating = missing.some((p, i) => p.failure && !failures[i]);
+  const saidElsewhere = missing.some((p, i) => p.quiet || (p.failure && !failures[i]));
   const waiting = missing.length > 0 && !failed;
-  return { failed, waiting, timed: waiting && !updating };
+  return { failed, waiting, timed: waiting && !saidElsewhere };
 }
 
 type Times = { ring: boolean; holding: boolean; slow: boolean; over: boolean };

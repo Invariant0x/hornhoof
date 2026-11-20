@@ -2013,6 +2013,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .release-fold .goal-fold > span { display: flex; flex-wrap: wrap; gap: 0 8px; }
 .release-fold .goal-fold b { color: var(--ink); }
 .waiting { display: grid; gap: 10px; }
+.waiting > .load-hold > .load-in { display: grid; gap: 10px; }
 /* The tracker, as mockup 10 draws it and as shown in "Tracker" in the style book: the left panel a share of the width
    from 270px, then the main area with where the person is, the view and its filters and the work, each band its full width
    with 20px inside; the card a drawer over the end side. On a phone the left panel is a drawer over the page, the board's
@@ -2080,6 +2081,8 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 /* The main area: each band its whole width, with 20px inside. */
 .tr-main { container: tr-main / inline-size; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; min-inline-size: 0; padding-block-end: 30px; border-block-start: 1px solid var(--line); }
 .tr-main > :not(.tr-top, .tr-bar) { inline-size: auto; margin: 6px 20px 0; }
+/* What waits stands apart from the list or the search results above it, so its heading does not sit on their last line. */
+.tr-main > :is(.tr-hold, .tr-found) + .waiting { margin-block-start: 24px; }
 .tr-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-inline-size: 0; padding: 10px 20px; border-block-end: 1px solid var(--line); }
 .tr-menu { display: none; }
 .tr-where { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-inline-size: 0; margin: 0; font: 600 16px var(--f-display); overflow-wrap: anywhere; }

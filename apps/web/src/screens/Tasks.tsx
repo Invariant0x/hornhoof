@@ -47,12 +47,12 @@ type Props = {
    anchoring moves it: overflow-anchor: none, and WebKit has none). Only when the row or card of that task would leave the
    screen, as the titles above it wrap anew, does the page scroll, as little as brings it whole into sight. */
 const rowOf = (id: string) => [...document.querySelectorAll<HTMLElement>('.tracker [data-task]')].find(row => row.dataset.task === id) ?? null;
-/* A server without goals and pipelines yet answers that it has none, which is no failure. */
+/* A server without goals, pipelines or kept cards yet answers that it has none, which is no failure. */
 const noneYet = (f: unknown) => f instanceof ApiFailure && f.status === 404;
 const tracked = (f: unknown) => (noneYet(f) ? null : f);
 
-/* The goals as a part of the tracker's load: a server without goals yet has none. */
-const goalsPart = (goals: unknown, failure: unknown, load: () => unknown): LoadPart => ({ data: goals ?? (noneYet(failure) ? [] : undefined), failure: tracked(failure), load });
+/* A list as a part of the tracker's load, the goals or the kept cards: a server without it yet has none. */
+const listPart = (list: unknown, failure: unknown, load: () => unknown): LoadPart => ({ data: list ?? (noneYet(failure) ? [] : undefined), failure: tracked(failure), load });
 
 type TrackerReads = { places: unknown; tasks: unknown; tasksFailure: unknown; goals: unknown; goalsFailure: unknown; pipelinesFailure: unknown };
 
@@ -112,6 +112,9 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   /* The cards Hornhoof kept for the viewer, which the screen also counts. */
   kept: WaitCard[] | undefined;
   onCardsSeen: () => void;
+  /* What else the section waits for before it says anything, its tasks among them; live: it is the page's one status. */
+  sources: LoadPart[];
+  live: boolean;
 };
 
 /* What waits lists the decisions of the person picked, or with none the viewer's own. */
@@ -184,42 +187,69 @@ function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () 
   </div>;
 }
 
-/* What waits for the person: what agents ask, the orchestrator's cards, the cards Hornhoof
-   kept for them, and the tasks that wait for them. For another person, only theirs; the page's title names them, and what
-   waits for everyone else is in Waiting for people. */
-function WaitingForYou({ decisions, decisionsFailure, personId, viewerId, tasks, recipient, kept, onCardsSeen, ...rest }: Waiting) {
+/* What waits for the person, once all of it came: what agents ask, the orchestrator's cards, the cards Hornhoof kept for them,
+   and the tasks that wait for them, or that nothing does. */
+function WaitingForYouBody({ decisions, personId, viewerId, tasks, recipient, kept, onCardsSeen, onFailure, ...rest }: Omit<Waiting, 'sources' | 'live' | 'decisionsFailure'> & { onFailure: (failure: unknown) => void }) {
   const t = useT();
-  const [failure, setFailure] = useState<unknown>(null);
   const shown = shownDecisions(decisions, decisionsOfWho(personId, viewerId));
   const cards = keptShown(kept, personId);
   const name = mapPeople(rest.org).find(p => p.id === personId)?.name ?? t.tasks.someone;
-
   return (
-    <section className="waiting" aria-label={t.tasks.waiting}>
-      <h2>{t.tasks.waiting}</h2>
-      <DecisionList shown={shown} onFailure={setFailure} {...rest} />
+    <>
+      <DecisionList shown={shown} onFailure={onFailure} {...rest} />
       <WaitCards cards={cards} onOpenTask={rest.onOpenTask} onSeen={onCardsSeen} />
       {tasks.length > 0 && <WaitingTasks tasks={tasks} personOf={() => recipient} heading={personId ? t.tracker.waitTasksOf(name) : t.tracker.waitTasks} onOpenTask={rest.onOpenTask} />}
-      {decisions && shownNone(shown) && !cards.length && !tasks.length && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
-      <DecisionsFailure failure={decisionsFailure} onRetry={rest.onDecisionsChanged} />
+      {shownNone(shown) && !cards.length && !tasks.length && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
+    </>
+  );
+}
+
+/* A section of what waits, under its heading: the shared indicator in its room until every source of it came (the decisions,
+   and what else it names), so it never says that nothing waits while something may still come; then what came, which fades
+   in. A failure of what came before stays by its section. */
+function WaitingSection({ label, heading, load, live, decisions, decisionsFailure, onRetry, failure, children }: {
+  label: string; heading: ReactNode; load: Load; live: boolean; decisions: Decisions | undefined; decisionsFailure: unknown; onRetry: () => void; failure: unknown; children: ReactNode;
+}) {
+  const t = useT();
+  return (
+    <section className="waiting" aria-label={label}>
+      {heading}
+      <Hold load={load} className="waiting-hold">
+        {load.phase === 'done' ? children : <Busy ring={load.ring} live={live} />}
+      </Hold>
+      {decisions && <DecisionsFailure failure={decisionsFailure} onRetry={onRetry} />}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
     </section>
   );
 }
 
-type PeopleWaiting = Pick<Waiting, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place'> & {
+/* What waits for the person. For another person, only theirs; the page's title names them, and what waits for everyone else
+   is in Waiting for people. */
+function WaitingForYou({ sources, live, decisionsFailure, ...rest }: Waiting) {
+  const t = useT();
+  const [failure, setFailure] = useState<unknown>(null);
+  const load = useLoad([{ data: rest.decisions, failure: decisionsFailure, load: rest.onDecisionsChanged }, ...sources]);
+  return (
+    <WaitingSection label={t.tasks.waiting} heading={<h2>{t.tasks.waiting}</h2>} load={load} live={live} decisions={rest.decisions} decisionsFailure={decisionsFailure} onRetry={rest.onDecisionsChanged} failure={failure}>
+      <WaitingForYouBody {...rest} onFailure={setFailure} />
+    </WaitingSection>
+  );
+}
+
+type PeopleWaiting = Pick<Waiting, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place' | 'sources' | 'live'> & {
   /* The tasks that wait for any person. */
   tasks: TaskLine[];
   /* The section names itself below the results of a search; the page's title right above names it otherwise. */
   titled: boolean;
 };
 
-/* What waits for people in the company, for those who see the whole of it: every decision the viewer sees, each saying whom
-   it waits for, and the tasks that wait for a person. */
-function WaitingForPeople({ decisions, decisionsFailure, tasks, titled, ...rest }: PeopleWaiting) {
+/* What waits for people in the company, for those who see the whole of it, once all of it came: every decision the viewer
+   sees, each saying whom it waits for, and the tasks that wait for a person. */
+function WaitingForPeople({ decisions, decisionsFailure, tasks, titled, sources, live, ...rest }: PeopleWaiting) {
   const t = useT();
   const words = t.tracker.peopleWaits;
   const [failure, setFailure] = useState<unknown>(null);
+  const load = useLoad([{ data: decisions, failure: decisionsFailure, load: rest.onDecisionsChanged }, ...sources]);
   const shown = shownDecisions(decisions, 'everyone');
   const people = mapPeople(rest.org);
   const waitsFor = (personId: string) => {
@@ -227,14 +257,11 @@ function WaitingForPeople({ decisions, decisionsFailure, tasks, titled, ...rest 
     return name ? words.waitingFor(name) : words.waitingForSomeone;
   };
   return (
-    <section className="waiting" aria-label={words.title}>
-      {titled && <h2>{words.title}</h2>}
+    <WaitingSection label={words.title} heading={titled && <h2>{words.title}</h2>} load={load} live={live} decisions={decisions} decisionsFailure={decisionsFailure} onRetry={rest.onDecisionsChanged} failure={failure}>
       <DecisionList shown={shown} onFailure={setFailure} waitsFor={waitsFor} {...rest} />
       {tasks.length > 0 && <WaitingTasks tasks={tasks} personOf={personWaited} heading={words.tasks} onOpenTask={rest.onOpenTask} />}
-      {decisions && shownNone(shown) && !tasks.length && <p className="muted">{words.nothing}</p>}
-      <DecisionsFailure failure={decisionsFailure} onRetry={rest.onDecisionsChanged} />
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-    </section>
+      {shownNone(shown) && !tasks.length && <p className="muted">{words.nothing}</p>}
+    </WaitingSection>
   );
 }
 
@@ -427,8 +454,9 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const { goals: goalList, failure: goalsFailure, load: loadGoals } = useGoals();
   /* The work and the goals come with the shared indicator where they will stand, and say why when they do not. A server
      without goals yet answers that it has none. */
-  const tasksLoad = useLoad([{ data: tasks, failure, load: loadTasks, cancel: cancelTasks }]);
-  const goalsLoad = useLoad([goalsPart(goalList, goalsFailure, loadGoals)]);
+  const taskPart: LoadPart = { data: tasks, failure, load: loadTasks, cancel: cancelTasks };
+  const tasksLoad = useLoad([taskPart]);
+  const goalsLoad = useLoad([listPart(goalList, goalsFailure, loadGoals)]);
   const { pipelines: pipelineList, failure: pipelinesFailure } = usePipelines();
   const [drawer, setDrawer] = useState(false);
   const [query, setQuery] = useState('');
@@ -449,7 +477,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   }
 
   const all = tasks ?? [];
-  const { cards: kept, load: reloadCards } = useWaitCards();
+  const { cards: kept, failure: keptFailure, load: reloadCards } = useWaitCards();
   const goals = goalList ?? [];
   const pipelines = pipelineList ?? [];
   const people = mapPeople(org);
@@ -564,6 +592,8 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       onDecisionsChanged={onDecisionsChanged}
       tasks={waitsOnPeople}
       titled={found !== null}
+      sources={[taskPart]}
+      live={WAIT_PAGES.has(section.kind)}
       onOpenTask={onOpenTask}
       onOpenAgent={onOpenAgent}
       onOpenOrchestrator={onOpenOrchestrator}
@@ -581,6 +611,8 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       recipient={recipient}
       kept={kept}
       onCardsSeen={reloadCards}
+      sources={[{ ...taskPart, quiet: section.kind === 'mine' }, listPart(kept, keptFailure, reloadCards)]}
+      live={WAIT_PAGES.has(section.kind)}
       onOpenTask={onOpenTask}
       onOpenAgent={onOpenAgent}
       onOpenOrchestrator={onOpenOrchestrator}

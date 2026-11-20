@@ -995,3 +995,51 @@ describe('the left panel and the goals page', () => {
     expect(location.pathname + location.search).toBe('/tasks/g1?card=goal');
   });
 });
+
+/* Ivan's rule (20.11, #1613): a section of what waits says that nothing waits only once every source of it came: until then
+   it holds its room with the shared indicator, as the style book has it (1.5, section 4). Each source is held back in turn,
+   and the empty words must not show before it is let go. */
+describe('what waits says that nothing waits only once all of it came', () => {
+  const NO_WAITS = [PAY, REFUND];
+  const ANSWERS: Record<string, unknown> = {
+    'GET /api/requests': decisions([]),
+    'GET /api/wait-cards': { cards: [], next: null },
+    'GET /api/tasks?status=all': { tasks: NO_WAITS },
+  };
+  /* The page's sources answer at once, but the held one waits until the test lets it go. */
+  function held(source: string) {
+    let open: () => void = () => {};
+    const opened = new Promise<void>(go => { open = go; });
+    const routes = Object.fromEntries(Object.entries(ANSWERS).map(([key, body]) => [key, key === source ? async () => { await opened; return [200, body]; } : [200, body]]));
+    return { routes, open: () => act(async () => { open(); await opened; }) };
+  }
+
+  it.each(['GET /api/requests', 'GET /api/wait-cards', 'GET /api/tasks?status=all'])('Waiting for you holds its room with the indicator while %s is held back', async source => {
+    const hold = held(source);
+    shell('/tasks?show=waits', hold.routes);
+    const section = await screen.findByRole('region', { name: 'Waiting for you' });
+    expect(within(section).getByRole('heading', { name: 'Waiting for you' })).toBeInTheDocument();
+    expect(within(section).getByRole('status')).toHaveTextContent('Loading…');
+    expect(section.querySelector('.load-hold')).toHaveAttribute('aria-busy', 'true');
+    await act(async () => { await new Promise(go => setTimeout(go, 50)); });
+    expect(within(section).queryByText('Nothing waits for you.')).toBeNull();
+    await hold.open();
+    expect(await within(section).findByText('Nothing waits for you.')).toBeInTheDocument();
+    expect(within(section).queryByRole('status')).toBeNull();
+  });
+
+  it.each(['GET /api/requests', 'GET /api/tasks?status=all'])('Waiting for people holds its room with the indicator while %s is held back', async source => {
+    const hold = held(source);
+    shell('/tasks?show=people', hold.routes);
+    const section = await screen.findByRole('region', { name: 'Waiting for people' });
+    expect(within(section).getByRole('status')).toHaveTextContent('Loading…');
+    await act(async () => { await new Promise(go => setTimeout(go, 50)); });
+    expect(within(section).queryByText('Nothing waits for people.')).toBeNull();
+    await hold.open();
+    expect(await within(section).findByText('Nothing waits for people.')).toBeInTheDocument();
+  });
+
+  it('stands what waits apart from the list above it, by a gap of the style book', () => {
+    expect(decl('.tr-main > :is(.tr-hold, .tr-found) + .waiting', 'margin-block-start')).toBe('24px');
+  });
+});

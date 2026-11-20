@@ -194,3 +194,13 @@ describe('the held room', () => {
     expect(again.container.querySelector('.load-in')?.classList.contains('arrive')).toBe(false);
   });
 });
+
+describe('a part another part of the screen says', () => {
+  it('is only awaited: its failure is not said again, and no limit counts while it is missing', () => {
+    const quiet = { ...part(undefined, new ApiFailure(500, 'internal', '')), quiet: true };
+    const { container } = render(<Shown parts={[part([1]), quiet]} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    later(FAIL_MS * 2);
+    expect(phase(container)).toBe('loading');
+  });
+});
