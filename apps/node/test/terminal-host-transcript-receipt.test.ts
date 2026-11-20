@@ -251,8 +251,10 @@ it("keeps an operator's assignment to deliver when Claude takes the same words o
   const a = c.host['agents'].get('receipt')!;
   const ASSIGNMENT = 'From Hornhoof: check the checkout.';
   const idle = () => `────────────\n❯ ${c.input()}\n────────────\n  ? for shortcuts\n`;
-  /* The program answers the person: no input shows. */
-  c.screen.mockImplementation(async () => '✻ Answering…\n');
+  /* The program is ready as the turn begins, then answers the person while the assignment waits to go in: no input shows
+     until it is done. */
+  let answering = true;
+  c.screen.mockImplementation(async () => (answering && a.promptWaits ? '✻ Answering…\n' : idle()));
   const turn = c.host.run({ ...job('receipt', ASSIGNMENT, { jobId: 'job-assignment', workDir: a.workDir, sessionId: a.sessionId }), home: a.home, operatorDelivery: { id: randomUUID(), ordinal: 2 } });
   void turn.catch(() => {});
   /* No test here has a time limit: wait a bounded while for the assignment to wait, and say so if it never does. */
@@ -263,7 +265,7 @@ it("keeps an operator's assignment to deliver when Claude takes the same words o
   expect(c.host['operator']!.recorded('receipt')).toBe(false);
   expect(a.turn?.words.originalPending()).toBe(true);
   expect(a.typing).toBe(ASSIGNMENT);
-  c.screen.mockImplementation(async () => idle());
+  answering = false;
   await c.pass(1_000);
   expect(c.paste.mock.calls.map(([, text]) => text)).toContain(ASSIGNMENT);
 });
