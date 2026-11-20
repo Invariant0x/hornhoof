@@ -194,5 +194,5 @@ export function useDepartmentTree(departmentId: string, on: boolean) {
     if (!on) return;
     return everyVisible(result.load, 60_000);
   }, [on, result.load]);
-  return { tree: result.data, failure: result.failure, load: result.load };
+  return { tree: result.data, failure: result.failure, load: result.load, cancel: result.cancel };
 }

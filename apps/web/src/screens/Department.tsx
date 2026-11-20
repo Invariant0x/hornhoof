@@ -233,8 +233,8 @@ type Drawer = 'about' | 'speed' | 'hire';
 /* The department's work tree, for its tree and its speed drawer: while either is open, the shared indicator where it will
    stand, then why it did not come with Try again. Closed, nothing waits for it and no limit counts. */
 function useTreeLoad(departmentId: string, on: boolean) {
-  const { tree, failure, load } = useDepartmentTree(departmentId, on);
-  return { tree, load: useLoad(on ? [{ data: tree, failure, load }] : []) };
+  const { tree, failure, load, cancel } = useDepartmentTree(departmentId, on);
+  return { tree, load: useLoad(on ? [{ data: tree, failure, load, cancel }] : []) };
 }
 
 const drawerTitle = (t: ReturnType<typeof useT>, drawer: Drawer | null): string =>
