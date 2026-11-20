@@ -375,6 +375,7 @@ export class FollowKeeper {
 
   private async replicaReport(): Promise<{ copy?: CopyReport; replicaBytes?: number }> {
     const copy = this.maker.report();
+    if (this.goingNow) return copy ? { copy } : {};
     const measured = await this.copySql.query<{ bytes: number }>(
       `SELECT COALESCE(SUM(pg_database_size(oid)), 0)::float8 AS bytes FROM pg_database
        WHERE datname IN ($1, $2) OR datname ~ '^hornhoof_old_[0-9]{8}t[0-9]{6}$'`, [COPY_DB, NEXT_DB],
