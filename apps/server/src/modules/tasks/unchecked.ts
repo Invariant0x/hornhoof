@@ -14,6 +14,8 @@ export type UncheckedItem =
   | { kind: 'task_unread'; task: number }
   /* Turnkey work closed before its report named the commit its holder checked and where its branch started. */
   | { kind: 'unpinned'; task: number }
+  /* Turnkey work that started before the server noted where the turn branch was, or where it could not read it. */
+  | { kind: 'unstarted'; task: number }
   /* A merge, or a commit, of the release that no checked result brought. */
   | { kind: 'merge'; commit: string }
   | { kind: 'commit'; commit: string };
@@ -27,6 +29,7 @@ export function uncheckedLine(item: UncheckedItem): string {
     case 'checker': return `#${item.task}: a checker of ${item.commit} is off, removed or its author, or passed no verdict on it.`;
     case 'task_unread': return `The commits of #${item.task} could not all be read.`;
     case 'unpinned': return `#${item.task} was closed before turnkey work named the commit its holder checked and where it started, so none of its commits counts as checked.`;
+    case 'unstarted': return `#${item.task}: where this turnkey work started is not on record, so none of its commits counts as checked.`;
     case 'merge': return `${item.commit} is a merge made outside every checked candidate.`;
     case 'commit': return `${item.commit} came in with no accepted candidate.`;
   }

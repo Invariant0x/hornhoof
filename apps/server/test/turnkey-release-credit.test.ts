@@ -7,7 +7,7 @@ import { BASE } from './development-echelons-fixture.js';
 import { mcp } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 import { prepareTemplates } from './templates-once.js';
-import { releasing } from './turn-release-fixture.js';
+import { releasing, startTurnkeyWork } from './turn-release-fixture.js';
 
 await prepareSharedDatabase();
 prepareTemplates();
@@ -39,12 +39,14 @@ function lay(f: Releasing, commits: Commit[], heads: Record<string, string>): vo
   Object.assign(f.repo.heads, heads);
 }
 
-/* A member of a turnkey team with a task of the turn's department, before its holder reports it. */
+/* A member of a turnkey team with a task of the turn's department, at work on it as the turn branch stands now, before its
+   holder reports it. */
 async function turnkeyTask(f: Releasing) {
   const [team] = await f.db.insert(teams).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, name: 'Lane', turnkey: true }).returning();
   const holder = await f.hire('Player', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
   await f.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, holder.id));
   const { task } = await f.create({ title: 'Turnkey change', assigneeAgentId: holder.id, reviewerAgentId: undefined, securityAgentId: undefined, testsAgentId: undefined });
+  await startTurnkeyWork(f, holder, task.id);
   const branch = `task-${task.number}`;
   const done = (checked?: { commit: string; baseCommit: string }) =>
     report(f.ctx, holder.id, task.id, { done: true, summary: 'Fast-forwarded the turn branch after my own review, security check and tests.', ...(checked ? { turnkey: checked } : {}) });
@@ -86,6 +88,33 @@ async function takenInOverStray(f: Releasing) {
   return { ...work, release: TAKEN_IN };
 }
 
+/* What the report tool asks the holder to name as turnkey.baseCommit. */
+async function contractOfStart(f: Releasing): Promise<string> {
+  const tool = (await f.client.listTools()).tools.find(found => found.name === 'report')!;
+  const turnkey = (tool.inputSchema.properties as Record<string, { properties: Record<string, { description: string }> }>).turnkey!;
+  return `${tool.description}\n${turnkey.properties.baseCommit!.description}`;
+}
+
+/* 2, as #1579 found it: built on a commit of another agent's branch the turn never took, with the start named as the report
+      contract says: the commit right under the holder's first own commit, which is that commit, not the turn's. */
+async function unacceptedNamedByContract(f: Releasing) {
+  const contract = await contractOfStart(f);
+  expect(contract).toContain('the commit right under your first own commit');
+  expect(contract).not.toMatch(/commit of main or the turn branch/);
+  return unacceptedUnder(f);
+}
+
+/* 4. A commit pushed straight to the turn branch before the work started: the holder branched from it, and a start named
+      under it is refused, as the server noted the turn branch there when the work started. */
+async function strayBeforeStart(f: Releasing) {
+  lay(f, [{ sha: FOREIGN, parents: [f.R] }], { [f.branch]: FOREIGN });
+  const work = await turnkeyTask(f);
+  lay(f, [{ sha: FOREIGN, parents: [f.R] }, { sha: OWN, parents: [FOREIGN] }], { [f.branch]: OWN, [work.branch]: OWN });
+  await expect(work.done({ commit: OWN, baseCommit: f.R })).rejects.toMatchObject({ status: 409, message: expect.stringContaining(`${f.R} does not hold ${FOREIGN}, where ${f.branch} was as your work on #${work.task.number} started`) as unknown });
+  await work.done({ commit: OWN, baseCommit: FOREIGN });
+  return { ...work, release: OWN };
+}
+
 const requireApproval = (f: Releasing) =>
   f.db.insert(approvalPolicies).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, channel: 'commit', mode: 'every' });
 const rules = [
@@ -101,6 +130,8 @@ describe('a release credits turnkey work with only the first-parent line from th
     it.each([
       ['a commit pushed straight to the turn branch under it, taken in by fast-forward', strayUnder, FOREIGN],
       ["a commit of another agent's branch it was built on", unacceptedUnder, FOREIGN],
+      ["a commit of another agent's branch it was built on, with the start named as the report contract says", unacceptedNamedByContract, FOREIGN],
+      ['a commit pushed straight to the turn branch before its work started, refusing a start named under it', strayBeforeStart, FOREIGN],
       ['a commit pushed on top of the commit its holder checked, before the report', pushedOnTop, ON_TOP],
       ['a commit pushed straight to the turn branch that its holder took in by a merge', takenInOverStray, FOREIGN],
     ])('names %s, and records the release only once a person approved the card that names it', async (_shape, shape, foreign) => {
@@ -156,6 +187,21 @@ describe('a release credits turnkey work with only the first-parent line from th
     expect(refused.text).toContain(`#${work.task.number} was closed before turnkey work named the commit its holder checked and where it started, so none of its commits counts as checked.`);
     expect(refused.text).toContain(`${OWN} came in with no accepted candidate.`);
   });
+
+  it('counts nothing of turnkey work whose start the server could not note as it began', async () => {
+    const f = await releasing();
+    const read = f.ctx.readCommit;
+    f.ctx.readCommit = async () => { throw new Error('The repository could not be reached.'); };
+    const work = await turnkeyTask(f);
+    f.ctx.readCommit = read;
+    lay(f, [{ sha: OWN, parents: [f.R] }], { [f.branch]: OWN, [work.branch]: OWN });
+    await work.done({ commit: OWN, baseCommit: f.R });
+    const run = await f.fullRun({ commit: OWN });
+    const refused = await f.recordRelease({ commit: OWN, runId: run.id });
+    expect(refused).toMatchObject({ isError: true });
+    expect(refused.text).toContain(`#${work.task.number}: where this turnkey work started is not on record, so none of its commits counts as checked.`);
+    expect(refused.text).toContain(`${OWN} came in with no accepted candidate.`);
+  });
 });
 
 /* H1 of #1569: a tag of the turn branch's name, as a ref written where the branch was deleted, holds no release. */
@@ -177,7 +223,7 @@ describe('the report that closes turnkey work', () => {
     await expect(work.done()).rejects.toMatchObject({ status: 400, message: expect.stringContaining('turnkey.commit') as unknown });
     await work.done({ commit: OWN, baseCommit: f.R });
     const [closed] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, work.task.id), eq(taskEvents.kind, 'report')));
-    expect(closed!.data).toMatchObject({ done: true, integration: { branch: f.branch, commit: OWN, start: f.R, from: work.branch } });
+    expect(closed!.data).toMatchObject({ done: true, integration: { branch: f.branch, commit: OWN, start: f.R, workStart: f.R, from: work.branch } });
   });
 
   it('is refused for a commit its own branch does not hold, or one that does not hold the commit named as its start', async () => {
@@ -187,6 +233,18 @@ describe('the report that closes turnkey work', () => {
     await expect(work.done({ commit: FOREIGN, baseCommit: f.R })).rejects.toMatchObject({ status: 409, message: expect.stringContaining(`${work.branch} is at ${OWN}, which does not hold ${FOREIGN}`) as unknown });
     await expect(work.done({ commit: OWN, baseCommit: FOREIGN })).rejects.toMatchObject({ status: 409, message: expect.stringContaining(`${OWN} does not hold ${FOREIGN}`) as unknown });
     expect((await f.detail(work.task.id)).status).not.toBe('done');
+  });
+
+  it('notes where the turn branch and main were as the work started, and holds a start named later than that', async () => {
+    const f = await releasing();
+    const work = await turnkeyTask(f);
+    const [started] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, work.task.id), eq(taskEvents.kind, 'status')));
+    expect(started!.data).toMatchObject({ toStatus: 'working', start: { turn: f.turn.number, turnHead: f.R, main: BASE } });
+    const SECOND = '2'.repeat(40);
+    lay(f, [{ sha: FOREIGN, parents: [f.R] }, { sha: OWN, parents: [FOREIGN] }, { sha: SECOND, parents: [OWN] }], { [f.branch]: SECOND, [work.branch]: SECOND });
+    await work.done({ commit: SECOND, baseCommit: OWN });
+    const [closed] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, work.task.id), eq(taskEvents.kind, 'report')));
+    expect(closed!.data).toMatchObject({ integration: { commit: SECOND, start: OWN, workStart: f.R } });
   });
 
   it('takes the commit and its start through the report tool', async () => {

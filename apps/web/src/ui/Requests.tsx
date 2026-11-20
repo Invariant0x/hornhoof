@@ -419,6 +419,7 @@ function uncheckedText(t: Messages, item: UncheckedItem): string {
     case 'checker': return words.checker(item.task, item.commit);
     case 'task_unread': return words.taskUnread(item.task);
     case 'unpinned': return words.unpinned(item.task);
+    case 'unstarted': return words.unstarted(item.task);
     case 'merge': return words.merge(item.commit);
     case 'commit': return words.commit(item.commit);
   }
