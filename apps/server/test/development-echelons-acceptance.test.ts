@@ -32,6 +32,18 @@ describe('accepting only a checked and integrated candidate', () => {
     expect(moved.task.status).toBe('done');
   });
 
+  /* H1 of #1579: a tag of a branch's name, as a ref written where the branch was deleted, is no head of it. */
+  it.each([['main', true], ['the candidate branch', false]] as const)('refuses a main integration where %s reads as a tag of its name', async (_which, main) => {
+    const f = await readyFixture(false);
+    const read = f.ctx.readCommit;
+    f.ctx.readCommit = async (repo, ref, timeout) => {
+      const at = await read(repo, ref, timeout);
+      return 'branch' in ref && (ref.branch === 'main') === main && !('problem' in at) ? { ...at, tag: true } : at;
+    };
+    await expect(report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Integrated the checked candidate.', acceptance: f.acceptance })).rejects.toMatchObject({ status: 409 });
+    expect((await loadTask(f.db, f.task.id)).status).not.toBe('done');
+  });
+
   it('checks a freshly set commit rule before accepting the main integration', async () => {
     const f = await readyFixture(false);
     const read = f.ctx.readCommit;

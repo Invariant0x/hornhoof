@@ -256,6 +256,9 @@ describe('status', () => {
   });
 });
 
+/* The steps a sign-in in the install window left for the running node. */
+const stepsLeft = () => readFileSync(join(data, 'login-steps'), 'utf8').trim().split('\n').map(l => { const entry = JSON.parse(l) as Record<string, unknown>; delete entry.run; return entry; });
+
 describe('login', () => {
   beforeEach(async () => {
     await run(['set-key'], `${SERVER} sub-1 claude ${KEY}\n`);
@@ -271,6 +274,22 @@ describe('login', () => {
     expect(readFileSync(join(data, 'login-url'), 'utf8')).toBe('https://login.example.test/device?code=ABC\n');
     expect(t.out()).toContain('Installing Claude Code.');
     expect(t.out()).toContain('Logged in.');
+  });
+
+  it('tells the running node each step after the code: checking the sign-in, then signed in', async () => {
+    fakeNpm(true);
+    process.env.FAKE_MODE = 'needs_login';
+    /* What an earlier sign-in left goes. */
+    writeFileSync(join(data, 'login-steps'), '{"step":"models"}\n');
+    expect(await command(['login'], io().io)).toBe(0);
+    expect(stepsLeft()).toEqual([{ step: 'checking' }, { step: 'signed_in' }]);
+  });
+
+  it('tells the running node why a sign-in its program did not take failed', async () => {
+    installFake('claude');
+    process.env.FAKE_MODE = 'signed_out';
+    expect((await run(['login'])).code).toBe(1);
+    expect(stepsLeft()).toEqual([{ step: 'checking' }, { step: 'failed', error: 'The program did not take the new sign-in, so nothing changed.', line: null }]);
   });
 
   it('skips the sign-in when the program is already signed in', async () => {

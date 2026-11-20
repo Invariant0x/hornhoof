@@ -30,6 +30,7 @@ import { harnessGreeted, harnessSynced } from '../testruns/harness.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
 import { alertSilentPart } from '../testruns/part-silence.js';
 import { ownMachine, sameNode, type NodeIdentity, type NodeTransport } from './hub.js';
+import { connectionSettled, connectionStep } from '../subscriptions/connecting.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
@@ -337,6 +338,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
   await wordMessage(ctx, id, msg, now);
   if (msg.type === 'author_check.done') return recordAuthorCheck(ctx, id, msg);
   if (await testNodeMessage(ctx, id, msg)) return;
+  if (await signinNodeMessage(ctx, id, msg)) return;
   const { db } = ctx;
   // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- Terminal and live word messages have their own handlers.
   switch (msg.type) {
@@ -384,6 +386,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
     case 'status':
       await handleNodeStatus(ctx, id, msg, now);
+      await settledOn(ctx, id);
       return;
     /* A node of a plan sealed the sign-in it holds for the plan's other nodes. */
     case 'cred.sealed': {
@@ -394,9 +397,6 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       deliver(ctx, msg.kind, msg.version, kept, id.nodeId);
       return;
     }
-    case 'login.done':
-      if (id.kind === 'node') await signedIn(ctx, id.nodeId, msg.ok, msg.error, { code: msg.code ?? null, line: msg.line ?? null });
-      return;
     case 'load': {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the message type tag from the node load
       const { type: _, live, checkLeases, ...load } = msg;
@@ -510,6 +510,19 @@ export async function handleNodeClose(ctx: Ctx, id: NodeIdentity): Promise<void>
   if (id.kind !== 'node') return;
   await ctx.db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.id, id.nodeId));
 }
+
+/* A plan's sign-in on a node: each step after its code, and how it ended. */
+async function signinNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<boolean> {
+  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- Other node frames remain with their owning handler.
+  switch (msg.type) {
+    case 'login.step': if (id.kind === 'node') await connectionStep(ctx, id.nodeId, msg); return true;
+    case 'login.done': if (id.kind === 'node') await signedIn(ctx, id.nodeId, msg.ok, msg.error, { code: msg.code ?? null, line: msg.line ?? null }); return true;
+    default: return false;
+  }
+}
+
+/* After a node's status: a plan connecting on it may be ready now. */
+const settledOn = async (ctx: Ctx, id: NodeIdentity) => { if (id.kind === 'node') await connectionSettled(ctx, id.nodeId); };
 
 const testStatusReady = (unblocked: boolean, msg: Extract<NodeMessage, { type: 'status' }>): boolean => unblocked || msg.testEnvironmentVersion === 1;
 async function testNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<boolean> {
