@@ -260,7 +260,7 @@ upload_request() {
 # other name, no folder, no link, and no more than it may unpack to. The upload is taken from the shared folder the
 # keeper put it in, and unpacked into a folder of the updater's own.
 unpack_upload() {
-  local file=$1 dir=$2 max=$3 archive="$2.tar" n names name item status=0
+  local file=$1 dir=$2 max=$3 archive="$2.tar" n names name item links status=0
   UPLOAD_WHY='The folder to unpack the upload in could not be made.'
   (umask 077 && mkdir "$dir") || return 1
   UPLOAD_WHY='The upload unpacks to more than it may.'
@@ -279,10 +279,13 @@ unpack_upload() {
   UPLOAD_WHY='The upload cannot be read.'
   (umask 077 && quiet tar -xf "$archive" -C "$dir") || return 1
   UPLOAD_WHY='The upload holds what is no file.'
+  # BusyBox tar, which the updater's image has, lists a second name of a file as a plain file and makes it even to a
+  # file outside the folder, so each file here must have its one name.
   for item in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
     [ -e "$item" ] || [ -L "$item" ] || continue
     name=${item##*/}
-    [ ! -L "$item" ] && [ -f "$item" ] && plain_table "${name%.csv}" && [ "$name" != "${name%.csv}" ] || return 1
+    [ ! -L "$item" ] && [ -f "$item" ] && links=$(facts "$item") && links=${links#* } && [ "${links%% *}" = 1 ] &&
+      plain_table "${name%.csv}" && [ "$name" != "${name%.csv}" ] || return 1
   done
 }
 

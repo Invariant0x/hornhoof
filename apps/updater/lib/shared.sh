@@ -97,9 +97,10 @@ hard_link() {
   fi
 }
 
-# facts <path>: the inode, the number of names and the owner of what is at the path itself, a link not followed.
+# facts <path>: the inode, the number of names, the permissions and the owner of what is at the path itself, a link not
+# followed.
 facts() {
-  stat -c '%i %h %u' -- "$1" 2> /dev/null || stat -f '%i %l %u' -- "$1" 2> /dev/null
+  stat -c '%i %h %a %u' -- "$1" 2> /dev/null || stat -f '%i %l %Lp %u' -- "$1" 2> /dev/null
 }
 
 refuse_file() {
@@ -138,16 +139,27 @@ take_here() (
   exit "$status"
 )
 
+# hardlinks_protected: Linux lets a user give a second name only to a file that user owns or may read and write
+# (fs.protected_hardlinks=1, as systemd sets it; the kernel's own default is 0).
+hardlinks_protected() {
+  local protected
+  read -r protected 2> /dev/null < /proc/sys/fs/protected_hardlinks && [ "$protected" = 1 ]
+}
+
 # same_file <facts before> <facts after> <folder owner>: the second name is of the file that was looked at, which has
-# one name more now, and is root's or the folder owner's.
+# one name more now, and is root's or the folder owner's. A file of root's on Linux had that one name only, so no alias
+# of another is read. Where anyone may link any file, it is taken only when everyone may read it anyway, as what root
+# publishes in a shared folder: one only root may read could be another of root's files under the name.
 same_file() {
-  local links=${1#* } now=${2#* } owner=${2##* } protected
+  local links=${1#* } now=${2#* } mode owner=${2##* }
   links=${links%% *}
+  mode=${now#* }
+  mode=${mode%% *}
   now=${now%% *}
   [ "$now" = "$((links + 1))" ] || return 1
   if [ "$owner" = 0 ] && [[ "$OSTYPE" == linux* ]]; then
-    # Linux must prevent an unprivileged user from linking a protected file. Also reject an existing alias.
-    [ "$links" = 1 ] && read -r protected < /proc/sys/fs/protected_hardlinks && [ "$protected" = 1 ]
+    [ "$links" = 1 ] || return 1
+    hardlinks_protected || case "$mode" in *[4567]) ;; *) return 1 ;; esac
   else
     [ "$owner" = 0 ] || [ "$owner" = "$3" ]
   fi
