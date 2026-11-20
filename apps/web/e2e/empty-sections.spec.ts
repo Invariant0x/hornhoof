@@ -28,12 +28,14 @@ async function bottomAbove(page: Page, block: Locator): Promise<number> {
 for (const look of LOOKS) {
   test.describe(`tracker sections that hold nothing, ${nameOf(look)}`, () => {
     const t = DICTIONARIES[look.lang];
+    /* The heading of Waiting for you: Mine with tasks also shows Waiting for people, a section of the same kind. */
+    const waitsHead = (page: Page) => page.locator('section.waiting').getByRole('heading', { level: 2, name: t.tasks.waiting, exact: true });
 
     test('Mine holds its list and Waiting for you in place while the tasks come; once they came empty nothing moves', async ({ page }) => {
       const held = await openTracker(page, '/tasks', look, EMPTY, ['/api/tasks']);
       await page.clock.runFor(RING_DELAY_MS);
       const room = page.locator('.tr-hold .room');
-      const waits = page.locator('section.waiting > h2');
+      const waits = waitsHead(page);
       const parts = [page.locator('.tr-bar'), room, waits];
       await expect(page.locator('.tr-held .spinner')).toBeVisible();
       const before = await boxesOf(parts);
@@ -109,7 +111,7 @@ for (const look of LOOKS) {
       await expect.poll(held['/api/tasks']!.asked).toBeGreaterThan(asked);
       await page.clock.runFor(RING_DELAY_MS);
       await expect(page.locator('.tr-held .spinner')).toBeVisible();
-      const waits = page.locator('section.waiting > h2');
+      const waits = waitsHead(page);
       const before = await boxesOf([page.locator('.tr-bar'), waits]);
       held['/api/tasks']!.release();
       await page.clock.runFor(RING_MIN_MS);
@@ -121,7 +123,7 @@ for (const look of LOOKS) {
       await openTracker(page, '/tasks', look, EMPTY, ['/api/tasks']);
       await page.clock.runFor(RING_DELAY_MS);
       const room = page.locator('.tr-hold .room');
-      const parts = [room, page.locator('section.waiting > h2')];
+      const parts = [room, waitsHead(page)];
       const before = await boxesOf(parts);
       for (const [ms, block] of [[SLOW_MS - RING_DELAY_MS, '.load-fail.slow'], [FAIL_MS - SLOW_MS, '.load-fail:not(.slow)']] as const) {
         await page.clock.runFor(ms);
