@@ -101,6 +101,9 @@ it("paints what an agent does from the theme's tokens, and an alarm and the fram
   /* The tree's shared Chip keeps the state badge whole: on one line where it fits, else wrapped inside its frame, and the
      task's words wrap after it. */
   expect(decl('.tview .tv-labs .dept-chip', 'position')).toBe('absolute');
+  /* #1595: a lane moves by the place that holds its chip. */
+  expect(decl('.tview .tv-labs .tv-lane', 'position')).toBe('absolute');
+  expect(decl('.tview .tv-labs .tv-lane', 'left')).toBe('0');
   expect(decl('.ast', 'flex')).toBe('none');
   expect(decl('.ast', 'white-space')).toBe('nowrap');
   expect(decl('.schip .r3 .ast', 'margin-right')).toBe('6px');
