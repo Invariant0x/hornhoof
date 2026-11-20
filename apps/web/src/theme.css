@@ -2445,9 +2445,6 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .wait-card.turn_summary { border-inline-start-color: var(--cyan-ink); }
 .wait-card h3 { font-size: 14px; }
 .wait-card p { margin: 0; }
-/* The person whose decisions show, with a cross that shows everyone's again. */
-.filter-chip { justify-self: start; display: inline-flex; align-items: center; gap: 2px; max-width: 100%; margin: 0; padding-left: 12px; border: 1px solid var(--amber); background: var(--surface); font-size: 13px; font-weight: 600; }
-.filter-chip > span { min-width: 0; overflow-wrap: anywhere; }
 .imps { display: grid; gap: 10px; }
 .imp { display: grid; gap: 8px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-inline-start: 3px solid var(--amber); }
 .imp-taken { border-inline-start-color: var(--cyan); }
