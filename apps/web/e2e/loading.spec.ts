@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { SubView } from '../src/types';
+import type { CopiesView, PersonView, SubView } from '../src/types';
 import { serveApi } from './api';
 
 /* The one department serveApi answers with, whose tasks the tracker lists. */
@@ -28,6 +28,13 @@ const PLAN = {
   machines: [{ id: 'm1', hostname: 'dev-laptop', status: 'ready', online: true }], api: null, models: [], target: null, connecting: null,
 } as unknown as SubView;
 
+const PERSON: PersonView = {
+  id: 'p2', name: 'Mira Stone', email: 'mira@example.com', title: 'Designer', status: 'active', isOwner: false,
+  access: { whole: true, departments: [], teams: [] },
+};
+/* Hornhoof keeps a copy on another machine, which the machines screen says in its header once it came. */
+const COPIES: CopiesView = { leader: 'hq-box', copies: [{ hostname: 'spare-box', sync: true }], onlySince: null };
+
 type Lang = 'en' | 'ru';
 const words = (lang: Lang) => (lang === 'en' ? en : ru);
 
@@ -41,6 +48,11 @@ type Screen = {
   shown(page: Page, lang: Lang): Locator[];
   place(page: Page): Locator;
   arrived(page: Page, lang: Lang): Locator;
+};
+
+const byTab = (tab: 'people' | 'machines' | 'subscriptions') => async (page: Page, lang: Lang) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('navigation').getByRole('button', { name: words(lang).shell.tabs[tab], exact: true }).click();
 };
 
 const SCREENS: Screen[] = [
@@ -57,14 +69,29 @@ const SCREENS: Screen[] = [
   {
     name: 'subscriptions',
     held: '/api/subscriptions',
-    open: async (page, lang) => {
-      await page.goto('/', { waitUntil: 'domcontentloaded' });
-      await page.getByRole('navigation').getByRole('button', { name: words(lang).shell.tabs.subscriptions, exact: true }).click();
-    },
+    open: byTab('subscriptions'),
     answer: route => route.fulfill({ json: { subscriptions: [PLAN], apiPlaces: null } }),
     shown: (page, lang) => [page.getByRole('navigation').first(), page.getByRole('heading', { level: 1, name: words(lang).subs.heading, exact: true })],
     place: page => page.locator('section.subs'),
     arrived: (page, lang) => page.getByRole('button', { name: words(lang).tables.openCard('Codex'), exact: true }),
+  },
+  {
+    name: 'people',
+    held: '/api/people',
+    open: byTab('people'),
+    answer: route => route.fulfill({ json: { people: [PERSON] } }),
+    shown: (page, lang) => [page.getByRole('navigation').first(), page.getByRole('heading', { level: 1, name: words(lang).people.heading, exact: true }), page.getByRole('button', { name: words(lang).people.invitePerson, exact: true })],
+    place: page => page.locator('section.people:not(.machines)'),
+    arrived: page => page.getByRole('cell', { name: 'Mira Stone' }),
+  },
+  {
+    name: 'machines',
+    held: '/api/machines',
+    open: byTab('machines'),
+    answer: route => route.fulfill({ json: { machines: [], copies: COPIES } }),
+    shown: (page, lang) => [page.getByRole('navigation').first(), page.getByRole('heading', { level: 1, name: words(lang).machines.heading, exact: true }), page.getByRole('button', { name: words(lang).machines.connect, exact: true })],
+    place: page => page.locator('section.machines'),
+    arrived: (page, lang) => page.getByText(words(lang).machines.noMachines, { exact: true }),
   },
 ];
 
