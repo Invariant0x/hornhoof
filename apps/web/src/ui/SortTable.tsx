@@ -2,6 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type Dispatch, 
 import { guardedResizeObserver } from '../guard';
 import { useLanguage, useT } from '../i18n';
 import { Edge } from './Edge';
+import { Hold, Idle, LoadLine, type Load } from './Loading';
 import { fitTable } from './fit-table';
 import { matchesFilters, TableTools, type FilterGroup, type Selections, type TableSearch } from './TableTools';
 import { nextSort, orderRows, sortRows, type Sort, type SortColumn } from './sort';
@@ -204,4 +205,30 @@ export function SortTable<T extends { id: string }>({ rows, columns, name, initi
       </table>
     </div></Edge>
   </>;
+}
+
+const nothing = () => {};
+const NO_SORT: Sort = { key: '', direction: 1 };
+
+/* A table while its rows come (style book 1.5, section 4; Design #1656): its search field, its count line and its head drawn
+   at once; in its first row the ring and its words, or why the load stalled with Retry; idle rows under it, rows in all. */
+export function HeldTable<T>({ load, columns, search, words, rows }: { load: Load; columns: TableColumn<T>[]; search?: TableSearch<T>; words?: ReactNode; rows: number }) {
+  return (
+    <Hold load={load} keep className="held-table">
+      {search && <>
+        <TableTools rows={[]} groups={[]} selected={{}} toggle={nothing} clear={nothing} query="" setQuery={nothing} placeholder={search.placeholder} short={search.short} />
+        <p className="result"><bdi><Idle w="10ch" /></bdi></p>
+      </>}
+      <Edge className="tbl-frame"><div className="tbl">
+        <SortBar columns={columns} sort={NO_SORT} choose={nothing} />
+        <table className="dt">
+          <TableHead columns={columns} sort={NO_SORT} choose={nothing} />
+          <tbody>
+            <tr className="held"><td colSpan={columns.length}><LoadLine load={load} words={words} /></td></tr>
+            {Array.from({ length: rows - 1 }, (_, i) => <tr key={i} className="held">{columns.map(c => <td key={c.key}><Idle w="8ch" /></td>)}</tr>)}
+          </tbody>
+        </table>
+      </div></Edge>
+    </Hold>
+  );
 }

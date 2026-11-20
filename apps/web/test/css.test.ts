@@ -22,15 +22,25 @@ it('hides the version footer only for a whole screen, the map or a phone', () =>
 });
 
 /* Over the map the version is small muted text in the bottom end corner of the room its bars leave free, mirrored right to
-   left, raised by what it measures over a bar in its column, with nothing around it, and a tap goes through it to the map
-   (#1590). */
+   left, with nothing around it, and a tap goes through it to the map (#1590). The map's bars stand at the start and in the
+   middle in either direction, so none stands in that corner to raise it over (#1622). */
 it('floats the version over the end corner of the map, out of the way of taps', () => {
   const rules = rulesFor('.map-version');
   expect(rules.map(rule => rule.media)).toEqual([null]);
   expect(rules[0]!.decls).toEqual({
-    position: 'absolute', 'inset-block-end': 'calc(4px + var(--lift, 0px))', 'inset-inline-end': '12px', margin: '0', color: 'var(--muted)', 'font-size': '12px',
+    position: 'absolute', 'inset-block-end': '4px', 'inset-inline-end': '12px', margin: '0', color: 'var(--muted)', 'font-size': '12px',
     'pointer-events': 'none', 'user-select': 'none',
   });
+});
+
+/* The map's zoom and Put back over it stand at the start of its bottom, so a page right to left mirrors them as it mirrors
+   the rest of the layout; left to right they stay where they stood. The other canvases keep their zoom at the left, beside
+   bars they place from the left (#1622). */
+it("stands the map's zoom and Put back at the start of its bottom, mirrored right to left", () => {
+  expect(decl('.zoom', 'left')).toBe('16px');
+  expect(decl('.map > .zoom', 'inset-inline')).toBe('16px auto');
+  expect(decl('.map-arrange', 'inset-inline-start')).toBe('16px');
+  expect(decl('.map-arrange', 'left')).toBeUndefined();
 });
 
 function paddingRightPx(selector: string): number | undefined {

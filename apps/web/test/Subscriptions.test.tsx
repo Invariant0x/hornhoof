@@ -20,8 +20,8 @@ afterEach(() => localStorage.clear());
 
 describe('Subscriptions', () => {
   it.each([
-    ['en', 'Until ', ', in 2 h 10 min. Its agents wait until then.', 'resets in 2 h 10 min', 'Ivan, limit reached until ', 'Built-in node', 'comes with the server'],
-    ['ru', 'До ', ', еще 2 ч 10 мин. До тех пор ее агенты ждут.', 'до сброса 2 ч 10 мин', 'Ivan, лимит исчерпан до ', 'Встроенная нода', 'идет вместе с сервером'],
+    ['en', 'Until ', ', in 2 h 10 min. Its agents wait until then.', 'resets in 2\u00a0h 10\u00a0min', 'Ivan, limit reached until ', 'Built-in node', 'comes with the server'],
+    ['ru', 'До ', ', еще 2 ч 10 мин. До тех пор ее агенты ждут.', 'до сброса 2\u00a0ч 10\u00a0мин', 'Ivan, лимит исчерпан до ', 'Встроенная нода', 'идет вместе с сервером'],
   ])('uses the quoted state, meter and machine-list wording in %s', async (language, until, sentence, reset, localState, builtin, comesWith) => {
     localStorage.setItem('hh-lang', language);
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
@@ -97,7 +97,7 @@ describe('Subscriptions', () => {
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits: { status: 'allowed', complete: true, windows: [] } }, SUBS[3]!] }] });
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
     await openAll();
-    expect.soft(meterRows(rowOf('Claude')).map(meter => meter.textContent)).toEqual(['5 часовНет у этого тарифа', '7 днейНет у этого тарифа']);
+    expect.soft(meterRows(rowOf('Claude')).map(meter => meter.textContent)).toEqual(['5\u00a0часовНет у этого тарифа', '7\u00a0днейНет у этого тарифа']);
     expect.soft(meterRows(rowOf('Claude')).every(meter => !meter.querySelector('.bar'))).toBe(true);
     expect(within(rowOf('Ключ Anthropic, заканчивается на 9f3a')).getByText('Оплата по факту, без лимитов тарифа')).toBeInTheDocument();
   });
@@ -250,11 +250,11 @@ describe('Subscriptions', () => {
     expect(claudeFive).toHaveTextContent(/^5 hours30%usedReset time unknown$/);
     expect(claudeSeven).toHaveTextContent(/^7 daysUnknown, no limit data received yet$/);
     expect(claudeSeven!.querySelector('.bar')).not.toBeInTheDocument();
-    expect(claudeMore.map(r => r.textContent)).toEqual(['7 days, Opus100%usedReset time unknown']);
+    expect(claudeMore.map(r => r.textContent)).toEqual(['7\u00a0days, Opus100%usedReset time unknown']);
     const [codexFive, codexSeven] = await rows('Codex');
     expect(codexFive).toHaveTextContent(/^5 hoursNot on this plan$/);
     expect(codexSeven).toHaveTextContent(/^7 days73%usedReset time unknown$/);
-    expect((await rows('Kimi')).map(r => r.textContent)).toEqual(['5 hours88%usedReset time unknown', '7 daysNot on this plan', 'Month6%usedReset time unknown']);
+    expect((await rows('Kimi')).map(r => r.textContent)).toEqual(['5\u00a0hours88%usedReset time unknown', '7\u00a0daysNot on this plan', 'Month6%usedReset time unknown']);
     const key = rowOf('Anthropic key ending 9f3a');
     expect(within(key).getByText('Pay as you go, no plan limits')).toBeInTheDocument();
     expect(within(key).queryByRole('list', { name: 'Limits' })).not.toBeInTheDocument();
@@ -342,8 +342,8 @@ describe('Subscriptions', () => {
      and «70%, до сброса 3 дня», and a model's week «7 дней, Opus». A column's name is text an attribute also holds for a
      narrow table, so its piece stands between the marks that isolate it left to right, as a bdi dir="ltr" does on a page. */
   it.each([
-    ['en', ['5 hours', '7 days', '7 days, Opus'], ['40%', '70%', '20%'], ['2 h 59 min', '3 days', '3 days'], 'resets in '],
-    ['ru', ['5 часов', '7 дней', '7 дней, Opus'], ['40%', '70%', '20%'], ['2 ч 59 мин', '3 дня', '3 дня'], 'до сброса '],
+    ['en', ['5 hours', '7 days', '7 days, Opus'], ['40%', '70%', '20%'], ['2\u00a0h 59\u00a0min', '3\u00a0days', '3\u00a0days'], 'resets in '],
+    ['ru', ['5 часов', '7 дней', '7 дней, Opus'], ['40%', '70%', '20%'], ['2\u00a0ч 59\u00a0мин', '3\u00a0дня', '3\u00a0дня'], 'до сброса '],
   ])('in %s holds each number of a plan\'s limits with its unit in one piece and each phrase whole in its own direction', async (language, windows, shares, durations, resets) => {
     localStorage.setItem('hh-lang', language);
     const now = Date.now();
@@ -373,8 +373,10 @@ describe('Subscriptions', () => {
     expect(cells.map(cell => cell.textContent)).toEqual(columns.map((_, i) => `${shares[i]}, ${resets}${durations[i]}`));
     openCards();
     const meters = meterRows(rowOf('Claude')).slice(0, 3);
-    const number = (name: string) => name.split(',')[0];
-    expect(meters.map(m => pieces(m.querySelector('.g-l')!))).toEqual(windows.map(w => [`null ${w}`, `ltr ${number(w)}`]));
+    /* On the card a window's number keeps its unit on one line (#1601). */
+    const whole = (name: string) => name.replace(' ', '\u00a0');
+    const number = (name: string) => whole(name).split(',')[0];
+    expect(meters.map(m => pieces(m.querySelector('.g-l')!))).toEqual(windows.map(w => [`null ${whole(w)}`, `ltr ${number(w)}`]));
     expect(meters.map(m => pieces(m.querySelector('.g-f > b')!))).toEqual(shares.map(s => [`ltr ${s}`]));
     expect(meters.map(m => [...m.querySelectorAll('.g-f > b .pct')].map(n => n.textContent))).toEqual([['%'], ['%'], ['%']]);
     expect(meters.map(m => pieces(m.querySelector('.g-s')!))).toEqual(durations.map(d => [`null ${resets}${d}`, `ltr ${d}`]));
@@ -472,8 +474,8 @@ describe('Subscriptions', () => {
     const claraCard = screen.getByRole('article', { name: 'Claude, Clara' });
     expect(claraCard.querySelector('.stline')).toHaveTextContent(`${offlineState}${offlineLine}`);
     expect(meterRows(claraCard).map(m => m.textContent)).toEqual([
-      `${language === 'en' ? '5 hours' : '5 часов'}${offlineWithData}`,
-      `${language === 'en' ? '7 days' : '7 дней'}${offlineWithData}`,
+      `${language === 'en' ? '5\u00a0hours' : '5\u00a0часов'}${offlineWithData}`,
+      `${language === 'en' ? '7\u00a0days' : '7\u00a0дней'}${offlineWithData}`,
     ]);
     const ivanCard = screen.getByRole('article', { name: 'Claude, Ivan' });
     expect(meterRows(ivanCard)[0]).toHaveTextContent(notOnPlan);

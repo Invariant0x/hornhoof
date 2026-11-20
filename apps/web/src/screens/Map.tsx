@@ -814,8 +814,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
      panel and moving a block leave the view alone. */
   const shown = !!arr;
   const putBack = Object.keys(layout.placed).length > 0 || Object.keys(layout.bends).length > 0 || layout.failed;
-  const barsShown = `${shown}|${windowOpen}|${putBack}`;
-  const roomStyle = useMapRoom(box, barsShown, shellTop);
+  const roomStyle = useMapRoom(box, `${shown}|${windowOpen}|${putBack}`, shellTop);
   const cardH = arr?.depts[0]?.h ?? 0, chipH = `${arr?.top[0]?.h ?? 0}:${arr?.people.chips[0]?.h ?? 0}`;
   usePauseHiddenMap(box, inside, shown);
   useEffect(() => {
@@ -1097,7 +1096,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
             )),
           )}
         </div>
-        <MapVersion bars={MAP_BARS} shown={barsShown} off={inside} />
+        <MapVersion off={inside} />
       </div>
 
       <ZoomBar

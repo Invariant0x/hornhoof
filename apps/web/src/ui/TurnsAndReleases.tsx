@@ -5,6 +5,7 @@ import { ALL_DEPARTMENTS, byRelease, inDepartment, NO_DEPARTMENT, type Preparing
 import type { TaskDepartments, TaskLine, TurnView } from '../types';
 import { Backlog } from './Backlog';
 import { Field } from './Field';
+import { Busy, Hold, useLoad, type LoadPart } from './Loading';
 import { BoardSection, Fold, GoalRows, Progress, SplitGoals, type CardRows } from './TaskBoard';
 
 type Choice = { id: string; label: string };
@@ -138,9 +139,13 @@ function Releases({ tasks, turns, rows, department, places }: { tasks: TaskLine[
 }
 
 /* Turns and releases of the departments the person reads: one department of them, or all of them. */
-export function TurnsAndReleases({ tasks, places, rows }: { tasks: TaskLine[] | undefined; places: TaskDepartments | undefined; rows: CardRows }) {
+/* The turns and their releases, once the tasks and the turns both came: until then their room holds the indicator. tasks: the
+   tracker's tasks as a part of its load. */
+export function TurnsAndReleases({ tasks: part, places, rows }: { tasks: LoadPart; places: TaskDepartments | undefined; rows: CardRows }) {
   const t = useT();
-  const { turns, failure } = useTurns();
+  const { turns, failure, load: loadTurns } = useTurns();
+  const load = useLoad([part, { data: turns, failure, load: loadTurns }]);
+  const tasks = part.data as TaskLine[] | undefined;
   const [picked, setPicked] = useState(ALL_DEPARTMENTS);
   const choices = choicesOf(t, places);
   const department = choices.some(c => c.id === picked) ? picked : ALL_DEPARTMENTS;
@@ -149,8 +154,8 @@ export function TurnsAndReleases({ tasks, places, rows }: { tasks: TaskLine[] | 
   return (
     <section className="board tr-releases" aria-label={t.tracker.side.turns}>
       {choices.length > 1 && <div className="board-tools"><DepartmentPicker choices={choices} value={department} onChange={setPicked} /></div>}
-      {failure !== null && <p className="alert" role="alert" dir="auto">{errorText(t, failure)}</p>}
-      {tasks && turns && <Releases tasks={shown} turns={shownTurns} rows={rows} department={department} places={places} />}
+      {turns && failure !== null && <p className="alert" role="alert" dir="auto">{errorText(t, failure)}</p>}
+      <Hold load={load}>{load.phase === 'done' ? <Releases tasks={shown} turns={shownTurns} rows={rows} department={department} places={places} /> : <Busy ring={load.ring} />}</Hold>
     </section>
   );
 }

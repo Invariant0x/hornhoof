@@ -46,12 +46,18 @@ say() {
 write_status() {
   STATE=$1
   STEP=$2
+  publish "$CONTROL/status.json" over status_json || {
+    printf '%s\n' 'Could not write status.json in the control folder.' >&2
+    return 1
+  }
+}
+
+status_json() {
   jq -n --arg id "$ID" --arg version "$VERSION" --arg state "$STATE" --arg step "$STEP" \
     --arg log "$(printf '%s' "$LOG" | tail -n 40)" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg says "$SAYS_MIGRATIONS" --arg migrations "$MIGRATIONS" --arg restore "$RESTORE" \
     '{id: $id, version: $version, state: $state, step: $step, log: $log, at: $at}
-      + (if $says == "" then {} else {migrations: (if $migrations == "" then null else ($migrations | tonumber) end), restore: ($restore == "1")} end)' > "$CONTROL/status.json.new"
-  mv "$CONTROL/status.json.new" "$CONTROL/status.json"
+      + (if $says == "" then {} else {migrations: (if $migrations == "" then null else ($migrations | tonumber) end), restore: ($restore == "1")} end)'
 }
 
 step() {
@@ -164,17 +170,19 @@ forget_kind() {
 # The service whose container is the build that runs here: the app on a server, the keeper on a worker, which has no app.
 main_service() { if worker; then printf keeper; else printf app; fi; }
 
-update_running() { [ "$(jq -r '.state // empty' "$CONTROL/status.json" 2> /dev/null || true)" = running ]; }
+update_running() { [ "$(take "$CONTROL/status.json" quiet jq -r '.state // empty' || true)" = running ]; }
 
 # The update under way, as status.json says it.
 read_status() {
-  ID=$(jq -r '.id // empty' "$CONTROL/status.json" | tr -cd 'A-Za-z0-9-')
-  VERSION=$(jq -r '.version // empty' "$CONTROL/status.json" | tr -cd 'A-Za-z0-9._ -' | cut -c1-64)
-  STEP=$(jq -r '.step // empty' "$CONTROL/status.json")
-  LOG="$(jq -r '.log // empty' "$CONTROL/status.json")
+  local status
+  status=$(take "$CONTROL/status.json" || true)
+  ID=$(jq -r '.id // empty' <<< "$status" | tr -cd 'A-Za-z0-9-')
+  VERSION=$(jq -r '.version // empty' <<< "$status" | tr -cd 'A-Za-z0-9._ -' | cut -c1-64)
+  STEP=$(jq -r '.step // empty' <<< "$status")
+  LOG="$(jq -r '.log // empty' <<< "$status")
 "
   # What it said of the database, when it had said anything: an update of an updater from before says nothing.
-  SAYS_MIGRATIONS=$(jq -r 'if has("migrations") then "1" else "" end' "$CONTROL/status.json" 2> /dev/null || true)
-  MIGRATIONS=$(jq -r '.migrations // empty | tostring' "$CONTROL/status.json" 2> /dev/null | tr -cd '0-9' || true)
-  RESTORE=$(jq -r 'if .restore == true then "1" else "" end' "$CONTROL/status.json" 2> /dev/null || true)
+  SAYS_MIGRATIONS=$(jq -r 'if has("migrations") then "1" else "" end' <<< "$status" 2> /dev/null || true)
+  MIGRATIONS=$(jq -r '.migrations // empty | tostring' <<< "$status" 2> /dev/null | tr -cd '0-9' || true)
+  RESTORE=$(jq -r 'if .restore == true then "1" else "" end' <<< "$status" 2> /dev/null || true)
 }

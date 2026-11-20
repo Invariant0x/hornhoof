@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, departments, jobs, tasks, teams, testParts, testRuns, turns } from '../src/db/schema.js';
-import { answer, ask, createTask, report, type Ask } from '../src/modules/tasks/engine.js';
+import { answer, ask, createTask, report, startWork, type Ask } from '../src/modules/tasks/engine.js';
 import { uncheckedInRelease } from '../src/modules/tasks/releases.js';
 import type { Task } from '../src/modules/tasks/state.js';
 import type { Ctx } from '../src/app.js';
@@ -180,6 +180,12 @@ export function joinedAfterR(f: Releasing, task: number, stray?: { sha: string; 
   return { own: MADE, head: TOP };
 }
 
+/* The holder's turn on its task went out, so its work starts: the server notes where the turn branch and main were then. */
+export async function startTurnkeyWork(f: Pick<Releasing, 'db' | 'ctx' | 'task'>, holder: { id: string; subscriptionId: string | null }, taskId: string): Promise<void> {
+  const [job] = await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: holder.id, subscriptionId: holder.subscriptionId!, taskId, kind: 'conversation', prompt: 'Work', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning();
+  await startWork(f.ctx, job!.id);
+}
+
 /* Turnkey work after R: a member of a turnkey team did it whole on task-N with its own review, security check and tests,
    joined it to the turn branch and closed it with report, naming the commit it checked and where task-N started. Without stray
    task-N is made on R and the turn branch goes to it by fast-forward; with one, it joins as joinedAfterR says. */
@@ -188,6 +194,7 @@ export async function turnkeyAfterR(f: Releasing, stray?: { sha: string; taken: 
   const holder = await f.hire('Player', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
   await f.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, holder.id));
   const { task } = await f.create({ title: 'Turnkey change', assigneeAgentId: holder.id, reviewerAgentId: undefined, securityAgentId: undefined, testsAgentId: undefined });
+  await startTurnkeyWork(f, holder, task.id);
   const joined = stray ? joinedAfterR(f, task.number, stray) : fastForwardedAfterR(f, task.number);
   const start = stray && !stray.taken ? stray.sha : f.R;
   await report(f.ctx, holder.id, task.id, { done: true, summary: 'Joined task-N to the turn branch after my own review, security check and tests.', turnkey: { commit: joined.own, baseCommit: start } });

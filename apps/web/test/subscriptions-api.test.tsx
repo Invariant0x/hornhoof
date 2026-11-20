@@ -29,6 +29,13 @@ const lists = (extra: Parameters<typeof mockApi>[0] = {}) => mockApi({
 
 afterEach(() => localStorage.clear());
 
+/* A plan's own row, once it came: while the plans load, the table holds rows of its own. */
+const planRow = (last4: string) => waitFor(() => {
+  const found = screen.getAllByRole('row').find(r => r.textContent!.includes(last4));
+  expect(found).toBeDefined();
+  return found!;
+});
+
 describe('Subscriptions & API', () => {
   it.each([
     ['en', 'Subscriptions & API', 'Personal plan, paid by subscription', 'API key, paid by tokens', 'By tokens', 'Type'],
@@ -46,7 +53,7 @@ describe('Subscriptions & API', () => {
     expect(rows().map(r => within(r).queryByRole('img', { name: key }) !== null)).toEqual([true, true]);
   });
 
-  it.each([['en', 'Tokens, 30 days', 'Tokens', 'Today', '7 days', '30 days', 'All time', 'Input', 'turn told no tokens'], ['ru', 'Токены, 30 дней', 'Токены', 'Сегодня', '7 дней', '30 дней', 'Всего', 'Ввод', 'ход без данных']])(
+  it.each([['en', 'Tokens, 30 days', 'Tokens', 'Today', '7\u00a0days', '30\u00a0days', 'All time', 'Input', 'turn told no tokens'], ['ru', 'Токены, 30 дней', 'Токены', 'Сегодня', '7\u00a0дней', '30\u00a0дней', 'Всего', 'Ввод', 'ход без данных']])(
     'shows in %s what each used in 30 days, and in the open card today, 7 and 30 days and all along', async (language, column, title, today, week, month, all, input, noData) => {
       localStorage.setItem('hh-lang', language);
       const calls = lists();
@@ -66,7 +73,7 @@ describe('Subscriptions & API', () => {
         expect(gauges[i]).toContain(label);
         expect(gauges[i]).toContain(n(language, total));
       }
-      expect(gauges[0]).toContain(`${input} ${n(language, 500)}`);
+      expect(gauges[0]).toContain(`${input}\u00a0${n(language, 500)}`);
       expect(part.textContent).toContain(noData);
     },
   );
@@ -137,7 +144,7 @@ describe('Subscriptions & API', () => {
     });
     const user = userEvent.setup();
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
-    const row = (await screen.findAllByRole('row')).find(r => r.textContent!.includes('WXYZ'))!;
+    const row = await planRow('WXYZ');
     fireEvent.click(within(row).getByRole('button', { name: /^(Open the card of |Открыть карточку )/ }));
     const card = await screen.findByRole('article', { name: /WXYZ/ });
     await user.click(within(card).getByRole('button', { name: /^Edit / }));
@@ -160,7 +167,7 @@ describe('Subscriptions & API', () => {
     const DANA: Me = { person: { ...ME.person, id: 'p2', name: 'Dana', email: 'dana@acme.com', title: 'CMO', scopeKind: 'listed', isOwner: false }, company: ME.company };
     const KEY: SubView = { ...ROUTER, id: 's-mkt', label: 'Marketing key', last4: 'MKT1', owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'department', id: 'd1', name: 'Marketing' }, target: { kind: 'department', id: 'd1' }, canChange: true };
     const card = async (last4: string) => {
-      const row = (await screen.findAllByRole('row')).find(r => r.textContent!.includes(last4))!;
+      const row = await planRow(last4);
       fireEvent.click(within(row).getByRole('button', { name: /^(Open the card of |Открыть карточку )/ }));
       return screen.findByRole('article', { name: new RegExp(last4) });
     };

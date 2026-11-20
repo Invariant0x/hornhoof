@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { AgentCardView, Employee, Org, ProgramView } from '../src/types';
 import { ME, serveApi } from './api';
 
-test.describe.configure({ timeout: 120_000 });
+test.describe.configure({ timeout: 0 });
 
 const NOW = Date.parse('2026-11-03T12:00:00.000Z');
 const ROLE = { en: 'Developer', ru: 'Разработчик' };

@@ -17,14 +17,26 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The map opens readable: on a phone its people chips' names are 11 px or more, as its cards' names are on any screen. A map that fits whole at that size opens as Show everything shows it, never larger than 100%, and one that does not opens with the hub in the middle across.
 - A node that waits for its work to end before an update holds new turns for at most 45 minutes (`NODE_UPDATE_WAIT_MS`): then it updates, and each turn it cut runs once more after the restart. The orchestrator hears once when a wait passes half an hour.
 - A tab whose session ended goes to the sign-in screen at once, and a tab nobody is signed in on reloads by itself once Hornhoof runs another version.
+- After the sign-in code, a plan's card and its sign-in window show that it is connecting, with its steps, the step its machine is at and the time since the code, until it is ready, for every program. A minute with no new step (`SIGNIN_SLOW_MS`) says it takes longer than usual; at 10 minutes (`SIGNIN_CONNECT_MS`) it fails and says why and what to do, each with Retry and Stop.
+- The tracker, the task card, the plans screen and a plan card's tokens hold the room of their data while it comes, with one loading ring from 400 ms, and nothing already shown moves when it comes. At 10 seconds a load says it takes longer than usual, at 30 seconds it gives up and says why, and an error says why at once, each with Retry. A section says that it has nothing only once all of it came.
+- On a page right to left, the map's zoom and Put back stand at the right, mirrored as the rest of the layout is.
 - A plan with separate limits for groups of models, as Antigravity's Gemini and its Claude and GPT models, keeps each group's limits: a used-up group holds only the turns and fallbacks on its own models, and the plan's card shows every group with what it used and when it resets.
 - In a page that reads right to left, an English line of a bar over the map ends with its full stop instead of starting with it, and the bar stays mirrored.
+- A number on a plan's card stays on one line with its unit or the word it goes with, as "14 h", "1 online" or "Input 0", in every language; a reset still wraps between its parts.
+- A release no longer counts as checked a commit that turnkey work was built on but its employee did not make: Hornhoof notes where the turn branch was as the work starts, refuses a start named under it, lists work whose start it has no record of for a person, and a tag named like main never stands for main.
 - A bar over the map, such as an update's, no longer pushes the map and an open department down: they reach the top of the window under the header and the bars, and what they show starts under the bars. Windows and cards open 8 px under the bars, and a card opened over a department 8 px under its name, however many lines the name takes.
 - In a page that reads right to left, the glow of the map's hub stands around the hub instead of at the map's right edge.
 
 ### Changed
 
+- In the tracker's list, the status dot of a task an employee works on right now has a filled core that breathes slowly, every such dot together; for a person who asked for less motion the core is full and still, and a screen reader hears "In work, working now".
 - The map runs to the bottom of the screen, with the version as small muted text in its bottom end corner, clear of its buttons and of the bars along a phone's bottom; other screens keep the version in the row below them.
+
+## [0.39.4] - 2026-11-20
+
+### Fixed
+
+- A node no longer refuses the hooks of an agent's own program as callers outside its terminal after the program gave up on one, so its Hornhoof tools stay connected.
 
 ## [0.39.3] - 2026-11-19
 

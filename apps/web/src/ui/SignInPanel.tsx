@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { SIGNIN_ERRORS, type SigninError } from '@hornhoof/protocol/signin';
 import { useT, type Messages } from '../i18n';
 import { useStream } from '../live';
@@ -20,11 +20,13 @@ type Props = {
   /* error: null when the plan signed in, else why it did not, in plain words. */
   onEnd(error: string | null): void;
   onStop(): void;
+  /* The plan's connection after the code, as its node says it. */
+  connection?: ReactNode;
 };
 
 /* A plan's sign-in terminal on one of its owner's machines, which only the owner sees and types into. It closes when the
    machine says the sign-in finished or gave up. */
-export function SignInPanel({ subId, program, nodeId, hostname, onEnd, onStop }: Props) {
+export function SignInPanel({ subId, program, nodeId, hostname, onEnd, onStop, connection = null }: Props) {
   const t = useT();
   const box = useRef<HTMLDivElement>(null);
   /* It opens under the plan's card, often below the screen's edge: without this, pressing Sign in seems to do nothing. */
@@ -39,6 +41,7 @@ export function SignInPanel({ subId, program, nodeId, hostname, onEnd, onStop }:
     <div className="signin" ref={box}>
       <h3>{t.subs.signingIn(hostname)}</h3>
       <p className="muted">{t.subs.signingInNote}</p>
+      {connection}
       <AgentTerminal
         path={`/api/subscriptions/${subId}/signin/terminal?nodeId=${encodeURIComponent(nodeId)}`}
         program={program}

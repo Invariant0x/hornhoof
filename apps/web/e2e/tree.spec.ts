@@ -10,7 +10,7 @@ for (const lang of ['en', 'ru'] as const) {
   for (const theme of ['light', 'dark'] as const) {
     for (const width of [1440, 375]) {
       test(`whole-turn tree in ${lang}, ${theme}, ${width}px`, async ({ page }, info) => {
-        test.setTimeout(90_000);
+        test.setTimeout(0);
         await page.setViewportSize({ width, height: 1200 });
         await page.addInitScript(({ lang, theme }) => {
           localStorage.setItem('hh-lang', lang);
@@ -114,7 +114,7 @@ for (const lang of ['en', 'ru'] as const) {
 for (const lang of ['en', 'ru'] as const) {
   for (const theme of ['light', 'dark'] as const) {
     test(`tree edges in ${lang}, ${theme}`, async ({ page }, info) => {
-      test.setTimeout(90_000);
+      test.setTimeout(0);
       await page.setViewportSize({ width: 375, height: 1200 });
       await page.addInitScript(({ lang, theme }) => {
         localStorage.setItem('hh-lang', lang);

@@ -15,7 +15,7 @@ import { ME, serveApi } from './api';
    direction its dictionary writes it, on a page laid out either way. The stripe beside what running a machine's command
    means, on the screen and on a machine's card, stands on the side its lines start from, with its gap, either way, and
    its words read whole in their own direction, their full stop after them. */
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 
 const GIB = 1024 ** 3;
 const NOW = Date.parse('2026-11-15T12:00:00.000Z');

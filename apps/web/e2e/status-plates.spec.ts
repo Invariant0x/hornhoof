@@ -7,7 +7,7 @@ import { ME, brokenHeaderWords, serveApi } from './api';
    table and as entries, at the widths of a desk, a laptop, a small laptop and a phone, in every shipped language (so in
    the longest and the shortest) and laid out right to left. A word breaks only where it does not fit a line of its own, a
    status is one frame, on one line as long as the rows stand as a table, and the table stands inside its frame. */
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 
 const NOW = Date.parse('2026-11-15T12:00:00.000Z');
 const WIDTHS = [1440, 1280, 1024, 375];

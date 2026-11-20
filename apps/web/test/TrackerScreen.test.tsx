@@ -3,6 +3,9 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
+import { heardAgain } from '../src/live';
 import { Shell } from '../src/screens/Shell';
 import type { GoalView, Me, Org, Pipeline, ProposalDecision, TaskDetail, TaskLine, TaskLogLine, WaitingRequest } from '../src/types';
 import { decisions, DEV_ORG, ME, mockApi, TASK_DETAIL, TURN } from './api-mock';
@@ -993,5 +996,142 @@ describe('the left panel and the goals page', () => {
     expect(within(company).getByRole('listitem', { name: 'Card payments' })).toBeInTheDocument();
     await user.click(within(company).getByRole('link', { name: '500 subscribers' }));
     expect(location.pathname + location.search).toBe('/tasks/g1?card=goal');
+  });
+});
+
+/* Ivan's rule (20.11, #1613): a section of what waits says that nothing waits only once every source of it came: until then
+   it holds its room with the shared indicator, as the style book has it (1.5, section 4). Each source is held back in turn,
+   and the empty words must not show before it is let go. */
+describe('what waits says that nothing waits only once all of it came', () => {
+  const NO_WAITS = [PAY, REFUND];
+  const ANSWERS: Record<string, unknown> = {
+    'GET /api/turns': { turns: [] },
+    'GET /api/requests': decisions([]),
+    'GET /api/wait-cards': { cards: [], next: null },
+    'GET /api/tasks?status=all': { tasks: NO_WAITS },
+  };
+  /* The page's sources answer at once, but the held one waits until the test lets it go. */
+  function held(source: string) {
+    let open: () => void = () => {};
+    const opened = new Promise<void>(go => { open = go; });
+    const routes = Object.fromEntries(Object.entries(ANSWERS).map(([key, body]) => [key, key === source ? async () => { await opened; return [200, body]; } : [200, body]]));
+    return { routes, open: () => act(async () => { open(); await opened; }) };
+  }
+
+  it.each(['GET /api/requests', 'GET /api/wait-cards', 'GET /api/tasks?status=all'])('Waiting for you holds its room with the indicator while %s is held back', async source => {
+    const hold = held(source);
+    shell('/tasks?show=waits', hold.routes);
+    const section = await screen.findByRole('region', { name: 'Waiting for you' });
+    expect(within(section).getByRole('heading', { name: 'Waiting for you' })).toBeInTheDocument();
+    expect(within(section).getByRole('status')).toHaveTextContent('Loading…');
+    expect(section.querySelector('.load-hold')).toHaveAttribute('aria-busy', 'true');
+    await act(async () => { await new Promise(go => setTimeout(go, 50)); });
+    expect(within(section).queryByText('Nothing waits for you.')).toBeNull();
+    await hold.open();
+    expect(await within(section).findByText('Nothing waits for you.')).toBeInTheDocument();
+    expect(within(section).queryByRole('status')).toBeNull();
+  });
+
+  it.each(['GET /api/requests', 'GET /api/tasks?status=all'])('Waiting for people holds its room with the indicator while %s is held back', async source => {
+    const hold = held(source);
+    shell('/tasks?show=people', hold.routes);
+    const section = await screen.findByRole('region', { name: 'Waiting for people' });
+    expect(within(section).getByRole('status')).toHaveTextContent('Loading…');
+    await act(async () => { await new Promise(go => setTimeout(go, 50)); });
+    expect(within(section).queryByText('Nothing waits for people.')).toBeNull();
+    await hold.open();
+    expect(await within(section).findByText('Nothing waits for people.')).toBeInTheDocument();
+  });
+
+  it('says that no task here has a due date only once the tasks came', async () => {
+    const hold = held('GET /api/tasks?status=all');
+    shell('/tasks?show=due', hold.routes);
+    const page = await screen.findByRole('region', { name: en.tracker.side.dates });
+    await act(async () => { await new Promise(go => setTimeout(go, 50)); });
+    expect(within(page).getByRole('status')).toHaveTextContent('Loading tasks…');
+    expect(within(page).queryByText('No tasks here have a due date.')).toBeNull();
+    await hold.open();
+    expect(await within(page).findByText('No tasks here have a due date.')).toBeInTheDocument();
+  });
+
+  it('says that a search found nothing only once the tasks came', async () => {
+    const user = userEvent.setup();
+    const hold = held('GET /api/tasks?status=all');
+    shell('/tasks?department=d2', hold.routes);
+    await user.type(await screen.findByRole('searchbox', { name: 'Search tasks' }), 'zebra');
+    const results = await screen.findByRole('region', { name: en.tracker.search.results });
+    expect(within(results).queryByText('No tasks found. Try other words or clear the search.')).toBeNull();
+    expect(within(results).getByRole('status')).toHaveTextContent('Loading tasks…');
+    await hold.open();
+    expect(await within(results).findByText('No tasks found. Try other words or clear the search.')).toBeInTheDocument();
+  });
+
+  it.each(['GET /api/turns', 'GET /api/tasks?status=all'])('says that no turn has been released yet only once the turns and the tasks came, while %s is held back', async source => {
+    const hold = held(source);
+    shell('/tasks?show=turns', { ...hold.routes, ...(source === 'GET /api/turns' ? {} : { 'GET /api/turns': [200, { turns: [] }] }) });
+    const page = await screen.findByRole('region', { name: en.tracker.side.turns });
+    await act(async () => { await new Promise(go => setTimeout(go, 50)); });
+    expect(within(page).getByRole('status')).toHaveTextContent('Loading…');
+    expect(within(page).queryByText(en.tasks.board.nothingYet)).toBeNull();
+    await hold.open();
+    expect(await within(page).findByText(en.tasks.board.nothingYet)).toBeInTheDocument();
+  });
+
+  it('stands what waits apart from the list above it, by a gap of the style book', () => {
+    expect(decl('.tr-main > :is(.tr-hold, .tr-found) + .waiting', 'margin-block-start')).toBe('24px');
+  });
+});
+
+/* #1629, Ivan's word: the tracker tells the tasks an employee works on at this moment from those only in work. Their status
+   dot carries the class Design draws the pulse on, and a screen reader hears it, in every shipped language. It follows
+   the company live, with no reload. */
+describe('the dot of work going on now', () => {
+  const dotOf = (list: HTMLElement, name: string) => rowOf(list, name).querySelector('.tr-status-dot')!;
+
+  /* Design #1628: a pulsing dot's label is one whole phrase of its own, and no dot has a title, which some screen readers
+     would read a second time. */
+  it.each([
+    ['en', en.tracker.groups.working, 'In work, working now'],
+    ['ru', ru.tracker.groups.working, 'В работе, сейчас работают'],
+  ])('marks only the task an employee works on now, and says so to a screen reader in one phrase, in %s', async (language, inWork, now) => {
+    localStorage.setItem('hh-lang', language);
+    try {
+      shell('/tasks?show=company');
+      const list = await screen.findByRole('region', { name: (language === 'en' ? en : ru).tracker.views.list });
+      await waitFor(() => expect(dotOf(list, '#21 Take card payments')).toHaveClass('now'));
+      expect((language === 'en' ? en : ru).tracker.dot.workingNow).toBe(now);
+      expect(dotOf(list, '#21 Take card payments')).toHaveAccessibleName(now);
+      expect(dotOf(list, '#23 Refund button')).not.toHaveClass('now');
+      expect(dotOf(list, '#23 Refund button')).toHaveAccessibleName(inWork);
+      expect([...list.querySelectorAll('.tr-status-dot[title]')]).toEqual([]);
+    } finally {
+      localStorage.clear();
+    }
+  });
+
+  /* Design #1628: only a task in work gets the core. One that waits for a person keeps its own ring, though an employee
+     works on it now. */
+  it('marks no task outside work, even one an employee works on now', async () => {
+    const on = (task: { id: string; number: number; title: string }) => ({ status: 'working' as const, task: { ...task, echelons: taskRoute() } });
+    const both: Org = { ...DEV_ORG, departments: DEV_ORG.departments.map(d => ({ ...d, employees: d.employees.map(e => (e.id === 'b1' ? { ...e, ...on({ id: 't21', number: 21, title: 'Take card payments' }) } : e.id === 'b0' ? { ...e, ...on({ id: 't24', number: 24, title: 'Fix the login page' }) } : e)) })) };
+    shell('/tasks?show=company', { 'GET /api/org': () => [200, both] });
+    const list = await main();
+    await waitFor(() => expect(dotOf(list, '#21 Take card payments')).toHaveClass('now'));
+    expect(dotOf(list, '#24 Fix the login page')).not.toHaveClass('now');
+    expect(dotOf(list, '#24 Fix the login page')).toHaveAccessibleName(en.tracker.groups.waiting);
+  });
+
+  it('starts and stops as the company says who works on what, with no reload', async () => {
+    let org: Org = DEV_ORG;
+    shell('/tasks?show=company', { 'GET /api/org': () => [200, org] });
+    const list = await main();
+    await waitFor(() => expect(rowOf(list, '#21 Take card payments')).toBeInTheDocument());
+    expect(dotOf(list, '#21 Take card payments')).not.toHaveClass('now');
+    org = ORG;
+    await act(async () => { heardAgain(); });
+    await waitFor(() => expect(dotOf(list, '#21 Take card payments')).toHaveClass('now'));
+    org = DEV_ORG;
+    await act(async () => { heardAgain(); });
+    await waitFor(() => expect(dotOf(list, '#21 Take card payments')).not.toHaveClass('now'));
   });
 });

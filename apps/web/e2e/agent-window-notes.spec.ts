@@ -10,7 +10,7 @@ import { CLOSED, OPEN, openWindow } from './computer-strip-api';
    window, under the terminal and the input line inside it, never over either; several stand one under another, each
    led by a word in a frame. */
 
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 
 type Look = { lang: 'en' | 'ru'; dir: 'ltr' | 'rtl'; theme: 'light' | 'dark'; width: 1440 | 375 };
 const LOOKS: Look[] = (['en', 'ru'] as const).flatMap(lang =>

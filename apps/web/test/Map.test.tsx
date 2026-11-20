@@ -460,9 +460,13 @@ describe('Map', () => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'GET /api/map/layout': () => kept });
     const { container } = render(<MapScreen {...PROPS} />);
     const marketing = (await screen.findByText('Marketing')).closest<HTMLElement>('.dept')!;
-    const scale = () => Number(/scale\(([^)]+)\)/.exec(container.querySelector<HTMLElement>('.world')!.style.transform)![1]);
-    await waitFor(() => expect(scale()).not.toBe(1));
+    const view = () => container.querySelector<HTMLElement>('.world')!.style.transform;
+    const scale = () => Number(/scale\(([^)]+)\)/.exec(view())![1]);
+    /* A company that fits whole opens no larger than it is drawn (#1597), so the map may open at 100%: its first fit shows
+       in where it stands, not only in its scale. */
+    await waitFor(() => expect(view()).not.toBe('translate(0px, 0px) scale(1)'));
     const first = scale();
+    expect(first, 'the map opens no larger than it is drawn').toBeLessThanOrEqual(1);
     await act(async () => arrive());
     await waitFor(() => expect(marketing.style.top).toBe('1400px'));
     expect(scale()).toBeLessThan(first);

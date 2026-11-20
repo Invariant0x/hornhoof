@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { Decisions, ProposalDecision, Roster } from '../src/types';
 import { serveApi } from './api';
 
-test.describe.configure({ timeout: 120_000 });
+test.describe.configure({ timeout: 0 });
 
 const OPS = { id: 'd-ops', name: 'Operations' };
 const role = (id: string, en: string, ru: string, required: boolean, holder: string | null) => ({

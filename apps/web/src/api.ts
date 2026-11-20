@@ -202,9 +202,9 @@ async function change<T>(path: string, init: RequestInit & { headers: Record<str
   }
 }
 
-function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = body === undefined ? {} : { 'content-type': 'application/json' };
-  const init = { method, headers, body: body === undefined ? undefined : JSON.stringify(body) };
+  const init = { method, headers, body: body === undefined ? undefined : JSON.stringify(body), ...(signal ? { signal } : {}) };
   return method === 'GET' ? respond<T>(path, init) : change<T>(path, init);
 }
 
@@ -214,7 +214,8 @@ export const api = {
   putFile: <T>(path: string, file: Blob) => respond<T>(path, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: file }),
   text: (path: string) => respondText(path),
   streamBytes: (path: string, signal?: AbortSignal) => respondBytes(path, signal),
-  get: <T>(path: string) => request<T>('GET', path),
+  /* signal: stops the ask, as a load given up at its limit does. */
+  get: <T>(path: string, signal?: AbortSignal) => request<T>('GET', path, undefined, signal),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
   put: <T>(path: string, body: unknown) => request<T>('PUT', path, body),
   patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, body),
