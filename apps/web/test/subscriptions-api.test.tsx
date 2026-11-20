@@ -46,7 +46,7 @@ describe('Subscriptions & API', () => {
     expect(rows().map(r => within(r).queryByRole('img', { name: key }) !== null)).toEqual([true, true]);
   });
 
-  it.each([['en', 'Tokens, 30 days', 'Tokens', 'Today', '7 days', '30 days', 'All time', 'Input', 'turn told no tokens'], ['ru', 'Токены, 30 дней', 'Токены', 'Сегодня', '7 дней', '30 дней', 'Всего', 'Ввод', 'ход без данных']])(
+  it.each([['en', 'Tokens, 30 days', 'Tokens', 'Today', '7\u00a0days', '30\u00a0days', 'All time', 'Input', 'turn told no tokens'], ['ru', 'Токены, 30 дней', 'Токены', 'Сегодня', '7\u00a0дней', '30\u00a0дней', 'Всего', 'Ввод', 'ход без данных']])(
     'shows in %s what each used in 30 days, and in the open card today, 7 and 30 days and all along', async (language, column, title, today, week, month, all, input, noData) => {
       localStorage.setItem('hh-lang', language);
       const calls = lists();
@@ -66,7 +66,7 @@ describe('Subscriptions & API', () => {
         expect(gauges[i]).toContain(label);
         expect(gauges[i]).toContain(n(language, total));
       }
-      expect(gauges[0]).toContain(`${input} ${n(language, 500)}`);
+      expect(gauges[0]).toContain(`${input}\u00a0${n(language, 500)}`);
       expect(part.textContent).toContain(noData);
     },
   );
