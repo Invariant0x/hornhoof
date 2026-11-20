@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ApiFailure } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
@@ -12,7 +12,7 @@ import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
 import { DepartmentMark } from '../ui/TrackerMarks';
 import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
-import { LoadState, useLoad, type LoadPart } from '../ui/Loading';
+import { Busy, Hold, LoadState, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
 import { MachineAway } from '../ui/MachineAway';
 import { MergeCard } from '../ui/MergeCard';
 import { Requests, wordsAnswer } from '../ui/Requests';
@@ -20,7 +20,7 @@ import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { GoalForm, PipelineForm, TrackerNewTask } from '../ui/TrackerForms';
 import { TrackerSide } from '../ui/TrackerSide';
-import { TrackerBoard, TrackerFound, TrackerGoals, TrackerGraph, TrackerList, type Rows } from '../ui/TrackerViews';
+import { HeldList, TrackerBoard, TrackerFound, TrackerGoals, TrackerGraph, TrackerList, type Rows } from '../ui/TrackerViews';
 import { TurnsAndReleases } from '../ui/TurnsAndReleases';
 import { waitText } from '../ui/tracker-words';
 import { WaitCards } from '../ui/WaitCards';
@@ -120,6 +120,19 @@ const decisionsOfWho = (personId: string | null, viewerId: string): DecisionsOf 
 const shownNone = (s: ShownDecisions) => !s.requests.length && !s.proposals.length && !s.merges.length;
 
 const nothing = () => {};
+
+/* The work of a view, held while it comes (style book 1.5, section 4): the list holds its rows at their final size, as many
+   as it showed last in this tab; the board and the graph hold the ring where they will stand. Once it came, it fades in. */
+function HeldWork({ load, view, list, shown, children }: { load: Load; view: string; list: string; shown: number; children: ReactNode }) {
+  const t = useT();
+  const done = load.phase === 'done';
+  const rows = useHeldRows(list, done && view === 'list' ? shown : null);
+  return (
+    <Hold load={load} className="tr-hold">
+      {done ? children : view === 'list' ? <HeldList rows={rows} ring={load.ring} /> : <Busy ring={load.ring} words={t.load.tasks} />}
+    </Hold>
+  );
+}
 
 /* Who takes a card this person may not take; nothing for one they take. */
 const lockOf = (card: ProposalDecision) => (card.canAnswer ? undefined : (card.decidedBy ?? CEO_DECIDES));
@@ -409,12 +422,12 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const sideId = useId();
   const { org } = useOrg();
   const { taskDepartments: places, failure: placesFailure } = useTaskDepartments();
-  const { tasks, failure, load: loadTasks } = useTasks({ status: 'all' });
+  const { tasks, failure, load: loadTasks, cancel: cancelTasks } = useTasks({ status: 'all' });
   const updateSaysIt = useUpdateSaysIt();
   const { goals: goalList, failure: goalsFailure, load: loadGoals } = useGoals();
   /* The work and the goals come with the shared indicator where they will stand, and say why when they do not. A server
      without goals yet answers that it has none. */
-  const tasksLoad = useLoad([{ data: tasks, failure, load: loadTasks }]);
+  const tasksLoad = useLoad([{ data: tasks, failure, load: loadTasks, cancel: cancelTasks }]);
   const goalsLoad = useLoad([goalsPart(goalList, goalsFailure, loadGoals)]);
   const { pipelines: pipelineList, failure: pipelinesFailure } = usePipelines();
   const [drawer, setDrawer] = useState(false);
@@ -658,7 +671,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
           : section.kind === 'goals' ? (
             <>
               {/* Until the goals come, the page says it is loading rather than that there are none. */}
-              {goalList ? <TrackerGoals goals={shownGoals} label={departmentId ? t.tracker.side.goals : t.tracker.side.allGoals} empty={t.tracker.noGoals} onOpenGoal={onOpenGoal} />
+              {goalList && goalsLoad.phase === 'done' ? <TrackerGoals goals={shownGoals} label={departmentId ? t.tracker.side.goals : t.tracker.side.allGoals} empty={t.tracker.noGoals} onOpenGoal={onOpenGoal} />
                 : <LoadState load={goalsLoad} />}
               {makeHere}
             </>
@@ -678,12 +691,11 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
               </div>
               {section.kind === 'failures' && <MachineAway machines={machinesAway} />}
               {makeHere}
-              {!tasks && <LoadState load={tasksLoad} />}
-              {tasks && (
-                view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} empty={empty} showSubtasks={showSubtasks} />
+              <HeldWork load={tasksLoad} view={view} list={`${sectionKey}|${view}|${JSON.stringify(chips)}`} shown={work.length}>
+                {view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} empty={empty} showSubtasks={showSubtasks} />
                 : view === 'board' ? <TrackerBoard tasks={work} all={all} pipeline={pipeline} cancelled={false} rows={rows} />
-                : <TrackerGraph forest={forest} crumbs={crumbs} top={section.kind === 'department' ? departmentName : t.tracker.graph.all} onCrumb={toCrumb} rows={rows} onOpenGoal={onOpenGoal} stages={pipeline ? { on: stages, onChange: setStageMode } : undefined} />
-              )}
+                : <TrackerGraph forest={forest} crumbs={crumbs} top={section.kind === 'department' ? departmentName : t.tracker.graph.all} onCrumb={toCrumb} rows={rows} onOpenGoal={onOpenGoal} stages={pipeline ? { on: stages, onChange: setStageMode } : undefined} />}
+              </HeldWork>
               {section.kind === 'mine' && waiting}
             </>
           )}

@@ -77,8 +77,8 @@ export const en = {
     loading: 'Loading…',
     /* Something under way that took longer than its one limit: it may still finish. */
     tooLong: 'Taking longer than usual',
-    /* What to do about a screen's data that takes longer than usual. */
-    stillComing: 'It may still come. Try again, or wait a little longer.',
+    /* Asks again for what failed or takes longer than usual. */
+    retry: 'Retry',
     somethingWrong: 'Something went wrong.',
     next: 'Next',
     back: 'Back',
@@ -96,6 +96,26 @@ export const en = {
     title: 'Title',
     atLeast10: 'At least 10 characters.',
     useAtLeast10: 'Use at least 10 characters.',
+  },
+  /* A screen's data while it comes (style book 1.5, section 4): the words beside the ring, and for a load that failed one
+     whole sentence of what failed and why, then what to do. */
+  load: {
+    tasks: 'Loading tasks…',
+    task: 'Loading the task…',
+    limits: 'Loading limits…',
+    failed: {
+      offline: 'Could not load: no connection to the server.',
+      timeout: 'Could not load: the server did not answer in 30 seconds.',
+      server: 'Could not load: something went wrong on the server.',
+      provider: 'Could not load the limits: the provider did not answer.',
+    },
+    hint: {
+      offline: 'Check the internet connection, then press "Retry".',
+      timeout: 'What is already on the screen stays. Press "Retry" to ask again.',
+      server: 'What is already on the screen stays. If "Retry" does not help, try again in a few minutes.',
+      provider: 'The rest of the card works. Press "Retry" to ask the provider again.',
+    },
+    slowHint: 'You can wait or press "Retry".',
   },
   app: {
     notResponding: 'Hornhoof is not responding',
