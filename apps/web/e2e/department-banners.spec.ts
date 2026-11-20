@@ -145,6 +145,58 @@ function shot(png: Buffer, name: string) {
   console.log(`SHOT ${name}.png sha256=${createHash('sha256').update(png).digest('hex')}`);
 }
 
+/* What of the Development card shows in the map's room under the header and the bars, its middle, and the middle of the
+   room. */
+async function cardPart(page: Page) {
+  const map = await boxOf(page, '.map'), under = await room(page), shown = await boxOf(page, '.dept:has-text("Development")');
+  const [x0, x1] = [Math.max(shown.x, map.x), Math.min(shown.x + shown.width, map.x + map.width)];
+  const [y0, y1] = [Math.max(shown.y, map.y, under.top), Math.min(shown.y + shown.height, map.y + map.height, under.bottom)];
+  return { shows: x1 - x0 > 8 && y1 - y0 > 8, x: (x0 + x1) / 2, y: (y0 + y1) / 2, card: shown, middle: { x: map.x + map.width / 2, y: (under.top + under.bottom) / 2 } };
+}
+async function shownPart(page: Page) {
+  const at = await cardPart(page);
+  expect(at.shows, "the department's card shows in the room under the bars").toBe(true);
+  return at;
+}
+/* Where a tall bar or the edge of the room leaves the card out of the room or at its edge, the person zooms out from the
+   middle of the room, as far as it takes. */
+async function zoomOutUntilShown(page: Page) {
+  for (let i = 0; i < 4 && !(await cardPart(page)).shows; i++) {
+    const { middle } = await cardPart(page);
+    await page.mouse.move(middle.x, middle.y);
+    await page.mouse.wheel(0, 240);
+    await still(page);
+  }
+}
+
+/* A zoom in on the part of a card that shows keeps the card in the room: the point under the pointer stays where it is.
+   Seen failing on #1639 in one run of three at 375 px (cyberpunk, and earlier matrix): a zoom in on the card at the edge of
+   the room left it out of the room. Suspected cause: the pan edges of #1596 (keptToEdges in ui/canvas.tsx), which keep a
+   zoomed view to the content's edges and so move it away from the pointer. Fixme until that defect's own task fixes it. */
+for (const skin of SKINS) {
+  test.fixme(`a zoom in on the part of a card that shows keeps the card in the room, 375px ${skin}`, async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: HEIGHT });
+    await page.addInitScript(skin => {
+      localStorage.setItem('hh-lang', 'en');
+      localStorage.setItem('hh-theme', skin);
+    }, skin);
+    await serveApi(page);
+    await page.goto('/');
+    await expect(page.locator('.dept', { hasText: 'Development' })).toBeVisible();
+    await still(page);
+    await zoomOutUntilShown(page);
+    for (let i = 0; i < 3; i++) {
+      const at = await shownPart(page);
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.wheel(0, -240);
+      await still(page);
+      await shownPart(page);
+      await page.mouse.wheel(0, 240);
+      await still(page);
+    }
+  });
+}
+
 for (const width of WIDTHS) for (const skin of SKINS) for (const bar of BARS) {
   test(`a department opened under ${bar.name} fills the room under the bars, and the map comes back as it was, ${width}px ${skin}`, async ({ page }, info) => {
     const errors: string[] = [];
@@ -164,40 +216,21 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const bar of BARS) {
 
     /* The person zooms the map in on the department's card and leaves it there: the view is theirs. A phone's map opens on
        its hub (#1597), where the card may show only in part at an edge, and the map runs under the header and the bars
-       (#1639), so they zoom and then click where the card shows in the room under them. */
-    const part = async () => {
-      const map = await boxOf(page, '.map'), under = await room(page), shown = await boxOf(page, '.dept:has-text("Development")');
-      const [x0, x1] = [Math.max(shown.x, map.x), Math.min(shown.x + shown.width, map.x + map.width)];
-      const [y0, y1] = [Math.max(shown.y, map.y, under.top), Math.min(shown.y + shown.height, map.y + map.height, under.bottom)];
-      return { shows: x1 - x0 > 8 && y1 - y0 > 8, x: (x0 + x1) / 2, y: (y0 + y1) / 2, card: shown, middle: { x: (map.x + map.x + map.width) / 2, y: (under.top + under.bottom) / 2 } };
-    };
-    const shownPart = async () => {
-      const at = await part();
-      expect(at.shows, "the department's card shows in the room under the bars").toBe(true);
-      return at;
-    };
-    /* Where a tall bar or the edge of the room leaves the card out of the room or at its edge, the person zooms out from the
-       middle of the room, as far as it takes. */
-    const untilShown = async () => {
-      for (let i = 0; i < 4 && !(await part()).shows; i++) {
-        const { middle } = await part();
-        await page.mouse.move(middle.x, middle.y);
-        await page.mouse.wheel(0, 240);
-        await still(page);
-      }
-    };
-    await untilShown();
-    const zoomAt = await shownPart();
+       (#1639), so they zoom and then click where the card shows in the room under them. Where the card is out of the room
+       or at its edge, before the zoom or after it, they zoom out until it shows; that a zoom in on the card may leave it
+       out of the room is its own check below. */
+    await zoomOutUntilShown(page);
+    const zoomAt = await shownPart(page);
     await page.mouse.move(zoomAt.x, zoomAt.y);
     await page.mouse.wheel(0, -240);
     await still(page);
-    await untilShown();
+    await zoomOutUntilShown(page);
     const left = await still(page);
     const mapBefore = await boxOf(page, '.map');
     expect(mapBefore.y, 'the map starts at the top of the window, under the header and any bar').toBeLessThanOrEqual(0.5);
 
     arm?.();
-    const clickAt = await shownPart();
+    const clickAt = await shownPart(page);
     await card.click({ position: { x: clickAt.x - clickAt.card.x, y: clickAt.y - clickAt.card.y } });
     const back = page.getByRole('button', { name: en.dept.back, exact: true });
     await expect(back).toBeVisible();
