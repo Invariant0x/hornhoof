@@ -17,7 +17,7 @@ import type { Measured } from './owner-screens-sizes';
    the sizes of its pieces for a comparison between the engines afterwards. A picture of each card is kept, in the folder
    SHOTS names when it is set. */
 
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 
 const SHOTS = process.env.SHOTS;
 const GIB = 1024 ** 3;

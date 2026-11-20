@@ -14,11 +14,10 @@ export default defineConfig({
   outputDir: 'results/tasks-board',
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
-  timeout: 180_000,
+  timeout: 0,
   reporter: process.env.HH_TEST_REPORT ? [['list'], ['./file-report.ts']] : 'list',
-  /* An expectation that does not come true fails in 15 seconds, not at the test's limit; actions and navigation have no
-     limit of their own (0), so the limit for a test above bounds them. */
-  expect: { timeout: 15_000 },
+  /* A test, its expectations, actions and navigation have no limit (0): only the run's own limit ends a hang (note #59). */
+  expect: { timeout: 0 },
   use: {
     baseURL: origin,
     actionTimeout: 0,

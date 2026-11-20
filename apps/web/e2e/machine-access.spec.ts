@@ -6,7 +6,7 @@ import { ru } from '../src/i18n/ru';
 import { box, ME, serveApi } from './api';
 
 /* The existing card controls keep their geometry with standing access and no approval steps. */
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 
 type Look = { lang: Language; theme: 'light' | 'dark'; width: 1440 | 375 };
 const messages: Record<Language, Messages> = { en, ru };

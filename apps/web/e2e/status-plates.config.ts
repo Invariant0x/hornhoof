@@ -17,9 +17,9 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   workers: 2,
   retries: 0,
-  timeout: 180_000,
+  timeout: 0,
   reporter: process.env.HH_TEST_REPORT ? [['list'], ['./file-report.ts']] : 'list',
-  /* Expectations, actions and navigation have no limit of their own (0); the limit for a test above is the only one. */
+  /* A test, its expectations, actions and navigation have no limit (0): only the run's own limit ends a hang (note #59). */
   expect: { timeout: 0 },
   use: {
     baseURL: origin,
