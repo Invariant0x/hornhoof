@@ -15,7 +15,7 @@ import { GOAL_CLASS, goalProgress } from './GoalPanel';
 import { Busy, Idle, MAX_HELD_ROWS } from './Loading';
 
 /* How a view opens a task's card and marks the open one. asksYou: an open question on a task is the person's to answer. */
-export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; questionAt?: (id: string) => string | undefined; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined; stageOwner?: (stage: PipelineStage) => string | undefined };
+export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; questionAt?: (id: string) => string | undefined; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined; stageOwner?: (stage: PipelineStage) => string | undefined; now?: (id: string) => boolean };
 
 /* A value of a row with its name, which shows beside it only where the row is too narrow for the names above the list. The
    pair keeps its own direction, so "Executor: Hana" reads in that order right to left, and so does the value alone, so the
@@ -42,6 +42,14 @@ function relationsOf(tasks: TaskLine[]): Relations {
     }
   }
   return needed;
+}
+
+/* A row's status dot: its status, and where an employee works on the task at this moment that too, said to a screen reader
+   and on the class the pulse is drawn on (#1629). */
+function StatusDot({ status, now }: { status: ReturnType<typeof humanStatus>; now: boolean }) {
+  const t = useT();
+  const label = t.tracker.groups[status];
+  return <span className={`tr-status-dot ${STATE_CLASS[status]}${now ? ' now' : ''}`} role="img" aria-label={now ? `${label}, ${t.tracker.nowDot}` : label} />;
 }
 
 function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tree: TaskTree; rows: Rows; relations: Relations; depth?: number; showSubtasks?: boolean }) {
@@ -72,7 +80,7 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
                 <span className="tr-caret" aria-hidden="true" />
               </button>
             )}
-            <span className={`tr-status-dot ${STATE_CLASS[status]}`} role="img" aria-label={t.tracker.groups[status]} />
+            <StatusDot status={status} now={rows.now?.(task.id) ?? false} />
             <span className="tr-line">
               <button className="linkish tr-title" type="button" dir="auto" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
               {tree.total > 0 && <span className="tr-branch-count" title={words.subtasks(tree.done, tree.total)}><TrackerIcon name="branch" />{tree.total}</span>}

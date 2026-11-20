@@ -2456,6 +2456,8 @@ export const en = {
       notStarted: 'Not started', working: 'In work', review: 'Review', waiting: 'Waits for a person', waitingYou: 'Waits for you', failure: 'Failure', stopped: 'Stopped',
       paused: 'Paused', done: 'Done', cancelled: 'Cancelled',
     },
+    /* Said after a task's status where an employee works on it at this moment. */
+    nowDot: 'working now',
     noGoals: 'No goals here yet.',
     noDates: 'No tasks here have a due date.',
     noTasks: 'No tasks here.',

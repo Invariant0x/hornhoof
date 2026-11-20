@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
+import { heardAgain } from '../src/live';
 import { Shell } from '../src/screens/Shell';
 import type { GoalView, Me, Org, Pipeline, ProposalDecision, TaskDetail, TaskLine, TaskLogLine, WaitingRequest } from '../src/types';
 import { decisions, DEV_ORG, ME, mockApi, TASK_DETAIL, TURN } from './api-mock';
@@ -1077,5 +1079,43 @@ describe('what waits says that nothing waits only once all of it came', () => {
 
   it('stands what waits apart from the list above it, by a gap of the style book', () => {
     expect(decl('.tr-main > :is(.tr-hold, .tr-found) + .waiting', 'margin-block-start')).toBe('24px');
+  });
+});
+
+/* #1629, Ivan's word: the tracker tells the tasks an employee works on at this moment from those only in work. Their status
+   dot carries the class Design draws the pulse on, and a screen reader hears it, in every shipped language. It follows
+   the company live, with no reload. */
+describe('the dot of work going on now', () => {
+  const dotOf = (list: HTMLElement, name: string) => rowOf(list, name).querySelector('.tr-status-dot')!;
+
+  it.each([
+    ['en', en.tracker.groups.working, 'working now'],
+    ['ru', ru.tracker.groups.working, 'работают сейчас'],
+  ])('marks only the task an employee works on now, and says so to a screen reader, in %s', async (language, inWork, now) => {
+    localStorage.setItem('hh-lang', language);
+    try {
+      shell('/tasks?show=company');
+      const list = await screen.findByRole('region', { name: (language === 'en' ? en : ru).tracker.views.list });
+      await waitFor(() => expect(dotOf(list, '#21 Take card payments')).toHaveClass('now'));
+      expect(dotOf(list, '#21 Take card payments')).toHaveAccessibleName(`${inWork}, ${now}`);
+      expect(dotOf(list, '#23 Refund button')).not.toHaveClass('now');
+      expect(dotOf(list, '#23 Refund button').getAttribute('aria-label')).not.toContain(now);
+    } finally {
+      localStorage.clear();
+    }
+  });
+
+  it('starts and stops as the company says who works on what, with no reload', async () => {
+    let org: Org = DEV_ORG;
+    shell('/tasks?show=company', { 'GET /api/org': () => [200, org] });
+    const list = await main();
+    await waitFor(() => expect(rowOf(list, '#21 Take card payments')).toBeInTheDocument());
+    expect(dotOf(list, '#21 Take card payments')).not.toHaveClass('now');
+    org = ORG;
+    await act(async () => { heardAgain(); });
+    await waitFor(() => expect(dotOf(list, '#21 Take card payments')).toHaveClass('now'));
+    org = DEV_ORG;
+    await act(async () => { heardAgain(); });
+    await waitFor(() => expect(dotOf(list, '#21 Take card payments')).not.toHaveClass('now'));
   });
 });
