@@ -191,8 +191,8 @@ declare module 'fastify' {
 }
 
 /* The few routes that answer without a session. Over the link they say nothing a stranger could use to tell which
-   company or which build is behind the name. The health answer is 503 while the app is off, so a check can tell it has
-   not started. */
+   company or which build is behind the name beyond what the page at / already shows. The health answer is 503 while the
+   app is off, so a check can tell it has not started. */
 function publicRoutes(app: FastifyInstance, { config, db, mode }: Ctx): void {
   const { version, commit, migrations } = config;
   const build = pageBuild(config.webDist);

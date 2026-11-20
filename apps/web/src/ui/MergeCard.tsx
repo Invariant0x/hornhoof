@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { useLanguage, useT } from '../i18n';
 import type { MergeConflict, MergeDecision, MergePicked } from '../types';
+import { WaitsForNote } from './DecidedBy';
 
 const when = (language: string, iso: string): string => new Date(iso).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -41,7 +42,8 @@ function Conflict({ conflict, busy, onPick }: { conflict: MergeConflict; busy: b
 /* What a merge left for the CEO alone: the rows about people, access, plans, machines and protected records that differ
    between this company and a database that came back, table by table, each with both values. He keeps what is here or
    takes what is there, one at a time or a whole table at once. */
-export function MergeCard({ merge, onChange, onFailure }: { merge: MergeDecision; onChange: () => void; onFailure: (err: unknown) => void }) {
+/* waitsFor: whom the card waits for, on a list of what waits for more people than one. */
+export function MergeCard({ merge, onChange, onFailure, waitsFor }: { merge: MergeDecision; onChange: () => void; onFailure: (err: unknown) => void; waitsFor?: string }) {
   const t = useT();
   const { language } = useLanguage();
   const [conflicts, setConflicts] = useState<MergeConflict[] | null>(null);
@@ -75,6 +77,7 @@ export function MergeCard({ merge, onChange, onFailure }: { merge: MergeDecision
   return (
     <section className="t-card" aria-label={title}>
       <h4>{title}</h4>
+      <WaitsForNote text={waitsFor} />
       <p className="t-card-brief">{t.merge.needsYou(conflicts?.length ?? merge.open)}</p>
       {left.length > 0 && (
         /* The server writes why in English; another language says that it happened. */

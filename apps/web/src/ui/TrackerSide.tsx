@@ -25,7 +25,8 @@ type Props = {
   pipelines: Pipeline[];
   goals: GoalView[];
   tasks: TaskLine[];
-  counts: { waits: number; failures: number; mine: number; working: number };
+  /* people: what waits for people in the company, counted only for those who see the whole company. */
+  counts: { waits: number; people?: number; failures: number; mine: number; working: number };
   create?: Create;
   open: boolean;
   onClose: () => void;
@@ -202,6 +203,13 @@ function DepartmentItem({ d, org, place, go, onOpenTask, onOpenAgent, pipelines,
   );
 }
 
+/* What waits for people in the company, a row only for those who see the whole company, who have its count. */
+function PeopleWaitsItem({ count, on, go }: { count?: number; on: boolean; go: (next: TrackerPlace) => void }) {
+  const t = useT();
+  if (count === undefined) return null;
+  return <li><Item icon={<TrackerIcon name="waits" />} on={on} count={count} tone="attention" onClick={() => go({ show: 'people' })}>{t.tracker.peopleWaits.title}</Item></li>;
+}
+
 /* The left panel of mockup 10: what waits for the person, their tasks and the work going on now; the people who answer
    for the work; the departments. What the product needs besides, the goals, due dates, failures, the orchestrator's own
    work and the turns, follows in the same rows. A phone opens it as a drawer. */
@@ -234,6 +242,7 @@ export function TrackerSide({ id, place, onPlace, onOpenTask, onOpenAgent, org, 
       </div>
       <ul className="tr-items">
         <li><Item icon={<TrackerIcon name="waits" />} on={place.show === 'waits'} count={counts.waits} tone="attention" onClick={() => go({ show: 'waits', ...person })}>{words.waits}</Item></li>
+        <PeopleWaitsItem count={counts.people} on={place.show === 'people'} go={go} />
         <li><Item icon={<TrackerIcon name="mine" />} on={mine} count={counts.mine} onClick={() => go({ ...person, view: 'list' })}>{words.mine}</Item></li>
         <li><Item icon={<span className="tr-live" aria-hidden="true" />} on={place.show === 'working'} count={counts.working} tone="working" onClick={() => go({ show: 'working', ...person, view: 'list' })}>{words.working}</Item></li>
       </ul>

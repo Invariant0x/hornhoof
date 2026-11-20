@@ -20,6 +20,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - The map runs to the bottom of the screen, with the version as small muted text in its bottom end corner, clear of its buttons and of the bars along a phone's bottom; other screens keep the version in the row below them.
 
+## [0.39.2] - 2026-11-19
+
+### Fixed
+
+- A department opened while a banner shows over the map now fills the screen instead of splitting it with the map.
+
 ## [0.39.1] - 2026-11-19
 
 ### Fixed
