@@ -19,7 +19,7 @@ const HANA = { id: 'h1', name: 'Hana', kind: 'head' as const, role: { en: 'Head 
 const department = (d: { id: string; name: string }) => ({
   id: d.id, name: d.name, templateKey: null, roleCode: 'CTO', about: '', agents: { total: 1, working: 1 }, products: [], teams: [], people: [], employees: [], roles: [],
 });
-const ORG: Org = {
+export const ORG: Org = {
   company: ME.company,
   orchestrator: { id: 'a1', name: 'Orchestrator', model: 'claude-opus-5-5', effort: null, subscription: null, context: null, program: null, alarm: null, retry: null, failure: null },
   agents: { total: 3, working: 3 }, people: [], departments: [DEV, SALES].map(department),

@@ -1096,7 +1096,7 @@ describe('what waits says that nothing waits only once all of it came', () => {
 describe('a section of the tracker that holds nothing', () => {
   /* A done task of another department: the company has work, and none of it is in the sections looked at. */
   const ELSEWHERE = line({ id: 't30', number: 30, title: 'Plan the launch', status: 'done', department: { id: 'd9', name: 'Marketing' }, responsible: MARIA, assignee: null });
-  const NONE = {
+  const NONE: Record<string, [number, unknown]> = {
     'GET /api/tasks?status=all': [200, { tasks: [ELSEWHERE] }],
     'GET /api/goals': [200, { goals: [] }],
     'GET /api/turns': [200, { turns: [] }],
@@ -1148,7 +1148,7 @@ describe('a section of the tracker that holds nothing', () => {
       const block = await blockOf(words.empty.company);
       expect(block).toHaveClass('first');
       expect(block.querySelector('svg.load-mark')).not.toBeNull();
-      expect(block).toHaveTextContent(words.emptyHint.company);
+      expect(block).toHaveTextContent(words.emptyHint.company!);
       expect(within(block).getByRole('button', { name: words.empty.create })).toBeInTheDocument();
     },
   );
@@ -1222,7 +1222,7 @@ describe('a section of the tracker that holds nothing', () => {
     ['the kept cards', 'Waiting for you', '/tasks?show=waits', 'GET /api/wait-cards', words.empty.waits],
     ['the decisions', 'Waiting for people', '/tasks?show=people', 'GET /api/requests', words.empty.people],
   ])('says nothing while %s, a source of %s, are held back', async (_source, _section, path, source, fact) => {
-    const routes: Record<string, [number, unknown]> = { 'GET /api/org': [200, ORG], 'GET /api/requests': [200, decisions([])], ...(NONE as Record<string, [number, unknown]>) };
+    const routes: Record<string, [number, unknown]> = { 'GET /api/org': [200, ORG], 'GET /api/requests': [200, decisions([])], ...NONE };
     const hold = holding(source, routes);
     shell(path, hold.routes);
     await settle();

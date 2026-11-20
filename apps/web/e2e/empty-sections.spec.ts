@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { DICTIONARIES } from '../src/i18n';
-import { boxesOf, ELSEWHERE, expectSameBoxes, FAIL_MS, LONGEST, NO_DECISIONS, openTracker, RING_DELAY_MS, RING_MIN_MS, SHORTEST, shownEmpty, SLOW_MS, type Look } from './empty-sections';
+import { boxesOf, ELSEWHERE, expectSameBoxes, FAIL_MS, HEADED_ORG, LONGEST, NO_DECISIONS, openTracker, RING_DELAY_MS, RING_MIN_MS, SHORTEST, shownEmpty, SLOW_MS, type Look } from './empty-sections';
 import { TASKS } from './tasks-board/api';
 
 /* Ivan's word (20.11, #1638): on Mine, "No open tasks to answer for." stood right under the filters, and loading showed as a
@@ -102,8 +102,11 @@ for (const look of LOOKS) {
       const held = await openTracker(page, '/tasks', look, { ...EMPTY, '/api/tasks': { tasks: TASKS } }, ['/api/tasks']);
       held['/api/tasks']!.release();
       await expect(page.locator('.tr-list:not(.tr-held) .tr-row').first()).toBeVisible();
+      const asked = held['/api/tasks']!.asked();
       held['/api/tasks']!.again();
       await page.reload({ waitUntil: 'domcontentloaded' });
+      /* The clock moves only once the page asked again, so the ring's timer is set by then. */
+      await expect.poll(held['/api/tasks']!.asked).toBeGreaterThan(asked);
       await page.clock.runFor(RING_DELAY_MS);
       await expect(page.locator('.tr-held .spinner')).toBeVisible();
       const waits = page.locator('section.waiting > h2');
@@ -128,7 +131,8 @@ for (const look of LOOKS) {
     });
 
     test('a company with no task at all opens on its first view under the Hornhoof mark, in the middle', async ({ page }) => {
-      await openTracker(page, '/tasks', look, { ...EMPTY, '/api/tasks': { tasks: [] } });
+      /* Development has a head, so the person may make the company's first task. */
+      await openTracker(page, '/tasks', look, { ...EMPTY, '/api/tasks': { tasks: [] }, '/api/org': HEADED_ORG });
       const block = shownEmpty(page.locator('.tr-hold')).first();
       await expect(block).toHaveClass(/\bfirst\b/);
       await expect(block.getByText(t.tracker.empty.company, { exact: true })).toBeVisible();

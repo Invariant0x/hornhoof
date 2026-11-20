@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { DICTIONARIES, LANGUAGES, type Language, type Messages } from '../src/i18n';
-import { SALES, serveTasksBoard, TASKS } from './tasks-board/api';
+import type { Employee, Org } from '../src/types';
+import { DEV, ORG, SALES, serveTasksBoard, TASKS } from './tasks-board/api';
 
 /* What the browser checks of the tracker's empty sections (#1638, Design #1633) share with the pictures made for Design. */
 
@@ -22,6 +23,13 @@ export type Look = { lang: Language; width: number; theme?: string; dir?: 'rtl' 
    and the rest hold nothing while the company is not empty. */
 export const ELSEWHERE = TASKS.filter(task => task.department?.id === SALES.id);
 export const NO_DECISIONS = { requests: [], proposals: [], machineAccess: [], counts: { byPerson: {}, byAgent: {}, total: 0 } };
+
+/* The company with a head in Development, who takes its tasks, so the person may make one there. */
+const HEAD: Employee = {
+  id: 'h1', name: 'Hana', roleId: null, title: { en: 'Head of development', ru: 'Глава разработки' }, kind: 'head', model: '', modelName: null, provider: null, effort: null,
+  state: 'working', status: 'idle', on: true, timer: null, task: null, context: null, program: null, alarm: null, retry: null, failure: null,
+};
+export const HEADED_ORG: Org = { ...ORG, departments: ORG.departments.map(d => (d.id === DEV.id ? { ...d, employees: [HEAD] } : d)) };
 
 const pathOf = (url: URL | string) => new URL(url.toString()).pathname;
 

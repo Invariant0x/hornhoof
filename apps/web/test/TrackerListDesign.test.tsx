@@ -23,7 +23,7 @@ function task(over: Partial<TaskLine> = {}): TaskLine {
 
 function list(tasks: TaskLine[]) {
   const rows = { selected: null, onOpenTask: vi.fn() };
-  render(<LanguageProvider><TrackerList tasks={tasks} all={tasks} rows={rows} empty="Empty" /></LanguageProvider>);
+  render(<LanguageProvider><TrackerList tasks={tasks} all={tasks} rows={rows} /></LanguageProvider>);
   return rows;
 }
 
@@ -31,7 +31,7 @@ it('keeps the executor name and program color alongside a generalist mark and ma
   const oneShot = { review: { fanOut: 2, judge: null } };
   const example = task({ echelons: { ...taskRoute(), stage: 'review', phase: 'active', oneShot } });
   const rows = { selected: null, onOpenTask: vi.fn(), programOf: () => 'claude' as const, turnkeyOf: (id: string) => id === executor.id };
-  render(<LanguageProvider><TrackerList tasks={[example]} all={[example]} rows={rows} empty="Empty" /></LanguageProvider>);
+  render(<LanguageProvider><TrackerList tasks={[example]} all={[example]} rows={rows} /></LanguageProvider>);
   const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
   const mark = within(row).getByRole('img', { name: executor.name });
   expect(mark).toHaveAttribute('data-program', 'claude');
@@ -103,7 +103,7 @@ it('uses status shapes and stable identity marks, and leaves priority to the car
     task({ id: 'open', number: 271, title: 'Draft', status: 'open' }),
     task({ id: 'wait', number: 272, title: 'Proof', status: 'waiting', time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind: 'person', who: { kind: 'person', ...responsible }, reason: null, since }] } }),
   ];
-  render(<LanguageProvider><TrackerList tasks={tasks} all={tasks} rows={rows} empty="Empty" /></LanguageProvider>);
+  render(<LanguageProvider><TrackerList tasks={tasks} all={tasks} rows={rows} /></LanguageProvider>);
   const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
   expect(within(row).getByRole('img', { name: 'Leo Park' })).toHaveAttribute('data-program', 'claude');
   expect(within(row).getByRole('img', { name: 'Maya' })).toHaveClass('tr-avatar');
@@ -120,7 +120,7 @@ it('opens subtasks as a tree under the parent title and keeps child facts in the
   const child = task({ id: 'child', parentId: 'plan', number: 268, title: 'Pick the recipients', status: 'open', priority: 'low' });
   const tasks = [task(), child];
   const rows = { selected: null, onOpenTask: vi.fn() };
-  const view = (showSubtasks: boolean) => <LanguageProvider><TrackerList tasks={tasks} all={tasks} rows={rows} empty="Empty" showSubtasks={showSubtasks} /></LanguageProvider>;
+  const view = (showSubtasks: boolean) => <LanguageProvider><TrackerList tasks={tasks} all={tasks} rows={rows} showSubtasks={showSubtasks} /></LanguageProvider>;
   const { rerender } = render(view(true));
   const parent = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
   const toggle = within(parent).getByRole('button', { name: 'Subtasks: 0 of 1 done' });
@@ -218,7 +218,7 @@ it('draws the rows, rings, pills and chips at the mockup sizes', () => {
 it.each([null, 'plan'])('shares the mockup column proportions with selection %s', selected => {
   const example = task();
   const rows = { selected, onOpenTask: vi.fn() };
-  render(<LanguageProvider><TrackerList tasks={[example]} all={[example]} rows={rows} empty="Empty" /></LanguageProvider>);
+  render(<LanguageProvider><TrackerList tasks={[example]} all={[example]} rows={rows} /></LanguageProvider>);
   const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
   const desktop = 'tr-list (width > 640px)';
   const people = '.tr-cell.tr-cell-person';
