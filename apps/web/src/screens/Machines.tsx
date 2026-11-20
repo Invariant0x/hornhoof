@@ -861,7 +861,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const openIds = openCommandIds({ ...addCommands, ...coreCommands }, now);
   const rows = machineRows(machines ?? [], builtin, subs, t.machines.builtin);
   const columns = machineColumns(t, language, priority);
-  const search: TableSearch<MachineRow> = { placeholder: t.tables.searchMachines, short: t.tables.searchMachinesShort, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount };
+  const search: TableSearch<MachineRow> = { placeholder: t.tables.searchMachines, short: t.tables.searchMachinesShort, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount, room: 'machines' };
   if (unavailableFailure(loadFailure) || unavailableFailure(failure) || (selected && machines && !rows.some(row => row.id === selected))) return <RouteUnavailable onHome={onHome} />;
 
   return (

@@ -957,6 +957,8 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 /* A held table spaces its search, count line and table as the screen around it does, so they stand where they will. */
 .held-table, .held-table > .load-in { gap: inherit; }
 .held-table > .load-in { display: grid; }
+/* The filter buttons' row of a held table keeps the size it took last in this tab, if it showed (TableTools, Design #1667). */
+.held-table .tools-r2 { min-block-size: var(--tools-room, 0px); }
 .arrive { animation: arrive .12s ease-out both; }
 @keyframes arrive { from { opacity: 0; } }
 .load-fail { display: grid; gap: 8px; max-inline-size: 60ch; padding: 12px 14px; border-inline-start: 3px solid var(--pink); background: var(--surface2); color: var(--ink); font-family: var(--f-body); font-size: 14px; text-align: start; }

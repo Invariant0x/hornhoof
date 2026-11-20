@@ -460,6 +460,29 @@ test.describe('the people and the machines while they come', () => {
     expect(await rows.count()).toBeGreaterThan(1);
     await expectKeptRoom(page, rows.first(), [room.locator('table.dt thead'), rows.nth(1), page.locator('section.machines .pool')]);
   });
+
+  /* Design #1667 (style book 1.7, "last known size"): the filter buttons count the machines, so the first load of the
+     screen cannot know them and the table moves down once when they come. Once shown in this tab, their row keeps its room
+     on the next load, and nothing moves when they come again. */
+  test('machines: hold the room of their filter buttons on the next load in this tab, once they showed them', async ({ page }) => {
+    const both: Screen = { ...screenOf('machines'), answer: route => route.fulfill({ json: { machines: [BOX, { ...BOX, id: 'm2', hostname: 'lab-box', online: false }], copies: COPIES } }) };
+    const head = page.locator('section.machines table.dt thead');
+    const hold = await openHeld(page, both, EN);
+    hold.release();
+    await expect(page.locator('section.machines .tools-r2 .fgroup').first()).toBeVisible();
+    const shown = await boxesOf([head]);
+    hold.failing(false);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.clock.runFor(RING_DELAY_MS);
+    await expect(page.locator('section.machines .load-hold table.dt thead')).toBeVisible();
+    expectSameBoxes(await boxesOf([head]), shown);
+    const answered = hold.answered();
+    hold.release();
+    await answered;
+    await page.clock.runFor(RING_MIN_MS);
+    await expect(page.locator('section.machines .tools-r2 .fgroup').first()).toBeVisible();
+    expectSameBoxes(await boxesOf([head]), shown);
+  });
 });
 
 /* The pictures for the check against the style book: each state of a load of each screen, on a phone and a desktop, in both
