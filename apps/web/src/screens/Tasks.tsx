@@ -150,15 +150,19 @@ function workParts(place: TrackerPlace, kind: ListKind, goals: LoadPart, org: Lo
   return [place.view === 'graph' || place.goal ? goals : DONE_PART, kind === 'working' ? org : DONE_PART];
 }
 
-type Empty = { kind: ListKind; view: string; graphEmpty: string; firstView: boolean; offer?: EmptyAction };
+type Empty = { kind: ListKind; view: string; graphEmpty: string; firstView: boolean; other: boolean; offer?: EmptyAction };
+
+/* Which words an empty place of work takes: the board's for the company's work in Board view, and for another person's Mine
+   those of what a person answers for, as it is not the viewer's own. */
+const emptyKindOf = (kind: ListKind, view: string, other: boolean): EmptyKind => (view === 'board' && kind === 'company' ? 'board' : kind === 'mine' && other ? 'responsible' : kind);
 
 /* What the empty block of a place's work says: for a company with no tasks at all, its first view under the Hornhoof mark;
    for an empty graph, that it has nothing to draw; else the fact of its section, its hint where it has one, and the one thing
    to do where a new task belongs to it. */
-function emptyWork(t: ReturnType<typeof useT>, { kind, view, graphEmpty, firstView, offer }: Empty): ReactNode {
+function emptyWork(t: ReturnType<typeof useT>, { kind, view, graphEmpty, firstView, other, offer }: Empty): ReactNode {
   if (firstView) return <EmptyState form="first" text={t.tracker.empty.company} hint={t.tracker.emptyHint.company} action={offer} />;
   if (view === 'graph') return <EmptyState icon="branch" text={graphEmpty} />;
-  const shown: EmptyKind = view === 'board' && kind === 'company' ? 'board' : kind;
+  const shown = emptyKindOf(kind, view, other);
   return <EmptyState icon={EMPTY_ICON[shown]} text={t.tracker.empty[shown]} hint={t.tracker.emptyHint[shown]} action={MAKES_TASKS.has(shown) ? offer : undefined} />;
 }
 
@@ -707,7 +711,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const { forest, crumbs } = view === 'graph' ? graph() : { forest: [], crumbs: [] };
   /* The one thing to do about an empty list, where the person may: make a task here, in the form the + beside Tasks opens. */
   const offer = offerTask(can.kinds, t.tracker.empty.create, () => setMaking('task'));
-  const empty = emptyWork(t, { kind: section.kind, view, graphEmpty: t.tracker.graph.empty, firstView: noTaskYet(company, tasks), offer });
+  const empty = emptyWork(t, { kind: section.kind, view, graphEmpty: t.tracker.graph.empty, firstView: noTaskYet(company, tasks), other, offer });
 
   return (
     <div className="tracker fit">

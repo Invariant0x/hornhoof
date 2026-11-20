@@ -1153,6 +1153,12 @@ describe('a section of the tracker that holds nothing', () => {
     },
   );
 
+  it("says of another person's Mine that the person answers for no open task, with nothing to do", async () => {
+    shell('/tasks?person=p2', NONE);
+    const block = await blockOf(words.empty.responsible);
+    expect(within(block).queryByRole('button')).toBeNull();
+  });
+
   it('says the board has no tasks on the company board of one who does not see the whole company', async () => {
     shell('/tasks?show=company&view=board', NO_TASKS, listed('p1', 'Ivan'));
     const block = await blockOf(words.empty.board);
