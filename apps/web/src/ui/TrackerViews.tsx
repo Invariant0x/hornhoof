@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { useLanguage, useT } from '../i18n';
 import { humanStatus, isClosed, taskWaits, type Asks, type TaskTree } from '../task-tree';
-import { boardColumns, doerOf, layoutTree, listGroups, NODE, type BoardColumn, type Crumb, type GraphNode, type ListGroup, type Placed } from '../tracker';
+import { boardColumns, doerOf, layoutTree, listGroups, NODE, type BoardColumn, type Crumb, type GraphNode, type Layout, type ListGroup, type Placed } from '../tracker';
 import type { GoalView, Pipeline, PipelineStage, TaskLine } from '../types';
 import { CANVAS_ZOOM_LIMITS, usePageDirection, usePanZoom, ZoomBar } from './canvas';
 import { dueText } from './tracker-words';
@@ -474,6 +474,22 @@ function waitWire(a: Placed, b: Placed, lane: number, rtl: boolean): string {
   return `M${outer(a, rtl)} ${y1}H${lane}V${y2}H${rtl ? b.x - 2 : b.x + NODE.w + 2}`;
 }
 
+/* A wait's word by the waiting node towards the lane, the arrow pointing to the lane. Right to left it ends by the node: laid
+   out left to right from that end, so no engine runs it back over the node, while its words keep their own order. */
+function WaitWord({ from, y, rtl }: { from: Placed; y: number; rtl: boolean }) {
+  const words = useT().tracker.graph.waitsFor;
+  return rtl
+    ? <text x={from.x - 6} y={y} textAnchor="end" direction="ltr">{`← ${words}`}</text>
+    : <text x={from.x + NODE.w + 6} y={y}>{`${words} →`}</text>;
+}
+
+/* Where the world stands across a canvas w wide for a tree drawn at scale k, its box from left as wide as width: the box in
+   the middle, or 12 px in from the canvas's start when it is wider; right to left, the mirror of that. */
+function across(w: number, k: number, { width, left }: Pick<Layout, 'width' | 'left'>, rtl: boolean): number {
+  const start = Math.max(12, (w - width * k) / 2);
+  return rtl ? w - start - (left + width) * k : start;
+}
+
 /* The least scale a tree opens at, where the words of its nodes still read. */
 const READABLE = 0.6;
 
@@ -518,8 +534,7 @@ function Canvas({ forest, rows, onOpenGoal }: { forest: GraphNode[]; rows: Rows;
     const whole = w && h && layout.width && layout.height ? Math.max(CANVAS_ZOOM_LIMITS.min, Math.min(1, (w - 24) / layout.width, (h - 24) / layout.height)) : 1;
     const k = all ? whole : Math.max(whole, Math.min(1, READABLE));
     const y = k === whole ? 12 : Math.min(12, h / 2 - rootMiddle * k);
-    const start = Math.max(12, (w - layout.width * k) / 2);
-    setView({ k, x: rtl ? w - start - (layout.left + layout.width) * k : start, y, smooth: false });
+    setView({ k, x: across(w, k, { width: layout.width, left: layout.left }, rtl), y, smooth: false });
   }, [layout.width, layout.height, layout.left, rootMiddle, rtl, setView]);
   const fit = useCallback(() => place(true), [place]);
   /* New work on the tree places it again, until the person moved or zoomed it. */
@@ -547,16 +562,10 @@ function Canvas({ forest, rows, onOpenGoal }: { forest: GraphNode[]; rows: Rows;
               {layout.parts.map(p => <path key={`${p.from}-${p.to}`} className="part" d={wire(at.get(p.from)!, at.get(p.to)!, rtl)} />)}
               {layout.waits.map(w => {
                 const [a, b] = [at.get(w.from)!, at.get(w.to)!];
-                const y = Math.round(a.y + a.h / 2 + 6) - 5;
                 return (
                   <g key={`${w.from}~${w.to}`} className="wait">
                     <path d={waitWire(a, b, w.lane, rtl)} markerEnd={`url(#${arrow})`} />
-                    {/* Its word stands by the waiting node towards the lane, the arrow pointing to the lane. Right to left it
-                        ends by the node: laid out left to right from that end, so no engine runs it back over the node, while
-                        its words keep their own order. */}
-                    {rtl
-                      ? <text x={a.x - 6} y={y} textAnchor="end" direction="ltr">{`← ${t.tracker.graph.waitsFor}`}</text>
-                      : <text x={a.x + NODE.w + 6} y={y}>{`${t.tracker.graph.waitsFor} →`}</text>}
+                    <WaitWord from={a} y={Math.round(a.y + a.h / 2 + 6) - 5} rtl={rtl} />
                   </g>
                 );
               })}

@@ -241,6 +241,23 @@ export type Layout = {
   width: number; height: number; left: number; drawn: number;
 };
 
+/* Where the lanes of count waits end past a tree that ends at right, the word of the last one with them; none, none. */
+const lanesEnd = (right: number, count: number) => (count ? right + LANE.first + count * LANE.step + LANE.room : 0);
+
+/* A drawing seen from the other side: each node and lane as far from its right as it stood from its left, the tree's box with
+   them. */
+function mirrored(layout: Layout): Layout {
+  const { drawn } = layout;
+  return {
+    ...layout,
+    nodes: layout.nodes.map(p => ({ ...p, x: drawn - p.x - NODE.w })),
+    waits: layout.waits.map(wait => ({ ...wait, lane: drawn - wait.lane })),
+    left: drawn - layout.width,
+  };
+}
+/* A drawing laid out left to right, turned to the page's direction. */
+const TURNED: Record<'ltr' | 'rtl', (layout: Layout) => Layout> = { ltr: layout => layout, rtl: mirrored };
+
 /* Each level one step further along, each leaf on a row of its own, a node in the middle of what is under it and never over
    the node above it in its level. heightOf: the height a node's words take on the page, once measured; a node is never
    lower than NODE.h. A dashed line goes from a task to each task of the tree it waits for, along a lane of its own past the
@@ -274,14 +291,8 @@ export function layoutTree(forest: GraphNode[], heightOf: (id: string) => number
     .map((wait, i) => ({ ...wait, lane: right + LANE.first + i * LANE.step }));
   nodes.sort((a, b) => a.depth - b.depth || a.y - b.y);
   const width = right + NODE.pad;
-  const drawn = Math.max(width, waits.length ? right + LANE.first + waits.length * LANE.step + LANE.room : 0);
   const height = Math.max(0, ...nodes.map(p => p.y + p.h)) + NODE.pad;
-  if (dir === 'ltr') return { nodes, parts, waits, width, height, left: 0, drawn };
-  return {
-    nodes: nodes.map(p => ({ ...p, x: drawn - p.x - NODE.w })), parts,
-    waits: waits.map(wait => ({ ...wait, lane: drawn - wait.lane })),
-    width, height, left: drawn - width, drawn,
-  };
+  return TURNED[dir]({ nodes, parts, waits, width, height, left: 0, drawn: Math.max(width, lanesEnd(right, waits.length)) });
 }
 
 /* The way back up from where the graph grows: the goals above, the tasks above, and the root itself. */
