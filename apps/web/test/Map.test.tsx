@@ -472,7 +472,8 @@ describe('Map', () => {
     expect(marketing.style.top).toBe('1400px');
     const transform = () => container.querySelector<HTMLElement>('.world')!.style.transform;
     const first = transform();
-    expect(Number(/scale\(([^)]+)\)/.exec(first)![1])).toBeLessThan(1);
+    /* A company that fits whole opens no larger than it is drawn (#1597); this one, with a block kept low, opens below 100%. */
+    expect(Number(/scale\(([^)]+)\)/.exec(first)![1]), 'the map opens no larger than it is drawn').toBeLessThan(1);
     await act(async () => {});
     expect(transform()).toBe(first);
   });

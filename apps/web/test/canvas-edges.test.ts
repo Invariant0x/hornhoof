@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FLOAT_GAP, SIDE_GAP, freeRoom, keptToEdges, scrollRange, type Edges, type View } from '../src/ui/canvas';
-import { MAP_READABLE_K, mapView } from '../src/screens/Map';
+import { MAP_READABLE_K, PHONE_MAP_READABLE_K, mapView } from '../src/screens/Map';
 import { rulesFor } from './css';
 
 /* The Head of Design's rule for #1539 (19.11), for #1554: a canvas that does not fit opens readable and scrolls, and the
@@ -68,16 +68,29 @@ describe('freeRoom', () => {
 describe('mapView', () => {
   const room = { x0: 32, x1: 343, y0: 76, y1: 686 };
   const company = { x0: 100, y0: 200, x1: 1300, y1: 1000 };
+  /* The hub's middle across: the company has more departments on one side of it than on the other. */
+  const hub = 400;
 
+  /* Design's decision 2 on #1596, for #1597: a map that does not fit opens with the hub itself in the middle across, not
+     the middle of the whole layout. */
   it('opens a map too wide for a phone with its card names 11 px tall, centred across on the hub, and fits it with Show everything', () => {
-    const opened = mapView(room, company, false);
+    const opened = mapView(room, company, false, MAP_READABLE_K, hub);
     expect(opened.k).toBe(MAP_READABLE_K);
     expect(20 * opened.k).toBeCloseTo(11, 10);
-    expect(opened.x + ((company.x0 + company.x1) / 2) * opened.k).toBeCloseTo((room.x0 + room.x1) / 2, 10);
+    expect(opened.x + hub * opened.k).toBeCloseTo((room.x0 + room.x1) / 2, 10);
     expect(opened.y + company.y0 * opened.k).toBeCloseTo(room.y0 + (610 - 800 * opened.k) / 2, 10);
-    const whole = mapView(room, company, true);
+    const whole = mapView(room, company, true, MAP_READABLE_K, hub);
     expect(whole.k).toBeCloseTo(311 / 1200, 10);
     expect(whole.x + company.x0 * whole.k).toBeCloseTo(room.x0, 10);
+  });
+
+  /* Design's note on #1596, for #1597: on a phone the people chips' names open as readable as the cards' names must. */
+  it('opens a phone\'s map with its people chip names 11 px tall and its card names larger, centred across on the hub', () => {
+    const opened = mapView(room, company, false, PHONE_MAP_READABLE_K, hub);
+    expect(Number(rulesFor('.chip b')[0]!.decls['font-size']!.replace('px', '')) * opened.k).toBe(11);
+    expect(20 * opened.k).toBeGreaterThan(11);
+    expect(opened.x + hub * opened.k).toBeCloseTo((room.x0 + room.x1) / 2, 10);
+    expect(mapView(room, company, true, PHONE_MAP_READABLE_K, hub)).toEqual(mapView(room, company, true));
   });
 
   it('opens a map taller than the room at its top', () => {
@@ -86,10 +99,34 @@ describe('mapView', () => {
     expect(opened.y + tall.y0 * opened.k).toBe(room.y0);
   });
 
+  /* The head of Development's word on #1597, until Design says otherwise: a map that fits whole opens fitted, centred on the
+     whole layout, wherever its hub stands. */
   it('opens a map that fits readable whole, as Show everything shows it', () => {
     const wide = { x0: 32, x1: 1408, y0: 76, y1: 828 };
-    expect(mapView(wide, company, false)).toEqual(mapView(wide, company, true));
-    expect(mapView(wide, company, false).k).toBeGreaterThan(MAP_READABLE_K);
+    expect(mapView(wide, company, false, MAP_READABLE_K, hub)).toEqual(mapView(wide, company, true));
+    expect(mapView(wide, company, false, MAP_READABLE_K, hub).k).toBeGreaterThan(MAP_READABLE_K);
+  });
+
+  /* Design on #1597: a map fits only at a size where its smallest name is 11 px tall or more. One that fits only smaller
+     opens readable from the hub. */
+  it('opens a map that fits only below the readable size from the hub, readable', () => {
+    const mid = { x0: 0, y0: 0, x1: 500, y1: 400 }, at = 150;
+    const wide = mapView(room, mid, false, MAP_READABLE_K, at);
+    expect(wide).toEqual(mapView(room, mid, true));
+    expect(wide.k).toBeCloseTo(311 / 500, 10);
+    const phone = mapView(room, mid, false, PHONE_MAP_READABLE_K, at);
+    expect(phone.k).toBe(PHONE_MAP_READABLE_K);
+    expect(phone.x + at * phone.k).toBeCloseTo((room.x0 + room.x1) / 2, 10);
+  });
+
+  /* Design on #1597: a map that fits is never drawn larger than it is. */
+  it('opens a small map and shows it whole at 100% at most', () => {
+    const small = { x0: 0, y0: 0, x1: 200, y1: 150 };
+    for (const whole of [false, true]) {
+      const v = mapView(room, small, whole, PHONE_MAP_READABLE_K, 40);
+      expect(v.k).toBe(1);
+      expect(v.x + 100).toBeCloseTo((room.x0 + room.x1) / 2, 10);
+    }
   });
 });
 

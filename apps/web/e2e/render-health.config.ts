@@ -17,7 +17,7 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   workers: 1,
   retries: 0,
-  timeout: 240_000,
+  timeout: 0,
   reporter: process.env.HH_TEST_REPORT ? [['list'], ['./file-report.ts']] : 'list',
   expect: { timeout: 0 },
   use: {

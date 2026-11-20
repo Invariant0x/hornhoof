@@ -146,8 +146,8 @@ act_on_nodes() {
 # image, so now and again the installer of this updater's own build looks at the nodes alone: each on another image than
 # the one .env names goes to it once it is free, and the others are left as they are.
 # The installer waits for each such node's work to end, however long that takes, so it runs beside this loop, one look
-# at a time, and says what it did in nodes.log of the control folder. A run that looks once waits for it: its
-# container goes when it ends, and an installer cut off between removing a node and starting it would lose the node.
+# at a time, and says what it did in nodes.log of the control folder once it ends. A run that looks once waits for it:
+# its container goes when it ends, and an installer cut off between removing a node and starting it would lose the node.
 worker_nodes() {
   local now
   now=$(date +%s)
@@ -156,10 +156,18 @@ worker_nodes() {
   if nodes_look_runs; then return 0; fi
   [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ] && [ -f "$INSTALLER" ] || return 0
   own "$NODE_IMAGE" "$(env_value HORNHOOF_NODE_REF)" || return 0
-  (HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATER_REV="$UPDATER_REV" HORNHOOF_WORKER_NODES=1 \
-    HORNHOOF_VERSION="$(env_value HORNHOOF_VERSION)" HORNHOOF_APP_REF="$(env_value HORNHOOF_APP_REF)" HORNHOOF_NODE_REF="$(env_value HORNHOOF_NODE_REF)" \
-    HORNHOOF_UPDATER_REF="$(env_value HORNHOOF_UPDATER_REF)" bash "$INSTALLER" worker > "$CONTROL/nodes.log" 2>&1 ||
-    printf 'Could not move the nodes of this machine to its build: see nodes.log in the control folder.\n') &
+  (
+    log=$(mktemp) && seen=$(mktemp -d) || exit 0
+    installer_control "$seen" || true
+    code=0
+    HORNHOOF_CONTROL_DIR="$seen" HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATER_REV="$UPDATER_REV" HORNHOOF_WORKER_NODES=1 \
+      HORNHOOF_VERSION="$(env_value HORNHOOF_VERSION)" HORNHOOF_APP_REF="$(env_value HORNHOOF_APP_REF)" HORNHOOF_NODE_REF="$(env_value HORNHOOF_NODE_REF)" \
+      HORNHOOF_UPDATER_REF="$(env_value HORNHOOF_UPDATER_REF)" bash "$INSTALLER" worker > "$log" 2>&1 || code=$?
+    # Written in the updater's own temporary folder while the installer runs, and then put in place whole.
+    publish "$CONTROL/nodes.log" over cat -- "$log" || printf '%s\n' 'Could not write nodes.log in the control folder.' >&2
+    rm -rf -- "${log:?}" "${seen:?}"
+    [ "$code" = 0 ] || printf 'Could not move the nodes of this machine to its build: see nodes.log in the control folder.\n'
+  ) &
   NODES_LOOK=$!
   if [ -n "$ONCE" ]; then wait "$NODES_LOOK" || true; fi
 }

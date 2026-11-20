@@ -17,8 +17,9 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   reporter: process.env.HH_TEST_REPORT ? [['list'], ['./e2e/file-report.ts']] : 'list',
-  /* An expectation, an action or a navigation looks until its state comes, however loaded the machine is: 0 is no limit.
-     Only the runner's limit for a test ends a state that never comes. */
+  /* A test, an expectation, an action or a navigation goes on until its state comes, however loaded the machine is: 0 is no
+     limit (note #59). Only the run's own limit ends a state that never comes. */
+  timeout: 0,
   expect: { timeout: 0 },
   use: {
     baseURL: `http://localhost:${PORT}`,

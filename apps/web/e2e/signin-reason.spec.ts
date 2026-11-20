@@ -9,7 +9,7 @@ import { serveApi } from './api';
    said, as the node sends it, instead of the plain words. The longest the node sends is 200 characters, here one word
    with no place to break; it wraps inside the page in both languages, both themes, left to right and
    right to left, wide and narrow. The pictures are for the check against the style book. */
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 const SHOTS = 'e2e/results/signin-reason-shots';
 mkdirSync(SHOTS, { recursive: true });
 

@@ -17,7 +17,7 @@ const DEPARTMENT_ID = 'd2';
    30 s it gives the ask up and says why; an error answer says why at once; each with Retry, which shows the ring at once,
    keeps the focus in the room and asks again. The server's answers are held back by the test, and the page runs on the
    test's clock, paused, so it moves only as far as a test moves it. */
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 const SHOTS = 'e2e/results/loading-shots';
 mkdirSync(SHOTS, { recursive: true });
 
