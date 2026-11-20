@@ -720,13 +720,17 @@ describe('Department view', () => {
 
   it('keeps the department actions in the free strip after the zoom while a window or task is open', () => {
     /* Windows and tasks end above the strip at the bottom where the zoom and the actions sit, so the actions
-       stay there, right after the zoom, at every width a window leaves beside them; on a phone the window covers all. */
+       stay there, right after the zoom, at every width a window leaves beside them; on a phone the window covers all.
+       A window stands at the right in either direction, so right to left the actions keep the end, away from it (#1658). */
     const strip = px(decl('.dv-acts', 'bottom')) + px(decl('.hbtn', 'height'));
     for (const panel of ['.orch', '.acard']) expect(px(decl(panel, 'bottom'))).toBeGreaterThan(strip);
-    for (const kind of ['window', 'task'])
-      expect(rulesFor(`.body.with-${kind} .dv-acts`).map(r => [r.media, r.decls.left, r.decls.right, r.decls.bottom])).toEqual([
-        ['(min-width: 761px)', decl('.dview .ticker', 'left'), 'auto', undefined],
+    const afterZoom = decl('.dview .ticker', 'inset-inline')!.split(' ')[0];
+    for (const kind of ['window', 'task']) {
+      expect(rulesFor(`.body.with-${kind} .dv-acts:dir(ltr)`).map(r => [r.media, r.decls['inset-inline'], r.decls.bottom])).toEqual([
+        ['(min-width: 761px)', `${afterZoom} auto`, undefined],
       ]);
+      expect(rulesFor(`.body.with-${kind} .dv-acts`)).toEqual([]);
+    }
   });
 
   it('keeps an idle reviewer in its role frame behind gate 1, with no return arrows', async () => {

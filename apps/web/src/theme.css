@@ -719,11 +719,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .dname { min-width: 0; overflow-wrap: break-word; font-family: var(--f-display); font-size: 20px; font-weight: 600; }
 .cnt { flex: none; font-family: var(--f-display); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .cnt b { color: var(--ink); font-weight: 600; }
-/* Zoom bottom left and the orchestrator's line bottom middle. */
-.zoom { position: absolute; left: 16px; bottom: 16px; max-inline-size: calc(100% - 32px); display: flex; align-items: center; }
-/* On the map the zoom stands at the start of the bottom, mirrored on a page right to left as the rest of the layout is; the
-   other canvases keep it at the left, beside bars they place from the left (#1622). */
-.map > .zoom { inset-inline: 16px auto; }
+/* The zoom at the start of the bottom of every canvas, mirrored on a page right to left as the rest of the layout is (#1622,
+   #1658), and the orchestrator's line bottom middle. */
+.zoom { position: absolute; inset-inline-start: 16px; bottom: 16px; max-inline-size: calc(100% - 32px); display: flex; align-items: center; }
 /* A block's grip over its top left corner, 44 px to touch at any zoom: nothing drawn, only the pointer shows it, and the ring of
    the keyboard's focus; the map's corners are not mirrored. */
 .grip { box-sizing: border-box; margin: 0; padding: 0; border: 0; background: none; cursor: move; touch-action: none; transform-origin: 50% 50%; }
@@ -1559,10 +1557,11 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 .crumbs { position: absolute; z-index: 3; top: 12px; inset-inline-start: 68px; display: flex; align-items: flex-start; gap: 8px; height: auto; max-width: calc(50% - var(--tabs-half, 204px) - 76px); min-width: 0; }
 .crumbs h2 { min-width: 0; white-space: normal; overflow-wrap: break-word; font-size: 15px; color: var(--cyan-ink); }
 .crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; height: auto; min-height: 44px; box-sizing: border-box; min-width: 0; padding: 8px 14px; color: var(--ink); }
-.dv-acts { position: absolute; z-index: 3; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.dv-acts { position: absolute; z-index: 3; inset-inline-end: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px; }
 /* A window, card or task ends above the strip the zoom and the actions sit in, so with one open the actions move along
-   that strip to right after the zoom, out from under it at any width; on a phone the window covers the whole screen. */
-@media (min-width: 761px) { .body.with-window .dv-acts, .body.with-task .dv-acts { left: 212px; right: auto; } }
+   that strip to right after the zoom, out from under it at any width; on a phone the window covers the whole screen. It
+   stands at the right in either direction, so right to left the actions already keep the end, away from it (#1658). */
+@media (min-width: 761px) { .body.with-window .dv-acts:dir(ltr), .body.with-task .dv-acts:dir(ltr) { inset-inline: 212px auto; } }
 .hbtn { height: 44px; padding: 0 16px; box-sizing: border-box; color: var(--ink); font-family: var(--f-display); font-size: 14px; font-weight: 600; white-space: nowrap; cursor: pointer; }
 .hbtn:hover { border-color: var(--line2); }
 .hbtn.on { color: var(--cyan-ink); box-shadow: inset 0 -2px 0 var(--cyan); }
@@ -1584,10 +1583,13 @@ body:has(.dview) .version-mark { display: none; }
    every window and panel fixed there (#1384). A phone shows no footer; About names the version there, and the map over its
    corner. */
 @media (max-width: 760px) { .version-mark { display: none; } }
-/* The line of what changed sits between the zoom and the actions. */
-.dview .ticker { left: 212px; right: var(--ticker-right, 16px); transform: none; max-width: none; }
+/* The line of what changed sits between the zoom and the actions, in either direction. */
+.dview .ticker { inset-inline: 212px var(--ticker-right, 16px); transform: none; max-width: none; }
 .dv-drawer { position: absolute; z-index: 4; }
-.dv-drawer, .acard { top: 68px; left: 16px; bottom: 76px; width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
+.dv-drawer, .acard { top: 68px; bottom: 76px; width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
+/* The drawer opens at the start, under the department's name, mirrored right to left; a window keeps its own place (#1658). */
+.dv-drawer { inset-inline-start: 16px; }
+.acard { left: 16px; }
 /* The drawer starts under the department's name and ends above the line of what happened, as the department measures them. */
 .dv-drawer { top: var(--tree-top, 68px); bottom: var(--tree-bottom, 76px); }
 .dv-drawer-h { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 6px 6px 18px; border-bottom: 1px solid var(--line); }
@@ -1903,7 +1905,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   /* The hint of an empty map stands whole above the dock, which may grow to several rows: across the width, 16px above
      its top as the map measures it. */
   .dv-empty { left: 16px; right: 16px; bottom: calc(var(--tree-bottom, 228px) + 8px); transform: none; overflow-wrap: break-word; }
-  .dv-drawer, .acard { top: 116px; bottom: 16px; width: auto; right: 16px; }
+  .dv-drawer, .acard { top: 116px; bottom: 16px; width: auto; }
+  .acard { right: 16px; }
+  .dv-drawer { inset-inline: 16px; }
   .dv-drawer { top: var(--tree-top, 116px); }
   /* The schema shows between the department's name and the dock, as the tree does: what scrolls under them goes out of sight. */
   .dcanvas { inset-block: var(--tree-top, 116px) var(--tree-bottom, 228px); }
