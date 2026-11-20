@@ -275,6 +275,8 @@ async function expectAbove(mark: Locator, words: Locator) {
   expect(Math.abs(m.x + m.width / 2 - (w.x + w.width / 2))).toBeLessThanOrEqual(1);
 }
 
+const fontOf = (block: Locator) => block.evaluate(el => getComputedStyle(el).fontFamily);
+
 /* Each box within half a pixel of the other. */
 function expectSameBoxes(after: { x: number; y: number; width: number; height: number }[], before: typeof after) {
   expect(after).toHaveLength(before.length);
@@ -345,6 +347,8 @@ for (const screen of SCREENS) {
       await page.clock.runFor(FAIL_MS - SLOW_MS);
       const failed = screen.place(page).locator('.load-fail:not(.slow)');
       await expect(failed).toHaveAttribute('role', 'alert');
+      /* In the body's font everywhere, in a window set in monospace too (style book 1.5, section 4, rule 6). */
+      expect(await fontOf(failed)).toBe(await fontOf(page.locator('body')));
       await expect(failed.locator('.lf-t')).toHaveText(t.load.failed.timeout);
       await expect(failed.locator('.lf-h')).toHaveText(t.load.hint.timeout);
       await expect(failed.locator('.spinner')).toHaveCount(0);
@@ -469,7 +473,12 @@ for (const screen of SCREENS) for (const look of LOOKS) {
     await inside();
     await shot('slow');
     await page.clock.runFor(FAIL_MS - SLOW_MS);
-    await expect(screen.place(page).locator('.load-fail:not(.slow) .lf-t')).toHaveText(t.load.failed.timeout);
+    const failed = screen.place(page).locator('.load-fail:not(.slow)');
+    await expect(failed.locator('.lf-t')).toHaveText(t.load.failed.timeout);
+    /* The button's quoted name stays on one line (Design #1654), and each sentence reads in its own language's direction,
+       its period at its end, on a page laid out right to left too (#1621). */
+    expect(await failed.locator('.lf-h .lf-name').evaluate(el => el.getClientRects().length)).toBe(1);
+    expect(await failed.locator('p').evaluateAll(words => words.every(p => p.matches(':dir(ltr)')))).toBe(true);
     await inside();
     await shot('failed');
     await screen.place(page).getByRole('button', { name: t.common.retry, exact: true }).click();

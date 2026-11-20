@@ -954,11 +954,12 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .load-hold > .load-fail { align-self: start; }
 .arrive { animation: arrive .12s ease-out both; }
 @keyframes arrive { from { opacity: 0; } }
-.load-fail { display: grid; gap: 8px; max-inline-size: 60ch; padding: 12px 14px; border-inline-start: 3px solid var(--pink); background: var(--surface2); color: var(--ink); font-size: 14px; text-align: start; }
+.load-fail { display: grid; gap: 8px; max-inline-size: 60ch; padding: 12px 14px; border-inline-start: 3px solid var(--pink); background: var(--surface2); color: var(--ink); font-family: var(--f-body); font-size: 14px; text-align: start; }
 .load-fail.slow { border-inline-start-color: var(--amber); }
 .load-fail > p { margin: 0; min-inline-size: 0; overflow-wrap: anywhere; }
 .load-fail > .lf-t { display: flex; align-items: center; gap: 8px; font-weight: 600; }
 .load-fail > .lf-h { color: var(--muted); font-size: 13px; }
+.load-fail .lf-name { white-space: nowrap; }
 .load-fail > .entry-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .load-fail .btn { min-block-size: 44px; min-inline-size: 44px; padding: 8px 12px; line-height: 1.4; }
 /* A plan's connection after its sign-in code (ui/PlanConnection.tsx, style book 1.5 section 4): "Step 3 of 4" over the bar of

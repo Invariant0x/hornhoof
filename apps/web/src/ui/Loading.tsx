@@ -211,14 +211,29 @@ export function Busy({ ring, words, form = 'inline', live = true }: BusyProps) {
    better; ring: false where the part already shows its ring. Stop is only where a load can be stopped. */
 type FailProps = { load: Load; onRetry(): unknown; retryLabel?: string; words?: [string, string]; slowHint?: string; ring?: boolean; stop?: { text: string; label?: string; run(): unknown } };
 
+const OPENS = '«"“„';
+const CLOSES = '»"”“';
+
+/* A failure's words with the name of the button they quote kept whole on one line, quotes and all, so «Повторить» never
+   breaks into «По-» and «вторить». */
+export function KeepName({ text, name }: { text: string; name: string }) {
+  const at = text.indexOf(name);
+  if (at < 0) return <>{text}</>;
+  const end = at + name.length;
+  const from = at > 0 && OPENS.includes(text[at - 1]!) ? at - 1 : at;
+  const to = end < text.length && CLOSES.includes(text[end]!) ? end + 1 : end;
+  return <>{text.slice(0, from)}<span className="lf-name">{text.slice(from, to)}</span>{text.slice(to)}</>;
+}
+
 export function LoadFail({ load, onRetry, retryLabel, words, slowHint, ring = true, stop }: FailProps) {
   const t = useT();
   const slow = load.phase === 'slow';
   const [what, next] = slow ? [t.common.tooLong, slowHint ?? t.load.slowHint] : words ?? failWords(t, load.failure);
   return (
     <div className={slow ? 'load-fail slow' : 'load-fail'} role={slow ? 'status' : 'alert'}>
-      <p className="lf-t">{slow && ring && <span className="spinner" aria-hidden="true" />}<span>{what}</span></p>
-      <p className="lf-h">{next}</p>
+      {/* Each sentence in the direction of its own language, so its period stays at its end on a page laid out right to left. */}
+      <p className="lf-t" dir="auto">{slow && ring && <span className="spinner" aria-hidden="true" />}<span><KeepName text={what} name={t.common.retry} /></span></p>
+      <p className="lf-h" dir="auto"><KeepName text={next} name={t.common.retry} /></p>
       <div className="entry-actions">
         <button className="btn" type="button" aria-label={retryLabel} onClick={() => void onRetry()}>{t.common.retry}</button>
         {stop && <button className="btn ghost" type="button" aria-label={stop.label} onClick={() => void stop.run()}>{stop.text}</button>}

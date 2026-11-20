@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiFailure } from '../src/api';
 import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 import { UpdateSaysIt } from '../src/ui/LoadFailure';
+import { decl } from './css';
 import { FAIL_MS, Hold, Idle, LoadState, MAX_HELD_ROWS, RING_DELAY_MS, RING_MIN_MS, SLOW_MS, useHeldRows, useLoad, type LoadPart } from '../src/ui/Loading';
 
 /* One load of a screen from its parts, on the style book's timeline (1.5, section 4): no ring for the first 400 ms, then the
@@ -244,5 +246,39 @@ describe('the rows a list holds while it loads', () => {
     const { result, rerender } = renderHook(({ shown }) => useHeldRows('private', shown), { initialProps: { shown: 5 as number | null } });
     rerender({ shown: null });
     expect(result.current).toBeNull();
+  });
+});
+
+describe('the look of a failed load', () => {
+  afterEach(() => localStorage.clear());
+
+  /* Style book 1.5, section 4, rule 6: in a window set in monospace, "секунд." wrapped onto a line of its own. */
+  it('is in the body font everywhere, whatever font the window around it has', () => {
+    expect(decl('.load-fail', 'font-family')).toBe('var(--f-body)');
+  });
+
+  /* Design #1654: on a phone «Повторить» broke into «По-» and «вторить». */
+  it.each([
+    ['en', en.load.hint.server, '"Retry"'],
+    ['ru', ru.load.hint.server, '«Повторить»'],
+  ])('keeps the quoted name of its button whole on one line, with its quotes, in %s', (language, hint, quoted) => {
+    localStorage.setItem('hh-lang', language);
+    const { container } = render(<Shown parts={[part(undefined, new ApiFailure(500, 'internal', ''))]} />);
+    const words = container.querySelector('.load-fail .lf-h')!;
+    expect(words.textContent).toBe(hint);
+    expect([...words.querySelectorAll('.lf-name')].map(name => name.textContent)).toEqual([quoted]);
+    expect(decl('.load-fail .lf-name', 'white-space')).toBe('nowrap');
+  });
+
+  it('leaves words that quote no button as they are', () => {
+    const { container } = render(<Shown parts={[part(undefined, new ApiFailure(403, 'forbidden', 'You do not have access to this.'))]} />);
+    expect(container.querySelector('.lf-t')!.textContent).toBe('You do not have access to this.');
+    expect(container.querySelector('.lf-t .lf-name')).toBeNull();
+  });
+
+  /* #1621: on a page laid out right to left, the period of a sentence in a language read left to right stood at its start. */
+  it('lets its words take the direction of their own language', () => {
+    const { container } = render(<Shown parts={[part(undefined, new ApiFailure(500, 'internal', ''))]} />);
+    expect([...container.querySelectorAll('.load-fail > p')].map(p => p.getAttribute('dir'))).toEqual(['auto', 'auto']);
   });
 });
