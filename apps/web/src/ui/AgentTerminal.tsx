@@ -3,6 +3,7 @@ import { BindViewResponse, decodeViewChallenge, encodeViewSignature, isTestViewR
 import '@xterm/xterm/css/xterm.css';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { errorText, useT, type Messages } from '../i18n';
+import { activeLook, subscribeSkins } from '../skins/store';
 import { usePictureDrop } from './MessagePictures';
 import { fitTerminal, measureGlyphsExactly, observeTerminalFit } from './terminal-fit';
 import { isBracketedPaste, TerminalInput, type InputRefusal, type TerminalRights } from './terminal-input';
@@ -18,6 +19,12 @@ const ANSI = ['#14191e', '#b43c2a', '#00c200', '#c7c400', '#2744c7', '#c040be', 
 const NAMES = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'] as const;
 const COLORS = Object.fromEntries(ANSI.map((c, i) => [i < 8 ? NAMES[i]! : `bright${NAMES[i - 8]![0]!.toUpperCase()}${NAMES[i - 8]!.slice(1)}`, c]));
 const THEME: ITheme = { ...COLORS, background: '#15191f', foreground: '#dcdcdc', cursor: '#ffffff', cursorAccent: '#000000', selectionBackground: '#b3d7ff', selectionForeground: '#000000' };
+
+/* Theme-specific dark terminal surface and ink when the active theme declares them, else the default dark console. */
+function terminalTheme(): ITheme {
+  const custom = activeLook().terminal;
+  return custom ? { ...THEME, background: custom.bg, foreground: custom.ink } : THEME;
+}
 
 const OPTIONS: ITerminalOptions = {
   fontFamily: 'Monaco, Menlo, "DejaVu Sans Mono", monospace',
@@ -728,7 +735,10 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
     setDenied(null);
     setPictureState(null);
     setPictureFailure(null);
-    const term = new Terminal(OPTIONS);
+    const term = new Terminal({ ...OPTIONS, theme: terminalTheme() });
+    const stopTheme = subscribeSkins(() => {
+      term.options.theme = terminalTheme();
+    });
     termRef.current = term;
     const container = box.current!;
     term.open(container);
@@ -749,6 +759,7 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
       sendPicture.current = () => {};
       termRef.current = null;
       view.end();
+      stopTheme();
       unfit();
       disposeLater(term);
     };

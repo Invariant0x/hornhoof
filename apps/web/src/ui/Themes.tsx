@@ -1,29 +1,39 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type ChangeEvent, type CSSProperties } from 'react';
+import { useEffect, useId, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import { useLanguage, useT, type Language } from '../i18n';
 import { en, type Messages } from '../i18n/en';
 import { ru } from '../i18n/ru';
 import { COLLECTION_LIMIT, uniqueName, type CustomSkin } from '../skins/collection';
 import { BUILTIN_SKINS, DEFAULT_SKIN, ownLook, type BuiltinSkinId } from '../skins/registry';
-import { declarations, type Skin, type SkinLook, type SkinNames } from '../skins/roles';
-import { addSkin, chooseSkin, removeSkin, restoreSkin, skinsState, subscribeSkins, type Removal } from '../skins/store';
+import { declarations, extraDeclarations, type Skin, type SkinLook, type SkinNames } from '../skins/roles';
+import { addSkin, chooseSkin, removeSkin, restoreSkin, skinsState, type Removal } from '../skins/store';
+import { useSkins } from '../skins/use-skin';
 import { builtinFile, parseSkin, SEE_THROUGH, SKIN_FILE_LIMIT, skinText, type SkinError } from '../skins/validate';
 
-/* The Themes section of a person's settings: a card for every built-in skin and
-   every one of their own, one click to apply one, a file to add, any skin to download as a sample, and the guide to
-   making one. Anyone signed in has it: what it changes stays in this browser. */
+/* The Theme store section of a person's settings: full interactive world themes, classic built-in skins and every skin
+   of their own, one click to apply one, a file to add, any skin to download as a sample, and the guide to making one.
+   Anyone signed in has it: what it changes stays in this browser. */
 
 type Problem = SkinError | { code: 'read_failed'; key?: undefined; value?: undefined };
 /* The line under the heading that says what the last action did: a status, an alert, or a file still being read. */
 type Notice = { tone: 'status' | 'alert' | 'busy'; title?: string; text: string; removal?: Removal };
 type Card = { id: string; look: SkinLook; name: string; desc: string; own: boolean; file: () => Skin };
+type StoreFilter = 'all' | 'worlds' | 'classic' | 'custom';
+const STORE_FILTERS: readonly StoreFilter[] = ['all', 'worlds', 'classic', 'custom'];
 
-const useSkins = () => useSyncExternalStore(subscribeSkins, skinsState);
+const isWorldCard = (card: Card) => !!card.look.world && card.look.world !== 'standard';
+function matchesFilter(card: Card, filter: StoreFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'worlds') return isWorldCard(card);
+  if (filter === 'custom') return card.own;
+  return !card.own && !isWorldCard(card);
+}
 
 const nameIn = (names: SkinNames, language: Language) => (language === 'ru' ? names.ru : names.en);
 const builtinNames = (id: BuiltinSkinId): SkinNames => ({ ru: ru.skins.names[id], en: en.skins.names[id] });
 
-/* The tokens of a skin on its own preview only, so each card shows its skin in the same drawing. */
-const previewStyle = (look: SkinLook) => Object.fromEntries(declarations(look).filter(([property]) => property.startsWith('--'))) as CSSProperties;
+/* The tokens of a skin on its own preview only, so each card shows its skin and world colours in the same drawing. */
+const previewStyle = (look: SkinLook) =>
+  Object.fromEntries([...declarations(look), ...extraDeclarations(look).set].filter(([property]) => property.startsWith('--'))) as CSSProperties;
 
 function problemText(t: Messages, problem: Problem): string {
   const value = problem.code === 'bad_base' ? BUILTIN_SKINS.map(skin => skin.id).join(', ') : problem.code === 'opaque' ? SEE_THROUGH.join(', ') : (problem.value ?? '');
@@ -54,11 +64,32 @@ function SwapLabel({ first, second, showSecond }: { first: string; second: strin
   );
 }
 
+/* Miniature desert panorama shown inside the Ancient Egypt theme card preview, using only semantic and world tokens. */
+function EgyptPreviewScene() {
+  return (
+    <svg className="sp-world-banner" viewBox="0 0 240 46" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <rect x="0" y="0" width="240" height="28" fill="var(--surface2)" />
+      <rect x="0" y="28" width="240" height="10" fill="var(--world-ground, var(--bg))" />
+      <circle cx="198" cy="13" r="6.5" fill="var(--amber)" opacity="0.88" />
+      <polygon points="24,38 56,14 88,38" fill="var(--world-structure, var(--line))" />
+      <polygon points="56,14 88,38 64,38" fill="var(--world-shade, var(--shadow))" />
+      <polygon points="74,38 118,6 162,38" fill="var(--world-structure, var(--line))" />
+      <polygon points="118,6 162,38 128,38" fill="var(--world-shade, var(--shadow))" />
+      <polygon points="118,6 126,12 110,12" fill="var(--amber)" opacity="0.85" />
+      <polygon points="168,38 172,18 176,38" fill="var(--line2)" />
+      <circle cx="188" cy="30" r="4" fill="var(--world-field, var(--ok))" />
+      <rect x="0" y="37" width="240" height="9" fill="var(--world-water, var(--cyan))" />
+    </svg>
+  );
+}
+
 /* The same small task card in the colours and fonts of each skin. It shows, it does nothing. */
 function Preview({ look }: { look: SkinLook }) {
   const words = useT().skins.preview;
+  const world = look.world && look.world !== 'standard' ? look.world : undefined;
   return (
-    <div className="skin-preview" style={previewStyle(look)} data-cut={look.shape} aria-hidden="true">
+    <div className="skin-preview" style={previewStyle(look)} data-cut={look.shape} data-world={world} aria-hidden="true">
+      {world === 'egypt' && <EgyptPreviewScene />}
       <div className="sp-row">
         <span className="sp-label">{words.task}</span>
         <span className="sp-status">{words.ready}</span>
@@ -75,12 +106,19 @@ function Preview({ look }: { look: SkinLook }) {
 
 type CardProps = { card: Card; on: boolean; onApply: () => void; onDownload: () => void; onRemove: () => void };
 
+function cardOrigin(words: Messages['skins'], card: Card): string {
+  if (card.own) return words.own;
+  if (card.id === DEFAULT_SKIN) return `${words.builtIn} · ${words.byDefault}`;
+  if (isWorldCard(card)) return `${words.builtIn} · ${words.worldBadge}`;
+  return words.builtIn;
+}
+
 /* A skin's card: its preview, name, origin and description, then its quiet buttons on the end edge. The skin on says so
    by a state beside its name instead of Apply, and that state holds the focus once Apply is gone. */
 function SkinCard({ card, on, onApply, onDownload, onRemove }: CardProps) {
   const t = useT();
   const words = t.skins;
-  const origin = card.own ? words.own : card.id === DEFAULT_SKIN ? `${words.builtIn} · ${words.byDefault}` : words.builtIn;
+  const origin = cardOrigin(words, card);
   return (
     <li className="skin-card" data-current={on || undefined}>
       <Preview look={card.look} />
@@ -257,28 +295,54 @@ function AddFromFile({ say, focusOn }: Talk) {
 
 type CatalogProps = { cards: readonly Card[]; active: string; onApply: (card: Card) => void; onDownload: (card: Card) => void; onRemove: (card: Card) => void };
 
+function StoreFilters({ filter, onSelect }: { filter: StoreFilter; onSelect: (next: StoreFilter) => void }) {
+  const t = useT();
+  return (
+    <div className="skins-filters" role="group" aria-label={t.skins.filterLabel}>
+      {STORE_FILTERS.map(kind => (
+        <button key={kind} className={`btn small ghost${filter === kind ? ' on' : ''}`} type="button" aria-pressed={filter === kind} onClick={() => onSelect(kind)}>
+          {t.skins.filters[kind]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CatalogEmpty({ custom }: { custom: boolean }) {
+  const t = useT();
+  return (
+    <div className="skins-empty">
+      <p className="skins-empty-title">{custom ? t.skins.empty : t.skins.emptyFilter}</p>
+      {custom && <p className="muted">{t.skins.emptyHint}</p>}
+    </div>
+  );
+}
+
 function Catalog({ cards, active, onApply, onDownload, onRemove }: CatalogProps) {
   const t = useT();
   const id = useId();
+  const [filter, setFilter] = useState<StoreFilter>('all');
+  const shown = cards.filter(card => matchesFilter(card, filter));
+  const showOwnEmpty = filter === 'all' && !cards.some(card => card.own);
   return (
     <section className="skins-catalog" aria-labelledby={id}>
       <div className="skins-catalog-head">
         <h5 id={id}>{t.skins.catalog}</h5>
         <p className="muted">{t.skins.catalogHint}</p>
       </div>
-      <div className="skin-wrap">
-        <ul className="skin-cards">
-          {cards.map(card => (
-            <SkinCard key={card.id} card={card} on={card.id === active} onApply={() => onApply(card)} onDownload={() => onDownload(card)} onRemove={() => onRemove(card)} />
-          ))}
-        </ul>
-      </div>
-      {!cards.some(card => card.own) && (
-        <div className="skins-empty">
-          <p className="skins-empty-title">{t.skins.empty}</p>
-          <p className="muted">{t.skins.emptyHint}</p>
+      <StoreFilters filter={filter} onSelect={setFilter} />
+      {shown.length > 0 ? (
+        <div className="skin-wrap">
+          <ul className="skin-cards">
+            {shown.map(card => (
+              <SkinCard key={card.id} card={card} on={card.id === active} onApply={() => onApply(card)} onDownload={() => onDownload(card)} onRemove={() => onRemove(card)} />
+            ))}
+          </ul>
         </div>
+      ) : (
+        <CatalogEmpty custom={filter === 'custom'} />
       )}
+      {showOwnEmpty && <CatalogEmpty custom />}
     </section>
   );
 }

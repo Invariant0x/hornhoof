@@ -1,6 +1,6 @@
 import { COLLECTION_LIMIT, collectionText, readCollection, withAdded, withRestored, without, type CustomSkin } from './collection';
 import { builtinSkin, DEFAULT_SKIN, ownLook } from './registry';
-import { declarations, type Skin, type SkinLook } from './roles';
+import { declarations, extraDeclarations, type Skin, type SkinLook, type WorldKind } from './roles';
 
 /* The skin on the page and the collection of a person's own, kept in this browser. The skin on the page is always one
    that exists: a name the browser kept that names no skin, from an older version or a deleted skin, means Cyberpunk. */
@@ -41,14 +41,21 @@ function lookIn(custom: readonly CustomSkin[], id: string): SkinLook | null {
   return builtinSkin(id) ?? (own ? ownLook(own.skin) : null);
 }
 
-/* Every token of the skin at once, so switching never shows a mix of two skins. */
+/* Every token and root attribute of the skin at once, so switching never shows a mix of two themes. */
 function apply({ active, custom }: SkinsState): void {
   const look = lookIn(custom, active)!;
   const page = document.documentElement;
   page.dataset.theme = active;
   page.dataset.scheme = look.scheme;
   page.dataset.cut = look.shape;
+  if (look.world && look.world !== 'standard') page.dataset.world = look.world;
+  else delete page.dataset.world;
+  if (look.surface && look.surface !== 'plain') page.dataset.surface = look.surface;
+  else delete page.dataset.surface;
   for (const [property, value] of declarations(look)) page.style.setProperty(property, value);
+  const extra = extraDeclarations(look);
+  for (const property of extra.clear) page.style.removeProperty(property);
+  for (const [property, value] of extra.set) page.style.setProperty(property, value);
 }
 
 function change(next: SkinsState): void {
@@ -73,6 +80,10 @@ export function subscribeSkins(listener: () => void): () => void {
 
 /* The look of a built-in skin or one of the collection, by its name. */
 export const lookOf = (id: string): SkinLook | null => lookIn(state.custom, id);
+
+/* The active skin's full look and interactive world kind. */
+export const activeLook = (): SkinLook => lookIn(state.custom, state.active)!;
+export const activeWorld = (): WorldKind => activeLook().world ?? 'standard';
 
 /* Puts a skin on the page at once and keeps the choice; a name of no skin changes nothing. */
 export function chooseSkin(id: string): boolean {

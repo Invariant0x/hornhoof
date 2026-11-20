@@ -381,18 +381,20 @@ for (const skin of SKINS) for (const width of RTL_WIDTHS) {
 
 for (const skin of SKINS) for (const width of RTL_WIDTHS) {
   const look = `ru-ltr-${skin}-${width}`;
-  test(`five skins: an odd last card takes the whole row, no card has a filled button: ${look}`, async ({ page }, info) => {
+  test(`odd last card takes the whole row, no card has a filled button: ${look}`, async ({ page }, info) => {
     const problems = await prepare(page, 'ru', skin, width);
     const dialog = await openGroup(page, ru, 'appearance', '/settings', 'ltr', ALL);
+    const initial = await skinGrid(page);
+    expect(initial.widths).toHaveLength(5);
+    expect(Math.abs(initial.lastWidth - initial.room), `${look}: the fifth card takes the row`).toBeLessThanOrEqual(1);
     const dusk = builtinFile(builtinSkin('cyberpunk')!, { ru: 'Сумерки', en: 'Dusk' });
     await dialog.locator('input[type="file"]').setInputFiles({ name: 'dusk.json', mimeType: 'application/json', buffer: Buffer.from(skinText(dusk)) });
     await expect(dialog.getByRole('status')).toHaveText(ru.skins.added('Сумерки'));
     const grid = await skinGrid(page);
-    expect(grid.widths).toHaveLength(5);
-    expect(Math.abs(grid.lastWidth - grid.room), `${look}: the fifth card takes the row`).toBeLessThanOrEqual(1);
+    expect(grid.widths).toHaveLength(6);
     await expect(dialog.locator('.skin-card .btn:not(.ghost)')).toHaveCount(0);
-    await checkGroup(page, ru, 'appearance', `${look} five skins`);
-    await shot(page, info, `settings-skins-5-${look}`);
+    await checkGroup(page, ru, 'appearance', `${look} six skins`);
+    await shot(page, info, `settings-skins-6-${look}`);
     expect(problems).toEqual([]);
   });
 }

@@ -537,6 +537,9 @@ select:disabled { opacity: .55; }
 .skins-notice .entry-actions { margin-block-start: 4px; justify-content: flex-start; }
 .skins-catalog { display: grid; gap: 12px; min-width: 0; }
 .skins-catalog-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
+.skins-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.skins-filters .btn.on { background: var(--glow); color: var(--cyan-ink); box-shadow: inset 0 0 0 1px var(--cyan); }
+.sp-world-banner { display: block; width: 100%; height: 46px; border: 1px solid var(--line); }
 /* Two columns where the place is wide, one where it is narrow: the place decides, not the window. An odd last card takes
    the whole row, so no card stands alone in half a row. */
 .skin-wrap { container: skins / inline-size; min-width: 0; }
@@ -693,7 +696,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
    every card of the map is as tall as the card whose words need the most, as the map measures them. */
 .dept > .edge { height: 100%; }
 .dept .edge-in { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
-.edge > .corner { position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-left: 2px solid var(--cyan); border-top: 2px solid var(--cyan); pointer-events: none; }
+.edge > .corner { position: absolute; inset-inline-start: 0; inset-block-start: 0; width: 22px; height: 22px; border-inline-start: 2px solid var(--cyan); border-block-start: 2px solid var(--cyan); pointer-events: none; }
 .dept .row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .dept .row2 { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
 .dept .detail { min-width: 0; color: var(--muted); overflow-wrap: break-word; }
@@ -1279,15 +1282,15 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 /* The live terminal takes the window, wider, in its own colors; cards wait below it. */
 .orch.term { width: min(980px, calc(100vw - 32px)); }
 /* The padding sits on the terminal itself, which is what its fit leaves out when it counts rows. */
-.t-term { position: relative; flex: 1 1 auto; min-height: 156px; min-width: 0; color-scheme: dark; background: #15191F; overflow: hidden; }
+.t-term { position: relative; flex: 1 1 auto; min-height: 156px; min-width: 0; color-scheme: dark; background: var(--term-bg, #15191F); overflow: hidden; }
 .t-xterm { width: 100%; height: 100%; }
 .t-term .xterm { height: 100%; padding: 6px 8px 4px 10px; }
 .t-menu { position: absolute; z-index: 20; padding: 4px; background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 8px 24px var(--shadow); }
 .t-copy { display: block; width: 100%; padding: 6px 12px; border: 0; background: none; color: var(--ink); font-family: var(--f-display); font-size: 13px; font-weight: 600; text-align: left; white-space: nowrap; cursor: pointer; }
 .t-copy:hover:not(:disabled) { color: var(--cyan-ink); background: var(--glow); }
 .t-copy:disabled { color: var(--muted); cursor: default; }
-.t-load { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: #15191F; color: #dcdcdc; font-family: var(--f-body); font-size: 15px; }
-.t-load .spinner { width: 44px; height: 44px; border-width: 3px; border-color: #2b323b; border-top-color: #dcdcdc; }
+.t-load { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: var(--term-bg, #15191F); color: var(--term-ink, #dcdcdc); font-family: var(--f-body); font-size: 15px; }
+.t-load .spinner { width: 44px; height: 44px; border-width: 3px; border-color: #2b323b; border-top-color: var(--term-ink, #dcdcdc); }
 /* Why the terminal cannot show now, in place of it. */
 .t-load p { max-width: 60ch; margin: 0; padding: 0 24px; text-align: center; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .t-load .spinner { animation-duration: 3s; } }

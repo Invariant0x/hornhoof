@@ -294,7 +294,7 @@ test('the chosen skin of the collection is on the page before the app starts, an
   const dialog = await openThemes(page, words);
   expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(rgb(OWN.colors.bg));
   /* The colour of the page in each of the next frames after a click: the new skin from the first one, never a mix. */
-  for (const choice of ['matrix', 'light', 'pixel'] as const) {
+  for (const choice of ['matrix', 'egypt', 'light', 'pixel'] as const) {
     await page.evaluate(() => {
       const seen: string[] = [];
       (window as unknown as { seen: string[] }).seen = seen;
@@ -307,6 +307,13 @@ test('the chosen skin of the collection is on the page before the app starts, an
     await dialog.getByRole('button', { name: `${words.skins.apply}: ${words.skins.names[choice]}`, exact: true }).click();
     await page.waitForFunction(() => (window as unknown as { seen: string[] }).seen.length === 3);
     expect(await page.evaluate(() => (window as unknown as { seen: string[] }).seen)).toEqual(Array(3).fill(rgb(builtinSkin(choice)!.colors.bg)));
+    if (choice === 'egypt') {
+      await expect(page.locator('html')).toHaveAttribute('data-world', 'egypt');
+      await expect(page.locator('html')).toHaveAttribute('data-surface', 'papyrus');
+    } else {
+      await expect(page.locator('html')).not.toHaveAttribute('data-world');
+      await expect(page.locator('html')).not.toHaveAttribute('data-surface');
+    }
   }
   expect(problems).toEqual([]);
 });
@@ -403,6 +410,6 @@ test('a skin file is added beside the others, a bad one is refused in plain word
   expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(rgb(CYBERPUNK.colors.bg));
   await again.getByRole('button', { name: words.skins.undo, exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'custom-2');
-  await expect(again.getByRole('region', { name: words.skins.catalog }).getByRole('heading', { level: 6 })).toHaveText(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Dusk', 'Dawn']);
+  await expect(again.getByRole('region', { name: words.skins.catalog }).getByRole('heading', { level: 6 })).toHaveText(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Ancient Egypt', 'Dusk', 'Dawn']);
   expect(problems).toEqual([]);
 });
