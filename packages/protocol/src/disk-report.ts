@@ -8,8 +8,9 @@ export const DiskPart = z.enum(DISK_PARTS);
 export type DiskPart = z.infer<typeof DiskPart>;
 
 const Bytes = z.number().int().min(0);
-/* How many of its latest removals a node names. */
+/* How many of its latest removals a node names, and how many of the copies it keeps. */
 export const DISK_CLEANED_MAX = 50;
+export const DISK_KEPT_MAX = 50;
 
 /* A node's disk, in bytes: the total and free space of the disk its folders are on, and the free space it needs there to
    take heavy work, which it works out from a share of the disk and an amount. docker: the same of Docker's own disk, where
@@ -18,7 +19,9 @@ export const DISK_CLEANED_MAX = 50;
    parts: Hornhoof's share by part, leaving out a part the node could not measure. low: since when the node, with either
    disk still under its threshold after cleaning up after itself, takes no new checks or builds; the same while it stays
    short, and null once it has room again. cleaned: what the node removed in its cleaning of the last day, one entry for
-   each part of each cleaning, newest first. */
+   each part of each cleaning, newest first. kept: what its cleaning leaves because it can't be restored, biggest first, so a
+   person sees where it is, how big and why: the agent's folder on the node (its employee id), the path inside that folder,
+   the task it is for, and whether it has changes not committed or commits not pushed. An older node leaves it out. */
 export const DiskReport = z.object({
   total: Bytes,
   free: Bytes,
@@ -27,5 +30,9 @@ export const DiskReport = z.object({
   parts: z.object({ images: Bytes, containers: Bytes, volumes: Bytes, buildCache: Bytes, workingCopies: Bytes, recordings: Bytes, checkTemp: Bytes } satisfies Record<DiskPart, typeof Bytes>).partial(),
   low: z.object({ since: z.iso.datetime() }).nullable(),
   cleaned: z.array(z.object({ part: DiskPart, bytes: Bytes, at: z.iso.datetime() })).max(DISK_CLEANED_MAX),
+  kept: z
+    .array(z.object({ part: DiskPart, agent: z.string().max(64), path: z.string().max(300), task: z.number().int().positive().nullable(), bytes: Bytes, why: z.enum(['uncommitted', 'unpushed']) }))
+    .max(DISK_KEPT_MAX)
+    .optional(),
 });
 export type DiskReport = z.infer<typeof DiskReport>;
