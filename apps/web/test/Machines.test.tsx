@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LANGUAGES, LanguageProvider } from '../src/i18n';
@@ -12,6 +12,7 @@ import { accessView, fixedAt, MACHINES, ME, mockApi, SUBS, withKey } from './api
 import { decl } from './css';
 import { clock } from '../src/ui/subscription';
 import { commandCode } from './command-code';
+import { shownTable } from './shown-table';
 
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
 const GIB = 1024 ** 3;
@@ -31,12 +32,6 @@ const card = (name: string) => {
   fireEvent.click(screen.getByRole('button', { name: new RegExp(`^(Open the card of |Открыть карточку )${name}$`) }));
   return screen.getByRole('article', { name });
 };
-/* The machines' own table, once they came: while they come the screen holds a table head of the same columns, busy. */
-const shownTable = () => waitFor(() => {
-  const table = screen.getByRole('table');
-  expect(table.closest('[aria-busy="true"]')).toBeNull();
-  return table;
-});
 const openCard = async (name: string) => {
   await shownTable();
   return card(name);
