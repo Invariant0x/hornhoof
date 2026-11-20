@@ -1,16 +1,16 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { captureWith } from './capture';
-import { DEV, serveTasksBoard } from './tasks-board/api';
+import { DEV, serveTasksBoard, TASKS } from './tasks-board/api';
 import { serveTree } from './tree-api';
 
 /* The zoom of the department's schema and tree stands at the start of its canvas's bottom, mirrored on a page right to left
-   as the rest of the layout is; the tracker's graph, drawn left to right in either direction, keeps its zoom at the left.
-   The department's line of what happened and its actions follow the zoom along the bottom, and its Speed and About drawer
-   opens at the start, under its name. Left to right nothing moves. Agent windows stand at the right in either direction, so
-   with one open the actions keep away from it: after the zoom left to right, at the end right to left, and the mirrored zoom
-   stays clear of it (#1658). Each look is shot before any check; shots go to HH_SCREENSHOT_DIR when it is set. Made-up
-   companies. */
+   as the rest of the layout is. The department's line of what happened and its actions follow the zoom along the bottom, and
+   its Speed and About drawer opens at the start, under its name. Left to right nothing moves. Agent windows stand at the right
+   in either direction, so with one open the actions keep away from it: after the zoom left to right, at the end right to
+   left, and the mirrored zoom stays clear of it (#1658). The tracker's graph is drawn mirrored right to left, its root at the
+   right, and its zoom follows to the start too (#1670). Each look is shot before any check; shots go to HH_SCREENSHOT_DIR
+   when it is set. Made-up companies. */
 
 const capture = captureWith('canvas-mirror', process.env.HH_SCREENSHOT_DIR);
 type Dir = 'ltr' | 'rtl';
@@ -40,8 +40,6 @@ async function open(context: BrowserContext, size: Size, dir: Dir, skin: string,
 
 const department = (context: BrowserContext, size: Size, dir: Dir, skin: string) =>
   open(context, size, dir, skin, page => serveTree(page, { during: true }), '/departments/d2');
-const tracker = (context: BrowserContext, size: Size, dir: Dir, skin: string) =>
-  open(context, size, dir, skin, serveTasksBoard, `/tasks?department=${DEV.id}&view=graph`);
 
 /* Two frames in a row with the same boxes: the page has stopped moving. */
 async function still(page: Page, selector: string) {
@@ -59,7 +57,8 @@ async function box(page: Page, selector: string): Promise<Box> {
   return b;
 }
 const meets = (a: Box, b: Box) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-const near = (actual: number, expected: number, what: string) => expect(Math.abs(actual - expected), `${what}: ${actual} for ${expected}`).toBeLessThanOrEqual(1);
+/* Soft, so a test shows every place that is off, not only the first. */
+const near = (actual: number, expected: number, what: string) => expect.soft(Math.abs(actual - expected), `${what}: ${actual} for ${expected}`).toBeLessThanOrEqual(1);
 
 /* Right to left a box is its left to right box mirrored across the page: as far from the right, at the same height, as wide. */
 function mirrored(what: string, ltr: Box, rtl: Box, across: number) {
@@ -158,22 +157,51 @@ for (const skin of SKINS) for (const height of [900, 640]) {
   });
 }
 
-/* The tracker's graph is drawn left to right in either direction, its root at the left and its leaves at the right, so its
-   zoom stays at the left of its canvas, over the side by the root, where it covers no node when the graph opens: mirrored,
-   it would lie over the leaves. Mirroring the graph is a job of its own (#1658, Design's verdict in #1668). */
+/* Right to left the tracker's graph is the mirror of its drawing left to right: its root at the right, each level further to
+   the left, the lane of a wait left of the tree and its word between the waiting node and the lane, the words of each reading
+   in their own direction. Its zoom stands at the start of the canvas's bottom as on the other canvases, over the side by the
+   root, where it covers no node when the graph opens. Left to right nothing moves (#1670, Design's verdict in #1668). The
+   check of the card payments waits for their build, so a wait is drawn. */
+/* A node by its words as the page shows them: a goal after its mark, a task after its number. */
+const ROOT = '◎ Card payments', CHILD = '#1 Take card payments';
+const WAITING = TASKS.find(x => x.title === 'Check: take card payments')!, AWAITED = TASKS.find(x => x.title === 'Build: take card payments')!;
+async function serveWithWait(page: Page) {
+  await serveTasksBoard(page);
+  await page.route(url => url.pathname === '/api/tasks', route => route.fulfill({ json: { tasks: TASKS.map(x => (x.id === WAITING.id ? { ...x, waitsFor: [AWAITED.number] } : x)) } }));
+}
+const graph = (context: BrowserContext, size: Size, dir: Dir, skin: string) =>
+  open(context, size, dir, skin, serveWithWait, `/tasks?department=${DEV.id}&view=graph`);
+
 for (const skin of SKINS) for (const size of [WIDE, PHONE]) {
-  test(`the tracker graph keeps its zoom at the left of its canvas in either direction, over no node: ${skin} ${size.width}`, async ({ context }, info) => {
-    const page = { ltr: await tracker(context, size, 'ltr', skin), rtl: await tracker(context, size, 'rtl', skin) };
+  test(`the tracker graph grows from a root at the start, its wait and its zoom mirrored with it, over no node: ${skin} ${size.width}`, async ({ context }, info) => {
+    const page = { ltr: await graph(context, size, 'ltr', skin), rtl: await graph(context, size, 'rtl', skin) };
     for (const dir of ['ltr', 'rtl'] as const) {
       await expect(page[dir].getByRole('region', { name: en.tracker.graph.canvas }).locator('.tr-node').first()).toBeVisible();
+      await expect(page[dir].locator('.tr-wires .wait')).toHaveCount(1);
       /* On a phone the canvas runs below the fold: its zoom is brought into sight, as a person scrolls to it. */
       await page[dir].locator('.tr-canvas .zoom').scrollIntoViewIfNeeded();
       await still(page[dir], '.tr-canvas, .tr-canvas .zoom, .tr-canvas .world, .tr-canvas .tr-node');
       if (info.project.name.includes('chromium')) await capture(page[dir], info, `tracker-${skin}-${dir}-${size.width}`);
     }
     const at = async (selector: string) => ({ ltr: await box(page.ltr, selector), rtl: await box(page.rtl, selector) });
+    const node = (title: string) => at(`.tr-canvas .tr-node:has(.tr-node-title:text-is("${title}"))`);
     const canvas = await at('.tr-canvas'), zoom = await at('.tr-canvas .zoom');
     mirrored('the canvas', canvas.ltr, canvas.rtl, size.width);
+    /* Left to right the zoom stands where it stood; right to left it is mirrored with the page. */
+    near(zoom.ltr.x - canvas.ltr.x, EDGE + FRAME, 'the zoom from the canvas\'s left, left to right');
+    mirrored('the zoom', zoom.ltr, zoom.rtl, size.width);
+    const root = await node(ROOT), child = await node(CHILD);
+    const waiting = await node(`#${WAITING.number} ${WAITING.title}`), awaited = await node(`#${AWAITED.number} ${AWAITED.title}`);
+    const lane = await at('.tr-wires .wait path'), word = await at('.tr-wires .wait text');
+    expect.soft(root.ltr.x + root.ltr.width, 'left to right: the root left of its task').toBeLessThan(child.ltr.x);
+    expect.soft(root.rtl.x, 'right to left: the root right of its task').toBeGreaterThan(child.rtl.x + child.rtl.width);
+    /* As far from the canvas's start as left to right, at the same height: the drawing is mirrored, not only moved. */
+    near(canvas.rtl.x + canvas.rtl.width - (root.rtl.x + root.rtl.width), root.ltr.x - canvas.ltr.x, 'the root from the canvas\'s start, right to left');
+    near(root.rtl.y, root.ltr.y, 'the root at the same height, right to left');
+    expect.soft(lane.ltr.x + lane.ltr.width, 'left to right: the lane right of its nodes').toBeGreaterThan(Math.max(waiting.ltr.x + waiting.ltr.width, awaited.ltr.x + awaited.ltr.width));
+    expect.soft(lane.rtl.x, 'right to left: the lane left of its nodes').toBeLessThan(Math.min(waiting.rtl.x, awaited.rtl.x));
+    expect.soft(word.ltr.x, 'left to right: the word after the waiting node').toBeGreaterThanOrEqual(waiting.ltr.x + waiting.ltr.width);
+    expect.soft(word.rtl.x + word.rtl.width, 'right to left: the word before the waiting node').toBeLessThanOrEqual(waiting.rtl.x);
     for (const dir of ['ltr', 'rtl'] as const) {
       /* What the canvas shows of each node, its words inside it, meets no floating control. */
       const nodes = await page[dir].locator('.tr-canvas .tr-node').evaluateAll(els => els.map(e => {
@@ -186,8 +214,7 @@ for (const skin of SKINS) for (const size of [WIDE, PHONE]) {
         const x = Math.max(b.x, frame.x), y = Math.max(b.y, frame.y);
         return { x, y, width: Math.max(0, Math.min(b.x + b.width, frame.x + frame.width) - x), height: Math.max(0, Math.min(b.y + b.height, frame.y + frame.height) - y) };
       };
-      expect(nodes.filter(n => meets(seen(n.box), zoom[dir])).map(n => n.name), `${dir} ${size.width}: nodes under the zoom`).toEqual([]);
-      near(zoom[dir].x - canvas[dir].x, EDGE + FRAME, `the zoom from the canvas's left, ${dir}`);
+      expect.soft(nodes.filter(n => meets(seen(n.box), zoom[dir])).map(n => n.name), `${dir} ${size.width}: nodes under the zoom`).toEqual([]);
       near(canvas[dir].y + canvas[dir].height - (zoom[dir].y + zoom[dir].height), EDGE + FRAME, `the zoom from the canvas's bottom, ${dir}`);
     }
   });

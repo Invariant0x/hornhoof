@@ -3,7 +3,7 @@ import { useLanguage, useT } from '../i18n';
 import { humanStatus, isClosed, taskWaits, type Asks, type TaskTree } from '../task-tree';
 import { boardColumns, doerOf, layoutTree, listGroups, NODE, type BoardColumn, type Crumb, type GraphNode, type ListGroup, type Placed } from '../tracker';
 import type { GoalView, Pipeline, PipelineStage, TaskLine } from '../types';
-import { CANVAS_ZOOM_LIMITS, usePanZoom, ZoomBar } from './canvas';
+import { CANVAS_ZOOM_LIMITS, usePageDirection, usePanZoom, ZoomBar } from './canvas';
 import { dueText } from './tracker-words';
 import { routePath } from '../routes';
 import { TrackerIcon, type Program } from './icons';
@@ -455,19 +455,23 @@ function Node({ placed, rows, onOpenGoal }: { placed: Placed; rows: Rows; onOpen
   );
 }
 
+/* The side of a node that faces what is under it, and the one that faces what is above it: right and left left to right,
+   mirrored right to left. */
+const outer = (p: Placed, rtl: boolean) => (rtl ? p.x : p.x + NODE.w);
+const inner = (p: Placed, rtl: boolean) => (rtl ? p.x + NODE.w : p.x);
+
 /* A line from the end of one node to the start of another, bent in the middle. */
-function wire(a: Placed, b: Placed): string {
-  const [x1, y1, x2, y2] = [a.x + NODE.w, a.y + a.h / 2, b.x, b.y + b.h / 2];
+function wire(a: Placed, b: Placed, rtl: boolean): string {
+  const [x1, y1, x2, y2] = [outer(a, rtl), a.y + a.h / 2, inner(b, rtl), b.y + b.h / 2];
   const mid = (x1 + x2) / 2;
-  return x2 > x1 ? `M${x1} ${y1}C${mid} ${y1} ${mid} ${y2} ${x2} ${y2}` : `M${a.x + NODE.w / 2} ${a.y + a.h}C${a.x + NODE.w / 2} ${y2} ${b.x + NODE.w / 2} ${y1} ${b.x + NODE.w / 2} ${b.y}`;
+  return (rtl ? x2 < x1 : x2 > x1) ? `M${x1} ${y1}C${mid} ${y1} ${mid} ${y2} ${x2} ${y2}` : `M${a.x + NODE.w / 2} ${a.y + a.h}C${a.x + NODE.w / 2} ${y2} ${b.x + NODE.w / 2} ${y1} ${b.x + NODE.w / 2} ${b.y}`;
 }
 
-/* A wait goes out from the end of the waiting node to a lane of its own past the whole tree, along it, and back to the end
-   of the node it waits for, where its arrow points. */
-const LANE = { first: 24, step: 14, room: 70 };
-function waitWire(a: Placed, b: Placed, lane: number): string {
+/* A wait goes out from the end of the waiting node to its lane past the whole tree, along it, and back to the end of the
+   node it waits for, where its arrow points. */
+function waitWire(a: Placed, b: Placed, lane: number, rtl: boolean): string {
   const [y1, y2] = [Math.round(a.y + a.h / 2 + 6), Math.round(b.y + b.h / 2 + 6)];
-  return `M${a.x + NODE.w} ${y1}H${lane}V${y2}H${b.x + NODE.w + 2}`;
+  return `M${outer(a, rtl)} ${y1}H${lane}V${y2}H${rtl ? b.x - 2 : b.x + NODE.w + 2}`;
 }
 
 /* The least scale a tree opens at, where the words of its nodes still read. */
@@ -481,7 +485,9 @@ function Canvas({ forest, rows, onOpenGoal }: { forest: GraphNode[]; rows: Rows;
   const box = useRef<HTMLDivElement>(null);
   const world = useRef<HTMLDivElement>(null);
   const [heights, setHeights] = useState<ReadonlyMap<string, number>>(new Map());
-  const layout = layoutTree(forest, id => heights.get(id));
+  const dir = usePageDirection();
+  const rtl = dir === 'rtl';
+  const layout = layoutTree(forest, id => heights.get(id), dir);
   /* A font that arrives after the nodes are drawn changes their heights: they are measured again then. */
   const [, setFontsIn] = useState(0);
   useEffect(() => {
@@ -504,15 +510,17 @@ function Canvas({ forest, rows, onOpenGoal }: { forest: GraphNode[]; rows: Rows;
   const root = layout.nodes.find(p => p.depth === 0);
   const rootMiddle = root ? root.y + root.h / 2 : 0;
   /* all: the whole tree as small as it takes. Otherwise a tree too big for the canvas opens at a size its words read at,
-     on the middle of its first root. */
+     on the middle of its first root, which stands at the start of the canvas: right to left, the view is the mirror of the
+     one left to right. */
   const place = useCallback((all: boolean) => {
     const el = box.current;
     const [w, h] = [el?.clientWidth ?? 0, el?.clientHeight ?? 0];
     const whole = w && h && layout.width && layout.height ? Math.max(CANVAS_ZOOM_LIMITS.min, Math.min(1, (w - 24) / layout.width, (h - 24) / layout.height)) : 1;
     const k = all ? whole : Math.max(whole, Math.min(1, READABLE));
     const y = k === whole ? 12 : Math.min(12, h / 2 - rootMiddle * k);
-    setView({ k, x: Math.max(12, (w - layout.width * k) / 2), y, smooth: false });
-  }, [layout.width, layout.height, rootMiddle, setView]);
+    const start = Math.max(12, (w - layout.width * k) / 2);
+    setView({ k, x: rtl ? w - start - (layout.left + layout.width) * k : start, y, smooth: false });
+  }, [layout.width, layout.height, layout.left, rootMiddle, rtl, setView]);
   const fit = useCallback(() => place(true), [place]);
   /* New work on the tree places it again, until the person moved or zoomed it. */
   useLayoutEffect(() => {
@@ -525,8 +533,6 @@ function Canvas({ forest, rows, onOpenGoal }: { forest: GraphNode[]; rows: Rows;
     e.stopPropagation();
   };
   if (!layout.nodes.length) return <p className="muted">{t.tracker.graph.empty}</p>;
-  const right = Math.max(...layout.nodes.map(p => p.x + NODE.w));
-  const width = Math.max(layout.width, layout.waits.length ? right + LANE.first + layout.waits.length * LANE.step + LANE.room : 0);
   const arrow = `tr-arrow-${marker.replace(/[^A-Za-z0-9_-]/g, '')}`;
   const legend = t.tracker.graph.legend;
   return (
@@ -534,17 +540,23 @@ function Canvas({ forest, rows, onOpenGoal }: { forest: GraphNode[]; rows: Rows;
       <div className="tr-canvas">
         <div className="map tr-map" ref={box} role="region" aria-label={t.tracker.graph.canvas} {...pan.handlers} onClickCapture={ignoreDragged}>
           <div className="world" ref={world} style={{ transform: `translate(${pan.view.x}px, ${pan.view.y}px) scale(${pan.view.k})` }}>
-            <svg className="wires tr-wires" width={width} height={layout.height} aria-hidden="true">
+            <svg className="wires tr-wires" width={layout.drawn} height={layout.height} aria-hidden="true">
               <defs>
                 <marker id={arrow} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" /></marker>
               </defs>
-              {layout.parts.map(p => <path key={`${p.from}-${p.to}`} className="part" d={wire(at.get(p.from)!, at.get(p.to)!)} />)}
-              {layout.waits.map((w, i) => {
+              {layout.parts.map(p => <path key={`${p.from}-${p.to}`} className="part" d={wire(at.get(p.from)!, at.get(p.to)!, rtl)} />)}
+              {layout.waits.map(w => {
                 const [a, b] = [at.get(w.from)!, at.get(w.to)!];
+                const y = Math.round(a.y + a.h / 2 + 6) - 5;
                 return (
                   <g key={`${w.from}~${w.to}`} className="wait">
-                    <path d={waitWire(a, b, right + LANE.first + i * LANE.step)} markerEnd={`url(#${arrow})`} />
-                    <text x={a.x + NODE.w + 6} y={Math.round(a.y + a.h / 2 + 6) - 5}>{`${t.tracker.graph.waitsFor} →`}</text>
+                    <path d={waitWire(a, b, w.lane, rtl)} markerEnd={`url(#${arrow})`} />
+                    {/* Its word stands by the waiting node towards the lane, the arrow pointing to the lane. Right to left it
+                        ends by the node: laid out left to right from that end, so no engine runs it back over the node, while
+                        its words keep their own order. */}
+                    {rtl
+                      ? <text x={a.x - 6} y={y} textAnchor="end" direction="ltr">{`← ${t.tracker.graph.waitsFor}`}</text>
+                      : <text x={a.x + NODE.w + 6} y={y}>{`${t.tracker.graph.waitsFor} →`}</text>}
                   </g>
                 );
               })}

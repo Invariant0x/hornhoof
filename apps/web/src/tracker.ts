@@ -230,13 +230,23 @@ export function pipelineTree(pipeline: Pipeline, tasks: TaskLine[]): GraphNode[]
 
 /* The width and least height of a node and the steps between levels and rows, in the units of the canvas. */
 export const NODE = { w: 290, h: 52, dx: 330, dy: 62, pad: 20 };
+/* A wait's lane past the whole tree: the first this far out, each next one a step further, and room past the last for its
+   arrow and its word. */
+export const LANE = { first: 24, step: 14, room: 70 };
 export type Placed = { node: GraphNode; x: number; y: number; h: number; depth: number };
-export type Layout = { nodes: Placed[]; parts: { from: string; to: string }[]; waits: { from: string; to: string }[]; width: number; height: number };
+/* width and height: the tree's own box, which Fit frames, from left in the drawing; drawn: the width of the whole drawing,
+   the lanes of the waits with it. */
+export type Layout = {
+  nodes: Placed[]; parts: { from: string; to: string }[]; waits: { from: string; to: string; lane: number }[];
+  width: number; height: number; left: number; drawn: number;
+};
 
 /* Each level one step further along, each leaf on a row of its own, a node in the middle of what is under it and never over
    the node above it in its level. heightOf: the height a node's words take on the page, once measured; a node is never
-   lower than NODE.h. A dashed line goes from a task to each task of the tree it waits for. */
-export function layoutTree(forest: GraphNode[], heightOf: (id: string) => number | undefined = () => undefined): Layout {
+   lower than NODE.h. A dashed line goes from a task to each task of the tree it waits for, along a lane of its own past the
+   whole tree. Right to left the drawing is the mirror of the one left to right: the root at the right, each level further to
+   the left, the lanes left of the tree (#1670). */
+export function layoutTree(forest: GraphNode[], heightOf: (id: string) => number | undefined = () => undefined, dir: 'ltr' | 'rtl' = 'ltr'): Layout {
   const nodes: Placed[] = [];
   const parts: Layout['parts'] = [];
   const gap = NODE.dy - NODE.h;
@@ -259,12 +269,18 @@ export function layoutTree(forest: GraphNode[], heightOf: (id: string) => number
   };
   forest.forEach(tree => place(tree, 0));
   const numbered = new Map(nodes.flatMap(p => (p.node.kind === 'task' ? [[p.node.task.number, p.node.id] as const] : [])));
-  const waits = nodes.flatMap(p => (p.node.kind === 'task' ? p.node.task.waitsFor.flatMap(n => (numbered.has(n) ? [{ from: p.node.id, to: numbered.get(n)! }] : [])) : []));
+  const right = Math.max(0, ...nodes.map(p => p.x + NODE.w));
+  const waits = nodes.flatMap(p => (p.node.kind === 'task' ? p.node.task.waitsFor.flatMap(n => (numbered.has(n) ? [{ from: p.node.id, to: numbered.get(n)! }] : [])) : []))
+    .map((wait, i) => ({ ...wait, lane: right + LANE.first + i * LANE.step }));
   nodes.sort((a, b) => a.depth - b.depth || a.y - b.y);
+  const width = right + NODE.pad;
+  const drawn = Math.max(width, waits.length ? right + LANE.first + waits.length * LANE.step + LANE.room : 0);
+  const height = Math.max(0, ...nodes.map(p => p.y + p.h)) + NODE.pad;
+  if (dir === 'ltr') return { nodes, parts, waits, width, height, left: 0, drawn };
   return {
-    nodes, parts, waits,
-    width: Math.max(0, ...nodes.map(p => p.x + NODE.w)) + NODE.pad,
-    height: Math.max(0, ...nodes.map(p => p.y + p.h)) + NODE.pad,
+    nodes: nodes.map(p => ({ ...p, x: drawn - p.x - NODE.w })), parts,
+    waits: waits.map(wait => ({ ...wait, lane: drawn - wait.lane })),
+    width, height, left: drawn - width, drawn,
   };
 }
 

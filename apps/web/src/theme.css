@@ -719,12 +719,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .dname { min-width: 0; overflow-wrap: break-word; font-family: var(--f-display); font-size: 20px; font-weight: 600; }
 .cnt { flex: none; font-family: var(--f-display); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .cnt b { color: var(--ink); font-weight: 600; }
-/* The zoom at the start of a canvas's bottom, mirrored on a page right to left as the rest of the layout is (#1622, #1658),
-   and the orchestrator's line bottom middle. */
+/* The zoom at the start of a canvas's bottom, mirrored on a page right to left as the rest of the layout is, the tracker's
+   graph mirrored with it, its root at the start (#1622, #1658, #1670), and the orchestrator's line bottom middle. */
 .zoom { position: absolute; inset-inline-start: 16px; bottom: 16px; max-inline-size: calc(100% - 32px); display: flex; align-items: center; }
-/* The tracker's graph is drawn left to right in either direction, its root at the left, so its zoom stays at the left, over the
-   side by the root; mirrored it would lie over the leaves (#1658, until the graph mirrors). */
-.tr-canvas > .zoom { left: 16px; right: auto; }
 /* A block's grip over its top left corner, 44 px to touch at any zoom: nothing drawn, only the pointer shows it, and the ring of
    the keyboard's focus; the map's corners are not mirrored. */
 .grip { box-sizing: border-box; margin: 0; padding: 0; border: 0; background: none; cursor: move; touch-action: none; transform-origin: 50% 50%; }
