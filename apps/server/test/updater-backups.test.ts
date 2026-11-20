@@ -161,7 +161,7 @@ describe('updater, backups', () => {
     expect((await runOnce(stand(), null)).out).not.toContain('Deleted a database dump');
   });
 
-  it('sweeps a stale direct file of another owner and leaves a direct link target intact', async () => {
+  it('keeps a stale direct file of another owner and leaves a direct link target intact', async () => {
     const s = stand();
     mkdirSync(dumps(s));
     const old = new Date(Date.now() - 25 * 3_600_000);
@@ -180,7 +180,7 @@ describe('updater, backups', () => {
     const step = nativeOwner ? 'sweep_dumps' : "facts() { printf '%s\\n' '1 1 700 0'; }; sweep_dumps";
     const r = await runUpdaterStep(s, step);
     expect(r.code, r.out).toBe(0);
-    expect(existsSync(stale)).toBe(false);
+    expect(readFileSync(stale, 'utf8')).toBe('rows');
     expect(readFileSync(outside, 'utf8')).toBe('rows');
   });
 

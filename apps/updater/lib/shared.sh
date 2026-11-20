@@ -254,15 +254,22 @@ directory_mount() (
   exit 1
 )
 
+# Save the physical path including any trailing newlines in the directory name.
+read_cleanup_path() {
+  local output
+  output=$(physical_dir && printf '.') || return 1
+  printf -v "$1" '%s' "${output%$'\n.'}"
+}
+
 # Remove a direct entry. Walk a directory only from its own working directory on the parent's mount.
 # A link is unlinked by its name, and a directory left after a failed walk stays for the next pass.
 clear_entry() {
-  local item=$1 here=$2 mount=$3 depth=$4 actual child_mount
+  local item=$1 here=$2 mount=$3 depth=$4 child_path child_mount
   [ -L "$item" ] || [ -e "$item" ] || return 0
   if [ ! -L "$item" ] && [ -d "$item" ]; then
     (
       cd -P -- "$item" 2> /dev/null &&
-        actual=$(physical_dir) && [ "$actual" = "${here%/}/${item#./}" ] &&
+        read_cleanup_path child_path && [ "$child_path" = "${here%/}/${item#./}" ] &&
         child_mount=$(directory_mount) && [ "$child_mount" = "$mount" ] &&
         clear_here "$((depth + 1))"
     ) && rmdir -- "$item" 2> /dev/null
@@ -275,7 +282,7 @@ clear_entry() {
 clear_here() {
   local depth=${1:-0} here mount item status=0
   [ "$depth" -lt 16 ] || return 1
-  here=$(physical_dir) && mount=$(directory_mount) || return 1
+  read_cleanup_path here && mount=$(directory_mount) || return 1
   for item in ./* ./.[!.]* ./..?*; do
     clear_entry "$item" "$here" "$mount" "$depth" || status=1
   done
@@ -286,7 +293,7 @@ clear_here() {
 # so the files step can try again without relying on private directory names in the shared parent.
 remove_folders() (
   local name here mount status=0
-  entered "$CONTROL" && here=$(physical_dir) && mount=$(directory_mount) || exit 1
+  entered "$CONTROL" && read_cleanup_path here && mount=$(directory_mount) || exit 1
   for name in "$@"; do
     clear_entry "./${name:?}" "$here" "$mount" 0 || status=1
   done
