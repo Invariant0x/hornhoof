@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type Dispatch, type MutableRefObject, type ReactNode, type SetStateAction } from 'react';
 import { ApiFailure } from '../api';
 import { errorText, useT, type Messages } from '../i18n';
 import { LogoMark } from './icons';
@@ -88,25 +88,38 @@ type Marks = { ring: boolean; least: boolean; slow: boolean; over: boolean };
 
 const NOT_YET: Marks = { ring: false, least: false, slow: false, over: false };
 
+type SetMarks = Dispatch<SetStateAction<Marks>>;
+type Timer = ReturnType<typeof setTimeout>;
+
+/* Shows the ring now and holds it for its least time, in the one least timer of the load. */
+function showRing(setMarks: SetMarks, least: MutableRefObject<Timer | undefined>) {
+  setMarks(m => ({ ...m, ring: true, least: false }));
+  clearTimeout(least.current);
+  least.current = setTimeout(() => setMarks(m => ({ ...m, least: true })), RING_MIN_MS);
+}
+
+const markOf = (setMarks: SetMarks, key: 'slow' | 'over') => () => setMarks(m => ({ ...m, [key]: true }));
+
+/* A wait's timers from its start: the ring after its delay, or at once when Retry asked; longer than usual and given up,
+   where the limits count. */
+function startTimes(setMarks: SetMarks, least: MutableRefObject<Timer | undefined>, byRetry: boolean, timed: boolean): Timer[] {
+  const ring = () => showRing(setMarks, least);
+  setMarks(NOT_YET);
+  if (byRetry) ring();
+  const timers = byRetry ? [] : [setTimeout(ring, RING_DELAY_MS)];
+  if (timed) timers.push(setTimeout(markOf(setMarks, 'slow'), SLOW_MS), setTimeout(markOf(setMarks, 'over'), FAIL_MS));
+  return timers;
+}
+
 /* The ring, the holding of data and the limits of a load. A wait starts them, the ring at once when Retry asked; data that
    came while the ring showed waits until it showed its least time, counted from the moment it showed. */
 function useTimes(waiting: boolean, timed: boolean, asked: Asked): Times {
   const [marks, setMarks] = useState<Marks>(NOT_YET);
-  const least = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const least = useRef<Timer>(undefined);
   useEffect(() => () => clearTimeout(least.current), []);
   useLayoutEffect(() => {
     if (!waiting) return;
-    const ring = () => {
-      setMarks(m => ({ ...m, ring: true, least: false }));
-      clearTimeout(least.current);
-      least.current = setTimeout(() => setMarks(m => ({ ...m, least: true })), RING_MIN_MS);
-    };
-    setMarks(NOT_YET);
-    if (asked.byRetry) ring();
-    const timers = [
-      ...(asked.byRetry ? [] : [setTimeout(ring, RING_DELAY_MS)]),
-      ...(timed ? [setTimeout(() => setMarks(m => ({ ...m, slow: true })), SLOW_MS), setTimeout(() => setMarks(m => ({ ...m, over: true })), FAIL_MS)] : []),
-    ];
+    const timers = startTimes(setMarks, least, asked.byRetry, timed);
     return () => timers.forEach(clearTimeout);
   }, [waiting, timed, asked]);
   const holding = !waiting && marks.ring && !marks.least;

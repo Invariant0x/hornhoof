@@ -1,10 +1,10 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiFailure } from '../src/api';
 import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { UpdateSaysIt } from '../src/ui/LoadFailure';
-import { FAIL_MS, Hold, Idle, LoadState, RING_DELAY_MS, RING_MIN_MS, SLOW_MS, useLoad, type LoadPart } from '../src/ui/Loading';
+import { FAIL_MS, Hold, Idle, LoadState, MAX_HELD_ROWS, RING_DELAY_MS, RING_MIN_MS, SLOW_MS, useHeldRows, useLoad, type LoadPart } from '../src/ui/Loading';
 
 /* One load of a screen from its parts, on the style book's timeline (1.5, section 4): no ring for the first 400 ms, then the
    ring at least 500 ms; at 10 s it takes longer than usual, at 30 s it is given up; an error answer fails at once. Retry asks
@@ -208,5 +208,41 @@ describe('a part another part of the screen says', () => {
     expect(screen.queryByRole('alert')).toBeNull();
     later(FAIL_MS * 2);
     expect(phase(container)).toBe('loading');
+  });
+});
+
+/* Design #1611: a list holds as many rows as it showed last in this tab, at most 40; with none kept, or a tab that keeps
+   nothing, it fills what is in view. */
+describe('the rows a list holds while it loads', () => {
+  afterEach(() => {
+    sessionStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it('knows none at first, then the count the list showed last, kept per list', () => {
+    const { result, rerender } = renderHook(({ list, shown }) => useHeldRows(list, shown), { initialProps: { list: 'mine|list', shown: null as number | null } });
+    expect(result.current).toBeNull();
+    rerender({ list: 'mine|list', shown: 7 });
+    rerender({ list: 'mine|list', shown: null });
+    expect(result.current).toBe(7);
+    rerender({ list: 'company|list', shown: null });
+    expect(result.current).toBeNull();
+  });
+
+  it('holds at most 40, and at least one row of a list that showed none', () => {
+    const { result, rerender } = renderHook(({ shown }) => useHeldRows('long', shown), { initialProps: { shown: 500 as number | null } });
+    rerender({ shown: null });
+    expect(result.current).toBe(MAX_HELD_ROWS);
+    rerender({ shown: 0 });
+    rerender({ shown: null });
+    expect(result.current).toBe(1);
+  });
+
+  it('fills what is in view where the tab keeps nothing', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied'); });
+    const { result, rerender } = renderHook(({ shown }) => useHeldRows('private', shown), { initialProps: { shown: 5 as number | null } });
+    rerender({ shown: null });
+    expect(result.current).toBeNull();
   });
 });

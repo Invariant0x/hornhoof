@@ -2,7 +2,7 @@ import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { api, ApiFailure } from '../api';
 import { useStream } from '../live';
-import { LoadState, useLoad } from '../ui/Loading';
+import { LoadState, useLoad, type Load } from '../ui/Loading';
 import { PlanConnection } from '../ui/PlanConnection';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
@@ -540,6 +540,9 @@ function usePlanConnections({ setSubs, load, run, signIn }: ConnectionParts) {
 }
 
 /* What could not load, said on top of the page: the plans' own failure stands where they would until they came. */
+/* A screen's data once its load is done, so the ring keeps its least time; until then, none. */
+const doneOf = <T,>(data: T | null, load: Load): T | null => (load.phase === 'done' ? data : null);
+
 const failureOnTop = (subs: SubView[] | null, plans: unknown, commands: unknown) => (subs ? plans ?? commands : commands);
 
 export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
@@ -571,6 +574,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   const { subs, setSubs, apiPlaces, commands, load, connected, newCommand: requestCommand, dismissCommand, failure: readFailure, commandsFailure } = usePlanCommands(live);
   /* The plans come with the shared indicator where they will stand, and say why when they do not. */
   const plansLoad = useLoad([{ data: subs, failure: readFailure, load }]);
+  const plans = doneOf(subs, plansLoad);
   /* Where this person connects an API key: anywhere with the whole company, else only in the departments they run. */
   const places = me.person.scopeKind === 'company' ? null : apiPlaces ?? [];
   const newCommand = (sub: SubView) => run(() => requestCommand(sub));
@@ -692,15 +696,15 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
       {/* The plans show once their load is done: until then the ring holds their room for at least its least time. */}
-      {subs && plansLoad.phase === 'done' && subs.length === 0 && <p className="muted">{t.subs.empty}</p>}
-      {subs && plansLoad.phase === 'done' && subs.length > 0 && (
+      {plans && plans.length === 0 && <p className="muted">{t.subs.empty}</p>}
+      {plans && plans.length > 0 && (
         <SortTable
-          rows={subs}
+          rows={plans}
           columns={subscriptionColumns(t, now)}
           name={s => subName(t, s)}
           initialSort={{ key: 'status', direction: 1 }}
           search={{ placeholder: t.tables.searchSubscriptions, short: t.tables.searchSubscriptionsShort, text: s => subscriptionSearch(t, language, s), count: t.tables.subscriptionCount }}
-          filters={subscriptionFilters(t, now, subs)}
+          filters={subscriptionFilters(t, now, plans)}
           card={s => <SubscriptionDetails sub={s} me={me} now={now} controls={{
             command: commands ? commandForPlan(commands, s, now) : undefined,
             test: tests[s.id], asking: confirm === s.id,
@@ -709,7 +713,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
             keying: keyFor === s.id,
             editing: editFor === s.id, setEditFor,
             saved: subscription => { setEditFor(null); setSubs(list => replaceSubscription(list, subscription, 'update')); }, places,
-            setBudget, setFallbacks, plans: subs, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, setConfirm, remove, endSignIn, stopSignIn, retryConnection, cancelConnection,
+            setBudget, setFallbacks, plans, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, setConfirm, remove, endSignIn, stopSignIn, retryConnection, cancelConnection,
             done: () => { setKeyFor(null); void load(); },
           }} />}
         />
