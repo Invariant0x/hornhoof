@@ -177,7 +177,7 @@ async function sweepScales(page: Page, dir: 'ltr' | 'rtl', context: string, chec
   const zv = page.locator('.map .zoom .zv');
   const btns = page.locator('.map .zoom .zbtn');
 
-  /* Initial fitted scale on the map ("115%" at 1440, "41%" at 375). */
+  /* Initial fitted scale on the map: "100%" at 1440, as Fit and Show everything cap it (Design on #1597). */
   const initial = await measureZoom(page, dir);
   assertWholeZoom(initial, `${context} initial (${initial.text})`);
 
@@ -198,7 +198,7 @@ async function sweepScales(page: Page, dir: 'ltr' | 'rtl', context: string, chec
 
   /* Restore fitted scale via the Fit button. */
   await page.evaluate(() => document.querySelectorAll<HTMLButtonElement>('.map .zoom .zbtn')[2]!.click());
-  if (context.includes('1440')) await expect(zv).toHaveText('115%');
+  if (context.includes('1440')) await expect(zv).toHaveText('100%');
   assertWholeZoom(await measureZoom(page, dir), `${context} fit`);
 }
 
@@ -208,7 +208,7 @@ test('map: scale label fits whole across scales and skins, en and ru ltr, at 144
   for (const { id } of LANGUAGES) {
     for (const skin of SKINS) {
       await openMap(page, id, skin, 'ltr', 1440);
-      await expect(page.locator('.map .zoom .zv')).toHaveText('115%');
+      await expect(page.locator('.map .zoom .zv')).toHaveText('100%');
       await sweepScales(page, 'ltr', `${id} ltr ${skin} 1440`, skin === 'cyberpunk');
     }
   }
