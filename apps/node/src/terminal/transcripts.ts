@@ -10,16 +10,25 @@ export class LineTail {
   private offset: number;
   /* The start of a line the program has not ended yet. It waits as bytes, since a read can stop inside a letter. */
   private partial = Buffer.alloc(0);
+  /* Whether it knows the end of the file as it read last: what it reads from now on was written from now on. A file to
+     follow from its end that it could not find has no known end until it reads it. */
+  private known: boolean;
 
   constructor(
     private readonly file: string,
     { fromEnd = false }: { fromEnd?: boolean } = {},
   ) {
-    this.offset = fromEnd ? sizeOf(file) : 0;
+    const size = fromEnd ? sizeOf(file) : 0;
+    this.offset = size ?? 0;
+    this.known = size !== null;
   }
+
+  get bounded(): boolean { return this.known; }
 
   read(): string[] {
     const size = sizeOf(this.file);
+    if (size === null) return [];
+    this.known = true;
     if (size <= this.offset) return [];
     const buf = Buffer.alloc(size - this.offset);
     const fd = openSync(this.file, 'r');
@@ -37,11 +46,11 @@ export class LineTail {
   }
 }
 
-function sizeOf(file: string): number {
+function sizeOf(file: string): number | null {
   try {
     return statSync(file).size;
   } catch {
-    return 0;
+    return null;
   }
 }
 

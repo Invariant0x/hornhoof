@@ -135,6 +135,8 @@ type Agent = {
   ownerTyped?: boolean;
   /* The prompt Hornhoof typed, until the program's prompt hook says what it got. */
   typing?: string | null;
+  /* The log whose new entries can be the receipt of what Hornhoof types: the one read up to the moment it went in. */
+  receiptLog?: LineTail | null;
   limits: Limits | null;
   /* How full the context is as Hornhoof last heard it, and how many tokens Kimi's model takes in it. */
   contextUsed: number | null;
@@ -984,8 +986,9 @@ export class TerminalHost {
     await this.prepare(job, urls);
     if (a.sessionId) a.left.add(a.sessionId);
     Object.assign(a, { ...startedState(job, spec), hash, instance: randomUUID() });
-    if (job.program.kind === 'claude' && !job.input.sessionId) await this.keepNew(job.input, spec.sessionId);
-    a.tail = this.tailFor(a);
+    const fresh = job.program.kind === 'claude' && !job.input.sessionId;
+    if (fresh) await this.keepNew(job.input, spec.sessionId);
+    a.tail = this.tailFor(a, fresh);
   }
 
   private async launchAttempt(a: Agent, job: TermJob, spec: LaunchSpec): Promise<void> {
@@ -1964,10 +1967,11 @@ export class TerminalHost {
     return `Hornhoof: this message reached you cut short, ${got.length} of its ${typed.length} characters. The whole message is in ${file}. Read it there before you go on.`;
   }
 
-  private tailFor(a: Agent): LineTail | null {
+  /* fresh: a session the program starts now, whose log holds only what it writes from now on, even before it exists. */
+  private tailFor(a: Agent, fresh = false): LineTail | null {
     if (a.program?.kind === 'antigravity') a.agyRead = agySteps();
     const file = this.transcriptFile(a);
-    return file ? new LineTail(file, { fromEnd: true }) : null;
+    return file ? new LineTail(file, { fromEnd: !fresh }) : null;
   }
 
   private transcriptFile(a: Agent): string | null {
@@ -2087,21 +2091,39 @@ export class TerminalHost {
   }
 
   /* Hornhoof's words go in from here. What the program logged before is read first, while no words wait, so no entry of it
-     counts as their receipt. */
+     counts as their receipt. A program that comes back is read from the end of its log the node marked as it came up, and
+     the node reads nothing before the words go in. A log whose end it could not find then can hold earlier entries, and
+     gives no receipt; nor does the log of a session the program changes to later, which is read from its start. This
+     takes Claude's --resume to go on in the same file, adding to it and copying no earlier entry into it once up, as the
+     transcripts of Claude Code up to 2.1.329 on a node show: one file across launches and versions, with no entry of
+     another session and no words of the user twice. */
   private typingNow(a: Agent, words: string): void {
     this.drain(a);
     a.typing = words;
+    a.receiptLog = a.tail?.bounded ? a.tail : null;
   }
 
   /* Claude's transcript records the words Hornhoof typed as it takes them: the receipt its prompt hook gives, should Claude
      have given up on that hook, as on a busy machine, and the node take the program's own end for another turn's. Words
      Claude queued and dequeued have their own receipts. */
   private claudeTookTyped(a: Agent, line: Record<string, unknown>): void {
-    const typed = a.typing;
-    if (typed == null || a.dequeued || !a.turn || this.overIn(a) || !claudeTook(line, typed)) return;
-    if (!this.takeRetainedAssignment(a, typed)) a.turn.words.taken(typed);
+    const typed = this.awaitingReceipt(a);
+    if (typed === null || !claudeTook(line, typed)) return;
+    /* What Claude takes while Hornhoof's words wait to go in came of a person's Enter, were it the same words: theirs. */
+    if (a.promptWaits) return this.personSent(a);
+    if (!this.takeRetainedAssignment(a, typed)) a.turn!.words.taken(typed);
     a.typing = null;
     this.tookTurn(a);
+  }
+
+  /* The words Hornhoof typed whose receipt the line read now can be. */
+  private awaitingReceipt(a: Agent): string | null {
+    if (a.typing == null || a.dequeued || !a.turn || this.overIn(a)) return null;
+    return this.readUpToTyping(a) ? a.typing : null;
+  }
+
+  private readUpToTyping(a: Agent): boolean {
+    return a.tail != null && a.tail === a.receiptLog;
   }
 
   private knownClaudeWord(a: Agent, receipt: NonNullable<ReturnType<typeof claudeWordReceipt>>): boolean {

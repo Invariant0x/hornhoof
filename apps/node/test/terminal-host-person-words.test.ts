@@ -74,6 +74,23 @@ describe("a person's words sent while Hornhoof's turn waits to type its prompt",
     expect(before, 'no prompt goes into a program that answers the person').toBe(0);
   });
 
+  /* Claude logs an entry of the turn's own words while that prompt waits: they came of the person's Enter, not Hornhoof's. */
+  it("keep the turn's words waiting when Claude takes the same words of the person's, and the prompt goes in after", async () => {
+    const c = await personWrites();
+    c.record({ type: 'user', message: { role: 'user', content: PROMPT } });
+    c.drain();
+    expect(c.a.typing).toBe(PROMPT);
+    expect(c.a.turn?.words.pending()).toEqual([PROMPT]);
+    await c.pass(1_000);
+    await c.ended({ last_assistant_message: 'An answer for the person.' });
+    await c.until(() => c.enters() > 0);
+    await c.takes('hook first');
+    await c.ended({ last_assistant_message: 'The answer of the turn.' });
+    await c.pass(5_000);
+    expect(c.outcome.result).toMatchObject({ ok: true, result: 'The answer of the turn.' });
+    expect(c.opens()).toEqual([]);
+  });
+
   it('get their answer when they stop it themselves with Esc, and the prompt goes in after', async () => {
     const c = await personWrites();
     await c.pass(1_000);

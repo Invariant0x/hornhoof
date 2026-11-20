@@ -2,7 +2,7 @@ import { UNHEARD_MS, type ProgramState } from '@hornhoof/protocol';
 import { RESTART_AFTER_MS } from '@hornhoof/protocol/map';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { contentText, isRecord } from '../providers/events.js';
-import { flat } from './left-input.js';
+import { flat, pastable } from './left-input.js';
 import type { TermProgram } from './programs.js';
 
 export type RestartEvidence = {
@@ -76,13 +76,23 @@ export function claudeWordReceipt(line: Record<string, unknown>, enqueued: strin
 }
 
 /* Claude records the words it took as an entry of the user, as text and nothing else: a tool's output comes as an entry of
-   the user too, but as its result, and what Claude itself says is its own. Only these words, exactly, are these words;
-   space around them is no part of them. */
+   the user too, but as its result, and what Claude itself says is its own. Only these words whole are these words, as
+   Claude got them: as tmux pasted them, inside Claude's wrapper of a paste over several lines or not, with their space
+   folded, as the receipts of queued words take them. */
 export function claudeTook(line: Record<string, unknown>, words: string): boolean {
-  if (line.type !== 'user' || line.isMeta === true || !isRecord(line.message) || line.message.role !== 'user') return false;
-  const content = line.message.content;
-  const parts: unknown[] = typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : [];
-  return parts.length > 0 && parts.every(part => isRecord(part) && part.type === 'text') && contentText(content) === words.trim();
+  const message = userMessage(line);
+  return message !== null && onlyText(message.content) && same(pastable(words), contentText(message.content));
+}
+
+/* The message of an entry the user wrote: not a note Claude adds of its own, nor the prompt of a sub-agent. */
+function userMessage(line: Record<string, unknown>): Record<string, unknown> | null {
+  if (line.type !== 'user' || line.isMeta === true || line.isSidechain === true || !isRecord(line.message)) return null;
+  return line.message.role === 'user' ? line.message : null;
+}
+
+function onlyText(content: unknown): boolean {
+  if (typeof content === 'string') return true;
+  return Array.isArray(content) && content.length > 0 && content.every(part => isRecord(part) && part.type === 'text' && typeof part.text === 'string');
 }
 
 /* Keys are not receipts. Keep each live message until the program takes it, including across a restart. */
