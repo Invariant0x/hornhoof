@@ -124,6 +124,14 @@ const shownNone = (s: ShownDecisions) => !s.requests.length && !s.proposals.leng
 
 const nothing = () => {};
 
+/* Tasks a search found or that have a date, once the tasks came: until then the room holds the indicator, so it never says
+   that there are none while they may still come. */
+function FoundList({ load, tasks, all, rows, none }: { load: Load; tasks: TaskLine[]; all: TaskLine[]; rows: Rows; none: string }) {
+  const t = useT();
+  const shown = tasks.length ? <TrackerFound tasks={tasks} all={all} rows={rows} /> : <p className="muted" role="status">{none}</p>;
+  return <Hold load={load}>{load.phase === 'done' ? shown : <Busy ring={load.ring} words={t.load.tasks} />}</Hold>;
+}
+
 /* The work of a view, held while it comes (style book 1.5, section 4): the list holds its rows at their final size, as many
    as it showed last in this tab; the board and the graph hold the ring where they will stand. Once it came, it fades in. */
 function HeldWork({ load, view, list, shown, children }: { load: Load; view: string; list: string; shown: number; children: ReactNode }) {
@@ -694,7 +702,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
           <>
             <section className="tr-found" aria-label={t.tracker.search.results}>
               <h2>{t.tracker.search.results}</h2>
-              {found.length ? <TrackerFound tasks={found} all={all} rows={rows} /> : <p className="muted" role="status">{t.tasks.noSearchResults}</p>}
+              <FoundList load={tasksLoad} tasks={found} all={all} rows={rows} none={t.tasks.noSearchResults} />
             </section>
             {/* A search leaves what waits for the person where it was. */}
             {WAITS_SHOWN.has(section.kind) && waiting}
@@ -710,10 +718,10 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
           )
           : section.kind === 'due' ? (
             <section className="tr-found" aria-label={t.tracker.side.dates}>
-              {work.length ? <TrackerFound tasks={[...work].sort((a, b) => a.dueAt!.localeCompare(b.dueAt!))} all={all} rows={rows} /> : <p className="muted">{t.tracker.noDates}</p>}
+              <FoundList load={tasksLoad} tasks={[...work].sort((a, b) => a.dueAt!.localeCompare(b.dueAt!))} all={all} rows={rows} none={t.tracker.noDates} />
             </section>
           )
-          : section.kind === 'turns' ? <TurnsAndReleases tasks={tasks} places={places} rows={{ selected, onOpenTask, asksYou, questionAt, place: task => [task.department ? place_(task.department) : t.tracker.side.orchestrator, task.product?.name].filter(Boolean).join(' / ') }} />
+          : section.kind === 'turns' ? <TurnsAndReleases tasks={taskPart} places={places} rows={{ selected, onOpenTask, asksYou, questionAt, place: task => [task.department ? place_(task.department) : t.tracker.side.orchestrator, task.product?.name].filter(Boolean).join(' / ') }} />
           : (
             <>
               <div className="tr-bar">

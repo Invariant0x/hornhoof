@@ -3,6 +3,7 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { en } from '../src/i18n/en';
 import { Shell } from '../src/screens/Shell';
 import type { GoalView, Me, Org, Pipeline, ProposalDecision, TaskDetail, TaskLine, TaskLogLine, WaitingRequest } from '../src/types';
 import { decisions, DEV_ORG, ME, mockApi, TASK_DETAIL, TURN } from './api-mock';
@@ -1002,6 +1003,7 @@ describe('the left panel and the goals page', () => {
 describe('what waits says that nothing waits only once all of it came', () => {
   const NO_WAITS = [PAY, REFUND];
   const ANSWERS: Record<string, unknown> = {
+    'GET /api/turns': { turns: [] },
     'GET /api/requests': decisions([]),
     'GET /api/wait-cards': { cards: [], next: null },
     'GET /api/tasks?status=all': { tasks: NO_WAITS },
@@ -1037,6 +1039,40 @@ describe('what waits says that nothing waits only once all of it came', () => {
     expect(within(section).queryByText('Nothing waits for people.')).toBeNull();
     await hold.open();
     expect(await within(section).findByText('Nothing waits for people.')).toBeInTheDocument();
+  });
+
+  it('says that no task here has a due date only once the tasks came', async () => {
+    const hold = held('GET /api/tasks?status=all');
+    shell('/tasks?show=due', hold.routes);
+    const page = await screen.findByRole('region', { name: en.tracker.side.dates });
+    await act(async () => { await new Promise(go => setTimeout(go, 50)); });
+    expect(within(page).getByRole('status')).toHaveTextContent('Loading tasks…');
+    expect(within(page).queryByText('No tasks here have a due date.')).toBeNull();
+    await hold.open();
+    expect(await within(page).findByText('No tasks here have a due date.')).toBeInTheDocument();
+  });
+
+  it('says that a search found nothing only once the tasks came', async () => {
+    const user = userEvent.setup();
+    const hold = held('GET /api/tasks?status=all');
+    shell('/tasks?department=d2', hold.routes);
+    await user.type(await screen.findByRole('searchbox', { name: 'Search tasks' }), 'zebra');
+    const results = await screen.findByRole('region', { name: en.tracker.search.results });
+    expect(within(results).queryByText('No tasks found. Try other words or clear the search.')).toBeNull();
+    expect(within(results).getByRole('status')).toHaveTextContent('Loading tasks…');
+    await hold.open();
+    expect(await within(results).findByText('No tasks found. Try other words or clear the search.')).toBeInTheDocument();
+  });
+
+  it.each(['GET /api/turns', 'GET /api/tasks?status=all'])('says that no turn has been released yet only once the turns and the tasks came, while %s is held back', async source => {
+    const hold = held(source);
+    shell('/tasks?show=turns', { ...hold.routes, ...(source === 'GET /api/turns' ? {} : { 'GET /api/turns': [200, { turns: [] }] }) });
+    const page = await screen.findByRole('region', { name: en.tracker.side.turns });
+    await act(async () => { await new Promise(go => setTimeout(go, 50)); });
+    expect(within(page).getByRole('status')).toHaveTextContent('Loading…');
+    expect(within(page).queryByText(en.tasks.board.nothingYet)).toBeNull();
+    await hold.open();
+    expect(await within(page).findByText(en.tasks.board.nothingYet)).toBeInTheDocument();
   });
 
   it('stands what waits apart from the list above it, by a gap of the style book', () => {
