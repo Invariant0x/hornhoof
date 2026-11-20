@@ -298,7 +298,7 @@ restore_run() {
 # The keeper orders a restore with restore.json, once both files of restore/<attempt> are whole. An order runs once:
 # the same backup is tried again under a new attempt. It waits for an update that waits or runs.
 restore_request() {
-  local file="$CONTROL/restore.json" status="$CONTROL/restore-status.json" order said carry waiting
+  local file="$CONTROL/restore.json" status="$CONTROL/restore-status.json" order said carry waiting name
   if worker || [ -z "$SERVER_DIR" ] || [ ! -f "$SERVER_DIR/.env" ]; then return 0; fi
   if restore_left; then return 0; fi
   [ -f "$file" ] || return 0
@@ -318,7 +318,10 @@ restore_request() {
         ;;
     esac
   fi
-  [ -f "$CONTROL/restore/$R_ATTEMPT.sql.gz" ] && [ -f "$CONTROL/restore/$R_ATTEMPT.env.json" ] || return 0
+  # Whatever stands at both names, a link or a pipe too, goes on to the load: it takes only a plain file, and says so.
+  for name in "$R_ATTEMPT.sql.gz" "$R_ATTEMPT.env.json"; do
+    [ -L "$CONTROL/restore/$name" ] || [ -e "$CONTROL/restore/$name" ] || return 0
+  done
   R_DUMPED=$(jq -r '.dumpedAt // empty' <<< "$order" 2> /dev/null | tr -cd '0-9A-Za-z:.+-' | cut -c1-40 || true)
   carry=$(jq -r 'if .carry == true then "1" else "" end' <<< "$order" 2> /dev/null || true)
   R_STAMP=''
