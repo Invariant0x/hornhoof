@@ -88,6 +88,13 @@ describe.runIf(process.platform === 'linux')('a hook its program let go', () => 
     }
   }
 
+  /* The program writes the hook's input as it ends the hook's shell. A hook already over by then has closed its end,
+     and the write is refused with EPIPE; that refusal is no fault, any other is. */
+  function feed(child: ChildProcess, input: string): void {
+    child.stdin!.on('error', (error: NodeJS.ErrnoException) => { if (error.code !== 'EPIPE') throw error; });
+    child.stdin!.end(input);
+  }
+
   function track(child: ChildProcess): number {
     cleanups.push(() => { try { process.kill(child.pid!, 'SIGKILL'); } catch { /* gone */ } });
     return child.pid!;
@@ -103,7 +110,7 @@ describe.runIf(process.platform === 'linux')('a hook its program let go', () => 
     const [hook] = hooksOf([sh]);
     cleanups.push(() => { try { process.kill(hook!.pid, 'SIGKILL'); } catch { /* gone */ } });
     process.kill(sh, 'SIGTERM');
-    shell.stdin!.end('{}');
+    feed(shell, '{}');
     await until(() => !alive(hook!.pid), 'the hook is over');
     expect(heard).toEqual([]);
   });
@@ -117,7 +124,7 @@ describe.runIf(process.platform === 'linux')('a hook its program let go', () => 
     const hook = hooksOf([parent]).find(h => h.ppid === parent)!;
     cleanups.push(() => { try { process.kill(hook.pid, 'SIGKILL'); } catch { /* gone */ } });
     process.kill(parent, 'SIGKILL');
-    runner.stdin!.end('{}');
+    feed(runner, '{}');
     await until(() => !alive(hook.pid), 'the hook is over');
     expect(heard).toEqual([]);
   });
