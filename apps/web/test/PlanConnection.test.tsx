@@ -105,7 +105,7 @@ describe('a plan connecting after its sign-in code, on its card', () => {
     const failed = within(part).getByRole('alert');
     expect(failed.querySelector('.lf-t')?.textContent).toBe(en.subs.signInErrors.noAnswer);
     expect(failed.querySelector('.lf-h')?.textContent).toBe(words.next.noAnswer);
-    expect(ru.subs.signInErrors.noAnswer).toBe('Не удалось подключить: компьютер перестал отвечать.');
+    expect(ru.subs.signInErrors.noAnswer).toBe('Не удалось подключить: машина перестала отвечать.');
   });
 
   it('a minute with no new step says it takes longer than usual, where it got to, with Retry and Stop, the ring staying in its marker alone', () => {
