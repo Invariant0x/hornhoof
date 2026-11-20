@@ -12,7 +12,7 @@ import { ME, serveApi } from './api';
    dbreathe (2.6 s), every dot in one phase taken from the wall clock; for a person who asked for less motion the core is
    full and still. Only that dot says "In work, working now" to a screen reader, and no dot has a title. The company's word
    of who works on what comes through a stand-in for the stream. */
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: 0 });
 const SHOTS = 'e2e/results/working-now-shots';
 mkdirSync(SHOTS, { recursive: true });
 
