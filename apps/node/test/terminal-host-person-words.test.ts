@@ -77,7 +77,7 @@ describe("a person's words sent while Hornhoof's turn waits to type its prompt",
   /* Claude logs an entry of the turn's own words while that prompt waits: they came of the person's Enter, not Hornhoof's. */
   it("keep the turn's words waiting when Claude takes the same words of the person's, and the prompt goes in after", async () => {
     const c = await personWrites();
-    c.record({ type: 'user', message: { role: 'user', content: PROMPT } });
+    c.record({ type: 'user', promptSource: 'typed', message: { role: 'user', content: PROMPT } });
     c.drain();
     expect(c.a.typing).toBe(PROMPT);
     expect(c.a.turn?.words.pending()).toEqual([PROMPT]);

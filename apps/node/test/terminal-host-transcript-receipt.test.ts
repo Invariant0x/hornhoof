@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +9,8 @@ import type { RunResult } from '../src/runner.js';
 import { claudeTook } from '../src/terminal/program-restart.js';
 import { LineTail } from '../src/terminal/transcripts.js';
 import { claudePasted } from './fakes/word-receipts.mjs';
+import { job } from './terminal-host-helpers.js';
+import { cleanups as liveCleanups, liveTerminal } from './terminal-host-live-helpers.js';
 import { atWork, cleanups, SESSION } from './terminal-host-receipts-helpers.js';
 
 /* Claude Code gives up on a hook as on a status line a newer one overtook: the prompt hook that would say it took Hornhoof's
@@ -18,12 +21,14 @@ import { atWork, cleanups, SESSION } from './terminal-host-receipts-helpers.js';
 
 afterEach(async () => {
   for (const clean of cleanups.splice(0).reverse()) await clean();
+  for (const clean of liveCleanups.splice(0).reverse()) await clean();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 const WORDS = 'Go on.';
-const userSaid = (content: unknown) => ({ type: 'user', message: { role: 'user', content } });
+/* Claude Code 2.1.318 to 2.1.329 mark what was typed into its input with promptSource typed. */
+const userSaid = (content: unknown) => ({ type: 'user', promptSource: 'typed', message: { role: 'user', content } });
 
 function settled(running: Promise<RunResult>) {
   let result: RunResult | undefined;
@@ -43,6 +48,15 @@ describe('an entry of Claude that shows it took these words', () => {
     ['an entry with no message', { type: 'user' }, false],
     ['an entry of a sub-agent with the same words', { ...userSaid(WORDS), isSidechain: true }, false],
     ['the words beside a text part that holds no string', userSaid([{ type: 'text', text: WORDS }, { type: 'text', text: 7 }]), false],
+    /* What Claude writes as the user's of its own: its summary of a compacted conversation, a notice of a task of its own,
+       words it queued, its note of an interruption, and an entry without a word of what was typed. */
+    ["Claude's summary of the conversation it compacted", { ...userSaid(WORDS), isCompactSummary: true, isVisibleInTranscriptOnly: true }, false],
+    ['a summary with no word of where it came from', { type: 'user', isCompactSummary: true, isVisibleInTranscriptOnly: true, turnOrigin: 'human', message: { role: 'user', content: WORDS } }, false],
+    ['a notice Claude gives itself of a task', { ...userSaid(WORDS), promptSource: 'system', turnOrigin: 'task_notification' }, false],
+    ['words Claude queued and took after', { ...userSaid(WORDS), promptSource: 'queued' }, false],
+    ['a note Claude adds beside a tool call', { ...userSaid(WORDS), turnCompanion: true }, false],
+    ['an entry that says nothing of where it came from', { type: 'user', message: { role: 'user', content: WORDS } }, false],
+    ['its note of an interruption', { type: 'user', interruptedMessageId: 'm-1', message: { role: 'user', content: WORDS } }, false],
   ])('%s', (_what, line, took) => {
     expect(claudeTook(line, WORDS)).toBe(took);
   });
@@ -209,18 +223,105 @@ describe('the end of the log the receipt comes from', () => {
     cleanups.push(async () => rmSync(dir, { recursive: true, force: true }));
     const file = join(dir, 'log.jsonl');
     const tail = new LineTail(file, { fromEnd: true });
-    expect(tail.bounded).toBe(false);
+    expect(tail.mark()).toBeNull();
     writeFileSync(file, '{"type":"user"}\n');
     expect(tail.read()).toEqual(['{"type":"user"}']);
-    expect(tail.bounded).toBe(true);
-    expect(new LineTail(file, { fromEnd: true }).bounded).toBe(true);
+    expect(tail.mark()).not.toBeNull();
+    expect(new LineTail(file, { fromEnd: true }).mark()).not.toBeNull();
   });
 
   it("is known for a new session's log before its program writes it", async () => {
     const c = await atWork('claude', 'silent');
     const a = c.host['agents'].get('receipt')!;
     a.sessionId = '6a1f0c2e-7d3b-4f5a-9e8d-1b2c3d4e5f60';
-    expect(c.host['tailFor'](a, true)?.bounded).toBe(true);
-    expect(c.host['tailFor'](a)?.bounded).toBe(false);
+    expect(c.host['tailFor'](a, true)?.mark()).not.toBeNull();
+    expect(c.host['tailFor'](a)?.mark()).toBeNull();
+  });
+});
+
+/* An operator's assignment waits to go in while the program answers a person. What Claude takes meanwhile is the
+   person's, were it the assignment's words: the assignment is not delivered by it, and goes in once the program is
+   ready. */
+it("keeps an operator's assignment to deliver when Claude takes the same words of a person's while it waits", async () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'hh-operator-wait-')));
+  cleanups.push(async () => rmSync(dir, { recursive: true, force: true }));
+  const c = await liveTerminal('claude', 'queued', { watched: true, operator: { dir, connected: () => true, send: () => true } });
+  c.finish();
+  await c.on(c.running);
+  const a = c.host['agents'].get('receipt')!;
+  const ASSIGNMENT = 'From Hornhoof: check the checkout.';
+  const idle = () => `────────────\n❯ ${c.input()}\n────────────\n  ? for shortcuts\n`;
+  /* The program answers the person: no input shows. */
+  c.screen.mockImplementation(async () => '✻ Answering…\n');
+  const turn = c.host.run({ ...job('receipt', ASSIGNMENT, { jobId: 'job-assignment', workDir: a.workDir, sessionId: a.sessionId }), home: a.home, operatorDelivery: { id: randomUUID(), ordinal: 2 } });
+  void turn.catch(() => {});
+  /* No test here has a time limit: wait a bounded while for the assignment to wait, and say so if it never does. */
+  for (let step = 0; step < 400 && !a.promptWaits; step++) await c.pass(5);
+  expect(a.promptWaits).toBe(true);
+  c.record(userSaid(ASSIGNMENT));
+  c.host['drain'](a);
+  expect(c.host['operator']!.recorded('receipt')).toBe(false);
+  expect(a.turn?.words.originalPending()).toBe(true);
+  expect(a.typing).toBe(ASSIGNMENT);
+  c.screen.mockImplementation(async () => idle());
+  await c.pass(1_000);
+  expect(c.paste.mock.calls.map(([, text]) => text)).toContain(ASSIGNMENT);
+});
+
+/* The receipt boundary is the end of the log as the node read it while the words went in: a read that failed then, a
+   line the program had not ended then, or a read failing after, leaves no boundary to count from. */
+describe('the boundary a receipt counts from', () => {
+  async function typing() {
+    const c = await atWork('claude', 'silent');
+    const a = c.host['agents'].get('receipt')!;
+    const file = claudeTranscript(c.home, c.workDir, SESSION);
+    c.drain();
+    a.took = false;
+    return { c, a, file, result: settled(c.running), type: () => c.host['typingNow'](a, WORDS) };
+  }
+
+  it('is none when the read as the words went in failed', async () => {
+    const { c, a, file, result, type } = await typing();
+    c.record(userSaid(WORDS));
+    renameSync(file, `${file}.away`);
+    type();
+    renameSync(`${file}.away`, file);
+    c.finish();
+    await c.pass(1_000);
+    expect(a.took).toBe(false);
+    expect(result()).toBeUndefined();
+  });
+
+  it('is none while a line the program began before the words is not ended', async () => {
+    const { c, a, file, result, type } = await typing();
+    const line = JSON.stringify(userSaid(WORDS));
+    appendFileSync(file, line.slice(0, 20));
+    type();
+    appendFileSync(file, `${line.slice(20)}\n`);
+    c.finish();
+    await c.pass(1_000);
+    expect(a.took).toBe(false);
+    expect(result()).toBeUndefined();
+  });
+
+  it('lapses when a read fails after the words went in', async () => {
+    const { c, a, file, result, type } = await typing();
+    type();
+    renameSync(file, `${file}.away`);
+    c.drain();
+    renameSync(`${file}.away`, file);
+    c.record(userSaid(WORDS));
+    c.finish();
+    await c.pass(1_000);
+    expect(a.took).toBe(false);
+    expect(result()).toBeUndefined();
+  });
+
+  it("stays at the start of a new session's log the program has not written yet", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'hh-tail-new-')));
+    cleanups.push(async () => rmSync(dir, { recursive: true, force: true }));
+    const tail = new LineTail(join(dir, 'new.jsonl'));
+    expect(tail.read()).toEqual([]);
+    expect(tail.mark()).not.toBeNull();
   });
 });
