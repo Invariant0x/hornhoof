@@ -2457,6 +2457,9 @@ export const en = {
       notStarted: 'Not started', working: 'In work', review: 'Review', waiting: 'Waits for a person', waitingYou: 'Waits for you', failure: 'Failure', stopped: 'Stopped',
       paused: 'Paused', done: 'Done', cancelled: 'Cancelled',
     },
+    /* What a status dot says to a screen reader where an employee works on its task in work at this moment, in one phrase
+       (Design #1628). */
+    dot: { workingNow: 'In work, working now' },
     /* What a section of the tracker says once all of it came and it holds nothing (Design #1633, style book 1.7 section 4):
        the fact, then where it helps a hint, each a whole sentence of its own. company: also the first view of a company with
        no tasks at all; board: the company's work in Board view; create: the one thing to do about it, where it fits. */

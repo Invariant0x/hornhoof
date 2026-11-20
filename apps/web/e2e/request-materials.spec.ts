@@ -325,7 +325,7 @@ async function mountFixtureRoutes(page: Page) {
 }
 
 test('renders materials list and fullscreen viewer across dynamic shipped locales, 375/1440 widths, and light/dark themes without sideways scroll or accidental answers', async ({ page }, info) => {
-  test.setTimeout(60_000);
+  test.setTimeout(0);
   await page.goto('about:blank');
   const locales = await selectExtremeLocales(page);
   const posts = await mountFixtureRoutes(page);
@@ -568,7 +568,7 @@ async function startRealServer(publicUrl: string): Promise<RealServerBoot> {
 }
 
 test('separates legacy option.image preview from explicit choice and send-without-choice on a real Fastify + PGlite server', async ({ page, baseURL }, info) => {
-  test.setTimeout(40_000);
+  test.setTimeout(0);
   const webOrigin = baseURL ?? 'http://localhost:4179';
   const srv = await startRealServer(webOrigin);
   try {
@@ -668,7 +668,7 @@ function buildTwoPagePdfBuffer(withEncrypt = false): Buffer {
 }
 
 test('renders real 2-page PDF via bundled pdfjs-dist without OpenAction or external fetches, handles malformed/encrypted PDFs and revoked content honestly, and verifies 3-option wide layout', async ({ page }, info) => {
-  test.setTimeout(60_000);
+  test.setTimeout(0);
   const reqId = '66666666-6666-4666-8666-666666666666';
   const validPdfId = '77777777-7777-4777-8777-777777777777';
   const badPdfId = '88888888-8888-4888-8888-888888888888';

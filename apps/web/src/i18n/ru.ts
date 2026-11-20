@@ -2447,6 +2447,7 @@ export const ru: Messages = {
       notStarted: 'Не начата', working: 'В работе', review: 'На проверке', waiting: 'Ждет человека', waitingYou: 'Ждет вас', failure: 'Сбой', stopped: 'Остановлена',
       paused: 'На паузе', done: 'Готово', cancelled: 'Отменена',
     },
+    dot: { workingNow: 'В работе, сейчас работают' },
     empty: {
       mine: 'Открытых задач, за которые отвечаете вы, нет.',
       waits: 'Ваших ответов ничего не ждет.',
