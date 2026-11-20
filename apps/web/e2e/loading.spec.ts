@@ -59,6 +59,7 @@ const inDepartment = (button: (lang: Lang) => string) => async (page: Page, lang
   await page.goto(`/departments/${DEPARTMENT_ID}`, { waitUntil: 'domcontentloaded' });
   await page.locator('.dv-tools').getByRole('button', { name: button(lang), exact: true }).click();
 };
+const backOf = (page: Page, lang: Lang) => page.locator('.crumbs').getByRole('button', { name: words(lang).dept.back, exact: true });
 const departmentShown = (page: Page, lang: Lang, button: string) => [sections(page, lang), page.locator('.crumb h2'), page.locator('.dv-tools').getByRole('button', { name: button, exact: true })];
 
 /* A screen whose data the test holds back: where it opens, which answer is held, the blocks it shows before that answer,
@@ -169,7 +170,8 @@ const SCREENS: Screen[] = [
     held: '/api/org',
     open: atPath(`/departments/${DEPARTMENT_ID}`),
     answer: route => route.fallback(),
-    shown: (page, lang) => [sections(page, lang)],
+    /* Back and the bottom bar stand from the first frame; only the schema's body waits (Design on #1654). */
+    shown: (page, lang) => [sections(page, lang), backOf(page, lang), page.locator('.dv-acts')],
     place: page => page.locator('.dview'),
     arrived: (page, lang) => page.getByRole('region', { name: words(lang).dept.schema, exact: true }),
   },
@@ -540,5 +542,73 @@ test.describe('map arrangement', () => {
     await expect(page.getByRole('button', { name: /^Development/ })).toBeVisible();
     await expect(page.locator('.map').getByRole('alert')).toHaveCount(0);
     await expect(page.locator('.map').getByRole('button', { name: t.common.retry, exact: true })).toHaveCount(0);
+  });
+});
+
+/* 20.11, Design on #1654: a department opened at its own address drew nothing but the indicator while the company came, so
+   back, its name and its tools jumped in once it came, and a failure left no way out. What it knows without waiting stands
+   at once: back, which works throughout, the plate of its name with an idle bar, its tools, disabled until the company
+   came, and the room of Hire. Only the schema's body waits. */
+test.describe('department while its company comes', () => {
+  const DEPT = SCREENS.find(s => s.name === 'department')!;
+  const plate = (page: Page) => page.locator('.crumbs .crumb');
+  const tools = (page: Page) => page.locator('.dv-tools button');
+  const hire = (page: Page) => page.locator('.dv-acts > .btn');
+  async function expectWaiting(page: Page) {
+    await expect(backOf(page, 'en')).toBeEnabled();
+    await expect(plate(page).locator('.ph')).toHaveCount(1);
+    await expect(tools(page)).toHaveCount(4);
+    for (const tool of await tools(page).all()) await expect(tool).toBeDisabled();
+    /* A person of the whole company may hire: the room of Hire holds its button, disabled with the tools. */
+    await expect(hire(page)).toBeDisabled();
+  }
+  async function expectCame(page: Page) {
+    await expect(DEPT.arrived(page, 'en')).toBeVisible();
+    await expect(plate(page).locator('h2')).toHaveText('Development');
+    for (const tool of await tools(page).all()) await expect(tool).toBeEnabled();
+    await expect(hire(page)).toBeEnabled();
+  }
+
+  test('draws back, the plate of its name, its tools and the room of Hire at once, and the plate keeps its place and height', async ({ page }) => {
+    const hold = await openHeld(page, DEPT, EN);
+    await expectWaiting(page);
+    const before = (await plate(page).boundingBox())!;
+    const answered = hold.answered();
+    hold.release();
+    await answered;
+    await page.clock.runFor(RING_MIN_MS);
+    await expectCame(page);
+    const after = (await plate(page).boundingBox())!;
+    for (const side of ['x', 'y', 'height'] as const) expect(Math.abs(after[side] - before[side])).toBeLessThanOrEqual(0.5);
+  });
+
+  test('keeps its tools waiting through a failure, until Retry brings the company', async ({ page }) => {
+    const t = words('en');
+    const hold = await openHeld(page, DEPT, EN);
+    hold.failing(true);
+    const failed = hold.answered();
+    hold.release();
+    await failed;
+    await expect(DEPT.place(page).locator('.load-fail')).toHaveAttribute('role', 'alert');
+    await expectWaiting(page);
+    hold.failing(false);
+    await DEPT.place(page).getByRole('button', { name: t.common.retry, exact: true }).click();
+    const again = hold.answered();
+    hold.release();
+    await again;
+    await page.clock.runFor(RING_MIN_MS);
+    await expectCame(page);
+  });
+
+  test('leaves for the map by back while its load failed', async ({ page }) => {
+    const hold = await openHeld(page, DEPT, EN);
+    hold.failing(true);
+    const failed = hold.answered();
+    hold.release();
+    await failed;
+    await expect(DEPT.place(page).locator('.load-fail')).toHaveAttribute('role', 'alert');
+    await backOf(page, 'en').click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/');
+    await expect(page.locator('.dview')).toHaveCount(0);
   });
 });
