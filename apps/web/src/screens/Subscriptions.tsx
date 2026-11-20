@@ -515,7 +515,8 @@ type ConnectionParts = {
 
 /* Where a plan's connection is after its sign-in code comes as its node says it; once it ended, the plans are read again
    and show ready or what to do. From one that stalled: a plan that signs in from Hornhoof tries again with a new sign-in,
-   one that signs in on its machine has its node check the sign-in there again; or it stops. */
+   one that signs in on its machine has its node check the sign-in there again; or it stops. What stalled goes before the
+   asking, so a step the node says before the answer comes stays. */
 function usePlanConnections({ setSubs, load, run, signIn }: ConnectionParts) {
   const setConnection = (id: string, connecting: SubView['connecting']) => setSubs(list => list?.map(s => (s.id === id ? { ...s, connecting } : s)) ?? null);
   useStream(m => {
@@ -525,14 +526,14 @@ function usePlanConnections({ setSubs, load, run, signIn }: ConnectionParts) {
   });
   const retryConnection = (sub: SubView) =>
     run(async () => {
+      setConnection(sub.id, null);
       if (TERMINAL_SIGNIN.has(sub.provider)) await signIn(sub, false);
       else await api.post(`/api/subscriptions/${sub.id}/connecting/retry`);
-      setConnection(sub.id, null);
     });
   const cancelConnection = (sub: SubView) =>
     run(async () => {
-      await api.post(`/api/subscriptions/${sub.id}/connecting/cancel`);
       setConnection(sub.id, null);
+      await api.post(`/api/subscriptions/${sub.id}/connecting/cancel`);
     });
   return { retryConnection, cancelConnection };
 }
