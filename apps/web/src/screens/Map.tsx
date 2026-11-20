@@ -38,6 +38,9 @@ const WINDOW_W = 672;
 /* A card's name is drawn 20 px tall. The Head of Design's rule for #1539 (19.11), for #1554: the map opens with it 11 px tall
    or more at any width and in any language, and scrolls; Show everything may go further out. */
 export const MAP_READABLE_K = 11 / 20;
+/* A people chip's name is drawn 14 px tall (.chip b). Design's note on #1596, for #1597: on a phone the map opens with it 11 px
+   tall as well, and its cards' names larger still. */
+export const PHONE_MAP_READABLE_K = 11 / 14;
 /* The screen's bar floats over the top of the map, the zoom and the line of the orchestrator over its bottom: the map keeps
    this much room from them at least, and Fit this much from the sides. The screen's bar ends this far down. */
 const MAP_ROOM = { top: 76, bottom: 72 }, FIT_SIDE = 32, TOP_BAR = 56;
@@ -634,15 +637,19 @@ function useMapRoom(box: { current: HTMLDivElement | null }, bars: string): CSSP
   return room ? ({ '--map-top': `${room.top}px`, '--map-bottom': `${room.bottom}px` } as CSSProperties) : undefined;
 }
 
-/* Where the map stands in the free room of its canvas, b its bounds in the world: whole, as large as it fits up to 115%,
-   when Show everything asks for it or when it fits so at a readable size; otherwise readable and centred across on the
-   middle of the company, the hub, from its top when it is taller than the room. */
-export function mapView(room: Box, b: Box, whole: boolean): { k: number; x: number; y: number } {
+/* Design on #1597: a map that fits opens no larger than it is drawn, and Show everything shows it so too. */
+export const OPEN_MAX_K = 1, WHOLE_MAX_K = 1;
+
+/* Where the map stands in the free room of its canvas, b its bounds in the world and hub the middle of its hub across.
+   Whole, as large as it fits up to its cap and centred on the whole layout, when Show everything asks for it or when it fits
+   so at a readable size; otherwise readable with the hub in the middle across (Design's decision 2 on #1596, for #1597), from
+   its top when it is taller than the room. readable: the least zoom that is readable. */
+export function mapView(room: Box, b: Box, whole: boolean, readable = MAP_READABLE_K, hub = (b.x0 + b.x1) / 2): { k: number; x: number; y: number } {
   const w = Math.max(1, room.x1 - room.x0), h = Math.max(1, room.y1 - room.y0), bw = b.x1 - b.x0, bh = b.y1 - b.y0;
-  const fitK = Math.min(w / bw, h / bh, 1.15);
-  const k = whole ? fitK : Math.max(fitK, MAP_READABLE_K);
+  const fitK = Math.min(w / bw, h / bh, whole ? WHOLE_MAX_K : OPEN_MAX_K);
+  const fits = whole || fitK >= readable, k = fits ? fitK : readable;
   const y = bh * k <= h + 0.5 ? room.y0 + (h - bh * k) / 2 - b.y0 * k : room.y0 - b.y0 * k;
-  return { k, x: room.x0 + (w - bw * k) / 2 - b.x0 * k, y };
+  return { k, x: room.x0 + w / 2 - (fits ? (b.x0 + b.x1) / 2 : hub) * k, y };
 }
 
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
@@ -783,7 +790,8 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const fit = useCallback((whole: boolean) => {
     const shown = arrRef.current, room = roomOf(FIT_SIDE);
     if (!room || !org || !shown || inside) return;
-    const v = mapView(room, arrangedBounds(shown, org), whole);
+    const phone = box.current!.clientWidth <= CANVAS_NARROW;
+    const v = mapView(room, arrangedBounds(shown, org), whole, phone ? PHONE_MAP_READABLE_K : MAP_READABLE_K, shown.hub.x + HUB);
     setMinZoom(Math.min(MIN_K, v.k));
     setView({ ...v, smooth: true });
   }, [org, inside, setView, roomOf]);

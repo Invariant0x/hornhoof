@@ -12,6 +12,7 @@ import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
 import { moveStalledQueues } from '../src/modules/tasks/orphan-turns.js';
 import { reconcile } from '../src/modules/tasks/reconcile.js';
+import { cancelJob, CANCEL_END_WAIT_MS } from '../src/modules/tasks/wake.js';
 import { jobOf } from '../src/modules/tools/job.js';
 import { BUILTIN } from './builtin.js';
 import { setUpCompany, testApp } from './helpers.js';
@@ -590,5 +591,80 @@ describe('a turn its node still lists whose program is gone', () => {
     c.later();
     await reconcile(c.ctx, new Date());
     expect(await c.job(turn)).toMatchObject({ status: 'failed', error: 'machine_offline' });
+  });
+});
+
+/* #1695: Stop asks the turn's node to end it (job.cancel). A node that never reports the end (an old one, or one whose
+   program was already gone) must not hold the employee's queue: after CANCEL_END_WAIT_MS the watchdog closes the turn as
+   Stop does when no node is there, and the next waiting turn goes out. */
+describe('a turn Stop called off whose end never comes', () => {
+  /* Hana works on a turn on her laptop's node, which is connected, and her next message waits behind it; Stop asks the node. */
+  async function stopped() {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const next = await c.message(c.hana.id, 'Orchestrator: three new reports wait for you.');
+    expect((await c.job(next)).status).toBe('queued');
+    await cancelJob(c.ctx, turn);
+    expect(c.send.mock.calls.filter(([, m]) => m.type === 'job.cancel' && m.jobId === turn)).toHaveLength(1);
+    expect((await c.job(turn)).status).toBe('running');
+    return { ...c, turn, next };
+  }
+  /* The node's report that the turn ended as stopped. */
+  const endOf = (jobId: string) => ({ type: 'job.done', jobId, ok: false, sessionId: null, result: 'Stopped.', tail: '', error: 'cancelled' }) as NodeMessage;
+  const stops = async (c: Awaited<ReturnType<typeof stopped>>) =>
+    (await c.db.select(only(agentEvents, 'id')).from(agentEvents).where(and(eq(agentEvents.jobId, c.turn), eq(agentEvents.kind, 'stopped')))).length;
+
+  it('is closed as stopped once the wait is over when the node never reports its end, and the next turn goes out', async () => {
+    const c = await stopped();
+    c.later(CANCEL_END_WAIT_MS - 1);
+    await reconcile(c.ctx, new Date());
+    expect((await c.job(c.turn)).status).toBe('running');
+    expect(c.sentRun(c.next)).toBe(false);
+
+    c.later(1);
+    await reconcile(c.ctx, new Date());
+    expect(await c.job(c.turn)).toMatchObject({ status: 'failed', error: 'cancelled', result: 'Stopped.' });
+    expect(await stops(c)).toBe(1);
+    expect((await c.job(c.next)).status).toBe('running');
+    expect(c.sentRun(c.next)).toBe(true);
+  });
+
+  it('closes once when the node reports the end in time, and the wait then does nothing', async () => {
+    const c = await stopped();
+    c.later(CANCEL_END_WAIT_MS / 2);
+    await handleNodeMessage(c.ctx, c.node, endOf(c.turn));
+    const closed = await c.job(c.turn);
+    expect(closed).toMatchObject({ status: 'failed', error: 'cancelled' });
+    expect((await c.job(c.next)).status).toBe('running');
+
+    c.later(CANCEL_END_WAIT_MS);
+    await reconcile(c.ctx, new Date());
+    expect(await c.job(c.turn)).toEqual(closed);
+    expect(await stops(c)).toBe(1);
+    expect(c.send.mock.calls.filter(([, m]) => m.type === 'job.run' && m.jobId === c.next)).toHaveLength(1);
+  });
+
+  it('ignores an end the node reports after the wait closed the turn, with no second close', async () => {
+    const c = await stopped();
+    c.later(CANCEL_END_WAIT_MS);
+    await reconcile(c.ctx, new Date());
+    const closed = await c.job(c.turn);
+    expect(closed).toMatchObject({ status: 'failed', error: 'cancelled' });
+
+    c.later();
+    await expect(handleNodeMessage(c.ctx, c.node, endOf(c.turn))).resolves.not.toThrow();
+    expect(await c.job(c.turn)).toEqual(closed);
+    expect(await stops(c)).toBe(1);
+    expect(c.send.mock.calls.filter(([, m]) => m.type === 'job.run' && m.jobId === c.next)).toHaveLength(1);
+  });
+
+  it('closes at once, as before, when no node is there to ask', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const next = await c.message(c.hana.id, 'Orchestrator: three new reports wait for you.');
+    c.send.mockReturnValueOnce(false);
+    await cancelJob(c.ctx, turn);
+    expect(await c.job(turn)).toMatchObject({ status: 'failed', error: 'cancelled', result: 'Stopped.' });
+    expect((await c.job(next)).status).toBe('running');
   });
 });
