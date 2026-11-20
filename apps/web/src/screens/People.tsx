@@ -497,6 +497,9 @@ function HeldPerson() {
 
 /* A list with no count kept for the session holds this many people. */
 const HELD_PEOPLE = 3;
+const useHeldPeople = (people: PersonView[] | null): number => useHeldRows('people', people ? people.length : null) ?? HELD_PEOPLE;
+/* A failure to load says itself over the people once they came; before that their held table says it. */
+const overPeople = (people: PersonView[] | null, failure: unknown) => (people ? failure : null);
 
 /* The people's table while they come (style book 1.5, section 4; Design #1656): its head at once; in its first row the ring
    and its words, or why the load stalled with Retry; held people under it, as many as it showed last. */
@@ -554,7 +557,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
   /* The people come into their held table, which says why when they do not. */
   const peopleLoad = useLoad([{ data: people, failure: loadFailure, load }]);
   const shown = doneOf(people, peopleLoad);
-  const heldPeople = useHeldRows('people', shown ? shown.length : null) ?? HELD_PEOPLE;
+  const heldPeople = useHeldPeople(shown);
   const tableHost = usePeopleTable(shown);
   /* After a break, an update among them, the list is read again. */
   useStream(m => {
@@ -638,7 +641,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
         onClose={closePerson}
       />
       {panel?.kind === 'delete' && <DeleteAsk person={panel.person} onYes={() => removePerson(panel.person)} onClose={() => setPanel(null)} />}
-      <LoadFailure failure={people ? loadFailure : null} />
+      <LoadFailure failure={overPeople(people, loadFailure)} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
       {shown ? (<>
