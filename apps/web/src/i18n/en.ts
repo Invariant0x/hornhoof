@@ -2459,6 +2459,9 @@ export const en = {
       notStarted: 'Not started', working: 'In work', review: 'Review', waiting: 'Waits for a person', waitingYou: 'Waits for you', failure: 'Failure', stopped: 'Stopped',
       paused: 'Paused', done: 'Done', cancelled: 'Cancelled',
     },
+    /* What a status dot says to a screen reader where an employee works on its task in work at this moment, in one phrase
+       (Design #1628). */
+    dot: { workingNow: 'In work, working now' },
     noGoals: 'No goals here yet.',
     noDates: 'No tasks here have a due date.',
     noTasks: 'No tasks here.',

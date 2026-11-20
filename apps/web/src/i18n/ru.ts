@@ -2449,6 +2449,7 @@ export const ru: Messages = {
       notStarted: 'Не начата', working: 'В работе', review: 'На проверке', waiting: 'Ждет человека', waitingYou: 'Ждет вас', failure: 'Сбой', stopped: 'Остановлена',
       paused: 'На паузе', done: 'Готово', cancelled: 'Отменена',
     },
+    dot: { workingNow: 'В работе, сейчас работают' },
     noGoals: 'Целей здесь пока нет.',
     noDates: 'У этих задач пока нет сроков.',
     noTasks: 'Задач здесь нет.',
