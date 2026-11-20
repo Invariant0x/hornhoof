@@ -534,8 +534,7 @@ go_back() {
 
 handle_request() {
   local request id tag digest node updater done_id
-  [ -f "$CONTROL/request.json" ] || return 0
-  request=$(take "$CONTROL/request.json" || true)
+  request=$(take "$CONTROL/request.json") || return 0
   id=$(jq -r '.id // empty' <<< "$request" 2> /dev/null || true)
   case "$id" in '' | *[!A-Za-z0-9-]*) return 0 ;; esac
   done_id=$(take "$CONTROL/status.json" quiet jq -r '.id // empty' || true)

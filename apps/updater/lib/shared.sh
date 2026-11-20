@@ -34,6 +34,13 @@ entered() {
   return 1
 }
 
+# Enter only a staging directory at the expected path, owned by this updater and private.
+enter_stage() {
+  local mode
+  cd -P -- "./$2" && [ "$(physical_dir)" = "${1%/}/$2" ] && [ -O . ] || return 1
+  mode=$(stat -c '%a' . 2> /dev/null || stat -f '%Lp' . 2> /dev/null) && [ "$mode" = 700 ]
+}
+
 # move_over <file> <name>: rename a file over a name in the same folder, replacing a link there instead of following it.
 move_over() {
   if [[ "$OSTYPE" == darwin* ]]; then
@@ -60,7 +67,7 @@ put_in_place() (
   fi
   here=$(physical_dir) && temporary=$(mktemp -d ".$kind.XXXXXXXX") || exit 1
   (
-    cd -P -- "./$temporary" && [ "$(physical_dir)" = "${here%/}/$temporary" ] && [ -O . ] || exit 1
+    enter_stage "$here" "$temporary" || exit 1
     trap 'rm -f -- "./${kind:?}"' EXIT
     if [ "$how" = keeper ]; then umask 077; else umask 022; fi
     set -o noclobber
@@ -95,24 +102,34 @@ facts() {
   stat -c '%i %h %u' -- "$1" 2> /dev/null || stat -f '%i %l %u' -- "$1" 2> /dev/null
 }
 
+refuse_file() {
+  printf 'Refused %s: it is not a plain file.\n' "${1##*/}" >&2
+  return 1
+}
+
 # take_here <name> [command [args]], in the folder the shell entered: the command, cat by default, reads that file on its
 # standard input. The file first gets a second name in a private folder made beside it, on the same file system, which
 # opens nothing. It is read by that name only when that is what was at the name: a regular file, the same one, with one
 # name more than it had, and root's or the folder owner's. Anything else, or a second name that cannot be made, is
-# refused, and that is said. Nothing at the name fails quietly. The kernel lets a user give a file a second name only
-# when it may read and write it (fs.protected_hardlinks), so the app and the keeper cannot bring a file of root's here.
+# refused with a diagnostic. A missing name fails quietly.
 take_here() (
-  local file="$1" here owner before after temporary status=0
+  local file="$1" here source owner before after temporary status=0
   shift
   [ "$#" -gt 0 ] || set -- cat
   [ -L "$file" ] || [ -e "$file" ] || exit 1
-  here=$(physical_dir) && owner=$(facts .) && owner=${owner##* } && temporary=$(mktemp -d .take.XXXXXXXX) || exit 1
+  here=$(physical_dir) && owner=$(facts .) || { refuse_file "$file"; exit 1; }
+  source="${here%/}/$file"
+  if [[ "$OSTYPE" == linux* ]]; then
+    exec 9< . || { refuse_file "$file"; exit 1; }
+    source="/proc/self/fd/9/$file"
+  fi
+  temporary=$(mktemp -d .take.XXXXXXXX) || { refuse_file "$file"; exit 1; }
   (
-    cd -P -- "./$temporary" && [ "$(physical_dir)" = "${here%/}/$temporary" ] && [ -O . ] || exit 1
+    enter_stage "$here" "$temporary" || { refuse_file "$file"; exit 1; }
     trap 'rm -f -- ./taken' EXIT
-    if ! before=$(facts "../$file") || ! hard_link "../$file" ./taken 2> /dev/null || [ -L ./taken ] || [ ! -f ./taken ] ||
-      ! after=$(facts ./taken) || [ "${after%% *}" != "${before%% *}" ] || ! same_file "$before" "$after" "$owner"; then
-      if [ -L "../$file" ] || [ -e "../$file" ]; then printf 'Refused %s: it is not a plain file.\n' "${file##*/}" >&2; fi
+    if ! before=$(facts "$source") || ! hard_link "$source" ./taken 2> /dev/null || [ -L ./taken ] || [ ! -f ./taken ] ||
+      ! after=$(facts ./taken) || [ "${after%% *}" != "${before%% *}" ] || ! same_file "$before" "$after" "${owner##* }"; then
+      refuse_file "$file"
       exit 1
     fi
     "$@" < ./taken
@@ -124,10 +141,16 @@ take_here() (
 # same_file <facts before> <facts after> <folder owner>: the second name is of the file that was looked at, which has
 # one name more now, and is root's or the folder owner's.
 same_file() {
-  local links=${1#* } now=${2#* }
+  local links=${1#* } now=${2#* } owner=${2##* } protected
   links=${links%% *}
   now=${now%% *}
-  [ "$now" = "$((links + 1))" ] && { [ "${2##* }" = 0 ] || [ "${2##* }" = "$3" ]; }
+  [ "$now" = "$((links + 1))" ] || return 1
+  if [ "$owner" = 0 ] && [[ "$OSTYPE" == linux* ]]; then
+    # Linux must prevent an unprivileged user from linking a protected file. Also reject an existing alias.
+    [ "$links" = 1 ] && read -r protected < /proc/sys/fs/protected_hardlinks && [ "$protected" = 1 ]
+  else
+    [ "$owner" = 0 ] || [ "$owner" = "$3" ]
+  fi
 }
 
 # take <path> [command [args]]: take_here for a file of a shared folder, named by its path.
@@ -149,12 +172,33 @@ installer_control() {
   take "$CONTROL/addresses.json" > "$1/addresses.json" || rm -f -- "$1/addresses.json"
 }
 
-# keeper_dir <folder>: a folder of a shared folder for the keeper alone, made when it is missing: mode 700, and the
-# keeper's. Its mode and owner change only once it is entered, so a link in its place changes nothing it points to.
+# keeper_dir <folder>: give the keeper ownership only of a directory created inside private staging.
+# A folder already at the shared name must already belong to the keeper.
 keeper_dir() (
+  local name="${1##*/}" here temporary target owner actual
   entered "${1%/*}" || exit 1
-  [ -L "./${1##*/}" ] || [ -e "./${1##*/}" ] || mkdir -- "./${1##*/}" 2> /dev/null || true
-  entered "$1" && owned . 700
+  owner=$(facts "$CONTROL") || exit 1
+  if [ ! -L "./$name" ] && [ ! -e "./$name" ]; then
+    here=$(physical_dir) && temporary=$(mktemp -d .keeper.XXXXXXXX) || exit 1
+    target="${here%/}/$name"
+    if [[ "$OSTYPE" == linux* ]]; then
+      exec 9< . || exit 1
+      target="/proc/self/fd/9/$name"
+    fi
+    (
+      enter_stage "$here" "$temporary" || exit 1
+      trap 'rmdir -- ./keeper 2> /dev/null || true' EXIT
+      mkdir -- ./keeper && owned ./keeper 700 &&
+        { [ -e "$target" ] || [ -L "$target" ] || move_over ./keeper "$target"; }
+    ) || true
+    rmdir -- "./${temporary:?}" 2> /dev/null || true
+  fi
+  entered "$1" && actual=$(facts .) || exit 1
+  if [ "${actual##* }" != "${owner##* }" ]; then
+    printf 'Refused %s: it is not a keeper folder.\n' "$name" >&2
+    exit 1
+  fi
+  chmod 700 .
 )
 
 # remove_in <folder> <name>...: files of a shared folder go. A link goes itself, never what it points to, and a folder

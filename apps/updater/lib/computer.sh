@@ -47,8 +47,7 @@ heartbeat() (
   enter_shared "$1" || exit 0
   [ ! -L ./alive ] || exit 0
   if [ -f ./alive ]; then
-    # -c: BusyBox touch -h would create a marker missing by now, through a link put there in the meantime.
-    touch -c -h -- ./alive 2> /dev/null || true
+    put_in_place alive alive over : 2> /dev/null || true
     exit 0
   fi
   computer_publish alive alive : 2> /dev/null || true
@@ -102,7 +101,10 @@ computer_runs() (
   done
   for file in ./*.json; do
     case "$file" in *.out.json) continue ;; esac
-    [ ! -L "$file" ] && [ -f "$file" ] || continue
+    if [ -L "$file" ] || [ ! -f "$file" ]; then
+      if [ -L "$file" ] || [ -e "$file" ]; then refuse_file "$file" || true; fi
+      continue
+    fi
     id=$(basename "$file" .json)
     case "$id" in '' | *[!A-Za-z0-9-]*) continue ;; esac
     started="./$id.started"
@@ -128,8 +130,11 @@ computer_runs() (
       rm -f -- "${out:?}"
       continue
     fi
-    request=$(take_here "$file" || true)
-    command=$(jq -r '.command // empty' <<< "$request" 2> /dev/null || true)
+    if ! request=$(take_here "$file") || ! command=$(jq -er '.command | strings | select(length > 0)' <<< "$request" 2> /dev/null); then
+      printf '%s\n' 'Computer request refused: no valid command could be read.' >&2
+      rm -f -- "${out:?}"
+      continue
+    fi
     timeout=$(jq -r '.timeout // empty' <<< "$request" 2> /dev/null || true)
     case "$timeout" in '' | *[!0-9]*) timeout=300 ;; esac
     if [ "$timeout" -lt 1 ] || [ "$timeout" -gt "$COMPUTER_MAX" ]; then timeout=300; fi

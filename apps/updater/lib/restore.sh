@@ -44,7 +44,7 @@ restore_says() {
 
 # restore_ended <state> <step> <line> [kept]: the last word of a restore; its order and its journal go.
 restore_ended() {
-  restore_says "$@"
+  restore_says "$@" || return 0
   rm -f "$CONTROL/restore-journal.json" "$CONTROL/restore.json"
 }
 
@@ -301,11 +301,10 @@ restore_request() {
   local file="$CONTROL/restore.json" status="$CONTROL/restore-status.json" order said carry waiting name
   if worker || [ -z "$SERVER_DIR" ] || [ ! -f "$SERVER_DIR/.env" ]; then return 0; fi
   if restore_left; then return 0; fi
-  [ -f "$file" ] || return 0
+  order=$(take "$file") || return 0
   waiting=$(take "$CONTROL/request.json" quiet jq -r '.id // empty' || true)
   if plain_id "$waiting" && [ "$waiting" != "$(take "$CONTROL/status.json" quiet jq -r '.id // empty' || true)" ]; then return 0; fi
   if update_running; then return 0; fi
-  order=$(take "$file" || true)
   R_ATTEMPT=$(jq -r '.attempt // empty' <<< "$order" 2> /dev/null || true)
   R_ID=$(jq -r '.id // empty' <<< "$order" 2> /dev/null || true)
   plain_id "$R_ATTEMPT" && plain_id "$R_ID" || return 0

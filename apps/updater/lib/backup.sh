@@ -123,7 +123,6 @@ dump_failed() {
 # keeper asks anew under another id.
 dump_request() {
   local asked id db database reason copy=''
-  [ -f "$CONTROL/dump.json" ] || return 0
   [ -n "$SERVER_DIR" ] || return 0
   # A machine that keeps a copy gives one dump alone: its own database, from the time it led, which its keeper saves
   # before the copy is made again. A machine with no database gives none.
@@ -131,7 +130,7 @@ dump_request() {
     [ -f "$CONTROL/replica.json" ] || return 0
     copy=1
   fi
-  asked=$(take "$CONTROL/dump.json" || true)
+  asked=$(take "$CONTROL/dump.json") || return 0
   id=$(jq -r '.id // empty' <<< "$asked" 2> /dev/null || true)
   plain_id "$id" || return 0
   database=$(jq -r '.database // empty' <<< "$asked" 2> /dev/null || true)
@@ -174,7 +173,8 @@ sweep_dumps() (
 # here.
 keep_link() {
   local file="${BACKUP%.sql.gz}.tunnel.json"
-  if [ -z "$BACKUP" ] || [ ! -f "$CONTROL/tunnel.json" ]; then return 0; fi
+  [ -n "$BACKUP" ] || return 0
+  [ -L "$CONTROL/tunnel.json" ] || [ -e "$CONTROL/tunnel.json" ] || return 0
   if (umask 077 && take "$CONTROL/tunnel.json" > "$file.new" && chmod 600 "$file.new" && mv "$file.new" "$file"); then
     say "The public link's settings are in backups/$(basename "$file"). A link taken after the database was saved is not in it; guide/updates.md says how to take it back."
   else

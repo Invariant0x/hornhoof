@@ -30,7 +30,7 @@ describe('updater, backups', () => {
     /* For the keeper alone: it runs as the control folder's owner, and reads and deletes what root wrote. */
     expect([mode(dumps(s)), mode(join(dumps(s), `${ID}.sql.gz`)), mode(join(dumps(s), `${ID}.json`))]).toEqual([0o700, 0o600, 0o600]);
     /* The folder once it is entered, and each file in the private folder it is written in, before it is renamed into place. */
-    for (const path of ['.', `./${ID}.sql.gz`, `./${ID}.json`]) expect(r.calls).toContain(`chown ${owner(s)} ${path}`);
+    for (const path of ['./keeper', `./${ID}.sql.gz`, `./${ID}.json`]) expect(r.calls).toContain(`chown ${owner(s)} ${path}`);
     expect(existsSync(join(s.control, 'dump.json'))).toBe(false);
     expect(readdirSync(dumps(s)).sort()).toEqual([`${ID}.json`, `${ID}.sql.gz`]);
 

@@ -122,7 +122,7 @@ const SITES: Site[] = [
     step: "docker() { case \"$*\" in *information_schema*) printf 'public.tasks\\n' ;; *) printf 'id\\n1\\n' ;; esac; }; uploads_dir; make_upload sample db",
   },
   {
-    name: 'role.json', request: true, old: ['role-secrets.json'], step: 'data_settings',
+    name: 'role.json', request: true, old: ['role-secrets.json'], step: 'data_settings "$(take "$CONTROL/role.json")"',
     prepare: s => {
       writeFileSync(join(s.control, 'role.json'), json({ id: 'sample', secrets: { HORNHOOF_SECRET: SECRET, NODE_KEY: 'k'.repeat(40), RELAY_URL: 'https://relay.sample.test' } }));
       writeFileSync(join(s.server, '.env'), ROLE_ENV);
@@ -196,6 +196,19 @@ describe('what the updater writes in the folders it shares with the app and the 
     expect(existsSync(made)).toBe(false);
     expect(lstatSync(join(s.control, 'alive')).isSymbolicLink()).toBe(true);
   });
+
+  it('publishes a fresh heartbeat inode in both volumes', async () => {
+    const s = stand();
+    const app = join(s.control, 'alive');
+    const keeper = join(s.computerControl, 'alive');
+    writeFileSync(app, '');
+    writeFileSync(keeper, '');
+    const before = [lstatSync(app).ino, lstatSync(keeper).ino];
+    const r = await runUpdaterStep(s, 'heartbeats');
+    expect(r.code, r.out).toBe(0);
+    expect(lstatSync(app).ino).not.toBe(before[0]);
+    expect(lstatSync(keeper).ino).not.toBe(before[1]);
+  });
 });
 
 /* What the updater reads in the shared folders it reads only as a regular file of that folder, and nothing else. */
@@ -208,6 +221,14 @@ const READS: Read[] = [
 ];
 
 describe('what the updater reads in the folders it shares with the app and the keeper', () => {
+  it('reports a request that is a directory', async () => {
+    const s = stand();
+    mkdirSync(join(s.control, 'request.json'));
+    const r = await runUpdaterStep(s, 'handle_request');
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('Refused request.json: it is not a plain file.');
+  });
+
   it.each(READS)('refuses $name when it is a link, and reads nothing through it', async ({ name, step, standIn: said }) => {
     const s = stand();
     const outside = join(s.dir, 'outside', name);
