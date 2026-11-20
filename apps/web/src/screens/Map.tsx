@@ -13,7 +13,7 @@ import { mapPeople, useOrg, wholeCompanyPeople, type MapPerson } from '../org';
 import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
 import { Bar, percent } from '../ui/Bar';
-import { CANVAS_NARROW, CANVAS_ZOOM_LIMITS, DRAG_PX, FLOAT_GAP, LEFT_PANEL_COVER, SIDE_GAP, canvasSpace, freeRoom, sameView, usePanZoom, ZoomBar, type Box, type Edges, type View } from '../ui/canvas';
+import { CANVAS_NARROW, CANVAS_ZOOM_LIMITS, DRAG_PX, FLOAT_GAP, LEFT_PANEL_COVER, SIDE_GAP, canvasSpace, freeRoom, underShell, useFitMove, usePanZoom, worldTransition, ZoomBar, type Box, type Edges, type View } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { useLoadFailure } from '../ui/LoadFailure';
 import { MapVersion } from '../ui/VersionMark';
@@ -626,7 +626,7 @@ function useMapRoom(box: { current: HTMLDivElement | null }, bars: string, shell
     const measure = () => {
       const phone = el.clientWidth > 0 && el.clientWidth <= CANVAS_NARROW;
       const free = phone ? freeRoom(el, el.querySelectorAll(MAP_BARS), { left: 0, width: el.clientWidth }) : null;
-      const next = free && { top: Math.max(TOP_BAR + FLOAT_GAP, shellTop ?? 0), bottom: el.clientHeight - free.y1 };
+      const next = free && { top: underShell(TOP_BAR + FLOAT_GAP, shellTop), bottom: el.clientHeight - free.y1 };
       setRoom(was => (was?.top === next?.top && was?.bottom === next?.bottom ? was : next));
     };
     measure();
@@ -783,7 +783,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
       const el = box.current;
       if (!el || !el.clientWidth) return null;
       const space = canvasSpace(el.clientWidth, leftPanelOpen ? LEFT_PANEL_COVER : 0, windowOpen ? WINDOW_W : 0);
-      return freeRoom(el, el.querySelectorAll(MAP_BARS), space, { ...MAP_ROOM, top: Math.max(MAP_ROOM.top, shellTop ?? 0), side });
+      return freeRoom(el, el.querySelectorAll(MAP_BARS), space, { ...MAP_ROOM, top: underShell(MAP_ROOM.top, shellTop), side });
     },
     [windowOpen, leftPanelOpen, shellTop],
   );
@@ -794,21 +794,18 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
 
   /* Show everything when whole; otherwise as the map opens, readable. A fit because a bar of the shell came or went follows
      the bars in the shell's time (#1635). */
-  const fittedTop = useRef<number | null | undefined>(undefined);
+  const fitMove = useFitMove(shellTop);
   const fit = useCallback((whole: boolean) => {
     const shown = arrRef.current, room = roomOf(FIT_SIDE);
     if (!room || !org || !shown || inside) return;
     const phone = box.current!.clientWidth <= CANVAS_NARROW;
     const v = mapView(room, arrangedBounds(shown, org), whole, phone ? PHONE_MAP_READABLE_K : MAP_READABLE_K, shown.hub.x + HUB);
     setMinZoom(Math.min(MIN_K, v.k));
-    const shift = fittedTop.current !== undefined && fittedTop.current !== shellTop;
-    fittedTop.current = shellTop;
-    /* Where it already stands or glides to, it keeps going as it goes: a second look as a resize is watched again must not
-       turn the shell's slide into Fit's glide. */
-    if (sameView(viewNow.current, v)) return;
-    viewNow.current = { ...v, smooth: shift ? 'shift' : true };
-    setView(viewNow.current);
-  }, [org, inside, setView, roomOf, shellTop]);
+    const move = fitMove(viewNow.current, v);
+    if (!move) return;
+    viewNow.current = move;
+    setView(move);
+  }, [org, inside, setView, roomOf, fitMove]);
   const fitRef = useRef(fit);
   fitRef.current = fit;
 
@@ -969,7 +966,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
             width: W,
             height: H,
             transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`,
-            transition: still || !view.smooth ? 'none' : view.smooth === 'fly' ? `transform ${FLY_MS / 1000}s cubic-bezier(.55,0,.25,1)` : view.smooth === 'shift' ? 'transform var(--shell-shift) ease-out' : 'transform .8s cubic-bezier(.3,.7,.2,1)',
+            transition: worldTransition(view.smooth, still, `transform ${FLY_MS / 1000}s cubic-bezier(.55,0,.25,1)`),
           }}
         >
           <div className="halo" style={{ left: mx - HALO, top: my - HALO, width: 2 * HALO, height: 2 * HALO }} />

@@ -49,6 +49,17 @@ export const CONTENT: Record<View, string> = {
 export const TOP_BLOCKS = `.topbar > *, ${SHELL_BARS}`;
 export const BOTTOM_BLOCKS = '.map > :is(.zoom, .ticker, .map-arrange), .dview :is(.zoom, .ticker, .dv-acts)';
 
+/* Where each view opens, and what shows once it has. */
+const START: Record<View, { path: string; shown: string }> = {
+  map: { path: '/', shown: '.map .dept' },
+  department: { path: '/departments/d2', shown: '.dview .shead' },
+};
+
+/* A page that reads right to left. */
+async function mirror(page: Page, dir: Look['dir']) {
+  if (dir === 'rtl') await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
+}
+
 export async function open(page: Page, look: Look, width: number, bars: (typeof BARS)[number], view: View) {
   await page.setViewportSize({ width, height: HEIGHT });
   await page.addInitScript(({ lang, skin }) => {
@@ -57,10 +68,10 @@ export async function open(page: Page, look: Look, width: number, bars: (typeof 
   }, look);
   await serveApi(page);
   await bars.serve(page);
-  await page.goto(view === 'map' ? '/' : '/departments/d2');
-  await expect(page.locator(view === 'map' ? '.map .dept' : '.dview .shead').first()).toBeVisible();
+  await page.goto(START[view].path);
+  await expect(page.locator(START[view].shown).first()).toBeVisible();
   await expect(page.locator(SHELL_BARS)).toHaveCount(bars.count);
-  if (look.dir === 'rtl') await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
+  await mirror(page, look.dir);
   await page.evaluate(async () => { await document.fonts.ready; });
   await still(page);
 }

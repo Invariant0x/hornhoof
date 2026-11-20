@@ -30,13 +30,41 @@ export function shellTopOf(page: HTMLElement): number | null {
 export const UNDER_MENU = 12 + 44 + FLOAT_GAP;
 
 /* On a phone every bar after the first folds to one line with More, which opens it whole (#1635). More stays hidden on a wide
-   screen and on the first bar: theme.css shows it where it folds the bar. open: whether the person opened this bar, for its
-   class. */
-export function useBarFold(): { open: boolean; more: ReactNode } {
+   screen and on the first bar: theme.css shows it where it folds the bar. className: the bar's, open once the person opened
+   it. */
+export function useBarFold(): { className: string; more: ReactNode } {
   const t = useT();
   const [open, setOpen] = useState(false);
   const more = open ? null : <button className="btn small ghost bar-more" type="button" hidden aria-expanded="false" onClick={() => setOpen(true)}>{t.shell.barMore}</button>;
-  return { open, more };
+  return { className: `update-banner glass${open ? ' open' : ''}`, more };
+}
+
+/* What watches a page, or nothing where the browser has no such watcher. */
+type Watcher = { observe(target: Element, options?: object): void; disconnect(): void };
+const UNWATCHED: Watcher = { observe: () => {}, disconnect: () => {} };
+const sizesOf = (changed: () => void): Watcher => (typeof ResizeObserver === 'undefined' ? UNWATCHED : guardedResizeObserver(changed, 'shell-bars'));
+const rowsOf = (changed: () => void): Watcher => (typeof MutationObserver === 'undefined' ? UNWATCHED : new MutationObserver(changed));
+
+/* Calls changed now, and again as a bar of the page comes, goes or grows with its words, and as the page changes size;
+   gives back what stops it. */
+function watchShellBars(page: HTMLElement, changed: () => void): () => void {
+  const watched = new WeakSet<Element>();
+  const look = () => {
+    for (const bar of page.querySelectorAll(SHELL_BARS)) {
+      if (watched.has(bar)) continue;
+      watched.add(bar);
+      sizes.observe(bar);
+    }
+    changed();
+  };
+  const sizes = sizesOf(look), rows = rowsOf(look);
+  look();
+  sizes.observe(page);
+  rows.observe(page, { childList: true });
+  return () => {
+    rows.disconnect();
+    sizes.disconnect();
+  };
 }
 
 /* The shell's own measure of it: again as a bar comes, goes or grows with its words, and as the window changes size. */
@@ -45,26 +73,7 @@ export function useMeasuredShellTop(page: RefObject<HTMLElement | null>): number
   useLayoutEffect(() => {
     const el = page.current;
     if (!el) return;
-    const watched = new WeakSet<Element>();
-    let sizes: ResizeObserver | null = null;
-    const measure = () => {
-      for (const bar of el.querySelectorAll(SHELL_BARS)) {
-        if (watched.has(bar)) continue;
-        watched.add(bar);
-        sizes?.observe(bar);
-      }
-      const next = shellTopOf(el);
-      setTop(was => (was === next ? was : next));
-    };
-    sizes = typeof ResizeObserver === 'undefined' ? null : guardedResizeObserver(measure, 'shell-bars');
-    measure();
-    sizes?.observe(el);
-    const rows = typeof MutationObserver === 'undefined' ? null : new MutationObserver(measure);
-    rows?.observe(el, { childList: true });
-    return () => {
-      rows?.disconnect();
-      sizes?.disconnect();
-    };
+    return watchShellBars(el, () => setTop(shellTopOf(el)));
   }, [page]);
   return top;
 }

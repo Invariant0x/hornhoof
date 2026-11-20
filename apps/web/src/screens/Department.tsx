@@ -7,7 +7,7 @@ import { useDepartmentTree } from '../tasks';
 import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { Bar, percent } from '../ui/Bar';
 import { Chip, agentWorking, doingLine, Listed, modelParts, Switch, STATUS_CLASS } from '../ui/Chip';
-import { CANVAS_NARROW as NARROW, FLOAT_GAP, LEFT_PANEL_COVER, canvasSpace, freeRoom, sameView, usePanZoom, ZoomBar, type Edges } from '../ui/canvas';
+import { CANVAS_NARROW as NARROW, FLOAT_GAP, LEFT_PANEL_COVER, canvasSpace, freeRoom, useFitMove, usePanZoom, worldTransition, ZoomBar, type Edges } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, BackIcon, InfoIcon, ListIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
 import { ApprovalPolicy } from '../ui/ApprovalPolicy';
@@ -461,23 +461,19 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
      everything keeps free at the bottom what the line of what happened may still grow by. When a bar of the shell comes or
      goes, the name moves and the schema slides after it in the shell's time (#1635). */
   const { fitBottom, treeTop, shellTop } = chrome;
-  const placedUnder = useRef<number | null | undefined>(undefined);
+  const fitMove = useFitMove(shellTop);
   const place = useCallback(
     (whole: boolean) => {
       const el = box.current, at = roomOf();
       if (!el || !at) return;
       const { left, width } = at.space, phone = el.clientWidth <= NARROW;
       const room = { left, width, height: el.clientHeight, free: treeTop, bottom: fitBottom.current };
-      const shift = placedUnder.current !== undefined && placedUnder.current !== shellTop;
-      placedUnder.current = shellTop;
-      const next = schemaView(room, size.current, whole, phone);
-      /* Where it already stands or glides to, it keeps going as it goes: a second look as a resize is watched again must not
-         turn the shell's slide into Fit's glide. */
-      if (sameView(viewNow.current, next)) return;
-      viewNow.current = { ...next, smooth: shift ? 'shift' : true };
-      setView(viewNow.current);
+      const move = fitMove(viewNow.current, schemaView(room, size.current, whole, phone));
+      if (!move) return;
+      viewNow.current = move;
+      setView(move);
     },
-    [setView, fitBottom, roomOf, treeTop, shellTop],
+    [setView, fitBottom, roomOf, treeTop, fitMove],
   );
 
   /* The schema is placed again when its frames or their staff change, and once its cards are first measured, not when a card
@@ -612,7 +608,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
     width: s.right,
     height: s.h,
     transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`,
-    transition: still || !view.smooth ? 'none' : view.smooth === 'shift' ? 'transform var(--shell-shift) ease-out' : 'transform .8s cubic-bezier(.3,.7,.2,1)',
+    transition: worldTransition(view.smooth, still),
     ['--k' as string]: far ? Math.min(2, Math.max(1, 0.72 / view.k)).toFixed(3) : '1',
   } as CSSProperties;
   const drawerName = drawerTitle(t, drawer);

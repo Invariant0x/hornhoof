@@ -127,7 +127,7 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
   }
   if (!body) return null;
   return (
-    <div className={`update-banner glass${fold.open ? ' open' : ''}`} role="status" aria-label={t.updates.label}>
+    <div className={fold.className} role="status" aria-label={t.updates.label}>
       {body}
       {fold.more}
       {failure !== null && <p className="update-error" role="alert" dir="auto">{errorText(t, failure)}</p>}

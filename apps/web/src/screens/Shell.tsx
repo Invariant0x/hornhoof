@@ -300,9 +300,10 @@ function DepartmentFallback({ deptId, org, orgFailure }: { deptId: string | null
 }
 
 /* What the shell tells the map, an open department and the windows beside them while one or both stand: where the room
-   under its bars starts, and how much room an open department's name takes under it. */
-function shellVars(shellTop: number | null, plateRoom: number | null): CSSProperties | undefined {
-  if (shellTop === null && plateRoom === null) return undefined;
+   under its bars starts, and how much room an open department's name takes under it. Only the map's tab, which holds an
+   open department too, floats them over its canvas: a page keeps its own room. */
+function shellVars(onMap: boolean, shellTop: number | null, plateRoom: number | null): CSSProperties | undefined {
+  if (!onMap || (shellTop === null && plateRoom === null)) return undefined;
   return { ...(shellTop === null ? {} : { '--shell-top': `${shellTop}px` }), ...(plateRoom === null ? {} : { '--plate-room': `${plateRoom}px` }) } as CSSProperties;
 }
 
@@ -431,7 +432,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
     <AgentWindowContext value={openAgent}>
     <UpdateSaysIt value={updateSaysIt}>
     <ShellTop value={shellTop}>
-    <div className="shell" style={tab === 'map' ? shellVars(shellTop, plateRoom) : undefined}>
+    <div className="shell" style={shellVars(tab === 'map', shellTop, plateRoom)}>
       <header className="topbar" ref={fit.bar}>
         <div className="tb-brand glass" ref={fit.brand}>
           <LogoMark />

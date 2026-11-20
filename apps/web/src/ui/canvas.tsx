@@ -19,6 +19,31 @@ export type View = { x: number; y: number; k: number; smooth: boolean | 'fly' | 
 export const sameView = (a: Pick<View, 'x' | 'y' | 'k'>, b: Pick<View, 'x' | 'y' | 'k'>) =>
   Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.k - b.k) < 1e-4;
 
+/* Where the room under the bars of the shell starts: least down from the top, or under the last bar while one stands lower
+   (#1639). */
+export const underShell = (least: number, shellTop: number | null) => Math.max(least, shellTop ?? 0);
+
+const GLIDE = 'transform .8s cubic-bezier(.3,.7,.2,1)';
+/* How the world goes to its view: at once while still, as for less motion, or when not asked to glide; in the shell's time
+   after a bar of the shell came or went (#1635); flying into a department, as fly says; else with Fit's glide. */
+export function worldTransition(smooth: View['smooth'], still: boolean, fly = GLIDE): string {
+  if (still || !smooth) return 'none';
+  if (smooth === 'shift') return 'transform var(--shell-shift) ease-out';
+  return smooth === 'fly' ? fly : GLIDE;
+}
+
+/* The move of a fit from the view now to next: none where it already stands or glides there, so a second look as a resize is
+   watched again keeps the move going; in the shell's time when a bar of the shell came or went since the last fit, as
+   shellTop says (#1635); else Fit's glide. */
+export function useFitMove(shellTop: number | null): (now: View, next: Omit<View, 'smooth'>) => View | null {
+  const lastTop = useRef<number | null | undefined>(undefined);
+  return useCallback((now: View, next: Omit<View, 'smooth'>) => {
+    const shift = lastTop.current !== undefined && lastTop.current !== shellTop;
+    lastTop.current = shellTop;
+    return sameView(now, next) ? null : { ...next, smooth: shift ? 'shift' : true };
+  }, [shellTop]);
+}
+
 /* A box from its top left to its bottom right corner. */
 export type Box = { x0: number; y0: number; x1: number; y1: number };
 /* What a canvas scrolls: its content, in the world's pixels, and the room of the canvas that what floats over it leaves free,

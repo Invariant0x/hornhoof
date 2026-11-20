@@ -25,7 +25,7 @@ export function RecoveryBanner({ me, again, onOpen }: { me: Me; again?: unknown;
 
   if (!owner || !view?.recoveryNeeded) return null;
   return (
-    <div className={`update-banner glass${fold.open ? ' open' : ''}`} role="status" aria-label={t.backups.title}>
+    <div className={fold.className} role="status" aria-label={t.backups.title}>
       <span dir="auto">{view.linkChanged ? t.backups.bannerLink : t.backups.banner}</span>
       <button className="btn small" type="button" onClick={onOpen}>{t.backups.openSettings}</button>
       {fold.more}
