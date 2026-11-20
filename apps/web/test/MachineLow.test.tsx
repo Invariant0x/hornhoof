@@ -24,6 +24,22 @@ const LOW: MachineLowCard = {
       { part: 'checkTemp', bytes: 1 * GIB, at: '2026-11-20T09:30:00.000Z' },
     ],
   },
+  names: {},
+};
+/* Work the machine keeps because it can't be restored: Theo's copy with changes not committed, and one of a folder no
+   employee of the company has. */
+const THEO = '00000000-0000-4000-8000-0000000000a1';
+const STRAY = '00000000-0000-4000-8000-0000000000b2';
+const KEEPS: MachineLowCard = {
+  ...LOW,
+  names: { [THEO]: 'Theo' },
+  disk: {
+    ...LOW.disk,
+    kept: [
+      { part: 'workingCopies', agent: STRAY, path: 'scratch/copy', task: null, bytes: 2.5 * GIB, why: 'unpushed' },
+      { part: 'workingCopies', agent: THEO, path: 'hornhoof-1750', task: 1750, bytes: 9 * GIB, why: 'uncommitted' },
+    ],
+  },
 };
 
 const shown = (machines: MachineLowCard[]) => render(<LanguageProvider><MachineLow machines={machines} /></LanguageProvider>);
@@ -77,6 +93,32 @@ describe('a machine short of disk space, as its people read it', () => {
     shown([{ ...LOW, owner: null, disk: { ...LOW.disk, cleaned: [] } }]);
     const card = screen.getByRole('region', { name: 'Machine studio-laptop is low on disk space' });
     expect(within(card).queryByText(/^Removed in the last/)).not.toBeInTheDocument();
+  });
+
+  it("lists the work it keeps because it can't be restored, biggest first: whose, where, for which task, how big and why", () => {
+    shown([KEEPS]);
+    const card = screen.getByRole('region', { name: 'Machine studio-laptop (Lisa) is low on disk space' });
+    const kept = within(card).getByRole('list', { name: "Kept, because it can't be restored" });
+    expect(within(kept).getAllByRole('listitem').map(row => row.textContent)).toEqual([
+      'Theo, hornhoof-1750: task 1750, 9 GB, changes not committed',
+      `${STRAY}, scratch/copy: 2.5 GB, commits not pushed`,
+    ]);
+    expect([...kept.querySelectorAll('li:first-child bdi')].map(piece => piece.textContent)).toEqual(['Theo', 'hornhoof-1750']);
+  });
+
+  it('says what it keeps in Russian', () => {
+    localStorage.setItem('hh-lang', 'ru');
+    shown([KEEPS]);
+    const kept = screen.getByRole('list', { name: 'Оставлено, потому что не восстановить' });
+    expect(within(kept).getAllByRole('listitem').map(row => row.textContent)).toEqual([
+      'Theo, hornhoof-1750: задача 1750, 9 ГБ, изменения не закоммичены',
+      `${STRAY}, scratch/copy: 2,5 ГБ, коммиты не отправлены`,
+    ]);
+  });
+
+  it('lists nothing kept when the machine keeps nothing', () => {
+    shown([LOW]);
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
   });
 
   it('says nothing of the parts when the machine measured none', () => {

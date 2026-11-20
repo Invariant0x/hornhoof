@@ -1,4 +1,5 @@
-import { DISK_PARTS, type DiskPart } from '@hornhoof/protocol';
+import { DISK_PARTS, type DiskPart, type DiskReport } from '@hornhoof/protocol';
+import { useId } from 'react';
 import { useLanguage, useT } from '../i18n';
 import type { MachineLowCard } from '../types';
 import { gigabytes, measuredParts } from './MachineDisk';
@@ -14,6 +15,28 @@ function cleanedByPart(card: MachineLowCard): [DiskPart, number][] {
   const sums = new Map<DiskPart, number>();
   for (const { part, bytes } of card.disk.cleaned) sums.set(part, (sums.get(part) ?? 0) + bytes);
   return DISK_PARTS.flatMap(part => (sums.has(part) ? [[part, sums.get(part)!] as [DiskPart, number]] : [])).toSorted((a, b) => b[1] - a[1]);
+}
+
+/* The work a machine keeps because it can't be restored, the biggest first: whose it is and where, each read in its own
+   direction, then for which task, how big and why. A folder of no employee the company knows goes by its own name. */
+function Kept({ card }: { card: MachineLowCard }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const id = useId();
+  const kept: NonNullable<DiskReport['kept']> = (card.disk.kept ?? []).toSorted((a, b) => b.bytes - a.bytes);
+  if (!kept.length) return null;
+  return (
+    <>
+      <p id={id}>{t.tasks.machineLowKept}</p>
+      <ul className="ml-kept" aria-labelledby={id}>
+        {kept.map((k, i) => (
+          <li key={i}>
+            <bdi>{card.names?.[k.agent] ?? k.agent}</bdi>, <bdi>{k.path}</bdi>: {t.tasks.machineLowKeptRow(k.task, gigabytes(language, k.bytes), t.tasks.machineLowKeptWhy[k.why])}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
 }
 
 /* A machine short of disk space, in words for the person who can make room on it. Nothing here waits for an answer: the
@@ -34,6 +57,7 @@ function Low({ card }: { card: MachineLowCard }) {
       {disk.docker && <p>{t.tasks.machineLowDocker(gb(disk.docker.free), gb(disk.docker.total), gb(disk.docker.threshold))}</p>}
       {takes.length > 0 && <p>{t.tasks.machineLowTakes(list(takes))}</p>}
       {cleaned.length > 0 && <p>{t.tasks.machineLowCleaned(list(cleaned))}</p>}
+      <Kept card={card} />
       <p>{t.tasks.machineLowGoesOn}</p>
       <p>{t.tasks.machineLowDo}</p>
     </section>

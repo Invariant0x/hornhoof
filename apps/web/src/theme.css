@@ -2564,6 +2564,7 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .machine-away { display: grid; gap: 4px; min-inline-size: 0; padding: 8px 12px; border-inline-start: 2px solid var(--pink); overflow-wrap: anywhere; }
 .machine-away h3 { font-size: 14px; }
 .machine-away p { margin: 0; }
+.machine-away .ml-kept { margin: 0; padding-inline-start: 18px; }
 /* A card kept for the person: a turn that is over in the accent, what needs a look in amber. */
 .wait-card { display: grid; gap: 4px; padding: 8px 12px; border-inline-start: 2px solid var(--amber); min-width: 0; overflow-wrap: anywhere; }
 .wait-card.turn_summary { border-inline-start-color: var(--cyan-ink); }

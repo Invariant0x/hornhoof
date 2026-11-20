@@ -740,6 +740,8 @@ export type MachineLowCard = {
   owner: { id: string; name: string } | null;
   since: string;
   disk: DiskReport;
+  /* The names of the company's employees whose work the machine keeps, by its folder. A server from before sends none. */
+  names?: Record<string, string>;
 };
 
 /* Everything that waits for people as /api/requests shows it to this person, and the counts of all of it: per owner, per

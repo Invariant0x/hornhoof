@@ -1,7 +1,8 @@
 import type { DiskReport } from '@hornhoof/protocol';
 import type { FastifyInstance } from 'fastify';
+import { isDeepStrictEqual } from 'node:util';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { companies, departments } from '../src/db/schema.js';
+import { agents, companies, departments } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 import { invitePerson } from './helpers-company.js';
@@ -22,7 +23,7 @@ const DISK: DiskReport = {
 const ROOMY: DiskReport = { ...DISK, free: 120 * GB, low: null };
 const load = (disk?: DiskReport) => ({ type: 'load' as const, cpus: 8, load: 1, memFree: 8 * GB, memTotal: 16 * GB, tests: 0, jobs: 0, ...(disk ? { disk } : {}) });
 
-type Card = { id: string; hostname: string | null; owner: { id: string; name: string } | null; since: string; disk: DiskReport };
+type Card = { id: string; hostname: string | null; owner: { id: string; name: string } | null; since: string; disk: DiskReport; names: Record<string, string> };
 
 /* Bob's machine worker-1, joined with his own plan and connected, and Carol, who sees one department only. */
 async function bobsMachine() {
@@ -40,7 +41,7 @@ async function bobsMachine() {
   const node = await connectNode(url, joined.nodes[0].key as string);
   node.send({ type: 'hello', version: '0.41.0', loggedIn: true, running: [], load: load(ROOMY) });
   const me = (await app.inject({ url: '/api/me', ...as(bob) })).json();
-  return { app, ceo, bob, carol, node, machine: joined.machine.id as string, bobId: (me.person?.id ?? me.id) as string };
+  return { app, db, ceo, bob, carol, node, machine: joined.machine.id as string, bobId: (me.person?.id ?? me.id) as string };
 }
 
 const cardsOf = async (app: FastifyInstance, token: string): Promise<Card[]> => {
@@ -51,7 +52,8 @@ const cardsOf = async (app: FastifyInstance, token: string): Promise<Card[]> => 
 const diskOn = async (app: FastifyInstance, token: string) => (await app.inject({ url: '/api/machines', ...as(token) })).json().machines[0]?.load?.disk;
 const says = async (app: FastifyInstance, token: string, node: FakeNode, disk: DiskReport) => {
   node.send(load(disk));
-  await until(async () => JSON.stringify(await diskOn(app, token)) === JSON.stringify(disk));
+  /* The server says it back in the schema's own order of keys, so the two are compared as values. */
+  await until(async () => isDeepStrictEqual(await diskOn(app, token), disk));
 };
 
 describe("a machine's disk", () => {
@@ -77,10 +79,25 @@ describe('the card of a machine short of disk space', () => {
     expect(await cardsOf(app, ceo)).toEqual([]);
 
     await says(app, ceo, node, DISK);
-    const card: Card = { id: machine, hostname: 'worker-1', owner: { id: bobId, name: 'Bob' }, since: LOW_SINCE, disk: DISK };
+    const card: Card = { id: machine, hostname: 'worker-1', owner: { id: bobId, name: 'Bob' }, since: LOW_SINCE, disk: DISK, names: {} };
     expect(await cardsOf(app, ceo)).toEqual([card]);
     expect(await cardsOf(app, bob)).toEqual([card]);
     expect(await cardsOf(app, carol)).toEqual([]);
+  });
+
+  it("names the company's employees whose work the node keeps, and no one it does not know", async () => {
+    const { app, db, ceo, node } = await bobsMachine();
+    const [employee] = await db.select({ id: agents.id, name: agents.name }).from(agents).limit(1);
+    const elsewhere = '00000000-0000-4000-8000-000000000001';
+    const kept: NonNullable<DiskReport['kept']> = [
+      { part: 'workingCopies', agent: employee!.id, path: 'hornhoof', task: 12, bytes: 9 * GB, why: 'uncommitted' },
+      { part: 'workingCopies', agent: elsewhere, path: 'copy', task: null, bytes: 2 * GB, why: 'unpushed' },
+      { part: 'workingCopies', agent: 'not-an-id', path: 'scratch', task: null, bytes: GB, why: 'unpushed' },
+    ];
+    await says(app, ceo, node, { ...DISK, kept });
+    const [card] = await cardsOf(app, ceo);
+    expect(card!.disk.kept).toEqual(kept);
+    expect(card!.names).toEqual({ [employee!.id]: employee!.name });
   });
 
   it('goes away by itself once the node has room again, or is off the line', async () => {

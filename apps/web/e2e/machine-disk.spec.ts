@@ -25,13 +25,17 @@ const DISK: DiskReport = {
     { part: 'buildCache', bytes: 8.2 * GIB, at: '2026-11-20T09:39:00.000Z' },
     { part: 'containers', bytes: 2.4 * GIB, at: '2026-11-20T09:38:00.000Z' },
   ],
+  kept: [
+    { part: 'workingCopies', agent: '00000000-0000-4000-8000-0000000000a1', path: 'hornhoof-1750/apps/web', task: 1750, bytes: 6.8 * GIB, why: 'uncommitted' },
+    { part: 'workingCopies', agent: '00000000-0000-4000-8000-0000000000b2', path: 'scratch/release-check-copy', task: null, bytes: 1.9 * GIB, why: 'unpushed' },
+  ],
 };
 const MACHINE: MachineView = {
   id: 'm1', hostname: HOST, os: 'darwin', arch: 'arm64', owner: OWNER, online: true, lastSeenAt: null, plans: [],
   load: { cpus: 10, load: 1, memFree: 10 * GIB, memTotal: 12 * GIB, jobs: 0, tests: 0, cpuModel: 'Apple M2 Pro', diskFree: DISK.free, diskTotal: DISK.total, disk: DISK },
   lendsTests: true, running: { agents: [], parts: [] },
 };
-const LOW: MachineLowCard = { id: 'm1', hostname: HOST, owner: OWNER, since: DISK.low!.since, disk: DISK };
+const LOW: MachineLowCard = { id: 'm1', hostname: HOST, owner: OWNER, since: DISK.low!.since, disk: DISK, names: { '00000000-0000-4000-8000-0000000000a1': 'Theodora Vasilievna-Brightwater' } };
 const SUBS: SubView[] = [];
 
 async function messagesFor(language: Language): Promise<Messages> {
@@ -74,7 +78,8 @@ async function diskPart(page: Page, t: Messages): Promise<{ card: Locator; part:
 /* The low-space card among the tracker's Failures. */
 async function lowCard(page: Page, t: Messages): Promise<Locator> {
   const card = page.getByRole('region', { name: t.tasks.machineLow(HOST, OWNER.name), exact: true });
-  await expect(card.locator('p')).toHaveCount(6);
+  await expect(card.locator('p')).toHaveCount(7);
+  await expect(card.locator('.ml-kept li')).toHaveCount(DISK.kept!.length);
   await page.evaluate(() => document.fonts.ready);
   return card;
 }
