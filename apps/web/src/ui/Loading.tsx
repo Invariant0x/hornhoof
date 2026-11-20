@@ -133,6 +133,9 @@ function phaseOf(failed: unknown, times: Times, waiting: boolean): Pick<Load, 'p
   return { phase: 'done', ring: false, failure: null };
 }
 
+/* A screen's data once its load is done, else null: what the screen shows in place of its held room. */
+export const doneOf = <T,>(data: T | null, load: Load): T | null => (load.phase === 'done' ? data : null);
+
 /* One load of a screen from its parts. Show its data once its phase is done, not as soon as the data is there, so the ring
    keeps its least time. */
 export function useLoad(parts: LoadPart[]): Load {

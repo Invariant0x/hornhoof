@@ -1245,6 +1245,43 @@ describe('runNode', () => {
     expect(server.received.find(m => m.type === 'job.done')).toMatchObject({ jobId: 'j1', ok: false, error: 'cancelled' });
   });
 
+  it.each([
+    ['a mail turn', { key: 'a1', repo: null }],
+    ['a task turn', { key: 'a1', repo: null, tasks: { open: [7], upTo: 7 } }],
+  ])('ends %s as stopped at once when Hornhoof calls it off while its run still waits, and tells that end only once', async (_turn, workspace) => {
+    const server = await fakeServer();
+    /* The run waits on, as one whose program's end signal the node never heard does, until the test lets it end. */
+    const run: { finish?: () => void } = {};
+    const waits: ProviderAdapter = {
+      ...adapter,
+      run: () => new Promise(done => { run.finish = () => done({ ok: true, sessionId: 'sess-late', result: 'A late answer.', output: '', error: null, limits: null }); }),
+    };
+    const node = await runNode({ dir: nodeDir(server.url), adapter: waits, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: 'sess-1', model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null, workspace });
+    await server.wait(() => run.finish !== undefined);
+    const ends = () => server.received.filter(m => m.type === 'job.done' && m.jobId === 'j1');
+    server.send({ type: 'job.cancel', jobId: 'j1' });
+    await server.barrier('called off');
+    expect(ends()).toEqual([expect.objectContaining({ ok: false, sessionId: 'sess-1', result: 'Stopped.', tail: '', error: 'cancelled' })]);
+    /* Hornhoof confirms that end, the run ends after all, and Hornhoof asks again for a job the node still listed. */
+    server.send({ type: 'job.ack', jobId: 'j1' });
+    run.finish!();
+    const replies = () => server.received.filter(m => m.type === 'jobs.held');
+    const held = async () => {
+      const before = replies().length;
+      server.send({ type: 'jobs.check', jobIds: ['j1'] });
+      await server.wait(() => replies().length > before);
+      return replies().at(-1)!.held as string[];
+    };
+    /* Each look asks the node again, until it holds the job no more. */
+    while ((await held()).length) { /* the run still winds down */ }
+    server.send({ type: 'job.cancel', jobId: 'j1' });
+    await server.barrier('ran out');
+    expect(ends()).toHaveLength(1);
+  });
+
   it("says how busy its machine is in hello and every while after, with the agent jobs it runs", async () => {
     const server = await fakeServer();
     const slow: ProviderAdapter = { ...adapter, run: input => new Promise(done => input.signal?.addEventListener('abort', () => done({ ok: false, sessionId: null, result: '', output: '', error: 'agent_failed', limits: null }))) };

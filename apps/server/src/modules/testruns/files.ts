@@ -9,20 +9,21 @@ import { ApiError } from '../../errors.js';
 import { identify } from '../nodes/socket.js';
 import { checkRoom, FILE_BYTES } from '../tasks/file-policy.js';
 import { sendFile } from '../tasks/attachments.js';
-import { madeName, workPartOn } from './runs.js';
+import { madeName, runningPartOn } from './runs.js';
 
 const FileParams = z.object({ id: z.string().max(64), name: RunFile });
 
-/* The node that runs a part of work fetches the task's files its run names and puts on the task the files the part made,
-   with its own key. Nothing else reaches them: not another node, not a part that ended, not a file the run did not name. */
+/* The node that runs a part fetches the task's files its run of work names, and puts on the task the files the part left in
+   $HH_OUT, a part of work's or of a test run's, with its own key. Nothing else reaches them: not another node, not a part
+   that ended, not a file the run did not name. A test run names none. */
 export function partFileRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
   async function partOf(req: FastifyRequest) {
     const node = await identify(ctx, req);
     if (!node) throw new ApiError(401, 'unauthorized', 'Unknown node key.');
     const { id, name } = FileParams.parse(req.params);
-    const found = await workPartOn(ctx, node, id);
-    if (!found) throw new ApiError(404, 'not_found', 'This node runs no such part of work now.');
+    const found = await runningPartOn(ctx, node, id);
+    if (!found) throw new ApiError(404, 'not_found', 'This node runs no such part now.');
     return { ...found, name };
   }
 

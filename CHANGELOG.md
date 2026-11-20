@@ -9,6 +9,15 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- On a page right to left, the tracker's graph is drawn mirrored too: its root at the right, each level further to the left, the lines of what a task waits for on the left with their words beside the waiting task, and its zoom at the right as on the other canvases.
+- People and Machines hold the room of their data while it comes, with the same loading ring and Retry: their table heads, and Machines' pool and search, stand at once, and nothing above the rows moves when they come. Once Machines showed its filter buttons in a tab, its next load there holds their room too.
+- The map, a department with its tree and speed, and an employee's window show the same loading indicator where their data will stand. The map is drawn only once the company and the person's own arrangement came, so its blocks no longer jump into place. A department opened at its own address keeps back, the plate of its name and its tools while its company comes, so a failure there has a way out. Their loads say why they failed, or that they take longer than usual, as the tracker's do. None of them says it is empty, such as a conversation with no messages yet, while something it shows is still on its way.
+
+## [0.40.0] - 2026-11-20
+
+### Fixed
+
+- Stop ends any turn an employee's node runs, not only one a person typed: the program stops as on Escape and the turn ends as stopped at once, even when the node never heard the program say its turn ended, and that end is told once.
 - Map cards and the department screen show every word in any language: cards grow together, far zoom moves nothing, words break with hyphens and the hint keeps its own room.
 - People on the map show their whole name and title in any language: their chips wrap with hyphens and each row grows to its tallest chip.
 - On a phone the map opens with names readable and a department opens on its head card; both scroll to an edge and stop clear of the floating buttons, and nothing scrolls under them.
@@ -19,17 +28,35 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A tab whose session ended goes to the sign-in screen at once, and a tab nobody is signed in on reloads by itself once Hornhoof runs another version.
 - After the sign-in code, a plan's card and its sign-in window show that it is connecting, with its steps, the step its machine is at and the time since the code, until it is ready, for every program. A minute with no new step (`SIGNIN_SLOW_MS`) says it takes longer than usual; at 10 minutes (`SIGNIN_CONNECT_MS`) it fails and says why and what to do, each with Retry and Stop.
 - The tracker, the task card, the plans screen and a plan card's tokens hold the room of their data while it comes, with one loading ring from 400 ms, and nothing already shown moves when it comes. At 10 seconds a load says it takes longer than usual, at 30 seconds it gives up and says why, and an error says why at once, each with Retry. A section says that it has nothing only once all of it came.
-- The map, a department with its tree and speed, and an employee's window show the same loading indicator where their data will stand. The map is drawn only once the company and the person's own arrangement came, so its blocks no longer jump into place. A department opened at its own address keeps back, the plate of its name and its tools while its company comes, so a failure there has a way out. Their loads say why they failed, or that they take longer than usual, as the tracker's do. None of them says it is empty, such as a conversation with no messages yet, while something it shows is still on its way.
 - On a page right to left, the map's zoom and Put back stand at the right, mirrored as the rest of the layout is.
+- On a page right to left, the zoom of a department's schema and tree stands at the right too, and the department's line of what happened, its actions and its Speed and About drawer stand mirrored with it; an agent window keeps its place, and the tracker's graph, still drawn from the left, keeps its zoom at the left, clear of its tasks.
 - A plan with separate limits for groups of models, as Antigravity's Gemini and its Claude and GPT models, keeps each group's limits: a used-up group holds only the turns and fallbacks on its own models, and the plan's card shows every group with what it used and when it resets.
 - In a page that reads right to left, an English line of a bar over the map ends with its full stop instead of starting with it, and the bar stays mirrored.
 - A number on a plan's card stays on one line with its unit or the word it goes with, as "14 h", "1 online" or "Input 0", in every language; a reset still wraps between its parts.
 - A release no longer counts as checked a commit that turnkey work was built on but its employee did not make: Hornhoof notes where the turn branch was as the work starts, refuses a start named under it, lists work whose start it has no record of for a person, and a tag named like main never stands for main.
+- Stop ends a turn even when its machine never reports the end: Hornhoof closes the turn itself at most a minute and a half after Stop, and the employee's waiting messages go out.
+- The updater can no longer be made to overwrite files of the installation, such as its secrets: it does not follow what the app puts in the folders they share, gives an installer it runs a folder of its own, and unpacks from an upload or a restore only plain files whose own header it read, at most 1000 of them.
+- A restore whose dump is a named pipe gets an answer instead of waiting for ever, an archive with data after its end fails as unreadable, and removing a loaded dump's copy never stops the updater.
+- The updater keeps answering while it carries an employee's computer commands.
+- A Kimi Code turn that goes on after words were steered into it keeps its job and its tools, and a turn Kimi starts on its own no longer leaves the next turn waiting silently behind it.
+- A department's schema opens clear of the top bar at every width, and on a screen wider than 760 px the tracker's list, board and graph make room beside an open task card instead of lying under it.
+
+### Added
+
+- People who see the whole company have a tracker section Waiting for people: every decision they see and every task that waits for a person, each saying whom it waits for.
 
 ### Changed
 
 - In the tracker's list, the status dot of a task an employee works on right now has a filled core that breathes slowly, every such dot together; for a person who asked for less motion the core is full and still, and a screen reader hears "In work, working now".
 - The map runs to the bottom of the screen, with the version as small muted text in its bottom end corner, clear of its buttons and of the bars along a phone's bottom; other screens keep the version in the row below them.
+- Waiting for me lists only what waits for you: a question asked of another person by name waits for that person alone. A person's filter names them in the page title, with no chip of its own.
+- A release that brings commits no check covered is recorded only once a person approves a card that lists exactly those commits, shown next to Approve, whatever the commit rule and even under autonomous release. A hand-in's base must already be on main or the open turn, and turnkey work counts only from the commit its holder checked.
+
+## [0.39.5] - 2026-11-20
+
+### Added
+
+- A run_tests part that runs a command gets an empty folder in $HH_OUT, and the plain files it leaves there, such as a browser check's pictures, go on the run's task as test-<run>-<part>-<name>, as run_work's do, whether its tests passed or failed.
 
 ## [0.39.4] - 2026-11-20
 

@@ -669,21 +669,21 @@ it('counts a task with a question once and counts failed tasks separately', asyn
   expect(list).not.toHaveTextContent('Fix the login page');
 });
 
-/* Max, a person of the company, is asked by name on the card payments, and only he answers; Ivan, the CEO looking, is asked
+/* Theo, a person of the company, is asked by name on the card payments, and only he answers; Ivan, the CEO looking, is asked
    by name on the refund button; the login page's question is for anyone, Maria's as her department's, and Ivan may take it
    too. The login page also waits for Ivan himself. */
 describe('what waits for people', () => {
-  const MAX = { id: 'p-max', name: 'Max' };
-  const WITH_MAX: Org = { ...ORG, people: [...ORG.people, { ...ORG.people[1]!, id: MAX.id, name: MAX.name, email: 'max@acme.test', title: 'Designer' }] };
+  const THEO = { id: 'p-theo', name: 'Theo' };
+  const WITH_THEO: Org = { ...ORG, people: [...ORG.people, { ...ORG.people[1]!, id: THEO.id, name: THEO.name, email: 'theo@acme.test', title: 'Designer' }] };
   const asked = (id: string, task: TaskLine, text: string, over: Partial<WaitingRequest>): WaitingRequest => ({
     id, kind: 'question', text, task: { id: task.id, number: task.number, title: task.title, department: DEV }, ownerPersonId: IVAN.id, canAnswer: true,
     agent: { id: BRUNO.id, name: BRUNO.name }, commit: null, commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: LOGIN.createdAt, ...over,
   });
   const BY_NAME = { kind: 'named_person' as const, department: null };
-  const FOR_MAX = asked('r-max', PAY, 'Which bank for the cards?', { ownerPersonId: MAX.id, canAnswer: false, decidedBy: BY_NAME });
+  const FOR_THEO = asked('r-theo', PAY, 'Which bank for the cards?', { ownerPersonId: THEO.id, canAnswer: false, decidedBy: BY_NAME });
   const FOR_IVAN = asked('r-ivan', REFUND, 'How much may a refund be?', { decidedBy: BY_NAME });
   const FOR_ANYONE = asked('r-any', LOGIN, 'Which header?', { ownerPersonId: MARIA.id, decidedBy: { kind: 'department_and_ceo', department: DEV } });
-  const routes = { 'GET /api/org': [200, WITH_MAX], 'GET /api/requests': [200, decisions([FOR_MAX, FOR_IVAN, FOR_ANYONE])] };
+  const routes = { 'GET /api/org': [200, WITH_THEO], 'GET /api/requests': [200, decisions([FOR_THEO, FOR_IVAN, FOR_ANYONE])] };
   const articles = (region: HTMLElement) => within(region).getAllByRole('article').map(a => a.getAttribute('aria-label'));
 
   it("leaves a question asked of another person by name out of the viewer's own list and count, and keeps the rest", async () => {
@@ -698,22 +698,22 @@ describe('what waits for people', () => {
   });
 
   it("keeps a question asked of a person by name in that person's filter", async () => {
-    shell('/tasks?show=waits&person=p-max', routes);
+    shell('/tasks?show=waits&person=p-theo', routes);
     const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
-    expect(await screen.findByRole('heading', { level: 1, name: 'Waits for Max' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Waits for Theo' })).toBeInTheDocument();
     await within(waiting).findByText('Which bank for the cards?');
     expect(articles(waiting)).toEqual(['#21 Take card payments']);
   });
 
   it("names the person of a filter in the page's title alone, and Me takes the filter off", async () => {
     const user = userEvent.setup();
-    shell('/tasks?show=waits&person=p-max', routes);
+    shell('/tasks?show=waits&person=p-theo', routes);
     const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
     await within(waiting).findByText('Which bank for the cards?');
-    expect(screen.getByRole('heading', { level: 1, name: 'Waits for Max' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Waits for Theo' })).toBeInTheDocument();
     /* Everything that waits for other people is in Waiting for people, so the list has neither a second line naming the
        person nor a way to everyone's decisions. */
-    expect(waiting).not.toHaveTextContent('Decisions for Max');
+    expect(waiting).not.toHaveTextContent('Decisions for Theo');
     expect(screen.queryByRole('button', { name: "Show everyone's decisions" })).toBeNull();
     await user.selectOptions(screen.getByRole('combobox', { name: 'View as' }), 'Me, Ivan');
     expect(screen.getByRole('heading', { level: 1, name: 'Waits for me' })).toBeInTheDocument();
@@ -748,10 +748,10 @@ describe('what waits for people', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Waiting for people' })).toBeInTheDocument();
     const people = screen.getByRole('region', { name: 'Waiting for people' });
     expect(articles(people)).toEqual(['#21 Take card payments', '#23 Refund button', '#24 Fix the login page']);
-    expect(within(people).getByRole('article', { name: '#21 Take card payments' })).toHaveTextContent('Waiting for: Max');
+    expect(within(people).getByRole('article', { name: '#21 Take card payments' })).toHaveTextContent('Waiting for: Theo');
     expect(within(people).getByRole('article', { name: '#23 Refund button' })).toHaveTextContent('Waiting for: Ivan');
     expect(within(people).getByRole('article', { name: '#24 Fix the login page' })).toHaveTextContent('Waiting for: Maria');
-    /* Max's question shows who answers it instead of a way to answer. */
+    /* Theo's question shows who answers it instead of a way to answer. */
     expect(within(people).getByRole('article', { name: '#21 Take card payments' })).toHaveTextContent('Only the person asked can answer.');
     /* The tasks that wait for a person, here the login page for Ivan. */
     const tasks = within(people).getByRole('heading', { name: 'Tasks that wait for people' }).parentElement!;

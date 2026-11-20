@@ -2,7 +2,7 @@ import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { api, ApiFailure } from '../api';
 import { useStream } from '../live';
-import { useHeldRows, useLoad, type Load } from '../ui/Loading';
+import { doneOf, useHeldRows, useLoad } from '../ui/Loading';
 import { PlanConnection, ReadySaid } from '../ui/PlanConnection';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
@@ -554,8 +554,6 @@ function usePlanConnections({ setSubs, load, run, signIn }: ConnectionParts) {
 
 /* What could not load, said on top of the page: the plans' own failure stands where they would until they came. */
 /* A screen's data once its load is done, so the ring keeps its least time; until then, none. */
-const doneOf = <T,>(data: T | null, load: Load): T | null => (load.phase === 'done' ? data : null);
-
 const failureOnTop = (subs: SubView[] | null, plans: unknown, commands: unknown) => (subs ? plans ?? commands : commands);
 
 export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {

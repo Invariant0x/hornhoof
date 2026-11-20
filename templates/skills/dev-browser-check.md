@@ -14,6 +14,6 @@ Unit tests do not show what a user meets. This is for a change that has somethin
 3. Walk the whole flow the change touches, then its edges: empty data, an error from what it depends on, a slow answer, a long name, a small screen where the product has screens.
 4. On a screen, check every theme the product has at narrow and wide widths, on the longest and shortest languages among its actually shipped translations, measured on the real strings of the touched views instead of a fixed two-language pair, plus one shipped RTL language once the product ships one. Never count a pseudo-locale or demo string as a real shipped language. A claim about web layout or geometry takes a run across Chromium, Firefox and WebKit: never count a single browser engine as cross-engine verification.
 5. Watch logs, the console and failed requests: any error is a finding.
-6. Keep evidence of each state you checked (screenshots, recordings, command output, responses) named by what they show, and list it in your report.
+6. Keep evidence of each state you checked (screenshots, recordings, command output, responses) named by what they show, and list it in your report. On a check machine, a run_tests part that runs your command puts what it writes to $HH_OUT on the task.
 
 If the product or the browser does not start, install missing browser dependencies in your workspace and verify the browser opens. If it still fails, report BLOCKED with the command and its output. A check you could not run is not a pass.

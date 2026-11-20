@@ -1,5 +1,15 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { useT } from '../i18n';
+
+/* The direction the page reads in, from the dir of its root, which a page may set after it is first drawn. A canvas that
+   places its content by hand follows it as it changes, since its content does not mirror with the page's own layout. */
+const pageDirection = (): 'ltr' | 'rtl' => (document.documentElement.getAttribute('dir') === 'rtl' ? 'rtl' : 'ltr');
+function watchDirection(changed: () => void): () => void {
+  const watch = new MutationObserver(changed);
+  watch.observe(document.documentElement, { attributes: true, attributeFilter: ['dir'] });
+  return () => watch.disconnect();
+}
+export const usePageDirection = () => useSyncExternalStore(watchDirection, pageDirection, (): 'ltr' | 'rtl' => 'ltr');
 
 /* A press that moves further than this drags the canvas instead of clicking. */
 export const DRAG_PX = 4;
