@@ -177,7 +177,7 @@ describe("an agent's window opens as a chat", () => {
     expect(term.querySelector('.load-fail.slow')).toHaveTextContent('Taking longer than usual');
     expect(place.queryByRole('alert')).not.toBeInTheDocument();
     await act(async () => { vi.advanceTimersByTime(FAIL_MS - SLOW_MS); });
-    expect(place.getByRole('alert')).toHaveTextContent(en.load.failed.timeout);
+    expect(place.getByRole('alert').querySelector('.lf-t')?.textContent).toBe(en.load.failed.timeout);
     const before = asked;
     fireEvent.click(place.getByRole('button', { name: 'Retry' }));
     await act(async () => {});
