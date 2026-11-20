@@ -1,7 +1,7 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { captureWith } from './capture';
-import { DEV, serveTasksBoard, TASKS } from './tasks-board/api';
+import { DEV, GOALS, serveTasksBoard, TASKS } from './tasks-board/api';
 import { serveTree } from './tree-api';
 
 /* The zoom of the department's schema and tree stands at the start of its canvas's bottom, mirrored on a page right to left
@@ -162,8 +162,8 @@ for (const skin of SKINS) for (const height of [900, 640]) {
    in their own direction. Its zoom stands at the start of the canvas's bottom as on the other canvases, over the side by the
    root, where it covers no node when the graph opens. Left to right nothing moves (#1670, Design's verdict in #1668). The
    check of the card payments waits for their build, so a wait is drawn. */
-/* A node by its words as the page shows them: a goal after its mark, a task after its number. */
-const ROOT = '◎ Card payments', CHILD = '#1 Take card payments';
+/* The goal of card payments at the root and the task under it, by the ids their nodes carry. */
+const ROOT = GOALS.find(g => g.title === 'Card payments')!.id, CHILD = TASKS.find(x => x.title === 'Take card payments')!.id;
 const WAITING = TASKS.find(x => x.title === 'Check: take card payments')!, AWAITED = TASKS.find(x => x.title === 'Build: take card payments')!;
 async function serveWithWait(page: Page) {
   await serveTasksBoard(page);
@@ -172,26 +172,37 @@ async function serveWithWait(page: Page) {
 const graph = (context: BrowserContext, size: Size, dir: Dir, skin: string) =>
   open(context, size, dir, skin, serveWithWait, `/tasks?department=${DEV.id}&view=graph`);
 
+/* A box read at once from a page already still: what is not there fails the test at once, naming it, instead of being waited
+   for without end, as a browser test has no time limit of its own (#1663). */
+async function now(page: Page, selector: string): Promise<Box> {
+  const b = await page.evaluate(s => {
+    const r = document.querySelector(s)?.getBoundingClientRect();
+    return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
+  }, selector);
+  if (!b) throw new Error(`${selector} is not on the page`);
+  return b;
+}
+
 for (const skin of SKINS) for (const size of [WIDE, PHONE]) {
   test(`the tracker graph grows from a root at the start, its wait and its zoom mirrored with it, over no node: ${skin} ${size.width}`, async ({ context }, info) => {
     const page = { ltr: await graph(context, size, 'ltr', skin), rtl: await graph(context, size, 'rtl', skin) };
     for (const dir of ['ltr', 'rtl'] as const) {
       await expect(page[dir].getByRole('region', { name: en.tracker.graph.canvas }).locator('.tr-node').first()).toBeVisible();
-      await expect(page[dir].locator('.tr-wires .wait')).toHaveCount(1);
       /* On a phone the canvas runs below the fold: its zoom is brought into sight, as a person scrolls to it. */
       await page[dir].locator('.tr-canvas .zoom').scrollIntoViewIfNeeded();
       await still(page[dir], '.tr-canvas, .tr-canvas .zoom, .tr-canvas .world, .tr-canvas .tr-node');
       if (info.project.name.includes('chromium')) await capture(page[dir], info, `tracker-${skin}-${dir}-${size.width}`);
+      expect(await page[dir].locator('.tr-wires .wait').count(), `${dir}: the waits drawn`).toBe(1);
     }
-    const at = async (selector: string) => ({ ltr: await box(page.ltr, selector), rtl: await box(page.rtl, selector) });
-    const node = (title: string) => at(`.tr-canvas .tr-node:has(.tr-node-title:text-is("${title}"))`);
+    const at = async (selector: string) => ({ ltr: await now(page.ltr, selector), rtl: await now(page.rtl, selector) });
+    const node = (id: string) => at(`.tr-canvas .tr-node[data-node="${id}"]`);
     const canvas = await at('.tr-canvas'), zoom = await at('.tr-canvas .zoom');
     mirrored('the canvas', canvas.ltr, canvas.rtl, size.width);
     /* Left to right the zoom stands where it stood; right to left it is mirrored with the page. */
     near(zoom.ltr.x - canvas.ltr.x, EDGE + FRAME, 'the zoom from the canvas\'s left, left to right');
     mirrored('the zoom', zoom.ltr, zoom.rtl, size.width);
     const root = await node(ROOT), child = await node(CHILD);
-    const waiting = await node(`#${WAITING.number} ${WAITING.title}`), awaited = await node(`#${AWAITED.number} ${AWAITED.title}`);
+    const waiting = await node(WAITING.id), awaited = await node(AWAITED.id);
     const lane = await at('.tr-wires .wait path'), word = await at('.tr-wires .wait text');
     expect.soft(root.ltr.x + root.ltr.width, 'left to right: the root left of its task').toBeLessThan(child.ltr.x);
     expect.soft(root.rtl.x, 'right to left: the root right of its task').toBeGreaterThan(child.rtl.x + child.rtl.width);
