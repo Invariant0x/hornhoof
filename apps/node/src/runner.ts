@@ -57,9 +57,6 @@ export class ProgramNotStarted extends Error {
 /* step: where a sign-in is after its code, for the running node to pass on, when the program shows it. */
 export type LoginIo = { input: NodeJS.ReadableStream; output: NodeJS.WritableStream; urlFile: string; step?: (step: SigninStep) => void };
 
-/* Where a sign-in is after its code, said to whoever listens. */
-export const sayStep = (io: LoginIo, step: SigninStep): void => io.step?.(step);
-
 /* One agent program (Claude Code, Codex, Kimi) as the node drives it. */
 export interface ProviderAdapter {
   install(): Promise<void>;
