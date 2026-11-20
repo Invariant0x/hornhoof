@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
-import type { BackupsView, UpdatesView } from '../src/types';
-import { serveApi } from './api';
+import type { BackupsView, Org, UpdatesView } from '../src/types';
+import { ME, serveApi } from './api';
 
 /* A department opened from the map while a bar of the shell hangs over the map, as everyone saw it on 0.39.1: after each
    update until its OK is pressed, in a new company until its recovery file is saved, while a newer build waits, and when
@@ -162,18 +162,25 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const bar of BARS) {
     await still(page);
 
     /* The person zooms the map in on the department's card and leaves it there: the view is theirs. A phone's map opens on
-       its hub (#1597), where the card may show only in part at an edge, so they zoom where it shows. */
-    const map = await boxOf(page, '.map'), shown = await boxOf(page, '.dept:has-text("Development")');
-    const [x0, x1] = [Math.max(shown.x, map.x), Math.min(shown.x + shown.width, map.x + map.width)];
-    const [y0, y1] = [Math.max(shown.y, map.y), Math.min(shown.y + shown.height, map.y + map.height)];
-    await page.mouse.move((x0 + x1) / 2, (y0 + y1) / 2);
+       its hub (#1597), where the card may show only in part at an edge, and the map runs under the header and the bars
+       (#1639), so they zoom and then click where the card shows in the room under them. */
+    const shownPart = async () => {
+      const map = await boxOf(page, '.map'), under = await room(page), shown = await boxOf(page, '.dept:has-text("Development")');
+      const [x0, x1] = [Math.max(shown.x, map.x), Math.min(shown.x + shown.width, map.x + map.width)];
+      const [y0, y1] = [Math.max(shown.y, map.y, under.top), Math.min(shown.y + shown.height, map.y + map.height, under.bottom)];
+      expect(x1 - x0 > 8 && y1 - y0 > 8, "the department's card shows in the room under the bars").toBe(true);
+      return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, card: shown };
+    };
+    const zoomAt = await shownPart();
+    await page.mouse.move(zoomAt.x, zoomAt.y);
     await page.mouse.wheel(0, -240);
     const left = await still(page);
     const mapBefore = await boxOf(page, '.map');
     expect(mapBefore.y, 'the map starts at the top of the window, under the header and any bar').toBeLessThanOrEqual(0.5);
 
     arm?.();
-    await card.click();
+    const clickAt = await shownPart();
+    await card.click({ position: { x: clickAt.x - clickAt.card.x, y: clickAt.y - clickAt.card.y } });
     const back = page.getByRole('button', { name: en.dept.back, exact: true });
     await expect(back).toBeVisible();
     await expect(page.locator('main.body > :is(.update-banner, .alert, .guard-stop)').first()).toBeVisible();
@@ -261,6 +268,94 @@ for (const width of WIDTHS) for (const dir of DIRS) for (const bar of [NO_BAR, .
     const start = await page.locator('.dview .crumbs').evaluate(e => parseFloat(getComputedStyle(e).insetInlineStart));
     const fromStart = dir === 'rtl' ? width - (plate.x + plate.width) : plate.x;
     expect(Math.abs(fromStart - start), `the name plate stands ${start} px from the ${dir === 'rtl' ? 'right' : 'left'} edge, not ${fromStart}`).toBeLessThanOrEqual(1);
+    expect(errors).toEqual([]);
+  });
+}
+
+/* Design on #1639: a card opens 8 px under the last element at the top, and the department's name plate is one. A name
+   that wraps to two lines makes the plate taller, so a card opened over the department starts under its measured bottom:
+   on a phone always, on a wide screen where that is lower than under the header or the bars. */
+const LONG_NAME = 'Development of the web app, the map of the company and the task tracker';
+const LONG_NAMED: Org = {
+  company: ME.company,
+  orchestrator: { id: 'a1', name: 'Orchestrator', model: 'claude-opus-5-5', effort: null, subscription: null, context: null, program: null, alarm: null, retry: null, failure: null },
+  agents: { total: 1, working: 1 },
+  people: [],
+  departments: [{ id: 'd2', name: LONG_NAME, templateKey: null, roleCode: 'CTO', about: '', agents: { total: 1, working: 1 }, products: [], teams: [], people: [], employees: [], roles: [] }],
+};
+for (const width of WIDTHS) for (const dir of DIRS) for (const bar of [NO_BAR, ...BARS.filter(bar => bar.name === 'the update that ended')]) {
+  test(`a task card opens 8 px under a department's name of two lines with ${bar.name}, ${width}px ${dir}`, async ({ page }, info) => {
+    const errors: string[] = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.setViewportSize({ width, height: HEIGHT });
+    await page.addInitScript(() => {
+      localStorage.setItem('hh-lang', 'en');
+      localStorage.setItem('hh-theme', 'cyberpunk');
+    });
+    await serveApi(page);
+    await page.route('**/api/org', route => route.fulfill({ json: LONG_NAMED }));
+    await bar.serve(page);
+    await page.goto('/');
+    const card = page.locator('.dept', { hasText: LONG_NAME });
+    await expect(card).toBeVisible();
+    if (bar.before) await expect(page.locator('main.body > .update-banner')).toBeVisible();
+    if (dir === 'rtl') await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
+    await still(page);
+    await card.click();
+    await expect(page.getByRole('button', { name: en.dept.back, exact: true })).toBeVisible();
+    /* A task opens over the department as its tree opens one: the task's address, with the department's under it. */
+    await page.evaluate(() => {
+      history.pushState({ hhBackground: location.pathname, hhUnderlays: [] }, '', '/tasks/t1');
+      dispatchEvent(new PopStateEvent('popstate'));
+    });
+    const opened = page.locator('aside.acard');
+    await expect(opened.getByText('Checkout step 1', { exact: true }).first()).toBeVisible();
+    await expect(page.locator('.dview .crumbs')).toBeVisible();
+    const lines = await page.locator('.dview .crumbs h2').evaluate(e => Math.round(e.getBoundingClientRect().height / parseFloat(getComputedStyle(e).lineHeight)));
+    expect(lines, "the department's name takes two lines").toBeGreaterThanOrEqual(2);
+    const plate = await stillBox(page, '.dview .crumbs'), at = await stillBox(page, 'aside.acard');
+    shot(await page.screenshot({ animations: 'disabled' }), `task-card-${info.project.name}-${width}-${dir}-${bar.name.replace(/[^a-z]+/gi, '-').replace(/^-|-$/g, '')}`);
+
+    const under = await room(page), header = await boxOf(page, '.topbar');
+    const plateEnd = plate.y + plate.height + 8;
+    const top = width <= 760 ? plateEnd : Math.max(bar === NO_BAR ? 68 : under.top, plateEnd);
+    expect(Math.abs(at.y - top), `the task card opens at ${top}, 8 px under the name plate's bottom at ${plate.y + plate.height}, not at ${at.y}`).toBeLessThanOrEqual(1);
+    expect(at.y, 'the task card opens under the header').toBeGreaterThanOrEqual(header.y + header.height);
+    expect(errors).toEqual([]);
+  });
+}
+
+/* The same rule for the windows on a wide screen: an employee's window stands at the right in both directions, and in rtl
+   the department's name stands there too. While a department is open its windows open 8 px under the name as the cards
+   do, where that is lower than under the header or the bars; with none open they open under the bars (the map's check). */
+for (const dir of DIRS) for (const bar of [NO_BAR, ...BARS.filter(bar => bar.name === 'the update that ended')]) {
+  test(`an employee's window opens 8 px under a department's name of two lines with ${bar.name}, 1440px ${dir}`, async ({ page }, info) => {
+    const errors: string[] = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.setViewportSize({ width: 1440, height: HEIGHT });
+    await page.addInitScript(() => {
+      localStorage.setItem('hh-lang', 'en');
+      localStorage.setItem('hh-theme', 'cyberpunk');
+    });
+    await serveApi(page);
+    await page.route('**/api/org', route => route.fulfill({ json: LONG_NAMED }));
+    await bar.serve(page);
+    await page.goto('/');
+    const card = page.locator('.dept', { hasText: LONG_NAME });
+    await expect(card).toBeVisible();
+    if (bar.before) await expect(page.locator('main.body > .update-banner')).toBeVisible();
+    if (dir === 'rtl') await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
+    await still(page);
+    await card.click();
+    /* The CEO hires from the department, and the orchestrator's window opens for it. */
+    await page.locator('.dview').getByRole('button', { name: en.dept.hire, exact: true }).click();
+    await expect(page.locator('.orch')).toBeVisible();
+    const plate = await stillBox(page, '.dview .crumbs'), at = await stillBox(page, '.orch');
+    shot(await page.screenshot({ animations: 'disabled' }), `window-${info.project.name}-1440-${dir}-${bar.name.replace(/[^a-z]+/gi, '-').replace(/^-|-$/g, '')}`);
+
+    const under = await room(page);
+    const top = Math.max(bar === NO_BAR ? 68 : under.top, plate.y + plate.height + 8);
+    expect(Math.abs(at.y - top), `the window opens at ${top}, 8 px under the name plate's bottom at ${plate.y + plate.height}, not at ${at.y}`).toBeLessThanOrEqual(1);
     expect(errors).toEqual([]);
   });
 }

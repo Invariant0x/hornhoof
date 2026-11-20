@@ -74,14 +74,18 @@ describe('the map and an open department under the bars of the shell', () => {
     expect(decl('.dview', 'inset')).toBe('0');
   });
 
-  /* Design on #1639: while a bar stands, the windows open 8 px under it, as the room under the bars starts; without one they
-     stay under the header. On a phone the card keeps its place under the department's name. */
-  it('opens the windows and the cards under the bars while one stands', () => {
-    expect(decl('.orch', 'top')).toBe('var(--shell-top, 68px)');
-    expect(decl('.agent-strips', 'top')).toBe('var(--shell-top, 68px)');
-    expect(decl('.acard', 'top')).toBe('var(--shell-top, 68px)');
+  /* Design on #1639: a window or a card opens 8 px under the last element at the top: under the bar while one stands, as
+     the room under the bars starts, else under the header. An open department's name plate is one too, as tall as its
+     name wraps: the shell gives its height and the 8 px under it as --plate-room. The plate starts where the room under
+     the bars does, or beside the logo on a wide screen without a bar. With no department open a phone's card keeps its
+     place, where the name would stand, and a phone's window covers the page under the top bar. */
+  it("opens the windows and the cards under the bars, and under an open department's name as tall as it is", () => {
+    const under = 'max(var(--shell-top, 68px), calc(var(--shell-top, 12px) + var(--plate-room, 0px)))';
+    expect(decl('.orch', 'top')).toBe(under);
+    expect(decl('.agent-strips', 'top')).toBe(under);
+    expect(decl('.acard', 'top')).toBe(under);
     expect(decl('.orch', 'top', '(max-width: 760px)')).toBe('var(--shell-top, 56px)');
-    expect(decl('.acard', 'top', '(max-width: 760px)')).toBe('calc(var(--shell-top, 64px) + 52px)');
+    expect(decl('.acard', 'top', '(max-width: 760px)')).toBe('calc(var(--shell-top, 64px) + var(--plate-room, 52px))');
   });
 
   it("starts the department's name under the bars while one stands, beside the logo or under the top bar while none does", () => {

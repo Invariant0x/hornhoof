@@ -80,6 +80,9 @@ type Props = {
   onOpenDepartment?(id: string): void;
   /* How wide the department's name stands beside the logo on a wide screen, for the top bar's tabs; 0 when it does not. */
   onCrumbs?(px: number): void;
+  /* How much room the department's name takes at the top, as tall as it wraps and the 8 px under it, for the cards that
+     open under it (#1639); null once the department closes. */
+  onPlate?(room: number | null): void;
 };
 
 /* What the cards drawn from a schema measure: its head, each frame's heading and cards, and the people's chips, in its order.
@@ -333,7 +336,7 @@ function oneLineOverflow(title: HTMLElement): number {
    words need is measured as they are shown, once for each language and set of tools. On a phone the name of the department
    stands under the top bar; on a wide screen it stands beside the logo, and the top bar is told how wide it is. The tree and
    drawers start under it on both. */
-function useDepartmentSpace(language: string, panel: Props['panel'], tools: string, onCrumbs?: (px: number) => void) {
+function useDepartmentSpace(language: string, panel: Props['panel'], tools: string, onCrumbs?: (px: number) => void, onPlate?: (room: number | null) => void) {
   const root = useRef<HTMLDivElement>(null), dock = useRef<HTMLDivElement>(null), actions = useRef<HTMLDivElement>(null), crumbs = useRef<HTMLElement>(null);
   const [space, setSpace] = useState({ right: 16, bottom: 228, top: 116, tickerHidden: false });
   /* What Show everything leaves free at the bottom: the dock, with the line of what happened as tall as it shows folded. */
@@ -370,6 +373,7 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
         : Math.max(68, name?.offsetHeight ? name.offsetTop + name.offsetHeight + 12 : 0);
       setSpace({ right, bottom, top, tickerHidden: !phone && width - right - ZOOM_ROOM < 220 });
       onCrumbs?.(phone || !name || shellTop !== null ? 0 : name.offsetWidth + (title ? oneLineOverflow(title) : 0));
+      onPlate?.(name?.offsetHeight ? name.getBoundingClientRect().height + 8 : null);
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
@@ -382,8 +386,9 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
     if (line) observer.observe(line);
     if (crumbs.current) observer.observe(crumbs.current);
     return () => observer.disconnect();
-  }, [panel, icons, words, onCrumbs, tickerHidden, shellTop]);
+  }, [panel, icons, words, onCrumbs, onPlate, tickerHidden, shellTop]);
   useEffect(() => () => onCrumbs?.(0), [onCrumbs]);
+  useEffect(() => () => onPlate?.(null), [onPlate]);
   const style = { '--ticker-right': `${space.right}px`, '--tree-bottom': `${space.bottom}px`, '--tree-top': `${space.top}px` } as CSSProperties;
   return { root, dock, actions, crumbs, style, icons, tickerHidden: space.tickerHidden, fitBottom };
 }
@@ -397,7 +402,7 @@ export function pruneSwitched(switched: Record<string, boolean>, employees: Empl
   return kept.length === entries.length ? switched : Object.fromEntries(kept);
 }
 
-export function DepartmentView({ me, department: d, deputies, selected, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions, onOpenTracker, onCrumbs }: Props) {
+export function DepartmentView({ me, department: d, deputies, selected, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions, onOpenTracker, onCrumbs, onPlate }: Props) {
   useRenderGuard('department');
   const t = useT();
   const { language } = useLanguage();
@@ -421,7 +426,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   const [drawer, setDrawer] = useState<Drawer | null>(null);
   const { tree: workTree, failure: treeFailure } = useDepartmentTree(d.id, tree || drawer === 'speed');
   const openAgent = useOpenAgent();
-  const chrome = useDepartmentSpace(language, panel, runs ? 'hire' : '', onCrumbs);
+  const chrome = useDepartmentSpace(language, panel, runs ? 'hire' : '', onCrumbs, onPlate);
   const [zoomSlot, setZoomSlot] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!drawer) return;

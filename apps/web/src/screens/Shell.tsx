@@ -301,10 +301,17 @@ function DepartmentFallback({ deptId, org, orgFailure }: { deptId: string | null
   return deptId && !org && failure === null ? <div className="dview" aria-busy="true"><div className="dcanvas" /></div> : null;
 }
 
-function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire, onCrumbs }: MapRouteProps & {
+/* What the shell tells the map, an open department and the windows beside them while one or both stand: where the room
+   under its bars starts, and how much room an open department's name takes under it. */
+function shellVars(shellTop: number | null, plateRoom: number | null): CSSProperties | undefined {
+  if (shellTop === null && plateRoom === null) return undefined;
+  return { ...(shellTop === null ? {} : { '--shell-top': `${shellTop}px` }), ...(plateRoom === null ? {} : { '--plate-room': `${plateRoom}px` }) } as CSSProperties;
+}
+
+function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire, onCrumbs, onPlate }: MapRouteProps & {
   deptId: string | null; denied: boolean; org: Org | null; orgFailure: unknown; shown: string | null; panel: 'window' | 'task' | null;
   openTask: (id: string) => void; openTracker: (departmentId: string) => void; openDepartment: (id: string) => void; onHire: (dept: Department) => void;
-  onCrumbs: (px: number) => void;
+  onCrumbs: (px: number) => void; onPlate: (room: number | null) => void;
 }) {
   if (tab !== 'map' || denied || missingDepartment) return null;
   if (!dept) return <DepartmentFallback deptId={deptId} org={org} orgFailure={orgFailure} />;
@@ -325,6 +332,7 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
       onOpenDepartment={openDepartment}
       onHire={() => onHire(dept)}
       onCrumbs={onCrumbs}
+      onPlate={onPlate}
     />
   );
 }
@@ -393,6 +401,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   /* Where the room under the bars of the shell starts, which the map and an open department start what they show at. */
   const page = useRef<HTMLElement>(null);
   const shellTop = useMeasuredShellTop(page);
+  /* The room an open department's name takes at the top, which the cards open under. */
+  const [plateRoom, setPlateRoom] = useState<number | null>(null);
 
   useEffect(() => {
     if (!menu) return;
@@ -426,7 +436,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
     <AgentWindowContext value={openAgent}>
     <UpdateSaysIt value={updateSaysIt}>
     <ShellTop value={shellTop}>
-    <div className="shell" style={tab !== 'map' || shellTop === null ? undefined : ({ '--shell-top': `${shellTop}px` } as CSSProperties)}>
+    <div className="shell" style={tab === 'map' ? shellVars(shellTop, plateRoom) : undefined}>
       <header className="topbar" ref={fit.bar}>
         <div className="tb-brand glass" ref={fit.brand}>
           <LogoMark />
@@ -437,7 +447,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
       </header>
       {/* The bars of the shell stand first in the page, each in its own row under the header, and what the page shows
           comes after them. On the map they float over it and an open department, which start under them, and the windows
-          and cards open under them too: the shell says where with --shell-top. */}
+          and cards open under them too: the shell says where with --shell-top, and how much room an open department's
+          name takes under them with --plate-room. */}
       <main ref={page} className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}${tab === 'tasks' ? ' tracker-page' : ''}`}>
         <SwitchBanner>
           {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} onProgressShown={setUpdateSaysIt} />}
@@ -450,7 +461,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
         </GuardBoundary>
         <GuardBoundary block="department" reset={deptId}>
-        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onCrumbs={setCrumbs} onHire={dept => {
+        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onCrumbs={setCrumbs} onPlate={setPlateRoom} onHire={dept => {
           setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
           openAgent('orchestrator');
         }} />
