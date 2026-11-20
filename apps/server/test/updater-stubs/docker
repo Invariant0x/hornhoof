@@ -148,6 +148,8 @@ case "$1 $2" in
   # The containers of the compose project, by id and service, or the other nodes on this computer, by name and plan.
   'ps -a')
     case "$*" in
+      # STUB_PROJECT_STATES: each container of the project by its service and state, as service=state words.
+      *com.docker.compose.project*'{{.State}}'*) for w in ${STUB_PROJECT_STATES:-}; do printf '%s %s\n' "${w%%=*}" "${w#*=}"; done ;;
       *com.docker.compose.project*) for w in ${STUB_PROJECT_CONTAINERS:-}; do printf '%s %s\n' "${w%%=*}" "${w#*=}"; done ;;
       *)
         for w in ${STUB_PLAN_NODES:-}; do
@@ -255,6 +257,15 @@ case "$1 $2" in
         cat > "$STUB_STATE/copied-$(printf '%s' "$table" | tr -d '"')"
         exit 0 ;;
     esac
+    # The roles the policies of the leader's schema name, one a line: none unless a test says (STUB_POLICY_ROLES,
+    # with | between them).
+    case " $* " in
+      *' pg_policies,'*)
+        [ -z "${PGPASSWORD:-}" ] || printf 'psql had its password\n' >> "$STUB_LOG"
+        [ "${STUB_SCHEMA:-ok}" != fail ] || { echo 'psql: error: connection to server failed' >&2; exit 2; }
+        [ -z "${STUB_POLICY_ROLES:-}" ] || printf '%s\n' "$STUB_POLICY_ROLES" | tr '|' '\n'
+        exit 0 ;;
+    esac
     [ -z "${PGPASSWORD:-}" ] || printf 'pg_dump had its password\n' >> "$STUB_LOG"
     [ "${STUB_SCHEMA:-ok}" != fail ] || { echo 'pg_dump: error: connection to server failed' >&2; exit 1; }
     case " $* " in
@@ -268,6 +279,8 @@ case "$1 $2" in
       # The leader's schema going into the database of a copy. STUB_RESTORE=fail: it does not load.
       *' -1 -v ON_ERROR_STOP=1 '*)
         [ "${STUB_RESTORE:-ok}" = fail ] && { cat > /dev/null; echo 'psql: error: out of disk space' >&2; exit 3; }
+        # STUB_RESTORE=role: a statement of the schema names a role the database does not have, as psql says it.
+        [ "${STUB_RESTORE:-ok}" = role ] && { cat > /dev/null; printf 'SET\npsql:<stdin>:11871: ERROR:  role "%s" does not exist\n' "${STUB_MISSING_ROLE:-a_reader}" >&2; exit 3; }
         cat > "$STUB_STATE/loaded" ;;
       # The session that stays on the database a restore closes. It answers once the connections are off: the term,
       # machine and cluster of that database, and STUB_CARRY when it was asked who may get in. STUB_CUTOVER=fail: it
@@ -358,6 +371,10 @@ case "$1 $2" in
             if [ "${COMPOSE_PROFILES-unset}" = '' ]; then services_in "$(compose_file "$@")" | grep -v -e '^db$' -e '^migrate$' -e '^app$'; else services_in "$(compose_file "$@")"; fi ;;
           *' config --format json '*)
             printf '{"services":{"db":{"volumes":[{"type":"volume","source":"pgdata","target":"/var/lib/postgresql/data"}]}},"volumes":{"pgdata":{"name":"hornhoof_pgdata"},"control":{"name":"hornhoof_control"}}}\n' ;;
+          # Containers that were made and never started, started as they are. STUB_NO_RECREATE_UP=fail: they do not start.
+          *' up -d --no-build --no-deps --no-recreate '*)
+            [ -z "${STUB_LOG_ROLE:-}" ] || printf 'up as HORNHOOF_ROLE=%s\n' "${HORNHOOF_ROLE:-}" >> "$STUB_LOG"
+            [ "${STUB_NO_RECREATE_UP:-ok}" != fail ] || exit 1 ;;
           # A machine that stopped keeping a copy starts what a worker runs.
           *' up -d --no-build --remove-orphans '*) [ -z "${STUB_LOG_ROLE:-}" ] || printf 'up as HORNHOOF_ROLE=%s\n' "${HORNHOOF_ROLE:-}" >> "$STUB_LOG" ;;
           # Whether what a restore carried over is there for the app that starts now.
