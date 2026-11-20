@@ -50,13 +50,17 @@ export const CUT_RANGE = { min: 0, max: 1.5 };
 export const CUT_SHAPES = ['bevel', 'steps'] as const;
 export type CutShape = (typeof CUT_SHAPES)[number];
 
+/* The least opacity the core of a task worked on now breathes down to (Design #1628), measured per skin to keep 3:1 on the
+   row, the row under the pointer and the open row. A look with none, as a person's own skin, keeps it at 1: still. */
+export const PULSE_TOKEN = '--tracker-pulse-low';
+
 /* Whether a skin is dark or light, which tells the browser how to draw its own parts: scrollbars, fields, checkboxes. */
 export const SCHEMES = ['dark', 'light'] as const;
 export type Scheme = (typeof SCHEMES)[number];
 
 export type SkinColors = Readonly<Record<ColorRole, string>>;
 type SkinFonts = Readonly<Record<FontRole, readonly string[]>>;
-export type SkinLook = { scheme: Scheme; colors: SkinColors; fonts: SkinFonts; cut: number; shape: CutShape };
+export type SkinLook = { scheme: Scheme; colors: SkinColors; fonts: SkinFonts; cut: number; shape: CutShape; pulse?: number };
 /* The name of a person's own skin in each language Hornhoof speaks. */
 export type SkinNames = Readonly<{ ru: string; en: string }>;
 /* A skin of a person's own, as its file holds it: the built-in skin it stands on, which gives it the shape of its cut,
@@ -75,7 +79,7 @@ const fontStack = (fonts: readonly string[]) => fonts.map(font => (isKeyword(fon
 export function declarations(look: SkinLook): [string, string][] {
   const colors = COLOR_ROLES.map((role): [string, string] => [COLOR_TOKENS[role], look.colors[role]]);
   const fonts = FONT_ROLES.map((role): [string, string] => [FONT_TOKENS[role], fontStack(look.fonts[role])]);
-  return [...colors, ...fonts, [CUT_TOKEN, String(look.cut)], ['color-scheme', look.scheme]];
+  return [...colors, ...fonts, [CUT_TOKEN, String(look.cut)], [PULSE_TOKEN, String(look.pulse ?? 1)], ['color-scheme', look.scheme]];
 }
 
-export const SKIN_PROPERTIES = [...Object.values(COLOR_TOKENS), ...Object.values(FONT_TOKENS), CUT_TOKEN, 'color-scheme'];
+export const SKIN_PROPERTIES = [...Object.values(COLOR_TOKENS), ...Object.values(FONT_TOKENS), CUT_TOKEN, PULSE_TOKEN, 'color-scheme'];

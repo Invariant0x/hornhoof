@@ -22,6 +22,7 @@ export const BUILTIN_SKINS = [
     scheme: 'dark',
     cut: 1,
     shape: 'bevel',
+    pulse: .55,
     fonts: FONTS,
     colors: {
       bg: '#141A22', surface: '#1B232D', surface2: '#212B37', line: '#2C3845', line2: '#687A8F', ink: '#E3EAF1', muted: '#93A0AE',
@@ -38,6 +39,7 @@ export const BUILTIN_SKINS = [
     scheme: 'light',
     cut: 1,
     shape: 'bevel',
+    pulse: .8,
     fonts: FONTS,
     colors: {
       bg: '#E6EBF0', surface: '#F8FAFC', surface2: '#EEF2F6', line: '#C9D3DD', line2: '#768695', ink: '#0F1B27', muted: '#4C5A68',
@@ -54,6 +56,7 @@ export const BUILTIN_SKINS = [
     scheme: 'dark',
     cut: 0,
     shape: 'bevel',
+    pulse: .55,
     fonts: FONTS,
     colors: {
       bg: '#050A06', surface: '#0A130D', surface2: '#101D14', line: '#1E3525', line2: '#4A7856', ink: '#D4F7DC', muted: '#84B390',
@@ -71,6 +74,7 @@ export const BUILTIN_SKINS = [
     scheme: 'dark',
     cut: 1,
     shape: 'steps',
+    pulse: .55,
     fonts: PIXEL_FONTS,
     colors: {
       bg: '#151523', surface: '#202033', surface2: '#2A2A40', line: '#42425C', line2: '#9292AD', ink: '#FFF4DA', muted: '#C9BFAC',

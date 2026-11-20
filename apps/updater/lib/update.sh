@@ -86,8 +86,10 @@ migrations_to_run() {
 # keeper_said <file> <field>: a field of the answer the server's keeper left for this very update; fails while there
 # is none of this update.
 keeper_said() {
-  [ "$(jq -r '.id // empty' "$CONTROL/$1" 2> /dev/null || true)" = "$ID" ] || return 1
-  jq -r ".$2 // empty" "$CONTROL/$1" 2> /dev/null || true
+  local said
+  said=$(take "$CONTROL/$1" || true)
+  [ "$(jq -r '.id // empty' <<< "$said" 2> /dev/null || true)" = "$ID" ] || return 1
+  jq -r ".$2 // empty" <<< "$said" 2> /dev/null || true
 }
 
 # The machines that keep a copy of the company promise to wait for the update: the server's keeper asks them, and says
@@ -192,7 +194,8 @@ remove_unnamed() {
 # run_installer <tag> <app> <node> <updater>: the installer of that build. It takes as long as it takes: no clock ends it.
 run_installer() {
   local tag=$1 dir="$WORK/$1"
-  HORNHOOF_CONTROL_DIR="$CONTROL" HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATER_REV="$UPDATER_REV" HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
+  installer_control "$WORK/control" || true
+  HORNHOOF_CONTROL_DIR="$WORK/control" HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATER_REV="$UPDATER_REV" HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
     HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" HORNHOOF_NODES_FREE="$NODES_FREE" HORNHOOF_NODES_ONLY="$NODES_ONLY" bash "$dir/install.sh" "$(install_mode)" >> "$WORK/install.log" 2>&1
 }
 
@@ -325,10 +328,11 @@ save_and_install() {
 
 # Whether the keeper passed on the company server's word for this very request, and the word still stands.
 told_to_go() {
-  local id commit until
-  id=$(jq -r '.id // empty' "$CONTROL/go.json" 2> /dev/null || true)
-  commit=$(jq -r '.commit // empty' "$CONTROL/go.json" 2> /dev/null || true)
-  until=$(jq -r '.until // 0 | floor' "$CONTROL/go.json" 2> /dev/null || true)
+  local word id commit until
+  word=$(take "$CONTROL/go.json" || true)
+  id=$(jq -r '.id // empty' <<< "$word" 2> /dev/null || true)
+  commit=$(jq -r '.commit // empty' <<< "$word" 2> /dev/null || true)
+  until=$(jq -r '.until // 0 | floor' <<< "$word" 2> /dev/null || true)
   case "$until" in '' | *[!0-9]*) return 1 ;; esac
   [ "$id" = "$ID" ] && [ "$commit" = "$TAG" ] && [ "$until" -gt "$(date +%s)" ]
 }
@@ -342,7 +346,7 @@ wait_turn() {
   step wait "Waiting for its turn to install."
   while true; do
     if told_to_go; then return 0; fi
-    if [ "$(jq -r '.id // empty' "$CONTROL/request.json" 2> /dev/null || true)" != "$ID" ]; then
+    if [ "$(take "$CONTROL/request.json" quiet jq -r '.id // empty' || true)" != "$ID" ]; then
       stop_with failed "A newer build came first, so this one was left." finished
       return 1
     fi
@@ -399,7 +403,7 @@ warn_subnet_overlap() {
   addrs=$(
     {
       env_value HORNHOOF_ADDRESSES | tr ',' '\n'
-      if [ -f "$CONTROL/addresses.json" ]; then jq -r '.addresses[]? // empty' "$CONTROL/addresses.json" 2> /dev/null || true; fi
+      take "$CONTROL/addresses.json" quiet jq -r '.addresses[]? // empty' || true
     } | awk 'NF'
   )
   [ -n "$addrs" ] || return 0
@@ -529,19 +533,19 @@ go_back() {
 }
 
 handle_request() {
-  local id tag digest node updater done_id
-  [ -f "$CONTROL/request.json" ] || return 0
-  id=$(jq -r '.id // empty' "$CONTROL/request.json" 2> /dev/null || true)
+  local request id tag digest node updater done_id
+  request=$(take "$CONTROL/request.json") || return 0
+  id=$(jq -r '.id // empty' <<< "$request" 2> /dev/null || true)
   case "$id" in '' | *[!A-Za-z0-9-]*) return 0 ;; esac
-  done_id=$(jq -r '.id // empty' "$CONTROL/status.json" 2> /dev/null || true)
+  done_id=$(take "$CONTROL/status.json" quiet jq -r '.id // empty' || true)
   [ "$id" != "$done_id" ] || return 0
   ID=$id
-  VERSION=$(jq -r '.version // empty' "$CONTROL/request.json" | tr -cd 'A-Za-z0-9._ -' | cut -c1-64)
-  tag=$(jq -r '.tag // empty' "$CONTROL/request.json")
-  digest=$(jq -r '.digest // empty' "$CONTROL/request.json")
-  node=$(jq -r '.nodeDigest // empty' "$CONTROL/request.json")
-  updater=$(jq -r '.updaterDigest // empty' "$CONTROL/request.json")
-  NODES_FREE=$(jq -r 'if .immediate == true or .urgent == true then "1" else "" end' "$CONTROL/request.json")
+  VERSION=$(jq -r '.version // empty' <<< "$request" | tr -cd 'A-Za-z0-9._ -' | cut -c1-64)
+  tag=$(jq -r '.tag // empty' <<< "$request")
+  digest=$(jq -r '.digest // empty' <<< "$request")
+  node=$(jq -r '.nodeDigest // empty' <<< "$request")
+  updater=$(jq -r '.updaterDigest // empty' <<< "$request")
+  NODES_FREE=$(jq -r 'if .immediate == true or .urgent == true then "1" else "" end' <<< "$request")
   WORK=$(mktemp -d)
   update "$tag" "$digest" "$node" "$updater"
   rm -rf "$WORK"

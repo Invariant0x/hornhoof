@@ -52,6 +52,7 @@ All colours are tokens in `:root` of `theme.css`. Light is the default. Dark app
 | `--on-btn` | `#FFFFFF` | `#05222A` | Text on `--btn` |
 | `--hud` | `rgba(240, 244, 247, .94)` | `rgba(23, 30, 39, .94)` | Dense layer over the map, with no blur under it: `.glass` |
 | `--shadow` | `rgba(20, 40, 60, .18)` | `rgba(0, 0, 0, .45)` | Shadow of menus and windows |
+| `--tracker-pulse-low` | `0.8` | `0.55` | Not a colour: the weakest opacity the core of a task worked on now breathes down to, `.tr-status-dot.working.now::before`. Set per skin in `apps/web/src/skins/registry.ts`, measured at 3:1 on the row, the row under the pointer and the open row: Matrix and Pixel 0.55 as Cyberpunk. A person's own skin is not measured and keeps 1, a still core (Design #1628) |
 
 ### Contrast of text
 

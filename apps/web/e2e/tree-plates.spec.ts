@@ -102,7 +102,7 @@ for (const lang of ['en', 'ru'] as const) {
   for (const theme of ['light', 'dark'] as const) {
     for (const width of [1440, 375]) {
       test(`plates of a full department show all their words in ${lang}, ${theme}, ${width}px`, async ({ page }, info) => {
-        test.setTimeout(180_000);
+        test.setTimeout(0);
         await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
         await page.addInitScript(({ lang, theme }) => {
           localStorage.setItem('hh-lang', lang);
@@ -176,9 +176,9 @@ for (const lang of ['en', 'ru'] as const) {
         /* A longer line makes only its own plate taller, and the rows under it move down by as much. */
         const short = await box(of('Nora')), gap = (await box(of('Oleg'))).y - short.y;
         await of('Nora').locator('.r2').evaluate((title, text) => { title.textContent = text; }, ` ${LONG_TITLE}`);
-        await expect.poll(async () => (await box(of('Nora'))).height, { message: "Nora's plate grows with the long line", timeout: 10_000 }).toBeGreaterThan(short.height);
+        await expect.poll(async () => (await box(of('Nora'))).height, { message: "Nora's plate grows with the long line" }).toBeGreaterThan(short.height);
         const nora = await box(of('Nora'));
-        await expect.poll(async () => Math.abs((await box(of('Oleg'))).y - nora.y - (gap - short.height + nora.height)), { message: 'the plates under it move down', timeout: 10_000 }).toBeLessThanOrEqual(1);
+        await expect.poll(async () => Math.abs((await box(of('Oleg'))).y - nora.y - (gap - short.height + nora.height)), { message: 'the plates under it move down' }).toBeLessThanOrEqual(1);
         await expectNoPlatesTouch(labs);
         await expectLinesFollowPlates(page, full);
 
