@@ -338,6 +338,8 @@ case "$1 $2" in
       # STUB_PULL=images: the app image comes, the other images of its compose file do not.
       compose)
         case " $* " in
+          # STUB_ON_STOP: a command run as the services stop, as another writer of the shared folders could act then.
+          *' stop '*) [ -z "${STUB_ON_STOP:-}" ] || sh -c "$STUB_ON_STOP" ;;
           *' down '*) [ -z "${STUB_NETWORKS:-}" ] || printf 'none' > "$STUB_STATE/networks" ;;
           *' up '*) networks_up "$(compose_file "$@")" || exit 1 ;;
         esac

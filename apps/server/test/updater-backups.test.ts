@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -359,9 +359,20 @@ describe('updater, restore', () => {
     expect(at(r.calls, `docker exec dbcid psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q -c ${ALONE} -c DROP DATABASE hornhoof WITH (FORCE)`)).toBeGreaterThan(at(r.calls, 'docker compose up'));
   });
 
-  /* The keeper's folder of a restore can be written by the app too. A named pipe in the place of the dump stops nothing,
-     and a link in the place of the backup's settings brings in no settings from elsewhere. */
-  it('ends a restore whose dump is a named pipe at once, with nothing changed', async () => {
+  /* The keeper's folder of a restore can be written by the app too. Both files of a backup are taken into the updater's
+     own folder before anything stops: a named pipe or a link in the place of either, or a file with another name too,
+     ends the restore while the company still runs, and nothing comes in from elsewhere. */
+  function expectUntouched(s: Stand, calls: string[]) {
+    expect([database(s, 'hornhoof'), database(s, 'hornhoof_restore'), closed(s, 'hornhoof')]).toEqual(['20', null, false]);
+    expect(envOf(s)).toBe(OLD_ENV);
+    expect(readdirSync(file(s, 'restore'))).toEqual([]);
+    for (const gone of ['restore.json', 'restore-journal.json']) expect(existsSync(file(s, gone)), gone).toBe(false);
+    expect(calls.filter(call => call.startsWith('docker compose stop') || call.startsWith('docker compose up'))).toEqual([]);
+  }
+  const DUMP_LINE = 'The backup cannot be read, so nothing changed.';
+  const SETTINGS_LINE = "The backup's settings cannot be read, so nothing changed.";
+
+  it('ends a restore whose dump is a named pipe at once, before anything stops', async () => {
     const s = stand(OLD_ENV);
     order(s);
     const dump = file(s, 'restore', `${ATTEMPT}.sql.gz`);
@@ -369,11 +380,11 @@ describe('updater, restore', () => {
     expect(spawnSync('mkfifo', [dump]).status).toBe(0);
     const r = await runOnce(s, null, WITH_CARRY);
     expect(r.out).toContain(`Refused ${ATTEMPT}.sql.gz: it is not a plain file.`);
-    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'failed', step: 'load', line: 'The backup did not load, so nothing changed.' });
-    expectAsBefore(s, r.calls);
+    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'failed', step: 'load', line: DUMP_LINE });
+    expectUntouched(s, r.calls);
   }, 10_000);
 
-  it("takes no settings through a link in the place of the backup's", async () => {
+  it("takes no settings through a link in the place of the backup's, and stops nothing", async () => {
     const s = stand(OLD_ENV);
     order(s);
     const outside = join(s.dir, 'outside.json');
@@ -383,9 +394,38 @@ describe('updater, restore', () => {
     symlinkSync(outside, settings);
     const r = await runOnce(s, null, WITH_CARRY);
     expect(r.out).toContain(`Refused ${ATTEMPT}.env.json: it is not a plain file.`);
-    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'failed', step: 'swap', line: "The backup's settings cannot be written, so nothing changed." });
-    expectAsBefore(s, r.calls);
+    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'failed', step: 'load', line: SETTINGS_LINE });
+    expectUntouched(s, r.calls);
     expect(readFileSync(outside, 'utf8')).toBe(JSON.stringify(NEW));
+  });
+
+  it.each([
+    { what: 'the dump', name: `${ATTEMPT}.sql.gz`, line: DUMP_LINE },
+    { what: 'the settings', name: `${ATTEMPT}.env.json`, line: SETTINGS_LINE },
+  ])('takes $what only with one name, and stops nothing otherwise', async ({ name, line }) => {
+    const s = stand(OLD_ENV);
+    order(s);
+    linkSync(file(s, 'restore', name), join(s.dir, 'second-name'));
+    const r = await runOnce(s, null, WITH_CARRY);
+    expect(r.out).toContain(`Refused ${name}: it is not a plain file.`);
+    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'failed', step: 'load', line });
+    expectUntouched(s, r.calls);
+  });
+
+  /* What loads and what goes into .env is what was looked at: files put at both names once the company stops change nothing. */
+  it('restores the backup as it was taken, whatever stands at its names after', async () => {
+    const s = stand(OLD_ENV);
+    order(s);
+    const other = { HORNHOOF_SECRET: `${'C'.repeat(43)}=`, NODE_KEY: 'q'.repeat(40), RELAY_URL: 'https://other.hornhoof.test' };
+    writeFileSync(join(s.dir, 'other.sql.gz'), gzipSync('-- a dump of the hornhoof database\n-- migrations 5\n-- copy 9\n'));
+    writeFileSync(join(s.dir, 'other.env.json'), JSON.stringify(other));
+    const swap = `mv -f ${join(s.dir, 'other.sql.gz')} ${file(s, 'restore', `${ATTEMPT}.sql.gz`)} 2>/dev/null; mv -f ${join(s.dir, 'other.env.json')} ${file(s, 'restore', `${ATTEMPT}.env.json`)} 2>/dev/null; true`;
+    const r = await runOnce(s, null, { ...WITH_CARRY, STUB_ON_STOP: swap });
+    expect(r.code).toBe(0);
+    expect(r.calls.some(call => call.startsWith('docker compose stop'))).toBe(true);
+    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'done' });
+    expect(database(s, 'hornhoof')).toBe('18');
+    expect(envOf(s)).toBe(NEW_ENV);
   });
 
   it('refuses settings it cannot write', async () => {

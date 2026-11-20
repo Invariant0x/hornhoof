@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { APP, DIGESTS, JQ, runOnce, stand, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
 
@@ -53,6 +54,46 @@ const busyboxTar = (s: Stand) => {
   const tools = mkdtempSync(join(s.dir, 'tools-'));
   writeFileSync(join(tools, 'tar'), `#!/bin/sh\ncase "$1" in -tvf) ${TAR} "$@" | sed 's/^h/-/' ;; *) exec ${TAR} "$@" ;; esac\n`, { mode: 0o755 });
   return { PATH: `${tools}:${dirname(fileURLToPath(new URL('./updater-stubs/docker', import.meta.url)))}:${dirname(JQ)}:/usr/bin:/bin` };
+};
+/* The same, also writing down every command it is given, so a test sees whether anything was unpacked at all. */
+const loggedTar = (s: Stand) => {
+  const tools = mkdtempSync(join(s.dir, 'tools-'));
+  const log = join(s.dir, 'tar.log');
+  writeFileSync(join(tools, 'tar'), `#!/bin/sh\nprintf '%s\\n' "$*" >> ${log}\ncase "$1" in -tvf) ${TAR} "$@" | sed 's/^h/-/' ;; *) exec ${TAR} "$@" ;; esac\n`, { mode: 0o755 });
+  return { env: { PATH: `${tools}:${dirname(fileURLToPath(new URL('./updater-stubs/docker', import.meta.url)))}:${dirname(JQ)}:/usr/bin:/bin` }, calls: () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []) };
+};
+/* A tar archive written header by header, for members no tar of this machine would pack as they are. */
+type Member = { name: string; type?: string; data?: string; link?: string };
+function tarOf(members: Member[]): Buffer {
+  const blocks: Buffer[] = [];
+  for (const { name, type = '0', data = '', link = '' } of members) {
+    const header = Buffer.alloc(512);
+    const body = Buffer.from(data);
+    const put = (at: number, value: string) => header.write(value, at, 'latin1');
+    put(0, name);
+    put(100, '0000644\0');
+    put(108, '0000000\0');
+    put(116, '0000000\0');
+    put(124, `${body.length.toString(8).padStart(11, '0')}\0`);
+    put(136, '00000000000\0');
+    put(148, '        ');
+    put(156, type);
+    put(157, link);
+    put(257, 'ustar\x0000');
+    let sum = 0;
+    for (const byte of header) sum += byte;
+    put(148, `${sum.toString(8).padStart(6, '0')}\0 `);
+    blocks.push(header, body, Buffer.alloc((512 - (body.length % 512)) % 512));
+  }
+  blocks.push(Buffer.alloc(1024));
+  return Buffer.concat(blocks);
+}
+/* A pax header's record: its length counts itself. */
+const pax = (key: string, value: string) => {
+  const rest = ` ${key}=${value}\n`;
+  let length = rest.length + 1;
+  while (`${length}${rest}`.length !== length) length += 1;
+  return `${length}${rest}`;
 };
 const TASKS = 'id,title\n1,first\n2,"two\n\\.\nDROP DATABASE hornhoof;"\n';
 const JOURNAL = 'id,tbl\n7,tasks\n';
@@ -152,6 +193,37 @@ describe('the updater and what a machine held when it stopped holding the data',
   /* The keeper takes what a machine sends into a folder the app can write too. A named pipe in the place of the packed
      file stops nothing, and the load unpacks and dumps the schema in a folder of the updater's own, never through a
      link put at the names it used for that in the shared folder. */
+  /* Every member is looked at in the archive's own headers before tar touches anything: tar's own listing can show a
+     second name of a file, even one outside the folder, as a plain file, and BusyBox tar makes such a name as it unpacks.
+     Only plain files go, and tar unpacks none of an upload that holds anything else. */
+  it.each([
+    { what: 'a second name of a file outside the folder', member: (out: string) => ({ name: 'net.journal.csv', type: '1', link: out }), line: 'The upload holds what is no file.' },
+    { what: 'a plain file that names a link, which BusyBox makes a second name of', member: (out: string) => ({ name: 'net.journal.csv', link: out }), line: 'The upload holds what is no file.' },
+    { what: 'a link', member: (out: string) => ({ name: 'net.journal.csv', type: '2', link: out }), line: 'The upload holds what is no file.' },
+    { what: 'a folder', member: () => ({ name: 'net.journal.csv', type: '5' }), line: 'The upload holds what is no file.' },
+    { what: 'a named pipe', member: () => ({ name: 'net.journal.csv', type: '6' }), line: 'The upload holds what is no file.' },
+    { what: 'a device', member: () => ({ name: 'net.journal.csv', type: '3' }), line: 'The upload holds what is no file.' },
+    { what: 'a file of a kind this updater never packs', member: () => ({ name: 'net.journal.csv', type: '7', data: JOURNAL }), line: 'The upload holds what is no file.' },
+    { what: 'a header that names the next member otherwise', member: () => ({ name: 'PaxHeaders/net.journal.csv', type: 'x', data: pax('path', 'net.journal.csv') }), line: 'The upload holds a file that is no table of the company.' },
+    { what: 'a table twice', member: () => ({ name: 'public.tasks.csv', data: TASKS }), line: 'The upload holds a table twice.' },
+  ])('unpacks nothing of an upload that holds $what', async ({ member, line }) => {
+    const s = stand();
+    const id = randomUUID();
+    const outside = join(s.dir, 'outside.csv');
+    writeFileSync(outside, JOURNAL, { mode: 0o600 });
+    mkdirSync(join(s.control, 'uploads'), { recursive: true });
+    const file = join(s.control, 'uploads', `${NID}-${id}.tar.gz`);
+    writeFileSync(file, gzipSync(tarOf([{ name: 'public.tasks.csv', data: TASKS }, member(outside)])));
+    load(s, id, file);
+    const tar = loggedTar(s);
+    const r = await runOnce(s, null, tar.env);
+    expect(readFileSync(join(s.control, 'uploads', `${NID}-${id}.failed`), 'utf8').trim()).toBe(line);
+    expect(r.out).toContain(`Could not load what a machine uploaded: ${line}`);
+    expect(tar.calls().filter(call => /^-\w*x/.test(call))).toEqual([]);
+    expect([readFileSync(outside, 'utf8'), statSync(outside).nlink]).toEqual([JOURNAL, 1]);
+    expect(made(r.calls)).toBe(false);
+  });
+
   it('loads nothing from a named pipe in the place of an upload, and goes on at once', async () => {
     const s = stand();
     const id = randomUUID();
