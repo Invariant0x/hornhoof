@@ -161,8 +161,20 @@ dump_request() {
 # within a day; this does the same for a machine whose keeper makes no backups, or does not run. Only the files of dumps
 # itself go, by their names there: a folder in it, which the app can swap for a link at any moment, is never gone into.
 sweep_dumps() (
-  [ -d "$CONTROL/dumps" ] || exit 0
-  entered "$CONTROL/dumps" || exit 0
+  local owner actual
+  [ -L "$CONTROL/dumps" ] || [ -e "$CONTROL/dumps" ] || exit 0
+  if ! enter_shared "$CONTROL" || ! owner=$(facts .); then
+    printf 'Refused dumps: could not read the keeper folder owner.\n' >&2
+    exit 0
+  fi
+  if ! enter_shared "$CONTROL/dumps"; then
+    printf 'Refused dumps: it is not a plain folder.\n' >&2
+    exit 0
+  fi
+  if ! actual=$(facts .) || [ "${actual##* }" != "${owner##* }" ]; then
+    printf 'Refused dumps: it is not a keeper folder.\n' >&2
+    exit 0
+  fi
   if [ -n "$(find . -maxdepth 1 -type f -mmin +1440 2> /dev/null | head -n 1)" ]; then
     find . -maxdepth 1 -type f -mmin +1440 -exec rm -f {} + 2> /dev/null || true
     printf 'Deleted a database dump that was not sealed within a day.\n'
