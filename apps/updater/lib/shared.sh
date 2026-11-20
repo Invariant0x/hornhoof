@@ -142,6 +142,13 @@ quiet() {
   "$@" 2> /dev/null
 }
 
+# installer_control <folder>: the one file of the control folder an installer that this updater runs reads, the machine's
+# addresses, taken into a folder of the updater's own, which the installer is given as its control folder.
+installer_control() {
+  mkdir -p -- "$1" && rm -f -- "$1/addresses.json" || return 1
+  take "$CONTROL/addresses.json" > "$1/addresses.json" || rm -f -- "$1/addresses.json"
+}
+
 # keeper_dir <folder>: a folder of a shared folder for the keeper alone, made when it is missing: mode 700, and the
 # keeper's. Its mode and owner change only once it is entered, so a link in its place changes nothing it points to.
 keeper_dir() (
