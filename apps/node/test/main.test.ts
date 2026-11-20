@@ -913,6 +913,9 @@ describe('runNode', () => {
               { id: 'gemini-5h', window: '5h', remaining_fraction: fiveHourRemaining, reset_time: '2026-11-04T21:41:44Z' },
               { id: 'gemini-weekly', window: 'weekly', remaining_fraction: 0.6, reset_time: '2026-11-10T00:41:44Z' },
             ],
+          }, {
+            name: 'Claude and GPT models',
+            buckets: [{ id: '3p-weekly', window: 'weekly', remaining_fraction: 0, reset_time: '2026-11-11T21:19:23Z' }],
           }],
         },
       },
@@ -929,13 +932,15 @@ describe('runNode', () => {
     });
 
     await server.wait(() => server.received.some(m => m.type === 'status' && m.limits !== null));
-    expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toEqual({
+    const fixture = [
+      { name: 'five_hour', utilization: 1 - 0.6985989809036255, resetsAt: '2026-11-04T21:41:44.000Z' },
+      { name: 'seven_day', utilization: 1 - 0.6328346133232117, resetsAt: '2026-11-10T00:41:44.000Z' },
+    ];
+    expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toMatchObject({
       status: 'allowed',
-      windows: [
-        { name: 'five_hour', utilization: 1 - 0.6985989809036255, resetsAt: '2026-11-04T21:41:44.000Z' },
-        { name: 'seven_day', utilization: 1 - 0.6328346133232117, resetsAt: '2026-11-10T00:41:44.000Z' },
-      ],
+      windows: fixture,
       complete: true,
+      groups: [{ name: 'Gemini Models', status: 'allowed', windows: fixture }, { name: 'Claude and GPT models', status: 'allowed' }],
     });
 
     /* A broken source leaves the node running and never fabricates status: rejected. */
@@ -954,13 +959,20 @@ describe('runNode', () => {
     await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j-agy'));
     expect(server.received.filter(m => m.type === 'status').length).toBeGreaterThan(statusesBefore);
     const done = server.received.findIndex(m => m.type === 'job.done' && m.jobId === 'j-agy');
+    /* The reading after a turn keeps each model group: the used-up Claude and GPT week holds none of Gemini's turns. */
+    const gemini = [
+      { name: 'five_hour', utilization: 0.75, resetsAt: '2026-11-04T21:41:44.000Z' },
+      { name: 'seven_day', utilization: 0.4, resetsAt: '2026-11-10T00:41:44.000Z' },
+    ];
+    const others = [{ name: 'seven_day', utilization: 1, resetsAt: '2026-11-11T21:19:23.000Z' }];
     expect(server.received.slice(0, done).filter(m => m.type === 'status').map(m => m.limits)).toContainEqual({
-      status: 'allowed',
-      windows: [
-        { name: 'five_hour', utilization: 0.75, resetsAt: '2026-11-04T21:41:44.000Z' },
-        { name: 'seven_day', utilization: 0.4, resetsAt: '2026-11-10T00:41:44.000Z' },
-      ],
+      status: 'rejected',
+      windows: [gemini[0], others[0]],
       complete: true,
+      groups: [
+        { name: 'Gemini Models', status: 'allowed', windows: gemini, complete: true },
+        { name: 'Claude and GPT models', status: 'rejected', windows: others, complete: true },
+      ],
     });
   });
 

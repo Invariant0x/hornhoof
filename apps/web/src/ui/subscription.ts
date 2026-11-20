@@ -21,13 +21,26 @@ export const currentPlanLimits = (s: Pick<SubView, 'limits' | 'limitsUpdatedAt'>
 
 const fullestWindow = (windows: Limits['windows']) => [...windows].sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1))[0];
 
+type LimitState = { reached: boolean; resetsAt: string | null };
+
 /* Rejection lasts until every blocking window resets. Unknown shares can block too. */
-export function limitState(limits: Limits | null, now: number, updatedAt?: string | Date | null) {
-  const current = updatedAt === undefined ? limits : currentLimits(limits, updatedAt, now);
-  const windows = current?.windows ?? [];
+function partState(part: Pick<Limits, 'status' | 'windows'> | null): LimitState {
+  const windows = part?.windows ?? [];
   const open = windows.filter(w => w.utilization === null || w.utilization >= 1).sort((a, b) => until(b) - until(a));
   const top = open[0] ?? fullestWindow(windows);
-  return { reached: current?.status === 'rejected', resetsAt: top?.resetsAt ?? null };
+  return { reached: part?.status === 'rejected', resetsAt: top?.resetsAt ?? null };
+}
+
+/* A plan that keeps its limits by model group is at its limit only while every group is, until the first of them starts
+   over; a group at its limit holds only the turns on its own models. */
+export function limitState(limits: Limits | null, now: number, updatedAt?: string | Date | null): LimitState {
+  const current = updatedAt === undefined ? limits : currentLimits(limits, updatedAt, now);
+  const groups = current?.groups ?? [];
+  if (!groups.length) return partState(current);
+  const each = groups.map(partState);
+  if (!each.every(g => g.reached)) return { reached: false, resetsAt: null };
+  const first = each.map(g => g.resetsAt).sort((a, b) => (a ? Date.parse(a) : Infinity) - (b ? Date.parse(b) : Infinity))[0];
+  return { reached: true, resetsAt: first ?? null };
 }
 
 export function stateOf(s: SubView, now: number) {

@@ -4,7 +4,7 @@ import { errorText, useLanguage, useT, type Language, type Messages } from '../i
 import { PROVIDER_NAMES } from '../providers';
 import type { DecidedBy, MaterialStampView, ProviderId, RoleOption, Roster, Serving, StaffLine } from '../types';
 import { BusyLabel } from './BusyLabel';
-import { DecidedByNote, frozenBy } from './DecidedBy';
+import { DecidedByNote, frozenBy, WaitsForNote } from './DecidedBy';
 import { AlertIcon, StaffIcon } from './icons';
 import { ProposalMaterialsSection, useProposalCardPost, useProposalMaterials } from './RequestMaterials';
 
@@ -18,6 +18,8 @@ type Props = {
   onHide?(): void;
   /* Someone who may not take the card reads it, with who takes it, and changes nothing. */
   locked?: DecidedBy;
+  /* Whom the card waits for, on a list of what waits for more people than one. */
+  waitsFor?: string;
 };
 
 /* A line with the CEO's choices: the subscription and model start from the line, or from the role and Default. */
@@ -306,7 +308,7 @@ function canShowStaffCorrect(sent: boolean, isProposal: boolean, onCorrect: (() 
 }
 
 /* Who to hire into a department: ticks, a subscription and a model per person, and one click that hires them. */
-export function StaffCard({ department, proposal, onCorrect, onDone, onHide, locked }: Props) {
+export function StaffCard({ department, proposal, onCorrect, onDone, onHide, locked, waitsFor }: Props) {
   const t = useT();
   const { language } = useLanguage();
   const { busy, sent, failure, setFailure, postProposal } = useProposalCardPost(onDone);
@@ -321,6 +323,7 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
   return (
     <div className={sent ? 't-card staff done' : 't-card staff'}>
       <h4><StaffIcon />{t.staff.title(department.name)}</h4>
+      <WaitsForNote text={waitsFor} />
       {proposal?.brief && <p className="t-card-brief">{proposal.brief}</p>}
       <ProposalMaterialsSection state={proposalMaterials} />
       <StaffNoServingNote roster={roster} sent={sent} t={t} />

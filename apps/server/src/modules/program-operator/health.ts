@@ -3,7 +3,7 @@ import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, programOperatorCases, subscriptions } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
-import { limitUntil } from '../conversation/limits.js';
+import { modelLimitUntil } from '../conversation/limits.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { escalateCase, expireOperatorCases, queueEscalation, syncOperatorCases } from './cases.js';
 import { callOperationsOnHold } from './hold-watch.js';
@@ -58,7 +58,7 @@ async function operatorAvailable(ctx: Ctx, row: typeof programOperatorCases.$inf
     .where(and(eq(agents.id, row.operatorAgentId), eq(departments.companyId, row.companyId), eq(departments.templateKey, 'operations')));
   if (!selected) return false;
   const { agent, job, plan } = selected;
-  if (!availableAgent(agent, row.companyId) || !availableTurn(job, agent.id) || !availablePlan(plan, row.companyId)) return false;
+  if (!availableAgent(agent, row.companyId) || !availableTurn(job, agent.id) || !availablePlan(plan, row.companyId, agent.model)) return false;
   const [stuck] = await ctx.db.select(idOnly(programOperatorCases)).from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agent.id), or(eq(programOperatorCases.status, 'open'), eq(programOperatorCases.recoveryHold, true)))).limit(1);
   return !stuck;
 }
@@ -71,8 +71,8 @@ function availableTurn(job: typeof jobs.$inferSelect, agentId: string): boolean 
   return job.agentId === agentId && (job.status === 'queued' || job.status === 'running');
 }
 
-function availablePlan(plan: typeof subscriptions.$inferSelect, companyId: string): boolean {
-  return plan.companyId === companyId && !plan.removedAt && plan.status === 'ready' && !limitUntil(plan.limits, plan.limitsUpdatedAt);
+function availablePlan(plan: typeof subscriptions.$inferSelect, companyId: string, model: string): boolean {
+  return plan.companyId === companyId && !plan.removedAt && plan.status === 'ready' && !modelLimitUntil(plan, model);
 }
 
 export async function restoreOperatorNode(ctx: Ctx, node: NodeIdentity): Promise<void> {

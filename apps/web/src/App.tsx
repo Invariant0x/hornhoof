@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, ApiFailure } from './api';
+import { api, ApiFailure, onSignedOut } from './api';
+import { useReloadToNewBuild } from './build';
 import { errorText, useT } from './i18n';
 import { forgetOrg } from './org';
 import { forgetRequestDrafts } from './ui/Requests';
@@ -31,7 +32,8 @@ export function App() {
 
 /* Whoever comes on this tab next sees nothing of the company the one before saw, however they came: the company leaves
    every screen, with the answers still on their way for it, and so do the answers the one before typed and did not
-   send, before the next screen draws. */
+   send, before the next screen draws. A session the server ended while someone was signed in here takes the tab to log
+   in at once, the same way. */
 function useScreen() {
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
   const person = useRef<string | null>(null);
@@ -44,6 +46,7 @@ function useScreen() {
     person.current = id;
     setScreen(next);
   }, []);
+  useEffect(() => onSignedOut(() => person.current !== null && show({ kind: 'login' })), [show]);
   return [screen, show] as const;
 }
 
@@ -60,6 +63,7 @@ function validMe(me: Me | null): Me {
 function Screens() {
   const t = useT();
   const [screen, show] = useScreen();
+  useReloadToNewBuild(screen.kind === 'shell');
 
   const decide = useCallback(async (welcome = false) => {
     const route = parseRoute(window.location.pathname);

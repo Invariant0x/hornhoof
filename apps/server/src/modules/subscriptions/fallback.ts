@@ -1,4 +1,4 @@
-import { modelsFor } from '@hornhoof/protocol';
+import { limitsForModel, modelsFor } from '@hornhoof/protocol';
 import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentSpot } from '../../auth/access.js';
@@ -7,7 +7,7 @@ import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { modelOnPlan, tierIn } from '../agents/role-model.js';
-import { budgetUntil, limitUntil } from '../conversation/limits.js';
+import { budgetUntil, modelLimitUntil } from '../conversation/limits.js';
 import { enqueueTurn, insertTurn, pump } from '../conversation/queue.js';
 import { planHeld, planWaitsFor } from '../conversation/state.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
@@ -24,11 +24,15 @@ type Plan = typeof subscriptions.$inferSelect;
 type Fallback = typeof agentFallbacks.$inferSelect;
 type Target = { plan: Plan; model: string | null };
 
-/* Until when the plan holds this employee's turns back: at its limit, or a worker's past the share set for tasks. Heads and
-   the orchestrator keep coordinating work above that share, so it holds none of theirs. */
-export function heldUntil(plan: Pick<Plan, 'limits' | 'limitsUpdatedAt' | 'budget'>, kind: string): string | null {
-  return limitUntil(plan.limits, plan.limitsUpdatedAt) ?? (kind === 'worker' ? budgetUntil(plan.limits, plan.budget, plan.limitsUpdatedAt) : null);
+/* Until when the plan holds this employee's turns back on that model: at its limit, or a worker's past the share set for
+   tasks, by the limits of the model's group where the plan keeps them by group. Heads and the orchestrator keep
+   coordinating work above that share, so it holds none of theirs. */
+export function heldUntil(plan: Pick<Plan, 'limits' | 'limitsUpdatedAt' | 'budget'>, kind: string, model: string): string | null {
+  return modelLimitUntil(plan, model) ?? (kind === 'worker' ? budgetUntil(limitsForModel(plan.limits, model), plan.budget, plan.limitsUpdatedAt) : null);
 }
+
+/* The model it runs on its own plan: the one it goes back to from a fallback, else the one it runs now. */
+const homeModel = (agent: Agent, kept: Fallback | null): string => (kept ? kept.homeModel : agent.model);
 
 async function planOf(ctx: Ctx, id: string): Promise<Plan | null> {
   const [plan] = await ctx.db.select().from(subscriptions).where(and(eq(subscriptions.id, id), isNull(subscriptions.removedAt)));
@@ -60,15 +64,22 @@ async function fallbacksOf(ctx: Ctx, agent: Agent, home: Plan): Promise<Target[]
   return out;
 }
 
-/* A plan takes the employee's turns now: signed in, a machine of it there, and nothing of it holds them back. */
-async function hasRoom(ctx: Ctx, agent: Agent, plan: Plan): Promise<boolean> {
-  return plan.status === 'ready' && !heldUntil(plan, agent.kind) && (await planWaitsFor(ctx, agent, plan)) === null;
+/* A plan takes the employee's turns on that model now: signed in, a machine of it there, and nothing of it holds them back. */
+async function hasRoom(ctx: Ctx, agent: Agent, plan: Plan, model: string): Promise<boolean> {
+  return plan.status === 'ready' && !heldUntil(plan, agent.kind, model) && (await planWaitsFor(ctx, agent, plan)) === null;
 }
 
-async function firstWithRoom(ctx: Ctx, agent: Agent, home: Plan, now: Plan | null): Promise<Target | null> {
-  for (const target of await fallbacksOf(ctx, agent, home)) if (target.plan.id !== now?.id && (await hasRoom(ctx, agent, target.plan))) return target;
+/* The first fallback with room for the model it would run there. */
+async function firstWithRoom(ctx: Ctx, agent: Agent, home: Plan, now: Plan | null, kept: Fallback | null): Promise<Target | null> {
+  const back = backTo(agent, kept);
+  for (const target of await fallbacksOf(ctx, agent, home)) {
+    if (target.plan.id !== now?.id && (await hasRoom(ctx, agent, target.plan, (await runsOn(ctx, agent, home, back, target)).model))) return target;
+  }
   return null;
 }
+
+/* The model and effort it goes back to on its own plan. */
+const backTo = (agent: Agent, kept: Fallback | null) => (kept ? { model: kept.homeModel, effort: kept.homeEffort } : { model: agent.model, effort: agent.effort });
 
 /* The model it runs there: the one named for that fallback, its own on a plan of its own plan's program, else the one its
    role asks for there, or that program's Default for the orchestrator, which has no role, as a move by hand gives it. How
@@ -108,8 +119,7 @@ async function moveAgent(ctx: Ctx, agent: Agent, next: { subscriptionId: string;
 }
 
 async function goOn(ctx: Ctx, agent: Agent, home: Plan, kept: Fallback | null, target: Target): Promise<boolean> {
-  const back = kept ? { model: kept.homeModel, effort: kept.homeEffort } : { model: agent.model, effort: agent.effort };
-  const next = { subscriptionId: target.plan.id, ...(await runsOn(ctx, agent, home, back, target)) };
+  const next = { subscriptionId: target.plan.id, ...(await runsOn(ctx, agent, home, backTo(agent, kept), target)) };
   return moveAgent(ctx, agent, next, tx =>
     kept
       ? tx.update(agentFallbacks).set({ subscriptionId: target.plan.id }).where(eq(agentFallbacks.agentId, agent.id))
@@ -148,12 +158,12 @@ const holdMinute = (until: string) => {
 async function stuckOn(ctx: Ctx, home: Plan): Promise<Agent[]> {
   const on = await ctx.db.select().from(agents).where(and(eq(agents.subscriptionId, home.id), isNull(agents.removedAt), isNull(agents.switchedOffAt), ne(agents.kind, 'assistant'))).orderBy(asc(agents.createdAt));
   const stuck: Agent[] = [];
-  for (const agent of on) if ((await planHeld(ctx, agent, home)) && !(await firstWithRoom(ctx, agent, home, null))) stuck.push(agent);
+  for (const agent of on) if ((await planHeld(ctx, agent, home)) && !(await firstWithRoom(ctx, agent, home, null, null))) stuck.push(agent);
   return stuck;
 }
 
-function noRoomText(home: Plan & { ownerName: string }, until: string, stuck: Agent[]): string {
-  const why = limitUntil(home.limits, home.limitsUpdatedAt) ? 'is at its usage limit' : 'used the share set for tasks';
+function noRoomText(home: Plan & { ownerName: string }, until: string, stuck: Agent[], model: string): string {
+  const why = modelLimitUntil(home, model) ? 'is at its usage limit' : 'used the share set for tasks';
   return (
     `Hornhoof: the plan ${home.label} (${home.ownerName}) ${why} until ${until}, and no fallback plan has room for its employees, so their work waits: ${stuck.map(a => a.name).join(', ')}. ` +
     'Give the plan a fallback with room on the Subscriptions screen, connect another plan, or move them to another plan on their cards. They go back to their own plan once its window starts over.'
@@ -165,7 +175,7 @@ function noRoomText(home: Plan & { ownerName: string }, until: string, stuck: Ag
 async function readsNow(ctx: Ctx, orchestrator: Agent | undefined): Promise<boolean> {
   if (!orchestrator?.subscriptionId || orchestrator.removedAt) return false;
   const plan = await planOf(ctx, orchestrator.subscriptionId);
-  return Boolean(plan && !heldUntil(plan, orchestrator.kind));
+  return Boolean(plan && !heldUntil(plan, orchestrator.kind, orchestrator.model));
 }
 
 const told = new WeakMap<Ctx, Set<string>>();
@@ -191,13 +201,14 @@ async function ownerName(ctx: Ctx, home: Plan): Promise<string> {
   return owner?.name ?? '';
 }
 
-/* The orchestrator hears once of a plan whose hold stops work that no fallback can take: once for each hold, by its reset. */
+/* The orchestrator hears once of a plan whose hold stops work that no fallback can take: once for each hold, by its reset.
+   from: the employee it stopped, on the model it runs on that plan. */
 async function tellNoRoom(ctx: Ctx, home: Plan, until: string, from: Agent): Promise<void> {
   const caseId = `plan-fallback:${home.id}:${holdMinute(until)}`;
   const orchestrator = await toTell(ctx, home, caseId);
   const stuck = orchestrator ? await stuckOn(ctx, home) : [];
   if (!orchestrator || !stuck.length) return;
-  const text = noRoomText({ ...home, ownerName: await ownerName(ctx, home) }, until, stuck);
+  const text = noRoomText({ ...home, ownerName: await ownerName(ctx, home) }, until, stuck, from.model);
   const turn = { companyId: home.companyId, agentId: orchestrator.id, prompt: text, createdBy: null, message: { personId: null, text, failureCase: caseId, notification: { source: 'limit' as const, tasks: [], detail: { en: home.label, ru: home.label } } } };
   /* The orchestrator's own line goes on as it is: it takes the message once the turn it is in goes out. */
   await (orchestrator.id === from.id ? insertTurn(ctx, turn) : enqueueTurn(ctx, turn));
@@ -209,7 +220,7 @@ async function tellNoRoom(ctx: Ctx, home: Plan, until: string, from: Agent): Pro
 export async function fallbackMove(ctx: Ctx, agentId: string): Promise<boolean> {
   const at = await whereItIs(ctx, agentId);
   if (!at) return false;
-  const until = heldUntil(at.home, at.agent.kind);
+  const until = heldUntil(at.home, at.agent.kind, homeModel(at.agent, at.kept));
   if (until) return goOnOrStay(ctx, at, until);
   return at.kept ? comeHome(ctx, at.agent, at.home, at.kept) : false;
 }
@@ -234,7 +245,7 @@ const movable = (agent: Agent | undefined): agent is Agent & { subscriptionId: s
 const stillAway = (kept: Fallback, agent: Agent, home: Plan | null): boolean => kept.subscriptionId === agent.subscriptionId && home !== null;
 
 async function comeHome(ctx: Ctx, agent: Agent, home: Plan, kept: Fallback): Promise<boolean> {
-  return (await hasRoom(ctx, agent, home)) && goHome(ctx, agent, kept);
+  return (await hasRoom(ctx, agent, home, kept.homeModel)) && goHome(ctx, agent, kept);
 }
 
 /* The fallback it is on, with its wake set for when its own plan's hold ends. */
@@ -248,9 +259,9 @@ async function stayingOn(ctx: Ctx, { agent, kept }: Where, until: string): Promi
 async function goOnOrStay(ctx: Ctx, at: Where, until: string): Promise<boolean> {
   const { agent, home } = at;
   const now = await stayingOn(ctx, at, until);
-  if (now && (await hasRoom(ctx, agent, now))) return false;
-  const target = await firstWithRoom(ctx, agent, home, now);
-  if (!target) return noRoom(ctx, agent, home, until);
+  if (now && (await hasRoom(ctx, agent, now, agent.model))) return false;
+  const target = await firstWithRoom(ctx, agent, home, now, at.kept);
+  if (!target) return noRoom(ctx, { ...agent, model: homeModel(agent, at.kept) }, home, until);
   const moved = await goOn(ctx, agent, home, at.kept, target);
   if (moved) comeBackAt(ctx, agent.id, until);
   return moved;
@@ -272,9 +283,9 @@ export async function fallBackFrom(ctx: Ctx, planId: string): Promise<void> {
 /* Each round of the reconciler: whoever is on a fallback while its own plan takes its turns again comes back between turns,
    also when the wake set for that was lost with a restart of the server. */
 export async function settleFallbacks(ctx: Ctx): Promise<void> {
-  const away = await ctx.db.select({ agentId: agentFallbacks.agentId, kind: agents.kind, home: subscriptions }).from(agentFallbacks)
+  const away = await ctx.db.select({ agentId: agentFallbacks.agentId, kind: agents.kind, model: agentFallbacks.homeModel, home: subscriptions }).from(agentFallbacks)
     .innerJoin(agents, eq(agents.id, agentFallbacks.agentId)).innerJoin(subscriptions, eq(subscriptions.id, agentFallbacks.homeSubscriptionId));
-  for (const { agentId, kind, home } of away) if (home.removedAt || !heldUntil(home, kind)) await pump(ctx, agentId);
+  for (const { agentId, kind, model, home } of away) if (home.removedAt || !heldUntil(home, kind, model)) await pump(ctx, agentId);
 }
 
 /* The fallback an employee is on, for its card: its own plan and when that plan's hold ends, as far as it is known now. */
@@ -282,7 +293,7 @@ export async function fallbackOf(ctx: Ctx, agent: Pick<Agent, 'id' | 'kind' | 's
   const [kept] = await ctx.db.select().from(agentFallbacks).where(eq(agentFallbacks.agentId, agent.id));
   if (!kept || kept.subscriptionId !== agent.subscriptionId) return null;
   const home = await planOf(ctx, kept.homeSubscriptionId);
-  return home ? { home: home.id, until: heldUntil(home, agent.kind) } : null;
+  return home ? { home: home.id, until: heldUntil(home, agent.kind, kept.homeModel) } : null;
 }
 
 /* An employee a person moved by hand stays where they put it. */

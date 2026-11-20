@@ -9,7 +9,7 @@ import { agentState } from '../conversation/state.js';
 import { insertTurn, keepLetter, openTypedTurn, pump, turnRefused } from '../conversation/queue.js';
 import { type TurnMessage } from '../conversation/turn-types.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
-import { limitUntil, refusedLimits } from '../conversation/limits.js';
+import { modelLimitUntil, refusedLimits } from '../conversation/limits.js';
 import { conversationOf, liveSubscription } from '../conversation/placement.js';
 import { onAgent } from '../conversation/line.js';
 import { GONE_ALONG } from '../conversation/constants.js';
@@ -600,10 +600,11 @@ async function handQueuedToFree(ctx: Ctx, agent: Agent, task: Task, w: Wake): Pr
 
 const mayCheckTask = (task: Task): boolean => ['open', 'working', 'review'].includes(task.status) && !task.externalWait && !task.paused;
 
-async function planLimitUntil(db: Ctx['db'], subscriptionId: string | null): Promise<string | null> {
+/* Until when the plan the turn ran on is at its limit for its agent's model. */
+async function planLimitUntil(db: Ctx['db'], subscriptionId: string | null, agentId: string): Promise<string | null> {
   if (!subscriptionId) return null;
-  const [sub] = await db.select({ limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt }).from(subscriptions).where(eq(subscriptions.id, subscriptionId));
-  return sub ? limitUntil(sub.limits, sub.limitsUpdatedAt) : null;
+  const [sub] = await db.select({ limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt, model: agents.model }).from(subscriptions).leftJoin(agents, eq(agents.id, agentId)).where(eq(subscriptions.id, subscriptionId));
+  return sub ? modelLimitUntil(sub, sub.model) : null;
 }
 
 async function hasOpenTaskWork(db: Ctx['db'], task: Task): Promise<boolean> {
@@ -711,7 +712,7 @@ async function checkHeld(ctx: Ctx, job: HeldJob, task: Task, worked: boolean): P
   if (await taskMovedInTurn(db, agentId, task, job.startedAt)) return;
   /* A turn that ended at the plan's limit did not stand still: another of its role on another plan takes the work over,
      or the agent goes on once the limit starts over. */
-  const until = await planLimitUntil(db, job.subscriptionId);
+  const until = await planLimitUntil(db, job.subscriptionId, agentId);
   if (until) return resumeAtPlanLimit(ctx, agentId, task, until);
   /* Turns that keep breaking as they start would only break again, and so would turns that keep failing later on: whoever
      gave the task out hears of it, once. So does a turn that did not go out for the length of its instructions, at once,
