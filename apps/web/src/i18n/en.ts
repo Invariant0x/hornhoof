@@ -1842,6 +1842,16 @@ export const en = {
     },
     waiting: 'Waiting for you',
     nothingWaiting: 'Nothing waits for you.',
+    queue: {
+      empty: 'Nothing is waiting for an answer',
+      defer: 'Defer',
+      deferred: 'Deferred',
+      more: (n: number) => `${n} more ${plural('en', n, { one: 'card', other: 'cards' })}`,
+      asked: 'Asked:',
+      open: 'Open',
+      readOnly: 'Read only',
+      materials: 'Question materials',
+    },
     /* Cards Hornhoof kept for the person until they say they saw them, in their words. */
     cards: {
       open: 'Open task',

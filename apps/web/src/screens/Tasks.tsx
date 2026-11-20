@@ -1,28 +1,29 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { deptLabel, errorText, useLanguage, useT } from '../i18n';
+import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import type { TrackerPlace } from '../routes';
 import { searchTasks } from '../task-search';
 import { placeName, useGoals, usePipelines, useTaskDepartments, useTasks, useWaitCards } from '../tasks';
-import { doerOf, filterTasks, graphPath, graphTree, mine, personWaited, pipelineTree, pruneGoals, shownDecisions, TRACKER_VIEWS, waitingOn, waitingOnPeople, waitsCount, workingNow, BOARD_STATUSES, boardStatus, type Crumb, type DecisionsOf, type GraphNode, type ShownDecisions, type WorkFilter } from '../tracker';
-import type { Decisions, Department, Me, Org, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard } from '../types';
-import { CEO_DECIDES } from '../ui/DecidedBy';
+import { doerOf, filterTasks, graphPath, graphTree, mine, personWaited, pipelineTree, pruneGoals, shownDecisions, TRACKER_VIEWS, waitingOn, waitingOnPeople, waitsCount, withoutRequestWaits, workingNow, BOARD_STATUSES, boardStatus, type Crumb, type DecisionsOf, type GraphNode, type ShownDecisions, type WorkFilter } from '../tracker';
+import type { Decisions, Department, Me, Org, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard, WaitingRequest } from '../types';
+import { CEO_DECIDES, DecidedByNote } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
-import { DepartmentMark } from '../ui/TrackerMarks';
+import { DepartmentMark, PersonMark } from '../ui/TrackerMarks';
 import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
 import { Busy, Hold, LoadState, noneYet, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
 import { MachineAway } from '../ui/MachineAway';
 import { MergeCard } from '../ui/MergeCard';
-import { Requests, wordsAnswer } from '../ui/Requests';
+import { namedReadOnly, Requests, wordsAnswer } from '../ui/Requests';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { GoalForm, PipelineForm, TrackerNewTask } from '../ui/TrackerForms';
 import { TrackerSide } from '../ui/TrackerSide';
 import { HeldList, TrackerBoard, TrackerFound, TrackerGoals, TrackerGraph, TrackerList, type Rows } from '../ui/TrackerViews';
 import { TurnsAndReleases } from '../ui/TurnsAndReleases';
-import { waitText } from '../ui/tracker-words';
-import { WaitCards } from '../ui/WaitCards';
+import { sinceSeconds, spanText, waitText } from '../ui/tracker-words';
+import { cardWords, WaitCards } from '../ui/WaitCards';
+import { WaitingQueue, type WaitQueueEntry } from '../ui/WaitingQueue';
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 
 type Props = {
@@ -104,6 +105,7 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   /* Whose: the person looked at, whom the page's title names, or the viewer with none. */
   personId: string | null;
   viewerId: string;
+  queue: boolean;
   /* The tasks that wait for that person. */
   tasks: TaskLine[];
   recipient: string;
@@ -119,6 +121,10 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
 const decisionsOfWho = (personId: string | null, viewerId: string): DecisionsOf => (personId ? { person: personId } : { viewer: viewerId });
 
 const shownNone = (s: ShownDecisions) => !s.requests.length && !s.proposals.length && !s.merges.length;
+
+const taskTitle = (task: Pick<TaskLine, 'number' | 'title'>) => `#${task.number} ${task.title}`;
+const requestIcon = { question: 'waits', approval: 'list', choice: 'branch', stuck: 'failure' } as const;
+const age = (t: Messages, at: string) => spanText(t, sinceSeconds(at));
 
 const nothing = () => {};
 
@@ -183,6 +189,80 @@ function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOp
   );
 }
 
+function NamedQuestionRow({ request, org, onOpenTask }: { request: WaitingRequest; org: Org | null; onOpenTask: (id: string) => void }) {
+  const t = useT();
+  const person = mapPeople(org).find(p => p.id === request.ownerPersonId);
+  return (
+    <article className="entry wait-question" aria-label={taskTitle(request.task)}>
+      <div className="wait-question-copy">
+        <p className="wait-question-text" dir="auto">{request.text}</p>
+        <div className="wait-meta">
+          <bdi>{t.tasks.queue.asked}</bdi>
+          {person && <PersonMark person={person} decorative />}
+          <bdi>{person?.name ?? t.tasks.someone}</bdi>
+          <span aria-hidden="true">·</span><bdi dir="ltr">#{request.task.number}</bdi>
+          <span aria-hidden="true">·</span><bdi>{age(t, request.at)}</bdi>
+        </div>
+        <DecidedByNote by={request.decidedBy} />
+      </div>
+      <div className="entry-actions">
+        <button className="btn ghost" type="button" onClick={() => onOpenTask(request.task.id)}>{t.tasks.queue.open}</button>
+      </div>
+    </article>
+  );
+}
+
+const queueDone = (done: () => void, refresh: () => void) => () => { done(); refresh(); };
+
+function QueueDeck({ shown, tasks, cards, recipient, onCardsSeen, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, onFailure }: Omit<Listed, 'waitsFor'> & {
+  tasks: TaskLine[];
+  cards: WaitCard[];
+  recipient: string;
+  onCardsSeen: () => void;
+}) {
+  const t = useT();
+  const deferButton = (defer: () => void) => <div className="entry-actions"><button className="btn ghost" type="button" onClick={defer}>{t.tasks.queue.defer}</button></div>;
+  const items: WaitQueueEntry[] = [
+    ...shown.requests.map(request => ({
+      id: `request:${request.id}`, title: taskTitle(request.task), icon: requestIcon[request.kind],
+      text: request.kind === 'stuck' ? t.tasks.stuckText(request.agent.name, request.task.number) : request.text,
+      meta: <><bdi>{request.agent.name}</bdi><span aria-hidden="true">·</span><bdi dir="ltr">#{request.task.number}</bdi><span aria-hidden="true">·</span><bdi>{age(t, request.at)}</bdi></>,
+      show: (done: () => void, defer: () => void) => <Requests requests={[request]} onChanged={queueDone(done, onDecisionsChanged)} onDefer={defer} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} />,
+    })),
+    ...shown.proposals.map(card => ({
+      id: `proposal:${card.id}`, title: card.department ? t.staff.title(card.department.name) : t.card.title, text: card.brief, icon: 'list' as const,
+      meta: <><bdi>{card.agent.name}</bdi><span aria-hidden="true">·</span><bdi>{age(t, card.at)}</bdi></>,
+      show: (done: () => void, defer: () => void) => <><ProposalCard card={card} org={org} onCorrect={onOpenOrchestrator} onDone={queueDone(done, onDecisionsChanged)} />{deferButton(defer)}</>,
+    })),
+    ...shown.merges.map(merge => ({
+      id: `merge:${merge.id}`, title: merge.label, text: merge.label, meta: null, icon: 'branch' as const,
+      show: (_done: () => void, defer: () => void) => <><MergeCard merge={merge} onChange={onDecisionsChanged} onFailure={onFailure} />{deferButton(defer)}</>,
+    })),
+    ...cards.map(card => {
+      const { title, text } = cardWords(t, card);
+      return {
+        id: `card:${card.id}`, title, text, meta: age(t, card.at), icon: 'waits' as const,
+        show: (done: () => void, defer: () => void) => <><WaitCards cards={[card]} onOpenTask={onOpenTask} onSeen={queueDone(done, onCardsSeen)} />{deferButton(defer)}</>,
+      };
+    }),
+    ...tasks.map(task => {
+      const wait = waitText(t, task, undefined, recipient);
+      return {
+        id: `task:${task.id}`, title: taskTitle(task), text: task.title, meta: wait, icon: 'waits' as const,
+        show: (_done: () => void, defer: () => void) => <>
+          <p className="wait-meta">{wait}</p>
+          <p dir="auto">{taskTitle(task)}</p>
+          <div className="entry-actions">
+            <button className="btn" type="button" onClick={() => onOpenTask(task.id)}>{t.tasks.cards.open}</button>
+            <button className="btn ghost" type="button" onClick={defer}>{t.tasks.queue.defer}</button>
+          </div>
+        </>,
+      };
+    }),
+  ];
+  return <WaitingQueue items={items} />;
+}
+
 function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () => void }) {
   const t = useT();
   const shown = useLoadFailure(failure);
@@ -195,10 +275,11 @@ function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () 
 
 /* What waits for the person, once all of it came: what agents ask, the orchestrator's cards, the cards Hornhoof kept for them,
    and the tasks that wait for them, or that nothing does. */
-function WaitingForYouBody({ decisions, personId, viewerId, tasks, recipient, kept, onCardsSeen, onFailure, ...rest }: Omit<Waiting, 'sources' | 'live' | 'decisionsFailure'> & { onFailure: (failure: unknown) => void }) {
+function WaitingForYouBody({ decisions, personId, viewerId, queue, tasks, recipient, kept, onCardsSeen, onFailure, ...rest }: Omit<Waiting, 'sources' | 'live' | 'decisionsFailure'> & { onFailure: (failure: unknown) => void }) {
   const t = useT();
   const shown = shownDecisions(decisions, decisionsOfWho(personId, viewerId));
   const cards = keptShown(kept, personId);
+  if (queue && !personId) return <QueueDeck shown={shown} tasks={tasks} cards={cards} recipient={recipient} onCardsSeen={onCardsSeen} onFailure={onFailure} {...rest} />;
   const name = mapPeople(rest.org).find(p => p.id === personId)?.name ?? t.tasks.someone;
   return (
     <>
@@ -257,6 +338,8 @@ function WaitingForPeople({ decisions, decisionsFailure, tasks, titled, sources,
   const [failure, setFailure] = useState<unknown>(null);
   const load = useLoad([{ data: decisions, failure: decisionsFailure, load: rest.onDecisionsChanged }, ...sources]);
   const shown = shownDecisions(decisions, 'everyone');
+  const named = shown.requests.filter(namedReadOnly);
+  const actionable = { ...shown, requests: shown.requests.filter(request => !namedReadOnly(request)) };
   const people = mapPeople(rest.org);
   const waitsFor = (personId: string) => {
     const name = people.find(p => p.id === personId)?.name;
@@ -264,7 +347,8 @@ function WaitingForPeople({ decisions, decisionsFailure, tasks, titled, sources,
   };
   return (
     <WaitingSection label={words.title} heading={titled && <h2>{words.title}</h2>} load={load} live={live} decisions={decisions} decisionsFailure={decisionsFailure} onRetry={rest.onDecisionsChanged} failure={failure}>
-      <DecisionList shown={shown} onFailure={setFailure} waitsFor={waitsFor} {...rest} />
+      {named.length > 0 && <div className="reqs">{named.map(request => <NamedQuestionRow key={request.id} request={request} org={rest.org} onOpenTask={rest.onOpenTask} />)}</div>}
+      <DecisionList shown={actionable} onFailure={setFailure} waitsFor={waitsFor} {...rest} />
       {tasks.length > 0 && <WaitingTasks tasks={tasks} personOf={personWaited} heading={words.tasks} onOpenTask={rest.onOpenTask} />}
       {shownNone(shown) && !tasks.length && <p className="muted">{words.nothing}</p>}
     </WaitingSection>
@@ -519,8 +603,9 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
     },
   };
   const own = mine(all, goals, who);
-  const waitsOnWho = waitingOn(all, recipient);
-  const waitsOnPeople = waitingOnPeople(all);
+  const otherWaits = withoutRequestWaits(all, decisions?.requests);
+  const waitsOnWho = waitingOn(otherWaits, recipient);
+  const waitsOnPeople = waitingOnPeople(otherWaits);
   const failures = all.filter(task => boardStatus(task) === 'failure');
   const machinesAway = decisions?.machinesAway ?? [];
   const pipeline = place.pipeline ? pipelines.find(p => p.id === place.pipeline) ?? null : null;
@@ -614,6 +699,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       onDecisionsChanged={onDecisionsChanged}
       personId={decisionsOf}
       viewerId={me.person.id}
+      queue={section.kind === 'waits'}
       tasks={waitsOnWho}
       recipient={recipient}
       kept={kept}

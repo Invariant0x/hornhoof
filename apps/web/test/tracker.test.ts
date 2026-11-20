@@ -276,8 +276,9 @@ describe('what waits for people', () => {
     expect(requested(shownDecisions(DECISIONS, { person: LEO.id }))).toEqual(['r3']);
   });
 
-  it("keeps a question asked of the viewer by name in their own decisions, also when another person looks at the company's", () => {
-    expect(requested(shownDecisions(DECISIONS, { viewer: MAX }))).toEqual(['r1', 'r3']);
+  it("uses the server's answer permissions for the viewer's own list", () => {
+    const maxView = { ...DECISIONS, requests: [{ ...FOR_MAX, canAnswer: true }, { ...FOR_SAM, canAnswer: false }, FOR_ANYONE] };
+    expect(requested(shownDecisions(maxView, { viewer: MAX }))).toEqual(['r1', 'r3']);
   });
 
   it('gives everything the viewer sees for the company', () => {

@@ -1843,6 +1843,16 @@ export const ru: Messages = {
     },
     waiting: 'Ждут вас',
     nothingWaiting: 'Вас ничего не ждет.',
+    queue: {
+      empty: 'Ничего не ждет ответа',
+      defer: 'Отложить',
+      deferred: 'Отложено',
+      more: n => `Еще ${n} ${plural('ru', n, { one: 'карточка', few: 'карточки', many: 'карточек', other: 'карточки' })}`,
+      asked: 'Спросили:',
+      open: 'Открыть',
+      readOnly: 'Только чтение',
+      materials: 'Материалы вопроса',
+    },
     cards: {
       open: 'Открыть задачу',
       seen: 'Понятно',
