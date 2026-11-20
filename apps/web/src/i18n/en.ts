@@ -827,6 +827,8 @@ export const en = {
       retryLabel: (name: string) => `Retry connecting ${name}`,
       cancel: 'Stop',
       cancelLabel: (name: string) => `Stop connecting ${name}`,
+      /* Said once by the plan's status as it turns ready; its card shows no such line. */
+      ready: (name: string) => `${name}: done. Agents on this plan can work now.`,
     },
     pasteKey: 'Paste the key',
     pasteKeyLabel: (name: string) => `Paste the key for ${name}`,

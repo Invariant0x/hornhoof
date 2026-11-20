@@ -4,6 +4,7 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { SubView, WaitCard } from '../src/types';
 import { serveApi, TASKS } from './api';
+import { stretch } from './pseudo-text';
 
 /* The one department serveApi answers with, whose tasks the tracker lists. */
 const DEPARTMENT_ID = 'd2';
@@ -446,5 +447,31 @@ for (const screen of SCREENS) for (const look of LOOKS) {
     await expect(screen.arrived(page, look.lang)).toBeVisible();
     await inside();
     await shot('ready');
+  });
+}
+
+/* No pseudo-long language ships, so the test keeps its own (Design #1656): the words of each state of a load about twice as
+   long as the English wrap inside their blocks and the screen, on a phone and a desktop. */
+for (const screen of SCREENS) for (const width of [375, 1440]) {
+  test(`each state of a load wraps inside the screen in a long pseudo translation ${screen.name}-${width}`, async ({ page, browserName }) => {
+    const hold = await openHeld(page, screen, { lang: 'en', theme: 'cyberpunk', width });
+    const blocks = screen.place(page).locator('.load-busy, .load-boot, .load-fail');
+    const check = async (state: string) => {
+      for (const block of await blocks.all()) await stretch(block);
+      /* A run of text inside a line has no width of its own to overflow: its block is checked. */
+      expect(await blocks.evaluateAll(all => all.flatMap(b => [b, ...b.querySelectorAll('*')]).filter(e => !e.closest('.sr') && getComputedStyle(e).display !== 'inline' && e.scrollWidth > e.clientWidth + 1).map(e => `${e.tagName.toLowerCase()}.${[...e.classList].join('.')} ${e.scrollWidth}>${e.clientWidth}`))).toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.screenshot({ path: `${SHOTS}/${browserName}-${screen.name}-pseudo-${width}-${state}.png`, animations: 'disabled' });
+    };
+    await page.clock.runFor(RING_DELAY_MS);
+    await expect(busyOf(screen, page)).not.toHaveClass(/unseen/);
+    await check('loading');
+    await page.clock.runFor(SLOW_MS - RING_DELAY_MS);
+    await expect(screen.place(page).locator('.load-fail.slow')).toBeVisible();
+    await check('slow');
+    await page.clock.runFor(FAIL_MS - SLOW_MS);
+    await expect(screen.place(page).locator('.load-fail:not(.slow)')).toBeVisible();
+    await check('failed');
+    hold.release();
   });
 }

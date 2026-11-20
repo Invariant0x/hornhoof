@@ -836,6 +836,7 @@ export const ru: Messages = {
       retryLabel: name => `Повторить подключение ${name}`,
       cancel: 'Остановить',
       cancelLabel: name => `Остановить подключение ${name}`,
+      ready: name => `${name}: готово. Агенты на этом тарифе уже могут работать.`,
     },
     pasteKey: 'Вставьте ключ',
     pasteKeyLabel: name => `Вставить ключ для ${name}`,

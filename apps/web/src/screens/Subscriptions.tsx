@@ -3,7 +3,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } f
 import { api, ApiFailure } from '../api';
 import { useStream } from '../live';
 import { useHeldRows, useLoad, type Load } from '../ui/Loading';
-import { PlanConnection } from '../ui/PlanConnection';
+import { PlanConnection, ReadySaid } from '../ui/PlanConnection';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
 import type { JobView, Me, PlanFallback, ShownCommand, SubView } from '../types';
@@ -405,11 +405,13 @@ function PlanFoot(props: PlanProps) {
   );
 }
 
-/* Its sign-in window when open, which shows the plan's connection after the code; else the connection on the card. */
+/* Its sign-in window when open, which shows the plan's connection after the code; else the connection on the card. The
+   plan's status for the moment it is ready stays through both. */
 function PlanExtra({ sub: s, controls: c, now }: Omit<PlanProps, 'me'> & { now: number }) {
   const on = c.signing;
   const connection = s.connecting ? <PlanConnection sub={s} connecting={s.connecting} now={now} onRetry={() => c.retryConnection(s)} onCancel={() => c.cancelConnection(s)} /> : null;
   return <>
+    <ReadySaid sub={s} />
     {on && <SignInPanel subId={s.id} program={PROGRAM_NAMES[s.provider]} nodeId={on.nodeId} hostname={on.hostname} onEnd={error => c.endSignIn(on, error)} onStop={() => c.stopSignIn(on)} connection={connection} />}
     {!on && connection}
     {c.keying && isKeyPlan(s.provider) && <KeyForm sub={{ ...s, provider: s.provider }} onDone={c.done} onCancel={() => c.setKeyFor(null)} />}

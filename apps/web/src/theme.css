@@ -983,6 +983,8 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .conn-now > h4 { margin: 0; }
 .conn-now > p { margin: 0; overflow-wrap: anywhere; }
 .conn-now > .conn-keep { color: var(--muted); font-size: 13px; }
+/* The time since the code in digits of one width, so the line does not shift as it counts (Design #1656). */
+.conn-time { font-variant-numeric: tabular-nums; }
 .signin h3 { margin: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; }
 .signin p { margin: 0; font-size: 12.5px; }
 .signin .t-term { height: 360px; }

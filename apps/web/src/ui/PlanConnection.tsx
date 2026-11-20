@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { useT, type Messages } from '../i18n';
 import { PROGRAM_NAMES } from '../providers';
@@ -62,18 +63,31 @@ function nextAfter(t: Messages, sub: SubView, c: Connecting): string {
   return TERMINAL_SIGNIN.has(sub.provider) ? next.signInAgain : next.installWindow(c.hostname);
 }
 
-/* What happens now: the step its node reports and the time since the code, as the screen's status; past a minute with no new
-   step, that it takes longer than usual; or why it failed and what to do. Retry and Stop for both. */
+/* The step its node reports, as the screen's status while it connects, which a screen reader says when the step changes;
+   then the time since the code, outside the status, so it is not said every second, in digits of one width, so the line
+   does not shift as it counts (Design #1656). */
+function NowLine({ connecting: c, now }: Pick<Props, 'connecting' | 'now'>) {
+  const t = useT();
+  const words = t.subs.connection;
+  return (
+    <p className="conn-at">
+      <span role={c.state === 'connecting' ? 'status' : undefined}>{words.steps[c.step]}.</span>{' '}
+      <span className="conn-time">{words.passed(passedWords(t, now - Date.parse(c.since)))}</span>
+    </p>
+  );
+}
+
+/* What happens now: the step its node reports and the time since the code; past a minute with no new step, that it takes
+   longer than usual; or why it failed and what to do. Retry and Stop for both. */
 function ConnectNow({ sub, connecting: c, now, onRetry, onCancel }: Props) {
   const t = useT();
   const words = t.subs.connection;
   const name = subName(t, sub);
-  const at = `${words.steps[c.step]}. ${words.passed(passedWords(t, now - Date.parse(c.since)))}`;
-  if (c.state === 'connecting') return <><p role="status">{at}</p><p className="conn-keep">{words.keepOn}</p></>;
+  if (c.state === 'connecting') return <><NowLine connecting={c} now={now} /><p className="conn-keep">{words.keepOn}</p></>;
   const load: Load = { phase: c.state === 'too_long' ? 'slow' : 'failed', ring: false, failure: null, asked: 0, retry: onRetry };
   return (
     <>
-      {c.state === 'too_long' && <p>{at}</p>}
+      {c.state === 'too_long' && <NowLine connecting={c} now={now} />}
       <LoadFail load={load} onRetry={onRetry} retryLabel={words.retryLabel(name)} words={[signInError(t, c), nextAfter(t, sub, c)]} slowHint={words.slowHint} ring={false}
         stop={{ text: words.cancel, label: words.cancelLabel(name), run: onCancel }} />
     </>
@@ -94,4 +108,41 @@ export function PlanConnection(props: Props) {
       </div>
     </div>
   );
+}
+
+/* How long a plan's status keeps its words that it is ready, for a screen reader to say them once; then no status is left on
+   a plan that works. */
+export const READY_SAID_MS = 7_000;
+
+/* Where a plan's connection stands for its status: none heard; connecting, until the plan reads ready, as the plans are
+   read again only after the machine said the connection ended; or ready, said. */
+type Heard = 'none' | 'connecting' | 'ready';
+
+/* What the plan's status hears next, from what it heard and where the plan is now. */
+function heardNow(heard: Heard, sub: SubView): Heard {
+  if (sub.connecting) return 'connecting';
+  return heard === 'connecting' && sub.status === 'ready' ? 'ready' : heard;
+}
+
+/* Where the plan's connection stands for its status, which forgets a ready plan READY_SAID_MS after it read ready. */
+function useHeard(sub: SubView): Heard {
+  const [heard, setHeard] = useState<Heard>(() => heardNow('none', sub));
+  const next = heardNow(heard, sub);
+  if (next !== heard) setHeard(next);
+  useEffect(() => {
+    if (next !== 'ready') return;
+    const gone = setTimeout(() => setHeard('none'), READY_SAID_MS);
+    return () => clearTimeout(gone);
+  }, [next]);
+  return next;
+}
+
+/* The plan's status for the moment it is ready (Design #1656: its ready card has no "Done" line). It is there, empty, from
+   when the plan connects, so that its words come as a change, which a screen reader says once; they go a little later
+   with it. A plan that was ready without connecting here says nothing. */
+export function ReadySaid({ sub }: { sub: SubView }) {
+  const t = useT();
+  const heard = useHeard(sub);
+  if (heard === 'none') return null;
+  return <p className="sr conn-said" role="status">{heard === 'ready' ? t.subs.connection.ready(subName(t, sub)) : ''}</p>;
 }

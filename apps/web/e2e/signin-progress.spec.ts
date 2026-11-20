@@ -4,6 +4,7 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { SubView } from '../src/types';
 import { serveApi } from './api';
+import { stretch } from './pseudo-text';
 
 /* 19.11: after the sign-in code, nothing on the plan's card changed while its program connected, and an Antigravity plan
    took so long that its owner could not tell whether it worked or hung. From the first step its node reports until the
@@ -24,6 +25,8 @@ const LIMIT = 10 * MINUTE;
 const T0 = Date.parse('2026-11-19T22:00:00Z');
 /* The code was entered a minute after the page's clock started. */
 const CODE_AT = T0 + MINUTE;
+/* How long a plan's status keeps its words that it is ready, which a screen reader says once (READY_SAID_MS). */
+const READY_SAID_MS = 7_000;
 
 type Provider = 'codex' | 'antigravity';
 const NAMES: Record<Provider, string> = { codex: 'Codex', antigravity: 'Antigravity' };
@@ -120,8 +123,9 @@ async function wholeInside(page: Page, shown: Locator, width: number) {
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(width);
   /* Each block that overflows its own width, named by its tag and classes, so a failure says which one. Words only a
-     screen reader reads are 1 px wide on purpose. */
-  expect(await shown.evaluate(el => [el, ...el.querySelectorAll('*')].filter(e => !e.closest('.sr') && e.scrollWidth > e.clientWidth + 1).map(e => `${e.tagName.toLowerCase()}.${[...e.classList].join('.')} ${e.scrollWidth}>${e.clientWidth}`))).toEqual([]);
+     screen reader reads are 1 px wide on purpose. A run of text inside a line has no width of its own to overflow: its
+     block is checked (Firefox gives it a scroll width over a client width of 0). */
+  expect(await shown.evaluate(el => [el, ...el.querySelectorAll('*')].filter(e => !e.closest('.sr') && getComputedStyle(e).display !== 'inline' && e.scrollWidth > e.clientWidth + 1).map(e => `${e.tagName.toLowerCase()}.${[...e.classList].join('.')} ${e.scrollWidth}>${e.clientWidth}`))).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 }
 
@@ -159,9 +163,9 @@ test.describe('a plan connecting after its sign-in code', () => {
     await expect(shown.locator('.conn-prog > p')).toHaveText(t.subs.connection.progress(3, 4));
     await expectBeside(ringOf(shown), nowStep(shown));
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.checking);
-    await expect(shown.getByRole('status')).toContainText(t.subs.connection.passed(t.subs.connection.seconds(0)));
+    await expect(shown.locator('.conn-time')).toHaveText(t.subs.connection.passed(t.subs.connection.seconds(0)));
     await later(page, 65_000);
-    await expect(shown.getByRole('status')).toContainText(t.subs.connection.passed(t.subs.connection.minutes(1, 5)));
+    await expect(shown.locator('.conn-time')).toHaveText(t.subs.connection.passed(t.subs.connection.minutes(1, 5)));
     await opened.connect('codex', connection('saving'));
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.saving);
     /* The sign-in window closes once the sign-in is kept; the card goes on showing the connection. */
@@ -190,11 +194,52 @@ test.describe('a plan connecting after its sign-in code', () => {
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.signed_in);
     await opened.connect('antigravity', connection('limits'));
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.limits);
-    await expect(shown.getByRole('status')).toContainText(t.subs.connection.passed(t.subs.connection.minutes(2, 10)));
+    await expect(shown.locator('.conn-time')).toHaveText(t.subs.connection.passed(t.subs.connection.minutes(2, 10)));
     opened.plans.now = [plan('antigravity', 'ready')];
     await opened.connect('antigravity', null);
     await expect(shown).toHaveCount(0);
     await expect(page.getByRole('heading', { name: t.cards.aboutPlan, exact: true })).toBeVisible();
+  });
+
+  /* Design #1656: a screen reader hears each step, not each second, and the line does not shift as the time counts. */
+  test('counts the time since the code outside the status, in digits of one width', async ({ page }) => {
+    const t = words(EN);
+    const opened = await openPlans(page, EN, [plan('antigravity', 'needs_login')]);
+    await openCard(page, EN, 'antigravity');
+    await opened.connect('antigravity', connection('checking'));
+    const shown = part(page, EN, 'antigravity');
+    const time = shown.locator('.conn-time');
+    await later(page, 11_000);
+    await expect(time).toHaveText(t.subs.connection.passed(t.subs.connection.seconds(11)));
+    await expect(shown.getByRole('status')).toHaveText(`${t.subs.connection.steps.checking}.`);
+    expect(await time.evaluate(el => ({ digits: getComputedStyle(el).fontVariantNumeric, live: el.closest('[role="status"], [aria-live]') !== null }))).toEqual({ digits: 'tabular-nums', live: false });
+    const before = (await time.boundingBox())!;
+    await page.clock.fastForward(7_000);
+    await expect(time).toHaveText(t.subs.connection.passed(t.subs.connection.seconds(18)));
+    expect(Math.abs((await time.boundingBox())!.width - before.width)).toBeLessThan(0.5);
+  });
+
+  /* Design #1656: the ready card has no "Done" line. The plan's status, there and empty while it connected, says once that it
+     is ready, as a change a screen reader says; a little later no status is left. */
+  test('says once that the plan is ready, in the status it had while it connected, then leaves none', async ({ page }) => {
+    const t = words(EN);
+    const opened = await openPlans(page, EN, [plan('codex', 'needs_login')]);
+    await openCard(page, EN, 'codex');
+    await opened.connect('codex', connection('models'));
+    await expect(part(page, EN, 'codex')).toBeVisible();
+    const said = page.locator('.conn-said');
+    await expect(said).toHaveAttribute('role', 'status');
+    await expect(said).toHaveText('');
+    const region = (await said.elementHandle())!;
+    opened.plans.now = [plan('codex', 'ready')];
+    await opened.connect('codex', null);
+    await expect(page.getByRole('heading', { name: t.cards.aboutPlan, exact: true })).toBeVisible();
+    await expect(said).toHaveText(t.subs.connection.ready('Codex'));
+    expect(await region.evaluate(el => el.isConnected)).toBe(true);
+    await expect(page.getByRole('status').filter({ hasText: t.subs.connection.ready('Codex') })).toHaveCount(1);
+    await page.clock.fastForward(READY_SAID_MS);
+    await expect(said).toHaveCount(0);
+    await expect(page.getByText(t.subs.connection.ready('Codex'))).toHaveCount(0);
   });
 
   test('Codex: a failed connection says why and what to do, with no ring, and Retry signs in again', async ({ page }) => {
@@ -348,5 +393,31 @@ for (const look of LOOKS) {
       await page.screenshot({ path: `${SHOTS}/${browserName}-${name}-${state}.png`, animations: 'disabled' });
     }
     expect(errors).toEqual([]);
+  });
+}
+
+/* No pseudo-long language ships, so the test keeps its own (Design #1656): each text of the connection about twice as long
+   as the English still wraps inside the card, in each state, on a phone and a desktop. */
+for (const width of [375, 1440]) {
+  test(`each state of a connection wraps inside its card in a long pseudo translation ${width}`, async ({ page, browserName }) => {
+    const look: Look = { lang: 'en', theme: 'cyberpunk', width };
+    const opened = await openPlans(page, look, [plan('antigravity', 'needs_login')]);
+    await openCard(page, look, 'antigravity');
+    const shown = part(page, look, 'antigravity');
+    const check = async (state: string) => {
+      await stretch(shown);
+      await wholeInside(page, shown, width);
+      await shown.evaluate(el => el.scrollIntoView({ block: 'center' }));
+      await page.screenshot({ path: `${SHOTS}/${browserName}-pseudo-${width}-${state}.png`, animations: 'disabled' });
+    };
+    await opened.connect('antigravity', connection('account'));
+    await expect(ringOf(shown)).toBeVisible();
+    await check('connecting');
+    await opened.connect('antigravity', connection('models', 'too_long'));
+    await expect(shown.locator('.load-fail.slow')).toBeVisible();
+    await check('too_long');
+    await opened.connect('antigravity', connection('checking', 'failed', { error: 'The sign-in ended before it finished, so nothing changed.', line: 'Antigravity CLI did not finish signing in.' }));
+    await expect(shown.getByRole('alert')).toBeVisible();
+    await check('failed');
   });
 }
