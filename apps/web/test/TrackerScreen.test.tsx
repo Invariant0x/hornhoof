@@ -1084,7 +1084,9 @@ describe('what waits says that nothing waits only once all of it came', () => {
   });
 
   it('stands what waits apart from the list above it, by a gap of the style book', () => {
-    expect(decl('.tr-main > :is(.tr-hold, .tr-found) + .waiting', 'margin-block-start')).toBe('24px');
+    /* The tracker's spacing between sections (Design #1633): 24px. */
+    expect(decl('.tr-main > :is(.tr-hold, .tr-found) + .waiting', 'margin-block-start')).toBe('var(--sec-gap)');
+    expect(decl('.tr-main', '--sec-gap')).toBe('24px');
   });
 });
 

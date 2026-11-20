@@ -73,15 +73,16 @@ function Layer({ shown, className, style, children }: { shown: boolean; classNam
 }
 
 /* How tall what holds a room's place stands while it comes, kept once it is gone, so the empty block that takes the room
-   then holds that height and nothing under it moves. */
-function useHolderHeight() {
+   then holds that height and nothing under it moves. Only for the list it held: another list, as the filters change, holds
+   nothing of it, and the room stays the one element it was. */
+function useHolderHeight(list: string | undefined) {
   const holder = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState(0);
+  const [kept, setKept] = useState({ list, px: 0 });
   useLayoutEffect(() => {
     const px = holder.current?.offsetHeight;
-    if (px !== undefined && px !== height) setHeight(px);
+    if (px !== undefined && (px !== kept.px || list !== kept.list)) setKept({ list, px });
   });
-  return { holder, height };
+  return { holder, height: kept.list === list ? kept.px : 0 };
 }
 
 /* The room of a section (Design #1633): what holds its place while it comes and its empty block stand in one grid cell, so
@@ -94,7 +95,7 @@ type RoomProps = { done: boolean; none: boolean; held: ReactNode; empty: ReactNo
 export function Room({ done, none, held, empty, list, children }: RoomProps) {
   const shown = done && !none;
   const { room, data, held: height } = useHeldHeight(list, done, none);
-  const { holder, height: holderHeight } = useHolderHeight();
+  const { holder, height: holderHeight } = useHolderHeight(list);
   const kept = done && holderHeight ? { minBlockSize: `${holderHeight}px` } : undefined;
   return (
     <div ref={room} className="room" style={height ? { minBlockSize: `${height}px` } : undefined}>

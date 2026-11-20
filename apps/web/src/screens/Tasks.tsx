@@ -195,8 +195,7 @@ function HeldWork({ load, view, list, shown, none, empty, children }: { load: Lo
   const held = view === 'list' ? <HeldList rows={rows} load={load} /> : <Busy ring={load.ring} words={t.load.tasks} />;
   return (
     <Hold load={load} className="tr-hold" keep={view === 'list'}>
-      {/* Another list, as the filters change, starts its own room, with what it held last in this tab. */}
-      <Room key={list} done={done} none={none} held={held} empty={empty} list={list}>{children}</Room>
+      <Room done={done} none={none} held={held} empty={empty} list={list}>{children}</Room>
     </Hold>
   );
 }
