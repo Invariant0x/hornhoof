@@ -33,14 +33,30 @@ it('floats the version over the end corner of the map, out of the way of taps', 
   });
 });
 
-/* The map's zoom and Put back over it stand at the start of its bottom, so a page right to left mirrors them as it mirrors
-   the rest of the layout; left to right they stay where they stood. The other canvases keep their zoom at the left, beside
-   bars they place from the left (#1622). */
-it("stands the map's zoom and Put back at the start of its bottom, mirrored right to left", () => {
-  expect(decl('.zoom', 'left')).toBe('16px');
-  expect(decl('.map > .zoom', 'inset-inline')).toBe('16px auto');
+/* The zoom of the map, the department and its tree, and the map's Put back over it, stand at the start of the bottom, so a
+   page right to left mirrors them as it mirrors the rest of the layout; left to right they stay where they stood (#1622,
+   #1658). */
+it("stands the canvases' zoom and the map's Put back at the start of the bottom, mirrored right to left", () => {
+  expect(decl('.zoom', 'inset-inline-start')).toBe('16px');
+  expect(decl('.zoom', 'left')).toBeUndefined();
+  expect(rulesFor('.map > .zoom')).toEqual([]);
+  /* The tracker's graph is drawn left to right in either direction, so its zoom stays at the left, by the root. */
+  expect([decl('.tr-canvas > .zoom', 'left'), decl('.tr-canvas > .zoom', 'right')]).toEqual(['16px', 'auto']);
   expect(decl('.map-arrange', 'inset-inline-start')).toBe('16px');
   expect(decl('.map-arrange', 'left')).toBeUndefined();
+});
+
+/* The department's line of what happened and its actions follow the zoom along the bottom, and its drawer opens at the start
+   under its name, all mirrored right to left; an agent window keeps its own place, at the left as before (#1658). */
+it("mirrors the department's line, actions and drawer right to left, and leaves a window's place alone", () => {
+  expect(decl('.dview .ticker', 'inset-inline')).toBe('212px var(--ticker-right, 16px)');
+  expect(decl('.dv-acts', 'inset-inline-end')).toBe('16px');
+  expect(decl('.dv-drawer', 'inset-inline-start')).toBe('16px');
+  expect(decl('.dv-drawer', 'inset-inline', '(max-width: 760px)')).toBe('16px');
+  for (const [selector, media] of [['.dview .ticker', null], ['.dv-acts', null], ['.dv-drawer', null], ['.dv-drawer', '(max-width: 760px)']] as const)
+    for (const side of ['left', 'right']) expect(decl(selector, side, media), `${selector} ${side}`).toBeUndefined();
+  expect(decl('.acard', 'left')).toBe('16px');
+  expect(decl('.acard', 'right', '(max-width: 760px)')).toBe('16px');
 });
 
 function paddingRightPx(selector: string): number | undefined {
