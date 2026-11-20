@@ -505,8 +505,8 @@ export class Bridge {
   }
 
   /* A slow answer to a request from before counts from when it was asked, and only if the program still waited for it. */
-  private heardList(key: string, asked: number, res: ServerResponse): void {
-    if (this.abandoned.has(res)) return;
+  private heardList(key: string, asked: number, res?: ServerResponse): void {
+    if (res !== undefined && this.abandoned.has(res)) return;
     if (!this.listedSince(key, asked)) this.listedAt.set(key, asked);
     for (const heard of [...(this.listing.get(key) ?? [])]) heard(asked);
   }
