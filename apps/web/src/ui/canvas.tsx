@@ -99,7 +99,9 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, ready: unknown
   });
   const handTo = useCallback((was: View, next: View) => {
     const e = edgesOf.current?.();
-    return e ? keptToEdges(was, next, e) : next;
+    const out = e ? keptToEdges(was, next, e) : next;
+    console.log('HANDTO ' + JSON.stringify({ t: performance.now(), was, next, e, out }));
+    return out;
   }, []);
   const drag = useRef<{ id: number; x: number; y: number; moved: number } | null>(null);
   const byHand = useRef(false);

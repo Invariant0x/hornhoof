@@ -474,3 +474,120 @@ for (const width of WIDTHS) for (const dir of DIRS) for (const skin of SKINS) fo
     expect(errors).toEqual([]);
   });
 }
+
+/* DIAG #1733, never lands: the fixme flow and the flow Zee saw fail (a single zoom, then the bar arms), with every view, room,
+   bar and frame change recorded in the page and each step's measure, one file per test in DIAG_DIR. */
+const DIAG_DIR = process.env.DIAG_DIR ?? join(SHOTS, 'diag-1733');
+async function diagnosed(page: Page, name: string, flow: (note: (what: string) => Promise<void>) => Promise<void>) {
+  const log: string[] = [];
+  page.on('console', m => { if (/^(HANDTO|HHFIT|HHAUTO|HHARR)/.test(m.text())) log.push(m.text()); });
+  page.on('pageerror', e => log.push(`PAGEERROR ${JSON.stringify(e.message)}`));
+  await page.addInitScript(() => {
+    const w = window as unknown as { __diag: string[] };
+    w.__diag = [];
+    const rect = (el: Element | null | undefined) => {
+      if (!el) return '-';
+      const r = el.getBoundingClientRect();
+      return [r.x, r.y, r.width, r.height].map(n => n.toFixed(1)).join(',');
+    };
+    const card = () => [...document.querySelectorAll('.dept')].find(d => d.textContent?.includes('Development'));
+    const t = () => performance.now().toFixed(1);
+    new MutationObserver(list => {
+      for (const m of list) {
+        const el = m.target as HTMLElement;
+        if (m.type === 'attributes' && el.classList?.contains('world'))
+          w.__diag.push(`MOVE ${t()} ${el.style.transform} transition=${getComputedStyle(el).transition} card ${rect(card())} map ${rect(document.querySelector('.map'))}`);
+        else if (m.type === 'attributes' && el.classList?.contains('map-room')) w.__diag.push(`ROOMSTYLE ${t()} ${el.getAttribute('style')}`);
+        else if (m.type === 'childList' && el.matches?.('main.body')) {
+          const bars = [...el.querySelectorAll(':scope > :is(.update-banner, .alert, .guard-stop)')].map(b => `${b.className.toString().split(' ')[0]}@${rect(b)}`);
+          w.__diag.push(`BARS ${t()} [${bars.join(' ')}]`);
+        }
+      }
+    }).observe(document, { attributes: true, attributeFilter: ['style'], childList: true, subtree: true });
+    let last = '';
+    const frame = () => {
+      const world = document.querySelector<HTMLElement>('.map .world');
+      const now = world ? `${world.style.transform} card ${rect(card())} map ${rect(document.querySelector('.map'))}` : 'no world';
+      if (now !== last) w.__diag.push(`FRAME ${t()} ${now}`);
+      last = now;
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  });
+  const note = async (what: string) => {
+    const at = await page.evaluate(() => performance.now());
+    const part = await cardPart(page);
+    log.push(`NOTE ${what} ${JSON.stringify({ t: at, view: await view(page), part, room: await room(page), map: await boxOf(page, '.map') })}`);
+  };
+  let outcome = 'FAILED';
+  try {
+    await flow(note);
+    outcome = 'passed';
+  } finally {
+    log.push(...await page.evaluate(() => (window as unknown as { __diag: string[] }).__diag).catch(() => ['DIAG-LOST']));
+    mkdirSync(DIAG_DIR, { recursive: true });
+    writeFileSync(join(DIAG_DIR, `${outcome}-${name}.txt`), log.join('\n'));
+  }
+}
+async function diagOpen(page: Page, skin: string) {
+  await page.setViewportSize({ width: 375, height: HEIGHT });
+  await page.addInitScript(skin => {
+    localStorage.setItem('hh-lang', 'en');
+    localStorage.setItem('hh-theme', skin);
+  }, skin);
+  await serveApi(page);
+}
+
+for (const skin of SKINS) {
+  test(`DIAG1733 fixme flow, 375px ${skin}`, async ({ page }, info) => {
+    await diagnosed(page, `fixme-${skin}-${info.repeatEachIndex}`, async note => {
+      await diagOpen(page, skin);
+      await page.goto('/');
+      await expect(page.locator('.dept', { hasText: 'Development' })).toBeVisible();
+      await note('visible');
+      await still(page);
+      await note('still');
+      await zoomOutUntilShown(page);
+      for (let i = 0; i < 3; i++) {
+        const at = await shownPart(page);
+        await note(`before-in-${i}`);
+        await page.mouse.move(at.x, at.y);
+        await page.mouse.wheel(0, -240);
+        await note(`wheeled-in-${i}`);
+        await still(page);
+        await note(`after-in-${i}`);
+        await shownPart(page);
+        await page.mouse.wheel(0, 240);
+        await still(page);
+        await note(`after-out-${i}`);
+      }
+    });
+  });
+}
+
+for (const skin of SKINS) for (const bar of BARS) {
+  test(`DIAG1733 Zee's flow under ${bar.name}, 375px ${skin}`, async ({ page }, info) => {
+    await diagnosed(page, `zee-${skin}-${bar.name.replace(/[^a-z]+/gi, '-')}-${info.repeatEachIndex}`, async note => {
+      await diagOpen(page, skin);
+      const arm = await bar.serve(page);
+      await page.goto('/');
+      await expect(page.locator('.dept', { hasText: 'Development' })).toBeVisible();
+      if (bar.before) await expect(page.locator('main.body > .update-banner')).toBeVisible();
+      await note('visible');
+      await still(page);
+      await note('still');
+      await zoomOutUntilShown(page);
+      const zoomAt = await shownPart(page);
+      await note('before-in');
+      await page.mouse.move(zoomAt.x, zoomAt.y);
+      await page.mouse.wheel(0, -240);
+      await note('wheeled-in');
+      await still(page);
+      await note('after-in');
+      expect((await boxOf(page, '.map')).y, 'the map starts at the top of the window').toBeLessThanOrEqual(0.5);
+      arm?.();
+      await note('armed');
+      await shownPart(page);
+    });
+  });
+}

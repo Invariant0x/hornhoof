@@ -709,6 +709,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const arr = useMemo(() => (org ? arrangeMap(org, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed, bends, need, chipNeed) : null), [org, layout.placed, moving, bends, need, chipNeed]);
   /* Pulses and Fit read the map as it stands, without waiting for it to settle. */
   const arrRef = useRef(arr);
+  if (arrRef.current !== arr && arr) console.log('HHARR ' + JSON.stringify({ t: performance.now(), hub: arr.hub, d: arr.depts.map(d => [Math.round(d.x), Math.round(d.y), Math.round(d.w), Math.round(d.h)]), top: arr.top.map(c => [Math.round(c.x), Math.round(c.y), Math.round(c.w), Math.round(c.h)]) }));
   arrRef.current = arr;
 
   useEffect(() => {
@@ -801,6 +802,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     const phone = box.current!.clientWidth <= CANVAS_NARROW;
     const v = mapView(room, arrangedBounds(shown, org), whole, phone ? PHONE_MAP_READABLE_K : MAP_READABLE_K, shown.hub.x + HUB);
     setMinZoom(Math.min(MIN_K, v.k));
+    console.log('HHFIT ' + JSON.stringify({ t: performance.now(), v, now: viewNow.current, room, shellTop }));
     const move = fitMove(viewNow.current, v);
     if (!move) return;
     viewNow.current = move;
@@ -827,6 +829,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   useEffect(() => {
     if (!shown || inside) return;
     const auto = () => {
+      console.log('HHAUTO ' + JSON.stringify({ t: performance.now(), mine: mine(), back: !!back.current, cardH, chipH, shellTop, v: layout.version }));
       if (!mine() && !back.current) fitRef.current(false);
     };
     auto();
