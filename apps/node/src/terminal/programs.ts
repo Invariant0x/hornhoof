@@ -44,7 +44,10 @@ export const bridgeEnv = (urls: AgentUrls) => ({
   COLORTERM: 'truecolor',
 });
 
-export const hook = (event: string) => [{ hooks: [{ type: 'command', command: `hh-hook ${event}` }] }];
+/* A program that runs a hook command in a shell and gives up on it ends that shell: exec makes the shell the hook, so the hook
+   ends with it instead of calling the bridge later as an orphan that no pane holds. */
+export const hookCommand = (event: string) => `exec hh-hook ${event}`;
+export const hook = (event: string) => [{ hooks: [{ type: 'command', command: hookCommand(event) }] }];
 
 /* A JSON file a program keeps, or nothing when it is missing or not JSON. */
 export function readJson(file: string): Record<string, unknown> {
