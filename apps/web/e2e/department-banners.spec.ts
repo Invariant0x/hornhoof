@@ -123,9 +123,12 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const bar of BARS) {
     if (bar.before) await expect(page.locator('main.body > .update-banner')).toBeVisible();
     await still(page);
 
-    /* The person zooms the map in and leaves it there: the view is theirs. */
-    const map = await boxOf(page, '.map');
-    await page.mouse.move(map.x + map.width / 2, map.y + map.height / 2);
+    /* The person zooms the map in on the department's card and leaves it there: the view is theirs. A phone's map opens on
+       its hub (#1597), where the card may show only in part at an edge, so they zoom where it shows. */
+    const map = await boxOf(page, '.map'), shown = await boxOf(page, '.dept:has-text("Development")');
+    const [x0, x1] = [Math.max(shown.x, map.x), Math.min(shown.x + shown.width, map.x + map.width)];
+    const [y0, y1] = [Math.max(shown.y, map.y), Math.min(shown.y + shown.height, map.y + map.height)];
+    await page.mouse.move((x0 + x1) / 2, (y0 + y1) / 2);
     await page.mouse.wheel(0, -240);
     const left = await still(page);
     const mapBefore = await boxOf(page, '.map');
