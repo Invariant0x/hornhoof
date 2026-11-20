@@ -110,7 +110,9 @@ const SCREENS: Screen[] = [
     held: '/api/subscriptions',
     open: byTab('subscriptions'),
     answer: route => route.fulfill({ json: { subscriptions: [PLAN], apiPlaces: null } }),
-    shown: (page, lang) => [page.getByRole('navigation').first(), page.getByRole('heading', { level: 1, name: words(lang).subs.heading, exact: true })],
+    /* Its search field and its table's head are drawn at once and stay where they are when the plans come (Design #1656). */
+    shown: (page, lang) => [page.getByRole('navigation').first(), page.getByRole('heading', { level: 1, name: words(lang).subs.heading, exact: true }),
+      page.locator('section.subs input[type=search]'), page.locator('section.subs table.dt thead')],
     place: page => page.locator('section.subs'),
     arrived: (page, lang) => page.getByRole('button', { name: words(lang).tables.openCard('Codex'), exact: true }),
   },
@@ -338,7 +340,23 @@ for (const screen of SCREENS) {
   });
 }
 
+/* Design #1656: past 10 s and once given up, what the room holds stays: the block that says so stands where the ring and its
+   words stood, in the room's first row. */
+async function expectKeptRoom(page: Page, first: Locator, kept: Locator[]) {
+  for (const [ms, block] of [[SLOW_MS, '.load-fail.slow'], [FAIL_MS - SLOW_MS, '.load-fail:not(.slow)']] as const) {
+    await page.clock.runFor(ms);
+    await expect(first.locator(block)).toBeVisible();
+    for (const part of kept) await expect(part).toBeVisible();
+  }
+}
+
 test.describe('the tracker list while its tasks come', () => {
+  test('keeps its column names, its group head and its held rows past 10 s and once given up', async ({ page }) => {
+    await openHeld(page, SCREENS[0]!, EN);
+    const rows = page.locator('.tr-held .tr-rows > .tr-row');
+    await expectKeptRoom(page, rows.first(), [page.locator('.tr-held .tr-head'), page.locator('.tr-held .tr-group-head'), rows.nth(1)]);
+  });
+
   test('holds rows of the size of its rows, which its first rows take in place, with the column names and the group head at once', async ({ page }) => {
     const hold = await openHeld(page, SCREENS[0]!, EN);
     await page.clock.runFor(RING_DELAY_MS);
@@ -367,6 +385,20 @@ test.describe('the tracker list while its tasks come', () => {
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.clock.runFor(RING_DELAY_MS);
     await expect(page.locator('.tr-held .tr-row')).toHaveCount(Math.min(shown, 40));
+  });
+});
+
+test.describe('the plans while they come', () => {
+  test('draw their search field, their count line and their table head at once, hold plan rows, and keep them past 10 s and once given up', async ({ page }) => {
+    const t = words('en');
+    await openHeld(page, SCREENS[2]!, EN);
+    const room = page.locator('section.subs .load-hold');
+    await expect(room.getByPlaceholder(t.tables.searchSubscriptions)).toBeVisible();
+    await expect(room.locator('p.result')).toBeVisible();
+    await expect(room.locator('table.dt thead th').first()).toBeVisible();
+    const rows = room.locator('table.dt tbody tr');
+    expect(await rows.count()).toBeGreaterThan(1);
+    await expectKeptRoom(page, rows.first(), [room.locator('table.dt thead'), rows.nth(1), room.getByPlaceholder(t.tables.searchSubscriptions)]);
   });
 });
 
