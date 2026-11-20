@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { en } from '../src/i18n/en';
 import type { AgentCardView, Employee, Org, SubView } from '../src/types';
 import { box, ME, serveApi, TASKS } from './api';
 
@@ -305,7 +306,11 @@ test('keeps the department choice and the search box inside a 375 px phone scree
   await page.getByRole('button', { name: 'Map' }).click();
   await page.getByRole('button', { name: new RegExp(`^${LONG_DEPT.name}`) }).click();
   await page.getByRole('button', { name: 'Department tasks' }).click();
-  await page.getByRole('button', { name: 'New task', exact: true }).click();
+  await page.getByRole('button', { name: en.tracker.side.open, exact: true }).click();
+  const side = page.getByRole('navigation', { name: en.tracker.side.label, exact: true });
+  await side.getByRole('button', { name: en.tracker.side.create, exact: true }).click();
+  await side.getByRole('group', { name: en.tracker.side.create, exact: true })
+    .getByRole('button', { name: en.tracker.actions.newTask, exact: true }).click();
   /* Its priority and its product. */
   const newTaskSelects = page.locator('.new-task select');
   await expect(newTaskSelects).toHaveCount(2);
