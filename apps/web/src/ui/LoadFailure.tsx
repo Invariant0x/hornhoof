@@ -24,5 +24,5 @@ export function LoadFailure({ failure }: { failure: unknown }) {
   const t = useT();
   const shown = useLoadFailure(failure);
   if (shown === null) return null;
-  return <p className="alert" role="alert">{errorText(t, shown)}</p>;
+  return <p className="alert" role="alert"><span dir="auto">{errorText(t, shown)}</span></p>;
 }

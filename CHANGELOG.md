@@ -18,6 +18,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - After the sign-in code, a plan's card and its sign-in window show that it is connecting, with the step its machine is at and the time since the code, until it is ready, for every program. A connection that fails says why and what to do; one past 10 minutes (`SIGNIN_CONNECT_MS`) says it takes longer than usual, with Try again and Stop.
 - The tracker and the plans screen show one loading indicator where their data will stand, and nothing already shown moves when it comes. A load that fails says why, and one past 20 seconds says it takes longer than usual, each with Try again.
 - A plan with separate limits for groups of models, as Antigravity's Gemini and its Claude and GPT models, keeps each group's limits: a used-up group holds only the turns and fallbacks on its own models, and the plan's card shows every group with what it used and when it resets.
+- In a page that reads right to left, an English line of a bar over the map ends with its full stop instead of starting with it, and the bar stays mirrored.
 
 ### Changed
 
