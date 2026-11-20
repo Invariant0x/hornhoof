@@ -25,9 +25,14 @@ const settle = () => act(async () => {});
 const READY = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
 const NO_HISTORY: [number, unknown] = [200, { events: [], state: READY }];
 
-/* The company has no departments, and its department d2 no employee but its head. */
+/* The company has no departments; or its department d2 has no employee but its head, no sub-unit and no person of its own,
+   and only people who see the whole company. */
 const NO_DEPARTMENTS: Org = { ...ORG, departments: [] };
-const HEAD_ONLY: Org = { ...DEV_ORG, departments: DEV_ORG.departments.map(d => ({ ...d, employees: d.employees.filter(e => e.kind === 'head') })) };
+const HEAD_ONLY: Org = {
+  ...DEV_ORG,
+  people: DEV_ORG.people.filter(p => p.access.whole),
+  departments: DEV_ORG.departments.map(d => ({ ...d, teams: [], people: [], employees: d.employees.filter(e => e.kind === 'head') })),
+};
 const NO_TURN: DepartmentTree = { now: '2026-11-20T02:00:00.000Z', turn: null, repository: true, lines: [], time: [], idle: [] };
 
 afterEach(() => window.history.replaceState(null, '', '/'));
@@ -56,16 +61,20 @@ describe('the map says it has no departments only once', () => {
   });
 });
 
-describe('a department says it has no employees', () => {
+describe('a department says it has no employees, people or sub-units', () => {
   it('only once the company came', async () => {
+    const user = userEvent.setup();
     const org = held([200, HEAD_ONLY]);
     mockApi({ 'GET /api/org': org.route });
     window.history.replaceState(null, '', '/departments/d2');
     render(<LanguageProvider><Shell me={ME} onSignOut={() => {}} /></LanguageProvider>);
     await settle();
-    expect(screen.queryByText(en.dept.noMembers)).not.toBeInTheDocument();
+    for (const empty of [en.dept.noMembers, en.dept.noPeople, en.dept.noSubUnits]) expect(screen.queryByText(empty)).not.toBeInTheDocument();
     await org.release();
     expect(await screen.findByText(en.dept.noMembers)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'About the department' }));
+    expect(await screen.findByText(en.dept.noPeople)).toBeInTheDocument();
+    expect(screen.getByText(en.dept.noSubUnits)).toBeInTheDocument();
   });
 });
 
