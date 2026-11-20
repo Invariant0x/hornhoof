@@ -26,6 +26,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Changed
 
+- In the tracker's list, the status dot of a task an employee works on right now has a filled core that breathes slowly, every such dot together; for a person who asked for less motion the core is full and still, and a screen reader hears "In work, working now".
 - The map runs to the bottom of the screen, with the version as small muted text in its bottom end corner, clear of its buttons and of the bars along a phone's bottom; other screens keep the version in the row below them.
 
 ## [0.39.4] - 2026-11-20
