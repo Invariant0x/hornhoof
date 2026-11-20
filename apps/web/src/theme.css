@@ -2103,7 +2103,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .room > .room-layer { grid-area: 1 / 1; min-inline-size: 0; align-self: start; }
 .room > .room-layer.off { visibility: hidden; }
 .room > .room-empty { display: grid; align-self: stretch; }
-.waiting .room > .room-layer:not(.room-empty) { display: grid; gap: 10px; }
+.waiting .room-data { display: grid; gap: 10px; }
 /* A section that holds nothing: 2 rows of the list high, 4 where it is narrow; the section's icon, the fact and its hint at
    its start, 16 px under its top; the one thing to do at its end, in the middle of its height, or under the words where the
    room is narrow. */

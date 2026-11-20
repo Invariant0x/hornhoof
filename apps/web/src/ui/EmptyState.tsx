@@ -85,8 +85,8 @@ function useHolderHeight() {
 }
 
 /* The room of a section (Design #1633): what holds its place while it comes and its empty block stand in one grid cell, so
-   loading and empty have one height and nothing under them moves when it came; what came then takes the room, which grows
-   only at its end. done: every source of it came; none: and it holds nothing, so the empty block shows, and never before;
+   loading and empty have one height and nothing under them moves when it came; what came then takes the room, which keeps
+   the height it held for this visit and grows only at its end. done: every source of it came; none: and it holds nothing, so the empty block shows, and never before;
    until then it is drawn unseen, to size the room. list: which list it is, so the room holds the height it showed last in
    this tab. */
 type RoomProps = { done: boolean; none: boolean; held: ReactNode; empty: ReactNode; list?: string; children?: ReactNode };
@@ -95,11 +95,12 @@ export function Room({ done, none, held, empty, list, children }: RoomProps) {
   const shown = done && !none;
   const { room, data, held: height } = useHeldHeight(list, done, none);
   const { holder, height: holderHeight } = useHolderHeight();
+  const kept = done && holderHeight ? { minBlockSize: `${holderHeight}px` } : undefined;
   return (
     <div ref={room} className="room" style={height ? { minBlockSize: `${height}px` } : undefined}>
       {!done && <div ref={holder} className="room-layer">{held}</div>}
-      {!shown && <Layer shown={done} className="room-empty" style={done ? { minBlockSize: `${holderHeight}px` } : undefined}>{empty}</Layer>}
-      {shown && <div ref={data} className="room-layer">{children}</div>}
+      {!shown && <Layer shown={done} className="room-empty" style={kept}>{empty}</Layer>}
+      {shown && <div className="room-layer" style={kept}><div ref={data} className="room-data">{children}</div></div>}
     </div>
   );
 }

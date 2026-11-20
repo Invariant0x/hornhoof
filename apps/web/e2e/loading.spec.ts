@@ -125,7 +125,8 @@ const SCREENS: Screen[] = [
     answer: route => route.fulfill({ json: { cards: [], next: null } }),
     shown: (page, lang) => [page.getByRole('navigation').first(), page.locator('h1.tr-where'), page.locator('section.waiting').getByRole('heading', { name: words(lang).tasks.waiting, exact: true })],
     place: page => page.locator('section.waiting'),
-    arrived: (page, lang) => page.locator('section.waiting').getByText(words(lang).tracker.empty.waits, { exact: true }),
+    /* Its empty block is drawn unseen from the first frame, to size its room (Design #1633): it arrived once its layer shows. */
+    arrived: (page, lang) => page.locator('section.waiting .room-layer:not(.off)').getByText(words(lang).tracker.empty.waits, { exact: true }),
   },
   {
     name: 'waits-cards',
@@ -352,18 +353,35 @@ async function expectKeptRoom(page: Page, first: Locator, kept: Locator[]) {
 }
 
 test.describe('the tracker list while its tasks come', () => {
-  test('keeps its column names, its group head and its held rows past 10 s and once given up', async ({ page }) => {
+  /* Design #1633 on #1656: past 10 s and once given up, the block that says so covers the first held rows, 2 on a wide list,
+     where the ring stood, and the room keeps its height; the column names and the group head stay. */
+  test('keeps its column names, its group head and its height past 10 s and once given up, the block over its first rows', async ({ page }) => {
     await openHeld(page, SCREENS[0]!, EN);
-    const rows = page.locator('.tr-held .tr-rows > .tr-row');
-    await expectKeptRoom(page, rows.first(), [page.locator('.tr-held .tr-head'), page.locator('.tr-held .tr-group-head'), rows.nth(1)]);
+    await page.clock.runFor(RING_DELAY_MS);
+    const rows = page.locator('.tr-held .tr-rows > .tr-row:visible');
+    await expect(rows).toHaveCount(2);
+    const [first, second] = await boxesOf([rows.first(), rows.nth(1)]);
+    const room = page.locator('.tr-held-rows');
+    const [held] = await boxesOf([room]);
+    for (const [ms, block] of [[SLOW_MS - RING_DELAY_MS, '.load-fail.slow'], [FAIL_MS - SLOW_MS, '.load-fail:not(.slow)']] as const) {
+      await page.clock.runFor(ms);
+      const said = room.locator(`:scope > ${block}`);
+      await expect(said).toBeVisible();
+      const [box] = await boxesOf([said]);
+      expect(Math.abs(box!.y - first!.y)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(box!.y + box!.height - (second!.y + second!.height))).toBeLessThanOrEqual(0.5);
+      expectSameBoxes(await boxesOf([room]), [held!]);
+      for (const part of [page.locator('.tr-held .tr-head'), page.locator('.tr-held .tr-group-head')]) await expect(part).toBeVisible();
+    }
   });
 
+  /* With no count of its own a list holds the empty block's height, 2 rows on a wide list (Design #1633, amending #1611). */
   test('holds rows of the size of its rows, which its first rows take in place, with the column names and the group head at once', async ({ page }) => {
     const hold = await openHeld(page, SCREENS[0]!, EN);
     await page.clock.runFor(RING_DELAY_MS);
-    const heldRows = page.locator('.tr-held .tr-row');
+    const heldRows = page.locator('.tr-held .tr-row:visible');
     const count = await heldRows.count();
-    expect(count).toBeGreaterThan(3);
+    expect(count).toBe(2);
     const held = await boxesOf(await heldRows.all());
     for (const row of held) expect(Math.abs(row.height - 37)).toBeLessThanOrEqual(0.5);
     const heads = await boxesOf([page.locator('.tr-held .tr-group-head'), page.locator('.tr-held .tr-head')]);
@@ -385,7 +403,7 @@ test.describe('the tracker list while its tasks come', () => {
     hold.failing(false);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.clock.runFor(RING_DELAY_MS);
-    await expect(page.locator('.tr-held .tr-row')).toHaveCount(Math.min(shown, 40));
+    await expect(page.locator('.tr-held .tr-row:visible')).toHaveCount(Math.min(shown, 40));
   });
 });
 
