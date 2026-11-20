@@ -69,7 +69,12 @@ const Grants = z.object({ held: SignedGrant.nullable(), spent: z.array(z.object(
 type Grants = z.infer<typeof Grants>;
 const Out = z.object({ exit: z.number().int().min(0).max(255), output: z.string().max(30_000) });
 
-type Settings = { untilSec: number | null; until: string | null; asked: null; by: 'keeper' };
+/* stopped: closed by a keeper as it stopped while access was open, which hears no close any more. Its updater starts
+   nothing then, and lets a command already under way run on for a while, until a keeper speaks again: a command that
+   recreates the keeper, as an installer does, would otherwise end itself halfway and leave the machine's containers
+   made but never started. accessUntil: the end of the access for a time that was open then, past which no command runs
+   on; standing access has none. */
+type Settings = { untilSec: number | null; until: string | null; asked: null; by: 'keeper'; stopped?: true; accessUntil?: number };
 const CLOSED: Settings = { untilSec: null, until: null, asked: null, by: 'keeper' };
 
 /* Carries a machine's computer access between the app that leads and the machine's own updater. It asks the app for the
@@ -83,6 +88,8 @@ export class ComputerCarrier {
   private round: Promise<number> | null = null;
   private heardAt = 0;
   private wasOpen = false;
+  /* The end of the access for a time this keeper last wrote open; null for standing access and when closed. */
+  private openEnds: number | null = null;
   private prepared = false;
   /* The app said open with a grant this keeper did not take: said back to it at the next ask, once. */
   /* The grant the app gave last that opened nothing here, by its nonce; '1' for an open answer with no grant to name. */
@@ -137,12 +144,13 @@ export class ComputerCarrier {
   }
 
   /* Ends the round in flight, writes nothing of it, and leaves the machine closed: a keeper that asks no more cannot
-     hear a close. */
+     hear a close. Where access was open it says it stopped, so a command under way outlives a restart of the keeper
+     (Settings). */
   async stop(): Promise<void> {
     this.stopping.abort();
     if (this.timer) clearTimeout(this.timer);
     await this.round?.catch(() => undefined);
-    this.write(CLOSED, true);
+    this.write(this.wasOpen ? { ...CLOSED, stopped: true, ...(this.openEnds === null ? {} : { accessUntil: this.openEnds }) } : CLOSED, true);
   }
 
   private async oneRound(): Promise<number> {
@@ -304,6 +312,7 @@ export class ComputerCarrier {
         : this.openUntil(access);
       if (access && 'standing' in access && this.decided?.held) this.openUntil(null);
       this.wasOpen = until !== null;
+      this.openEnds = until !== null && !(access && 'standing' in access) ? until : null;
       this.write(until === null ? CLOSED : { untilSec: until, until: new Date(until * 1000).toISOString(), asked: null, by: 'keeper' });
       for (const id of said.data.forget) this.letGo(id);
       for (const run of said.data.runs) this.writeRun(run);
