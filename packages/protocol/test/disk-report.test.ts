@@ -6,8 +6,8 @@ const LOAD = { cpus: 8, load: 1.5, memFree: 4 * GB, memTotal: 16 * GB, tests: 0,
 const DISK = {
   total: 500 * GB,
   free: 40 * GB,
-  docker: { total: 200 * GB, free: 15 * GB },
-  parts: { images: 60 * GB, volumes: 30 * GB, buildCache: 20 * GB, workingCopies: 12 * GB, recordings: 2 * GB, checkTemp: 5 * GB },
+  docker: { total: 200 * GB, free: 15 * GB, threshold: 20 * GB },
+  parts: { images: 60 * GB, containers: 3 * GB, volumes: 30 * GB, buildCache: 20 * GB, workingCopies: 12 * GB, recordings: 2 * GB, checkTemp: 5 * GB },
   threshold: 50 * GB,
   low: { since: '2026-11-20T10:00:00.000Z' },
   cleaned: [{ part: 'checkTemp', bytes: 8 * GB, at: '2026-11-20T09:59:00.000Z' }],
@@ -15,8 +15,8 @@ const DISK = {
 const load = (more: object) => parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, ...more }));
 
 describe("a node's disk report", () => {
-  it('names the parts of the disk that are Hornhoof’s, in the order the screens show them', () => {
-    expect(DISK_PARTS).toEqual(['images', 'volumes', 'buildCache', 'workingCopies', 'recordings', 'checkTemp']);
+  it("names the parts of the disk that are Hornhoof's, in the order the screens show them", () => {
+    expect(DISK_PARTS).toEqual(['images', 'containers', 'volumes', 'buildCache', 'workingCopies', 'recordings', 'checkTemp']);
   });
 
   it('comes with the load of a newer node, in its hello and on its own', () => {
@@ -28,7 +28,7 @@ describe("a node's disk report", () => {
     expect(load({})).toEqual({ type: 'load', ...LOAD });
   });
 
-  it('leaves out the parts the node could not measure and Docker’s own disk where it has none, and says when the disk is not low', () => {
+  it("leaves out the parts the node could not measure and Docker's own disk where it has none, and says when the disk is not low", () => {
     const said = { total: DISK.total, free: DISK.free, parts: { workingCopies: 12 * GB }, threshold: DISK.threshold, low: null, cleaned: [] };
     expect(DiskReport.parse(said)).toEqual(said);
   });
@@ -42,6 +42,7 @@ describe("a node's disk report", () => {
       { ...DISK, cleaned: [{ part: 'photos', bytes: GB, at: '2026-11-20T09:59:00.000Z' }] },
       { ...DISK, cleaned: Array.from({ length: 51 }, () => DISK.cleaned[0]) },
       { ...DISK, threshold: undefined },
+      { ...DISK, docker: { total: 200 * GB, free: 15 * GB } },
       'full',
     ]) {
       expect(load({ disk: bad })).toEqual({ type: 'load', ...LOAD });
