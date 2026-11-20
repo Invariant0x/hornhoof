@@ -271,6 +271,7 @@ describe('the updater and what a machine held when it stopped holding the data',
       closeSync(fd);
     };
     sparse('over', base256(0x80, BigInt(OVER)));
+    sparse('wide-octal', Buffer.from(OVER.toString(8), 'latin1'));
     sparse('short', base256(0x80, BigInt(OVER)), OVER - 4096);
     sparse('negative', base256(0xff, BigInt(OVER)));
     sparse('flagged', base256(0x81, BigInt(OVER)));
@@ -285,12 +286,28 @@ describe('the updater and what a machine held when it stopped holding the data',
       `#!/bin/sh\nfor a in "$@"; do n=\${a#+}; case "$n" in *[!0-9]* | '') ;; *) [ "$n" -lt 4294967296 ] || { echo "tail: invalid number '$a'" >&2; exit 1; } ;; esac; done\nexec ${TAIL} "$@"\n`,
       { mode: 0o755 },
     );
+    const TR = spawnSync('sh', ['-c', 'command -v tr'], { encoding: 'utf8' }).stdout.trim();
+    writeFileSync(
+      join(tools, 'tr'),
+      [
+        '#!/bin/sh',
+        'if [ "${STUB_PADDING_FILTER:-}" = fail ] && [ "$#" -eq 2 ] && [ "$1" = -d ] && [ "$2" = "\\000" ]; then exit 1; fi',
+        `exec "${TR}" "$@"`,
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
     const r = await runUpdaterStep(
       s,
-      `for f in over short negative flagged huge trailing octal; do e=0; m=$(tar_members "${s.dir}/$f.tar") || e=$?; printf '%s %s %s\\n' "$f" "$e" "$m"; done`,
+      `for f in over wide-octal short negative flagged huge trailing octal; do e=0; m=$(tar_members "${s.dir}/$f.tar") || e=$?; printf '%s %s %s\\n' "$f" "$e" "$m"; done
+       e=0; m=$(STUB_PADDING_FILTER=fail tar_members "${s.dir}/over.tar") || e=$?; printf 'padding-filter %s %s\\n' "$e" "$m"`,
       { PATH: `${tools}:${dirname(fileURLToPath(new URL('./updater-stubs/docker', import.meta.url)))}:${dirname(JQ)}:/usr/bin:/bin` },
     );
-    expect(r.out.split('\n').filter(Boolean)).toEqual(['over 0 file public.tasks.csv', 'short 1 ', 'negative 1 ', 'flagged 1 ', 'huge 1 ', 'trailing 1 file public.tasks.csv', 'octal 1 file public.tasks.csv']);
+    expect(r.out.split('\n').filter(Boolean)).toEqual([
+      'over 0 file public.tasks.csv', 'wide-octal 0 file public.tasks.csv',
+      'short 1 ', 'negative 1 ', 'flagged 1 ', 'huge 1 ',
+      'trailing 1 file public.tasks.csv', 'octal 1 file public.tasks.csv', 'padding-filter 1 file public.tasks.csv',
+    ]);
   });
 
   /* Where the limit is: the headers of a thousand files are read, and none of one more is decoded. */

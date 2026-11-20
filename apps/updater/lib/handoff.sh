@@ -264,15 +264,16 @@ upload_request() {
 # members than UPLOAD_MOST, read no further, as each header costs a command.
 UPLOAD_MOST=1000
 tar_members() {
-  local archive=$1 total at=0 count=0 head name size octal kind i pair ch left number byte
+  local archive=$1 total at=0 count=0 head padding name size octal kind i pair ch left number byte
   total=$(wc -c < "$archive") || return 1
   while [ "$at" -lt "$total" ]; do
     [ "$((total - at))" -ge 512 ] || return 1
     head=$(od -An -v -tx1 -j "$at" -N 512 -- "$archive" | tr -d ' \n') && [ "${#head}" = 1024 ] || return 1
     if [ "${head:0:2}" = 00 ]; then
-      # A block with no name ends the archive; BusyBox tar reads on past one such block, so only zeros may follow. They
-      # are counted from the end: BusyBox tail takes no offset of 4 GiB or more, and a tail that fails fails the archive.
-      [ "$({ tail -c "$((total - at))" -- "$archive" 2> /dev/null || printf x; } | tr -d '\000' | head -c 1 | wc -c)" -eq 0 ] || return 1
+      # BusyBox tar can read past one end block. Read from that block with dd, whose seek supports large files.
+      # Require the whole check to succeed and produce no nonzero byte.
+      padding=$(dd if="$archive" bs=512 skip="$((at / 512))" 2> /dev/null | tr -d '\000' | head -c 1 | wc -c) || return 1
+      [ "$padding" -eq 0 ] || return 1
       return 0
     fi
     count=$((count + 1))
