@@ -19,6 +19,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - On a page right to left, the map's zoom and Put back stand at the right, mirrored as the rest of the layout is.
 - A plan with separate limits for groups of models, as Antigravity's Gemini and its Claude and GPT models, keeps each group's limits: a used-up group holds only the turns and fallbacks on its own models, and the plan's card shows every group with what it used and when it resets.
 - In a page that reads right to left, an English line of a bar over the map ends with its full stop instead of starting with it, and the bar stays mirrored.
+- A number on a plan's card stays on one line with its unit or the word it goes with, as "14 h", "1 online" or "Input 0", in every language; a reset still wraps between its parts.
 
 ### Changed
 

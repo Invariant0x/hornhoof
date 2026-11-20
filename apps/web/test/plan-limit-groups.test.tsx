@@ -37,7 +37,7 @@ describe('a plan that keeps its limits by model group', () => {
     for (const [group, shares] of [['Gemini Models', ['0%', '6%']], ['Claude and GPT models', ['100%', '100%']]] as const) {
       const part = within(card).getByRole('heading', { name: `Limits: ${group}` }).closest('section')!;
       const gauges = [...part.querySelectorAll('.gauge')];
-      expect(gauges.map(g => g.querySelector('.g-l')!.textContent)).toEqual(['5 hours', '7 days']);
+      expect(gauges.map(g => g.querySelector('.g-l')!.textContent)).toEqual(['5\u00a0hours', '7\u00a0days']);
       expect(gauges.map(g => g.querySelector('.g-f b')!.textContent)).toEqual(shares);
       for (const g of gauges) expect(g.querySelector('.g-s')!.textContent).toMatch(/^resets in /);
     }
