@@ -264,14 +264,15 @@ upload_request() {
 # members than UPLOAD_MOST, read no further, as each header costs a command.
 UPLOAD_MOST=1000
 tar_members() {
-  local archive=$1 total at=0 count=0 head name size octal kind i pair ch
+  local archive=$1 total at=0 count=0 head name size octal kind i pair ch left number byte
   total=$(wc -c < "$archive") || return 1
   while [ "$at" -lt "$total" ]; do
     [ "$((total - at))" -ge 512 ] || return 1
     head=$(od -An -v -tx1 -j "$at" -N 512 -- "$archive" | tr -d ' \n') && [ "${#head}" = 1024 ] || return 1
     if [ "${head:0:2}" = 00 ]; then
-      # A block with no name ends the archive; BusyBox tar reads on past one such block, so only zeros may follow.
-      [ "$(tail -c "+$((at + 1))" -- "$archive" | tr -d '\000' | head -c 1 | wc -c)" -eq 0 ] || return 1
+      # A block with no name ends the archive; BusyBox tar reads on past one such block, so only zeros may follow. They
+      # are counted from the end: BusyBox tail takes no offset of 4 GiB or more, and a tail that fails fails the archive.
+      [ "$({ tail -c "$((total - at))" -- "$archive" 2> /dev/null || printf x; } | tr -d '\000' | head -c 1 | wc -c)" -eq 0 ] || return 1
       return 0
     fi
     count=$((count + 1))
@@ -287,13 +288,27 @@ tar_members() {
       printf -v ch '%b' "\\x$pair"
       name+=$ch
     done
-    # The size, in octal digits and nothing else before the spaces or zeros that end the field.
+    # The size, in octal digits and nothing else before the spaces or zeros that end the field. From 8 GiB, GNU and
+    # BusyBox tar write it in base-256 instead: the byte 0x80, then the number in the eleven bytes after it. That number
+    # is read only while it is no more than what follows the header, so it can neither run over nor overflow.
     size=${head:248:24}
-    while [ "${size: -2}" = 00 ] || [ "${size: -2}" = 20 ]; do size=${size%??}; done
-    [[ "$size" =~ ^(3[0-7])+$ ]] || return 1
-    octal=''
-    for ((i = 1; i < ${#size}; i += 2)); do octal+=${size:i:1}; done
-    size=$((8#$octal))
+    if [ "${size:0:2}" = 80 ]; then
+      left=$((total - at - 512))
+      number=0
+      for ((i = 2; i < 24; i += 2)); do
+        byte=$((16#${size:i:2}))
+        [ "$number" -le "$(((left - byte) / 256))" ] || return 1
+        number=$((number * 256 + byte))
+        [ "$number" -le "$left" ] || return 1
+      done
+      size=$number
+    else
+      while [ "${size: -2}" = 00 ] || [ "${size: -2}" = 20 ]; do size=${size%??}; done
+      [[ "$size" =~ ^(3[0-7])+$ ]] || return 1
+      octal=''
+      for ((i = 1; i < ${#size}; i += 2)); do octal+=${size:i:1}; done
+      size=$((8#$octal))
+    fi
     # Type 0, no name of a link, and no prefix for the name.
     kind=other
     if [ "${head:312:2}" = 30 ] && [[ "${head:314:200}${head:690:310}" =~ ^(00)+$ ]]; then kind='file'; fi

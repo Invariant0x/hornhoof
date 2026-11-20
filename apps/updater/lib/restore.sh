@@ -299,8 +299,8 @@ restore_run() {
   restore_stop
   # The copy of the dump goes as soon as it is loaded, or could not be: it is kept through no later step.
   load_copy "$DBC" "$WORK/restore.sql.gz" || status=$?
-  # Never a stop here, with the company down: rm -rf of the folder at the end takes a copy this could not.
-  rm -f -- "$WORK/restore.sql.gz" || true
+  # Never a stop here, with the company down: the removal of the folder at the end takes a copy this could not.
+  rm -f -- "$WORK/restore.sql.gz" || say "Could not remove the updater's copy of the backup yet; it goes with its folder."
   if [ "$status" -ne 0 ]; then
     restore_undo 'The backup did not load, so nothing changed.' load
     return 0
@@ -348,6 +348,7 @@ restore_request() {
   [ -n "$DBC" ] || return 0
   WORK=$(mktemp -d)
   restore_run "$carry"
-  rm -rf "$WORK"
+  # The restore has ended, done or undone, either way: a folder of the updater's own that will not go stops nothing.
+  rm -rf -- "${WORK:?}" || say "Could not remove the updater's copy of the backup, in $WORK."
   WORK=''
 }
