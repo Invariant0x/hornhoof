@@ -799,12 +799,12 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   };
 
   /* Show everything when whole; otherwise as the map opens, readable. */
-  const fit = useCallback((whole: boolean, smooth = true) => {
+  const fit = useCallback((whole: boolean) => {
     const shown = arrRef.current, room = roomOf(FIT_SIDE);
     if (!room || !org || !shown || inside) return;
     const v = mapView(room, arrangedBounds(shown, org), whole);
     setMinZoom(Math.min(MIN_K, v.k));
-    setView({ ...v, smooth });
+    setView({ ...v, smooth: true });
   }, [org, inside, setView, roomOf]);
   const fitRef = useRef(fit);
   fitRef.current = fit;
@@ -824,13 +824,11 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const roomStyle = useMapRoom(box, `${shown}|${windowOpen}|${putBack}`);
   const cardH = arr?.depts[0]?.h ?? 0, chipH = `${arr?.top[0]?.h ?? 0}:${arr?.people.chips[0]?.h ?? 0}`;
   usePauseHiddenMap(box, inside, shown);
-  /* Before the first frame, so the map is drawn where it stands; it moves there only after that. */
-  const placedOnce = useRef(false);
+  /* Before the first frame, so the map is first drawn where it stands and does not move there. */
   useLayoutEffect(() => {
     if (!shown || inside) return;
     const auto = () => {
-      if (!mine() && !back.current) fitRef.current(false, placedOnce.current);
-      placedOnce.current = true;
+      if (!mine() && !back.current) fitRef.current(false);
     };
     auto();
     const el = box.current;
