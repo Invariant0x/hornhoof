@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { NodeMessage } from '@hornhoof/protocol';
 import { SIGNIN_ERRORS, SIGNIN_STEPS, type SigninStep } from '@hornhoof/protocol/signin';
 import { hideKeyLike } from './redact.js';
-import type { ProviderAdapter } from './runner.js';
+import type { LoginIo, ProviderAdapter } from './runner.js';
 
 /* Where a sign-in in the install window leaves its steps for the running node, one JSON line each. */
 export const LOGIN_STEPS_FILE = 'login-steps';
@@ -14,6 +14,9 @@ const LINE_MAX = 400;
 const seconds = (ms: number) => Math.round(ms / 1000);
 
 type ProgressOptions = { send(m: NodeMessage): void; log(line: string): void };
+
+/* Where a sign-in is after its code, said to whoever listens. */
+export const sayStep = (io: LoginIo, step: SigninStep): void => io.step?.(step);
 
 /* Reads what a plan can do once its program signed in, saying each step. */
 export type ReadPlan = (step: (s: SigninStep) => void) => Promise<void>;
