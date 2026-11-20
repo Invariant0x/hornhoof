@@ -12,6 +12,7 @@ import { DepartmentMark, ExecutorMark, PersonMark } from './TrackerMarks';
 import { WorkerMark } from './WorkerMark';
 import { QuestionButton, STATE_CLASS, StateWord, WaitLine } from './TaskActivity';
 import { GOAL_CLASS, goalProgress } from './GoalPanel';
+import { EmptyState } from './EmptyState';
 import { Idle, LoadLine, MAX_HELD_ROWS, type Load } from './Loading';
 
 /* How a view opens a task's card and marks the open one. asksYou: an open question on a task is the person's to answer. */
@@ -208,7 +209,8 @@ export function HeldList({ rows, load }: { rows: number | null; load: Load }) {
   );
 }
 
-export function TrackerList({ tasks, all, rows, empty, showSubtasks = true }: { tasks: TaskLine[]; all: TaskLine[]; rows: Rows; empty: string; showSubtasks?: boolean }) {
+/* empty: what the list says once it came and holds nothing, its empty block. */
+export function TrackerList({ tasks, all, rows, empty, showSubtasks = true }: { tasks: TaskLine[]; all: TaskLine[]; rows: Rows; empty: ReactNode; showSubtasks?: boolean }) {
   const t = useT();
   const groups = listGroups(tasks, rows.asksYou, all);
   const relations = relationsOf(all);
@@ -218,7 +220,7 @@ export function TrackerList({ tasks, all, rows, empty, showSubtasks = true }: { 
         <div className="tr-list-grid">
           {groups.map((group, i) => <Group key={group.status} group={group} rows={rows} relations={relations} showSubtasks={showSubtasks} head={i === 0} />)}
         </div>
-      ) : <p className="muted">{empty}</p>}
+      ) : empty}
     </section>
   );
 }
@@ -334,7 +336,7 @@ function GoalRow({ tree, onOpenGoal, depth = 0 }: { tree: GoalTree; onOpenGoal: 
 
 /* The goals page: the goals given as the list's rows, the smaller ones under the goal they are part of, grouped by their
    state under the same pills, the names of the columns under the first pill. */
-export function TrackerGoals({ goals, label, empty, onOpenGoal }: { goals: GoalView[]; label: string; empty: string; onOpenGoal: (id: string) => void }) {
+export function TrackerGoals({ goals, label, empty, onOpenGoal }: { goals: GoalView[]; label: string; empty: ReactNode; onOpenGoal: (id: string) => void }) {
   const t = useT();
   const words = t.tracker.list;
   const ids = new Set(goals.map(g => g.id));
@@ -365,7 +367,7 @@ export function TrackerGoals({ goals, label, empty, onOpenGoal }: { goals: GoalV
             );
           })}
         </div>
-      ) : <p className="muted">{empty}</p>}
+      ) : empty}
     </section>
   );
 }
@@ -511,7 +513,7 @@ function Canvas({ forest, rows, onOpenGoal }: { forest: GraphNode[]; rows: Rows;
     e.preventDefault();
     e.stopPropagation();
   };
-  if (!layout.nodes.length) return <p className="muted">{t.tracker.graph.empty}</p>;
+  if (!layout.nodes.length) return <EmptyState picture="branch" text={t.tracker.graph.empty} />;
   const right = Math.max(...layout.nodes.map(p => p.x + NODE.w));
   const width = Math.max(layout.width, layout.waits.length ? right + LANE.first + layout.waits.length * LANE.step + LANE.room : 0);
   const arrow = `tr-arrow-${marker.replace(/[^A-Za-z0-9_-]/g, '')}`;

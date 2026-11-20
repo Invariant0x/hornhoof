@@ -2092,6 +2092,12 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-main > :not(.tr-top, .tr-bar) { inline-size: auto; margin: 6px 20px 0; }
 /* What waits stands apart from the list or the search results above it, so its heading does not sit on their last line. */
 .tr-main > :is(.tr-hold, .tr-found) + .waiting { margin-block-start: 24px; }
+/* A section that holds nothing (ui/EmptyState.tsx, #1638): apart from the filters or the heading above it, its picture, its
+   words and the one thing to do, in the middle of its room. Its look is its own classes; Design #1633 sets the final one. */
+.empty-state { display: grid; justify-items: center; gap: 8px; margin-block-start: 24px; padding: 24px 16px; text-align: center; }
+.empty-state-art { display: grid; place-items: center; color: var(--muted); }
+.empty-state-art > .ic { width: 32px; height: 32px; }
+.empty-state-text { margin: 0; max-inline-size: 48ch; color: var(--muted); overflow-wrap: anywhere; }
 .tr-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-inline-size: 0; padding: 10px 20px; border-block-end: 1px solid var(--line); }
 .tr-menu { display: none; }
 .tr-where { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-inline-size: 0; margin: 0; font: 600 16px var(--f-display); overflow-wrap: anywhere; }

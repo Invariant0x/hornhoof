@@ -5,6 +5,7 @@ import { ALL_DEPARTMENTS, byRelease, inDepartment, NO_DEPARTMENT, type Preparing
 import type { TaskDepartments, TaskLine, TurnView } from '../types';
 import { Backlog } from './Backlog';
 import { Field } from './Field';
+import { EmptyState } from './EmptyState';
 import { Busy, Hold, useLoad, type LoadPart } from './Loading';
 import { BoardSection, Fold, GoalRows, Progress, SplitGoals, type CardRows } from './TaskBoard';
 
@@ -124,7 +125,7 @@ function Releases({ tasks, turns, rows, department, places }: { tasks: TaskLine[
         </>
       ) : (
         <>
-          {!preparing.length && !released.length && <p className="muted" dir="auto">{t.tasks.board.nothingYet}</p>}
+          {!preparing.length && !released.length && <EmptyState picture="pipeline" text={t.tasks.board.nothingYet} />}
           {preparing.map(next => <NextRelease key={next.turn.id} next={next} rows={rows} />)}
           {released.length > 0 && (
             <BoardSection heading={t.tasks.board.closedReleases}>

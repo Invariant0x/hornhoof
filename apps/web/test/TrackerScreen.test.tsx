@@ -1079,3 +1079,102 @@ describe('what waits says that nothing waits only once all of it came', () => {
     expect(decl('.tr-main > :is(.tr-hold, .tr-found) + .waiting', 'margin-block-start')).toBe('24px');
   });
 });
+
+/* Ivan's word (20.11, #1638): on Mine, "No open tasks to answer for." stood right under the filters, and the rest of the
+   page was a bare line. Every section of the tracker that holds nothing says so in one empty block of its own, with its
+   picture, its words and, where the person can do something about it, the one thing to do; it stands apart from what is
+   above it by a gap of the style book, and it shows only once every source of its section came. */
+describe('a section of the tracker that holds nothing', () => {
+  const NONE = {
+    'GET /api/tasks?status=all': [200, { tasks: [] }],
+    'GET /api/goals': [200, { goals: [] }],
+    'GET /api/turns': [200, { turns: [] }],
+    'GET /api/wait-cards': [200, { cards: [], next: null }],
+  };
+  const blockOf = async (text: string) => (await screen.findByText(text)).closest<HTMLElement>('.empty-state');
+
+  it.each([
+    ['Mine', '/tasks', en.tracker.noMine],
+    ['Working now', '/tasks?show=working', en.tracker.nothingWorking],
+    ['a department', '/tasks?department=d2', en.tracker.noTasks],
+    ['the whole company', '/tasks?show=company', en.tracker.noTasks],
+    ['Failures', '/tasks?show=failures', en.tracker.noTasks],
+    ['a graph', '/tasks?department=d2&view=graph', en.tracker.graph.empty],
+    ['the goals', '/tasks?show=goals', en.tracker.noGoals],
+    ['Waiting for you', '/tasks?show=waits', en.tasks.nothingWaiting],
+    ['Waiting for people', '/tasks?show=people', en.tracker.peopleWaits.nothing],
+    ['Due dates', '/tasks?show=due', en.tracker.noDates],
+    ['Turns', '/tasks?show=turns', en.tasks.board.nothingYet],
+  ])('%s says so in its empty block, with its picture', async (_section, path, text) => {
+    shell(path, NONE);
+    const block = await blockOf(text);
+    expect(block).not.toBeNull();
+    expect(block!.querySelector('.empty-state-art > svg')).not.toBeNull();
+    expect(block!.querySelector('.empty-state-text')).toHaveTextContent(text);
+  });
+
+  it('says a search found nothing in its empty block', async () => {
+    const user = userEvent.setup();
+    shell('/tasks?department=d2', NONE);
+    await user.type(await screen.findByRole('searchbox', { name: 'Search tasks' }), 'zebra');
+    expect(await blockOf(en.tasks.noSearchResults)).not.toBeNull();
+  });
+
+  it('offers to make a task from an empty list where the person may plan, and opens its form', async () => {
+    const user = userEvent.setup();
+    shell('/tasks?department=d2', NONE);
+    const block = (await blockOf(en.tracker.noTasks))!;
+    await user.click(within(block).getByRole('button', { name: en.tracker.actions.newTask }));
+    expect(await screen.findByLabelText('Title')).toBeInTheDocument();
+    expect(screen.getByText('Dana, the head, gets it and splits it among the department.')).toBeInTheDocument();
+  });
+
+  it('offers to set a goal from an empty list of goals where the person may plan', async () => {
+    const user = userEvent.setup();
+    shell('/tasks?show=goals', NONE);
+    const block = (await blockOf(en.tracker.noGoals))!;
+    await user.click(within(block).getByRole('button', { name: en.tracker.actions.newGoal }));
+    expect(await screen.findByRole('form', { name: en.tracker.form.newGoal })).toBeInTheDocument();
+  });
+
+  it('offers nothing to do where the person may not plan', async () => {
+    shell('/tasks?department=d2', { ...NONE, 'GET /api/task-departments': [200, { whole: true, mayPlanCompany: false, departments: [{ id: 'd2', name: null, templateKey: 'development', mine: true, mayPlan: false, responsible: MARIA }] }] });
+    const block = (await blockOf(en.tracker.noTasks))!;
+    expect(within(block).queryByRole('button')).toBeNull();
+  });
+
+  it('stands apart from the filters or the heading above it by a gap of the style book', () => {
+    expect(decl('.empty-state', 'margin-block-start')).toBe('24px');
+  });
+
+  /* The page's sources answer at once, but the held one waits until the test lets it go. */
+  function holding(source: string, routes: Record<string, [number, unknown]>) {
+    let open: () => void = () => {};
+    const opened = new Promise<void>(go => { open = go; });
+    const held = { ...routes, [source]: async () => { await opened; return routes[source]!; } };
+    return { routes: held, open: () => act(async () => { open(); await opened; }) };
+  }
+  const settle = () => act(async () => { await new Promise(go => setTimeout(go, 50)); });
+
+  it('of a goal says it has no tasks only once the goals came, since they say which tasks serve it', async () => {
+    const hold = holding('GET /api/goals', { ...NONE, 'GET /api/tasks?status=all': [200, { tasks: TASKS }], 'GET /api/goals': [200, { goals: [COMPANY_GOAL, DEPT_GOAL] }] });
+    shell('/tasks?goal=g2', hold.routes);
+    await main();
+    await settle();
+    expect(screen.queryByText(en.tracker.noTasks)).toBeNull();
+    expect(document.querySelector('.empty-state')).toBeNull();
+    await hold.open();
+    expect(rowOf(await main(), '#21 Take card payments')).toBeInTheDocument();
+    expect(screen.queryByText(en.tracker.noTasks)).toBeNull();
+  });
+
+  it('as a graph says there is nothing to draw only once the goals came', async () => {
+    const hold = holding('GET /api/goals', NONE);
+    shell('/tasks?department=d2&view=graph', hold.routes);
+    await main();
+    await settle();
+    expect(screen.queryByText(en.tracker.graph.empty)).toBeNull();
+    await hold.open();
+    expect(await blockOf(en.tracker.graph.empty)).not.toBeNull();
+  });
+});
