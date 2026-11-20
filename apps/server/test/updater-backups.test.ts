@@ -3,7 +3,7 @@ import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, sta
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { ask, at, JQ, runOnce, stand, type Stand } from './updater-fixture.js';
+import { ask, at, JQ, runOnce, stand, stubbed, type Stand } from './updater-fixture.js';
 
 const ID = '0f0f0f0f-0000-4000-8000-00000000000a';
 const dumps = (s: Stand) => join(s.control, 'dumps');
@@ -159,6 +159,26 @@ describe('updater, backups', () => {
     expect(r.out).toContain('Deleted a database dump that was not sealed within a day.');
     /* A machine with no such folder is left alone. */
     expect((await runOnce(stand(), null)).out).not.toContain('Deleted a database dump');
+  });
+
+  /* The app can swap a folder in dumps for a link at any moment, also while the sweep runs, here right before rm does.
+     The sweep deletes old files of dumps itself only, by their names there, so it never deletes through such a link. */
+  it('deletes nothing through a folder of dumps swapped for a link', async () => {
+    const s = stand();
+    const outside = join(s.dir, 'outside');
+    const sub = join(dumps(s), 'sub');
+    const old = new Date(Date.now() - 25 * 3_600_000);
+    mkdirSync(outside);
+    mkdirSync(sub, { recursive: true });
+    for (const file of [join(dumps(s), 'old.sql.gz'), ...[outside, sub].flatMap(dir => ['a.sql.gz', 'b.sql.gz'].map(name => join(dir, name)))]) {
+      writeFileSync(file, 'x');
+      utimesSync(file, old, old);
+    }
+    const r = await runOnce(s, null, { ...stubbed(s, 'rm', 'rm-swap'), RM_SWAP: `${sub}=${outside}` });
+    expect(r.code, r.out).toBe(0);
+    expect(readdirSync(outside).sort()).toEqual(['a.sql.gz', 'b.sql.gz']);
+    expect(existsSync(join(dumps(s), 'old.sql.gz'))).toBe(false);
+    expect(r.out).toContain('Deleted a database dump that was not sealed within a day.');
   });
 
   it('takes no name for a dump but a plain one, and dumps nothing on a machine with no database', async () => {
