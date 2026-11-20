@@ -780,3 +780,58 @@ for (const look of LOOKS.filter(l => l.width === 375)) {
     expect.soft(errors).toEqual([]);
   });
 }
+
+/* Design on #1597, by decision 2 of #1596: a wide screen's map that fits at a readable size, its card names 11 px tall or
+   more, opens as Show everything shows it, fitted and centred on the whole layout, with no card past an edge, and never
+   larger than 100%. A map that fits only smaller opens readable with the hub itself in the middle across, left to right and
+   right to left alike. */
+const ALONE = (org: Org): Org => ({ ...org, people: [], departments: [{ ...org.departments[2]!, people: [] }] });
+/* Too tall to fit readable: a stack of people docked beside the second card, on the hub's right, makes every card as tall
+   as it, so the hub stands off the middle of the whole layout. */
+const STACKED = (org: Org): Org => ({
+  ...org,
+  departments: org.departments.map((d, i) => (i === 1 ? { ...d, people: Array.from({ length: 20 }, (_, n) => ({ ...d.people[0]!, id: `n${n + 10}`, name: `${d.people[0]!.name} ${n + 1}` })) } : d)),
+});
+for (const look of LOOKS.filter(l => l.width === 1440 && (l.script === 'en' || l.script === 'rtl'))) {
+  const name = `${look.script}-${look.dir}-${look.width}`;
+  const opened = (page: Page) => page.evaluate(() => {
+    const world = document.querySelector<HTMLElement>('.map .world')!, at = world.getBoundingClientRect();
+    const hub = document.querySelector('.map .hub-art')!.getBoundingClientRect(), room = document.querySelector('.map .map-room')!.getBoundingClientRect();
+    const names = [...document.querySelectorAll('.map .dept .dname')].map(el => parseFloat(getComputedStyle(el).fontSize));
+    const k = at.width / world.offsetWidth;
+    return { k, x: at.left, y: at.top, across: hub.left + hub.width / 2 - (room.left + room.width / 2), name: Math.min(...names) * k };
+  });
+  for (const [what, company, cards] of [['fits', (org: Org) => org, 4], ['small', ALONE, 1], ['tall', STACKED, 4]] as const) {
+    test(`the map on a wide screen opens fitted when it fits readable, else readable on the hub: ${what}, ${look.script}, ${look.dir}`, async ({ page, browserName }, info) => {
+      const errors: string[] = [];
+      page.on('pageerror', e => errors.push(e.message));
+      await page.setViewportSize({ width: look.width, height: 900 });
+      await page.addInitScript(({ lang, dir }) => {
+        localStorage.setItem('hh-lang', lang);
+        document.addEventListener('DOMContentLoaded', () => { document.documentElement.dir = dir; });
+      }, look);
+      await serve(page, company(wholeTextOrg(look.script)));
+      await page.goto('/');
+      await expect(page.locator('.map .dept')).toHaveCount(cards);
+      await page.evaluate(d => { document.documentElement.dir = d; }, look.dir);
+      await settle(page);
+      await shoot(page, info, `wide-map-${what}-open-${browserName}-${name}`);
+      const open = await opened(page), whole = (await inView(page, 'map')).whole.length;
+      expect.soft(open.name, 'the map opens with card names at least 11 px tall').toBeGreaterThanOrEqual(10.99);
+      expect.soft(open.k, 'the map opens no larger than 100%').toBeLessThanOrEqual(1);
+      if (what === 'small') expect.soft(open.k, 'a small map opens at 100%').toBe(1);
+      await page.locator('.map .zoom').getByRole('button', { name: look.lang === 'en' ? 'Show everything' : 'Показать все' }).click();
+      await settle(page);
+      const all = await opened(page);
+      if (what === 'tall') {
+        expect.soft(Math.abs(open.across), `the map opens centred across on the hub, ${open.across.toFixed(1)} px off`).toBeLessThanOrEqual(1);
+        expect.soft(all.k, 'Show everything goes further out than the map opens').toBeLessThan(open.k);
+      } else {
+        expect.soft(Math.abs(all.k - open.k), 'the map opens at the size Show everything shows it').toBeLessThanOrEqual(1e-3);
+        expect.soft(Math.max(Math.abs(all.x - open.x), Math.abs(all.y - open.y)), 'the map opens where Show everything shows it').toBeLessThanOrEqual(1);
+        expect.soft(whole, 'the map opens with every card and chip whole').toBe(await page.locator(BLOCKS.map).count());
+      }
+      expect.soft(errors).toEqual([]);
+    });
+  }
+}

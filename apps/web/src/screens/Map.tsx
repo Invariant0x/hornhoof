@@ -637,15 +637,19 @@ function useMapRoom(box: { current: HTMLDivElement | null }, bars: string): CSSP
   return room ? ({ '--map-top': `${room.top}px`, '--map-bottom': `${room.bottom}px` } as CSSProperties) : undefined;
 }
 
-/* Where the map stands in the free room of its canvas, b its bounds in the world: whole, as large as it fits up to 115%,
-   when Show everything asks for it or when it fits so at a readable size; otherwise readable and centred across on the
-   middle of the company, the hub, from its top when it is taller than the room. readable: the least zoom that is readable. */
-export function mapView(room: Box, b: Box, whole: boolean, readable = MAP_READABLE_K): { k: number; x: number; y: number } {
+/* Design on #1597: a map that fits opens no larger than it is drawn, and Show everything shows it so too. */
+export const OPEN_MAX_K = 1, WHOLE_MAX_K = 1;
+
+/* Where the map stands in the free room of its canvas, b its bounds in the world and hub the middle of its hub across.
+   Whole, as large as it fits up to its cap and centred on the whole layout, when Show everything asks for it or when it fits
+   so at a readable size; otherwise readable with the hub in the middle across (Design's decision 2 on #1596, for #1597), from
+   its top when it is taller than the room. readable: the least zoom that is readable. */
+export function mapView(room: Box, b: Box, whole: boolean, readable = MAP_READABLE_K, hub = (b.x0 + b.x1) / 2): { k: number; x: number; y: number } {
   const w = Math.max(1, room.x1 - room.x0), h = Math.max(1, room.y1 - room.y0), bw = b.x1 - b.x0, bh = b.y1 - b.y0;
-  const fitK = Math.min(w / bw, h / bh, 1.15);
-  const k = whole ? fitK : Math.max(fitK, readable);
+  const fitK = Math.min(w / bw, h / bh, whole ? WHOLE_MAX_K : OPEN_MAX_K);
+  const fits = whole || fitK >= readable, k = fits ? fitK : readable;
   const y = bh * k <= h + 0.5 ? room.y0 + (h - bh * k) / 2 - b.y0 * k : room.y0 - b.y0 * k;
-  return { k, x: room.x0 + (w - bw * k) / 2 - b.x0 * k, y };
+  return { k, x: room.x0 + w / 2 - (fits ? (b.x0 + b.x1) / 2 : hub) * k, y };
 }
 
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
@@ -787,7 +791,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     const shown = arrRef.current, room = roomOf(FIT_SIDE);
     if (!room || !org || !shown || inside) return;
     const phone = box.current!.clientWidth <= CANVAS_NARROW;
-    const v = mapView(room, arrangedBounds(shown, org), whole, phone ? PHONE_MAP_READABLE_K : MAP_READABLE_K);
+    const v = mapView(room, arrangedBounds(shown, org), whole, phone ? PHONE_MAP_READABLE_K : MAP_READABLE_K, shown.hub.x + HUB);
     setMinZoom(Math.min(MIN_K, v.k));
     setView({ ...v, smooth: true });
   }, [org, inside, setView, roomOf]);
