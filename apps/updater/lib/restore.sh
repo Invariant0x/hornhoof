@@ -33,9 +33,13 @@ number_in_use() { psql_on postgres -tAc "SELECT oid FROM pg_database WHERE datna
 # restored database is, as the order has it; the app marks the restore by it once the order is gone.
 restore_says() {
   printf '%s\n' "$3"
-  jq -n --arg attempt "$R_ATTEMPT" --arg id "$R_ID" --arg state "$1" --arg step "$2" --arg line "$3" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg kept "${4:-}" --arg dumped "$R_DUMPED" \
-    '{attempt: $attempt, id: $id, state: $state, step: $step, line: $line, at: $at, kept: (if $kept == "" then null else $kept end)} + (if $dumped == "" then {} else {dumpedAt: $dumped} end)' > "$CONTROL/restore-status.json.new"
-  mv "$CONTROL/restore-status.json.new" "$CONTROL/restore-status.json"
+  # shellcheck disable=SC2016 # the dollars are jq's own
+  publish "$CONTROL/restore-status.json" over jq -n --arg attempt "$R_ATTEMPT" --arg id "$R_ID" --arg state "$1" --arg step "$2" --arg line "$3" \
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg kept "${4:-}" --arg dumped "$R_DUMPED" \
+    '{attempt: $attempt, id: $id, state: $state, step: $step, line: $line, at: $at, kept: (if $kept == "" then null else $kept end)} + (if $dumped == "" then {} else {dumpedAt: $dumped} end)' || {
+    printf '%s\n' 'Could not write restore-status.json in the control folder.' >&2
+    return 1
+  }
 }
 
 # restore_ended <state> <step> <line> [kept]: the last word of a restore; its order and its journal go.
@@ -47,12 +51,13 @@ restore_ended() {
 # journal <change>: the last change a restore made, written whole and then moved, so a start after any stop knows what
 # to put back.
 journal() {
-  jq -n --arg attempt "$R_ATTEMPT" --arg id "$R_ID" --arg dumped "$R_DUMPED" --arg stamp "$R_STAMP" --arg old "$R_OLD" --arg did "$1" \
-    '{attempt: $attempt, id: $id, dumpedAt: $dumped, stamp: $stamp, old: $old, did: $did}' > "$CONTROL/restore-journal.json.new" && mv "$CONTROL/restore-journal.json.new" "$CONTROL/restore-journal.json"
+  # shellcheck disable=SC2016 # the dollars are jq's own
+  publish "$CONTROL/restore-journal.json" over jq -n --arg attempt "$R_ATTEMPT" --arg id "$R_ID" --arg dumped "$R_DUMPED" --arg stamp "$R_STAMP" --arg old "$R_OLD" --arg did "$1" \
+    '{attempt: $attempt, id: $id, dumpedAt: $dumped, stamp: $stamp, old: $old, did: $did}'
 }
 
 # The dump and the settings a restore was given in the clear go in every outcome.
-restore_wipe() { rm -f "$CONTROL/restore/$R_ATTEMPT.sql.gz" "$CONTROL/restore/$R_ATTEMPT.env.json"; }
+restore_wipe() { remove_in "$CONTROL/restore" "$R_ATTEMPT.sql.gz" "$R_ATTEMPT.env.json"; }
 
 # The app and the node stop, so nothing writes while the databases change places.
 restore_stop() {
@@ -120,8 +125,11 @@ cutover() {
 
 # keep_carry <out>: who may get in now, for the keeper to put into the restored database, and for it alone to read.
 keep_carry() {
-  local file="$CONTROL/restore-carry.json"
-  (umask 077 && sed -n 2p "$1" | jq -ce --arg attempt "$R_ATTEMPT" 'select(type == "object") | {attempt: $attempt, carry: .}' > "$file.new") && owned "$file.new" 600 && mv "$file.new" "$file"
+  publish "$CONTROL/restore-carry.json" keeper carry_of "$1"
+}
+
+carry_of() {
+  sed -n 2p "$1" | jq -ce --arg attempt "$R_ATTEMPT" 'select(type == "object") | {attempt: $attempt, carry: .}'
 }
 
 # adopt <term> <machine> <cluster>: the loaded database goes by what the closed one went by (adopt.sql), committed
@@ -138,8 +146,10 @@ adopt() {
 # hornhoof_before_<stamp> with its connections off, and the backup's settings go into .env. SWAP_LINE says why it
 # failed.
 restore_swap() {
-  local env="$CONTROL/restore/$R_ATTEMPT.env.json" out="$WORK/cutover.out" secret node_key relay term machine cluster
+  local env="$WORK/env.json" out="$WORK/cutover.out" secret node_key relay term machine cluster
   SWAP_LINE="The backup's settings cannot be written, so nothing changed."
+  # The backup's settings, taken from the keeper's folder into the updater's own.
+  (umask 077 && take "$CONTROL/restore/$R_ATTEMPT.env.json" > "$env") || return 1
   secret=$(setting HORNHOOF_SECRET "$env") && node_key=$(setting NODE_KEY "$env") && relay=$(setting RELAY_URL "$env") || return 1
   SWAP_LINE='The databases could not change places, so nothing changed.'
   restore_stamp || return 1
@@ -162,6 +172,7 @@ restore_swap() {
   journal new_renamed || return 1
   write_env "$secret" "$node_key" "$relay" || return 1
   rm -f "$env"
+  remove_in "$CONTROL/restore" "$R_ATTEMPT.env.json"
   journal committed
 }
 
@@ -232,25 +243,27 @@ restore_start() {
 # A restore this updater was stopped in, or could not put back: by its journal it goes on when the swap was done, and
 # back otherwise; one stopped before its journal began only loaded a copy. Fails when there is none.
 restore_left() {
-  local file="$CONTROL/restore-journal.json" status="$CONTROL/restore-status.json" did step
-  if [ -f "$file" ]; then
-    R_ATTEMPT=$(jq -r '.attempt // empty' "$file" 2> /dev/null || true)
-    R_ID=$(jq -r '.id // empty' "$file" 2> /dev/null || true)
-    R_DUMPED=$(jq -r '.dumpedAt // empty' "$file" 2> /dev/null | tr -cd '0-9A-Za-z:.+-' | cut -c1-40 || true)
-    R_STAMP=$(jq -r '.stamp // empty' "$file" 2> /dev/null || true)
-    R_OLD=$(jq -r '.old // empty' "$file" 2> /dev/null || true)
-    did=$(jq -r '.did // empty' "$file" 2> /dev/null || true)
+  local file="$CONTROL/restore-journal.json" status="$CONTROL/restore-status.json" said did step
+  if [ -L "$file" ] || [ -e "$file" ]; then
+    said=$(take "$file" || true)
+    R_ATTEMPT=$(jq -r '.attempt // empty' <<< "$said" 2> /dev/null || true)
+    R_ID=$(jq -r '.id // empty' <<< "$said" 2> /dev/null || true)
+    R_DUMPED=$(jq -r '.dumpedAt // empty' <<< "$said" 2> /dev/null | tr -cd '0-9A-Za-z:.+-' | cut -c1-40 || true)
+    R_STAMP=$(jq -r '.stamp // empty' <<< "$said" 2> /dev/null || true)
+    R_OLD=$(jq -r '.old // empty' <<< "$said" 2> /dev/null || true)
+    did=$(jq -r '.did // empty' <<< "$said" 2> /dev/null || true)
     if ! plain_id "$R_ATTEMPT" || ! plain_id "$R_ID" || ! plain_stamp "$R_STAMP" || ! plain_number "$R_OLD"; then
       [ -n "$JOURNAL_SAID" ] || printf 'restore-journal.json cannot be read, so the restore it is of stays as it is.\n'
       JOURNAL_SAID=1
       return 0
     fi
   else
-    [ "$(jq -r '.state // empty' "$status" 2> /dev/null || true)" = running ] || return 1
-    step=$(jq -r '.step // empty' "$status" 2> /dev/null || true)
+    said=$(take "$status" || true)
+    [ "$(jq -r '.state // empty' <<< "$said" 2> /dev/null || true)" = running ] || return 1
+    step=$(jq -r '.step // empty' <<< "$said" 2> /dev/null || true)
     case "$step" in load | swap) ;; *) return 1 ;; esac
-    R_ATTEMPT=$(jq -r '.attempt // empty' "$status" 2> /dev/null || true)
-    R_ID=$(jq -r '.id // empty' "$status" 2> /dev/null || true)
+    R_ATTEMPT=$(jq -r '.attempt // empty' <<< "$said" 2> /dev/null || true)
+    R_ID=$(jq -r '.id // empty' <<< "$said" 2> /dev/null || true)
     plain_id "$R_ATTEMPT" && plain_id "$R_ID" || return 1
     R_STAMP=''
     R_OLD=''
@@ -269,11 +282,11 @@ restore_left() {
 restore_run() {
   restore_says running load 'Loading the backup.'
   restore_stop
-  if ! load_copy "$DBC" "$CONTROL/restore/$R_ATTEMPT.sql.gz"; then
+  if ! take "$CONTROL/restore/$R_ATTEMPT.sql.gz" load_copy "$DBC" -; then
     restore_undo 'The backup did not load, so nothing changed.' load
     return 0
   fi
-  rm -f "$CONTROL/restore/$R_ATTEMPT.sql.gz"
+  remove_in "$CONTROL/restore" "$R_ATTEMPT.sql.gz"
   restore_says running swap 'Putting the restored database in the place of the one in use.'
   if ! restore_swap "$1"; then
     restore_undo "$SWAP_LINE" swap
@@ -285,18 +298,20 @@ restore_run() {
 # The keeper orders a restore with restore.json, once both files of restore/<attempt> are whole. An order runs once:
 # the same backup is tried again under a new attempt. It waits for an update that waits or runs.
 restore_request() {
-  local file="$CONTROL/restore.json" status="$CONTROL/restore-status.json" carry waiting
+  local file="$CONTROL/restore.json" status="$CONTROL/restore-status.json" order said carry waiting
   if worker || [ -z "$SERVER_DIR" ] || [ ! -f "$SERVER_DIR/.env" ]; then return 0; fi
   if restore_left; then return 0; fi
   [ -f "$file" ] || return 0
-  waiting=$(jq -r '.id // empty' "$CONTROL/request.json" 2> /dev/null || true)
-  if plain_id "$waiting" && [ "$waiting" != "$(jq -r '.id // empty' "$CONTROL/status.json" 2> /dev/null || true)" ]; then return 0; fi
+  waiting=$(take "$CONTROL/request.json" quiet jq -r '.id // empty' || true)
+  if plain_id "$waiting" && [ "$waiting" != "$(take "$CONTROL/status.json" quiet jq -r '.id // empty' || true)" ]; then return 0; fi
   if update_running; then return 0; fi
-  R_ATTEMPT=$(jq -r '.attempt // empty' "$file" 2> /dev/null || true)
-  R_ID=$(jq -r '.id // empty' "$file" 2> /dev/null || true)
+  order=$(take "$file" || true)
+  R_ATTEMPT=$(jq -r '.attempt // empty' <<< "$order" 2> /dev/null || true)
+  R_ID=$(jq -r '.id // empty' <<< "$order" 2> /dev/null || true)
   plain_id "$R_ATTEMPT" && plain_id "$R_ID" || return 0
-  if [ "$(jq -r '.attempt // empty' "$status" 2> /dev/null || true)" = "$R_ATTEMPT" ]; then
-    case "$(jq -r '.state // empty' "$status" 2> /dev/null || true)" in
+  said=$(take "$status" || true)
+  if [ "$(jq -r '.attempt // empty' <<< "$said" 2> /dev/null || true)" = "$R_ATTEMPT" ]; then
+    case "$(jq -r '.state // empty' <<< "$said" 2> /dev/null || true)" in
       'done' | failed)
         rm -f "$file"
         return 0
@@ -304,8 +319,8 @@ restore_request() {
     esac
   fi
   [ -f "$CONTROL/restore/$R_ATTEMPT.sql.gz" ] && [ -f "$CONTROL/restore/$R_ATTEMPT.env.json" ] || return 0
-  R_DUMPED=$(jq -r '.dumpedAt // empty' "$file" 2> /dev/null | tr -cd '0-9A-Za-z:.+-' | cut -c1-40 || true)
-  carry=$(jq -r 'if .carry == true then "1" else "" end' "$file" 2> /dev/null || true)
+  R_DUMPED=$(jq -r '.dumpedAt // empty' <<< "$order" 2> /dev/null | tr -cd '0-9A-Za-z:.+-' | cut -c1-40 || true)
+  carry=$(jq -r 'if .carry == true then "1" else "" end' <<< "$order" 2> /dev/null || true)
   R_STAMP=''
   R_OLD=''
   DBC=$(compose ps -q db 2> /dev/null || true)

@@ -62,31 +62,34 @@ keep_backups() {
 
 # The folder the keeper takes dumps of the database from, and seals each into a backup: <id>.sql.gz, and <id>.json
 # {id, reason, at, migrations}, or <id>.failed with a line.
-dumps_dir() { mkdir -p "$CONTROL/dumps" && owned "$CONTROL/dumps" 700; }
+dumps_dir() { keeper_dir "$CONTROL/dumps"; }
 
 # dump_said <id> <reason> <migrations>: written after the dump, so it says the dump is whole.
 dump_said() {
-  local file="$CONTROL/dumps/$1.json"
   case "$3" in '' | *[!0-9]*) return 1 ;; esac
-  (umask 077 && jq -n --arg id "$1" --arg reason "$2" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson migrations "$3" \
-    '{id: $id, reason: $reason, at: $at, migrations: $migrations}' > "$file.new") && owned "$file.new" 600 && mv "$file.new" "$file"
+  # shellcheck disable=SC2016 # the dollars are jq's own
+  publish "$CONTROL/dumps/$1.json" keeper jq -n --arg id "$1" --arg reason "$2" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson migrations "$3" \
+    '{id: $id, reason: $reason, at: $at, migrations: $migrations}'
 }
 
-# drop_dump <id>: whatever a dump that was not finished left.
-drop_dump() { rm -f "$CONTROL/dumps/$1.sql.gz.part" "$CONTROL/dumps/$1.sql.gz" "$CONTROL/dumps/$1.json.new" "$CONTROL/dumps/$1.json"; }
+# drop_dump <id>: whatever a dump that was not finished left, and what an updater of an older build left of one.
+drop_dump() { remove_in "$CONTROL/dumps" "$1.sql.gz.part" "$1.sql.gz" "$1.json.new" "$1.json"; }
+
+# pg_dump_gz <db container> <database>: that database, dumped and packed, on the standard output.
+pg_dump_gz() {
+  docker exec "$1" pg_dump -U hornhoof -d "$2" | gzip
+}
 
 # The copy taken before an update goes to the keeper too, under the update's id.
 hand_backup() {
-  local file="$CONTROL/dumps/$ID.sql.gz"
-  dumps_dir && (umask 077 && cp "$BACKUP" "$file.part") && owned "$file.part" 600 && mv "$file.part" "$file" && dump_said "$ID" update "$BEFORE"
+  dumps_dir && publish "$CONTROL/dumps/$ID.sql.gz" keeper cat -- "$BACKUP" && dump_said "$ID" update "$BEFORE"
 }
 
 # make_dump <id> <db container>: the database as it is now, for the keeper.
 make_dump() {
-  local file="$CONTROL/dumps/$1.sql.gz" n
+  local n
   dumps_dir && n=$(migrations) || return 1
-  (umask 077 && docker exec "$2" pg_dump -U hornhoof -d hornhoof | gzip > "$file.part") || return 1
-  owned "$file.part" 600 && mv "$file.part" "$file" && dump_said "$1" timer "$n"
+  publish "$CONTROL/dumps/$1.sql.gz" keeper pg_dump_gz "$2" hornhoof && dump_said "$1" timer "$n"
 }
 
 # kept_name <name>: the name of a database a restore set aside, and of no other. Only such a name ever goes into a
@@ -101,19 +104,17 @@ kept_name() {
 # make_fork_dump <id> <db container> <database>: a database a restore set aside, before it goes. A restore leaves its
 # connections off, so they are turned on first.
 make_fork_dump() {
-  local file="$CONTROL/dumps/$1.sql.gz" n
+  local n
   dumps_dir || return 1
   docker exec "$2" psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q -c "ALTER DATABASE \"$3\" WITH ALLOW_CONNECTIONS true" > /dev/null 2>&1 || return 1
   n=$(docker exec "$2" psql -U hornhoof -d "$3" -tAc 'SELECT count(*) FROM drizzle.__drizzle_migrations' 2> /dev/null | tr -d ' ') || return 1
-  (umask 077 && docker exec "$2" pg_dump -U hornhoof -d "$3" | gzip > "$file.part") || return 1
-  owned "$file.part" 600 && mv "$file.part" "$file" && dump_said "$1" fork "$n"
+  publish "$CONTROL/dumps/$1.sql.gz" keeper pg_dump_gz "$2" "$3" && dump_said "$1" fork "$n"
 }
 
 # dump_failed <id> [line]: nothing of the dump stays, and the keeper reads why.
 dump_failed() {
-  local file="$CONTROL/dumps/$1.failed"
   drop_dump "$1"
-  dumps_dir && (umask 077 && printf '%s\n' "${2:-The database could not be dumped.}" > "$file.new") && owned "$file.new" 600 && mv "$file.new" "$file"
+  dumps_dir && publish "$CONTROL/dumps/$1.failed" keeper printf '%s\n' "${2:-The database could not be dumped.}"
 }
 
 # The data keeper asks for a dump with dump.json {id}, or with {id, database, reason: "fork"} for a database a restore
@@ -121,7 +122,7 @@ dump_failed() {
 # {id, database: "hornhoof", reason: "fork"} for its own database, when that one led the company before. The request goes once the dump is there, whole or failed; a dump that is there is not made again, so the
 # keeper asks anew under another id.
 dump_request() {
-  local id db database reason copy=''
+  local asked id db database reason copy=''
   [ -f "$CONTROL/dump.json" ] || return 0
   [ -n "$SERVER_DIR" ] || return 0
   # A machine that keeps a copy gives one dump alone: its own database, from the time it led, which its keeper saves
@@ -130,10 +131,11 @@ dump_request() {
     [ -f "$CONTROL/replica.json" ] || return 0
     copy=1
   fi
-  id=$(jq -r '.id // empty' "$CONTROL/dump.json" 2> /dev/null || true)
+  asked=$(take "$CONTROL/dump.json" || true)
+  id=$(jq -r '.id // empty' <<< "$asked" 2> /dev/null || true)
   plain_id "$id" || return 0
-  database=$(jq -r '.database // empty' "$CONTROL/dump.json" 2> /dev/null || true)
-  reason=$(jq -r '.reason // empty' "$CONTROL/dump.json" 2> /dev/null || true)
+  database=$(jq -r '.database // empty' <<< "$asked" 2> /dev/null || true)
+  reason=$(jq -r '.reason // empty' <<< "$asked" 2> /dev/null || true)
   if [ ! -f "$CONTROL/dumps/$id.json" ] && [ ! -f "$CONTROL/dumps/$id.failed" ]; then
     db=$(compose ps -q db 2> /dev/null || true)
     [ -n "$db" ] || return 0
@@ -158,13 +160,14 @@ dump_request() {
 
 # A dump in the clear is never left for long. The keeper seals and removes each, and removes what it did not seal
 # within a day; this does the same for a machine whose keeper makes no backups, or does not run.
-sweep_dumps() {
-  [ -d "$CONTROL/dumps" ] || return 0
-  if [ -n "$(find "$CONTROL/dumps" -type f -mmin +1440 2> /dev/null | head -n 1)" ]; then
-    find "$CONTROL/dumps" -type f -mmin +1440 -exec rm -f {} + 2> /dev/null || true
+sweep_dumps() (
+  [ -d "$CONTROL/dumps" ] || exit 0
+  entered "$CONTROL/dumps" || exit 0
+  if [ -n "$(find . -type f -mmin +1440 2> /dev/null | head -n 1)" ]; then
+    find . -type f -mmin +1440 -exec rm -f {} + 2> /dev/null || true
     printf 'Deleted a database dump that was not sealed within a day.\n'
   fi
-}
+)
 
 # The public link's settings as they are now, next to the database copy, readable by the owner only. A link the
 # company took on the new build is not in that copy, while its name stays taken at hornhoof.org and its key is only
@@ -172,7 +175,7 @@ sweep_dumps() {
 keep_link() {
   local file="${BACKUP%.sql.gz}.tunnel.json"
   if [ -z "$BACKUP" ] || [ ! -f "$CONTROL/tunnel.json" ]; then return 0; fi
-  if (umask 077 && cp "$CONTROL/tunnel.json" "$file.new" && chmod 600 "$file.new" && mv "$file.new" "$file"); then
+  if (umask 077 && take "$CONTROL/tunnel.json" > "$file.new" && chmod 600 "$file.new" && mv "$file.new" "$file"); then
     say "The public link's settings are in backups/$(basename "$file"). A link taken after the database was saved is not in it; guide/updates.md says how to take it back."
   else
     rm -f "$file.new"

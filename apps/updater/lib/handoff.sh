@@ -31,19 +31,21 @@ stay_worker() {
   rm -f "$CONTROL/role.json" "$CONTROL/role-secrets.json" "$CONTROL/replica.json"
   COMPOSE_PROFILES=data,builtin compose rm -sf db migrate app node > /dev/null 2>&1 || true
   HORNHOOF_ROLE=worker compose up -d --no-build front keeper > /dev/null 2>&1 || true
-  (umask 077 && printf "The company's settings cannot be written here, so this machine stays a worker.\n" > "$CONTROL/role.failed.new") &&
-    owned "$CONTROL/role.failed.new" 600 && mv "$CONTROL/role.failed.new" "$CONTROL/role.failed" || true
+  publish "$CONTROL/role.failed" keeper printf "The company's settings cannot be written here, so this machine stays a worker.\n" || true
   say "This machine stays a worker: could not $1."
 }
 
 # The settings a copy needs go into .env: the company's three, each checked as a backup's are, a password for its own
 # database when it has none, and the role and the profiles that start the database, the app and this machine's own
-# built-in node. No value is said.
+# built-in node. No value is said. The secrets are read from role.json into a file of the updater's own, where neither
+# the app nor the keeper can reach.
 data_settings() {
-  local from="$CONTROL/role-secrets.json" secret node_key relay
-  (umask 077 && jq '.secrets // {}' "$CONTROL/role.json" > "$from" 2> /dev/null) || return 1
-  secret=$(setting HORNHOOF_SECRET "$from") && node_key=$(setting NODE_KEY "$from") && relay=$(setting RELAY_URL "$from") || return 1
-  [ -n "$secret" ] && [ -n "$relay" ] || return 1
+  local from secret node_key relay ok=''
+  from=$(mktemp) || return 1
+  if (umask 077 && take "$CONTROL/role.json" quiet jq '.secrets // {}' > "$from") &&
+    secret=$(setting HORNHOOF_SECRET "$from") && node_key=$(setting NODE_KEY "$from") && relay=$(setting RELAY_URL "$from"); then ok=1; fi
+  rm -f -- "${from:?}"
+  [ -n "$ok" ] && [ -n "$secret" ] && [ -n "$relay" ] || return 1
   write_env "$secret" "$node_key" "$relay" || return 1
   if [ -z "$(env_value POSTGRES_PASSWORD)" ]; then PUT_VALUE=$(new_password) put_env POSTGRES_PASSWORD || return 1; fi
   PUT_VALUE=data put_env HORNHOOF_ROLE && PUT_VALUE=data,builtin put_env COMPOSE_PROFILES
@@ -88,10 +90,10 @@ load_schema() {
   tables=$(docker exec "$db" psql -U hornhoof -d "$database" -At -c "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'" 2> /dev/null) ||
     { printf "This machine's database could not be asked."; return 1; }
   [ "$tables" = 0 ] || { printf 'The database is not empty.'; return 1; }
-  dump="$CONTROL/schema/$attempt.sql"
+  dump=$(mktemp) || { printf "The company server's schema could not be read."; return 1; }
   (
     umask 077
-    PGPASSWORD=$(jq -r '.password // empty' "$request" 2> /dev/null) || exit 1
+    PGPASSWORD=$(take "$request" quiet jq -r '.password // empty') || exit 1
     export PGPASSWORD
     docker exec -e PGPASSWORD "$db" pg_dump -h keeper -p "$port" -U hornhoof_replica --schema-only --no-owner --no-publications --no-subscriptions --no-privileges hornhoof > "$dump" 2> /dev/null &&
       docker exec -e PGPASSWORD "$db" pg_dump -h keeper -p "$port" -U hornhoof_replica --data-only --table=drizzle.__drizzle_migrations hornhoof >> "$dump" 2> /dev/null &&
@@ -111,7 +113,7 @@ load_schema() {
 write_passfile() {
   local db=$1 request="$CONTROL/schema.json"
   # shellcheck disable=SC2016 # PGDATA is the database container's own, read there.
-  jq -r '"*:*:*:hornhoof_replica:" + (.password // "")' "$request" 2> /dev/null |
+  take "$request" quiet jq -r '"*:*:*:hornhoof_replica:" + (.password // "")' |
     docker exec -i -u postgres "$db" sh -c 'umask 077 && cat > "$PGDATA/replica.pgpass"' > /dev/null 2>&1
 }
 
@@ -130,29 +132,30 @@ passfile_alone() {
 # dropped. With only: "passfile" it asks for the password file alone, whatever was answered under that attempt before:
 # a copy that joins the slot a new leader made for it holds its tables already.
 schema_request() {
-  local request="$CONTROL/schema.json" attempt database port only reason
+  local request="$CONTROL/schema.json" asked attempt database port only reason
   [ -f "$request" ] || return 0
   [ -n "$SERVER_DIR" ] || return 0
-  attempt=$(jq -r '.attempt // empty | tostring' "$request" 2> /dev/null || true)
-  database=$(jq -r '.database // empty | tostring' "$request" 2> /dev/null || true)
-  port=$(jq -r '.port // empty | tostring' "$request" 2> /dev/null || true)
-  only=$(jq -r '.only // empty | tostring' "$request" 2> /dev/null || true)
+  asked=$(take "$request" || true)
+  attempt=$(jq -r '.attempt // empty | tostring' <<< "$asked" 2> /dev/null || true)
+  database=$(jq -r '.database // empty | tostring' <<< "$asked" 2> /dev/null || true)
+  port=$(jq -r '.port // empty | tostring' <<< "$asked" 2> /dev/null || true)
+  only=$(jq -r '.only // empty | tostring' <<< "$asked" 2> /dev/null || true)
   if ! plain_count "$attempt" || ! plain_database "$database" || ! plain_count "$port" || { [ -n "$only" ] && [ "$only" != passfile ]; }; then
     rm -f "$request"
     return 0
   fi
   if [ "$only" = passfile ]; then
-    mkdir -p "$CONTROL/schema" && owned "$CONTROL/schema" 700 || return 0
-    rm -f "$CONTROL/schema/$attempt.done" "$CONTROL/schema/$attempt.failed"
+    keeper_dir "$CONTROL/schema" || return 0
+    remove_in "$CONTROL/schema" "$attempt.done" "$attempt.failed"
   elif [ -f "$CONTROL/schema/$attempt.done" ] || [ -f "$CONTROL/schema/$attempt.failed" ]; then
     rm -f "$request"
     return 0
   fi
-  mkdir -p "$CONTROL/schema" && owned "$CONTROL/schema" 700 || return 0
+  keeper_dir "$CONTROL/schema" || return 0
   if reason=$(if [ "$only" = passfile ]; then passfile_alone; else load_schema "$attempt" "$database" "$port"; fi); then
-    (umask 077 && : > "$CONTROL/schema/$attempt.done") && owned "$CONTROL/schema/$attempt.done" 600 || true
+    publish "$CONTROL/schema/$attempt.done" keeper : || true
   else
-    (umask 077 && printf '%s\n' "$reason" > "$CONTROL/schema/$attempt.failed") && owned "$CONTROL/schema/$attempt.failed" 600 || true
+    publish "$CONTROL/schema/$attempt.failed" keeper printf '%s\n' "$reason" || true
     say "Could not load the company's schema for a copy: $reason"
   fi
   rm -f "$request"
@@ -173,36 +176,54 @@ upload_name() {
 quoted_table() { printf '"%s"."%s"' "${1%%.*}" "${1#*.}"; }
 
 # The folder uploads are made in on a machine that leaves the data, and taken into on the company server.
-uploads_dir() { mkdir -p "$CONTROL/uploads" && owned "$CONTROL/uploads" 700; }
+uploads_dir() { keeper_dir "$CONTROL/uploads"; }
+
+# scratch <name>: an empty folder of the updater's own for an upload's tables, in its temporary folder, where neither
+# the app nor the keeper can reach. What a stop left there before goes first.
+scratch() {
+  local dir="${TMPDIR:-/tmp}/hornhoof-$1"
+  rm -rf -- "${dir:?}" && (umask 077 && mkdir -- "$dir") && printf '%s' "$dir"
+}
 
 # upload_said <name> <done | failed> [line]: how an upload, or its load, ended, for the keeper alone to read.
 upload_said() {
-  local file="$CONTROL/uploads/$1.$2"
-  (umask 077 && printf '%s' "${3:+$3
-}" > "$file") && owned "$file" 600
+  publish "$CONTROL/uploads/$1.$2" keeper printf '%s' "${3:+$3
+}"
 }
 
 # make_upload <id> <db container>: every table of the company's three schemas in the database in use here, as CSV with
-# its header, one file a table, in one packed file for the keeper to send. UPLOAD_WHY says why it could not.
+# its header, one file a table, in one packed file for the keeper to send. The tables are written in a folder of the
+# updater's own first. UPLOAD_WHY says why it could not.
 UPLOAD_WHY=''
 make_upload() {
-  local id=$1 db=$2 dir="$CONTROL/uploads/$1.tables" file="$CONTROL/uploads/$1.tar.gz" tables table names=''
-  rm -rf "$dir" "$file.part"
-  UPLOAD_WHY='The folder for the upload could not be made.'
-  (umask 077 && mkdir "$dir") || return 1
+  local id=$1 db=$2 dir tables table status=0
   UPLOAD_WHY="This machine's database could not be asked."
   tables=$(docker exec "$db" psql -U hornhoof -d hornhoof -At -c "SELECT table_schema || '.' || table_name FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema IN ('public', 'net', 'net_local') ORDER BY 1" 2> /dev/null) &&
     [ -n "$tables" ] || return 1
   UPLOAD_WHY='A table could not be read.'
-  for table in $tables; do
-    plain_table "$table" || return 1
-    (umask 077 && docker exec "$db" psql -U hornhoof -d hornhoof -v ON_ERROR_STOP=1 -q -c "COPY $(quoted_table "$table") TO STDOUT (FORMAT csv, HEADER true)" > "$dir/$table.csv" 2> /dev/null) || return 1
+  for table in $tables; do plain_table "$table" || return 1; done
+  UPLOAD_WHY='The folder for the upload could not be made.'
+  dir=$(scratch upload) || return 1
+  publish "$CONTROL/uploads/$id.tar.gz" keeper pack_tables "$db" "$dir" "$tables" || status=$?
+  rm -rf -- "${dir:?}"
+  case "$status" in
+    0) return 0 ;;
+    3) UPLOAD_WHY='A table could not be read.' ;;
+    4) UPLOAD_WHY='The upload could not be packed.' ;;
+  esac
+  return 1
+}
+
+# pack_tables <db container> <folder> <tables>: each table as CSV with its header into the folder, then all of them packed
+# on the standard output. It fails with 3 when a table could not be read, and with 4 when they could not be packed.
+pack_tables() {
+  local db=$1 dir=$2 table names=''
+  for table in $3; do
+    (umask 077 && docker exec "$db" psql -U hornhoof -d hornhoof -v ON_ERROR_STOP=1 -q -c "COPY $(quoted_table "$table") TO STDOUT (FORMAT csv, HEADER true)" > "$dir/$table.csv" 2> /dev/null) || return 3
     names="$names $table.csv"
   done
-  UPLOAD_WHY='The upload could not be packed.'
   # shellcheck disable=SC2086 # names is a list of file names made of checked table names.
-  (umask 077 && tar -czf "$file.part" -C "$dir" $names 2> /dev/null) && owned "$file.part" 600 && mv "$file.part" "$file" || return 1
-  rm -rf "$dir"
+  tar -czf - -C "$dir" $names 2> /dev/null || return 4
 }
 
 # The keeper of a machine that stopped holding the company's data asks, with upload.json {id}, for everything its
@@ -212,7 +233,7 @@ upload_request() {
   local request="$CONTROL/upload.json" id db
   [ -f "$request" ] || return 0
   [ -n "$SERVER_DIR" ] && [ -f "$CONTROL/replica.json" ] || return 0
-  id=$(jq -r '.id // empty | tostring' "$request" 2> /dev/null || true)
+  id=$(take "$request" quiet jq -r '.id // empty | tostring' || true)
   if ! plain_id "$id" || [ -f "$CONTROL/uploads/$id.done" ] || [ -f "$CONTROL/uploads/$id.failed" ]; then
     rm -f "$request"
     return 0
@@ -223,7 +244,7 @@ upload_request() {
   if make_upload "$id" "$db"; then
     upload_said "$id" 'done' || true
   else
-    rm -rf "$CONTROL/uploads/$id.tables" "$CONTROL/uploads/$id.tar.gz.part" "$CONTROL/uploads/$id.tar.gz"
+    remove_in "$CONTROL/uploads" "$id.tar.gz"
     upload_said "$id" failed "$UPLOAD_WHY" || true
     say "Could not make the upload of this machine's copy: $UPLOAD_WHY"
   fi
@@ -231,23 +252,24 @@ upload_request() {
 }
 
 # unpack_upload <file> <folder> <most bytes>: the files of an upload, each the rows of one table and nothing else: no
-# other name, no folder, no link, and no more than it may unpack to.
+# other name, no folder, no link, and no more than it may unpack to. The upload is taken from the shared folder the
+# keeper put it in, and unpacked into a folder of the updater's own.
 unpack_upload() {
   local file=$1 dir=$2 max=$3 n names name
   UPLOAD_WHY='The folder to unpack the upload in could not be made.'
   rm -rf "$dir"
   (umask 077 && mkdir "$dir") || return 1
   UPLOAD_WHY='The upload unpacks to more than it may.'
-  n=$( (gunzip -c "$file" 2> /dev/null || true) | head -c "$((max + 1))" | wc -c | tr -d ' ')
+  n=$( (take "$file" quiet gunzip -c || true) | head -c "$((max + 1))" | wc -c | tr -d ' ')
   [ "$n" -le "$max" ] || return 1
   UPLOAD_WHY='The upload cannot be read.'
-  names=$(tar -tzf "$file" 2> /dev/null) && [ -n "$names" ] || return 1
+  names=$(take "$file" quiet tar -tzf -) && [ -n "$names" ] || return 1
   UPLOAD_WHY='The upload holds a file that is no table of the company.'
   while IFS= read -r name; do
     plain_table "${name%.csv}" && [ "$name" != "${name%.csv}" ] || return 1
   done <<< "$names"
   UPLOAD_WHY='The upload cannot be read.'
-  (umask 077 && tar -xzf "$file" -C "$dir" 2> /dev/null) || return 1
+  (umask 077 && take "$file" quiet tar -xzf - -C "$dir") || return 1
   UPLOAD_WHY='The upload holds what is no file.'
   [ -z "$(find "$dir" -mindepth 1 ! -type f 2> /dev/null; find "$dir" -type f -links +1 2> /dev/null)" ]
 }
@@ -276,11 +298,12 @@ $table.$column
     -c "\\copy $(quoted_table "$table") ($list) FROM STDIN WITH (FORMAT csv, HEADER true)" < "$path" > /dev/null 2>&1
 }
 
-# load_upload <file> <database> <most bytes unpacked>: what a machine uploaded becomes a database of this server, under
-# another name until it is whole: this server's own schema, and each file as the rows of its table, with no trigger
-# run. No statement of the machine's runs: its bytes reach the database only as rows. UPLOAD_WHY says why it could not.
+# load_upload <file> <database> <most bytes unpacked> <work folder>: what a machine uploaded becomes a database of this
+# server, under another name until it is whole: this server's own schema, and each file as the rows of its table, with
+# no trigger run. No statement of the machine's runs: its bytes reach the database only as rows. It unpacks and dumps in
+# the work folder, the updater's own. UPLOAD_WHY says why it could not.
 load_upload() {
-  local file=$1 database=$2 max=$3 loading="hornhoof_uploading_${2#hornhoof_upload_}" dir="$CONTROL/uploads/loading" schema="$CONTROL/uploads/loading.sql"
+  local file=$1 database=$2 max=$3 loading="hornhoof_uploading_${2#hornhoof_upload_}" dir="$4/loading" schema="$4/loading.sql"
   local tables columns path table
   unpack_upload "$file" "$dir" "$max" || return 1
   UPLOAD_WHY='The database for the upload could not be made.'
@@ -319,12 +342,13 @@ $table
 # without .tar.gz>.done or .failed with a line, removes the file and what it unpacked whatever the end, and then the
 # request. A database a stop left half loaded goes first, and one that failed goes at once.
 load_request() {
-  local request="$CONTROL/load.json" file database max name old ok=''
+  local request="$CONTROL/load.json" asked file database max name old work ok=''
   [ -f "$request" ] || return 0
   if worker || [ -z "$SERVER_DIR" ]; then return 0; fi
-  file=$(jq -r '.file // empty | tostring' "$request" 2> /dev/null || true)
-  database=$(jq -r '.database // empty | tostring' "$request" 2> /dev/null || true)
-  max=$(jq -r '.unpackMax // empty | tostring' "$request" 2> /dev/null || true)
+  asked=$(take "$request" || true)
+  file=$(jq -r '.file // empty | tostring' <<< "$asked" 2> /dev/null || true)
+  database=$(jq -r '.database // empty | tostring' <<< "$asked" 2> /dev/null || true)
+  max=$(jq -r '.unpackMax // empty | tostring' <<< "$asked" 2> /dev/null || true)
   name=${file##*/}
   name=${name%.tar.gz}
   # The id of the machine it came from, in the length today's installs have or the one older installs had.
@@ -338,9 +362,13 @@ load_request() {
   for old in $(db_names || true); do
     case "$old" in hornhoof_uploading_*) if plain_database "$old"; then psql_on postgres -c "DROP DATABASE IF EXISTS $old" > /dev/null 2>&1 || true; fi ;; esac
   done
-  UPLOAD_WHY='The request names no database of an upload.'
-  if upload_name "$database" && plain_number "$max" && [ "${#max}" -le 15 ] && load_upload "$CONTROL/uploads/$name.tar.gz" "$database" "$max"; then ok=1; fi
-  rm -rf "$CONTROL/uploads/loading" "$CONTROL/uploads/loading.sql" "$CONTROL/uploads/$name.tar.gz"
+  UPLOAD_WHY='The folder to unpack the upload in could not be made.'
+  if work=$(scratch load); then
+    UPLOAD_WHY='The request names no database of an upload.'
+    if upload_name "$database" && plain_number "$max" && [ "${#max}" -le 15 ] && load_upload "$CONTROL/uploads/$name.tar.gz" "$database" "$max" "$work"; then ok=1; fi
+    rm -rf -- "${work:?}"
+  fi
+  remove_in "$CONTROL/uploads" "$name.tar.gz"
   if [ -n "$ok" ]; then
     upload_said "$name" 'done' || true
   else
@@ -478,21 +506,22 @@ wipe_step() {
 # host name, which the machine then reaches as a worker; without it nothing goes.
 WIPE_SAID=''
 wipe_request() {
-  local request="$CONTROL/wipe.json" id step next checked server
+  local request="$CONTROL/wipe.json" asked id step next checked server
   [ -f "$request" ] || return 0
   [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ] || return 0
-  id=$(jq -r '.id // empty | tostring' "$request" 2> /dev/null || true)
+  asked=$(take "$request" || true)
+  id=$(jq -r '.id // empty | tostring' <<< "$asked" 2> /dev/null || true)
   if ! plain_id "$id" || { [ -z "$(env_value HORNHOOF_ROLE)" ] && [ ! -f "$CONTROL/replica.json" ]; }; then
     rm -f "$request"
     return 0
   fi
-  server=$(jq -r '.server // empty | tostring' "$request" 2> /dev/null || true)
+  server=$(jq -r '.server // empty | tostring' <<< "$asked" 2> /dev/null || true)
   if [ -z "$(env_value COMPOSE_FILE)" ] && ! company_address "$server"; then
     [ "$WIPE_SAID" = address ] || say "The request to wipe this machine names no address of the company to reach afterwards, so nothing is wiped."
     WIPE_SAID=address
     return 0
   fi
-  step=$(jq -r '.step // "check" | tostring' "$request" 2> /dev/null || true)
+  step=$(jq -r '.step // "check" | tostring' <<< "$asked" 2> /dev/null || true)
   while true; do
     case "$step" in
       stop) next=volume ;;
@@ -503,8 +532,8 @@ wipe_request() {
       done) next='' ;;
       *) step=check next=stop ;;
     esac
-    (umask 077 && jq -n --arg id "$id" --arg step "$step" --arg server "$server" '{id: $id, step: $step} + (if $server == "" then {} else {server: $server} end)' > "$request.new") &&
-      owned "$request.new" 600 && mv "$request.new" "$request" || return 0
+    # shellcheck disable=SC2016 # the dollars are jq's own
+    publish "$request" keeper jq -n --arg id "$id" --arg step "$step" --arg server "$server" '{id: $id, step: $step} + (if $server == "" then {} else {server: $server} end)' || return 0
     case "$step" in
       check)
         checked=0
@@ -518,8 +547,8 @@ wipe_request() {
         [ "$checked" = 0 ] || { wipe_waits check; return 0; }
         ;;
       done)
-        (umask 077 && jq -n --arg id "$id" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{id: $id, at: $at}' > "$CONTROL/wiped.json.new") &&
-          owned "$CONTROL/wiped.json.new" 600 && mv "$CONTROL/wiped.json.new" "$CONTROL/wiped.json" || return 0
+        # shellcheck disable=SC2016 # the dollars are jq's own
+        publish "$CONTROL/wiped.json" keeper jq -n --arg id "$id" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{id: $id, at: $at}' || return 0
         rm -f "$request"
         say "This machine holds nothing of the company's data any more."
         return 0
