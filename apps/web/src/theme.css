@@ -2337,6 +2337,8 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .tr-group-head { grid-column: 1 / -1; }
   .tr-group > [hidden], .tr-rows[hidden] { display: none; }
   .tr-v:has(> .tr-mark, > .tr-stage-ghost) { display: flex; flex-wrap: wrap; align-items: center; }
+  /* The executor's program as its logo, as near its initials as the one-shot mark (#1770); the narrow list's gap does it there. */
+  .tr-v > .tr-executor + .pm { margin-inline-start: 4px; }
   .tr-cells:dir(rtl) > .tr-cell > .tr-v:dir(ltr), .tr-cells:dir(ltr) > .tr-cell > .tr-v:dir(rtl) { justify-content: flex-end; text-align: end; }
 }
 /* A narrow list puts each fact under the title, after its name. */

@@ -6,7 +6,7 @@ import { BUILTIN_SKINS } from '../../src/skins/registry';
 import { NODE } from '../../src/tracker';
 import { captureWith } from '../capture';
 import { openTaskAction } from '../api';
-import { DEV, GOAL_NOTE, GOALS, QUESTION, serveGoalHistory, serveOutsideWork, serveShortNames, serveTasksBoard, SHORT, TASKS } from './api';
+import { DEV, GOAL_NOTE, GOALS, QUESTION, serveGoalHistory, serveOutsideWork, serveShortNames, serveStaff, serveTasksBoard, SHORT, TASKS } from './api';
 
 /* The tracker as a person meets it: the left panel of lists, where the person is, views of the same work with their
    filters, the graph on a canvas like the map's, and the card at the end side. 138 tasks, every shipped language, every built-in skin, at a desk and on a phone, also mirrored right to left. Shots go to HH_SCREENSHOT_DIR when it is set. */
@@ -734,3 +734,56 @@ test('says what to do when there is no work yet, and when a search finds nothing
   await page.getByRole('searchbox', { name: t.tasks.search }).fill('anything');
   await expect(page.locator('.tr-found').getByRole('status')).toHaveText(t.tasks.noSearchResults);
 });
+
+/* Ivan's word of 20.11 (#1770): the logo of the program an executor works in now stands right after its initials, in an
+   Executor column no wider than without it, named for a screen reader and in a tooltip. The person who answers for the work
+   and a member with no plan get none. The shot is taken before any check, so a run on the code before the logo shows how it was. */
+for (const lang of ['en', 'ru'] as const) for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
+  test(`puts the logo of the executor's program right after its initials: ${lang} ${dir} ${width}`, async ({ page }, info) => {
+    const t = MESSAGES[lang];
+    const look = `${lang}-${dir}-${width}-${info.project.name.replace('tasks-', '')}`;
+    const list = page.getByRole('region', { name: t.tracker.views.list, exact: true });
+    const visit = async () => {
+      await open(page, lang, width, `/tasks?department=${DEV.id}`, SKINS[0]);
+      await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+      await expect(list.locator('.tr-row').first()).toBeVisible();
+    };
+    const columnWidth = () => list.locator('.tr-head > span').nth(1).evaluate(e => e.getBoundingClientRect().width);
+    const wide = width > 760;
+    await serveTasksBoard(page);
+    await visit();
+    const before = wide ? await columnWidth() : 0;
+    await serveStaff(page);
+    await visit();
+    await capture(page, info, `program-${look}`);
+
+    const payments = list.getByRole('listitem', { name: named('Take card payments'), exact: true }).locator(':scope > .tr-cells');
+    const executorCell = payments.locator('.tr-cell').nth(0);
+    const mark = executorCell.getByRole('img', { name: 'Hana', exact: true });
+    const logo = executorCell.getByRole('img', { name: 'Codex', exact: true });
+    await expect(logo).toBeVisible();
+    await expect(logo.locator('title')).toHaveText('Codex');
+    /* Right after the initials in the cell's own direction, on their middle line, and inside the cell. */
+    const forward = await executorCell.locator('.tr-v').evaluate(e => getComputedStyle(e).direction === 'ltr');
+    const [m, l, c] = [(await mark.boundingBox())!, (await logo.boundingBox())!, (await executorCell.boundingBox())!];
+    const gap = forward ? l.x - (m.x + m.width) : m.x - (l.x + l.width);
+    expect(gap, `gap ${look}`).toBeGreaterThanOrEqual(0);
+    expect(gap, `gap ${look}`).toBeLessThanOrEqual(6);
+    expect(Math.abs(m.y + m.height / 2 - (l.y + l.height / 2)), `middle ${look}`).toBeLessThanOrEqual(1.5);
+    expect(l.x, `cell start ${look}`).toBeGreaterThanOrEqual(c.x - 1);
+    expect(l.x + l.width, `cell end ${look}`).toBeLessThanOrEqual(c.x + c.width + 1);
+    if (wide) expect(Math.abs((await columnWidth()) - before), `column ${look}`).toBeLessThanOrEqual(1);
+    else {
+      /* On a phone the name follows the logo: "Executor: HA [logo] Hana". */
+      const name = (await executorCell.getByText('Hana', { exact: true }).boundingBox())!;
+      expect(forward ? name.x - (l.x + l.width) : l.x - (name.x + name.width), `name ${look}`).toBeGreaterThanOrEqual(0);
+    }
+
+    await expect(payments.locator('.tr-cell').nth(1).getByRole('img', { name: 'Ivan', exact: true })).toBeVisible();
+    await expect(payments.locator('.tr-cell').nth(1).locator('.pm')).toHaveCount(0);
+    const build = list.getByRole('listitem', { name: named('Build: take card payments'), exact: true }).locator(':scope > .tr-cells');
+    await expect(build.getByRole('img', { name: 'Bruno', exact: true })).toHaveAttribute('data-program', 'other');
+    await expect(build.locator('.pm')).toHaveCount(0);
+    await inside(page, `program ${look}`);
+  });
+}

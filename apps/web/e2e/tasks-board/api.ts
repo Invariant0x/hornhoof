@@ -201,6 +201,17 @@ export async function serveOutsideWork(page: Page) {
   return gift;
 }
 
+/* Development's employees as the map lists them: Hana works in Codex now, Bruno has no plan. */
+const member = (agent: typeof HANA | typeof BRUNO, provider: Employee['provider']): Employee => ({
+  id: agent.id, name: agent.name, roleId: null, title: agent.role, kind: agent.kind, model: '', modelName: null, provider, effort: null,
+  state: provider ? 'sleeping' : 'needs_subscription', status: 'idle', on: true, timer: null, task: null, context: null, program: null,
+  alarm: null, retry: null, failure: null,
+});
+export async function serveStaff(page: Page) {
+  const org: Org = { ...ORG, departments: ORG.departments.map(d => (d.id === DEV.id ? { ...d, employees: [member(HANA, 'codex'), member(BRUNO, null)] } : d)) };
+  await page.route('**/api/org', route => route.fulfill({ json: org }));
+}
+
 /* The history of the goal Card payments: Ivan set it, moved its date, and Hana wrote a note on it, a sentence of its own. An
    edit names what changed as the server writes it (goals.ts FIELD_NAMES): "due" for the due date. more: lines after these. */
 export const GOAL_NOTE = 'The bank asks for two more weeks, 3 of 5 checks are done.';

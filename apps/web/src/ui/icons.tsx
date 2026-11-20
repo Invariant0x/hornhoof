@@ -134,8 +134,11 @@ const MARKS: Record<Program, ReactNode> = {
 /* The program an agent works in, next to its name; the name is its label and tooltip. */
 /* protocol: an API connection's, which decides its program. */
 export function ProviderMark({ provider, protocol }: { provider: ProviderId | null; protocol?: Protocol | null }) {
-  if (!provider) return null;
-  const program = programOf(provider, protocol);
+  return provider ? <ProgramMark program={programOf(provider, protocol)} /> : null;
+}
+
+/* The same mark where the program is already known, as the tracker's executor has it. */
+export function ProgramMark({ program }: { program: Program }) {
   return (
     <svg className={`pm ${program}`} viewBox="0 0 16 16" role="img" aria-label={PROGRAM_NAMES[program]}>
       <title>{PROGRAM_NAMES[program]}</title>

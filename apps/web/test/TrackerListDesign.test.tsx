@@ -42,6 +42,24 @@ it('keeps the executor name and program color alongside a generalist mark and ma
   expect(call.querySelector('path[d="M8 1 15 8 8 15 1 8Z"]')).toBeInTheDocument();
 });
 
+/* Ivan's word of 20.11 (#1770): the program the executor works in now, as its logo right after the initials, named for a
+   screen reader and in a tooltip. A member with no plan and the person who answers for the task get none. */
+it('puts the logo of the program the executor works in right after its initials, and none without a plan', () => {
+  const planless = task({ id: 'idle', number: 268, title: 'Pick the recipients', executor: { ...executor, id: 'nora', name: 'Nora Lee' }, assignee: { ...executor, id: 'nora', name: 'Nora Lee' } });
+  const rows = { selected: null, onOpenTask: vi.fn(), programOf: (id: string) => (id === executor.id ? 'codex' as const : null) };
+  const tasks = [task(), planless];
+  render(<LanguageProvider><TrackerList tasks={tasks} all={tasks} rows={rows} empty="Empty" /></LanguageProvider>);
+  const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
+  const logo = within(row).getByRole('img', { name: 'Codex' });
+  expect(logo).toHaveClass('pm', 'codex');
+  expect(logo.querySelector('title')).toHaveTextContent('Codex');
+  expect(within(row).getByRole('img', { name: executor.name }).nextElementSibling).toBe(logo);
+  expect(within(row).getByRole('img', { name: responsible.name }).parentElement!.querySelector('.pm')).toBeNull();
+  const idle = screen.getByRole('listitem', { name: '#268 Pick the recipients' });
+  expect(within(idle).getByRole('img', { name: 'Nora Lee' })).toHaveAttribute('data-program', 'other');
+  expect(idle.querySelector('.pm')).toBeNull();
+});
+
 it('reads each task across one line and shows a late date', () => {
   list([task({ dueAt: '2020-01-01T00:00:00.000Z' })]);
   expect(screen.getByText('Name', { selector: '.tr-head span' })).toBeInTheDocument();
