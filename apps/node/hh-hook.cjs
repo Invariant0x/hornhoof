@@ -37,6 +37,9 @@ function endOnceLetGo() {
   }, 50).unref();
 }
 
+/* The hook goes only while its program still holds it. */
+const sendWhileHeld = (event, body) => (letGo() ? null : sendHook(event, body));
+
 async function main() {
   const event = process.argv[2];
   /* Written before the exit below cuts a pipe short. */
@@ -45,8 +48,7 @@ async function main() {
   if (!event || !url || !/^[a-z]+$/.test(event)) return;
   endOnceLetGo();
   const body = process.argv[3] ?? (await readStdin());
-  if (letGo()) return;
-  const res = await sendHook(event, body || '{}');
+  const res = await sendWhileHeld(event, body || '{}');
   if (!res) return;
   return print(await answerOf(event, res));
 }
