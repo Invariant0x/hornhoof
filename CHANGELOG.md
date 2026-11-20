@@ -21,6 +21,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The map, a department with its tree and speed, and an employee's window show the same loading indicator where their data will stand. The map is drawn only once the company and the person's own arrangement came, so its blocks no longer jump into place. A department opened at its own address keeps back, the plate of its name and its tools while its company comes, so a failure there has a way out. Their loads say why they failed, or that they take longer than usual, as the tracker's do. None of them says it is empty, such as a conversation with no messages yet, while something it shows is still on its way.
 - A plan with separate limits for groups of models, as Antigravity's Gemini and its Claude and GPT models, keeps each group's limits: a used-up group holds only the turns and fallbacks on its own models, and the plan's card shows every group with what it used and when it resets.
 - In a page that reads right to left, an English line of a bar over the map ends with its full stop instead of starting with it, and the bar stays mirrored.
+- A number on a plan's card stays on one line with its unit or the word it goes with, as "14 h", "1 online" or "Input 0", in every language; a reset still wraps between its parts.
 
 ### Changed
 
