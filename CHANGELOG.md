@@ -22,6 +22,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - The map runs to the bottom of the screen, with the version as small muted text in its bottom end corner, clear of its buttons and of the bars along a phone's bottom; other screens keep the version in the row below them.
 
+## [0.39.3] - 2026-11-19
+
+### Fixed
+
+- On a phone, a department's head card no longer opens under the department's name: it starts 8 px below it, with or without a banner over the map.
+
 ## [0.39.2] - 2026-11-19
 
 ### Fixed
