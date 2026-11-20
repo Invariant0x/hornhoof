@@ -145,8 +145,10 @@ for (const lang of ['en', 'ru'] as const) {
         await page.getByRole('button', { name: lang === 'en' ? /^Development/ : /^Разработка/ }).click();
         await page.getByRole('button', { name: lang === 'en' ? 'Tree' : 'Дерево', exact: true }).click();
       };
+      const t = lang === 'en' ? en : ru;
       await open();
-      await expect(page.locator('.tv-empty')).toHaveText(lang === 'en' ? 'Loading…' : 'Загрузка…');
+      /* While the tree comes, the shared indicator stands in its body, and after a failure it says why with Retry (#1620). */
+      await expect(page.locator('.tview-wait .load-boot-t')).toHaveText(t.common.loading);
       await page.screenshot({ path: info.outputPath('tree-loading.png') });
       mode = 'empty';
       release();
@@ -156,7 +158,7 @@ for (const lang of ['en', 'ru'] as const) {
       const failed = page.waitForResponse(r => r.url().endsWith('/api/departments/d2/tree') && r.status() === 503);
       await open();
       await failed;
-      await expect(page.locator('.tv-empty')).toHaveText(lang === 'en' ? 'This is not available right now.' : 'Сейчас это недоступно.');
+      await expect(page.locator('.tview-wait .load-fail .lf-t')).toHaveText(t.load.failed.server);
       await page.screenshot({ path: info.outputPath('tree-error.png') });
       mode = 'long';
       await open();
