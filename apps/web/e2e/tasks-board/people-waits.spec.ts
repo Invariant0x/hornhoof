@@ -1,13 +1,14 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { DICTIONARIES, LANGUAGES, type Language, type Messages } from '../../src/i18n';
 import { BUILTIN_SKINS, builtinSkin, DEFAULT_SKIN } from '../../src/skins/registry';
+import { ME } from '../api';
 import { captureWith } from '../capture';
 import { MARIA_QUESTION, MAX_QUESTION, QUESTION, servePeopleWaits, serveTasksBoard } from './api';
 
 /* What waits for people in the company, as the CEO meets it in the tracker: every decision with whom it waits for, and its
    count beside it, while Waits for me keeps only the CEO's own. The look goes in the default skin and one of the other
    scheme, at a desk and on a phone, in the shipped languages with the longest and the shortest words on this page. Shots go
-   to HH_SCREENSHOT_DIR when it is set, from Chromium. */
+   to HH_SCREENSHOT_DIR when it is set, from Chromium, with one person's filter beside them. */
 
 const capture = captureWith('people-waits', process.env.HH_SCREENSHOT_DIR);
 const SKINS = [DEFAULT_SKIN, BUILTIN_SKINS.find(skin => skin.scheme !== builtinSkin(DEFAULT_SKIN)!.scheme)!.id];
@@ -68,21 +69,60 @@ test('lists what waits for people with whom each waits for, counts it, and leave
   expect(await countOn(side, t.tracker.peopleWaits.title)).toBe(await countOn(side, t.tracker.side.waits) + 1);
 });
 
+test('names what waits for people once, in the title of the page', async ({ page }) => {
+  const t = DICTIONARIES.en;
+  await open(page, 'en', 1440, '/tasks?show=people');
+  const people = page.getByRole('region', { name: t.tracker.peopleWaits.title });
+  await expect(people.locator('article.req', { hasText: MAX_QUESTION })).toContainText(t.tracker.peopleWaits.waitingFor('Max'));
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(t.tracker.peopleWaits.title);
+  await expect(page.getByRole('heading', { name: t.tracker.peopleWaits.title, exact: true })).toHaveCount(1);
+});
+
+test('shows what waits for one person under a title with their name alone, and Me takes the filter off', async ({ page }) => {
+  const t = DICTIONARIES.en;
+  await open(page, 'en', 1440, '/tasks?show=waits&person=p-max');
+  const mine = page.getByRole('region', { name: t.tasks.waiting });
+  await expect(mine).toContainText(MAX_QUESTION);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(t.tracker.where.waitsFor('Max'));
+  /* What waits for other people has its own section, so the list neither names the person again nor offers everyone's
+     decisions. */
+  await expect(mine.getByText(/^Decisions for /)).toHaveCount(0);
+  await page.getByRole('combobox', { name: t.tracker.viewAs }).selectOption({ label: t.tracker.viewAsSelf(ME.person.name) });
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(t.tracker.where.waits);
+  await expect(mine).toContainText(QUESTION);
+  await expect(mine).not.toContainText(MAX_QUESTION);
+});
+
+/* Each card and its words stay inside the main area, nothing cut short, and the page never scrolls sideways. A closed select
+   shows its choice on one line, as every select of the app does. */
+async function fitsInside(page: Page, region: Locator) {
+  const frame = (await page.locator('.tr-main').boundingBox())!;
+  for (const box of await region.locator('article.req, article.req header > *, .tr-waits li').evaluateAll(els => els.map(e => e.getBoundingClientRect()).map(r => ({ x: r.x, right: r.right })))) {
+    expect(box.x).toBeGreaterThanOrEqual(frame.x - 1);
+    expect(box.right).toBeLessThanOrEqual(frame.x + frame.width + 1);
+  }
+  expect(await page.locator('.tracker :not(select)').evaluateAll(els => els.filter(e => getComputedStyle(e).textOverflow === 'ellipsis').length)).toBe(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+}
+
 for (const lang of LOOK_LANGUAGES) for (const skin of SKINS) for (const width of [1440, 375]) {
   test(`shows what waits for people whole inside the screen: ${lang} ${skin} ${width}`, async ({ page, browserName }, info) => {
     const t = DICTIONARIES[lang];
     await open(page, lang, width, '/tasks?show=people', skin);
     const people = page.getByRole('region', { name: t.tracker.peopleWaits.title });
     await expect(people.locator('article.req', { hasText: MAX_QUESTION })).toContainText(t.tracker.peopleWaits.waitingFor('Max'));
-    /* Each card and its words stay inside the main area, nothing cut short, and the page never scrolls sideways. A closed
-       select shows its choice on one line, as every select of the app does. */
-    const frame = (await page.locator('.tr-main').boundingBox())!;
-    for (const box of await people.locator('article.req, article.req header > *, .tr-waits li').evaluateAll(els => els.map(e => e.getBoundingClientRect()).map(r => ({ x: r.x, right: r.right })))) {
-      expect(box.x).toBeGreaterThanOrEqual(frame.x - 1);
-      expect(box.right).toBeLessThanOrEqual(frame.x + frame.width + 1);
-    }
-    expect(await page.locator('.tracker :not(select)').evaluateAll(els => els.filter(e => getComputedStyle(e).textOverflow === 'ellipsis').length)).toBe(0);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+    await fitsInside(page, people);
     if (browserName === 'chromium') await capture(page, info, `${lang}-${skin}-${width}`);
+  });
+}
+
+for (const lang of LOOK_LANGUAGES) for (const width of [1440, 375]) {
+  test(`shows what waits for one person whole inside the screen: ${lang} ${width}`, async ({ page, browserName }, info) => {
+    const t = DICTIONARIES[lang];
+    await open(page, lang, width, '/tasks?show=waits&person=p-max');
+    const mine = page.getByRole('region', { name: t.tasks.waiting });
+    await expect(mine.locator('article.req', { hasText: MAX_QUESTION })).toBeVisible();
+    await fitsInside(page, mine);
+    if (browserName === 'chromium') await capture(page, info, `filter-${lang}-${DEFAULT_SKIN}-${width}`);
   });
 }
