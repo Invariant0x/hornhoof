@@ -655,7 +655,7 @@ export type MaterialStampView = {
    version, and commits or merges no checked work brought. */
 export type UncheckedItem =
   | { kind: 'unread'; base: string; commit: string }
-  | { kind: 'holder_off' | 'no_candidate' | 'task_unread' | 'unpinned'; task: number }
+  | { kind: 'holder_off' | 'no_candidate' | 'task_unread' | 'unpinned' | 'unstarted'; task: number }
   | { kind: 'checker'; task: number; commit: string }
   | { kind: 'merge' | 'commit'; commit: string };
 

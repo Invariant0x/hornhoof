@@ -1,4 +1,4 @@
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import type { Org, PersonView } from '../src/types';
 import { box, ME, serveApi } from './api';
 
@@ -121,13 +121,20 @@ test.describe('bends on the lines of the company map', () => {
     expect(await page.locator('.world').getAttribute('style')).toBe(view);
     await expect.poll(() => kept.anchors[LINE]).toEqual([[x1, y1]]);
 
-    /* The arrow keys move a bend that has the keyboard's focus, 10 at a step. */
+    /* The arrow keys move a bend that has the keyboard's focus, 10 at a step, and it shows that focus with a ring of its own
+       inside its handle, not the page's ring around it. The keyboard brings the focus, on with Tab and back with Shift+Tab, as
+       a person's would: every engine rings what the keyboard reached, while Firefox does not ring a button a script focused
+       after the hand held it (#1657). */
     await bend.focus();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+Tab');
+    await expect(bend).toBeFocused();
     await page.keyboard.press('ArrowLeft');
     await page.keyboard.press('ArrowLeft');
     expect(await trace(page)).toBe(`M 600 420 L ${x1! - 20} 420 L ${x1! - 20} 200 L 390 200`);
     await expect.poll(() => kept.anchors[LINE]).toEqual([[x1! - 20, y1]]);
-    expect(await bend.evaluate(e => getComputedStyle(e).outlineStyle)).toBe('solid');
+    expect(await bend.evaluate(e => { const s = getComputedStyle(e); return [e.matches(':focus-visible'), s.outlineStyle, s.outlineWidth, s.outlineOffset]; }))
+      .toEqual([true, 'solid', '2px', '-6px']);
     const moved = await onScreen(page, [x1! - 20, y1!]);
     await page.screenshot({ path: info.outputPath('bends-4-keys-close.png'), animations: 'disabled', clip: { x: moved.x - 160, y: moved.y - 140, width: 260, height: 260 } });
     await shot(page, info, 'bends-4-keys');
@@ -159,7 +166,7 @@ test.describe('bends on the lines of the company map', () => {
 test.describe('bends under a finger', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
-  test('a finger puts a bend from 10 px beside a line, takes it by a handle as big as a block\'s grip, and a tap takes it away', async ({ page }, info) => {
+  test('a finger puts a bend from 10 px beside a line, takes it by a handle as big as a block\'s grip, and a tap takes it away', async ({ page, browserName }, info) => {
     const { writes } = await serveMap(page);
     await page.goto('/');
     await expect(page.locator('.dept')).toHaveCount(2);
@@ -171,11 +178,16 @@ test.describe('bends under a finger', () => {
     expect(await hitAt(page, at.x + 11, at.y)).toBe(LINE);
     expect(await hitAt(page, at.x - 11, at.y)).toBe(LINE);
     expect(await hitAt(page, at.x + 15, at.y)).not.toBe(LINE);
-    /* Neither the line nor the bend is drawn for the touch, so the phone flashes nothing over the map where it lands. */
-    expect(await page.locator(`.wires .hit[data-line="${LINE}"]`).evaluate(e => getComputedStyle(e).getPropertyValue('-webkit-tap-highlight-color'))).toBe('rgba(0, 0, 0, 0)');
+    /* Neither the line nor the bend is drawn for the touch, so the phone flashes nothing over the map where it lands. That flash
+       is -webkit-tap-highlight-color, Chromium's and WebKit's own: Firefox has no such property and flashes nothing on a tap,
+       so only an engine that has it is asked, and Firefox stays the only one without it (#1657). */
+    const flashes = await page.evaluate(() => CSS.supports('-webkit-tap-highlight-color', 'transparent'));
+    expect(flashes, 'an engine with a tap flash').toBe(browserName !== 'firefox');
+    const flash = (of: Locator) => of.evaluate(e => getComputedStyle(e).getPropertyValue('-webkit-tap-highlight-color'));
+    if (flashes) expect(await flash(page.locator(`.wires .hit[data-line="${LINE}"]`))).toBe('rgba(0, 0, 0, 0)');
     await page.touchscreen.tap(at.x + 10, at.y);
     const bend = page.locator('.bend');
-    expect(await bend.evaluate(e => getComputedStyle(e).getPropertyValue('-webkit-tap-highlight-color'))).toBe('rgba(0, 0, 0, 0)');
+    if (flashes) expect(await flash(bend)).toBe('rgba(0, 0, 0, 0)');
     await expect(bend).toHaveCount(1);
     await expect.poll(() => writes.length).toBe(1);
 

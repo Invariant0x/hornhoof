@@ -42,13 +42,13 @@ describe('the approval of a release that brings what no check covers', () => {
   it('says every kind of what no check covers in plain words of each language', () => {
     const items: NonNullable<WaitingRequest['unchecked']> = [
       { kind: 'no_candidate', task: 3 }, { kind: 'checker', task: 4, commit: RELEASE }, { kind: 'task_unread', task: 5 },
-      { kind: 'unpinned', task: 6 }, { kind: 'merge', commit: STRAY },
+      { kind: 'unpinned', task: 6 }, { kind: 'unstarted', task: 7 }, { kind: 'merge', commit: STRAY },
     ];
     for (const [lang, t] of [['en', en], ['ru', ru]] as const) {
       renderIn(lang, <Requests {...requestProps({ ...RELEASE_CARD, unchecked: items })} />);
-      const list = screen.getByRole('region', { name: t.tasks.unchecked.heading(5) });
+      const list = screen.getByRole('region', { name: t.tasks.unchecked.heading(6) });
       expect(within(list).getAllByRole('listitem').map(item => item.textContent)).toEqual([
-        t.tasks.unchecked.noCandidate(3), t.tasks.unchecked.checker(4, RELEASE), t.tasks.unchecked.taskUnread(5), t.tasks.unchecked.unpinned(6), t.tasks.unchecked.merge(STRAY),
+        t.tasks.unchecked.noCandidate(3), t.tasks.unchecked.checker(4, RELEASE), t.tasks.unchecked.taskUnread(5), t.tasks.unchecked.unpinned(6), t.tasks.unchecked.unstarted(7), t.tasks.unchecked.merge(STRAY),
       ]);
       cleanup();
     }

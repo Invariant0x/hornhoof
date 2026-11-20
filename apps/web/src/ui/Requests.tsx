@@ -409,19 +409,24 @@ function RequestItem({ request, onDone, inline, ...shared }: Shared & { request:
   );
 }
 
+type UncheckedWords = Messages['tasks']['unchecked'];
+
+/* Each kind of what a release brings that no check covers, in the person's language. */
+const UNCHECKED_TEXT: { [K in UncheckedItem['kind']]: (words: UncheckedWords, item: UncheckedItem & { kind: K }) => string } = {
+  unread: (words, item) => words.unread(item.base, item.commit),
+  holder_off: (words, item) => words.holderOff(item.task),
+  no_candidate: (words, item) => words.noCandidate(item.task),
+  checker: (words, item) => words.checker(item.task, item.commit),
+  task_unread: (words, item) => words.taskUnread(item.task),
+  unpinned: (words, item) => words.unpinned(item.task),
+  unstarted: (words, item) => words.unstarted(item.task),
+  merge: (words, item) => words.merge(item.commit),
+  commit: (words, item) => words.commit(item.commit),
+};
+
 /* One thing a release brings that no check covers, in the person's language. */
 function uncheckedText(t: Messages, item: UncheckedItem): string {
-  const words = t.tasks.unchecked;
-  switch (item.kind) {
-    case 'unread': return words.unread(item.base, item.commit);
-    case 'holder_off': return words.holderOff(item.task);
-    case 'no_candidate': return words.noCandidate(item.task);
-    case 'checker': return words.checker(item.task, item.commit);
-    case 'task_unread': return words.taskUnread(item.task);
-    case 'unpinned': return words.unpinned(item.task);
-    case 'merge': return words.merge(item.commit);
-    case 'commit': return words.commit(item.commit);
-  }
+  return (UNCHECKED_TEXT[item.kind] as (words: UncheckedWords, item: UncheckedItem) => string)(t.tasks.unchecked, item);
 }
 
 /* What the release brings that no check covers, as Hornhoof keeps it apart from the words and the plain explanation above:
