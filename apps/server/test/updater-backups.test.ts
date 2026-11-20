@@ -213,6 +213,47 @@ describe('updater, backups', () => {
     expect(r.out).toContain('Refused dumps: it is not a plain folder.');
   });
 
+  it.each(['different', 'unavailable'])('keeps stale dumps when their mount identity is %s', async identity => {
+    const s = stand();
+    mkdirSync(dumps(s));
+    const stale = join(dumps(s), 'old.sql.gz');
+    writeFileSync(stale, 'rows');
+    utimesSync(stale, new Date(0), new Date(0));
+    const r = await runUpdaterStep(s, `
+      directory_mount() {
+        case "$(physical_dir)" in
+          */dumps) ${identity === 'different' ? 'printf "%s\\n" 2' : 'return 1'} ;;
+          *) printf '%s\\n' 1 ;;
+        esac
+      }
+      sweep_dumps
+    `);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('Refused dumps: could not verify the control mount.');
+    expect(readFileSync(stale, 'utf8')).toBe('rows');
+  });
+
+  it.each(['find', 'rm'])('reports a dump sweep failure from %s and continues', async command => {
+    const s = stand();
+    const tools = join(s.dir, 'sweep-tools');
+    mkdirSync(tools);
+    writeFileSync(join(tools, command), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    mkdirSync(dumps(s));
+    const stale = join(dumps(s), 'old.sql.gz');
+    writeFileSync(stale, 'rows');
+    utimesSync(stale, new Date(0), new Date(0));
+    const r = await runUpdaterStep(s, `
+      export PATH="$SWEEP_TOOLS:$PATH"
+      sweep_dumps
+      printf 'Sweep returned.\\n'
+    `, { SWEEP_TOOLS: tools });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('Sweep returned.');
+    expect(r.out).toContain('Could not check or remove one or more stale dump entries.');
+    expect(r.out).not.toContain('Deleted a database dump');
+    expect(readFileSync(stale, 'utf8')).toBe('rows');
+  });
+
   /* The app can swap a folder in dumps for a link at any moment, also while the sweep runs, here right before rm does.
      The sweep deletes old files of dumps itself only, by their names there, so it never deletes through such a link. */
   it('deletes nothing through a folder of dumps swapped for a link', async () => {

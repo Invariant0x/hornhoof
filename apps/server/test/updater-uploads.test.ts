@@ -385,6 +385,16 @@ describe('the updater and what a machine held when it stopped holding the data',
     expect(existsSync(join(unrelated, 'kept'))).toBe(true);
   });
 
+  it('clears directory names ending in newlines', async () => {
+    const s = stand();
+    const dir = join(s.control, 'dumps', 'retained\n', 'tables\n\n');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'old.csv'), 'rows');
+    const r = await runUpdaterStep(s, 'remove_folders dumps');
+    expect(r.code, r.out).toBe(0);
+    expect(existsSync(join(s.control, 'dumps'))).toBe(false);
+  });
+
   it.each(['dumps', 'dumps/mounted'])('leaves files at the %s mount boundary', async path => {
     const s = stand();
     const mounted = join(s.control, path);
