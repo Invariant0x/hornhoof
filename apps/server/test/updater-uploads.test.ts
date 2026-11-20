@@ -140,6 +140,41 @@ describe('the updater and what a machine held when it stopped holding the data',
     expect(has(s, 'load.json')).toBe(false);
   });
 
+  /* The keeper takes what a machine sends into a folder the app can write too. A named pipe in the place of the packed
+     file stops nothing, and the load unpacks and dumps the schema in a folder of the updater's own, never through a
+     link put at the names it used for that in the shared folder. */
+  it('loads nothing from a named pipe in the place of an upload, and goes on at once', async () => {
+    const s = stand();
+    const id = randomUUID();
+    const file = join(s.control, 'uploads', `${NID}-${id}.tar.gz`);
+    mkdirSync(join(s.control, 'uploads'), { recursive: true });
+    expect(spawnSync('mkfifo', [file]).status).toBe(0);
+    load(s, id, file);
+    const r = await runOnce(s, null);
+    expect(r.out).toContain(`Refused ${NID}-${id}.tar.gz: it is not a plain file.`);
+    expect(listed(s, 'uploads')).toEqual([`${NID}-${id}.failed`]);
+    expect(copies(r.calls)).toEqual([]);
+    expect(renamed(r.calls)).toBe(false);
+  }, 10_000);
+
+  it('loads an upload without writing through links at the names an older build unpacked it at', async () => {
+    const s = stand();
+    const id = randomUUID();
+    const file = packed(s, id, { 'public.tasks.csv': TASKS });
+    const outside = join(s.dir, 'outside');
+    mkdirSync(outside);
+    const sample = join(outside, 'sample.env');
+    writeFileSync(sample, 'SAMPLE_SETTING=unchanged\n', { mode: 0o600 });
+    symlinkSync(sample, join(s.control, 'uploads', 'loading.sql'));
+    symlinkSync(outside, join(s.control, 'uploads', 'loading'));
+    load(s, id, file);
+    const r = await runOnce(s, null);
+    expect(readFileSync(sample, 'utf8')).toBe('SAMPLE_SETTING=unchanged\n');
+    expect(readdirSync(outside)).toEqual(['sample.env']);
+    expect(copies(r.calls)).toHaveLength(1);
+    expect(listed(s, 'uploads')).toContain(`${NID}-${id}.done`);
+  });
+
   it('loads the upload of a machine with an id of the older length', async () => {
     const s = stand();
     const id = randomUUID();

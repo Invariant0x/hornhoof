@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -28,7 +29,8 @@ describe('updater, backups', () => {
     expect(said(join(dumps(s), `${ID}.json`)).at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
     /* For the keeper alone: it runs as the control folder's owner, and reads and deletes what root wrote. */
     expect([mode(dumps(s)), mode(join(dumps(s), `${ID}.sql.gz`)), mode(join(dumps(s), `${ID}.json`))]).toEqual([0o700, 0o600, 0o600]);
-    for (const path of [dumps(s), join(dumps(s), `${ID}.sql.gz.part`), join(dumps(s), `${ID}.json.new`)]) expect(r.calls).toContain(`chown ${owner(s)} ${path}`);
+    /* The folder once it is entered, and each file in the private folder it is written in, before it is renamed into place. */
+    for (const path of ['.', `./${ID}.sql.gz`, `./${ID}.json`]) expect(r.calls).toContain(`chown ${owner(s)} ${path}`);
     expect(existsSync(join(s.control, 'dump.json'))).toBe(false);
     expect(readdirSync(dumps(s)).sort()).toEqual([`${ID}.json`, `${ID}.sql.gz`]);
 
@@ -285,7 +287,7 @@ describe('updater, restore', () => {
     /* Who may get in now, for the keeper alone. */
     expect(json(file(s, 'restore-carry.json'))).toEqual({ attempt: ATTEMPT, carry: CARRY });
     expect(statSync(file(s, 'restore-carry.json')).mode & 0o777).toBe(0o600);
-    expect(r.calls).toContain(`chown ${owner(s)} ${file(s, 'restore-carry.json.new')}`);
+    expect(r.calls).toContain(`chown ${owner(s)} ./restore-carry.json`);
     expect(readdirSync(file(s, 'restore'))).toEqual([]);
     for (const gone of ['restore.json', 'restore-journal.json', 'recovery-link.json']) expect(existsSync(file(s, gone)), gone).toBe(false);
     /* No secret was on a command line. */
@@ -355,6 +357,35 @@ describe('updater, restore', () => {
     expect(r.calls.filter(call => call === 'up with the carry')).toHaveLength(1);
     /* The restored one went only while the old one was kept under its own name. */
     expect(at(r.calls, `docker exec dbcid psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q -c ${ALONE} -c DROP DATABASE hornhoof WITH (FORCE)`)).toBeGreaterThan(at(r.calls, 'docker compose up'));
+  });
+
+  /* The keeper's folder of a restore can be written by the app too. A named pipe in the place of the dump stops nothing,
+     and a link in the place of the backup's settings brings in no settings from elsewhere. */
+  it('ends a restore whose dump is a named pipe at once, with nothing changed', async () => {
+    const s = stand(OLD_ENV);
+    order(s);
+    const dump = file(s, 'restore', `${ATTEMPT}.sql.gz`);
+    rmSync(dump);
+    expect(spawnSync('mkfifo', [dump]).status).toBe(0);
+    const r = await runOnce(s, null, WITH_CARRY);
+    expect(r.out).toContain(`Refused ${ATTEMPT}.sql.gz: it is not a plain file.`);
+    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'failed', step: 'load', line: 'The backup did not load, so nothing changed.' });
+    expectAsBefore(s, r.calls);
+  }, 10_000);
+
+  it("takes no settings through a link in the place of the backup's", async () => {
+    const s = stand(OLD_ENV);
+    order(s);
+    const outside = join(s.dir, 'outside.json');
+    writeFileSync(outside, JSON.stringify(NEW), { mode: 0o600 });
+    const settings = file(s, 'restore', `${ATTEMPT}.env.json`);
+    rmSync(settings);
+    symlinkSync(outside, settings);
+    const r = await runOnce(s, null, WITH_CARRY);
+    expect(r.out).toContain(`Refused ${ATTEMPT}.env.json: it is not a plain file.`);
+    expect(statusOf(s)).toMatchObject({ attempt: ATTEMPT, state: 'failed', step: 'swap', line: "The backup's settings cannot be written, so nothing changed." });
+    expectAsBefore(s, r.calls);
+    expect(readFileSync(outside, 'utf8')).toBe(JSON.stringify(NEW));
   });
 
   it('refuses settings it cannot write', async () => {
