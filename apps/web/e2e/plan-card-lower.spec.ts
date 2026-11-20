@@ -233,7 +233,11 @@ for (const look of [...FULL.filter(look => look.dir === 'rtl'), { lang: 'en', th
   test(`ends each hint of the card with its last character after its last word, in ${lookName(look)}`, async ({ page }) => {
     const t = MESSAGES[look.lang];
     const { card, errors } = await opened(page, look);
-    const hints = [t.subs.fallbacksHint, t.cards.noAgentsHint, t.subs.signedInOnce('Ivan', 1)].sort((a, b) => a.localeCompare(b));
+    const signedInHint = t.subs.signedInOnce('Ivan', 1);
+    const onlineHint = look.lang === 'en'
+      ? signedInHint.replace('1 online', '1\u00a0online')
+      : signedInHint.replace(': 1)', ':\u00a01)');
+    const hints = [t.subs.fallbacksHint, t.cards.noAgentsHint, onlineHint].sort((a, b) => a.localeCompare(b));
     expect(await hintEnds(card)).toEqual(hints.map(text => ({ text, atEnd: true })));
     expect(errors).toEqual([]);
   });
