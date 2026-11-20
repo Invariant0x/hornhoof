@@ -7,6 +7,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+## [0.39.4] - 2026-11-20
+
+### Fixed
+
+- A node no longer refuses the hooks of an agent's own program as callers outside its terminal after the program gave up on one, so its Hornhoof tools stay connected.
+
 ## [0.39.3] - 2026-11-19
 
 ### Fixed
