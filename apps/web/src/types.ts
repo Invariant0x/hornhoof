@@ -5,7 +5,7 @@ import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from 
 import type { ExternalWait, TaskWaitFact, WaitSourceKind } from '@hornhoof/protocol/waits';
 import type { SigninStep } from '@hornhoof/protocol/signin';
 import type { Notification } from '@hornhoof/protocol';
-import type { ConnectionEnd, DepartmentTurnProgress, FailureKind, Limits, MachineDrain, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { ConnectionEnd, DepartmentTurnProgress, DiskReport, FailureKind, Limits, MachineDrain, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { RiskClass, WorkKind } from '@hornhoof/protocol/pipeline-report';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
@@ -732,6 +732,16 @@ export type MachineAwayCard = {
   important: { name: string; kind: 'orchestrator' | 'head' }[];
 };
 
+/* A machine short of disk space, whose node takes no new checks or builds since: for its owner and the CEO, gone by itself
+   once the node has room again or is off the line. */
+export type MachineLowCard = {
+  id: string;
+  hostname: string;
+  owner: { id: string; name: string } | null;
+  since: string;
+  disk: DiskReport;
+};
+
 /* Everything that waits for people as /api/requests shows it to this person, and the counts of all of it: per owner, per
    asking agent and in total. */
 export type Decisions = {
@@ -742,6 +752,8 @@ export type Decisions = {
   /* What merges left for the CEO alone. A server from before merges sends none. */
   merges?: MergeDecision[];
   machinesAway?: MachineAwayCard[];
+  /* A server from before nodes said how full their disk is sends none. */
+  machinesLow?: MachineLowCard[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
 

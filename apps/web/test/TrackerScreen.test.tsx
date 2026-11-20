@@ -910,6 +910,34 @@ it.each([
   expect(within(board).getByRole('region', { name: failures })).toHaveTextContent(phrase);
 });
 
+const GIB = 1024 ** 3;
+/* A made-up machine of Lisa's, short of disk space since this morning. */
+const LOW_MACHINE = {
+  id: 'm1',
+  hostname: 'studio-laptop',
+  owner: { id: 'p1', name: 'Lisa' },
+  since: '2026-11-20T10:00:00.000Z',
+  disk: { total: 500 * GIB, free: 40 * GIB, threshold: 50 * GIB, parts: { images: 60 * GIB }, low: { since: '2026-11-20T10:00:00.000Z' }, cleaned: [] },
+};
+
+it.each([
+  ['en', 'Task lists', 'Failures', 'Machine studio-laptop (Lisa) is low on disk space'],
+  ['ru', 'Списки задач', 'Сбои', 'На машине studio-laptop (Lisa) мало места на диске'],
+])('shows a machine short of disk space among the failures and counts it there (%s)', async (language, lists, failures, title) => {
+  localStorage.setItem('hh-lang', language);
+  shell('/tasks?show=failures&view=list', { 'GET /api/requests': [200, { ...decisions([]), machinesLow: [LOW_MACHINE] }] });
+  expect(await screen.findByRole('region', { name: title })).toBeInTheDocument();
+  const side = screen.getByRole('navigation', { name: lists });
+  expect(within(side).getByRole('button', { name: `${failures} 1` })).toBeInTheDocument();
+});
+
+it('shows no such card and counts none once the machine has room again', async () => {
+  shell('/tasks?show=failures&view=list');
+  const side = await screen.findByRole('navigation', { name: 'Task lists' });
+  expect(await within(side).findByRole('button', { name: 'Failures 0' })).toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: /is low on disk space$/ })).not.toBeInTheDocument();
+});
+
 describe('the left panel and the goals page', () => {
   it("keeps the mockup's order and puts what the product adds after it", async () => {
     shell('/tasks?department=d2');

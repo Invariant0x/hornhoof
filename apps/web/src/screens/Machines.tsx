@@ -22,13 +22,13 @@ import { MachineConnections } from '../ui/MachineConnections';
 import { ProgramVersions } from '../ui/ProgramVersions';
 import { TickBox } from '../ui/TickBox';
 import { DrainLine, DrainMark } from '../ui/MachineDrain';
+import { DiskParts, gigabytes, LowDisk } from '../ui/MachineDisk';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 import { addablePlans, machinePool, machineRows, type MachineRow } from './machine-rows';
 import { everyVisible } from '../guard';
 import { Phones } from '../ui/Phones';
 
 const REFRESH_MS = 5000;
-const GIB = 1024 ** 3;
 /* Docker's system on a Mac keeps a little of what it is given, so only a clear gap says it was set smaller. */
 const SMALLER = 1.1;
 
@@ -36,8 +36,6 @@ const SMALLER = 1.1;
 const CERT_WARNING_MS = 14 * 24 * 3600_000;
 
 const SYSTEMS: Record<string, string> = { darwin: 'macOS', linux: 'Linux' };
-
-const gigabytes = (language: Language, bytes: number) => new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(Math.round((bytes / GIB) * 10) / 10);
 
 const busyShare = (load: number, cpus: number) => Math.min(100, Math.round((load / Math.max(1, cpus)) * 100));
 
@@ -160,7 +158,7 @@ function machineColumns(t: Messages, language: Language, priority: boolean): Tab
   const place: TableColumn<MachineRow>[] = priority ? [{ key: 'priority', label: t.cards.priority, direction: 1, className: 'k-prio', lead: true, value: placeOf, cell: m => <PriorityCell row={m} /> }] : [];
   return [
     ...place,
-    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<DrainMark drain={m.drain} /><OffChecks row={m} /><OtherBuild row={m} /><BrowserIssue row={m} /><CheckIssue row={m} /></> },
+    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<DrainMark drain={m.drain} /><OffChecks row={m} /><OtherBuild row={m} /><BrowserIssue row={m} /><CheckIssue row={m} /><LowDisk load={m.online ? m.load : null} /></> },
     { key: 'owner', label: t.machines.owner, direction: 1, value: m => m.owner?.name ?? null, cell: m => m.owner?.name },
     { key: 'status', label: t.tables.status, direction: 1, value: m => m.online ? 0 : 1, className: 'k-status', cell: m => m.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span> },
     { key: 'load', label: t.machines.load, direction: -1, value: load, cell: m => load(m) === null ? t.machines.unknown : <span className="cell-load"><Bar used={load(m)! / 100} /><b><bdi>{t.machines.percent(load(m)!)}</bdi></b></span> },
@@ -641,7 +639,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
   const picking = controls.picking === row.id;
   return (
     <CardFrame label={row.hostname} accent={row.server}
-      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OffChecks row={row} /><OtherBuild row={row} /><BrowserIssue row={row} /><CheckIssue row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
+      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OffChecks row={row} /><OtherBuild row={row} /><BrowserIssue row={row} /><CheckIssue row={row} /><LowDisk load={row.online ? row.load : null} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
       extra={m && (core ? <CoreCommand machine={m} shown={core} controls={controls} /> : <PlanPicker machine={m} addable={addable} shown={shown} picking={picking} controls={controls} />)}>
       <section className="blk blk-facts">
         <h4>{t.cards.aboutMachine}</h4>
@@ -654,6 +652,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
           {row.checkError && <p className="machine-note">{row.checkError}</p>}
           <NetworkPlace row={row} />
         </Part>
+        {row.online && row.load?.disk && <DiskParts disk={row.load.disk} />}
       </section>
       <RunningNow title={t.machines.runningNow} label={t.machines.runningOn(row.hostname)} agents={row.running.agents} parts={row.running.parts} online={row.online} me={me} />
       <section className="blk blk-side">

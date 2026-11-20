@@ -1066,6 +1066,15 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .facts dd small { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
 .machine-note { font-size: 12.5px; padding-left: 10px; border-left: 3px solid var(--amber-ink); }
+/* Hornhoof's share of a machine's disk (#1750), a row a part: its name at the start, wrapping between whole words, and its
+   size at the end on one line, with its share of the whole disk under them. */
+.disk-parts { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; }
+.disk-parts li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 4px 12px; min-inline-size: 0; }
+.disk-parts .dp-n { min-inline-size: 0; overflow-wrap: break-word; hyphens: auto; }
+.disk-parts .dp-v { font-weight: 500; font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
+.disk-parts .bar { grid-column: 1 / -1; }
+/* Docker's own disk is another disk than the parts above, so its line stands apart from them. */
+.dp-docker { margin-block-start: 12px; }
 .machine-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 /* Subscriptions & API: every button, field and list is a target of 44px, and a card's actions end at its end edge. */
 .subs .btn { min-height: 44px; }
