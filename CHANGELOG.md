@@ -7,6 +7,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+## [0.39.6] - 2026-11-20
+
+### Fixed
+
+- A turn no longer stays running after Claude Code took Hornhoof's words and finished, when its prompt hook was lost: the words in Claude's own transcript count as taken, and the turn ends by itself.
+
 ## [0.39.5] - 2026-11-20
 
 ### Added
