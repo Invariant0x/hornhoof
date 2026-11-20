@@ -7,6 +7,7 @@ import { TerminalHost } from '../src/terminal/host.js';
 import { agyProgram, agyTranscript } from '../src/providers/antigravity-terminal.js';
 import { claudeProgram } from '../src/providers/claude-terminal.js';
 import { TurnWords } from '../src/terminal/program-restart.js';
+import { idleScreen } from '../src/terminal/program-state.js';
 import { agySteps, LineTail } from '../src/terminal/transcripts.js';
 import { Tmux } from '../src/terminal/tmux.js';
 
@@ -102,6 +103,26 @@ describe('Antigravity execution boundaries', () => {
     expect(await sending).toBeNull();
   });
 
+
+  it('keeps a turn running while agy shows an earlier answer done at its empty prompt and no receipt came', async () => {
+    const c = fixture();
+    vi.useFakeTimers();
+    c.agent.took = false;
+    c.agent.typing = 'Please submit the review.';
+    c.agent.turn!.observed = c.host['observeProgram'](c.agent, 'job');
+    const idle = readFileSync(new URL('./fixtures/agy-tui/screen-done.ansi', import.meta.url), 'utf8');
+    expect(idleScreen('antigravity', idle)).toBe(true);
+    vi.spyOn(c.tmux, 'alive').mockResolvedValue(true);
+    vi.spyOn(c.tmux, 'screen').mockResolvedValue(idle);
+    vi.spyOn(c.tmux, 'keys').mockResolvedValue();
+    const job = { key: 'agy', program: agyProgram, bin: 'agy', home: c.agent.home, signedOut: /signed out/, input: { jobId: 'job', prompt: 'Please submit the review.', workDir: c.agent.home, sessionId: 'session', model: null, secret: null, instructions: null, tools: null, timeoutMs: 120_000 } };
+    void c.host['waitAgyReceipt'](c.agent, job, job.input.prompt);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(c.agent.turn!.ending).toBeUndefined();
+    expect(c.agent.busy).toBe(true);
+    c.agent.took = true;
+    await vi.advanceTimersByTimeAsync(100);
+  });
 
   it('keeps the next job waiting past its timeout while the previous agy turn is active', async () => {
     const c = fixture();

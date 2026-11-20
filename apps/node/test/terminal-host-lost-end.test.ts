@@ -41,6 +41,26 @@ it("ends a restarted turn whose words' hook was refused, once its program shows 
   expect(result()).toMatchObject({ ok: true, error: null });
 });
 
+/* The same answer drawn again at another width, as when a person opens the agent's terminal in a window of another size:
+   its words wrap anew, its first rows go off the top and the rules around the prompt take the new width. */
+const redrawn = (rows: string[], width: number) => `${rows.join('\n')}\n\n✻ Worked for 4s · done 2:30 AM\n${'─'.repeat(width)}\n❯ \n${'─'.repeat(width)}\n`;
+
+it('leaves a restarted turn running while its program shows the answer of before drawn at another width', async () => {
+  const c = await atWork('claude', 'silent');
+  const a = c.host['agents'].get('receipt')!;
+  const shown = vi.spyOn(c.tmux, 'screen').mockResolvedValue(redrawn(['⏺ The first row of what it said before,', '  and the last row of it.'], 80));
+  await c.on(c.host['replayWords'](a, a.turn!, 'Go on.'));
+  const result = settled(c.running);
+  shown.mockResolvedValue(redrawn(['⏺ The first row of what it said before, and the last row of it.'], 120));
+  await c.pass(LOOKS_MS);
+  shown.mockResolvedValue(redrawn(['  and the last row of it.'], 60));
+  await c.pass(LOOKS_MS);
+  expect(result()).toBeUndefined();
+  shown.mockResolvedValue(redrawn(['⏺ What it says now.'], 60).replace('2:30 AM', '2:38 AM'));
+  await c.pass(LOOKS_MS);
+  expect(result()).toMatchObject({ ok: true, error: null });
+});
+
 it('ends a turn no end of which ever came, once its program shows its answer done at an empty prompt two looks in a row', async () => {
   const c = await atWork('claude', 'silent');
   const shown = vi.spyOn(c.tmux, 'screen').mockResolvedValue('⏺ Reading the files.\n\n✻ Thinking… (12s · esc to interrupt)\n────────────────────\n❯ \n────────────────────\n');
