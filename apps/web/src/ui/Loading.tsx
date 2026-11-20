@@ -186,9 +186,9 @@ export function Busy({ ring, words, form = 'inline', live = true }: BusyProps) {
 /* A load past 10 s or failed, in the room of what it holds: why, or that it takes longer than usual with the ring still
    turning, as the ask still runs; then what to do, and Retry. words: what failed and what to do, where the screen knows
    better; ring: false where the part already shows its ring. Stop is only where a load can be stopped. */
-type FailProps = { load: Load; onRetry(): void; words?: [string, string]; slowHint?: string; ring?: boolean; stop?: { text: string; label?: string; run(): unknown } };
+type FailProps = { load: Load; onRetry(): unknown; retryLabel?: string; words?: [string, string]; slowHint?: string; ring?: boolean; stop?: { text: string; label?: string; run(): unknown } };
 
-export function LoadFail({ load, onRetry, words, slowHint, ring = true, stop }: FailProps) {
+export function LoadFail({ load, onRetry, retryLabel, words, slowHint, ring = true, stop }: FailProps) {
   const t = useT();
   const slow = load.phase === 'slow';
   const [what, next] = slow ? [t.common.tooLong, slowHint ?? t.load.slowHint] : words ?? failWords(t, load.failure);
@@ -197,7 +197,7 @@ export function LoadFail({ load, onRetry, words, slowHint, ring = true, stop }: 
       <p className="lf-t">{slow && ring && <span className="spinner" aria-hidden="true" />}<span>{what}</span></p>
       <p className="lf-h">{next}</p>
       <div className="entry-actions">
-        <button className="btn" type="button" onClick={onRetry}>{t.common.retry}</button>
+        <button className="btn" type="button" aria-label={retryLabel} onClick={() => void onRetry()}>{t.common.retry}</button>
         {stop && <button className="btn ghost" type="button" aria-label={stop.label} onClick={() => void stop.run()}>{stop.text}</button>}
       </div>
     </div>

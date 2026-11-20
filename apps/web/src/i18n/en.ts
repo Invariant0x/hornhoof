@@ -795,6 +795,7 @@ export const en = {
       noProgram: 'The program could not be installed on this machine, so nothing changed. Check the machine\'s internet connection and free disk space, then try again.',
       other: 'The sign-in did not finish, so nothing changed. Try again.',
       signedOut: 'The program on this machine is not signed in, so nothing changed.',
+      noAnswer: 'Could not connect: your computer stopped answering.',
     },
     /* A plan connecting after its sign-in code: the step its node reports, the time since the code, and what to do when it
        failed or takes too long. */
@@ -812,13 +813,18 @@ export const en = {
       seconds: (s: number) => `${s} s`,
       minutes: (m: number, s: number) => `${m} min ${s} s`,
       passed: (time: string) => `${time} since the code`,
+      /* How far the plan got on its way to work, over the bar of the steps done. */
+      progress: (n: number, total: number) => `Step ${n} of ${total}`,
+      nowTitle: 'Now',
+      keepOn: 'Keep the computer on; this page moves on by itself.',
+      /* A minute with no new step from the machine. */
+      slowHint: 'A step usually takes under a minute. Check that your computer is on and online.',
       next: {
         signInAgain: 'Sign in again. Nothing changed on the plan.',
         installWindow: (host: string) => `Run the install command on ${host} again and sign in there.`,
+        noAnswer: 'Check that the computer is on and online, then press "Retry".',
       },
-      tooLongNext: (minutes: number) => `Connecting has taken more than ${minutes} min. It may still finish. Try again, or stop and come back to it later.`,
-      retry: 'Try again',
-      retryLabel: (name: string) => `Try connecting ${name} again`,
+      retryLabel: (name: string) => `Retry connecting ${name}`,
       cancel: 'Stop',
       cancelLabel: (name: string) => `Stop connecting ${name}`,
     },
@@ -839,6 +845,8 @@ export const en = {
       key: (program: string) => `Paste your ${program} key`,
       ready: 'Ready: agents on this plan can work',
       done: '(done)',
+      current: '(now)',
+      failedMark: '(did not work)',
       now: {
         run: 'Copy the command below, paste it into Terminal on a Mac or Linux or into PowerShell on Windows, and press Enter. This page moves on by itself once your computer connects.',
         newCommand: 'Press "Make a new command" below, then run the new command on your computer.',

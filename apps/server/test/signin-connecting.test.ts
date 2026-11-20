@@ -8,13 +8,16 @@ import { as, connectNode, invitePerson, listen, nextOf, openStream, setUpCompany
 
 /* 19.11: after the sign-in code, nothing on the plan's card changed while its program connected, and an Antigravity plan
    took so long that its owner could not tell whether it worked or hung. From the first step its node reports until the
-   plan is ready, the plan says it is connecting, at which step and since when; a failure says why; past one limit for the
-   whole connection it says that, and its owner can try again or stop. The server's clock and rounds go only as far as a
-   test moves them. */
+   plan is ready, the plan says it is connecting, at which step and since when; a failure says why. A step that takes
+   longer than usual says so (style book 1.5, #1611: 60 s after the last step its node reported), and the whole connection
+   fails at its deadline, which the server alone keeps; its owner can try again or stop. The server's clock and rounds go
+   only as far as a test moves them. */
 
 const MINUTE = 60_000;
-/* The longest the whole connection takes before its owner hears it takes too long, unless set otherwise. */
+/* The deadline of the whole connection, unless set otherwise: past it, it failed. */
 const LIMIT = 10 * MINUTE;
+/* How long after the last step its node reported a connection takes longer than usual, unless set otherwise. */
+const SLOW = MINUTE;
 /* The server looks at the connections once a second. */
 const ROUND = 1000;
 const T0 = new Date('2026-11-19T22:00:00.000Z');
@@ -78,9 +81,11 @@ const signedIn = (node: FakeNode) => node.send({ type: 'status', loggedIn: true,
 
 
 describe('connecting a plan after its sign-in code', () => {
-  it('has one limit for the whole connection, ten minutes unless set otherwise', () => {
+  it('has one deadline for the whole connection, ten minutes, and takes longer than usual a minute after a step, unless set otherwise', () => {
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).signinConnectMs).toBe(LIMIT);
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, SIGNIN_CONNECT_MS: '120000' }).signinConnectMs).toBe(2 * MINUTE);
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).signinSlowMs).toBe(SLOW);
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, SIGNIN_SLOW_MS: '30000' }).signinSlowMs).toBe(30_000);
     expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, SIGNIN_CONNECT_MS: 'soon' })).toThrow(/SIGNIN_CONNECT_MS/);
   });
 
@@ -162,30 +167,50 @@ describe('connecting a plan after its sign-in code', () => {
     expect(said(stream, codex.plan)).toEqual([]);
   });
 
-  it('says a connection takes too long past the one limit for the whole of it, whatever its steps, and still turns ready if it ends', async () => {
+  it('says a connection takes longer than usual a minute after the last step its node reported, which each new step starts over, and still turns ready if it ends', async () => {
     const { app, owner, agy, stream, later } = await plans();
     agy.node.send({ type: 'login.step', step: 'checking' });
     await saysNext(stream, agy.plan, 0);
-    await later(4 * MINUTE);
-    agy.node.send({ type: 'login.step', step: 'models' });
-    await saysNext(stream, agy.plan, 1);
-    /* A new step does not move the limit: it is of the whole connection. */
-    await later(6 * MINUTE - 3 * ROUND);
-    expect((await planOf(app, owner, agy.plan)).connecting).toMatchObject({ state: 'connecting', step: 'models', until: at(LIMIT) });
+    await later(SLOW - 2 * ROUND);
+    expect((await planOf(app, owner, agy.plan)).connecting).toMatchObject({ state: 'connecting', step: 'checking' });
     await later(2 * ROUND);
-    expect(await saysNext(stream, agy.plan, 2)).toMatchObject({ state: 'too_long', step: 'models', since: at(0), until: at(LIMIT), error: null });
-    expect((await planOf(app, owner, agy.plan)).connecting).toMatchObject({ state: 'too_long' });
+    expect(await saysNext(stream, agy.plan, 1)).toMatchObject({ state: 'too_long', step: 'checking', since: at(0), until: at(LIMIT), error: null });
+    agy.node.send({ type: 'login.step', step: 'models' });
+    expect(await saysNext(stream, agy.plan, 2)).toMatchObject({ state: 'connecting', step: 'models', since: at(0), until: at(LIMIT) });
+    await later(SLOW - 2 * ROUND);
+    expect((await planOf(app, owner, agy.plan)).connecting).toMatchObject({ state: 'connecting', step: 'models' });
+    await later(2 * ROUND);
+    expect(await saysNext(stream, agy.plan, 3)).toMatchObject({ state: 'too_long', step: 'models' });
     signedIn(agy.node);
-    expect(await saysNext(stream, agy.plan, 3)).toBeNull();
+    expect(await saysNext(stream, agy.plan, 4)).toBeNull();
     expect(await planOf(app, owner, agy.plan)).toMatchObject({ status: 'ready', connecting: null });
   });
 
-  it('takes the limit it is set to', async () => {
-    const { codex, stream, later } = await plans({ SIGNIN_CONNECT_MS: String(2 * MINUTE) });
+  it('fails at the deadline of the whole connection, whatever its steps, saying its machine stopped answering', async () => {
+    const { app, owner, agy, stream, later } = await plans();
+    agy.node.send({ type: 'login.step', step: 'checking' });
+    await saysNext(stream, agy.plan, 0);
+    /* Steps keep coming, so it never takes longer than usual: the deadline is still of the whole connection. */
+    for (const step of ['saving', 'account', 'limits', 'models', 'account', 'limits', 'models', 'account', 'limits', 'models'] as const) {
+      await later(SLOW - 5 * ROUND);
+      agy.node.send({ type: 'login.step', step });
+      await until(() => said(stream, agy.plan).at(-1)?.step === step);
+    }
+    expect(said(stream, agy.plan).some(c => c?.state === 'too_long')).toBe(false);
+    expect((await planOf(app, owner, agy.plan)).connecting).toMatchObject({ state: 'connecting', until: at(LIMIT) });
+    await later(LIMIT - 10 * (SLOW - 5 * ROUND));
+    expect(await saysNext(stream, agy.plan, 0, c => c?.state === 'failed')).toMatchObject({ state: 'failed', error: SIGNIN_ERRORS.noAnswer, since: at(0), until: at(LIMIT) });
+    expect((await planOf(app, owner, agy.plan)).connecting).toMatchObject({ state: 'failed', error: SIGNIN_ERRORS.noAnswer });
+  });
+
+  it('takes the deadline and the time of a step it is set to', async () => {
+    const { codex, stream, later } = await plans({ SIGNIN_CONNECT_MS: String(2 * MINUTE), SIGNIN_SLOW_MS: String(30_000) });
     codex.node.send({ type: 'login.step', step: 'checking' });
     expect(await saysNext(stream, codex.plan, 0)).toMatchObject({ until: at(2 * MINUTE) });
-    await later(2 * MINUTE);
+    await later(30_000);
     expect(await saysNext(stream, codex.plan, 1)).toMatchObject({ state: 'too_long' });
+    await later(90_000);
+    expect(await saysNext(stream, codex.plan, 2)).toMatchObject({ state: 'failed', error: SIGNIN_ERRORS.noAnswer });
   });
 
   it('stops on Cancel: the sign-in running on the node stops and the plan shows no connection', async () => {
@@ -199,12 +224,12 @@ describe('connecting a plan after its sign-in code', () => {
     expect((await planOf(app, owner, codex.plan)).connecting).toBeNull();
   });
 
-  it('tries an Antigravity connection again on Retry: its node checks the sign-in again, and the limit starts over', async () => {
+  it('tries an Antigravity connection again on Retry: its node checks the sign-in again, and the deadline starts over', async () => {
     const { app, owner, agy, stream, later } = await plans();
     agy.node.send({ type: 'login.step', step: 'checking' });
     await saysNext(stream, agy.plan, 0);
     await later(LIMIT);
-    await saysNext(stream, agy.plan, 1, c => c?.state === 'too_long');
+    await saysNext(stream, agy.plan, 1, c => c?.state === 'failed');
     const retry = await app.inject({ method: 'POST', url: `/api/subscriptions/${agy.plan}/connecting/retry`, ...as(owner) });
     expect(retry.statusCode).toBe(204);
     expect(await nextOf(agy.node, 'login.check')).toEqual({ type: 'login.check' });
