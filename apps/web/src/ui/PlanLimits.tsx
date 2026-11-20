@@ -5,13 +5,14 @@ import { Bar, percent, Share } from './Bar';
 import { Gauge, Part } from './Cards';
 import { ResetTime, ResetWords, resetDurationAt } from './reset';
 import { currentPlanLimits, limitState, MAIN_WINDOWS, unknownLimitData, windowParts } from './subscription';
+import { keepUnits } from './units';
 
 /* A window's name whole, in the direction of its own words, with its number and unit in one piece that reads left to right,
-   so a page laid out right to left keeps «7 days, Opus» as it reads. */
+   so a page laid out right to left keeps «7 days, Opus» as it reads, and the number never wraps away from its unit. */
 function WindowName({ name }: { name: string }) {
   const t = useT();
   const [piece, words] = windowParts(t, name);
-  return <bdi>{piece && <bdi dir="ltr">{piece}</bdi>}{words}</bdi>;
+  return <bdi>{piece && <bdi dir="ltr">{keepUnits(piece)}</bdi>}{words}</bdi>;
 }
 
 /* A window of a part of the plan's limits: the window, its used share where it is known, and when it resets. */

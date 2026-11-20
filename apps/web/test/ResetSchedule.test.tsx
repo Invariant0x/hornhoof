@@ -132,10 +132,11 @@ describe('relative subscription reset times', () => {
     const kimi = { ...SUBS[2]!, status: 'ready' as const, online: true, machines: [MACHINE], limits: { status: 'allowed' as const, complete: true, windows: [{ name: 'five_hour', utilization: 0.88, resetsAt: at(30_000) }, { name: 'month', utilization: 0.06, resetsAt: 'not-a-time' }] } };
     await renderSubs([claude, codex, kimi]);
     for (const button of screen.getAllByRole('button', { name: /^Open the card of / })) fireEvent.click(button);
-    /* A reset's line by its whole words, one piece in the direction of its own words: the time in it stands in a piece of its own. */
+    /* A reset's line by its whole words, one piece in the direction of its own words: the time in it stands in a piece of its own,
+       each number on one line with its unit (#1601). */
     const resetLine = (text: string) => (_: string, el: Element | null) => !!el?.matches('.g-s > bdi:not([dir])') && el.textContent === text;
-    expect(within(screen.getByRole('article', { name: 'Claude, Ivan' })).getByText(resetLine('resets in 3 days 7 h'))).toBeInTheDocument();
-    expect(within(screen.getByRole('article', { name: 'Codex, Ivan' })).getByText(resetLine('resets in 7 h 5 min'))).toBeInTheDocument();
+    expect(within(screen.getByRole('article', { name: 'Claude, Ivan' })).getByText(resetLine('resets in 3\u00a0days 7\u00a0h'))).toBeInTheDocument();
+    expect(within(screen.getByRole('article', { name: 'Codex, Ivan' })).getByText(resetLine('resets in 7\u00a0h 5\u00a0min'))).toBeInTheDocument();
     expect(within(screen.getByRole('article', { name: 'Codex, Ivan' })).getByText(resetLine('Reset time unknown'))).toBeInTheDocument();
     expect(within(screen.getByRole('article', { name: 'Kimi, Ivan' })).getByText(resetLine('resets in less than a minute'))).toBeInTheDocument();
     expect(within(screen.getByRole('article', { name: 'Kimi, Ivan' })).getByText(resetLine('Reset time unknown'))).toBeInTheDocument();

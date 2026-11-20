@@ -5,6 +5,7 @@ import type { ModelTokens, SubView, TokenPeriods, TokenSum } from '../types';
 import { Gauge } from './Cards';
 import { LoadState, noneYet, useLoad, type LoadPart } from './Loading';
 import { tokenCount } from './token-count';
+import { keepUnits, NBSP } from './units';
 
 const PERIODS = ['today', 'week', 'month', 'all'] as const;
 
@@ -59,11 +60,11 @@ export function TokenCount({ count }: { count: number }) {
 }
 
 /* A period's tile: its name in one piece as «7 дней», the short count on screen, the whole one in its name and tooltip,
-   then input, output and cache. */
+   then input, output and cache, each on one line with its count. */
 function PeriodGauge({ label, sum, t, language }: { label: string; sum: TokenSum; t: Messages; language: Language }) {
   const full = t.subs.tokens.full(new Intl.NumberFormat(language).format(sum.total), sum.total);
   const split = [[t.subs.tokens.input, sum.input], [t.subs.tokens.output, sum.output], [t.subs.tokens.cache, sum.cacheRead + sum.cacheWrite]] as const;
-  return <Gauge label={<Piece text={label} />} name={`${label}: ${full}`} title={full} figure={<TokenCount count={sum.total} />} sub={split.map(([term, count]) => <span key={term}>{`${term} `}<TokenCount count={count} /></span>)} empty={!sum.turns} />;
+  return <Gauge label={<Piece text={keepUnits(label)} />} name={`${label}: ${full}`} title={full} figure={<TokenCount count={sum.total} />} sub={split.map(([term, count]) => <span key={term}>{`${term}${NBSP}`}<TokenCount count={count} /></span>)} empty={!sum.turns} />;
 }
 
 /* Each model's share of the connection's 30 days, the largest first, under the name the connection lists it by. */

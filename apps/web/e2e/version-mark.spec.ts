@@ -80,18 +80,18 @@ async function openMap(page: Page, look: Look, arranged = false) {
   await still(page);
 }
 
-/* What the version stands on: the top of the highest bar along the bottom of the map, or else the bottom of the window. On a
-   phone that is the highest of them all, wherever it stands across, as Put back at the start over the dock: the room
-   #1554 measures ends over them all, and the version stands in the end corner of that room. On a wide screen the room is the
-   whole map, so it is the highest in the version's own column, as the zoom right to left. */
-const floorUnder = (page: Page, at: Box, phone: boolean) => page.evaluate(({ selector, at, phone }) => {
+/* What the version stands on. On a phone, the top of the highest bar along the bottom of the map, wherever it stands across,
+   as Put back at the start over the dock: the room #1554 measures ends over them all, and the version stands in the end
+   corner of that room. On a wide screen the room is the whole map and no bar stands in the end corner, the zoom and Put back
+   at the start and the orchestrator's line in the middle (#1622), so it is the bottom of the window. */
+const floorUnder = (page: Page, phone: boolean) => page.evaluate(({ selector, phone }) => {
   const tops = [...document.querySelectorAll(selector)].map(e => e.getBoundingClientRect())
-    .filter(r => r.width && r.height && r.top > innerHeight / 2 && (phone || (r.left < at.x + at.width && at.x < r.right))).map(r => r.top);
+    .filter(r => phone && r.width && r.height && r.top > innerHeight / 2).map(r => r.top);
   return tops.length ? Math.min(...tops) : innerHeight;
-}, { selector: BARS, at, phone });
+}, { selector: BARS, phone });
 
 async function standsOn(page: Page, at: Box, width: Width) {
-  const bottom = at.y + at.height, floor = await floorUnder(page, at, width === 375);
+  const bottom = at.y + at.height, floor = await floorUnder(page, width === 375);
   expect(bottom, 'over the bars along the bottom').toBeLessThanOrEqual(floor);
   expect(floor - bottom, 'near what it stands on').toBeLessThanOrEqual(NEAR);
 }
@@ -171,8 +171,7 @@ for (const look of LOOKS) {
     if (look.dir === 'rtl') expect(at.x, 'gap to the left edge').toBeLessThanOrEqual(NEAR);
     expect(look.dir === 'ltr' ? at.x > width / 2 : at.x + at.width < width / 2, 'on the end half of the screen').toBe(true);
 
-    /* At the bottom: in the corner of the window, or right on the bars along the bottom, as on a phone, and as on the zoom at
-       the left of a wide screen right to left. */
+    /* At the bottom: right on the bars along the bottom on a phone, in the corner of the window on a wide screen. */
     await standsOn(page, at, look.width);
 
     /* It covers no control and no bar, and a tap at its middle goes to the map under it. */

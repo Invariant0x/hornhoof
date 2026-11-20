@@ -12,7 +12,7 @@ import { DepartmentMark, ExecutorMark, PersonMark } from './TrackerMarks';
 import { WorkerMark } from './WorkerMark';
 import { QuestionButton, STATE_CLASS, StateWord, WaitLine } from './TaskActivity';
 import { GOAL_CLASS, goalProgress } from './GoalPanel';
-import { Busy, Idle, MAX_HELD_ROWS } from './Loading';
+import { Idle, LoadLine, MAX_HELD_ROWS, type Load } from './Loading';
 
 /* How a view opens a task's card and marks the open one. asksYou: an open question on a task is the person's to answer. */
 export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; questionAt?: (id: string) => string | undefined; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined; stageOwner?: (stage: PipelineStage) => string | undefined; now?: (id: string) => boolean };
@@ -190,7 +190,7 @@ function rowsToFill(list: HTMLElement | null): number {
 
 /* The list while its tasks come (style book 1.5, section 4): the names of its columns and its first group's head at once, then
    as many held rows as it showed last in this tab, or as fill what is in view, the first with the ring and its words. */
-export function HeldList({ rows, ring }: { rows: number | null; ring: boolean }) {
+export function HeldList({ rows, load }: { rows: number | null; load: Load }) {
   const t = useT();
   const list = useRef<HTMLDivElement>(null);
   const [fill, setFill] = useState(rows ?? 1);
@@ -206,7 +206,7 @@ export function HeldList({ rows, ring }: { rows: number | null; ring: boolean })
           <ListHead />
           <div>
             <ul className="tr-rows">
-              <li className="tr-row"><div className="tr-cells tr-row-line"><Busy ring={ring} words={t.load.tasks} /></div></li>
+              <li className="tr-row"><div className="tr-cells tr-row-line"><LoadLine load={load} words={t.load.tasks} /></div></li>
               {Array.from({ length: held - 1 }, (_, i) => <HeldRow key={i} title={HELD_TITLES[i % HELD_TITLES.length]!} />)}
             </ul>
           </div>

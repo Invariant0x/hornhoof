@@ -4,6 +4,7 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { SubView, WaitCard } from '../src/types';
 import { serveApi, TASKS } from './api';
+import { stretch } from './pseudo-text';
 
 /* The one department serveApi answers with, whose tasks the tracker lists. */
 const DEPARTMENT_ID = 'd2';
@@ -110,7 +111,9 @@ const SCREENS: Screen[] = [
     held: '/api/subscriptions',
     open: byTab('subscriptions'),
     answer: route => route.fulfill({ json: { subscriptions: [PLAN], apiPlaces: null } }),
-    shown: (page, lang) => [page.getByRole('navigation').first(), page.getByRole('heading', { level: 1, name: words(lang).subs.heading, exact: true })],
+    /* Its search field and its table's head are drawn at once and stay where they are when the plans come (Design #1656). */
+    shown: (page, lang) => [page.getByRole('navigation').first(), page.getByRole('heading', { level: 1, name: words(lang).subs.heading, exact: true }),
+      page.locator('section.subs input[type=search]'), page.locator('section.subs table.dt thead')],
     place: page => page.locator('section.subs'),
     arrived: (page, lang) => page.getByRole('button', { name: words(lang).tables.openCard('Codex'), exact: true }),
   },
@@ -338,7 +341,23 @@ for (const screen of SCREENS) {
   });
 }
 
+/* Design #1656: past 10 s and once given up, what the room holds stays: the block that says so stands where the ring and its
+   words stood, in the room's first row. */
+async function expectKeptRoom(page: Page, first: Locator, kept: Locator[]) {
+  for (const [ms, block] of [[SLOW_MS, '.load-fail.slow'], [FAIL_MS - SLOW_MS, '.load-fail:not(.slow)']] as const) {
+    await page.clock.runFor(ms);
+    await expect(first.locator(block)).toBeVisible();
+    for (const part of kept) await expect(part).toBeVisible();
+  }
+}
+
 test.describe('the tracker list while its tasks come', () => {
+  test('keeps its column names, its group head and its held rows past 10 s and once given up', async ({ page }) => {
+    await openHeld(page, SCREENS[0]!, EN);
+    const rows = page.locator('.tr-held .tr-rows > .tr-row');
+    await expectKeptRoom(page, rows.first(), [page.locator('.tr-held .tr-head'), page.locator('.tr-held .tr-group-head'), rows.nth(1)]);
+  });
+
   test('holds rows of the size of its rows, which its first rows take in place, with the column names and the group head at once', async ({ page }) => {
     const hold = await openHeld(page, SCREENS[0]!, EN);
     await page.clock.runFor(RING_DELAY_MS);
@@ -367,6 +386,20 @@ test.describe('the tracker list while its tasks come', () => {
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.clock.runFor(RING_DELAY_MS);
     await expect(page.locator('.tr-held .tr-row')).toHaveCount(Math.min(shown, 40));
+  });
+});
+
+test.describe('the plans while they come', () => {
+  test('draw their search field, their count line and their table head at once, hold plan rows, and keep them past 10 s and once given up', async ({ page }) => {
+    const t = words('en');
+    await openHeld(page, SCREENS[2]!, EN);
+    const room = page.locator('section.subs .load-hold');
+    await expect(room.getByPlaceholder(t.tables.searchSubscriptions)).toBeVisible();
+    await expect(room.locator('p.result')).toBeVisible();
+    await expect(room.locator('table.dt thead th').first()).toBeVisible();
+    const rows = room.locator('table.dt tbody tr');
+    expect(await rows.count()).toBeGreaterThan(1);
+    await expectKeptRoom(page, rows.first(), [room.locator('table.dt thead'), rows.nth(1), room.getByPlaceholder(t.tables.searchSubscriptions)]);
   });
 });
 
@@ -414,5 +447,31 @@ for (const screen of SCREENS) for (const look of LOOKS) {
     await expect(screen.arrived(page, look.lang)).toBeVisible();
     await inside();
     await shot('ready');
+  });
+}
+
+/* No pseudo-long language ships, so the test keeps its own (Design #1656): the words of each state of a load about twice as
+   long as the English wrap inside their blocks and the screen, on a phone and a desktop. */
+for (const screen of SCREENS) for (const width of [375, 1440]) {
+  test(`each state of a load wraps inside the screen in a long pseudo translation ${screen.name}-${width}`, async ({ page, browserName }) => {
+    const hold = await openHeld(page, screen, { lang: 'en', theme: 'cyberpunk', width });
+    const blocks = screen.place(page).locator('.load-busy, .load-boot, .load-fail');
+    const check = async (state: string) => {
+      for (const block of await blocks.all()) await stretch(block);
+      /* A run of text inside a line has no width of its own to overflow: its block is checked. */
+      expect(await blocks.evaluateAll(all => all.flatMap(b => [b, ...b.querySelectorAll('*')]).filter(e => !e.closest('.sr') && getComputedStyle(e).display !== 'inline' && e.scrollWidth > e.clientWidth + 1).map(e => `${e.tagName.toLowerCase()}.${[...e.classList].join('.')} ${e.scrollWidth}>${e.clientWidth}`))).toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.screenshot({ path: `${SHOTS}/${browserName}-${screen.name}-pseudo-${width}-${state}.png`, animations: 'disabled' });
+    };
+    await page.clock.runFor(RING_DELAY_MS);
+    await expect(busyOf(screen, page)).not.toHaveClass(/unseen/);
+    await check('loading');
+    await page.clock.runFor(SLOW_MS - RING_DELAY_MS);
+    await expect(screen.place(page).locator('.load-fail.slow')).toBeVisible();
+    await check('slow');
+    await page.clock.runFor(FAIL_MS - SLOW_MS);
+    await expect(screen.place(page).locator('.load-fail:not(.slow)')).toBeVisible();
+    await check('failed');
+    hold.release();
   });
 }

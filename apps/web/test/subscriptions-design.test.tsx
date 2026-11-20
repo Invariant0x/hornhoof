@@ -240,9 +240,9 @@ describe('the Tokens part of an open card', () => {
     const today = periods(1_250_000).today;
     const tile = within(part).getByRole('group', { name: new RegExp(`${n(language, today.total)} ${tokens}`) });
     expect(tile).toHaveAttribute('title', `${n(language, today.total)} ${tokens}`);
-    expect(tile.textContent).toContain(`${input} ${n(language, today.input)}`);
-    expect(tile.textContent).toContain(`${output} ${n(language, today.output)}`);
-    expect(tile.textContent).toMatch(new RegExp(`${cache} `));
+    expect(tile.textContent).toContain(`${input}\u00a0${n(language, today.input)}`);
+    expect(tile.textContent).toContain(`${output}\u00a0${n(language, today.output)}`);
+    expect(tile.textContent).toMatch(new RegExp(`${cache}\u00a0`));
     expect(within(part).getAllByRole('group', { name: new RegExp(` ${tokens}$`) })).toHaveLength(4);
 
     const models = part.querySelector('.models')!;
@@ -282,7 +282,7 @@ describe('the Tokens part of an open card', () => {
     const counts = periods(1_250_000);
     expect(pieces(cell)).toEqual([`ltr ${tokenCount(language, ROUTER.tokens!.month.total)}`]);
     const words = language === 'en' ? en.subs.tokens : ru.subs.tokens;
-    expect([...part.querySelectorAll('.g-l')].map(pieces)).toEqual((['today', 'week', 'month', 'all'] as const).map(p => [`ltr ${words[p]}`]));
+    expect([...part.querySelectorAll('.g-l')].map(pieces)).toEqual((['today', 'week', 'month', 'all'] as const).map(p => [`ltr ${words[p].replace(/(\d) /, '$1\u00a0')}`]));
     expect([...part.querySelectorAll('.g-f b')].map(pieces)).toEqual((['today', 'week', 'month', 'all'] as const).map(p => [`ltr ${tokenCount(language, counts[p].total)}`]));
     const today = [...part.querySelectorAll('.gauge')][0]!;
     const lines = [...today.querySelectorAll('.g-s > span')];
