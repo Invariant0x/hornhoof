@@ -310,7 +310,8 @@ function landedElsewhere(pinned: string | null | undefined, commit: string | nul
   return 'clone_failed';
 }
 
-/* The task's files a part of work takes in, through Hornhoof with the node's key, and the files it puts on the task. */
+/* The task's files a part of work takes in, through Hornhoof with the node's key, and the files a part that runs a command
+   puts on the task. */
 /* signal: gives up on the request, and on its body, when the part is stopped or its time is up. */
 export type PartFiles = {
   get(partId: string, name: string, signal?: AbortSignal): Promise<Buffer>;
@@ -339,7 +340,7 @@ export function partFiles(server: string, key: string): PartFiles {
   };
 }
 
-/* The files a part of work left in its output folder that go on the task: plain files only, made by the part's own user
+/* The files a part left in its output folder, $HH_OUT, that go on the task: plain files only, made by the part's own user
    when it has one, at most MAX_RUN_FILES of them, each at most RUN_FILE_BYTES. Opened without following a link, so a
    link to the node's key never leaves the machine. */
 export async function putOutputs(msg: TestRun, folder: string, user: JobUser | null, files: PartFiles, out: Output, signal: AbortSignal): Promise<void> {
@@ -387,7 +388,7 @@ export async function putOutputs(msg: TestRun, folder: string, user: JobUser | n
 /* A part's folders: its own, which stays the node's so its user cannot put anything else in place of the rest, and the
    ones inside it that its user writes in. */
 export function partFolders(root: string, msg: TestRun): { own: string; user: string[] } {
-  const subs = ['home', 'tmp', ...(msg.kind === 'work' ? ['out', msg.repo ? 'in' : 'work'] : []), ...(msg.repo ? ['repo'] : [])];
+  const subs = ['home', 'tmp', 'out', ...(msg.kind === 'work' ? [msg.repo ? 'in' : 'work'] : []), ...(msg.repo ? ['repo'] : [])];
   return { own: root, user: subs.map(sub => join(root, sub)) };
 }
 
@@ -413,7 +414,7 @@ function workerEnv(msg: TestRun, options: Options): Record<string, string> {
 function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox: string, workers: Record<string, string>): NodeJS.ProcessEnv {
   const parts = { HH_PART: String(msg.part), HH_PARTS: String(msg.parts) };
   if (msg.kind === 'work') return { ...base, NO_COLOR: '1', ...parts, HH_IN: inbox, HH_OUT: outbox, ...workers };
-  return { ...base, CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', ...workers, ...parts, HH_TEST_PART: String(msg.part), HH_TEST_PARTS: String(msg.parts) };
+  return { ...base, CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', ...workers, ...parts, HH_TEST_PART: String(msg.part), HH_TEST_PARTS: String(msg.parts), HH_OUT: outbox };
 }
 
 function partStopReporter(msg: TestRun, out: Output): (ended: Ended) => TestError | null {
@@ -429,8 +430,8 @@ function partStopReporter(msg: TestRun, out: Output): (ended: Ended) => TestErro
 
 /* One part of a run, which always ends with a tests.done: the commit Hornhoof pinned, or else the branch if there is one,
    comes into a fresh folder, a part of work gets the task's files it names, the command runs within the time with a home
-   and a temporary folder of its own, what a part of work leaves in its output folder goes on the task, and the folder
-   goes, whatever happened. */
+   and a temporary folder of its own, what it leaves in its output folder goes on the task unless it was stopped, and the
+   folder goes, whatever happened. */
 export async function runTests(msg: TestRun, options: Options): Promise<TestsDone> {
   if (msg.environment) return runProductPart(msg, options);
   const { dir, user, hidden, signal, proc = '/proc', files, prepareRepoBrowser = repoDir => ensureRepoBrowser(dir, repoDir, user) } = options;
@@ -528,7 +529,7 @@ export async function runTests(msg: TestRun, options: Options): Promise<TestsDon
     /* Only a user of the node's own, never the node's or a person's. */
     if (user && user.uid >= FIRST_UID) clearShared(user.uid, SHARED);
     try {
-      if (work && ran && files && error !== 'cancelled') await putOutputs(msg, outbox, user, files, out, until(deadline + PUT_GRACE_MS));
+      if (ran && files && error !== 'cancelled') await putOutputs(msg, outbox, user, files, out, until(deadline + PUT_GRACE_MS));
     } catch (err) {
       out.line(`The output folder could not be read: ${err instanceof Error ? err.message : String(err)}`);
     }
