@@ -78,7 +78,7 @@ It is your own virtual cloud. It runs on the computers you connect, one or many,
 
    On a computer that already runs Hornhoof, yours or another person's, it asks a name for the new company, such as `home`, and sets it up apart, with its own database and port. `server --name home` gives the name without the question.
 
-2. Open the link it shows, name your company and pick one of nine templates. You are the CEO.
+2. Open the link it shows, name your company and pick one of ten templates. You are the CEO.
 
    ![Setting up a company](.github/assets/setup.gif)
 
@@ -104,7 +104,7 @@ Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM 
 - **Computers add up.** Laptops, a Mac mini and an old server become one pool. The full test run splits across the freest machines. If the computer with the server turns off, a machine with a full copy of the data takes over within a minute, at the same link.
 - **Everyone sees their part.** Each person gets the departments they work in, and inside them the agents on their own plans. Someone who runs several departments sits next to the CEO as a deputy.
 - **Sign-ins stay with their owners.** Your plan's sign-in is sealed to your own machines. Nobody else can read it, the CEO included.
-- **Real departments from day one.** Development, design, marketing, sales, support, finance. Nine company templates, each department with a head and employees who know their job.
+- **Real departments from day one.** Development, design, marketing, sales, support, finance. Ten company templates, each department with a head and employees who know their job.
 
 ![The Development department at work](.github/assets/development.gif)
 
@@ -116,7 +116,7 @@ Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM 
 
 - **A department for every kind of work.** Each has a head and employees who each know one part of the job. In marketing a search specialist, a social media manager and a copywriter work on one campaign; in support the first line answers, the second line takes the hard cases and an editor keeps the knowledge base. The head splits the goal, hands out the parts and checks the result.
 - **Agents work like people.** A letter goes out from the department's own mailbox, social networks go through the company's Android phones, and each step is written down in the department's git. There is no mailing machinery: like Lego, a department builds what it needs from a mailbox, a phone, a script and a skill.
-- **A library to start from.** 10 departments, 64 roles and over 150 skills from the best practices of each field: campaign plans, copywriting and editing, SEO audits, social posts, market sizing, marketplace listings, sales, support and finance. Development, design and operations run every day in Hornhoof's own company, and what works there goes back into the templates.
+- **A library to start from.** 11 departments, 75 roles and over 190 skills from the best practices of each field: campaign plans, copywriting and editing, SEO audits, social posts, market sizing, marketplace listings, sales, support and finance. Development, design and operations run every day in Hornhoof's own company, and what works there goes back into the templates.
 - **Your own way of working.** Change any employee's role and skills on its card, or write your own roles, skills and departments. The company puts them to work on the next task.
 
 ## Ways of working
@@ -231,7 +231,7 @@ Hornhoof is developed inside Hornhoof. Its own company of agents on Claude, Chat
 
 ## Let's build it together
 
-I built Hornhoof for myself, to make working with AI convenient: several plans, several computers and far too many terminal tabs, working as one team. On the way I gathered what actually works: how to split work so agents do not wait on each other, which checks catch real bugs and which only slow things down, how to keep agents moving without babysitting them. All of it is in the templates, 64 roles and over 150 skills that every company starts with.
+I built Hornhoof for myself, to make working with AI convenient: several plans, several computers and far too many terminal tabs, working as one team. On the way I gathered what actually works: how to split work so agents do not wait on each other, which checks catch real bugs and which only slow things down, how to keep agents moving without babysitting them. All of it is in the templates, 75 roles and over 190 skills that every company starts with.
 
 Let's join forces and make it the best way to run AI agents: the fastest, the most reliable, safe, and fully yours. The code is open under MIT, and Hornhoof's own company puts what you add to work right away. Try it and tell me what broke, bring the practices that work for you, write templates for departments and roles, translate the screens, or pick an open issue.
 
