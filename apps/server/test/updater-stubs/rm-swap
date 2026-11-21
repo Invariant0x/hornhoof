@@ -1,0 +1,14 @@
+#!/bin/sh
+# rm, as the app can meet it: the first time it is given a file in the folder RM_SWAP names (<folder>=<target>, by what
+# it really is), that folder is swapped for a link to the target before anything goes, which a process of UID 1000 can do
+# at any moment. Then rm itself runs on what it was given.
+from=${RM_SWAP%%=*}
+for path in "$@"; do
+  [ -n "${RM_SWAP:-}" ] || break
+  case "$path" in -*) continue ;; esac
+  [ "$(cd -P -- "$(dirname -- "$path")" 2> /dev/null && pwd -P)" = "$from" ] || continue
+  if mkdir "$STUB_STATE/rm-swapped" 2> /dev/null; then mv -- "$from" "$from.moved" && ln -s -- "${RM_SWAP#*=}" "$from"; fi
+  break
+done
+for real in /bin/rm /usr/bin/rm; do [ -x "$real" ] && exec "$real" "$@"; done
+exit 127

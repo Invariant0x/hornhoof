@@ -192,6 +192,8 @@ select:disabled { opacity: .55; }
 .ic { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .pm { width: 13px; height: 13px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: var(--ink); }
 .pm .fill { fill: currentColor; stroke: none; }
+/* Where an executor has no program: the room of its mark, empty, so nothing beside it moves (#1776). */
+.pm-none { display: inline-block; inline-size: 13px; block-size: 13px; flex: none; }
 .pm.claude { color: var(--p-claude); }
 .pm.kimi { color: var(--p-kimi); }
 .pm.glm { color: var(--p-glm); }
@@ -284,8 +286,17 @@ select:disabled { opacity: .55; }
 .shell {
   --bar-top: 12px; --bar-edge: 16px; --bar-size: 44px; --bar-gap: 8px;
   --header-room: calc(2 * var(--bar-top) + var(--bar-size));
+  /* Design's #1635, variant A (#1639): the header, the bars of the shell and the bottom bar are glass blocks of the skin's
+     --hud, .94 in every skin, and what stands under the bars moves in 200 ms when one comes or goes, by transform. What
+     the map and a department show starts --float-gap, 8 px on every screen, under the last block at the top, though on a
+     phone the blocks stand 6 px apart: --under-menu while no bar stands, and --shell-top, which the shell measures and sets
+     on itself, while one does. --plate-room is the height of an open
+     department's name and the 8 px under it, while a department is open. */
+  --bar-glass: var(--hud); --shell-shift: 200ms; --float-gap: 8px;
+  --under-menu: calc(var(--bar-top) + var(--bar-size) + var(--float-gap));
   position: relative; height: 100%;
 }
+@media (prefers-reduced-motion: reduce) { .shell { --shell-shift: 0s; } }
 .topbar {
   position: absolute; z-index: 10; inset-block-start: var(--bar-top); inset-inline: var(--bar-edge);
   display: grid; grid-template-columns: 1fr minmax(0, auto) 1fr; align-items: start; gap: var(--bar-gap);
@@ -294,7 +305,7 @@ select:disabled { opacity: .55; }
 .topbar > * { pointer-events: auto; }
 /* Glass floats over the canvas, whose dots and signals move every frame: a blur under it is drawn again every frame and
    stalls the page. The dense --hud of every skin stands in for it. */
-.glass { background: var(--hud); border: 1px solid var(--line); }
+.glass { background: var(--bar-glass, var(--hud)); border: 1px solid var(--line); }
 .tb-brand { justify-self: start; display: flex; align-items: center; justify-content: center; width: var(--bar-size); height: var(--bar-size); }
 .tb-brand svg { width: 24px; height: 24px; flex: none; }
 /* The strip's frame is drawn over its tabs rather than around them, so each tab is a target of the strip's whole 44px. */
@@ -307,7 +318,9 @@ select:disabled { opacity: .55; }
 }
 .tabs button + button { border-inline-start: 1px solid var(--line); }
 .tabs button:hover { color: var(--ink); }
-.tabs button.on { color: var(--cyan-ink); background: var(--glow); box-shadow: inset 0 -2px 0 var(--cyan); }
+/* The chosen tab stands on an opaque backing, the accent's glow over the surface: over the glass alone what passes under it
+   would take its ink under 4.5:1 in a light skin (#1635). */
+.tabs button.on { color: var(--cyan-ink); background: linear-gradient(var(--glow), var(--glow)) var(--surface); box-shadow: inset 0 -2px 0 var(--cyan); }
 /* When the words of the tabs do not fit one line, each tab is its icon: cells of the strip's height with the icon in the
    middle, in the tab's own colour, and the count of what waits on the icon's corner. */
 .tabs svg { display: block; flex: none; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: butt; stroke-linejoin: miter; }
@@ -592,15 +605,30 @@ select:disabled { opacity: .55; }
 .body > .update-banner { margin-inline: auto; max-inline-size: calc(100% - 2 * var(--bar-edge)); overflow-wrap: anywhere; }
 .body > .guard-stop { position: relative; z-index: 9; }
 .body.page > :is(.update-banner, .alert, .guard-stop) { z-index: auto; }
-/* On the map, the canvas fills the room after any shell bars. Without a bar it still reaches behind the header. An open
-   department takes that room alone: the map it flew in from keeps its size and view out of the row, and shows nowhere,
-   not even behind the header and the bars. */
-.body:not(.page):has(> :is(.update-banner, .alert, .guard-stop)) { display: flex; flex-direction: column; }
-.body:not(.page)::before, .body:not(.page) > :is(.update-banner, .alert, .guard-stop) { flex: none; }
-.body:not(.page):has(> :is(.update-banner, .alert, .guard-stop)) > :is(.map:not([inert]), .dview) {
-  position: relative; inset: auto; flex: 1; min-block-size: var(--bar-size);
+/* On the map the canvas and an open department fill the window from its top, and the header and the bars of the shell float
+   over them (#1639): what they show starts under the last bar, at --shell-top as the shell measures it while a bar stands.
+   An open department covers the map it flew in from, which keeps its size and view behind it. */
+/* There each bar is a glass block like the header's (#1635): no shadow, and the map shows between the blocks. A failure keeps
+   the mark at its start. A bar that comes shows from its top down on the curve and in the time what stands under the bars
+   slides on, so the slide never lets the content under the part of the bar already shown: from the menu's bottom, which
+   stands --bar-top above the first bar, or from the bar above, --bar-gap above the next. */
+.body:not(.page) > :is(.update-banner, .alert, .guard-stop) {
+  background: var(--bar-glass); border: 1px solid var(--line); box-shadow: none;
+  animation: bar-in var(--shell-shift) ease-out;
 }
-.body:not(.page):has(> :is(.update-banner, .alert, .guard-stop)) > .map[inert] { visibility: hidden; }
+.body:not(.page) > .alert { border-inline-start: 3px solid var(--pink); }
+.body:not(.page) > .guard-stop { border-inline-start: 3px solid var(--pink-ink); }
+.body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ :is(.update-banner, .alert, .guard-stop) { --bar-above: var(--bar-gap); }
+@keyframes bar-in { from { clip-path: inset(0 0 calc(100% + var(--bar-above, var(--bar-top))) 0); } }
+/* On a phone every bar after the first folds to one line with More, which opens it whole (Design's decision on #1635): two
+   bars would take a third of the screen. More is hidden elsewhere: a .btn's display beats the hidden attribute by itself. */
+.bar-more[hidden] { display: none; }
+@media (max-width: 760px) {
+  .body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) { flex-wrap: nowrap; }
+  .body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) > span { flex: 1 1 auto; min-inline-size: 0; max-block-size: 1lh; overflow: hidden; }
+  .body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) > :not(span, .bar-more) { display: none; }
+  .body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) > .bar-more { display: inline-flex; flex: none; }
+}
 
 /* Map */
 .map { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -642,6 +670,9 @@ select:disabled { opacity: .55; }
 .pt { pointer-events: none; }
 .pt.k { fill: var(--ink); }
 .halo { border-radius: 50%; background: radial-gradient(circle, var(--glow), transparent 68%); pointer-events: none; }
+/* The hub's glow stands where the map puts it, left and top from the world's corner, in either direction: the inset of a
+   button's halo would pull it to the world's right edge right to left (#1639). */
+.world > .halo { inset: auto; }
 .chips { left: 0; top: 0; margin: 0; padding: 0; list-style: none; }
 .chips > li { position: absolute; }
 .chips li > .edge { height: 100%; }
@@ -1070,6 +1101,15 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .facts dd small { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
 .machine-note { font-size: 12.5px; padding-left: 10px; border-left: 3px solid var(--amber-ink); }
+/* Hornhoof's share of a machine's disk (#1750), a row a part: its name at the start, wrapping between whole words, and its
+   size at the end on one line, with its share of the whole disk under them. */
+.disk-parts { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; }
+.disk-parts li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 4px 12px; min-inline-size: 0; }
+.disk-parts .dp-n { min-inline-size: 0; overflow-wrap: break-word; hyphens: auto; }
+.disk-parts .dp-v { font-weight: 500; font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
+.disk-parts .bar { grid-column: 1 / -1; }
+/* Docker's own disk is another disk than the parts above, so its line stands apart from them. */
+.dp-docker { margin-block-start: 12px; }
 .machine-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 /* Subscriptions & API: every button, field and list is a target of 44px, and a card's actions end at its end edge. */
 .subs .btn { min-height: 44px; }
@@ -1136,8 +1176,10 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .t-card.done label { cursor: default; }
 .t-card.done label > *, .t-card.done h4 { opacity: .6; }
 
-/* The orchestrator's window: a terminal over the right of the map. */
-.orch { position: fixed; z-index: 9; top: 68px; right: 16px; bottom: 76px; width: 640px; box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); font-family: var(--f-mono); font-size: 13px; line-height: 1.55; }
+/* The orchestrator's window: a terminal over the right of the map. Like every window and card, it opens 8 px under the last
+   block at the top: the menu, a bar of the shell while one stands over the map, and an open department's name under them
+   (#1639, Design's decision on #1635). */
+.orch { position: fixed; z-index: 9; top: calc(var(--shell-top, var(--under-menu)) + var(--plate-room, 0px)); right: 16px; bottom: 76px; width: 640px; box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); font-family: var(--f-mono); font-size: 13px; line-height: 1.55; }
 .t-bar { flex: none; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 4px 0 14px; border-bottom: 1px solid var(--line); font-family: var(--f-body); font-size: 12.5px; color: var(--muted); }
 .t-bar .lights { flex: none; display: flex; gap: 6px; }
 .t-bar .lights i { width: 10px; height: 10px; border-radius: 50%; background: var(--idle); }
@@ -1389,7 +1431,7 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .notebook-unread p { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .t-st { flex: none; display: flex; justify-content: space-between; gap: 12px; padding: 6px 16px 10px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 .t-st > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 760px) { .orch, .orch.term { left: 0; right: 0; top: 56px; bottom: 0; width: auto; border-left: 0; border-right: 0; } }
+@media (max-width: 760px) { .orch, .orch.term { left: 0; right: 0; top: var(--shell-top, var(--under-menu)); bottom: 0; width: auto; border-left: 0; border-right: 0; } }
 @media (prefers-reduced-motion: reduce) { .t-log > * { animation: none; } }
 
 /* A department card on the map opens the department. */
@@ -1438,9 +1480,9 @@ button.chip-btn.attn { --glow: var(--amber); --frame: var(--amber); }
   position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
   background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 22px 22px; -webkit-hyphens: auto; hyphens: auto;
 }
-/* The top bar and the department's name keep a band of their own over the page's background, and the schema starts under
-   it, as the tree does: it opens and fits clear of the bar, and a part dragged or zoomed up goes out of sight at its edge. */
-.dcanvas { inset-block-start: var(--tree-top, var(--header-room)); }
+/* The schema's canvas runs from the top of the window to its bottom, under the top bar, the department's name and the dock,
+   which are glass blocks over it with no band of their own (#1635, which replaces #1556's band). The schema opens and fits
+   clear of them; a part the person drags or zooms there passes under the glass. */
 .dcanvas:active { cursor: grabbing; }
 .dcanvas .wires .tick { fill: none; stroke: var(--line2); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
 .wires .ko { fill: none; stroke: var(--bg); stroke-width: 7; vector-effect: non-scaling-stroke; }
@@ -1564,9 +1606,14 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 .pchip .pn b { font-family: var(--f-display); font-size: 14px; font-weight: 600; overflow-wrap: break-word; }
 .pchip .pn span { font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
 .dv-empty { position: absolute; left: 50%; bottom: var(--tree-bottom, 76px); transform: translateX(-50%); margin: 0; padding: 10px 16px; font-size: 13px; color: var(--muted); }
-/* The department's name next to the logo, its actions bottom right and the drawer they open at the left. A name too long
-   for its room wraps its words, and the tree and the drawers start under it, as the department measures it. */
-.crumbs { position: absolute; z-index: 3; top: 12px; inset-inline-start: 68px; display: flex; align-items: flex-start; gap: 8px; height: auto; max-width: calc(50% - var(--tabs-half, 204px) - 76px); min-width: 0; }
+/* The department's name 8 px under the menu, or under the last bar of the shell while one stands, on every screen; its
+   actions bottom right and the drawer they open at the left. A name too long for its room wraps its words, and the tree and
+   the drawers start under it, as the department measures it. It moves with the bars by transform (#1635, #1639). */
+.crumbs {
+  position: absolute; z-index: 3; top: 0; inset-inline-start: var(--bar-edge); display: flex; align-items: flex-start; gap: 8px; height: auto;
+  max-width: calc(100% - 2 * var(--bar-edge)); min-width: 0;
+  transform: translateY(var(--shell-top, var(--under-menu))); transition: transform var(--shell-shift) ease-out;
+}
 .crumbs h2 { min-width: 0; white-space: normal; overflow-wrap: break-word; font-size: 15px; color: var(--cyan-ink); }
 .crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; height: auto; min-height: 44px; box-sizing: border-box; min-width: 0; padding: 8px 14px; color: var(--ink); }
 .dv-acts { position: absolute; z-index: 3; inset-inline-end: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px; }
@@ -1601,7 +1648,7 @@ body:has(.dview) .version-mark { display: none; }
 /* The line of what changed sits between the zoom and the actions, in either direction. */
 .dview .ticker { inset-inline: 212px var(--ticker-right, 16px); transform: none; max-width: none; }
 .dv-drawer { position: absolute; z-index: 4; }
-.dv-drawer, .acard { top: 68px; bottom: 76px; width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
+.dv-drawer, .acard { top: calc(var(--shell-top, var(--under-menu)) + var(--plate-room, 0px)); bottom: 76px; width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
 /* The drawer opens at the start, under the department's name, mirrored right to left; a window keeps its own place (#1658). */
 .dv-drawer { inset-inline-start: 16px; }
 .acard { left: 16px; }
@@ -1749,6 +1796,10 @@ body:has(.dview) .version-mark { display: none; }
 /* A page has no strip at the bottom: there a card, task or window lies over it down to the bottom of the window, and the page
    keeps its width and place under it. */
 .body.page ~ .acard, .body.page ~ .orch { bottom: 0; }
+/* A page keeps its own opaque header room, which #1635 leaves as it is: its windows and cards open under that room as before,
+   or under a bar of the shell while one stands, where on the map and in a department they open 8 px under the menu. */
+@media (min-width: 761px) { .body.page ~ :is(.orch, .dv-drawer, .acard, .agent-strips) { top: var(--shell-top, 68px); } }
+@media (max-width: 760px) { .body.page ~ .orch { top: var(--shell-top, 56px); } }
 /* The body scrolls with the same 18 px of room at its end for a scrollbar in every browser, so its words are as wide in each:
    --sb is what this browser's scrollbar takes of it (style book section 9). */
 .ac-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-content: start; padding: 16px 18px 20px; padding-inline-end: calc(18px + max(0px, 18px - var(--sb, 0px))); }
@@ -1926,19 +1977,16 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .t-card.staff > .form-foot { margin-block-start: 10px; }
 
 @media (max-width: 760px) {
-  /* The name of the department stands under the top bar and wraps its words; the tree and the drawers start under it, as the
-     department measures it. */
-  .crumbs { top: 64px; inset-inline-start: 16px; max-width: calc(100% - 32px); }
   .dv-acts { flex-wrap: wrap; }
   /* The hint of an empty map stands whole above the dock, which may grow to several rows: across the width, 16px above
      its top as the map measures it. */
   .dv-empty { left: 16px; right: 16px; bottom: calc(var(--tree-bottom, 228px) + 8px); transform: none; overflow-wrap: break-word; }
-  .dv-drawer, .acard { top: 116px; bottom: 16px; width: auto; }
+  /* A card opens 8 px under the department's name, as tall as it wraps, below the bars too; with no department open it keeps
+     the place where the name would stand. */
+  .dv-drawer, .acard { top: calc(var(--shell-top, var(--under-menu)) + var(--plate-room, 52px)); bottom: 16px; width: auto; }
   .acard { right: 16px; }
   .dv-drawer { inset-inline: 16px; }
   .dv-drawer { top: var(--tree-top, 116px); }
-  /* The schema shows between the department's name and the dock, as the tree does: what scrolls under them goes out of sight. */
-  .dcanvas { inset-block: var(--tree-top, 116px) var(--tree-bottom, 228px); }
   .ac-pick, .staff-pick { grid-template-columns: minmax(0, 1fr); }
   .staff-pick { margin-inline-start: 0; }
   /* The dock stands across the bottom: the zoom at its end with out, in and Show everything, the line of what happened
@@ -2343,9 +2391,12 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-held .tr-status-dot { border-color: var(--idle); }
 .tr-held .tr-title { display: flex; flex: 1 1 auto; align-items: center; }
 .tr-held .tr-group-toggle { cursor: default; }
-.tr-held .tr-row-line > .load-busy { grid-column: 1 / -1; padding-inline: 8px; }
-/* Past 10 s or once failed, the block that says so stands in the first held row, over the whole width (Design #1656). */
-.tr-held .tr-row-line > .load-fail { grid-column: 1 / -1; margin-block: 6px; }
+.tr-held .tr-rows { align-content: start; }
+.tr-held .tr-row-line > .load-busy { grid-column: 1 / -1; min-block-size: var(--row); padding-inline: 8px; }
+/* Past 10 s or once failed, the block that says so sits over the first held rows from the top edge while row 0 keeps its
+   row height, so the held rows under it never shift (Design #1656, #1844). */
+.tr-held .tr-row-line:has(> .tr-held-fail)::before { content: ''; grid-column: 1 / -1; min-block-size: var(--row); }
+.tr-held .tr-row-line > .tr-held-fail { position: absolute; inset-block-start: 0; inset-inline: 0; z-index: 2; padding: 6px 0; background: var(--bg); border-block-end: 1px solid var(--line); }
 /* A task's card while its details come: a held line of its path, and the details as a tail (ui/TaskPanel.tsx HeldTask). */
 .tp-path-held { min-block-size: var(--tracker-target-fine); }
 .tp-path-held::after { content: none; }
@@ -2362,6 +2413,8 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .tr-group-head { grid-column: 1 / -1; }
   .tr-group > [hidden], .tr-rows[hidden] { display: none; }
   .tr-v:has(> .tr-mark, > .tr-stage-ghost) { display: flex; flex-wrap: wrap; align-items: center; }
+  /* The executor's program as its logo, as near its initials as the one-shot mark (#1770); the narrow list's gap does it there. */
+  .tr-v > .tr-executor + :is(.pm, .pm-none) { margin-inline-start: 4px; }
   .tr-cells:dir(rtl) > .tr-cell > .tr-v:dir(ltr), .tr-cells:dir(ltr) > .tr-cell > .tr-v:dir(rtl) { justify-content: flex-end; text-align: end; }
 }
 /* A narrow list puts each fact under the title, after its name. */
@@ -2580,6 +2633,7 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .machine-away { display: grid; gap: 4px; min-inline-size: 0; padding: 8px 12px; border-inline-start: 2px solid var(--pink); overflow-wrap: anywhere; }
 .machine-away h3 { font-size: 14px; }
 .machine-away p { margin: 0; }
+.machine-away .ml-kept { margin: 0; padding-inline-start: 18px; }
 /* A card kept for the person: a turn that is over in the accent, what needs a look in amber. */
 .wait-card { display: grid; gap: 4px; padding: 8px 12px; border-inline-start: 2px solid var(--amber); min-width: 0; overflow-wrap: anywhere; }
 .wait-card.turn_summary { border-inline-start-color: var(--cyan-ink); }
@@ -2684,6 +2738,35 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .entry-actions { box-sizing: border-box; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: stretch; gap: 8px; inline-size: 100%; min-width: 0; margin: 0; padding: 0; }
 .entry-actions > :is(.act, .btn) { flex: 0 1 auto; min-inline-size: 0; max-inline-size: 100%; box-sizing: border-box; height: auto; min-height: 44px; margin: 0; padding: 8px 12px; border-radius: 0; appearance: none; display: inline-flex; align-items: center; justify-content: center; text-align: center; white-space: normal; overflow-wrap: break-word; line-height: 1.4; }
 .req-actions.entry-actions { justify-content: flex-start; }
+.wait-queue, .wait-strips, .wait-question-copy { display: grid; gap: 8px; min-inline-size: 0; }
+.wait-current { min-inline-size: 0; padding: 16px 18px; border: 1px solid var(--line2); background: var(--surface); overflow-wrap: anywhere; }
+.wait-current:has(> h3:focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.wait-current-content { display: grid; gap: 12px; min-inline-size: 0; animation: arrive .12s ease-out both; }
+.wait-current :is(.req, .wait-card, .t-card) { gap: 12px; margin: 0; padding: 0; border: 0; background: var(--surface); }
+.wait-current .req header { color: var(--muted); font-size: 13px; }
+.wait-current .req header .req-term { margin-left: 0; margin-inline-start: auto; text-align: start; }
+.wait-current .req-actions.entry-actions { justify-content: flex-end; }
+.wait-strips ul { list-style: none; margin: 0; padding: 0; min-inline-size: 0; }
+.wait-strips li + li { border-block-start: 1px solid var(--line); }
+.wait-strip { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: start; gap: 8px; inline-size: 100%; min-block-size: 44px; margin: 0; padding: 10px 14px; border: 0; background: var(--surface); color: var(--ink); font-family: var(--f-body); font-size: 14px; line-height: 1.45; text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+.wait-strip:hover { background: var(--surface2); }
+.wait-strip:focus-visible { position: relative; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.wait-strip > .ic, .wait-question-hint svg { inline-size: 14px; block-size: 14px; margin-block-start: 2px; color: var(--muted); }
+.wait-strip-lines { display: grid; gap: 4px; min-inline-size: 0; }
+.wait-strip-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.wait-strip-text bdi, .wait-meta > * { min-inline-size: 0; }
+.wait-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.wait-neutral.status { color: var(--muted); border-color: var(--line2); }
+.wait-question { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; min-inline-size: 0; padding-block: 12px; border-block-end: 1px solid var(--line); }
+.wait-question-copy { gap: 4px; }
+.wait-question-text { color: var(--ink); font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wait-question .tr-avatar { --tr-tone: var(--muted); inline-size: 20px; block-size: 20px; min-inline-size: 20px; min-block-size: 20px; }
+.wait-question-hint { display: flex; align-items: start; gap: 4px; font-size: 13px; overflow-wrap: anywhere; }
+.wait-question-hint svg { flex: 0 0 14px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.wait-question-hint svg .cf { fill: currentColor; stroke: none; }
+.req:has(> header .wait-neutral) { border-inline-start: 1px solid var(--line); }
+@media (max-width: 640px) { .wait-question { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { .wait-current-content { animation: none; } }
 .choice-list > .req-option { min-height: 44px; }
 .mat-zone { display: grid; gap: 8px; min-width: 0; margin: 0; }
 .mat-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; margin: 0; }
@@ -3299,6 +3382,8 @@ th.k-prio .sorth { white-space: nowrap; }
 .cell-load .bar { width: 64px; flex: 1 1 64px; min-width: 24px; max-width: 64px; }
 .cell-load b, .num { font-weight: 500; font-variant-numeric: tabular-nums; white-space: normal; }
 .cell-lim { display: grid; gap: 4px; min-width: 0; }
+.where-list.limit-groups { gap: 12px; }
+.limit-groups .cell-lim { gap: 0; }
 .cell-lim .bar { width: 80px; }
 .cell-lim span { font-size: 12px; color: var(--muted); }
 .cell-lim b { font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -3441,7 +3526,7 @@ th.k-prio .sorth { white-space: nowrap; }
 .side-panel > .acard { position: static; width: 100%; height: 100%; max-width: none; }
 .side-panel .ac-body > .notebook { padding: 0; overflow: visible; }
 /* Minimized windows: a strip each at the edge, one after another; what the edge cannot hold scrolls. */
-.agent-strips { position: fixed; z-index: 9; top: 68px; right: 0; bottom: 76px; width: 32px; display: flex; flex-direction: column; gap: 4px; overflow: hidden auto; scrollbar-width: none; }
+.agent-strips { position: fixed; z-index: 9; top: calc(var(--shell-top, var(--under-menu)) + var(--plate-room, 0px)); right: 0; bottom: 76px; width: 32px; display: flex; flex-direction: column; gap: 4px; overflow: hidden auto; scrollbar-width: none; }
 .agent-strips:empty { display: none; }
 .agent-strip { flex: none; display: flex; flex-direction: column-reverse; border: 1px solid var(--cyan); box-sizing: border-box; background: var(--surface); }
 .agent-strip-open { display: flex; align-items: center; gap: 6px; min-height: 48px; max-height: 240px; padding: 8px 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; writing-mode: vertical-rl; }
