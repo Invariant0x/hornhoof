@@ -72,8 +72,8 @@ for (const { id: lang, rtl } of [...LANGUAGES.map(({ id }) => ({ id, rtl: false 
       const t = DICTIONARIES[lang];
       const { firstId, readonlyTitle } = await openQueue(page, lang, skin, width, rtl);
       const id = `${rtl ? 'rtl' : lang}-${skin}-${width}`;
-      const shot = async (name: string, region?: Locator) => {
-        if (browserName === 'chromium') await capture(region ?? page, info, `${id}-${name}`);
+      const shot = async (name: string) => {
+        if (browserName === 'chromium') await capture(page, info, `${id}-${name}`);
       };
       const mine = page.getByRole('region', { name: t.tasks.waiting, exact: true });
       const open = mine.locator('article.req');
@@ -117,7 +117,8 @@ for (const { id: lang, rtl } of [...LANGUAGES.map(({ id }) => ({ id, rtl: false 
       await expect(row).toContainText(t.tasks.decidedByNamedPerson);
       await expect(row.getByRole('button')).toHaveCount(1);
       await fits(people);
-      await shot('people', row);
+      await row.scrollIntoViewIfNeeded();
+      await shot('people');
       await row.getByRole('button', { name: t.tasks.queue.open, exact: true }).click();
       const panel = page.getByRole('complementary', { name: `#${readonlyTitle.number} ${readonlyTitle.title}`, exact: true });
       const readOnly = panel.getByRole('article', { name: `#${readonlyTitle.number} ${readonlyTitle.title}`, exact: true });
