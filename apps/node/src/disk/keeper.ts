@@ -1,4 +1,4 @@
-import { DISK_KEPT_MAX, DiskReport } from '@hornhoof/protocol';
+import { DISK_IGNORED_MAX, DISK_KEPT_MAX, DiskReport } from '@hornhoof/protocol';
 import type { Cleaner, Stay } from './clean.js';
 import { DiskCleaned, DiskLow, diskThreshold, type DiskSettings, type Removal } from './state.js';
 
@@ -21,9 +21,10 @@ const PATH_MAX = 300;
 
 /* What stays, as the report can carry it: a path too long keeps its end, where a person finds the copy, and an entry under a
    folder that is no agent id of Hornhoof's goes. */
+const fit = (path: string) => (path.length > PATH_MAX ? `…${path.slice(-(PATH_MAX - 1))}` : path);
 function fitted(stay: Stay): Stay | null {
   if (stay.agent.length > AGENT_MAX) return null;
-  return stay.path.length > PATH_MAX ? { ...stay, path: `…${stay.path.slice(-(PATH_MAX - 1))}` } : stay;
+  return { ...stay, path: fit(stay.path), ...(stay.ignored ? { ignored: stay.ignored.slice(0, DISK_IGNORED_MAX).map(fit) } : {}) };
 }
 
 /* A node's care of its disk. Each pass first removes what of Hornhoof's share can come back, part by part, then measures the

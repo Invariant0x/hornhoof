@@ -92,6 +92,19 @@ describe("the working copies of an agent's finished tasks, in a node's disk care
     expect(copies.kept()).toEqual([{ agent: 'agent-a', path: 'shop-7', task: 7, bytes: expect.any(Number), why: 'unpushed' }]);
   });
 
+  it('keeps a pushed one that holds an ignored file no remote has, without its dependencies, and names that file for the card', async () => {
+    const { dir, clone, copy } = node();
+    const shop = clone('agent-a', 'shop');
+    const done = copy(shop, 'shop-7', 'task-7');
+    writeFileSync(join(shop, '.git', 'info', 'exclude'), '.env\n');
+    writeFileSync(join(done, '.env'), 'KEY=made-up\n');
+    const copies = workingCopies({ dir, git: agentGit(dir, OWNER), tasks: () => closedUpTo(7) });
+    expect(await copies.clean()).toBeGreaterThanOrEqual(256 * 1024);
+    expect(readFileSync(join(done, '.env'), 'utf8')).toBe('KEY=made-up\n');
+    expect(existsSync(join(done, 'node_modules'))).toBe(false);
+    expect(copies.kept()).toEqual([{ agent: 'agent-a', path: 'shop-7', task: 7, bytes: expect.any(Number), why: 'ignored', ignored: ['.env'] }]);
+  });
+
   it('leaves an open task and its dependencies alone', async () => {
     const { dir, clone, copy } = node();
     const open = copy(clone('agent-a', 'shop'), 'shop-7', 'task-7');

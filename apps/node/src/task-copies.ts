@@ -30,9 +30,29 @@ const real = (path: string): string | null => {
 
 const why = (err: unknown) => (err instanceof GitPreparationError ? err.outcome.stderr : err instanceof Error ? err.message : String(err)).split('\n').map(l => l.trim()).find(Boolean) ?? 'no reason was given';
 
+/* What git ignores in a copy that comes back by itself: installed dependencies, builds, caches and test output, a folder or
+   a file of that name at any depth, or a file ending so. A closed task's worktree goes only when all it ignores is of these;
+   anything else git ignores is on no remote, so the worktree stays for a person to see. */
+export const REBUILDABLE = ['node_modules', 'dist', 'build', '.cache', 'coverage', '.next', '.nuxt', '.turbo', '.parcel-cache', '.vite', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.venv', 'target', '.gradle', 'test-results', 'playwright-report', 'blob-report', 'e2e/results', '.eslintcache', '.DS_Store', '*.tsbuildinfo'] as const;
+
+/* Whether a path git lists as ignored, a folder with its slash, is of what comes back by itself. */
+export function rebuildable(entry: string): boolean {
+  const path = `/${entry.replace(/\/$/, '')}`;
+  return REBUILDABLE.some(name => (name.startsWith('*.') ? path.endsWith(name.slice(1)) : path.endsWith(`/${name}`) || path.includes(`/${name}/`)));
+}
+
+/* What git ignores in a worktree, from ls-files with --directory: a folder ignored whole is one entry, and git also lists
+   the folders not in the repository that hold what it ignores, which are left out here as their entries stand for them. */
+function ownIgnored(listed: string): string[] {
+  const entries = listed.split('\0').filter(Boolean);
+  return entries.filter(entry => !(entry.endsWith('/') && entries.some(other => other !== entry && other.startsWith(entry))));
+}
+
+const named = (paths: string[]) => (paths.length > 5 ? `${paths.slice(0, 5).join(', ')} and ${paths.length - 5} more` : paths.join(', '));
+
 /* Why a closed task's worktree stays. */
-export type KeptWhy = 'locked' | 'uncommitted' | 'unpushed' | 'failed';
-export type ClosedCopy = { path: string; task: number } & ({ removed: true } | { removed: false; why: KeptWhy; reason: string });
+export type KeptWhy = 'locked' | 'uncommitted' | 'unpushed' | 'ignored' | 'failed';
+export type ClosedCopy = { path: string; task: number } & ({ removed: true } | { removed: false; why: KeptWhy; reason: string; ignored?: string[] });
 export type CloneRun = (args: string[], cwd: string) => Promise<string>;
 
 /* git in the agent's folder as the agent's user, never as root: git reads settings of the agent's own that can run
@@ -72,6 +92,11 @@ export async function closedCopies(checkout: string, agentDir: string, tasks: Ta
       const ahead = await run(['rev-list', '--count', 'HEAD', '--not', '--remotes'], tree.path);
       if (ahead !== '0') {
         kept(/^\d+$/.test(ahead) ? 'unpushed' : 'failed', notPushed(ahead));
+        continue;
+      }
+      const ignored = ownIgnored(await run(['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'], tree.path)).filter(entry => !rebuildable(entry));
+      if (ignored.length) {
+        copies.push({ path: tree.path, task: n, removed: false, why: 'ignored', reason: `it holds what git ignores and no remote has: ${named(ignored)}`, ignored });
         continue;
       }
       await removing(tree.path);

@@ -1,6 +1,6 @@
 import { lstat, readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import type { TaskStates } from '@hornhoof/protocol';
+import { DISK_IGNORED_MAX, type TaskStates } from '@hornhoof/protocol';
 import { closedCopies, type CloneRun } from '../task-copies.js';
 import { folderBytes, type Cleaner, type Stay } from './clean.js';
 import { dropDependencies } from './dependencies.js';
@@ -56,9 +56,10 @@ export function workingCopies({ dir, git, tasks }: Options): Cleaner & { kept():
           });
           for (const copy of copies) {
             if (copy.removed) freed += sizes.get(copy.path) ?? 0;
-            if (copy.removed || (copy.why !== 'uncommitted' && copy.why !== 'unpushed')) continue;
+            if (copy.removed || copy.why === 'locked' || copy.why === 'failed') continue;
             freed += await dropDependencies(copy.path, git).catch(() => 0);
-            stays.push({ agent, path: relative(agentDir, copy.path), task: copy.task, bytes: await folderBytes(copy.path).catch(() => 0), why: copy.why });
+            const ignored = copy.ignored ? { ignored: copy.ignored.slice(0, DISK_IGNORED_MAX) } : {};
+            stays.push({ agent, path: relative(agentDir, copy.path), task: copy.task, bytes: await folderBytes(copy.path).catch(() => 0), why: copy.why, ...ignored });
           }
         }
       }
