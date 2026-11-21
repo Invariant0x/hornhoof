@@ -5,19 +5,17 @@ export type EngineKind = 'isometric-2d' | '3d';
 
 export type Direction8 = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
 export type UniqueRenderAngle5 = 'N' | 'NE' | 'E' | 'SE' | 'S';
-export type ResolutionTierId = 'overview' | '1x' | '2x' | '4x';
+export type LodTierId = '1x' | '2x' | '4x' | '8x';
+export type AnimationDetailLevel = 'reduced' | 'standard' | 'full';
 export type FootprintKey = '1x1' | '2x2' | '3x3' | '4x4' | '5x5' | '6x6';
 
-export type ResolutionTierSpec = Readonly<{
+export type LodTierSpec = Readonly<{
+  id: LodTierId;
   tileW: number;
   tileH: number;
   humanHeightPx: number;
   rigSourceHumanHeightPx?: number;
-}>;
-
-export type OverviewTierSpec = Readonly<{
-  tileW: number;
-  tileH: number;
+  animationDetail: AnimationDetailLevel;
 }>;
 
 export type FootprintMetrics = Readonly<{
@@ -27,23 +25,29 @@ export type FootprintMetrics = Readonly<{
   maxCanvasH: number;
 }>;
 
+export type CameraBoundsSpec = Readonly<{
+  /* Zoom relative to default 100% (1.0 = 120x60 CSS px): 0.5 = 50% (60x30), 2.0 = 200% (240x120). */
+  minZoom: number;
+  defaultZoom: number;
+  maxZoom: number;
+}>;
+
 export type ProjectionSpec = Readonly<{
   type: 'dimetric_2_to_1';
   tileRatioWToH: number;
   diamondAngleDeg: number;
   cameraElevationDeg: number;
+  /* Logical world tile dimensions at 100% default zoom (120 x 60 CSS px). */
+  defaultTileW: number;
+  defaultTileH: number;
   sun: Readonly<{
     direction: 'top_left';
     azimuthDeg: number;
     elevationDeg: number;
     kelvin: number;
   }>;
-  tiers: Readonly<{
-    master4x: ResolutionTierSpec;
-    hd2x: ResolutionTierSpec;
-    classic1x: ResolutionTierSpec;
-    overview: OverviewTierSpec;
-  }>;
+  /* Sorted ascending by tileW; 8x (480x240) provides 2x Retina crispness at 200% (240x120 CSS px). */
+  lods: readonly LodTierSpec[];
   buildingFootprintsMaster4x: Readonly<Record<FootprintKey, FootprintMetrics>>;
   directions: Readonly<{
     order: readonly Direction8[];
@@ -66,8 +70,7 @@ export type TileSlotSpec = Readonly<{
 export type SpriteAtlasSpec = Readonly<{
   id: string;
   url: string;
-  tileW?: number;
-  tileH?: number;
+  maxSourceTileW?: number;
 }>;
 
 /* Stage counts declared by a world pack; the engine adapts to any positive integers. */
@@ -96,7 +99,6 @@ export type WorldPaletteSpec = Readonly<{
 
 export type WorldEngineParamsSpec = Readonly<{
   chunkSize: number;
-  overviewMarginPx: number;
   orderChaosDefault: number;
 }>;
 
@@ -107,6 +109,7 @@ export type WorldPackManifest = Readonly<{
   /* Single map dimension N for an N x N diamond tile grid. */
   mapSize: number;
   projection: ProjectionSpec;
+  camera: CameraBoundsSpec;
   defaultTileId: string;
   tiles: readonly TileSlotSpec[];
   sprites: readonly SpriteAtlasSpec[];
@@ -114,27 +117,31 @@ export type WorldPackManifest = Readonly<{
   palette: WorldPaletteSpec;
   params: WorldEngineParamsSpec;
   /* Optional pure tile resolver for stub or preview packs; defaults to defaultTileId. */
-  resolveEmptyTileId?: (col: number, row: number, chunkSize: number) => string;
+  resolveEmptyTileId?: (col: number, row: number, chunkSize: number, mapSize: number) => string;
 }>;
 
-/* Canonical 2:1 dimetric asset standard (240x120 master 4x, 120x60 hd 2x, 60x30 classic 1x, 16x8 overview). */
+/* Canonical 2:1 dimetric asset standard:
+   50% min (60x30 CSS px, 34px human), 100% default (120x60 CSS px, 68px human),
+   200% max (240x120 CSS px, 136px human), plus 8x (480x240, 544px rig source) for 2x Retina displays. */
 export const DEFAULT_ISOMETRIC_PROJECTION: ProjectionSpec = {
   type: 'dimetric_2_to_1',
   tileRatioWToH: 2.0,
   diamondAngleDeg: 26.56505,
   cameraElevationDeg: 30.0,
+  defaultTileW: 120,
+  defaultTileH: 60,
   sun: {
     direction: 'top_left',
     azimuthDeg: -45,
     elevationDeg: 55,
     kelvin: 5200,
   },
-  tiers: {
-    master4x: { tileW: 240, tileH: 120, humanHeightPx: 136, rigSourceHumanHeightPx: 544 },
-    hd2x: { tileW: 120, tileH: 60, humanHeightPx: 68 },
-    classic1x: { tileW: 60, tileH: 30, humanHeightPx: 34 },
-    overview: { tileW: 16, tileH: 8 },
-  },
+  lods: [
+    { id: '1x', tileW: 60, tileH: 30, humanHeightPx: 34, animationDetail: 'reduced' },
+    { id: '2x', tileW: 120, tileH: 60, humanHeightPx: 68, animationDetail: 'standard' },
+    { id: '4x', tileW: 240, tileH: 120, humanHeightPx: 136, animationDetail: 'full' },
+    { id: '8x', tileW: 480, tileH: 240, humanHeightPx: 272, rigSourceHumanHeightPx: 544, animationDetail: 'full' },
+  ],
   buildingFootprintsMaster4x: {
     '1x1': { diamondW: 240, diamondH: 120, doorHeightPx: 148, maxCanvasH: 420 },
     '2x2': { diamondW: 480, diamondH: 240, doorHeightPx: 152, maxCanvasH: 680 },
@@ -150,21 +157,45 @@ export const DEFAULT_ISOMETRIC_PROJECTION: ProjectionSpec = {
   },
 };
 
+export const DEFAULT_CAMERA_BOUNDS: CameraBoundsSpec = {
+  minZoom: 0.5,
+  defaultZoom: 1.0,
+  maxZoom: 2.0,
+};
+
 const COLOR_PATTERN = /^(?:#[0-9a-f]{3,8}|rgba?\([^)]+\))$/i;
 
 export type WorldPackValidation = { ok: true } | { ok: false; errors: string[] };
 
-export function tierTileMetrics(projection: ProjectionSpec, tier: ResolutionTierId): { tileW: number; tileH: number } {
-  switch (tier) {
-    case 'overview':
-      return projection.tiers.overview;
-    case '1x':
-      return projection.tiers.classic1x;
-    case '2x':
-      return projection.tiers.hd2x;
-    case '4x':
-      return projection.tiers.master4x;
+/* Maximum source tile width available in this pack (used to prevent upscaling past native art resolution). */
+export function packMaxSourceTileW(pack: WorldPackManifest): number {
+  let maxLod = 0;
+  for (const lod of pack.projection.lods) {
+    if (lod.tileW > maxLod) maxLod = lod.tileW;
   }
+  const spriteCaps = pack.sprites
+    .map(s => s.maxSourceTileW)
+    .filter((w): w is number => typeof w === 'number' && w > 0);
+  if (spriteCaps.length > 0) {
+    return Math.min(maxLod, ...spriteCaps);
+  }
+  return maxLod;
+}
+
+/* Picks the smallest available LOD tier whose physical tile width is >= required CSS tile width * DPR.
+   Never selects a lower tier when a higher crisp tier exists; falls back to the highest available tier. */
+export function selectLodTier(
+  lods: readonly LodTierSpec[],
+  cssTileW: number,
+  devicePixelRatio = 1,
+): LodTierSpec {
+  const sorted = [...lods].sort((a, b) => a.tileW - b.tileW);
+  const dpr = Math.max(1, devicePixelRatio);
+  const requiredPhysicalTileW = cssTileW * dpr;
+  for (const lod of sorted) {
+    if (lod.tileW + 1e-6 >= requiredPhysicalTileW) return lod;
+  }
+  return sorted[sorted.length - 1]!;
 }
 
 export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation {
@@ -179,16 +210,34 @@ export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation 
     errors.push('params.orderChaosDefault must be in [0, 1]');
   }
 
-  const tiers: [string, { tileW: number; tileH: number }][] = [
-    ['master4x', pack.projection.tiers.master4x],
-    ['hd2x', pack.projection.tiers.hd2x],
-    ['classic1x', pack.projection.tiers.classic1x],
-    ['overview', pack.projection.tiers.overview],
-  ];
-  for (const [name, t] of tiers) {
-    if (t.tileW <= 0 || t.tileH <= 0 || Math.abs(t.tileW / t.tileH - 2) > 1e-6) {
-      errors.push(`projection.tiers.${name} must have positive 2:1 tileW:tileH`);
+  if (
+    pack.projection.defaultTileW <= 0 ||
+    pack.projection.defaultTileH <= 0 ||
+    Math.abs(pack.projection.defaultTileW / pack.projection.defaultTileH - 2) > 1e-6
+  ) {
+    errors.push('projection defaultTileW:defaultTileH must be positive 2:1');
+  }
+
+  if (pack.projection.lods.length === 0) {
+    errors.push('projection.lods must declare at least one LOD tier');
+  }
+  let prevW = 0;
+  for (const lod of pack.projection.lods) {
+    if (lod.tileW <= 0 || lod.tileH <= 0 || Math.abs(lod.tileW / lod.tileH - 2) > 1e-6) {
+      errors.push(`projection.lods.${lod.id} must have positive 2:1 tileW:tileH`);
     }
+    if (lod.tileW <= prevW) {
+      errors.push('projection.lods must be sorted strictly ascending by tileW');
+    }
+    prevW = lod.tileW;
+  }
+
+  if (
+    pack.camera.minZoom <= 0 ||
+    pack.camera.defaultZoom < pack.camera.minZoom ||
+    pack.camera.maxZoom < pack.camera.defaultZoom
+  ) {
+    errors.push('camera zoom bounds must satisfy 0 < minZoom <= defaultZoom <= maxZoom');
   }
 
   if (pack.tiles.length === 0) {

@@ -1,66 +1,74 @@
-/* Camera model for panning, cursor-anchored zooming, bird-eye framing and resolution tier selection. */
+/* Camera model for drag panning, smooth cursor-anchored zooming within hard bounds,
+   Retina/DPR-aware LOD capping (zero upscaling blur) and animation detail selection. */
 
 import { mapWorldBounds, screenToWorld, type MapWorldBounds, type Point2D, type WorldRect } from './coords';
-import type { ResolutionTierId } from './manifest';
+import {
+  packMaxSourceTileW,
+  selectLodTier,
+  type AnimationDetailLevel,
+  type LodTierSpec,
+  type WorldPackManifest,
+} from './manifest';
 
 export type ViewportSize = Readonly<{ width: number; height: number }>;
 
 export type CameraState = Readonly<{
-  /* Logical world coordinate centered in the viewport. */
+  /* Logical world coordinate centered in the viewport (at 100% default 120x60 scale). */
   x: number;
   y: number;
-  /* Scale factor relative to classic 1x logical tiles (1 = 60x30, 2 = 120x60, 4 = 240x120). */
+  /* Scale factor relative to 100% default (0.5 = 50% / 60x30 CSS px, 1.0 = 100% / 120x60, 2.0 = 200% / 240x120). */
   zoom: number;
 }>;
 
-export const MIN_SAFE_VIEWPORT = 1;
-export const MAX_CAMERA_ZOOM = 4;
+export type EffectiveZoomBounds = Readonly<{
+  minZoom: number;
+  defaultZoom: number;
+  maxZoom: number;
+  /* True when source asset resolution caps maxZoom below pack.camera.maxZoom at the current DPR. */
+  cappedBySource: boolean;
+}>;
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-/* Zoom level at which the entire N x N diamond map fits inside the viewport with marginPx padding. */
-export function computeBirdEyeZoom(
-  mapSize: number,
-  tileW: number,
-  tileH: number,
-  viewport: ViewportSize,
-  marginPx = 24,
-): number {
-  const bounds = mapWorldBounds(mapSize, tileW, tileH);
-  const availW = Math.max(MIN_SAFE_VIEWPORT, viewport.width - marginPx * 2);
-  const availH = Math.max(MIN_SAFE_VIEWPORT, viewport.height - marginPx * 2);
-  const fit = Math.min(availW / bounds.width, availH / bounds.height);
-  return clamp(fit, 0.04, 1);
+/* Computes hard zoom bounds for the pack at the display's devicePixelRatio.
+   Never permits zooming past native source resolution (no upscaling blur). */
+export function computeEffectiveZoomBounds(
+  pack: WorldPackManifest,
+  devicePixelRatio = 1,
+  assetMaxSourceTileW?: number,
+): EffectiveZoomBounds {
+  const dpr = Math.max(1, devicePixelRatio);
+  const minZoom = pack.camera.minZoom;
+  const configuredMax = pack.camera.maxZoom;
+  const maxSourceW = assetMaxSourceTileW ?? packMaxSourceTileW(pack);
+  const noStretchMax = (maxSourceW / dpr) / pack.projection.defaultTileW;
+  const maxZoom = Math.max(minZoom, Math.min(configuredMax, noStretchMax));
+  const defaultZoom = clamp(pack.camera.defaultZoom, minZoom, maxZoom);
+  return {
+    minZoom,
+    defaultZoom,
+    maxZoom,
+    cappedBySource: noStretchMax + 1e-6 < configuredMax,
+  };
 }
 
-export function zoomForTier(
-  tier: ResolutionTierId,
-  mapSize: number,
-  tileW: number,
-  tileH: number,
-  viewport: ViewportSize,
-  marginPx = 24,
-): number {
-  switch (tier) {
-    case 'overview':
-      return computeBirdEyeZoom(mapSize, tileW, tileH, viewport, marginPx);
-    case '1x':
-      return 1;
-    case '2x':
-      return 2;
-    case '4x':
-      return 4;
-  }
+/* Selects the crisp LOD tier from the pack for the current zoom and devicePixelRatio. */
+export function lodForCamera(pack: WorldPackManifest, zoom: number, devicePixelRatio = 1): LodTierSpec {
+  const cssTileW = pack.projection.defaultTileW * zoom;
+  return selectLodTier(pack.projection.lods, cssTileW, devicePixelRatio);
 }
 
-/* Maps any continuous zoom level onto the colleague's mipmap resolution ladder (overview / 1x / 2x / 4x). */
-export function activeZoomTier(zoom: number): ResolutionTierId {
-  if (zoom < 0.55) return 'overview';
-  if (zoom < 1.5) return '1x';
-  if (zoom < 3.0) return '2x';
-  return '4x';
+/* Selects animation detail level by CSS zoom: reduced at far district zoom, full up close. */
+export function animationDetailForZoom(zoom: number): AnimationDetailLevel {
+  if (zoom < 0.75) return 'reduced';
+  if (zoom < 1.5) return 'standard';
+  return 'full';
+}
+
+export function zoomPercent(zoom: number): number {
+  return Math.round(zoom * 100);
 }
 
 export function clampCameraPosition(cam: CameraState, bounds: MapWorldBounds): CameraState {
@@ -71,23 +79,17 @@ export function clampCameraPosition(cam: CameraState, bounds: MapWorldBounds): C
   };
 }
 
-export function createInitialCamera(
-  mapSize: number,
-  tileW: number,
-  tileH: number,
-  viewport: ViewportSize,
-  initialTier: ResolutionTierId = '1x',
-  marginPx = 24,
-): CameraState {
-  const bounds = mapWorldBounds(mapSize, tileW, tileH);
+export function createInitialCamera(pack: WorldPackManifest, devicePixelRatio = 1): CameraState {
+  const bounds = mapWorldBounds(pack.mapSize, pack.projection.defaultTileW, pack.projection.defaultTileH);
+  const zoomBounds = computeEffectiveZoomBounds(pack, devicePixelRatio);
   return {
     x: bounds.centerX,
     y: bounds.centerY,
-    zoom: zoomForTier(initialTier, mapSize, tileW, tileH, viewport, marginPx),
+    zoom: zoomBounds.defaultZoom,
   };
 }
 
-/* Pans the camera by a pointer drag delta in screen pixels, softly clamped to map world bounds. */
+/* Pans the camera by a pointer drag delta in screen pixels, clamped to map world bounds. */
 export function panCamera(
   cam: CameraState,
   deltaScreenX: number,
@@ -104,7 +106,7 @@ export function panCamera(
   );
 }
 
-/* Zooms around a screen anchor point (such as the mouse cursor) so the world point beneath it stays fixed. */
+/* Smoothly zooms around a screen anchor point (such as the mouse cursor) clamped strictly to [minZoom, maxZoom]. */
 export function zoomCameraAt(
   cam: CameraState,
   factor: number,

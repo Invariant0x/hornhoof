@@ -1,17 +1,20 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { copyFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ResolutionTierId } from '../src/world/manifest';
 import type { WorldEngineStats } from '../src/world/renderer';
 import { captureWith } from './capture';
 
 /* Stage 1 engine core live browser verification: empty 150x150 2:1 diamond grid on the stub pack,
-   bird-eye / 1x / 2x / 4x zoom tiers, baked chunk frustum culling, drag pan + wheel zoom and tile click picking. */
+   hard zoom bounds (50% min 60x30 .. 100% default 120x60 .. 200% max 240x120), Retina-aware LOD
+   selection, baked chunk frustum culling, drag pan + wheel zoom and exact tile click picking. */
 
 const capture = captureWith('stage1', process.env.HH_SCREENSHOT_DIR);
 
 type DemoHandle = {
-  setZoomTier: (tier: ResolutionTierId) => void;
+  setZoom: (zoom: number) => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetZoom: () => void;
   panByScreen: (dx: number, dy: number) => void;
   flushVisibleBakes: () => void;
   getStats: () => WorldEngineStats;
@@ -31,7 +34,7 @@ async function readStats(page: Page): Promise<WorldEngineStats> {
   return page.evaluate(() => (window as unknown as { __WORLD_DEMO__: DemoHandle }).__WORLD_DEMO__.getStats());
 }
 
-test('Stage 1 demo renders empty 150x150 stub map with chunk culling, 4x/2x/1x/bird-eye zoom and exact tile click picking', async ({ browser }, info: TestInfo) => {
+test('Stage 1 demo renders empty 150x150 stub map with hard zoom bounds, Retina LODs, chunk culling and click picking', async ({ browser }, info: TestInfo) => {
   const shotDir = process.env.HH_SCREENSHOT_DIR;
   const videoDir = info.outputPath('stage1-video');
   if (shotDir) mkdirSync(shotDir, { recursive: true });
@@ -39,6 +42,7 @@ test('Stage 1 demo renders empty 150x150 stub map with chunk culling, 4x/2x/1x/b
 
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 1,
     recordVideo: { dir: videoDir, size: { width: 1280, height: 720 } },
   });
   const page = await context.newPage();
@@ -52,66 +56,96 @@ test('Stage 1 demo renders empty 150x150 stub map with chunk culling, 4x/2x/1x/b
     await page.goto('/world-demo.html');
     await waitForDemoReady(page);
 
+    /* Default 100% zoom: 120x60 CSS px tile, 2x LOD at DPR 1, tiny visible chunk slice. */
     const initial = await readStats(page);
     expect(initial.mapSize).toBe(150);
-    expect(initial.totalChunks).toBe(361);
-    expect(initial.tier).toBe('1x');
+    expect(initial.chunkSize).toBe(4);
+    expect(initial.totalChunks).toBe(1444);
+    expect(initial.zoomPercent).toBe(100);
+    expect(initial.cssTileW).toBe(120);
+    expect(initial.cssTileH).toBe(60);
+    expect(initial.lodId).toBe('2x');
+    expect(initial.animationDetail).toBe('standard');
     expect(initial.visibleChunks).toBeGreaterThan(0);
-    expect(initial.visibleChunks).toBeLessThan(initial.totalChunks * 0.25);
+    expect(initial.visibleChunks).toBeLessThan(initial.totalChunks * 0.06);
 
-    /* Click center tile (75, 75) at 1x zoom and verify exact readout. */
-    const pt75 = await page.evaluate(() => (window as unknown as { __WORLD_DEMO__: DemoHandle }).__WORLD_DEMO__.screenPointOfTile(75, 75));
-    await page.mouse.click(pt75.x, pt75.y);
+    /* Click center tile (75, 75) at 100% and verify exact tile + chunk readout. */
+    const pt100 = await page.evaluate(() => (window as unknown as { __WORLD_DEMO__: DemoHandle }).__WORLD_DEMO__.screenPointOfTile(75, 75));
+    await page.mouse.click(pt100.x, pt100.y);
     await expect(page.getByTestId('world-stage1-selected')).toContainText('Clicked tile: (75, 75)');
-    await expect(page.getByTestId('world-stage1-selected')).toContainText('Chunk (9, 9)');
-    await capture(page, info, '1x-desktop');
+    await expect(page.getByTestId('world-stage1-selected')).toContainText('Chunk (18, 18)');
+    await capture(page, info, '100pct-desktop');
 
-    /* Bird-eye view: whole 150x150 diamond visible on one screen. */
-    await page.getByTestId('zoom-tier-overview').click();
+    /* Zoom out repeatedly via minus button + wheel to prove hard floor stops strictly at 50% (60x30, no bird-eye). */
+    const zoomOutBtn = page.getByTestId('zoom-out');
+    for (let i = 0; i < 4; i++) {
+      await zoomOutBtn.click();
+    }
+    await page.mouse.move(720, 450);
+    await page.mouse.wheel(0, 600);
     await waitForDemoReady(page);
-    const bird = await readStats(page);
-    expect(bird.tier).toBe('overview');
-    expect(bird.visibleChunks).toBe(bird.totalChunks);
-    await capture(page, info, 'birdeye-desktop');
+    const minStats = await readStats(page);
+    expect(minStats.zoomPercent).toBe(50);
+    expect(minStats.zoom).toBeCloseTo(0.5, 4);
+    expect(minStats.cssTileW).toBe(60);
+    expect(minStats.cssTileH).toBe(30);
+    expect(minStats.lodId).toBe('1x');
+    expect(minStats.animationDetail).toBe('reduced');
+    expect(minStats.visibleChunks).toBeGreaterThan(initial.visibleChunks);
+    expect(minStats.visibleChunks).toBeLessThan(minStats.totalChunks * 0.15);
+    await expect(zoomOutBtn).toBeDisabled();
+    await expect(page.getByTestId('zoom-reset')).toHaveText('50%');
+    await capture(page, info, '50pct-min-desktop');
 
-    /* 2x HD zoom tier: tighter culling, click another exact tile (78, 72) well clear of the top-left HUD. */
-    await page.getByTestId('zoom-tier-2x').click();
+    /* Reset via percentage button returns cleanly to 100%. */
+    await page.getByTestId('zoom-reset').click();
     await waitForDemoReady(page);
-    const zoom2 = await readStats(page);
-    expect(zoom2.tier).toBe('2x');
-    expect(zoom2.visibleChunks).toBeLessThan(initial.visibleChunks);
-    const pt2 = await page.evaluate(() => (window as unknown as { __WORLD_DEMO__: DemoHandle }).__WORLD_DEMO__.screenPointOfTile(78, 72));
-    await page.mouse.click(pt2.x, pt2.y);
-    await expect(page.getByTestId('world-stage1-selected')).toContainText('Clicked tile: (78, 72)');
-    await capture(page, info, '2x-desktop');
+    expect((await readStats(page)).zoomPercent).toBe(100);
+    await expect(zoomOutBtn).toBeEnabled();
 
-    /* 4x Master zoom tier: smallest visible chunk set, coordinate labels visible inside tiles. */
-    await page.getByTestId('zoom-tier-4x').click();
+    /* Zoom in repeatedly via plus button + wheel to prove hard ceiling stops strictly at 200% (240x120, 4x LOD). */
+    const zoomInBtn = page.getByTestId('zoom-in');
+    for (let i = 0; i < 4; i++) {
+      await zoomInBtn.click();
+    }
+    await page.mouse.move(720, 450);
+    await page.mouse.wheel(0, -600);
     await waitForDemoReady(page);
-    const zoom4 = await readStats(page);
-    expect(zoom4.tier).toBe('4x');
-    expect(zoom4.visibleChunks).toBeGreaterThan(0);
-    expect(zoom4.visibleChunks).toBeLessThan(zoom2.visibleChunks);
-    const pt4 = await page.evaluate(() => (window as unknown as { __WORLD_DEMO__: DemoHandle }).__WORLD_DEMO__.screenPointOfTile(75, 75));
-    await page.mouse.click(pt4.x, pt4.y);
+    const maxStats = await readStats(page);
+    expect(maxStats.zoomPercent).toBe(200);
+    expect(maxStats.zoom).toBeCloseTo(2.0, 4);
+    expect(maxStats.cssTileW).toBe(240);
+    expect(maxStats.cssTileH).toBe(120);
+    expect(maxStats.lodId).toBe('4x');
+    expect(maxStats.animationDetail).toBe('full');
+    expect(maxStats.visibleChunks).toBeGreaterThan(0);
+    expect(maxStats.visibleChunks).toBeLessThan(initial.visibleChunks);
+    await expect(zoomInBtn).toBeDisabled();
+    await expect(page.getByTestId('zoom-reset')).toHaveText('200%');
+
+    const pt200 = await page.evaluate(() => (window as unknown as { __WORLD_DEMO__: DemoHandle }).__WORLD_DEMO__.screenPointOfTile(75, 75));
+    await page.mouse.click(pt200.x, pt200.y);
     await expect(page.getByTestId('world-stage1-selected')).toContainText('Clicked tile: (75, 75)');
-    await capture(page, info, '4x-desktop');
+    await capture(page, info, '200pct-max-desktop');
 
-    /* Smooth drag pan + wheel zoom interaction. */
+    /* Return to 100%, test real mouse drag panning + wheel zoom inside bounds. */
+    await page.getByTestId('zoom-reset').click();
+    await waitForDemoReady(page);
     const beforePan = await readStats(page);
     await page.mouse.move(720, 450);
     await page.mouse.down();
     await page.mouse.move(540, 360, { steps: 10 });
     await page.mouse.up();
-    await page.mouse.wheel(0, 240);
+    await page.mouse.wheel(0, -240);
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const afterPan = await readStats(page);
     expect(afterPan.camera.x).not.toBeCloseTo(beforePan.camera.x, 1);
     expect(afterPan.camera.y).not.toBeCloseTo(beforePan.camera.y, 1);
-    expect(afterPan.zoom).toBeLessThan(beforePan.zoom);
+    expect(afterPan.zoom).toBeGreaterThan(beforePan.zoom);
+    expect(afterPan.zoom).toBeLessThanOrEqual(2.0);
 
-    /* Measure smooth rAF loop during continuous programmatic panning at 1x zoom (all visible chunks already baked). */
-    await page.getByTestId('zoom-tier-1x').click();
+    /* Measure smooth rAF loop during continuous panning at 100% zoom. */
+    await page.getByTestId('zoom-reset').click();
     await waitForDemoReady(page);
     const bench = await page.evaluate(
       () =>
@@ -137,7 +171,7 @@ test('Stage 1 demo renders empty 150x150 stub map with chunk culling, 4x/2x/1x/b
     );
     console.log(
       `STAGE1_METRICS renderer=${initial.rendererKind} map=${initial.mapSize}x${initial.mapSize} totalChunks=${initial.totalChunks}` +
-        ` visOverview=${bird.visibleChunks} vis1x=${initial.visibleChunks} vis2x=${zoom2.visibleChunks} vis4x=${zoom4.visibleChunks}` +
+        ` vis50=${minStats.visibleChunks} vis100=${initial.visibleChunks} vis200=${maxStats.visibleChunks}` +
         ` panFrames=${bench.frames} avgFrameMs=${bench.avgMs} fps=${bench.fps}`,
     );
     expect(bench.frames).toBe(24);
@@ -151,19 +185,41 @@ test('Stage 1 demo renders empty 150x150 stub map with chunk culling, 4x/2x/1x/b
     }
   }
 
-  /* Verify mobile portrait viewport renders cleanly with zero overflow. */
-  const mobileCtx = await browser.newContext({ viewport: { width: 375, height: 812 } });
+  /* Verify 2x Retina DPR selects crisp 2x/4x/8x LODs with zero upscaling blur. */
+  const retinaCtx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+  const retinaPage = await retinaCtx.newPage();
+  const retinaErrors: string[] = [];
+  retinaPage.on('pageerror', error => retinaErrors.push(error.message));
+  try {
+    await retinaPage.goto('/world-demo.html');
+    await waitForDemoReady(retinaPage);
+    const r100 = await readStats(retinaPage);
+    expect(r100.dpr).toBe(2);
+    expect(r100.lodId).toBe('4x');
+
+    await retinaPage.evaluate(() => (window as unknown as { __WORLD_DEMO__: DemoHandle }).__WORLD_DEMO__.setZoom(2.0));
+    await waitForDemoReady(retinaPage);
+    expect((await readStats(retinaPage)).lodId).toBe('8x');
+
+    await retinaPage.evaluate(() => (window as unknown as { __WORLD_DEMO__: DemoHandle }).__WORLD_DEMO__.setZoom(0.5));
+    await waitForDemoReady(retinaPage);
+    expect((await readStats(retinaPage)).lodId).toBe('2x');
+    expect(retinaErrors).toEqual([]);
+  } finally {
+    await retinaCtx.close();
+  }
+
+  /* Verify narrow mobile portrait viewport renders cleanly with zero overflow. */
+  const mobileCtx = await browser.newContext({ viewport: { width: 375, height: 812 }, deviceScaleFactor: 1 });
   const mobilePage = await mobileCtx.newPage();
   const mobileErrors: string[] = [];
   mobilePage.on('pageerror', error => mobileErrors.push(error.message));
   try {
     await mobilePage.goto('/world-demo.html');
     await waitForDemoReady(mobilePage);
-    await mobilePage.getByTestId('zoom-tier-overview').click();
-    await waitForDemoReady(mobilePage);
     const overflow = await mobilePage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     expect(overflow).toBe(false);
-    await capture(mobilePage, info, 'birdeye-mobile');
+    await capture(mobilePage, info, '100pct-mobile');
     expect(mobileErrors).toEqual([]);
   } finally {
     await mobileCtx.close();

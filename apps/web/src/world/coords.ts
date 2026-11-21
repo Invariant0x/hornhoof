@@ -1,6 +1,6 @@
 /* Exact 2:1 diamond isometric coordinate conversion and click picking.
-   World units are expressed in canonical 1x logical pixels (tileW x tileH, e.g. 60 x 30), so camera zoom
-   1 = classic 1x, 2 = hd 2x, 4 = master 4x, and bird-eye zoom fits the entire N x N diamond on screen. */
+   World units are expressed in default 100% logical pixels (defaultTileW x defaultTileH, e.g. 120 x 60),
+   so camera zoom 0.5 = 50% (60x30 CSS px), 1.0 = 100% (120x60 CSS px), and 2.0 = 200% (240x120 CSS px). */
 
 import type { CameraState, ViewportSize } from './camera';
 
@@ -36,7 +36,7 @@ export type PickableObject = Readonly<{
   row: number;
   spanCol: number;
   spanRow: number;
-  /* Visual height rising above the ground footprint in 1x world pixels. */
+  /* Visual height rising above the ground footprint in logical world pixels. */
   heightWorld?: number;
   label?: string;
 }>;

@@ -1,7 +1,7 @@
 /* Geometric colored-diamond stub world pack for Stage 1 engine verification.
    Contains zero theme-specific assets, words or colours. */
 
-import { DEFAULT_ISOMETRIC_PROJECTION, type WorldPackManifest } from '../manifest';
+import { DEFAULT_CAMERA_BOUNDS, DEFAULT_ISOMETRIC_PROJECTION, type WorldPackManifest } from '../manifest';
 
 export const STUB_DIAMOND_PACK: WorldPackManifest = {
   id: 'stub-diamonds',
@@ -9,6 +9,7 @@ export const STUB_DIAMOND_PACK: WorldPackManifest = {
   engine: 'isometric-2d',
   mapSize: 150,
   projection: DEFAULT_ISOMETRIC_PROJECTION,
+  camera: DEFAULT_CAMERA_BOUNDS,
   defaultTileId: 'cell-a',
   tiles: [
     { id: 'cell-a', fill: '#2E3B4E', stroke: '#3F5169', accent: '#4C617D', buildable: true, walkable: true },
@@ -48,13 +49,14 @@ export const STUB_DIAMOND_PACK: WorldPackManifest = {
     },
   },
   params: {
-    chunkSize: 8,
-    overviewMarginPx: 28,
+    /* 4x4 tile chunks stay <= 1920x960 px even at 8x Retina LOD (480x240), fitting every 2048px GPU. */
+    chunkSize: 4,
     orderChaosDefault: 0.5,
   },
-  resolveEmptyTileId(col: number, row: number, chunkSize: number): string {
-    if (col === 0 || row === 0 || col === 149 || row === 149) return 'border';
-    const centerDist = Math.max(Math.abs(col - 75), Math.abs(row - 75));
+  resolveEmptyTileId(col: number, row: number, chunkSize: number, mapSize: number): string {
+    if (col === 0 || row === 0 || col === mapSize - 1 || row === mapSize - 1) return 'border';
+    const center = Math.floor(mapSize / 2);
+    const centerDist = Math.max(Math.abs(col - center), Math.abs(row - center));
     if (centerDist <= 3) return 'origin';
     const chunkParity = (Math.floor(col / chunkSize) + Math.floor(row / chunkSize)) & 1;
     const tileParity = (col + row) & 1;

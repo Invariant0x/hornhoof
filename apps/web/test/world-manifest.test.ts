@@ -1,7 +1,13 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ISOMETRIC_PROJECTION, validateWorldPack, type WorldPackManifest } from '../src/world/manifest';
+import {
+  DEFAULT_CAMERA_BOUNDS,
+  DEFAULT_ISOMETRIC_PROJECTION,
+  packMaxSourceTileW,
+  validateWorldPack,
+  type WorldPackManifest,
+} from '../src/world/manifest';
 import { STUB_DIAMOND_PACK } from '../src/world/packs/stub-pack';
 
 const WORLD_DIR = join(import.meta.dirname, '..', 'src', 'world');
@@ -19,27 +25,22 @@ function walkFiles(dir: string): string[] {
 }
 
 describe('world pack manifest contract and stub pack', () => {
-  it('validates the stub diamond pack with 150x150 map size and standard colleague proportions', () => {
+  it('validates the stub diamond pack with 150x150 map size, hard zoom bounds and 1x..8x LOD tiers', () => {
     expect(validateWorldPack(STUB_DIAMOND_PACK)).toEqual({ ok: true });
     expect(STUB_DIAMOND_PACK.engine).toBe('isometric-2d');
     expect(STUB_DIAMOND_PACK.mapSize).toBe(150);
+    expect(STUB_DIAMOND_PACK.params.chunkSize).toBe(4);
     expect(STUB_DIAMOND_PACK.projection).toEqual(DEFAULT_ISOMETRIC_PROJECTION);
-    expect(STUB_DIAMOND_PACK.projection.tiers.master4x).toEqual({
-      tileW: 240,
-      tileH: 120,
-      humanHeightPx: 136,
-      rigSourceHumanHeightPx: 544,
-    });
-    expect(STUB_DIAMOND_PACK.projection.tiers.hd2x).toEqual({
-      tileW: 120,
-      tileH: 60,
-      humanHeightPx: 68,
-    });
-    expect(STUB_DIAMOND_PACK.projection.tiers.classic1x).toEqual({
-      tileW: 60,
-      tileH: 30,
-      humanHeightPx: 34,
-    });
+    expect(STUB_DIAMOND_PACK.camera).toEqual(DEFAULT_CAMERA_BOUNDS);
+    expect(STUB_DIAMOND_PACK.projection.defaultTileW).toBe(120);
+    expect(STUB_DIAMOND_PACK.projection.defaultTileH).toBe(60);
+
+    expect(STUB_DIAMOND_PACK.projection.lods).toEqual([
+      { id: '1x', tileW: 60, tileH: 30, humanHeightPx: 34, animationDetail: 'reduced' },
+      { id: '2x', tileW: 120, tileH: 60, humanHeightPx: 68, animationDetail: 'standard' },
+      { id: '4x', tileW: 240, tileH: 120, humanHeightPx: 136, animationDetail: 'full' },
+      { id: '8x', tileW: 480, tileH: 240, humanHeightPx: 272, rigSourceHumanHeightPx: 544, animationDetail: 'full' },
+    ]);
     expect(Object.keys(STUB_DIAMOND_PACK.projection.buildingFootprintsMaster4x)).toEqual([
       '1x1', '2x2', '3x3', '4x4', '5x5', '6x6',
     ]);
@@ -47,21 +48,43 @@ describe('world pack manifest contract and stub pack', () => {
     expect(STUB_DIAMOND_PACK.projection.directions.order).toHaveLength(8);
   });
 
-  it('rejects manifests with invalid mapSize, broken 2:1 tile ratio, bad chunkSize or bad colours', () => {
-    const badSize: WorldPackManifest = { ...STUB_DIAMOND_PACK, mapSize: 0 };
-    expect(validateWorldPack(badSize).ok).toBe(false);
+  it('controls map size via a single mapSize field and respects sprite source resolution caps', () => {
+    const resized: WorldPackManifest = { ...STUB_DIAMOND_PACK, mapSize: 200 };
+    expect(validateWorldPack(resized)).toEqual({ ok: true });
+    expect(resized.resolveEmptyTileId?.(199, 100, resized.params.chunkSize, resized.mapSize)).toBe('border');
+    expect(resized.resolveEmptyTileId?.(100, 100, resized.params.chunkSize, resized.mapSize)).toBe('origin');
 
-    const badRatio: WorldPackManifest = {
+    expect(packMaxSourceTileW(STUB_DIAMOND_PACK)).toBe(480);
+    const spriteCapped: WorldPackManifest = {
+      ...STUB_DIAMOND_PACK,
+      sprites: [{ id: 'atlas-main', url: '/sprites/main.png', maxSourceTileW: 240 }],
+    };
+    expect(packMaxSourceTileW(spriteCapped)).toBe(240);
+  });
+
+  it('rejects manifests with invalid mapSize, bad tile ratio, unsorted LODs, bad camera bounds or bad colours', () => {
+    expect(validateWorldPack({ ...STUB_DIAMOND_PACK, mapSize: 0 }).ok).toBe(false);
+
+    const badDefaultRatio: WorldPackManifest = {
+      ...STUB_DIAMOND_PACK,
+      projection: { ...STUB_DIAMOND_PACK.projection, defaultTileW: 120, defaultTileH: 80 },
+    };
+    expect(validateWorldPack(badDefaultRatio).ok).toBe(false);
+
+    const unsortedLods: WorldPackManifest = {
       ...STUB_DIAMOND_PACK,
       projection: {
         ...STUB_DIAMOND_PACK.projection,
-        tiers: {
-          ...STUB_DIAMOND_PACK.projection.tiers,
-          classic1x: { tileW: 60, tileH: 40, humanHeightPx: 34 },
-        },
+        lods: [...STUB_DIAMOND_PACK.projection.lods].reverse(),
       },
     };
-    expect(validateWorldPack(badRatio).ok).toBe(false);
+    expect(validateWorldPack(unsortedLods).ok).toBe(false);
+
+    const badCamera: WorldPackManifest = {
+      ...STUB_DIAMOND_PACK,
+      camera: { minZoom: 1.5, defaultZoom: 1.0, maxZoom: 2.0 },
+    };
+    expect(validateWorldPack(badCamera).ok).toBe(false);
 
     const badChunk: WorldPackManifest = {
       ...STUB_DIAMOND_PACK,
@@ -76,7 +99,7 @@ describe('world pack manifest contract and stub pack', () => {
     expect(validateWorldPack(badColor).ok).toBe(false);
   });
 
-  it('keeps the entire world engine and stub pack free of theme-specific words and em dashes', () => {
+  it('keeps the entire world engine and stub pack free of theme-specific words, Russian yo and em dashes', () => {
     const files = walkFiles(WORLD_DIR);
     expect(files.length).toBeGreaterThan(0);
     for (const file of files) {
@@ -85,6 +108,7 @@ describe('world pack manifest contract and stub pack', () => {
       const body = readFileSync(file, 'utf8');
       expect(FORBIDDEN_THEME_TERMS.test(body), `theme word in ${rel}`).toBe(false);
       expect(body.includes('\u2014'), `em dash in ${rel}`).toBe(false);
+      expect(/[\u0451\u0401]/.test(body), `Russian yo in ${rel}`).toBe(false);
     }
   });
 });

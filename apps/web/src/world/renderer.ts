@@ -1,17 +1,19 @@
-/* PixiJS v8 chunked isometric world renderer with bounded per-frame baking, frustum culling,
-   pan/zoom/click interaction and automatic Canvas 2D fallback when WebGL is unavailable. */
+/* PixiJS v8 chunked isometric world renderer with hard zoom bounds, Retina/DPR-aware LOD baking,
+   frustum culling, drag pan / cursor zoom / click picking and graceful Canvas 2D fallback. */
 
 import { Application, Container, Graphics, Sprite, Texture } from 'pixi.js';
 import {
-  activeZoomTier,
-  computeBirdEyeZoom,
+  animationDetailForZoom,
+  clamp,
+  computeEffectiveZoomBounds,
   createInitialCamera,
-  MAX_CAMERA_ZOOM,
+  lodForCamera,
   panCamera,
   visibleWorldRect,
   zoomCameraAt,
-  zoomForTier,
+  zoomPercent,
   type CameraState,
+  type EffectiveZoomBounds,
   type ViewportSize,
 } from './camera';
 import { bakeChunkCanvas, buildTileLookup, type BakedChunk } from './chunk-baker';
@@ -27,7 +29,7 @@ import {
   type PickResult,
   type TileCoord,
 } from './coords';
-import type { ResolutionTierId, TileSlotSpec, WorldPackManifest } from './manifest';
+import type { AnimationDetailLevel, LodTierId, LodTierSpec, TileSlotSpec, WorldPackManifest } from './manifest';
 
 export type RendererKind = 'webgl' | 'canvas2d';
 
@@ -35,7 +37,17 @@ export type WorldEngineStats = Readonly<{
   fps: number;
   frameTimeMs: number;
   zoom: number;
-  tier: ResolutionTierId;
+  zoomPercent: number;
+  minZoom: number;
+  maxZoom: number;
+  cappedBySource: boolean;
+  cssTileW: number;
+  cssTileH: number;
+  lodId: LodTierId;
+  lodTileW: number;
+  lodTileH: number;
+  dpr: number;
+  animationDetail: AnimationDetailLevel;
   visibleChunks: number;
   totalChunks: number;
   cachedChunks: number;
@@ -51,7 +63,7 @@ export type WorldEngineStats = Readonly<{
 export type WorldEngineOptions = Readonly<{
   host: HTMLElement;
   pack: WorldPackManifest;
-  initialTier?: ResolutionTierId;
+  initialZoom?: number;
   objects?: readonly PickableObject[];
   resolveTileId?: (col: number, row: number) => string;
   onStats?: (stats: WorldEngineStats) => void;
@@ -68,8 +80,8 @@ type CachedChunkEntry = {
 const BAKE_BUDGET_MS = 7;
 const DRAG_THRESHOLD_PX = 5;
 const KEY_PAN_PX_PER_SEC = 540;
-const OVERVIEW_CACHE_CAP = 420;
-const DETAIL_CACHE_CAP = 96;
+const CHUNK_CACHE_CAP = 260;
+const ZOOM_STEP_FACTOR = 1.25;
 
 function parseHexColor(color: string, fallback = 0x141b24): number {
   const m = /^#([0-9a-f]{6})$/i.exec(color.trim());
@@ -105,6 +117,8 @@ export class IsometricWorldEngine {
 
   private objects: readonly PickableObject[];
   private viewport: ViewportSize;
+  private dpr: number;
+  private zoomBounds: EffectiveZoomBounds;
   private camera: CameraState;
   private hoveredTile: TileCoord | null = null;
   private selectedPick: PickResult | null = null;
@@ -119,8 +133,7 @@ export class IsometricWorldEngine {
   private fallbackCtx: CanvasRenderingContext2D | null = null;
   private rendererKind: RendererKind = 'webgl';
 
-  private readonly overviewCache = new ChunkLruCache<CachedChunkEntry>(OVERVIEW_CACHE_CAP);
-  private readonly detailCache = new ChunkLruCache<CachedChunkEntry>(DETAIL_CACHE_CAP);
+  private readonly chunkCache = new ChunkLruCache<CachedChunkEntry>(CHUNK_CACHE_CAP);
   private visibleChunkList: ChunkCoord[] = [];
   private pendingBakeCount = 0;
 
@@ -146,8 +159,8 @@ export class IsometricWorldEngine {
   private constructor(options: WorldEngineOptions) {
     this.host = options.host;
     this.pack = options.pack;
-    this.tileW = options.pack.projection.tiers.classic1x.tileW;
-    this.tileH = options.pack.projection.tiers.classic1x.tileH;
+    this.tileW = options.pack.projection.defaultTileW;
+    this.tileH = options.pack.projection.defaultTileH;
     this.bounds = mapWorldBounds(options.pack.mapSize, this.tileW, this.tileH);
     this.chunkGrid = buildChunkGrid(options.pack.mapSize, options.pack.params.chunkSize, this.tileW, this.tileH);
     this.tileLookup = buildTileLookup(options.pack);
@@ -156,15 +169,17 @@ export class IsometricWorldEngine {
     this.onStats = options.onStats;
     this.onSelect = options.onSelect;
 
+    this.dpr = Math.min(Math.max(1, window.devicePixelRatio || 1), 2);
     this.viewport = this.readHostSize();
-    this.camera = createInitialCamera(
-      options.pack.mapSize,
-      this.tileW,
-      this.tileH,
-      this.viewport,
-      options.initialTier ?? '1x',
-      options.pack.params.overviewMarginPx,
-    );
+    this.zoomBounds = computeEffectiveZoomBounds(options.pack, this.dpr);
+    const initial = createInitialCamera(options.pack, this.dpr);
+    this.camera = {
+      ...initial,
+      zoom:
+        options.initialZoom !== undefined
+          ? clamp(options.initialZoom, this.zoomBounds.minZoom, this.zoomBounds.maxZoom)
+          : initial.zoom,
+    };
   }
 
   static async create(options: WorldEngineOptions): Promise<IsometricWorldEngine> {
@@ -183,7 +198,6 @@ export class IsometricWorldEngine {
 
   private async mount(): Promise<void> {
     this.host.innerHTML = '';
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     try {
       const app = new Application();
@@ -192,7 +206,7 @@ export class IsometricWorldEngine {
         height: this.viewport.height,
         backgroundColor: parseHexColor(this.pack.palette.backdrop),
         antialias: true,
-        resolution: dpr,
+        resolution: this.dpr,
         autoDensity: true,
         preference: 'webgl',
       });
@@ -224,7 +238,7 @@ export class IsometricWorldEngine {
       this.overlayGraphic = overlayGraphic;
       this.drawMapBorderPixi();
     } catch {
-      this.mountFallbackCanvas(dpr);
+      this.mountFallbackCanvas();
     }
 
     this.attachEvents();
@@ -233,10 +247,10 @@ export class IsometricWorldEngine {
     this.rafId = requestAnimationFrame(this.onAnimationFrame);
   }
 
-  private mountFallbackCanvas(dpr: number): void {
+  private mountFallbackCanvas(): void {
     const canvas = document.createElement('canvas');
-    canvas.width = Math.round(this.viewport.width * dpr);
-    canvas.height = Math.round(this.viewport.height * dpr);
+    canvas.width = Math.round(this.viewport.width * this.dpr);
+    canvas.height = Math.round(this.viewport.height * this.dpr);
     canvas.style.display = 'block';
     canvas.style.width = '100%';
     canvas.style.height = '100%';
@@ -263,7 +277,7 @@ export class IsometricWorldEngine {
       .lineTo(bottom.x, bottom.y)
       .lineTo(left.x, left.y)
       .closePath()
-      .stroke({ color: stroke.color, alpha: stroke.alpha, width: 2 / Math.max(this.camera.zoom, 0.15) });
+      .stroke({ color: stroke.color, alpha: stroke.alpha, width: 2 / Math.max(this.camera.zoom, 0.25) });
   }
 
   private attachEvents(): void {
@@ -290,14 +304,20 @@ export class IsometricWorldEngine {
   private readonly handleResize = (): void => {
     if (this.destroyed) return;
     const next = this.readHostSize();
-    if (next.width === this.viewport.width && next.height === this.viewport.height) return;
+    const nextDpr = Math.min(Math.max(1, window.devicePixelRatio || 1), 2);
+    if (next.width === this.viewport.width && next.height === this.viewport.height && nextDpr === this.dpr) return;
     this.viewport = next;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.dpr = nextDpr;
+    this.zoomBounds = computeEffectiveZoomBounds(this.pack, this.dpr);
+    this.camera = {
+      ...this.camera,
+      zoom: clamp(this.camera.zoom, this.zoomBounds.minZoom, this.zoomBounds.maxZoom),
+    };
     if (this.app) {
       this.app.renderer.resize(next.width, next.height);
     } else if (this.fallbackCanvas) {
-      this.fallbackCanvas.width = Math.round(next.width * dpr);
-      this.fallbackCanvas.height = Math.round(next.height * dpr);
+      this.fallbackCanvas.width = Math.round(next.width * this.dpr);
+      this.fallbackCanvas.height = Math.round(next.height * this.dpr);
     }
     this.dirtyScene = true;
     this.emitStats(true);
@@ -382,9 +402,16 @@ export class IsometricWorldEngine {
   private readonly onWheel = (e: WheelEvent): void => {
     e.preventDefault();
     const pt = this.pointerLocalPos(e);
-    const factor = e.deltaY < 0 ? 1.18 : 1 / 1.18;
-    const minZoom = this.getBirdEyeZoom();
-    this.camera = zoomCameraAt(this.camera, factor, pt, this.viewport, minZoom, MAX_CAMERA_ZOOM, this.bounds);
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    this.camera = zoomCameraAt(
+      this.camera,
+      factor,
+      pt,
+      this.viewport,
+      this.zoomBounds.minZoom,
+      this.zoomBounds.maxZoom,
+      this.bounds,
+    );
     this.dirtyScene = true;
     this.emitStats(true);
   };
@@ -399,40 +426,53 @@ export class IsometricWorldEngine {
     this.pressedKeys.delete(e.key.toLowerCase());
   };
 
-  getBirdEyeZoom(): number {
-    return computeBirdEyeZoom(
-      this.pack.mapSize,
-      this.tileW,
-      this.tileH,
-      this.viewport,
-      this.pack.params.overviewMarginPx,
-    );
-  }
-
-  setZoomTier(tier: ResolutionTierId): void {
-    const zoom = zoomForTier(
-      tier,
-      this.pack.mapSize,
-      this.tileW,
-      this.tileH,
-      this.viewport,
-      this.pack.params.overviewMarginPx,
-    );
-    if (tier === 'overview') {
-      this.camera = { x: this.bounds.centerX, y: this.bounds.centerY, zoom };
-    } else {
-      this.camera = { ...this.camera, zoom };
-    }
+  setZoom(zoom: number): void {
+    const clamped = clamp(zoom, this.zoomBounds.minZoom, this.zoomBounds.maxZoom);
+    if (Math.abs(clamped - this.camera.zoom) < 1e-9) return;
+    this.camera = { ...this.camera, zoom: clamped };
     this.dirtyScene = true;
     this.emitStats(true);
   }
 
+  zoomIn(): void {
+    const center = { x: this.viewport.width / 2, y: this.viewport.height / 2 };
+    this.camera = zoomCameraAt(
+      this.camera,
+      ZOOM_STEP_FACTOR,
+      center,
+      this.viewport,
+      this.zoomBounds.minZoom,
+      this.zoomBounds.maxZoom,
+      this.bounds,
+    );
+    this.dirtyScene = true;
+    this.emitStats(true);
+  }
+
+  zoomOut(): void {
+    const center = { x: this.viewport.width / 2, y: this.viewport.height / 2 };
+    this.camera = zoomCameraAt(
+      this.camera,
+      1 / ZOOM_STEP_FACTOR,
+      center,
+      this.viewport,
+      this.zoomBounds.minZoom,
+      this.zoomBounds.maxZoom,
+      this.bounds,
+    );
+    this.dirtyScene = true;
+    this.emitStats(true);
+  }
+
+  resetZoom(): void {
+    this.setZoom(this.zoomBounds.defaultZoom);
+  }
+
   setCamera(camera: CameraState): void {
-    const minZoom = this.getBirdEyeZoom();
     this.camera = {
-      x: Math.max(this.bounds.minX, Math.min(this.bounds.maxX, camera.x)),
-      y: Math.max(this.bounds.minY, Math.min(this.bounds.maxY, camera.y)),
-      zoom: Math.max(minZoom, Math.min(MAX_CAMERA_ZOOM, camera.zoom)),
+      x: clamp(camera.x, this.bounds.minX, this.bounds.maxX),
+      y: clamp(camera.y, this.bounds.minY, this.bounds.maxY),
+      zoom: clamp(camera.zoom, this.zoomBounds.minZoom, this.zoomBounds.maxZoom),
     };
     this.dirtyScene = true;
     this.emitStats(true);
@@ -466,27 +506,39 @@ export class IsometricWorldEngine {
     return pick;
   }
 
-  /* Synchronously finishes baking all currently visible chunks (useful for deterministic screenshot capture). */
+  /* Synchronously finishes baking all currently visible chunks (for deterministic screenshot capture). */
   flushVisibleBakes(): void {
-    const tier = activeZoomTier(this.camera.zoom);
+    const lod = lodForCamera(this.pack, this.camera.zoom, this.dpr);
     const rect = visibleWorldRect(this.camera, this.viewport, this.tileW);
     const visible = cullVisibleChunks(this.chunkGrid, rect);
     for (const chunk of visible) {
-      this.ensureChunkBaked(chunk, tier);
+      this.ensureChunkBaked(chunk, lod);
     }
     this.dirtyScene = true;
     this.syncScene(Infinity);
+    this.emitStats(true);
   }
 
   getStats(): WorldEngineStats {
+    const lod = lodForCamera(this.pack, this.camera.zoom, this.dpr);
     return {
       fps: Math.round(this.lastFps),
       frameTimeMs: Math.round(this.lastFrameMs * 10) / 10,
       zoom: Math.round(this.camera.zoom * 1000) / 1000,
-      tier: activeZoomTier(this.camera.zoom),
+      zoomPercent: zoomPercent(this.camera.zoom),
+      minZoom: this.zoomBounds.minZoom,
+      maxZoom: this.zoomBounds.maxZoom,
+      cappedBySource: this.zoomBounds.cappedBySource,
+      cssTileW: Math.round(this.tileW * this.camera.zoom),
+      cssTileH: Math.round(this.tileH * this.camera.zoom),
+      lodId: lod.id,
+      lodTileW: lod.tileW,
+      lodTileH: lod.tileH,
+      dpr: this.dpr,
+      animationDetail: animationDetailForZoom(this.camera.zoom),
       visibleChunks: this.visibleChunkList.length,
       totalChunks: this.chunkGrid.chunks.length,
-      cachedChunks: this.overviewCache.size + this.detailCache.size,
+      cachedChunks: this.chunkCache.size,
       pendingBakes: this.pendingBakeCount,
       mapSize: this.pack.mapSize,
       chunkSize: this.pack.params.chunkSize,
@@ -497,12 +549,8 @@ export class IsometricWorldEngine {
     };
   }
 
-  private cacheForTier(tier: ResolutionTierId): ChunkLruCache<CachedChunkEntry> {
-    return tier === 'overview' ? this.overviewCache : this.detailCache;
-  }
-
-  private cacheKey(chunk: ChunkCoord, tier: ResolutionTierId): string {
-    return `${chunk.key}@${tier}`;
+  private cacheKey(chunk: ChunkCoord, lodId: LodTierId): string {
+    return `${chunk.key}@${lodId}`;
   }
 
   private disposeEntry = (entry: CachedChunkEntry): void => {
@@ -515,13 +563,12 @@ export class IsometricWorldEngine {
     }
   };
 
-  private ensureChunkBaked(chunk: ChunkCoord, tier: ResolutionTierId): CachedChunkEntry {
-    const cache = this.cacheForTier(tier);
-    const key = this.cacheKey(chunk, tier);
-    const existing = cache.get(key);
+  private ensureChunkBaked(chunk: ChunkCoord, lod: LodTierSpec): CachedChunkEntry {
+    const key = this.cacheKey(chunk, lod.id);
+    const existing = this.chunkCache.get(key);
     if (existing) return existing;
 
-    const baked = bakeChunkCanvas(chunk, this.pack, this.tileLookup, tier, this.resolveTileId);
+    const baked = bakeChunkCanvas(chunk, this.pack, this.tileLookup, lod, this.resolveTileId);
     let texture: Texture | null = null;
     let sprite: Sprite | null = null;
     if (this.app) {
@@ -532,7 +579,7 @@ export class IsometricWorldEngine {
       sprite.scale.set(1 / baked.scale);
     }
     const entry: CachedChunkEntry = { baked, texture, sprite };
-    cache.set(key, entry);
+    this.chunkCache.set(key, entry);
     return entry;
   }
 
@@ -550,7 +597,6 @@ export class IsometricWorldEngine {
     if (this.fpsSamples.length > 30) this.fpsSamples.shift();
     this.lastFps = this.fpsSamples.reduce((acc, v) => acc + v, 0) / this.fpsSamples.length;
 
-    /* Smooth keyboard camera panning. */
     if (this.pressedKeys.size > 0) {
       const step = KEY_PAN_PX_PER_SEC * (dtMs / 1000);
       let dx = 0;
@@ -575,35 +621,40 @@ export class IsometricWorldEngine {
     }
   }
 
+  private findAnyCachedLod(chunk: ChunkCoord): { key: string; entry: CachedChunkEntry } | null {
+    const lods = this.pack.projection.lods;
+    for (let i = lods.length - 1; i >= 0; i--) {
+      const k = this.cacheKey(chunk, lods[i]!.id);
+      const hit = this.chunkCache.get(k);
+      if (hit) return { key: k, entry: hit };
+    }
+    return null;
+  }
+
   private syncScene(bakeBudgetMs: number): void {
-    const tier = activeZoomTier(this.camera.zoom);
+    const lod = lodForCamera(this.pack, this.camera.zoom, this.dpr);
     const visibleRect = visibleWorldRect(this.camera, this.viewport, this.tileW);
     const visible = cullVisibleChunks(this.chunkGrid, visibleRect);
     this.visibleChunkList = visible;
 
-    const primaryCache = this.cacheForTier(tier);
-    const protectedPrimary = new Set<string>();
-    const protectedOverview = new Set<string>();
+    const protectedKeys = new Set<string>();
     const drawEntries: CachedChunkEntry[] = [];
-
     const bakeStart = performance.now();
     let pending = 0;
 
     for (const chunk of visible) {
-      const primaryKey = this.cacheKey(chunk, tier);
-      protectedPrimary.add(primaryKey);
-      let entry = primaryCache.get(primaryKey);
+      const key = this.cacheKey(chunk, lod.id);
+      protectedKeys.add(key);
+      let entry = this.chunkCache.get(key);
       if (!entry) {
         if (performance.now() - bakeStart < bakeBudgetMs) {
-          entry = this.ensureChunkBaked(chunk, tier);
+          entry = this.ensureChunkBaked(chunk, lod);
         } else {
           pending++;
-          /* Show cached overview chunk as instant placeholder until this detail chunk finishes baking. */
-          const ovKey = this.cacheKey(chunk, 'overview');
-          protectedOverview.add(ovKey);
-          entry = this.overviewCache.get(ovKey);
-          if (!entry && performance.now() - bakeStart < bakeBudgetMs + 2) {
-            entry = this.ensureChunkBaked(chunk, 'overview');
+          const fallback = this.findAnyCachedLod(chunk);
+          if (fallback) {
+            protectedKeys.add(fallback.key);
+            entry = fallback.entry;
           }
         }
       }
@@ -612,13 +663,7 @@ export class IsometricWorldEngine {
 
     this.pendingBakeCount = pending;
     this.dirtyScene = pending > 0;
-
-    if (tier === 'overview') {
-      this.overviewCache.evictIfNeeded(protectedPrimary, this.disposeEntry);
-    } else {
-      this.detailCache.evictIfNeeded(protectedPrimary, this.disposeEntry);
-      this.overviewCache.evictIfNeeded(protectedOverview, this.disposeEntry);
-    }
+    this.chunkCache.evictIfNeeded(protectedKeys, this.disposeEntry);
 
     if (this.app && this.worldContainer && this.chunkLayer) {
       this.worldContainer.position.set(
@@ -716,7 +761,7 @@ export class IsometricWorldEngine {
     ctx.lineTo(left.x, left.y);
     ctx.closePath();
     ctx.strokeStyle = this.pack.palette.border;
-    ctx.lineWidth = 2 / Math.max(this.camera.zoom, 0.15);
+    ctx.lineWidth = 2 / Math.max(this.camera.zoom, 0.25);
     ctx.stroke();
 
     const drawHighlight = (col: number, row: number, spanC: number, spanR: number, fill: string, stroke: string) => {
@@ -786,8 +831,7 @@ export class IsometricWorldEngine {
     window.removeEventListener('resize', this.handleResize);
     this.resizeObserver?.disconnect();
 
-    this.overviewCache.clear(this.disposeEntry);
-    this.detailCache.clear(this.disposeEntry);
+    this.chunkCache.clear(this.disposeEntry);
 
     if (this.app) {
       this.app.destroy(true, { children: true, texture: true });

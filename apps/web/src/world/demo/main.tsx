@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { tileCenterToWorld, worldToScreen } from '../coords';
-import type { ResolutionTierId } from '../manifest';
 import { STUB_DIAMOND_PACK } from '../packs/stub-pack';
 import { IsometricWorldEngine, type WorldEngineStats } from '../renderer';
 
 /* Standalone Stage 1 engine demo page: renders an empty 150x150 2:1 diamond grid on the stub pack
-   with pan, 4x/2x/1x/bird-eye zoom, baked chunk culling, click-to-select tile readout and FPS counter. */
+   with drag pan, hard-bounded zoom (50% min 60x30 .. 100% default 120x60 .. 200% max 240x120),
+   Retina-aware LOD selection, baked chunk culling, click-to-select tile readout and FPS counter. */
 
 type DemoHandle = {
-  setZoomTier: (tier: ResolutionTierId) => void;
+  setZoom: (zoom: number) => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetZoom: () => void;
   panByScreen: (dx: number, dy: number) => void;
   flushVisibleBakes: () => void;
   getStats: () => WorldEngineStats;
@@ -21,13 +24,6 @@ declare global {
     __WORLD_DEMO__?: DemoHandle;
   }
 }
-
-const TIERS: readonly { id: ResolutionTierId; label: string }[] = [
-  { id: 'overview', label: "Bird's-eye" },
-  { id: '1x', label: '1x (60x30)' },
-  { id: '2x', label: '2x (120x60)' },
-  { id: '4x', label: '4x (240x120)' },
-];
 
 function Stage1Demo() {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -42,7 +38,6 @@ function Stage1Demo() {
     void IsometricWorldEngine.create({
       host,
       pack: STUB_DIAMOND_PACK,
-      initialTier: '1x',
       onStats: next => {
         if (alive) setStats(next);
       },
@@ -54,7 +49,10 @@ function Stage1Demo() {
       engineRef.current = engine;
       setStats(engine.getStats());
       window.__WORLD_DEMO__ = {
-        setZoomTier: tier => engine.setZoomTier(tier),
+        setZoom: z => engine.setZoom(z),
+        zoomIn: () => engine.zoomIn(),
+        zoomOut: () => engine.zoomOut(),
+        resetZoom: () => engine.resetZoom(),
         panByScreen: (dx, dy) => engine.panByScreen(dx, dy),
         flushVisibleBakes: () => engine.flushVisibleBakes(),
         getStats: () => engine.getStats(),
@@ -64,8 +62,8 @@ function Stage1Demo() {
           const w = tileCenterToWorld(
             col,
             row,
-            STUB_DIAMOND_PACK.projection.tiers.classic1x.tileW,
-            STUB_DIAMOND_PACK.projection.tiers.classic1x.tileH,
+            STUB_DIAMOND_PACK.projection.defaultTileW,
+            STUB_DIAMOND_PACK.projection.defaultTileH,
           );
           return worldToScreen(w.x, w.y, cur.camera, { width: rect.width, height: rect.height });
         },
@@ -91,10 +89,21 @@ function Stage1Demo() {
     ? tileCenterToWorld(
         selected.col,
         selected.row,
-        STUB_DIAMOND_PACK.projection.tiers.classic1x.tileW,
-        STUB_DIAMOND_PACK.projection.tiers.classic1x.tileH,
+        STUB_DIAMOND_PACK.projection.defaultTileW,
+        STUB_DIAMOND_PACK.projection.defaultTileH,
       )
     : null;
+
+  const atMin = stats ? stats.zoom <= stats.minZoom + 1e-4 : false;
+  const atMax = stats ? stats.zoom >= stats.maxZoom - 1e-4 : false;
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      void document.documentElement.requestFullscreen?.().catch(() => undefined);
+    } else {
+      void document.exitFullscreen?.().catch(() => undefined);
+    }
+  };
 
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden', background: STUB_DIAMOND_PACK.palette.backdrop }}>
@@ -115,7 +124,7 @@ function Stage1Demo() {
           fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
           fontSize: 12.5,
           lineHeight: 1.45,
-          maxWidth: 'min(360px, calc(100vw - 28px))',
+          maxWidth: 'min(380px, calc(100vw - 28px))',
           pointerEvents: 'auto',
           userSelect: 'none',
         }}
@@ -130,7 +139,10 @@ function Stage1Demo() {
                 FPS: <strong data-testid="metric-fps">{stats.fps}</strong> ({stats.frameTimeMs} ms) | Renderer: {stats.rendererKind}
               </div>
               <div>
-                Zoom: <strong data-testid="metric-zoom">{stats.zoom.toFixed(2)}x</strong> | Tier: <strong data-testid="metric-tier">{stats.tier}</strong>
+                Zoom: <strong data-testid="metric-zoom">{stats.zoomPercent}%</strong> ({stats.cssTileW}x{stats.cssTileH} px) | Bounds: {Math.round(stats.minZoom * 100)}%..{Math.round(stats.maxZoom * 100)}%
+              </div>
+              <div>
+                LOD: <strong data-testid="metric-lod">{stats.lodId}</strong> ({stats.lodTileW}x{stats.lodTileH}, DPR {stats.dpr}) | Anim: {stats.animationDetail}
               </div>
               <div>
                 Chunks: <strong data-testid="metric-visible-chunks">{stats.visibleChunks}</strong> / <span data-testid="metric-total-chunks">{stats.totalChunks}</span> (cached {stats.cachedChunks})
@@ -156,30 +168,98 @@ function Stage1Demo() {
             ? `Clicked tile: (${selected.col}, ${selected.row}) | Chunk (${selectedChunk.cx}, ${selectedChunk.cy}) | World (${selectedWorld.x}, ${selectedWorld.y})`
             : 'Click any diamond tile to inspect coordinates'}
         </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {TIERS.map(t => {
-            const active = stats?.tier === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                data-testid={`zoom-tier-${t.id}`}
-                onClick={() => engineRef.current?.setZoomTier(t.id)}
-                style={{
-                  padding: '6px 10px',
-                  border: active ? '1px solid #FFD166' : '1px solid rgba(130, 184, 224, 0.45)',
-                  background: active ? 'rgba(255, 209, 102, 0.22)' : 'rgba(30, 42, 58, 0.9)',
-                  color: active ? '#FFE599' : '#D9E7F5',
-                  fontFamily: 'inherit',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                }}
-              >
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
+      </div>
+
+      {/* Product-aligned zoom bar in bottom-left corner: minus, percent (100% = default), plus, fullscreen. */}
+      <div
+        data-testid="world-stage1-zoombar"
+        style={{
+          position: 'fixed',
+          bottom: 16,
+          left: 16,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: 4,
+          background: 'rgba(18, 25, 34, 0.92)',
+          border: '1px solid rgba(126, 214, 255, 0.35)',
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+          userSelect: 'none',
+        }}
+      >
+        <button
+          type="button"
+          data-testid="zoom-out"
+          aria-label="Zoom out"
+          disabled={atMin}
+          onClick={() => engineRef.current?.zoomOut()}
+          style={{
+            minWidth: 36,
+            height: 36,
+            border: '1px solid rgba(130, 184, 224, 0.35)',
+            background: atMin ? 'rgba(30, 42, 58, 0.35)' : 'rgba(30, 42, 58, 0.9)',
+            color: atMin ? '#6C7D93' : '#E7F0F9',
+            fontSize: 16,
+            cursor: atMin ? 'not-allowed' : 'pointer',
+          }}
+        >
+          -
+        </button>
+        <button
+          type="button"
+          data-testid="zoom-reset"
+          aria-label="Reset zoom to 100%"
+          onClick={() => engineRef.current?.resetZoom()}
+          style={{
+            minWidth: 62,
+            height: 36,
+            padding: '0 8px',
+            border: '1px solid rgba(130, 184, 224, 0.35)',
+            background: 'rgba(30, 42, 58, 0.9)',
+            color: '#FFE08A',
+            fontFamily: 'inherit',
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+        >
+          {stats ? `${stats.zoomPercent}%` : '100%'}
+        </button>
+        <button
+          type="button"
+          data-testid="zoom-in"
+          aria-label="Zoom in"
+          disabled={atMax}
+          onClick={() => engineRef.current?.zoomIn()}
+          style={{
+            minWidth: 36,
+            height: 36,
+            border: '1px solid rgba(130, 184, 224, 0.35)',
+            background: atMax ? 'rgba(30, 42, 58, 0.35)' : 'rgba(30, 42, 58, 0.9)',
+            color: atMax ? '#6C7D93' : '#E7F0F9',
+            fontSize: 16,
+            cursor: atMax ? 'not-allowed' : 'pointer',
+          }}
+        >
+          +
+        </button>
+        <button
+          type="button"
+          data-testid="zoom-fullscreen"
+          aria-label="Fullscreen"
+          onClick={toggleFullscreen}
+          style={{
+            minWidth: 36,
+            height: 36,
+            border: '1px solid rgba(130, 184, 224, 0.35)',
+            background: 'rgba(30, 42, 58, 0.9)',
+            color: '#E7F0F9',
+            fontSize: 14,
+            cursor: 'pointer',
+          }}
+        >
+          [ ]
+        </button>
       </div>
     </div>
   );

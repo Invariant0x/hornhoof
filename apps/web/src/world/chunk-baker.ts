@@ -1,10 +1,10 @@
 /* Offscreen HTMLCanvas2D terrain chunk baker.
-   Bakes one chunkSize x chunkSize diamond patch into a crisp raster image sized to the active LOD tier,
+   Bakes one chunkSize x chunkSize diamond patch into a crisp raster image at the selected LOD tier,
    ready for GPU texture upload (PixiJS) or direct 2D blitting. */
 
 import type { ChunkCoord } from './chunks';
 import { tileCenterToWorld } from './coords';
-import { tierTileMetrics, type ResolutionTierId, type TileSlotSpec, type WorldPackManifest } from './manifest';
+import type { LodTierId, LodTierSpec, TileSlotSpec, WorldPackManifest } from './manifest';
 
 export type BakedChunk = Readonly<{
   canvas: HTMLCanvasElement;
@@ -14,7 +14,7 @@ export type BakedChunk = Readonly<{
   pixelWidth: number;
   pixelHeight: number;
   tileCount: number;
-  tier: ResolutionTierId;
+  lodId: LodTierId;
 }>;
 
 const BAKE_PAD_PX = 1;
@@ -29,12 +29,11 @@ export function bakeChunkCanvas(
   chunk: ChunkCoord,
   pack: WorldPackManifest,
   tileLookup: ReadonlyMap<string, TileSlotSpec>,
-  tier: ResolutionTierId,
+  lod: LodTierSpec,
   resolveTileId?: (col: number, row: number) => string,
 ): BakedChunk {
-  const baseTileW = pack.projection.tiers.classic1x.tileW;
-  const baseTileH = pack.projection.tiers.classic1x.tileH;
-  const lod = tierTileMetrics(pack.projection, tier);
+  const baseTileW = pack.projection.defaultTileW;
+  const baseTileH = pack.projection.defaultTileH;
   const scale = lod.tileW / baseTileW;
 
   const worldWidth = chunk.bounds.maxX - chunk.bounds.minX;
@@ -49,16 +48,15 @@ export function bakeChunkCanvas(
 
   const fallbackTile = tileLookup.get(pack.defaultTileId) ?? pack.tiles[0]!;
   const resolver = resolveTileId ?? (pack.resolveEmptyTileId
-    ? (c: number, r: number) => pack.resolveEmptyTileId!(c, r, pack.params.chunkSize)
+    ? (c: number, r: number) => pack.resolveEmptyTileId!(c, r, pack.params.chunkSize, pack.mapSize)
     : () => pack.defaultTileId);
 
   let tileCount = 0;
   if (ctx) {
     const hw = lod.tileW / 2;
     const hh = lod.tileH / 2;
-    const showGridStroke = tier !== 'overview';
-    const showBevel = tier === '2x' || tier === '4x';
-    const showCoords = tier === '4x';
+    const showBevel = lod.tileW >= 120;
+    const showCoords = lod.tileW >= 240;
 
     ctx.lineJoin = 'miter';
     for (let row = chunk.rowStart; row < chunk.rowEnd; row++) {
@@ -79,30 +77,25 @@ export function bakeChunkCanvas(
         ctx.fillStyle = spec.fill;
         ctx.fill();
 
-        if (showGridStroke) {
-          ctx.strokeStyle = spec.stroke;
-          ctx.lineWidth = tier === '4x' ? 1.5 : 1;
-          ctx.stroke();
-        } else {
-          /* Fill subpixel anti-aliasing seam between adjacent overview diamonds. */
-          ctx.strokeStyle = spec.fill;
-          ctx.lineWidth = 0.75;
-          ctx.stroke();
-        }
+        ctx.strokeStyle = spec.stroke;
+        ctx.lineWidth = Math.max(1, scale);
+        ctx.stroke();
 
         if (showBevel && spec.accent) {
+          const inset = Math.max(1.25, 1.5 * scale);
           ctx.beginPath();
-          ctx.moveTo(cx - hw + 1.5, cy);
-          ctx.lineTo(cx, cy - hh + 1.5);
-          ctx.lineTo(cx + hw - 1.5, cy);
+          ctx.moveTo(cx - hw + inset, cy);
+          ctx.lineTo(cx, cy - hh + inset);
+          ctx.lineTo(cx + hw - inset, cy);
           ctx.strokeStyle = spec.accent;
-          ctx.lineWidth = tier === '4x' ? 1.5 : 1;
+          ctx.lineWidth = Math.max(1, scale);
           ctx.stroke();
         }
 
         if (showCoords) {
-          ctx.fillStyle = 'rgba(220, 234, 248, 0.38)';
-          ctx.font = '600 13px ui-monospace, Menlo, Consolas, monospace';
+          const fontPx = Math.round(13 * (lod.tileW / 240));
+          ctx.fillStyle = 'rgba(220, 234, 248, 0.42)';
+          ctx.font = `600 ${fontPx}px ui-monospace, Menlo, Consolas, monospace`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(`${col},${row}`, cx, cy);
@@ -110,8 +103,8 @@ export function bakeChunkCanvas(
       }
     }
 
-    /* Draw subtle outer chunk boundary so chunk partitioning is inspectable at overview and 1x. */
-    if (tier === 'overview' || tier === '1x') {
+    /* Draw subtle outer chunk boundary so chunk partitioning is inspectable at 50% and 100%. */
+    if (lod.tileW <= 120) {
       const top = tileCenterToWorld(chunk.colStart, chunk.rowStart, baseTileW, baseTileH);
       const right = tileCenterToWorld(chunk.colEnd - 1, chunk.rowStart, baseTileW, baseTileH);
       const bottom = tileCenterToWorld(chunk.colEnd - 1, chunk.rowEnd - 1, baseTileW, baseTileH);
@@ -141,6 +134,6 @@ export function bakeChunkCanvas(
     pixelWidth,
     pixelHeight,
     tileCount,
-    tier,
+    lodId: lod.id,
   };
 }
