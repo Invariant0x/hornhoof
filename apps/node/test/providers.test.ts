@@ -1051,6 +1051,8 @@ describe('Hornhoof tools and instructions', () => {
     expect(mcpConfig!.json).toEqual({ mcpServers: { hornhoof: { type: 'http', url: TOOLS.url, headers: { Authorization: `Bearer ${TOOLS.token}` } } } });
     expect(mcpConfig!.mode & 0o777).toBe(0o600);
     expect(existsSync(mcpConfig!.path)).toBe(false);
+    /* Two minutes to connect to them as it starts, not Claude Code's own 30 seconds. */
+    expect(lastRun().env.MCP_TIMEOUT).toBe('120000');
     expect(events).toContainEqual({ kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' });
   });
 
@@ -1059,12 +1061,12 @@ describe('Hornhoof tools and instructions', () => {
     await run();
     const { argv, env, agentsMd } = lastRun();
     expect(agentsMd).toBe(CODEX_HEAD + INSTRUCTIONS + '\n');
-    expect(argv).toEqual(['exec', '-c', `mcp_servers.hornhoof.url="${TOOLS.url}"`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"', ...FLAGS, '-C', work, '--', 'say ready']);
+    expect(argv).toEqual(['exec', '-c', `mcp_servers.hornhoof.url="${TOOLS.url}"`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"', '-c', 'mcp_servers.hornhoof.startup_timeout_sec=120', ...FLAGS, '-C', work, '--', 'say ready']);
     expect(env.HH_TOOL_TOKEN).toBe(TOOLS.token);
     expect(events).toContainEqual({ kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' });
 
     await run({ sessionId: CODEX_THREAD });
-    expect(lastRun().argv.slice(0, 6)).toEqual(['exec', 'resume', '-c', `mcp_servers.hornhoof.url="${TOOLS.url}"`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"']);
+    expect(lastRun().argv.slice(0, 8)).toEqual(['exec', 'resume', '-c', `mcp_servers.hornhoof.url="${TOOLS.url}"`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"', '-c', 'mcp_servers.hornhoof.startup_timeout_sec=120']);
   });
 
   it('give Kimi Code AGENTS.md and an mcp.json in its home that names the env variable, not the token', async () => {
@@ -1072,7 +1074,7 @@ describe('Hornhoof tools and instructions', () => {
     await run();
     const { env, agentsMd, kimiMcp } = lastRun();
     expect(agentsMd).toBe(INSTRUCTIONS + '\n');
-    expect(kimiMcp).toEqual({ mcpServers: { hornhoof: { transport: 'http', url: TOOLS.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN' } } });
+    expect(kimiMcp).toEqual({ mcpServers: { hornhoof: { transport: 'http', url: TOOLS.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN', startupTimeoutMs: 120_000 } } });
     expect(env.HH_TOOL_TOKEN).toBe(TOOLS.token);
     expect(events).toContainEqual({ kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' });
   });

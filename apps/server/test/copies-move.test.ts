@@ -63,7 +63,7 @@ async function company(env: NodeJS.ProcessEnv = {}) {
 }
 
 describe("the CEO's request to move the server", () => {
-  it('asks for a move and gives the target its copy', async () => {
+  it('asks for a move and waits for a replica seat when both are occupied', async () => {
     const c = await company();
     expect([(await c.rowOf(c.a.id)).role, (await c.rowOf(c.b.id)).role, (await c.rowOf(c.d.id)).role]).toEqual(['data', 'data', 'worker']);
     expect([(await c.rowOf(c.d.id)).serverOrder, (await c.listed()).move]).toEqual([4, null]);
@@ -73,10 +73,25 @@ describe("the CEO's request to move the server", () => {
     const res = await c.post(c.d.id);
     expect([res.statusCode, res.json()]).toEqual([202, { state: 'preparing' }]);
     expect(await c.moves()).toEqual([{ request: expect.any(String) as string, machine_id: c.d.id, from_machine_id: c.leader.id, asked_by: c.owner.id, state: 'preparing', reason: null }]);
-    /* The target holds the data at once, beside the two copies, and one ranking gave it that. */
-    expect([(await c.rowOf(c.a.id)).role, (await c.rowOf(c.b.id)).role, (await c.rowOf(c.d.id)).role]).toEqual(['data', 'data', 'data']);
+    /* A request never gives the target a third replica. */
+    expect([(await c.rowOf(c.a.id)).role, (await c.rowOf(c.b.id)).role, (await c.rowOf(c.d.id)).role]).toEqual(['data', 'data', 'worker']);
     expect(ranked).toEqual([{ rescore: false }]);
     expect((await c.listed()).move).toEqual({ machine: c.d.id, state: 'preparing', reason: null, leader: 'rack', progress: null });
+    /* One remaining copy is ready, so the ranking can retire the other. */
+    const name = 'copy_1111111111111111_1';
+    await c.db.update(machines).set({ copyName: name, copyState: 'making' }).where(eq(machines.id, c.a.id));
+    writeKeeperState(c.control, { mode: 'lead', at: new Date().toISOString(), link: null, copies: [{ name, state: 'pace' }] });
+    await c.ctx.ranking.now();
+    expect((await c.rowOf(c.b.id)).role).toBe('data');
+
+    await c.db.update(machines).set({ copyState: 'ready' }).where(eq(machines.id, c.a.id));
+    await c.ctx.ranking.now();
+    expect(await c.rowOf(c.b.id)).toMatchObject({ role: 'worker', uploadState: 'waiting' });
+    await c.ctx.ranking.now();
+    expect(await c.rowOf(c.d.id)).toMatchObject({ role: 'worker' });
+    await c.db.update(machines).set({ uploadState: null }).where(eq(machines.id, c.b.id));
+    await c.ctx.ranking.now();
+    expect(await c.rowOf(c.d.id)).toMatchObject({ role: 'data' });
     /* While its copy is being made, how far it is. */
     await c.db.update(machines).set({ copyState: 'making', copyProgress: 40 }).where(eq(machines.id, c.d.id));
     expect((await c.listed()).move).toMatchObject({ progress: 40 });

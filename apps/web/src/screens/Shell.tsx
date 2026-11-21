@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType, type CSSProperties, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type RefObject } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, useT } from '../i18n';
 import { notOpened, useOrg } from '../org';
@@ -11,6 +11,7 @@ import { RecoveryBanner } from '../ui/RecoveryBanner';
 import { SwitchBanner } from '../ui/SwitchBanner';
 import { ShellTop, useMeasuredShellTop } from '../ui/shellBars';
 import { LoadFailure, UpdateSaysIt, useLoadFailure } from '../ui/LoadFailure';
+import { onTop, useLoad } from '../ui/Loading';
 import { UpdateBanner } from '../ui/UpdateBanner';
 import { UpdateCut } from '../ui/UpdateCut';
 import { useVersion, versionText } from '../ui/VersionMark';
@@ -293,10 +294,19 @@ function MapWorkspace({ tab, me, dept, deptId, denied, missingDepartment, panel,
   );
 }
 
-/* A department still loading, or one whose load the update holds: the panel says so, and the load asks again after it. */
-function DepartmentFallback({ deptId, org, orgFailure }: { deptId: string | null; org: Org | null; orgFailure: unknown }) {
-  const failure = useLoadFailure(orgFailure);
-  return deptId && !org && failure === null ? <div className="dview" aria-busy="true"><div className="dcanvas" /></div> : null;
+/* A department opened at its own address before its company came: only its id, until the company says the rest. */
+const waitingDepartment = (id: string): Department => ({
+  id, name: null, templateKey: null, roleCode: '', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [],
+});
+
+/* The load of a department's company. shown: the department once its load is done, not as soon as the company is there, so
+   the ring keeps its least time; before, the department as far as its id says, which stands with the shared indicator in
+   its body and says why with Retry when the company does not come. One the update holds keeps the indicator: the panel says
+   why, and the load asks again after it. Null for a department the company does not have. */
+function useDepartmentLoad(dept: Department | undefined, deptId: string | null, org: Org | null, failure: unknown, loadOrg: () => void) {
+  const load = useLoad(deptId ? [{ data: org, failure, load: loadOrg }] : []);
+  const waiting = useMemo(() => (deptId ? waitingDepartment(deptId) : null), [deptId]);
+  return { load, shown: load.phase === 'done' ? dept ?? null : waiting };
 }
 
 /* What the shell tells the map, an open department and the windows beside them while one or both stand: where the room
@@ -307,18 +317,19 @@ function shellVars(onMap: boolean, shellTop: number | null, plateRoom: number | 
   return { ...(shellTop === null ? {} : { '--shell-top': `${shellTop}px` }), ...(plateRoom === null ? {} : { '--plate-room': `${plateRoom}px` }) } as CSSProperties;
 }
 
-function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire, onPlate }: MapRouteProps & {
-  deptId: string | null; denied: boolean; org: Org | null; orgFailure: unknown; shown: string | null; panel: 'window' | 'task' | null;
+function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, loadOrg, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire, onPlate }: MapRouteProps & {
+  deptId: string | null; denied: boolean; org: Org | null; orgFailure: unknown; loadOrg(): void; shown: string | null; panel: 'window' | 'task' | null;
   openTask: (id: string) => void; openTracker: (departmentId: string) => void; openDepartment: (id: string) => void; onHire: (dept: Department) => void;
   onPlate: (room: number | null) => void;
 }) {
-  if (tab !== 'map' || denied || missingDepartment) return null;
-  if (!dept) return <DepartmentFallback deptId={deptId} org={org} orgFailure={orgFailure} />;
+  const { load, shown: department } = useDepartmentLoad(dept, deptId, org, orgFailure, loadOrg);
+  if (tab !== 'map' || denied || missingDepartment || !department) return null;
   return (
     <DepartmentView
-      key={dept.id}
+      key={department.id}
       me={me}
-      department={dept}
+      department={department}
+      load={load}
       deputies={org?.people ?? []}
       selected={shown}
       panel={panel}
@@ -329,7 +340,7 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
       onOpenDecisions={openDecisions}
       onOpenTracker={openTracker}
       onOpenDepartment={openDepartment}
-      onHire={() => onHire(dept)}
+      onHire={() => onHire(department)}
       onPlate={onPlate}
     />
   );
@@ -353,7 +364,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const windows = useAgentWindows(null);
   /* A task's panel stands on the left, on its own: it and a window on the screen take each other's place. */
   const [staff, setStaff] = useState<StaffAsk | null>(null);
-  const { org, failure: orgFailure } = useOrg(windows.ids.length > 0 || taskId !== null || deptId !== null);
+  const { org, failure: orgFailure, load: loadOrg } = useOrg(windows.ids.length > 0 || taskId !== null || deptId !== null);
   const orchestratorId = org?.orchestrator?.id;
   if (orchestratorId && windows.ids.includes(orchestratorId)) windows.nameOrchestrator(orchestratorId);
   const { open: openWindow, hide: hideWindow } = windows;
@@ -451,13 +462,14 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount({ kind: 'settings', group: 'company' })} />
         </SwitchBanner>
         <AgentWindowError shown={windows.shown} org={org} failure={orgFailure} />
-        {deptId && !unavailableFailure(orgFailure) && <LoadFailure failure={orgFailure} />}
+        {/* Before the company came, the department says it where it will stand. */}
+        {deptId && !unavailableFailure(orgFailure) && <LoadFailure failure={onTop(org, orgFailure)} />}
         {(route.kind === 'unavailable' || route.kind === 'invite' || missingDepartment || denied) && <RouteUnavailable onHome={goHome} />}
         <GuardBoundary block="map" reset={deptId}>
           <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
         </GuardBoundary>
         <GuardBoundary block="department" reset={deptId}>
-        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onPlate={setPlateRoom} onHire={dept => {
+        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} loadOrg={loadOrg} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onPlate={setPlateRoom} onHire={dept => {
           setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
           openAgent('orchestrator');
         }} />

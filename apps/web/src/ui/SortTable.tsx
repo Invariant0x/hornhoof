@@ -190,7 +190,7 @@ export function SortTable<T extends { id: string }>({ rows, columns, name, initi
 
   return <>
     {search && <>
-      <TableTools rows={rows} groups={filters} selected={selected} toggle={toggleFilter} clear={key => setSelected(previous => ({ ...previous, [key]: [] }))} query={query} setQuery={setQuery} placeholder={search.placeholder} short={search.short} />
+      <TableTools rows={rows} groups={filters} selected={selected} toggle={toggleFilter} clear={key => setSelected(previous => ({ ...previous, [key]: [] }))} query={query} setQuery={setQuery} placeholder={search.placeholder} short={search.short} room={search.room} />
       <ResultLine filtered={filtered} count={search.count(rows.length)} shown={visible.length} all={rows.length} clear={() => { setQuery(''); setSelected({}); }} />
     </>}
     {search && visible.length === 0 && <p className="nothing">{t.tables.noMatch}</p>}
@@ -216,7 +216,7 @@ export function HeldTable<T>({ load, columns, search, words, rows }: { load: Loa
   return (
     <Hold load={load} keep className="held-table">
       {search && <>
-        <TableTools rows={[]} groups={[]} selected={{}} toggle={nothing} clear={nothing} query="" setQuery={nothing} placeholder={search.placeholder} short={search.short} />
+        <TableTools rows={[]} groups={[]} selected={{}} toggle={nothing} clear={nothing} query="" setQuery={nothing} placeholder={search.placeholder} short={search.short} room={search.room} held />
         <p className="result"><bdi><Idle w="10ch" /></bdi></p>
       </>}
       <Edge className="tbl-frame"><div className="tbl">

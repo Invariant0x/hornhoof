@@ -3,7 +3,7 @@ import { WORK_MEMORY_GB, TEST_MINUTES, UNMEASURED_QUIET_MS, OPEN_RUNS, WAIT_MS, 
 import type { KeptFiles, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { refusePaused } from '../tasks/pause.js';
-import { and, asc, eq, exists, inArray, isNotNull, isNull, like, max, notExists, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, exists, inArray, isNotNull, isNull, like, max, notExists, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
@@ -62,8 +62,17 @@ const toolsOf = (kind: RunKind) => (kind === 'work' ? { state: 'work_run', stop:
 
 /* Where an agent reads a run again, part by part. */
 const readAgain = (run: Pick<Run, 'kind' | 'number'>) => `${toolsOf(run.kind).state} ${run.number} shows it part by part.`;
-export const madeName = (run: Pick<Run, 'number'>, part: number, name: string) => `work-${run.number}-${part}-${name}`;
-const filesOf = (run: Pick<Run, 'kind' | 'number'>) => like(attachments.name, `${run.kind}-${run.number}-%`);
+/* What a part puts on the task from $HH_OUT: work-<run>-<part>-<name> for work, test-<run>-<part>-<name> for a test run, whose
+   logs are tests-<run>-<part>.log. */
+const madeWord = (run: Pick<Run, 'kind'>) => (run.kind === 'work' ? 'work' : 'test');
+export const madeName = (run: Pick<Run, 'kind' | 'number'>, part: number, name: string) => `${madeWord(run)}-${run.number}-${part}-${name}`;
+/* A run's files on its task: its logs and what its parts made. */
+const filesOf = (run: Pick<Run, 'kind' | 'number'>) => or(like(attachments.name, `${run.kind}-${run.number}-%`), like(attachments.name, `${madeWord(run)}-${run.number}-%`))!;
+/* What a part made, as its run's state names it: always for work, for a test run once it made anything. */
+function madeView(run: Pick<Run, 'kind' | 'number'>, part: number, has: Set<string | null>): { made?: string[] } {
+  const made = [...has].filter((n): n is string => n !== null && n.startsWith(madeName(run, part, ''))).sort();
+  return run.kind === 'work' || made.length ? { made } : {};
+}
 export const commandFor = (run: Pick<Run, 'command' | 'parts'>, part: number) => run.command.replaceAll('{parts}', String(run.parts)).replaceAll('{part}', String(part));
 
 /* The last lines of a log. */
@@ -505,7 +514,7 @@ export async function loseParts(ctx: Ctx, which: SQL, why: string): Promise<void
       .returning({ id: testParts.id });
     if (again) cancelParts(ctx, [p]);
     /* What the lost attempt put on the task goes: the part makes it again, and the old id takes no more. */
-    if (again && run.kind === 'work') {
+    if (again) {
       await ctx.db.delete(attachments).where(and(eq(attachments.taskId, run.taskId), like(attachments.name, `${madeName(run, p.part, '')}%`)));
     }
     if (again) await runReached(ctx, run, 'retry');
@@ -808,7 +817,7 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: Run
       startedAt: p.startedAt?.toISOString() ?? null,
       finishedAt: p.finishedAt?.toISOString() ?? null,
       log: has.has(logName(run, p.part)) ? logName(run, p.part) : null,
-      ...(work ? { made: [...has].filter(n => n!.startsWith(`work-${run.number}-${p.part}-`)).sort() } : {}),
+      ...madeView(run, p.part, has),
       ...(p.lost.length ? { ranAgain: p.lost.map(lostLine) } : {}),
       ...(p.status === 'failed' && p.tail ? { end: p.tail } : {}),
     })),
@@ -872,15 +881,15 @@ export async function stopRun(ctx: Ctx, job: ToolJob, number: number, kind: RunK
   return `${named(run)} is stopped.`;
 }
 
-/* A running part of work on this node, and its run, for the part's files. */
-export async function workPartOn(ctx: Ctx, id: NodeIdentity, partId: string): Promise<{ part: Part; run: Run; task: Task } | null> {
+/* A running part on this node, and its run, for the part's files. */
+export async function runningPartOn(ctx: Ctx, id: NodeIdentity, partId: string): Promise<{ part: Part; run: Run; task: Task } | null> {
   if (!isId(partId)) return null;
   const [found] = await ctx.db
     .select({ part: testParts, run: testRuns, task: tasks })
     .from(testParts)
     .innerJoin(testRuns, eq(testRuns.id, testParts.runId))
     .innerJoin(tasks, eq(tasks.id, testRuns.taskId))
-    .where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), eq(testRuns.kind, 'work'), ofNode(ctx, id)));
+    .where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), ofNode(ctx, id)));
   return found ?? null;
 }
 
