@@ -73,6 +73,18 @@ describe('what a task is waiting for', () => {
     expect(await timeWaits(c, task, c.tokens.olga)).toMatchObject([{ kind: 'person', who: { kind: 'person', id: c.ids.olga } }]);
   });
 
+  it('names only the person asked on a named question in both tracker responses', async () => {
+    const c = await aclCompany();
+    const task = await c.work('Choose the currency', c.crew.mine);
+    const { request } = await ask(c.app.ctx, c.crew.mine.id, task.id, { kind: 'question', text: 'Which currency?', recipientPersonId: c.ids.olga });
+    const decisions = await c.get('/api/requests', c.tokens.ceo);
+    expect(decisions.json().requests).toContainEqual(expect.objectContaining({ id: request.id, canAnswer: false, ownerPersonId: c.ids.olga }));
+    const named = { kind: 'person', request: true, who: { kind: 'person', id: c.ids.olga } };
+    expect(await timeWaits(c, task)).toMatchObject([named]);
+    const list = await c.get('/api/tasks?status=all', c.tokens.ceo);
+    expect(list.json().tasks.find((row: Task) => row.id === task.id).time.waitsOn).toMatchObject([named]);
+  });
+
   it.each([['tests', 'run'], ['work', 'work']] as const)('uses the number of a %s run even when two records name it', async (kind, shownKind) => {
     const c = await aclCompany();
     const task = await c.work('Test the release', c.crew.mine);

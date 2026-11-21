@@ -10,7 +10,7 @@ import { seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { agents, machines, nodeCodes, nodes, people, subscriptions, tasks, testParts, testRuns, type Provider } from '../../db/schema.js';
+import { agents, companies, machines, nodeCodes, nodes, people, subscriptions, tasks, testParts, testRuns, type Provider } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError, loggable } from '../../errors.js';
 import { runningAgents } from '../agents/running.js';
@@ -18,6 +18,7 @@ import { linkOf, publicUrl } from '../link/link.js';
 import { buildSoon, type LeaderBuild } from '../network/follow.js';
 import { companyFolder, isServerComputer, issueTicket } from '../network/join.js';
 import { seenAccess } from '../computer/seen.js';
+import { replicasOf } from '../copies/measured.js';
 import { askMove, cancelMove, moveView } from '../copies/move.js';
 import { setPriority } from '../copies/priority.js';
 import { holding } from '../copies/view.js';
@@ -30,6 +31,7 @@ import { connectionRoutes } from './connection-routes.js';
 import { disconnectMachines, refuseLeader } from './disconnect.js';
 import { nodeIdentity, ownBuiltin, ownMachine as machineOfServer, type NodeHub } from './hub.js';
 import { nodeImageOfBuild } from './image.js';
+import { machineFolders } from './machine-disk.js';
 import { builtinMachine, isServerInstall, liveNode, otherBuild, settlePlans, shownMachine } from './nodes.js';
 import { machineProgramNodes, machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
 import { machineDrain, nodeDrain } from '../updates/drain.js';
@@ -247,9 +249,9 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/machines', async req => {
     const me = await requirePerson(req, db);
-    const live = and(isNull(machines.revokedAt), shownMachine(config));
+    const live = and(eq(machines.companyId, me.companyId), isNull(machines.revokedAt), shownMachine(config));
     const rows = await db
-      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, networkId: machines.networkId, webPort: machines.webPort, path: machines.path, keepsBackups: machines.keepsBackups, heldBackups: machines.heldBackups })
+      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, networkId: machines.networkId, webPort: machines.webPort, path: machines.path, keepsBackups: machines.keepsBackups, heldBackups: machines.heldBackups, role: machines.role, uploadState: machines.uploadState })
       .from(machines)
       .innerJoin(people, eq(people.id, machines.personId))
       .where(me.scopeKind === 'company' ? live : and(live, eq(machines.personId, me.id)))
@@ -271,7 +273,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       db
         .select(only(machines, 'hostname'))
         .from(machines)
-        .where(and(eq(machines.companyId, me.companyId), live, eq(machines.role, 'worker'), eq(machines.directFails, true), gt(machines.reportAt, new Date(Date.now() - CORE_OFFER_MS))))
+        .where(and(live, eq(machines.role, 'worker'), eq(machines.directFails, true), gt(machines.reportAt, new Date(Date.now() - CORE_OFFER_MS))))
         .orderBy(machines.createdAt);
     const [ownRow, refused] = me.scopeKind === 'company' ? await Promise.all([findThisMachine(db, config), refusing()]) : [null, []];
     const refusedBy = refused.map(row => row.hostname);
@@ -283,6 +285,12 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
        the computer the server itself runs on says what the server's own row says. */
     const held = me.scopeKind === 'company' ? await holding(ctx) : null;
     const dataOf = (machineId: string) => held?.views.get(serverMachine?.id === machineId && ownRow ? ownRow.id : machineId) ?? null;
+    const [company] = held ? await db.select(only(companies, 'name')).from(companies).where(eq(companies.id, me.companyId)) : [];
+    const machineReplicas = (m: (typeof rows)[number]) => {
+      if (!company) return undefined;
+      const leads = m.id === ownRow?.id || m.id === serverMachine?.id;
+      return replicasOf(ctx, m.id, !leads && (m.role === 'data' || m.uploadState !== null), company.name);
+    };
     /* Each machine's computer access as this person sees it; the server's card carries its own machine's. */
     const access = await seenAccess(ctx, me);
     const accessOf = (machineId: string | undefined) => access.find(view => view.machine.id === machineId) ?? null;
@@ -309,6 +317,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
           ? {
               online: hub.isOnline(own),
               load: together([hub.loadOf(own)]),
+              replicas: { count: 0, bytes: 0, companies: [] },
               running: running(a => a.builtin && onOwn(a.builtinMachine), p => p.builtin && onOwn(p.builtinMachine)),
               machine: serverMachine,
               drain: nodeDrain(ctx, own),
@@ -334,12 +343,13 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         otherBuild: otherBuild(hub, on(m.id).map(n => n.id), config.nodeBuild),
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
         plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
+        folders: machineFolders(hub, on(m.id)),
         lendsTests: m.lendsTests,
         /* Where the company opens on that machine, and how the machine reaches the server; none without the core. */
         core: m.networkId ? { webPort: m.webPort, path: m.path } : null,
         needsCore: needsCore(m),
         access: accessOf(m.id),
-        ...(held ? { data: dataOf(m.id) } : {}),
+        ...(held ? { data: dataOf(m.id), replicas: machineReplicas(m) } : {}),
         /* Whether it keeps the company's backups, and how many it holds; none of either without the core. */
         keepsBackups: m.networkId ? m.keepsBackups : null,
         heldBackups: m.networkId ? m.heldBackups.length : null,

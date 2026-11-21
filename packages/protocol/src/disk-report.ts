@@ -6,6 +6,10 @@ import { z } from 'zod';
 export const DISK_PARTS = ['images', 'containers', 'volumes', 'buildCache', 'workingCopies', 'recordings', 'checkTemp'] as const;
 export const DiskPart = z.enum(DISK_PARTS);
 export type DiskPart = z.infer<typeof DiskPart>;
+/* The parts each node measures in its own folder, /data, apart from the rest, which the whole machine shares: the same in the
+   report of every node on it. A node's folder is a Docker volume of its own, so where the volumes are measured these are
+   inside them. */
+export const NODE_DISK_PARTS = ['workingCopies', 'recordings', 'checkTemp'] as const satisfies readonly DiskPart[];
 
 const Bytes = z.number().int().min(0);
 /* How many of its latest removals a node names, and how many of the copies it keeps. */
@@ -38,3 +42,12 @@ export const DiskReport = z.object({
     .optional(),
 });
 export type DiskReport = z.infer<typeof DiskReport>;
+
+/* The server adds this to the machine's disk view from keeper measurements. Bytes are part of Docker's volumes.
+   Companies lists only those the server can name for the viewer. The node's own disk report carries no company names. */
+export const MachineReplicas = z.object({
+  count: z.number().int().min(0),
+  bytes: Bytes,
+  companies: z.array(z.object({ name: z.string(), bytes: Bytes })),
+});
+export type MachineReplicas = z.infer<typeof MachineReplicas>;

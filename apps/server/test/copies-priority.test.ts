@@ -115,14 +115,23 @@ describe("the CEO's choice of a machine's place", () => {
     const copy = (n: string) => `copy_${n.repeat(16)}_1`;
     await c.db.update(machines).set({ role: 'data', copyName: copy('1'), copyState: 'ready' }).where(eq(machines.id, c.a.id));
     await c.db.update(machines).set({ role: 'data', copyName: copy('2'), copyState: 'ready' }).where(eq(machines.id, c.b.id));
-    const said = (b: 'pace' | 'behind') => writeKeeperState(c.control, { mode: 'lead', at: new Date().toISOString(), link: null, copies: [{ name: copy('1'), state: 'sync' }, { name: copy('2'), state: b }] });
-    said('behind');
+    const said = (name: string, b: 'pace' | 'behind') => writeKeeperState(c.control, { mode: 'lead', at: new Date().toISOString(), link: null, copies: [{ name: copy('1'), state: 'sync' }, { name, state: b }] });
+    said(copy('2'), 'behind');
     expect(c.refusal(await c.put(c.a.id, { pin: 'none' }))).toEqual([409, 'only_copy', 'a holds the only up-to-date copy; give another machine a place first.']);
     expect((await c.rowOf(c.a.id)).serverPin).toBeNull();
-    /* A copy that is behind may be kept out: another one is up to date. */
+    /* A copy that is behind may be kept out while another is up to date. Its seat remains occupied until its wipe. */
     expect((await c.put(c.b.id, { pin: 'none' })).statusCode).toBe(204);
-    expect((await c.put(c.b.id, { pin: null })).statusCode).toBe(204);
-    said('pace');
+    expect(await c.rowOf(c.b.id)).toMatchObject({ role: 'worker', uploadState: 'waiting' });
+    expect((await c.rowOf(c.c.id)).role).toBe('worker');
+    expect(c.refusal(await c.put(c.a.id, { pin: 'none' }))[1]).toBe('only_copy');
+    expect((await c.app.inject({
+      method: 'POST', url: '/api/network/report', payload: { wiped: true }, remoteAddress: '127.0.0.1',
+      headers: { 'x-hornhoof-via': c.b.id, 'x-hornhoof-keeper': '1' },
+    })).statusCode).toBe(204);
+    await c.ctx.ranking.now();
+    expect(await c.rowOf(c.c.id)).toMatchObject({ role: 'data', uploadState: null });
+    await c.db.update(machines).set({ copyName: copy('3'), copyState: 'ready' }).where(eq(machines.id, c.c.id));
+    said(copy('3'), 'pace');
     expect((await c.put(c.a.id, { pin: 'none' })).statusCode).toBe(204);
     expect((await c.rowOf(c.a.id)).serverPin).toBe('none');
   });
