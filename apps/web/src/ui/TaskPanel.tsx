@@ -103,22 +103,33 @@ function TaskQuestionsSection({ requests }: { requests: TaskDetail['requests'] }
   );
 }
 
+function PathGoal({ goal, onOpenGoal }: { goal: { id: string; title: string }; onOpenGoal?: (id: string) => void }) {
+  if (onOpenGoal) return <li><button className="linkish tp-goal" type="button" dir="auto" onClick={() => onOpenGoal(goal.id)}>{goal.title}</button></li>;
+  return <li><span className="tp-goal" dir="auto">{goal.title}</span></li>;
+}
+
+function PathParent({ parent, onOpen }: { parent?: { id: string; number: number; title: string } | null; onOpen: (id: string) => void }) {
+  if (!parent) return null;
+  return <li><button className="linkish" type="button" dir="auto" onClick={() => onOpen(parent.id)}>#{parent.number} {parent.title}</button></li>;
+}
+
+function HeldPath({ held, hasGoals }: { held?: boolean; hasGoals?: boolean }) {
+  if (!held || hasGoals) return null;
+  return <li className="tp-path-held" aria-hidden="true"><Idle w="12ch" /></li>;
+}
+
 /* Where the task belongs: the goals above it, from the company's, each with the goal's mark, and the task it is part of, each
    followed by the mark that leads on to the card itself. Each opens its own card. When held is true and the goals have not
    come yet, an idle bar keeps the path row's place so the title stays fixed when they arrive. */
 export function CardPath({ goals, parent, held, onOpenGoal, onOpen }: { goals: { id: string; title: string }[]; parent?: { id: string; number: number; title: string } | null; held?: boolean; onOpenGoal?: (id: string) => void; onOpen: (id: string) => void }) {
   const t = useT();
-  const holding = Boolean(held && !goals.length);
-  const shown = goals.length > 0 || Boolean(parent);
-  if (!shown && !holding) return null;
+  if (!goals.length && !parent) return held ? <nav className="tp-path" aria-hidden="true"><ol><HeldPath held /></ol></nav> : null;
   return (
-    <nav className="tp-path" aria-label={shown ? t.tracker.card.path : undefined} aria-hidden={shown ? undefined : true}>
+    <nav className="tp-path" aria-label={t.tracker.card.path}>
       <ol>
-        {holding && <li className="tp-path-held" aria-hidden="true"><Idle w="12ch" /></li>}
-        {goals.map(g => (
-          <li key={g.id}>{onOpenGoal ? <button className="linkish tp-goal" type="button" dir="auto" onClick={() => onOpenGoal(g.id)}>{g.title}</button> : <span className="tp-goal" dir="auto">{g.title}</span>}</li>
-        ))}
-        {parent && <li><button className="linkish" type="button" dir="auto" onClick={() => onOpen(parent.id)}>#{parent.number} {parent.title}</button></li>}
+        <HeldPath held={held} hasGoals={goals.length > 0} />
+        {goals.map(g => <PathGoal key={g.id} goal={g} onOpenGoal={onOpenGoal} />)}
+        <PathParent parent={parent} onOpen={onOpen} />
       </ol>
     </nav>
   );
@@ -301,11 +312,16 @@ export function goalChain(id: string | null | undefined, goals: GoalView[] | und
 
 /* What a task's path shows for its goal: the full chain once goals came, nothing while they are still coming so the held
    bar keeps the row, or the task's own goal when goals failed or omitted it. */
-export function taskGoalPath(goal: TaskLine['goal'], goals: GoalView[] | undefined, failed = false): { id: string; title: string }[] {
+export function taskGoalPath(goal: TaskLine['goal'], goals: GoalView[] | undefined, failed: boolean): { id: string; title: string }[] {
   if (!goal) return [];
   if (goals === undefined) return failed ? [goal] : [];
   const chain = goalChain(goal.id, goals);
   return chain.length ? chain : [goal];
+}
+
+/* Whether a task's goal path is still waiting on the goals list to arrive. */
+export function goalsPending(goal: TaskLine['goal'], goals: GoalView[] | undefined, failed: boolean): boolean {
+  return Boolean(goal) && goals === undefined && !failed;
 }
 
 type View = 'menu' | 'details' | 'log' | 'edit' | 'comment' | 'cancel' | 'pause' | 'secret';
@@ -340,7 +356,7 @@ function TaskBody({ task, goals, goalsFailed, onOpen, onClose, active, onChanged
         <CardPath
           goals={taskGoalPath(task.goal, goals, goalsFailed)}
           parent={task.parent}
-          held={Boolean(task.goal && goals === undefined && !goalsFailed)}
+          held={goalsPending(task.goal, goals, goalsFailed)}
           onOpenGoal={leads.onOpenGoal}
           onOpen={onOpen}
         />
