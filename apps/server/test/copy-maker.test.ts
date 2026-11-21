@@ -481,6 +481,13 @@ describe('the maker of a copy', () => {
     await maker.tick(ORDER);
     expect(s.request()).toMatchObject({ attempt: 2, database: 'hornhoof' });
     expect(maker.report()).toMatchObject({ state: 'making', name: 'copy_99bb2233aabbccdd_2' });
+
+    s.loaded(2, 'hornhoof');
+    const restarted = s.maker();
+    await until(s, restarted, 'sync');
+    await s.maker().tick(ORDER);
+    expect([...s.databases.keys()]).toEqual(['hornhoof']);
+    expect([...s.databases.get('hornhoof')!.subs.keys()]).toEqual(['copy_99bb2233aabbccdd_2']);
   });
 
   it('goes on with a giving up that was cut short, and gives up when its slot is lost', async () => {
@@ -552,6 +559,8 @@ describe('the maker of a copy', () => {
     /* While the new one fills, the old one is asked how far it reaches on one connection, not on a new one each second. */
     s.loaded(2, 'hornhoof_next');
     await until(s, maker, 'sync');
+    const active = [...s.databases.values()].flatMap(database => [...database.subs].filter(([, sub]) => sub.enabled).map(([name]) => name));
+    expect(active).toEqual([NEXT]);
     const before = s.opened.filter(database => database === 'hornhoof').length;
     for (let n = 0; n < 5; n++) await maker.tick({ ...ORDER });
     expect(s.opened.filter(database => database === 'hornhoof').length - before).toBeLessThanOrEqual(1);

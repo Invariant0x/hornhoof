@@ -1,29 +1,30 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { deptLabel, errorText, useLanguage, useT } from '../i18n';
+import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import type { TrackerPlace } from '../routes';
 import { searchTasks } from '../task-search';
 import { placeName, useGoals, usePipelines, useTaskDepartments, useTasks, useWaitCards } from '../tasks';
-import { doerOf, filterTasks, graphPath, graphTree, mine, personWaited, pipelineTree, pruneGoals, shownDecisions, TRACKER_VIEWS, waitingOn, waitingOnPeople, waitsCount, workingNow, BOARD_STATUSES, boardStatus, type Crumb, type DecisionsOf, type GraphNode, type ShownDecisions, type WorkFilter } from '../tracker';
-import type { Decisions, Department, Me, Org, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard } from '../types';
-import { CEO_DECIDES } from '../ui/DecidedBy';
+import { doerOf, filterTasks, graphPath, graphTree, mine, personWaited, pipelineTree, pruneGoals, shownDecisions, TRACKER_VIEWS, waitingOn, waitingOnPeople, waitsCount, withoutRequestWaits, workingNow, BOARD_STATUSES, boardStatus, type Crumb, type DecisionsOf, type GraphNode, type ShownDecisions, type WorkFilter } from '../tracker';
+import type { Decisions, Department, Me, Org, PersonRef, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard, WaitingRequest } from '../types';
+import { CEO_DECIDES, DecidedByNote } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
-import { DepartmentMark } from '../ui/TrackerMarks';
+import { DepartmentMark, PersonMark } from '../ui/TrackerMarks';
 import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
 import { Busy, Hold, LoadState, noneYet, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
 import { MachineAway } from '../ui/MachineAway';
 import { MachineLow } from '../ui/MachineLow';
 import { MergeCard } from '../ui/MergeCard';
-import { Requests, wordsAnswer } from '../ui/Requests';
+import { namedReadOnly, Requests, wordsAnswer } from '../ui/Requests';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { GoalForm, PipelineForm, TrackerNewTask } from '../ui/TrackerForms';
 import { TrackerSide } from '../ui/TrackerSide';
 import { HeldList, TrackerBoard, TrackerFound, TrackerGoals, TrackerGraph, TrackerList, type Rows } from '../ui/TrackerViews';
 import { TurnsAndReleases } from '../ui/TurnsAndReleases';
-import { waitText } from '../ui/tracker-words';
-import { WaitCards } from '../ui/WaitCards';
+import { sinceSeconds, spanText, waitText } from '../ui/tracker-words';
+import { cardWords, WaitCards } from '../ui/WaitCards';
+import { WaitingQueue, type WaitQueueEntry } from '../ui/WaitingQueue';
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 
 type Props = {
@@ -104,7 +105,7 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   place: (p: TaskLine['department']) => string;
   /* Whose: the person looked at, whom the page's title names, or the viewer with none. */
   personId: string | null;
-  viewerId: string;
+  queue: boolean;
   /* The tasks that wait for that person. */
   tasks: TaskLine[];
   recipient: string;
@@ -117,9 +118,13 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
 };
 
 /* What waits lists the decisions of the person picked, or with none the viewer's own. */
-const decisionsOfWho = (personId: string | null, viewerId: string): DecisionsOf => (personId ? { person: personId } : { viewer: viewerId });
+const decisionsOfWho = (personId: string | null): DecisionsOf => personId ? { person: personId } : 'viewer';
 
 const shownNone = (s: ShownDecisions) => !s.requests.length && !s.proposals.length && !s.merges.length;
+
+const taskTitle = (task: Pick<TaskLine, 'number' | 'title'>) => `#${task.number} ${task.title}`;
+const requestIcon = { question: 'waits', approval: 'list', choice: 'branch', stuck: 'failure' } as const;
+const age = (t: Messages, at: string) => spanText(t, sinceSeconds(at));
 
 const nothing = () => {};
 
@@ -184,6 +189,79 @@ function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOp
   );
 }
 
+function NamedQuestionRow({ request, person, onOpenTask }: { request: WaitingRequest; person?: PersonRef | null; onOpenTask: (id: string) => void }) {
+  const t = useT();
+  return (
+    <article className="entry wait-question" aria-label={taskTitle(request.task)}>
+      <div className="wait-question-copy">
+        <p className="wait-question-text" dir="auto">{request.text}</p>
+        <div className="wait-meta">
+          <bdi>{t.tasks.queue.asked}</bdi>
+          {person && <PersonMark person={person} decorative />}
+          <bdi>{person?.name ?? t.tasks.someone}</bdi>
+          <span aria-hidden="true">·</span><bdi dir="ltr">#{request.task.number}</bdi>
+          <span aria-hidden="true">·</span><bdi>{age(t, request.at)}</bdi>
+        </div>
+        <DecidedByNote by={request.decidedBy} />
+      </div>
+      <div className="entry-actions">
+        <button className="btn ghost" type="button" onClick={() => onOpenTask(request.task.id)}>{t.tasks.queue.open}</button>
+      </div>
+    </article>
+  );
+}
+
+const queueDone = (done: () => void, refresh: () => void) => () => { done(); refresh(); };
+
+function QueueDeck({ shown, tasks, cards, recipient, onCardsSeen, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, onFailure }: Omit<Listed, 'waitsFor'> & {
+  tasks: TaskLine[];
+  cards: WaitCard[];
+  recipient: string;
+  onCardsSeen: () => void;
+}) {
+  const t = useT();
+  const deferButton = (defer: () => void) => <div className="entry-actions"><button className="btn ghost" type="button" onClick={defer}>{t.tasks.queue.defer}</button></div>;
+  const items: WaitQueueEntry[] = [
+    ...shown.requests.map(request => ({
+      id: `request:${request.id}`, title: taskTitle(request.task), icon: requestIcon[request.kind],
+      text: request.kind === 'stuck' ? t.tasks.stuckText(request.agent.name, request.task.number) : request.text,
+      meta: <><bdi>{request.agent.name}</bdi><span aria-hidden="true">·</span><bdi dir="ltr">#{request.task.number}</bdi><span aria-hidden="true">·</span><bdi>{age(t, request.at)}</bdi></>,
+      show: (done: () => void, defer: () => void) => <Requests requests={[request]} onChanged={queueDone(done, onDecisionsChanged)} onDefer={defer} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} />,
+    })),
+    ...shown.proposals.map(card => ({
+      id: `proposal:${card.id}`, title: card.department ? t.staff.title(card.department.name) : t.card.title, text: card.brief, icon: 'list' as const,
+      meta: <><bdi>{card.agent.name}</bdi><span aria-hidden="true">·</span><bdi>{age(t, card.at)}</bdi></>,
+      show: (done: () => void, defer: () => void) => <><ProposalCard card={card} org={org} onCorrect={onOpenOrchestrator} onDone={queueDone(done, onDecisionsChanged)} />{deferButton(defer)}</>,
+    })),
+    ...shown.merges.map(merge => ({
+      id: `merge:${merge.id}`, title: merge.label, text: merge.label, meta: null, icon: 'branch' as const,
+      show: (_done: () => void, defer: () => void) => <><MergeCard merge={merge} onChange={onDecisionsChanged} onFailure={onFailure} />{deferButton(defer)}</>,
+    })),
+    ...cards.map(card => {
+      const { title, text } = cardWords(t, card);
+      return {
+        id: `card:${card.id}`, title, text, meta: age(t, card.at), icon: 'waits' as const,
+        show: (done: () => void, defer: () => void) => <><WaitCards cards={[card]} onOpenTask={onOpenTask} onSeen={queueDone(done, onCardsSeen)} />{deferButton(defer)}</>,
+      };
+    }),
+    ...tasks.map(task => {
+      const wait = waitText(t, task, undefined, recipient);
+      return {
+        id: `task:${task.id}`, title: taskTitle(task), text: task.title, meta: wait, icon: 'waits' as const,
+        show: (_done: () => void, defer: () => void) => <>
+          <p className="wait-meta">{wait}</p>
+          <p dir="auto">{taskTitle(task)}</p>
+          <div className="entry-actions">
+            <button className="btn" type="button" onClick={() => onOpenTask(task.id)}>{t.tasks.cards.open}</button>
+            <button className="btn ghost" type="button" onClick={defer}>{t.tasks.queue.defer}</button>
+          </div>
+        </>,
+      };
+    }),
+  ];
+  return <WaitingQueue items={items} />;
+}
+
 function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () => void }) {
   const t = useT();
   const shown = useLoadFailure(failure);
@@ -196,19 +274,28 @@ function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () 
 
 /* What waits for the person, once all of it came: what agents ask, the orchestrator's cards, the cards Hornhoof kept for them,
    and the tasks that wait for them, or that nothing does. */
-function WaitingForYouBody({ decisions, personId, viewerId, tasks, recipient, kept, onCardsSeen, onFailure, ...rest }: Omit<Waiting, 'sources' | 'live' | 'decisionsFailure'> & { onFailure: (failure: unknown) => void }) {
+type PersonalWaiting = Omit<Waiting, 'sources' | 'live' | 'decisionsFailure'> & { onFailure: (failure: unknown) => void };
+
+function PersonalWaitList({ shown, cards, personId, tasks, recipient, onCardsSeen, ...rest }: Omit<Listed, 'waitsFor'> & {
+  personId: string | null; tasks: TaskLine[]; cards: WaitCard[]; recipient: string; onCardsSeen: () => void;
+}) {
   const t = useT();
-  const shown = shownDecisions(decisions, decisionsOfWho(personId, viewerId));
-  const cards = keptShown(kept, personId);
   const name = mapPeople(rest.org).find(p => p.id === personId)?.name ?? t.tasks.someone;
   return (
     <>
-      <DecisionList shown={shown} onFailure={onFailure} {...rest} />
+      <DecisionList shown={shown} {...rest} />
       <WaitCards cards={cards} onOpenTask={rest.onOpenTask} onSeen={onCardsSeen} />
       {tasks.length > 0 && <WaitingTasks tasks={tasks} personOf={() => recipient} heading={personId ? t.tracker.waitTasksOf(name) : t.tracker.waitTasks} onOpenTask={rest.onOpenTask} />}
       {shownNone(shown) && !cards.length && !tasks.length && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
     </>
   );
+}
+
+function WaitingForYouBody({ decisions, personId, queue, kept, ...rest }: PersonalWaiting) {
+  const shown = shownDecisions(decisions, decisionsOfWho(personId));
+  const cards = keptShown(kept, personId);
+  if (queue && !personId) return <QueueDeck shown={shown} cards={cards} {...rest} />;
+  return <PersonalWaitList shown={shown} cards={cards} personId={personId} {...rest} />;
 }
 
 /* A section of what waits, under its heading: the shared indicator in its room until every source of it came (the decisions,
@@ -244,20 +331,31 @@ function WaitingForYou({ sources, live, decisionsFailure, ...rest }: Waiting) {
 }
 
 type PeopleWaiting = Pick<Waiting, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place' | 'sources' | 'live'> & {
+  allTasks: TaskLine[];
   /* The tasks that wait for any person. */
   tasks: TaskLine[];
   /* The section names itself below the results of a search; the page's title right above names it otherwise. */
   titled: boolean;
 };
 
+function namedAddressee({ task, ownerPersonId }: WaitingRequest, people: PersonRef[], tasks: TaskLine[]) {
+  const listed = people.find(person => person.id === ownerPersonId);
+  if (listed) return listed;
+  const line = tasks.find(candidate => candidate.id === task.id);
+  const wait = line?.time?.waitsOn.find(({ who }) => who?.kind === 'person' && who.id === ownerPersonId && who.name);
+  return wait?.who;
+}
+
 /* What waits for people in the company, for those who see the whole of it, once all of it came: every decision the viewer
    sees, each saying whom it waits for, and the tasks that wait for a person. */
-function WaitingForPeople({ decisions, decisionsFailure, tasks, titled, sources, live, ...rest }: PeopleWaiting) {
+function WaitingForPeople({ decisions, decisionsFailure, allTasks, tasks, titled, sources, live, ...rest }: PeopleWaiting) {
   const t = useT();
   const words = t.tracker.peopleWaits;
   const [failure, setFailure] = useState<unknown>(null);
   const load = useLoad([{ data: decisions, failure: decisionsFailure, load: rest.onDecisionsChanged }, ...sources]);
   const shown = shownDecisions(decisions, 'everyone');
+  const named = shown.requests.filter(namedReadOnly);
+  const actionable = { ...shown, requests: shown.requests.filter(request => !namedReadOnly(request)) };
   const people = mapPeople(rest.org);
   const waitsFor = (personId: string) => {
     const name = people.find(p => p.id === personId)?.name;
@@ -265,7 +363,8 @@ function WaitingForPeople({ decisions, decisionsFailure, tasks, titled, sources,
   };
   return (
     <WaitingSection label={words.title} heading={titled && <h2>{words.title}</h2>} load={load} live={live} decisions={decisions} decisionsFailure={decisionsFailure} onRetry={rest.onDecisionsChanged} failure={failure}>
-      <DecisionList shown={shown} onFailure={setFailure} waitsFor={waitsFor} {...rest} />
+      {named.length > 0 && <div className="reqs">{named.map(request => <NamedQuestionRow key={request.id} request={request} person={namedAddressee(request, people, allTasks)} onOpenTask={rest.onOpenTask} />)}</div>}
+      <DecisionList shown={actionable} onFailure={setFailure} waitsFor={waitsFor} {...rest} />
       {tasks.length > 0 && <WaitingTasks tasks={tasks} personOf={personWaited} heading={words.tasks} onOpenTask={rest.onOpenTask} />}
       {shownNone(shown) && !tasks.length && <p className="muted">{words.nothing}</p>}
     </WaitingSection>
@@ -523,8 +622,9 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
     },
   };
   const own = mine(all, goals, who);
-  const waitsOnWho = waitingOn(all, recipient);
-  const waitsOnPeople = waitingOnPeople(all);
+  const otherWaits = withoutRequestWaits(all, decisions);
+  const waitsOnWho = waitingOn(otherWaits, recipient);
+  const waitsOnPeople = waitingOnPeople(otherWaits);
   const failures = all.filter(task => boardStatus(task) === 'failure');
   const machinesAway = decisions?.machinesAway ?? [];
   const machinesLow = lowMachines(decisions);
@@ -602,6 +702,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       decisions={decisions}
       decisionsFailure={decisionsFailure}
       onDecisionsChanged={onDecisionsChanged}
+      allTasks={all}
       tasks={waitsOnPeople}
       titled={found !== null}
       sources={[taskPart]}
@@ -618,7 +719,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       decisionsFailure={decisionsFailure}
       onDecisionsChanged={onDecisionsChanged}
       personId={decisionsOf}
-      viewerId={me.person.id}
+      queue={section.kind === 'waits'}
       tasks={waitsOnWho}
       recipient={recipient}
       kept={kept}
@@ -664,7 +765,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
         tasks={all}
         onOpenAgent={onOpenAgent}
         counts={{
-          waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf, me.person.id)), waitsOnWho, keptShown(kept, decisionsOf)),
+          waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf)), waitsOnWho, keptShown(kept, decisionsOf)),
           people: peopleCount(decisions, waitsOnPeople, company),
           failures: failures.length + machinesAway.filter(machine => !machine.back).length + machinesLow.length,
           mine: own.tasks.length,

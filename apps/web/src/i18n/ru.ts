@@ -421,6 +421,7 @@ export const ru: Messages = {
     account: 'Аккаунт',
     logOut: 'Выйти',
     version: (v: string) => `Версия ${v}`,
+    barMore: 'Еще',
   },
   skins: {
     title: 'Скины оформления',
@@ -1858,6 +1859,16 @@ export const ru: Messages = {
     },
     waiting: 'Ждут вас',
     nothingWaiting: 'Вас ничего не ждет.',
+    queue: {
+      empty: 'Ничего не ждет ответа',
+      defer: 'Отложить',
+      deferred: 'Отложено',
+      more: n => `Еще ${n} ${plural('ru', n, { one: 'карточка', few: 'карточки', many: 'карточек', other: 'карточки' })}`,
+      asked: 'Спросили:',
+      open: 'Открыть',
+      readOnly: 'Только чтение',
+      materials: 'Материалы вопроса',
+    },
     cards: {
       open: 'Открыть задачу',
       seen: 'Понятно',
@@ -2492,6 +2503,7 @@ export const ru: Messages = {
     priority: { label: 'Приоритет', urgent: 'Срочно', high: 'Высокий', normal: 'Обычный', low: 'Низкий' },
     list: { task: 'Название', executor: 'Исполнитель', responsible: 'Ответственный', due: 'Срок', progress: 'Прогресс', parts: 'Части этой цели', subtasks: (done: number, total: number) => `Подзадачи: готово ${done} из ${total}`,
       group: (status: string, count: number) => `${status}: ${count}`,
+      program: (name: string) => `Программа: ${name}`,
       neededFor: (number: number, department: string) => `нужна для #${number} ${department}`,
     },
     nobody: 'Никто',

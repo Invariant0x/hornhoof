@@ -88,10 +88,13 @@ export function claudeTook(line: Record<string, unknown>, words: string): boolea
    compacted conversation that only its transcript shows, a note beside a tool call, words of its own queue. */
 const CLAUDE_OWN = ['isMeta', 'isSidechain', 'isCompactSummary', 'isVisibleInTranscriptOnly', 'turnCompanion', 'queueTranscriptOnly'] as const;
 
+/* An entry Claude wrote as the user's of its own, which nobody typed, whatever words it holds. */
+export const claudeOwn = (line: Record<string, unknown>): boolean => CLAUDE_OWN.some(flag => line[flag] === true);
+
 /* The message of an entry typed into Claude's input, as Claude Code 2.1.318 to 2.1.329 mark it (promptSource typed): not
    one of Claude's own, nor one that says nothing of where it came from. */
 function userMessage(line: Record<string, unknown>): Record<string, unknown> | null {
-  if (line.type !== 'user' || line.promptSource !== 'typed' || CLAUDE_OWN.some(flag => line[flag] === true) || !isRecord(line.message)) return null;
+  if (line.type !== 'user' || line.promptSource !== 'typed' || claudeOwn(line) || !isRecord(line.message)) return null;
   return line.message.role === 'user' ? line.message : null;
 }
 
