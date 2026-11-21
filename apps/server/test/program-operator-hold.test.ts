@@ -395,6 +395,7 @@ const recoveryQueries = (c: Held) => c.sent.mock.calls.filter(([, frame]) => fra
 
 it.each<[string, Partial<typeof FREE>]>([
   ['an idle program', {}],
+  ["Hornhoof's own unsent words", { input: 'hornhoof' }],
   ['no program', { program: 'gone', current: null, input: 'unknown' }],
 ])('automatically releases the unavailable operator hold with %s and restarts the queue', async (_screen, facts) => {
   const c = await held();
@@ -518,6 +519,39 @@ it('inspects the current node when an employee moves to another node on the same
   apiPlan.sent.mockClear();
   expect(await apiPlan.call()).toMatchObject({ result: 'released', continuation: expect.any(String) });
   expect(recoveryQueries(apiPlan)).toEqual([]);
+});
+
+it('releases a hold without querying a permanently disconnected node on the same or switched subscription', async () => {
+  /* Same subscription: permanently disconnected old node with a live replacement node on the plan. */
+  const samePlan = await release({ input: 'words' });
+  const replacement = await addNode(samePlan, samePlan.sub.id, 'Replacement host');
+  await samePlan.db.update(nodes).set({ keyHash: null, status: 'needs_login' }).where(eq(nodes.id, samePlan.identity.nodeId));
+  await samePlan.db.update(agents).set({ nodeId: null }).where(eq(agents.id, samePlan.agent.id));
+  showRecoveryByNode(samePlan, {});
+  samePlan.sent.mockClear();
+
+  expect(await samePlan.call()).toMatchObject({ result: 'released', continuation: expect.any(String) });
+  expect(recoveryQueries(samePlan)).toEqual([]);
+  expect(await samePlan.row()).toMatchObject({ status: 'resolved', recoveryHold: false });
+  expect((await samePlan.children())[0]).toMatchObject({ nodeId: replacement.id });
+
+  /* Switched subscription whose latest historical job ran on a now-revoked node. */
+  const auto = await held();
+  const [nextSub] = await auto.db.insert(subscriptions).values({ ...auto.sub, id: randomUUID(), kind: 'personal', provider: 'claude', status: 'ready' }).returning();
+  const retired = await addNode(auto, nextSub!.id, 'Retired host');
+  const active = await addNode(auto, nextSub!.id, 'Active host');
+  await auto.db.insert(jobs).values({ companyId: auto.companyId, agentId: auto.agent.id, subscriptionId: nextSub!.id, nodeId: retired.id, kind: 'conversation', prompt: 'Earlier on retired node.', timeoutMs: 1000, status: 'done', startedAt: new Date(+auto.now - MINUTE), finishedAt: new Date(+auto.now - 30_000) });
+  await auto.db.update(nodes).set({ keyHash: null, status: 'needs_login' }).where(eq(nodes.id, retired.id));
+  await auto.db.update(agents).set({ subscriptionId: nextSub!.id }).where(eq(agents.id, auto.agent.id));
+  showRecoveryByNode(auto, { [auto.identity.nodeId]: { input: 'words' } });
+  auto.sent.mockClear();
+
+  await checkOperatorHealth(auto.ctx, new Date(+auto.now + 6 * MINUTE));
+  expect(recoveryQueries(auto)).toEqual([]);
+  const autoChildren = await auto.children();
+  expect(autoChildren).toHaveLength(1);
+  expect(autoChildren[0]).toMatchObject({ subscriptionId: nextSub!.id, nodeId: active.id, status: 'running' });
+  expect(await auto.row()).toMatchObject({ status: 'resolved', recoveryHold: false });
 });
 
 it('releases and reads operator case mode even when agent_events holds a non-numeric operatorEvidence ordinal', async () => {
