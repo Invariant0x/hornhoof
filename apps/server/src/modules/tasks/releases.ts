@@ -512,20 +512,22 @@ async function makeBranchOf(ctx: Reader, repo: Repo, turn: Turn): Promise<void> 
   else ctx.log?.info({ ...at, head: branch.head, made: branch.made }, branch.made ? `turn-${turn.number} was made from ${branch.head}.` : `turn-${turn.number} was there already, at ${branch.head}.`);
 }
 
+async function releaseTurn(ctx: Reader, turn: Turn): Promise<void> {
+  try {
+    const target = await integrationTarget(ctx, { companyId: turn.companyId, productId: null, departmentId: turn.departmentId });
+    if (target?.turn?.id === turn.id) await releaseOne(ctx, turn, target.repo);
+  } catch (err) {
+    if (err instanceof BranchProofUnavailable) return;
+    ctx.log?.error({ error: loggable(err), companyId: turn.companyId, turn: turn.number }, 'Looking for the release of a turn failed.');
+  }
+}
+
 /* Every minute: each department that keeps a repository, on its tags. One department's trouble keeps no other from it. */
 export async function releaseRound(ctx: Reader): Promise<void> {
   if (!ctx.config || !ctx.readTags) return;
   const open = await ctx.db.select().from(turns).innerJoin(departments, eq(departments.id, turns.departmentId))
     .where(and(eq(turns.status, 'open'), isNull(departments.parentId), isNotNull(departments.repoUrl)));
-  for (const { turns: turn } of open) {
-    try {
-      const target = await integrationTarget(ctx, { companyId: turn.companyId, productId: null, departmentId: turn.departmentId });
-      if (target?.turn?.id === turn.id) await releaseOne(ctx, turn, target.repo);
-    } catch (err) {
-      if (err instanceof BranchProofUnavailable) continue;
-      ctx.log?.error({ error: loggable(err), companyId: turn.companyId, turn: turn.number }, 'Looking for the release of a turn failed.');
-    }
-  }
+  for (const { turns: turn } of open) await releaseTurn(ctx, turn);
 }
 
 export type { Release };

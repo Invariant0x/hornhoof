@@ -48,6 +48,11 @@ const proofCache = new WeakMap<BranchProofReader, Set<string>>();
 const MAX_PROOFS = 4096;
 const PROOF_TIMEOUT_MS = 10_000;
 
+function rememberProof(proved: Set<string>, key: string): void {
+  if (proved.size >= MAX_PROOFS) proved.delete(proved.values().next().value!);
+  proved.add(key);
+}
+
 /* Both SHAs are immutable. The repository and credential keep proof from crossing repository access boundaries. */
 export async function branchHolds(ctx: BranchProofReader, repo: Repo, head: string, commit: string): Promise<boolean> {
   if (head === commit) return true;
@@ -57,29 +62,34 @@ export async function branchHolds(ctx: BranchProofReader, repo: Repo, head: stri
   if (proved.has(key)) return true;
   const git = await ctx.readGitAncestry?.(repo, head, commit, PROOF_TIMEOUT_MS).catch(() => null);
   const holds = git ?? await restHolds(ctx, repo, head, commit);
-  if (holds) {
-    if (proved.size >= MAX_PROOFS) proved.delete(proved.values().next().value!);
-    proved.add(key);
-  }
+  if (holds) rememberProof(proved, key);
   return holds;
 }
+
+type CompareResult = Awaited<ReturnType<NonNullable<BranchProofReader['readCompare']>>>;
+
+function compareHolds(compared: CompareResult | undefined, commit: string, head: string): boolean | null {
+  if (!compared) return null;
+  if (heldLineage(compared, commit, head)) return true;
+  if (compared.complete) return null;
+  if (compared.rateLimit) throw new GitHubRateLimited(compared.rateLimit);
+  return compared.reason === 'not-an-ancestor' ? false : null;
+}
+
+const historyUnavailable = (repo: Repo): BranchProofUnavailable => new BranchProofUnavailable(
+  githubName(repo.url) ? "GitHub didn't answer with the commit history. Try again." : 'The repository could not confirm the commit history. Try again.',
+);
 
 async function restHolds(ctx: BranchProofReader, repo: Repo, head: string, commit: string): Promise<boolean> {
   try {
     const merged = await ctx.readMerged?.(repo, { base: head, head: commit }, PROOF_TIMEOUT_MS);
     if (merged !== undefined && merged !== null) return merged;
-    const compared = await ctx.readCompare?.(repo, { base: commit, head }, PROOF_TIMEOUT_MS);
-    if (compared && heldLineage(compared, commit, head)) return true;
-    if (compared && !compared.complete) {
-      if (compared.rateLimit) throw new GitHubRateLimited(compared.rateLimit);
-      if (compared.reason === 'not-an-ancestor') return false;
-    }
+    const compared = compareHolds(await ctx.readCompare?.(repo, { base: commit, head }, PROOF_TIMEOUT_MS), commit, head);
+    if (compared !== null) return compared;
   } catch (error) {
-    if (error instanceof GitHubRateLimited) {
-      throw new BranchProofUnavailable(error.message, error.limit);
-    }
+    if (error instanceof GitHubRateLimited) throw new BranchProofUnavailable(error.message, error.limit);
   }
-  throw new BranchProofUnavailable(githubName(repo.url) ? "GitHub didn't answer with the commit history. Try again." : 'The repository could not confirm the commit history. Try again.');
+  throw historyUnavailable(repo);
 }
 
 /* The head of a branch as the repository says it now, or why it could not say. A tag of its name is no branch: it stands for

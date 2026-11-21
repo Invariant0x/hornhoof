@@ -5,7 +5,7 @@ import type { TrackerPlace } from '../routes';
 import { searchTasks } from '../task-search';
 import { placeName, useGoals, usePipelines, useTaskDepartments, useTasks, useWaitCards } from '../tasks';
 import { doerOf, filterTasks, graphPath, graphTree, mine, personWaited, pipelineTree, pruneGoals, shownDecisions, TRACKER_VIEWS, waitingOn, waitingOnPeople, waitsCount, workingNow, BOARD_STATUSES, boardStatus, type Crumb, type DecisionsOf, type GraphNode, type ShownDecisions, type WorkFilter } from '../tracker';
-import type { Decisions, Department, Me, Org, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard } from '../types';
+import type { Decisions, Department, GitHubLimitCard, Me, Org, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard } from '../types';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
@@ -24,6 +24,22 @@ import { TurnsAndReleases } from '../ui/TurnsAndReleases';
 import { waitText } from '../ui/tracker-words';
 import { WaitCards } from '../ui/WaitCards';
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
+
+const failureCards = (decisions: Decisions | undefined): GitHubLimitCard[] => decisions?.githubLimits ?? [];
+
+function GitHubLimitCards({ limits }: { limits: readonly GitHubLimitCard[] }) {
+  const t = useT();
+  return (
+    <>
+      {limits.map(({ repository, resetAt }) => (
+        <section className="machine-away" key={repository} aria-label={t.tasks.githubLimit(repository)}>
+          <h3 dir="auto">{t.tasks.githubLimit(repository)}</h3>
+          <p>{resetAt === null ? t.tasks.githubLimitUnknown : t.tasks.githubLimitRetry(new Date(resetAt).toISOString().slice(11, 16))}</p>
+        </section>
+      ))}
+    </>
+  );
+}
 
 type Props = {
   me: Me;
@@ -523,7 +539,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const waitsOnPeople = waitingOnPeople(all);
   const failures = all.filter(task => boardStatus(task) === 'failure');
   const machinesAway = decisions?.machinesAway ?? [];
-  const githubLimits = decisions?.githubLimits ?? [];
+  const githubLimits = failureCards(decisions);
   const pipeline = place.pipeline ? pipelines.find(p => p.id === place.pipeline) ?? null : null;
   /* The department where the person is: its work, or its goals. */
   const departmentId = section.kind === 'department' ? section.id : section.kind === 'goals' ? place.department : undefined;
@@ -729,17 +745,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
                 {view === 'list' && <FilterChips chips={chips} onChange={setChips} tasks={chipTasks}
                   subtasks={showSubtasks} onSubtasks={() => setShowSubtasks(!showSubtasks)} />}
               </div>
-              {section.kind === 'failures' && (
-                <>
-                  <MachineAway machines={machinesAway} />
-                  {githubLimits.map(({ repository, resetAt }) => (
-                    <section className="machine-away" key={repository} aria-label={t.tasks.githubLimit(repository)}>
-                      <h3 dir="auto">{t.tasks.githubLimit(repository)}</h3>
-                      <p>{resetAt === null ? t.tasks.githubLimitUnknown : t.tasks.githubLimitRetry(new Date(resetAt).toISOString().slice(11, 16))}</p>
-                    </section>
-                  ))}
-                </>
-              )}
+              {section.kind === 'failures' && <><MachineAway machines={machinesAway} /><GitHubLimitCards limits={githubLimits} /></>}
               {makeHere}
               <HeldWork load={tasksLoad} view={view} list={`${sectionKey}|${view}|${JSON.stringify(chips)}`} shown={work.length}>
                 {view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} empty={empty} showSubtasks={showSubtasks} />

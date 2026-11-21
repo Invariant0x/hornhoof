@@ -200,6 +200,10 @@ function machineCards(me: Person, person: string | undefined, cards: Decisions['
     .map(card => ({ ...card, since: card.since.toISOString(), back: card.back?.toISOString() ?? null }));
 }
 
+function githubLimitCards(me: Person, person: string | undefined, ctx: Ctx) {
+  return !me.via && me.isOwner && (!person || person === me.id) ? ctx.githubLimits.cards() : [];
+}
+
 function requestViews(mine: Decisions['requests'], lines: Awaited<ReturnType<typeof linesFor>>, commits: (string | null)[], pictures: Map<string, string[]>, names: Map<string, string>, explaining: Set<string>, places: Places) {
   return mine.map((r, i) => ({
     id: r.request.id,
@@ -530,7 +534,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       machineAccess: [],
       merges: decisions.merges.filter(merge => picked(merge.ownerPersonId)).map(({ id, label, after, open, ownerPersonId }) => ({ id, label, after, open, ownerPersonId })),
       machinesAway: machineCards(me, person, decisions.machines),
-      githubLimits: !me.via && me.isOwner && picked(me.id) ? ctx.githubLimits.cards() : [],
+      githubLimits: githubLimitCards(me, person, ctx),
       counts: decisions.counts,
     };
   });

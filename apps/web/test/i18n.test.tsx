@@ -138,6 +138,21 @@ describe('errorText', () => {
     expect(errorText(ru, unavailableProducer)).toBe(ru.errors.source_producer_unavailable);
   });
 
+  it('words GitHub rate limit resets, missing commit history and named host errors in both languages', () => {
+    const timed = Object.assign(new ApiFailure(409, 'conflict', 'limit', 'github_rate_limited'), { details: { resetTime: '23:45' } });
+    expect(errorText(en, timed)).toBe(en.errors.github_rate_limited('23:45'));
+    expect(errorText(ru, timed)).toBe(ru.errors.github_rate_limited('23:45'));
+    const untimed = new ApiFailure(409, 'conflict', 'limit', 'github_rate_limited');
+    expect(errorText(en, untimed)).toBe(en.errors.github_rate_limited(null));
+    expect(errorText(ru, untimed)).toBe(ru.errors.github_rate_limited(null));
+    const unread = new ApiFailure(409, 'conflict', 'history', 'commit_history_unavailable');
+    expect(errorText(en, unread)).toBe(en.errors.commit_history_unavailable);
+    expect(errorText(ru, unread)).toBe(ru.errors.commit_history_unavailable);
+    const leader = Object.assign(new ApiFailure(409, 'conflict', 'leader', 'leader'), { details: { host: 'mac' } });
+    expect(errorText(en, leader)).toBe(en.errors.leader('mac'));
+    expect(errorText(ru, leader)).toBe(ru.errors.leader('mac'));
+  });
+
   it('streams bytes across arrayBuffer fallback and content-length headers', async () => {
     vi.stubGlobal(
       'fetch',
