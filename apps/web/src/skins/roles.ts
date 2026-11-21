@@ -80,9 +80,18 @@ export const WORLD_COLOR_ROLES = Object.keys(WORLD_COLOR_TOKENS) as WorldColorRo
 export type WorldColors = Readonly<Record<WorldColorRole, string>>;
 export const WORLD_PROPERTIES = Object.values(WORLD_COLOR_TOKENS);
 
-/* Optional dark terminal overrides for themes that adjust the terminal surface and ink. */
+/* Optional dark terminal overrides for themes that adjust the terminal surface, ink and ANSI palette. */
 export const TERMINAL_TOKENS = { bg: '--term-bg', ink: '--term-ink' } as const;
-export type SkinTerminal = Readonly<{ bg: string; ink: string }>;
+export type SkinTerminal = Readonly<{
+  bg: string;
+  ink: string;
+  cursor?: string;
+  cursorAccent?: string;
+  selection?: string;
+  selectionInk?: string;
+  idle?: string;
+  ansi?: readonly string[];
+}>;
 export const TERMINAL_PROPERTIES = Object.values(TERMINAL_TOKENS);
 
 export type SkinColors = Readonly<Record<ColorRole, string>>;

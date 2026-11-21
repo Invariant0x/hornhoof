@@ -18,8 +18,8 @@ const PIXEL_FONTS: Record<FontRole, readonly string[]> = { ...FONTS, display: ['
 /* Alegreya and Golos Text, open fonts with Latin and Cyrillic kept in src/fonts with their OFL licences. Scripts outside
    their unicode-range (such as Arabic) fall through to system-ui. */
 const EGYPT_FONTS: Record<FontRole, readonly string[]> = {
-  display: ['Alegreya', 'Onest', 'system-ui', 'serif'],
-  body: ['Golos Text', 'Onest', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+  display: ['Alegreya', 'Golos Text', 'Georgia', 'system-ui', 'serif'],
+  body: ['Golos Text', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
   mono: ['ui-monospace', 'SF Mono', 'Menlo', 'Consolas', 'monospace'],
 };
 
@@ -119,7 +119,19 @@ export const BUILTIN_SKINS = [
       structure: '#D7BE92',
       shade: 'rgba(42, 31, 18, .28)',
     },
-    terminal: { bg: '#17130F', ink: '#EFE4CE' },
+    terminal: {
+      bg: '#17130F',
+      ink: '#EFE4CE',
+      cursor: '#E6B34C',
+      cursorAccent: '#1A130B',
+      selection: '#5CA4E8',
+      selectionInk: '#0E1722',
+      idle: '#332A21',
+      ansi: [
+        '#1D1712', '#F07067', '#5ED69E', '#E6B74C', '#6EB0FA', '#EC83B0', '#56D6D2', '#E5D8C0',
+        '#A69680', '#FF9890', '#8AE8BC', '#FAD375', '#9AC9FF', '#F7A8CB', '#8CE8E5', '#FAF4E6',
+      ],
+    },
   },
 ] as const satisfies readonly (SkinLook & { id: string })[];
 

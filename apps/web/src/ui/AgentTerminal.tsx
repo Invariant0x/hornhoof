@@ -17,13 +17,25 @@ import { disposeTerminal } from './xterm-release';
    which a light background would wash out. */
 const ANSI = ['#14191e', '#b43c2a', '#00c200', '#c7c400', '#2744c7', '#c040be', '#00c5c7', '#c7c7c7', '#686868', '#dd7975', '#58e790', '#ece100', '#a7abf2', '#e17ee1', '#60fdff', '#ffffff'];
 const NAMES = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'] as const;
-const COLORS = Object.fromEntries(ANSI.map((c, i) => [i < 8 ? NAMES[i]! : `bright${NAMES[i - 8]![0]!.toUpperCase()}${NAMES[i - 8]!.slice(1)}`, c]));
-const THEME: ITheme = { ...COLORS, background: '#15191f', foreground: '#dcdcdc', cursor: '#ffffff', cursorAccent: '#000000', selectionBackground: '#b3d7ff', selectionForeground: '#000000' };
+const ansiPalette = (list: readonly string[]): Partial<ITheme> =>
+  Object.fromEntries(list.slice(0, 16).map((c, i) => [i < 8 ? NAMES[i]! : `bright${NAMES[i - 8]![0]!.toUpperCase()}${NAMES[i - 8]!.slice(1)}`, c]));
+const THEME: ITheme = { ...ansiPalette(ANSI), background: '#15191f', foreground: '#dcdcdc', cursor: '#ffffff', cursorAccent: '#000000', selectionBackground: '#b3d7ff', selectionForeground: '#000000' };
 
-/* Theme-specific dark terminal surface and ink when the active theme declares them, else the default dark console. */
+/* Theme-specific dark terminal surface, ink and ANSI colours when the active theme declares them, else the default dark console. */
 function terminalTheme(): ITheme {
   const custom = activeLook().terminal;
-  return custom ? { ...THEME, background: custom.bg, foreground: custom.ink } : THEME;
+  if (!custom) return THEME;
+  const overrides = Object.fromEntries(
+    [
+      ['background', custom.bg],
+      ['foreground', custom.ink],
+      ['cursor', custom.cursor],
+      ['cursorAccent', custom.cursorAccent],
+      ['selectionBackground', custom.selection],
+      ['selectionForeground', custom.selectionInk],
+    ].filter(([, value]) => value !== undefined),
+  );
+  return { ...THEME, ...(custom.ansi ? ansiPalette(custom.ansi) : {}), ...overrides };
 }
 
 const OPTIONS: ITerminalOptions = {

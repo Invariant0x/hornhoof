@@ -3514,11 +3514,22 @@ th.k-prio .sorth { white-space: nowrap; }
 .light-note { position: fixed; z-index: 30; inset-inline-start: 16px; inset-block-end: 72px; max-inline-size: min(520px, calc(100% - 32px)); }
 /* Papyrus and carved sandstone surface treatment across every screen when a theme declares data-surface="papyrus".
    Uses only semantic and world tokens via background-image and inset shadows, keeping layout geometry and contrast intact. */
-:where(:root[data-surface='papyrus']) body {
+:where(:root[data-surface='papyrus']:not([data-grain='off'])) body,
+:where(:root[data-surface='papyrus']:not([data-grain='off'])) .map-bg-grain {
   background-image:
     radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--surface) 42%, transparent), transparent 68%),
     repeating-linear-gradient(90deg, transparent 0 18px, color-mix(in srgb, var(--line) 14%, transparent) 18px 19px),
     repeating-linear-gradient(0deg, transparent 0 26px, color-mix(in srgb, var(--line) 11%, transparent) 26px 27px);
+}
+:where(:root[data-surface='papyrus'][data-grain='off']) body,
+:where(:root[data-surface='papyrus'][data-grain='off']) .map-bg-grain {
+  background-image: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(:root[data-surface='papyrus']) body,
+  :where(:root[data-surface='papyrus']) .map-bg-grain {
+    background-image: none;
+  }
 }
 :where(:root[data-surface='papyrus']) .edge > .edge-in,
 :where(:root[data-surface='papyrus']) .dialog,
@@ -3540,8 +3551,8 @@ th.k-prio .sorth { white-space: nowrap; }
     linear-gradient(180deg, color-mix(in srgb, var(--surface) 55%, transparent), color-mix(in srgb, var(--surface2) 32%, transparent)),
     repeating-linear-gradient(0deg, transparent 0 14px, color-mix(in srgb, var(--line) 10%, transparent) 14px 15px);
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--line2) 22%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--surface) 88%, transparent);
+    inset 0 0 0 3px var(--surface),
+    inset 0 0 0 4px var(--line);
 }
 :where(:root[data-surface='papyrus']) .dialog,
 :where(:root[data-surface='papyrus']) .account-menu,
@@ -3549,8 +3560,8 @@ th.k-prio .sorth { white-space: nowrap; }
 :where(:root[data-surface='papyrus']) .acard,
 :where(:root[data-surface='papyrus']) .dv-drawer {
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--line2) 28%, transparent),
-    inset 0 2px 0 color-mix(in srgb, var(--amber) 34%, transparent),
+    inset 0 0 0 3px var(--surface),
+    inset 0 0 0 4px var(--line),
     0 12px 28px var(--shadow);
 }
 :where(:root[data-surface='papyrus']) .dialog > header,
@@ -3563,7 +3574,7 @@ th.k-prio .sorth { white-space: nowrap; }
 :where(:root[data-surface='papyrus']) .ptable th,
 :where(:root[data-surface='papyrus']) .dt th {
   background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface2) 64%, transparent), transparent);
-  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--amber) 42%, transparent);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--cyan) 42%, var(--line));
 }
 :where(:root[data-surface='papyrus']) .tabs.glass,
 :where(:root[data-surface='papyrus']) .tb-brand.glass,
@@ -3576,19 +3587,14 @@ th.k-prio .sorth { white-space: nowrap; }
   background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 60%, transparent), color-mix(in srgb, var(--surface2) 44%, transparent));
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, var(--surface) 90%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, var(--line2) 34%, transparent),
-    0 3px 10px var(--shadow);
+    inset 0 -1px 0 color-mix(in srgb, var(--line2) 34%, transparent);
 }
 :where(:root[data-surface='papyrus']) .tabs button.on {
-  box-shadow:
-    inset 0 -3px 0 var(--cyan),
-    inset 0 2px 0 color-mix(in srgb, var(--amber) 55%, transparent);
+  box-shadow: inset 0 -2px 0 var(--cyan);
 }
 :where(:root[data-surface='papyrus']) .btn:not(.ghost) {
   background-image: linear-gradient(180deg, color-mix(in srgb, var(--on-btn) 14%, transparent), color-mix(in srgb, var(--ink) 16%, transparent));
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--on-btn) 30%, transparent),
-    inset 0 -2px 0 color-mix(in srgb, var(--ink) 28%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-btn) 24%, transparent);
 }
 :where(:root[data-surface='papyrus']) .btn.ghost:not(:hover):not(.on),
 :where(:root[data-surface='papyrus']) .act:not(:hover) {
@@ -3619,11 +3625,218 @@ th.k-prio .sorth { white-space: nowrap; }
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line2) 24%, transparent);
 }
 :where(:root[data-surface='papyrus']) .edge > .corner {
-  border-inline-start-color: var(--amber);
-  border-block-start-color: var(--amber);
+  border-inline-start-color: var(--cyan);
+  border-block-start-color: var(--cyan);
 }
 :where(:root[data-surface='papyrus']) .edge {
   background-color: var(--line2);
+}
+:where(:root[data-surface='papyrus']) .tabs svg[data-icon-set='egypt'],
+:where(:root[data-surface='papyrus']) .hbtn.ib svg[data-icon-set='egypt'] {
+  stroke-width: 1.45;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* Arabic, Persian and Hebrew scripts keep zero letter-spacing so cursive glyphs stay joined,
+   and stay in system-ui rather than serif display faces under papyrus themes. */
+:where([dir='rtl'], :lang(ar), :lang(fa), :lang(he)),
+:where([dir='rtl'], :lang(ar), :lang(fa), :lang(he)) :is(h1, h2, h3, h4, h5, h6, button, .btn, .act, .tabs button, .skin-name, .crumb, .dhead, .t-bar, .badge) {
+  letter-spacing: 0;
+}
+:where(:root[data-surface='papyrus']:is([dir='rtl'], :lang(ar), :lang(fa), :lang(he))) :is(body, h1, h2, h3, h4, h5, h6, button, .btn, .act, .tabs button, .skin-name, .dhead, .t-bar) {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+.skins-title-row { display: inline-flex; align-items: center; gap: 8px; }
+.skins-title-row > .ic { inline-size: 18px; block-size: 18px; color: var(--cyan-ink); }
+.skin-perf-note { margin: 6px 0 0; padding: 6px 10px; border: 1px solid var(--line); border-inline-start: 3px solid var(--amber); background: var(--surface2); font-size: 12.5px; color: var(--ink); overflow-wrap: break-word; }
+.skins-grain { padding: 12px 14px; border: 1px solid var(--line); background: var(--surface); display: grid; gap: 2px; }
+.skins-grain > label.check { display: inline-flex; align-items: center; gap: 10px; min-block-size: 44px; cursor: pointer; font-size: 13.5px; font-weight: 500; }
+.skins-grain > label.check input { inline-size: 18px; block-size: 18px; accent-color: var(--cyan-ink); flex: none; }
+.skins-grain-hint { margin: 0; padding-inline-start: 28px; font-size: 12.5px; }
+
+/* Reusable 3D world loading screen and Ancient Egypt interactive map & quarry overlay. */
+.world-loader {
+  position: relative;
+  display: grid;
+  place-items: center;
+  inline-size: 100%;
+  block-size: 100%;
+  padding: 24px 16px;
+  background: var(--world-ground, var(--bg));
+  overflow: auto;
+}
+.world-loader-card {
+  inline-size: min(520px, 100%);
+  padding: 20px;
+  display: grid;
+  gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line2);
+  box-shadow: inset 0 0 0 3px var(--surface), inset 0 0 0 4px var(--line);
+}
+.world-loader-art {
+  inline-size: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--line);
+  background: var(--world-ground, var(--bg));
+  overflow: hidden;
+}
+.world-loader-art svg { display: block; inline-size: 100%; block-size: 100%; }
+.world-loader-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.world-loader-head h2 { margin: 0; font-family: var(--f-display); font-size: 20px; font-weight: 600; }
+.world-loader-pct { font-family: var(--f-mono); font-size: 13px; font-weight: 600; color: var(--cyan-ink); }
+.world-loader-line { margin: 0; font-size: 13.5px; color: var(--muted); }
+.world-loader-bar { inline-size: 100%; block-size: 8px; background: var(--idle); border: 1px solid var(--line); overflow: hidden; }
+.world-loader-bar > i { display: block; block-size: 100%; background: var(--cyan); transition: inline-size .2s ease; }
+.world-loader[data-still='true'] .world-loader-bar > i { transition: none; }
+.world-loader-fail { display: grid; gap: 10px; padding: 12px 14px; background: var(--surface2); border: 1px solid var(--line); border-inline-start: 3px solid var(--pink); }
+.world-loader-fail p { margin: 0; font-size: 13.5px; color: var(--ink); }
+
+.egypt-map, .egypt-quarry {
+  position: relative;
+  inline-size: 100%;
+  block-size: 100%;
+  overflow: hidden;
+  background: var(--world-ground, var(--bg));
+  touch-action: none;
+  user-select: none;
+}
+.egypt-canvas {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  display: block;
+}
+.egypt-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.egypt-pin {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: 36px;
+  max-inline-size: 210px;
+  padding: 5px 10px;
+  background: var(--hud);
+  border: 1px solid var(--line2);
+  color: var(--ink);
+  font-family: var(--f-display);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: start;
+  cursor: pointer;
+}
+.egypt-pin:hover, .egypt-pin:focus-visible {
+  border-color: var(--cyan);
+  color: var(--cyan-ink);
+  outline: 2px solid var(--cyan-ink);
+  outline-offset: 1px;
+  z-index: 6;
+}
+.egypt-dept-pin {
+  min-block-size: 44px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border-inline-start: 3px solid var(--cyan);
+}
+.egypt-dept-meta { font-family: var(--f-body); font-size: 11.5px; font-weight: 500; color: var(--muted); }
+.egypt-temple-pin {
+  min-block-size: 44px;
+  border-inline-start: 3px solid var(--amber);
+}
+.egypt-temple-pin.hot { border-color: var(--pink); }
+.egypt-temple-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 20px;
+  block-size: 20px;
+  padding: 0 5px;
+  background: var(--pink);
+  color: var(--on-pink);
+  font-family: var(--f-body);
+  font-size: 11px;
+  font-weight: 600;
+}
+.egypt-pharaoh-pin {
+  min-block-size: 44px;
+  border-color: var(--amber);
+  background: var(--surface);
+}
+.egypt-worker-wrap {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.egypt-worker-pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-block-size: 28px;
+  max-inline-size: 156px;
+  padding: 2px 8px;
+  background: var(--hud);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: grab;
+}
+.egypt-worker-pin.boosted { border-color: var(--amber); color: var(--amber-ink); }
+.egypt-worker-pin.praying { border-color: var(--pink); color: var(--pink-ink); }
+.egypt-worker-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 28px;
+  block-size: 28px;
+  background: var(--surface);
+  border: 1px solid var(--line2);
+  color: var(--cyan-ink);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.egypt-worker-open:hover, .egypt-worker-open:focus-visible { border-color: var(--cyan); outline: 2px solid var(--cyan-ink); outline-offset: 1px; }
+.egypt-map-toggle {
+  position: absolute;
+  inset-block-start: 68px;
+  inset-inline-end: 16px;
+  z-index: 8;
+}
+.egypt-quarry-banner {
+  position: absolute;
+  inset-block-start: 68px;
+  inset-inline-end: 16px;
+  z-index: 8;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-inline-size: min(420px, calc(100% - 32px));
+  padding: 8px 12px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+@media (max-width: 760px) {
+  .egypt-map-toggle, .egypt-quarry-banner { inset-block-start: 62px; inset-inline-end: 8px; }
+  .egypt-quarry-banner .egypt-quarry-hint { display: none; }
 }
 
 /* A page the guard turned light draws nothing that costs a frame: no animation, transition, filter, blur or shadow. */

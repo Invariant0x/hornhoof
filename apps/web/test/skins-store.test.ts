@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { COLLECTION_LIMIT, collectionText, readCollection, uniqueName, withAdded, withRestored, without, type CustomSkin } from '../src/skins/collection';
 import { BUILTIN_SKINS, builtinSkin, ownLook } from '../src/skins/registry';
 import { COLOR_TOKENS, CUT_TOKEN, FONT_TOKENS, SKIN_PROPERTIES, TERMINAL_PROPERTIES, WORLD_COLOR_TOKENS, WORLD_PROPERTIES, type Skin } from '../src/skins/roles';
-import { activeWorld, addSkin, chooseSkin, initSkins, lookOf, removeSkin, restoreSkin, skinsState, subscribeSkins } from '../src/skins/store';
+import { activeWorld, addSkin, chooseSkin, initSkins, lookOf, mapGrain, removeSkin, restoreSkin, setMapGrain, skinsState, subscribeSkins } from '../src/skins/store';
 import { builtinFile, skinText } from '../src/skins/validate';
 
 const root = document.documentElement;
@@ -24,6 +24,7 @@ function clearPage() {
   delete root.dataset.cut;
   delete root.dataset.world;
   delete root.dataset.surface;
+  delete root.dataset.grain;
   root.removeAttribute('style');
 }
 
@@ -291,5 +292,30 @@ describe('the skin on the page', () => {
       expect({ ...root.dataset }).toEqual(beforeDataset);
       expect(inline()).toEqual(beforeTokens);
     }
+  });
+
+  it('persists the optional papyrus map grain toggle and leaves no data-grain trace on non-papyrus themes', () => {
+    expect(mapGrain()).toBe(true);
+    expect(root.dataset.grain).toBeUndefined();
+
+    chooseSkin('egypt');
+    expect(root.dataset.grain).toBeUndefined();
+    setMapGrain(false);
+    expect(mapGrain()).toBe(false);
+    expect(localStorage.getItem('hh-map-grain')).toBe('off');
+    expect(root.dataset.grain).toBe('off');
+
+    nextVisit();
+    expect(mapGrain()).toBe(false);
+    expect(root.dataset.grain).toBe('off');
+
+    chooseSkin('cyberpunk');
+    expect(root.dataset.grain).toBeUndefined();
+
+    chooseSkin('egypt');
+    expect(root.dataset.grain).toBe('off');
+    setMapGrain(true);
+    expect(mapGrain()).toBe(true);
+    expect(root.dataset.grain).toBeUndefined();
   });
 });

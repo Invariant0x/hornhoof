@@ -42,4 +42,28 @@ describe('Ancient Egypt papyrus surface styling across all screens', () => {
       }
     }
   });
+
+  it('uses lapis accent on corner marks, incised double-hairline frames, toggleable map grain and RTL/Arabic joining safety', () => {
+    const corner = RULES.find(rule => rule.selectors.includes(":where(:root[data-surface='papyrus']) .edge > .corner"));
+    expect(corner?.decls['border-inline-start-color']).toBe('var(--cyan)');
+    expect(corner?.decls['border-block-start-color']).toBe('var(--cyan)');
+
+    const incised = RULES.find(rule =>
+      rule.selectors.some(s => s.includes(":where(:root[data-surface='papyrus'])") && s.includes('.edge > .edge-in')) &&
+      rule.decls['box-shadow']?.includes('inset 0 0 0 3px var(--surface), inset 0 0 0 4px var(--line)'),
+    );
+    expect(incised, 'missing Design incised double-hairline frame').toBeDefined();
+
+    const rtlTracking = RULES.find(rule => rule.selectors.some(s => s.includes(':lang(ar)')) && rule.decls['letter-spacing'] === '0');
+    expect(rtlTracking, 'missing letter-spacing: 0 for Arabic/RTL').toBeDefined();
+
+    const rtlFont = RULES.find(rule =>
+      rule.selectors.some(s => s.includes(":root[data-surface='papyrus']") && s.includes(':lang(ar)')) &&
+      rule.decls['font-family']?.includes('system-ui'),
+    );
+    expect(rtlFont, 'missing system-ui override for Arabic/RTL under papyrus').toBeDefined();
+
+    const grainOff = RULES.find(rule => rule.selectors.some(s => s.includes("[data-grain='off']")));
+    expect(grainOff, 'missing papyrus grain off selector').toBeDefined();
+  });
 });

@@ -5,9 +5,10 @@ import { ru } from '../i18n/ru';
 import { COLLECTION_LIMIT, uniqueName, type CustomSkin } from '../skins/collection';
 import { BUILTIN_SKINS, DEFAULT_SKIN, ownLook, type BuiltinSkinId } from '../skins/registry';
 import { declarations, extraDeclarations, type Skin, type SkinLook, type SkinNames } from '../skins/roles';
-import { addSkin, chooseSkin, removeSkin, restoreSkin, skinsState, type Removal } from '../skins/store';
-import { useSkins } from '../skins/use-skin';
+import { addSkin, chooseSkin, removeSkin, restoreSkin, setMapGrain, skinsState, type Removal } from '../skins/store';
+import { useMapGrain, useSkins } from '../skins/use-skin';
 import { builtinFile, parseSkin, SEE_THROUGH, SKIN_FILE_LIMIT, skinText, type SkinError } from '../skins/validate';
+import { ThemeShopIcon } from './icons';
 
 /* The Theme store section of a person's settings: full interactive world themes, classic built-in skins and every skin
    of their own, one click to apply one, a file to add, any skin to download as a sample, and the guide to making one.
@@ -67,18 +68,20 @@ function SwapLabel({ first, second, showSecond }: { first: string; second: strin
 /* Miniature desert panorama shown inside the Ancient Egypt theme card preview, using only semantic and world tokens. */
 function EgyptPreviewScene() {
   return (
-    <svg className="sp-world-banner" viewBox="0 0 240 46" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      <rect x="0" y="0" width="240" height="28" fill="var(--surface2)" />
-      <rect x="0" y="28" width="240" height="10" fill="var(--world-ground, var(--bg))" />
-      <circle cx="198" cy="13" r="6.5" fill="var(--amber)" opacity="0.88" />
-      <polygon points="24,38 56,14 88,38" fill="var(--world-structure, var(--line))" />
-      <polygon points="56,14 88,38 64,38" fill="var(--world-shade, var(--shadow))" />
-      <polygon points="74,38 118,6 162,38" fill="var(--world-structure, var(--line))" />
-      <polygon points="118,6 162,38 128,38" fill="var(--world-shade, var(--shadow))" />
-      <polygon points="118,6 126,12 110,12" fill="var(--amber)" opacity="0.85" />
-      <polygon points="168,38 172,18 176,38" fill="var(--line2)" />
-      <circle cx="188" cy="30" r="4" fill="var(--world-field, var(--ok))" />
-      <rect x="0" y="37" width="240" height="9" fill="var(--world-water, var(--cyan))" />
+    <svg className="sp-world-banner" viewBox="0 0 240 54" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <rect width="240" height="54" fill="var(--world-ground, var(--bg))" />
+      <path d="M0 39 Q68 32 128 41 T240 36 L240 54 L0 54 Z" fill="var(--world-field, var(--ok))" opacity="0.52" />
+      <path d="M0 43 Q72 37 132 46 T240 41 L240 50 Q180 54 128 50 T0 48 Z" fill="var(--world-water, var(--cyan))" />
+      <path d="M16 33 L88 22 L162 29 L224 19" fill="none" stroke="var(--world-path, var(--line))" strokeWidth="5" strokeLinecap="round" />
+      <circle cx="204" cy="12" r="5.5" fill="var(--amber)" opacity="0.88" />
+      <polygon points="34,34 66,8 98,34" fill="var(--world-structure, var(--line))" stroke="var(--line2)" strokeWidth="1" />
+      <polygon points="66,8 98,34 73,34" fill="var(--world-shade, var(--shadow))" />
+      <line x1="54" y1="18" x2="78" y2="18" stroke="var(--line2)" strokeWidth="0.8" />
+      <line x1="44" y1="26" x2="88" y2="26" stroke="var(--line2)" strokeWidth="0.8" />
+      <rect x="116" y="16" width="32" height="17" fill="var(--world-structure, var(--line))" stroke="var(--line2)" strokeWidth="1" />
+      <line x1="123" y1="16" x2="123" y2="33" stroke="var(--line2)" strokeWidth="1" />
+      <line x1="132" y1="16" x2="132" y2="33" stroke="var(--line2)" strokeWidth="1" />
+      <line x1="141" y1="16" x2="141" y2="33" stroke="var(--line2)" strokeWidth="1" />
     </svg>
   );
 }
@@ -119,8 +122,9 @@ function SkinCard({ card, on, onApply, onDownload, onRemove }: CardProps) {
   const t = useT();
   const words = t.skins;
   const origin = cardOrigin(words, card);
+  const world = isWorldCard(card);
   return (
-    <li className="skin-card" data-current={on || undefined}>
+    <li className="skin-card" data-current={on || undefined} aria-current={on || undefined}>
       <Preview look={card.look} />
       <div className="skin-card-text">
         <div className="skin-card-head">
@@ -133,6 +137,7 @@ function SkinCard({ card, on, onApply, onDownload, onRemove }: CardProps) {
         </div>
         <p className="skin-meta">{origin}</p>
         <p className="skin-meta">{card.desc}</p>
+        {world && <p className="skin-perf-note">{words.perfNote}</p>}
       </div>
       <div className="entry-actions skin-actions">
         {on ? (
@@ -347,6 +352,21 @@ function Catalog({ cards, active, onApply, onDownload, onRemove }: CatalogProps)
   );
 }
 
+function MapGrainOption({ shown }: { shown: boolean }) {
+  const t = useT();
+  const grain = useMapGrain();
+  if (!shown) return null;
+  return (
+    <div className="skins-grain">
+      <label className="check">
+        <input type="checkbox" checked={grain} onChange={event => setMapGrain(event.target.checked)} />
+        <span>{t.skins.grainToggle}</span>
+      </label>
+      <p className="muted skins-grain-hint">{t.skins.grainHint}</p>
+    </div>
+  );
+}
+
 export function Themes() {
   const t = useT();
   const { language } = useLanguage();
@@ -364,6 +384,7 @@ export function Themes() {
   });
 
   const cards = catalogCards(t, language, custom);
+  const activeCard = cards.find(card => card.id === active);
   const focusOn = (id: string) => {
     focusTo.current = id;
   };
@@ -392,7 +413,10 @@ export function Themes() {
     <div className="skins" ref={root}>
       <div className="skins-head">
         <div className="skins-intro">
-          <h4 id={headingId}>{t.skins.title}</h4>
+          <div className="skins-title-row">
+            <ThemeShopIcon />
+            <h4 id={headingId}>{t.skins.title}</h4>
+          </div>
           <p>{t.skins.desc}</p>
           <p className="muted">{t.skins.local}</p>
         </div>
@@ -400,6 +424,7 @@ export function Themes() {
       </div>
       {notice && <NoticeBar notice={notice} onUndo={undo} />}
       <Catalog cards={cards} active={active} onApply={apply} onDownload={card => download(t, card, setNotice)} onRemove={remove} />
+      <MapGrainOption shown={activeCard?.look.surface === 'papyrus'} />
       <Guide />
     </div>
   );

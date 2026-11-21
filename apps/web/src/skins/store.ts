@@ -12,8 +12,10 @@ export type Added = { ok: true; entry: CustomSkin } | { ok: false; reason: 'full
 
 const ACTIVE_KEY = 'hh-theme';
 const COLLECTION_KEY = 'hh-skins';
+const GRAIN_KEY = 'hh-map-grain';
 
 let state: SkinsState = { active: DEFAULT_SKIN, custom: [] };
+let grain = true;
 /* How many times a person picked a skin, so putting a deleted skin back knows whether they chose another since. */
 let choices = 0;
 const listeners = new Set<() => void>();
@@ -52,6 +54,8 @@ function apply({ active, custom }: SkinsState): void {
   else delete page.dataset.world;
   if (look.surface && look.surface !== 'plain') page.dataset.surface = look.surface;
   else delete page.dataset.surface;
+  if (look.surface === 'papyrus' && !grain) page.dataset.grain = 'off';
+  else delete page.dataset.grain;
   for (const [property, value] of declarations(look)) page.style.setProperty(property, value);
   const extra = extraDeclarations(look);
   for (const property of extra.clear) page.style.removeProperty(property);
@@ -66,9 +70,20 @@ function change(next: SkinsState): void {
 
 /* Runs before the page draws, from the script at the top of index.html, and again when the app starts. */
 export function initSkins(): void {
+  grain = stored(GRAIN_KEY) !== 'off';
   const custom = readCollection(stored(COLLECTION_KEY));
   const saved = stored(ACTIVE_KEY) ?? '';
   change({ active: lookIn(custom, saved) ? saved : DEFAULT_SKIN, custom });
+}
+
+export const mapGrain = (): boolean => grain;
+
+/* Toggles the subtle papyrus grain on map backgrounds for papyrus themes; persists in this browser. */
+export function setMapGrain(on: boolean): void {
+  grain = on;
+  keep(GRAIN_KEY, on ? 'on' : 'off');
+  apply(state);
+  listeners.forEach(listener => listener());
 }
 
 export const skinsState = (): SkinsState => state;

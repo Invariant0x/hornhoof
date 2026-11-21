@@ -64,6 +64,7 @@ function clearPage() {
   delete root.dataset.cut;
   delete root.dataset.world;
   delete root.dataset.surface;
+  delete root.dataset.grain;
   root.removeAttribute('style');
 }
 
@@ -147,10 +148,24 @@ describe('the Themes section of the settings', () => {
 
     await user.click(within(dialog).getByRole('button', { name: 'Apply: Ancient Egypt' }));
     expect([root.dataset.theme, root.dataset.world, root.dataset.surface]).toEqual(['egypt', 'egypt', 'papyrus']);
+    /* Ivan's correction: Cyberpunk stays an equal card in the store, with no separate Back to Cyberpunk banner or button. */
+    expect(within(dialog).queryByText(/Return to Cyberpunk|Вернуться к Киберпанку/i)).not.toBeInTheDocument();
+    /* Egypt card explains 3D isometric map weight and reduced-motion support, and previews contain no SVG <text>. */
+    expect(within(dialog).getByText('Uses a 3D isometric map that is heavier on older or low-spec machines. Respects reduced motion.')).toBeInTheDocument();
+    expect(dialog.querySelectorAll('.skin-preview svg text')).toHaveLength(0);
+    /* Papyrus map-grain toggle appears under Egypt and leaves no trace when switching back. */
+    const grain = within(dialog).getByRole('checkbox', { name: 'Papyrus grain on map background' });
+    expect(grain).toBeChecked();
+    await user.click(grain);
+    expect(grain).not.toBeChecked();
+    expect(root.dataset.grain).toBe('off');
+
     await user.click(within(dialog).getByRole('button', { name: 'Apply: Cyberpunk' }));
     expect(root.dataset.theme).toBe('cyberpunk');
     expect(root.dataset.world).toBeUndefined();
     expect(root.dataset.surface).toBeUndefined();
+    expect(root.dataset.grain).toBeUndefined();
+    expect(within(dialog).queryByRole('checkbox', { name: 'Papyrus grain on map background' })).not.toBeInTheDocument();
   });
 
   it('applies a skin in one click, at once, moves focus to its state and says so, and the card and the page agree', async () => {
