@@ -344,8 +344,13 @@ export async function syncOperatorCases(ctx: Ctx, agentId: string, now = new Dat
   }
 }
 
+const caseNoticeIds = (row: Case): Array<string | null | undefined> => [
+  row.operatorJobId, row.escalationJobId, row.continuationJobId,
+  row.resolution?.holdCall?.job, ...Object.values(row.resolution?.holdNoticeJobs ?? {}),
+];
+
 async function pumpCaseNotices(ctx: Ctx, row: Case): Promise<void> {
-  for (const id of [row.operatorJobId, row.escalationJobId, row.continuationJobId, row.resolution?.holdCall?.job, ...Object.values(row.resolution?.holdNoticeJobs ?? {})]) {
+  for (const id of caseNoticeIds(row)) {
     if (!id) continue;
     const [job] = await ctx.db.select(only(jobs, 'agentId')).from(jobs).where(eq(jobs.id, id));
     if (job?.agentId) await pump(ctx, job.agentId);

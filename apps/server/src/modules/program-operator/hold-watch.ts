@@ -62,20 +62,31 @@ const unavailableHoldWords: HoldWords = {
   detail: name => ({ en: `${name}: recovery hold needs attention`, ru: `${name}: удержание требует внимания` }),
 };
 
+async function activeOrchestrator(ctx: Ctx, companyId: string): Promise<Agent | undefined> {
+  const [orchestrator] = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+  return orchestrator;
+}
+
+async function operationsHead(ctx: Ctx, companyId: string): Promise<Agent | undefined> {
+  const staff = await operationsStaff(ctx, companyId);
+  return staff.find(agent => agent.kind === 'head');
+}
+
+async function notifyResponder(ctx: Ctx, row: Case, to: Agent | undefined, sent: string | undefined): Promise<string | undefined> {
+  if (sent || !to) return sent;
+  if (to.id !== row.agentId && !await liveSubscription(ctx, to.id)) return undefined;
+  return tellOfHold(ctx, row, to, unavailableHoldWords);
+}
+
 /* Keep one visible letter per responder with the held case, including after a restart. The caller holds the employee. */
 export async function callRecoveryResponders(ctx: Ctx, row: Case): Promise<void> {
   const resolution = row.resolution!;
-  const previous = resolution.holdNoticeJobs;
-  if (previous?.orchestrator && previous.operations) return;
-  const [orchestrator] = await ctx.db.select().from(agents).where(and(eq(agents.companyId, row.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
-  const head = (await operationsStaff(ctx, row.companyId)).find(agent => agent.kind === 'head');
-  const notice = async (to: Agent | undefined) => to && (to.id === row.agentId || await liveSubscription(ctx, to.id))
-    ? tellOfHold(ctx, row, to, unavailableHoldWords)
-    : undefined;
-  const forOrchestrator = previous?.orchestrator ?? await notice(orchestrator);
-  const forOperations = previous?.operations ?? await notice(head);
-  if (forOrchestrator === previous?.orchestrator && forOperations === previous?.operations) return;
-  await ctx.db.update(programOperatorCases).set({ resolution: { ...resolution, holdNoticeJobs: { orchestrator: forOrchestrator, operations: forOperations } } }).where(eq(programOperatorCases.id, row.id));
+  const previous = resolution.holdNoticeJobs ?? {};
+  if (previous.orchestrator && previous.operations) return;
+  const orchestrator = await notifyResponder(ctx, row, await activeOrchestrator(ctx, row.companyId), previous.orchestrator);
+  const operations = await notifyResponder(ctx, row, await operationsHead(ctx, row.companyId), previous.operations);
+  if (orchestrator === previous.orchestrator && operations === previous.operations) return;
+  await ctx.db.update(programOperatorCases).set({ resolution: { ...resolution, holdNoticeJobs: { orchestrator, operations } } }).where(eq(programOperatorCases.id, row.id));
 }
 
 async function tellOfHold(ctx: Ctx, row: Case, to: Agent, words: HoldWords): Promise<string> {

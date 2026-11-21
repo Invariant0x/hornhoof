@@ -66,16 +66,22 @@ async function watchHold(ctx: Ctx, id: string, now: Date): Promise<Case | undefi
   await callOperationsOnHold(ctx, waiting, now, fromStart(waiting) ? notStartedWords : undefined);
 }
 
-async function checkUnavailableHold(ctx: Ctx, seen: Case, state: Awaited<ReturnType<typeof requestRecoveryState>>, now: Date): Promise<void> {
+type RecoveryScreen = Awaited<ReturnType<typeof requestRecoveryState>>;
+
+async function resolveUnavailableHold(ctx: Ctx, seen: Case, state: RecoveryScreen): Promise<boolean> {
+  const row = await stillHeld(ctx, seen.id);
+  if (!row || row.revision !== seen.revision || !unavailableOperatorHold(row)) return false;
+  if (state && !recoveryScreenRefusal(state)) await continueOnceAutomatically(ctx, row, state.program);
+  const waiting = await stillHeld(ctx, row.id);
+  if (!waiting) return true;
+  await callRecoveryResponders(ctx, waiting);
+  return false;
+}
+
+async function checkUnavailableHold(ctx: Ctx, seen: Case, state: RecoveryScreen, now: Date): Promise<void> {
   const released = await operatorTransaction(ctx, async (tx, inside) => {
     await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, seen.agentId)).for('update');
-    const row = await stillHeld(inside, seen.id);
-    if (!row || row.revision !== seen.revision || !unavailableOperatorHold(row)) return false;
-    if (state && !recoveryScreenRefusal(state)) await continueOnceAutomatically(inside, row, state.program);
-    const waiting = await stillHeld(inside, row.id);
-    if (!waiting) return true;
-    await callRecoveryResponders(inside, waiting);
-    return false;
+    return resolveUnavailableHold(inside, seen, state);
   });
   await syncOperatorCases(ctx, seen.agentId, now);
   if (released) await pump(ctx, seen.agentId);

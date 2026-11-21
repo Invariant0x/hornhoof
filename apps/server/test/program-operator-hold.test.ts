@@ -293,6 +293,7 @@ const turnsWith = async (c: Held, agentId: string, word: string) =>
 async function timedOutHold() {
   const c = await held();
   await c.db.update(programOperatorCases).set({ resolution: { ...c.incident.resolution!, outcome: 'operator_timeout' } }).where(eq(programOperatorCases.id, c.incident.id));
+  await checkOperatorHealth(c.ctx, c.now);
   return c;
 }
 
