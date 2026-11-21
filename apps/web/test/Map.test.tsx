@@ -407,7 +407,8 @@ describe('Map', () => {
     expect(label).toHaveTextContent('30%');
   });
 
-  it('leaves the view where the person put it as the company changes live, the arrangement comes, panels open and a department closes, and opens it there again', async () => {
+  /* Since 20.11 the arrangement comes before the map is drawn (#1620), so the person's view is theirs only after it came. */
+  it('leaves the view where the person put it as the company changes live, panels open and a department closes, and opens it there again', async () => {
     const width = vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(1100);
     const height = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(900);
     onTestFinished(() => {
@@ -420,7 +421,9 @@ describe('Map', () => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'GET /api/map/layout': () => kept });
     const opened: string[] = [];
     const { container, rerender, unmount } = render(<MapScreen {...PROPS} onOpenDepartment={id => opened.push(id)} />);
+    await act(async () => arrive());
     const marketing = (await screen.findByText('Marketing')).closest<HTMLElement>('.dept')!;
+    expect(marketing.style.left).toBe('40px');
     const view = () => container.querySelector<HTMLElement>('.world')!.style.transform;
     /* The map shows all of itself when it first opens; then the person zooms in. */
     await waitFor(() => expect(view()).not.toBe('translate(0px, 0px) scale(1)'));
@@ -428,8 +431,7 @@ describe('Map', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
     const mine = view();
     stream.send({ type: 'working', working: 1 });
-    await act(async () => arrive());
-    await waitFor(() => expect(marketing.style.left).toBe('40px'));
+    await act(async () => {});
     expect(view()).toBe(mine);
     rerender(<MapScreen {...PROPS} onOpenDepartment={id => opened.push(id)} windowOpen leftPanelOpen />);
     expect(view()).toBe(mine);
@@ -446,7 +448,10 @@ describe('Map', () => {
     expect(again.container.querySelector<HTMLElement>('.world')!.style.transform).toBe(mine);
   });
 
-  it('shows all of the map as it first opens, with the blocks where the server keeps them, until the person moves it', async () => {
+  /* 20.11 (#1620): the map was drawn before the arrangement came, and then its blocks jumped to their places and it zoomed
+     out again. Now it is drawn once the arrangement came: the blocks stand where the server keeps them and the view shows all
+     of them from the first frame, and nothing moves after it. */
+  it('shows all of the map as it first opens, with the blocks where the server keeps them from its first frame, until the person moves it', async () => {
     const width = vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(1100);
     const height = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(900);
     onTestFinished(() => {
@@ -459,17 +464,36 @@ describe('Map', () => {
     const kept = new Promise<[number, unknown]>(resolve => (arrive = () => resolve([200, { blocks: { 'dept:d1': { x: 40, y: 1400 } } }])));
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'GET /api/map/layout': () => kept });
     const { container } = render(<MapScreen {...PROPS} />);
-    const marketing = (await screen.findByText('Marketing')).closest<HTMLElement>('.dept')!;
-    const view = () => container.querySelector<HTMLElement>('.world')!.style.transform;
-    const scale = () => Number(/scale\(([^)]+)\)/.exec(view())![1]);
-    /* A company that fits whole opens no larger than it is drawn (#1597), so the map may open at 100%: its first fit shows
-       in where it stands, not only in its scale. */
-    await waitFor(() => expect(view()).not.toBe('translate(0px, 0px) scale(1)'));
-    const first = scale();
-    expect(first, 'the map opens no larger than it is drawn').toBeLessThanOrEqual(1);
+    await act(async () => {});
+    expect(screen.queryByText('Marketing')).not.toBeInTheDocument();
+    expect(container.querySelector('.world')).toBeNull();
     await act(async () => arrive());
-    await waitFor(() => expect(marketing.style.top).toBe('1400px'));
-    expect(scale()).toBeLessThan(first);
+    const marketing = (await screen.findByText('Marketing')).closest<HTMLElement>('.dept')!;
+    expect(marketing.style.top).toBe('1400px');
+    const transform = () => container.querySelector<HTMLElement>('.world')!.style.transform;
+    const first = transform();
+    /* A company that fits whole opens no larger than it is drawn (#1597); this one, with a block kept low, opens below 100%. */
+    expect(Number(/scale\(([^)]+)\)/.exec(first)![1]), 'the map opens no larger than it is drawn').toBeLessThan(1);
+    await act(async () => {});
+    expect(transform()).toBe(first);
+  });
+
+  it('zooms with the wheel once it is drawn, also when the arrangement came after the company', async () => {
+    /* #1620: the map stands only once the company and the arrangement came, so the wheel must reach the map then, not
+       the room that held its place while the company alone was there. */
+    let arrive = () => {};
+    const kept = new Promise<[number, unknown]>(resolve => (arrive = () => resolve([200, { blocks: {} }])));
+    mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'GET /api/map/layout': () => kept });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await act(async () => {});
+    await act(async () => {});
+    expect(container.querySelector('.world')).toBeNull();
+    await act(async () => arrive());
+    await screen.findByText('Marketing');
+    const label = () => container.querySelector('.zoom .zv')!.textContent;
+    const before = label();
+    fireEvent.wheel(container.querySelector('.map:not(.map-wait)')!, { deltaY: -400, clientX: 200, clientY: 200 });
+    expect(label(), 'the wheel zooms the map that is drawn').not.toBe(before);
   });
 
   it.each([375, 1440])('fits the company clear of a left panel at %ipx', async width => {
