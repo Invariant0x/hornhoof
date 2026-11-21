@@ -101,6 +101,8 @@ export type GeneratedWorldMap = Readonly<{
   kindSpecAt: (col: number, row: number) => TerrainKindSpec | null;
   isBuildable: (col: number, row: number) => boolean;
   isWalkable: (col: number, row: number) => boolean;
+  isLiquid: (col: number, row: number) => boolean;
+  isExcavatable: (col: number, row: number) => boolean;
   stats: GeneratedMapStats;
 }>;
 
@@ -334,6 +336,8 @@ export function generateWorldTerrain(
 
   const isBuildable = (col: number, row: number): boolean => Boolean(kindSpecAt(col, row)?.buildable);
   const isWalkable = (col: number, row: number): boolean => Boolean(kindSpecAt(col, row)?.walkable);
+  const isLiquid = (col: number, row: number): boolean => Boolean(kindSpecAt(col, row)?.liquid);
+  const isExcavatable = (col: number, row: number): boolean => Boolean(kindSpecAt(col, row)?.excavatable);
 
   const partial: GeneratedWorldMap = {
     packId: pack.id,
@@ -353,6 +357,8 @@ export function generateWorldTerrain(
     kindSpecAt,
     isBuildable,
     isWalkable,
+    isLiquid,
+    isExcavatable,
     stats: {
       totalTiles: width * height,
       buildableTiles,
