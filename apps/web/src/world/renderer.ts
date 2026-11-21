@@ -22,6 +22,7 @@ import {
   mapWorldBounds,
   pickAtScreen,
   screenToTile,
+  tileCenterToWorld,
   tileDiamondVertices,
   tileTopVertexToWorld,
   type MapWorldBounds,
@@ -64,6 +65,8 @@ export type WorldEngineOptions = Readonly<{
   host: HTMLElement;
   pack: WorldPackManifest;
   initialZoom?: number;
+  initialCenterTile?: TileCoord;
+  markerTile?: TileCoord | null;
   objects?: readonly PickableObject[];
   resolveTileId?: (col: number, row: number) => string;
   onStats?: (stats: WorldEngineStats) => void;
@@ -119,6 +122,7 @@ export class IsometricWorldEngine {
   private viewport: ViewportSize;
   private dpr: number;
   private zoomBounds: EffectiveZoomBounds;
+  private readonly markerTile: TileCoord | null;
   private camera: CameraState;
   private hoveredTile: TileCoord | null = null;
   private selectedPick: PickResult | null = null;
@@ -173,8 +177,13 @@ export class IsometricWorldEngine {
     this.viewport = this.readHostSize();
     this.zoomBounds = computeEffectiveZoomBounds(options.pack, this.dpr);
     const initial = createInitialCamera(options.pack, this.dpr);
+    const startCenter = options.initialCenterTile
+      ? tileCenterToWorld(options.initialCenterTile.col, options.initialCenterTile.row, this.tileW, this.tileH)
+      : { x: initial.x, y: initial.y };
+    this.markerTile = options.markerTile ?? null;
     this.camera = {
-      ...initial,
+      x: clamp(startCenter.x, this.bounds.minX, this.bounds.maxX),
+      y: clamp(startCenter.y, this.bounds.minY, this.bounds.maxY),
       zoom:
         options.initialZoom !== undefined
           ? clamp(options.initialZoom, this.zoomBounds.minZoom, this.zoomBounds.maxZoom)
@@ -690,6 +699,22 @@ export class IsometricWorldEngine {
     g.clear();
     const strokeW = Math.max(1, 2 / this.camera.zoom);
 
+    if (this.markerTile) {
+      const pts = tileDiamondVertices(this.markerTile.col, this.markerTile.row, this.tileW, this.tileH);
+      const center = tileCenterToWorld(this.markerTile.col, this.markerTile.row, this.tileW, this.tileH);
+      g.moveTo(pts[0].x, pts[0].y)
+        .lineTo(pts[1].x, pts[1].y)
+        .lineTo(pts[2].x, pts[2].y)
+        .lineTo(pts[3].x, pts[3].y)
+        .closePath()
+        .fill({ color: 0xffd166, alpha: 0.32 })
+        .stroke({ color: 0x111720, alpha: 0.9, width: strokeW * 2.2 })
+        .stroke({ color: 0xffd166, alpha: 1, width: strokeW * 1.25 });
+      g.circle(center.x, center.y, Math.max(4, 7 / this.camera.zoom))
+        .fill({ color: 0xffd166, alpha: 0.98 })
+        .stroke({ color: 0x111720, alpha: 0.95, width: Math.max(1.5, 2 / this.camera.zoom) });
+    }
+
     if (this.hoveredTile) {
       const fill = parseColorAndAlpha(this.pack.palette.hoverFill, 0x68ceff, 0.24);
       const stroke = parseColorAndAlpha(this.pack.palette.hoverStroke, 0x7ed6ff, 0.95);
@@ -781,6 +806,25 @@ export class IsometricWorldEngine {
       ctx.lineWidth = Math.max(1, 2 / this.camera.zoom);
       ctx.stroke();
     };
+
+    if (this.markerTile) {
+      drawHighlight(
+        this.markerTile.col,
+        this.markerTile.row,
+        1,
+        1,
+        'rgba(255, 209, 102, 0.34)',
+        '#FFD166',
+      );
+      const center = tileCenterToWorld(this.markerTile.col, this.markerTile.row, this.tileW, this.tileH);
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, Math.max(4, 7 / this.camera.zoom), 0, Math.PI * 2);
+      ctx.fillStyle = '#FFD166';
+      ctx.fill();
+      ctx.strokeStyle = '#111720';
+      ctx.lineWidth = Math.max(1.5, 2 / this.camera.zoom);
+      ctx.stroke();
+    }
 
     if (this.hoveredTile) {
       drawHighlight(
