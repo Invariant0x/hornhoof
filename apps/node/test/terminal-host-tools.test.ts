@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { NodeMessage } from '@hornhoof/protocol';
@@ -19,21 +20,31 @@ type Heard = { method: string; auth: string };
 const servers: Server[] = [];
 afterEach(() => servers.splice(0).forEach(server => server.close()));
 
-async function hornhoof(): Promise<{ url: string; heard: Heard[] }> {
+/* busy: a busy Hornhoof, which answers that call of a program connecting only once the test lets it. */
+async function hornhoof(busy: 'initialize' | 'tools/list' | null = null): Promise<{ url: string; heard: Heard[]; waiting: () => number; answer: () => void }> {
   const heard: Heard[] = [];
+  const waiting: (() => void)[] = [];
+  let holds = busy !== null;
   const server = createServer((req, res) => {
     let body = '';
     req.on('data', chunk => (body += chunk));
     req.on('end', () => {
       const msg = JSON.parse(body) as { id?: number; method: string };
       heard.push({ method: msg.method, auth: req.headers.authorization ?? '' });
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id ?? null, result: msg.method === 'tools/list' ? { tools: [{ name: 'task' }] } : {} }));
+      const answer = () => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id ?? null, result: msg.method === 'tools/list' ? { tools: [{ name: 'task' }] } : {} }));
+      };
+      if (holds && msg.method === busy) waiting.push(answer);
+      else answer();
     });
   });
   await listenIn(server);
   servers.push(server);
-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, heard };
+  return {
+    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, heard, waiting: () => waiting.length,
+    answer: () => { holds = false; waiting.splice(0).forEach(answer => answer()); },
+  };
 }
 
 type Terminal = Awaited<ReturnType<typeof liveTerminal>>;
@@ -61,7 +72,72 @@ function overLink() {
 /* What an MCP client sends to connect: it asks the server what it is, then lists its tools. */
 const connect = async (c: Terminal) => [await call(c, 1, 'initialize'), await call(c, 2, 'tools/list')];
 
+/* Claude Code 2.1.329 waits for an MCP server to connect as many milliseconds as MCP_TIMEOUT says, or 30 seconds, and then
+   gives up on it for the rest of its session. The stand-in reads the env its launch was given and does the same, on the
+   test's clock, while its calls go on real sockets; stop gives up on them earlier. */
+async function connectsAsClaude(c: Terminal, stop = new AbortController()): Promise<'listed' | 'gave up'> {
+  const env = readFileSync(c.launch.mock.calls.at(-1)![1].envFile!, 'utf8');
+  const limit = setTimeout(() => stop.abort(), Number(/^MCP_TIMEOUT='(\d+)'$/m.exec(env)?.[1]) || 30_000);
+  try {
+    for (const [id, method] of [[1, 'initialize'], [2, 'tools/list']] as const) {
+      const res = await fetch(c.host['bridge'].agent('receipt').mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id, method }), signal: stop.signal });
+      await res.json();
+    }
+    return 'listed';
+  } catch {
+    return 'gave up';
+  } finally {
+    clearTimeout(limit);
+  }
+}
+
 describe("a program's connection to Hornhoof's tools", () => {
+  it("gives Claude Code two minutes to connect to them, so its turn gets them from a busy Hornhoof that answers after 30 seconds", async () => {
+    const up = await hornhoof('initialize');
+    /* Hornhoof gives a turn far more than the 31 seconds it waits here. */
+    const c = await liveTerminal('claude', 'queued', { host: { hornhoof: up.url }, connects: true, timeoutMs: 600_000 });
+    /* While its calls are on their way the clock stands still: only the test moves it. */
+    const connecting = c.carry(() => connectsAsClaude(c));
+    /* Hornhoof has the program's first call, and answers it 31 seconds later. */
+    await until(() => up.waiting() === 1);
+    for (let second = 0; second < 31; second++) await vi.advanceTimersByTimeAsync(1000);
+    up.answer();
+    expect(await c.on(connecting)).toBe('listed');
+    /* With them its turn does its work. */
+    expect(await call(c, 3, 'tools/call')).toEqual({ jsonrpc: '2.0', id: 3, result: {} });
+    c.finish();
+    expect(await c.on(c.running)).toMatchObject({ ok: true, result: 'Done.' });
+  });
+
+  it.each(['initialize', 'tools/list'] as const)('ends the turn of a program that gave up on %s before Hornhoof answered as one without tools, and starts it again in its session for the next turn', async method => {
+    const up = await hornhoof(method);
+    const c = await liveTerminal('claude', 'queued', { host: { hornhoof: up.url }, connects: true, watched: true });
+    const kept = vi.spyOn(c.host['bridge'] as unknown as { keepTools: (key: string, body: Buffer, answer: Buffer) => void }, 'keepTools');
+    const stop = new AbortController();
+    const connecting = connectsAsClaude(c, stop);
+    await until(() => up.waiting() === 1);
+    /* Hornhoof did not answer in the time the program waits. */
+    stop.abort();
+    expect(await connecting).toBe('gave up');
+    /* No test here has a time limit: give the bridge a bounded while to hear the connection close, and say so if it never does. */
+    for (let turn = 0; turn < 1000 && !c.log.mock.calls.some(([line]) => String(line).includes('gave up')); turn++) await new Promise(resolve => setImmediate(resolve));
+    expect(c.log).toHaveBeenCalledWith(`Agent receipt's program gave up on ${method} of Hornhoof's tools before Hornhoof answered: it has no tools until it starts again.`);
+    /* Hornhoof's answer comes after all, to a program that no longer waits for it: it gave the program no tools. */
+    up.answer();
+    await until(() => kept.mock.calls.some(([, body]) => String(body).includes(method)));
+    /* Its model ends the turn, which had no tools: the server repeats a turn that ends so. */
+    c.finish();
+    expect(await c.on(c.running)).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'tools' } });
+    expect(c.launch).toHaveBeenCalledTimes(1);
+    const next = c.run('NEXT', 'job-next');
+    await c.until(() => c.launch.mock.calls.length === 2);
+    expect(c.log).toHaveBeenCalledWith("Agent receipt (claude) could not reach Hornhoof's tools when its program connected, so the program starts again in its session.");
+    expect(await c.on(c.carry(() => connectsAsClaude(c)))).toBe('listed');
+    await c.until(() => c.sent.some(m => m.type === 'job.program' && m.jobId === 'job-next' && m.state === 'thinking'));
+    c.finish();
+    expect(await c.on(next)).toMatchObject({ ok: true });
+  });
+
   it('keeps the turn that started a program until the program has its tools, so one that connects after its short turn still gets them', async () => {
     const up = await hornhoof();
     let over = false;

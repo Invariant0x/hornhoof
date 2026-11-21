@@ -392,3 +392,12 @@ describe('the words of copies', () => {
     ]);
   });
 });
+
+describe('the load given up at 30 seconds', () => {
+  /* Design on #1654 (#1620): its number stays on one line with its unit, as #1601's units do, in every shipped language. */
+  it.each(LANGUAGES.map(l => l.id))('keeps the number and its unit together in %s', id => {
+    const said = DICTIONARIES[id].load.failed.timeout;
+    expect(said).toMatch(/\d\u00a0\p{L}/u);
+    expect(said).not.toMatch(/\d \p{L}/u);
+  });
+});
