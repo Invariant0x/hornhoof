@@ -8,15 +8,20 @@ import {
   DEFAULT_STATUE_STAGES,
   STATUE_TASKS_PER_STAGE,
   agentLevelFromAcceptedTasks,
+  classifyAgentRole,
   departmentStageFromAcceptedTasks,
   departmentStatuesFromAcceptedTasks,
+  deriveResidentLiveState,
   flophouseStageFromCalls,
   goalMonumentProgress,
   houseStageFromLevel,
   machinePowerTier,
   nextLevelProgress,
+  outfitTierFromLevel,
   residenceStageFromAcceptedTasks,
+  type WorldLiveActiveCall,
   type WorldLiveAgent,
+  type WorldLiveCurrentTask,
   type WorldLiveDepartment,
   type WorldLiveGoal,
   type WorldLiveMachine,
@@ -766,6 +771,15 @@ export function createHornhoofLiveFixture(): WorldLiveSnapshot {
     },
   ];
 
+  const MODEL_BY_PROVIDER: Readonly<Record<string, string>> = {
+    claude: 'claude-opus-5-5',
+    codex: 'gpt-6.1-sol',
+    antigravity: 'gemini-3-pro',
+    kimi: 'kimi-k2.5',
+    glm: 'glm-5',
+    anthropic_api: 'claude-sonnet-5-5',
+  };
+
   const departments: WorldLiveDepartment[] = [];
   const agents: WorldLiveAgent[] = [];
   let acceptedTasksTotal = 0;
@@ -777,14 +791,60 @@ export function createHornhoofLiveFixture(): WorldLiveSnapshot {
     for (const m of r.members) {
       const id = `agent-${globalIdx + 1}`;
       if (m.kind === 'head') headId = id;
-      const machine = machines[globalIdx % machines.length]!;
+      /* Keep key role showcase agents on online machines/subscriptions so every archetype is active on screen. */
+      const machineIdx = globalIdx % machines.length;
+      const machine = machines[machineIdx]!;
       const sub = subscriptions[globalIdx % subscriptions.length]!;
       const prog = nextLevelProgress(m.tasks);
+      const isTurnkey = m.name === 'Tank' || m.name === 'Zee';
+      const roleInfo = classifyAgentRole({ kind: m.kind, roleKey: m.roleKey, isTurnkey });
+
+      const waitingForHuman = m.name === 'Mouse' || m.name === 'Persephone';
+      const hasFailedTurn = m.name === 'Crier';
+      const recentlyLeveledUp = m.name === 'Link' || m.name === 'Rama';
+      const isIdle = m.name === 'Soren' || m.name === 'Nora' || m.name === 'Prism';
+      const isWorking = !waitingForHuman && !hasFailedTurn && !recentlyLeveledUp && !isIdle;
+
+      const liveState = deriveResidentLiveState({
+        machineOnline: machine.online,
+        allRestingNoSubscription: false,
+        subscriptionExhausted: sub.exhausted,
+        hasFailedTurn,
+        waitingForHuman,
+        isWorking,
+        recentlyLeveledUp,
+      });
+
+      const currentTask: WorldLiveCurrentTask | null =
+        liveState === 'working' || liveState === 'waiting_human' || liveState === 'turn_failed'
+          ? {
+              id: `task-live-${globalIdx + 1}`,
+              number: 1800 + globalIdx + 1,
+              title:
+                m.name === 'Tank'
+                  ? 'Game Worlds Stage 5 Residents'
+                  : m.kind === 'head'
+                    ? `${r.deptName} Sprint Coordination`
+                    : `${r.roleCode} Deliverable #${globalIdx + 1}`,
+              /* Builders split naturally between goal monuments (goal-1 / goal-2) and department statues (null). */
+              goalId: globalIdx % 2 === 0 ? (r.deptId === 'dept-dev' ? 'goal-1' : 'goal-2') : null,
+            }
+          : null;
+
       agents.push({
         id,
         name: m.name,
         kind: m.kind,
+        model: MODEL_BY_PROVIDER[sub.provider] ?? 'claude-sonnet-5-5',
         roleKey: m.roleKey,
+        isTurnkey,
+        roleClass: roleInfo.roleClass,
+        archetype: roleInfo.archetype,
+        outfitTier: outfitTierFromLevel(prog.level),
+        liveState,
+        currentTask,
+        hasRecentRework: m.name === 'Trinity' || m.name === 'Apoc',
+        talkingToAgentId: null,
         departmentId: r.deptId,
         machineId: machine.id,
         subscriptionId: sub.id,
@@ -809,8 +869,32 @@ export function createHornhoofLiveFixture(): WorldLiveSnapshot {
       statues: departmentStatuesFromAcceptedTasks(deptSum, DEFAULT_STATUE_STAGES, STATUE_TASKS_PER_STAGE),
       oneShotCallsCount: Math.max(4, Math.round(deptSum / 22)),
       headAgentId: headId,
+      hasSmoke: r.deptId === 'dept-mkt',
+      hasStuckTask: r.deptId === 'dept-des',
+      hasRecentRework: r.deptId === 'dept-dev',
     });
   }
+
+  const activeCalls: WorldLiveActiveCall[] = [
+    {
+      id: 'call-live-1',
+      callerAgentId: 'agent-2',
+      departmentId: 'dept-dev',
+      taskNumber: 1803,
+      judge: false,
+      machineId: 'mac-0x',
+      provider: 'claude',
+    },
+    {
+      id: 'call-live-2',
+      callerAgentId: 'agent-23',
+      departmentId: 'dept-ops',
+      taskNumber: 1805,
+      judge: true,
+      machineId: 'mac-home',
+      provider: 'codex',
+    },
+  ];
 
   const g1Prog = goalMonumentProgress({
     status: 'active',
@@ -922,7 +1006,16 @@ export function createHornhoofLiveFixture(): WorldLiveSnapshot {
       id: 'agent-orch',
       name: 'Orchestrator',
       kind: 'orchestrator',
+      model: 'claude-opus-5-5',
       roleKey: null,
+      isTurnkey: false,
+      roleClass: 'ruler',
+      archetype: 'ruler',
+      outfitTier: outfitTierFromLevel(agentLevelFromAcceptedTasks(42)),
+      liveState: 'working',
+      currentTask: { id: 'task-orch-1', number: 1803, title: 'Coordinate Company Milestones', goalId: 'goal-1' },
+      hasRecentRework: false,
+      talkingToAgentId: 'agent-1',
       departmentId: null,
       machineId: 'mac-0x',
       subscriptionId: 'sub-claude-1',
@@ -938,6 +1031,7 @@ export function createHornhoofLiveFixture(): WorldLiveSnapshot {
     agents,
     subscriptions,
     goals,
+    activeCalls,
     relocations: [],
     savedLayout: null,
     permissions: {
@@ -1053,5 +1147,62 @@ export function createNoSubscriptionFixture(): WorldLiveSnapshot {
     relocations: [],
     savedLayout: null,
     permissions: { canRelocateAny: true, relocatableDepartmentIds: ['d-ops', 'd-dev', 'd-mkt'] },
+  };
+}
+
+/* 150-resident live stress fixture for Stage 5 performance verification without frame drops. */
+export function createStress150LiveFixture(): WorldLiveSnapshot {
+  const base = createHornhoofLiveFixture();
+  const extraAgents: WorldLiveAgent[] = [...base.agents];
+  const rolePool = ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-TEST', 'DEV-ARCH', 'DEV-OPS', 'OPS-WATCH', 'OPS-FIX', 'OPS-BUGS', 'MKT-WRITE', 'VID-EDIT', 'DSN-UI'] as const;
+
+  for (let i = extraAgents.length; i < 150; i++) {
+    const dept = base.departments[i % base.departments.length]!;
+    const machine = base.machines[i % base.machines.length]!;
+    const sub = base.subscriptions[i % base.subscriptions.length]!;
+    const roleKey = rolePool[i % rolePool.length]!;
+    const tasks = Math.max(1, (i * 7) % 52);
+    const prog = nextLevelProgress(tasks);
+    const isTurnkey = i % 19 === 0;
+    const roleInfo = classifyAgentRole({ kind: 'worker', roleKey, isTurnkey });
+    const liveState = deriveResidentLiveState({
+      machineOnline: machine.online,
+      allRestingNoSubscription: false,
+      subscriptionExhausted: sub.exhausted,
+      hasFailedTurn: i % 47 === 0,
+      waitingForHuman: i % 37 === 0,
+      isWorking: i % 5 !== 0,
+      recentlyLeveledUp: i % 23 === 0,
+    });
+    extraAgents.push({
+      id: `agent-stress-${i + 1}`,
+      name: `Resident ${i + 1}`,
+      kind: 'worker',
+      model: 'claude-sonnet-5-5',
+      roleKey,
+      isTurnkey,
+      roleClass: roleInfo.roleClass,
+      archetype: roleInfo.archetype,
+      outfitTier: outfitTierFromLevel(prog.level),
+      liveState,
+      currentTask: liveState === 'working' ? { id: `st-${i}`, number: 2000 + i, title: `Work #${i + 1}`, goalId: i % 2 === 0 ? 'goal-1' : null } : null,
+      hasRecentRework: roleInfo.inspectsStones && i % 2 === 0,
+      talkingToAgentId: null,
+      departmentId: dept.id,
+      machineId: machine.id,
+      subscriptionId: sub.id,
+      provider: sub.provider,
+      acceptedTasks: tasks,
+      level: prog.level,
+      houseStage: houseStageFromLevel(prog.level, 10),
+      nextLevelRemaining: prog.remaining,
+      resting: sub.exhausted,
+    });
+  }
+
+  return {
+    ...base,
+    company: { ...base.company, name: 'Hornhoof (150 Residents)' },
+    agents: extraAgents,
   };
 }

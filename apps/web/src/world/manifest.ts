@@ -2,10 +2,42 @@
    Contains zero theme-specific words, files or colours; every concrete world supplies its own manifest,
    materials, liquid layer and procedural terrain recipe. */
 
+import type { ResidentRoleClass, RoleArchetype } from '@hornhoof/protocol/world';
 import type { TileCoord } from './coords';
 
 export type EngineKind = 'isometric-2d' | '3d';
 export type OuterWallMode = 'ring' | 'none';
+
+export type RolePropKind =
+  | 'stone'
+  | 'scroll'
+  | 'staff'
+  | 'tool'
+  | 'spear_shield'
+  | 'water_jar'
+  | 'gong'
+  | 'key'
+  | 'chisel'
+  | 'banner'
+  | 'none';
+
+export type RoleHeadgearKind = 'none' | 'cap' | 'hood' | 'helm' | 'crown' | 'circlet';
+
+export type PackRoleLookSpec = Readonly<{
+  id: string;
+  label: Readonly<{ en: string; ru: string }>;
+  tunicColor: string;
+  trimColor: string;
+  prop: RolePropKind;
+  headgear: RoleHeadgearKind;
+  insignia?: boolean;
+}>;
+
+export type AltarAnchorSpec = Readonly<{
+  offsetCol: number;
+  offsetRow: number;
+  label?: Readonly<{ en: string; ru: string }>;
+}>;
 
 export type Direction8 = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
 export type UniqueRenderAngle5 = 'N' | 'NE' | 'E' | 'SE' | 'S';
@@ -214,6 +246,11 @@ export type WorldPackManifest = Readonly<{
   showGridByDefault?: boolean;
   /* Whether the city builds an expanding outer wall ring ('ring', default) or relies on natural boundaries ('none'). */
   outerWallMode?: OuterWallMode;
+  /* Dedicated shrine/altar offset near the ruler residence where agents waiting for a human stand with a scroll. */
+  altarAnchor?: AltarAnchorSpec;
+  /* Pack-owned visual looks keyed by Hornhoof roleKey or generic archetype, plus per-class fallback looks. */
+  roleLooks?: Readonly<Record<string, PackRoleLookSpec>>;
+  classFallbackLooks?: Readonly<Record<ResidentRoleClass, PackRoleLookSpec>>;
   materials?: readonly GroundMaterialSpec[];
   liquidLayer?: LiquidLayerSpec;
   terrainRecipe?: TerrainRecipeSpec;
@@ -265,6 +302,81 @@ export const DEFAULT_CAMERA_BOUNDS: CameraBoundsSpec = {
 };
 
 const COLOR_PATTERN = /^(?:#[0-9a-f]{3,8}|rgba?\([^)]+\))$/i;
+
+const ENGINE_DEFAULT_CLASS_LOOKS: Readonly<Record<ResidentRoleClass, PackRoleLookSpec>> = {
+  ruler: {
+    id: 'default-ruler',
+    label: { en: 'Ruler', ru: 'Правитель' },
+    tunicColor: '#EAE0C8',
+    trimColor: '#E8B948',
+    prop: 'staff',
+    headgear: 'crown',
+    insignia: true,
+  },
+  head: {
+    id: 'default-head',
+    label: { en: 'Department Head', ru: 'Глава отдела' },
+    tunicColor: '#D6C7A8',
+    trimColor: '#5CA6E6',
+    prop: 'staff',
+    headgear: 'circlet',
+    insignia: true,
+  },
+  checker: {
+    id: 'default-checker',
+    label: { en: 'Inspector', ru: 'Проверяющий' },
+    tunicColor: '#C5CFD9',
+    trimColor: '#6994C2',
+    prop: 'scroll',
+    headgear: 'cap',
+  },
+  executor: {
+    id: 'default-executor',
+    label: { en: 'Builder', ru: 'Исполнитель' },
+    tunicColor: '#D4BC94',
+    trimColor: '#A67C52',
+    prop: 'tool',
+    headgear: 'none',
+  },
+  turnkey: {
+    id: 'default-turnkey',
+    label: { en: 'Turnkey Specialist', ru: 'Универсал под ключ' },
+    tunicColor: '#48607A',
+    trimColor: '#E5B85C',
+    prop: 'banner',
+    headgear: 'hood',
+    insignia: true,
+  },
+  day_laborer: {
+    id: 'default-day-laborer',
+    label: { en: 'Day Laborer', ru: 'Поденщик' },
+    tunicColor: '#9C8D78',
+    trimColor: '#736553',
+    prop: 'stone',
+    headgear: 'none',
+  },
+};
+
+/* Resolves a resident's visual look from the active world pack:
+   exact roleKey -> archetype -> nearest class fallback -> neutral engine default. */
+export function resolvePackRoleLook(
+  pack: WorldPackManifest,
+  roleKey: string | null,
+  roleClass: ResidentRoleClass,
+  archetype: RoleArchetype,
+): PackRoleLookSpec {
+  const normalized = (roleKey ?? '').trim().toUpperCase();
+  if (normalized && pack.roleLooks?.[normalized]) {
+    return pack.roleLooks[normalized]!;
+  }
+  if (pack.roleLooks?.[archetype]) {
+    return pack.roleLooks[archetype]!;
+  }
+  if (pack.classFallbackLooks?.[roleClass]) {
+    return pack.classFallbackLooks[roleClass]!;
+  }
+  return ENGINE_DEFAULT_CLASS_LOOKS[roleClass];
+}
 
 export type WorldPackValidation = { ok: true } | { ok: false; errors: string[] };
 

@@ -1,16 +1,23 @@
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  ALL_HORNHOOF_ROLE_KEYS,
+  HUMAN_WAKE_COOLDOWN_MS,
   MAX_AGENT_LEVEL,
   agentLevelFromAcceptedTasks,
   agentLevelThreshold,
+  classifyAgentRole,
   departmentStageFromAcceptedTasks,
   departmentStatuesFromAcceptedTasks,
+  deriveResidentLiveState,
   deriveWorldMode,
   flophouseStageFromCalls,
   goalMonumentProgress,
   houseStageFromLevel,
   machinePowerTier,
   nextLevelProgress,
+  outfitTierFromLevel,
   residenceStageFromAcceptedTasks,
   subscriptionFullness,
 } from '../src/world.js';
@@ -227,5 +234,183 @@ describe('canonical world formulas (single source of truth)', () => {
     expect(
       deriveWorldMode({ template: 'startup', departmentsCount: 3, employeesCount: 6, readySubscriptionsCount: 2 }),
     ).toBe('active');
+  });
+
+  it('classifies all 75 Hornhoof template roles deterministically with head/checker/executor/turnkey/ruler invariants', () => {
+    const rolesDir = join(process.cwd(), '../../templates/roles');
+    const diskRoles: string[] = [];
+    for (const dept of readdirSync(rolesDir)) {
+      for (const file of readdirSync(join(rolesDir, dept))) {
+        if (file.endsWith('.md')) diskRoles.push(file.slice(0, -3));
+      }
+    }
+    diskRoles.sort();
+    expect(diskRoles).toHaveLength(75);
+    expect([...ALL_HORNHOOF_ROLE_KEYS].sort()).toEqual(diskRoles);
+
+    for (const roleKey of diskRoles) {
+      const info = classifyAgentRole({
+        kind: roleKey.endsWith('-HEAD') ? 'head' : 'worker',
+        roleKey,
+        isTurnkey: false,
+      });
+      if (roleKey.endsWith('-HEAD')) {
+        expect(info.roleClass, roleKey).toBe('head');
+        expect(info.carriesStones, `${roleKey} never carries stones`).toBe(false);
+      }
+      expect(info.archetype.length).toBeGreaterThan(0);
+    }
+
+    /* Specific approved role archetypes from 00-ZADANIE.md appendix. */
+    expect(classifyAgentRole({ kind: 'orchestrator', roleKey: null, isTurnkey: false })).toMatchObject({
+      roleClass: 'ruler',
+      archetype: 'ruler',
+      carriesStones: false,
+    });
+    expect(classifyAgentRole({ kind: 'head', roleKey: 'DEV-HEAD', isTurnkey: false })).toMatchObject({
+      roleClass: 'head',
+      archetype: 'head',
+      carriesStones: false,
+    });
+    expect(classifyAgentRole({ kind: 'head', roleKey: 'OPS-HEAD', isTurnkey: false })).toMatchObject({
+      roleClass: 'head',
+      archetype: 'guard_captain',
+      carriesStones: false,
+    });
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'DEV-ENG', isTurnkey: false })).toMatchObject({
+      roleClass: 'executor',
+      archetype: 'builder',
+      carriesStones: true,
+    });
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'DEV-REV', isTurnkey: false })).toMatchObject({
+      roleClass: 'checker',
+      archetype: 'checker',
+      carriesStones: false,
+      inspectsStones: true,
+    });
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'DEV-TEST', isTurnkey: false })).toMatchObject({
+      roleClass: 'checker',
+      archetype: 'checker',
+      inspectsStones: true,
+    });
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'DEV-ARCH', isTurnkey: false })).toMatchObject({
+      roleClass: 'executor',
+      archetype: 'architect',
+    });
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'OPS-FIX', isTurnkey: false }).archetype).toBe('firefighter');
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'OPS-WATCH', isTurnkey: false }).archetype).toBe('patrol');
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'OPS-BUGS', isTurnkey: false }).archetype).toBe('inspector_scout');
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'OPS-INTEG', isTurnkey: false }).archetype).toBe('caravan_runner');
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'OPS-ACCT', isTurnkey: false }).archetype).toBe('keykeeper');
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'OPS-PROGRAM', isTurnkey: false }).archetype).toBe('machine_keeper');
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'DEV-SEC', isTurnkey: false }).archetype).toBe('gate_guard');
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'DEV-RED', isTurnkey: false }).archetype).toBe('red_team');
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'DEV-OPS', isTurnkey: false }).archetype).toBe('road_builder');
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'MKT-WRITE', isTurnkey: false }).archetype).toBe('scribe');
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'VID-EDIT', isTurnkey: false }).archetype).toBe('artisan');
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'DEV-ENG', isTurnkey: true })).toMatchObject({
+      roleClass: 'turnkey',
+      archetype: 'turnkey_specialist',
+      carriesStones: true,
+    });
+
+    /* Unknown custom role gracefully falls back by class. */
+    expect(classifyAgentRole({ kind: 'worker', roleKey: 'CUSTOM-FOO', isTurnkey: false })).toMatchObject({
+      roleClass: 'executor',
+      archetype: 'builder',
+    });
+  });
+
+  it('derives all 7 live resident states and outfit tiers 1..5 cleanly', () => {
+    expect(HUMAN_WAKE_COOLDOWN_MS).toBeGreaterThanOrEqual(30_000);
+    expect(outfitTierFromLevel(1)).toBe(1);
+    expect(outfitTierFromLevel(4)).toBe(2);
+    expect(outfitTierFromLevel(6)).toBe(3);
+    expect(outfitTierFromLevel(10)).toBe(4);
+    expect(outfitTierFromLevel(25)).toBe(5);
+
+    expect(
+      deriveResidentLiveState({
+        machineOnline: false,
+        allRestingNoSubscription: false,
+        subscriptionExhausted: false,
+        hasFailedTurn: true,
+        waitingForHuman: true,
+        isWorking: true,
+        recentlyLeveledUp: false,
+      }),
+    ).toBe('machine_offline');
+
+    expect(
+      deriveResidentLiveState({
+        machineOnline: true,
+        allRestingNoSubscription: false,
+        subscriptionExhausted: true,
+        hasFailedTurn: false,
+        waitingForHuman: false,
+        isWorking: true,
+        recentlyLeveledUp: false,
+      }),
+    ).toBe('exhausted');
+
+    expect(
+      deriveResidentLiveState({
+        machineOnline: true,
+        allRestingNoSubscription: false,
+        subscriptionExhausted: false,
+        hasFailedTurn: true,
+        waitingForHuman: false,
+        isWorking: false,
+        recentlyLeveledUp: false,
+      }),
+    ).toBe('turn_failed');
+
+    expect(
+      deriveResidentLiveState({
+        machineOnline: true,
+        allRestingNoSubscription: false,
+        subscriptionExhausted: false,
+        hasFailedTurn: false,
+        waitingForHuman: true,
+        isWorking: false,
+        recentlyLeveledUp: false,
+      }),
+    ).toBe('waiting_human');
+
+    expect(
+      deriveResidentLiveState({
+        machineOnline: true,
+        allRestingNoSubscription: false,
+        subscriptionExhausted: false,
+        hasFailedTurn: false,
+        waitingForHuman: false,
+        isWorking: true,
+        recentlyLeveledUp: true,
+      }),
+    ).toBe('working');
+
+    expect(
+      deriveResidentLiveState({
+        machineOnline: true,
+        allRestingNoSubscription: false,
+        subscriptionExhausted: false,
+        hasFailedTurn: false,
+        waitingForHuman: false,
+        isWorking: false,
+        recentlyLeveledUp: true,
+      }),
+    ).toBe('upgrading_home');
+
+    expect(
+      deriveResidentLiveState({
+        machineOnline: true,
+        allRestingNoSubscription: false,
+        subscriptionExhausted: false,
+        hasFailedTurn: false,
+        waitingForHuman: false,
+        isWorking: false,
+        recentlyLeveledUp: false,
+      }),
+    ).toBe('idle');
   });
 });

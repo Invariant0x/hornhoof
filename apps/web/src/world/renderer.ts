@@ -25,6 +25,7 @@ import {
   tileCenterToWorld,
   tileDiamondVertices,
   tileTopVertexToWorld,
+  worldToScreen,
   worldToTileFloat,
   type MapWorldBounds,
   type PickableObject,
@@ -40,6 +41,13 @@ import {
   type TileWindow,
 } from './city-renderer';
 import { cityToPickableObjects } from './live-sync';
+import {
+  pickResidentAtScreen,
+  stepResidentSimulation,
+  type ResidentEntity,
+  type ResidentSimulation,
+} from './residents';
+import { renderResidentsFallback2D, renderResidentsToPixi } from './residents-renderer';
 import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas } from './smooth-terrain-baker';
 import type { GeneratedWorldMap } from './terrain-engine';
 
@@ -93,6 +101,7 @@ export type WorldEngineOptions = Readonly<{
   resolveTileId?: (col: number, row: number) => string;
   onStats?: (stats: WorldEngineStats) => void;
   onSelect?: (pick: PickResult | null) => void;
+  onSelectResident?: (resident: ResidentEntity | null) => void;
   onHover?: (tile: TileCoord | null) => void;
 }>;
 
@@ -142,12 +151,16 @@ export class IsometricWorldEngine {
   private readonly resolveTileId?: (col: number, row: number) => string;
   private readonly onStats?: (stats: WorldEngineStats) => void;
   private readonly onSelect?: (pick: PickResult | null) => void;
+  private readonly onSelectResident?: (resident: ResidentEntity | null) => void;
   private readonly onHover?: (tile: TileCoord | null) => void;
 
   private objects: readonly PickableObject[];
   private cityRenderState: CityRenderState | null = null;
   private cityDirty = false;
   private relocationPreview: RelocationTargetPreview | null = null;
+  private residentSim: ResidentSimulation | null = null;
+  private selectedResidentId: string | null = null;
+  private residentPickingEnabled = true;
   private viewport: ViewportSize;
   private dpr: number;
   private zoomBounds: EffectiveZoomBounds;
@@ -168,6 +181,7 @@ export class IsometricWorldEngine {
   private chunkLayer: Container | null = null;
   private buildGridGraphic: Graphics | null = null;
   private cityGraphic: Graphics | null = null;
+  private residentsGraphic: Graphics | null = null;
   private borderGraphic: Graphics | null = null;
   private overlayGraphic: Graphics | null = null;
 
@@ -220,6 +234,7 @@ export class IsometricWorldEngine {
     this.objects = options.objects ?? [];
     this.onStats = options.onStats;
     this.onSelect = options.onSelect;
+    this.onSelectResident = options.onSelectResident;
     this.onHover = options.onHover;
 
     this.dpr = Math.min(Math.max(1, window.devicePixelRatio || 1), 2);
@@ -287,6 +302,7 @@ export class IsometricWorldEngine {
       const chunkLayer = new Container();
       const buildGridGraphic = new Graphics();
       const cityGraphic = new Graphics();
+      const residentsGraphic = new Graphics();
       const borderGraphic = new Graphics();
       const overlayGraphic = new Graphics();
 
@@ -344,6 +360,7 @@ export class IsometricWorldEngine {
       worldContainer.addChild(chunkLayer);
       worldContainer.addChild(buildGridGraphic);
       worldContainer.addChild(cityGraphic);
+      worldContainer.addChild(residentsGraphic);
       worldContainer.addChild(borderGraphic);
       worldContainer.addChild(overlayGraphic);
       app.stage.addChild(worldContainer);
@@ -352,6 +369,7 @@ export class IsometricWorldEngine {
       this.chunkLayer = chunkLayer;
       this.buildGridGraphic = buildGridGraphic;
       this.cityGraphic = cityGraphic;
+      this.residentsGraphic = residentsGraphic;
       this.borderGraphic = borderGraphic;
       this.overlayGraphic = overlayGraphic;
       if (this.cityRenderState) {
@@ -630,6 +648,47 @@ export class IsometricWorldEngine {
     this.dirtyScene = true;
   }
 
+  /* Attaches or clears the Stage 5 resident simulation rendered atop the city layer. */
+  setResidentSimulation(sim: ResidentSimulation | null): void {
+    this.residentSim = sim;
+    if (!sim) {
+      this.selectedResidentId = null;
+      this.residentsGraphic?.clear();
+    }
+    this.dirtyScene = true;
+  }
+
+  setSelectedResidentId(residentId: string | null): void {
+    this.selectedResidentId = residentId;
+    if (residentId !== null) {
+      this.selectedPick = null;
+    }
+    this.dirtyScene = true;
+  }
+
+  setResidentPickingEnabled(enabled: boolean): void {
+    this.residentPickingEnabled = enabled;
+  }
+
+  centerOnResident(residentId: string, zoom?: number): boolean {
+    const r = this.residentSim?.residents.find(item => item.id === residentId || item.agentId === residentId);
+    if (!r) return false;
+    const pt = tileCenterToWorld(r.col, r.row, this.tileW, this.tileH);
+    this.setCamera({
+      x: pt.x,
+      y: pt.y - 18,
+      zoom: zoom ?? this.camera.zoom,
+    });
+    return true;
+  }
+
+  getResidentScreenPoint(residentId: string): { x: number; y: number } | null {
+    const r = this.residentSim?.residents.find(item => item.id === residentId || item.agentId === residentId);
+    if (!r) return null;
+    const world = tileCenterToWorld(r.col, r.row, this.tileW, this.tileH);
+    return worldToScreen(world.x, world.y - 24, this.camera, this.viewport);
+  }
+
   centerOnTile(tile: TileCoord, zoom?: number): void {
     const pt = tileCenterToWorld(tile.col, tile.row, this.tileW, this.tileH);
     this.setCamera({
@@ -670,6 +729,27 @@ export class IsometricWorldEngine {
   }
 
   pickScreenPoint(sx: number, sy: number): PickResult | null {
+    if (this.residentSim && this.residentPickingEnabled) {
+      const hit = pickResidentAtScreen(
+        this.residentSim,
+        sx,
+        sy,
+        this.camera,
+        this.viewport,
+        this.tileW,
+        this.tileH,
+      );
+      if (hit) {
+        this.selectedResidentId = hit.id;
+        this.selectedPick = null;
+        this.dirtyScene = true;
+        this.onSelectResident?.(hit);
+        this.onSelect?.(null);
+        this.emitStats(true);
+        return null;
+      }
+    }
+
     const pick = pickAtScreen(
       sx,
       sy,
@@ -680,8 +760,10 @@ export class IsometricWorldEngine {
       this.tileH,
       this.pack.mapSize,
     );
+    this.selectedResidentId = null;
     this.selectedPick = pick;
     this.dirtyScene = true;
+    this.onSelectResident?.(null);
     this.onSelect?.(pick);
     this.emitStats(true);
     return pick;
@@ -697,6 +779,19 @@ export class IsometricWorldEngine {
     }
     this.dirtyScene = true;
     this.syncScene(Infinity);
+    if (this.app && this.residentsGraphic && this.residentSim) {
+      renderResidentsToPixi(
+        this.residentsGraphic,
+        this.residentSim,
+        this.cityRenderState?.city ?? null,
+        this.pack,
+        rect,
+        this.tileW,
+        this.tileH,
+        animationDetailForZoom(this.camera.zoom),
+        this.selectedResidentId,
+      );
+    }
     this.app?.render();
     this.emitStats(true);
   }
@@ -822,11 +917,35 @@ export class IsometricWorldEngine {
       }
     }
 
+    /* Advance Stage 5 live resident simulation at smooth real-time cadence. */
+    let residentsAnimated = false;
+    if (this.residentSim) {
+      stepResidentSimulation(this.residentSim, dtMs / 1000);
+      residentsAnimated = true;
+      if (!this.app) {
+        this.dirtyScene = true;
+      }
+    }
+
     const needsSync = this.dirtyScene || this.pendingBakeCount > 0;
     if (needsSync) {
       this.syncScene(BAKE_BUDGET_MS);
     }
-    if (this.app && (needsSync || liquidAnimated)) {
+    if (this.app && this.residentsGraphic && this.residentSim && (residentsAnimated || needsSync)) {
+      const visRect = visibleWorldRect(this.camera, this.viewport, this.tileW);
+      renderResidentsToPixi(
+        this.residentsGraphic,
+        this.residentSim,
+        this.cityRenderState?.city ?? null,
+        this.pack,
+        visRect,
+        this.tileW,
+        this.tileH,
+        animationDetailForZoom(this.camera.zoom),
+        this.selectedResidentId,
+      );
+    }
+    if (this.app && (needsSync || liquidAnimated || residentsAnimated)) {
       this.app.render();
     }
     this.lastCpuStepMs = performance.now() - stepStart;
@@ -1167,6 +1286,19 @@ export class IsometricWorldEngine {
     if (this.cityRenderState) {
       renderCityFallback2D(ctx, this.cityRenderState, this.pack, this.tileW, this.tileH);
     }
+    if (this.residentSim) {
+      const rect = visibleWorldRect(this.camera, this.viewport, this.tileW);
+      renderResidentsFallback2D(
+        ctx,
+        this.residentSim,
+        this.cityRenderState?.city ?? null,
+        this.pack,
+        rect,
+        this.tileW,
+        this.tileH,
+        this.selectedResidentId,
+      );
+    }
 
     ctx.beginPath();
     ctx.moveTo(top.x, top.y);
@@ -1274,6 +1406,8 @@ export class IsometricWorldEngine {
     this.liquidCanvas = null;
     this.buildGridGraphic = null;
     this.cityGraphic = null;
+    this.residentsGraphic = null;
+    this.residentSim = null;
 
     if (this.app) {
       this.app.destroy(true, { children: true, texture: true });

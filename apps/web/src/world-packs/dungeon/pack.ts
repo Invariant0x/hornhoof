@@ -2,13 +2,87 @@
    (bedrock, caverns, glowing magma river, fungal groves, ore veins, carved central hall)
    runs on the exact same engine with zero engine modifications. */
 
+import type { ResidentRoleClass } from '@hornhoof/protocol/world';
 import {
   DEFAULT_CAMERA_BOUNDS,
   DEFAULT_ISOMETRIC_PROJECTION,
   type GroundMaterialSpec,
+  type PackRoleLookSpec,
   type WorldPackManifest,
 } from '../../world/manifest';
 import { DUNGEON_TERRAIN_RECIPE, DUNGEON_TILE_KINDS } from './recipe';
+
+const DUNGEON_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
+  ruler: {
+    id: 'dungeon-archmage',
+    label: { en: 'Delve Lord', ru: 'Владыка подземелья' },
+    tunicColor: '#2E2B42',
+    trimColor: '#FFD166',
+    prop: 'staff',
+    headgear: 'crown',
+    insignia: true,
+  },
+  head: {
+    id: 'dungeon-foreman',
+    label: { en: 'Hall Foreman', ru: 'Мастер зала' },
+    tunicColor: '#484D63',
+    trimColor: '#64E3CE',
+    prop: 'staff',
+    headgear: 'circlet',
+    insignia: true,
+  },
+  guard_captain: {
+    id: 'dungeon-warden',
+    label: { en: 'Gate Warden', ru: 'Начальник дозора' },
+    tunicColor: '#3B3647',
+    trimColor: '#FF8C42',
+    prop: 'staff',
+    headgear: 'helm',
+    insignia: true,
+  },
+  checker: {
+    id: 'dungeon-rune-checker',
+    label: { en: 'Rune Inspector', ru: 'Хранитель рун' },
+    tunicColor: '#525A70',
+    trimColor: '#64E3CE',
+    prop: 'scroll',
+    headgear: 'hood',
+  },
+  builder: {
+    id: 'dungeon-delver',
+    label: { en: 'Stone Delver', ru: 'Каменотес глубин' },
+    tunicColor: '#6E6962',
+    trimColor: '#D99B52',
+    prop: 'stone',
+    headgear: 'helm',
+  },
+  turnkey_specialist: {
+    id: 'dungeon-master-delver',
+    label: { en: 'Guild Artificer', ru: 'Универсал гильдии' },
+    tunicColor: '#3B5868',
+    trimColor: '#FFD166',
+    prop: 'banner',
+    headgear: 'hood',
+    insignia: true,
+  },
+  day_laborer: {
+    id: 'dungeon-drifter',
+    label: { en: 'Tunnel Drifter', ru: 'Поденщик туннелей' },
+    tunicColor: '#5C5852',
+    trimColor: '#8B857C',
+    prop: 'stone',
+    headgear: 'none',
+  },
+};
+
+const DUNGEON_CLASS_FALLBACKS: Readonly<Record<ResidentRoleClass, PackRoleLookSpec>> = {
+  ruler: DUNGEON_ROLE_LOOKS.ruler!,
+  head: DUNGEON_ROLE_LOOKS.head!,
+  checker: DUNGEON_ROLE_LOOKS.checker!,
+  executor: DUNGEON_ROLE_LOOKS.builder!,
+  turnkey: DUNGEON_ROLE_LOOKS.turnkey_specialist!,
+  day_laborer: DUNGEON_ROLE_LOOKS.day_laborer!,
+};
 
 const DUNGEON_MATERIALS: readonly GroundMaterialSpec[] = [
   {
@@ -71,6 +145,13 @@ export const DUNGEON_WORLD_PACK: WorldPackManifest = {
   defaultTileId: 'solid_rock',
   showGridByDefault: false,
   outerWallMode: 'none',
+  altarAnchor: {
+    offsetCol: -3,
+    offsetRow: 2,
+    label: { en: 'Runic Shrine', ru: 'Рунный алтарь' },
+  },
+  roleLooks: DUNGEON_ROLE_LOOKS,
+  classFallbackLooks: DUNGEON_CLASS_FALLBACKS,
   tiles: DUNGEON_TILE_KINDS.map(k => ({
     id: k.id,
     fill: k.color,

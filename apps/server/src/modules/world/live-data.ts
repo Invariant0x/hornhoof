@@ -5,17 +5,22 @@ import {
   DEFAULT_STATUE_STAGES,
   STATUE_TASKS_PER_STAGE,
   agentLevelFromAcceptedTasks,
+  classifyAgentRole,
   departmentStageFromAcceptedTasks,
   departmentStatuesFromAcceptedTasks,
+  deriveResidentLiveState,
   deriveWorldMode,
   flophouseStageFromCalls,
   goalMonumentProgress,
   houseStageFromLevel,
   machinePowerTier,
   nextLevelProgress,
+  outfitTierFromLevel,
   residenceStageFromAcceptedTasks,
   subscriptionFullness,
+  type WorldLiveActiveCall,
   type WorldLiveAgent,
+  type WorldLiveCurrentTask,
   type WorldLiveDepartment,
   type WorldLiveGoal,
   type WorldLiveMachine,
@@ -40,10 +45,16 @@ import {
   oneShotCalls,
   subscriptions,
   tasks,
+  teams,
   worldLayouts,
 } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { agentWork } from '../agents/work.js';
+import { runningCalls } from '../calls/calls.js';
 import { deptName } from '../departments/templates.js';
+import { reworkTimes } from '../org/rework.js';
+import { agentFailureStates } from '../tasks/failure-records.js';
+import { seesTask } from '../tasks/visibility.js';
 
 const MACHINE_ONLINE_WINDOW_MS = 5 * 60_000;
 
@@ -82,12 +93,16 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
     machineRows,
     nodeRows,
     deptRows,
+    teamRows,
     agentRows,
     subRows,
     goalRows,
     taskRows,
     callRows,
     layoutRows,
+    workState,
+    liveRunningCalls,
+    deptReworkMap,
   ] = await Promise.all([
     db
       .select({
@@ -119,13 +134,19 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
       .where(eq(departments.companyId, companyId))
       .orderBy(asc(departments.position), asc(departments.createdAt)),
     db
+      .select({ id: teams.id, turnkey: teams.turnkey })
+      .from(teams)
+      .where(eq(teams.companyId, companyId)),
+    db
       .select({
         id: agents.id,
         name: agents.name,
         kind: agents.kind,
+        model: agents.model,
         roleKey: agents.roleKey,
         departmentId: agents.departmentId,
         productId: agents.productId,
+        teamId: agents.teamId,
         nodeId: agents.nodeId,
         builtinMachine: agents.builtinMachine,
         subscriptionId: agents.subscriptionId,
@@ -187,6 +208,9 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
       })
       .from(worldLayouts)
       .where(eq(worldLayouts.companyId, companyId)),
+    agentWork(db, companyId),
+    runningCalls(ctx, companyId),
+    reworkTimes(db, companyId, new Date(now), access),
   ]);
 
   /* Map products to their top-level department so accepted tasks aggregate cleanly at department level. */
@@ -293,6 +317,13 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
   /* Company agents visible to this viewer (personal assistants excluded by query and knowsAgentId). */
   const visibleEmployees = agentRows.filter(a => knowsAgentId(viewer, a.id));
   const nonOrchestratorEmployees = visibleEmployees.filter(a => a.kind !== 'orchestrator');
+  const turnkeyTeamIds = new Set(teamRows.filter(t => t.turnkey).map(t => t.id));
+  const machineOnlineById = new Map(liveMachines.map(m => [m.id, m.online]));
+  const failureMap = await agentFailureStates(
+    ctx,
+    companyId,
+    visibleEmployees.map(a => a.id),
+  );
 
   const worldMode = deriveWorldMode({
     template: company.template,
@@ -303,6 +334,14 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
   const allRestingNoSubscription = worldMode === 'no_subscription';
 
   const headByDept = new Map<string, string>();
+  const deptHasSmoke = new Set<string>();
+  const deptHasStuckTask = new Set<string>();
+  for (const t of taskRows) {
+    if (t.status === 'blocked' || t.status === 'waiting') {
+      const topD = t.departmentId ? (topDeptById.get(t.departmentId) ?? t.departmentId) : null;
+      if (topD) deptHasStuckTask.add(topD);
+    }
+  }
   const defaultMachineId = liveMachines[0]?.id ?? null;
 
   const liveAgents: WorldLiveAgent[] = visibleEmployees.map(a => {
@@ -316,12 +355,59 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
     const byNode = typeof a.nodeId === 'string' ? (nodeMachineById.get(a.nodeId) ?? null) : null;
     const byBuiltin = typeof a.builtinMachine === 'string' ? (machineByNetworkId.get(a.builtinMachine) ?? null) : null;
     const resolvedMachineId = byNode ?? byBuiltin ?? defaultMachineId;
+    const machineOnline = resolvedMachineId ? (machineOnlineById.get(resolvedMachineId) ?? true) : true;
+
+    const isTurnkey = Boolean(a.teamId && turnkeyTeamIds.has(a.teamId));
+    const roleInfo = classifyAgentRole({
+      kind: a.kind as 'orchestrator' | 'head' | 'worker',
+      roleKey: a.roleKey,
+      isTurnkey,
+    });
+    const work = workState.doing({ id: a.id, subscriptionId: a.subscriptionId });
+    const hasFailedTurn = Boolean(failureMap.get(a.id)?.failure);
+    if (hasFailedTurn && topDeptId) {
+      deptHasSmoke.add(topDeptId);
+    }
+    const waitingForHuman = work.status === 'waiting';
+    if (waitingForHuman && topDeptId) {
+      deptHasStuckTask.add(topDeptId);
+    }
+    const isWorking = work.status === 'working' || work.status === 'queued';
+    const recentlyLeveledUp = !isWorking && accepted > 0 && accepted === progress.currentThreshold;
+    const liveState = deriveResidentLiveState({
+      machineOnline,
+      allRestingNoSubscription,
+      subscriptionExhausted: sub !== null && sub.exhausted,
+      hasFailedTurn,
+      waitingForHuman,
+      isWorking,
+      recentlyLeveledUp,
+    });
+
+    const visibleTask: WorldLiveCurrentTask | null =
+      work.task && seesTask(viewer, work.task)
+        ? {
+            id: work.task.id,
+            number: work.task.number,
+            title: work.task.title,
+            goalId: work.task.goalId,
+          }
+        : null;
 
     return {
       id: a.id,
       name: a.name,
       kind: a.kind as 'orchestrator' | 'head' | 'worker',
+      model: a.model,
       roleKey: a.roleKey,
+      isTurnkey,
+      roleClass: roleInfo.roleClass,
+      archetype: roleInfo.archetype,
+      outfitTier: outfitTierFromLevel(progress.level),
+      liveState,
+      currentTask: visibleTask,
+      hasRecentRework: Boolean(topDeptId && deptReworkMap.has(topDeptId) && roleInfo.inspectsStones),
+      talkingToAgentId: null,
       departmentId: topDeptId,
       machineId: resolvedMachineId,
       subscriptionId: a.subscriptionId,
@@ -334,12 +420,13 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
     };
   });
 
+  const agentById = new Map(liveAgents.map(a => [a.id, a]));
   const rawOrchestrator = liveAgents.find(a => a.kind === 'orchestrator') ?? null;
   /* Viewers who cannot open the orchestrator still see the ruler residence on the map without exposing its internal agent UUID. */
   const orchestrator = rawOrchestrator
     ? seesAgentId(viewer, rawOrchestrator.id)
       ? rawOrchestrator
-      : { ...rawOrchestrator, id: 'ruler' }
+      : { ...rawOrchestrator, id: 'ruler', currentTask: null }
     : null;
 
   const liveDepartments: WorldLiveDepartment[] = topDepts.map(d => {
@@ -354,8 +441,27 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
       statues: departmentStatuesFromAcceptedTasks(accepted, DEFAULT_STATUE_STAGES, STATUE_TASKS_PER_STAGE),
       oneShotCallsCount: callsByDept.get(d.id) ?? 0,
       headAgentId: headByDept.get(d.id) ?? null,
+      hasSmoke: deptHasSmoke.has(d.id),
+      hasStuckTask: deptHasStuckTask.has(d.id),
+      hasRecentRework: deptReworkMap.has(d.id),
     };
   });
+
+  const activeCalls: WorldLiveActiveCall[] = liveRunningCalls
+    .filter(c => knowsAgentId(viewer, c.by))
+    .map(c => {
+      const caller = agentById.get(c.by);
+      const topDeptId = c.departmentId ? (topDeptById.get(c.departmentId) ?? c.departmentId) : (caller?.departmentId ?? null);
+      return {
+        id: c.id,
+        callerAgentId: c.by,
+        departmentId: topDeptId,
+        taskNumber: c.task,
+        judge: c.judge,
+        machineId: caller?.machineId ?? defaultMachineId,
+        provider: caller?.provider ?? null,
+      };
+    });
 
   /* Top-level goals (monuments): count child goals & tasks, identify the primary company goal. */
   const topGoals = goalRows.filter(g => g.parentGoalId === null);
@@ -458,6 +564,7 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
     agents: liveAgents.filter(a => a.kind !== 'orchestrator'),
     subscriptions: liveSubscriptions,
     goals: liveGoals,
+    activeCalls,
     relocations,
     savedLayout: storedLayoutRow?.layout ?? null,
     permissions: {

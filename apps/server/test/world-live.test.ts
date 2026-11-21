@@ -10,8 +10,10 @@ import {
   nodes,
   oneShotCalls,
   people,
+  requests,
   subscriptions,
   tasks,
+  teams,
 } from '../src/db/schema.js';
 import { cancel, report } from '../src/modules/tasks/engine.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
@@ -561,5 +563,237 @@ describe('Stage 4 live read-only world API and God\'s Word relocation', () => {
     expect(rHouse.toCol).toBe(68);
     expect(rHouse.toRow).toBe(69);
     expect(rCommon.status).toBe('cancelled');
+  });
+
+  it('projects Stage 5 live resident states (working, waiting_human, turn_failed + dept smoke, machine_offline, turnkey, activeCalls) strictly read-only', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [owner] = await db.select().from(people);
+    const [plan] = await db.select().from(subscriptions).where(eq(subscriptions.companyId, company!.id));
+
+    const [onlineMac] = await db
+      .insert(machines)
+      .values({
+        companyId: company!.id,
+        personId: owner!.id,
+        machineKey: 's5-online',
+        hostname: 'online.local',
+        cores: 8,
+        memory: 32 * 1024 ** 3,
+        reportAt: new Date(),
+      })
+      .returning();
+    const [offlineMac] = await db
+      .insert(machines)
+      .values({
+        companyId: company!.id,
+        personId: owner!.id,
+        machineKey: 's5-offline',
+        hostname: 'offline.local',
+        cores: 4,
+        memory: 8 * 1024 ** 3,
+        reportAt: new Date(Date.now() - 60 * 60_000),
+      })
+      .returning();
+
+    const [onlineNode] = await db
+      .insert(nodes)
+      .values({ companyId: company!.id, machineId: onlineMac!.id, subscriptionId: plan!.id, status: 'ready' })
+      .returning();
+    const [offlineNode] = await db
+      .insert(nodes)
+      .values({ companyId: company!.id, machineId: offlineMac!.id, subscriptionId: plan!.id, status: 'ready' })
+      .returning();
+
+    const [dept] = await db
+      .insert(departments)
+      .values({ companyId: company!.id, name: 'Development', templateKey: 'development', roleCode: 'DEV', position: 1 })
+      .returning();
+    const [tkTeam] = await db
+      .insert(teams)
+      .values({ companyId: company!.id, departmentId: dept!.id, name: 'Turnkey', turnkey: true })
+      .returning();
+
+    const [builder] = await db
+      .insert(agents)
+      .values({
+        companyId: company!.id,
+        kind: 'worker',
+        name: 'Builder',
+        model: 'claude-sonnet-5-5',
+        departmentId: dept!.id,
+        subscriptionId: plan!.id,
+        nodeId: onlineNode!.id,
+        roleKey: 'DEV-ENG',
+      })
+      .returning();
+    const [waiter] = await db
+      .insert(agents)
+      .values({
+        companyId: company!.id,
+        kind: 'worker',
+        name: 'Waiter',
+        model: 'gpt-6.1-sol',
+        departmentId: dept!.id,
+        subscriptionId: plan!.id,
+        nodeId: onlineNode!.id,
+        roleKey: 'DEV-REV',
+      })
+      .returning();
+    const [failedAgent] = await db
+      .insert(agents)
+      .values({
+        companyId: company!.id,
+        kind: 'worker',
+        name: 'FailedWorker',
+        model: 'claude-opus-5-5',
+        departmentId: dept!.id,
+        subscriptionId: plan!.id,
+        nodeId: onlineNode!.id,
+        roleKey: 'DEV-BE',
+      })
+      .returning();
+    const [sleeper] = await db
+      .insert(agents)
+      .values({
+        companyId: company!.id,
+        kind: 'worker',
+        name: 'Sleeper',
+        model: 'claude-sonnet-5-5',
+        departmentId: dept!.id,
+        teamId: tkTeam!.id,
+        subscriptionId: plan!.id,
+        nodeId: offlineNode!.id,
+        roleKey: 'DEV-ENG',
+      })
+      .returning();
+
+    /* Builder running a task -> liveState 'working' + currentTask. */
+    const [workTask] = await db
+      .insert(tasks)
+      .values({
+        companyId: company!.id,
+        number: 1,
+        departmentId: dept!.id,
+        title: 'Build Stage 5',
+        status: 'working',
+        assigneeAgentId: builder!.id,
+        executorAgentId: builder!.id,
+      })
+      .returning();
+    await db.insert(jobs).values({
+      companyId: company!.id,
+      subscriptionId: plan!.id,
+      agentId: builder!.id,
+      taskId: workTask!.id,
+      kind: 'conversation',
+      prompt: 'work',
+      timeoutMs: 1000,
+      status: 'running',
+      startedAt: new Date(),
+    });
+
+    /* Waiter has an open human request -> liveState 'waiting_human'. */
+    const [waitTask] = await db
+      .insert(tasks)
+      .values({
+        companyId: company!.id,
+        number: 2,
+        departmentId: dept!.id,
+        title: 'Need CEO choice',
+        status: 'waiting',
+        assigneeAgentId: waiter!.id,
+      })
+      .returning();
+    await db.insert(requests).values({
+      companyId: company!.id,
+      taskId: waitTask!.id,
+      agentId: waiter!.id,
+      kind: 'question',
+      audience: 'human',
+      text: 'Choose option',
+      status: 'open',
+    });
+
+    /* FailedWorker's last conversation turn failed -> liveState 'turn_failed' + dept.hasSmoke = true. */
+    await db.insert(jobs).values({
+      companyId: company!.id,
+      subscriptionId: plan!.id,
+      agentId: failedAgent!.id,
+      taskId: workTask!.id,
+      kind: 'conversation',
+      prompt: 'fail',
+      timeoutMs: 1000,
+      status: 'failed',
+      failure: { kind: 'crash', text: 'Process exited', retryable: false },
+      finishedAt: new Date(),
+    });
+
+    /* Active one-shot call -> day-laborer listed in activeCalls. */
+    const [callJob] = await db
+      .insert(jobs)
+      .values({
+        companyId: company!.id,
+        subscriptionId: plan!.id,
+        agentId: builder!.id,
+        taskId: workTask!.id,
+        kind: 'call',
+        prompt: 'one-shot helper',
+        timeoutMs: 1000,
+        status: 'running',
+        startedAt: new Date(),
+      })
+      .returning();
+    await db.insert(oneShotCalls).values({
+      companyId: company!.id,
+      batch: crypto.randomUUID(),
+      number: 1,
+      jobId: callJob!.id,
+      callerAgentId: builder!.id,
+      taskId: workTask!.id,
+      departmentId: dept!.id,
+      brief: 'helper call',
+    });
+
+    const insertSpy = vi.spyOn(db, 'insert');
+    const updateSpy = vi.spyOn(db, 'update');
+    const deleteSpy = vi.spyOn(db, 'delete');
+    const res = await app.inject({ url: '/api/world/state', ...as(ceo) });
+    expect(res.statusCode).toBe(200);
+    expect(insertSpy).not.toHaveBeenCalled();
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(deleteSpy).not.toHaveBeenCalled();
+    insertSpy.mockRestore();
+    updateSpy.mockRestore();
+    deleteSpy.mockRestore();
+
+    const state = res.json();
+    const byId = new Map<string, Record<string, unknown>>(
+      state.agents.map((a: Record<string, unknown>) => [String(a.id), a]),
+    );
+    expect(byId.get(builder!.id)).toMatchObject({
+      model: 'claude-sonnet-5-5',
+      roleClass: 'executor',
+      archetype: 'builder',
+      liveState: 'working',
+      currentTask: { id: workTask!.id, number: 1, title: 'Build Stage 5' },
+    });
+    expect(byId.get(waiter!.id)).toMatchObject({
+      roleClass: 'checker',
+      liveState: 'waiting_human',
+    });
+    expect(byId.get(failedAgent!.id)).toMatchObject({
+      liveState: 'turn_failed',
+    });
+    expect(byId.get(sleeper!.id)).toMatchObject({
+      isTurnkey: true,
+      roleClass: 'turnkey',
+      liveState: 'machine_offline',
+    });
+    expect(state.departments[0].hasSmoke).toBe(true);
+    expect(state.departments[0].hasStuckTask).toBe(true);
+    expect(state.activeCalls).toHaveLength(1);
+    expect(state.activeCalls[0].callerAgentId).toBe(builder!.id);
   });
 });

@@ -1,29 +1,43 @@
-/* Stage 4 live data isometric world viewer with bilingual RU/EN UI, live Hornhoof API + built-in
-   team/empty-lot/no-subscription scenarios, pack switching (Egypt / Dungeon) and full
-   God's Word relocation confirmation workflow ("Вы действительно хотите перестроить ...? Да / Нет"). */
+/* Stage 4 + Stage 5 live data isometric world viewer with bilingual RU/EN UI, live Hornhoof API +
+   built-in team/empty-lot/no-subscription/150-resident stress scenarios, pack switching (Egypt / Dungeon),
+   God's Word relocation confirmation workflow, live animated residents across all 6 role classes and
+   7 Hornhoof states, God's Altar waiting shrine, department smoke, offline night districts,
+   home scaffolding, Agent Card with rate-limited human wake and open-agent-window link. */
 
-import type { WorldLiveSnapshot, WorldRelocationRecord } from '@hornhoof/protocol/world';
+import type {
+  ResidentLiveState,
+  ResidentRoleClass,
+  WorldLiveSnapshot,
+  WorldRelocationRecord,
+} from '@hornhoof/protocol/world';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { CityBuilding, CityState } from '../world/city-layout';
-import type { PickResult } from '../world/coords';
+import type { PickResult, TileCoord } from '../world/coords';
 import {
   canRelocateBuildingTo,
   createEmptyCompanyFixture,
   createHornhoofLiveFixture,
   createNoSubscriptionFixture,
+  createStress150LiveFixture,
   syncLiveSnapshotToCity,
   type LiveCitySummary,
   type LiveCitySyncResult,
 } from '../world/live-sync';
 import type { WorldPackManifest } from '../world/manifest';
 import { IsometricWorldEngine, type RendererDebugInfo, type WorldEngineStats } from '../world/renderer';
+import {
+  HumanWakeGate,
+  createResidentSimulation,
+  type ResidentEntity,
+  type ResidentSimulation,
+} from '../world/residents';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../world/terrain-engine';
 import { DUNGEON_WORLD_PACK } from './dungeon/pack';
 import { EGYPT_WORLD_PACK } from './egypt/pack';
 
 type PackKey = 'egypt' | 'dungeon';
-type ScenarioKey = 'hornhoof' | 'empty' | 'no_subscription' | 'live';
+type ScenarioKey = 'hornhoof' | 'stress150' | 'empty' | 'no_subscription' | 'live';
 type LangKey = 'ru' | 'en';
 
 const PACKS: Record<PackKey, WorldPackManifest> = {
@@ -33,9 +47,10 @@ const PACKS: Record<PackKey, WorldPackManifest> = {
 
 const TEXT = {
   ru: {
-    title: 'Этап 4. Живой мир',
+    title: 'Живой мир (этапы 4-5)',
     scenarios: {
       hornhoof: 'Команда Hornhoof (944 задачи)',
+      stress150: 'Стресс-тест (150 жителей)',
       empty: 'Новая компания (пустырь)',
       no_subscription: 'Шаблон без подписки',
       live: 'Сервер Hornhoof API',
@@ -55,6 +70,23 @@ const TEXT = {
       statue: 'Статуя отдела',
       flophouse: 'Ночлежка разовых вызовов',
     },
+    roleClasses: {
+      executor: 'Исполнитель',
+      checker: 'Проверяющий',
+      head: 'Глава отдела',
+      turnkey: 'Под ключ',
+      day_laborer: 'Поденщик (разовый вызов)',
+      ruler: 'Правитель (оркестратор)',
+    } as Record<ResidentRoleClass, string>,
+    liveStates: {
+      working: 'Работает',
+      idle: 'Без задачи (отдыхает у дома)',
+      upgrading_home: 'Получил уровень (строит дом в лесах)',
+      waiting_human: 'Ждет решения человека (у алтаря бога)',
+      exhausted: 'Нет подписки (молится у пустого амбара)',
+      turn_failed: 'Ход упал (сломан инструмент, дым над отделом)',
+      machine_offline: 'Машина без связи (ночь в районе, спит)',
+    } as Record<ResidentLiveState, string>,
     grid: 'Сетка стройки',
     relocateBtn: 'Перестроить по слову бога',
     relocateHint: 'Выберите свободную клетку на карте для переноса здания (ESC для отмены)',
@@ -69,6 +101,7 @@ const TEXT = {
     pendingNotice: (num: number, c: number, r: number) =>
       `Ожидает принятия задачи #${num}. Здание стоит на старом месте; цель: (${c}, ${r}).`,
     agents: 'Агенты',
+    residents: 'Жители',
     machines: 'Машины',
     subs: 'Подписки',
     tasks: 'Принято задач',
@@ -78,6 +111,23 @@ const TEXT = {
     wall: 'Стена',
     stage: 'Стадия',
     level: 'Уровень',
+    outfit: 'Наряд',
+    noLevelDayLaborer: 'Без уровня (поденщик)',
+    acceptedTasks: 'Принято задач',
+    toNextLevel: 'До след. уровня',
+    maxLevel: 'Максимум',
+    currentTask: 'Текущая задача',
+    noCurrentTask: 'Нет активной задачи',
+    department: 'Отдел',
+    cityWide: 'Весь город',
+    model: 'Модель подписки',
+    machine: 'Машина',
+    unassignedMachine: 'Не назначена',
+    wakeBtn: 'Разбудить агента',
+    wakeSent: (sec: number) => `Сигнал пробуждения отправлен (пауза ${sec} с)`,
+    wakeCooldown: (sec: number) => `Слишком часто: подождите ${sec} с`,
+    openAgentWindow: 'Открыть окно агента',
+    inspectResidentBtn: 'Карточка жителя',
     fullness: 'Наполненность',
     progress: 'Прогресс',
     reached: 'Цель достигнута (праздник)',
@@ -91,9 +141,10 @@ const TEXT = {
     assigneeOrch: 'оркестратора',
   },
   en: {
-    title: 'Stage 4. Live World',
+    title: 'Live World (Stages 4-5)',
     scenarios: {
       hornhoof: 'Hornhoof Team (944 tasks)',
+      stress150: 'Stress Test (150 residents)',
       empty: 'New Company (Empty Lot)',
       no_subscription: 'Template Without Subscription',
       live: 'Live Hornhoof API',
@@ -113,6 +164,23 @@ const TEXT = {
       statue: 'Department Statue',
       flophouse: 'One-Shot Call Lodge',
     },
+    roleClasses: {
+      executor: 'Executor',
+      checker: 'Checker',
+      head: 'Department Head',
+      turnkey: 'Turnkey Generalist',
+      day_laborer: 'Day-Laborer (One-Shot)',
+      ruler: 'Ruler (Orchestrator)',
+    } as Record<ResidentRoleClass, string>,
+    liveStates: {
+      working: 'Working',
+      idle: 'Idle (resting near home)',
+      upgrading_home: 'Leveled up (upgrading home in scaffolding)',
+      waiting_human: "Waiting on human decision (at God's Altar)",
+      exhausted: 'Out of subscription limit (praying at empty supply)',
+      turn_failed: 'Turn failed (broken tool, smoke over department)',
+      machine_offline: 'Machine offline (night district, sleeping)',
+    } as Record<ResidentLiveState, string>,
     grid: 'Build Grid',
     relocateBtn: "Relocate by God's Word",
     relocateHint: 'Click a clear tile on the map to relocate this building (ESC to cancel)',
@@ -127,6 +195,7 @@ const TEXT = {
     pendingNotice: (num: number, c: number, r: number) =>
       `Waiting on task #${num}. Building stays at old tile; destination: (${c}, ${r}).`,
     agents: 'Agents',
+    residents: 'Residents',
     machines: 'Machines',
     subs: 'Plans',
     tasks: 'Accepted',
@@ -136,6 +205,23 @@ const TEXT = {
     wall: 'Wall',
     stage: 'Stage',
     level: 'Level',
+    outfit: 'Outfit',
+    noLevelDayLaborer: 'No level (day-laborer)',
+    acceptedTasks: 'Accepted tasks',
+    toNextLevel: 'To next level',
+    maxLevel: 'Max',
+    currentTask: 'Current task',
+    noCurrentTask: 'No active task',
+    department: 'Department',
+    cityWide: 'City-wide',
+    model: 'Subscription model',
+    machine: 'Machine',
+    unassignedMachine: 'Unassigned',
+    wakeBtn: 'Wake agent',
+    wakeSent: (sec: number) => `Wake signal sent (cooldown ${sec}s)`,
+    wakeCooldown: (sec: number) => `Rate-limited: wait ${sec}s`,
+    openAgentWindow: 'Open agent window',
+    inspectResidentBtn: 'Inspect resident',
     fullness: 'Fullness',
     progress: 'Progress',
     reached: 'Goal reached (celebrating)',
@@ -161,12 +247,26 @@ type LiveWorldDebugHandle = {
   getDebugInfo: () => RendererDebugInfo | null;
   getSummary: () => LiveCitySummary | null;
   getBuildings: () => readonly CityBuilding[];
+  getResidents: () => readonly ResidentEntity[];
+  getAltarTile: () => TileCoord | null;
+  getSimFlags: () => {
+    smokingDepartments: string[];
+    stuckDepartments: string[];
+    nightDistricts: string[];
+    scaffoldingHouses: string[];
+  } | null;
   setZoom: (zoom: number) => void;
   panByScreen: (dx: number, dy: number) => void;
   flushVisibleBakes: () => void;
   centerOnBuilding: (buildingId: string, zoom?: number) => boolean;
+  centerOnResident: (residentId: string, zoom?: number) => boolean;
+  getResidentScreenPoint: (residentId: string) => { x: number; y: number } | null;
+  selectResident: (residentId: string | null) => boolean;
+  wakeResident: (agentId: string) => { allowed: boolean; remainingMs: number };
   setScenario: (scenario: ScenarioKey, pack?: PackKey) => void;
-  triggerRelocationModal: (buildingId?: string) => { buildingId: string; fromCol: number; fromRow: number; toCol: number; toRow: number } | null;
+  triggerRelocationModal: (
+    buildingId?: string,
+  ) => { buildingId: string; fromCol: number; fromRow: number; toCol: number; toRow: number } | null;
 };
 
 declare global {
@@ -180,7 +280,9 @@ function readParams(): { pack: PackKey; scenario: ScenarioKey; lang: LangKey; zo
   const pack: PackKey = sp.get('pack') === 'dungeon' ? 'dungeon' : 'egypt';
   const rawMode = sp.get('mode');
   const scenario: ScenarioKey =
-    rawMode === 'empty' || rawMode === 'no_subscription' || rawMode === 'live' ? rawMode : 'hornhoof';
+    rawMode === 'empty' || rawMode === 'no_subscription' || rawMode === 'live' || rawMode === 'stress150'
+      ? rawMode
+      : 'hornhoof';
   const lang: LangKey = sp.get('lang') === 'en' ? 'en' : 'ru';
   const zRaw = Number(sp.get('zoom') ?? '100');
   const zoom = Number.isFinite(zRaw) ? Math.max(0.5, Math.min(2.0, zRaw / 100)) : 1.0;
@@ -191,6 +293,7 @@ function readParams(): { pack: PackKey; scenario: ScenarioKey; lang: LangKey; zo
 function fixtureFor(scenario: ScenarioKey): WorldLiveSnapshot {
   if (scenario === 'empty') return createEmptyCompanyFixture();
   if (scenario === 'no_subscription') return createNoSubscriptionFixture();
+  if (scenario === 'stress150') return createStress150LiveFixture();
   return createHornhoofLiveFixture();
 }
 
@@ -204,6 +307,9 @@ function Stage4LiveWorld() {
   const [apiNotice, setApiNotice] = useState<string | null>(null);
   const [stats, setStats] = useState<WorldEngineStats | null>(null);
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
+  const [selectedResidentId, setSelectedResidentId] = useState<string | null>(null);
+  const [wakeStatus, setWakeStatus] = useState<string | null>(null);
+  const [residentsCount, setResidentsCount] = useState<number>(0);
   const [relocatingBuildingId, setRelocatingBuildingId] = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<PendingModal | null>(null);
   const [relocationSeq, setRelocationSeq] = useState<number>(945);
@@ -213,6 +319,8 @@ function Stage4LiveWorld() {
   const mapRef = useRef<GeneratedWorldMap | null>(null);
   const cityRef = useRef<CityState | null>(null);
   const syncRef = useRef<LiveCitySyncResult | null>(null);
+  const simRef = useRef<ResidentSimulation | null>(null);
+  const wakeGateRef = useRef<HumanWakeGate>(new HumanWakeGate());
   const relocatingRef = useRef<string | null>(null);
   relocatingRef.current = relocatingBuildingId;
 
@@ -223,6 +331,8 @@ function Stage4LiveWorld() {
   useEffect(() => {
     let active = true;
     setSelectedBuildingId(null);
+    setSelectedResidentId(null);
+    setWakeStatus(null);
     setRelocatingBuildingId(null);
     setConfirmModal(null);
     cityRef.current = null;
@@ -274,6 +384,9 @@ function Stage4LiveWorld() {
     const synced = syncLiveSnapshotToCity(pack, map, snapshot, null);
     cityRef.current = synced.city;
     syncRef.current = synced;
+    const sim = createResidentSimulation(pack, synced.city, snapshot);
+    simRef.current = sim;
+    setResidentsCount(sim.residents.length);
 
     void IsometricWorldEngine.create({
       host,
@@ -306,6 +419,16 @@ function Stage4LiveWorld() {
           valid,
         });
       },
+      onSelectResident: resident => {
+        if (!alive) return;
+        setWakeStatus(null);
+        if (resident) {
+          setSelectedResidentId(resident.id);
+          setSelectedBuildingId(null);
+        } else {
+          setSelectedResidentId(null);
+        }
+      },
       onSelect: (pick: PickResult | null) => {
         if (!alive) return;
         const relId = relocatingRef.current;
@@ -320,6 +443,7 @@ function Stage4LiveWorld() {
         }
         if (pick?.kind === 'object') {
           setSelectedBuildingId(pick.object.id);
+          setSelectedResidentId(null);
         } else {
           setSelectedBuildingId(null);
         }
@@ -336,6 +460,7 @@ function Stage4LiveWorld() {
         emptyLotStakes: synced.emptyLotStakes,
         districtColors: synced.districtColors,
       });
+      engine.setResidentSimulation(sim);
       engine.flushVisibleBakes();
       setStats(engine.getStats());
 
@@ -344,6 +469,17 @@ function Stage4LiveWorld() {
         getDebugInfo: () => engineRef.current?.getRendererDebugInfo() ?? null,
         getSummary: () => syncRef.current?.summary ?? null,
         getBuildings: () => cityRef.current?.buildings ?? [],
+        getResidents: () => simRef.current?.residents ?? [],
+        getAltarTile: () => simRef.current?.altarTile ?? null,
+        getSimFlags: () =>
+          simRef.current
+            ? {
+                smokingDepartments: [...simRef.current.smokingDepartmentIds],
+                stuckDepartments: [...simRef.current.stuckDepartmentIds],
+                nightDistricts: [...simRef.current.nightDistrictIds],
+                scaffoldingHouses: [...simRef.current.scaffoldingHouseIds],
+              }
+            : null,
         setZoom: z => engineRef.current?.setZoom(z),
         panByScreen: (dx, dy) => engineRef.current?.panByScreen(dx, dy),
         flushVisibleBakes: () => engineRef.current?.flushVisibleBakes(),
@@ -357,6 +493,31 @@ function Stage4LiveWorld() {
           engineRef.current.flushVisibleBakes();
           return true;
         },
+        centerOnResident: (residentId, zoom) => {
+          if (!engineRef.current) return false;
+          const ok = engineRef.current.centerOnResident(residentId, zoom);
+          if (ok) engineRef.current.flushVisibleBakes();
+          return ok;
+        },
+        getResidentScreenPoint: residentId => engineRef.current?.getResidentScreenPoint(residentId) ?? null,
+        selectResident: residentId => {
+          if (residentId === null) {
+            setSelectedResidentId(null);
+            engineRef.current?.setSelectedResidentId(null);
+            return true;
+          }
+          const found = simRef.current?.residents.find(
+            item => item.id === residentId || item.agentId === residentId,
+          );
+          if (!found) return false;
+          setSelectedBuildingId(null);
+          setSelectedResidentId(found.id);
+          setWakeStatus(null);
+          engineRef.current?.setSelectedResidentId(found.id);
+          engineRef.current?.flushVisibleBakes();
+          return true;
+        },
+        wakeResident: agentId => wakeGateRef.current.tryWake(agentId),
         setScenario: (nextScenario, nextPack) => {
           if (nextPack) setPackKey(nextPack);
           setScenario(nextScenario);
@@ -376,6 +537,7 @@ function Stage4LiveWorld() {
               const c = b.col + dc;
               const r = b.row + dr;
               if (canRelocateBuildingTo(curCity, curMap, b.id, c, r)) {
+                setSelectedResidentId(null);
                 setSelectedBuildingId(b.id);
                 setRelocatingBuildingId(b.id);
                 setBuildGrid(true);
@@ -405,7 +567,7 @@ function Stage4LiveWorld() {
     };
   }, [pack, seed]);
 
-  /* Re-sync live snapshot updates (relocations, stage changes) onto the existing city without remounting PixiJS. */
+  /* Re-sync live snapshot updates (relocations, stage changes, resident states) without remounting PixiJS. */
   const [syncResult, setSyncResult] = useState<LiveCitySyncResult | null>(null);
   useEffect(() => {
     const map = mapRef.current;
@@ -414,12 +576,16 @@ function Stage4LiveWorld() {
     cityRef.current = synced.city;
     syncRef.current = synced;
     setSyncResult(synced);
+    const sim = createResidentSimulation(pack, synced.city, snapshot);
+    simRef.current = sim;
+    setResidentsCount(sim.residents.length);
     engineRef.current?.setCityRenderState({
       city: synced.city,
       worldMode: synced.worldMode,
       emptyLotStakes: synced.emptyLotStakes,
       districtColors: synced.districtColors,
     });
+    engineRef.current?.setResidentSimulation(sim);
   }, [pack, snapshot]);
 
   /* Toggle build grid cleanly on engine. */
@@ -427,12 +593,19 @@ function Stage4LiveWorld() {
     engineRef.current?.setBuildGridVisible(buildGrid);
   }, [buildGrid]);
 
-  /* Escape cancels relocation tile pick or modal. */
+  /* Disable resident picking while selecting a relocation tile so clicks land on tiles cleanly. */
+  useEffect(() => {
+    engineRef.current?.setResidentPickingEnabled(!relocatingBuildingId);
+  }, [relocatingBuildingId]);
+
+  /* Escape cancels relocation tile pick, modal, or selected card. */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setConfirmModal(null);
         setRelocatingBuildingId(null);
+        setSelectedResidentId(null);
+        engineRef.current?.setSelectedResidentId(null);
         engineRef.current?.setRelocationPreview(null);
       }
     };
@@ -444,6 +617,36 @@ function Stage4LiveWorld() {
     if (!selectedBuildingId || !syncResult) return null;
     return syncResult.city.buildings.find(b => b.id === selectedBuildingId) ?? null;
   }, [selectedBuildingId, syncResult]);
+
+  const selectedResident = useMemo(() => {
+    if (!selectedResidentId || !simRef.current) return null;
+    return simRef.current.residents.find(r => r.id === selectedResidentId) ?? null;
+  }, [selectedResidentId, residentsCount, snapshot]);
+
+  const handleHumanWake = useCallback(
+    async (resident: ResidentEntity) => {
+      const check = wakeGateRef.current.tryWake(resident.agentId);
+      if (!check.allowed) {
+        const sec = Math.max(1, Math.ceil(check.remainingMs / 1000));
+        setWakeStatus(t.wakeCooldown(sec));
+        return;
+      }
+      if (scenario === 'live' && !apiNotice && resident.roleClass !== 'day_laborer') {
+        try {
+          await fetch(`/api/agents/${encodeURIComponent(resident.agentId)}/messages`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text: 'World map wake ping' }),
+          });
+        } catch {
+          /* Non-blocking in offline preview. */
+        }
+      }
+      setWakeStatus(t.wakeSent(60));
+    },
+    [scenario, apiNotice, t],
+  );
 
   const assigneeLabelFor = useCallback(
     (b: CityBuilding) => {
@@ -596,6 +799,7 @@ function Stage4LiveWorld() {
             }}
           >
             <option value="hornhoof">{t.scenarios.hornhoof}</option>
+            <option value="stress150">{t.scenarios.stress150}</option>
             <option value="empty">{t.scenarios.empty}</option>
             <option value="no_subscription">{t.scenarios.no_subscription}</option>
             <option value="live">{t.scenarios.live}</option>
@@ -758,7 +962,7 @@ function Stage4LiveWorld() {
             gap: 10,
             padding: '8px 12px',
             borderRadius: 10,
-            background: 'rgba(18, 16, 13, 0.84)',
+            background: 'rgba(18, 16, 13, 0.86)',
             border: '1px solid rgba(226, 200, 146, 0.25)',
             color: '#E8DEC8',
             fontSize: 12,
@@ -767,6 +971,7 @@ function Stage4LiveWorld() {
         >
           <span><strong>{summary.companyName}</strong></span>
           <span>{t.agents}: <strong>{summary.agentsCount}</strong> ({t.topLv} {summary.topAgentLevel})</span>
+          <span data-testid="world-stage5-residents-count">{t.residents}: <strong>{residentsCount}</strong></span>
           <span>{t.machines}: <strong>{summary.machinesCount}</strong></span>
           <span>{t.subs}: <strong>{summary.activeSubscriptionsCount}/{summary.subscriptionsCount}</strong></span>
           <span>{t.tasks}: <strong>{summary.acceptedTasksTotal}</strong></span>
@@ -781,8 +986,198 @@ function Stage4LiveWorld() {
         </div>
       )}
 
+      {/* Stage 5 Resident Agent Card */}
+      {selectedResident && (
+        <div
+          data-testid="world-stage5-agent-card"
+          style={{
+            position: 'fixed',
+            top: 68,
+            right: 12,
+            width: 320,
+            padding: '14px 16px',
+            borderRadius: 12,
+            background: 'rgba(18, 16, 13, 0.94)',
+            border: '1px solid rgba(243, 210, 138, 0.48)',
+            color: '#F3EAD7',
+            fontSize: 13,
+            display: 'grid',
+            gap: 8,
+            zIndex: 16,
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <span
+                  aria-label="Provider cloak color"
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: 999,
+                    background: selectedResident.cloakColor,
+                    border: '1px solid rgba(255,255,255,0.45)',
+                    display: 'inline-block',
+                  }}
+                />
+                <strong data-testid="world-stage5-agent-name" style={{ fontSize: 15, color: '#F3D28A' }}>
+                  {selectedResident.name}
+                </strong>
+              </div>
+              <div style={{ fontSize: 12, color: '#C7BBA2', marginTop: 2 }}>
+                {selectedResident.look.label[lang]} ({t.roleClasses[selectedResident.roleClass]})
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedResidentId(null);
+                setWakeStatus(null);
+                engineRef.current?.setSelectedResidentId(null);
+              }}
+              style={{
+                background: 'transparent',
+                color: '#C7BAA0',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: 12,
+              }}
+            >
+              {t.close}
+            </button>
+          </div>
+
+          <div
+            data-testid="world-stage5-agent-state"
+            style={{
+              padding: '5px 8px',
+              borderRadius: 8,
+              background:
+                selectedResident.liveState === 'working'
+                  ? 'rgba(72, 168, 108, 0.2)'
+                  : selectedResident.liveState === 'turn_failed'
+                    ? 'rgba(218, 92, 64, 0.24)'
+                    : selectedResident.liveState === 'waiting_human'
+                      ? 'rgba(235, 190, 74, 0.22)'
+                      : 'rgba(116, 152, 214, 0.2)',
+              border: '1px solid rgba(255,255,255,0.14)',
+              fontSize: 12,
+            }}
+          >
+            {t.liveStates[selectedResident.liveState]}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 12 }}>
+            <div data-testid="world-stage5-agent-level">
+              {t.level}:{' '}
+              <strong>
+                {selectedResident.level === null
+                  ? t.noLevelDayLaborer
+                  : `Lv ${selectedResident.level} (${t.outfit} ${selectedResident.outfitTier}/5)`}
+              </strong>
+            </div>
+            <div data-testid="world-stage5-agent-accepted">
+              {t.acceptedTasks}: <strong>{selectedResident.acceptedTasks}</strong>
+            </div>
+            <div data-testid="world-stage5-agent-next-level">
+              {t.toNextLevel}:{' '}
+              <strong>
+                {selectedResident.level === null
+                  ? '-'
+                  : selectedResident.nextLevelRemaining === 0
+                    ? t.maxLevel
+                    : selectedResident.nextLevelRemaining}
+              </strong>
+            </div>
+            <div data-testid="world-stage5-agent-department">
+              {t.department}: <strong>{selectedResident.departmentName ?? t.cityWide}</strong>
+            </div>
+          </div>
+
+          <div data-testid="world-stage5-agent-task" style={{ fontSize: 12, color: '#E8DEC8' }}>
+            {t.currentTask}:{' '}
+            <strong>
+              {selectedResident.currentTask
+                ? `#${selectedResident.currentTask.number} ${selectedResident.currentTask.title}`
+                : t.noCurrentTask}
+            </strong>
+          </div>
+
+          <div style={{ display: 'grid', gap: 4, fontSize: 12, color: '#D7CCB4' }}>
+            <div data-testid="world-stage5-agent-model">
+              {t.model}:{' '}
+              <strong>
+                {selectedResident.model} ({selectedResident.provider ?? 'api'})
+              </strong>
+            </div>
+            <div data-testid="world-stage5-agent-machine">
+              {t.machine}: <strong>{selectedResident.machineHostname ?? t.unassignedMachine}</strong>
+            </div>
+          </div>
+
+          {wakeStatus && (
+            <div
+              data-testid="world-stage5-wake-status"
+              style={{
+                padding: '6px 8px',
+                borderRadius: 7,
+                background: 'rgba(243, 210, 138, 0.14)',
+                border: '1px solid rgba(243, 210, 138, 0.34)',
+                fontSize: 12,
+                color: '#F7E09E',
+              }}
+            >
+              {wakeStatus}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+            {selectedResident.roleClass !== 'day_laborer' && (
+              <button
+                type="button"
+                data-testid="world-stage5-wake-btn"
+                onClick={() => void handleHumanWake(selectedResident)}
+                style={{
+                  flex: 1,
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(243, 210, 138, 0.45)',
+                  background: 'rgba(210, 162, 74, 0.24)',
+                  color: '#F7DF9E',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontSize: 12,
+                }}
+              >
+                {t.wakeBtn}
+              </button>
+            )}
+            <a
+              data-testid="world-stage5-open-agent"
+              href={`/agents/${encodeURIComponent(selectedResident.agentId)}`}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                flex: 1,
+                padding: '8px 10px',
+                borderRadius: 8,
+                border: 'none',
+                background: '#D9A648',
+                color: '#1A140B',
+                fontWeight: 700,
+                textAlign: 'center',
+                textDecoration: 'none',
+                fontSize: 12,
+              }}
+            >
+              {t.openAgentWindow}
+            </a>
+          </div>
+        </div>
+      )}
+
       {/* Right-side selected building card */}
-      {selectedBuilding && (
+      {selectedBuilding && !selectedResident && (
         <div
           data-testid="world-stage4-inspector"
           style={{
@@ -840,6 +1235,33 @@ function Stage4LiveWorld() {
           )}
           {selectedBuilding.resting && (
             <div style={{ fontSize: 12, color: '#9FC1EA' }}>{t.resting}</div>
+          )}
+
+          {selectedBuilding.kind === 'house' && selectedBuilding.entityId && (
+            <button
+              type="button"
+              onClick={() => {
+                const resident = simRef.current?.residents.find(r => r.agentId === selectedBuilding.entityId);
+                if (resident) {
+                  setSelectedBuildingId(null);
+                  setSelectedResidentId(resident.id);
+                  engineRef.current?.setSelectedResidentId(resident.id);
+                  engineRef.current?.centerOnResident(resident.id);
+                }
+              }}
+              style={{
+                padding: '7px 10px',
+                borderRadius: 8,
+                border: '1px solid rgba(154, 198, 240, 0.4)',
+                background: 'rgba(84, 134, 186, 0.24)',
+                color: '#D7ECFF',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontSize: 12,
+              }}
+            >
+              {t.inspectResidentBtn}
+            </button>
           )}
 
           {selectedBuilding.pendingRelocation ? (

@@ -7,6 +7,245 @@ import { currentLimits, type Limits, type ProviderId } from './index.js';
 export const MAX_AGENT_LEVEL = 30;
 export const STATUE_TASKS_PER_STAGE = 100;
 export const DEFAULT_STATUE_STAGES = 20;
+export const HUMAN_WAKE_COOLDOWN_MS = 60_000;
+
+export const RESIDENT_ROLE_CLASSES = [
+  'executor',
+  'checker',
+  'head',
+  'turnkey',
+  'day_laborer',
+  'ruler',
+] as const;
+export type ResidentRoleClass = (typeof RESIDENT_ROLE_CLASSES)[number];
+
+export const ROLE_ARCHETYPES = [
+  'ruler',
+  'head',
+  'guard_captain',
+  'architect',
+  'checker',
+  'builder',
+  'scribe',
+  'artisan',
+  'patrol',
+  'inspector_scout',
+  'firefighter',
+  'caravan_runner',
+  'keykeeper',
+  'machine_keeper',
+  'gate_guard',
+  'red_team',
+  'road_builder',
+  'turnkey_specialist',
+  'day_laborer',
+] as const;
+export type RoleArchetype = (typeof ROLE_ARCHETYPES)[number];
+
+export const RESIDENT_LIVE_STATES = [
+  'working',
+  'idle',
+  'upgrading_home',
+  'waiting_human',
+  'exhausted',
+  'turn_failed',
+  'machine_offline',
+] as const;
+export type ResidentLiveState = (typeof RESIDENT_LIVE_STATES)[number];
+
+/* All 75 role templates declared in templates/roles across all 11 Hornhoof department templates. */
+export const ALL_HORNHOOF_ROLE_KEYS = [
+  'BIZ-ANALYST', 'BIZ-HEAD', 'BIZ-PARTNER', 'BIZ-PM', 'BIZ-REV',
+  'DEV-ARCH', 'DEV-BE', 'DEV-DOCS', 'DEV-ENG', 'DEV-FE', 'DEV-HEAD', 'DEV-OPS', 'DEV-PERF', 'DEV-PM', 'DEV-QA', 'DEV-RED', 'DEV-REV', 'DEV-SEC', 'DEV-TEST',
+  'DSN-HEAD', 'DSN-PM', 'DSN-QA', 'DSN-SYS', 'DSN-UI',
+  'FIN-AUDIT', 'FIN-BOOK', 'FIN-FPA', 'FIN-HEAD', 'FIN-PM',
+  'HHD-BILLS', 'HHD-CAL', 'HHD-HEAD', 'HHD-PM', 'HHD-SUPPLY',
+  'HOM-HEAD', 'HOM-NET', 'HOM-PM', 'HOM-SMART',
+  'MKT-EDIT', 'MKT-HEAD', 'MKT-PM', 'MKT-SEO', 'MKT-SOCIAL', 'MKT-WRITE',
+  'OPS-ACCT', 'OPS-BUGS', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PM', 'OPS-PROGRAM', 'OPS-WATCH',
+  'SAL-AE', 'SAL-HEAD', 'SAL-OPS', 'SAL-PM', 'SAL-REV', 'SAL-SDR',
+  'SUP-HEAD', 'SUP-KB', 'SUP-PM', 'SUP-QA', 'SUP-T1', 'SUP-T2',
+  'VID-BOARD', 'VID-COLOR', 'VID-EDIT', 'VID-GEN', 'VID-HEAD', 'VID-KEEP', 'VID-PM', 'VID-QA', 'VID-REF', 'VID-SOUND', 'VID-WRITE',
+] as const;
+export type HornhoofRoleKey = (typeof ALL_HORNHOOF_ROLE_KEYS)[number];
+
+export type RoleClassification = Readonly<{
+  roleClass: ResidentRoleClass;
+  archetype: RoleArchetype;
+  carriesStones: boolean;
+  inspectsStones: boolean;
+}>;
+
+const ROLE_EXACT_MAP: Readonly<Record<string, { roleClass: ResidentRoleClass; archetype: RoleArchetype }>> = {
+  /* Operations: security, reliability, accounts, integrations and machine tenders. */
+  'OPS-HEAD': { roleClass: 'head', archetype: 'guard_captain' },
+  'OPS-WATCH': { roleClass: 'executor', archetype: 'patrol' },
+  'OPS-BUGS': { roleClass: 'checker', archetype: 'inspector_scout' },
+  'OPS-FIX': { roleClass: 'executor', archetype: 'firefighter' },
+  'OPS-INTEG': { roleClass: 'executor', archetype: 'caravan_runner' },
+  'OPS-ACCT': { roleClass: 'executor', archetype: 'keykeeper' },
+  'OPS-PROGRAM': { roleClass: 'executor', archetype: 'machine_keeper' },
+  'OPS-PM': { roleClass: 'executor', archetype: 'scribe' },
+
+  /* Development: builders, architects, reviewers, testers, security and release engineers. */
+  'DEV-HEAD': { roleClass: 'head', archetype: 'head' },
+  'DEV-ARCH': { roleClass: 'executor', archetype: 'architect' },
+  'DEV-ENG': { roleClass: 'executor', archetype: 'builder' },
+  'DEV-BE': { roleClass: 'executor', archetype: 'builder' },
+  'DEV-FE': { roleClass: 'executor', archetype: 'builder' },
+  'DEV-PERF': { roleClass: 'executor', archetype: 'builder' },
+  'DEV-OPS': { roleClass: 'executor', archetype: 'road_builder' },
+  'DEV-DOCS': { roleClass: 'executor', archetype: 'scribe' },
+  'DEV-PM': { roleClass: 'executor', archetype: 'scribe' },
+  'DEV-REV': { roleClass: 'checker', archetype: 'checker' },
+  'DEV-TEST': { roleClass: 'checker', archetype: 'checker' },
+  'DEV-QA': { roleClass: 'checker', archetype: 'checker' },
+  'DEV-SEC': { roleClass: 'checker', archetype: 'gate_guard' },
+  'DEV-RED': { roleClass: 'checker', archetype: 'red_team' },
+
+  /* Design. */
+  'DSN-HEAD': { roleClass: 'head', archetype: 'head' },
+  'DSN-UI': { roleClass: 'executor', archetype: 'artisan' },
+  'DSN-SYS': { roleClass: 'executor', archetype: 'artisan' },
+  'DSN-PM': { roleClass: 'executor', archetype: 'scribe' },
+  'DSN-QA': { roleClass: 'checker', archetype: 'checker' },
+
+  /* Marketing. */
+  'MKT-HEAD': { roleClass: 'head', archetype: 'head' },
+  'MKT-WRITE': { roleClass: 'executor', archetype: 'scribe' },
+  'MKT-SEO': { roleClass: 'executor', archetype: 'scribe' },
+  'MKT-SOCIAL': { roleClass: 'executor', archetype: 'caravan_runner' },
+  'MKT-PM': { roleClass: 'executor', archetype: 'scribe' },
+  'MKT-EDIT': { roleClass: 'checker', archetype: 'checker' },
+
+  /* Video production: relief carvers, storyboarders, writers and reviewers. */
+  'VID-HEAD': { roleClass: 'head', archetype: 'head' },
+  'VID-WRITE': { roleClass: 'executor', archetype: 'scribe' },
+  'VID-BOARD': { roleClass: 'executor', archetype: 'artisan' },
+  'VID-COLOR': { roleClass: 'executor', archetype: 'artisan' },
+  'VID-EDIT': { roleClass: 'executor', archetype: 'artisan' },
+  'VID-GEN': { roleClass: 'executor', archetype: 'artisan' },
+  'VID-KEEP': { roleClass: 'executor', archetype: 'artisan' },
+  'VID-REF': { roleClass: 'executor', archetype: 'artisan' },
+  'VID-SOUND': { roleClass: 'executor', archetype: 'artisan' },
+  'VID-PM': { roleClass: 'executor', archetype: 'scribe' },
+  'VID-QA': { roleClass: 'checker', archetype: 'checker' },
+
+  /* Sales, Business Development, Support, Finance, Home Devices and Household. */
+  'SAL-HEAD': { roleClass: 'head', archetype: 'head' },
+  'SAL-AE': { roleClass: 'executor', archetype: 'caravan_runner' },
+  'SAL-SDR': { roleClass: 'executor', archetype: 'caravan_runner' },
+  'SAL-OPS': { roleClass: 'executor', archetype: 'keykeeper' },
+  'SAL-PM': { roleClass: 'executor', archetype: 'scribe' },
+  'SAL-REV': { roleClass: 'checker', archetype: 'checker' },
+
+  'BIZ-HEAD': { roleClass: 'head', archetype: 'head' },
+  'BIZ-ANALYST': { roleClass: 'executor', archetype: 'scribe' },
+  'BIZ-PARTNER': { roleClass: 'executor', archetype: 'caravan_runner' },
+  'BIZ-PM': { roleClass: 'executor', archetype: 'scribe' },
+  'BIZ-REV': { roleClass: 'checker', archetype: 'checker' },
+
+  'SUP-HEAD': { roleClass: 'head', archetype: 'head' },
+  'SUP-T1': { roleClass: 'executor', archetype: 'firefighter' },
+  'SUP-T2': { roleClass: 'executor', archetype: 'firefighter' },
+  'SUP-KB': { roleClass: 'executor', archetype: 'scribe' },
+  'SUP-PM': { roleClass: 'executor', archetype: 'scribe' },
+  'SUP-QA': { roleClass: 'checker', archetype: 'checker' },
+
+  'FIN-HEAD': { roleClass: 'head', archetype: 'head' },
+  'FIN-BOOK': { roleClass: 'executor', archetype: 'keykeeper' },
+  'FIN-FPA': { roleClass: 'executor', archetype: 'scribe' },
+  'FIN-PM': { roleClass: 'executor', archetype: 'scribe' },
+  'FIN-AUDIT': { roleClass: 'checker', archetype: 'checker' },
+
+  'HOM-HEAD': { roleClass: 'head', archetype: 'head' },
+  'HOM-NET': { roleClass: 'executor', archetype: 'machine_keeper' },
+  'HOM-SMART': { roleClass: 'executor', archetype: 'machine_keeper' },
+  'HOM-PM': { roleClass: 'executor', archetype: 'scribe' },
+
+  'HHD-HEAD': { roleClass: 'head', archetype: 'head' },
+  'HHD-SUPPLY': { roleClass: 'executor', archetype: 'keykeeper' },
+  'HHD-BILLS': { roleClass: 'executor', archetype: 'scribe' },
+  'HHD-CAL': { roleClass: 'executor', archetype: 'scribe' },
+  'HHD-PM': { roleClass: 'executor', archetype: 'scribe' },
+};
+
+/* Maps any Hornhoof agent to its canonical Stage 5 behavior class and archetype.
+   Enforces hard invariants: heads and rulers never carry stones; checkers inspect and can return stones. */
+export function classifyAgentRole(input: Readonly<{
+  kind: 'orchestrator' | 'head' | 'worker';
+  roleKey: string | null;
+  isTurnkey: boolean;
+}>): RoleClassification {
+  if (input.kind === 'orchestrator') {
+    return { roleClass: 'ruler', archetype: 'ruler', carriesStones: false, inspectsStones: false };
+  }
+  const normalized = (input.roleKey ?? '').trim().toUpperCase();
+  if (input.kind === 'head' || normalized.endsWith('-HEAD')) {
+    const archetype: RoleArchetype = normalized === 'OPS-HEAD' ? 'guard_captain' : 'head';
+    return { roleClass: 'head', archetype, carriesStones: false, inspectsStones: false };
+  }
+  if (input.isTurnkey) {
+    return { roleClass: 'turnkey', archetype: 'turnkey_specialist', carriesStones: true, inspectsStones: false };
+  }
+  const exact = ROLE_EXACT_MAP[normalized];
+  if (exact) {
+    return {
+      roleClass: exact.roleClass,
+      archetype: exact.archetype,
+      carriesStones: exact.roleClass === 'executor',
+      inspectsStones: exact.roleClass === 'checker',
+    };
+  }
+  if (/(?:-REV|-TEST|-QA|-AUDIT|-EDIT|-CRITIC)$/.test(normalized)) {
+    return { roleClass: 'checker', archetype: 'checker', carriesStones: false, inspectsStones: true };
+  }
+  if (/-ARCH$/.test(normalized)) {
+    return { roleClass: 'executor', archetype: 'architect', carriesStones: true, inspectsStones: false };
+  }
+  if (/-SEC$/.test(normalized)) {
+    return { roleClass: 'checker', archetype: 'gate_guard', carriesStones: false, inspectsStones: true };
+  }
+  if (/-RED$/.test(normalized)) {
+    return { roleClass: 'checker', archetype: 'red_team', carriesStones: false, inspectsStones: true };
+  }
+  if (/-WRITE$|-DOCS$/.test(normalized)) {
+    return { roleClass: 'executor', archetype: 'scribe', carriesStones: true, inspectsStones: false };
+  }
+  if (normalized.startsWith('VID-') || normalized.startsWith('DSN-')) {
+    return { roleClass: 'executor', archetype: 'artisan', carriesStones: true, inspectsStones: false };
+  }
+  return { roleClass: 'executor', archetype: 'builder', carriesStones: true, inspectsStones: false };
+}
+
+/* Maps canonical level (1..30) onto visual outfit progression tiers (1..5). */
+export function outfitTierFromLevel(level: number): 1 | 2 | 3 | 4 | 5 {
+  const l = Math.max(1, Math.min(MAX_AGENT_LEVEL, Math.floor(level)));
+  if (l >= 18) return 5;
+  if (l >= 10) return 4;
+  if (l >= 6) return 3;
+  if (l >= 3) return 2;
+  return 1;
+}
+
+/* Derives one of the 7 canonical live resident states purely from real Hornhoof runtime facts. */
+export function deriveResidentLiveState(input: Readonly<{
+  machineOnline: boolean;
+  allRestingNoSubscription: boolean;
+  subscriptionExhausted: boolean;
+  hasFailedTurn: boolean;
+  waitingForHuman: boolean;
+  isWorking: boolean;
+  recentlyLeveledUp: boolean;
+}>): ResidentLiveState {
+  if (!input.machineOnline) return 'machine_offline';
+  if (input.allRestingNoSubscription || input.subscriptionExhausted) return 'exhausted';
+  if (input.hasFailedTurn) return 'turn_failed';
+  if (input.waitingForHuman) return 'waiting_human';
+  if (input.isWorking) return 'working';
+  if (input.recentlyLeveledUp) return 'upgrading_home';
+  return 'idle';
+}
 
 export const WORLD_BUILDING_KINDS = [
   'residence',
@@ -343,13 +582,32 @@ export type WorldLiveDepartment = Readonly<{
   statues: readonly DepartmentStatueProgress[];
   oneShotCallsCount: number;
   headAgentId: string | null;
+  hasSmoke?: boolean;
+  hasStuckTask?: boolean;
+  hasRecentRework?: boolean;
+}>;
+
+export type WorldLiveCurrentTask = Readonly<{
+  id: string;
+  number: number;
+  title: string;
+  goalId: string | null;
 }>;
 
 export type WorldLiveAgent = Readonly<{
   id: string;
   name: string;
   kind: 'orchestrator' | 'head' | 'worker';
+  model?: string;
   roleKey: string | null;
+  isTurnkey?: boolean;
+  roleClass?: ResidentRoleClass;
+  archetype?: RoleArchetype;
+  outfitTier?: 1 | 2 | 3 | 4 | 5;
+  liveState?: ResidentLiveState;
+  currentTask?: WorldLiveCurrentTask | null;
+  hasRecentRework?: boolean;
+  talkingToAgentId?: string | null;
   departmentId: string | null;
   machineId: string | null;
   subscriptionId: string | null;
@@ -359,6 +617,16 @@ export type WorldLiveAgent = Readonly<{
   houseStage: number;
   nextLevelRemaining: number;
   resting: boolean;
+}>;
+
+export type WorldLiveActiveCall = Readonly<{
+  id: string;
+  callerAgentId: string;
+  departmentId: string | null;
+  taskNumber: number;
+  judge: boolean;
+  machineId: string | null;
+  provider: ProviderId | null;
 }>;
 
 export type WorldLiveSubscription = Readonly<{
@@ -437,6 +705,7 @@ export type WorldLiveSnapshot = Readonly<{
   agents: readonly WorldLiveAgent[];
   subscriptions: readonly WorldLiveSubscription[];
   goals: readonly WorldLiveGoal[];
+  activeCalls?: readonly WorldLiveActiveCall[];
   relocations: readonly WorldRelocationRecord[];
   savedLayout: Record<string, unknown> | null;
   permissions: Readonly<{
