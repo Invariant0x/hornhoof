@@ -7,6 +7,7 @@ import { agentGit } from '../task-copies.js';
 import { checkTemp } from './clean.js';
 import { workingCopies } from './copies.js';
 import { DiskKeeper, type Disk } from './keeper.js';
+import { recordings } from './recordings.js';
 import { diskSettings } from './state.js';
 
 /* How often a node looks after its disk, and how long after it starts it first does. */
@@ -56,7 +57,7 @@ export function startDiskCare({ dir, owner, env = process.env, checking, log, di
   const keeper = new DiskKeeper({
     disk,
     settings: diskSettings(env),
-    cleaners: [checkTemp(dir, checking), workingCopies({ dir, git: agentGit(join(dir, 'work'), owner), tasks: () => tasks })],
+    cleaners: [checkTemp(dir, checking), workingCopies({ dir, git: agentGit(join(dir, 'work'), owner), tasks: () => tasks }), recordings(dir)],
     log,
   });
   let running: Promise<void> | null = null;

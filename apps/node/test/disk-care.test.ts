@@ -46,6 +46,7 @@ describe("a node's disk care", () => {
     expect(disk.report()).toBeUndefined();
     await disk.pass();
     expect(disk.report()).toMatchObject({ total: 100 * GIB, free: 50 * GIB, threshold: 20 * GIB, low: null });
+    expect(Object.keys(disk.report()!.parts).sort()).toEqual(['checkTemp', 'recordings', 'workingCopies']);
   });
 
   it('runs one pass at a time', async () => {
