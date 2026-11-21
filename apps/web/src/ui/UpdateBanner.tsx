@@ -3,6 +3,7 @@ import { errorText, Phrase, useLanguage, useT } from '../i18n';
 import type { UpdateCalledOff, UpdatesView, UpdateWaiting } from '../types';
 import type { Updates } from '../updates';
 import { useConfirmAction } from './ConfirmAction';
+import { useBarFold } from './shellBars';
 import { UpdateProgress } from './UpdateProgress';
 import { buildText, versionText } from './VersionMark';
 import { updateTargetText, versionedStatus } from './UpdateVersion';
@@ -92,6 +93,7 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
   const [, rerender] = useState(0);
   const [failure, setFailure] = useState<unknown>(null);
   const confirmation = useConfirmAction();
+  const fold = useBarFold();
   const showingProgress = showsUpdate(updates);
   const cutReturn = useCutFocusReturn(updates, showingProgress);
   useLayoutEffect(() => {
@@ -163,8 +165,9 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
   }
   if (!body) return null;
   return (
-    <div className="update-banner glass" role="status" aria-label={t.updates.label}>
+    <div className={fold.className} role="status" aria-label={t.updates.label}>
       {body}
+      {fold.more}
       {confirmation.question}
       {failure !== null && <p className="update-error" role="alert" dir="auto">{errorText(t, failure)}</p>}
     </div>

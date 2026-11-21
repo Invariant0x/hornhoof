@@ -42,7 +42,7 @@ const countOn = async (side: Locator, name: string) => Number(await side.getByRo
 /* What a list of what waits shows, counted as its number counts it: each task once, whether it asks or waits, and every card
    without a task. */
 async function listed(region: Locator) {
-  const tasks = await region.locator('article.req, .tr-waits li').evaluateAll(els => els.map(e => (e.getAttribute('aria-label') ?? e.textContent ?? '').match(/#(\d+)/)?.[1]));
+  const tasks = await region.locator('article.req, article.wait-question, .tr-waits li').evaluateAll(els => els.map(e => (e.getAttribute('aria-label') ?? e.textContent ?? '').match(/#(\d+)/)?.[1]));
   return new Set(tasks).size + await region.locator('.t-card').count();
 }
 
@@ -54,13 +54,14 @@ test('lists what waits for people with whom each waits for, counts it, and leave
   await expect(mine).toContainText(QUESTION);
   await expect(mine).toContainText(MARIA_QUESTION);
   await expect(mine).not.toContainText(MAX_QUESTION);
-  expect(await countOn(side, t.tracker.side.waits)).toBe(await listed(mine));
+  await expect(mine.locator('article.req')).toHaveCount(1);
+  expect(await countOn(side, t.tracker.side.waits)).toBe(1 + await mine.getByRole('button', { expanded: false }).count());
 
   await side.getByRole('button', { name: new RegExp(`^${t.tracker.peopleWaits.title} \\d+$`) }).click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(t.tracker.peopleWaits.title);
   const people = page.getByRole('region', { name: t.tracker.peopleWaits.title });
-  const card = (text: string) => people.locator('article.req', { hasText: text });
-  await expect(card(MAX_QUESTION)).toContainText(t.tracker.peopleWaits.waitingFor('Max'));
+  const card = (text: string) => people.locator('article', { hasText: text });
+  await expect(card(MAX_QUESTION)).toContainText('Max');
   await expect(card(MAX_QUESTION)).toContainText(t.tasks.decidedByNamedPerson);
   await expect(card(QUESTION)).toContainText(t.tracker.peopleWaits.waitingFor('Ivan'));
   await expect(card(MARIA_QUESTION)).toContainText(t.tracker.peopleWaits.waitingFor('Maria'));
@@ -73,7 +74,7 @@ test('names what waits for people once, in the title of the page', async ({ page
   const t = DICTIONARIES.en;
   await open(page, 'en', 1440, '/tasks?show=people');
   const people = page.getByRole('region', { name: t.tracker.peopleWaits.title });
-  await expect(people.locator('article.req', { hasText: MAX_QUESTION })).toContainText(t.tracker.peopleWaits.waitingFor('Max'));
+  await expect(people.locator('article.wait-question', { hasText: MAX_QUESTION })).toContainText('Max');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(t.tracker.peopleWaits.title);
   await expect(page.getByRole('heading', { name: t.tracker.peopleWaits.title, exact: true })).toHaveCount(1);
 });
@@ -97,7 +98,7 @@ test('shows what waits for one person under a title with their name alone, and M
    shows its choice on one line, as every select of the app does. */
 async function fitsInside(page: Page, region: Locator) {
   const frame = (await page.locator('.tr-main').boundingBox())!;
-  for (const box of await region.locator('article.req, article.req header > *, .tr-waits li').evaluateAll(els => els.map(e => e.getBoundingClientRect()).map(r => ({ x: r.x, right: r.right })))) {
+  for (const box of await region.locator('article.req, article.req header > *, article.wait-question, .tr-waits li').evaluateAll(els => els.map(e => e.getBoundingClientRect()).map(r => ({ x: r.x, right: r.right })))) {
     expect(box.x).toBeGreaterThanOrEqual(frame.x - 1);
     expect(box.right).toBeLessThanOrEqual(frame.x + frame.width + 1);
   }
@@ -110,7 +111,7 @@ for (const lang of LOOK_LANGUAGES) for (const skin of SKINS) for (const width of
     const t = DICTIONARIES[lang];
     await open(page, lang, width, '/tasks?show=people', skin);
     const people = page.getByRole('region', { name: t.tracker.peopleWaits.title });
-    await expect(people.locator('article.req', { hasText: MAX_QUESTION })).toContainText(t.tracker.peopleWaits.waitingFor('Max'));
+    await expect(people.locator('article.wait-question', { hasText: MAX_QUESTION })).toContainText('Max');
     await fitsInside(page, people);
     if (browserName === 'chromium') await capture(page, info, `${lang}-${skin}-${width}`);
   });

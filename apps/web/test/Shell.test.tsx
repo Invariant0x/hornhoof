@@ -38,7 +38,7 @@ describe('Shell', () => {
     expect(screen.getAllByRole('button').filter(b => b.closest('nav')).map(b => b.textContent)).toEqual(['Map', 'Tasks', 'People', 'Subscriptions & API', 'Machines']);
     /* Tabs stand apart by a line at their start, on the right in a right-to-left language. */
     expect(decl('.tabs button + button', 'border-inline-start')).toBe('1px solid var(--line)');
-    expect(decl('.tabs button.on', 'background')).toBe('var(--glow)');
+    expect(decl('.tabs button.on', 'background')).toBe('linear-gradient(var(--glow), var(--glow)) var(--surface)');
     await user.click(screen.getByRole('button', { name: 'Subscriptions & API' }));
     expect(await screen.findByRole('heading', { name: 'Subscriptions & API' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Subscriptions & API' })).toHaveAttribute('aria-current', 'page');
