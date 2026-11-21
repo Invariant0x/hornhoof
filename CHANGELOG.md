@@ -20,6 +20,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Added
 
 - Each node looks after its disk every ten minutes: it removes what can come back (left-over check files, the working copies of finished tasks once everything in them is on GitHub and all they ignore is dependencies, builds, caches or test output, the installed dependencies of those that stay, and terminal recordings a stopped node left), reports its disk and Hornhoof's share by part, and while it is still short of space takes no new checks or builds, with the reason; turns go on. The threshold is the larger of a share of the disk and an amount, 10% and 20 GB by default (`HORNHOOF_DISK_SHARE`, `HORNHOOF_DISK_GB`). Unsaved work and files git ignores that no remote has are never touched and are named in the report.
+- Each machine's updater cleans Hornhoof's own Docker leftovers once an hour outside active updates: old Hornhoof images (keeping the two newest per repository and any image in use, without force), day-old leftover test stands (`hornhoof.lab`) and stale port-lock containers, and Docker build cache unused for 72 hours when Docker's disk is low or the cache exceeds its limit (10% or 10 GB by default). Node volumes, database volumes and non-Hornhoof resources are never touched. The updater hands Hornhoof's Docker sizes and recent removals to each running node to include in its disk report.
 
 ## [0.40.0] - 2026-11-20
 

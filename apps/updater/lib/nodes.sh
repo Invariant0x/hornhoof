@@ -343,6 +343,7 @@ nodes_mode() {
     nodes_look "$1" "$2" "$3" || code=1
     rm -rf "$WORK"
     if [ "${4:-}" = --once ]; then exit "$code"; fi
+    disk_care || printf 'Could not look after the Docker disk.\n'
     if [ "$code" = 0 ]; then sleep "$NODES_EVERY"; else sleep "$NODES_BACKOFF"; fi
   done
 }

@@ -6,6 +6,7 @@ import type { JobUser } from '../isolation.js';
 import { agentGit } from '../task-copies.js';
 import { checkTemp } from './clean.js';
 import { workingCopies } from './copies.js';
+import { readDockerDisk } from './docker.js';
 import { DiskKeeper, type Disk } from './keeper.js';
 import { recordings } from './recordings.js';
 import { diskSettings } from './state.js';
@@ -58,6 +59,7 @@ export function startDiskCare({ dir, owner, env = process.env, checking, log, di
     disk,
     settings: diskSettings(env),
     cleaners: [checkTemp(dir, checking), workingCopies({ dir, git: agentGit(join(dir, 'work'), owner), tasks: () => tasks }), recordings(dir)],
+    docker: () => readDockerDisk(dir),
     log,
   });
   let running: Promise<void> | null = null;

@@ -1,5 +1,6 @@
-import { DISK_IGNORED_MAX, DISK_KEPT_MAX, DiskReport } from '@hornhoof/protocol';
+import { DISK_CLEANED_MAX, DISK_IGNORED_MAX, DISK_KEPT_MAX, DiskReport } from '@hornhoof/protocol';
 import type { Cleaner, Stay } from './clean.js';
+import type { DockerDisk } from './docker.js';
 import { DiskCleaned, DiskLow, diskThreshold, type DiskSettings, type Removal } from './state.js';
 
 export type Disk = { total: number; free: number };
@@ -9,6 +10,8 @@ type Options = {
   disk: () => Disk | null | Promise<Disk | null>;
   settings: DiskSettings;
   cleaners: Cleaner[];
+  /* Docker figures handed to the node by the machine's updater; null when absent or stale. */
+  docker?: () => DockerDisk | null | Promise<DockerDisk | null>;
   now?: () => Date;
   log?: (line: string) => void;
 };
@@ -55,7 +58,15 @@ export class DiskKeeper {
     this.removed.add(removals, at);
     const disk = await this.options.disk();
     if (!disk) return (this.last = null);
-    const parts: DiskReport['parts'] = {};
+    const docker = this.options.docker
+      ? await Promise.resolve()
+          .then(() => this.options.docker!())
+          .catch((err: unknown) => {
+            log(`Could not read Docker disk figures: ${why(err)}`);
+            return null;
+          })
+      : null;
+    const parts: DiskReport['parts'] = { ...(docker?.parts ?? {}) };
     for (const cleaner of cleaners) {
       try {
         parts[cleaner.part] = await cleaner.size();
@@ -65,6 +76,9 @@ export class DiskKeeper {
     }
     const free = Math.min(disk.free, disk.total), threshold = diskThreshold(disk.total, settings);
     const low = this.lowState.after([{ free, threshold }], at);
+    const cleaned = [...this.removed.list(at), ...(docker?.cleaned ?? [])]
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+      .slice(0, DISK_CLEANED_MAX);
     const kept = cleaners
       .flatMap(c => (c.kept?.() ?? []).flatMap(stay => {
         const fit = fitted(stay);
@@ -72,7 +86,7 @@ export class DiskKeeper {
       }))
       .sort((a, b) => b.bytes - a.bytes)
       .slice(0, DISK_KEPT_MAX);
-    const report: DiskReport = { total: disk.total, free, threshold, parts, low, cleaned: this.removed.list(at), kept };
+    const report: DiskReport = { total: disk.total, free, threshold, parts, low, cleaned, kept };
     /* The server drops a report it cannot read whole, and with it low and what went: what stays goes first instead. */
     if (!DiskReport.safeParse(report).success) {
       log('The disk report could not carry what stays; it goes without it.');
