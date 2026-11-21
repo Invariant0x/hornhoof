@@ -104,13 +104,17 @@ function TaskQuestionsSection({ requests }: { requests: TaskDetail['requests'] }
 }
 
 /* Where the task belongs: the goals above it, from the company's, each with the goal's mark, and the task it is part of, each
-   followed by the mark that leads on to the card itself. Each opens its own card. */
-export function CardPath({ goals, parent, onOpenGoal, onOpen }: { goals: { id: string; title: string }[]; parent?: { id: string; number: number; title: string } | null; onOpenGoal?: (id: string) => void; onOpen: (id: string) => void }) {
+   followed by the mark that leads on to the card itself. Each opens its own card. When held is true and the goals have not
+   come yet, an idle bar keeps the path row's place so the title stays fixed when they arrive. */
+export function CardPath({ goals, parent, held, onOpenGoal, onOpen }: { goals: { id: string; title: string }[]; parent?: { id: string; number: number; title: string } | null; held?: boolean; onOpenGoal?: (id: string) => void; onOpen: (id: string) => void }) {
   const t = useT();
-  if (!goals.length && !parent) return null;
+  const holding = Boolean(held && !goals.length);
+  const shown = goals.length > 0 || Boolean(parent);
+  if (!shown && !holding) return null;
   return (
-    <nav className="tp-path" aria-label={t.tracker.card.path}>
+    <nav className="tp-path" aria-label={shown ? t.tracker.card.path : undefined} aria-hidden={shown ? undefined : true}>
       <ol>
+        {holding && <li className="tp-path-held" aria-hidden="true"><Idle w="12ch" /></li>}
         {goals.map(g => (
           <li key={g.id}>{onOpenGoal ? <button className="linkish tp-goal" type="button" dir="auto" onClick={() => onOpenGoal(g.id)}>{g.title}</button> : <span className="tp-goal" dir="auto">{g.title}</span>}</li>
         ))}
@@ -295,12 +299,22 @@ export function goalChain(id: string | null | undefined, goals: GoalView[] | und
   return graphPath({ goal: id }, goals ?? [], []);
 }
 
+/* What a task's path shows for its goal: the full chain once goals came, nothing while they are still coming so the held
+   bar keeps the row, or the task's own goal when goals failed or omitted it. */
+export function taskGoalPath(goal: TaskLine['goal'], goals: GoalView[] | undefined, failed = false): { id: string; title: string }[] {
+  if (!goal) return [];
+  if (goals === undefined) return failed ? [goal] : [];
+  const chain = goalChain(goal.id, goals);
+  return chain.length ? chain : [goal];
+}
+
 type View = 'menu' | 'details' | 'log' | 'edit' | 'comment' | 'cancel' | 'pause' | 'secret';
 
-function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: { task: TaskDetail; onOpen: (id: string) => void; onClose: () => void; active: boolean; onChanged: () => void; waiting: Waiting; leads: Leads }) {
+function TaskBody({ task, goals, goalsFailed, onOpen, onClose, active, onChanged, waiting, leads }: {
+  task: TaskDetail; goals: GoalView[] | undefined; goalsFailed: boolean; onOpen: (id: string) => void; onClose: () => void; active: boolean; onChanged: () => void; waiting: Waiting; leads: Leads;
+}) {
   const t = useT();
   const { org } = useOrg();
-  const { goals } = useGoals(!!task.goal);
   const [view, setView] = useState<View | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const selection = useRef('');
@@ -323,7 +337,13 @@ function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: 
   return (
     <>
       <header className="tp-head">
-        <CardPath goals={goalChain(task.goal?.id, goals)} parent={task.parent} onOpenGoal={leads.onOpenGoal} onOpen={onOpen} />
+        <CardPath
+          goals={taskGoalPath(task.goal, goals, goalsFailed)}
+          parent={task.parent}
+          held={Boolean(task.goal && goals === undefined && !goalsFailed)}
+          onOpenGoal={leads.onOpenGoal}
+          onOpen={onOpen}
+        />
         <p className="tp-kind">{task.parentId || task.parent ? words.kinds.subtask : words.kinds.task}</p>
         <div className="tp-title">
           <h2 className="tp-heading" dir="auto">{task.title}</h2>
@@ -506,7 +526,7 @@ function HeldTask({ line, load, asksYou, onGraph }: { line: TaskLine; load: Load
   return (
     <>
       <header className="tp-head">
-        {(line.goal || line.parentId) && <nav className="tp-path" aria-hidden="true"><ol><li className="tp-path-held"><Idle w="12ch" /></li></ol></nav>}
+        {(line.goal || line.parentId) && <CardPath goals={[]} held onOpen={() => {}} />}
         <p className="tp-kind">{line.parentId ? words.kinds.subtask : words.kinds.task}</p>
         <div className="tp-title"><h2 className="tp-heading" dir="auto">{line.title}</h2><span className="tp-menu-button" aria-hidden="true" /></div>
         <p className="tp-state"><StatusPill state={STATE_CLASS[status]}>{t.tracker.groups[status]}</StatusPill></p>
@@ -553,13 +573,14 @@ export function TaskPanel({ taskId, kind, onClose, onOpen, onHome, onOpenGoal, o
   const failure = useLoadFailure(readFailure);
   const taskLoad = useLoad([{ data: task, failure: readFailure, load, cancel }]);
   const line = task ?? knownLine(taskId);
+  const { goals, failure: goalsFailure } = useGoals(!!line?.goal);
   const title = line ? `#${line.number} ${line.title}` : t.tasks.heading;
   const shown = shownTask(task, taskLoad, failure);
   useEscapeCloses(onClose, active && !shown);
   return (
     <PanelFrame label={title} heading={cardBar(t, line, task)} plain kind={kind} onClose={onClose}>
       {shown && failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-      {shown ? <TaskBody key={shown.id} task={shown} onOpen={onOpen} onClose={onClose} active={active} onChanged={load} waiting={waiting} leads={{ onOpenGoal, onGraph }} />
+      {shown ? <TaskBody key={shown.id} task={shown} goals={goals} goalsFailed={goalsFailure !== null} onOpen={onOpen} onClose={onClose} active={active} onChanged={load} waiting={waiting} leads={{ onOpenGoal, onGraph }} />
         : <NotShown line={line} load={taskLoad} failure={failure} asksYou={waiting.requests.some(request => request.canAnswer)} onHome={onHome} onGraph={onGraph} />}
     </PanelFrame>
   );

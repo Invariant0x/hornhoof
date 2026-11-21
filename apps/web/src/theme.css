@@ -2381,9 +2381,8 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-held .tr-row-line > .load-busy { grid-column: 1 / -1; padding-inline: 8px; }
 /* Past 10 s or once failed, the block that says so stands in the first held row, over the whole width (Design #1656). */
 .tr-held .tr-row-line > .load-fail { grid-column: 1 / -1; margin-block: 6px; }
-/* A task's card while its details come: a held line of its path, and the details as a tail (ui/TaskPanel.tsx HeldTask). */
+/* A task's card while its details or goals come: a held line of its path, and the details as a tail (ui/TaskPanel.tsx). */
 .tp-path-held { min-block-size: var(--tracker-target-fine); }
-.tp-path-held::after { content: none; }
 .tp-held { display: grid; gap: 8px; align-content: start; }
 .tp-held > p { margin: 0; font-size: 14px; line-height: 1.45; }
 .tr-k { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -2517,8 +2516,10 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .tp-path ol { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 0; padding: 0; list-style: none; }
 .tp-path li { display: inline-flex; align-items: center; gap: 6px; min-inline-size: 0; overflow-wrap: anywhere; }
 .tp-path li::after { content: '›'; }
+.tp-path li.tp-path-held:last-child::after { content: none; }
 /* The goal's mark is drawn, not said: a reader hears the goal's name alone. */
 .tp-path .tp-goal::before { content: '◎'; content: '◎' / ''; margin-inline-end: .35em; }
+.tp-path span.tp-goal { display: inline-flex; align-items: center; min-block-size: var(--tracker-target-fine); }
 .tp-path .linkish { font: inherit; color: var(--cyan-ink); text-align: start; overflow-wrap: anywhere; }
 .tp-kind { margin: 8px 0 0; font: 600 11px var(--f-body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); overflow-wrap: break-word; }
 .tp-head > .tp-kind:first-child { margin-block-start: 0; }
@@ -2558,7 +2559,7 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .tp-mat-kind { display: block; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
 .tp-mat-open { color: var(--cyan-ink); font-size: 13px; text-decoration: underline; }
 @media (max-width: 760px), (pointer: coarse) {
-  :is(.tr-crumbs, .tp-path) .linkish, .tp-row .tp-link, .tp-mat-open { min-block-size: var(--tracker-target-touch); }
+  :is(.tr-crumbs, .tp-path) .linkish, .tp-path-held, .tp-path span.tp-goal, .tp-row .tp-link, .tp-mat-open { min-block-size: var(--tracker-target-touch); }
   :is(.tr-crumbs, .tp-path) .linkish { min-inline-size: var(--tracker-target-touch); }
   .tp-mat-open { display: inline-flex; align-items: center; }
   .gbtn, .tp-menu-button { min-block-size: var(--tracker-target-touch); }
