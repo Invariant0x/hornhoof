@@ -333,7 +333,7 @@ function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: 
             <span aria-hidden="true">…</span>
           </button>
         </div>
-        <p className="tp-state"><StatusPill state={STATE_CLASS[status]}>{t.tracker.groups[status]}</StatusPill></p>
+        <p className="tp-state" data-guide-anchor="TaskPanel.workStatus"><StatusPill state={STATE_CLASS[status]}>{t.tracker.groups[status]}</StatusPill></p>
         {task.why && <p className="tp-why" dir="auto">{task.why}</p>}
         {task.subtasks.length > 0 && <CardBar done={done} total={task.subtasks.length} label={t.tracker.list.subtasks(done, task.subtasks.length)} />}
       </header>
@@ -509,7 +509,7 @@ function HeldTask({ line, load, asksYou, onGraph }: { line: TaskLine; load: Load
         {(line.goal || line.parentId) && <nav className="tp-path" aria-hidden="true"><ol><li className="tp-path-held"><Idle w="12ch" /></li></ol></nav>}
         <p className="tp-kind">{line.parentId ? words.kinds.subtask : words.kinds.task}</p>
         <div className="tp-title"><h2 className="tp-heading" dir="auto">{line.title}</h2><span className="tp-menu-button" aria-hidden="true" /></div>
-        <p className="tp-state"><StatusPill state={STATE_CLASS[status]}>{t.tracker.groups[status]}</StatusPill></p>
+        <p className="tp-state" data-guide-anchor="TaskPanel.workStatus"><StatusPill state={STATE_CLASS[status]}>{t.tracker.groups[status]}</StatusPill></p>
         {line.why && <p className="tp-why" dir="auto">{line.why}</p>}
         {subtasks.length > 0 && <CardBar done={done} total={subtasks.length} label={t.tracker.list.subtasks(done, subtasks.length)} />}
       </header>

@@ -362,7 +362,7 @@ test('walks a new company from Setup to confirmed workingNow without any auto-ac
   const dialog = page.getByRole('dialog', { name: en.firstContact.title });
   await expect(dialog).toBeVisible();
   await expect(coach).toBeHidden();
-  await dialog.getByRole('button', { name: en.common.close }).click();
+  await dialog.getByRole('button', { name: en.firstContact.close }).click();
 
   /* Map shows coach at Orchestrator for first department. */
   await expect(coach).toBeVisible();
@@ -377,7 +377,7 @@ test('walks a new company from Setup to confirmed workingNow without any auto-ac
   await page.locator('[data-guide-anchor="Tracker.newGoal"]').click();
   await expect(page.locator('[data-guide-anchor="GoalForm.title"]')).toBeVisible();
   await page.locator('[data-guide-anchor="GoalForm.title"]').fill('Publish the first product brief');
-  await page.getByRole('button', { name: en.common.save }).click();
+  await page.getByRole('button', { name: en.tracker.form.save }).click();
 
   await expect(coach).toContainText(en.guide.voices.task[0]);
 
@@ -453,7 +453,7 @@ test('supports personal subscription branch, LinkReady, ConnectMachine copy non-
   await page.getByRole('button', { name: en.setup.goToMap }).click();
 
   /* Close FirstContact -> still waiting for machine until machine actually comes online. */
-  await page.getByRole('dialog', { name: en.firstContact.title }).getByRole('button', { name: en.common.close }).click();
+  await page.getByRole('dialog', { name: en.firstContact.title }).getByRole('button', { name: en.firstContact.close }).click();
   await expect(coach).toContainText('Follow the command on this page to connect the machine for your plan.');
 
   /* Machine connects online, plan needs login -> Subscriptions shows needs_login message. */

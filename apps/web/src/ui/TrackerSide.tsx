@@ -70,6 +70,8 @@ const dotOf = (status: Employee['status']) => (status === 'working' ? 'tr-live' 
 
 type Dept = TaskDepartments['departments'][number];
 
+const CREATE_ANCHORS: Record<string, string> = { goal: 'Tracker.newGoal', task: 'Tracker.newTask' };
+
 /* The 30px + beside Tasks, the mockup's one way to make something, opens a short menu in the look of the card's menu.
    Escape or a press elsewhere closes it; a choice closes it and the phone's drawer. */
 function CreateMenu({ create, onClose }: { create: Create; onClose: () => void }) {
@@ -102,7 +104,7 @@ function CreateMenu({ create, onClose }: { create: Create; onClose: () => void }
   }, [open]);
   return (
     <>
-      <button className="tr-new" type="button" ref={trigger} aria-label={label} title={label} aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => setOpen(!open)}>
+      <button className="tr-new" type="button" ref={trigger} data-guide-anchor="Tracker.create" aria-label={label} title={label} aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => setOpen(!open)}>
         <TrackerIcon name="add" />
       </button>
       {open && (
@@ -111,7 +113,7 @@ function CreateMenu({ create, onClose }: { create: Create; onClose: () => void }
           {create.items.length > 0 && (
             <div className="tp-menu-list">
               {create.items.map(item => (
-                <button key={item.key} className="linkish" type="button" onClick={() => { setOpen(false); item.onChoose(); onClose(); }}>{item.label}</button>
+                <button key={item.key} className="linkish" type="button" data-guide-anchor={CREATE_ANCHORS[item.key]} onClick={() => { setOpen(false); item.onChoose(); onClose(); }}>{item.label}</button>
               ))}
             </div>
           )}

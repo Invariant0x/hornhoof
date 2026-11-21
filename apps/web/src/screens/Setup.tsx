@@ -9,6 +9,8 @@ import { Field } from '../ui/Field';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
 import { LinkReady, type MadeLink } from '../ui/LinkReady';
 import { NOT_A_LOGIN, SecretInput } from '../ui/SecretInput';
+import { SetupGuideCoach, SetupResumeButton, useSetupGuide } from '../guide/SetupGuide';
+import { recordSetupHandoff } from '../guide/storage';
 import { RestoreFromFile } from './RestoreFromFile';
 
 type Mode = 'api_key' | 'personal' | 'later';
@@ -140,7 +142,7 @@ function useSubmit(form: Form, onAnswer: (answer: SetupAnswer) => void, onRefuse
 
 /* What follows a setup that went through: a link made waits for its certificate, a node command waits to be run, else the
    person is done. The plan is kept for the command's words. */
-function useAfterSetup(onDone: (done: { welcome: boolean }) => void) {
+function useAfterSetup(onDone: (done: { welcome: boolean }) => void, onFirstRun?: (mode: Mode) => void) {
   const [command, setCommand] = useState<string | null>(null);
   const [plan, setPlan] = useState<PlanProvider>('claude');
   const [made, setMade] = useState<MadeLink | null>(null);
@@ -152,7 +154,9 @@ function useAfterSetup(onDone: (done: { welcome: boolean }) => void) {
     plan,
     made,
     password,
-    answer(answer: SetupAnswer, chosen: PlanProvider, typed: string) {
+    answer(answer: SetupAnswer, chosen: PlanProvider, typed: string, mode: Mode) {
+      recordSetupHandoff(mode);
+      onFirstRun?.(mode);
       setCommand(answer.command ?? null);
       setPlan(chosen);
       setPassword(typed);
@@ -229,7 +233,7 @@ function CompanyStep({ form, update, problems, askCode, linkDomain, onNameTyped,
     <form onSubmit={onNext}>
       <div className="setup-lead">
         <Field label={t.setup.companyName}>
-          {p => <input {...p} value={form.companyName} onChange={e => update({ companyName: e.target.value })} maxLength={80} autoFocus autoComplete="organization" />}
+          {p => <input {...p} data-guide-anchor="Setup.companyName" value={form.companyName} onChange={e => update({ companyName: e.target.value })} maxLength={80} autoFocus autoComplete="organization" />}
         </Field>
       </div>
       <CompanyTemplates value={form.template} onPick={template => update({ template })} />
@@ -259,7 +263,7 @@ function AccountStep({ form, update, problems, onBack, onNext }: AccountStepProp
     <form onSubmit={onNext} noValidate>
       <p className="muted">{t.setup.becomeCeo(form.companyName.trim())}</p>
       <Field label={t.setup.yourName}>
-        {p => <input {...p} value={form.name} onChange={e => update({ name: e.target.value })} maxLength={80} autoFocus autoComplete="name" />}
+        {p => <input {...p} data-guide-anchor="Setup.yourName" value={form.name} onChange={e => update({ name: e.target.value })} maxLength={80} autoFocus autoComplete="name" />}
       </Field>
       <Field label={t.setup.yourTitle}>
         {p => <input {...p} value={form.title} onChange={e => update({ title: e.target.value })} maxLength={80} autoComplete="organization-title" />}
@@ -283,7 +287,7 @@ function ModeChoice({ mode, onMode }: { mode: Mode; onMode: (mode: Mode) => void
   const t = useT();
   const uid = useId();
   return (
-    <fieldset className="choice">
+    <fieldset className="choice" data-guide-anchor="Setup.orchestratorMode">
       <legend className="sr">{t.setup.howOrchestratorRuns}</legend>
       {MODES.map(id => (
         <label key={id} className={mode === id ? 'on' : ''}>
@@ -381,15 +385,20 @@ function StepsHead({ step }: { step: number }) {
   );
 }
 
+type SetupGuideHandle = ReturnType<typeof useSetupGuide>;
+
+const hasSetupError = (problems: Problems, failure: string): boolean => Boolean(failure) || Object.keys(problems).length > 0;
+
 interface WizardProps {
   linkDomain: string;
-  onAnswer: (answer: SetupAnswer, plan: PlanProvider, password: string) => void;
+  guide: SetupGuideHandle;
+  onAnswer: (answer: SetupAnswer, plan: PlanProvider, password: string, mode: Mode) => void;
   /* Instead of a new company: bring back one whose server was lost. */
   onRestore: () => void;
 }
 
 /* The three steps of setup, with what the person has written kept while they go back and forth. */
-function Wizard({ linkDomain, onAnswer, onRestore }: WizardProps) {
+function Wizard({ linkDomain, guide, onAnswer, onRestore }: WizardProps) {
   const t = useT();
   const [form, update] = useForm();
   const [step, setStep] = useState(0);
@@ -397,7 +406,7 @@ function Wizard({ linkDomain, onAnswer, onRestore }: WizardProps) {
   const [problems, setProblems] = useState<Problems>({});
   const sent = useSubmit(
     form,
-    answer => onAnswer(answer, form.plan, form.password),
+    answer => onAnswer(answer, form.plan, form.password, form.mode),
     refusal => {
       setProblems({ [refusal.where]: refusal.text });
       setAskCode(was => was || refusal.where === 'code');
@@ -420,7 +429,7 @@ function Wizard({ linkDomain, onAnswer, onRestore }: WizardProps) {
   }
 
   return (
-    <Card wide={step === 0}>
+    <Card wide={step === 0} topAction={<SetupResumeButton skipped={guide.skipped} resumeRef={guide.resumeRef} onResume={guide.resume} />}>
       <StepsHead step={step} />
       <StepBody
         step={step}
@@ -436,6 +445,7 @@ function Wizard({ linkDomain, onAnswer, onRestore }: WizardProps) {
         onBack={() => setStep(step - 1)}
         onFinish={finish}
       />
+      <SetupGuideCoach stage={{ kind: 'step', index: step as 0 | 1 | 2, hasError: hasSetupError(problems, sent.failure) }} guide={guide} />
       {step === 0 && <div className="actions"><button className="btn ghost" type="button" onClick={onRestore}>{t.setup.restore.link}</button></div>}
     </Card>
   );
@@ -443,14 +453,15 @@ function Wizard({ linkDomain, onAnswer, onRestore }: WizardProps) {
 
 /* The command that connects the person's own machine, shown when the orchestrator runs on their plan. */
 /* The password is the one the person just chose in this form, so their key is made with it and nothing more is asked. */
-function ConnectMachine({ command, plan, password, onDone }: { command: string; plan: PlanProvider; password: string; onDone: () => void }) {
+function ConnectMachine({ command, plan, password, guide, onDone }: { command: string; plan: PlanProvider; password: string; guide: SetupGuideHandle; onDone: () => void }) {
   const t = useT();
   return (
-    <Card>
+    <Card topAction={<SetupResumeButton skipped={guide.skipped} resumeRef={guide.resumeRef} onResume={guide.resume} />}>
       <h1>{t.setup.connectMachine}</h1>
       <p className="muted">{t.setup.runThis(PROVIDER_NAMES[plan])}</p>
-      <CommandBox command={command} password={password} />
+      <div data-guide-anchor="Setup.machineCommand"><CommandBox command={command} password={password} /></div>
       <p className="muted">{t.setup.joinOnce}</p>
+      <SetupGuideCoach stage={{ kind: 'machine' }} guide={guide} />
       <div className="actions">
         <button className="btn" type="button" onClick={onDone}>{t.setup.goToMap}</button>
       </div>
@@ -459,20 +470,27 @@ function ConnectMachine({ command, plan, password, onDone }: { command: string; 
 }
 
 /* linkDomain: what public links end in, as the server says. */
-export function Setup({ onDone, linkDomain = 'hornhoof.org', recovering = false }: { onDone: (done: { welcome: boolean }) => void; linkDomain?: string; recovering?: boolean }) {
+export function Setup({ onDone, onFirstRun, linkDomain = 'hornhoof.org', recovering = false }: {
+  onDone: (done: { welcome: boolean }) => void;
+  onFirstRun?: (mode: Mode) => void;
+  linkDomain?: string;
+  recovering?: boolean;
+}) {
   const t = useT();
-  const after = useAfterSetup(onDone);
+  const guide = useSetupGuide();
+  const after = useAfterSetup(onDone, onFirstRun);
   /* The server was given a recovery file already, or the person chose to give it one. */
   const [restoring, setRestoring] = useState(recovering);
   if (after.made) {
     return (
-      <Card>
+      <Card topAction={<SetupResumeButton skipped={guide.skipped} resumeRef={guide.resumeRef} onResume={guide.resume} />}>
         <h1>{t.settings.link}</h1>
         <LinkReady link={after.made} onNext={after.goOn} />
+        <SetupGuideCoach stage={{ kind: 'link' }} guide={guide} />
       </Card>
     );
   }
-  if (after.command) return <ConnectMachine password={after.password} command={after.command} plan={after.plan} onDone={after.done} />;
+  if (after.command) return <ConnectMachine password={after.password} command={after.command} plan={after.plan} guide={guide} onDone={after.done} />;
   if (restoring) return <Card><RestoreFromFile code={linkCode()} recovering={recovering} onBack={() => setRestoring(false)} /></Card>;
-  return <Wizard linkDomain={linkDomain} onAnswer={after.answer} onRestore={() => setRestoring(true)} />;
+  return <Wizard linkDomain={linkDomain} guide={guide} onAnswer={after.answer} onRestore={() => setRestoring(true)} />;
 }

@@ -8,6 +8,7 @@ import { AcceptInvite } from './screens/AcceptInvite';
 import { Login } from './screens/Login';
 import { Setup } from './screens/Setup';
 import { Shell } from './screens/Shell';
+import type { GuideMode } from './guide/types';
 import type { Me } from './types';
 import { Card } from './ui/Card';
 import { VersionMark } from './ui/VersionMark';
@@ -63,6 +64,7 @@ function validMe(me: Me | null): Me {
 function Screens() {
   const t = useT();
   const [screen, show] = useScreen();
+  const firstRunMode = useRef<GuideMode | undefined>(undefined);
   useReloadToNewBuild(screen.kind === 'shell');
 
   const decide = useCallback(async (welcome = false) => {
@@ -97,12 +99,12 @@ function Screens() {
     case 'invite':
       return <AcceptInvite token={screen.token} onDone={home} />;
     case 'setup':
-      return <Setup linkDomain={screen.linkDomain} recovering={screen.recovering} onDone={({ welcome }) => home(welcome)} />;
+      return <Setup linkDomain={screen.linkDomain} recovering={screen.recovering} onFirstRun={mode => { firstRunMode.current = mode; }} onDone={({ welcome }) => home(welcome)} />;
     case 'login':
       return <Login onDone={() => void decide()} />;
     case 'shell':
       /* Each person gets screens of their own: nothing the one before drew stays on them. */
-      return <Shell key={screen.me.person.id} me={screen.me} welcome={screen.welcome} onSignOut={() => void decide()} />;
+      return <Shell key={screen.me.person.id} me={screen.me} welcome={screen.welcome} firstRunMode={firstRunMode.current} onSignOut={() => { firstRunMode.current = undefined; void decide(); }} />;
     case 'error':
       return (
         <Card>

@@ -1,6 +1,7 @@
 import { TASK_PRIORITIES, type TaskPriority } from '@hornhoof/protocol';
 import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api';
+import { emitGuideEvent } from '../guide/storage';
 import { errorText, useLanguage, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import { useGoals, usePipelines } from '../tasks';
@@ -185,6 +186,11 @@ const goalFields = (goal: GoalView | undefined) => ({
   title: goal?.title ?? '', why: goal?.why ?? '', parent: goal?.parentId ?? '', responsible: goal?.responsible.id ?? '', target: goal?.target?.toString() ?? '', current: goal?.current?.toString() ?? '', unit: goal?.unit ?? '', due: dayOf(goal?.dueAt),
 });
 
+function reportGoalCreated(res: unknown): void {
+  const id = (res as { goal?: { id?: string } } | null)?.goal?.id;
+  emitGuideEvent({ type: 'goal_created', id });
+}
+
 /* A goal, new or changed: of a department, or of the whole company with none. A new one names only what was filled in; a
    change sends only what the person changed, with the version the form opened on. onReload: reads the goal again. */
 export function GoalForm({ goal, department, onDone, onCancel, onReload }: { goal?: GoalView; department: { id: string; name: string } | null; onDone: () => void; onCancel: () => void; onReload?: () => void }) {
@@ -215,7 +221,7 @@ export function GoalForm({ goal, department, onDone, onCancel, onReload }: { goa
     const all = sent(draft);
     if (!goal) {
       const given = Object.fromEntries(Object.entries(all).filter(([, v]) => v !== null && v !== undefined && v !== ''));
-      return void send(() => api.post('/api/goals', { ...given, department: department?.id ?? null }));
+      return void send(() => api.post('/api/goals', { ...given, department: department?.id ?? null }).then(reportGoalCreated));
     }
     const before = sent(was);
     const change = Object.fromEntries(Object.entries(all).filter(([k, v]) => v !== undefined && v !== before[k as keyof typeof before]));
@@ -225,7 +231,7 @@ export function GoalForm({ goal, department, onDone, onCancel, onReload }: { goa
 
   return (
     <TrackerForm label={goal ? words.editGoal : words.newGoal} busy={busy} failure={failure} onSubmit={save} onCancel={onCancel}>
-      <Field label={words.title}>{p => <input {...p} value={title} maxLength={120} required onChange={e => set({ title: e.target.value })} />}</Field>
+      <Field label={words.title}>{p => <input {...p} data-guide-anchor="GoalForm.title" value={title} maxLength={120} required onChange={e => set({ title: e.target.value })} />}</Field>
       <Field label={words.why}>{p => <textarea {...p} rows={3} value={why} maxLength={300} onChange={e => set({ why: e.target.value })} />}</Field>
       <Field label={words.parentGoal}>
         {p => (

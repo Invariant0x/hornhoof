@@ -881,13 +881,13 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   return (
     <section className="people machines">
       <header className="people-head">
-        <div>
+        <div data-guide-anchor="Machines.status">
           <h1>{t.machines.heading}</h1>
           <p className="muted">{t.machines.intro}</p>
         </div>
         {!activeCommand && (
           <div className="head-actions">
-            <button className="btn" type="button" onClick={() => void machineCommand()}>{t.machines.connect}</button>
+            <button className="btn" type="button" data-guide-anchor="Machines.connect" onClick={() => void machineCommand()}>{t.machines.connect}</button>
           </div>
         )}
       </header>

@@ -39,6 +39,8 @@ import { placeOf, useRoute, type Route, type SettingsGroup, type TrackerPlace } 
 import { departmentIsMissing, RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { GuardBoundary, LightNotice } from '../ui/GuardBoundary';
 import { guardedResizeObserver } from '../guard';
+import { GuideMenuRow, ShellGuideProvider } from '../guide/ShellGuide';
+import type { GuideMode } from '../guide/types';
 
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements' | 'inbox';
 const TABS: Exclude<Tab, 'improvements' | 'inbox'>[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
@@ -136,6 +138,7 @@ function AccountMenu({ me, onClose, onSignOut, onSettings, onAbout, onContact, .
       </div>
       <hr className="am-sep" />
       <MenuRow label={t.firstContact.title} onPick={onContact} onClose={onClose} />
+      <GuideMenuRow onClose={onClose} />
       <MenuRow label={t.settings.menu} onPick={onSettings} onClose={onClose} />
       <CompanyRows onClose={onClose} {...company} />
       <hr className="am-sep" />
@@ -208,6 +211,7 @@ function ShellTabs({ tab, waiting, navigate, fit }: { tab: Route['kind']; waitin
           <button
             key={id}
             type="button"
+            data-guide-anchor={`Nav.${id}`}
             className={tab === id ? 'on' : ''}
             aria-current={tab === id ? 'page' : undefined}
             aria-label={count || fit.icons ? name : undefined}
@@ -347,7 +351,7 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
 }
 
 /* Setup or an accepted invitation opens the orchestrator's first contact at once. */
-export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: boolean; onSignOut: () => void }) {
+export function Shell({ me, welcome = false, firstRunMode, onSignOut }: { me: Me; welcome?: boolean; firstRunMode?: GuideMode; onSignOut: () => void }) {
   const t = useT();
   const { route, navigate, backgrounds, switchOverlay, closeOverlay } = useRoute();
   const { accountDialog, pageRoute, taskId, card, tab, deptId } = workspaceOf(route, backgrounds);
@@ -443,6 +447,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
     <AgentWindowContext value={openAgent}>
     <UpdateSaysIt value={updateSaysIt}>
     <ShellTop value={shellTop}>
+    <ShellGuideProvider me={currentMe} firstRunMode={firstRunMode} route={route} org={org} orgFailure={orgFailure} contactOpen={contact} dialogOpen={Boolean(accountDialog)} navigate={navigate} openTask={openTask}>
     <div className="shell" style={shellVars(tab === 'map', shellTop, plateRoom)}>
       <header className="topbar" ref={fit.bar}>
         <div className="tb-brand glass" ref={fit.brand}>
@@ -532,6 +537,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
       <AccountDialog route={!accountDialog || (!company && accountDialog === 'versions') ? null : route} me={currentMe} updates={updates} inbox={inbox} onHome={goHome} onRenamed={setSelfName} onGroup={group => switchOverlay(group ? { kind: 'settings', group } : { kind: 'settings' })} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
       {company && updates.cut && <UpdateCut cut={updates.cut} updates={updates} />}
     </div>
+    </ShellGuideProvider>
     </ShellTop>
     </UpdateSaysIt>
     </AgentWindowContext>

@@ -335,9 +335,11 @@ function editAction(t: Messages, { sub: s, me, controls: c }: PlanProps): Action
   return { key: 'edit', text: t.subs.editApi, label: t.subs.editApiLabel(subName(t, s)), run: () => c.setEditFor(s.id) };
 }
 
+const SUB_ACTION_ANCHORS: Record<string, string> = { signin: 'Subscriptions.signIn', orchestrator: 'Subscriptions.orchestrator' };
+
 /* A busy action keeps its focus and its place, and does nothing until it is done. */
 function ActionButton({ action: a, className }: { action: Action; className: string }) {
-  return <button className={className} type="button" aria-label={a.label} aria-disabled={a.busy || undefined} onClick={() => { if (!a.busy) a.run(); }}>{a.text}</button>;
+  return <button className={className} type="button" data-guide-anchor={SUB_ACTION_ANCHORS[a.key]} aria-label={a.label} aria-disabled={a.busy || undefined} onClick={() => { if (!a.busy) a.run(); }}>{a.text}</button>;
 }
 
 const removable = (s: SubView, me: Me) => s.owner.id === me.person.id || me.person.scopeKind === 'company' || changesApi(s, me);
@@ -680,14 +682,14 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   return (
     <section className="people subs">
       <header className="people-head">
-        <div>
+        <div data-guide-anchor="Subscriptions.status">
           <h1>{t.subs.heading}</h1>
           <p className="muted">{t.subs.intro}</p>
         </div>
         {(!connecting || !connectingApi) && (
           <div className="head-actions">
-            {!connecting && <button className="btn" type="button" onClick={() => setConnecting(true)}>{t.subs.connect}</button>}
-            {!connectingApi && (places === null || places.length > 0) && <button className="btn ghost" type="button" onClick={() => setConnectingApi(true)}>{t.subs.connectApi}</button>}
+            {!connecting && <button className="btn" type="button" data-guide-anchor="Subscriptions.connect" onClick={() => setConnecting(true)}>{t.subs.connect}</button>}
+            {!connectingApi && (places === null || places.length > 0) && <button className="btn ghost" type="button" data-guide-anchor="Subscriptions.connectApi" onClick={() => setConnectingApi(true)}>{t.subs.connectApi}</button>}
           </div>
         )}
       </header>

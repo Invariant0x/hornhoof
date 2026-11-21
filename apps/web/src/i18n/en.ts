@@ -3093,6 +3093,70 @@ export const en = {
     telegram_invalid: "Write a Telegram username like @name, or the account's number.",
     telegram_person_taken: 'This Telegram is set for another person already.',
   },
+  guide: {
+    title: 'First-run guide',
+    skip: 'Skip guide',
+    resume: 'Resume guide',
+    finish: 'Finish guide',
+    openTask: 'Open task',
+    linkReadyNote: 'People can open your company at this address.',
+    waitMachine: 'Waiting for the machine. The machine will appear here when it connects.',
+    waitLogin: 'Your machine is online. Sign in to your subscription to continue.',
+    needsSetup: 'Complete the initial program setup on your machine, then return here.',
+    connecting: 'Checking the subscription',
+    planError: 'The subscription could not connect. Check the connection details before trying again.',
+    created: 'Task created. Work has not been confirmed yet.',
+    queued: 'In queue',
+    unavailable: 'Status unavailable. Work has not been confirmed yet.',
+    started: 'Working now',
+    voices: {
+      company: [
+        'Bring your company onto the map. Start with its name.',
+        'Name entered. Your company has a point on the map.',
+        'The name is still open. Check the highlighted field and try again.',
+      ] as readonly [string, string, string],
+      account: [
+        'Set up your owner account so you can run the company from here.',
+        'Owner details checked. You can choose how to run the orchestrator.',
+        'Account details need a check. Follow the message by the field.',
+      ] as readonly [string, string, string],
+      plan: [
+        'Give the orchestrator a plan to run on. You can connect it here or come back to Subscriptions.',
+        'Plan online. The orchestrator is ready to take your instructions.',
+        'The plan is still offline. Check the connection message and use its retry option when available.',
+      ] as readonly [string, string, string],
+      machine: [
+        'Connect the machine that will run your plan. Follow the command on this screen.',
+        'Machine online. It can now serve the plan.',
+        'The machine is still out of reach. Check its connection in Machines.',
+      ] as readonly [string, string, string],
+      department: [
+        'Open the orchestrator to build the department you want to start with.',
+        'Department on the map. Your company has a place for the team.',
+        'Structure unchanged. Check the card and try applying it again.',
+      ] as readonly [string, string, string],
+      staff: [
+        'Open Hire. Choose who should take the first work in this department.',
+        'Crew in place. There is someone to take the work.',
+        'The roster has not updated. Check the selected plan and the message on the hiring card.',
+      ] as readonly [string, string, string],
+      goal: [
+        'Set the objective. Open New goal and give your team a clear target.',
+        'Objective saved. Your team has a direction.',
+        'The goal is still a draft. Review the message in the form before saving again.',
+      ] as readonly [string, string, string],
+      task: [
+        'Open New task. Give the department one piece of work it can start with.',
+        'Task logged. We will show when someone starts work.',
+        'No task confirmation yet. Check the tracker before submitting again.',
+      ] as readonly [string, string, string],
+      work: [
+        'Task in the queue. The tracker will show when an employee picks it up.',
+        'First task underway. An employee is on it.',
+        'The task is waiting for attention. Open it to see what is holding it up.',
+      ] as readonly [string, string, string],
+    },
+  },
 };
 
 export type Messages = typeof en;

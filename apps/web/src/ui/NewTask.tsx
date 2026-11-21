@@ -1,6 +1,7 @@
 import { TASK_PRIORITIES, type TaskPriority } from '@hornhoof/protocol';
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
+import { emitGuideEvent } from '../guide/storage';
 import { errorText, useT } from '../i18n';
 import type { Department, TaskDetail } from '../types';
 import { Field } from './Field';
@@ -43,6 +44,7 @@ export function NewTask({ department: d, pipelineId, showPriority = false, head,
         ...(priority === 'normal' ? {} : { priority }),
         ...(product && d.products.some(x => x.id === product) ? { product } : {}),
       });
+      emitGuideEvent({ type: 'task_created', id: task.id });
       onCreated(task);
     } catch (err) {
       setFailure(err);
@@ -54,7 +56,7 @@ export function NewTask({ department: d, pipelineId, showPriority = false, head,
     <form className="new-task" onSubmit={e => void create(e)}>
       {place}
       <p className="muted">{t.dept.goesTo(head)}</p>
-      <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={120} required autoFocus />}</Field>
+      <Field label={t.common.title}>{p => <input {...p} data-guide-anchor="NewTask.title" value={title} onChange={e => setTitle(e.target.value)} maxLength={120} required autoFocus />}</Field>
       <Field label={t.dept.brief}>{p => <input {...p} value={brief} onChange={e => setBrief(e.target.value)} maxLength={600} />}</Field>
       <Field label={t.dept.details}>
         {p => <textarea {...p} rows={5} value={body} onChange={e => setBody(e.target.value)} maxLength={20000} placeholder={t.dept.detailsPlaceholder} />}

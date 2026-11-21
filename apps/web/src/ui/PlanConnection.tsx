@@ -86,11 +86,11 @@ function ConnectNow({ sub, connecting: c, now, onRetry, onCancel }: Props) {
   if (c.state === 'connecting') return <><NowLine connecting={c} now={now} /><p className="conn-keep">{words.keepOn}</p></>;
   const load: Load = { phase: c.state === 'too_long' ? 'slow' : 'failed', ring: false, failure: null, asked: 0, retry: onRetry };
   return (
-    <>
+    <div data-guide-anchor="Subscriptions.retry">
       {c.state === 'too_long' && <NowLine connecting={c} now={now} />}
       <LoadFail load={load} onRetry={onRetry} retryLabel={words.retryLabel(name)} words={[signInError(t, c), nextAfter(t, sub, c)]} slowHint={words.slowHint} ring={false}
         stop={{ text: words.cancel, label: words.cancelLabel(name), run: onCancel }} />
-    </>
+    </div>
   );
 }
 
@@ -100,7 +100,7 @@ function ConnectNow({ sub, connecting: c, now, onRetry, onCancel }: Props) {
 export function PlanConnection(props: Props) {
   const t = useT();
   return (
-    <div className="plan-connection" role="group" aria-label={t.subs.connection.label(subName(t, props.sub))}>
+    <div className="plan-connection" data-guide-anchor="Subscriptions.status" role="group" aria-label={t.subs.connection.label(subName(t, props.sub))}>
       <ConnectSteps sub={props.sub} failed={props.connecting.state === 'failed'} />
       <div className="conn-now">
         <h4 className="part-h">{t.subs.connection.nowTitle}</h4>

@@ -277,7 +277,7 @@ function HireButton({ room, waiting, onClick }: { room: HireRoom; waiting: boole
   const t = useT();
   if (room === 'none') return null;
   return (
-    <button className={room === 'held' ? 'btn unseen' : 'btn'} type="button" disabled={waiting} onClick={onClick}>
+    <button className={room === 'held' ? 'btn unseen' : 'btn'} type="button" data-guide-anchor="Department.hire" disabled={waiting} onClick={onClick}>
       {t.dept.hire}
     </button>
   );

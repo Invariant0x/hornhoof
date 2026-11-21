@@ -127,7 +127,7 @@ function StructureFooter({
   return (
     <div className="f">
       <Decides locked={locked}>
-        <button className="btn" type="button" disabled={!canCreate} onClick={onCreate}>
+        <button className="btn" type="button" data-guide-anchor="AgentWindow.structureApply" disabled={!canCreate} onClick={onCreate}>
           {label}
         </button>
         {!sent && (

@@ -3656,3 +3656,69 @@ th.k-prio .sorth { white-space: nowrap; }
 .phone-screen figcaption { margin-block-start: 8px; color: var(--muted); overflow-wrap: anywhere; }
 .phone-recordings { margin-block: 24px; min-inline-size: 0; }
 .phone-recording { border-block-start: 1px solid var(--line); padding-block: 16px; }
+
+/* First-run onboarding guide (#1822 / design #1812): tokens only, logical edges for RTL, 44 px actions. */
+.card-top-action { margin-inline-start: auto; }
+.guide-quiet { color: var(--cyan-ink); background: var(--surface); box-shadow: none; min-inline-size: 44px; min-block-size: 44px; padding: 8px 12px; }
+.guide-quiet:hover { box-shadow: none; text-decoration: underline; }
+.guide-coach {
+  inline-size: min(320px, calc(100vw - 32px));
+  padding: 14px 16px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line2);
+  border-block-start: 2px solid var(--cyan-ink);
+  box-shadow: 0 8px 24px var(--shadow);
+  text-align: start;
+  font-size: 16px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.guide-coach.is-floating { position: fixed; z-index: 45; }
+.guide-coach.is-floating::before {
+  content: "";
+  position: absolute;
+  inline-size: 12px;
+  inset-inline-end: 100%;
+  inset-block-start: 22px;
+  border-block-start: 2px solid var(--cyan-ink);
+  pointer-events: none;
+}
+.guide-coach.is-floating.is-before::before { inset-inline-end: auto; inset-inline-start: 100%; }
+.guide-coach.is-flow { position: static; inline-size: 100%; margin-block-start: 12px; box-shadow: none; }
+.guide-coach.is-inline {
+  position: fixed;
+  z-index: 45;
+  inset-inline: 16px;
+  inset-block-end: 16px;
+  inline-size: auto;
+  max-block-size: 42vh;
+  overflow: auto;
+}
+:where(:root[data-surface='papyrus']) .guide-coach {
+  box-shadow: inset 0 0 0 3px var(--surface), inset 0 0 0 4px var(--line);
+}
+.guide-coach-head { display: flex; align-items: center; gap: 10px; margin-block-end: 10px; }
+.guide-coach-head h2 { flex: 1; font-size: 18px; line-height: 1.2; }
+.guide-companion {
+  color: var(--cyan-ink);
+  border: 1px solid var(--cyan-ink);
+  background: var(--surface2);
+  inline-size: 36px;
+  block-size: 36px;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.guide-coach-body { display: grid; gap: 8px; }
+.guide-confirmed { border-inline-start: 2px solid var(--ok); padding-inline-start: 8px; font-size: 14px; }
+.guide-status { display: flex; align-items: center; gap: 8px; font-family: var(--f-display); font-weight: 600; font-size: 14px; color: var(--amber-ink); }
+.guide-status.is-ok { color: var(--ok); }
+.guide-recover { border-inline-start: 3px solid var(--pink); padding-inline-start: 8px; }
+.guide-coach-actions { margin-block-start: 10px; justify-content: flex-end; gap: 8px; }
+.guide-coach-actions .btn { min-inline-size: 44px; min-block-size: 44px; }
+.guide-highlight { box-shadow: 0 0 0 2px var(--cyan-ink); }
+.btn:not(.ghost).guide-highlight { box-shadow: inset 0 0 0 2px var(--on-btn); }
+@media (prefers-reduced-motion: reduce) {
+  .guide-coach .spinner { animation: none; }
+}

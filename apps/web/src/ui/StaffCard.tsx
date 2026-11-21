@@ -248,7 +248,7 @@ function StaffHireControls({
   /* Someone who may not take the card reads who takes it, on its own line, in place of Hire and Correct. */
   const decides = !locked && (
     <>
-      <button className="btn" type="button" aria-busy={busy} disabled={!canHire} onClick={onHire}>
+      <button className="btn" type="button" data-guide-anchor="StaffCard.hire" aria-busy={busy} disabled={!canHire} onClick={onHire}>
         <BusyLabel busy={busy} idle={hireLabel} working={t.staff.hiring} />
       </button>
       {showCorrect && (

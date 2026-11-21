@@ -51,7 +51,7 @@ export function LinkReady({ link, onNext }: { link: MadeLink; onNext: () => void
       )}
       <LetsEncryptNote />
       <div className="actions">
-        <button className="btn" type="button" onClick={onNext}>{t.common.next}</button>
+        <button className="btn" type="button" data-guide-anchor="Setup.linkNext" onClick={onNext}>{t.common.next}</button>
       </div>
     </>
   );

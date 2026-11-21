@@ -1024,7 +1024,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
           <DeptPeopleChips org={org} chips={placed.chips} byId={peopleById} onOpen={openDecisions} />
 
           {company ? (
-            <button className={`${hubClass}${windowOpen ? ' on' : ''}`} type="button" style={hubPlace} aria-label={t.map.openOrchestrator} onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
+            <button className={`${hubClass}${windowOpen ? ' on' : ''}`} type="button" data-guide-anchor="Map.orchestrator" style={hubPlace} aria-label={t.map.openOrchestrator} onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
               {hubArt}
             </button>
           ) : (
@@ -1048,6 +1048,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
             <button
               key={d.id}
               type="button"
+              data-guide-anchor={`Map.department:${d.id}`}
               className={`${deptClass(d, flashing.has(d.id))}${turnClass(turns.length > 0, turnOf.has(d.id))}`}
               style={{ left: spots[i]!.x, top: spots[i]!.y, width: spots[i]!.w, height: spots[i]!.h }}
               onClick={() => enter(spots[i]!, d.id)}
