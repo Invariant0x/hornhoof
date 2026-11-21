@@ -51,8 +51,8 @@ export function WaitingQueue({ items }: { items: WaitQueueEntry[] }) {
   };
   return (
     <div className="wait-queue">
-      <section className="wait-current" id={id} aria-labelledby={`${id}-heading`}>
-        <h3 className="sr" id={`${id}-heading`} ref={heading} tabIndex={-1}><bdi>{active.title}</bdi></h3>
+      <section className="wait-current" id={id}>
+        <h3 className="sr" ref={heading} tabIndex={-1}><bdi>{active.title}</bdi></h3>
         <div className="wait-current-content" key={active.id}>{active.show(done, defer)}</div>
       </section>
       {others.length > 0 && (

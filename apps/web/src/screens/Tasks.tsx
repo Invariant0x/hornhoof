@@ -5,7 +5,7 @@ import type { TrackerPlace } from '../routes';
 import { searchTasks } from '../task-search';
 import { placeName, useGoals, usePipelines, useTaskDepartments, useTasks, useWaitCards } from '../tasks';
 import { doerOf, filterTasks, graphPath, graphTree, mine, personWaited, pipelineTree, pruneGoals, shownDecisions, TRACKER_VIEWS, waitingOn, waitingOnPeople, waitsCount, withoutRequestWaits, workingNow, BOARD_STATUSES, boardStatus, type Crumb, type DecisionsOf, type GraphNode, type ShownDecisions, type WorkFilter } from '../tracker';
-import type { Decisions, Department, Me, Org, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard, WaitingRequest } from '../types';
+import type { Decisions, Department, Me, Org, PersonRef, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard, WaitingRequest } from '../types';
 import { CEO_DECIDES, DecidedByNote } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
@@ -189,9 +189,8 @@ function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOp
   );
 }
 
-function NamedQuestionRow({ request, org, onOpenTask }: { request: WaitingRequest; org: Org | null; onOpenTask: (id: string) => void }) {
+function NamedQuestionRow({ request, person, onOpenTask }: { request: WaitingRequest; person?: PersonRef; onOpenTask: (id: string) => void }) {
   const t = useT();
-  const person = mapPeople(org).find(p => p.id === request.ownerPersonId);
   return (
     <article className="entry wait-question" aria-label={taskTitle(request.task)}>
       <div className="wait-question-copy">
@@ -324,6 +323,7 @@ function WaitingForYou({ sources, live, decisionsFailure, ...rest }: Waiting) {
 }
 
 type PeopleWaiting = Pick<Waiting, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place' | 'sources' | 'live'> & {
+  allTasks: TaskLine[];
   /* The tasks that wait for any person. */
   tasks: TaskLine[];
   /* The section names itself below the results of a search; the page's title right above names it otherwise. */
@@ -332,7 +332,7 @@ type PeopleWaiting = Pick<Waiting, 'decisions' | 'decisionsFailure' | 'onDecisio
 
 /* What waits for people in the company, for those who see the whole of it, once all of it came: every decision the viewer
    sees, each saying whom it waits for, and the tasks that wait for a person. */
-function WaitingForPeople({ decisions, decisionsFailure, tasks, titled, sources, live, ...rest }: PeopleWaiting) {
+function WaitingForPeople({ decisions, decisionsFailure, allTasks, tasks, titled, sources, live, ...rest }: PeopleWaiting) {
   const t = useT();
   const words = t.tracker.peopleWaits;
   const [failure, setFailure] = useState<unknown>(null);
@@ -341,13 +341,17 @@ function WaitingForPeople({ decisions, decisionsFailure, tasks, titled, sources,
   const named = shown.requests.filter(namedReadOnly);
   const actionable = { ...shown, requests: shown.requests.filter(request => !namedReadOnly(request)) };
   const people = mapPeople(rest.org);
+  const addressee = ({ task, ownerPersonId }: WaitingRequest) =>
+    people.find(person => person.id === ownerPersonId) ??
+    allTasks.find(line => line.id === task.id)?.time?.waitsOn.find(wait =>
+      wait.who?.kind === 'person' && wait.who.id === ownerPersonId && wait.who.name)?.who ?? undefined;
   const waitsFor = (personId: string) => {
     const name = people.find(p => p.id === personId)?.name;
     return name ? words.waitingFor(name) : words.waitingForSomeone;
   };
   return (
     <WaitingSection label={words.title} heading={titled && <h2>{words.title}</h2>} load={load} live={live} decisions={decisions} decisionsFailure={decisionsFailure} onRetry={rest.onDecisionsChanged} failure={failure}>
-      {named.length > 0 && <div className="reqs">{named.map(request => <NamedQuestionRow key={request.id} request={request} org={rest.org} onOpenTask={rest.onOpenTask} />)}</div>}
+      {named.length > 0 && <div className="reqs">{named.map(request => <NamedQuestionRow key={request.id} request={request} person={addressee(request)} onOpenTask={rest.onOpenTask} />)}</div>}
       <DecisionList shown={actionable} onFailure={setFailure} waitsFor={waitsFor} {...rest} />
       {tasks.length > 0 && <WaitingTasks tasks={tasks} personOf={personWaited} heading={words.tasks} onOpenTask={rest.onOpenTask} />}
       {shownNone(shown) && !tasks.length && <p className="muted">{words.nothing}</p>}
@@ -603,7 +607,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
     },
   };
   const own = mine(all, goals, who);
-  const otherWaits = withoutRequestWaits(all, decisions?.requests);
+  const otherWaits = withoutRequestWaits(all, decisions);
   const waitsOnWho = waitingOn(otherWaits, recipient);
   const waitsOnPeople = waitingOnPeople(otherWaits);
   const failures = all.filter(task => boardStatus(task) === 'failure');
@@ -682,6 +686,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       decisions={decisions}
       decisionsFailure={decisionsFailure}
       onDecisionsChanged={onDecisionsChanged}
+      allTasks={all}
       tasks={waitsOnPeople}
       titled={found !== null}
       sources={[taskPart]}

@@ -724,6 +724,17 @@ describe('what waits for people', () => {
     expect(within(opened).queryByRole('button', { name: 'Send answer' })).not.toBeInTheDocument();
   });
 
+  it('names the addressee from the task wait when the person is missing from the company map', async () => {
+    const time = LOGIN.time!;
+    const payment = { ...PAY, time: { ...time, waitsOn: [{ ...time.waitsOn[0]!, request: true as const, who: { kind: 'person' as const, ...THEO } }] } };
+    shell('/tasks?show=people', {
+      'GET /api/tasks?status=all': [200, { tasks: [payment] }],
+      'GET /api/requests': [200, decisions([FOR_THEO])],
+    });
+    const request = await screen.findByRole('article', { name: '#21 Take card payments' });
+    expect(request).toHaveTextContent(/Asked:\s*.*Theo/);
+  });
+
   it('opens one queue card, moves a deferred card to the end, and advances on an accepted answer', async () => {
     const user = userEvent.setup();
     const third = asked('r-third', PAY, 'Which currency?', {});

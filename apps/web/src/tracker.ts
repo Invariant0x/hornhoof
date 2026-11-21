@@ -141,8 +141,8 @@ export const waitingOnPeople = (tasks: TaskLine[]): TaskLine[] => tasks.filter(t
 
 /* Open requests have their own cards and a server-checked right to answer. Their task summaries should never stand in for
    those cards, even while the task list catches up with an answer or an older server does not mark request waits. */
-export function withoutRequestWaits(tasks: TaskLine[], requests: Decisions['requests'] = []): TaskLine[] {
-  const withCards = new Set(requests.map(request => request.task.id));
+export function withoutRequestWaits(tasks: TaskLine[], decisions?: Decisions): TaskLine[] {
+  const withCards = new Set(decisions?.requests?.map(request => request.task.id));
   return tasks.map(task => {
     const time = task.time;
     if (!time) return task;
