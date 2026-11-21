@@ -604,6 +604,9 @@ select:disabled { opacity: .55; }
 
 /* Map */
 .map { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+/* The map's place, the department's and its tree's while their data comes: the shared indicator, or why it stalled with
+   Try again, in the middle of where the data will stand, its words wrapping however narrow the screen. */
+.map.map-wait, .dcanvas.dview-wait, .tview.tview-wait { display: grid; grid-template-columns: minmax(0, 60ch); place-content: center; padding: 16px; cursor: default; }
 .map::before {
   content: ''; position: absolute; inset: 0; pointer-events: none;
   background-image: radial-gradient(var(--dot) 1px, transparent 1px);
@@ -1156,6 +1159,9 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .t-bar .panel-count { margin: 0; font-weight: 600; line-height: 1; white-space: nowrap; pointer-events: none; }
 .t-bar svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .t-log { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 12px; }
+/* The conversation's place while the window's load comes. */
+.t-log.t-wait { justify-content: center; align-items: center; }
+.t-log.t-wait > * { max-width: 60ch; }
 .t-log > * { animation: tin .45s ease-out; }
 @keyframes tin { from { opacity: 0; transform: translateY(4px); } }
 .t-line { display: grid; gap: 12px; }
@@ -1296,10 +1302,10 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .t-copy:hover:not(:disabled) { color: var(--cyan-ink); background: var(--glow); }
 .t-copy:disabled { color: var(--muted); cursor: default; }
 .t-load { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: #15191F; color: #dcdcdc; font-family: var(--f-body); font-size: 15px; }
-.t-load .spinner { width: 44px; height: 44px; border-width: 3px; border-color: #2b323b; border-top-color: #dcdcdc; }
+.t-load > .spinner { width: 44px; height: 44px; border-width: 3px; border-color: #2b323b; border-top-color: #dcdcdc; }
 /* Why the terminal cannot show now, in place of it. */
 .t-load p { max-width: 60ch; margin: 0; padding: 0 24px; text-align: center; overflow-wrap: anywhere; }
-@media (prefers-reduced-motion: reduce) { .t-load .spinner { animation-duration: 3s; } }
+@media (prefers-reduced-motion: reduce) { .t-load > .spinner { animation-duration: 3s; } }
 .t-cards { flex: none; max-height: 45%; overflow: auto; padding: 10px 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
 /* Access to machines: a line each, no taller than one row of the window's header, however narrow the screen. */
 /* Earlier lines of a conversation come above the oldest one kept. */
@@ -1584,6 +1590,9 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 /* The tools in words stand apart. As icons they make one strip of 44 px cells drawn like the section tabs, and Hire stands
    after them at the end of the row, on a row of its own when it does not fit. */
 .dv-tools { display: contents; }
+/* While the company comes the department's tools stand at their size and wait, muted, as a disabled button does (#1620). */
+.dv-tools > .hbtn:disabled { cursor: not-allowed; opacity: .45; }
+.dv-zoom[inert] > .zoom { opacity: .45; }
 .dv-acts[data-fit="icons"] .dv-tools { display: flex; border: 0; outline: 1px solid var(--line); outline-offset: -1px; }
 .dv-acts[data-fit="icons"] .dv-tools > .hbtn { border: 0; background: none; }
 .dv-acts[data-fit="icons"] .dv-tools > .hbtn + .hbtn { border-inline-start: 1px solid var(--line); }
@@ -1772,6 +1781,7 @@ body:has(.dview) .version-mark { display: none; }
 }
 :is(.plan-settings, .plan-fallbacks) > h4 { margin: 0; font-size: 14px; }
 .plan-fallbacks .part-note { font-size: inherit; overflow-wrap: anywhere; }
+.plan-fallbacks { --fallback-control-size: 44px; --fallback-control-gap: 8px; }
 /* A field of the card is as wide as what it shows, up to the band, with its caret on its end side, and 44 px high as
    every field of the screen. Its value wraps rather than ending in dots: the select itself is clear over a copy of its
    value that can take more lines. Its focus is the page's ring, not the glow of a field being typed in. Its list and caret
@@ -1792,18 +1802,20 @@ body:has(.dview) .version-mark { display: none; }
 :is(.plan-settings, .plan-fallbacks) .select-wrap > select:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; border-color: var(--line2); box-shadow: none; }
 .model-select { grid-template-areas: "value"; }
 .model-select > select, .model-select > .model-value { grid-area: value; }
-.plan-fallbacks .model-select > select { z-index: 1; block-size: 100%; background-color: transparent; color: transparent; }
+.plan-fallbacks .model-select > select { z-index: 1; block-size: 100%; min-block-size: var(--fallback-control-size); background-color: transparent; color: transparent; }
 .model-select option { background-color: var(--surface2); color: var(--ink); }
 .model-value {
-  display: grid; align-items: center; min-inline-size: 0; min-block-size: 44px; padding-block: 8px; padding-inline: 12px 32px;
+  display: grid; align-items: center; min-inline-size: 0; min-block-size: var(--fallback-control-size); padding-block: 8px; padding-inline: 12px 32px;
   border: 1px solid transparent; background: var(--surface2); color: var(--ink); text-align: start; overflow-wrap: anywhere;
 }
 /* A model whose name is long opens its whole names as radio buttons under the field, as no browser's menu shows them whole. */
-.model-disclosure { display: grid; gap: 8px; min-inline-size: 0; }
-.model-trigger { inline-size: 100%; padding: 0; border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; text-align: start; }
-.model-trigger > .model-value { border: 0; }
+.model-trigger {
+  appearance: none; inline-size: 100%; min-block-size: var(--fallback-control-size); padding: 0;
+  border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; text-align: start;
+}
+.model-trigger > .model-value { min-block-size: 0; border: 0; }
 .model-trigger:hover, .model-choice:hover { border-color: var(--cyan-ink); }
-.model-disclosure > .choice-list { margin: 0; padding: 0; border: 0; }
+.fallback-model > .choice-list { grid-area: choices; border: 0; }
 .plan-fallbacks .choice-list { display: grid; gap: 8px; min-inline-size: 0; margin: 0; padding: 0; list-style: none; }
 .model-choice {
   display: flex; align-items: center; gap: 8px; min-inline-size: 0; min-block-size: 44px; padding: 8px 12px;
@@ -1816,12 +1828,12 @@ body:has(.dview) .version-mark { display: none; }
   .plan-fallbacks .model-select > select { forced-color-adjust: none; color: transparent; border-color: ButtonText; }
   .model-select option { color: CanvasText; background-color: Canvas; }
 }
-/* The fallback plans in their order, numbered. On a narrow card a plan's name, its model and its moves stand one under the
-   other past its number, the moves at the end edge; on a card of 700 px and more they stand in one row on shared columns. */
+/* On narrow cards the actions sit below the model to leave room for its full name. On wide cards they share the field's
+   row; the label and expanded options have their own rows, so neither shifts the buttons away from the field. */
 .fallback-list { display: grid; margin: 0; padding: 0; list-style: none; min-inline-size: 0; }
 .fallback-list > .entry {
-  display: grid; grid-template-columns: 24px minmax(0, 1fr); grid-template-areas: "position plan" ". model" ". moves";
-  gap: 8px; align-items: start; min-inline-size: 0;
+  display: grid; grid-template-columns: 24px minmax(0, 1fr); grid-template-areas: "position plan" ". model";
+  gap: var(--fallback-control-gap); align-items: start; min-inline-size: 0;
 }
 .fallback-list > .entry:not(:last-child) { padding-block-end: 8px; }
 .fallback-list > .entry + .entry { padding-block-start: 8px; border-block-start: 1px solid var(--line); }
@@ -1831,16 +1843,26 @@ body:has(.dview) .version-mark { display: none; }
 }
 .fallback-name { grid-area: plan; min-inline-size: 0; font-weight: 600; overflow-wrap: anywhere; }
 .fallback-model { grid-area: model; min-inline-size: 0; }
-.fallback-moves { grid-area: moves; }
-.plan-fallbacks .fallback-moves { flex-wrap: nowrap; }
-.plan-fallbacks .fallback-moves > .act { flex: none; inline-size: 44px; block-size: 44px; min-block-size: 44px; padding: 0; justify-content: center; }
+.plan-fallbacks .fallback-model.field { grid-template-areas: "label" "control" "moves"; }
+.plan-fallbacks .fallback-model.field:has(> .choice-list) { grid-template-areas: "label" "control" "choices" "moves"; }
+.fallback-model > label { grid-area: label; }
+.fallback-model > .select-wrap { grid-area: control; }
+.plan-fallbacks .fallback-moves { grid-area: moves; align-self: center; flex-wrap: nowrap; gap: var(--fallback-control-gap); }
+.plan-fallbacks .fallback-moves > .act {
+  flex: none; inline-size: var(--fallback-control-size); block-size: var(--fallback-control-size); min-block-size: var(--fallback-control-size);
+  padding: 0; justify-content: center;
+}
 .plan-fallbacks .fallback-moves > .act.danger { border-color: var(--pink-ink); }
 .plan-fallbacks .fallback-moves .ic, .fallback-add .ic { width: 16px; height: 16px; }
 @container card (min-width: 700px) {
   .fallback-list > .entry {
-    grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr) max-content; grid-template-areas: "position plan model moves";
+    grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr) max-content; grid-template-areas: "position plan model model";
     column-gap: 16px; align-items: center;
   }
+  .plan-fallbacks .fallback-model.field {
+    grid-template-columns: subgrid; column-gap: normal; grid-template-areas: "label label" "control moves";
+  }
+  .plan-fallbacks .fallback-model.field:has(> .choice-list) { grid-template-areas: "label label" "control moves" "choices choices"; }
 }
 .fallback-add { display: grid; justify-items: end; gap: 8px; min-inline-size: 0; }
 .fallback-add > .btn { max-inline-size: 100%; padding: 8px 12px; white-space: normal; overflow-wrap: anywhere; }
