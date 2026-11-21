@@ -704,17 +704,26 @@ test('shows what waits for the person and the cards kept for them inside the pag
   await page.route('**/api/wait-cards', route => route.fulfill({ json: { cards, next: null } }));
   for (const lang of LANGUAGES.map(l => l.id)) for (const width of [1440, 375]) {
     const t = MESSAGES[lang];
+    const tagText = t.tasks.cards.tag('v1.7.0', 24, 'unrecorded');
+    const summaryText = t.tasks.cards.summary(23, 'v1.6.0', t.tracker.side.turns);
     await open(page, lang, width, '/tasks?show=waits');
     await expect(page.getByRole('heading', { level: 1 })).toHaveText(t.tracker.where.waits);
     const waiting = page.getByRole('region', { name: t.tasks.waiting });
     await expect(waiting).toContainText(QUESTION);
-    await expect(page.getByRole('region', { name: t.tasks.cards.tagTitle })).toContainText(t.tasks.cards.tag('v1.7.0', 24, 'unrecorded'));
-    await expect(page.getByRole('region', { name: t.tasks.cards.summaryTitle(23) })).toContainText(t.tasks.cards.summary(23, 'v1.6.0', t.tracker.side.turns));
+    await expect(waiting.getByRole('button', { expanded: false })).toHaveCount(2);
     await inside(page, `waits ${lang} ${width}`);
+    await waiting.getByRole('button', { expanded: false }).filter({ hasText: tagText }).click();
+    await expect(page.getByRole('region', { name: t.tasks.cards.tagTitle })).toContainText(tagText);
+    await inside(page, `waits tag ${lang} ${width}`);
+    await waiting.getByRole('button', { expanded: false }).filter({ hasText: summaryText }).click();
+    await expect(page.getByRole('region', { name: t.tasks.cards.summaryTitle(23) })).toContainText(summaryText);
+    await inside(page, `waits summary ${lang} ${width}`);
     await capture(page, info, `waits-${lang}-${width}`);
   }
   await open(page, 'en', 375, '/tasks?show=waits');
   await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
+  const rtlWaiting = page.getByRole('region', { name: MESSAGES.en.tasks.waiting });
+  await rtlWaiting.getByRole('button', { expanded: false }).filter({ hasText: MESSAGES.en.tasks.cards.tag('v1.7.0', 24, 'unrecorded') }).click();
   const tag = page.getByRole('region', { name: MESSAGES.en.tasks.cards.tagTitle });
   /* Its edge line moves to the right, where the text starts. */
   expect(await tag.evaluate(el => getComputedStyle(el).borderRightWidth)).toBe('2px');

@@ -822,8 +822,11 @@ describe('separate question materials preview and explicit answering', () => {
       />,
     );
 
-    /* Open structure proposal sealed document in MaterialViewer, verify zero business actions inside viewer and zero POSTs. */
+    /* Open structure proposal sealed document in MaterialViewer, verify zero business actions inside viewer and zero POSTs.
+       WaitingQueue shows one card at a time, so the second proposal starts collapsed in the queue strip. */
     const openStruct = await screen.findByRole('button', { name: /Open material: Structure plan\.md/ });
+    expect(screen.getByRole('button', { name: /Hire Backend engineer\./, expanded: false })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Open material: Staffing plan\.md/ })).not.toBeInTheDocument();
     await user.click(openStruct);
     const dialog = await screen.findByRole('dialog', { name: 'Structure plan.md' });
     expect(await within(dialog).findByText('Includes Support and Finance before edits.')).toBeInTheDocument();
@@ -839,18 +842,22 @@ describe('separate question materials preview and explicit answering', () => {
     const reopened = await screen.findByRole('dialog', { name: 'Structure plan.md' });
     expect(await within(reopened).findByText('Includes Support and Finance before edits.')).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
 
-    /* Open staff proposal sealed document too, then close with zero POSTs. */
+    /* Submitting structure sends its exact stamp and advances WaitingQueue to the staff proposal card. */
+    await user.click(screen.getByRole('button', { name: en.card.create(1) }));
+
+    /* Open staff proposal sealed document too, then close without sending any staff POST. */
     await user.click(await screen.findByRole('button', { name: /Open material: Staffing plan\.md/ }));
     const staffDialog = await screen.findByRole('dialog', { name: 'Staffing plan.md' });
     expect(await within(staffDialog).findByText('Hire Bruno on Team key.')).toBeInTheDocument();
     expect(within(staffDialog).getByText(en.tasks.materials.proposalNote)).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+    expect(calls.filter(c => c.method === 'POST')).toHaveLength(1);
 
-    /* Submitting structure and staff sends the exact { materialRevision, materialDigest } stamps passed through Tasks.tsx. */
-    await user.click(screen.getByRole('button', { name: en.card.create(1) }));
-    await user.click(screen.getByRole('button', { name: en.staff.hire(1) }));
+    /* Submitting staff sends its exact { materialRevision, materialDigest } stamp and empties the queue. */
+    await user.click(await screen.findByRole('button', { name: en.staff.hire(1) }));
+    await screen.findByText(en.tasks.queue.empty);
 
     const postCalls = calls.filter(c => c.method === 'POST');
     expect(postCalls).toEqual([
