@@ -3,6 +3,7 @@ import { readerRole, REFUSED_NAME_PATTERN } from '../../db/agent-sql.js';
 import { APP_NAME, KEEPER_NAME, stripSettings } from '../../db/client.js';
 import { keepErrors } from '../../db/confirm.js';
 import { FENCE_TRIGGER, JOURNAL_TRIGGER, type LeaseKind, type LeaseSync, type Term } from '../../db/net.js';
+import { QUERY_MAX_MS } from './lease.js';
 
 /* The keeper's own way to the database: plain statements, one after another. */
 export type Sql = { query<R = Record<string, unknown>>(text: string, params?: unknown[]): Promise<{ rows: R[] }> };
@@ -29,7 +30,7 @@ export type LeaseStore = {
   close(): Promise<void>;
 };
 
-export const PRUNE_BATCH = 10_000;
+export const PRUNE_BATCH = 2_000;
 
 /* The highest term this database has seen, 0 for one that saw none. */
 const SEEN_TERM = `SELECT COALESCE(GREATEST((SELECT max(term_number) FROM net_local.state), (SELECT max(term_number) FROM net_local.lease)), 0)::int AS number`;
@@ -95,13 +96,13 @@ const pruneWith = (copies: boolean): string => {
 };
 /* The keeper of a new build runs a while on the schema of the build before, which knows no copies: it prunes as one
    machine does until the app has migrated. */
-const HAS_COPIES = `SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'machines' AND column_name = 'copy_at') AS there`;
+const HAS_COPIES = `SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('public.machines') AND attname = 'copy_at' AND NOT attisdropped) AS there`;
 /* The keeper of a new build runs a while on the schema of the build before, which has no record of merges: it prunes
    nothing until the app has migrated. */
 const HAS_MERGES = `SELECT to_regclass('net.merges') IS NOT NULL AND to_regclass('net.horizon') IS NOT NULL AND to_regclass('net.merge_consumed') IS NOT NULL AS there`;
 
 /* The keeper of a new build runs a while on the schema of the build before, which has no roles yet: it asks first. */
-const HAS_ROLES = `SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'machines' AND column_name = 'role') AS there`;
+const HAS_ROLES = `SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('public.machines') AND attname = 'role' AND NOT attisdropped) AS there`;
 const OTHER_DATA = `SELECT EXISTS (SELECT FROM public.machines WHERE role = 'data' AND revoked_at IS NULL AND network_id IS DISTINCT FROM $1) AS there`;
 
 /* Any right on a table at all. */
@@ -139,28 +140,69 @@ const PROBLEMS = `SELECT line FROM (
       WHERE current_setting('max_prepared_transactions') <> '0'
   ) found ORDER BY at, line`;
 
-export function leaseStore(sql: Sql & { close?(): Promise<void> }, opts: { machineId: string }): LeaseStore {
-  /* Operations' role is named after the database, which does not change under a connection; the orchestrator's sessions are the app's. */
-  let roles: Promise<string[]> | null = null;
-  const agentRoles = (): Promise<string[]> =>
-    (roles ??= sql.query<{ name: string }>('SELECT current_database() AS name').then(({ rows }) => [readerRole(rows[0]!.name)]));
-  const endSessions = async (): Promise<number> => (await sql.query<{ ended: number }>(END_SESSIONS, [APP_NAME, await agentRoles()])).rows[0]!.ended;
+type ClosableSql = Sql & { close?(): Promise<void> };
+
+/* Operations' role is named after the database, which does not change under a connection; the orchestrator's sessions are the app's. */
+function roleLookup(): (on: Sql) => Promise<string[]> {
+  let cached: string[] | null = null;
+  return async (on: Sql): Promise<string[]> => {
+    if (cached) return cached;
+    const { rows } = await on.query<{ name: string }>('SELECT current_database() AS name');
+    cached = [readerRole(rows[0]!.name)];
+    return cached;
+  };
+}
+
+async function takeLease(sql: Sql, machineId: string, fence: () => Promise<void>, kind: LeaseKind, until: Date, sync: LeaseSync, term?: Term): Promise<Term> {
+  if (term) {
+    /* Looked at before anything ends, so a term that cannot be taken leaves the lease as it stands. */
+    const seen = (await sql.query<{ number: number }>(SEEN_TERM)).rows[0]!.number;
+    if (term.machine !== machineId || term.split || term.number <= seen) throw new Error(`the term ${term.number} of ${term.machine} cannot be taken here: this database stands under term ${seen}`);
+  }
+  await fence();
+  const { rows } = await sql.query<{ number: number }>(TAKE, [machineId, kind, until, sync, term?.number ?? null]);
+  if (!rows[0]) throw new Error(`the term ${String(term?.number)} is not above every term this database has seen`);
+  return { number: rows[0].number, machine: machineId, split: false };
+}
+
+async function pruneJournal(bg: Sql, machineId: string, batch: number): Promise<number> {
+  if (!(await bg.query<{ there: boolean }>(HAS_MERGES)).rows[0]!.there) return 0;
+  const copies = (await bg.query<{ there: boolean }>(HAS_COPIES)).rows[0]!.there;
+  return (await bg.query<{ pruned: number }>(pruneWith(copies), [batch, machineId])).rows[0]!.pruned;
+}
+
+/* The lease says this machine keeps the data alone. With another data machine listed that would be untrue, and the
+   two could both lead: this machine then holds no such lease. */
+async function checkOthersHoldData(bg: Sql, machineId: string): Promise<boolean | null> {
+  try {
+    if (!(await bg.query<{ there: boolean }>(HAS_ROLES)).rows[0]!.there) return false;
+    return (await bg.query<{ there: boolean }>(OTHER_DATA, [machineId])).rows[0]!.there;
+  } catch {
+    return null;
+  }
+}
+
+async function closeSqlPair(sql: ClosableSql, bg: ClosableSql): Promise<void> {
+  try {
+    await sql.close?.();
+  } finally {
+    if (bg !== sql) await bg.close?.();
+  }
+}
+
+const serverStatementTimeoutMs = (given: number | (() => number), currentMs: number): number =>
+  Math.max(1, Math.ceil(typeof given === 'function' ? Math.max(currentMs, QUERY_MAX_MS) : currentMs));
+
+export function leaseStore(sql: ClosableSql, opts: { machineId: string; backgroundSql?: ClosableSql }): LeaseStore {
+  const bg = opts.backgroundSql ?? sql;
+  const agentRoles = roleLookup();
+  const endSessions = async (): Promise<number> => (await sql.query<{ ended: number }>(END_SESSIONS, [APP_NAME, await agentRoles(sql)])).rows[0]!.ended;
   const fence = async (): Promise<void> => {
     await sql.query(FENCE);
     await endSessions();
   };
   return {
-    async take(kind, until, sync = 'alone', term) {
-      if (term) {
-        /* Looked at before anything ends, so a term that cannot be taken leaves the lease as it stands. */
-        const seen = (await sql.query<{ number: number }>(SEEN_TERM)).rows[0]!.number;
-        if (term.machine !== opts.machineId || term.split || term.number <= seen) throw new Error(`the term ${term.number} of ${term.machine} cannot be taken here: this database stands under term ${seen}`);
-      }
-      await fence();
-      const { rows } = await sql.query<{ number: number }>(TAKE, [opts.machineId, kind, until, sync, term?.number ?? null]);
-      if (!rows[0]) throw new Error(`the term ${String(term?.number)} is not above every term this database has seen`);
-      return { number: rows[0].number, machine: opts.machineId, split: false };
-    },
+    take: (kind, until, sync = 'alone', term) => takeLease(sql, opts.machineId, fence, kind, until, sync, term),
     async renew(term, kind, until, ending, sync) {
       const { rows } = await sql.query(RENEW, [term.number, term.machine, term.split, kind, until, sync ?? null]);
       if (rows.length === 0) return false;
@@ -169,31 +211,19 @@ export function leaseStore(sql: Sql & { close?(): Promise<void> }, opts: { machi
     },
     fence,
     endSessions,
-    problems: async () => (await sql.query<{ line: string }>(PROBLEMS, [REFUSED_NAME_PATTERN, await agentRoles(), SOURCE_TABLES])).rows.map(row => row.line),
-    prune: async (batch = PRUNE_BATCH) => {
-      if (!(await sql.query<{ there: boolean }>(HAS_MERGES)).rows[0]!.there) return 0;
-      const copies = (await sql.query<{ there: boolean }>(HAS_COPIES)).rows[0]!.there;
-      return (await sql.query<{ pruned: number }>(pruneWith(copies), [batch, opts.machineId])).rows[0]!.pruned;
-    },
-    /* The lease says this machine keeps the data alone. With another data machine listed that would be untrue, and the
-       two could both lead: this machine then holds no such lease. */
-    async othersHoldData() {
-      try {
-        if (!(await sql.query<{ there: boolean }>(HAS_ROLES)).rows[0]!.there) return false;
-        return (await sql.query<{ there: boolean }>(OTHER_DATA, [opts.machineId])).rows[0]!.there;
-      } catch {
-        return null;
-      }
-    },
-    close: async () => sql.close?.(),
+    problems: async () => (await bg.query<{ line: string }>(PROBLEMS, [REFUSED_NAME_PATTERN, await agentRoles(bg), SOURCE_TABLES])).rows.map(row => row.line),
+    prune: (batch = PRUNE_BATCH) => pruneJournal(bg, opts.machineId, batch),
+    othersHoldData: () => checkOthersHoldData(bg, opts.machineId),
+    close: () => closeSqlPair(sql, bg),
   };
 }
 
-/* One connection at a time under the keeper's name, with no statement timeout of the database's own: each connect and each
-   query has timeoutMs, and one that fails or runs out drops its connection without waiting for it to end, so the next
-   query opens a new one. A timeout given as a function is read at each connect and each query, so it can follow what
-   the disk measures. A commit counts here once this machine wrote it (synchronous_commit local): the lease is a fact
-   of this machine alone. Queries run one after another, each waiting for the one before to settle. */
+/* One connection at a time under the keeper's name: each connect and each query has timeoutMs, and the Postgres session
+   also carries statement_timeout so a timed-out statement cancels on the server instead of lingering after drop().
+   One that fails or runs out drops its connection without waiting for it to end, so the next query opens a new one.
+   A timeout given as a function is read at each connect and each query, so it can follow what the disk measures.
+   A commit counts here once this machine wrote it (synchronous_commit local): the lease is a fact of this machine
+   alone. Queries run one after another, each waiting for the one before to settle. */
 export function keeperSql(url: string, opts: { timeoutMs?: number | (() => number) } = {}): Sql & { close(): Promise<void> } {
   const given = opts.timeoutMs ?? 2000;
   const timeoutMs = (): number => (typeof given === 'function' ? given() : given);
@@ -206,7 +236,13 @@ export function keeperSql(url: string, opts: { timeoutMs?: number | (() => numbe
   };
   const connected = async (): Promise<pg.Client> => {
     if (client) return client;
-    const next = new pg.Client({ connectionString: stripSettings(url), application_name: KEEPER_NAME, options: '-c synchronous_commit=local', connectionTimeoutMillis: timeoutMs() });
+    const ms = timeoutMs();
+    const next = new pg.Client({
+      connectionString: stripSettings(url),
+      application_name: KEEPER_NAME,
+      options: `-c synchronous_commit=local -c statement_timeout=${serverStatementTimeoutMs(given, ms)}`,
+      connectionTimeoutMillis: ms,
+    });
     keepErrors(next);
     next.on('error', () => { if (client === next) client = null; });
     await next.connect();
@@ -241,12 +277,14 @@ export function keeperSql(url: string, opts: { timeoutMs?: number | (() => numbe
 export const UNNAMED_MACHINE = 'unnamed';
 
 /* The lease is held in this machine's database, so without one there is none to hold. A machine without an id, as a
-   company started from the compose file by hand is, still leads: under a name of its own, alone, and in no network. */
-export function leaseOfMachine(config: { databaseUrl?: string | null; machineId: string | null }, log: (line: string) => void, open: (url: string) => Sql & { close?(): Promise<void> } = keeperSql): LeaseStore | null {
+   company started from the compose file by hand is, still leads: under a name of its own, alone, and in no network.
+   Lease writes and background maintenance use separate connections so slow catalog checks or pruning cannot starve
+   ten-second lease renewals. */
+export function leaseOfMachine(config: { databaseUrl?: string | null; machineId: string | null }, log: (line: string) => void, open: (url: string) => ClosableSql = keeperSql): LeaseStore | null {
   if (!config.databaseUrl) {
     log('The keeper takes no lease: DATABASE_URL is not set.');
     return null;
   }
   if (!config.machineId) log('HORNHOOF_MACHINE_ID is not set, so this machine leads under a name of its own and joins no network. Run the install command to give it one.');
-  return leaseStore(open(config.databaseUrl), { machineId: config.machineId ?? UNNAMED_MACHINE });
+  return leaseStore(open(config.databaseUrl), { machineId: config.machineId ?? UNNAMED_MACHINE, backgroundSql: open(config.databaseUrl) });
 }

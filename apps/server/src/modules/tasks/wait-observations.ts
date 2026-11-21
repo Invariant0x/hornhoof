@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, eq, inArray, isNull, notInArray, or } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, requests, tasks, testRuns, turns } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
@@ -8,6 +8,9 @@ import { waitingCycles } from './wait-graph.js';
 import { workOfOpenTurn } from './turn-department.js';
 
 const QUIET_DEPARTMENT_MS = 15 * 60_000;
+const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
+const uuidList = (ids: readonly string[]): string => `{${ids.join(',')}}`;
+const asDate = (value: Date | string | null | undefined): Date | null => (value == null ? null : value instanceof Date ? value : new Date(value));
 export const waitKey = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export const taskVersions = (rows: Task[]) => rows.map(t => ({ id: t.id, version: t.version })).sort((a, b) => a.id.localeCompare(b.id));
 
@@ -59,10 +62,45 @@ async function waitingForService(ctx: Ctx, task: Task): Promise<string | null> {
   return test ? 'waiting for a test run' : null;
 }
 
+/* Checks running conversations with two small indexed probes instead of an OR scan over job history. */
+async function hasRunningConversation(ctx: Ctx, companyId: string, employeeIds: readonly string[], taskIds: readonly string[]): Promise<boolean> {
+  if (employeeIds.length) {
+    const [byAgent] = await ctx.db.select(idOnly(jobs)).from(jobs)
+      .where(and(eq(jobs.companyId, companyId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), inArray(jobs.agentId, [...employeeIds]))).limit(1);
+    if (byAgent) return true;
+  }
+  if (!taskIds.length) return false;
+  const [byTask] = await ctx.db.select(idOnly(jobs)).from(jobs)
+    .where(and(eq(jobs.companyId, companyId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), inArray(jobs.taskId, [...taskIds]))).limit(1);
+  return Boolean(byTask);
+}
+
+/* Strict equality on task_id already implies task_id IS NOT NULL for the partial index without double-counting null_frac. */
+async function maxFinishedBy(ctx: Ctx, companyId: string, ids: readonly string[], by: 'agent' | 'task'): Promise<Date | null> {
+  if (!ids.length) return null;
+  const col = by === 'agent' ? sql.raw('agent_id') : sql.raw('task_id');
+  const [row] = rowsOf<{ at: Date | string | null }>(await ctx.db.execute(sql`
+    SELECT max(j.finished_at) AS "at"
+    FROM unnest(${uuidList(ids)}::uuid[]) AS k(id)
+    CROSS JOIN LATERAL (
+      SELECT finished_at
+      FROM jobs
+      WHERE company_id = ${companyId}
+        AND ${col} = k.id
+        AND kind = 'conversation'
+        AND started_at IS NOT NULL
+        AND finished_at IS NOT NULL
+      ORDER BY finished_at DESC
+      LIMIT 1
+    ) j
+  `));
+  return asDate(row?.at);
+}
+
 /* The last thing that says the department was at work. */
-const silentSince = (turn: typeof turns.$inferSelect, work: (typeof tasks.$inferSelect)[], conversations: (typeof jobs.$inferSelect)[]): Date => new Date(Math.max(
+const silentSince = (turn: typeof turns.$inferSelect, work: (typeof tasks.$inferSelect)[], finishedTimes: readonly (Date | null)[]): Date => new Date(Math.max(
   (turn.openedAt ?? turn.createdAt).getTime(), ...work.map(t => t.updatedAt.getTime()),
-  ...conversations.flatMap(job => job.startedAt && job.finishedAt ? [job.finishedAt.getTime()] : []),
+  ...finishedTimes.flatMap(at => (at ? [at.getTime()] : [])),
   /* A wait that ran out explained the work until then: the silence starts there. */
   ...work.flatMap(t => t.externalWait ? [new Date(t.externalWait.until).getTime()] : []),
 ));
@@ -73,13 +111,13 @@ export async function quietDepartment(ctx: Ctx, turnId: string, departmentId: st
   const scope = await departmentScope(ctx, turn.companyId, departmentId);
   const work = await ctx.db.select().from(tasks).where(and(workOfOpenTurn(turn.id), inArray(tasks.departmentId, scope), notInArray(tasks.status, [...CLOSED])));
   if (!work.length) return null;
-  const employees = ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, turn.companyId), inArray(agents.departmentId, scope)));
-  const conversations = await ctx.db.select().from(jobs).where(and(eq(jobs.companyId, turn.companyId), eq(jobs.kind, 'conversation'), or(inArray(jobs.agentId, employees), inArray(jobs.taskId, work.map(task => task.id)))));
-  if (conversations.some(job => job.status === 'running')) return null;
+  const employeeIds = (await ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, turn.companyId), inArray(agents.departmentId, scope)))).map(a => a.id);
+  const taskIds = work.map(task => task.id);
+  if (await hasRunningConversation(ctx, turn.companyId, employeeIds, taskIds)) return null;
   /* A department where all of it waits for something known, in time, has nothing to say. */
   const silent = await unexplained(ctx, work, now);
   if (!silent.length) return null;
-  const since = silentSince(turn, work, conversations);
+  const since = silentSince(turn, work, [await maxFinishedBy(ctx, turn.companyId, employeeIds, 'agent'), await maxFinishedBy(ctx, turn.companyId, taskIds, 'task')]);
   if (now.getTime() - since.getTime() < QUIET_DEPARTMENT_MS) return null;
   const versions = taskVersions(work);
   return { companyId: turn.companyId, work, silent, since, key: waitKey([turn.id, departmentId, versions, since.toISOString()]) };

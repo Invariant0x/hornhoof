@@ -851,7 +851,16 @@ export const jobs = pgTable(
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status),
+  t => [
+    index('jobs_subscription_id').on(t.subscriptionId),
+    index('jobs_task_id').on(t.taskId),
+    index('jobs_agent_id_status').on(t.agentId, t.status),
+    index('jobs_agent_conversation_ended').on(t.companyId, t.agentId, sql`coalesce(${t.finishedAt}, ${t.createdAt})`, t.createdAt).where(sql`${t.kind} = 'conversation' and ${t.status} in ('done', 'failed')`),
+    index('jobs_agent_conversation_retry_waiting').on(t.companyId, t.agentId, t.createdAt).where(sql`${t.kind} = 'conversation' and ${t.status} = 'queued' and ${t.notBefore} is not null and ${t.continueOf} is not null`),
+    index('jobs_agent_conversation_obsolete').on(t.companyId, t.agentId, sql`coalesce(${t.finishedAt}, ${t.createdAt})`, t.createdAt).where(sql`${t.kind} = 'conversation' and ${t.status} = 'obsolete'`),
+    index('jobs_agent_conversation_finished').on(t.companyId, t.agentId, t.finishedAt).where(sql`${t.kind} = 'conversation' and ${t.startedAt} is not null and ${t.finishedAt} is not null`),
+    index('jobs_task_conversation_finished').on(t.companyId, t.taskId, t.finishedAt).where(sql`${t.kind} = 'conversation' and ${t.taskId} is not null and ${t.startedAt} is not null and ${t.finishedAt} is not null`),
+    index('jobs_company_conversation_running').on(t.companyId, t.agentId, t.taskId).where(sql`${t.kind} = 'conversation' and ${t.status} = 'running'`),
     check('jobs_builtin_machine', sql`builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'`),
   ],
 );
@@ -985,6 +994,11 @@ export const agentEvents = pgTable(
     uniqueIndex('agent_events_operator_evidence').on(t.companyId, sql`(data->>'operatorEvidenceId')`).where(sql`data->>'operatorEvidenceId' is not null`),
     uniqueIndex('agent_events_operator_ordinal').on(t.companyId, sql`(data->'operatorEvidence'->>'instance')`, sql`(data->'operatorEvidence'->>'ordinal')`).where(sql`data->>'operatorEvidenceId' is not null`),
     index('agent_events_operator_instance').on(t.agentId, sql`(data->'operatorEvidence'->>'instance')`).where(sql`data->>'operatorEvidenceId' is not null`),
+    index('agent_events_operator_fallback').on(t.agentId, sql`(data->>'operatorFallback')`).where(sql`${t.kind} = 'typed' and data->>'operatorFallback' is not null`),
+    index('agent_events_operator_delivery').on(t.agentId, t.jobId, sql`(data->'operatorDelivery'->>'id')`).where(sql`data->'operatorDelivery'->>'id' is not null`),
+    index('agent_events_operator_evidence_delivery').on(t.agentId, sql`(data->'operatorEvidence'->>'deliveryId')`).where(sql`data->'operatorEvidence'->>'deliveryId' is not null`),
+    index('agent_events_operator_evidence_instance').on(t.agentId, sql`(data->'operatorEvidence'->>'instance')`).where(sql`data->'operatorEvidence'->>'instance' is not null`),
+    index('agent_events_operator_recovery_case').on(t.agentId, sql`(data->'operatorEvidence'->>'case')`).where(sql`data->'operatorEvidence'->>'type' = 'program.recovery_ready' and data->'operatorEvidence'->>'case' is not null`),
   ],
 );
 
@@ -1639,7 +1653,12 @@ export const programDeliveries = pgTable('program_deliveries', {
   finishedAt: timestamp('finished_at', { withTimezone: true }),
   outcome: text('outcome', { enum: ['pending', 'taken', 'not_taken', 'cancelled'] }).notNull().default('pending'),
   createdAt: createdAt(),
-}, t => [unique('program_deliveries_ordinal').on(t.agentId, t.ordinal), unique('program_deliveries_reference').on(t.agentId, t.reference), index('program_deliveries_job_id').on(t.jobId)]);
+}, t => [
+  unique('program_deliveries_ordinal').on(t.agentId, t.ordinal),
+  unique('program_deliveries_reference').on(t.agentId, t.reference),
+  index('program_deliveries_job_id').on(t.jobId),
+  index('program_deliveries_live_not_taken').on(t.createdAt).where(sql`${t.kind} = 'live' and ${t.outcome} = 'not_taken'`),
+]);
 
 /* Besides what a node sees of a program: a turn that ended before its program started holds its agent, and one that ended so
    on a node that cannot write its work folder holds every agent of that node. */
