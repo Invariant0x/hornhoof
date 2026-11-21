@@ -97,7 +97,8 @@ it('keeps background turn checks quiet on GitHub rate limits and still logs unex
   expect(errors).toHaveBeenCalledTimes(1);
 
   await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.sales.id, number: 8, goal: 'Close.', status: 'open', openedAt: after(0) });
-  await closeIdleTurns({ ...limited, bus: { ...c.app.ctx.bus, publish: () => { throw new Error('bus failed'); } } as typeof c.app.ctx.bus });
+  vi.spyOn(c.app.ctx.bus, 'publish').mockImplementationOnce(() => { throw new Error('bus failed'); });
+  await closeIdleTurns(limited);
   expect(errors).toHaveBeenCalledTimes(2);
 
   const failingDb = { select: () => { throw new Error('db failed'); } } as unknown as typeof c.db;
