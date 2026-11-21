@@ -119,7 +119,7 @@ async function openMapWith(page: Page, width: Width, lang: Lang, theme: ThemeCho
   await page.goto('/');
   await expect(page.locator('.map .dept')).toHaveCount(2);
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-  await expect(page.locator('.version-mark')).toBeVisible();
+  await expect(page.locator('.map-version')).toBeVisible();
   await page.evaluate(async () => { await document.fonts.ready; });
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   return errors;
@@ -147,7 +147,7 @@ async function measureChrome(page: Page): Promise<ChromeSnapshot> {
       avatar: rectOf(document.querySelector('.tb-right .avatar'))!,
       zoom: rectOf(document.querySelector('.map > .zoom'))!,
       ticker: rectOf(document.querySelector('.map > .ticker'))!,
-      version: rectOf(document.querySelector('.version-mark'))!,
+      version: rectOf(document.querySelector('.map-version'))!,
       overflow: document.documentElement.scrollWidth > window.innerWidth,
     };
   });
