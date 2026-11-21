@@ -235,7 +235,7 @@ const SILENT_CONNECTION_MS = 1000;
 const cardState = (cards: ReturnType<GitHubLimits['cards']>) =>
   cards.map(card => `${card.repository}\0${card.resetAt ?? ''}`).sort().join('\n');
 
-function reposByCompany(rows: { companyId: string; url: string | null; tokenEnc: string | null }[], secret: string) {
+function reposByCompany(rows: { companyId: string; url: string | null; tokenEnc: string | null }[], secret: Buffer) {
   const byCompany = new Map<string, { url: string; token: string }[]>();
   for (const row of rows) {
     const list = byCompany.get(row.companyId) ?? [];
@@ -301,7 +301,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     createSpreadsheet: createOnGoogleSheets(deps.config.googleTokenUrl, deps.config.googleSheetsUrl, deps.config.googleDriveUrl),
     createIssue: openIssueOnGitHub(),
     readModels: modelsReader({ allowed: deps.config.apiInternalHosts }),
-    clock: Date.now,
+    clock: () => Date.now(),
     released: RELEASED,
     ...deps,
     log: app.log,

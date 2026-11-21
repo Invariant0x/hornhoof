@@ -97,6 +97,7 @@ it('keeps GitHub limit cards and SSE refreshes isolated per company and reposito
 
   published.mockClear();
   at(after(60 * MINUTE));
+  c.app.ctx.clock = () => +after(60 * MINUTE);
   c.app.ctx.githubLimits.expire();
   await vi.waitFor(() => expect(published).toHaveBeenCalledWith(c.companyId, expect.objectContaining({ type: 'requests' })));
   expect(published.mock.calls.filter(([companyId]) => companyId === other!.id)).toEqual([]);
