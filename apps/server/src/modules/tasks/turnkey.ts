@@ -154,7 +154,10 @@ async function ownBranchOf(readCommit: NonNullable<Ctx['readCommit']>, repo: Int
   let own: Awaited<ReturnType<Ctx['readCommit']>>;
   try { own = await readCommit(repo, { task: task.number }, 5_000); }
   catch { throw unreadable(); }
-  if (!('problem' in own)) return own;
+  if (!('problem' in own)) {
+    if (own.tag) throw unreadable();
+    return own;
+  }
   if (own.missing) return null;
   throw unreadable();
 }

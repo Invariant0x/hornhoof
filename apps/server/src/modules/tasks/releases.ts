@@ -246,9 +246,12 @@ async function creditTurnkey(ctx: Reader, repo: Repo, brought: Compared[], lines
   return named;
 }
 
+type TaskBranch = { branch: string; task: number; head: string };
+type HeldBranch = TaskBranch & { holds: Set<string> };
+
 /* The heads of the repository's task branches, task-<number> or task-<number>-<words>, with the number each names, as one read
    of its refs says them: none where they could not be read. No ancestry is asked of the host for them. */
-async function taskHeads(ctx: Reader, repo: Repo): Promise<{ branch: string; task: number; head: string }[] | null> {
+async function taskHeads(ctx: Reader, repo: Repo): Promise<TaskBranch[] | null> {
   if (!ctx.readBranches) return null;
   const read = await ctx.readBranches(repo, 5_000).catch(() => null);
   if (!read || 'problem' in read) return null;
@@ -258,22 +261,41 @@ async function taskHeads(ctx: Reader, repo: Repo): Promise<{ branch: string; tas
   });
 }
 
-/* For each line, its own commits that a branch of another task holds, by the first such branch: a branch holds what its
-   head holds within the release's commits, so one whose head the release does not hold holds none here. A branch that also
-   holds the line's tip built on that work, not under it; a commit the line of that branch's own task counts is that task's. */
-function onOtherBranches(brought: Compared[], lines: Line[], own: Set<string>[], heads: { branch: string; task: number; head: string }[]): Map<string, string>[] {
-  const at = new Map(brought.map(c => [c.sha, c]));
+/* Commits each turnkey task claims on its own line, keyed by task number. */
+function commitsByTask(lines: Line[], own: Set<string>[]): Map<number, Set<string>> {
   const byTask = new Map<number, Set<string>>();
-  for (const [i, line] of lines.entries()) for (const sha of own[i]!) (byTask.get(line.task) ?? byTask.set(line.task, new Set()).get(line.task)!).add(sha);
+  for (const [i, line] of lines.entries()) {
+    const held = byTask.get(line.task) ?? new Set<string>();
+    byTask.set(line.task, held);
+    for (const sha of own[i]!) held.add(sha);
+  }
+  return byTask;
+}
+
+/* Notes each commit of mine that other holds without other's own accepted line claiming it. */
+function markOtherBranch(found: Map<string, string>, mine: Set<string>, other: HeldBranch, claimed?: Set<string>): void {
+  for (const sha of mine) {
+    if (other.holds.has(sha) && !claimed?.has(sha) && !found.has(sha)) found.set(sha, other.branch);
+  }
+}
+
+/* Commits of one line that a branch of another task holds without that task's accepted line claiming them, by the first
+   such branch. A branch that also holds the line's tip built on that work, not under it. */
+function otherBranchesFor(line: Line, mine: Set<string>, byTask: Map<number, Set<string>>, inRelease: HeldBranch[]): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const other of inRelease) {
+    if (other.task !== line.task && !other.holds.has(line.tip)) markOtherBranch(found, mine, other, byTask.get(other.task));
+  }
+  return found;
+}
+
+/* For each line, its own commits that a branch of another task holds, by the first such branch: a branch holds what its
+   head holds within the release's commits, so one whose head the release does not hold holds none here. */
+function onOtherBranches(brought: Compared[], lines: Line[], own: Set<string>[], heads: TaskBranch[]): Map<string, string>[] {
+  const at = new Map(brought.map(c => [c.sha, c]));
+  const byTask = commitsByTask(lines, own);
   const inRelease = heads.filter(h => at.has(h.head)).map(h => ({ ...h, holds: heldWithin(at, [h.head]) }));
-  return lines.map((line, i) => {
-    const found = new Map<string, string>();
-    for (const other of inRelease) {
-      if (other.task === line.task || other.holds.has(line.tip)) continue;
-      for (const sha of own[i]!) if (other.holds.has(sha) && !byTask.get(other.task)?.has(sha) && !found.has(sha)) found.set(sha, other.branch);
-    }
-    return found;
-  });
+  return lines.map((line, i) => otherBranchesFor(line, own[i]!, byTask, inRelease));
 }
 
 /* The line each turnkey work's holder checked: from the commit it named down to where its branch started, never under where

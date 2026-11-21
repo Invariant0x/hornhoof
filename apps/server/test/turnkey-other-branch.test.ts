@@ -145,6 +145,23 @@ describe('turnkey work built on a commit that another task\'s branch holds (H7 o
     expect(recorded(last.text)).toMatchObject({ covered: true, uncovered: [] });
   });
 
+  /* The first built on UNACCEPTED and honestly named UNACCEPTED as its start; the second built on the first and named R.
+     Even with no third branch left, the first's own branch holds UNACCEPTED while its accepted line does not claim it,
+     so the second cannot credit UNACCEPTED either. */
+  it('still names an unaccepted commit under an earlier task when a later task names the turn commit beneath it', async () => {
+    const f = await releasing();
+    const first = await turnkeyTask(f, 'First');
+    const second = await turnkeyTask(f, 'Second');
+    lay(f, [{ sha: UNACCEPTED, parents: [f.R] }, { sha: OWN, parents: [UNACCEPTED] }, { sha: LATER, parents: [OWN] }], { [f.branch]: OWN, [first.branch]: OWN, [second.branch]: LATER });
+    await first.done(OWN, UNACCEPTED);
+    f.repo.heads[f.branch] = LATER;
+    await second.done(LATER, f.R);
+    const { first: refused, last } = await released(f, LATER);
+    expect(refused).toMatchObject({ isError: true });
+    expect(refused.text).toContain(onOther(second.task.number, UNACCEPTED, first.branch));
+    expect(recorded(last.text)).toMatchObject({ covered: false, uncovered: [onOther(second.task.number, UNACCEPTED, first.branch)] });
+  });
+
   it('counts nothing of turnkey work as checked where the branches could not be read', async () => {
     const f = await releasing();
     const work = await turnkeyTask(f);
@@ -201,5 +218,19 @@ describe('where task-N already stood as its work started', () => {
     f.ctx.readCommit = read;
     const [started] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, work.task.id), eq(taskEvents.kind, 'status')));
     expect(started!.data).not.toHaveProperty('start');
+  });
+
+  it('leaves the work unstarted where a tag stands in the name of task-N as it started, and refuses that tag at hand-in (H1)', async () => {
+    const f = await releasing();
+    const [team] = await f.db.insert(teams).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, name: 'Lane Tagged', turnkey: true }).returning();
+    const holder = await f.hire('Tagged', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
+    await f.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, holder.id));
+    const { task } = await f.create({ title: 'Turnkey change on a tagged name', assigneeAgentId: holder.id, reviewerAgentId: undefined, securityAgentId: undefined, testsAgentId: undefined });
+    f.repo.tags[`task-${task.number}`] = SEEDED;
+    await startTurnkeyWork(f, holder, task.id);
+    const [started] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'status')));
+    expect(started!.data).not.toHaveProperty('start');
+    await expect(report(f.ctx, holder.id, task.id, { done: true, summary: 'Checked it myself.', turnkey: { commit: SEEDED, baseCommit: f.R } }))
+      .rejects.toMatchObject({ status: 409, message: expect.stringContaining(`The branch of #${task.number} could not be read`) as unknown });
   });
 });

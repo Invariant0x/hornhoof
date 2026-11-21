@@ -11,6 +11,8 @@ describe('what a release brings that no check covers', () => {
     [{ kind: 'checker', task: 7, commit: C }, `#7: a checker of ${C} is off, removed or its author, or passed no verdict on it.`],
     [{ kind: 'task_unread', task: 7 }, 'The commits of #7 could not all be read.'],
     [{ kind: 'unpinned', task: 7 }, '#7 was closed before turnkey work named the commit its holder checked and where it started, so none of its commits counts as checked.'],
+    [{ kind: 'unstarted', task: 7 }, '#7: where this turnkey work started is not on record, so none of its commits counts as checked.'],
+    [{ kind: 'other_branch', task: 7, commit: A, branch: 'task-8' }, `#7: ${A} is also on task-8, and no accepted result of that task brought it, so the checks of #7's holder do not cover it.`],
     [{ kind: 'merge', commit: A }, `${A} is a merge made outside every checked candidate.`],
     [{ kind: 'commit', commit: A }, `${A} came in with no accepted candidate.`],
   ] as [UncheckedItem, string][])('says %o to agents and on the release record as it said before', (item, line) => {

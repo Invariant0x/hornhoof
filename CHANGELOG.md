@@ -16,6 +16,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A bar over the map, such as an update's, no longer pushes the map and an open department down: they reach the top of the window under the header and the bars, and what they show starts under the bars. Windows and cards open 8 px under the bars, and a card opened over a department 8 px under its name, however many lines the name takes.
 - On the map and in an open department the menu, the bars and the bottom bar are separate glass blocks with no shadow and no band between them, so the map shows around them to the top and the bottom of the window, the department's schema too. The chosen tab stands on a solid backing. The department's name and the windows that open there stand 8 px under the menu or the last bar on every screen. When a bar comes or goes the name and the map or the schema slide to their new place in 200 ms, at once with less motion. On a phone every bar after the first folds to one line with More.
 - In a page that reads right to left, the glow of the map's hub stands around the hub instead of at the map's right edge.
+- A release now names for a person any commit that work done alone claims as its own when another task's branch holds it in the release without that task's accepted work bringing it, and notes where the task's own branch already stood as work started so commits already there cannot be claimed.
 
 ### Added
 
