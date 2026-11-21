@@ -7,6 +7,7 @@ import { minuteRound } from '../src/modules/agents/timers.js';
 import { serverStarted } from '../src/modules/nodes/connections.js';
 import { releaseRound, uncheckedInRelease } from '../src/modules/tasks/releases.js';
 import { closeIdleTurns } from '../src/modules/tasks/turn-ends.js';
+import { integrationTarget } from '../src/modules/tasks/turn-integration.js';
 import { GitHubRateLimited } from '../src/modules/testruns/github-limit.js';
 import { aclCompany, type AclCompany } from './agent-view-company.js';
 import { as } from './helpers.js';
@@ -102,6 +103,53 @@ it('keeps GitHub limit cards and SSE refreshes isolated per company and reposito
   await vi.waitFor(() => expect(published).toHaveBeenCalledWith(c.companyId, expect.objectContaining({ type: 'requests' })));
   expect(published.mock.calls.filter(([companyId]) => companyId === other!.id)).toEqual([]);
   expect((await waiting(c, c.tokens.ceo)).githubLimits).toEqual([]);
+});
+
+it('isolates tokenless public GitHub repository limit cards and SSE refreshes per company', async () => {
+  const c = await world();
+  const repoUrl = 'https://github.com/acme/public-shop.git';
+  await c.db.update(departments).set({ repoUrl, repoTokenEnc: null }).where(eq(departments.id, c.dev.id));
+  const [other] = await c.db.insert(companies).values({ name: 'Other Public', singleton: false }).returning();
+  const [otherOwner] = await c.db.insert(people).values({ companyId: other!.id, name: 'Nina', email: 'nina@other.com', status: 'active', isOwner: true, scopeKind: 'company' }).returning();
+  const otherToken = 'other-public-owner-session';
+  await c.db.insert(sessions).values({ personId: otherOwner!.id, tokenHash: hashToken(otherToken), expiresAt: after(120 * MINUTE) });
+  await c.db.insert(departments).values([
+    { companyId: other!.id, name: 'Public Mirror', roleCode: 'PUB', position: 1, repoUrl, repoTokenEnc: null },
+  ]);
+
+  const target = await integrationTarget(c.app.ctx, { companyId: c.companyId, productId: null, departmentId: c.dev.id });
+  expect(target).not.toBeNull();
+  const published = vi.spyOn(c.app.ctx.bus, 'publish');
+  const limit = { remaining: 0 as const, resetAt: +after(0) };
+  c.app.ctx.githubLimits.refused(target!.repo, limit);
+  c.app.ctx.githubLimits.refused(target!.repo, limit);
+
+  await vi.waitFor(() => expect(published).toHaveBeenCalledWith(c.companyId, expect.objectContaining({ type: 'requests' })));
+  expect(published.mock.calls.filter(([companyId]) => companyId === other!.id)).toEqual([]);
+  expect((await waiting(c, c.tokens.ceo)).githubLimits).toEqual([{ repository: 'acme/public-shop', resetAt: limit.resetAt }]);
+  expect((await waiting(c, otherToken)).githubLimits).toEqual([]);
+});
+
+it('skips corrupt encrypted repository tokens without failing requests or other companies SSE refreshes', async () => {
+  const c = await world();
+  const repoUrl = 'https://github.com/acme/resilient-shop.git';
+  await c.db.update(departments).set({ repoUrl, repoTokenEnc: encryptSecret('good-token', c.app.ctx.config.secret) }).where(eq(departments.id, c.dev.id));
+  const [other] = await c.db.insert(companies).values({ name: 'Broken Secret Co', singleton: false }).returning();
+  const [otherOwner] = await c.db.insert(people).values({ companyId: other!.id, name: 'Mila', email: 'mila@broken.test', status: 'active', isOwner: true, scopeKind: 'company' }).returning();
+  const otherToken = 'broken-secret-owner-session';
+  await c.db.insert(sessions).values({ personId: otherOwner!.id, tokenHash: hashToken(otherToken), expiresAt: after(120 * MINUTE) });
+  await c.db.insert(departments).values([
+    { companyId: other!.id, name: 'Corrupt Repo', roleCode: 'BAD', position: 1, repoUrl, repoTokenEnc: 'corrupt-ciphertext-fixture' },
+  ]);
+
+  const published = vi.spyOn(c.app.ctx.bus, 'publish');
+  const limit = { remaining: 0 as const, resetAt: +after(0) };
+  c.app.ctx.githubLimits.refused({ url: repoUrl, token: 'good-token' }, limit);
+  c.app.ctx.githubLimits.refused({ url: repoUrl, token: 'good-token' }, limit);
+
+  await vi.waitFor(() => expect(published).toHaveBeenCalledWith(c.companyId, expect.objectContaining({ type: 'requests' })));
+  expect((await waiting(c, c.tokens.ceo)).githubLimits).toEqual([{ repository: 'acme/resilient-shop', resetAt: limit.resetAt }]);
+  expect((await waiting(c, otherToken)).githubLimits).toEqual([]);
 });
 
 it('keeps background turn checks quiet on GitHub rate limits and still logs unexpected errors', async () => {

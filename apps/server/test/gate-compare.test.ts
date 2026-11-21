@@ -265,4 +265,30 @@ describe('a branch holds a commit, however many files lie between them', () => {
     expect(githubLimits.cards([tokenA, tokenB, tokenC])).toEqual([{ repository: 'acme/shop', resetAt: later }]);
     expect(githubLimits.cards([tokenB, tokenA])).toEqual([{ repository: 'acme/shop', resetAt: later }]);
   });
+
+  it('caches negative proofs for exact 40-hex SHAs and never caches mutable ref names', async () => {
+    const git = vi.fn().mockResolvedValue(false);
+    const rest = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const ctx = { readGitAncestry: git, readMerged: rest };
+    const head = 'e'.repeat(40);
+    expect(await branchHolds(ctx, at, head, sha)).toBe(false);
+    expect(await branchHolds(ctx, at, head, sha)).toBe(false);
+    expect(git).toHaveBeenCalledTimes(1);
+    expect(await branchHolds(ctx, at, 'main', sha)).toBe(true);
+    expect(await branchHolds(ctx, at, 'main', sha)).toBe(false);
+    expect(rest).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not leak cards for unattributed tokenless public repositories while keeping backoff active', async () => {
+    const resetAt = Date.UTC(2030, 0, 1, 23, 45);
+    const now = resetAt - 60_000;
+    const githubLimits = new GitHubLimits(() => now, () => {});
+    const anon = { url: 'https://github.com/acme/public.git', token: '' };
+    githubLimits.refused(anon, { remaining: 0, resetAt });
+    githubLimits.refused(anon, { remaining: 0, resetAt });
+    expect(githubLimits.cards([anon])).toEqual([]);
+    const read = vi.fn();
+    await expect(githubLimits.request(anon, read)).rejects.toThrow('23:45 UTC');
+    expect(read).not.toHaveBeenCalled();
+  });
 });
