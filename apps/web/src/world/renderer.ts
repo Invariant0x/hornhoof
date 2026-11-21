@@ -37,6 +37,7 @@ import {
   renderCityToPixi,
   type CityRenderState,
   type RelocationTargetPreview,
+  type TileWindow,
 } from './city-renderer';
 import { cityToPickableObjects } from './live-sync';
 import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas } from './smooth-terrain-baker';
@@ -53,6 +54,7 @@ export type RendererDebugInfo = Readonly<{
 export type WorldEngineStats = Readonly<{
   fps: number;
   frameTimeMs: number;
+  cpuStepMs: number;
   zoom: number;
   zoomPercent: number;
   minZoom: number;
@@ -174,6 +176,7 @@ export class IsometricWorldEngine {
   private lastBorderZoom = -1;
   private lastGridKey = '';
   private lastOverlayKey = '';
+  private cityCullWindow: TileWindow | null = null;
 
   private fallbackCanvas: HTMLCanvasElement | null = null;
   private fallbackCtx: CanvasRenderingContext2D | null = null;
@@ -190,6 +193,7 @@ export class IsometricWorldEngine {
   private fpsSamples: number[] = [];
   private lastFps = 60;
   private lastFrameMs = 16.67;
+  private lastCpuStepMs = 0;
   private lastStatsPushTs = 0;
 
   private dragPointerId: number | null = null;
@@ -262,6 +266,7 @@ export class IsometricWorldEngine {
         antialias: true,
         resolution: this.dpr,
         autoDensity: true,
+        autoStart: false,
         preference: 'webgl',
       });
       if (this.destroyed) {
@@ -612,6 +617,7 @@ export class IsometricWorldEngine {
   setCityRenderState(state: CityRenderState | null): void {
     this.cityRenderState = state;
     this.cityDirty = true;
+    this.cityCullWindow = null;
     this.objects = state ? cityToPickableObjects(state.city) : [];
     if (state?.relocationPreview !== undefined) {
       this.relocationPreview = state.relocationPreview;
@@ -691,6 +697,7 @@ export class IsometricWorldEngine {
     }
     this.dirtyScene = true;
     this.syncScene(Infinity);
+    this.app?.render();
     this.emitStats(true);
   }
 
@@ -699,6 +706,7 @@ export class IsometricWorldEngine {
     return {
       fps: Math.round(this.lastFps),
       frameTimeMs: Math.round(this.lastFrameMs * 10) / 10,
+      cpuStepMs: Math.round(this.lastCpuStepMs * 100) / 100,
       zoom: Math.round(this.camera.zoom * 1000) / 1000,
       zoomPercent: zoomPercent(this.camera.zoom),
       minZoom: this.zoomBounds.minZoom,
@@ -771,6 +779,7 @@ export class IsometricWorldEngine {
   };
 
   private stepFrame(ts: number): void {
+    const stepStart = performance.now();
     const dtMs = Math.max(1, Math.min(100, ts - this.lastFrameTs || 16.67));
     this.lastFrameTs = ts;
     this.lastFrameMs = dtMs;
@@ -793,7 +802,9 @@ export class IsometricWorldEngine {
     }
 
     /* Smoothly animate the dedicated liquid layer independently from baked ground chunks. */
+    let liquidAnimated = false;
     if (this.terrainMap && this.pack.liquidLayer) {
+      liquidAnimated = true;
       const dtSec = dtMs / 1000;
       const animDetail = animationDetailForZoom(this.camera.zoom);
       const speedScale = animDetail === 'reduced' ? 0.55 : 1.0;
@@ -811,9 +822,14 @@ export class IsometricWorldEngine {
       }
     }
 
-    if (this.dirtyScene || this.pendingBakeCount > 0) {
+    const needsSync = this.dirtyScene || this.pendingBakeCount > 0;
+    if (needsSync) {
       this.syncScene(BAKE_BUDGET_MS);
     }
+    if (this.app && (needsSync || liquidAnimated)) {
+      this.app.render();
+    }
+    this.lastCpuStepMs = performance.now() - stepStart;
 
     if (ts - this.lastStatsPushTs >= 180) {
       this.lastStatsPushTs = ts;
@@ -881,12 +897,39 @@ export class IsometricWorldEngine {
         }
       }
 
-      if (this.cityDirty && this.cityGraphic) {
-        this.cityDirty = false;
-        if (this.cityRenderState) {
-          renderCityToPixi(this.cityGraphic, this.cityRenderState, this.pack, this.tileW, this.tileH);
+      if (this.cityGraphic) {
+        if (!this.cityRenderState) {
+          if (this.cityDirty) {
+            this.cityDirty = false;
+            this.cityCullWindow = null;
+            this.cityGraphic.clear();
+          }
         } else {
-          this.cityGraphic.clear();
+          const viewCorners = [
+            worldToTileFloat(visibleRect.minX, visibleRect.minY, this.tileW, this.tileH),
+            worldToTileFloat(visibleRect.maxX, visibleRect.minY, this.tileW, this.tileH),
+            worldToTileFloat(visibleRect.maxX, visibleRect.maxY, this.tileW, this.tileH),
+            worldToTileFloat(visibleRect.minX, visibleRect.maxY, this.tileW, this.tileH),
+          ];
+          const vMinC = Math.floor(Math.min(...viewCorners.map(p => p.col))) - 2;
+          const vMaxC = Math.ceil(Math.max(...viewCorners.map(p => p.col))) + 2;
+          const vMinR = Math.floor(Math.min(...viewCorners.map(p => p.row))) - 2;
+          const vMaxR = Math.ceil(Math.max(...viewCorners.map(p => p.row))) + 2;
+          const cw = this.cityCullWindow;
+          const outsideCached =
+            !cw || vMinC < cw.minCol || vMaxC > cw.maxCol || vMinR < cw.minRow || vMaxR > cw.maxRow;
+          if (this.cityDirty || outsideCached) {
+            this.cityDirty = false;
+            const pad = 8;
+            const nextWindow: TileWindow = {
+              minCol: vMinC - pad,
+              maxCol: vMaxC + pad,
+              minRow: vMinR - pad,
+              maxRow: vMaxR + pad,
+            };
+            this.cityCullWindow = nextWindow;
+            renderCityToPixi(this.cityGraphic, this.cityRenderState, this.pack, this.tileW, this.tileH, nextWindow);
+          }
         }
       }
 

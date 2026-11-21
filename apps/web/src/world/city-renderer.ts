@@ -23,6 +23,13 @@ export type RelocationTargetPreview = Readonly<{
   valid: boolean;
 }>;
 
+export type TileWindow = Readonly<{
+  minCol: number;
+  maxCol: number;
+  minRow: number;
+  maxRow: number;
+}>;
+
 export type CityRenderState = Readonly<{
   city: CityState;
   worldMode: WorldMode;
@@ -95,6 +102,7 @@ function drawIsoPrismPixi(
   rightColor: number,
   outlineColor = 0x241d16,
   outlineAlpha = 0.55,
+  withStroke = true,
 ): void {
   /* Ground drop shadow toward bottom-right (sun from top-left). */
   const shOff = Math.min(18, height * 0.22);
@@ -103,7 +111,7 @@ function drawIsoPrismPixi(
     .lineTo(q.bottom.x + shOff, q.bottom.y + shOff * 0.45)
     .lineTo(q.bottom.x, q.bottom.y)
     .closePath()
-    .fill({ color: 0x100c08, alpha: 0.24 });
+    .fill({ color: 0x100c08, alpha: 0.22 });
 
   /* Left vertical wall (brighter sun-facing side). */
   g.moveTo(q.left.x, q.left.y)
@@ -111,8 +119,8 @@ function drawIsoPrismPixi(
     .lineTo(q.bottom.x, q.bottom.y - height)
     .lineTo(q.left.x, q.left.y - height)
     .closePath()
-    .fill({ color: leftColor, alpha: 1 })
-    .stroke({ color: outlineColor, alpha: outlineAlpha, width: 1.1 });
+    .fill({ color: leftColor, alpha: 1 });
+  if (withStroke) g.stroke({ color: outlineColor, alpha: outlineAlpha, width: 1.0 });
 
   /* Right vertical wall (shaded side). */
   g.moveTo(q.bottom.x, q.bottom.y)
@@ -120,8 +128,8 @@ function drawIsoPrismPixi(
     .lineTo(q.right.x, q.right.y - height)
     .lineTo(q.bottom.x, q.bottom.y - height)
     .closePath()
-    .fill({ color: rightColor, alpha: 1 })
-    .stroke({ color: outlineColor, alpha: outlineAlpha, width: 1.1 });
+    .fill({ color: rightColor, alpha: 1 });
+  if (withStroke) g.stroke({ color: outlineColor, alpha: outlineAlpha, width: 1.0 });
 
   /* Top roof face. */
   g.moveTo(q.top.x, q.top.y - height)
@@ -129,8 +137,8 @@ function drawIsoPrismPixi(
     .lineTo(q.bottom.x, q.bottom.y - height)
     .lineTo(q.left.x, q.left.y - height)
     .closePath()
-    .fill({ color: topColor, alpha: 1 })
-    .stroke({ color: outlineColor, alpha: outlineAlpha, width: 1.1 });
+    .fill({ color: topColor, alpha: 1 });
+  if (withStroke) g.stroke({ color: outlineColor, alpha: outlineAlpha, width: 1.0 });
 }
 
 function drawIsoPyramidPixi(
@@ -357,24 +365,32 @@ function drawBuildingPixi(
 
   if (b.kind === 'supply') {
     const fullness = Math.max(0, Math.min(1, b.fullness ?? 0.5));
-    const maxH = 38;
+    const maxH = 40;
     const emptyShell = 0x9c8e7a;
-    /* Outer silo frame. */
+    /* Outer granary/basin frame. */
     drawIsoPrismPixi(g, q, 14, 0xc3b49b, emptyShell, 0x7c705f);
-    /* Live fullness level rising inside the granary/well basin. */
+    /* Dark inner rim so fill height vs empty cavity reads clearly at a glance. */
+    const cavity = footprintQuad(b.col, b.row, b.spanCol, b.spanRow, tileW, tileH, 0.24);
+    g.moveTo(cavity.top.x, cavity.top.y - 14)
+      .lineTo(cavity.right.x, cavity.right.y - 14)
+      .lineTo(cavity.bottom.x, cavity.bottom.y - 14)
+      .lineTo(cavity.left.x, cavity.left.y - 14)
+      .closePath()
+      .fill({ color: 0x2c241d, alpha: 0.72 });
+    /* Live fullness level rising inside the supply basin. */
     if (fullness > 0.02) {
       const fillH = Math.max(6, Math.round(fullness * maxH));
-      const inner = footprintQuad(b.col, b.row, b.spanCol, b.spanRow, tileW, tileH, 0.28);
+      const inner = footprintQuad(b.col, b.row, b.spanCol, b.spanRow, tileW, tileH, 0.3);
       const innerQ: IsoQuad = {
-        top: { x: inner.top.x, y: inner.top.y - 12 },
-        right: { x: inner.right.x, y: inner.right.y - 12 },
-        bottom: { x: inner.bottom.x, y: inner.bottom.y - 12 },
-        left: { x: inner.left.x, y: inner.left.y - 12 },
+        top: { x: inner.top.x, y: inner.top.y - 14 },
+        right: { x: inner.right.x, y: inner.right.y - 14 },
+        bottom: { x: inner.bottom.x, y: inner.bottom.y - 14 },
+        left: { x: inner.left.x, y: inner.left.y - 14 },
       };
       drawIsoPrismPixi(g, innerQ, fillH, shadeHex(providerColor, 1.18), providerColor, shadeHex(providerColor, 0.78));
     } else {
       /* Empty supply emblem (dry basin). */
-      g.circle(cx, cy - 16, 7).fill({ color: 0x3b2c26, alpha: 0.85 }).stroke({ color: 0xe26a5a, alpha: 0.95, width: 1.6 });
+      g.circle(cx, cy - 16, 7).fill({ color: 0x3b2c26, alpha: 0.9 }).stroke({ color: 0xe26a5a, alpha: 0.95, width: 1.8 });
     }
     return;
   }
@@ -423,21 +439,43 @@ function drawBuildingPixi(
   }
 }
 
-/* Rebuilds the cached static isometric city geometry layer inside a PixiJS Graphics object.
-   Called ONLY when city state changes (never per pan/zoom frame). */
+/* Rebuilds the cached static isometric city geometry layer inside a PixiJS Graphics object,
+   strictly frustum-culled to cullWindow so off-screen walls/roads/buildings never inflate GPU triangle counts. */
 export function renderCityToPixi(
   g: Graphics,
   state: CityRenderState,
   pack: WorldPackManifest,
   tileW: number,
   tileH: number,
+  cullWindow?: TileWindow | null,
 ): void {
   g.clear();
   const { city } = state;
   const districtColors = state.districtColors ?? {};
 
-  /* 1. Roads and bridges. */
+  const tileInWindow = (col: number, row: number): boolean => {
+    if (!cullWindow) return true;
+    return (
+      col >= cullWindow.minCol &&
+      col <= cullWindow.maxCol &&
+      row >= cullWindow.minRow &&
+      row <= cullWindow.maxRow
+    );
+  };
+
+  const rectInWindow = (col: number, row: number, spanCol: number, spanRow: number): boolean => {
+    if (!cullWindow) return true;
+    return (
+      col + spanCol - 1 >= cullWindow.minCol &&
+      col <= cullWindow.maxCol &&
+      row + spanRow - 1 >= cullWindow.minRow &&
+      row <= cullWindow.maxRow
+    );
+  };
+
+  /* 1. Roads and bridges (viewport-culled, fill-only without heavy per-tile stroke triangulation). */
   for (const road of city.roads.values()) {
+    if (!tileInWindow(road.col, road.row)) continue;
     const pts = tileDiamondVertices(road.col, road.row, tileW, tileH);
     const style = road.bridge
       ? { fill: 0x9b6d3f, stroke: 0x593a1d, alpha: 0.96 }
@@ -447,21 +485,23 @@ export function renderCityToPixi(
       .lineTo(pts[2].x, pts[2].y)
       .lineTo(pts[3].x, pts[3].y)
       .closePath()
-      .fill({ color: style.fill, alpha: style.alpha })
-      .stroke({ color: style.stroke, alpha: 0.42, width: 1 });
+      .fill({ color: style.fill, alpha: style.alpha });
   }
 
-  /* 2. Optional outer city wall (empty for packs with outerWallMode: 'none'). */
+  /* 2. Optional outer city wall (empty for packs with outerWallMode: 'none'; strictly viewport-culled). */
   if (city.wallTiles.size > 0) {
     const wallCoords: TileCoord[] = [];
     for (const key of city.wallTiles) {
       const [cStr, rStr] = key.split(',');
-      wallCoords.push({ col: Number(cStr), row: Number(rStr) });
+      const col = Number(cStr);
+      const row = Number(rStr);
+      if (!tileInWindow(col, row)) continue;
+      wallCoords.push({ col, row });
     }
     wallCoords.sort((a, b) => a.col + a.row - (b.col + b.row));
     for (const pt of wallCoords) {
       const wq = footprintQuad(pt.col, pt.row, 1, 1, tileW, tileH, 0.06);
-      drawIsoPrismPixi(g, wq, 18, 0xbab09f, 0x9c9281, 0x7c7364, 0x3b342b, 0.65);
+      drawIsoPrismPixi(g, wq, 18, 0xbab09f, 0x9c9281, 0x7c7364, 0x3b342b, 0.55, false);
     }
   }
 
@@ -470,20 +510,28 @@ export function renderCityToPixi(
     drawEmptyLotPropsPixi(g, state.emptyLotStakes, city.center, tileW, tileH);
   }
 
-  /* 4. Depth-sorted placeholder structures. */
-  const sorted = [...city.buildings].sort((a, b) => {
-    const da = a.col + a.row + (a.spanCol + a.spanRow) * 0.5;
-    const db = b.col + b.row + (b.spanCol + b.spanRow) * 0.5;
-    return da - db || a.col - b.col;
-  });
+  /* 4. Depth-sorted placeholder structures (viewport-culled). */
+  const sorted = city.buildings
+    .filter(b => rectInWindow(b.col, b.row, b.spanCol, b.spanRow))
+    .sort((a, b) => {
+      const da = a.col + a.row + (a.spanCol + a.spanRow) * 0.5;
+      const db = b.col + b.row + (b.spanCol + b.spanRow) * 0.5;
+      return da - db || a.col - b.col;
+    });
   for (const b of sorted) {
     drawBuildingPixi(g, b, pack, districtColors, tileW, tileH);
   }
 
   /* 5. Pending God's Word relocation destination markers (building itself stays at old tile!). */
-  for (const b of sorted) {
+  for (const b of city.buildings) {
     const pend = b.pendingRelocation;
     if (!pend) continue;
+    if (
+      !rectInWindow(b.col, b.row, b.spanCol, b.spanRow) &&
+      !rectInWindow(pend.toCol, pend.toRow, b.spanCol, b.spanRow)
+    ) {
+      continue;
+    }
     const fromPt = tileCenterToWorld(b.col + b.spanCol * 0.5 - 0.5, b.row + b.spanRow * 0.5 - 0.5, tileW, tileH);
     const toPt = tileCenterToWorld(pend.toCol + b.spanCol * 0.5 - 0.5, pend.toRow + b.spanRow * 0.5 - 0.5, tileW, tileH);
     const tq = footprintQuad(pend.toCol, pend.toRow, b.spanCol, b.spanRow, tileW, tileH, 0.05);
