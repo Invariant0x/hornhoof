@@ -1,5 +1,6 @@
 import { DISK_CLEANED_MAX, DISK_KEPT_MAX, NODE_DISK_PARTS, type DiskReport } from '@hornhoof/protocol';
 import { latestReport } from './host-load.js';
+import { nodeIdentity, type NodeHub } from './hub.js';
 
 const OWN = new Set<string>(NODE_DISK_PARTS);
 
@@ -12,22 +13,43 @@ export function machineDisk(said: { at: number; disk?: DiskReport | undefined }[
   const newest = latestReport(reports)?.disk;
   if (!newest) return undefined;
   const disks = reports.map(r => r.disk);
-  const sums = NODE_DISK_PARTS.flatMap(part => {
-    const measured = disks.flatMap(disk => (disk.parts[part] === undefined ? [] : [disk.parts[part]]));
-    return measured.length ? [[part, measured.reduce((sum, bytes) => sum + bytes, 0)] as const] : [];
-  });
-  const parts: DiskReport['parts'] = { ...Object.fromEntries(Object.entries(newest.parts).filter(([part]) => !OWN.has(part))), ...Object.fromEntries(sums) };
+  const machine = Object.fromEntries(Object.entries(newest.parts).filter(([part]) => !OWN.has(part)));
+  return { ...newest, parts: { ...machine, ...ownSums(disks) }, low: lowSince(disks), cleaned: cleanedOf(disks, newest), ...keptOf(disks) };
+}
+
+/* What the nodes measure in their own folders, added up; a part none of them measured is left out. */
+function ownSums(disks: DiskReport[]): DiskReport['parts'] {
+  return Object.fromEntries(
+    NODE_DISK_PARTS.flatMap(part => {
+      const measured = disks.flatMap(disk => (disk.parts[part] === undefined ? [] : [disk.parts[part]]));
+      return measured.length ? [[part, measured.reduce((sum, bytes) => sum + bytes, 0)] as const] : [];
+    }),
+  );
+}
+
+/* Since when the first of the nodes that are low said so; none while no node is. */
+function lowSince(disks: DiskReport[]): DiskReport['low'] {
   const since = disks.flatMap(disk => (disk.low ? [disk.low.since] : [])).toSorted((a, b) => Date.parse(a) - Date.parse(b))[0];
-  const cleaned = disks
+  return since ? { since } : null;
+}
+
+/* The removals of Docker's parts from the newest report, as every node repeats them, and every node's own, newest first. */
+const cleanedOf = (disks: DiskReport[], newest: DiskReport): DiskReport['cleaned'] =>
+  disks
     .flatMap(disk => disk.cleaned.filter(c => disk === newest || OWN.has(c.part)))
     .toSorted((a, b) => Date.parse(b.at) - Date.parse(a.at))
     .slice(0, DISK_CLEANED_MAX);
-  const kept = disks.some(disk => disk.kept) ? disks.flatMap(disk => disk.kept ?? []).toSorted((a, b) => b.bytes - a.bytes).slice(0, DISK_KEPT_MAX) : undefined;
-  return { ...newest, parts, low: since ? { since } : null, cleaned, ...(kept ? { kept } : {}) };
-}
 
-/* The employees' working folders of each node of a machine, by the plan the node serves (none for the machine's own node),
-   the biggest first; a node that did not measure them, or says nothing of its disk, has none. */
+/* What every node keeps, the biggest first; nothing said while no node says it. */
+const keptOf = (disks: DiskReport[]): Pick<DiskReport, 'kept'> =>
+  disks.some(disk => disk.kept) ? { kept: disks.flatMap(disk => disk.kept ?? []).toSorted((a, b) => b.bytes - a.bytes).slice(0, DISK_KEPT_MAX) } : {};
+
+/* The employees' working folders of each node of a machine that says how big they are, by the plan the node serves (none
+   for the machine's own node), the biggest first. */
+export const machineFolders = (hub: NodeHub, nodes: { id: string; subscriptionId: string | null }[]) =>
+  workingFolders(nodes.map(n => ({ plan: n.subscriptionId, disk: hub.loadOf(nodeIdentity(n.id))?.disk })));
+
+/* The same from what each node said: a node that did not measure its working copies, or says nothing of its disk, has none. */
 export function workingFolders(nodes: { plan: string | null; disk: DiskReport | undefined }[]): { plan: string | null; bytes: number }[] {
   return nodes
     .flatMap(({ plan, disk }) => (disk?.parts.workingCopies === undefined ? [] : [{ plan, bytes: disk.parts.workingCopies }]))

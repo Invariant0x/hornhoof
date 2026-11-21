@@ -4,6 +4,7 @@ import type { Ctx } from '../../app.js';
 import { agents, companies, machines, people } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { machineNodes, machineState } from '../testruns/load.js';
+import type { NodeHub } from './hub.js';
 
 /* A machine whose node, short of disk space after cleaning up after itself, takes no new checks or builds. All of it is
    read from what the machine's nodes say now, so there is nothing to create or to close: the card is there while a node
@@ -22,6 +23,26 @@ async function keptNames(ctx: Pick<Ctx, 'db'>, companyId: string, disks: DiskRep
   return new Map(rows.map(row => [row.id, row.name]));
 }
 
+type Machine = { id: string; hostname: string; ownerId: string | null; ownerName: string | null };
+
+/* What a machine's nodes say of its disk while one of them is online; nothing while none is. */
+function saidDisk(hub: NodeHub, ids: string[]): DiskReport | undefined {
+  const { online, load } = machineState(hub, ids);
+  return online ? load?.disk : undefined;
+}
+
+/* The card of a machine whose disk is low, the names still to come; none while it has room. */
+function lowCard(machine: Machine, disk: DiskReport | undefined): Omit<MachineLow, 'names'>[] {
+  if (!disk?.low) return [];
+  const owner = machine.ownerId && machine.ownerName !== null ? { id: machine.ownerId, name: machine.ownerName } : null;
+  return [{ id: machine.id, hostname: machine.hostname, owner, since: disk.low.since, disk }];
+}
+
+/* The names of the employees among the folders a disk keeps work in. */
+const keptBy = (names: Map<string, string>, disk: DiskReport) => Object.fromEntries((disk.kept ?? []).flatMap(k => (names.has(k.agent) ? [[k.agent, names.get(k.agent)!]] : [])));
+
+const longestShortFirst = (a: MachineLow, b: MachineLow) => a.since.localeCompare(b.since) || a.id.localeCompare(b.id);
+
 /* The company's machines short of disk space, the longest short first. */
 export async function machinesLow(ctx: Pick<Ctx, 'db' | 'hub'>, companyId: string): Promise<MachineLow[]> {
   const served = await machineNodes(ctx.db, companyId);
@@ -30,16 +51,9 @@ export async function machinesLow(ctx: Pick<Ctx, 'db' | 'hub'>, companyId: strin
     .from(machines)
     .leftJoin(people, eq(people.id, machines.personId))
     .where(and(eq(machines.companyId, companyId), isNull(machines.revokedAt)));
-  const cards = rows.flatMap(row => {
-    const { online, load } = machineState(ctx.hub, served.filter(n => n.machineId === row.id).map(n => n.id));
-    const disk = online ? load?.disk : undefined;
-    if (!disk?.low) return [];
-    const owner = row.ownerId && row.ownerName !== null ? { id: row.ownerId, name: row.ownerName } : null;
-    return [{ id: row.id, hostname: row.hostname, owner, since: disk.low.since, disk }];
-  });
+  const cards = rows.flatMap(row => lowCard(row, saidDisk(ctx.hub, served.filter(n => n.machineId === row.id).map(n => n.id))));
   const names = await keptNames(ctx, companyId, cards.map(card => card.disk));
-  const named = (disk: DiskReport) => Object.fromEntries((disk.kept ?? []).flatMap(k => (names.has(k.agent) ? [[k.agent, names.get(k.agent)!]] : [])));
-  return cards.map(card => ({ ...card, names: named(card.disk) })).toSorted((a, b) => a.since.localeCompare(b.since) || a.id.localeCompare(b.id));
+  return cards.map(card => ({ ...card, names: keptBy(names, card.disk) })).toSorted(longestShortFirst);
 }
 
 const told = new WeakMap<object, Map<string, string>>();

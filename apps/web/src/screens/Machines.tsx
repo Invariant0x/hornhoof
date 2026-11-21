@@ -47,6 +47,13 @@ const folderRows = (t: Messages, row: MachineRow, subs: SubView[]): FolderRow[] 
     return { plan: sub ? [subName(t, sub), sub.tier].filter(Boolean).join(' ') : provider ? PROVIDER_NAMES[provider] : null, bytes };
   });
 
+/* The machine's disk by part, while it is on the line and its nodes say it. */
+function MachineDisk({ row, subs }: { row: MachineRow; subs: SubView[] }) {
+  const t = useT();
+  const disk = row.online ? row.load?.disk : undefined;
+  return disk ? <DiskParts disk={disk} replicas={row.replicas ?? null} folders={folderRows(t, row, subs)} /> : null;
+}
+
 const busyShare = (load: number, cpus: number) => Math.min(100, Math.round((load / Math.max(1, cpus)) * 100));
 
 /* The date the link's certificate ends, when that is near and the machine has not renewed it. */
@@ -203,7 +210,7 @@ function machineColumns(t: Messages, language: Language, priority: boolean): Tab
   const place: TableColumn<MachineRow>[] = priority ? [{ key: 'priority', label: t.cards.priority, direction: 1, className: 'k-prio', lead: true, value: placeOf, cell: m => <PriorityCell row={m} /> }] : [];
   return [
     ...place,
-    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<DrainMark drain={m.drain} /><OffChecks row={m} /><OtherBuild row={m} /><BrowserIssue row={m} /><CheckIssue row={m} /><LowDisk load={m.online ? m.load : null} /></> },
+    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<DrainMark drain={m.drain} /><OffChecks row={m} /><OtherBuild row={m} /><BrowserIssue row={m} /><CheckIssue row={m} /><LowDisk row={m} /></> },
     { key: 'owner', label: t.machines.owner, direction: 1, value: m => m.owner?.name ?? null, cell: m => m.owner?.name },
     { key: 'status', label: t.tables.status, direction: 1, value: m => m.online ? 0 : 1, className: 'k-status', cell: m => m.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span> },
     { key: 'load', label: t.machines.load, direction: -1, value: load, cell: m => load(m) === null ? t.machines.unknown : <span className="cell-load"><Bar used={load(m)! / 100} /><b><bdi>{t.machines.percent(load(m)!)}</bdi></b></span> },
@@ -684,7 +691,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
   const picking = controls.picking === row.id;
   return (
     <CardFrame label={row.hostname} accent={row.server}
-      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OffChecks row={row} /><OtherBuild row={row} /><BrowserIssue row={row} /><CheckIssue row={row} /><LowDisk load={row.online ? row.load : null} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
+      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OffChecks row={row} /><OtherBuild row={row} /><BrowserIssue row={row} /><CheckIssue row={row} /><LowDisk row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
       extra={m && (core ? <CoreCommand machine={m} shown={core} controls={controls} /> : <PlanPicker machine={m} addable={addable} shown={shown} picking={picking} controls={controls} />)}>
       <section className="blk blk-facts">
         <h4>{t.cards.aboutMachine}</h4>
@@ -697,7 +704,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
           {row.checkError && <p className="machine-note">{row.checkError}</p>}
           <NetworkPlace row={row} />
         </Part>
-        {row.online && row.load?.disk && <DiskParts disk={row.load.disk} replicas={row.replicas ?? null} folders={folderRows(t, row, subs)} />}
+        <MachineDisk row={row} subs={subs} />
       </section>
       <RunningNow title={t.machines.runningNow} label={t.machines.runningOn(row.hostname)} agents={row.running.agents} parts={row.running.parts} online={row.online} me={me} />
       <section className="blk blk-side">

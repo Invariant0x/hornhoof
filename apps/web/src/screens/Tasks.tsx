@@ -447,6 +447,9 @@ function MakeHere({ org, places, department, pipeline, loose, making, setMaking,
   );
 }
 
+/* The machines short of disk space among what waits for people; a server from before sends none. */
+const lowMachines = (decisions: Decisions | null | undefined) => decisions?.machinesLow ?? [];
+
 /* The tracker keeps the same task and goal cards across its views. */
 export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, onDecisionsChanged, selected, onOpenTask, onOpenGoal, onOpenAgent, onOpenOrchestrator, onHome }: Props) {
   const t = useT();
@@ -524,7 +527,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const waitsOnPeople = waitingOnPeople(all);
   const failures = all.filter(task => boardStatus(task) === 'failure');
   const machinesAway = decisions?.machinesAway ?? [];
-  const machinesLow = decisions?.machinesLow ?? [];
+  const machinesLow = lowMachines(decisions);
   const pipeline = place.pipeline ? pipelines.find(p => p.id === place.pipeline) ?? null : null;
   /* The department where the person is: its work, or its goals. */
   const departmentId = section.kind === 'department' ? section.id : section.kind === 'goals' ? place.department : undefined;
