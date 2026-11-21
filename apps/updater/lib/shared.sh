@@ -50,11 +50,22 @@ move_over() {
   fi
 }
 
+# link_once <file> <name>: publish a staged file at a name only when nothing is at that name already, atomically,
+# never replacing a concurrent file, link, pipe or folder and never descending into a folder.
+link_once() {
+  if [[ "$OSTYPE" == darwin* ]]; then
+    link -- "$1" "$2"
+  else
+    ln -T -- "$1" "$2"
+  fi
+}
+
 # put_in_place <name> <kind> <how> <writer> [args], in the folder the shell entered: what the writer prints is written in
-# a private folder made there and then renamed onto the name. The updater never opens the name to write it, so a link or
-# a pipe in its place can neither redirect the write nor stop it. how: once fails when anything is at the name already;
-# over replaces whatever file, link or pipe is there; keeper does too, with a file of mode 600 that is the keeper's
-# alone, as owned makes it. A writer that fails leaves the name as it was, and this fails with the writer's code.
+# a private folder made there and then published onto the name. The updater never opens the name to write it, so a link
+# or a pipe in its place can neither redirect the write nor stop it. how: once atomically links the staged file into
+# place and fails without replacing anything already at the name; over replaces whatever file, link or pipe is there;
+# keeper does too, with a file of mode 600 that is the keeper's alone, as owned makes it. A writer that fails leaves the
+# name as it was, and this fails with the writer's code.
 put_in_place() (
   local file="$1" kind="$2" how="$3" here temporary target status=0
   shift 3
@@ -73,8 +84,11 @@ put_in_place() (
     set -o noclobber
     "$@" > "./$kind" || exit
     if [ "$how" = keeper ]; then owned "./$kind" 600 || exit 1; fi
-    if [ "$how" = once ]; then [ ! -L "$target" ] && [ ! -e "$target" ] || exit 1; fi
-    move_over "./$kind" "$target"
+    if [ "$how" = once ]; then
+      link_once "./$kind" "$target" 2> /dev/null
+    else
+      move_over "./$kind" "$target"
+    fi
   ) || status=$?
   rmdir -- "./${temporary:?}" 2> /dev/null || true
   exit "$status"

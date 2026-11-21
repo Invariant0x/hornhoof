@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { UpdateState } from '../../db/schema.js';
@@ -11,6 +11,8 @@ import { Hourly, readJson, reasonOf, writePrivately } from './machine-keys.js';
 export const FOLLOW_FILE = 'follow.json';
 /* The server's word to install, as the updater reads it. until: seconds since 1970, by this machine's clock. */
 export const GO_FILE = 'go.json';
+/* The keeper-only volume where the updater reads rollout approvals and computer control, out of the app's reach. */
+const COMPUTER_CONTROL = 'computer-control';
 
 const Asked = z.object({ id: z.string(), tag: z.string(), at: z.string() });
 /* said: the server's own end of the word, by which a word already passed on is known. */
@@ -96,18 +98,20 @@ export class Following {
     writePrivately(join(this.opts.dir, FOLLOW_FILE), JSON.stringify({ id, tag: build.tag, at: this.now().toISOString() } satisfies Asked));
   }
 
-  /* The word is passed on as it came, for the request it is for. Written whole and then moved, so the updater never
-     reads half of it. */
+  /* The word is passed on as it came, for the request it is for, on the keeper-only volume so the app cannot plant one.
+     Written whole and then moved, so the updater never reads half of it. */
   private pass(go: Go): void {
     const mine = this.asked();
     if (!mine || go.commit !== mine.tag) return;
-    const file = join(this.opts.controlDir, GO_FILE);
+    const dir = join(this.opts.dir, COMPUTER_CONTROL);
+    const file = join(dir, GO_FILE);
     const held = Word.safeParse(readJson(file));
     /* One word is written once: the server repeats it with every view, each time with less of its stretch left. */
     if (held.success && held.data.id === mine.id && held.data.commit === go.commit && held.data.said === go.until) return;
     /* The stretch that is left, counted from now by this machine's own clock, which need not agree with the server's. */
     const until = Math.floor((this.now().getTime() + go.leftMs) / 1000);
     const word = { id: mine.id, commit: go.commit, until, said: go.until };
+    mkdirSync(dir, { recursive: true });
     writeFileSync(`${file}.new`, JSON.stringify(word));
     renameSync(`${file}.new`, file);
   }

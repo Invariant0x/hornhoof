@@ -13,8 +13,8 @@
 #
 # With HORNHOOF_ROLE=worker it runs on a machine that keeps none of the company's data. There the keeper writes
 # request.json for the build the company server runs. This downloads it, says so with the step wait, and installs once
-# the keeper passes on the server's word in go.json {id, commit, until}: the request's id, its tag, and the second the
-# word ends. It takes no copy of a database and puts none back.
+# the keeper passes on the server's word in go.json {id, commit, until} on the keeper-only computer volume: the
+# request's id, its tag, and the second the word ends. It takes no copy of a database and puts none back.
 
 # How long, in seconds, the server's keeper has to say that the copies promised to wait, that they hold every change
 # the database is saved with, and that their slots went before a database is put back.
@@ -381,7 +381,7 @@ save_and_install() {
 # Whether the keeper passed on the company server's word for this very request, and the word still stands.
 told_to_go() {
   local word id commit until
-  word=$(take "$CONTROL/go.json" || true)
+  word=$(take_alone "$COMPUTER_CONTROL/go.json" || true)
   id=$(jq -r '.id // empty' <<< "$word" 2> /dev/null || true)
   commit=$(jq -r '.commit // empty' <<< "$word" 2> /dev/null || true)
   until=$(jq -r '.until // 0 | floor' <<< "$word" 2> /dev/null || true)
@@ -394,7 +394,7 @@ told_to_go() {
 # the word, with a newer request, which the next pass takes, or after a day.
 wait_turn() {
   local waited=0
-  rm -f "$CONTROL/go.json"
+  remove_in "$COMPUTER_CONTROL" go.json
   step wait "Waiting for its turn to install."
   while true; do
     if told_to_go; then return 0; fi
