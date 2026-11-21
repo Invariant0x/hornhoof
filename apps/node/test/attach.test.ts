@@ -141,7 +141,7 @@ describe('hh-attach', () => {
     const result = await runJob(adapter, { type: 'job.run', jobId: 'headless-job', subscriptionId: 'kimi-plan', provider: 'kimi', prompt: 'Review', sessionId: null, model: null, secret: null, instructions: null, toolToken: 'headless-turn-token', timeoutMs: 2_147_453_647 }, dir, { toolsUrl: url.replace('/api/attachments', '/mcp'), untimed: true });
     expect(result.ok).toBe(true);
     const configured = JSON.parse(readFileSync(join(home, 'mcp.json'), 'utf8')) as { mcpServers: { hornhoof: { url: string; bearerTokenEnvVar: string } } };
-    expect(configured.mcpServers.hornhoof).toEqual({ transport: 'http', url: url.replace('/api/attachments', '/mcp'), bearerTokenEnvVar: 'HH_TOOL_TOKEN' });
+    expect(configured.mcpServers.hornhoof).toEqual({ transport: 'http', url: url.replace('/api/attachments', '/mcp'), bearerTokenEnvVar: 'HH_TOOL_TOKEN', startupTimeoutMs: 120_000 });
     expect(got.map(g => [g.url, g.auth, g.bytes.toString()])).toEqual([['/api/attachments?task=1151&name=review.md', 'Bearer headless-turn-token', 'Headless review']]);
   });
 

@@ -7,6 +7,7 @@ import { bridgeEnv, hook, hookCommand, readJson, type TermProgram } from '../ter
 import { claudeUsageLimits } from '../terminal/transcripts.js';
 import { CLAUDE_UNSIGNED } from './claude-attribution.js';
 import { readPrivate } from './process.js';
+import { claudeMcpStart } from './mcp-start.js';
 import { CLAUDE_NO_AUTO_UPDATE } from './session-updates.js';
 
 /* Claude Code in a native terminal: how it launches, the files it reads first, where it logs and its plan's limits. */
@@ -29,6 +30,11 @@ export async function writeClaudeTools(workDir: string, mcpUrl: string, fs: Agen
   await fs.write(claudeToolsFile(workDir), JSON.stringify({ mcpServers: { hornhoof: { type: 'http', url: mcpUrl } } }));
 }
 
+/* Claude Code gives a hook ten minutes, but its prompt hook thirty seconds and its session end hooks a second and a half
+   unless they ask for more (code.claude.com/docs/en/hooks, "Common fields"): each asks for a minute, in seconds. */
+const HOOK_S = 60;
+const claudeHook = (event: string) => hook(event, HOOK_S);
+
 export const claudeProgram: TermProgram = {
   kind: 'claude',
   launch({ bin, home, workDir, sessionId, model, effort, compactWindow, instructionsFile, urls }) {
@@ -36,7 +42,7 @@ export const claudeProgram: TermProgram = {
     const settings = {
       ...CLAUDE_UNSIGNED,
       /* After compacting its conversation, Claude Code adds what hh-hook compact prints, which sends it back to its tools. */
-      hooks: { SessionStart: [...hook('start'), { matcher: 'compact', ...hook('compact')[0]! }], UserPromptSubmit: hook('prompt'), Stop: hook('stop'), StopFailure: hook('stop'), PreToolUse: hook('tool'), PostToolUse: hook('tooldone'), PostToolUseFailure: hook('toolfail'), PermissionRequest: hook('ask'), SessionEnd: hook('end') },
+      hooks: { SessionStart: [...claudeHook('start'), { matcher: 'compact', ...claudeHook('compact')[0]! }], UserPromptSubmit: claudeHook('prompt'), Stop: claudeHook('stop'), StopFailure: claudeHook('stop'), PreToolUse: claudeHook('tool'), PostToolUse: claudeHook('tooldone'), PostToolUseFailure: claudeHook('toolfail'), PermissionRequest: claudeHook('ask'), SessionEnd: claudeHook('end') },
       /* The status line hears the plan's limits; it shows nothing. */
       statusLine: { type: 'command', command: hookCommand('status') },
     };
@@ -55,7 +61,7 @@ export const claudeProgram: TermProgram = {
     ];
     const compact: Record<string, string> = compactWindow ? { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(compactWindow) } : {};
     const token = planToken(home);
-    return { command, env: { CLAUDE_CONFIG_DIR: home, ...CLAUDE_NO_AUTO_UPDATE, ...CLAUDE_MAIN_SCREEN, ...bridgeEnv(urls), ...compact, ...(token ? { CLAUDE_CODE_OAUTH_TOKEN: token } : {}) }, sessionId: id };
+    return { command, env: { CLAUDE_CONFIG_DIR: home, ...CLAUDE_NO_AUTO_UPDATE, ...CLAUDE_MAIN_SCREEN, ...claudeMcpStart(), ...bridgeEnv(urls, { '*': HOOK_S * 1000 }), ...compact, ...(token ? { CLAUDE_CODE_OAUTH_TOKEN: token } : {}) }, sessionId: id };
   },
 };
 

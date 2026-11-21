@@ -1,0 +1,36 @@
+#!/bin/bash
+# rm, deleting as BusyBox rm -rf does: what is in a folder goes by its whole path, the folder's path and the name, one
+# after another, and the folder last. Right after the first file of the folder RM_SWAP names (<folder>=<target>, by what
+# it really is) went, that folder is swapped for a link to the target, as a process of UID 1000 can do at any moment, and
+# the paths that follow lead through the link. Without -r, each file given goes the same way.
+set -u
+real=''
+for r in /bin/rm /usr/bin/rm; do [ -x "$r" ] && real=$r && break; done
+recursive=0 status=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --) shift; break ;;
+    -*[rR]*) recursive=1; shift ;;
+    -?*) shift ;;
+    *) break ;;
+  esac
+done
+swap_after() { # <folder the file was in>
+  local from=${RM_SWAP%%=*}
+  [ -n "${RM_SWAP:-}" ] && [ "$1" = "$from" ] && mkdir "$STUB_STATE/rm-swapped" 2> /dev/null || return 0
+  mv -- "$from" "$from.moved" && ln -s -- "${RM_SWAP#*=}" "$from"
+}
+gone() { # <path>
+  local folder names name IFS=$'\n'
+  if [ "$recursive" = 1 ] && [ -d "$1" ] && [ ! -L "$1" ]; then
+    names=$(ls -A -- "$1") || return 1
+    for name in $names; do gone "$1/$name" || status=1; done
+    rmdir -- "$1" 2> /dev/null || status=1
+  else
+    folder=$(cd -P -- "$(dirname -- "$1")" 2> /dev/null && pwd -P) || folder=''
+    "$real" -f -- "$1" || status=1
+    swap_after "$folder"
+  fi
+}
+for path in "$@"; do gone "$path"; done
+exit "$status"
