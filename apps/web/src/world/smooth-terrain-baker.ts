@@ -246,12 +246,14 @@ export type BilinearCornerSample = Readonly<{
 
 /* Continuous bilinear interpolation of the smooth corner fields at any fractional (u, v). */
 export function sampleCornerFieldBilinear(cf: CornerFieldGrid, u: number, v: number): BilinearCornerSample {
-  const lu = Math.max(0, Math.min(cf.cols - 1.0001, u - cf.minCol));
-  const lv = Math.max(0, Math.min(cf.rows - 1.0001, v - cf.minRow));
-  const x0 = Math.floor(lu);
-  const y0 = Math.floor(lv);
-  const x1 = Math.min(cf.cols - 1, x0 + 1);
-  const y1 = Math.min(cf.rows - 1, y0 + 1);
+  const maxColIdx = cf.cols - 1;
+  const maxRowIdx = cf.rows - 1;
+  const lu = Math.max(0, Math.min(maxColIdx, u - cf.minCol));
+  const lv = Math.max(0, Math.min(maxRowIdx, v - cf.minRow));
+  const x0 = Math.min(maxColIdx, Math.floor(lu));
+  const y0 = Math.min(maxRowIdx, Math.floor(lv));
+  const x1 = Math.min(maxColIdx, x0 + 1);
+  const y1 = Math.min(maxRowIdx, y0 + 1);
   const fx = lu - x0;
   const fy = lv - y0;
 
@@ -514,6 +516,13 @@ export function bakeSmoothChunkPixels(
           g += (foamRgb[1] - g) * foamBand * foamStrength;
           b += (foamRgb[2] - b) * foamBand * foamStrength;
         }
+      }
+
+      if (
+        alpha < 255 &&
+        (u < chunk.colStart || u >= chunk.colEnd || v < chunk.rowStart || v >= chunk.rowEnd)
+      ) {
+        continue;
       }
 
       rgba[out] = clampByte(r);
