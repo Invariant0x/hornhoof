@@ -21,11 +21,12 @@ function standUp(commit?: string) {
   const following = new Following({ dir, controlDir, commit, now: () => clock.now, log: line => lines.push(line) });
   const read = (file: string) => (existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>) : null);
   const request = () => read(join(controlDir, 'request.json'));
-  const go = () => read(join(controlDir, GO_FILE));
+  const go = () => read(join(dir, 'computer-control', GO_FILE));
+  const controlGo = () => read(join(controlDir, GO_FILE));
   const asked = () => read(join(dir, FOLLOW_FILE));
   /* What the updater says of the request it runs. */
   const updater = (id: unknown, state: string, step: string) => writeFileSync(join(controlDir, 'status.json'), JSON.stringify({ id, version: 'x', state, step, log: '', at: '' }));
-  return { dir, controlDir, clock, lines, following, request, go, asked, updater };
+  return { dir, controlDir, clock, lines, following, request, go, controlGo, asked, updater };
 }
 
 describe("a worker following the server's build", () => {
@@ -113,10 +114,12 @@ describe("a worker following the server's build", () => {
     s.following.heard(B1, { commit: B1.tag, until, leftMs: 900_000 });
     const word = { id: s.request()!.id, commit: B1.tag, until: Date.parse('2031-03-10T13:15:00Z') / 1000, said: until };
     expect(s.go()).toEqual(word);
+    expect(s.controlGo()).toBeNull();
     /* The same word again, with less of it left, is the word already passed on. */
     s.clock.now = new Date('2031-03-10T13:05:00Z');
     s.following.heard(B1, { commit: B1.tag, until, leftMs: 600_000 });
     expect(s.go()).toEqual(word);
+    expect(s.controlGo()).toBeNull();
   });
 
   it('takes a newer build while the old one downloads or waits, and never while it is installed', () => {

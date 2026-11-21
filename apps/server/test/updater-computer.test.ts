@@ -191,20 +191,30 @@ describe('updater, the computer', () => {
     expect(pipes.every(path => lstatSync(path).isFIFO())).toBe(true);
   }, 10_000);
 
-  /* The keeper can plant a named pipe after the updater looked and found nothing there. One that appears while the
-     private folder is made is refused before the start marker is written; one that appears at the last moment before
-     the rename is replaced by it. Either way nothing opens the pipe, so nothing waits on it. */
-  function racing(s: Stand, tool: 'mktemp' | 'mv', plant: string) {
+  /* The keeper can plant an entry after the updater looked and found nothing there. In once mode, atomic no-replace
+     linking refuses a named pipe or concurrent file that appears either while staging or at the last moment before
+     publication, so nothing opens a pipe and no concurrent entry is overwritten. */
+  function racing(s: Stand, tool: 'mktemp' | 'publish', plant: string, create = 'mkfifo "$last"') {
     const tools = join(s.dir, 'racing');
     mkdirSync(tools);
-    const moves = join(s.dir, 'moves');
-    const script =
-      tool === 'mktemp'
-        ? `#!/bin/sh\ncase "$*" in *"-d .started."*) mkfifo ./sample.started ;; esac\nPATH=/usr/bin:/bin exec mktemp "$@"\n`
-        : `#!/bin/sh\nlast=\nfor a in "$@"; do last=$a; done\nprintf '%s\\n' "$*" >> '${moves}'\n` +
-          `case "$last" in ${plant}) mkfifo "$last" ;; esac\nexec /bin/mv "$@"\n`;
-    writeFileSync(join(tools, tool), script, { mode: 0o755 });
-    return { env: { ...env, PATH: `${tools}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin` }, moves };
+    const ops = join(s.dir, 'ops');
+    if (tool === 'mktemp') {
+      writeFileSync(
+        join(tools, 'mktemp'),
+        `#!/bin/sh\ncase "$*" in *"-d .started."*) mkfifo ./sample.started ;; esac\nPATH=/usr/bin:/bin exec mktemp "$@"\n`,
+        { mode: 0o755 },
+      );
+    } else {
+      for (const name of ['mv', 'ln', 'link'] as const) {
+        writeFileSync(
+          join(tools, name),
+          `#!/bin/sh\nlast=\nfor a in "$@"; do last=$a; done\nprintf '%s %s\\n' '${name}' "$*" >> '${ops}'\n` +
+            `PATH=/usr/bin:/bin\ncase "$last" in ${plant}) ${create} ;; esac\nexec ${name} "$@"\n`,
+          { mode: 0o755 },
+        );
+      }
+    }
+    return { env: { ...env, PATH: `${tools}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin` }, ops };
   }
 
   it('refuses a start marker when a named pipe appears at it after the check, and runs nothing', async () => {
@@ -220,21 +230,33 @@ describe('updater, the computer', () => {
     expect(readdirSync(queue).sort()).toEqual(['sample.json', 'sample.started']);
   }, 10_000);
 
-  it('renames the start marker and the answer over named pipes put there at the last moment, and runs once', async () => {
+  it('refuses a start marker atomically when a named pipe appears at the last moment, and runs nothing', async () => {
     const s = stand();
     access(s, later());
     command(s, 'sample', 'recorded sample');
-    const { env: raced, moves } = racing(s, 'mv', '*/sample.started|*/sample.out.json');
+    const { env: raced } = racing(s, 'publish', '*/sample.started');
+    const r = await runOnce(s, null, raced);
+    expect(r.code).toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(r.out).toContain('Computer request refused: its start marker could not be created.');
+    const queue = join(s.computerControl, 'computer');
+    expect(lstatSync(join(queue, 'sample.started')).isFIFO()).toBe(true);
+    expect(readdirSync(queue).sort()).toEqual(['sample.json', 'sample.started']);
+  }, 10_000);
+
+  it('preserves an answer published concurrently at the last moment and keeps the start marker', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'sample', 'recorded sample');
+    const earlier = JSON.stringify({ id: 'sample', exit: 7, output: 'earlier\n' });
+    const { env: raced } = racing(s, 'publish', '*/sample.out.json', `printf '%s' '${earlier}' > "$last"`);
     const r = await runOnce(s, null, raced);
     expect(r.code).toBe(0);
     expect(r.calls.filter(call => call.startsWith('docker start'))).toEqual(['docker start -a hornhoof-computer-sample']);
-    const renamed = readFileSync(moves, 'utf8');
-    expect(renamed).toMatch(/\.\/started \S+\/sample\.started/);
-    expect(renamed).toMatch(/\.\/answer \S+\/sample\.out\.json/);
+    expect(r.out).toContain('Computer answer refused: it could not be published safely.');
     const queue = join(s.computerControl, 'computer');
-    expect(lstatSync(join(queue, 'sample.out.json')).isFile()).toBe(true);
-    expect(answer(s, 'sample')).toEqual({ id: 'sample', exit: 0, output: 'ran: recorded sample\n' });
-    expect(readdirSync(queue).sort()).toEqual(['sample.json', 'sample.out.json']);
+    expect(answer(s, 'sample')).toEqual({ id: 'sample', exit: 7, output: 'earlier\n' });
+    expect(readdirSync(queue).sort()).toEqual(['sample.json', 'sample.out.json', 'sample.started']);
   }, 10_000);
 
   it('leaves the old queue alone when its owner is not UID 1000', async () => {
@@ -296,26 +318,19 @@ describe('updater, the computer', () => {
   });
 
   /* Bash opens a redirect target through a link without O_EXCL once it has seen something there that is not a regular
-     file, so the keeper could swap a link in at that moment. A missing heartbeat is made in a private folder and renamed
-     into place instead: here a link appears at the last moment before that rename, and the rename replaces it. */
-  it('makes a missing computer heartbeat in a private folder and renames it over a link put there at the last moment', async () => {
+     file, so the keeper could swap a link in at that moment. A missing heartbeat is staged in a private folder and
+     published atomically with once mode: a link put there at the last moment is refused without touching its target or
+     replacing the link. */
+  it('makes a missing computer heartbeat in a private folder and refuses a link put there at the last moment', async () => {
     const s = stand();
     const outside = join(s.dir, 'outside');
     mkdirSync(outside);
     const target = join(outside, 'recorded-target');
-    const tools = join(s.dir, 'racing');
-    mkdirSync(tools);
-    const moves = join(s.dir, 'moves');
-    writeFileSync(
-      join(tools, 'mv'),
-      `#!/bin/sh\nlast=\nfor a in "$@"; do last=$a; done\nprintf '%s\\n' "$*" >> '${moves}'\n` +
-        `case "$last" in */alive) ln -s '${target}' "$last" ;; esac\nexec /bin/mv "$@"\n`,
-      { mode: 0o755 },
-    );
-    const r = await runOnce(s, null, { ...env, PATH: `${tools}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin` });
+    const { env: raced, ops } = racing(s, 'publish', '*/alive', `ln -s '${target}' "$last"`);
+    const r = await runOnce(s, null, raced);
     expect(r.code).toBe(0);
-    expect(readFileSync(moves, 'utf8')).toMatch(/\.\/alive \S+\/alive/);
-    expect(lstatSync(join(s.computerControl, 'alive')).isFile()).toBe(true);
+    expect(readFileSync(ops, 'utf8')).toMatch(/(?:ln|link) .*\.\/alive \S+\/alive/);
+    expect(lstatSync(join(s.computerControl, 'alive')).isSymbolicLink()).toBe(true);
     expect(existsSync(target)).toBe(false);
     expect(readdirSync(s.computerControl).filter(name => name.startsWith('.alive.'))).toEqual([]);
   });

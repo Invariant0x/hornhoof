@@ -155,7 +155,7 @@ describe('the updater of a worker that is given the data', () => {
     writeFileSync(join(s.control, 'replica.json'), '{}');
     const later = Math.floor(Date.now() / 1000) + 900;
     const word = JSON.stringify({ id: 'w1', commit: '0.4.1', until: later });
-    const r = await runOnce(s, ask('w1'), { ...WORKER, HORNHOOF_ROLE: 'data', STUB_DURING_SLEEP: `printf '%s' '${word}' > ${s.control}/go.json` });
+    const r = await runOnce(s, ask('w1'), { ...WORKER, HORNHOOF_ROLE: 'data', STUB_DURING_SLEEP: `printf '%s' '${word}' > ${s.computerControl}/go.json` });
     expect(r.status).toMatchObject({ id: 'w1', state: 'done', step: 'finished' });
     expect(r.status.log).toContain('Waiting for its turn to install.');
     /* No copy of its database is saved and no migration is counted: its schema is the company server's. */

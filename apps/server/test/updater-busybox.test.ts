@@ -162,4 +162,44 @@ tests(BUSYBOX ? `the updater with the commands of BusyBox 1.37 (${BUSYBOX})` : '
     expect(readdirSync(outside).length).toBe(MANY);
     expect(leftIn(join(tree, 'sub'))).toBe(0);
   });
+
+  /* BusyBox ln -T: atomic no-replace publication in once mode never overwrites a concurrent entry or descends into a directory. */
+  it('publishes once with BusyBox ln -T without replacing a concurrent file, link, pipe or folder', async () => {
+    const s = stand();
+    const tools = busybox(s);
+    const ok = await runUpdaterStep(s, 'publish "$CONTROL/clean.once" once printf "whole\\n"', tools.env);
+    expect(ok.code, ok.out).toBe(0);
+    expect(readFileSync(join(s.control, 'clean.once'), 'utf8')).toBe('whole\n');
+    expect(statSync(join(s.control, 'clean.once')).nlink).toBe(1);
+
+    for (const [name, plant] of [
+      ['file.once', 'printf "earlier\\n" > "$last"'],
+      ['link.once', `'${BUSYBOX}' ln -s /nonexistent "$last"`],
+      ['pipe.once', 'PATH=/usr/bin:/bin mkfifo "$last"'],
+      ['dir.once', `'${BUSYBOX}' mkdir "$last"`],
+    ] as const) {
+      const shims = join(s.dir, `shims-${name}`);
+      mkdirSync(shims);
+      for (const cmd of ['ln', 'mv'] as const) {
+        writeFileSync(
+          join(shims, cmd),
+          `#!/bin/sh\nlast=\nfor a in "$@"; do last=$a; done\ncase "$last" in */${name}) ${plant} ;; esac\nexec '${BUSYBOX}' ${cmd} "$@"\n`,
+          { mode: 0o755 },
+        );
+      }
+      const r = await runUpdaterStep(
+        s,
+        `if publish "$CONTROL/${name}" once printf "later\\n"; then echo published; else echo refused; fi`,
+        { PATH: `${shims}:${tools.env.PATH}` },
+      );
+      expect(r.code, r.out).toBe(0);
+      expect(r.out.trim()).toBe('refused');
+    }
+    expect(readFileSync(join(s.control, 'file.once'), 'utf8')).toBe('earlier\n');
+    expect(lstatSync(join(s.control, 'link.once')).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(s.control, 'pipe.once')).isFIFO()).toBe(true);
+    expect(lstatSync(join(s.control, 'dir.once')).isDirectory()).toBe(true);
+    expect(readdirSync(join(s.control, 'dir.once'))).toEqual([]);
+    expect(readdirSync(s.control).sort()).toEqual(['clean.once', 'dir.once', 'file.once', 'link.once', 'pipe.once']);
+  });
 });

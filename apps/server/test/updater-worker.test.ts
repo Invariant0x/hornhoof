@@ -15,7 +15,7 @@ const WORKER = {
 const LATER = Math.floor(Date.now() / 1000) + 900;
 const word = (over: object = {}) => JSON.stringify({ id: 'w1', commit: '0.4.1', until: LATER, ...over });
 /* What happens while the updater waits a second: the keeper passes on the server's word, as this command writes it. */
-const during = (s: Stand, script: string) => ({ STUB_DURING_SLEEP: script.replaceAll('$C', s.control).replaceAll('$S', s.dir) });
+const during = (s: Stand, script: string) => ({ STUB_DURING_SLEEP: script.replaceAll('$C', s.control).replaceAll('$K', s.computerControl).replaceAll('$S', s.dir) });
 const said = (s: Stand, name: string) => JSON.parse(readFileSync(join(s.dir, name), 'utf8')) as { state: string; step: string; log: string };
 
 describe('the updater of a worker', () => {
@@ -26,11 +26,11 @@ describe('the updater of a worker', () => {
   it('downloads the build, waits for its turn, and installs when the keeper passes on the word', async () => {
     const s = stand();
     /* A word from before this wait is for another request. */
-    writeFileSync(join(s.control, 'go.json'), word());
+    writeFileSync(join(s.computerControl, 'go.json'), word());
     /* While it waits: what it says, whether the old word is still there, and then the word. */
     const r = await runOnce(s, ask('w1'), {
       ...WORKER,
-      ...during(s, `[ -f $S/in-wait ] || { cp $C/status.json $S/in-wait; [ -f $C/go.json ] && touch $S/old-word; }; printf '%s' '${word()}' > $C/go.json`),
+      ...during(s, `[ -f $S/in-wait ] || { cp $C/status.json $S/in-wait; [ -f $K/go.json ] && touch $S/old-word; }; printf '%s' '${word()}' > $K/go.json`),
     });
     expect(r.status).toMatchObject({ id: 'w1', version: '0.4.1', state: 'done', step: 'finished' });
     expect(said(s, 'in-wait')).toMatchObject({ state: 'running', step: 'wait' });
@@ -64,11 +64,23 @@ describe('the updater of a worker', () => {
     const past = Math.floor(Date.now() / 1000) - 5;
     const words = [word({ id: 'other' }), word({ commit: '0.4.0' }), word({ until: past }), '{}', 'not json'];
     /* Each wait brings the next of these, and none is taken, so the wait ends by itself. */
-    const script = `n=$(cat $S/n 2> /dev/null || echo 0); case $n in ${words.map((w, i) => `${i}) printf '%s' '${w}' > $C/go.json ;;`).join(' ')} esac; echo $((n + 1)) > $S/n`;
+    const script = `n=$(cat $S/n 2> /dev/null || echo 0); case $n in ${words.map((w, i) => `${i}) printf '%s' '${w}' > $K/go.json ;;`).join(' ')} esac; echo $((n + 1)) > $S/n`;
     const r = await runOnce(s, ask('w1'), { ...WORKER, HORNHOOF_TURN_WAIT: '12', ...during(s, script) });
     expect(r.status).toMatchObject({ id: 'w1', state: 'failed', step: 'finished' });
     expect(r.status.log).toContain('The company server did not give this machine its turn within a day.');
     expect(Number(readFileSync(join(s.dir, 'n'), 'utf8'))).toBeGreaterThanOrEqual(words.length);
+    expect(r.calls.some(c => c.startsWith('installer'))).toBe(false);
+  });
+
+  it('ignores a rollout approval planted in the app-writable control folder while waiting for its turn', async () => {
+    const s = stand();
+    const r = await runOnce(s, ask('w1'), {
+      ...WORKER,
+      HORNHOOF_TURN_WAIT: '4',
+      ...during(s, `printf '%s' '${word()}' > $C/go.json`),
+    });
+    expect(r.status).toMatchObject({ id: 'w1', state: 'failed', step: 'finished' });
+    expect(r.status.log).toContain('The company server did not give this machine its turn within a day.');
     expect(r.calls.some(c => c.startsWith('installer'))).toBe(false);
   });
 
@@ -83,7 +95,7 @@ describe('the updater of a worker', () => {
 
   it('goes back without restoring anything when the new build does not answer', async () => {
     const s = stand();
-    const r = await runOnce(s, ask('w1'), { ...WORKER, STUB_BROKEN: '0.4.1', ...during(s, `printf '%s' '${word()}' > $C/go.json`) });
+    const r = await runOnce(s, ask('w1'), { ...WORKER, STUB_BROKEN: '0.4.1', ...during(s, `printf '%s' '${word()}' > $K/go.json`) });
     expect(r.status).toMatchObject({ id: 'w1', state: 'rolled_back', step: 'finished' });
     expect(r.status.log).toContain('This machine runs the build from before the update again.');
     const installs = r.calls.filter(c => c.startsWith('installer'));
@@ -99,7 +111,7 @@ describe('the updater of a worker', () => {
     /* The updater's container goes while it waits, as with a restart of Docker; the next one finds the note. */
     const first = await runOnce(s, ask('w1'), { ...WORKER, ...during(s, 'kill -9 $(ps -o ppid= -p $PPID)') });
     expect(first.status).toMatchObject({ id: 'w1', state: 'running', step: 'wait' });
-    const again = await runOnce(s, null, { ...WORKER, ...during(s, `printf '%s' '${word()}' > $C/go.json`) });
+    const again = await runOnce(s, null, { ...WORKER, ...during(s, `printf '%s' '${word()}' > $K/go.json`) });
     expect(again.status).toMatchObject({ id: 'w1', state: 'done', step: 'finished' });
     /* It waited for its turn again: the word from before the stop would be for nobody. */
     expect(again.status.log).toContain('Waiting for its turn to install.');
@@ -135,7 +147,7 @@ describe('the updater of a worker', () => {
     writeFileSync(join(s.control, 'request.json'), JSON.stringify(ask('w1')));
     await until(() => loop.status()?.step === 'wait');
     /* Its turn comes while the look still waits: the install waits for the look, so no two installers move one node. */
-    writeFileSync(join(s.control, 'go.json'), word());
+    writeFileSync(join(s.computerControl, 'go.json'), word());
     await until(() => loop.status()?.log.includes("Waiting for the look at this machine's nodes to end.") ?? false);
     expect(loop.calls()).not.toContain('own installer end');
     expect(loop.calls().some(call => call.startsWith('installer worker'))).toBe(false);

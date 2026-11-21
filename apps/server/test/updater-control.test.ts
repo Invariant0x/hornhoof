@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -209,16 +209,108 @@ describe('what the updater writes in the folders it shares with the app and the 
     expect(lstatSync(app).ino).not.toBe(before[0]);
     expect(lstatSync(keeper).ino).not.toBe(before[1]);
   });
+
+  /* Once mode must never replace an entry created concurrently between the pre-check and publication,
+     must leave nothing behind when its writer fails, and must publish a single-link file when clear. */
+  function publishOnceRace(s: Stand, plant: string) {
+    const tools = join(s.dir, 'once-race');
+    mkdirSync(tools, { recursive: true });
+    for (const name of ['mv', 'ln', 'link'] as const) {
+      writeFileSync(
+        join(tools, name),
+        `#!/bin/sh\nlast=\nfor a in "$@"; do last=$a; done\nPATH=/usr/bin:/bin\ncase "$last" in */sample.once) ${plant} ;; esac\nexec ${name} "$@"\n`,
+        { mode: 0o755 },
+      );
+    }
+    return { PATH: `${tools}:${dirname(fileURLToPath(new URL('./updater-stubs/docker', import.meta.url)))}:${dirname(JQ)}:/usr/bin:/bin` };
+  }
+
+  it.each([
+    {
+      what: 'concurrent regular file',
+      plant: "printf 'earlier\\n' > \"$last\"",
+      check: (target: string) => {
+        expect(lstatSync(target).isFile()).toBe(true);
+        expect(readFileSync(target, 'utf8')).toBe('earlier\n');
+      },
+    },
+    {
+      what: 'concurrent symlink to a protected file',
+      plant: 'ln -s "$OUTSIDE" "$last"',
+      check: (target: string, outside: string) => {
+        expect(lstatSync(target).isSymbolicLink()).toBe(true);
+        untouched(outside);
+      },
+    },
+    {
+      what: 'concurrent dangling symlink',
+      plant: 'ln -s "$OUTSIDE.missing" "$last"',
+      check: (target: string, outside: string) => {
+        expect(lstatSync(target).isSymbolicLink()).toBe(true);
+        expect(existsSync(`${outside}.missing`)).toBe(false);
+      },
+    },
+    {
+      what: 'concurrent symlink to a directory',
+      plant: 'mkdir "$OUTSIDE.dir" && ln -s "$OUTSIDE.dir" "$last"',
+      check: (target: string, outside: string) => {
+        expect(lstatSync(target).isSymbolicLink()).toBe(true);
+        expect(readdirSync(`${outside}.dir`)).toEqual([]);
+      },
+    },
+    {
+      what: 'concurrent named pipe',
+      plant: 'mkfifo "$last"',
+      check: (target: string) => expect(lstatSync(target).isFIFO()).toBe(true),
+    },
+    {
+      what: 'concurrent directory',
+      plant: 'mkdir "$last"',
+      check: (target: string) => {
+        expect(lstatSync(target).isDirectory()).toBe(true);
+        expect(readdirSync(target)).toEqual([]);
+      },
+    },
+  ])('publishes once atomically without replacing a $what created after the check', async ({ plant, check }) => {
+    const s = stand();
+    const outside = standIn(s);
+    const r = await runUpdaterStep(
+      s,
+      'if publish "$CONTROL/sample.once" once printf "later\\n"; then echo published; else echo refused; fi',
+      { ...publishOnceRace(s, plant), OUTSIDE: outside },
+    );
+    expect(r.code, r.out).toBe(0);
+    expect(r.out.trim()).toBe('refused');
+    check(join(s.control, 'sample.once'), outside);
+    expect(readdirSync(s.control)).toEqual(['sample.once']);
+  }, 8_000);
+
+  it('publishes once cleanly when clear, and leaves no partial file when the writer fails', async () => {
+    const s = stand();
+    const failed = await runUpdaterStep(s, 'if publish "$CONTROL/sample.once" once sh -c "printf partial; exit 1"; then echo published; else echo refused; fi');
+    expect(failed.code, failed.out).toBe(0);
+    expect(failed.out.trim()).toBe('refused');
+    expect(readdirSync(s.control)).toEqual([]);
+
+    const ok = await runUpdaterStep(s, 'publish "$CONTROL/sample.once" once printf "whole\\n"');
+    expect(ok.code, ok.out).toBe(0);
+    const published = join(s.control, 'sample.once');
+    expect(readFileSync(published, 'utf8')).toBe('whole\n');
+    expect(lstatSync(published).nlink).toBe(1);
+    expect(lstatSync(published).mode & 0o777).toBe(0o644);
+    expect(readdirSync(s.control)).toEqual(['sample.once']);
+  });
 });
 
 /* What the updater reads in the shared folders it reads only as a regular file of that folder, and nothing else. */
-type Read = { name: string; step: string; standIn: object };
+type Read = { name: string; step: string; standIn: object; dir?: 'control' | 'computer' };
 const READS: Read[] = [
   { name: 'status.json', step: "if update_running; then printf 'read: running\\n'; fi", standIn: { state: 'running' } },
-  { name: 'go.json', step: "ID=sample TAG=0.4.1; if told_to_go; then printf 'read: go\\n'; fi", standIn: { id: 'sample', commit: '0.4.1', until: 9_999_999_999 } },
+  { name: 'go.json', dir: 'computer', step: "ID=sample TAG=0.4.1; if told_to_go; then printf 'read: go\\n'; fi", standIn: { id: 'sample', commit: '0.4.1', until: 9_999_999_999 } },
   { name: 'promised.json', step: "ID=sample; printf 'read: %s\\n' \"$(keeper_said promised.json ok || true)\"", standIn: { id: 'sample', ok: true } },
   { name: 'restore-status.json', step: "restore_request; printf 'read: %s\\n' \"$R_ATTEMPT\"", standIn: { state: 'running', step: 'load', attempt: 'sample', id: 'sample' } },
 ];
+const readDir = (s: Stand, dir?: 'control' | 'computer') => (dir === 'computer' ? s.computerControl : s.control);
 
 describe('what the updater reads in the folders it shares with the app and the keeper', () => {
   it('reports a request that is a directory', async () => {
@@ -229,20 +321,20 @@ describe('what the updater reads in the folders it shares with the app and the k
     expect(r.out).toContain('Refused request.json: it is not a plain file.');
   });
 
-  it.each(READS)('refuses $name when it is a link, and reads nothing through it', async ({ name, step, standIn: said }) => {
+  it.each(READS)('refuses $name when it is a link, and reads nothing through it', async ({ name, dir, step, standIn: said }) => {
     const s = stand();
     const outside = join(s.dir, 'outside', name);
     mkdirSync(dirname(outside), { recursive: true });
     writeFileSync(outside, json(said), { mode: 0o600 });
-    symlinkSync(outside, join(s.control, name));
+    symlinkSync(outside, join(readDir(s, dir), name));
     const r = await runUpdaterStep(s, step);
     expect(r.out).toContain(`Refused ${name}: it is not a plain file.`);
     expect(r.out).not.toMatch(/read: [a-z]/);
   });
 
-  it.each(READS)('goes on at once with a named pipe at $name', async ({ name, step }) => {
+  it.each(READS)('goes on at once with a named pipe at $name', async ({ name, dir, step }) => {
     const s = stand();
-    fifo(join(s.control, name));
+    fifo(join(readDir(s, dir), name));
     const r = await runUpdaterStep(s, step);
     expect(r.out).toContain(`Refused ${name}: it is not a plain file.`);
   }, 8_000);
@@ -261,6 +353,48 @@ describe('what the updater reads in the folders it shares with the app and the k
     const r = await runUpdaterStep(s, "if update_running; then printf 'read: running\\n'; fi");
     expect(r.out).toContain('read: running');
     expect(readdirSync(s.control)).toEqual(['status.json']);
+  });
+
+  it('reads a worker rollout approval only as a single-name file of the keeper channel, never from /control', async () => {
+    const step = "ID=sample TAG=0.4.1; if told_to_go; then printf 'read: go\\n'; else printf 'no-go\\n'; fi";
+    const valid = json({ id: 'sample', commit: '0.4.1', until: 9_999_999_999 });
+
+    /* Planted in the app-writable control folder: ignored. */
+    const planted = stand();
+    writeFileSync(join(planted.control, 'go.json'), valid);
+    const rPlanted = await runUpdaterStep(planted, step);
+    expect(rPlanted.code, rPlanted.out).toBe(0);
+    expect(rPlanted.out.trim()).toBe('no-go');
+
+    /* Hard-linked alias in the keeper channel: refused. */
+    const aliased = stand();
+    writeFileSync(join(aliased.computerControl, 'go.json'), valid);
+    linkSync(join(aliased.computerControl, 'go.json'), join(aliased.computerControl, 'go.alias'));
+    const rAliased = await runUpdaterStep(aliased, step);
+    expect(rAliased.code, rAliased.out).toBe(0);
+    expect(rAliased.out).toContain('Refused go.json: it is not a plain file.');
+    expect(rAliased.out).toContain('no-go');
+
+    /* Wrong owner (not the keeper folder owner): refused. */
+    const wrongOwner = stand();
+    writeFileSync(join(wrongOwner.computerControl, 'go.json'), valid);
+    const foreignUid = process.getuid?.() === 0 ? '4242' : '0';
+    const statOther = tool(
+      wrongOwner,
+      'stat',
+      `out=$(PATH=/usr/bin:/bin stat "$@") || exit\ncase "$*" in *go.json|*taken) printf '%s ${foreignUid}\\n' "\${out% *}" ;; *) printf '%s\\n' "$out" ;; esac\n`,
+    );
+    const rOwner = await runUpdaterStep(wrongOwner, step, statOther);
+    expect(rOwner.code, rOwner.out).toBe(0);
+    expect(rOwner.out).toContain('Refused go.json: it is not a plain file.');
+    expect(rOwner.out).toContain('no-go');
+
+    /* Clean single-name regular file in the keeper channel owned by the folder owner: accepted. */
+    const ok = stand();
+    writeFileSync(join(ok.computerControl, 'go.json'), valid);
+    const rOk = await runUpdaterStep(ok, step);
+    expect(rOk.code, rOk.out).toBe(0);
+    expect(rOk.out.trim()).toBe('read: go');
   });
 
   /* What root publishes there is root's, with one name, and everyone may read it. Where Linux lets anyone give a file a

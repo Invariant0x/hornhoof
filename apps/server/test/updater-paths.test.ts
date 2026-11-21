@@ -14,7 +14,7 @@ const JOINED_ENV = `COMPOSE_FILE=compose.yaml:compose.worker.yaml\nHORNHOOF_ROLE
 const KEEPER_HEALTH = 'http://keeper:7080/api/keeper';
 const LATER = Math.floor(Date.now() / 1000) + 900;
 /* While the updater waits a second, the keeper passes on the server's word for this request. */
-const turn = (s: Stand, id: string) => ({ STUB_DURING_SLEEP: `printf '%s' '${JSON.stringify({ id, commit: '0.4.1', until: LATER })}' > ${s.control}/go.json` });
+const turn = (s: Stand, id: string) => ({ STUB_DURING_SLEEP: `printf '%s' '${JSON.stringify({ id, commit: '0.4.1', until: LATER })}' > ${s.computerControl}/go.json` });
 const copies = (s: Stand) => writeFileSync(join(s.control, 'replica.json'), JSON.stringify({ since: '2026-11-11T12:00:00.000Z' }));
 const envOf = (s: Stand): Record<string, string> =>
   Object.fromEntries(readFileSync(join(s.server, '.env'), 'utf8').split('\n').filter(Boolean).map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));

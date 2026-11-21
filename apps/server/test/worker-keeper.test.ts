@@ -499,21 +499,24 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     await refreshBuild(c.app.ctx);
     const w = await worker(c);
     const control = (name: string) => join(w.config.controlDir, name);
-    const read = (name: string) => JSON.parse(readFileSync(control(name), 'utf8')) as { id: string; tag?: string; commit?: string; until?: number };
+    const keeperControl = (name: string) => join(w.config.dir, 'computer-control', name);
+    const read = (path: string) => JSON.parse(readFileSync(path, 'utf8')) as { id: string; tag?: string; commit?: string; until?: number };
     /* The view names the server's build, and the keeper asks the machine's updater for it. */
     await until(() => existsSync(control('request.json')));
-    const request = read('request.json');
+    const request = read(control('request.json'));
     expect(request).toMatchObject({ version: '0.19.0', tag: build.tag, digest: 'sha256:app', nodeDigest: 'sha256:node', updaterDigest: 'sha256:updater' });
+    expect(existsSync(keeperControl('go.json'))).toBe(false);
     expect(existsSync(control('go.json'))).toBe(false);
     /* The updater downloaded it and waits: the keeper says so, and the server gives this machine its turn. */
     writeFileSync(control('status.json'), JSON.stringify({ id: request.id, version: '0.19.0', state: 'running', step: 'wait', log: '', at: '' }));
     await until(async () => (await c.rowOf(w.machine)).updateState === 'ready');
-    await until(() => existsSync(control('go.json')));
-    const go = read('go.json');
+    await until(() => existsSync(keeperControl('go.json')));
+    const go = read(keeperControl('go.json'));
     expect(go).toMatchObject({ id: request.id, commit: build.tag });
     expect(go.until! * 1000 - Date.now()).toBeGreaterThan(14 * 60_000);
+    expect(existsSync(control('go.json'))).toBe(false);
     expect((await c.rowOf(w.machine)).goCommit).toBe(build.tag);
-    expect(read('request.json').id).toBe(request.id);
+    expect(read(control('request.json')).id).toBe(request.id);
   });
 
   it("pins its owner's key only from a ticket that let it in, and reports the pin's print", async () => {
