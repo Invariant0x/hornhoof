@@ -7,6 +7,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+## [0.40.3] - 2026-11-21
+
+### Fixed
+
+- An updater on an older installation whose shared control folder kept the setgid bit (`2755`) no longer refuses its own staging folders silently: it clears setgid on private staging and keeper folders so heartbeats and update requests work again, and re-running the installer clears setgid on an existing control volume and its subdirectories.
+
 ## [0.40.2] - 2026-11-21
 
 ### Fixed
