@@ -113,7 +113,7 @@ function HeldPool() {
   const t = useT();
   const idle = <Idle w="6ch" />;
   return (
-    <section aria-label={t.machines.pool} aria-busy="true">
+    <section className="held-pool" aria-label={t.machines.pool} aria-busy="true">
       <Edge className="pool" cut={12}>
         <Facts className="pool-facts" items={[[t.machines.poolOnline, idle], [t.machines.poolCores, idle], [t.machines.poolMemory, idle], [t.machines.poolBusy, idle]]} />
       </Edge>
