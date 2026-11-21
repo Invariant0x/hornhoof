@@ -104,25 +104,36 @@ describe('shared package store paths and turn env', () => {
   });
 
   it('passes per-UID package store env on workspace turns and omits it on non-workspace jobs', async () => {
-    const dir = temp('hh-store-runner-');
-    const personal = fakeAdapter();
-    await runJob(personal, job({ workspace: { key: 'agent-1', repo: null } }), dir);
-    expect(personal.inputs[0]!.env).toMatchObject({
-      PNPM_STORE_DIR: join(dir, 'work', '.pkg-store', 'pnpm'),
-      npm_config_cache: join(dir, 'work', '.pkg-store', 'npm'),
-    });
+    const prevPnpm = process.env.PNPM_STORE_DIR;
+    const prevNpm = process.env.npm_config_cache;
+    delete process.env.PNPM_STORE_DIR;
+    delete process.env.npm_config_cache;
+    try {
+      const dir = temp('hh-store-runner-');
+      const personal = fakeAdapter();
+      await runJob(personal, job({ workspace: { key: 'agent-1', repo: null } }), dir);
+      expect(personal.inputs[0]!.env).toMatchObject({
+        PNPM_STORE_DIR: join(dir, 'work', '.pkg-store', 'pnpm'),
+        npm_config_cache: join(dir, 'work', '.pkg-store', 'npm'),
+      });
 
-    const builtinHome = join(dir, 'agents', 'agent-2');
-    const builtin = fakeAdapter({ user: null, home: builtinHome, prepare: () => {} });
-    await runJob(builtin, job({ jobId: 'job-2', workspace: { key: 'agent-2', repo: null } }), dir);
-    expect(builtin.inputs[0]!.env).toMatchObject({
-      PNPM_STORE_DIR: join(builtinHome, '.pkg-store', 'pnpm'),
-      npm_config_cache: join(builtinHome, '.pkg-store', 'npm'),
-    });
+      const builtinHome = join(dir, 'agents', 'agent-2');
+      const builtin = fakeAdapter({ user: null, home: builtinHome, prepare: () => {} });
+      await runJob(builtin, job({ jobId: 'job-2', workspace: { key: 'agent-2', repo: null } }), dir);
+      expect(builtin.inputs[0]!.env).toMatchObject({
+        PNPM_STORE_DIR: join(builtinHome, '.pkg-store', 'pnpm'),
+        npm_config_cache: join(builtinHome, '.pkg-store', 'npm'),
+      });
 
-    const plain = fakeAdapter();
-    await runJob(plain, job({ jobId: 'job-3' }), dir);
-    expect(plain.inputs[0]!.env).toBeUndefined();
+      const plain = fakeAdapter();
+      await runJob(plain, job({ jobId: 'job-3' }), dir);
+      expect(plain.inputs[0]!.env).toBeUndefined();
+    } finally {
+      if (prevPnpm === undefined) delete process.env.PNPM_STORE_DIR;
+      else process.env.PNPM_STORE_DIR = prevPnpm;
+      if (prevNpm === undefined) delete process.env.npm_config_cache;
+      else process.env.npm_config_cache = prevNpm;
+    }
   });
 });
 
