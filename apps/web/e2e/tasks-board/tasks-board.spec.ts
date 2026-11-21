@@ -262,6 +262,7 @@ const dayFirst = (locator: Locator, date: string) => locator.evaluateAll((els, d
   return null;
 }), date);
 async function inOrder(locator: Locator, date: string, what: string) {
+  await expect(locator.filter({ hasText: date }).first(), what).toBeVisible();
   const found = await dayFirst(locator, date);
   expect(found, what).toContain(true);
   expect(found, what).not.toContain(false);
