@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardColumns, filterTasks, graphPath, graphTree, layoutTree, listGroups, mine, NODE, personWaited, pipelineTree, pruneGoals, shownDecisions, shownEmployees, waitingOn, waitingOnPeople, waitsCount, workingNow, type GraphNode } from '../src/tracker';
+import { boardColumns, filterTasks, graphPath, graphTree, LANE, layoutTree, listGroups, mine, NODE,personWaited, pipelineTree, pruneGoals, shownDecisions, shownEmployees, waitingOn, waitingOnPeople, waitsCount, workingNow, type GraphNode } from '../src/tracker';
 import type { Decisions, Employee, GoalView, Org, Pipeline, ProposalDecision, TaskLine, WaitingRequest } from '../src/types';
 import { taskRoute } from './task-route';
 
@@ -175,9 +175,48 @@ describe('the graph', () => {
     expect(at('t312').y).toBe((at('s1t').y + at('s2t').y) / 2);
     expect(layout.parts).toContainEqual({ from: 'g2', to: 't312' });
     expect(layout.parts).toContainEqual({ from: 't312', to: 's2t' });
-    expect(layout.waits).toEqual([{ from: 't319', to: 't312' }]);
+    /* A wait has a lane of its own past the whole tree, and the drawing leaves room past the last lane for its arrow and word;
+       the tree's own box, which Fit frames, starts at the drawing's left. */
+    const right = Math.max(...layout.nodes.map(n => n.x + NODE.w));
+    expect(layout.waits).toEqual([{ from: 't319', to: 't312', lane: right + LANE.first }]);
+    expect(layout.drawn).toBe(right + LANE.first + LANE.step + LANE.room);
+    expect(layout.left).toBe(0);
     expect(layout.width).toBeGreaterThanOrEqual(at('s1t').x + NODE.w);
     expect(layout.height).toBeGreaterThanOrEqual(Math.max(...layout.nodes.map(n => n.y)) + NODE.h);
+  });
+
+  it('lays a tree out mirrored right to left: the root at the right, each node and lane where left to right has it from the other side', () => {
+    const forest = graphTree({ goal: 'g2' }, GOALS, TASKS);
+    const ltr = layoutTree(forest), rtl = layoutTree(forest, undefined, 'rtl');
+    const at = (layout: typeof ltr, id: string) => layout.nodes.find(n => n.node.id === id)!;
+    expect(rtl.nodes.map(n => n.node.id)).toEqual(ltr.nodes.map(n => n.node.id));
+    for (const p of ltr.nodes) {
+      const q = at(rtl, p.node.id);
+      expect(q.x, p.node.id).toBe(ltr.drawn - p.x - NODE.w);
+      expect([q.y, q.h, q.depth], p.node.id).toEqual([p.y, p.h, p.depth]);
+    }
+    /* Each level further to the left: the root's box right of its tasks', theirs right of their subtasks'. */
+    expect(at(rtl, 'g2').x).toBeGreaterThan(at(rtl, 't312').x + NODE.w);
+    expect(at(rtl, 't312').x).toBeGreaterThan(at(rtl, 's1t').x + NODE.w);
+    /* The lanes of the waits stand left of every node, the first one nearest the tree. */
+    expect(rtl.waits).toEqual(ltr.waits.map(w => ({ ...w, lane: ltr.drawn - w.lane })));
+    for (const w of rtl.waits) expect(w.lane).toBeLessThan(Math.min(...rtl.nodes.map(n => n.x)));
+    expect(rtl.parts).toEqual(ltr.parts);
+    /* The drawing is as big, and the tree's box, which Fit frames, starts where the lanes end. */
+    expect([rtl.width, rtl.height, rtl.drawn]).toEqual([ltr.width, ltr.height, ltr.drawn]);
+    expect(rtl.left).toBe(ltr.drawn - ltr.width);
+    expect(Math.min(...rtl.nodes.map(n => n.x)) - rtl.left).toBe(NODE.pad);
+    expect(rtl.left + rtl.width - Math.max(...rtl.nodes.map(n => n.x + NODE.w))).toBe(NODE.pad);
+  });
+
+  it('draws a tree with no waits as wide as the tree itself, in either direction', () => {
+    const forest = graphTree({ task: 't312' }, GOALS, TASKS);
+    for (const dir of ['ltr', 'rtl'] as const) {
+      const layout = layoutTree(forest, undefined, dir);
+      expect(layout.waits, dir).toEqual([]);
+      expect([layout.drawn, layout.left], dir).toEqual([layout.width, 0]);
+    }
+    expect(layoutTree(forest, undefined, 'rtl').nodes.find(n => n.depth === 0)!.x).toBe(layoutTree(forest).width - NODE.pad - NODE.w);
   });
 
   it('gives a node the height its words take, moves the rows under it down and keeps its parent in the middle', () => {

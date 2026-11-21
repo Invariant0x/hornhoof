@@ -34,7 +34,7 @@ function fakeView(): FakeView {
   }) as unknown as FakeView;
 }
 
-export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; connects?: boolean; sessionId?: string | null; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]>; live?: string[]; watched?: boolean } = {}) {
+export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; connects?: boolean; sessionId?: string | null; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]>; live?: string[]; watched?: boolean; timeoutMs?: number } = {}) {
   /* The host runs on the fake clock, which moves only as the test moves it: c.until, c.on and c.pass. Turns of the event
      loop stay real, for the sockets of the bridge. */
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
@@ -157,7 +157,8 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
   });
   /* Someone has the agent's terminal open before its first turn, and keeps it open: its program stays up between turns. */
   if (options.watched) await onClock(host.open({ type: 'term.open', termId: 'watching', agentKey: options.key ?? 'receipt', cols: 100, rows: 30, write: false }), clocked);
-  const running = run(options.prompt ?? 'HANG');
+  /* timeoutMs: how long Hornhoof gives the first turn, which the test's 20 seconds would cut short. */
+  const running = run(options.prompt ?? 'HANG', undefined, options.timeoutMs ? { timeoutMs: options.timeoutMs } : {});
   if (options.prompt === '') await onClock(running, clocked);
   else await untilOnClock(() => sent.some(m => m.type === 'job.program' && m.state === 'thinking'), clocked);
   paste.mockClear(); keys.mockClear();
