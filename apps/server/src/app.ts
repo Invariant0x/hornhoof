@@ -99,7 +99,9 @@ import { overLink } from './auth/tunnel.js';
 import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
 
-import { readCompare, readMerged, readTree, type CompareReader, type MergeReader, type TreeReader } from './modules/testruns/compare.js';
+import { githubReaders, type CompareReader, type MergeReader, type TreeReader } from './modules/testruns/compare.js';
+import { GitHubLimits, limitRecord } from './modules/testruns/github-limit.js';
+import { MergedAnswers } from './modules/departments/branches.js';
 import { createOnGitHub } from './modules/departments/github-create.js';
 import { openIssueOnGitHub, type IssueCreator } from './modules/feedback/github-issue.js';
 import { RELEASED, type Released } from './modules/feedback/released.js';
@@ -128,6 +130,9 @@ export type Ctx = Deps & {
   conversationEffects: ConversationEffects;
   callEffects: CallEffects;
   readCommit: CommitReader;
+  githubLimits: GitHubLimits;
+  /* What GitHub said of which task branches are in the main line, kept for the task reads after. */
+  mergedAnswers: MergedAnswers;
   markCommit: CommitMarker;
   /* Creates a repository on a git host with a key the company saved. */
   createRepository: RepositoryCreator;
@@ -233,16 +238,18 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   });
   addSecurityHeaders(app);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
+  /* One request limit for every GitHub REST reader of the server, on the clock the server reads when it asks. */
+  const githubLimits = new GitHubLimits(() => ctx.clock(), limit => app.log.warn(limitRecord(limit), 'GitHub REST request limit exhausted.'));
   const ctx = {
     startedAt: new Date(),
     readCommit,
     markCommit,
-    readCompare,
-    readTree,
+    ...githubReaders(githubLimits),
     readBranches,
     createBranch,
     readTags,
-    readMerged,
+    githubLimits,
+    mergedAnswers: new MergedAnswers(),
     createRepository: createOnGitHub(),
     createSpreadsheet: createOnGoogleSheets(deps.config.googleTokenUrl, deps.config.googleSheetsUrl, deps.config.googleDriveUrl),
     createIssue: openIssueOnGitHub(),

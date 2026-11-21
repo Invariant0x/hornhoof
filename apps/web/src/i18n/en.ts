@@ -105,7 +105,7 @@ export const en = {
     limits: 'Loading limits…',
     failed: {
       offline: 'Could not load: no connection to the server.',
-      timeout: 'Could not load: the server did not answer in 30 seconds.',
+      timeout: 'Could not load: the server did not answer in 30\u00a0seconds.',
       server: 'Could not load: something went wrong on the server.',
       provider: 'Could not load the limits: the provider did not answer.',
     },
@@ -1842,6 +1842,16 @@ export const en = {
     },
     waiting: 'Waiting for you',
     nothingWaiting: 'Nothing waits for you.',
+    queue: {
+      empty: 'Nothing is waiting for an answer',
+      defer: 'Defer',
+      deferred: 'Deferred',
+      more: (n: number) => `${n} more ${plural('en', n, { one: 'card', other: 'cards' })}`,
+      asked: 'Asked:',
+      open: 'Open',
+      readOnly: 'Read only',
+      materials: 'Question materials',
+    },
     /* Cards Hornhoof kept for the person until they say they saw them, in their words. */
     cards: {
       open: 'Open task',

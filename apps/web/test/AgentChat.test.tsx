@@ -1,9 +1,11 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import type { EventView } from '../src/types';
+import { en } from '../src/i18n/en';
+import { FAIL_MS, SLOW_MS } from '../src/ui/Loading';
 import { CARD, DEV_ORG, ME, mockApi, ORG } from './api-mock';
 
 /* xterm needs a real canvas; the window only has to know the terminal is there. */
@@ -132,11 +134,56 @@ describe("an agent's window opens as a chat", () => {
     let comes: (answer: [number, unknown]) => void = () => {};
     const state = new Promise<[number, unknown]>(resolve => (comes = resolve));
     mockApi({ 'GET /api/agents/b1': () => new Promise(() => {}), 'GET /api/agents/b1/events?last=300': () => state });
-    render(<LanguageProvider><AgentWindow me={ME} org={org} agentId="b1" onClose={() => {}} /></LanguageProvider>);
+    const { container } = render(<LanguageProvider><AgentWindow me={ME} org={org} agentId="b1" onClose={() => {}} /></LanguageProvider>);
     expect(screen.getByRole('button', { name: 'Chat' })).toHaveTextContent('Chat');
-    expect(screen.getByRole('status', { name: 'Terminal' })).toHaveTextContent('Opening the Codex terminal…');
+    expect(within(container.querySelector<HTMLElement>('.t-term')!).getByRole('status')).toHaveTextContent('Opening the Codex terminal…');
     await act(async () => comes([200, { events: [], state: WITH_TERMINAL }]));
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
+  });
+
+  /* 20.11: the terminal's place drew a big ring of its own; now it names the program beside the shared ring (#1611 A), and
+     when its state does not come it says why, or that it takes longer than usual, with Retry. */
+  it('opens the terminal beside the shared ring, with no ring of its own', () => {
+    localStorage.setItem('hh-agent-view', 'terminal');
+    const { container } = open({ [`GET ${EVENTS}?last=300`]: () => new Promise(() => {}) });
+    const place = container.querySelector<HTMLElement>('.t-term')!;
+    expect(within(place).getByRole('status')).toHaveTextContent(/^Opening the \w+ terminal…$/);
+    expect(place.querySelectorAll('.load-busy > .spinner')).toHaveLength(1);
+    expect(place.querySelectorAll('.spinner')).toHaveLength(1);
+  });
+
+  it('says why the terminal could not open, with Retry, which asks for its state again and opens it', async () => {
+    localStorage.setItem('hh-agent-view', 'terminal');
+    let asked = 0;
+    const failed = [500, { error: { code: 'internal', message: 'The server could not answer.' } }];
+    const { container } = open({ [`GET ${EVENTS}?last=300`]: () => (++asked === 1 ? failed : [200, { events: [], state: WITH_TERMINAL }]) });
+    const place = within(container.querySelector<HTMLElement>('.t-term')!);
+    expect(await place.findByRole('alert')).not.toBeEmptyDOMElement();
+    fireEvent.click(place.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByTestId('live-terminal', {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(asked).toBe(2);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('says the terminal takes longer than usual at 10 s and gives up at 30 s, each with Retry, which asks again', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    localStorage.setItem('hh-agent-view', 'terminal');
+    let asked = 0;
+    const { container } = open({ [`GET ${EVENTS}?last=300`]: () => { asked++; return new Promise(() => {}); } });
+    await act(async () => { vi.advanceTimersByTime(SLOW_MS - 1); });
+    const term = container.querySelector<HTMLElement>('.t-term')!, place = within(term);
+    expect(term.querySelector('.load-fail')).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(term.querySelector('.load-fail.slow')).toHaveTextContent('Taking longer than usual');
+    expect(place.queryByRole('alert')).not.toBeInTheDocument();
+    await act(async () => { vi.advanceTimersByTime(FAIL_MS - SLOW_MS); });
+    expect(place.getByRole('alert').querySelector('.lf-t')?.textContent).toBe(en.load.failed.timeout);
+    const before = asked;
+    fireEvent.click(place.getByRole('button', { name: 'Retry' }));
+    await act(async () => {});
+    expect(asked).toBe(before + 1);
+    expect(place.queryByRole('alert')).not.toBeInTheDocument();
+    expect(place.getByRole('status')).toHaveTextContent(/^Opening the \w+ terminal…$/);
   });
 
   it('says the terminal cannot be shown here when the agent works on a machine that does not show it', async () => {

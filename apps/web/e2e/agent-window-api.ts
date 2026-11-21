@@ -28,7 +28,7 @@ function seesEmployee(live: AgentFixture): boolean {
   return person.isOwner || Boolean(person.isCeoDelegate && person.scopeKind === 'company') || person.id === SUB.owner?.id;
 }
 
-function agentRoutes(live: AgentFixture): Record<string, unknown> {
+export function agentRoutes(live: AgentFixture): Record<string, unknown> {
   const employee = { ...EMPLOYEE, task: live.hasTask ? EMPLOYEE.task : null };
   const agent = { ...AGENT, busy: live.awake };
   const me = live.viewer ?? ME;
