@@ -2686,7 +2686,7 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .wait-question-hint { display: flex; align-items: start; gap: 4px; font-size: 13px; overflow-wrap: anywhere; }
 .wait-question-hint svg { flex: 0 0 14px; fill: none; stroke: currentColor; stroke-width: 1.5; }
 .wait-question-hint svg .cf { fill: currentColor; stroke: none; }
-.req.req-named-readonly { border-inline-start: 1px solid var(--line); }
+.req:has(> header .wait-neutral) { border-inline-start: 1px solid var(--line); }
 @media (max-width: 640px) { .wait-question { grid-template-columns: minmax(0, 1fr); } }
 @media (prefers-reduced-motion: reduce) { .wait-current-content { animation: none; } }
 .choice-list > .req-option { min-height: 44px; }

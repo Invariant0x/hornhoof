@@ -113,13 +113,17 @@ function ReadOnly({
   );
 }
 
+function RequestAuthor({ who, request }: { who: string; request: WaitingRequest }) {
+  const t = useT();
+  return <><b><bdi>{who}</bdi></b>{namedReadOnly(request) && <span className="status wait-neutral">{t.tasks.queue.readOnly}</span>}</>;
+}
+
 function RequestHeader({ who, request, onOpenTask, onOpenAgent, placeName = defaultPlaceName, waitsFor, onDefer }: Shared & { who: string; request: WaitingRequest }) {
   const t = useT();
   const { task, agent } = request;
   return (
     <header>
-      <b><bdi>{who}</bdi></b>
-      {namedReadOnly(request) && <span className="status wait-neutral">{t.tasks.queue.readOnly}</span>}
+      <RequestAuthor who={who} request={request} />
       <button className="linkish" type="button" onClick={() => onOpenTask(task.id)}>
         <bdi>#{task.number} {task.title}</bdi>
       </button>
@@ -400,8 +404,8 @@ function RequestItem({ request, onDone, inline, onDefer, ...shared }: Shared & {
   const said = request.kind === 'stuck' ? t.tasks.stuckText(agent.name, task.number) : request.text;
   const who = whoAsked(t, request);
   return (
-    <article className={`req req-${request.kind}${namedReadOnly(request) ? ' req-named-readonly' : ''}`} aria-label={`#${task.number} ${task.title}`} aria-busy={busy}>
-      {inline ? <header><b><bdi>{who}</bdi></b>{namedReadOnly(request) && <span className="status wait-neutral">{t.tasks.queue.readOnly}</span>}</header> : <RequestHeader who={who} request={request} onDefer={onDefer} {...shared} />}
+    <article className={`req req-${request.kind}`} aria-label={`#${task.number} ${task.title}`} aria-busy={busy}>
+      {inline ? <header><RequestAuthor who={who} request={request} /></header> : <RequestHeader who={who} request={request} onDefer={onDefer} {...shared} />}
       <RequestWords request={request} said={said} inline={inline} />
       <RequestMaterialsZone items={manifest.common} failure={manifestFailure} onOpen={openViewer} heading={onDefer ? t.tasks.queue.materials : undefined} />
       <RequestForm
