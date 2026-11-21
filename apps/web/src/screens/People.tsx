@@ -5,7 +5,7 @@ import { fitTable } from '../ui/fit-table';
 import type { AccessInput, Me, Org, PersonView } from '../types';
 import { accessEmpty, accessInput, AccessPicker, accessText } from '../ui/AccessPicker';
 import { CopyButton } from '../ui/CopyButton';
-import { useConfirmAction } from '../ui/ConfirmAction';
+import { useConfirmAction, type Question } from '../ui/ConfirmAction';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
 import { doneOf, Hold, Idle, LoadLine, useHeldRows, useLoad, type Load } from '../ui/Loading';
@@ -180,6 +180,56 @@ function namedAccess(t: Messages, org: Org | null, access: AccessInput): string 
   ]).join(', ');
 }
 
+type EditAsk = { title: string; yes: string; working: string; line: ReactNode; danger?: boolean };
+
+function editAsks(t: Messages, org: Org | null, person: PersonView, changes: ReturnType<typeof changesOf>, isDeputy: boolean): EditAsk[] {
+  const name = <bdi>{person.name}</bdi>;
+  const asks: EditAsk[] = [];
+  if (changes.name) asks.push({ ...t.confirm.renamePerson, line: <Phrase words={t.confirm.renamePerson.effect} values={[name, <bdi>{changes.name}</bdi>]} /> });
+  if (changes.access && !sameAccess(changes.access, accessInput(person.access))) {
+    asks.push({ ...t.confirm.access, line: <Phrase words={t.confirm.access.effect} values={[name, <bdi>{namedAccess(t, org, changes.access)}</bdi>]} /> });
+  }
+  if (isDeputy !== Boolean(person.isCeoDelegate)) {
+    const words = isDeputy ? t.confirm.makeDeputy : t.confirm.dropDeputy;
+    asks.push({ ...words, danger: !isDeputy, line: <Phrase words={words.effect} values={[name]} /> });
+  }
+  return asks;
+}
+
+function personEditQuestion(t: Messages, org: Org | null, person: PersonView, changes: ReturnType<typeof changesOf>, isDeputy: boolean, onYes: () => Promise<void>): Question | null {
+  const asks = editAsks(t, org, person, changes, isDeputy);
+  const [first, ...more] = asks;
+  if (!first) return null;
+  return {
+    title: more.length ? t.confirm.several : first.title,
+    effect: first.line,
+    warnings: more.map(ask => ask.line),
+    yes: more.length ? t.common.save : first.yes,
+    working: more.length ? t.confirm.working : first.working,
+    danger: asks.some(ask => Boolean(ask.danger)),
+    onYes,
+  };
+}
+
+function deletePersonQuestion(t: Messages, person: PersonView, onYes: () => Promise<void>): Question {
+  const words = person.assistant ? t.confirm.deleteAssistant : t.confirm.deletePerson;
+  return {
+    ...words,
+    effect: <Phrase words={words.effect} values={[<bdi>{person.name}</bdi>]} />,
+    warnings: [person.assistant ? t.people.deleteAssistantNote : t.people.deleteNote],
+    final: true,
+    danger: true,
+    onYes,
+  };
+}
+
+async function savePersonAndDeputy(person: PersonView, changes: ReturnType<typeof changesOf>, isDeputy: boolean, onUpdated: (p: PersonView) => void, onSaved: (p: PersonView) => void) {
+  const res = await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, changes);
+  /* The row shows what is saved even if the deputy's own call, which needs that access, fails after it. */
+  onUpdated(res.person);
+  onSaved(deputyCall(isDeputy, person, res.person) ? (await api.put<{ person: PersonView }>(`/api/people/${person.id}/ceo-delegate`, { isCeoDelegate: isDeputy })).person : res.person);
+}
+
 /* The name, when the form shows it, above the title. */
 function NameAndTitle({ rename, name, title, onName, onTitle }: { rename: boolean; name: string; title: string; onName: (name: string) => void; onTitle: (title: string) => void }) {
   const t = useT();
@@ -209,35 +259,12 @@ function EditForm({ person, org, titleOnly, rename, telegram: telegramShown, dep
   function submit(e: FormEvent) {
     e.preventDefault();
     const changes = changesOf(person, rights, draft);
-    const name = <bdi>{person.name}</bdi>;
-    const asks: { title: string; yes: string; working: string; line: ReactNode; danger?: boolean }[] = [];
-    if (changes.name) asks.push({ ...t.confirm.renamePerson, line: <Phrase words={t.confirm.renamePerson.effect} values={[name, <bdi>{changes.name}</bdi>]} /> });
-    if (changes.access && !sameAccess(changes.access, accessInput(person.access))) {
-      asks.push({ ...t.confirm.access, line: <Phrase words={t.confirm.access.effect} values={[name, <bdi>{namedAccess(t, org, changes.access)}</bdi>]} /> });
-    }
-    if (isDeputy !== Boolean(person.isCeoDelegate)) {
-      const words = isDeputy ? t.confirm.makeDeputy : t.confirm.dropDeputy;
-      asks.push({ ...words, danger: !isDeputy, line: <Phrase words={words.effect} values={[name]} /> });
-    }
-    const [first, ...more] = asks;
-    if (!first) return void save(changes);
-    confirmation.ask({
-      title: more.length ? t.confirm.several : first.title,
-      effect: first.line,
-      warnings: more.map(ask => ask.line),
-      yes: more.length ? t.common.save : first.yes,
-      working: more.length ? t.confirm.working : first.working,
-      danger: asks.some(ask => Boolean(ask.danger)),
-      onYes: () => send(changes),
-    });
+    const question = personEditQuestion(t, org, person, changes, isDeputy, () => send(changes));
+    if (question) confirmation.ask(question);
+    else void save(changes);
   }
 
-  async function send(changes: ReturnType<typeof changesOf>) {
-    const res = await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, changes);
-    /* The row shows what is saved even if the deputy's own call, which needs that access, fails after it. */
-    onUpdated(res.person);
-    onSaved(deputyCall(isDeputy, person, res.person) ? (await api.put<{ person: PersonView }>(`/api/people/${person.id}/ceo-delegate`, { isCeoDelegate: isDeputy })).person : res.person);
-  }
+  const send = (changes: ReturnType<typeof changesOf>) => savePersonAndDeputy(person, changes, isDeputy, onUpdated, onSaved);
 
   async function save(changes: ReturnType<typeof changesOf>) {
     setBusy(true);
@@ -624,16 +651,8 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
   };
   /* Deleting for good says what ends with the person or the assistant, and that it cannot be undone. */
   const askDelete = (person: PersonView) => {
-    const words = person.assistant ? t.confirm.deleteAssistant : t.confirm.deletePerson;
     setFailure(null);
-    confirmation.ask({
-      ...words,
-      effect: <Phrase words={words.effect} values={[<bdi>{person.name}</bdi>]} />,
-      warnings: [person.assistant ? t.people.deleteAssistantNote : t.people.deleteNote],
-      final: true,
-      danger: true,
-      onYes: () => removePerson(person),
-    });
+    confirmation.ask(deletePersonQuestion(t, person, () => removePerson(person)));
   };
 
   const newLink = (person: PersonView) =>

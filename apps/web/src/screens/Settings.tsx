@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { errorText, LANGUAGES, Phrase, useLanguage, useT } from '../i18n';
+import { errorText, LANGUAGES, Phrase, useLanguage, useT, type Messages } from '../i18n';
 import type { SettingsGroup } from '../routes';
 import { useLive } from '../tasks';
 import type { Me, PersonView, TlsView } from '../types';
 import { CopyButton } from '../ui/CopyButton';
-import { useConfirmAction } from '../ui/ConfirmAction';
+import { useConfirmAction, type Question } from '../ui/ConfirmAction';
 import { takeEscape } from '../ui/escape';
 import { Field } from '../ui/Field';
 import { INTEGRATIONS, Integrations } from '../ui/Integrations';
@@ -146,6 +146,21 @@ function Encryption({ tls }: { tls: TlsView | null }) {
 
 /* The company's public link at hornhoof.org, which a person who sees the whole company copies, moves to another name or
    removes. A company with no link starts on a long random name, as link names are public. */
+function changeLinkQuestion(t: Messages, loaded: Loaded | null, name: string, onYes: () => Promise<void>): Question | null {
+  const link = loaded?.link;
+  if (!link || link.name === name) return null;
+  return {
+    ...t.confirm.changeLink,
+    effect: <Phrase words={t.confirm.changeLink.effect} values={[<bdi>{link.url}</bdi>, <bdi>{`${name}.${loaded.domain}`}</bdi>]} />,
+    warnings: [t.settings.moveNote],
+    onYes,
+  };
+}
+
+function removeLinkQuestion(t: Messages, url: string, onYes: () => Promise<void>): Question {
+  return { ...t.confirm.removeLink, effect: <Phrase words={t.settings.removeAsk} values={[<bdi>{url}</bdi>]} />, danger: true, onYes };
+}
+
 function CompanyLink() {
   const t = useT();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -187,23 +202,14 @@ function CompanyLink() {
   /* Opening the link saves at once; another name for a link in use is asked first, as is removing it. */
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!link || link.name === name) return void save();
+    const question = changeLinkQuestion(t, loaded, name, async () => settle(await putLink()));
+    if (!question) return void save();
     setFailure(null);
-    confirmation.ask({
-      ...t.confirm.changeLink,
-      effect: <Phrase words={t.confirm.changeLink.effect} values={[<bdi>{link.url}</bdi>, <bdi>{`${name}.${loaded?.domain ?? ''}`}</bdi>]} />,
-      warnings: [t.settings.moveNote],
-      onYes: async () => settle(await putLink()),
-    });
+    confirmation.ask(question);
   }
   const askRemove = (url: string) => {
     setFailure(null);
-    confirmation.ask({
-      ...t.confirm.removeLink,
-      effect: <Phrase words={t.settings.removeAsk} values={[<bdi>{url}</bdi>]} />,
-      danger: true,
-      onYes: async () => settle((await api.del('/api/link'), null)),
-    });
+    confirmation.ask(removeLinkQuestion(t, url, async () => settle((await api.del('/api/link'), null))));
   };
 
   if (unavailableFailure(loadFailure) || unavailableFailure(failure)) return null;

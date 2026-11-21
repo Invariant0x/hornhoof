@@ -64,25 +64,25 @@ function showsUpdate(updates: Updates): boolean {
   return updates.view !== null && (updates.starting || updates.view.updater.status?.state === 'running');
 }
 
+type CutTrack = { asked: boolean; saw: boolean };
+
+/* Tracks whether an update requested from this banner hit a running-turns cut and was then dismissed. */
+function nextCutTrack(track: CutTrack, updates: Updates, showingProgress: boolean): { next: CutTrack; focus: boolean } {
+  if (updates.cut) return { next: { asked: track.asked, saw: track.saw || track.asked }, focus: false };
+  if (track.saw) return { next: { asked: false, saw: false }, focus: !updates.starting && !showingProgress };
+  return { next: { asked: updates.asking && track.asked, saw: false }, focus: false };
+}
+
 /* When an update asked from this banner is held for running turns and then cancelled, return focus to its Update button. */
 function useCutFocusReturn(updates: Updates, showingProgress: boolean) {
   const button = useRef<HTMLButtonElement>(null);
-  const askedHere = useRef(false);
-  const sawCut = useRef(false);
+  const track = useRef<CutTrack>({ asked: false, saw: false });
   useEffect(() => {
-    if (updates.cut && askedHere.current) {
-      sawCut.current = true;
-      return;
-    }
-    if (!updates.cut && sawCut.current) {
-      sawCut.current = false;
-      askedHere.current = false;
-      if (!updates.starting && !showingProgress) button.current?.focus();
-    } else if (!updates.asking && !updates.cut) {
-      askedHere.current = false;
-    }
+    const { next, focus } = nextCutTrack(track.current, updates, showingProgress);
+    track.current = next;
+    if (focus) button.current?.focus();
   }, [updates.cut, updates.asking, updates.starting, showingProgress]);
-  return { button, markAsked: () => { askedHere.current = true; } };
+  return { button, markAsked: () => { track.current.asked = true; } };
 }
 
 /* Under the top bar: a newer build to take, an update waiting for the agents or running, or how the last one ended. */

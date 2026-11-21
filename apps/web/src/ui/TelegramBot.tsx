@@ -1,12 +1,23 @@
 import { useId, useState } from 'react';
 import { api } from '../api';
-import { errorText, Phrase, useT } from '../i18n';
+import { errorText, Phrase, useT, type Messages } from '../i18n';
 import type { AgentCardView } from '../types';
-import { useConfirmAction } from './ConfirmAction';
+import { useConfirmAction, type Question } from './ConfirmAction';
 import { SecretInput } from './SecretInput';
 
 type Bot = NonNullable<AgentCardView['telegram']>;
 type Props = { agentId: string; agentName?: string; telegram: Bot | null; editable: boolean; onChange(telegram: Bot | null): void };
+
+function disconnectTelegramQuestion(t: Messages, botName: string, agentName: string | undefined, onYes: () => Promise<void>): Question {
+  const words = t.agent.confirm.disconnectTelegram;
+  const bot = <bdi>{`@${botName}`}</bdi>;
+  return {
+    ...words,
+    effect: agentName ? <Phrase words={words.effect} values={[bot, <bdi>{agentName}</bdi>]} /> : <Phrase words={words.effectUnnamed} values={[bot]} />,
+    danger: true,
+    onYes,
+  };
+}
 
 /* The bot people write to a head or the orchestrator through in Telegram. Its token goes to the server once and never
    comes back: the card shows the bot by its name, and a person who runs the head's department, or one with the whole
@@ -36,17 +47,10 @@ export function TelegramBot({ agentId, agentName, telegram, editable, onChange }
   const askDisconnect = () => {
     if (!telegram) return;
     setFailure(null);
-    const words = t.agent.confirm.disconnectTelegram;
-    const bot = <bdi>{`@${telegram.username}`}</bdi>;
-    confirmation.ask({
-      ...words,
-      effect: agentName ? <Phrase words={words.effect} values={[bot, <bdi>{agentName}</bdi>]} /> : <Phrase words={words.effectUnnamed} values={[bot]} />,
-      danger: true,
-      onYes: async () => {
-        await api.del(path);
-        onChange(null);
-      },
-    });
+    confirmation.ask(disconnectTelegramQuestion(t, telegram.username, agentName, async () => {
+      await api.del(path);
+      onChange(null);
+    }));
   };
 
   return (

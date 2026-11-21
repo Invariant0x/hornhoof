@@ -154,7 +154,25 @@ function useCardLocks(me: Me, open: unknown): { cardLock?: DecidedBy; handLock?:
 
 /* A task takes Escape before the terminal; a minimized agent leaves the rest of the screen alone. */
 function stopOnEscape(e: globalThis.KeyboardEvent, box: HTMLElement | null, stop: () => void): void {
-  if (e.key === 'Escape' && !e.defaultPrevented && !box?.hidden) stop();
+  if (e.key !== 'Escape' || e.defaultPrevented || box?.hidden) return;
+  e.preventDefault();
+  stop();
+}
+
+function useStopConfirm(runningJobId: string | null | undefined, path: string, agentName: string) {
+  const t = useT();
+  const { ask, question } = useConfirmAction();
+  const stop = useCallback(() => {
+    if (!runningJobId) return;
+    const words = t.window.confirm.stop;
+    ask({
+      ...words,
+      effect: <Phrase words={words.effect} values={[<bdi>{agentName || t.window.hiddenEmployee}</bdi>]} />,
+      danger: true,
+      onYes: () => api.post(`${path}/stop`),
+    });
+  }, [runningJobId, path, agentName, t.window.confirm.stop, t.window.hiddenEmployee, ask]);
+  return { stop, confirmQuestion: question };
 }
 
 /* Words a person wrote to the agent, as the chat shows them on the person's side. A notice Hornhoof passed on is not. */
@@ -525,23 +543,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     );
   }, [staff, state, path, t, catchUp]);
 
-  const { ask: askConfirm, question: confirmQuestion } = useConfirmAction();
   const agentName = orchestrator ? t.window.orchestrator : card?.name || listedName(org, agentId);
-
-  const sendStop = useCallback(async () => {
-    if (state?.runningJobId) await api.post(`${path}/stop`);
-  }, [state?.runningJobId, path]);
-
-  const stop = useCallback(() => {
-    if (!state?.runningJobId) return;
-    const words = t.window.confirm.stop;
-    askConfirm({
-      ...words,
-      effect: <Phrase words={words.effect} values={[<bdi>{agentName || t.window.hiddenEmployee}</bdi>]} />,
-      danger: true,
-      onYes: sendStop,
-    });
-  }, [state?.runningJobId, t.window.confirm.stop, t.window.hiddenEmployee, askConfirm, agentName, sendStop]);
+  const { stop, confirmQuestion } = useStopConfirm(state?.runningJobId, path, agentName);
 
   useEffect(() => {
     if (!state?.busy) return;

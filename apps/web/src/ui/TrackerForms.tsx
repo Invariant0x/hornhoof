@@ -1,13 +1,13 @@
 import { TASK_PRIORITIES, type TaskPriority } from '@hornhoof/protocol';
 import { Fragment, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api';
-import { errorText, Phrase, useLanguage, useT } from '../i18n';
+import { errorText, Phrase, useLanguage, useT, type Messages } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import { useGoals, usePipelines } from '../tasks';
 import { stagesInOrder } from '../tracker';
 import type { Department, GoalView, Org, PersonRef, Pipeline, PipelineStage, TaskDetail } from '../types';
 import { BusyLabel } from './BusyLabel';
-import { useConfirmAction } from './ConfirmAction';
+import { useConfirmAction, type Question } from './ConfirmAction';
 import { Field } from './Field';
 import { NewTask } from './NewTask';
 
@@ -297,8 +297,30 @@ function usePipelineDraft(pipeline?: Pipeline) {
   return { draft, setDraft, version: base.version, refused: () => setStale(true) };
 }
 
+function stagePayload(s: StageDraft, before?: PipelineStage) {
+  const owner = s.owner.startsWith('role:') ? { ownerRole: s.owner.slice(5) } : { ownerAgentId: s.owner.slice(6) };
+  const name = s.name.trim() === before?.name && before?.stockName !== undefined ? before.stockName : s.name.trim();
+  return { key: s.key, ...(s.id ? { id: s.id } : {}), parent: s.parent || null, name, ...owner };
+}
+
 function removedStageNames(removed: PipelineStage[]): ReactNode {
   return removed.map((stage, i) => <Fragment key={stage.id}>{i > 0 && ', '}<bdi>{stage.name}</bdi></Fragment>);
+}
+
+function removedStagesQuestion(t: Messages, pipeline: Pipeline, stages: readonly StageDraft[], onYes: () => Promise<void>): Question | null {
+  const removed = pipeline.stages.filter(s => !stages.some(d => d.id === s.id));
+  if (!removed.length) return null;
+  const confirm = t.tracker.confirm.removeStage;
+  const many = removed.length > 1;
+  return {
+    title: many ? confirm.titleMany : confirm.title,
+    effect: <Phrase words={many ? confirm.effectMany : confirm.effect} values={[removedStageNames(removed), <bdi>{pipeline.name}</bdi>]} />,
+    yes: confirm.yes,
+    working: confirm.working,
+    final: true,
+    danger: true,
+    onYes,
+  };
 }
 
 /* A department's pipeline, new or changed: its name, why, and its stages, each after the head or after another stage, each
@@ -329,31 +351,17 @@ export function PipelineForm({ pipeline, department, onDone, onCancel }: { pipel
 
   function save() {
     if (stages.some(s => !s.name.trim() || !s.owner)) return setTried(true);
-    const owner = (s: StageDraft) => (s.owner.startsWith('role:') ? { ownerRole: s.owner.slice(5) } : { ownerAgentId: s.owner.slice(6) });
     const canonical = (value: string, shown?: string, stock?: string) => value.trim() === shown && stock !== undefined ? stock : value.trim();
     const body = {
       name: canonical(name, pipeline?.name, pipeline?.stockName),
       why: canonical(why, pipeline?.why, pipeline?.stockWhy),
-      stages: stages.map(s => {
-        const before = pipeline?.stages.find(stage => stage.id === s.id);
-        return { key: s.key, ...(s.id ? { id: s.id } : {}), parent: s.parent || null, name: canonical(s.name, before?.name, before?.stockName), ...owner(s) };
-      }),
+      stages: stages.map(s => stagePayload(s, pipeline?.stages.find(stage => stage.id === s.id))),
     };
     if (!pipeline) return void send(() => api.post('/api/pipelines', { department: department.id, ...body }));
     const patch = () => api.patch(`/api/pipelines/${pipeline.id}`, { version, ...body });
-    const removed = pipeline.stages.filter(s => !stages.some(d => d.id === s.id));
-    if (!removed.length) return void send(patch);
-    const confirm = t.tracker.confirm.removeStage;
-    const many = removed.length > 1;
-    confirmation.ask({
-      title: many ? confirm.titleMany : confirm.title,
-      effect: <Phrase words={many ? confirm.effectMany : confirm.effect} values={[removedStageNames(removed), <bdi>{pipeline.name}</bdi>]} />,
-      yes: confirm.yes,
-      working: confirm.working,
-      final: true,
-      danger: true,
-      onYes: () => submit(patch),
-    });
+    const question = removedStagesQuestion(t, pipeline, stages, () => submit(patch));
+    if (!question) return void send(patch);
+    confirmation.ask(question);
   }
 
   return (

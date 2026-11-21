@@ -6,7 +6,7 @@ import { PROVIDER_NAMES } from '../providers';
 import type { BuiltinView, CopiesView, DataView, MachineView, Me, MoveView, SubView, TlsView, Unfit } from '../types';
 import { Bar, Share } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
-import { useConfirmAction } from '../ui/ConfirmAction';
+import { useConfirmAction, type Question } from '../ui/ConfirmAction';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
 import { doneOf, Idle, useHeldRows, useLoad, type Load } from '../ui/Loading';
@@ -710,6 +710,22 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
   );
 }
 
+function keepBackupsQuestion(t: Messages, m: MachineView, keepsBackups: boolean, onYes: () => Promise<void>): Question {
+  const c = keepsBackups ? t.machines.confirm.keepBackupsOn : t.machines.confirm.keepBackupsOff;
+  return { ...c, effect: <Phrase words={c.effect} values={[<bdi>{m.hostname}</bdi>]} />, danger: !keepsBackups, onYes };
+}
+
+function disconnectMachineQuestion(t: Messages, m: MachineView, onYes: () => Promise<void>): Question {
+  const c = t.machines.confirm.disconnect;
+  return {
+    ...c,
+    effect: <Phrase words={c.effect} values={[<bdi>{m.hostname}</bdi>]} />,
+    warnings: m.plans.some(plan => plan.provider === 'claude') ? [t.machines.disconnectClaude] : [],
+    danger: true,
+    onYes,
+  };
+}
+
 export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRoute) {
   const t = useT();
   const { language } = useLanguage();
@@ -847,32 +863,19 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
     });
 
   const keepBackups = (m: MachineView, keepsBackups: boolean) => {
-    const c = keepsBackups ? t.machines.confirm.keepBackupsOn : t.machines.confirm.keepBackupsOff;
     setFailure(null);
-    confirmation.ask({
-      ...c,
-      effect: <Phrase words={c.effect} values={[<bdi>{m.hostname}</bdi>]} />,
-      danger: !keepsBackups,
-      onYes: async () => {
-        await api.patch(`/api/machines/${m.id}`, { keepsBackups });
-        setMachines(list => list?.map(x => (x.id === m.id ? { ...x, keepsBackups } : x)) ?? null);
-      },
-    });
+    confirmation.ask(keepBackupsQuestion(t, m, keepsBackups, async () => {
+      await api.patch(`/api/machines/${m.id}`, { keepsBackups });
+      setMachines(list => list?.map(x => (x.id === m.id ? { ...x, keepsBackups } : x)) ?? null);
+    }));
   };
 
   const disconnect = (m: MachineView) => {
-    const c = t.machines.confirm.disconnect;
     setFailure(null);
-    confirmation.ask({
-      ...c,
-      effect: <Phrase words={c.effect} values={[<bdi>{m.hostname}</bdi>]} />,
-      warnings: m.plans.some(plan => plan.provider === 'claude') ? [t.machines.disconnectClaude] : [],
-      danger: true,
-      onYes: async () => {
-        await api.post(`/api/machines/${m.id}/disconnect`);
-        await load();
-      },
-    });
+    confirmation.ask(disconnectMachineQuestion(t, m, async () => {
+      await api.post(`/api/machines/${m.id}/disconnect`);
+      await load();
+    }));
   };
 
   const pool = machinePool(machines ?? [], builtin);

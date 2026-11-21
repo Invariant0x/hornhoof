@@ -5,7 +5,7 @@ import { useOrg } from '../org';
 import type { ModelOption, Org, SubView } from '../types';
 import { subName } from './subscription';
 import { BusyLabel } from './BusyLabel';
-import { useConfirmAction } from './ConfirmAction';
+import { useConfirmAction, type Question } from './ConfirmAction';
 import { Field, type InputProps } from './Field';
 import { NOT_A_LOGIN, SecretInput } from './SecretInput';
 import { TickBox } from './TickBox';
@@ -54,6 +54,20 @@ function apiEditLines(t: Messages, org: Org | null, sub: SubView, label: string,
   if (label !== (sub.label ?? '')) lines.push(<Phrase words={t.subs.confirm.editApi.rename} values={[plan, <bdi>{label}</bdi>]} />);
   if (scope !== initialScope) lines.push(<Phrase words={t.subs.confirm.editApi.target} values={[plan, <bdi>{targetLabel(t, org, scope)}</bdi>]} />);
   return lines;
+}
+
+function apiEditQuestion(t: Messages, org: Org | null, sub: SubView | undefined, label: string, scope: string, initialScope: string, onYes: () => Promise<void>): Question | null {
+  if (!sub) return null;
+  const lines = apiEditLines(t, org, sub, label, scope, initialScope);
+  if (!lines.length) return null;
+  return {
+    title: t.subs.confirm.editApi.title,
+    effect: lines[0],
+    warnings: lines.slice(1),
+    yes: t.subs.confirm.editApi.yes,
+    working: t.subs.confirm.editApi.working,
+    onYes,
+  };
 }
 
 function ScopeField({ value, places, onChange }: { value: string; places: readonly string[] | null; onChange(value: string): void }) {
@@ -197,6 +211,18 @@ function NewFields({ form, set }: { form: NewForm; set(patch: Partial<NewForm>):
 
 type NewForm = { provider: ApiProvider; apiKey: string; baseUrl: string; protocol: Protocol };
 
+function apiFormBody(sub: SubView | undefined, fresh: NewForm, label: string, scope: string, models: Model[]) {
+  const target = targetOf(scope);
+  if (sub) return { label: label.trim(), target, models };
+  const custom = fresh.provider === 'custom_api';
+  return {
+    kind: 'api_key', provider: fresh.provider, label: label.trim(), apiKey: fresh.apiKey.trim(), target,
+    ...(custom ? { baseUrl: fresh.baseUrl.trim() } : {}),
+    ...(custom || fresh.provider === 'openrouter' ? { protocol: fresh.protocol } : {}),
+    ...(models.length ? { models } : {}),
+  };
+}
+
 /* sub: the connection to change; without it the form connects a new one. */
 export function ApiForm({ sub, places = null, onSaved, onCancel }: { sub?: SubView; places?: readonly string[] | null; onSaved(sub: SubView): void; onCancel(): void }) {
   const t = useT();
@@ -220,21 +246,11 @@ export function ApiForm({ sub, places = null, onSaved, onCancel }: { sub?: SubVi
     return (await api.post<{ models: Model[] }>('/api/subscriptions/models', { provider: fresh.provider, apiKey: fresh.apiKey.trim(), ...where })).models;
   }
 
-  function body() {
-    const target = targetOf(scope);
-    if (sub) return { label: label.trim(), target, models };
-    return {
-      kind: 'api_key', provider: fresh.provider, label: label.trim(), apiKey: fresh.apiKey.trim(), target,
-      ...(custom ? { baseUrl: fresh.baseUrl.trim() } : {}),
-      ...(custom || fresh.provider === 'openrouter' ? { protocol: fresh.protocol } : {}),
-      ...(models.length ? { models } : {}),
-    };
-  }
-
   async function send() {
+    const payload = apiFormBody(sub, fresh, label, scope, models);
     const { subscription } = sub
-      ? await api.patch<{ subscription: SubView }>(`/api/subscriptions/${sub.id}`, body())
-      : await api.post<{ subscription: SubView }>('/api/subscriptions', body());
+      ? await api.patch<{ subscription: SubView }>(`/api/subscriptions/${sub.id}`, payload)
+      : await api.post<{ subscription: SubView }>('/api/subscriptions', payload);
     onSaved(subscription);
   }
 
@@ -253,17 +269,10 @@ export function ApiForm({ sub, places = null, onSaved, onCancel }: { sub?: SubVi
   function save(e: FormEvent) {
     e.preventDefault();
     if (busy) return;
-    const lines = sub ? apiEditLines(t, org, sub, label.trim(), scope, initialScope) : [];
-    if (!lines.length) return void saveDirect();
+    const question = apiEditQuestion(t, org, sub, label.trim(), scope, initialScope, send);
+    if (!question) return void saveDirect();
     setProblem(null);
-    confirmation.ask({
-      title: t.subs.confirm.editApi.title,
-      effect: lines[0],
-      warnings: lines.slice(1),
-      yes: t.subs.confirm.editApi.yes,
-      working: t.subs.confirm.editApi.working,
-      onYes: send,
-    });
+    confirmation.ask(question);
   }
 
   const ready = label.trim() && (editing || (fresh.apiKey.trim().length >= 8 && (!custom || fresh.baseUrl.trim())));

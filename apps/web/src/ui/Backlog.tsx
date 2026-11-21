@@ -101,6 +101,18 @@ function ItemRow({ item, index, count, chosen, open, busy, drag, onChoose, onOpe
 
 /* A department's list of work kept for later turns: people add to it, put it in order, take out what is not needed and put
    the chosen items into the next turn, where they become its tasks. Nobody works on what is in it. */
+async function removeBacklogItem(departmentId: string, id: string, onOrder: (items: BacklogItem[]) => void, onBusy: (busy: boolean) => void, onReload: () => void) {
+  onBusy(true);
+  try {
+    onOrder((await removeFromBacklog(departmentId, id)).items);
+  } catch (err) {
+    onReload();
+    throw err;
+  } finally {
+    onBusy(false);
+  }
+}
+
 export function Backlog({ departmentId }: { departmentId: string }) {
   const t = useT();
   const heading = useId();
@@ -164,19 +176,6 @@ export function Backlog({ departmentId }: { departmentId: string }) {
     if (drag && drag.over !== null && from >= 0) move(from, drag.over > from ? drag.over - 1 : drag.over);
     setDrag(null);
   }
-  async function deleteItem(id: string) {
-    setBusy(true);
-    setProblem(null);
-    setSaid(null);
-    try {
-      setOrder((await removeFromBacklog(departmentId, id)).items);
-    } catch (err) {
-      load();
-      throw err;
-    } finally {
-      setBusy(false);
-    }
-  }
   const add = (item: { title: string; text: string }) => act(async () => { await addToBacklog(departmentId, item); load(); });
   const remove = (item: BacklogItem) => {
     setProblem(null);
@@ -186,7 +185,7 @@ export function Backlog({ departmentId }: { departmentId: string }) {
       effect: <Phrase words={t.backlog.confirm.remove.effect} values={[<bdi>{item.title}</bdi>]} />,
       final: true,
       danger: true,
-      onYes: () => deleteItem(item.id),
+      onYes: () => removeBacklogItem(departmentId, item.id, setOrder, setBusy, load),
     });
   };
   const schedule = () => void act(async () => {

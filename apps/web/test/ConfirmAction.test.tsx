@@ -99,6 +99,16 @@ describe('the confirmation of a critical action', () => {
     expect(screen.getByText('The form under it')).toBeInTheDocument();
   });
 
+  it('ignores a native cancel event so opening on Escape keydown does not dismiss on its keyup', async () => {
+    const onClose = vi.fn();
+    const { dialog } = await open({ onClose });
+    const cancel = new Event('cancel', { cancelable: true });
+    dialog.dispatchEvent(cancel);
+    expect(cancel.defaultPrevented).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(dialog).toBeInTheDocument();
+  });
+
   it('keeps the focus inside', async () => {
     const { user } = await open();
     const action = screen.getByRole('button', { name: 'Remove' });

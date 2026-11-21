@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
-import { errorText, Phrase, useLanguage, useT } from '../i18n';
+import { errorText, Phrase, useLanguage, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { ASSISTANT_PROGRAMS, type AssistantProgram, type AssistantView, type Me, type PersonView, type SubView } from '../types';
 import { BusyLabel } from '../ui/BusyLabel';
-import { useConfirmAction } from '../ui/ConfirmAction';
+import { useConfirmAction, type Question } from '../ui/ConfirmAction';
 import { CopyButton } from '../ui/CopyButton';
 import { Edge } from '../ui/Edge';
 import { Field } from '../ui/Field';
@@ -296,6 +296,25 @@ function OwnAgent({ plans, plan, agent, onPlan }: { plans: SubView[]; plan: stri
   </>;
 }
 
+function assistantRenameQuestion(t: Messages, current: string, changes: ReturnType<typeof personChanges>, onYes: () => Promise<void>): Question | null {
+  const next = changes && 'name' in changes ? changes.name : undefined;
+  if (!next) return null;
+  return {
+    ...t.people.confirm.renameAssistant,
+    effect: <Phrase words={t.people.confirm.renameAssistant.effect} values={[<bdi>{current}</bdi>, <bdi>{next}</bdi>]} />,
+    onYes,
+  };
+}
+
+const cleanUrl = (value: string) => value.trim() || null;
+
+function assistantPatchBody(owner: boolean, person: PersonView, program: AssistantProgram, eventsUrl: string, skillsUrl: string, plan: string) {
+  /* The plan goes only when its owner changed it: nobody else may send it. */
+  const currentPlan = person.assistant?.agent?.plan ?? '';
+  const moved = owner && plan !== currentPlan ? { plan: plan || null } : {};
+  return { program, eventsUrl: cleanUrl(eventsUrl), skillsUrl: cleanUrl(skillsUrl), ...moved };
+}
+
 /* An assistant's card: whom it acts for, its name and title for someone who manages people, its program, its events and
    skills addresses, for its owner the plan its own agent thinks on, and its key. onChanged: the key changed, and the card
    stays open. */
@@ -312,12 +331,11 @@ export function AssistantCard({ me, person, manages, rename, onChanged, onSaved,
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
   const confirmation = useConfirmAction();
+  const missingName = manages && rename && !name.trim();
 
   async function send(changes: ReturnType<typeof personChanges>) {
     if (changes) onChanged((await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, changes)).person);
-    /* The plan goes only when its owner changed it: nobody else may send it. */
-    const moved = owner && plan !== (person.assistant?.agent?.plan ?? '') ? { plan: plan || null } : {};
-    const body = { program, eventsUrl: eventsUrl.trim() || null, skillsUrl: skillsUrl.trim() || null, ...moved };
+    const body = assistantPatchBody(owner, person, program, eventsUrl, skillsUrl, plan);
     onSaved((await api.patch<{ person: PersonView }>(`/api/people/${person.id}/assistant`, body)).person);
   }
 
@@ -334,15 +352,12 @@ export function AssistantCard({ me, person, manages, rename, onChanged, onSaved,
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    if (manages && rename && !name.trim()) return;
+    if (missingName) return;
     const changes = personChanges(person, { manages, rename }, name, title);
-    if (changes && 'name' in changes && changes.name) {
+    const question = assistantRenameQuestion(t, person.name, changes, () => send(changes));
+    if (question) {
       setFailure('');
-      confirmation.ask({
-        ...t.people.confirm.renameAssistant,
-        effect: <Phrase words={t.people.confirm.renameAssistant.effect} values={[<bdi>{person.name}</bdi>, <bdi>{changes.name}</bdi>]} />,
-        onYes: () => send(changes),
-      });
+      confirmation.ask(question);
       return;
     }
     void save(changes);
@@ -364,7 +379,7 @@ export function AssistantCard({ me, person, manages, rename, onChanged, onSaved,
         {plans && <OwnAgent plans={plans} plan={plan} agent={person.assistant?.agent ?? null} onPlan={setPlan} />}
         {failure && <p className="alert" role="alert">{failure}</p>}
         <div className="form-foot">
-          <button className="btn" type="submit" aria-busy={busy} disabled={busy || (manages && rename && !name.trim())}>
+          <button className="btn" type="submit" aria-busy={busy} disabled={busy || missingName}>
             <BusyLabel busy={busy} idle={t.common.save} working={t.common.saving} />
           </button>
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>

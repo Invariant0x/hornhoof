@@ -2,7 +2,7 @@ import { useId, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { errorText, Phrase, useT, type Messages } from '../i18n';
 import type { Department, Repository } from '../types';
-import { useConfirmAction } from './ConfirmAction';
+import { useConfirmAction, type Question } from './ConfirmAction';
 import { Field } from './Field';
 import { DepartmentRepoHost } from './RepoHost';
 import { NOT_A_LOGIN, SecretInput } from './SecretInput';
@@ -43,6 +43,20 @@ function repoUpdateLines(t: Messages, repository: Repository, nextUrl: string, n
     return [<Phrase words={u.branch} values={[oldUrl, <bdi>{nextBranch}</bdi>]} />, ...(tokenChanged ? [u.tokenNote] : [])];
   }
   return tokenChanged ? [<Phrase words={u.token} values={[oldUrl]} />] : [];
+}
+
+function repoUpdateQuestion(t: Messages, repository: Repository | null | undefined, nextUrl: string, nextBranch: string, tokenChanged: boolean, onYes: () => Promise<void>): Question | null {
+  if (!repository) return null;
+  const lines = repoUpdateLines(t, repository, nextUrl, nextBranch, tokenChanged);
+  if (!lines.length) return null;
+  return {
+    title: t.dept.repoConfirm.update.title,
+    effect: lines[0],
+    warnings: lines.slice(1),
+    yes: t.dept.repoConfirm.update.yes,
+    working: t.dept.repoConfirm.update.working,
+    onYes,
+  };
 }
 
 /* The repository a department's or product's agents clone, for people who see the whole company. An empty token keeps the saved one. */
@@ -102,17 +116,10 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
     const gb = memory.trim() ? Number(memory) : null;
     const testMemory = gb !== (repository?.testMemoryGb ?? null) ? { testMemoryGb: gb } : {};
     const body = { url: nextUrl, branch: nextBranch, ...(nextToken ? { token: nextToken } : {}), ...author, ...testMemory, ...commandChange(fullCommand, savedCommand(repository)) };
-    const lines = repository ? repoUpdateLines(t, repository, nextUrl, nextBranch, Boolean(nextToken)) : [];
-    if (!lines.length) return void run(() => api.put(path, body));
+    const question = repoUpdateQuestion(t, repository, nextUrl, nextBranch, Boolean(nextToken), () => apply(() => api.put(path, body)));
+    if (!question) return void run(() => api.put(path, body));
     setFailure(null);
-    confirmation.ask({
-      title: t.dept.repoConfirm.update.title,
-      effect: lines[0],
-      warnings: lines.slice(1),
-      yes: t.dept.repoConfirm.update.yes,
-      working: t.dept.repoConfirm.update.working,
-      onYes: () => apply(() => api.put(path, body)),
-    });
+    confirmation.ask(question);
   }
 
   function askRemove(current: Repository) {

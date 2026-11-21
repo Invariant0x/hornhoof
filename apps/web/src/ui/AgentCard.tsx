@@ -8,7 +8,7 @@ import { defaultEffort, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, Part, SubView } from '../types';
 import { TimerSettings } from './TimerSettings';
 import { TelegramBot } from './TelegramBot';
-import { useConfirmAction } from './ConfirmAction';
+import { useConfirmAction, type Question } from './ConfirmAction';
 import { PanelFrame } from './SidePanels';
 import { LimitMeters } from './PlanLimits';
 import { FallbackLine } from './PlanFallbacks';
@@ -165,6 +165,31 @@ const keepLoadedCard = (live: boolean, card: AgentCardView | null, save: (c: Age
   if (live && card) save(card);
 };
 
+function removeAgentQuestion(t: Messages, current: AgentCardView, onYes: () => Promise<void>): Question {
+  const words = t.agent.confirm.remove;
+  const dept = current.department?.name;
+  return {
+    ...words,
+    effect: dept
+      ? <Phrase words={words.effect} values={[<bdi>{current.name}</bdi>, <bdi>{dept}</bdi>]} />
+      : <Phrase words={words.effectNoDept} values={[<bdi>{current.name}</bdi>]} />,
+    warnings: [words.warning],
+    danger: true,
+    final: true,
+    onYes,
+  };
+}
+
+function disconnectPlanQuestion(t: Messages, employeeTitle: string, subscription: SubView, onYes: () => Promise<void>): Question {
+  const words = t.agent.confirm.disconnectPlan;
+  return {
+    ...words,
+    effect: <Phrase words={words.effect} values={[<bdi>{employeeTitle}</bdi>, <bdi>{subLabel(subscription)}</bdi>]} />,
+    danger: true,
+    onYes,
+  };
+}
+
 export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClose }: Props) {
   const t = useT();
   const { language } = useLanguage();
@@ -258,33 +283,16 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
 
   function askRemove(current: AgentCardView) {
     setFailure(null);
-    const words = t.agent.confirm.remove;
-    const dept = current.department?.name;
-    confirmation.ask({
-      ...words,
-      effect: dept
-        ? <Phrase words={words.effect} values={[<bdi>{current.name}</bdi>, <bdi>{dept}</bdi>]} />
-        : <Phrase words={words.effectNoDept} values={[<bdi>{current.name}</bdi>]} />,
-      warnings: [words.warning],
-      danger: true,
-      final: true,
-      onYes: async () => {
-        await api.del(base);
-        onRemoved();
-      },
-    });
+    confirmation.ask(removeAgentQuestion(t, current, async () => {
+      await api.del(base);
+      onRemoved();
+    }));
   }
 
   function pickSubscription(current: AgentCardView, employeeTitle: string, next: string) {
     if (!next && current.subscription) {
       setFailure(null);
-      const words = t.agent.confirm.disconnectPlan;
-      confirmation.ask({
-        ...words,
-        effect: <Phrase words={words.effect} values={[<bdi>{employeeTitle}</bdi>, <bdi>{subLabel(current.subscription)}</bdi>]} />,
-        danger: true,
-        onYes: () => applyCard(() => api.patch<AgentCardView>(base, { subscription: null })),
-      });
+      confirmation.ask(disconnectPlanQuestion(t, employeeTitle, current.subscription, () => applyCard(() => api.patch<AgentCardView>(base, { subscription: null }))));
       return;
     }
     void change({ subscription: next || null });

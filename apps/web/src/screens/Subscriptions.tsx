@@ -8,7 +8,7 @@ import { errorText, Phrase, useLanguage, useT, type Language, type Messages } fr
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
 import type { JobView, Me, PlanFallback, ShownCommand, SubView } from '../types';
 import { PlanFallbacks } from '../ui/PlanFallbacks';
-import { useConfirmAction } from '../ui/ConfirmAction';
+import { useConfirmAction, type Question } from '../ui/ConfirmAction';
 import { CommandBox, type ActiveCommand } from '../ui/CommandBox';
 import { usePlanCommands } from './use-plan-commands';
 import { commandForPlan, SubscriptionCommandBlocks, SubscriptionInstall } from './SubscriptionCommands';
@@ -538,6 +538,17 @@ function usePlanConnections({ setSubs, load, run, signIn }: ConnectionParts) {
 /* A screen's data once its load is done, so the ring keeps its least time; until then, none. */
 const failureOnTop = (subs: SubView[] | null, plans: unknown, commands: unknown) => (subs ? plans ?? commands : commands);
 
+function removeSubQuestion(t: Messages, sub: SubView, onYes: () => Promise<void>): Question {
+  const words = sub.kind === 'api_key' ? t.subs.confirm.removeKey : t.subs.confirm.removePlan;
+  return {
+    ...words,
+    effect: <Phrase words={words.effect} values={[<bdi>{subName(t, sub)}</bdi>]} />,
+    final: true,
+    danger: true,
+    onYes,
+  };
+}
+
 export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   const t = useT();
   const { language } = useLanguage();
@@ -670,15 +681,8 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   };
 
   const askRemove = (sub: SubView) => {
-    const words = sub.kind === 'api_key' ? t.subs.confirm.removeKey : t.subs.confirm.removePlan;
     setFailure(null);
-    confirmation.ask({
-      ...words,
-      effect: <Phrase words={words.effect} values={[<bdi>{subName(t, sub)}</bdi>]} />,
-      final: true,
-      danger: true,
-      onYes: () => sendRemove(sub),
-    });
+    confirmation.ask(removeSubQuestion(t, sub, () => sendRemove(sub)));
   };
 
   if (unavailableFailure(readFailure)) return <RouteUnavailable onHome={onHome} />;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type SyntheticEvent } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { errorText, useT } from '../i18n';
 import { BusyLabel } from './BusyLabel';
@@ -64,42 +64,44 @@ const FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), select:n
 /* The window's own events stay in it: a row or a panel it was opened from never takes its clicks or keys. */
 const keepIn = (event: SyntheticEvent) => event.stopPropagation();
 
-export function ConfirmAction({ title, effect, warnings = [], final = false, yes, working, danger = false, onYes, onClose }: ConfirmActionProps) {
-  const t = useT();
-  const titleId = useId();
-  const effectId = useId();
-  const back = useRef<HTMLDialogElement>(null);
-  const box = useRef<HTMLDivElement>(null);
-  const action = useRef<HTMLButtonElement>(null);
-  const cancel = useRef<HTMLButtonElement>(null);
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<unknown>(null);
-  const live = useRef(true);
-  const busyNow = useRef(false);
-  const backdropDown = useRef(false);
-  const close = useRef(onClose);
-  close.current = onClose;
-  const dismiss = useCallback(() => {
-    if (!busyNow.current) close.current();
-  }, []);
+function nextFocusStop(stops: readonly HTMLElement[], at: Element | null, inside: boolean, shift: boolean): HTMLElement | null {
+  const edge = shift ? stops[0] : stops[stops.length - 1];
+  if (inside && at !== edge) return null;
+  return shift ? stops[stops.length - 1]! : stops[0]!;
+}
 
+/* Tab and Shift+Tab go round the window's own buttons. */
+function trapDialogFocus(event: ReactKeyboardEvent<HTMLDialogElement>, container: HTMLDivElement | null): void {
+  event.stopPropagation();
+  if (event.key !== 'Tab' || !container) return;
+  const stops = [...container.querySelectorAll<HTMLElement>(FOCUSABLE)];
+  if (!stops.length) return event.preventDefault();
+  const next = nextFocusStop(stops, document.activeElement, container.contains(document.activeElement), event.shiftKey);
+  if (!next) return;
+  event.preventDefault();
+  next.focus();
+}
+
+/* Opens the modal in the top layer once, sets its initial focus and restores the opener on close. */
+function useModalDialog(back: RefObject<HTMLDialogElement | null>, firstFocus: RefObject<RefObject<HTMLButtonElement | null>>, live: RefObject<boolean>) {
   useLayoutEffect(() => {
     const dialog = back.current!;
     const opener = document.activeElement;
     live.current = true;
     if (!dialog.open) dialog.showModal();
-    (danger ? cancel : action).current?.focus();
+    firstFocus.current.current?.focus();
     return () => {
       live.current = false;
       if (dialog.open) dialog.close();
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
-    // The window opens once, with the focus where its kind of action puts it.
-  }, []);
+  }, [back, firstFocus, live]);
+}
 
+/* On the window object, ahead of every listener on the document, so a window under this one keeps its own Escape and
+   an employee window does not stop its work. */
+function useEscapeDismiss(dismiss: () => void) {
   useEffect(() => {
-    /* On the window object, ahead of every listener on the document, so a window under this one keeps its own Escape and
-       an employee window does not stop its work. */
     const onKey = (event: KeyboardEvent) => {
       if (!takeEscape(event)) return;
       event.stopPropagation();
@@ -108,7 +110,11 @@ export function ConfirmAction({ title, effect, warnings = [], final = false, yes
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [dismiss]);
+}
 
+function useConfirmSubmit(onYes: () => unknown, live: RefObject<boolean>, busyNow: RefObject<boolean>, close: RefObject<() => void>) {
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
   const run = async () => {
     if (busyNow.current) return;
     busyNow.current = true;
@@ -125,24 +131,45 @@ export function ConfirmAction({ title, effect, warnings = [], final = false, yes
       if (live.current) setBusy(false);
     }
   };
+  return { busy, failure, run };
+}
 
-  /* Tab and Shift+Tab go round the window's own buttons. */
-  const keepFocus = (event: ReactKeyboardEvent<HTMLDialogElement>) => {
-    event.stopPropagation();
-    if (event.key !== 'Tab' || !box.current) return;
-    const stops = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
-    const [first, last] = [stops[0], stops[stops.length - 1]];
-    const at = document.activeElement;
-    const inside = box.current.contains(at);
-    if (!first) event.preventDefault();
-    else if (event.shiftKey && (at === first || !inside)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && (at === last || !inside)) {
-      event.preventDefault();
-      first.focus();
-    }
+function useBackdropDismiss(dismiss: () => void) {
+  const down = useRef(false);
+  return {
+    onPointerDown(event: SyntheticEvent) {
+      keepIn(event);
+      down.current = event.target === event.currentTarget;
+    },
+    onClick(event: SyntheticEvent) {
+      keepIn(event);
+      if (down.current && event.target === event.currentTarget) dismiss();
+      down.current = false;
+    },
   };
+}
+
+export function ConfirmAction({ title, effect, warnings = [], final = false, yes, working, danger = false, onYes, onClose }: ConfirmActionProps) {
+  const t = useT();
+  const titleId = useId();
+  const effectId = useId();
+  const back = useRef<HTMLDialogElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const action = useRef<HTMLButtonElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
+  const firstFocus = useRef(danger ? cancel : action);
+  const live = useRef(true);
+  const busyNow = useRef(false);
+  const close = useRef(onClose);
+  close.current = onClose;
+  const dismiss = useCallback(() => {
+    if (!busyNow.current) close.current();
+  }, []);
+  const { busy, failure, run } = useConfirmSubmit(onYes, live, busyNow, close);
+  const backdrop = useBackdropDismiss(dismiss);
+
+  useModalDialog(back, firstFocus, live);
+  useEscapeDismiss(dismiss);
 
   return createPortal(
     <dialog
@@ -152,20 +179,12 @@ export function ConfirmAction({ title, effect, warnings = [], final = false, yes
       aria-modal="true"
       aria-labelledby={titleId}
       aria-describedby={effectId}
-      onKeyDown={keepFocus}
-      onCancel={event => {
-        event.preventDefault();
-        dismiss();
-      }}
-      onPointerDown={event => {
-        keepIn(event);
-        backdropDown.current = event.target === event.currentTarget;
-      }}
-      onClick={event => {
-        keepIn(event);
-        if (backdropDown.current && event.target === event.currentTarget) dismiss();
-        backdropDown.current = false;
-      }}
+      onKeyDown={event => trapDialogFocus(event, box.current)}
+      /* Escape is handled on window keydown; preventing native cancel stops a CloseWatcher from closing a busy dialog
+         or closing one immediately on the keyup of the Escape that opened it. */
+      onCancel={event => event.preventDefault()}
+      onPointerDown={backdrop.onPointerDown}
+      onClick={backdrop.onClick}
       onMouseDown={keepIn}
       onSubmit={keepIn}
     >

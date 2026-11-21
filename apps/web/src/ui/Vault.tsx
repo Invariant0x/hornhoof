@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { errorText, Phrase, useLanguage, useT, type Messages } from '../i18n';
-import { useConfirmAction } from './ConfirmAction';
+import { useConfirmAction, type Question } from './ConfirmAction';
 import { Field } from './Field';
 import { NOT_A_LOGIN, SecretInput } from './SecretInput';
 import { TickBox } from './TickBox';
@@ -38,21 +38,39 @@ function useWhen() {
   return (iso: string) => new Date(iso).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
 }
 
-function vaultEditSummary(t: Messages, entry: VaultEntry, draft: Draft): { warnings: ReactNode[]; danger: boolean } {
-  const e = t.vault.confirm.edit;
-  const name = draft.name.trim();
-  const site = draft.site.trim();
-  const login = draft.login.trim();
-  const warnings: ReactNode[] = [
-    ...(draft.password ? [e.password] : []),
-    ...(draft.code.trim() ? [e.code] : []),
-    ...(draft.removeCode ? [e.removeCode] : []),
-    ...(name !== entry.name ? [<Phrase words={e.rename} values={[<bdi>{name}</bdi>]} />] : []),
-    ...(site !== entry.site ? [<Phrase words={e.site} values={[<bdi>{site}</bdi>]} />] : []),
-    ...(login !== entry.login ? [<Phrase words={e.login} values={[<bdi>{login}</bdi>]} />] : []),
+function vaultFieldWarnings(e: Messages['vault']['confirm']['edit'], entry: VaultEntry, draft: Draft): ReactNode[] {
+  const fields: [boolean, ReactNode][] = [
+    [draft.name.trim() !== entry.name, <Phrase words={e.rename} values={[<bdi>{draft.name.trim()}</bdi>]} />],
+    [draft.site.trim() !== entry.site, <Phrase words={e.site} values={[<bdi>{draft.site.trim()}</bdi>]} />],
+    [draft.login.trim() !== entry.login, <Phrase words={e.login} values={[<bdi>{draft.login.trim()}</bdi>]} />],
   ];
-  return { warnings, danger: Boolean(draft.password || draft.code.trim() || draft.removeCode) };
+  return fields.filter(([changed]) => changed).map(([, line]) => line);
 }
+
+function vaultSecretWarnings(e: Messages['vault']['confirm']['edit'], draft: Draft): ReactNode[] {
+  const items: [unknown, ReactNode][] = [[draft.password, e.password], [draft.code.trim(), e.code], [draft.removeCode, e.removeCode]];
+  return items.filter(([changed]) => Boolean(changed)).map(([, line]) => line);
+}
+
+function vaultEditQuestion(t: Messages, entry: VaultEntry | null, draft: Draft, onYes: () => Promise<void>): Question | null {
+  if (!entry) return null;
+  const e = t.vault.confirm.edit;
+  const secrets = vaultSecretWarnings(e, draft);
+  const warnings = [...secrets, ...vaultFieldWarnings(e, entry, draft)];
+  if (!warnings.length) return null;
+  return { title: e.title, effect: <Phrase words={e.effect} values={[<bdi>{entry.name}</bdi>]} />, warnings, yes: e.yes, working: e.working, danger: secrets.length > 0, onYes };
+}
+
+function vaultEntryBody(entry: VaultEntry | null, draft: Draft): Record<string, unknown> {
+  return {
+    name: draft.name.trim(), site: draft.site.trim(), login: draft.login.trim(),
+    ...(draft.password ? { password: draft.password } : {}),
+    ...(draft.code.trim() ? { code: draft.code.trim() } : {}),
+    ...(entry && draft.removeCode ? { removeCode: true } : {}),
+  };
+}
+
+const isVaultNameTaken = (err: unknown): boolean => (err as { reason?: string }).reason === 'vault_name_taken';
 
 /* The form of one entry: a new one, or the change of one, where an empty password or code keeps the stored one. */
 function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onSaved(): void; onCancel(): void }) {
@@ -84,11 +102,10 @@ function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onS
 
   async function send(body: Record<string, unknown>) {
     try {
-      if (entry) await api.patch(`/api/vault/${entry.id}`, body);
-      else await api.post('/api/vault', body);
+      await (entry ? api.patch(`/api/vault/${entry.id}`, body) : api.post('/api/vault', body));
       onSaved();
     } catch (err) {
-      if ((err as { reason?: string }).reason === 'vault_name_taken') setProblems({ name: v.nameTaken });
+      if (isVaultNameTaken(err)) setProblems({ name: v.nameTaken });
       throw err;
     }
   }
@@ -98,7 +115,7 @@ function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onS
     try {
       await send(body);
     } catch (err) {
-      if ((err as { reason?: string }).reason === 'vault_name_taken') showProblems({ name: v.nameTaken });
+      if (isVaultNameTaken(err)) showProblems({ name: v.nameTaken });
       else setFailure(err);
     } finally {
       setBusy(false);
@@ -111,23 +128,10 @@ function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onS
     if (Object.keys(found).length) return showProblems(found);
     setProblems({});
     setFailure(null);
-    const body = {
-      name: draft.name.trim(), site: draft.site.trim(), login: draft.login.trim(),
-      ...(draft.password ? { password: draft.password } : {}),
-      ...(draft.code.trim() ? { code: draft.code.trim() } : {}),
-      ...(entry && draft.removeCode ? { removeCode: true } : {}),
-    };
-    const summary = entry ? vaultEditSummary(t, entry, draft) : null;
-    if (!entry || !summary?.warnings.length) return void saveDirect(body);
-    confirmation.ask({
-      title: v.confirm.edit.title,
-      effect: <Phrase words={v.confirm.edit.effect} values={[<bdi>{entry.name}</bdi>]} />,
-      warnings: summary.warnings,
-      yes: v.confirm.edit.yes,
-      working: v.confirm.edit.working,
-      danger: summary.danger,
-      onYes: () => send(body),
-    });
+    const body = vaultEntryBody(entry, draft);
+    const question = vaultEditQuestion(t, entry, draft, () => send(body));
+    if (question) confirmation.ask(question);
+    else void saveDirect(body);
   }
 
   const ref = (name: FieldName) => (el: HTMLInputElement | null) => void (inputs.current[name] = el);
