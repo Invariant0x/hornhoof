@@ -10,6 +10,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Fixed
 
 - On a heavily loaded machine a node no longer refuses an agent's own hooks as callers outside its terminal: it checks a caller the moment its call arrives, each hook waits for the node as long as its program allows, and a caller that left before its check is refused under that reason.
+- Reading a task no longer spends GitHub's request limit: what GitHub said of whether a department's task branches are in main is kept, one read asks it of 10 branches at most, and once GitHub answers that the account's limit is used up nothing more is asked until its reset.
 
 ## [0.40.1] - 2026-11-21
 

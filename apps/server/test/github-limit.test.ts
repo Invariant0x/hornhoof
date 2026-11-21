@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { githubReaders, readCompare, readMerged } from '../src/modules/testruns/compare.js';
-import { GitHubLimits, GitHubRateLimited, githubRateLimit, type RateLimit } from '../src/modules/testruns/github-limit.js';
+import { GitHubLimits, GitHubRateLimited, githubRateLimit, limitRecord, type RateLimit } from '../src/modules/testruns/github-limit.js';
 
 /* GitHub gives each account 5000 REST requests an hour, which the whole server shares. Once they are spent, GitHub answers 403
    or 429 with x-ratelimit-remaining 0 and the time of the reset, and every request before then is lost. Its answers here are
@@ -18,6 +18,11 @@ describe("GitHub's answer that the request limit is used up", () => {
 
   it('has no reset time where GitHub named none', () => {
     expect(githubRateLimit(spent(403, { 'x-ratelimit-reset': '' }))).toEqual({ remaining: 0, resetAt: null });
+  });
+
+  it('goes to the server log as what is left and when it comes back, in UTC', () => {
+    expect(limitRecord({ remaining: 0, resetAt: reset * 1000 })).toEqual({ remaining: 0, resetAt: new Date(reset * 1000).toISOString() });
+    expect(limitRecord({ remaining: 0, resetAt: null })).toEqual({ remaining: 0, resetAt: null });
   });
 
   it('is no other refusal: a 403 with requests left, a 404 or a 401', () => {
