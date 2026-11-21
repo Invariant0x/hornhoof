@@ -95,7 +95,7 @@ async function whole(card: Locator): Promise<string[]> {
 /* How far the words of each model field start from the inside of its frame, on its start side: Design's amendment 1 wants
    the field's padding, 12 px, and nothing before it. */
 async function valueStarts(card: Locator): Promise<number[]> {
-  return card.locator('.fallback-model .field').evaluateAll(fields => fields.map(field => {
+  return card.locator('.fallback-model.field').evaluateAll(fields => fields.map(field => {
     const frame = field.querySelector<HTMLElement>('select, .model-trigger')!;
     const words = document.createRange();
     words.selectNodeContents(field.querySelector('.model-value bdi')!);
@@ -149,9 +149,26 @@ async function shoot(page: Page, piece: Locator, path: string): Promise<void> {
 const filledButtons = (card: Locator) => card.locator('.plan-card-actions .form-foot > button:not(.ghost)');
 
 const PIECES = {
-  settings: '.plan-settings', fallbacks: '.plan-fallbacks', entry: '.fallback-list > .entry', name: '.fallback-name', model: '.fallback-model .field',
+  settings: '.plan-settings', fallbacks: '.plan-fallbacks', entry: '.fallback-list > .entry', name: '.fallback-name', model: '.fallback-model.field',
   moves: '.fallback-moves', add: '.fallback-add > button', foot: '.plan-card-actions', action: '.plan-card-actions .form-foot > button',
 };
+
+async function expectFallbackControlPlacement(entry: Locator, layout: 'inline' | 'stacked') {
+  const field = await box(entry.locator('.fallback-model :is(select, .model-trigger)'));
+  for (const button of await entry.locator('.fallback-moves > button').all()) {
+    const action = await box(button);
+    if (layout === 'stacked') {
+      expect(action.y).toBeGreaterThanOrEqual(field.y + field.height);
+      continue;
+    }
+    const centerDifference = Math.abs(field.y + field.height / 2 - action.y - action.height / 2);
+    expect(centerDifference, `${await button.getAttribute('aria-label')} is centered on its model field`).toBeLessThanOrEqual(1);
+    if (field.height <= 45) {
+      expect(Math.abs(field.y - action.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(field.y + field.height - action.y - action.height)).toBeLessThanOrEqual(1);
+    }
+  }
+}
 
 const FULL: Look[] = [
   ...(['en', 'ru'] as const).flatMap(lang => (['light', 'dark'] as const).flatMap(theme => [1440, 375].map(width => ({ lang, theme, width, dir: 'ltr' as const })))),
@@ -173,7 +190,10 @@ for (const look of FULL) {
     for (const start of await valueStarts(card)) expect(Math.abs(start - 12), `the model's words start ${start}px inside its field`).toBeLessThanOrEqual(1);
 
     /* Each record's moves stand in one row at the end edge, the same edge for all; Add stands at that edge after the list. */
-    const band = await box(card.locator('.plan-fallbacks'));
+    const fallbacks = card.locator('.plan-fallbacks');
+    await shoot(page, fallbacks, info.outputPath(`fallback-controls-${fileName(look)}-${browserName}.png`));
+    for (const entry of await entries.all()) await expectFallbackControlPlacement(entry, look.width === 375 ? 'stacked' : 'inline');
+    const band = await box(fallbacks);
     const ends = await card.locator('.fallback-moves').evaluateAll(groups => groups.map(g => {
       const r = [...g.children].map(b => b.getBoundingClientRect());
       const rtl = getComputedStyle(g).direction === 'rtl';
@@ -364,6 +384,7 @@ test('opens the whole names of long models as radio buttons under the field, in 
   await field.click();
   const group = card.getByRole('group', { name: ru.subs.fallbackModelLabel(name), exact: true });
   await expect(group.getByRole('radio')).toHaveCount(3);
+  await expectFallbackControlPlacement(card.locator('.fallback-list > .entry').first(), 'stacked');
   expect(await whole(card)).toEqual([]);
   await group.scrollIntoViewIfNeeded();
   await card.locator('.fallback-list > .entry').first().screenshot({ path: info.outputPath(`model-list-${fileName(look)}-${browserName}.png`) });

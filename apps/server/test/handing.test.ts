@@ -220,6 +220,7 @@ describe('the keeper that hands the server over', () => {
     await late.it.look();
     expect(late.handing()).toMatchObject({ phase: 'aborted', reason: 'behind' });
     expect(late.did).toEqual(['front close', 'fence', 'front open', 'tunnel start']);
+    expect(late.it.keepsPeerTunnel()).toBe(false);
     /* Not before it leads again is the request marked. */
     await late.looks(2);
     expect(await late.moves()).toMatchObject([{ state: 'switching' }]);
@@ -239,10 +240,12 @@ describe('the keeper that hands the server over', () => {
     await h.looks(4);
     h.said.leads = false;
     expect(h.handing()?.phase).toBe('go');
+    expect(h.it.keepsPeerTunnel()).toBe(true);
     const before = h.did.length;
     /* Five minutes of silence: it holds, asks, and says so once a minute. */
     await h.looks(300, 1000);
     expect([h.it.holds(), h.did.slice(before), h.handing()?.phase]).toEqual([true, [], 'go']);
+    expect(h.it.keepsPeerTunnel()).toBe(false);
     expect(h.lines.filter(line => line === 'Waiting for studio to say whether it took the server.')).toHaveLength(5);
     /* An offer the target still holds, past the deadline: the go goes again, and it asks on. */
     h.said.state = { state: 'offered', switch: h.request! };
@@ -306,9 +309,11 @@ describe('the keeper that hands the server over', () => {
     /* It gave the go, and the note of that cannot be read: it does not know that the server is still its own. */
     const h = await hander({ handing: { phase: 'go', fenced: true, w: W, copies: [] } });
     expect(h.it.holds()).toBe(true);
+    expect(h.it.keepsPeerTunnel()).toBe(true);
     writeFileSync(join(h.dir, HANDING_FILE), '{');
     await h.looks(3);
     expect([h.it.holds(), h.did]).toEqual([true, []]);
+    expect(h.it.keepsPeerTunnel()).toBe(false);
     expect(() => readHanding(h.dir)).toThrow(/cannot read/);
     expect(h.lines.filter(line => line.includes('cannot read'))).toHaveLength(1);
     /* A keeper that starts over such a note holds from its start. */

@@ -32,9 +32,9 @@ import { findKimiWire, prepareKimi } from '../providers/kimi-terminal.js';
 import { FAILURE, failure } from './failures.js';
 import { TurnEnds, hookCalls, claudeEnd, stopIsLate, type TurnEnd } from './turn-signals.js';
 import { busy, enterPending, hasSettled, idleRefusal, RETIRED, stale, type IdleEvidence, type RetireResult } from './program-retire.js';
-import { claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
+import { claudeOwn, claudeTook, claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
 import { CALLS } from './tool-calls.js';
-import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
+import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type LogMark, type WireNews } from './transcripts.js';
 import type { RecordingCursor } from './recordings.js';
 import { envFile, type Tmux } from './tmux.js';
 import { holdsWords, LostWords } from './lost-words.js';
@@ -139,6 +139,8 @@ type Agent = {
   ownerTyped?: boolean;
   /* The prompt Hornhoof typed, until the program's prompt hook says what it got. */
   typing?: string | null;
+  /* Where the log stood as Hornhoof's words went in: only what it reads on from there can be their receipt. */
+  receiptFrom?: LogMark | null;
   limits: Limits | null;
   /* How full the context is as Hornhoof last heard it, and how many tokens Kimi's model takes in it. */
   contextUsed: number | null;
@@ -421,6 +423,7 @@ export class TerminalHost {
       ownerRejected: (key, event, reason) => this.logHookRejection(key, event, reason),
       ownerReported: (key, event, reason) => this.reportHookRejection(key, event, reason),
       refused: (key, method, reason) => this.log(`Hornhoof's tools refused ${method} of agent ${key}: ${reason}.`),
+      gaveUp: (key, method) => this.log(`Agent ${key}'s program gave up on ${method} of Hornhoof's tools before Hornhoof answered: it has no tools until it starts again.`),
       outside: opts.toolsOutside, opening: key => this.openingTurn(key), checkStep: opts.checkStep,
       sensitive: (key, name, input, answer, policy) => this.sensitiveTool(key, name, input, answer, policy),
     });
@@ -1001,8 +1004,9 @@ export class TerminalHost {
     await this.prepare(job, urls);
     if (a.sessionId) a.left.add(a.sessionId);
     Object.assign(a, { ...startedState(job, spec), hash, instance: randomUUID() });
-    if (job.program.kind === 'claude' && !job.input.sessionId) await this.keepNew(job.input, spec.sessionId);
-    a.tail = this.tailFor(a);
+    const fresh = job.program.kind === 'claude' && !job.input.sessionId;
+    if (fresh) await this.keepNew(job.input, spec.sessionId);
+    a.tail = this.tailFor(a, fresh);
   }
 
   private async launchAttempt(a: Agent, job: TermJob, spec: LaunchSpec): Promise<void> {
@@ -1093,7 +1097,7 @@ export class TerminalHost {
   private async typePlainPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
     a.fresh = false;
     a.took = false;
-    a.typing = prompt;
+    this.typingNow(a, prompt);
     if (typedSinceStart(a) && !(await this.freeOfPerson(a, job))) return this.inputNotFree(a, job);
     a.ownerTyped = false;
     await this.opts.tmux.paste(a.name, prompt);
@@ -1216,7 +1220,8 @@ export class TerminalHost {
   }
 
   private async deliverOperatorPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
-    a.fresh = false; a.took = false; a.typing = prompt; a.ownerTyped = false;
+    a.fresh = false; a.took = false; a.ownerTyped = false;
+    this.typingNow(a, prompt);
     const failed = await this.pasteOperatorPrompt(a, job, prompt);
     return failed ?? this.waitOperatorReceipt(a, job, prompt);
   }
@@ -1524,11 +1529,12 @@ export class TerminalHost {
   }
 
   /* A program that connects to its tools only after the short turn that started it ended is turned away, as no turn answers
-     for them then, and goes without them for the rest of its session. Its turns end saying so, not as turns that left
-     their task where it was, and the next one starts it anew, to connect while that turn runs. */
+     for them then, and one that gave up waiting for Hornhoof's answer as it connected has none either: each goes without
+     them for the rest of its session. Its turns end saying so, not as turns that left their task where it was, which the
+     server repeats, and the next one starts it anew, to connect while that turn runs. */
   private withoutTools(a: Agent, job: TermJob): Promise<RunResult> {
     a.hash = null;
-    a.failure = failure('tools', "The program has no Hornhoof tools in this session: it connected to them between turns, when no turn could answer for them. The next turn starts it anew.");
+    a.failure = failure('tools', "The program has no Hornhoof tools in this session: it connected to them between turns, when no turn could answer for them, or gave up waiting for Hornhoof's answer as it connected. The next turn starts it anew.");
     return this.failedTurn(a, job, 'agent_failed');
   }
 
@@ -1984,10 +1990,11 @@ export class TerminalHost {
     return `Hornhoof: this message reached you cut short, ${got.length} of its ${typed.length} characters. The whole message is in ${file}. Read it there before you go on.`;
   }
 
-  private tailFor(a: Agent): LineTail | null {
+  /* fresh: a session the program starts now, whose log holds only what it writes from now on, even before it exists. */
+  private tailFor(a: Agent, fresh = false): LineTail | null {
     if (a.program?.kind === 'antigravity') a.agyRead = agySteps();
     const file = this.transcriptFile(a);
-    return file ? new LineTail(file, { fromEnd: true }) : null;
+    return file ? new LineTail(file, fresh ? { empty: true } : { fromEnd: true }) : null;
   }
 
   private transcriptFile(a: Agent): string | null {
@@ -2096,13 +2103,58 @@ export class TerminalHost {
     }
   }
 
+  /* An entry of the user's delivers an operator's assignment; one Claude wrote of its own, as a summary of a compacted
+     conversation that holds the assignment word for word, does not. */
   private takeOperatorOriginal(a: Agent, line: Record<string, unknown>): void {
-    if (this.operator?.enabled(a.key) && line.type === 'user' && isRecord(line.message)) a.turn?.words.takeOriginal(contentText(line.message.content));
+    if (this.assignmentMayGoIn(a) && line.type === 'user' && isRecord(line.message) && !claudeOwn(line)) a.turn?.words.takeOriginal(contentText(line.message.content));
+  }
+
+  /* While Hornhoof's words wait to go in, what the program takes is a person's: never the delivery of an assignment. */
+  private assignmentMayGoIn(a: Agent): boolean {
+    return Boolean(this.operator?.enabled(a.key)) && !a.promptWaits;
   }
 
   private claudeReceivedWords(a: Agent, line: Record<string, unknown>): void {
     const receipt = claudeWordReceipt(line, a.enqueuedWords);
     if (receipt && !this.knownClaudeWord(a, receipt) && receipt.state === 'queued') this.ownerQueued(a, receipt.text);
+    this.claudeTookTyped(a, line);
+  }
+
+  /* Hornhoof's words go in from here. What the program logged before is read first, while no words wait, so no entry of it
+     counts as their receipt. A program that comes back is read from the end of its log the node marked as it came up, and
+     the node reads nothing before the words go in. A log whose end it could not find then, or that stopped inside a line,
+     can hold earlier entries, and gives no receipt; nor does a log a look fails at later, or the log of a session the
+     program changes to, which is read from its start. This
+     takes Claude's --resume to go on in the same file, adding to it and copying no earlier entry into it once up, as the
+     transcripts of Claude Code up to 2.1.329 on a node show: one file across launches and versions, with no entry of
+     another session and no words of the user twice. */
+  private typingNow(a: Agent, words: string): void {
+    this.drain(a);
+    a.typing = words;
+    a.receiptFrom = a.tail?.mark() ?? null;
+  }
+
+  /* Claude's transcript records the words Hornhoof typed as it takes them: the receipt its prompt hook gives, should Claude
+     have given up on that hook, as on a busy machine, and the node take the program's own end for another turn's. Words
+     Claude queued and dequeued have their own receipts. */
+  private claudeTookTyped(a: Agent, line: Record<string, unknown>): void {
+    const typed = this.awaitingReceipt(a);
+    if (typed === null || !claudeTook(line, typed)) return;
+    /* What Claude takes while Hornhoof's words wait to go in came of a person's Enter, were it the same words: theirs. */
+    if (a.promptWaits) return this.personSent(a);
+    if (!this.takeRetainedAssignment(a, typed)) a.turn!.words.taken(typed);
+    a.typing = null;
+    this.tookTurn(a);
+  }
+
+  /* The words Hornhoof typed whose receipt the line read now can be. */
+  private awaitingReceipt(a: Agent): string | null {
+    if (a.typing == null || a.dequeued || !a.turn || this.overIn(a)) return null;
+    return this.readUpToTyping(a) ? a.typing : null;
+  }
+
+  private readUpToTyping(a: Agent): boolean {
+    return Boolean(a.receiptFrom && a.tail?.holds(a.receiptFrom));
   }
 
   private knownClaudeWord(a: Agent, receipt: NonNullable<ReturnType<typeof claudeWordReceipt>>): boolean {
@@ -2142,8 +2194,8 @@ export class TerminalHost {
 
   private observeRetainedAssignment(a: Agent, words: TurnWords, line: Record<string, unknown>): void {
     if (!a.program) return;
-    if (a.program.kind === 'claude' && line.type === 'user' && isRecord(line.message)) words.takeOriginal(contentText(line.message.content));
-    else words.observe(a.program.kind, line);
+    if (a.program.kind !== 'claude' || line.type !== 'user' || !isRecord(line.message)) words.observe(a.program.kind, line);
+    else if (!claudeOwn(line)) words.takeOriginal(contentText(line.message.content));
   }
 
   private takeRetainedAssignment(a: Agent, prompt: string): boolean {
@@ -2948,7 +3000,7 @@ export class TerminalHost {
     const text = [note, ...turn.words.pending()].filter(Boolean).join('\n\n');
     turn.words.replay(text);
     a.took = false;
-    a.typing = text;
+    this.typingNow(a, text);
     await this.inputLane(a, () => this.opts.tmux.paste(a.name, text));
     const pastedAt = Date.now();
     a.pastedAt = pastedAt;

@@ -155,6 +155,12 @@ export async function servePeopleWaits(page: Page) {
   const decisions: Decisions = { ...DECISIONS, requests, counts: { byPerson: { [IVAN.id]: 1, [MARIA.id]: 1, 'p-max': 1 }, byAgent: { [HANA.id]: 2, [ROSA.id]: 1 }, total: 2 } };
   await page.route('**/api/org', route => route.fulfill({ json: { ...ORG, people } }));
   await page.route('**/api/requests', route => route.fulfill({ json: decisions }));
+  const waitingTasks = TASKS.map(row => row.title === 'Pick the next goals' ? {
+    ...row,
+    time: { ...row.time!, waitsOn: [{ kind: 'person', event: 'ceo', who: { kind: 'person', ...IVAN }, reason: 'Choose a date', since: row.createdAt }] },
+  } satisfies TaskLine : row);
+  await page.route('**/api/tasks?status=all', route => route.fulfill({ json: { tasks: waitingTasks } }));
+  return decisions;
 }
 
 /* The shortest words a link of the tracker holds: the goal Refunds and the task Gift cards are called QA, and Hana in

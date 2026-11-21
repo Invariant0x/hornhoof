@@ -107,14 +107,14 @@ function FallbackControls({ fallback, plan, list, first, last, onChange }: Item)
   const down = t.subs.fallbackDownLabel(name);
   const away = t.subs.fallbackRemoveLabel(name);
   return (
-    <>
+    <div className="fallback-model field">
       <ModelField fallback={fallback} plan={plan} name={name} pick={pick} />
       <div className="fallback-moves entry-actions">
         <button className="act" type="button" data-move="up" aria-label={up} title={up} disabled={first} onClick={() => onChange(moved(list, at, at - 1), { kind: 'move', plan: plan.id, move: 'up' })}><FallbackIcon name="up" /></button>
         <button className="act" type="button" data-move="down" aria-label={down} title={down} disabled={last} onClick={() => onChange(moved(list, at, at + 1), { kind: 'move', plan: plan.id, move: 'down' })}><FallbackIcon name="down" /></button>
         <button className="act danger" type="button" aria-label={away} title={away} onClick={() => onChange(list.filter(f => f !== fallback), { kind: 'remove', at })}><FallbackIcon name="remove" /></button>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -135,19 +135,17 @@ function ModelField({ fallback, plan, name, pick }: { fallback: PlanFallback; pl
   const label = t.subs.fallbackModelLabel(name);
   const long = options.some(o => o.name.length > LONG_MODEL);
   return (
-    <div className="fallback-model">
-      <div className="field">
-        <label htmlFor={id}>{t.subs.fallbackModelField}</label>
-        {long ? <ModelList id={id} label={label} options={options} value={value} chosen={chosen} pick={pick} /> : (
-          <span className="select-wrap model-select">
-            <select id={id} className="sel" aria-label={label} value={value} onChange={e => pick(e.target.value)}>
-              {options.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
-            <span className="model-value" aria-hidden="true"><bdi dir="auto">{chosen}</bdi></span>
-          </span>
-        )}
-      </div>
-    </div>
+    <>
+      <label htmlFor={id}>{t.subs.fallbackModelField}</label>
+      {long ? <ModelList id={id} label={label} options={options} value={value} chosen={chosen} pick={pick} /> : (
+        <span className="select-wrap model-select">
+          <select id={id} className="sel" aria-label={label} value={value} onChange={e => pick(e.target.value)}>
+            {options.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+          <span className="model-value" aria-hidden="true"><bdi dir="auto">{chosen}</bdi></span>
+        </span>
+      )}
+    </>
   );
 }
 
@@ -166,18 +164,19 @@ function ModelList({ id, label, options, value, chosen, pick }: { id: string; la
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const choices = `${id}-choices`;
+  const closeOnEscape = closer(open, () => setOpen(false), trigger);
   const choose = (model: string) => {
     setOpen(false);
     trigger.current?.focus();
     pick(model);
   };
   return (
-    <div className="model-disclosure" onKeyDown={closer(open, () => setOpen(false), trigger)}>
-      <button ref={trigger} id={id} className="select-wrap model-trigger" type="button" aria-label={label} aria-expanded={open} aria-controls={choices} onClick={() => setOpen(!open)}>
+    <>
+      <button ref={trigger} id={id} className="select-wrap model-trigger" type="button" aria-label={label} aria-expanded={open} aria-controls={choices} onClick={() => setOpen(!open)} onKeyDown={closeOnEscape}>
         <span className="model-value"><bdi dir="auto">{chosen}</bdi></span>
       </button>
       {open && (
-        <fieldset id={choices} className="choice-list">
+        <fieldset id={choices} className="choice-list" onKeyDown={closeOnEscape}>
           <legend className="sr">{label}</legend>
           {options.map(o => (
             <label key={o.id} className="model-choice">
@@ -187,7 +186,7 @@ function ModelList({ id, label, options, value, chosen, pick }: { id: string; la
           ))}
         </fieldset>
       )}
-    </div>
+    </>
   );
 }
 
