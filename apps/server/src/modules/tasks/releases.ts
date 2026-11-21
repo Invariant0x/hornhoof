@@ -341,8 +341,7 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   if (!target || !turn) throw refuse(409, 'repo_invalid', `#${task.number} is of no department that releases turns: its results go to their main line straight.`);
   if (!agent || agent.departmentId !== turn.departmentId) throw refuse(403, 'task_not_yours', 'Only the department whose turn it is records its release.');
   const head = await headOf(ctx, target.repo, target.branch);
-  if (!head) throw new BranchProofUnavailable(`${target.branch} could not be read. Try again.`);
-  if (!(await branchHolds(ctx, target.repo, head, input.commit))) throw refuse(409, 'task_changed', `${target.branch} does not hold ${input.commit}: it is at ${head}. A release is a commit of the turn branch.`);
+  if (!head || !(await branchHolds(ctx, target.repo, head, input.commit))) throw refuse(409, 'task_changed', `${target.branch} does not hold ${input.commit}${head ? `: it is at ${head}` : ', or it could not be read'}. A release is a commit of the turn branch.`);
   const base = await headOf(ctx, target.repo, target.repo.branch);
   if (!base) throw refuse(409, 'repo_invalid', `${target.repo.branch} could not be read. Try again.`);
   if (base === input.commit || await branchHolds(ctx, target.repo, base, input.commit)) throw refuse(409, 'task_invalid', `${target.repo.branch} already holds ${input.commit}: a release is recorded before main moves.`);

@@ -1,8 +1,11 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agents, jobs, machines, nodeConnections, nodes, people, requests, waitNotices } from '../src/db/schema.js';
+import { agents, departments, jobs, machines, nodeConnections, nodes, people, requests, turns, waitNotices } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { serverStarted } from '../src/modules/nodes/connections.js';
+import { releaseRound, uncheckedInRelease } from '../src/modules/tasks/releases.js';
+import { closeIdleTurns } from '../src/modules/tasks/turn-ends.js';
+import { GitHubRateLimited } from '../src/modules/testruns/github-limit.js';
 import { aclCompany, type AclCompany } from './agent-view-company.js';
 import { as } from './helpers.js';
 
@@ -64,6 +67,41 @@ it('shows a repeated GitHub limit in Failures to the company owner without creat
   expect(owner.githubLimits).toEqual([{ repository: 'acme/shop', resetAt: limit.resetAt }]);
   expect(owner.counts.total).toBe(0);
   expect((await waiting(c, c.tokens.bob)).githubLimits).toEqual([]);
+});
+
+it('keeps background turn checks quiet on GitHub rate limits and still logs unexpected errors', async () => {
+  const c = await world();
+  const MAIN = 'a'.repeat(40);
+  const AHEAD = 'b'.repeat(40);
+  await c.db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git', repoBranch: 'main' }).where(eq(departments.id, c.dev.id));
+  const [devTurn] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 7, goal: 'Ship.', status: 'open', openedAt: after(0), baseVersion: 'v1.0.0', baseCommit: MAIN }).returning();
+  const limit = new GitHubRateLimited({ remaining: 0, resetAt: +after(60 * MINUTE) });
+  const errors = vi.spyOn(c.app.ctx.log, 'error').mockImplementation(() => {});
+  const limited = {
+    ...c.app.ctx,
+    readBranches: async () => ({ heads: { main: MAIN, 'turn-7': AHEAD } }),
+    readTags: async () => ({ tags: { 'v1.1.0': AHEAD } }),
+    readCommit: async (_repo: unknown, ref: { branch: string } | { task: number }) => {
+      const branch = 'branch' in ref ? ref.branch : `task-${ref.task}`;
+      return { branch, commitSha: branch === 'main' ? MAIN : AHEAD };
+    },
+    readMerged: async () => { throw limit; },
+  };
+  await closeIdleTurns(limited);
+  await releaseRound(limited);
+  expect(await uncheckedInRelease(limited, { companyId: c.companyId, productId: null, departmentId: c.dev.id }, AHEAD)).toBeNull();
+  expect(errors).not.toHaveBeenCalled();
+  expect((await c.db.select().from(turns).where(eq(turns.id, devTurn!.id)))[0]).toMatchObject({ status: 'open' });
+
+  await releaseRound({ ...limited, readTags: async () => { throw new Error('tags failed'); } });
+  expect(errors).toHaveBeenCalledTimes(1);
+
+  await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.sales.id, number: 8, goal: 'Close.', status: 'open', openedAt: after(0) });
+  await closeIdleTurns({ ...limited, bus: { ...c.app.ctx.bus, publish: () => { throw new Error('bus failed'); } } as typeof c.app.ctx.bus });
+  expect(errors).toHaveBeenCalledTimes(2);
+
+  const failingDb = { select: () => { throw new Error('db failed'); } } as unknown as typeof c.db;
+  await expect(uncheckedInRelease({ ...limited, db: failingDb }, { companyId: c.companyId, productId: null, departmentId: c.dev.id }, AHEAD)).rejects.toThrow('db failed');
 });
 
 describe('a machine with agents that has gone away', () => {

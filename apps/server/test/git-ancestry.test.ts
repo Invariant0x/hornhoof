@@ -9,7 +9,7 @@ vi.mock('node:child_process', () => ({ execFile: exec }));
 const head = 'a'.repeat(40);
 const ancestor = 'b'.repeat(40);
 const repo = { url: 'https://github.com/acme/shop.git', token: 'fixture-token' };
-beforeEach(() => exec.mockReset());
+beforeEach(() => { exec.mockReset(); });
 
 it.each([[0, true], [1, false], [128, null]] as const)('checks the exact Git objects, interpreting merge-base exit %s', async (code, expected) => {
   exec.mockImplementation((_file, args, _options, done) => {
