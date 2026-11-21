@@ -1,12 +1,12 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { claudeTranscript } from '../src/providers/claude-terminal.js';
 import type { RunResult } from '../src/runner.js';
-import { claudeTook } from '../src/terminal/program-restart.js';
+import { claudeTook, TurnWords } from '../src/terminal/program-restart.js';
 import { LineTail } from '../src/terminal/transcripts.js';
 import { claudePasted } from './fakes/word-receipts.mjs';
 import { job } from './terminal-host-helpers.js';
@@ -51,6 +51,8 @@ describe('an entry of Claude that shows it took these words', () => {
     /* What Claude writes as the user's of its own: its summary of a compacted conversation, a notice of a task of its own,
        words it queued, its note of an interruption, and an entry without a word of what was typed. */
     ["Claude's summary of the conversation it compacted", { ...userSaid(WORDS), isCompactSummary: true, isVisibleInTranscriptOnly: true }, false],
+    ['a summary marked only as one', { ...userSaid(WORDS), isCompactSummary: true }, false],
+    ['an entry marked only as one its transcript alone shows', { ...userSaid(WORDS), isVisibleInTranscriptOnly: true }, false],
     ['a summary with no word of where it came from', { type: 'user', isCompactSummary: true, isVisibleInTranscriptOnly: true, turnOrigin: 'human', message: { role: 'user', content: WORDS } }, false],
     ['a notice Claude gives itself of a task', { ...userSaid(WORDS), promptSource: 'system', turnOrigin: 'task_notification' }, false],
     ['words Claude queued and took after', { ...userSaid(WORDS), promptSource: 'queued' }, false],
@@ -273,6 +275,49 @@ it("keeps an operator's assignment to deliver when Claude takes the same words o
   expect(c.paste.mock.calls.map(([, text]) => text)).toContain(ASSIGNMENT);
 });
 
+/* What Claude writes of its own as the user's, its summary of a compacted conversation or an entry only its transcript
+   shows, can hold an operator's assignment word for word, as a summary of the conversation the assignment began does. It is
+   no delivery of that assignment, in the turn it goes in or kept for a later one: only what was typed is. */
+describe("an operator's assignment as Claude writes it of its own", () => {
+  const ASSIGNMENT = 'From Hornhoof: check the checkout.';
+  const ownEntries = [
+    ['a summary of a compacted conversation', { ...userSaid(ASSIGNMENT), isCompactSummary: true }],
+    ['an entry only its transcript shows', { ...userSaid(ASSIGNMENT), isVisibleInTranscriptOnly: true }],
+    ['a summary that says nothing of where it came from', { type: 'user', isCompactSummary: true, message: { role: 'user', content: ASSIGNMENT } }],
+    ['an entry only its transcript shows, that says nothing of where it came from', { type: 'user', isVisibleInTranscriptOnly: true, message: { role: 'user', content: ASSIGNMENT } }],
+  ] as const;
+  async function waiting() {
+    const c = await atWork('claude', 'silent');
+    const a = c.host['agents'].get('receipt')!;
+    const told: string[] = [];
+    return { c, a, told, words: new TurnWords([ASSIGNMENT], { original: phase => told.push(phase) }) };
+  }
+
+  it.each(ownEntries)('is not delivered by %s in the turn it goes in', async (_what, line) => {
+    const { c, a, told, words } = await waiting();
+    a.turn!.words = words;
+    /* The operator's assignment may go in: it is the operator's, and no prompt of Hornhoof's waits. */
+    const may = vi.spyOn(c.host as unknown as { assignmentMayGoIn: () => boolean }, 'assignmentMayGoIn').mockReturnValue(true);
+    c.host['takeOperatorOriginal'](a, line);
+    expect(words.originalPending()).toBe(true);
+    expect(told).toEqual([]);
+    c.host['takeOperatorOriginal'](a, userSaid(ASSIGNMENT));
+    expect(told).toEqual(['taken']);
+    may.mockRestore();
+  });
+
+  it.each(ownEntries)('is not delivered by %s while it is kept for a later turn', async (_what, line) => {
+    const { c, a, told, words } = await waiting();
+    a.retainedAssignments = [{ jobId: randomUUID(), text: ASSIGNMENT, words }];
+    c.host['observeRetainedAssignments'](a, line);
+    expect(a.retainedAssignments).toHaveLength(1);
+    expect(told).toEqual([]);
+    c.host['observeRetainedAssignments'](a, userSaid(ASSIGNMENT));
+    expect(a.retainedAssignments).toEqual([]);
+    expect(told).toEqual(['taken']);
+  });
+});
+
 /* The receipt boundary is the end of the log as the node read it while the words went in: a read that failed then, a
    line the program had not ended then, or a read failing after, leaves no boundary to count from. */
 describe('the boundary a receipt counts from', () => {
@@ -332,5 +377,21 @@ describe('the boundary a receipt counts from', () => {
     const other = new LineTail(join(dir, 'other.jsonl'));
     expect(other.read()).toEqual([]);
     expect(other.mark()).toBeNull();
+  });
+
+  it("is none for a new session's log the node cannot look at for any reason but that it is not there yet", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'hh-tail-unseen-')));
+    cleanups.push(async () => rmSync(dir, { recursive: true, force: true }));
+    /* A file where the log's folder would be: looking at the log fails, and not because it is missing. */
+    writeFileSync(join(dir, 'project'), '');
+    const tail = new LineTail(join(dir, 'project', 'new.jsonl'), { empty: true });
+    expect(tail.read()).toEqual([]);
+    expect(tail.mark()).toBeNull();
+    /* Once the log can be looked at and is read whole, its end is known again. */
+    rmSync(join(dir, 'project'));
+    mkdirSync(join(dir, 'project'));
+    writeFileSync(join(dir, 'project', 'new.jsonl'), '{"type":"user"}\n');
+    expect(tail.read()).toEqual(['{"type":"user"}']);
+    expect(tail.mark()).not.toBeNull();
   });
 });
