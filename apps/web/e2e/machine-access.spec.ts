@@ -109,7 +109,7 @@ async function expectFits(page: Page, card: Locator, block: Locator, width: numb
 }
 
 for (const look of LOOKS) {
-  test(`the owner closes and reopens standing access in one press: ${named(look)}`, async ({ page }) => {
+  test(`the owner closes and reopens standing access after confirming: ${named(look)}`, async ({ page }) => {
     const { card, sent, errors, t } = await openMachines(page, look, 'm1');
     const block = blockOf(card, t);
     const c = t.machines.computer;
@@ -117,10 +117,12 @@ for (const look of LOOKS) {
     await expectFits(page, card, block, look.width);
     await snap(card, 'open');
     await block.getByRole('button', { name: t.window.computerClose, exact: true }).click();
+    await page.getByRole('alertdialog', { name: t.machines.confirm.closeAccess.title }).getByRole('button', { name: t.machines.confirm.closeAccess.yes, exact: true }).click();
     await expect(block.getByText(c.closedText, { exact: true })).toBeVisible();
     await expectFits(page, card, block, look.width);
     await snap(card, 'closed');
     await block.getByRole('button', { name: c.reopen, exact: true }).click();
+    await page.getByRole('alertdialog', { name: t.machines.confirm.openAccess.title }).getByRole('button', { name: t.machines.confirm.openAccess.yes, exact: true }).click();
     await expect(block.getByText(c.forOrchestrator, { exact: true })).toBeVisible();
     expect(sent).toEqual([{ path: '/api/machines/m1/access/close', body: null }, { path: '/api/machines/m1/access/open', body: null }]);
     await expect(block.getByLabel(t.common.password)).toHaveCount(0);

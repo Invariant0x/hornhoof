@@ -143,9 +143,11 @@ describe('Shell', () => {
       expect(controls.getByText('For the orchestrator')).toBeInTheDocument();
       expect(controls.getAllByRole('button').map(button => button.textContent)).toEqual(['Close access']);
       await user.click(controls.getByRole('button', { name: 'Close access' }));
+      await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Close access' }));
       expect(await controls.findByText('Access closed')).toBeInTheDocument();
       expect(controls.getAllByRole('button').map(button => button.textContent)).toEqual(['Reopen access']);
       await user.click(controls.getByRole('button', { name: 'Reopen access' }));
+      await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Open access' }));
       expect(await controls.findByText('For the orchestrator')).toBeInTheDocument();
       expect(calls.filter(call => call.method === 'POST')).toEqual([
         { method: 'POST', path: '/api/machines/m1/access/close', body: undefined },

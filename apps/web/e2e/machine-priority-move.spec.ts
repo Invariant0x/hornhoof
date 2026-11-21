@@ -10,9 +10,11 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
   const shot = (name: string) => `${name}-${language}-${theme}-${width}.png`;
   const card = (page: Page, hostname: string) => page.getByRole('article', { name: hostname });
   const open = (page: Page, hostname: string) => page.getByRole('button', { name: `${w.open} ${hostname}`, exact: true }).click();
-  const prompt = (page: Page) => page.getByRole('alertdialog', { name: language === 'en' ? 'Are you sure?' : 'Вы действительно хотите это сделать?' });
-  const yesButton = (page: Page) => prompt(page).getByRole('button', { name: language === 'en' ? 'Yes' : 'Да', exact: true });
-  const noButton = (page: Page) => prompt(page).getByRole('button', { name: language === 'en' ? 'No' : 'Нет', exact: true });
+  const movePrompt = (page: Page) => page.getByRole('alertdialog', { name: language === 'en' ? 'Do you really want to move the company server?' : 'Вы действительно хотите перенести сервер компании?' });
+  const moveYes = (page: Page) => movePrompt(page).getByRole('button', { name: language === 'en' ? 'Move server' : 'Перенести сервер', exact: true });
+  const stopPrompt = (page: Page) => page.getByRole('alertdialog', { name: language === 'en' ? 'Do you really want to stop moving the server?' : 'Вы действительно хотите остановить перенос сервера?' });
+  const stopYes = (page: Page) => stopPrompt(page).getByRole('button', { name: language === 'en' ? 'Stop move' : 'Остановить перенос', exact: true });
+  const cancelButton = (dialog: ReturnType<typeof movePrompt>) => dialog.getByRole('button', { name: w.cancel, exact: true });
 
   test(`asks before it moves the server, and says how a move goes, ${place}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height });
@@ -23,11 +25,11 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await expect(here).toBeVisible();
     expect(await within(here, target)).toBe(true);
     await here.click();
-    const question = prompt(page);
+    const question = movePrompt(page);
     expect(await question.count()).toBe(1);
-    await expect(question).toContainText(w.ask(LONG));
-    const [yes, cancel] = [yesButton(page), noButton(page)];
-    await expect(cancel).toBeFocused();
+    await expect(question).toContainText(LONG);
+    const [yes, cancel] = [moveYes(page), cancelButton(question)];
+    await expect(yes).toBeFocused();
     for (const one of [yes, cancel]) expect(await within(one, question)).toBe(true);
     /* Each answer is large enough to press with a finger, and the two do not lie on each other. */
     const [a, b] = [await box(yes), await box(cancel)];
@@ -39,13 +41,14 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await expect(here).toBeFocused();
     expect(sent).toEqual([]);
     await here.click();
-    /* A refusal is still said inside the card. */
+    /* A refusal stays inside the confirmation window's alert. */
     await yes.click();
-    const refusal = target.getByText(w.updating);
-    await expect(refusal).toBeVisible();
-    expect(await within(refusal, target)).toBe(true);
+    const refusal = question.getByRole('alert');
+    await expect(refusal).toContainText(w.updating);
+    expect(await within(refusal, question)).toBe(true);
     expect(sent).toEqual([{ path: '/api/machines/m3/move', body: 'POST' }]);
     await page.screenshot({ path: info.outputPath(shot('move-refused')), fullPage: true });
+    await cancel.click();
     await expect(question).toHaveCount(0);
   });
 
@@ -63,12 +66,14 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await page.screenshot({ path: info.outputPath(shot('move-waiting')), fullPage: true });
     const mutation = page.waitForRequest(req => req.method() === 'DELETE' && new URL(req.url()).pathname === '/api/machines/m3/move');
     await stop.click();
-    expect(await Promise.race([prompt(page).waitFor().then(() => 'question'), mutation.then(() => 'request')])).toBe('question');
-    await expect(prompt(page)).toContainText(LONG);
-    await noButton(page).click();
+    const dialog = stopPrompt(page);
+    expect(await Promise.race([dialog.waitFor().then(() => 'question'), mutation.then(() => 'request')])).toBe('question');
+    await expect(dialog).toContainText(LONG);
+    await expect(cancelButton(dialog)).toBeFocused();
+    await cancelButton(dialog).click();
     expect(sent).toEqual([]);
     await stop.click();
-    await yesButton(page).click();
+    await stopYes(page).click();
     await expect.poll(() => sent).toEqual([{ path: '/api/machines/m3/move', body: 'DELETE' }]);
   });
 }

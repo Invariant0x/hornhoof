@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT } from '../i18n';
+import { errorText, Phrase, useLanguage, useT } from '../i18n';
 import type { Question, QuestionView } from '../types';
+import { useConfirmAction } from './ConfirmAction';
 import { clock } from './subscription';
 
 /* While a question stands it is looked at this often; else this seldom, since only a machine that lost the one it
    follows ever asks. */
 const ASKING_MS = 5_000;
 const QUIET_MS = 30_000;
+
+/* A machine that never said its name is told by the start of its id. */
+const named = (host: string, networkId: string) => host || networkId.slice(0, 8);
 
 /* Under the top bar, on a machine that keeps a copy of the company's data: when the machine that led stopped
    answering and the copies may lack changes, the question of which copy to go on from, or to wait. Everyone reads it;
@@ -22,6 +26,7 @@ export function RecoveryQuestion({ children, again = false }: { children?: React
      away from the page for a while, so its buttons give way to a line that says what happens. */
   const [went, setWent] = useState<string | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
+  const confirmation = useConfirmAction();
 
   /* A server from before copies never answers, and so asks nothing; a look that fails changes nothing, so a question
      that stands stays while the machine is away for a moment. */
@@ -37,16 +42,15 @@ export function RecoveryQuestion({ children, again = false }: { children?: React
   if (!question) return <>{children}</>;
   const q = t.question;
   const { copies } = question;
-  /* A machine that never said its name is told by the start of its id. */
-  const named = (host: string, networkId: string) => host || networkId.slice(0, 8);
   const leader = named(question.leader.host, question.leader.networkId);
   const heard = clock(language, question.leader.heard);
-  const send = async (path: string, body: object) => {
+
+  const sendWait = async () => {
     setBusy(true);
     setFailure(null);
     try {
-      await api.post(path, body);
-      setWent('networkId' in body ? question.since : null);
+      await api.post('/api/network/question/wait', {});
+      setWent(null);
     } catch (err) {
       setFailure(err);
     } finally {
@@ -54,6 +58,38 @@ export function RecoveryQuestion({ children, again = false }: { children?: React
       await look();
     }
   };
+
+  const sendGoOn = async (copy: Question['copies'][number]) => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await api.post('/api/network/question/go-on', { networkId: copy.networkId, reach: copy.reach });
+      setWent(question.since);
+    } finally {
+      setBusy(false);
+      await look();
+    }
+  };
+
+  const askGoOn = (copy: Question['copies'][number]) => {
+    const host = named(copy.host, copy.networkId);
+    const reach = clock(language, copy.reach);
+    const words = q.confirm;
+    setFailure(null);
+    confirmation.ask({
+      title: words.title,
+      effect: reach
+        ? <Phrase words={words.effectAt} values={[<bdi>{host}</bdi>, <bdi>{reach}</bdi>]} />
+        : <Phrase words={words.effect} values={[<bdi>{host}</bdi>]} />,
+      warnings: [q.warning(leader)],
+      final: true,
+      danger: true,
+      yes: words.yes,
+      working: words.working,
+      onYes: () => sendGoOn(copy),
+    });
+  };
+
   const goOn = (copy: Question['copies'][number]) => {
     const reach = clock(language, copy.reach);
     return copies.length === 1 ? q.goOn(reach) : q.goOnAt(reach, named(copy.host, copy.networkId));
@@ -69,15 +105,16 @@ export function RecoveryQuestion({ children, again = false }: { children?: React
         <>
           <div className="entry-actions" role="group" aria-label={q.answers}>
             {copies.map(copy => (
-              <button key={copy.networkId} className="btn" type="button" disabled={busy} onClick={() => void send('/api/network/question/go-on', { networkId: copy.networkId, reach: copy.reach })}>{goOn(copy)}</button>
+              <button key={copy.networkId} className="btn" type="button" disabled={busy} onClick={() => askGoOn(copy)}>{goOn(copy)}</button>
             ))}
-            <button className="btn ghost" type="button" disabled={busy} onClick={() => void send('/api/network/question/wait', {})}>{q.wait(leader)}</button>
+            <button className="btn ghost" type="button" disabled={busy} onClick={() => void sendWait()}>{q.wait(leader)}</button>
           </div>
           <p className="question-note" dir="auto">{q.warning(leader)}</p>
         </>
       ) : (
         <p className="question-note" dir="auto">{q.ceoOnly}</p>
       )}
+      {confirmation.question}
       {failure !== null && <p className="alert" role="alert"><span dir="auto">{errorText(t, failure)}</span></p>}
     </div>
   );

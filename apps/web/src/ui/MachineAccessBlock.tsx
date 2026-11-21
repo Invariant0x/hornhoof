@@ -1,7 +1,8 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { useT } from '../i18n';
+import { Phrase, useT } from '../i18n';
 import type { ComputerAccessView } from '../types';
+import { useConfirmAction } from './ConfirmAction';
 import { DecidedByNote } from './DecidedBy';
 
 /* Words in the screen's language keep their order in a page drawn right to left. */
@@ -19,7 +20,7 @@ export function MachineAccessBlock({ view: given, onChanged }: { view: ComputerA
   const heading = useId();
   const [answered, setAnswered] = useState<ComputerAccessView | null>(null);
   const [busy, setBusy] = useState<Action | null>(null);
-  const [failed, setFailed] = useState<Action | null>(null);
+  const confirmation = useConfirmAction();
   useEffect(() => setAnswered(null), [given]);
   const view = answered ?? given;
   const full = view.scope === 'all_agents';
@@ -29,15 +30,22 @@ export function MachineAccessBlock({ view: given, onChanged }: { view: ComputerA
 
   async function change(next: Action) {
     setBusy(next);
-    setFailed(null);
     try {
       setAnswered(await api.post<ComputerAccessView>(`/api/machines/${view.machine.id}/access/${next}`));
       onChanged();
-    } catch {
-      setFailed(next);
     } finally {
       setBusy(null);
     }
+  }
+
+  function askChange(next: Action) {
+    const words = next === 'close' ? t.machines.confirm.closeAccess : t.machines.confirm.openAccess;
+    confirmation.ask({
+      ...words,
+      effect: <Phrase words={words.effect} values={[<bdi>{view.machine.hostname}</bdi>]} />,
+      danger: next === 'close',
+      onYes: () => change(next),
+    });
   }
 
   return (
@@ -58,19 +66,12 @@ export function MachineAccessBlock({ view: given, onChanged }: { view: ComputerA
       {!view.open && !view.canOpen && <DecidedByNote by={{ kind: 'machine_owner', department: null }} />}
       {(view.open ? view.canClose : view.canOpen) && (
         <div className="entry-actions">
-          <button className={view.open ? 'act' : 'btn'} type="button" disabled={busy !== null} onClick={() => void change(action)}>
+          <button className={view.open ? 'act' : 'btn'} type="button" disabled={busy !== null} onClick={() => askChange(action)}>
             {busy ? busy === 'close' ? c.closing : c.opening : label}
           </button>
         </div>
       )}
-      {failed && (
-        <div className="acc-failed" role="alert">
-          <Line>{c.failed}</Line>
-          <div className="entry-actions">
-            <button className="act" type="button" onClick={() => void change(failed)}>{c.retry}</button>
-          </div>
-        </div>
-      )}
+      {confirmation.question}
     </section>
   );
 }

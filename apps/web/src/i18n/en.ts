@@ -292,6 +292,20 @@ export const en = {
     banner: 'Save the recovery file, so the company can be restored if this server is lost.',
     bannerLink: 'The public link changed, so the recovery file is out of date. Save a new one.',
     openSettings: 'Open Company & access',
+    confirm: {
+      restore: {
+        title: 'Do you really want to restore this backup?',
+        effect: (time: string) => `The company will be restored to the backup of ${time}.`,
+        yes: 'Restore',
+        working: 'Restoring…',
+      },
+      leaveOut: {
+        title: 'Do you really want to leave this database out?',
+        effect: (time: string) => `The database from before the restore of ${time} will be left out.`,
+        yes: 'Leave out',
+        working: 'Leaving out…',
+      },
+    },
   },
   merge: {
     after: (time: string) => `What came after ${time}`,
@@ -1164,6 +1178,57 @@ export const en = {
     keepsBackups: 'Keeps company backups',
     keepsNoBackups: 'Keeps no company backups',
     backupsHeld: (n: number) => `Backups held: ${n}`,
+    confirm: {
+      disconnect: {
+        title: 'Do you really want to disconnect this machine?',
+        effect: (host: string) => `Everything on ${host} stops, and a plan that runs nowhere else waits for a machine again.`,
+        yes: 'Disconnect',
+        working: 'Disconnecting…',
+      },
+      move: {
+        title: 'Do you really want to move the company server?',
+        effect: (host: string) => `The company server will move to ${host}.`,
+        warning: 'Hornhoof stops for a short while as it moves; your work is kept.',
+        yes: 'Move server',
+        working: 'Moving…',
+      },
+      stopMove: {
+        title: 'Do you really want to stop moving the server?',
+        effect: (host: string) => `The company server will stay where it is and will not move to ${host}.`,
+        yes: 'Stop move',
+        working: 'Stopping…',
+      },
+      keepBackupsOn: {
+        title: 'Do you really want to keep company backups on this machine?',
+        effect: (host: string) => `Future company backups will also be kept on ${host}.`,
+        yes: 'Keep backups',
+        working: 'Saving…',
+      },
+      keepBackupsOff: {
+        title: 'Do you really want to stop keeping company backups on this machine?',
+        effect: (host: string) => `Future company backups will no longer be placed on ${host}.`,
+        yes: 'Stop keeping backups',
+        working: 'Saving…',
+      },
+      openAccess: {
+        title: 'Do you really want to open access to this machine?',
+        effect: (host: string) => `Access to ${host} will open for the orchestrator.`,
+        yes: 'Open access',
+        working: 'Opening access…',
+      },
+      closeAccess: {
+        title: 'Do you really want to close access to this machine?',
+        effect: (host: string) => `Access to ${host} will close for agents.`,
+        yes: 'Close access',
+        working: 'Closing access…',
+      },
+      updatePrograms: {
+        title: 'Do you really want to update agent programs?',
+        effect: (host: string) => `Installed agent programs on ${host} will be updated.`,
+        yes: 'Update',
+        working: 'Updating…',
+      },
+    },
     /* Its nodes are of another build than the one the server's nodes are: here is a list of theirs, or olderBuild for
        nodes from before builds. */
     otherBuild: 'Other build',
@@ -2840,6 +2905,13 @@ export const en = {
     waiting: (leader: string) => `Waiting for ${leader}. You can still choose a copy to go on from.`,
     ceoOnly: 'Only the CEO answers this, from their own session.',
     goingOn: 'Hornhoof goes on from the copy you chose. About a minute.',
+    confirm: {
+      title: 'Do you really want to continue from this copy?',
+      effectAt: (host: string, reach: string) => `Hornhoof will continue from the copy on ${host} as of ${reach}.`,
+      effect: (host: string) => `Hornhoof will continue from the copy on ${host}.`,
+      yes: 'Continue',
+      working: 'Continuing…',
+    },
   },
   switch: {
     label: 'Where Hornhoof runs',
@@ -2904,6 +2976,26 @@ export const en = {
     nodeOn: (plan: string, machine: string) => `${plan} on ${machine}`,
     nodeFree: 'Free: being replaced now, then takes work again by itself',
     nodeWaitsFor: (work: string) => `Waits for: ${work}`,
+    confirm: {
+      update: {
+        title: 'Do you really want to update Hornhoof?',
+        effect: (build: string) => `Hornhoof will update to ${build} and restart.`,
+        yes: 'Update',
+        working: 'Updating…',
+      },
+      install: {
+        title: 'Do you really want to install this build?',
+        effect: (build: string) => `Hornhoof will install ${build} and restart.`,
+        yes: 'Install',
+        working: 'Installing…',
+      },
+      goBack: {
+        title: 'Do you really want to go back to this build?',
+        effect: (build: string) => `Hornhoof will go back to ${build} and restart.`,
+        yes: 'Go back',
+        working: 'Installing…',
+      },
+    },
   },
   errors: {
     phone_invalid: 'Check the phone name, computer and address.',

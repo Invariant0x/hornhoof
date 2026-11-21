@@ -1,12 +1,13 @@
 import { useState, type ReactNode } from 'react';
 import type { ProgramInfo } from '@hornhoof/protocol';
 import { api } from '../api';
-import { errorText, useT } from '../i18n';
+import { Phrase, useT } from '../i18n';
 import { Facts, Part } from './Cards';
+import { useConfirmAction } from './ConfirmAction';
 
 const NAMES: Record<ProgramInfo['id'], string> = { claude: 'Claude Code', codex: 'Codex', kimi: 'Kimi Code' };
 type Programs = ProgramInfo[] | null | undefined;
-type Props = { id: string; online: boolean; programs: Programs; canUpdate: boolean; onUpdated(): Promise<void> };
+type Props = { id: string; hostname?: string; online: boolean; programs: Programs; canUpdate: boolean; onUpdated(): Promise<void> };
 
 function ProgramVersion({ program }: { program: ProgramInfo }) {
   const t = useT();
@@ -36,33 +37,38 @@ function ProgramBody({ online, programs }: { online: boolean; programs: Programs
 
 function useProgramUpdate(id: string, onUpdated: () => Promise<void>) {
   const [pending, setPending] = useState(false);
-  const [failure, setFailure] = useState<unknown>(null);
   const update = async () => {
     setPending(true);
-    setFailure(null);
     try {
       await api.post(`/api/machines/${encodeURIComponent(id)}/programs/update`);
       await onUpdated();
-    } catch (err) {
-      setFailure(err);
     } finally {
       setPending(false);
     }
   };
-  return { pending, failure, update };
+  return { pending, update };
 }
 
 const hasPrograms = (online: boolean, programs: Programs) => online && Boolean(programs?.length);
 const updating = (programs: Programs) => programs?.some(program => program.updating) ?? false;
 
-function ProgramControls({ id, online, programs, canUpdate, onUpdated }: Props) {
+function ProgramControls({ id, hostname, online, programs, canUpdate, onUpdated }: Props) {
   const t = useT();
-  const { pending, failure, update } = useProgramUpdate(id, onUpdated);
+  const { pending, update } = useProgramUpdate(id, onUpdated);
+  const confirmation = useConfirmAction();
   const busy = pending || (online && updating(programs));
+  const askUpdate = () => {
+    const words = t.machines.confirm.updatePrograms;
+    confirmation.ask({
+      ...words,
+      effect: <Phrase words={words.effect} values={[<bdi>{hostname ?? id}</bdi>]} />,
+      onYes: update,
+    });
+  };
   return <>
-    {canUpdate && <div className="entry-actions"><button type="button" className="act" disabled={!hasPrograms(online, programs) || busy} onClick={() => void update()}>{t.machines.updatePrograms}</button></div>}
+    {canUpdate && <div className="entry-actions"><button type="button" className="act" disabled={!hasPrograms(online, programs) || busy} onClick={askUpdate}>{t.machines.updatePrograms}</button></div>}
     {busy && <p className="part-note" role="status">{t.machines.programsUpdating}</p>}
-    {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+    {confirmation.question}
   </>;
 }
 

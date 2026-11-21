@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiFailure } from '../api';
-import { errorText, useLanguage, useT } from '../i18n';
+import { errorText, Phrase, useLanguage, useT } from '../i18n';
 import type { RecoveryView } from '../types';
+import { useConfirmAction } from '../ui/ConfirmAction';
 import { Field } from '../ui/Field';
 import { NOT_A_LOGIN } from '../ui/SecretInput';
 import { RestoreProgress, sizeOf, textOf, when } from './Backups';
@@ -36,6 +37,7 @@ export function RestoreFromFile({ code: linkCode, recovering = false, onBack }: 
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
+  const confirmation = useConfirmAction();
   const asked = encodeURIComponent(code);
 
   /* What came in so far. A server that knows of no recovery has its company back, which ends the waiting; or it started
@@ -87,11 +89,26 @@ export function RestoreFromFile({ code: linkCode, recovering = false, onBack }: 
       await api.putFile(`/api/recovery/bundles/${id}?code=${asked}`, file);
       await look();
     });
-  const restore = (id: string) =>
-    act(async () => {
+  const restore = async (id: string) => {
+    setBusy(true);
+    try {
       await api.post('/api/recovery/restore', { code, id });
       await look();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const confirmRestore = (id: string, time: string) => {
+    const words = t.backups.confirm.restore;
+    setFailure(null);
+    confirmation.ask({
+      ...words,
+      effect: <Phrase words={words.effect} values={[<bdi>{time}</bdi>]} />,
+      final: true,
+      danger: true,
+      onYes: () => restore(id),
     });
+  };
 
   if (done) {
     return (
@@ -129,7 +146,7 @@ export function RestoreFromFile({ code: linkCode, recovering = false, onBack }: 
               <div key={bundle.id} className="settings-actions">
                 <span className="entry-main">{time}, {sizeOf(t, bundle.size)}</span>
                 <div className="entry-actions">
-                  <button className="btn small" type="button" disabled={busy} aria-label={t.backups.restoreLabel(time)} onClick={() => void restore(bundle.id)}>{t.setup.restore.thisOne}</button>
+                  <button className="btn small" type="button" disabled={busy} aria-label={t.backups.restoreLabel(time)} onClick={() => confirmRestore(bundle.id, time)}>{t.setup.restore.thisOne}</button>
                 </div>
               </div>
             );
@@ -140,6 +157,7 @@ export function RestoreFromFile({ code: linkCode, recovering = false, onBack }: 
         </>
       )}
       {view?.restore && <RestoreProgress status={view.restore} />}
+      {confirmation.question}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       {!running && <div className="actions"><button className="btn ghost" type="button" onClick={onBack}>{t.setup.restore.newCompany}</button></div>}
     </>

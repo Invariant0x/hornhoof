@@ -126,8 +126,10 @@ describe('Machines', () => {
     render(<Machines me={ME} />);
     const mac = await screen.findByRole('article', { name: 'dev-laptop' });
     expect(await within(mac).findByText(commandCode(withKey(command.command)))).toBeInTheDocument();
+    const user = userEvent.setup();
     const update = within(mac).getByRole('button', { name: 'Update programs' });
-    await userEvent.setup().click(update);
+    await user.click(update);
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Update' }));
     await vi.waitFor(() => expect(calls.filter(c => c.method === 'GET' && c.path === '/api/nodes/commands').length).toBeGreaterThanOrEqual(2));
     await vi.waitFor(() => expect(update).toBeEnabled());
     expect(within(mac).getByText(commandCode(withKey(command.command)))).toBeInTheDocument();
@@ -137,9 +139,16 @@ describe('Machines', () => {
   it('updates programs on the virtual built-in card through its own action', async () => {
     const calls = lists({ 'POST /api/machines/builtin/programs/update': [202, { updating: true }] },
       { ...BUILTIN, programs: [{ id: 'codex', version: '3.0.0', updating: false, failed: false }] });
+    const user = userEvent.setup();
     render(<Machines me={ME} />);
     const builtin = await openCard('Built-in node');
-    await userEvent.setup().click(within(builtin).getByRole('button', { name: 'Update programs' }));
+    await user.click(within(builtin).getByRole('button', { name: 'Update programs' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to update agent programs?' });
+    expect(dialog.querySelector('p bdi')).toHaveTextContent('Built-in node');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+    await user.click(within(builtin).getByRole('button', { name: 'Update programs' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Update' }));
     expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/builtin/programs/update', body: undefined });
   });
 
@@ -472,9 +481,16 @@ describe('Machines', () => {
     const user = userEvent.setup();
     render(<Machines me={ME} />);
     await user.click(within(await openCard('build-box')).getByRole('button', { name: 'Disconnect build-box' }));
-    expect(screen.getByText('Disconnect build-box? Everything on it stops, and a plan that runs nowhere else waits for a machine again.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Yes, disconnect' }));
-    expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/m2/disconnect', body: undefined });
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to disconnect this machine?' });
+    expect(dialog).toHaveAccessibleDescription('Everything on build-box stops, and a plan that runs nowhere else waits for a machine again.');
+    expect(dialog.querySelector('p bdi')).toHaveTextContent('build-box');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(within(dialog).getByRole('button', { name: 'Disconnect' })).toHaveClass('danger');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+    await user.click(within(card('build-box')).getByRole('button', { name: 'Disconnect build-box' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Disconnect' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/m2/disconnect', body: undefined }));
   });
 
   it("lends a machine to the company's test runs, or takes it back, for its owner or someone who sees the whole company", async () => {
@@ -488,9 +504,17 @@ describe('Machines', () => {
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/machines/m1', body: { lendsTests: false } }));
   });
 
-  it('ticks backups like test runs, on a machine with a core', async () => {
-    const withCore = MACHINES.map(machine => (machine.id === 'm1' ? { ...machine, keepsBackups: true, heldBackups: 2 } : { ...machine, keepsBackups: null, heldBackups: null }));
-    const calls = mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: withCore, builtin: BUILTIN }], 'PATCH /api/machines/m1': [200, { lendsTests: true, keepsBackups: false }] });
+  it('confirms changing backup keeping on a machine with a core, leaving the box unchanged on Cancel', async () => {
+    let keeps = true;
+    const withCore = () => MACHINES.map(machine => (machine.id === 'm1' ? { ...machine, keepsBackups: keeps, heldBackups: 2 } : { ...machine, keepsBackups: null, heldBackups: null }));
+    const calls = mockApi({
+      'GET /api/subscriptions': [200, { subscriptions: SUBS }],
+      'GET /api/machines': () => [200, { machines: withCore(), builtin: BUILTIN }],
+      'PATCH /api/machines/m1': body => {
+        keeps = Boolean((body as { keepsBackups?: boolean }).keepsBackups);
+        return [200, { lendsTests: true, keepsBackups: keeps }];
+      },
+    });
     const user = userEvent.setup();
     render(<Machines me={ME} />);
     const mine = await openCard('dev-laptop');
@@ -498,9 +522,34 @@ describe('Machines', () => {
     expect(keep).toBeChecked();
     expect(fact(mine, 'Backups')).toContain('Keep company backups');
     expect(within(mine).getByText('Backups held: 2')).toBeInTheDocument();
+    /* Turning backups OFF is dangerous: focus opens on Cancel, and Cancel leaves the checkbox checked. */
     await user.click(keep);
-    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/machines/m1', body: { keepsBackups: false } }));
+    const offDialog = screen.getByRole('alertdialog', { name: 'Do you really want to stop keeping company backups on this machine?' });
+    expect(offDialog).toHaveAccessibleDescription('Future company backups will no longer be placed on dev-laptop.');
+    expect(offDialog.querySelector('p bdi')).toHaveTextContent('dev-laptop');
+    expect(within(offDialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(within(offDialog).getByRole('button', { name: 'Stop keeping backups' })).toHaveClass('danger');
+    await user.click(within(offDialog).getByRole('button', { name: 'Cancel' }));
+    expect(keep).toBeChecked();
+    expect(calls.filter(c => c.method === 'PATCH')).toEqual([]);
+    await user.click(keep);
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Stop keeping backups' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PATCH')).toEqual([{ method: 'PATCH', path: '/api/machines/m1', body: { keepsBackups: false } }]));
     await vi.waitFor(() => expect(keep).not.toBeChecked());
+    /* Turning backups ON is ordinary: focus opens on Keep backups, and Cancel leaves it unchecked. */
+    await user.click(keep);
+    const onDialog = screen.getByRole('alertdialog', { name: 'Do you really want to keep company backups on this machine?' });
+    expect(onDialog).toHaveAccessibleDescription('Future company backups will also be kept on dev-laptop.');
+    expect(onDialog.querySelector('p bdi')).toHaveTextContent('dev-laptop');
+    expect(within(onDialog).getByRole('button', { name: 'Keep backups' })).toHaveFocus();
+    expect(within(onDialog).getByRole('button', { name: 'Keep backups' })).not.toHaveClass('danger');
+    await user.click(within(onDialog).getByRole('button', { name: 'Cancel' }));
+    expect(keep).not.toBeChecked();
+    expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(1);
+    await user.click(keep);
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Keep backups' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PATCH').at(-1)).toEqual({ method: 'PATCH', path: '/api/machines/m1', body: { keepsBackups: true } }));
+    await vi.waitFor(() => expect(keep).toBeChecked());
     /* A machine without the company's core keeps none, and says nothing of them. */
     const other = card('build-box');
     expect(within(other).queryByRole('checkbox', { name: /backups/ })).not.toBeInTheDocument();
@@ -802,17 +851,19 @@ describe('Machines', () => {
     const fourth = await openCard('host-4');
     const here = within(fourth).getByRole('button', { name: 'Move the server here' });
     await user.click(here);
-    /* The question stands in the button's place, with the focus on its first answer. */
-    expect(within(fourth).getByText('Move the company server to host-4? Hornhoof stops for a short while as it moves; your work is kept.')).toBeInTheDocument();
-    expect(within(fourth).queryByRole('button', { name: 'Move the server here' })).not.toBeInTheDocument();
-    expect(within(fourth).getByRole('button', { name: 'Move the server' })).toHaveFocus();
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to move the company server?' });
+    expect(dialog).toHaveAccessibleDescription('The company server will move to host-4.');
+    expect(dialog.querySelector('p bdi')).toHaveTextContent('host-4');
+    expect(dialog).toHaveTextContent('Hornhoof stops for a short while as it moves; your work is kept.');
+    expect(within(dialog).getByRole('button', { name: 'Move server' })).toHaveFocus();
+    expect(within(dialog).getByRole('button', { name: 'Move server' })).not.toHaveClass('danger');
     /* Cancel asks nothing of the server, and the focus is back on the button. */
-    await user.click(within(fourth).getByRole('button', { name: 'Cancel' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(within(fourth).getByRole('button', { name: 'Move the server here' })).toHaveFocus();
     expect(calls.filter(c => c.method === 'POST')).toEqual([]);
     await user.click(within(fourth).getByRole('button', { name: 'Move the server here' }));
     const loads = calls.filter(c => c.path === '/api/machines' && c.method === 'GET').length;
-    await user.click(within(fourth).getByRole('button', { name: 'Move the server' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Move server' }));
     await vi.waitFor(() => expect(calls.filter(c => c.method === 'POST')).toEqual([{ method: 'POST', path: '/api/machines/p3/move', body: undefined }]));
     /* Then the tab is read again. */
     await vi.waitFor(() => expect(calls.filter(c => c.path === '/api/machines' && c.method === 'GET').length).toBeGreaterThan(loads));
@@ -859,6 +910,15 @@ describe('Machines', () => {
     /* While one machine waits to take the server, another may still be asked in its place. */
     expect(within(card('host-2')).getByRole('button', { name: 'Move the server here' })).toBeInTheDocument();
     await user.click(within(card('host-4')).getByRole('button', { name: 'Cancel the move' }));
+    const stopDialog = screen.getByRole('alertdialog', { name: 'Do you really want to stop moving the server?' });
+    expect(stopDialog).toHaveAccessibleDescription('The company server will stay where it is and will not move to host-4.');
+    expect(stopDialog.querySelector('p bdi')).toHaveTextContent('host-4');
+    expect(within(stopDialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(within(stopDialog).getByRole('button', { name: 'Stop move' })).toHaveClass('danger');
+    await user.click(within(stopDialog).getByRole('button', { name: 'Cancel' }));
+    expect(first.calls.filter(c => c.method === 'DELETE')).toEqual([]);
+    await user.click(within(card('host-4')).getByRole('button', { name: 'Cancel the move' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Stop move' }));
     await vi.waitFor(() => expect(first.calls.filter(c => c.method === 'DELETE')).toEqual([{ method: 'DELETE', path: '/api/machines/p3/move', body: undefined }]));
     first.view.unmount();
     const lines: [object, string][] = [
@@ -878,26 +938,26 @@ describe('Machines', () => {
   });
 
   it.each([
-    ['en', 'Move the server here', 'Move the server', 'Hornhoof is updating. Move the server once the update ended.', 'The server is moving to host-3 now.'],
+    ['en', 'Move the server here', 'Move server', 'Hornhoof is updating. Move the server once the update ended.', 'The server is moving to host-3 now.'],
     ['ru', 'Перенести сервер сюда', 'Перенести сервер', 'Hornhoof обновляется. Перенесите сервер, когда обновление закончится.', 'Сервер как раз переезжает на host-3.'],
-  ])("shows a move's refusal in %s", async (language, here, yes, updating, switching) => {
+  ])("shows a move's refusal inside the confirmation dialog in %s", async (language, here, yes, updating, switching) => {
     const refused = (reason: string, details?: object) => [409, { error: { code: 'conflict', reason, message: 'Refused.', ...(details ? { details } : {}) } }] as [number, unknown];
     const first = moving(null, { language, routes: { 'POST /api/machines/p3/move': refused('updating') } });
     const user = userEvent.setup();
     const fourth = await openCard('host-4');
     await user.click(within(fourth).getByRole('button', { name: here }));
-    await user.click(within(fourth).getByRole('button', { name: yes }));
-    /* Said in the part itself, as an alert. */
-    await vi.waitFor(() => expect(within(fourth).getByText(updating)).toHaveAttribute('role', 'alert'));
-    expect(within(fourth).getByText(updating).closest('.prio')).not.toBeNull();
-    /* The question stays, to be asked again or called off. */
-    expect(within(fourth).getByRole('button', { name: yes })).toBeEnabled();
+    const dialog = screen.getByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: yes }));
+    /* Said inside the confirmation window as an alert, with its button ready to try again. */
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(updating);
+    expect(within(dialog).getByRole('button', { name: yes })).toBeEnabled();
     first.view.unmount();
     moving(null, { language, routes: { 'POST /api/machines/p3/move': refused('switching', { host: 'host-3' }) } });
     const again = await openCard('host-4');
     await user.click(within(again).getByRole('button', { name: here }));
-    await user.click(within(again).getByRole('button', { name: yes }));
-    await vi.waitFor(() => expect(within(again).getByText(switching)).toHaveAttribute('role', 'alert'));
+    const secondDialog = screen.getByRole('alertdialog');
+    await user.click(within(secondDialog).getByRole('button', { name: yes }));
+    expect(await within(secondDialog).findByRole('alert')).toHaveTextContent(switching);
   });
 
   it("keeps the company's install connected", async () => {
@@ -1238,18 +1298,21 @@ describe("each machine's place in the company's network", () => {
   });
 
   it.each([
-    ['en', 'Disconnect', 'If it was stolen, its owner should also revoke its Claude sign-in at claude.ai, which stays valid for a year.'],
-    ['ru', 'Отключить', 'Если ее украли, владельцу нужно еще отозвать вход Claude на claude.ai: он действует год.'],
-  ])('says in %s what a Disconnect cannot end, for a machine that ran Claude alone', async (language, disconnect, claude) => {
+    ['en', 'Disconnect', 'Cancel', 'If it was stolen, its owner should also revoke its Claude sign-in at claude.ai, which stays valid for a year.'],
+    ['ru', 'Отключить', 'Отмена', 'Если ее украли, владельцу нужно еще отозвать вход Claude на claude.ai: он действует год.'],
+  ])('says in %s what a Disconnect cannot end, for a machine that ran Claude alone', async (language, disconnect, cancel, claude) => {
     localStorage.setItem('hh-lang', language);
     show();
     const user = userEvent.setup();
     const mac = await openCard('dev-laptop');
     await user.click(within(mac).getByRole('button', { name: new RegExp(`^${disconnect}`) }));
-    expect(within(mac).getByText(new RegExp(claude.replaceAll('.', '\\.')))).toBeInTheDocument();
+    const claudeDialog = screen.getByRole('alertdialog');
+    expect(within(claudeDialog).getByText(claude)).toBeInTheDocument();
+    await user.click(within(claudeDialog).getByRole('button', { name: cancel }));
     const box = card('build-box');
     await user.click(within(box).getByRole('button', { name: new RegExp(`^${disconnect}`) }));
-    expect(within(box).queryByText(new RegExp(claude.replaceAll('.', '\\.')))).not.toBeInTheDocument();
+    const otherDialog = screen.getByRole('alertdialog');
+    expect(within(otherDialog).queryByText(claude)).not.toBeInTheDocument();
   });
 
   it('says before a machine joins what a Mac that runs the server may ask', async () => {
@@ -1289,7 +1352,7 @@ describe("computer access on a machine's card", () => {
   /* The access part of a card (#1115): its owner can close or reopen it. */
   const part = (card_: HTMLElement) => within(card_).getByRole('region', { name: /^(Computer access|Доступ к машинам)$/ });
 
-  it('closes standing access and reopens it from the card without signing or choosing a duration', async () => {
+  it('closes standing access and reopens it from the card after confirming, without signing or choosing a duration', async () => {
     const calls = showLive([mac()], server(), {
       close: () => [200, ofServer({ open: false, scope: null })],
       open: () => [200, ofServer()],
@@ -1298,8 +1361,26 @@ describe("computer access on a machine's card", () => {
     expect(within(access).getByText('Access open')).toBeInTheDocument();
     const user = userEvent.setup();
     await user.click(within(access).getByRole('button', { name: 'Close access' }));
+    const closeDialog = screen.getByRole('alertdialog', { name: 'Do you really want to close access to this machine?' });
+    expect(closeDialog).toHaveAccessibleDescription('Access to debian will close for agents.');
+    expect(closeDialog.querySelector('p bdi')).toHaveTextContent('debian');
+    expect(within(closeDialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(within(closeDialog).getByRole('button', { name: 'Close access' })).toHaveClass('danger');
+    await user.click(within(closeDialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.filter(call => call.method === 'POST')).toEqual([]);
+    await user.click(within(access).getByRole('button', { name: 'Close access' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Close access' }));
     expect(await within(access).findByText('The owner closed access to this machine.')).toBeInTheDocument();
     await user.click(within(access).getByRole('button', { name: 'Reopen access' }));
+    const openDialog = screen.getByRole('alertdialog', { name: 'Do you really want to open access to this machine?' });
+    expect(openDialog).toHaveAccessibleDescription('Access to debian will open for the orchestrator.');
+    expect(openDialog.querySelector('p bdi')).toHaveTextContent('debian');
+    expect(within(openDialog).getByRole('button', { name: 'Open access' })).toHaveFocus();
+    expect(within(openDialog).getByRole('button', { name: 'Open access' })).not.toHaveClass('danger');
+    await user.click(within(openDialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(1);
+    await user.click(within(access).getByRole('button', { name: 'Reopen access' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Open access' }));
     expect(await within(access).findByText('Access open')).toBeInTheDocument();
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
     expect(calls.filter(call => call.method === 'POST')).toEqual([
@@ -1320,7 +1401,7 @@ describe("computer access on a machine's card", () => {
     expect(within(own).getByRole('button', { name: 'Close access' })).toBeInTheDocument();
   });
 
-  it('keeps a failed change beside its machine and retries it', async () => {
+  it('keeps a failed change inside the confirmation dialog and retries it', async () => {
     let answers = 0;
     const calls = showLive([mac()], server({ open: false, scope: null }), {
       open: () => (++answers === 1 ? [503, { error: { code: 'unavailable', message: 'Offline.' } }] : [200, ofServer()]),
@@ -1328,11 +1409,13 @@ describe("computer access on a machine's card", () => {
     const access = part(await openCard('debian'));
     const user = userEvent.setup();
     await user.click(within(access).getByRole('button', { name: 'Reopen access' }));
-    expect(await within(access).findByRole('alert')).toHaveTextContent('Access could not be changed. Check your connection and try again.');
-    await user.click(within(access).getByRole('button', { name: 'Retry' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to open access to this machine?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Open access' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Offline.');
+    await user.click(within(dialog).getByRole('button', { name: 'Open access' }));
     expect(await within(access).findByText('Access open')).toBeInTheDocument();
     expect(calls.filter(call => call.path === '/api/machines/m-server/access/open').map(call => call.body)).toEqual([undefined, undefined]);
-    expect(within(access).queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 
   it('shows task access and the owner switch in Russian', async () => {

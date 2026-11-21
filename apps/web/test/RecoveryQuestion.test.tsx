@@ -61,7 +61,7 @@ describe('the question of which copy to go on from', () => {
     expect(within(box).getByText('Only the CEO answers this, from their own session.')).toBeInTheDocument();
   });
 
-  it("sends the CEO's answer and looks again", async () => {
+  it("sends the CEO's answer after confirming a copy, and sends wait directly", async () => {
     /* Until a time that has not come whenever this runs: the line shows only while he still waits. */
     const waiting = { ...THREE, waiting: '2099-01-01T00:00:00.000Z' };
     let asked = 0;
@@ -74,22 +74,48 @@ describe('the question of which copy to go on from', () => {
     const box = await screen.findByRole('group', { name: 'The server stopped answering' });
     await user.click(within(box).getByRole('button', { name: 'Wait for deb' }));
     await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toEqual([{ method: 'POST', path: '/api/network/question/wait', body: {} }]));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     /* The next look says he waits; he may still choose a copy. */
     expect(await within(box).findByText('Waiting for deb. You can still choose a copy to go on from.')).toBeInTheDocument();
     expect(within(box).getAllByRole('button')).toHaveLength(4);
+    /* Choosing a copy with a reach time names both machine and time in <bdi>; Cancel sends nothing. */
+    await user.click(within(box).getByRole('button', { name: `Go on from ${time('en', REACH)} on mac` }));
+    const timed = screen.getByRole('alertdialog', { name: 'Do you really want to continue from this copy?' });
+    expect(timed).toHaveAccessibleDescription(`Hornhoof will continue from the copy on mac as of ${time('en', REACH)}.`);
+    expect([...timed.querySelectorAll('p bdi')].map(el => el.textContent)).toEqual(['mac', time('en', REACH)]);
+    expect(timed).toHaveTextContent('Only if deb is off.');
+    expect(timed).toHaveTextContent('This cannot be undone.');
+    expect(within(timed).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(timed).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.filter(call => call.path === '/api/network/question/go-on')).toEqual([]);
+    /* Choosing a copy without a reach time names the machine in <bdi>, and confirming sends go-on. */
     await user.click(within(box).getByRole('button', { name: 'Go on from the copy on air' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to continue from this copy?' });
+    expect(dialog).toHaveAccessibleDescription('Hornhoof will continue from the copy on air.');
+    expect(dialog.querySelector('p bdi')).toHaveTextContent('air');
+    expect(within(dialog).getByRole('button', { name: 'Continue' })).toHaveClass('danger');
+    await user.click(within(dialog).getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(calls.filter(call => call.method === 'POST').at(-1)).toEqual({ method: 'POST', path: '/api/network/question/go-on', body: { networkId: D, reach: null } }));
     /* The copy he chose takes the server and is away from the page meanwhile: the buttons give way to what happens. */
     expect(await within(box).findByText('Hornhoof goes on from the copy you chose. About a minute.')).toBeInTheDocument();
     expect(within(box).queryAllByRole('button')).toEqual([]);
   });
 
-  it('says why an answer was refused', async () => {
-    shown(ONE, true, 'en', { 'POST /api/network/question/wait': [409, { error: { code: 'conflict', reason: 'question_changed', message: 'The question changed. Look again.' } }] });
+  it('says why an answer was refused, in the dialog for go-on and on the banner for wait', async () => {
+    const { view } = shown(ONE, true, 'en', {
+      'POST /api/network/question/wait': [409, { error: { code: 'conflict', reason: 'question_changed', message: 'The question changed. Look again.' } }],
+      'POST /api/network/question/go-on': [409, { error: { code: 'conflict', reason: 'question_changed', message: 'The question changed. Look again.' } }],
+    });
     const user = userEvent.setup();
     const box = await screen.findByRole('group', { name: 'The server stopped answering' });
     await user.click(within(box).getByRole('button', { name: 'Wait for deb' }));
     expect(await within(box).findByRole('alert')).toHaveTextContent('The question changed. Look again.');
+    await user.click(within(box).getByRole('button', { name: `Go on from ${time('en', REACH)}` }));
+    const dialog = screen.getByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Continue' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('The question changed. Look again.');
+    view.unmount();
   });
 
   it('keeps the question while a look fails', async () => {
