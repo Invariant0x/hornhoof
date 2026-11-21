@@ -76,7 +76,7 @@ async function readHolds(ctx: BranchProofReader, repo: Repo, head: string, commi
 export async function branchHolds(ctx: BranchProofReader, repo: Repo, head: string, commit: string): Promise<boolean> {
   if (head === commit) return true;
   const key = proofKey(repo, head, commit);
-  if (!key) return readHolds(ctx, repo, head, commit);
+  if (!key) return restHolds(ctx, repo, head, commit);
   const proved = proofStore(ctx);
   const cached = proved.get(key);
   if (cached !== undefined) return cached;

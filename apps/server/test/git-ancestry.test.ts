@@ -195,6 +195,9 @@ it('caps concurrent distinct Git fetches and frees slots after completion', asyn
   expect(pending).toHaveLength(4);
   for (const finish of pending) finish();
   expect(await Promise.all(lookups.slice(0, 4))).toEqual([true, true, true, true]);
+  mocks.setHandler((args, _options, child) => {
+    emitResult(child, 0, args.includes('cat-file') ? 'commit\n' : '');
+  });
   expect(await readGitAncestry(repo, '7'.repeat(40), ancestor, 10_000)).toBe(true);
 });
 
