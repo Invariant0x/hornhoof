@@ -1,4 +1,4 @@
-import { generateKeyPairSync, X509Certificate } from 'node:crypto';
+import { generateKeyPairSync, randomUUID, X509Certificate } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,12 +6,13 @@ import * as x509 from '@peculiar/x509';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { authority, certificates, companies, machines, peerSecrets, people } from '../src/db/schema.js';
+import { authority, certificates, companies, departments, machines, peerSecrets, people } from '../src/db/schema.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { UPLOAD_SPARE } from '../src/modules/keeper/uploads.js';
 import { saveLink } from '../src/modules/link/link.js';
 import { LEFT_SLOTS_FRESH_MS } from '../src/modules/copies/left-slots.js';
 import { certFacts, issuedBy } from '../src/modules/network/authority.js';
+import { fakeRelay } from './fake-relay.js';
 import { as, invitePerson, setUpCompany, testApp, until } from './helpers.js';
 
 const MACHINE_ID = 'a1b2c3d4'.repeat(4);
@@ -99,33 +100,61 @@ describe('the network routes the keeper calls', () => {
     expect(revokedIn(said.crlPem)).toEqual(['aa01']);
   });
 
-  it("keeps the old leader's install when a copy leads", async () => {
-    const c = await company();
+  it('removes the former server after a move and changes the key of the working link', async () => {
+    const relay = await fakeRelay();
+    const c = await company({ RELAY_URL: relay.url });
+    const auth = as(c.ceo);
+    const name = 'sample-company';
+    expect((await c.app.inject({ method: 'PUT', url: '/api/link', payload: { name }, ...auth })).statusCode).toBe(200);
+    const priorKey = relay.bindings.get(name)?.key;
+    expect(priorKey).toBeTruthy();
     /* A, where the company was installed, with its certificate, and B, a joined computer that took the server: this
        app runs on B. */
-    const [a] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ownerId, machineKey: `server:${'f'.repeat(32)}`, hostname: 'old-rack', networkId: 'f'.repeat(32), role: 'data' }).returning();
-    await c.db.insert(certificates).values({ serial: 'aa01', machineId: a!.id, until: new Date(Date.now() + 86_400_000) });
-    const b = await c.joined('data', newKey(), { hostname: 'b-box', networkId: MACHINE_ID });
+    const former = await c.joined('data', newKey(), { machineKey: `server:${'f'.repeat(32)}`, hostname: 'former-server', networkId: 'f'.repeat(32) });
+    await c.db.insert(certificates).values({ serial: 'aa01', machineId: former.id, until: new Date(Date.now() + 86_400_000) });
+    const leader = await c.joined('data', newKey(), { hostname: 'current-server', networkId: MACHINE_ID });
     const answer = (await c.certificate(newKey())).json() as { machine: string };
-    expect(answer.machine).toBe(b.id);
-    expect((await c.db.select().from(machines).where(eq(machines.id, a!.id)))[0]!.revokedAt).toBeNull();
-    expect((await c.db.select().from(certificates).where(eq(certificates.serial, 'aa01')))[0]!.revokedAt).toBeNull();
-    expect(((await c.peers()).json() as { revoked: string[] }).revoked).toEqual([]);
+    expect(answer.machine).toBe(leader.id);
+    const listed = async () => (await c.app.inject({ url: '/api/machines', ...auth })).json() as { machines: { id: string; serverInstall: boolean }[] };
+    expect((await listed()).machines).toEqual(expect.arrayContaining([expect.objectContaining({ id: former.id, serverInstall: true })]));
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/machines/${former.id}`, payload: { lendsTests: false }, ...auth })).statusCode).toBe(200);
 
-    /* The install is listed as a machine, by the name its keeper reported, and is no computer to disconnect. The
-       machine that leads is listed too, as the computer its owner joined, and does not leave either. */
-    const listed = (await c.app.inject({ url: '/api/machines', ...as(c.ceo) })).json() as { machines: { id: string; hostname: string; serverInstall: boolean }[] };
-    expect(listed.machines.map(m => [m.id, m.hostname, m.serverInstall])).toEqual(expect.arrayContaining([[a!.id, 'old-rack', true], [b.id, 'b-box', false]]));
-    const refusal = async (id: string) => {
-      const res = await c.app.inject({ method: 'POST', url: `/api/machines/${id}/disconnect`, ...as(c.ceo) });
-      const { error } = res.json() as { error: { reason: string; message: string } };
-      return [res.statusCode, error.reason, error.message];
-    };
-    expect(await refusal(a!.id)).toEqual([409, 'server_install', 'The company was installed on old-rack, so it cannot be disconnected.']);
-    expect(await refusal(b.id)).toEqual([409, 'leader', 'b-box runs the company server. Move the server to another machine first.']);
-    expect((await c.serverRows()).map(row => row.id).sort()).toEqual([a!.id, b.id].sort());
-    /* The other routes of a machine take the install. */
-    expect((await c.app.inject({ method: 'PATCH', url: `/api/machines/${a!.id}`, payload: { lendsTests: false }, ...as(c.ceo) })).statusCode).toBe(200);
+    const removed = await c.app.inject({ method: 'POST', url: `/api/machines/${former.id}/disconnect`, ...auth });
+    expect(removed.statusCode).toBe(204);
+    expect((await listed()).machines.map(m => m.id)).toEqual([leader.id]);
+    expect((await c.peers()).json()).toMatchObject({ machine: leader.id, revoked: ['aa01'] });
+    await until(() => Boolean(relay.bindings.get(name)?.key && relay.bindings.get(name)?.key !== priorKey));
+    const current = await c.app.inject({ url: '/api/link', ...auth });
+    expect(current.statusCode).toBe(200);
+    expect(current.json()).toMatchObject({ link: { name, url: relay.urlFor(name) } });
+  });
+
+  it('refuses to remove the computer that took over as leader', async () => {
+    const c = await company();
+    const leader = await c.joined('data', newKey(), { hostname: 'current-server', networkId: MACHINE_ID });
+    expect((await c.certificate(newKey())).statusCode).toBe(200);
+    const res = await c.app.inject({ method: 'POST', url: `/api/machines/${leader.id}/disconnect`, ...as(c.ceo) });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: { reason: 'leader' } });
+    expect((await c.serverRows()).map(row => row.id)).toEqual([leader.id]);
+  });
+
+  it('previews the last replica and only backups without disconnecting the machine', async () => {
+    const c = await company();
+    expect((await c.certificate(newKey())).statusCode).toBe(200);
+    const backup = randomUUID();
+    const replica = await c.joined('data', newKey(), { copyState: 'ready', heldBackups: [backup] });
+    const unfinished = await c.joined('data', newKey(), { copyState: 'making' });
+    const warning = (token = c.ceo) => c.app.inject({ url: `/api/machines/${replica.id}/removal`, ...as(token) });
+    const [department] = await c.db.insert(departments).values({ companyId: c.companyId, name: 'Operations', roleCode: 'COO' }).returning();
+    const outsider = await invitePerson(c.app, c.ceo, { name: 'Taylor', email: 'taylor@example.test', access: { departments: [department!.id] } });
+    expect((await warning(outsider)).statusCode).toBe(403);
+    expect((await warning()).json()).toEqual({ lastReplica: true, onlyBackup: true, uncollectedData: false });
+    await c.db.update(machines).set({ copyState: 'ready', heldBackups: [backup] }).where(eq(machines.id, unfinished.id));
+    expect((await warning()).json()).toEqual({ lastReplica: false, onlyBackup: false, uncollectedData: false });
+    await c.db.update(machines).set({ role: 'worker', uploadState: 'waiting' }).where(eq(machines.id, replica.id));
+    expect((await warning()).json()).toEqual({ lastReplica: false, onlyBackup: false, uncollectedData: true });
+    expect((await c.serverRows()).map(row => row.id)).toContain(replica.id);
   });
 
   it("refuses to disable the leader's person", async () => {

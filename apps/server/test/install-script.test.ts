@@ -457,6 +457,86 @@ describe('install.sh', () => {
     expect(r.calls).toContain('docker volume rm hornhoof-claude-1c07dac4');
   });
 
+  describe('uninstalling a server', () => {
+    function installed() {
+      const pc = computer();
+      const add = (name: string) => {
+        const folder = pc.folder(name);
+        pc.company(`COMPOSE_PROJECT_NAME=${name}\nHORNHOOF_SERVER_DIR=${folder}\nHORNHOOF_SECRET=test-only\nHORNHOOF_APP_REF=ghcr.io/invariant0x/hornhoof:latest\n`, name);
+        writeFileSync(join(folder, 'compose.yaml'), 'services: {db: {image: postgres}}\n');
+        return folder;
+      };
+      const target = add('hornhoof');
+      const other = add('hornhoof-sample');
+      pc.setList([`${target} 8080 8180`, `${other} 8081 8181`]);
+      const parent = join(target, '..');
+      return {
+        target, other, list: pc.list,
+        backups: () => readdirSync(parent).filter(name => name.startsWith('.hornhoof-backup.')).map(name => join(parent, name)),
+        remove: (args: string[] = [], env: Record<string, string> = {}, tty = 'y\n') => install({
+          args: ['--uninstall', ...args], tty,
+          env: { HORNHOOF_DIR: target, HORNHOOF_SERVER: '', STUB_PORTS_DIR: join(parent, '..', 'ports'), STUB_DATABASE_DUMP: 'ok', ...env },
+        }),
+      };
+    }
+
+    it('verifies and keeps a private database copy before removing a server installation', () => {
+      const pc = installed();
+      const r = pc.remove([], { STUB_COMPOSE_VERSION: '2.20.0' });
+      expect(r.code, r.out).toBe(0);
+      const dumped = r.calls.findIndex(call => call.includes('exec -T db pg_dump '));
+      const verified = r.calls.findIndex(call => call.includes('exec -T db pg_restore '));
+      const down = r.calls.findIndex(call => call.includes('down --volumes'));
+      expect(dumped).toBeGreaterThanOrEqual(0);
+      expect(verified).toBeGreaterThan(dumped);
+      expect(down).toBeGreaterThan(verified);
+      expect(existsSync(pc.target)).toBe(false);
+      expect(existsSync(pc.other)).toBe(true);
+      expect(pc.list()).toEqual([`${pc.other} 8081 8181`]);
+      const [backup] = pc.backups();
+      expect(backup).toBeTruthy();
+      expect(statSync(backup).mode & 0o777).toBe(0o700);
+      expect(readFileSync(join(backup, 'database.dump'), 'utf8')).toBe('PGDMP test archive\n');
+      expect(readFileSync(join(backup, 'globals.sql'), 'utf8')).toContain('test database globals');
+      expect(readFileSync(join(backup, 'installation', '.env'), 'utf8')).toContain('HORNHOOF_SECRET=test-only');
+      expect(r.out).toContain(backup);
+    });
+
+    it.each(['fail', 'empty', 'invalid'])('keeps the installation and its data if the backup is %s', bad => {
+      const pc = installed();
+      const r = pc.remove(['--name', 'sample'], { STUB_DATABASE_DUMP: bad });
+      expect(r.code).toBe(1);
+      expect(r.calls.some(call => call.includes('exec -T db pg_dump '))).toBe(true);
+      expect(r.calls.some(call => call.includes(' down ') || call.startsWith('docker rm ') || call.startsWith('docker volume rm '))).toBe(false);
+      expect(existsSync(pc.target)).toBe(true);
+      expect(existsSync(pc.other)).toBe(true);
+      expect(r.out).toContain('Could not save a database copy');
+    });
+
+    it('keeps the installation when Docker cannot identify the project', () => {
+      const pc = installed();
+      const r = pc.remove([], { STUB_PROJECT_LOOKUP: 'fail' });
+      expect(r.code).toBe(1);
+      expect(r.out).toContain('Could not identify the Docker project');
+      expect(r.calls.some(call => call.includes('pg_dump') || call.includes('down --volumes'))).toBe(false);
+      expect(pc.backups()).toEqual([]);
+      expect(existsSync(pc.target)).toBe(true);
+    });
+
+    it("leaves server installations alone when the person declines or runs another company's script", () => {
+      const pc = installed();
+      const declined = pc.remove([], {}, 'n\n');
+      expect(declined.code).toBe(0);
+      expect(declined.out).toContain(pc.target);
+      const other = pc.remove([], { HORNHOOF_SERVER: SERVER, STUB_CONTAINERS: `hornhoof-claude-1c07dac4=${SERVER}` }, 'y\nn\n');
+      expect(other.calls).toContain('docker rm -f hornhoof-claude-1c07dac4');
+      expect([declined, other].every(result => result.calls.every(call => !call.includes('pg_dump')))).toBe(true);
+      expect(pc.backups()).toEqual([]);
+      expect(existsSync(pc.target)).toBe(true);
+      expect(existsSync(pc.other)).toBe(true);
+    });
+  });
+
   it('removes only this server\'s nodes on --uninstall when another company has nodes here too', () => {
     const r = install({ args: ['--uninstall'], tty: 'y\nn\n', env: { STUB_CONTAINERS: `hornhoof-claude-1c07dac4=${SERVER} hornhoof-codex-9f1e2d3c=https://other.example.test` } });
     expect(r.code).toBe(0);

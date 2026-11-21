@@ -6,6 +6,7 @@
 #   install.sh server                                            install or update the Hornhoof server
 #   install.sh server --name <name>                              another company's server on this computer, in ~/hornhoof-<name>
 #   install.sh --uninstall                                       remove this machine's nodes, and the company's core here
+#   install.sh --uninstall [--name <name>]                       back up and remove a local server installation
 #   install.sh worker                                            for the updater of a machine that joined: move its core
 #
 # A join also brings the company's small core to the machine: front, the keeper and the updater, in a folder of the
@@ -96,7 +97,7 @@ SERVER_LABEL=hornhoof.server
 NODE_MAIN=/app/apps/node/dist/main.js
 FIRST_PORT=8080
 FIRST_PEER_PORT=8180
-USAGE='Usage: install.sh [--join <code> [--owner-key <key>]] [--urgent] | server [--name <name>] [--urgent] | worker | --uninstall'
+USAGE='Usage: install.sh [--join <code> [--owner-key <key>]] [--urgent] | server [--name <name>] [--urgent] | worker | --uninstall [--name <name>]'
 UNREADABLE='Hornhoof sent a line this installer cannot read. Update Hornhoof and get a new command.'
 
 OS=''
@@ -1225,33 +1226,108 @@ drop_nodes_updater() {
   for id in $(nodes_updaters -aq); do "${DOCKER[@]}" rm -f "$id" > /dev/null 2>&1 || true; done
 }
 
+# Remove only this installation's entries, leaving an unreadable list alone.
+forget_install_ports() {
+  local registry subnets
+  APP_REF=$(value_in "$2" HORNHOOF_APP_REF)
+  SERVER_DIR=$1
+  [ -n "$APP_REF" ] || return 0
+  take_port_lock
+  if registry=$(read_registry); then
+    other_lines "$registry" | write_registry || say "Could not take $SERVER_DIR off the list of Hornhoof's ports on this computer."
+  else
+    say "Could not read the list of Hornhoof's ports on this computer, so $SERVER_DIR stayed on it."
+  fi
+  if subnets=$(read_subnets); then
+    other_lines "$subnets" | write_subnets || say "Could not take $SERVER_DIR off the list of Hornhoof's subnets on this computer."
+  else
+    say "Could not read the list of Hornhoof's subnets on this computer, so $SERVER_DIR stayed on it."
+  fi
+  drop_port_lock "$PORT_LOCK_ID"
+}
+
 # The company's core on this machine goes: its containers and volumes, with the machine's key in them, its folder, and
 # its line in the list of ports. A machine that joins again later is a new machine to the company.
 remove_core() {
-  local core=$1 registry subnets
+  local core=$1
   say "Removing the company's core in $core."
   find_compose
   (cd "$core" && "${COMPOSE[@]}" down -v) > /dev/null 2>&1 || say "Could not stop the core in $core. Run docker compose down -v there, then remove the folder."
-  APP_REF=$(value_in "$core/.env" HORNHOOF_APP_REF)
-  SERVER_DIR=$core
-  if [ -n "$APP_REF" ]; then
-    take_port_lock
-    registry=$(read_registry) || registry=''
-    other_lines "$registry" | write_registry || say "Could not take $core off the list of Hornhoof's ports on this computer."
-    if subnets=$(read_subnets); then
-      other_lines "$subnets" | write_subnets || say "Could not take $core off the list of Hornhoof's subnets on this computer."
-    else
-      say "Could not read the list of Hornhoof's subnets on this computer, so $core stayed on it."
-    fi
-    drop_port_lock "$PORT_LOCK_ID"
+  forget_install_ports "$core" "$core/.env"
+  rm -rf -- "${core:?}"
+}
+
+is_server_folder() {
+  [ ! -L "$1" ] && [ -f "$1/compose.yaml" ] && [ -n "$(value_in "$1/.env" HORNHOOF_SECRET)" ] &&
+    [ -z "$(value_in "$1/.env" COMPOSE_FILE)" ] && [ "$(value_in "$1/.env" HORNHOOF_ROLE)" != worker ]
+}
+
+# Start only the existing database, then wait for it to answer, including with Compose 2.20.
+start_backup_database() {
+  local deadline=$((SECONDS + ANSWER_WAIT))
+  "$@" start db > /dev/null || return 1
+  until "$@" exec -T db pg_isready -t 2 -U hornhoof -d hornhoof > /dev/null 2>&1; do
+    [ "$SECONDS" -lt "$deadline" ] || return 1
+    sleep 1
+  done
+}
+
+uninstall_server() {
+  local folder recorded project elsewhere answer backup
+  local -a compose
+  is_server_folder "$SERVER_DIR" || fail "No Hornhoof server installation was found in $SERVER_DIR."
+  folder=$(CDPATH='' cd -P -- "$SERVER_DIR" && pwd -P) || fail "Could not open the server folder $SERVER_DIR."
+  recorded=$(value_in "$folder/.env" HORNHOOF_SERVER_DIR)
+  if [ -n "$recorded" ] && [ "$(CDPATH='' cd -P -- "$recorded" 2> /dev/null && pwd -P)" != "$folder" ]; then
+    fail "The settings in $folder name another server folder."
   fi
-  rm -rf "$core"
+  SERVER_DIR=$folder
+  project=$(value_in "$folder/.env" COMPOSE_PROJECT_NAME)
+  [[ "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || fail "Could not read the Docker project name in $folder."
+  [ -z "$NAME" ] || [ "$project" = "hornhoof-$NAME" ] || fail "The settings in $folder name another Docker project."
+  elsewhere=$(project_elsewhere "$project" "$folder" strict) || fail "Could not identify the Docker project $project. The server stays in $folder."
+  [ -z "$elsewhere" ] || fail "The Docker project $project also belongs to $elsewhere."
+
+  say "This removes the server's containers and volumes, including its local work files."
+  answer=$(ask "Back up the database and remove the Hornhoof server in $folder? [y/N] " n)
+  case "$answer" in
+    y | Y | yes) ;;
+    *) say "The server stays in $folder."; return 0 ;;
+  esac
+
+  find_compose
+  compose=("${COMPOSE[@]}" --project-directory "$folder" --env-file "$folder/.env" -f "$folder/compose.yaml" -p "$project")
+  backup=$(umask 077; mktemp -d "$(dirname "$folder")/.hornhoof-backup.XXXXXX") || fail "Could not make a backup folder next to $folder."
+  if ! (
+    umask 077
+    start_backup_database "${compose[@]}" &&
+      "${compose[@]}" exec -T db pg_dump -U hornhoof -d hornhoof --format=custom > "$backup/database.dump" &&
+      [ -s "$backup/database.dump" ] &&
+      "${compose[@]}" exec -T db pg_restore --file=/dev/null < "$backup/database.dump" &&
+      "${compose[@]}" exec -T db pg_dumpall -U hornhoof --globals-only > "$backup/globals.sql" &&
+      [ -s "$backup/globals.sql" ]
+  ); then
+    fail "Could not save a database copy. The server installation stays in $folder. The incomplete backup is in $backup."
+  fi
+  say "Database copy saved in $backup."
+  "${compose[@]}" down --volumes --remove-orphans || fail "Could not remove the Docker project $project. The database copy is in $backup."
+  mv -- "${folder:?}" "$backup/installation" || fail "Could not move the settings from $folder. The database copy is in $backup."
+  forget_install_ports "$folder" "$backup/installation/.env"
+  say "The server is removed. Keep the database copy and the installation settings in $backup together."
 }
 
 uninstall_mode() {
   local entry names='' name answer core asked
   detect_system
   docker_works || fail "Docker is not running, so there are no nodes to remove. Start Docker, then run this again."
+  if [ -n "$NAME${HORNHOOF_SERVER_DIR:-}" ]; then
+    uninstall_server
+    return 0
+  fi
+  # A script served by another company keeps its own scope. A local script can remove the default server here.
+  case "$SERVER" in
+    __HORNHOOF_* | '') if is_server_folder "$SERVER_DIR"; then uninstall_server; return 0; fi ;;
+  esac
   core=$(core_of_server)
   if [ -n "$core" ]; then
     # The core goes, so the company's nodes here go whichever of its addresses each joined through.
@@ -1385,11 +1461,13 @@ hornhoof_servers() {
   } | awk -F'|' 'tolower($1 "|" $3) ~ /hornhoof/ && $1 != "" && !seen[$1 "|" $2]++ { print $1 "|" $2 "|" $4 }'
 }
 
-# project_elsewhere <project> <folder>: the folder another company runs that compose project from; nothing when none does.
+# project_elsewhere <project> <folder> [strict]: another folder using this project; strict requires an answer from Docker.
 project_elsewhere() {
   local found env proj line folder
-  found=$("${DOCKER[@]}" ps -a --filter "label=com.docker.compose.project=$1" --format '{{.Label "com.docker.compose.project.working_dir"}}' 2> /dev/null |
-    awk 'NF' | grep -v -x -F -e "$2" | head -1 || true)
+  if ! found=$("${DOCKER[@]}" ps -a --filter "label=com.docker.compose.project=$1" --format '{{.Label "com.docker.compose.project.working_dir"}}' 2> /dev/null); then
+    [ "${3:-}" != strict ] || return 1
+  fi
+  found=$(printf '%s\n' "$found" | awk 'NF' | grep -v -x -F -e "$2" | head -1 || true)
   if [ -n "$found" ]; then
     printf '%s\n' "$found"
     return 0
@@ -2652,7 +2730,7 @@ if [ -n "$OWNER_KEY" ]; then
   [ -n "$CODE" ] || fail "--owner-key goes with --join. $USAGE"
 fi
 if [ -n "$NAME" ]; then
-  [ "$MODE" = server ] || fail "--name is for install.sh server. $USAGE"
+  [ "$MODE" = server ] || [ "$MODE" = uninstall ] || fail "--name is for install.sh server or --uninstall. $USAGE"
   valid_name "$NAME" || fail "--name takes lowercase letters, digits and dashes, up to 32 characters, such as acme."
   SERVER_DIR="$BASE_DIR-$NAME"
 fi

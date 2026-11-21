@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Config } from '../../config.js';
 import type { Db } from '../../db/client.js';
@@ -12,7 +12,7 @@ import { findThisMachine } from '../network/store.js';
 import { nodeIdentity } from './hub.js';
 import { loseParts } from '../testruns/runs.js';
 import { failOpenJobs } from './job-failures.js';
-import { liveNode, settlePlans } from './nodes.js';
+import { isServerInstall, liveNode, settlePlans } from './nodes.js';
 
 /* The machine that leads does not leave the company: the server moves to another machine first. Asked where a person
    takes machines out, before anything is changed. */
@@ -21,6 +21,23 @@ export async function refuseLeader(db: Db, config: Config, machineIds: string[])
   if (!leader || !machineIds.includes(leader.id)) return;
   const [row] = await db.select(only(machines, 'hostname')).from(machines).where(eq(machines.id, leader.id));
   throw new ApiError(409, 'conflict', `${row?.hostname || 'This machine'} runs the company server. Move the server to another machine first.`, 'leader', { host: row?.hostname ?? '' });
+}
+
+type CopyHolder = Pick<typeof machines.$inferSelect, 'role' | 'copyState' | 'copyAt' | 'machineKey'>;
+
+/* A replica in its first setup is not a spare copy yet. An old server can still hold its database before it reports a replica. */
+const hasReplica = (row: CopyHolder): boolean => row.role === 'data' && (row.copyState === 'ready' || row.copyAt !== null || isServerInstall(row.machineKey));
+
+export async function removalWarnings(db: Db, config: Config, machine: typeof machines.$inferSelect) {
+  const { networkId, role, copyState, copyAt, machineKey, heldBackups } = machines;
+  const others = await db.select({ networkId, role, copyState, copyAt, machineKey, heldBackups }).from(machines)
+    .where(and(eq(machines.companyId, machine.companyId), isNull(machines.revokedAt), ne(machines.id, machine.id)));
+  const otherBackups = new Set(others.flatMap(row => row.heldBackups));
+  return {
+    lastReplica: hasReplica(machine) && !others.some(row => row.networkId !== config.machineId && hasReplica(row)),
+    onlyBackup: machine.heldBackups.some(id => !otherBackups.has(id)),
+    uncollectedData: machine.uploadState === 'waiting',
+  };
 }
 
 /* Stops these machines' nodes: open jobs fail, the parts of test runs they ran wait for another machine, sockets close,

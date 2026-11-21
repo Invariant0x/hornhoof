@@ -378,6 +378,16 @@ case "$1" in
     case "$*" in
       *' stop app') [ -z "${STUB_RUNNING_SERVICES:-}" ] || not_running app ;;
       *' down') compose_networks_down "$@" ;;
+      *' start --wait '* ) [ "${STUB_COMPOSE_VERSION:-}" != 2.20.0 ] || exit 1 ;;
+      *' exec -T db pg_dump '* )
+        case "${STUB_DATABASE_DUMP:-fail}" in
+          fail) exit 1 ;;
+          empty) exit 0 ;;
+          invalid) printf 'invalid archive\n' ;;
+          ok) printf 'PGDMP test archive\n' ;;
+        esac ;;
+      *' exec -T db pg_dumpall '* ) printf 'test database globals\n' ;;
+      *' exec -T db pg_restore '* ) [ "$(cat)" = 'PGDMP test archive' ] || exit 1 ;;
       *' pull') case "${STUB_PULL:-ok}" in fail) echo "pull access denied" >&2; exit 1 ;; esac ;;
       # STUB_SERVICES: the services the folder's compose files name, with the profiles its settings turn on.
       *' config --services') for s in ${STUB_SERVICES:-}; do echo "$s"; done ;;
@@ -399,7 +409,10 @@ case "$1" in
     case "$*" in
       *com.docker.compose.service=app*) for s in ${STUB_SERVERS:-}; do IFS=: read -r p d _ <<< "$s"; echo "$p|$d|ghcr.io/invariant0x/hornhoof:latest|app-$p"; done; exit 0 ;;
       *com.docker.compose.service=keeper*) for s in ${STUB_CORES:-}; do IFS=: read -r p d _ <<< "$s"; echo "$p|$d|ghcr.io/invariant0x/hornhoof:latest|keeper-$p"; done; exit 0 ;;
-      *com.docker.compose.project=*) for s in ${STUB_SERVERS:-} ${STUB_CORES:-}; do IFS=: read -r p d _ <<< "$s"; case "$* " in *"com.docker.compose.project=$p "*) echo "$d" ;; esac; done; exit 0 ;;
+      *com.docker.compose.project=*)
+        [ "${STUB_PROJECT_LOOKUP:-}" != fail ] || exit 1
+        for s in ${STUB_SERVERS:-} ${STUB_CORES:-}; do IFS=: read -r p d _ <<< "$s"; case "$* " in *"com.docker.compose.project=$p "*) echo "$d" ;; esac; done
+        exit 0 ;;
     esac
     init_containers
     while IFS='|' read -r name server _; do

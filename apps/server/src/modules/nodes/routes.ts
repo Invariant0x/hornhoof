@@ -27,7 +27,7 @@ import { pumpTests } from '../testruns/runs.js';
 import { createInstallCommand } from './command.js';
 import { nodeCommandRoutes } from './command-routes.js';
 import { connectionRoutes } from './connection-routes.js';
-import { disconnectMachines, refuseLeader } from './disconnect.js';
+import { disconnectMachines, refuseLeader, removalWarnings } from './disconnect.js';
 import { nodeIdentity, ownBuiltin, ownMachine as machineOfServer, type NodeHub } from './hub.js';
 import { nodeImageOfBuild } from './image.js';
 import { builtinMachine, isServerInstall, liveNode, otherBuild, settlePlans, shownMachine } from './nodes.js';
@@ -365,20 +365,25 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   /* A live machine its owner, or someone who sees the whole company, may change. */
   async function ownMachine(me: Awaited<ReturnType<typeof requirePerson>>, id: string) {
-    const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt), shownMachine(config)));
+    const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), eq(machines.companyId, me.companyId), isNull(machines.revokedAt), shownMachine(config)));
     if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
     if (machine.personId !== me.id && me.scopeKind !== 'company') throw new ApiError(403, 'forbidden', 'Only the owner of this machine can do this.', 'not_owner');
     return machine;
   }
 
-  app.post('/api/machines/:id/disconnect', async (req, reply) => {
+  app.get('/api/machines/:id/removal', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const machine = await ownMachine(me, id);
-    /* The machine the company was installed on is no computer someone joined, and the one that leads does not leave. */
-    if (isServerInstall(machine.machineKey)) {
-      throw new ApiError(409, 'conflict', `The company was installed on ${machine.hostname || 'this machine'}, so it cannot be disconnected.`, 'server_install', { host: machine.hostname });
-    }
+    await refuseLeader(db, config, [id]);
+    reply.header('cache-control', 'no-store');
+    return removalWarnings(db, config, machine);
+  });
+
+  app.post('/api/machines/:id/disconnect', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    await ownMachine(me, id);
     await refuseLeader(db, config, [id]);
     await disconnectMachines(ctx, [id]);
     return reply.code(204).send();
