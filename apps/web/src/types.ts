@@ -657,6 +657,7 @@ export type UncheckedItem =
   | { kind: 'unread'; base: string; commit: string }
   | { kind: 'holder_off' | 'no_candidate' | 'task_unread' | 'unpinned' | 'unstarted'; task: number }
   | { kind: 'checker'; task: number; commit: string }
+  | { kind: 'other_branch'; task: number; commit: string; branch: string }
   | { kind: 'merge' | 'commit'; commit: string };
 
 export type WaitingRequest = MaterialStampView & {

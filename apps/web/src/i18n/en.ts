@@ -1899,6 +1899,7 @@ export const en = {
     unchecked: {
       heading: (n: number) => `What this release brings that no check covers: ${n} ${n === 1 ? 'item' : 'items'}`,
       accept: 'Approve only if you accept each of these.',
+      otherBranches: 'Work an employee did and checked alone counts as checked from the commit they named down to where it started. Hornhoof names a commit that another task\'s branch holds only where the head of that branch is in this release.',
       unread: (base: string, commit: string) => `Hornhoof could not read every commit between main at ${base} and ${commit}.`,
       holderOff: (task: number) => `#${task}: the employee who did and checked this work alone is switched off or removed.`,
       noCandidate: (task: number) => `#${task}: no checked version of it, and it is not work its employee did and checked alone.`,
@@ -1906,6 +1907,7 @@ export const en = {
       taskUnread: (task: number) => `Hornhoof could not read every commit of #${task}.`,
       unpinned: (task: number) => `#${task} was closed before such work named the commit its employee checked, so none of its commits counts as checked.`,
       unstarted: (task: number) => `#${task}: there is no record of where this work started, so none of its commits counts as checked.`,
+      otherBranch: (task: number, commit: string, branch: string) => `#${task}: ${commit} is also on ${branch}, the branch of another task whose accepted work did not bring it, so the check of the employee who did #${task} alone does not cover it.`,
       merge: (commit: string) => `${commit} is a merge made outside every checked change.`,
       commit: (commit: string) => `${commit} came in without any check.`,
     },

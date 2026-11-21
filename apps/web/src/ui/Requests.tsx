@@ -420,6 +420,7 @@ const UNCHECKED_TEXT: { [K in UncheckedItem['kind']]: (words: UncheckedWords, it
   task_unread: (words, item) => words.taskUnread(item.task),
   unpinned: (words, item) => words.unpinned(item.task),
   unstarted: (words, item) => words.unstarted(item.task),
+  other_branch: (words, item) => words.otherBranch(item.task, item.commit, item.branch),
   merge: (words, item) => words.merge(item.commit),
   commit: (words, item) => words.commit(item.commit),
 };
@@ -443,6 +444,7 @@ function UncheckedList({ request }: { request: WaitingRequest }) {
         {items.map((item, index) => <li key={index}>{uncheckedText(t, item)}</li>)}
       </ul>
       <p>{t.tasks.unchecked.accept}</p>
+      <p>{t.tasks.unchecked.otherBranches}</p>
     </section>
   );
 }

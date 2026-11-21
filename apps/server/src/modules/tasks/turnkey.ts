@@ -60,9 +60,10 @@ async function requireNamed(ctx: Reader, repo: IntegrationTarget['repo'], own: O
   if (!(await branchHolds(ctx, repo, named.commit, named.baseCommit))) throw refuse(409, 'task_invalid', `${named.commit} does not hold ${named.baseCommit}. Name as turnkey.baseCommit the ${START_COMMIT}.`);
 }
 
-/* Where the turn branch of its department, and main, were as turnkey work started, as the server read them then: turn is the
-   turn open then and turnHead its branch's head, none where it had no turn or its branch was not made yet. */
-export type WorkStart = { turn: number | null; turnHead: string | null; main: string | null };
+/* Where the turn branch of its department, main and the work's own branch were as turnkey work started, as the server read
+   them then: turn is the turn open then and turnHead its branch's head, none where it had no turn or its branch was not made
+   yet; taskHead the head of task-<number>, none where it was not made yet, and missing on a note from before it was kept. */
+export type WorkStart = { turn: number | null; turnHead: string | null; main: string | null; taskHead?: string | null };
 
 type Repo = IntegrationTarget['repo'];
 
@@ -77,10 +78,10 @@ async function headAt(readCommit: NonNullable<Live['readCommit']>, repo: Repo, b
   }
 }
 
-type StartingTask = Pick<Task, 'id' | 'companyId' | 'productId' | 'departmentId' | 'status' | 'assigneeAgentId'>;
+type StartingTask = Pick<Task, 'id' | 'number' | 'companyId' | 'productId' | 'departmentId' | 'status' | 'assigneeAgentId'>;
 
 /* What the status note of work that starts now keeps of where it started: turnkey work of a department that releases turns,
-   taken up by its holder, keeps where the turn branch and main were. */
+   taken up by its holder, keeps where the turn branch, main and its own branch were. */
 export async function workStartNote(ctx: Live, task: StartingTask, agentId: string): Promise<{ start?: WorkStart }> {
   if (task.status !== 'open' || task.assigneeAgentId !== agentId) return {};
   const start = await workStartOf(ctx, task);
@@ -93,7 +94,7 @@ export async function workStartNote(ctx: Live, task: StartingTask, agentId: stri
 async function workStartOf(ctx: Live, task: StartingTask): Promise<WorkStart | null> {
   if (!ctx.config || !ctx.readCommit) return null;
   const at = await turnkeyRepo(ctx.db, ctx.config, task);
-  return at ? readWorkStart(ctx.readCommit, at.repo, at.turn) : null;
+  return at ? readWorkStart(ctx.readCommit, at.repo, at.turn, task.number) : null;
 }
 
 type Turn = NonNullable<Awaited<ReturnType<typeof openTurnOf>>>;
@@ -107,26 +108,43 @@ async function turnkeyRepo(db: Live['db'], config: NonNullable<Live['config']>, 
   return { repo: found.repo, turn: await openTurnOf(db, task.companyId, found.department.id) };
 }
 
-/* The heads of the turn branch and main now: none where the turn branch could not be read, or neither is there. */
-async function readWorkStart(readCommit: NonNullable<Live['readCommit']>, repo: Repo, turn: Turn | null): Promise<WorkStart | null> {
-  const [turnHead, main] = await Promise.all([turn ? headAt(readCommit, repo, `turn-${turn.number}`) : null, headAt(readCommit, repo, repo.branch)]);
-  if (turnHead === undefined || (!turnHead && !main)) return null;
-  return { turn: turn?.number ?? null, turnHead, main: main ?? null };
+/* The head of the work's own branch, task-<number>: null where it is not made yet, undefined where it could not be read. */
+async function ownHeadAt(readCommit: NonNullable<Live['readCommit']>, repo: Repo, task: number): Promise<string | null | undefined> {
+  try {
+    const at = await readCommit(repo, { task }, 5_000);
+    if ('problem' in at) return at.missing ? null : undefined;
+    return at.tag ? undefined : at.commitSha;
+  } catch {
+    return undefined;
+  }
 }
 
-/* The commit every start named for the work must hold: the head of the turn branch as the work first started, else main's. */
-async function startedAt(db: Db | Tx, task: Task): Promise<{ commit: string; at: string } | null> {
+/* The heads of the turn branch, main and the work's own branch now: none where the turn branch or the work's own branch could
+   not be read, or neither the turn branch nor main is there. */
+async function readWorkStart(readCommit: NonNullable<Live['readCommit']>, repo: Repo, turn: Turn | null, task: number): Promise<WorkStart | null> {
+  const [turnHead, main, taskHead] = await Promise.all([turn ? headAt(readCommit, repo, `turn-${turn.number}`) : null, headAt(readCommit, repo, repo.branch), ownHeadAt(readCommit, repo, task)]);
+  if (turnHead === undefined || taskHead === undefined || (!turnHead && !main)) return null;
+  return { turn: turn?.number ?? null, turnHead, main: main ?? null, taskHead };
+}
+
+/* The commits every start named for the work must hold: the head of the turn branch as the work first started, else main's,
+   and the head its own branch already had then, if it was made. */
+async function startedAt(db: Db | Tx, task: Task): Promise<{ commit: string; at: string; taskHead: string | null } | null> {
   const [first] = await db.select(only(taskEvents, 'data')).from(taskEvents)
     .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'status'), sql`${taskEvents.data} ? 'start'`)).orderBy(asc(taskEvents.id)).limit(1);
   const start = first?.data.start as WorkStart | undefined;
-  if (start?.turnHead) return { commit: start.turnHead, at: `turn-${start.turn}` };
-  return start?.main ? { commit: start.main, at: 'main' } : null;
+  const taskHead = start?.taskHead ?? null;
+  if (start?.turnHead) return { commit: start.turnHead, at: `turn-${start.turn}`, taskHead };
+  return start?.main ? { commit: start.main, at: 'main', taskHead } : null;
 }
 
-/* The start named holds where the work started: a start under it would count as checked commits that were there before. */
+/* The start named holds where the work started: a start under it would count as checked commits that were there before, on
+   the turn branch or already on the work's own branch, which another may have made. */
 async function requireStarted(ctx: Reader, repo: Repo, task: Task, named: TurnkeyChecked): Promise<string | null> {
   const started = await startedAt(ctx.db, task);
-  if (started && !(await branchHolds(ctx, repo, named.baseCommit, started.commit))) throw refuse(409, 'task_invalid', `${named.baseCommit} does not hold ${started.commit}, where ${started.at} was as your work on #${task.number} started, so your branch started there or later. Name as turnkey.baseCommit the ${START_COMMIT}.`);
+  const under = (commit: string, at: string, after: string) => refuse(409, 'task_invalid', `${named.baseCommit} does not hold ${commit}, where ${at} was as your work on #${task.number} started, so ${after}. Name as turnkey.baseCommit the ${START_COMMIT}.`);
+  if (started && !(await branchHolds(ctx, repo, named.baseCommit, started.commit))) throw under(started.commit, started.at, 'your branch started there or later');
+  if (started?.taskHead && !(await branchHolds(ctx, repo, named.baseCommit, started.taskHead))) throw under(started.taskHead, `task-${task.number}`, 'your own commits come after it');
   return started?.commit ?? null;
 }
 

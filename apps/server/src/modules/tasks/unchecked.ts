@@ -16,6 +16,9 @@ export type UncheckedItem =
   | { kind: 'unpinned'; task: number }
   /* Turnkey work that started before the server noted where the turn branch was, or where it could not read it. */
   | { kind: 'unstarted'; task: number }
+  /* A commit credited to turnkey work as its holder's own that another task's branch holds, which no accepted result of that
+     task brought: its holder may have built on it. */
+  | { kind: 'other_branch'; task: number; commit: string; branch: string }
   /* A merge, or a commit, of the release that no checked result brought. */
   | { kind: 'merge'; commit: string }
   | { kind: 'commit'; commit: string };
@@ -31,6 +34,7 @@ const LINES: { [K in Kind]: (item: Extract<UncheckedItem, { kind: K }>) => strin
   task_unread: item => `The commits of #${item.task} could not all be read.`,
   unpinned: item => `#${item.task} was closed before turnkey work named the commit its holder checked and where it started, so none of its commits counts as checked.`,
   unstarted: item => `#${item.task}: where this turnkey work started is not on record, so none of its commits counts as checked.`,
+  other_branch: item => `#${item.task}: ${item.commit} is also on ${item.branch}, and no accepted result of that task brought it, so the checks of #${item.task}'s holder do not cover it.`,
   merge: item => `${item.commit} is a merge made outside every checked candidate.`,
   commit: item => `${item.commit} came in with no accepted candidate.`,
 };

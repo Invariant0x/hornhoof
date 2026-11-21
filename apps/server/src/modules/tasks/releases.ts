@@ -211,17 +211,74 @@ async function coverage(ctx: Reader, repo: Repo, base: string, commit: string, r
     if (!own) { uncovered.push({ kind: 'task_unread', task: result.task.number }); continue; }
     for (const c of own) checked.add(c.sha);
   }
-  for (const sha of turnkeyCommits(brought, turnkeyLines(results), checked)) checked.add(sha);
+  const named = await creditTurnkey(ctx, repo, brought, turnkeyLines(results), checked, uncovered);
   for (const c of brought) {
-    if (checked.has(c.sha)) continue;
+    if (checked.has(c.sha) || named.has(c.sha)) continue;
     uncovered.push({ kind: c.parents.length > 1 ? 'merge' : 'commit', commit: c.sha });
   }
   return uncovered;
 }
 
+type Line = { task: number; tip: string; start: string; workStart: string };
+
+/* Counts as checked each turnkey line's own commits, but a commit another task's branch holds that no accepted result of that
+   task brought: it is named for a person, as its holder may have built on it (H7 of #1686). Where the branches could not be
+   read, none of a line counts and the line is named as unread. The commits it named. */
+async function creditTurnkey(ctx: Reader, repo: Repo, brought: Compared[], lines: Line[], checked: Set<string>, uncovered: UncheckedItem[]): Promise<Set<string>> {
+  const named = new Set<string>();
+  if (!lines.length) return named;
+  const own = turnkeyCommits(brought, lines, checked);
+  const heads = await taskHeads(ctx, repo);
+  if (!heads) {
+    for (const line of lines) uncovered.push({ kind: 'task_unread', task: line.task });
+    return named;
+  }
+  const elsewhere = onOtherBranches(brought, lines, own, heads);
+  for (const [i, line] of lines.entries()) {
+    for (const sha of own[i]!) {
+      const branch = elsewhere[i]!.get(sha);
+      if (branch === undefined) { checked.add(sha); continue; }
+      if (named.has(sha)) continue;
+      named.add(sha);
+      uncovered.push({ kind: 'other_branch', task: line.task, commit: sha, branch });
+    }
+  }
+  return named;
+}
+
+/* The heads of the repository's task branches, task-<number> or task-<number>-<words>, with the number each names, as one read
+   of its refs says them: none where they could not be read. No ancestry is asked of the host for them. */
+async function taskHeads(ctx: Reader, repo: Repo): Promise<{ branch: string; task: number; head: string }[] | null> {
+  if (!ctx.readBranches) return null;
+  const read = await ctx.readBranches(repo, 5_000).catch(() => null);
+  if (!read || 'problem' in read) return null;
+  return Object.entries(read.heads).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).flatMap(([branch, head]) => {
+    const task = /^task-(\d+)(?:-.+)?$/.exec(branch)?.[1];
+    return task ? [{ branch, task: Number(task), head }] : [];
+  });
+}
+
+/* For each line, its own commits that a branch of another task holds, by the first such branch: a branch holds what its
+   head holds within the release's commits, so one whose head the release does not hold holds none here. A branch that also
+   holds the line's tip built on that work, not under it; a commit the line of that branch's own task counts is that task's. */
+function onOtherBranches(brought: Compared[], lines: Line[], own: Set<string>[], heads: { branch: string; task: number; head: string }[]): Map<string, string>[] {
+  const at = new Map(brought.map(c => [c.sha, c]));
+  const byTask = new Map<number, Set<string>>();
+  for (const [i, line] of lines.entries()) for (const sha of own[i]!) (byTask.get(line.task) ?? byTask.set(line.task, new Set()).get(line.task)!).add(sha);
+  const inRelease = heads.filter(h => at.has(h.head)).map(h => ({ ...h, holds: heldWithin(at, [h.head]) }));
+  return lines.map((line, i) => {
+    const found = new Map<string, string>();
+    for (const other of inRelease) {
+      if (other.task === line.task || other.holds.has(line.tip)) continue;
+      for (const sha of own[i]!) if (other.holds.has(sha) && !byTask.get(other.task)?.has(sha) && !found.has(sha)) found.set(sha, other.branch);
+    }
+    return found;
+  });
+}
+
 /* The line each turnkey work's holder checked: from the commit it named down to where its branch started, never under where
    the turn branch was as the work started. Work with either start missing has none. */
-const turnkeyLines = (results: Accepted[]) => results.flatMap(r => (r.turnkey?.start && r.turnkey.workStart ? [{ tip: r.commit, start: r.turnkey.start, workStart: r.turnkey.workStart }] : []));
+const turnkeyLines = (results: Accepted[]): Line[] => results.flatMap(r => (r.turnkey?.start && r.turnkey.workStart ? [{ task: r.task.number, tip: r.commit, start: r.turnkey.start, workStart: r.turnkey.workStart }] : []));
 
 /* What turnkey work leaves to a person by itself: a holder off since, a report that named nothing it checked, or work whose
    start the server has no record of. */
@@ -296,16 +353,14 @@ type Compared = { sha: string; parents: string[] };
    Its own are the commits down the first parents of its tip, to one the start or workStart holds, another result brought or
    main holds. A merge on its branch took the turn branch in from its other side,
    which is not its own; a commit on top of its tip, or a merge on the turn branch that joined it there, is no commit it checked. */
-function turnkeyCommits(brought: Compared[], lines: { tip: string; start: string; workStart: string }[], others: Set<string>): Set<string> {
+function turnkeyCommits(brought: Compared[], lines: Line[], others: Set<string>): Set<string>[] {
   const at = new Map(brought.map(c => [c.sha, c]));
-  const own = new Set<string>();
-  for (const { tip, start, workStart } of lines) {
+  return lines.map(({ tip, start, workStart }) => {
     const under = heldWithin(at, [start, workStart]);
     const line = new Set<string>();
     for (let sha = tip; at.has(sha) && !others.has(sha) && !under.has(sha) && !line.has(sha); sha = at.get(sha)!.parents[0] ?? '') line.add(sha);
-    for (const sha of line) own.add(sha);
-  }
-  return own;
+    return line;
+  });
 }
 
 /* The commits of a comparison the given ones hold, themselves too. */
