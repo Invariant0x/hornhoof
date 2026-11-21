@@ -889,6 +889,107 @@ describe('what waits for people', () => {
     expect(within(side).queryByRole('button', { name: /^Waiting for people/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Waiting for people' })).not.toBeInTheDocument();
   });
+
+  it('does not address the viewer as "you" on another person\'s cards in Waiting for people, while keeping it in Waiting for me', async () => {
+    const options = [{ label: 'Card A', image: null }, { label: 'Card B', image: null }];
+    const commit = 'a'.repeat(40);
+    const mariaChoice = asked('r-m-choice', PAY, 'Pick a card style.', { kind: 'choice', options, ownerPersonId: MARIA.id, canAnswer: true, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+    const mariaCommit = asked('r-m-commit', FORM, 'Approve this commit.', { kind: 'approval', commit, ownerPersonId: MARIA.id, canAnswer: true, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+    const mariaPolicy = asked('r-m-policy', LOGIN, 'Approve the spend.', { kind: 'approval', commit: null, ownerPersonId: MARIA.id, canAnswer: true, decidedBy: { kind: 'owner_and_ceo', department: DEV } });
+    const theoReadOnly = asked('r-t-choice', { ...PAY, id: 't25', number: 25, title: 'Design layout' }, 'Pick a layout.', { kind: 'choice', options, ownerPersonId: THEO.id, canAnswer: false, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+    const ivanChoice = asked('r-i-choice', REFUND, 'Pick a refund policy.', { kind: 'choice', options, ownerPersonId: IVAN.id, canAnswer: true });
+    const allRequests = [mariaChoice, mariaCommit, mariaPolicy, theoReadOnly, ivanChoice];
+    const reqRoutes = { ...routes, 'GET /api/requests': [200, decisions(allRequests)] };
+
+    shell('/tasks?show=people', reqRoutes);
+    const people = await screen.findByRole('region', { name: 'Waiting for people' });
+    await within(people).findByText('Pick a card style.');
+
+    const headerOf = (label: string) => within(people).getByRole('article', { name: label }).querySelector('header')!;
+    expect(headerOf('#21 Take card payments')).toHaveTextContent('Waiting for: Maria');
+    expect(headerOf('#21 Take card payments')).not.toHaveTextContent(/\basks you\b/i);
+    expect(headerOf('#21 Take card payments')).toHaveTextContent('Bruno asks for a choice');
+
+    expect(headerOf('#22 Card form')).toHaveTextContent('Waiting for: Maria');
+    expect(headerOf('#22 Card form')).not.toHaveTextContent(/\basks you\b/i);
+    expect(headerOf('#22 Card form')).toHaveTextContent('Bruno asks for commit approval');
+
+    expect(headerOf('#24 Fix the login page')).toHaveTextContent('Waiting for: Maria');
+    expect(headerOf('#24 Fix the login page')).not.toHaveTextContent(/\basks you\b/i);
+    expect(headerOf('#24 Fix the login page')).toHaveTextContent('Bruno asks for approval');
+
+    expect(headerOf('#25 Design layout')).toHaveTextContent('Waiting for: Theo');
+    expect(headerOf('#25 Design layout')).not.toHaveTextContent(/\basks you\b/i);
+    expect(headerOf('#25 Design layout')).toHaveTextContent('Bruno asks for a choice');
+
+    /* The viewer's own card in Waiting for people is still addressed to the viewer. */
+    expect(headerOf('#23 Refund button')).toHaveTextContent('Waiting for: Ivan');
+    expect(headerOf('#23 Refund button')).toHaveTextContent('Bruno asks you to pick one');
+    cleanup();
+
+    /* Viewing another person's waits does not address the viewer as "you" either. */
+    shell('/tasks?show=waits&person=p2', reqRoutes);
+    const mariaWaiting = await screen.findByRole('region', { name: 'Waiting for you' });
+    await within(mariaWaiting).findByText('Pick a card style.');
+    expect(within(mariaWaiting).getByRole('article', { name: '#21 Take card payments' }).querySelector('header')).not.toHaveTextContent(/\basks you\b/i);
+    expect(within(mariaWaiting).getByRole('article', { name: '#21 Take card payments' }).querySelector('header')).toHaveTextContent('Bruno asks for a choice');
+    cleanup();
+
+    /* In Waiting for me, cards addressed to the viewer keep the direct "asks you" phrasing. */
+    const ivanCommit = asked('r-i-commit', FORM, 'Approve Ivan commit.', { kind: 'approval', commit, ownerPersonId: IVAN.id, canAnswer: true });
+    const ivanPolicy = asked('r-i-policy', LOGIN, 'Approve Ivan spend.', { kind: 'approval', commit: null, ownerPersonId: IVAN.id, canAnswer: true });
+    const ivanQuestion = asked('r-i-q', PAY, 'Which provider?', { kind: 'question', ownerPersonId: IVAN.id, canAnswer: true });
+    for (const [req, expected] of [
+      [ivanChoice, 'Bruno asks you to pick one'],
+      [ivanCommit, 'Bruno asks you to approve a commit'],
+      [ivanPolicy, 'Bruno asks you to approve this'],
+      [ivanQuestion, 'Bruno asks'],
+    ] as const) {
+      shell('/tasks?show=waits', { ...routes, 'GET /api/requests': [200, decisions([req])] });
+      const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+      expect(await within(waiting).findByText(expected)).toBeInTheDocument();
+      cleanup();
+    }
+  });
+
+  it('does not address the viewer as "вас" in Russian on another person\'s cards in Waiting for people, while keeping it in Waiting for me', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      const options = [{ label: 'Вариант 1', image: null }, { label: 'Вариант 2', image: null }];
+      const commit = 'b'.repeat(40);
+      const mariaChoice = asked('r-m-choice', PAY, 'Выберите стиль.', { kind: 'choice', options, ownerPersonId: MARIA.id, canAnswer: true, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+      const mariaCommit = asked('r-m-commit', FORM, 'Одобрите коммит.', { kind: 'approval', commit, ownerPersonId: MARIA.id, canAnswer: true, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+      const mariaPolicy = asked('r-m-policy', LOGIN, 'Одобрите публикацию.', { kind: 'approval', commit: null, ownerPersonId: MARIA.id, canAnswer: true, decidedBy: { kind: 'owner_and_ceo', department: DEV } });
+      const mariaQuestion = asked('r-m-q', { ...PAY, id: 't26', number: 26, title: 'Вопрос про тариф' }, 'Какой тариф выбрать?', { kind: 'question', ownerPersonId: MARIA.id, canAnswer: true, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+      const ivanPolicy = asked('r-i-policy', REFUND, 'Одобрите возврат.', { kind: 'approval', commit: null, ownerPersonId: IVAN.id, canAnswer: true });
+
+      shell('/tasks?show=people', { ...routes, 'GET /api/requests': [200, decisions([mariaChoice, mariaCommit, mariaPolicy, mariaQuestion, ivanPolicy])] });
+      const people = await screen.findByRole('region', { name: 'Ждут людей' });
+      await within(people).findByText('Одобрите публикацию.');
+
+      const headerOf = (label: string) => within(people).getByRole('article', { name: label }).querySelector('header')!;
+      for (const [label, expected] of [
+        ['#21 Take card payments', 'Bruno просит выбрать'],
+        ['#22 Card form', 'Bruno просит одобрить коммит'],
+        ['#24 Fix the login page', 'Bruno просит одобрить'],
+        ['#26 Вопрос про тариф', 'Bruno спрашивает'],
+      ] as const) {
+        const header = headerOf(label);
+        expect(header).toHaveTextContent('Ждет: Maria');
+        expect(header).not.toHaveTextContent(/просит вас/i);
+        expect(header).toHaveTextContent(expected);
+      }
+      expect(headerOf('#23 Refund button')).toHaveTextContent('Bruno просит вас это одобрить');
+      cleanup();
+
+      shell('/tasks?show=waits', { ...routes, 'GET /api/requests': [200, decisions([ivanPolicy])] });
+      const waiting = await screen.findByRole('region', { name: 'Ждут вас' });
+      expect(await within(waiting).findByText('Bruno просит вас это одобрить')).toBeInTheDocument();
+      cleanup();
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
 });
 
 it('shows a failed run in Turns with the full task title and no question action', async () => {

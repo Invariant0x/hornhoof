@@ -512,6 +512,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onGraph={openGraph}
           onHome={goHome}
           requests={decisions.requestsOf(taskId)}
+          viewerId={me.person.id}
           onRequestsChanged={decisions.load}
           onOpenAgent={openAgent}
         />
