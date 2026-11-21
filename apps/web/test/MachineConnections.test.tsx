@@ -5,6 +5,7 @@ import { Machines } from '../src/screens/Machines';
 import type { BuiltinView, ConnectionHistory, MachineDrop, NodeDropView } from '../src/types';
 import { MachineConnections } from '../src/ui/MachineConnections';
 import { MACHINES, ME, mockApi, SUBS } from './api-mock';
+import { shownTable } from './shown-table';
 
 const AT = '2026-11-04T17:15:00.000Z';
 const when = (language: 'en' | 'ru', at = AT) => new Date(at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
@@ -551,7 +552,7 @@ describe('the machines screen and the history of a machine', () => {
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines, builtin }], [`GET ${PATH}`]: [200, history()], ...extra });
   const open = async (name: string) => {
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    await screen.findByRole('table');
+    await shownTable();
     fireEvent.click(screen.getByRole('button', { name: `Open the card of ${name}` }));
     return screen.getByRole('article', { name });
   };
@@ -559,7 +560,7 @@ describe('the machines screen and the history of a machine', () => {
   it('puts it in the card of the machine, and asks for it only once the card is open', async () => {
     const calls = lists();
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    await screen.findByRole('table');
+    await shownTable();
     expect(calls.filter(c => c.path === PATH)).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: 'Open the card of dev-laptop' }));
     const card = screen.getByRole('article', { name: 'dev-laptop' });

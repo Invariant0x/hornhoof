@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
 import { credentialSecrets } from '../src/credentials.js';
 import { StreamMask } from '../src/terminal/mask.js';
@@ -344,7 +344,7 @@ describe('Kimi Code in a terminal', () => {
     writeFileSync(join(home, 'config.toml'), own);
     await prepareKimi(home, work, URLS.mcpUrl);
     await prepareKimi(home, work, URLS.mcpUrl);
-    expect(JSON.parse(readFileSync(join(work, '.kimi-code', 'mcp.json'), 'utf8'))).toEqual({ mcpServers: { hornhoof: { transport: 'http', url: URLS.mcpUrl } } });
+    expect(JSON.parse(readFileSync(join(work, '.kimi-code', 'mcp.json'), 'utf8'))).toEqual({ mcpServers: { hornhoof: { transport: 'http', url: URLS.mcpUrl, startupTimeoutMs: 120_000 } } });
     const config = readFileSync(join(home, 'config.toml'), 'utf8');
     expect(config.startsWith(own)).toBe(true);
     expect(config.match(/\[\[hooks\]\]/g)).toHaveLength(10);
@@ -494,5 +494,39 @@ describe('how long each program lets the hooks of the node run', () => {
   it("tells hh-hook the thirty seconds Kimi and Antigravity give a hook", () => {
     expect(limits(kimiProgram.launch(launch).env)).toEqual({ '*': 30_000 });
     expect(limits(agyProgram.launch(launch).env)).toEqual({ '*': 30_000 });
+  });
+});
+
+/* Claude Code, Codex and Kimi Code give up on an MCP server that has not connected after 30 seconds, and their session then
+   has no Hornhoof tools. A busy machine answers later than that, so each waits two minutes. Antigravity waits five already. */
+describe("how long each program waits for Hornhoof's tools to connect as it starts", () => {
+  const launch = { bin: '/t/program', home: '/h', workDir: '/w', sessionId: null, model: null, instructionsFile: null, urls: URLS };
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('gives Claude Code two minutes, in milliseconds in MCP_TIMEOUT', () => {
+    expect(claudeProgram.launch(launch).env.MCP_TIMEOUT).toBe('120000');
+    expect(claudeProgram.launch({ ...launch, sessionId: 'existing-session' }).env.MCP_TIMEOUT).toBe('120000');
+  });
+
+  it("leaves MCP_TIMEOUT to the node's owner who started the node with one, which tmux hands the program", () => {
+    vi.stubEnv('MCP_TIMEOUT', '300000');
+    expect(claudeProgram.launch(launch).env).not.toHaveProperty('MCP_TIMEOUT');
+  });
+
+  it.each([null, 'existing-session'])('gives Codex two minutes, in seconds in its server startup_timeout_sec, with session %s', sessionId => {
+    const { command } = codexProgram.launch({ ...launch, sessionId });
+    expect(command[command.indexOf('mcp_servers.hornhoof.startup_timeout_sec=120') - 1]).toBe('-c');
+  });
+
+  it("gives Kimi Code two minutes, in milliseconds in its server's startupTimeoutMs", async () => {
+    const work = mkdtempSync(join(tmpdir(), 'hh-kimi-work-'));
+    await prepareKimi(mkdtempSync(join(tmpdir(), 'hh-kimi-')), work, URLS.mcpUrl);
+    expect(JSON.parse(readFileSync(join(work, '.kimi-code', 'mcp.json'), 'utf8')).mcpServers.hornhoof.startupTimeoutMs).toBe(120_000);
+  });
+
+  it('leaves Antigravity its own five minutes, which a timeoutSeconds of its server would shorten', async () => {
+    const work = mkdtempSync(join(tmpdir(), 'hh-agy-work-'));
+    await prepareAgy(work, URLS.mcpUrl);
+    expect(JSON.parse(readFileSync(join(work, '.agents', 'mcp_config.json'), 'utf8')).mcpServers.hornhoof).not.toHaveProperty('timeoutSeconds');
   });
 });

@@ -177,6 +177,58 @@ project_containers() {
     --format '{{.ID}} {{.Label "com.docker.compose.service"}}' 2> /dev/null || true
 }
 
+# A compose run cut short, as one whose command on the computer was stopped halfway, leaves containers it made and never
+# started, and the machine stands without them: a node finds no front, and nothing would start them. Those of this
+# server's own project start again as compose made them, each said, once the same ones stood so for UNSTARTED_AFTER
+# seconds with no update and no command under way, so a compose run that is still going finishes first. None of a service
+# that runs is started beside it, nothing is made again, and the updater's own is left to its swap. Migrations, and on
+# the machine whose database the company writes the app that needs them, start only by an update, which saves the
+# database first. A container made on purpose and left unstarted, as by compose create, starts too: no step of this
+# stack makes one. The first time each set was seen stays in the control folder, so a restart of the updater keeps it;
+# that folder is shared with the app and the keeper, so the note is read with take and written with publish, which
+# never follow a link at its name.
+UNSTARTED_AFTER=300
+start_unstarted() {
+  local seen="$CONTROL/unstarted" project states running services='' service now noted since role left=' updater migrate '
+  [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ] || return 0
+  if update_running || [ -f "$SERVER_DIR/backups/update.json" ] || computer_busy; then
+    rm -f "$seen"
+    return 0
+  fi
+  [ "$(path_kind)" != lead ] || left=' updater migrate app '
+  project=$(compose_project)
+  states=$(docker ps -a --filter "label=com.docker.compose.project=$project" --format '{{.Label "com.docker.compose.service"}} {{.State}}' 2> /dev/null) || return 0
+  running=" $(printf '%s\n' "$states" | awk '$2 == "running" { print $1 }' | tr '\n' ' ') "
+  for service in $(printf '%s\n' "$states" | awk '$2 == "created" { print $1 }' | sort -u); do
+    [[ "$service" =~ ^[a-z][a-z0-9_-]{0,62}$ ]] || continue
+    case "$left$running" in *" $service "*) continue ;; esac
+    services="$services $service"
+  done
+  services=${services# }
+  if [ -z "$services" ]; then
+    rm -f "$seen"
+    return 0
+  fi
+  now=$(date +%s)
+  noted=$(take "$seen" || true)
+  since=${noted%% *}
+  if [ "${noted#* }" != "$services" ] || ! [[ "$since" =~ ^[0-9]+$ ]]; then
+    publish "$seen" over printf '%s %s\n' "$now" "$services" || true
+    return 0
+  fi
+  [ "$((now - since))" -ge "$UNSTARTED_AFTER" ] || return 0
+  for service in $services; do say "Starting $service, whose container was made and never started."; done
+  # Under the role the settings name: this updater's own environment holds the one it was started with.
+  role=$(env_value HORNHOOF_ROLE)
+  # shellcheck disable=SC2086 # services is a space-separated list of plain service names.
+  if HORNHOOF_ROLE="${role:-$ROLE}" compose up -d --no-build --no-deps --no-recreate $services > /dev/null 2>&1; then
+    rm -f "$seen"
+  else
+    say "Could not start $services."
+    publish "$seen" over printf '%s %s\n' "$now" "$services" || true
+  fi
+}
+
 # remove_unnamed <compose file>: containers of services that file does not name go before its installer runs, since a
 # build from before front could not take the web port while front holds it, and drop_orphans comes only after an
 # install that worked. A file without the updater would take this updater for one of them, so then nothing goes.

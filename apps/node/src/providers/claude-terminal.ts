@@ -7,6 +7,7 @@ import { bridgeEnv, hook, hookCommand, readJson, type TermProgram } from '../ter
 import { claudeUsageLimits } from '../terminal/transcripts.js';
 import { CLAUDE_UNSIGNED } from './claude-attribution.js';
 import { readPrivate } from './process.js';
+import { claudeMcpStart } from './mcp-start.js';
 import { CLAUDE_NO_AUTO_UPDATE } from './session-updates.js';
 
 /* Claude Code in a native terminal: how it launches, the files it reads first, where it logs and its plan's limits. */
@@ -60,7 +61,7 @@ export const claudeProgram: TermProgram = {
     ];
     const compact: Record<string, string> = compactWindow ? { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(compactWindow) } : {};
     const token = planToken(home);
-    return { command, env: { CLAUDE_CONFIG_DIR: home, ...CLAUDE_NO_AUTO_UPDATE, ...CLAUDE_MAIN_SCREEN, ...bridgeEnv(urls, { '*': HOOK_S * 1000 }), ...compact, ...(token ? { CLAUDE_CODE_OAUTH_TOKEN: token } : {}) }, sessionId: id };
+    return { command, env: { CLAUDE_CONFIG_DIR: home, ...CLAUDE_NO_AUTO_UPDATE, ...CLAUDE_MAIN_SCREEN, ...claudeMcpStart(), ...bridgeEnv(urls, { '*': HOOK_S * 1000 }), ...compact, ...(token ? { CLAUDE_CODE_OAUTH_TOKEN: token } : {}) }, sessionId: id };
   },
 };
 

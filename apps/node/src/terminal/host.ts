@@ -423,6 +423,7 @@ export class TerminalHost {
       ownerRejected: (key, event, reason) => this.logHookRejection(key, event, reason),
       ownerReported: (key, event, reason) => this.reportHookRejection(key, event, reason),
       refused: (key, method, reason) => this.log(`Hornhoof's tools refused ${method} of agent ${key}: ${reason}.`),
+      gaveUp: (key, method) => this.log(`Agent ${key}'s program gave up on ${method} of Hornhoof's tools before Hornhoof answered: it has no tools until it starts again.`),
       outside: opts.toolsOutside, opening: key => this.openingTurn(key), checkStep: opts.checkStep,
       sensitive: (key, name, input, answer, policy) => this.sensitiveTool(key, name, input, answer, policy),
     });
@@ -1528,11 +1529,12 @@ export class TerminalHost {
   }
 
   /* A program that connects to its tools only after the short turn that started it ended is turned away, as no turn answers
-     for them then, and goes without them for the rest of its session. Its turns end saying so, not as turns that left
-     their task where it was, and the next one starts it anew, to connect while that turn runs. */
+     for them then, and one that gave up waiting for Hornhoof's answer as it connected has none either: each goes without
+     them for the rest of its session. Its turns end saying so, not as turns that left their task where it was, which the
+     server repeats, and the next one starts it anew, to connect while that turn runs. */
   private withoutTools(a: Agent, job: TermJob): Promise<RunResult> {
     a.hash = null;
-    a.failure = failure('tools', "The program has no Hornhoof tools in this session: it connected to them between turns, when no turn could answer for them. The next turn starts it anew.");
+    a.failure = failure('tools', "The program has no Hornhoof tools in this session: it connected to them between turns, when no turn could answer for them, or gave up waiting for Hornhoof's answer as it connected. The next turn starts it anew.");
     return this.failedTurn(a, job, 'agent_failed');
   }
 

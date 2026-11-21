@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { bridgeEnv, type TermProgram } from '../terminal/programs.js';
 import { projectDocArgs } from './codex.js';
+import { CODEX_MCP_START } from './mcp-start.js';
 import { CODEX_NO_AUTO_UPDATE } from './session-updates.js';
 
 /* Codex in a native terminal: how it launches and how its session logs are found. */
@@ -26,7 +27,7 @@ export const codexProgram: TermProgram = {
   kind: 'codex',
   launch({ bin, home, workDir, sessionId, model, effort, instructionsBytes, urls }) {
     /* Codex sends the agent's secret from its environment as a bearer token, to the address that carries none. */
-    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpAddress)}`, '-c', `mcp_servers.hornhoof.bearer_token_env_var="${CODEX_SECRET_ENV}"`, ...projectDocArgs(instructionsBytes), ...CODEX_NO_AUTO_UPDATE, ...CODEX_NO_MODEL_QUESTION, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
+    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpAddress)}`, '-c', `mcp_servers.hornhoof.bearer_token_env_var="${CODEX_SECRET_ENV}"`, ...CODEX_MCP_START, ...projectDocArgs(instructionsBytes), ...CODEX_NO_AUTO_UPDATE, ...CODEX_NO_MODEL_QUESTION, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
     const hooks = Object.entries(CODEX_HOOKS).flatMap(([name, event]) => ['-c', `hooks.${name}=[{hooks=[{type="command",command="hh-hook ${event}"${SHORT_HOOKS.has(name) ? ',timeout=3' : ''}}]}]`]);
     const rest = ['--dangerously-bypass-approvals-and-sandbox', '--dangerously-bypass-hook-trust', CODEX_MAIN_SCREEN, ...hooks, ...config, ...(model ? ['-m', model] : [])];
     /* A resumed session works in the folder it started in, which is the pane's. */
