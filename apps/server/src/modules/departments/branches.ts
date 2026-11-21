@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { tasks } from '../../db/schema.js';
 import type { BranchesAt, RepoAddress } from '../testruns/refs.js';
+import { GitHubRateLimited } from '../testruns/github-limit.js';
 import { worksIn, type Reader } from './inside.js';
 import { repoAt } from './repository.js';
 
@@ -17,7 +18,7 @@ const SHOWN = 20;
 /* A department's page and a task's read wait no longer than this for the repository. */
 const READ_MS = 5_000;
 
-type Readers = Pick<Ctx, 'db' | 'config'> & Partial<Pick<Ctx, 'readBranches' | 'readMerged'>>;
+type Readers = Pick<Ctx, 'db' | 'config'> & Partial<Pick<Ctx, 'readBranches' | 'readMerged' | 'githubLimits'>>;
 type Repo = RepoAddress & { branch: string };
 type Found = { task: typeof tasks.$inferSelect; repo: Repo; branch: string; commit: string };
 
@@ -70,7 +71,15 @@ async function onBranches(rows: (typeof tasks.$inferSelect)[], repos: Places): P
 /* The branches GitHub does not show in the main line, and those it cannot tell of. */
 async function notMerged(ctx: Readers, found: Found[]): Promise<DepartmentBranch[]> {
   const readMerged = ctx.readMerged ?? (async () => null);
-  const merged = await Promise.all(found.map(f => readMerged(f.repo, { base: f.repo.branch, head: f.commit }, READ_MS)));
+  const merged = await Promise.all(found.map(async f => {
+    if (ctx.githubLimits?.known(f.repo)) return null;
+    try { return await readMerged(f.repo, { base: f.repo.branch, head: f.commit }, READ_MS); }
+    catch (error) {
+      if (!(error instanceof GitHubRateLimited)) throw error;
+      ctx.githubLimits?.refused(f.repo, error.limit);
+      return null;
+    }
+  }));
   return found.flatMap((f, i): DepartmentBranch[] =>
     merged[i] === true ? [] : [{ task: f.task.number, title: f.task.title, status: f.task.status as 'done' | 'review', branch: f.branch, commit: f.commit, merged: merged[i] === false ? false : null }]);
 }

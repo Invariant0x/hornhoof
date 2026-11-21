@@ -1,10 +1,13 @@
+import { createHash } from 'node:crypto';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { companies, turnReleases, turns } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
+import { ApiError } from '../../errors.js';
 import { repoAt } from '../departments/repository.js';
 import { refuse, type Task, type Tx } from './state.js';
 import { heldLineage } from '../testruns/compare.js';
+import { githubName, GitHubRateLimited, resetTime, type RateLimit } from '../testruns/github-limit.js';
 import { ensureOpenTurn, openTurnOf } from './turn-department.js';
 import { newerVersion, versionsNewestFirst } from './turn-tags.js';
 
@@ -12,7 +15,8 @@ import { newerVersion, versionsNewestFirst } from './turn-tags.js';
    accepted into its branch turn-<number>; its release takes that branch to main. A product, or a part of a department, that
    keeps a repository of its own has no turn: its results go to its main line straight, with a person approving each. */
 
-type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readMerged' | 'readBranches' | 'createBranch' | 'readTags'>>;
+export type BranchProofReader = Partial<Pick<Ctx, 'readGitAncestry' | 'readCompare' | 'readMerged' | 'githubLimits'>>;
+type Reader = BranchProofReader & Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readBranches' | 'createBranch' | 'readTags'>>;
 type Turn = typeof turns.$inferSelect;
 type Release = typeof turnReleases.$inferSelect;
 type Repo = NonNullable<Awaited<ReturnType<typeof repoAt>>>['repo'];
@@ -34,18 +38,51 @@ export async function integrationTarget(ctx: Reader, task: Pick<Task, 'companyId
   return { repo: found.repo, branch: `turn-${turn.number}`, turn };
 }
 
-/* A branch at head holds commit: it is there, or the branch went on from it. GitHub says so by the status of their comparison,
-   however many files it has; where it cannot, the line of their full comparison proves it. Anything unread proves nothing. */
-export async function branchHolds(ctx: Partial<Pick<Ctx, 'readMerged' | 'readCompare'>>, repo: Repo, head: string, commit: string): Promise<boolean> {
-  if (head === commit) return true;
-  try {
-    const merged = await ctx.readMerged?.(repo, { base: head, head: commit }, 10_000);
-    if (merged !== undefined && merged !== null) return merged;
-    const compared = await ctx.readCompare?.(repo, { base: commit, head }, 10_000);
-    return !!compared && !!heldLineage(compared, commit, head);
-  } catch {
-    return false;
+export class BranchProofUnavailable extends ApiError {
+  constructor(message: string, limit?: RateLimit) {
+    super(409, 'conflict', message, limit ? 'github_rate_limited' : 'commit_history_unavailable', limit ? { resetTime: resetTime(limit) } : undefined);
   }
+}
+
+const proofCache = new WeakMap<BranchProofReader, Set<string>>();
+const MAX_PROOFS = 4096;
+const PROOF_TIMEOUT_MS = 10_000;
+
+/* Both SHAs are immutable. The repository and credential keep proof from crossing repository access boundaries. */
+export async function branchHolds(ctx: BranchProofReader, repo: Repo, head: string, commit: string): Promise<boolean> {
+  if (head === commit) return true;
+  const key = createHash('sha256').update(JSON.stringify([repo.url, repo.token, head, commit])).digest('hex');
+  const proved = proofCache.get(ctx) ?? new Set<string>();
+  proofCache.set(ctx, proved);
+  if (proved.has(key)) return true;
+  const git = await ctx.readGitAncestry?.(repo, head, commit, PROOF_TIMEOUT_MS).catch(() => null);
+  const holds = git ?? await restHolds(ctx, repo, head, commit);
+  if (holds) {
+    if (proved.size >= MAX_PROOFS) proved.delete(proved.values().next().value!);
+    proved.add(key);
+  }
+  return holds;
+}
+
+async function restHolds(ctx: BranchProofReader, repo: Repo, head: string, commit: string): Promise<boolean> {
+  try {
+    const limit = ctx.githubLimits?.known(repo);
+    if (limit) throw new GitHubRateLimited(limit);
+    const merged = await ctx.readMerged?.(repo, { base: head, head: commit }, PROOF_TIMEOUT_MS);
+    if (merged !== undefined && merged !== null) return merged;
+    const compared = await ctx.readCompare?.(repo, { base: commit, head }, PROOF_TIMEOUT_MS);
+    if (compared && heldLineage(compared, commit, head)) return true;
+    if (compared && !compared.complete) {
+      if (compared.rateLimit) throw new GitHubRateLimited(compared.rateLimit);
+      if (compared.reason === 'not-an-ancestor') return false;
+    }
+  } catch (error) {
+    if (error instanceof GitHubRateLimited) {
+      ctx.githubLimits?.refused(repo, error.limit);
+      throw new BranchProofUnavailable(error.message, error.limit);
+    }
+  }
+  throw new BranchProofUnavailable(githubName(repo.url) ? "GitHub didn't answer with the commit history. Try again." : 'The repository could not confirm the commit history. Try again.');
 }
 
 /* The head of a branch as the repository says it now, or why it could not say. A tag of its name is no branch: it stands for

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { heldLineage, readCompare, readMerged, readTree, treePaths } from '../src/modules/testruns/compare.js';
 import { exactComparison } from '../src/modules/tasks/review-context.js';
 import { branchHolds } from '../src/modules/tasks/turn-integration.js';
+import { GitHubLimits } from '../src/modules/testruns/github-limit.js';
 
 const sha = 'a'.repeat(40);
 const fixture = (files: { filename: string; previous_filename?: string; patch?: string; additions: number; deletions: number }[] = [{ filename: 'src/view.ts', patch: '+const title = "Saved";', additions: 1, deletions: 0 }]) => ({ base_commit: { sha: 'b'.repeat(40) }, commits: [{ sha }], total_commits: 1, status: 'ahead', files });
@@ -199,7 +200,50 @@ describe('a branch holds a commit, however many files lie between them', () => {
   it('takes the line of a capped comparison where GitHub could not say by status, and nothing else', async () => {
     const head = 'c'.repeat(40);
     expect(await branchHolds({ readMerged: async () => null, readCompare: async (_repo, refs) => capped(refs.base, refs.head) }, at, head, sha)).toBe(true);
-    expect(await branchHolds({ readMerged: async () => null, readCompare: async () => capped(sha, 'd'.repeat(40)) }, at, head, sha)).toBe(false);
+    await expect(branchHolds({ readMerged: async () => null, readCompare: async () => capped(sha, 'd'.repeat(40)) }, at, head, sha))
+      .rejects.toThrow("GitHub didn't answer with the commit history");
     expect(await branchHolds({ readMerged: async () => null, readCompare: async () => ({ complete: false, reason: 'not-an-ancestor' }) }, at, head, sha)).toBe(false);
+  });
+
+  it('checks Git before REST and only reuses a positive proof for the same repository, credential and exact SHAs', async () => {
+    const git = vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false);
+    const rest = vi.fn();
+    const ctx = { readGitAncestry: git, readMerged: rest };
+    const head = 'e'.repeat(40);
+    expect(await branchHolds(ctx, at, head, sha)).toBe(true);
+    expect(await branchHolds(ctx, at, head, sha)).toBe(true);
+    expect(git).toHaveBeenCalledTimes(1);
+    expect(git).toHaveBeenCalledWith(at, head, sha, expect.any(Number));
+    expect(await branchHolds(ctx, { ...at, token: 'different-fixture-token' }, head, sha)).toBe(false);
+    expect(await branchHolds(ctx, at, 'f'.repeat(40), sha)).toBe(false);
+    expect(git).toHaveBeenCalledTimes(3);
+    expect(rest).not.toHaveBeenCalled();
+  });
+
+  it('logs a limit once, raises a single card after another refusal and resumes REST at the reset', async () => {
+    const resetAt = Date.UTC(2030, 0, 1, 23, 45);
+    let now = resetAt - 60_000;
+    const warned = vi.fn(), changed = vi.fn();
+    const githubLimits = new GitHubLimits(() => now, warned, changed);
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 403, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(resetAt / 1000) } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'behind' })));
+    vi.stubGlobal('fetch', fetcher);
+    const ctx = { githubLimits, readMerged, readCompare };
+    const head = 'e'.repeat(40);
+    await expect(branchHolds(ctx, at, head, sha)).rejects.toThrow('23:45 UTC');
+    expect(githubLimits.cards()).toEqual([]);
+    await expect(branchHolds(ctx, at, head, sha)).rejects.toThrow('23:45 UTC');
+    await expect(branchHolds(ctx, at, head, sha)).rejects.toThrow('23:45 UTC');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(warned).toHaveBeenCalledExactlyOnceWith({ remaining: 0, resetAt });
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(githubLimits.cards()).toEqual([{ repository: 'acme/shop', resetAt }]);
+    now = resetAt;
+    githubLimits.expire();
+    expect(githubLimits.cards()).toEqual([]);
+    expect(changed).toHaveBeenCalledTimes(2);
+    expect(await branchHolds(ctx, at, head, sha)).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

@@ -146,6 +146,8 @@ export type ErrorReason =
   | 'turn_department'
   | 'no_turnkey_team'
   | 'repo_invalid'
+  | 'github_rate_limited'
+  | 'commit_history_unavailable'
   | 'repo_command_invalid'
   | 'repo_folder_taken'
   | 'product_taken'

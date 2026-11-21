@@ -7,7 +7,7 @@ import { repoAt } from '../departments/repository.js';
 import { CLOSED, type Tx } from './engine.js';
 import { keepSnapshot } from './pipeline-report.js';
 import { releasesWork } from './turn-department.js';
-import { branchHolds } from './turn-integration.js';
+import { branchHolds, BranchProofUnavailable, type BranchProofReader } from './turn-integration.js';
 
 /* A turn ends on the tag of its release (releases.ts). One that holds nothing for a release could never end that way: no
    result was accepted into it, every task of its department is done or cancelled, and its branch holds nothing main lacks,
@@ -16,7 +16,7 @@ import { branchHolds } from './turn-integration.js';
    result already, moved by hand, and only a release recorded before main moved releases it. Nothing opens a turn in its
    place: the next result accepted into the department opens one, and a department without a repository never gets one. */
 
-type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readBranches' | 'readMerged' | 'readCompare' | 'log'>>;
+type Reader = BranchProofReader & Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readBranches' | 'log'>>;
 type Turn = typeof turns.$inferSelect;
 type Department = typeof departments.$inferSelect;
 
@@ -31,6 +31,7 @@ export async function closeIdleTurns(ctx: Reader): Promise<void> {
     try {
       await closeIfIdle(ctx, turn, department);
     } catch (err) {
+      if (err instanceof BranchProofUnavailable) continue;
       ctx.log?.error({ error: loggable(err), companyId: turn.companyId, turn: turn.number }, 'Closing a turn that holds nothing for a release failed.');
     }
   }

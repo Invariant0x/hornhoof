@@ -19,7 +19,7 @@ type Card = {
   agents: number;
   important: { name: string; kind: string }[];
 };
-type Waiting = { machinesAway?: Card[]; counts: { total: number; byPerson: Record<string, number> } };
+type Waiting = { machinesAway?: Card[]; githubLimits?: { repository: string; resetAt: number | null }[]; counts: { total: number; byPerson: Record<string, number> } };
 
 afterEach(() => { vi.useRealTimers(); });
 const at = (time: Date) => { vi.useFakeTimers({ toFake: ['Date'], now: time }); };
@@ -52,6 +52,19 @@ async function waiting(c: AclCompany, token: string): Promise<Waiting> {
   return answer.json();
 }
 const cardsOf = async (c: AclCompany, token: string) => (await waiting(c, token)).machinesAway ?? [];
+
+it('shows a repeated GitHub limit in Failures to the company owner without creating a person wait', async () => {
+  const c = await world();
+  const repo = { url: 'https://github.com/acme/shop.git', token: 'fixture-token' };
+  const limit = { remaining: 0 as const, resetAt: +after(0) };
+  c.app.ctx.githubLimits.refused(repo, limit);
+  expect((await waiting(c, c.tokens.ceo)).githubLimits).toEqual([]);
+  c.app.ctx.githubLimits.refused(repo, limit);
+  const owner = await waiting(c, c.tokens.ceo);
+  expect(owner.githubLimits).toEqual([{ repository: 'acme/shop', resetAt: limit.resetAt }]);
+  expect(owner.counts.total).toBe(0);
+  expect((await waiting(c, c.tokens.bob)).githubLimits).toEqual([]);
+});
 
 describe('a machine with agents that has gone away', () => {
   it('shows nothing at 4:59, and at 5:00 one card to its owner and to the CEO, with no agent asked', async () => {

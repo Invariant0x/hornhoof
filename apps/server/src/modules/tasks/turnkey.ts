@@ -8,7 +8,7 @@ import { changeRoute, type Route } from './route-records.js';
 import { giver, refuse, type Live, type Moved, type Task, type Tx } from './state.js';
 import { move } from './transitions.js';
 import { openTurnOf } from './turn-department.js';
-import { branchHolds, integrationTarget, requireInTurn, requireSameTurn, type IntegrationTarget } from './turn-integration.js';
+import { branchHolds, integrationTarget, requireInTurn, requireSameTurn, type BranchProofReader, type IntegrationTarget } from './turn-integration.js';
 
 /* A turnkey team: each member does a task end to end alone on its task branch with local changed-area checks (never
    per-task run_tests), never enters the echelons and calls no other member of the department onto its work. The mark is
@@ -37,7 +37,7 @@ export const throughEchelons = (db: Db | Tx, task: Pick<Task, 'companyId' | 'exe
 export const turnkeyWork = (task: Pick<Task, 'number'>) =>
   refuse(409, 'task_invalid', `#${task.number} is turnkey work: its holder does it end to end alone and closes it with report, so no echelon takes it.`);
 
-type Reader = Parameters<typeof move>[0] & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readMerged'>>;
+type Reader = BranchProofReader & Parameters<typeof move>[0];
 
 /* What the holder of turnkey work names as it closes it: the exact commit it checked and took into the turn branch by
    fast-forward, a commit it made on its own branch, and the commit right under its first own commit, which is another

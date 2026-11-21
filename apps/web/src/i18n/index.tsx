@@ -83,6 +83,10 @@ export function useLanguage(): { language: Language; setLanguage: (l: Language) 
    error it was. */
 export function errorText(t: Messages, err: unknown): string {
   if (!(err instanceof ApiFailure)) return t.errors.codes.internal;
+  if (err.reason === 'github_rate_limited') {
+    const time = err.details?.resetTime;
+    return t.errors.github_rate_limited(typeof time === 'string' ? time : null);
+  }
   const reasons: Record<string, unknown> = t.errors;
   const known = err.reason && err.reason !== 'codes' ? reasons[err.reason] : undefined;
   if (typeof known === 'string') return known;

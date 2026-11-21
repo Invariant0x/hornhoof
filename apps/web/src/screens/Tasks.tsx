@@ -523,6 +523,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const waitsOnPeople = waitingOnPeople(all);
   const failures = all.filter(task => boardStatus(task) === 'failure');
   const machinesAway = decisions?.machinesAway ?? [];
+  const githubLimits = decisions?.githubLimits ?? [];
   const pipeline = place.pipeline ? pipelines.find(p => p.id === place.pipeline) ?? null : null;
   /* The department where the person is: its work, or its goals. */
   const departmentId = section.kind === 'department' ? section.id : section.kind === 'goals' ? place.department : undefined;
@@ -661,7 +662,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
         counts={{
           waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf, me.person.id)), waitsOnWho, keptShown(kept, decisionsOf)),
           people: peopleCount(decisions, waitsOnPeople, company),
-          failures: failures.length + machinesAway.filter(machine => !machine.back).length,
+          failures: failures.length + machinesAway.filter(machine => !machine.back).length + githubLimits.length,
           mine: own.tasks.length,
           working: working.length,
         }}
@@ -728,7 +729,17 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
                 {view === 'list' && <FilterChips chips={chips} onChange={setChips} tasks={chipTasks}
                   subtasks={showSubtasks} onSubtasks={() => setShowSubtasks(!showSubtasks)} />}
               </div>
-              {section.kind === 'failures' && <MachineAway machines={machinesAway} />}
+              {section.kind === 'failures' && (
+                <>
+                  <MachineAway machines={machinesAway} />
+                  {githubLimits.map(({ repository, resetAt }) => (
+                    <section className="machine-away" key={repository} aria-label={t.tasks.githubLimit(repository)}>
+                      <h3 dir="auto">{t.tasks.githubLimit(repository)}</h3>
+                      <p>{resetAt === null ? t.tasks.githubLimitUnknown : t.tasks.githubLimitRetry(new Date(resetAt).toISOString().slice(11, 16))}</p>
+                    </section>
+                  ))}
+                </>
+              )}
               {makeHere}
               <HeldWork load={tasksLoad} view={view} list={`${sectionKey}|${view}|${JSON.stringify(chips)}`} shown={work.length}>
                 {view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} empty={empty} showSubtasks={showSubtasks} />

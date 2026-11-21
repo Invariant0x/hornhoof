@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { RepoAddress } from './refs.js';
 import { bodyWithin } from './bounded.js';
+import { githubName, githubRateLimit, GitHubRateLimited, type RateLimit } from './github-limit.js';
 
 /* A file GitHub lists with its counts and shows no patch of, as it does for a large file such as a migration's snapshot. */
 type OmittedPatch = { path: string; additions: number; deletions: number };
@@ -10,7 +11,7 @@ type ComparedCommit = { sha: string; parents: string[] };
 type Lineage = { baseSha: string; headSha: string; commits?: ComparedCommit[] };
 /* A comparison GitHub could not list whole names no paths. Where its status and commits still prove the line, it keeps that
    lineage, which proves no change of any file. */
-export type CompareResult = { complete: true; baseSha: string; headSha: string; paths: string[]; diff: string; omitted?: OmittedPatch[]; commits?: ComparedCommit[] } | { complete: false; reason: string; lineage?: Lineage };
+export type CompareResult = { complete: true; baseSha: string; headSha: string; paths: string[]; diff: string; omitted?: OmittedPatch[]; commits?: ComparedCommit[] } | { complete: false; reason: string; lineage?: Lineage; rateLimit?: RateLimit };
 export type CompareReader = (repo: RepoAddress, refs: { base: string; head: string }, timeoutMs?: number) => Promise<CompareResult>;
 const Sha = z.string().regex(/^[a-f0-9]{40}$/);
 const File = z.object({ filename: z.string().min(1), previous_filename: z.string().optional(), patch: z.string().optional(), additions: z.number().int().nonnegative(), deletions: z.number().int().nonnegative() });
@@ -22,19 +23,6 @@ const MoreCommits = z.object({ commits: z.array(Commit), total_commits: z.number
 /* GitHub lists at most this many commits on a page of a comparison, and the server reads no more pages than this. */
 const COMMITS_PER_PAGE = 250;
 const COMMIT_PAGES = 20;
-
-function trustedHost(at: URL): boolean {
-  return at.protocol === 'https:' && at.host === 'github.com' && !at.username && !at.password && !at.search && !at.hash;
-}
-
-function githubName(url: string): string | null {
-  try {
-    const at = new URL(url);
-    if (!trustedHost(at)) return null;
-    const parts = at.pathname.replace(/^\/|\/$/g, '').replace(/\.git$/, '').split('/');
-    return parts.length === 2 && parts.every(p => /^[a-z0-9][a-z0-9_.-]*$/i.test(p)) ? parts.join('/') : null;
-  } catch { return null; }
-}
 
 /* A patch GitHub shows is whole when it holds every line its counts name. One it shows none of is named, never read as empty. */
 function completePatch(file: z.infer<typeof File>): boolean {
@@ -91,7 +79,12 @@ async function githubJson(repo: RepoAddress, path: string, timeoutMs: number): P
     redirect: 'manual', signal: AbortSignal.timeout(timeoutMs),
     headers: { accept: 'application/vnd.github+json', 'user-agent': 'hornhoof', 'x-github-api-version': '2022-11-28', ...(repo.token ? { authorization: `Bearer ${repo.token}` } : {}) },
   });
-  if (!response.ok) { await response.body?.cancel(); throw new Error('unavailable'); }
+  if (!response.ok) {
+    const limit = githubRateLimit(response);
+    await response.body?.cancel().catch(() => {});
+    if (limit) throw new GitHubRateLimited(limit);
+    throw new Error('unavailable');
+  }
   const body = await bodyWithin(response, GITHUB_MAX_BYTES);
   if (!body) throw new TooLarge('too-large');
   return { body: JSON.parse(body.toString('utf8')) as unknown };
@@ -122,7 +115,11 @@ export const readCompare: CompareReader = async (repo, refs, timeoutMs = 10_000)
     if (!first.success || first.data.commits.length < COMMITS_PER_PAGE || first.data.total_commits <= first.data.commits.length) return parsedComparison(answer.body);
     const commits = await laterCommits(repo, path, first.data, timeoutMs);
     return commits ? parsedComparison({ ...first.data, commits }) : { complete: false, reason: 'incomplete-comparison' };
-  } catch (error) { return failed(error, 'compare'); }
+  } catch (error) {
+    return error instanceof GitHubRateLimited
+      ? { complete: false, reason: 'github-rate-limit', rateLimit: error.limit }
+      : failed(error, 'compare');
+  }
 };
 
 /* Whether a branch's commit is in the main line: GitHub's compare of the main line with it says behind or identical once every
@@ -139,7 +136,10 @@ export const readMerged: MergeReader = async (repo, refs, timeoutMs = 10_000) =>
   try {
     const answer = await githubJson(repo, `compare/${encodeURIComponent(refs.base)}...${encodeURIComponent(refs.head)}?per_page=1`, timeoutMs);
     return answer ? mergedIn(answer.body) : null;
-  } catch { return null; }
+  } catch (error) {
+    if (error instanceof GitHubRateLimited) throw error;
+    return null;
+  }
 };
 
 /* The files of a commit, every one: GitHub cuts a long list short and says so, and a cut list is no list. entries names what

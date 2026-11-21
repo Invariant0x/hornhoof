@@ -13,7 +13,7 @@ import { uncheckedLine, uncheckedLines, type UncheckedItem } from './unchecked.j
 import { recordTurnSummary } from './wait-goals.js';
 import { lastTurnNumber } from './numbers.js';
 import { recordWaitNotice } from './wait-notices.js';
-import { branchHolds, ensureTurnBranch, headOf, integrationTarget, recordOfTag, type IntegrationTarget } from './turn-integration.js';
+import { branchHolds, BranchProofUnavailable, ensureTurnBranch, headOf, integrationTarget, recordOfTag, type BranchProofReader, type IntegrationTarget } from './turn-integration.js';
 import { newerVersion, versionsNewestFirst } from './turn-tags.js';
 import { openTurnOf } from './turn-department.js';
 import { repoAt } from '../departments/repository.js';
@@ -31,7 +31,7 @@ import { wholeProductRun } from './autonomous-release.js';
 
 type Turn = typeof turns.$inferSelect;
 type Release = typeof turnReleases.$inferSelect;
-type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readTags' | 'readBranches' | 'createBranch' | 'log'>>;
+type Reader = BranchProofReader & Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readTags' | 'readBranches' | 'createBranch' | 'log'>>;
 type Repo = IntegrationTarget['repo'];
 
 const lockCompany = (tx: Tx, companyId: string) => tx.select(idOnly(companies)).from(companies).where(eq(companies.id, companyId)).for('no key update');
@@ -262,9 +262,14 @@ async function mainUnder(ctx: Reader, repo: Repo, branch: string, commit: string
    commit is no release of its department's open turn, or where that could not be read. Recording the release reads it again
    and refuses on its own. */
 export async function uncheckedInRelease(ctx: Reader, task: Pick<Task, 'companyId' | 'productId' | 'departmentId'>, commit: string): Promise<UncheckedItem[] | null> {
-  const at = await openRelease(ctx, task);
-  const base = at ? await mainUnder(ctx, at.repo, `turn-${at.turn.number}`, commit) : null;
-  return at && base ? (await broughtBy(ctx, at.turn, at.repo, base, commit)).uncovered : null;
+  try {
+    const at = await openRelease(ctx, task);
+    const base = at ? await mainUnder(ctx, at.repo, `turn-${at.turn.number}`, commit) : null;
+    return at && base ? (await broughtBy(ctx, at.turn, at.repo, base, commit)).uncovered : null;
+  } catch (error) {
+    if (error instanceof BranchProofUnavailable) return null;
+    throw error;
+  }
 }
 
 type ReleaseAt = { task: Task; turn: Turn; repo: Repo; commit: string; uncovered: UncheckedItem[] };
@@ -336,7 +341,8 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   if (!target || !turn) throw refuse(409, 'repo_invalid', `#${task.number} is of no department that releases turns: its results go to their main line straight.`);
   if (!agent || agent.departmentId !== turn.departmentId) throw refuse(403, 'task_not_yours', 'Only the department whose turn it is records its release.');
   const head = await headOf(ctx, target.repo, target.branch);
-  if (!head || !(await branchHolds(ctx, target.repo, head, input.commit))) throw refuse(409, 'task_changed', `${target.branch} does not hold ${input.commit}${head ? `: it is at ${head}` : ', or it could not be read'}. A release is a commit of the turn branch.`);
+  if (!head) throw new BranchProofUnavailable(`${target.branch} could not be read. Try again.`);
+  if (!(await branchHolds(ctx, target.repo, head, input.commit))) throw refuse(409, 'task_changed', `${target.branch} does not hold ${input.commit}: it is at ${head}. A release is a commit of the turn branch.`);
   const base = await headOf(ctx, target.repo, target.repo.branch);
   if (!base) throw refuse(409, 'repo_invalid', `${target.repo.branch} could not be read. Try again.`);
   if (base === input.commit || await branchHolds(ctx, target.repo, base, input.commit)) throw refuse(409, 'task_invalid', `${target.repo.branch} already holds ${input.commit}: a release is recorded before main moves.`);
@@ -516,6 +522,7 @@ export async function releaseRound(ctx: Reader): Promise<void> {
       const target = await integrationTarget(ctx, { companyId: turn.companyId, productId: null, departmentId: turn.departmentId });
       if (target?.turn?.id === turn.id) await releaseOne(ctx, turn, target.repo);
     } catch (err) {
+      if (err instanceof BranchProofUnavailable) continue;
       ctx.log?.error({ error: loggable(err), companyId: turn.companyId, turn: turn.number }, 'Looking for the release of a turn failed.');
     }
   }
