@@ -76,7 +76,7 @@ it('keeps background turn checks quiet on GitHub rate limits and still logs unex
   await c.db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git', repoBranch: 'main' }).where(eq(departments.id, c.dev.id));
   const [devTurn] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 7, goal: 'Ship.', status: 'open', openedAt: after(0), baseVersion: 'v1.0.0', baseCommit: MAIN }).returning();
   const limit = new GitHubRateLimited({ remaining: 0, resetAt: +after(60 * MINUTE) });
-  const errors = vi.spyOn(c.app.ctx.log, 'error').mockImplementation(() => {});
+  const errors = vi.spyOn(c.app.ctx.log, 'error');
   const limited = {
     ...c.app.ctx,
     readBranches: async () => ({ heads: { main: MAIN, 'turn-7': AHEAD } }),
