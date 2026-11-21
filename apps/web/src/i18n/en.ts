@@ -627,6 +627,11 @@ export const en = {
     setupFor: (program: string) => `Settings for ${program}`,
     setupWhere: (file: string) => `Add these lines to ${file} on the computer where the program runs, next to what is there already. The key is in them, so keep them as safe as the key.`,
     copySetup: 'Copy settings',
+    confirm: {
+      renameAssistant: { title: 'Do you really want to rename this assistant?', effect: (from: string, to: string) => `${from} will be renamed to ${to}.`, yes: 'Rename', working: 'Renaming…' },
+      replaceKey: { title: "Do you really want to replace this assistant's key?", effect: (name: string) => `The current key for ${name} will stop working and a new one will be issued.`, yes: 'Replace key', working: 'Replacing…' },
+      revokeKey: { title: "Do you really want to revoke this assistant's key?", effect: (name: string) => `The key for ${name} will stop working immediately.`, yes: 'Revoke key', working: 'Revoking…' },
+    },
   },
   subs: {
     heading: 'Subscriptions & API',
@@ -1375,6 +1380,9 @@ export const en = {
       subscription_removed: 'The subscription was removed during this turn.',
       other: 'This turn failed.',
     },
+    confirm: {
+      stop: { title: 'Do you really want to stop current work?', effect: (name: string) => `${name} will stop its current turn right away.`, yes: 'Stop', working: 'Stopping…' },
+    },
   },
   card: {
     title: 'Company structure',
@@ -1386,6 +1394,18 @@ export const en = {
     remove: 'Remove',
     products: 'Products',
     withPeople: 'Hire the people of each template with its department. One no subscription serves yet waits for it.',
+    confirm: {
+      removeTitle: 'Do you really want to remove this department?',
+      changeTitle: 'Do you really want to change this department?',
+      manyTitle: 'Do you really want to apply these structure changes?',
+      removeEffect: (name: string) => `${name} will be removed from the company.`,
+      updateEffect: (name: string) => `${name} will be updated.`,
+      updateProducts: (name: string, products: string) => `${name} will be updated (products: ${products}).`,
+      removeYes: 'Remove',
+      removing: 'Removing…',
+      applyYes: 'Apply changes',
+      applying: 'Applying…',
+    },
   },
   /* The guard that stops a block drawing without end and turns heavy effects off while the page slows down. */
   guard: {
@@ -1666,6 +1686,10 @@ export const en = {
     addSubUnit: 'Add sub-unit',
     renameSubUnit: 'Rename',
     deleteSubUnit: 'Delete sub-unit',
+    subUnitConfirm: {
+      rename: { title: 'Do you really want to rename this sub-unit?', effect: (name: string, department: string, next: string) => `${name} in ${department} will be renamed to ${next}.`, yes: 'Rename', working: 'Renaming…' },
+      delete: { title: 'Do you really want to delete this sub-unit?', effect: (name: string, department: string) => `${name} will be deleted from ${department}. Its employees will return to the department's pipeline.`, yes: 'Delete', working: 'Deleting…' },
+    },
     inPipeline: 'In the pipeline',
     subUnitOf: (name: string) => `Sub-unit for ${name}`,
     turnkey: 'Works turnkey',
@@ -1753,6 +1777,36 @@ export const en = {
     byOrchestrator: 'Orchestrator',
     viewOnly: "Only people with access to this employee's department or the whole company can change it.",
     orchestratorNote: 'The orchestrator\'s instructions and skills come with Hornhoof. The company notebook at their end is in his window.',
+    confirm: {
+      remove: {
+        title: 'Do you really want to remove this employee?',
+        effect: (name: string, department: string) => `${name} will be removed from ${department}.`,
+        effectNoDept: (name: string) => `${name} will be removed from the company.`,
+        warning: 'Its conversation stays in the history.',
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+      reset: {
+        title: 'Do you really want to reset these instructions?',
+        effect: (name: string) => `${name}'s skills and effort choice will be reset to the template.`,
+        warning: 'Its assignment is kept.',
+        yes: 'Reset',
+        working: 'Resetting…',
+      },
+      disconnectPlan: {
+        title: 'Do you really want to disconnect this plan?',
+        effect: (name: string, plan: string) => `${name} will be disconnected from ${plan} and will stop taking turns until another plan is chosen.`,
+        yes: 'Disconnect',
+        working: 'Disconnecting…',
+      },
+      disconnectTelegram: {
+        title: 'Do you really want to disconnect this Telegram bot?',
+        effect: (bot: string, agent: string) => `${bot} will be disconnected from ${agent}. Telegram messages will stop reaching them.`,
+        effectUnnamed: (bot: string) => `${bot} will be disconnected. Telegram messages will stop reaching this employee.`,
+        yes: 'Disconnect',
+        working: 'Disconnecting…',
+      },
+    },
   },
   staff: {
     title: (name: string) => `Hiring for ${name}`,

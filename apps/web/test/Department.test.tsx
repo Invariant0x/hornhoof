@@ -1192,6 +1192,7 @@ describe('Department view', () => {
     await user.clear(renameBox);
     await user.type(renameBox, 'Fast lane');
     await user.click(within(subUnits).getByRole('button', { name: 'Save' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Rename' }));
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH' && c.path === '/api/departments/d2/teams/u1')?.body).toEqual({ name: 'Fast lane' }));
 
     await user.click(within(subUnits).getByRole('button', { name: 'New sub-unit' }));
@@ -1200,6 +1201,7 @@ describe('Department view', () => {
     await vi.waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === '/api/departments/d2/teams')?.body).toEqual({ name: 'Hotfixes' }));
 
     await user.click(within(subUnits).getByRole('button', { name: 'Delete sub-unit' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }));
     await vi.waitFor(() => expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/departments/d2/teams/u1')).toBe(true));
   });
 });

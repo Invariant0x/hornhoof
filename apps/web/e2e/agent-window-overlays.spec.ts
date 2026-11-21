@@ -86,6 +86,10 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     }
     await window.focus();
     await page.keyboard.press('Escape');
+    const stopDialog = page.getByRole('alertdialog');
+    await expect(stopDialog).toBeVisible();
+    expect(stops).toEqual([]);
+    await stopDialog.getByRole('button', { name: en ? 'Stop' : 'Остановить', exact: true }).click();
     await expect.poll(() => stops).toEqual(['POST']);
     await fit.focus();
     await fit.press('Enter');

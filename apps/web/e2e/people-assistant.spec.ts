@@ -103,6 +103,7 @@ for (const lang of ['en', 'ru'] as const) {
         const card = page.locator('.panel', { has: page.getByRole('heading', { name: t.people.editHeading('Ava'), exact: true }) });
         await expect(card.getByText(t.people.actsFor(AVA.assistant!.owner.name), { exact: true })).toBeVisible();
         await card.getByRole('button', { name: t.people.replaceKey, exact: true }).click();
+        await page.getByRole('alertdialog', { name: t.people.confirm.replaceKey.title }).getByRole('button', { name: t.people.confirm.replaceKey.yes, exact: true }).click();
         const key = card.getByText(MADE.key, { exact: true });
         await expect(key).toBeVisible();
         await expect(card.getByText(MADE.signingSecret, { exact: true })).toBeVisible();

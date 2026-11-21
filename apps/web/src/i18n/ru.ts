@@ -647,6 +647,11 @@ export const ru: Messages = {
     setupFor: program => `Настройки для ${program}`,
     setupWhere: file => `Добавьте эти строки в ${file} на машине, где работает программа, рядом с тем, что там уже есть. В них ключ, поэтому храните их так же надежно, как ключ.`,
     copySetup: 'Скопировать настройки',
+    confirm: {
+      renameAssistant: { title: 'Вы действительно хотите переименовать этого ассистента?', effect: (from, to) => `Имя ${from} изменится на ${to}.`, yes: 'Переименовать', working: 'Переименовываем…' },
+      replaceKey: { title: 'Вы действительно хотите заменить ключ этого ассистента?', effect: name => `Текущий ключ для ${name} перестанет работать, и будет выпущен новый.`, yes: 'Заменить ключ', working: 'Заменяем…' },
+      revokeKey: { title: 'Вы действительно хотите отозвать ключ этого ассистента?', effect: name => `Ключ для ${name} перестанет работать сразу.`, yes: 'Отозвать ключ', working: 'Отзываем…' },
+    },
   },
   subs: {
     heading: 'Подписки и API',
@@ -1368,6 +1373,9 @@ export const ru: Messages = {
       subscription_removed: 'Подписку удалили во время этого шага.',
       other: 'Этот шаг не удался.',
     },
+    confirm: {
+      stop: { title: 'Вы действительно хотите остановить текущую работу?', effect: name => `${name} сразу остановит текущий ход.`, yes: 'Остановить', working: 'Останавливаем…' },
+    },
   },
   card: {
     title: 'Структура компании',
@@ -1379,6 +1387,18 @@ export const ru: Messages = {
     remove: 'Убрать',
     products: 'Продукты',
     withPeople: 'Сразу нанять в каждый отдел сотрудников по его шаблону. Кому пока не подходит ни одна подписка, тот ждет ее.',
+    confirm: {
+      removeTitle: 'Вы действительно хотите убрать этот отдел?',
+      changeTitle: 'Вы действительно хотите изменить этот отдел?',
+      manyTitle: 'Вы действительно хотите применить эти изменения структуры?',
+      removeEffect: name => `Отдел ${name} будет убран из компании.`,
+      updateEffect: name => `Отдел ${name} будет изменен.`,
+      updateProducts: (name, products) => `Отдел ${name} будет изменен (продукты: ${products}).`,
+      removeYes: 'Убрать',
+      removing: 'Убираем…',
+      applyYes: 'Применить изменения',
+      applying: 'Применяем…',
+    },
   },
   /* The guard that stops a block stuck redrawing and turns heavy effects off while the page is slow. */
   guard: {
@@ -1660,6 +1680,10 @@ export const ru: Messages = {
     addSubUnit: 'Добавить подотдел',
     renameSubUnit: 'Переименовать',
     deleteSubUnit: 'Удалить подотдел',
+    subUnitConfirm: {
+      rename: { title: 'Вы действительно хотите переименовать этот подотдел?', effect: (name, department, next) => `Подотдел ${name} в отделе ${department} будет переименован в ${next}.`, yes: 'Переименовать', working: 'Переименовываем…' },
+      delete: { title: 'Вы действительно хотите удалить этот подотдел?', effect: (name, department) => `Подотдел ${name} будет удален из отдела ${department}. Его сотрудники вернутся в конвейер отдела.`, yes: 'Удалить', working: 'Удаляем…' },
+    },
     inPipeline: 'В конвейере',
     subUnitOf: (name: string) => `Подотдел для ${name}`,
     turnkey: 'Работает под ключ',
@@ -1752,6 +1776,36 @@ export const ru: Messages = {
     byOrchestrator: 'Оркестратор',
     viewOnly: 'Менять этого сотрудника могут только люди с доступом к его отделу или ко всей компании.',
     orchestratorNote: 'Инструкции и навыки оркестратора приходят вместе с Hornhoof. Блокнот компании в их конце открывается в его окне.',
+    confirm: {
+      remove: {
+        title: 'Вы действительно хотите удалить этого сотрудника?',
+        effect: (name, department) => `${name} будет удален из отдела ${department}.`,
+        effectNoDept: name => `${name} будет удален из компании.`,
+        warning: 'Переписка останется в истории.',
+        yes: 'Удалить',
+        working: 'Удаляем…',
+      },
+      reset: {
+        title: 'Вы действительно хотите сбросить эти инструкции?',
+        effect: name => `Навыки и выбранное усилие сотрудника ${name} будут сброшены к шаблону.`,
+        warning: 'Назначение сохранится.',
+        yes: 'Сбросить',
+        working: 'Сбрасываем…',
+      },
+      disconnectPlan: {
+        title: 'Вы действительно хотите отключить эту подписку?',
+        effect: (name, plan) => `${name} будет отключен от ${plan} и перестанет брать ходы, пока не выбрана другая подписка.`,
+        yes: 'Отключить',
+        working: 'Отключаем…',
+      },
+      disconnectTelegram: {
+        title: 'Вы действительно хотите отключить этого бота в Telegram?',
+        effect: (bot, agent) => `${bot} будет отключен от ${agent}. Сообщения из Telegram перестанут доходить до этого сотрудника.`,
+        effectUnnamed: bot => `${bot} будет отключен. Сообщения из Telegram перестанут доходить до этого сотрудника.`,
+        yes: 'Отключить',
+        working: 'Отключаем…',
+      },
+    },
   },
   staff: {
     title: (name: string) => `Найм в отдел ${name}`,

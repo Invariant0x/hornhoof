@@ -588,7 +588,7 @@ describe("a person's assistant", () => {
     expect(within(rowOf('Ava')).getByText('Assistant of Maria')).toBeInTheDocument();
   });
 
-  it('makes a key and shows it with the signing secret once, then replaces and revokes it', async () => {
+  it('makes a key and shows it with the signing secret once, then replaces and revokes it after asking', async () => {
     const calls = mockApi({
       ...lists([...PEOPLE, AVA]),
       'POST /api/people/h1/key': [201, { key: 'hha_KEY', signingSecret: 'hhs_SECRET', person: KEYED }],
@@ -598,7 +598,9 @@ describe("a person's assistant", () => {
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
     expect(screen.getByText('No key yet.')).toBeInTheDocument();
+    /* First-time Issue key runs directly with no confirmation dialog. */
     await user.click(screen.getByRole('button', { name: 'Issue key' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(await screen.findByText('hha_KEY')).toBeInTheDocument();
     expect(screen.getByText('hhs_SECRET')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy key' })).toBeInTheDocument();
@@ -607,10 +609,107 @@ describe("a person's assistant", () => {
     await user.click(screen.getByRole('button', { name: 'Hide key' }));
     expect(screen.queryByText('hha_KEY')).not.toBeInTheDocument();
     expect(screen.getByText(/^Key made on/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Replace key' })).toBeInTheDocument();
+
+    /* Replace key asks first, names the assistant in <bdi>, warns it cannot be undone, and cancels cleanly. */
+    await user.click(screen.getByRole('button', { name: 'Replace key' }));
+    const replaceDialog = screen.getByRole('alertdialog', { name: "Do you really want to replace this assistant's key?" });
+    expect(replaceDialog).toHaveAccessibleDescription('The current key for Ava will stop working and a new one will be issued.');
+    expect(replaceDialog.querySelectorAll('bdi').length).toBe(1);
+    expect(replaceDialog).toHaveTextContent('This cannot be undone.');
+    expect(within(replaceDialog).getByRole('button', { name: 'Replace key' })).toHaveClass('danger');
+    expect(within(replaceDialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(replaceDialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.filter(c => c.path === '/api/people/h1/key')).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Replace key' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Replace key' }));
+    expect(await screen.findByText('hha_KEY')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Hide key' }));
+
+    /* Revoke key asks first, names the assistant in <bdi>, warns it cannot be undone, and cancels cleanly on Escape. */
     await user.click(screen.getByRole('button', { name: 'Revoke key' }));
+    const revokeDialog = screen.getByRole('alertdialog', { name: "Do you really want to revoke this assistant's key?" });
+    expect(revokeDialog).toHaveAccessibleDescription('The key for Ava will stop working immediately.');
+    expect(revokeDialog.querySelectorAll('bdi').length).toBe(1);
+    expect(revokeDialog).toHaveTextContent('This cannot be undone.');
+    expect(within(revokeDialog).getByRole('button', { name: 'Revoke key' })).toHaveClass('danger');
+    expect(within(revokeDialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.filter(c => c.method === 'DELETE')).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Revoke key' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Revoke key' }));
     expect(await screen.findByText('No key yet.')).toBeInTheDocument();
-    expect(calls.filter(c => c.path === '/api/people/h1/key').map(c => c.method)).toEqual(['POST', 'DELETE']);
+    expect(calls.filter(c => c.path === '/api/people/h1/key').map(c => c.method)).toEqual(['POST', 'POST', 'DELETE']);
+  });
+
+  it('asks before renaming an assistant, names old and new in <bdi>, keeps failures in the dialog, and saves directly when name is unchanged', async () => {
+    let fail = true;
+    let current: PersonView = AVA;
+    const calls = mockApi({
+      ...lists([...PEOPLE, AVA]),
+      'PATCH /api/people/h1': (body: unknown) => {
+        if ((body as { name?: string }).name && fail) return [500, { error: { code: 'internal', message: 'Could not rename.' } }];
+        current = { ...current, ...(body as Partial<PersonView>) };
+        return [200, { person: current }];
+      },
+      'PATCH /api/people/h1/assistant': () => [200, { person: current }],
+    });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
+    /* Saving with an unchanged assistant name saves directly with no confirmation dialog. */
+    const titleField = screen.getByLabelText('Title');
+    await user.type(titleField, 'Daily helper');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PATCH').map(c => c.path)).toEqual(['/api/people/h1', '/api/people/h1/assistant']));
+
+    /* Reopen and rename: confirms with old and new names in <bdi>, keeps failures in the dialog, then succeeds. */
+    await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
+    const field = screen.getByLabelText('Assistant name');
+    await user.clear(field);
+    await user.type(field, 'Nova');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to rename this assistant?' });
+    expect(dialog).toHaveAccessibleDescription('Ava will be renamed to Nova.');
+    expect([...dialog.querySelectorAll('bdi')].map(n => n.textContent)).toEqual(['Ava', 'Nova']);
+    const yes = within(dialog).getByRole('button', { name: 'Rename' });
+    expect(yes).not.toHaveClass('danger');
+    expect(yes).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(2);
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Rename' }));
+    expect(await within(screen.getByRole('alertdialog')).findByRole('alert')).toHaveTextContent('Could not rename.');
+
+    fail = false;
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Rename' }));
+    await vi.waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(calls.filter(c => c.method === 'PATCH').map(c => c.path)).toEqual(['/api/people/h1', '/api/people/h1/assistant', '/api/people/h1', '/api/people/h1', '/api/people/h1/assistant']);
+    expect(within(rowOf('Nova')).getByText('Assistant of Maria')).toBeInTheDocument();
+  });
+
+  it('keeps replace and revoke key failures inside the confirmation dialog', async () => {
+    mockApi({
+      ...lists([...PEOPLE, KEYED]),
+      'POST /api/people/h1/key': [503, { error: { code: 'unavailable', message: 'Key service busy.' } }],
+      'DELETE /api/people/h1/key': [503, { error: { code: 'unavailable', message: 'Cannot revoke now.' } }],
+    });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
+    await user.click(screen.getByRole('button', { name: 'Replace key' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Replace key' }));
+    expect(await within(screen.getByRole('alertdialog')).findByRole('alert')).toHaveTextContent('Key service busy.');
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+
+    await user.click(screen.getByRole('button', { name: 'Revoke key' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Revoke key' }));
+    expect(await within(screen.getByRole('alertdialog')).findByRole('alert')).toHaveTextContent('Cannot revoke now.');
   });
 
   it.each([

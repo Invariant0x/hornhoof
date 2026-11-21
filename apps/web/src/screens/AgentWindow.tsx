@@ -1,7 +1,7 @@
 import { commandBlockOpen } from '../ui/CommandBox';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api';
-import { deptLabel, errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
+import { deptLabel, errorText, Phrase, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { liveOf } from '../org';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
@@ -13,6 +13,7 @@ import { AddPicture, PictureTray, SentPictures, useDraftPictures, usePictureDrop
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { useChatScroll } from '../ui/chat-scroll';
 import { CommandCard } from '../ui/CommandCard';
+import { useConfirmAction } from '../ui/ConfirmAction';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { Markdown } from '../ui/Markdown';
 import { Inbox, useInboxCount } from '../ui/Inbox';
@@ -524,9 +525,23 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     );
   }, [staff, state, path, t, catchUp]);
 
-  const stop = useCallback(() => {
-    if (state?.runningJobId) void api.post(`${path}/stop`).catch(setFailure);
+  const { ask: askConfirm, question: confirmQuestion } = useConfirmAction();
+  const agentName = orchestrator ? t.window.orchestrator : card?.name || listedName(org, agentId);
+
+  const sendStop = useCallback(async () => {
+    if (state?.runningJobId) await api.post(`${path}/stop`);
   }, [state?.runningJobId, path]);
+
+  const stop = useCallback(() => {
+    if (!state?.runningJobId) return;
+    const words = t.window.confirm.stop;
+    askConfirm({
+      ...words,
+      effect: <Phrase words={words.effect} values={[<bdi>{agentName || t.window.hiddenEmployee}</bdi>]} />,
+      danger: true,
+      onYes: sendStop,
+    });
+  }, [state?.runningJobId, t.window.confirm.stop, t.window.hiddenEmployee, askConfirm, agentName, sendStop]);
 
   useEffect(() => {
     if (!state?.busy) return;
@@ -638,7 +653,6 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     fromEnd.current = null;
   }, [events, log]);
 
-  const agentName = orchestrator ? t.window.orchestrator : card?.name || listedName(org, agentId);
   const authorOf = (e: LogEvent): string => {
     if (!isMessage(e)) return e.person?.id === me.person.id ? t.window.chat.you : (e.person?.name ?? '');
     const name = e.message.from.id === me.person.id ? t.window.chat.you : partyName(t, language, e.message.from);
@@ -828,6 +842,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         {known && <span>{where}</span>}
         {chat && <span>{t.window.hint}</span>}
       </div>
+      {confirmQuestion}
     </AgentWindowLayout>
   );
 }

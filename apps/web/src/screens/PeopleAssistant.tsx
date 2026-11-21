@@ -1,9 +1,10 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT } from '../i18n';
+import { errorText, Phrase, useLanguage, useT } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { ASSISTANT_PROGRAMS, type AssistantProgram, type AssistantView, type Me, type PersonView, type SubView } from '../types';
 import { BusyLabel } from '../ui/BusyLabel';
+import { useConfirmAction } from '../ui/ConfirmAction';
 import { CopyButton } from '../ui/CopyButton';
 import { Edge } from '../ui/Edge';
 import { Field } from '../ui/Field';
@@ -179,24 +180,46 @@ function KeySection({ person, onChanged }: { person: PersonView; onChanged: (per
   const [shown, setShown] = useState<Made | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const confirmation = useConfirmAction();
   const made = person.assistant?.key;
 
-  async function run(action: () => Promise<PersonView>) {
+  async function run(action: () => Promise<void>) {
     setBusy(true);
     setFailure(null);
     try {
-      onChanged(await action());
+      await action();
     } catch (err) {
       setFailure(err);
     }
     setBusy(false);
   }
-  const create = () => run(async () => {
+  const issue = async () => {
     const res = await api.post<Made>(`/api/people/${person.id}/key`);
     setShown(res);
-    return res.person;
-  });
-  const revoke = () => run(async () => (await api.del<{ person: PersonView }>(`/api/people/${person.id}/key`)).person);
+    onChanged(res.person);
+  };
+  const revokeKey = async () => onChanged((await api.del<{ person: PersonView }>(`/api/people/${person.id}/key`)).person);
+  const create = () => run(issue);
+  const askReplace = () => {
+    setFailure(null);
+    confirmation.ask({
+      ...t.people.confirm.replaceKey,
+      effect: <Phrase words={t.people.confirm.replaceKey.effect} values={[<bdi>{person.name}</bdi>]} />,
+      danger: true,
+      final: true,
+      onYes: issue,
+    });
+  };
+  const askRevoke = () => {
+    setFailure(null);
+    confirmation.ask({
+      ...t.people.confirm.revokeKey,
+      effect: <Phrase words={t.people.confirm.revokeKey.effect} values={[<bdi>{person.name}</bdi>]} />,
+      danger: true,
+      final: true,
+      onYes: revokeKey,
+    });
+  };
 
   return (
     <section className="assistant-key" aria-labelledby={`${id}-key`}>
@@ -220,12 +243,13 @@ function KeySection({ person, onChanged }: { person: PersonView; onChanged: (per
         <p className="key-line"><KeyIcon />{made ? t.people.keyMade(new Intl.DateTimeFormat(language, { dateStyle: 'medium' }).format(new Date(made.createdAt))) : t.people.noKey}</p>
         <div className="entry-actions">
           {made ? <>
-            <button className="act" type="button" disabled={busy} onClick={() => void create()}>{t.people.replaceKey}</button>
-            <button className="act danger" type="button" disabled={busy} onClick={() => void revoke()}>{t.people.revokeKey}</button>
+            <button className="act" type="button" disabled={busy} onClick={askReplace}>{t.people.replaceKey}</button>
+            <button className="act danger" type="button" disabled={busy} onClick={askRevoke}>{t.people.revokeKey}</button>
           </> : <button className="btn" type="button" disabled={busy} onClick={() => void create()}>{t.people.issueKey}</button>}
         </div>
       </>}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      {confirmation.question}
     </section>
   );
 }
@@ -287,22 +311,41 @@ export function AssistantCard({ me, person, manages, rename, onChanged, onSaved,
   const [plan, setPlan] = useState(person.assistant?.agent?.plan ?? '');
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
+  const confirmation = useConfirmAction();
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
+  async function send(changes: ReturnType<typeof personChanges>) {
+    if (changes) onChanged((await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, changes)).person);
+    /* The plan goes only when its owner changed it: nobody else may send it. */
+    const moved = owner && plan !== (person.assistant?.agent?.plan ?? '') ? { plan: plan || null } : {};
+    const body = { program, eventsUrl: eventsUrl.trim() || null, skillsUrl: skillsUrl.trim() || null, ...moved };
+    onSaved((await api.patch<{ person: PersonView }>(`/api/people/${person.id}/assistant`, body)).person);
+  }
+
+  async function save(changes: ReturnType<typeof personChanges>) {
     setBusy(true);
     setFailure('');
     try {
-      const changes = personChanges(person, { manages, rename }, name, title);
-      if (changes) onChanged((await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, changes)).person);
-      /* The plan goes only when its owner changed it: nobody else may send it. */
-      const moved = owner && plan !== (person.assistant?.agent?.plan ?? '') ? { plan: plan || null } : {};
-      const body = { program, eventsUrl: eventsUrl.trim() || null, skillsUrl: skillsUrl.trim() || null, ...moved };
-      onSaved((await api.patch<{ person: PersonView }>(`/api/people/${person.id}/assistant`, body)).person);
+      await send(changes);
     } catch (err) {
       setFailure(errorText(t, err));
       setBusy(false);
     }
+  }
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (manages && rename && !name.trim()) return;
+    const changes = personChanges(person, { manages, rename }, name, title);
+    if (changes && 'name' in changes && changes.name) {
+      setFailure('');
+      confirmation.ask({
+        ...t.people.confirm.renameAssistant,
+        effect: <Phrase words={t.people.confirm.renameAssistant.effect} values={[<bdi>{person.name}</bdi>, <bdi>{changes.name}</bdi>]} />,
+        onYes: () => send(changes),
+      });
+      return;
+    }
+    void save(changes);
   }
 
   return (
@@ -311,7 +354,7 @@ export function AssistantCard({ me, person, manages, rename, onChanged, onSaved,
         <h2 className="form-title"><EditIcon />{t.people.editHeading(person.name)}</h2>
         <p className="muted">{t.people.actsFor(person.assistant?.owner.name ?? '')}</p>
       </div>
-      <form onSubmit={e => void submit(e)} className="form-grid">
+      <form onSubmit={submit} className="form-grid">
         {manages && rename && <Field label={t.people.assistantName}>{p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} required />}</Field>}
         {manages && <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} />}</Field>}
         <ProgramAndAddress program={program} eventsUrl={eventsUrl} onProgram={setProgram} onEventsUrl={setEventsUrl} />
@@ -327,6 +370,7 @@ export function AssistantCard({ me, person, manages, rename, onChanged, onSaved,
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
         </div>
       </form>
+      {confirmation.question}
       <KeySection person={person} onChanged={onChanged} />
     </Edge>
   );

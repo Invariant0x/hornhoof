@@ -491,12 +491,14 @@ describe("an agent's live terminal in its window", () => {
     expect(screen.queryByRole('textbox', { name: 'Write to the orchestrator' })).not.toBeInTheDocument();
   });
 
-  it('offers Stop above the terminal while the agent works', async () => {
+  it('offers Stop above the terminal while the agent works and confirms before stopping', async () => {
     const user = userEvent.setup();
     const { calls } = open(true, { busy: true, runningJobId: 'j1' });
     await socket();
     await user.click(await screen.findByRole('button', { name: 'Stop' }));
-    expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(true);
+    expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(false);
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Stop' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toHaveLength(1));
   });
 
   it('cuts a long paste into pieces the server takes', async () => {
