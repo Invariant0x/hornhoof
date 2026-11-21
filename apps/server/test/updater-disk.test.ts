@@ -197,7 +197,13 @@ if (args[0] === 'cp') {
   const src = args[1];
   const dst = args[2];
   const cid = dst.split(':')[0];
-  fs.copyFileSync(src, path.join(delivered, cid + '.json'));
+  const st = fs.statSync(src);
+  if (path.basename(src) !== 'docker-disk.json' || dst !== cid + ':/data/') process.exit(2);
+  if ((st.mode & 0o444) !== 0o444) process.exit(2);
+  const target = path.join(delivered, cid + '.json');
+  const tmp = target + '.tmp.' + process.pid;
+  fs.copyFileSync(src, tmp);
+  fs.renameSync(tmp, target);
   process.exit(0);
 }
 if (args[0] === 'compose' && args[1] === 'ps') {

@@ -57,7 +57,7 @@ disk_setting() {
 
 disk_safe_ref() {
   case "$1" in
-    '' | -* | *'|'* | *[$' \t\r\n']*) return 1 ;;
+    '' | -* | *'|'* | *[$' \t\r\n*?[']*) return 1 ;;
     *) return 0 ;;
   esac
 }
@@ -75,14 +75,14 @@ disk_busy() {
 }
 
 disk_inspect_images() {
-  local ids raw out
-  ids=$(docker image ls -aq --no-trunc 2> /dev/null | awk '/^[^- \t\r\n][^ \t\r\n]*$/' | sort -u || true)
-  if [ -z "$ids" ]; then
+  local -a ids=()
+  local raw out
+  mapfile -t ids < <(docker image ls -aq --no-trunc 2> /dev/null | awk '/^[^- \t\r\n*?[][^ \t\r\n*?[]*$/' | sort -u || true)
+  if [ "${#ids[@]}" -eq 0 ]; then
     printf '[]'
     return 0
   fi
-  # shellcheck disable=SC2086 # image IDs are validated non-option tokens
-  raw=$(docker image inspect --format '{{json .}}' $ids 2> /dev/null || true)
+  raw=$(docker image inspect --format '{{json .}}' "${ids[@]}" 2> /dev/null || true)
   if [ -z "$raw" ]; then
     printf '[]'
     return 0
@@ -92,14 +92,14 @@ disk_inspect_images() {
 }
 
 disk_inspect_containers() {
-  local ids raw out
-  ids=$(docker ps -aq 2> /dev/null | awk '/^[^- \t\r\n][^ \t\r\n]*$/' | sort -u || true)
-  if [ -z "$ids" ]; then
+  local -a ids=()
+  local raw out
+  mapfile -t ids < <(docker ps -aq 2> /dev/null | awk '/^[^- \t\r\n*?[][^ \t\r\n*?[]*$/' | sort -u || true)
+  if [ "${#ids[@]}" -eq 0 ]; then
     printf '[]'
     return 0
   fi
-  # shellcheck disable=SC2086 # container IDs are validated non-option tokens
-  raw=$(docker inspect --size --format '{{json .}}' $ids 2> /dev/null || true)
+  raw=$(docker inspect --size --format '{{json .}}' "${ids[@]}" 2> /dev/null || true)
   if [ -z "$raw" ]; then
     printf '[]'
     return 0
@@ -109,14 +109,14 @@ disk_inspect_containers() {
 }
 
 disk_inspect_volumes() {
-  local names raw out
-  names=$(docker volume ls -q 2> /dev/null | awk '/^[^- \t\r\n][^ \t\r\n]*$/' | sort -u || true)
-  if [ -z "$names" ]; then
+  local -a names=()
+  local raw out
+  mapfile -t names < <(docker volume ls -q 2> /dev/null | awk '/^[^- \t\r\n*?[][^ \t\r\n*?[]*$/' | sort -u || true)
+  if [ "${#names[@]}" -eq 0 ]; then
     printf '[]'
     return 0
   fi
-  # shellcheck disable=SC2086 # volume names are validated non-option tokens
-  raw=$(docker volume inspect --format '{{json .}}' $names 2> /dev/null || true)
+  raw=$(docker volume inspect --format '{{json .}}' "${names[@]}" 2> /dev/null || true)
   if [ -z "$raw" ]; then
     printf '[]'
     return 0
@@ -163,6 +163,7 @@ disk_fs_space() {
 # referenced by a running or stopped container. Never uses -f. Prints total freed bytes.
 disk_clean_images() {
   local images_json=$1 containers_json=$2 plan id size refs freed=0 ref ok
+  local -a ref_arr=()
   # shellcheck disable=SC2016 # the dollars belong to jq
   plan=$(jq -nr \
     --argjson images "$images_json" \
@@ -196,13 +197,15 @@ disk_clean_images() {
   while IFS='|' read -r id size refs; do
     [ -n "$id" ] || continue
     disk_safe_ref "$id" || continue
+    plain_number "${size:-}" || size=0
+    read -r -a ref_arr <<< "$refs"
+    [ "${#ref_arr[@]}" -gt 0 ] || continue
     ok=1
-    for ref in $refs; do
+    for ref in "${ref_arr[@]}"; do
       disk_safe_ref "$ref" || { ok=0; break; }
     done
     [ "$ok" = 1 ] || continue
-    # shellcheck disable=SC2086 # refs is a validated space-separated list of image refs
-    if docker rmi $refs > /dev/null 2>&1; then
+    if docker rmi "${ref_arr[@]}" > /dev/null 2>&1; then
       printf 'Removed old Hornhoof image %s (%s bytes).\n' "$id" "$size" >&2
       freed=$((freed + size))
     fi
@@ -214,7 +217,8 @@ disk_clean_images() {
 # port-lock containers. Prints "<freed_containers> <freed_volumes>".
 disk_clean_labs() {
   local containers_json=$1 volumes_json=$2 vol_sizes_json=$3 now=$4 lab_age=$5
-  local plan lab cids vols cbytes vbytes nets cid size freed_c=0 freed_v=0 id ok
+  local plan lab cids vols cbytes vbytes cid size freed_c=0 freed_v=0 id ok
+  local -a cid_arr=() vol_arr=() nets=()
   # shellcheck disable=SC2016 # the dollars belong to jq
   plan=$(jq -nr \
     --argjson containers "$containers_json" \
@@ -244,26 +248,27 @@ disk_clean_labs() {
   while IFS='|' read -r lab cids vols cbytes vbytes; do
     [ -n "$lab" ] || continue
     disk_plain_lab "$lab" || continue
+    plain_number "${cbytes:-}" || cbytes=0
+    plain_number "${vbytes:-}" || vbytes=0
     if [ -n "$cids" ]; then
+      read -r -a cid_arr <<< "$cids"
       ok=1
-      for id in $cids; do disk_safe_ref "$id" || { ok=0; break; }; done
-      # shellcheck disable=SC2086 # validated container IDs
-      if [ "$ok" = 1 ] && docker rm -f -v $cids > /dev/null 2>&1; then
+      for id in "${cid_arr[@]}"; do disk_safe_ref "$id" || { ok=0; break; }; done
+      if [ "$ok" = 1 ] && [ "${#cid_arr[@]}" -gt 0 ] && docker rm -f -v "${cid_arr[@]}" > /dev/null 2>&1; then
         freed_c=$((freed_c + cbytes))
       fi
     fi
     if [ -n "$vols" ]; then
+      read -r -a vol_arr <<< "$vols"
       ok=1
-      for id in $vols; do disk_safe_ref "$id" || { ok=0; break; }; done
-      # shellcheck disable=SC2086 # validated volume names
-      if [ "$ok" = 1 ] && docker volume rm -f $vols > /dev/null 2>&1; then
+      for id in "${vol_arr[@]}"; do disk_safe_ref "$id" || { ok=0; break; }; done
+      if [ "$ok" = 1 ] && [ "${#vol_arr[@]}" -gt 0 ] && docker volume rm -f "${vol_arr[@]}" > /dev/null 2>&1; then
         freed_v=$((freed_v + vbytes))
       fi
     fi
-    nets=$(docker network ls --filter "label=hornhoof.lab=$lab" -q 2> /dev/null || true)
-    if [ -n "$nets" ]; then
-      # shellcheck disable=SC2086 # network IDs from docker network ls -q
-      docker network rm $nets > /dev/null 2>&1 || true
+    mapfile -t nets < <(docker network ls --filter "label=hornhoof.lab=$lab" -q 2> /dev/null | awk '/^[^- \t\r\n*?[][^ \t\r\n*?[]*$/' | sort -u || true)
+    if [ "${#nets[@]}" -gt 0 ]; then
+      docker network rm "${nets[@]}" > /dev/null 2>&1 || true
     fi
     printf 'Removed expired test stand hornhoof.lab=%s (containers %s bytes, volumes %s bytes).\n' "$lab" "$cbytes" "$vbytes" >&2
   done <<< "$plan"
@@ -286,6 +291,7 @@ disk_clean_labs() {
   while IFS='|' read -r cid size; do
     [ -n "$cid" ] || continue
     disk_safe_ref "$cid" || continue
+    plain_number "${size:-}" || size=0
     if docker rm -f -v "$cid" > /dev/null 2>&1; then
       printf 'Removed stale Hornhoof lock container %s (%s bytes).\n' "$cid" "$size" >&2
       freed_c=$((freed_c + size))
@@ -383,7 +389,7 @@ disk_update_cleaned() {
 disk_measure_and_deliver() {
   local stamp=$1 cleaned_json=$2
   local images_json containers_json volumes_json vol_sizes_json cache_bytes own_project=''
-  local report_json tmp cid targets
+  local report_json tmpdir tmp cid targets
   images_json=$(disk_inspect_images)
   containers_json=$(disk_inspect_containers)
   volumes_json=$(disk_inspect_volumes)
@@ -479,16 +485,17 @@ disk_measure_and_deliver() {
   ' 2> /dev/null | sort -u || true)
   [ -n "$targets" ] || return 0
 
-  tmp=$(umask 077 && mktemp 2> /dev/null || true)
-  [ -n "$tmp" ] || return 0
+  tmpdir=$(umask 077 && mktemp -d 2> /dev/null || true)
+  [ -n "$tmpdir" ] || return 0
+  tmp=$tmpdir/docker-disk.json
   printf '%s\n' "$report_json" > "$tmp"
-  chmod 600 "$tmp" 2> /dev/null || true
+  chmod 644 "$tmp" 2> /dev/null || true
   while IFS= read -r cid; do
     [ -n "$cid" ] || continue
     disk_safe_ref "$cid" || continue
-    docker cp "$tmp" "$cid:/data/docker-disk.json" > /dev/null 2>&1 || true
+    docker cp "$tmp" "$cid:/data/" > /dev/null 2>&1 || true
   done <<< "$targets"
-  rm -f "$tmp"
+  rm -f "$tmp" && rmdir "$tmpdir" 2> /dev/null || true
 }
 
 # One paced pass of Docker disk care. Runs at most once per HORNHOOF_DISK_EVERY seconds (default 1 hour) and skips while an
