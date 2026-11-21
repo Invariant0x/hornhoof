@@ -52,13 +52,13 @@ export function workingCopies({ dir, git, tasks }: Options): Cleaner & { kept():
           if (!(await isClone(clone))) continue;
           const sizes = new Map<string, number>();
           const { copies } = await closedCopies(clone, agentDir, states, git, async path => {
-            sizes.set(path, await folderBytes(path));
+            sizes.set(path, await folderBytes(path).catch(() => 0));
           });
           for (const copy of copies) {
             if (copy.removed) freed += sizes.get(copy.path) ?? 0;
             if (copy.removed || (copy.why !== 'uncommitted' && copy.why !== 'unpushed')) continue;
             freed += await dropDependencies(copy.path, git).catch(() => 0);
-            stays.push({ agent, path: relative(agentDir, copy.path), task: copy.task, bytes: await folderBytes(copy.path), why: copy.why });
+            stays.push({ agent, path: relative(agentDir, copy.path), task: copy.task, bytes: await folderBytes(copy.path).catch(() => 0), why: copy.why });
           }
         }
       }

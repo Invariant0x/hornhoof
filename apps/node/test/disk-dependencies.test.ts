@@ -63,6 +63,16 @@ describe("a finished task's clone, short of its dependencies", () => {
     expect(readFileSync(join(clone, '.env'), 'utf8')).toBe('KEY=made-up\n');
   });
 
+  it('reads a folder named as git pathspec magic as a plain name, so every other file git ignores stays', async () => {
+    const { clone } = finishedClone();
+    fill(join(clone, ':!a', 'node_modules', 'left-pad', 'index.js'), 1024);
+    fill(join(clone, 'node_modules', 'react', 'index.js'), 1024);
+    await dropDependencies(clone, run);
+    expect(existsSync(join(clone, ':!a', 'node_modules'))).toBe(false);
+    expect(existsSync(join(clone, 'node_modules'))).toBe(false);
+    expect(readFileSync(join(clone, '.env'), 'utf8')).toBe('KEY=made-up\n');
+  });
+
   it('keeps a node_modules that git tracks', async () => {
     const { clone } = finishedClone();
     fill(join(clone, 'vendor', 'node_modules', 'kept.js'), 1024);

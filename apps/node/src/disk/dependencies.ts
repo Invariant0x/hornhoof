@@ -16,7 +16,8 @@ export async function dropDependencies(tree: string, git: CloneGit): Promise<num
   for (const folder of listed.split('\0').filter(entry => DEPENDENCIES.test(entry))) {
     const path = join(tree, folder);
     const before = await folderBytes(path);
-    await git(['clean', '-ffdXq', '--', folder], tree);
+    /* A folder of the clone is a plain name here: git reads a name like ":!x" as magic that would turn the pathspec round. */
+    await git(['--literal-pathspecs', 'clean', '-ffdXq', '--', folder], tree);
     freed += Math.max(0, before - (await folderBytes(path)));
   }
   return freed;

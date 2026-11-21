@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DiskReport } from '@hornhoof/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { checkTemp, folderBytes } from '../src/disk/clean.js';
 import { DiskKeeper } from '../src/disk/keeper.js';
@@ -39,6 +40,18 @@ describe('the size of a folder', () => {
 
   it('is 0 for a folder that is not there', async () => {
     expect(await folderBytes(join(folder(), 'none'))).toBe(0);
+  });
+
+  it('gives up on a du that does not finish, so a pass goes on with the part unmeasured', async () => {
+    const bin = folder(), path = process.env.PATH;
+    writeFileSync(join(bin, 'du'), '#!/bin/sh\nexec sleep 5\n');
+    chmodSync(join(bin, 'du'), 0o755);
+    process.env.PATH = `${bin}:${path ?? ''}`;
+    try {
+      await expect(folderBytes(folder(), 100)).rejects.toThrow(/did not finish/);
+    } finally {
+      process.env.PATH = path;
+    }
   });
 });
 
@@ -120,6 +133,22 @@ describe('what a cleaning leaves because it cannot come back', () => {
     expect(report?.kept).toHaveLength(50);
     expect(report?.kept?.[0]).toEqual({ part: 'workingCopies', agent: 'agent-a', path: 'shop-60', task: 60, bytes: 60 * MB, why: 'uncommitted' });
     expect(report?.kept?.[49]?.path).toBe('shop-11');
+  });
+
+  it('fits what the report can carry: a long path keeps its end, and an entry of no agent of Hornhoof\'s goes', async () => {
+    const deep = `${'deep/'.repeat(80)}shop`;
+    const stays = [
+      { agent: 'agent-a', path: deep, task: 1, bytes: 2 * MB, why: 'unpushed' as const },
+      { agent: 'x'.repeat(65), path: 'shop', task: 2, bytes: MB, why: 'uncommitted' as const },
+    ];
+    const copies = { part: 'workingCopies' as const, size: async () => 0, clean: async () => 0, kept: () => stays };
+    const keeper = new DiskKeeper({ disk: async () => ({ total: 10 * MB, free: 9 * MB }), settings: NEEDS_3_MB, cleaners: [copies], now: () => at });
+    const report = await keeper.pass();
+    expect(DiskReport.safeParse(report).success).toBe(true);
+    expect(report?.kept).toHaveLength(1);
+    expect(report?.kept?.[0]?.path).toHaveLength(300);
+    expect(report?.kept?.[0]?.path.endsWith('deep/shop')).toBe(true);
+    expect(report?.kept?.[0]?.path.startsWith('…')).toBe(true);
   });
 
   it('is empty where nothing stays', async () => {

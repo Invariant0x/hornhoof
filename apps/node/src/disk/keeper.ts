@@ -1,5 +1,5 @@
-import { DISK_KEPT_MAX, type DiskReport } from '@hornhoof/protocol';
-import type { Cleaner } from './clean.js';
+import { DISK_KEPT_MAX, DiskReport } from '@hornhoof/protocol';
+import type { Cleaner, Stay } from './clean.js';
 import { DiskCleaned, DiskLow, diskThreshold, type DiskSettings, type Removal } from './state.js';
 
 export type Disk = { total: number; free: number };
@@ -14,6 +14,17 @@ type Options = {
 };
 
 const why = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/* The longest agent id and path the report carries. */
+const AGENT_MAX = 64;
+const PATH_MAX = 300;
+
+/* What stays, as the report can carry it: a path too long keeps its end, where a person finds the copy, and an entry under a
+   folder that is no agent id of Hornhoof's goes. */
+function fitted(stay: Stay): Stay | null {
+  if (stay.agent.length > AGENT_MAX) return null;
+  return stay.path.length > PATH_MAX ? { ...stay, path: `…${stay.path.slice(-(PATH_MAX - 1))}` } : stay;
+}
 
 /* A node's care of its disk. Each pass first removes what of Hornhoof's share can come back, part by part, then measures the
    disk and each part, and finds whether the node is low: still under its threshold after the cleaning, so it takes no new
@@ -53,8 +64,20 @@ export class DiskKeeper {
     }
     const free = Math.min(disk.free, disk.total), threshold = diskThreshold(disk.total, settings);
     const low = this.lowState.after([{ free, threshold }], at);
-    const kept = cleaners.flatMap(c => (c.kept?.() ?? []).map(stay => ({ part: c.part, ...stay }))).sort((a, b) => b.bytes - a.bytes).slice(0, DISK_KEPT_MAX);
-    this.last = { total: disk.total, free, threshold, parts, low, cleaned: this.removed.list(at), kept };
+    const kept = cleaners
+      .flatMap(c => (c.kept?.() ?? []).flatMap(stay => {
+        const fit = fitted(stay);
+        return fit ? [{ part: c.part, ...fit }] : [];
+      }))
+      .sort((a, b) => b.bytes - a.bytes)
+      .slice(0, DISK_KEPT_MAX);
+    const report: DiskReport = { total: disk.total, free, threshold, parts, low, cleaned: this.removed.list(at), kept };
+    /* The server drops a report it cannot read whole, and with it low and what went: what stays goes first instead. */
+    if (!DiskReport.safeParse(report).success) {
+      log('The disk report could not carry what stays; it goes without it.');
+      delete report.kept;
+    }
+    this.last = report;
     return this.last;
   }
 

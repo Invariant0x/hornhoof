@@ -10,11 +10,19 @@ export type Stay = Omit<NonNullable<DiskReport['kept']>[number], 'part'>;
    says how many bytes it freed; kept, where a part has it, what its last cleaning left because it cannot come back. */
 export type Cleaner = { part: DiskPart; size(): Promise<number>; clean(): Promise<number>; kept?(): Stay[] };
 
+/* How long du may count one folder before the node gives up on it. */
+export const DU_TIMEOUT_MS = 5 * 60_000;
+
 /* What a folder takes on its disk, in bytes, as du counts it: the blocks of its files, on that disk alone, never following
-   a link. A folder that is not there takes nothing. du runs apart, so a folder of a million files never holds the node up. */
-export function folderBytes(path: string): Promise<number> {
-  return new Promise(resolve => {
-    execFile('du', ['-skx', '--', path], { encoding: 'utf8', maxBuffer: 1 << 20 }, (_err, stdout) => {
+   a link. A folder that is not there takes nothing. du runs apart, so a folder of a million files never holds the node up,
+   and one that does not finish in time fails, so the part stays unmeasured and the next pass still comes. */
+export function folderBytes(path: string, timeoutMs = DU_TIMEOUT_MS): Promise<number> {
+  return new Promise((resolve, reject) => {
+    execFile('du', ['-skx', '--', path], { encoding: 'utf8', maxBuffer: 1 << 20, timeout: timeoutMs, killSignal: 'SIGKILL' }, (err, stdout) => {
+      if (err?.killed) {
+        reject(new Error(`du did not finish in ${Math.ceil(timeoutMs / 1000)} s`));
+        return;
+      }
       const kib = /^(\d+)\s/.exec(stdout)?.[1];
       resolve(kib ? Number(kib) * 1024 : 0);
     });
