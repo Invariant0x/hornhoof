@@ -71,4 +71,21 @@ describe("a node's disk care", () => {
     disk.stop();
     expect(checks.refused()).toBeNull();
   });
+
+  it('includes Docker parts and recent removals from docker-disk.json when the updater has delivered one', async () => {
+    const dir = node();
+    const at = new Date().toISOString();
+    writeFileSync(
+      join(dir, 'docker-disk.json'),
+      JSON.stringify({
+        at,
+        parts: { images: 2 * GIB, containers: 100, volumes: 4 * GIB, buildCache: GIB },
+        cleaned: [{ part: 'images', bytes: GIB, at }],
+      }),
+    );
+    const disk = care(dir, () => 50 * GIB);
+    await disk.pass();
+    expect(disk.report()?.parts).toMatchObject({ images: 2 * GIB, containers: 100, volumes: 4 * GIB, buildCache: GIB });
+    expect(disk.report()?.cleaned).toEqual([{ part: 'images', bytes: GIB, at }]);
+  });
 });
