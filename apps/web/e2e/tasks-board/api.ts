@@ -201,15 +201,35 @@ export async function serveOutsideWork(page: Page) {
   return gift;
 }
 
-/* Development's employees as the map lists them: Hana works in Codex now, Bruno has no plan. */
-const member = (agent: typeof HANA | typeof BRUNO, provider: Employee['provider']): Employee => ({
+/* Development's employees as the map lists them, each on the plan it runs on now, and the piece of work each does: Hana in
+   Codex, Bruno in Claude (and every part of every piece), Ada in Antigravity, Gus in GLM, Kai in Kimi, and Nora with no plan.
+   STAFF names them for the tests: the title of the piece of work, the executor and the program the list should name. */
+type Agent = { id: string; name: string; kind: 'head' | 'worker'; role: { en: string; ru: string } };
+const worker = (id: string, name: string): Agent => ({ id, name, kind: 'worker', role: { en: 'Developer', ru: 'Разработчик' } });
+const member = (agent: Agent, provider: Employee['provider']): Employee => ({
   id: agent.id, name: agent.name, roleId: null, title: agent.role, kind: agent.kind, model: '', modelName: null, provider, effort: null,
   state: provider ? 'sleeping' : 'needs_subscription', status: 'idle', on: true, timer: null, task: null, context: null, program: null,
   alarm: null, retry: null, failure: null,
 });
+const PLANS: { work: string; agent: Agent; provider: Employee['provider']; program: string | null }[] = [
+  { work: 'Take card payments', agent: HANA, provider: 'codex', program: 'Codex' },
+  { work: 'Refunds on request', agent: BRUNO, provider: 'claude', program: 'Claude' },
+  { work: 'Receipts by email', agent: worker('w3', 'Ada'), provider: 'antigravity', program: 'Antigravity' },
+  { work: 'Gift cards', agent: worker('w4', 'Gus'), provider: 'glm', program: 'GLM' },
+  { work: 'Pay in parts', agent: worker('w5', 'Kai'), provider: 'kimi', program: 'Kimi' },
+  { work: 'Delivery dates', agent: worker('w6', 'Nora'), provider: null, program: null },
+];
+export const STAFF = PLANS.map(({ work, agent, program }) => ({ work, name: agent.name, program }));
 export async function serveStaff(page: Page) {
-  const org: Org = { ...ORG, departments: ORG.departments.map(d => (d.id === DEV.id ? { ...d, employees: [member(HANA, 'codex'), member(BRUNO, null)] } : d)) };
-  await page.route('**/api/org', route => route.fulfill({ json: org }));
+  const org: Org = { ...ORG, departments: ORG.departments.map(d => (d.id === DEV.id ? { ...d, employees: PLANS.map(p => member(p.agent, p.provider)) } : d)) };
+  const doers = new Map(PLANS.map(p => [p.work, p.agent]));
+  const tasks = TASKS.map(x => (!x.parentId && doers.has(x.title) ? { ...x, assignee: doers.get(x.title)! } : x));
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/org') return route.fulfill({ json: org });
+    if (path === '/api/tasks') return route.fulfill({ json: { tasks } });
+    return route.fallback();
+  });
 }
 
 /* The history of the goal Card payments: Ivan set it, moved its date, and Hana wrote a note on it, a sentence of its own. An

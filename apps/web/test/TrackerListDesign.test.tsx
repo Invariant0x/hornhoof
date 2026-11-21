@@ -60,6 +60,17 @@ it('puts the logo of the program the executor works in right after its initials,
   expect(idle.querySelector('.pm')).toBeNull();
 });
 
+/* Each program has a mark of its own, named after it. */
+it.each([['claude', 'Claude'], ['codex', 'Codex'], ['kimi', 'Kimi'], ['glm', 'GLM'], ['antigravity', 'Antigravity']] as const)('draws the %s mark after the initials of an executor in it', (program, name) => {
+  const rows = { selected: null, onOpenTask: vi.fn(), programOf: () => program };
+  render(<LanguageProvider><TrackerList tasks={[task()]} all={[task()]} rows={rows} empty="Empty" /></LanguageProvider>);
+  const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
+  const logo = within(row).getByRole('img', { name });
+  expect(logo).toHaveClass('pm', program);
+  expect(logo.querySelector('path, rect, circle')).toBeInTheDocument();
+  expect(within(row).getByRole('img', { name: executor.name }).nextElementSibling).toBe(logo);
+});
+
 it('reads each task across one line and shows a late date', () => {
   list([task({ dueAt: '2020-01-01T00:00:00.000Z' })]);
   expect(screen.getByText('Name', { selector: '.tr-head span' })).toBeInTheDocument();
