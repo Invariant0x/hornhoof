@@ -1,9 +1,10 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import type { TaskLine } from '../src/types';
-import { TrackerList } from '../src/ui/TrackerViews';
+import type { Load } from '../src/ui/Loading';
+import { HeldList, snapFailRoom, TrackerList } from '../src/ui/TrackerViews';
 import { decl } from './css';
 import { taskRoute } from './task-route';
 
@@ -296,4 +297,103 @@ it('keeps goal cards out of the task list', () => {
   list([task()]);
   expect(screen.queryByRole('progressbar')).toBeNull();
   expect(document.querySelector('.tr-goals')).toBeNull();
+});
+
+/* #1844: slow and failed notices overlay from the first held row's top edge while row 0 keeps its row height, so held rows
+   under it never shift (deltaY === 0). */
+it('keeps held skeleton rows stationary when a load turns slow or fails', async () => {
+  const user = userEvent.setup();
+  expect.soft(decl('.tr-held .tr-rows', 'align-content')).toBe('start');
+  expect.soft(decl('.tr-held .tr-row-line > .load-busy', 'min-block-size')).toBe('var(--row)');
+  expect.soft(decl('.tr-held .tr-row-line:has(> .tr-held-fail)::before', 'min-block-size')).toBe('var(--row)');
+  expect.soft(decl('.tr-held .tr-row-line > .tr-held-fail', 'position')).toBe('absolute');
+  expect.soft(decl('.tr-held .tr-row-line > .tr-held-fail', 'inset-block-start')).toBe('0');
+  expect.soft(decl('.tr-held .tr-row-line > .tr-held-fail', 'inset-inline')).toBe('0');
+  expect.soft(decl('.tr-held .tr-row-line > .tr-held-fail', 'background')).toBe('var(--bg)');
+  expect.soft(decl('.tr-held .tr-row-line > .tr-held-fail', 'border-block-end')).toBe('1px solid var(--line)');
+  expect.soft(decl('.tr-held .tr-row-line > .load-fail', 'grid-column')).toBeUndefined();
+
+  const retry = vi.fn();
+  const makeLoad = (phase: Load['phase'], failure: unknown = null): Load => ({ phase, ring: phase === 'loading', failure, asked: 0, retry });
+  const { container, rerender } = render(<LanguageProvider><HeldList rows={6} load={makeLoad('loading')} /></LanguageProvider>);
+  expect(container.querySelectorAll('.tr-held .tr-rows > .tr-row')).toHaveLength(6);
+  expect(container.querySelector('.tr-held .tr-row:first-child .load-busy')).not.toBeNull();
+  expect(container.querySelector('.tr-held .tr-held-fail')).toBeNull();
+
+  rerender(<LanguageProvider><HeldList rows={6} load={makeLoad('slow')} /></LanguageProvider>);
+  expect(container.querySelectorAll('.tr-held .tr-rows > .tr-row')).toHaveLength(6);
+  expect(container.querySelector('.tr-held .tr-row:first-child > .tr-row-line > .tr-held-fail > .load-fail.slow')).not.toBeNull();
+  expect(container.querySelector('.tr-held .load-busy')).toBeNull();
+
+  rerender(<LanguageProvider><HeldList rows={6} load={makeLoad('failed', new Error('boom'))} /></LanguageProvider>);
+  expect(container.querySelectorAll('.tr-held .tr-rows > .tr-row')).toHaveLength(6);
+  expect(container.querySelector('.tr-held .tr-row:first-child > .tr-row-line > .tr-held-fail > .load-fail:not(.slow)')).not.toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(retry).toHaveBeenCalledTimes(1);
+});
+
+it('snaps the stalled notice band to the next held row border, or holds room in the list when it holds fewer rows', () => {
+  expect(snapFailRoom(135, [37, 74, 111, 148, 185])).toEqual({ band: 148, rows: null });
+  expect(snapFailRoom(111.4, [37, 74, 111, 148])).toEqual({ band: 111, rows: null });
+  expect(snapFailRoom(135.2, [37, 74])).toEqual({ band: null, rows: 136 });
+  expect(snapFailRoom(0, [37, 74])).toEqual({ band: null, rows: null });
+});
+
+it('measures and observes stalled notice room on row borders and short lists', () => {
+  const observerBox: { run?: ResizeObserverCallback } = {};
+  const observed: Element[] = [];
+  const disconnect = vi.fn();
+  class FakeResizeObserver {
+    constructor(cb: ResizeObserverCallback) { observerBox.run = cb; }
+    observe(el: Element) { observed.push(el); }
+    unobserve() {}
+    disconnect() { disconnect(); }
+  }
+  vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+  let cardHeight = 122;
+  const rect = (top: number, height: number): DOMRect =>
+    ({ top, bottom: top + height, height, left: 0, right: 400, width: 400, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.classList.contains('tr-rows')) return rect(100, 222);
+    if (this.classList.contains('tr-row')) {
+      const i = [...(this.parentElement?.children ?? [])].indexOf(this);
+      return rect(100 + i * 37, 37);
+    }
+    if (this.classList.contains('load-fail')) return rect(106, cardHeight);
+    return rect(0, 0);
+  });
+  const origStyle = window.getComputedStyle.bind(window);
+  const styleSpy = vi.spyOn(window, 'getComputedStyle').mockImplementation((el: Element) => {
+    if (el instanceof HTMLElement && el.classList.contains('tr-held-fail')) {
+      return { paddingTop: '6px', paddingBottom: '6px', borderBottomWidth: '1px' } as CSSStyleDeclaration;
+    }
+    return origStyle(el);
+  });
+  try {
+    const load: Load = { phase: 'slow', ring: false, failure: null, asked: 0, retry: vi.fn() };
+    const { container, rerender, unmount } = render(<LanguageProvider><HeldList rows={6} load={load} /></LanguageProvider>);
+    const fail = container.querySelector<HTMLElement>('.tr-held-fail')!;
+    const rows = container.querySelector<HTMLElement>('.tr-held .tr-rows')!;
+    expect(fail.style.minBlockSize).toBe('148px');
+    expect(rows.style.minBlockSize).toBe('');
+    expect(observed).toContain(rows);
+    expect(observed).toContain(fail.firstElementChild);
+
+    cardHeight = 150;
+    act(() => { observerBox.run?.([], {} as ResizeObserver); });
+    expect(container.querySelector<HTMLElement>('.tr-held-fail')!.style.minBlockSize).toBe('185px');
+
+    rerender(<LanguageProvider><HeldList rows={2} load={{ ...load, phase: 'failed', failure: new Error('boom') }} /></LanguageProvider>);
+    expect(container.querySelector<HTMLElement>('.tr-held-fail')!.style.minBlockSize).toBe('');
+    expect(container.querySelector<HTMLElement>('.tr-held .tr-rows')!.style.minBlockSize).toBe('163px');
+
+    rerender(<LanguageProvider><HeldList rows={2} load={{ ...load, phase: 'loading', ring: true }} /></LanguageProvider>);
+    expect(container.querySelector<HTMLElement>('.tr-held .tr-rows')!.style.minBlockSize).toBe('');
+    expect(disconnect).toHaveBeenCalled();
+    unmount();
+  } finally {
+    rectSpy.mockRestore();
+    styleSpy.mockRestore();
+    vi.unstubAllGlobals();
+  }
 });
