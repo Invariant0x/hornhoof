@@ -25,9 +25,9 @@ export class LineTail {
     { fromEnd = false, empty = false }: { fromEnd?: boolean; empty?: boolean } = {},
   ) {
     const size = fromEnd ? sizeOf(file) : 0;
-    this.offset = size ?? 0;
+    this.offset = typeof size === 'number' ? size : 0;
     this.waitsForFile = empty;
-    this.known = empty || (fromEnd && size !== null);
+    this.known = empty || (fromEnd && typeof size === 'number');
   }
 
   /* None while it does not know where the file ends, or the start of a line it read is not ended yet. */
@@ -41,8 +41,8 @@ export class LineTail {
 
   read(): string[] {
     const size = sizeOf(this.file);
-    if (size === null) {
-      this.missed();
+    if (typeof size !== 'number') {
+      this.missed(size === 'missing');
       return [];
     }
     this.known = true;
@@ -63,8 +63,10 @@ export class LineTail {
     return bytes.subarray(0, end).toString('utf8').split('\n').filter(l => l.trim());
   }
 
-  private missed(): void {
-    if (this.waitsForFile) return;
+  /* A new session's log that is not there yet keeps its known start; a look that failed otherwise, at a log that may be
+     there for all the node can tell, leaves no known end. */
+  private missed(missing = false): void {
+    if (this.waitsForFile && missing) return;
     this.known = false;
     this.failed++;
   }
@@ -79,11 +81,12 @@ function readAt(file: string, buf: Buffer, at: number): number {
   }
 }
 
-function sizeOf(file: string): number | null {
+/* The size of a file, or that it is not there, or that it could not be looked at for another reason. */
+function sizeOf(file: string): number | 'missing' | 'unseen' {
   try {
     return statSync(file).size;
-  } catch {
-    return null;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unseen';
   }
 }
 
