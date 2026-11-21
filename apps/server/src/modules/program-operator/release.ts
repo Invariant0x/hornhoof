@@ -48,7 +48,7 @@ export async function releaseRecoveryHold(ctx: Ctx, caller: OperatorCaller, inpu
 }
 
 async function refusalNow(ctx: Ctx, row: Case, state: OperatorRecoveryState | null): Promise<Refusal | null> {
-  const seen = recoveryScreenRefusal(state, true);
+  const seen = recoveryScreenRefusal(state);
   if (seen) return seen;
   if (await runsATurn(ctx, row.agentId)) return 'program_busy';
   return await liveSubscription(ctx, row.agentId) ? null : 'no_plan';

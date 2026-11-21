@@ -12,7 +12,7 @@ type Case = typeof programOperatorCases.$inferSelect;
 const reachedNode = or(
   isNotNull(jobs.startedAt),
   eq(jobs.status, 'running'),
-  and(eq(jobs.status, 'queued'), or(isNotNull(jobs.nodeId), isNotNull(jobs.builtinMachine))),
+  and(eq(jobs.status, 'queued'), isNotNull(jobs.nodeId)),
 );
 
 const noProgramState = (row: Case): OperatorRecoveryState => ({
@@ -45,6 +45,7 @@ async function latestJobNodeOnPlan(ctx: Ctx, row: Case, subscriptionId: string):
   const [lastJob] = await ctx.db
     .select({ nodeId: jobs.nodeId })
     .from(jobs)
+    .innerJoin(nodes, and(eq(nodes.id, jobs.nodeId), eq(nodes.subscriptionId, subscriptionId), liveNode))
     .where(and(eq(jobs.agentId, row.agentId), eq(jobs.companyId, row.companyId), eq(jobs.kind, 'conversation'), eq(jobs.subscriptionId, subscriptionId), isNotNull(jobs.nodeId), reachedNode))
     .orderBy(desc(jobs.createdAt))
     .limit(1);
@@ -56,7 +57,7 @@ async function recoveryNodeId(ctx: Ctx, row: Case, subscriptionId: string, agent
   if (placed && (!samePlan || placed !== row.nodeId)) return placed;
   const recent = await latestJobNodeOnPlan(ctx, row, subscriptionId);
   if (recent) return recent;
-  return samePlan ? row.nodeId : null;
+  return samePlan ? liveNodeOnPlan(ctx, row.nodeId, subscriptionId) : null;
 }
 
 /* Ask the employee's current node rather than a stale case.nodeId left behind after a plan or node switch. */
@@ -79,17 +80,16 @@ export function unavailableOperatorHold(row: Case): boolean {
 const screenBusy = (state: OperatorRecoveryState): boolean =>
   state.runningTool || state.retrying || state.busy;
 
-const inputAllowed = (input: OperatorRecoveryState['input'], replaceHornhoofInput: boolean): boolean =>
-  input === 'empty' || (replaceHornhoofInput && input === 'hornhoof');
+const READY_INPUT = new Set<OperatorRecoveryState['input']>(['empty', 'hornhoof']);
 
-/* Only what the node sees right now counts. Manual release can also replace Hornhoof's own unsent words. */
-export function recoveryScreenRefusal(state: OperatorRecoveryState | null, replaceHornhoofInput = false): OperatorError | null {
+/* Only what the node sees right now counts. Hornhoof's own unsent words are replaced when the saved words continue. */
+export function recoveryScreenRefusal(state: OperatorRecoveryState | null): OperatorError | null {
   if (!state) return 'node_unavailable';
   if (state.program === 'gone') return null;
   if (state.wait === 'protected') return 'protected_screen';
   if (state.wait) return 'input_not_proven';
   if (screenBusy(state)) return 'program_busy';
-  return inputAllowed(state.input, replaceHornhoofInput) ? null : 'input_not_proven';
+  return READY_INPUT.has(state.input) ? null : 'input_not_proven';
 }
 
 export async function operatorRecoveryHolds(ctx: Ctx, agentId: string): Promise<boolean> {
