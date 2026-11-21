@@ -15,6 +15,8 @@ const Bytes = z.number().int().min(0);
 /* How many of its latest removals a node names, and how many of the copies it keeps. */
 export const DISK_CLEANED_MAX = 50;
 export const DISK_KEPT_MAX = 50;
+/* How many of the paths git ignores and no remote has a copy that stays for them names. */
+export const DISK_IGNORED_MAX = 20;
 
 /* A node's disk, in bytes: the total and free space of the disk its folders are on, and the free space it needs there to
    take heavy work, which it works out from a share of the disk and an amount. docker: the same of Docker's own disk, where
@@ -35,7 +37,7 @@ export const DiskReport = z.object({
   low: z.object({ since: z.iso.datetime() }).nullable(),
   cleaned: z.array(z.object({ part: DiskPart, bytes: Bytes, at: z.iso.datetime() })).max(DISK_CLEANED_MAX),
   kept: z
-    .array(z.object({ part: DiskPart, agent: z.string().max(64), path: z.string().max(300), task: z.number().int().positive().nullable(), bytes: Bytes, why: z.enum(['uncommitted', 'unpushed']) }))
+    .array(z.object({ part: DiskPart, agent: z.string().max(64), path: z.string().max(300), task: z.number().int().positive().nullable(), bytes: Bytes, why: z.enum(['uncommitted', 'unpushed', 'ignored']), ignored: z.array(z.string().max(300)).max(DISK_IGNORED_MAX).optional() }))
     .max(DISK_KEPT_MAX)
     .optional(),
 });
