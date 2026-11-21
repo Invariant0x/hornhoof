@@ -8,6 +8,7 @@ import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { REPORT_MAX } from '../backups/types.js';
 import { holdsData } from '../copies/holds.js';
+import { noteReplicaBytes } from '../copies/measured.js';
 import { copyOrder } from '../copies/slots.js';
 import { isPrivate } from '../keeper/addresses.js';
 import { TABLE_SYNC_SLOT } from '../keeper/slots.js';
@@ -68,6 +69,7 @@ const ReportBody = z.object({
       left: z.array(z.string().regex(TABLE_SYNC_SLOT)).max(200).optional(),
     })
     .optional(),
+  replicaBytes: z.number().int().min(0).optional().catch(undefined),
   /* A machine that stopped holding the data holds nothing of it any more. */
   wiped: z.literal(true).optional(),
   /* What the server order is scored on, as the machine itself measures it over a day: the round trip of its hellos to
@@ -219,7 +221,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
      alone, which has none else: a computer someone joined said its name then. */
   app.post('/api/network/report', async (req, reply) => {
     const who = await requireKeeper(req);
-    const { hostname, update, pin, copy, wiped, fsyncP99Ms, ...told } = ReportBody.parse(req.body ?? {});
+    const { hostname, update, pin, copy, wiped, replicaBytes, fsyncP99Ms, ...told } = ReportBody.parse(req.body ?? {});
     /* A keeper that just started has not timed its disk yet: the row keeps the last it said. */
     const said = { ...told, ...(fsyncP99Ms == null ? {} : { fsyncP99Ms }) };
     const machine = await machineOf(who);
@@ -256,8 +258,16 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
         );
       }
       /* Its turn to install is over once it says so: it runs the build, or the install failed. */
-      return { installed: Boolean(row && after && installs(row, now) && !installs(after, now)), looked: pin !== undefined && pin !== row?.ownerPin, companyId: row?.companyId };
+      return {
+        installed: Boolean(row && after && installs(row, now) && !installs(after, now)),
+        looked: pin !== undefined && pin !== row?.ownerPin,
+        companyId: row?.companyId,
+        measured: !who.own && (row?.role === 'data' || Boolean(row?.uploadState)),
+        wiped: 'uploadState' in left,
+      };
     });
+    if (installed.wiped) noteReplicaBytes(ctx, machine.id, null);
+    else if (installed.measured && replicaBytes !== undefined) noteReplicaBytes(ctx, machine.id, replicaBytes);
     if (installed.installed) void releaseHeld(ctx);
     /* The screens load the machine again when its pinned key changes. */
     if (installed.looked && installed.companyId) ctx.bus.publish(installed.companyId, { type: 'computer' });
@@ -293,7 +303,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
      The link's secrets go only into an answer that travels over TLS. */
   app.post('/api/network/join', async req => {
     const { machine, role, issued, authorityPem } = await redeemTicket(ctx, JoinBody.parse(req.body));
-    const view = viewFor(await workerView(ctx, machine), await cameOverHttps(req, config));
+    const view = viewFor(await workerView(ctx, machine, role), await cameOverHttps(req, config));
     return { machine, role, certPem: issued.certPem, authorityPem, until: issued.until.toISOString(), view };
   });
 
