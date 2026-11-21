@@ -196,7 +196,8 @@ export function forgetOrg(): void {
 }
 
 /* The company as /api/org shows it, kept fresh from the live stream; a screen asks for it again only while enabled. */
-export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
+/* load: asks for the company again, as Try again does. */
+export function useOrg(enabled = true): { org: Org | null; failure: unknown; load: () => void } {
   const [org, setOrg] = useState<Org | null>(() => known);
   const [failure, setFailure] = useState<unknown>(null);
   const mounted = useRef(true);
@@ -237,5 +238,5 @@ export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
     return askWith(err => mounted.current && setFailure(err));
   }, [enabled]);
 
-  return { org, failure };
+  return { org, failure, load };
 }
