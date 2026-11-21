@@ -247,4 +247,21 @@ describe('a branch holds a commit, however many files lie between them', () => {
     expect(await branchHolds(ctx, at, head, sha)).toBe(true);
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
+
+  it('holds requests back for a minute where the reset GitHub names has already passed by the server clock', async () => {
+    const resetAt = Date.UTC(2030, 0, 1, 23, 45);
+    let now = resetAt + 5_000;
+    const warned = vi.fn();
+    const githubLimits = new GitHubLimits(() => now, warned, vi.fn());
+    const fetcher = vi.fn(async () => new Response(null, { status: 403, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(resetAt / 1000) } }));
+    vi.stubGlobal('fetch', fetcher);
+    const ctx = githubReaders(githubLimits);
+    await expect(ctx.readMerged(at, { base: 'main', head: sha })).rejects.toThrow('23:45 UTC');
+    await expect(ctx.readMerged(at, { base: 'main', head: sha })).rejects.toThrow('23:45 UTC');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(warned).toHaveBeenCalledOnce();
+    now += 60_000;
+    await expect(ctx.readMerged(at, { base: 'main', head: sha })).rejects.toThrow('23:45 UTC');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
 });
