@@ -59,6 +59,7 @@ describe('Ancient Egypt original CC0 icon set', () => {
     );
 
     const { container, rerender } = render(view());
+    const cyberpunkNode = container.cloneNode(true);
     const cyberpunkMarkup = container.innerHTML;
     expect(container.querySelectorAll('svg')).toHaveLength(25);
     expect([...container.querySelectorAll('svg')].every(svg => svg.getAttribute('aria-hidden') === 'true')).toBe(true);
@@ -73,7 +74,7 @@ describe('Ancient Egypt original CC0 icon set', () => {
 
     chooseSkin('cyberpunk');
     rerender(view());
-    expect(container.innerHTML).toBe(cyberpunkMarkup);
+    expect(container.isEqualNode(cyberpunkNode)).toBe(true);
     expect(container.querySelectorAll('svg[data-icon-set="egypt"]')).toHaveLength(0);
   });
 });
