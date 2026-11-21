@@ -1140,6 +1140,8 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .machine-actions .lend { margin-right: 4px; }
 @media (max-width: 760px) {
   .pool-facts { grid-template-rows: repeat(4, auto); grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-columns: auto; }
+  /* While the initial load stalls or fails on a narrow screen, keep the held pool below the held table so the error and Retry stay in view. */
+  .machines:has(.held-table .load-fail) > .held-pool { order: 1; }
 }
 @media (max-width: 420px) {
   .facts { grid-template-columns: 1fr; gap: 0; }
@@ -2404,9 +2406,12 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-held .tr-status-dot { border-color: var(--idle); }
 .tr-held .tr-title { display: flex; flex: 1 1 auto; align-items: center; }
 .tr-held .tr-group-toggle { cursor: default; }
-.tr-held .tr-row-line > .load-busy { grid-column: 1 / -1; padding-inline: 8px; }
-/* Past 10 s or once failed, the block that says so stands in the first held row, over the whole width (Design #1656). */
-.tr-held .tr-row-line > .load-fail { grid-column: 1 / -1; margin-block: 6px; }
+.tr-held .tr-rows { align-content: start; }
+.tr-held .tr-row-line > .load-busy { grid-column: 1 / -1; min-block-size: var(--row); padding-inline: 8px; }
+/* Past 10 s or once failed, the block that says so sits over the first held rows from the top edge while row 0 keeps its
+   row height, so the held rows under it never shift (Design #1656, #1844). */
+.tr-held .tr-row-line:has(> .tr-held-fail)::before { content: ''; grid-column: 1 / -1; min-block-size: var(--row); }
+.tr-held .tr-row-line > .tr-held-fail { position: absolute; inset-block-start: 0; inset-inline: 0; z-index: 2; padding: 6px 0; background: var(--bg); border-block-end: 1px solid var(--line); }
 /* A task's card while its details come: a held line of its path, and the details as a tail (ui/TaskPanel.tsx HeldTask). */
 .tp-path-held { min-block-size: var(--tracker-target-fine); }
 .tp-path-held::after { content: none; }
