@@ -35,7 +35,7 @@ describe('Ancient Egypt original CC0 icon set', () => {
         <PeopleIcon />
         <MachineIcon />
         <PlugIcon />
-        <PayIcon kind="subscription" />
+        <PayIcon kind="personal" />
         <PayIcon kind="api_key" />
         <AlertIcon />
         <TrackerIcon name="mine" />
