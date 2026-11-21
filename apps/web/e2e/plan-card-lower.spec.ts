@@ -297,8 +297,14 @@ for (const width of [1440, 375]) {
     expect(errors).toEqual([]);
   });
 
-  test(`asks before removing in place of the foot, and gives the focus back to Remove on cancel, in ${lookName(look)}`, async ({ page, browserName }, info) => {
+  test(`confirms removal without moving the foot, and restores focus on No, in ${lookName(look)}`, async ({ page, browserName }, info) => {
     const { card, errors } = await opened(page, look);
+    let deletions = 0;
+    await page.route('**/api/subscriptions/s-kimi', route => {
+      if (route.request().method() !== 'DELETE') return route.fallback();
+      deletions++;
+      return route.fulfill({ status: 204 });
+    });
     const foot = card.locator('.plan-card-actions');
     const remove = foot.getByRole('button', { name: en.subs.removeLabel('Kimi'), exact: true });
     /* Where a piece stands in the card, which keeps its place however far the page scrolled to show the focus. */
@@ -306,15 +312,20 @@ for (const width of [1440, 375]) {
     await remove.focus();
     const before = await inCard(foot.locator('.form-foot'));
     await page.keyboard.press('Enter');
-    await expect(foot.getByText(en.subs.removeAsk('Kimi'))).toBeVisible();
-    await expect(foot.locator('.form-foot')).toHaveCount(0);
-    expect(Math.abs(await inCard(foot.locator('.ask')) - before), 'the question stands where the foot stood').toBeLessThanOrEqual(1);
-    const cancel = foot.getByRole('button', { name: en.common.cancel, exact: true });
+    const question = page.getByRole('alertdialog', { name: 'Are you sure?' });
+    expect(await question.count()).toBe(1);
+    await expect(question).toContainText(en.subs.removeAsk('Kimi'));
+    expect(Math.abs(await inCard(foot.locator('.form-foot')) - before)).toBeLessThanOrEqual(1);
+    const cancel = question.getByRole('button', { name: 'No', exact: true });
     await expect(cancel).toBeFocused();
-    await foot.screenshot({ path: info.outputPath(`remove-question-${fileName(look)}-${browserName}.png`) });
+    await question.screenshot({ path: info.outputPath(`remove-question-${fileName(look)}-${browserName}.png`) });
     await page.keyboard.press('Enter');
-    await expect(foot.locator('.form-foot')).toHaveCount(1);
+    await expect(question).toHaveCount(0);
     await expect(remove).toBeFocused();
+    expect(deletions).toBe(0);
+    await remove.click();
+    await question.getByRole('button', { name: 'Yes', exact: true }).click();
+    await expect.poll(() => deletions).toBe(1);
     expect(errors).toEqual([]);
   });
 
@@ -348,6 +359,33 @@ for (const width of [1440, 375]) {
       en.subs.fallbackAddLabel('Kimi, Ivan'),
       en.subs.runTestLabel('Kimi'), en.subs.useForOrchestratorLabel('Kimi'), en.subs.pasteKeyLabel('Kimi'), en.subs.removeLabel('Kimi'),
     ]);
+    expect(errors).toEqual([]);
+  });
+}
+
+for (const action of ['fallback', 'orchestrator'] as const) {
+  test(`confirms a plan change for ${action}`, async ({ page }) => {
+    const look: Look = { lang: 'en', theme: 'light', width: 1440, dir: 'ltr' };
+    const { card, errors } = await opened(page, look);
+    const endpoint = action === 'fallback' ? '/api/subscriptions/s-kimi' : '/api/subscriptions/s-kimi/orchestrator';
+    const method = action === 'fallback' ? 'PATCH' : 'POST';
+    let writes = 0;
+    await page.route(`**${endpoint}`, route => {
+      if (route.request().method() !== method) return route.fallback();
+      writes++;
+      return route.fulfill({ json: { subscription: { ...KIMI, fallbacks: CHOSEN.slice(1), isOrchestrator: action === 'orchestrator' } } });
+    });
+    const trigger = card.getByRole('button', { name: action === 'fallback' ? en.subs.fallbackRemoveLabel('Claude, Design team') : en.subs.useForOrchestratorLabel('Kimi'), exact: true });
+    const write = page.waitForRequest(req => req.method() === method && new URL(req.url()).pathname === endpoint);
+    const question = page.getByRole('alertdialog', { name: 'Are you sure?' });
+    await trigger.click();
+    expect(await Promise.race([question.waitFor().then(() => 'question'), write.then(() => 'request')])).toBe('question');
+    await expect(question).toContainText(action === 'fallback' ? 'Claude, Design team' : 'Kimi');
+    await question.getByRole('button', { name: 'No', exact: true }).click();
+    expect(writes).toBe(0);
+    await trigger.click();
+    await question.getByRole('button', { name: 'Yes', exact: true }).click();
+    await expect.poll(() => writes).toBe(1);
     expect(errors).toEqual([]);
   });
 }

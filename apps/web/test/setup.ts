@@ -16,6 +16,12 @@ vi.setConfig({ expect: { poll: { timeout: NO_LIMIT } } });
 const waitFor = vi.waitFor;
 vi.waitFor = ((callback, options) => waitFor(callback, { ...(typeof options === 'number' ? {} : options), timeout: NO_LIMIT })) as typeof vi.waitFor;
 
+/* jsdom has the element and its open property. Chromium tests exercise the modal behavior. */
+Object.defineProperties(HTMLDialogElement.prototype, {
+  showModal: { configurable: true, value(this: HTMLDialogElement) { this.open = true; } },
+  close: { configurable: true, value(this: HTMLDialogElement) { this.open = false; } },
+});
+
 /* A person's key in the tests: kept in memory, made with Node's own crypto and few rounds, and gone after each test. */
 const kept: { key: DeviceKey | null } = { key: null };
 keyDefaults.store = { get: async () => kept.key, put: async key => void (kept.key = key), clear: async () => void (kept.key = null) };

@@ -5,6 +5,7 @@ import type { SettingsGroup } from '../routes';
 import { useLive } from '../tasks';
 import type { Me, PersonView, TlsView } from '../types';
 import { CopyButton } from '../ui/CopyButton';
+import { useConfirmAction } from '../ui/ConfirmAction';
 import { takeEscape } from '../ui/escape';
 import { Field } from '../ui/Field';
 import { INTEGRATIONS, Integrations } from '../ui/Integrations';
@@ -59,11 +60,17 @@ function NameForm({ me, onRenamed }: { me: Me; onRenamed?: (name: string) => voi
   const [name, setName] = useState(me.person.name);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState('');
+  const confirmation = useConfirmAction();
 
-  async function save(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) return setFailure(t.profile.nameRequired);
+    if (trimmed === me.person.name) return void save(trimmed);
+    confirmation.ask({ action: t.confirmAction.rename(me.person.name, trimmed), onYes: () => void save(trimmed) });
+  }
+
+  async function save(trimmed: string) {
     setBusy(true);
     setFailure('');
     try {
@@ -79,7 +86,7 @@ function NameForm({ me, onRenamed }: { me: Me; onRenamed?: (name: string) => voi
 
   return (
     <section className="settings-part" aria-label={t.settings.groups.profile}>
-      <form className="settings-form" noValidate onSubmit={e => void save(e)}>
+      <form className="settings-form" noValidate onSubmit={submit}>
         <Field label={t.common.name} problem={failure || undefined}>
           {p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} required />}
         </Field>
@@ -87,6 +94,7 @@ function NameForm({ me, onRenamed }: { me: Me; onRenamed?: (name: string) => voi
           <button className="btn small" type="submit" disabled={busy}>{t.common.save}</button>
         </div>
       </form>
+      {confirmation.question}
     </section>
   );
 }
@@ -132,7 +140,8 @@ function Encryption({ tls }: { tls: TlsView | null }) {
 function CompanyLink() {
   const t = useT();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [mode, setMode] = useState<'view' | 'edit' | 'remove'>('view');
+  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  const confirmation = useConfirmAction();
   const [name, setName] = useState('');
   const [state, setState] = useState<NameState>('empty');
   const [busy, setBusy] = useState(false);
@@ -163,6 +172,19 @@ function CompanyLink() {
   const remove = () => run(async () => (await api.del('/api/link'), null));
   const check = (n: string) => api.get<NameCheck>(`/api/link/names/${encodeURIComponent(n)}`);
   const link = loaded?.link ?? null;
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!link || link.name === name) {
+      void save();
+      return;
+    }
+    confirmation.ask({
+      action: t.confirmAction.publicLink(link.url, `${name}.${loaded?.domain ?? ''}`),
+      warnings: [t.settings.moveNote],
+      onYes: () => void save(),
+    });
+  }
+
   if (unavailableFailure(loadFailure) || unavailableFailure(failure)) return null;
 
   return (
@@ -178,39 +200,26 @@ function CompanyLink() {
                 <CopyButton text={link.url} />
               </div>
               <Encryption tls={loaded.tls ?? null} />
-              {mode === 'remove' ? (
-                <div className="settings-actions">
-                  <span className="entry-main">{t.settings.removeAsk(link.url)}</span>
-                  <div className="entry-actions" role="group" aria-label={t.settings.removeAsk(link.url)}>
-                    <button className="btn" type="button" disabled={busy} onClick={() => void remove()}>{t.settings.yesRemove}</button>
-                    <button className="btn ghost" type="button" onClick={() => setMode('view')}>{t.settings.keep}</button>
-                  </div>
-                </div>
-              ) : (
-                <div className="settings-actions">
-                  <button
-                    className="btn small ghost"
-                    type="button"
-                    onClick={() => {
-                      setName(link.name);
-                      setFailure(null);
-                      setMode('edit');
-                    }}
-                  >
-                    {t.settings.change}
-                  </button>
-                  <button className="btn small ghost danger" type="button" onClick={() => setMode('remove')}>{t.settings.remove}</button>
-                </div>
-              )}
+              <div className="settings-actions">
+                <button
+                  className="btn small ghost"
+                  type="button"
+                  onClick={() => {
+                    setName(link.name);
+                    setFailure(null);
+                    setMode('edit');
+                  }}
+                >
+                  {t.settings.change}
+                </button>
+                <button className="btn small ghost danger" type="button" disabled={busy}
+                  onClick={() => confirmation.ask({ action: t.settings.removeAsk(link.url), onYes: () => void remove() })}>
+                  {t.settings.remove}
+                </button>
+              </div>
             </>
           ) : (
-            <form
-              className="settings-form"
-              onSubmit={e => {
-                e.preventDefault();
-                void save();
-              }}
-            >
+            <form className="settings-form" onSubmit={submit}>
               {!link && <p>{t.settings.closed}</p>}
               <LinkName name={name} onName={setName} domain={loaded.domain} check={check} onState={setState} current={link?.name} startRandom={!link} />
               {link && <p className="update-note">{t.settings.moveNote}</p>}
@@ -224,6 +233,7 @@ function CompanyLink() {
       )}
       <LoadFailure failure={loadFailure} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      {confirmation.question}
     </>
   );
 }

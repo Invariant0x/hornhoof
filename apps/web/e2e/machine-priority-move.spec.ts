@@ -10,6 +10,9 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
   const shot = (name: string) => `${name}-${language}-${theme}-${width}.png`;
   const card = (page: Page, hostname: string) => page.getByRole('article', { name: hostname });
   const open = (page: Page, hostname: string) => page.getByRole('button', { name: `${w.open} ${hostname}`, exact: true }).click();
+  const prompt = (page: Page) => page.getByRole('alertdialog', { name: language === 'en' ? 'Are you sure?' : 'Вы действительно хотите это сделать?' });
+  const yesButton = (page: Page) => prompt(page).getByRole('button', { name: language === 'en' ? 'Yes' : 'Да', exact: true });
+  const noButton = (page: Page) => prompt(page).getByRole('button', { name: language === 'en' ? 'No' : 'Нет', exact: true });
 
   test(`asks before it moves the server, and says how a move goes, ${place}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height });
@@ -20,33 +23,35 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await expect(here).toBeVisible();
     expect(await within(here, target)).toBe(true);
     await here.click();
-    /* The question takes the button's place, with its answers inside the card and the focus on the first. */
-    const question = target.getByText(w.ask(LONG));
-    const [yes, cancel] = [target.getByRole('button', { name: w.yes, exact: true }), target.getByRole('button', { name: w.cancel, exact: true })];
-    await expect(question).toBeVisible();
-    await expect(yes).toBeFocused();
-    for (const one of [question, yes, cancel]) expect(await within(one, target)).toBe(true);
+    const question = prompt(page);
+    expect(await question.count()).toBe(1);
+    await expect(question).toContainText(w.ask(LONG));
+    const [yes, cancel] = [yesButton(page), noButton(page)];
+    await expect(cancel).toBeFocused();
+    for (const one of [yes, cancel]) expect(await within(one, question)).toBe(true);
     /* Each answer is large enough to press with a finger, and the two do not lie on each other. */
     const [a, b] = [await box(yes), await box(cancel)];
     expect(Math.round(Math.min(a.height, b.height))).toBeGreaterThanOrEqual(44);
     expect(a.x + a.width <= b.x + 1 || a.y + a.height <= b.y + 1).toBe(true);
     expect(await noSideScroll(page)).toBe(true);
     await page.screenshot({ path: info.outputPath(shot('move-ask')), fullPage: true });
-    /* A refusal is said under the answers, inside the card. */
+    await cancel.click();
+    await expect(here).toBeFocused();
+    expect(sent).toEqual([]);
+    await here.click();
+    /* A refusal is still said inside the card. */
     await yes.click();
     const refusal = target.getByText(w.updating);
     await expect(refusal).toBeVisible();
     expect(await within(refusal, target)).toBe(true);
     expect(sent).toEqual([{ path: '/api/machines/m3/move', body: 'POST' }]);
     await page.screenshot({ path: info.outputPath(shot('move-refused')), fullPage: true });
-    /* Cancel gives the focus back to the button. */
-    await cancel.click();
-    await expect(here).toBeFocused();
+    await expect(question).toHaveCount(0);
   });
 
   test(`shows a move that waits for its copy, ${place}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height });
-    await openMachines(page, language, theme, undefined, { machine: 'm3', state: 'preparing', reason: null, leader: 'rack-01', progress: 40 });
+    const sent = await openMachines(page, language, theme, undefined, { machine: 'm3', state: 'preparing', reason: null, leader: 'rack-01', progress: 40 });
     await open(page, LONG);
     const target = card(page, LONG);
     const [line, stop] = [target.getByText(w.waiting(LONG)), target.getByRole('button', { name: w.stop, exact: true })];
@@ -56,5 +61,14 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await expect(target.getByRole('button', { name: w.here, exact: true })).toHaveCount(0);
     expect(await noSideScroll(page)).toBe(true);
     await page.screenshot({ path: info.outputPath(shot('move-waiting')), fullPage: true });
+    const mutation = page.waitForRequest(req => req.method() === 'DELETE' && new URL(req.url()).pathname === '/api/machines/m3/move');
+    await stop.click();
+    expect(await Promise.race([prompt(page).waitFor().then(() => 'question'), mutation.then(() => 'request')])).toBe('question');
+    await expect(prompt(page)).toContainText(LONG);
+    await noButton(page).click();
+    expect(sent).toEqual([]);
+    await stop.click();
+    await yesButton(page).click();
+    await expect.poll(() => sent).toEqual([{ path: '/api/machines/m3/move', body: 'DELETE' }]);
   });
 }

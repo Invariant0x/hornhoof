@@ -360,6 +360,9 @@ select:disabled { opacity: .55; }
 }
 .dialog:focus { outline: none; }
 .dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dialog.confirm-action { position: fixed; inset: 0; margin: auto; max-inline-size: 100%; color: var(--ink); overflow-wrap: anywhere; }
+.dialog.confirm-action::backdrop { background: var(--scrim); }
+.confirm-action > ul { margin: 0; }
 .first-contact > *, .first-contact h2 { min-inline-size: 0; overflow-wrap: anywhere; }
 .versions-check { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .update-note { padding: 10px 12px; border-left: 3px solid var(--amber); background: var(--surface2); font-size: 13px; }

@@ -16,6 +16,7 @@ const iconOf = (element: HTMLElement) => element.querySelector('svg')!.outerHTML
 const drawn = (icon: ReactElement) => render(icon).container.innerHTML;
 
 const rowOf = (name: string) => screen.getByRole('row', { name: new RegExp(`^${name}\\b`) });
+const confirm = (user: ReturnType<typeof userEvent.setup>) => user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Yes', exact: true }));
 
 describe('People', () => {
   it('lists everyone with title, access and status', async () => {
@@ -149,6 +150,8 @@ describe('People', () => {
       expect(within(rowOf(name)).getAllByRole('button').map(b => b.textContent)).toEqual(['Edit']);
     }
     await user.click(within(rowOf('Sasha')).getByRole('button', { name: 'Disable Sasha' }));
+    expect(calls.some(c => c.method === 'PATCH')).toBe(false);
+    await confirm(user);
     expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/people/p3', body: { status: 'disabled' } });
   });
 
@@ -192,11 +195,12 @@ describe('deleting a person', () => {
     const user = userEvent.setup();
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Delete Sasha' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Delete Sasha for good?' });
+    const dialog = screen.getByRole('alertdialog', { name: 'Are you sure?' });
+    expect(dialog).toHaveAccessibleDescription(/Delete Sasha for good/);
     expect(dialog).toHaveAccessibleDescription(/cannot be undone/);
-    expect(dialog).toHaveFocus();
+    expect(within(dialog).getByRole('button', { name: 'No' })).toHaveFocus();
     expect(calls.some(c => c.method === 'DELETE')).toBe(false);
-    await user.click(within(dialog).getByRole('button', { name: 'Yes, delete' }));
+    await confirm(user);
     expect(calls.filter(c => c.method === 'DELETE')).toEqual([{ method: 'DELETE', path: '/api/people/p3', body: undefined }]);
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(screen.queryByRole('cell', { name: 'Sasha' })).not.toBeInTheDocument();
@@ -208,15 +212,15 @@ describe('deleting a person', () => {
     const user = userEvent.setup();
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Delete Ava' }));
-    expect(screen.getByRole('alertdialog', { name: 'Delete Ava for good?' })).toHaveAccessibleDescription(/key stops working and its own agent leaves the company/);
+    expect(screen.getByRole('alertdialog', { name: 'Are you sure?' })).toHaveAccessibleDescription(/Delete Ava for good.*key stops working and its own agent leaves the company/);
   });
 
-  it('leaves the person as they are on Cancel or Escape', async () => {
+  it('leaves the person as they are on No or Escape', async () => {
     const calls = mockApi({ ...lists, 'DELETE /api/people/p2': [204, undefined] });
     const user = userEvent.setup();
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Delete Maria' }));
-    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'No' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Delete Maria' }));
     await user.keyboard('{Escape}');
@@ -231,11 +235,11 @@ describe('deleting a person', () => {
     const user = userEvent.setup();
     render(<People me={ME} selected="p3" onSelect={onSelect} />);
     await user.click(await screen.findByRole('button', { name: 'Delete Maria' }));
-    await user.click(screen.getByRole('button', { name: 'Yes, delete' }));
+    await confirm(user);
     expect(screen.queryByRole('cell', { name: 'Maria' })).not.toBeInTheDocument();
     expect(onSelect).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Delete Sasha' }));
-    await user.click(screen.getByRole('button', { name: 'Yes, delete' }));
+    await confirm(user);
     expect(onSelect).toHaveBeenCalledWith(null);
   });
 
@@ -245,7 +249,7 @@ describe('deleting a person', () => {
     const user = userEvent.setup();
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Delete Maria' }));
-    await user.click(screen.getByRole('button', { name: 'Yes, delete' }));
+    await confirm(user);
     expect(await screen.findByRole('alert')).toHaveTextContent('maria-box runs the company server');
     expect(screen.getByRole('cell', { name: 'Maria' })).toBeInTheDocument();
   });
@@ -256,13 +260,14 @@ describe('deleting a person', () => {
     const user = userEvent.setup();
     render(<LanguageProvider><People me={ME} /></LanguageProvider>);
     await user.click(await screen.findByRole('button', { name: 'Удалить Sasha' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Удалить Sasha навсегда?' });
+    const dialog = screen.getByRole('alertdialog', { name: ru.confirmAction.question });
+    expect(dialog).toHaveAccessibleDescription(/Удалить Sasha навсегда/);
     expect(dialog).toHaveAccessibleDescription(/Отменить это нельзя/);
-    expect(within(dialog).getByRole('button', { name: 'Да, удалить' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: ru.common.cancel })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: ru.confirmAction.yes })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: ru.confirmAction.no })).toBeInTheDocument();
     await user.keyboard('{Escape}');
     await user.click(screen.getByRole('button', { name: 'Удалить Ava' }));
-    expect(screen.getByRole('alertdialog', { name: 'Удалить Ava навсегда?' })).toHaveAccessibleDescription(/ключ перестанет работать/);
+    expect(screen.getByRole('alertdialog', { name: ru.confirmAction.question })).toHaveAccessibleDescription(/Удалить Ava навсегда.*ключ перестанет работать/);
     localStorage.clear();
   });
 });
@@ -337,6 +342,7 @@ describe('People row actions', () => {
     await user.type(title, 'Head of social');
     await user.click(screen.getByRole('checkbox', { name: 'Marketing' }));
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await confirm(user);
     expect(calls.find(c => c.method === 'PATCH')).toEqual({
       method: 'PATCH',
       path: '/api/people/p3',
@@ -377,6 +383,7 @@ describe('the name in the edit form', () => {
     await retype(user, 'Name', '  Maria Ray  ');
     await retype(user, 'Title', 'COO');
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await confirm(user);
     expect(patched(calls)).toEqual({ method: 'PATCH', path: '/api/people/p2', body: { name: 'Maria Ray', title: 'COO', access: { whole: true } } });
     expect(await screen.findByRole('cell', { name: 'Maria Ray' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
@@ -386,6 +393,7 @@ describe('the name in the edit form', () => {
     const { calls, user } = await open(DEPUTY, 'Sasha', { 'PATCH /api/people/p3': [200, { person: { ...PEOPLE[2], name: 'Sasha Lee' } }] });
     await retype(user, 'Name', 'Sasha Lee');
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await confirm(user);
     expect(patched(calls)!.body).toMatchObject({ name: 'Sasha Lee' });
     expect(await screen.findByRole('cell', { name: 'Sasha Lee' })).toBeInTheDocument();
   });
@@ -395,6 +403,7 @@ describe('the name in the edit form', () => {
     expect(screen.queryByRole('checkbox', { name: 'Whole company' })).not.toBeInTheDocument();
     await retype(user, 'Name', 'Ivan R');
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await confirm(user);
     expect(patched(calls)!.body).toEqual({ name: 'Ivan R', title: 'CEO' });
   });
 
@@ -403,6 +412,7 @@ describe('the name in the edit form', () => {
     const { calls, user } = await open(LISTED, 'Sasha', { 'PATCH /api/people/p3': [200, { person: { ...PEOPLE[2], name: 'Sasha Lee' } }] }, onRenamed);
     await retype(user, 'Name', 'Sasha Lee');
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await confirm(user);
     expect(patched(calls)!.body).toEqual({ name: 'Sasha Lee', title: 'SMM' });
     expect(await screen.findByRole('cell', { name: 'Sasha Lee' })).toBeInTheDocument();
     expect(onRenamed).toHaveBeenCalledWith('Sasha Lee');
@@ -413,6 +423,7 @@ describe('the name in the edit form', () => {
     const { user } = await open(ME, 'Maria', { 'PATCH /api/people/p2': [200, { person: { ...PEOPLE[1], name: 'Maria Ray' } }] }, onRenamed);
     await retype(user, 'Name', 'Maria Ray');
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await confirm(user);
     expect(await screen.findByRole('cell', { name: 'Maria Ray' })).toBeInTheDocument();
     expect(onRenamed).not.toHaveBeenCalled();
   });
@@ -458,6 +469,7 @@ describe('the name in the edit form', () => {
     const { user } = await open(ME, 'Maria', { 'PATCH /api/people/p2': [403, { error: { code: 'forbidden', message: 'Only the CEO or the CEO delegate changes another person\'s name.', reason: 'owner_locked' } }] });
     await retype(user, 'Name', 'Maria Ray');
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await confirm(user);
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.getByLabelText('Name')).toHaveValue('Maria Ray');
     expect(within(rowOf('Maria')).queryByText('Maria Ray')).not.toBeInTheDocument();

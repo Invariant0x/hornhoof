@@ -97,6 +97,15 @@ export const en = {
     atLeast10: 'At least 10 characters.',
     useAtLeast10: 'Use at least 10 characters.',
   },
+  confirmAction: {
+    question: 'Are you sure?',
+    yes: 'Yes',
+    no: 'No',
+    rename: (from: string, to: string) => `Change the name from ${from} to ${to}.`,
+    access: (person: string, places: string) => `Change access for ${person} to ${places}.`,
+    deputy: (person: string, granted: boolean) => granted ? `Make ${person} the Deputy CEO.` : `Take Deputy CEO authority away from ${person}.`,
+    publicLink: (before: string, after: string) => `Change the public link from ${before} to ${after}.`,
+  },
   /* A screen's data while it comes (style book 1.5, section 4): the words beside the ring, and for a load that failed one
      whole sentence of what failed and why, then what to do. */
   load: {

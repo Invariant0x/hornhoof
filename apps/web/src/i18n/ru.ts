@@ -130,6 +130,15 @@ export const ru: Messages = {
     atLeast10: 'Не меньше 10 символов.',
     useAtLeast10: 'Нужно не меньше 10 символов.',
   },
+  confirmAction: {
+    question: 'Вы действительно хотите это сделать?',
+    yes: 'Да',
+    no: 'Нет',
+    rename: (from: string, to: string) => `Изменить имя «${from}» на «${to}».`,
+    access: (person: string, places: string) => `Изменить доступ для «${person}». Будет доступно «${places}».`,
+    deputy: (person: string, granted: boolean) => granted ? `Назначить «${person}» заместителем директора.` : `Снять полномочия заместителя директора с «${person}».`,
+    publicLink: (before: string, after: string) => `Изменить публичную ссылку с ${before} на ${after}.`,
+  },
   load: {
     tasks: 'Загружаем задачи…',
     task: 'Загружаем задачу…',
