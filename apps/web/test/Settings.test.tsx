@@ -114,7 +114,7 @@ describe('the public link under Company & access', () => {
     const user = userEvent.setup();
     render(<Settings me={ME} group="company" onClose={() => {}} />);
     await user.click(await screen.findByRole('button', { name: 'Remove link' }));
-    expect(screen.getByText('Hornhoof stops opening at https://acme.hornhoof.org. Machines connected through this link lose the connection.')).toBeInTheDocument();
+    expect(screen.getByRole('alertdialog')).toHaveAccessibleDescription('Hornhoof stops opening at https://acme.hornhoof.org. Machines connected through this link lose the connection.');
     await user.click(within(screen.getByRole('alertdialog', { name: 'Do you really want to remove the public link?' })).getByRole('button', { name: 'Cancel' }));
     expect(calls.some(c => c.method === 'DELETE')).toBe(false);
     await user.click(screen.getByRole('button', { name: 'Remove link' }));
@@ -129,8 +129,9 @@ describe('the public link under Company & access', () => {
     const user = userEvent.setup();
     render(<Settings me={ME} group="company" onClose={() => {}} />);
     await user.click(await screen.findByRole('button', { name: 'Remove link' }));
-    const question = screen.getByText(`Hornhoof stops opening at ${longest.url}. Machines connected through this link lose the connection.`);
-    expect(screen.getByRole('alertdialog')).toContainElement(question);
+    expect(screen.getByRole('alertdialog')).toHaveAccessibleDescription(`Hornhoof stops opening at ${longest.url}. Machines connected through this link lose the connection.`);
+    /* The address stands whole in its own direction, and the line breaks inside it only where it is longer than the line. */
+    expect(within(screen.getByRole('alertdialog')).getByText(longest.url).tagName).toBe('BDI');
     expect(decl('dialog.dialog-back > .dialog > :is(h2, p)', 'overflow-wrap')).toBe('anywhere');
   });
 
