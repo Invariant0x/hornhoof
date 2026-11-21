@@ -58,13 +58,15 @@ describe('the confirmation of a critical action', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toHaveClass('btn', 'ghost');
   });
 
-  it('opens on Cancel for a dangerous action and on the action otherwise', async () => {
+  it('opens on Cancel for a dangerous action', async () => {
     await open();
     expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
-    screen.getByRole('button', { name: 'Cancel' }).click();
+  });
+
+  it('opens on the action for an ordinary one', async () => {
     await open({ danger: false, yes: 'Rename' });
-    expect(screen.getAllByRole('button', { name: 'Rename' }).at(-1)).toHaveFocus();
-    expect(screen.getAllByRole('button', { name: 'Rename' }).at(-1)).not.toHaveClass('danger');
+    expect(screen.getByRole('button', { name: 'Rename' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Rename' })).not.toHaveClass('danger');
   });
 
   it('changes nothing on Cancel, Escape or a click outside, and gives the focus back to its button', async () => {
