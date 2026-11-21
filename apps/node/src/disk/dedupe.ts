@@ -34,6 +34,7 @@ const CHUNK_BYTES = 64 * 1024;
 const TEMP_STALE_MS = 60 * 60 * 1000;
 const WORKER_TIMEOUT_MS = 120_000;
 const HEX_PREFIX = /^[0-9a-f]{2}$/;
+const CAS_ENTRY = /^[0-9a-f]{64}-[01]$/;
 const WORKER_PATH = fileURLToPath(new URL('./dedupe-worker.js', import.meta.url));
 
 export type DedupeTarget = { rootDir: string; nodeModulesDir: string };
@@ -258,7 +259,7 @@ function dedupeFile(filePath: string, state: State): 'ok' | 'exdev' {
     if (existed === null) return 'ok';
 
     const casStat = safeLstat(casPath);
-    if (!casStat?.isFile() || casStat.size !== fst.size) return 'ok';
+    if (!casStat?.isFile() || casStat.size !== fst.size || (casStat.mode & 0o777) !== canonicalMode) return 'ok';
     if (casStat.dev === fst.dev && casStat.ino === fst.ino) return 'ok';
 
     const sibling = join(dirname(filePath), `.hh-dedupe-${process.pid}-${state.seq++}`);
@@ -399,7 +400,7 @@ export function pruneCas(store: string, opts: PruneOptions = {}): PruneResult {
         }
         continue;
       }
-      if (st.nlink === 1 && (aggressive || nowMs - st.mtimeMs >= maxAgeMs)) {
+      if (CAS_ENTRY.test(name) && st.nlink === 1 && (aggressive || nowMs - st.mtimeMs >= maxAgeMs)) {
         try {
           unlinkSync(file);
           pruned++;
