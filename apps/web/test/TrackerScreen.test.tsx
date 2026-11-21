@@ -718,7 +718,7 @@ describe('what waits for people', () => {
     expect(request).toHaveTextContent(/Asked:\s*.*Theo/);
     expect(request).toHaveTextContent('Only the person asked can answer.');
     expect(people).not.toHaveTextContent('Waits for Ivan');
-    await user.click(within(request).getByRole('button', { name: 'Open', exact: true }));
+    await user.click(within(request).getByRole('button', { name: /^Open$/ }));
     const opened = await card('#21 Take card payments');
     expect(await within(opened).findByText('Read only', { exact: true })).toBeInTheDocument();
     expect(within(opened).queryByRole('button', { name: 'Send answer' })).not.toBeInTheDocument();
