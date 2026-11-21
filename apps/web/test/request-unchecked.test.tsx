@@ -43,15 +43,27 @@ describe('the approval of a release that brings what no check covers', () => {
     const items: NonNullable<WaitingRequest['unchecked']> = [
       { kind: 'no_candidate', task: 3 }, { kind: 'checker', task: 4, commit: RELEASE }, { kind: 'task_unread', task: 5 },
       { kind: 'unpinned', task: 6 }, { kind: 'unstarted', task: 7 }, { kind: 'merge', commit: STRAY },
+      { kind: 'other_branch', task: 8, commit: STRAY, branch: 'task-77777' },
     ];
     for (const [lang, t] of [['en', en], ['ru', ru]] as const) {
       renderIn(lang, <Requests {...requestProps({ ...RELEASE_CARD, unchecked: items })} />);
-      const list = screen.getByRole('region', { name: t.tasks.unchecked.heading(6) });
+      const list = screen.getByRole('region', { name: t.tasks.unchecked.heading(7) });
       expect(within(list).getAllByRole('listitem').map(item => item.textContent)).toEqual([
         t.tasks.unchecked.noCandidate(3), t.tasks.unchecked.checker(4, RELEASE), t.tasks.unchecked.taskUnread(5), t.tasks.unchecked.unpinned(6), t.tasks.unchecked.unstarted(7), t.tasks.unchecked.merge(STRAY),
+        t.tasks.unchecked.otherBranch(8, STRAY, 'task-77777'),
       ]);
+      expect(t.tasks.unchecked.otherBranch(8, STRAY, 'task-77777')).toContain('task-77777');
       cleanup();
     }
+  });
+
+  /* H7 of #1686: a branch of another task whose head the release does not hold is not compared, so the list may miss a commit
+     of it that work done alone was built on. The card says so where the list is, in the person's language. */
+  it.each([['en', en], ['ru', ru]] as const)('says, in %s, how far work done alone was compared with other tasks\' branches', (lang, t) => {
+    renderIn(lang, <Requests {...requestProps(RELEASE_CARD)} />);
+    const list = screen.getByRole('region', { name: t.tasks.unchecked.heading(3) });
+    expect(list).toHaveTextContent(t.tasks.unchecked.otherBranches);
+    expect(within(list).getAllByRole('listitem')).toHaveLength(3);
   });
 
   it('shows the list to someone who reads the card without answering it, too', () => {
