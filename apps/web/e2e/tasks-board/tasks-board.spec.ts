@@ -725,10 +725,22 @@ test('shows what waits for the person and the cards kept for them inside the pag
   const rtlWaiting = page.getByRole('region', { name: MESSAGES.en.tasks.waiting });
   await rtlWaiting.getByRole('button', { expanded: false }).filter({ hasText: MESSAGES.en.tasks.cards.tag('v1.7.0', 24, 'unrecorded') }).click();
   const tag = page.getByRole('region', { name: MESSAGES.en.tasks.cards.tagTitle });
-  /* Its edge line moves to the right, where the text starts. */
-  expect(await tag.evaluate(el => getComputedStyle(el).borderRightWidth)).toBe('2px');
+  await expect(tag).toContainText(MESSAGES.en.tasks.cards.tag('v1.7.0', 24, 'unrecorded'));
+  /* In RTL, each collapsed strip's leading icon sits on the right, where the text starts. */
+  const stripMirrored = await rtlWaiting.locator('.wait-strip').first().evaluate(el => {
+    const icon = el.querySelector('.ic')!.getBoundingClientRect();
+    const lines = el.querySelector('.wait-strip-lines')!.getBoundingClientRect();
+    return icon.left >= lines.right;
+  });
+  expect(stripMirrored).toBe(true);
   await inside(page, 'waits rtl');
   await capture(page, info, 'waits-rtl-375');
+  /* Outside the queue (on Mine), the kept card keeps its 2 px edge line on the right in RTL. */
+  await open(page, 'en', 375, '/tasks');
+  await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
+  const mineTag = page.getByRole('region', { name: MESSAGES.en.tasks.cards.tagTitle });
+  await expect(mineTag).toBeVisible();
+  expect(await mineTag.evaluate(el => getComputedStyle(el).borderRightWidth)).toBe('2px');
 });
 
 test('says what to do when there is no work yet, and when a search finds nothing', async ({ page }) => {
