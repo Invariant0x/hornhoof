@@ -18,6 +18,7 @@ import { agentEvents, agents, departments, jobs, people, requests, tasks, taskWa
 import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
 import { deptName } from '../departments/templates.js';
+import { repoScopeOf } from '../testruns/github-limit.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { resolveStuck } from './stuck.js';
 import { answer, cancel, closeTask, createTask } from './engine.js';
@@ -206,11 +207,15 @@ async function companyGitHubRepos(ctx: Ctx, companyId: string) {
     .select({ url: departments.repoUrl, tokenEnc: departments.repoTokenEnc })
     .from(departments)
     .where(and(eq(departments.companyId, companyId), isNotNull(departments.repoUrl)));
-  return rows.map(row => ({ url: row.url!, token: row.tokenEnc ? decryptSecret(row.tokenEnc, ctx.config.secret) : '' }));
+  const decrypt = (enc: string) => decryptSecret(enc, ctx.config.secret);
+  return rows.flatMap(row => {
+    const scoped = repoScopeOf(row, companyId, decrypt);
+    return scoped ? [scoped] : [];
+  });
 }
 
 async function githubLimitCards(me: Person, person: string | undefined, ctx: Ctx) {
-  if (me.via || !me.isOwner || (person && person !== me.id)) return [];
+  if (me.via || !me.isOwner || (person && person !== me.id) || !ctx.githubLimits.hasCards()) return [];
   return ctx.githubLimits.cards(await companyGitHubRepos(ctx, me.companyId));
 }
 

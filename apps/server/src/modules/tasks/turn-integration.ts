@@ -7,7 +7,7 @@ import { ApiError } from '../../errors.js';
 import { repoAt } from '../departments/repository.js';
 import { refuse, type Task, type Tx } from './state.js';
 import { heldLineage } from '../testruns/compare.js';
-import { githubName, GitHubRateLimited, resetTime, type RateLimit } from '../testruns/github-limit.js';
+import { githubName, GitHubRateLimited, resetTime, withRepoCompany, type RateLimit } from '../testruns/github-limit.js';
 import { ensureOpenTurn, openTurnOf } from './turn-department.js';
 import { newerVersion, versionsNewestFirst } from './turn-tags.js';
 
@@ -30,12 +30,13 @@ export async function integrationTarget(ctx: Reader, task: Pick<Task, 'companyId
   if (!ctx.config) return null;
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]);
   if (!found) return null;
-  if (found.department.parentId) return { repo: found.repo, branch: found.repo.branch, turn: null };
+  const repo = withRepoCompany(found.repo, task.companyId);
+  if (found.department.parentId) return { repo, branch: repo.branch, turn: null };
   const turn = await openTurnOf(ctx.db, task.companyId, found.department.id)
     ?? await ctx.db.transaction(async tx => { await lockCompany(tx, task.companyId); return ensureOpenTurn(tx, task.companyId, found.department.id); });
   /* Its repository went away meanwhile. */
   if (!turn) return null;
-  return { repo: found.repo, branch: `turn-${turn.number}`, turn };
+  return { repo, branch: `turn-${turn.number}`, turn };
 }
 
 export class BranchProofUnavailable extends ApiError {
@@ -44,25 +45,43 @@ export class BranchProofUnavailable extends ApiError {
   }
 }
 
-const proofCache = new WeakMap<BranchProofReader, Set<string>>();
+const SHA = /^[0-9a-f]{40}$/;
+const proofCache = new WeakMap<BranchProofReader, Map<string, boolean>>();
 const MAX_PROOFS = 4096;
 const PROOF_TIMEOUT_MS = 10_000;
 
-function rememberProof(proved: Set<string>, key: string): void {
-  if (proved.size >= MAX_PROOFS) proved.delete(proved.values().next().value!);
-  proved.add(key);
+function rememberProof(proved: Map<string, boolean>, key: string, holds: boolean): void {
+  if (!proved.has(key) && proved.size >= MAX_PROOFS) proved.delete(proved.keys().next().value!);
+  proved.set(key, holds);
 }
 
-/* Both SHAs are immutable. The repository and credential keep proof from crossing repository access boundaries. */
+const proofKey = (repo: Repo, head: string, commit: string): string | null =>
+  SHA.test(head) && SHA.test(commit) ? createHash('sha256').update(JSON.stringify([repo.url, repo.token, head, commit])).digest('hex') : null;
+
+function proofStore(ctx: BranchProofReader): Map<string, boolean> {
+  let proved = proofCache.get(ctx);
+  if (!proved) {
+    proved = new Map<string, boolean>();
+    proofCache.set(ctx, proved);
+  }
+  return proved;
+}
+
+async function readHolds(ctx: BranchProofReader, repo: Repo, head: string, commit: string): Promise<boolean> {
+  const git = await ctx.readGitAncestry?.(repo, head, commit, PROOF_TIMEOUT_MS).catch(() => null);
+  return git ?? restHolds(ctx, repo, head, commit);
+}
+
+/* Both 40-hex SHAs are immutable, so positive and negative ancestry proofs hold forever for the same repository and credential. */
 export async function branchHolds(ctx: BranchProofReader, repo: Repo, head: string, commit: string): Promise<boolean> {
   if (head === commit) return true;
-  const key = createHash('sha256').update(JSON.stringify([repo.url, repo.token, head, commit])).digest('hex');
-  const proved = proofCache.get(ctx) ?? new Set<string>();
-  proofCache.set(ctx, proved);
-  if (proved.has(key)) return true;
-  const git = await ctx.readGitAncestry?.(repo, head, commit, PROOF_TIMEOUT_MS).catch(() => null);
-  const holds = git ?? await restHolds(ctx, repo, head, commit);
-  if (holds) rememberProof(proved, key);
+  const key = proofKey(repo, head, commit);
+  if (!key) return readHolds(ctx, repo, head, commit);
+  const proved = proofStore(ctx);
+  const cached = proved.get(key);
+  if (cached !== undefined) return cached;
+  const holds = await readHolds(ctx, repo, head, commit);
+  rememberProof(proved, key, holds);
   return holds;
 }
 

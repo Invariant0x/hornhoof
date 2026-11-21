@@ -18,6 +18,7 @@ import { newerVersion, versionsNewestFirst } from './turn-tags.js';
 import { openTurnOf } from './turn-department.js';
 import { repoAt } from '../departments/repository.js';
 import { heldLineage } from '../testruns/compare.js';
+import { withRepoCompany } from '../testruns/github-limit.js';
 import { keptEverything, ofItsRelease } from '../testruns/reuse.js';
 import { wholeProductRun } from './autonomous-release.js';
 
@@ -246,7 +247,7 @@ async function openRelease(ctx: Reader, task: Pick<Task, 'companyId' | 'productI
   const found = ctx.config ? await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]) : null;
   if (!found || found.department.parentId) return null;
   const turn = await openTurnOf(ctx.db, task.companyId, found.department.id);
-  return turn ? { repo: found.repo, turn } : null;
+  return turn ? { repo: withRepoCompany(found.repo, task.companyId), turn } : null;
 }
 
 /* Main's head under commit, where commit is a release of the turn branch: the branch holds it, main does not yet, and main can

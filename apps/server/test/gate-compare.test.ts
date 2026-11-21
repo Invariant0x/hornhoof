@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { githubReaders, heldLineage, readCompare, readMerged, readTree, treePaths } from '../src/modules/testruns/compare.js';
 import { exactComparison } from '../src/modules/tasks/review-context.js';
 import { branchHolds } from '../src/modules/tasks/turn-integration.js';
-import { GitHubLimits } from '../src/modules/testruns/github-limit.js';
+import { GitHubLimits, repoScopeOf, withRepoCompany } from '../src/modules/testruns/github-limit.js';
 
 const sha = 'a'.repeat(40);
 const fixture = (files: { filename: string; previous_filename?: string; patch?: string; additions: number; deletions: number }[] = [{ filename: 'src/view.ts', patch: '+const title = "Saved";', additions: 1, deletions: 0 }]) => ({ base_commit: { sha: 'b'.repeat(40) }, commits: [{ sha }], total_commits: 1, status: 'ahead', files });
@@ -232,17 +232,19 @@ describe('a branch holds a commit, however many files lie between them', () => {
     const ctx = githubReaders(githubLimits);
     const head = 'e'.repeat(40);
     await expect(ctx.readMerged(at, { base: 'main', head: sha })).rejects.toThrow('23:45 UTC');
-    expect(githubLimits.cards()).toEqual([]);
+    expect(githubLimits.cards([at])).toEqual([]);
     await expect(ctx.readCompare(at, { base: sha, head })).resolves.toMatchObject({ complete: false, reason: 'github-rate-limit', rateLimit: { resetAt } });
     await expect(branchHolds(ctx, at, head, sha)).rejects.toThrow('23:45 UTC');
     await expect(ctx.readMerged({ ...at, url: 'https://github.com/acme/another.git' }, { base: 'main', head: sha })).rejects.toThrow('23:45 UTC');
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(warned).toHaveBeenCalledExactlyOnceWith({ remaining: 0, resetAt });
     expect(changed).toHaveBeenCalledTimes(1);
-    expect(githubLimits.cards()).toEqual([{ repository: 'acme/shop', resetAt }]);
+    expect(githubLimits.hasCards()).toBe(true);
+    expect(githubLimits.cards([at])).toEqual([{ repository: 'acme/shop', resetAt }]);
     now = resetAt;
     githubLimits.expire();
-    expect(githubLimits.cards()).toEqual([]);
+    expect(githubLimits.hasCards()).toBe(false);
+    expect(githubLimits.cards([at])).toEqual([]);
     expect(changed).toHaveBeenCalledTimes(2);
     expect(await branchHolds(ctx, at, head, sha)).toBe(true);
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -290,5 +292,20 @@ describe('a branch holds a commit, however many files lie between them', () => {
     const read = vi.fn();
     await expect(githubLimits.request(anon, read)).rejects.toThrow('23:45 UTC');
     expect(read).not.toHaveBeenCalled();
+  });
+
+  it('isolates company-attributed public and shared-token cards and fails closed on corrupt tokens', () => {
+    const resetAt = Date.UTC(2030, 0, 1, 23, 45);
+    const now = resetAt - 60_000;
+    const githubLimits = new GitHubLimits(() => now, () => {});
+    const pubA = withRepoCompany({ url: 'https://github.com/acme/public.git', token: '' }, 'co-a');
+    const pubB = withRepoCompany({ url: 'https://github.com/acme/public.git', token: '' }, 'co-b');
+    githubLimits.refused(pubA, { remaining: 0, resetAt });
+    githubLimits.refused(pubA, { remaining: 0, resetAt });
+    expect(githubLimits.cards([pubA])).toEqual([{ repository: 'acme/public', resetAt }]);
+    expect(githubLimits.cards([pubB])).toEqual([]);
+    expect(repoScopeOf({ url: null, tokenEnc: null }, 'co-a', () => 'unused')).toBeNull();
+    expect(repoScopeOf({ url: pubA.url, tokenEnc: null }, 'co-a', () => 'unused')).toEqual({ url: pubA.url, token: '', companyId: 'co-a' });
+    expect(repoScopeOf({ url: pubA.url, tokenEnc: 'enc' }, 'co-a', () => { throw new Error('bad'); })).toBeNull();
   });
 });

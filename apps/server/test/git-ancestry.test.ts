@@ -197,3 +197,15 @@ it('caps concurrent distinct Git fetches and frees slots after completion', asyn
   expect(await Promise.all(lookups.slice(0, 4))).toEqual([true, true, true, true]);
   expect(await readGitAncestry(repo, '7'.repeat(40), ancestor, 10_000)).toBe(true);
 });
+
+it('returns null cleanly when git fails to spawn or init exits non-zero', async () => {
+  mocks.setHandler((_args, _options, child) => {
+    queueMicrotask(() => child.emit('error', new Error('ENOENT')));
+  });
+  expect(await readGitAncestry(repo, head, ancestor, 10_000)).toBeNull();
+
+  mocks.setHandler((args, _options, child) => {
+    emitResult(child, args.includes('init') ? 1 : 0);
+  });
+  expect(await readGitAncestry(repo, head, ancestor, 10_000)).toBeNull();
+});

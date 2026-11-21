@@ -4,6 +4,7 @@ import { companies, departments, tasks, turns } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { repoAt } from '../departments/repository.js';
+import { withRepoCompany } from '../testruns/github-limit.js';
 import { CLOSED, type Tx } from './engine.js';
 import { keepSnapshot } from './pipeline-report.js';
 import { releasesWork } from './turn-department.js';
@@ -82,10 +83,11 @@ async function nothingToMerge(ctx: Reader, turn: Turn, department: Department): 
   if (!ctx.config || !ctx.readBranches) return null;
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [department.id]);
   if (!found) return null;
-  const read = await ctx.readBranches(found.repo, 5_000).catch(() => null);
+  const repo = withRepoCompany(found.repo, department.companyId);
+  const read = await ctx.readBranches(repo, 5_000).catch(() => null);
   if (!read || 'problem' in read) return null;
-  const branch = `turn-${turn.number}`, head = read.heads[branch], main = read.heads[found.repo.branch];
+  const branch = `turn-${turn.number}`, head = read.heads[branch], main = read.heads[repo.branch];
   if (!head) return `${ENDED} ${branch} is not in the repository, so it had nothing to release.`;
-  if (!main || !(await branchHolds(ctx, found.repo, main, head))) return null;
-  return `${ENDED} ${found.repo.branch} holds everything ${branch} holds, so it had nothing to release.`;
+  if (!main || !(await branchHolds(ctx, repo, main, head))) return null;
+  return `${ENDED} ${repo.branch} holds everything ${branch} holds, so it had nothing to release.`;
 }

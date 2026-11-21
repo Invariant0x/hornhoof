@@ -101,7 +101,7 @@ import type { Db } from './db/client.js';
 
 import { githubReaders, type CompareReader, type MergeReader, type TreeReader } from './modules/testruns/compare.js';
 import { readGitAncestry, type GitAncestryReader } from './modules/testruns/git-ancestry.js';
-import { GitHubLimits, limitRecord } from './modules/testruns/github-limit.js';
+import { GitHubLimits, limitRecord, repoScopeOf, type ScopedRepo } from './modules/testruns/github-limit.js';
 import { MergedAnswers } from './modules/departments/branches.js';
 import { isNotNull } from 'drizzle-orm';
 import { decryptSecret } from './crypto/secrets.js';
@@ -236,16 +236,19 @@ const cardState = (cards: ReturnType<GitHubLimits['cards']>) =>
   cards.map(card => `${card.repository}\0${card.resetAt ?? ''}`).sort().join('\n');
 
 function reposByCompany(rows: { companyId: string; url: string | null; tokenEnc: string | null }[], secret: Buffer) {
-  const byCompany = new Map<string, { url: string; token: string }[]>();
+  const byCompany = new Map<string, ScopedRepo[]>();
+  const decrypt = (enc: string) => decryptSecret(enc, secret);
   for (const row of rows) {
+    const scoped = repoScopeOf(row, row.companyId, decrypt);
+    if (!scoped) continue;
     const list = byCompany.get(row.companyId) ?? [];
-    list.push({ url: row.url!, token: row.tokenEnc ? decryptSecret(row.tokenEnc, secret) : '' });
+    list.push(scoped);
     byCompany.set(row.companyId, list);
   }
   return byCompany;
 }
 
-function publishChangedCards(bus: EventBus, limits: GitHubLimits, byCompany: Map<string, { url: string; token: string }[]>, last: Map<string, string>): void {
+function publishChangedCards(bus: EventBus, limits: GitHubLimits, byCompany: Map<string, ScopedRepo[]>, last: Map<string, string>): void {
   for (const id of new Set([...byCompany.keys(), ...last.keys()])) {
     const next = cardState(limits.cards(byCompany.get(id) ?? []));
     if ((last.get(id) ?? '') === next) continue;
@@ -254,21 +257,34 @@ function publishChangedCards(bus: EventBus, limits: GitHubLimits, byCompany: Map
   }
 }
 
-function notifyGitHubLimitCards(deps: Deps, bus: EventBus, log: FastifyBaseLogger, limits: GitHubLimits, last: Map<string, string>): void {
-  void deps.db
-    .select({ companyId: departments.companyId, url: departments.repoUrl, tokenEnc: departments.repoTokenEnc })
-    .from(departments)
-    .where(isNotNull(departments.repoUrl))
-    .then(rows => publishChangedCards(bus, limits, reposByCompany(rows, deps.config.secret), last))
-    .catch((error: unknown) => log.error({ error: loggable(error) }, 'Refreshing GitHub limit cards failed.'));
+async function refreshGitHubLimitCards(deps: Deps, bus: EventBus, log: FastifyBaseLogger, limits: GitHubLimits, last: Map<string, string>): Promise<void> {
+  try {
+    if (!limits.hasCards()) return publishChangedCards(bus, limits, new Map(), last);
+    const rows = await deps.db
+      .select({ companyId: departments.companyId, url: departments.repoUrl, tokenEnc: departments.repoTokenEnc })
+      .from(departments)
+      .where(isNotNull(departments.repoUrl));
+    publishChangedCards(bus, limits, reposByCompany(rows, deps.config.secret), last);
+  } catch (error: unknown) {
+    log.error({ error: loggable(error) }, 'Refreshing GitHub limit cards failed.');
+  }
 }
 
 function githubLimitsFor(deps: Deps, log: FastifyBaseLogger, bus: EventBus, clock: () => number): GitHubLimits {
   const last = new Map<string, string>();
+  let running = false, dirty = false;
+  const notify = () => {
+    if (running) { dirty = true; return; }
+    running = true;
+    void refreshGitHubLimitCards(deps, bus, log, limits, last).finally(() => {
+      running = false;
+      if (dirty) { dirty = false; notify(); }
+    });
+  };
   const limits: GitHubLimits = new GitHubLimits(
     clock,
     limit => log.warn(limitRecord(limit), 'GitHub REST request limit exhausted.'),
-    () => notifyGitHubLimitCards(deps, bus, log, limits, last),
+    notify,
   );
   return limits;
 }

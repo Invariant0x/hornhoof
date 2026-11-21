@@ -4,6 +4,7 @@ import type { Ctx } from '../../app.js';
 import { agents, taskEvents, taskRoutes, teams } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
+import { withRepoCompany } from '../testruns/github-limit.js';
 import { changeRoute, type Route } from './route-records.js';
 import { giver, refuse, type Live, type Moved, type Task, type Tx } from './state.js';
 import { move } from './transitions.js';
@@ -104,7 +105,7 @@ async function turnkeyRepo(db: Live['db'], config: NonNullable<Live['config']>, 
   if (route?.state.resultKind !== 'turnkey') return null;
   const found = await repoAt({ db, config }, [task.productId, task.departmentId]);
   if (!found || found.department.parentId) return null;
-  return { repo: found.repo, turn: await openTurnOf(db, task.companyId, found.department.id) };
+  return { repo: withRepoCompany(found.repo, task.companyId), turn: await openTurnOf(db, task.companyId, found.department.id) };
 }
 
 /* The heads of the turn branch and main now: none where the turn branch could not be read, or neither is there. */
