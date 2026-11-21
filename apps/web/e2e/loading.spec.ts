@@ -2,9 +2,9 @@ import { mkdirSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { CopiesView, DepartmentTree, EventView, MachineView, PersonView, SubView, WaitCard } from '../src/types';
+import type { CopiesView, DepartmentTree, EventView, GoalView, MachineView, PersonView, SubView, TaskLine, WaitCard } from '../src/types';
 import { agentRoutes } from './agent-window-api';
-import { serveApi, TASKS } from './api';
+import { detail, serveApi, TASKS } from './api';
 import { stretch } from './pseudo-text';
 
 /* The one department serveApi answers with, whose tasks the tracker lists. */
@@ -757,3 +757,140 @@ for (const screen of SCREENS) for (const width of [375, 1440]) {
     hold.release();
   });
 }
+
+/* 21.11 (#1775): a task card with a goal holds the path row from the first frame until /api/goals arrives, both with and
+   without a parent, so the heading stays at the exact same vertical place from first paint to full load. */
+test.describe('task card path while goals load', () => {
+  const GOAL_PARENT: GoalView = {
+    id: 'g1', number: 1, title: 'Sales', why: '', department: null, parentId: null, responsible: { id: 'p1', name: 'Ivan' },
+    target: null, current: null, unit: '', dueAt: null, status: 'active', progress: 0, done: 0, total: 0, version: 1, mayEdit: true,
+  };
+  const GOAL_CHILD: GoalView = { ...GOAL_PARENT, id: 'g2', number: 2, title: 'Payments', parentId: 'g1' };
+  const GOAL_REF = { id: 'g2', number: 2, title: 'Payments' };
+  const PATH_LOOKS: { look: Look; tag: string }[] = [
+    { look: { lang: 'en', theme: 'cyberpunk', width: 1440 }, tag: 'en' },
+    { look: { lang: 'ru', theme: 'cyberpunk', width: 1440 }, tag: 'ru' },
+    { look: { lang: 'ru', theme: 'cyberpunk', width: 1440, dir: 'rtl' }, tag: 'rtl' },
+    { look: { lang: 'en', theme: 'cyberpunk', width: 375 }, tag: 'en' },
+    { look: { lang: 'ru', theme: 'cyberpunk', width: 375 }, tag: 'ru' },
+    { look: { lang: 'ru', theme: 'cyberpunk', width: 375, dir: 'rtl' }, tag: 'rtl' },
+  ];
+
+  function gate() {
+    let open = () => {};
+    const wait = new Promise<void>(resolve => { open = resolve; });
+    return { wait, release: () => open() };
+  }
+
+  function taskWithGoal(withParent: boolean): { list: TaskLine[]; card: ReturnType<typeof detail> } {
+    const parentLine: TaskLine = { ...TASKS[1]!, title: 'Checkout', parentId: null, goal: GOAL_REF };
+    const line: TaskLine = { ...FIRST, parentId: withParent ? parentLine.id : null, goal: GOAL_REF };
+    const card = { ...detail(line), parent: withParent ? { id: parentLine.id, number: parentLine.number, title: parentLine.title } : null };
+    return { list: [line, parentLine, ...TASKS.slice(2)], card };
+  }
+
+  async function mountPathFixture(page: Page, look: Look, withParent: boolean, options: { failGoals?: boolean } = {}) {
+    await page.setViewportSize({ width: look.width, height: 900 });
+    await page.addInitScript(({ lang, theme, dir }) => {
+      localStorage.setItem('hh-lang', lang);
+      localStorage.setItem('hh-theme', theme);
+      if (dir === 'rtl') document.addEventListener('DOMContentLoaded', () => { document.documentElement.dir = 'rtl'; });
+    }, look);
+    await serveApi(page);
+    const { list, card } = taskWithGoal(withParent);
+    const taskGate = gate();
+    const goalsGate = gate();
+    await page.route(url => pathOf(url) === '/api/tasks', route => route.fulfill({ json: { tasks: list } }));
+    await page.route(url => pathOf(url) === `/api/tasks/${FIRST.id}`, async route => {
+      await taskGate.wait;
+      return route.fulfill({ json: { task: card } });
+    });
+    await page.route(url => pathOf(url) === '/api/goals', async route => {
+      await goalsGate.wait;
+      if (options.failGoals) return route.fulfill({ status: 500, json: { error: { code: 'internal', message: 'Goals unavailable.' } } });
+      return route.fulfill({ json: { goals: [GOAL_PARENT, GOAL_CHILD] } });
+    });
+    return { taskGate, goalsGate };
+  }
+
+  async function maybeShot(page: Page, name: string) {
+    const dir = process.env.HH_PATH_SHOTS_DIR;
+    if (!dir) return;
+    mkdirSync(dir, { recursive: true });
+    const prefix = process.env.HH_PATH_SHOTS_PREFIX ?? 'after';
+    await page.screenshot({ path: `${dir}/${prefix}-${name}.png`, animations: 'disabled' });
+  }
+
+  for (const withParent of [false, true]) {
+    const kind = withParent ? 'with-parent' : 'without-parent';
+    for (const { look, tag } of PATH_LOOKS) {
+      test(`keeps heading fixed while goals load (${kind}, ${look.width}, ${tag})`, async ({ page }) => {
+        const t = words(look.lang);
+        const { taskGate, goalsGate } = await mountPathFixture(page, look, withParent);
+        await tracker(page);
+        await page.getByRole('button', { name: FIRST.title, exact: true }).click();
+        const panel = page.locator('.acard');
+        const heading = panel.locator('.tp-heading');
+        await expect(heading).toHaveText(FIRST.title);
+        await page.evaluate(() => document.fonts.ready);
+        const box0 = (await heading.boundingBox())!;
+
+        taskGate.release();
+        await expect(panel.getByRole('button', { name: t.tasks.taskActions, exact: true })).toBeVisible();
+        const box1 = (await heading.boundingBox())!;
+        const heldPending = (await panel.locator('.tp-head > nav.tp-path .tp-path-held').count()) > 0;
+        if (!withParent) await maybeShot(page, `goals-pending-${look.width}-${tag}`);
+
+        goalsGate.release();
+        await expect(panel.locator('.tp-head > nav.tp-path').getByRole('button', { name: GOAL_CHILD.title, exact: true })).toBeVisible();
+        const box2 = (await heading.boundingBox())!;
+        if (!withParent) await maybeShot(page, `goals-loaded-${look.width}-${tag}`);
+
+        expectSameBoxes([box1], [box0]);
+        expectSameBoxes([box2], [box0]);
+        expect(heldPending, 'path row held while goals are pending').toBe(true);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      });
+    }
+  }
+
+  test('keeps heading fixed on direct card URL when goals arrive after the task', async ({ page }) => {
+    const t = words('en');
+    const { taskGate, goalsGate } = await mountPathFixture(page, EN, false);
+    taskGate.release();
+    await page.goto(`/tasks/${FIRST.id}`, { waitUntil: 'domcontentloaded' });
+    const panel = page.locator('.acard');
+    const heading = panel.locator('.tp-heading');
+    await expect(panel.getByRole('button', { name: t.tasks.taskActions, exact: true })).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const before = (await heading.boundingBox())!;
+    const hadHeld = (await panel.locator('.tp-head > nav.tp-path .tp-path-held').count()) === 1;
+
+    goalsGate.release();
+    await expect(panel.locator('.tp-head > nav.tp-path').getByRole('button', { name: GOAL_CHILD.title, exact: true })).toBeVisible();
+    const after = (await heading.boundingBox())!;
+    expectSameBoxes([after], [before]);
+    expect(hadHeld, 'path row held on direct card URL while goals load').toBe(true);
+  });
+
+  test('falls back to the task goal without shifting the heading when /api/goals fails', async ({ page }) => {
+    const t = words('en');
+    const { taskGate, goalsGate } = await mountPathFixture(page, EN, false, { failGoals: true });
+    taskGate.release();
+    await page.goto(`/tasks/${FIRST.id}`, { waitUntil: 'domcontentloaded' });
+    const panel = page.locator('.acard');
+    const heading = panel.locator('.tp-heading');
+    await expect(panel.getByRole('button', { name: t.tasks.taskActions, exact: true })).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const before = (await heading.boundingBox())!;
+
+    const answered = page.waitForResponse(r => pathOf(r.url()) === '/api/goals');
+    goalsGate.release();
+    await answered;
+    await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+    const fallbackVisible = await panel.locator('.tp-head > nav.tp-path').getByRole('button', { name: GOAL_CHILD.title, exact: true }).isVisible();
+    const after = (await heading.boundingBox())!;
+    expect(fallbackVisible, 'task goal stays visible when /api/goals fails').toBe(true);
+    expectSameBoxes([after], [before]);
+  });
+});

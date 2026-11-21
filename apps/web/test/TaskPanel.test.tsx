@@ -940,3 +940,92 @@ describe('a task whose holder has its machine offline', () => {
     expect(within(panel).queryByText(/is offline/)).not.toBeInTheDocument();
   });
 });
+
+describe('task card path while goals load', () => {
+  const GOAL_PARENT = {
+    id: 'g1', number: 1, title: 'Sales', why: '', department: null, parentId: null, responsible: { id: 'p1', name: 'Ivan' },
+    target: null, current: null, unit: '', dueAt: null, status: 'active' as const, progress: 0, done: 0, total: 0, version: 1, mayEdit: true,
+  };
+  const GOAL_CHILD = { ...GOAL_PARENT, id: 'g2', number: 2, title: 'Payments', parentId: 'g1' };
+  const GOAL_REF = { id: 'g2', number: 2, title: 'Payments' };
+
+  function deferredGoals() {
+    let release!: (reply: [number, unknown]) => void;
+    const promise = new Promise<[number, unknown]>(resolve => { release = resolve; });
+    return { route: () => promise, release };
+  }
+
+  it('holds the path row while goals load on a task with a goal and no parent, then shows the goal chain', async () => {
+    const user = userEvent.setup();
+    const goals = deferredGoals();
+    const line = { ...TASKS[0]!, parentId: null, goal: GOAL_REF };
+    const task = { ...TASK_DETAIL, parentId: null, parent: null, goal: GOAL_REF };
+    shell({
+      'GET /api/tasks?status=all': [200, { tasks: [line, ...TASKS.slice(1)] }],
+      'GET /api/tasks/t12': [200, { task }],
+      'GET /api/goals': goals.route,
+    });
+    const panel = await openTask(user);
+    const card = within(panel);
+    await card.findByRole('button', { name: 'Task actions' });
+    const heldPath = panel.querySelector('.tp-head > nav.tp-path');
+    expect(heldPath).not.toBeNull();
+    expect(heldPath).toHaveAttribute('aria-hidden', 'true');
+    expect(heldPath!.querySelector('.tp-path-held .ph')).not.toBeNull();
+
+    goals.release([200, { goals: [GOAL_PARENT, GOAL_CHILD] }]);
+    const nav = await card.findByRole('navigation', { name: 'Where it belongs' });
+    expect(nav.querySelector('.tp-path-held')).toBeNull();
+    expect(within(nav).getAllByRole('button').map(b => b.textContent)).toEqual(['Sales', 'Payments']);
+  });
+
+  it('holds the goal slot beside the parent while goals load on a subtask with a goal, then replaces it with the goal chain', async () => {
+    const user = userEvent.setup();
+    const goals = deferredGoals();
+    const line = { ...TASKS[0]!, parentId: 't10', goal: GOAL_REF };
+    const task = { ...TASK_DETAIL, parentId: 't10', parent: { id: 't10', number: 10, title: 'Checkout' }, goal: GOAL_REF };
+    shell({
+      'GET /api/tasks?status=all': [200, { tasks: [line, ...TASKS.slice(1)] }],
+      'GET /api/tasks/t12': [200, { task }],
+      'GET /api/goals': goals.route,
+    });
+    const panel = await openTask(user);
+    const card = within(panel);
+    await card.findByRole('button', { name: 'Task actions' });
+    const nav = card.getByRole('navigation', { name: 'Where it belongs' });
+    const items = [...nav.querySelectorAll('ol > li')];
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveClass('tp-path-held');
+    expect(items[0]!.querySelector('.ph')).not.toBeNull();
+    expect(within(items[1] as HTMLElement).getByRole('button', { name: '#10 Checkout' })).toBeInTheDocument();
+
+    goals.release([200, { goals: [GOAL_PARENT, GOAL_CHILD] }]);
+    await waitFor(() => expect(within(nav).getAllByRole('button').map(b => b.textContent)).toEqual(['Sales', 'Payments', '#10 Checkout']));
+    expect(nav.querySelector('.tp-path-held')).toBeNull();
+  });
+
+  it('falls back to the task goal when /api/goals fails or omits it, without dropping the path row', async () => {
+    const user = userEvent.setup();
+    const goals = deferredGoals();
+    const line = { ...TASKS[0]!, parentId: null, goal: GOAL_REF };
+    const task = { ...TASK_DETAIL, parentId: null, parent: null, goal: GOAL_REF };
+    shell({
+      'GET /api/tasks?status=all': [200, { tasks: [line, ...TASKS.slice(1)] }],
+      'GET /api/tasks/t12': [200, { task }],
+      'GET /api/goals': goals.route,
+    });
+    const panel = await openTask(user);
+    const card = within(panel);
+    await card.findByRole('button', { name: 'Task actions' });
+    goals.release([500, { error: { code: 'internal', message: 'Server error' } }]);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const nav = card.getByRole('navigation', { name: 'Where it belongs' });
+    expect(within(nav).getByRole('button', { name: 'Payments' })).toBeInTheDocument();
+  });
+
+  it('matches the held path row height to the touch target token on phones and hides its trailing separator', () => {
+    expect.soft(decl('.tp-path-held', 'min-block-size')).toBe('var(--tracker-target-fine)');
+    expect.soft(decl('.tp-path-held', 'min-block-size', '(max-width: 760px), (pointer: coarse)')).toBe('var(--tracker-target-touch)');
+    expect(decl('.tp-path li.tp-path-held:last-child::after', 'content')).toBe('none');
+  });
+});
