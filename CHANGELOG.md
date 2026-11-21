@@ -13,6 +13,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - People and Machines hold the room of their data while it comes, with the same loading ring and Retry: their table heads, and Machines' pool and search, stand at once, and nothing above the rows moves when they come. Once Machines showed its filter buttons in a tab, its next load there holds their room too.
 - The map, a department with its tree and speed, and an employee's window show the same loading indicator where their data will stand. The map is drawn only once the company and the person's own arrangement came, so its blocks no longer jump into place. A department opened at its own address keeps back, the plate of its name and its tools while its company comes, so a failure there has a way out. Their loads say why they failed, or that they take longer than usual, as the tracker's do. None of them says it is empty, such as a conversation with no messages yet, while something it shows is still on its way.
 
+### Added
+
+- Each node looks after its disk every ten minutes: it removes what can come back (left-over check files, the working copies of finished tasks once everything in them is on GitHub, the installed dependencies of those that keep unsaved work, and terminal recordings a stopped node left), reports its disk and Hornhoof's share by part, and while it is still short of space takes no new checks or builds, with the reason; turns go on. The threshold is the larger of a share of the disk and an amount, 10% and 20 GB by default (`HORNHOOF_DISK_SHARE`, `HORNHOOF_DISK_GB`). Unsaved work is never touched and is named in the report.
+
 ## [0.40.0] - 2026-11-20
 
 ### Fixed
