@@ -37,7 +37,7 @@ describe('shared hook transport', () => {
     expect(new Set(calls.map(c => c.call)).size).toBe(1);
     expect(calls.every(c => c.pid === String(process.pid) && c.body === '{"answer":"Done"}')).toBe(true);
   });
-  it.each([403, 'disconnect', 'timeout'] as const)('reports a final %s failure and remains bounded', async status => {
+  it.each([403, 'disconnect', 'timeout'] as const)('reports a final %s failure, bounded by one wait', async status => {
     const calls = await bridge(status);
     /* No clock: a call's limit runs out once a bridge that never answers holds that call, and never while a bridge answers. */
     vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => {
@@ -46,7 +46,8 @@ describe('shared hook transport', () => {
       return limit.signal;
     });
     expect(await sendHook('stop', '{}')).toBeNull();
-    expect(calls).toHaveLength(status === 403 ? 1 : 3);
+    /* A call out of time is not sent again: on a new connection its check would start over. */
+    expect(calls).toHaveLength(status === 'disconnect' ? 3 : 1);
   });
   it('does not retry non-stop hooks', async () => {
     const calls = await bridge(503);
@@ -55,17 +56,31 @@ describe('shared hook transport', () => {
 });
 
 describe('lifecycle hook delivery', () => {
-  it.each(['tool', 'tooldone', 'toolfail'])('%s tries once, and waits three seconds for a busy node to check its caller', async event => {
+  it.each(['start', 'prompt', 'stop', 'interrupt', 'end', 'ask', 'queued', 'invocation'])('%s, told only once, waits fifty seconds in all for a busy node and sends again only after a server error, with the same call id', async event => {
+    const calls = await bridge(503, true);
+    const timer = vi.spyOn(AbortSignal, 'timeout');
+    expect(await sendHook(event, '{}')).not.toBeNull();
+    expect(calls).toHaveLength(3);
+    expect(new Set(calls.map(c => c.call)).size).toBe(1);
+    expect(timer.mock.calls).toEqual([[50_000]]);
+  });
+  it.each([['tool', 10_000], ['tooldone', 10_000], ['toolfail', 10_000], ['status', 3_000], ['unheard', 3_000]] as const)('%s tries once and waits %i ms for a busy node', async (event, ms) => {
     const calls = await bridge(503);
     const timer = vi.spyOn(AbortSignal, 'timeout');
     expect(await sendHook(event, '{}')).toBeNull();
     expect(calls).toHaveLength(1);
-    expect(timer).toHaveBeenCalledWith(3000);
+    expect(timer.mock.calls).toEqual([[ms]]);
   });
-  it('retries an interrupt with the same call id', async () => {
-    const calls = await bridge(503, true);
-    expect(await sendHook('interrupt', '{}')).not.toBeNull();
-    expect(calls).toHaveLength(3);
-    expect(new Set(calls.map(c => c.call)).size).toBe(1);
+  it.each([
+    [{ '*': 600_000, interrupt: 3_000, end: 3_000 }, { interrupt: 2_500, end: 2_500, stop: 50_000, tool: 10_000 }],
+    [{ '*': 30_000 }, { stop: 25_000, prompt: 25_000, tool: 10_000, status: 3_000 }],
+    [{ '*': 60_000 }, { stop: 50_000, end: 50_000 }],
+    ['not json', { stop: 50_000 }],
+  ])('waits less than the program that runs it lets a hook run, as the node tells it: %j', async (limits, waits) => {
+    await bridge(200);
+    vi.stubEnv('HH_HOOK_LIMITS', typeof limits === 'string' ? limits : JSON.stringify(limits));
+    const timer = vi.spyOn(AbortSignal, 'timeout');
+    for (const event of Object.keys(waits)) await sendHook(event, '{}');
+    expect(timer.mock.calls).toEqual(Object.values(waits).map(ms => [ms]));
   });
 });
