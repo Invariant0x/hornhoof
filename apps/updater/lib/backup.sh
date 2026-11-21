@@ -158,12 +158,36 @@ dump_request() {
 }
 
 # A dump in the clear is never left for long. The keeper seals and removes each, and removes what it did not seal
-# within a day; this does the same for a machine whose keeper makes no backups, or does not run.
+# within a day; this does the same for a machine whose keeper makes no backups, or does not run. Only the keeper's
+# regular files directly in dumps go. The scan never goes into its subfolders or follows links.
 sweep_dumps() (
-  [ -d "$CONTROL/dumps" ] || exit 0
-  entered "$CONTROL/dumps" || exit 0
-  if [ -n "$(find . -type f -mmin +1440 2> /dev/null | head -n 1)" ]; then
-    find . -type f -mmin +1440 -exec rm -f {} + 2> /dev/null || true
+  local owner actual mount dumps_mount removed
+  [ -L "$CONTROL/dumps" ] || [ -e "$CONTROL/dumps" ] || exit 0
+  if ! enter_shared "$CONTROL" || ! owner=$(facts .); then
+    printf 'Refused dumps: could not read the keeper folder owner.\n' >&2
+    exit 0
+  fi
+  if ! mount=$(directory_mount); then
+    printf 'Refused dumps: could not verify the control mount.\n' >&2
+    exit 0
+  fi
+  if ! enter_shared "$CONTROL/dumps"; then
+    printf 'Refused dumps: it is not a plain folder.\n' >&2
+    exit 0
+  fi
+  if ! actual=$(facts .) || [ "${actual##* }" != "${owner##* }" ]; then
+    printf 'Refused dumps: it is not a keeper folder.\n' >&2
+    exit 0
+  fi
+  if ! dumps_mount=$(directory_mount) || [ "$dumps_mount" != "$mount" ]; then
+    printf 'Refused dumps: could not verify the control mount.\n' >&2
+    exit 0
+  fi
+  # Batched -exec passes removal failures back through find. Each successful batch prints one marker.
+  if ! removed=$(find . -maxdepth 1 -type f -user "${owner##* }" -mmin +1440 \
+    -exec sh -c 'rm -f -- "$@" && printf .' sweep-dumps {} + 2> /dev/null); then
+    printf 'Could not check or remove one or more stale dump entries.\n' >&2
+  elif [ -n "$removed" ]; then
     printf 'Deleted a database dump that was not sealed within a day.\n'
   fi
 )

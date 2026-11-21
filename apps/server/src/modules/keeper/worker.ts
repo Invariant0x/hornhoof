@@ -96,7 +96,7 @@ export type WorkerKeeperOptions = {
   /* What a machine that keeps a copy adds to its word of where the company moves: that its copy is cut off from the
      leader, and that it asks the CEO a question. */
   switchMore?: () => { cut: boolean; question: boolean };
-  extraReport?: () => object;
+  extraReport?: () => object | Promise<object>;
   /* What measures this machine's connection to the internet; none where a test gives none. */
   internet?: Internet;
   /* How often the keeper times a synced write to its disk; a test's keeper takes its own. copying: whether the
@@ -768,7 +768,7 @@ export class WorkerKeeper {
          internet. */
       const rtt = this.sessions.linkRttMs();
       const network = { ...this.measures.network(), ...(rtt === null ? {} : { linkRttMs: rtt }) };
-      const backups = { ...(this.ageRecipient ? { ageKey: this.ageRecipient } : {}), heldBackups: this.holder.store().reported(), ...(this.becoming?.failure() ? { copy: setup } : {}), ...this.opts.extraReport?.(), ...(wiped ? { wiped } : {}) };
+      const backups = { ...(this.ageRecipient ? { ageKey: this.ageRecipient } : {}), heldBackups: this.holder.store().reported(), ...(this.becoming?.failure() ? { copy: setup } : {}), ...await this.opts.extraReport?.(), ...(wiped ? { wiped } : {}) };
       /* A leader an update took back to a build before refuses words it does not know: the report goes again at once
          without the newest of them, the measures, and then without any, so what an older leader does take is not lost
          with what it does not. */

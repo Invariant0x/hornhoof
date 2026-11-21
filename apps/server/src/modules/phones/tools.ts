@@ -32,7 +32,7 @@ function actionAnswer({ status, capture, typing }: PhoneReply): ToolAnswer {
 }
 
 export function registerPhoneTools(server: McpServer, ctx: Ctx, me: PhoneAgent): void {
-  server.registerTool('phones', { description: 'The company Android phones you may borrow, their owners, whether each is busy and how many agents wait. state offline: its computer is offline, or the computer does not see the phone (connection not_connected) and it cannot be borrowed until its owner connects it again.' }, () => answer(async () => {
+  server.registerTool('phones', { description: 'The company Android phones you may borrow, their owners, whether each is busy and how many agents wait. state offline: its computer is offline or did not answer (connection computer_offline), or the computer does not see the phone (connection not_connected) and it cannot be borrowed until its owner connects it again.' }, () => answer(async () => {
     const phones = await ctx.db.select().from(companyPhones).where(and(eq(companyPhones.companyId, me.companyId), isNull(companyPhones.removedAt))).orderBy(asc(companyPhones.createdAt), asc(companyPhones.id));
     const connections = await phoneConnections(ctx, phones);
     return { value: { phones: await Promise.all(phones.map(p => phoneView(ctx, p, undefined, connections.get(p.id)))) } };

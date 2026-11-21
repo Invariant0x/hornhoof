@@ -9,17 +9,19 @@ import { nodes, subscriptions, testRuns } from '../../db/schema.js';
 import { nodeIdentity, type NodeHub, type NodeIdentity, type SaidLoad } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
 import { latestReport } from '../nodes/host-load.js';
+import { machineDisk } from '../nodes/machine-disk.js';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the timestamp from the public load
 const plain = ({ at: _, ...load }: SaidLoad): NodeLoad => load;
 
-/* A machine's load from what its nodes said: they share its processors and memory, of which the newest word counts, and
-   each runs jobs of its own. */
+/* A machine's load from what its nodes said: they share its processors, memory and disk, of which the newest word counts,
+   and each runs jobs of its own and measures its own folder. */
 export function together(loads: (SaidLoad | null)[]): NodeLoad | null {
   const said = loads.filter((l): l is SaidLoad => l !== null);
   if (!said.length) return null;
   const newest = latestReport(said)!;
-  return { ...plain(newest), tests: said.reduce((n, l) => n + l.tests, 0), jobs: said.reduce((n, l) => n + l.jobs, 0) };
+  const disk = machineDisk(said);
+  return { ...plain(newest), tests: said.reduce((n, l) => n + l.tests, 0), jobs: said.reduce((n, l) => n + l.jobs, 0), ...(disk ? { disk } : {}) };
 }
 
 /* A part runs on one node, whose local limits count; jobs and tests still belong to the whole machine. */
