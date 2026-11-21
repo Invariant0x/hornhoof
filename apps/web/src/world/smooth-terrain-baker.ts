@@ -149,26 +149,26 @@ export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArr
       let accent = 0;
 
       if (spec.pattern === 'fine_grain') {
-        const drift = periodicNoise2D(u * 6, v * 12, 6, 12, seed + 83);
+        const drift = periodicNoise2D(u * 8, v * 8, 8, 8, seed + 83);
         blend = macro * 0.48 + drift * 0.34 + mid * 0.18 + fine * 0.16 * contrast + micro * 0.08;
-        const sparkle = periodicDiagNoise(u, v, 32, seed + 97);
+        const sparkle = periodicDiagNoise(u, v, 24, seed + 97);
         if (sparkle > 0.72) accent = smoothstep(0.72, 0.92, sparkle) * 0.34 * contrast;
       } else if (spec.pattern === 'grass_tufts') {
-        /* Painterly organic meadow with soft sunlit patches and delicate fine blade texture. */
+        /* Isotropic ground-space meadow; isometric (u, v) sampling projects it flat onto the terrain. */
         const patch = periodicDiagNoise(u, v, 6, seed + 89);
-        const tuft = periodicNoise2D(u * 18, v * 28, 18, 28, seed + 91);
-        const blade = periodicDiagNoise(u, v, 26, seed + 109);
-        blend = macro * 0.42 + patch * 0.32 + tuft * 0.26 + fine * 0.10;
+        const tuft = periodicNoise2D(u * 16, v * 16, 16, 16, seed + 91);
+        const blade = periodicDiagNoise(u, v, 22, seed + 109);
+        blend = macro * 0.44 + patch * 0.3 + tuft * 0.26 + fine * 0.1;
         const sunlit = tuft * 0.55 + blade * 0.45;
-        if (sunlit > 0.62) accent = smoothstep(0.62, 0.88, sunlit) * 0.46 * contrast;
+        if (sunlit > 0.62) accent = smoothstep(0.62, 0.88, sunlit) * 0.44 * contrast;
       } else if (spec.pattern === 'furrows') {
-        /* 2:1 isometric diagonal furrows aligned smoothly with tile axes. */
-        const phase = (u * 7 + v * 14) * Math.PI * 2 + (macro - 0.5) * 1.1;
+        /* Ground-axis crop furrows automatically projected onto the 2:1 isometric tile plane. */
+        const phase = u * 16 * Math.PI * 2 + (macro - 0.5) * 1.1;
         const stripe = 0.5 + 0.5 * Math.sin(phase);
         blend = stripe * 0.58 + macro * 0.28 + mid * 0.14 + fine * 0.08;
         if (stripe > 0.7) accent = smoothstep(0.7, 0.98, stripe) * 0.32;
       } else if (spec.pattern === 'wind_ripples') {
-        const phase = (u * 5 - v * 10) * Math.PI * 2 + (macro - 0.5) * 2.1;
+        const phase = (u * 5 + v * 5) * Math.PI * 2 + (macro - 0.5) * 2.1;
         const wave = 0.5 + 0.5 * Math.sin(phase);
         blend = wave * 0.56 + macro * 0.32 + mid * 0.12 + fine * 0.08;
         if (wave > 0.72) accent = smoothstep(0.72, 0.98, wave) * 0.38;
@@ -180,9 +180,9 @@ export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArr
         blend = strata * 0.72 + macro * 0.28 + fine * 0.12;
         if (strata > 0.72) accent = smoothstep(0.72, 0.94, strata) * 0.48;
       } else if (spec.pattern === 'cut_stone') {
-        /* Isometric staggered cut-stone terraces. */
-        const su = u * 4 + v * 8;
-        const sv = u * 4 - v * 8;
+        /* Ground-plane staggered masonry blocks projected onto isometric tiles. */
+        const su = u * 8;
+        const sv = v * 4;
         const rowId = Math.floor(sv);
         const bx = (((su + (rowId & 1) * 0.5) % 1) + 1) % 1;
         const by = ((sv % 1) + 1) % 1;
@@ -191,26 +191,26 @@ export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArr
         blend = (1 - mortar) * (0.45 + macro * 0.36 + mid * 0.19 + fine * 0.1) + mortar * 0.14;
         if (mortar < 0.2 && (bx < 0.18 || by < 0.18)) accent = 0.32;
       } else if (spec.pattern === 'moss_glow') {
-        /* Smooth bioluminescent spore clusters on damp cavern floor. */
+        /* Smooth isotropic bioluminescent spore clusters foreshortened flat onto the cavern floor. */
         const cluster1 = periodicDiagNoise(u, v, 8, seed + 241);
         const cluster2 = periodicNoise2D(u * 16, v * 16, 16, 16, seed + 263);
         const glow = cluster1 * 0.55 + cluster2 * 0.45;
         blend = macro * 0.5 + mid * 0.5;
         if (glow > 0.62) accent = smoothstep(0.62, 0.88, glow) * 0.92;
       } else if (spec.pattern === 'paved_stone') {
-        /* 2:1 isometric diamond flagstones with soft bevels and weathered variation. */
-        const duRaw = u * 5 + v * 10;
-        const dvRaw = u * 5 - v * 10;
-        const cellU = ((Math.floor(duRaw) % 5) + 5) % 5;
-        const cellV = ((Math.floor(dvRaw) % 5) + 5) % 5;
+        /* Ground-space flagstones (2x2 per tile) that project as true 2:1 isometric diamond slabs. */
+        const duRaw = u * 8;
+        const dvRaw = v * 8;
+        const cellU = ((Math.floor(duRaw) % 8) + 8) % 8;
+        const cellV = ((Math.floor(dvRaw) % 8) + 8) % 8;
         const slabTone = hash2i(cellU, cellV, seed + 307);
         const fx = ((duRaw % 1) + 1) % 1;
         const fy = ((dvRaw % 1) + 1) % 1;
         const edge = Math.min(fx, 1 - fx, fy, 1 - fy);
-        const seam = 1 - smoothstep(0.035, 0.085, edge);
-        const surface = 0.34 + slabTone * 0.28 + macro * 0.24 + mid * 0.14 + fine * 0.1;
-        blend = surface * (1 - seam * 0.72) + seam * 0.08;
-        if (seam < 0.25 && fx < 0.18 && fy < 0.82) accent = 0.22 * (1 - seam);
+        const seam = 1 - smoothstep(0.035, 0.09, edge);
+        const surface = 0.34 + slabTone * 0.26 + macro * 0.24 + mid * 0.16 + fine * 0.1;
+        blend = surface * (1 - seam * 0.7) + seam * 0.08;
+        if (seam < 0.25 && (fx < 0.16 || fy < 0.16)) accent = 0.22 * (1 - seam);
       }
 
       const t = Math.max(0, Math.min(1, blend));
@@ -254,12 +254,12 @@ export function buildLiquidSurfacePixels(spec: LiquidLayerSpec, size = 256): Uin
       const wu = u + warpX;
       const wv = v + warpY;
 
-      const wave1 = periodicNoise2D(wu * 4, wv * 8, 4, 8, seed);
+      const wave1 = periodicNoise2D(wu * 6, wv * 6, 6, 6, seed);
       const wave2 = periodicDiagNoise(wu, wv, 5, seed + 71);
-      const wave3 = periodicNoise2D(wu * 8, wv * 16, 8, 16, seed + 101);
+      const wave3 = periodicNoise2D(wu * 10, wv * 10, 10, 10, seed + 101);
 
       const cA = 1 - Math.abs(2 * periodicDiagNoise(wu, wv, 6, seed + 139) - 1);
-      const cB = 1 - Math.abs(2 * periodicNoise2D(wu * 9, wv * 18, 9, 18, seed + 181) - 1);
+      const cB = 1 - Math.abs(2 * periodicNoise2D(wu * 10, wv * 10, 10, 10, seed + 181) - 1);
       const caustic = cA * 0.6 + cB * 0.4;
       const ripple = Math.pow(caustic, spec.glow ? 2.8 : 4.6);
 
@@ -431,11 +431,6 @@ export function bakeSmoothChunkPixels(
 
     let u = u0 + pxStart * du;
     let v = v0 + pxStart * dv;
-    const tfy = wy * 1.15;
-    const ty0 = Math.floor(tfy);
-    const tFracY = tfy - ty0;
-    const row0Off = (ty0 & TEX_MASK) * TEX_SIZE;
-    const row1Off = ((ty0 + 1) & TEX_MASK) * TEX_SIZE;
     let out = (py * pixelWidth + pxStart) * 4;
 
     for (let px = pxStart; px <= pxEnd; px++, u += du, v += dv, out += 4) {
@@ -486,12 +481,18 @@ export function bakeSmoothChunkPixels(
       const dEdv = (e01 - e00) * (1 - fx) + (e11 - e10) * fx;
       const shade = Math.max(0.76, Math.min(1.22, 1.0 - (dEdu * 0.55 + dEdv * 0.55)));
 
-      const wx = worldX + (px + 0.5) * invScale;
-      const tfx = wx * 1.15;
+      /* Project material textures onto the isometric ground plane via global tile coordinates (u, v):
+         64 texels per tile = one seamless 256x256 texture repeat across every 4x4 ground tiles. */
+      const tfx = u * 64;
+      const tfy = v * 64;
       const tx0 = Math.floor(tfx);
+      const ty0 = Math.floor(tfy);
       const tFracX = tfx - tx0;
+      const tFracY = tfy - ty0;
       const tx0m = tx0 & TEX_MASK;
       const tx1m = (tx0 + 1) & TEX_MASK;
+      const row0Off = (ty0 & TEX_MASK) * TEX_SIZE;
+      const row1Off = ((ty0 + 1) & TEX_MASK) * TEX_SIZE;
       const idx00 = (row0Off + tx0m) * 3;
       const idx10 = (row0Off + tx1m) * 3;
       const idx01 = (row1Off + tx0m) * 3;

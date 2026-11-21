@@ -260,6 +260,8 @@ export class IsometricWorldEngine {
       if (this.terrainMap && this.pack.liquidLayer) {
         const liqCanvas = buildLiquidSurfaceCanvas(this.pack.liquidLayer, 256);
         const liqTex = Texture.from(liqCanvas);
+        /* Explicit repeat wrapping prevents bilinear clamp seams at tile borders in WebGL. */
+        liqTex.source.style.addressMode = 'repeat';
         const spriteA = new TilingSprite({
           texture: liqTex,
           width: this.bounds.width,
@@ -267,6 +269,8 @@ export class IsometricWorldEngine {
         });
         spriteA.x = this.bounds.minX;
         spriteA.y = this.bounds.minY;
+        /* 2:1 foreshortening aligns animated liquid ripples with the isometric horizontal plane. */
+        spriteA.tileScale.set(1.25, 0.625);
 
         const spriteB = new TilingSprite({
           texture: liqTex,
@@ -276,7 +280,7 @@ export class IsometricWorldEngine {
         spriteB.x = this.bounds.minX;
         spriteB.y = this.bounds.minY;
         spriteB.alpha = 0.36;
-        spriteB.tileScale.set(1.35, 1.35);
+        spriteB.tileScale.set(1.75, 0.875);
 
         const n = this.pack.mapSize;
         const mTop = tileTopVertexToWorld(0, 0, this.tileW, this.tileH);

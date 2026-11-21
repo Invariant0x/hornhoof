@@ -151,8 +151,9 @@ export const DUNGEON_TERRAIN_RECIPE: TerrainRecipeSpec = {
     const evaluateCavernField = (gx: number, gy: number): { hallDist: number; cavernVal: number; tunnelVal: number; fungalVal: number; oreVal: number } => {
       const dx = gx - params.startCenter.col;
       const dy = gy - params.startCenter.row;
-      const wobble = (noise.fbm2D(gx * 0.14, gy * 0.14, params.cavernSeed + 31, 2) - 0.5) * 2.4;
-      const hallDist = Math.hypot(dx, dy) + wobble * 0.72 - params.hallRadius;
+      const wobble =
+        (noise.fbm2D(gx * 0.12, gy * 0.12, params.cavernSeed + 31, 3) - 0.5) * 4.4;
+      const hallDist = Math.hypot(dx, dy) + wobble - params.hallRadius;
       const cavernVal = noise.fbm2D(gx * 0.036, gy * 0.036, params.cavernSeed, 3);
       const tunnelRidge = noise.ridgedFbm2D(gx * 0.026, gy * 0.026, params.tunnelSeed, 3);
       const fungalVal = noise.fbm2D(gx * 0.075, gy * 0.075, params.fungalSeed, 3);
@@ -169,6 +170,7 @@ export const DUNGEON_TERRAIN_RECIPE: TerrainRecipeSpec = {
 
       const f = evaluateCavernField(gx, gy);
       if (f.hallDist <= 0) return 'start_hall';
+      if (f.hallDist <= 1.8) return 'rough_cavern';
 
       const isNaturalCavern = f.cavernVal > 0.625 || f.tunnelVal > 0.805;
       if (isNaturalCavern) {
@@ -185,13 +187,15 @@ export const DUNGEON_TERRAIN_RECIPE: TerrainRecipeSpec = {
       const f = evaluateCavernField(vx, vy);
 
       const obsidianW = 1 - smoothstep(0.6, 2.5, Math.max(0, dLava));
-      const hallW = (1 - smoothstep(-1.0, 1.4, f.hallDist)) * (1 - obsidianW);
+      const hallW = (1 - smoothstep(-1.4, 2.0, f.hallDist)) * (1 - obsidianW);
+      /* Natural cave halo around the carved hall eliminates any sharp geometric edge. */
+      const cavernHalo = (1 - smoothstep(0.5, 4.2, f.hallDist)) * (1 - hallW) * (1 - obsidianW);
 
       const cavernSignal = Math.max(
         smoothstep(0.585, 0.655, f.cavernVal),
         smoothstep(0.765, 0.835, f.tunnelVal),
       );
-      const openCavern = cavernSignal * (1 - hallW) * (1 - obsidianW);
+      const openCavern = Math.min(1, cavernSignal + cavernHalo * 0.85) * (1 - hallW) * (1 - obsidianW);
       const fungalW = openCavern * smoothstep(0.57, 0.67, f.fungalVal) * smoothstep(4, 8, dLava);
       const cavernFloorW = Math.max(0, openCavern - fungalW);
 
@@ -199,10 +203,11 @@ export const DUNGEON_TERRAIN_RECIPE: TerrainRecipeSpec = {
       const oreW = solidMask * smoothstep(0.64, 0.72, f.oreVal) * smoothstep(2.5, 5.5, dLava);
       const bedrockW = Math.max(0.02, solidMask - oreW);
 
-      /* Carved halls and caverns lie low; uncut bedrock rises steeply as cavern walls under top-left light. */
-      const lavaDip = smoothstep(-1.2, 2.0, dLava) * 0.25;
-      const wallLift = solidMask * (0.68 + 0.32 * noise.ridgedFbm2D(vx * 0.05, vy * 0.05, params.cavernSeed + 99, 2));
-      const elevation = -0.22 + lavaDip + wallLift;
+      /* Gentle multi-octave cave relief avoids harsh bright/dark geometric bands along carved walls. */
+      const lavaDip = smoothstep(-1.2, 2.2, dLava) * 0.16;
+      const wallLift =
+        solidMask * (0.24 + 0.18 * noise.ridgedFbm2D(vx * 0.055, vy * 0.055, params.cavernSeed + 99, 2));
+      const elevation = -0.14 + lavaDip + wallLift;
       const moisture = Math.max(fungalW, 1 - smoothstep(0, 8, Math.max(0, dLava)));
 
       return {

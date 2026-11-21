@@ -108,7 +108,7 @@ test('Stage 2 gallery supports Egypt and Dungeon packs and renders smooth non-st
     await expect(page.getByTestId('stage2-gallery-title')).toContainText('Stage 2: Pack-Owned Map Gallery');
     await page.getByTestId('lang-ru').click();
 
-    /* 3. Open Dungeon "hornhoof" in the smooth isometric engine at 100% zoom (1440x900) and focus the magma shore. */
+    /* 3. Open Dungeon "hornhoof" in the smooth isometric engine at 100% (magma shore) and 200% (carved hall edge with isometric flagstones). */
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.getByTestId('gallery-card-hornhoof').click();
     await waitForIsoReady(page);
@@ -120,6 +120,15 @@ test('Stage 2 gallery supports Egypt and Dungeon packs and renders smooth non-st
     expect(dungeonStats.buildGridVisible).toBe(false);
     expect(dungeonStats.hasAnimatedLiquid).toBe(true);
     await capture(page, info, 'dungeon-hornhoof-100pct');
+
+    /* Zoom to 200% right at the edge of the carved starting hall to prove isometric diamond flagstones + organic cave edge + zero seams. */
+    await page.evaluate(() => {
+      const g = (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__;
+      g.focusTile(71, 71);
+      g.setZoom(2.0);
+    });
+    await waitForIsoReady(page);
+    await capture(page, info, 'dungeon-hornhoof-200pct');
 
     /* 4. Open Ancient Egypt "hornhoof" and inspect smooth curved shoreline at 100% and 200% zoom. */
     await page.getByTestId('stage2-back-gallery').click();
