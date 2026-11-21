@@ -430,7 +430,9 @@ describe('updater, Docker disk care', () => {
     const s = stand();
     const w = dockerWorld({
       images: [],
-      containers: [],
+      containers: [
+        { Id: 'c-node', Name: '/hh-node', Image: 'sha256:n', Created: iso(-100), SizeRw: 0, State: { Running: true, Status: 'running' }, Config: { Labels: { 'hornhoof.subscription': 'p1' } }, Mounts: [] },
+      ],
       volumes: [],
       networks: [],
       buildCacheSize: '0B',
@@ -441,10 +443,10 @@ describe('updater, Docker disk care', () => {
 
     /* Two calls within an hour look at Docker once; with HORNHOOF_DISK_EVERY=0 they look twice. */
     expect((await runUpdaterStep(s, 'disk_care; disk_care', w.env({ HORNHOOF_DISK_EVERY: '3600' }))).code).toBe(0);
-    expect(w.calls().filter(c => c.startsWith('docker image ls'))).toHaveLength(1);
+    expect(w.calls().filter(c => c.startsWith('docker cp '))).toHaveLength(1);
 
     expect((await runUpdaterStep(s, 'disk_care; disk_care', w.env({ HORNHOOF_DISK_EVERY: '0' }))).code).toBe(0);
-    expect(w.calls().filter(c => c.startsWith('docker image ls'))).toHaveLength(3);
+    expect(w.calls().filter(c => c.startsWith('docker cp '))).toHaveLength(3);
 
     /* Skips while an update is running. */
     const busy = stand();

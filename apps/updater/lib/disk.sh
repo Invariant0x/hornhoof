@@ -57,7 +57,7 @@ disk_setting() {
 
 disk_safe_ref() {
   case "$1" in
-    '' | -* | *[$' \t\r\n']*) return 1 ;;
+    '' | -* | *'|'* | *[$' \t\r\n']*) return 1 ;;
     *) return 0 ;;
   esac
 }
@@ -148,7 +148,7 @@ disk_df_volumes() {
   out=$(printf '%s\n' "$raw" | jq -r "$DISK_JQ_HELPERS"'
     ((.Volumes // []) | map({key: .Name, value: (.Size | to_bytes)}) | from_entries) // {}
   ' 2> /dev/null || true)
-  printf '%s' "${out:-{}}"
+  if [ -n "$out" ]; then printf '%s' "$out"; else printf '{}'; fi
 }
 
 # Total and free bytes of Docker's disk (the filesystem this updater runs on).
@@ -190,10 +190,10 @@ disk_clean_images() {
     | map(select(.Id as $id | ($keep | index($id)) == null))
     | .[]
     | (own_tags | if length > 1 then join(" ") else "" end) as $multi |
-    [.Id, ((.Size // 0) | floor | tostring), (if $multi != "" then $multi else .Id end)] | @tsv
+    [.Id, ((.Size // 0) | floor | tostring), (if $multi != "" then $multi else .Id end)] | join("|")
   ' 2> /dev/null || true)
 
-  while IFS=$'\t' read -r id size refs; do
+  while IFS='|' read -r id size refs; do
     [ -n "$id" ] || continue
     disk_safe_ref "$id" || continue
     ok=1
@@ -238,10 +238,10 @@ disk_clean_labs() {
       ($vs | map(.Name) | join(" ")),
       ($cs | map(.SizeRw // 0) | add // 0 | floor | tostring),
       ($vs | map($vsizes[.Name] // 0) | add // 0 | floor | tostring)
-    ] | @tsv
+    ] | join("|")
   ' 2> /dev/null || true)
 
-  while IFS=$'\t' read -r lab cids vols cbytes vbytes; do
+  while IFS='|' read -r lab cids vols cbytes vbytes; do
     [ -n "$lab" ] || continue
     disk_plain_lab "$lab" || continue
     if [ -n "$cids" ]; then
@@ -280,10 +280,10 @@ disk_clean_labs() {
     | (.Config.Labels["io.hornhoof.since"] // "") as $since
     | select($since | test("^[0-9]+$"))
     | select(($now - ($since | tonumber)) >= $age)
-    | [.Id, ((.SizeRw // 0) | floor | tostring)] | @tsv
+    | [.Id, ((.SizeRw // 0) | floor | tostring)] | join("|")
   ' 2> /dev/null || true)
 
-  while IFS=$'\t' read -r cid size; do
+  while IFS='|' read -r cid size; do
     [ -n "$cid" ] || continue
     disk_safe_ref "$cid" || continue
     if docker rm -f -v "$cid" > /dev/null 2>&1; then
