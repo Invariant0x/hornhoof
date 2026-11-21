@@ -9,6 +9,9 @@ const MAX_KEPT = 64;
 /* The shortest piece of a prompt that tells it apart, when the program shows only a part of what was pasted. */
 const OWN_PIECE = 40;
 export const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
+/* What tmux pastes of these words: terminal controls in them must not end the paste or become keys, so only newline and
+   tab of them stay. */
+export const pastable = (text: string) => text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
 /* What a program shows in place of a long paste: the words themselves are not on its screen. */
 const FOLDED = /\[Pasted (?:text|content)\b[^\]]*\]/i;
 const ONLY_FOLDED = new RegExp(`^${FOLDED.source}$`, 'i');

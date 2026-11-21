@@ -222,6 +222,14 @@ describe('hook delivery through the bridge', () => {
     expect(handled).toHaveBeenCalledTimes(1);
   });
 
+  it('reports a caller that left before its owner check under that reason, not as a failed check, and still refuses it', async () => {
+    const handled = vi.fn();
+    const b = await opened(handled, async (_key, _peer, why) => { why?.('the caller left before its owner check');return false; });
+    expect((await post(b.url)).status).toBe(403);
+    expect(b.rejected).toEqual([{ key: 'agent-1', event: 'stop', reason: 'the caller left before its owner check' }]);
+    expect(handled).not.toHaveBeenCalled();
+  });
+
   it("reports a refused check command and tools call with the check's reason, as it does a hook", async () => {
     const b = await opened(() => { throw Error('must not run'); }, async (_key, _peer, why) => { why?.("the caller is not under the agent's pane");return false; });
     const check = b.url.replace('/hook/', '/check/');

@@ -23,12 +23,16 @@ export const kimiProgram: TermProgram = {
     /* The agent's folder is trusted, so Kimi reads the tools and instructions Hornhoof leaves there without asking. Kimi
        has no flag for effort; it reads this setting over its own. */
     const thinking: Record<string, string> = effort ? { KIMI_MODEL_THINKING_EFFORT: effort } : {};
-    return { command, env: { KIMI_CODE_HOME: home, KIMI_CODE_TRUST_WORKSPACE: '1', PI_PROGRAM_STATUS: '1', ...KIMI_NO_AUTO_UPDATE, ...thinking, ...bridgeEnv(urls) }, sessionId };
+    return { command, env: { KIMI_CODE_HOME: home, KIMI_CODE_TRUST_WORKSPACE: '1', PI_PROGRAM_STATUS: '1', ...KIMI_NO_AUTO_UPDATE, ...thinking, ...bridgeEnv(urls, KIMI_HOOK_LIMITS) }, sessionId };
   },
   limits: kimiPlanLimits,
 };
 
 /* Hornhoof's hooks in Kimi's settings: the start names the session, the prompt opens a person's turn before Kimi goes on. */
+/* Kimi Code gives every hook thirty seconds unless it asks for more
+   (packages/agent-core-v2/src/features/externalHooks/internal/matchHooks.ts, DEFAULT_HOOK_TIMEOUT_SECONDS). */
+const KIMI_HOOK_LIMITS = { '*': 30_000 };
+
 const KIMI_HOOKS = [
   ['SessionStart', 'start'],
   ['UserPromptSubmit', 'prompt'],
