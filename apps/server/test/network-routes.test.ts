@@ -335,6 +335,33 @@ describe('the network routes the keeper calls', () => {
     }
   });
 
+  it('reports replica count and measured bytes only for machines that hold a copy', async () => {
+    const c = await company();
+    await c.db.update(companies).set({ name: 'Example Company' }).where(eq(companies.id, c.companyId));
+    await c.certificate(newKey());
+    const replica = await c.joined('data', newKey(), { networkId: '1'.repeat(32) });
+    const worker = await c.joined('worker', newKey(), { networkId: '2'.repeat(32) });
+    const copy = { state: 'ready', progress: null, error: null, at: null, name: 'copy_1111111111111111_1', old: null };
+    const report = (machine: string, payload: object) => c.app.inject({ method: 'POST', url: '/api/network/report', payload, ...from(machine) });
+    const listed = async () => (await c.app.inject({ url: '/api/machines', ...as(c.ceo) })).json() as {
+      builtin: { replicas?: unknown }; machines: { id: string; replicas?: unknown }[];
+    };
+    expect((await report(replica.id, { copy, replicaBytes: 4096 })).statusCode).toBe(204);
+    expect((await report(worker.id, { copy, replicaBytes: 8192 })).statusCode).toBe(204);
+    const view = await listed();
+    const empty = { count: 0, bytes: 0, companies: [] };
+    expect(view.builtin.replicas).toEqual(empty);
+    expect(view.machines.find(row => row.id === replica.id)?.replicas).toEqual({
+      count: 1, bytes: 4096, companies: [{ name: 'Example Company', bytes: 4096 }],
+    });
+    expect(view.machines.find(row => row.id === worker.id)?.replicas).toEqual(empty);
+
+    await c.db.update(machines).set({ role: 'worker', uploadState: 'kept' }).where(eq(machines.id, replica.id));
+    expect((await listed()).machines.find(row => row.id === replica.id)?.replicas).toMatchObject({ count: 1, bytes: 4096 });
+    expect((await report(replica.id, { wiped: true })).statusCode).toBe(204);
+    expect((await listed()).machines.find(row => row.id === replica.id)?.replicas).toEqual(empty);
+  });
+
   it("hands its own keeper the leader's slots of broken-off tables that a copy named in its last report, while that report is fresh", async () => {
     const c = await company();
     const copy = await c.joined('data', newKey());

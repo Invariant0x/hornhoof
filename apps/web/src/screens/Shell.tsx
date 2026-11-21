@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type RefObject } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, useT } from '../i18n';
 import { notOpened, useOrg } from '../org';
@@ -9,6 +9,7 @@ import { Idents } from '../ui/Idents';
 import { FirstContact } from '../ui/FirstContact';
 import { RecoveryBanner } from '../ui/RecoveryBanner';
 import { SwitchBanner } from '../ui/SwitchBanner';
+import { ShellTop, useMeasuredShellTop } from '../ui/shellBars';
 import { LoadFailure, UpdateSaysIt, useLoadFailure } from '../ui/LoadFailure';
 import { onTop, useLoad } from '../ui/Loading';
 import { UpdateBanner } from '../ui/UpdateBanner';
@@ -155,11 +156,10 @@ function CompanyPage({ tab, improvements, inbox, onTask, onHome }: {
 }
 
 /* The section tabs keep their words while all of them fit one line in the room the top bar leaves them: in the middle,
-   clear of the logo, the department's name beside it and the account, or from the start of the row on a phone with no logo.
-   Else each tab shows its icon and keeps its name as its label and tooltip. What the words need is measured as they are
-   shown, once for each set of words and when the fonts arrive; the room at every resize. The strip's half width goes to
-   the page as --tabs-half, for the department's name. */
-function useTabsFit(words: string, crumbs: number) {
+   clear of the logo and the account, or from the start of the row on a phone with no logo. Else each tab shows its icon and
+   keeps its name as its label and tooltip. What the words need is measured as they are shown, once for each set of words
+   and when the fonts arrive; the room at every resize. An open department's name stands under the menu (#1635). */
+function useTabsFit(words: string) {
   const bar = useRef<HTMLElement>(null), nav = useRef<HTMLElement>(null), brand = useRef<HTMLDivElement>(null), side = useRef<HTMLDivElement>(null);
   const [icons, setIcons] = useState(false);
   const [fonts, setFonts] = useState(false);
@@ -182,18 +182,17 @@ function useTabsFit(words: string, crumbs: number) {
       }
       const gap = parseFloat(getComputedStyle(top).columnGap) || 0;
       const logo = brand.current?.offsetWidth ?? 0;
-      const start = (logo ? logo + gap : 0) + (crumbs ? crumbs + gap : 0);
+      const start = logo ? logo + gap : 0;
       const end = (side.current?.offsetWidth ?? 0) + gap;
       const room = logo ? top.clientWidth - 2 * Math.max(start, end) : top.clientWidth - start - end;
       setIcons(need.current!.px > room);
-      top.parentElement?.style.setProperty('--tabs-half', `${strip.offsetWidth / 2}px`);
     };
     decide();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = guardedResizeObserver(decide, 'tabs');
     observer.observe(top);
     return () => observer.disconnect();
-  }, [icons, key, crumbs]);
+  }, [icons, key]);
   return { bar, nav, brand, side, icons };
 }
 
@@ -310,10 +309,18 @@ function useDepartmentLoad(dept: Department | undefined, deptId: string | null, 
   return { load, shown: load.phase === 'done' ? dept ?? null : waiting };
 }
 
-function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, loadOrg, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire, onCrumbs }: MapRouteProps & {
+/* What the shell tells the map, an open department and the windows beside them while one or both stand: where the room
+   under its bars starts, and how much room an open department's name takes under it. Only the map's tab, which holds an
+   open department too, floats them over its canvas: a page keeps its own room. */
+function shellVars(onMap: boolean, shellTop: number | null, plateRoom: number | null): CSSProperties | undefined {
+  if (!onMap || (shellTop === null && plateRoom === null)) return undefined;
+  return { ...(shellTop === null ? {} : { '--shell-top': `${shellTop}px` }), ...(plateRoom === null ? {} : { '--plate-room': `${plateRoom}px` }) } as CSSProperties;
+}
+
+function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, loadOrg, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire, onPlate }: MapRouteProps & {
   deptId: string | null; denied: boolean; org: Org | null; orgFailure: unknown; loadOrg(): void; shown: string | null; panel: 'window' | 'task' | null;
   openTask: (id: string) => void; openTracker: (departmentId: string) => void; openDepartment: (id: string) => void; onHire: (dept: Department) => void;
-  onCrumbs: (px: number) => void;
+  onPlate: (room: number | null) => void;
 }) {
   const { load, shown: department } = useDepartmentLoad(dept, deptId, org, orgFailure, loadOrg);
   if (tab !== 'map' || denied || missingDepartment || !department) return null;
@@ -334,7 +341,7 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
       onOpenTracker={openTracker}
       onOpenDepartment={openDepartment}
       onHire={() => onHire(department)}
-      onCrumbs={onCrumbs}
+      onPlate={onPlate}
     />
   );
 }
@@ -397,9 +404,12 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const account = useRef<HTMLDivElement>(null);
   const accountButton = useRef<HTMLButtonElement>(null);
   const closeContact = useCallback(() => { setContact(false); accountButton.current?.focus(); }, []);
-  /* How wide a department's name stands beside the logo, which the tabs leave room for. */
-  const [crumbs, setCrumbs] = useState(0);
-  const fit = useTabsFit(`${TABS.map(id => t.shell.tabs[id]).join('|')}|${decisions.waiting}`, crumbs);
+  const fit = useTabsFit(`${TABS.map(id => t.shell.tabs[id]).join('|')}|${decisions.waiting}`);
+  /* Where the room under the bars of the shell starts, which the map and an open department start what they show at. */
+  const page = useRef<HTMLElement>(null);
+  const shellTop = useMeasuredShellTop(page);
+  /* The room an open department's name takes at the top, which the cards open under. */
+  const [plateRoom, setPlateRoom] = useState<number | null>(null);
 
   useEffect(() => {
     if (!menu) return;
@@ -432,7 +442,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   return (
     <AgentWindowContext value={openAgent}>
     <UpdateSaysIt value={updateSaysIt}>
-    <div className="shell">
+    <ShellTop value={shellTop}>
+    <div className="shell" style={shellVars(tab === 'map', shellTop, plateRoom)}>
       <header className="topbar" ref={fit.bar}>
         <div className="tb-brand glass" ref={fit.brand}>
           <LogoMark />
@@ -442,8 +453,10 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} inbox={inbox} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} onContact={() => setContact(true)} toDecide={toDecide} account={account} accountButton={accountButton} side={fit.side} />
       </header>
       {/* The bars of the shell stand first in the page, each in its own row under the header, and what the page shows
-          comes after them. */}
-      <main className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}${tab === 'tasks' ? ' tracker-page' : ''}`}>
+          comes after them. On the map they float over it and an open department, which start under them, and the windows
+          and cards open under them too: the shell says where with --shell-top, and how much room an open department's
+          name takes under them with --plate-room. */}
+      <main ref={page} className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}${tab === 'tasks' ? ' tracker-page' : ''}`}>
         <SwitchBanner>
           {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} onProgressShown={setUpdateSaysIt} />}
           <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount({ kind: 'settings', group: 'company' })} />
@@ -456,7 +469,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
         </GuardBoundary>
         <GuardBoundary block="department" reset={deptId}>
-        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} loadOrg={loadOrg} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onCrumbs={setCrumbs} onHire={dept => {
+        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} loadOrg={loadOrg} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onPlate={setPlateRoom} onHire={dept => {
           setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
           openAgent('orchestrator');
         }} />
@@ -519,6 +532,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
       <AccountDialog route={!accountDialog || (!company && accountDialog === 'versions') ? null : route} me={currentMe} updates={updates} inbox={inbox} onHome={goHome} onRenamed={setSelfName} onGroup={group => switchOverlay(group ? { kind: 'settings', group } : { kind: 'settings' })} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
       {company && updates.cut && <UpdateCut cut={updates.cut} updates={updates} />}
     </div>
+    </ShellTop>
     </UpdateSaysIt>
     </AgentWindowContext>
   );
