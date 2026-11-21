@@ -708,8 +708,8 @@ export class IsometricWorldEngine {
         .lineTo(pts[3].x, pts[3].y)
         .closePath()
         .fill({ color: 0xffd166, alpha: 0.32 })
-        .stroke({ color: 0x111720, alpha: 0.9, width: strokeW * 2.2 })
-        .stroke({ color: 0xffd166, alpha: 1, width: strokeW * 1.25 });
+        .stroke({ color: 0x111720, alpha: 0.9, width: strokeW * 1.4 })
+        .stroke({ color: 0xffd166, alpha: 1, width: strokeW * 0.85 });
       g.circle(center.x, center.y, Math.max(4, 7 / this.camera.zoom))
         .fill({ color: 0xffd166, alpha: 0.98 })
         .stroke({ color: 0x111720, alpha: 0.95, width: Math.max(1.5, 2 / this.camera.zoom) });

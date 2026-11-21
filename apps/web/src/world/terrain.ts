@@ -150,7 +150,7 @@ type SeedFieldParams = Readonly<{
   cityCenter: TileCoord;
 }>;
 
-const GROVE_CELL = 34;
+const GROVE_CELL = 46;
 
 function meanderAt(params: Omit<SeedFieldParams, 'cityCenter'>, along: number): { center: number; slope: number; halfW: number } {
   const center =
@@ -162,8 +162,8 @@ function meanderAt(params: Omit<SeedFieldParams, 'cityCenter'>, along: number): 
     params.amp2 * params.freq2 * Math.cos(along * params.freq2 + params.phase2);
   const halfW =
     params.baseHalfW +
-    0.55 * Math.sin(along * 0.043 + params.widthPhase1) +
-    0.3 * Math.cos(along * 0.089 + params.widthPhase2);
+    0.75 * Math.sin(along * 0.055 + params.widthPhase1) +
+    0.4 * Math.cos(along * 0.11 + params.widthPhase2);
   return { center, slope, halfW };
 }
 
@@ -199,10 +199,10 @@ function signedRiverDistance(params: Omit<SeedFieldParams, 'cityCenter'>, gx: nu
 function rawRidgeValue(params: Omit<SeedFieldParams, 'cityCenter'>, gx: number, gy: number): number {
   const rx = gx * params.ridgeCos - gy * params.ridgeSin;
   const ry = gx * params.ridgeSin + gy * params.ridgeCos;
-  /* Directional 2.1:1 stretching forms natural mountain ridges and escarpments. */
-  const chain = ridgedFbm2D(rx * 0.015, ry * 0.031, params.ridgeSeed, 4);
-  const massif = fbm2D(gx * 0.018 + 13.7, gy * 0.018 - 7.3, (params.ridgeSeed + 7919) >>> 0, 3);
-  return chain * 0.65 + massif * 0.35;
+  /* Directional 2.2:1 stretching forms natural mountain ridges and escarpments. */
+  const chain = ridgedFbm2D(rx * 0.017, ry * 0.036, params.ridgeSeed, 4);
+  const massif = fbm2D(gx * 0.024 + 13.7, gy * 0.024 - 7.3, (params.ridgeSeed + 7919) >>> 0, 3);
+  return chain * 0.72 + massif * 0.28;
 }
 
 function fertileBandWidth(params: Omit<SeedFieldParams, 'cityCenter'>, gx: number, gy: number): number {
@@ -281,28 +281,29 @@ function buildSeedParams(numericSeed: number, baseSize: number): SeedFieldParams
   const riverCos = Math.cos(theta);
   const riverSin = Math.sin(theta);
 
-  /* Bounded meander amplitudes & frequencies guarantee |dm/dalong| <= 0.44 < 0.50:
-     proves single continuous edge-to-edge river crossing at every angle and expansion size. */
-  const baseOffset = (rng() * 2 - 1) * 14;
-  const amp1 = 11 + rng() * 5;
-  const freq1 = 0.015 + rng() * 0.004;
+  /* Pronounced S-curve river meanders (wavelength ~95..140 tiles) with bounded lateral excursion
+     so every company map has vivid natural bends and a single continuous edge-to-edge river. */
+  const baseOffset = (rng() * 2 - 1) * 11;
+  const amp1 = 10 + rng() * 5.5;
+  const freq1 = 0.042 + rng() * 0.02;
   const phase1 = rng() * Math.PI * 2;
-  const amp2 = 2.5 + rng() * 1.5;
-  const freq2 = 0.029 + rng() * 0.006;
+  const amp2 = 3.0 + rng() * 2.5;
+  const freq2 = 0.082 + rng() * 0.032;
   const phase2 = rng() * Math.PI * 2;
-  const baseHalfW = 2.8 + rng() * 0.85;
+  const baseHalfW = 2.85 + rng() * 0.85;
   const widthPhase1 = rng() * Math.PI * 2;
   const widthPhase2 = rng() * Math.PI * 2;
 
-  /* Roughly half of all company seeds feature a confluent tributary reaching a third map edge. */
+  /* Roughly half of all company seeds feature a sweeping tributary merging at a natural 32..50 degree angle. */
   const hasTributary = rng() < 0.45;
-  const joinAlong = (rng() * 2 - 1) * 22;
+  const joinAlong = (rng() * 2 - 1) * 20;
   const tribSide = rng() < 0.5 ? -1 : 1;
-  const tribBranchAngle = theta + tribSide * (0.78 + rng() * 0.45);
+  const tribDir = rng() < 0.5 ? 0 : Math.PI;
+  const tribBranchAngle = theta + tribDir + tribSide * (0.56 + rng() * 0.32);
   const tribCos = Math.cos(tribBranchAngle);
   const tribSin = Math.sin(tribBranchAngle);
-  const tribAmp = 6 + rng() * 4;
-  const tribFreq = 0.024 + rng() * 0.01;
+  const tribAmp = 7 + rng() * 4.5;
+  const tribFreq = 0.048 + rng() * 0.022;
   const tribPhase = rng() * Math.PI * 2;
   const tribHalfW = 1.95 + rng() * 0.45;
 
@@ -362,6 +363,9 @@ function buildSeedParams(numericSeed: number, baseSize: number): SeedFieldParams
 type GroveCandidate = Readonly<{
   x: number;
   y: number;
+  cosA: number;
+  sinA: number;
+  aspect: number;
   springR: number;
   groveR: number;
 }>;
@@ -369,10 +373,10 @@ type GroveCandidate = Readonly<{
 /* Evaluates whether infinite lattice cell (cellX, cellY) hosts an inland spring + grove pocket. */
 function groveInCell(params: SeedFieldParams, cellX: number, cellY: number): GroveCandidate | null {
   const roll = hash2i(cellX, cellY, params.groveSeed);
-  if (roll > 0.72) return null;
+  if (roll > 0.62) return null;
 
-  const jx = 0.2 + 0.6 * hash2i(cellX, cellY, (params.groveSeed + 101) >>> 0);
-  const jy = 0.2 + 0.6 * hash2i(cellX, cellY, (params.groveSeed + 211) >>> 0);
+  const jx = 0.18 + 0.64 * hash2i(cellX, cellY, (params.groveSeed + 101) >>> 0);
+  const jy = 0.18 + 0.64 * hash2i(cellX, cellY, (params.groveSeed + 211) >>> 0);
   const x = (cellX + jx) * GROVE_CELL;
   const y = (cellY + jy) * GROVE_CELL;
 
@@ -381,11 +385,13 @@ function groveInCell(params: SeedFieldParams, cellX: number, cellY: number): Gro
   const fertileW = fertileBandWidth(params, x, y);
   if (dRiver < fertileW + 9) return null;
   if (Math.hypot(x - params.cityCenter.col, y - params.cityCenter.row) < 20) return null;
-  if (rawRidgeValue(params, x, y) > 0.57) return null;
+  if (rawRidgeValue(params, x, y) > 0.59) return null;
 
-  const springR = 1.45 + 0.7 * hash2i(cellX, cellY, (params.groveSeed + 307) >>> 0);
-  const groveR = 4.0 + 1.8 * hash2i(cellX, cellY, (params.groveSeed + 409) >>> 0);
-  return { x, y, springR, groveR };
+  const angle = hash2i(cellX, cellY, (params.groveSeed + 613) >>> 0) * Math.PI;
+  const aspect = 1.25 + 0.55 * hash2i(cellX, cellY, (params.groveSeed + 719) >>> 0);
+  const springR = 1.6 + 1.0 * hash2i(cellX, cellY, (params.groveSeed + 307) >>> 0);
+  const groveR = 4.6 + 2.6 * hash2i(cellX, cellY, (params.groveSeed + 409) >>> 0);
+  return { x, y, cosA: Math.cos(angle), sinA: Math.sin(angle), aspect, springR, groveR };
 }
 
 /* Pure O(1) evaluation of a single world tile (gx, gy), invariant under any map edge expansion. */
@@ -418,12 +424,16 @@ function evaluateTerrainAt(params: SeedFieldParams, gx: number, gy: number): Ter
   /* Check inland spring + grove pockets across the 3x3 surrounding infinite lattice cells. */
   const cx = Math.floor(gx / GROVE_CELL);
   const cy = Math.floor(gy / GROVE_CELL);
-  const wobble = (fbm2D(gx * 0.16, gy * 0.16, (params.groveSeed + 521) >>> 0, 2) - 0.5) * 1.4;
+  const wobble = (fbm2D(gx * 0.14, gy * 0.14, (params.groveSeed + 521) >>> 0, 2) - 0.5) * 2.4;
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
       const cand = groveInCell(params, cx + dx, cy + dy);
       if (!cand) continue;
-      const dist = Math.hypot(gx - cand.x, gy - cand.y) + wobble * 0.6;
+      const rx = gx - cand.x;
+      const ry = gy - cand.y;
+      const lx = (rx * cand.cosA + ry * cand.sinA) / cand.aspect;
+      const ly = -rx * cand.sinA + ry * cand.cosA;
+      const dist = Math.hypot(lx, ly) + wobble * 0.7;
       if (dist <= cand.springR) return 'spring';
       if (dist <= cand.groveR) return 'grove';
     }
@@ -434,13 +444,13 @@ function evaluateTerrainAt(params: SeedFieldParams, gx: number, gy: number): Ter
     const ridgeVal = rawRidgeValue(params, gx, gy);
     const outerBoost = Math.min(0.055, Math.max(0, (distCenter - 26) / 680));
     const effectiveRidge = ridgeVal + outerBoost;
-    const ridgeThreshold = 0.708;
+    const ridgeThreshold = 0.688;
     if (effectiveRidge >= ridgeThreshold) return 'ridge';
 
     /* Quarries form compact stone outcrops nestled along the foothill skirts of ridges. */
-    if (effectiveRidge >= ridgeThreshold - 0.072) {
+    if (effectiveRidge >= ridgeThreshold - 0.068) {
       const qNoise = fbm2D(gx * 0.074, gy * 0.074, params.quarrySeed, 3);
-      if (qNoise > 0.575) return 'quarry';
+      if (qNoise > 0.57) return 'quarry';
     }
   }
 
