@@ -550,10 +550,9 @@ function Stage4LiveWorld() {
           gap: 8,
           padding: '8px 12px',
           borderRadius: 12,
-          background: 'rgba(18, 16, 13, 0.84)',
+          background: 'rgba(18, 16, 13, 0.9)',
           border: '1px solid rgba(226, 200, 146, 0.28)',
           color: '#F3EAD7',
-          backdropFilter: 'blur(8px)',
           fontSize: 13,
           zIndex: 10,
         }}
