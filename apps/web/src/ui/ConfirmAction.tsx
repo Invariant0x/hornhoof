@@ -76,6 +76,7 @@ export function ConfirmAction({ title, effect, warnings = [], final = false, yes
   const [failure, setFailure] = useState<unknown>(null);
   const live = useRef(true);
   const busyNow = useRef(false);
+  const backdropDown = useRef(false);
   const close = useRef(onClose);
   close.current = onClose;
   const dismiss = useCallback(() => {
@@ -159,9 +160,13 @@ export function ConfirmAction({ title, effect, warnings = [], final = false, yes
       }}
       onPointerDown={event => {
         keepIn(event);
-        if (event.target === event.currentTarget) dismiss();
+        backdropDown.current = event.target === event.currentTarget;
       }}
-      onClick={keepIn}
+      onClick={event => {
+        keepIn(event);
+        if (backdropDown.current && event.target === event.currentTarget) dismiss();
+        backdropDown.current = false;
+      }}
       onMouseDown={keepIn}
       onSubmit={keepIn}
     >

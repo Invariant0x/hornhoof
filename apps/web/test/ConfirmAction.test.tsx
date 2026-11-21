@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -83,7 +83,7 @@ describe('the confirmation of a critical action', () => {
     expect(opener).toHaveFocus();
 
     await user.click(opener);
-    fireEvent.pointerDown(document.querySelector('.dialog-back')!);
+    await user.click(document.querySelector('.dialog-back')!);
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(opener).toHaveFocus();
     expect(onYes).not.toHaveBeenCalled();

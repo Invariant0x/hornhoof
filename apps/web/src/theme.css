@@ -370,9 +370,11 @@ dialog.dialog-back { inline-size: auto; block-size: auto; max-inline-size: none;
 dialog.dialog-back:not([open]) { display: none; }
 dialog.dialog-back::backdrop { background: transparent; }
 dialog.dialog-back > .dialog > :is(h2, p) { min-inline-size: 0; overflow-wrap: anywhere; }
+dialog.dialog-back > .dialog > p bdi { font-weight: 600; }
 dialog.dialog-back > .dialog > p[data-final] { font-size: 13px; color: var(--pink-ink); }
 dialog.dialog-back > .dialog > .alert { margin: 0; }
 dialog.dialog-back .busy-swap > * { display: inline-flex; align-items: center; gap: 8px; }
+dialog.dialog-back .btn .spinner { border-color: color-mix(in srgb, currentColor 30%, transparent); border-block-start-color: currentColor; }
 .first-contact > *, .first-contact h2 { min-inline-size: 0; overflow-wrap: anywhere; }
 .versions-check { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .update-note { padding: 10px 12px; border-left: 3px solid var(--amber); background: var(--surface2); font-size: 13px; }

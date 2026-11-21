@@ -11,7 +11,7 @@ const LONG = 'Александра-Маргарита Константинопо
 const LONG_EN = 'Maximiliana-Evangelina Montgomery-Featherstonehaugh';
 
 const person = (name: string): PersonView => ({
-  ...ME.person, id: 'p2', name, title: 'Editor', isOwner: false, isCeoDelegate: false, access: { whole: false, departments: [], teams: [] },
+  ...ME.person, id: 'p2', name, title: 'Editor', isOwner: false, isCeoDelegate: false, access: { whole: true, departments: [], teams: [] },
 });
 
 type Look = { lang: 'en' | 'ru'; dir: 'ltr' | 'rtl'; theme: 'light' | 'cyberpunk'; width: 375 | 1440 };
@@ -66,7 +66,8 @@ async function whole(page: Page, dialog: Locator, dir: Look['dir']) {
   const inner = await box.evaluate(element => {
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
-    return { left: rect.left + parseFloat(style.paddingLeft), right: rect.right - parseFloat(style.paddingRight) };
+    const left = rect.left + element.clientLeft;
+    return { left: left + parseFloat(style.paddingLeft), right: left + element.clientWidth - parseFloat(style.paddingRight) };
   });
   if (a.y === c.y) {
     if (dir === 'ltr') expect(Math.abs(c.x + c.width - inner.right), 'Cancel ends the group on the end edge').toBeLessThanOrEqual(1);
@@ -92,10 +93,12 @@ for (const look of LOOKS) {
     await remove.focus();
     await page.keyboard.press('Enter');
     await expect(dialog).toHaveAccessibleName(t.confirm.deletePerson.title);
+    expect(await dialog.locator('p bdi').first().evaluate(e => getComputedStyle(e).fontWeight)).toBe('600');
     const cancel = dialog.getByRole('button', { name: t.common.cancel, exact: true });
     await expect(cancel).toBeFocused();
     expect(await cancel.evaluate(e => getComputedStyle(e).outlineStyle)).toBe('solid');
-    const action = dialog.getByRole('button', { name: t.confirm.deletePerson.yes, exact: true });
+    const action = dialog.locator('.entry-actions > button').first();
+    await expect(action).toHaveAccessibleName(t.confirm.deletePerson.yes);
     expect(await action.evaluate(e => [getComputedStyle(e).backgroundColor, getComputedStyle(e).color])).toEqual(
       await page.evaluate(() => {
         const probe = document.createElement('i');
@@ -115,6 +118,7 @@ for (const look of LOOKS) {
     await expect(action).toHaveAttribute('aria-busy', 'true');
     await expect(action).toBeDisabled();
     await expect(cancel).toBeDisabled();
+    expect(await action.evaluate(e => getComputedStyle(e.querySelector('.spinner')!).borderTopColor === getComputedStyle(e).color)).toBe(true);
     expect((await dialog.locator('.entry-actions').boundingBox())!.width).toBeCloseTo(group.width, 0);
     await page.keyboard.press('Escape');
     await expect(dialog).toBeVisible();
