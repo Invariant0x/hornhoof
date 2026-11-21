@@ -309,7 +309,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     everyMs: config.updateCheckMs,
     onError: err => app.log.warn({ err }, 'Could not check for newer builds.'),
   });
-  ctx.updater = new UpdaterControl(config.controlDir);
+  ctx.updater = new UpdaterControl(config.controlDir, () => ctx.clock());
   ctx.restores = new Restores(ctx);
   ctx.totalLoss = new TotalLoss(ctx);
   ctx.merger = new Merger(ctx, keptDatabases(deps.db, deps.config));

@@ -480,6 +480,8 @@ export type StreamMessage =
   | { type: 'improvements' }
   /* The feedback inbox of Hornhoof's own installation changed. */
   | { type: 'feedback' }
+  /* Updater availability changed; people who see the whole company fetch updates again. */
+  | { type: 'updates' }
   /* A department's list of work kept for later turns changed. */
   | { type: 'backlog'; spot: { departmentId: string | null } }
   | { type: 'context'; agentId: string; used: number }
@@ -1064,6 +1066,8 @@ export type UpdateWaiting = { version: string; commit?: string; since: string; u
    updater, error says why. */
 export type UpdateCalledOff = { version: string; commit?: string; at: string; until: string; reason: 'deadline' | 'cancelled' | 'failed'; turns: NamedTurn[]; error?: string };
 
+export type UpdaterSilent = { since: string };
+
 export type UpdatesView = {
   current: { version: string; commit: string; migrations: number };
   available: boolean;
@@ -1071,7 +1075,7 @@ export type UpdatesView = {
   latest: Build | null;
   versions: Build[];
   error: string | null;
-  updater: { present: boolean; status: UpdaterStatus | null; waiting: UpdateWaiting | null; calledOff: UpdateCalledOff | null };
+  updater: { present: boolean; status: UpdaterStatus | null; waiting: UpdateWaiting | null; calledOff: UpdateCalledOff | null; silent?: UpdaterSilent | null };
   /* What each node waits for before it is replaced. A server from before this says nothing. */
   nodeWaits?: NodeWait[];
 };

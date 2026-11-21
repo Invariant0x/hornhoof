@@ -29,7 +29,15 @@ const onOffer = (state: UpdateState, commit: string): boolean => Boolean(state.l
 async function updatesView(ctx: Ctx, wait: UpdateWait, companyId: string) {
   const { version, commit, migrations } = ctx.config;
   const state = ctx.updates.state();
-  const updater: UpdaterView = { present: ctx.updater.present(), status: ctx.updater.status(), waiting: await wait.shown(companyId), calledOff: await wait.shownCalledOff(companyId) };
+  const now = ctx.clock();
+  const silent = ctx.updater.silentSince(now);
+  const updater: UpdaterView = {
+    present: ctx.updater.present(now),
+    status: ctx.updater.status(),
+    waiting: await wait.shown(companyId),
+    calledOff: await wait.shownCalledOff(companyId),
+    ...(silent ? { silent: { since: silent.toISOString() } } : {}),
+  };
   return { current: { version, commit, migrations }, available: onOffer(state, commit), ...state, updater, nodeWaits: await nodeWaits(ctx, companyId) };
 }
 

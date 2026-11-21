@@ -1,13 +1,22 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useState } from 'react';
 import { errorText, useLanguage, useT } from '../i18n';
-import type { Build } from '../types';
+import type { Build, UpdatesView } from '../types';
 import type { Updates } from '../updates';
 import { NodeWaits } from '../ui/MachineDrain';
 import { UpdateProgress } from '../ui/UpdateProgress';
 import { buildText, versionText } from '../ui/VersionMark';
-import { updateTargetText, versionedStatus } from '../ui/UpdateVersion';
+import { silentTime, updateTargetText, versionedStatus } from '../ui/UpdateVersion';
 import { useDialogClose } from '../ui/use-dialog-close';
+
+/* Explains when the updater stopped answering (auto-clearing) or is not running on this server. */
+function UpdaterNotice({ updater }: { updater: UpdatesView['updater'] }) {
+  const t = useT();
+  const { language } = useLanguage();
+  if (updater.silent) return <p className="update-note" role="status">{t.updates.silent(silentTime(language, updater.silent.since))}</p>;
+  if (!updater.present) return <p className="update-note">{t.updates.missing}</p>;
+  return null;
+}
 
 /* The builds Hornhoof can run, the one it runs, and the update under way or the last one's end. */
 export function Versions({ updates, onClose, onHome }: { updates: Updates; onClose: () => void; onHome?: () => void }) {
@@ -61,7 +70,7 @@ export function Versions({ updates, onClose, onHome }: { updates: Updates; onClo
           </button>
           <span className="muted">{view.error ? t.updates.checkFailed : view.checkedAt && t.updates.checkedAt(new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit' }).format(new Date(view.checkedAt)))}</span>
         </div>
-        {!updater.present && <p className="update-note">{t.updates.missing}</p>}
+        <UpdaterNotice updater={updater} />
         {updates.starting && !status && <UpdateProgress version={updateTargetText(updates)} step={null} starting offline={updates.offline} maintenance={updates.maintenance} />}
         {status && (
           <div className="update-progress">

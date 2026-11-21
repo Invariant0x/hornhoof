@@ -251,4 +251,23 @@ describe('updater heartbeat monitoring', () => {
     expect(clearView.updater.present).toBe(true);
     expect(clearView.updater.silent).toBeUndefined();
   });
+
+  it('delivers the alert once an Operations watcher becomes available while still stale', async () => {
+    const control = makeControlDir();
+    let now = START;
+    const c = await failureCompany({ HORNHOOF_CONTROL_DIR: control });
+    c.ctx.clock = () => now;
+    await c.db.update(agents).set({ switchedOffAt: new Date(now) }).where(eq(agents.id, c.watcher.id));
+
+    touchAlive(control, START);
+    now = START + THRESHOLD_MS;
+    await minuteRound(c.ctx, new Date(now), failLoud);
+    expect(await c.turnsOf(c.watcher.id)).toHaveLength(0);
+    expect((await c.app.inject({ method: 'GET', url: '/api/updates', ...as(c.ceo) })).json().updater.silent).toEqual({ since: '2026-11-21T10:00:00.000Z' });
+
+    await c.db.update(agents).set({ switchedOffAt: null }).where(eq(agents.id, c.watcher.id));
+    now = START + THRESHOLD_MS + 60_000;
+    await minuteRound(c.ctx, new Date(now), failLoud);
+    expect(await c.turnsOf(c.watcher.id)).toHaveLength(1);
+  });
 });

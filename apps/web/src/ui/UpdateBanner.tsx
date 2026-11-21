@@ -5,7 +5,7 @@ import type { Updates } from '../updates';
 import { useBarFold } from './shellBars';
 import { UpdateProgress } from './UpdateProgress';
 import { buildText, versionText } from './VersionMark';
-import { updateTargetText, versionedStatus } from './UpdateVersion';
+import { silentTime, updateTargetText, versionedStatus } from './UpdateVersion';
 
 const LATER = 'hh-later';
 const SEEN = 'hh-update-seen';
@@ -57,6 +57,89 @@ function WaitNoteBody({ note, onCallOff, onSeen }: { note: WaitNote; onCallOff: 
   );
 }
 
+/* Warns when the updater heartbeat is stale, linking to Versions for details. */
+function SilentUpdaterBody({ since, onDetails }: { since: string; onDetails: () => void }) {
+  const t = useT();
+  const { language } = useLanguage();
+  return (
+    <>
+      <span dir="auto">{t.updates.silentBanner(silentTime(language, since))}</span>
+      <button className="btn small ghost" type="button" onClick={onDetails}>{t.updates.details}</button>
+    </>
+  );
+}
+
+function idleBody(
+  view: UpdatesView,
+  updates: Updates,
+  onDetails: () => void,
+  act: (run: () => Promise<void>) => Promise<void>,
+  hide: (key: string, value: string) => void,
+  t: ReturnType<typeof useT>,
+): React.ReactNode {
+  const { status } = view.updater;
+  if (status && stored(SEEN) !== status.id) return resultBody(status, view.current, onDetails, hide, t);
+  if (view.available && view.latest && stored(LATER) !== view.latest.commit) return availableBody(view.latest, updates, act, hide, t);
+  return null;
+}
+
+/* What the banner renders for the current update state, or null when nothing should show. */
+function bannerBody(
+  updates: Updates,
+  view: UpdatesView,
+  showingProgress: boolean,
+  onDetails: () => void,
+  act: (run: () => Promise<void>) => Promise<void>,
+  hide: (key: string, value: string) => void,
+  t: ReturnType<typeof useT>,
+): React.ReactNode {
+  if (showingProgress) {
+    return (
+      <>
+        <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : view.updater.status!.step} starting={updates.starting} offline={updates.offline} maintenance={updates.maintenance} />
+        <button className="btn small ghost" type="button" onClick={onDetails}>{t.updates.details}</button>
+      </>
+    );
+  }
+  if (view.updater.silent) return <SilentUpdaterBody since={view.updater.silent.since} onDetails={onDetails} />;
+  const note = waitNoteOf(view.updater);
+  if (note) return <WaitNoteBody note={note} onCallOff={() => void act(updates.callOff)} onSeen={at => hide(CALLED_OFF, at)} />;
+  return idleBody(view, updates, onDetails, act, hide, t);
+}
+
+function resultBody(
+  status: NonNullable<UpdatesView['updater']['status']>,
+  current: UpdatesView['current'],
+  onDetails: () => void,
+  hide: (key: string, value: string) => void,
+  t: ReturnType<typeof useT>,
+): React.ReactNode {
+  return (
+    <>
+      <span dir="auto">{t.updates.result(versionedStatus(status), versionText(current))}</span>
+      {status.state !== 'done' && <button className="btn small ghost" type="button" onClick={onDetails}>{t.updates.details}</button>}
+      <button className="btn small ghost" type="button" onClick={() => hide(SEEN, status.id)}>{t.updates.ok}</button>
+    </>
+  );
+}
+
+function availableBody(
+  latest: NonNullable<UpdatesView['latest']>,
+  updates: Updates,
+  act: (run: () => Promise<void>) => Promise<void>,
+  hide: (key: string, value: string) => void,
+  t: ReturnType<typeof useT>,
+): React.ReactNode {
+  return (
+    <>
+      <span dir="auto">{t.updates.out(buildText(latest), latest.title)}</span>
+      <button className="btn small" type="button" disabled={updates.asking} onClick={() => void act(() => updates.update('latest', false))}>{t.updates.update}</button>
+      <button className="btn small ghost" type="button" disabled={updates.asking} onClick={() => void act(() => updates.update('latest', true))}>{t.updates.whenIdle}</button>
+      <button className="btn small ghost" type="button" onClick={() => hide(LATER, latest.commit)}>{t.updates.later}</button>
+    </>
+  );
+}
+
 /* Whether the banner shows an update on its way: asked for, or running, with the server in maintenance or restarting
    meanwhile. */
 function showsUpdate(updates: Updates): boolean {
@@ -79,8 +162,6 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
   }, [showingProgress, onProgressShown]);
   const { view } = updates;
   if (!view) return null;
-  const { status } = view.updater;
-  const note = waitNoteOf(view.updater);
 
   async function act(run: () => Promise<void>) {
     setFailure(null);
@@ -96,38 +177,11 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
     rerender(n => n + 1);
   };
 
-  let body: React.ReactNode = null;
-  if (showingProgress) {
-    body = (
-      <>
-        <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : status!.step} starting={updates.starting} offline={updates.offline} maintenance={updates.maintenance} />
-        <button className="btn small ghost" type="button" onClick={onDetails}>{t.updates.details}</button>
-      </>
-    );
-  } else if (note) {
-    body = <WaitNoteBody note={note} onCallOff={() => void act(updates.callOff)} onSeen={at => hide(CALLED_OFF, at)} />;
-  } else if (status && stored(SEEN) !== status.id) {
-    body = (
-      <>
-        <span dir="auto">{t.updates.result(versionedStatus(status), versionText(view.current))}</span>
-        {status.state !== 'done' && <button className="btn small ghost" type="button" onClick={onDetails}>{t.updates.details}</button>}
-        <button className="btn small ghost" type="button" onClick={() => hide(SEEN, status.id)}>{t.updates.ok}</button>
-      </>
-    );
-  } else if (view.available && view.latest && stored(LATER) !== view.latest.commit) {
-    const latest = view.latest;
-    body = (
-      <>
-        <span dir="auto">{t.updates.out(buildText(latest), latest.title)}</span>
-        <button className="btn small" type="button" disabled={updates.asking} onClick={() => void act(() => updates.update('latest', false))}>{t.updates.update}</button>
-        <button className="btn small ghost" type="button" disabled={updates.asking} onClick={() => void act(() => updates.update('latest', true))}>{t.updates.whenIdle}</button>
-        <button className="btn small ghost" type="button" onClick={() => hide(LATER, latest.commit)}>{t.updates.later}</button>
-      </>
-    );
-  }
+  const body = bannerBody(updates, view, showingProgress, onDetails, act, hide, t);
   if (!body) return null;
+  const warn = !showingProgress && Boolean(view.updater.silent);
   return (
-    <div className={fold.className} role="status" aria-label={t.updates.label}>
+    <div className={`${fold.className}${warn ? ' warn' : ''}`} role="status" aria-label={t.updates.label}>
       {body}
       {fold.more}
       {failure !== null && <p className="update-error" role="alert" dir="auto">{errorText(t, failure)}</p>}

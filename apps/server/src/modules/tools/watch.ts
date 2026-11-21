@@ -32,6 +32,7 @@ import { registerReleaseTool } from '../program-operator/release.js';
 import { nextSection } from './next-section.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
 import { watchedTasks } from './watch-tasks.js';
+import { updaterSilent } from '../updates/health.js';
 
 type Reader = Parameters<typeof agentSeesTask>[0];
 type TaskSight = Parameters<typeof agentSeesTask>[1];
@@ -410,7 +411,8 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           'The words of work you may not open, as task shows it, come with no credential and no private path in them. ' +
           'Turns people or Hornhoof stopped on purpose are left out. Also where agents stumbled, each with when and on which task it was seen last: commands and modules ' +
           'a shell or a program said were not installed (the same words read in a file count for nothing), the tools they installed by hand, ' +
-          'and the questions and stuck tasks they stopped on for people, with the answer and how their last turn on the task ended.',
+          'and the questions and stuck tasks they stopped on for people, with the answer and how their last turn on the task ended. ' +
+          'In updaterSilent, when the updater heartbeat is stale past its threshold (with since), or null once it is fresh again.',
         inputSchema: { hours: z.number().int().min(1).max(72).default(6).describe('How many hours back to read, 1 to 72.') },
       },
       async ({ hours }) => {
@@ -495,6 +497,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           installed: installed.map(({ value, example: _, ...i }) => ({ command: value, ...i })),
           stops,
           undelivered,
+          updaterSilent: updaterSilent(ctx),
         });
       },
     );

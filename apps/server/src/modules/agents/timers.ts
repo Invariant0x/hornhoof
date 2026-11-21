@@ -25,6 +25,7 @@ import type { AgentRow } from './find.js';
 import { checkOperatorHealth } from '../program-operator/health.js';
 import { releaseRound } from '../tasks/releases.js';
 import { closeIdleTurns } from '../tasks/turn-ends.js';
+import { checkUpdaterHealth } from '../updates/health.js';
 
 export { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX } from '../templates/load.js';
 /* Hornhoof looks for due rounds this often. */
@@ -140,6 +141,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
     tellOfMachinesAway(ctx, now).catch(failed('telling of machines away failed')),
     tellOfMachinesLow(ctx).catch(failed('telling of machines short of disk space failed')),
+    checkUpdaterHealth(ctx, now).catch(failed('checking the updater heartbeat failed')),
   ]);
 }
 
@@ -153,6 +155,7 @@ async function entrySweeps(ctx: Ctx, failed: (what: string) => (err: unknown) =>
     wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
     retryCallBatches(ctx).catch(failed('recovering one-shot call batches failed')),
     dropOldFiles(ctx, new Date()).catch(failed('removing the files of old turns failed')),
+    checkUpdaterHealth(ctx, new Date(ctx.clock())).catch(failed('checking the updater heartbeat failed')),
   ]);
 }
 

@@ -4,7 +4,7 @@ import type { UpdatesView } from './types';
 import type { Version } from './ui/VersionMark';
 import { answeredUpdate } from './update-state';
 import { everyVisible } from './guard';
-import { heardAgain, latestAnswers } from './live';
+import { heardAgain, latestAnswers, useStream } from './live';
 
 /* A seam for tests: the page reloads once the server runs another build. */
 export const page = { reload: () => window.location.reload() };
@@ -138,6 +138,10 @@ export function useUpdates(enabled: boolean): Updates {
     void load();
     return everyVisible(() => void load(), pollMs);
   }, [enabled, pollMs, load]);
+
+  useStream(m => {
+    if (enabled && m.type === 'updates') void load();
+  });
 
   const dropCut = useCallback(() => setCut(null), []);
 

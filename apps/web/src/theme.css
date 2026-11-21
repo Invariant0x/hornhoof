@@ -361,6 +361,7 @@ select:disabled { opacity: .55; }
   box-shadow: 0 6px 20px var(--shadow);
 }
 .update-banner > span { font-size: 13px; }
+.update-banner.warn { border-inline-start: 3px solid var(--amber); }
 .update-error { flex-basis: 100%; color: var(--pink-ink); font-size: 13px; }
 /* The question of which copy to go on from: its text, then its answers as one group below it. */
 .question-banner { flex-direction: column; align-items: stretch; box-sizing: border-box; inline-size: min(640px, calc(100% - 2 * var(--bar-edge))); padding: 12px 14px; }
@@ -375,7 +376,7 @@ select:disabled { opacity: .55; }
 .dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .first-contact > *, .first-contact h2 { min-inline-size: 0; overflow-wrap: anywhere; }
 .versions-check { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-.update-note { padding: 10px 12px; border-left: 3px solid var(--amber); background: var(--surface2); font-size: 13px; }
+.update-note { margin: 0; padding: 10px 12px; border-inline-start: 3px solid var(--amber); background: var(--surface2); font-size: 13px; overflow-wrap: anywhere; }
 .update-progress { display: grid; gap: 8px; }
 /* Settings: each part with its heading; the public link with its copy button, and its actions in a row. */
 .settings-part { display: grid; gap: 10px; }

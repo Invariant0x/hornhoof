@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /* What the updater writes about the update it runs or ran last. */
@@ -35,7 +35,9 @@ export type UpdateWaiting = { version: string; commit?: string; since: string; u
    finished by then. cancelled: a person or the orchestrator called it off. failed: Hornhoof could not go on with it,
    error says why. */
 export type UpdateCalledOff = { version: string; commit?: string; at: string; until: string; reason: 'deadline' | 'cancelled' | 'failed'; turns: NamedTurn[]; error?: string };
-export type UpdaterView = { present: boolean; status: UpdaterStatus | null; waiting: UpdateWaiting | null; calledOff: UpdateCalledOff | null };
+/* The updater has stopped updating its heartbeat past UPDATER_SILENT_MS: since is its last observed heartbeat time. */
+export type UpdaterSilent = { since: string };
+export type UpdaterView = { present: boolean; status: UpdaterStatus | null; waiting: UpdateWaiting | null; calledOff: UpdateCalledOff | null; silent?: UpdaterSilent };
 
 /* What the app asks the updater for: the image tag to install, the digest of the exact build the app read for it, the
    digests of the node and updater images of its commit, empty for one the build does not have, and the version people
@@ -57,20 +59,26 @@ function statusWithBuild(dir: string): UpdaterStatus | null {
 }
 
 /* The updater touches alive every few seconds; older than this, it is not running. */
-const ALIVE_MS = 30_000;
+export const ALIVE_MS = 30_000;
+/* Single threshold for declaring the updater silent, raising an Operations signal, and surfacing the status in UI. */
+export const UPDATER_SILENT_MS = 2 * 60_000;
 
 /* What holds the updater: an update or a restore. */
 export type UpdaterWork = 'update' | 'restore';
 /* The steps of a restore that are the updater's own: from there its status file says the restore runs. */
 const RESTORE_SWAP_STEPS = new Set<unknown>(['load', 'swap', 'start']);
 
+type AliveEntry = { kind: 'file'; mtimeMs: number } | { kind: 'other'; mtimeMs: number } | { kind: 'missing' };
+
 /* The app's side of the control folder it shares with the updater. */
 export class UpdaterControl {
   /* What was promised the updater and is not in its hands yet: an update that waits for idle or reads the registry, or
      a restore its keeper still prepares. */
   private held: { kind: UpdaterWork; id: string } | null = null;
+  /* Last observed mtime of a regular alive file so disappearance or symlink replacement still triggers silence. */
+  private lastAliveMs: number | null = null;
 
-  constructor(private readonly dir: string) {}
+  constructor(private readonly dir: string, private readonly clock: () => number = Date.now) {}
 
   /* Restores and updates share one claim on the updater, taken in one step so two asked at once never both go on. It
      claims for this id and answers null; or it answers what holds the updater and changes nothing. An update takes the
@@ -102,12 +110,33 @@ export class UpdaterControl {
     return asking === 'restore' && waiting?.id && waiting.id !== status?.id ? 'update' : null;
   }
 
-  present(): boolean {
+  /* Reads alive without following symlinks; records the mtime of a regular heartbeat file. */
+  private readAlive(): AliveEntry {
     try {
-      return Date.now() - statSync(join(this.dir, 'alive')).mtimeMs < ALIVE_MS;
+      const stat = lstatSync(join(this.dir, 'alive'));
+      if (!stat.isFile()) return { kind: 'other', mtimeMs: stat.mtimeMs };
+      this.lastAliveMs = stat.mtimeMs;
+      return { kind: 'file', mtimeMs: stat.mtimeMs };
     } catch {
-      return false;
+      return { kind: 'missing' };
     }
+  }
+
+  present(now = this.clock()): boolean {
+    const alive = this.readAlive();
+    return alive.kind === 'file' && now - alive.mtimeMs < ALIVE_MS;
+  }
+
+  private aliveSince(alive: AliveEntry): number | null {
+    if (alive.kind === 'file') return alive.mtimeMs;
+    if (alive.kind === 'other') return this.lastAliveMs ?? alive.mtimeMs;
+    return this.lastAliveMs;
+  }
+
+  /* When the updater heartbeat has been stale for at least UPDATER_SILENT_MS, returns its last heartbeat time. */
+  silentSince(now = this.clock()): Date | null {
+    const since = this.aliveSince(this.readAlive());
+    return since !== null && now - since >= UPDATER_SILENT_MS ? new Date(since) : null;
   }
 
   status(): UpdaterStatus | null {
