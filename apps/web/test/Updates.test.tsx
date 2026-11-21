@@ -7,6 +7,8 @@ import { Versions } from '../src/screens/Versions';
 import type { Build, UpdatesView, UpdaterStatus } from '../src/types';
 import { page, type Updates } from '../src/updates';
 import { ME, mockApi, ORG } from './api-mock';
+import { fakeStream } from './fake-stream';
+import { clock } from '../src/ui/subscription';
 
 const build = (version: string, commit: string, extra: Partial<Build> = {}): Build => ({ tag: version, version, commit, created: '2026-10-30T01:00:00Z', title: '', migrations: 5, ...extra });
 
@@ -461,6 +463,63 @@ describe('updates', () => {
       await user.click(await screen.findByRole('button', { name: 'Update' }));
       expect(await screen.findByRole('alert')).toBeInTheDocument();
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('silent updater status', () => {
+    const SINCE = '2026-11-21T10:00:00.000Z';
+
+    it('surfaces a silent updater automatically in the banner and Versions dialog and clears via live SSE', async () => {
+      const stream = fakeStream();
+      let view = updates({ available: false }, { present: false, silent: { since: SINCE } });
+      mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': () => [200, view] });
+      const user = userEvent.setup();
+      render(<Shell me={ME} onSignOut={() => {}} />);
+
+      const since = clock('en', SINCE)!;
+      const banner = await screen.findByRole('status', { name: 'Hornhoof update' });
+      expect(banner).toHaveClass('warn');
+      expect(banner).toHaveTextContent(`The updater has not answered since ${since}. Updates cannot run until it is back.`);
+      expect(within(banner).queryByRole('button', { name: 'Update' })).not.toBeInTheDocument();
+
+      await user.click(within(banner).getByRole('button', { name: 'Details' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Versions' });
+      expect(within(dialog).getByRole('status')).toHaveTextContent(`The updater has not answered since ${since}. Operations has been notified.`);
+      expect(within(dialog).queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
+
+      /* Live SSE event refreshes /api/updates and clears the silent warning automatically. */
+      view = updates({ available: false }, { present: true });
+      stream.send({ type: 'updates' });
+      await vi.waitFor(() => expect(screen.queryByRole('status', { name: 'Hornhoof update' })).not.toBeInTheDocument());
+      expect(within(dialog).queryByRole('status')).not.toBeInTheDocument();
+      expect(within(dialog).getAllByRole('button', { name: 'Install' }).length).toBeGreaterThan(0);
+    });
+
+    it('shows the silent updater status in Russian and handles an invalid timestamp cleanly', async () => {
+      localStorage.setItem('hh-lang', 'ru');
+      mockApi({
+        'GET /api/org': [200, ORG],
+        'GET /api/updates': [200, updates({ available: true }, { present: false, silent: { since: SINCE } })],
+      });
+      const user = userEvent.setup();
+      const { unmount } = render(<LanguageProvider><Shell me={ME} onSignOut={() => {}} /></LanguageProvider>);
+
+      const since = clock('ru', SINCE)!;
+      const banner = await screen.findByRole('status', { name: 'Обновление Hornhoof' });
+      expect(banner).toHaveTextContent(`Служба обновления не отвечает с ${since}. Обновления не запустятся, пока она не вернется.`);
+      await user.click(within(banner).getByRole('button', { name: 'Подробнее' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Версии' });
+      expect(within(dialog).getByRole('status')).toHaveTextContent(`Служба обновления не отвечает с ${since}. Операции предупреждены.`);
+      unmount();
+
+      localStorage.removeItem('hh-lang');
+      mockApi({
+        'GET /api/org': [200, ORG],
+        'GET /api/updates': [200, updates({ available: false }, { present: false, silent: { since: 'not-a-date' } })],
+      });
+      render(<Shell me={ME} onSignOut={() => {}} />);
+      const fallbackBanner = await screen.findByRole('status', { name: 'Hornhoof update' });
+      expect(fallbackBanner).toHaveTextContent('The updater is not answering. Updates cannot run until it is back.');
     });
   });
 });
