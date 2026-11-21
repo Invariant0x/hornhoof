@@ -219,12 +219,12 @@ async function coverage(ctx: Reader, repo: Repo, base: string, commit: string, r
   return uncovered;
 }
 
-type Line = { task: number; tip: string; start: string; workStart: string };
+type TurnkeyLine = { task: number; tip: string; start: string; workStart: string };
 
 /* Counts as checked each turnkey line's own commits, but a commit another task's branch holds that no accepted result of that
    task brought: it is named for a person, as its holder may have built on it (H7 of #1686). Where the branches could not be
    read, none of a line counts and the line is named as unread. The commits it named. */
-async function creditTurnkey(ctx: Reader, repo: Repo, brought: Compared[], lines: Line[], checked: Set<string>, uncovered: UncheckedItem[]): Promise<Set<string>> {
+async function creditTurnkey(ctx: Reader, repo: Repo, brought: Compared[], lines: TurnkeyLine[], checked: Set<string>, uncovered: UncheckedItem[]): Promise<Set<string>> {
   const named = new Set<string>();
   if (!lines.length) return named;
   const own = turnkeyCommits(brought, lines, checked);
@@ -262,7 +262,7 @@ async function taskHeads(ctx: Reader, repo: Repo): Promise<TaskBranch[] | null> 
 }
 
 /* Commits each turnkey task claims on its own line, keyed by task number. */
-function commitsByTask(lines: Line[], own: Set<string>[]): Map<number, Set<string>> {
+function commitsByTask(lines: TurnkeyLine[], own: Set<string>[]): Map<number, Set<string>> {
   const byTask = new Map<number, Set<string>>();
   for (const [i, line] of lines.entries()) {
     const held = byTask.get(line.task) ?? new Set<string>();
@@ -281,7 +281,7 @@ function markOtherBranch(found: Map<string, string>, mine: Set<string>, other: H
 
 /* Commits of one line that a branch of another task holds without that task's accepted line claiming them, by the first
    such branch. A branch that also holds the line's tip built on that work, not under it. */
-function otherBranchesFor(line: Line, mine: Set<string>, byTask: Map<number, Set<string>>, inRelease: HeldBranch[]): Map<string, string> {
+function otherBranchesFor(line: TurnkeyLine, mine: Set<string>, byTask: Map<number, Set<string>>, inRelease: HeldBranch[]): Map<string, string> {
   const found = new Map<string, string>();
   for (const other of inRelease) {
     if (other.task !== line.task && !other.holds.has(line.tip)) markOtherBranch(found, mine, other, byTask.get(other.task));
@@ -291,7 +291,7 @@ function otherBranchesFor(line: Line, mine: Set<string>, byTask: Map<number, Set
 
 /* For each line, its own commits that a branch of another task holds, by the first such branch: a branch holds what its
    head holds within the release's commits, so one whose head the release does not hold holds none here. */
-function onOtherBranches(brought: Compared[], lines: Line[], own: Set<string>[], heads: TaskBranch[]): Map<string, string>[] {
+function onOtherBranches(brought: Compared[], lines: TurnkeyLine[], own: Set<string>[], heads: TaskBranch[]): Map<string, string>[] {
   const at = new Map(brought.map(c => [c.sha, c]));
   const byTask = commitsByTask(lines, own);
   const inRelease = heads.filter(h => at.has(h.head)).map(h => ({ ...h, holds: heldWithin(at, [h.head]) }));
@@ -300,7 +300,7 @@ function onOtherBranches(brought: Compared[], lines: Line[], own: Set<string>[],
 
 /* The line each turnkey work's holder checked: from the commit it named down to where its branch started, never under where
    the turn branch was as the work started. Work with either start missing has none. */
-const turnkeyLines = (results: Accepted[]): Line[] => results.flatMap(r => (r.turnkey?.start && r.turnkey.workStart ? [{ task: r.task.number, tip: r.commit, start: r.turnkey.start, workStart: r.turnkey.workStart }] : []));
+const turnkeyLines = (results: Accepted[]): TurnkeyLine[] => results.flatMap(r => (r.turnkey?.start && r.turnkey.workStart ? [{ task: r.task.number, tip: r.commit, start: r.turnkey.start, workStart: r.turnkey.workStart }] : []));
 
 /* What turnkey work leaves to a person by itself: a holder off since, a report that named nothing it checked, or work whose
    start the server has no record of. */
@@ -375,7 +375,7 @@ type Compared = { sha: string; parents: string[] };
    Its own are the commits down the first parents of its tip, to one the start or workStart holds, another result brought or
    main holds. A merge on its branch took the turn branch in from its other side,
    which is not its own; a commit on top of its tip, or a merge on the turn branch that joined it there, is no commit it checked. */
-function turnkeyCommits(brought: Compared[], lines: Line[], others: Set<string>): Set<string>[] {
+function turnkeyCommits(brought: Compared[], lines: TurnkeyLine[], others: Set<string>): Set<string>[] {
   const at = new Map(brought.map(c => [c.sha, c]));
   return lines.map(({ tip, start, workStart }) => {
     const under = heldWithin(at, [start, workStart]);
