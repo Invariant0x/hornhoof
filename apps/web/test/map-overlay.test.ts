@@ -8,7 +8,7 @@ import { decl, RULES, rulesFor } from './css';
    open department, and what stands under the bars moves with them. The browser check (e2e/map-overlay.spec.ts) measures the
    page; this one holds the tokens and rules the page is drawn from. */
 
-const BARS = '.body:not(.page) > :is(.update-banner, .alert, .guard-stop)';
+const BARS = '.body:not(.page) > .shell-bars > :is(.update-banner, .alert, .guard-stop)';
 
 describe('the glass blocks of the shell over the map', () => {
   it('are the skin\'s --hud with a 1 px --line frame, no shadow and no blur, the bars of the shell too', () => {

@@ -2,13 +2,11 @@ import { expect, test, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { BARS, BOTTOM_BLOCKS, CANVAS, CONTENT, HEIGHT, LOOKS, MESSAGES, named, open, SHELL_BARS, still, TOP_BLOCKS, VIEWS, WIDTHS } from './map-overlay-view';
 
-/* Design's #1635, variant A, on the map and an open department (#1639). They lie under everything, from the top of the window
-   to its bottom, and the menu, the bars of the shell and the bottom bar lie over them as separate glass blocks: the skin's
-   --hud (.94), a 1 px --line frame, no blur, no shadow and no band between the blocks, so the map shows there. The chosen tab
-   stands on an opaque backing. What the map and the department show starts 8 px under the last block at the top, and the
-   department's name plate is one; it ends over the bottom bar, and as they open nothing stands under a block. A bar that comes
-   or goes moves what stands under it in 200 ms ease-out, by transform only, and in one step for less motion. On a phone every
-   bar after the first folds to one line with More. Design's check.js measures the same rules on its mockup. */
+/* Glass blocks over the map and open department (#1635, #1639) under Ivan's HUD overlay rule (#1874, #1882). The world
+   always fills the viewport from top to bottom under the glass blocks (--hud .94, 1 px --line, no blur, no shadow, no band
+   between blocks) and NEVER shifts or resizes when a shell bar appears or goes. Only department UI chrome (.crumbs) slides
+   by transform in 200 ms ease-out (one step for reduced motion) so Back stays clear of bars. On a phone every bar after the
+   first folds to one line with More. */
 test.describe.configure({ timeout: 0 });
 
 /* Each glass block that is not as Design draws it, and why: what it is, then what it has. */
@@ -60,7 +58,7 @@ const blockEdges = (page: Page) => page.evaluate(({ top, bottom }) => {
 
 /* Every part of what the selector finds that shows in the window, clipped as the boxes around it clip it, and stands under a
    block or less than 8 px from one, at the top or along the bottom. */
-const underBlocks = (page: Page, selector: string) => page.evaluate(({ sel, blocks }) => {
+const underBlocks = (page: Page, selector: string, includeShellBars = true) => page.evaluate(({ sel, blocks }) => {
   const over = [...document.querySelectorAll(blocks)].map(el => ({ el, r: el.getBoundingClientRect() })).filter(({ r }) => r.width && r.height);
   const seen: string[] = [];
   for (const el of document.querySelectorAll<HTMLElement>(sel)) {
@@ -79,7 +77,7 @@ const underBlocks = (page: Page, selector: string) => page.evaluate(({ sel, bloc
     }
   }
   return seen;
-}, { sel: selector, blocks: `${TOP_BLOCKS}, ${BOTTOM_BLOCKS}` });
+}, { sel: selector, blocks: `${includeShellBars ? TOP_BLOCKS : '.topbar > *'}, ${BOTTOM_BLOCKS}` });
 
 /* Whether what starts at y starts 8 px under a block that ends at edge: rounded up to the whole pixel where a bar ends between
    two, as the shell measures it. */
@@ -123,29 +121,29 @@ for (const view of VIEWS) for (const bars of BARS) for (const width of WIDTHS) f
     expect(tab.color, 'the chosen tab stands on --surface').toBe(tab.surface);
     expect(tab.image, 'with --glow laid over it').toContain('gradient');
 
-    /* What it shows starts 8 px under the last block at the top: on a department its name plate, and its head card at least
-       8 px under the plate (#1610). As it opens nothing stands under a block or nearer than 8 px to one. */
+    /* On a department its name plate starts 8 px under the last top block (so Back stays clickable). On both the map and
+       a department, transient shell bars overlay the world as HUD without pushing or resizing the world (#1874). */
     const edges = await blockEdges(page);
     if (view === 'department') {
       const plate = await boxOf(page, '.dview .crumbs'), head = await boxOf(page, '.dview .shead');
       eightUnder(plate.y, edges.top, `the name plate starts 8 px under the last block's bottom at ${edges.top}, not at ${plate.y}`);
-      expect(head.y, `the head card starts 8 px or more under the plate's bottom at ${plate.y + plate.height}, not at ${head.y}`).toBeGreaterThanOrEqual(plate.y + plate.height + 8 - 0.5);
+      if (bars.count === 0) expect(head.y, `the head card starts 8 px or more under the plate's bottom at ${plate.y + plate.height}, not at ${head.y}`).toBeGreaterThanOrEqual(plate.y + plate.height + 8 - 0.5);
     }
-    expect(await underBlocks(page, CONTENT[view]), `nothing the ${view} shows stands under a block or nearer than 8 px as it opens`).toEqual([]);
+    expect(await underBlocks(page, CONTENT[view], false), `nothing the ${view} shows stands under the menu or bottom blocks as it opens`).toEqual([]);
     expect(errors).toEqual([]);
   });
 }
 
-/* The update's bar goes as its OK is pressed: it goes at once, and what stood under it slides up to 8 px under the menu in
-   200 ms ease-out, the name plate and the department or the map by transform only. For less motion it takes its place in
-   one step. */
+/* When the update bar closes on OK: the bar disappears at once, the world (.map .hub or .dview .shead) stays completely
+   stationary to the pixel (#1874, #1882), and only the department's UI chrome (.crumbs) slides up by transform in 200 ms
+   ease-out (one step for reduced motion). */
 for (const view of VIEWS) for (const width of WIDTHS) for (const motion of ['no-preference', 'reduce'] as const) {
-  test(`what stands under a bar that goes slides up by transform in 200 ms ease-out${motion === 'reduce' ? ', in one step for less motion' : ''}: the ${view}, ${width}px`, async ({ page }) => {
+  test(`closing the update bar leaves the world stationary while department chrome slides by transform${motion === 'reduce' ? ', in one step for less motion' : ''}: the ${view}, ${width}px`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: motion });
     const look = LOOKS[0]!;
     await open(page, look, width, BARS[1]!, view);
-    const moved = view === 'map' ? '.map:not([inert]) .hub' : '.dview .shead';
-    const watched = view === 'map' ? [moved] : ['.dview .crumbs', moved];
+    const worldNode = view === 'map' ? '.map:not([inert]) .hub' : '.dview .shead';
+    const watched = view === 'map' ? [worldNode] : ['.dview .crumbs', worldNode];
     if (view === 'department') {
       const plate = await page.locator('.dview .crumbs').evaluate(e => {
         const s = getComputedStyle(e);
@@ -160,9 +158,6 @@ for (const view of VIEWS) for (const width of WIDTHS) for (const motion of ['no-
       }
     }
 
-    /* Every frame until 1200 ms after the press: where each watched box stands, the top its style gives it, and each
-       transition that moves it or what holds it, as property, length in ms and timing. A slow machine may take long to
-       press, so the frames count from the press. */
     type Frame = { at: number; tops: number[]; styled: string[]; moves: string[] };
     await page.evaluate(sel => {
       const w = window as unknown as { frames_: Frame[]; pressed_: number | null; done_: boolean };
@@ -179,7 +174,7 @@ for (const view of VIEWS) for (const width of WIDTHS) for (const motion of ['no-
           return [`${a.transitionProperty} ${Number(timing.duration)}ms ${getComputedStyle(target).transitionTimingFunction}`];
         });
         w.frames_.push({ at: now, tops: els.map(e => e.getBoundingClientRect().top), styled: els.map(e => getComputedStyle(e).top), moves });
-        if (w.pressed_ === null || now - w.pressed_ < 1200) requestAnimationFrame(look);
+        if (w.pressed_ === null || now - w.pressed_ < 600) requestAnimationFrame(look);
         else w.done_ = true;
       };
       requestAnimationFrame(look);
@@ -192,25 +187,23 @@ for (const view of VIEWS) for (const width of WIDTHS) for (const motion of ['no-
       return [w.frames_, w.pressed_] as const;
     });
     await still(page);
-    /* From the last frame before the press on. */
     const frames = all.slice(Math.max(0, all.findIndex(f => f.at > pressed) - 1));
     const moves = [...new Set(frames.flatMap(f => f.moves))];
-    if (motion === 'reduce') expect(moves, 'nothing glides for less motion').toEqual([]);
-    else expect(moves, 'what stands under the bar moves by transform in 200 ms ease-out, and by nothing else').toEqual(['transform 200ms ease-out']);
 
-    for (const [i, sel] of watched.entries()) {
-      const tops = frames.map(f => f.tops[i]!), first = tops[0]!, last = tops[tops.length - 1]!;
-      expect(last, `${sel} moves up as the bar goes`).toBeLessThan(first - 8);
-      expect(new Set(frames.map(f => f.styled[i])).size, `${sel} keeps its top: it moves by transform`).toBe(1);
-      expect(tops.every((top, k) => k === 0 || top <= tops[k - 1]! + 0.5), `${sel} only moves up: ${tops.map(Math.round).join(' ')}`).toBe(true);
-      const moving = frames.filter(f => Math.abs(f.tops[i]! - first) > 0.5 && Math.abs(f.tops[i]! - last) > 0.5);
-      if (motion === 'reduce') {
-        expect(moving.map(f => Math.round(f.tops[i]!)), `${sel} takes its place in one step`).toEqual([]);
-        continue;
-      }
-      expect(moving.length, `${sel} slides through frames between its places`).toBeGreaterThan(0);
-    }
-    if (view === 'department') {
+    /* The world node stays stationary to the pixel across every frame. */
+    const worldIdx = watched.indexOf(worldNode);
+    const worldTops = frames.map(f => f.tops[worldIdx]!);
+    expect(Math.max(...worldTops) - Math.min(...worldTops), `${worldNode} stays stationary when the bar closes`).toBeLessThanOrEqual(0.5);
+
+    if (view === 'map') {
+      expect(moves, 'nothing on the map glides when the bar closes').toEqual([]);
+    } else {
+      if (motion === 'reduce') expect(moves, 'nothing glides for less motion').toEqual([]);
+      else expect(moves, 'only the name plate moves by transform in 200 ms ease-out').toEqual(['transform 200ms ease-out']);
+      const plateTops = frames.map(f => f.tops[0]!), first = plateTops[0]!, last = plateTops[plateTops.length - 1]!;
+      expect(last, '.dview .crumbs moves up as the bar goes').toBeLessThan(first - 8);
+      expect(new Set(frames.map(f => f.styled[0])).size, '.dview .crumbs keeps its top: it moves by transform').toBe(1);
+      expect(plateTops.every((top, k) => k === 0 || top <= plateTops[k - 1]! + 0.5), '.dview .crumbs only moves up').toBe(true);
       const edges = await blockEdges(page), plate = await boxOf(page, '.dview .crumbs');
       eightUnder(plate.y, edges.top, `the plate ends 8 px under the menu at ${edges.top}, not at ${plate.y}`);
     }

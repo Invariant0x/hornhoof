@@ -1,24 +1,13 @@
 import { expect, it } from 'vitest';
 import { decl, parse, px, RULES, rulesFor } from './css';
 
-it('reserves a footer row for the version outside the screen and its fixed panels', () => {
+it('gives the screen the entire viewport height with no bottom version footer row (#1874)', () => {
   expect(decl('.app-layout', 'display')).toBe('grid');
-  expect(decl('.app-layout', 'grid-template-rows')).toBe('minmax(0, 1fr) auto');
+  expect(decl('.app-layout', 'grid-template-rows')).toBe('minmax(0, 1fr)');
   expect(decl('.app-screen', 'contain')).toBe('paint');
-  expect(rulesFor('.version-mark').filter(rule => ['fixed', 'absolute', 'sticky'].includes(rule.decls.position ?? ''))).toEqual([]);
-});
-
-/* The footer's row is taken from the screen above it, so a footer that comes and goes moves every window and panel fixed
-   there: it hides only for a whole screen, never because a form or a panel opened in one (#1384). The map shows the version
-   over its own corner instead (#1590). */
-it('hides the version footer only for a whole screen, the map or a phone', () => {
-  const hiding = RULES.filter(rule => rule.decls.display === 'none').flatMap(rule =>
-    rule.selectors.filter(selector => selector.endsWith('.version-mark')).map(selector => `${rule.media ?? 'any width'}: ${selector}`));
-  expect(hiding).toEqual([
-    'any width: .app-layout:has(.map-version) > .version-mark',
-    'any width: body:has(.dview) .version-mark',
-    '(max-width: 760px): .version-mark',
-  ]);
+  expect(rulesFor('.version-mark')).toEqual([]);
+  const anyVersionMark = RULES.filter(rule => rule.selectors.some(selector => selector.includes('.version-mark')));
+  expect(anyVersionMark).toEqual([]);
 });
 
 /* Over the map the version is small muted text in the bottom end corner of the room its bars leave free, mirrored right to

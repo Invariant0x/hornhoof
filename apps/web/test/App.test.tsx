@@ -84,16 +84,42 @@ describe('App', () => {
   it.each([
     ['log in', '/', [401, signedOut], 'heading', 'Log in'],
     ['board', '/tasks?department=d2&view=board', [200, ME], 'region', 'Board'],
-  ] as const)('shows the version in a footer below the %s screen', async (_screen, path, me, role, name) => {
+    ['people', '/people', [200, ME], 'heading', 'People'],
+    ['subscriptions', '/subscriptions', [200, ME], 'heading', 'Subscriptions & API'],
+    ['machines', '/machines', [200, ME], 'heading', 'Machines'],
+  ] as const)('omits the bottom version bar on the %s screen', async (_screen, path, me, role, name) => {
     window.history.replaceState(null, '', path);
-    mockApi({ ...TRACKER, 'GET /api/org': [200, DEV_ORG], 'GET /api/setup': [200, { needed: false }], 'GET /api/me': [...me],
-      'GET /api/version': [200, { version: '0.4.0', commit: 'abc1234def', migrations: 5 }] });
-    render(<App />);
-    const content = await screen.findByRole(role, { name });
-    const version = await screen.findByText('0.4.0 (abc1234)');
-    const footer = screen.queryByRole('contentinfo');
-    expect(footer).toContainElement(version);
-    expect(footer!.previousElementSibling).toContainElement(content);
+    mockApi({
+      ...TRACKER,
+      'GET /api/org': [200, DEV_ORG],
+      'GET /api/people': [200, { people: [] }],
+      'GET /api/subscriptions': [200, { subscriptions: [] }],
+      'GET /api/machines': [200, { machines: [] }],
+      'GET /api/setup': [200, { needed: false }],
+      'GET /api/me': [...me],
+      'GET /api/version': [200, { version: '0.4.0', commit: 'abc1234def', migrations: 5 }],
+    });
+    const { container } = render(<App />);
+    await screen.findByRole(role, { name });
+    expect(screen.queryByRole('contentinfo')).toBeNull();
+    expect(container.querySelector('.version-mark')).toBeNull();
+    expect(container.querySelector('.map-version')).toBeNull();
+  });
+
+  it('shows the version only as a HUD label on the map, with no footer bar', async () => {
+    window.history.replaceState(null, '', '/');
+    mockApi({
+      'GET /api/org': [200, DEV_ORG],
+      'GET /api/setup': [200, { needed: false }],
+      'GET /api/me': [200, ME],
+      'GET /api/version': [200, { version: '0.4.0', commit: 'abc1234def', migrations: 5 }],
+    });
+    const { container } = render(<App />);
+    await screen.findByRole('button', { name: /^Development/ });
+    const mark = await screen.findByText('0.4.0 (abc1234)');
+    expect(mark.closest('.map-version')).not.toBeNull();
+    expect(screen.queryByRole('contentinfo')).toBeNull();
+    expect(container.querySelector('.version-mark')).toBeNull();
   });
 
   it('opens the workspace once the person logs in', async () => {

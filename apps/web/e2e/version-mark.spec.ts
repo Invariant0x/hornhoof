@@ -4,10 +4,10 @@ import type { Org } from '../src/types';
 import { ME, serveApi } from './api';
 import { captureWith } from './capture';
 
-/* The version over the map (#1590, Ivan's word): the map has no row of its own under it and no line above one; it runs to the
-   bottom of the screen, and the version is small muted text in its bottom end corner, over the map, clear of every control
-   and of the bars along a phone's bottom, catching no taps. Every other screen keeps the footer row b0e6cb58 gave it, so it
-   covers nothing there. A made-up company. Shots go to HH_SCREENSHOT_DIR when it is set. */
+/* The version over the map (#1590, #1874): the map has no footer row and no line under it; it runs to the bottom of the
+   screen, and the version is small muted text in its bottom end corner as a HUD overlay over the map, clear of every control
+   and of the bars along a phone's bottom, catching no taps. Every other screen has no bottom version bar at all (#1874), so
+   page content extends to the bottom of the viewport. A made-up company. Shots go to HH_SCREENSHOT_DIR when it is set. */
 
 const capture = captureWith('version-mark', process.env.HH_SCREENSHOT_DIR);
 const VERSION = { version: '0.39.1', commit: 'a276aa6c0ffee' };
@@ -54,7 +54,7 @@ async function still(page: Page) {
       const r = e.getBoundingClientRect();
       return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)];
     }));
-  }, `.map .world, ${BARS}, .version-mark`);
+  }, `.map .world, ${BARS}`);
   let before = await boxes();
   for (let now = await boxes(); now !== before; now = await boxes()) before = now;
 }
@@ -143,8 +143,8 @@ for (const look of LOOKS) {
     await openMap(page, look);
     const { width, height } = SIZES[look.width];
 
-    /* No row of its own and no line: the screen and the map reach the bottom of the window. */
-    expect(await page.getByRole('contentinfo').isVisible(), 'a footer row shows').toBe(false);
+    /* No footer row anywhere in the DOM: the screen and the map reach the bottom of the window. */
+    await expect(page.locator('.version-mark, [role="contentinfo"]')).toHaveCount(0);
     expect((await box(page.locator('.app-screen'))).y + (await box(page.locator('.app-screen'))).height).toBe(height);
     const map = await box(page.locator('.map'));
     expect(map.y + map.height).toBe(height);
@@ -205,16 +205,23 @@ for (const skin of BUILTIN_SKINS.map(s => s.id)) {
   });
 }
 
-test('every other screen keeps the version in its footer row below the screen', async ({ page }, info) => {
-  await page.setViewportSize(SIZES[1440]);
-  await serveApi(page);
-  await page.route('**/api/version', route => route.fulfill({ json: VERSION }));
-  await page.goto('/machines');
-  const footer = page.getByRole('contentinfo');
-  await expect(footer).toHaveText(TEXT);
-  const screen = await box(page.locator('.app-screen')), row = await box(footer);
-  expect(screen.y + screen.height).toBe(row.y);
-  expect(row.y + row.height).toBe(SIZES[1440].height);
-  expect(await footer.evaluate(el => getComputedStyle(el).borderTopWidth)).toBe('1px');
-  if (info.project.name.includes('chromium')) await capture(page, info, 'machines-footer-1440');
-});
+for (const width of [1440, 375] as const) {
+  test(`non-map screens omit the bottom version bar from the DOM and extend to the viewport bottom: ${width}px`, async ({ page }, info) => {
+    await page.setViewportSize(SIZES[width]);
+    await serveApi(page);
+    await page.route('**/api/version', route => route.fulfill({ json: VERSION }));
+    await page.route('**/api/people', route => route.fulfill({ json: { people: [] } }));
+    await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: [] } }));
+
+    for (const path of ['/tasks', '/people', '/subscriptions', '/machines']) {
+      await page.goto(path);
+      await expect(page.locator('main.body')).toBeVisible();
+      await expect(page.locator('.version-mark, [role="contentinfo"], .map-version')).toHaveCount(0);
+      const screen = await box(page.locator('.app-screen'));
+      const body = await box(page.locator('main.body'));
+      expect(Math.abs(screen.y + screen.height - SIZES[width].height), `${path}: .app-screen reaches bottom`).toBeLessThanOrEqual(1);
+      expect(Math.abs(body.y + body.height - SIZES[width].height), `${path}: main.body reaches bottom`).toBeLessThanOrEqual(1);
+    }
+    if (info.project.name.includes('chromium')) await capture(page, info, `machines-no-footer-${width}`);
+  });
+}

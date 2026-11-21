@@ -26,22 +26,22 @@ const BROKEN = { status: 500, json: { error: { code: 'internal', message: 'Somet
    opened while the company's reload fails. */
 const BARS: { name: string; bar: string; serve: (page: Page) => Promise<void>; show: (page: Page) => Promise<void> }[] = [
   {
-    name: 'the update that ended', bar: 'main.body > .update-banner',
+    name: 'the update that ended', bar: 'main.body > .shell-bars > .update-banner',
     serve: async page => { await page.route('**/api/updates', route => route.fulfill({ json: { ...quiet(), updater: { present: true, status: { id: 'u39', version: '0.39.1', commit: CURRENT.commit, state: 'done', step: 'finished', log: '', at: '2026-11-19T19:00:00.000Z' }, waiting: null, calledOff: null } } satisfies UpdatesView })); },
     show: async () => {},
   },
   {
-    name: 'a newer build', bar: 'main.body > .update-banner',
+    name: 'a newer build', bar: 'main.body > .shell-bars > .update-banner',
     serve: async page => { await page.route('**/api/updates', route => route.fulfill({ json: { ...quiet(), available: true, latest: NEWER, versions: [NEWER] } satisfies UpdatesView })); },
     show: async () => {},
   },
   {
-    name: 'the recovery file', bar: 'main.body > .update-banner',
+    name: 'the recovery file', bar: 'main.body > .shell-bars > .update-banner',
     serve: async page => { await page.route('**/api/backups/recovery', route => route.fulfill({ json: { recoveryNeeded: true, linkChanged: false } satisfies Pick<BackupsView, 'recoveryNeeded' | 'linkChanged'> })); },
     show: async () => {},
   },
   {
-    name: "the company's failed reload", bar: 'main.body > .alert',
+    name: "the company's failed reload", bar: 'main.body > .shell-bars > .alert',
     serve: async page => {
       let failing = false;
       await page.route('**/api/org', route => (failing ? route.fulfill(BROKEN) : route.fallback()));

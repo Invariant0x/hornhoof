@@ -18,13 +18,16 @@ function page(...bars: [string, number, number][]) {
 function pageApart(apart: string, ...bars: [string, number, number][]) {
   const main = document.createElement('main');
   placed(main, 0, 812);
+  const stack = document.createElement('div');
+  stack.className = 'shell-bars';
   for (const [kind, top, bottom] of bars) {
     const bar = document.createElement('div');
     bar.className = kind;
     bar.style.marginBlockEnd = apart;
     placed(bar, top, bottom);
-    main.append(bar);
+    stack.append(bar);
   }
+  main.append(stack);
   document.body.append(main);
   return main;
 }
@@ -61,17 +64,20 @@ describe('useMeasuredShellTop', () => {
     return <main ref={main} />;
   }
 
-  it('measures again as a bar comes and goes', async () => {
+  it('measures again as a bar comes and goes inside .shell-bars', async () => {
     let top: number | null | undefined;
     const view = render(<Probe seen={t => { top = t; }} />);
     const main = view.container.querySelector('main')!;
+    const stack = document.createElement('div');
+    stack.className = 'shell-bars';
+    main.append(stack);
     placed(main, 0, 812);
     expect(top).toBeNull();
     const bar = document.createElement('div');
     bar.className = 'update-banner';
     bar.style.marginBlockEnd = '8px';
     placed(bar, 68, 112);
-    await act(async () => { main.append(bar); });
+    await act(async () => { stack.append(bar); });
     expect(top).toBe(120);
     await act(async () => { bar.remove(); });
     expect(top).toBeNull();
@@ -79,10 +85,24 @@ describe('useMeasuredShellTop', () => {
 });
 
 describe('the map and an open department under the bars of the shell', () => {
-  it('no longer moves them down into a row under the bars: they fill the window from its top', () => {
+  it('lays shell bars over the full-viewport world in a dedicated HUD stack with pass-through pointer events (#1874)', () => {
     expect(rulesFor('.body:not(.page):has(> :is(.update-banner, .alert, .guard-stop))')).toEqual([]);
+    expect(decl('.body:not(.page)', 'overflow')).toBe('hidden');
+    expect(decl('.body:not(.page)::before', 'content')).toBe('none');
+    expect(decl('.body:not(.page) > .shell-bars', 'position')).toBe('absolute');
+    expect(decl('.body:not(.page) > .shell-bars', 'inset-block-start')).toBe('var(--header-room)');
+    expect(decl('.body:not(.page) > .shell-bars', 'inset-inline')).toBe('var(--bar-edge)');
+    expect(decl('.body:not(.page) > .shell-bars', 'gap')).toBe('var(--bar-gap)');
+    expect(decl('.body:not(.page) > .shell-bars', 'pointer-events')).toBe('none');
+    expect(decl('.body:not(.page) > .shell-bars > :is(.update-banner, .alert, .guard-stop)', 'pointer-events')).toBe('auto');
     expect(decl('.map', 'inset')).toBe('0');
     expect(decl('.dview', 'inset')).toBe('0');
+  });
+
+  it('never shrinks the world container for a narrow-screen agent strip; only scrollable pages leave 44 px (#1874)', () => {
+    const narrow = '(max-width: 760px)';
+    expect(rulesFor('.shell:has(.agent-strip) .body')).toEqual([]);
+    expect(decl('.shell:has(.agent-strip) .body.page', 'bottom', narrow)).toBe('44px');
   });
 
   /* Design on #1639: a window or a card opens 8 px under the last element at the top: under the bar while one stands, as

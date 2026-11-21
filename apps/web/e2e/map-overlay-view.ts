@@ -38,7 +38,7 @@ export const BARS: { name: string; count: number; serve: (page: Page) => Promise
 export const VIEWS = ['map', 'department'] as const;
 export type View = (typeof VIEWS)[number];
 
-export const SHELL_BARS = 'main.body > :is(.update-banner, .alert, .guard-stop)';
+export const SHELL_BARS = 'main.body > .shell-bars > :is(.update-banner, .alert, .guard-stop)';
 export const CANVAS: Record<View, string> = { map: '.map:not([inert])', department: '.dview .dcanvas' };
 /* What the map and an open department show, which no block may cover as they open. */
 export const CONTENT: Record<View, string> = {

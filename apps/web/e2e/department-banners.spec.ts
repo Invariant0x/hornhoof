@@ -9,10 +9,9 @@ import { ME, serveApi } from './api';
 
 /* A department opened from the map while a bar of the shell hangs over the map, as everyone saw it on 0.39.1: after each
    update until its OK is pressed, in a new company until its recovery file is saved, while a newer build waits, and when
-   the company's reload fails. The map flew into the department's card and stayed in the upper half at that zoom, and the
-   department took the lower half. The department takes the whole window, as with no bar, with the header and the bars
-   floating over it and what it shows starting under them (#1639), and no map shows beside it; back on the map, the map is
-   where and as large as the person left it. Each look is a width and a skin: the default one, and one more. */
+   the company's reload fails. Under the HUD overlay rule (#1874, #1882), both the map and an open department always fill the
+   entire viewport beneath the UI chrome, shell bars sit in a dedicated HUD stack above them without shifting or resizing the
+   world, no map shows beside an open department, and returning leaves the map in the exact same position and size. */
 test.describe.configure({ timeout: 0 });
 
 const WIDTHS = [1440, 375];
@@ -62,20 +61,23 @@ const BARS: { name: string; before: boolean; serve: (page: Page) => Promise<(() 
 
 type Box = { x: number; y: number; width: number; height: number };
 
+const SHELL_BARS = 'main.body > .shell-bars > :is(.update-banner, .alert, .guard-stop)';
+const UPDATE_BANNER = 'main.body > .shell-bars > .update-banner';
+
 /* Where the room under the shell's bars starts, the bottom of the page, and where the bars stand. */
-const room = (page: Page) => page.evaluate(() => {
+const room = (page: Page) => page.evaluate(sel => {
   const body = document.querySelector('main.body')!.getBoundingClientRect();
-  const bars = [...document.querySelectorAll('main.body > :is(.update-banner, .alert, .guard-stop)')];
+  const bars = [...document.querySelectorAll(sel)];
   /* 8 px under the last bar on every screen, though on a phone the bars stand 6 px apart (Design's rule on #1635). */
   const top = Math.max(body.top, ...bars.map(bar => bar.getBoundingClientRect().bottom + 8));
   return { top, bottom: body.bottom, bars: bars.length };
-});
+}, SHELL_BARS);
 /* What a click inside the room under the header and the bars reaches, across the whole width. */
 const roomBox = (b: Box, under: { top: number; bottom: number }): Box => ({ x: b.x, y: under.top, width: b.width, height: under.bottom - under.top });
 /* Every part of what the selector finds that shows in the window, clipped as the boxes around it clip it, and lies under the
    header's blocks or a bar of the shell: a word there could not be read. */
-const underBars = (page: Page, selector: string) => page.evaluate(sel => {
-  const over = [...document.querySelectorAll('main.body > :is(.update-banner, .alert, .guard-stop), .topbar > *')]
+const underBars = (page: Page, selector: string, includeShellBars = true) => page.evaluate(({ sel, overSel }) => {
+  const over = [...document.querySelectorAll(overSel)]
     .map(el => ({ el, r: el.getBoundingClientRect() })).filter(({ r }) => r.width && r.height);
   const seen: string[] = [];
   for (const el of document.querySelectorAll<HTMLElement>(sel)) {
@@ -94,7 +96,7 @@ const underBars = (page: Page, selector: string) => page.evaluate(sel => {
     }
   }
   return seen;
-}, selector);
+}, { sel: selector, overSel: includeShellBars ? `${SHELL_BARS}, .topbar > *` : '.topbar > *' });
 /* What the map and an open department show that a bar could hide. */
 const MAP_CONTENT = '.map:not([inert]) .world :is(.dept, .hub, .chip)';
 const DEPARTMENT_CONTENT = '.dview :is(.crumbs, .shead, .pchip, .llab)';
@@ -211,12 +213,12 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const bar of BARS) {
     await page.goto('/');
     const card = page.locator('.dept', { hasText: 'Development' });
     await expect(card).toBeVisible();
-    if (bar.before) await expect(page.locator('main.body > .update-banner')).toBeVisible();
+    if (bar.before) await expect(page.locator(UPDATE_BANNER)).toBeVisible();
     await still(page);
 
     /* The person zooms the map in on the department's card and leaves it there: the view is theirs. A phone's map opens on
        its hub (#1597), where the card may show only in part at an edge, and the map runs under the header and the bars
-       (#1639), so they zoom and then click where the card shows in the room under them. Where the card is out of the room
+       (#1874), so they zoom and then click where the card shows in the room under them. Where the card is out of the room
        or at its edge, before the zoom or after it, they zoom out until it shows; that a zoom in on the card may leave it
        out of the room is its own check below. */
     await zoomOutUntilShown(page);
@@ -234,12 +236,19 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const bar of BARS) {
     await card.click({ position: { x: clickAt.x - clickAt.card.x, y: clickAt.y - clickAt.card.y } });
     const back = page.getByRole('button', { name: en.dept.back, exact: true });
     await expect(back).toBeVisible();
-    await expect(page.locator('main.body > :is(.update-banner, .alert, .guard-stop)').first()).toBeVisible();
+    await expect(page.locator(SHELL_BARS).first()).toBeVisible();
     /* The schema glides to its place as the department opens, under the glass of the bars on its way (#1635): it is checked
        where it stops. */
     await stillBox(page, '.dview .shead');
     const name = `${info.project.name}-${width}-${skin}-${bar.name.replace(/[^a-z]+/gi, '-').replace(/^-|-$/g, '')}`;
-    shot(await page.screenshot(), name);
+    const png = await page.screenshot({ animations: 'disabled' });
+    shot(png, name);
+    if (process.env.HH_OUT && skin === 'cyberpunk' && bar.name === 'the update that ended') {
+      const prefix = process.env.HH_SHOT_PREFIX ?? 'after';
+      const file = `${prefix}-department-banner-${width}.png`;
+      writeFileSync(join(process.env.HH_OUT, file), png);
+      console.log(`SHOT ${file} sha256=${createHash('sha256').update(png).digest('hex')}`);
+    }
 
     const under = await room(page);
     const department = await boxOf(page, '.dview');
@@ -250,7 +259,7 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const bar of BARS) {
     expect(await reached(page, roomBox(department, under)), 'only the department shows in the room under the bars, no map beside it').toEqual(Array(25).fill('department'));
     const plate = await boxOf(page, '.dview .crumbs');
     expect(plate.y, `the department's name starts under the bars at ${under.top}, not at ${plate.y}`).toBeGreaterThanOrEqual(under.top - 0.5);
-    expect(await underBars(page, DEPARTMENT_CONTENT), 'nothing the department shows lies under the bars').toEqual([]);
+    if (bar.before) expect(await underBars(page, DEPARTMENT_CONTENT), 'nothing the department shows lies under the bars').toEqual([]);
     expect(await mapOutside(page), 'no part of the map shows outside the department, behind the header or the bars either').toBe(false);
 
     await back.click();
@@ -258,7 +267,7 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const bar of BARS) {
     await expect(card).toBeVisible();
     await expect.poll(() => view(page), 'the map is back where and as large as the person left it').toBe(left);
     const mapAfter = await boxOf(page, '.map');
-    if (bar.before) expect(mapAfter, 'the map takes the same room as before').toEqual(mapBefore);
+    expect(mapAfter, 'the map takes the exact same room as before').toEqual(mapBefore);
     expect(errors).toEqual([]);
   });
 }
@@ -295,15 +304,15 @@ for (const width of WIDTHS) for (const dir of DIRS) for (const bar of [NO_BAR, .
     await page.goto('/');
     const card = page.locator('.dept', { hasText: 'Development' });
     await expect(card).toBeVisible();
-    if (bar.before) await expect(page.locator('main.body > .update-banner')).toBeVisible();
+    if (bar.before) await expect(page.locator(UPDATE_BANNER)).toBeVisible();
     if (dir === 'rtl') await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
     await still(page);
 
     arm?.();
     await card.click();
     await expect(page.getByRole('button', { name: en.dept.back, exact: true })).toBeVisible();
-    if (bar !== NO_BAR) await expect(page.locator('main.body > :is(.update-banner, .alert, .guard-stop)').first()).toBeVisible();
-    else await expect(page.locator('main.body > :is(.update-banner, .alert, .guard-stop)')).toHaveCount(0);
+    if (bar !== NO_BAR) await expect(page.locator(SHELL_BARS).first()).toBeVisible();
+    else await expect(page.locator(SHELL_BARS)).toHaveCount(0);
     const nameText = page.locator('.dview .shead .hn');
     await expect(nameText).toHaveText(en.dept.noHead);
     const head = await stillBox(page, '.dview .shead');
@@ -312,11 +321,17 @@ for (const width of WIDTHS) for (const dir of DIRS) for (const bar of [NO_BAR, .
     /* Still, so a look that did not change is the same picture byte for byte: the blinking dot of the line stands still. */
     shot(await page.screenshot({ animations: 'disabled' }), `head-${info.project.name}-${width}-${dir}-${bar.name.replace(/[^a-z]+/gi, '-').replace(/^-|-$/g, '')}`);
 
-    expect(head.y, `the head card starts at ${head.y}, 8 px under the name plate's bottom at ${plate.y + plate.height}`).toBeGreaterThanOrEqual(plate.y + plate.height + 8 - 0.5);
-    /* Every word of the head card shows: what a click at the middle of "No head yet." reaches is the head card. */
-    const words = await boxOf(page, '.dview .shead .hn');
-    expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('.shead'), { x: words.x + words.width / 2, y: words.y + words.height / 2 }), '"No head yet." is not under anything').toBe(true);
-    expect(await underBars(page, DEPARTMENT_CONTENT), 'nothing the department shows lies under the header or the bars').toEqual([]);
+    if (bar === NO_BAR || bar.before) {
+      expect(head.y, `the head card starts at ${head.y}, 8 px under the name plate's bottom at ${plate.y + plate.height}`).toBeGreaterThanOrEqual(plate.y + plate.height + 8 - 0.5);
+      /* Every word of the head card shows: what a click at the middle of "No head yet." reaches is the head card. */
+      const words = await boxOf(page, '.dview .shead .hn');
+      expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('.shead'), { x: words.x + words.width / 2, y: words.y + words.height / 2 }), '"No head yet." is not under anything').toBe(true);
+      expect(await underBars(page, DEPARTMENT_CONTENT), 'nothing the department shows lies under the header or the bars').toEqual([]);
+    } else {
+      /* A reload error that arrives after opening overlays the world without shifting it; the name plate stays clear of the alert. */
+      const under = await room(page);
+      expect(plate.y, `the name plate stays clear of the alert at ${under.top}, not ${plate.y}`).toBeGreaterThanOrEqual(under.top - 0.5);
+    }
     /* The name stands at the start of the line: the left in ltr, the right in rtl, as far from that edge in both. */
     const start = await page.locator('.dview .crumbs').evaluate(e => parseFloat(getComputedStyle(e).insetInlineStart));
     const fromStart = dir === 'rtl' ? width - (plate.x + plate.width) : plate.x;
@@ -353,7 +368,7 @@ for (const width of WIDTHS) for (const dir of DIRS) for (const bar of [NO_BAR, .
     await page.goto('/');
     const card = page.locator('.dept', { hasText: LONG_NAME });
     await expect(card).toBeVisible();
-    if (bar.before) await expect(page.locator('main.body > .update-banner')).toBeVisible();
+    if (bar.before) await expect(page.locator(UPDATE_BANNER)).toBeVisible();
     if (dir === 'rtl') await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
     await still(page);
     await card.click();
@@ -398,7 +413,7 @@ for (const dir of DIRS) for (const bar of [NO_BAR, ...BARS.filter(bar => bar.nam
     await page.goto('/');
     const card = page.locator('.dept', { hasText: LONG_NAME });
     await expect(card).toBeVisible();
-    if (bar.before) await expect(page.locator('main.body > .update-banner')).toBeVisible();
+    if (bar.before) await expect(page.locator(UPDATE_BANNER)).toBeVisible();
     if (dir === 'rtl') await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
     await still(page);
     await card.click();
@@ -415,14 +430,12 @@ for (const dir of DIRS) for (const bar of [NO_BAR, ...BARS.filter(bar => bar.nam
   });
 }
 
-/* Ivan's word on 0.39.2 and 0.39.3, for #1639: a bar of the shell took a row of its own and moved the map down under it, so
-   the header stood apart from the map. The map's dots and lines reach the top of the window, the header and the bars float
-   over them, nothing the map shows lies under them, and the map opens with its hub in the middle across of the room under
-   them (#1597). Each look is a width, a direction, a skin and a bar: an update that ended, one that waits for the agents,
-   and none. */
+/* Ivan's rule (#1874, #1882): the map always fills the entire viewport beneath the header and shell bars without shifting or
+   resizing when a bar shows. Shell bars sit in the HUD stack above the map; where a bar covers part of the world, the world
+   continues underneath. The orchestrator's window (UI chrome) still opens 8 px under the last top block. */
 const FLOATING = [NO_BAR, ...BARS.filter(bar => bar.name === 'the update that ended' || bar.name === 'an update waiting for the agents')];
 for (const width of WIDTHS) for (const dir of DIRS) for (const skin of SKINS) for (const bar of FLOATING) {
-  test(`the map runs under the header and ${bar.name} to the top of the window, its hub in the middle of the room under them, ${width}px ${dir} ${skin}`, async ({ page }, info) => {
+  test(`the map fills the viewport under the header and ${bar.name} without shifting, ${width}px ${dir} ${skin}`, async ({ page }, info) => {
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.setViewportSize({ width, height: HEIGHT });
@@ -435,8 +448,8 @@ for (const width of WIDTHS) for (const dir of DIRS) for (const skin of SKINS) fo
     await bar.serve(page);
     await page.goto('/');
     await expect(page.locator('.dept', { hasText: 'Development' })).toBeVisible();
-    if (bar === NO_BAR) await expect(page.locator('main.body > :is(.update-banner, .alert, .guard-stop)')).toHaveCount(0);
-    else await expect(page.locator('main.body > .update-banner')).toBeVisible();
+    if (bar === NO_BAR) await expect(page.locator(SHELL_BARS)).toHaveCount(0);
+    else await expect(page.locator(UPDATE_BANNER)).toBeVisible();
     await page.evaluate(d => { document.documentElement.dir = d; }, dir);
     await still(page);
     shot(await page.screenshot({ animations: 'disabled' }), `map-${info.project.name}-${width}-${dir}-${skin}-${bar.name.replace(/[^a-z]+/gi, '-').replace(/^-|-$/g, '')}`);
@@ -444,16 +457,13 @@ for (const width of WIDTHS) for (const dir of DIRS) for (const skin of SKINS) fo
     const map = await boxOf(page, '.map'), under = await room(page);
     expect(map.y, 'the map starts at the top of the window, under the header and any bar').toBeLessThanOrEqual(0.5);
     expect(Math.abs(map.y + map.height - under.bottom), `the map reaches the bottom of the page at ${under.bottom}`).toBeLessThanOrEqual(1);
-    expect(await underBars(page, MAP_CONTENT), 'nothing the map shows lies under the header or the bars').toEqual([]);
-    /* The room the map opens in starts under the header, or under the bars and the gap after them while one stands. */
+    /* Only the permanent header bounds the initial map fit; transient shell bars overlay as HUD without shifting the map. */
+    expect(await underBars(page, MAP_CONTENT, false), 'nothing the map shows lies under the header').toEqual([]);
     const header = await boxOf(page, '.topbar');
-    const top = bar === NO_BAR ? header.y + header.height + 8 : under.top;
+    const top = header.y + header.height + 8;
     const hub = await boxOf(page, '.map .hub-art:not(.hub-spin)'), glow = await boxOf(page, '.map .world > .halo');
     expect(Math.abs(glow.x + glow.width / 2 - (hub.x + hub.width / 2)), "the hub's glow stands around the hub, in either direction").toBeLessThanOrEqual(1);
-    expect(hub.y, `the hub starts in the room under the header and the bars, at ${top} or lower`).toBeGreaterThanOrEqual(top - 0.5);
-    /* By Design's rule on #1597 a phone's map, which never fits whole at a readable size, opens with its hub in the middle
-       across; a wide screen's fits, and opens whole in the room with the middle of all of it there: the hub's glow, its
-       cards and its people. */
+    expect(hub.y, `the hub starts under the header at ${top} or lower`).toBeGreaterThanOrEqual(top - 0.5);
     const layout = await page.evaluate(() => {
       const boxes = (selector: string) => [...document.querySelectorAll(selector)].map(el => el.getBoundingClientRect());
       const glow = boxes('.map .world > .halo'), blocks = boxes('.map .world :is(.dept, .hub, .chips, .dept-chips)'), across = [...glow, ...blocks];
@@ -462,11 +472,10 @@ for (const width of WIDTHS) for (const dir of DIRS) for (const skin of SKINS) fo
     const across = width <= 760 ? hub.x + hub.width / 2 : (layout.x0 + layout.x1) / 2;
     expect(Math.abs(across - width / 2), `the map stands in the middle across of the room, ${(across - width / 2).toFixed(1)} px off`).toBeLessThanOrEqual(1);
     if (width > 760) {
-      expect(layout.y0, `the whole map starts in the room under the bars, at ${top} or lower`).toBeGreaterThanOrEqual(top - 0.5);
-      expect(layout.y1, `the whole map ends in the room, above ${under.bottom}`).toBeLessThanOrEqual(under.bottom);
+      expect(layout.y0, `the whole map starts under the header at ${top} or lower`).toBeGreaterThanOrEqual(top - 0.5);
+      expect(layout.y1, `the whole map ends above ${under.bottom}`).toBeLessThanOrEqual(under.bottom);
     }
-    /* Design on #1639 and #1635: the orchestrator's window opens 8 px under the last block at the top, a bar while one
-       stands, else the menu, whose blocks end 56 px down on every screen. */
+    /* The orchestrator's window (UI chrome) opens 8 px under the last block at the top: a bar while one stands, else the menu. */
     await page.getByRole('button', { name: en.map.openOrchestrator, exact: true }).click();
     const opened = await boxOf(page, '.orch');
     const windowTop = bar === NO_BAR ? 56 + 8 : under.top;
