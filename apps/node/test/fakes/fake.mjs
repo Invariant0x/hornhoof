@@ -230,6 +230,13 @@ const AGY_RUNS = {
     agyToolStep('ACTIVE');
     setInterval(() => {}, 1000);
   },
+  /* Main conversation starts, a subagent step reports its own conversation_id, and the final result omits conversation_id. */
+  subagent: () => {
+    process.stdout.write(JSON.stringify({ event: 'init', conversation_id: 'c3b66b04-872b-4fbe-a3a4-058a026ef20a', init: { cwd: '/home/user/project', tools: ['run_command'] } }) + '\n');
+    process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { conversation_id: 'c3b66b04-872b-4fbe-a3a4-058a026ef20a', step_index: 0, state: 'DONE', step_type: 'user_input' } }) + '\n');
+    process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { conversation_id: 'subagent-0000-4000-8000-000000000001', step_index: 1, state: 'DONE', step_type: 'tool', tool_name: 'generate_image', tool_info: { name: 'generate_image', parameters: {}, output: 'ok' } } }) + '\n');
+    process.stdout.write(JSON.stringify({ event: 'result', result: { conversation_id: '', status: 'SUCCESS', response: 'Done.\n', duration_seconds: 1, num_turns: 1 } }) + '\n');
+  },
 };
 
 const agyToolStep = state => process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { step_index: 2, state, step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'make' }, ...(state === 'DONE' ? { output: 'built\n' } : {}) } } }) + '\n');

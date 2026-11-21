@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentEvent, NodeMessage } from '@hornhoof/protocol';
@@ -228,5 +228,130 @@ describe('Antigravity execution boundaries', () => {
     expect(ended).toBe(true);
     expect(c.agent.turn!.jobId).toBe('job');
   });
+});
 
+describe('Antigravity subagent conversations', () => {
+  it('keeps the main session and open turn when a subagent runs, and resumes the main session on the next turn', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hh-agy-subagent-'));
+    folders.push(home);
+    const workDir = join(home, 'work');
+    mkdirSync(workDir);
+    const remembered: string[] = [];
+    const launches: string[][] = [];
+    const idle = readFileSync(new URL('./fixtures/agy-tui/screen-idle.ansi', import.meta.url), 'utf8');
+    const tmux = new Tmux({ env: { HOME: home } });
+    const host = new TerminalHost({
+      tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], env: { VITEST_MAX_WORKERS: '2' },
+      remember: sessionId => { remembered.push(sessionId); }, pollMs: 50, lookMs: 50, readyMs: 1000, toolsMs: 1000,
+    });
+    vi.useFakeTimers();
+    const finish = async <T>(work: Promise<T>): Promise<T> => {
+      let settled = false;
+      void work.finally(() => { settled = true; });
+      for (let i = 0; i < 200 && !settled; i++) await vi.advanceTimersByTimeAsync(50);
+      return work;
+    };
+    let alive = false;
+    let promptText = '';
+    vi.spyOn(tmux, 'launch').mockImplementation(async (_name, opts) => {
+      launches.push(opts.command);
+      alive = true;
+    });
+    vi.spyOn(tmux, 'alive').mockImplementation(async () => alive);
+    vi.spyOn(tmux, 'screen').mockResolvedValue(idle);
+    vi.spyOn(tmux, 'programCursor').mockResolvedValue(null);
+    vi.spyOn(tmux, 'paste').mockImplementation(async (_name, text) => { promptText = text; });
+    vi.spyOn(tmux, 'keys').mockImplementation(async (_name, ...keys) => {
+      if (!keys.includes('Enter')) return;
+      const agent = host['agent']('designer');
+      const mainId = 'main-conversation-1';
+      await host['hook']('designer', 'invocation', { conversationId: mainId, invocationNum: 0, lastUserInput: promptText });
+      const transcript = agyTranscript(home, mainId)!;
+      mkdirSync(join(transcript, '..'), { recursive: true });
+      if (promptText.includes('first turn')) {
+        appendFileSync(transcript, JSON.stringify({ type: 'PLANNER_RESPONSE', step_index: 1, status: 'DONE', tool_calls: [{ name: 'invoke_subagent', args: { TypeName: 'image-generator' } }] }) + '\n');
+        await host['hook']('designer', 'invocation', { conversationId: 'subagent-conversation-1', invocationNum: 0, lastUserInput: 'Generate a banner' });
+        await host['hook']('designer', 'invocation', { conversationId: 'subagent-conversation-1', invocationNum: 1, lastUserInput: 'Generate a banner' });
+        await host['hook']('designer', 'stop', { conversationId: 'subagent-conversation-1', fullyIdle: false, terminationReason: 'NO_TOOL_CALL', error: '' });
+        await host['hook']('designer', 'stop', { conversationId: 'subagent-conversation-1', fullyIdle: true, terminationReason: 'NO_TOOL_CALL', error: '' });
+        await host['hook']('designer', 'stop', { conversationId: 'subagent-conversation-2', fullyIdle: true, terminationReason: 'ERROR', error: 'image failed' });
+        expect(agent.sessionId).toBe(mainId);
+        expect(agent.turn!.ending).toBeUndefined();
+        expect([...agent.cleared]).toEqual([]);
+        expect([...agent.left]).toEqual([]);
+        await host['hook']('designer', 'invocation', { conversationId: mainId, invocationNum: 1, lastUserInput: promptText });
+        appendFileSync(transcript, JSON.stringify({ type: 'GENERIC', step_index: 2, status: 'DONE', content: 'banner.png' }) + '\n');
+        appendFileSync(transcript, JSON.stringify({ type: 'PLANNER_RESPONSE', step_index: 3, status: 'DONE', content: 'Banner ready.' }) + '\n');
+        await host['hook']('designer', 'stop', { conversationId: mainId, fullyIdle: true, terminationReason: 'NO_TOOL_CALL', error: '' });
+      } else {
+        appendFileSync(transcript, JSON.stringify({ type: 'PLANNER_RESPONSE', step_index: 4, status: 'DONE', content: 'Resumed with tools.' }) + '\n');
+        await host['hook']('designer', 'stop', { conversationId: mainId, fullyIdle: true, terminationReason: 'NO_TOOL_CALL', error: '' });
+      }
+    });
+
+    const job = (jobId: string, prompt: string, sessionId: string | null) => ({
+      key: 'designer', program: agyProgram, bin: 'agy', home, signedOut: /signed out/,
+      input: { jobId, prompt, workDir, sessionId, model: null, secret: null, instructions: null, tools: null, timeoutMs: 60_000 },
+    });
+
+    const res1 = await finish(host.run(job('job-1', 'Run first turn with subagent', null)));
+    expect(res1).toMatchObject({ ok: true, sessionId: 'main-conversation-1', result: 'Banner ready.' });
+    expect(remembered).not.toContain('subagent-conversation-1');
+    expect(launches[0]).not.toContain('--conversation');
+
+    /* Simulate program exit so the next turn must relaunch Antigravity with the saved session id. */
+    alive = false;
+    const res2 = await finish(host.run(job('job-2', 'Run second turn after restart', res1.sessionId)));
+    expect(launches[1]).toEqual(expect.arrayContaining(['--conversation', 'main-conversation-1']));
+    expect(res2).toMatchObject({ ok: true, sessionId: 'main-conversation-1', result: 'Resumed with tools.' });
+  });
+
+  it('keeps a resumed main session and transcript intact when a subagent fires hooks', async () => {
+    const c = fixture();
+    vi.useFakeTimers();
+    const file = agyTranscript(c.agent.home, 'session')!;
+    await c.host['hook']('agy', 'invocation', { conversationId: 'child-subagent', invocationNum: 0, lastUserInput: 'Draw mockup' });
+    await c.host['hook']('agy', 'invocation', { conversationId: 'child-subagent', invocationNum: 1, lastUserInput: 'Draw mockup' });
+    await c.host['hook']('agy', 'stop', { conversationId: 'child-subagent', fullyIdle: false, error: '' });
+    await c.host['hook']('agy', 'stop', { conversationId: 'child-subagent', fullyIdle: true, error: '' });
+    await c.host['hook']('agy', 'stop', { session_id: 'child-subagent', fullyIdle: true, error: 'boom' });
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(c.agent.sessionId).toBe('session');
+    expect([...c.agent.cleared]).toEqual([]);
+    expect([...c.agent.left]).toEqual([]);
+    expect(c.agent.turn!.ending).toBeUndefined();
+    appendFileSync(file, JSON.stringify({ type: 'PLANNER_RESPONSE', step_index: 1, status: 'DONE', content: 'Main done.' }) + '\n');
+    await c.host['hook']('agy', 'stop', { conversationId: 'session', fullyIdle: true, terminationReason: 'NO_TOOL_CALL', error: '' });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(c.agent.turn!.ending).toEqual({ status: 'done', message: 'Main done.' });
+    expect(c.agent.sessionId).toBe('session');
+  });
+
+  it('ignores a background subagent between turns and while the next prompt waits', async () => {
+    const c = fixture();
+    c.agent.turn = null;
+    c.agent.busy = false;
+    c.agent.took = false;
+    c.agent.promptWaits = true;
+    await c.host['hook']('agy', 'invocation', { conversationId: 'bg-subagent', invocationNum: 0, lastUserInput: 'Background work' });
+    await c.host['hook']('agy', 'stop', { conversationId: 'bg-subagent', fullyIdle: true, error: '' });
+    expect(c.agent.sessionId).toBe('session');
+    expect(c.agent.busy).toBe(false);
+    expect(c.agent.personWords).toBeFalsy();
+    expect(c.agent.turn).toBeNull();
+    expect(c.sent).toEqual([]);
+  });
+
+  it('ignores a stale hook from a left Antigravity session before a fresh run names its own', async () => {
+    const c = fixture();
+    c.agent.sessionId = null;
+    c.agent.left.add('previous-main');
+    c.agent.busy = false;
+    await c.host['hook']('agy', 'invocation', { conversationId: 'previous-main', invocationNum: 1 });
+    expect(c.agent.sessionId).toBeNull();
+    expect(c.agent.busy).toBe(false);
+    await c.host['hook']('agy', 'invocation', { conversationId: 'fresh-main', invocationNum: 1 });
+    expect(c.agent.sessionId).toBe('fresh-main');
+    expect(c.agent.busy).toBe(true);
+  });
 });
