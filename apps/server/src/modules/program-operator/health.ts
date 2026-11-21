@@ -10,8 +10,7 @@ import { escalateCase, expireOperatorCases, queueEscalation, syncOperatorCases }
 import { callOperationsOnHold, callRecoveryResponders, holdWatchDue } from './hold-watch.js';
 import { fromStart, notStartedWords } from './not-started.js';
 import { acceptOperatorRecovery, continueOnceAutomatically, settleOperatorHold } from './recovery.js';
-import { recoveryScreenRefusal, unavailableOperatorHold } from './recovery-state.js';
-import { requestRecoveryState } from './rpc.js';
+import { currentRecoveryState, recoveryScreenRefusal, unavailableOperatorHold } from './recovery-state.js';
 import { operatorTransaction } from './transactions.js';
 import { reconcileOperatorFallbacks } from './requeue.js';
 
@@ -36,7 +35,7 @@ export async function checkOperatorHealth(ctx: Ctx, now = new Date()): Promise<v
     await syncOperatorCases(ctx, agentId, now);
   }
   /* Request fresh screens without holding database locks or waiting out each silent node in turn. */
-  const screens = await Promise.all(watch.map(async row => ({ row, state: await requestRecoveryState(ctx, row) })));
+  const screens = await Promise.all(watch.map(async row => ({ row, state: await currentRecoveryState(ctx, row) })));
   for (const { row, state } of screens) await checkUnavailableHold(ctx, row, state, now);
 }
 
@@ -44,7 +43,7 @@ async function restoreCase(ctx: Ctx, row: Case, now: Date): Promise<Case | undef
   if (row.status === 'open' && !await operatorAvailable(ctx, row)) await escalateCase(ctx, row, 'operator_unavailable', now);
   if (row.status === 'escalated' && !row.escalationJobId) await queueEscalation(ctx, row);
   if (!row.recoveryHold) return;
-  const evidence = await ctx.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.agentId, row.agentId), sql`${agentEvents.data}->'operatorEvidence'->>'type' = 'program.recovery_ready'`, sql`${agentEvents.data}->'operatorEvidence'->>'case' = ${row.id}`));
+  const evidence = await ctx.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.agentId, row.agentId), sql`${agentEvents.data}->>'operatorEvidenceId' is not null`, sql`${agentEvents.data}->'operatorEvidence'->>'type' = 'program.recovery_ready'`, sql`${agentEvents.data}->'operatorEvidence'->>'case' = ${row.id}`));
   for (const fact of evidence) {
     const data = fact.data as { operatorEvidence?: unknown };
     const parsed = OperatorNodeMessage.safeParse(data.operatorEvidence);
@@ -66,7 +65,7 @@ async function watchHold(ctx: Ctx, id: string, now: Date): Promise<Case | undefi
   await callOperationsOnHold(ctx, waiting, now, fromStart(waiting) ? notStartedWords : undefined);
 }
 
-type RecoveryScreen = Awaited<ReturnType<typeof requestRecoveryState>>;
+type RecoveryScreen = Awaited<ReturnType<typeof currentRecoveryState>>;
 
 async function resolveUnavailableHold(ctx: Ctx, seen: Case, state: RecoveryScreen): Promise<boolean> {
   const row = await stillHeld(ctx, seen.id);

@@ -13,9 +13,8 @@ import { authorizeAccess } from './access.js';
 import { operatorRefused, type OperatorCaller } from './authorization.js';
 import { syncOperatorCases } from './cases.js';
 import { fromStart, releaseStartHold } from './not-started.js';
-import { recoveryScreenRefusal } from './recovery-state.js';
+import { currentRecoveryState, recoveryScreenRefusal } from './recovery-state.js';
 import { continueRecovery, runsATurn } from './recovery.js';
-import { requestRecoveryState } from './rpc.js';
 import { operatorTransaction } from './transactions.js';
 
 type Agent = typeof agents.$inferSelect;
@@ -38,7 +37,7 @@ export async function releaseRecoveryHold(ctx: Ctx, caller: OperatorCaller, inpu
   const found = await caseToRelease(ctx, me, input.case);
   if (!found.recoveryHold) return noHold(found);
   if (fromStart(found)) return await releaseStartHold(ctx, me, found, input.reason, await agentParty(ctx, found.companyId, me.id)) ? { result: 'released', continuation: found.continuationJobId } : noHold(found);
-  const state = await requestRecoveryState(ctx, found);
+  const state = await currentRecoveryState(ctx, found);
   const result = await operatorTransaction(ctx, async (tx, inside) => {
     await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, found.agentId)).for('update');
     const [row] = await tx.select().from(programOperatorCases).where(eq(programOperatorCases.id, found.id)).for('update');

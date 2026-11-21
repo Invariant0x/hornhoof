@@ -59,15 +59,22 @@ async function resolveUnqualifiedCases(ctx: Ctx, frame: OperatorEvidence, qualif
 }
 
 async function instanceFacts(ctx: Ctx, agentId: string, instance: string): Promise<OperatorEvidence[]> {
-  const rows = await ctx.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->'operatorEvidence'->>'instance' = ${instance}`))
-    .orderBy(sql`(${agentEvents.data}->'operatorEvidence'->>'ordinal')::bigint`);
-  return rows.flatMap(({ data }) => {
-    const parsed = OperatorNodeMessage.safeParse((data as { operatorEvidence?: unknown }).operatorEvidence);
-    return parsed.success && 'evidenceId' in parsed.data ? [parsed.data] : [];
-  });
+  const rows = await ctx.db
+    .select(only(agentEvents, 'data'))
+    .from(agentEvents)
+    .where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'operatorEvidenceId' is not null`, sql`${agentEvents.data}->'operatorEvidence'->>'instance' = ${instance}`));
+  return rows
+    .flatMap(({ data }) => {
+      const parsed = OperatorNodeMessage.safeParse((data as { operatorEvidence?: unknown }).operatorEvidence);
+      return parsed.success && 'evidenceId' in parsed.data ? [parsed.data] : [];
+    })
+    .sort((a, b) => a.ordinal - b.ordinal);
 }
 
+const hasQuestionEvidence = (row: Pick<Case, 'evidence'>): boolean => row.evidence.some(evidence => evidence.reason === 'question_waiting');
+
 export async function operatorCaseMode<Row extends Case>(ctx: Ctx, row: Row): Promise<{ reason: Row['reason'] | 'question_waiting'; questionId?: string; question?: OperatorQuestion; readOnly: boolean }> {
+  if (!hasQuestionEvidence(row)) return { reason: row.reason, readOnly: row.readOnly };
   const facts = await instanceFacts(ctx, row.agentId, row.instance);
   const signal = qualifyingReasons(facts).find(signal => signal.reason === 'question_waiting' && row.evidence.some(evidence => evidence.reason === signal.reason && evidence.evidenceKey === signal.evidenceKey));
   if (!signal) return { reason: row.reason, readOnly: row.readOnly };
@@ -256,7 +263,7 @@ async function latestInstance(ctx: Ctx, agentId: string): Promise<string | null>
   const [current] = await ctx.db.select({ instance: programInstances.id }).from(programInstances)
     .innerJoin(agentEvents, sql`${agentEvents.data}->'operatorEvidence'->>'instance' = ${programInstances.id}::text`)
     .innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
-    .where(and(eq(programInstances.agentId, agentId), eq(agentEvents.agentId, agentId), eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), eq(jobs.nodeId, programInstances.nodeId), eq(jobs.companyId, programInstances.companyId)))
+    .where(and(eq(programInstances.agentId, agentId), eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'operatorEvidenceId' is not null`, eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), eq(jobs.nodeId, programInstances.nodeId), eq(jobs.companyId, programInstances.companyId)))
     .orderBy(desc(programInstances.createdAt)).limit(1);
   if (current) return current.instance;
   const [latest] = await ctx.db.select({ instance: programInstances.id }).from(programInstances).where(eq(programInstances.agentId, agentId)).orderBy(desc(programInstances.createdAt)).limit(1);
