@@ -199,6 +199,7 @@ test('confirms machine disconnect, backups toggle, server move, stop move, compu
   expect(mutations[6]).toEqual({ method: 'DELETE', path: '/api/machines/m2/move', body: undefined });
 
   /* 5. Disconnect dev-laptop (danger + Claude sign-in warning). */
+  await page.getByRole('button', { name: 'Open the card of dev-laptop', exact: true }).click();
   const disconnect = laptop.getByRole('button', { name: 'Disconnect dev-laptop', exact: true });
   await cancelAndEscape(page, disconnect, 'Do you really want to disconnect this machine?', async box => {
     await expect(box.locator('p bdi')).toHaveText('dev-laptop');

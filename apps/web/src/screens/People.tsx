@@ -227,7 +227,7 @@ function EditForm({ person, org, titleOnly, rename, telegram: telegramShown, dep
       warnings: more.map(ask => ask.line),
       yes: more.length ? t.common.save : first.yes,
       working: more.length ? t.confirm.working : first.working,
-      danger: !more.length && first.danger,
+      danger: asks.some(ask => Boolean(ask.danger)),
       onYes: () => send(changes),
     });
   }

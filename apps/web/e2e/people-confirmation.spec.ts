@@ -7,20 +7,40 @@ const PERSON: PersonView = {
   access: { whole: false, departments: [], teams: [] },
 };
 
-async function people(page: Page) {
+const ASSISTANT: PersonView = {
+  ...ME.person, id: 'h1', name: 'Ava', title: 'Assistant', isOwner: false, isCeoDelegate: false,
+  access: { whole: false, departments: [], teams: [] },
+  assistant: {
+    owner: { id: ME.person.id, name: ME.person.name },
+    program: 'openclaw',
+    eventsUrl: null,
+    skillsUrl: null,
+    key: { createdAt: '2030-01-01T09:00:00.000Z' },
+    agent: null,
+  },
+};
+
+const DEPUTY: PersonView = {
+  ...ME.person, id: 'p3', name: 'Dana', title: 'Deputy', isOwner: false, isCeoDelegate: true,
+  access: { whole: true, departments: [], teams: [] },
+};
+
+async function people(page: Page, list: PersonView[] = [PERSON]) {
   const changes: { method: string; path: string; body?: object }[] = [];
   await serveApi(page);
-  await page.route('**/api/people', route => route.fulfill({ json: { people: [PERSON] } }));
-  await page.route('**/api/people/p2**', async route => {
+  await page.route('**/api/people/**', async route => {
     const request = route.request();
     const method = request.method();
-    if (method === 'GET') return route.fulfill({ json: { person: PERSON } });
     const path = new URL(request.url()).pathname;
+    if (path === '/api/people') return route.fulfill({ json: { people: list } });
+    const target = list.find(p => path.startsWith(`/api/people/${p.id}`)) ?? PERSON;
+    if (method === 'GET') return route.fulfill({ json: { person: target } });
     const body = request.postDataJSON() as object | undefined;
     changes.push({ method, path, body });
     if (method === 'DELETE') return route.fulfill({ status: 204 });
-    return route.fulfill({ json: { person: { ...PERSON, ...body } } });
+    return route.fulfill({ json: { person: { ...target, ...body } } });
   });
+  await page.route('**/api/people', route => route.fulfill({ json: { people: list } }));
   await page.goto('/people');
   return changes;
 }
@@ -97,4 +117,41 @@ test('confirms the name and authority changes before saving a person', async ({ 
   ]);
   expect(changes[0]?.body).toMatchObject({ name: 'Morgan Vale', access: { whole: true } });
   expect(changes[1]?.body).toEqual({ isCeoDelegate: true });
+});
+
+test('confirms permanent deletion of a named assistant', async ({ page }) => {
+  const changes = await people(page, [PERSON, ASSISTANT]);
+  const remove = page.getByRole('button', { name: 'Delete Ava' });
+  await remove.click();
+  await expect(question(page)).toHaveAccessibleName('Do you really want to delete this assistant?');
+  await expect(question(page)).toHaveAccessibleDescription('Ava will be deleted from the company.');
+  await expect(question(page)).toContainText('This cannot be undone.');
+  await expect(question(page).getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+  await answer(page, 'Cancel');
+  expect(changes).toEqual([]);
+  await remove.click();
+  await answer(page, 'Delete');
+  await expect.poll(() => changes.map(change => [change.method, change.path])).toEqual([['DELETE', '/api/people/h1']]);
+  await expect(page.getByRole('cell', { name: 'Ava' })).toHaveCount(0);
+});
+
+test('confirms revoking Deputy CEO authority with danger focus on Cancel', async ({ page }) => {
+  const changes = await people(page, [DEPUTY]);
+  await page.getByRole('button', { name: 'Edit Dana' }).click();
+  await page.getByLabel('Name', { exact: true }).fill('Dana Ray');
+  await page.getByRole('switch', { name: 'Deputy CEO' }).uncheck();
+  const save = page.getByRole('button', { name: 'Save', exact: true });
+  await save.click();
+  await expect(question(page)).toHaveAccessibleName('Do you really want to save these changes?');
+  await expect(question(page).getByRole('button', { name: 'Save', exact: true })).toHaveClass(/\bdanger\b/);
+  await expect(question(page).getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+  await answer(page, 'Cancel');
+  expect(changes).toEqual([]);
+  await save.click();
+  await answer(page, 'Save');
+  await expect.poll(() => changes.map(change => [change.method, change.path])).toEqual([
+    ['PATCH', '/api/people/p3'],
+    ['PUT', '/api/people/p3/ceo-delegate'],
+  ]);
+  expect(changes[1]?.body).toEqual({ isCeoDelegate: false });
 });

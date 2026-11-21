@@ -95,7 +95,6 @@ export function ConfirmAction({ title, effect, warnings = [], final = false, yes
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
     // The window opens once, with the focus where its kind of action puts it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

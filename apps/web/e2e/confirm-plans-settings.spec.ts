@@ -127,16 +127,17 @@ test('Subscriptions: confirms removing personal plan, broken plan, API key and m
   await confirmAndCheck(page, removeKimi, en.subs.confirm.removePlan.yes, () => writes.length, 2);
   expect(writes[1]).toEqual({ method: 'DELETE', path: '/api/subscriptions/s-kimi' });
 
-  await page.getByRole('button', { name: en.tables.openCard('Broken Claude'), exact: true }).click();
-  const brokenCard = page.getByRole('article', { name: 'Broken Claude, Ivan' });
-  const removeBroken = brokenCard.getByRole('button', { name: en.subs.removeLabel('Broken Claude'), exact: true });
+  await page.getByRole('button', { name: en.tables.openCard('Claude'), exact: true }).click();
+  const brokenCard = page.getByRole('article', { name: 'Claude, Ivan' });
+  const removeBroken = brokenCard.getByRole('button', { name: en.subs.removeLabel('Claude'), exact: true });
   await cancelAndEscape(page, removeBroken, en.subs.confirm.removePlan.title, () => writes.length - 2);
   await confirmAndCheck(page, removeBroken, en.subs.confirm.removePlan.yes, () => writes.length, 3);
   expect(writes[2]).toEqual({ method: 'DELETE', path: '/api/subscriptions/s-broken' });
 
-  await page.getByRole('button', { name: en.tables.openCard('OpenRouter'), exact: true }).click();
-  const apiCard = page.getByRole('article', { name: 'OpenRouter' });
-  const removeApi = apiCard.getByRole('button', { name: en.subs.removeLabel('OpenRouter'), exact: true });
+  const apiName = en.subs.keyEnding('OpenRouter', 'WXYZ');
+  await page.getByRole('button', { name: en.tables.openCard(apiName), exact: true }).click();
+  const apiCard = page.getByRole('article', { name: `${apiName}, Ivan` });
+  const removeApi = apiCard.getByRole('button', { name: en.subs.removeLabel(apiName), exact: true });
   await cancelAndEscape(page, removeApi, en.subs.confirm.removeKey.title, () => writes.length - 3);
   await confirmAndCheck(page, removeApi, en.subs.confirm.removeKey.yes, () => writes.length, 4);
   expect(writes[3]).toEqual({ method: 'DELETE', path: '/api/subscriptions/s-api' });
@@ -169,9 +170,10 @@ test('KeyForm, ApiForm and PlanFallbacks: confirms key replacement, API label/ta
   await expect(kimiCard.getByRole('combobox', { name: en.subs.fallbackModelLabel('Codex, Product team') })).toBeFocused();
 
   // 3. ApiForm: changing label and target confirms; models-only saves directly without dialog.
-  await page.getByRole('button', { name: en.tables.openCard('OpenRouter'), exact: true }).click();
-  const apiCard = page.getByRole('article', { name: 'OpenRouter' });
-  await apiCard.getByRole('button', { name: en.subs.editApiLabel('OpenRouter'), exact: true }).click();
+  const apiName = en.subs.keyEnding('OpenRouter', 'WXYZ');
+  await page.getByRole('button', { name: en.tables.openCard(apiName), exact: true }).click();
+  const apiCard = page.getByRole('article', { name: `${apiName}, Ivan` });
+  await apiCard.getByRole('button', { name: en.subs.editApiLabel(apiName), exact: true }).click();
   await apiCard.getByLabel(en.subs.apiName, { exact: true }).fill('Company Router');
   await apiCard.getByLabel(en.subs.apiServes, { exact: true }).selectOption('orchestrator');
   const saveApi = apiCard.getByRole('button', { name: en.subs.saveChanges, exact: true });
@@ -179,7 +181,7 @@ test('KeyForm, ApiForm and PlanFallbacks: confirms key replacement, API label/ta
   await confirmAndCheck(page, saveApi, en.subs.confirm.editApi.yes, () => writes.filter(w => w.path === '/api/subscriptions/s-api').length, 1);
 
   // Models-only edit saves directly without opening ConfirmAction.
-  await apiCard.getByRole('button', { name: en.subs.editApiLabel('Company Router'), exact: true }).click();
+  await apiCard.getByRole('button', { name: en.subs.editApiLabel(apiName), exact: true }).click();
   await apiCard.getByLabel(en.subs.modelId, { exact: true }).fill('m-b');
   await apiCard.getByRole('button', { name: en.subs.addModel, exact: true }).click();
   await apiCard.getByRole('button', { name: en.subs.saveChanges, exact: true }).click();
@@ -254,15 +256,16 @@ test('RepoSettings: confirms updating existing repository (omitting token) and r
   });
   await page.goto('/departments/d2');
   await page.getByRole('button', { name: en.dept.about, exact: true }).click();
-  await page.getByRole('button', { name: en.dept.change, exact: true }).click();
-  await page.getByLabel(en.dept.address, { exact: true }).fill('https://github.com/acme/next-app');
-  await page.getByLabel(en.dept.branch, { exact: true }).fill('release');
-  await page.getByLabel(en.dept.token, { exact: true }).fill(secretToken);
-  const saveBtn = page.getByRole('button', { name: en.common.save, exact: true });
+  const ownRepo = page.getByRole('region', { name: en.dept.repositories, exact: true }).getByRole('listitem', { name: en.dept.ownRepository, exact: true });
+  await ownRepo.getByRole('button', { name: en.dept.change, exact: true }).click();
+  await ownRepo.getByLabel(en.dept.address, { exact: true }).fill('https://github.com/acme/next-app');
+  await ownRepo.getByLabel(en.dept.branch, { exact: true }).fill('release');
+  await ownRepo.getByLabel(en.dept.token, { exact: true }).fill(secretToken);
+  const saveBtn = ownRepo.getByRole('button', { name: en.common.save, exact: true });
   await cancelAndEscape(page, saveBtn, en.dept.repoConfirm.update.title, () => puts, [secretToken]);
   await confirmAndCheck(page, saveBtn, en.dept.repoConfirm.update.yes, () => puts, 1);
 
-  const removeBtn = page.getByRole('button', { name: en.dept.remove, exact: true });
+  const removeBtn = ownRepo.getByRole('button', { name: en.dept.remove, exact: true });
   await cancelAndEscape(page, removeBtn, en.dept.repoConfirm.remove.title, () => deletes);
   await confirmAndCheck(page, removeBtn, en.dept.repoConfirm.remove.yes, () => deletes, 1);
   expect(errors).toEqual([]);
@@ -360,5 +363,51 @@ test('Settings integrations and passwords: confirms GitHub key, Google Sheets di
   const removeVault = vaultGroup.getByRole('button', { name: en.vault.remove, exact: true });
   await cancelAndEscape(page, removeVault, en.vault.confirm.remove.title, () => vaultDeletes);
   await confirmAndCheck(page, removeVault, en.vault.confirm.remove.yes, () => vaultDeletes, 1);
+  expect(errors).toEqual([]);
+});
+
+test('Settings public link: confirms changing and removing an existing public URL', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  let link: { name: string; url: string } | null = { name: 'acme', url: 'https://acme.hornhoof.org' };
+  let linkPuts = 0;
+  let linkDeletes = 0;
+
+  await taskStream(page);
+  await serveApi(page);
+  await page.route('**/api/link/names/*', route => {
+    const picked = new URL(route.request().url()).pathname.split('/').pop() ?? '';
+    return route.fulfill({ json: { name: picked, free: true } });
+  });
+  await page.route('**/api/link', route => {
+    const method = route.request().method();
+    if (method === 'PUT') {
+      linkPuts++;
+      const { name } = route.request().postDataJSON() as { name: string };
+      link = { name, url: `https://${name}.hornhoof.org` };
+      return route.fulfill({ json: { link } });
+    }
+    if (method === 'DELETE') {
+      linkDeletes++;
+      link = null;
+      return route.fulfill({ status: 204 });
+    }
+    return route.fulfill({ json: { link, domain: 'hornhoof.org', tls: null } });
+  });
+
+  await page.goto('/settings/company');
+  const settingsDialog = page.getByRole('dialog', { name: en.settings.title, exact: true });
+  await settingsDialog.getByRole('button', { name: en.settings.change, exact: true }).click();
+  const field = settingsDialog.getByLabel(en.link.label, { exact: true });
+  await field.fill('acme-hq');
+  await expect(settingsDialog.getByText('acme-hq.hornhoof.org is free.')).toBeVisible();
+  const saveLink = settingsDialog.getByRole('button', { name: en.common.save, exact: true });
+  await cancelAndEscape(page, saveLink, en.confirm.changeLink.title, () => linkPuts);
+  await confirmAndCheck(page, saveLink, en.confirm.changeLink.yes, () => linkPuts, 1);
+  await expect(settingsDialog.getByRole('link', { name: 'https://acme-hq.hornhoof.org' })).toBeVisible();
+
+  const removeLink = settingsDialog.getByRole('button', { name: en.settings.remove, exact: true });
+  await cancelAndEscape(page, removeLink, en.confirm.removeLink.title, () => linkDeletes);
+  await confirmAndCheck(page, removeLink, en.confirm.removeLink.yes, () => linkDeletes, 1);
   expect(errors).toEqual([]);
 });

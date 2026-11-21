@@ -240,6 +240,7 @@ test('confirms removing a saved pipeline stage and deleting a backlog item', asy
   /* Backlog: deleting a saved item confirms before DELETE. */
   mutations.length = 0;
   await page.goto('/tasks?show=turns');
+  await page.getByRole('combobox', { name: en.tasks.department, exact: true }).selectOption('d2');
   const remove = () => page.getByRole('button', { name: en.backlog.removeLabel('Price page'), exact: true }).click();
   await cancelAndEscape(page, remove, () => expect(mutations).toEqual([]));
   await remove();

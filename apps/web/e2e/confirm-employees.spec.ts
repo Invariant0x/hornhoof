@@ -298,6 +298,7 @@ test('confirms stopping work (Stop button and Escape), disconnecting plan, reset
   await brunoWindow.getByRole('button', { name: 'Stop', exact: true }).click();
   await question(page).getByRole('button', { name: 'Stop', exact: true }).click();
   await expect.poll(() => mutations.filter(m => m.path.endsWith('/stop'))).toHaveLength(1);
+  await expect(question(page)).toHaveCount(0);
 
   /* Escape opens confirmation; a second Escape dismisses ONLY the dialog without sending /stop. */
   await brunoWindow.focus();
@@ -311,6 +312,7 @@ test('confirms stopping work (Stop button and Escape), disconnecting plan, reset
   await page.keyboard.press('Escape');
   await question(page).getByRole('button', { name: 'Stop', exact: true }).click();
   await expect.poll(() => mutations.filter(m => m.path.endsWith('/stop'))).toHaveLength(2);
+  await expect(question(page)).toHaveCount(0);
 
   /* Open Bruno's card: switching plans is direct, disconnecting confirms and keeps select controlled on Cancel. */
   await brunoWindow.getByRole('button', { name: 'Card', exact: true }).click();
@@ -335,6 +337,7 @@ test('confirms stopping work (Stop button and Escape), disconnecting plan, reset
   await runsOn.selectOption('');
   await question(page).getByRole('button', { name: 'Disconnect', exact: true }).click();
   await expect.poll(() => mutations.filter(m => m.method === 'PATCH' && m.path === '/api/agents/b1')).toHaveLength(3);
+  await expect(question(page)).toHaveCount(0);
   expect(mutations.filter(m => m.method === 'PATCH' && m.path === '/api/agents/b1').at(-1)?.body).toEqual({ subscription: null });
   await expect(runsOn).toHaveValue('');
 
@@ -346,11 +349,13 @@ test('confirms stopping work (Stop button and Escape), disconnecting plan, reset
   await expect(question(page)).toContainText('Its assignment is kept.');
   await expect(question(page)).toContainText('This cannot be undone.');
   await question(page).getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(question(page)).toHaveCount(0);
   expect(mutations.filter(m => m.path.endsWith('/reset'))).toHaveLength(0);
 
   await brunoCard.getByRole('button', { name: 'Reset to template', exact: true }).click();
   await question(page).getByRole('button', { name: 'Reset', exact: true }).click();
   await expect.poll(() => mutations.filter(m => m.path.endsWith('/reset'))).toHaveLength(1);
+  await expect(question(page)).toHaveCount(0);
 
   /* Remove employee confirms naming employee and department in <bdi>, Escape cancels, then DELETE sends once. */
   await brunoCard.getByRole('button', { name: 'Remove from the company', exact: true }).click();
