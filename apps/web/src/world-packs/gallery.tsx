@@ -1,124 +1,111 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { tileCenterToWorld, worldToScreen } from '../coords';
-import { TERRAIN_PREVIEW_PACK } from '../packs/terrain-preview-pack';
-import { IsometricWorldEngine, type WorldEngineStats } from '../renderer';
+import { tileCenterToWorld, worldToScreen, type TileCoord } from '../world/coords';
+import type { WorldPackManifest } from '../world/manifest';
+import { IsometricWorldEngine, type WorldEngineStats } from '../world/renderer';
 import {
   GALLERY_SEEDS,
-  generateProceduralMap,
-  TERRAIN_RULES,
-  type ProceduralMap,
-  type TerrainKind,
-} from '../terrain';
-import { renderProceduralMapPreview } from '../terrain-preview';
+  generateWorldTerrain,
+  type GeneratedWorldMap,
+} from '../world/terrain-engine';
+import { renderProceduralMapPreview } from '../world/terrain-preview';
+import { DUNGEON_WORLD_PACK } from './dungeon/pack';
+import { EGYPT_WORLD_PACK } from './egypt/pack';
 
-/* Stage 2 procedural map viewer: 12-seed gallery with full legend + click-to-inspect
-   inside the live Stage 1 isometric chunked WebGL engine. */
+/* Multi-pack Stage 2 gallery viewer and smooth-blended isometric inspector.
+   Lives outside engine core (src/world-packs/) and mounts any WorldPackManifest with a terrainRecipe. */
 
 type Lang = 'ru' | 'en';
+
+const AVAILABLE_PACKS: readonly WorldPackManifest[] = [
+  EGYPT_WORLD_PACK,
+  DUNGEON_WORLD_PACK,
+];
 
 const COPY: Record<
   Lang,
   {
-    title: string;
+    titlePrefix: string;
     subtitle: string;
+    packLabel: string;
     backToGallery: string;
     clickToInspect: string;
     buildable: string;
-    river: string;
+    continuity: string;
     center: string;
-    tilesToWater: string;
     hovered: string;
     clickedPrompt: string;
     buildableYes: string;
     buildableNo: string;
-    legend: Record<TerrainKind | 'cityCenter', string>;
+    buildGrid: string;
+    on: string;
+    off: string;
+    focusShore: string;
+    focusCenter: string;
+    startCenterLegend: string;
   }
 > = {
   ru: {
-    title: 'Этап 2: Галерея процедурных карт (12 зерен, 150 x 150)',
-    subtitle: 'Каждое зерно строит свою карту целиком. Нажмите на любую карту, чтобы открыть ее в изометрическом движке.',
+    titlePrefix: 'Этап 2: Галерея карт из пакета мира (12 зерен, 150 x 150)',
+    subtitle: 'Рецепт местности, виды клеток и текстуры принадлежат пакету мира. Нажмите на карту для плавного изометрического вида.',
+    packLabel: 'Пакет мира',
     backToGallery: '<- К галерее 12 карт',
-    clickToInspect: 'Открыть в изометрии',
-    buildable: 'Застройка',
-    river: 'Река',
+    clickToInspect: 'Открыть в плавной изометрии',
+    buildable: 'Доступно',
+    continuity: 'Поток',
     center: 'Центр',
-    tilesToWater: 'кл. до воды',
     hovered: 'Под курсором',
-    clickedPrompt: 'Нажмите на любую клетку, чтобы увидеть ее тип и координаты',
-    buildableYes: 'под застройку',
-    buildableNo: 'не под застройку',
-    legend: {
-      river: 'Река',
-      bank: 'Берег',
-      fertile: 'Зеленая полоса',
-      field: 'Поля',
-      plain: 'Ровная земля',
-      dune: 'Барханы',
-      ridge: 'Скалы и гряды',
-      quarry: 'Каменоломни',
-      spring: 'Родник',
-      grove: 'Роща',
-      cityCenter: 'Центр города',
-    },
+    clickedPrompt: 'Нажмите на любую точку, чтобы увидеть клетку и тип земли',
+    buildableYes: 'можно строить',
+    buildableNo: 'нельзя строить',
+    buildGrid: 'Сетка постройки',
+    on: 'Вкл',
+    off: 'Выкл',
+    focusShore: 'К берегу',
+    focusCenter: 'К центру',
+    startCenterLegend: 'Стартовый центр',
   },
   en: {
-    title: 'Stage 2: Procedural Map Gallery (12 seeds, 150 x 150)',
-    subtitle: 'Each company seed generates its entire map deterministically. Click any map to open it in the isometric engine.',
+    titlePrefix: 'Stage 2: Pack-Owned Map Gallery (12 seeds, 150 x 150)',
+    subtitle: 'Terrain recipe, tile rules and ground textures live inside each world pack. Click any map for smooth isometric rendering.',
+    packLabel: 'World pack',
     backToGallery: '<- Back to 12-map gallery',
-    clickToInspect: 'Open isometric view',
-    buildable: 'Buildable',
-    river: 'River',
+    clickToInspect: 'Open smooth isometric view',
+    buildable: 'Usable',
+    continuity: 'Flow',
     center: 'Center',
-    tilesToWater: 'tiles to water',
     hovered: 'Hover',
-    clickedPrompt: 'Click any diamond tile to inspect its terrain and coordinates',
+    clickedPrompt: 'Click anywhere on the terrain to inspect tile coordinates and kind',
     buildableYes: 'buildable',
     buildableNo: 'non-buildable',
-    legend: {
-      river: 'River',
-      bank: 'Bank',
-      fertile: 'Fertile strip',
-      field: 'Fields',
-      plain: 'Flat plain',
-      dune: 'Dunes',
-      ridge: 'Ridges & cliffs',
-      quarry: 'Quarries',
-      spring: 'Spring',
-      grove: 'Grove',
-      cityCenter: 'City center',
-    },
+    buildGrid: 'Build grid',
+    on: 'On',
+    off: 'Off',
+    focusShore: 'Focus shore',
+    focusCenter: 'Focus center',
+    startCenterLegend: 'Start center',
   },
 };
 
-const LEGEND_ORDER: readonly (TerrainKind | 'cityCenter')[] = [
-  'river',
-  'bank',
-  'fertile',
-  'field',
-  'plain',
-  'dune',
-  'ridge',
-  'quarry',
-  'spring',
-  'grove',
-  'cityCenter',
-];
-
 type GallerySummary = Readonly<{
+  packId: string;
   seed: string;
   buildableRatio: number;
-  riverIsContinuous: boolean;
-  riverTouchesEdges: readonly string[];
-  cityCenter: { col: number; row: number };
-  centerDistanceToRiver: number;
+  continuityOk: boolean;
+  continuityEdges: readonly string[];
+  startCenter: TileCoord;
+  centerDistanceToLiquid: number;
 }>;
 
 type GalleryHandle = {
+  setPack: (packId: string) => void;
   openSeed: (seed: string) => void;
   backToGallery: () => void;
   setLang: (lang: Lang) => void;
   setZoom: (zoom: number) => void;
+  setBuildGridVisible: (visible: boolean) => void;
+  focusTile: (col: number, row: number) => void;
+  focusNearestShore: () => TileCoord;
   flushVisibleBakes: () => void;
   getStats: () => WorldEngineStats | null;
   screenPointOfTile: (col: number, row: number) => { x: number; y: number } | null;
@@ -131,20 +118,51 @@ declare global {
   }
 }
 
-function readInitialQuery(): { lang: Lang; seed: string | null } {
+function readInitialQuery(): { lang: Lang; packId: string; seed: string | null } {
   const params = new URLSearchParams(window.location.search);
-  const rawLang = params.get('lang');
-  const lang: Lang = rawLang === 'en' ? 'en' : 'ru';
+  const lang: Lang = params.get('lang') === 'en' ? 'en' : 'ru';
+  const rawPack = params.get('pack');
+  const packId = AVAILABLE_PACKS.some(p => p.id === rawPack) ? rawPack! : EGYPT_WORLD_PACK.id;
   const rawSeed = params.get('seed');
-  return { lang, seed: rawSeed && rawSeed.trim() ? rawSeed.trim() : null };
+  return { lang, packId, seed: rawSeed && rawSeed.trim() ? rawSeed.trim() : null };
+}
+
+/* Finds the closest shoreline point right on the smooth water/liquid boundary near startCenter. */
+function findNearestShoreTile(map: GeneratedWorldMap): TileCoord {
+  const { col: cx, row: cy } = map.startCenter;
+  let best: TileCoord = map.startCenter;
+  let bestScore = Infinity;
+  for (let dy = -18; dy <= 18; dy++) {
+    for (let dx = -18; dx <= 18; dx++) {
+      const c = cx + dx;
+      const r = cy + dy;
+      const spec = map.kindSpecAt(c, r);
+      if (!spec || spec.liquid) continue;
+      /* Check if 4-adjacent to a liquid tile. */
+      const adjLiquid =
+        map.kindSpecAt(c + 1, r)?.liquid ||
+        map.kindSpecAt(c - 1, r)?.liquid ||
+        map.kindSpecAt(c, r + 1)?.liquid ||
+        map.kindSpecAt(c, r - 1)?.liquid;
+      if (!adjLiquid) continue;
+      const d = Math.hypot(dx, dy);
+      if (d < bestScore) {
+        bestScore = d;
+        best = { col: c, row: r };
+      }
+    }
+  }
+  return best;
 }
 
 function MapCard({
   map,
+  pack,
   lang,
   onOpen,
 }: {
-  map: ProceduralMap;
+  map: GeneratedWorldMap;
+  pack: WorldPackManifest;
   lang: Lang;
   onOpen: (seed: string) => void;
 }) {
@@ -154,11 +172,11 @@ function MapCard({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    renderProceduralMapPreview(canvas, map, TERRAIN_PREVIEW_PACK, 2);
-  }, [map]);
+    renderProceduralMapPreview(canvas, map, pack, 2);
+  }, [map, pack]);
 
   const pct = (map.stats.buildableRatio * 100).toFixed(1);
-  const edges = map.stats.riverTouchesEdges.join('');
+  const edges = map.stats.continuityEdges.join('') || 'ok';
 
   return (
     <button
@@ -192,11 +210,10 @@ function MapCard({
           width: '100%',
           aspectRatio: '1 / 1',
           border: '1px solid rgba(130, 184, 224, 0.25)',
-          imageRendering: 'pixelated',
         }}
       />
       <div style={{ fontSize: 11, color: '#B7C8DC', lineHeight: 1.35 }}>
-        {t.river}: {edges} | {t.center}: ({map.cityCenter.col}, {map.cityCenter.row}) ({map.stats.centerDistanceToRiver} {t.tilesToWater})
+        {t.continuity}: {edges} | {t.center}: ({map.startCenter.col}, {map.startCenter.row})
       </div>
     </button>
   );
@@ -204,11 +221,13 @@ function MapCard({
 
 function IsometricInspector({
   map,
+  pack,
   lang,
   onBack,
   engineRef,
 }: {
-  map: ProceduralMap;
+  map: GeneratedWorldMap;
+  pack: WorldPackManifest;
   lang: Lang;
   onBack: () => void;
   engineRef: { current: IsometricWorldEngine | null };
@@ -216,18 +235,27 @@ function IsometricInspector({
   const hostRef = useRef<HTMLDivElement>(null);
   const [stats, setStats] = useState<WorldEngineStats | null>(null);
   const t = COPY[lang];
+  const shoreTile = useMemo(() => findNearestShoreTile(map), [map]);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     let alive = true;
 
+    /* Frame between startCenter and nearest shore so both the smooth curved bank and start center appear immediately. */
+    const initialMid: TileCoord = {
+      col: Math.round((map.startCenter.col + shoreTile.col) / 2),
+      row: Math.round((map.startCenter.row + shoreTile.row) / 2),
+    };
+
     void IsometricWorldEngine.create({
       host,
-      pack: TERRAIN_PREVIEW_PACK,
-      initialCenterTile: map.cityCenter,
-      markerTile: map.cityCenter,
-      resolveTileId: (col, row) => map.tileAt(col, row) ?? 'plain',
+      pack,
+      terrainMap: map,
+      showBuildGrid: false,
+      initialCenterTile: initialMid,
+      markerTile: map.startCenter,
+      resolveTileId: (col, row) => map.tileAt(col, row) ?? pack.defaultTileId,
       onStats: next => {
         if (alive) setStats(next);
       },
@@ -245,13 +273,21 @@ function IsometricInspector({
       engineRef.current?.destroy();
       engineRef.current = null;
     };
-  }, [map, engineRef]);
+  }, [map, pack, shoreTile, engineRef]);
 
   const atMin = stats ? stats.zoom <= stats.minZoom + 1e-4 : false;
   const atMax = stats ? stats.zoom >= stats.maxZoom - 1e-4 : false;
   const selected = stats?.selectedPick ?? null;
-  const selectedKind = selected ? map.tileAt(selected.col, selected.row) : null;
-  const hoveredKind = stats?.hoveredTile ? map.tileAt(stats.hoveredTile.col, stats.hoveredTile.row) : null;
+  const selectedSpec = selected ? map.kindSpecAt(selected.col, selected.row) : null;
+  const hoveredSpec = stats?.hoveredTile ? map.kindSpecAt(stats.hoveredTile.col, stats.hoveredTile.row) : null;
+
+  const focusOnTile = (tile: TileCoord) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const w = tileCenterToWorld(tile.col, tile.row, pack.projection.defaultTileW, pack.projection.defaultTileH);
+    const cur = engine.getStats();
+    engine.setCamera({ x: w.x, y: w.y, zoom: cur.camera.zoom });
+  };
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -262,7 +298,7 @@ function IsometricInspector({
   };
 
   return (
-    <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden', background: TERRAIN_PREVIEW_PACK.palette.backdrop }}>
+    <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden', background: pack.palette.backdrop }}>
       <div ref={hostRef} data-testid="stage2-iso-canvas" style={{ position: 'absolute', inset: 0 }} />
 
       <div
@@ -274,19 +310,19 @@ function IsometricInspector({
           display: 'grid',
           gap: 8,
           padding: '12px 14px',
-          background: 'rgba(18, 25, 34, 0.92)',
+          background: 'rgba(18, 25, 34, 0.9)',
           border: '1px solid rgba(126, 214, 255, 0.34)',
           color: '#E7F0F9',
           fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
           fontSize: 12.5,
           lineHeight: 1.45,
-          maxWidth: 'min(420px, calc(100vw - 28px))',
+          maxWidth: 'min(440px, calc(100vw - 28px))',
           userSelect: 'none',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
           <strong style={{ fontSize: 13.5, color: '#9BD9FF' }}>
-            {map.seed} ({map.width} x {map.height})
+            {pack.name[lang]} / {map.seed}
           </strong>
           <button
             type="button"
@@ -306,16 +342,64 @@ function IsometricInspector({
           </button>
         </div>
 
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          <button
+            type="button"
+            data-testid="stage2-toggle-grid"
+            onClick={() => engineRef.current?.setBuildGridVisible(!stats?.buildGridVisible)}
+            style={{
+              padding: '4px 9px',
+              background: stats?.buildGridVisible ? '#284562' : 'rgba(30, 42, 58, 0.85)',
+              border: '1px solid rgba(130, 184, 224, 0.42)',
+              color: stats?.buildGridVisible ? '#FFE08A' : '#E7F0F9',
+              fontFamily: 'inherit',
+              fontSize: 11.5,
+              cursor: 'pointer',
+            }}
+          >
+            {t.buildGrid}: {stats?.buildGridVisible ? t.on : t.off}
+          </button>
+          <button
+            type="button"
+            data-testid="stage2-focus-shore"
+            onClick={() => focusOnTile(shoreTile)}
+            style={{
+              padding: '4px 9px',
+              background: 'rgba(30, 42, 58, 0.85)',
+              border: '1px solid rgba(130, 184, 224, 0.42)',
+              color: '#E7F0F9',
+              fontFamily: 'inherit',
+              fontSize: 11.5,
+              cursor: 'pointer',
+            }}
+          >
+            {t.focusShore}
+          </button>
+          <button
+            type="button"
+            data-testid="stage2-focus-center"
+            onClick={() => focusOnTile(map.startCenter)}
+            style={{
+              padding: '4px 9px',
+              background: 'rgba(30, 42, 58, 0.85)',
+              border: '1px solid rgba(130, 184, 224, 0.42)',
+              color: '#E7F0F9',
+              fontFamily: 'inherit',
+              fontSize: 11.5,
+              cursor: 'pointer',
+            }}
+          >
+            {t.focusCenter}
+          </button>
+        </div>
+
         {stats && (
           <div>
-            <div>
-              {t.buildable}: <strong>{(map.stats.buildableRatio * 100).toFixed(1)}%</strong> | {t.river}: {map.stats.riverTouchesEdges.join('')} | {t.center}: ({map.cityCenter.col}, {map.cityCenter.row})
-            </div>
             <div>
               Zoom: <strong>{stats.zoomPercent}%</strong> ({stats.cssTileW}x{stats.cssTileH} px) | LOD: {stats.lodId} | Chunks: {stats.visibleChunks} / {stats.totalChunks}
             </div>
             <div>
-              {t.hovered}: {stats.hoveredTile && hoveredKind ? `(${stats.hoveredTile.col}, ${stats.hoveredTile.row}) [${t.legend[hoveredKind]}]` : 'none'}
+              {t.hovered}: {stats.hoveredTile && hoveredSpec ? `(${stats.hoveredTile.col}, ${stats.hoveredTile.row}) [${hoveredSpec.label[lang]}]` : 'none'}
             </div>
           </div>
         )}
@@ -329,8 +413,8 @@ function IsometricInspector({
             color: '#FFE08A',
           }}
         >
-          {selected && selectedKind
-            ? `(${selected.col}, ${selected.row}) | ${t.legend[selectedKind]} (${TERRAIN_RULES[selectedKind].buildable ? t.buildableYes : t.buildableNo})`
+          {selected && selectedSpec
+            ? `(${selected.col}, ${selected.row}) | ${selectedSpec.label[lang]} (${selectedSpec.buildable ? t.buildableYes : t.buildableNo})`
             : t.clickedPrompt}
         </div>
       </div>
@@ -432,26 +516,57 @@ function IsometricInspector({
 function Stage2GalleryApp() {
   const initial = useMemo(() => readInitialQuery(), []);
   const [lang, setLang] = useState<Lang>(initial.lang);
+  const [packId, setPackId] = useState<string>(initial.packId);
   const [activeSeed, setActiveSeed] = useState<string | null>(initial.seed);
   const engineRef = useRef<IsometricWorldEngine | null>(null);
 
+  const activePack = useMemo(
+    () => AVAILABLE_PACKS.find(p => p.id === packId) ?? EGYPT_WORLD_PACK,
+    [packId],
+  );
+
   const maps = useMemo(
-    () => GALLERY_SEEDS.map(seed => generateProceduralMap({ seed, mapSize: TERRAIN_PREVIEW_PACK.mapSize })),
-    [],
+    () => GALLERY_SEEDS.map(seed => generateWorldTerrain(activePack, { seed, mapSize: activePack.mapSize })),
+    [activePack],
   );
 
   const activeMap = useMemo(() => {
     if (!activeSeed) return null;
     const found = maps.find(m => m.seed === activeSeed);
-    return found ?? generateProceduralMap({ seed: activeSeed, mapSize: TERRAIN_PREVIEW_PACK.mapSize });
-  }, [activeSeed, maps]);
+    return found ?? generateWorldTerrain(activePack, { seed: activeSeed, mapSize: activePack.mapSize });
+  }, [activeSeed, maps, activePack]);
 
   useEffect(() => {
     window.__WORLD_GALLERY__ = {
+      setPack: id => {
+        setActiveSeed(null);
+        setPackId(id);
+      },
       openSeed: seed => setActiveSeed(seed),
       backToGallery: () => setActiveSeed(null),
       setLang: next => setLang(next),
       setZoom: z => engineRef.current?.setZoom(z),
+      setBuildGridVisible: v => engineRef.current?.setBuildGridVisible(v),
+      focusTile: (col, row) => {
+        const engine = engineRef.current;
+        if (!engine) return;
+        const w = tileCenterToWorld(col, row, activePack.projection.defaultTileW, activePack.projection.defaultTileH);
+        engine.setCamera({ x: w.x, y: w.y, zoom: engine.getStats().camera.zoom });
+      },
+      focusNearestShore: () => {
+        const target = activeMap ? findNearestShoreTile(activeMap) : { col: 75, row: 75 };
+        const engine = engineRef.current;
+        if (engine) {
+          const w = tileCenterToWorld(
+            target.col,
+            target.row,
+            activePack.projection.defaultTileW,
+            activePack.projection.defaultTileH,
+          );
+          engine.setCamera({ x: w.x, y: w.y, zoom: engine.getStats().camera.zoom });
+        }
+        return target;
+      },
       flushVisibleBakes: () => engineRef.current?.flushVisibleBakes(),
       getStats: () => engineRef.current?.getStats() ?? null,
       screenPointOfTile: (col, row) => {
@@ -461,33 +576,30 @@ function Stage2GalleryApp() {
         if (!host) return null;
         const rect = host.getBoundingClientRect();
         const cur = engine.getStats();
-        const w = tileCenterToWorld(
-          col,
-          row,
-          TERRAIN_PREVIEW_PACK.projection.defaultTileW,
-          TERRAIN_PREVIEW_PACK.projection.defaultTileH,
-        );
+        const w = tileCenterToWorld(col, row, activePack.projection.defaultTileW, activePack.projection.defaultTileH);
         return worldToScreen(w.x, w.y, cur.camera, { width: rect.width, height: rect.height });
       },
       getGallerySummaries: () =>
         maps.map(m => ({
+          packId: m.packId,
           seed: m.seed,
           buildableRatio: m.stats.buildableRatio,
-          riverIsContinuous: m.stats.riverIsContinuous,
-          riverTouchesEdges: m.stats.riverTouchesEdges,
-          cityCenter: m.cityCenter,
-          centerDistanceToRiver: m.stats.centerDistanceToRiver,
+          continuityOk: m.stats.continuityOk,
+          continuityEdges: m.stats.continuityEdges,
+          startCenter: m.startCenter,
+          centerDistanceToLiquid: m.stats.centerDistanceToLiquid,
         })),
     };
     return () => {
       delete window.__WORLD_GALLERY__;
     };
-  }, [maps]);
+  }, [maps, activeMap, activePack]);
 
   if (activeMap) {
     return (
       <IsometricInspector
         map={activeMap}
+        pack={activePack}
         lang={lang}
         onBack={() => setActiveSeed(null)}
         engineRef={engineRef}
@@ -496,7 +608,7 @@ function Stage2GalleryApp() {
   }
 
   const t = COPY[lang];
-  const colorMap = new Map(TERRAIN_PREVIEW_PACK.tiles.map(slot => [slot.id, slot.fill]));
+  const recipe = activePack.terrainRecipe!;
 
   return (
     <div
@@ -522,12 +634,32 @@ function Stage2GalleryApp() {
       >
         <div>
           <h1 data-testid="stage2-gallery-title" style={{ margin: 0, fontSize: 19, fontWeight: 700, color: '#9BD9FF' }}>
-            {t.title}
+            {t.titlePrefix}: {recipe.name[lang]}
           </h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: '#A9BDD3' }}>{t.subtitle}</p>
         </div>
 
-        <div style={{ display: 'inline-flex', gap: 4 }}>
+        <div style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: '#A9BDD3' }}>{t.packLabel}:</span>
+          {AVAILABLE_PACKS.map(p => (
+            <button
+              key={p.id}
+              type="button"
+              data-testid={`pack-${p.id}`}
+              onClick={() => setPackId(p.id)}
+              style={{
+                padding: '6px 11px',
+                border: '1px solid rgba(130, 184, 224, 0.4)',
+                background: p.id === activePack.id ? '#284562' : '#19222E',
+                color: p.id === activePack.id ? '#FFE08A' : '#C8D8E8',
+                fontWeight: 700,
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              {p.name[lang]}
+            </button>
+          ))}
           {(['ru', 'en'] as const).map(code => (
             <button
               key={code}
@@ -535,7 +667,7 @@ function Stage2GalleryApp() {
               data-testid={`lang-${code}`}
               onClick={() => setLang(code)}
               style={{
-                padding: '6px 11px',
+                padding: '6px 10px',
                 border: '1px solid rgba(130, 184, 224, 0.4)',
                 background: lang === code ? '#284562' : '#19222E',
                 color: lang === code ? '#FFE08A' : '#C8D8E8',
@@ -563,21 +695,34 @@ function Stage2GalleryApp() {
           fontSize: 12,
         }}
       >
-        {LEGEND_ORDER.map(key => (
-          <span key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        {recipe.tileKinds.map(kind => (
+          <span key={kind.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <span
               style={{
                 display: 'inline-block',
                 width: 12,
                 height: 12,
-                borderRadius: key === 'cityCenter' ? '50%' : 2,
-                background: key === 'cityCenter' ? '#FFD166' : (colorMap.get(key) ?? '#888888'),
+                borderRadius: 2,
+                background: kind.color,
                 border: '1px solid rgba(255, 255, 255, 0.35)',
               }}
             />
-            <span>{t.legend[key]}</span>
+            <span>{kind.label[lang]}</span>
           </span>
         ))}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span
+            style={{
+              display: 'inline-block',
+              width: 12,
+              height: 12,
+              borderRadius: '50%',
+              background: '#FFD166',
+              border: '1px solid rgba(255, 255, 255, 0.35)',
+            }}
+          />
+          <span>{t.startCenterLegend}</span>
+        </span>
       </div>
 
       <main
@@ -589,7 +734,7 @@ function Stage2GalleryApp() {
         }}
       >
         {maps.map(map => (
-          <MapCard key={map.seed} map={map} lang={lang} onOpen={setActiveSeed} />
+          <MapCard key={`${activePack.id}-${map.seed}`} map={map} pack={activePack} lang={lang} onOpen={setActiveSeed} />
         ))}
       </main>
     </div>

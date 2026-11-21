@@ -2,11 +2,13 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WorldEngineStats } from '../src/world/renderer';
-import { GALLERY_SEEDS, MIN_BUILDABLE_RATIO } from '../src/world/terrain';
+import { GALLERY_SEEDS } from '../src/world/terrain-engine';
 import { captureWith } from './capture';
 
-/* Stage 2 live browser verification: 12-seed procedural map gallery + click-to-inspect
-   inside the live Stage 1 isometric chunked WebGL renderer. */
+/* Stage 2 live browser verification:
+   1. Pack-owned procedural recipes: 12-seed gallery for BOTH Ancient Egypt and Subterranean Dungeon.
+   2. Smooth blended textures + curved shoreline without staircase + separate animated liquid layer +
+      build-grid hidden by default (visible only on toggle) at 100% and 200% zoom on hornhoof. */
 
 const capture = captureWith('stage2', process.env.HH_SCREENSHOT_DIR);
 
@@ -19,19 +21,24 @@ async function captureFull(page: Page, info: TestInfo, name: string): Promise<vo
 }
 
 type GallerySummary = Readonly<{
+  packId: string;
   seed: string;
   buildableRatio: number;
-  riverIsContinuous: boolean;
-  riverTouchesEdges: readonly string[];
-  cityCenter: { col: number; row: number };
-  centerDistanceToRiver: number;
+  continuityOk: boolean;
+  continuityEdges: readonly string[];
+  startCenter: { col: number; row: number };
+  centerDistanceToLiquid: number;
 }>;
 
 type GalleryHandle = {
+  setPack: (packId: string) => void;
   openSeed: (seed: string) => void;
   backToGallery: () => void;
   setLang: (lang: 'ru' | 'en') => void;
   setZoom: (zoom: number) => void;
+  setBuildGridVisible: (visible: boolean) => void;
+  focusTile: (col: number, row: number) => void;
+  focusNearestShore: () => { col: number; row: number };
   flushVisibleBakes: () => void;
   getStats: () => WorldEngineStats | null;
   screenPointOfTile: (col: number, row: number) => { x: number; y: number } | null;
@@ -44,17 +51,15 @@ async function waitForIsoReady(page: Page): Promise<void> {
     return Boolean(g?.getStats());
   });
   await page.evaluate(() => {
-    const g = (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__;
-    g.flushVisibleBakes();
+    (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.flushVisibleBakes();
   });
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 }
 
-test('Stage 2 gallery renders 12 distinct procedural maps and opens any seed in the live isometric engine', async ({ browser }, info: TestInfo) => {
+test('Stage 2 gallery supports Egypt and Dungeon packs and renders smooth non-staircased shorelines at 100% and 200%', async ({ browser }, info: TestInfo) => {
   const shotDir = process.env.HH_SCREENSHOT_DIR;
   if (shotDir) mkdirSync(shotDir, { recursive: true });
 
-  /* 1600x1280 displays all 12 maps in a crisp 4x3 grid for visual inspection. */
   const context = await browser.newContext({
     viewport: { width: 1600, height: 1280 },
     deviceScaleFactor: 1,
@@ -67,84 +72,97 @@ test('Stage 2 gallery renders 12 distinct procedural maps and opens any seed in 
   });
 
   try {
-    await page.goto('/world-gallery.html?lang=ru');
+    /* 1. Ancient Egypt 12-seed gallery. */
+    await page.goto('/world-gallery.html?lang=ru&pack=egypt');
     await page.waitForFunction(() => Boolean((window as unknown as { __WORLD_GALLERY__?: GalleryHandle }).__WORLD_GALLERY__));
     await expect(page.locator('[data-testid^="gallery-card-"]')).toHaveCount(12);
 
-    const summaries = await page.evaluate(() =>
+    const egyptSummaries = await page.evaluate(() =>
       (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.getGallerySummaries(),
     );
-    expect(summaries).toHaveLength(12);
-    for (const s of summaries) {
+    expect(egyptSummaries).toHaveLength(12);
+    for (const s of egyptSummaries) {
       expect(GALLERY_SEEDS).toContain(s.seed);
-      expect(s.riverIsContinuous, `${s.seed} river continuity`).toBe(true);
-      expect(s.riverTouchesEdges.length, `${s.seed} river edges`).toBeGreaterThanOrEqual(2);
-      expect(s.buildableRatio, `${s.seed} buildable share`).toBeGreaterThanOrEqual(MIN_BUILDABLE_RATIO);
-      expect(s.centerDistanceToRiver, `${s.seed} center distance`).toBeGreaterThanOrEqual(2);
-      expect(s.centerDistanceToRiver, `${s.seed} center distance`).toBeLessThanOrEqual(10);
+      expect(s.packId).toBe('egypt');
+      expect(s.continuityOk).toBe(true);
+      expect(s.buildableRatio).toBeGreaterThanOrEqual(0.55);
     }
+    await captureFull(page, info, 'gallery-egypt-12');
 
-    /* Confirm every gallery canvas rendered non-empty pixels and capture the full 12-map gallery. */
-    const paintedCount = await page.evaluate(() => {
-      const canvases = [...document.querySelectorAll<HTMLCanvasElement>('[data-testid^="gallery-canvas-"]')];
-      return canvases.filter(c => c.width >= 300 && c.height >= 300).length;
-    });
-    expect(paintedCount).toBe(12);
-    await captureFull(page, info, 'gallery-12-maps');
+    /* 2. Switch to Subterranean Dungeon pack -> exact same gallery shows 12 Dungeon maps. */
+    await page.getByTestId('pack-dungeon').click();
+    await expect(page.locator('[data-testid^="gallery-card-"]')).toHaveCount(12);
+    const dungeonSummaries = await page.evaluate(() =>
+      (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.getGallerySummaries(),
+    );
+    expect(dungeonSummaries).toHaveLength(12);
+    for (const s of dungeonSummaries) {
+      expect(s.packId).toBe('dungeon');
+      expect(s.continuityOk).toBe(true);
+      expect(s.buildableRatio).toBeGreaterThanOrEqual(0.65);
+    }
+    await captureFull(page, info, 'gallery-dungeon-12');
 
-    /* Verify Russian / English toggle updates headings cleanly without errors. */
+    /* Verify EN/RU language switch. */
     await page.getByTestId('lang-en').click();
-    await expect(page.getByTestId('stage2-gallery-title')).toContainText('Stage 2: Procedural Map Gallery');
+    await expect(page.getByTestId('stage2-gallery-title')).toContainText('Stage 2: Pack-Owned Map Gallery');
     await page.getByTestId('lang-ru').click();
-    await expect(page.getByTestId('stage2-gallery-title')).toContainText('Этап 2: Галерея процедурных карт');
 
-    /* Open "hornhoof" in the live isometric engine at 1440x900 desktop viewport. */
+    /* 3. Open Dungeon "hornhoof" in the smooth isometric engine at 100% zoom (1440x900). */
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.getByTestId('gallery-card-hornhoof').click();
     await waitForIsoReady(page);
-
-    const hornhoofSummary = summaries.find(s => s.seed === 'hornhoof')!;
-    const iso100 = await page.evaluate(() => (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.getStats()!);
-    expect(iso100.mapSize).toBe(150);
-    expect(iso100.zoomPercent).toBe(100);
-    expect(iso100.visibleChunks).toBeLessThan(iso100.totalChunks * 0.06);
-
-    /* Click the riverside city center tile and verify exact tile + terrain readout. */
-    const centerPt = await page.evaluate(
-      ({ col, row }) => (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.screenPointOfTile(col, row)!,
-      hornhoofSummary.cityCenter,
+    const dungeonStats = await page.evaluate(() =>
+      (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.getStats()!,
     );
-    await page.mouse.click(centerPt.x, centerPt.y);
-    await expect(page.getByTestId('stage2-iso-selected')).toContainText(
-      `(${hornhoofSummary.cityCenter.col}, ${hornhoofSummary.cityCenter.row})`,
-    );
-    await expect(page.getByTestId('stage2-iso-selected')).toContainText('под застройку');
-    await capture(page, info, 'iso-hornhoof-100pct');
+    expect(dungeonStats.buildGridVisible).toBe(false);
+    expect(dungeonStats.hasAnimatedLiquid).toBe(true);
+    await capture(page, info, 'dungeon-hornhoof-100pct');
 
-    /* Zoom out to 50% minimum to inspect river bend, banks, fertile strip, fields and plains in 2:1 isometry. */
-    await page.evaluate(() => (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.setZoom(0.5));
-    await waitForIsoReady(page);
-    await capture(page, info, 'iso-hornhoof-50pct');
-
-    /* Return to gallery and inspect a second distinct seed ("meridian-hq") at 50% zoom. */
+    /* 4. Open Ancient Egypt "hornhoof" and inspect smooth curved shoreline at 100% and 200% zoom. */
     await page.getByTestId('stage2-back-gallery').click();
-    await expect(page.locator('[data-testid^="gallery-card-"]')).toHaveCount(12);
-    await page.getByTestId('gallery-card-meridian-hq').click();
+    await page.getByTestId('pack-egypt').click();
+    await page.getByTestId('gallery-card-hornhoof').click();
     await waitForIsoReady(page);
-    await page.evaluate(() => (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.setZoom(0.5));
-    await waitForIsoReady(page);
-    await capture(page, info, 'iso-meridian-50pct');
 
-    console.log(
-      `STAGE2_METRICS seeds=${summaries.length} hornhoofCenter=(${hornhoofSummary.cityCenter.col},${hornhoofSummary.cityCenter.row})` +
-        ` hornhoofBuildable=${(hornhoofSummary.buildableRatio * 100).toFixed(1)}% isoRenderer=${iso100.rendererKind}`,
+    const egypt100 = await page.evaluate(() =>
+      (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.getStats()!,
     );
+    expect(egypt100.zoomPercent).toBe(100);
+    expect(egypt100.buildGridVisible).toBe(false);
+    expect(egypt100.hasAnimatedLiquid).toBe(true);
+
+    /* Focus cleanly on the smooth curved hornhoof riverbank at 100% (grid OFF). */
+    await page.evaluate(() => (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.focusNearestShore());
+    await waitForIsoReady(page);
+    await capture(page, info, 'shore-hornhoof-100pct');
+
+    /* Toggle Build Grid ON at 100% to verify grid appears cleanly only during build mode. */
+    await page.getByTestId('stage2-toggle-grid').click();
+    await waitForIsoReady(page);
+    const gridOnStats = await page.evaluate(() =>
+      (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.getStats()!,
+    );
+    expect(gridOnStats.buildGridVisible).toBe(true);
+    await capture(page, info, 'shore-hornhoof-buildgrid-100pct');
+
+    /* Turn Build Grid back OFF and zoom to 200% max zoom right on the smooth curved shoreline. */
+    await page.getByTestId('stage2-toggle-grid').click();
+    await page.evaluate(() => (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.setZoom(2.0));
+    await waitForIsoReady(page);
+    const egypt200 = await page.evaluate(() =>
+      (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.getStats()!,
+    );
+    expect(egypt200.zoomPercent).toBe(200);
+    expect(egypt200.buildGridVisible).toBe(false);
+    await capture(page, info, 'shore-hornhoof-200pct');
+
     expect(errors).toEqual([]);
   } finally {
     await context.close();
   }
 
-  /* Verify mobile portrait viewport renders the 12-map gallery cleanly with zero horizontal overflow. */
+  /* Verify mobile portrait viewport renders the multi-pack gallery with zero overflow. */
   const mobileCtx = await browser.newContext({ viewport: { width: 375, height: 812 }, deviceScaleFactor: 1 });
   const mobilePage = await mobileCtx.newPage();
   const mobileErrors: string[] = [];

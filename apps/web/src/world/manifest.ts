@@ -1,5 +1,8 @@
 /* Universal world pack manifest contract for the isometric world engine.
-   Contains zero theme-specific words, files or colours; every concrete world supplies its own manifest. */
+   Contains zero theme-specific words, files or colours; every concrete world supplies its own manifest,
+   materials, liquid layer and procedural terrain recipe. */
+
+import type { TileCoord } from './coords';
 
 export type EngineKind = 'isometric-2d' | '3d';
 
@@ -56,7 +59,7 @@ export type ProjectionSpec = Readonly<{
   }>;
 }>;
 
-/* Terrain tile visual slot declared by a world pack. */
+/* Discrete terrain tile visual slot declared by a world pack (used by stub packs and pick readouts). */
 export type TileSlotSpec = Readonly<{
   id: string;
   fill: string;
@@ -64,6 +67,96 @@ export type TileSlotSpec = Readonly<{
   accent?: string;
   buildable: boolean;
   walkable: boolean;
+}>;
+
+/* Procedural placeholder texture pattern replaced later by artist-authored seamless PNG textures. */
+export type GroundTexturePattern =
+  | 'fine_grain'
+  | 'grass_tufts'
+  | 'furrows'
+  | 'wind_ripples'
+  | 'cracked_rock'
+  | 'cut_stone'
+  | 'moss_glow'
+  | 'paved_stone';
+
+/* Seamless tileable ground material blended across smooth corner-field masks during chunk baking. */
+export type GroundMaterialSpec = Readonly<{
+  id: string;
+  baseColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  pattern: GroundTexturePattern;
+  scalePx?: number;
+  contrast?: number;
+  edgeNoiseWeight?: number;
+  textureUrl?: string;
+}>;
+
+/* Separate animated liquid layer rendered beneath alpha-cutout terrain chunks. */
+export type LiquidLayerSpec = Readonly<{
+  baseColor: string;
+  deepColor: string;
+  highlightColor: string;
+  shoreFoamColor: string;
+  shallowTintColor: string;
+  speedX: number;
+  speedY: number;
+  glow?: boolean;
+}>;
+
+/* Pack-owned terrain tile category with gameplay rules and legend metadata. */
+export type TerrainKindSpec = Readonly<{
+  id: string;
+  label: Readonly<{ en: string; ru: string }>;
+  color: string;
+  materialId: string;
+  buildable: boolean;
+  walkable: boolean;
+  liquid?: boolean;
+  excavatable?: boolean;
+}>;
+
+/* Smooth continuous values evaluated at each tile corner vertex (vCol, vRow). */
+export type CornerSample = Readonly<{
+  elevation: number;
+  moisture: number;
+  /* Signed distance to liquid boundary: < 0 inside liquid, 0 smooth shoreline, > 0 solid ground. */
+  signedWaterDist: number;
+  /* Blend weight per pack materialId (normalized to sum to 1 by the engine). */
+  layerWeights: Readonly<Record<string, number>>;
+}>;
+
+/* Deterministic noise toolkit supplied by the engine to any pack's terrain recipe. */
+export type TerrainNoiseToolkit = Readonly<{
+  hashSeed: (seed: string | number) => number;
+  createRng: (seed: number) => () => number;
+  hash2i: (ix: number, iy: number, seed: number) => number;
+  valueNoise2D: (x: number, y: number, seed: number) => number;
+  fbm2D: (x: number, y: number, seed: number, octaves?: number, lacunarity?: number, gain?: number) => number;
+  ridgedFbm2D: (x: number, y: number, seed: number, octaves?: number, lacunarity?: number, gain?: number) => number;
+}>;
+
+/* Prepared per-seed terrain evaluator returned by a world pack's recipe.
+   Must evaluate purely in infinite world coordinates so edge expansion never shifts existing tiles or corners. */
+export type PreparedTerrainRecipe = Readonly<{
+  startCenter: TileCoord;
+  sampleTile: (col: number, row: number) => string;
+  sampleCorner: (vertexCol: number, vertexRow: number) => CornerSample;
+}>;
+
+/* Pack-owned procedural world generation recipe. */
+export type TerrainRecipeSpec = Readonly<{
+  id: string;
+  name: Readonly<{ en: string; ru: string }>;
+  tileKinds: readonly TerrainKindSpec[];
+  materialIds: readonly string[];
+  minBuildableRatio: number;
+  /* Optional tile kind IDs that must form a single continuous edge-to-edge network (e.g. waterways). */
+  continuityKindIds?: readonly string[];
+  /* When true, excavatable solid rock counts toward the pack's expansion space budget. */
+  countExcavatableAsOpen?: boolean;
+  prepare: (numericSeed: number, baseSize: number, noise: TerrainNoiseToolkit) => PreparedTerrainRecipe;
 }>;
 
 /* Optional sprite sheet reference declared by a world pack (empty in pure geometric stub packs). */
@@ -116,6 +209,11 @@ export type WorldPackManifest = Readonly<{
   stageCounts: StageCountsSpec;
   palette: WorldPaletteSpec;
   params: WorldEngineParamsSpec;
+  /* Smooth blended ground packs set showGridByDefault: false so the grid appears only in build mode. */
+  showGridByDefault?: boolean;
+  materials?: readonly GroundMaterialSpec[];
+  liquidLayer?: LiquidLayerSpec;
+  terrainRecipe?: TerrainRecipeSpec;
   /* Optional pure tile resolver for stub or preview packs; defaults to defaultTileId. */
   resolveEmptyTileId?: (col: number, row: number, chunkSize: number, mapSize: number) => string;
 }>;
@@ -254,6 +352,51 @@ export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation 
   }
   if (!tileIds.has(pack.defaultTileId)) {
     errors.push(`defaultTileId "${pack.defaultTileId}" is not present in tiles`);
+  }
+
+  const materialIds = new Set<string>();
+  if (pack.materials) {
+    for (const mat of pack.materials) {
+      if (!mat.id.trim()) errors.push('material.id must be non-empty');
+      if (materialIds.has(mat.id)) errors.push(`duplicate material.id: ${mat.id}`);
+      materialIds.add(mat.id);
+      if (!COLOR_PATTERN.test(mat.baseColor)) errors.push(`invalid baseColor on material ${mat.id}`);
+      if (!COLOR_PATTERN.test(mat.secondaryColor)) errors.push(`invalid secondaryColor on material ${mat.id}`);
+      if (!COLOR_PATTERN.test(mat.accentColor)) errors.push(`invalid accentColor on material ${mat.id}`);
+    }
+  }
+
+  if (pack.liquidLayer) {
+    const l = pack.liquidLayer;
+    for (const [k, c] of Object.entries({
+      baseColor: l.baseColor,
+      deepColor: l.deepColor,
+      highlightColor: l.highlightColor,
+      shoreFoamColor: l.shoreFoamColor,
+      shallowTintColor: l.shallowTintColor,
+    })) {
+      if (!COLOR_PATTERN.test(c)) errors.push(`invalid liquidLayer.${k} colour`);
+    }
+  }
+
+  if (pack.terrainRecipe) {
+    const recipe = pack.terrainRecipe;
+    if (!recipe.id.trim()) errors.push('terrainRecipe.id must be non-empty');
+    if (recipe.tileKinds.length === 0) errors.push('terrainRecipe.tileKinds must be non-empty');
+    if (recipe.minBuildableRatio < 0 || recipe.minBuildableRatio > 1) {
+      errors.push('terrainRecipe.minBuildableRatio must be in [0, 1]');
+    }
+    for (const kind of recipe.tileKinds) {
+      if (!COLOR_PATTERN.test(kind.color)) errors.push(`invalid terrainRecipe.tileKinds.${kind.id} colour`);
+      if (materialIds.size > 0 && !materialIds.has(kind.materialId)) {
+        errors.push(`terrainRecipe.tileKinds.${kind.id} references unknown materialId "${kind.materialId}"`);
+      }
+    }
+    if (materialIds.size > 0) {
+      for (const mid of recipe.materialIds) {
+        if (!materialIds.has(mid)) errors.push(`terrainRecipe.materialIds references unknown "${mid}"`);
+      }
+    }
   }
 
   for (const [key, value] of Object.entries(pack.stageCounts)) {

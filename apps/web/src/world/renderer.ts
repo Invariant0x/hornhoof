@@ -1,7 +1,7 @@
 /* PixiJS v8 chunked isometric world renderer with hard zoom bounds, Retina/DPR-aware LOD baking,
    frustum culling, drag pan / cursor zoom / click picking and graceful Canvas 2D fallback. */
 
-import { Application, Container, Graphics, Sprite, Texture } from 'pixi.js';
+import { Application, Container, Graphics, Sprite, Texture, TilingSprite } from 'pixi.js';
 import {
   animationDetailForZoom,
   clamp,
@@ -25,12 +25,15 @@ import {
   tileCenterToWorld,
   tileDiamondVertices,
   tileTopVertexToWorld,
+  worldToTileFloat,
   type MapWorldBounds,
   type PickableObject,
   type PickResult,
   type TileCoord,
 } from './coords';
 import type { AnimationDetailLevel, LodTierId, LodTierSpec, TileSlotSpec, WorldPackManifest } from './manifest';
+import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas } from './smooth-terrain-baker';
+import type { GeneratedWorldMap } from './terrain-engine';
 
 export type RendererKind = 'webgl' | 'canvas2d';
 
@@ -56,6 +59,8 @@ export type WorldEngineStats = Readonly<{
   mapSize: number;
   chunkSize: number;
   rendererKind: RendererKind;
+  buildGridVisible: boolean;
+  hasAnimatedLiquid: boolean;
   hoveredTile: TileCoord | null;
   selectedPick: PickResult | null;
   camera: CameraState;
@@ -64,6 +69,8 @@ export type WorldEngineStats = Readonly<{
 export type WorldEngineOptions = Readonly<{
   host: HTMLElement;
   pack: WorldPackManifest;
+  terrainMap?: GeneratedWorldMap;
+  showBuildGrid?: boolean;
   initialZoom?: number;
   initialCenterTile?: TileCoord;
   markerTile?: TileCoord | null;
@@ -109,6 +116,7 @@ function parseColorAndAlpha(color: string, fallbackHex: number, fallbackAlpha = 
 export class IsometricWorldEngine {
   private readonly host: HTMLElement;
   private readonly pack: WorldPackManifest;
+  private readonly terrainMap?: GeneratedWorldMap;
   private readonly tileW: number;
   private readonly tileH: number;
   private readonly bounds: MapWorldBounds;
@@ -123,13 +131,21 @@ export class IsometricWorldEngine {
   private dpr: number;
   private zoomBounds: EffectiveZoomBounds;
   private readonly markerTile: TileCoord | null;
+  private buildGridVisible: boolean;
   private camera: CameraState;
   private hoveredTile: TileCoord | null = null;
   private selectedPick: PickResult | null = null;
 
   private app: Application | null = null;
   private worldContainer: Container | null = null;
+  private liquidSpriteA: TilingSprite | null = null;
+  private liquidSpriteB: TilingSprite | null = null;
+  private liquidTexture: Texture | null = null;
+  private liquidCanvas: HTMLCanvasElement | null = null;
+  private liquidPhaseX = 0;
+  private liquidPhaseY = 0;
   private chunkLayer: Container | null = null;
+  private buildGridGraphic: Graphics | null = null;
   private borderGraphic: Graphics | null = null;
   private overlayGraphic: Graphics | null = null;
 
@@ -163,6 +179,8 @@ export class IsometricWorldEngine {
   private constructor(options: WorldEngineOptions) {
     this.host = options.host;
     this.pack = options.pack;
+    this.terrainMap = options.terrainMap;
+    this.buildGridVisible = options.showBuildGrid ?? options.pack.showGridByDefault ?? true;
     this.tileW = options.pack.projection.defaultTileW;
     this.tileH = options.pack.projection.defaultTileH;
     this.bounds = mapWorldBounds(options.pack.mapSize, this.tileW, this.tileH);
@@ -233,16 +251,68 @@ export class IsometricWorldEngine {
       this.host.appendChild(app.canvas);
 
       const worldContainer = new Container();
+      const liquidLayer = new Container();
       const chunkLayer = new Container();
+      const buildGridGraphic = new Graphics();
       const borderGraphic = new Graphics();
       const overlayGraphic = new Graphics();
+
+      if (this.terrainMap && this.pack.liquidLayer) {
+        const liqCanvas = buildLiquidSurfaceCanvas(this.pack.liquidLayer, 256);
+        const liqTex = Texture.from(liqCanvas);
+        const spriteA = new TilingSprite({
+          texture: liqTex,
+          width: this.bounds.width,
+          height: this.bounds.height,
+        });
+        spriteA.x = this.bounds.minX;
+        spriteA.y = this.bounds.minY;
+
+        const spriteB = new TilingSprite({
+          texture: liqTex,
+          width: this.bounds.width,
+          height: this.bounds.height,
+        });
+        spriteB.x = this.bounds.minX;
+        spriteB.y = this.bounds.minY;
+        spriteB.alpha = 0.36;
+        spriteB.tileScale.set(1.35, 1.35);
+
+        const n = this.pack.mapSize;
+        const mTop = tileTopVertexToWorld(0, 0, this.tileW, this.tileH);
+        const mRight = tileTopVertexToWorld(n, 0, this.tileW, this.tileH);
+        const mBottom = tileTopVertexToWorld(n, n, this.tileW, this.tileH);
+        const mLeft = tileTopVertexToWorld(0, n, this.tileW, this.tileH);
+        const mask = new Graphics();
+        mask
+          .moveTo(mTop.x, mTop.y)
+          .lineTo(mRight.x, mRight.y)
+          .lineTo(mBottom.x, mBottom.y)
+          .lineTo(mLeft.x, mLeft.y)
+          .closePath()
+          .fill({ color: 0xffffff });
+
+        liquidLayer.addChild(spriteA);
+        liquidLayer.addChild(spriteB);
+        liquidLayer.addChild(mask);
+        liquidLayer.mask = mask;
+
+        this.liquidCanvas = liqCanvas;
+        this.liquidTexture = liqTex;
+        this.liquidSpriteA = spriteA;
+        this.liquidSpriteB = spriteB;
+      }
+
+      worldContainer.addChild(liquidLayer);
       worldContainer.addChild(chunkLayer);
+      worldContainer.addChild(buildGridGraphic);
       worldContainer.addChild(borderGraphic);
       worldContainer.addChild(overlayGraphic);
       app.stage.addChild(worldContainer);
 
       this.worldContainer = worldContainer;
       this.chunkLayer = chunkLayer;
+      this.buildGridGraphic = buildGridGraphic;
       this.borderGraphic = borderGraphic;
       this.overlayGraphic = overlayGraphic;
       this.drawMapBorderPixi();
@@ -269,6 +339,9 @@ export class IsometricWorldEngine {
     this.fallbackCtx = canvas.getContext('2d');
     this.canvasElement = canvas;
     this.rendererKind = 'canvas2d';
+    if (this.terrainMap && this.pack.liquidLayer) {
+      this.liquidCanvas = buildLiquidSurfaceCanvas(this.pack.liquidLayer, 256);
+    }
   }
 
   private drawMapBorderPixi(): void {
@@ -497,6 +570,13 @@ export class IsometricWorldEngine {
     this.dirtyScene = true;
   }
 
+  setBuildGridVisible(visible: boolean): void {
+    if (this.buildGridVisible === visible) return;
+    this.buildGridVisible = visible;
+    this.dirtyScene = true;
+    this.emitStats(true);
+  }
+
   pickScreenPoint(sx: number, sy: number): PickResult | null {
     const pick = pickAtScreen(
       sx,
@@ -552,6 +632,8 @@ export class IsometricWorldEngine {
       mapSize: this.pack.mapSize,
       chunkSize: this.pack.params.chunkSize,
       rendererKind: this.rendererKind,
+      buildGridVisible: this.buildGridVisible,
+      hasAnimatedLiquid: Boolean(this.terrainMap && this.pack.liquidLayer),
       hoveredTile: this.hoveredTile,
       selectedPick: this.selectedPick,
       camera: this.camera,
@@ -577,7 +659,10 @@ export class IsometricWorldEngine {
     const existing = this.chunkCache.get(key);
     if (existing) return existing;
 
-    const baked = bakeChunkCanvas(chunk, this.pack, this.tileLookup, lod, this.resolveTileId);
+    const baked =
+      this.terrainMap && this.pack.materials && this.pack.materials.length > 0
+        ? bakeSmoothChunkCanvas(chunk, this.terrainMap, this.pack, lod)
+        : bakeChunkCanvas(chunk, this.pack, this.tileLookup, lod, this.resolveTileId);
     let texture: Texture | null = null;
     let sprite: Sprite | null = null;
     if (this.app) {
@@ -616,6 +701,25 @@ export class IsometricWorldEngine {
       if (this.pressedKeys.has('arrowdown') || this.pressedKeys.has('s')) dy -= step;
       if (dx !== 0 || dy !== 0) {
         this.camera = panCamera(this.camera, dx, dy, this.bounds);
+        this.dirtyScene = true;
+      }
+    }
+
+    /* Smoothly animate the dedicated liquid layer independently from baked ground chunks. */
+    if (this.terrainMap && this.pack.liquidLayer) {
+      const dtSec = dtMs / 1000;
+      const animDetail = animationDetailForZoom(this.camera.zoom);
+      const speedScale = animDetail === 'reduced' ? 0.55 : 1.0;
+      this.liquidPhaseX = (this.liquidPhaseX + this.pack.liquidLayer.speedX * dtSec * speedScale) % 256;
+      this.liquidPhaseY = (this.liquidPhaseY + this.pack.liquidLayer.speedY * dtSec * speedScale) % 256;
+      if (this.liquidSpriteA) {
+        this.liquidSpriteA.tilePosition.set(this.liquidPhaseX, this.liquidPhaseY);
+      }
+      if (this.liquidSpriteB) {
+        this.liquidSpriteB.visible = animDetail !== 'reduced';
+        this.liquidSpriteB.tilePosition.set(-this.liquidPhaseX * 0.65, this.liquidPhaseY * 0.85);
+      }
+      if (!this.app) {
         this.dirtyScene = true;
       }
     }
@@ -686,11 +790,55 @@ export class IsometricWorldEngine {
         if (entry.sprite) this.chunkLayer.addChild(entry.sprite);
       }
 
+      this.drawBuildGridPixi(visibleRect);
       this.drawMapBorderPixi();
       this.drawOverlayPixi();
     } else {
       this.renderFallback2D(drawEntries);
     }
+  }
+
+  private drawBuildGridPixi(visibleRect: { minX: number; maxX: number; minY: number; maxY: number }): void {
+    if (!this.buildGridGraphic) return;
+    const g = this.buildGridGraphic;
+    g.clear();
+    if (!this.terrainMap || !this.buildGridVisible) return;
+
+    const corners = [
+      worldToTileFloat(visibleRect.minX, visibleRect.minY, this.tileW, this.tileH),
+      worldToTileFloat(visibleRect.maxX, visibleRect.minY, this.tileW, this.tileH),
+      worldToTileFloat(visibleRect.maxX, visibleRect.maxY, this.tileW, this.tileH),
+      worldToTileFloat(visibleRect.minX, visibleRect.maxY, this.tileW, this.tileH),
+    ];
+    let minC = Infinity;
+    let maxC = -Infinity;
+    let minR = Infinity;
+    let maxR = -Infinity;
+    for (const pt of corners) {
+      if (pt.col < minC) minC = pt.col;
+      if (pt.col > maxC) maxC = pt.col;
+      if (pt.row < minR) minR = pt.row;
+      if (pt.row > maxR) maxR = pt.row;
+    }
+    const n = this.pack.mapSize;
+    const c0 = Math.max(0, Math.floor(minC) - 1);
+    const c1 = Math.min(n, Math.ceil(maxC) + 1);
+    const r0 = Math.max(0, Math.floor(minR) - 1);
+    const r1 = Math.min(n, Math.ceil(maxR) + 1);
+    const stroke = parseColorAndAlpha(this.pack.palette.gridLine, 0xffffff, 0.28);
+    const w = Math.max(0.8, 1 / this.camera.zoom);
+
+    for (let c = c0; c <= c1; c++) {
+      const a = tileTopVertexToWorld(c, r0, this.tileW, this.tileH);
+      const b = tileTopVertexToWorld(c, r1, this.tileW, this.tileH);
+      g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+    }
+    for (let r = r0; r <= r1; r++) {
+      const a = tileTopVertexToWorld(c0, r, this.tileW, this.tileH);
+      const b = tileTopVertexToWorld(c1, r, this.tileW, this.tileH);
+      g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+    }
+    g.stroke({ color: stroke.color, alpha: Math.max(0.24, stroke.alpha), width: w });
   }
 
   private drawOverlayPixi(): void {
@@ -769,16 +917,66 @@ export class IsometricWorldEngine {
     );
     ctx.scale(this.camera.zoom, this.camera.zoom);
 
-    for (const entry of entries) {
-      const b = entry.baked;
-      ctx.drawImage(b.canvas, b.worldX, b.worldY, b.pixelWidth / b.scale, b.pixelHeight / b.scale);
-    }
-
     const n = this.pack.mapSize;
     const top = tileTopVertexToWorld(0, 0, this.tileW, this.tileH);
     const right = tileTopVertexToWorld(n, 0, this.tileW, this.tileH);
     const bottom = tileTopVertexToWorld(n, n, this.tileW, this.tileH);
     const left = tileTopVertexToWorld(0, n, this.tileW, this.tileH);
+
+    /* Dedicated animated liquid layer underneath alpha-cutout smooth ground chunks. */
+    if (this.terrainMap && this.liquidCanvas) {
+      const pattern = ctx.createPattern(this.liquidCanvas, 'repeat');
+      if (pattern) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(top.x, top.y);
+        ctx.lineTo(right.x, right.y);
+        ctx.lineTo(bottom.x, bottom.y);
+        ctx.lineTo(left.x, left.y);
+        ctx.closePath();
+        ctx.clip();
+        ctx.translate(this.liquidPhaseX, this.liquidPhaseY);
+        ctx.fillStyle = pattern;
+        ctx.fillRect(this.bounds.minX - 256, this.bounds.minY - 256, this.bounds.width + 512, this.bounds.height + 512);
+        ctx.restore();
+      }
+    }
+
+    for (const entry of entries) {
+      const b = entry.baked;
+      ctx.drawImage(b.canvas, b.worldX, b.worldY, b.pixelWidth / b.scale, b.pixelHeight / b.scale);
+    }
+
+    if (this.terrainMap && this.buildGridVisible) {
+      const rect = visibleWorldRect(this.camera, this.viewport, this.tileW);
+      const corners = [
+        worldToTileFloat(rect.minX, rect.minY, this.tileW, this.tileH),
+        worldToTileFloat(rect.maxX, rect.minY, this.tileW, this.tileH),
+        worldToTileFloat(rect.maxX, rect.maxY, this.tileW, this.tileH),
+        worldToTileFloat(rect.minX, rect.maxY, this.tileW, this.tileH),
+      ];
+      const c0 = Math.max(0, Math.floor(Math.min(...corners.map(p => p.col))) - 1);
+      const c1 = Math.min(n, Math.ceil(Math.max(...corners.map(p => p.col))) + 1);
+      const r0 = Math.max(0, Math.floor(Math.min(...corners.map(p => p.row))) - 1);
+      const r1 = Math.min(n, Math.ceil(Math.max(...corners.map(p => p.row))) + 1);
+      ctx.beginPath();
+      for (let c = c0; c <= c1; c++) {
+        const a = tileTopVertexToWorld(c, r0, this.tileW, this.tileH);
+        const b = tileTopVertexToWorld(c, r1, this.tileW, this.tileH);
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+      }
+      for (let r = r0; r <= r1; r++) {
+        const a = tileTopVertexToWorld(c0, r, this.tileW, this.tileH);
+        const b = tileTopVertexToWorld(c1, r, this.tileW, this.tileH);
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+      }
+      ctx.strokeStyle = this.pack.palette.gridLine;
+      ctx.lineWidth = Math.max(0.8, 1 / this.camera.zoom);
+      ctx.stroke();
+    }
+
     ctx.beginPath();
     ctx.moveTo(top.x, top.y);
     ctx.lineTo(right.x, right.y);
@@ -876,6 +1074,14 @@ export class IsometricWorldEngine {
     this.resizeObserver?.disconnect();
 
     this.chunkCache.clear(this.disposeEntry);
+    if (this.liquidTexture) {
+      this.liquidTexture.destroy(true);
+      this.liquidTexture = null;
+    }
+    this.liquidSpriteA = null;
+    this.liquidSpriteB = null;
+    this.liquidCanvas = null;
+    this.buildGridGraphic = null;
 
     if (this.app) {
       this.app.destroy(true, { children: true, texture: true });
