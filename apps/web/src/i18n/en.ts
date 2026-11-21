@@ -327,6 +327,15 @@ export const en = {
     takeAll: 'Take all from there',
     topics: { people: 'People', access: 'Access', plans: 'Plans', machines: 'Machines', protected: 'Protected records', work: 'Work' },
     notTaken: (n: number) => (n === 1 ? '1 could not be taken and stays as it is here.' : `${n} could not be taken and stay as they are here.`),
+    confirm: {
+      title: 'Do you really want to apply this merge decision?',
+      keepHere: (what: string, merge: string) => `For ${what} in ${merge}, the current value here will be kept.`,
+      takeThere: (what: string, merge: string) => `For ${what} in ${merge}, the value from there will replace what is here.`,
+      keepAll: (section: string, merge: string) => `For all of ${section} in ${merge}, the current values here will be kept.`,
+      takeAll: (section: string, merge: string) => `For all of ${section} in ${merge}, the values from there will replace what is here.`,
+      yes: 'Apply',
+      working: 'Applying…',
+    },
   },
   /* The GitHub key Hornhoof creates repositories with: the whole company's in its settings, a department's own on its screen. */
   repoHost: {
@@ -1365,6 +1374,14 @@ export const en = {
     note: (n: number) => `Note #${n}`,
     changeNote: (n: number) => `Change note #${n}`,
     removeNote: (n: number) => `Remove note #${n}`,
+    confirm: {
+      remove: {
+        title: 'Do you really want to delete this note?',
+        effect: (note: string) => `Note ${note} will be deleted from the notebook.`,
+        yes: 'Delete',
+        working: 'Deleting…',
+      },
+    },
   },
   agentInbox: {
     panel: 'Inbox',
@@ -1607,6 +1624,35 @@ export const en = {
       autonomousJournalEmpty: 'No commits have been auto-approved yet.',
       autonomousJournalWho: (agent: string, task: string) => `${agent} on #${task}`,
       autonomousJournalProof: (run: string, reviewer: string) => `full run #${run}, PASS by ${reviewer}`,
+      confirm: {
+        thisDepartment: 'this department',
+        ceo: 'CEO',
+        owner: {
+          title: 'Do you really want to change the department owner?',
+          effect: (owner: string, dept: string) => `${owner} will be the owner of ${dept}.`,
+          effectCeo: (owner: string, dept: string) => `${dept} will have no separate owner; ${owner} will decide.`,
+          yes: 'Change owner',
+          working: 'Saving…',
+        },
+        rule: {
+          title: 'Do you really want to change this approval rule?',
+          effect: (channel: string, dept: string, rule: string) => `For ${channel} in ${dept}, the rule will change to ${rule}.`,
+          yes: 'Change rule',
+          working: 'Saving…',
+        },
+        enableAutonomous: {
+          title: 'Do you really want to enable autonomous release?',
+          effect: (dept: string) => `Verified commits in ${dept} will be able to release to main without an approval card.`,
+          yes: 'Enable',
+          working: 'Enabling…',
+        },
+        disableAutonomous: {
+          title: 'Do you really want to disable autonomous release?',
+          effect: (dept: string) => `Releases to main in ${dept} will require an approval card again.`,
+          yes: 'Disable',
+          working: 'Disabling…',
+        },
+      },
     },
     structure: 'Department structure',
     staffMap: 'Staff map',
@@ -2026,6 +2072,27 @@ export const en = {
   },
   tasks: {
     hideSecret: { vault: 'Save passwords in the company vault', action: 'Hide secret', value: 'Secret to hide', hint: 'Select the secret in the task or its log, or paste it here: at least 8 characters. All stored copies will be replaced with [hidden].', confirm: 'Hide everywhere', hiding: 'Hiding...', done: 'Secret hidden.', failed: 'The secret could not be hidden. Check your access and select the text again.' },
+    confirm: {
+      cancel: {
+        title: 'Do you really want to cancel this task?',
+        effect: (task: string) => `${task} and its open subtasks will be cancelled. Its record stays in history.`,
+        yes: 'Cancel task',
+        working: 'Cancelling…',
+      },
+      pause: {
+        title: 'Do you really want to pause this task?',
+        effect: (task: string) => `Active work on ${task} will stop until it is resumed.`,
+        yes: 'Pause',
+        working: 'Pausing…',
+      },
+      hideSecret: {
+        title: 'Do you really want to hide this secret?',
+        effect: (task: string) => `All stored copies of this secret in ${task} will be replaced with [hidden].`,
+        effectGeneric: 'All stored copies of this secret in this task will be replaced with [hidden].',
+        yes: 'Hide secret',
+        working: 'Hiding…',
+      },
+    },
     echelons: {
       coordination: 'Checked coordination report',
       turnkey: 'No stages: the employee does it alone from start to finish',
@@ -2887,6 +2954,16 @@ export const en = {
       whole: { goal: 'the goal', task: 'the task' },
       and: (...items: string[]) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`),
     },
+    confirm: {
+      removeStage: {
+        title: 'Do you really want to remove this stage?',
+        titleMany: 'Do you really want to remove these stages?',
+        effect: (stage: string, pipeline: string) => `${stage} will be removed from ${pipeline}.`,
+        effectMany: (stages: string, pipeline: string) => `${stages} will be removed from ${pipeline}.`,
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+    },
   },
   /* A turn a node restart cut off: on which node and when, why, which turn, and what Hornhoof did about it. */
   restarts: {
@@ -2928,6 +3005,14 @@ export const en = {
     removeLabel: (title: string) => `Remove from the list: ${title}`,
     schedule: (n: number) => (n ? `Give to the head of the department: ${n}` : 'Give to the head of the department'),
     scheduled: (tasks: string) => `Given to the head of the department: ${tasks}.`,
+    confirm: {
+      remove: {
+        title: 'Do you really want to delete this item?',
+        effect: (title: string) => `${title} will be deleted from the off-turn list.`,
+        yes: 'Delete',
+        working: 'Deleting…',
+      },
+    },
   },
   improvements: {
     title: 'Improvements',

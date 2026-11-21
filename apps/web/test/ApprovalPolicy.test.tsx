@@ -55,19 +55,37 @@ describe('ApprovalPolicy', () => {
     expect(ru.dept.approvals.ownerHint).toBe('Хозяину отдела первым приходят его одобрения и решения. Каждый, кому дан отдел, тоже управляет им полностью: нанимает и убирает сотрудников, меняет подотделы и репозиторий и отвечает на одобрения.');
   });
 
-  it('names the owner the CEO picks through the route, and shows them', async () => {
+  it('names the owner the CEO picks through the route after confirming, and keeps the current owner on Cancel', async () => {
     const calls = mockApi({ [POLICY]: [200, ceoView()], 'PUT /api/departments/d1/owner': [200, { ownerPersonId: 'p2' }] });
-    render(<ApprovalPolicy departmentId="d1" />);
-    fireEvent.change(await screen.findByRole('combobox', { name: t.owner }), { target: { value: 'p2' } });
+    render(<ApprovalPolicy departmentId="d1" departmentName="Development" />);
+    const pick = (await screen.findByRole('combobox', { name: t.owner })) as HTMLSelectElement;
+    fireEvent.change(pick, { target: { value: 'p2' } });
+    expect(calls.filter(c => c.method === 'PUT')).toEqual([]);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to change the department owner?' });
+    expect(dialog).toHaveAccessibleDescription('Dana will be the owner of Development.');
+    expect([...dialog.querySelectorAll('bdi')].map(el => el.textContent)).toEqual(['Dana', 'Development']);
+    expect(within(dialog).getByRole('button', { name: 'Change owner' })).toHaveFocus();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.filter(c => c.method === 'PUT')).toEqual([]);
+    expect(pick.value).toBe('');
+
+    fireEvent.change(pick, { target: { value: 'p2' } });
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Change owner' }));
     await waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ personId: 'p2' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   });
 
-  it('takes the owner away with the empty choice', async () => {
+  it('takes the owner away with the empty choice after confirming', async () => {
     const calls = mockApi({ [POLICY]: [200, ceoView({ owner: { id: 'p2', name: 'Dana' } })], 'PUT /api/departments/d1/owner': [200, { ownerPersonId: null }] });
-    render(<ApprovalPolicy departmentId="d1" />);
+    render(<ApprovalPolicy departmentId="d1" departmentName="Development" />);
     const pick = (await screen.findByRole('combobox', { name: t.owner })) as HTMLSelectElement;
     expect(pick.value).toBe('p2');
     fireEvent.change(pick, { target: { value: '' } });
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to change the department owner?' });
+    expect(dialog).toHaveAccessibleDescription('Development will have no separate owner; CEO will decide.');
+    expect([...dialog.querySelectorAll('bdi')].map(el => el.textContent)).toEqual(['Development', 'CEO']);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Change owner' }));
     await waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ personId: null }));
   });
 
@@ -77,12 +95,14 @@ describe('ApprovalPolicy', () => {
     expect(await screen.findByText(t.noCandidates)).toBeInTheDocument();
   });
 
-  it('shows the server\'s refusal of an owner in place, and the choice goes back', async () => {
+  it('shows the server\'s refusal of an owner inside the dialog, and the choice stays at the current owner', async () => {
     mockApi({ [POLICY]: [200, ceoView()], 'PUT /api/departments/d1/owner': [400, { error: { code: 'validation', message: 'Only an active person with access to this department can own it.', reason: 'owner_no_access' } }] });
     render(<ApprovalPolicy departmentId="d1" />);
     const pick = (await screen.findByRole('combobox', { name: t.owner })) as HTMLSelectElement;
     fireEvent.change(pick, { target: { value: 'p2' } });
-    expect(await screen.findByRole('alert')).toHaveTextContent(en.errors.owner_no_access);
+    const dialog = screen.getByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Change owner' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(en.errors.owner_no_access);
     expect(pick.value).toBe('');
   });
 
@@ -125,35 +145,66 @@ describe('ApprovalPolicy', () => {
     expect(within(someone.container).queryByRole('option', { name: t.modes.every })).not.toBeInTheDocument();
   });
 
-  it('saves a mode without a limit at once', async () => {
-    const calls = mockApi({ [POLICY]: [200, ceoView()], 'PUT /api/departments/d1/approval-policy/message': [200, ceoView()] });
-    render(<ApprovalPolicy departmentId="d1" />);
+  it('confirms a mode without a limit and reverts the dropdown on Cancel', async () => {
+    const calls = mockApi({ [POLICY]: [200, ceoView()], 'PUT /api/departments/d1/approval-policy/message': [200, ceoView({ rules: every.map(r => (r.channel === 'message' ? { channel: 'message', mode: 'new_kinds' } : r)) })] });
+    render(<ApprovalPolicy departmentId="d1" departmentName="Development" />);
     await screen.findByRole('combobox', { name: t.owner });
-    fireEvent.change(rowOf('message').getByRole('combobox', { name: t.mode }), { target: { value: 'new_kinds' } });
+    const select = rowOf('message').getByRole('combobox', { name: t.mode }) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'new_kinds' } });
+    expect(calls.filter(c => c.method === 'PUT')).toEqual([]);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to change this approval rule?' });
+    expect(dialog).toHaveAccessibleDescription('For Messages in Development, the rule will change to Only new kinds.');
+    expect([...dialog.querySelectorAll('bdi')].map(el => el.textContent)).toEqual(['Messages', 'Development', 'Only new kinds']);
+    expect(within(dialog).getByRole('button', { name: 'Change rule' })).toHaveFocus();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.filter(c => c.method === 'PUT')).toEqual([]);
+    expect(select.value).toBe('every');
+
+    fireEvent.change(select, { target: { value: 'new_kinds' } });
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Change rule' }));
     await waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ mode: 'new_kinds' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(select.value).toBe('new_kinds');
   });
 
-  it('offers no approval at all as one of the ways, saved at once', async () => {
+  it('treats removing approval ("none") as dangerous in the confirmation dialog', async () => {
     const calls = mockApi({ [POLICY]: [200, ceoView()], 'PUT /api/departments/d1/approval-policy/spend': [200, ceoView()] });
-    render(<ApprovalPolicy departmentId="d1" />);
+    render(<ApprovalPolicy departmentId="d1" departmentName="Development" />);
     await screen.findByRole('combobox', { name: t.owner });
     expect(within(rowOf('spend').getByRole('combobox', { name: t.mode })).getByRole('option', { name: t.modes.none })).toBeInTheDocument();
     fireEvent.change(rowOf('spend').getByRole('combobox', { name: t.mode }), { target: { value: 'none' } });
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to change this approval rule?' });
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(within(dialog).getByRole('button', { name: 'Change rule' })).toHaveClass('danger');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Change rule' }));
     await waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ mode: 'none' }));
   });
 
-  it('asks for a limit before it saves the mode of limits, and sends a number', async () => {
+  it('asks for a limit before confirming the mode of limits, keeps inputs on Cancel, and sends a number', async () => {
     const calls = mockApi({ [POLICY]: [200, ceoView()], 'PUT /api/departments/d1/approval-policy/spend': [200, ceoView({ rules: [{ channel: 'spend', mode: 'within_limits', limit: 250.5, unit: 'USD' }] })] });
-    render(<ApprovalPolicy departmentId="d1" />);
+    render(<ApprovalPolicy departmentId="d1" departmentName="Development" />);
     await screen.findByRole('combobox', { name: t.owner });
     const row = rowOf('spend');
     fireEvent.change(row.getByRole('combobox', { name: t.mode }), { target: { value: 'within_limits' } });
     expect(calls.filter(c => c.method === 'PUT')).toEqual([]);
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     const save = row.getByRole('button', { name: en.common.save });
     expect(save).toBeDisabled();
     fireEvent.change(row.getByRole('spinbutton', { name: t.limit }), { target: { value: '250.5' } });
     fireEvent.change(row.getByRole('textbox', { name: t.unit }), { target: { value: ' USD ' } });
     fireEvent.click(save);
+    expect(calls.filter(c => c.method === 'PUT')).toEqual([]);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to change this approval rule?' });
+    expect(dialog).toHaveAccessibleDescription('For Spending in Development, the rule will change to No approval up to 250.5 USD.');
+    expect([...dialog.querySelectorAll('bdi')].map(el => el.textContent)).toEqual(['Spending', 'Development', 'No approval up to 250.5 USD']);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect((row.getByRole('spinbutton', { name: t.limit }) as HTMLInputElement).value).toBe('250.5');
+    expect((row.getByRole('textbox', { name: t.unit }) as HTMLInputElement).value).toBe(' USD ');
+
+    fireEvent.click(save);
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Change rule' }));
     await waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ mode: 'within_limits', limit: 250.5, unit: 'USD' }));
   });
 
@@ -165,15 +216,18 @@ describe('ApprovalPolicy', () => {
     expect((row.getByRole('spinbutton', { name: t.limit }) as HTMLInputElement).value).toBe('100');
     fireEvent.change(row.getByRole('spinbutton', { name: t.limit }), { target: { value: '5' } });
     fireEvent.click(row.getByRole('button', { name: en.common.save }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Change rule' }));
     await waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ mode: 'within_limits', limit: 5 }));
   });
 
-  it('shows a refused rule on its own line', async () => {
+  it('shows a refused rule inside the confirmation dialog and reverts the direct dropdown pick', async () => {
     mockApi({ [POLICY]: [200, ceoView()], 'PUT /api/departments/d1/approval-policy/message': [403, { error: { code: 'forbidden', message: 'No.', reason: 'policy_not_allowed' } }] });
     render(<ApprovalPolicy departmentId="d1" />);
     await screen.findByRole('combobox', { name: t.owner });
     fireEvent.change(rowOf('message').getByRole('combobox', { name: t.mode }), { target: { value: 'new_kinds' } });
-    expect(await rowOf('message').findByRole('alert')).toHaveTextContent(en.errors.policy_not_allowed);
+    const dialog = screen.getByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Change rule' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(en.errors.policy_not_allowed);
     expect((rowOf('message').getByRole('combobox', { name: t.mode }) as HTMLSelectElement).value).toBe('every');
   });
 
@@ -291,14 +345,28 @@ describe('the words', () => {
       ],
       'GET /api/autonomous-releases?department=d1': [200, { entries: [entry] }],
     });
-    const { unmount } = render(<ApprovalPolicy departmentId="d1" />);
+    const { unmount } = render(<ApprovalPolicy departmentId="d1" departmentName="Development" />);
     await screen.findByRole('combobox', { name: t.owner });
     const toggle = screen.getByRole('switch', { name: /autonomous release/i });
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
+    expect(calls.filter(c => c.method === 'PUT')).toEqual([]);
+    const enableDialog = screen.getByRole('alertdialog', { name: 'Do you really want to enable autonomous release?' });
+    expect(enableDialog).toHaveAccessibleDescription('Verified commits in Development will be able to release to main without an approval card.');
+    expect(enableDialog.querySelector('bdi')).toHaveTextContent('Development');
+    expect(within(enableDialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(within(enableDialog).getByRole('button', { name: 'Enable' })).toHaveClass('danger');
+    fireEvent.click(within(enableDialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(toggle).not.toBeChecked();
+    expect(calls.filter(c => c.method === 'PUT')).toEqual([]);
+
+    fireEvent.click(toggle);
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Enable' }));
     await waitFor(() =>
       expect(calls.find(c => c.method === 'PUT' && c.path.endsWith('/autonomous-release'))?.body).toEqual({ enabled: true }),
     );
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
     expect(await screen.findByText(/Hana/)).toBeInTheDocument();
     expect(screen.getByText(/Rita/)).toBeInTheDocument();
     expect(screen.getByText(/#12/)).toBeInTheDocument();
@@ -312,7 +380,7 @@ describe('the words', () => {
       'PUT /api/departments/d1/approval-policy/autonomous-release': [200, { ...hers, autonomousRelease: false }],
       'GET /api/autonomous-releases?department=d1': [200, { entries: [] }],
     });
-    const second = render(<ApprovalPolicy departmentId="d1" />);
+    const second = render(<ApprovalPolicy departmentId="d1" departmentName="Development" />);
     await screen.findByText(t.ownerIs('Dana'));
     const own = screen.getByRole('switch', { name: /autonomous release/i });
     expect(own).toBeChecked();
@@ -320,6 +388,12 @@ describe('the words', () => {
     const line = own.closest('label')!;
     expect(within(line).getByText(t.autonomousReleaseWord(true))).toBeInTheDocument();
     fireEvent.click(own);
+    const disableDialog = screen.getByRole('alertdialog', { name: 'Do you really want to disable autonomous release?' });
+    expect(disableDialog).toHaveAccessibleDescription('Releases to main in Development will require an approval card again.');
+    expect(disableDialog.querySelector('bdi')).toHaveTextContent('Development');
+    expect(within(disableDialog).getByRole('button', { name: 'Disable' })).toHaveFocus();
+    expect(within(disableDialog).getByRole('button', { name: 'Disable' })).not.toHaveClass('danger');
+    fireEvent.click(within(disableDialog).getByRole('button', { name: 'Disable' }));
     await waitFor(() => expect(owner.find(c => c.method === 'PUT' && c.path.endsWith('/autonomous-release'))?.body).toEqual({ enabled: false }));
     expect(await within(line).findByText(t.autonomousReleaseWord(false))).toBeInTheDocument();
     second.unmount();

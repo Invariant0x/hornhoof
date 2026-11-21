@@ -350,6 +350,7 @@ describe('the decisions of one person', () => {
     const card = await within(waiting).findByRole('region', { name: /^What came after / });
     expect(card).toHaveTextContent('1 change about people, access, plans, machines or protected records needs you.');
     await user.click(await within(card).findByRole('button', { name: 'Keep here' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Apply' }));
     expect(calls).toContainEqual({ method: 'POST', path: '/api/merges/pick', body: { ids: ['c1'], take: 'here' } });
     /* Settled, the card goes with the count. */
     await waitFor(() => expect(within(waiting).queryByRole('region', { name: /^What came after / })).not.toBeInTheDocument());

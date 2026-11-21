@@ -899,10 +899,29 @@ describe('Department view', () => {
     const calls = shell({});
     await flyIn(user);
     await drawer(user, 'About the department');
-    expect(await screen.findByRole('region', { name: 'Approvals' })).toBeInTheDocument();
+    const approvals = await screen.findByRole('region', { name: 'Approvals' });
+    expect(approvals).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'How it works' })).toBeNull();
     expect(screen.queryByRole('radio', { name: 'Works in turns' })).toBeNull();
     expect(calls.some(c => c.path.endsWith('/work-mode'))).toBe(false);
+  });
+
+  it('passes the department name to approval confirmations from About the department', async () => {
+    const user = userEvent.setup();
+    shell({
+      'GET /api/departments/d2/approval-policy': [200, {
+        departmentId: 'd2', owner: null, canSetOwner: true, canChangePolicy: true, autonomousRelease: false, canSetAutonomousRelease: true,
+        candidates: [{ id: 'p6', name: 'Lena', title: 'Lead' }],
+        rules: [{ channel: 'commit', mode: 'every' }],
+      }],
+    });
+    await flyIn(user);
+    await drawer(user, 'About the department');
+    const approvals = await screen.findByRole('region', { name: 'Approvals' });
+    await user.selectOptions(await within(approvals).findByRole('combobox', { name: 'Department owner' }), 'p6');
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to change the department owner?' });
+    expect([...dialog.querySelectorAll('bdi')].map(el => el.textContent)).toEqual(['Lena', 'Development']);
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
   });
 
   it('lets the owner of the department hire into it, and change its repository and sub-units, without the orchestrator', async () => {

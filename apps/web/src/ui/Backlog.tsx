@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState, type DragEvent, type FormEvent, type MouseEvent } from 'react';
 import { addToBacklog, moved, orderBacklog, removeFromBacklog, scheduleBacklog, useBacklog } from '../backlog';
-import { errorText, useLanguage, useT } from '../i18n';
+import { errorText, Phrase, useLanguage, useT } from '../i18n';
 import type { BacklogItem } from '../types';
+import { useConfirmAction } from './ConfirmAction';
 import { Edge } from './Edge';
 import { Field } from './Field';
 import { useEntriesFit } from './SortTable';
@@ -112,6 +113,7 @@ export function Backlog({ departmentId }: { departmentId: string }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<unknown>(null);
   const [said, setSaid] = useState<string | null>(null);
+  const confirmation = useConfirmAction();
   /* A fresh list from the server replaces the order shown while a move was on its way, and forgets what is gone. */
   useEffect(() => {
     setOrder(null);
@@ -162,8 +164,31 @@ export function Backlog({ departmentId }: { departmentId: string }) {
     if (drag && drag.over !== null && from >= 0) move(from, drag.over > from ? drag.over - 1 : drag.over);
     setDrag(null);
   }
+  async function deleteItem(id: string) {
+    setBusy(true);
+    setProblem(null);
+    setSaid(null);
+    try {
+      setOrder((await removeFromBacklog(departmentId, id)).items);
+    } catch (err) {
+      load();
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  }
   const add = (item: { title: string; text: string }) => act(async () => { await addToBacklog(departmentId, item); load(); });
-  const remove = (id: string) => void act(async () => setOrder((await removeFromBacklog(departmentId, id)).items));
+  const remove = (item: BacklogItem) => {
+    setProblem(null);
+    setSaid(null);
+    confirmation.ask({
+      ...t.backlog.confirm.remove,
+      effect: <Phrase words={t.backlog.confirm.remove.effect} values={[<bdi>{item.title}</bdi>]} />,
+      final: true,
+      danger: true,
+      onYes: () => deleteItem(item.id),
+    });
+  };
   const schedule = () => void act(async () => {
     const ids = list.filter(i => chosen.has(i.id)).map(i => i.id);
     const done = await scheduleBacklog(departmentId, ids);
@@ -207,7 +232,7 @@ export function Backlog({ departmentId }: { departmentId: string }) {
                   onChoose={() => setChosen(previous => toggle(previous, item.id))}
                   onOpen={() => setOpen(previous => toggle(previous, item.id))}
                   onMove={to => move(index, to)}
-                  onRemove={() => remove(item.id)}
+                  onRemove={() => remove(item)}
                   onDrag={setDrag}
                   onDrop={drop}
                 />
@@ -223,6 +248,7 @@ export function Backlog({ departmentId }: { departmentId: string }) {
       )}
       {said && <p className="muted" role="status" dir="auto">{said}</p>}
       {problem !== null && <p className="alert" role="alert" dir="auto">{errorText(t, problem)}</p>}
+      {confirmation.question}
     </section>
   );
 }

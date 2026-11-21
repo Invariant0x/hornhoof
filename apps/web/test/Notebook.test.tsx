@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -46,11 +46,44 @@ describe('the company notebook', () => {
     await user.type(edit, 'Turns stay very small.');
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await user.click(screen.getByRole('button', { name: 'Remove note #1' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to delete this note?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
     expect(calls.filter(c => c.method !== 'GET')).toEqual([
       { method: 'POST', path: '/api/notebook', body: { text: 'One question at a time.' } },
       { method: 'PATCH', path: '/api/notebook/3', body: { text: 'Turns stay very small.' } },
       { method: 'DELETE', path: '/api/notebook/1', body: undefined },
     ]);
+  });
+
+  it('confirms before deleting a note and keeps failures in the dialog', async () => {
+    const user = userEvent.setup();
+    let fail = true;
+    const calls = show({
+      'DELETE /api/notebook/1': () => (fail ? [500, { error: { code: 'internal', message: 'Cannot delete note.' } }] : [204, undefined]),
+    });
+    await screen.findByText('Turns stay small.');
+    const remove = screen.getByRole('button', { name: 'Remove note #1' });
+    await user.click(remove);
+    expect(calls.filter(c => c.method === 'DELETE')).toEqual([]);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to delete this note?' });
+    expect(dialog).toHaveAccessibleDescription('Note #1 will be deleted from the notebook.');
+    expect(dialog.querySelector('bdi')).toHaveTextContent('#1');
+    expect(dialog).toHaveTextContent('This cannot be undone.');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.filter(c => c.method === 'DELETE')).toEqual([]);
+
+    await user.click(remove);
+    const again = screen.getByRole('alertdialog');
+    await user.click(within(again).getByRole('button', { name: 'Delete' }));
+    expect(await within(again).findByRole('alert')).toHaveTextContent('Cannot delete note.');
+
+    fail = false;
+    await user.click(within(again).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(calls.filter(c => c.method === 'DELETE')).toHaveLength(2);
   });
 
   it('says when the notebook could not be read, and reads it again on Try again', async () => {

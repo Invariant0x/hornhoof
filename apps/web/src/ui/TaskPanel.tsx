@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { HIDDEN } from '@hornhoof/protocol/redaction';
-import { errorText, useLanguage, useT, type Messages } from '../i18n';
+import { errorText, Phrase, useLanguage, useT, type Messages } from '../i18n';
 import { useOrg } from '../org';
 import { routePath } from '../routes';
 import { knownLine, knownSubtasks, placeName, useGoals, usePipelines, useTask } from '../tasks';
@@ -9,6 +9,7 @@ import { graphPath } from '../tracker';
 import { humanStatus, isClosed } from '../task-tree';
 import type { GoalView, Org, TaskDetail, TaskLine, TaskStatus, WaitingRequest } from '../types';
 import { Field } from './Field';
+import { useConfirmAction } from './ConfirmAction';
 import { useLoadFailure } from './LoadFailure';
 import { Busy, Hold, Idle, LoadState, useLoad, type Load } from './Loading';
 import { TaskEdit } from './TrackerForms';
@@ -295,7 +296,7 @@ export function goalChain(id: string | null | undefined, goals: GoalView[] | und
   return graphPath({ goal: id }, goals ?? [], []);
 }
 
-type View = 'menu' | 'details' | 'log' | 'edit' | 'comment' | 'cancel' | 'pause' | 'secret';
+type View = 'menu' | 'details' | 'log' | 'edit' | 'comment' | 'pause' | 'secret';
 
 function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: { task: TaskDetail; onOpen: (id: string) => void; onClose: () => void; active: boolean; onChanged: () => void; waiting: Waiting; leads: Leads }) {
   const t = useT();
@@ -364,7 +365,9 @@ function TaskMenu({ id, task, view, selection, onView, onClose, onOpen, onChange
   const [failure, setFailure] = useState<unknown>(null);
   const sending = useRef(false);
   const menu = useRef<HTMLDivElement>(null);
+  const confirmation = useConfirmAction();
   const { version, revision } = task;
+  const taskLabel = `#${task.number} ${task.title}`;
   const mayEdit = task.mayEdit && typeof version === 'number' && typeof revision === 'number';
   const mayAct = !isClosed(task);
   const mayPause = mayAct && task.mayPause;
@@ -380,7 +383,7 @@ function TaskMenu({ id, task, view, selection, onView, onClose, onOpen, onChange
     onChanged();
   }
 
-  async function run(action: () => Promise<unknown>) {
+  async function perform(action: () => Promise<unknown>) {
     if (sending.current) return;
     sending.current = true;
     setBusy(true);
@@ -390,11 +393,17 @@ function TaskMenu({ id, task, view, selection, onView, onClose, onOpen, onChange
       setText('');
       setWhy('');
       done();
-    } catch (err) {
-      setFailure(err);
     } finally {
       sending.current = false;
       setBusy(false);
+    }
+  }
+
+  async function run(action: () => Promise<unknown>) {
+    try {
+      await perform(action);
+    } catch (err) {
+      setFailure(err);
     }
   }
 
@@ -408,8 +417,31 @@ function TaskMenu({ id, task, view, selection, onView, onClose, onOpen, onChange
     if (text.trim()) void run(() => api.post(`/api/tasks/${task.id}/comments`, { text: text.trim() }));
   }
 
-  function pause(paused: boolean, reason: string) {
-    void run(() => api.put(`/api/tasks/${task.id}/paused`, { paused, reason }));
+  function resume() {
+    void run(() => api.put(`/api/tasks/${task.id}/paused`, { paused: false, reason: '' }));
+  }
+
+  function askCancel() {
+    setFailure(null);
+    confirmation.ask({
+      ...t.tasks.confirm.cancel,
+      effect: <Phrase words={t.tasks.confirm.cancel.effect} values={[<bdi>{taskLabel}</bdi>]} />,
+      danger: true,
+      onYes: () => perform(() => api.post(`/api/tasks/${task.id}/cancel`, {})),
+    });
+  }
+
+  function askPause(e: FormEvent) {
+    e.preventDefault();
+    const reason = why.trim();
+    if (!reason) return;
+    setFailure(null);
+    confirmation.ask({
+      ...t.tasks.confirm.pause,
+      effect: <Phrase words={t.tasks.confirm.pause.effect} values={[<bdi>{taskLabel}</bdi>]} />,
+      danger: true,
+      onYes: () => perform(() => api.put(`/api/tasks/${task.id}/paused`, { paused: true, reason })),
+    });
   }
 
   if (!view) return null;
@@ -430,13 +462,13 @@ function TaskMenu({ id, task, view, selection, onView, onClose, onOpen, onChange
             </button>
           )}
           {mayPause && !task.paused && <button className="linkish" type="button" onClick={() => select('pause')}>{t.tasks.pause}</button>}
-          {canResume && <button className="linkish" type="button" disabled={busy} onClick={() => pause(false, '')}>{t.tasks.resume}</button>}
-          {mayAct && <button className="linkish" type="button" onClick={() => select('cancel')}>{t.tasks.cancelTask}</button>}
+          {canResume && <button className="linkish" type="button" disabled={busy} onClick={resume}>{t.tasks.resume}</button>}
+          {mayAct && <button className="linkish" type="button" onClick={askCancel}>{t.tasks.cancelTask}</button>}
         </div>
       )}
       {view === 'details' && <TaskDetails task={task} waiting={waiting} onOpen={onOpen} onChanged={onChanged} />}
       {view === 'log' && <FullTaskLog task={task} onChanged={onChanged} />}
-      {view === 'secret' && task.mayHideSecret && <HideSecret taskId={task.id} onChanged={onChanged} onClose={back} initialValue={selection} />}
+      {view === 'secret' && task.mayHideSecret && <HideSecret taskId={task.id} taskLabel={taskLabel} onChanged={onChanged} onClose={back} initialValue={selection} />}
       {view === 'edit' && mayEdit && <TaskEdit task={{ ...task, version, revision }} onCancel={back} onDone={done} onReload={onChanged} />}
       {view === 'comment' && mayAct && (
         <form className="tp-comment" onSubmit={comment}>
@@ -446,17 +478,8 @@ function TaskMenu({ id, task, view, selection, onView, onClose, onOpen, onChange
           </div>
         </form>
       )}
-      {view === 'cancel' && mayAct && (
-        <>
-          <p>{t.tasks.cancelAsk(task.number)}</p>
-          <div className="entry-actions" role="group" aria-label={task.title}>
-            <button className="btn" type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/tasks/${task.id}/cancel`, {}))}>{t.tasks.yesCancel}</button>
-            <button className="btn ghost" type="button" onClick={back}>{t.tasks.keep}</button>
-          </div>
-        </>
-      )}
       {view === 'pause' && mayPause && !task.paused && (
-        <form className="tp-comment" onSubmit={e => { e.preventDefault(); if (why.trim()) pause(true, why.trim()); }}>
+        <form className="tp-comment" onSubmit={askPause}>
           <Field label={t.tasks.pauseWhy}>{p => <textarea {...p} rows={2} value={why} onChange={e => setWhy(e.target.value)} />}</Field>
           <div className="form-foot" role="group" aria-label={t.tasks.pause}>
             <button className="btn" type="submit" disabled={busy || !why.trim()}>{t.tasks.yesPause}</button>
@@ -466,6 +489,7 @@ function TaskMenu({ id, task, view, selection, onView, onClose, onOpen, onChange
       )}
       {busy && <p className="muted" role="status">{t.tasks.sending}</p>}
       {failure !== null && <p className="alert" role="alert">{proseErrorText(t, failure)}</p>}
+      {confirmation.question}
     </div>
   );
 }

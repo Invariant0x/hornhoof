@@ -1,12 +1,13 @@
 import { TASK_PRIORITIES, type TaskPriority } from '@hornhoof/protocol';
-import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { Fragment, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api';
-import { errorText, useLanguage, useT } from '../i18n';
+import { errorText, Phrase, useLanguage, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import { useGoals, usePipelines } from '../tasks';
 import { stagesInOrder } from '../tracker';
 import type { Department, GoalView, Org, PersonRef, Pipeline, PipelineStage, TaskDetail } from '../types';
 import { BusyLabel } from './BusyLabel';
+import { useConfirmAction } from './ConfirmAction';
 import { Field } from './Field';
 import { NewTask } from './NewTask';
 
@@ -28,7 +29,7 @@ function useSend(onDone: () => void, onRefused?: (failure: unknown) => void) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
   const sending = useRef(false);
-  async function send(action: () => Promise<unknown>) {
+  async function submit(action: () => Promise<unknown>) {
     if (sending.current) return;
     sending.current = true;
     setBusy(true);
@@ -37,14 +38,21 @@ function useSend(onDone: () => void, onRefused?: (failure: unknown) => void) {
       await action();
       onDone();
     } catch (err) {
-      setFailure(err);
       onRefused?.(err);
+      throw err;
     } finally {
       sending.current = false;
       setBusy(false);
     }
   }
-  return { busy, failure, send };
+  async function send(action: () => Promise<unknown>) {
+    try {
+      await submit(action);
+    } catch (err) {
+      setFailure(err);
+    }
+  }
+  return { busy, failure, send, submit };
 }
 
 /* Refused because someone changed it after the form opened. */
@@ -289,6 +297,10 @@ function usePipelineDraft(pipeline?: Pipeline) {
   return { draft, setDraft, version: base.version, refused: () => setStale(true) };
 }
 
+function removedStageNames(removed: PipelineStage[]): ReactNode {
+  return removed.map((stage, i) => <Fragment key={stage.id}>{i > 0 && ', '}<bdi>{stage.name}</bdi></Fragment>);
+}
+
 /* A department's pipeline, new or changed: its name, why, and its stages, each after the head or after another stage, each
    done by a role or an employee of the department. Each stage needs a name and the one who does it before it goes. Stages
    keep their ids, so the tasks on them stay. */
@@ -303,7 +315,8 @@ export function PipelineForm({ pipeline, department, onDone, onCancel }: { pipel
   const made = useRef(0);
   const key = () => `n${++made.current}`;
   const [tried, setTried] = useState(false);
-  const { busy, failure, send } = useSend(onDone, err => {
+  const confirmation = useConfirmAction();
+  const { busy, failure, send, submit } = useSend(onDone, err => {
     if (changedMeanwhile(err)) refused();
   });
   const { language } = useLanguage();
@@ -326,47 +339,64 @@ export function PipelineForm({ pipeline, department, onDone, onCancel }: { pipel
         return { key: s.key, ...(s.id ? { id: s.id } : {}), parent: s.parent || null, name: canonical(s.name, before?.name, before?.stockName), ...owner(s) };
       }),
     };
-    void send(() => (pipeline ? api.patch(`/api/pipelines/${pipeline.id}`, { version, ...body }) : api.post('/api/pipelines', { department: department.id, ...body })));
+    if (!pipeline) return void send(() => api.post('/api/pipelines', { department: department.id, ...body }));
+    const patch = () => api.patch(`/api/pipelines/${pipeline.id}`, { version, ...body });
+    const removed = pipeline.stages.filter(s => !stages.some(d => d.id === s.id));
+    if (!removed.length) return void send(patch);
+    const confirm = t.tracker.confirm.removeStage;
+    const many = removed.length > 1;
+    confirmation.ask({
+      title: many ? confirm.titleMany : confirm.title,
+      effect: <Phrase words={many ? confirm.effectMany : confirm.effect} values={[removedStageNames(removed), <bdi>{pipeline.name}</bdi>]} />,
+      yes: confirm.yes,
+      working: confirm.working,
+      final: true,
+      danger: true,
+      onYes: () => submit(patch),
+    });
   }
 
   return (
-    <TrackerForm label={pipeline ? words.editPipeline : words.newPipeline} busy={busy} failure={failure} onSubmit={save} onCancel={onCancel}>
-      <Field label={words.name}>{p => <input {...p} value={name} maxLength={80} required onChange={e => setName(e.target.value)} />}</Field>
-      <Field label={words.why}>{p => <textarea {...p} rows={2} value={why} maxLength={300} onChange={e => setWhy(e.target.value)} />}</Field>
-      <fieldset className="field-group tr-stages">
-        <legend>{words.stages}</legend>
-        <div className="field-group-body">
-          {stages.map((s, i) => (
-            <div key={s.key} className="tr-stage" role="group" aria-label={words.stageN(i + 1)}>
-              <Field label={words.stageName} problem={tried && !s.name.trim() ? words.stageNeedsName : undefined}>{p => <input {...p} value={s.name} maxLength={60} onChange={e => set(i, { name: e.target.value })} />}</Field>
-              <Field label={words.after}>
-                {p => (
-                  <select {...p} value={s.parent} onChange={e => set(i, { parent: e.target.value })}>
-                    <option value="">{words.afterHead}</option>
-                    {stages.slice(0, i).map(o => <option key={o.key} value={o.key}>{o.name || words.stageN(stages.indexOf(o) + 1)}</option>)}
-                  </select>
-                )}
-              </Field>
-              <Field label={words.owner} problem={tried && !s.owner ? words.stageNeedsOwner : undefined}>
-                {p => (
-                  <select {...p} value={s.owner} onChange={e => set(i, { owner: e.target.value })}>
-                    {!s.owner && <option value="" disabled>{words.chooseOwner}</option>}
-                    <optgroup label={words.roles}>{roles.map(r => <option key={r.id} value={`role:${r.id}`}>{r.title[language]}</option>)}</optgroup>
-                    {employees.length > 0 && <optgroup label={words.employees}>{employees.map(e => <option key={e.id} value={`agent:${e.id}`}>{e.name}</option>)}</optgroup>}
-                  </select>
-                )}
-              </Field>
-              <div className="entry-actions">
-                <button className="btn ghost" type="button" onClick={() => remove(i)}>{words.removeStage}</button>
+    <>
+      <TrackerForm label={pipeline ? words.editPipeline : words.newPipeline} busy={busy} failure={failure} onSubmit={save} onCancel={onCancel}>
+        <Field label={words.name}>{p => <input {...p} value={name} maxLength={80} required onChange={e => setName(e.target.value)} />}</Field>
+        <Field label={words.why}>{p => <textarea {...p} rows={2} value={why} maxLength={300} onChange={e => setWhy(e.target.value)} />}</Field>
+        <fieldset className="field-group tr-stages">
+          <legend>{words.stages}</legend>
+          <div className="field-group-body">
+            {stages.map((s, i) => (
+              <div key={s.key} className="tr-stage" role="group" aria-label={words.stageN(i + 1)}>
+                <Field label={words.stageName} problem={tried && !s.name.trim() ? words.stageNeedsName : undefined}>{p => <input {...p} value={s.name} maxLength={60} onChange={e => set(i, { name: e.target.value })} />}</Field>
+                <Field label={words.after}>
+                  {p => (
+                    <select {...p} value={s.parent} onChange={e => set(i, { parent: e.target.value })}>
+                      <option value="">{words.afterHead}</option>
+                      {stages.slice(0, i).map(o => <option key={o.key} value={o.key}>{o.name || words.stageN(stages.indexOf(o) + 1)}</option>)}
+                    </select>
+                  )}
+                </Field>
+                <Field label={words.owner} problem={tried && !s.owner ? words.stageNeedsOwner : undefined}>
+                  {p => (
+                    <select {...p} value={s.owner} onChange={e => set(i, { owner: e.target.value })}>
+                      {!s.owner && <option value="" disabled>{words.chooseOwner}</option>}
+                      <optgroup label={words.roles}>{roles.map(r => <option key={r.id} value={`role:${r.id}`}>{r.title[language]}</option>)}</optgroup>
+                      {employees.length > 0 && <optgroup label={words.employees}>{employees.map(e => <option key={e.id} value={`agent:${e.id}`}>{e.name}</option>)}</optgroup>}
+                    </select>
+                  )}
+                </Field>
+                <div className="entry-actions">
+                  <button className="btn ghost" type="button" onClick={() => remove(i)}>{words.removeStage}</button>
+                </div>
               </div>
+            ))}
+            <div className="entry-actions">
+              <button className="btn ghost" type="button" onClick={() => setStages(list => [...list, { key: key(), parent: list.at(-1)?.key ?? '', name: '', owner: '' }])}>{words.addStage}</button>
             </div>
-          ))}
-          <div className="entry-actions">
-            <button className="btn ghost" type="button" onClick={() => setStages(list => [...list, { key: key(), parent: list.at(-1)?.key ?? '', name: '', owner: '' }])}>{words.addStage}</button>
           </div>
-        </div>
-      </fieldset>
-    </TrackerForm>
+        </fieldset>
+      </TrackerForm>
+      {confirmation.question}
+    </>
   );
 }
 

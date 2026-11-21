@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import { useLanguage, useT } from '../i18n';
+import { Phrase, useLanguage, useT } from '../i18n';
 import type { MergeConflict, MergeDecision, MergePicked } from '../types';
+import { useConfirmAction } from './ConfirmAction';
 import { WaitsForNote } from './DecidedBy';
 
 const when = (language: string, iso: string): string => new Date(iso).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
@@ -50,6 +51,7 @@ export function MergeCard({ merge, onChange, onFailure, waitsFor }: { merge: Mer
   const [busy, setBusy] = useState(false);
   /* What the last pick could not take, in the server's own words. */
   const [left, setLeft] = useState<MergePicked['refused']>([]);
+  const confirmation = useConfirmAction();
   const title = merge.after ? t.merge.after(when(language, merge.after)) : merge.label;
 
   const load = useCallback(async () => {
@@ -66,11 +68,22 @@ export function MergeCard({ merge, onChange, onFailure, waitsFor }: { merge: Mer
       setLeft((await api.post<MergePicked>('/api/merges/pick', body)).refused);
       await load();
       onChange();
-    } catch (err) {
-      onFailure(err);
     } finally {
       setBusy(false);
     }
+  }
+
+  function askPick(kind: 'keepHere' | 'takeThere' | 'keepAll' | 'takeAll', target: string, body: object) {
+    const confirm = t.merge.confirm;
+    confirmation.ask({
+      title: confirm.title,
+      effect: <Phrase words={confirm[kind]} values={[<bdi>{target}</bdi>, <bdi>{title}</bdi>]} />,
+      yes: confirm.yes,
+      working: confirm.working,
+      final: true,
+      danger: true,
+      onYes: () => pick(body),
+    });
   }
 
   const tables = [...new Set((conflicts ?? []).map(conflict => conflict.table))];
@@ -86,19 +99,21 @@ export function MergeCard({ merge, onChange, onFailure, waitsFor }: { merge: Mer
       {tables.map(table => {
         const rows = conflicts!.filter(conflict => conflict.table === table);
         const topic = t.merge.topics[rows[0]!.topic] ?? rows[0]!.topic;
+        const section = table === rows[0]!.topic ? topic : `${topic}: ${table}`;
         return (
-          <div key={table} role="group" aria-label={table === rows[0]!.topic ? topic : `${topic}: ${table}`}>
-            <p className="muted">{table === rows[0]!.topic ? topic : `${topic}: ${table}`}</p>
+          <div key={table} role="group" aria-label={section}>
+            <p className="muted">{section}</p>
             {rows.map(conflict => (
-              <Conflict key={conflict.id} conflict={conflict} busy={busy} onPick={take => void pick({ ids: [conflict.id], take })} />
+              <Conflict key={conflict.id} conflict={conflict} busy={busy} onPick={take => askPick(take === 'here' ? 'keepHere' : 'takeThere', conflict.what, { ids: [conflict.id], take })} />
             ))}
             <div className="f">
-              <button className="btn small" type="button" disabled={busy} onClick={() => void pick({ merge: merge.id, table, take: 'here' })}>{t.merge.keepAll}</button>
-              <button className="btn small" type="button" disabled={busy} onClick={() => void pick({ merge: merge.id, table, take: 'there' })}>{t.merge.takeAll}</button>
+              <button className="btn small" type="button" disabled={busy} onClick={() => askPick('keepAll', section, { merge: merge.id, table, take: 'here' })}>{t.merge.keepAll}</button>
+              <button className="btn small" type="button" disabled={busy} onClick={() => askPick('takeAll', section, { merge: merge.id, table, take: 'there' })}>{t.merge.takeAll}</button>
             </div>
           </div>
         );
       })}
+      {confirmation.question}
     </section>
   );
 }

@@ -225,7 +225,7 @@ function DeptApprovals({ department, shown }: { department: Department; shown: b
   return (
     <section aria-labelledby={`${id}-approvals`}>
       <h3 id={`${id}-approvals`}>{t.dept.approvals.title}</h3>
-      <ApprovalPolicy departmentId={department.id} ownerPersonId={department.ownerPersonId} />
+      <ApprovalPolicy departmentId={department.id} departmentName={deptLabel(t, department)} ownerPersonId={department.ownerPersonId} />
     </section>
   );
 }

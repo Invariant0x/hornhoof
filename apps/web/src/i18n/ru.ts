@@ -353,6 +353,15 @@ export const ru: Messages = {
     takeAll: 'Взять все оттуда',
     topics: { people: 'Люди', access: 'Доступ', plans: 'Тарифы', machines: 'Машины', protected: 'Защищенные записи', work: 'Работа' },
     notTaken: n => `Не удалось взять: ${n}. Здесь все осталось как было.`,
+    confirm: {
+      title: 'Вы действительно хотите применить это решение о слиянии?',
+      keepHere: (what, merge) => `Для ${what} в ${merge} останется текущее значение здесь.`,
+      takeThere: (what, merge) => `Для ${what} в ${merge} значение оттуда заменит текущее.`,
+      keepAll: (section, merge) => `Для всего раздела ${section} в ${merge} останутся текущие значения здесь.`,
+      takeAll: (section, merge) => `Для всего раздела ${section} в ${merge} значения оттуда заменят текущие.`,
+      yes: 'Применить',
+      working: 'Применяем…',
+    },
   },
   repoHost: {
     title: 'Создание репозиториев',
@@ -1363,6 +1372,14 @@ export const ru: Messages = {
     note: n => `Запись №${n}`,
     changeNote: n => `Изменить запись №${n}`,
     removeNote: n => `Удалить запись №${n}`,
+    confirm: {
+      remove: {
+        title: 'Вы действительно хотите удалить эту запись?',
+        effect: note => `Запись ${note} будет удалена из блокнота.`,
+        yes: 'Удалить',
+        working: 'Удаляем…',
+      },
+    },
   },
   agentInbox: {
     panel: 'Входящие',
@@ -1600,6 +1617,35 @@ export const ru: Messages = {
       autonomousJournalEmpty: 'Автоматически одобренных коммитов пока нет.',
       autonomousJournalWho: (agent, task) => `${agent} в #${task}`,
       autonomousJournalProof: (run, reviewer) => `полный прогон #${run}, PASS от ${reviewer}`,
+      confirm: {
+        thisDepartment: 'этого отдела',
+        ceo: 'CEO',
+        owner: {
+          title: 'Вы действительно хотите сменить владельца отдела?',
+          effect: (owner, dept) => `Владельцем ${dept} станет ${owner}.`,
+          effectCeo: (owner, dept) => `У ${dept} не будет отдельного владельца; решения будет принимать ${owner}.`,
+          yes: 'Сменить владельца',
+          working: 'Сохраняем…',
+        },
+        rule: {
+          title: 'Вы действительно хотите изменить это правило одобрения?',
+          effect: (channel, dept, rule) => `Для «${channel}» ${dept} будет действовать правило: ${rule}.`,
+          yes: 'Изменить правило',
+          working: 'Сохраняем…',
+        },
+        enableAutonomous: {
+          title: 'Вы действительно хотите включить автономный выпуск?',
+          effect: dept => `Проверенные коммиты ${dept} смогут выходить в main без карточки одобрения.`,
+          yes: 'Включить',
+          working: 'Включаем…',
+        },
+        disableAutonomous: {
+          title: 'Вы действительно хотите отключить автономный выпуск?',
+          effect: dept => `Выпуски в main для ${dept} снова потребуют карточки одобрения.`,
+          yes: 'Отключить',
+          working: 'Отключаем…',
+        },
+      },
     },
     structure: 'Структура отдела',
     staffMap: 'Карта сотрудников',
@@ -2025,6 +2071,27 @@ export const ru: Messages = {
   },
   tasks: {
     hideSecret: { vault: 'Сохраняйте пароли в хранилище компании', action: 'Скрыть секрет', value: 'Секрет, который нужно скрыть', hint: 'Выделите секрет в задаче или журнале либо вставьте его сюда, не короче 8 символов. Во всех сохраненных копиях вместо него будет [hidden].', confirm: 'Скрыть везде', hiding: 'Скрываем...', done: 'Секрет скрыт.', failed: 'Не удалось скрыть секрет. Проверьте доступ и выделите текст еще раз.' },
+    confirm: {
+      cancel: {
+        title: 'Вы действительно хотите отменить эту задачу?',
+        effect: task => `Задача ${task} и ее открытые подзадачи будут отменены. Запись о ней останется в истории.`,
+        yes: 'Отменить задачу',
+        working: 'Отменяем…',
+      },
+      pause: {
+        title: 'Вы действительно хотите поставить эту задачу на паузу?',
+        effect: task => `Активная работа по задаче ${task} остановится, пока паузу не снимут.`,
+        yes: 'Поставить на паузу',
+        working: 'Ставим на паузу…',
+      },
+      hideSecret: {
+        title: 'Вы действительно хотите скрыть этот секрет?',
+        effect: task => `Все сохраненные копии этого секрета в задаче ${task} будут заменены на [hidden].`,
+        effectGeneric: 'Все сохраненные копии этого секрета в этой задаче будут заменены на [hidden].',
+        yes: 'Скрыть секрет',
+        working: 'Скрываем…',
+      },
+    },
     echelons: {
       coordination: 'Проверенный отчет по дочерним результатам',
       turnkey: 'Без этапов: сотрудник сам делает ее от начала до конца',
@@ -2870,6 +2937,16 @@ export const ru: Messages = {
       whole: { goal: 'цель', task: 'задачу' },
       and: (...items: string[]) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} и ${items.at(-1)}`),
     },
+    confirm: {
+      removeStage: {
+        title: 'Вы действительно хотите удалить этот этап?',
+        titleMany: 'Вы действительно хотите удалить эти этапы?',
+        effect: (stage, pipeline) => `Этап ${stage} будет удален из конвейера ${pipeline}.`,
+        effectMany: (stages, pipeline) => `Этапы ${stages} будут удалены из конвейера ${pipeline}.`,
+        yes: 'Удалить',
+        working: 'Удаляем…',
+      },
+    },
   },
   restarts: {
     heading: 'Ходы, прерванные перезапуском ноды',
@@ -2910,6 +2987,14 @@ export const ru: Messages = {
     removeLabel: title => `Убрать из списка: ${title}`,
     schedule: n => (n ? `Отдать главе отдела: ${n}` : 'Отдать главе отдела'),
     scheduled: tasks => `Отдано главе отдела: ${tasks}.`,
+    confirm: {
+      remove: {
+        title: 'Вы действительно хотите удалить этот пункт?',
+        effect: title => `Пункт ${title} будет удален из списка вне хода.`,
+        yes: 'Удалить',
+        working: 'Удаляем…',
+      },
+    },
   },
   improvements: {
     title: 'Улучшения',

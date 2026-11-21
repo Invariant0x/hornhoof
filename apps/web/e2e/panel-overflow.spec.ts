@@ -114,6 +114,7 @@ for (const lang of ['en', 'ru'] as const) {
             await notebook.getByRole('button', { name: m.notebook.cancel, exact: true }).tap();
           }
           await remove.click();
+          await page.getByRole('alertdialog').getByRole('button', { name: m.notebook.confirm.remove.yes, exact: true }).click();
           await expect.poll(() => removed.length).toBe(1);
           expect(errors).toEqual([]);
         });

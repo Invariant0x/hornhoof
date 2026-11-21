@@ -1,7 +1,8 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { useT, type Messages } from '../i18n';
+import { Phrase, useT, type Messages } from '../i18n';
 import type { TaskPlace, UncheckedItem, WaitingRequest } from '../types';
+import { useConfirmAction } from './ConfirmAction';
 import { DecidedByNote } from './DecidedBy';
 import { Field } from './Field';
 import { Markdown } from './Markdown';
@@ -324,7 +325,7 @@ function useRequestSend(requestId: string, onDone: () => void) {
   const [failure, setFailure] = useState<unknown>(null);
   const sending = useRef(false);
 
-  async function send(path: string, body: unknown) {
+  async function post(path: string, body: unknown) {
     if (sending.current) return;
     sending.current = true;
     setBusy(true);
@@ -335,12 +336,20 @@ function useRequestSend(requestId: string, onDone: () => void) {
       onDone();
     } catch (err) {
       sending.current = false;
-      setFailure(err);
       setBusy(false);
+      throw err;
     }
   }
 
-  return { busy, failure, send };
+  async function send(path: string, body: unknown) {
+    try {
+      await post(path, body);
+    } catch (err) {
+      setFailure(err);
+    }
+  }
+
+  return { busy, failure, send, post };
 }
 
 function RequestFeedback({ busy, failure }: { busy: boolean; failure: unknown }) {
@@ -367,11 +376,22 @@ function RequestFeedback({ busy, failure }: { busy: boolean; failure: unknown })
 function RequestItem({ request, onDone, inline, ...shared }: Shared & { request: WaitingRequest; onDone: () => void }) {
   const t = useT();
   const [text, setText] = useState(() => draftsByRequest.get(request.id) ?? '');
-  const { busy, failure, send } = useRequestSend(request.id, onDone);
+  const { busy, failure, send, post } = useRequestSend(request.id, onDone);
+  const confirmation = useConfirmAction();
   const { manifest, availableItems, failure: manifestFailure, viewer, openViewer, selectViewer, closeViewer } = useRequestMaterials(request, t);
   const { task, agent } = request;
   const stamp = readMaterialStamp(request, manifest);
   const reply = (body: object) => void send(`/api/requests/${request.id}`, { ...stamp, ...body });
+  const taskLabel = `#${task.number} ${task.title}`;
+
+  function askCancel() {
+    confirmation.ask({
+      ...t.tasks.confirm.cancel,
+      effect: <Phrase words={t.tasks.confirm.cancel.effect} values={[<bdi>{taskLabel}</bdi>]} />,
+      danger: true,
+      onYes: () => post(`/api/tasks/${task.id}/cancel`, {}),
+    });
+  }
 
   function updateDraft(next: string) {
     setText(next);
@@ -400,11 +420,12 @@ function RequestItem({ request, onDone, inline, ...shared }: Shared & { request:
         onAnswer={answer}
         onPick={i => reply(pickBody(i, text))}
         onDecide={approve => reply(approvalBody(approve, text))}
-        onCancel={inline ? undefined : () => void send(`/api/tasks/${task.id}/cancel`, {})}
+        onCancel={inline ? undefined : askCancel}
         onOpenMaterial={openViewer}
       />
       <RequestFeedback busy={busy} failure={failure} />
       {viewer && <MaterialViewer items={availableItems} activeId={viewer.id} opener={viewer.opener} onSelect={selectViewer} onClose={closeViewer} />}
+      {confirmation.question}
     </article>
   );
 }
