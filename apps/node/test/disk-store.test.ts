@@ -385,8 +385,8 @@ describe('workingCopies integration with shared package store', () => {
     gitInit(clone1);
     gitInit(clone2);
 
-    const bigA = payload('shared-dep-a', 256 * 1024);
-    const bigB = payload('shared-dep-b', 256 * 1024);
+    const bigA = payload('shared-dep-a', 512 * 1024);
+    const bigB = payload('shared-dep-b', 512 * 1024);
     writeAged(join(clone1, 'node_modules/lib/a.js'), bigA);
     writeAged(join(clone1, 'apps/web/node_modules/lib/b.js'), bigB);
     writeAged(join(clone2, 'node_modules/lib/a.js'), bigA);
@@ -402,6 +402,7 @@ describe('workingCopies integration with shared package store', () => {
     const after = await cleaner.size();
 
     expect(freed).toBe(bigA.length + bigB.length);
+    expect(before - after).toBeGreaterThanOrEqual(bigA.length + bigB.length - 64 * 1024);
     expect(after).toBeLessThan(before * 0.65);
     expect(lstatSync(join(clone1, 'node_modules/lib/a.js')).ino).toBe(lstatSync(join(clone2, 'node_modules/lib/a.js')).ino);
     expect(lstatSync(join(clone1, 'apps/web/node_modules/lib/b.js')).ino).toBe(lstatSync(join(clone2, 'apps/web/node_modules/lib/b.js')).ino);
