@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { Subscriptions } from '../src/screens/Subscriptions';
 import type { Limits, SubView } from '../src/types';
-import { LimitMeters } from '../src/ui/PlanLimits';
+import { LimitCell, LimitMeters } from '../src/ui/PlanLimits';
 import { limitState, stateOf } from '../src/ui/subscription';
 import { ME, SUBS } from './api-mock';
 import { lists, openAll, openCards, rowOf, waitFor } from './subscriptions-helpers';
@@ -28,7 +28,7 @@ const AGY: SubView = { ...SUBS[0]!, id: 's-agy', provider: 'antigravity', label:
 const serve = (sub: SubView) => lists({ 'GET /api/subscriptions': [200, { subscriptions: [sub] }] });
 
 describe('a plan that keeps its limits by model group', () => {
-  it('shows each group on its card under its own name, with what it used and when it resets', async () => {
+  it('shows each group on its card with its usage and reset, and bars for the fullest group', async () => {
     serve(AGY);
     render(<Subscriptions me={ME} />);
     await openAll();
@@ -40,6 +40,7 @@ describe('a plan that keeps its limits by model group', () => {
       expect(gauges.map(g => g.querySelector('.g-l')!.textContent)).toEqual(['5\u00a0hours', '7\u00a0days']);
       expect(gauges.map(g => g.querySelector('.g-f b')!.textContent)).toEqual(shares);
       for (const g of gauges) expect(g.querySelector('.g-s')!.textContent).toMatch(/^resets in /);
+      expect(part.querySelectorAll('.bar')).toHaveLength(group === 'Gemini Models' ? 0 : 2);
     }
   });
 
@@ -54,13 +55,28 @@ describe('a plan that keeps its limits by model group', () => {
     expect(limitState({ status: 'rejected', windows: OTHERS.windows }, now)).toEqual({ reached: true, resetsAt: '2099-11-22T08:00:00.000Z' });
   });
 
-  it("shows each group in the list's limit cells and calls the plan ready", async () => {
+  it("shows one bar for the fullest group in the list's limit cell, with text for every group", async () => {
     serve(AGY);
     render(<Subscriptions me={ME} />);
     const row = await waitFor(() => rowOf('Antigravity'));
     expect(within(row).getByText('Ready')).toBeInTheDocument();
     const week = [...row.querySelectorAll('td')].find(td => td.textContent?.includes('Gemini Models: 6%'));
     expect(week?.textContent).toMatch(/Gemini Models: 6%, resets in .*Claude and GPT models: 100%, resets in /);
+    expect(week?.querySelectorAll('.bar')).toHaveLength(1);
+    expect(within(week!).getAllByRole('listitem').find(line => line.querySelector('.bar'))).toHaveTextContent('Claude and GPT models: 100%');
+  });
+
+  it('uses the plan reset to distinguish equally full groups and still shows a current group when that reset passes', () => {
+    const week = OTHERS.windows[1]!;
+    const gemini = { ...GEMINI, windows: [{ ...week, resetsAt: '2099-11-23T08:00:00.000Z' }] };
+    const plan: SubView = { ...AGY, limits: { ...GROUPED, groups: [gemini, OTHERS] }, limitsUpdatedAt: '2099-11-22T07:55:00.000Z' };
+    const { rerender } = render(<LimitCell sub={plan} name="seven_day" now={Date.parse('2099-11-22T07:59:00.000Z')} />);
+    const lines = () => screen.getAllByRole('listitem');
+    expect(lines()[0]?.querySelector('.bar')).toBeNull();
+    expect(lines()[1]?.querySelector('.bar')).toBeInTheDocument();
+    rerender(<LimitCell sub={plan} name="seven_day" now={Date.parse('2099-11-22T08:01:00.000Z')} />);
+    expect(lines()[0]?.querySelector('.bar')).toBeInTheDocument();
+    expect(lines()[1]?.querySelector('.bar')).toBeNull();
   });
 
   it('says on the card and in the list which window a group does not have, and which one is not known yet', async () => {
