@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { tileCenterToWorld, worldToScreen } from '../coords';
 import { STUB_DIAMOND_PACK } from '../packs/stub-pack';
-import { IsometricWorldEngine, type WorldEngineStats } from '../renderer';
+import { IsometricWorldEngine, type RendererDebugInfo, type WorldEngineStats } from '../renderer';
 
 /* Standalone Stage 1 engine demo page: renders an empty 150x150 2:1 diamond grid on the stub pack
    with drag pan, hard-bounded zoom (50% min 60x30 .. 100% default 120x60 .. 200% max 240x120),
@@ -16,6 +16,7 @@ type DemoHandle = {
   panByScreen: (dx: number, dy: number) => void;
   flushVisibleBakes: () => void;
   getStats: () => WorldEngineStats;
+  getDebugInfo: () => RendererDebugInfo;
   screenPointOfTile: (col: number, row: number) => { x: number; y: number };
 };
 
@@ -56,6 +57,7 @@ function Stage1Demo() {
         panByScreen: (dx, dy) => engine.panByScreen(dx, dy),
         flushVisibleBakes: () => engine.flushVisibleBakes(),
         getStats: () => engine.getStats(),
+        getDebugInfo: () => engine.getRendererDebugInfo(),
         screenPointOfTile: (col, row) => {
           const cur = engine.getStats();
           const rect = host.getBoundingClientRect();

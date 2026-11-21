@@ -4,6 +4,7 @@
    and corridors out of bedrock). Records monthly snapshots and exact tile-area breakdowns
    for Year 1, Year 2 and Year 5. Contains zero theme-specific words, files or colours. */
 
+import { agentLevelFromAcceptedTasks } from '@hornhoof/protocol/world';
 import {
   bindCityMap,
   computeCityTileBreakdown,
@@ -75,16 +76,8 @@ export type FiveYearSimResult = Readonly<{
   coordinateJumps: number;
 }>;
 
-/* Canonical agent level threshold from accepted tasks: round(2 * (L - 1)^1.8), levels 1..30. */
-export function agentLevelFromTasks(acceptedTasks: number): number {
-  let level = 1;
-  for (let l = 2; l <= 30; l++) {
-    const threshold = Math.round(2 * Math.pow(l - 1, 1.8));
-    if (acceptedTasks >= threshold) level = l;
-    else break;
-  }
-  return level;
-}
+/* Canonical agent level from accepted tasks: imported from the single shared formula in @hornhoof/protocol/world. */
+export const agentLevelFromTasks = agentLevelFromAcceptedTasks;
 
 /* Distributes 160000 tasks across 60 months along a realistic growing company curve (exact sum = 160000). */
 function monthlyTaskSchedule(months: number, total: number): number[] {
@@ -113,7 +106,10 @@ export function runFiveYearSimulation(
 ): FiveYearSimResult {
   const mapSize = options.mapSize ?? pack.mapSize;
   const map = generateWorldTerrain(pack, { seed: options.seed, mapSize });
-  const city = bindCityMap(createCity(map, { orderChaos: options.orderChaos }), map);
+  const city = bindCityMap(
+    createCity(map, { orderChaos: options.orderChaos, outerWallMode: pack.outerWallMode ?? 'ring' }),
+    map,
+  );
   const recordSnapshots = options.recordSnapshots ?? true;
 
   const taskSchedule = monthlyTaskSchedule(FIVE_YEAR_TARGETS.months, FIVE_YEAR_TARGETS.acceptedTasks);

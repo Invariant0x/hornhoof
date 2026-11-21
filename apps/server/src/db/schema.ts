@@ -1,4 +1,5 @@
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
+import type { WorldRelocationStored } from '@hornhoof/protocol/world';
 import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
 import type { QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
 import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, PROVIDER_IDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
@@ -239,6 +240,17 @@ export const mapLayouts = pgTable('map_layouts', {
   companyId: companyId(),
   blocks: jsonb('blocks').$type<MapBlocks>().notNull().default({}),
   anchors: jsonb('anchors').$type<MapAnchors>().notNull().default({}),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* Saved isometric world layout and pending God's Word relocation orders for a company.
+   Isolated from company work tables so viewing or saving the world never alters work records. */
+export const worldLayouts = pgTable('world_layouts', {
+  companyId: uuid('company_id').primaryKey().references(() => companies.id, { onDelete: 'cascade' }),
+  packId: text('pack_id').notNull().default('default'),
+  seed: text('seed').notNull().default(''),
+  layout: jsonb('layout').$type<Record<string, unknown> | null>(),
+  relocations: jsonb('relocations').$type<WorldRelocationStored[]>().notNull().default([]),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

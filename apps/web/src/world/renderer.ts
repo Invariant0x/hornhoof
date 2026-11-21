@@ -32,10 +32,23 @@ import {
   type TileCoord,
 } from './coords';
 import type { AnimationDetailLevel, LodTierId, LodTierSpec, TileSlotSpec, WorldPackManifest } from './manifest';
+import {
+  renderCityFallback2D,
+  renderCityToPixi,
+  type CityRenderState,
+  type RelocationTargetPreview,
+} from './city-renderer';
+import { cityToPickableObjects } from './live-sync';
 import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas } from './smooth-terrain-baker';
 import type { GeneratedWorldMap } from './terrain-engine';
 
 export type RendererKind = 'webgl' | 'canvas2d';
+
+export type RendererDebugInfo = Readonly<{
+  rendererKind: RendererKind;
+  glRenderer: string | null;
+  glVendor: string | null;
+}>;
 
 export type WorldEngineStats = Readonly<{
   fps: number;
@@ -78,9 +91,11 @@ export type WorldEngineOptions = Readonly<{
   resolveTileId?: (col: number, row: number) => string;
   onStats?: (stats: WorldEngineStats) => void;
   onSelect?: (pick: PickResult | null) => void;
+  onHover?: (tile: TileCoord | null) => void;
 }>;
 
 type CachedChunkEntry = {
+  key: string;
   baked: BakedChunk;
   texture: Texture | null;
   sprite: Sprite | null;
@@ -125,8 +140,12 @@ export class IsometricWorldEngine {
   private readonly resolveTileId?: (col: number, row: number) => string;
   private readonly onStats?: (stats: WorldEngineStats) => void;
   private readonly onSelect?: (pick: PickResult | null) => void;
+  private readonly onHover?: (tile: TileCoord | null) => void;
 
   private objects: readonly PickableObject[];
+  private cityRenderState: CityRenderState | null = null;
+  private cityDirty = false;
+  private relocationPreview: RelocationTargetPreview | null = null;
   private viewport: ViewportSize;
   private dpr: number;
   private zoomBounds: EffectiveZoomBounds;
@@ -146,8 +165,15 @@ export class IsometricWorldEngine {
   private liquidPhaseY = 0;
   private chunkLayer: Container | null = null;
   private buildGridGraphic: Graphics | null = null;
+  private cityGraphic: Graphics | null = null;
   private borderGraphic: Graphics | null = null;
   private overlayGraphic: Graphics | null = null;
+
+  /* Dirty-tracking keys eliminate per-frame scene-graph rebuilds during smooth 60 FPS panning. */
+  private lastVisibleChunkSig = '';
+  private lastBorderZoom = -1;
+  private lastGridKey = '';
+  private lastOverlayKey = '';
 
   private fallbackCanvas: HTMLCanvasElement | null = null;
   private fallbackCtx: CanvasRenderingContext2D | null = null;
@@ -190,6 +216,7 @@ export class IsometricWorldEngine {
     this.objects = options.objects ?? [];
     this.onStats = options.onStats;
     this.onSelect = options.onSelect;
+    this.onHover = options.onHover;
 
     this.dpr = Math.min(Math.max(1, window.devicePixelRatio || 1), 2);
     this.viewport = this.readHostSize();
@@ -254,6 +281,7 @@ export class IsometricWorldEngine {
       const liquidLayer = new Container();
       const chunkLayer = new Container();
       const buildGridGraphic = new Graphics();
+      const cityGraphic = new Graphics();
       const borderGraphic = new Graphics();
       const overlayGraphic = new Graphics();
 
@@ -310,6 +338,7 @@ export class IsometricWorldEngine {
       worldContainer.addChild(liquidLayer);
       worldContainer.addChild(chunkLayer);
       worldContainer.addChild(buildGridGraphic);
+      worldContainer.addChild(cityGraphic);
       worldContainer.addChild(borderGraphic);
       worldContainer.addChild(overlayGraphic);
       app.stage.addChild(worldContainer);
@@ -317,8 +346,12 @@ export class IsometricWorldEngine {
       this.worldContainer = worldContainer;
       this.chunkLayer = chunkLayer;
       this.buildGridGraphic = buildGridGraphic;
+      this.cityGraphic = cityGraphic;
       this.borderGraphic = borderGraphic;
       this.overlayGraphic = overlayGraphic;
+      if (this.cityRenderState) {
+        this.cityDirty = true;
+      }
       this.drawMapBorderPixi();
     } catch {
       this.mountFallbackCanvas();
@@ -458,6 +491,7 @@ export class IsometricWorldEngine {
     );
     if (nextHover?.col !== this.hoveredTile?.col || nextHover?.row !== this.hoveredTile?.row) {
       this.hoveredTile = nextHover;
+      this.onHover?.(nextHover);
       this.dirtyScene = true;
     }
   };
@@ -574,6 +608,54 @@ export class IsometricWorldEngine {
     this.dirtyScene = true;
   }
 
+  /* Updates the Stage 4 isometric city placeholder layer and its pickable building footprints. */
+  setCityRenderState(state: CityRenderState | null): void {
+    this.cityRenderState = state;
+    this.cityDirty = true;
+    this.objects = state ? cityToPickableObjects(state.city) : [];
+    if (state?.relocationPreview !== undefined) {
+      this.relocationPreview = state.relocationPreview;
+    }
+    this.dirtyScene = true;
+  }
+
+  setRelocationPreview(preview: RelocationTargetPreview | null): void {
+    this.relocationPreview = preview;
+    this.dirtyScene = true;
+  }
+
+  centerOnTile(tile: TileCoord, zoom?: number): void {
+    const pt = tileCenterToWorld(tile.col, tile.row, this.tileW, this.tileH);
+    this.setCamera({
+      x: pt.x,
+      y: pt.y,
+      zoom: zoom ?? this.camera.zoom,
+    });
+  }
+
+  getRendererDebugInfo(): RendererDebugInfo {
+    let glRenderer: string | null = null;
+    let glVendor: string | null = null;
+    if (this.canvasElement && this.rendererKind === 'webgl') {
+      try {
+        const gl = (this.canvasElement.getContext('webgl2') ??
+          this.canvasElement.getContext('webgl')) as WebGLRenderingContext | null;
+        if (gl) {
+          const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+          glRenderer = dbg
+            ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL))
+            : String(gl.getParameter(gl.RENDERER));
+          glVendor = dbg
+            ? String(gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL))
+            : String(gl.getParameter(gl.VENDOR));
+        }
+      } catch {
+        /* Ignore context inspection errors in restricted environments. */
+      }
+    }
+    return { rendererKind: this.rendererKind, glRenderer, glVendor };
+  }
+
   setBuildGridVisible(visible: boolean): void {
     if (this.buildGridVisible === visible) return;
     this.buildGridVisible = visible;
@@ -649,6 +731,7 @@ export class IsometricWorldEngine {
   }
 
   private disposeEntry = (entry: CachedChunkEntry): void => {
+    this.lastVisibleChunkSig = '';
     if (entry.sprite) {
       entry.sprite.removeFromParent();
       entry.sprite.destroy();
@@ -676,7 +759,7 @@ export class IsometricWorldEngine {
       sprite.y = baked.worldY;
       sprite.scale.set(1 / baked.scale);
     }
-    const entry: CachedChunkEntry = { baked, texture, sprite };
+    const entry: CachedChunkEntry = { key, baked, texture, sprite };
     this.chunkCache.set(key, entry);
     return entry;
   }
@@ -789,13 +872,29 @@ export class IsometricWorldEngine {
       );
       this.worldContainer.scale.set(this.camera.zoom);
 
-      this.chunkLayer.removeChildren();
-      for (const entry of drawEntries) {
-        if (entry.sprite) this.chunkLayer.addChild(entry.sprite);
+      const chunkSig = drawEntries.map(e => e.key).join('|');
+      if (chunkSig !== this.lastVisibleChunkSig) {
+        this.lastVisibleChunkSig = chunkSig;
+        this.chunkLayer.removeChildren();
+        for (const entry of drawEntries) {
+          if (entry.sprite) this.chunkLayer.addChild(entry.sprite);
+        }
+      }
+
+      if (this.cityDirty && this.cityGraphic) {
+        this.cityDirty = false;
+        if (this.cityRenderState) {
+          renderCityToPixi(this.cityGraphic, this.cityRenderState, this.pack, this.tileW, this.tileH);
+        } else {
+          this.cityGraphic.clear();
+        }
       }
 
       this.drawBuildGridPixi(visibleRect);
-      this.drawMapBorderPixi();
+      if (this.lastBorderZoom !== this.camera.zoom) {
+        this.lastBorderZoom = this.camera.zoom;
+        this.drawMapBorderPixi();
+      }
       this.drawOverlayPixi();
     } else {
       this.renderFallback2D(drawEntries);
@@ -804,9 +903,13 @@ export class IsometricWorldEngine {
 
   private drawBuildGridPixi(visibleRect: { minX: number; maxX: number; minY: number; maxY: number }): void {
     if (!this.buildGridGraphic) return;
-    const g = this.buildGridGraphic;
-    g.clear();
-    if (!this.terrainMap || !this.buildGridVisible) return;
+    if (!this.terrainMap || !this.buildGridVisible) {
+      if (this.lastGridKey !== 'off') {
+        this.lastGridKey = 'off';
+        this.buildGridGraphic.clear();
+      }
+      return;
+    }
 
     const corners = [
       worldToTileFloat(visibleRect.minX, visibleRect.minY, this.tileW, this.tileH),
@@ -829,6 +932,12 @@ export class IsometricWorldEngine {
     const c1 = Math.min(n, Math.ceil(maxC) + 1);
     const r0 = Math.max(0, Math.floor(minR) - 1);
     const r1 = Math.min(n, Math.ceil(maxR) + 1);
+    const gridKey = `${c0}:${c1}:${r0}:${r1}:${Math.round(this.camera.zoom * 1000)}`;
+    if (gridKey === this.lastGridKey) return;
+    this.lastGridKey = gridKey;
+
+    const g = this.buildGridGraphic;
+    g.clear();
     const stroke = parseColorAndAlpha(this.pack.palette.gridLine, 0xffffff, 0.28);
     const w = Math.max(0.8, 1 / this.camera.zoom);
 
@@ -847,6 +956,20 @@ export class IsometricWorldEngine {
 
   private drawOverlayPixi(): void {
     if (!this.overlayGraphic) return;
+    const overlayKey = [
+      Math.round(this.camera.zoom * 1000),
+      this.markerTile ? `${this.markerTile.col},${this.markerTile.row}` : '-',
+      this.hoveredTile ? `${this.hoveredTile.col},${this.hoveredTile.row}` : '-',
+      this.selectedPick
+        ? `${this.selectedPick.kind}:${this.selectedPick.col},${this.selectedPick.row}:${this.selectedPick.kind === 'object' ? this.selectedPick.object.id : ''}`
+        : '-',
+      this.relocationPreview
+        ? `${this.relocationPreview.col},${this.relocationPreview.row},${this.relocationPreview.spanCol}x${this.relocationPreview.spanRow}:${this.relocationPreview.valid}`
+        : '-',
+    ].join('|');
+    if (overlayKey === this.lastOverlayKey) return;
+    this.lastOverlayKey = overlayKey;
+
     const g = this.overlayGraphic;
     g.clear();
     const strokeW = Math.max(1, 2 / this.camera.zoom);
@@ -901,6 +1024,23 @@ export class IsometricWorldEngine {
         .closePath()
         .fill({ color: fill.color, alpha: fill.alpha })
         .stroke({ color: stroke.color, alpha: stroke.alpha, width: strokeW * 1.25 });
+    }
+
+    if (this.relocationPreview) {
+      const rp = this.relocationPreview;
+      const top = tileTopVertexToWorld(rp.col, rp.row, this.tileW, this.tileH);
+      const right = tileTopVertexToWorld(rp.col + rp.spanCol, rp.row, this.tileW, this.tileH);
+      const bottom = tileTopVertexToWorld(rp.col + rp.spanCol, rp.row + rp.spanRow, this.tileW, this.tileH);
+      const left = tileTopVertexToWorld(rp.col, rp.row + rp.spanRow, this.tileW, this.tileH);
+      const fillColor = rp.valid ? 0x4ad680 : 0xe85d5d;
+      const strokeColor = rp.valid ? 0x8cf0b2 : 0xff9494;
+      g.moveTo(top.x, top.y)
+        .lineTo(right.x, right.y)
+        .lineTo(bottom.x, bottom.y)
+        .lineTo(left.x, left.y)
+        .closePath()
+        .fill({ color: fillColor, alpha: 0.36 })
+        .stroke({ color: strokeColor, alpha: 0.96, width: strokeW * 1.4 });
     }
   }
 
@@ -979,6 +1119,10 @@ export class IsometricWorldEngine {
       ctx.strokeStyle = this.pack.palette.gridLine;
       ctx.lineWidth = Math.max(0.8, 1 / this.camera.zoom);
       ctx.stroke();
+    }
+
+    if (this.cityRenderState) {
+      renderCityFallback2D(ctx, this.cityRenderState, this.pack, this.tileW, this.tileH);
     }
 
     ctx.beginPath();
@@ -1086,6 +1230,7 @@ export class IsometricWorldEngine {
     this.liquidSpriteB = null;
     this.liquidCanvas = null;
     this.buildGridGraphic = null;
+    this.cityGraphic = null;
 
     if (this.app) {
       this.app.destroy(true, { children: true, texture: true });

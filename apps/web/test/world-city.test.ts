@@ -268,7 +268,10 @@ describe('Stage 3 pack-agnostic organic city growth, standard 1x1..6x6 footprint
     }
   });
 
-  it('runs the full 5-year simulation on the Dungeon pack by carving halls and corridors out of solid bedrock', () => {
+  it('runs the full 5-year simulation on the Dungeon pack by carving halls and corridors out of solid bedrock without an outer wall', () => {
+    expect(EGYPT_WORLD_PACK.outerWallMode).toBe('ring');
+    expect(DUNGEON_WORLD_PACK.outerWallMode).toBe('none');
+
     const map = generateWorldTerrain(DUNGEON_WORLD_PACK, { seed: 'hornhoof', mapSize: 150 });
     const expandedMap = generateWorldTerrain(DUNGEON_WORLD_PACK, { seed: 'hornhoof', mapSize: 150, expandMargin: 25 });
     const result = runFiveYearSimulation(DUNGEON_WORLD_PACK, { seed: 'hornhoof', mapSize: 150, orderChaos: 0.5 });
@@ -278,6 +281,13 @@ describe('Stage 3 pack-agnostic organic city growth, standard 1x1..6x6 footprint
     expect(result.totalAgents).toBe(150);
     expect(result.totalAcceptedTasks).toBe(160000);
     expect(result.totalMajorGoals).toBe(30);
+
+    /* Pack chose outerWallMode: 'none' -> uncut bedrock is the natural boundary, zero octagonal wall underground. */
+    expect(city.outerWallMode).toBe('none');
+    expect(city.wallGeneration).toBe(0);
+    expect(city.wallTiles.size).toBe(0);
+    expect(city.wallHull).toBeNull();
+    expect(result.year5Breakdown.wallTiles).toBe(0);
 
     /* Subterranean growth genuinely carves halls and corridors out of solid rock. */
     expect(city.excavatedTiles.size).toBeGreaterThan(1500);

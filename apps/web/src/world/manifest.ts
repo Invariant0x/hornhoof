@@ -5,6 +5,7 @@
 import type { TileCoord } from './coords';
 
 export type EngineKind = 'isometric-2d' | '3d';
+export type OuterWallMode = 'ring' | 'none';
 
 export type Direction8 = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
 export type UniqueRenderAngle5 = 'N' | 'NE' | 'E' | 'SE' | 'S';
@@ -211,6 +212,8 @@ export type WorldPackManifest = Readonly<{
   params: WorldEngineParamsSpec;
   /* Smooth blended ground packs set showGridByDefault: false so the grid appears only in build mode. */
   showGridByDefault?: boolean;
+  /* Whether the city builds an expanding outer wall ring ('ring', default) or relies on natural boundaries ('none'). */
+  outerWallMode?: OuterWallMode;
   materials?: readonly GroundMaterialSpec[];
   liquidLayer?: LiquidLayerSpec;
   terrainRecipe?: TerrainRecipeSpec;
@@ -397,6 +400,10 @@ export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation 
         if (!materialIds.has(mid)) errors.push(`terrainRecipe.materialIds references unknown "${mid}"`);
       }
     }
+  }
+
+  if (pack.outerWallMode !== undefined && pack.outerWallMode !== 'ring' && pack.outerWallMode !== 'none') {
+    errors.push(`invalid outerWallMode "${String(pack.outerWallMode)}"`);
   }
 
   for (const [key, value] of Object.entries(pack.stageCounts)) {

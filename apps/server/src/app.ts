@@ -42,6 +42,7 @@ import { startOperationsCheck } from './modules/operations/ensure.js';
 import { startTrackerUpgrade } from './modules/tracker/upgrade.js';
 import { orgRoutes } from './modules/org/routes.js';
 import { mapLayoutRoutes } from './modules/org/layout.js';
+import { worldRoutes } from './modules/world/routes.js';
 import { peopleRoutes } from './modules/people/routes.js';
 import { assistantSetupRoutes } from './modules/assistants/setup.js';
 import { assistantMcpRoutes } from './modules/assistants/mcp.js';
@@ -410,6 +411,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   assistantSetupRoutes(app, ctx);
   orgRoutes(app, ctx);
   mapLayoutRoutes(app, ctx);
+  worldRoutes(app, ctx);
   subscriptionRoutes(app, ctx);
   signinRoutes(app, ctx);
   nodeRoutes(app, ctx);

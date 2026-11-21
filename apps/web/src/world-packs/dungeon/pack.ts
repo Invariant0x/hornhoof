@@ -70,6 +70,7 @@ export const DUNGEON_WORLD_PACK: WorldPackManifest = {
   camera: DEFAULT_CAMERA_BOUNDS,
   defaultTileId: 'solid_rock',
   showGridByDefault: false,
+  outerWallMode: 'none',
   tiles: DUNGEON_TILE_KINDS.map(k => ({
     id: k.id,
     fill: k.color,

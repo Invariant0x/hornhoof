@@ -77,6 +77,7 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
   camera: DEFAULT_CAMERA_BOUNDS,
   defaultTileId: 'plain',
   showGridByDefault: false,
+  outerWallMode: 'ring',
   tiles: EGYPT_TILE_KINDS.map(k => ({
     id: k.id,
     fill: k.color,

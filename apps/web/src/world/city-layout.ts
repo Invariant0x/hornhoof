@@ -7,6 +7,7 @@
    Contains zero theme-specific words, files or colours. */
 
 import type { TileCoord } from './coords';
+import type { OuterWallMode } from './manifest';
 import { createRng, hash2i } from './prng';
 import type { GeneratedWorldMap } from './terrain-engine';
 
@@ -60,6 +61,22 @@ export type CityBuilding = {
   mergedFromIds: string[];
   goalCount: number;
   placedAtStep: number;
+  /* Optional Stage 4 live-data display properties (never alter saved coordinates). */
+  entityId?: string;
+  acceptedTasks?: number;
+  fullness?: number;
+  progress?: number;
+  reached?: boolean;
+  celebrating?: boolean;
+  resting?: boolean;
+  provider?: string;
+  pendingRelocation?: {
+    relocationId: string;
+    taskId: string;
+    taskNumber: number;
+    toCol: number;
+    toRow: number;
+  } | null;
 };
 
 export type RoadTile = {
@@ -115,6 +132,7 @@ export type CityState = {
   seed: string;
   baseSize: number;
   orderChaos: number;
+  outerWallMode: OuterWallMode;
   center: TileCoord;
   stepCounter: number;
   wallGeneration: number;
@@ -151,6 +169,7 @@ export type CityLayoutSnapshot = Readonly<{
   seed: string;
   baseSize: number;
   orderChaos: number;
+  outerWallMode?: OuterWallMode;
   center: TileCoord;
   stepCounter: number;
   wallGeneration: number;
@@ -398,7 +417,7 @@ function setRoadTile(
   return tile;
 }
 
-function canPlaceFootprint(
+export function canPlaceFootprint(
   city: CityState,
   map: GeneratedWorldMap,
   col: number,
@@ -854,14 +873,19 @@ export function refreshCityMetrics(city: CityState): void {
 }
 
 /* Creates a new city centered on the generated map's startCenter, with initial residence and starter avenue. */
-export function createCity(map: GeneratedWorldMap, options?: { orderChaos?: number }): CityState {
+export function createCity(
+  map: GeneratedWorldMap,
+  options?: { orderChaos?: number; outerWallMode?: OuterWallMode },
+): CityState {
   const orderChaos = Math.max(0, Math.min(1, options?.orderChaos ?? 0.5));
+  const outerWallMode: OuterWallMode = options?.outerWallMode ?? 'ring';
   const rng = createRng((map.numericSeed ^ Math.round(orderChaos * 10007)) >>> 0);
   const city: CityState = {
     packId: map.packId,
     seed: map.seed,
     baseSize: map.baseSize,
     orderChaos,
+    outerWallMode,
     center: { col: map.startCenter.col, row: map.startCenter.row },
     stepCounter: 0,
     wallGeneration: 0,
@@ -1424,6 +1448,7 @@ function isInsideHull(hull: WallHull, c: number, r: number, inset = 0): boolean 
 /* Builds or expands the single outer city wall ring. When the city outgrows an old wall,
    the old wall ring converts into a connected boulevard street and a new wider outer wall rises. */
 export function rebuildWallIfNeeded(city: CityState, map: GeneratedWorldMap, forceCheck = false): boolean {
+  if (city.outerWallMode === 'none') return false;
   if (city.buildings.length < 12) return false;
 
   const needInitial = city.wallGeneration === 0;
@@ -1753,6 +1778,7 @@ export function serializeCityLayout(city: CityState): CityLayoutSnapshot {
     seed: city.seed,
     baseSize: city.baseSize,
     orderChaos: city.orderChaos,
+    outerWallMode: city.outerWallMode,
     center: { ...city.center },
     stepCounter: city.stepCounter,
     wallGeneration: city.wallGeneration,
@@ -1779,6 +1805,7 @@ export function deserializeCityLayout(snapshot: CityLayoutSnapshot): CityState {
     seed: snapshot.seed,
     baseSize: snapshot.baseSize,
     orderChaos: snapshot.orderChaos,
+    outerWallMode: snapshot.outerWallMode ?? 'ring',
     center: { ...snapshot.center },
     stepCounter: snapshot.stepCounter,
     wallGeneration: snapshot.wallGeneration,
