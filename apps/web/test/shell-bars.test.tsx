@@ -1,7 +1,8 @@
 import { act, render } from '@testing-library/react';
 import { useRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { shellTopOf, useMeasuredShellTop } from '../src/ui/shellBars';
+import { GuardBoundary } from '../src/ui/GuardBoundary';
+import { ShellBarsHost, shellTopOf, useMeasuredShellTop } from '../src/ui/shellBars';
 import { decl, rulesFor } from './css';
 
 /* #1639: on the map the header and the bars of the shell float over the canvas and an open department, which start what
@@ -81,6 +82,22 @@ describe('useMeasuredShellTop', () => {
     expect(top).toBe(120);
     await act(async () => { bar.remove(); });
     expect(top).toBeNull();
+  });
+
+  it('portals a non-floating GuardBoundary stop plate into ShellBarsHost while floating boundaries render inline', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    function Broken(): never { throw new Error('boom'); }
+    const host = document.createElement('div');
+    host.className = 'shell-bars';
+    document.body.append(host);
+    const { container } = render(
+      <ShellBarsHost value={host}>
+        <GuardBoundary block="department"><Broken /></GuardBoundary>
+        <GuardBoundary block="window" float><Broken /></GuardBoundary>
+      </ShellBarsHost>,
+    );
+    expect(host.querySelector('.guard-stop:not(.float)')).not.toBeNull();
+    expect(container.querySelector('.guard-stop.float')).not.toBeNull();
   });
 });
 

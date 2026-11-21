@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DepartmentView } from '../src/screens/Department';
 import { MapScreen } from '../src/screens/Map';
 import { sameView, worldTransition } from '../src/ui/canvas';
-import { ShellTop } from '../src/ui/shellBars';
+import { ShellBarsHost, ShellTop } from '../src/ui/shellBars';
 import { DEV_ORG, ME, mockApi } from './api-mock';
 import { fakeStream } from './fake-stream';
 
@@ -46,6 +46,33 @@ describe('the world stays stationary when shell bars appear or disappear (#1874)
       expect(container.querySelector<HTMLElement>('.map .world')!.style.transform).toBe(worldBefore);
       expect(container.querySelector<HTMLElement>('.map-room')!.style.getPropertyValue('--map-top')).toBe(mapTopBefore);
     }
+  });
+
+  it('overlays a map reload error inside ShellBarsHost without unmounting or shifting the map', async () => {
+    const stream = fakeStream();
+    let fail = false;
+    mockApi({
+      'GET /api/org': () => (fail ? [500, { error: { code: 'internal', message: 'Reload down.' } }] : [200, DEV_ORG]),
+      'GET /api/map/layout': [200, { blocks: {}, bends: {} }],
+      'GET /api/version': [200, { version: '0.40.2', commit: 'abcdef1' }],
+    });
+    const host = document.createElement('div');
+    host.className = 'shell-bars';
+    document.body.append(host);
+    const { container } = render(
+      <ShellBarsHost value={host}>
+        <MapScreen me={ME} windowOpen={false} onOpenOrchestrator={() => {}} />
+      </ShellBarsHost>,
+    );
+    await screen.findByRole('button', { name: /^Development/ });
+    const map = container.querySelector<HTMLElement>('.map')!;
+    sizeBox(map, 1440, 900);
+    fail = true;
+    stream.send({ type: 'org' });
+    await waitFor(() => expect(host.querySelector('.alert')).not.toBeNull());
+    expect(container.querySelector('.map')).toBe(map);
+    expect(screen.getByRole('button', { name: /^Development/ })).toBeInTheDocument();
+    host.remove();
   });
 
   it('keeps an open department world transform stationary when shell bars come or go after opening', async () => {

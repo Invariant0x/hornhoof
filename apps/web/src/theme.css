@@ -35,8 +35,8 @@ input[type='number']::-webkit-outer-spin-button, input[type='number']::-webkit-i
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .muted { color: var(--muted); }
 
-.app-layout { display: grid; block-size: 100%; grid-template-rows: minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); }
-/* Even fixed panels use the screen's box, so the version keeps a separate row below it. */
+.app-layout { display: grid; block-size: 100%; grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
+/* Fixed panels stay contained inside the full-viewport screen box. */
 .app-screen { min-inline-size: 0; overflow: auto; contain: paint; }
 .app-screen:has(> .stage) { scrollbar-gutter: stable; }
 
@@ -167,7 +167,7 @@ select:disabled { opacity: .55; }
 /* So does the card of a tick whose words stand under it, as the consent of an address. */
 .check-card:has([aria-invalid="true"]) { border-color: var(--pink); }
 .field .bad { font-size: 12px; color: var(--pink-ink); }
-.alert { padding: 10px 12px; border-inline-start: 3px solid var(--pink); background: var(--surface2); color: var(--ink); }
+.alert { padding: 10px 12px; border-inline-start: 3px solid var(--pink); background: var(--surface2); color: var(--ink); overflow-wrap: anywhere; }
 
 /* Centered card screens: setup, log in, invite */
 .stage {
@@ -286,12 +286,10 @@ select:disabled { opacity: .55; }
 .shell {
   --bar-top: 12px; --bar-edge: 16px; --bar-size: 44px; --bar-gap: 8px;
   --header-room: calc(2 * var(--bar-top) + var(--bar-size));
-  /* Design's #1635, variant A (#1639): the header, the bars of the shell and the bottom bar are glass blocks of the skin's
-     --hud, .94 in every skin, and what stands under the bars moves in 200 ms when one comes or goes, by transform. What
-     the map and a department show starts --float-gap, 8 px on every screen, under the last block at the top, though on a
-     phone the blocks stand 6 px apart: --under-menu while no bar stands, and --shell-top, which the shell measures and sets
-     on itself, while one does. --plate-room is the height of an open
-     department's name and the 8 px under it, while a department is open. */
+  /* Glass HUD overlay tokens (#1635, #1874): the header, shell bars and bottom bar are glass blocks of the skin's --hud
+     (.94 in every skin). The world underneath always fills the viewport and never shifts or resizes; --shell-top and
+     --shell-shift position only UI chrome (.crumbs, windows, cards) 8 px (--float-gap) under the last top block.
+     --plate-room is the height of an open department's name plate plus 8 px while a department is open. */
   --bar-glass: var(--hud); --shell-shift: 200ms; --float-gap: 8px;
   --under-menu: calc(var(--bar-top) + var(--bar-size) + var(--float-gap));
   position: relative; height: 100%;
@@ -420,14 +418,6 @@ select:disabled { opacity: .55; }
 .versions-now { color: var(--cyan-ink); font-family: var(--f-display); font-weight: 600; white-space: nowrap; }
 .update-confirm { display: grid; gap: 10px; padding: 12px; border-left: 3px solid var(--amber); background: var(--surface2); }
 .update-cut .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
-.version-mark {
-  padding: 4px 12px;
-  border-block-start: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 12px;
-  text-align: end;
-  overflow-wrap: anywhere;
-}
 .seg { display: flex; }
 .seg button {
   flex: 1; min-height: 32px; margin-left: -1px; padding: 0 8px; cursor: pointer;
@@ -595,39 +585,45 @@ select:disabled { opacity: .55; }
   .skins-guide { padding: 16px; }
 }
 .body { position: absolute; inset: 0; overflow: auto; }
-/* The header's room heads what scrolls, on every tab: the bars of the shell and the page start under it. A page scrolls
-   under the floating header, so there the room is a band in the page's own color that stays at the top: text never shows
-   around the glass blocks. On the map the canvas runs under the header, and the room lets every touch through to it. */
+/* Pages scroll under the floating header, so a sticky band in the page's own background keeps text from showing around
+   the header blocks. On the world container (.body:not(.page) — map, department, and future game worlds), the world always
+   fills the entire viewport beneath the UI with no flow spacer and no scrolling (#1874). */
 .body::before { content: ''; position: sticky; top: 0; display: block; block-size: var(--header-room); pointer-events: none; }
 .body.page::before { z-index: 5; background: var(--bg); pointer-events: auto; }
-/* Shell bars take their own rows under the header. On a page they scroll under its band. */
-.body > :is(.update-banner, .alert) { position: relative; z-index: 9; margin-block: 0 var(--bar-gap); margin-inline: var(--bar-edge); }
-.body > .update-banner { margin-inline: auto; max-inline-size: calc(100% - 2 * var(--bar-edge)); overflow-wrap: anywhere; }
-.body > .guard-stop { position: relative; z-index: 9; }
-.body.page > :is(.update-banner, .alert, .guard-stop) { z-index: auto; }
-/* On the map the canvas and an open department fill the window from its top, and the header and the bars of the shell float
-   over them (#1639): what they show starts under the last bar, at --shell-top as the shell measures it while a bar stands.
-   An open department covers the map it flew in from, which keeps its size and view behind it. */
-/* There each bar is a glass block like the header's (#1635): no shadow, and the map shows between the blocks. A failure keeps
-   the mark at its start. A bar that comes shows from its top down on the curve and in the time what stands under the bars
-   slides on, so the slide never lets the content under the part of the bar already shown: from the menu's bottom, which
-   stands --bar-top above the first bar, or from the bar above, --bar-gap above the next. */
-.body:not(.page) > :is(.update-banner, .alert, .guard-stop) {
+.body:not(.page) { overflow: hidden; }
+.body:not(.page)::before { content: none; }
+/* Dedicated HUD overlay stack for shell bars (.update-banner, .alert, .guard-stop) over the full-viewport world
+   (.body:not(.page)). Pointer events pass through empty stack space so clicks and drags outside the bars reach the world
+   underneath; bars wrap cleanly in every language without shifting or resizing the world (#1874, #1882). */
+.body:not(.page) > .shell-bars {
+  position: absolute; z-index: 9; inset-block-start: var(--header-room); inset-inline: var(--bar-edge);
+  display: flex; flex-direction: column; align-items: stretch; gap: var(--bar-gap);
+  pointer-events: none;
+}
+.body:not(.page) > .shell-bars > :is(.update-banner, .alert, .guard-stop) {
+  position: relative; margin: 0; max-inline-size: 100%; overflow-wrap: anywhere; pointer-events: auto;
   background: var(--bar-glass); border: 1px solid var(--line); box-shadow: none;
   animation: bar-in var(--shell-shift) ease-out;
 }
-.body:not(.page) > .alert { border-inline-start: 3px solid var(--pink); }
-.body:not(.page) > .guard-stop { border-inline-start: 3px solid var(--pink-ink); }
-.body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ :is(.update-banner, .alert, .guard-stop) { --bar-above: var(--bar-gap); }
+.body:not(.page) > .shell-bars > .update-banner { align-self: center; }
+.body:not(.page) > .shell-bars > .question-banner { inline-size: min(640px, 100%); }
+.body:not(.page) > .shell-bars > .alert { border-inline-start: 3px solid var(--pink); }
+.body:not(.page) > .shell-bars > .guard-stop { align-self: center; max-inline-size: min(520px, 100%); border-inline-start: 3px solid var(--pink-ink); }
+.body:not(.page) > .shell-bars > :is(.update-banner, .alert, .guard-stop) ~ :is(.update-banner, .alert, .guard-stop) { --bar-above: var(--bar-gap); }
 @keyframes bar-in { from { clip-path: inset(0 0 calc(100% + var(--bar-above, var(--bar-top))) 0); } }
+/* On scrollable pages (.body.page), shell bars stay in document flow under the header band. */
+.body.page > .shell-bars:empty { display: none; }
+.body.page > .shell-bars > :is(.update-banner, .alert) { position: relative; z-index: auto; margin-block: 0 var(--bar-gap); margin-inline: var(--bar-edge); }
+.body.page > .shell-bars > .update-banner { margin-inline: auto; max-inline-size: calc(100% - 2 * var(--bar-edge)); overflow-wrap: anywhere; }
+.body.page > .shell-bars > .guard-stop { position: relative; z-index: auto; }
 /* On a phone every bar after the first folds to one line with More, which opens it whole (Design's decision on #1635): two
    bars would take a third of the screen. More is hidden elsewhere: a .btn's display beats the hidden attribute by itself. */
 .bar-more[hidden] { display: none; }
 @media (max-width: 760px) {
-  .body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) { flex-wrap: nowrap; }
-  .body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) > span { flex: 1 1 auto; min-inline-size: 0; max-block-size: 1lh; overflow: hidden; }
-  .body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) > :not(span, .bar-more) { display: none; }
-  .body:not(.page) > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) > .bar-more { display: inline-flex; flex: none; }
+  .body:not(.page) > .shell-bars > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) { flex-wrap: nowrap; }
+  .body:not(.page) > .shell-bars > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) > span { flex: 1 1 auto; min-inline-size: 0; max-block-size: 1lh; overflow: hidden; }
+  .body:not(.page) > .shell-bars > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) > :not(span, .bar-more) { display: none; }
+  .body:not(.page) > .shell-bars > :is(.update-banner, .alert, .guard-stop) ~ .update-banner:not(.open) > .bar-more { display: inline-flex; flex: none; }
 }
 
 /* Map */
@@ -1635,14 +1631,6 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 .dv-acts[data-fit="icons"] .dv-tools > .hbtn { border: 0; background: none; }
 .dv-acts[data-fit="icons"] .dv-tools > .hbtn + .hbtn { border-inline-start: 1px solid var(--line); }
 .dv-acts[data-fit="icons"] > .btn { margin-inline-start: auto; padding-block: 8px; }
-/* The map runs to the bottom of the screen and names the version over its own corner (#1590). */
-.app-layout:has(.map-version) > .version-mark { display: none; }
-/* The actions take the corner the version sits in on the map. */
-body:has(.dview) .version-mark { display: none; }
-/* A form keeps the footer below it: the footer's row comes from the screen, so a footer that went with a form would move
-   every window and panel fixed there (#1384). A phone shows no footer; About names the version there, and the map over its
-   corner. */
-@media (max-width: 760px) { .version-mark { display: none; } }
 /* The line of what changed sits between the zoom and the actions, in either direction. */
 .dview .ticker { inset-inline: 212px var(--ticker-right, 16px); transform: none; max-width: none; }
 .dv-drawer { position: absolute; z-index: 4; }
@@ -2111,7 +2099,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .body.tracker-page { inset-block-start: var(--header-room); container-type: size; overflow-anchor: none; scrollbar-gutter: stable; }
 .body.tracker-page::before { content: none; }
 /* The tracker stands right under the header, which leaves a bar of the shell above it a gap of its own. */
-.body.tracker-page > :is(.update-banner, .alert, .guard-stop):first-child { margin-block-start: var(--bar-gap); }
+.body.tracker-page > .shell-bars > :is(.update-banner, .alert, .guard-stop):first-child { margin-block-start: var(--bar-gap); }
 /* The mockup's .side: the panel's surface, 12px by 8px inside, its rows of 32px for a mouse (44px for a finger, below). */
 .tr-side { position: sticky; inset-block-start: 0; display: block; min-inline-size: 0; block-size: 100cqb; overflow: auto; overflow-wrap: break-word; scrollbar-gutter: stable; padding: 12px 8px 20px; box-sizing: border-box; background: var(--surface); border-inline-end: 1px solid var(--line); border-block-start: 1px solid var(--line); }
 .tr-side-title { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-block-size: 30px; margin: 2px 8px 10px; font: 600 18px var(--f-display); }
@@ -3560,14 +3548,14 @@ th.k-prio .sorth { white-space: nowrap; }
   /* A panel takes the whole window here: what lies under it is out of reach for the keyboard too. */
   .orch.with-panels .agent-conversation { display: none; }
   .orch .t-st { white-space: normal; flex-wrap: wrap; }
-  /* In a row at the bottom here, where the text reads across and everything above makes room. */
+  /* In a row at the bottom here, overlaid over the full-viewport world; only scrollable pages and panels make 44 px room (#1874). */
   .agent-strips { top: auto; left: 0; bottom: 0; width: auto; height: 44px; flex-direction: row; overflow: auto hidden; background: var(--surface); border-top: 1px solid var(--line); }
   .shell:has(.orch.fullscreen:not([hidden])) .agent-strips { top: auto; }
   .agent-strip { flex-direction: row; }
   .agent-strip-open { max-width: 240px; max-height: none; min-height: 0; padding: 0 10px; writing-mode: horizontal-tb; }
   .agent-strip-name { min-width: 0; }
   .agent-strip-close { width: 36px; height: auto; border-bottom: 0; border-left: 1px solid var(--line); }
-  .shell:has(.agent-strip) .body { bottom: 44px; }
+  .shell:has(.agent-strip) .body.page { bottom: 44px; }
   .shell:has(.agent-strip) .orch, .shell:has(.agent-strip) .acard:not(.side-panel .acard) { bottom: 44px; }
 }
 
@@ -3606,14 +3594,14 @@ th.k-prio .sorth { white-space: nowrap; }
 /* Guard plate: one line and one button of 44 px on the second surface with the strong line; logical sides, so a
    right-to-left page mirrors them. A plate that floats stands above the bottom row of the map and the department, so it
    hides none of their controls. */
-.guard-stop, .light-note { display: flex; align-items: center; gap: 12px; padding-block: 8px; padding-inline: 14px 8px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-size: 14px; }
-.guard-stop p, .light-note p { margin: 0; }
+.guard-stop, .light-note { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-block: 8px; padding-inline: 14px 8px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-size: 14px; }
+.guard-stop p, .light-note p { margin: 0; min-inline-size: 0; overflow-wrap: anywhere; }
 .guard-stop .btn, .light-note .btn { flex: none; min-block-size: 44px; }
 /* Turning the effects back on is the second choice: a ghost button framed by a border, since the light mode it stands in
    takes the ghost's shadow away. */
 .light-note .btn.ghost { border: 1px solid var(--line2); box-shadow: none; }
 .light-note .btn.ghost:hover { border-color: var(--cyan); }
-.guard-stop { max-inline-size: 520px; margin-block: 0 var(--bar-gap); margin-inline: auto; border-inline-start: 3px solid var(--pink-ink); }
+.guard-stop { max-inline-size: min(520px, calc(100% - 2 * var(--bar-edge, 16px))); margin-block: 0 var(--bar-gap); margin-inline: auto; border-inline-start: 3px solid var(--pink-ink); }
 .guard-stop.float { position: fixed; z-index: 30; inset-inline-end: 16px; inset-block-end: 72px; max-inline-size: min(520px, calc(100% - 32px)); margin: 0; }
 .light-note { position: fixed; z-index: 30; inset-inline-start: 16px; inset-block-end: 72px; max-inline-size: min(520px, calc(100% - 32px)); }
 /* A page the guard turned light draws nothing that costs a frame: no animation, transition, filter, blur or shadow. */

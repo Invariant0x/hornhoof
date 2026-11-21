@@ -217,15 +217,11 @@ export async function assertTrackerEdges(page: Pick<Page, 'locator'>, width: num
     expect(covering, 'fixed elements overlapping the tracker').toEqual([]);
     return;
   }
-  const version = page.locator('.version-mark');
-  if (!last) {
-    await expect(version).toBeVisible();
-    return;
-  }
-  const [card, body, footer] = await Promise.all([last.boundingBox(), tracker.boundingBox(), version.boundingBox()]);
+  expect(await tracker.evaluate(() => document.querySelectorAll('.version-mark').length), 'no bottom version bar on tracker').toBe(0);
+  if (!last) return;
+  const [card, body] = await Promise.all([last.boundingBox(), tracker.boundingBox()]);
   expect(card!.y).toBeGreaterThanOrEqual(body!.y);
   expect(Math.abs(card!.y + card!.height - (body!.y + body!.height))).toBeLessThanOrEqual(1);
-  expect(card!.y + card!.height).toBeLessThanOrEqual(footer!.y + 1);
 }
 
 async function expectOneLine(label: Locator): Promise<void> {

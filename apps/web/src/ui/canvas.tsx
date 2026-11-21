@@ -21,37 +21,19 @@ export function canvasSpace(width: number, left: number, right: number): { left:
   return width <= CANVAS_NARROW ? { left: 0, width } : { left, width: width - left - right };
 }
 
-/* smooth: the change came from Fit and glides, flies into a department, or follows the bars of the shell as one comes or goes
-   (shift, in the shell's time); drag and zoom follow the hand at once. */
-export type View = { x: number; y: number; k: number; smooth: boolean | 'fly' | 'shift' };
+/* smooth: the change came from Fit and glides, or flies into a department; drag and zoom follow the hand at once. */
+export type View = { x: number; y: number; k: number; smooth: boolean | 'fly' };
 
 /* Whether two views stand in the same place, to the half pixel. */
 export const sameView = (a: Pick<View, 'x' | 'y' | 'k'>, b: Pick<View, 'x' | 'y' | 'k'>) =>
   Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.k - b.k) < 1e-4;
 
-/* Where the room under the bars of the shell starts: least down from the top, or under the last bar while one stands lower
-   (#1639). */
-export const underShell = (least: number, shellTop: number | null) => Math.max(least, shellTop ?? 0);
-
 const GLIDE = 'transform .8s cubic-bezier(.3,.7,.2,1)';
-/* How the world goes to its view: at once while still, as for less motion, or when not asked to glide; in the shell's time
-   after a bar of the shell came or went (#1635); flying into a department, as fly says; else with Fit's glide. */
+/* How the world goes to its view: at once while still, as for less motion, or when not asked to glide; flying into a
+   department, as fly says; else with Fit's glide. */
 export function worldTransition(smooth: View['smooth'], still: boolean, fly = GLIDE): string {
   if (still || !smooth) return 'none';
-  if (smooth === 'shift') return 'transform var(--shell-shift) ease-out';
   return smooth === 'fly' ? fly : GLIDE;
-}
-
-/* The move of a fit from the view now to next: none where it already stands or glides there, so a second look as a resize is
-   watched again keeps the move going; in the shell's time when a bar of the shell came or went since the last fit, as
-   shellTop says (#1635); else as asked (Fit's glide by default, or at once when the map places itself on its first frame). */
-export function useFitMove(shellTop: number | null): (now: View, next: Omit<View, 'smooth'>, smooth?: boolean) => View | null {
-  const lastTop = useRef<number | null | undefined>(undefined);
-  return useCallback((now: View, next: Omit<View, 'smooth'>, smooth = true) => {
-    const shift = lastTop.current !== undefined && lastTop.current !== shellTop;
-    lastTop.current = shellTop;
-    return sameView(now, next) ? null : { ...next, smooth: shift ? 'shift' : smooth };
-  }, [shellTop]);
 }
 
 /* A box from its top left to its bottom right corner. */

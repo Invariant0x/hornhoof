@@ -8,7 +8,7 @@ import { Idle, LoadState, useLoad, type Load } from '../ui/Loading';
 import type { Department, DepartmentTree, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { Bar, percent } from '../ui/Bar';
 import { Chip, agentWorking, doingLine, Listed, modelParts, Switch, STATUS_CLASS } from '../ui/Chip';
-import { CANVAS_NARROW as NARROW, FLOAT_GAP, LEFT_PANEL_COVER, canvasSpace, freeRoom, useFitMove, usePanZoom, worldTransition, ZoomBar, type Edges } from '../ui/canvas';
+import { CANVAS_NARROW as NARROW, FLOAT_GAP, LEFT_PANEL_COVER, canvasSpace, freeRoom, sameView, usePanZoom, worldTransition, ZoomBar, type Edges } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, BackIcon, InfoIcon, ListIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
 import { ApprovalPolicy } from '../ui/ApprovalPolicy';
@@ -442,11 +442,24 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
     return () => observer.disconnect();
   }, [panel, icons, words, onPlate, tickerHidden, shellTop]);
   useEffect(() => () => onPlate?.(null), [onPlate]);
-  /* The tree starts 8 px under the name, which stands where the shell says: as a bar comes or goes it moves in the same
-     render as the shell's top, so the schema follows the name at once. */
+  /* The tree and drawers start 8 px under the name plate, which tracks --shell-top so UI chrome stays clear of bars. */
   const treeTop = (shellTop ?? UNDER_MENU) + (space.plate || 44) + FLOAT_GAP;
   const style = { '--ticker-right': `${space.right}px`, '--tree-bottom': `${space.bottom}px`, '--tree-top': `${treeTop}px` } as CSSProperties;
-  return { root, dock, actions, crumbs, style, icons, tickerHidden: space.tickerHidden, fitBottom, treeTop, shellTop };
+  return { root, dock, actions, crumbs, style, icons, tickerHidden: space.tickerHidden, fitBottom, treeTop, shellTop, plate: space.plate };
+}
+
+/* The schema's top room: locked to the shellTop present when the schema first renders so transient shell bars never
+   shift the world after opening, while explicit Fit (whole = true) uses the live treeTop under .crumbs (#1874, #1882). */
+function useEntryTop(shellTop: number | null, plate: number, treeTop: number) {
+  const live = useRef(treeTop);
+  live.current = treeTop;
+  const entry = useRef(shellTop);
+  const shown = useRef(false);
+  if (!shown.current) entry.current = shellTop;
+  const openTop = (entry.current ?? UNDER_MENU) + (plate || 44) + FLOAT_GAP;
+  const markShown = useCallback(() => { shown.current = true; }, []);
+  const topFor = useCallback((whole: boolean) => (whole ? live.current : openTop), [openTop]);
+  return { markShown, topFor };
 }
 
 /* Inside a department: the head above the current task stages and their owners. Tasks, the repository, products and
@@ -527,23 +540,23 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   };
 
   /* Opens at a readable size, from the left or on a phone on the head's card, when the schema does not fit so; Fit shows all of
-     it. It stands from 8 px under the department's name, where the department says the tree starts, to the dock, and Show
-     everything keeps free at the bottom what the line of what happened may still grow by. When a bar of the shell comes or
-     goes, the name moves and the schema slides after it in the shell's time (#1635). */
-  const { fitBottom, treeTop, shellTop } = chrome;
-  const fitMove = useFitMove(shellTop);
+     it. The world opens clear of the name plate on entry and never shifts when shell bars come or go afterwards (#1874, #1882). */
+  const { fitBottom, treeTop, shellTop, plate } = chrome;
+  const { markShown, topFor } = useEntryTop(shellTop, plate, treeTop);
   const place = useCallback(
     (whole: boolean) => {
       const el = box.current, at = roomOf();
       if (!el || !at) return;
+      markShown();
       const { left, width } = at.space, phone = el.clientWidth <= NARROW;
-      const room = { left, width, height: el.clientHeight, free: treeTop, bottom: fitBottom.current };
-      const move = fitMove(viewNow.current, schemaView(room, size.current, whole, phone));
-      if (!move) return;
+      const room = { left, width, height: el.clientHeight, free: topFor(whole), bottom: fitBottom.current };
+      const next = schemaView(room, size.current, whole, phone);
+      if (sameView(viewNow.current, next)) return;
+      const move = { ...next, smooth: true as const };
       viewNow.current = move;
       setView(move);
     },
-    [setView, fitBottom, roomOf, treeTop, fitMove],
+    [setView, fitBottom, roomOf, markShown, topFor],
   );
 
   /* The schema is placed again when its frames or their staff change, and once its cards are first measured, not when a card

@@ -1,6 +1,7 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import type { LineState } from '@hornhoof/protocol/map';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
@@ -13,7 +14,7 @@ import { mapPeople, useOrg, wholeCompanyPeople, type MapPerson } from '../org';
 import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
 import { Bar, percent } from '../ui/Bar';
-import { CANVAS_NARROW, CANVAS_ZOOM_LIMITS, DRAG_PX, FLOAT_GAP, LEFT_PANEL_COVER, SIDE_GAP, canvasSpace, freeRoom, underShell, useFitMove, usePanZoom, worldTransition, ZoomBar, type Box, type Edges, type View } from '../ui/canvas';
+import { CANVAS_NARROW, CANVAS_ZOOM_LIMITS, DRAG_PX, FLOAT_GAP, LEFT_PANEL_COVER, SIDE_GAP, canvasSpace, freeRoom, sameView, usePanZoom, worldTransition, ZoomBar, type Box, type Edges, type View } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { useLoadFailure } from '../ui/LoadFailure';
 import { LoadState, useLoad, type Load } from '../ui/Loading';
@@ -28,7 +29,7 @@ import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
 import { clock } from './Subscriptions';
 import { guardedResizeObserver, useRenderGuard } from '../guard';
-import { useShellTop } from '../ui/shellBars';
+import { useShellBarsHost } from '../ui/shellBars';
 
 export { deptLayout, type DeptSpot } from '../map-arrange';
 
@@ -44,8 +45,8 @@ export const MAP_READABLE_K = 11 / 20;
    tall as well, and its cards' names larger still. */
 export const PHONE_MAP_READABLE_K = 11 / 14;
 /* The screen's bar floats over the top of the map, the zoom and the line of the orchestrator over its bottom: the map keeps
-   this much room from them at least, and Fit this much from the sides. The screen's bar ends this far down. The bars of the
-   shell float over the map's top too, and while one stands the room starts under them (#1639). */
+   this much room from them at least, and Fit this much from the sides. Transient shell bars overlay the map as a HUD without
+   shifting or resizing it (#1874). */
 const MAP_ROOM = { top: 76, bottom: 72 }, FIT_SIDE = 32, TOP_BAR = 56;
 /* What floats over the bottom of the map: the zoom, the line of the orchestrator and Put back. */
 const MAP_BARS = ':scope > .zoom, :scope > .ticker, :scope > .map-arrange';
@@ -617,9 +618,9 @@ function useChipNeed(box: { current: HTMLDivElement | null }, org: Org | null, l
 
 /* On a phone the map shows its cards and chips only between the screen's bar and the bars along its bottom, FLOAT_GAP clear
    of each, as a department's schema and tree do there: what scrolls under them goes out of sight, and the dots run on under
-   the glass. Measured as the map opens, as its bars come, go or grow, and as the screen changes size. bars: what says which
-   bars stand now. shellTop: where the room under the bars of the shell starts while one stands over the map (#1639). */
-function useMapRoom(box: { current: HTMLDivElement | null }, bars: string, shellTop: number | null): CSSProperties | undefined {
+   the glass. Measured as the map opens, as its bars come, go or grow, and as the screen changes size. Transient shell bars
+   overlay as HUD and never clip or shift the map (#1874). */
+function useMapRoom(box: { current: HTMLDivElement | null }, bars: string): CSSProperties | undefined {
   const [room, setRoom] = useState<{ top: number; bottom: number } | null>(null);
   useLayoutEffect(() => {
     const el = box.current;
@@ -627,7 +628,7 @@ function useMapRoom(box: { current: HTMLDivElement | null }, bars: string, shell
     const measure = () => {
       const phone = el.clientWidth > 0 && el.clientWidth <= CANVAS_NARROW;
       const free = phone ? freeRoom(el, el.querySelectorAll(MAP_BARS), { left: 0, width: el.clientWidth }) : null;
-      const next = free && { top: underShell(TOP_BAR + FLOAT_GAP, shellTop), bottom: el.clientHeight - free.y1 };
+      const next = free && { top: TOP_BAR + FLOAT_GAP, bottom: el.clientHeight - free.y1 };
       setRoom(was => (was?.top === next?.top && was?.bottom === next?.bottom ? was : next));
     };
     measure();
@@ -636,7 +637,7 @@ function useMapRoom(box: { current: HTMLDivElement | null }, bars: string, shell
     observer.observe(el);
     for (const bar of el.querySelectorAll(MAP_BARS)) observer.observe(bar);
     return () => observer.disconnect();
-  }, [box, bars, shellTop]);
+  }, [box, bars]);
   return room ? ({ '--map-top': `${room.top}px`, '--map-bottom': `${room.bottom}px` } as CSSProperties) : undefined;
 }
 
@@ -664,13 +665,20 @@ function useMapLoad(org: Org | null, failure: unknown, loadOrg: () => void, layo
 }
 
 /* What the map shows in its place before it can draw itself: where the route leads nowhere, the shared indicator while the
-   company and the person's arrangement come, why they did not with Retry, or a failure of a later look at the company;
-   null once there is a map to draw. It draws only once both came, so no block moves after the first frame. */
-function mapStandIn(t: Messages, failure: unknown, load: Load, onHome?: () => void) {
+   company and the person's arrangement come, or why they did not with Retry; null once there is a map to draw. A later
+   reload failure overlays the kept map via MapAlert without unmounting or shifting it (#1874). */
+function mapStandIn(failure: unknown, load: Load, onHome?: () => void) {
   if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
   if (load.phase !== 'done') return <div className="map map-wait" aria-busy={load.phase !== 'failed'}><LoadState load={load} form="screen" /><MapVersion /></div>;
-  if (failure !== null) return <p className="alert" role="alert">{errorText(t, failure)}</p>;
   return null;
+}
+
+/* A reload failure while the map is already drawn overlays the map in the shell's HUD stack without moving the world. */
+function MapAlert({ failure, inside, host }: { failure: unknown; inside: boolean; host: HTMLElement | null }) {
+  const t = useT();
+  if (inside || failure === null) return null;
+  const bar = <p className="alert" role="alert"><span dir="auto">{errorText(t, failure)}</span></p>;
+  return host ? createPortal(bar, host) : bar;
 }
 
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
@@ -684,8 +692,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const still = useReducedMotion();
   const wirePrefix = useId();
   const company = me.person.scopeKind === 'company';
-  /* Where the room under the bars of the shell starts while one stands over the map. */
-  const shellTop = useShellTop();
+  const barsHost = useShellBarsHost();
   const { org, failure: loadFailure, load: loadOrg } = useOrg();
   /* While the update panel says the server takes no changes, the map keeps what it last showed. */
   const failure = useLoadFailure(loadFailure);
@@ -805,9 +812,9 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
       const el = box.current;
       if (!el || !el.clientWidth) return null;
       const space = canvasSpace(el.clientWidth, leftPanelOpen ? LEFT_PANEL_COVER : 0, windowOpen ? WINDOW_W : 0);
-      return freeRoom(el, el.querySelectorAll(MAP_BARS), space, { ...MAP_ROOM, top: underShell(MAP_ROOM.top, shellTop), side });
+      return freeRoom(el, el.querySelectorAll(MAP_BARS), space, { ...MAP_ROOM, side });
     },
-    [windowOpen, leftPanelOpen, shellTop],
+    [windowOpen, leftPanelOpen],
   );
   edges.current = () => {
     const shown = arrRef.current, room = roomOf(SIDE_GAP);
@@ -815,20 +822,19 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   };
 
   /* Show everything when whole; otherwise as the map opens, readable. smooth: it moves there, as when the person asks; the
-     map placing itself stands there at once, so it never glides after its first frame (#1620). A fit because a bar of the
-     shell came or went follows the bars in the shell's time (#1635). */
-  const fitMove = useFitMove(shellTop);
+     map placing itself stands there at once, so it never glides after its first frame (#1620). Shell bars never trigger a
+     re-fit (#1874). */
   const fit = useCallback((whole: boolean, smooth = true) => {
     const shown = arrRef.current, room = roomOf(FIT_SIDE);
     if (!room || !org || !shown || inside) return;
     const phone = box.current!.clientWidth <= CANVAS_NARROW;
     const v = mapView(room, arrangedBounds(shown, org), whole, phone ? PHONE_MAP_READABLE_K : MAP_READABLE_K, shown.hub.x + HUB);
     setMinZoom(Math.min(MIN_K, v.k));
-    const move = fitMove(viewNow.current, v, smooth);
-    if (!move) return;
+    if (sameView(viewNow.current, v)) return;
+    const move: View = { ...v, smooth };
     viewNow.current = move;
     setView(move);
-  }, [org, inside, setView, roomOf, fitMove]);
+  }, [org, inside, setView, roomOf]);
   const fitRef = useRef(fit);
   fitRef.current = fit;
 
@@ -840,11 +846,11 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
 
   /* Until the view is the person's own, the map shows all of itself, or as much as it shows readable where all of it would be
      too small to read: as it opens, as the arrangement comes from the server or is put back, as its cards and people chips
-     grow with their words, and as the screen changes size. Live changes of the company, the orchestrator's window, the left
-     panel and moving a block leave the view alone. */
+     grow with their words, and as the screen changes size. Live changes of the company, shell bars, the orchestrator's window,
+     the left panel and moving a block leave the view alone. */
   const shown = !!arr;
   const putBack = Object.keys(layout.placed).length > 0 || Object.keys(layout.bends).length > 0 || layout.failed;
-  const roomStyle = useMapRoom(box, `${shown}|${windowOpen}|${putBack}`, shellTop);
+  const roomStyle = useMapRoom(box, `${shown}|${windowOpen}|${putBack}`);
   const cardH = arr?.depts[0]?.h ?? 0, chipH = `${arr?.top[0]?.h ?? 0}:${arr?.people.chips[0]?.h ?? 0}`;
   usePauseHiddenMap(box, inside, shown);
   /* Before the first frame, so the map is first drawn where it stands and does not move there. */
@@ -859,7 +865,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     const ro = guardedResizeObserver(auto, 'map');
     ro.observe(el);
     return () => ro.disconnect();
-  }, [shown, inside, layout.version, mine, cardH, chipH, shellTop]);
+  }, [shown, inside, layout.version, mine, cardH, chipH]);
 
   /* The person's own view stays for the next visit; the flight into a department is not theirs. */
   useEffect(() => {
@@ -889,7 +895,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     timers.current.add(timer);
   }
 
-  const standIn = mapStandIn(t, failure, mapLoad, onHome);
+  const standIn = mapStandIn(failure, mapLoad, onHome);
   if (standIn || !org || !arr) return standIn ?? <div className="map" aria-busy="true"><MapVersion /></div>;
 
   const depts = org.departments;
@@ -981,6 +987,8 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   );
 
   return (
+    <>
+    <MapAlert failure={failure} inside={inside} host={barsHost} />
     <div className="map" ref={box} inert={inside} aria-hidden={inside || undefined} {...handlers}>
       <div className="map-room" style={roomStyle}>
         <div
@@ -1165,5 +1173,6 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
         </div>
       )}
     </div>
+    </>
   );
 }

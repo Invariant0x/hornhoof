@@ -3,13 +3,17 @@ import { guardedResizeObserver } from '../guard';
 import { FLOAT_GAP } from './canvas';
 import { useT } from '../i18n';
 
-/* The bars of the shell, each in its own row under the header: an update, the recovery file, a load that failed and a block
-   that stopped. A stopped window floats on its own and is none of them. */
-export const SHELL_BARS = ':scope > :is(.update-banner, .alert, .guard-stop:not(.float))';
+/* The bars of the shell, stacked in the .shell-bars HUD layer under the header: an update, the recovery file, a load that
+   failed and a block that stopped. A stopped window floats on its own and is none of them. */
+export const SHELL_BARS = ':scope > .shell-bars > :is(.update-banner, .alert, .guard-stop:not(.float)), :scope > :is(.update-banner, .alert, .guard-stop:not(.float))';
 
-/* On the map the canvas and an open department fill the window from its top, and the header and the bars of the shell float
-   over them (#1639). What they show starts here, from the top of the page: FLOAT_GAP under the last bar on every screen,
-   however far apart the bars stand (#1635). While no bar stands it is null, and each keeps its own room under the header. */
+/* The dedicated .shell-bars container inside main.body, so boundaries and map reload errors portal into the same HUD stack. */
+export const ShellBarsHost = createContext<HTMLElement | null>(null);
+export const useShellBarsHost = (): HTMLElement | null => useContext(ShellBarsHost);
+
+/* On the map and an open department the world always fills the viewport without shifting or resizing (#1874). ShellTop tells
+   UI chrome (.crumbs, windows, cards) where the room under the shell's bars starts: FLOAT_GAP under the last bar on every
+   screen, or null while no bar stands. */
 export const ShellTop = createContext<number | null>(null);
 export const useShellTop = (): number | null => useContext(ShellTop);
 
@@ -49,7 +53,13 @@ const rowsOf = (changed: () => void): Watcher => (typeof MutationObserver === 'u
    gives back what stops it. */
 function watchShellBars(page: HTMLElement, changed: () => void): () => void {
   const watched = new WeakSet<Element>();
+  const stacks = new WeakSet<Element>();
   const look = () => {
+    const stack = page.querySelector(':scope > .shell-bars');
+    if (stack && !stacks.has(stack)) {
+      stacks.add(stack);
+      rows.observe(stack, { childList: true });
+    }
     for (const bar of page.querySelectorAll(SHELL_BARS)) {
       if (watched.has(bar)) continue;
       watched.add(bar);

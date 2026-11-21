@@ -29,16 +29,9 @@ const shortCommit = (commit?: string) => commit?.slice(0, 7) || '?';
 export const versionText = ({ version, commit }: Version) => `${version} (${shortCommit(commit)})`;
 export const buildText = (build: Version & { tag: string }) => versionText({ version: build.version || build.tag, commit: build.commit });
 
-/* The running build has a footer below the screen, in a row of its own so it covers nothing; the map names it over its own
-   corner instead. */
-export function VersionMark() {
-  const version = useVersion();
-  return version && <footer className="version-mark">{versionText(version)}</footer>;
-}
-
-/* The running build over the map, in the bottom end corner of the room its bars leave free, read left to right on any page.
-   It is on the map from the moment the map opens, even before the build answers, so the footer row never comes and goes
-   under the map (#1590). off: a department's view is open over the map, which names no version then. */
+/* The running build over the map only (#1590, #1874): small muted HUD text in the bottom end corner of the room its bars
+   leave free, read left to right on any page, with no full-width bottom bar anywhere in the app. off: a department's view
+   is open over the map, which names no version then. */
 export function MapVersion({ off = false }: { off?: boolean }) {
   return off ? null : <MapVersionText />;
 }

@@ -1,6 +1,8 @@
 import { Component, Fragment, type ErrorInfo, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { enterLight, isRenderStorm, leaveLight, useLight } from '../guard';
 import { useT } from '../i18n';
+import { ShellBarsHost } from './shellBars';
 
 /* reset: what the block shows, such as the department open in it; when it changes, a stopped block draws again. float: the
    block stands on its own over the page, as an agent's window does, and so does what stands in for it. */
@@ -23,6 +25,8 @@ function GuardStop({ storm, float, onRestart }: { storm: boolean; float: boolean
 /* Keeps a block that fails or draws without end off the page while the rest of it works. A block that drew without end
    turns the page light too. The restart draws the block anew from nothing, as when it first opened. */
 export class GuardBoundary extends Component<Props, State> {
+  static contextType = ShellBarsHost;
+  declare context: HTMLElement | null;
   state: State = { error: null, round: 0 };
 
   static getDerivedStateFromError(error: unknown): Partial<State> {
@@ -42,7 +46,10 @@ export class GuardBoundary extends Component<Props, State> {
 
   render() {
     const { error, round } = this.state;
-    if (error) return <GuardStop storm={isRenderStorm(error)} float={!!this.props.float} onRestart={this.restart} />;
+    if (error) {
+      const plate = <GuardStop storm={isRenderStorm(error)} float={!!this.props.float} onRestart={this.restart} />;
+      return !this.props.float && this.context ? createPortal(plate, this.context) : plate;
+    }
     return <Fragment key={round}>{this.props.children}</Fragment>;
   }
 }

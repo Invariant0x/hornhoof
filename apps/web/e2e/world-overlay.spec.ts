@@ -300,7 +300,7 @@ for (const width of WIDTHS) for (const skin of SKINS) {
     await page.goto('/tasks');
     await expect(page.locator('.tracker')).toBeVisible();
     await page.getByRole('button', { name: en.shell.account, exact: true }).click();
-    await page.getByRole('menuitem', { name: en.shell.settings, exact: true }).click();
+    await page.locator('.account-menu').getByRole('button', { name: en.settings.menu, exact: true }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.locator('.version-mark, [role="contentinfo"], .map-version')).toHaveCount(0);
 

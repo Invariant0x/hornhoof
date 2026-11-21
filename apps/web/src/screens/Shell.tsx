@@ -9,7 +9,7 @@ import { Idents } from '../ui/Idents';
 import { FirstContact } from '../ui/FirstContact';
 import { RecoveryBanner } from '../ui/RecoveryBanner';
 import { SwitchBanner } from '../ui/SwitchBanner';
-import { ShellTop, useMeasuredShellTop } from '../ui/shellBars';
+import { ShellBarsHost, ShellTop, useMeasuredShellTop } from '../ui/shellBars';
 import { LoadFailure, UpdateSaysIt, useLoadFailure } from '../ui/LoadFailure';
 import { onTop, useLoad } from '../ui/Loading';
 import { UpdateBanner } from '../ui/UpdateBanner';
@@ -405,8 +405,9 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const accountButton = useRef<HTMLButtonElement>(null);
   const closeContact = useCallback(() => { setContact(false); accountButton.current?.focus(); }, []);
   const fit = useTabsFit(`${TABS.map(id => t.shell.tabs[id]).join('|')}|${decisions.waiting}`);
-  /* Where the room under the bars of the shell starts, which the map and an open department start what they show at. */
+  /* Where UI chrome (.crumbs, windows, cards) starts under the bars of the shell; the world underneath never moves (#1874). */
   const page = useRef<HTMLElement>(null);
+  const [barsHost, setBarsHost] = useState<HTMLDivElement | null>(null);
   const shellTop = useMeasuredShellTop(page);
   /* The room an open department's name takes at the top, which the cards open under. */
   const [plateRoom, setPlateRoom] = useState<number | null>(null);
@@ -442,6 +443,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   return (
     <AgentWindowContext value={openAgent}>
     <UpdateSaysIt value={updateSaysIt}>
+    <ShellBarsHost value={barsHost}>
     <ShellTop value={shellTop}>
     <div className="shell" style={shellVars(tab === 'map', shellTop, plateRoom)}>
       <header className="topbar" ref={fit.bar}>
@@ -452,18 +454,20 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         <ShellTabs tab={tab} waiting={decisions.waiting} navigate={navigate} fit={fit} />
         <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} inbox={inbox} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} onContact={() => setContact(true)} toDecide={toDecide} account={account} accountButton={accountButton} side={fit.side} />
       </header>
-      {/* The bars of the shell stand first in the page, each in its own row under the header, and what the page shows
-          comes after them. On the map they float over it and an open department, which start under them, and the windows
-          and cards open under them too: the shell says where with --shell-top, and how much room an open department's
-          name takes under them with --plate-room. */}
+      {/* On the map and open departments (.body:not(.page)), the world always fills the viewport beneath the UI and never
+          shifts or resizes (#1874). Shell bars (.update-banner, .alert, .guard-stop) live in the dedicated .shell-bars HUD
+          stack over the world with pass-through pointer events outside the bars; UI chrome (.crumbs, windows, cards) reads
+          --shell-top and --plate-room so chrome stays clear of bars. On pages (.body.page), .shell-bars flows under the header. */}
       <main ref={page} className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}${tab === 'tasks' ? ' tracker-page' : ''}`}>
-        <SwitchBanner>
-          {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} onProgressShown={setUpdateSaysIt} />}
-          <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount({ kind: 'settings', group: 'company' })} />
-        </SwitchBanner>
-        <AgentWindowError shown={windows.shown} org={org} failure={orgFailure} />
-        {/* Before the company came, the department says it where it will stand. */}
-        {deptId && !unavailableFailure(orgFailure) && <LoadFailure failure={onTop(org, orgFailure)} />}
+        <div className="shell-bars" ref={setBarsHost}>
+          <SwitchBanner>
+            {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} onProgressShown={setUpdateSaysIt} />}
+            <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount({ kind: 'settings', group: 'company' })} />
+          </SwitchBanner>
+          <AgentWindowError shown={windows.shown} org={org} failure={orgFailure} />
+          {/* Before the company came, the department says it where it will stand. */}
+          {deptId && !unavailableFailure(orgFailure) && <LoadFailure failure={onTop(org, orgFailure)} />}
+        </div>
         {(route.kind === 'unavailable' || route.kind === 'invite' || missingDepartment || denied) && <RouteUnavailable onHome={goHome} />}
         <GuardBoundary block="map" reset={deptId}>
           <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
@@ -533,6 +537,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
       {company && updates.cut && <UpdateCut cut={updates.cut} updates={updates} />}
     </div>
     </ShellTop>
+    </ShellBarsHost>
     </UpdateSaysIt>
     </AgentWindowContext>
   );

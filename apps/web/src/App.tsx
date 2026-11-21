@@ -10,7 +10,6 @@ import { Setup } from './screens/Setup';
 import { Shell } from './screens/Shell';
 import type { Me } from './types';
 import { Card } from './ui/Card';
-import { VersionMark } from './ui/VersionMark';
 import { parseRoute } from './routes';
 
 type Screen =
@@ -25,7 +24,6 @@ export function App() {
   return (
     <div className="app-layout">
       <div className="app-screen"><Screens /></div>
-      <VersionMark />
     </div>
   );
 }
