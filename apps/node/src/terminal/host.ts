@@ -96,8 +96,12 @@ type Turn = {
   sourceDelivery?: OperatorDelivery;
   operatorInstance?: string;
   ownActivity?: boolean;
+  /* Hornhoof called the turn off: its program got its Escape, and nothing that comes later stops it again. */
+  calledOff?: boolean;
 };
 type JobError = RunResult['error'];
+/* What the end of a turn Hornhoof gave tells as Hornhoof calls it off. */
+export type CalledOff = { sessionId: string | null; tokens: TurnTokens | null };
 type LiveWords = { turn: Turn; program: TermProgram; text: string; deadline: number; reason?: string; operatorDelivery?: OperatorDelivery };
 type TakenWords = { jobId: string | null; text: string; operatorDelivery?: OperatorDelivery };
 
@@ -1530,7 +1534,7 @@ export class TerminalHost {
 
   private async stopTurn(a: Agent, job: TermJob, ended: Deferred<string>): Promise<RunResult> {
     this.intentional(a, 'cancelled');
-    await this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Escape'));
+    if (!a.turn?.calledOff) await this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Escape'));
     await Promise.race([ended.promise, sleep(STOP_WAIT_MS)]);
     a.busy = false;
     return await this.failedTurn(a, job, 'cancelled');
@@ -3146,16 +3150,37 @@ export class TerminalHost {
     if (a.program?.kind === 'claude' && a.workDir) await this.fs.remove(claudeToolsFile(a.workDir)).catch(() => {});
   }
 
-  /* Hornhoof calls off a turn a person typed: the program stops as on Escape, and the turn ends as stopped. */
+  /* Hornhoof calls off a turn: the program stops as on Escape, and the turn ends as stopped. A turn a person typed tells
+     its end here. One Hornhoof gave waits for no end signal any more, and its node tells its end. A turn called off once,
+     or one this host does not hold, has nothing left to stop. */
   async cancel(jobId: string): Promise<void> {
-    const a = [...this.agents.values()].find(x => x.turn?.typed && x.turn.jobId === jobId);
+    const a = this.holding(jobId);
     if (!a) return;
     this.intentional(a, 'cancelled');
-    this.finishTyped(a, '', 'cancelled');
+    if (a.turn!.typed) this.finishTyped(a, '', 'cancelled');
+    else this.callOff(a, a.turn!);
     /* A session that is gone took its program with it; the turn ends all the same. */
     a.cancelling = this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Escape')).catch(() => {});
     await a.cancelling;
     a.busy = false;
+  }
+
+  /* What the end of a turn Hornhoof gave tells as Hornhoof calls it off now: none for a turn a person typed, which tells
+     its own, or one this host does not hold. */
+  calledOffEnd(jobId: string): CalledOff | null {
+    const a = this.holding(jobId);
+    return a && !a.turn!.typed ? { sessionId: a.sessionId, tokens: a.tally.tokens() } : null;
+  }
+
+  private holding(jobId: string): Agent | undefined {
+    return [...this.agents.values()].find(x => x.turn?.jobId === jobId && !x.turn.calledOff);
+  }
+
+  /* Its run waits for nothing more: it ends as stopped, whatever the program says or leaves unsaid. */
+  private callOff(a: Agent, turn: Turn): void {
+    turn.calledOff = true;
+    a.stopped = true;
+    a.ended?.resolve('');
   }
 
   /* The agent's views hear when its program comes up or goes. */

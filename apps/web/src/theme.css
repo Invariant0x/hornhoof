@@ -604,6 +604,9 @@ select:disabled { opacity: .55; }
 
 /* Map */
 .map { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+/* The map's place, the department's and its tree's while their data comes: the shared indicator, or why it stalled with
+   Try again, in the middle of where the data will stand, its words wrapping however narrow the screen. */
+.map.map-wait, .dcanvas.dview-wait, .tview.tview-wait { display: grid; grid-template-columns: minmax(0, 60ch); place-content: center; padding: 16px; cursor: default; }
 .map::before {
   content: ''; position: absolute; inset: 0; pointer-events: none;
   background-image: radial-gradient(var(--dot) 1px, transparent 1px);
@@ -719,11 +722,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .dname { min-width: 0; overflow-wrap: break-word; font-family: var(--f-display); font-size: 20px; font-weight: 600; }
 .cnt { flex: none; font-family: var(--f-display); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .cnt b { color: var(--ink); font-weight: 600; }
-/* Zoom bottom left and the orchestrator's line bottom middle. */
-.zoom { position: absolute; left: 16px; bottom: 16px; max-inline-size: calc(100% - 32px); display: flex; align-items: center; }
-/* On the map the zoom stands at the start of the bottom, mirrored on a page right to left as the rest of the layout is; the
-   other canvases keep it at the left, beside bars they place from the left (#1622). */
-.map > .zoom { inset-inline: 16px auto; }
+/* The zoom at the start of a canvas's bottom, mirrored on a page right to left as the rest of the layout is, the tracker's
+   graph mirrored with it, its root at the start (#1622, #1658, #1670), and the orchestrator's line bottom middle. */
+.zoom { position: absolute; inset-inline-start: 16px; bottom: 16px; max-inline-size: calc(100% - 32px); display: flex; align-items: center; }
 /* A block's grip over its top left corner, 44 px to touch at any zoom: nothing drawn, only the pointer shows it, and the ring of
    the keyboard's focus; the map's corners are not mirrored. */
 .grip { box-sizing: border-box; margin: 0; padding: 0; border: 0; background: none; cursor: move; touch-action: none; transform-origin: 50% 50%; }
@@ -784,6 +785,8 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .people { max-width: 1040px; margin: 0 auto; padding: 16px 16px 48px; display: grid; gap: 18px; }
 .people-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
 .people-head > div { display: grid; gap: 6px; max-width: 60ch; }
+/* Which machines keep copies of the company, under the machines' table once they came. */
+.machines-copies { display: grid; gap: 6px; max-width: 60ch; }
 .panel > .edge-in { padding: 20px; display: grid; gap: 14px; }
 .panel .actions { display: flex; justify-content: flex-end; }
 /* A card with a form for people, assistants, hiring and plans: 24 px inside and 16 px between blocks, 16
@@ -955,6 +958,8 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 /* A held table spaces its search, count line and table as the screen around it does, so they stand where they will. */
 .held-table, .held-table > .load-in { gap: inherit; }
 .held-table > .load-in { display: grid; }
+/* The filter buttons' row of a held table keeps the size it took last in this tab, if it showed (TableTools, Design #1667). */
+.held-table .tools-r2 { min-block-size: var(--tools-room, 0px); }
 .arrive { animation: arrive .12s ease-out both; }
 @keyframes arrive { from { opacity: 0; } }
 .load-fail { display: grid; gap: 8px; max-inline-size: 60ch; padding: 12px 14px; border-inline-start: 3px solid var(--pink); background: var(--surface2); color: var(--ink); font-family: var(--f-body); font-size: 14px; text-align: start; }
@@ -1145,6 +1150,9 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .t-bar .panel-count { margin: 0; font-weight: 600; line-height: 1; white-space: nowrap; pointer-events: none; }
 .t-bar svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .t-log { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 12px; }
+/* The conversation's place while the window's load comes. */
+.t-log.t-wait { justify-content: center; align-items: center; }
+.t-log.t-wait > * { max-width: 60ch; }
 .t-log > * { animation: tin .45s ease-out; }
 @keyframes tin { from { opacity: 0; transform: translateY(4px); } }
 .t-line { display: grid; gap: 12px; }
@@ -1285,10 +1293,10 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .t-copy:hover:not(:disabled) { color: var(--cyan-ink); background: var(--glow); }
 .t-copy:disabled { color: var(--muted); cursor: default; }
 .t-load { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: #15191F; color: #dcdcdc; font-family: var(--f-body); font-size: 15px; }
-.t-load .spinner { width: 44px; height: 44px; border-width: 3px; border-color: #2b323b; border-top-color: #dcdcdc; }
+.t-load > .spinner { width: 44px; height: 44px; border-width: 3px; border-color: #2b323b; border-top-color: #dcdcdc; }
 /* Why the terminal cannot show now, in place of it. */
 .t-load p { max-width: 60ch; margin: 0; padding: 0 24px; text-align: center; overflow-wrap: anywhere; }
-@media (prefers-reduced-motion: reduce) { .t-load .spinner { animation-duration: 3s; } }
+@media (prefers-reduced-motion: reduce) { .t-load > .spinner { animation-duration: 3s; } }
 .t-cards { flex: none; max-height: 45%; overflow: auto; padding: 10px 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
 /* Access to machines: a line each, no taller than one row of the window's header, however narrow the screen. */
 /* Earlier lines of a conversation come above the oldest one kept. */
@@ -1559,10 +1567,11 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 .crumbs { position: absolute; z-index: 3; top: 12px; inset-inline-start: 68px; display: flex; align-items: flex-start; gap: 8px; height: auto; max-width: calc(50% - var(--tabs-half, 204px) - 76px); min-width: 0; }
 .crumbs h2 { min-width: 0; white-space: normal; overflow-wrap: break-word; font-size: 15px; color: var(--cyan-ink); }
 .crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; height: auto; min-height: 44px; box-sizing: border-box; min-width: 0; padding: 8px 14px; color: var(--ink); }
-.dv-acts { position: absolute; z-index: 3; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.dv-acts { position: absolute; z-index: 3; inset-inline-end: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px; }
 /* A window, card or task ends above the strip the zoom and the actions sit in, so with one open the actions move along
-   that strip to right after the zoom, out from under it at any width; on a phone the window covers the whole screen. */
-@media (min-width: 761px) { .body.with-window .dv-acts, .body.with-task .dv-acts { left: 212px; right: auto; } }
+   that strip to right after the zoom, out from under it at any width; on a phone the window covers the whole screen. It
+   stands at the right in either direction, so right to left the actions already keep the end, away from it (#1658). */
+@media (min-width: 761px) { .body.with-window .dv-acts:dir(ltr), .body.with-task .dv-acts:dir(ltr) { inset-inline: 212px auto; } }
 .hbtn { height: 44px; padding: 0 16px; box-sizing: border-box; color: var(--ink); font-family: var(--f-display); font-size: 14px; font-weight: 600; white-space: nowrap; cursor: pointer; }
 .hbtn:hover { border-color: var(--line2); }
 .hbtn.on { color: var(--cyan-ink); box-shadow: inset 0 -2px 0 var(--cyan); }
@@ -1572,6 +1581,9 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 /* The tools in words stand apart. As icons they make one strip of 44 px cells drawn like the section tabs, and Hire stands
    after them at the end of the row, on a row of its own when it does not fit. */
 .dv-tools { display: contents; }
+/* While the company comes the department's tools stand at their size and wait, muted, as a disabled button does (#1620). */
+.dv-tools > .hbtn:disabled { cursor: not-allowed; opacity: .45; }
+.dv-zoom[inert] > .zoom { opacity: .45; }
 .dv-acts[data-fit="icons"] .dv-tools { display: flex; border: 0; outline: 1px solid var(--line); outline-offset: -1px; }
 .dv-acts[data-fit="icons"] .dv-tools > .hbtn { border: 0; background: none; }
 .dv-acts[data-fit="icons"] .dv-tools > .hbtn + .hbtn { border-inline-start: 1px solid var(--line); }
@@ -1584,10 +1596,13 @@ body:has(.dview) .version-mark { display: none; }
    every window and panel fixed there (#1384). A phone shows no footer; About names the version there, and the map over its
    corner. */
 @media (max-width: 760px) { .version-mark { display: none; } }
-/* The line of what changed sits between the zoom and the actions. */
-.dview .ticker { left: 212px; right: var(--ticker-right, 16px); transform: none; max-width: none; }
+/* The line of what changed sits between the zoom and the actions, in either direction. */
+.dview .ticker { inset-inline: 212px var(--ticker-right, 16px); transform: none; max-width: none; }
 .dv-drawer { position: absolute; z-index: 4; }
-.dv-drawer, .acard { top: 68px; left: 16px; bottom: 76px; width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
+.dv-drawer, .acard { top: 68px; bottom: 76px; width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
+/* The drawer opens at the start, under the department's name, mirrored right to left; a window keeps its own place (#1658). */
+.dv-drawer { inset-inline-start: 16px; }
+.acard { left: 16px; }
 /* The drawer starts under the department's name and ends above the line of what happened, as the department measures them. */
 .dv-drawer { top: var(--tree-top, 68px); bottom: var(--tree-bottom, 76px); }
 .dv-drawer-h { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 6px 6px 18px; border-bottom: 1px solid var(--line); }
@@ -1757,6 +1772,7 @@ body:has(.dview) .version-mark { display: none; }
 }
 :is(.plan-settings, .plan-fallbacks) > h4 { margin: 0; font-size: 14px; }
 .plan-fallbacks .part-note { font-size: inherit; overflow-wrap: anywhere; }
+.plan-fallbacks { --fallback-control-size: 44px; --fallback-control-gap: 8px; }
 /* A field of the card is as wide as what it shows, up to the band, with its caret on its end side, and 44 px high as
    every field of the screen. Its value wraps rather than ending in dots: the select itself is clear over a copy of its
    value that can take more lines. Its focus is the page's ring, not the glow of a field being typed in. Its list and caret
@@ -1777,18 +1793,20 @@ body:has(.dview) .version-mark { display: none; }
 :is(.plan-settings, .plan-fallbacks) .select-wrap > select:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; border-color: var(--line2); box-shadow: none; }
 .model-select { grid-template-areas: "value"; }
 .model-select > select, .model-select > .model-value { grid-area: value; }
-.plan-fallbacks .model-select > select { z-index: 1; block-size: 100%; background-color: transparent; color: transparent; }
+.plan-fallbacks .model-select > select { z-index: 1; block-size: 100%; min-block-size: var(--fallback-control-size); background-color: transparent; color: transparent; }
 .model-select option { background-color: var(--surface2); color: var(--ink); }
 .model-value {
-  display: grid; align-items: center; min-inline-size: 0; min-block-size: 44px; padding-block: 8px; padding-inline: 12px 32px;
+  display: grid; align-items: center; min-inline-size: 0; min-block-size: var(--fallback-control-size); padding-block: 8px; padding-inline: 12px 32px;
   border: 1px solid transparent; background: var(--surface2); color: var(--ink); text-align: start; overflow-wrap: anywhere;
 }
 /* A model whose name is long opens its whole names as radio buttons under the field, as no browser's menu shows them whole. */
-.model-disclosure { display: grid; gap: 8px; min-inline-size: 0; }
-.model-trigger { inline-size: 100%; padding: 0; border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; text-align: start; }
-.model-trigger > .model-value { border: 0; }
+.model-trigger {
+  appearance: none; inline-size: 100%; min-block-size: var(--fallback-control-size); padding: 0;
+  border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; text-align: start;
+}
+.model-trigger > .model-value { min-block-size: 0; border: 0; }
 .model-trigger:hover, .model-choice:hover { border-color: var(--cyan-ink); }
-.model-disclosure > .choice-list { margin: 0; padding: 0; border: 0; }
+.fallback-model > .choice-list { grid-area: choices; border: 0; }
 .plan-fallbacks .choice-list { display: grid; gap: 8px; min-inline-size: 0; margin: 0; padding: 0; list-style: none; }
 .model-choice {
   display: flex; align-items: center; gap: 8px; min-inline-size: 0; min-block-size: 44px; padding: 8px 12px;
@@ -1801,12 +1819,12 @@ body:has(.dview) .version-mark { display: none; }
   .plan-fallbacks .model-select > select { forced-color-adjust: none; color: transparent; border-color: ButtonText; }
   .model-select option { color: CanvasText; background-color: Canvas; }
 }
-/* The fallback plans in their order, numbered. On a narrow card a plan's name, its model and its moves stand one under the
-   other past its number, the moves at the end edge; on a card of 700 px and more they stand in one row on shared columns. */
+/* On narrow cards the actions sit below the model to leave room for its full name. On wide cards they share the field's
+   row; the label and expanded options have their own rows, so neither shifts the buttons away from the field. */
 .fallback-list { display: grid; margin: 0; padding: 0; list-style: none; min-inline-size: 0; }
 .fallback-list > .entry {
-  display: grid; grid-template-columns: 24px minmax(0, 1fr); grid-template-areas: "position plan" ". model" ". moves";
-  gap: 8px; align-items: start; min-inline-size: 0;
+  display: grid; grid-template-columns: 24px minmax(0, 1fr); grid-template-areas: "position plan" ". model";
+  gap: var(--fallback-control-gap); align-items: start; min-inline-size: 0;
 }
 .fallback-list > .entry:not(:last-child) { padding-block-end: 8px; }
 .fallback-list > .entry + .entry { padding-block-start: 8px; border-block-start: 1px solid var(--line); }
@@ -1816,16 +1834,26 @@ body:has(.dview) .version-mark { display: none; }
 }
 .fallback-name { grid-area: plan; min-inline-size: 0; font-weight: 600; overflow-wrap: anywhere; }
 .fallback-model { grid-area: model; min-inline-size: 0; }
-.fallback-moves { grid-area: moves; }
-.plan-fallbacks .fallback-moves { flex-wrap: nowrap; }
-.plan-fallbacks .fallback-moves > .act { flex: none; inline-size: 44px; block-size: 44px; min-block-size: 44px; padding: 0; justify-content: center; }
+.plan-fallbacks .fallback-model.field { grid-template-areas: "label" "control" "moves"; }
+.plan-fallbacks .fallback-model.field:has(> .choice-list) { grid-template-areas: "label" "control" "choices" "moves"; }
+.fallback-model > label { grid-area: label; }
+.fallback-model > .select-wrap { grid-area: control; }
+.plan-fallbacks .fallback-moves { grid-area: moves; align-self: center; flex-wrap: nowrap; gap: var(--fallback-control-gap); }
+.plan-fallbacks .fallback-moves > .act {
+  flex: none; inline-size: var(--fallback-control-size); block-size: var(--fallback-control-size); min-block-size: var(--fallback-control-size);
+  padding: 0; justify-content: center;
+}
 .plan-fallbacks .fallback-moves > .act.danger { border-color: var(--pink-ink); }
 .plan-fallbacks .fallback-moves .ic, .fallback-add .ic { width: 16px; height: 16px; }
 @container card (min-width: 700px) {
   .fallback-list > .entry {
-    grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr) max-content; grid-template-areas: "position plan model moves";
+    grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr) max-content; grid-template-areas: "position plan model model";
     column-gap: 16px; align-items: center;
   }
+  .plan-fallbacks .fallback-model.field {
+    grid-template-columns: subgrid; column-gap: normal; grid-template-areas: "label label" "control moves";
+  }
+  .plan-fallbacks .fallback-model.field:has(> .choice-list) { grid-template-areas: "label label" "control moves" "choices choices"; }
 }
 .fallback-add { display: grid; justify-items: end; gap: 8px; min-inline-size: 0; }
 .fallback-add > .btn { max-inline-size: 100%; padding: 8px 12px; white-space: normal; overflow-wrap: anywhere; }
@@ -1903,7 +1931,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   /* The hint of an empty map stands whole above the dock, which may grow to several rows: across the width, 16px above
      its top as the map measures it. */
   .dv-empty { left: 16px; right: 16px; bottom: calc(var(--tree-bottom, 228px) + 8px); transform: none; overflow-wrap: break-word; }
-  .dv-drawer, .acard { top: 116px; bottom: 16px; width: auto; right: 16px; }
+  .dv-drawer, .acard { top: 116px; bottom: 16px; width: auto; }
+  .acard { right: 16px; }
+  .dv-drawer { inset-inline: 16px; }
   .dv-drawer { top: var(--tree-top, 116px); }
   /* The schema shows between the department's name and the dock, as the tree does: what scrolls under them goes out of sight. */
   .dcanvas { inset-block: var(--tree-top, 116px) var(--tree-bottom, 228px); }
