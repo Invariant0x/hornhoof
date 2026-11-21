@@ -10,6 +10,7 @@ import { readDockerDisk } from './docker.js';
 import { DiskKeeper, type Disk } from './keeper.js';
 import { recordings } from './recordings.js';
 import { diskSettings } from './state.js';
+import { storeDir } from './store.js';
 
 /* How often a node looks after its disk, and how long after it starts it first does. */
 export const DISK_PASS_MS = 10 * 60_000;
@@ -55,16 +56,22 @@ const readTasks = (file: string): TaskStates | null => {
 export function startDiskCare({ dir, owner, env = process.env, checking, log, disk, everyMs = DISK_PASS_MS, firstMs = FIRST_PASS_MS }: Options) {
   const file = join(dir, 'disk-tasks.json');
   let tasks = readTasks(file);
-  const keeper = new DiskKeeper({
+  let keeper: DiskKeeper | null = null;
+  keeper = new DiskKeeper({
     disk,
     settings: diskSettings(env),
-    cleaners: [checkTemp(dir, checking), workingCopies({ dir, git: agentGit(join(dir, 'work'), owner), tasks: () => tasks }), recordings(dir)],
+    cleaners: [
+      checkTemp(dir, checking),
+      workingCopies({ dir, git: agentGit(join(dir, 'work'), owner), tasks: () => tasks, store: storeDir(dir, owner), owner, aggressive: () => keeper?.low ?? false }),
+      recordings(dir),
+    ],
     docker: () => readDockerDisk(dir),
     log,
   });
+  const activeKeeper = keeper;
   let running: Promise<void> | null = null;
   const pass = (): Promise<void> =>
-    (running ??= keeper
+    (running ??= activeKeeper
       .pass()
       .then(
         report => suspendCheckSlots(DISK_HOLD, diskReason(report)),
@@ -79,7 +86,7 @@ export function startDiskCare({ dir, owner, env = process.env, checking, log, di
   timer.unref();
   return {
     pass,
-    report: (): DiskReport | undefined => keeper.report ?? undefined,
+    report: (): DiskReport | undefined => activeKeeper.report ?? undefined,
     tasks: () => tasks,
     /* The company's open tasks as a turn names them. */
     noteTasks(next: TaskStates | undefined): void {
