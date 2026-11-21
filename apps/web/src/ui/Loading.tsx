@@ -133,6 +133,9 @@ function phaseOf(failed: unknown, times: Times, waiting: boolean): Pick<Load, 'p
   return { phase: 'done', ring: false, failure: null };
 }
 
+/* A screen's data once its load is done, else null: what the screen shows in place of its held room. */
+export const doneOf = <T,>(data: T | null, load: Load): T | null => (load.phase === 'done' ? data : null);
+
 /* One load of a screen from its parts. Show its data once its phase is done, not as soon as the data is there, so the ring
    keeps its least time. */
 export function useLoad(parts: LoadPart[]): Load {
@@ -159,6 +162,10 @@ export function useLoad(parts: LoadPart[]): Load {
   };
   return { ...phaseOf(failed, times, waiting), asked: asked.round, retry };
 }
+
+/* A failure of a load said on top of the page: only once the data came. Before that, the load says it where the data would
+   stand. */
+export const onTop = (data: unknown, failure: unknown): unknown => (data === undefined || data === null ? null : failure);
 
 /* What failed and what to do, each one whole sentence: the load given up at 30 s, no connection, an error answer that names
    its own reason, as a refusal while Hornhoof installs an update does, or any other error answer. */
