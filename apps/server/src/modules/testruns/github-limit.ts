@@ -47,6 +47,31 @@ const hasCard = (window: Window | undefined): boolean => Boolean(window && [...w
 const sameWindow = (prior: Window | undefined, limit: RateLimit, now: number): prior is Window =>
   Boolean(prior && prior.limit.resetAt === limit.resetAt && prior.until > now);
 
+const repoKey = (repo: RepoAddress): string | null => {
+  const name = githubName(repo.url)?.toLowerCase();
+  return name ? `${account(repo)}\0${name}` : null;
+};
+
+const laterReset = (prior: number | null, next: number | null): number | null =>
+  prior === null ? next : next === null ? prior : Math.max(prior, next);
+
+function recordCard(cards: Map<string, Card>, repository: string, resetAt: number | null): void {
+  const prior = cards.get(repository);
+  cards.set(repository, { repository, resetAt: prior ? laterReset(prior.resetAt, resetAt) : resetAt });
+}
+
+function allowedRepos(repos: Iterable<RepoAddress>): Set<string> {
+  const allowed = new Set<string>();
+  for (const repo of repos) {
+    const key = repoKey(repo);
+    if (key) allowed.add(key);
+  }
+  return allowed;
+}
+
+const matchesScope = (allowed: Set<string> | null, key: string, repository: string): boolean =>
+  !allowed || allowed.has(`${key}\0${repository}`);
+
 /* What GitHub said last of each account's request limit, by a hash of its token. While one is used up, no request goes to
    GitHub with that token, for any repository, until its reset, or for a minute where GitHub named no reset still to come: it
    is refused here as GitHub would. One warning per account and reset; a second refusal puts the repository in Failures. */
@@ -93,12 +118,17 @@ export class GitHubLimits {
     if (hasCard(prior)) this.changed();
   }
 
-  cards(): Card[] {
-    const cards = new Map<string, Card>();
-    for (const window of this.windows.values()) {
-      if (window.until <= this.now()) continue;
-      for (const [repository, repeated] of window.repositories) if (repeated) cards.set(repository, { repository, resetAt: window.limit.resetAt });
+  private collectCards(cards: Map<string, Card>, key: string, window: Window, allowed: Set<string> | null): void {
+    if (window.until <= this.now()) return;
+    for (const [repository, repeated] of window.repositories) {
+      if (repeated && matchesScope(allowed, key, repository)) recordCard(cards, repository, window.limit.resetAt);
     }
+  }
+
+  cards(repos?: Iterable<RepoAddress>): Card[] {
+    const allowed = repos ? allowedRepos(repos) : null;
+    const cards = new Map<string, Card>();
+    for (const [key, window] of this.windows) this.collectCards(cards, key, window, allowed);
     return [...cards.values()];
   }
 

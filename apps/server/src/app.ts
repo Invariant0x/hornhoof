@@ -103,8 +103,9 @@ import { githubReaders, type CompareReader, type MergeReader, type TreeReader } 
 import { readGitAncestry, type GitAncestryReader } from './modules/testruns/git-ancestry.js';
 import { GitHubLimits, limitRecord } from './modules/testruns/github-limit.js';
 import { MergedAnswers } from './modules/departments/branches.js';
-import { companies } from './db/schema.js';
-import { idOnly } from './db/selections.js';
+import { isNotNull } from 'drizzle-orm';
+import { decryptSecret } from './crypto/secrets.js';
+import { departments } from './db/schema.js';
 import { createOnGitHub } from './modules/departments/github-create.js';
 import { openIssueOnGitHub, type IssueCreator } from './modules/feedback/github-issue.js';
 import { RELEASED, type Released } from './modules/feedback/released.js';
@@ -231,18 +232,45 @@ const RESTORE_RETRY_MS = 10_000;
 /* For how long a connection that has sent nothing is waited for once the app closes. */
 const SILENT_CONNECTION_MS = 1000;
 
-function notifyGitHubLimitCards(db: Db, bus: EventBus, log: FastifyBaseLogger): void {
-  void db.select(idOnly(companies)).from(companies).then(rows => {
-    for (const { id } of rows) bus.publish(id, { type: 'requests', spot: { departmentId: null, parentId: null } });
-  }).catch((error: unknown) => log.error({ error: loggable(error) }, 'Refreshing GitHub limit cards failed.'));
+const cardState = (cards: ReturnType<GitHubLimits['cards']>) =>
+  cards.map(card => `${card.repository}\0${card.resetAt ?? ''}`).sort().join('\n');
+
+function reposByCompany(rows: { companyId: string; url: string | null; tokenEnc: string | null }[], secret: string) {
+  const byCompany = new Map<string, { url: string; token: string }[]>();
+  for (const row of rows) {
+    const list = byCompany.get(row.companyId) ?? [];
+    list.push({ url: row.url!, token: row.tokenEnc ? decryptSecret(row.tokenEnc, secret) : '' });
+    byCompany.set(row.companyId, list);
+  }
+  return byCompany;
+}
+
+function publishChangedCards(bus: EventBus, limits: GitHubLimits, byCompany: Map<string, { url: string; token: string }[]>, last: Map<string, string>): void {
+  for (const id of new Set([...byCompany.keys(), ...last.keys()])) {
+    const next = cardState(limits.cards(byCompany.get(id) ?? []));
+    if ((last.get(id) ?? '') === next) continue;
+    if (next) last.set(id, next); else last.delete(id);
+    bus.publish(id, { type: 'requests', spot: { departmentId: null, parentId: null } });
+  }
+}
+
+function notifyGitHubLimitCards(deps: Deps, bus: EventBus, log: FastifyBaseLogger, limits: GitHubLimits, last: Map<string, string>): void {
+  void deps.db
+    .select({ companyId: departments.companyId, url: departments.repoUrl, tokenEnc: departments.repoTokenEnc })
+    .from(departments)
+    .where(isNotNull(departments.repoUrl))
+    .then(rows => publishChangedCards(bus, limits, reposByCompany(rows, deps.config.secret), last))
+    .catch((error: unknown) => log.error({ error: loggable(error) }, 'Refreshing GitHub limit cards failed.'));
 }
 
 function githubLimitsFor(deps: Deps, log: FastifyBaseLogger, bus: EventBus, clock: () => number): GitHubLimits {
-  return new GitHubLimits(
+  const last = new Map<string, string>();
+  const limits: GitHubLimits = new GitHubLimits(
     clock,
     limit => log.warn(limitRecord(limit), 'GitHub REST request limit exhausted.'),
-    () => notifyGitHubLimitCards(deps.db, bus, log),
+    () => notifyGitHubLimitCards(deps, bus, log, limits, last),
   );
+  return limits;
 }
 
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {

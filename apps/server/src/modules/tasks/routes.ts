@@ -12,6 +12,7 @@ import { hideTaskSecret } from './hide-secret.js';
 import { departmentsHad, runsDepartment } from '../../auth/departments.js';
 import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actorOf, requireCompanyScope, requirePerson, viaOrchestrator, type Person } from '../../auth/session.js';
+import { decryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, people, requests, tasks, taskWaits, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -200,8 +201,17 @@ function machineCards(me: Person, person: string | undefined, cards: Decisions['
     .map(card => ({ ...card, since: card.since.toISOString(), back: card.back?.toISOString() ?? null }));
 }
 
-function githubLimitCards(me: Person, person: string | undefined, ctx: Ctx) {
-  return !me.via && me.isOwner && (!person || person === me.id) ? ctx.githubLimits.cards() : [];
+async function companyGitHubRepos(ctx: Ctx, companyId: string) {
+  const rows = await ctx.db
+    .select({ url: departments.repoUrl, tokenEnc: departments.repoTokenEnc })
+    .from(departments)
+    .where(and(eq(departments.companyId, companyId), isNotNull(departments.repoUrl)));
+  return rows.map(row => ({ url: row.url!, token: row.tokenEnc ? decryptSecret(row.tokenEnc, ctx.config.secret) : '' }));
+}
+
+async function githubLimitCards(me: Person, person: string | undefined, ctx: Ctx) {
+  if (me.via || !me.isOwner || (person && person !== me.id)) return [];
+  return ctx.githubLimits.cards(await companyGitHubRepos(ctx, me.companyId));
 }
 
 function requestViews(mine: Decisions['requests'], lines: Awaited<ReturnType<typeof linesFor>>, commits: (string | null)[], pictures: Map<string, string[]>, names: Map<string, string>, explaining: Set<string>, places: Places) {
@@ -534,7 +544,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       machineAccess: [],
       merges: decisions.merges.filter(merge => picked(merge.ownerPersonId)).map(({ id, label, after, open, ownerPersonId }) => ({ id, label, after, open, ownerPersonId })),
       machinesAway: machineCards(me, person, decisions.machines),
-      githubLimits: githubLimitCards(me, person, ctx),
+      githubLimits: await githubLimitCards(me, person, ctx),
       counts: decisions.counts,
     };
   });

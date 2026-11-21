@@ -247,4 +247,22 @@ describe('a branch holds a commit, however many files lie between them', () => {
     expect(await branchHolds(ctx, at, head, sha)).toBe(true);
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
+
+  it('scopes repeated cards by repository address and token and keeps the later reset time', () => {
+    const earlier = Date.UTC(2030, 0, 1, 22, 0);
+    const later = Date.UTC(2030, 0, 1, 23, 30);
+    const now = earlier - 60_000;
+    const githubLimits = new GitHubLimits(() => now, () => {});
+    const tokenA = { url: 'https://github.com/acme/shop.git', token: 'token-a' };
+    const tokenB = { url: 'https://github.com/acme/shop.git', token: 'token-b' };
+    const tokenC = { url: 'https://github.com/acme/shop.git', token: 'token-c' };
+    const nonGithub = { url: 'https://gitlab.com/acme/shop.git', token: 'token-a' };
+    for (const [repo, resetAt] of [[tokenA, null], [tokenA, null], [tokenB, later], [tokenB, later], [tokenC, earlier], [tokenC, earlier]] as const) {
+      githubLimits.refused(repo, { remaining: 0, resetAt });
+    }
+    expect(githubLimits.cards([nonGithub, { url: tokenA.url, token: 'wrong-token' }])).toEqual([]);
+    expect(githubLimits.cards([tokenA, nonGithub])).toEqual([{ repository: 'acme/shop', resetAt: null }]);
+    expect(githubLimits.cards([tokenA, tokenB, tokenC])).toEqual([{ repository: 'acme/shop', resetAt: later }]);
+    expect(githubLimits.cards([tokenB, tokenA])).toEqual([{ repository: 'acme/shop', resetAt: later }]);
+  });
 });
