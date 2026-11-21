@@ -66,12 +66,32 @@ export function agentGit(agentDir: string, owner: Owner, git: Git = realGit): Cl
 const notPushed = (ahead: string) =>
   ahead === '1' ? '1 commit of it is not on the remote' : /^\d+$/.test(ahead) ? `${ahead} commits of it are not on the remote` : 'git could not tell whether its commits are on the remote';
 
+type StayReason = { why: KeptWhy; reason: string; ignored?: string[] };
+
+/* Why a finished task's worktree must stay now, or null if everything in it is on a remote or rebuildable. */
+async function keepReason(run: CloneRun, path: string): Promise<StayReason | null> {
+  if (await run(['status', '--porcelain', '--ignore-submodules=none'], path)) {
+    return { why: 'uncommitted', reason: 'it has changes that are not committed' };
+  }
+  /* Its commits that no branch of the remote has: none once they are pushed, or merged into a branch that is. */
+  const ahead = await run(['rev-list', '--count', 'HEAD', '--not', '--remotes'], path);
+  if (ahead !== '0') {
+    return { why: /^\d+$/.test(ahead) ? 'unpushed' : 'failed', reason: notPushed(ahead) };
+  }
+  const ignored = ownIgnored(await run(['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'], path)).filter(entry => !rebuildable(entry));
+  if (ignored.length) {
+    return { why: 'ignored', reason: `it holds what git ignores and no remote has: ${named(ignored)}`, ignored };
+  }
+  return null;
+}
+
 /* Takes away the agent's worktrees of closed tasks, which hold the task's dependencies and fill the machine's disk. Only a
-   worktree in the agent's folder, on a task's branch, of a task that is done or cancelled, with nothing uncommitted in it and
-   every commit of it on the remote, pushed or merged there, goes, the way git itself removes one, so the clone's list of
-   worktrees stays right; its branch stays in the clone. The clone itself and every other worktree stay. It names each closed
-   task's worktree, whether it went, and why one that stays could not go. removing runs just before one goes. */
-export async function closedCopies(checkout: string, agentDir: string, tasks: TaskStates, run: CloneRun, removing: (path: string) => Promise<void> = async () => {}): Promise<{ copies: ClosedCopy[]; problem: string | null }> {
+   worktree in the agent's folder, on a task's branch, of a task that is done or cancelled, with nothing uncommitted in it,
+   every commit of it on the remote, pushed or merged there, and only rebuildable ignored files goes, the way git itself
+   removes one, so the clone's list of worktrees stays right; its branch stays in the clone. The clone itself and every other
+   worktree stay. It names each closed task's worktree, whether it went, and why one that stays could not go. When removing is
+   given (e.g. to measure size before removal), the copy is checked again after it returns, right before git removes it. */
+export async function closedCopies(checkout: string, agentDir: string, tasks: TaskStates, run: CloneRun, removing?: (path: string) => Promise<void>): Promise<{ copies: ClosedCopy[]; problem: string | null }> {
   const folder = real(agentDir), open = new Set(tasks.open), copies: ClosedCopy[] = [];
   if (!folder) return { copies, problem: null };
   for (const tree of treesOf(await run(['worktree', 'list', '--porcelain', '-z'], checkout)).slice(1)) {
@@ -84,22 +104,15 @@ export async function closedCopies(checkout: string, agentDir: string, tasks: Ta
       continue;
     }
     try {
-      if (await run(['status', '--porcelain', '--ignore-submodules=none'], tree.path)) {
-        kept('uncommitted', 'it has changes that are not committed');
+      let stay = await keepReason(run, tree.path);
+      if (!stay && removing) {
+        await removing(tree.path);
+        stay = await keepReason(run, tree.path);
+      }
+      if (stay) {
+        copies.push({ path: tree.path, task: n, removed: false, ...stay });
         continue;
       }
-      /* Its commits that no branch of the remote has: none once they are pushed, or merged into a branch that is. */
-      const ahead = await run(['rev-list', '--count', 'HEAD', '--not', '--remotes'], tree.path);
-      if (ahead !== '0') {
-        kept(/^\d+$/.test(ahead) ? 'unpushed' : 'failed', notPushed(ahead));
-        continue;
-      }
-      const ignored = ownIgnored(await run(['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'], tree.path)).filter(entry => !rebuildable(entry));
-      if (ignored.length) {
-        copies.push({ path: tree.path, task: n, removed: false, why: 'ignored', reason: `it holds what git ignores and no remote has: ${named(ignored)}`, ignored });
-        continue;
-      }
-      await removing(tree.path);
       await run(['worktree', 'remove', tree.path], checkout);
     } catch (err) {
       kept('failed', `git could not remove it: ${why(err)}`);

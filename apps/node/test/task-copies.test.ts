@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { runJob, type ProviderAdapter } from '../src/runner.js';
-import { removeClosedCopies } from '../src/task-copies.js';
+import { agentGit, closedCopies, removeClosedCopies } from '../src/task-copies.js';
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' });
@@ -85,6 +85,21 @@ describe("the worktrees of an agent's closed tasks", () => {
     expect(existsSync(join(done, '.env'))).toBe(true);
     expect(trees()).toEqual([clone, done]);
     expect(lines).toEqual([`Kept the worktree of closed task #15 at ${done}: it holds what git ignores and no remote has: .env, local/.`]);
+  });
+
+  it('keeps the copy if an ignored file that comes back from nowhere appears while its size is being measured', async () => {
+    const { agent, clone, copy, trees } = agentFolder();
+    const done = copy('shop-16', 'task-16');
+    writeFileSync(join(clone, '.git', 'info', 'exclude'), '.env\n');
+    const run = agentGit(agent, OWNER)!;
+    const { copies } = await closedCopies(clone, agent, { open: [], upTo: 16 }, run, async path => {
+      writeFileSync(join(path, '.env'), 'KEY=late\n');
+    });
+    expect(existsSync(join(done, '.env'))).toBe(true);
+    expect(trees()).toEqual([clone, done]);
+    expect(copies).toEqual([
+      { path: done, task: 16, removed: false, why: 'ignored', reason: 'it holds what git ignores and no remote has: .env', ignored: ['.env'] },
+    ]);
   });
 
   it('keeps the copy of a closed task with a commit that is not on the remote, and says why', async () => {
