@@ -156,7 +156,7 @@ function populateCas(
   seq: number,
 ): boolean | null {
   const existing = safeLstat(casPath);
-  if (existing) return existing.isFile() && existing.size === expectedSize ? true : null;
+  if (existing) return existing.isFile() && existing.size === expectedSize && (existing.mode & 0o777) === canonicalMode ? true : null;
 
   const tmpPath = join(prefixDir, `.tmp-${process.pid}-${seq}`);
   let tmpFd: number | null = null;
