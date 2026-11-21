@@ -359,20 +359,24 @@ describe('content-addressed hard-link deduplication', () => {
 
     /* Remove cloneA: dead now has nlink === 1 in CAS; live still has nlink === 2 (CAS + cloneB). */
     rmSync(join(cloneA, 'node_modules'), { recursive: true, force: true });
+    const stray = join(store, 'cas', '00', 'README.txt');
+    writeAged(stray, Buffer.from('not-a-cas-entry'));
 
     const now = Date.now();
     /* Fresh nlink === 1 stays under normal retention. */
     expect(pruneCas(store, { nowMs: now, aggressive: false })).toEqual({ pruned: 0, freed: 0 });
-    /* Past 7-day retention: dead entry is pruned; live entry survives. */
+    /* Past 7-day retention: dead entry is pruned; live entry and unrelated files survive. */
     const afterWeek = pruneCas(store, { nowMs: now + CAS_MAX_AGE_MS + 1000, aggressive: false });
     expect(afterWeek).toEqual({ pruned: 1, freed: dataDead.length });
+    expect(existsSync(stray)).toBe(true);
     expect(readFileSync(join(cloneB, 'node_modules/live/index.js')).equals(dataLive)).toBe(true);
     expect(lstatSync(join(cloneB, 'node_modules/live/index.js')).nlink).toBe(2);
 
-    /* Remove cloneB too: aggressive GC removes live immediately even before 7 days. */
+    /* Remove cloneB too: aggressive GC removes live immediately even before 7 days, leaving unrelated files alone. */
     rmSync(join(cloneB, 'node_modules'), { recursive: true, force: true });
     const aggressive = pruneCas(store, { nowMs: now, aggressive: true });
     expect(aggressive).toEqual({ pruned: 1, freed: dataLive.length });
+    expect(existsSync(stray)).toBe(true);
   });
 });
 
