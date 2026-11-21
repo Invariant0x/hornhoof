@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
-import { NODE, type Crumb, type GraphNode } from '../src/tracker';
+import { layoutTree, NODE, type Crumb, type GraphNode } from '../src/tracker';
 import type { GoalView, TaskLine } from '../src/types';
 import { decl } from './css';
 import { taskRoute } from './task-route';
@@ -129,5 +129,86 @@ describe('the graph as the mockup draws it', () => {
     expect.soft(decl('.tr-wires .wait path', 'stroke-dasharray')).toBe('5 4');
     expect.soft(decl('.tr-crumbs', 'font')).toBe('600 13.5px var(--f-display)');
     expect(decl('.tr-legend', 'font-size')).toBe('12px');
+  });
+});
+
+/* Right to left the graph is drawn as a mirror of itself: its root at the right, each level further to the left, the lines
+   and the lanes of the waits mirrored with it, while the words in its nodes and labels read in their own direction (#1670). */
+describe('the graph right to left', () => {
+  const page = document.documentElement;
+  /* The canvas's size, which the page has no layout to give, is set on HTMLElement for a test and taken off after it. */
+  const own = { clientWidth: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth'), clientHeight: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight') };
+  afterEach(() => {
+    page.removeAttribute('dir');
+    for (const [name, was] of Object.entries(own)) {
+      if (was) Object.defineProperty(HTMLElement.prototype, name, was);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+    }
+  });
+  /* A goal with two tasks, the second waiting for the first. */
+  const tree = () => [node('g1', 'Mailing', [taskNode(task('t1', 412, 'Find 3D artists')), taskNode(task('t2', 419, 'First wave', { waitsFor: [412] }))])];
+  const place = (container: HTMLElement, id: string) => {
+    const el = container.querySelector<HTMLElement>(`[data-node="${id}"]`)!;
+    return { x: parseFloat(el.style.left), y: parseFloat(el.style.top) };
+  };
+  const numbers = (d: string) => (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+
+  it('grows from a root at the right, each line leaving a node from the side that faces what is under it', () => {
+    page.dir = 'rtl';
+    const { container } = render(graph(tree(), []));
+    const [root, first, second] = ['g1', 't1', 't2'].map(id => place(container, id));
+    expect(root!.x).toBeGreaterThan(first!.x + NODE.w);
+    expect(first!.x).toBe(second!.x);
+    const parts = [...container.querySelectorAll('.tr-wires .part')].map(p => numbers(p.getAttribute('d')!));
+    expect(parts).toHaveLength(2);
+    for (const [d, child] of [[parts[0]!, first!], [parts[1]!, second!]] as const) {
+      expect(d[0], 'from the root\'s left side').toBe(root!.x);
+      expect(d.at(-2), 'to the right side of the task').toBe(child.x + NODE.w);
+    }
+  });
+
+  it('routes a wait out to a lane left of the tree, back into the node it waits for, and words it next to the waiting node', () => {
+    page.dir = 'rtl';
+    const { container } = render(graph(tree(), []));
+    const [root, first, second] = ['g1', 't1', 't2'].map(id => place(container, id));
+    const wait = container.querySelector('.tr-wires .wait')!;
+    const d = wait.querySelector('path')!.getAttribute('d')!;
+    expect(d).toMatch(/^M\d+ \d+H\d+V\d+H\d+$/);
+    const [x1, , lane, , x2] = numbers(d);
+    expect(x1, 'from the left side of the waiting task').toBe(second!.x);
+    expect(lane, 'its lane left of every node').toBeLessThan(Math.min(root!.x, first!.x, second!.x));
+    expect(x2, 'its arrow at the left side of the task it waits for').toBe(first!.x - 2);
+    const word = wait.querySelector('text')!;
+    expect(word).toHaveTextContent('← waits for');
+    expect(word).toHaveAttribute('text-anchor', 'end');
+    expect(word).toHaveAttribute('direction', 'ltr');
+    expect(Number(word.getAttribute('x'))).toBe(second!.x - 6);
+  });
+
+  it('draws the tree again mirrored when the page turns right to left after the tree is drawn', async () => {
+    const { container } = render(graph(tree(), []));
+    expect(place(container, 'g1').x).toBeLessThan(place(container, 't1').x);
+    await act(async () => { page.dir = 'rtl'; });
+    expect(place(container, 'g1').x).toBeGreaterThan(place(container, 't1').x + NODE.w);
+  });
+
+  it('opens a tree wider than the canvas with its root at the start edge: the right, as the mirror of left to right', () => {
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return (this as HTMLElement).classList.contains('tr-map') ? 300 : 0; } });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return (this as HTMLElement).classList.contains('tr-map') ? 600 : 0; } });
+    const view = (container: HTMLElement) => {
+      const [x, y, k] = numbers(transform(container));
+      return { x: x!, y: y!, k: k! };
+    };
+    const ltr = render(graph(tree(), []));
+    const before = view(ltr.container);
+    ltr.unmount();
+    page.dir = 'rtl';
+    const rtl = render(graph(tree(), []));
+    const after = view(rtl.container);
+    const [l, r] = [layoutTree(tree()), layoutTree(tree(), undefined, 'rtl')];
+    expect(l.width * before.k, 'wider than the canvas').toBeGreaterThan(300);
+    expect([after.k, after.y]).toEqual([before.k, before.y]);
+    /* The tree's box stands as far from the canvas's right as left to right it stands from its left. */
+    expect(300 - (after.x + (r.left + r.width) * after.k)).toBeCloseTo(before.x + l.left * before.k, 6);
   });
 });
