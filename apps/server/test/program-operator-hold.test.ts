@@ -11,6 +11,7 @@ import { createTask } from '../src/modules/tasks/engine.js';
 import { afterRestart, afterRestartOutsideTask } from '../src/modules/tasks/restarts.js';
 import { recordJobProgram } from '../src/modules/tasks/silent.js';
 import { reserveDelivery } from '../src/modules/program-operator/deliveries.js';
+import { operatorCaseMode } from '../src/modules/program-operator/cases.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
 import { adoptOperatorOwnerTurn, continueRecovery } from '../src/modules/program-operator/recovery.js';
 import { checkOperatorHealth } from '../src/modules/program-operator/health.js';
@@ -375,6 +376,23 @@ function showRecoveryState(c: Held, facts: Partial<typeof FREE> | null): void {
   });
 }
 
+function showRecoveryByNode(c: Held, byNode: Record<string, Partial<typeof FREE> | null>): void {
+  c.sent.mockImplementation((node, frame) => {
+    if (frame.type !== 'program.recovery_state_get' || node.kind !== 'node') return true;
+    const facts = byNode[node.nodeId];
+    if (facts) queueMicrotask(() => receiveOperatorReply(c.ctx, node, { type: 'program.recovery_state', ...c.program, request: frame.request, ...FREE, current: c.program.instance, ...facts }));
+    return true;
+  });
+}
+
+async function addNode(c: Held, subscriptionId: string, hostname = 'Replacement host') {
+  const [machine] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: randomUUID(), hostname }).returning();
+  const [node] = await c.db.insert(nodes).values({ companyId: c.companyId, machineId: machine!.id, subscriptionId, keyHash: randomUUID(), status: 'ready', version: '0.7.1' }).returning();
+  return node!;
+}
+
+const recoveryQueries = (c: Held) => c.sent.mock.calls.filter(([, frame]) => frame.type === 'program.recovery_state_get').map(([node]) => (node.kind === 'node' ? node.nodeId : `builtin:${node.machine}`));
+
 it.each<[string, Partial<typeof FREE>]>([
   ['an idle program', {}],
   ['no program', { program: 'gone', current: null, input: 'unknown' }],
@@ -426,6 +444,119 @@ it.each<[string, Partial<typeof FREE>]>([
   showRecoveryState(c, {});
   await checkOperatorHealth(c.ctx, new Date(+c.now + 8 * MINUTE));
   expect(await c.row()).toMatchObject({ recoveryHold: false });
+});
+
+it('releases a hold after a subscription switch without querying the stale old node when the new plan has no program yet', async () => {
+  /* Manual release via program_recovery_release. */
+  const manual = await release({ input: 'words' });
+  const [nextSub] = await manual.db.insert(subscriptions).values({ ...manual.sub, id: randomUUID(), kind: 'personal', provider: 'claude', status: 'ready' }).returning();
+  await addNode(manual, nextSub!.id);
+  /* Subscription switch leaves agents.nodeId pointing at the old node until a turn runs on the new plan. */
+  await manual.db.update(agents).set({ subscriptionId: nextSub!.id }).where(eq(agents.id, manual.agent.id));
+  showRecoveryByNode(manual, { [manual.identity.nodeId]: { input: 'words' } });
+  manual.sent.mockClear();
+
+  expect(await manual.call()).toMatchObject({ result: 'released', continuation: expect.any(String) });
+  expect(recoveryQueries(manual)).toEqual([]);
+  expect(await manual.row()).toMatchObject({ status: 'resolved', recoveryHold: false });
+  expect((await manual.children())[0]).toMatchObject({ subscriptionId: nextSub!.id });
+
+  /* Automatic hold-watch release after operator_unavailable. */
+  const auto = await held();
+  const [autoSub] = await auto.db.insert(subscriptions).values({ ...auto.sub, id: randomUUID(), kind: 'personal', provider: 'claude', status: 'ready' }).returning();
+  const autoNode = await addNode(auto, autoSub!.id);
+  await auto.db.update(agents).set({ subscriptionId: autoSub!.id }).where(eq(agents.id, auto.agent.id));
+  showRecoveryByNode(auto, { [auto.identity.nodeId]: { input: 'words' } });
+  auto.sent.mockClear();
+
+  await checkOperatorHealth(auto.ctx, new Date(+auto.now + 6 * MINUTE));
+  expect(recoveryQueries(auto)).toEqual([]);
+  const autoChildren = await auto.children();
+  expect(autoChildren).toHaveLength(1);
+  expect(autoChildren[0]).toMatchObject({ subscriptionId: autoSub!.id, nodeId: autoNode.id, status: 'running' });
+  expect(await auto.row()).toMatchObject({ status: 'resolved', recoveryHold: false });
+});
+
+it('inspects the current node instead of the stale case node after moving to a new node on a new subscription', async () => {
+  const c = await release({ input: 'words' });
+  const [nextSub] = await c.db.insert(subscriptions).values({ ...c.sub, id: randomUUID(), kind: 'personal', provider: 'claude', status: 'ready' }).returning();
+  const nextNode = await addNode(c, nextSub!.id);
+  await c.db.update(agents).set({ subscriptionId: nextSub!.id, nodeId: nextNode.id }).where(eq(agents.id, c.agent.id));
+
+  showRecoveryByNode(c, { [c.identity.nodeId]: { input: 'words' }, [nextNode.id]: { wait: 'permission' } });
+  c.sent.mockClear();
+  expect(await c.call()).toMatchObject({ result: 'refused', reason: 'input_not_proven' });
+  expect(recoveryQueries(c)).toEqual([nextNode.id]);
+
+  await checkOperatorHealth(c.ctx, new Date(+c.now + 6 * MINUTE));
+  expect(await c.row()).toMatchObject({ recoveryHold: true });
+  expect(recoveryQueries(c)).toEqual([nextNode.id, nextNode.id]);
+
+  showRecoveryByNode(c, { [c.identity.nodeId]: { input: 'words' }, [nextNode.id]: { program: 'gone', current: null, input: 'unknown' } });
+  /* Even when agents.nodeId lags behind on the old node, a prior turn on the new plan still directs the check to nextNode. */
+  await c.db.update(agents).set({ nodeId: c.identity.nodeId }).where(eq(agents.id, c.agent.id));
+  await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.agent.id, subscriptionId: nextSub!.id, nodeId: nextNode.id, kind: 'conversation', prompt: 'Earlier on new plan.', timeoutMs: 1000, status: 'done', startedAt: new Date(+c.now - MINUTE), finishedAt: new Date(+c.now - 30_000) });
+  c.sent.mockClear();
+  expect(await c.call()).toMatchObject({ result: 'released', continuation: expect.any(String) });
+  expect(recoveryQueries(c)).toEqual([nextNode.id]);
+  expect(await c.row()).toMatchObject({ status: 'resolved', recoveryHold: false });
+});
+
+it('inspects the current node when an employee moves to another node on the same subscription or switches to an API key', async () => {
+  const samePlan = await release({ input: 'words' });
+  const peerNode = await addNode(samePlan, samePlan.sub.id, 'Peer host');
+  await samePlan.db.update(agents).set({ nodeId: peerNode.id }).where(eq(agents.id, samePlan.agent.id));
+  showRecoveryByNode(samePlan, { [samePlan.identity.nodeId]: { input: 'words' }, [peerNode.id]: {} });
+  samePlan.sent.mockClear();
+  expect(await samePlan.call()).toMatchObject({ result: 'released', continuation: expect.any(String) });
+  expect(recoveryQueries(samePlan)).toEqual([peerNode.id]);
+
+  const apiPlan = await release({ input: 'words' });
+  const [apiSub] = await apiPlan.db.insert(subscriptions).values({ companyId: apiPlan.companyId, ownerPersonId: apiPlan.sub.ownerPersonId, kind: 'api_key', provider: 'anthropic_api', label: 'Key', status: 'ready' }).returning();
+  await apiPlan.db.update(agents).set({ subscriptionId: apiSub!.id }).where(eq(agents.id, apiPlan.agent.id));
+  showRecoveryByNode(apiPlan, { [apiPlan.identity.nodeId]: { input: 'words' } });
+  apiPlan.sent.mockClear();
+  expect(await apiPlan.call()).toMatchObject({ result: 'released', continuation: expect.any(String) });
+  expect(recoveryQueries(apiPlan)).toEqual([]);
+});
+
+it('releases and reads operator case mode even when agent_events holds a non-numeric operatorEvidence ordinal', async () => {
+  const c = await release();
+  const questionId = randomUUID();
+  await c.db.insert(agentEvents).values({
+    companyId: c.companyId,
+    agentId: c.agent.id,
+    jobId: c.job.id,
+    kind: 'message',
+    data: { text: 'Malformed evidence.', turnFact: true, operatorEvidenceId: randomUUID(), operatorEvidence: { instance: c.fact.instance, ordinal: 'bad-ordinal' } },
+  });
+  await c.db.insert(agentEvents).values({
+    companyId: c.companyId,
+    agentId: c.agent.id,
+    jobId: c.job.id,
+    kind: 'message',
+    data: {
+      text: 'Question asked.',
+      turnFact: true,
+      operatorEvidenceId: randomUUID(),
+      operatorEvidence: { type: 'program.question', agentKey: c.agent.id, jobId: c.job.id, instance: c.fact.instance, evidenceId: randomUUID(), ordinal: 10, question: { id: questionId, kind: 'permission', tool: 'Bash', text: 'Run check?', callId: null }, questionOrdinal: 1, phase: 'asked', elapsedMs: 1000 },
+    },
+  });
+  await c.db.insert(agentEvents).values({
+    companyId: c.companyId,
+    agentId: c.agent.id,
+    jobId: c.job.id,
+    kind: 'message',
+    data: {
+      text: 'Question waiting.',
+      turnFact: true,
+      operatorEvidenceId: randomUUID(),
+      operatorEvidence: { type: 'program.operator_needed', agentKey: c.agent.id, jobId: c.job.id, instance: c.fact.instance, evidenceId: randomUUID(), ordinal: 11, reason: 'question_waiting', deliveryId: null, questionId, evidenceKey: questionId, elapsedMs: 31000, sinceLaunchMs: 31000, exit: null },
+    },
+  });
+  const mode = await operatorCaseMode(c.ctx, { ...(await c.row()), evidence: [{ reason: 'question_waiting', evidenceKey: questionId, deliveryId: null }] });
+  expect(mode).toMatchObject({ reason: 'question_waiting', questionId });
+  expect(await c.call()).toMatchObject({ result: 'released', continuation: expect.any(String) });
 });
 
 /* The tool of Operations, with the node answering what it sees right now. */
