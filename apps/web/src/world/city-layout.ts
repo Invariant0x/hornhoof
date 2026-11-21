@@ -486,8 +486,9 @@ function pickDoorForFootprint(
     if (!canWalkRoad(city, map, cand.col, cand.row, false)) continue;
     const k = tileKey(cand.col, cand.row);
     const alreadyRoad = city.roads.has(k);
+    const insideOtherLot = !alreadyRoad && city.lotReservation.has(k);
     const d = Math.abs(cand.col - target.col) + Math.abs(cand.row - target.row);
-    const score = (insideLot ? 60 : 0) + (alreadyRoad ? -100 : 0) + d;
+    const score = (insideLot || insideOtherLot ? 80 : 0) + (alreadyRoad ? -100 : 0) + d;
     if (score < bestScore) {
       bestScore = score;
       best = cand;
@@ -598,6 +599,7 @@ function findRoadPath(
     stopAtAnyRoad: boolean;
     targetRoads?: ReadonlySet<string>;
     allowBridge: boolean;
+    avoidLots?: boolean;
     maxExpansions: number;
   },
 ): TileCoord[] | null {
@@ -657,6 +659,7 @@ function findRoadPath(
 
       const isExistingRoad = city.roads.has(nk);
       if (!isExistingRoad && !canWalkRoad(city, map, nc, nr, options.allowBridge)) continue;
+      if (!isExistingRoad && options.avoidLots && city.lotReservation.has(nk)) continue;
 
       const spec = map.kindSpecAt(nc, nr);
       let stepCost = 1.0;
@@ -670,8 +673,8 @@ function findRoadPath(
         if (spec && !spec.walkable && spec.excavatable) {
           stepCost = 2.2;
         }
-        /* Strongly steer roads around reserved building growth lots so homes can expand smoothly. */
-        if (city.lotReservation.has(nk)) stepCost += 6.5;
+        /* Strongly steer fallback roads around reserved building growth lots so homes can expand smoothly. */
+        if (city.lotReservation.has(nk)) stepCost += 25;
         if (cur.dirIdx !== -1 && cur.dirIdx !== dIdx) stepCost += turnPenalty;
         if (order > 0.25) {
           const onGrid = (nc - rx) % GRID_BLOCK_STEP === 0 || (nr - ry) % GRID_BLOCK_STEP === 0;
@@ -717,6 +720,7 @@ function connectDoorToRoads(
     stopAtAnyRoad: true,
     targetRoads,
     allowBridge: false,
+    avoidLots: true,
     maxExpansions: 3200,
   });
   if (!path) {
@@ -724,6 +728,16 @@ function connectDoorToRoads(
       stopAtAnyRoad: true,
       targetRoads,
       allowBridge: true,
+      avoidLots: true,
+      maxExpansions: 8000,
+    });
+  }
+  if (!path) {
+    path = findRoadPath(city, map, door, nearest, {
+      stopAtAnyRoad: true,
+      targetRoads,
+      allowBridge: true,
+      avoidLots: false,
       maxExpansions: 10000,
     });
   }
@@ -871,29 +885,36 @@ export function createCity(map: GeneratedWorldMap, options?: { orderChaos?: numb
     rngState: Math.floor(rng() * 0xffffffff) >>> 0,
   };
 
-  /* Place the ruler's residence right on startCenter with a reserved 6x6 royal growth lot. */
+  /* Place the ruler's residence right on startCenter with a clear reserved 6x6 royal growth lot. */
   const spec = defaultFootprint('residence', 0, 0);
   let resCol = map.startCenter.col - 1;
   let resRow = map.startCenter.row - 1;
   if (!canPlaceFootprint(city, map, resCol, resRow, spec.lotSpanCol, spec.lotSpanRow, undefined, false)) {
-    outer: for (let rad = 0; rad <= 10; rad++) {
-      for (let dr = -rad; dr <= rad; dr++) {
-        for (let dc = -rad; dc <= rad; dc++) {
-          if (
-            canPlaceFootprint(
-              city,
-              map,
-              map.startCenter.col + dc,
-              map.startCenter.row + dr,
-              spec.spanCol,
-              spec.spanRow,
-              undefined,
-              false,
-            )
-          ) {
-            resCol = map.startCenter.col + dc;
-            resRow = map.startCenter.row + dr;
-            break outer;
+    let found = false;
+    for (const [needC, needR] of [
+      [spec.lotSpanCol, spec.lotSpanRow],
+      [spec.spanCol, spec.spanRow],
+    ] as const) {
+      if (found) break;
+      for (let rad = 0; rad <= 10 && !found; rad++) {
+        for (let dr = -rad; dr <= rad && !found; dr++) {
+          for (let dc = -rad; dc <= rad && !found; dc++) {
+            if (
+              canPlaceFootprint(
+                city,
+                map,
+                map.startCenter.col + dc,
+                map.startCenter.row + dr,
+                needC,
+                needR,
+                undefined,
+                false,
+              )
+            ) {
+              resCol = map.startCenter.col + dc;
+              resRow = map.startCenter.row + dr;
+              found = true;
+            }
           }
         }
       }
@@ -947,6 +968,7 @@ export function createCity(map: GeneratedWorldMap, options?: { orderChaos?: numb
     const shorePath = findRoadPath(city, map, door, shore, {
       stopAtAnyRoad: false,
       allowBridge: false,
+      avoidLots: true,
       maxExpansions: 3200,
     });
     if (shorePath) {
@@ -980,6 +1002,7 @@ export function createCity(map: GeneratedWorldMap, options?: { orderChaos?: numb
             const c1 = door.col + off;
             const r1 = door.row + dir * step;
             if (!canWalkRoad(city, map, c1, r1, false)) break;
+            if (city.lotReservation.has(tileKey(c1, r1))) break;
             setRoadTile(city, map, c1, r1, { trafficDelta: 4, minTier: 'trail' });
           }
         }
@@ -990,6 +1013,7 @@ export function createCity(map: GeneratedWorldMap, options?: { orderChaos?: numb
             const c2 = door.col + dir * step;
             const r2 = door.row + off;
             if (!canWalkRoad(city, map, c2, r2, false)) break;
+            if (city.lotReservation.has(tileKey(c2, r2))) break;
             setRoadTile(city, map, c2, r2, { trafficDelta: 4, minTier: 'trail' });
           }
         }
