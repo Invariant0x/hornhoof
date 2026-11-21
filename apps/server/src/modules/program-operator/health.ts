@@ -43,7 +43,7 @@ async function restoreCase(ctx: Ctx, row: Case, now: Date): Promise<Case | undef
   if (row.status === 'open' && !await operatorAvailable(ctx, row)) await escalateCase(ctx, row, 'operator_unavailable', now);
   if (row.status === 'escalated' && !row.escalationJobId) await queueEscalation(ctx, row);
   if (!row.recoveryHold) return;
-  const evidence = await ctx.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.agentId, row.agentId), sql`${agentEvents.data}->>'operatorEvidenceId' is not null`, sql`${agentEvents.data}->'operatorEvidence'->>'type' = 'program.recovery_ready'`, sql`${agentEvents.data}->'operatorEvidence'->>'case' = ${row.id}`));
+  const evidence = await ctx.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.agentId, row.agentId), sql`${agentEvents.data}->>'operatorEvidenceId' is not null`, sql`${agentEvents.data}->'operatorEvidence'->>'instance' = ${row.instance}`, sql`${agentEvents.data}->'operatorEvidence'->>'type' = 'program.recovery_ready'`, sql`${agentEvents.data}->'operatorEvidence'->>'case' = ${row.id}`));
   for (const fact of evidence) {
     const data = fact.data as { operatorEvidence?: unknown };
     const parsed = OperatorNodeMessage.safeParse(data.operatorEvidence);
