@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { useT, type Messages } from '../i18n';
 import type { DecidedBy } from '../types';
+import { InfoIcon } from './icons';
 
 function whoDecides(t: Messages, by: DecidedBy): string {
   const place = by.department?.name;
@@ -13,6 +14,7 @@ function whoDecides(t: Messages, by: DecidedBy): string {
 /* Who takes a decision this person sees and may not take, in place of its buttons. */
 export function DecidedByNote({ by = CEO_DECIDES }: { by?: DecidedBy }) {
   const t = useT();
+  if (by.kind === 'named_person') return <p className="muted decided-by wait-question-hint"><InfoIcon /><bdi>{whoDecides(t, by)}</bdi></p>;
   return <p className="muted decided-by">{whoDecides(t, by)}</p>;
 }
 
