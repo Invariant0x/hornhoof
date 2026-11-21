@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { errorText, LANGUAGES, useLanguage, useT } from '../i18n';
+import { errorText, LANGUAGES, Phrase, useLanguage, useT } from '../i18n';
 import type { SettingsGroup } from '../routes';
 import { useLive } from '../tasks';
 import type { Me, PersonView, TlsView } from '../types';
@@ -67,16 +67,25 @@ function NameForm({ me, onRenamed }: { me: Me; onRenamed?: (name: string) => voi
     const trimmed = name.trim();
     if (!trimmed) return setFailure(t.profile.nameRequired);
     if (trimmed === me.person.name) return void save(trimmed);
-    confirmation.ask({ action: t.confirmAction.rename(me.person.name, trimmed), onYes: () => void save(trimmed) });
+    setFailure('');
+    confirmation.ask({
+      ...t.confirm.renameSelf,
+      effect: <Phrase words={t.confirm.renameSelf.effect} values={[<bdi>{me.person.name}</bdi>, <bdi>{trimmed}</bdi>]} />,
+      onYes: () => send(trimmed),
+    });
+  }
+
+  async function send(trimmed: string) {
+    const res = await api.patch<{ person: PersonView }>(`/api/people/${me.person.id}`, { name: trimmed });
+    setName(res.person.name);
+    onRenamed?.(res.person.name);
   }
 
   async function save(trimmed: string) {
     setBusy(true);
     setFailure('');
     try {
-      const res = await api.patch<{ person: PersonView }>(`/api/people/${me.person.id}`, { name: trimmed });
-      setName(res.person.name);
-      onRenamed?.(res.person.name);
+      await send(trimmed);
     } catch (err) {
       setFailure(errorText(t, err));
     } finally {
@@ -152,15 +161,18 @@ function CompanyLink() {
     if (data) setLoaded(data);
   }, [data]);
 
+  const settle = (link: Link | null) => {
+    /* The old certificate is not shown after a change, since it was for the old name. */
+    setLoaded(was => ({ domain: was?.domain ?? '', link, tls: null }));
+    setMode('view');
+    if (!link) setName('');
+  };
+
   async function run(change: () => Promise<Link | null>) {
     setBusy(true);
     setFailure(null);
     try {
-      const link = await change();
-      /* The old certificate is not shown after a change, since it was for the old name. */
-      setLoaded(was => ({ domain: was?.domain ?? '', link, tls: null }));
-      setMode('view');
-      if (!link) setName('');
+      settle(await change());
     } catch (err) {
       setFailure(err);
     } finally {
@@ -168,22 +180,31 @@ function CompanyLink() {
     }
   }
 
-  const save = () => run(async () => (await api.put<{ link: Link }>('/api/link', { name })).link);
-  const remove = () => run(async () => (await api.del('/api/link'), null));
+  const putLink = async () => (await api.put<{ link: Link }>('/api/link', { name })).link;
+  const save = () => run(putLink);
   const check = (n: string) => api.get<NameCheck>(`/api/link/names/${encodeURIComponent(n)}`);
   const link = loaded?.link ?? null;
+  /* Opening the link saves at once; another name for a link in use is asked first, as is removing it. */
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!link || link.name === name) {
-      void save();
-      return;
-    }
+    if (!link || link.name === name) return void save();
+    setFailure(null);
     confirmation.ask({
-      action: t.confirmAction.publicLink(link.url, `${name}.${loaded?.domain ?? ''}`),
+      ...t.confirm.changeLink,
+      effect: <Phrase words={t.confirm.changeLink.effect} values={[<bdi>{link.url}</bdi>, <bdi>{`${name}.${loaded?.domain ?? ''}`}</bdi>]} />,
       warnings: [t.settings.moveNote],
-      onYes: () => void save(),
+      onYes: async () => settle(await putLink()),
     });
   }
+  const askRemove = (url: string) => {
+    setFailure(null);
+    confirmation.ask({
+      ...t.confirm.removeLink,
+      effect: <Phrase words={t.settings.removeAsk} values={[<bdi>{url}</bdi>]} />,
+      danger: true,
+      onYes: async () => settle((await api.del('/api/link'), null)),
+    });
+  };
 
   if (unavailableFailure(loadFailure) || unavailableFailure(failure)) return null;
 
@@ -213,7 +234,7 @@ function CompanyLink() {
                   {t.settings.change}
                 </button>
                 <button className="btn small ghost danger" type="button" disabled={busy}
-                  onClick={() => confirmation.ask({ action: t.settings.removeAsk(link.url), onYes: () => void remove() })}>
+                  onClick={() => askRemove(link.url)}>
                   {t.settings.remove}
                 </button>
               </div>

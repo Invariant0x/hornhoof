@@ -371,7 +371,7 @@ for (const lang of ['en', 'ru'] as const) for (const width of WIDTHS) {
     await shot(page, info, `settings-integrations-ask-${name}`);
     await page.goto('/settings/company');
     await dialog.getByRole('button', { name: t.settings.remove, exact: true }).click();
-    await expect(page.getByRole('alertdialog', { name: t.confirmAction.question })).toHaveAccessibleDescription(t.settings.removeAsk('https://acme.hornhoof.org'));
+    await expect(page.getByRole('alertdialog', { name: t.confirm.removeLink.title })).toHaveAccessibleDescription(t.settings.removeAsk('https://acme.hornhoof.org'));
     await shot(page, info, `settings-company-ask-${name}`);
     expect(problems).toEqual([]);
   });

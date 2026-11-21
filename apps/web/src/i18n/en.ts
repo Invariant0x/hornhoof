@@ -97,14 +97,22 @@ export const en = {
     atLeast10: 'At least 10 characters.',
     useAtLeast10: 'Use at least 10 characters.',
   },
-  confirmAction: {
-    question: 'Are you sure?',
-    yes: 'Yes',
-    no: 'No',
-    rename: (from: string, to: string) => `Change the name from ${from} to ${to}.`,
-    access: (person: string, places: string) => `Change access for ${person} to ${places}.`,
-    deputy: (person: string, granted: boolean) => granted ? `Make ${person} the Deputy CEO.` : `Take Deputy CEO authority away from ${person}.`,
-    publicLink: (before: string, after: string) => `Change the public link from ${before} to ${after}.`,
+  /* The question before a person's critical action (ui/ConfirmAction.tsx; style book 1.9, section 4 "Confirmation"): the
+     question names the action, the line under it says what happens to what, and the action's button carries its verb. */
+  confirm: {
+    final: 'This cannot be undone.',
+    working: 'Working…',
+    several: 'Do you really want to save these changes?',
+    deletePerson: { title: 'Do you really want to delete this person?', effect: (name: string) => `${name} will be deleted from the company.`, yes: 'Delete', working: 'Deleting…' },
+    deleteAssistant: { title: 'Do you really want to delete this assistant?', effect: (name: string) => `${name} will be deleted from the company.`, yes: 'Delete', working: 'Deleting…' },
+    disablePerson: { title: 'Do you really want to disable this person?', effect: (name: string) => `${name} will no longer be able to sign in.`, yes: 'Disable', working: 'Disabling…' },
+    renamePerson: { title: 'Do you really want to rename this person?', effect: (from: string, to: string) => `${from} will be renamed to ${to}.`, yes: 'Rename', working: 'Renaming…' },
+    renameSelf: { title: 'Do you really want to change your name?', effect: (from: string, to: string) => `Your name will change from ${from} to ${to}.`, yes: 'Change name', working: 'Saving…' },
+    access: { title: "Do you really want to change this person's access?", effect: (name: string, places: string) => `${name} will have access to ${places}.`, yes: 'Change access', working: 'Saving…' },
+    makeDeputy: { title: 'Do you really want to make this person the Deputy CEO?', effect: (name: string) => `${name} will take the CEO's decisions and see the whole company.`, yes: 'Make deputy', working: 'Saving…' },
+    dropDeputy: { title: 'Do you really want to take Deputy CEO authority away?', effect: (name: string) => `${name} will no longer take the CEO's decisions.`, yes: 'Take away', working: 'Saving…' },
+    removeLink: { title: 'Do you really want to remove the public link?', yes: 'Remove', working: 'Removing…' },
+    changeLink: { title: 'Do you really want to change the public link?', effect: (before: string, after: string) => `The link ${before} will change to ${after}.`, yes: 'Change link', working: 'Saving…' },
   },
   /* A screen's data while it comes (style book 1.5, section 4): the words beside the ring, and for a load that failed one
      whole sentence of what failed and why, then what to do. */
@@ -567,8 +575,8 @@ export const en = {
     delete: 'Delete',
     deleteLabel: (name: string) => `Delete ${name}`,
     deleteAsk: (name: string) => `Delete ${name} for good?`,
-    deleteNote: 'They can no longer sign in, and their keys, machines and personal plans stop working. Their own assistants are deleted with them. Old tasks and answers keep the name. This cannot be undone.',
-    deleteAssistantNote: 'Its key stops working and its own agent leaves the company. Old tasks and answers keep the name. This cannot be undone.',
+    deleteNote: 'They can no longer sign in, and their keys, machines and personal plans stop working. Their own assistants are deleted with them. Old tasks and answers keep the name.',
+    deleteAssistantNote: 'Its key stops working and its own agent leaves the company. Old tasks and answers keep the name.',
     yesDelete: 'Yes, delete',
     agentsNote: 'Agents are not listed here. They live on the map, inside their departments.',
     ceoDelegate: 'Deputy CEO',

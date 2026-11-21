@@ -43,13 +43,13 @@ describe('the public link under Company & access', () => {
     expect(await screen.findByText('acme-corp.hornhoof.org is free.')).toBeInTheDocument();
     const save = within(screen.getByLabelText('Link').closest('form')!).getByRole('button', { name: 'Save' });
     await user.click(save);
-    const question = screen.getByRole('alertdialog', { name: 'Are you sure?' });
-    expect(question).toHaveAccessibleDescription(/acme\.hornhoof\.org.*acme-corp\.hornhoof\.org/);
+    const question = screen.getByRole('alertdialog', { name: 'Do you really want to change the public link?' });
+    expect(question).toHaveAccessibleDescription('The link https://acme.hornhoof.org will change to acme-corp.hornhoof.org.');
     expect(calls.some(c => c.method === 'PUT')).toBe(false);
-    await user.click(within(question).getByRole('button', { name: 'No' }));
+    await user.click(within(question).getByRole('button', { name: 'Cancel' }));
     expect(calls.some(c => c.method === 'PUT')).toBe(false);
     await user.click(save);
-    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Yes' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Change link' }));
     expect(await screen.findByRole('link', { name: 'https://acme-corp.hornhoof.org' })).toBeInTheDocument();
     expect(calls.find(c => c.method === 'PUT')).toEqual({ method: 'PUT', path: '/api/link', body: { name: 'acme-corp' } });
   });
@@ -115,10 +115,10 @@ describe('the public link under Company & access', () => {
     render(<Settings me={ME} group="company" onClose={() => {}} />);
     await user.click(await screen.findByRole('button', { name: 'Remove link' }));
     expect(screen.getByText('Hornhoof stops opening at https://acme.hornhoof.org. Machines connected through this link lose the connection.')).toBeInTheDocument();
-    await user.click(within(screen.getByRole('alertdialog', { name: 'Are you sure?' })).getByRole('button', { name: 'No' }));
+    await user.click(within(screen.getByRole('alertdialog', { name: 'Do you really want to remove the public link?' })).getByRole('button', { name: 'Cancel' }));
     expect(calls.some(c => c.method === 'DELETE')).toBe(false);
     await user.click(screen.getByRole('button', { name: 'Remove link' }));
-    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Yes' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
     expect(await screen.findByText('Hornhoof opens only at its own address, on this computer and your network.')).toBeInTheDocument();
     expect(calls.map(c => `${c.method} ${c.path}`)).toContain('DELETE /api/link');
   });
@@ -131,7 +131,7 @@ describe('the public link under Company & access', () => {
     await user.click(await screen.findByRole('button', { name: 'Remove link' }));
     const question = screen.getByText(`Hornhoof stops opening at ${longest.url}. Machines connected through this link lose the connection.`);
     expect(screen.getByRole('alertdialog')).toContainElement(question);
-    expect(decl('.dialog.confirm-action', 'overflow-wrap')).toBe('anywhere');
+    expect(decl('dialog.dialog-back > .dialog > :is(h2, p)', 'overflow-wrap')).toBe('anywhere');
   });
 
   it('starts a company with no link on a long random name', async () => {
@@ -157,7 +157,7 @@ describe('the public link under Company & access', () => {
     const user = userEvent.setup();
     render(<Settings me={ME} group="company" onClose={() => {}} />);
     await user.click(await screen.findByRole('button', { name: 'Remove link' }));
-    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Yes' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
     expect(await screen.findByLabelText('Link')).toHaveValue(RANDOM);
   });
 
@@ -186,12 +186,13 @@ describe('your own name under Profile', () => {
     await user.clear(field);
     await user.type(field, '  Lisa  ');
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    const question = screen.getByRole('alertdialog', { name: 'Are you sure?' });
+    const question = screen.getByRole('alertdialog', { name: 'Do you really want to change your name?' });
+    expect(question).toHaveAccessibleDescription('Your name will change from Ivan to Lisa.');
     expect(calls.find(c => c.method === 'PATCH')).toBeUndefined();
-    await user.click(within(question).getByRole('button', { name: 'No' }));
+    await user.click(within(question).getByRole('button', { name: 'Cancel' }));
     expect(calls.find(c => c.method === 'PATCH')).toBeUndefined();
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Yes' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Change name' }));
     expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/people/p1', body: { name: 'Lisa' } });
     expect(renamed).toEqual(['Lisa']);
   });
@@ -239,8 +240,10 @@ describe('your own name under Profile', () => {
     expect(await within(form).findByText('Enter your name.')).toBeInTheDocument();
     await user.type(field, 'Lisa');
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Yes' }));
-    expect(await within(form).findByText('You cannot change this name.')).toBeInTheDocument();
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Change name' }));
+    /* A refusal stays in the question, with its buttons back. */
+    expect(await within(screen.getByRole('alertdialog')).findByRole('alert')).toHaveTextContent('You cannot change this name.');
+    expect(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Change name' })).toBeEnabled();
   });
 });
 

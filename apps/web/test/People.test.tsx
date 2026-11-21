@@ -16,7 +16,8 @@ const iconOf = (element: HTMLElement) => element.querySelector('svg')!.outerHTML
 const drawn = (icon: ReactElement) => render(icon).container.innerHTML;
 
 const rowOf = (name: string) => screen.getByRole('row', { name: new RegExp(`^${name}\\b`) });
-const confirm = (user: ReturnType<typeof userEvent.setup>) => user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Yes', exact: true }));
+/* The first button of a confirmation is its action, named by its verb. */
+const confirm = (user: ReturnType<typeof userEvent.setup>) => user.click(within(screen.getByRole('alertdialog')).getAllByRole('button')[0]);
 
 describe('People', () => {
   it('lists everyone with title, access and status', async () => {
@@ -195,10 +196,11 @@ describe('deleting a person', () => {
     const user = userEvent.setup();
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Delete Sasha' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Are you sure?' });
-    expect(dialog).toHaveAccessibleDescription(/Delete Sasha for good/);
-    expect(dialog).toHaveAccessibleDescription(/cannot be undone/);
-    expect(within(dialog).getByRole('button', { name: 'No' })).toHaveFocus();
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to delete this person?' });
+    expect(dialog).toHaveAccessibleDescription('Sasha will be deleted from the company.');
+    expect(dialog).toHaveTextContent(/stop working.*This cannot be undone\./);
+    expect(within(dialog).getByRole('button', { name: 'Delete' })).toHaveClass('danger');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
     expect(calls.some(c => c.method === 'DELETE')).toBe(false);
     await confirm(user);
     expect(calls.filter(c => c.method === 'DELETE')).toEqual([{ method: 'DELETE', path: '/api/people/p3', body: undefined }]);
@@ -212,15 +214,17 @@ describe('deleting a person', () => {
     const user = userEvent.setup();
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Delete Ava' }));
-    expect(screen.getByRole('alertdialog', { name: 'Are you sure?' })).toHaveAccessibleDescription(/Delete Ava for good.*key stops working and its own agent leaves the company/);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to delete this assistant?' });
+    expect(dialog).toHaveAccessibleDescription('Ava will be deleted from the company.');
+    expect(dialog).toHaveTextContent(/key stops working and its own agent leaves the company/);
   });
 
-  it('leaves the person as they are on No or Escape', async () => {
+  it('leaves the person as they are on Cancel or Escape', async () => {
     const calls = mockApi({ ...lists, 'DELETE /api/people/p2': [204, undefined] });
     const user = userEvent.setup();
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Delete Maria' }));
-    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'No' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Delete Maria' }));
     await user.keyboard('{Escape}');
@@ -260,14 +264,14 @@ describe('deleting a person', () => {
     const user = userEvent.setup();
     render(<LanguageProvider><People me={ME} /></LanguageProvider>);
     await user.click(await screen.findByRole('button', { name: 'Удалить Sasha' }));
-    const dialog = screen.getByRole('alertdialog', { name: ru.confirmAction.question });
-    expect(dialog).toHaveAccessibleDescription(/Удалить Sasha навсегда/);
-    expect(dialog).toHaveAccessibleDescription(/Отменить это нельзя/);
-    expect(within(dialog).getByRole('button', { name: ru.confirmAction.yes })).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: ru.confirmAction.no })).toBeInTheDocument();
+    const dialog = screen.getByRole('alertdialog', { name: 'Вы действительно хотите удалить этого человека?' });
+    expect(dialog).toHaveAccessibleDescription('Учетная запись Sasha будет удалена из компании.');
+    expect(dialog).toHaveTextContent(/Это нельзя отменить\./);
+    expect(within(dialog).getByRole('button', { name: 'Удалить' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: ru.common.cancel })).toBeInTheDocument();
     await user.keyboard('{Escape}');
     await user.click(screen.getByRole('button', { name: 'Удалить Ava' }));
-    expect(screen.getByRole('alertdialog', { name: ru.confirmAction.question })).toHaveAccessibleDescription(/Удалить Ava навсегда.*ключ перестанет работать/);
+    expect(screen.getByRole('alertdialog', { name: 'Вы действительно хотите удалить этого помощника?' })).toHaveTextContent(/Помощник Ava будет удален из компании\..*ключ перестанет работать/);
     localStorage.clear();
   });
 });

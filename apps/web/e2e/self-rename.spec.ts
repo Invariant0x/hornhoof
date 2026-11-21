@@ -51,15 +51,18 @@ for (const lang of ['en', 'ru'] as const) {
         const name = lang === 'en' ? 'Lisa Ray' : 'Лиза Рей';
         await field.fill(`  ${name}  `);
         const save = dialog.getByRole('button', { name: lang === 'en' ? 'Save' : 'Сохранить', exact: true });
-        const confirmation = page.getByRole('alertdialog', { name: lang === 'en' ? 'Are you sure?' : 'Вы действительно хотите это сделать?' });
-        const no = confirmation.getByRole('button', { name: lang === 'en' ? 'No' : 'Нет', exact: true });
-        const yes = confirmation.getByRole('button', { name: lang === 'en' ? 'Yes' : 'Да', exact: true });
+        const confirmation = page.getByRole('alertdialog', { name: lang === 'en' ? 'Do you really want to change your name?' : 'Вы действительно хотите изменить свое имя?' });
+        const no = confirmation.getByRole('button', { name: lang === 'en' ? 'Cancel' : 'Отмена', exact: true });
+        const yes = confirmation.getByRole('button', { name: lang === 'en' ? 'Change name' : 'Изменить имя', exact: true });
         const firstSave = page.waitForRequest(request => request.method() === 'PATCH' && new URL(request.url()).pathname === '/api/people/p1');
         await save.click();
         expect(await Promise.race([confirmation.waitFor().then(() => 'question'), firstSave.then(() => 'request')])).toBe('question');
         await expect(confirmation).toContainText('Lisa');
         await expect(confirmation).toContainText(name);
         expect(namesSaved).toEqual([]);
+        /* A rename is not dangerous: the focus opens on its own button, and Tab goes round the two. */
+        await expect(yes).toBeFocused();
+        await page.keyboard.press('Tab');
         await expect(no).toBeFocused();
         await page.keyboard.press('Tab');
         await expect(yes).toBeFocused();

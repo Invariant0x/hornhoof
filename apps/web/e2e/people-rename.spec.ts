@@ -129,7 +129,7 @@ for (const lang of ['en', 'ru'] as const) {
     const nameField = (page: Page) => page.getByLabel(m.common.name, { exact: true });
     const titleField = (page: Page) => page.getByLabel(m.common.title, { exact: true });
     const save = (page: Page) => page.getByRole('button', { name: m.common.save, exact: true }).click();
-    const confirmRename = (page: Page) => page.getByRole('alertdialog', { name: m.confirmAction.question }).getByRole('button', { name: m.confirmAction.yes, exact: true }).click();
+    const confirmRename = (page: Page) => page.getByRole('alertdialog', { name: m.confirm.renamePerson.title }).getByRole('button', { name: m.confirm.renamePerson.yes, exact: true }).click();
     const row = (page: Page, name: string) => page.locator('table.ptable tr', { hasText: name });
 
     try {
