@@ -4,6 +4,7 @@ import type { Limits } from '@hornhoof/protocol';
 import { ownFs, type AgentFs } from '../agent-fs.js';
 import { bridgeEnv, readJson, type TermProgram } from '../terminal/programs.js';
 import { kimiUsageLimits } from '../terminal/transcripts.js';
+import { KIMI_MCP_START } from './mcp-start.js';
 import { KIMI_NO_AUTO_UPDATE } from './session-updates.js';
 
 /* Kimi Code in a native terminal: how it launches, the files it reads first, where it logs and its plan's limits. */
@@ -22,12 +23,16 @@ export const kimiProgram: TermProgram = {
     /* The agent's folder is trusted, so Kimi reads the tools and instructions Hornhoof leaves there without asking. Kimi
        has no flag for effort; it reads this setting over its own. */
     const thinking: Record<string, string> = effort ? { KIMI_MODEL_THINKING_EFFORT: effort } : {};
-    return { command, env: { KIMI_CODE_HOME: home, KIMI_CODE_TRUST_WORKSPACE: '1', PI_PROGRAM_STATUS: '1', ...KIMI_NO_AUTO_UPDATE, ...thinking, ...bridgeEnv(urls) }, sessionId };
+    return { command, env: { KIMI_CODE_HOME: home, KIMI_CODE_TRUST_WORKSPACE: '1', PI_PROGRAM_STATUS: '1', ...KIMI_NO_AUTO_UPDATE, ...thinking, ...bridgeEnv(urls, KIMI_HOOK_LIMITS) }, sessionId };
   },
   limits: kimiPlanLimits,
 };
 
 /* Hornhoof's hooks in Kimi's settings: the start names the session, the prompt opens a person's turn before Kimi goes on. */
+/* Kimi Code gives every hook thirty seconds unless it asks for more
+   (packages/agent-core-v2/src/features/externalHooks/internal/matchHooks.ts, DEFAULT_HOOK_TIMEOUT_SECONDS). */
+const KIMI_HOOK_LIMITS = { '*': 30_000 };
+
 const KIMI_HOOKS = [
   ['SessionStart', 'start'],
   ['UserPromptSubmit', 'prompt'],
@@ -47,7 +52,7 @@ const KIMI_HOOKS = [
 export async function prepareKimi(home: string, workDir: string, mcpUrl: string, fs: AgentFs = ownFs): Promise<void> {
   const dir = join(workDir, '.kimi-code');
   await fs.mkdir(dir);
-  await fs.write(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { hornhoof: { transport: 'http', url: mcpUrl } } }, null, 2));
+  await fs.write(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { hornhoof: { transport: 'http', url: mcpUrl, ...KIMI_MCP_START } } }, null, 2));
   const file = join(home, 'config.toml');
   /* A home that was never signed in has none yet. */
   const config = (await fs.read(file)) ?? '';

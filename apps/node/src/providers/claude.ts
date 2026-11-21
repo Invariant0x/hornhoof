@@ -11,6 +11,7 @@ import { claudePlanLimits, planToken } from './claude-terminal.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine, toolName } from './events.js';
 import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, readPrivate, runProgram, tokensIn, writePrivate } from './process.js';
 import { CLAUDE_UNSIGNED } from './claude-attribution.js';
+import { claudeMcpStart } from './mcp-start.js';
 import { CLAUDE_NO_AUTO_UPDATE } from './session-updates.js';
 import { anthropicTokens, claudeModel, withModel } from '../turn-tokens.js';
 import { NPM_PACKAGES } from './packages.js';
@@ -95,7 +96,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
   const glmKey = () => readPrivate(keyFile)?.trim() ?? '';
 
   function env(jobSecret: string | null, model: string | null = null): NodeJS.ProcessEnv {
-    const extra: Record<string, string> = { CLAUDE_CONFIG_DIR: ensureDir(home), ...CLAUDE_NO_AUTO_UPDATE };
+    const extra: Record<string, string> = { CLAUDE_CONFIG_DIR: ensureDir(home), ...CLAUDE_NO_AUTO_UPDATE, ...claudeMcpStart() };
     /* A job user cannot write the node's own HOME, so its home is the key's folder. */
     if (user) extra.HOME = home;
     if (mode === 'api_key' && api) Object.assign(extra, endpointEnv(api, jobSecret ?? secret ?? '', model));

@@ -12,6 +12,7 @@ import { STOPPED_ON_PURPOSE } from '../conversation/constants.js';
 import { dropOldConnections, serverStarted } from '../nodes/connections.js';
 import { tellOfCopySchemaFailures } from '../copies/schema-failures.js';
 import { tellOfMachinesAway } from '../nodes/machine-away.js';
+import { tellOfMachinesLow } from '../nodes/machine-low.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { reconcile, waitsOnPurpose } from '../tasks/reconcile.js';
 import { retryCallBatches } from '../calls/calls.js';
@@ -140,6 +141,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
     tellOfCopySchemaFailures(ctx, now).catch(failed('telling of copy schema failures failed')),
     tellOfMachinesAway(ctx, now).catch(failed('telling of machines away failed')),
+    tellOfMachinesLow(ctx).catch(failed('telling of machines short of disk space failed')),
   ]);
 }
 

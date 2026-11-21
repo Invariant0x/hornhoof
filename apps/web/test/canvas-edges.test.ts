@@ -137,8 +137,8 @@ describe('what scrolls out of the room on a phone', () => {
     expect(rulesFor('.map-room > .world')[0]!.decls.top).toBe('calc(-1 * var(--map-top, 0px))');
   });
 
-  it('goes out of sight on a department\'s schema, which stands between its name and the dock as its tree does', () => {
-    const phone = rulesFor('.dcanvas').find(r => r.media === '(max-width: 760px)');
-    expect(phone?.decls['inset-block']).toBe('var(--tree-top, 116px) var(--tree-bottom, 228px)');
+  /* A department's schema runs under the glass of its name and the dock instead (#1635): its canvas takes the whole window. */
+  it('passes under the glass on a department\'s schema, whose canvas takes the whole window', () => {
+    expect(rulesFor('.dcanvas').filter(r => r.media === '(max-width: 760px)' && Object.keys(r.decls).some(p => p.startsWith('inset')))).toEqual([]);
   });
 });

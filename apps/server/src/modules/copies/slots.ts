@@ -12,6 +12,7 @@ export type CopySlot = { name: string; pid: number | null; walStatus: string | n
 
 /* What the app asks of its Postgres about the copies that follow it. */
 export type Replication = {
+  within?(db: Db): Replication;
   slots(): Promise<CopySlot[]>;
   /* Ends the connection that reads a slot. */
   end(pid: number): Promise<void>;
@@ -24,6 +25,7 @@ export type Replication = {
 export function replicationOf(db: Db): Replication {
   const q = queryOf(db);
   return {
+    within: replicationOf,
     slots: () => q<CopySlot>('SELECT slot_name::text AS name, active_pid AS pid, wal_status AS "walStatus", confirmed_flush_lsn::text AS confirmed FROM pg_replication_slots ORDER BY slot_name'),
     end: async pid => void (await q('SELECT pg_terminate_backend($1::int)', [pid])),
     drop: async name => void (await q('SELECT pg_drop_replication_slot($1::text)', [name])),

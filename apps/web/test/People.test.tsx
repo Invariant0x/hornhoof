@@ -57,7 +57,8 @@ describe('People', () => {
     });
     const view = render(<People me={ME} />);
     view.rerender(<People me={{ ...ME, person: { ...ME.person, name: 'Ivan R' } }} />);
-    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.getByRole('table').closest('[aria-busy="true"]')).not.toBeNull();
+    expect(screen.queryByRole('cell', { name: 'Ivan' })).not.toBeInTheDocument();
     await act(async () => { finish([200, { people: PEOPLE }]); });
     expect(await screen.findByRole('cell', { name: 'Ivan' })).toBeInTheDocument();
   });

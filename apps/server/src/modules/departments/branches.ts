@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto';
 import { ownBranch } from '@hornhoof/protocol';
 import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { tasks } from '../../db/schema.js';
+import type { MergeReader } from '../testruns/compare.js';
+import { GitHubRateLimited } from '../testruns/github-limit.js';
 import type { BranchesAt, RepoAddress } from '../testruns/refs.js';
 import { worksIn, type Reader } from './inside.js';
 import { repoAt } from './repository.js';
@@ -16,17 +19,46 @@ const LOOKED_AT = 40;
 const SHOWN = 20;
 /* A department's page and a task's read wait no longer than this for the repository. */
 const READ_MS = 5_000;
+/* Every task read of every agent of the department says these branches, and GitHub's request limit is the whole server's:
+   one read asks GitHub's compare of no more branches than this, and cannot tell of the others yet, which a later one asks of. */
+export const COMPARES_PER_READ = 10;
+/* A branch not in main, or one GitHub could not tell of, is asked of again once main moved, or after this at most. */
+export const UNSETTLED_MS = 5 * 60_000;
+const ANSWERS_KEPT = 4_096;
 
-type Readers = Pick<Ctx, 'db' | 'config'> & Partial<Pick<Ctx, 'readBranches' | 'readMerged'>>;
+type Readers = Pick<Ctx, 'db' | 'config' | 'clock' | 'mergedAnswers'> & Partial<Pick<Ctx, 'readBranches' | 'readMerged'>>;
 type Repo = RepoAddress & { branch: string };
-type Found = { task: typeof tasks.$inferSelect; repo: Repo; branch: string; commit: string };
+type Found = { task: typeof tasks.$inferSelect; repo: Repo; branch: string; commit: string; main: string | null };
+type Said = { merged: boolean | null; main: string | null; at: number };
+
+/* What GitHub said of whether a branch's commit is in the main line, by repository, token, main line and commit. A commit in
+   the main line stays there, so that answer holds for good; any other holds while main is at the commit it was at then, and
+   for a few minutes at most. The oldest go first once there are many. */
+export class MergedAnswers {
+  private readonly said = new Map<string, Said>();
+
+  static key(repo: Repo, commit: string): string {
+    return createHash('sha256').update(JSON.stringify([repo.url, repo.token, repo.branch, commit])).digest('hex');
+  }
+
+  get(key: string, main: string | null, now: number): boolean | null | undefined {
+    const said = this.said.get(key);
+    return said && (said.merged === true || (said.main === main && now - said.at < UNSETTLED_MS)) ? said.merged : undefined;
+  }
+
+  keep(key: string, said: Said): void {
+    this.said.delete(key);
+    if (this.said.size >= ANSWERS_KEPT) this.said.delete(this.said.keys().next().value!);
+    this.said.set(key, said);
+  }
+}
 
 const NONE: DepartmentBranches = { branches: [], problem: null };
 
-/* The branch of each task in its repository's heads, if it has exactly one. */
-function branchOf(task: { number: number }, heads: Record<string, string>): { branch: string; commit: string } | null {
+/* The branch of each task in its repository's heads, if it has exactly one, and where the main line is. */
+function branchOf(task: { number: number }, heads: Record<string, string>, main: string): { branch: string; commit: string; main: string | null } | null {
   const own = ownBranch(Object.keys(heads), task.number);
-  return 'branch' in own ? { branch: own.branch, commit: heads[own.branch]! } : null;
+  return 'branch' in own ? { branch: own.branch, commit: heads[own.branch]!, main: heads[main] ?? null } : null;
 }
 
 /* Each repository once: the tasks of a product go to its repository when it has one, the others to the department's. */
@@ -61,16 +93,40 @@ async function onBranches(rows: (typeof tasks.$inferSelect)[], repos: Places): P
     const place = repos.get(task.productId ?? '');
     const read = place ? await place.read : null;
     if (read && 'problem' in read) problems.add(read.problem);
-    const at = read && 'heads' in read ? branchOf(task, read.heads) : null;
+    const at = read && 'heads' in read ? branchOf(task, read.heads, place!.repo.branch) : null;
     if (at) found.push({ task, repo: place!.repo, ...at });
   }
   return { found, problems: [...problems] };
 }
 
-/* The branches GitHub does not show in the main line, and those it cannot tell of. */
+/* GitHub's answer for one branch, kept for the reads after. While the request limit of the repository's token is used up,
+   the server's readers ask GitHub nothing until its reset and say so: no answer to keep, and unknown for now. */
+async function askMerged(ctx: Readers, readMerged: MergeReader, f: Found, key: string, now: number): Promise<boolean | null> {
+  try {
+    const merged = await readMerged(f.repo, { base: f.repo.branch, head: f.commit }, READ_MS);
+    ctx.mergedAnswers.keep(key, { merged, main: f.main, at: now });
+    return merged;
+  } catch (error) {
+    if (error instanceof GitHubRateLimited) return null;
+    throw error;
+  }
+}
+
+/* Whether a branch is in main: as GitHub said before where that still holds, else asked now while the read may still ask,
+   else unknown. It counts what the read may still ask before its first wait, so the newest branches are the ones asked. */
+async function mergedOf(ctx: Readers, f: Found, read: { left: number; now: number }): Promise<boolean | null> {
+  const key = MergedAnswers.key(f.repo, f.commit);
+  const said = ctx.mergedAnswers.get(key, f.main, read.now);
+  if (said !== undefined) return said;
+  if (!ctx.readMerged || read.left === 0) return null;
+  read.left--;
+  return askMerged(ctx, ctx.readMerged, f, key, read.now);
+}
+
+/* The branches GitHub does not show in the main line, and those it cannot tell of, asking it of a few at most. */
 async function notMerged(ctx: Readers, found: Found[]): Promise<DepartmentBranch[]> {
-  const readMerged = ctx.readMerged ?? (async () => null);
-  const merged = await Promise.all(found.map(f => readMerged(f.repo, { base: f.repo.branch, head: f.commit }, READ_MS)));
+  const read = { left: COMPARES_PER_READ, now: ctx.clock() };
+  const merged = await Promise.all(found.map(f => mergedOf(ctx, f, read)));
   return found.flatMap((f, i): DepartmentBranch[] =>
     merged[i] === true ? [] : [{ task: f.task.number, title: f.task.title, status: f.task.status as 'done' | 'review', branch: f.branch, commit: f.commit, merged: merged[i] === false ? false : null }]);
 }

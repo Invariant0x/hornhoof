@@ -1,43 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fromAgent, OwnerUnknown, socketOf } from '../src/terminal/peer.js';
+import { fakeProc, removeProcs } from './terminal-peer-fixture.js';
 
-const hex = (port: number) => port.toString(16).toUpperCase().padStart(4, '0');
-const folders: string[] = [];
-afterEach(() => folders.splice(0).forEach(folder => rmSync(folder, { recursive: true, force: true })));
-
-/* A /proc with two agents' panes, 10 and 20, and the processes under them. */
-function fakeProc(socket: { port: number; bridgePort: number; inode: number }, holder: number) {
-  const proc = mkdtempSync(join(tmpdir(), 'hh-proc-'));
-  folders.push(proc);
-  mkdirSync(join(proc, 'net'));
-  writeFileSync(
-    join(proc, 'net', 'tcp'),
-    [
-      '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode',
-      `   0: 0100007F:${hex(socket.bridgePort)} 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 500 1 0 100 0 0 10 0`,
-      `   1: 0100007F:${hex(socket.port)} 0100007F:${hex(socket.bridgePort)} 01 00000000:00000000 00:00000000 00000000  1000        0 ${socket.inode} 1 0 20 4 30 10 -1`,
-      `   2: 0100007F:${hex(socket.bridgePort)} 0100007F:${hex(socket.port)} 01 00000000:00000000 00:00000000 00000000     0        0 ${socket.inode + 1} 1 0 20 4 30 10 -1`,
-    ].join('\n') + '\n',
-  );
-  const processes: [number, number, string][] = [
-    [1, 0, 'node'],
-    [10, 1, 'sh'],
-    [11, 10, 'claude (main) x'],
-    [12, 11, 'hh-hook'],
-    [20, 1, 'sh'],
-    [21, 20, 'codex'],
-  ];
-  for (const [pid, ppid, comm] of processes) {
-    mkdirSync(join(proc, String(pid), 'fd'), { recursive: true });
-    writeFileSync(join(proc, String(pid), 'stat'), `${pid} (${comm}) S ${ppid} ${pid} ${pid} 0 -1 4194560 100 0 0 0\n`);
-    symlinkSync('/dev/null', join(proc, String(pid), 'fd', '0'));
-  }
-  symlinkSync(`socket:[${socket.inode}]`, join(proc, String(holder), 'fd', '7'));
-  return proc;
-}
+afterEach(removeProcs);
 
 describe('which agent a connection to the bridge comes from', () => {
   const socket = { port: 41234, bridgePort: 35001, inode: 9001 };
@@ -80,7 +47,7 @@ describe('which agent a connection to the bridge comes from', () => {
     expect(await fromAgent(panes, fakeProc(socket, 1))('agent-1', socket)).toBe(false);
   });
 
-  it('says why it refuses a connection, and a pane lookup that fails gives no answer instead of a refusal', async () => {
+  it('says why it refuses a connection, a closed one as a caller that left, and a pane lookup that fails gives no answer instead of a refusal', async () => {
     const reasons: string[] = [];
     const why = (reason: string) => void reasons.push(reason);
     expect(await fromAgent(panes, fakeProc(socket, 12))('agent-1', { ...socket, pid: 0 }, why)).toBe(false);
@@ -93,9 +60,9 @@ describe('which agent a connection to the bridge comes from', () => {
     expect(reasons).toEqual([
       'malformed pid hint',
       'the hinted process does not hold the connection',
-      'the hinted process is gone, as a caller that gave up before its check is',
+      'the hinted process is not running',
       "the caller is not under the agent's pane",
-      'the connection is not in the socket table',
+      'the caller left before its owner check',
       "no process under the agent's pane holds the connection",
       'the agent has no pane',
     ]);

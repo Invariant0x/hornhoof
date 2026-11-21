@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { NodeLoad } from '@hornhoof/protocol';
 import { ApiFailure, api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
@@ -9,12 +9,14 @@ import { Bar, Share } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
+import { doneOf, Idle, useHeldRows, useLoad, type Load } from '../ui/Loading';
 import { latestAnswers, useStream } from '../live';
 import { CardBlock, CardFrame, CardHead, EmptyBox, Facts, Gauge, MachineMark, Part } from '../ui/Cards';
 import { ProviderMark } from '../ui/icons';
 import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
 import { providerFilter, type FilterGroup } from '../ui/TableTools';
-import { SortTable, type TableColumn } from '../ui/SortTable';
+import { HeldTable, SortTable, type TableColumn } from '../ui/SortTable';
+import type { TableSearch } from '../ui/TableTools';
 import { clock, planStateOnMachine, subName } from '../ui/subscription';
 import { MachineAccessBlock } from '../ui/MachineAccessBlock';
 import { useNow } from '../ui/reset';
@@ -22,13 +24,13 @@ import { MachineConnections } from '../ui/MachineConnections';
 import { ProgramVersions } from '../ui/ProgramVersions';
 import { TickBox } from '../ui/TickBox';
 import { DrainLine, DrainMark } from '../ui/MachineDrain';
+import { DiskParts, gigabytes, LowDisk, type FolderRow } from '../ui/MachineDisk';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 import { addablePlans, machinePool, machineRows, type MachineRow } from './machine-rows';
 import { everyVisible } from '../guard';
 import { Phones } from '../ui/Phones';
 
 const REFRESH_MS = 5000;
-const GIB = 1024 ** 3;
 /* Docker's system on a Mac keeps a little of what it is given, so only a clear gap says it was set smaller. */
 const SMALLER = 1.1;
 
@@ -37,7 +39,20 @@ const CERT_WARNING_MS = 14 * 24 * 3600_000;
 
 const SYSTEMS: Record<string, string> = { darwin: 'macOS', linux: 'Linux' };
 
-const gigabytes = (language: Language, bytes: number) => new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(Math.round((bytes / GIB) * 10) / 10);
+/* Each node's working folders by the name of the plan it serves, as its card names the plan; none for the machine's own node. */
+const folderRows = (t: Messages, row: MachineRow, subs: SubView[]): FolderRow[] =>
+  (row.folders ?? []).map(({ plan, bytes }) => {
+    const sub = subs.find(s => s.id === plan);
+    const provider = row.plans.find(p => p.id === plan)?.provider;
+    return { plan: sub ? [subName(t, sub), sub.tier].filter(Boolean).join(' ') : provider ? PROVIDER_NAMES[provider] : null, bytes };
+  });
+
+/* The machine's disk by part, while it is on the line and its nodes say it. */
+function MachineDisk({ row, subs }: { row: MachineRow; subs: SubView[] }) {
+  const t = useT();
+  const disk = row.online ? row.load?.disk : undefined;
+  return disk ? <DiskParts disk={disk} replicas={row.replicas ?? null} folders={folderRows(t, row, subs)} /> : null;
+}
 
 const busyShare = (load: number, cpus: number) => Math.min(100, Math.round((load / Math.max(1, cpus)) * 100));
 
@@ -106,6 +121,41 @@ function Pool({ loads, online, all }: { loads: NodeLoad[]; online: number; all: 
   );
 }
 
+/* The pool's frame while the machines come: its names at once, idle bars where its figures will stand. */
+function HeldPool() {
+  const t = useT();
+  const idle = <Idle w="6ch" />;
+  return (
+    <section aria-label={t.machines.pool} aria-busy="true">
+      <Edge className="pool" cut={12}>
+        <Facts className="pool-facts" items={[[t.machines.poolOnline, idle], [t.machines.poolCores, idle], [t.machines.poolMemory, idle], [t.machines.poolBusy, idle]]} />
+      </Edge>
+    </section>
+  );
+}
+
+/* A list with no count kept for the session holds this many machines. */
+const HELD_MACHINES = 3;
+
+type BodyProps = {
+  me: Me; shown: MachineView[] | null; load: Load; builtin: BuiltinView | null; pool: ReturnType<typeof machinePool>; copies: CopiesView | null;
+  held: number; columns: TableColumn<MachineRow>[]; search: TableSearch<MachineRow>; table: ReactNode;
+};
+
+/* The machines once they came: the pool, the table or that there are none, where Hornhoof keeps copies, and the phones.
+   While they come, the pool's frame and the table are held in their place (style book 1.5, section 4; Design #1656). */
+function MachinesBody({ me, shown, load, builtin, pool, copies, held, columns, search, table }: BodyProps) {
+  const t = useT();
+  if (!shown) return <><HeldPool /><HeldTable load={load} columns={columns} search={search} rows={held} /></>;
+  return <>
+    <Pool {...pool} />
+    {shown.length === 0 && !builtin ? <p className="muted">{t.machines.noMachines}</p> : table}
+    {/* Under the table: it comes with the machines, so nothing above them moves when they come. */}
+    {copies && <div className="machines-copies"><CopiesLine copies={copies} /></div>}
+    <Phones me={me} machines={shown} />
+  </>;
+}
+
 function MemoryGauge({ load, less }: { load: NodeLoad; less: boolean }) {
   const t = useT();
   const { language } = useLanguage();
@@ -160,7 +210,7 @@ function machineColumns(t: Messages, language: Language, priority: boolean): Tab
   const place: TableColumn<MachineRow>[] = priority ? [{ key: 'priority', label: t.cards.priority, direction: 1, className: 'k-prio', lead: true, value: placeOf, cell: m => <PriorityCell row={m} /> }] : [];
   return [
     ...place,
-    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<DrainMark drain={m.drain} /><OffChecks row={m} /><OtherBuild row={m} /><BrowserIssue row={m} /><CheckIssue row={m} /></> },
+    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<DrainMark drain={m.drain} /><OffChecks row={m} /><OtherBuild row={m} /><BrowserIssue row={m} /><CheckIssue row={m} /><LowDisk row={m} /></> },
     { key: 'owner', label: t.machines.owner, direction: 1, value: m => m.owner?.name ?? null, cell: m => m.owner?.name },
     { key: 'status', label: t.tables.status, direction: 1, value: m => m.online ? 0 : 1, className: 'k-status', cell: m => m.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span> },
     { key: 'load', label: t.machines.load, direction: -1, value: load, cell: m => load(m) === null ? t.machines.unknown : <span className="cell-load"><Bar used={load(m)! / 100} /><b><bdi>{t.machines.percent(load(m)!)}</bdi></b></span> },
@@ -641,7 +691,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
   const picking = controls.picking === row.id;
   return (
     <CardFrame label={row.hostname} accent={row.server}
-      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OffChecks row={row} /><OtherBuild row={row} /><BrowserIssue row={row} /><CheckIssue row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
+      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OffChecks row={row} /><OtherBuild row={row} /><BrowserIssue row={row} /><CheckIssue row={row} /><LowDisk row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
       extra={m && (core ? <CoreCommand machine={m} shown={core} controls={controls} /> : <PlanPicker machine={m} addable={addable} shown={shown} picking={picking} controls={controls} />)}>
       <section className="blk blk-facts">
         <h4>{t.cards.aboutMachine}</h4>
@@ -654,6 +704,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
           {row.checkError && <p className="machine-note">{row.checkError}</p>}
           <NetworkPlace row={row} />
         </Part>
+        <MachineDisk row={row} subs={subs} />
       </section>
       <RunningNow title={t.machines.runningNow} label={t.machines.runningOn(row.hostname)} agents={row.running.agents} parts={row.running.parts} online={row.online} me={me} />
       <section className="blk blk-side">
@@ -731,6 +782,10 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
     void load();
     return everyVisible(() => void load(), REFRESH_MS);
   }, [load]);
+  /* The machines come into their held pool and table, which say why when they do not. */
+  const machinesLoad = useLoad([{ data: machines, failure: loadFailure, load }]);
+  const shown = doneOf(machines, machinesLoad);
+  const heldMachines = useHeldRows('machines', shown ? shown.length : null) ?? HELD_MACHINES;
   useStream(m => {
     if (m.type === 'reconnected') void load();
   });
@@ -819,6 +874,8 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const activeCommand = liveCommand(command, now);
   const openIds = openCommandIds({ ...addCommands, ...coreCommands }, now);
   const rows = machineRows(machines ?? [], builtin, subs, t.machines.builtin);
+  const columns = machineColumns(t, language, priority);
+  const search: TableSearch<MachineRow> = { placeholder: t.tables.searchMachines, short: t.tables.searchMachinesShort, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount, room: 'machines' };
   if (unavailableFailure(loadFailure) || unavailableFailure(failure) || (selected && machines && !rows.some(row => row.id === selected))) return <RouteUnavailable onHome={onHome} />;
 
   return (
@@ -827,7 +884,6 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
         <div>
           <h1>{t.machines.heading}</h1>
           <p className="muted">{t.machines.intro}</p>
-          {copies && <CopiesLine copies={copies} />}
         </div>
         {!activeCommand && (
           <div className="head-actions">
@@ -846,29 +902,25 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           onCancel={() => void cancelMachine(activeCommand.id)}
         />
       )}
-      <LoadFailure failure={loadFailure} />
+      <LoadFailure failure={machines ? loadFailure : null} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       {certificateEnds && <CertificateWarning ends={certificateEnds} />}
-
-      {machines && <Pool {...pool} />}
-      {machines && machines.length === 0 && !builtin && <p className="muted">{t.machines.noMachines}</p>}
-      {machines && (machines.length > 0 || builtin) && (
+      <MachinesBody me={me} shown={shown} load={machinesLoad} builtin={builtin} pool={pool} copies={copies} held={heldMachines} columns={columns} search={search} table={(
         <SortTable
           rows={rows}
           selectedId={selected}
           onSelect={onSelect}
-          columns={machineColumns(t, language, priority)}
+          columns={columns}
           name={row => row.hostname}
           openIds={openIds}
           initialSort={{ key: priority ? 'priority' : 'status', direction: 1 }}
-          search={{ placeholder: t.tables.searchMachines, short: t.tables.searchMachinesShort, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
+          search={search}
           filters={machineFilters(t)}
           card={row => <MachineDetails row={row} subs={subs} me={me} now={now} order={{ shown: priority, last: Math.max(1, ...rows.map(one => placeOf(one) ?? 0)), moving }} controls={{
             picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, disconnect, refresh: load, fail: setFailure,
           }} />}
         />
-      )}
-      {machines && <Phones me={me} machines={machines} />}
+      )} />
     </section>
   );
 }

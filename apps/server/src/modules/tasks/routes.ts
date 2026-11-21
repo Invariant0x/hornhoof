@@ -532,6 +532,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       merges: decisions.merges.filter(merge => picked(merge.ownerPersonId)).map(({ id, label, after, open, ownerPersonId }) => ({ id, label, after, open, ownerPersonId })),
       machinesAway: machineCards(me, person, decisions.machines),
       copySchemaFailures: await copySchemaFailures(ctx, me, person),
+      machinesLow: decisions.low.filter(card => !person || person === me.id || person === card.owner?.id),
       counts: decisions.counts,
     };
   });

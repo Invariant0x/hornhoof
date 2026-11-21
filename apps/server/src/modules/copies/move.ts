@@ -33,9 +33,9 @@ type Stored = { machine: string; state: MoveState; hostname: string };
 const STORED = `SELECT v.machine_id::text AS machine, v.state, m.hostname FROM net.move v JOIN public.machines m ON m.id = v.machine_id FOR UPDATE OF v`;
 
 /* Stores the CEO's request to move the server to this machine, in place of any request that is not switching yet,
-   then ranks, so the target gets the data in the same call, and ends when that run ended. The machine that leads is
+   then ranks, so the target gets the first free replica seat, and ends when that run ended. The machine that leads is
    there already; a machine with no number cannot take the server; while Hornhoof updates, and while the server is
-   moving, nothing new is asked. A ranking that fails leaves the request stored, and the next run gives the copy. */
+   moving, nothing new is asked. A ranking that fails leaves the request stored for the next run. */
 export async function askMove(ctx: Ctx, machineId: string, by: string): Promise<void> {
   const { db, config } = ctx;
   const [row] = await db.select().from(machines).where(and(eq(machines.id, machineId), isNull(machines.revokedAt)));

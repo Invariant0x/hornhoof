@@ -9,8 +9,9 @@ import { captureWith } from './capture';
 import { DEV, serveTasksBoard, TASKS } from './tasks-board/api';
 
 /* Nothing of a page sits under the top bar or under the open card (#1556, Design's amendment of mockup 10). The department's
-   schema opens and fits with its column headers, cards and chips clear of the bar and the department's name, which keep a
-   band of their own; what is dragged up goes out of sight at that band. On a wide screen the tracker's work ends where the
+   schema opens and fits with its column headers, cards and chips clear of the bar and the department's name. The bar and
+   the name are glass blocks over the schema with no band of their own (#1635, variant A): its canvas runs under them to the
+   top of the window, and what the person drags or zooms up passes under the glass. On a wide screen the tracker's work ends where the
    card starts, its titles wrapped whole beside it, and the row whose card opens or closes stays in sight; on a phone the
    card is the whole screen under the top bar. Pseudo-locale text makes every word longer and adds one too long for a line;
    it is test data, not a language the app ships. Shots go to HH_SCREENSHOT_DIR when it is set. */
@@ -37,11 +38,6 @@ type Box = { x: number; y: number; width: number; height: number };
 const whole = (b: Box): Box => ({ x: Math.round(b.x), y: Math.round(b.y), width: Math.round(b.width), height: Math.round(b.height) });
 const meets = (a: Box, b: Box) => a.width > 0 && a.height > 0 && b.width > 0 && b.height > 0
   && a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-/* The part of a box its canvas shows. */
-const shown = (b: Box, frame: Box): Box => {
-  const x = Math.max(b.x, frame.x), y = Math.max(b.y, frame.y);
-  return { x, y, width: Math.max(0, Math.min(b.x + b.width, frame.x + frame.width) - x), height: Math.max(0, Math.min(b.y + b.height, frame.y + frame.height) - y) };
-};
 
 async function open(page: Page, look: Look, size: Size, path: string) {
   await page.setViewportSize(size);
@@ -126,11 +122,13 @@ async function clearOnSight(page: Page, when: string) {
   expect(cut.map(p => p.name), `${when}: headers cut by the edge of the canvas`).toEqual([]);
 }
 
-/* After the person pulled or zoomed it: what of the schema still shows meets neither the top bar nor the department's name. */
-async function clearOfBar(page: Page, when: string) {
+/* After the person pulled or zoomed it, the schema shows on a canvas that runs from the top of the window, under the top bar
+   and the department's name, to its bottom: no band of the page's background stands under them (#1635). */
+async function underGlass(page: Page, when: string) {
   await still(page, PARTS);
-  const { bars, canvas, parts } = await schemaBoxes(page);
-  expect(parts.filter(p => bars.some(bar => meets(whole(shown(p.box, canvas)), whole(bar)))).map(p => p.name), `${when}: parts under the top bar`).toEqual([]);
+  const { canvas } = await schemaBoxes(page);
+  expect(Math.round(canvas.y), `${when}: the schema's canvas starts at the top of the window`).toBe(0);
+  expect(Math.round(canvas.y + canvas.height), `${when}: and ends at its bottom`).toBe(await page.evaluate(() => innerHeight));
 }
 
 /* A pull of the schema by its bare background: a press where no card is, moved by `by`. WebKit selects words under a pull
@@ -179,14 +177,15 @@ for (const size of [{ width: 1440, height: 900 }, { width: 375, height: 812 }]) 
       await pull(page, { x: -200, y: -200 });
       for (let i = 0; i < 2; i++) await zoom.getByRole('button', { name: t.map.zoomIn, exact: true }).click({ force: true });
       await pull(page, { x: -250, y: 60 });
-      await clearOfBar(page, 'after the moves of a recording');
+      await underGlass(page, 'after the moves of a recording');
 
       /* Fit again, then pulled up until the first column's header reaches the middle of the top bar. */
       await zoom.getByRole('button', { name: t.map.showAll, exact: true }).click({ force: true });
       await clearOnSight(page, 'after Show everything again');
       const [header, bar] = [(await page.locator('.dview .frame .fh').first().boundingBox())!, (await page.locator('header.topbar').boundingBox())!];
       await pull(page, { x: 0, y: Math.round(bar.y + bar.height / 2 - header.y) });
-      await clearOfBar(page, 'pulled up to the top bar');
+      /* A schema that fits stays in its room as it is pulled (#1596); what is larger may pass under the glass (#1635). */
+      await underGlass(page, 'pulled up to the top bar');
       expect(errors).toEqual([]);
     });
   }
