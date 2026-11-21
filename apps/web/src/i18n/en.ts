@@ -396,6 +396,8 @@ export const en = {
     account: 'Account',
     logOut: 'Log out',
     version: (v: string) => `Version ${v}`,
+    /* On a phone every bar under the top bar after the first shows one line; this opens it whole. */
+    barMore: 'More',
   },
   /* The Themes section of the settings: the built-in themes, a person's own kept in this browser, and how to make one. */
   skins: {
@@ -960,6 +962,25 @@ export const en = {
     smallerMac: 'Docker on this Mac is set smaller than the Mac, so Hornhoof uses only part of it.',
     smaller: 'Hornhoof on this machine is set smaller than the machine, so it uses only part of it.',
     memoryShort: 'The machine reported a shortage of memory. New agent programs wait, and what already runs there goes on.',
+    /* Hornhoof's share of the machine's disk, part by part, under its gauges; words: the same names inside a sentence. */
+    diskParts: {
+      title: 'Disk by part',
+      names: { images: 'Images', containers: 'Containers', volumes: 'Volumes', buildCache: 'Build cache', workingCopies: 'Working copies', recordings: 'Terminal recordings', checkTemp: 'Check temp files' },
+      words: { images: 'images', containers: 'containers', volumes: 'volumes', buildCache: 'build cache', workingCopies: 'working copies', recordings: 'terminal recordings', checkTemp: 'check temp files' },
+      size: (gb: string) => `${gb} GB`,
+      all: (gb: string, total: string) => `Hornhoof in all: ${gb} GB of ${total} GB`,
+      other: (gb: string) => `Everything else: ${gb} GB`,
+      /* The copies of company databases, already inside the volumes, then the companies the server can name. */
+      replicas: (count: number) => `Company database copies, in the volumes: ${count}`,
+      /* The working folders of the employees on one node, by the plan it serves, or of the machine's own node, which has none. */
+      folders: (plan: string) => `Employees' working folders on ${plan}`,
+      ownNode: "Employees' working folders on the machine's own node",
+      /* A part a node keeps in its own folder, which is a Docker volume, so it is already inside the volumes. */
+      inVolumes: (name: string) => `${name}, in the volumes`,
+      docker: (free: string, total: string) => `Docker's own disk: ${free} GB free of ${total} GB`,
+      low: (since: string) => `Short of disk space since ${since}: it takes no new checks or builds until space is back. Its turns go on.`,
+      mark: 'Low on disk',
+    },
     runningOn: (host: string) => `What runs on ${host} now`,
     nothing: 'Nothing right now',
     working: 'working',
@@ -1842,6 +1863,16 @@ export const en = {
     },
     waiting: 'Waiting for you',
     nothingWaiting: 'Nothing waits for you.',
+    queue: {
+      empty: 'Nothing is waiting for an answer',
+      defer: 'Defer',
+      deferred: 'Deferred',
+      more: (n: number) => `${n} more ${plural('en', n, { one: 'card', other: 'cards' })}`,
+      asked: 'Asked:',
+      open: 'Open',
+      readOnly: 'Read only',
+      materials: 'Question materials',
+    },
     /* Cards Hornhoof kept for the person until they say they saw them, in their words. */
     cards: {
       open: 'Open task',
@@ -1866,6 +1897,17 @@ export const en = {
     machineAwayImportant: (names: string) => `Among them: ${names}.`,
     machineAwayDo: 'What to do: switch it on and plug it in, sign in to the account, check that Docker has started.',
     machineBack: (host: string, at: string) => `Machine ${host} is back: ${at}.`,
+    /* A machine short of disk space, whose node takes no new checks or builds until it has room again. */
+    machineLow: (host: string, owner: string | null) => (owner ? `Machine ${host} (${owner}) is low on disk space` : `Machine ${host} is low on disk space`),
+    machineLowFree: (free: string, total: string, need: string) => `Free: ${free} GB of ${total} GB. It needs at least ${need} GB.`,
+    machineLowDocker: (free: string, total: string, need: string) => `Docker's own disk: free ${free} GB of ${total} GB. It needs at least ${need} GB.`,
+    machineLowTakes: (parts: string) => `Hornhoof takes: ${parts}.`,
+    machineLowCleaned: (parts: string) => `Removed in the last 24 hours: ${parts}.`,
+    machineLowGoesOn: 'It keeps running its turns, but takes no new checks or builds until space is back.',
+    machineLowKept: 'Not removed: a person needs to check it',
+    machineLowKeptRow: (task: number | null, gb: string, why: string) => `${task === null ? '' : `task ${task}, `}${gb} GB, ${why}`,
+    machineLowKeptWhy: { uncommitted: 'changes not committed', unpushed: 'commits not pushed', ignored: 'ignored files not on a remote' },
+    machineLowDo: 'What to do: remove files you no longer need from this machine, or give Docker more disk space.',
     someone: 'this person',
     nothingFor: (name: string) => `Nothing waits for a decision from ${name}.`,
     asks: (agent: string) => `${agent} asks`,
@@ -2479,6 +2521,8 @@ export const en = {
     priority: { label: 'Priority', urgent: 'Urgent', high: 'High', normal: 'Normal', low: 'Low' },
     list: { task: 'Name', executor: 'Executor', responsible: 'Responsible', due: 'Due', progress: 'Progress', parts: 'Parts of this goal', subtasks: (done: number, total: number) => `Subtasks: ${done} of ${total} done`,
       group: (status: string, count: number) => `${status}: ${count}`,
+      /* The name and tooltip of the logo of the program an executor works in (#1776). */
+      program: (name: string) => `Program: ${name}`,
       neededFor: (number: number, department: string) => `needed for #${number} ${department}`,
     },
     nobody: 'Nobody',

@@ -144,7 +144,13 @@ export type OwnLink = { name: string; key: string; client: string; url: string }
 
 /* What hands the server over for this keeper, made with what the keeper gives it. While it holds, the keeper takes no
    lease, says it does not lead, and keeps its front door shut and its link's client stopped. */
-export type HandingPart = { start(): Promise<void>; stop(): Promise<void>; holds(): boolean; to?(): { machine: string; networkId: string } | null };
+export type HandingPart = {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  holds(): boolean;
+  keepsPeerTunnel?(): boolean;
+  to?(): { machine: string; networkId: string } | null;
+};
 export type HandingParts = {
   front: { close(): Promise<void>; open(): void };
   tunnel: { start(): void; stop(): Promise<void> };
@@ -729,6 +735,7 @@ export class Keeper {
       commit: config.commit,
       identity: this.identity,
       mode: () => this.mode(),
+      keepsPeerTunnel: () => this.hander?.keepsPeerTunnel?.() ?? false,
       settings,
       ports,
       host,

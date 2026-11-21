@@ -30,7 +30,7 @@ import { acceptClaudeDialogs, claudeToolsFile, claudeTranscript, writeClaudeTool
 import { findRollout, rolloutFiles } from '../providers/codex-terminal.js';
 import { findKimiWire, prepareKimi } from '../providers/kimi-terminal.js';
 import { FAILURE, failure } from './failures.js';
-import { TurnEnds, hookCalls, claudeEnd, stopIsLate, type TurnEnd } from './turn-signals.js';
+import { TurnEnds, agyHookSession, claudeEnd, foreignAgyHook, hookCalls, keepsAgySession, stopIsLate, stopSession, type TurnEnd } from './turn-signals.js';
 import { busy, enterPending, hasSettled, idleRefusal, RETIRED, stale, type IdleEvidence, type RetireResult } from './program-retire.js';
 import { claudeOwn, claudeTook, claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
 import { CALLS } from './tool-calls.js';
@@ -316,6 +316,7 @@ const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000,
 /* The options given, without those set to nothing. */
 const defined = (opts: Options): Partial<Options> => Object.fromEntries(Object.entries(opts).filter(([, value]) => value !== undefined));
 const withSession = (m: NodeMessage, session: string | null): NodeMessage => (m.type === 'job.program' && session ? { ...m, session } : m);
+const hookPayload = (body: unknown): Record<string, unknown> => (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
 /* When the host last looked at the program, and the tool it ran then. */
 type Look = { at: number; call: Pending | null; retry?: ProgramRetry | null };
 type ObservedProgram = { watch: ProgramWatch; look: Look };
@@ -1695,7 +1696,7 @@ export class TerminalHost {
   /* A person cleared the conversation in Claude Code, which goes on in a new session with a log of its own; or Kimi Code
      named its session, whose log the host finds once Kimi writes it; or Antigravity named its conversation. */
   private follow(a: Agent, sessionId: string): void {
-    if (!sessionId || sessionId === a.sessionId) return;
+    if (!sessionId || sessionId === a.sessionId || keepsAgySession(a.program?.kind, a.sessionId)) return;
     if (a.sessionId) a.blank = sessionId;
     this.leaveSession(a);
     a.sessionId = sessionId;
@@ -2436,8 +2437,13 @@ export class TerminalHost {
     const a = this.agents.get(key);
     if (!a) return;
     if (event !== 'status') a.signAt = Date.now();
-    const data = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+    const data = hookPayload(body);
+    if (this.foreignAgy(a, data)) return;
     return this.hooks.get(event)?.(a, data);
+  }
+
+  private foreignAgy(a: Agent, data: Record<string, unknown>): boolean {
+    return foreignAgyHook(a.program?.kind, a.sessionId, a.left, data);
   }
 
   private readonly hooks = new Map<string, Hook>([
@@ -2521,8 +2527,9 @@ export class TerminalHost {
   private async finalStoppedHook(a: Agent, data: Record<string, unknown>): Promise<void> {
     this.drain(a);
     const id = typeof data.turn_id === 'string' ? data.turn_id : undefined;
-    if (stopIsLate({ promptIn: this.stoppable(a), answersPerson: Boolean(a.personWords), from: data.session_id, session: a.sessionId, left: a.left })) return this.lateStop(a, data, id);
-    if (typeof data.session_id === 'string') this.follow(a, data.session_id);
+    const from = stopSession(a.program?.kind, data);
+    if (stopIsLate({ promptIn: this.stoppable(a), answersPerson: Boolean(a.personWords), from, session: a.sessionId, left: a.left })) return this.lateStop(a, data, id);
+    if (typeof from === 'string') this.follow(a, from);
     if (data.stopped === true) return this.interrupted(a, id);
     const detail = this.stopFailure(a, data);
     if (detail) return this.turnFailed(a, detail.text, detail, id);
@@ -2576,7 +2583,8 @@ export class TerminalHost {
 
   private async invocation(a: Agent, data: Record<string, unknown>): Promise<void> {
     if (a.program?.kind !== 'antigravity') return;
-    if (typeof data.conversationId === 'string') this.follow(a, data.conversationId);
+    const session = agyHookSession(data);
+    if (session) this.follow(a, session);
     if (data.invocationNum !== 0) {
       a.agyAnswered = false;
       a.busy = true;

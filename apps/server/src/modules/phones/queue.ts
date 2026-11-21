@@ -8,7 +8,7 @@ import { nodeIdentity } from '../nodes/hub.js';
 import { taskByRef } from '../tasks/lookup.js';
 import { pendingPhoneReadiness, refreshPhoneReadiness } from './readiness.js';
 import { phoneCapable, phoneRequest } from './rpc.js';
-import { phoneById, phoneDenied, phoneGone, phoneInvalid, phoneMissing, phoneNotConnected, phoneOffline, type CompanyPhone, type PhoneSession } from './store.js';
+import { phoneById, phoneComputerUnavailable, phoneDenied, phoneGone, phoneInvalid, phoneMissing, phoneNotConnected, phoneOffline, type CompanyPhone, type PhoneSession } from './store.js';
 import { phoneConnection } from './presence.js';
 import { idOnly } from '../../db/selections.js';
 /* An employee or assistant that borrows a phone, and the turn it runs. */
@@ -55,9 +55,9 @@ export async function acquirePhone(ctx: Ctx, me: PhoneAgent, phoneId: string, ta
   // A task of another person's assistant remains private even within the company.
   const privateIds = [task.assigneeAgentId, task.executorAgentId].filter((v): v is string => Boolean(v));
   if (privateIds.length && (await ctx.db.select(idOnly(agents)).from(agents).where(and(inArray(agents.id, privateIds), eq(agents.kind, 'assistant'), ne(agents.id, me.id)))).length) throw phoneDenied();
-  // A phone its node's adb does not list now is not lent: an agent would only get a session that fails at once.
+  // A phone whose computer did not answer or whose adb does not list it now is not lent: an agent would only get a session that fails at once.
   const connection = await phoneConnection(ctx, phone);
-  if (connection === 'computer_offline') throw phoneOffline();
+  if (connection === 'computer_offline') throw phoneComputerUnavailable();
   if (connection === 'not_connected') throw phoneNotConnected();
   await reconcilePhone(ctx, phoneId);
   const session = await ctx.db.transaction(async tx => {

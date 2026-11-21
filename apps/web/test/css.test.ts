@@ -264,3 +264,8 @@ it('sizes the map scale label by its content from tokens without clipping and ke
   expect(decl('.zv', 'overflow')).toBeUndefined();
   expect(decl('.zv', 'text-overflow')).toBeUndefined();
 });
+
+it('moves the held machines pool below the held table when the initial load stalls or fails on a narrow screen', () => {
+  expect(decl('.machines:has(.held-table .load-fail) > .held-pool', 'order', '(max-width: 760px)')).toBe('1');
+  expect(decl('.machines:has(.held-table .load-fail) > .held-pool', 'order')).toBeUndefined();
+});
