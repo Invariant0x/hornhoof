@@ -108,9 +108,11 @@ test('Stage 2 gallery supports Egypt and Dungeon packs and renders smooth non-st
     await expect(page.getByTestId('stage2-gallery-title')).toContainText('Stage 2: Pack-Owned Map Gallery');
     await page.getByTestId('lang-ru').click();
 
-    /* 3. Open Dungeon "hornhoof" in the smooth isometric engine at 100% zoom (1440x900). */
+    /* 3. Open Dungeon "hornhoof" in the smooth isometric engine at 100% zoom (1440x900) and focus the magma shore. */
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.getByTestId('gallery-card-hornhoof').click();
+    await waitForIsoReady(page);
+    await page.evaluate(() => (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.focusNearestShore());
     await waitForIsoReady(page);
     const dungeonStats = await page.evaluate(() =>
       (window as unknown as { __WORLD_GALLERY__: GalleryHandle }).__WORLD_GALLERY__.getStats()!,

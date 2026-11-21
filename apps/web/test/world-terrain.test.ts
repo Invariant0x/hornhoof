@@ -3,7 +3,12 @@ import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildChunkGrid } from '../src/world/chunks';
 import { DEFAULT_ISOMETRIC_PROJECTION, validateWorldPack } from '../src/world/manifest';
-import { bakeSmoothChunkPixels, sampleCornerFieldBilinear } from '../src/world/smooth-terrain-baker';
+import {
+  bakeSmoothChunkPixels,
+  buildLiquidSurfacePixels,
+  getMaterialTextureRgb,
+  sampleCornerFieldBilinear,
+} from '../src/world/smooth-terrain-baker';
 import {
   GALLERY_SEEDS,
   generateWorldTerrain,
@@ -201,5 +206,70 @@ describe('Stage 2 pack-owned procedural generation and modularity', () => {
     expect(opaqueLandPx).toBeGreaterThan(200);
     /* Smooth shoreline mask produces anti-aliased feathered edge pixels rather than hard binary tile steps. */
     expect(featheredShorePx).toBeGreaterThan(50);
+  });
+
+  it('synthesizes strictly toroidal seamless ground and liquid textures with zero wrap seams', () => {
+    const measureWrapSeamRatio = (
+      buf: Uint8ClampedArray,
+      size: number,
+      stride: 3 | 4,
+    ): { horizRatio: number; vertRatio: number } => {
+      let wrapX = 0;
+      let meanInteriorX = 0;
+      let wrapY = 0;
+      let meanInteriorY = 0;
+      for (let y = 0; y < size; y++) {
+        const left = (y * size + 0) * stride;
+        const right = (y * size + (size - 1)) * stride;
+        for (let c = 0; c < 3; c++) {
+          wrapX += Math.abs(buf[left + c]! - buf[right + c]!);
+        }
+        for (let x = 0; x < size - 1; x++) {
+          const a = (y * size + x) * stride;
+          const b = (y * size + x + 1) * stride;
+          for (let c = 0; c < 3; c++) {
+            meanInteriorX += Math.abs(buf[a + c]! - buf[b + c]!);
+          }
+        }
+      }
+      meanInteriorX /= size - 1;
+
+      for (let x = 0; x < size; x++) {
+        const top = (0 * size + x) * stride;
+        const bot = ((size - 1) * size + x) * stride;
+        for (let c = 0; c < 3; c++) {
+          wrapY += Math.abs(buf[top + c]! - buf[bot + c]!);
+        }
+        for (let y = 0; y < size - 1; y++) {
+          const a = (y * size + x) * stride;
+          const b = ((y + 1) * size + x) * stride;
+          for (let c = 0; c < 3; c++) {
+            meanInteriorY += Math.abs(buf[a + c]! - buf[b + c]!);
+          }
+        }
+      }
+      meanInteriorY /= size - 1;
+
+      return {
+        horizRatio: wrapX / Math.max(1, meanInteriorX),
+        vertRatio: wrapY / Math.max(1, meanInteriorY),
+      };
+    };
+
+    for (const pack of [EGYPT_WORLD_PACK, DUNGEON_WORLD_PACK]) {
+      for (const mat of pack.materials ?? []) {
+        const rgb = getMaterialTextureRgb(mat);
+        const size = Math.round(Math.sqrt(rgb.length / 3));
+        const { horizRatio, vertRatio } = measureWrapSeamRatio(rgb, size, 3);
+        expect(horizRatio, `${pack.id}/${mat.id} horizontal wrap seam`).toBeLessThan(1.35);
+        expect(vertRatio, `${pack.id}/${mat.id} vertical wrap seam`).toBeLessThan(1.35);
+      }
+      if (pack.liquidLayer) {
+        const rgba = buildLiquidSurfacePixels(pack.liquidLayer, 256);
+        const { horizRatio, vertRatio } = measureWrapSeamRatio(rgba, 256, 4);
+        expect(horizRatio, `${pack.id} liquid horizontal wrap seam`).toBeLessThan(1.35);
+        expect(vertRatio, `${pack.id} liquid vertical wrap seam`).toBeLessThan(1.35);
+      }
+    }
   });
 });

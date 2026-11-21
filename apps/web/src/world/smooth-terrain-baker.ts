@@ -18,7 +18,7 @@ import type { CornerFieldGrid, GeneratedWorldMap } from './terrain-engine';
 
 type Rgb = readonly [number, number, number];
 
-const TEX_SIZE = 128;
+const TEX_SIZE = 256;
 const TEX_MASK = TEX_SIZE - 1;
 const NOISE_LUT_SIZE = 256;
 const NOISE_LUT_MASK = NOISE_LUT_SIZE - 1;
@@ -44,19 +44,25 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/* Periodic 2D value noise that wraps seamlessly across [0, period) in both X and Y. */
-function periodicNoise2D(x: number, y: number, period: number, seed: number): number {
+/* C2-smooth toroidal 2D value noise wrapping seamlessly over [0, periodX) x [0, periodY). */
+function periodicNoise2D(
+  x: number,
+  y: number,
+  periodX: number,
+  periodY: number,
+  seed: number,
+): number {
   const x0 = Math.floor(x);
   const y0 = Math.floor(y);
   const fx = x - x0;
   const fy = y - y0;
-  const sx = fx * fx * (3 - 2 * fx);
-  const sy = fy * fy * (3 - 2 * fy);
+  const sx = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
+  const sy = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
 
-  const ix0 = ((x0 % period) + period) % period;
-  const iy0 = ((y0 % period) + period) % period;
-  const ix1 = (ix0 + 1) % period;
-  const iy1 = (iy0 + 1) % period;
+  const ix0 = ((x0 % periodX) + periodX) % periodX;
+  const iy0 = ((y0 % periodY) + periodY) % periodY;
+  const ix1 = (ix0 + 1) % periodX;
+  const iy1 = (iy0 + 1) % periodY;
 
   const n00 = hash2i(ix0, iy0, seed);
   const n10 = hash2i(ix1, iy0, seed);
@@ -68,18 +74,25 @@ function periodicNoise2D(x: number, y: number, period: number, seed: number): nu
   return nx0 + (nx1 - nx0) * sy;
 }
 
+/* 45-degree rotated periodic noise over [0, 1) x [0, 1): eliminates axis-aligned grid feel while
+   remaining strictly periodic because integer period shifts (u+1, v) and (u, v+1) map identically. */
+function periodicDiagNoise(u: number, v: number, period: number, seed: number): number {
+  return periodicNoise2D((u + v) * period, (u - v) * period, period, period, seed);
+}
+
 function getNoiseLuts(): { coarse: Float32Array; detail: Float32Array } {
   if (!sharedNoiseLut || !sharedDetailLut) {
     sharedNoiseLut = new Float32Array(NOISE_LUT_SIZE * NOISE_LUT_SIZE);
     sharedDetailLut = new Float32Array(NOISE_LUT_SIZE * NOISE_LUT_SIZE);
     for (let y = 0; y < NOISE_LUT_SIZE; y++) {
       for (let x = 0; x < NOISE_LUT_SIZE; x++) {
-        const u = (x / NOISE_LUT_SIZE) * 16;
-        const v = (y / NOISE_LUT_SIZE) * 16;
-        const n1 = periodicNoise2D(u, v, 16, 0x243f6a88);
-        const n2 = periodicNoise2D(u * 2, v * 2, 32, 0x85a308d3);
-        sharedNoiseLut[y * NOISE_LUT_SIZE + x] = n1 * 0.68 + n2 * 0.32 - 0.5;
-        sharedDetailLut[y * NOISE_LUT_SIZE + x] = periodicNoise2D(u * 4, v * 4, 64, 0x13198a2e) - 0.5;
+        const u = x / NOISE_LUT_SIZE;
+        const v = y / NOISE_LUT_SIZE;
+        const n1 = periodicNoise2D(u * 12, v * 12, 12, 12, 0x243f6a88);
+        const n2 = periodicDiagNoise(u, v, 16, 0x85a308d3);
+        sharedNoiseLut[y * NOISE_LUT_SIZE + x] = n1 * 0.65 + n2 * 0.35 - 0.5;
+        sharedDetailLut[y * NOISE_LUT_SIZE + x] =
+          periodicDiagNoise(u, v, 32, 0x13198a2e) - 0.5;
       }
     }
   }
@@ -104,7 +117,7 @@ function sampleLutFast(lut: Float32Array, fx: number, fy: number): number {
   return a + (b - a) * ty;
 }
 
-/* Synthesizes a seamless tileable 128x128 RGB ground texture from a pack's GroundMaterialSpec. */
+/* Synthesizes a strictly seamless toroidal 256x256 RGB ground texture from a pack's GroundMaterialSpec. */
 export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArray {
   const key = `${spec.id}|${spec.baseColor}|${spec.secondaryColor}|${spec.accentColor}|${spec.pattern}|${spec.contrast ?? 1}`;
   const cached = materialCache.get(key);
@@ -120,54 +133,84 @@ export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArr
   let off = 0;
 
   for (let y = 0; y < TEX_SIZE; y++) {
+    const v = y / TEX_SIZE;
     for (let x = 0; x < TEX_SIZE; x++) {
       const u = x / TEX_SIZE;
-      const v = y / TEX_SIZE;
-      const macro = periodicNoise2D(u * 8, v * 8, 8, seed);
-      const mid = periodicNoise2D(u * 20, v * 20, 20, seed + 17);
-      const grain = hash2i(x, y, seed + 53) - 0.5;
+      const macro =
+        periodicNoise2D(u * 4, v * 4, 4, 4, seed) * 0.62 +
+        periodicDiagNoise(u, v, 5, seed + 7) * 0.38;
+      const mid =
+        periodicDiagNoise(u, v, 11, seed + 17) * 0.55 +
+        periodicNoise2D(u * 14, v * 14, 14, 14, seed + 29) * 0.45;
+      const fine = periodicNoise2D(u * 36, v * 36, 36, 36, seed + 53) - 0.5;
+      const micro = periodicDiagNoise(u, v, 48, seed + 67) - 0.5;
 
-      let blend = macro * 0.58 + mid * 0.42;
+      let blend = macro * 0.55 + mid * 0.45;
       let accent = 0;
 
       if (spec.pattern === 'fine_grain') {
-        blend += grain * 0.16 * contrast;
-        if (mid > 0.72 && grain > 0.15) accent = 0.28;
+        const drift = periodicNoise2D(u * 6, v * 12, 6, 12, seed + 83);
+        blend = macro * 0.48 + drift * 0.34 + mid * 0.18 + fine * 0.16 * contrast + micro * 0.08;
+        const sparkle = periodicDiagNoise(u, v, 32, seed + 97);
+        if (sparkle > 0.72) accent = smoothstep(0.72, 0.92, sparkle) * 0.34 * contrast;
       } else if (spec.pattern === 'grass_tufts') {
-        const blade = periodicNoise2D(u * 32, v * 16, 32, seed + 91);
-        blend = macro * 0.45 + blade * 0.55 + grain * 0.12;
-        if (blade > 0.74) accent = 0.42 * contrast;
+        /* Painterly organic meadow with soft sunlit patches and delicate fine blade texture. */
+        const patch = periodicDiagNoise(u, v, 6, seed + 89);
+        const tuft = periodicNoise2D(u * 18, v * 28, 18, 28, seed + 91);
+        const blade = periodicDiagNoise(u, v, 26, seed + 109);
+        blend = macro * 0.42 + patch * 0.32 + tuft * 0.26 + fine * 0.10;
+        const sunlit = tuft * 0.55 + blade * 0.45;
+        if (sunlit > 0.62) accent = smoothstep(0.62, 0.88, sunlit) * 0.46 * contrast;
       } else if (spec.pattern === 'furrows') {
-        const stripe = 0.5 + 0.5 * Math.sin((u * 10 + v * 10) * Math.PI * 2 + macro * 1.4);
-        blend = stripe * 0.65 + macro * 0.35;
-        if (stripe > 0.78) accent = 0.35;
+        /* 2:1 isometric diagonal furrows aligned smoothly with tile axes. */
+        const phase = (u * 7 + v * 14) * Math.PI * 2 + (macro - 0.5) * 1.1;
+        const stripe = 0.5 + 0.5 * Math.sin(phase);
+        blend = stripe * 0.58 + macro * 0.28 + mid * 0.14 + fine * 0.08;
+        if (stripe > 0.7) accent = smoothstep(0.7, 0.98, stripe) * 0.32;
       } else if (spec.pattern === 'wind_ripples') {
-        const wave = 0.5 + 0.5 * Math.sin((u * 6 + v * 12) * Math.PI * 2 + macro * 2.4);
-        blend = wave * 0.6 + macro * 0.4 + grain * 0.08;
-        if (wave > 0.76) accent = 0.36;
+        const phase = (u * 5 - v * 10) * Math.PI * 2 + (macro - 0.5) * 2.1;
+        const wave = 0.5 + 0.5 * Math.sin(phase);
+        blend = wave * 0.56 + macro * 0.32 + mid * 0.12 + fine * 0.08;
+        if (wave > 0.72) accent = smoothstep(0.72, 0.98, wave) * 0.38;
       } else if (spec.pattern === 'cracked_rock') {
-        const r1 = 1 - Math.abs(2 * periodicNoise2D(u * 12, v * 12, 12, seed + 131) - 1);
-        const r2 = 1 - Math.abs(2 * periodicNoise2D(u * 24, v * 24, 24, seed + 193) - 1);
-        const crack = r1 * 0.6 + r2 * 0.4;
-        blend = crack * 0.75 + macro * 0.25 + grain * 0.14;
-        if (crack > 0.8) accent = 0.45;
+        const r1 = 1 - Math.abs(2 * periodicDiagNoise(u, v, 6, seed + 131) - 1);
+        const r2 = 1 - Math.abs(2 * periodicNoise2D(u * 14, v * 14, 14, 14, seed + 193) - 1);
+        const r3 = 1 - Math.abs(2 * periodicDiagNoise(u, v, 22, seed + 211) - 1);
+        const strata = r1 * 0.5 + r2 * 0.32 + r3 * 0.18;
+        blend = strata * 0.72 + macro * 0.28 + fine * 0.12;
+        if (strata > 0.72) accent = smoothstep(0.72, 0.94, strata) * 0.48;
       } else if (spec.pattern === 'cut_stone') {
-        const rowId = Math.floor(v * 8);
-        const bx = ((u * 4 + (rowId & 1) * 0.5) % 1 + 1) % 1;
-        const by = (v * 8) % 1;
-        const mortar = bx < 0.07 || by < 0.1;
-        blend = mortar ? 0.12 : 0.45 + macro * 0.4 + grain * 0.12;
-        if (!mortar && (bx < 0.15 || by < 0.18)) accent = 0.38;
+        /* Isometric staggered cut-stone terraces. */
+        const su = u * 4 + v * 8;
+        const sv = u * 4 - v * 8;
+        const rowId = Math.floor(sv);
+        const bx = (((su + (rowId & 1) * 0.5) % 1) + 1) % 1;
+        const by = ((sv % 1) + 1) % 1;
+        const edge = Math.min(bx, 1 - bx, by, 1 - by);
+        const mortar = 1 - smoothstep(0.03, 0.09, edge);
+        blend = (1 - mortar) * (0.45 + macro * 0.36 + mid * 0.19 + fine * 0.1) + mortar * 0.14;
+        if (mortar < 0.2 && (bx < 0.18 || by < 0.18)) accent = 0.32;
       } else if (spec.pattern === 'moss_glow') {
-        const speck = periodicNoise2D(u * 24, v * 24, 24, seed + 241);
+        /* Smooth bioluminescent spore clusters on damp cavern floor. */
+        const cluster1 = periodicDiagNoise(u, v, 8, seed + 241);
+        const cluster2 = periodicNoise2D(u * 16, v * 16, 16, 16, seed + 263);
+        const glow = cluster1 * 0.55 + cluster2 * 0.45;
         blend = macro * 0.5 + mid * 0.5;
-        if (speck > 0.72) accent = (speck - 0.72) * 3.2;
+        if (glow > 0.62) accent = smoothstep(0.62, 0.88, glow) * 0.92;
       } else if (spec.pattern === 'paved_stone') {
-        const gx = (u * 6) % 1;
-        const gy = (v * 6) % 1;
-        const seam = gx < 0.08 || gy < 0.08;
-        blend = seam ? 0.15 : 0.45 + macro * 0.35 + grain * 0.1;
-        if (!seam && (gx < 0.16 || gy < 0.16)) accent = 0.3;
+        /* 2:1 isometric diamond flagstones with soft bevels and weathered variation. */
+        const duRaw = u * 5 + v * 10;
+        const dvRaw = u * 5 - v * 10;
+        const cellU = ((Math.floor(duRaw) % 5) + 5) % 5;
+        const cellV = ((Math.floor(dvRaw) % 5) + 5) % 5;
+        const slabTone = hash2i(cellU, cellV, seed + 307);
+        const fx = ((duRaw % 1) + 1) % 1;
+        const fy = ((dvRaw % 1) + 1) % 1;
+        const edge = Math.min(fx, 1 - fx, fy, 1 - fy);
+        const seam = 1 - smoothstep(0.035, 0.085, edge);
+        const surface = 0.34 + slabTone * 0.28 + macro * 0.24 + mid * 0.14 + fine * 0.1;
+        blend = surface * (1 - seam * 0.72) + seam * 0.08;
+        if (seam < 0.25 && fx < 0.18 && fy < 0.82) accent = 0.22 * (1 - seam);
       }
 
       const t = Math.max(0, Math.min(1, blend));
@@ -191,38 +234,41 @@ export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArr
   return buf;
 }
 
-/* Synthesizes a seamless 256x256 tileable animated liquid texture (shimmering currents or glowing liquid). */
-export function buildLiquidSurfaceCanvas(spec: LiquidLayerSpec, size = 256): HTMLCanvasElement {
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return canvas;
-
+/* Pure pixel synthesizer for a strictly seamless toroidal animated liquid tile (testable in Node). */
+export function buildLiquidSurfacePixels(spec: LiquidLayerSpec, size = 256): Uint8ClampedArray {
   const base = parseHexRgb(spec.baseColor, [40, 128, 175]);
   const deep = parseHexRgb(spec.deepColor, [24, 92, 138]);
   const hi = parseHexRgb(spec.highlightColor, [120, 206, 232]);
   const seed = hashSeed(`${spec.baseColor}|${spec.deepColor}|${spec.highlightColor}`);
 
-  const img = ctx.createImageData(size, size);
-  const data = img.data;
+  const data = new Uint8ClampedArray(size * size * 4);
   let off = 0;
 
   for (let y = 0; y < size; y++) {
+    const v = y / size;
     for (let x = 0; x < size; x++) {
       const u = x / size;
-      const v = y / size;
-      const wave1 = periodicNoise2D(u * 8, v * 16, 16, seed);
-      const wave2 = periodicNoise2D(u * 16 + 3.1, v * 8 - 1.7, 16, seed + 71);
-      const caustic = 1 - Math.abs(2 * periodicNoise2D(u * 12, v * 20, 20, seed + 139) - 1);
-      const ripple = Math.pow(caustic, spec.glow ? 3.0 : 4.2);
+      /* Soft periodic domain warp breaks all grid symmetry while preserving exact toroidal wrap. */
+      const warpX = (periodicNoise2D(u * 4, v * 4, 4, 4, seed + 13) - 0.5) * 0.06;
+      const warpY = (periodicNoise2D(u * 4, v * 4, 4, 4, seed + 37) - 0.5) * 0.06;
+      const wu = u + warpX;
+      const wv = v + warpY;
 
-      const mix = Math.max(0, Math.min(1, wave1 * 0.55 + wave2 * 0.45));
+      const wave1 = periodicNoise2D(wu * 4, wv * 8, 4, 8, seed);
+      const wave2 = periodicDiagNoise(wu, wv, 5, seed + 71);
+      const wave3 = periodicNoise2D(wu * 8, wv * 16, 8, 16, seed + 101);
+
+      const cA = 1 - Math.abs(2 * periodicDiagNoise(wu, wv, 6, seed + 139) - 1);
+      const cB = 1 - Math.abs(2 * periodicNoise2D(wu * 9, wv * 18, 9, 18, seed + 181) - 1);
+      const caustic = cA * 0.6 + cB * 0.4;
+      const ripple = Math.pow(caustic, spec.glow ? 2.8 : 4.6);
+
+      const mix = Math.max(0, Math.min(1, wave1 * 0.45 + wave2 * 0.35 + wave3 * 0.2));
       let r = deep[0] + (base[0] - deep[0]) * mix;
       let g = deep[1] + (base[1] - deep[1]) * mix;
       let b = deep[2] + (base[2] - deep[2]) * mix;
 
-      const shimmer = ripple * (spec.glow ? 0.72 : 0.48);
+      const shimmer = ripple * (spec.glow ? 0.78 : 0.42);
       r += (hi[0] - r) * shimmer;
       g += (hi[1] - g) * shimmer;
       b += (hi[2] - b) * shimmer;
@@ -233,6 +279,20 @@ export function buildLiquidSurfaceCanvas(spec: LiquidLayerSpec, size = 256): HTM
       data[off++] = 255;
     }
   }
+  return data;
+}
+
+/* Synthesizes a seamless 256x256 tileable animated liquid canvas (shimmering currents or glowing liquid). */
+export function buildLiquidSurfaceCanvas(spec: LiquidLayerSpec, size = 256): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+
+  const pixels = buildLiquidSurfacePixels(spec, size);
+  const img = ctx.createImageData(size, size);
+  img.data.set(pixels);
   ctx.putImageData(img, 0, 0);
   return canvas;
 }
@@ -371,8 +431,11 @@ export function bakeSmoothChunkPixels(
 
     let u = u0 + pxStart * du;
     let v = v0 + pxStart * dv;
-    const ty = Math.floor(wy * 0.9) & TEX_MASK;
-    const texRowOff = ty * TEX_SIZE;
+    const tfy = wy * 1.15;
+    const ty0 = Math.floor(tfy);
+    const tFracY = tfy - ty0;
+    const row0Off = (ty0 & TEX_MASK) * TEX_SIZE;
+    const row1Off = ((ty0 + 1) & TEX_MASK) * TEX_SIZE;
     let out = (py * pixelWidth + pxStart) * 4;
 
     for (let px = pxStart; px <= pxEnd; px++, u += du, v += dv, out += 4) {
@@ -402,16 +465,16 @@ export function bakeSmoothChunkPixels(
         waterArr[i11]! * w11;
 
       /* Fast reject deep interior liquid well clear of the shoreline noise band. */
-      if (rawWater < -1.1) continue;
+      if (rawWater < -0.95) continue;
 
       let dWater = rawWater;
       let nCoarse = 0;
-      if (rawWater < 1.5) {
-        nCoarse = sampleLutFast(coarse, u * 11.5, v * 11.5);
-        const nDetail = sampleLutFast(detail, u * 23.0, v * 23.0);
-        dWater = rawWater + nCoarse * 0.62 + nDetail * 0.24;
+      if (rawWater < 1.35) {
+        nCoarse = sampleLutFast(coarse, u * 4.5, v * 4.5);
+        const nDetail = sampleLutFast(detail, u * 5.0, v * 5.0);
+        dWater = rawWater + nCoarse * 0.5 + nDetail * 0.1;
         /* Deep liquid cutout: transparent alpha lets the separate animated liquid layer shine through. */
-        if (dWater < -0.34) continue;
+        if (dWater < -0.26) continue;
       }
 
       /* Compute directional top-left 5200K hillshading from continuous elevation gradient. */
@@ -424,8 +487,19 @@ export function bakeSmoothChunkPixels(
       const shade = Math.max(0.76, Math.min(1.22, 1.0 - (dEdu * 0.55 + dEdv * 0.55)));
 
       const wx = worldX + (px + 0.5) * invScale;
-      const tx = Math.floor(wx * 0.9) & TEX_MASK;
-      const texIdx = (texRowOff + tx) * 3;
+      const tfx = wx * 1.15;
+      const tx0 = Math.floor(tfx);
+      const tFracX = tfx - tx0;
+      const tx0m = tx0 & TEX_MASK;
+      const tx1m = (tx0 + 1) & TEX_MASK;
+      const idx00 = (row0Off + tx0m) * 3;
+      const idx10 = (row0Off + tx1m) * 3;
+      const idx01 = (row1Off + tx0m) * 3;
+      const idx11 = (row1Off + tx1m) * 3;
+      const tw00 = (1 - tFracX) * (1 - tFracY);
+      const tw10 = tFracX * (1 - tFracY);
+      const tw01 = (1 - tFracX) * tFracY;
+      const tw11 = tFracX * tFracY;
 
       /* Fast single-material path when one layer dominates (> 0.96); full smooth noise blend on borders. */
       let maxM = 0;
@@ -445,11 +519,11 @@ export function bakeSmoothChunkPixels(
       let b = 0;
       if (maxW >= 0.96) {
         const tex = textures[maxM]!;
-        r = tex[texIdx]!;
-        g = tex[texIdx + 1]!;
-        b = tex[texIdx + 2]!;
+        r = tex[idx00]! * tw00 + tex[idx10]! * tw10 + tex[idx01]! * tw01 + tex[idx11]! * tw11;
+        g = tex[idx00 + 1]! * tw00 + tex[idx10 + 1]! * tw10 + tex[idx01 + 1]! * tw01 + tex[idx11 + 1]! * tw11;
+        b = tex[idx00 + 2]! * tw00 + tex[idx10 + 2]! * tw10 + tex[idx01 + 2]! * tw01 + tex[idx11 + 2]! * tw11;
       } else {
-        const edgeN = nCoarse !== 0 ? nCoarse : sampleLutFast(coarse, u * 11.5, v * 11.5);
+        const edgeN = nCoarse !== 0 ? nCoarse : sampleLutFast(coarse, u * 5.5, v * 5.5);
         let wSum = 0;
         for (let m = 0; m < matCount; m++) {
           const raw = wBuf[m]!;
@@ -458,7 +532,7 @@ export function bakeSmoothChunkPixels(
             continue;
           }
           const sign = (m & 1) === 0 ? 1 : -1;
-          const perturbed = Math.max(0, raw + edgeN * sign * 0.16);
+          const perturbed = Math.max(0, raw + edgeN * sign * 0.14);
           const sharp = perturbed * perturbed;
           wBuf[m] = sharp;
           wSum += sharp;
@@ -470,15 +544,15 @@ export function bakeSmoothChunkPixels(
             if (wm <= 0) continue;
             const k = wm * invSum;
             const tex = textures[m]!;
-            r += tex[texIdx]! * k;
-            g += tex[texIdx + 1]! * k;
-            b += tex[texIdx + 2]! * k;
+            r += (tex[idx00]! * tw00 + tex[idx10]! * tw10 + tex[idx01]! * tw01 + tex[idx11]! * tw11) * k;
+            g += (tex[idx00 + 1]! * tw00 + tex[idx10 + 1]! * tw10 + tex[idx01 + 1]! * tw01 + tex[idx11 + 1]! * tw11) * k;
+            b += (tex[idx00 + 2]! * tw00 + tex[idx10 + 2]! * tw10 + tex[idx01 + 2]! * tw01 + tex[idx11 + 2]! * tw11) * k;
           }
         } else {
           const tex = textures[maxM]!;
-          r = tex[texIdx]!;
-          g = tex[texIdx + 1]!;
-          b = tex[texIdx + 2]!;
+          r = tex[idx00]! * tw00 + tex[idx10]! * tw10 + tex[idx01]! * tw01 + tex[idx11]! * tw11;
+          g = tex[idx00 + 1]! * tw00 + tex[idx10 + 1]! * tw10 + tex[idx01 + 1]! * tw01 + tex[idx11 + 1]! * tw11;
+          b = tex[idx00 + 2]! * tw00 + tex[idx10 + 2]! * tw10 + tex[idx01 + 2]! * tw01 + tex[idx11 + 2]! * tw11;
         }
       }
 
@@ -487,31 +561,31 @@ export function bakeSmoothChunkPixels(
       b *= shade;
 
       let alpha = 255;
-      if (dWater < 0.72) {
+      if (dWater < 0.62) {
         /* Damp shore darkening (or warm emissive rim glow) hugging the curved coastline smoothly. */
-        const wetFactor = 1 - smoothstep(0.08, 0.72, dWater);
+        const wetFactor = 1 - smoothstep(0.05, 0.62, dWater);
         if (isGlowLiquid) {
-          r += (shallowRgb[0] - r) * wetFactor * 0.48;
-          g += (shallowRgb[1] - g) * wetFactor * 0.48;
-          b += (shallowRgb[2] - b) * wetFactor * 0.48;
+          r += (shallowRgb[0] - r) * wetFactor * 0.52;
+          g += (shallowRgb[1] - g) * wetFactor * 0.52;
+          b += (shallowRgb[2] - b) * wetFactor * 0.52;
         } else {
-          const damp = 1 - wetFactor * 0.16;
+          const damp = 1 - wetFactor * 0.2;
           r *= damp;
           g *= damp;
           b *= damp;
         }
 
-        if (dWater < 0.14) {
+        if (dWater < 0.08) {
           /* Curved feathered shoreline edge blending seamlessly into the animated liquid layer. */
-          const shoreMask = smoothstep(-0.34, 0.14, dWater);
+          const shoreMask = smoothstep(-0.26, 0.08, dWater);
           alpha = clampByte(shoreMask * 255);
-          const shallowMix = 1 - smoothstep(-0.22, 0.12, dWater);
-          r += (shallowRgb[0] - r) * shallowMix * 0.65;
-          g += (shallowRgb[1] - g) * shallowMix * 0.65;
-          b += (shallowRgb[2] - b) * shallowMix * 0.65;
+          const shallowMix = 1 - smoothstep(-0.18, 0.08, dWater);
+          r += (shallowRgb[0] - r) * shallowMix * 0.62;
+          g += (shallowRgb[1] - g) * shallowMix * 0.62;
+          b += (shallowRgb[2] - b) * shallowMix * 0.62;
 
-          const foamBand = Math.exp(-Math.pow((dWater + 0.06) / 0.1, 2));
-          const foamStrength = isGlowLiquid ? 0.65 : 0.42;
+          const foamBand = Math.exp(-Math.pow((dWater + 0.04) / 0.075, 2));
+          const foamStrength = isGlowLiquid ? 0.68 : 0.36;
           r += (foamRgb[0] - r) * foamBand * foamStrength;
           g += (foamRgb[1] - g) * foamBand * foamStrength;
           b += (foamRgb[2] - b) * foamBand * foamStrength;

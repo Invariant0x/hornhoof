@@ -114,9 +114,9 @@ export const DUNGEON_TERRAIN_RECIPE: TerrainRecipeSpec = {
     const theta = rng() * Math.PI;
     const lavaCos = Math.cos(theta);
     const lavaSin = Math.sin(theta);
-    /* Keep magma stream slightly offset from dead center so the central starting hall stays spacious and dramatic. */
+    /* Keep magma stream slightly offset from dead center so the central starting hall sits dramatically beside the lava gorge. */
     const side = rng() < 0.5 ? -1 : 1;
-    const lavaOffset = side * (16 + rng() * 14);
+    const lavaOffset = side * (12 + rng() * 9);
     const amp1 = 9 + rng() * 5;
     const freq1 = 0.044 + rng() * 0.02;
     const phase1 = rng() * Math.PI * 2;
@@ -124,7 +124,7 @@ export const DUNGEON_TERRAIN_RECIPE: TerrainRecipeSpec = {
     const freq2 = 0.088 + rng() * 0.028;
     const phase2 = rng() * Math.PI * 2;
     const lavaHalfW = 2.35 + rng() * 0.65;
-    const hallRadius = 8.5 + rng() * 2.0;
+    const hallRadius = 6.2 + rng() * 1.4;
 
     const baseParams: Omit<DungeonSeedParams, 'startCenter'> = {
       origin,
@@ -151,8 +151,8 @@ export const DUNGEON_TERRAIN_RECIPE: TerrainRecipeSpec = {
     const evaluateCavernField = (gx: number, gy: number): { hallDist: number; cavernVal: number; tunnelVal: number; fungalVal: number; oreVal: number } => {
       const dx = gx - params.startCenter.col;
       const dy = gy - params.startCenter.row;
-      const wobble = (noise.fbm2D(gx * 0.12, gy * 0.12, params.cavernSeed + 31, 2) - 0.5) * 2.2;
-      const hallDist = Math.max(Math.abs(dx), Math.abs(dy)) * 0.55 + Math.hypot(dx, dy) * 0.55 + wobble * 0.45 - params.hallRadius;
+      const wobble = (noise.fbm2D(gx * 0.14, gy * 0.14, params.cavernSeed + 31, 2) - 0.5) * 2.4;
+      const hallDist = Math.hypot(dx, dy) + wobble * 0.72 - params.hallRadius;
       const cavernVal = noise.fbm2D(gx * 0.036, gy * 0.036, params.cavernSeed, 3);
       const tunnelRidge = noise.ridgedFbm2D(gx * 0.026, gy * 0.026, params.tunnelSeed, 3);
       const fungalVal = noise.fbm2D(gx * 0.075, gy * 0.075, params.fungalSeed, 3);

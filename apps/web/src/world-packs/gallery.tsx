@@ -132,8 +132,8 @@ function findNearestShoreTile(map: GeneratedWorldMap): TileCoord {
   const { col: cx, row: cy } = map.startCenter;
   let best: TileCoord = map.startCenter;
   let bestScore = Infinity;
-  for (let dy = -18; dy <= 18; dy++) {
-    for (let dx = -18; dx <= 18; dx++) {
+  for (let dy = -42; dy <= 42; dy++) {
+    for (let dx = -42; dx <= 42; dx++) {
       const c = cx + dx;
       const r = cy + dy;
       const spec = map.kindSpecAt(c, r);
@@ -242,11 +242,15 @@ function IsometricInspector({
     if (!host) return;
     let alive = true;
 
-    /* Frame between startCenter and nearest shore so both the smooth curved bank and start center appear immediately. */
-    const initialMid: TileCoord = {
-      col: Math.round((map.startCenter.col + shoreTile.col) / 2),
-      row: Math.round((map.startCenter.row + shoreTile.row) / 2),
-    };
+    /* Frame between startCenter and nearest shore when nearby; otherwise center on startCenter. */
+    const shoreDist = Math.hypot(shoreTile.col - map.startCenter.col, shoreTile.row - map.startCenter.row);
+    const initialMid: TileCoord =
+      shoreDist <= 14
+        ? {
+            col: Math.round((map.startCenter.col + shoreTile.col) / 2),
+            row: Math.round((map.startCenter.row + shoreTile.row) / 2),
+          }
+        : map.startCenter;
 
     void IsometricWorldEngine.create({
       host,
