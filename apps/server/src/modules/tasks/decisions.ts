@@ -11,6 +11,7 @@ import { agents, departments, proposals, requests, tasks } from '../../db/schema
 import { idOnly } from '../../db/selections.js';
 import { DELETION_CONFLICT } from '../merge/picks.js';
 import { isAddressedTo, machinesAway, type MachineAway } from '../nodes/machine-away.js';
+import { machinesLow, type MachineLow } from '../nodes/machine-low.js';
 import { requestSubject, taskSpot, type Request, type Task } from './state.js';
 import { seesTask, type TaskPlace } from './visibility.js';
 /* What waits for people, as each person may see it: whose card counts each decision and whose filter shows it, and whether
@@ -36,6 +37,8 @@ export type Decisions = {
      back to, when the merge is of the database that restore set aside. open: how many of its conflicts are his. */
   merges: { id: string; label: string; after: string | null; open: number; agentId: string; ownerPersonId: string }[];
   machines: MachineAway[];
+  /* The machines short of disk space, for their owner and the CEO as the machines away are. */
+  low: MachineLow[];
   counts: Counts;
 };
 
@@ -95,7 +98,7 @@ async function mergesFor(ctx: Pick<Ctx, 'db'>, me: Person, everyone: readonly Ca
 export const openPersonRequests = () => and(eq(requests.status, 'open'), or(ne(requests.kind, 'stuck'), eq(requests.audience, 'human')));
 
 /* Everything waiting for people that this person may see, each with whether they may take it. */
-export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'startedAt'>, me: Person): Promise<Decisions> {
+export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'startedAt' | 'hub'>, me: Person): Promise<Decisions> {
   const { db } = ctx;
   const viewer = await viewerOf(db, me);
   const { access } = viewer;
@@ -122,7 +125,8 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'startedAt'>, me: P
     ...shownCards.map(c => ({ ownerPersonId: c.ownerPersonId, agentId: c.proposal.agentId })),
   ]);
   const machines = (await machinesAway(ctx, me.companyId, new Date())).filter(card => isAddressedTo(me, card));
-  return { requests: seen, proposals: shownCards, merges, machines, counts };
+  const low = (await machinesLow(ctx, me.companyId)).filter(card => isAddressedTo(me, card));
+  return { requests: seen, proposals: shownCards, merges, machines, low, counts };
 }
 
 /* The number on a person's card: their decisions this viewer sees, none for the viewer's own card or for anyone's when the

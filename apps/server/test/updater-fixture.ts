@@ -291,3 +291,85 @@ export const runRev1 = (s: Stand, request: object | null, env: Record<string, st
 export const takeOver = (s: Stand, env: Record<string, string> = {}) => run(SCRIPT, '--take-over', s, env);
 
 export const at = (calls: string[], start: string) => calls.findIndex(c => c.startsWith(start));
+
+/* A tar archive written header by header, for members no tar of this machine would pack as they are. */
+export type Member = { name: string; type?: string; data?: string; link?: string; prefix?: string } | { block: Buffer };
+export function tarOf(members: Member[]): Buffer {
+  const blocks: Buffer[] = [];
+  for (const member of members) {
+    if ('block' in member) {
+      blocks.push(member.block);
+      continue;
+    }
+    const { name, type = '0', data = '', link = '', prefix = '' } = member;
+    const header = Buffer.alloc(512);
+    const body = Buffer.from(data);
+    const put = (at: number, value: string) => header.write(value, at, 'latin1');
+    put(0, name);
+    put(100, '0000644\0');
+    put(108, '0000000\0');
+    put(116, '0000000\0');
+    put(124, `${body.length.toString(8).padStart(11, '0')}\0`);
+    put(136, '00000000000\0');
+    put(148, '        ');
+    put(156, type);
+    put(157, link);
+    put(257, 'ustar\x0000');
+    put(345, prefix);
+    let sum = 0;
+    for (const byte of header) sum += byte;
+    put(148, `${sum.toString(8).padStart(6, '0')}\0 `);
+    blocks.push(header, body, Buffer.alloc((512 - (body.length % 512)) % 512));
+  }
+  blocks.push(Buffer.alloc(1024));
+  return Buffer.concat(blocks);
+}
+/* A pax header's record: its length counts itself. */
+export const pax = (key: string, value: string) => {
+  const rest = ` ${key}=${value}\n`;
+  let length = rest.length + 1;
+  while (`${length}${rest}`.length !== length) length += 1;
+  return `${length}${rest}`;
+};
+export const TASKS = 'id,title\n1,first\n2,"two\n\\.\nDROP DATABASE hornhoof;"\n';
+export const JOURNAL = 'id,tbl\n7,tasks\n';
+/* Uploads no machine of the company makes, each with the line the updater fails it with: every member is looked at in
+   the archive's own headers before tar touches anything. Tar's own listing can show a second name of a file, even one
+   outside the folder, as a plain file, and BusyBox tar makes such a name as it unpacks. Only plain files go. Each comes
+   after a plain file of a table; out is a file outside the folder. */
+export const HOSTILE_UPLOADS: { what: string; members: (out: string) => Member[]; line: string }[] = [
+  { what: 'a second name of a file outside the folder', members: (out: string) => [{ name: 'net.journal.csv', type: '1', link: out }], line: 'The upload holds what is no file.' },
+  { what: 'a plain file that names a link, which BusyBox makes a second name of', members: (out: string) => [{ name: 'net.journal.csv', link: out }], line: 'The upload holds what is no file.' },
+  { what: 'a link', members: (out: string) => [{ name: 'net.journal.csv', type: '2', link: out }], line: 'The upload holds what is no file.' },
+  { what: 'a folder', members: () => [{ name: 'net.journal.csv', type: '5' }], line: 'The upload holds what is no file.' },
+  { what: 'a named pipe', members: () => [{ name: 'net.journal.csv', type: '6' }], line: 'The upload holds what is no file.' },
+  { what: 'a device', members: () => [{ name: 'net.journal.csv', type: '3' }], line: 'The upload holds what is no file.' },
+  { what: 'a file of a kind this updater never packs', members: () => [{ name: 'net.journal.csv', type: '7', data: JOURNAL }], line: 'The upload holds what is no file.' },
+  { what: 'a file with no kind at all, as the oldest tars wrote one', members: () => [{ name: 'net.journal.csv', type: '\0', data: JOURNAL }], line: 'The upload holds what is no file.' },
+  { what: 'a name with a folder before it', members: () => [{ name: 'net.journal.csv', prefix: 'public.tasks', data: JOURNAL }], line: 'The upload holds what is no file.' },
+  {
+    what: 'a header that gives the next file another name',
+    members: () => [{ name: 'public.pax.csv', type: 'x', data: pax('path', 'net.journal.csv') }, { name: 'public.other.csv', data: JOURNAL }],
+    line: 'The upload holds what is no file.',
+  },
+  { what: 'a table twice', members: () => [{ name: 'public.tasks.csv', data: TASKS }], line: 'The upload holds a table twice.' },
+  /* Tar reads on past one empty block, or stops at it, as it is made: after one, only empty blocks may follow. */
+  { what: 'a link after one empty block', members: (out: string) => [{ block: Buffer.alloc(512) }, { name: 'net.journal.csv', type: '1', link: out }], line: 'The upload cannot be read.' },
+  { what: 'something after its end', members: () => [{ block: Buffer.alloc(1024) }, { block: Buffer.alloc(512, 'x') }], line: 'The upload cannot be read.' },
+  /* Each header is read on its own, so an upload of more files than the company could ever have tables is not read on. */
+  { what: 'more files than the company could have tables', members: () => Array.from({ length: 1000 }, (_, i) => ({ name: `public.t${i}.csv` })), line: 'The upload holds a file that is no table of the company.' },
+];
+
+/* PATH for a run in which one command is a stub of updater-stubs, under that command's name. */
+export function stubbed(s: Stand, name: string, stub: string): { PATH: string } {
+  const tools = mkdtempSync(join(s.dir, 'stubbed-'));
+  symlinkSync(join(STUBS, stub), join(tools, name));
+  return { PATH: `${tools}:${STUBS}:${TOOLS}:/usr/bin:/bin` };
+}
+
+/* PATH for a run in which the given commands are names of one binary, as BusyBox gives its applets, after the stubs. */
+export function appletsOf(s: Stand, binary: string, names: string[]): { PATH: string; dir: string } {
+  const dir = mkdtempSync(join(s.dir, 'applets-'));
+  for (const name of names) symlinkSync(binary, join(dir, name));
+  return { PATH: `${STUBS}:${dir}:${TOOLS}:/usr/bin:/bin`, dir };
+}

@@ -1,7 +1,7 @@
 import { TASK_PRIORITIES } from '@hornhoof/protocol';
 import { isPersonWait } from '@hornhoof/protocol/waits';
 import { humanStatus, isClosed, taskTrees, taskWaits, type Asks, type HumanStatus, type TaskTree } from './task-tree';
-import type { Decisions, DecidedBy, Employee, GoalView, MergeDecision, Org, Pipeline, PipelineStage, TaskLine } from './types';
+import type { Decisions, Employee, GoalView, MergeDecision, Org, Pipeline, PipelineStage, TaskLine } from './types';
 
 /* Ways to look at the same work. */
 export const TRACKER_VIEWS = ['list', 'board', 'graph'] as const;
@@ -139,28 +139,39 @@ export const personWaited = (task: TaskLine): string | undefined =>
 /* The open tasks that wait for any person. */
 export const waitingOnPeople = (tasks: TaskLine[]): TaskLine[] => tasks.filter(t => !t.paused && personWaited(t) !== undefined);
 
+/* Open requests have their own cards and a server-checked right to answer. Their task summaries should never stand in for
+   those cards, even while the task list catches up with an answer or an older server does not mark request waits. */
+export function withoutRequestWaits(tasks: TaskLine[], decisions?: Decisions): TaskLine[] {
+  const withCards = new Set(decisions?.requests?.map(request => request.task.id));
+  return tasks.map(task => {
+    const time = task.time;
+    if (!time) return task;
+    const hasCard = withCards.has(task.id);
+    const waitsOn = time.waitsOn.filter(wait => !wait.request && !(hasCard && isPersonWait(wait) && wait.event !== 'ceo'));
+    return waitsOn.length === time.waitsOn.length ? task : { ...task, time: { ...time, waitsOn } };
+  });
+}
+
 /* Whose decisions a list shows: one person's; the viewer's own, without a question asked of another person by name, which
    only that person answers; or everything the viewer sees in the company. */
-export type DecisionsOf = { person: string } | { viewer: string } | 'everyone';
+export type DecisionsOf = { person: string } | 'viewer' | 'everyone';
 export type ShownDecisions = Pick<Decisions, 'requests' | 'proposals'> & { merges: MergeDecision[] };
 
-type Owned = { ownerPersonId: string; decidedBy?: DecidedBy };
-const askedOfAnother = (d: Owned, viewer: string) => d.decidedBy?.kind === 'named_person' && d.ownerPersonId !== viewer;
-const isOf = (d: Owned, whose: DecisionsOf) =>
-  whose === 'everyone' || ('person' in whose ? d.ownerPersonId === whose.person : !askedOfAnother(d, whose.viewer));
+const isOf = (owner: string, whose: DecisionsOf, canAnswer: boolean) =>
+  whose === 'everyone' || (whose === 'viewer' ? canAnswer : owner === whose.person);
 
 /* What of the decisions a list shows; nothing before the first answer. */
 export function shownDecisions(decisions: Decisions | undefined, whose: DecisionsOf): ShownDecisions {
   if (!decisions) return { requests: [], proposals: [], merges: [] };
-  const theirs = <T extends Owned>(items: T[]) => items.filter(d => isOf(d, whose));
-  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), merges: theirs(decisions.merges ?? []) };
+  const theirs = <T extends { ownerPersonId: string; canAnswer: boolean }>(items: T[]) => items.filter(d => isOf(d.ownerPersonId, whose, d.canAnswer));
+  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), merges: (decisions.merges ?? []).filter(d => isOf(d.ownerPersonId, whose, true)) };
 }
 
 /* What a list of what waits shows, counted: a task with a question once, alongside decisions that have no task and the cards
    Hornhoof kept. */
 export function waitsCount(s: ShownDecisions, tasks: TaskLine[], cards: readonly { id: string }[]): number {
-  const taskIds = new Set([...s.requests.map(r => r.task.id), ...tasks.map(task => task.id)]);
-  return taskIds.size + s.proposals.length + s.merges.length + cards.length;
+  const represented = new Set(s.requests.map(r => r.task.id));
+  return s.requests.length + tasks.filter(task => !represented.has(task.id)).length + s.proposals.length + s.merges.length + cards.length;
 }
 
 /* A department's employees for the left panel: those at work first, then the rest, at least so many in sight. */

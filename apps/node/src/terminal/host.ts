@@ -32,7 +32,7 @@ import { findKimiWire, prepareKimi } from '../providers/kimi-terminal.js';
 import { FAILURE, failure } from './failures.js';
 import { TurnEnds, agyHookSession, claudeEnd, foreignAgyHook, hookCalls, keepsAgySession, stopIsLate, stopSession, type TurnEnd } from './turn-signals.js';
 import { busy, enterPending, hasSettled, idleRefusal, RETIRED, stale, type IdleEvidence, type RetireResult } from './program-retire.js';
-import { claudeTook, claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
+import { claudeOwn, claudeTook, claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
 import { CALLS } from './tool-calls.js';
 import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type LogMark, type WireNews } from './transcripts.js';
 import type { RecordingCursor } from './recordings.js';
@@ -2104,8 +2104,10 @@ export class TerminalHost {
     }
   }
 
+  /* An entry of the user's delivers an operator's assignment; one Claude wrote of its own, as a summary of a compacted
+     conversation that holds the assignment word for word, does not. */
   private takeOperatorOriginal(a: Agent, line: Record<string, unknown>): void {
-    if (this.assignmentMayGoIn(a) && line.type === 'user' && isRecord(line.message)) a.turn?.words.takeOriginal(contentText(line.message.content));
+    if (this.assignmentMayGoIn(a) && line.type === 'user' && isRecord(line.message) && !claudeOwn(line)) a.turn?.words.takeOriginal(contentText(line.message.content));
   }
 
   /* While Hornhoof's words wait to go in, what the program takes is a person's: never the delivery of an assignment. */
@@ -2193,8 +2195,8 @@ export class TerminalHost {
 
   private observeRetainedAssignment(a: Agent, words: TurnWords, line: Record<string, unknown>): void {
     if (!a.program) return;
-    if (a.program.kind === 'claude' && line.type === 'user' && isRecord(line.message)) words.takeOriginal(contentText(line.message.content));
-    else words.observe(a.program.kind, line);
+    if (a.program.kind !== 'claude' || line.type !== 'user' || !isRecord(line.message)) words.observe(a.program.kind, line);
+    else if (!claudeOwn(line)) words.takeOriginal(contentText(line.message.content));
   }
 
   private takeRetainedAssignment(a: Agent, prompt: string): boolean {

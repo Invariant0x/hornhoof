@@ -14,7 +14,7 @@ import { prerequisiteOf } from './wait-views.js';
 export type TimeFacts = {
   inStatusSince: string;
   workSeconds: number;
-  waitsOn: WaitFact[];
+  waitsOn: (WaitFact & { request?: true })[];
 };
 
 /* Since when each task is in its status: its last change of status, or, for a task from before the log said so, its last
@@ -56,10 +56,16 @@ export function reviewerOf(wait: TaskWait): string | null {
 const runIdOf = (wait: TaskWait) => wait.kind === 'run' && validSourceKey('run', wait.sourceKey) ? wait.sourceKey.slice('run:'.length) : null;
 const requestIdOf = (wait: TaskWait) => wait.kind === 'person' && wait.sourceKey.startsWith('request:') && validSourceKey('person', wait.sourceKey) ? wait.sourceKey.slice('request:'.length) : null;
 
+function personWaitFact(fact: WaitFact, request: string | null, id: string | null, names: Map<string, string>): TimeFacts['waitsOn'] {
+  if (request && !id) return [];
+  const who: Who | null = id ? { kind: 'person', id, name: names.get(id) ?? '' } : null;
+  return [{ ...fact, who, ...(request ? { request: true } : {}) }];
+}
+
 /* Use the same recipient as the decision card, including when a question predates wait ownership. */
 async function questionRecipients(db: Ctx['db'], rows: TimedTask[], waits: (t: TimedTask) => TaskWait[]): Promise<Map<string, string | null>> {
   const ids = rows.flatMap(task => waits(task).flatMap(wait => requestIdOf(wait) ?? []));
-  const asked = ids.length ? await db.select({ id: requests.id, taskId: requests.taskId, companyId: requests.companyId, kind: requests.kind, decisionTopic: requests.decisionTopic })
+  const asked = ids.length ? await db.select({ id: requests.id, taskId: requests.taskId, companyId: requests.companyId, kind: requests.kind, decisionTopic: requests.decisionTopic, recipientPersonId: requests.recipientPersonId })
     .from(requests).where(and(inArray(requests.id, ids), openPersonRequests())) : [];
   const companies = [...new Set(asked.map(q => q.companyId))];
   const everyone = new Map(await Promise.all(companies.map(async id => [id, await candidates({ db }, id)] as const)));
@@ -126,7 +132,7 @@ export async function timeFacts(db: Ctx['db'], rows: TimedTask[], waits: (t: Tim
   };
 
 
-  const waitsOf = (task: TimedTask): WaitFact[] => {
+  const waitsOf = (task: TimedTask): TimeFacts['waitsOn'] => {
     const records = waits(task);
     const agent = (id: string | null): Who | null => id && id !== (task.executorAgentId ?? task.assigneeAgentId)
       ? { kind: 'agent', id, name: names.agent(id) ?? '' } : null;
@@ -136,7 +142,7 @@ export async function timeFacts(db: Ctx['db'], rows: TimedTask[], waits: (t: Tim
       return runFact(match, since);
     };
     const external = task.externalWait;
-    const facts = records.flatMap((wait): WaitFact[] => {
+    const facts = records.flatMap((wait): TimeFacts['waitsOn'] => {
       const since = wait.createdAt.toISOString();
       const fact = { kind: wait.kind, who: null, reason: null, since };
       switch (wait.kind) {
@@ -145,11 +151,7 @@ export async function timeFacts(db: Ctx['db'], rows: TimedTask[], waits: (t: Tim
           const number = task.after.includes(id) ? names.task(id) : undefined;
           return number === undefined ? [] : [{ ...fact, reason: `#${number}` }];
         }
-        case 'person': {
-          const id = personIdOf(wait);
-          if (!id && requestIdOf(wait)) return [];
-          return [{ ...fact, who: id ? { kind: 'person', id, name: named.get(id) ?? '' } : null }];
-        }
+        case 'person': return personWaitFact(fact, requestIdOf(wait), personIdOf(wait), named);
         case 'review': return [{ ...fact, who: agent(reviewerOf(wait)) }];
         case 'run': {
           const id = runIdOf(wait);

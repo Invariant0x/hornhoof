@@ -5,7 +5,7 @@ import type { WaitCard } from '../types';
 import { clock } from './subscription';
 
 /* What a card is called, and what it says in the person's language, from what Hornhoof kept of it. */
-function cardWords(t: Messages, card: WaitCard): { title: string; text: string } {
+export function cardWords(t: Messages, card: WaitCard): { title: string; text: string } {
   const words = t.tasks.cards, number = card.number ?? 0;
   if (card.about === 'release_tag' && card.tag && card.turn) return { title: words.tagTitle, text: words.tag(card.tag.version, card.turn.number, card.tag.why) };
   if (card.about === 'turn_summary' && card.turn) return { title: words.summaryTitle(card.turn.number), text: words.summary(card.turn.number, card.turn.version, t.tracker.side.turns) };
