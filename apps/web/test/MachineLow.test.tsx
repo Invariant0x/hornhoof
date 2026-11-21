@@ -116,6 +116,50 @@ describe('a machine short of disk space, as its people read it', () => {
     ]);
   });
 
+  it('names the ignored files a kept copy holds, each path in its own direction, and leaves out the list when none are named', () => {
+    const ignored: MachineLowCard = {
+      ...LOW,
+      names: { [THEO]: 'Theo' },
+      disk: {
+        ...LOW.disk,
+        kept: [
+          { part: 'workingCopies', agent: THEO, path: 'empty-list', task: 9, bytes: 512 * 1024 ** 2, why: 'ignored', ignored: [] },
+          { part: 'workingCopies', agent: THEO, path: 'shop-7', task: 7, bytes: 3 * GIB, why: 'ignored', ignored: ['.env', 'local/data.sqlite'] },
+          { part: 'workingCopies', agent: STRAY, path: 'empty-note', task: null, bytes: GIB, why: 'ignored' },
+        ],
+      },
+    };
+    shown([ignored]);
+    const kept = screen.getByRole('list', { name: 'Not removed: a person needs to check it' });
+    expect(within(kept).getAllByRole('listitem').map(row => row.textContent)).toEqual([
+      'Theo, shop-7: task 7, 3 GB, ignored files not on a remote: .env, local/data.sqlite',
+      `${STRAY}, empty-note: 1 GB, ignored files not on a remote`,
+      'Theo, empty-list: task 9, 0.5 GB, ignored files not on a remote',
+    ]);
+    expect([...kept.querySelectorAll('li:first-child bdi')].map(piece => piece.textContent)).toEqual(['Theo', 'shop-7', '.env', 'local/data.sqlite']);
+  });
+
+  it('names kept ignored files in Russian', () => {
+    localStorage.setItem('hh-lang', 'ru');
+    const ignored: MachineLowCard = {
+      ...LOW,
+      names: { [THEO]: 'Theo' },
+      disk: {
+        ...LOW.disk,
+        kept: [
+          { part: 'workingCopies', agent: THEO, path: 'shop-7', task: 7, bytes: 3 * GIB, why: 'ignored', ignored: ['.env', 'local/data.sqlite'] },
+          { part: 'workingCopies', agent: STRAY, path: 'empty-note', task: null, bytes: GIB, why: 'ignored' },
+        ],
+      },
+    };
+    shown([ignored]);
+    const kept = screen.getByRole('list', { name: 'Не убрано, нужна проверка человека' });
+    expect(within(kept).getAllByRole('listitem').map(row => row.textContent)).toEqual([
+      'Theo, shop-7: задача 7, 3 ГБ, игнорируемые файлы без копии в репозитории: .env, local/data.sqlite',
+      `${STRAY}, empty-note: 1 ГБ, игнорируемые файлы без копии в репозитории`,
+    ]);
+  });
+
   it('lists nothing kept when the machine keeps nothing', () => {
     shown([LOW]);
     expect(screen.queryByRole('list')).not.toBeInTheDocument();

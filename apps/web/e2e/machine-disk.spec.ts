@@ -28,6 +28,7 @@ const DISK: DiskReport = {
   kept: [
     { part: 'workingCopies', agent: '00000000-0000-4000-8000-0000000000a1', path: 'hornhoof-1750/apps/web', task: 1750, bytes: 6.8 * GIB, why: 'uncommitted' },
     { part: 'workingCopies', agent: '00000000-0000-4000-8000-0000000000b2', path: 'scratch/release-check-copy', task: null, bytes: 1.9 * GIB, why: 'unpushed' },
+    { part: 'workingCopies', agent: '00000000-0000-4000-8000-0000000000a1', path: 'shop-7', task: 7, bytes: 1.25 * GIB, why: 'ignored', ignored: ['.env', 'local/data/store-snapshot.sqlite'] },
   ],
 };
 const MACHINE: MachineView = {

@@ -133,6 +133,20 @@ describe('the card of a machine short of disk space', () => {
     expect(card!.names).toEqual({ [employee!.id]: employee!.name });
   });
 
+  it('keeps ignored-file paths on a kept copy from the node load through to the low-space card', async () => {
+    const { app, db, ceo, node } = await bobsMachine();
+    const [employee] = await db.select({ id: agents.id, name: agents.name }).from(agents).limit(1);
+    const kept: NonNullable<DiskReport['kept']> = [
+      { part: 'workingCopies', agent: employee!.id, path: 'shop-7', task: 7, bytes: GB, why: 'ignored', ignored: ['.env', 'local/'] },
+    ];
+    node.send({ ...load({ ...DISK, kept }), tests: 1 });
+    const machine = async () => (await app.inject({ url: '/api/machines', ...as(ceo) })).json().machines[0];
+    await until(async () => (await machine())?.load?.tests === 1);
+    const [card] = await cardsOf(app, ceo);
+    expect(card?.disk.kept).toEqual(kept);
+    expect(card?.names).toEqual({ [employee!.id]: employee!.name });
+  });
+
   it('goes away by itself once the node has room again, or is off the line', async () => {
     const { app, ceo, node } = await bobsMachine();
     await says(app, ceo, node, DISK);

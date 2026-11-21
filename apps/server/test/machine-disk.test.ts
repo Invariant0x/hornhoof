@@ -13,7 +13,7 @@ const OLDER: DiskReport = {
   parts: { ...DOCKER, workingCopies: 9 * GB, recordings: GB, checkTemp: 2 * GB },
   low: null,
   cleaned: [{ part: 'checkTemp', bytes: 3 * GB, at: '2026-11-20T09:00:00.000Z' }],
-  kept: [{ part: 'workingCopies', agent: 'a', path: 'small', task: 1, bytes: GB, why: 'unpushed' }],
+  kept: [{ part: 'workingCopies', agent: 'a', path: 'small', task: 1, bytes: GB, why: 'ignored', ignored: ['.env', 'local/'] }],
 };
 const NEWER: DiskReport = {
   ...SHARED,

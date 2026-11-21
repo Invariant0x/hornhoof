@@ -1888,7 +1888,7 @@ export const ru: Messages = {
     machineLowGoesOn: 'Она продолжает свои ходы, но не берет новых проверок и сборок, пока место не освободится.',
     machineLowKept: 'Не убрано, нужна проверка человека',
     machineLowKeptRow: (task, gb, why) => `${task === null ? '' : `задача ${task}, `}${gb} ГБ, ${why}`,
-    machineLowKeptWhy: { uncommitted: 'изменения не закоммичены', unpushed: 'коммиты не отправлены' },
+    machineLowKeptWhy: { uncommitted: 'изменения не закоммичены', unpushed: 'коммиты не отправлены', ignored: 'игнорируемые файлы без копии в репозитории' },
     machineLowDo: 'Что сделать: удалите с этой машины ненужные файлы или дайте Docker больше места на диске.',
     someone: 'этого человека',
     nothingFor: name => `От ${name} решений сейчас не ждут.`,
