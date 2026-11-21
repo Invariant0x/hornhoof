@@ -7,6 +7,7 @@ import { z } from 'zod';
 export const DOCKER_DISK_FILE = 'docker-disk.json';
 const MAX_BYTES = 64 * 1024;
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_FUTURE_MS = 5 * 60 * 1000;
 
 export const DOCKER_DISK_PARTS = ['images', 'containers', 'volumes', 'buildCache'] as const;
 const DockerDiskPart = z.enum(DOCKER_DISK_PARTS);
@@ -60,17 +61,20 @@ function dockerParts(raw: Record<string, unknown>): DockerDisk['parts'] {
   return parts;
 }
 
-function dockerCleaned(raw: unknown[], cutoff: number): DiskReport['cleaned'] {
+function dockerCleaned(raw: unknown[], cutoff: number, maxFuture: number): DiskReport['cleaned'] {
   const entries: DiskReport['cleaned'] = [];
   for (const item of raw) {
     const parsed = CleanedEntry.safeParse(item);
-    if (parsed.success && parsed.data.bytes > 0 && Date.parse(parsed.data.at) >= cutoff) entries.push(parsed.data);
+    if (!parsed.success || parsed.data.bytes <= 0) continue;
+    const atMs = Date.parse(parsed.data.at);
+    if (atMs >= cutoff && atMs <= maxFuture) entries.push(parsed.data);
   }
   return entries.sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).slice(0, DISK_CLEANED_MAX);
 }
 
 /* Reads the updater's latest Docker disk report from <dir>/docker-disk.json. Only Docker's four parts and recent
-   removals within 24 hours are accepted; missing, stale, symlinked, oversized or malformed files return null. */
+   removals within 24 hours (and within 5 minutes of clock skew) are accepted; missing, stale, future, symlinked,
+   oversized or malformed files return null. */
 export function readDockerDisk(dir: string, now: Date = new Date()): DockerDisk | null {
   const text = readCapped(join(dir, DOCKER_DISK_FILE));
   if (text === null) return null;
@@ -82,7 +86,10 @@ export function readDockerDisk(dir: string, now: Date = new Date()): DockerDisk 
   }
   const parsed = RawDockerDisk.safeParse(json);
   if (!parsed.success) return null;
-  const cutoff = now.getTime() - MAX_AGE_MS;
-  if (Date.parse(parsed.data.at) < cutoff) return null;
-  return { parts: dockerParts(parsed.data.parts), cleaned: dockerCleaned(parsed.data.cleaned, cutoff) };
+  const nowMs = now.getTime();
+  const cutoff = nowMs - MAX_AGE_MS;
+  const maxFuture = nowMs + MAX_FUTURE_MS;
+  const atMs = Date.parse(parsed.data.at);
+  if (atMs < cutoff || atMs > maxFuture) return null;
+  return { parts: dockerParts(parsed.data.parts), cleaned: dockerCleaned(parsed.data.cleaned, cutoff, maxFuture) };
 }
