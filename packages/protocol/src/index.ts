@@ -10,6 +10,7 @@ export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, App
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
 export { MachineDrain, NodeWait } from './machine-drain.js';
 export { DISK_CLEANED_MAX, DISK_KEPT_MAX, DISK_PARTS, DiskPart, DiskReport } from './disk-report.js';
+export { DISK_IGNORED_MAX } from './disk-report.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
 export * from './test-terminals.js';

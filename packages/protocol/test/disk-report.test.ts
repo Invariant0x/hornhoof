@@ -28,6 +28,7 @@ describe("a node's disk report", () => {
     const kept = [
       { part: 'workingCopies', agent: '479e2112-3e30-40a7-89a2-2e6786f56a70', path: 'hornhoof', task: 1750, bytes: 9 * GB, why: 'uncommitted' },
       { part: 'workingCopies', agent: 'f7863b74-d43d-49db-9d48-774326e62283', path: 'scratch/copy', task: null, bytes: 2 * GB, why: 'unpushed' },
+      { part: 'workingCopies', agent: 'agent-c', path: 'shop-7', task: 7, bytes: GB, why: 'ignored', ignored: ['.env', 'local/'] },
     ];
     expect(load({ disk: { ...DISK, kept } })).toEqual({ type: 'load', ...LOAD, disk: { ...DISK, kept } });
     expect(DiskReport.parse(DISK).kept).toBeUndefined();
@@ -56,6 +57,8 @@ describe("a node's disk report", () => {
       { ...DISK, kept: [{ part: 'workingCopies', agent: 'a', path: 'x'.repeat(301), task: 1, bytes: GB, why: 'unpushed' }] },
       { ...DISK, kept: [{ part: 'workingCopies', agent: 'a'.repeat(65), path: 'x', task: 1, bytes: GB, why: 'unpushed' }] },
       { ...DISK, kept: [{ part: 'workingCopies', agent: 'a', path: 'x', task: 0, bytes: GB, why: 'unpushed' }] },
+      { ...DISK, kept: [{ part: 'workingCopies', agent: 'a', path: 'x', task: 1, bytes: GB, why: 'ignored', ignored: Array.from({ length: 21 }, (_, i) => `f${i}`) }] },
+      { ...DISK, kept: [{ part: 'workingCopies', agent: 'a', path: 'x', task: 1, bytes: GB, why: 'ignored', ignored: ['x'.repeat(301)] }] },
       { ...DISK, kept: Array.from({ length: 51 }, () => ({ part: 'workingCopies', agent: 'a', path: 'x', task: null, bytes: GB, why: 'unpushed' })) },
       'full',
     ]) {
