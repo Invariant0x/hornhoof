@@ -33,15 +33,15 @@ it('floats the version over the end corner of the map, out of the way of taps', 
   });
 });
 
-/* The zoom of the map, the department and its tree, and the map's Put back over it, stand at the start of the bottom, so a
-   page right to left mirrors them as it mirrors the rest of the layout; left to right they stay where they stood (#1622,
-   #1658). */
+/* The zoom of the map, the department, its tree and the tracker's graph, and the map's Put back over it, stand at the start
+   of the bottom, so a page right to left mirrors them as it mirrors the rest of the layout; left to right they stay where they
+   stood (#1622, #1658, #1670). */
 it("stands the canvases' zoom and the map's Put back at the start of the bottom, mirrored right to left", () => {
   expect(decl('.zoom', 'inset-inline-start')).toBe('16px');
   expect(decl('.zoom', 'left')).toBeUndefined();
   expect(rulesFor('.map > .zoom')).toEqual([]);
-  /* The tracker's graph is drawn left to right in either direction, so its zoom stays at the left, by the root. */
-  expect([decl('.tr-canvas > .zoom', 'left'), decl('.tr-canvas > .zoom', 'right')]).toEqual(['16px', 'auto']);
+  /* The tracker's graph is mirrored too, its root at the start, so its zoom has no place of its own any more. */
+  expect(rulesFor('.tr-canvas > .zoom')).toEqual([]);
   expect(decl('.map-arrange', 'inset-inline-start')).toBe('16px');
   expect(decl('.map-arrange', 'left')).toBeUndefined();
 });

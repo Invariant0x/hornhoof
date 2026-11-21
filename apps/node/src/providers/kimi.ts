@@ -9,6 +9,7 @@ import { withProgramExit } from '../program-exit.js';
 import { kimiPlanLimits } from './kimi-terminal.js';
 import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
 import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
+import { KIMI_MCP_START } from './mcp-start.js';
 import { KIMI_NO_AUTO_UPDATE } from './session-updates.js';
 import { NPM_PACKAGES } from './packages.js';
 
@@ -152,7 +153,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
     /* Kimi has no MCP flag: it reads mcp.json from its home, and the token from the env variable named there. */
     const mcpJson = join(ensureDir(home), 'mcp.json');
     if (input.tools) {
-      const server = { transport: 'http', url: input.tools.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN' };
+      const server = { transport: 'http', url: input.tools.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN', ...KIMI_MCP_START };
       writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
     } else rmSync(mcpJson, { force: true });
     if (input.instructions) tellKimi(input, input.instructions, user);

@@ -1,7 +1,7 @@
 import { TASK_PRIORITIES } from '@hornhoof/protocol';
 import { isPersonWait } from '@hornhoof/protocol/waits';
 import { humanStatus, isClosed, taskTrees, taskWaits, type Asks, type HumanStatus, type TaskTree } from './task-tree';
-import type { Decisions, DecidedBy, Employee, GoalView, MergeDecision, Org, Pipeline, PipelineStage, TaskLine } from './types';
+import type { Decisions, Employee, GoalView, MergeDecision, Org, Pipeline, PipelineStage, TaskLine } from './types';
 
 /* Ways to look at the same work. */
 export const TRACKER_VIEWS = ['list', 'board', 'graph'] as const;
@@ -139,28 +139,39 @@ export const personWaited = (task: TaskLine): string | undefined =>
 /* The open tasks that wait for any person. */
 export const waitingOnPeople = (tasks: TaskLine[]): TaskLine[] => tasks.filter(t => !t.paused && personWaited(t) !== undefined);
 
+/* Open requests have their own cards and a server-checked right to answer. Their task summaries should never stand in for
+   those cards, even while the task list catches up with an answer or an older server does not mark request waits. */
+export function withoutRequestWaits(tasks: TaskLine[], decisions?: Decisions): TaskLine[] {
+  const withCards = new Set(decisions?.requests?.map(request => request.task.id));
+  return tasks.map(task => {
+    const time = task.time;
+    if (!time) return task;
+    const hasCard = withCards.has(task.id);
+    const waitsOn = time.waitsOn.filter(wait => !wait.request && !(hasCard && isPersonWait(wait) && wait.event !== 'ceo'));
+    return waitsOn.length === time.waitsOn.length ? task : { ...task, time: { ...time, waitsOn } };
+  });
+}
+
 /* Whose decisions a list shows: one person's; the viewer's own, without a question asked of another person by name, which
    only that person answers; or everything the viewer sees in the company. */
-export type DecisionsOf = { person: string } | { viewer: string } | 'everyone';
+export type DecisionsOf = { person: string } | 'viewer' | 'everyone';
 export type ShownDecisions = Pick<Decisions, 'requests' | 'proposals'> & { merges: MergeDecision[] };
 
-type Owned = { ownerPersonId: string; decidedBy?: DecidedBy };
-const askedOfAnother = (d: Owned, viewer: string) => d.decidedBy?.kind === 'named_person' && d.ownerPersonId !== viewer;
-const isOf = (d: Owned, whose: DecisionsOf) =>
-  whose === 'everyone' || ('person' in whose ? d.ownerPersonId === whose.person : !askedOfAnother(d, whose.viewer));
+const isOf = (owner: string, whose: DecisionsOf, canAnswer: boolean) =>
+  whose === 'everyone' || (whose === 'viewer' ? canAnswer : owner === whose.person);
 
 /* What of the decisions a list shows; nothing before the first answer. */
 export function shownDecisions(decisions: Decisions | undefined, whose: DecisionsOf): ShownDecisions {
   if (!decisions) return { requests: [], proposals: [], merges: [] };
-  const theirs = <T extends Owned>(items: T[]) => items.filter(d => isOf(d, whose));
-  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), merges: theirs(decisions.merges ?? []) };
+  const theirs = <T extends { ownerPersonId: string; canAnswer: boolean }>(items: T[]) => items.filter(d => isOf(d.ownerPersonId, whose, d.canAnswer));
+  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), merges: (decisions.merges ?? []).filter(d => isOf(d.ownerPersonId, whose, true)) };
 }
 
 /* What a list of what waits shows, counted: a task with a question once, alongside decisions that have no task and the cards
    Hornhoof kept. */
 export function waitsCount(s: ShownDecisions, tasks: TaskLine[], cards: readonly { id: string }[]): number {
-  const taskIds = new Set([...s.requests.map(r => r.task.id), ...tasks.map(task => task.id)]);
-  return taskIds.size + s.proposals.length + s.merges.length + cards.length;
+  const represented = new Set(s.requests.map(r => r.task.id));
+  return s.requests.length + tasks.filter(task => !represented.has(task.id)).length + s.proposals.length + s.merges.length + cards.length;
 }
 
 /* A department's employees for the left panel: those at work first, then the rest, at least so many in sight. */
@@ -230,13 +241,40 @@ export function pipelineTree(pipeline: Pipeline, tasks: TaskLine[]): GraphNode[]
 
 /* The width and least height of a node and the steps between levels and rows, in the units of the canvas. */
 export const NODE = { w: 290, h: 52, dx: 330, dy: 62, pad: 20 };
+/* A wait's lane past the whole tree: the first this far out, each next one a step further, and room past the last for its
+   arrow and its word. */
+export const LANE = { first: 24, step: 14, room: 70 };
 export type Placed = { node: GraphNode; x: number; y: number; h: number; depth: number };
-export type Layout = { nodes: Placed[]; parts: { from: string; to: string }[]; waits: { from: string; to: string }[]; width: number; height: number };
+/* width and height: the tree's own box, which Fit frames, from left in the drawing; drawn: the width of the whole drawing,
+   the lanes of the waits with it. */
+export type Layout = {
+  nodes: Placed[]; parts: { from: string; to: string }[]; waits: { from: string; to: string; lane: number }[];
+  width: number; height: number; left: number; drawn: number;
+};
+
+/* Where the lanes of count waits end past a tree that ends at right, the word of the last one with them; none, none. */
+const lanesEnd = (right: number, count: number) => (count ? right + LANE.first + count * LANE.step + LANE.room : 0);
+
+/* A drawing seen from the other side: each node and lane as far from its right as it stood from its left, the tree's box with
+   them. */
+function mirrored(layout: Layout): Layout {
+  const { drawn } = layout;
+  return {
+    ...layout,
+    nodes: layout.nodes.map(p => ({ ...p, x: drawn - p.x - NODE.w })),
+    waits: layout.waits.map(wait => ({ ...wait, lane: drawn - wait.lane })),
+    left: drawn - layout.width,
+  };
+}
+/* A drawing laid out left to right, turned to the page's direction. */
+const TURNED: Record<'ltr' | 'rtl', (layout: Layout) => Layout> = { ltr: layout => layout, rtl: mirrored };
 
 /* Each level one step further along, each leaf on a row of its own, a node in the middle of what is under it and never over
    the node above it in its level. heightOf: the height a node's words take on the page, once measured; a node is never
-   lower than NODE.h. A dashed line goes from a task to each task of the tree it waits for. */
-export function layoutTree(forest: GraphNode[], heightOf: (id: string) => number | undefined = () => undefined): Layout {
+   lower than NODE.h. A dashed line goes from a task to each task of the tree it waits for, along a lane of its own past the
+   whole tree. Right to left the drawing is the mirror of the one left to right: the root at the right, each level further to
+   the left, the lanes left of the tree (#1670). */
+export function layoutTree(forest: GraphNode[], heightOf: (id: string) => number | undefined = () => undefined, dir: 'ltr' | 'rtl' = 'ltr'): Layout {
   const nodes: Placed[] = [];
   const parts: Layout['parts'] = [];
   const gap = NODE.dy - NODE.h;
@@ -259,13 +297,13 @@ export function layoutTree(forest: GraphNode[], heightOf: (id: string) => number
   };
   forest.forEach(tree => place(tree, 0));
   const numbered = new Map(nodes.flatMap(p => (p.node.kind === 'task' ? [[p.node.task.number, p.node.id] as const] : [])));
-  const waits = nodes.flatMap(p => (p.node.kind === 'task' ? p.node.task.waitsFor.flatMap(n => (numbered.has(n) ? [{ from: p.node.id, to: numbered.get(n)! }] : [])) : []));
+  const right = Math.max(0, ...nodes.map(p => p.x + NODE.w));
+  const waits = nodes.flatMap(p => (p.node.kind === 'task' ? p.node.task.waitsFor.flatMap(n => (numbered.has(n) ? [{ from: p.node.id, to: numbered.get(n)! }] : [])) : []))
+    .map((wait, i) => ({ ...wait, lane: right + LANE.first + i * LANE.step }));
   nodes.sort((a, b) => a.depth - b.depth || a.y - b.y);
-  return {
-    nodes, parts, waits,
-    width: Math.max(0, ...nodes.map(p => p.x + NODE.w)) + NODE.pad,
-    height: Math.max(0, ...nodes.map(p => p.y + p.h)) + NODE.pad,
-  };
+  const width = right + NODE.pad;
+  const height = Math.max(0, ...nodes.map(p => p.y + p.h)) + NODE.pad;
+  return TURNED[dir]({ nodes, parts, waits, width, height, left: 0, drawn: Math.max(width, lanesEnd(right, waits.length)) });
 }
 
 /* The way back up from where the graph grows: the goals above, the tasks above, and the root itself. */

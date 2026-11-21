@@ -1,10 +1,11 @@
 import type { LineState } from '@hornhoof/protocol/map';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { useStream } from '../live';
 import { useDepartmentTree } from '../tasks';
-import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
+import { Idle, LoadState, useLoad, type Load } from '../ui/Loading';
+import type { Department, DepartmentTree, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { Bar, percent } from '../ui/Bar';
 import { Chip, agentWorking, doingLine, Listed, modelParts, Switch, STATUS_CLASS } from '../ui/Chip';
 import { CANVAS_NARROW as NARROW, FLOAT_GAP, LEFT_PANEL_COVER, canvasSpace, freeRoom, usePanZoom, ZoomBar, type Edges } from '../ui/canvas';
@@ -79,6 +80,8 @@ type Props = {
   onOpenDepartment?(id: string): void;
   /* How wide the department's name stands beside the logo on a wide screen, for the top bar's tabs; 0 when it does not. */
   onCrumbs?(px: number): void;
+  /* The load of the company, while a department opened at its own address waits for it; the department is then only its id. */
+  load?: Load;
 };
 
 /* What the cards drawn from a schema measure: its head, each frame's heading and cards, and the people's chips, in its order.
@@ -228,6 +231,71 @@ function DeptApprovals({ department, shown }: { department: Department; shown: b
 }
 
 type Drawer = 'about' | 'speed' | 'hire';
+
+/* Whether the department still waits for its company (Design on #1654): it then stands with what it knows without waiting,
+   back, the plate of its name, its tools and the room of Hire, and only the schema's body waits. */
+const waitsFor = (load?: Load): load is Load => load !== undefined && load.phase !== 'done';
+const busyOf = (load?: Load) => (load?.phase === 'loading' || load?.phase === 'slow') || undefined;
+
+/* The schema's body while the company comes: the shared indicator, then why it did not come with Retry. */
+function DepartmentBodyWait({ load }: { load?: Load }) {
+  if (!waitsFor(load)) return null;
+  return <div className="dcanvas dview-wait"><LoadState load={load} form="screen" /></div>;
+}
+
+/* Back, which works throughout, and the plate of the department's name: while the company comes, an idle bar as tall as a
+   one-line name, then the name, which fades in. Nothing above the plate moves; a long name may grow it down. */
+function DepartmentCrumbs({ department: d, waiting, navRef, onBack }: { department: Department; waiting: boolean; navRef: RefObject<HTMLElement | null>; onBack(): void }) {
+  const t = useT();
+  const [waited] = useState(waiting);
+  const came = waited ? 'arrive' : undefined;
+  return (
+    <nav className="crumbs" ref={navRef} aria-label={deptLabel(t, d) || t.dept.schema}>
+      <button className="hbtn glass ib" type="button" aria-label={t.dept.back} title={t.dept.back} onClick={onBack}>
+        <BackIcon />
+      </button>
+      <div className="crumb glass">
+        {waiting ? <h2><Idle w="12ch" /></h2> : (
+          <>
+            <h2 className={came}>{deptLabel(t, d)}</h2>
+            <span className={came ? `role ${came}` : 'role'}>{d.roleCode}</span>
+          </>
+        )}
+      </div>
+    </nav>
+  );
+}
+
+/* Where Hire stands: shown for whoever may hire; while the company comes, held, unseen, for anyone the company has still to
+   say of; none once it said they may not. Hire stands last at the end, so its room going leaves the tools where they are. */
+type HireRoom = 'shown' | 'held' | 'none';
+const hireRoom = (waiting: boolean, runs: boolean): HireRoom => (runs ? 'shown' : waiting ? 'held' : 'none');
+
+function HireButton({ room, waiting, onClick }: { room: HireRoom; waiting: boolean; onClick(): void }) {
+  const t = useT();
+  if (room === 'none') return null;
+  return (
+    <button className={room === 'held' ? 'btn unseen' : 'btn'} type="button" disabled={waiting} onClick={onClick}>
+      {t.dept.hire}
+    </button>
+  );
+}
+
+/* The department's work tree in the schema's place, once its load is done, or the indicator while it comes. */
+function DeptTreeBody({ on, tree, load, department, onOpenTask, zoomSlot }: { on: boolean; tree?: DepartmentTree; load: Load; department: Department; onOpenTask(taskId: string): void; zoomSlot: HTMLDivElement | null }) {
+  if (!on) return null;
+  if (!tree) return <div className="tview tview-wait"><LoadState load={load} form="screen" /></div>;
+  return <TreeView tree={tree} department={department} onOpenTask={onOpenTask} zoomSlot={zoomSlot} />;
+}
+
+/* The department's work tree, for its tree and its speed drawer: while either is open, the shared indicator where it will
+   stand, then why it did not come with Retry. Closed, nothing waits for it and no limit counts. */
+function useTreeLoad(departmentId: string, on: boolean) {
+  const { tree, failure, load, cancel } = useDepartmentTree(departmentId, on);
+  const treeLoad = useLoad(on ? [{ data: tree, failure, load, cancel }] : []);
+  /* The tree shows once its load is done, not as soon as it came, so the ring keeps its least time. */
+  return { tree: treeLoad.phase === 'done' ? tree : undefined, load: treeLoad };
+}
 
 const drawerTitle = (t: ReturnType<typeof useT>, drawer: Drawer | null): string =>
   ({ speed: t.dept.speed, hire: t.dept.hiring, about: t.dept.about })[drawer ?? 'about'];
@@ -394,7 +462,7 @@ export function pruneSwitched(switched: Record<string, boolean>, employees: Empl
   return kept.length === entries.length ? switched : Object.fromEntries(kept);
 }
 
-export function DepartmentView({ me, department: d, deputies, selected, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions, onOpenTracker, onCrumbs }: Props) {
+export function DepartmentView({ me, department: d, deputies, selected, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions, onOpenTracker, onCrumbs, load }: Props) {
   useRenderGuard('department');
   const t = useT();
   const { language } = useLanguage();
@@ -414,11 +482,13 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   /* Everyone given the department runs it as the whole company does, its named owner among them: its people, sub-units and
      repository. A team in it alone is not the department. */
   const runs = canGive;
+  const waiting = waitsFor(load);
+  const hire = hireRoom(waiting, runs);
   const [tree, setTree] = useState(false);
   const [drawer, setDrawer] = useState<Drawer | null>(null);
-  const { tree: workTree, failure: treeFailure } = useDepartmentTree(d.id, tree || drawer === 'speed');
+  const { tree: workTree, load: treeLoad } = useTreeLoad(d.id, tree || drawer === 'speed');
   const openAgent = useOpenAgent();
-  const chrome = useDepartmentSpace(language, panel, runs ? 'hire' : '', onCrumbs);
+  const chrome = useDepartmentSpace(language, panel, hire === 'none' ? '' : 'hire', onCrumbs);
   const [zoomSlot, setZoomSlot] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!drawer) return;
@@ -618,11 +688,10 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   const lines = (...cls: Line['cls'][]) => s.lines.filter(l => cls.includes(l.cls)).map((l, i) => <Wire key={`${l.cls}${i}`} l={l} />);
 
   return (
-    <div className="dview" ref={chrome.root} style={chrome.style}>
-      {tree && (workTree ? (
-        <TreeView tree={workTree} department={d} onOpenTask={onOpenTask} zoomSlot={zoomSlot} />
-      ) : <div className="tview"><p className="tv-empty glass">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</p></div>)}
-      {!tree && (
+    <div className="dview" ref={chrome.root} style={chrome.style} aria-busy={busyOf(load)}>
+      <DeptTreeBody on={tree} tree={workTree} load={treeLoad} department={d} onOpenTask={onOpenTask} zoomSlot={zoomSlot} />
+      <DepartmentBodyWait load={load} />
+      {!tree && !waiting && (
       <div className={`dcanvas${far ? ' far' : ''}`} ref={box} role="region" aria-label={t.dept.schema} {...handlers}>
         <div className="world" ref={world} style={worldStyle}>
           <section aria-labelledby={`${id}-members`} className="slayer">
@@ -707,46 +776,34 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
 
       )}
 
-      <nav className="crumbs" ref={chrome.crumbs} aria-label={deptLabel(t, d)}>
-        <button className="hbtn glass ib" type="button" aria-label={t.dept.back} title={t.dept.back} onClick={onBack}>
-          <BackIcon />
-        </button>
-        <div className="crumb glass">
-          <h2>{deptLabel(t, d)}</h2>
-          <span className="role">{d.roleCode}</span>
-        </div>
-      </nav>
+      <DepartmentCrumbs department={d} waiting={waiting} navRef={chrome.crumbs} onBack={onBack} />
 
       {/* The zoom, the line of what happened and the actions: along the bottom of a wide screen, one over the other on a phone. */}
       <div className="dv-dock" ref={chrome.dock}>
         {/* The schema's zoom, or the tree's, which the tree puts here. */}
-        <div className="dv-zoom" ref={setZoomSlot}>{!tree && <ZoomBar k={view.k} onZoom={zoomAt} onFit={() => place(true)} />}</div>
+        <div className="dv-zoom" ref={setZoomSlot} inert={waiting}>{!tree && <ZoomBar k={view.k} onZoom={zoomAt} onFit={() => place(true)} />}</div>
         {/* An open panel takes the room the ticker needs. */}
         {!panel && !chrome.tickerHidden && <HintLine said={said} />}
         <div className="dv-acts" ref={chrome.actions} data-fit={chrome.icons ? 'icons' : undefined} onPointerDown={e => e.stopPropagation()}>
           <div className="dv-tools glass">
-            <button className="hbtn glass ib" type="button" aria-label={treeButton} title={treeButton} onClick={() => setTree(!tree)}>{tree ? <MapIcon /> : <TreeIcon />}</button>
-            <button className={`hbtn glass ib${drawer === 'speed' ? ' on' : ''}`} type="button" aria-label={t.dept.speed} title={t.dept.speed} aria-expanded={drawer === 'speed'} onClick={() => setDrawer(drawer === 'speed' ? null : 'speed')}><SpeedIcon /></button>
-            <button className={`hbtn glass${chrome.icons ? ' ib' : ''}`} type="button" {...named(chrome.icons, t.dept.tasksButton)} onClick={() => onOpenTracker?.(d.id)}>
+            <button className="hbtn glass ib" type="button" disabled={waiting} aria-label={treeButton} title={treeButton} onClick={() => setTree(!tree)}>{tree ? <MapIcon /> : <TreeIcon />}</button>
+            <button className={`hbtn glass ib${drawer === 'speed' ? ' on' : ''}`} type="button" disabled={waiting} aria-label={t.dept.speed} title={t.dept.speed} aria-expanded={drawer === 'speed'} onClick={() => setDrawer(drawer === 'speed' ? null : 'speed')}><SpeedIcon /></button>
+            <button className={`hbtn glass${chrome.icons ? ' ib' : ''}`} type="button" disabled={waiting} {...named(chrome.icons, t.dept.tasksButton)} onClick={() => onOpenTracker?.(d.id)}>
               {chrome.icons ? <ListIcon /> : t.dept.tasksButton}
             </button>
-            <button className={`hbtn glass${chrome.icons ? ' ib' : ''}${drawer === 'about' ? ' on' : ''}`} type="button" {...named(chrome.icons, t.dept.about)} aria-expanded={drawer === 'about'} onClick={() => setDrawer(drawer === 'about' ? null : 'about')}>
+            <button className={`hbtn glass${chrome.icons ? ' ib' : ''}${drawer === 'about' ? ' on' : ''}`} type="button" disabled={waiting} {...named(chrome.icons, t.dept.about)} aria-expanded={drawer === 'about'} onClick={() => setDrawer(drawer === 'about' ? null : 'about')}>
               {chrome.icons ? <InfoIcon /> : t.dept.about}
             </button>
           </div>
           {/* The orchestrator's window is the whole company's; the owner hires from the roster here. */}
-          {runs && (
-            <button className="btn" type="button" onClick={company ? onHire : () => setDrawer('hire')}>
-              {t.dept.hire}
-            </button>
-          )}
+          <HireButton room={hire} waiting={waiting} onClick={company ? onHire : () => setDrawer('hire')} />
         </div>
       </div>
 
       {drawer && (
         <aside className={`dv-drawer${drawer === 'speed' ? ' spd' : ''}`} aria-label={drawerName}>
           <DrawerHead title={drawerName} onClose={() => setDrawer(null)} />
-          {drawer === 'speed' ? (workTree ? <SpeedPanel tree={workTree} department={d} onAgent={openAgent} /> : <div className="dv-drawer-b">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</div>) : (
+          {drawer === 'speed' ? (workTree ? <SpeedPanel tree={workTree} department={d} onAgent={openAgent} /> : <div className="dv-drawer-b"><LoadState load={treeLoad} /></div>) : (
           <div className="dv-drawer-b">
             {drawer === 'hire' && runs && <StaffCard department={{ id: d.id, name: deptLabel(t, d) }} onDone={() => setDrawer(null)} onHide={() => setDrawer(null)} />}
             {drawer === 'about' && (
