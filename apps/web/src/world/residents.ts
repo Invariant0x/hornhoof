@@ -187,7 +187,7 @@ function findRoadRoute(
   let found = false;
   let visited = 0;
 
-  while (head < queue.length && visited < 480) {
+  while (head < queue.length && visited < 2400) {
     const cur = queue[head++]!;
     const ck = tKey(cur.col, cur.row);
     visited++;
@@ -216,11 +216,11 @@ function findRoadRoute(
     }
     route.reverse();
   } else {
-    /* Direct smooth fallback waypoint if target sits slightly off road network (e.g. perimeter guard post). */
-    route = [start, goal];
+    /* Stay at start road tile rather than walking straight across building roofs. */
+    route = [start];
   }
 
-  if (sim.pathCache.size > 1200) sim.pathCache.clear();
+  if (sim.pathCache.size > 1600) sim.pathCache.clear();
   sim.pathCache.set(cacheKey, route);
   return route;
 }
@@ -229,27 +229,96 @@ function buildingDoor(b: CityBuilding): TileCoord {
   return { col: b.door.col, row: b.door.row };
 }
 
+/* True if another building sits immediately South/East of (col, row), whose extruded roof would
+   visually project upward over (col, row) in 2:1 isometric projection. */
+function isTileOccludedInFront(city: CityState, col: number, row: number): boolean {
+  const checks: readonly [number, number][] = [
+    [1, 0],
+    [0, 1],
+    [1, 1],
+    [2, 1],
+    [1, 2],
+    [2, 2],
+  ];
+  for (const [dc, dr] of checks) {
+    if (city.footprintOccupant.has(tKey(col + dc, row + dr))) return true;
+  }
+  return false;
+}
+
+/* Picks a visible front-facing (South/East) road or plaza tile beside a building so working and
+   stationary residents stand in clear view on the street instead of hidden behind tall roofs. */
+function frontTileForBuilding(b: CityBuilding, city: CityState, roadSet: ReadonlySet<string>): TileCoord {
+  const frontCandidates: TileCoord[] = [];
+  for (let c = b.col; c < b.col + b.spanCol; c++) {
+    frontCandidates.push({ col: c, row: b.row + b.spanRow });
+  }
+  for (let r = b.row; r < b.row + b.spanRow; r++) {
+    frontCandidates.push({ col: b.col + b.spanCol, row: r });
+  }
+  frontCandidates.push({ col: b.col + b.spanCol, row: b.row + b.spanRow });
+
+  for (const pt of frontCandidates) {
+    const k = tKey(pt.col, pt.row);
+    if (roadSet.has(k) && !city.footprintOccupant.has(k) && !isTileOccludedInFront(city, pt.col, pt.row)) {
+      return pt;
+    }
+  }
+  for (const pt of frontCandidates) {
+    const k = tKey(pt.col, pt.row);
+    if (!city.footprintOccupant.has(k) && !city.wallTiles.has(k) && !isTileOccludedInFront(city, pt.col, pt.row)) {
+      return pt;
+    }
+  }
+  for (const pt of frontCandidates) {
+    const k = tKey(pt.col, pt.row);
+    if (roadSet.has(k) && !city.footprintOccupant.has(k)) {
+      return pt;
+    }
+  }
+  return buildingDoor(b);
+}
+
 function resolveAltarTile(pack: WorldPackManifest, city: CityState, residence: CityBuilding | undefined): TileCoord {
   const anchor = pack.altarAnchor ?? { offsetCol: 3, offsetRow: -2 };
   const baseCol = residence ? residence.col + Math.floor(residence.spanCol / 2) : city.center.col;
   const baseRow = residence ? residence.row + Math.floor(residence.spanRow / 2) : city.center.row;
   const desired = { col: baseCol + anchor.offsetCol, row: baseRow + anchor.offsetRow };
-  /* Prefer exact pack anchor offset when free of building footprints, else step outward to first clear tile. */
-  if (!city.footprintOccupant.has(tKey(desired.col, desired.row))) {
+
+  const isAltarClear = (c: number, r: number): boolean => {
+    const k = tKey(c, r);
+    if (city.footprintOccupant.has(k) || city.wallTiles.has(k)) return false;
+    /* Ensure zero extruded building roofs in front overlap the sanctuary or waiting agents. */
+    return !isTileOccludedInFront(city, c, r);
+  };
+
+  if (isAltarClear(desired.col, desired.row)) {
     return desired;
   }
-  for (let rad = 1; rad <= 6; rad++) {
+
+  /* Search outward from the pack anchor (preferring clear open plaza/road-adjacent ground near the palace). */
+  let best: TileCoord | null = null;
+  let bestScore = Infinity;
+  for (let rad = 1; rad <= 10; rad++) {
     for (let dr = -rad; dr <= rad; dr++) {
       for (let dc = -rad; dc <= rad; dc++) {
+        if (Math.abs(dc) !== rad && Math.abs(dr) !== rad) continue;
         const c = desired.col + dc;
         const r = desired.row + dr;
-        if (!city.footprintOccupant.has(tKey(c, r))) {
-          return { col: c, row: r };
+        if (!isAltarClear(c, r)) continue;
+        const distAnchor = Math.hypot(dc, dr);
+        const distRes = Math.hypot(c - baseCol, r - baseRow);
+        const nearRoad = DIRS_4.some(([rc, rr]) => city.roads.has(tKey(c + rc, r + rr))) ? -1.5 : 0;
+        const score = distAnchor * 1.1 + distRes * 0.45 + nearRoad;
+        if (score < bestScore) {
+          bestScore = score;
+          best = { col: c, row: r };
         }
       }
     }
+    if (best) return best;
   }
-  return residence ? buildingDoor(residence) : city.center;
+  return residence ? frontTileForBuilding(residence, city, new Set(city.roads.keys())) : city.center;
 }
 
 /* Rate limiter enforcing that human agent wakes cannot fire more than once per cooldown window. */
@@ -292,7 +361,7 @@ export function createResidentSimulation(
   }
 
   const residence = city.buildings.find(b => b.kind === 'residence');
-  const residenceTile = residence ? buildingDoor(residence) : { ...city.center };
+  const residenceTile = residence ? frontTileForBuilding(residence, city, roadSet) : { ...city.center };
   const altarTile = resolveAltarTile(pack, city, residence);
   const altarLabel = pack.altarAnchor?.label ?? { en: "God's Altar", ru: 'Алтарь бога' };
 
@@ -306,17 +375,17 @@ export function createResidentSimulation(
   let flophouseTile: TileCoord = residenceTile;
 
   for (const b of city.buildings) {
-    const door = buildingDoor(b);
-    if (b.kind === 'department' && b.departmentId) deptTiles.set(b.departmentId, door);
-    if (b.kind === 'monument' && b.entityId) goalTiles.set(b.entityId, door);
-    if (b.kind === 'statue' && b.departmentId) statueTilesByDept.set(b.departmentId, door);
+    const front = frontTileForBuilding(b, city, roadSet);
+    if (b.kind === 'department' && b.departmentId) deptTiles.set(b.departmentId, front);
+    if (b.kind === 'monument' && b.entityId) goalTiles.set(b.entityId, front);
+    if (b.kind === 'statue' && b.departmentId) statueTilesByDept.set(b.departmentId, front);
     if (b.kind === 'house' && b.entityId) houseByAgent.set(b.entityId, b);
-    if (b.kind === 'district_hub' && b.districtId) hubTilesByMachine.set(b.districtId, door);
+    if (b.kind === 'district_hub' && b.districtId) hubTilesByMachine.set(b.districtId, front);
     if (b.kind === 'supply') {
-      supplyTiles.push(door);
-      if ((b.fullness ?? 1) <= 0.05 || b.resting) emptySupplyTiles.push(door);
+      supplyTiles.push(front);
+      if ((b.fullness ?? 1) <= 0.05 || b.resting) emptySupplyTiles.push(front);
     }
-    if (b.kind === 'flophouse') flophouseTile = door;
+    if (b.kind === 'flophouse') flophouseTile = front;
   }
 
   /* Gate tiles: outer roads touching the outer wall perimeter (or outer road extremities if outerWallMode === 'none'). */
@@ -421,7 +490,7 @@ export function createResidentSimulation(
       roleClass === 'ruler'
         ? residenceTile
         : house
-          ? buildingDoor(house)
+          ? frontTileForBuilding(house, city, roadSet)
           : agent.departmentId && deptTiles.has(agent.departmentId)
             ? deptTiles.get(agent.departmentId)!
             : residenceTile;
@@ -447,7 +516,7 @@ export function createResidentSimulation(
       /* Active 'working' state: choose destination by role class & archetype. */
       if (roleClass === 'ruler') {
         const targetHouse = agent.talkingToAgentId ? houseByAgent.get(agent.talkingToAgentId) : undefined;
-        workTile = targetHouse ? buildingDoor(targetHouse) : deptTile;
+        workTile = targetHouse ? frontTileForBuilding(targetHouse, city, roadSet) : deptTile;
         deliveryTargetKind = 'none';
       } else if (roleClass === 'turnkey') {
         const otherDeptId =
@@ -515,12 +584,16 @@ export function createResidentSimulation(
       const ang = (idx * 2.399963) % (Math.PI * 2);
       const rad =
         liveState === 'waiting_human'
-          ? 0.58 + (idx % 3) * 0.14
+          ? 0.52 + (idx % 3) * 0.14
           : liveState === 'exhausted' || liveState === 'turn_failed'
-            ? 0.44 + (idx % 3) * 0.16
-            : 0.28;
-      startCol += Math.cos(ang) * rad;
-      startRow += Math.sin(ang) * rad;
+            ? 0.38 + (idx % 3) * 0.12
+            : 0.24;
+      const candC = startCol + Math.cos(ang) * rad;
+      const candR = startRow + Math.sin(ang) * rad;
+      if (!city.footprintOccupant.has(tKey(Math.round(candC), Math.round(candR)))) {
+        startCol = candC;
+        startRow = candR;
+      }
     }
     const startPt = { col: startCol, row: startRow };
     const visitedDepartmentIds =

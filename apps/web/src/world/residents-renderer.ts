@@ -196,7 +196,7 @@ function drawOfflineNightDistrictsPixi(
     const ctr = buildingCenterWorld(b, tileW, tileH);
     if (!inRect(ctr.x, ctr.y, rect, 260)) continue;
 
-    const pad = 0.65;
+    const pad = 0.85;
     const top = tileTopVertexToWorld(b.col - pad, b.row - pad, tileW, tileH);
     const right = tileTopVertexToWorld(b.col + b.spanCol + pad, b.row - pad, tileW, tileH);
     const bottom = tileTopVertexToWorld(b.col + b.spanCol + pad, b.row + b.spanRow + pad, tileW, tileH);
@@ -207,15 +207,17 @@ function drawOfflineNightDistrictsPixi(
       .lineTo(bottom.x, bottom.y)
       .lineTo(left.x, left.y)
       .closePath()
-      .fill({ color: 0x0b1738, alpha: 0.34 });
+      .fill({ color: 0x0a1536, alpha: 0.44 });
 
-    /* Crescent night moon badge above offline machine hub. */
+    /* Crescent night moon badge + stars above offline machine hub. */
     if (b.kind === 'district_hub') {
       const mx = ctr.x;
       const my = ctr.y - 68;
-      fillOctagon(g, mx, my, 12, 12, 0x101d3c, 0.92);
-      fillOctagon(g, mx - 2, my, 6.2, 6.2, 0xd8e8ff, 0.98);
-      fillOctagon(g, mx + 2.2, my - 1.2, 5.4, 5.4, 0x101d3c, 1);
+      fillOctagon(g, mx, my, 14, 14, 0x0f1c3b, 0.94);
+      fillOctagon(g, mx - 2.4, my, 7.2, 7.2, 0xdcebff, 0.98);
+      fillOctagon(g, mx + 2.4, my - 1.4, 6.2, 6.2, 0x0f1c3b, 1);
+      fillOctagon(g, mx - 18, my - 12, 2.2, 2.2, 0xe4f0ff, 0.9);
+      fillOctagon(g, mx + 17, my - 16, 1.9, 1.9, 0xe4f0ff, 0.82);
     }
   }
 }
@@ -500,8 +502,8 @@ function drawResidentPixi(
     const topC = isReturned ? 0xeb987e : 0xf2e6cc;
     const leftC = isReturned ? 0xd4765b : 0xdac8a4;
     const rightC = isReturned ? 0xb4583f : 0xbba67e;
-    const bx = x + dirX * 5 * scale;
-    const by = torsoTopY + 2 * scale;
+    const bx = x + dirX * 10 * scale;
+    const by = torsoTopY + 13 * scale;
     const w = 13 * scale;
     const h = 10 * scale;
     g.moveTo(bx, by - h)
@@ -625,8 +627,57 @@ function drawResidentPixi(
   }
 }
 
-/* Reused sort scratch array avoids per-frame allocations when rendering 150 active residents. */
+/* Reused scratch arrays avoid per-frame allocations when rendering 150 active residents. */
 const visibleScratch: ResidentEntity[] = [];
+
+type BuildingOcclusionBox = {
+  minCol: number;
+  maxCol: number;
+  minRow: number;
+  maxRow: number;
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+};
+
+const visibleBuildingBoxes: BuildingOcclusionBox[] = [];
+
+function buildingExtrudedHeight(b: CityBuilding): number {
+  switch (b.kind) {
+    case 'monument':
+      return 30 + Math.round((b.progress ?? 0.5) * (b.spanCol >= 6 ? 120 : 84));
+    case 'residence':
+      return 28 + b.stage * 10;
+    case 'department':
+      return 34 + b.stage * 4;
+    case 'district_hub':
+      return 26 + b.stage * 5;
+    case 'supply':
+      return 24 + b.stage * 6;
+    case 'statue':
+      return 16 + Math.min(28, b.stage * 2);
+    case 'flophouse':
+      return 22 + b.stage * 4;
+    case 'house':
+      return 16 + Math.min(28, b.stage * 4);
+  }
+}
+
+function isOccludedByFrontBuilding(r: ResidentEntity, posX: number, posY: number): boolean {
+  const sampleY = posY - 18;
+  for (let i = 0; i < visibleBuildingBoxes.length; i++) {
+    const b = visibleBuildingBoxes[i]!;
+    /* In 2:1 isometric painter's order, building b sits in front of (r.col, r.row) iff
+       r.col < b.maxCol and r.row < b.maxRow (not strictly South or East of the footprint). */
+    if (r.col < b.maxCol - 0.15 && r.row < b.maxRow - 0.15) {
+      if (posX > b.minX + 6 && posX < b.maxX - 6 && sampleY > b.minY + 4 && sampleY < b.maxY - 6) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 export function renderResidentsToPixi(
   g: Graphics,
@@ -641,7 +692,29 @@ export function renderResidentsToPixi(
 ): void {
   g.clear();
 
+  visibleBuildingBoxes.length = 0;
   if (city) {
+    for (let i = 0; i < city.buildings.length; i++) {
+      const b = city.buildings[i]!;
+      const ctr = buildingCenterWorld(b, tileW, tileH);
+      if (!inRect(ctr.x, ctr.y, visibleRect, 260)) continue;
+      const top = tileTopVertexToWorld(b.col, b.row, tileW, tileH);
+      const right = tileTopVertexToWorld(b.col + b.spanCol, b.row, tileW, tileH);
+      const bottom = tileTopVertexToWorld(b.col + b.spanCol, b.row + b.spanRow, tileW, tileH);
+      const left = tileTopVertexToWorld(b.col, b.row + b.spanRow, tileW, tileH);
+      const h = buildingExtrudedHeight(b);
+      visibleBuildingBoxes.push({
+        minCol: b.col,
+        maxCol: b.col + b.spanCol,
+        minRow: b.row,
+        maxRow: b.row + b.spanRow,
+        minX: left.x,
+        maxX: right.x,
+        minY: top.y - h,
+        maxY: bottom.y,
+      });
+    }
+
     drawOfflineNightDistrictsPixi(g, sim, city, visibleRect, tileW, tileH);
     drawHomeScaffoldingPixi(g, sim, city, visibleRect, tileW, tileH);
     if (city.buildings.length > 0) {
@@ -652,14 +725,14 @@ export function renderResidentsToPixi(
     }
   }
 
-  /* Viewport-cull and depth-sort visible residents. */
+  /* Viewport-cull, skip passersby occluded behind tall front buildings, and depth-sort visible residents. */
   visibleScratch.length = 0;
   for (let i = 0; i < sim.residents.length; i++) {
     const r = sim.residents[i]!;
     const pos = tileCenterToWorld(r.col, r.row, tileW, tileH);
-    if (inRect(pos.x, pos.y, visibleRect, 120)) {
-      visibleScratch.push(r);
-    }
+    if (!inRect(pos.x, pos.y, visibleRect, 120)) continue;
+    if (r.id !== selectedResidentId && isOccludedByFrontBuilding(r, pos.x, pos.y)) continue;
+    visibleScratch.push(r);
   }
   visibleScratch.sort((a, b) => a.col + a.row - (b.col + b.row));
 

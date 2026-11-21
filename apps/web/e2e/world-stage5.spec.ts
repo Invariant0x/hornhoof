@@ -167,7 +167,21 @@ test('Stage 5 records live residents video of Hornhoof team city', async ({ brow
       const failed = h.getResidents().find(r => r.liveState === 'turn_failed');
       if (failed) h.centerOnResident(failed.id, 1.25);
     });
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(900);
+
+    await page.evaluate(() => {
+      const h = (window as unknown as { __WORLD_LIVE__: LiveStage5Handle }).__WORLD_LIVE__;
+      const offline = h.getResidents().find(r => r.liveState === 'machine_offline');
+      if (offline) h.centerOnResident(offline.id, 1.0);
+    });
+    await page.waitForTimeout(900);
+
+    await page.evaluate(() => {
+      const h = (window as unknown as { __WORLD_LIVE__: LiveStage5Handle }).__WORLD_LIVE__;
+      const upgrader = h.getResidents().find(r => r.liveState === 'upgrading_home');
+      if (upgrader) h.centerOnResident(upgrader.id, 1.35);
+    });
+    await page.waitForTimeout(800);
 
     await page.evaluate(() => {
       const h = (window as unknown as { __WORLD_LIVE__: LiveStage5Handle }).__WORLD_LIVE__;
@@ -177,7 +191,7 @@ test('Stage 5 records live residents video of Hornhoof team city', async ({ brow
         h.selectResident(turnkey.id);
       }
     });
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(900);
 
     expect(errors).toEqual([]);
   } finally {
@@ -284,12 +298,12 @@ test('Stage 5 captures residents (100%/200%), interactive Agent Card + wake cool
     await expect(page.getByTestId('world-stage5-wake-status')).toContainText('Слишком часто');
     await capture(page, info, 'agent-card');
 
-    /* Close card and frame God's Altar + smoking department / states showcase. */
+    /* Close card and frame the offline machine nighttime district (moon + sleeping residents) & upgrading homes. */
     await page.keyboard.press('Escape');
     await page.evaluate(() => {
       const h = (window as unknown as { __WORLD_LIVE__: LiveStage5Handle }).__WORLD_LIVE__;
-      const failed = h.getResidents().find(r => r.liveState === 'turn_failed');
-      if (failed) h.centerOnResident(failed.id, 1.0);
+      const offline = h.getResidents().find(r => r.liveState === 'machine_offline');
+      if (offline) h.centerOnResident(offline.id, 0.9);
     });
     await page.waitForTimeout(250);
     await capture(page, info, 'states-showcase');
