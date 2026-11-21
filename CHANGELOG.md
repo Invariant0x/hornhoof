@@ -15,7 +15,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Added
 
-- Each node looks after its disk every ten minutes: it removes what can come back (left-over check files, the working copies of finished tasks once everything in them is on GitHub, the installed dependencies of those that keep unsaved work, and terminal recordings a stopped node left), reports its disk and Hornhoof's share by part, and while it is still short of space takes no new checks or builds, with the reason; turns go on. The threshold is the larger of a share of the disk and an amount, 10% and 20 GB by default (`HORNHOOF_DISK_SHARE`, `HORNHOOF_DISK_GB`). Unsaved work is never touched and is named in the report.
+- Each node looks after its disk every ten minutes: it removes what can come back (left-over check files, the working copies of finished tasks once everything in them is on GitHub and all they ignore is dependencies, builds, caches or test output, the installed dependencies of those that stay, and terminal recordings a stopped node left), reports its disk and Hornhoof's share by part, and while it is still short of space takes no new checks or builds, with the reason; turns go on. The threshold is the larger of a share of the disk and an amount, 10% and 20 GB by default (`HORNHOOF_DISK_SHARE`, `HORNHOOF_DISK_GB`). Unsaved work and files git ignores that no remote has are never touched and are named in the report.
 
 ## [0.40.0] - 2026-11-20
 
