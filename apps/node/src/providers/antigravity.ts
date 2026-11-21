@@ -180,6 +180,26 @@ export function agyInput(parameters: unknown): string {
   return isRecord(parameters) && typeof parameters.CommandLine === 'string' ? parameters.CommandLine : inputText(parameters);
 }
 
+const agyId = (value: unknown): string | null => (typeof value === 'string' && value.trim() ? value.trim() : null);
+const resultConversation = (ev: Record<string, unknown>): string | null => (isRecord(ev.result) ? agyId(ev.result.conversation_id) : null);
+const stepConversation = (ev: Record<string, unknown>): string | null => agyId((ev.event === 'step_update' && isRecord(ev.step_update) ? ev.step_update : ev).conversation_id);
+
+/* Tracks the main conversation of an agy stream-json run: init names the conversation first, result confirms it, and a
+   subagent's step_update with another conversation_id must never replace it. */
+export function agyStreamSession(requested: string | null) {
+  let init: string | null = null;
+  let result: string | null = null;
+  let step: string | null = null;
+  return {
+    observe(ev: Record<string, unknown>): void {
+      if (ev.event === 'init') init ||= agyId(ev.conversation_id);
+      else if (ev.event === 'result') result = resultConversation(ev) ?? result;
+      else step ||= stepConversation(ev);
+    },
+    current: (): string | null => init ?? result ?? requested ?? step,
+  };
+}
+
 const AGY_LIMITS_WAIT_MS = 15_000;
 const AGY_WINDOWS: Record<string, string> = {
   '5h': 'five_hour',
@@ -533,7 +553,7 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
     }
     if (input.instructions) tellAgy(input, input.instructions, user);
 
-    let sessionId: string | null = input.sessionId;
+    const session = agyStreamSession(input.sessionId);
     let result: Record<string, unknown> | null = null;
     const read = agyStream();
     const done = await runProgram({
@@ -548,13 +568,14 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
         const ev = objectLine(line);
         if (!ev) return;
         for (const event of read(ev)) input.onEvent?.(event);
-        const step = isRecord(ev.step_update) ? ev.step_update : isRecord(ev.result) ? ev.result : ev;
-        if (typeof step.conversation_id === 'string' && step.conversation_id) sessionId = step.conversation_id;
+        session.observe(ev);
         if (ev.event === 'result' && isRecord(ev.result)) result = ev.result;
       },
     }).finally(() => {
       if (input.tools) rmSync(mcpJson, { force: true });
     });
+
+    const sessionId = session.current();
 
     /* Assigned in onLine, which TypeScript does not follow. */
     const final = result as Record<string, unknown> | null;

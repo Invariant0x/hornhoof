@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import type { PhoneDevice, PhoneReadinessIssue } from '@hornhoof/protocol';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { companyPhones, phoneSessions } from '../src/db/schema.js';
 import { phoneConnection, phoneConnections } from '../src/modules/phones/presence.js';
 import { as, mcp, until } from './helpers.js';
@@ -11,6 +11,7 @@ const ENDPOINT = '192.168.1.80:5555';
 const ready: PhoneDevice = { serial: ENDPOINT, status: 'device', model: 'Pixel_8' };
 const available = { online: true, state: 'available', connection: 'ready' };
 const missing = { online: false, state: 'offline', connection: 'not_connected' };
+const computerOffline = { online: false, state: 'offline', connection: 'computer_offline' };
 
 async function company() {
   const c = await phoneCompany({ lists: true });
@@ -30,7 +31,7 @@ it('shows a phone offline once its node\'s adb stops listing it, also unauthoriz
   c.adbLists([{ ...ready, status: 'offline', model: null }]);
   expect(await c.listed()).toMatchObject(missing);
   c.adbLists(null);
-  expect(await c.listed()).toMatchObject(missing);
+  expect(await c.listed()).toMatchObject(computerOffline);
   c.adbLists([ready]);
   expect(await c.listed()).toMatchObject(available);
   expect((await c.app.inject({ url: `/api/phones/${c.phone.id}`, ...as(c.claraSession) })).json()).toMatchObject(available);
@@ -131,4 +132,101 @@ it('keeps a node that cannot list phones as before: its phones follow its comput
   const view = (await c.app.inject({ url: '/api/phones', ...as(c.claraSession) })).json();
   expect(view.phones[0]).toMatchObject(available);
   expect(c.calls.filter(m => m.type === 'phone.list')).toEqual([]);
+});
+
+/* A failed or timed-out phone.list RPC means the node could not be queried, never that adb does not see the phone over USB (#1858). */
+it('distinguishes an empty ok phone.list (not_connected) from a failed phone.list (computer_offline, never USB disconnect)', async () => {
+  const c = await company();
+  const [phone] = await c.db.select().from(companyPhones).where(eq(companyPhones.id, c.phone.id));
+  const turn = await c.startTurn(c.nora.id, c.task.id);
+  const tools = await mcp(c.app, turn.token);
+  const phones = async () => (JSON.parse(((await tools.callTool({ name: 'phones', arguments: {} })) as Reply).content[0]!.text!) as { phones: unknown[] }).phones[0];
+
+  /* Honest not_connected: node answered status ok without the phone serial. */
+  c.adbLists([]);
+  expect(await phoneConnection(c.app.ctx, phone!)).toBe('not_connected');
+  expect(await c.listed()).toMatchObject(missing);
+  expect(await phones()).toMatchObject(missing);
+  const missingRefusal = await tools.callTool({ name: 'phone_acquire', arguments: { phone: c.phone.id } }) as Reply;
+  expect(missingRefusal.isError).toBe(true);
+  expect(JSON.parse(missingRefusal.content[0]!.text!)).toMatchObject({ error: { reason: 'phone_not_connected' } });
+
+  /* RPC failure: phone.list replied status failed -> computer_offline, not not_connected. */
+  c.adbLists(null);
+  expect(await phoneConnection(c.app.ctx, phone!)).toBe('computer_offline');
+  const listed = await c.listed();
+  expect(listed).toMatchObject(computerOffline);
+  expect(listed).not.toHaveProperty('readiness');
+  expect(await phones()).toMatchObject(computerOffline);
+  const failedRefusal = await tools.callTool({ name: 'phone_acquire', arguments: { phone: c.phone.id } }) as Reply;
+  expect(failedRefusal.isError).toBe(true);
+  const failedBody = JSON.parse(failedRefusal.content[0]!.text!) as { error: { reason: string; message: string } };
+  expect(failedBody.error.reason).toBe('phone_unavailable');
+  expect(failedBody.error.reason).not.toBe('phone_not_connected');
+  expect(failedBody.error.message).toMatch(/computer/i);
+  expect(failedBody.error.message).not.toMatch(/USB|Wireless debugging|adb/i);
+  expect(await c.db.select().from(phoneSessions).where(eq(phoneSessions.phoneId, c.phone.id))).toEqual([]);
+  expect(c.calls.filter(m => m.type === 'phone.open')).toEqual([]);
+
+  /* Transient failure is not cached: once phone.list answers ok with the phone, it is ready and can be acquired. */
+  c.adbLists([ready]);
+  expect(await phoneConnection(c.app.ctx, phone!)).toBe('ready');
+  const lent = await tools.callTool({ name: 'phone_acquire', arguments: { phone: c.phone.id } }) as Reply;
+  expect(lent.isError, lent.content[0]?.text).not.toBe(true);
+  expect(JSON.parse(lent.content[0]!.text!)).toMatchObject({ status: 'active' });
+});
+
+it('reports computer_offline, not not_connected, when phone.list times out or the node drops mid-request', async () => {
+  const c = await company();
+  const [phone] = await c.db.select().from(companyPhones).where(eq(companyPhones.id, c.phone.id));
+  const lists = () => c.calls.filter(m => m.type === 'phone.list').length;
+
+  /* 20 s RPC timeout in rpc.ts resolves failed -> computer_offline, never not_connected. */
+  const beforeTimeout = lists();
+  c.holdLists();
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const timedOut = phoneConnection(c.app.ctx, phone!);
+    while (lists() <= beforeTimeout) await new Promise<void>(resolve => { setImmediate(resolve); });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(await timedOut).toBe('computer_offline');
+  } finally {
+    vi.useRealTimers();
+  }
+
+  /* Recovery after timeout: next look asks the node again and sees ready. */
+  c.adbLists([ready]);
+  c.answerLists();
+  expect(await phoneConnection(c.app.ctx, phone!)).toBe('ready');
+
+  /* Brief node drop while phone.list is in flight -> computer_offline, never not_connected. */
+  const beforeDrop = lists();
+  c.holdLists();
+  const dropped = phoneConnection(c.app.ctx, phone!);
+  await until(() => lists() > beforeDrop);
+  c.node.close();
+  await c.node.closed;
+  expect(await dropped).toBe('computer_offline');
+});
+
+it('keeps batch results separate when one phone.list batch returns ok and the next fails', async () => {
+  const c = await company();
+  const [phone] = await c.db.select().from(companyPhones).where(eq(companyPhones.id, c.phone.id));
+  const lists = () => c.calls.filter(m => m.type === 'phone.list').length;
+  const batchPhones = Array.from({ length: 101 }, (_, i) => ({
+    ...phone!,
+    id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
+    serial: `SYNPHONE${String(i).padStart(3, '0')}`,
+  }));
+  const before = lists();
+  c.holdLists();
+  const pending = phoneConnections(c.app.ctx, batchPhones);
+  await until(() => lists() > before);
+  c.adbLists([{ serial: batchPhones[0]!.serial, status: 'device', model: 'Pixel_8' }]);
+  c.answerLists();
+  c.adbLists(null);
+  const result = await pending;
+  expect(result.get(batchPhones[0]!.id)).toBe('ready');
+  expect(result.get(batchPhones[1]!.id)).toBe('not_connected');
+  expect(result.get(batchPhones[100]!.id)).toBe('computer_offline');
 });

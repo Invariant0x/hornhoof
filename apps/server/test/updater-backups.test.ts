@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chownSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { ask, at, JQ, runOnce, stand, type Stand } from './updater-fixture.js';
+import { ask, at, JQ, runOnce, runUpdaterStep, stand, stubbed, type Stand } from './updater-fixture.js';
 
 const ID = '0f0f0f0f-0000-4000-8000-00000000000a';
 const dumps = (s: Stand) => join(s.control, 'dumps');
@@ -159,6 +159,119 @@ describe('updater, backups', () => {
     expect(r.out).toContain('Deleted a database dump that was not sealed within a day.');
     /* A machine with no such folder is left alone. */
     expect((await runOnce(stand(), null)).out).not.toContain('Deleted a database dump');
+  });
+
+  it('keeps a stale direct file of another owner and leaves a direct link target intact', async () => {
+    const s = stand();
+    mkdirSync(dumps(s));
+    const old = new Date(Date.now() - 25 * 3_600_000);
+    const stale = join(dumps(s), 'old.sql.gz');
+    const outside = join(s.dir, 'kept.sql.gz');
+    for (const file of [stale, outside]) {
+      writeFileSync(file, 'rows');
+      utimesSync(file, old, old);
+    }
+    symlinkSync(outside, join(dumps(s), 'link.sql.gz'));
+    /* A privileged fixture gives the stale file a real different UID. Otherwise model the keeper's UID. */
+    const nativeOwner = process.getuid?.() === 0;
+    if (nativeOwner) chownSync(stale, 1234, statSync(stale).gid);
+    const keeper = nativeOwner ? statSync(dumps(s)).uid : 0;
+    expect(statSync(stale).uid).not.toBe(keeper);
+    const step = nativeOwner ? 'sweep_dumps' : "facts() { printf '%s\\n' '1 1 700 0'; }; sweep_dumps";
+    const r = await runUpdaterStep(s, step);
+    expect(r.code, r.out).toBe(0);
+    expect(readFileSync(stale, 'utf8')).toBe('rows');
+    expect(readFileSync(outside, 'utf8')).toBe('rows');
+  });
+
+  it('rejects a dumps directory owned by a different user', async () => {
+    const s = stand();
+    mkdirSync(dumps(s));
+    const file = join(dumps(s), 'old.sql.gz');
+    const old = new Date(Date.now() - 25 * 3_600_000);
+    writeFileSync(file, 'rows');
+    utimesSync(file, old, old);
+    const r = await runUpdaterStep(s, `
+      facts() {
+        case "$(physical_dir)" in
+          */dumps) printf '%s\\n' '1 1 700 1234' ;;
+          *) printf '%s\\n' '2 1 700 1000' ;;
+        esac
+      }
+      sweep_dumps
+    `);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('Refused dumps: it is not a keeper folder.');
+    expect(readFileSync(file, 'utf8')).toBe('rows');
+  });
+
+  it('logs a dangling link in place of dumps and skips the sweep', async () => {
+    const s = stand();
+    symlinkSync(join(s.dir, 'missing'), dumps(s));
+    const r = await runUpdaterStep(s, 'sweep_dumps');
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('Refused dumps: it is not a plain folder.');
+  });
+
+  it.each(['different', 'unavailable'])('keeps stale dumps when their mount identity is %s', async identity => {
+    const s = stand();
+    mkdirSync(dumps(s));
+    const stale = join(dumps(s), 'old.sql.gz');
+    writeFileSync(stale, 'rows');
+    utimesSync(stale, new Date(0), new Date(0));
+    const r = await runUpdaterStep(s, `
+      directory_mount() {
+        case "$(physical_dir)" in
+          */dumps) ${identity === 'different' ? 'printf "%s\\n" 2' : 'return 1'} ;;
+          *) printf '%s\\n' 1 ;;
+        esac
+      }
+      sweep_dumps
+    `);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('Refused dumps: could not verify the control mount.');
+    expect(readFileSync(stale, 'utf8')).toBe('rows');
+  });
+
+  it.each(['find', 'rm'])('reports a dump sweep failure from %s and continues', async command => {
+    const s = stand();
+    const tools = join(s.dir, 'sweep-tools');
+    mkdirSync(tools);
+    writeFileSync(join(tools, command), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    mkdirSync(dumps(s));
+    const stale = join(dumps(s), 'old.sql.gz');
+    writeFileSync(stale, 'rows');
+    utimesSync(stale, new Date(0), new Date(0));
+    const r = await runUpdaterStep(s, `
+      export PATH="$SWEEP_TOOLS:$PATH"
+      sweep_dumps
+      printf 'Sweep returned.\\n'
+    `, { SWEEP_TOOLS: tools });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('Sweep returned.');
+    expect(r.out).toContain('Could not check or remove one or more stale dump entries.');
+    expect(r.out).not.toContain('Deleted a database dump');
+    expect(readFileSync(stale, 'utf8')).toBe('rows');
+  });
+
+  /* The app can swap a folder in dumps for a link at any moment, also while the sweep runs, here right before rm does.
+     The sweep deletes old files of dumps itself only, by their names there, so it never deletes through such a link. */
+  it('deletes nothing through a folder of dumps swapped for a link', async () => {
+    const s = stand();
+    const outside = join(s.dir, 'outside');
+    const sub = join(dumps(s), 'sub');
+    const old = new Date(Date.now() - 25 * 3_600_000);
+    mkdirSync(outside);
+    mkdirSync(sub, { recursive: true });
+    for (const file of [join(dumps(s), 'old.sql.gz'), ...[outside, sub].flatMap(dir => ['a.sql.gz', 'b.sql.gz'].map(name => join(dir, name)))]) {
+      writeFileSync(file, 'x');
+      utimesSync(file, old, old);
+    }
+    const r = await runOnce(s, null, { ...stubbed(s, 'rm', 'rm-swap'), RM_SWAP: `${sub}=${outside}` });
+    expect(r.code, r.out).toBe(0);
+    expect(readdirSync(outside).sort()).toEqual(['a.sql.gz', 'b.sql.gz']);
+    expect(existsSync(join(dumps(s), 'old.sql.gz'))).toBe(false);
+    expect(r.out).toContain('Deleted a database dump that was not sealed within a day.');
   });
 
   it('takes no name for a dump but a plain one, and dumps nothing on a machine with no database', async () => {

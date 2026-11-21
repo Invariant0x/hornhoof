@@ -17,6 +17,7 @@ export type PhoneSession = typeof phoneSessions.$inferSelect;
 export const phoneDenied = () => new ApiError(403, 'forbidden', 'This phone is not available to you.', 'phone_not_allowed');
 export const phoneMissing = () => new ApiError(404, 'not_found', 'There is no such phone.', 'phone_unknown');
 export const phoneOffline = () => new ApiError(503, 'unavailable', 'The phone does not answer. Check its connection and the approval on its screen.', 'phone_unavailable');
+export const phoneComputerUnavailable = () => new ApiError(503, 'unavailable', "The phone's computer is offline or did not answer. Try again in a moment.", 'phone_unavailable');
 export const phoneNotConnected = () => new ApiError(503, 'unavailable', 'The phone is not connected to its computer: adb there does not list it. Plug it in by USB, or turn on Wireless debugging on it and add it again with its address.', 'phone_not_connected');
 export const phoneGone = () => new ApiError(409, 'conflict', 'You do not hold an active session on this phone.', 'phone_session_gone');
 export const phoneInvalid = () => new ApiError(400, 'validation', 'Check the phone name, computer and address.', 'phone_invalid');
