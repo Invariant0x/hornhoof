@@ -297,7 +297,7 @@ for (const width of [1440, 375]) {
     expect(errors).toEqual([]);
   });
 
-  test(`confirms removal without moving the foot, and restores focus on No, in ${lookName(look)}`, async ({ page, browserName }, info) => {
+  test(`confirms removal without moving the foot, and restores focus on Cancel, in ${lookName(look)}`, async ({ page, browserName }, info) => {
     const { card, errors } = await opened(page, look);
     let deletions = 0;
     await page.route('**/api/subscriptions/s-kimi', route => {
@@ -312,11 +312,11 @@ for (const width of [1440, 375]) {
     await remove.focus();
     const before = await inCard(foot.locator('.form-foot'));
     await page.keyboard.press('Enter');
-    const question = page.getByRole('alertdialog', { name: 'Are you sure?' });
+    const question = page.getByRole('alertdialog', { name: en.subs.confirm.removePlan.title });
     expect(await question.count()).toBe(1);
-    await expect(question).toContainText(en.subs.removeAsk('Kimi'));
+    await expect(question).toContainText(en.subs.confirm.removePlan.effect('Kimi'));
     expect(Math.abs(await inCard(foot.locator('.form-foot')) - before)).toBeLessThanOrEqual(1);
-    const cancel = question.getByRole('button', { name: 'No', exact: true });
+    const cancel = question.getByRole('button', { name: en.common.cancel, exact: true });
     await expect(cancel).toBeFocused();
     await question.screenshot({ path: info.outputPath(`remove-question-${fileName(look)}-${browserName}.png`) });
     await page.keyboard.press('Enter');
@@ -324,7 +324,7 @@ for (const width of [1440, 375]) {
     await expect(remove).toBeFocused();
     expect(deletions).toBe(0);
     await remove.click();
-    await question.getByRole('button', { name: 'Yes', exact: true }).click();
+    await question.getByRole('button', { name: en.subs.confirm.removePlan.yes, exact: true }).click();
     await expect.poll(() => deletions).toBe(1);
     expect(errors).toEqual([]);
   });
@@ -369,6 +369,7 @@ for (const action of ['fallback', 'orchestrator'] as const) {
     const { card, errors } = await opened(page, look);
     const endpoint = action === 'fallback' ? '/api/subscriptions/s-kimi' : '/api/subscriptions/s-kimi/orchestrator';
     const method = action === 'fallback' ? 'PATCH' : 'POST';
+    const ask = action === 'fallback' ? en.subs.confirm.removeFallback : en.subs.confirm.orchestrator;
     let writes = 0;
     await page.route(`**${endpoint}`, route => {
       if (route.request().method() !== method) return route.fallback();
@@ -377,14 +378,14 @@ for (const action of ['fallback', 'orchestrator'] as const) {
     });
     const trigger = card.getByRole('button', { name: action === 'fallback' ? en.subs.fallbackRemoveLabel('Claude, Design team') : en.subs.useForOrchestratorLabel('Kimi'), exact: true });
     const write = page.waitForRequest(req => req.method() === method && new URL(req.url()).pathname === endpoint);
-    const question = page.getByRole('alertdialog', { name: 'Are you sure?' });
+    const question = page.getByRole('alertdialog', { name: ask.title });
     await trigger.click();
     expect(await Promise.race([question.waitFor().then(() => 'question'), write.then(() => 'request')])).toBe('question');
     await expect(question).toContainText(action === 'fallback' ? 'Claude, Design team' : 'Kimi');
-    await question.getByRole('button', { name: 'No', exact: true }).click();
+    await question.getByRole('button', { name: en.common.cancel, exact: true }).click();
     expect(writes).toBe(0);
     await trigger.click();
-    await question.getByRole('button', { name: 'Yes', exact: true }).click();
+    await question.getByRole('button', { name: ask.yes, exact: true }).click();
     await expect.poll(() => writes).toBe(1);
     expect(errors).toEqual([]);
   });

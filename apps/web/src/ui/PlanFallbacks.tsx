@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
-import { useLanguage, useT } from '../i18n';
+import { Phrase, useLanguage, useT } from '../i18n';
 import type { AgentCardView, PlanFallback, SubView } from '../types';
+import { useConfirmAction } from './ConfirmAction';
 import { FallbackIcon } from './icons';
 import { servingLabel } from './StaffCard';
 
@@ -39,7 +40,7 @@ function focusAfter(root: HTMLElement, intent: Intent, add: HTMLElement | null):
 
 /* The band of a plan's fallback plans in their order, each with its model, for whoever may change the plan to order, add
    and remove; none named means any plan of the company with room. */
-export function PlanFallbacks({ sub, plans, editable, onChange }: { sub: SubView; plans: SubView[]; editable: boolean; onChange: Change }) {
+export function PlanFallbacks({ sub, plans, editable, onChange, onRemove }: { sub: SubView; plans: SubView[]; editable: boolean; onChange: Change; onRemove?: Change }) {
   const t = useT();
   const heading = useId();
   const list = sub.fallbacks ?? [];
@@ -48,8 +49,11 @@ export function PlanFallbacks({ sub, plans, editable, onChange }: { sub: SubView
   const add = useRef<HTMLButtonElement>(null);
   const intent = useRef<Intent | null>(null);
   const [said, setSaid] = useState('');
+  const confirmation = useConfirmAction();
+  const asking = Boolean(confirmation.question);
   const order = list.map(f => f.subscription).join(' ');
   useEffect(() => {
+    if (asking) return;
     const done = intent.current;
     intent.current = null;
     if (!done || !root.current) return;
@@ -59,10 +63,22 @@ export function PlanFallbacks({ sub, plans, editable, onChange }: { sub: SubView
     const plan = plans.find(p => p.id === done.plan);
     if (plan && at >= 0) setSaid(t.subs.fallbackMoved(planLabel(plan), at + 1));
     /* The list's order is what a saved change shows; the rest is read as it stands then. */
-  }, [order]);
+  }, [order, asking]);
   const change = (next: PlanFallback[], what: Intent | null) => {
     intent.current = what;
     return onChange(next);
+  };
+  const askRemove = (fallback: PlanFallback, plan: SubView, at: number) => {
+    const next = list.filter(f => f !== fallback);
+    confirmation.ask({
+      ...t.subs.confirm.removeFallback,
+      effect: <Phrase words={t.subs.confirm.removeFallback.effect} values={[<bdi>{planLabel(plan)}</bdi>, <bdi>{planLabel(sub)}</bdi>]} />,
+      danger: true,
+      onYes: async () => {
+        await (onRemove ?? onChange)(next);
+        intent.current = { kind: 'remove', at };
+      },
+    });
   };
   return (
     <section className="plan-fallbacks" aria-labelledby={heading} ref={root}>
@@ -72,7 +88,7 @@ export function PlanFallbacks({ sub, plans, editable, onChange }: { sub: SubView
           <p className="part-note" dir="auto">{t.subs.fallbacksHint}</p>
           <ol className="fallback-list">
             {named.map(({ fallback, plan }, i) => (
-              <FallbackItem key={plan.id} fallback={fallback} plan={plan} list={list} place={i + 1} first={i === 0} last={i === named.length - 1} editable={editable} onChange={change} />
+              <FallbackItem key={plan.id} fallback={fallback} plan={plan} list={list} place={i + 1} first={i === 0} last={i === named.length - 1} editable={editable} onChange={change} onRemove={askRemove} />
             ))}
           </ol>
         </>
@@ -81,11 +97,22 @@ export function PlanFallbacks({ sub, plans, editable, onChange }: { sub: SubView
       )}
       {editable && <AddFallback sub={sub} plans={plans} list={list} onChange={change} button={add} />}
       <p className="sr" role="status">{said}</p>
+      {confirmation.question}
     </section>
   );
 }
 
-type Item = { fallback: PlanFallback; plan: SubView; list: PlanFallback[]; place: number; first: boolean; last: boolean; editable: boolean; onChange: (next: PlanFallback[], what: Intent | null) => unknown };
+type Item = {
+  fallback: PlanFallback;
+  plan: SubView;
+  list: PlanFallback[];
+  place: number;
+  first: boolean;
+  last: boolean;
+  editable: boolean;
+  onChange: (next: PlanFallback[], what: Intent | null) => unknown;
+  onRemove: (fallback: PlanFallback, plan: SubView, at: number) => void;
+};
 
 function FallbackItem(item: Item) {
   return (
@@ -98,7 +125,7 @@ function FallbackItem(item: Item) {
 }
 
 /* Its model, and moving it up, down or away. */
-function FallbackControls({ fallback, plan, list, first, last, onChange }: Item) {
+function FallbackControls({ fallback, plan, list, first, last, onChange, onRemove }: Item) {
   const t = useT();
   const name = planLabel(plan);
   const at = list.indexOf(fallback);
@@ -112,7 +139,7 @@ function FallbackControls({ fallback, plan, list, first, last, onChange }: Item)
       <div className="fallback-moves entry-actions">
         <button className="act" type="button" data-move="up" aria-label={up} title={up} disabled={first} onClick={() => onChange(moved(list, at, at - 1), { kind: 'move', plan: plan.id, move: 'up' })}><FallbackIcon name="up" /></button>
         <button className="act" type="button" data-move="down" aria-label={down} title={down} disabled={last} onClick={() => onChange(moved(list, at, at + 1), { kind: 'move', plan: plan.id, move: 'down' })}><FallbackIcon name="down" /></button>
-        <button className="act danger" type="button" aria-label={away} title={away} onClick={() => onChange(list.filter(f => f !== fallback), { kind: 'remove', at })}><FallbackIcon name="remove" /></button>
+        <button className="act danger" type="button" aria-label={away} title={away} onClick={() => onRemove(fallback, plan, at)}><FallbackIcon name="remove" /></button>
       </div>
     </div>
   );

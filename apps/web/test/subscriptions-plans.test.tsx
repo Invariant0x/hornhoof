@@ -291,6 +291,15 @@ describe('signing in to plans', () => {
     expect(screen.getByRole('link', { name: /Kimi/ })).toHaveAttribute('href', 'https://www.kimi.com/code/console');
     await userEvent.type(screen.getByLabelText('Kimi key'), KEY);
     await userEvent.click(screen.getByRole('button', { name: 'Connect key' }));
+    const dialog = screen.getByRole('alertdialog', { name: "Do you really want to replace this plan's key?" });
+    expect(dialog).toHaveAccessibleDescription('The saved key for Kimi will be replaced on its machines.');
+    expect(within(dialog).getByText('Kimi').tagName).toBe('BDI');
+    expect(dialog.textContent).not.toContain(KEY);
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.some(c => c.path === '/api/subscriptions/s-kimi/recipients' || c.path === '/api/subscriptions/s-kimi/credential')).toBe(false);
+    await userEvent.click(screen.getByRole('button', { name: 'Connect key' }));
+    await userEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Replace key' }));
     await waitFor(() => expect(calls.find(c => c.path === '/api/subscriptions/s-kimi/credential')).toBeTruthy());
     const sent = calls.find(c => c.path === '/api/subscriptions/s-kimi/credential')!.body as { kind: string; version: number; envelopes: { nodeId: string; sealed: string }[] };
     expect(sent.kind).toBe('kimi_key');
@@ -506,9 +515,12 @@ describe('the card of a plan that does not work', () => {
     /* Remove ends the foot of the card, across it under its blocks (#1444). */
     const side = screen.getByRole('article', { name: 'Anthropic key ending 9f3a, Ivan' }).querySelector<HTMLElement>('.plan-card-actions')!;
     await userEvent.click(within(side).getByRole('button', { name: 'Remove Anthropic key ending 9f3a' }));
-    expect(within(side).getByText('Remove Anthropic key ending 9f3a? The key is deleted from Hornhoof.')).toBeInTheDocument();
-    await userEvent.click(within(side).getByRole('button', { name: 'Yes, remove' }));
-    expect(calls.find(c => c.method === 'DELETE')).toEqual({ method: 'DELETE', path: '/api/subscriptions/s-key', body: undefined });
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to remove this API key?' });
+    expect(dialog).toHaveAccessibleDescription('Anthropic key ending 9f3a will be removed. The key will be deleted from Hornhoof.');
+    expect(dialog).toHaveTextContent('This cannot be undone.');
+    expect(within(dialog).getByText('Anthropic key ending 9f3a').tagName).toBe('BDI');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(calls.find(c => c.method === 'DELETE')).toEqual({ method: 'DELETE', path: '/api/subscriptions/s-key', body: undefined }));
   });
 });
 
@@ -553,10 +565,30 @@ describe('the forms that connect plans and keys', () => {
     const connect = screen.getByRole('button', { name: 'Connect key' });
     expect(groupOf(connect)).toEqual([connect, screen.getByRole('button', { name: 'Cancel' })]);
     await user.click(connect);
+    const dialog = screen.getByRole('alertdialog', { name: "Do you really want to replace this plan's key?" });
+    const replace = within(dialog).getByRole('button', { name: 'Replace key' });
+    await user.click(replace);
+    expect(replace).toHaveAccessibleName('Replacing…');
+    expect(replace).toHaveAttribute('aria-busy', 'true');
     expect(connect).toHaveAccessibleName('Connecting…');
     expect(connect).toHaveAttribute('aria-busy', 'true');
     await act(async () => { finish([200, { version: 1, recipients: [] }]); });
     expect(await waitFor(() => screen.getByRole('alert'))).toHaveTextContent('No machine of this plan can take the key yet.');
     expect(connect).toHaveAccessibleName('Connect key');
+  });
+
+  it('keeps a key replacement server error inside the confirmation dialog', async () => {
+    const kimi = { ...SUBS[2]!, status: 'needs_login' as const, online: true, machines: [{ ...MACHINE, status: 'needs_login' as const }] };
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }], 'GET /api/subscriptions': [200, { subscriptions: [kimi] }], 'GET /api/subscriptions/s-kimi/recipients': [500, { error: { code: 'internal', message: 'Recipients failed.' } }] });
+    const user = userEvent.setup();
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    await user.click(await waitFor(() => screen.getByRole('button', { name: 'Paste the key for Kimi' })));
+    await user.type(screen.getByLabelText('Kimi key'), 'sk-kimi-secret-999');
+    await user.click(screen.getByRole('button', { name: 'Connect key' }));
+    const dialog = screen.getByRole('alertdialog', { name: "Do you really want to replace this plan's key?" });
+    await user.click(within(dialog).getByRole('button', { name: 'Replace key' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Recipients failed.');
+    expect(dialog.textContent).not.toContain('sk-kimi-secret-999');
   });
 });

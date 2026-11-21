@@ -619,10 +619,28 @@ describe('Subscriptions', () => {
     render(<Subscriptions me={ME} />);
     await openAll();
     await user.click(await waitFor(() => screen.getByRole('button', { name: 'Remove Kimi' })));
-    expect(screen.getByText('Remove Kimi? Its login will be deleted from the machine.')).toBeInTheDocument();
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to remove this subscription?' });
+    expect(dialog).toHaveAccessibleDescription('Kimi will be removed. Its login will be deleted from the machine.');
+    expect(dialog).toHaveTextContent('This cannot be undone.');
+    expect(within(dialog).getByText('Kimi').tagName).toBe('BDI');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(calls.some(c => c.method === 'DELETE')).toBe(false);
-    await user.click(screen.getByRole('button', { name: 'Yes, remove' }));
-    expect(calls.find(c => c.method === 'DELETE')).toEqual({ method: 'DELETE', path: '/api/subscriptions/s-kimi', body: undefined });
+    await user.click(screen.getByRole('button', { name: 'Remove Kimi' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(calls.find(c => c.method === 'DELETE')).toEqual({ method: 'DELETE', path: '/api/subscriptions/s-kimi', body: undefined }));
+  });
+
+  it('keeps a removal error inside the confirmation dialog', async () => {
+    lists({ 'DELETE /api/subscriptions/s-kimi': [500, { error: { code: 'internal', message: 'Cannot delete right now.' } }] });
+    const user = userEvent.setup();
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    await user.click(await waitFor(() => screen.getByRole('button', { name: 'Remove Kimi' })));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to remove this subscription?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Cannot delete right now.');
+    expect(within(dialog).getByRole('button', { name: 'Remove' })).toBeEnabled();
   });
 
   it('moves the orchestrator to a company subscription and shows the badge', async () => {
@@ -631,7 +649,15 @@ describe('Subscriptions', () => {
     render(<Subscriptions me={ME} />);
     await openAll();
     await user.click(await waitFor(() => screen.getByRole('button', { name: 'Use Claude for the orchestrator' })));
-    expect(calls.find(c => c.method === 'POST')!.path).toBe('/api/subscriptions/s-claude/orchestrator');
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to move the orchestrator to this plan?' });
+    expect(dialog).toHaveAccessibleDescription('The orchestrator will run on Claude.');
+    expect(within(dialog).getByText('Claude').tagName).toBe('BDI');
+    expect(within(dialog).getByRole('button', { name: 'Move' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.some(c => c.method === 'POST')).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'Use Claude for the orchestrator' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(calls.find(c => c.method === 'POST')!.path).toBe('/api/subscriptions/s-claude/orchestrator'));
     expect(await waitFor(() => within(rowOf('Claude')).getByText('Orchestrator'))).toBeInTheDocument();
     expect(within(rowOf('Anthropic key ending 9f3a')).queryByText('Orchestrator')).not.toBeInTheDocument();
   });
@@ -678,6 +704,14 @@ describe('Subscriptions', () => {
     await user.click(within(card).getByRole('button', { name: 'Move Codex, Ivan lower' }));
     await user.selectOptions(within(card).getByRole('combobox', { name: 'Model on Orchestrator (Anthropic)' }), 'claude-sonnet-5-5');
     await user.click(within(card).getByRole('button', { name: 'Remove Codex, Ivan from the fallback plans' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to remove this fallback plan?' });
+    expect(dialog).toHaveAccessibleDescription('Codex, Ivan will no longer be a fallback plan for Claude, Ivan.');
+    expect(within(dialog).getByText('Codex, Ivan').tagName).toBe('BDI');
+    expect(within(dialog).getByText('Claude, Ivan').tagName).toBe('BDI');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(2);
+    await user.click(within(card).getByRole('button', { name: 'Remove Codex, Ivan from the fallback plans' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(calls.filter(c => c.method === 'PATCH').map(c => c.body)).toEqual([
       { fallbacks: [named[1], named[0]] },
       { fallbacks: [named[0], { subscription: 's-key', model: 'claude-sonnet-5-5' }] },

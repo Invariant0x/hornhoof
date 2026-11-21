@@ -99,8 +99,47 @@ describe('the Passwords group of the settings', () => {
     await user.type(screen.getByLabelText('Login'), 'new@acme.test');
     await user.click(screen.getByLabelText('Remove the one-time code key'));
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to update this sign-in?' });
+    expect(dialog).toHaveAccessibleDescription('The saved sign-in Partner site will be updated.');
+    expect(within(dialog).getByText('Partner site').tagName).toBe('BDI');
+    expect(dialog).toHaveTextContent('The saved one-time code key will be removed.');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.some(c => c.method === 'PATCH')).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toBeDefined());
     expect(calls.find(c => c.method === 'PATCH')!.body).toEqual({ name: 'Partner site', site: 'https://partner.example/login', login: 'new@acme.test', removeCode: true });
+  });
+
+  it('never shows password or 2FA code in the confirmation dialog, uses ordinary focus for metadata edits, and shows vault_name_taken inside the dialog', async () => {
+    const calls = mockApi({
+      'GET /api/vault': [200, { entries: [ENTRY] }],
+      'PATCH /api/vault/v1': [409, { error: { code: 'conflict', message: 'The vault already has an entry of this name.', reason: 'vault_name_taken' } }],
+    });
+    const user = userEvent.setup();
+    open();
+    await user.click(await screen.findByRole('button', { name: 'Change' }));
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'CRM');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const ordinary = screen.getByRole('alertdialog', { name: 'Do you really want to update this sign-in?' });
+    expect(within(ordinary).getByRole('button', { name: 'Save' })).toHaveFocus();
+    await user.click(within(ordinary).getByRole('button', { name: 'Save' }));
+    expect(await within(ordinary).findByRole('alert')).toHaveTextContent('A sign-in with this name is already saved.');
+    await user.click(within(ordinary).getByRole('button', { name: 'Cancel' }));
+
+    await user.type(screen.getByLabelText('Password'), 'super-secret-pw-999');
+    await user.type(screen.getByLabelText('One-time code key (optional)'), 'JBSWY3DPEHPK3PXP');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const danger = screen.getByRole('alertdialog', { name: 'Do you really want to update this sign-in?' });
+    expect(within(danger).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(danger.textContent).not.toContain('super-secret-pw-999');
+    expect(danger.textContent).not.toContain('JBSWY3DPEHPK3PXP');
+    expect(danger).toHaveTextContent('The saved password will be replaced.');
+    expect(danger).toHaveTextContent('The saved one-time code key will be replaced.');
+    await user.click(within(danger).getByRole('button', { name: 'Cancel' }));
+    expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(1);
   });
 
   it('says a taken name at the name field', async () => {
@@ -123,8 +162,15 @@ describe('the Passwords group of the settings', () => {
     const user = userEvent.setup();
     open();
     await user.click(await screen.findByRole('button', { name: 'Remove' }));
-    expect(screen.getByText('Remove Partner site? Employees can no longer sign in with it.')).toBeInTheDocument();
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to remove this sign-in?' });
+    expect(dialog).toHaveAccessibleDescription('Partner site will be removed. Employees can no longer sign in with it.');
+    expect(dialog).toHaveTextContent('This cannot be undone.');
+    expect(within(dialog).getByText('Partner site').tagName).toBe('BDI');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.some(c => c.method === 'DELETE')).toBe(false);
     await user.click(screen.getByRole('button', { name: 'Remove' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/vault/v1')).toBe(true));
   });
 

@@ -4,11 +4,11 @@ import { api, ApiFailure } from '../api';
 import { useStream } from '../live';
 import { doneOf, useHeldRows, useLoad } from '../ui/Loading';
 import { PlanConnection, ReadySaid } from '../ui/PlanConnection';
-import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
+import { errorText, Phrase, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
 import type { JobView, Me, PlanFallback, ShownCommand, SubView } from '../types';
 import { PlanFallbacks } from '../ui/PlanFallbacks';
-import { Ask } from '../ui/Ask';
+import { useConfirmAction } from '../ui/ConfirmAction';
 import { CommandBox, type ActiveCommand } from '../ui/CommandBox';
 import { usePlanCommands } from './use-plan-commands';
 import { commandForPlan, SubscriptionCommandBlocks, SubscriptionInstall } from './SubscriptionCommands';
@@ -247,12 +247,12 @@ function TestResult({ test }: { test: Test }) {
 type PlanControls = {
   command: ShownCommand | null | undefined;
   test: Test | undefined;
-  asking: boolean;
   signing: Signing | null;
   note: SignNote | null;
   keying: boolean;
   setBudget: (sub: SubView, budget: number | null) => unknown;
   setFallbacks: (sub: SubView, fallbacks: PlanFallback[]) => unknown;
+  removeFallback: (sub: SubView, fallbacks: PlanFallback[]) => Promise<void>;
   /* Every plan of the company this person sees, which a plan's fallbacks are named from. */
   plans: SubView[];
   runTest: (sub: SubView) => unknown;
@@ -265,8 +265,7 @@ type PlanControls = {
   /* Where an API connection may go: anywhere (null), or only the departments this person runs. */
   places: string[] | null;
   newCommand: (sub: SubView) => unknown;
-  setConfirm: (id: string | null) => void;
-  remove: (sub: SubView) => unknown;
+  askRemove: (sub: SubView) => void;
   endSignIn: (signing: Signing, error: string | null) => void;
   stopSignIn: (signing: Signing) => unknown;
   /* A plan's connection after its sign-in code that failed or takes too long: try it again, or stop it. */
@@ -344,7 +343,7 @@ const removable = (s: SubView, me: Me) => s.owner.id === me.person.id || me.pers
 
 function RemoveButtons({ sub: s, me, controls: c }: PlanProps) {
   const t = useT();
-  return removable(s, me) ? <button className="act danger" type="button" aria-label={t.subs.removeLabel(subName(t, s))} onClick={() => c.setConfirm(s.id)}>{t.subs.remove}</button> : null;
+  return removable(s, me) ? <button className="act danger" type="button" aria-label={t.subs.removeLabel(subName(t, s))} onClick={() => c.askRemove(s)}>{t.subs.remove}</button> : null;
 }
 
 /* Whether a foot's buttons stand in one row with each label on one line, measured as the foot is laid out: each button
@@ -370,35 +369,26 @@ function useOneRow(foot: RefObject<HTMLDivElement | null>, actions: string): boo
 }
 
 /* The foot of a working plan's card: what its test says, then its actions on one end edge. The first of them is the one
-   filled button, Run a test when the plan can run one; Remove ends the foot, apart from the rest. While Remove asks, its
-   question stands in the foot's place, and Cancel gives the focus back to Remove. When they do not fit in one row with each
-   label whole, they stand in two matched columns, Remove in the end one. */
+   filled button, Run a test when the plan can run one; Remove ends the foot, apart from the rest. When they do not fit in
+   one row with each label whole, they stand in two matched columns, Remove in the end one. */
 function PlanFoot(props: PlanProps) {
   const t = useT();
   const { sub: s, me, controls: c } = props;
   const actions = [...testActions(t, props), editAction(t, props), signInAction(t, props), keyAction(t, props)].filter((a): a is Action => a !== null);
   const remove = removable(s, me);
-  const removeButton = useRef<HTMLButtonElement>(null);
-  const question = useRef<HTMLDivElement>(null);
   const row = useRef<HTMLDivElement>(null);
-  const oneRow = useOneRow(row, `${actions.map(a => a.text).join(' ')} ${remove} ${c.asking}`);
+  const oneRow = useOneRow(row, `${actions.map(a => a.text).join(' ')} ${remove}`);
   /* In two columns Remove ends the second; it has a button beside it when an odd number of actions comes before it. */
   const apart = actions.length > 0 && (oneRow || actions.length % 2 === 1);
-  const asked = useRef(false);
-  useEffect(() => {
-    if (c.asking) question.current?.querySelector<HTMLButtonElement>('button.ghost')?.focus();
-    else if (asked.current) removeButton.current?.focus();
-    asked.current = c.asking;
-  }, [c.asking]);
   if (!actions.length && !remove && !c.test && !c.note) return null;
   return (
     <div className="plan-card-actions">
       {c.test && <TestResult test={c.test} />}
       <SignInNote note={c.note} />
-      {c.asking ? <div className="plan-ask" ref={question}><RemoveAsk sub={s} controls={c} /></div> : (actions.length > 0 || remove) && (
+      {(actions.length > 0 || remove) && (
         <div className={oneRow ? 'form-foot' : 'form-foot two-columns'} ref={row}>
           {actions.map((a, i) => <ActionButton key={a.key} action={a} className={i === 0 ? 'btn' : 'btn ghost'} />)}
-          {remove && <button ref={removeButton} className={apart ? 'btn ghost danger plan-remove apart' : 'btn ghost danger plan-remove'} type="button" aria-label={t.subs.removeLabel(subName(t, s))} onClick={() => c.setConfirm(s.id)}>{t.subs.remove}</button>}
+          {remove && <button className={apart ? 'btn ghost danger plan-remove apart' : 'btn ghost danger plan-remove'} type="button" aria-label={t.subs.removeLabel(subName(t, s))} onClick={() => c.askRemove(s)}>{t.subs.remove}</button>}
         </div>
       )}
     </div>
@@ -457,13 +447,6 @@ function SignInNote({ note }: { note: SignNote | null }) {
   </>;
 }
 
-/* Remove asks first. */
-function RemoveAsk({ sub: s, controls: c }: Omit<PlanProps, 'me'>) {
-  const t = useT();
-  const name = subName(t, s);
-  return c.asking ? <Ask text={s.kind === 'api_key' ? t.subs.removeKeyAsk(name) : t.subs.removeAsk(name)} yes={t.subs.yesRemove} onYes={() => c.remove(s)} onNo={() => c.setConfirm(null)} /> : null;
-}
-
 /* A plan works once it is ready. Until then, or while its sign-in has found nodes too old for it, all there is to show is
    what is wrong and what to do: its card is one block. */
 const needsFix = (s: SubView, note: SignNote | null): boolean => s.status !== 'ready' || Boolean(note?.command);
@@ -481,7 +464,6 @@ function PlanFix(props: PlanProps) {
       <SubscriptionInstall sub={s} ownerId={me.person.id} command={c.command} onNew={() => c.newCommand(s)} />
       <SignInNote note={c.note} />
       <div className="machine-actions">{[signInAction(t, props), keyAction(t, props)].map(a => a && <ActionButton key={a.key} action={a} className="act" />)}<RemoveButtons {...props} /></div>
-      <RemoveAsk sub={s} controls={c} />
     </section>
   );
 }
@@ -502,7 +484,7 @@ function PlanWorking({ sub: s, me, controls, now }: PlanProps & { now: number })
       <PlanMachines sub={s} now={now} />
     </section>
     {s.kind === 'personal' && <PlanSettings sub={s} me={me} controls={controls} />}
-    <PlanFallbacks sub={s} plans={controls.plans} editable={s.owner.id === me.person.id || me.person.scopeKind === 'company' || changesApi(s, me)} onChange={list => controls.setFallbacks(s, list)} />
+    <PlanFallbacks sub={s} plans={controls.plans} editable={s.owner.id === me.person.id || me.person.scopeKind === 'company' || changesApi(s, me)} onChange={list => controls.setFallbacks(s, list)} onRemove={list => controls.removeFallback(s, list)} />
     <PlanFoot sub={s} me={me} controls={controls} />
   </>;
 }
@@ -561,9 +543,9 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   const { language } = useLanguage();
   const now = useNow();
   const [connecting, setConnecting] = useState(false);
-  const [confirm, setConfirm] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, Test>>({});
   const [failure, setFailure] = useState<unknown>(null);
+  const confirmation = useConfirmAction();
   const [signing, setSigning] = useState<Signing | null>(null);
   /* Why the last sign-in of a plan did not finish. */
   const [signNote, setSignNote] = useState<SignNote | null>(null);
@@ -634,11 +616,19 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
     }
   }
 
-  const makeOrchestrator = (sub: SubView) =>
-    run(async () => {
-      const { subscription } = await api.post<{ subscription: SubView }>(`/api/subscriptions/${sub.id}/orchestrator`);
-      setSubs(list => replaceSubscription(list, subscription, 'orchestrator'));
+  const sendOrchestrator = async (sub: SubView) => {
+    const { subscription } = await api.post<{ subscription: SubView }>(`/api/subscriptions/${sub.id}/orchestrator`);
+    setSubs(list => replaceSubscription(list, subscription, 'orchestrator'));
+  };
+
+  const makeOrchestrator = (sub: SubView) => {
+    setFailure(null);
+    confirmation.ask({
+      ...t.subs.confirm.orchestrator,
+      effect: <Phrase words={t.subs.confirm.orchestrator.effect} values={[<bdi>{subName(t, sub)}</bdi>]} />,
+      onYes: () => sendOrchestrator(sub),
     });
+  };
 
   const setBudget = (sub: SubView, budget: number | null) =>
     run(async () => {
@@ -646,11 +636,17 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
       setSubs(list => replaceSubscription(list, subscription, 'update'));
     });
 
-  const setFallbacks = (sub: SubView, fallbacks: PlanFallback[]) =>
-    run(async () => {
-      const { subscription } = await api.patch<{ subscription: SubView }>(`/api/subscriptions/${sub.id}`, { fallbacks });
-      setSubs(list => replaceSubscription(list, subscription, 'update'));
-    });
+  const saveFallbacks = async (sub: SubView, fallbacks: PlanFallback[]) => {
+    const { subscription } = await api.patch<{ subscription: SubView }>(`/api/subscriptions/${sub.id}`, { fallbacks });
+    setSubs(list => replaceSubscription(list, subscription, 'update'));
+  };
+
+  const setFallbacks = (sub: SubView, fallbacks: PlanFallback[]) => run(() => saveFallbacks(sub, fallbacks));
+
+  const removeFallback = (sub: SubView, fallbacks: PlanFallback[]) => {
+    setFailure(null);
+    return saveFallbacks(sub, fallbacks);
+  };
 
   const signIn = (sub: SubView, fresh: boolean) => startSignIn(t, sub, fresh, setSigning, setSignNote);
 
@@ -668,12 +664,22 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
 
   const { retryConnection, cancelConnection } = usePlanConnections({ setSubs, load, run, signIn });
 
-  const remove = (sub: SubView) =>
-    run(async () => {
-      setConfirm(null);
-      await api.del(`/api/subscriptions/${sub.id}`);
-      await load();
+  const sendRemove = async (sub: SubView) => {
+    await api.del(`/api/subscriptions/${sub.id}`);
+    await load();
+  };
+
+  const askRemove = (sub: SubView) => {
+    const words = sub.kind === 'api_key' ? t.subs.confirm.removeKey : t.subs.confirm.removePlan;
+    setFailure(null);
+    confirmation.ask({
+      ...words,
+      effect: <Phrase words={words.effect} values={[<bdi>{subName(t, sub)}</bdi>]} />,
+      final: true,
+      danger: true,
+      onYes: () => sendRemove(sub),
     });
+  };
 
   if (unavailableFailure(readFailure)) return <RouteUnavailable onHome={onHome} />;
 
@@ -719,17 +725,18 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
           filters={subscriptionFilters(t, now, plans)}
           card={s => <SubscriptionDetails sub={s} me={me} now={now} controls={{
             command: commands ? commandForPlan(commands, s, now) : undefined,
-            test: tests[s.id], asking: confirm === s.id,
+            test: tests[s.id],
             signing: signing?.subId === s.id ? signing : null,
             note: signNote?.subId === s.id ? signNote : null,
             keying: keyFor === s.id,
             editing: editFor === s.id, setEditFor,
             saved: subscription => { setEditFor(null); setSubs(list => replaceSubscription(list, subscription, 'update')); }, places,
-            setBudget, setFallbacks, plans, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, setConfirm, remove, endSignIn, stopSignIn, retryConnection, cancelConnection,
+            setBudget, setFallbacks, removeFallback, plans, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, askRemove, endSignIn, stopSignIn, retryConnection, cancelConnection,
             done: () => { setKeyFor(null); void load(); },
           }} />}
         />
       )}
+      {confirmation.question}
     </section>
   );
 }

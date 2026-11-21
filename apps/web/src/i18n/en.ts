@@ -46,6 +46,14 @@ export const en = {
     live: 'Live screen', waitingFrame: 'Waiting for a screen. An assistant session starts the recording.', paused: 'The screen is paused. The phone is in your hands.', noPicture: 'This screen could not be read.', updated: (at: string) => `Screen from ${at}`, screenFor: (name: string) => `Screen of ${name}`, screenError: 'The screen did not load. Try again.',
     recordings: 'Phone recordings', noRecordings: 'No phone sessions on this task yet.', play: 'Play', pause: 'Pause', previous: 'Previous frame', next: 'Next frame', replay: 'Open recording', closeReplay: 'Close recording', frameOf: (n: number, total: number) => `Frame ${n} of ${total}`,
     recordingStates: { queued: 'Waiting', starting: 'Starting', active: 'Recording', revoking: 'Stopping', ended: 'Finished', cancelled: 'Cancelled' },
+    confirm: {
+      stop: {
+        title: 'Do you really want to stop lending this phone?',
+        effect: (name: string) => `${name} will stop taking work from assistants and return to your hands.`,
+        yes: 'Stop lending',
+        working: 'Stopping…',
+      },
+    },
   },
   routes: {
     unavailable: 'Not found or no access',
@@ -341,6 +349,20 @@ export const en = {
     key: 'Key',
     keyHint: "A GitHub token that may create repositories for this owner and push to them: on a fine-grained token, Administration and Contents set to Read and write for all its repositories; on a classic one, repo. With each repository it creates, it goes to the machines of that department's agents.",
     keyKeep: 'Leave it empty to keep the saved key.',
+    confirm: {
+      remove: {
+        title: 'Do you really want to remove this GitHub key?',
+        effect: (owner: string) => `Hornhoof will stop creating repositories for ${owner} with this key. The repositories it created keep working.`,
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+      replace: {
+        title: 'Do you really want to replace this GitHub key?',
+        effect: (owner: string) => `The saved GitHub key settings for ${owner} will be replaced.`,
+        yes: 'Replace',
+        working: 'Replacing…',
+      },
+    },
   },
   /* The Integrations group: one card for each outside tool, with its name, what it gives, whether it is connected and what to do. */
   integrations: {
@@ -392,6 +414,26 @@ export const en = {
     removeAsk: (name: string) => `Remove ${name}? Employees can no longer sign in with it.`,
     yesRemove: 'Remove',
     keep: 'Keep',
+    confirm: {
+      remove: {
+        title: 'Do you really want to remove this sign-in?',
+        effect: (name: string) => `${name} will be removed. Employees can no longer sign in with it.`,
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+      edit: {
+        title: 'Do you really want to update this sign-in?',
+        effect: (name: string) => `The saved sign-in ${name} will be updated.`,
+        password: 'The saved password will be replaced.',
+        code: 'The saved one-time code key will be replaced.',
+        removeCode: 'The saved one-time code key will be removed.',
+        rename: (to: string) => `It will be renamed to ${to}.`,
+        site: (site: string) => `Its site will change to ${site}.`,
+        login: (login: string) => `Its login will change to ${login}.`,
+        yes: 'Save',
+        working: 'Saving…',
+      },
+    },
   },
   googleSheets: {
     title: 'Google Sheets',
@@ -410,6 +452,14 @@ export const en = {
     keyKeep: 'Leave it empty to keep the saved key.',
     shareLabel: 'Share new spreadsheets with',
     shareHint: 'The Google account that gets editor access to each new spreadsheet. A service account key needs it, as it opens its spreadsheets to no one else; with an OAuth key it is optional.',
+    confirm: {
+      disconnect: {
+        title: 'Do you really want to disconnect Google Sheets?',
+        effect: (account: string) => `Google Sheets for ${account} will be disconnected. Employees will stop creating new Google Sheets links and will attach .xlsx files instead.`,
+        yes: 'Disconnect',
+        working: 'Disconnecting…',
+      },
+    },
   },
   invite: {
     heading: 'Invite link',
@@ -803,6 +853,45 @@ export const en = {
     removeAsk: (name: string) => `Remove ${name}? Its login will be deleted from the machine.`,
     removeKeyAsk: (name: string) => `Remove ${name}? The key is deleted from Hornhoof.`,
     yesRemove: 'Yes, remove',
+    confirm: {
+      removePlan: {
+        title: 'Do you really want to remove this subscription?',
+        effect: (name: string) => `${name} will be removed. Its login will be deleted from the machine.`,
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+      removeKey: {
+        title: 'Do you really want to remove this API key?',
+        effect: (name: string) => `${name} will be removed. The key will be deleted from Hornhoof.`,
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+      orchestrator: {
+        title: 'Do you really want to move the orchestrator to this plan?',
+        effect: (name: string) => `The orchestrator will run on ${name}.`,
+        yes: 'Move',
+        working: 'Moving…',
+      },
+      replaceKey: {
+        title: "Do you really want to replace this plan's key?",
+        effect: (name: string) => `The saved key for ${name} will be replaced on its machines.`,
+        yes: 'Replace key',
+        working: 'Replacing…',
+      },
+      editApi: {
+        title: 'Do you really want to update this API connection?',
+        rename: (name: string, to: string) => `${name} will be renamed to ${to}.`,
+        target: (name: string, place: string) => `${name} will serve ${place}.`,
+        yes: 'Save changes',
+        working: 'Saving…',
+      },
+      removeFallback: {
+        title: 'Do you really want to remove this fallback plan?',
+        effect: (fallback: string, main: string) => `${fallback} will no longer be a fallback plan for ${main}.`,
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+    },
     empty: 'No subscriptions yet. Connect yours so the agents can work.',
     signedInOnce: (owner: string, n: number) => `Signed in once, runs on any of ${owner}'s machines (${n} online)`,
     signedInOn: (machines: string) => `Signed in on ${machines} only`,
@@ -1696,6 +1785,24 @@ export const en = {
     remove: 'Remove',
     removeAsk: 'Remove the repository? Agents keep their clones and the token is deleted.',
     yesRemove: 'Yes, remove',
+    repoConfirm: {
+      remove: {
+        title: 'Do you really want to remove this repository?',
+        effect: (url: string) => `${url} will be removed. Agents keep their clones and the token is deleted.`,
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+      update: {
+        title: 'Do you really want to update this repository?',
+        url: (from: string, to: string) => `The repository ${from} will change to ${to}.`,
+        branch: (url: string, branch: string) => `The branch of ${url} will change to ${branch}.`,
+        branchNote: (branch: string) => `Default branch will change to ${branch}.`,
+        token: (url: string) => `The saved access token for ${url} will be replaced.`,
+        tokenNote: 'The saved access token will be replaced.',
+        yes: 'Save',
+        working: 'Saving…',
+      },
+    },
     schema: 'Department schema',
     status: { working: 'working', queued: 'queued', handed: 'handed on', waiting: 'needs a decision', idle: 'free', off: 'No subscription yet' },
     statusSummary: (counts: StatusCounts) => summary(counts, { working: 'working', queued: 'queued', handed: 'handed on', waiting: 'needs a decision', idle: 'free', off: 'no subscription' }),

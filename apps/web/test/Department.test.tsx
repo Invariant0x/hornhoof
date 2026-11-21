@@ -977,10 +977,11 @@ describe('Department view', () => {
     await user.clear(branch);
     await user.type(branch, 'develop');
     await user.click(within(repo).getByRole('button', { name: 'Save' }));
+    await user.click(within(screen.getByRole('alertdialog', { name: 'Do you really want to update this repository?' })).getByRole('button', { name: 'Save' }));
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ url: 'https://github.com/acme/app.git', branch: 'develop' }));
     expect(within(repo).queryByLabelText('Branch')).not.toBeInTheDocument();
     await user.click(within(repo).getByRole('button', { name: 'Remove' }));
-    await user.click(within(repo).getByRole('button', { name: 'Yes, remove' }));
+    await user.click(within(screen.getByRole('alertdialog', { name: 'Do you really want to remove this repository?' })).getByRole('button', { name: 'Remove' }));
     await vi.waitFor(() => expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/departments/d2/repository')).toBe(true));
   });
 

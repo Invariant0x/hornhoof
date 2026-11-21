@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { errorText, useT } from '../i18n';
+import { Phrase, useT } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import type { SubView } from '../types';
 import { BusyLabel } from './BusyLabel';
+import { useConfirmAction } from './ConfirmAction';
 import { Field } from './Field';
 import { SecretInput } from './SecretInput';
+import { subName } from './subscription';
 
 /* Plans that sign in with a key pasted once, and where their owner gets one. */
 const KEY_PLANS = {
@@ -24,13 +26,11 @@ export function KeyForm({ sub, onDone, onCancel }: { sub: SubView & { provider: 
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const confirmation = useConfirmAction();
   const provider = PROVIDER_NAMES[sub.provider];
   const plan = KEY_PLANS[sub.provider];
 
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    const secret = key.trim();
-    if (!secret || busy) return;
+  async function send(secret: string) {
     setBusy(true);
     setProblem(null);
     try {
@@ -42,27 +42,41 @@ export function KeyForm({ sub, onDone, onCancel }: { sub: SubView & { provider: 
       await api.post(`/api/subscriptions/${sub.id}/credential`, { kind: plan.kind, version: version + 1, envelopes });
       setKey('');
       onDone();
-    } catch (err) {
-      setProblem(errorText(t, err));
     } finally {
       setBusy(false);
     }
   }
 
+  function save(e: FormEvent) {
+    e.preventDefault();
+    const secret = key.trim();
+    if (!secret || busy) return;
+    setProblem(null);
+    confirmation.ask({
+      ...t.subs.confirm.replaceKey,
+      effect: <Phrase words={t.subs.confirm.replaceKey.effect} values={[<bdi>{subName(t, sub)}</bdi>]} />,
+      danger: true,
+      onYes: () => send(secret),
+    });
+  }
+
   /* The note says how the key is kept, with where to get one after it. */
   const hint = <>{t.subs.keyNote} <a href={plan.page} target="_blank" rel="noreferrer">{t.subs.keyPage(provider)}</a>.</>;
   return (
-    <form className="key-form form-grid" onSubmit={e => void save(e)}>
-      <Field label={t.subs.keyField(provider)} hint={hint}>
-        {p => <SecretInput {...p} className="mono" value={key} onChange={e => setKey(e.target.value)} />}
-      </Field>
-      {problem && <p className="alert" role="alert">{problem}</p>}
-      <div className="form-foot">
-        <button className="btn" type="submit" aria-busy={busy} disabled={busy || !key.trim()}>
-          <BusyLabel busy={busy} idle={t.subs.connectKey} working={t.subs.connecting} />
-        </button>
-        <button className="btn ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
-      </div>
-    </form>
+    <>
+      <form className="key-form form-grid" onSubmit={save}>
+        <Field label={t.subs.keyField(provider)} hint={hint}>
+          {p => <SecretInput {...p} className="mono" value={key} onChange={e => setKey(e.target.value)} />}
+        </Field>
+        {problem && <p className="alert" role="alert">{problem}</p>}
+        <div className="form-foot">
+          <button className="btn" type="submit" aria-busy={busy} disabled={busy || !key.trim()}>
+            <BusyLabel busy={busy} idle={t.subs.connectKey} working={t.subs.connecting} />
+          </button>
+          <button className="btn ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
+        </div>
+      </form>
+      {confirmation.question}
+    </>
   );
 }

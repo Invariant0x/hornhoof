@@ -156,11 +156,47 @@ describe('Subscriptions & API', () => {
     await user.click(within(form).getByRole('button', { name: 'Load from the API' }));
     await user.click(await within(form).findByRole('checkbox', { name: 'Qwen 3 Coder' }));
     await user.click(within(form).getByRole('button', { name: 'Save' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to update this API connection?' });
+    expect(dialog).toHaveAccessibleDescription('OpenRouter key ending WXYZ will be renamed to Router.');
+    expect(within(dialog).getByText('OpenRouter key ending WXYZ').tagName).toBe('BDI');
+    expect(within(dialog).getByText('Router').tagName).toBe('BDI');
+    expect(within(dialog).getByRole('button', { name: 'Save changes' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.some(c => c.method === 'PATCH')).toBe(false);
+    await user.click(within(form).getByRole('button', { name: 'Save' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(calls.some(c => c.method === 'PATCH')).toBe(true));
     expect(calls.find(c => c.method === 'PATCH')!.body).toEqual({
       label: 'Router', target: { kind: 'any' },
       models: [{ id: 'meta-llama/llama-4-maverick', name: 'Llama 4 Maverick' }, { id: 'qwen/qwen-3-coder', name: 'Qwen 3 Coder' }],
     });
+  });
+
+  it('confirms target change on an existing API connection and saves model-only changes directly', async () => {
+    const calls = lists({
+      'PATCH /api/subscriptions/s-router': [200, { subscription: { ...ROUTER, target: { kind: 'orchestrator', id: null } } }],
+    });
+    const user = userEvent.setup();
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    const row = await planRow('WXYZ');
+    fireEvent.click(within(row).getByRole('button', { name: /^(Open the card of |Открыть карточку )/ }));
+    const card = await screen.findByRole('article', { name: /WXYZ/ });
+    await user.click(within(card).getByRole('button', { name: /^Edit / }));
+    const form = within(card).getByRole('form', { name: /^Edit / });
+    await user.type(within(form).getByLabelText('Model id'), 'claude-sonnet');
+    await user.click(within(form).getByRole('button', { name: 'Add' }));
+    await user.click(within(form).getByRole('button', { name: 'Save' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    await waitFor(() => expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(1));
+
+    await user.click(within(card).getByRole('button', { name: /^Edit / }));
+    const again = within(card).getByRole('form', { name: /^Edit / });
+    await user.selectOptions(within(again).getByLabelText('Serves'), 'any');
+    await user.click(within(again).getByRole('button', { name: 'Save' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to update this API connection?' });
+    expect(dialog).toHaveAccessibleDescription('OpenRouter key ending WXYZ will serve Any department.');
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(2));
   });
 
   describe('for a person who runs a department', () => {

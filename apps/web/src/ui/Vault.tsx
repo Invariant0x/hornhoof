@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT } from '../i18n';
+import { errorText, Phrase, useLanguage, useT, type Messages } from '../i18n';
+import { useConfirmAction } from './ConfirmAction';
 import { Field } from './Field';
 import { NOT_A_LOGIN, SecretInput } from './SecretInput';
 import { TickBox } from './TickBox';
@@ -12,7 +13,7 @@ type Who = { id: string; name: string } | null;
 export type VaultEntry = { id: string; name: string; site: string; login: string; hasCode: boolean; createdBy: Who; createdAt: string };
 type LogLine = { id: string; kind: 'created' | 'changed' | 'removed' | 'taken'; person: Who; agent: Who; task: { id: string; number: number | null } | null; at: string };
 
-type Mode = { kind: 'list' } | { kind: 'add' } | { kind: 'edit'; entry: VaultEntry } | { kind: 'remove'; entry: VaultEntry } | { kind: 'log'; entry: VaultEntry; lines: LogLine[] | null };
+type Mode = { kind: 'list' } | { kind: 'add' } | { kind: 'edit'; entry: VaultEntry } | { kind: 'log'; entry: VaultEntry; lines: LogLine[] | null };
 type FieldName = 'name' | 'site' | 'login' | 'password' | 'code';
 type Draft = { name: string; site: string; login: string; password: string; code: string; removeCode: boolean };
 
@@ -37,6 +38,22 @@ function useWhen() {
   return (iso: string) => new Date(iso).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+function vaultEditSummary(t: Messages, entry: VaultEntry, draft: Draft): { warnings: ReactNode[]; danger: boolean } {
+  const e = t.vault.confirm.edit;
+  const name = draft.name.trim();
+  const site = draft.site.trim();
+  const login = draft.login.trim();
+  const warnings: ReactNode[] = [
+    ...(draft.password ? [e.password] : []),
+    ...(draft.code.trim() ? [e.code] : []),
+    ...(draft.removeCode ? [e.removeCode] : []),
+    ...(name !== entry.name ? [<Phrase words={e.rename} values={[<bdi>{name}</bdi>]} />] : []),
+    ...(site !== entry.site ? [<Phrase words={e.site} values={[<bdi>{site}</bdi>]} />] : []),
+    ...(login !== entry.login ? [<Phrase words={e.login} values={[<bdi>{login}</bdi>]} />] : []),
+  ];
+  return { warnings, danger: Boolean(draft.password || draft.code.trim() || draft.removeCode) };
+}
+
 /* The form of one entry: a new one, or the change of one, where an empty password or code keeps the stored one. */
 function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onSaved(): void; onCancel(): void }) {
   const t = useT();
@@ -45,6 +62,7 @@ function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onS
   const [problems, setProblems] = useState<Partial<Record<FieldName, string>>>({});
   const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const confirmation = useConfirmAction();
   const inputs = useRef<Partial<Record<FieldName, HTMLInputElement | null>>>({});
   const set = (change: Partial<Draft>) => setDraft(d => ({ ...d, ...change }));
 
@@ -64,23 +82,21 @@ function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onS
     if (first) requestAnimationFrame(() => inputs.current[first]?.focus());
   }
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    const found = check();
-    if (Object.keys(found).length) return showProblems(found);
-    setProblems({});
-    setFailure(null);
-    setBusy(true);
-    const body = {
-      name: draft.name.trim(), site: draft.site.trim(), login: draft.login.trim(),
-      ...(draft.password ? { password: draft.password } : {}),
-      ...(draft.code.trim() ? { code: draft.code.trim() } : {}),
-      ...(entry && draft.removeCode ? { removeCode: true } : {}),
-    };
+  async function send(body: Record<string, unknown>) {
     try {
       if (entry) await api.patch(`/api/vault/${entry.id}`, body);
       else await api.post('/api/vault', body);
       onSaved();
+    } catch (err) {
+      if ((err as { reason?: string }).reason === 'vault_name_taken') setProblems({ name: v.nameTaken });
+      throw err;
+    }
+  }
+
+  async function saveDirect(body: Record<string, unknown>) {
+    setBusy(true);
+    try {
+      await send(body);
     } catch (err) {
       if ((err as { reason?: string }).reason === 'vault_name_taken') showProblems({ name: v.nameTaken });
       else setFailure(err);
@@ -89,36 +105,64 @@ function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onS
     }
   }
 
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    const found = check();
+    if (Object.keys(found).length) return showProblems(found);
+    setProblems({});
+    setFailure(null);
+    const body = {
+      name: draft.name.trim(), site: draft.site.trim(), login: draft.login.trim(),
+      ...(draft.password ? { password: draft.password } : {}),
+      ...(draft.code.trim() ? { code: draft.code.trim() } : {}),
+      ...(entry && draft.removeCode ? { removeCode: true } : {}),
+    };
+    const summary = entry ? vaultEditSummary(t, entry, draft) : null;
+    if (!entry || !summary?.warnings.length) return void saveDirect(body);
+    confirmation.ask({
+      title: v.confirm.edit.title,
+      effect: <Phrase words={v.confirm.edit.effect} values={[<bdi>{entry.name}</bdi>]} />,
+      warnings: summary.warnings,
+      yes: v.confirm.edit.yes,
+      working: v.confirm.edit.working,
+      danger: summary.danger,
+      onYes: () => send(body),
+    });
+  }
+
   const ref = (name: FieldName) => (el: HTMLInputElement | null) => void (inputs.current[name] = el);
   return (
-    <form className="settings-form" onSubmit={e => void submit(e)} noValidate aria-label={entry ? v.changeTitle(entry.name) : v.addTitle}>
-      <Field label={v.name} hint={v.nameHint} problem={problems.name}>
-        {p => <input {...p} {...NOT_A_LOGIN} ref={ref('name')} value={draft.name} onChange={e => set({ name: e.target.value })} maxLength={80} autoComplete="off" />}
-      </Field>
-      <Field label={v.site} hint={v.siteHint} problem={problems.site}>
-        {p => <input {...p} {...NOT_A_LOGIN} ref={ref('site')} value={draft.site} onChange={e => set({ site: e.target.value })} maxLength={2048} autoComplete="off" inputMode="url" spellCheck={false} />}
-      </Field>
-      <Field label={v.login} problem={problems.login}>
-        {p => <input {...p} {...NOT_A_LOGIN} ref={ref('login')} value={draft.login} onChange={e => set({ login: e.target.value })} maxLength={320} autoComplete="off" spellCheck={false} />}
-      </Field>
-      <Field label={v.password} hint={entry ? v.passwordKeep : v.passwordHint} problem={problems.password}>
-        {p => <SecretInput {...p} ref={ref('password')} value={draft.password} onChange={e => set({ password: e.target.value })} maxLength={1024} />}
-      </Field>
-      <Field label={v.code} hint={entry?.hasCode ? v.codeKeep : v.codeHint} problem={problems.code}>
-        {p => <SecretInput {...p} ref={ref('code')} value={draft.code} onChange={e => set({ code: e.target.value })} maxLength={2048} />}
-      </Field>
-      {entry?.hasCode && (
-        <label className="check-card">
-          <TickBox checked={draft.removeCode} onChange={e => set({ removeCode: e.target.checked })} />
-          <span><b>{v.removeCode}</b></span>
-        </label>
-      )}
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-      <div className="settings-actions">
-        <button className="btn small" type="submit" disabled={busy}>{t.common.save}</button>
-        <button className="btn small ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
-      </div>
-    </form>
+    <>
+      <form className="settings-form" onSubmit={submit} noValidate aria-label={entry ? v.changeTitle(entry.name) : v.addTitle}>
+        <Field label={v.name} hint={v.nameHint} problem={problems.name}>
+          {p => <input {...p} {...NOT_A_LOGIN} ref={ref('name')} value={draft.name} onChange={e => set({ name: e.target.value })} maxLength={80} autoComplete="off" />}
+        </Field>
+        <Field label={v.site} hint={v.siteHint} problem={problems.site}>
+          {p => <input {...p} {...NOT_A_LOGIN} ref={ref('site')} value={draft.site} onChange={e => set({ site: e.target.value })} maxLength={2048} autoComplete="off" inputMode="url" spellCheck={false} />}
+        </Field>
+        <Field label={v.login} problem={problems.login}>
+          {p => <input {...p} {...NOT_A_LOGIN} ref={ref('login')} value={draft.login} onChange={e => set({ login: e.target.value })} maxLength={320} autoComplete="off" spellCheck={false} />}
+        </Field>
+        <Field label={v.password} hint={entry ? v.passwordKeep : v.passwordHint} problem={problems.password}>
+          {p => <SecretInput {...p} ref={ref('password')} value={draft.password} onChange={e => set({ password: e.target.value })} maxLength={1024} />}
+        </Field>
+        <Field label={v.code} hint={entry?.hasCode ? v.codeKeep : v.codeHint} problem={problems.code}>
+          {p => <SecretInput {...p} ref={ref('code')} value={draft.code} onChange={e => set({ code: e.target.value })} maxLength={2048} />}
+        </Field>
+        {entry?.hasCode && (
+          <label className="check-card">
+            <TickBox checked={draft.removeCode} onChange={e => set({ removeCode: e.target.checked })} />
+            <span><b>{v.removeCode}</b></span>
+          </label>
+        )}
+        {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+        <div className="settings-actions">
+          <button className="btn small" type="submit" disabled={busy}>{t.common.save}</button>
+          <button className="btn small ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
+        </div>
+      </form>
+      {confirmation.question}
+    </>
   );
 }
 
@@ -155,7 +199,7 @@ export function Vault() {
   const [entries, setEntries] = useState<VaultEntry[] | null>(null);
   const [mode, setMode] = useState<Mode>({ kind: 'list' });
   const [failure, setFailure] = useState<unknown>(null);
-  const [busy, setBusy] = useState(false);
+  const confirmation = useConfirmAction();
 
   const load = () =>
     api.get<{ entries: VaultEntry[] }>(VAULT_PATH).then(
@@ -167,17 +211,18 @@ export function Vault() {
     );
   useEffect(() => void load(), []);
 
-  async function remove(entry: VaultEntry) {
-    setBusy(true);
-    try {
-      await api.del(`/api/vault/${entry.id}`);
-      setMode({ kind: 'list' });
-      await load();
-    } catch (err) {
-      setFailure(err);
-    } finally {
-      setBusy(false);
-    }
+  function askRemove(entry: VaultEntry) {
+    setFailure(null);
+    confirmation.ask({
+      ...v.confirm.remove,
+      effect: <Phrase words={v.confirm.remove.effect} values={[<bdi>{entry.name}</bdi>]} />,
+      final: true,
+      danger: true,
+      onYes: async () => {
+        await api.del(`/api/vault/${entry.id}`);
+        await load();
+      },
+    });
   }
 
   function openLog(entry: VaultEntry) {
@@ -216,19 +261,11 @@ export function Vault() {
                   <span className="vault-site">{entry.site}</span>
                   <span>{v.loginIs(entry.login)}{entry.hasCode ? ` ${v.withCode}` : ''}</span>
                   <small>{entry.createdBy ? v.addedBy(entry.createdBy.name, when(entry.createdAt)) : v.added(when(entry.createdAt))}</small>
-                  {mode.kind === 'remove' && mode.entry.id === entry.id ? (
-                    <div className="settings-actions">
-                      <span className="entry-main">{v.removeAsk(entry.name)}</span>
-                      <button className="btn small" type="button" disabled={busy} onClick={() => void remove(entry)}>{v.yesRemove}</button>
-                      <button className="btn small ghost" type="button" onClick={() => setMode({ kind: 'list' })}>{v.keep}</button>
-                    </div>
-                  ) : (
-                    <div className="settings-actions">
-                      <button className="btn small ghost" type="button" onClick={() => openLog(entry)}>{v.log}</button>
-                      <button className="btn small ghost" type="button" onClick={() => setMode({ kind: 'edit', entry })}>{v.change}</button>
-                      <button className="btn small ghost danger" type="button" onClick={() => setMode({ kind: 'remove', entry })}>{v.remove}</button>
-                    </div>
-                  )}
+                  <div className="settings-actions">
+                    <button className="btn small ghost" type="button" onClick={() => openLog(entry)}>{v.log}</button>
+                    <button className="btn small ghost" type="button" onClick={() => setMode({ kind: 'edit', entry })}>{v.change}</button>
+                    <button className="btn small ghost danger" type="button" onClick={() => askRemove(entry)}>{v.remove}</button>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -239,6 +276,7 @@ export function Vault() {
         </section>
       )}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      {confirmation.question}
     </div>
   );
 }
