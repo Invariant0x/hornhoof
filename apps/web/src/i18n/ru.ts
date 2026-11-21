@@ -2467,6 +2467,7 @@ export const ru: Messages = {
     priority: { label: 'Приоритет', urgent: 'Срочно', high: 'Высокий', normal: 'Обычный', low: 'Низкий' },
     list: { task: 'Название', executor: 'Исполнитель', responsible: 'Ответственный', due: 'Срок', progress: 'Прогресс', parts: 'Части этой цели', subtasks: (done: number, total: number) => `Подзадачи: готово ${done} из ${total}`,
       group: (status: string, count: number) => `${status}: ${count}`,
+      program: (name: string) => `Программа: ${name}`,
       neededFor: (number: number, department: string) => `нужна для #${number} ${department}`,
     },
     nobody: 'Никто',

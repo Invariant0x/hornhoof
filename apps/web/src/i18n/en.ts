@@ -2479,6 +2479,8 @@ export const en = {
     priority: { label: 'Priority', urgent: 'Urgent', high: 'High', normal: 'Normal', low: 'Low' },
     list: { task: 'Name', executor: 'Executor', responsible: 'Responsible', due: 'Due', progress: 'Progress', parts: 'Parts of this goal', subtasks: (done: number, total: number) => `Subtasks: ${done} of ${total} done`,
       group: (status: string, count: number) => `${status}: ${count}`,
+      /* The name and tooltip of the logo of the program an executor works in (#1776). */
+      program: (name: string) => `Program: ${name}`,
       neededFor: (number: number, department: string) => `needed for #${number} ${department}`,
     },
     nobody: 'Nobody',

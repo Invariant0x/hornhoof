@@ -736,10 +736,11 @@ test('says what to do when there is no work yet, and when a search finds nothing
 });
 
 /* Ivan's word of 20.11 (#1770): the logo of the program an executor works in now stands right after its initials, in an
-   Executor column no wider than without it, named for a screen reader and in a tooltip, drawn in the program's own colour
-   (Codex has none of its own and takes the ink, as everywhere ProviderMark stands). The six pieces of work are done in
-   Codex, Claude, Antigravity, GLM, Kimi and with no plan; the one with no plan and the person who answers get no logo.
-   With subtasks folded all six stand in one shot, in the light skin and Cyberpunk. The shot is taken before any check. */
+   Executor column no wider than without it, drawn in the program's own colour (Codex has none of its own and takes the ink,
+   as Design decided), and named "Program: Codex" for a screen reader and in its tooltip, so no one tells the program by its
+   look alone. The six pieces of work are done in Codex, Claude, Antigravity, GLM, Kimi and with no plan: the one with no plan
+   shows no mark but keeps its room, so its initials stand in line with the others, mirrored too; the person who answers
+   gets nothing. With subtasks folded all six stand in one shot, in the light skin and Cyberpunk. The shot comes first. */
 const PROGRAM_COLOR: Record<string, string> = { Codex: '--ink', Claude: '--p-claude', Antigravity: '--p-antigravity', GLM: '--p-glm', Kimi: '--p-kimi' };
 for (const skin of ['light', 'cyberpunk']) for (const lang of ['en', 'ru'] as const) for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
   test(`puts the logo of the executor's program right after its initials: ${skin} ${lang} ${dir} ${width}`, async ({ page }, info) => {
@@ -764,37 +765,51 @@ for (const skin of ['light', 'cyberpunk']) for (const lang of ['en', 'ru'] as co
     if (!wide) await page.setViewportSize({ width, height: 1400 });
     await capture(page, info, `program-${look}`);
 
+    const edges: number[] = [];
     for (const { work, name, program } of STAFF) {
       const cells = list.getByRole('listitem', { name: named(work), exact: true }).locator(':scope > .tr-cells');
       const executorCell = cells.locator('.tr-cell').nth(0);
       const mark = executorCell.getByRole('img', { name, exact: true });
       await expect(mark, `${name} ${look}`).toBeVisible();
-      await expect(cells.locator('.tr-cell').nth(1).locator('.pm'), `responsible ${look}`).toHaveCount(0);
+      await expect(cells.locator('.tr-cell').nth(1).locator('.pm, .pm-none'), `responsible ${look}`).toHaveCount(0);
+      const [forward, ends] = await executorCell.locator('.tr-v').evaluate(e => [getComputedStyle(e).direction === 'ltr', getComputedStyle(e).justifyContent === 'flex-end']);
+      const m = (await mark.boundingBox())!;
+      edges.push(ends ? m.x + m.width : m.x);
+      let slot = executorCell.locator('.pm-none');
       if (!program) {
         await expect(mark).toHaveAttribute('data-program', 'other');
         await expect(executorCell.locator('.pm'), `${name} has no plan ${look}`).toHaveCount(0);
-        continue;
+        await expect(executorCell.getByRole('img', { name: /^(Program|Программа):/ }), `${name} has no plan ${look}`).toHaveCount(0);
+        await expect(slot).toHaveAttribute('aria-hidden', 'true');
+      } else {
+        const label = t.tracker.list.program(program);
+        slot = executorCell.getByRole('img', { name: label, exact: true });
+        await expect(slot, `${program} ${look}`).toBeVisible();
+        await expect(slot.locator('title')).toHaveText(label);
+        expect(await slot.evaluate(e => getComputedStyle(e).color), `${program} colour ${look}`).toBe(await roleColor(page, PROGRAM_COLOR[program]!));
       }
-      const logo = executorCell.getByRole('img', { name: program, exact: true });
-      await expect(logo, `${program} ${look}`).toBeVisible();
-      await expect(logo.locator('title')).toHaveText(program);
-      expect(await logo.evaluate(e => getComputedStyle(e).color), `${program} colour ${look}`).toBe(await roleColor(page, PROGRAM_COLOR[program]!));
-      /* Right after the initials in the cell's own direction, on their middle line, and inside the cell. */
-      const forward = await executorCell.locator('.tr-v').evaluate(e => getComputedStyle(e).direction === 'ltr');
-      const [m, l, c] = [(await mark.boundingBox())!, (await logo.boundingBox())!, (await executorCell.boundingBox())!];
+      /* The logo, or the room of one with no plan, right after the initials in the cell's own direction, as big as a logo,
+         on their middle line, and inside the cell. */
+      const what = program ?? `${name}'s empty place`;
+      const [l, c] = [(await slot.boundingBox())!, (await executorCell.boundingBox())!];
+      expect(Math.abs(l.width - 13) + Math.abs(l.height - 13), `${what} size ${look}`).toBeLessThanOrEqual(1);
       const gap = forward ? l.x - (m.x + m.width) : m.x - (l.x + l.width);
-      expect(gap, `${program} gap ${look}`).toBeGreaterThanOrEqual(0);
-      expect(gap, `${program} gap ${look}`).toBeLessThanOrEqual(6);
-      expect(Math.abs(m.y + m.height / 2 - (l.y + l.height / 2)), `${program} middle ${look}`).toBeLessThanOrEqual(1.5);
-      expect(l.x, `${program} cell start ${look}`).toBeGreaterThanOrEqual(c.x - 1);
-      expect(l.x + l.width, `${program} cell end ${look}`).toBeLessThanOrEqual(c.x + c.width + 1);
+      expect(gap, `${what} gap ${look}`).toBeGreaterThanOrEqual(0);
+      expect(gap, `${what} gap ${look}`).toBeLessThanOrEqual(6);
+      expect(Math.abs(m.y + m.height / 2 - (l.y + l.height / 2)), `${what} middle ${look}`).toBeLessThanOrEqual(1.5);
+      expect(l.x, `${what} cell start ${look}`).toBeGreaterThanOrEqual(c.x - 1);
+      expect(l.x + l.width, `${what} cell end ${look}`).toBeLessThanOrEqual(c.x + c.width + 1);
       if (!wide) {
         /* On a phone the name follows the logo: "Executor: HA [logo] Hana". */
         const words = (await executorCell.getByText(name, { exact: true }).boundingBox())!;
-        expect(forward ? words.x - (l.x + l.width) : l.x - (words.x + words.width), `${program} name ${look}`).toBeGreaterThanOrEqual(0);
+        expect(forward ? words.x - (l.x + l.width) : l.x - (words.x + words.width), `${what} name ${look}`).toBeGreaterThanOrEqual(0);
       }
     }
-    if (wide) expect(Math.abs((await columnWidth()) - before), `column ${look}`).toBeLessThanOrEqual(1);
+    if (wide) {
+      expect(Math.abs((await columnWidth()) - before), `column ${look}`).toBeLessThanOrEqual(1);
+      /* Every executor's initials, the one with no plan's too, keep one edge of the column. */
+      expect(Math.max(...edges) - Math.min(...edges), `initials in line ${look}`).toBeLessThanOrEqual(1);
+    }
     await inside(page, `program ${look}`);
   });
 }

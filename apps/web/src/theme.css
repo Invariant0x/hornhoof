@@ -192,6 +192,8 @@ select:disabled { opacity: .55; }
 .ic { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .pm { width: 13px; height: 13px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: var(--ink); }
 .pm .fill { fill: currentColor; stroke: none; }
+/* Where an executor has no program: the room of its mark, empty, so nothing beside it moves (#1776). */
+.pm-none { display: inline-block; inline-size: 13px; block-size: 13px; flex: none; }
 .pm.claude { color: var(--p-claude); }
 .pm.kimi { color: var(--p-kimi); }
 .pm.glm { color: var(--p-glm); }
@@ -2338,7 +2340,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .tr-group > [hidden], .tr-rows[hidden] { display: none; }
   .tr-v:has(> .tr-mark, > .tr-stage-ghost) { display: flex; flex-wrap: wrap; align-items: center; }
   /* The executor's program as its logo, as near its initials as the one-shot mark (#1770); the narrow list's gap does it there. */
-  .tr-v > .tr-executor + .pm { margin-inline-start: 4px; }
+  .tr-v > .tr-executor + :is(.pm, .pm-none) { margin-inline-start: 4px; }
   .tr-cells:dir(rtl) > .tr-cell > .tr-v:dir(ltr), .tr-cells:dir(ltr) > .tr-cell > .tr-v:dir(rtl) { justify-content: flex-end; text-align: end; }
 }
 /* A narrow list puts each fact under the title, after its name. */

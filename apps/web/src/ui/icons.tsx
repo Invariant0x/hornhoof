@@ -113,6 +113,7 @@ const PROGRAM: Record<ProviderId, Program> = {
 const PROTOCOL_PROGRAM: Record<Protocol, Program> = { anthropic: 'claude', openai: 'codex' };
 const PROGRAM_NAMES: Record<Program, string> = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', antigravity: 'Antigravity' };
 export const programOf = (provider: ProviderId, protocol?: Protocol | null): Program => (protocol ? PROTOCOL_PROGRAM[protocol] : PROGRAM[provider]);
+export const programName = (program: Program): string => PROGRAM_NAMES[program];
 const MARKS: Record<Program, ReactNode> = {
   claude: <path d="M8 1.6v3.6M8 10.8v3.6M1.6 8h3.6M10.8 8h3.6M3.5 3.5l2.5 2.5M10 10l2.5 2.5M12.5 3.5 10 6M6 10l-2.5 2.5" />,
   codex: (
@@ -137,11 +138,12 @@ export function ProviderMark({ provider, protocol }: { provider: ProviderId | nu
   return provider ? <ProgramMark program={programOf(provider, protocol)} /> : null;
 }
 
-/* The same mark where the program is already known, as the tracker's executor has it. */
-export function ProgramMark({ program }: { program: Program }) {
+/* The same mark where the program is already known, as the tracker's executor has it; label: its name and tooltip, the
+   program's name by default. */
+export function ProgramMark({ program, label = PROGRAM_NAMES[program] }: { program: Program; label?: string }) {
   return (
-    <svg className={`pm ${program}`} viewBox="0 0 16 16" role="img" aria-label={PROGRAM_NAMES[program]}>
-      <title>{PROGRAM_NAMES[program]}</title>
+    <svg className={`pm ${program}`} viewBox="0 0 16 16" role="img" aria-label={label}>
+      <title>{label}</title>
       {MARKS[program]}
     </svg>
   );

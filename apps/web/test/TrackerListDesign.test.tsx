@@ -42,22 +42,27 @@ it('keeps the executor name and program color alongside a generalist mark and ma
   expect(call.querySelector('path[d="M8 1 15 8 8 15 1 8Z"]')).toBeInTheDocument();
 });
 
-/* Ivan's word of 20.11 (#1770): the program the executor works in now, as its logo right after the initials, named for a
-   screen reader and in a tooltip. A member with no plan and the person who answers for the task get none. */
+/* Ivan's word of 20.11 (#1770): the program the executor works in now, as its logo right after the initials, named "Program:
+   Codex" for a screen reader and in a tooltip (Design). A member with no plan gets an empty place as wide instead, which no
+   one hears; the person who answers for the task gets nothing. */
 it('puts the logo of the program the executor works in right after its initials, and none without a plan', () => {
   const planless = task({ id: 'idle', number: 268, title: 'Pick the recipients', executor: { ...executor, id: 'nora', name: 'Nora Lee' }, assignee: { ...executor, id: 'nora', name: 'Nora Lee' } });
   const rows = { selected: null, onOpenTask: vi.fn(), programOf: (id: string) => (id === executor.id ? 'codex' as const : null) };
   const tasks = [task(), planless];
   render(<LanguageProvider><TrackerList tasks={tasks} all={tasks} rows={rows} empty="Empty" /></LanguageProvider>);
   const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
-  const logo = within(row).getByRole('img', { name: 'Codex' });
+  const logo = within(row).getByRole('img', { name: 'Program: Codex' });
   expect(logo).toHaveClass('pm', 'codex');
-  expect(logo.querySelector('title')).toHaveTextContent('Codex');
+  expect(logo.querySelector('title')).toHaveTextContent(/^Program: Codex$/);
   expect(within(row).getByRole('img', { name: executor.name }).nextElementSibling).toBe(logo);
   expect(within(row).getByRole('img', { name: responsible.name }).parentElement!.querySelector('.pm')).toBeNull();
   const idle = screen.getByRole('listitem', { name: '#268 Pick the recipients' });
-  expect(within(idle).getByRole('img', { name: 'Nora Lee' })).toHaveAttribute('data-program', 'other');
+  const nora = within(idle).getByRole('img', { name: 'Nora Lee' });
+  expect(nora).toHaveAttribute('data-program', 'other');
   expect(idle.querySelector('.pm')).toBeNull();
+  expect(within(idle).queryByRole('img', { name: /^Program/ })).toBeNull();
+  expect(nora.nextElementSibling).toHaveClass('pm-none');
+  expect(nora.nextElementSibling).toHaveAttribute('aria-hidden', 'true');
 });
 
 /* Each program has a mark of its own, named after it. */
@@ -65,8 +70,9 @@ it.each([['claude', 'Claude'], ['codex', 'Codex'], ['kimi', 'Kimi'], ['glm', 'GL
   const rows = { selected: null, onOpenTask: vi.fn(), programOf: () => program };
   render(<LanguageProvider><TrackerList tasks={[task()]} all={[task()]} rows={rows} empty="Empty" /></LanguageProvider>);
   const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
-  const logo = within(row).getByRole('img', { name });
+  const logo = within(row).getByRole('img', { name: `Program: ${name}` });
   expect(logo).toHaveClass('pm', program);
+  expect(logo.querySelector('title')).toHaveTextContent(`Program: ${name}`);
   expect(logo.querySelector('path, rect, circle')).toBeInTheDocument();
   expect(within(row).getByRole('img', { name: executor.name }).nextElementSibling).toBe(logo);
 });
