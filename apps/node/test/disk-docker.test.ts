@@ -90,4 +90,40 @@ describe('Docker figures handed to the node by the updater', () => {
     mkdirSync(join(sub, 'docker-disk.json'));
     expect(readDockerDisk(sub, NOW)).toBeNull();
   });
+
+  it('rejects future timestamps beyond clock-skew tolerance in docker-disk.json and cleaned entries', () => {
+    const farFuture = folder();
+    writeFileSync(
+      join(farFuture, 'docker-disk.json'),
+      JSON.stringify({ at: '2099-01-01T00:00:00.000Z', parts: { images: 10 }, cleaned: [] }),
+    );
+    expect(readDockerDisk(farFuture, NOW)).toBeNull();
+
+    const overSkew = folder();
+    writeFileSync(
+      join(overSkew, 'docker-disk.json'),
+      JSON.stringify({ at: '2026-11-21T12:05:01.000Z', parts: { images: 10 }, cleaned: [] }),
+    );
+    expect(readDockerDisk(overSkew, NOW)).toBeNull();
+
+    const mixed = folder();
+    const validAt = '2026-11-21T11:55:00.000Z';
+    const smallSkewAt = '2026-11-21T12:04:00.000Z';
+    writeFileSync(
+      join(mixed, 'docker-disk.json'),
+      JSON.stringify({
+        at: smallSkewAt,
+        parts: { images: 10 },
+        cleaned: [
+          { part: 'images', bytes: 999, at: '2099-01-01T00:00:00.000Z' },
+          { part: 'volumes', bytes: 888, at: '2026-11-21T12:06:00.000Z' },
+          { part: 'buildCache', bytes: 777, at: validAt },
+        ],
+      }),
+    );
+    expect(readDockerDisk(mixed, NOW)).toEqual({
+      parts: { images: 10 },
+      cleaned: [{ part: 'buildCache', bytes: 777, at: validAt }],
+    });
+  });
 });
