@@ -88,6 +88,7 @@ const ROUTES: Record<string, unknown> = {
   '/api/machines/access': { views: [] },
   /* What the CEO's reminder of the recovery file asks at the start: nothing to remind of. */
   '/api/backups/recovery': { recoveryNeeded: false, linkChanged: false },
+  '/api/company/pause': { paused: null, finishingTurns: 0 },
   '/api/machines/here': { machine: null, view: null },
   /* What every page asks about where the company runs: it stays on its machine, and nothing waits for the CEO. */
   '/api/network/switch': { self: null, moving: false, from: null, to: null, since: null, cut: false, question: false } satisfies SwitchWord,

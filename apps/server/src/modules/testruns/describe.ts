@@ -10,6 +10,7 @@ import { builtinOf, nodeIdentity, ownMachine, sameNode, type NodeIdentity } from
 import { productPlaces, scopeKey, testCapabilities } from './load.js';
 export { noteTestCapabilities, scopeKey, testCapabilities } from './load.js';
 import { canReach } from '../../auth/access.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import { refuse } from '../tasks/state.js';
 import { computerKey } from './capacity.js';
 import { pickMachine } from './pick.js';
@@ -271,8 +272,10 @@ function publishDescription(ctx: Ctx, run: Run, request: TestEnvironmentRequest,
 
 export async function pumpDescriptions(ctx: Ctx, open: (companyId: string) => Promise<Place[]>, target: (run: Run) => Promise<Target>, finish: (id: string) => Promise<void>): Promise<void> {
   planningSources.set(ctx, { open, target });
+  const paused = await pausedCompanyIds(ctx.db);
   const pending = await ctx.db.select().from(testRuns).where(and(eq(testRuns.status, 'running'), isNull(testRuns.environmentSnapshot), sql`${testRuns.environmentRequest} is not null`));
   for (const run of pending) {
+    if (paused.has(run.companyId)) continue;
     const request = run.environmentRequest!, problem = request.problem ?? (Date.now() - run.createdAt.getTime() > WAIT_MS ? { code: 'timeout' as const, detail: 'No product environment was described within the queue deadline.' } : null);
     if (problem) { cancelDescription(ctx, request); await descriptionFailure(ctx, run, problem); await finish(run.id); continue; }
     const found = await target(run);

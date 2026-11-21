@@ -19,6 +19,7 @@ import { openTurnOf } from './turn-department.js';
 import { repoAt } from '../departments/repository.js';
 import { heldLineage } from '../testruns/compare.js';
 import { keptEverything, ofItsRelease } from '../testruns/reuse.js';
+import { isCompanyPaused, pausedCompanyIds } from '../org/pause-state.js';
 import { wholeProductRun } from './autonomous-release.js';
 
 /* A turn is a release of its department. Its holder records the release before main moves: the exact commit R of
@@ -325,6 +326,7 @@ export type ReleaseInput = { task: number; commit: string; runId: string };
 
 /* The record of a release, asked by the holder of its release task in the turn's department before main moves. */
 export async function recordRelease(ctx: Reader, agentId: string, companyId: string, input: ReleaseInput) {
+  if (await isCompanyPaused(ctx.db, companyId)) throw refuse(409, 'company_paused', 'The company is paused. No new release can start until it is resumed.');
   const task = await taskByRef(ctx, companyId, input.task);
   if (!task) throw refuse(404, 'task_unknown', `There is no task #${input.task}.`);
   if (task.assigneeAgentId !== agentId) throw refuse(403, 'task_not_yours', `#${task.number} is not yours: only the holder of the release task records the release.`);
@@ -509,9 +511,11 @@ async function makeBranchOf(ctx: Reader, repo: Repo, turn: Turn): Promise<void> 
 /* Every minute: each department that keeps a repository, on its tags. One department's trouble keeps no other from it. */
 export async function releaseRound(ctx: Reader): Promise<void> {
   if (!ctx.config || !ctx.readTags) return;
+  const paused = await pausedCompanyIds(ctx.db);
   const open = await ctx.db.select().from(turns).innerJoin(departments, eq(departments.id, turns.departmentId))
     .where(and(eq(turns.status, 'open'), isNull(departments.parentId), isNotNull(departments.repoUrl)));
   for (const { turns: turn } of open) {
+    if (paused.has(turn.companyId)) continue;
     try {
       const target = await integrationTarget(ctx, { companyId: turn.companyId, productId: null, departmentId: turn.departmentId });
       if (target?.turn?.id === turn.id) await releaseOne(ctx, turn, target.repo);

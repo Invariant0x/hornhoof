@@ -6,6 +6,7 @@ import { loggable } from '../../errors.js';
 import type { StreamMessage } from '../events/bus.js';
 import { eventsAfter, sweepEvents, type AssistantEventView } from './events.js';
 import { collectReplies, type Told } from './replies.js';
+import { isCompanyPaused } from '../org/pause-state.js';
 import { tellRequests } from './requests.js';
 import { Wakes } from './wake.js';
 
@@ -67,8 +68,9 @@ class Passes {
     this.queued = false;
     if (this.stopped) return;
     try {
-      if (work.replies) this.later((await collectReplies(this.ctx, this.companyId, this.service.told, this.service.replyGraceMs)).again);
-      if (work.requests) await tellRequests(this.ctx, this.companyId, this.service.told);
+      const paused = await isCompanyPaused(this.ctx.db, this.companyId);
+      if (work.replies) this.later((await collectReplies(this.ctx, this.companyId, this.service.told, this.service.replyGraceMs, undefined, paused)).again);
+      if (work.requests && !paused) await tellRequests(this.ctx, this.companyId, this.service.told);
     } catch (err) {
       if (!this.stopped) this.ctx.log.warn({ error: loggable(err), companyId: this.companyId }, 'Could not pass on what an assistant waits for.');
     }

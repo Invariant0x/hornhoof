@@ -22,6 +22,7 @@ import { harnessRound } from '../testruns/harness.js';
 import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
 import { checkOperatorHealth } from '../program-operator/health.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import { releaseRound } from '../tasks/releases.js';
 import { closeIdleTurns } from '../tasks/turn-ends.js';
 
@@ -88,8 +89,10 @@ async function queueDueRound(ctx: Ctx, id: string, now: Date): Promise<string | 
    nothing to look at skips its round. Returns how many rounds it started. */
 export async function timerTick(ctx: Ctx, now = new Date(), report: (err: unknown) => void = () => {}): Promise<number> {
   const { db } = ctx;
+  const paused = await pausedCompanyIds(db);
   let started = 0;
-  for (const { id } of await db.select(idOnly(agents)).from(agents).where(timed)) {
+  for (const { id, companyId } of await db.select({ id: agents.id, companyId: agents.companyId }).from(agents).where(timed)) {
+    if (paused.has(companyId)) continue;
     try {
       const queued = await onAgent(ctx, id, () => queueDueRound(ctx, id, now));
       if (!queued) continue;

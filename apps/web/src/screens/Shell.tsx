@@ -2,11 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { api } from '../api';
 import { deptLabel, errorText, useT } from '../i18n';
 import { notOpened, useOrg } from '../org';
+import { useCompanyPause } from '../pause';
 import { forgetOwnerKey } from '../owner-key';
 import type { Me, Org } from '../types';
 import { ListIcon, LogoMark, MachineIcon, MapIcon, PeopleIcon, PlugIcon } from '../ui/icons';
 import { Idents } from '../ui/Idents';
 import { FirstContact } from '../ui/FirstContact';
+import { CompanyPauseBanner } from '../ui/CompanyPauseBanner';
 import { RecoveryBanner } from '../ui/RecoveryBanner';
 import { SwitchBanner } from '../ui/SwitchBanner';
 import { ShellTop, useMeasuredShellTop } from '../ui/shellBars';
@@ -74,11 +76,12 @@ function AccountDialog({ route, me, updates, inbox, onRenamed, onGroup, onClose,
 }
 
 /* One row of the account menu: it closes the menu, then does what it says. */
-function MenuRow({ label, count, onPick, onClose }: { label: string; count?: { shown: number; said: string }; onPick: () => void; onClose: () => void }) {
+function MenuRow({ label, count, disabled, onPick, onClose }: { label: string; count?: { shown: number; said: string }; disabled?: boolean; onPick: () => void; onClose: () => void }) {
   return (
     <button
       className="mi"
       type="button"
+      disabled={disabled}
       aria-label={count?.shown ? count.said : undefined}
       onClick={() => {
         onClose();
@@ -101,12 +104,15 @@ type MenuProps = {
   onSettings: () => void;
   onAbout: () => void;
   onContact: () => void;
+  paused: boolean;
+  pauseBusy: boolean;
+  onPauseToggle?: () => void;
   toDecide: number;
 };
 
 /* The pages of the whole company: what employees found to improve with how many wait for a decision, the feedback
    inbox and Versions. Nothing, and no line above it, for a person who sees only some departments. */
-function CompanyRows({ onClose, onImprovements, onInbox, onVersions, toDecide }: Omit<MenuProps, 'me' | 'onSignOut' | 'onSettings' | 'onAbout' | 'onContact'>) {
+function CompanyRows({ onClose, onImprovements, onInbox, onVersions, toDecide }: Pick<MenuProps, 'onClose' | 'onImprovements' | 'onInbox' | 'onVersions' | 'toDecide'>) {
   const t = useT();
   if (!onImprovements && !onInbox && !onVersions) return null;
   return (
@@ -120,10 +126,10 @@ function CompanyRows({ onClose, onImprovements, onInbox, onVersions, toDecide }:
 }
 
 /* The short account menu as Design's reference draws it: the person and the version, then rows in groups with a line
-   between them: giving the orchestrator access to this machine, Settings, the pages of the whole company, About and Log
-   out. onImprovements, onInbox and onVersions: only for people who see the whole company, onInbox only on Hornhoof's own
-   installation. Themes and the language live in Settings, feedback in About. */
-function AccountMenu({ me, onClose, onSignOut, onSettings, onAbout, onContact, ...company }: MenuProps) {
+   between them: giving the orchestrator access to this machine, company pause/resume for whole-company people, Settings,
+   the pages of the whole company, About and Log out. onImprovements, onInbox and onVersions: only for people who see
+   the whole company, onInbox only on Hornhoof's own installation. Themes and the language live in Settings, feedback in About. */
+function AccountMenu({ me, onClose, onSignOut, onSettings, onAbout, onContact, paused, pauseBusy, onPauseToggle, ...company }: MenuProps) {
   const t = useT();
   const version = useVersion();
 
@@ -136,6 +142,7 @@ function AccountMenu({ me, onClose, onSignOut, onSettings, onAbout, onContact, .
       </div>
       <hr className="am-sep" />
       <MenuRow label={t.firstContact.title} onPick={onContact} onClose={onClose} />
+      {onPauseToggle && <MenuRow label={paused ? t.companyPause.resumeMenu : t.companyPause.pauseMenu} disabled={pauseBusy} onPick={onPauseToggle} onClose={onClose} />}
       <MenuRow label={t.settings.menu} onPick={onSettings} onClose={onClose} />
       <CompanyRows onClose={onClose} {...company} />
       <hr className="am-sep" />
@@ -225,8 +232,9 @@ function ShellTabs({ tab, waiting, navigate, fit }: { tab: Route['kind']; waitin
   );
 }
 
-function ShellAccount({ me, menu, setMenu, company, inbox, navigate, openAccount, onSignOut, onContact, toDecide, account, accountButton, side }: {
+function ShellAccount({ me, menu, setMenu, company, inbox, paused, pauseBusy, onPauseToggle, navigate, openAccount, onSignOut, onContact, toDecide, account, accountButton, side }: {
   me: Me; menu: boolean; setMenu: (open: boolean) => void; company: boolean; inbox: boolean;
+  paused: boolean; pauseBusy: boolean; onPauseToggle?: () => void;
   navigate: ReturnType<typeof useRoute>['navigate']; openAccount: (next: Route) => void;
   onSignOut: () => void; onContact: () => void; toDecide: number;
   account: RefObject<HTMLDivElement | null>; accountButton: RefObject<HTMLButtonElement | null>; side: RefObject<HTMLDivElement | null>;
@@ -238,7 +246,7 @@ function ShellAccount({ me, menu, setMenu, company, inbox, navigate, openAccount
         <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
           {me.person.name.trim().charAt(0).toUpperCase()}
         </button>
-        {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={onSignOut} onContact={onContact} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onInbox={company && inbox ? () => navigate({ kind: 'inbox' }) : undefined} onVersions={company ? () => openAccount({ kind: 'versions' }) : undefined} onSettings={() => openAccount({ kind: 'settings', group: 'profile' })} onAbout={() => openAccount({ kind: 'about' })} toDecide={toDecide} />}
+        {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={onSignOut} onContact={onContact} paused={paused} pauseBusy={pauseBusy} onPauseToggle={onPauseToggle} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onInbox={company && inbox ? () => navigate({ kind: 'inbox' }) : undefined} onVersions={company ? () => openAccount({ kind: 'versions' }) : undefined} onSettings={() => openAccount({ kind: 'settings', group: 'profile' })} onAbout={() => openAccount({ kind: 'about' })} toDecide={toDecide} />}
       </div>
     </div>
   );
@@ -346,6 +354,9 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
   );
 }
 
+/* People who see the whole company (CEO, delegate, or company scope) may pause and resume it. */
+const canControlPause = (me: Me): boolean => me.person.scopeKind === 'company' || Boolean(me.person.isOwner || me.canDecideCompany);
+
 /* Setup or an accepted invitation opens the orchestrator's first contact at once. */
 export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: boolean; onSignOut: () => void }) {
   const t = useT();
@@ -358,6 +369,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const [selfName, setSelfName] = useState(me.person.name);
   const currentMe = { ...me, person: { ...me.person, name: selfName } };
   const company = me.person.scopeKind === 'company';
+  const canPauseCompany = canControlPause(me);
+  const companyPause = useCompanyPause();
   const inbox = useFeedbackInbox();
   const denied = !company && ['improvements', 'inbox', 'versions'].some(kind => kind === route.kind || kind === pageRoute.kind);
   /* The orchestrator's window opens over the map, for people who see the whole company. */
@@ -450,7 +463,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <span className="sr">{me.company.name}</span>
         </div>
         <ShellTabs tab={tab} waiting={decisions.waiting} navigate={navigate} fit={fit} />
-        <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} inbox={inbox} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} onContact={() => setContact(true)} toDecide={toDecide} account={account} accountButton={accountButton} side={fit.side} />
+        <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} inbox={inbox} paused={companyPause.view.paused !== null} pauseBusy={companyPause.busy} onPauseToggle={canPauseCompany ? () => void companyPause.toggle() : undefined} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} onContact={() => setContact(true)} toDecide={toDecide} account={account} accountButton={accountButton} side={fit.side} />
       </header>
       {/* The bars of the shell stand first in the page, each in its own row under the header, and what the page shows
           comes after them. On the map they float over it and an open department, which start under them, and the windows
@@ -458,6 +471,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           name takes under them with --plate-room. */}
       <main ref={page} className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}${tab === 'tasks' ? ' tracker-page' : ''}`}>
         <SwitchBanner>
+          <CompanyPauseBanner state={companyPause} canControl={canPauseCompany} />
           {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} onProgressShown={setUpdateSaysIt} />}
           <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount({ kind: 'settings', group: 'company' })} />
         </SwitchBanner>

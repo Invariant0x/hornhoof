@@ -295,6 +295,12 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     body => ({ method: 'PUT', url: '/api/link', payload: body }),
   );
   tool('remove_public_link', 'Closes the public link: Hornhoof opens only at its own address again.', {}, () => ({ method: 'DELETE', url: '/api/link' }));
+  tool(
+    'resume_company',
+    'Lifts the company pause so employees, timers, checks and queues continue from where they stopped. Allowed only in a turn carrying the words of a person who sees the whole company.',
+    {},
+    () => ({ method: 'POST', url: '/api/company/resume' }),
+  );
 
   const Note = z.number().int().positive().describe('The note\'s number, as your notebook shows it, like 3 for [#3].');
   /* The company notebook, or with department the one its head carries. */

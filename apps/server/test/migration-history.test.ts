@@ -46,7 +46,7 @@ function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[]
   if (table === 'agents') return rows.map(({ row }) => ({ row: { ...row, builtin_machine: null, inbox_mode: null, timer_nudged_at: null, ...(['head', 'worker'].includes(row.kind as string) ? { skills: [...(row.skills as string[]), 'hh-work-fast'] } : {}) } }));
   /* Migration 0094 keeps the numbers the company gave: its one task, and no turn. The tracker's migration marks every
      company there before it for its one-time upgrade. */
-  if (table === 'companies') return rows.map(row => ({ row: { ...row.row, task_numbers_used: 1, turn_numbers_used: 0, inbox_mode: 'inbox', tracker_due: true } }));
+  if (table === 'companies') return rows.map(row => ({ row: { ...row.row, task_numbers_used: 1, turn_numbers_used: 0, inbox_mode: 'inbox', tracker_due: true, paused: null, resumed_at: null } }));
   if (table === 'jobs') return rows.map(row => ({ row: { ...row.row, builtin_machine: null, inbox_wake: false } }));
   /* The same for a part of a test run: none ran on a machine's built-in node before there were any. */
   if (table === 'test_parts') return rows.map(row => ({ row: { ...row.row, builtin_machine: null } }));

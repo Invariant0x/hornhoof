@@ -84,11 +84,13 @@ export async function tellOwner(ctx: Ctx, to: { companyId: string; assistantId: 
   told(to.assistantId, await storeEvent(ctx.db, { ...to, kind: 'reply', data }), 'reply', true);
 }
 
-/* Every answer the company's assistants wait for. Returns when to look again, or null when nothing waits for a time. */
-export async function collectReplies(ctx: Ctx, companyId: string, told: Told, graceMs: number, now = new Date()): Promise<{ again: number | null; waiting: boolean }> {
+/* Every answer the company's assistants wait for. While paused, only each assistant's own agent answers its owner;
+   company agents' replies wait until Resume. Returns when to look again, or null when nothing waits for a time. */
+export async function collectReplies(ctx: Ctx, companyId: string, told: Told, graceMs: number, now = new Date(), paused = false): Promise<{ again: number | null; waiting: boolean }> {
   const rows = await ctx.db.select().from(assistantReplies).where(eq(assistantReplies.companyId, companyId)).orderBy(asc(assistantReplies.createdAt));
   let again: number | null = null;
   for (const row of rows) {
+    if (paused && (await agentOf(ctx, row.agentId)).kind !== 'assistant') continue;
     const after = await collectOne(ctx, row, told, graceMs, now);
     if (after !== null) again = again === null ? after : Math.min(again, after);
   }

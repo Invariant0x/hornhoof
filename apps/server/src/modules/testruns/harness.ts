@@ -18,6 +18,7 @@ import { repoAt } from '../departments/repository.js';
 import { keyOf as who, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
 import { identify } from '../nodes/socket.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import { repositoryScope } from './describe.js';
 import { harnessPlaces } from './load.js';
 import { builtinLent, mayTake, placesOf, type Place } from './runs.js';
@@ -344,7 +345,8 @@ async function syncProduct(ctx: Ctx, department: Department, places: Place[], no
 }
 
 async function round(ctx: Ctx, now: Date): Promise<void> {
-  const products = await ctx.db.select().from(departments).where(isNotNull(departments.repoUrl));
+  const paused = await pausedCompanyIds(ctx.db);
+  const products = (await ctx.db.select().from(departments).where(isNotNull(departments.repoUrl))).filter(product => !paused.has(product.companyId));
   const places = new Map<string, Place[]>();
   for (const companyId of new Set(products.map(product => product.companyId))) places.set(companyId, await harnessPlaces(ctx, await placesOf(ctx, companyId)));
   for (const product of products) {

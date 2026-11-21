@@ -12,6 +12,7 @@ import { modelLimitUntil } from '../conversation/limits.js';
 import { takesTurns } from '../conversation/placement.js';
 import { appendEvent } from '../events/store.js';
 import { nodeHeld } from '../updates/drain.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import { firstOfRun, outcomeOfOperatorTry } from './failure-run.js';
 import { fromStart } from './not-started.js';
 import { currentOperatorQuestion, liveFailureSignals, qualifyingReasons } from './policy.js';
@@ -352,8 +353,10 @@ async function pumpCaseNotices(ctx: Ctx, row: Case): Promise<void> {
 }
 
 export async function expireOperatorCases(ctx: Ctx, now = new Date()): Promise<void> {
-  const due = await ctx.db.select({ id: programOperatorCases.id, agentId: programOperatorCases.agentId }).from(programOperatorCases).where(and(eq(programOperatorCases.status, 'open'), lte(programOperatorCases.deadlineAt, now)));
+  const paused = await pausedCompanyIds(ctx.db);
+  const due = await ctx.db.select({ id: programOperatorCases.id, companyId: programOperatorCases.companyId, agentId: programOperatorCases.agentId }).from(programOperatorCases).where(and(eq(programOperatorCases.status, 'open'), lte(programOperatorCases.deadlineAt, now)));
   for (const entry of due) {
+    if (paused.has(entry.companyId)) continue;
     await operatorTransaction(ctx, async (tx, inside) => {
       await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, entry.agentId)).for('update');
       const [row] = await tx.select().from(programOperatorCases).where(and(eq(programOperatorCases.id, entry.id), eq(programOperatorCases.status, 'open'))).for('update');

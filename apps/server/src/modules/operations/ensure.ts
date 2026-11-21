@@ -11,6 +11,7 @@ import { pump } from '../conversation/queue.js';
 import { windowNode } from '../conversation/placement.js';
 import { hireEmployee, type Hired, type HiredBy } from '../departments/hire.js';
 import { appendEvent, listEvents } from '../events/store.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import type { Tx } from '../tasks/state.js';
 import { resumeAgent } from '../tasks/wake.js';
 import { placeableSubscriptions, spotIn, type Serving } from '../tools/staff.js';
@@ -168,7 +169,10 @@ export async function ensureOperations(ctx: Ctx, companyId: string): Promise<voi
 /* One company's trouble does not keep the others from their check. */
 export async function checkOperations(ctx: Ctx, failed: (err: unknown) => void): Promise<void> {
   try {
-    for (const { id } of await ctx.db.select(idOnly(companies)).from(companies)) await ensureOperations(ctx, id).catch(failed);
+    const paused = await pausedCompanyIds(ctx.db);
+    for (const { id } of await ctx.db.select(idOnly(companies)).from(companies)) {
+      if (!paused.has(id)) await ensureOperations(ctx, id).catch(failed);
+    }
   } catch (err) {
     failed(err);
   }

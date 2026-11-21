@@ -146,7 +146,7 @@ function checkMenu(found: Awaited<ReturnType<typeof menuLayout>>, width: number,
   expect(found.broken, `${look}: no word broken that fits a line`).toEqual([]);
 }
 
-const WHOLE_ORDER = (t: Messages) => ['head', '\u2014', t.firstContact.title, t.settings.menu, '\u2014', t.shell.tabs.improvements, t.inbox.menu, t.updates.menu, '\u2014', t.about.menu, t.shell.logOut];
+const WHOLE_ORDER = (t: Messages) => ['head', '\u2014', t.firstContact.title, t.companyPause.pauseMenu, t.settings.menu, '\u2014', t.shell.tabs.improvements, t.inbox.menu, t.updates.menu, '\u2014', t.about.menu, t.shell.logOut];
 const LISTED_ORDER = (t: Messages) => ['head', '—', t.firstContact.title, t.settings.menu, '—', t.about.menu, t.shell.logOut];
 
 const LOOKS: Look[] = [
@@ -311,9 +311,11 @@ for (const skin of SKINS) for (const width of WIDTHS) {
     });
     const menu = await openMenu(page, t);
     const settings = menu.getByRole('button', { name: t.settings.menu, exact: true });
-    /* Talk to the orchestrator, then Settings. */
+    /* Talk to the orchestrator, Pause company, then Settings. */
     await page.keyboard.press('Tab');
     await expect(menu.getByRole('button', { name: t.firstContact.title, exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(menu.getByRole('button', { name: t.companyPause.pauseMenu, exact: true })).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(settings).toBeFocused();
     expect(await ring(settings), `${name}: the menu row`).toBe('true solid 2px 2px');

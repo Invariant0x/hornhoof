@@ -33,6 +33,8 @@ import { logTurnFact } from '../tasks/turn-log.js';
 import { queuedInput, queuedUsed } from './queued-input.js';
 import { repeatedTurn, UNHEARD_NOTE, type RepeatedTurn } from './turn-words.js';
 import { liveInputOf } from '../program-operator/input.js';
+import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
+import { isCompanyPaused, mayHearPersonWhilePaused, openCaseForRunningTurn } from '../org/pause-state.js';
 import { queuedOperatorAssignment } from '../program-operator/recovered-input.js';
 import { inboxChanged, inboxModeOf, isMail, keepMail, takesInsteadOfTurn, unreadMail, type InboxStatus } from './inbox.js';
 /* How long after a plan's limit starts over its waiting turns go out, so the program sees the new limit. */
@@ -159,8 +161,8 @@ async function intoInbox(ctx: Ctx, t: Turn & { message: TurnMessage }): Promise<
 
 /* Letters wait unread with no turn for them, as after a turn that took the inbox did not reach its program: one goes now.
    A switched-off employee reads them once it is on again. */
-async function inboxTurnDue(ctx: Ctx, agent: { id: string; companyId: string; switchedOffAt: Date | null }): Promise<boolean> {
-  if (agent.switchedOffAt) return false;
+async function inboxTurnDue(ctx: Ctx, agent: { id: string; companyId: string; switchedOffAt: Date | null }, paused = false): Promise<boolean> {
+  if (paused || agent.switchedOffAt) return false;
   if ((await inboxModeOf(ctx.db, agent.id)).effective !== 'inbox' || !(await unreadMail(ctx.db, agent.id)).length) return false;
   const [open] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agent.id), eq(jobs.status, 'queued'), eq(jobs.inboxWake, true))).limit(1);
   if (open) return false;
@@ -348,6 +350,7 @@ async function storeTypedTurn(
 ): Promise<{ jobId: string; token: string } | null> {
   const target = await agentOnNode(ctx, node, agentId);
   if (!target || (queued && (await queuedUsed(ctx, agentId, queued.seq)))) return null;
+  if ((await isCompanyPaused(ctx.db, target.agent.companyId)) && !mayHearPersonWhilePaused(target.agent, personId)) return null;
   const openedQueued: OpenedQueued | null = queued ? { ...queued, repeated: await repeatedTurn(ctx, queued.job, queued.source) } : null;
   /* A machine that installs its build takes no turn, and nothing of what stands there is changed for one. */
   if (node.kind === 'node' && (await machineInstalls(ctx.db, node.nodeId))) return null;
@@ -420,6 +423,7 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
     const on = await agentOnNode(ctx, node, agentId);
     if (!on) return false;
     const { agent, sub } = on;
+    if ((await isCompanyPaused(db, agent.companyId)) && agent.kind !== 'orchestrator' && agent.kind !== 'assistant') return false;
     if (await resumesOperator(ctx, agent, node)) return true;
     /* Task turns and the inbox's turn of an agent that is switched off wait for it to be on and start nothing. */
     const waiting = and(eq(jobs.status, 'queued'), modelLimitUntil(sub, agent.model) ? programStart : agent.switchedOffAt ? peopleTurns : undefined);
@@ -452,7 +456,8 @@ const onlyWords = and(isNull(jobs.createdBy), eq(jobs.answersCeo, false), isNull
    task: the agent reads them all at once, instead of one turn each while newer ones go first. A head also reads
    everything that moved on its tasks while it was busy. An assistant's program builds its own message, and a switched-off
    agent's inbox waits until it is on. */
-async function goingAlong(ctx: Ctx, agent: { id: string; kind: string; switchedOffAt: Date | null }, job: Pick<typeof jobs.$inferSelect, 'id' | 'taskId'>): Promise<Along[]> {
+async function goingAlong(ctx: Ctx, agent: { id: string; kind: string; switchedOffAt: Date | null }, job: Pick<typeof jobs.$inferSelect, 'id' | 'taskId'>, paused = false): Promise<Along[]> {
+  if (paused) return [];
   const tasks = job.taskId && agent.kind === 'head' ? isNotNull(jobs.taskId) : undefined;
   const [words] = agent.kind === 'assistant' ? [] : await ctx.db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.id, job.id), onlyWords));
   const others = words
@@ -523,10 +528,18 @@ async function wentOut(ctx: Ctx, job: Queued, along: readonly Along[], lines: { 
   if (lines) ctx.bus.publish(lines.companyId, { type: 'org' });
 }
 
+/* Which queued turns may dispatch while the company is paused: a person's own words (or empty program start) for the
+   orchestrator and personal assistants, or an open program-operator case for a turn currently running. */
+function pausedMayGo(agent: { kind: string; roleKey?: string | null }): SQL {
+  if (agent.kind === 'orchestrator' || agent.kind === 'assistant') return or(isNotNull(jobs.createdBy), programStart)!;
+  if (agent.roleKey === PROGRAM_OPERATOR_ROLE) return openCaseForRunningTurn;
+  return sql`false`;
+}
+
 /* A delayed retry holds the whole line, including personal messages while task turns are held back. */
-async function waitsForRetry(ctx: Ctx, agentId: string): Promise<boolean> {
+async function waitsForRetry(ctx: Ctx, agentId: string, paused = false, agent?: { kind: string; roleKey?: string | null }): Promise<boolean> {
   const [retry] = await ctx.db.select({ at: jobs.notBefore }).from(jobs)
-    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.notBefore), sql`not exists (select 1 from agent_events e where e.job_id = ${jobs.id} and e.data->>'report' is not null)`)).orderBy(asc(jobs.createdAt)).limit(1);
+    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.notBefore), paused && agent ? pausedMayGo(agent) : undefined, sql`not exists (select 1 from agent_events e where e.job_id = ${jobs.id} and e.data->>'report' is not null)`)).orderBy(asc(jobs.createdAt)).limit(1);
   if (!retry?.at || +retry.at <= Date.now()) return false;
   pumpAt(ctx, agentId, retry.at.toISOString(), 0);
   return true;
@@ -553,22 +566,28 @@ async function tellOperationsOfHold(ctx: Ctx, agent: PlanAgent & { name: string 
 
 /* Switched off, it still answers people who write to it; its task turns and the turn that takes its inbox wait until it is
    on. Past the share set for tasks only task turns wait. */
-function turnsThatMayGo(agent: PlanAgent & { switchedOffAt: Date | null }, until: string | null, spent: string | null) {
-  return and(conversationOf(agent.id), eq(jobs.status, 'queued'), until ? programStart : undefined, agent.switchedOffAt ? peopleTurns : spent ? isNull(jobs.taskId) : undefined);
+function turnsThatMayGo(agent: PlanAgent & { switchedOffAt: Date | null; roleKey?: string | null }, until: string | null, spent: string | null, paused: boolean) {
+  return and(
+    conversationOf(agent.id),
+    eq(jobs.status, 'queued'),
+    until ? programStart : undefined,
+    agent.switchedOffAt ? peopleTurns : spent ? isNull(jobs.taskId) : undefined,
+    paused ? pausedMayGo(agent) : undefined,
+  );
 }
 
 /* The turn that may go out now, if any, with the line woken for what comes next: the plan's limit or share starting over,
    or a turn that may go by then and waits for its time. A turn that is due and may not go sets no wake, which would only
    send the line round again at once. */
-async function dueTurn(ctx: Ctx, agent: PlanAgent & { name: string; switchedOffAt: Date | null }, sub: Plan) {
+async function dueTurn(ctx: Ctx, agent: PlanAgent & { name: string; switchedOffAt: Date | null; roleKey?: string | null }, sub: Plan, paused = false) {
   /* Real turns wait for the limit; an empty start can still open the saved program. Past the share set for tasks only
      workers' task turns wait. */
   const until = modelLimitUntil(sub, agent.model);
   const spent = workerBudgetUntil(agent, sub);
   const reset = until ?? spent;
   if (reset) pumpAt(ctx, agent.id, reset);
-  await tellOperationsOfHold(ctx, agent, sub);
-  const mayGo = turnsThatMayGo(agent, until, spent);
+  if (!paused) await tellOperationsOfHold(ctx, agent, sub);
+  const mayGo = turnsThatMayGo(agent, until, spent, paused);
   const now = new Date(Date.now());
   const [job] = await ctx.db.select().from(jobs).where(and(mayGo, or(isNull(jobs.notBefore), lte(jobs.notBefore, now)))).orderBy(desc(sql`${jobs.notBefore} is not null`), asc(jobs.inboxWake), asc(jobs.createdAt)).limit(1);
   if (job) return job;

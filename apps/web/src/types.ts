@@ -32,7 +32,9 @@ export type Person = {
   isCeoDelegate?: boolean;
 };
 
-export type Company = { id: string; name: string };
+export type CompanyPause = { by: string; byName: string; at: string };
+export type CompanyPauseView = { paused: CompanyPause | null; finishingTurns: number };
+export type Company = { id: string; name: string; paused?: CompanyPause | null };
 
 /* canDecideCompany: this person takes the decisions only the CEO takes, the orchestrator's cards among them. */
 export type Me = { person: Person; company: Company; canDecideCompany?: boolean };

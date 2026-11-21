@@ -76,6 +76,9 @@ const resolutionChecks = (name: string, t: ResolutionColumns) => [
 export const INBOX_MODES = ['inbox', 'direct'] as const;
 export type InboxMode = (typeof INBOX_MODES)[number];
 
+/* Who paused the company and when: null while it runs. Survives server restarts. */
+export type CompanyPause = { by: string; byName: string; at: string };
+
 export const companies = pgTable('companies', {
   id: id(),
   name: text('name').notNull(),
@@ -93,6 +96,10 @@ export const companies = pgTable('companies', {
   /* A company from before the tracker gets its open tasks' responsible people and a product manager in each department
      once, by the server's own rules; a new one starts with them. */
   trackerDue: boolean('tracker_due').notNull().default(false),
+  /* While set, no new company work starts and deadlines stand still; survives server restarts. */
+  paused: jsonb('paused').$type<CompanyPause>(),
+  /* When the company was last resumed from a pause, so silence alarms count from then. */
+  resumedAt: timestamp('resumed_at', { withTimezone: true }),
   createdAt: createdAt(),
 });
 

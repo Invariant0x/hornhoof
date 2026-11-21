@@ -14,6 +14,7 @@ import { agentProgramState, programGoneSince } from './program-state.js';
 import { alreadyAlerted, screenReader } from './silent.js';
 import { logTurnFact } from './turn-log.js';
 import { lastTurnSigns } from './turn-signs.js';
+import { isCompanyPaused } from '../org/pause-state.js';
 import { afterJob } from './wake.js';
 
 type Job = typeof jobs.$inferSelect;
@@ -190,6 +191,7 @@ function stalledText(name: string, agentId: string, job: Job, waiting: Job, now:
 
 /* Operations hear once of a turn whose program stands idle while the agent's messages wait behind it again. */
 async function tellOperations(ctx: Ctx, job: Job, waiting: Job, busy: ReadonlySet<string>, now: Date): Promise<void> {
+  if (await isCompanyPaused(ctx.db, job.companyId)) return;
   const caseId = `${job.id}:queue`;
   if (await alreadyAlerted(ctx, caseId)) return;
   const [agent] = await ctx.db.select().from(agents).where(eq(agents.id, job.agentId!));

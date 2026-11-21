@@ -15,6 +15,7 @@ import { logTurnFact } from './turn-log.js';
 import { jobCheckQueued, jobCheckLastEnd } from '../nodes/check-slots.js';
 import { builtinOf, nodeIdentity } from '../nodes/hub.js';
 import { stopStaleProgram } from './stale-program.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import { lastTurnSigns } from './turn-signs.js';
 export const SILENT_TURN_MS = QUIET_ALARM_MS;
 /* Every program shows a spinner or a clock while it thinks, so its screen moves. A thinking program whose screen stood still
@@ -376,8 +377,9 @@ function quietCase(s: SilentTurn, now: Date): string {
 export function checkSilentTurns(ctx: Ctx, now = new Date()): Promise<void> {
   const prev = silentChains.get(ctx) ?? Promise.resolve();
   const run = prev.then(async () => {
+    const paused = await pausedCompanyIds(ctx.db);
     const busy = await busyAgentIds(ctx);
-    const silent = await findSilentTurns(ctx, now);
+    const silent = (await findSilentTurns(ctx, now)).filter(s => !paused.has(s.job.companyId));
     const unavailable = new Set([...busy, ...silent.map(s => s.agent.id)]);
     for (const s of silent) await sendTurnAlarm(ctx, s, unavailable, now);
   });

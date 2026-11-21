@@ -20,6 +20,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - On the map and in an open department the menu, the bars and the bottom bar are separate glass blocks with no shadow and no band between them, so the map shows around them to the top and the bottom of the window, the department's schema too. The chosen tab stands on a solid backing. The department's name and the windows that open there stand 8 px under the menu or the last bar on every screen. When a bar comes or goes the name and the map or the schema slide to their new place in 200 ms, at once with less motion. On a phone every bar after the first folds to one line with More.
 - In a page that reads right to left, the glow of the map's hub stands around the hub instead of at the map's right edge.
 
+### Added
+
+- Company pause and Resume: people who see the whole company can pause the company from the account menu next to "Talk to the orchestrator" and resume it with one button. Running turns and running test parts finish on their own while no new employee turn, timer, check, release or watchdog alarm starts; queues, messages and tasks arriving during the pause wait, and pending deadlines shift forward on Resume. Everyone sees a pause bar under the top bar with who paused it, when and how many turns are still finishing. The orchestrator and personal assistants still answer people's own words during a pause, and the orchestrator can lift the pause only in a turn carrying a whole-company person's words.
+
 ## [0.40.0] - 2026-11-20
 
 ### Fixed

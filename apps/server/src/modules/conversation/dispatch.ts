@@ -25,12 +25,24 @@ import { effortOfTurn } from './turn-effort.js';
 import { repositoryScope } from '../testruns/describe.js';
 import { cancelUnsentDelivery } from '../program-operator/deliveries.js';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
+import { isCompanyPaused, mayStartWhilePaused } from '../org/pause-state.js';
 import { claimMail, inboxChanged, mailShown, mailSummary, mailWentOut, unreadMail } from './inbox.js';
+
+/* Null when the agent is gone or held by a company pause; otherwise whether its company is paused. */
+async function pauseStateFor(db: Ctx['db'], agentId: string): Promise<boolean | null> {
+  const [candidate] = await db.select({ companyId: agents.companyId, kind: agents.kind, roleKey: agents.roleKey }).from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
+  if (!candidate) return null;
+  const paused = await isCompanyPaused(db, candidate.companyId);
+  return paused && !mayStartWhilePaused(candidate) ? null : paused;
+}
+
 export async function sendNext(ctx: Ctx, agentId: string, queue: DispatchQueue): Promise<void> {
   const { waitsForWords, waitsForRetry, dueTurn, inboxTurnDue, heldBack, goingAlong, ALONG, take, HELD, wentOutWithWords, wentOut } = queue;
   const { db } = ctx;
   const [running] = await db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   if (running || await waitsForWords(ctx, agentId)) return;
+  const paused = await pauseStateFor(db, agentId);
+  if (paused === null) return;
   /* Between turns: onto a fallback plan while its own holds its turns back, and home again once it does not. What follows
      reads the plan it is on after that. */
   await ctx.conversationEffects.beforeDispatch(ctx, agentId);
@@ -41,9 +53,9 @@ export async function sendNext(ctx: Ctx, agentId: string, queue: DispatchQueue):
   if (await heldByOperator(ctx, agent)) return;
   /* An update waits for the turns that run: new ones start after it, the orchestrator's go on. */
   if (agent.kind !== 'orchestrator' && turnsHeld(ctx, agent.companyId)) return;
-  if (await waitsForRetry(ctx, agentId)) return;
-  const due = await dueTurn(ctx, agent, sub);
-  if (!due) return (await inboxTurnDue(ctx, agent)) ? sendNext(ctx, agentId, queue) : undefined;
+  if (await waitsForRetry(ctx, agentId, paused, agent)) return;
+  const due = await dueTurn(ctx, agent, sub, paused);
+  if (!due) return (await inboxTurnDue(ctx, agent, paused)) ? sendNext(ctx, agentId, queue) : undefined;
   if (await heldBack(ctx, due)) return sendNext(ctx, agentId, queue);
   /* The turn that takes the inbox asks what is unread in it when it goes, or goes nowhere when nothing is. */
   let mail = due.inboxWake ? await unreadMail(db, agentId) : [];
@@ -63,7 +75,7 @@ export async function sendNext(ctx: Ctx, agentId: string, queue: DispatchQueue):
   if (await machineInstalls(db, place.nodeId)) return;
   if (await nextToInstallHolds(ctx, place.nodeId, isLeader(agent))) return;
   const going: Along[] = [];
-  for (const j of await goingAlong(ctx, agent, job)) if (!(await heldBack(ctx, { ...j, agentId }))) going.push(j);
+  for (const j of await goingAlong(ctx, agent, job, paused)) if (!(await heldBack(ctx, { ...j, agentId }))) going.push(j);
   /* The turn that takes the inbox goes along with what is unread in it now; while nothing is, it stays and ends unsent. */
   if (!mail.length && going.some(j => j.inboxWake)) mail = await unreadMail(db, agentId);
   const along = going.flatMap(j => (!j.inboxWake ? [j] : mail.length ? [{ ...j, prompt: mailSummary(mail) }] : []));

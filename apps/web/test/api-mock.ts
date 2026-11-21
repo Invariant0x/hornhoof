@@ -25,7 +25,7 @@ function taskDepartments(routes: Record<string, Route>): Route {
 export const TEST_KEY = { publicKey: 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE'.padEnd(122, 'k'), wrapped: 'd3JhcHBlZA', salt: 'c2FsdA', iv: 'aXY', iterations: 600_000 };
 /* A join command as the screens show it: with the viewer's key on it. */
 export const withKey = (command: string): string => `${command} --owner-key ${TEST_KEY.publicKey}`;
-const KEY_ROUTES: Record<string, Route> = { 'GET /api/me/key': [200, { key: TEST_KEY }], 'PUT /api/me/key': [204], 'GET /api/phones': [200, { phones: [] }] };
+const KEY_ROUTES: Record<string, Route> = { 'GET /api/me/key': [200, { key: TEST_KEY }], 'PUT /api/me/key': [204], 'GET /api/phones': [200, { phones: [] }], 'GET /api/company/pause': [200, { paused: null, finishingTurns: 0 }] };
 
 export function mockApi(routes: Record<string, Route>): Call[] {
   const calls: Call[] = [];

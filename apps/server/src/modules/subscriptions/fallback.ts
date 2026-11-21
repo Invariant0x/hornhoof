@@ -11,6 +11,7 @@ import { budgetUntil, modelLimitUntil } from '../conversation/limits.js';
 import { enqueueTurn, insertTurn, pump } from '../conversation/queue.js';
 import { planHeld, planWaitsFor } from '../conversation/state.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
+import { isCompanyPaused, pausedCompanyIds } from '../org/pause-state.js';
 import { orchestratorServing, runsTier, servingSubscriptions } from '../tools/staff.js';
 
 /* Hornhoof's own doing: no person decided it and the orchestrator did not act for one. */
@@ -269,7 +270,7 @@ async function goOnOrStay(ctx: Ctx, at: Where, until: string): Promise<boolean> 
 
 /* Only work the plan really holds back waits: a person's own message still goes past the share set for tasks. */
 async function noRoom(ctx: Ctx, agent: Agent, home: Plan, until: string): Promise<false> {
-  if (await planHeld(ctx, agent, home)) await tellNoRoom(ctx, home, until, agent);
+  if (!(await isCompanyPaused(ctx.db, agent.companyId)) && (await planHeld(ctx, agent, home))) await tellNoRoom(ctx, home, until, agent);
   return false;
 }
 
@@ -283,9 +284,10 @@ export async function fallBackFrom(ctx: Ctx, planId: string): Promise<void> {
 /* Each round of the reconciler: whoever is on a fallback while its own plan takes its turns again comes back between turns,
    also when the wake set for that was lost with a restart of the server. */
 export async function settleFallbacks(ctx: Ctx): Promise<void> {
-  const away = await ctx.db.select({ agentId: agentFallbacks.agentId, kind: agents.kind, model: agentFallbacks.homeModel, home: subscriptions }).from(agentFallbacks)
+  const paused = await pausedCompanyIds(ctx.db);
+  const away = await ctx.db.select({ agentId: agentFallbacks.agentId, companyId: agents.companyId, kind: agents.kind, model: agentFallbacks.homeModel, home: subscriptions }).from(agentFallbacks)
     .innerJoin(agents, eq(agents.id, agentFallbacks.agentId)).innerJoin(subscriptions, eq(subscriptions.id, agentFallbacks.homeSubscriptionId));
-  for (const { agentId, kind, model, home } of away) if (home.removedAt || !heldUntil(home, kind, model)) await pump(ctx, agentId);
+  for (const { agentId, companyId, kind, model, home } of away) if (!paused.has(companyId) && (home.removedAt || !heldUntil(home, kind, model))) await pump(ctx, agentId);
 }
 
 /* The fallback an employee is on, for its card: its own plan and when that plan's hold ends, as far as it is known now. */

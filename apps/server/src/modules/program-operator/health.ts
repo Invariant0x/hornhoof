@@ -10,16 +10,19 @@ import { callOperationsOnHold } from './hold-watch.js';
 import { fromStart, notStartedWords } from './not-started.js';
 import { acceptOperatorRecovery, settleOperatorHold } from './recovery.js';
 import { operatorTransaction } from './transactions.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import { reconcileOperatorFallbacks } from './requeue.js';
 
 const needsHealth = or(eq(programOperatorCases.status, 'open'), eq(programOperatorCases.recoveryHold, true), and(eq(programOperatorCases.status, 'escalated'), isNull(programOperatorCases.escalationJobId)));
 
 /* Deadlines and missing wake recipients are durable; neither process restart nor an empty outbox loses the case. */
 export async function checkOperatorHealth(ctx: Ctx, now = new Date()): Promise<void> {
+  const paused = await pausedCompanyIds(ctx.db);
   await expireOperatorCases(ctx, now);
   await reconcileOperatorFallbacks(ctx, now);
-  const entries = await ctx.db.selectDistinct(only(programOperatorCases, 'agentId')).from(programOperatorCases).where(needsHealth);
-  for (const { agentId } of entries) {
+  const entries = await ctx.db.selectDistinct({ agentId: programOperatorCases.agentId, companyId: programOperatorCases.companyId }).from(programOperatorCases).where(needsHealth);
+  for (const { agentId, companyId } of entries) {
+    if (paused.has(companyId)) continue;
     await operatorTransaction(ctx, async (tx, inside) => {
       await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, agentId)).for('update');
       const rows = await tx.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agentId), needsHealth)).for('update');

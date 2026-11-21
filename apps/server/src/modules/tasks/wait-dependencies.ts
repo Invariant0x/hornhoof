@@ -2,6 +2,7 @@ import { and, eq, isNotNull, notInArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, tasks } from '../../db/schema.js';
 import { liveSubscription } from '../conversation/placement.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import { CLOSED } from './state.js';
 import { expireWait } from './wait-expiry.js';
 
@@ -14,8 +15,10 @@ async function unavailableEmployee(ctx: Ctx, companyId: string, id: string): Pro
 
 /* An unavailable dependency gives the holder a turn to choose another way forward. */
 export async function checkWaitDependencies(ctx: Ctx): Promise<void> {
+  const paused = await pausedCompanyIds(ctx.db);
   const waiting = await ctx.db.select().from(tasks).where(and(isNotNull(tasks.externalWait), notInArray(tasks.status, [...CLOSED])));
   for (const task of waiting) {
+    if (paused.has(task.companyId)) continue;
     const wait = task.externalWait;
     if (wait?.on?.kind !== 'employee') continue;
     const on = wait.on;

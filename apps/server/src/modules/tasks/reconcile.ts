@@ -15,6 +15,7 @@ import { checkSignInFailures, sendWaitingFailureAlarms } from './failures.js';
 import { askOfRunningTurns, moveStalledQueues } from './orphan-turns.js';
 import { checkSilentTurns } from './silent.js';
 import { closeUnendedCancels, wakeAll } from './wake.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import { settleFallbacks } from '../subscriptions/fallback.js';
 
 const MACHINE_AWAY_MS = 5 * 60_000;
@@ -87,9 +88,11 @@ async function canWake(ctx: Ctx, w: Wake, movedAt: Date, before: Date): Promise<
 
 /* Old moves need a wake only when the holder has not handled them or chosen to wait. */
 async function wakeMissing(ctx: Ctx, now: Date): Promise<void> {
+  const paused = await pausedCompanyIds(ctx.db);
   const before = new Date(now.getTime() - LOST_WAKE_MS);
   const open = await ctx.db.select().from(tasks).where(inArray(tasks.status, ['open', 'working', 'review', 'blocked']));
   for (const task of open) {
+    if (paused.has(task.companyId)) continue;
     const move = await lastMove(ctx.db, task.id);
     const movedAt = move?.createdAt ?? task.createdAt;
     if (movedAt >= before || (await waitsOnPurpose(ctx, task))) continue;

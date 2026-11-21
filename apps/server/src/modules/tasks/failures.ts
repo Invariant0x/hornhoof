@@ -17,6 +17,7 @@ import { logTurnFact } from './turn-log.js';
 import { keptBeforeStart } from '../program-operator/start-holds.js';
 import { keepUnheardWords, operatorHandledFailure, sayAgain, tellAgainWentAlong, unheardWords } from '../program-operator/recovery.js';
 import { repeatWake } from './wake-state.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import { originalPromptOf } from '../conversation/requested-prompt.js';
 const UNHEARD_MAX_MINUTES = 240;
 type TaskTurn = Parameters<typeof turnAgain>[1];
@@ -187,11 +188,13 @@ async function failureFacts(ctx: Ctx, job: Job, next: string): Promise<string> {
 
 /* A sign-in that has not healed while turns wait deserves one message, naming the person who can renew it. */
 export async function checkSignInFailures(ctx: Ctx, now = new Date()): Promise<void> {
+  const paused = await pausedCompanyIds(ctx.db);
   const failed = await ctx.db.select({ job: jobs, owner: people.name, plan: subscriptions.label })
     .from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).innerJoin(people, eq(people.id, subscriptions.ownerPersonId))
     .innerJoin(nodes, eq(nodes.id, jobs.nodeId)).where(and(eq(jobs.error, 'not_logged_in'), eq(nodes.status, 'needs_login'))).orderBy(desc(jobs.finishedAt));
   const seen = new Set<string>();
   for (const { job, owner, plan } of failed) {
+    if (paused.has(job.companyId)) continue;
     if (!job.nodeId || seen.has(job.nodeId)) continue;
     seen.add(job.nodeId);
     if (!job.finishedAt || +now - +job.finishedAt < 3_600_000) continue;
@@ -201,10 +204,12 @@ export async function checkSignInFailures(ctx: Ctx, now = new Date()): Promise<v
 
 /* An unavailable watcher must not lose a case that will not produce another failed turn. */
 export async function sendWaitingFailureAlarms(ctx: Ctx): Promise<void> {
+  const paused = await pausedCompanyIds(ctx.db);
   const pending = await ctx.db.select({ job: jobs, caseId: sql<string>`${agentEvents.data}->>'operationsPending'`, text: sql<string>`${agentEvents.data}->>'operationsText'`, tellHead: sql<boolean>`(${agentEvents.data}->>'operationsTellHead')::boolean` })
     .from(agentEvents).innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
     .where(and(eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'operationsPending' is not null`, sql`not exists (select 1 from agent_events sent where sent.data->>'failureCase' is not null and sent.data->>'failureCase' = ${agentEvents.data}->>'operationsPending')`));
   for (const alarm of pending) {
+    if (paused.has(alarm.job.companyId)) continue;
     if (await failureTaskTurn(ctx, alarm.job) === null) {
       await logTurnFact(ctx, alarm.job, 'The delayed Operations notice was skipped because the task no longer waits for this turn.', { failureCase: alarm.caseId, failureSkipped: true });
       continue;

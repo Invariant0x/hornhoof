@@ -1,6 +1,7 @@
-import { and, asc, eq, lt, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, lt, ne, notInArray, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { pendingWakes } from '../../db/schema.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import type { Tx, Wake, WakeWhy } from './state.js';
 
 /* A wake nobody queued for a day is given up. */
@@ -29,10 +30,12 @@ export async function wakeQueued(db: Db, w: Wake): Promise<void> {
   await db.delete(pendingWakes).where(and(same, action, w.why === 'explain' ? eq(pendingWakes.text, w.text ?? '') : undefined));
 }
 
-/* Wakes written before the given time that nobody queued, oldest first. */
+/* Wakes written before the given time that nobody queued, oldest first. Paused companies hold theirs untouched. */
 export async function wakesLeft(db: Db, before: Date): Promise<Wake[]> {
-  await db.delete(pendingWakes).where(and(ne(pendingWakes.why, 'calls'), lt(pendingWakes.createdAt, new Date(before.getTime() - GIVE_UP_MS))));
-  const rows = await db.select().from(pendingWakes).where(lt(pendingWakes.createdAt, before)).orderBy(asc(pendingWakes.createdAt));
+  const paused = [...(await pausedCompanyIds(db))];
+  const active = paused.length ? notInArray(pendingWakes.companyId, paused) : undefined;
+  await db.delete(pendingWakes).where(and(ne(pendingWakes.why, 'calls'), lt(pendingWakes.createdAt, new Date(before.getTime() - GIVE_UP_MS)), active));
+  const rows = await db.select().from(pendingWakes).where(and(lt(pendingWakes.createdAt, before), active)).orderBy(asc(pendingWakes.createdAt));
   return rows.map(wakeOf);
 }
 

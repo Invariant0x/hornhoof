@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { and, eq, inArray, isNull, notInArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, departments, jobs, requests, tasks, testRuns, turns } from '../../db/schema.js';
+import { agents, companies, departments, jobs, requests, tasks, testRuns, turns } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import { CLOSED, openAfter, type Task } from './state.js';
 import { waitingCycles } from './wait-graph.js';
 import { workOfOpenTurn } from './turn-department.js';
@@ -12,10 +13,11 @@ export const waitKey = (value: unknown): string => createHash('sha256').update(J
 export const taskVersions = (rows: Task[]) => rows.map(t => ({ id: t.id, version: t.version })).sort((a, b) => a.id.localeCompare(b.id));
 
 export async function waitCycles(ctx: Ctx, now: Date) {
+  const paused = await pausedCompanyIds(ctx.db);
   const rows = await ctx.db.select({ task: tasks, employee: agents }).from(tasks).innerJoin(agents, eq(agents.id, tasks.assigneeAgentId)).where(and(
     notInArray(tasks.status, [...CLOSED]), isNull(agents.removedAt), isNull(agents.switchedOffAt),
   ));
-  const edges = rows.flatMap(({ task, employee }) => !task.externalWait?.work && task.externalWait?.on?.kind === 'employee' && new Date(task.externalWait.until) > now
+  const edges = rows.flatMap(({ task, employee }) => !paused.has(task.companyId) && !task.externalWait?.work && task.externalWait?.on?.kind === 'employee' && new Date(task.externalWait.until) > now
     ? [{ from: employee.id, to: task.externalWait.on.employee, task, name: employee.name }] : []);
   return waitingCycles(edges);
 }
@@ -59,9 +61,11 @@ async function waitingForService(ctx: Ctx, task: Task): Promise<string | null> {
   return test ? 'waiting for a test run' : null;
 }
 
-/* The last thing that says the department was at work. */
-const silentSince = (turn: typeof turns.$inferSelect, work: (typeof tasks.$inferSelect)[], conversations: (typeof jobs.$inferSelect)[]): Date => new Date(Math.max(
-  (turn.openedAt ?? turn.createdAt).getTime(), ...work.map(t => t.updatedAt.getTime()),
+/* The last thing that says the department was at work, counting from the last company resume when one happened. */
+const silentSince = (turn: typeof turns.$inferSelect, work: (typeof tasks.$inferSelect)[], conversations: (typeof jobs.$inferSelect)[], resumedAt: Date | null): Date => new Date(Math.max(
+  (turn.openedAt ?? turn.createdAt).getTime(),
+  resumedAt?.getTime() ?? 0,
+  ...work.map(t => t.updatedAt.getTime()),
   ...conversations.flatMap(job => job.startedAt && job.finishedAt ? [job.finishedAt.getTime()] : []),
   /* A wait that ran out explained the work until then: the silence starts there. */
   ...work.flatMap(t => t.externalWait ? [new Date(t.externalWait.until).getTime()] : []),
@@ -70,6 +74,8 @@ const silentSince = (turn: typeof turns.$inferSelect, work: (typeof tasks.$infer
 export async function quietDepartment(ctx: Ctx, turnId: string, departmentId: string, now: Date) {
   const [turn] = await ctx.db.select().from(turns).where(and(eq(turns.id, turnId), eq(turns.status, 'open')));
   if (!turn) return null;
+  const [company] = await ctx.db.select({ paused: companies.paused, resumedAt: companies.resumedAt }).from(companies).where(eq(companies.id, turn.companyId));
+  if (company?.paused) return null;
   const scope = await departmentScope(ctx, turn.companyId, departmentId);
   const work = await ctx.db.select().from(tasks).where(and(workOfOpenTurn(turn.id), inArray(tasks.departmentId, scope), notInArray(tasks.status, [...CLOSED])));
   if (!work.length) return null;
@@ -79,7 +85,7 @@ export async function quietDepartment(ctx: Ctx, turnId: string, departmentId: st
   /* A department where all of it waits for something known, in time, has nothing to say. */
   const silent = await unexplained(ctx, work, now);
   if (!silent.length) return null;
-  const since = silentSince(turn, work, conversations);
+  const since = silentSince(turn, work, conversations, company?.resumedAt ?? null);
   if (now.getTime() - since.getTime() < QUIET_DEPARTMENT_MS) return null;
   const versions = taskVersions(work);
   return { companyId: turn.companyId, work, silent, since, key: waitKey([turn.id, departmentId, versions, since.toISOString()]) };

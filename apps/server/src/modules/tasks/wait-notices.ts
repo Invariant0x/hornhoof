@@ -10,6 +10,7 @@ import { insertOrDeliverTurn, pump } from '../conversation/queue.js';
 import { liveSubscription } from '../conversation/placement.js';
 import { withInputLock } from '../conversation/decision-context.js';
 import { notificationMessage } from '../events/notifications.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import { ownNote } from './events.js';
 import { taskSpot, type Task, type Tx } from './state.js';
 import type { WaitNoticeGuard } from './wait-notice-types.js';
@@ -180,8 +181,9 @@ async function sendNotice(ctx: Ctx, pendingNotice: Notice, now: Date): Promise<v
 
 /* A claim survives interrupted sends. Message acceptance and outbox completion commit together. */
 export async function deliverWaitNotices(ctx: Ctx, now = new Date()): Promise<void> {
+  const paused = await pausedCompanyIds(ctx.db);
   const due = await ctx.db.select().from(waitNotices).where(and(pending, or(isNull(waitNotices.leaseUntil), lte(waitNotices.leaseUntil, now)))).orderBy(asc(waitNotices.createdAt));
-  await Promise.all(due.map(async row => {
+  await Promise.all(due.filter(row => !paused.has(row.companyId)).map(async row => {
     try { await sendNotice(ctx, row, now); }
     catch (error) { ctx.log.error({ error: loggable(error), waitNotice: row.id }, 'Delivering a wait notice failed.'); }
   }));

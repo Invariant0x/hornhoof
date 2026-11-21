@@ -4,6 +4,7 @@ import { companies, departments, tasks, turns } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { repoAt } from '../departments/repository.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import { CLOSED, type Tx } from './engine.js';
 import { keepSnapshot } from './pipeline-report.js';
 import { releasesWork } from './turn-department.js';
@@ -26,8 +27,10 @@ const ENDED = 'Hornhoof closed it by itself: every task of its department was do
 
 /* Every minute: each open turn that holds nothing for a release closes. One turn's trouble keeps no other from it. */
 export async function closeIdleTurns(ctx: Reader): Promise<void> {
+  const paused = await pausedCompanyIds(ctx.db);
   const open = await ctx.db.select({ turn: turns, department: departments }).from(turns).innerJoin(departments, eq(departments.id, turns.departmentId)).where(eq(turns.status, 'open'));
   for (const { turn, department } of open) {
+    if (paused.has(turn.companyId)) continue;
     try {
       await closeIfIdle(ctx, turn, department);
     } catch (err) {

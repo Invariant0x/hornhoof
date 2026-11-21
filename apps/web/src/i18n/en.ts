@@ -2848,7 +2848,20 @@ export const en = {
     nodeFree: 'Free: being replaced now, then takes work again by itself',
     nodeWaitsFor: (work: string) => `Waits for: ${work}`,
   },
+  companyPause: {
+    label: 'Company pause',
+    pauseMenu: 'Pause company',
+    resumeMenu: 'Resume company',
+    resume: 'Resume',
+    bannerRunning: (n: number, by: string, at: string) =>
+      `The company is paused. ${n} ${plural('en', n, { one: 'turn is', other: 'turns are' })} still finishing. Paused by ${by} at ${at}.`,
+    bannerIdle: (by: string, at: string) =>
+      `The company is paused. Nothing is running. Paused by ${by} at ${at}.`,
+  },
   errors: {
+    company_pause_forbidden: 'Only a person who sees the whole company can pause it.',
+    company_resume_forbidden: 'Only a person who sees the whole company can resume it.',
+    company_paused: 'The company is paused. Resume it first.',
     phone_invalid: 'Check the phone name, computer and address.',
     phone_unknown: 'This phone or recording is not available.',
     phone_not_allowed: 'You do not have access to this phone or recording.',

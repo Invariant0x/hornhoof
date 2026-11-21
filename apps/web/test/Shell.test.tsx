@@ -191,7 +191,7 @@ describe('Shell', () => {
   });
 
   it.each([
-    ['who sees the whole company', ME, ['Talk to the orchestrator', 'Settings', 'Improvements', 'Versions', 'About', 'Log out']],
+    ['who sees the whole company', ME, ['Talk to the orchestrator', 'Pause company', 'Settings', 'Improvements', 'Versions', 'About', 'Log out']],
     ['who sees only some departments', { ...ME, person: { ...ME.person, scopeKind: 'listed' as const, isOwner: false } }, ['Talk to the orchestrator', 'Settings', 'About', 'Log out']],
   ])('keeps the account menu short for a person %s: no themes, language or feedback', async (_who, me, items) => {
     mockApi({ 'GET /api/org': [200, ORG] });
@@ -351,7 +351,7 @@ describe('the account menu', () => {
     await within(menu).findByRole('button', { name: 'Improvements, 2 to decide' });
     await within(menu).findByRole('button', { name: 'Feedback inbox' });
     expect(rows(menu)).toEqual([
-      'head', 'line', 'Talk to the orchestrator', 'Settings',
+      'head', 'line', 'Talk to the orchestrator', 'Pause company', 'Settings',
       'line', 'Improvements + 2', 'Feedback inbox', 'Versions',
       'line', 'About', 'Log out',
     ]);

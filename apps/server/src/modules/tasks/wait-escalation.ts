@@ -5,6 +5,7 @@ import { agents, people, tasks, taskWaits, waitNotices } from '../../db/schema.j
 import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { notificationMessage } from '../events/notifications.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import { ownNote } from './events.js';
 import { type Task, type Tx } from './state.js';
 import { recordWaitNotice } from './wait-notices.js';
@@ -151,8 +152,9 @@ async function eachDue(ctx: Ctx, ids: { id: string }[], step: (id: string) => Pr
 
 /* Called with the rest of the wait checks, once a minute. A wait that fails is taken again in the next round, whole. */
 export async function sweepWaits(ctx: Ctx, now = new Date()): Promise<void> {
-  const late = await ctx.db.select(idOnly(taskWaits)).from(taskWaits).where(dueBy(taskWaits.nextActionAt, now, sql`${taskWaits.level} < ${LEVELS.department}`)).orderBy(asc(taskWaits.nextActionAt)).limit(SWEEP_SIZE);
-  await eachDue(ctx, late, id => stepWait(ctx, id, now));
-  const reviews = await ctx.db.select(idOnly(taskWaits)).from(taskWaits).where(dueBy(taskWaits.nextReviewAt, now)).orderBy(asc(taskWaits.nextReviewAt)).limit(SWEEP_SIZE);
-  await eachDue(ctx, reviews, id => reviewWait(ctx, id, now));
+  const paused = await pausedCompanyIds(ctx.db);
+  const late = await ctx.db.select({ id: taskWaits.id, companyId: taskWaits.companyId }).from(taskWaits).where(dueBy(taskWaits.nextActionAt, now, sql`${taskWaits.level} < ${LEVELS.department}`)).orderBy(asc(taskWaits.nextActionAt)).limit(SWEEP_SIZE);
+  await eachDue(ctx, late.filter(row => !paused.has(row.companyId)), id => stepWait(ctx, id, now));
+  const reviews = await ctx.db.select({ id: taskWaits.id, companyId: taskWaits.companyId }).from(taskWaits).where(dueBy(taskWaits.nextReviewAt, now)).orderBy(asc(taskWaits.nextReviewAt)).limit(SWEEP_SIZE);
+  await eachDue(ctx, reviews.filter(row => !paused.has(row.companyId)), id => reviewWait(ctx, id, now));
 }

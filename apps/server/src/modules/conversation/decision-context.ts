@@ -13,6 +13,7 @@ import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { sayLive } from './live.js';
 import { answeredWords, wordsForTurn } from './turn-words.js';
+import { isCompanyPaused, mayHearPersonWhilePaused } from '../org/pause-state.js';
 import { liveInputOf } from '../program-operator/input.js';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 
@@ -172,6 +173,11 @@ export function deliverLive(
   return withInputLock(ctx, agentId, () => deliverLockedInput(ctx, agentId, text, on, keep));
 }
 
+async function blockedByCompanyPause(db: Reader, agentId: string, personId: string | null | undefined): Promise<boolean> {
+  const [target] = await db.select({ companyId: agents.companyId, kind: agents.kind }).from(agents).where(eq(agents.id, agentId));
+  return Boolean(target && (await isCompanyPaused(db, target.companyId)) && !mayHearPersonWhilePaused(target, personId));
+}
+
 /* The caller already owns the input lock; callers that also need the agent line take input first. */
 export async function deliverLockedInput(
   ctx: Ctx,
@@ -180,6 +186,9 @@ export async function deliverLockedInput(
   on: { taskId?: string; source?: { personId?: string | null; data?: unknown } },
   keep: (jobId: string, kept: WithEvent) => Promise<void>,
 ): Promise<string | null> {
+  /* While the company is paused, arriving work waits in line instead of entering a finishing turn; only a person's words
+     reach the orchestrator or a personal assistant live. */
+  if (await blockedByCompanyPause(ctx.db, agentId, on.source?.personId)) return null;
   const into = await sayLive(ctx, agentId, text, on.taskId, on.source, jobId => inputPending(ctx.db, jobId));
   const delivery = liveInputOf(on.source?.data, agentId)?.delivery;
   return into ? keepLiveInput(into, (jobId, kept) => keep(jobId, keepOperatorDelivery(kept, delivery))) : null;

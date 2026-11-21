@@ -19,6 +19,7 @@ import { onAgent } from '../conversation/line.js';
 import { withInputLock } from '../conversation/decision-context.js';
 import { messageNotDelivered, NOT_DELIVERED, refusedMessage, taskNamed, undeliveredLine } from '../conversation/undelivered.js';
 import { dropMail, inboxChanged } from '../conversation/inbox.js';
+import { isCompanyPaused, pausedCompanyIds } from '../org/pause-state.js';
 import { recordRequestedNotice, requestedWaitNotice } from './wait-notices.js';
 import { checkWaitHealth } from './wait-monitor.js';
 import { bindSource } from './wait-producers.js';
@@ -278,8 +279,9 @@ async function waitsInLine(ctx: Ctx, agentId: string, turn: { id: string; create
    back the words of the turn that ended, or not have taken the turn that went to it, and the turn goes out with the next
    try, which the minute round makes if nothing comes before. */
 async function notWaiting(ctx: Ctx, agentId: string, id: string): Promise<string | null> {
-  const [turn] = await ctx.db.select({ id: jobs.id, taskId: jobs.taskId, createdAt: jobs.createdAt }).from(jobs).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
+  const [turn] = await ctx.db.select({ id: jobs.id, companyId: jobs.companyId, taskId: jobs.taskId, createdAt: jobs.createdAt }).from(jobs).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
   if (!turn) return 'turn_not_sent';
+  if (await isCompanyPaused(ctx.db, turn.companyId)) return null;
   const state = await agentState(ctx, agentId);
   if (updating(state)) return null;
   const held = planHold(state, turn.taskId !== null);
@@ -368,13 +370,14 @@ export async function endWaitForRun(tx: Tx, taskId: string, agentId: string, run
 
 /* The task move and its wake commit together. Repeated or concurrent sweeps can end each wait only once. */
 export async function checkExternalWaits(ctx: Ctx, now = new Date()): Promise<number> {
+  const paused = await pausedCompanyIds(ctx.db);
   const due = await ctx.db.select().from(tasks).where(and(
     isNotNull(tasks.externalWait),
     lte(sql<string>`${tasks.externalWait}->>'until'`, now.toISOString()),
     notInArray(tasks.status, ['done', 'cancelled']),
   ));
   let ended = 0;
-  for (const task of due) if (await expireWait(ctx, task, undefined, now)) ended++;
+  for (const task of due) if (!paused.has(task.companyId) && (await expireWait(ctx, task, undefined, now))) ended++;
   return ended;
 }
 export { expireWait } from './wait-expiry.js';

@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
 import { nodeHeld } from '../updates/drain.js';
+import { pausedCompanyIds } from '../org/pause-state.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import { agents, attachments, companies, departments, machines, nodes, people, subscriptions, tasks, testParts, testRuns, type ExternalWait, type LostRun } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
@@ -374,16 +375,18 @@ function partSilenceMs(run: Run, estimatedMs: number | undefined): number {
 /* Gives waiting parts out oldest first, keeping a shared count of reservations on each physical computer. */
 async function giveOut(ctx: Ctx): Promise<void> {
   const { db } = ctx;
+  const paused = await pausedCompanyIds(db);
   await pumpDescriptions(ctx, companyId => placesOf(ctx, companyId), run => targetOf(ctx, run), id => settleRun(ctx, id));
   /* A run whose every file was reused has no part whose end would end it. */
   for (const { id } of await db.select(idOnly(testRuns)).from(testRuns).where(and(eq(testRuns.status, 'running'), eq(testRuns.parts, 0), isNotNull(testRuns.environmentSnapshot)))) await settleRun(ctx, id);
-  const waiting = await db
+  const waiting = (await db
     .select({ part: testParts, run: testRuns, task: { number: tasks.number } })
     .from(testParts)
     .innerJoin(testRuns, eq(testRuns.id, testParts.runId))
     .innerJoin(tasks, eq(tasks.id, testRuns.taskId))
     .where(eq(testParts.status, 'queued'))
-    .orderBy(asc(testRuns.createdAt), asc(testParts.part));
+    .orderBy(asc(testRuns.createdAt), asc(testParts.part)))
+    .filter(entry => !paused.has(entry.run.companyId));
   const places = await queuePlaces(ctx, waiting.map(w => w.run.companyId));
   const reserved = new Reservations();
   const targets = new Map<string, Awaited<ReturnType<typeof targetOf>>>();
@@ -617,6 +620,7 @@ const upperLimitPassed = (run: Run, part: Part, now: Date): boolean =>
    long for a machine, and runs whose parts all ended. */
 export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> {
   const { db } = ctx;
+  const paused = await pausedCompanyIds(db);
   await settleLeftOpen(ctx);
   const open = await db
     .select({ part: testParts, run: testRuns })
@@ -633,7 +637,7 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
     const node = part.status === 'running' ? nodeOf(ctx, part) : null;
     const away = node && ctx.hub.awaySince(node);
     if (away && away + AWAY_MS < now.getTime()) await loseParts(ctx, eq(testParts.id, part.id), 'machine_offline');
-    if (part.status === 'queued' && part.queuedAt.getTime() + WAIT_MS < now.getTime()) {
+    if (part.status === 'queued' && !paused.has(run.companyId) && part.queuedAt.getTime() + WAIT_MS < now.getTime()) {
       await endParts(ctx, and(eq(testParts.id, part.id), eq(testParts.status, 'queued'))!, 'no_machine');
     }
   }
