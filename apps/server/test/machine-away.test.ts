@@ -1,6 +1,8 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agents, departments, jobs, machines, nodeConnections, nodes, people, requests, turns, waitNotices } from '../src/db/schema.js';
+import { encryptSecret } from '../src/crypto/secrets.js';
+import { hashToken } from '../src/crypto/tokens.js';
+import { agents, companies, departments, jobs, machines, nodeConnections, nodes, people, requests, sessions, turns, waitNotices } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { serverStarted } from '../src/modules/nodes/connections.js';
 import { releaseRound, uncheckedInRelease } from '../src/modules/tasks/releases.js';
@@ -59,6 +61,7 @@ const cardsOf = async (c: AclCompany, token: string) => (await waiting(c, token)
 it('shows a repeated GitHub limit in Failures to the company owner without creating a person wait', async () => {
   const c = await world();
   const repo = { url: 'https://github.com/acme/shop.git', token: 'fixture-token' };
+  await c.db.update(departments).set({ repoUrl: repo.url, repoTokenEnc: encryptSecret(repo.token, c.app.ctx.config.secret) }).where(eq(departments.id, c.dev.id));
   const limit = { remaining: 0 as const, resetAt: +after(0) };
   c.app.ctx.githubLimits.refused(repo, limit);
   expect((await waiting(c, c.tokens.ceo)).githubLimits).toEqual([]);
@@ -67,6 +70,37 @@ it('shows a repeated GitHub limit in Failures to the company owner without creat
   expect(owner.githubLimits).toEqual([{ repository: 'acme/shop', resetAt: limit.resetAt }]);
   expect(owner.counts.total).toBe(0);
   expect((await waiting(c, c.tokens.bob)).githubLimits).toEqual([]);
+});
+
+it('keeps GitHub limit cards and SSE refreshes isolated per company and repository token', async () => {
+  const c = await world();
+  const repoUrl = 'https://github.com/acme/private-shop.git';
+  await c.db.update(departments).set({ repoUrl, repoTokenEnc: encryptSecret('acme-token', c.app.ctx.config.secret) }).where(eq(departments.id, c.dev.id));
+  const [other] = await c.db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+  const [otherOwner] = await c.db.insert(people).values({ companyId: other!.id, name: 'Rita', email: 'rita@other.com', status: 'active', isOwner: true, scopeKind: 'company' }).returning();
+  const otherToken = 'other-company-owner-session';
+  await c.db.insert(sessions).values({ personId: otherOwner!.id, tokenHash: hashToken(otherToken), expiresAt: after(120 * MINUTE) });
+  await c.db.insert(departments).values([
+    { companyId: other!.id, name: 'Probe With Token', roleCode: 'PRB', position: 1, repoUrl, repoTokenEnc: encryptSecret('other-token', c.app.ctx.config.secret) },
+    { companyId: other!.id, name: 'Probe Public', roleCode: 'PUB', position: 2, repoUrl },
+  ]);
+
+  const published = vi.spyOn(c.app.ctx.bus, 'publish');
+  const limit = { remaining: 0 as const, resetAt: +after(0) };
+  c.app.ctx.githubLimits.refused({ url: repoUrl, token: 'acme-token' }, limit);
+  c.app.ctx.githubLimits.refused({ url: repoUrl, token: 'acme-token' }, limit);
+
+  await vi.waitFor(() => expect(published).toHaveBeenCalledWith(c.companyId, expect.objectContaining({ type: 'requests' })));
+  expect(published.mock.calls.filter(([companyId]) => companyId === other!.id)).toEqual([]);
+  expect((await waiting(c, c.tokens.ceo)).githubLimits).toEqual([{ repository: 'acme/private-shop', resetAt: limit.resetAt }]);
+  expect((await waiting(c, otherToken)).githubLimits).toEqual([]);
+
+  published.mockClear();
+  at(after(60 * MINUTE));
+  c.app.ctx.githubLimits.expire();
+  await vi.waitFor(() => expect(published).toHaveBeenCalledWith(c.companyId, expect.objectContaining({ type: 'requests' })));
+  expect(published.mock.calls.filter(([companyId]) => companyId === other!.id)).toEqual([]);
+  expect((await waiting(c, c.tokens.ceo)).githubLimits).toEqual([]);
 });
 
 it('keeps background turn checks quiet on GitHub rate limits and still logs unexpected errors', async () => {
