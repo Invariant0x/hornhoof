@@ -278,7 +278,8 @@ describe('what still draws its bar', () => {
     server({ 'GET /api/org': [200, ORG] });
     render(<Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} onSignOut={() => {}} />);
     await waitFor(() => screen.getByText(MAINTENANCE));
-    expect(screen.getByText(MAINTENANCE)).toHaveAttribute('role', 'alert');
+    /* The map says it where it will stand, in the block of a failed load (#1620). */
+    expect(screen.getByText(MAINTENANCE).closest('[role="alert"]')).not.toBeNull();
   });
 
   it('a maintenance refusal while the updates screen has nothing to show yet', async () => {
@@ -297,7 +298,7 @@ describe('what still draws its bar', () => {
     render(<Shell me={ME} onSignOut={() => {}} />);
     await waitFor(() => screen.getByText(/Moving the company to another machine/));
     await takenIn();
-    expect(bars()).toContain(MAINTENANCE);
+    expect(bars()).toContainEqual(expect.stringContaining(MAINTENANCE));
     expect(screen.queryByRole('progressbar', { name: 'Update progress' })).not.toBeInTheDocument();
   });
 
@@ -305,6 +306,6 @@ describe('what still draws its bar', () => {
     mockApi({ 'GET /api/updates': [200, view('install')], 'GET /api/org': [...BROKEN] });
     render(<Shell me={ME} onSignOut={() => {}} />);
     await waitFor(() => screen.getByRole('progressbar', { name: 'Update progress' }));
-    await waitFor(() => expect(bars()).toEqual(['Something went wrong.']));
+    await waitFor(() => expect(bars()).toEqual([expect.stringContaining(en.load.failed.server)]));
   });
 });

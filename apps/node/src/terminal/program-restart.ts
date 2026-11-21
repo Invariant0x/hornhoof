@@ -2,7 +2,7 @@ import { UNHEARD_MS, type ProgramState } from '@hornhoof/protocol';
 import { RESTART_AFTER_MS } from '@hornhoof/protocol/map';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { contentText, isRecord } from '../providers/events.js';
-import { flat } from './left-input.js';
+import { flat, pastable } from './left-input.js';
 import type { TermProgram } from './programs.js';
 
 export type RestartEvidence = {
@@ -73,6 +73,34 @@ export function claudeWordReceipt(line: Record<string, unknown>, enqueued: strin
   if (line.operation === 'remove') return { state: line.reason === 'absorbed_mid_turn' ? 'taken' : 'removed', text: removeQueued(text, enqueued) };
   if (line.operation === 'dequeue') removeQueued(text, enqueued);
   return null;
+}
+
+/* Claude records the words it took as an entry of the user, as text and nothing else: a tool's output comes as an entry of
+   the user too, but as its result, and what Claude itself says is its own. Only these words whole are these words, as
+   Claude got them: as tmux pasted them, inside Claude's wrapper of a paste over several lines or not, with their space
+   folded, as the receipts of queued words take them. */
+export function claudeTook(line: Record<string, unknown>, words: string): boolean {
+  const message = userMessage(line);
+  return message !== null && onlyText(message.content) && same(pastable(words), contentText(message.content));
+}
+
+/* What Claude writes as the user's of its own carries one of these: a note, a sub-agent's prompt, its summary of a
+   compacted conversation that only its transcript shows, a note beside a tool call, words of its own queue. */
+const CLAUDE_OWN = ['isMeta', 'isSidechain', 'isCompactSummary', 'isVisibleInTranscriptOnly', 'turnCompanion', 'queueTranscriptOnly'] as const;
+
+/* An entry Claude wrote as the user's of its own, which nobody typed, whatever words it holds. */
+export const claudeOwn = (line: Record<string, unknown>): boolean => CLAUDE_OWN.some(flag => line[flag] === true);
+
+/* The message of an entry typed into Claude's input, as Claude Code 2.1.318 to 2.1.329 mark it (promptSource typed): not
+   one of Claude's own, nor one that says nothing of where it came from. */
+function userMessage(line: Record<string, unknown>): Record<string, unknown> | null {
+  if (line.type !== 'user' || line.promptSource !== 'typed' || claudeOwn(line) || !isRecord(line.message)) return null;
+  return line.message.role === 'user' ? line.message : null;
+}
+
+function onlyText(content: unknown): boolean {
+  if (typeof content === 'string') return true;
+  return Array.isArray(content) && content.length > 0 && content.every(part => isRecord(part) && part.type === 'text' && typeof part.text === 'string');
 }
 
 /* Keys are not receipts. Keep each live message until the program takes it, including across a restart. */

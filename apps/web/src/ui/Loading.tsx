@@ -163,6 +163,10 @@ export function useLoad(parts: LoadPart[]): Load {
   return { ...phaseOf(failed, times, waiting), asked: asked.round, retry };
 }
 
+/* A failure of a load said on top of the page: only once the data came. Before that, the load says it where the data would
+   stand. */
+export const onTop = (data: unknown, failure: unknown): unknown => (data === undefined || data === null ? null : failure);
+
 /* What failed and what to do, each one whole sentence: the load given up at 30 s, no connection, an error answer that names
    its own reason, as a refusal while Hornhoof installs an update does, or any other error answer. */
 export function failWords(t: Messages, failure: unknown): [string, string] {

@@ -14,4 +14,4 @@ You can pin a few important user flows with reproducible end-to-end tests.
 - Wait for conditions (an element, a response, a line of output), never for a fixed number of seconds.
 - On failure keep what shows what happened: a screenshot, the logs, the requests, the output.
 - When a flow is unstable, establish whether it exposes an intermittent product defect or a faulty check. Preserve proof of the harmful behavior and repair the check that produces an unreliable result.
-- Run named test files of your change in your own workspace when its browser is there; installing that browser is allowed.
+- Run named test files of your change in your own workspace when its browser is there, in Chromium only: Firefox and WebKit run them in the turn's whole release run. Installing that browser is allowed.
