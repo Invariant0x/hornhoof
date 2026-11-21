@@ -10,6 +10,9 @@ COMPUTER_CONTROL="${HORNHOOF_COMPUTER_CONTROL_DIR:-/computer}"
 # The longest a command on the computer runs, in seconds, and how many characters of its output go back.
 COMPUTER_MAX=1800
 COMPUTER_OUTPUT=30000
+# How long a command under way runs on, in seconds, while access is closed only by a keeper that stopped: one the command
+# itself recreates, as an installer does, comes back within it, and its word decides then.
+COMPUTER_KEEPER_GRACE=120
 # linux: this reads the machine's own addresses, which only a container on the host's network sees, once a minute.
 HOST_OS="${HORNHOOF_HOST_OS:-}"
 ADDRESSES_EVERY=60
@@ -67,6 +70,25 @@ computer_open() {
   until=$(take "$COMPUTER_CONTROL/computer.json" quiet jq -r '.untilSec // 0' || true)
   case "$until" in '' | *[!0-9]*) return 1 ;; esac
   [ "$until" -gt "$(date +%s)" ]
+}
+
+# Whether a command on the computer is under way: its start marker is there until its answer is.
+computer_busy() {
+  local mark
+  for mark in "$COMPUTER_CONTROL"/computer/*.started; do
+    if [ -e "$mark" ] || [ -L "$mark" ]; then return 0; fi
+  done
+  return 1
+}
+
+# Whether access was closed by a keeper as it stopped, and no keeper has said anything since: such a keeper hears no close.
+# Access for a time that had ended by then holds nothing: the keeper says when it ends in accessUntil.
+computer_keeper_stopped() {
+  local now
+  now=$(date +%s)
+  # shellcheck disable=SC2016 # $now is jq's, given with --argjson.
+  [ "$(take "$COMPUTER_CONTROL/computer.json" quiet jq -r --argjson now "$now" \
+    '.stopped == true and (if has("accessUntil") then ((.accessUntil | type) == "number" and .accessUntil > $now) else true end)' || true)" = true ]
 }
 
 computer_answer_json() {
@@ -154,13 +176,20 @@ computer_runs() (
       touch "$out.closed"
       docker rm -f "$name" > /dev/null 2>&1 || true
     else
-      # The watch removes the container if its time is up, access closes or its keeper takes the command back.
+      # The watch removes the container if its time is up, access closes or its keeper takes the command back. Access
+      # that a keeper closed as it stopped holds the command for COMPUTER_KEEPER_GRACE seconds at most: the keeper that
+      # comes back opens it again or closes it, and with none the command stops all the same.
       (
         i=0
+        held=0
         while [ "$i" -lt "$timeout" ]; do
           sleep 1
           [ ! -f "$out.done" ] || exit 0
-          if [ ! -f "$file" ] || ! computer_open; then
+          if [ -f "$file" ] && computer_open; then
+            held=0
+          elif [ -f "$file" ] && [ "$held" -lt "$COMPUTER_KEEPER_GRACE" ] && computer_keeper_stopped; then
+            held=$((held + 1))
+          else
             touch "$out.closed"
             docker rm -f "$name"
             exit 0

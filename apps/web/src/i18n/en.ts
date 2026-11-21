@@ -105,7 +105,7 @@ export const en = {
     limits: 'Loading limits…',
     failed: {
       offline: 'Could not load: no connection to the server.',
-      timeout: 'Could not load: the server did not answer in 30 seconds.',
+      timeout: 'Could not load: the server did not answer in 30\u00a0seconds.',
       server: 'Could not load: something went wrong on the server.',
       provider: 'Could not load the limits: the provider did not answer.',
     },

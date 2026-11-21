@@ -11,6 +11,7 @@ import { withProgramExit, type ProgramExit } from '../program-exit.js';
 import { KEEP_BYTES, stripEscapes } from '../providers/process.js';
 import { recorded, recordedAfter, recordingCursor, Recordings, type ExitSnapshot, type RecordingCursor } from './recordings.js';
 import { PrivateStreamMask } from './mask.js';
+import { pastable } from './left-input.js';
 
 /* How agent sessions look and behave: no tmux bar, the wheel scrolls, the size is the smallest window's of the people
    watching (the node gives them all that size), colours pass through, and a finished program leaves its last screen. */
@@ -239,8 +240,7 @@ export class Tmux {
      a program that ended gets nothing. */
   async paste(name: string, text: string): Promise<void> {
     const buffer = `hh-${randomBytes(6).toString('hex')}`;
-    /* Embedded terminal controls must not end the paste or become keystrokes. Keep only newline and tab. */
-    const clean = text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
+    const clean = pastable(text);
     await this.run(['load-buffer', '-b', buffer, '-'], clean);
     await this.run(['if-shell', '-F', '-t', name, '#{pane_dead}', `delete-buffer -b ${buffer}`, `paste-buffer -p -d -b ${buffer} -t ${quote(name)}`]);
   }

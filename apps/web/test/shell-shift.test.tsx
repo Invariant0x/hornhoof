@@ -21,6 +21,13 @@ describe('the move of a fit', () => {
     expect(result.current({ ...at, smooth: 'shift' }, { x: 10.2, y: 19.8, k: 1 })).toBeNull();
     expect(result.current({ ...at, smooth: true }, { x: 10, y: 20, k: 1.5 })).not.toBeNull();
   });
+
+  it('stands in place when asked not to glide, and still follows a bar of the shell in its time', () => {
+    const { result, rerender } = renderHook(({ top }) => useFitMove(top), { initialProps: { top: null as number | null } });
+    expect(result.current({ ...at, smooth: false }, { x: 30, y: 40, k: 1 }, false)).toEqual({ x: 30, y: 40, k: 1, smooth: false });
+    rerender({ top: 120 });
+    expect(result.current({ x: 30, y: 40, k: 1, smooth: false }, { x: 30, y: 96, k: 1 }, false)).toEqual({ x: 30, y: 96, k: 1, smooth: 'shift' });
+  });
 });
 
 describe("the world's transition", () => {

@@ -133,6 +133,7 @@ while true; do
   sweep_dumps
   dump_request
   restore_request
+  start_unstarted || true
   catch_up_nodes || printf 'Could not look at the nodes.\n'
   sleep 2
 done

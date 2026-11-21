@@ -16,6 +16,7 @@ import { Bar, percent } from '../ui/Bar';
 import { CANVAS_NARROW, CANVAS_ZOOM_LIMITS, DRAG_PX, FLOAT_GAP, LEFT_PANEL_COVER, SIDE_GAP, canvasSpace, freeRoom, underShell, useFitMove, usePanZoom, worldTransition, ZoomBar, type Box, type Edges, type View } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { useLoadFailure } from '../ui/LoadFailure';
+import { LoadState, useLoad, type Load } from '../ui/Loading';
 import { MapVersion } from '../ui/VersionMark';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
@@ -654,6 +655,24 @@ export function mapView(room: Box, b: Box, whole: boolean, readable = MAP_READAB
   return { k, x: room.x0 + w / 2 - (fits ? (b.x0 + b.x1) / 2 : hub) * k, y };
 }
 
+/* One load of the map: the company and the person's arrangement. ready: the company, once both came, for what the map
+   draws, measures and places; null before. An arrangement that fails to come leaves the map as it places itself; only one
+   still on its way holds the map. */
+function useMapLoad(org: Org | null, failure: unknown, loadOrg: () => void, layout: { arrived: boolean; load(): void }) {
+  const load = useLoad([{ data: org, failure, load: loadOrg }, { data: layout.arrived || null, failure: null, load: layout.load }]);
+  return { load, ready: load.phase === 'done' ? org : null };
+}
+
+/* What the map shows in its place before it can draw itself: where the route leads nowhere, the shared indicator while the
+   company and the person's arrangement come, why they did not with Retry, or a failure of a later look at the company;
+   null once there is a map to draw. It draws only once both came, so no block moves after the first frame. */
+function mapStandIn(t: Messages, failure: unknown, load: Load, onHome?: () => void) {
+  if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
+  if (load.phase !== 'done') return <div className="map map-wait" aria-busy={load.phase !== 'failed'}><LoadState load={load} form="screen" /><MapVersion /></div>;
+  if (failure !== null) return <p className="alert" role="alert">{errorText(t, failure)}</p>;
+  return null;
+}
+
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
 type Props = { me: Me; windowOpen: boolean; leftPanelOpen?: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void; onOpenDecisions?(personId: string): void; onHome?: () => void };
 
@@ -667,7 +686,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const company = me.person.scopeKind === 'company';
   /* Where the room under the bars of the shell starts while one stands over the map. */
   const shellTop = useShellTop();
-  const { org, failure: loadFailure } = useOrg();
+  const { org, failure: loadFailure, load: loadOrg } = useOrg();
   /* While the update panel says the server takes no changes, the map keeps what it last showed. */
   const failure = useLoadFailure(loadFailure);
   const [shots, setShots] = useState<Shot[]>([]);
@@ -677,7 +696,11 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const box = useRef<HTMLDivElement>(null);
   /* What the hand scrolls: the map as it stands, between the bars floating over it. */
   const edges = useRef<() => Edges | null>(() => null);
-  const { view, setView, zoomAt, handlers, dragged, touched } = usePanZoom(box, org, { min: minZoom, max: MAX_K }, kept ?? undefined, () => edges.current());
+  /* Where this person put blocks, and the one load of the company and that arrangement. */
+  const layout = useMapLayout();
+  const { load: mapLoad, ready } = useMapLoad(org, loadFailure, loadOrg, layout);
+  /* The wheel finds the map once it stands, which is once both came (#1620), not as soon as the company did. */
+  const { view, setView, zoomAt, handlers, dragged, touched } = usePanZoom(box, ready, { min: minZoom, max: MAX_K }, kept ?? undefined, () => edges.current());
   const viewNow = useRef(view);
   viewNow.current = view;
   /* Whether the view is the person's own: kept from before, shown with Fit, or dragged or zoomed. Only the person moves it
@@ -691,8 +714,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const held = useRef<{ m: Extract<LiveMessage, { type: 'pulse' }>; at: number }[]>([]);
   const [flashing, setFlashing] = useState<Set<string>>(new Set());
   const flashTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  /* Where this person put blocks, and the block their hand moves now. */
-  const layout = useMapLayout();
+  /* The block the person's hand moves now. */
   const [moving, setMoving] = useState<{ key: string; at: At } | null>(null);
   /* The bend the hand moves now: on which line, which of its bends, and where. */
   const [bending, setBending] = useState<{ line: string; i: number; at: Point } | null>(null);
@@ -704,9 +726,9 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const [pointed, setPointed] = useState<string | null>(null);
   /* Every card of the map is as tall as the words of the card that has the most need, and every people chip of a row as
      the words of the chip that has the most. */
-  const need = useCardNeed(box, org, language);
-  const chipNeed = useChipNeed(box, org, language);
-  const arr = useMemo(() => (org ? arrangeMap(org, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed, bends, need, chipNeed) : null), [org, layout.placed, moving, bends, need, chipNeed]);
+  const need = useCardNeed(box, ready, language);
+  const chipNeed = useChipNeed(box, ready, language);
+  const arr = useMemo(() => (ready ? arrangeMap(ready, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed, bends, need, chipNeed) : null), [ready, layout.placed, moving, bends, need, chipNeed]);
   /* Pulses and Fit read the map as it stands, without waiting for it to settle. */
   const arrRef = useRef(arr);
   arrRef.current = arr;
@@ -792,16 +814,17 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     return room && org && shown && !inside ? { content: arrangedBounds(shown, org), room } : null;
   };
 
-  /* Show everything when whole; otherwise as the map opens, readable. A fit because a bar of the shell came or went follows
-     the bars in the shell's time (#1635). */
+  /* Show everything when whole; otherwise as the map opens, readable. smooth: it moves there, as when the person asks; the
+     map placing itself stands there at once, so it never glides after its first frame (#1620). A fit because a bar of the
+     shell came or went follows the bars in the shell's time (#1635). */
   const fitMove = useFitMove(shellTop);
-  const fit = useCallback((whole: boolean) => {
+  const fit = useCallback((whole: boolean, smooth = true) => {
     const shown = arrRef.current, room = roomOf(FIT_SIDE);
     if (!room || !org || !shown || inside) return;
     const phone = box.current!.clientWidth <= CANVAS_NARROW;
     const v = mapView(room, arrangedBounds(shown, org), whole, phone ? PHONE_MAP_READABLE_K : MAP_READABLE_K, shown.hub.x + HUB);
     setMinZoom(Math.min(MIN_K, v.k));
-    const move = fitMove(viewNow.current, v);
+    const move = fitMove(viewNow.current, v, smooth);
     if (!move) return;
     viewNow.current = move;
     setView(move);
@@ -824,10 +847,11 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const roomStyle = useMapRoom(box, `${shown}|${windowOpen}|${putBack}`, shellTop);
   const cardH = arr?.depts[0]?.h ?? 0, chipH = `${arr?.top[0]?.h ?? 0}:${arr?.people.chips[0]?.h ?? 0}`;
   usePauseHiddenMap(box, inside, shown);
-  useEffect(() => {
+  /* Before the first frame, so the map is first drawn where it stands and does not move there. */
+  useLayoutEffect(() => {
     if (!shown || inside) return;
     const auto = () => {
-      if (!mine() && !back.current) fitRef.current(false);
+      if (!mine() && !back.current) fitRef.current(false, false);
     };
     auto();
     const el = box.current;
@@ -865,9 +889,8 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     timers.current.add(timer);
   }
 
-  if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
-  if (failure !== null) return <p className="alert" role="alert">{errorText(t, failure)}</p>;
-  if (!org || !arr) return <div className="map" aria-busy="true"><MapVersion /></div>;
+  const standIn = mapStandIn(t, failure, mapLoad, onHome);
+  if (standIn || !org || !arr) return standIn ?? <div className="map" aria-busy="true"><MapVersion /></div>;
 
   const depts = org.departments;
   const sub = org.orchestrator?.subscription ?? null;

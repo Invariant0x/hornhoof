@@ -1,5 +1,15 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { useT } from '../i18n';
+
+/* The direction the page reads in, from the dir of its root, which a page may set after it is first drawn. A canvas that
+   places its content by hand follows it as it changes, since its content does not mirror with the page's own layout. */
+const pageDirection = (): 'ltr' | 'rtl' => (document.documentElement.getAttribute('dir') === 'rtl' ? 'rtl' : 'ltr');
+function watchDirection(changed: () => void): () => void {
+  const watch = new MutationObserver(changed);
+  watch.observe(document.documentElement, { attributes: true, attributeFilter: ['dir'] });
+  return () => watch.disconnect();
+}
+export const usePageDirection = () => useSyncExternalStore(watchDirection, pageDirection, (): 'ltr' | 'rtl' => 'ltr');
 
 /* A press that moves further than this drags the canvas instead of clicking. */
 export const DRAG_PX = 4;
@@ -34,13 +44,13 @@ export function worldTransition(smooth: View['smooth'], still: boolean, fly = GL
 
 /* The move of a fit from the view now to next: none where it already stands or glides there, so a second look as a resize is
    watched again keeps the move going; in the shell's time when a bar of the shell came or went since the last fit, as
-   shellTop says (#1635); else Fit's glide. */
-export function useFitMove(shellTop: number | null): (now: View, next: Omit<View, 'smooth'>) => View | null {
+   shellTop says (#1635); else as asked (Fit's glide by default, or at once when the map places itself on its first frame). */
+export function useFitMove(shellTop: number | null): (now: View, next: Omit<View, 'smooth'>, smooth?: boolean) => View | null {
   const lastTop = useRef<number | null | undefined>(undefined);
-  return useCallback((now: View, next: Omit<View, 'smooth'>) => {
+  return useCallback((now: View, next: Omit<View, 'smooth'>, smooth = true) => {
     const shift = lastTop.current !== undefined && lastTop.current !== shellTop;
     lastTop.current = shellTop;
-    return sameView(now, next) ? null : { ...next, smooth: shift ? 'shift' : true };
+    return sameView(now, next) ? null : { ...next, smooth: shift ? 'shift' : smooth };
   }, [shellTop]);
 }
 
