@@ -39,7 +39,18 @@ export class GitHubLimits {
 
   constructor(private readonly now: () => number, private readonly warn: (limit: RateLimit) => void, private readonly changed: () => void) {}
 
-  known(repo: RepoAddress): RateLimit | null {
+  async request<T>(repo: RepoAddress, read: () => Promise<T>): Promise<T> {
+    try {
+      const limit = this.known(repo);
+      if (limit) throw new GitHubRateLimited(limit);
+      return await read();
+    } catch (error) {
+      if (error instanceof GitHubRateLimited) this.refused(repo, error.limit);
+      throw error;
+    }
+  }
+
+  private known(repo: RepoAddress): RateLimit | null {
     if (!githubName(repo.url)) return null;
     const window = this.windows.get(account(repo));
     return window && window.until > this.now() ? window.limit : null;

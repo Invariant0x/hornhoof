@@ -18,7 +18,7 @@ const SHOWN = 20;
 /* A department's page and a task's read wait no longer than this for the repository. */
 const READ_MS = 5_000;
 
-type Readers = Pick<Ctx, 'db' | 'config'> & Partial<Pick<Ctx, 'readBranches' | 'readMerged' | 'githubLimits'>>;
+type Readers = Pick<Ctx, 'db' | 'config'> & Partial<Pick<Ctx, 'readBranches' | 'readMerged'>>;
 type Repo = RepoAddress & { branch: string };
 type Found = { task: typeof tasks.$inferSelect; repo: Repo; branch: string; commit: string };
 
@@ -72,11 +72,9 @@ async function onBranches(rows: (typeof tasks.$inferSelect)[], repos: Places): P
 async function notMerged(ctx: Readers, found: Found[]): Promise<DepartmentBranch[]> {
   const readMerged = ctx.readMerged ?? (async () => null);
   const merged = await Promise.all(found.map(async f => {
-    if (ctx.githubLimits?.known(f.repo)) return null;
     try { return await readMerged(f.repo, { base: f.repo.branch, head: f.commit }, READ_MS); }
     catch (error) {
       if (!(error instanceof GitHubRateLimited)) throw error;
-      ctx.githubLimits?.refused(f.repo, error.limit);
       return null;
     }
   }));

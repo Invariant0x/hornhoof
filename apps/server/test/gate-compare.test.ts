@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { heldLineage, readCompare, readMerged, readTree, treePaths } from '../src/modules/testruns/compare.js';
+import { githubReaders, heldLineage, readCompare, readMerged, readTree, treePaths } from '../src/modules/testruns/compare.js';
 import { exactComparison } from '../src/modules/tasks/review-context.js';
 import { branchHolds } from '../src/modules/tasks/turn-integration.js';
 import { GitHubLimits } from '../src/modules/testruns/github-limit.js';
@@ -220,7 +220,7 @@ describe('a branch holds a commit, however many files lie between them', () => {
     expect(rest).not.toHaveBeenCalled();
   });
 
-  it('logs a limit once, raises a single card after another refusal and resumes REST at the reset', async () => {
+  it('shares the same limit between merge status, full comparison and branch ancestry until the reset', async () => {
     const resetAt = Date.UTC(2030, 0, 1, 23, 45);
     let now = resetAt - 60_000;
     const warned = vi.fn(), changed = vi.fn();
@@ -229,12 +229,13 @@ describe('a branch holds a commit, however many files lie between them', () => {
       .mockResolvedValueOnce(new Response(null, { status: 403, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(resetAt / 1000) } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'behind' })));
     vi.stubGlobal('fetch', fetcher);
-    const ctx = { githubLimits, readMerged, readCompare };
+    const ctx = githubReaders(githubLimits);
     const head = 'e'.repeat(40);
-    await expect(branchHolds(ctx, at, head, sha)).rejects.toThrow('23:45 UTC');
+    await expect(ctx.readMerged(at, { base: 'main', head: sha })).rejects.toThrow('23:45 UTC');
     expect(githubLimits.cards()).toEqual([]);
+    await expect(ctx.readCompare(at, { base: sha, head })).resolves.toMatchObject({ complete: false, reason: 'github-rate-limit', rateLimit: { resetAt } });
     await expect(branchHolds(ctx, at, head, sha)).rejects.toThrow('23:45 UTC');
-    await expect(branchHolds(ctx, at, head, sha)).rejects.toThrow('23:45 UTC');
+    await expect(ctx.readMerged({ ...at, url: 'https://github.com/acme/another.git' }, { base: 'main', head: sha })).rejects.toThrow('23:45 UTC');
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(warned).toHaveBeenCalledExactlyOnceWith({ remaining: 0, resetAt });
     expect(changed).toHaveBeenCalledTimes(1);

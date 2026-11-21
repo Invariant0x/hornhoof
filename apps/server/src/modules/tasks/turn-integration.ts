@@ -15,7 +15,7 @@ import { newerVersion, versionsNewestFirst } from './turn-tags.js';
    accepted into its branch turn-<number>; its release takes that branch to main. A product, or a part of a department, that
    keeps a repository of its own has no turn: its results go to its main line straight, with a person approving each. */
 
-export type BranchProofReader = Partial<Pick<Ctx, 'readGitAncestry' | 'readCompare' | 'readMerged' | 'githubLimits'>>;
+export type BranchProofReader = Partial<Pick<Ctx, 'readGitAncestry' | 'readCompare' | 'readMerged'>>;
 type Reader = BranchProofReader & Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readBranches' | 'createBranch' | 'readTags'>>;
 type Turn = typeof turns.$inferSelect;
 type Release = typeof turnReleases.$inferSelect;
@@ -66,8 +66,6 @@ export async function branchHolds(ctx: BranchProofReader, repo: Repo, head: stri
 
 async function restHolds(ctx: BranchProofReader, repo: Repo, head: string, commit: string): Promise<boolean> {
   try {
-    const limit = ctx.githubLimits?.known(repo);
-    if (limit) throw new GitHubRateLimited(limit);
     const merged = await ctx.readMerged?.(repo, { base: head, head: commit }, PROOF_TIMEOUT_MS);
     if (merged !== undefined && merged !== null) return merged;
     const compared = await ctx.readCompare?.(repo, { base: commit, head }, PROOF_TIMEOUT_MS);
@@ -78,7 +76,6 @@ async function restHolds(ctx: BranchProofReader, repo: Repo, head: string, commi
     }
   } catch (error) {
     if (error instanceof GitHubRateLimited) {
-      ctx.githubLimits?.refused(repo, error.limit);
       throw new BranchProofUnavailable(error.message, error.limit);
     }
   }

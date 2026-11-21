@@ -99,7 +99,7 @@ import { overLink } from './auth/tunnel.js';
 import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
 
-import { readCompare, readMerged, readTree, type CompareReader, type MergeReader, type TreeReader } from './modules/testruns/compare.js';
+import { githubReaders, type CompareReader, type MergeReader, type TreeReader } from './modules/testruns/compare.js';
 import { readGitAncestry, type GitAncestryReader } from './modules/testruns/git-ancestry.js';
 import { GitHubLimits } from './modules/testruns/github-limit.js';
 import { companies } from './db/schema.js';
@@ -250,12 +250,10 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     startedAt: new Date(),
     readCommit,
     markCommit,
-    readCompare,
-    readTree,
+    ...githubReaders(githubLimits),
     readBranches,
     createBranch,
     readTags,
-    readMerged,
     readGitAncestry,
     githubLimits,
     createRepository: createOnGitHub(),
