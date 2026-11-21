@@ -337,6 +337,7 @@ nodes_mode() {
     printf 'Usage: updater.sh nodes <server address> <updater image by digest> <host hash> [--once]\n' >&2
     exit 2
   fi
+  trap '[ -z "${DISK_PRIVATE_DIR:-}" ] || rm -rf -- "${DISK_PRIVATE_DIR:?}" 2> /dev/null || true' EXIT
   while true; do
     WORK=$(mktemp -d)
     code=0

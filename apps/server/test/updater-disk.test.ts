@@ -1,7 +1,7 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { JQ, PARTS, SCRIPT, SQL, runUpdaterStep, stand, startLoop } from './updater-fixture.js';
@@ -14,7 +14,14 @@ const NOW = Math.floor(Date.parse('2026-11-21T12:00:00Z') / 1000);
 const GIB = 1024 ** 3;
 const MIB = 1024 ** 2;
 
-type StubImage = { Id: string; Created: string; Size: number; RepoTags: string[] | null; RepoDigests: string[] | null };
+type StubImage = {
+  Id: string;
+  Created: string;
+  Size: number;
+  RepoTags: string[] | null;
+  RepoDigests: string[] | null;
+  RootFS?: { Layers: string[] };
+};
 type StubContainer = {
   Id: string;
   Name: string;
@@ -22,8 +29,9 @@ type StubContainer = {
   Created: string;
   SizeRw: number;
   State: { Running: boolean; Status: string };
-  Config: { Labels: Record<string, string> };
+  Config: { Labels: Record<string, string>; Env?: string[] };
   Mounts: { Type: string; Name?: string }[];
+  GraphDriver?: { Data: Record<string, string> };
 };
 type StubVolume = { Name: string; CreatedAt: string; Labels: Record<string, string>; Size: string };
 type StubNetwork = { Id: string; Labels: Record<string, string> };
@@ -38,6 +46,7 @@ type StubState = {
   diskTotalKb: number;
   diskFreeKb: number;
   failRmi?: string[];
+  failCmd?: string[];
 };
 
 const dirs: string[] = [];
@@ -70,6 +79,8 @@ const args = process.argv.slice(2);
 fs.appendFileSync(logFile, 'docker ' + args.join(' ') + '\\n');
 const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
 const save = () => fs.writeFileSync(stateFile, JSON.stringify(state));
+const cmd1 = args[0] || '';
+const cmd2 = (args[0] || '') + ' ' + (args[1] || '');
 
 const filtersOf = (list) => {
   const out = [];
@@ -87,133 +98,144 @@ const filterBy = (items, filters, isContainer = false) => items.filter(item => f
   return true;
 }));
 
-if (args[0] === 'image' && args[1] === 'ls') {
-  process.stdout.write(state.images.map(i => i.Id).join('\\n') + (state.images.length ? '\\n' : ''));
-  process.exit(0);
-}
-if (args[0] === 'image' && args[1] === 'inspect') {
-  const ids = args.slice(2).filter((a, i, arr) => a !== '--format' && arr[i - 1] !== '--format');
-  for (const id of ids) {
-    const img = state.images.find(x => x.Id === id);
-    if (img) process.stdout.write(JSON.stringify(img) + '\\n');
+(() => {
+  if ((state.failCmd || []).includes(cmd1) || (state.failCmd || []).includes(cmd2)) { process.exitCode = 1; return; }
+  if (args[0] === 'image' && args[1] === 'ls') {
+    process.stdout.write(state.images.map(i => i.Id).join('\\n') + (state.images.length ? '\\n' : ''));
+    return;
   }
-  process.exit(0);
-}
-if (args[0] === 'rmi') {
-  const force = args.includes('-f') || args.includes('--force');
-  const refs = args.slice(1).filter(a => !a.startsWith('-'));
-  let failed = false;
-  for (const ref of refs) {
-    const idx = state.images.findIndex(i => i.Id === ref || (i.RepoTags || []).includes(ref) || (i.RepoDigests || []).includes(ref));
-    if (idx < 0) { failed = true; continue; }
-    const img = state.images[idx];
-    if ((state.failRmi || []).includes(img.Id)) { failed = true; continue; }
-    const inUse = state.containers.some(c => c.Image === img.Id);
-    if (inUse && !force) { failed = true; continue; }
-    if ((img.RepoTags || []).includes(ref) && img.RepoTags.length > 1) {
-      img.RepoTags = img.RepoTags.filter(t => t !== ref);
-    } else {
-      state.images.splice(idx, 1);
+  if (args[0] === 'image' && args[1] === 'inspect') {
+    const ids = args.slice(2).filter((a, i, arr) => a !== '--format' && arr[i - 1] !== '--format');
+    for (const id of ids) {
+      const img = state.images.find(x => x.Id === id);
+      if (img) process.stdout.write(JSON.stringify(img) + '\\n');
     }
+    return;
   }
-  save();
-  process.exit(failed ? 1 : 0);
-}
-if (args[0] === 'ps') {
-  const filters = filtersOf(args);
-  const all = args.includes('-a') || args.includes('-aq');
-  const list = filterBy(all ? state.containers : state.containers.filter(c => c.State.Running), filters, true);
-  process.stdout.write(list.map(c => c.Id).join('\\n') + (list.length ? '\\n' : ''));
-  process.exit(0);
-}
-if (args[0] === 'inspect') {
-  const ids = [];
-  for (let i = 1; i < args.length; i++) {
-    if (args[i] === '--format') { i++; continue; }
-    if (args[i].startsWith('-')) continue;
-    ids.push(args[i]);
+  if (args[0] === 'rmi') {
+    const force = args.includes('-f') || args.includes('--force');
+    const refs = args.slice(1).filter(a => !a.startsWith('-'));
+    let failed = false;
+    for (const ref of refs) {
+      const idx = state.images.findIndex(i => i.Id === ref || (i.RepoTags || []).includes(ref) || (i.RepoDigests || []).includes(ref));
+      if (idx < 0) { failed = true; continue; }
+      const img = state.images[idx];
+      if ((state.failRmi || []).includes(img.Id)) { failed = true; continue; }
+      const inUse = state.containers.some(c => c.Image === img.Id);
+      if (inUse && !force) { failed = true; continue; }
+      if ((img.RepoTags || []).includes(ref) && img.RepoTags.length > 1) {
+        img.RepoTags = img.RepoTags.filter(t => t !== ref);
+      } else {
+        state.images.splice(idx, 1);
+      }
+    }
+    save();
+    process.exitCode = failed ? 1 : 0;
+    return;
   }
-  for (const id of ids) {
-    const c = state.containers.find(x => x.Id === id || x.Name === id);
-    if (c) process.stdout.write(JSON.stringify(c) + '\\n');
+  if (args[0] === 'ps') {
+    const filters = filtersOf(args);
+    const all = args.includes('-a') || args.includes('-aq');
+    const list = filterBy(all ? state.containers : state.containers.filter(c => c.State.Running), filters, true);
+    process.stdout.write(list.map(c => c.Id).join('\\n') + (list.length ? '\\n' : ''));
+    return;
   }
-  process.exit(0);
-}
-if (args[0] === 'rm') {
-  const ids = args.slice(1).filter(a => !a.startsWith('-'));
-  state.containers = state.containers.filter(c => !ids.includes(c.Id) && !ids.includes(c.Name));
-  save();
-  process.exit(0);
-}
-if (args[0] === 'volume' && args[1] === 'ls') {
-  const list = filterBy(state.volumes, filtersOf(args), false);
-  process.stdout.write(list.map(v => v.Name).join('\\n') + (list.length ? '\\n' : ''));
-  process.exit(0);
-}
-if (args[0] === 'volume' && args[1] === 'inspect') {
-  const names = args.slice(2).filter((a, i, arr) => a !== '--format' && arr[i - 1] !== '--format');
-  for (const name of names) {
-    const v = state.volumes.find(x => x.Name === name);
-    if (v) process.stdout.write(JSON.stringify({ Name: v.Name, CreatedAt: v.CreatedAt, Labels: v.Labels }) + '\\n');
+  if (args[0] === 'inspect') {
+    const ids = [];
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === '--format') { i++; continue; }
+      if (args[i].startsWith('-')) continue;
+      ids.push(args[i]);
+    }
+    for (const id of ids) {
+      const c = state.containers.find(x => x.Id === id || x.Name === id);
+      if (c) process.stdout.write(JSON.stringify(c) + '\\n');
+    }
+    return;
   }
-  process.exit(0);
-}
-if (args[0] === 'volume' && args[1] === 'rm') {
-  const names = args.slice(2).filter(a => !a.startsWith('-'));
-  state.volumes = state.volumes.filter(v => !names.includes(v.Name));
-  save();
-  process.exit(0);
-}
-if (args[0] === 'network' && args[1] === 'ls') {
-  const list = filterBy(state.networks, filtersOf(args), false);
-  process.stdout.write(list.map(n => n.Id).join('\\n') + (list.length ? '\\n' : ''));
-  process.exit(0);
-}
-if (args[0] === 'network' && args[1] === 'rm') {
-  const ids = args.slice(2).filter(a => !a.startsWith('-'));
-  state.networks = state.networks.filter(n => !ids.includes(n.Id));
-  save();
-  process.exit(0);
-}
-if (args[0] === 'system' && args[1] === 'df') {
-  if (args.includes('-v')) {
-    process.stdout.write(JSON.stringify({
-      Volumes: state.volumes.map(v => ({ Name: v.Name, Size: v.Size })),
-      BuildCache: [],
-    }) + '\\n');
-  } else {
-    process.stdout.write(JSON.stringify({ Type: 'Build Cache', Size: state.buildCacheSize, Reclaimable: state.buildCacheSize }) + '\\n');
+  if (args[0] === 'rm') {
+    const force = args.includes('-f') || args.includes('--force');
+    const ids = args.slice(1).filter(a => !a.startsWith('-'));
+    let failed = false;
+    for (const id of ids) {
+      const idx = state.containers.findIndex(c => c.Id === id || c.Name === id);
+      if (idx < 0) { failed = true; continue; }
+      if (state.containers[idx].State.Running && !force) { failed = true; continue; }
+      state.containers.splice(idx, 1);
+    }
+    save();
+    process.exitCode = failed ? 1 : 0;
+    return;
   }
-  process.exit(0);
-}
-if (args[0] === 'builder' && args[1] === 'prune') {
-  const reclaimed = state.reclaimOnPrune || '0B';
-  if (state.buildCacheAfterPrune !== undefined) state.buildCacheSize = state.buildCacheAfterPrune;
-  save();
-  process.stdout.write('Total reclaimed space: ' + reclaimed + '\\n');
-  process.exit(0);
-}
-if (args[0] === 'cp') {
-  const src = args[1];
-  const dst = args[2];
-  const cid = dst.split(':')[0];
-  const st = fs.statSync(src);
-  if (path.basename(src) !== 'docker-disk.json' || dst !== cid + ':/data/') process.exit(2);
-  if ((st.mode & 0o444) !== 0o444) process.exit(2);
-  const target = path.join(delivered, cid + '.json');
-  const tmp = target + '.tmp.' + process.pid;
-  fs.copyFileSync(src, tmp);
-  fs.renameSync(tmp, target);
-  process.exit(0);
-}
-if (args[0] === 'compose' && args[1] === 'ps') {
-  if (args.includes('node')) {
-    const node = state.containers.find(c => c.Config.Labels['com.docker.compose.service'] === 'node');
-    if (node) process.stdout.write(node.Id + '\\n');
+  if (args[0] === 'volume' && args[1] === 'ls') {
+    const list = filterBy(state.volumes, filtersOf(args), false);
+    process.stdout.write(list.map(v => v.Name).join('\\n') + (list.length ? '\\n' : ''));
+    return;
   }
-  process.exit(0);
-}
-process.exit(0);
+  if (args[0] === 'volume' && args[1] === 'inspect') {
+    const names = args.slice(2).filter((a, i, arr) => a !== '--format' && arr[i - 1] !== '--format');
+    for (const name of names) {
+      const v = state.volumes.find(x => x.Name === name);
+      if (v) process.stdout.write(JSON.stringify({ Name: v.Name, CreatedAt: v.CreatedAt, Labels: v.Labels }) + '\\n');
+    }
+    return;
+  }
+  if (args[0] === 'volume' && args[1] === 'rm') {
+    const names = args.slice(2).filter(a => !a.startsWith('-'));
+    state.volumes = state.volumes.filter(v => !names.includes(v.Name));
+    save();
+    return;
+  }
+  if (args[0] === 'network' && args[1] === 'ls') {
+    const list = filterBy(state.networks, filtersOf(args), false);
+    process.stdout.write(list.map(n => n.Id).join('\\n') + (list.length ? '\\n' : ''));
+    return;
+  }
+  if (args[0] === 'network' && args[1] === 'rm') {
+    const ids = args.slice(2).filter(a => !a.startsWith('-'));
+    state.networks = state.networks.filter(n => !ids.includes(n.Id));
+    save();
+    return;
+  }
+  if (args[0] === 'system' && args[1] === 'df') {
+    if (args.includes('-v')) {
+      process.stdout.write(JSON.stringify({
+        Volumes: state.volumes.map(v => ({ Name: v.Name, Size: v.Size })),
+        BuildCache: [],
+      }) + '\\n');
+    } else {
+      process.stdout.write(JSON.stringify({ Type: 'Build Cache', Size: state.buildCacheSize, Reclaimable: state.buildCacheSize }) + '\\n');
+    }
+    return;
+  }
+  if (args[0] === 'builder' && args[1] === 'prune') {
+    const reclaimed = state.reclaimOnPrune || '0B';
+    if (state.buildCacheAfterPrune !== undefined) state.buildCacheSize = state.buildCacheAfterPrune;
+    save();
+    process.stdout.write('Total reclaimed space: ' + reclaimed + '\\n');
+    return;
+  }
+  if (args[0] === 'cp') {
+    const src = args[1];
+    const dst = args[2];
+    const cid = dst.split(':')[0];
+    const st = fs.statSync(src);
+    if (path.basename(src) !== 'docker-disk.json' || dst !== cid + ':/data/') { process.exitCode = 2; return; }
+    if ((st.mode & 0o444) !== 0o444) { process.exitCode = 2; return; }
+    const target = path.join(delivered, cid + '.json');
+    const tmp = target + '.tmp.' + process.pid;
+    fs.copyFileSync(src, tmp);
+    fs.renameSync(tmp, target);
+    return;
+  }
+  if (args[0] === 'compose' && args[1] === 'ps') {
+    if (args.includes('node')) {
+      const node = state.containers.find(c => c.Config.Labels['com.docker.compose.service'] === 'node');
+      if (node) process.stdout.write(node.Id + '\\n');
+    }
+    return;
+  }
+})();
 `;
   writeFileSync(join(bin, 'docker'), dockerStub, { mode: 0o755 });
   chmodSync(join(bin, 'docker'), 0o755);
@@ -283,6 +305,7 @@ describe('updater, Docker disk care', () => {
         { Id: 'sha256:node3', Created: iso(-100), Size: 500 * MIB, RepoTags: [`${NODE}:0.40.4`], RepoDigests: [`${NODE}@sha256:${'a'.repeat(64)}`] },
         { Id: 'sha256:node2', Created: iso(-200), Size: 500 * MIB, RepoTags: [`${NODE}:0.40.3`], RepoDigests: [`${NODE}@sha256:${'b'.repeat(64)}`] },
         { Id: 'sha256:node1', Created: iso(-300), Size: 450 * MIB, RepoTags: [`${NODE}:0.40.2`], RepoDigests: [`${NODE}@sha256:${'c'.repeat(64)}`] },
+        { Id: 'sha256:shared-digest', Created: iso(-500), Size: 300 * MIB, RepoTags: [`${APP}:0.39.0`], RepoDigests: [`${APP}@sha256:${'9'.repeat(64)}`, `other/repo@sha256:${'8'.repeat(64)}`] },
         { Id: 'sha256:other', Created: iso(-9999), Size: 900 * MIB, RepoTags: ['postgres:17'], RepoDigests: ['postgres@sha256:0000'] },
       ],
       containers: [
@@ -300,10 +323,10 @@ describe('updater, Docker disk care', () => {
 
     const r = await runUpdaterStep(s, 'disk_care', w.env());
     expect(r.code).toBe(0);
-    expect(w.state().images.map(i => i.Id).sort()).toEqual(['sha256:app2', 'sha256:app3', 'sha256:app4', 'sha256:node2', 'sha256:node3', 'sha256:other']);
+    expect(w.state().images.map(i => i.Id).sort()).toEqual(['sha256:app2', 'sha256:app3', 'sha256:app4', 'sha256:node2', 'sha256:node3', 'sha256:other', 'sha256:shared-digest']);
     expect(w.calls().filter(c => c.startsWith('docker rmi'))).toEqual(['docker rmi sha256:app1', 'docker rmi sha256:node1']);
     const report = w.readDelivered('c-node');
-    expect(report.parts.images).toBe((400 + 380 + 360 + 500 + 500) * MIB);
+    expect(report.parts.images).toBe((400 + 380 + 360 + 500 + 500 + 300) * MIB);
     expect(report.cleaned).toEqual([{ part: 'images', bytes: (350 + 450) * MIB, at: new Date(NOW * 1000).toISOString().replace('.000Z', 'Z') }]);
     expect(r.out).toContain('Removed old Hornhoof image sha256:app1');
 
@@ -376,18 +399,21 @@ describe('updater, Docker disk care', () => {
     );
     expect(existsSync(join(w.delivered, 'c-foreign.json'))).toBe(false);
 
-    /* An orphaned day-old lab volume (with no container left) still goes, while a lab with any fresh volume stays whole. */
+    /* An orphaned day-old lab volume (with no container left) still goes, while a lab with any fresh volume or Go zero timestamp stays whole, and exited lock containers are removed without -f. */
     const sOrphan = stand();
     const wOrphan = dockerWorld({
       images: [],
       containers: [
         { Id: 'c-mixed-old', Name: '/hh-lab-mixed-m1', Image: 'sha256:m', Created: iso(-90_000), SizeRw: 10 * MIB, State: { Running: false, Status: 'exited' }, Config: { Labels: { 'hornhoof.lab': 'mixed-lab' } }, Mounts: [] },
+        { Id: 'c-zero-ts', Name: '/hh-lab-zero-m1', Image: 'sha256:m', Created: '0001-01-01T00:00:00Z', SizeRw: 10 * MIB, State: { Running: false, Status: 'exited' }, Config: { Labels: { 'hornhoof.lab': 'zero-lab' } }, Mounts: [] },
         { Id: 'c-lock-old', Name: '/hh-port-lock', Image: 'sha256:a', Created: iso(-90_000), SizeRw: 1 * MIB, State: { Running: false, Status: 'exited' }, Config: { Labels: { 'io.hornhoof.since': String(NOW - 90_000) } }, Mounts: [] },
+        { Id: 'c-lock-running', Name: '/hh-port-lock-live', Image: 'sha256:a', Created: iso(-90_000), SizeRw: 1 * MIB, State: { Running: true, Status: 'running' }, Config: { Labels: { 'io.hornhoof.since': String(NOW - 90_000) } }, Mounts: [] },
         { Id: 'c-node', Name: '/hh-node', Image: 'sha256:n', Created: iso(-100), SizeRw: 0, State: { Running: true, Status: 'running' }, Config: { Labels: { 'hornhoof.subscription': 'p1' } }, Mounts: [] },
       ],
       volumes: [
         { Name: 'hh-lab-orphan-vol', CreatedAt: iso(-90_000), Labels: { 'hornhoof.lab': 'orphan-lab' }, Size: '500MiB' },
         { Name: 'hh-lab-mixed-fresh', CreatedAt: iso(-1200), Labels: { 'hornhoof.lab': 'mixed-lab' }, Size: '300MiB' },
+        { Name: 'hh-lab-zero-vol', CreatedAt: '0001-01-01T00:00:00Z', Labels: { 'hornhoof.lab': 'zero-lab' }, Size: '300MiB' },
       ],
       networks: [{ Id: 'net-orphan', Labels: { 'hornhoof.lab': 'orphan-lab' } }],
       buildCacheSize: '0B',
@@ -396,9 +422,11 @@ describe('updater, Docker disk care', () => {
       diskFreeKb: 50 * 1024 * 1024,
     });
     expect((await runUpdaterStep(sOrphan, 'disk_care', wOrphan.env())).code).toBe(0);
-    expect(wOrphan.state().containers.map(c => c.Id).sort()).toEqual(['c-mixed-old', 'c-node']);
-    expect(wOrphan.state().volumes.map(v => v.Name)).toEqual(['hh-lab-mixed-fresh']);
+    expect(wOrphan.state().containers.map(c => c.Id).sort()).toEqual(['c-lock-running', 'c-mixed-old', 'c-node', 'c-zero-ts']);
+    expect(wOrphan.state().volumes.map(v => v.Name).sort()).toEqual(['hh-lab-mixed-fresh', 'hh-lab-zero-vol']);
     expect(wOrphan.state().networks).toEqual([]);
+    expect(wOrphan.calls()).toContain('docker rm -v c-lock-old');
+    expect(wOrphan.calls()).not.toContain('docker rm -f -v c-lock-old');
   });
 
   it('prunes build cache with until=72h only when cache is over its limit or Docker disk is below threshold', async () => {
@@ -524,11 +552,294 @@ describe('updater, Docker disk care', () => {
     expect((await runUpdaterStep(s, 'disk_care', w.env())).code).toBe(0);
     expect(w.readDelivered('c-node').cleaned.map(c => c.bytes)).toEqual([200 * MIB]);
   });
+
+  it('stores cleaned state outside $CONTROL by default and safely resists symlinks, FIFOs, and poisoned state', async () => {
+    const emptyWorld = () =>
+      dockerWorld({
+        images: [
+          { Id: 'sha256:app3', Created: iso(-100), Size: 300 * MIB, RepoTags: [`${APP}:0.40.3`], RepoDigests: null },
+          { Id: 'sha256:app2', Created: iso(-200), Size: 300 * MIB, RepoTags: [`${APP}:0.40.2`], RepoDigests: null },
+          { Id: 'sha256:app1', Created: iso(-300), Size: 100 * MIB, RepoTags: [`${APP}:0.40.1`], RepoDigests: null },
+        ],
+        containers: [
+          { Id: 'c-node', Name: '/hh-node', Image: 'sha256:n', Created: iso(-100), SizeRw: 0, State: { Running: true, Status: 'running' }, Config: { Labels: { 'hornhoof.subscription': 'p1' } }, Mounts: [] },
+        ],
+        volumes: [],
+        networks: [],
+        buildCacheSize: '0B',
+        reclaimOnPrune: '0B',
+        diskTotalKb: 100 * 1024 * 1024,
+        diskFreeKb: 50 * 1024 * 1024,
+      });
+
+    /* Default with SERVER_DIR set and HORNHOOF_DISK_STATE unset: stays outside $CONTROL and outside $SERVER_DIR/backups. */
+    const sDefault = stand();
+    const wDefault = emptyWorld();
+    expect((await runUpdaterStep(sDefault, 'disk_care', wDefault.env({ HORNHOOF_DISK_STATE: '' }))).code).toBe(0);
+    expect(existsSync(join(sDefault.control, 'disk-cleaned.json'))).toBe(false);
+    expect(existsSync(join(sDefault.server, 'backups'))).toBe(false);
+    const nextDefault = wDefault.state();
+    nextDefault.images.push({ Id: 'sha256:app0', Created: iso(-400), Size: 50 * MIB, RepoTags: [`${APP}:0.40.0`], RepoDigests: null });
+    writeFileSync(join(wDefault.dir, 'docker-state.json'), JSON.stringify(nextDefault));
+    expect((await runUpdaterStep(sDefault, 'disk_care', wDefault.env({ HORNHOOF_DISK_STATE: '' }))).code).toBe(0);
+    expect(wDefault.readDelivered('c-node').cleaned.map(c => c.bytes)).toEqual([50 * MIB, 100 * MIB]);
+
+    /* File symlink at $CONTROL/disk-cleaned.json: target file is untouched and symlink is replaced atomically. */
+    const sFileLink = stand();
+    const wFileLink = emptyWorld();
+    const outsideSecret = join(wFileLink.dir, 'secret.env');
+    writeFileSync(outsideSecret, 'KEEP_SECRET=1\n');
+    const sharedState = join(sFileLink.control, 'disk-cleaned.json');
+    symlinkSync(outsideSecret, sharedState);
+    const rFileLink = await runUpdaterStep(sFileLink, 'disk_care', wFileLink.env({ HORNHOOF_DISK_STATE: sharedState }));
+    expect(rFileLink.code).toBe(0);
+    expect(readFileSync(outsideSecret, 'utf8')).toBe('KEEP_SECRET=1\n');
+    expect(lstatSync(sharedState).isSymbolicLink()).toBe(false);
+    expect(lstatSync(sharedState).isFile()).toBe(true);
+
+    /* Directory symlinks (both under $CONTROL and for custom HORNHOOF_DISK_STATE): never drop files into target dir. */
+    const sDirLink = stand();
+    const wDirLink = emptyWorld();
+    const outsideDir1 = join(wDirLink.dir, 'outside-dir-1');
+    const outsideDir2 = join(wDirLink.dir, 'outside-dir-2');
+    mkdirSync(outsideDir1);
+    mkdirSync(outsideDir2);
+    const sharedDirLink = join(sDirLink.control, 'disk-cleaned.json');
+    const customDirLink = join(wDirLink.dir, 'custom-disk-cleaned.json');
+    symlinkSync(outsideDir1, sharedDirLink);
+    symlinkSync(outsideDir2, customDirLink);
+    expect((await runUpdaterStep(sDirLink, 'disk_care', wDirLink.env({ HORNHOOF_DISK_STATE: sharedDirLink }))).code).toBe(0);
+    expect(readdirSync(outsideDir1)).toEqual([]);
+    expect(lstatSync(sharedDirLink).isSymbolicLink()).toBe(false);
+    expect((await runUpdaterStep(sDirLink, 'disk_care', wDirLink.env({ HORNHOOF_DISK_STATE: customDirLink }))).code).toBe(0);
+    expect(readdirSync(outsideDir2)).toEqual([]);
+    expect(lstatSync(customDirLink).isSymbolicLink()).toBe(false);
+
+    /* FIFO at $CONTROL/disk-cleaned.json: refused immediately without hanging and replaced atomically. */
+    const sFifo = stand();
+    const wFifo = emptyWorld();
+    const fifoState = join(sFifo.control, 'disk-cleaned.json');
+    execFileSync('mkfifo', [fifoState]);
+    const rFifo = await runUpdaterStep(sFifo, 'disk_care', wFifo.env({ HORNHOOF_DISK_STATE: fifoState }));
+    expect(rFifo.code).toBe(0);
+    expect(lstatSync(fifoState).isFile()).toBe(true);
+    expect(wFifo.readDelivered('c-node').cleaned).toHaveLength(1);
+
+    /* Poisoned state: extra fields, future 2099 timestamps, foreign parts, and >64 KiB bloat are stripped or rejected. */
+    const sPoison = stand();
+    const wPoison = emptyWorld();
+    const poisonState = join(sPoison.control, 'disk-cleaned.json');
+    const validAt = iso(-1800).replace('.000Z', 'Z');
+    writeFileSync(
+      poisonState,
+      JSON.stringify([
+        { part: 'images', bytes: 777, at: '2099-01-01T00:00:00Z', extra: 'x'.repeat(2000) },
+        { part: 'workingCopies', bytes: 555, at: validAt },
+        { part: 'volumes', bytes: -10, at: validAt },
+        { part: 'volumes', bytes: 42 * MIB, at: validAt, junk: 'drop-me' },
+      ]),
+    );
+    expect((await runUpdaterStep(sPoison, 'disk_care', wPoison.env({ HORNHOOF_DISK_STATE: poisonState }))).code).toBe(0);
+    const cleanedAfter = wPoison.readDelivered('c-node').cleaned;
+    expect(cleanedAfter).toEqual([
+      { part: 'images', bytes: 100 * MIB, at: new Date(NOW * 1000).toISOString().replace('.000Z', 'Z') },
+      { part: 'volumes', bytes: 42 * MIB, at: validAt },
+    ]);
+    for (const item of cleanedAfter) expect(Object.keys(item).sort()).toEqual(['at', 'bytes', 'part']);
+
+    /* Oversized (>64 KiB) state file is rejected before jq and cannot push docker-disk.json past 64 KiB. */
+    writeFileSync(
+      poisonState,
+      JSON.stringify([{ part: 'images', bytes: 123, at: '2099-01-01T00:00:00Z', pad: 'A'.repeat(70_000) }]),
+    );
+    expect((await runUpdaterStep(sPoison, 'disk_care', wPoison.env({ HORNHOOF_DISK_STATE: poisonState }))).code).toBe(0);
+    expect(statSync(join(wPoison.delivered, 'c-node.json')).size).toBeLessThan(4096);
+    expect(wPoison.readDelivered('c-node').cleaned).toEqual([]);
+  });
+
+  it('never passes container .Config.Env secrets to jq args or files, handles >128 KiB inspect payloads, and stays Bash 3.2 compatible', async () => {
+    expect(readFileSync(join(PARTS, 'disk.sh'), 'utf8')).not.toMatch(/\b(mapfile|readarray)\b/);
+
+    const s = stand();
+    const layers = Array.from({ length: 40 }, (_, k) => `sha256:${String(k).padStart(64, '0')}`);
+    const images: StubImage[] = [
+      ...Array.from({ length: 5 }, (_, k) => ({
+        Id: `sha256:app-${k}`,
+        Created: iso(-100 * (k + 1)),
+        Size: 100 * MIB,
+        RepoTags: [`${APP}:0.40.${5 - k}`],
+        RepoDigests: [`${APP}@sha256:${String(k).padStart(64, 'a')}`],
+        RootFS: { Layers: layers },
+      })),
+      ...Array.from({ length: 55 }, (_, k) => ({
+        Id: `sha256:other-${k}`,
+        Created: iso(-1000 - k),
+        Size: 50 * MIB,
+        RepoTags: [`other/img:${k}`],
+        RepoDigests: [`other/img@sha256:${String(k).padStart(64, 'b')}`],
+        RootFS: { Layers: layers },
+      })),
+    ];
+    const secretA = 'HORNHOOF_SECRET=TOP_SECRET_MARKER_XYZ';
+    const secretB = 'POSTGRES_PASSWORD=DB_PASS_MARKER_999';
+    const containers: StubContainer[] = [
+      {
+        Id: 'c-node',
+        Name: '/hh-node',
+        Image: 'sha256:app-0',
+        Created: iso(-100),
+        SizeRw: 20 * MIB,
+        State: { Running: true, Status: 'running' },
+        Config: { Labels: { 'hornhoof.subscription': 'p1' }, Env: [secretA, secretB] },
+        Mounts: [],
+        GraphDriver: { Data: { MergedDir: 'x'.repeat(6000) } },
+      },
+      ...Array.from({ length: 24 }, (_, k) => ({
+        Id: `c-other-${k}`,
+        Name: `/other-${k}`,
+        Image: `sha256:other-${k}`,
+        Created: iso(-500 - k),
+        SizeRw: 5 * MIB,
+        State: { Running: true, Status: 'running' },
+        Config: { Labels: {}, Env: [secretA, secretB, `EXTRA=${'z'.repeat(4000)}`] },
+        Mounts: [],
+        GraphDriver: { Data: { MergedDir: 'y'.repeat(4000) } },
+      })),
+    ];
+    expect(JSON.stringify(images).length).toBeGreaterThan(180_000);
+    expect(JSON.stringify(containers).length).toBeGreaterThan(180_000);
+
+    const w = dockerWorld({
+      images,
+      containers,
+      volumes: [],
+      networks: [],
+      buildCacheSize: '1GiB',
+      reclaimOnPrune: '0B',
+      diskTotalKb: 100 * 1024 * 1024,
+      diskFreeKb: 50 * 1024 * 1024,
+    });
+    const spyBin = join(w.dir, 'spy-bin');
+    const leakLog = join(w.dir, 'jq-leaks.log');
+    mkdirSync(spyBin);
+    writeFileSync(leakLog, '');
+    const jqSpy = `#!${process.execPath}
+const fs = require('node:fs');
+const { spawnSync } = require('node:child_process');
+const secrets = (process.env.DISK_JQ_FORBIDDEN || '').split(',').filter(Boolean);
+const leakLog = process.env.DISK_JQ_LEAK_LOG;
+const args = process.argv.slice(2);
+for (const a of args) {
+  for (const s of secrets) if (a.includes(s)) fs.appendFileSync(leakLog, 'ARGV_LEAK:' + s + '\\n');
+}
+for (let i = 0; i < args.length; i++) {
+  if ((args[i] === '--slurpfile' || args[i] === '--rawfile') && args[i + 2]) {
+    const body = fs.readFileSync(args[i + 2], 'utf8');
+    for (const s of secrets) if (body.includes(s)) fs.appendFileSync(leakLog, 'FILE_LEAK:' + s + '\\n');
+    i += 2;
+  } else if (args[i] && !args[i].startsWith('-') && fs.existsSync(args[i]) && fs.statSync(args[i]).isFile()) {
+    const body = fs.readFileSync(args[i], 'utf8');
+    for (const s of secrets) if (body.includes(s)) fs.appendFileSync(leakLog, 'FILE_LEAK:' + s + '\\n');
+  }
+}
+const r = spawnSync(process.env.REAL_JQ, args, { stdio: 'inherit' });
+process.exit(r.status === null ? 1 : r.status);
+`;
+    writeFileSync(join(spyBin, 'jq'), jqSpy, { mode: 0o755 });
+    chmodSync(join(spyBin, 'jq'), 0o755);
+
+    const baseEnv = w.env();
+    const r = await runUpdaterStep(s, 'disk_care', {
+      ...baseEnv,
+      PATH: `${spyBin}:${baseEnv.PATH}`,
+      REAL_JQ: JQ,
+      DISK_JQ_FORBIDDEN: 'TOP_SECRET_MARKER_XYZ,DB_PASS_MARKER_999',
+      DISK_JQ_LEAK_LOG: leakLog,
+    });
+    expect(r.code).toBe(0);
+    expect(readFileSync(leakLog, 'utf8')).toBe('');
+    /* Kept the 2 newest Hornhoof images (app-0, app-1), removed the 3 older ones (app-2, app-3, app-4). */
+    const remainingOwn = w.state().images.filter(i => i.Id.startsWith('sha256:app-')).map(i => i.Id).sort();
+    expect(remainingOwn).toEqual(['sha256:app-0', 'sha256:app-1']);
+    expect(w.readDelivered('c-node').parts.images).toBe(200 * MIB);
+    expect(w.readDelivered('c-node').cleaned).toEqual([{ part: 'images', bytes: 300 * MIB, at: expect.any(String) }]);
+  });
+
+  it('fails closed on partial Docker inspection so failed ps or volume ls never triggers deletions or zeroed reports', async () => {
+    const sPsFail = stand();
+    const wPsFail = dockerWorld({
+      images: [
+        { Id: 'sha256:app3', Created: iso(-100), Size: 300 * MIB, RepoTags: [`${APP}:0.40.3`], RepoDigests: null },
+        { Id: 'sha256:app2', Created: iso(-200), Size: 300 * MIB, RepoTags: [`${APP}:0.40.2`], RepoDigests: null },
+        { Id: 'sha256:app1', Created: iso(-300), Size: 300 * MIB, RepoTags: [`${APP}:0.40.1`, `${APP}:old`], RepoDigests: null },
+      ],
+      containers: [
+        { Id: 'c-uses-app1', Name: '/hh-app1', Image: 'sha256:app1', Created: iso(-100), SizeRw: 0, State: { Running: true, Status: 'running' }, Config: { Labels: {} }, Mounts: [] },
+      ],
+      volumes: [
+        { Name: 'hh-lab-old-vol', CreatedAt: iso(-90_000), Labels: { 'hornhoof.lab': 'old-lab' }, Size: '1GiB' },
+      ],
+      networks: [],
+      buildCacheSize: '0B',
+      reclaimOnPrune: '0B',
+      diskTotalKb: 100 * 1024 * 1024,
+      diskFreeKb: 50 * 1024 * 1024,
+      failCmd: ['ps'],
+    });
+    expect((await runUpdaterStep(sPsFail, 'disk_care', wPsFail.env())).code).toBe(0);
+    expect(wPsFail.calls().some(c => c.startsWith('docker rmi'))).toBe(false);
+    expect(wPsFail.calls().some(c => c.startsWith('docker volume rm'))).toBe(false);
+    expect(wPsFail.state().images).toHaveLength(3);
+    expect(wPsFail.state().volumes).toHaveLength(1);
+    expect(readdirSync(wPsFail.delivered)).toEqual([]);
+
+    const sVolFail = stand();
+    const wVolFail = dockerWorld({
+      images: [],
+      containers: [
+        { Id: 'c-lab-old', Name: '/hh-lab-x', Image: 'sha256:m', Created: iso(-90_000), SizeRw: 10 * MIB, State: { Running: false, Status: 'exited' }, Config: { Labels: { 'hornhoof.lab': 'x-lab' } }, Mounts: [] },
+      ],
+      volumes: [
+        { Name: 'hh-lab-x-fresh', CreatedAt: iso(-600), Labels: { 'hornhoof.lab': 'x-lab' }, Size: '1GiB' },
+      ],
+      networks: [],
+      buildCacheSize: '0B',
+      reclaimOnPrune: '0B',
+      diskTotalKb: 100 * 1024 * 1024,
+      diskFreeKb: 50 * 1024 * 1024,
+      failCmd: ['volume ls'],
+    });
+    expect((await runUpdaterStep(sVolFail, 'disk_care', wVolFail.env())).code).toBe(0);
+    expect(wVolFail.calls().some(c => c.startsWith('docker rm'))).toBe(false);
+    expect(wVolFail.state().containers).toHaveLength(1);
+
+    const sInspectFail = stand();
+    const wInspectFail = dockerWorld({
+      images: [
+        { Id: 'sha256:app3', Created: iso(-100), Size: 300 * MIB, RepoTags: [`${APP}:0.40.3`], RepoDigests: null },
+        { Id: 'sha256:app2', Created: iso(-200), Size: 300 * MIB, RepoTags: [`${APP}:0.40.2`], RepoDigests: null },
+        { Id: 'sha256:app1', Created: iso(-300), Size: 300 * MIB, RepoTags: [`${APP}:0.40.1`, `${APP}:old`], RepoDigests: null },
+      ],
+      containers: [
+        { Id: 'c-uses-app1', Name: '/hh-app1', Image: 'sha256:app1', Created: iso(-100), SizeRw: 0, State: { Running: true, Status: 'running' }, Config: { Labels: {} }, Mounts: [] },
+      ],
+      volumes: [],
+      networks: [],
+      buildCacheSize: '0B',
+      reclaimOnPrune: '0B',
+      diskTotalKb: 100 * 1024 * 1024,
+      diskFreeKb: 50 * 1024 * 1024,
+      failCmd: ['inspect'],
+    });
+    expect((await runUpdaterStep(sInspectFail, 'disk_care', wInspectFail.env())).code).toBe(0);
+    expect(wInspectFail.calls().some(c => c.startsWith('docker rmi'))).toBe(false);
+    expect(wInspectFail.state().images).toHaveLength(3);
+  });
 });
 
 /* Unused imports guard: keep SCRIPT/PARTS referenced for direct nodes_mode check below. */
 describe('updater nodes mode, Docker disk care', () => {
-  it('runs disk care in nodes_mode as well', async () => {
+  it('runs disk care in nodes_mode using a private 0700 state directory rather than a predictable /tmp file', async () => {
     const w = dockerWorld({
       images: [],
       containers: [
@@ -541,12 +852,28 @@ describe('updater nodes mode, Docker disk care', () => {
       diskTotalKb: 100 * 1024 * 1024,
       diskFreeKb: 50 * 1024 * 1024,
     });
+    const privateTmp = join(w.dir, 'tmp');
+    mkdirSync(privateTmp);
     const child = spawn('bash', ['-euo', 'pipefail', '-c', `. "${PARTS}shared.sh"; . "${PARTS}state.sh"; . "${PARTS}server.sh"; . "${PARTS}nodes.sh"; . "${PARTS}disk.sh"; disk_care`], {
-      env: { ...process.env, ...w.env(), HORNHOOF_IMAGE: APP, IMAGE: APP, NODE_IMAGE: NODE, UPDATER_IMAGE: UPDATER, CONTROL: join(w.dir, 'no-control'), SERVER_DIR: '' },
+      env: {
+        ...process.env,
+        ...w.env({ HORNHOOF_DISK_STATE: '' }),
+        TMPDIR: privateTmp,
+        HORNHOOF_IMAGE: APP,
+        IMAGE: APP,
+        NODE_IMAGE: NODE,
+        UPDATER_IMAGE: UPDATER,
+        CONTROL: join(w.dir, 'no-control'),
+        SERVER_DIR: '',
+      },
     });
     const [code] = (await once(child, 'exit')) as [number | null];
     expect(code).toBe(0);
     expect(w.readDelivered('c-node').parts.buildCache).toBe(2 * GIB);
+    expect(existsSync(join(privateTmp, 'hornhoof-disk-cleaned.json'))).toBe(false);
+    const privateDirs = readdirSync(privateTmp).filter(n => n.startsWith('hornhoof-disk-state.'));
+    expect(privateDirs).toHaveLength(1);
+    expect(statSync(join(privateTmp, privateDirs[0]!)).mode & 0o777).toBe(0o700);
     expect(existsSync(SCRIPT)).toBe(true);
   });
 });

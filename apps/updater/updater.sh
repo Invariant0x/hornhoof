@@ -124,7 +124,7 @@ RUNS=$!
   sleep 5
 done) &
 ADDRS=$!
-trap 'kill $ALIVE $RUNS $ADDRS $NODES_LOOK 2> /dev/null || true' EXIT
+trap 'kill $ALIVE $RUNS $ADDRS $NODES_LOOK 2> /dev/null || true; [ -z "${DISK_PRIVATE_DIR:-}" ] || rm -rf -- "${DISK_PRIVATE_DIR:?}" 2> /dev/null || true' EXIT
 while true; do
   handle_request
   become_data
