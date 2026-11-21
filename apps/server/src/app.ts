@@ -101,7 +101,8 @@ import type { Db } from './db/client.js';
 
 import { githubReaders, type CompareReader, type MergeReader, type TreeReader } from './modules/testruns/compare.js';
 import { readGitAncestry, type GitAncestryReader } from './modules/testruns/git-ancestry.js';
-import { GitHubLimits } from './modules/testruns/github-limit.js';
+import { GitHubLimits, limitRecord } from './modules/testruns/github-limit.js';
+import { MergedAnswers } from './modules/departments/branches.js';
 import { companies } from './db/schema.js';
 import { idOnly } from './db/selections.js';
 import { createOnGitHub } from './modules/departments/github-create.js';
@@ -133,6 +134,8 @@ export type Ctx = Deps & {
   callEffects: CallEffects;
   readCommit: CommitReader;
   githubLimits: GitHubLimits;
+  /* What GitHub said of which task branches are in the main line, kept for the task reads after. */
+  mergedAnswers: MergedAnswers;
   markCommit: CommitMarker;
   /* Creates a repository on a git host with a key the company saved. */
   createRepository: RepositoryCreator;
@@ -228,6 +231,20 @@ const RESTORE_RETRY_MS = 10_000;
 /* For how long a connection that has sent nothing is waited for once the app closes. */
 const SILENT_CONNECTION_MS = 1000;
 
+function notifyGitHubLimitCards(db: Db, bus: EventBus, log: FastifyBaseLogger): void {
+  void db.select(idOnly(companies)).from(companies).then(rows => {
+    for (const { id } of rows) bus.publish(id, { type: 'requests', spot: { departmentId: null, parentId: null } });
+  }).catch((error: unknown) => log.error({ error: loggable(error) }, 'Refreshing GitHub limit cards failed.'));
+}
+
+function githubLimitsFor(deps: Deps, log: FastifyBaseLogger, bus: EventBus, clock: () => number): GitHubLimits {
+  return new GitHubLimits(
+    clock,
+    limit => log.warn(limitRecord(limit), 'GitHub REST request limit exhausted.'),
+    () => notifyGitHubLimitCards(deps.db, bus, log),
+  );
+}
+
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger ?? false, logController: new LogController({ disableRequestLogging: true }) });
   const web = hasWebApp(deps.config.webDist);
@@ -239,13 +256,8 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   addSecurityHeaders(app);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
   const bus = new EventBus();
-  const githubLimits = new GitHubLimits(deps.clock ?? Date.now,
-    limit => app.log.warn({ remaining: limit.remaining, resetAt: limit.resetAt === null ? null : new Date(limit.resetAt).toISOString() }, 'GitHub REST request limit exhausted.'),
-    () => {
-      void deps.db.select(idOnly(companies)).from(companies).then(rows => {
-        for (const { id } of rows) bus.publish(id, { type: 'requests', spot: { departmentId: null, parentId: null } });
-      }).catch((error: unknown) => app.log.error({ error: loggable(error) }, 'Refreshing GitHub limit cards failed.'));
-    });
+  /* One request limit for every GitHub REST reader of the server, on the clock the server reads when it asks. */
+  const githubLimits = githubLimitsFor(deps, app.log, bus, () => ctx.clock());
   const ctx = {
     startedAt: new Date(),
     readCommit,
@@ -256,6 +268,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     readTags,
     readGitAncestry,
     githubLimits,
+    mergedAnswers: new MergedAnswers(),
     createRepository: createOnGitHub(),
     createSpreadsheet: createOnGoogleSheets(deps.config.googleTokenUrl, deps.config.googleSheetsUrl, deps.config.googleDriveUrl),
     createIssue: openIssueOnGitHub(),

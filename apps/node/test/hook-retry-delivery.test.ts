@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe('owner check outlasting the hook client deadline', () => {
-  it('finishes hh-hook stop once after timeouts and client exit', async () => {
+  it('finishes hh-hook stop once after its one wait ran out and the client exited', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     let checks = 0;let turn = 'first';const ended: string[] = [];
     let release!: () => void;
@@ -57,18 +57,20 @@ describe('owner check outlasting the hook client deadline', () => {
     const clock = hookClock(child);
     const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
     close.push(release);
-    /* All three clients time out and exit before the ownership lookups finish. */
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      await eventually(() => checking === attempt || child.exitCode !== null);
-      expect(checking).toBe(attempt);
-      await clock.advance(15_000);
-    }
+    /* The client sends its stop once and waits fifty seconds in all: it times out and exits before the ownership lookup
+       finishes, and sends nothing again, as a new connection would start the check over. */
+    await eventually(() => checking === 1 || child.exitCode !== null);
+    expect(checking).toBe(1);
+    await clock.advance(50_000);
+    /* A client that sent again would start a second check before it could exit. */
+    await eventually(() => child.exitCode !== null || checking > 1);
+    expect(checking).toBe(1);
     await exited;
     expect(child.exitCode).toBe(0);
     expect(ended).toEqual([]);
     release();
     await Promise.all(handling);
-    expect(checks).toBe(3);
+    expect(checks).toBe(1);
     expect(ended).toEqual(['first']);
     expect(turn).toBe('next');
   });
