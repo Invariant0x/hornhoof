@@ -6,9 +6,11 @@
       zoom bottom-left, orchestrator bar bottom-center, version bottom-right.
    2) Live clicks on all 6 world entity types (house/resident + quick chat, granary/subscription,
       machine hub, pyramid/goal with subgoals, statue, palace/orchestrator).
-   3) On-map Department Mode: highlights department houses & residents in banner color,
-      dims rest of city, overlays work-path lines (handoff, checker, head_guide, one_shot),
-      opens department side card with people/tasks/pipeline/manage tabs, restores city on close. */
+   3) On-map Department Mode: highlights department houses & residents gently in banner color,
+      dims rest of city softly, draws calm road-only street routes between landmarks
+      (zero straight diagonals to agents or head guidance lines), renders Hornhoof's static
+      hierarchy graph (head, responsible people, sub-departments, teams, role groups) directly
+      inside the side card, and restores the city on close. */
 
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { copyFileSync, mkdirSync } from 'node:fs';
@@ -104,15 +106,40 @@ function buildMatchingOrg(worldState: ReturnType<typeof buildWorldFixtureWithExt
         total: worldState.agents.filter(a => a.departmentId === d.id).length,
         working: worldState.agents.filter(a => a.departmentId === d.id && a.liveState === 'working').length,
       },
-      products: [],
-      teams: [],
-      people: [],
+      products:
+        d.roleCode === 'DEV'
+          ? [
+              { id: 'prod-core', name: 'Hornhoof Core', repository: null },
+              { id: 'prod-world', name: 'World Engine', repository: null },
+            ]
+          : [],
+      teams:
+        d.roleCode === 'DEV'
+          ? [
+              { id: 'team-turnkey', name: 'Turnkey Squad', about: 'End-to-end delivery', stage: 0, gate: false, turnkey: true },
+            ]
+          : [],
+      people:
+        d.roleCode === 'DEV'
+          ? [
+              {
+                id: ME.person.id,
+                name: ME.person.name,
+                email: ME.person.email,
+                title: 'CEO',
+                status: 'active' as const,
+                isOwner: true,
+                access: { whole: true, departments: [], teams: [] },
+              },
+            ]
+          : [],
       employees: worldState.agents
         .filter(a => a.departmentId === d.id)
         .map(a => ({
           id: a.id,
           name: a.name,
           roleId: a.roleKey,
+          teamId: d.roleCode === 'DEV' && a.isTurnkey ? 'team-turnkey' : null,
           turnkey: a.isTurnkey,
           title: { en: a.roleKey ?? 'Developer', ru: a.roleKey ?? 'Разработчик' },
           kind: a.kind === 'head' ? 'head' : 'worker',
@@ -418,6 +445,8 @@ test.describe('Stage 8 themed map chrome, 6 entity side cards, and on-map Depart
         highlightedResidents: number;
         linksCount: number;
         linkKinds: string[];
+        allLinksOnRoads: boolean;
+        pathTilesTotal: number;
       } | null;
       clearSelection: () => void;
       flushVisibleBakes: () => void;
@@ -425,16 +454,23 @@ test.describe('Stage 8 themed map chrome, 6 entity side cards, and on-map Depart
 
     const card = page.getByTestId('world-side-card');
 
-    /* 1. Department building -> Department Mode directly on city map (no separate department screen!). */
+    /* 1. Department building -> Department Mode directly on city map (no separate department screen!):
+       static Hornhoof hierarchy graph inside the side card + calm road-only routes on the map. */
     const pickedDept = await page.evaluate(() => (window as unknown as { __WORLD_PRODUCT__: DebugHandle }).__WORLD_PRODUCT__.selectBuildingByKind('department', 0));
     expect(pickedDept).not.toBeNull();
     await expect(card).toHaveAttribute('data-card-kind', 'department');
     const cardRect = await card.boundingBox();
     expect(cardRect).not.toBeNull();
     expect(cardRect!.x, 'side card anchors on the right edge away from ZoomBar').toBeGreaterThan(900);
+    await expect(page.getByTestId('world-dept-hierarchy')).toBeVisible();
+    await expect(page.getByTestId('world-dept-subdepts')).toContainText('Hornhoof Core');
+    await expect(page.getByTestId('world-dept-subdepts')).toContainText('World Engine');
+    await expect(page.getByTestId('world-dept-people')).toContainText(ME.person.name);
+    await expect(page.getByTestId('world-dept-hierarchy')).toContainText('Turnkey Squad');
     await expect(page.getByTestId('world-dept-workpaths')).toBeVisible();
     await expect(card).toContainText('ур. ');
     await expect(card).not.toContainText('Lv ');
+    await expect(card).not.toContainText('Направление от главы отдела');
     await expect(page.locator('.dview')).toHaveCount(0);
 
     const focus = await page.evaluate(() => (window as unknown as { __WORLD_PRODUCT__: DebugHandle }).__WORLD_PRODUCT__.getDepartmentFocus());
@@ -443,6 +479,10 @@ test.describe('Stage 8 themed map chrome, 6 entity side cards, and on-map Depart
     expect(focus!.highlightedResidents).toBeGreaterThanOrEqual(1);
     expect(focus!.linksCount).toBeGreaterThanOrEqual(2);
     expect(focus!.linkKinds).toContain('handoff');
+    expect(focus!.linkKinds).not.toContain('head_guide');
+    expect(focus!.linkKinds).not.toContain('checker');
+    expect(focus!.allLinksOnRoads, 'all map routes must follow city.roads strictly').toBe(true);
+    expect(focus!.pathTilesTotal).toBeGreaterThanOrEqual(4);
 
     await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
     const deptPath = info.outputPath('stage8-egypt-department-mode.png');

@@ -153,38 +153,88 @@ describe('Stage 8 WorldSideCards (all 6 entity cards + Department Mode)', () => 
     expect(screen.queryByTestId('world-agent-quick-chat')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open orchestrator' })).toBeInTheDocument();
 
-    /* 7. Department Mode card (work-path legend, people, active tasks, pipeline, close). */
+    /* 7. Department Mode card (static Hornhoof hierarchy graph, road routes, tasks, pipeline, close). */
     const devDept = enrichedLive.departments[0]!;
+    const devAgents = enrichedLive.agents.filter(a => a.departmentId === devDept.id);
+    const enrichedOrg = {
+      ...DEV_ORG,
+      departments: [
+        {
+          ...DEV_ORG.departments[0]!,
+          id: devDept.id,
+          name: devDept.name,
+          roleCode: devDept.roleCode,
+          products: [
+            { id: 'prod-core', name: 'Hornhoof Core', repository: null },
+            { id: 'prod-engine', name: 'World Engine', repository: null },
+          ],
+          teams: [
+            { id: 'team-turnkey', name: 'Turnkey Squad', about: 'End-to-end delivery', stage: 0, gate: false, turnkey: true },
+          ],
+          people: [
+            {
+              id: 'p-ceo',
+              name: 'Ivan',
+              email: 'ivan@hornhoof.example',
+              title: 'CEO',
+              status: 'active' as const,
+              isOwner: true,
+              access: { whole: true, departments: [], teams: [] },
+            },
+          ],
+          employees: devAgents.map(a => ({
+            ...DEV_ORG.departments[0]!.employees[0]!,
+            id: a.id,
+            name: a.name,
+            kind: a.kind === 'head' ? ('head' as const) : ('worker' as const),
+            turnkey: a.isTurnkey,
+            teamId: a.isTurnkey ? 'team-turnkey' : null,
+            roleId: a.roleKey,
+          })),
+        },
+      ],
+    };
     const focus = buildDepartmentFocus(synced.city, sim.residents, devDept.id, { departmentIndex: 0 });
     rerender(
       <LanguageProvider>
         <WorldSideCards
           {...baseProps}
+          org={enrichedOrg}
           selection={{ kind: 'department', departmentId: devDept.id }}
           departmentFocus={focus}
         />
       </LanguageProvider>,
     );
     expect(screen.getByTestId('world-side-card')).toHaveAttribute('data-card-kind', 'department');
+    expect(screen.getByTestId('world-dept-hierarchy')).toBeInTheDocument();
+    expect(screen.getByTestId('world-dept-subdepts')).toHaveTextContent('Hornhoof Core');
+    expect(screen.getByTestId('world-dept-subdepts')).toHaveTextContent('World Engine');
+    expect(screen.getByTestId('world-dept-people')).toHaveTextContent('Ivan');
+    expect(screen.getByTestId('world-dept-hierarchy')).toHaveTextContent('Turnkey Squad');
     expect(screen.getByTestId('world-dept-workpaths')).toBeInTheDocument();
+    expect(screen.getByTestId('world-dept-workpaths')).not.toHaveTextContent('head guidance');
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(baseProps.onClose).toHaveBeenCalledTimes(1);
 
-    /* Russian locale localizes short levels to "ур. N" with zero English "Lv" leaks. */
+    /* Russian locale localizes short levels to "ур. N" with zero English "Lv" leaks or legacy head-guidance legend. */
     localStorage.setItem('hh-lang', 'ru');
     try {
       rerender(
         <LanguageProvider key="ru">
           <WorldSideCards
             {...baseProps}
+            org={enrichedOrg}
             selection={{ kind: 'department', departmentId: devDept.id }}
             departmentFocus={focus}
           />
         </LanguageProvider>,
       );
       const ruCardText = screen.getByTestId('world-side-card').textContent ?? '';
+      expect(ruCardText).toContain('Иерархия отдела');
+      expect(ruCardText).toContain('Подотделы и продукты');
       expect(ruCardText).toContain('ур. ');
       expect(ruCardText).not.toMatch(/\bLv\s+\d+/);
+      expect(ruCardText).not.toContain('Направление от главы отдела');
     } finally {
       localStorage.removeItem('hh-lang');
     }

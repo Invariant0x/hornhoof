@@ -1211,7 +1211,6 @@ export class IsometricWorldEngine {
             this.tileW,
             this.tileH,
             this.camera.zoom,
-            this.residentSim?.timeSec ?? 0,
           );
         }
       }

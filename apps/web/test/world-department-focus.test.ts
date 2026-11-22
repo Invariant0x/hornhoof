@@ -1,14 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildDepartmentFocus, departmentBannerColor } from '../src/world/department-focus';
+import { buildDepartmentFocus, departmentBannerColor, isLinkStrictlyOnRoads } from '../src/world/department-focus';
 import { createHornhoofLiveFixture, syncLiveSnapshotToCity } from '../src/world/live-sync';
 import { createResidentSimulation } from '../src/world/residents';
 import { generateWorldTerrain } from '../src/world/terrain-engine';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
 
 describe('Stage 8 pack-agnostic Department Mode overlay', () => {
-  it('highlights department buildings and residents in banner color and builds work-path links between participants', () => {
+  it('highlights department buildings and residents gently and routes links strictly along city roads', () => {
     const live = createHornhoofLiveFixture();
     const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: live.company.seed, mapSize: 100 });
     const synced = syncLiveSnapshotToCity(EGYPT_WORLD_PACK, map, live);
@@ -37,7 +37,7 @@ describe('Stage 8 pack-agnostic Department Mode overlay', () => {
       expect(focus.highlightedBuildingIds.has(otherDeptBuilding.id)).toBe(false);
     }
 
-    /* Residents of the department are highlighted; residents of other departments are not. */
+    /* Residents of the department are highlighted gently; residents of other departments are not. */
     const deptResidents = sim.residents.filter(r => r.departmentId === devDept.id);
     expect(deptResidents.length).toBeGreaterThan(0);
     for (const r of deptResidents) {
@@ -48,13 +48,21 @@ describe('Stage 8 pack-agnostic Department Mode overlay', () => {
       expect(focus.highlightedResidentIds.has(otherResident.id)).toBe(false);
     }
 
-    /* Work-path links cover handoffs (stone carriers), checkers (reviewers/testers), head guidance, and one-shot helpers. */
-    const kinds = new Set(focus.links.map(l => l.kind));
+    /* Street routes run strictly tile-by-tile on city.roads between landmarks:
+       zero straight rays to individual agents and zero head_guide / checker spaghetti. */
+    const kinds = new Set<string>(focus.links.map(l => l.kind));
     expect(kinds.has('handoff')).toBe(true);
-    expect(kinds.has('checker')).toBe(true);
-    expect(kinds.has('head_guide')).toBe(true);
+    expect(kinds.has('statue')).toBe(true);
     expect(kinds.has('one_shot')).toBe(true);
-    expect(focus.links.length).toBeGreaterThanOrEqual(4);
+    expect(kinds.has('head_guide')).toBe(false);
+    expect(kinds.has('checker')).toBe(false);
+    expect(focus.links.length).toBeGreaterThanOrEqual(2);
+    expect(focus.links.length).toBeLessThanOrEqual(3);
+
+    for (const link of focus.links) {
+      expect(link.path.length).toBeGreaterThanOrEqual(2);
+      expect(isLinkStrictlyOnRoads(synced.city, link), `link ${link.id} must stay strictly on city.roads`).toBe(true);
+    }
   });
 
   it('contains zero theme-specific words in department-focus core module', () => {

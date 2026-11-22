@@ -15,17 +15,20 @@ import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { AgentCardView, Department, Me, Org } from '../types';
+import type { AgentCardView, Department, Employee, Me, Org, ProviderId } from '../types';
 import { ApprovalPolicy } from '../ui/ApprovalPolicy';
 import { Bar } from '../ui/Bar';
 import { BriefingPanel } from '../ui/Briefing';
 import { DeptBranchesIfKept } from '../ui/DeptBranches';
+import { Edge } from '../ui/Edge';
+import { PersonIcon, ProviderMark } from '../ui/icons';
 import { Repositories } from '../ui/RepoSettings';
 import { StaffCard } from '../ui/StaffCard';
 import { DeptSubUnits } from '../ui/SubUnits';
 import { OneShotMarks } from '../ui/TaskWorkflow';
+import { employeeKind, WorkerMark } from '../ui/WorkerMark';
 import type { CityBuilding } from '../world/city-layout';
-import type { DepartmentFocusSpec } from '../world/department-focus';
+import type { DepartmentFocusSpec, DepartmentWorkLinkKind } from '../world/department-focus';
 import type { ResidentEntity } from '../world/residents';
 import { clock } from './Subscriptions';
 
@@ -641,6 +644,335 @@ function OrchestratorSideCard({
   );
 }
 
+type HierMember = Readonly<{
+  id: string;
+  name: string;
+  roleClass: NonNullable<WorldLiveAgent['roleClass']>;
+  liveState: NonNullable<WorldLiveAgent['liveState']>;
+  level: number;
+  provider: ProviderId | null;
+  turnkey: boolean;
+  teamId: string | null;
+  roleId: string | null;
+  currentTask: WorldLiveAgent['currentTask'];
+  orgEmp: Employee | null;
+}>;
+
+type HierGroup = Readonly<{
+  key: string;
+  title: string;
+  badge?: string;
+  isGate?: boolean;
+  members: readonly HierMember[];
+}>;
+
+function statusDotTone(state: NonNullable<WorldLiveAgent['liveState']>, isOn: boolean): 'work' | 'wait' | 'warn' | 'idle' {
+  if (!isOn) return 'idle';
+  if (state === 'working' || state === 'upgrading_home') return 'work';
+  if (state === 'waiting_human') return 'wait';
+  if (state === 'exhausted' || state === 'turn_failed') return 'warn';
+  return 'idle';
+}
+
+function roadLinkLabel(kind: DepartmentWorkLinkKind, wc: ReturnType<typeof useT>['skins']['worldCard']): string {
+  if (kind === 'handoff') return wc.legendHandoff;
+  if (kind === 'statue') return wc.legendStatue;
+  return wc.legendOneShot;
+}
+
+/* Static Hornhoof-style department hierarchy graph rendered directly inside the side card
+   (chamfered frames, orthogonal bus lines and junction dots, zero animation):
+   Head -> Responsible people -> Sub-departments/Products -> Sub-units/Teams -> Role groups. */
+function DepartmentHierarchyGraph({
+  orgDept,
+  deptAgents,
+  roleCode,
+  deptTitle,
+  canGive,
+  switched,
+  switchErr,
+  onSelectAgent,
+  onToggleAgent,
+}: {
+  orgDept: Department | null;
+  deptAgents: readonly WorldLiveAgent[];
+  roleCode: string;
+  deptTitle: string;
+  canGive: boolean;
+  switched: Record<string, boolean>;
+  switchErr: string | null;
+  onSelectAgent: (agentId: string) => void;
+  onToggleAgent: (agentId: string, nextOn: boolean) => void;
+}) {
+  const t = useT();
+  const wc = t.skins.worldCard;
+  const { language } = useLanguage();
+
+  const orgById = new Map((orgDept?.employees ?? []).map(e => [e.id, e]));
+  const membersMap = new Map<string, HierMember>();
+
+  for (const a of deptAgents) {
+    const orgEmp = orgById.get(a.id) ?? null;
+    membersMap.set(a.id, {
+      id: a.id,
+      name: a.name,
+      roleClass: a.roleClass ?? (orgEmp?.kind === 'head' ? 'head' : orgEmp?.turnkey ? 'turnkey' : 'executor'),
+      liveState: a.liveState ?? (orgEmp?.status === 'working' ? 'working' : 'idle'),
+      level: a.level,
+      provider: (a.provider ?? orgEmp?.provider ?? null) as ProviderId | null,
+      turnkey: Boolean(a.isTurnkey || orgEmp?.turnkey),
+      teamId: orgEmp?.teamId ?? null,
+      roleId: orgEmp?.roleId ?? a.roleKey ?? null,
+      currentTask: a.currentTask ?? (orgEmp?.task ? { id: orgEmp.task.id, number: orgEmp.task.number, title: orgEmp.task.title, goalId: null } : null),
+      orgEmp,
+    });
+  }
+
+  for (const e of orgDept?.employees ?? []) {
+    if (membersMap.has(e.id)) continue;
+    membersMap.set(e.id, {
+      id: e.id,
+      name: e.name,
+      roleClass: e.kind === 'head' ? 'head' : e.turnkey ? 'turnkey' : 'executor',
+      liveState: e.status === 'working' ? 'working' : e.status === 'waiting' ? 'waiting_human' : 'idle',
+      level: 1,
+      provider: e.provider ?? null,
+      turnkey: Boolean(e.turnkey),
+      teamId: e.teamId ?? null,
+      roleId: e.roleId ?? null,
+      currentTask: e.task ? { id: e.task.id, number: e.task.number, title: e.task.title, goalId: null } : null,
+      orgEmp: e,
+    });
+  }
+
+  const allMembers = [...membersMap.values()];
+  const head = allMembers.find(m => m.orgEmp?.kind === 'head' || m.roleClass === 'head') ?? null;
+  const nonHead = allMembers.filter(m => m.id !== head?.id);
+  const products = orgDept?.products ?? [];
+  const teams = orgDept?.teams ?? [];
+  const people = orgDept?.people ?? [];
+
+  const groups: HierGroup[] = [];
+  const assignedIds = new Set<string>();
+
+  for (const tm of teams) {
+    const teamMembers = nonHead.filter(m => m.teamId === tm.id);
+    for (const m of teamMembers) assignedIds.add(m.id);
+    groups.push({
+      key: `team:${tm.id}`,
+      title: tm.name,
+      badge: tm.turnkey ? wc.deptTurnkeyBadge : undefined,
+      members: teamMembers,
+    });
+  }
+
+  const loose = nonHead.filter(m => !assignedIds.has(m.id));
+  const roles = orgDept?.roles ?? [];
+  const matchedByRole = new Set<string>();
+  for (const r of roles) {
+    const roleMembers = loose.filter(m => m.roleId === r.id);
+    if (roleMembers.length === 0) continue;
+    for (const m of roleMembers) matchedByRole.add(m.id);
+    groups.push({
+      key: `role:${r.id}`,
+      title: r.title[language],
+      isGate: r.gate !== null || r.schema === 'final_check',
+      members: roleMembers,
+    });
+  }
+
+  const ungrouped = loose.filter(m => !matchedByRole.has(m.id));
+  const fallbackBuckets: Array<{
+    key: string;
+    title: string;
+    badge?: string;
+    isGate?: boolean;
+    predicate: (m: HierMember) => boolean;
+  }> = [
+    { key: 'cls:turnkey', title: wc.deptGroupTurnkey, badge: wc.deptTurnkeyBadge, predicate: m => m.roleClass === 'turnkey' || m.turnkey },
+    { key: 'cls:executor', title: wc.deptGroupExecutors, predicate: m => m.roleClass === 'executor' && !m.turnkey },
+    { key: 'cls:checker', title: wc.deptGroupCheckers, isGate: true, predicate: m => m.roleClass === 'checker' },
+    { key: 'cls:helper', title: wc.deptGroupHelpers, predicate: m => m.roleClass === 'day_laborer' },
+  ];
+  const bucketedIds = new Set<string>();
+  for (const b of fallbackBuckets) {
+    const matched = ungrouped.filter(m => !bucketedIds.has(m.id) && b.predicate(m));
+    if (matched.length === 0) continue;
+    for (const m of matched) bucketedIds.add(m.id);
+    groups.push({ key: b.key, title: b.title, badge: b.badge, isGate: b.isGate, members: matched });
+  }
+  const rest = ungrouped.filter(m => !bucketedIds.has(m.id));
+  if (rest.length > 0) {
+    groups.push({ key: 'cls:other', title: t.dept.others, members: rest });
+  }
+
+  const headIsOn = head ? (switched[head.id] ?? (head.orgEmp ? head.orgEmp.status !== 'off' : true)) : false;
+  const hasBranches = products.length > 0 || groups.length > 0;
+
+  return (
+    <section className="world-card-section world-hierarchy" data-testid="world-dept-hierarchy" aria-label={wc.deptHierarchy}>
+      <div className="world-hier-sec-head">
+        <h4>{wc.deptHierarchy}</h4>
+        <small className="muted">{allMembers.length}</small>
+      </div>
+      {switchErr && <p className="alert" role="alert">{switchErr}</p>}
+
+      <div className="world-hier-graph">
+        {/* Top node: Department Head in chamfered Hornhoof frame */}
+        <div className="world-hier-root">
+          <Edge cut={10} corner className="world-hier-head">
+            {head ? (
+              <div className="world-hier-head-in">
+                <div className="world-hier-meta-row">
+                  <WorkerMark kind={employeeKind(head.turnkey)} decorative />
+                  <span className="world-hier-role">{roleCode ? `${roleCode} · ${wc.roleClasses.head}` : wc.roleClasses.head}</span>
+                  <ProviderMark provider={head.provider} />
+                  {head.orgEmp && canGive && (
+                    <input
+                      type="checkbox"
+                      className="sw"
+                      checked={headIsOn}
+                      aria-label={head.name}
+                      onChange={ev => onToggleAgent(head.id, ev.target.checked)}
+                    />
+                  )}
+                </div>
+                <div className="world-hier-title-row">
+                  <span className={`world-hier-dot ${statusDotTone(head.liveState, headIsOn)}`} aria-hidden="true" />
+                  <button className="world-hier-name-btn" type="button" onClick={() => onSelectAgent(head.id)}>
+                    {head.name}
+                  </button>
+                  <span className="world-hier-lv">{wc.levelShort(head.level)}</span>
+                </div>
+                <div className="world-hier-sub muted">
+                  {wc.liveStates[head.liveState]}
+                  {head.currentTask ? ` · #${head.currentTask.number} ${head.currentTask.title}` : ''}
+                </div>
+              </div>
+            ) : (
+              <div className="world-hier-head-in">
+                <span className="world-hier-role">{roleCode ? `${roleCode} · ${deptTitle}` : deptTitle}</span>
+                <span className="muted">{wc.deptNoHead}</span>
+              </div>
+            )}
+          </Edge>
+
+          {/* Responsible people branch connected off the head node */}
+          {people.length > 0 && (
+            <div className="world-hier-people-branch" data-testid="world-dept-people">
+              <span className="world-hier-branch-label">{wc.deptResponsible}</span>
+              <ul className="world-hier-people-list">
+                {people.map(p => (
+                  <li key={p.id}>
+                    <Edge cut={6} className="world-hier-person">
+                      <span className="world-hier-person-in">
+                        <PersonIcon label={t.map.person} />
+                        <span className="world-hier-person-text">
+                          <b>{p.name}</b>
+                          {p.title && <small className="muted">{p.title}</small>}
+                        </span>
+                      </span>
+                    </Edge>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        {/* Static orthogonal trunk + via junction + framed branches */}
+        {hasBranches && (
+          <div className="world-hier-trunk">
+            <span className="world-hier-via" aria-hidden="true" />
+            <div className="world-hier-branches">
+              {/* Sub-departments / Products branch */}
+              {products.length > 0 && (
+                <div className="world-hier-branch-item" data-testid="world-dept-subdepts">
+                  <Edge cut={8} corner className="world-hier-frame">
+                    <div className="world-hier-frame-head">
+                      <span className="world-hier-frame-title">{wc.deptSubdepts}</span>
+                      <span className="world-hier-count">{products.length}</span>
+                    </div>
+                    <ul className="world-hier-subdept-grid">
+                      {products.map(prod => (
+                        <li key={prod.id}>
+                          <Edge cut={6} className="world-hier-subdept">
+                            <span className="world-hier-subdept-in">
+                              <b>{prod.name}</b>
+                              {prod.repository?.branch && <small className="muted">{prod.repository.branch}</small>}
+                            </span>
+                          </Edge>
+                        </li>
+                      ))}
+                    </ul>
+                  </Edge>
+                </div>
+              )}
+
+              {/* Sub-unit teams & role frames with chamfered member nodes */}
+              {groups.map(group => (
+                <div key={group.key} className="world-hier-branch-item" data-hier-group={group.key}>
+                  <Edge cut={8} corner className={`world-hier-frame${group.isGate ? ' gate' : ''}`}>
+                    <div className="world-hier-frame-head">
+                      <span className="world-hier-frame-title">{group.title}</span>
+                      <span className="world-hier-frame-tags">
+                        {group.badge && <span className="world-card-badge">{group.badge}</span>}
+                        <span className="world-hier-count">{group.members.length}</span>
+                      </span>
+                    </div>
+                    {group.members.length > 0 ? (
+                      <ul className="world-hier-members">
+                        {group.members.map(m => {
+                          const isOn = switched[m.id] ?? (m.orgEmp ? m.orgEmp.status !== 'off' : true);
+                          return (
+                            <li key={m.id}>
+                              <Edge cut={6} className={`world-hier-member${isOn ? '' : ' off'}`}>
+                                <div className="world-hier-member-in">
+                                  <div className="world-hier-member-row">
+                                    <span className={`world-hier-dot ${statusDotTone(m.liveState, isOn)}`} aria-hidden="true" />
+                                    <WorkerMark kind={employeeKind(m.turnkey)} decorative />
+                                    <button className="world-hier-name-btn" type="button" onClick={() => onSelectAgent(m.id)}>
+                                      {m.name}
+                                    </button>
+                                    <ProviderMark provider={m.provider} />
+                                    <span className="world-hier-lv">
+                                      {m.roleClass === 'day_laborer' ? '-' : wc.levelShort(m.level)}
+                                    </span>
+                                    {m.orgEmp && canGive && (
+                                      <input
+                                        type="checkbox"
+                                        className="sw"
+                                        checked={isOn}
+                                        aria-label={m.name}
+                                        onChange={ev => onToggleAgent(m.id, ev.target.checked)}
+                                      />
+                                    )}
+                                  </div>
+                                  {m.currentTask && (
+                                    <div className="world-hier-member-task muted">
+                                      #{m.currentTask.number} {m.currentTask.title}
+                                    </div>
+                                  )}
+                                </div>
+                              </Edge>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <p className="muted world-hier-empty">{wc.noAgentsAssigned}</p>
+                    )}
+                  </Edge>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 /* Department Building -> Department Mode side card preserving every existing department capability on the city map. */
 function DepartmentModeCard({
   me,
@@ -748,63 +1080,48 @@ function DepartmentModeCard({
 
         {tab === 'overview' && (
           <>
+            <DepartmentHierarchyGraph
+              orgDept={orgDept}
+              deptAgents={deptAgents}
+              roleCode={roleCode}
+              deptTitle={title}
+              canGive={canGive}
+              switched={switched}
+              switchErr={switchErr}
+              onSelectAgent={onSelectAgent}
+              onToggleAgent={(agentId, nextOn) => void toggleAgent(agentId, nextOn)}
+            />
+
             {focus && (
               <section className="world-card-section" data-testid="world-dept-workpaths">
                 <h4>{wc.deptWorkPaths} ({focus.links.length})</h4>
-                <ul className="world-legend-list">
-                  <li>
-                    <span className="world-legend-swatch" style={{ backgroundColor: focus.bannerColor }} />
-                    <span>{wc.legendHandoff}</span>
-                  </li>
-                  <li>
-                    <span className="world-legend-swatch" style={{ backgroundColor: '#4CC9F0' }} />
-                    <span>{wc.legendChecker}</span>
-                  </li>
-                  <li>
-                    <span className="world-legend-swatch" style={{ backgroundColor: '#F8E18C' }} />
-                    <span>{wc.legendHead}</span>
-                  </li>
-                  <li>
-                    <span className="world-legend-swatch dashed" style={{ borderColor: '#FFB703' }} />
-                    <span>{wc.legendOneShot}</span>
-                  </li>
-                </ul>
+                {focus.links.length > 0 ? (
+                  <ul className="world-legend-list">
+                    {focus.links.map(link => (
+                      <li key={link.id}>
+                        <span
+                          className={`world-legend-swatch${link.kind === 'one_shot' ? ' dashed' : ''}`}
+                          style={
+                            link.kind === 'one_shot'
+                              ? { borderColor: '#D49B38' }
+                              : { backgroundColor: focus.bannerColor }
+                          }
+                        />
+                        <span>
+                          {roadLinkLabel(link.kind, wc)}
+                          <small className="muted"> · {link.fromLabel} -&gt; {link.toLabel}</small>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted">{wc.deptNoRoadRoutes}</p>
+                )}
+                {focus.highlightedResidentIds.size > 0 && (
+                  <p className="muted world-card-sub">{wc.deptHighlightedResidents(focus.highlightedResidentIds.size)}</p>
+                )}
               </section>
             )}
-
-            <section className="world-card-section">
-              <h4>{wc.deptPeople} ({deptAgents.length})</h4>
-              {switchErr && <p className="alert" role="alert">{switchErr}</p>}
-              {deptAgents.length > 0 ? (
-                <ul className="world-card-list">
-                  {deptAgents.map(a => {
-                    const orgEmp = orgDept?.employees.find(e => e.id === a.id);
-                    const isOn = switched[a.id] ?? (orgEmp ? orgEmp.status !== 'off' : true);
-                    return (
-                      <li key={a.id}>
-                        <button className="world-link-btn" type="button" onClick={() => onSelectAgent(a.id)}>
-                          <span>{a.name}</span>
-                          <small className="muted">
-                            {wc.roleClasses[a.roleClass ?? 'executor']} · {wc.levelShort(a.level)}
-                          </small>
-                        </button>
-                        {orgEmp && canGive && (
-                          <input
-                            type="checkbox"
-                            className="sw"
-                            checked={isOn}
-                            aria-label={a.name}
-                            onChange={ev => void toggleAgent(a.id, ev.target.checked)}
-                          />
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : (
-                <p className="muted">{wc.noAgentsAssigned}</p>
-              )}
-            </section>
 
             <section className="world-card-section">
               <h4>{wc.deptActiveTasks} ({activeTasks.length})</h4>

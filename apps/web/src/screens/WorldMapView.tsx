@@ -17,7 +17,7 @@ import { takeEscape } from '../ui/escape';
 import { MapVersion } from '../ui/VersionMark';
 import type { CityBuilding, CityState } from '../world/city-layout';
 import { createConstructionSimulation, type ConstructionSimulation } from '../world/construction';
-import { buildDepartmentFocus, type DepartmentFocusSpec } from '../world/department-focus';
+import { buildDepartmentFocus, isLinkStrictlyOnRoads, type DepartmentFocusSpec } from '../world/department-focus';
 import {
   canRelocateBuildingTo,
   syncLiveSnapshotToCity,
@@ -72,6 +72,8 @@ type ProductWorldDebugHandle = Readonly<{
     highlightedResidents: number;
     linksCount: number;
     linkKinds: string[];
+    allLinksOnRoads: boolean;
+    pathTilesTotal: number;
   } | null;
   selectBuildingByKind: (kind: CityBuilding['kind'], index?: number) => { id: string; label: string; kind: string } | null;
   selectResidentByRoleClass: (roleClass?: string) => { id: string; agentId: string; name: string } | null;
@@ -342,6 +344,7 @@ export function WorldMapView({
         getResidents: () => simRef.current?.residents ?? [],
         getDepartmentFocus: () => {
           const f = engineRef.current?.getDepartmentFocus();
+          const city = cityRef.current;
           if (!f) return null;
           return {
             departmentId: f.departmentId,
@@ -350,6 +353,8 @@ export function WorldMapView({
             highlightedResidents: f.highlightedResidentIds.size,
             linksCount: f.links.length,
             linkKinds: [...new Set(f.links.map(l => l.kind))],
+            allLinksOnRoads: Boolean(city) && f.links.every(l => isLinkStrictlyOnRoads(city!, l)),
+            pathTilesTotal: f.links.reduce((acc, l) => acc + l.path.length, 0),
           };
         },
         selectBuildingByKind: (kind, index = 0) => {

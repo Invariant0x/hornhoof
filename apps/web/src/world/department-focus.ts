@@ -1,21 +1,23 @@
 /* Pack-agnostic Department Mode focus builder and overlay renderer for Stage 8.
    Highlights all buildings and residents belonging to the selected department in its banner color,
-   dims the rest of the city with separate ground-vs-actor weighting, and overlays work-path lines
-   showing stone handoffs, checkers, head guidance, and one-shot helpers directly on the city map.
+   dims the rest of the city softly, and draws only clean road-following street routes between
+   department structures (never straight diagonals across roofs/water and never lines to walking agents).
    Contains zero theme-specific words. */
 
 import type { Graphics } from 'pixi.js';
-import type { CityBuilding, CityState } from './city-layout';
+import { tileKey, type CityBuilding, type CityState } from './city-layout';
 import { tileCenterToWorld, tileTopVertexToWorld, type TileCoord } from './coords';
 import type { ResidentEntity } from './residents';
 
-export type DepartmentWorkLinkKind = 'handoff' | 'checker' | 'head_guide' | 'one_shot';
+export type DepartmentWorkLinkKind = 'handoff' | 'statue' | 'one_shot';
 
 export type DepartmentWorkLink = Readonly<{
   id: string;
   kind: DepartmentWorkLinkKind;
   from: TileCoord;
   to: TileCoord;
+  /* Ordered street tiles strictly inside city.roads along which this route runs. */
+  path: readonly TileCoord[];
   fromLabel: string;
   toLabel: string;
   active: boolean;
@@ -62,11 +64,108 @@ function parseHex(color: string, fallback: number): number {
   return m ? Number.parseInt(m[1]!, 16) : fallback;
 }
 
-function buildingCenterTile(b: CityBuilding): TileCoord {
-  return {
-    col: b.col + (b.spanCol - 1) * 0.5,
-    row: b.row + (b.spanRow - 1) * 0.5,
-  };
+/* Collects existing road tiles around a building footprint (checking radius 1, 2, then 3). */
+function roadEntrancesForBuilding(city: CityState, b: CityBuilding): TileCoord[] {
+  for (const pad of [1, 2, 3]) {
+    const out: TileCoord[] = [];
+    const seen = new Set<string>();
+    const minC = b.col - pad;
+    const maxC = b.col + b.spanCol - 1 + pad;
+    const minR = b.row - pad;
+    const maxR = b.row + b.spanRow - 1 + pad;
+    for (let c = minC; c <= maxC; c++) {
+      for (let r = minR; r <= maxR; r++) {
+        if (c >= b.col && c < b.col + b.spanCol && r >= b.row && r < b.row + b.spanRow) continue;
+        const k = tileKey(c, r);
+        if (seen.has(k) || !city.roads.has(k)) continue;
+        seen.add(k);
+        out.push({ col: c, row: r });
+      }
+    }
+    if (out.length > 0) {
+      const refCol = b.door?.col ?? b.col + b.spanCol * 0.5;
+      const refRow = b.door?.row ?? b.row + b.spanRow * 0.5;
+      out.sort(
+        (a, c) =>
+          Math.abs(a.col - refCol) + Math.abs(a.row - refRow) -
+          (Math.abs(c.col - refCol) + Math.abs(c.row - refRow)),
+      );
+      return out;
+    }
+  }
+  return [];
+}
+
+const ROAD_DIRS: readonly [number, number][] = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+
+/* Shortest path strictly along city.roads tiles between two buildings' front-door street entrances. */
+function findRoadPathBetweenBuildings(
+  city: CityState,
+  fromBld: CityBuilding,
+  toBld: CityBuilding,
+  maxVisited = 4000,
+): TileCoord[] {
+  const starts = roadEntrancesForBuilding(city, fromBld);
+  const targets = roadEntrancesForBuilding(city, toBld);
+  if (starts.length === 0 || targets.length === 0) return [];
+
+  const start = starts[0]!;
+  const startKey = tileKey(start.col, start.row);
+  let target = targets.find(t => tileKey(t.col, t.row) !== startKey) ?? targets[0]!;
+  let targetKey = tileKey(target.col, target.row);
+
+  /* If two adjacent structures share the exact same single road tile, extend one step along the road. */
+  if (targetKey === startKey) {
+    for (const [dc, dr] of ROAD_DIRS) {
+      const nc = start.col + dc;
+      const nr = start.row + dr;
+      if (city.roads.has(tileKey(nc, nr))) {
+        target = { col: nc, row: nr };
+        targetKey = tileKey(nc, nr);
+        break;
+      }
+    }
+  }
+  if (targetKey === startKey) return [];
+
+  const parent = new Map<string, string | null>([[startKey, null]]);
+  const coordByKey = new Map<string, TileCoord>([[startKey, start]]);
+  const queue: string[] = [startKey];
+
+  let head = 0;
+  let reachedKey: string | null = null;
+  while (head < queue.length && parent.size < maxVisited) {
+    const curKey = queue[head++]!;
+    if (curKey === targetKey) {
+      reachedKey = curKey;
+      break;
+    }
+    const cur = coordByKey.get(curKey)!;
+    for (const [dc, dr] of ROAD_DIRS) {
+      const nc = cur.col + dc;
+      const nr = cur.row + dr;
+      const nk = tileKey(nc, nr);
+      if (parent.has(nk) || !city.roads.has(nk)) continue;
+      parent.set(nk, curKey);
+      coordByKey.set(nk, { col: nc, row: nr });
+      queue.push(nk);
+    }
+  }
+
+  if (!reachedKey) return [];
+  const reversed: TileCoord[] = [];
+  let cursor: string | null = reachedKey;
+  while (cursor !== null) {
+    reversed.push(coordByKey.get(cursor)!);
+    cursor = parent.get(cursor) ?? null;
+  }
+  reversed.reverse();
+  return reversed;
 }
 
 export function buildDepartmentFocus(
@@ -82,6 +181,7 @@ export function buildDepartmentFocus(
   let deptBuilding: CityBuilding | null = null;
   let flophouseBuilding: CityBuilding | null = null;
   let monumentBuilding: CityBuilding | null = null;
+  const deptStatues: CityBuilding[] = [];
   const houseByAgentId = new Map<string, CityBuilding>();
 
   for (const b of city.buildings) {
@@ -91,6 +191,7 @@ export function buildDepartmentFocus(
     }
     if (b.departmentId === departmentId) {
       if (b.kind === 'department') deptBuilding = b;
+      if (b.kind === 'statue') deptStatues.push(b);
       if (b.kind === 'department' || b.kind === 'house' || b.kind === 'statue') {
         highlightedBuildingIds.add(b.id);
       }
@@ -108,115 +209,63 @@ export function buildDepartmentFocus(
     if (r.departmentId === departmentId) {
       highlightedResidentIds.add(r.id);
       deptResidents.push(r);
-      const house = houseByAgentId.get(r.agentId) ?? (r.homeBuildingId ? city.buildings.find(b => b.id === r.homeBuildingId) : undefined);
+      const house =
+        houseByAgentId.get(r.agentId) ??
+        (r.homeBuildingId ? city.buildings.find(b => b.id === r.homeBuildingId) : undefined);
       if (house) highlightedBuildingIds.add(house.id);
     }
   }
 
-  const anchorTile = deptBuilding ? buildingCenterTile(deptBuilding) : city.center;
-  const anchorLabel = deptBuilding?.label ?? departmentId;
   const links: DepartmentWorkLink[] = [];
+  const hasWorking = deptResidents.some(r => r.liveState === 'working');
+  const hasDayLaborers = deptResidents.some(r => r.roleClass === 'day_laborer');
 
-  const heads = deptResidents.filter(r => r.roleClass === 'head');
-  const executors = deptResidents.filter(r => r.roleClass === 'executor' || r.roleClass === 'turnkey');
-  const checkers = deptResidents.filter(r => r.roleClass === 'checker');
-  const dayLaborers = deptResidents.filter(r => r.roleClass === 'day_laborer');
-
-  const tileForResident = (r: ResidentEntity): TileCoord => {
-    const house = houseByAgentId.get(r.agentId);
-    if (house) return buildingCenterTile(house);
-    return { col: r.col, row: r.row };
-  };
-
-  /* 1. Department head -> executors / department hub (guidance). */
-  for (const head of heads) {
-    const from = tileForResident(head);
-    const targets = executors.slice(0, 6);
-    if (targets.length === 0) {
+  /* Only build clean, road-following routes between architectural landmarks (zero straight rays to walking agents). */
+  if (deptBuilding && monumentBuilding) {
+    const path = findRoadPathBetweenBuildings(city, deptBuilding, monumentBuilding);
+    if (path.length >= 2) {
       links.push({
-        id: `head-${head.id}-hub`,
-        kind: 'head_guide',
-        from,
-        to: anchorTile,
-        fromLabel: head.name,
-        toLabel: anchorLabel,
-        active: head.liveState === 'working',
+        id: `route-dept-monument-${monumentBuilding.id}`,
+        kind: 'handoff',
+        from: path[0]!,
+        to: path[path.length - 1]!,
+        path,
+        fromLabel: deptBuilding.label,
+        toLabel: monumentBuilding.label,
+        active: hasWorking,
       });
-    } else {
-      for (const exec of targets) {
-        links.push({
-          id: `head-${head.id}-${exec.id}`,
-          kind: 'head_guide',
-          from,
-          to: tileForResident(exec),
-          fromLabel: head.name,
-          toLabel: exec.name,
-          active: head.liveState === 'working' || exec.liveState === 'working',
-        });
-      }
     }
   }
 
-  /* 2. Executors -> department hub & primary goal monument (stone handoff flow). */
-  for (const exec of executors.slice(0, 12)) {
-    const from = tileForResident(exec);
-    links.push({
-      id: `handoff-${exec.id}-dept`,
-      kind: 'handoff',
-      from,
-      to: anchorTile,
-      fromLabel: exec.name,
-      toLabel: anchorLabel,
-      active: exec.liveState === 'working',
-    });
-  }
-  if (monumentBuilding) {
-    links.push({
-      id: `handoff-dept-monument-${monumentBuilding.id}`,
-      kind: 'handoff',
-      from: anchorTile,
-      to: buildingCenterTile(monumentBuilding),
-      fromLabel: anchorLabel,
-      toLabel: monumentBuilding.label,
-      active: executors.some(e => e.liveState === 'working'),
-    });
-  }
-
-  /* 3. Department hub / executors -> checkers (inspection & rework return loop). */
-  for (const chk of checkers.slice(0, 8)) {
-    const to = tileForResident(chk);
-    links.push({
-      id: `checker-dept-${chk.id}`,
-      kind: 'checker',
-      from: anchorTile,
-      to,
-      fromLabel: anchorLabel,
-      toLabel: chk.name,
-      active: chk.liveState === 'working' || chk.hasRecentRework,
-    });
-  }
-
-  /* 4. One-shot helpers (flophouse or active day-laborers) -> department hub. */
-  if (flophouseBuilding) {
-    highlightedBuildingIds.add(flophouseBuilding.id);
-    links.push({
-      id: `oneshot-lodge-${flophouseBuilding.id}`,
-      kind: 'one_shot',
-      from: buildingCenterTile(flophouseBuilding),
-      to: anchorTile,
-      fromLabel: flophouseBuilding.label,
-      toLabel: anchorLabel,
-      active: dayLaborers.length > 0,
-    });
-  } else if (dayLaborers.length > 0) {
-    for (const helper of dayLaborers.slice(0, 4)) {
+  if (deptBuilding && deptStatues.length > 0) {
+    const statue = deptStatues[deptStatues.length - 1]!;
+    const path = findRoadPathBetweenBuildings(city, deptBuilding, statue);
+    if (path.length >= 2) {
       links.push({
-        id: `oneshot-res-${helper.id}`,
+        id: `route-dept-statue-${statue.id}`,
+        kind: 'statue',
+        from: path[0]!,
+        to: path[path.length - 1]!,
+        path,
+        fromLabel: deptBuilding.label,
+        toLabel: statue.label,
+        active: hasWorking,
+      });
+    }
+  }
+
+  if (deptBuilding && flophouseBuilding && hasDayLaborers) {
+    const path = findRoadPathBetweenBuildings(city, flophouseBuilding, deptBuilding);
+    if (path.length >= 2) {
+      highlightedBuildingIds.add(flophouseBuilding.id);
+      links.push({
+        id: `route-oneshot-${flophouseBuilding.id}`,
         kind: 'one_shot',
-        from: { col: helper.col, row: helper.row },
-        to: anchorTile,
-        fromLabel: helper.name,
-        toLabel: anchorLabel,
+        from: path[0]!,
+        to: path[path.length - 1]!,
+        path,
+        fromLabel: flophouseBuilding.label,
+        toLabel: deptBuilding.label,
         active: true,
       });
     }
@@ -231,75 +280,77 @@ export function buildDepartmentFocus(
   };
 }
 
+/* Verifies that a work route runs strictly tile-by-tile along existing city.roads tiles (4-connected). */
+export function isLinkStrictlyOnRoads(city: CityState, link: DepartmentWorkLink): boolean {
+  if (link.path.length < 2) return false;
+  for (let i = 0; i < link.path.length; i++) {
+    const cur = link.path[i]!;
+    if (!city.roads.has(tileKey(cur.col, cur.row))) return false;
+    if (i > 0) {
+      const prev = link.path[i - 1]!;
+      const dist = Math.abs(cur.col - prev.col) + Math.abs(cur.row - prev.row);
+      if (dist !== 1) return false;
+    }
+  }
+  return true;
+}
+
 function linkColor(kind: DepartmentWorkLinkKind, bannerHex: number): number {
-  if (kind === 'checker') return 0x4cc9f0;
-  if (kind === 'one_shot') return 0xffb703;
-  if (kind === 'head_guide') return 0xf8e18c;
+  if (kind === 'one_shot') return 0xd49b38;
   return bannerHex;
 }
 
 function linkCss(kind: DepartmentWorkLinkKind, bannerColor: string): string {
-  if (kind === 'checker') return '#4CC9F0';
-  if (kind === 'one_shot') return '#FFB703';
-  if (kind === 'head_guide') return '#F8E18C';
+  if (kind === 'one_shot') return '#D49B38';
   return bannerColor;
 }
 
-function drawDashedArcPixi(
+function drawRoadPathPixi(
   g: Graphics,
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-  lift: number,
+  path: readonly TileCoord[],
+  tileW: number,
+  tileH: number,
   color: number,
   width: number,
   dashed: boolean,
-  timeSec: number,
-  active: boolean,
 ): void {
-  const mx = (x1 + x2) * 0.5;
-  const my = (y1 + y2) * 0.5 - lift;
-  const steps = 16;
-  const pts: Array<{ x: number; y: number }> = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const inv = 1 - t;
-    pts.push({
-      x: inv * inv * x1 + 2 * inv * t * mx + t * t * x2,
-      y: inv * inv * y1 + 2 * inv * t * my + t * t * y2,
-    });
-  }
+  if (path.length < 2) return;
+  const pts = path.map(t => tileCenterToWorld(t.col, t.row, tileW, tileH));
 
+  /* Soft road-hugging under-glow along the street centerline. */
+  g.moveTo(pts[0]!.x, pts[0]!.y);
+  for (let i = 1; i < pts.length; i++) {
+    g.lineTo(pts[i]!.x, pts[i]!.y);
+  }
+  g.stroke({ color, alpha: 0.24, width: width * 2.8, cap: 'round', join: 'round' });
+
+  /* Crisp static street trace (dashed only for one-shot helper routes). */
   if (dashed) {
-    for (let i = 0; i < steps; i += 2) {
-      const a = pts[i]!;
-      const b = pts[i + 1]!;
-      g.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ color, alpha: active ? 0.96 : 0.72, width });
+    for (let i = 0; i < pts.length - 1; i++) {
+      if (i % 2 === 1) continue;
+      g.moveTo(pts[i]!.x, pts[i]!.y)
+        .lineTo(pts[i + 1]!.x, pts[i + 1]!.y)
+        .stroke({ color, alpha: 0.88, width, cap: 'round' });
     }
   } else {
     g.moveTo(pts[0]!.x, pts[0]!.y);
-    for (let i = 1; i <= steps; i++) {
+    for (let i = 1; i < pts.length; i++) {
       g.lineTo(pts[i]!.x, pts[i]!.y);
     }
-    g.stroke({ color, alpha: active ? 0.96 : 0.74, width });
+    g.stroke({ color, alpha: 0.86, width, cap: 'round', join: 'round' });
   }
 
-  /* Directional traveling pulse dot along the work path. */
-  const phase = active ? (timeSec * 0.55) % 1 : 0.5;
-  const inv = 1 - phase;
-  const px = inv * inv * x1 + 2 * inv * phase * mx + phase * phase * x2;
-  const py = inv * inv * y1 + 2 * inv * phase * my + phase * phase * y2;
-  g.circle(px, py, width * 1.55).fill({ color: 0xffffff, alpha: active ? 0.96 : 0.65 });
-  g.circle(px, py, width * 2.25).fill({ color, alpha: active ? 0.42 : 0.2 });
-
-  /* Terminal node marker. */
-  g.circle(x2, y2, width * 1.3).fill({ color, alpha: 0.92 });
+  /* Clean start/end street nodes. */
+  const start = pts[0]!;
+  const end = pts[pts.length - 1]!;
+  g.circle(start.x, start.y, width * 1.15).fill({ color, alpha: 0.9 });
+  g.circle(end.x, end.y, width * 1.35).fill({ color, alpha: 0.95 });
+  g.circle(end.x, end.y, width * 0.65).fill({ color: 0xffffff, alpha: 0.85 });
 }
 
 /* PixiJS WebGL overlay for Department Mode:
-   dims the non-selected city ground/structures while keeping the selected department's buildings,
-   houses, statues, residents and inter-participant work paths brightly lit in its banner color. */
+   softly dims unfocused city ground/buildings, highlights department structures & agents gently,
+   and illuminates only real road-following routes between department buildings. */
 export function renderDepartmentFocusToPixi(
   g: Graphics,
   focus: DepartmentFocusSpec,
@@ -309,10 +360,9 @@ export function renderDepartmentFocusToPixi(
   tileW: number,
   tileH: number,
   zoom: number,
-  timeSec: number,
 ): void {
   const bannerHex = parseHex(focus.bannerColor, 0x2e7bb5);
-  const strokeW = Math.max(1.8, 2.6 / Math.max(0.5, zoom));
+  const strokeW = Math.max(1.6, 2.3 / Math.max(0.5, zoom));
 
   /* 1. Soft darkening veil over the full map diamond (dims unfocused city ground & buildings). */
   const top = tileTopVertexToWorld(0, 0, tileW, tileH);
@@ -324,9 +374,15 @@ export function renderDepartmentFocusToPixi(
     .lineTo(bottom.x, bottom.y)
     .lineTo(left.x, left.y)
     .closePath()
-    .fill({ color: 0x0e0c0a, alpha: 0.42 });
+    .fill({ color: 0x0e0c0a, alpha: 0.34 });
 
-  /* 2. Bright banner-colored footprint highlights + banner pennants on every building in the department. */
+  /* 2. Road-following routes along actual streets between department landmarks (static, calm). */
+  const linkW = Math.max(2.0, 2.6 / Math.max(0.5, zoom));
+  for (const link of focus.links) {
+    drawRoadPathPixi(g, link.path, tileW, tileH, linkColor(link.kind, bannerHex), linkW, link.kind === 'one_shot');
+  }
+
+  /* 3. Banner-colored footprint highlights + pennants on department buildings, statues, and member houses. */
   for (const b of city.buildings) {
     if (!focus.highlightedBuildingIds.has(b.id)) continue;
     const bt = tileTopVertexToWorld(b.col, b.row, tileW, tileH);
@@ -334,59 +390,45 @@ export function renderDepartmentFocusToPixi(
     const bb = tileTopVertexToWorld(b.col + b.spanCol, b.row + b.spanRow, tileW, tileH);
     const bl = tileTopVertexToWorld(b.col, b.row + b.spanRow, tileW, tileH);
 
-    const fillAlpha = b.kind === 'department' ? 0.34 : 0.24;
+    const fillAlpha = b.kind === 'department' ? 0.3 : 0.2;
     g.moveTo(bt.x, bt.y)
       .lineTo(br.x, br.y)
       .lineTo(bb.x, bb.y)
       .lineTo(bl.x, bl.y)
       .closePath()
       .fill({ color: bannerHex, alpha: fillAlpha })
-      .stroke({ color: bannerHex, alpha: 0.98, width: strokeW * (b.kind === 'department' ? 1.5 : 1.05) });
+      .stroke({ color: bannerHex, alpha: 0.96, width: strokeW * (b.kind === 'department' ? 1.45 : 1.0) });
 
-    /* Bright inner rim so highlighted structures pop above the dimmed city. */
     g.moveTo(bt.x, bt.y)
       .lineTo(br.x, br.y)
       .lineTo(bb.x, bb.y)
       .lineTo(bl.x, bl.y)
       .closePath()
-      .stroke({ color: 0xffffff, alpha: 0.45, width: strokeW * 0.45 });
+      .stroke({ color: 0xffffff, alpha: 0.42, width: strokeW * 0.4 });
 
-    /* Banner pennant flagpole at the top corner of highlighted department structures. */
-    const poleH = b.kind === 'department' ? 38 : 22;
+    const poleH = b.kind === 'department' ? 36 : 20;
     g.moveTo(bt.x, bt.y)
       .lineTo(bt.x, bt.y - poleH)
-      .stroke({ color: 0xf7ecd2, alpha: 0.95, width: Math.max(1.4, strokeW * 0.7) });
+      .stroke({ color: 0xf7ecd2, alpha: 0.94, width: Math.max(1.3, strokeW * 0.65) });
     g.moveTo(bt.x, bt.y - poleH)
-      .lineTo(bt.x + (b.kind === 'department' ? 18 : 11), bt.y - poleH + 5)
+      .lineTo(bt.x + (b.kind === 'department' ? 17 : 10), bt.y - poleH + 5)
       .lineTo(bt.x, bt.y - poleH + 10)
       .closePath()
-      .fill({ color: bannerHex, alpha: 0.98 });
+      .fill({ color: bannerHex, alpha: 0.96 });
   }
 
-  /* 3. Work-path lines overlaid on the city map between department participants. */
-  const linkW = Math.max(2.0, 2.8 / Math.max(0.5, zoom));
-  for (const link of focus.links) {
-    const a = tileCenterToWorld(link.from.col, link.from.row, tileW, tileH);
-    const b = tileCenterToWorld(link.to.col, link.to.row, tileW, tileH);
-    const dist = Math.hypot(b.x - a.x, b.y - a.y);
-    if (dist < 4) continue;
-    const lift = Math.min(72, Math.max(18, dist * 0.16));
-    const col = linkColor(link.kind, bannerHex);
-    drawDashedArcPixi(g, a.x, a.y - 12, b.x, b.y - 12, lift, col, linkW, link.kind === 'one_shot', timeSec, link.active);
-  }
-
-  /* 4. Bright banner-color rings around every resident belonging to this department. */
+  /* 4. Gentle ground highlight rings around department residents (no lines pointing at agents). */
   for (const r of residents) {
     if (!focus.highlightedResidentIds.has(r.id)) continue;
     const pt = tileCenterToWorld(r.col, r.row, tileW, tileH);
     g.ellipse(pt.x, pt.y + 1, 14, 7.5)
-      .fill({ color: bannerHex, alpha: 0.36 })
-      .stroke({ color: bannerHex, alpha: 0.98, width: strokeW * 0.9 });
-    g.ellipse(pt.x, pt.y + 1, 10, 5.2).stroke({ color: 0xffffff, alpha: 0.7, width: Math.max(1, strokeW * 0.4) });
+      .fill({ color: bannerHex, alpha: 0.3 })
+      .stroke({ color: bannerHex, alpha: 0.92, width: strokeW * 0.85 });
+    g.ellipse(pt.x, pt.y + 1, 9.5, 5).stroke({ color: 0xffffff, alpha: 0.65, width: Math.max(1, strokeW * 0.38) });
   }
 }
 
-/* Canvas 2D fallback overlay for Department Mode (identical visual semantics). */
+/* Canvas 2D fallback overlay for Department Mode (identical road-following & subtle highlight semantics). */
 export function renderDepartmentFocusFallback2D(
   ctx: CanvasRenderingContext2D,
   focus: DepartmentFocusSpec,
@@ -409,10 +451,29 @@ export function renderDepartmentFocusFallback2D(
   ctx.lineTo(bottom.x, bottom.y);
   ctx.lineTo(left.x, left.y);
   ctx.closePath();
-  ctx.fillStyle = 'rgba(14, 12, 10, 0.42)';
+  ctx.fillStyle = 'rgba(14, 12, 10, 0.34)';
   ctx.fill();
 
-  const strokeW = Math.max(1.8, 2.6 / Math.max(0.5, zoom));
+  const linkW = Math.max(2, 2.6 / Math.max(0.5, zoom));
+  for (const link of focus.links) {
+    if (link.path.length < 2) continue;
+    const pts = link.path.map(t => tileCenterToWorld(t.col, t.row, tileW, tileH));
+    ctx.beginPath();
+    ctx.setLineDash(link.kind === 'one_shot' ? [8, 6] : []);
+    ctx.moveTo(pts[0]!.x, pts[0]!.y);
+    for (let i = 1; i < pts.length; i++) {
+      ctx.lineTo(pts[i]!.x, pts[i]!.y);
+    }
+    ctx.globalAlpha = 0.86;
+    ctx.strokeStyle = linkCss(link.kind, focus.bannerColor);
+    ctx.lineWidth = linkW;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  const strokeW = Math.max(1.6, 2.3 / Math.max(0.5, zoom));
   for (const b of city.buildings) {
     if (!focus.highlightedBuildingIds.has(b.id)) continue;
     const bt = tileTopVertexToWorld(b.col, b.row, tileW, tileH);
@@ -425,45 +486,26 @@ export function renderDepartmentFocusFallback2D(
     ctx.lineTo(bb.x, bb.y);
     ctx.lineTo(bl.x, bl.y);
     ctx.closePath();
-    ctx.globalAlpha = b.kind === 'department' ? 0.34 : 0.24;
+    ctx.globalAlpha = b.kind === 'department' ? 0.3 : 0.2;
     ctx.fillStyle = focus.bannerColor;
     ctx.fill();
-    ctx.globalAlpha = 0.98;
+    ctx.globalAlpha = 0.96;
     ctx.strokeStyle = focus.bannerColor;
-    ctx.lineWidth = strokeW * (b.kind === 'department' ? 1.5 : 1.05);
+    ctx.lineWidth = strokeW * (b.kind === 'department' ? 1.45 : 1.0);
     ctx.stroke();
   }
-
-  for (const link of focus.links) {
-    const a = tileCenterToWorld(link.from.col, link.from.row, tileW, tileH);
-    const b = tileCenterToWorld(link.to.col, link.to.row, tileW, tileH);
-    const dist = Math.hypot(b.x - a.x, b.y - a.y);
-    if (dist < 4) continue;
-    const lift = Math.min(72, Math.max(18, dist * 0.16));
-    const mx = (a.x + b.x) * 0.5;
-    const my = (a.y + b.y) * 0.5 - lift - 12;
-    ctx.beginPath();
-    ctx.setLineDash(link.kind === 'one_shot' ? [8, 6] : []);
-    ctx.moveTo(a.x, a.y - 12);
-    ctx.quadraticCurveTo(mx, my, b.x, b.y - 12);
-    ctx.globalAlpha = link.active ? 0.95 : 0.72;
-    ctx.strokeStyle = linkCss(link.kind, focus.bannerColor);
-    ctx.lineWidth = Math.max(2, 2.8 / Math.max(0.5, zoom));
-    ctx.stroke();
-  }
-  ctx.setLineDash([]);
 
   for (const r of residents) {
     if (!focus.highlightedResidentIds.has(r.id)) continue;
     const pt = tileCenterToWorld(r.col, r.row, tileW, tileH);
     ctx.beginPath();
     ctx.ellipse(pt.x, pt.y + 1, 14, 7.5, 0, 0, Math.PI * 2);
-    ctx.globalAlpha = 0.36;
+    ctx.globalAlpha = 0.3;
     ctx.fillStyle = focus.bannerColor;
     ctx.fill();
-    ctx.globalAlpha = 0.98;
+    ctx.globalAlpha = 0.92;
     ctx.strokeStyle = focus.bannerColor;
-    ctx.lineWidth = strokeW;
+    ctx.lineWidth = strokeW * 0.85;
     ctx.stroke();
   }
   ctx.restore();
