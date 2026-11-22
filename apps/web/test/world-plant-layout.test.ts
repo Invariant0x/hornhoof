@@ -79,11 +79,11 @@ describe('plant layer layout', () => {
     const roots: number[] = [];
     for (let i = list.shadowCount; i < list.count; i++) {
       const it = itemAt(list, i);
-      /* Trunks and single-part plants have pivot (20, 200): their root y is the translation plus d * 200. */
+      /* Trunks and single-part plants have pivot (20, 200): their root y is the translation plus d * 200 (the list is float32, so allow its rounding). */
       if (it.frame % 3 === 0) roots.push(it.ty + it.d * 200);
     }
     expect(roots.length).toBeGreaterThan(5);
-    for (let i = 1; i < roots.length; i++) expect(roots[i]!).toBeGreaterThanOrEqual(roots[i - 1]! - 1e-6);
+    for (let i = 1; i < roots.length; i++) expect(roots[i]!).toBeGreaterThanOrEqual(roots[i - 1]! - 0.01);
   });
 
   it('bends and flutters the plants as time passes, and shrinks the work to the view', () => {

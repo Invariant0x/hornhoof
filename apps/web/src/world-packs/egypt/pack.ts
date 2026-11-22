@@ -195,9 +195,9 @@ const EGYPT_MATERIALS: readonly GroundMaterialSpec[] = [
   },
   {
     id: 'grass',
-    baseColor: '#609246',
-    secondaryColor: '#487434',
-    accentColor: '#84B45E',
+    baseColor: '#6AA04C',
+    secondaryColor: '#517E3A',
+    accentColor: '#8EBB62',
     pattern: 'grass_tufts',
     contrast: 1.15,
   },

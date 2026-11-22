@@ -231,9 +231,10 @@ export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArr
       } else if (spec.pattern === 'grass_tufts') {
         /* Isotropic ground-space meadow; isometric (u, v) sampling projects it flat onto the terrain. */
         const patch = periodicDiagNoise(u, v, 6, seed + 89);
-        const tuft = periodicNoise2D(u * 16, v * 16, 16, 16, seed + 91);
+        /* Two lattices at different angles, so the meadow patches are round and do not tile into diamonds. */
+        const tuft = periodicNoise2D(u * 16, v * 16, 16, 16, seed + 91) * 0.5 + periodicDiagNoise(u, v, 11, seed + 93) * 0.5;
         blend = macro * 0.46 + patch * 0.3 + tuft * 0.24;
-        if (tuft > 0.64) accent = smoothstep(0.64, 0.9, tuft) * 0.36 * contrast;
+        if (tuft > 0.62) accent = smoothstep(0.62, 0.86, tuft) * 0.26 * contrast;
       } else if (spec.pattern === 'furrows') {
         /* Ground-axis crop furrows automatically projected onto the 2:1 isometric tile plane. */
         const phase = u * 16 * Math.PI * 2 + (macro - 0.5) * 1.1;
