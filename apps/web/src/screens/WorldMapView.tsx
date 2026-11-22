@@ -33,7 +33,7 @@ import {
   type ResidentSimulation,
 } from '../world/residents';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../world/terrain-engine';
-import { orchestratorStatus } from './Map';
+import { orchestratorStatus, useMapRoom } from './Map';
 import { clock } from './Subscriptions';
 import { WorldSideCards, type WorldSelection } from './WorldSideCards';
 
@@ -123,7 +123,9 @@ export function WorldMapView({
   const [relocateBusy, setRelocateBusy] = useState(false);
   const [residentsTick, setResidentsTick] = useState(0);
 
+  const boxRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
+  const roomStyle = useMapRoom(boxRef, `${windowOpen}`);
   const engineRef = useRef<IsometricWorldEngine | null>(null);
   const mapRef = useRef<GeneratedWorldMap | null>(null);
   const cityRef = useRef<CityState | null>(null);
@@ -343,7 +345,8 @@ export function WorldMapView({
           const matches = (cityRef.current?.buildings ?? []).filter(b => b.kind === kind);
           const target = matches[index];
           if (!target) return null;
-          engineRef.current?.centerOnBuilding(target.id, 1.15);
+          const targetZoom = kind === 'department' ? 0.78 : 1.15;
+          engineRef.current?.centerOnBuilding(target.id, targetZoom);
           engineRef.current?.flushVisibleBakes();
           selectBuilding(target);
           return { id: target.id, label: target.label, kind: target.kind };
@@ -494,9 +497,9 @@ export function WorldMapView({
   const status = orchestratorStatus(t, sub, limitAt, org.orchestrator?.planned);
 
   return (
-    <div className="map world-map" data-world-canvas={pack.id} inert={inside} aria-hidden={inside || undefined}>
-      <div className="map-room world-canvas-room">
-        <div className="world-canvas-host" ref={hostRef} />
+    <div className="map world-map" ref={boxRef} data-world-canvas={pack.id} inert={inside} aria-hidden={inside || undefined}>
+      <div className="world-canvas-host" ref={hostRef} />
+      <div className="map-room" style={roomStyle}>
         <MapVersion off={inside} />
       </div>
 
@@ -583,7 +586,7 @@ export function WorldMapView({
         onSelectDepartment={deptId => {
           setWakeStatus(null);
           const deptBld = cityRef.current?.buildings.find(b => b.kind === 'department' && b.departmentId === deptId);
-          if (deptBld) engineRef.current?.centerOnBuilding(deptBld.id, 1.0);
+          if (deptBld) engineRef.current?.centerOnBuilding(deptBld.id, 0.78);
           setSelection({ kind: 'department', departmentId: deptId, building: deptBld });
         }}
         onWakeAgent={handleWakeAgent}

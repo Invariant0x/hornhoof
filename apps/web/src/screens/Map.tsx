@@ -619,7 +619,7 @@ function useChipNeed(box: { current: HTMLDivElement | null }, org: Org | null, l
    of each, as a department's schema and tree do there: what scrolls under them goes out of sight, and the dots run on under
    the glass. Measured as the map opens, as its bars come, go or grow, and as the screen changes size. bars: what says which
    bars stand now. */
-function useMapRoom(box: { current: HTMLDivElement | null }, bars: string): CSSProperties | undefined {
+export function useMapRoom(box: { current: HTMLDivElement | null }, bars: string): CSSProperties | undefined {
   const [room, setRoom] = useState<{ top: number; bottom: number } | null>(null);
   useLayoutEffect(() => {
     const el = box.current;

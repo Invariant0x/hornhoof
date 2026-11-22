@@ -85,7 +85,7 @@ function buildMatchingOrg(worldState: ReturnType<typeof buildWorldFixtureWithExt
         signedInOnce: true,
         leaseMachine: null,
       },
-      context: 42,
+      context: 0.42,
       program: null,
       alarm: null,
       retry: null,
@@ -373,6 +373,8 @@ test.describe('Stage 8 themed map chrome, 6 entity side cards, and on-map Depart
         expectClose(cur.zoom.y, base.zoom.y, 2, `${tag} zoom.y`);
         expectClose(cur.zoom.height, base.zoom.height, 2, `${tag} zoom.h`);
         expectClose(cur.ticker.bottom, base.ticker.bottom, 2, `${tag} ticker.bottom`);
+        expectClose(cur.ticker.height, base.ticker.height, tickerTol, `${tag} ticker.height`);
+        expect(cur.ticker.height, `${tag} ticker stays compact`).toBeLessThan(180);
         expectClose(cur.ticker.x + cur.ticker.width / 2, base.ticker.x + base.ticker.width / 2, 2, `${tag} ticker.centerX`);
         expectClose(cur.version.bottom, base.version.bottom, tickerTol, `${tag} version.bottom`);
         expectClose(cur.version.right, base.version.right, 2, `${tag} version.right`);
@@ -405,6 +407,9 @@ test.describe('Stage 8 themed map chrome, 6 entity side cards, and on-map Depart
     const pickedDept = await page.evaluate(() => (window as unknown as { __WORLD_PRODUCT__: DebugHandle }).__WORLD_PRODUCT__.selectBuildingByKind('department', 0));
     expect(pickedDept).not.toBeNull();
     await expect(card).toHaveAttribute('data-card-kind', 'department');
+    const cardRect = await card.boundingBox();
+    expect(cardRect).not.toBeNull();
+    expect(cardRect!.x, 'side card anchors on the right edge away from ZoomBar').toBeGreaterThan(900);
     await expect(page.getByTestId('world-dept-workpaths')).toBeVisible();
     await expect(page.locator('.dview')).toHaveCount(0);
 

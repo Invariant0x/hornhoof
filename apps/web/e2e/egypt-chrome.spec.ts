@@ -52,7 +52,7 @@ const sampleOrg = (): Org => ({
       signedInOnce: true,
       leaseMachine: null,
     },
-    context: 38,
+    context: 0.38,
     program: null,
     alarm: null,
     retry: null,

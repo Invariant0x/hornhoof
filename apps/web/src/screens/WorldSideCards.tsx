@@ -299,8 +299,9 @@ function SubscriptionSideCard({
   const wc = t.skins.worldCard;
   const { language } = useLanguage();
   const label = subscription?.label ?? building.label;
-  const fullnessPct = Math.round((subscription?.fullness ?? building.fullness ?? 0) * 100);
-  const usedPct = Math.max(0, Math.min(100, 100 - fullnessPct));
+  const fullnessRatio = Math.max(0, Math.min(1, subscription?.fullness ?? building.fullness ?? 0));
+  const fullnessPct = Math.round(fullnessRatio * 100);
+  const usedRatio = Math.max(0, Math.min(1, 1 - fullnessRatio));
   const resets = subscription?.resetsAt ? clock(language, subscription.resetsAt) : null;
   const users = [
     ...(snapshot.orchestrator && snapshot.orchestrator.subscriptionId === subscription?.id ? [snapshot.orchestrator] : []),
@@ -321,7 +322,7 @@ function SubscriptionSideCard({
             <span>{wc.remaining}</span>
             <strong data-testid="world-sub-remaining">{fullnessPct}%</strong>
           </div>
-          <Bar used={usedPct} />
+          <Bar used={usedRatio} />
         </section>
 
         <dl className="world-card-grid">
@@ -395,7 +396,8 @@ function MachineSideCard({
   const hostname = machine?.hostname ?? building.label;
   const hosted = snapshot.agents.filter(a => a.machineId === machine?.id);
   const working = hosted.filter(a => a.liveState === 'working').length;
-  const loadPct = hosted.length > 0 ? Math.round((working / hosted.length) * 100) : 0;
+  const loadRatio = hosted.length > 0 ? Math.max(0, Math.min(1, working / hosted.length)) : 0;
+  const loadPct = Math.round(loadRatio * 100);
 
   return (
     <aside className="dv-drawer world-card" data-testid="world-side-card" data-card-kind="machine" aria-label={hostname}>
@@ -411,7 +413,7 @@ function MachineSideCard({
             <span>{wc.load}</span>
             <strong data-testid="world-machine-load">{working}/{hosted.length} ({loadPct}%)</strong>
           </div>
-          <Bar used={loadPct} />
+          <Bar used={loadRatio} />
         </section>
 
         <dl className="world-card-grid">
@@ -479,7 +481,8 @@ function GoalSideCard({
   const t = useT();
   const wc = t.skins.worldCard;
   const title = goal ? `#${goal.number} ${goal.title}` : building.label;
-  const pct = Math.round((goal?.progress ?? building.progress ?? 0) * 100);
+  const progressRatio = Math.max(0, Math.min(1, goal?.progress ?? building.progress ?? 0));
+  const pct = Math.round(progressRatio * 100);
   const subgoals = goal?.childGoals ?? [];
 
   return (
@@ -496,7 +499,7 @@ function GoalSideCard({
             <span>{wc.goalProgress}</span>
             <strong data-testid="world-goal-progress">{pct}%</strong>
           </div>
-          <Bar used={pct} />
+          <Bar used={progressRatio} />
           {goal && (
             <p className="muted world-card-sub">
               {wc.acceptedTasks}: {goal.tasksDone}/{goal.tasksTotal}
@@ -567,7 +570,7 @@ function StatueSideCard({
       />
       <div className="dv-drawer-b world-card-body">
         <p data-testid="world-statue-tasks"><strong>{wc.statueTasksDone(accepted)}</strong></p>
-        <Bar used={Math.round((building.stage / Math.max(1, building.maxStage)) * 100)} />
+        <Bar used={Math.max(0, Math.min(1, building.stage / Math.max(1, building.maxStage)))} />
         <div className="world-card-actions">
           {department && (
             <button className="btn small" type="button" onClick={() => onSelectDepartment(department.id)}>

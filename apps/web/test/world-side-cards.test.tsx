@@ -90,6 +90,9 @@ describe('Stage 8 WorldSideCards (all 6 entity cards + Department Mode)', () => 
     );
     expect(screen.getByTestId('world-side-card')).toHaveAttribute('data-card-kind', 'subscription');
     expect(screen.getByTestId('world-sub-remaining')).toBeInTheDocument();
+    const subBarWidth = parseFloat(screen.getByTestId('world-side-card').querySelector<HTMLElement>('.bar i')!.style.width);
+    expect(subBarWidth).toBeGreaterThanOrEqual(0);
+    expect(subBarWidth).toBeLessThanOrEqual(100);
 
     /* 3. Machine hub card (connection, load, hosted agents). */
     const machineBuilding = synced.city.buildings.find(b => b.kind === 'district_hub')!;
@@ -101,6 +104,9 @@ describe('Stage 8 WorldSideCards (all 6 entity cards + Department Mode)', () => 
     );
     expect(screen.getByTestId('world-side-card')).toHaveAttribute('data-card-kind', 'machine');
     expect(screen.getByTestId('world-machine-load')).toBeInTheDocument();
+    const machineBarWidth = parseFloat(screen.getByTestId('world-side-card').querySelector<HTMLElement>('.bar i')!.style.width);
+    expect(machineBarWidth).toBeGreaterThanOrEqual(0);
+    expect(machineBarWidth).toBeLessThanOrEqual(100);
 
     /* 4. Goal monument card (progress + subgoals list). */
     const goalBuilding = synced.city.buildings.find(b => b.kind === 'monument')!;
@@ -113,6 +119,9 @@ describe('Stage 8 WorldSideCards (all 6 entity cards + Department Mode)', () => 
     expect(screen.getByTestId('world-side-card')).toHaveAttribute('data-card-kind', 'goal');
     expect(screen.getByText(/Ship core engine/)).toBeInTheDocument();
     expect(screen.getByText(/Ship Egypt theme UI/)).toBeInTheDocument();
+    const goalBarWidth = parseFloat(screen.getByTestId('world-side-card').querySelector<HTMLElement>('.bar i')!.style.width);
+    expect(goalBarWidth).toBeGreaterThanOrEqual(0);
+    expect(goalBarWidth).toBeLessThanOrEqual(100);
 
     /* 5. Statue card (department completed tasks + open department mode button). */
     const statueBuilding = synced.city.buildings.find(b => b.kind === 'statue')!;
@@ -126,6 +135,9 @@ describe('Stage 8 WorldSideCards (all 6 entity cards + Department Mode)', () => 
     );
     expect(screen.getByTestId('world-side-card')).toHaveAttribute('data-card-kind', 'statue');
     expect(screen.getByTestId('world-statue-tasks')).toBeInTheDocument();
+    const statueBarWidth = parseFloat(screen.getByTestId('world-side-card').querySelector<HTMLElement>('.bar i')!.style.width);
+    expect(statueBarWidth).toBeGreaterThanOrEqual(0);
+    expect(statueBarWidth).toBeLessThanOrEqual(100);
 
     /* 6. Orchestrator residence card (simple quick chat + open orchestrator). */
     const resBuilding = synced.city.buildings.find(b => b.kind === 'residence')!;
