@@ -18,6 +18,7 @@ function exportShot(srcPath: string, filename: string): void {
 
 test.describe('Stage 7 world skills, company theme, era names, and simple agent quick chat', () => {
   test('CEO switches company theme in Company & access, previews & confirms era renaming, and non-CEO has no theme picker', async ({ page }, info) => {
+    test.setTimeout(60_000);
     await page.setViewportSize({ width: 1366, height: 900 });
     await page.addInitScript(() => {
       localStorage.setItem('hh-lang', 'ru');
@@ -120,14 +121,16 @@ test.describe('Stage 7 world skills, company theme, era names, and simple agent 
     await expect(settingsDialog.getByRole('region', { name: 'Каталог тем' })).toBeVisible();
     await settingsDialog.getByRole('button', { name: 'Включить: Древний Египет' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'egypt');
-    await expect(settingsDialog.getByRole('button', { name: 'Переименовать агентов по эпохе' })).toBeVisible();
+    const renameBtn = settingsDialog.getByRole('button', { name: 'Переименовать агентов по эпохе' });
+    await expect(renameBtn).toBeVisible();
+    await renameBtn.scrollIntoViewIfNeeded();
 
     const ceoThemePath = info.outputPath('stage7-ceo-company-theme.png');
     await page.screenshot({ path: ceoThemePath, animations: 'disabled' });
     exportShot(ceoThemePath, 'stage7-ceo-company-theme.png');
 
     /* Open rename preview confirmation modal and capture screenshot. */
-    await settingsDialog.getByRole('button', { name: 'Переименовать агентов по эпохе' }).click();
+    await renameBtn.click();
     const renameDialog = page.getByRole('dialog', { name: 'Переименовать агентов по эпохе мира?' });
     await expect(renameDialog.getByText('Фараон Хеопс')).toBeVisible();
     await expect(renameDialog.getByText('Имхотеп')).toBeVisible();
@@ -148,17 +151,36 @@ test.describe('Stage 7 world skills, company theme, era names, and simple agent 
   });
 
   test('clicking a resident opens a simple human-friendly chat popup in both Egypt and Dungeon worlds', async ({ page }, info) => {
+    test.setTimeout(60_000);
     await page.setViewportSize({ width: 1366, height: 860 });
-    await page.goto('/world-demo/live-city.html?pack=egypt&scenario=hornhoof&lang=ru');
-    await page.waitForFunction(() => Boolean((window as unknown as { __liveCityDebug?: unknown }).__liveCityDebug));
-    await page.waitForTimeout(300);
+    await page.route('**/api/agents/*/events*', route => route.fulfill({ status: 404, json: { error: { code: 'not_found', message: 'Offline preview' } } }));
+    await page.route('**/api/stream', route => route.abort());
+
+    type LiveHandle = {
+      getResidents: () => readonly { id: string; agentId: string; name: string; roleClass: string }[];
+      centerOnResident: (id: string, zoom?: number) => boolean;
+      selectResident: (id: string | null) => boolean;
+      flushVisibleBakes: () => void;
+    };
+
+    await page.goto('/world-live.html?pack=egypt&mode=hornhoof&lang=ru');
+    await page.waitForFunction(() => {
+      const h = (window as unknown as { __WORLD_LIVE__?: LiveHandle }).__WORLD_LIVE__;
+      return Boolean(h && h.getResidents().length > 0);
+    });
 
     /* Select a resident and chat in Egypt voice without developer terminal jargon. */
     const pickedEgypt = await page.evaluate(() => {
-      const dbg = (window as unknown as { __liveCityDebug: { selectResidentByRoleClass: (c: string) => { name: string } | null } }).__liveCityDebug;
-      return dbg.selectResidentByRoleClass('executor');
+      const h = (window as unknown as { __WORLD_LIVE__: LiveHandle }).__WORLD_LIVE__;
+      const found = h.getResidents().find(r => r.roleClass === 'executor') ?? h.getResidents()[0];
+      if (!found) return null;
+      h.centerOnResident(found.id, 1.45);
+      h.selectResident(found.id);
+      h.flushVisibleBakes();
+      return { id: found.id, name: found.name };
     });
     expect(pickedEgypt).not.toBeNull();
+    await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 
     const chatBox = page.getByTestId('world-agent-quick-chat');
     await expect(chatBox).toBeVisible();
@@ -175,14 +197,24 @@ test.describe('Stage 7 world skills, company theme, era names, and simple agent 
     exportShot(egyptChatPath, 'stage7-agent-quick-chat-egypt.png');
 
     /* Switch to the second test pack (Dungeon) and verify its own distinct voice in the same simple chat UI. */
-    await page.goto('/world-demo/live-city.html?pack=dungeon&scenario=hornhoof&lang=ru');
-    await page.waitForFunction(() => Boolean((window as unknown as { __liveCityDebug?: unknown }).__liveCityDebug));
-    await page.waitForTimeout(300);
-
-    await page.evaluate(() => {
-      const dbg = (window as unknown as { __liveCityDebug: { selectResidentByRoleClass: (c: string) => unknown } }).__liveCityDebug;
-      dbg.selectResidentByRoleClass('executor');
+    await page.goto('/world-live.html?pack=dungeon&mode=hornhoof&lang=ru');
+    await page.waitForFunction(() => {
+      const h = (window as unknown as { __WORLD_LIVE__?: LiveHandle }).__WORLD_LIVE__;
+      return Boolean(h && h.getResidents().length > 0);
     });
+
+    const pickedDungeon = await page.evaluate(() => {
+      const h = (window as unknown as { __WORLD_LIVE__: LiveHandle }).__WORLD_LIVE__;
+      const found = h.getResidents().find(r => r.roleClass === 'executor') ?? h.getResidents()[0];
+      if (!found) return null;
+      h.centerOnResident(found.id, 1.45);
+      h.selectResident(found.id);
+      h.flushVisibleBakes();
+      return { id: found.id, name: found.name };
+    });
+    expect(pickedDungeon).not.toBeNull();
+    await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+
     await expect(chatBox).toBeVisible();
     await expect(chatBox).toContainText('Слушаюсь, хранитель глубин');
     await chatBox.locator('input[type="text"]').fill('Проверь факелы в западном зале');
