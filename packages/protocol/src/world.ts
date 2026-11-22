@@ -734,3 +734,214 @@ export const WorldLayoutSaveSchema = z.object({
   layout: z.record(z.string(), z.unknown()),
 }).strict();
 export type WorldLayoutSaveInput = z.infer<typeof WorldLayoutSaveSchema>;
+
+/* Stage 7 theme-agnostic world pack skills, voice channel boundaries and company theme contract.
+   Concrete world packs register their own skills and name catalogs outside this core module. */
+
+export const DEFAULT_COMPANY_THEME = 'cyberpunk';
+export const STANDARD_COMPANY_THEMES = ['cyberpunk', 'light', 'matrix', 'pixel'] as const;
+export type StandardCompanyTheme = (typeof STANDARD_COMPANY_THEMES)[number];
+
+export const WORLD_VOICE_FORBIDDEN_CHANNELS = [
+  'agent_to_agent',
+  'orchestrator',
+  'task',
+  'commit',
+  'code',
+  'document',
+  'external_post',
+] as const;
+export type WorldVoiceForbiddenChannel = (typeof WORLD_VOICE_FORBIDDEN_CHANNELS)[number];
+
+export const WORLD_VOICE_CHANNELS = ['human_chat', ...WORLD_VOICE_FORBIDDEN_CHANNELS] as const;
+export type WorldVoiceChannel = (typeof WORLD_VOICE_CHANNELS)[number];
+
+export function isWorldVoiceAllowed(channel: WorldVoiceChannel): boolean {
+  return channel === 'human_chat';
+}
+
+export type WorldLangText = Readonly<{ en: string; ru: string }>;
+
+export type WorldSkillKind = 'core' | 'procedure' | 'checklist' | 'gate';
+
+export type WorldSkillChannelPolicy = Readonly<{
+  humanChat: boolean;
+  agentToAgent: false;
+  orchestrator: false;
+  tasks: false;
+  commits: false;
+  code: false;
+  documents: false;
+  externalPosts: false;
+  preservesMeaningAndBadNews: true;
+}>;
+
+export type WorldSkillVoiceSpec = Readonly<{
+  samples: WorldLangText;
+  salutations: readonly string[];
+  channels: WorldSkillChannelPolicy;
+}>;
+
+export type WorldPackSkillSpec = Readonly<{
+  id: string;
+  kind: WorldSkillKind;
+  title: WorldLangText;
+  description: WorldLangText;
+  body: string;
+  voice?: WorldSkillVoiceSpec;
+}>;
+
+export type WorldPackNamesSpec = Readonly<{
+  ruler: WorldLangText;
+  employees: Readonly<{ en: readonly string[]; ru: readonly string[] }>;
+}>;
+
+export type WorldPackBehaviorSpec = Readonly<{
+  id: string;
+  label: WorldLangText;
+  skills: readonly WorldPackSkillSpec[];
+  names: WorldPackNamesSpec;
+}>;
+
+export type WorldThemeView = Readonly<{
+  theme: string;
+  activePack: Readonly<{
+    id: string;
+    label: WorldLangText;
+    skillIds: readonly string[];
+  }> | null;
+  canEdit: boolean;
+}>;
+
+const THEME_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
+
+export const WorldThemeUpdateSchema = z.object({
+  theme: z.string().trim().min(1).max(60).regex(THEME_ID_PATTERN),
+}).strict();
+export type WorldThemeUpdateInput = z.infer<typeof WorldThemeUpdateSchema>;
+
+const VOICE_BODY_REQUIRED_HINTS: readonly Readonly<{ label: string; pattern: RegExp }>[] = [
+  { label: 'human-only scope', pattern: /human|people/i },
+  { label: 'agent-to-agent prohibition', pattern: /agent-to-agent|other agents|between agents|message_employee/i },
+  { label: 'orchestrator prohibition', pattern: /orchestrator/i },
+  { label: 'tasks prohibition', pattern: /task/i },
+  { label: 'commits prohibition', pattern: /commit/i },
+  { label: 'code prohibition', pattern: /code/i },
+  { label: 'documents prohibition', pattern: /document/i },
+  { label: 'posts/external prohibition', pattern: /post|external/i },
+  { label: 'meaning and bad-news preservation', pattern: /bad news/i },
+];
+
+/* Validates a world pack's skills and era name lists without knowing any specific theme. */
+export function validateWorldPackBehavior(pack: WorldPackBehaviorSpec): string[] {
+  const issues: string[] = [];
+  if (!THEME_ID_PATTERN.test(pack.id)) {
+    issues.push(`Invalid world pack id "${pack.id}".`);
+  }
+  if (!pack.label.en.trim() || !pack.label.ru.trim()) {
+    issues.push(`World pack "${pack.id}" must declare en and ru labels.`);
+  }
+  if (!pack.skills.length) {
+    issues.push(`World pack "${pack.id}" must declare at least one skill.`);
+  }
+
+  const skillIds = new Set<string>();
+  let voiceSkills = 0;
+  for (const skill of pack.skills) {
+    if (!THEME_ID_PATTERN.test(skill.id)) {
+      issues.push(`Invalid skill id "${skill.id}" in world pack "${pack.id}".`);
+    }
+    if (skillIds.has(skill.id)) {
+      issues.push(`Duplicate skill id "${skill.id}" in world pack "${pack.id}".`);
+    }
+    skillIds.add(skill.id);
+    if (!skill.title.en.trim() || !skill.title.ru.trim()) {
+      issues.push(`Skill "${skill.id}" must declare en and ru titles.`);
+    }
+    if (!skill.description.en.trim() || !skill.description.ru.trim()) {
+      issues.push(`Skill "${skill.id}" must declare en and ru descriptions.`);
+    }
+    if (!skill.body.trim()) {
+      issues.push(`Skill "${skill.id}" body must be non-empty.`);
+    }
+    if (skill.voice) {
+      voiceSkills += 1;
+      const { samples, salutations, channels } = skill.voice;
+      if (!samples.en.trim() || !samples.ru.trim()) {
+        issues.push(`Voice skill "${skill.id}" must declare en and ru sample phrases.`);
+      }
+      if (!salutations.length || salutations.some(s => !s.trim())) {
+        issues.push(`Voice skill "${skill.id}" must declare non-empty salutations.`);
+      }
+      if (!channels.humanChat) {
+        issues.push(`Voice skill "${skill.id}" must allow humanChat.`);
+      }
+      if (
+        channels.agentToAgent !== false ||
+        channels.orchestrator !== false ||
+        channels.tasks !== false ||
+        channels.commits !== false ||
+        channels.code !== false ||
+        channels.documents !== false ||
+        channels.externalPosts !== false ||
+        channels.preservesMeaningAndBadNews !== true
+      ) {
+        issues.push(`Voice skill "${skill.id}" violates mandatory non-human channel prohibitions.`);
+      }
+      for (const hint of VOICE_BODY_REQUIRED_HINTS) {
+        if (!hint.pattern.test(skill.body)) {
+          issues.push(`Voice skill "${skill.id}" body is missing explicit rule for ${hint.label}.`);
+        }
+      }
+    }
+  }
+  if (voiceSkills === 0) {
+    issues.push(`World pack "${pack.id}" must declare at least one voice skill.`);
+  }
+
+  if (!pack.names.ruler.en.trim() || !pack.names.ruler.ru.trim()) {
+    issues.push(`World pack "${pack.id}" must declare ruler names in en and ru.`);
+  }
+  for (const lang of ['en', 'ru'] as const) {
+    const list = pack.names.employees[lang];
+    if (!list.length) {
+      issues.push(`World pack "${pack.id}" must declare employee names for "${lang}".`);
+    }
+    const seen = new Set<string>();
+    for (const raw of list) {
+      const normalized = raw.trim().toLowerCase();
+      if (!normalized) {
+        issues.push(`World pack "${pack.id}" has an empty employee name in "${lang}".`);
+      } else if (seen.has(normalized)) {
+        issues.push(`World pack "${pack.id}" has duplicate employee name "${raw}" in "${lang}".`);
+      }
+      seen.add(normalized);
+    }
+  }
+  return issues;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/* Detects whether text contains any voice salutation declared by the given world pack. */
+export function containsWorldVoicePhrase(text: string, pack: WorldPackBehaviorSpec): boolean {
+  const source = text.trim();
+  if (!source) return false;
+  for (const skill of pack.skills) {
+    if (!skill.voice) continue;
+    const phrases = new Set<string>([
+      skill.voice.samples.en,
+      skill.voice.samples.ru,
+      ...skill.voice.salutations,
+    ]);
+    for (const phrase of phrases) {
+      const clean = phrase.trim();
+      if (!clean) continue;
+      const re = new RegExp(`(^|[^\\p{L}\\p{N}_])${escapeRegExp(clean)}($|[^\\p{L}\\p{N}_])`, 'iu');
+      if (re.test(source)) return true;
+    }
+  }
+  return false;
+}

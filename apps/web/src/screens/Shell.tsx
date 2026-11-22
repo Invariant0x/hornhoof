@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType, type RefObject } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, useT } from '../i18n';
+import { useStream } from '../live';
 import { notOpened, useOrg } from '../org';
 import { forgetOwnerKey } from '../owner-key';
+import { skinsState, syncCompanySkin } from '../skins/store';
 import type { Me, Org } from '../types';
 import { ListIcon, LogoMark, MachineIcon, MapIcon, PeopleIcon, PlugIcon } from '../ui/icons';
 import { Idents } from '../ui/Idents';
@@ -61,14 +63,15 @@ function workspaceOf(route: Route, backgrounds: Route[]) {
 
 /* The window of the account menu open over the page. The groups of Settings are one window, so switching between them
    keeps the window and its focus. */
-function AccountDialog({ route, me, updates, inbox, onRenamed, onGroup, onClose, onHome }: {
+function AccountDialog({ route, me, updates, inbox, onRenamed, onCompanyTheme, onGroup, onClose, onHome }: {
   route: Route | null; me: Me; updates: Updates; inbox: boolean; onRenamed: (name: string) => void;
+  onCompanyTheme: (theme: string) => void;
   onGroup: (group?: SettingsGroup) => void; onClose: () => void; onHome: () => void;
 }) {
   if (route?.kind === 'about') return <About inbox={inbox} onClose={onClose} />;
   if (route?.kind === 'versions') return <Versions updates={updates} onClose={onClose} onHome={onHome} />;
   if (route?.kind !== 'settings') return null;
-  return <Settings me={me} group={route.group} onGroup={onGroup} onRenamed={onRenamed} onClose={onClose} />;
+  return <Settings me={me} group={route.group} onGroup={onGroup} onRenamed={onRenamed} onCompanyTheme={onCompanyTheme} onClose={onClose} />;
 }
 
 /* One row of the account menu: it closes the menu, then does what it says. */
@@ -338,7 +341,9 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const [menu, setMenu] = useState(false);
   const [contact, setContact] = useState(welcome);
   const [selfName, setSelfName] = useState(me.person.name);
-  const currentMe = { ...me, person: { ...me.person, name: selfName } };
+  const [companyTheme, setCompanyTheme] = useState<string | undefined>(me.company.theme);
+  const lastServerTheme = useRef<string | null>(null);
+  const currentMe = { ...me, person: { ...me.person, name: selfName }, company: { ...me.company, ...(companyTheme ? { theme: companyTheme } : {}) } };
   const company = me.person.scopeKind === 'company';
   const inbox = useFeedbackInbox();
   const denied = !company && ['improvements', 'inbox', 'versions'].some(kind => kind === route.kind || kind === pageRoute.kind);
@@ -347,6 +352,27 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   /* A task's panel stands on the left, on its own: it and a window on the screen take each other's place. */
   const [staff, setStaff] = useState<StaffAsk | null>(null);
   const { org, failure: orgFailure } = useOrg(windows.ids.length > 0 || taskId !== null || deptId !== null);
+  useEffect(() => {
+    if (me.company.theme) setCompanyTheme(me.company.theme);
+  }, [me.company.theme]);
+  useEffect(() => {
+    if (org?.company.theme) setCompanyTheme(org.company.theme);
+  }, [org?.company.theme]);
+  useStream(m => {
+    if (m.type === 'company_theme') setCompanyTheme(m.theme);
+  });
+  useEffect(() => {
+    if (!companyTheme) return;
+    if (!me.person.isOwner) {
+      lastServerTheme.current = companyTheme;
+      syncCompanySkin(companyTheme);
+      return;
+    }
+    const changed = lastServerTheme.current !== null && lastServerTheme.current !== companyTheme;
+    const isCustom = skinsState().active.startsWith('custom-');
+    lastServerTheme.current = companyTheme;
+    if (changed || !isCustom) syncCompanySkin(companyTheme);
+  }, [companyTheme, me.person.isOwner]);
   const orchestratorId = org?.orchestrator?.id;
   if (orchestratorId && windows.ids.includes(orchestratorId)) windows.nameOrchestrator(orchestratorId);
   const { open: openWindow, hide: hideWindow } = windows;
@@ -504,7 +530,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onHome={goHome}
         />
       )}
-      <AccountDialog route={!accountDialog || (!company && accountDialog === 'versions') ? null : route} me={currentMe} updates={updates} inbox={inbox} onHome={goHome} onRenamed={setSelfName} onGroup={group => switchOverlay(group ? { kind: 'settings', group } : { kind: 'settings' })} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
+      <AccountDialog route={!accountDialog || (!company && accountDialog === 'versions') ? null : route} me={currentMe} updates={updates} inbox={inbox} onHome={goHome} onRenamed={setSelfName} onCompanyTheme={setCompanyTheme} onGroup={group => switchOverlay(group ? { kind: 'settings', group } : { kind: 'settings' })} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
       {company && updates.cut && <UpdateCut cut={updates.cut} updates={updates} />}
     </div>
     </UpdateSaysIt>

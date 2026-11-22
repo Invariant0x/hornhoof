@@ -94,6 +94,8 @@ export const companies = pgTable('companies', {
   /* A company from before the tracker gets its open tasks' responsible people and a product manager in each department
      once, by the server's own rules; a new one starts with them. */
   trackerDue: boolean('tracker_due').notNull().default(false),
+  /* Single company-wide UI theme or active world pack id, chosen by the CEO in company settings. */
+  theme: text('theme').notNull().default('cyberpunk'),
   createdAt: createdAt(),
 });
 

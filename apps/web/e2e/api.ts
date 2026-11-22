@@ -132,6 +132,11 @@ export async function serveApi(page: Page) {
     /* A stream with nothing to say stays open. An answer would end it: the browser reconnects within seconds, and on each
        reconnect the whole app fetches what it missed, which keeps every page in every test busy. */
     if (path === '/api/stream') return;
+    if (path === '/api/world/theme' && route.request().method() === 'PUT') {
+      const parsed = route.request().postDataJSON() as { theme?: string } | null;
+      return route.fulfill(json({ theme: parsed?.theme ?? 'cyberpunk', activePack: null, canEdit: true }));
+    }
+    if (path === '/api/world/theme') return route.fulfill(json({ theme: 'cyberpunk', activePack: null, canEdit: true }));
     if (path in ROUTES) return route.fulfill(json(ROUTES[path]));
     if (/^\/api\/tasks\/[^/]+\/phone-recordings$/.test(path)) return route.fulfill(json({ recordings: [] }));
     if (/^\/api\/machines\/[^/]+\/connections$/.test(path)) return route.fulfill(json({ summary: { drops: 0, averageMs: null, cause: null }, events: [] }));

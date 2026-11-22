@@ -137,6 +137,7 @@ const DEPARTMENT_ITSELF = { ann: 404, olga: 200, wes: 200, clara: 200, ceo: 200 
 const LISTS: Listed[] = [
   { route: 'GET /api/org', url: () => '/api/org', statuses: ALL_OK, company: true },
   { route: 'GET /api/world/state', url: () => '/api/world/state', statuses: ALL_OK, company: true },
+  { route: 'GET /api/world/theme', url: () => '/api/world/theme', statuses: ALL_OK, company: true },
   { route: 'GET /api/tasks', url: c => `/api/tasks?status=all&department=${c.dev.id}`, statuses: ALL_OK, company: true },
   { route: 'GET /api/requests', url: () => '/api/requests', statuses: ALL_OK },
   { route: 'GET /api/wait-cards', url: () => '/api/wait-cards', statuses: ALL_OK },
@@ -224,6 +225,7 @@ const ELSEWHERE: Record<string, string> = {
   'GET /api/feedback/inbox': "feedback-inbox.test.ts: only on Hornhoof's own installation, a person with the whole company, 403 for another one; its cards came from installations, not from this company's agents",
   'POST /api/feedback/inbox/:id/issue': "feedback-issue.test.ts: only on Hornhoof's own installation, a person with the whole company, 403 for another one",
   'POST /api/world/relocations': 'world-live.test.ts: CEO or whole-company owner for common buildings, department reach for department structures and agent houses, 403 otherwise',
+  'PUT /api/world/theme': 'world-skills.test.ts: the CEO alone (isOwner && !viaHead), 403 for delegate, whole-company non-owner, department owner, listed person and head',
 };
 
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */

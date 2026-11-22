@@ -109,6 +109,15 @@ export function chooseSkin(id: string): boolean {
   return true;
 }
 
+/* Applies the company-wide theme reported by the server and caches it locally for reload boot. */
+export function syncCompanySkin(themeId: string): boolean {
+  const next = builtinSkin(themeId) ? themeId : DEFAULT_SKIN;
+  keep(ACTIVE_KEY, next);
+  if (state.active === next) return false;
+  change({ ...state, active: next });
+  return true;
+}
+
 /* Adds a skin after those kept, without turning it on. It is added only when the browser kept it: a person is never told
    a skin was added that the next visit would not have. */
 export function addSkin(skin: Skin): Added {

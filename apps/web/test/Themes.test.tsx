@@ -17,11 +17,15 @@ const own = (name: string, bg = '#010203', base = 'cyberpunk'): Skin => {
   return { ...sample, base, colors: { ...sample.colors, bg } };
 };
 const file = (body: string, name = 'dusk.json') => new File([body], name, { type: 'application/json' });
-const EN = { account: 'Account', item: 'Settings', title: 'Settings', group: 'Appearance & language', add: 'Add from file' };
-const RU = { account: 'Аккаунт', item: 'Настройки', title: 'Настройки', group: 'Оформление и язык', add: 'Добавить из файла' };
+const EN = { account: 'Account', item: 'Settings', title: 'Settings', group: 'Company & access', add: 'Add from file' };
+const RU = { account: 'Аккаунт', item: 'Настройки', title: 'Настройки', group: 'Компания и доступ', add: 'Добавить из файла' };
 
 function renderShell(person = ME.person) {
-  mockApi({ 'GET /api/org': [200, ORG] });
+  mockApi({
+    'GET /api/org': [200, ORG],
+    'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }],
+    'PUT /api/world/theme': body => [200, { theme: (body as { theme: string }).theme, activePack: null, canEdit: true }],
+  });
   return render(
     <LanguageProvider>
       <Shell me={{ ...ME, person }} onSignOut={() => {}} />
@@ -82,21 +86,28 @@ afterEach(() => {
 });
 
 describe('the Themes section of the settings', () => {
-  it('lives under Appearance & language in Settings, with no row of its own in the account menu, for a person who does not see the whole company too', async () => {
+  it('lives under Company & access for the CEO only, with no personal theme picker under Appearance & language or for non-CEO members', async () => {
     const user = userEvent.setup();
-    renderShell({ ...ME.person, scopeKind: 'listed', isOwner: false });
+    const { unmount } = renderShell({ ...ME.person, scopeKind: 'listed', isOwner: false });
     await user.click(screen.getByRole('button', { name: 'Account' }));
     expect(screen.queryByRole('button', { name: /theme/i })).not.toBeInTheDocument();
     expect(screen.queryByText('Themes')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Settings' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+    const listedDialog = await screen.findByRole('dialog', { name: 'Settings' });
     expect(location.pathname).toBe('/settings/profile');
-    await user.click(within(dialog).getByRole('button', { name: 'Appearance & language' }));
+    await user.click(within(listedDialog).getByRole('button', { name: 'Appearance & language' }));
     expect(location.pathname).toBe('/settings');
-    expect(within(dialog).getByRole('button', { name: 'Appearance & language' })).toHaveAttribute('aria-current', 'page');
+    expect(within(listedDialog).queryByRole('region', { name: 'Theme catalog' })).not.toBeInTheDocument();
+    unmount();
+
+    history.replaceState(null, '', '/');
+    renderShell(ME.person);
+    const dialog = await openThemes(user);
+    expect(location.pathname).toBe('/settings/company');
+    expect(within(dialog).getByRole('button', { name: 'Company & access' })).toHaveAttribute('aria-current', 'page');
     expect(within(dialog).getByRole('heading', { name: 'Theme store', level: 4 })).toBeInTheDocument();
-    expect(within(dialog).getByText('Choose a complete theme or skin. Other members keep their themes.')).toBeInTheDocument();
-    expect(within(dialog).getByText('Your choice stays in this browser.')).toBeInTheDocument();
+    expect(within(dialog).getByText('Choose one theme or world for the whole company. All members see it and all agents receive its world skills.')).toBeInTheDocument();
+    expect(within(dialog).getByText('Only the CEO can change the company theme.')).toBeInTheDocument();
     expect(catalog(dialog)).toBeInTheDocument();
   });
 
@@ -190,17 +201,17 @@ describe('the Themes section of the settings', () => {
     expect(applied(screen.getByRole('dialog')).map(card => within(card).getByRole('heading').textContent)).toEqual(['Matrix']);
   });
 
-  it('switches between Profile and Appearance & language inside Settings at their own addresses', async () => {
+  it('switches between Profile and Company & access inside Settings at their own addresses', async () => {
     const user = userEvent.setup();
     renderShell();
     const dialog = await openThemes(user);
-    expect(location.pathname).toBe('/settings');
+    expect(location.pathname).toBe('/settings/company');
     await user.click(within(dialog).getByRole('button', { name: 'Profile' }));
     expect(location.pathname).toBe('/settings/profile');
     expect(within(dialog).getByRole('textbox', { name: 'Name' })).toBeInTheDocument();
     expect(within(dialog).queryByRole('region', { name: 'Theme catalog' })).not.toBeInTheDocument();
-    await user.click(within(dialog).getByRole('button', { name: 'Appearance & language' }));
-    expect(location.pathname).toBe('/settings');
+    await user.click(within(dialog).getByRole('button', { name: 'Company & access' }));
+    expect(location.pathname).toBe('/settings/company');
     expect(catalog(dialog)).toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -381,7 +392,7 @@ describe('the guide in the Themes section', () => {
     await user.click(screen.getByRole('button', { name: RU.item }));
     expect(screen.getByRole('button', { name: 'Профиль' })).toHaveAttribute('aria-current', 'page');
     await user.click(screen.getByRole('button', { name: RU.group }));
-    expect(screen.getByRole('button', { name: 'Оформление и язык' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: 'Компания и доступ' })).toHaveAttribute('aria-current', 'page');
     const dialog = await screen.findByRole('dialog', { name: RU.title });
     expect(titles(dialog)).toEqual(['Киберпанк', 'Светлая', 'Матрица', 'Пиксельная', 'Древний Египет']);
     expect(within(dialog).getByText('Встроенная · По умолчанию')).toBeInTheDocument();

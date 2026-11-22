@@ -210,7 +210,7 @@ export const en = {
     groups: { profile: 'Profile', appearance: 'Appearance & language', integrations: 'Integrations', passwords: 'Passwords', company: 'Company & access' },
     /* What a group holds, under its heading. Integrations and Passwords say it in their own words. */
     intro: {
-      appearance: 'Only for you and only in this browser. Other members keep their language and theme.',
+      appearance: 'Only for you and only in this browser. Other members keep their language.',
       company: 'Shared settings of the company and how Hornhoof opens from outside.',
     },
     link: 'Link on the internet',
@@ -400,8 +400,8 @@ export const en = {
   /* The Theme store section of the settings: built-in full themes and skins, a person's own kept in this browser, and how to make one. */
   skins: {
     title: 'Theme store',
-    desc: 'Choose a complete theme or skin. Other members keep their themes.',
-    local: 'Your choice stays in this browser.',
+    desc: 'Choose one theme or world for the whole company. All members see it and all agents receive its world skills.',
+    local: 'Only the CEO can change the company theme.',
     add: 'Add from file',
     loading: 'Reading file...',
     busy: 'Reading the file. Your other skins are still available.',

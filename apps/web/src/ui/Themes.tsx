@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
-import { useLanguage, useT, type Language } from '../i18n';
+import { api } from '../api';
+import { errorText, useLanguage, useT, type Language } from '../i18n';
 import { en, type Messages } from '../i18n/en';
 import { ru } from '../i18n/ru';
 import { COLLECTION_LIMIT, uniqueName, type CustomSkin } from '../skins/collection';
@@ -367,11 +368,12 @@ function MapGrainOption({ shown }: { shown: boolean }) {
   );
 }
 
-export function Themes() {
+export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) => void } = {}) {
   const t = useT();
   const { language } = useLanguage();
   const { active, custom } = useSkins();
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [saving, setSaving] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   /* Where focus goes once the catalog has drawn again: the Apply of a card, or Add from file. */
   const focusTo = useRef<string | null>(null);
@@ -389,10 +391,21 @@ export function Themes() {
     focusTo.current = id;
   };
 
-  function apply(card: Card) {
-    if (card.id === active || !chooseSkin(card.id)) return;
-    setNotice({ tone: 'status', text: t.skins.nowOn(card.name) });
-    focusOn(card.id);
+  async function apply(card: Card) {
+    if (card.id === active || saving) return;
+    setSaving(true);
+    try {
+      const serverTheme = card.own ? DEFAULT_SKIN : card.id;
+      await api.put('/api/world/theme', { theme: serverTheme });
+      if (!chooseSkin(card.id)) return;
+      if (!card.own) onCompanyTheme?.(serverTheme);
+      setNotice({ tone: 'status', text: t.skins.nowOn(card.name) });
+      focusOn(card.id);
+    } catch (err) {
+      setNotice({ tone: 'alert', text: errorText(t, err) });
+    } finally {
+      setSaving(false);
+    }
   }
 
   function remove(card: Card) {
@@ -423,7 +436,7 @@ export function Themes() {
         <AddFromFile say={setNotice} focusOn={focusOn} />
       </div>
       {notice && <NoticeBar notice={notice} onUndo={undo} />}
-      <Catalog cards={cards} active={active} onApply={apply} onDownload={card => download(t, card, setNotice)} onRemove={remove} />
+      <Catalog cards={cards} active={active} onApply={card => void apply(card)} onDownload={card => download(t, card, setNotice)} onRemove={remove} />
       <MapGrainOption shown={activeCard?.look.surface === 'papyrus'} />
       <Guide />
     </div>

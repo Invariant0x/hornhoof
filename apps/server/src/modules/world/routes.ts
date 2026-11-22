@@ -1,15 +1,20 @@
-/* HTTP routes for Stage 4 live isometric world:
+/* HTTP routes for isometric world:
    - GET  /api/world/state       (strictly read-only company state projection)
+   - GET  /api/world/theme       (active company theme and active world pack summary for any signed-in member)
+   - PUT  /api/world/theme       (CEO-only company theme/world switcher; broadcasts live update to everyone)
    - PUT  /api/world/layout      (saves city layout in isolated world_layouts table only)
    - POST /api/world/relocations (God's Word relocation: creates a real small task after confirmation,
                                   building coordinates never move until the task is accepted) */
 
 import { randomUUID } from 'node:crypto';
 import {
+  DEFAULT_COMPANY_THEME,
   WorldLayoutSaveSchema,
   WorldRelocationRequestSchema,
+  WorldThemeUpdateSchema,
   type WorldRelocationRecord,
   type WorldRelocationStored,
+  type WorldThemeView,
 } from '@hornhoof/protocol/world';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -17,14 +22,30 @@ import type { Ctx } from '../../app.js';
 import { accessOf, agentSpot, canReach } from '../../auth/access.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import { actorOf, requirePerson } from '../../auth/session.js';
-import { agents, departments, worldLayouts } from '../../db/schema.js';
+import { agents, companies, departments, worldLayouts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
 import { createTask } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
 import { readWorldLiveState } from './live-data.js';
+import { isAllowedCompanyTheme, worldPackForTheme } from './packs/index.js';
 
 const MAX_STORED_RELOCATIONS = 200;
+
+function themeViewOf(ctx: Ctx, theme: string, canEdit: boolean): WorldThemeView {
+  const pack = worldPackForTheme(ctx.worldPacks, theme);
+  return {
+    theme,
+    activePack: pack
+      ? {
+          id: pack.id,
+          label: pack.label,
+          skillIds: pack.skills.map(s => s.id),
+        }
+      : null,
+    canEdit,
+  };
+}
 
 export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
@@ -33,6 +54,35 @@ export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/world/state', async req => {
     const me = await requirePerson(req, db);
     return readWorldLiveState(ctx, me);
+  });
+
+  /* Returns the company's single active theme/world for any signed-in member. */
+  app.get('/api/world/theme', async req => {
+    const me = await requirePerson(req, db);
+    const [company] = await db
+      .select({ theme: companies.theme })
+      .from(companies)
+      .where(eq(companies.id, me.companyId));
+    return themeViewOf(ctx, company?.theme ?? DEFAULT_COMPANY_THEME, Boolean(me.isOwner && !me.viaHead));
+  });
+
+  /* Changes the single company-wide theme/world. Strictly restricted to the company CEO. */
+  app.put('/api/world/theme', async req => {
+    const me = await requirePerson(req, db);
+    if (!me.isOwner || me.viaHead) {
+      throw new ApiError(403, 'forbidden', 'Only the CEO can change the company theme.', 'not_owner_session');
+    }
+    const body = WorldThemeUpdateSchema.parse(req.body);
+    if (!isAllowedCompanyTheme(ctx.worldPacks, body.theme)) {
+      throw new ApiError(400, 'validation', `Unknown company theme "${body.theme}".`);
+    }
+    await db
+      .update(companies)
+      .set({ theme: body.theme })
+      .where(eq(companies.id, me.companyId));
+    ctx.bus.publish(me.companyId, { type: 'company_theme', theme: body.theme });
+    ctx.bus.publish(me.companyId, { type: 'org' });
+    return themeViewOf(ctx, body.theme, true);
   });
 
   /* Persists the generated/grown city layout into the isolated world_layouts table without touching work tables. */
