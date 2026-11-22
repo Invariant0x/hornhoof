@@ -339,6 +339,15 @@ export function sampleCornerFieldBilinear(cf: CornerFieldGrid, u: number, v: num
   };
 }
 
+/* Signed water distance as the baker draws it, with the same shoreline noise: below about 0.08 the picture is water or
+   foam. Anything that must stand on dry land (plants, later buildings) checks this, not the raw field. */
+export function displayedWaterDistance(cf: CornerFieldGrid, u: number, v: number): number {
+  const raw = sampleCornerFieldBilinear(cf, u, v).signedWaterDist;
+  if (raw >= 1.35) return raw;
+  const { coarse, detail } = getNoiseLuts();
+  return raw + sampleLutFast(coarse, u * 4.5, v * 4.5) * 0.5 + sampleLutFast(detail, u * 5.0, v * 5.0) * 0.1;
+}
+
 export type SmoothBakedPixels = Readonly<{
   rgba: Uint8ClampedArray;
   worldX: number;

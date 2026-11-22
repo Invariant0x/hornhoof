@@ -13,6 +13,7 @@ import {
   type WorldPackManifest,
 } from '../../world/manifest';
 import { egyptArtCatalog } from './art';
+import { EGYPT_LIGHTING, EGYPT_PLANTS, EGYPT_WIND } from './plants';
 import { EGYPT_TERRAIN_RECIPE, EGYPT_TILE_KINDS } from './recipe';
 
 const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
@@ -313,6 +314,9 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
     glow: false,
   },
   terrainRecipe: EGYPT_TERRAIN_RECIPE,
+  plants: EGYPT_PLANTS,
+  wind: EGYPT_WIND,
+  lighting: EGYPT_LIGHTING,
   sprites: [],
   stageCounts: {
     house: 10,

@@ -201,6 +201,99 @@ export type LiquidLayerSpec = Readonly<{
   glow?: boolean;
 }>;
 
+/* Generic plant silhouettes the engine can draw procedurally from a pack's palette. Artists replace them later with
+   sprite art (see PlantArtSpec); the silhouette names describe geometry only, never a species or a biome. */
+export type PlantShape =
+  | 'fronded_tree'
+  | 'blade_cluster'
+  | 'umbel_reed'
+  | 'round_shrub'
+  | 'broad_tree';
+
+/* Where inside a plant image its parts are, in image pixels with y pointing down. */
+export type PlantPassport = Readonly<{
+  /* Where the plant meets the ground: the sway pivot and the depth-sorting point. */
+  rootPoint: readonly [number, number];
+  /* Middle of the crown, used for wind flutter and for the shadow's widest point. */
+  crownCenter: readonly [number, number];
+  /* Where the crown attaches to the stem; the crown flutters around this point. */
+  crownHub: readonly [number, number];
+  heightPx: number;
+  crownWidthPx: number;
+}>;
+
+/* Artist-delivered sprite for a plant kind: the image, an optional grayscale wind-weight mask (how much each pixel
+   moves, 0 = rooted, 1 = free) and the passport that locates its parts. */
+export type PlantArtSpec = Readonly<{
+  url: string;
+  windMaskUrl?: string;
+  passport: PlantPassport;
+}>;
+
+export type PlantRange = Readonly<{ min: number; max: number }>;
+
+/* Pack-owned plant kind: what it looks like, where it may grow and how the wind moves it. */
+export type PlantKindSpec = Readonly<{
+  id: string;
+  label: Readonly<{ en: string; ru: string }>;
+  /* Procedural silhouette, used when no art is supplied. */
+  shape: PlantShape;
+  art?: PlantArtSpec;
+  /* Tile kind ids (from the pack's terrain recipe) where this kind may stand. */
+  tileKinds: readonly string[];
+  /* Chance per tile when every suitability term is 1. */
+  density: number;
+  /* Smooth windows over the corner fields; chance fades toward the edges of each window. */
+  moisture: PlantRange;
+  /* Signed distance to liquid in tiles: positive on land, near zero at the waterline. */
+  waterDist: PlantRange;
+  /* Highest blend weight each ground material may have at the exact spot (keeps plants off bedrock and quarries). */
+  materialCaps?: Readonly<Record<string, number>>;
+  /* 0 = even spread, 1 = tight groves; clumpScale is the grove size in tiles. */
+  clumping: number;
+  clumpScale: number;
+  /* Tiles around a plant that no plant of lower priority may take. */
+  spacing: number;
+  /* Wins conflicts between kinds and decides depth ties. */
+  priority: number;
+  /* Plants per chosen tile: reeds come in beds. */
+  clusterSize?: PlantRange;
+  /* Tiles around the chosen tile that a bed spreads over. */
+  clusterRadius?: number;
+  /* Height at 100% zoom in px, picked per plant. */
+  heightPx: PlantRange;
+  palette: Readonly<{ primary: string; secondary: string; accent: string; trunk?: string }>;
+  /* Wind response: amplitude scales the lean, frequency is in Hz, flutter scales the crown's fast shiver. */
+  sway: Readonly<{ amplitude: number; frequency: number; flutter: number }>;
+  /* Different drawings per kind so a grove does not repeat one image. */
+  variants: number;
+}>;
+
+/* Wind field shared by every plant: a steady breeze plus gust fronts that travel across the map. */
+export type WindSpec = Readonly<{
+  /* Direction the wind blows toward on screen, degrees: 0 = right, 90 = down. */
+  directionDeg: number;
+  /* Steady lean of a plant with sway amplitude 1, in [0, 1]. */
+  baseStrength: number;
+  /* Extra lean while a gust front passes, in [0, 1]. */
+  gustStrength: number;
+  /* How fast a gust front travels, tiles per second. */
+  gustSpeed: number;
+  /* Size of a gust front, tiles. */
+  gustScale: number;
+}>;
+
+/* Light and shadow for plants and later buildings and people. The sun position comes from the projection. */
+export type LightingSpec = Readonly<{
+  shadowColor: string;
+  /* Opacity of a plant's cast shadow at its darkest, in [0, 1]. */
+  shadowAlpha: number;
+  /* Shadow length as a multiple of the plant's height. */
+  shadowLength: number;
+  /* Warm tint multiplied over sunlit ground, '#ffffff' for none. */
+  sunTint: string;
+}>;
+
 /* Pack-owned terrain tile category with gameplay rules and legend metadata. */
 export type TerrainKindSpec = Readonly<{
   id: string;
@@ -320,6 +413,10 @@ export type WorldPackManifest = Readonly<{
   materials?: readonly GroundMaterialSpec[];
   liquidLayer?: LiquidLayerSpec;
   terrainRecipe?: TerrainRecipeSpec;
+  /* Plant kinds, wind and light; a pack with none draws a bare world. */
+  plants?: readonly PlantKindSpec[];
+  wind?: WindSpec;
+  lighting?: LightingSpec;
   /* Optional pure tile resolver for stub or preview packs; defaults to defaultTileId. */
   resolveEmptyTileId?: (col: number, row: number, chunkSize: number, mapSize: number) => string;
   /* Slots for artist pictures and sheets (ARTIST_CONTRACT.md); without art the engine draws placeholders. */
@@ -648,6 +745,57 @@ export function selectLodTier(
   return sorted[sorted.length - 1]!;
 }
 
+function validRange(r: PlantRange): boolean {
+  return Number.isFinite(r.min) && Number.isFinite(r.max) && r.min <= r.max;
+}
+
+/* Plant kinds, wind and light: every id, range and colour must be usable before the engine places a single plant. */
+function validatePlants(pack: WorldPackManifest, materialIds: ReadonlySet<string>, errors: string[]): void {
+  const kindIds = new Set((pack.terrainRecipe?.tileKinds ?? []).map(k => k.id));
+  const seen = new Set<string>();
+  for (const plant of pack.plants ?? []) {
+    const tag = `plants.${plant.id}`;
+    if (!plant.id.trim()) errors.push('plant.id must be non-empty');
+    if (seen.has(plant.id)) errors.push(`duplicate plant.id: ${plant.id}`);
+    seen.add(plant.id);
+    if (plant.tileKinds.length === 0) errors.push(`${tag}.tileKinds must be non-empty`);
+    for (const id of plant.tileKinds) {
+      if (kindIds.size > 0 && !kindIds.has(id)) errors.push(`${tag}.tileKinds references unknown tile kind "${id}"`);
+    }
+    for (const id of Object.keys(plant.materialCaps ?? {})) {
+      if (materialIds.size > 0 && !materialIds.has(id)) errors.push(`${tag}.materialCaps references unknown material "${id}"`);
+    }
+    if (!(plant.density > 0 && plant.density <= 1)) errors.push(`${tag}.density must be in (0, 1]`);
+    if (!validRange(plant.moisture)) errors.push(`${tag}.moisture must be an ordered range`);
+    if (!validRange(plant.waterDist)) errors.push(`${tag}.waterDist must be an ordered range`);
+    if (!validRange(plant.heightPx) || plant.heightPx.min <= 0) errors.push(`${tag}.heightPx must be a positive ordered range`);
+    if (plant.clusterSize && (!validRange(plant.clusterSize) || plant.clusterSize.min < 1)) {
+      errors.push(`${tag}.clusterSize must be an ordered range from 1`);
+    }
+    if (plant.clumping < 0 || plant.clumping > 1) errors.push(`${tag}.clumping must be in [0, 1]`);
+    if (plant.clumpScale <= 0) errors.push(`${tag}.clumpScale must be positive`);
+    if (!Number.isInteger(plant.spacing) || plant.spacing < 0) errors.push(`${tag}.spacing must be a non-negative integer`);
+    if (!Number.isInteger(plant.variants) || plant.variants < 1) errors.push(`${tag}.variants must be a positive integer`);
+    for (const [k, c] of Object.entries(plant.palette)) {
+      if (!COLOR_PATTERN.test(c)) errors.push(`invalid ${tag}.palette.${k} colour`);
+    }
+    if (plant.sway.amplitude < 0 || plant.sway.frequency <= 0) errors.push(`${tag}.sway needs amplitude >= 0 and frequency > 0`);
+  }
+  const wind = pack.wind;
+  if (wind) {
+    if (wind.baseStrength < 0 || wind.baseStrength > 1) errors.push('wind.baseStrength must be in [0, 1]');
+    if (wind.gustStrength < 0 || wind.gustStrength > 1) errors.push('wind.gustStrength must be in [0, 1]');
+    if (wind.gustSpeed <= 0 || wind.gustScale <= 0) errors.push('wind.gustSpeed and wind.gustScale must be positive');
+  }
+  const light = pack.lighting;
+  if (light) {
+    if (!COLOR_PATTERN.test(light.shadowColor)) errors.push('invalid lighting.shadowColor colour');
+    if (!COLOR_PATTERN.test(light.sunTint)) errors.push('invalid lighting.sunTint colour');
+    if (light.shadowAlpha < 0 || light.shadowAlpha > 1) errors.push('lighting.shadowAlpha must be in [0, 1]');
+    if (light.shadowLength < 0) errors.push('lighting.shadowLength must be non-negative');
+  }
+}
+
 export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation {
   const errors: string[] = [];
 
@@ -750,6 +898,8 @@ export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation 
       }
     }
   }
+
+  validatePlants(pack, materialIds, errors);
 
   if (pack.outerWallMode !== undefined && pack.outerWallMode !== 'ring' && pack.outerWallMode !== 'none') {
     errors.push(`invalid outerWallMode "${String(pack.outerWallMode)}"`);
