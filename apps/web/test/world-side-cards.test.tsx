@@ -68,7 +68,7 @@ describe('Stage 8 WorldSideCards (all 6 entity cards + Department Mode)', () => 
       onHire: vi.fn(),
     };
 
-    /* 1. Employee / House card (level, task, simple quick chat, wake, open agent window). */
+    /* 1. House / Employee side card (level, task, wake, open agent window; no obsolete quick chat box). */
     const firstAgent = enrichedLive.agents.find(a => a.currentTask !== null) ?? enrichedLive.agents[0]!;
     const agentSel: WorldSelection = { kind: 'agent', agentId: firstAgent.id };
     const { rerender } = render(
@@ -78,7 +78,8 @@ describe('Stage 8 WorldSideCards (all 6 entity cards + Department Mode)', () => 
     );
     expect(screen.getByTestId('world-side-card')).toHaveAttribute('data-card-kind', 'agent');
     expect(screen.getByTestId('world-card-level')).toHaveTextContent(`Lv ${firstAgent.level}`);
-    expect(screen.getByTestId('world-agent-quick-chat')).toBeInTheDocument();
+    expect(screen.queryByTestId('world-agent-quick-chat')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open agent window' })).toBeInTheDocument();
 
     /* 2. Subscription card (remaining limit, reset time, working agents). */
     const subBuilding = synced.city.buildings.find(b => b.kind === 'supply')!;
@@ -139,7 +140,7 @@ describe('Stage 8 WorldSideCards (all 6 entity cards + Department Mode)', () => 
     expect(statueBarWidth).toBeGreaterThanOrEqual(0);
     expect(statueBarWidth).toBeLessThanOrEqual(100);
 
-    /* 6. Orchestrator residence card (simple quick chat + open orchestrator). */
+    /* 6. Orchestrator residence card (residence stats + open orchestrator; no obsolete quick chat box). */
     const resBuilding = synced.city.buildings.find(b => b.kind === 'residence')!;
     rerender(
       <LanguageProvider>
@@ -147,7 +148,8 @@ describe('Stage 8 WorldSideCards (all 6 entity cards + Department Mode)', () => 
       </LanguageProvider>,
     );
     expect(screen.getByTestId('world-side-card')).toHaveAttribute('data-card-kind', 'orchestrator');
-    expect(screen.getByTestId('world-agent-quick-chat')).toBeInTheDocument();
+    expect(screen.queryByTestId('world-agent-quick-chat')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open orchestrator' })).toBeInTheDocument();
 
     /* 7. Department Mode card (work-path legend, people, active tasks, pipeline, close). */
     const devDept = enrichedLive.departments[0]!;

@@ -136,6 +136,10 @@ export function WorldMapView({
   snapshotRef.current = snapshot;
   const relocatingRef = useRef<CityBuilding | null>(null);
   relocatingRef.current = relocatingBuilding;
+  const onOpenAgentRef = useRef(onOpenAgent);
+  onOpenAgentRef.current = onOpenAgent;
+  const onOpenOrchestratorRef = useRef(onOpenOrchestrator);
+  onOpenOrchestratorRef.current = onOpenOrchestrator;
   const wakeGateRef = useRef<HumanWakeGate>(new HumanWakeGate());
 
   /* Load authoritative read-only world snapshot from /api/world/state and keep it fresh via SSE. */
@@ -209,11 +213,18 @@ export function WorldMapView({
 
   const selectResident = useCallback((resident: ResidentEntity) => {
     setWakeStatus(null);
+    engineRef.current?.setSelectedResidentId(resident.id);
     if (resident.roleClass === 'ruler') {
-      setSelection({ kind: 'orchestrator' });
+      setSelection(null);
+      onOpenOrchestratorRef.current();
       return;
     }
-    setSelection({ kind: 'agent', agentId: resident.agentId, resident });
+    if (resident.roleClass === 'day_laborer') {
+      setSelection({ kind: 'agent', agentId: resident.agentId, resident });
+      return;
+    }
+    setSelection(null);
+    onOpenAgentRef.current(resident.agentId);
   }, []);
 
   const clearSelection = useCallback(() => {
@@ -577,11 +588,12 @@ export function WorldMapView({
         onSelectAgent={agentId => {
           setWakeStatus(null);
           const res = simRef.current?.residents.find(r => r.agentId === agentId);
-          setSelection({ kind: 'agent', agentId, resident: res });
           if (res) {
             engineRef.current?.centerOnResident(res.id, 1.35);
             engineRef.current?.setSelectedResidentId(res.id);
           }
+          setSelection(null);
+          onOpenAgentRef.current(agentId);
         }}
         onSelectDepartment={deptId => {
           setWakeStatus(null);

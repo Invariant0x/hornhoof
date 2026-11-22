@@ -40,33 +40,9 @@ import {
 import { generateWorldTerrain, type GeneratedWorldMap } from '../world/terrain-engine';
 import { DUNGEON_WORLD_PACK } from './dungeon/pack';
 import { EGYPT_WORLD_PACK } from './egypt/pack';
-import { WorldAgentQuickChat, type QuickChatDemoFallback } from '../ui/WorldAgentQuickChat';
 
 type PackKey = 'egypt' | 'dungeon';
 type ScenarioKey = 'hornhoof' | 'stress150' | 'empty' | 'no_subscription' | 'live';
-
-function quickChatFallbackFor(pack: PackKey, lang: 'ru' | 'en', agentName: string): QuickChatDemoFallback {
-  if (pack === 'dungeon') {
-    return lang === 'ru'
-      ? {
-          greeting: `Слушаюсь, хранитель глубин. Я ${agentName}, готов к вашим поручениям.`,
-          replyFor: text => `Слушаюсь, хранитель глубин! Исполняю вашу просьбу: "${text}".`,
-        }
-      : {
-          greeting: `As you command, Keeper of the Deep. I am ${agentName}, ready for your word.`,
-          replyFor: text => `As you command, Keeper of the Deep! Carrying out your request: "${text}".`,
-        };
-  }
-  return lang === 'ru'
-    ? {
-        greeting: `Да, повелитель. Я ${agentName}, слушаю вас.`,
-        replyFor: text => `Да, повелитель, я исполню вашу просьбу: "${text}".`,
-      }
-    : {
-        greeting: `Yes, my lord. I am ${agentName}, at your service.`,
-        replyFor: text => `Yes, my lord, I will carry out your request: "${text}".`,
-      };
-}
 type LangKey = 'ru' | 'en';
 
 const PACKS: Record<PackKey, WorldPackManifest> = {
@@ -662,11 +638,6 @@ function Stage4LiveWorld() {
     return simRef.current.residents.find(r => r.id === selectedResidentId) ?? null;
   }, [selectedResidentId, residentsCount, snapshot]);
 
-  const quickChatFallback = useMemo(
-    () => (selectedResident ? quickChatFallbackFor(packKey, lang, selectedResident.name) : undefined),
-    [packKey, lang, selectedResident],
-  );
-
   const handleHumanWake = useCallback(
     async (resident: ResidentEntity) => {
       const check = wakeGateRef.current.tryWake(resident.agentId);
@@ -1173,16 +1144,6 @@ function Stage4LiveWorld() {
               {t.machine}: <strong>{selectedResident.machineHostname ?? t.unassignedMachine}</strong>
             </div>
           </div>
-
-          {selectedResident.roleClass !== 'day_laborer' && (
-            <WorldAgentQuickChat
-              agentId={selectedResident.agentId}
-              agentName={selectedResident.name}
-              lang={lang}
-              compactDark
-              demoFallback={quickChatFallback}
-            />
-          )}
 
           {wakeStatus && (
             <div

@@ -958,6 +958,8 @@ export class IsometricWorldEngine {
       sprite.x = baked.worldX;
       sprite.y = baked.worldY;
       sprite.scale.set(1 / baked.scale);
+      sprite.visible = false;
+      this.chunkLayer?.addChild(sprite);
     }
     const entry: CachedChunkEntry = { key, baked, texture, sprite };
     this.chunkCache.set(key, entry);
@@ -1141,9 +1143,20 @@ export class IsometricWorldEngine {
       const chunkSig = drawEntries.map(e => e.key).join('|');
       if (chunkSig !== this.lastVisibleChunkSig) {
         this.lastVisibleChunkSig = chunkSig;
-        this.chunkLayer.removeChildren();
+        const wanted = new Set<Sprite>();
         for (const entry of drawEntries) {
-          if (entry.sprite) this.chunkLayer.addChild(entry.sprite);
+          if (entry.sprite) {
+            wanted.add(entry.sprite);
+            if (entry.sprite.parent !== this.chunkLayer) {
+              this.chunkLayer.addChild(entry.sprite);
+            }
+            entry.sprite.visible = true;
+          }
+        }
+        for (const child of this.chunkLayer.children) {
+          if (!wanted.has(child as Sprite)) {
+            child.visible = false;
+          }
         }
       }
 

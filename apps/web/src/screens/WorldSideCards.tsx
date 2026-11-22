@@ -24,7 +24,6 @@ import { Repositories } from '../ui/RepoSettings';
 import { StaffCard } from '../ui/StaffCard';
 import { DeptSubUnits } from '../ui/SubUnits';
 import { OneShotMarks } from '../ui/TaskWorkflow';
-import { WorldAgentQuickChat } from '../ui/WorldAgentQuickChat';
 import type { CityBuilding } from '../world/city-layout';
 import type { DepartmentFocusSpec } from '../world/department-focus';
 import type { ResidentEntity } from '../world/residents';
@@ -129,7 +128,6 @@ function AgentSideCard({
 }) {
   const t = useT();
   const wc = t.skins.worldCard;
-  const { language } = useLanguage();
   const [cardDetail, setCardDetail] = useState<AgentCardView | null>(null);
   const agentId = agent?.id ?? resident?.agentId ?? '';
 
@@ -225,10 +223,6 @@ function AgentSideCard({
             <p className="muted">{wc.noCurrentTask}</p>
           )}
         </section>
-
-        {roleClass !== 'day_laborer' && agentId && (
-          <WorldAgentQuickChat agentId={agentId} agentName={name} lang={language} />
-        )}
 
         <section className="world-card-section">
           <h4>{wc.history}</h4>
@@ -601,7 +595,6 @@ function OrchestratorSideCard({
 }) {
   const t = useT();
   const wc = t.skins.worldCard;
-  const { language } = useLanguage();
   const orch = snapshot.orchestrator;
   const title = orch?.name ?? org.orchestrator?.name ?? t.map.orchestrator;
   const stage = building?.stage ?? snapshot.company.residenceStage;
@@ -626,10 +619,6 @@ function OrchestratorSideCard({
             <dd>{org.agents.working} / {org.agents.total}</dd>
           </div>
         </dl>
-
-        {canOpen && (
-          <WorldAgentQuickChat agentId="orchestrator" agentName={title} lang={language} />
-        )}
 
         {canOpen && (
           <div className="world-card-actions">

@@ -3605,6 +3605,45 @@ th.k-prio .sorth { white-space: nowrap; }
 :where(:root[data-surface='papyrus']) .world-map .map-version {
   text-shadow: 0 1px 3px var(--surface), 0 0 8px var(--surface);
 }
+:where(:root[data-surface='papyrus']) .orch {
+  border-color: var(--line2);
+  border-top-color: var(--amber);
+  background-color: var(--surface);
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, var(--bg)), var(--surface));
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--surface) 72%, transparent),
+    0 18px 44px var(--shadow);
+}
+:where(:root[data-surface='papyrus']) .orch > .t-bar {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--bg) 68%, var(--surface)), color-mix(in srgb, var(--surface2) 82%, transparent));
+  border-bottom-color: var(--line2);
+}
+:where(:root[data-surface='papyrus']) .world-agent-strip {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface2) 88%, var(--bg)), var(--surface2));
+  border-bottom-color: var(--line);
+}
+:where(:root[data-surface='papyrus']) .world-level-badge {
+  background-color: color-mix(in srgb, var(--amber) 18%, var(--surface));
+  border-color: var(--amber);
+  color: var(--ink);
+}
+:where(:root[data-surface='papyrus']) .world-level-bar i {
+  background-image: linear-gradient(90deg, var(--cyan), var(--amber));
+}
+:where(:root[data-surface='papyrus']) .orch .t-log.chat {
+  background-image: repeating-linear-gradient(0deg, transparent 0 26px, color-mix(in srgb, var(--line2) 7%, transparent) 26px 27px);
+}
+:where(:root[data-surface='papyrus']) .orch .chat-msg.agent .chat-body {
+  background-color: var(--surface2);
+  border-color: var(--line2);
+  border-inline-start-color: var(--amber);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 85%, transparent);
+}
+:where(:root[data-surface='papyrus']) .orch .chat-msg.person .chat-body {
+  background-color: color-mix(in srgb, var(--cyan) 10%, var(--surface));
+  border-color: var(--line2);
+  border-inline-end-color: var(--cyan);
+}
 :where(:root[data-surface='papyrus']) .btn:not(.ghost) {
   background-image: linear-gradient(180deg, color-mix(in srgb, var(--on-btn) 14%, transparent), color-mix(in srgb, var(--ink) 16%, transparent));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-btn) 24%, transparent);
@@ -3811,6 +3850,56 @@ th.k-prio .sorth { white-space: nowrap; }
 .world-stage-list li { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .world-confirm-dialog { max-inline-size: 440px; inline-size: min(440px, calc(100vw - 24px)); }
 .world-confirm-body { padding: 14px 16px; display: grid; gap: 10px; }
+/* Single compact level strip inside AgentWindow when a game world theme is active (pack-agnostic). */
+.world-agent-strip {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 6px 14px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--f-body);
+  font-size: 12.5px;
+}
+.world-level-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--line2);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: 12px;
+}
+.world-level-bar {
+  flex: 1 1 88px;
+  min-inline-size: 64px;
+  max-inline-size: 150px;
+  block-size: 6px;
+  background: var(--line);
+  overflow: hidden;
+}
+.world-level-bar > i {
+  display: block;
+  block-size: 100%;
+  background: var(--cyan);
+}
+.world-level-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.world-level-dept {
+  color: var(--ink);
+  font-weight: 500;
+}
 @media (max-width: 720px) {
   .world-card { inset-inline-start: 12px; inset-inline-end: 12px; inline-size: auto; top: 64px; bottom: 118px; }
 }

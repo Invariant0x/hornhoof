@@ -5,9 +5,9 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { AgentWindow } from '../src/screens/AgentWindow';
 import { Shell } from '../src/screens/Shell';
-import { initSkins, skinsState } from '../src/skins/store';
-import { WorldAgentQuickChat } from '../src/ui/WorldAgentQuickChat';
+import { initSkins, skinsState, syncCompanySkin } from '../src/skins/store';
 import { ME, mockApi, ORG } from './api-mock';
 
 const root = document.documentElement;
@@ -219,45 +219,132 @@ describe('Stage 7 company-wide theme in Company & access (no personal theme pick
     expect(within(settingsDialog).getByRole('status')).toHaveTextContent('Restored 2 original names.');
   });
 
-  it('shows a simple human-friendly chat popup for a clicked agent without terminal tool noise and sends real messages', async () => {
+  it('opens the real AgentWindow in conversation view (not terminal) with a single level strip and world voice when a world theme is active', async () => {
     const user = userEvent.setup();
+    localStorage.setItem('hh-agent-view', 'terminal');
+    syncCompanySkin('egypt');
+
     const calls = mockApi({
-      'GET /api/agents/b1/events?last=40': [
+      'GET /api/world/state': [
+        200,
+        {
+          company: { id: 'c1', name: 'Hornhoof', seed: 'hornhoof', templateKey: null, acceptedTasksTotal: 120, residenceStage: 2, oneShotCallsTotal: 0 },
+          departments: [{ id: 'd1', name: 'Development', templateKey: 'development', roleCode: 'DEV', acceptedTasks: 60, stage: 3, statuesCount: 1, currentStatueStage: 1 }],
+          machines: [],
+          subscriptions: [],
+          goals: [],
+          agents: [
+            {
+              id: 'b1',
+              name: 'Imhotep',
+              kind: 'worker',
+              roleKey: 'DEV-ENG',
+              roleClass: 'executor',
+              archetype: 'builder',
+              isTurnkey: false,
+              departmentId: 'd1',
+              machineId: null,
+              subscriptionId: null,
+              provider: 'claude',
+              model: 'claude-opus-5-5',
+              acceptedTasks: 44,
+              level: 6,
+              nextLevelRemaining: 6,
+              houseStage: 4,
+              liveState: 'working',
+              currentTask: { id: 't1', number: 1803, title: 'Build harbor gate' },
+            },
+          ],
+          orchestrator: null,
+          relocations: [],
+          permissions: { canRelocateAny: true, relocatableDepartmentIds: ['d1'] },
+        },
+      ],
+      'GET /api/agents/b1': [
+        200,
+        {
+          id: 'b1',
+          kind: 'worker',
+          name: 'Imhotep',
+          role: { id: 'DEV-ENG', title: { en: 'Developer', ru: 'Разработчик' } },
+          department: { id: 'd1', name: 'Development' },
+          product: null,
+          team: null,
+          teams: [],
+          model: 'claude-opus-5-5',
+          effort: 'high',
+          subscription: null,
+          machine: null,
+          state: 'working',
+          currentTask: { id: 't1', number: 1803, title: 'Build harbor gate' },
+          inboxUnread: 2,
+          program: null,
+          alarm: null,
+          retry: null,
+          failure: null,
+          skills: [],
+          parts: [],
+          raw: '',
+          runsOn: [],
+          changes: [],
+          interrupted: [],
+          canEdit: true,
+          canRemove: false,
+          timer: null,
+        },
+      ],
+      'GET /api/agents/b1/events?last=300': [
         200,
         {
           events: [
-            { seq: 1, kind: 'message', data: { text: 'Please check the harbor build.' }, jobId: null, person: { id: 'p1', name: 'Ivan' }, at: '2026-11-22T02:00:00.000Z' },
-            { seq: 2, kind: 'tool', data: { name: 'run_command', input: { cmd: 'npm test' } }, jobId: null, person: null, at: '2026-11-22T02:00:01.000Z' },
-            { seq: 3, kind: 'tool_result', data: { output: 'PASS' }, jobId: null, person: null, at: '2026-11-22T02:00:02.000Z' },
-            { seq: 4, kind: 'text', data: { text: 'Yes, my lord, the harbor build is complete.' }, jobId: null, person: null, at: '2026-11-22T02:00:03.000Z' },
+            { seq: 1, kind: 'message', data: { text: 'Tell me about your role at the harbor.' }, jobId: null, person: { id: 'p1', name: 'Ivan' }, at: '2026-11-22T02:00:00.000Z' },
+            { seq: 2, kind: 'text', data: { text: 'Yes, my lord, I shape the stone foundations and check each course.' }, jobId: null, person: null, at: '2026-11-22T02:00:03.000Z' },
           ],
-          state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 },
+          state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0, terminal: false },
         },
       ],
       'POST /api/agents/b1/messages': [201, { ok: true }],
     });
 
-    render(
+    const { rerender } = render(
       <LanguageProvider>
-        <WorldAgentQuickChat agentId="b1" agentName="Imhotep" />
+        <AgentWindow me={ME} org={ORG} agentId="b1" onClose={() => {}} />
       </LanguageProvider>,
     );
 
-    expect(await screen.findByText('Please check the harbor build.')).toBeInTheDocument();
-    expect(screen.getByText('Yes, my lord, the harbor build is complete.')).toBeInTheDocument();
-    expect(screen.queryByText(/run_command|npm test/)).not.toBeInTheDocument();
+    /* Even with hh-agent-view=terminal stored, world theme opens directly in conversation chat and hides terminal toggle. */
+    expect(await screen.findByText('Yes, my lord, I shape the stone foundations and check each course.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Terminal' })).not.toBeInTheDocument();
 
-    const input = screen.getByRole('textbox', { name: 'Message Imhotep' });
-    await user.type(input, 'Start the next stage please');
-    await user.click(screen.getByRole('button', { name: 'Send' }));
+    /* Existing employee window controls stay in place: current task, inbox, card/settings. */
+    expect(screen.getByRole('button', { name: 'Task' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Inbox/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Card' })).toBeInTheDocument();
 
+    /* One compact level strip shows level + progress without repeating the agent's name (already in header). */
+    const strip = await screen.findByTestId('world-agent-level-strip');
+    expect(strip).toHaveTextContent('Level 6');
+    expect(strip).toHaveTextContent('Accepted: 44');
+    expect(strip).toHaveTextContent('6 to Lv 7');
+    expect(strip).not.toHaveTextContent('Imhotep');
+
+    const input = screen.getByRole('textbox', { name: 'Write to Imhotep' });
+    await user.type(input, 'Keep up the good work{Enter}');
     await waitFor(() =>
       expect(calls.find(c => c.method === 'POST' && c.path === '/api/agents/b1/messages')).toEqual({
         method: 'POST',
         path: '/api/agents/b1/messages',
-        body: { text: 'Start the next stage please' },
+        body: { text: 'Keep up the good work' },
       }),
     );
-    expect(screen.getByText('Start the next stage please')).toBeInTheDocument();
+
+    /* Switching back to a standard theme removes the world level strip and restores the terminal switch. */
+    syncCompanySkin('cyberpunk');
+    rerender(
+      <LanguageProvider>
+        <AgentWindow me={ME} org={ORG} agentId="b1" onClose={() => {}} />
+      </LanguageProvider>,
+    );
+    await waitFor(() => expect(screen.queryByTestId('world-agent-level-strip')).not.toBeInTheDocument());
   });
 });

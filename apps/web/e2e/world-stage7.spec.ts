@@ -150,79 +150,182 @@ test.describe('Stage 7 world skills, company theme, era names, and simple agent 
     await expect(settingsDialog.getByRole('status')).toContainText('Прежние имена агентов возвращены (5).');
   });
 
-  test('clicking a resident opens a simple human-friendly chat popup in both Egypt and Dungeon worlds', async ({ page }, info) => {
+  test('clicking a resident on the active world map opens the real AgentWindow in conversation view with level strip and world voice', async ({ page }, info) => {
     test.setTimeout(60_000);
     await page.setViewportSize({ width: 1366, height: 860 });
-    await page.route('**/api/agents/*/events*', route => route.fulfill({ status: 404, json: { error: { code: 'not_found', message: 'Offline preview' } } }));
-    await page.route('**/api/stream', route => route.abort());
+    await page.addInitScript(() => {
+      localStorage.setItem('hh-lang', 'ru');
+      localStorage.setItem('hh-theme', 'egypt');
+      localStorage.setItem('hh-agent-view', 'terminal');
+    });
 
-    type LiveHandle = {
-      getResidents: () => readonly { id: string; agentId: string; name: string; roleClass: string }[];
-      centerOnResident: (id: string, zoom?: number) => boolean;
-      selectResident: (id: string | null) => boolean;
-      flushVisibleBakes: () => void;
-    };
+    await serveApi(page);
+    const posted: string[] = [];
+    await page.route('**/api/me', route => route.fulfill({ json: { ...ME, company: { ...ME.company, theme: 'egypt' } } }));
+    await page.route('**/api/org', route =>
+      route.fulfill({
+        json: {
+          company: { ...ME.company, theme: 'egypt' },
+          orchestrator: null,
+          agents: { total: 1, working: 1 },
+          people: [],
+          departments: [
+            {
+              id: 'dept-dev',
+              name: 'Development',
+              templateKey: 'development',
+              roleCode: 'DEV',
+              about: '',
+              agents: { total: 1, working: 1 },
+              products: [],
+              teams: [],
+              people: [],
+              employees: [
+                {
+                  id: 'agent-dev-1',
+                  name: 'Имхотеп',
+                  roleId: 'DEV-ENG',
+                  turnkey: false,
+                  title: { en: 'Developer', ru: 'Разработчик' },
+                  kind: 'worker',
+                  model: 'claude-opus-5-5',
+                  modelName: 'claude-opus-5-5',
+                  provider: 'claude',
+                  effort: 'high',
+                  state: 'working',
+                  status: 'working',
+                  on: true,
+                  timer: null,
+                  task: null,
+                  context: 0.25,
+                  program: null,
+                  alarm: null,
+                  retry: null,
+                  failure: null,
+                },
+              ],
+              roles: [],
+              pipelines: [],
+              calls: [],
+            },
+          ],
+        },
+      }),
+    );
+    await page.route('**/api/world/state', route =>
+      route.fulfill({
+        json: {
+          company: { id: ME.company.id, name: ME.company.name, seed: 'hornhoof', templateKey: 'startup', acceptedTasksTotal: 120, residenceStage: 2, oneShotCallsTotal: 0 },
+          departments: [{ id: 'dept-dev', name: 'Development', templateKey: 'development', roleCode: 'DEV', acceptedTasks: 44, stage: 3, statuesCount: 1, currentStatueStage: 1 }],
+          machines: [],
+          subscriptions: [],
+          goals: [],
+          agents: [
+            {
+              id: 'agent-dev-1',
+              name: 'Имхотеп',
+              kind: 'worker',
+              roleKey: 'DEV-ENG',
+              roleClass: 'executor',
+              archetype: 'builder',
+              isTurnkey: false,
+              departmentId: 'dept-dev',
+              machineId: null,
+              subscriptionId: null,
+              provider: 'claude',
+              model: 'claude-opus-5-5',
+              acceptedTasks: 44,
+              level: 6,
+              nextLevelRemaining: 6,
+              houseStage: 4,
+              liveState: 'working',
+              currentTask: { id: 'task-1', number: 1803, title: 'Построить гавань' },
+            },
+          ],
+          orchestrator: null,
+          relocations: [],
+          permissions: { canRelocateAny: true, relocatableDepartmentIds: ['dept-dev'] },
+        },
+      }),
+    );
+    await page.route('**/api/agents/agent-dev-1', route =>
+      route.fulfill({
+        json: {
+          id: 'agent-dev-1',
+          kind: 'worker',
+          name: 'Имхотеп',
+          role: { id: 'DEV-ENG', title: { en: 'Developer', ru: 'Разработчик' } },
+          department: { id: 'dept-dev', name: 'Development' },
+          product: null,
+          team: null,
+          teams: [],
+          model: 'claude-opus-5-5',
+          effort: 'high',
+          subscription: null,
+          machine: null,
+          state: 'working',
+          currentTask: { id: 'task-1', number: 1803, title: 'Построить гавань' },
+          inboxUnread: 1,
+          program: null,
+          alarm: null,
+          retry: null,
+          failure: null,
+          skills: [],
+          parts: [],
+          raw: '',
+          runsOn: [],
+          changes: [],
+          interrupted: [],
+          canEdit: true,
+          canRemove: false,
+          timer: null,
+        },
+      }),
+    );
+    await page.route('**/api/agents/agent-dev-1/messages', route => {
+      const body = route.request().postDataJSON() as { text?: string };
+      if (body.text) posted.push(body.text);
+      return route.fulfill({ status: 201, json: { ok: true } });
+    });
+    await page.route('**/api/agents/agent-dev-1/events*', route =>
+      route.fulfill({
+        json: {
+          events: [
+            { seq: 1, kind: 'text', at: '2026-11-22T10:00:00.000Z', data: { text: 'Да, повелитель, я возвожу стены у реки.' } },
+            ...posted.flatMap((msg, idx) => [
+              { seq: 2 + idx * 2, kind: 'message', at: '2026-11-22T10:01:00.000Z', person: { id: ME.person.id, name: ME.person.name }, data: { text: msg } },
+              { seq: 3 + idx * 2, kind: 'text', at: '2026-11-22T10:01:02.000Z', data: { text: `Да, повелитель, я исполню вашу просьбу: "${msg}".` } },
+            ]),
+          ],
+          state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0, terminal: true },
+        },
+      }),
+    );
 
-    await page.goto('/world-live.html?pack=egypt&mode=hornhoof&lang=ru');
+    await page.goto('/');
+    await expect(page.locator('[data-world-canvas="egypt"]')).toBeVisible();
     await page.waitForFunction(() => {
-      const h = (window as unknown as { __WORLD_LIVE__?: LiveHandle }).__WORLD_LIVE__;
+      const h = (window as unknown as { __WORLD_PRODUCT__?: { getResidents: () => unknown[] } }).__WORLD_PRODUCT__;
       return Boolean(h && h.getResidents().length > 0);
     });
 
-    /* Select a resident and chat in Egypt voice without developer terminal jargon. */
-    const pickedEgypt = await page.evaluate(() => {
-      const h = (window as unknown as { __WORLD_LIVE__: LiveHandle }).__WORLD_LIVE__;
-      const found = h.getResidents().find(r => r.roleClass === 'executor') ?? h.getResidents()[0];
-      if (!found) return null;
-      h.centerOnResident(found.id, 1.45);
-      h.selectResident(found.id);
-      h.flushVisibleBakes();
-      return { id: found.id, name: found.name };
+    await page.evaluate(() => {
+      const h = (window as unknown as { __WORLD_PRODUCT__: { selectResidentByRoleClass: (r?: string) => unknown } }).__WORLD_PRODUCT__;
+      h.selectResidentByRoleClass('executor');
     });
-    expect(pickedEgypt).not.toBeNull();
-    await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 
-    const chatBox = page.getByTestId('world-agent-quick-chat');
-    await expect(chatBox).toBeVisible();
-    await expect(chatBox).toContainText('Да, повелитель');
+    const win = page.locator('.orch').first();
+    await expect(win).toBeVisible();
+    await expect(win.getByTestId('world-agent-level-strip')).toContainText('Уровень 6');
+    await expect(win.locator('.t-log.chat')).toContainText('Да, повелитель, я возвожу стены у реки.');
+    await expect(page.getByTestId('world-agent-quick-chat')).toHaveCount(0);
 
-    const input = chatBox.locator('input[type="text"]');
-    await input.fill('Подготовь отчет по стройке у реки');
-    await chatBox.getByTestId('world-quick-chat-send').click();
-    await expect(chatBox).toContainText('Подготовь отчет по стройке у реки');
-    await expect(chatBox).toContainText('Да, повелитель, я исполню вашу просьбу');
+    await win.locator('textarea').fill('Подготовь отчет по стройке у реки');
+    await win.locator('.chat-send').click();
+    await expect(win.locator('.t-log.chat')).toContainText('Да, повелитель, я исполню вашу просьбу');
 
-    const egyptChatPath = info.outputPath('stage7-agent-quick-chat-egypt.png');
+    const egyptChatPath = info.outputPath('stage7-agent-window-egypt.png');
     await page.screenshot({ path: egyptChatPath, animations: 'disabled' });
-    exportShot(egyptChatPath, 'stage7-agent-quick-chat-egypt.png');
-
-    /* Switch to the second test pack (Dungeon) and verify its own distinct voice in the same simple chat UI. */
-    await page.goto('/world-live.html?pack=dungeon&mode=hornhoof&lang=ru');
-    await page.waitForFunction(() => {
-      const h = (window as unknown as { __WORLD_LIVE__?: LiveHandle }).__WORLD_LIVE__;
-      return Boolean(h && h.getResidents().length > 0);
-    });
-
-    const pickedDungeon = await page.evaluate(() => {
-      const h = (window as unknown as { __WORLD_LIVE__: LiveHandle }).__WORLD_LIVE__;
-      const found = h.getResidents().find(r => r.roleClass === 'executor') ?? h.getResidents()[0];
-      if (!found) return null;
-      h.centerOnResident(found.id, 1.45);
-      h.selectResident(found.id);
-      h.flushVisibleBakes();
-      return { id: found.id, name: found.name };
-    });
-    expect(pickedDungeon).not.toBeNull();
-    await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
-
-    await expect(chatBox).toBeVisible();
-    await expect(chatBox).toContainText('Слушаюсь, хранитель глубин');
-    await chatBox.locator('input[type="text"]').fill('Проверь факелы в западном зале');
-    await chatBox.getByTestId('world-quick-chat-send').click();
-    await expect(chatBox).toContainText('Слушаюсь, хранитель глубин! Исполняю вашу просьбу');
-
-    const dungeonChatPath = info.outputPath('stage7-agent-quick-chat-dungeon.png');
-    await page.screenshot({ path: dungeonChatPath, animations: 'disabled' });
-    exportShot(dungeonChatPath, 'stage7-agent-quick-chat-dungeon.png');
+    exportShot(egyptChatPath, 'stage7-agent-window-egypt.png');
   });
 });

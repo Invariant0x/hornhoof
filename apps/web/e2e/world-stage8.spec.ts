@@ -109,7 +109,6 @@ function buildMatchingOrg(worldState: ReturnType<typeof buildWorldFixtureWithExt
       people: [],
       employees: worldState.agents
         .filter(a => a.departmentId === d.id)
-        .slice(0, 6)
         .map(a => ({
           id: a.id,
           name: a.name,
@@ -205,35 +204,52 @@ async function openProductMap(
         events: [
           {
             seq: 1,
+            kind: 'message',
+            at: '2026-11-22T09:58:00.000Z',
+            person: { id: ME.person.id, name: ME.person.name },
+            data: { text: opts.lang === 'ru' ? 'Расскажи про свою роль и над чем трудишься.' : 'Tell me about your role and current work.' },
+          },
+          {
+            seq: 2,
             kind: 'text',
             at: '2026-11-22T10:00:00.000Z',
-            data: { text: opts.lang === 'ru' ? 'Да, повелитель, слушаю вас.' : 'Yes, my lord, at your service.' },
+            data: {
+              text:
+                opts.lang === 'ru'
+                  ? 'Да, повелитель, слушаю вас. Я возвожу главные стены нашего отдела и слежу, чтобы каждый камень лег ровно.'
+                  : 'Yes, my lord, at your service. I shape our department walls and make sure every stone settles cleanly.',
+            },
           },
         ],
-        state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 },
+        state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0, terminal: true },
       },
     }),
   );
   await page.route('**/api/agents/*', route => {
-    if (route.request().url().includes('/events') || route.request().url().includes('/messages')) {
+    const url = route.request().url();
+    if (url.includes('/events') || url.includes('/messages') || url.includes('/inbox')) {
       return route.fallback();
     }
+    const id = decodeURIComponent(url.split('/api/agents/')[1]?.split('?')[0] ?? 'agent-1');
+    const matched = worldState.agents.find(a => a.id === id);
+    const dept = matched?.departmentId ? worldState.departments.find(d => d.id === matched.departmentId) : null;
     return route.fulfill({
       json: {
-        id: 'agent-1',
-        kind: 'worker',
-        name: 'Tank',
-        role: null,
-        department: { id: DEV_ID, name: 'Development' },
+        id: matched?.id ?? id,
+        kind: matched?.kind === 'head' ? 'head' : 'worker',
+        name: matched?.name ?? 'Tank',
+        role: { id: matched?.roleKey ?? 'DEV-ENG', title: { en: 'Developer', ru: 'Разработчик' } },
+        department: dept ? { id: dept.id, name: dept.name } : { id: DEV_ID, name: 'Development' },
         product: null,
         team: null,
         teams: [],
-        model: 'claude-opus-5-5',
+        model: matched?.model ?? 'claude-opus-5-5',
         effort: 'high',
         subscription: null,
-        machine: null,
-        state: 'ready',
-        currentTask: null,
+        machine: matched?.machineId ? { id: matched.machineId, hostname: 'a-host', online: true } : null,
+        state: 'working',
+        currentTask: matched?.currentTask ?? { id: 'task-1803', number: 1803, title: 'DEV Deliverable #3' },
+        inboxUnread: 2,
         program: null,
         alarm: null,
         retry: null,
@@ -431,17 +447,38 @@ test.describe('Stage 8 themed map chrome, 6 entity side cards, and on-map Depart
     const clearedFocus = await page.evaluate(() => (window as unknown as { __WORLD_PRODUCT__: DebugHandle }).__WORLD_PRODUCT__.getDepartmentFocus());
     expect(clearedFocus).toBeNull();
 
-    /* 2. Resident / House -> Employee card with level, task, history & simple quick chat. */
+    /* 2. Resident -> opens Hornhoof's real AgentWindow in world-styled conversation view (NOT terminal, NOT a separate quick chat)
+       with ALL existing buttons (current task, inbox, settings/card) and ONE compact level strip that never repeats the name. */
     const pickedRes = await page.evaluate(() => (window as unknown as { __WORLD_PRODUCT__: DebugHandle }).__WORLD_PRODUCT__.selectResidentByRoleClass('executor'));
     expect(pickedRes).not.toBeNull();
-    await expect(card).toHaveAttribute('data-card-kind', 'agent');
-    await expect(page.getByTestId('world-card-level')).toContainText('Lv');
-    await expect(page.getByTestId('world-agent-quick-chat')).toBeVisible();
-    await expect(page.getByTestId('world-agent-quick-chat')).toContainText('Да, повелитель');
+    const agentWin = page.locator('.orch').first();
+    await expect(agentWin).toBeVisible();
+    await expect(agentWin.locator('.agent-window-title')).toContainText(pickedRes!.name);
+    await expect(agentWin.locator('.t-log.chat')).toBeVisible();
+    await expect(agentWin.locator('.t-log.chat')).toContainText('Да, повелитель, слушаю вас.');
+    await expect(agentWin.locator('.agent-task-toggle')).toBeVisible();
+    await expect(agentWin.locator('[data-panel="inbox"]')).toBeVisible();
+    await expect(agentWin.locator('[data-panel="card"]')).toBeVisible();
+    await expect(agentWin.getByRole('button', { name: /Терминал/i })).toHaveCount(0);
+    await expect(page.getByTestId('world-agent-quick-chat')).toHaveCount(0);
+    const levelStrip = agentWin.getByTestId('world-agent-level-strip');
+    await expect(levelStrip).toBeVisible();
+    await expect(levelStrip).toContainText('Уровень');
+    await expect(levelStrip).toContainText('Принято:');
+    await expect(levelStrip).not.toContainText(pickedRes!.name);
     await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
     const resPath = info.outputPath('stage8-egypt-click-resident.png');
     await page.screenshot({ path: resPath, animations: 'disabled' });
     exportShot(resPath, 'stage8-egypt-click-resident.png');
+    await agentWin.locator('.window-close').click();
+    await expect(agentWin).toHaveCount(0);
+
+    /* 2b. House -> employee/house side card (level, task, wake, relocate, open agent window; no quick chat box). */
+    const pickedHouse = await page.evaluate(() => (window as unknown as { __WORLD_PRODUCT__: DebugHandle }).__WORLD_PRODUCT__.selectBuildingByKind('house', 0));
+    expect(pickedHouse).not.toBeNull();
+    await expect(card).toHaveAttribute('data-card-kind', 'agent');
+    await expect(page.getByTestId('world-card-level')).toContainText('Lv');
+    await expect(page.getByTestId('world-agent-quick-chat')).toHaveCount(0);
 
     /* 3. Granary / Well -> Subscription card with remaining limit, reset time & agents list. */
     const pickedSub = await page.evaluate(() => (window as unknown as { __WORLD_PRODUCT__: DebugHandle }).__WORLD_PRODUCT__.selectBuildingByKind('supply', 0));
@@ -477,10 +514,11 @@ test.describe('Stage 8 themed map chrome, 6 entity side cards, and on-map Depart
     await expect(card).toHaveAttribute('data-card-kind', 'statue');
     await expect(page.getByTestId('world-statue-tasks')).toContainText('Выполнено задач');
 
-    /* 7. Palace -> Orchestrator card with quick chat & open orchestrator button. */
+    /* 7. Palace -> Orchestrator card with residence stats & open orchestrator button (no quick chat box). */
     const pickedOrch = await page.evaluate(() => (window as unknown as { __WORLD_PRODUCT__: DebugHandle }).__WORLD_PRODUCT__.selectBuildingByKind('residence', 0));
     expect(pickedOrch).not.toBeNull();
     await expect(card).toHaveAttribute('data-card-kind', 'orchestrator');
-    await expect(page.getByTestId('world-agent-quick-chat')).toBeVisible();
+    await expect(page.getByTestId('world-agent-quick-chat')).toHaveCount(0);
+    await expect(card.getByRole('button', { name: 'Открыть оркестратор' })).toBeVisible();
   });
 });
