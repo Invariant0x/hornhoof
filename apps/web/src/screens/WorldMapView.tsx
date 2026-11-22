@@ -46,7 +46,7 @@ export type WorldMapViewProps = Readonly<{
   activeDepartmentId?: string | null;
   onOpenOrchestrator: () => void;
   onOpenAgent: (agentId: string) => void;
-  onOpenDepartment?: (id: string | null) => void;
+  onCloseDepartment?: () => void;
   onOpenTask?: (taskId: string) => void;
   onOpenGoal?: (goalId: string) => void;
   onOpenTracker?: (departmentId: string) => void;
@@ -99,7 +99,7 @@ export function WorldMapView({
   activeDepartmentId = null,
   onOpenOrchestrator,
   onOpenAgent,
-  onOpenDepartment,
+  onCloseDepartment,
   onOpenTask,
   onOpenGoal,
   onOpenTracker,
@@ -222,8 +222,8 @@ export function WorldMapView({
     engineRef.current?.setSelectedResidentId(null);
     engineRef.current?.setRelocationPreview(null);
     engineRef.current?.setBuildGridVisible(false);
-    if (activeDepartmentId) onOpenDepartment?.(null);
-  }, [activeDepartmentId, onOpenDepartment]);
+    if (activeDepartmentId) onCloseDepartment?.();
+  }, [activeDepartmentId, onCloseDepartment]);
 
   /* Sync external /departments/:id route directly into on-map Department Mode (no separate department screen). */
   useEffect(() => {

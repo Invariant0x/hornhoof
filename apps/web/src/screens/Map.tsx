@@ -664,7 +664,8 @@ type Props = {
   inside?: boolean;
   activeDepartmentId?: string | null;
   onOpenAgent?(agentId: string): void;
-  onOpenDepartment?(id: string | null): void;
+  onOpenDepartment?(id: string): void;
+  onCloseDepartment?(): void;
   onOpenDecisions?(personId: string): void;
   onOpenTask?(taskId: string): void;
   onOpenGoal?(goalId: string): void;
@@ -684,6 +685,7 @@ export function MapScreen({
   activeDepartmentId = null,
   onOpenAgent,
   onOpenDepartment,
+  onCloseDepartment,
   onOpenDecisions,
   onOpenTask,
   onOpenGoal,
@@ -906,7 +908,7 @@ export function MapScreen({
         activeDepartmentId={activeDepartmentId}
         onOpenOrchestrator={onOpenOrchestrator}
         onOpenAgent={onOpenAgent ?? (() => {})}
-        onOpenDepartment={onOpenDepartment}
+        onCloseDepartment={onCloseDepartment}
         onOpenTask={onOpenTask}
         onOpenGoal={onOpenGoal}
         onOpenTracker={onOpenTracker}

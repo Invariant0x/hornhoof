@@ -317,7 +317,8 @@ function MapWorkspace({
       onOpenAgent={openAgent}
       inside={!isWorld && !!dept}
       activeDepartmentId={isWorld ? deptId : null}
-      onOpenDepartment={id => navigate(id ? { kind: 'department', id } : { kind: 'map' })}
+      onOpenDepartment={id => navigate({ kind: 'department', id })}
+      onCloseDepartment={() => navigate({ kind: 'map' })}
       onOpenDecisions={openDecisions}
       onOpenTask={openTask}
       onOpenGoal={openGoal}
