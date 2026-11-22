@@ -287,6 +287,14 @@ restore_hold() {
   (umask 077 && take_alone "$CONTROL/restore/$R_ATTEMPT.env.json" > "$WORK/env.json")
 }
 
+# restore_warn <line>: says what of the restore's own cleanup did not go. Its output may have lost its reader, as a pipe
+# that closed: the write then fails rather than SIGPIPE ending the updater, with the company down or before it goes on.
+restore_warn() {
+  trap '' PIPE
+  say "$@" || true
+  trap - PIPE
+}
+
 # restore_run <with carry>: hold, load, swap, start.
 restore_run() {
   local status=0
@@ -300,7 +308,7 @@ restore_run() {
   # The copy of the dump goes as soon as it is loaded, or could not be: it is kept through no later step.
   load_copy "$DBC" "$WORK/restore.sql.gz" || status=$?
   # While the company is down, both removal and reporting its failure must leave the load result in charge.
-  rm -f -- "$WORK/restore.sql.gz" || say "Could not remove the updater's copy of the backup yet; it goes with its folder." || true
+  rm -f -- "$WORK/restore.sql.gz" || restore_warn "Could not remove the updater's copy of the backup yet; it goes with its folder."
   if [ "$status" -ne 0 ]; then
     restore_undo 'The backup did not load, so nothing changed.' load
     return 0
@@ -349,6 +357,6 @@ restore_request() {
   WORK=$(mktemp -d)
   restore_run "$carry"
   # The restore has ended, done or undone, either way: a folder of the updater's own that will not go stops nothing.
-  rm -rf -- "${WORK:?}" || say "Could not remove the updater's copy of the backup, in $WORK." || true
+  rm -rf -- "${WORK:?}" || restore_warn "Could not remove the updater's copy of the backup, in $WORK."
   WORK=''
 }
