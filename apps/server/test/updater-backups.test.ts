@@ -360,6 +360,61 @@ describe('updater, restore', () => {
     }
   });
 
+  /* The warning about a copy that would not go may lose its reader too, as when the pipe the updater's output goes to
+     has closed: the write then gets SIGPIPE. That ends neither the restore, with the company down after its copy was
+     loaded, nor the pass after the restore ended: each warning is reached, and the run goes on to its end. */
+  it('goes on when the warning about its copy of the dump gets SIGPIPE', async () => {
+    const cases = [
+      { env: { STUB_TERM: '7', ...WITH_CARRY }, state: 'done', step: 'start', failing: 'both', warned: 2 },
+      { env: { STUB_RESTORE: 'fail' }, state: 'failed', step: 'load', failing: 'both', warned: 2 },
+      { env: { STUB_TERM: '7', ...WITH_CARRY }, state: 'done', step: 'start', failing: 'folder', warned: 1 },
+    ] as const;
+    for (const { env, state, step, failing, warned } of cases) {
+      const s = stand(OLD_ENV);
+      order(s);
+      const tools = join(s.dir, 'tools');
+      mkdirSync(tools);
+      const copy = failing === 'both' ? '*/restore.sql.gz) fail "$a" ;; ' : '';
+      writeFileSync(
+        join(tools, 'rm'),
+        [
+          '#!/bin/sh',
+          "fail() { printf 'rm: cannot remove %s: Read-only file system\\n' \"$1\" >&2; exit 1; }",
+          'for a in "$@"; do',
+          `  case "$a" in ${copy}'${s.dir}'/tmp.*) [ ! -d "$a" ] || fail "$a" ;; esac`,
+          'done',
+          'exec /bin/rm "$@"',
+          '',
+        ].join('\n'),
+        { mode: 0o755 },
+      );
+      const PATH = `${tools}:${dirname(fileURLToPath(new URL('./updater-stubs/docker', import.meta.url)))}:${dirname(JQ)}:/usr/bin:/bin`;
+      const reached = join(s.dir, 'warned');
+      const brokenPipe = join(s.dir, 'cleanup-pipe.sh');
+      /* What a write to a pipe with no reader meets: SIGPIPE to the process that writes, and a failed write where that
+         process ignores it. */
+      writeFileSync(brokenPipe, [
+        'printf() {',
+        '  case "${2-}" in',
+        '    "Could not remove the updater\'s copy of the backup"*)',
+        `      builtin printf '%s\\n' "$2" >> '${reached}'`,
+        '      kill -PIPE "$BASHPID"',
+        '      return 1',
+        '      ;;',
+        '  esac',
+        '  builtin printf "$@"',
+        '}',
+        '',
+      ].join('\n'));
+      const r = await runOnce(s, null, { ...env, PATH, BASH_ENV: brokenPipe });
+      expect(readFileSync(reached, 'utf8').trim().split('\n'), r.out).toHaveLength(warned);
+      expect(r.code, r.out).toBe(0);
+      expect(statusOf(s), r.out).toMatchObject({ state, step });
+      if (state === 'failed') expectAsBefore(s, r.calls);
+      else expect(r.calls).toContain('docker compose up -d --no-build app node');
+    }
+  });
+
   it('changes nothing when the backup does not load or the database in use does not close', async () => {
     const s = stand(OLD_ENV);
     order(s);
