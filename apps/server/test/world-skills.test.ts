@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { agents, assistants, companies, departments, improvements, people, subscriptions, tasks } from '../src/db/schema.js';
 import { instructionsOf } from '../src/modules/agents/instructions.js';
 import { addressed, answerBy, wrote } from '../src/modules/conversation/prompt.js';
+import { hireEmployee } from '../src/modules/departments/hire.js';
 import { createWorldPackRegistry } from '../src/modules/world/packs/index.js';
 import { DUNGEON_WORLD_PACK } from '../src/modules/world/packs/dungeon.js';
 import { EGYPT_WORLD_PACK } from '../src/modules/world/packs/egypt.js';
@@ -81,7 +82,7 @@ describe('Stage 7 world skills, voice channel boundaries, and company theme', ()
     /* Default theme is cyberpunk across /api/world/theme, /api/me, and /api/org. */
     const initialCeo = await app.inject({ url: '/api/world/theme', ...as(ceo) });
     expect(initialCeo.statusCode).toBe(200);
-    expect(initialCeo.json()).toEqual({ theme: DEFAULT_COMPANY_THEME, activePack: null, canEdit: true });
+    expect(initialCeo.json()).toEqual({ theme: DEFAULT_COMPANY_THEME, activePack: null, canEdit: true, renamedAgentsCount: 0 });
     expect((await app.inject({ url: '/api/me', ...as(listedUser) })).json().company.theme).toBe(DEFAULT_COMPANY_THEME);
 
     /* Non-CEO users (delegate, whole-company, listed) can read but never modify the company theme. */
@@ -125,8 +126,10 @@ describe('Stage 7 world skills, voice channel boundaries, and company theme', ()
         id: 'egypt',
         label: EGYPT_WORLD_PACK.label,
         skillIds: ['world-egypt-voice'],
+        voiceSamples: EGYPT_WORLD_PACK.skills[0]!.voice!.samples,
       },
       canEdit: true,
+      renamedAgentsCount: 0,
     });
     expect(events).toContainEqual({ type: 'company_theme', theme: 'egypt' });
     expect(events).toContainEqual({ type: 'org' });
@@ -528,5 +531,183 @@ describe('Stage 7 world skills, voice channel boundaries, and company theme', ()
       expect(previewRes.statusCode).toBe(200);
       expect(containsWorldVoicePhrase(JSON.stringify(previewRes.json()), pack), `${pack.id}: external post preview`).toBe(false);
     }
+  });
+
+  it('gives newly hired agents unique era names while a world is active and keeps standard names when off', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [owner] = await db.select().from(people);
+    const [dept] = await db
+      .insert(departments)
+      .values({ companyId: company!.id, name: 'Development', templateKey: 'development', roleCode: 'DEV', position: 1 })
+      .returning();
+
+    /* World OFF (cyberpunk): default role title stays as asked. */
+    const offHired = await db.transaction(tx =>
+      hireEmployee(
+        app.ctx,
+        tx,
+        { companyId: company!.id, departmentId: dept!.id },
+        { role: 'DEV-ENG', name: 'Developer', model: '', subscription: null, skills: ['dev-tdd'] },
+        { personId: owner!.id, byOrchestrator: false },
+      ),
+    );
+    expect(offHired.name).toBe('Developer');
+
+    /* Turn Egypt ON: default role hires receive unique Egypt era names in EN and RU, while explicit manual names are respected. */
+    await app.inject({ method: 'PUT', url: '/api/world/theme', payload: { theme: 'egypt' }, ...as(ceo) });
+
+    const enHire1 = await db.transaction(tx =>
+      hireEmployee(
+        app.ctx,
+        tx,
+        { companyId: company!.id, departmentId: dept!.id },
+        { role: 'DEV-ENG', name: 'Developer', model: '', subscription: null, skills: ['dev-tdd'] },
+        { personId: owner!.id, byOrchestrator: false },
+      ),
+    );
+    const enHire2 = await db.transaction(tx =>
+      hireEmployee(
+        app.ctx,
+        tx,
+        { companyId: company!.id, departmentId: dept!.id },
+        { role: 'DEV-ENG', name: 'Developer 2', model: '', subscription: null, skills: ['dev-tdd'] },
+        { personId: owner!.id, byOrchestrator: false },
+      ),
+    );
+    const ruHire = await db.transaction(tx =>
+      hireEmployee(
+        app.ctx,
+        tx,
+        { companyId: company!.id, departmentId: dept!.id },
+        { role: 'DEV-REV', name: 'Ревьюер кода', model: '', subscription: null, skills: ['dev-review-diff'] },
+        { personId: owner!.id, byOrchestrator: false },
+      ),
+    );
+    const manualHire = await db.transaction(tx =>
+      hireEmployee(
+        app.ctx,
+        tx,
+        { companyId: company!.id, departmentId: dept!.id },
+        { role: 'DEV-TEST', name: 'Morpheus', model: '', subscription: null, skills: ['dev-tdd'] },
+        { personId: owner!.id, byOrchestrator: false },
+      ),
+    );
+
+    expect(EGYPT_WORLD_PACK.names.employees.en).toContain(enHire1.name);
+    expect(EGYPT_WORLD_PACK.names.employees.en).toContain(enHire2.name);
+    expect(enHire1.name).not.toBe(enHire2.name);
+    expect(EGYPT_WORLD_PACK.names.employees.ru).toContain(ruHire.name);
+    expect(manualHire.name).toBe('Morpheus');
+  });
+
+  it('renames existing agents in one confirmed CEO action, keeps one name everywhere, preserves original names across worlds, and restores them when turning the world off', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [owner] = await db.select().from(people);
+    const [dept] = await db
+      .insert(departments)
+      .values({ companyId: company!.id, name: 'Development', templateKey: 'development', roleCode: 'DEV', position: 1 })
+      .returning();
+
+    const [head] = await db
+      .insert(agents)
+      .values({ companyId: company!.id, kind: 'head', name: 'Head of dev', model: 'claude-opus-5-5', departmentId: dept!.id, roleKey: 'DEV-HEAD' })
+      .returning();
+    const [worker] = await db
+      .insert(agents)
+      .values({ companyId: company!.id, kind: 'worker', name: 'Tank', model: 'claude-sonnet-5-5', departmentId: dept!.id, roleKey: 'DEV-ENG' })
+      .returning();
+    const [orch] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const [assistantPerson] = await db
+      .insert(people)
+      .values({ companyId: company!.id, name: 'Ivan AI', title: 'Assistant', status: 'active', scopeKind: 'company', isOwner: false, isAgent: true, assistantOf: owner!.id })
+      .returning();
+    const [assistantAgent] = await db
+      .insert(agents)
+      .values({ companyId: company!.id, kind: 'assistant', name: 'Ivan AI', model: 'claude-sonnet-5-5' })
+      .returning();
+    await db.insert(assistants).values({ companyId: company!.id, personId: assistantPerson!.id, agentId: assistantAgent!.id, program: 'openclaw' });
+
+    const listed = await invitePerson(app, ceo, { name: 'Ann', email: 'ann2@acme.com', title: 'Dev', access: { departments: [dept!.id], teams: [] } });
+
+    app.ctx.worldPacks = createWorldPackRegistry([EGYPT_WORLD_PACK, DUNGEON_WORLD_PACK]);
+    await app.inject({ method: 'PUT', url: '/api/world/theme', payload: { theme: 'egypt' }, ...as(ceo) });
+
+    /* Non-CEO is forbidden on preview, rename, and restore. */
+    expect((await app.inject({ url: '/api/world/rename-preview?lang=ru', ...as(listed) })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: '/api/world/rename-agents', payload: { lang: 'ru', confirmed: true }, ...as(listed) })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: '/api/world/restore-names', payload: { confirmed: true }, ...as(listed) })).statusCode).toBe(403);
+
+    /* Unconfirmed rename is rejected with 400. */
+    expect((await app.inject({ method: 'POST', url: '/api/world/rename-agents', payload: { lang: 'ru', confirmed: false }, ...as(ceo) })).statusCode).toBe(400);
+
+    /* Preview shows orchestrator + head + worker, excludes personal assistant. */
+    const previewRes = await app.inject({ url: '/api/world/rename-preview?lang=ru', ...as(ceo) });
+    expect(previewRes.statusCode).toBe(200);
+    const preview = previewRes.json();
+    expect(preview.packId).toBe('egypt');
+    expect(preview.items).toHaveLength(3);
+    expect(preview.items.some((i: { agentId: string }) => i.agentId === assistantAgent!.id)).toBe(false);
+    expect(preview.items.find((i: { agentId: string }) => i.agentId === orch!.id).proposedName).toBe('Фараон Хеопс');
+
+    /* Execute confirmed bulk rename into Egypt RU era names. */
+    const renameRes = await app.inject({
+      method: 'POST',
+      url: '/api/world/rename-agents',
+      payload: { lang: 'ru', confirmed: true },
+      ...as(ceo),
+    });
+    expect(renameRes.statusCode).toBe(200);
+    expect(renameRes.json().renamedCount).toBe(3);
+
+    /* One name everywhere: DB, /api/org, /api/agents/:id, /api/world/state, and agent instructions header! */
+    const [workerAfterEgypt] = await db.select().from(agents).where(eq(agents.id, worker!.id));
+    expect(EGYPT_WORLD_PACK.names.employees.ru).toContain(workerAfterEgypt!.name);
+    expect(workerAfterEgypt!.originalName).toBe('Tank');
+    expect((await app.inject({ url: `/api/agents/${worker!.id}`, ...as(ceo) })).json().name).toBe(workerAfterEgypt!.name);
+    expect((await instructionsOf(app.ctx, workerAfterEgypt!)).text).toContain(`You are ${workerAfterEgypt!.name},`);
+    const orgAfterEgypt = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(orgAfterEgypt.orchestrator.name).toBe('Фараон Хеопс');
+    expect(orgAfterEgypt.departments[0].employees.find((e: { id: string }) => e.id === worker!.id).name).toBe(workerAfterEgypt!.name);
+    const worldAfterEgypt = (await app.inject({ url: '/api/world/state', ...as(ceo) })).json();
+    expect(worldAfterEgypt.agents.find((a: { id: string }) => a.id === worker!.id).name).toBe(workerAfterEgypt!.name);
+    const [assistantStillUntouched] = await db.select().from(agents).where(eq(agents.id, assistantAgent!.id));
+    expect(assistantStillUntouched!.name).toBe('Ivan AI');
+
+    /* Switch Egypt -> Dungeon directly and rename again: original pre-world names ('Tank', 'Head of dev', 'Orchestrator') stay preserved! */
+    await app.inject({ method: 'PUT', url: '/api/world/theme', payload: { theme: 'dungeon' }, ...as(ceo) });
+    const dungeonRename = await app.inject({
+      method: 'POST',
+      url: '/api/world/rename-agents',
+      payload: { lang: 'en', confirmed: true },
+      ...as(ceo),
+    });
+    expect(dungeonRename.statusCode).toBe(200);
+    const [workerAfterDungeon] = await db.select().from(agents).where(eq(agents.id, worker!.id));
+    expect(DUNGEON_WORLD_PACK.names.employees.en).toContain(workerAfterDungeon!.name);
+    expect(workerAfterDungeon!.originalName).toBe('Tank');
+
+    /* Turning the world OFF (back to cyberpunk) automatically restores exact pre-world names and clears originalName! */
+    const backOff = await app.inject({
+      method: 'PUT',
+      url: '/api/world/theme',
+      payload: { theme: DEFAULT_COMPANY_THEME },
+      ...as(ceo),
+    });
+    expect(backOff.statusCode).toBe(200);
+    expect(backOff.json().restoredNamesCount).toBe(3);
+
+    const [workerRestored] = await db.select().from(agents).where(eq(agents.id, worker!.id));
+    const [headRestored] = await db.select().from(agents).where(eq(agents.id, head!.id));
+    const [orchRestored] = await db.select().from(agents).where(eq(agents.id, orch!.id));
+    expect(workerRestored!.name).toBe('Tank');
+    expect(workerRestored!.originalName).toBeNull();
+    expect(headRestored!.name).toBe('Head of dev');
+    expect(headRestored!.originalName).toBeNull();
+    expect(orchRestored!.name).toBe('Orchestrator');
+    expect(orchRestored!.originalName).toBeNull();
   });
 });

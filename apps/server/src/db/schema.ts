@@ -689,6 +689,8 @@ export const agents = pgTable(
     /* An assistant's own agent belongs to the assistant's owner alone, outside every department. */
     kind: text('kind', { enum: ['orchestrator', 'head', 'worker', 'assistant'] }).notNull(),
     name: text('name').notNull(),
+    /* Pre-world agent name preserved on the first world-era bulk rename and restored when leaving the world. */
+    originalName: text('original_name'),
     model: text('model').notNull(),
     departmentId: uuid('department_id').references(() => departments.id),
     teamId: uuid('team_id').references(() => teams.id),

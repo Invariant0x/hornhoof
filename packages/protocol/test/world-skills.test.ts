@@ -7,9 +7,13 @@ import {
   STANDARD_COMPANY_THEMES,
   WORLD_VOICE_CHANNELS,
   WORLD_VOICE_FORBIDDEN_CHANNELS,
+  WorldRenameExecuteSchema,
+  WorldRestoreNamesSchema,
   WorldThemeUpdateSchema,
   containsWorldVoicePhrase,
   isWorldVoiceAllowed,
+  pickNextWorldEraName,
+  planWorldAgentRenames,
   validateWorldPackBehavior,
   type WorldPackBehaviorSpec,
 } from '../src/world.js';
@@ -107,5 +111,41 @@ describe('Stage 7 world pack skills and voice boundary contract', () => {
     expect(() => WorldThemeUpdateSchema.parse({ theme: '' })).toThrow();
     expect(() => WorldThemeUpdateSchema.parse({ theme: '../etc' })).toThrow();
     expect(() => WorldThemeUpdateSchema.parse({ theme: 'cyberpunk', extra: true })).toThrow();
+  });
+
+  it('picks unique era names for new hires in en and ru and adds suffixes when the base list fills up', () => {
+    expect(pickNextWorldEraName(SAMPLE_PACK, 'en', [], 'orchestrator')).toBe('Flight Director Vega');
+    expect(pickNextWorldEraName(SAMPLE_PACK, 'ru', [], 'orchestrator')).toBe('Директор Вега');
+
+    expect(pickNextWorldEraName(SAMPLE_PACK, 'en', ['astra'], 'worker')).toBe('Orion');
+    expect(pickNextWorldEraName(SAMPLE_PACK, 'ru', ['Астра', 'Орион'], 'head')).toBe('Лира');
+    expect(pickNextWorldEraName(SAMPLE_PACK, 'en', ['Astra', 'Orion', 'Lyra'], 'worker')).toBe('Astra 2');
+    expect(pickNextWorldEraName(SAMPLE_PACK, 'en', ['Astra', 'Orion', 'Lyra', 'Astra 2'], 'worker')).toBe('Orion 2');
+  });
+
+  it('plans deterministic bulk renames without collisions while preserving original pre-world names', () => {
+    const plan = planWorldAgentRenames(SAMPLE_PACK, 'ru', [
+      { id: 'a1', kind: 'orchestrator', name: 'Orchestrator', originalName: null },
+      { id: 'a2', kind: 'head', name: 'Head of dev', originalName: null },
+      { id: 'a3', kind: 'worker', name: 'Tank', originalName: 'Tank' },
+      { id: 'a4', kind: 'worker', name: 'Trinity', originalName: null },
+      { id: 'a5', kind: 'worker', name: 'Neo', originalName: null },
+    ]);
+    expect(plan.map(p => [p.agentId, p.proposedName, p.preservedOriginalName])).toEqual([
+      ['a1', 'Директор Вега', 'Orchestrator'],
+      ['a2', 'Астра', 'Head of dev'],
+      ['a3', 'Орион', 'Tank'],
+      ['a4', 'Лира', 'Trinity'],
+      ['a5', 'Астра 2', 'Neo'],
+    ]);
+    expect(new Set(plan.map(p => p.proposedName.toLowerCase())).size).toBe(5);
+  });
+
+  it('requires explicit confirmation on rename and restore payloads', () => {
+    expect(WorldRenameExecuteSchema.parse({ lang: 'ru', confirmed: true })).toEqual({ lang: 'ru', confirmed: true });
+    expect(() => WorldRenameExecuteSchema.parse({ lang: 'ru', confirmed: false })).toThrow();
+    expect(() => WorldRenameExecuteSchema.parse({ lang: 'de', confirmed: true })).toThrow();
+    expect(WorldRestoreNamesSchema.parse({ confirmed: true })).toEqual({ confirmed: true });
+    expect(() => WorldRestoreNamesSchema.parse({ confirmed: false })).toThrow();
   });
 });

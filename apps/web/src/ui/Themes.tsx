@@ -1,3 +1,4 @@
+import type { WorldNameLanguage, WorldRenamePreview, WorldRenameResult, WorldRestoreNamesResult, WorldThemeView } from '@hornhoof/protocol/world';
 import { useEffect, useId, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Language } from '../i18n';
@@ -368,16 +369,206 @@ function MapGrainOption({ shown }: { shown: boolean }) {
   );
 }
 
+/* CEO-only control to rename all existing company agents into the active world's era names in one confirmed step,
+   or restore their saved pre-world names cleanly. */
+function WorldEraNamesPanel({
+  worldActive,
+  renamedCount,
+  onRenamedCount,
+  say,
+}: {
+  worldActive: boolean;
+  renamedCount: number;
+  onRenamedCount: (count: number) => void;
+  say: (notice: Notice) => void;
+}) {
+  const t = useT();
+  const wn = t.skins.worldNames;
+  const { language } = useLanguage();
+  const [preview, setPreview] = useState<WorldRenamePreview | null>(null);
+  const [nameLang, setNameLang] = useState<WorldNameLanguage>(language === 'ru' ? 'ru' : 'en');
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const headingId = useId();
+  const dialogId = useId();
+  const restoreDialogId = useId();
+
+  if (!worldActive && renamedCount <= 0) return null;
+
+  async function openRenamePreview(lang: WorldNameLanguage) {
+    setBusy(true);
+    try {
+      const data = await api.get<WorldRenamePreview>(`/api/world/rename-preview?lang=${lang}`);
+      setNameLang(lang);
+      setPreview(data);
+    } catch (err) {
+      say({ tone: 'alert', text: errorText(t, err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmRename() {
+    if (!preview || busy) return;
+    setBusy(true);
+    try {
+      const res = await api.post<WorldRenameResult>('/api/world/rename-agents', { lang: nameLang, confirmed: true });
+      setPreview(null);
+      onRenamedCount(res.renamedCount);
+      say({ tone: 'status', text: wn.renamed(res.renamedCount) });
+    } catch (err) {
+      say({ tone: 'alert', text: errorText(t, err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmRestore() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await api.post<WorldRestoreNamesResult>('/api/world/restore-names', { confirmed: true });
+      setRestoreOpen(false);
+      onRenamedCount(0);
+      say({ tone: 'status', text: wn.restored(res.restoredCount) });
+    } catch (err) {
+      say({ tone: 'alert', text: errorText(t, err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="settings-part" aria-labelledby={headingId}>
+      <h5 id={headingId}>{wn.title}</h5>
+      <p className="muted">{wn.hint}</p>
+      <div className="entry-actions">
+        {worldActive && (
+          <button
+            className="btn small ghost"
+            type="button"
+            disabled={busy}
+            onClick={() => void openRenamePreview(language === 'ru' ? 'ru' : 'en')}
+          >
+            {wn.renameBtn}
+          </button>
+        )}
+        {renamedCount > 0 && (
+          <button
+            className="btn small ghost"
+            type="button"
+            disabled={busy}
+            onClick={() => setRestoreOpen(true)}
+          >
+            {wn.restoreBtn}
+          </button>
+        )}
+      </div>
+
+      {preview && (
+        <div className="dialog-back" onPointerDown={e => e.target === e.currentTarget && !busy && setPreview(null)}>
+          <div className="dialog" role="dialog" aria-modal="true" aria-labelledby={dialogId} style={{ maxWidth: 560, width: 'min(560px, 100%)', padding: 20, display: 'grid', gap: 14 }}>
+            <h4 id={dialogId} style={{ margin: 0 }}>{wn.dialogTitle}</h4>
+            <p className="muted" style={{ margin: 0 }}>{wn.dialogIntro}</p>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span className="muted">{wn.langLabel}:</span>
+              <button
+                type="button"
+                className={`btn small ghost${nameLang === 'ru' ? ' on' : ''}`}
+                disabled={busy}
+                onClick={() => void openRenamePreview('ru')}
+              >
+                Русский
+              </button>
+              <button
+                type="button"
+                className={`btn small ghost${nameLang === 'en' ? ' on' : ''}`}
+                disabled={busy}
+                onClick={() => void openRenamePreview('en')}
+              >
+                English
+              </button>
+            </div>
+            {preview.items.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }}>{wn.previewEmpty}</p>
+            ) : (
+              <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 6, padding: 8 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--line)' }}>
+                      <th style={{ padding: '4px 6px' }}>{wn.previewOld}</th>
+                      <th style={{ padding: '4px 6px' }}>{wn.previewNew}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.items.map(item => (
+                      <tr key={item.agentId} style={{ borderBottom: '1px solid var(--line)' }}>
+                        <td style={{ padding: '5px 6px' }}>{item.currentName}</td>
+                        <td style={{ padding: '5px 6px', fontWeight: 600 }}>{item.proposedName}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="settings-actions">
+              <button className="btn small ghost" type="button" disabled={busy} onClick={() => setPreview(null)}>
+                {wn.cancel}
+              </button>
+              <button className="btn small" type="button" disabled={busy || preview.items.length === 0} onClick={() => void confirmRename()}>
+                {wn.confirmRename}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {restoreOpen && (
+        <div className="dialog-back" onPointerDown={e => e.target === e.currentTarget && !busy && setRestoreOpen(false)}>
+          <div className="dialog" role="dialog" aria-modal="true" aria-labelledby={restoreDialogId} style={{ maxWidth: 460, width: 'min(460px, 100%)', padding: 20, display: 'grid', gap: 14 }}>
+            <h4 id={restoreDialogId} style={{ margin: 0 }}>{wn.restoreTitle}</h4>
+            <p className="muted" style={{ margin: 0 }}>{wn.restoreAsk}</p>
+            <div className="settings-actions">
+              <button className="btn small ghost" type="button" disabled={busy} onClick={() => setRestoreOpen(false)}>
+                {wn.cancel}
+              </button>
+              <button className="btn small" type="button" disabled={busy} onClick={() => void confirmRestore()}>
+                {wn.confirmRestore}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) => void } = {}) {
   const t = useT();
   const { language } = useLanguage();
   const { active, custom } = useSkins();
   const [notice, setNotice] = useState<Notice | null>(null);
   const [saving, setSaving] = useState(false);
+  const [renamedCount, setRenamedCount] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   /* Where focus goes once the catalog has drawn again: the Apply of a card, or Add from file. */
   const focusTo = useRef<string | null>(null);
   const headingId = useId();
+
+  useEffect(() => {
+    let alive = true;
+    void api
+      .get<WorldThemeView>('/api/world/theme')
+      .then(res => {
+        if (alive && typeof res?.renamedAgentsCount === 'number') {
+          setRenamedCount(res.renamedAgentsCount);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [active]);
 
   useEffect(() => {
     if (focusTo.current === null) return;
@@ -396,10 +587,15 @@ export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) =>
     setSaving(true);
     try {
       const serverTheme = card.own ? DEFAULT_SKIN : card.id;
-      await api.put('/api/world/theme', { theme: serverTheme });
+      const res = await api.put<WorldThemeView>('/api/world/theme', { theme: serverTheme });
       if (!chooseSkin(card.id)) return;
       if (!card.own) onCompanyTheme?.(serverTheme);
-      setNotice({ tone: 'status', text: t.skins.nowOn(card.name) });
+      if (typeof res?.renamedAgentsCount === 'number') setRenamedCount(res.renamedAgentsCount);
+      const restoredSuffix =
+        res?.restoredNamesCount && res.restoredNamesCount > 0
+          ? ` ${t.skins.worldNames.restoredOnLeave(res.restoredNamesCount)}`
+          : '';
+      setNotice({ tone: 'status', text: `${t.skins.nowOn(card.name)}${restoredSuffix}` });
       focusOn(card.id);
     } catch (err) {
       setNotice({ tone: 'alert', text: errorText(t, err) });
@@ -437,6 +633,12 @@ export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) =>
       </div>
       {notice && <NoticeBar notice={notice} onUndo={undo} />}
       <Catalog cards={cards} active={active} onApply={card => void apply(card)} onDownload={card => download(t, card, setNotice)} onRemove={remove} />
+      <WorldEraNamesPanel
+        worldActive={Boolean(activeCard && isWorldCard(activeCard))}
+        renamedCount={renamedCount}
+        onRenamedCount={setRenamedCount}
+        say={setNotice}
+      />
       <MapGrainOption shown={activeCard?.look.surface === 'papyrus'} />
       <Guide />
     </div>

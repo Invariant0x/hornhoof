@@ -226,6 +226,9 @@ const ELSEWHERE: Record<string, string> = {
   'POST /api/feedback/inbox/:id/issue': "feedback-issue.test.ts: only on Hornhoof's own installation, a person with the whole company, 403 for another one",
   'POST /api/world/relocations': 'world-live.test.ts: CEO or whole-company owner for common buildings, department reach for department structures and agent houses, 403 otherwise',
   'PUT /api/world/theme': 'world-skills.test.ts: the CEO alone (isOwner && !viaHead), 403 for delegate, whole-company non-owner, department owner, listed person and head',
+  'GET /api/world/rename-preview': 'world-skills.test.ts: the CEO alone (isOwner && !viaHead), 403 for everyone else',
+  'POST /api/world/rename-agents': 'world-skills.test.ts: the CEO alone (isOwner && !viaHead), 403 for everyone else',
+  'POST /api/world/restore-names': 'world-skills.test.ts: the CEO alone (isOwner && !viaHead), 403 for everyone else',
 };
 
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */

@@ -809,9 +809,119 @@ export type WorldThemeView = Readonly<{
     id: string;
     label: WorldLangText;
     skillIds: readonly string[];
+    voiceSamples?: WorldLangText;
   }> | null;
   canEdit: boolean;
+  renamedAgentsCount?: number;
+  restoredNamesCount?: number;
 }>;
+
+export const WORLD_NAME_LANGUAGES = ['en', 'ru'] as const;
+export type WorldNameLanguage = (typeof WORLD_NAME_LANGUAGES)[number];
+
+export type WorldAgentRenameCandidate = Readonly<{
+  id: string;
+  kind: 'orchestrator' | 'head' | 'worker';
+  name: string;
+  originalName: string | null;
+}>;
+
+export type WorldAgentRenamePlanItem = Readonly<{
+  agentId: string;
+  kind: 'orchestrator' | 'head' | 'worker';
+  currentName: string;
+  proposedName: string;
+  preservedOriginalName: string;
+}>;
+
+export type WorldRenamePreview = Readonly<{
+  packId: string;
+  packLabel: WorldLangText;
+  lang: WorldNameLanguage;
+  items: readonly WorldAgentRenamePlanItem[];
+  alreadyRenamedCount: number;
+}>;
+
+export type WorldRenameResult = Readonly<{
+  packId: string;
+  lang: WorldNameLanguage;
+  renamedCount: number;
+  items: readonly WorldAgentRenamePlanItem[];
+}>;
+
+export type WorldRestoreNamesResult = Readonly<{
+  restoredCount: number;
+  items: readonly Readonly<{
+    agentId: string;
+    previousName: string;
+    restoredName: string;
+  }>[];
+}>;
+
+export const WorldRenamePreviewQuerySchema = z.object({
+  lang: z.enum(WORLD_NAME_LANGUAGES).default('en'),
+});
+
+export const WorldRenameExecuteSchema = z.object({
+  lang: z.enum(WORLD_NAME_LANGUAGES).default('en'),
+  confirmed: z.literal(true),
+}).strict();
+export type WorldRenameExecuteInput = z.infer<typeof WorldRenameExecuteSchema>;
+
+export const WorldRestoreNamesSchema = z.object({
+  confirmed: z.literal(true),
+}).strict();
+export type WorldRestoreNamesInput = z.infer<typeof WorldRestoreNamesSchema>;
+
+/* Picks the next unused era name from a world pack in the requested language without collisions. */
+export function pickNextWorldEraName(
+  pack: WorldPackBehaviorSpec,
+  language: WorldNameLanguage,
+  existingNames: Iterable<string>,
+  kind: 'orchestrator' | 'head' | 'worker',
+): string {
+  const taken = new Set<string>();
+  for (const name of existingNames) {
+    const clean = name.trim().toLowerCase();
+    if (clean) taken.add(clean);
+  }
+  const baseList = kind === 'orchestrator' ? [pack.names.ruler[language]] : pack.names.employees[language];
+  const fallback = baseList.length ? baseList : [pack.label[language]];
+
+  for (const candidate of fallback) {
+    const clean = candidate.trim();
+    if (clean && !taken.has(clean.toLowerCase())) return clean;
+  }
+  for (let suffix = 2; suffix < 10_000; suffix++) {
+    for (const candidate of fallback) {
+      const clean = `${candidate.trim()} ${suffix}`;
+      if (!taken.has(clean.toLowerCase())) return clean;
+    }
+  }
+  return `${fallback[0]!.trim()} ${taken.size + 1}`;
+}
+
+/* Computes a deterministic bulk rename plan for all active non-assistant agents while preserving pre-world names. */
+export function planWorldAgentRenames(
+  pack: WorldPackBehaviorSpec,
+  language: WorldNameLanguage,
+  activeAgents: readonly WorldAgentRenameCandidate[],
+): WorldAgentRenamePlanItem[] {
+  const used = new Set<string>();
+  const items: WorldAgentRenamePlanItem[] = [];
+  for (const agent of activeAgents) {
+    const proposedName = pickNextWorldEraName(pack, language, used, agent.kind);
+    used.add(proposedName.toLowerCase());
+    items.push({
+      agentId: agent.id,
+      kind: agent.kind,
+      currentName: agent.name,
+      proposedName,
+      preservedOriginalName: agent.originalName ?? agent.name,
+    });
+  }
+  return items;
+}
 
 const THEME_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 

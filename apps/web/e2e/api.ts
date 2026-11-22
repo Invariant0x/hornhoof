@@ -134,9 +134,18 @@ export async function serveApi(page: Page) {
     if (path === '/api/stream') return;
     if (path === '/api/world/theme' && route.request().method() === 'PUT') {
       const parsed = route.request().postDataJSON() as { theme?: string } | null;
-      return route.fulfill(json({ theme: parsed?.theme ?? 'cyberpunk', activePack: null, canEdit: true }));
+      return route.fulfill(json({ theme: parsed?.theme ?? 'cyberpunk', activePack: null, canEdit: true, renamedAgentsCount: 0 }));
     }
-    if (path === '/api/world/theme') return route.fulfill(json({ theme: 'cyberpunk', activePack: null, canEdit: true }));
+    if (path === '/api/world/theme') return route.fulfill(json({ theme: 'cyberpunk', activePack: null, canEdit: true, renamedAgentsCount: 0 }));
+    if (path.startsWith('/api/world/rename-preview')) {
+      return route.fulfill(json({ packId: 'egypt', packLabel: { en: 'Ancient Egypt', ru: 'Древний Египет' }, lang: 'en', alreadyRenamedCount: 0, items: [] }));
+    }
+    if (path === '/api/world/rename-agents' && route.request().method() === 'POST') {
+      return route.fulfill(json({ packId: 'egypt', lang: 'en', renamedCount: 0, items: [] }));
+    }
+    if (path === '/api/world/restore-names' && route.request().method() === 'POST') {
+      return route.fulfill(json({ restoredCount: 0, items: [] }));
+    }
     if (path in ROUTES) return route.fulfill(json(ROUTES[path]));
     if (/^\/api\/tasks\/[^/]+\/phone-recordings$/.test(path)) return route.fulfill(json({ recordings: [] }));
     if (/^\/api\/machines\/[^/]+\/connections$/.test(path)) return route.fulfill(json({ summary: { drops: 0, averageMs: null, cause: null }, events: [] }));

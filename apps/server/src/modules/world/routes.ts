@@ -1,28 +1,39 @@
 /* HTTP routes for isometric world:
-   - GET  /api/world/state       (strictly read-only company state projection)
-   - GET  /api/world/theme       (active company theme and active world pack summary for any signed-in member)
-   - PUT  /api/world/theme       (CEO-only company theme/world switcher; broadcasts live update to everyone)
-   - PUT  /api/world/layout      (saves city layout in isolated world_layouts table only)
-   - POST /api/world/relocations (God's Word relocation: creates a real small task after confirmation,
-                                  building coordinates never move until the task is accepted) */
+   - GET  /api/world/state          (strictly read-only company state projection)
+   - GET  /api/world/theme          (active company theme and active world pack summary for any signed-in member)
+   - PUT  /api/world/theme          (CEO-only company theme/world switcher; restores original names on leaving world)
+   - GET  /api/world/rename-preview (CEO-only preview of era names for active non-assistant agents)
+   - POST /api/world/rename-agents  (CEO-only confirmed bulk rename preserving original pre-world names)
+   - POST /api/world/restore-names  (CEO-only confirmed restore of preserved pre-world names)
+   - PUT  /api/world/layout         (saves city layout in isolated world_layouts table only)
+   - POST /api/world/relocations    (God's Word relocation: creates a real small task after confirmation,
+                                     building coordinates never move until the task is accepted) */
 
 import { randomUUID } from 'node:crypto';
 import {
   DEFAULT_COMPANY_THEME,
   WorldLayoutSaveSchema,
   WorldRelocationRequestSchema,
+  WorldRenameExecuteSchema,
+  WorldRenamePreviewQuerySchema,
+  WorldRestoreNamesSchema,
   WorldThemeUpdateSchema,
+  planWorldAgentRenames,
+  type WorldAgentRenameCandidate,
   type WorldRelocationRecord,
   type WorldRelocationStored,
+  type WorldRenamePreview,
+  type WorldRenameResult,
+  type WorldRestoreNamesResult,
   type WorldThemeView,
 } from '@hornhoof/protocol/world';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { accessOf, agentSpot, canReach } from '../../auth/access.js';
 import { actsAsCeo } from '../../auth/decisions.js';
-import { actorOf, requirePerson } from '../../auth/session.js';
-import { agents, companies, departments, worldLayouts } from '../../db/schema.js';
+import { actorOf, employeeChangedBy, requirePerson, type Person } from '../../auth/session.js';
+import { agentChanges, agents, companies, departments, worldLayouts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
 import { createTask } from '../tasks/engine.js';
@@ -32,8 +43,20 @@ import { isAllowedCompanyTheme, worldPackForTheme } from './packs/index.js';
 
 const MAX_STORED_RELOCATIONS = 200;
 
-function themeViewOf(ctx: Ctx, theme: string, canEdit: boolean): WorldThemeView {
+function requireWorldCeo(me: Person): void {
+  if (!me.isOwner || me.viaHead) {
+    throw new ApiError(403, 'forbidden', 'Only the CEO can change the company theme or rename agents for a world.', 'not_owner_session');
+  }
+}
+
+function themeViewOf(
+  ctx: Ctx,
+  theme: string,
+  canEdit: boolean,
+  extra?: { renamedAgentsCount?: number; restoredNamesCount?: number },
+): WorldThemeView {
   const pack = worldPackForTheme(ctx.worldPacks, theme);
+  const voiceSamples = pack?.skills.find(s => s.voice)?.voice?.samples;
   return {
     theme,
     activePack: pack
@@ -41,10 +64,66 @@ function themeViewOf(ctx: Ctx, theme: string, canEdit: boolean): WorldThemeView 
           id: pack.id,
           label: pack.label,
           skillIds: pack.skills.map(s => s.id),
+          ...(voiceSamples ? { voiceSamples } : {}),
         }
       : null,
     canEdit,
+    ...(extra?.renamedAgentsCount !== undefined ? { renamedAgentsCount: extra.renamedAgentsCount } : {}),
+    ...(extra?.restoredNamesCount !== undefined ? { restoredNamesCount: extra.restoredNamesCount } : {}),
   };
+}
+
+const KIND_RANK: Record<'orchestrator' | 'head' | 'worker', number> = {
+  orchestrator: 0,
+  head: 1,
+  worker: 2,
+};
+
+async function loadRenameCandidates(db: Ctx['db'], companyId: string): Promise<WorldAgentRenameCandidate[]> {
+  const rows = await db
+    .select({
+      id: agents.id,
+      kind: agents.kind,
+      name: agents.name,
+      originalName: agents.originalName,
+    })
+    .from(agents)
+    .where(and(eq(agents.companyId, companyId), isNull(agents.removedAt), ne(agents.kind, 'assistant')))
+    .orderBy(asc(agents.createdAt), asc(agents.id));
+
+  return rows
+    .filter((r): r is { id: string; kind: 'orchestrator' | 'head' | 'worker'; name: string; originalName: string | null } => r.kind !== 'assistant')
+    .sort((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind]);
+}
+
+async function restoreCompanyAgentNames(db: Ctx['db'], me: Person): Promise<WorldRestoreNamesResult> {
+  const by = employeeChangedBy(me);
+  const items: { agentId: string; previousName: string; restoredName: string }[] = [];
+  await db.transaction(async tx => {
+    const renamed = await tx
+      .select({ id: agents.id, name: agents.name, originalName: agents.originalName })
+      .from(agents)
+      .where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), ne(agents.kind, 'assistant'), isNotNull(agents.originalName)))
+      .orderBy(asc(agents.createdAt), asc(agents.id));
+
+    for (const row of renamed) {
+      if (!row.originalName) continue;
+      await tx
+        .update(agents)
+        .set({ name: row.originalName, originalName: null })
+        .where(eq(agents.id, row.id));
+      await tx.insert(agentChanges).values({
+        companyId: me.companyId,
+        agentId: row.id,
+        ...by,
+        field: 'name',
+        before: row.name,
+        after: row.originalName,
+      });
+      items.push({ agentId: row.id, previousName: row.name, restoredName: row.originalName });
+    }
+  });
+  return { restoredCount: items.length, items };
 }
 
 export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -63,15 +142,20 @@ export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
       .select({ theme: companies.theme })
       .from(companies)
       .where(eq(companies.id, me.companyId));
-    return themeViewOf(ctx, company?.theme ?? DEFAULT_COMPANY_THEME, Boolean(me.isOwner && !me.viaHead));
+    const renamed = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), ne(agents.kind, 'assistant'), isNotNull(agents.originalName)));
+    return themeViewOf(ctx, company?.theme ?? DEFAULT_COMPANY_THEME, Boolean(me.isOwner && !me.viaHead), {
+      renamedAgentsCount: renamed.length,
+    });
   });
 
-  /* Changes the single company-wide theme/world. Strictly restricted to the company CEO. */
+  /* Changes the single company-wide theme/world. Strictly restricted to the company CEO.
+     When leaving a world for a standard non-world theme, restores all preserved pre-world agent names automatically. */
   app.put('/api/world/theme', async req => {
     const me = await requirePerson(req, db);
-    if (!me.isOwner || me.viaHead) {
-      throw new ApiError(403, 'forbidden', 'Only the CEO can change the company theme.', 'not_owner_session');
-    }
+    requireWorldCeo(me);
     const body = WorldThemeUpdateSchema.parse(req.body);
     if (!isAllowedCompanyTheme(ctx.worldPacks, body.theme)) {
       throw new ApiError(400, 'validation', `Unknown company theme "${body.theme}".`);
@@ -80,9 +164,111 @@ export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
       .update(companies)
       .set({ theme: body.theme })
       .where(eq(companies.id, me.companyId));
+
+    let restoredNamesCount = 0;
+    const nextPack = worldPackForTheme(ctx.worldPacks, body.theme);
+    if (!nextPack) {
+      const restored = await restoreCompanyAgentNames(db, me);
+      restoredNamesCount = restored.restoredCount;
+    }
+
+    const remainingRenamed = nextPack
+      ? (
+          await db
+            .select({ id: agents.id })
+            .from(agents)
+            .where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), ne(agents.kind, 'assistant'), isNotNull(agents.originalName)))
+        ).length
+      : 0;
+
     ctx.bus.publish(me.companyId, { type: 'company_theme', theme: body.theme });
     ctx.bus.publish(me.companyId, { type: 'org' });
-    return themeViewOf(ctx, body.theme, true);
+    return themeViewOf(ctx, body.theme, true, {
+      renamedAgentsCount: remainingRenamed,
+      ...(restoredNamesCount > 0 ? { restoredNamesCount } : {}),
+    });
+  });
+
+  /* Preview of era names for all active non-assistant agents before CEO confirmation. */
+  app.get('/api/world/rename-preview', async req => {
+    const me = await requirePerson(req, db);
+    requireWorldCeo(me);
+    const { lang } = WorldRenamePreviewQuerySchema.parse(req.query);
+    const [company] = await db.select({ theme: companies.theme }).from(companies).where(eq(companies.id, me.companyId));
+    const pack = worldPackForTheme(ctx.worldPacks, company?.theme);
+    if (!pack) {
+      throw new ApiError(409, 'conflict', 'No active world pack is selected for this company.');
+    }
+    const candidates = await loadRenameCandidates(db, me.companyId);
+    const items = planWorldAgentRenames(pack, lang, candidates);
+    const preview: WorldRenamePreview = {
+      packId: pack.id,
+      packLabel: pack.label,
+      lang,
+      items,
+      alreadyRenamedCount: candidates.filter(c => c.originalName !== null).length,
+    };
+    return preview;
+  });
+
+  /* Executes a confirmed one-action bulk rename of active non-assistant agents into the active world's era names,
+     preserving each agent's first pre-world originalName so returning off the world restores it cleanly. */
+  app.post('/api/world/rename-agents', async req => {
+    const me = await requirePerson(req, db);
+    requireWorldCeo(me);
+    const body = WorldRenameExecuteSchema.parse(req.body);
+    const [company] = await db.select({ theme: companies.theme }).from(companies).where(eq(companies.id, me.companyId));
+    const pack = worldPackForTheme(ctx.worldPacks, company?.theme);
+    if (!pack) {
+      throw new ApiError(409, 'conflict', 'No active world pack is selected for this company.');
+    }
+
+    const by = employeeChangedBy(me);
+    const items = await db.transaction(async tx => {
+      const candidates = await loadRenameCandidates(tx, me.companyId);
+      const planned = planWorldAgentRenames(pack, body.lang, candidates);
+      for (const item of planned) {
+        await tx
+          .update(agents)
+          .set({
+            name: item.proposedName,
+            originalName: item.preservedOriginalName,
+          })
+          .where(eq(agents.id, item.agentId));
+        if (item.currentName !== item.proposedName) {
+          await tx.insert(agentChanges).values({
+            companyId: me.companyId,
+            agentId: item.agentId,
+            ...by,
+            field: 'name',
+            before: item.currentName,
+            after: item.proposedName,
+          });
+        }
+      }
+      return planned;
+    });
+
+    ctx.bus.publish(me.companyId, { type: 'org' });
+    const result: WorldRenameResult = {
+      packId: pack.id,
+      lang: body.lang,
+      renamedCount: items.length,
+      items,
+    };
+    return result;
+  });
+
+  /* Restores every renamed agent's preserved pre-world name on CEO confirmation. */
+  app.post('/api/world/restore-names', async req => {
+    const me = await requirePerson(req, db);
+    requireWorldCeo(me);
+    WorldRestoreNamesSchema.parse(req.body);
+    const result = await restoreCompanyAgentNames(db, me);
+    if (result.restoredCount > 0) {
+      ctx.bus.publish(me.companyId, { type: 'org' });
+    }
+    return result;
   });
 
   /* Persists the generated/grown city layout into the isolated world_layouts table without touching work tables. */
