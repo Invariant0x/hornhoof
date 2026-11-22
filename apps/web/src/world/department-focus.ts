@@ -360,6 +360,7 @@ export function renderDepartmentFocusToPixi(
   tileW: number,
   tileH: number,
   zoom: number,
+  visibleResidentIds?: ReadonlySet<string>,
 ): void {
   const bannerHex = parseHex(focus.bannerColor, 0x2e7bb5);
   const strokeW = Math.max(1.6, 2.3 / Math.max(0.5, zoom));
@@ -417,14 +418,15 @@ export function renderDepartmentFocusToPixi(
       .fill({ color: bannerHex, alpha: 0.96 });
   }
 
-  /* 4. Gentle ground highlight rings around department residents (no lines pointing at agents). */
+  /* 4. Gentle ground highlight rings locked 1:1 to currently visible department residents (no lines pointing at agents). */
   for (const r of residents) {
     if (!focus.highlightedResidentIds.has(r.id)) continue;
+    if (visibleResidentIds && !visibleResidentIds.has(r.id)) continue;
     const pt = tileCenterToWorld(r.col, r.row, tileW, tileH);
-    g.ellipse(pt.x, pt.y + 1, 14, 7.5)
+    g.ellipse(pt.x, pt.y + 3, 14, 7.5)
       .fill({ color: bannerHex, alpha: 0.3 })
       .stroke({ color: bannerHex, alpha: 0.92, width: strokeW * 0.85 });
-    g.ellipse(pt.x, pt.y + 1, 9.5, 5).stroke({ color: 0xffffff, alpha: 0.65, width: Math.max(1, strokeW * 0.38) });
+    g.ellipse(pt.x, pt.y + 3, 9.5, 5).stroke({ color: 0xffffff, alpha: 0.65, width: Math.max(1, strokeW * 0.38) });
   }
 }
 

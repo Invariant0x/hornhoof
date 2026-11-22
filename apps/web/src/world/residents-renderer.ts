@@ -689,8 +689,10 @@ export function renderResidentsToPixi(
   tileH: number,
   detail: AnimationDetailLevel,
   selectedResidentId: string | null,
+  outDrawnIds?: Set<string>,
 ): void {
   g.clear();
+  outDrawnIds?.clear();
 
   visibleBuildingBoxes.length = 0;
   if (city) {
@@ -738,6 +740,7 @@ export function renderResidentsToPixi(
 
   for (let i = 0; i < visibleScratch.length; i++) {
     const r = visibleScratch[i]!;
+    outDrawnIds?.add(r.id);
     drawResidentPixi(g, r, sim.timeSec, tileW, tileH, detail, r.id === selectedResidentId);
   }
 

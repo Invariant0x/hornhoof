@@ -202,6 +202,7 @@ export class IsometricWorldEngine {
   private departmentFocusGraphic: Graphics | null = null;
   private borderGraphic: Graphics | null = null;
   private overlayGraphic: Graphics | null = null;
+  private readonly drawnResidentIds = new Set<string>();
 
   /* Dirty-tracking keys eliminate per-frame scene-graph rebuilds during smooth 60 FPS panning. */
   private lastVisibleChunkSig = '';
@@ -875,8 +876,10 @@ export class IsometricWorldEngine {
         this.tileH,
         animationDetailForZoom(this.camera.zoom),
         this.selectedResidentId,
+        this.drawnResidentIds,
       );
     }
+    this.redrawDepartmentFocusPixi();
     if (this.app && this.constructionGraphic && this.constructionSim) {
       renderConstructionLoopsToPixi(
         this.constructionGraphic,
@@ -1063,7 +1066,11 @@ export class IsometricWorldEngine {
           this.tileH,
           detail,
           this.selectedResidentId,
+          this.drawnResidentIds,
         );
+        if (this.departmentFocus) {
+          this.redrawDepartmentFocusPixi();
+        }
       }
       if (this.constructionGraphic && this.constructionSim && (constructionAnimated || needsSync)) {
         renderConstructionLoopsToPixi(
@@ -1199,21 +1206,7 @@ export class IsometricWorldEngine {
         }
       }
 
-      if (this.departmentFocusGraphic) {
-        this.departmentFocusGraphic.clear();
-        if (this.departmentFocus && this.cityRenderState) {
-          renderDepartmentFocusToPixi(
-            this.departmentFocusGraphic,
-            this.departmentFocus,
-            this.cityRenderState.city,
-            this.residentSim?.residents ?? [],
-            this.pack.mapSize,
-            this.tileW,
-            this.tileH,
-            this.camera.zoom,
-          );
-        }
-      }
+      this.redrawDepartmentFocusPixi();
 
       this.drawBuildGridPixi(visibleRect);
       if (this.lastBorderZoom !== this.camera.zoom) {
@@ -1223,6 +1216,24 @@ export class IsometricWorldEngine {
       this.drawOverlayPixi();
     } else {
       this.renderFallback2D(drawEntries);
+    }
+  }
+
+  private redrawDepartmentFocusPixi(): void {
+    if (!this.departmentFocusGraphic) return;
+    this.departmentFocusGraphic.clear();
+    if (this.departmentFocus && this.cityRenderState) {
+      renderDepartmentFocusToPixi(
+        this.departmentFocusGraphic,
+        this.departmentFocus,
+        this.cityRenderState.city,
+        this.residentSim?.residents ?? [],
+        this.pack.mapSize,
+        this.tileW,
+        this.tileH,
+        this.camera.zoom,
+        this.residentSim ? this.drawnResidentIds : undefined,
+      );
     }
   }
 
