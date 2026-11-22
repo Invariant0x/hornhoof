@@ -171,7 +171,6 @@ export function buildingLoopsFor(
     const reached = state ? state.phase === 'complete' && state.currentStage >= state.maxStage : Boolean(building.reached);
     if (reached) {
       add('celebration', 1.0);
-      add('awning', 0.9);
     } else {
       const stage = state ? state.currentStage : building.stage;
       add('dust', 1.0);
@@ -223,14 +222,9 @@ export function buildingLoopsFor(
     return loops;
   }
 
-  const stageSpec = resolveStageSpecForBuilding(building, null, pack);
   if (building.kind === 'department') {
     add('awning', 0.95);
     add('smoke', 0.6);
-    if (stageSpec.hasScaffolding) {
-      add('crane', 0.8);
-      add('dust', 0.6);
-    }
   } else if (building.kind === 'residence') {
     add('awning', 1.0);
     if (building.stage >= 4) add('water', 0.65);
@@ -246,11 +240,13 @@ export function buildingLoopsFor(
 }
 
 /* Computes concrete resident work slots (elevated scaffold hammering, open-room interior masons,
-   ramp carriers, heavy stone sled haulers, statue carvers and demolition teams). */
+   ramp carriers, heavy stone sled haulers, statue carvers and demolition teams).
+   When footprintOccupant is provided, external ground slots avoid colliding with neighboring buildings. */
 export function workSlotsForBuilding(
   building: CityBuilding,
   state: BuildingConstructionState | null,
   pack: WorldPackManifest,
+  footprintOccupant?: ReadonlyMap<string, string>,
 ): WorkSlot[] {
   const slots: WorkSlot[] = [];
   if (state && state.phase === 'cleared') return slots;
@@ -259,6 +255,12 @@ export function workSlotsForBuilding(
   const r0 = state ? state.row : building.row;
   const sc = state ? state.spanCol : building.spanCol;
   const sr = state ? state.spanRow : building.spanRow;
+
+  const isGroundClear = (col: number, row: number): boolean => {
+    if (!footprintOccupant) return true;
+    const occ = footprintOccupant.get(`${Math.round(col)},${Math.round(row)}`);
+    return !occ || occ === building.id;
+  };
 
   if (state && state.phase === 'demolishing') {
     const elev = Math.max(4, Math.round(state.currentStage * 3.8));
@@ -276,13 +278,42 @@ export function workSlotsForBuilding(
       ? Math.max(0.1, state.currentStage / Math.max(1, state.maxStage))
       : Math.max(0.12, Math.min(1, building.progress ?? 0.5));
     const tierElev = Math.round(16 + progress * (sc >= 6 ? 78 : 52));
-    slots.push(
-      /* Heavy stone block pulled on wooden sled along the monument approach. */
-      { id: `${building.id}-sled-1`, action: 'pull_sled', col: c0 + sc * 0.55, row: r0 + sr + 0.65, elevationPx: 0, facing: 'N' },
-      /* Ramp carriers & elevated top-tier masons. */
-      { id: `${building.id}-ramp-1`, action: 'carry_ramp', col: c0 + sc + 0.15, row: r0 + sr * 0.65, elevationPx: Math.round(tierElev * 0.45), facing: 'W' },
-      { id: `${building.id}-top-1`, action: 'hammer_scaffold', col: c0 + sc * 0.52, row: r0 + sr * 0.52, elevationPx: tierElev, facing: 'S' },
-    );
+
+    /* Place the 2-worker sled team on an open ground lane beside the monument (never overlapping another roof!). */
+    const sledCandidates: Array<{ col: number; row: number; facing: 'N' | 'W' | 'E' }> = [
+      { col: c0 + sc * 0.55, row: r0 + sr + 0.75, facing: 'N' },
+      { col: c0 + sc + 0.75, row: r0 + sr * 0.55, facing: 'W' },
+      { col: c0 - 0.8, row: r0 + sr * 0.65, facing: 'E' },
+    ];
+    const sledSpot = sledCandidates.find(pt => isGroundClear(pt.col, pt.row) && isGroundClear(pt.col + 0.6, pt.row));
+    if (sledSpot) {
+      slots.push({
+        id: `${building.id}-sled-1`,
+        action: 'pull_sled',
+        col: sledSpot.col,
+        row: sledSpot.row,
+        elevationPx: 0,
+        facing: sledSpot.facing,
+      });
+    }
+    if (isGroundClear(c0 + sc + 0.15, r0 + sr * 0.65)) {
+      slots.push({
+        id: `${building.id}-ramp-1`,
+        action: 'carry_ramp',
+        col: c0 + sc + 0.15,
+        row: r0 + sr * 0.65,
+        elevationPx: Math.round(tierElev * 0.45),
+        facing: 'W',
+      });
+    }
+    slots.push({
+      id: `${building.id}-top-1`,
+      action: 'hammer_scaffold',
+      col: c0 + sc * 0.52,
+      row: r0 + sr * 0.52,
+      elevationPx: tierElev,
+      facing: 'S',
+    });
     return slots;
   }
 
@@ -292,10 +323,26 @@ export function workSlotsForBuilding(
     const finished = state ? state.phase === 'complete' && stage >= maxS : Boolean(building.reached) || stage >= maxS;
     if (finished) return slots;
     const elev = Math.round(12 + (stage / Math.max(1, maxS)) * (26 + sc * 16));
-    slots.push(
-      { id: `${building.id}-carve-1`, action: 'carve_statue', col: c0 + sc - 0.05, row: r0 + sr * 0.55, elevationPx: elev * 0.65, facing: 'W' },
-      { id: `${building.id}-carve-2`, action: 'carve_statue', col: c0 + sc * 0.45, row: r0 + sr + 0.05, elevationPx: Math.max(0, elev * 0.35), facing: 'N' },
-    );
+    if (isGroundClear(c0 + sc + 0.1, r0 + sr * 0.55)) {
+      slots.push({
+        id: `${building.id}-carve-1`,
+        action: 'carve_statue',
+        col: c0 + sc - 0.05,
+        row: r0 + sr * 0.55,
+        elevationPx: elev * 0.65,
+        facing: 'W',
+      });
+    }
+    if (isGroundClear(c0 + sc * 0.45, r0 + sr + 0.15)) {
+      slots.push({
+        id: `${building.id}-carve-2`,
+        action: 'carve_statue',
+        col: c0 + sc * 0.45,
+        row: r0 + sr + 0.05,
+        elevationPx: Math.max(0, elev * 0.35),
+        facing: 'N',
+      });
+    }
     return slots;
   }
 

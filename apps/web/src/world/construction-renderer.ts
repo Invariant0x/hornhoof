@@ -543,7 +543,7 @@ export function renderConstructionLoopsToPixi(
     }
 
     /* Draw work-slot workers (open interior rooms, scaffolds, ramps, sled teams, sculptors, demolition). */
-    const slots = workSlotsForBuilding(building, state, pack);
+    const slots = workSlotsForBuilding(building, state, pack, city.footprintOccupant);
     for (const slot of slots) {
       drawWorkSlotWorker(g, slot, sim.timeSec, tileW, tileH, woodHex, dustHex);
     }

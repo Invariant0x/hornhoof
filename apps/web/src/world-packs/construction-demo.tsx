@@ -215,12 +215,12 @@ function buildStage6ShowcaseCity(
   let relocateNewStage = 1;
 
   const anchors = {
-    plaza: { col: centerCol + 1, row: centerRow },
-    building: { col: centerCol - 4, row: centerRow + 4 },
-    statues: { col: centerCol + 4, row: centerRow + 5 },
+    plaza: mode === 'demolish' ? { col: centerCol, row: centerRow + 1 } : { col: centerCol, row: centerRow },
+    building: { col: centerCol - 4, row: centerRow + 5 },
+    statues: { col: centerCol + 5, row: centerRow + 5 },
     pyramid: { col: centerCol + 3, row: centerRow - 5 },
-    demolish: { col: centerCol - 5, row: centerRow + 3 },
-    relocate: { col: centerCol + 2, row: centerRow + 1 },
+    demolish: { col: centerCol - 3, row: centerRow + 2 },
+    relocate: { col: centerCol + 1, row: centerRow + 1 },
   };
 
   const baseBuildingFields = {
@@ -397,12 +397,12 @@ function buildStage6ShowcaseCity(
       id: 'stage6-demolish',
       kind: 'department',
       label: 'Old Workshop',
-      col: centerCol - 7,
+      col: centerCol - 5,
       row: centerRow + 1,
       spanCol: 4,
       spanRow: 4,
-      door: { col: centerCol - 5, row: centerRow + 5 },
-      lot: { col: centerCol - 8, row: centerRow, spanCol: 6, spanRow: 6 },
+      door: { col: centerCol - 3, row: centerRow + 5 },
+      lot: { col: centerCol - 6, row: centerRow, spanCol: 6, spanRow: 6 },
       stage: demolishStage,
       maxStage: 10,
       level: 10,
@@ -441,12 +441,12 @@ function buildStage6ShowcaseCity(
       id: 'stage6-reloc__old',
       kind: 'house',
       label: 'Relocating Villa (Old)',
-      col: centerCol,
+      col: centerCol + 1,
       row: centerRow - 4,
       spanCol: 3,
       spanRow: 3,
-      door: { col: centerCol + 1, row: centerRow - 1 },
-      lot: { col: centerCol - 1, row: centerRow - 5, spanCol: 5, spanRow: 5 },
+      door: { col: centerCol + 2, row: centerRow - 1 },
+      lot: { col: centerCol, row: centerRow - 5, spanCol: 5, spanRow: 5 },
       stage: relocateOldStage,
       maxStage: 10,
       level: 9,
@@ -455,7 +455,7 @@ function buildStage6ShowcaseCity(
       districtId: 'mac-main',
       pendingRelocation:
         relocateOldStage > 0
-          ? { relocationId: 'rel-demo', taskId: 'task-1810', taskNumber: 1810, toCol: centerCol + 4, toRow: centerRow + 3 }
+          ? { relocationId: 'rel-demo', taskId: 'task-1810', taskNumber: 1810, toCol: centerCol + 2, toRow: centerRow + 2 }
           : null,
     };
     const relNew: CityBuilding = {
@@ -463,12 +463,12 @@ function buildStage6ShowcaseCity(
       id: 'stage6-reloc',
       kind: 'house',
       label: 'Relocating Villa (New)',
-      col: centerCol + 4,
-      row: centerRow + 3,
+      col: centerCol + 2,
+      row: centerRow + 2,
       spanCol: 3,
       spanRow: 3,
-      door: { col: centerCol + 5, row: centerRow + 6 },
-      lot: { col: centerCol + 3, row: centerRow + 2, spanCol: 5, spanRow: 5 },
+      door: { col: centerCol + 3, row: centerRow + 5 },
+      lot: { col: centerCol + 1, row: centerRow + 1, spanCol: 5, spanRow: 5 },
       stage: relocateNewStage,
       maxStage: 10,
       level: 9,
@@ -578,13 +578,25 @@ function Stage6ConstructionStudio() {
 
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<IsometricWorldEngine | null>(null);
-  const centerRef = useRef<{ col: number; row: number }>({ col: 75, row: 75 });
   const anchorsRef = useRef<Record<'plaza' | 'building' | 'statues' | 'pyramid' | 'demolish' | 'relocate', { col: number; row: number }> | null>(null);
   const readoutRef = useRef<Stage6Readout | null>(null);
 
   const pack = PACKS[packKey];
   const t = TEXT[lang];
   const stages = useMemo(() => resolveConstructionStages(pack), [pack]);
+
+  /* Generate terrain & dry plaza anchor synchronously per pack so initial camera & anchors never lag! */
+  const { terrainMap, dryCenter } = useMemo(() => {
+    const map = generateWorldTerrain(pack, { seed: 'hornhoof-team-2026', mapSize: pack.mapSize });
+    return { terrainMap: map, dryCenter: findDryPlazaCenter(map) };
+  }, [pack]);
+
+  const builtState = useMemo(
+    () => buildStage6ShowcaseCity(pack, dryCenter.col, dryCenter.row, mode, progress),
+    [pack, dryCenter, mode, progress],
+  );
+  anchorsRef.current = builtState.anchors;
+  readoutRef.current = builtState.readout;
 
   /* Smooth continuous playback timer when playing. */
   useEffect(() => {
@@ -610,21 +622,15 @@ function Stage6ConstructionStudio() {
     if (!host) return;
     let alive = true;
 
-    const map = generateWorldTerrain(pack, { seed: 'hornhoof-team-2026', mapSize: pack.mapSize });
-    const dryCenter = findDryPlazaCenter(map);
-    centerRef.current = dryCenter;
-
-    const built = buildStage6ShowcaseCity(pack, dryCenter.col, dryCenter.row, mode, progress);
-    anchorsRef.current = built.anchors;
-    readoutRef.current = built.readout;
+    const initialBuilt = buildStage6ShowcaseCity(pack, dryCenter.col, dryCenter.row, mode, progress);
 
     void IsometricWorldEngine.create({
       host,
       pack,
-      terrainMap: map,
+      terrainMap,
       showBuildGrid: false,
       initialZoom: initial.zoom,
-      initialCenterTile: built.anchors.plaza,
+      initialCenterTile: initialBuilt.anchors.plaza,
       onStats: next => {
         if (alive) setStats(next);
       },
@@ -635,11 +641,11 @@ function Stage6ConstructionStudio() {
       }
       engineRef.current = engine;
       engine.setCityRenderState({
-        city: built.city,
+        city: initialBuilt.city,
         worldMode: 'active',
         districtColors: { 'mac-main': '#4DA167' },
       });
-      engine.setConstructionSimulation(built.sim);
+      engine.setConstructionSimulation(initialBuilt.sim);
       engine.flushVisibleBakes();
       setStats(engine.getStats());
 
@@ -671,16 +677,9 @@ function Stage6ConstructionStudio() {
       engineRef.current?.destroy();
       engineRef.current = null;
     };
-  }, [pack]);
+  }, [pack, terrainMap, dryCenter]);
 
   /* Sync progress & mode updates onto the live engine without remounting PixiJS. */
-  const builtState = useMemo(
-    () => buildStage6ShowcaseCity(pack, centerRef.current.col, centerRef.current.row, mode, progress),
-    [pack, mode, progress],
-  );
-  anchorsRef.current = builtState.anchors;
-  readoutRef.current = builtState.readout;
-
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
