@@ -253,3 +253,20 @@ test('Stage 9: Egypt draws artist files through the contract as they appear, and
   await centreOn(page, 'monument', 1);
   await shot(page, info, 'egypt-test-pictures-with-placeholders');
 });
+
+test('Stage 9: the second test pack runs on the same engine with its own world', async ({ page }, info) => {
+  const space = resolveWorldPack('space');
+  expect(space?.art).toBeTruthy();
+  await serveArt(page, space!, null);
+  await openLive(page, 'space');
+  await settle(page);
+  const buildings = await page.evaluate(() => (window as unknown as { __WORLD_LIVE__: LiveHandle }).__WORLD_LIVE__.getBuildings().length);
+  expect(buildings).toBeGreaterThan(5);
+  await centreOn(page, 'residence', 1);
+  await shot(page, info, 'space-pack-1440');
+
+  await page.goto('/world-gallery.html?pack=space&lang=ru');
+  await page.waitForSelector('canvas');
+  await page.evaluate(() => new Promise<void>(r => setTimeout(r, 400)));
+  await shot(page, info, 'space-gallery');
+});

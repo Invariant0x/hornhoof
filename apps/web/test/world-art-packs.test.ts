@@ -102,8 +102,9 @@ function cityBuilding(kind: BuildingKind, span: number, stage: number, level: nu
 }
 
 describe('Stage 9 world packs follow the art contract', () => {
-  it('has the Egypt pack with an art catalog', () => {
+  it('has at least the Egypt pack and a second pack with an art catalog', () => {
     expect(PACKS_WITH_ART.map(p => p.id)).toContain('egypt');
+    expect(PACKS_WITH_ART.length).toBeGreaterThanOrEqual(2);
   });
 
   for (const pack of PACKS_WITH_ART) {

@@ -4,10 +4,12 @@
 import type { WorldPackManifest } from '../world/manifest';
 import { DUNGEON_WORLD_PACK } from './dungeon/pack';
 import { EGYPT_WORLD_PACK } from './egypt/pack';
+import { SPACE_WORLD_PACK } from './space/pack';
 
 const WORLD_PACKS: Readonly<Record<string, WorldPackManifest>> = {
   egypt: EGYPT_WORLD_PACK,
   dungeon: DUNGEON_WORLD_PACK,
+  space: SPACE_WORLD_PACK,
 };
 
 export function resolveWorldPack(worldId: string | null | undefined): WorldPackManifest | null {
