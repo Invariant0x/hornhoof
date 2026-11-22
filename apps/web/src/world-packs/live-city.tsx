@@ -1103,7 +1103,7 @@ function Stage4LiveWorld() {
               <strong>
                 {selectedResident.level === null
                   ? t.noLevelDayLaborer
-                  : `Lv ${selectedResident.level} (${t.outfit} ${selectedResident.outfitTier}/5)`}
+                  : `${lang === 'ru' ? 'ур.' : 'Lv'} ${selectedResident.level} (${t.outfit} ${selectedResident.outfitTier}/5)`}
               </strong>
             </div>
             <div data-testid="world-stage5-agent-accepted">
@@ -1248,7 +1248,7 @@ function Stage4LiveWorld() {
             <div>{t.footprint}: <strong>{selectedBuilding.spanCol}x{selectedBuilding.spanRow}</strong></div>
             <div>{t.coords}: <strong>({selectedBuilding.col}, {selectedBuilding.row})</strong></div>
             {selectedBuilding.kind === 'house' && (
-              <div>{t.level}: <strong>Lv {selectedBuilding.level}</strong></div>
+              <div>{t.level}: <strong>{lang === 'ru' ? 'ур.' : 'Lv'} {selectedBuilding.level}</strong></div>
             )}
             {selectedBuilding.acceptedTasks !== undefined && (
               <div>{t.tasks}: <strong>{selectedBuilding.acceptedTasks}</strong></div>

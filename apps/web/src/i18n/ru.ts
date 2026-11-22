@@ -464,6 +464,7 @@ export const ru: Messages = {
     worldCard: {
       levelStripAria: 'Уровень и прогресс агента',
       levelStripLevel: level => `Уровень ${level}`,
+      levelShort: level => `ур. ${level}`,
       levelStripAccepted: count => `Принято: ${count}`,
       levelStripNext: (remaining, nextLevel) => `до ${nextLevel} ур.: ${remaining}`,
       close: 'Закрыть',

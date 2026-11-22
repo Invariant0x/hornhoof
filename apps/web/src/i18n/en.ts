@@ -440,6 +440,7 @@ export const en = {
     worldCard: {
       levelStripAria: 'Agent level and progress',
       levelStripLevel: (level: number) => `Level ${level}`,
+      levelShort: (level: number) => `Lv ${level}`,
       levelStripAccepted: (count: number) => `Accepted: ${count}`,
       levelStripNext: (remaining: number, nextLevel: number) => `${remaining} to Lv ${nextLevel}`,
       close: 'Close',

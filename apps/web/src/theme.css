@@ -3603,7 +3603,7 @@ th.k-prio .sorth { white-space: nowrap; }
   box-shadow: inset 0 -2px 0 var(--amber);
 }
 :where(:root[data-surface='papyrus']) .world-map .map-version {
-  text-shadow: 0 1px 3px var(--surface), 0 0 8px var(--surface);
+  text-shadow: 0 0 2px var(--surface), 0 1px 4px var(--surface), 0 0 10px var(--surface);
 }
 :where(:root[data-surface='papyrus']) .orch {
   border-color: var(--line2);
@@ -3708,6 +3708,11 @@ th.k-prio .sorth { white-space: nowrap; }
 
 /* Stage 8 interactive world canvas & entity side cards inside MapScreen (pack-agnostic). */
 .world-map::before { display: none; }
+/* World canvas always fills 100% of the viewport; shell banners float above it without shifting the world down. */
+.body:not(.page):has(> :is(.update-banner, .alert, .guard-stop)) > .map.world-map:not([inert]) {
+  position: absolute;
+  inset: 0;
+}
 .world-map > .map-room { pointer-events: none; }
 .world-canvas-host { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
 .world-canvas-host:active { cursor: grabbing; }

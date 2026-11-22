@@ -176,7 +176,7 @@ function AgentSideCard({
           <div>
             <dt>{wc.level}</dt>
             <dd data-testid="world-card-level">
-              {roleClass === 'day_laborer' ? '-' : `Lv ${level}`}
+              {roleClass === 'day_laborer' ? '-' : wc.levelShort(level)}
             </dd>
           </div>
           <div>
@@ -295,7 +295,7 @@ function SubscriptionSideCard({
   const label = subscription?.label ?? building.label;
   const fullnessRatio = Math.max(0, Math.min(1, subscription?.fullness ?? building.fullness ?? 0));
   const fullnessPct = Math.round(fullnessRatio * 100);
-  const usedRatio = Math.max(0, Math.min(1, 1 - fullnessRatio));
+  const remainingTone = fullnessRatio <= 0.1 ? ' max' : fullnessRatio <= 0.3 ? ' hi' : '';
   const resets = subscription?.resetsAt ? clock(language, subscription.resetsAt) : null;
   const users = [
     ...(snapshot.orchestrator && snapshot.orchestrator.subscriptionId === subscription?.id ? [snapshot.orchestrator] : []),
@@ -316,7 +316,16 @@ function SubscriptionSideCard({
             <span>{wc.remaining}</span>
             <strong data-testid="world-sub-remaining">{fullnessPct}%</strong>
           </div>
-          <Bar used={usedRatio} />
+          <span
+            className={`bar${remainingTone}`}
+            data-testid="world-sub-bar"
+            role="progressbar"
+            aria-valuenow={fullnessPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <i style={{ width: `${fullnessPct}%` }} />
+          </span>
         </section>
 
         <dl className="world-card-grid">
@@ -339,7 +348,7 @@ function SubscriptionSideCard({
                   <button className="world-link-btn" type="button" onClick={() => onSelectAgent(a.id)}>
                     {a.name}
                   </button>
-                  <small className="muted">Lv {a.level}</small>
+                  <small className="muted">{wc.levelShort(a.level)}</small>
                 </li>
               ))}
             </ul>
@@ -776,7 +785,7 @@ function DepartmentModeCard({
                         <button className="world-link-btn" type="button" onClick={() => onSelectAgent(a.id)}>
                           <span>{a.name}</span>
                           <small className="muted">
-                            {wc.roleClasses[a.roleClass ?? 'executor']} · Lv {a.level}
+                            {wc.roleClasses[a.roleClass ?? 'executor']} · {wc.levelShort(a.level)}
                           </small>
                         </button>
                         {orgEmp && canGive && (

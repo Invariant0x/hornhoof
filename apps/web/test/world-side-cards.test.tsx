@@ -90,8 +90,10 @@ describe('Stage 8 WorldSideCards (all 6 entity cards + Department Mode)', () => 
       </LanguageProvider>,
     );
     expect(screen.getByTestId('world-side-card')).toHaveAttribute('data-card-kind', 'subscription');
-    expect(screen.getByTestId('world-sub-remaining')).toBeInTheDocument();
-    const subBarWidth = parseFloat(screen.getByTestId('world-side-card').querySelector<HTMLElement>('.bar i')!.style.width);
+    const subRemainingText = screen.getByTestId('world-sub-remaining').textContent ?? '';
+    const expectedSubPct = parseInt(subRemainingText, 10);
+    const subBarWidth = parseFloat(screen.getByTestId('world-sub-bar').querySelector<HTMLElement>('i')!.style.width);
+    expect(subBarWidth).toBe(expectedSubPct);
     expect(subBarWidth).toBeGreaterThanOrEqual(0);
     expect(subBarWidth).toBeLessThanOrEqual(100);
 
@@ -167,6 +169,25 @@ describe('Stage 8 WorldSideCards (all 6 entity cards + Department Mode)', () => 
     expect(screen.getByTestId('world-dept-workpaths')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(baseProps.onClose).toHaveBeenCalledTimes(1);
+
+    /* Russian locale localizes short levels to "ур. N" with zero English "Lv" leaks. */
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      rerender(
+        <LanguageProvider key="ru">
+          <WorldSideCards
+            {...baseProps}
+            selection={{ kind: 'department', departmentId: devDept.id }}
+            departmentFocus={focus}
+          />
+        </LanguageProvider>,
+      );
+      const ruCardText = screen.getByTestId('world-side-card').textContent ?? '';
+      expect(ruCardText).toContain('ур. ');
+      expect(ruCardText).not.toMatch(/\bLv\s+\d+/);
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
   });
 
   it('keeps zero theme-specific words in WorldMapView, WorldSideCards and org-fallback', () => {

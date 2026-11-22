@@ -350,6 +350,12 @@ test.describe('Stage 8 themed map chrome, 6 entity side cards, and on-map Depart
           expect(box.tabLabels[3]).toBe(words.shell.tabs.subscriptions);
           expect(box.tabLabels[4]).toBe(words.shell.tabs.machines);
           expect(box.tabLabels.includes(words.settings.menu)).toBe(false);
+          if (theme === 'egypt' && c.showBanner) {
+            const worldBox = await page.locator('.map.world-map').boundingBox();
+            expect(worldBox).not.toBeNull();
+            expect(worldBox!.y, 'world canvas starts at y=0 even when banner floats over it').toBe(0);
+            expect(worldBox!.height, 'world canvas fills full viewport height with banner').toBe(c.height);
+          }
 
           const shotName = `stage8-${theme}-${c.lang}-${c.width}.png`;
           const shotPath = info.outputPath(shotName);
@@ -427,6 +433,8 @@ test.describe('Stage 8 themed map chrome, 6 entity side cards, and on-map Depart
     expect(cardRect).not.toBeNull();
     expect(cardRect!.x, 'side card anchors on the right edge away from ZoomBar').toBeGreaterThan(900);
     await expect(page.getByTestId('world-dept-workpaths')).toBeVisible();
+    await expect(card).toContainText('ур. ');
+    await expect(card).not.toContainText('Lv ');
     await expect(page.locator('.dview')).toHaveCount(0);
 
     const focus = await page.evaluate(() => (window as unknown as { __WORLD_PRODUCT__: DebugHandle }).__WORLD_PRODUCT__.getDepartmentFocus());
@@ -473,18 +481,29 @@ test.describe('Stage 8 themed map chrome, 6 entity side cards, and on-map Depart
     await agentWin.locator('.window-close').click();
     await expect(agentWin).toHaveCount(0);
 
-    /* 2b. House -> employee/house side card (level, task, wake, relocate, open agent window; no quick chat box). */
+    /* 2b. House -> employee/house side card (level localized, task, wake, relocate, open agent window; no quick chat box). */
     const pickedHouse = await page.evaluate(() => (window as unknown as { __WORLD_PRODUCT__: DebugHandle }).__WORLD_PRODUCT__.selectBuildingByKind('house', 0));
     expect(pickedHouse).not.toBeNull();
     await expect(card).toHaveAttribute('data-card-kind', 'agent');
-    await expect(page.getByTestId('world-card-level')).toContainText('Lv');
+    await expect(page.getByTestId('world-card-level')).toContainText('ур. ');
+    await expect(page.getByTestId('world-card-level')).not.toContainText('Lv ');
     await expect(page.getByTestId('world-agent-quick-chat')).toHaveCount(0);
 
-    /* 3. Granary / Well -> Subscription card with remaining limit, reset time & agents list. */
+    /* 3. Granary / Well -> Subscription card with remaining limit bar matching displayed %, reset time & localized levels. */
     const pickedSub = await page.evaluate(() => (window as unknown as { __WORLD_PRODUCT__: DebugHandle }).__WORLD_PRODUCT__.selectBuildingByKind('supply', 0));
     expect(pickedSub).not.toBeNull();
     await expect(card).toHaveAttribute('data-card-kind', 'subscription');
-    await expect(page.getByTestId('world-sub-remaining')).toContainText('%');
+    const remText = (await page.getByTestId('world-sub-remaining').textContent()) ?? '';
+    expect(remText).toContain('%');
+    const expectedPct = parseInt(remText, 10);
+    const fillRatio = await page.getByTestId('world-sub-bar').evaluate(el => {
+      const track = el.getBoundingClientRect().width;
+      const fill = el.querySelector('i')!.getBoundingClientRect().width;
+      return track > 0 ? Math.round((fill / track) * 100) : 0;
+    });
+    expectClose(fillRatio, expectedPct, 2, 'subscription remaining bar fill matches remaining %');
+    await expect(card).toContainText('ур. ');
+    await expect(card).not.toContainText('Lv ');
     await expect(page.getByTestId('world-sub-reset')).toBeVisible();
     await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
     const subPath = info.outputPath('stage8-egypt-click-subscription.png');
