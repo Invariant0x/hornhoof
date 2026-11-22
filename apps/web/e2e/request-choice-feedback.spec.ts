@@ -1,7 +1,8 @@
 import { startServer } from './real-server';
 /// <reference types="node" />
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Locator, type Page, type Route, type TestInfo } from '@playwright/test';
 import { LANGUAGES, type Language } from '../src/i18n';
@@ -806,6 +807,7 @@ const config = loadConfig({
   HORNHOOF_SECRET: secret,
   UPDATE_CHECK_MS: '0',
   PUBLIC_URL: process.env.HH_PUBLIC_URL ?? 'http://localhost:4179',
+  WEB_DIST: process.env.HH_WEB_DIST,
 });
 const app = await buildApp({
   db,
@@ -927,14 +929,27 @@ process.stdin.on('end', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
 `;
 
-async function startRealServer(publicUrl: string): Promise<RealServerBoot> {
-  return startServer<Omit<RealServerBoot, 'stop'>>(REAL_SERVER_SCRIPT, { cwd: resolve(HERE, '../../server'), publicUrl, invalidBoot: 'Invalid server boot line' });
+/* A server answers /api/build, which the page asks every few minutes, only with a page of its own to name. Left to find the
+   built app in this checkout, it answered 404 wherever the app was not built, and the browser logs each as a console error.
+   The server gets a small page of its own, as a production one has. */
+function pageFolder(): string {
+  const folder = mkdtempSync(join(tmpdir(), 'hh-choice-web-'));
+  writeFileSync(join(folder, 'index.html'), '<!doctype html><title>Hornhoof</title>\n');
+  return folder;
+}
+
+async function startRealServer(publicUrl: string, webDist: string): Promise<RealServerBoot> {
+  return startServer<Omit<RealServerBoot, 'stop'>>(REAL_SERVER_SCRIPT, { cwd: resolve(HERE, '../../server'), publicUrl, invalidBoot: 'Invalid server boot line', env: { HH_WEB_DIST: webDist } });
 }
 
 test('saves neutral feedback without pick, delivers words to author, and preserves explicit pick: 0 on a real server', async ({ page, baseURL }, info) => {
   test.setTimeout(0);
   const webOrigin = baseURL ?? 'http://localhost:4179';
-  const srv = await startRealServer(webOrigin);
+  const webDist = pageFolder();
+  const srv = await startRealServer(webOrigin, webDist).catch(err => {
+    rmSync(webDist, { recursive: true, force: true });
+    throw err;
+  });
   try {
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.addInitScript(() => {
@@ -1067,5 +1082,6 @@ test('saves neutral feedback without pick, delivers words to author, and preserv
     expect(errors).toEqual([]);
   } finally {
     await srv.stop();
+    rmSync(webDist, { recursive: true, force: true });
   }
 });
