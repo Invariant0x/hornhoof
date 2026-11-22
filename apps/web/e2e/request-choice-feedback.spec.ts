@@ -564,7 +564,9 @@ for (const lang of CHECKED_LOCALES) {
 
         await page.goto('/tasks');
         const mainCards = page.locator('.page article.req');
-        await expect(mainCards).toHaveCount(3);
+        /* The page holds what this person can answer; the read-only choice of another person waits under Waiting for people (#1806). */
+        await expect(mainCards).toHaveCount(2);
+        await expect(mainCards.filter({ hasText: panelRequests.find(request => !request.canAnswer)!.text })).toHaveCount(0);
         await page.evaluate(async () => {
           await document.fonts.ready;
         });
