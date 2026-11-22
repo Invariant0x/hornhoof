@@ -42,6 +42,8 @@ async function messagesFor(locale: Language): Promise<Messages> {
 /* Only the first page of a test starts from these; what the test changes later stays for the next page. */
 async function prepare(page: Page, language: Language, skin: string | null, own = true) {
   await serveApi(page);
+  /* Keep CompanyLink above Themes static so its random-name check timer never shifts geometry mid-switch. */
+  await page.route('**/api/link', route => route.fulfill({ json: { link: { name: 'acme', url: 'https://acme.hornhoof.org' }, domain: 'hornhoof.org' } }));
   await page.addInitScript(({ language, skin, collection }) => {
     if (sessionStorage.getItem('hh-test-seeded')) return;
     sessionStorage.setItem('hh-test-seeded', '1');
@@ -77,6 +79,7 @@ async function openThemes(page: Page, words: Messages): Promise<Locator> {
   /* Company theme store lives under Company & access for the CEO. */
   await dialog.getByRole('button', { name: words.settings.groups.company, exact: true }).click();
   await expect(dialog.getByRole('button', { name: words.settings.groups.company, exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(dialog.getByRole('link', { name: 'https://acme.hornhoof.org', exact: true })).toBeVisible();
   await expect(dialog.getByRole('region', { name: words.skins.catalog })).toBeVisible();
   await page.evaluate(async () => { await document.fonts.ready; });
   return dialog;
