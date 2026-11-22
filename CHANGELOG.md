@@ -18,6 +18,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - On the map and in an open department the menu, the bars and the bottom bar are separate glass blocks with no shadow and no band between them, so the map shows around them to the top and the bottom of the window, the department's schema too. The chosen tab stands on a solid backing. The department's name and the windows that open there stand 8 px under the menu or the last bar on every screen. When a bar comes or goes the name and the map or the schema slide to their new place in 200 ms, at once with less motion. On a phone every bar after the first folds to one line with More.
 - In a page that reads right to left, the glow of the map's hub stands around the hub instead of at the map's right edge.
 - An Antigravity turn that launches a subagent keeps the employee's main conversation as its session, ignores hooks from child conversations, and resumes the main conversation with its Hornhoof tools on the next turn.
+- An Antigravity turn that fails with `UNAUTHENTICATED (code 401)` because its program kept an hour-old access token is no longer lost as an unknown failure: the program starts anew with the saved sign-in and the turn is tried once more with no person involved, and a second refusal right after that is a sign-in failure with a clear reason for Operations.
 
 ### Added
 
