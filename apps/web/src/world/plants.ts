@@ -40,6 +40,8 @@ const TAU = Math.PI * 2;
 /* A root must stand this far (tiles) from the painted water and foam; the check is only made near the shore. */
 const DRAWN_SHORE_CLEARANCE = 0.14;
 const DRAWN_SHORE_CLEARANCE_BELOW = 1.35;
+/* A plant whose root is just above a view can still cast its shadow into it: this share of the reach. */
+const SHADOW_REACH = 0.4;
 
 const SALT = { draw: 101, jitterU: 211, jitterV: 223, score: 307, variant: 401, size: 503, flip: 601, phase: 701, height: 809, bedU: 911, bedV: 929, bedPick: 947 } as const;
 
@@ -220,7 +222,7 @@ export function visiblePlants(field: PlantField, rect: WorldRect, reach: number)
   let hi = plants.length;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (plants[mid]!.y < rect.minY) lo = mid + 1;
+    if (plants[mid]!.y < rect.minY - reach * SHADOW_REACH) lo = mid + 1;
     else hi = mid;
   }
   const out: PlacedPlant[] = [];

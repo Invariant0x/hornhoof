@@ -106,7 +106,7 @@ describe('procedural plant placement', () => {
     for (const p of seen) {
       expect(p.x).toBeGreaterThanOrEqual(rect.minX - 200);
       expect(p.x).toBeLessThanOrEqual(rect.maxX + 200);
-      expect(p.y).toBeGreaterThanOrEqual(rect.minY);
+      expect(p.y).toBeGreaterThanOrEqual(rect.minY - 200 * 0.4);
       expect(p.y).toBeLessThanOrEqual(rect.maxY + 200);
     }
   });

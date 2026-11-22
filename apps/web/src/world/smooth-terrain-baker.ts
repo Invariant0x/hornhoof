@@ -226,17 +226,14 @@ export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArr
 
       if (spec.pattern === 'fine_grain') {
         const drift = periodicNoise2D(u * 8, v * 8, 8, 8, seed + 83);
-        blend = macro * 0.48 + drift * 0.34 + mid * 0.18 + fine * 0.16 * contrast + micro * 0.08;
-        const sparkle = periodicDiagNoise(u, v, 24, seed + 97);
-        if (sparkle > 0.72) accent = smoothstep(0.72, 0.92, sparkle) * 0.34 * contrast;
+        /* Grains and pebbles are drawn on afterwards (addTextureDetail); no lattice-aligned sparkle here, it tiles into bricks. */
+        blend = macro * 0.5 + drift * 0.34 + mid * 0.16;
       } else if (spec.pattern === 'grass_tufts') {
         /* Isotropic ground-space meadow; isometric (u, v) sampling projects it flat onto the terrain. */
         const patch = periodicDiagNoise(u, v, 6, seed + 89);
         const tuft = periodicNoise2D(u * 16, v * 16, 16, 16, seed + 91);
-        const blade = periodicDiagNoise(u, v, 22, seed + 109);
-        blend = macro * 0.44 + patch * 0.3 + tuft * 0.26 + fine * 0.1;
-        const sunlit = tuft * 0.55 + blade * 0.45;
-        if (sunlit > 0.62) accent = smoothstep(0.62, 0.88, sunlit) * 0.44 * contrast;
+        blend = macro * 0.46 + patch * 0.3 + tuft * 0.24;
+        if (tuft > 0.64) accent = smoothstep(0.64, 0.9, tuft) * 0.36 * contrast;
       } else if (spec.pattern === 'furrows') {
         /* Ground-axis crop furrows automatically projected onto the 2:1 isometric tile plane. */
         const phase = u * 16 * Math.PI * 2 + (macro - 0.5) * 1.1;

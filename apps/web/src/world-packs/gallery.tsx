@@ -106,6 +106,8 @@ type GalleryHandle = {
   /* Fixes the wind clock in seconds so a shot repeats exactly; null follows real time. */
   setWindClock: (seconds: number | null) => void;
   focusNearestShore: () => TileCoord;
+  /* Tile kind id at a tile of the open map, null outside it; for scripted camera paths. */
+  tileKindAt: (col: number, row: number) => string | null;
   flushVisibleBakes: () => void;
   getStats: () => WorldEngineStats | null;
   screenPointOfTile: (col: number, row: number) => { x: number; y: number } | null;
@@ -573,6 +575,7 @@ function Stage2GalleryApp() {
         }
         return target;
       },
+      tileKindAt: (col, row) => activeMap?.tileAt(col, row) ?? null,
       flushVisibleBakes: () => engineRef.current?.flushVisibleBakes(),
       getStats: () => engineRef.current?.getStats() ?? null,
       screenPointOfTile: (col, row) => {
