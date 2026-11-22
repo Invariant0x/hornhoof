@@ -306,7 +306,7 @@ function expectClose(actual: number, expected: number, tol: number, label: strin
 }
 
 test.describe('Stage 8 themed map chrome, 6 entity side cards, and on-map Department Mode', () => {
-  test('Cyberpunk, Light, and Ancient Egypt place every chrome element identically across EN/RU and 1440/375', async ({ browser }, info: TestInfo) => {
+  test('Cyberpunk, Light, and Ancient Egypt place every chrome element identically across languages and viewports', async ({ browser }, info: TestInfo) => {
     test.setTimeout(120_000);
     const cases: Array<{ width: number; height: number; lang: 'en' | 'ru'; themes: Array<'cyberpunk' | 'light' | 'egypt'>; showBanner?: boolean }> = [
       { width: 1440, height: 900, lang: 'en', themes: ['cyberpunk', 'light', 'egypt'], showBanner: true },

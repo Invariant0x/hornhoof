@@ -3669,7 +3669,7 @@ th.k-prio .sorth { white-space: nowrap; }
 .skins-grain-hint { margin: 0; padding-inline-start: 28px; font-size: 12.5px; }
 
 /* Stage 8 interactive world canvas & entity side cards inside MapScreen (pack-agnostic). */
-.world-map { position: relative; overflow: hidden; }
+.world-map::before { display: none; }
 .world-canvas-room { position: absolute; inset: 0; }
 .world-canvas-host { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
 .world-canvas-host:active { cursor: grabbing; }
