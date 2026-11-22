@@ -258,7 +258,7 @@ function IsometricInspector({
       terrainMap: map,
       showBuildGrid: false,
       initialCenterTile: initialMid,
-      markerTile: map.startCenter,
+      markerTile: new URLSearchParams(window.location.search).get('marker') === '0' ? null : map.startCenter,
       resolveTileId: (col, row) => map.tileAt(col, row) ?? pack.defaultTileId,
       onStats: next => {
         if (alive) setStats(next);

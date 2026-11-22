@@ -54,6 +54,9 @@ export class PlantLayout {
   private readonly shadowDir: { x: number; y: number };
   private readonly shadowLength: number;
   private readonly reach: number;
+  /* Lowest and highest lean among the plants laid out by the last build: how differently the grove is moving. */
+  leanMin = 0;
+  leanMax = 0;
 
   constructor(options: PlantLayoutOptions) {
     this.pack = options.pack;
@@ -82,6 +85,8 @@ export class PlantLayout {
     const bodyBase = shadows ? plants.length : 0;
     let shadowN = 0;
     let bodyN = 0;
+    let leanMin = Infinity;
+    let leanMax = -Infinity;
 
     for (const p of plants) {
       const kind = kinds[p.kindIndex]!;
@@ -91,6 +96,10 @@ export class PlantLayout {
       const fx = p.flip ? -1 : 1;
       const w = wind ? sampleWind(wind, kind.sway, p.col, p.row, timeSec, p.phase) : { lean: 0, flutter: 0, gust: 0 };
 
+      if (kind.sway.amplitude > 0) {
+        leanMin = Math.min(leanMin, w.lean / kind.sway.amplitude);
+        leanMax = Math.max(leanMax, w.lean / kind.sway.amplitude);
+      }
       const twoPart = info.crown !== undefined;
       const baseLean = twoPart ? w.lean * 0.45 : w.lean;
       const a = fx * m;
@@ -149,6 +158,8 @@ export class PlantLayout {
     if (shadows && shadowN < bodyBase) {
       data.copyWithin(shadowN * ITEM_STRIDE, bodyBase * ITEM_STRIDE, (bodyBase + bodyN) * ITEM_STRIDE);
     }
+    this.leanMin = leanMin === Infinity ? 0 : leanMin;
+    this.leanMax = leanMax === -Infinity ? 0 : leanMax;
     out.shadowCount = shadows ? shadowN : 0;
     out.count = out.shadowCount + bodyN;
     return plants.length;

@@ -882,7 +882,7 @@ export class IsometricWorldEngine {
     return { rendererKind: this.rendererKind, glRenderer, glVendor };
   }
 
-  /* Fixes the wind clock (seconds) so shots and video repeat exactly; null goes back to real time. */
+  /* Fixes the clock (seconds) of the wind and the water so shots and video repeat exactly; null goes back to real time. */
   setWindClock(seconds: number | null): void {
     this.windClockSec = seconds;
     this.dirtyScene = true;
@@ -1093,8 +1093,14 @@ export class IsometricWorldEngine {
       const dtSec = dtMs / 1000;
       const animDetail = animationDetailForZoom(this.camera.zoom);
       const speedScale = animDetail === 'reduced' ? 0.55 : 1.0;
-      this.liquidPhaseX = (this.liquidPhaseX + this.pack.liquidLayer.speedX * dtSec * speedScale) % 256;
-      this.liquidPhaseY = (this.liquidPhaseY + this.pack.liquidLayer.speedY * dtSec * speedScale) % 256;
+      if (this.windClockSec !== null) {
+        /* A fixed clock moves the water by the clock, not by how long the frames took. */
+        this.liquidPhaseX = (this.pack.liquidLayer.speedX * this.windClockSec * speedScale) % 256;
+        this.liquidPhaseY = (this.pack.liquidLayer.speedY * this.windClockSec * speedScale) % 256;
+      } else {
+        this.liquidPhaseX = (this.liquidPhaseX + this.pack.liquidLayer.speedX * dtSec * speedScale) % 256;
+        this.liquidPhaseY = (this.liquidPhaseY + this.pack.liquidLayer.speedY * dtSec * speedScale) % 256;
+      }
       if (this.liquidSpriteA) {
         this.liquidSpriteA.tilePosition.set(this.liquidPhaseX, this.liquidPhaseY);
       }

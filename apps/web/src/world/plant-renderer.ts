@@ -15,6 +15,8 @@ export type PlantStats = Readonly<{
   inView: number;
   drawn: number;
   byKind: Readonly<Record<string, number>>;
+  /* Spread of the wind lean (per unit of sway amplitude) over the plants drawn last frame: 0 would be everything in unison. */
+  leanSpan: number;
 }>;
 
 function parseColor(color: string): number {
@@ -55,7 +57,7 @@ export class PlantRenderer {
     (this.pack.plants ?? []).forEach((k, i) => {
       byKind[k.id] = this.field.countsByKind[i] ?? 0;
     });
-    return { total: this.field.plants.length, inView: this.inView, drawn: this.list.count - this.list.shadowCount, byKind };
+    return { total: this.field.plants.length, inView: this.inView, drawn: this.list.count - this.list.shadowCount, byKind, leanSpan: this.layout ? this.layout.leanMax - this.layout.leanMin : 0 };
   }
 
   private ensureAtlas(): PlantAtlas {
