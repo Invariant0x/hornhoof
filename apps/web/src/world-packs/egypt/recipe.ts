@@ -33,6 +33,8 @@ export const EGYPT_MATERIAL_IDS = [
   'dune',
   'rock',
   'quarry',
+  'silt',
+  'dust',
 ] as const;
 
 type EgyptSeedParams = Readonly<{
@@ -452,7 +454,16 @@ export const EGYPT_TERRAIN_RECIPE: TerrainRecipeSpec = {
       const oasisGrass = oasis.groveDist < 3 ? 1 - smoothstep(-1.0, 2.0, oasis.groveDist) : 0;
       const grassWeight = Math.max(valleyGrass, oasisGrass) * (1 - fieldWeight * 0.75) * (1 - rockWeight);
 
-      const used = bankWeight + grassWeight + fieldWeight + duneWeight + rockWeight + quarryBand;
+      /* Dark Nile silt in a patchy band just above the waterline, and trodden dust on the city site around the start. */
+      const siltNoise = noise.fbm2D(vx * 0.12 + 3.1, vy * 0.12 - 1.7, (params.bankSeed + 211) >>> 0, 2);
+      const siltBand =
+        smoothstep(bankW - 0.2, bankW + 0.7, dRiver) * (1 - smoothstep(bankW + 1.2, bankW + 2.6, dRiver));
+      const siltWeight = siltBand * smoothstep(0.4, 0.66, siltNoise) * 0.6 * (1 - rockWeight);
+      const dustNoise = noise.fbm2D(vx * 0.16, vy * 0.16, (params.oasisSeed + 4423) >>> 0, 3);
+      const dustWeight =
+        (1 - smoothstep(5, 12.5, distCenter)) * smoothstep(0.28, 0.55, dustNoise) * 0.85 * (1 - bankWeight) * (1 - grassWeight * 0.6);
+
+      const used = bankWeight + grassWeight + fieldWeight + duneWeight + rockWeight + quarryBand + siltWeight + dustWeight;
       const sandWeight = Math.max(0.04, 1 - Math.min(1, used));
 
       const elevation =
@@ -474,6 +485,8 @@ export const EGYPT_TERRAIN_RECIPE: TerrainRecipeSpec = {
           dune: duneWeight,
           rock: rockWeight,
           quarry: quarryBand,
+          silt: siltWeight,
+          dust: dustWeight,
         },
       };
     };

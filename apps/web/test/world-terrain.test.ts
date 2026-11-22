@@ -209,51 +209,29 @@ describe('Stage 2 pack-owned procedural generation and modularity', () => {
   });
 
   it('synthesizes strictly toroidal seamless ground and liquid textures with zero wrap seams', () => {
+    /* A seamless texture's wrap pair (last column next to the first) differs like any other neighbouring pair. A seam
+       would make it stand out above the largest difference between neighbouring columns (rows) inside the texture.
+       The measure does not depend on the texture's resolution. */
     const measureWrapSeamRatio = (
       buf: Uint8ClampedArray,
       size: number,
       stride: 3 | 4,
     ): { horizRatio: number; vertRatio: number } => {
-      let wrapX = 0;
-      let meanInteriorX = 0;
-      let wrapY = 0;
-      let meanInteriorY = 0;
-      for (let y = 0; y < size; y++) {
-        const left = (y * size + 0) * stride;
-        const right = (y * size + (size - 1)) * stride;
-        for (let c = 0; c < 3; c++) {
-          wrapX += Math.abs(buf[left + c]! - buf[right + c]!);
+      const pairDiff = (a: number, b: number, along: 'col' | 'row'): number => {
+        let sum = 0;
+        for (let i = 0; i < size; i++) {
+          const p = along === 'col' ? (i * size + a) * stride : (a * size + i) * stride;
+          const q = along === 'col' ? (i * size + b) * stride : (b * size + i) * stride;
+          for (let c = 0; c < 3; c++) sum += Math.abs(buf[p + c]! - buf[q + c]!);
         }
-        for (let x = 0; x < size - 1; x++) {
-          const a = (y * size + x) * stride;
-          const b = (y * size + x + 1) * stride;
-          for (let c = 0; c < 3; c++) {
-            meanInteriorX += Math.abs(buf[a + c]! - buf[b + c]!);
-          }
-        }
-      }
-      meanInteriorX /= size - 1;
-
-      for (let x = 0; x < size; x++) {
-        const top = (0 * size + x) * stride;
-        const bot = ((size - 1) * size + x) * stride;
-        for (let c = 0; c < 3; c++) {
-          wrapY += Math.abs(buf[top + c]! - buf[bot + c]!);
-        }
-        for (let y = 0; y < size - 1; y++) {
-          const a = (y * size + x) * stride;
-          const b = ((y + 1) * size + x) * stride;
-          for (let c = 0; c < 3; c++) {
-            meanInteriorY += Math.abs(buf[a + c]! - buf[b + c]!);
-          }
-        }
-      }
-      meanInteriorY /= size - 1;
-
-      return {
-        horizRatio: wrapX / Math.max(1, meanInteriorX),
-        vertRatio: wrapY / Math.max(1, meanInteriorY),
+        return sum;
       };
+      const ratio = (along: 'col' | 'row'): number => {
+        let maxInterior = 1;
+        for (let k = 0; k < size - 1; k++) maxInterior = Math.max(maxInterior, pairDiff(k, k + 1, along));
+        return pairDiff(size - 1, 0, along) / maxInterior;
+      };
+      return { horizRatio: ratio('col'), vertRatio: ratio('row') };
     };
 
     for (const pack of [EGYPT_WORLD_PACK, DUNGEON_WORLD_PACK]) {
@@ -261,14 +239,14 @@ describe('Stage 2 pack-owned procedural generation and modularity', () => {
         const rgb = getMaterialTextureRgb(mat);
         const size = Math.round(Math.sqrt(rgb.length / 3));
         const { horizRatio, vertRatio } = measureWrapSeamRatio(rgb, size, 3);
-        expect(horizRatio, `${pack.id}/${mat.id} horizontal wrap seam`).toBeLessThan(1.35);
-        expect(vertRatio, `${pack.id}/${mat.id} vertical wrap seam`).toBeLessThan(1.35);
+        expect(horizRatio, `${pack.id}/${mat.id} horizontal wrap seam`).toBeLessThan(1.15);
+        expect(vertRatio, `${pack.id}/${mat.id} vertical wrap seam`).toBeLessThan(1.15);
       }
       if (pack.liquidLayer) {
         const rgba = buildLiquidSurfacePixels(pack.liquidLayer, 256);
         const { horizRatio, vertRatio } = measureWrapSeamRatio(rgba, 256, 4);
-        expect(horizRatio, `${pack.id} liquid horizontal wrap seam`).toBeLessThan(1.35);
-        expect(vertRatio, `${pack.id} liquid vertical wrap seam`).toBeLessThan(1.35);
+        expect(horizRatio, `${pack.id} liquid horizontal wrap seam`).toBeLessThan(1.15);
+        expect(vertRatio, `${pack.id} liquid vertical wrap seam`).toBeLessThan(1.15);
       }
     }
   });

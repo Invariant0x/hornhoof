@@ -13,12 +13,14 @@ import type {
   LodTierSpec,
   WorldPackManifest,
 } from './manifest';
-import { hash2i, hashSeed, valueNoise2D } from './prng';
+import { createRng, hash2i, hashSeed, valueNoise2D } from './prng';
 import type { CornerFieldGrid, GeneratedWorldMap } from './terrain-engine';
 
 type Rgb = readonly [number, number, number];
 
-const TEX_SIZE = 256;
+/* 512 texels repeat over 4 x 4 tiles: 128 texels per tile, so strokes and grains stay crisp up to 200% zoom. */
+const TEX_SIZE = 512;
+const TEXELS_PER_TILE = 128;
 const TEX_MASK = TEX_SIZE - 1;
 const NOISE_LUT_SIZE = 256;
 const NOISE_LUT_MASK = NOISE_LUT_SIZE - 1;
@@ -117,6 +119,80 @@ function sampleLutFast(lut: Float32Array, fx: number, fy: number): number {
   return a + (b - a) * ty;
 }
 
+
+/* Blends a soft round dot into the wrapping RGB texture. */
+function plotDot(buf: Uint8ClampedArray, x: number, y: number, radius: number, rgb: Rgb, alpha: number): void {
+  const r = Math.ceil(radius);
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const d = Math.hypot(dx - (x - Math.round(x)), dy - (y - Math.round(y)));
+      if (d > radius) continue;
+      const a = alpha * (1 - (d / radius) * 0.7);
+      const tx = (Math.round(x) + dx) & TEX_MASK;
+      const ty = (Math.round(y) + dy) & TEX_MASK;
+      const o = (ty * TEX_SIZE + tx) * 3;
+      buf[o] += (rgb[0] - buf[o]!) * a;
+      buf[o + 1] += (rgb[1] - buf[o + 1]!) * a;
+      buf[o + 2] += (rgb[2] - buf[o + 2]!) * a;
+    }
+  }
+}
+
+/* A short tapered blade: wide and faint at the root, thin and bright toward the tip. */
+function plotBlade(buf: Uint8ClampedArray, x: number, y: number, angle: number, len: number, bend: number, rgb: Rgb, alpha: number): void {
+  const steps = Math.max(3, Math.round(len * 1.4));
+  let px = x;
+  let py = y;
+  let a = angle;
+  for (let i = 0; i < steps; i++) {
+    const t = i / steps;
+    plotDot(buf, px, py, 1.15 - 0.55 * t, rgb, alpha * (0.55 + 0.45 * t));
+    px += Math.cos(a) * 0.72;
+    py += Math.sin(a) * 0.72;
+    a += bend / steps;
+  }
+}
+
+/* Adds hand-drawn detail on top of the noise tones: grass blades, sand grains and soil crumbs, all wrapping. */
+function addTextureDetail(buf: Uint8ClampedArray, spec: GroundMaterialSpec, c: readonly [Rgb, Rgb, Rgb], seed: number): void {
+  const rng = createRng(seed ^ 0x9e3779b9);
+  const [base, dark, light] = c;
+  const contrast = spec.contrast ?? 1;
+  if (spec.pattern === 'grass_tufts') {
+    for (let i = 0; i < 9000; i++) {
+      const lit = rng();
+      plotBlade(buf, rng() * TEX_SIZE, rng() * TEX_SIZE, rng() * Math.PI * 2, 5 + rng() * 7, (rng() - 0.5) * 1.2, mixRgb(dark, light, lit * lit), 0.5 * contrast);
+    }
+  } else if (spec.pattern === 'fine_grain' || spec.pattern === 'packed_dust' || spec.pattern === 'wind_ripples') {
+    const grains = spec.pattern === 'packed_dust' ? 2600 : 5200;
+    for (let i = 0; i < grains; i++) {
+      const bright = rng() < 0.5;
+      plotDot(buf, rng() * TEX_SIZE, rng() * TEX_SIZE, 0.6 + rng() * 0.9, bright ? mixRgb(base, light, 0.8) : mixRgb(base, dark, 0.8), 0.3 + 0.3 * rng());
+    }
+    /* A few pebbles with a lit upper-left edge. */
+    for (let i = 0; i < 70; i++) {
+      const x = rng() * TEX_SIZE;
+      const y = rng() * TEX_SIZE;
+      const r = 1.4 + rng() * 2.2;
+      plotDot(buf, x + 0.8, y + 1, r, mixRgb(base, dark, 0.7), 0.45);
+      plotDot(buf, x, y, r, mixRgb(base, light, 0.35), 0.7);
+      plotDot(buf, x - r * 0.3, y - r * 0.3, r * 0.45, mixRgb(base, light, 0.9), 0.5);
+    }
+  } else if (spec.pattern === 'soil_clods') {
+    for (let i = 0; i < 3800; i++) {
+      plotDot(buf, rng() * TEX_SIZE, rng() * TEX_SIZE, 0.7 + rng() * 1.6, rng() < 0.5 ? mixRgb(base, dark, 0.9) : mixRgb(base, light, 0.7), 0.35 + 0.3 * rng());
+    }
+  } else if (spec.pattern === 'cracked_rock' || spec.pattern === 'cut_stone') {
+    for (let i = 0; i < 2600; i++) {
+      plotDot(buf, rng() * TEX_SIZE, rng() * TEX_SIZE, 0.6 + rng() * 1.1, rng() < 0.5 ? mixRgb(base, dark, 0.8) : mixRgb(base, light, 0.7), 0.3 + 0.25 * rng());
+    }
+  }
+}
+
+function mixRgb(a: Rgb, b: Rgb, t: number): Rgb {
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+}
+
 /* Synthesizes a strictly seamless toroidal 256x256 RGB ground texture from a pack's GroundMaterialSpec. */
 export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArray {
   const key = `${spec.id}|${spec.baseColor}|${spec.secondaryColor}|${spec.accentColor}|${spec.pattern}|${spec.contrast ?? 1}`;
@@ -197,6 +273,18 @@ export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArr
         const glow = cluster1 * 0.55 + cluster2 * 0.45;
         blend = macro * 0.5 + mid * 0.5;
         if (glow > 0.62) accent = smoothstep(0.62, 0.88, glow) * 0.92;
+      } else if (spec.pattern === 'soil_clods') {
+        /* Rounded clods with dark crevices between them, like turned river silt. */
+        const clod = 1 - Math.abs(2 * periodicDiagNoise(u, v, 9, seed + 331) - 1);
+        const crumb = periodicNoise2D(u * 22, v * 22, 22, 22, seed + 347);
+        blend = 0.18 + clod * 0.42 + macro * 0.2 + crumb * 0.12 + fine * 0.1;
+        if (clod > 0.8) accent = smoothstep(0.8, 0.96, clod) * 0.34 * contrast;
+      } else if (spec.pattern === 'packed_dust') {
+        /* Trodden earth: soft, low contrast, with a few worn streaks and pebbles. */
+        const streak = periodicDiagNoise(u * 1.0, v * 3.0, 7, seed + 353);
+        const speck = periodicNoise2D(u * 40, v * 40, 40, 40, seed + 367);
+        blend = macro * 0.5 + mid * 0.22 + streak * 0.18 + fine * 0.12;
+        if (speck > 0.8) accent = smoothstep(0.8, 0.95, speck) * 0.3;
       } else if (spec.pattern === 'paved_stone') {
         /* Ground-space flagstones (2x2 per tile) that project as true 2:1 isometric diamond slabs. */
         const duRaw = u * 8;
@@ -230,6 +318,7 @@ export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArr
     }
   }
 
+  addTextureDetail(buf, spec, [c0, c1, c2], seed);
   materialCache.set(key, buf);
   return buf;
 }
@@ -400,6 +489,10 @@ export function bakeSmoothChunkPixels(
   const shallowRgb = parseHexRgb(liquid?.shallowTintColor ?? '#489FB5', [72, 159, 181]);
   const foamRgb = parseHexRgb(liquid?.shoreFoamColor ?? '#CFEAEF', [207, 234, 239]);
   const isGlowLiquid = Boolean(liquid?.glow);
+  const sun = parseHexRgb(pack.lighting?.sunTint ?? '#FFFFFF', [255, 255, 255]);
+  const sunR = sun[0] / 255;
+  const sunG = sun[1] / 255;
+  const sunB = sun[2] / 255;
 
   const { coarse, detail } = getNoiseLuts();
   const cCols = cf.cols;
@@ -492,8 +585,8 @@ export function bakeSmoothChunkPixels(
 
       /* Project material textures onto the isometric ground plane via global tile coordinates (u, v):
          64 texels per tile = one seamless 256x256 texture repeat across every 4x4 ground tiles. */
-      const tfx = u * 64;
-      const tfy = v * 64;
+      const tfx = u * TEXELS_PER_TILE;
+      const tfy = v * TEXELS_PER_TILE;
       const tx0 = Math.floor(tfx);
       const ty0 = Math.floor(tfy);
       const tFracX = tfx - tx0;
@@ -566,9 +659,10 @@ export function bakeSmoothChunkPixels(
         }
       }
 
-      r *= shade;
-      g *= shade;
-      b *= shade;
+      /* The sun's tint warms what it lights. */
+      r *= shade * sunR;
+      g *= shade * sunG;
+      b *= shade * sunB;
 
       let alpha = 255;
       if (dWater < 0.62) {

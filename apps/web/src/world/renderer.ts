@@ -64,6 +64,7 @@ import {
   type ResidentSimulation,
 } from './residents';
 import { renderResidentsFallback2D, renderResidentsToPixi, type ResidentArtContext } from './residents-renderer';
+import { PlantRenderer, type PlantStats } from './plant-renderer';
 import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas } from './smooth-terrain-baker';
 import type { GeneratedWorldMap } from './terrain-engine';
 
@@ -100,6 +101,8 @@ export type WorldEngineStats = Readonly<{
   rendererKind: RendererKind;
   buildGridVisible: boolean;
   hasAnimatedLiquid: boolean;
+  /* Plants on the map and in view; null for a pack without plants. */
+  plants?: PlantStats | null;
   hoveredTile: TileCoord | null;
   selectedPick: PickResult | null;
   camera: CameraState;
@@ -247,11 +250,15 @@ export class IsometricWorldEngine {
   private readonly pressedKeys = new Set<string>();
   private resizeObserver: ResizeObserver | null = null;
   private canvasElement: HTMLCanvasElement | null = null;
+  private plantRenderer: PlantRenderer | null = null;
+  /* A fixed wind clock in seconds for steady shots and video; null follows real time. */
+  private windClockSec: number | null = null;
 
   private constructor(options: WorldEngineOptions) {
     this.host = options.host;
     this.pack = options.pack;
     this.terrainMap = options.terrainMap;
+    this.plantRenderer = PlantRenderer.create(options.pack, options.terrainMap);
     this.buildGridVisible = options.showBuildGrid ?? options.pack.showGridByDefault ?? true;
     this.tileW = options.pack.projection.defaultTileW;
     this.tileH = options.pack.projection.defaultTileH;
@@ -392,6 +399,10 @@ export class IsometricWorldEngine {
       worldContainer.addChild(liquidLayer);
       worldContainer.addChild(chunkLayer);
       worldContainer.addChild(buildGridGraphic);
+      /* Shadows and plants, depth-sorted among themselves; buildings and people draw above this layer. */
+      const plantLayer = new Container();
+      worldContainer.addChild(plantLayer);
+      this.plantRenderer?.attachPixi(plantLayer);
       worldContainer.addChild(cityGraphic);
       worldContainer.addChild(buildingArtLayer);
       worldContainer.addChild(residentsGraphic);
@@ -871,6 +882,16 @@ export class IsometricWorldEngine {
     return { rendererKind: this.rendererKind, glRenderer, glVendor };
   }
 
+  /* Fixes the wind clock (seconds) so shots and video repeat exactly; null goes back to real time. */
+  setWindClock(seconds: number | null): void {
+    this.windClockSec = seconds;
+    this.dirtyScene = true;
+  }
+
+  private windTime(): number {
+    return this.windClockSec ?? performance.now() / 1000;
+  }
+
   setBuildGridVisible(visible: boolean): void {
     if (this.buildGridVisible === visible) return;
     this.buildGridVisible = visible;
@@ -989,6 +1010,7 @@ export class IsometricWorldEngine {
       rendererKind: this.rendererKind,
       buildGridVisible: this.buildGridVisible,
       hasAnimatedLiquid: Boolean(this.terrainMap && this.pack.liquidLayer),
+      plants: this.plantRenderer?.stats ?? null,
       hoveredTile: this.hoveredTile,
       selectedPick: this.selectedPick,
       camera: this.camera,
@@ -1119,6 +1141,17 @@ export class IsometricWorldEngine {
       }
     }
 
+    /* Plants sway in the wind, so a map with plants redraws every frame. */
+    let plantsAnimated = false;
+    if (this.plantRenderer) {
+      plantsAnimated = true;
+      if (this.app) {
+        this.plantRenderer.update(visibleWorldRect(this.camera, this.viewport, this.tileW), this.windTime());
+      } else {
+        this.dirtyScene = true;
+      }
+    }
+
     const needsSync = this.dirtyScene || this.pendingBakeCount > 0;
     if (needsSync) {
       this.syncScene(BAKE_BUDGET_MS);
@@ -1162,7 +1195,7 @@ export class IsometricWorldEngine {
         );
       }
     }
-    if (this.app && (needsSync || liquidAnimated || residentsAnimated || constructionAnimated)) {
+    if (this.app && (needsSync || liquidAnimated || residentsAnimated || constructionAnimated || plantsAnimated)) {
       this.app.render();
     }
     this.lastCpuStepMs = performance.now() - stepStart;
@@ -1513,6 +1546,8 @@ export class IsometricWorldEngine {
       ctx.drawImage(b.canvas, b.worldX, b.worldY, b.pixelWidth / b.scale, b.pixelHeight / b.scale);
     }
 
+    this.plantRenderer?.drawFallback2D(ctx, visibleWorldRect(this.camera, this.viewport, this.tileW), this.windTime());
+
     if (this.terrainMap && this.buildGridVisible) {
       const rect = visibleWorldRect(this.camera, this.viewport, this.tileW);
       const corners = [
@@ -1706,6 +1741,8 @@ export class IsometricWorldEngine {
       this.app.destroy(true, { children: true, texture: true });
       this.app = null;
     }
+    this.plantRenderer?.destroy();
+    this.plantRenderer = null;
     if (this.fallbackCanvas) {
       this.fallbackCanvas.remove();
       this.fallbackCanvas = null;

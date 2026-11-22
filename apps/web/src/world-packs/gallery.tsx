@@ -101,6 +101,10 @@ type GalleryHandle = {
   setZoom: (zoom: number) => void;
   setBuildGridVisible: (visible: boolean) => void;
   focusTile: (col: number, row: number) => void;
+  /* Camera in world pixels and zoom (1 = 100%); for scripted shots and video. */
+  setCamera: (camera: { x: number; y: number; zoom: number }) => void;
+  /* Fixes the wind clock in seconds so a shot repeats exactly; null follows real time. */
+  setWindClock: (seconds: number | null) => void;
   focusNearestShore: () => TileCoord;
   flushVisibleBakes: () => void;
   getStats: () => WorldEngineStats | null;
@@ -547,6 +551,8 @@ function Stage2GalleryApp() {
       setLang: next => setLang(next),
       setZoom: z => engineRef.current?.setZoom(z),
       setBuildGridVisible: v => engineRef.current?.setBuildGridVisible(v),
+      setCamera: camera => engineRef.current?.setCamera(camera),
+      setWindClock: seconds => engineRef.current?.setWindClock(seconds),
       focusTile: (col, row) => {
         const engine = engineRef.current;
         if (!engine) return;

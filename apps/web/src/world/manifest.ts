@@ -174,7 +174,9 @@ export type GroundTexturePattern =
   | 'cracked_rock'
   | 'cut_stone'
   | 'moss_glow'
-  | 'paved_stone';
+  | 'paved_stone'
+  | 'soil_clods'
+  | 'packed_dust';
 
 /* Seamless tileable ground material blended across smooth corner-field masks during chunk baking. */
 export type GroundMaterialSpec = Readonly<{
@@ -208,7 +210,8 @@ export type PlantShape =
   | 'blade_cluster'
   | 'umbel_reed'
   | 'round_shrub'
-  | 'broad_tree';
+  | 'broad_tree'
+  | 'stone_cluster';
 
 /* Where inside a plant image its parts are, in image pixels with y pointing down. */
 export type PlantPassport = Readonly<{

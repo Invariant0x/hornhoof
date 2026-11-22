@@ -241,6 +241,22 @@ const EGYPT_MATERIALS: readonly GroundMaterialSpec[] = [
     pattern: 'cut_stone',
     contrast: 1.1,
   },
+  {
+    id: 'silt',
+    baseColor: '#7B5F42',
+    secondaryColor: '#5D4730',
+    accentColor: '#A08460',
+    pattern: 'soil_clods',
+    contrast: 1.1,
+  },
+  {
+    id: 'dust',
+    baseColor: '#D2BC8E',
+    secondaryColor: '#B79F6F',
+    accentColor: '#E8D8B2',
+    pattern: 'packed_dust',
+    contrast: 0.95,
+  },
 ];
 
 const EGYPT_STAGE_LABELS: Readonly<Record<string, Readonly<{ en: string; ru: string }>>> = {
