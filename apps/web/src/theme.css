@@ -3584,13 +3584,27 @@ th.k-prio .sorth { white-space: nowrap; }
 :where(:root[data-surface='papyrus']) .crumb.glass,
 :where(:root[data-surface='papyrus']) .dv-tools.glass,
 :where(:root[data-surface='papyrus']) .hbtn.glass {
-  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 60%, transparent), color-mix(in srgb, var(--surface2) 44%, transparent));
+  background-color: color-mix(in srgb, var(--bg) 82%, var(--surface));
+  background-image:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 74%, transparent), color-mix(in srgb, var(--bg) 62%, transparent)),
+    repeating-linear-gradient(0deg, transparent 0 12px, color-mix(in srgb, var(--line2) 8%, transparent) 12px 13px);
+  border-color: var(--line2);
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--surface) 90%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, var(--line2) 34%, transparent);
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 92%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--line2) 48%, transparent),
+    inset 0 0 0 2px color-mix(in srgb, var(--surface) 58%, transparent),
+    0 4px 12px var(--shadow);
+}
+:where(:root[data-surface='papyrus']) .tb-brand.glass svg {
+  color: var(--ink);
+  filter: drop-shadow(0 1px 0 color-mix(in srgb, var(--surface) 88%, transparent));
 }
 :where(:root[data-surface='papyrus']) .tabs button.on {
-  box-shadow: inset 0 -2px 0 var(--cyan);
+  box-shadow: inset 0 -2px 0 var(--amber);
+}
+:where(:root[data-surface='papyrus']) .world-map .map-version {
+  color: var(--ink);
+  text-shadow: 0 1px 3px var(--surface), 0 0 8px var(--surface);
 }
 :where(:root[data-surface='papyrus']) .btn:not(.ghost) {
   background-image: linear-gradient(180deg, color-mix(in srgb, var(--on-btn) 14%, transparent), color-mix(in srgb, var(--ink) 16%, transparent));
@@ -3653,6 +3667,151 @@ th.k-prio .sorth { white-space: nowrap; }
 .skins-grain > label.check { display: inline-flex; align-items: center; gap: 10px; min-block-size: 44px; cursor: pointer; font-size: 13.5px; font-weight: 500; }
 .skins-grain > label.check input { inline-size: 18px; block-size: 18px; accent-color: var(--cyan-ink); flex: none; }
 .skins-grain-hint { margin: 0; padding-inline-start: 28px; font-size: 12.5px; }
+
+/* Stage 8 interactive world canvas & entity side cards inside MapScreen (pack-agnostic). */
+.world-map { position: relative; overflow: hidden; }
+.world-canvas-room { position: absolute; inset: 0; }
+.world-canvas-host { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
+.world-canvas-host:active { cursor: grabbing; }
+.world-ticker-btn { cursor: pointer; }
+.world-relocate-banner {
+  position: fixed;
+  z-index: 26;
+  top: 66px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  max-inline-size: calc(100vw - 32px);
+  font-size: 13px;
+}
+.world-card {
+  position: fixed;
+  z-index: 28;
+  top: 68px;
+  inset-inline-end: 16px;
+  bottom: 72px;
+  inline-size: min(380px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line2);
+  color: var(--ink);
+  overflow: hidden;
+}
+.world-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.world-card-titles { min-inline-size: 0; flex: 1 1 auto; }
+.world-card-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.world-card-title-row h3 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: break-word; }
+.world-card-sub { margin: 3px 0 0; font-size: 12.5px; }
+.world-banner-dot { inline-size: 10px; block-size: 10px; border-radius: 50%; flex: none; border: 1px solid var(--line2); }
+.world-card-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+.world-card-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.world-card-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.world-card-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+  padding: 8px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+}
+.world-card-grid dt { font-size: 11px; color: var(--muted); }
+.world-card-grid dd { margin: 2px 0 0; font-size: 13px; font-weight: 600; overflow-wrap: break-word; }
+.world-card-section { display: grid; gap: 6px; }
+.world-card-section h4 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.world-metric-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.world-card-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.world-card-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  font-size: 13px;
+}
+.world-link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--cyan-ink);
+  font: inherit;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.world-link-btn:hover { text-decoration: underline; }
+.world-task-pill {
+  background: var(--surface2);
+  border: 1px solid var(--line2);
+  padding: 7px 9px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: start;
+  cursor: pointer;
+  inline-size: 100%;
+  overflow-wrap: break-word;
+}
+.world-task-pill:hover { border-color: var(--cyan); }
+.world-card-notice {
+  margin: 0;
+  padding: 7px 9px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--amber);
+  font-size: 12.5px;
+}
+.world-card-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+.world-legend-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.world-legend-list li { display: flex; align-items: center; gap: 8px; }
+.world-legend-swatch { inline-size: 16px; block-size: 4px; flex: none; border-radius: 2px; }
+.world-legend-swatch.dashed { block-size: 0; border-top: 3px dashed var(--amber); background: none; }
+.world-pipeline-list { display: grid; gap: 8px; }
+.world-pipeline-block { padding: 8px 10px; background: var(--surface2); border: 1px solid var(--line); display: grid; gap: 6px; font-size: 13px; }
+.world-stage-list { margin: 0; padding-inline-start: 18px; display: grid; gap: 4px; font-size: 12.5px; }
+.world-stage-list li { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.world-confirm-dialog { max-inline-size: 440px; inline-size: min(440px, calc(100vw - 24px)); }
+.world-confirm-body { padding: 14px 16px; display: grid; gap: 10px; }
+@media (max-width: 720px) {
+  .world-card { inset-inline-start: 12px; inset-inline-end: 12px; inline-size: auto; top: 64px; bottom: 118px; }
+}
 
 /* A page the guard turned light draws nothing that costs a frame: no animation, transition, filter, blur or shadow. */
 :root[data-light] *, :root[data-light] *::before, :root[data-light] *::after {

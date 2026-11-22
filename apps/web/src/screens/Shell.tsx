@@ -5,6 +5,7 @@ import { useStream } from '../live';
 import { notOpened, useOrg } from '../org';
 import { forgetOwnerKey } from '../owner-key';
 import { skinsState, syncCompanySkin } from '../skins/store';
+import { useWorld } from '../skins/use-skin';
 import type { Me, Org } from '../types';
 import { ListIcon, LogoMark, MachineIcon, MapIcon, PeopleIcon, PlugIcon } from '../ui/icons';
 import { Idents } from '../ui/Idents';
@@ -279,10 +280,33 @@ type MapRouteProps = {
   goHome: () => void; openAgent: (id: string) => void; openDecisions: (id: string) => void;
 };
 
-function MapWorkspace({ tab, me, dept, deptId, denied, missingDepartment, panel, goHome, openAgent, navigate, openDecisions }: MapRouteProps & {
-  deptId: string | null; denied: boolean; panel: 'window' | 'task' | null; navigate: ReturnType<typeof useRoute>['navigate'];
+function MapWorkspace({
+  tab,
+  me,
+  dept,
+  deptId,
+  denied,
+  missingDepartment,
+  panel,
+  isWorld,
+  goHome,
+  openAgent,
+  openTask,
+  openGoal,
+  navigate,
+  openDecisions,
+  onHire,
+}: MapRouteProps & {
+  deptId: string | null;
+  denied: boolean;
+  panel: 'window' | 'task' | null;
+  isWorld: boolean;
+  openTask: (id: string) => void;
+  openGoal: (id: string) => void;
+  navigate: ReturnType<typeof useRoute>['navigate'];
+  onHire: (dept: Department) => void;
 }) {
-  if (tab !== 'map' || denied || missingDepartment || (deptId && !dept)) return null;
+  if (tab !== 'map' || denied || missingDepartment || (!isWorld && deptId && !dept)) return null;
   return (
     <MapScreen
       me={me}
@@ -290,9 +314,16 @@ function MapWorkspace({ tab, me, dept, deptId, denied, missingDepartment, panel,
       windowOpen={panel === 'window'}
       leftPanelOpen={panel === 'task'}
       onOpenOrchestrator={() => openAgent('orchestrator')}
-      inside={!!dept}
+      onOpenAgent={openAgent}
+      inside={!isWorld && !!dept}
+      activeDepartmentId={isWorld ? deptId : null}
       onOpenDepartment={id => navigate(id ? { kind: 'department', id } : { kind: 'map' })}
       onOpenDecisions={openDecisions}
+      onOpenTask={openTask}
+      onOpenGoal={openGoal}
+      onOpenTracker={id => navigate({ kind: 'tasks', department: id })}
+      onOpenTab={nextTab => navigate({ kind: nextTab })}
+      onHire={onHire}
     />
   );
 }
@@ -334,6 +365,7 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
 /* Setup or an accepted invitation opens the orchestrator's first contact at once. */
 export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: boolean; onSignOut: () => void }) {
   const t = useT();
+  const isWorld = useWorld() !== 'standard';
   const { route, navigate, backgrounds, switchOverlay, closeOverlay } = useRoute();
   const { accountDialog, pageRoute, taskId, card, tab, deptId } = workspaceOf(route, backgrounds);
   const goHome = () => navigate({ kind: 'map' });
@@ -467,14 +499,35 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         {deptId && !unavailableFailure(orgFailure) && <LoadFailure failure={orgFailure} />}
         {(route.kind === 'unavailable' || route.kind === 'invite' || missingDepartment || denied) && <RouteUnavailable onHome={goHome} />}
         <GuardBoundary block="map" reset={deptId}>
-          <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
+          <MapWorkspace
+            tab={tab}
+            me={me}
+            dept={dept}
+            deptId={deptId}
+            denied={denied}
+            missingDepartment={missingDepartment}
+            panel={shownPanel}
+            isWorld={isWorld}
+            goHome={goHome}
+            openAgent={openAgent}
+            openTask={openTask}
+            openGoal={openGoal}
+            navigate={navigate}
+            openDecisions={openDecisions}
+            onHire={d => {
+              setStaff({ id: d.id, name: deptLabel(t, d), at: Date.now() });
+              openAgent('orchestrator');
+            }}
+          />
         </GuardBoundary>
-        <GuardBoundary block="department" reset={deptId}>
-        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onCrumbs={setCrumbs} onHire={dept => {
-          setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
-          openAgent('orchestrator');
-        }} />
-        </GuardBoundary>
+        {!isWorld && (
+          <GuardBoundary block="department" reset={deptId}>
+            <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onCrumbs={setCrumbs} onHire={dept => {
+              setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
+              openAgent('orchestrator');
+            }} />
+          </GuardBoundary>
+        )}
         {tab === 'tasks' && (
           <GuardBoundary block="tasks">
           <Tasks

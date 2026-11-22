@@ -199,4 +199,32 @@ describe('Stage 5 residents, role behaviors, 7 live states, wake cooldown and 15
     expect(forbidden.test(resSrc)).toBe(false);
     expect(forbidden.test(renSrc)).toBe(false);
   });
+
+  it('drives resident walkPhase strictly from distance traveled rather than elapsed time so feet never slide', () => {
+    const live = createHornhoofLiveFixture();
+    const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: live.company.seed, mapSize: 100 });
+    const synced = syncLiveSnapshotToCity(EGYPT_WORLD_PACK, map, live);
+    const sim = createResidentSimulation(EGYPT_WORLD_PACK, synced.city, live);
+
+    const walker = sim.residents.find(r => r.liveState === 'working' && r.path.length >= 2)!;
+    expect(walker).toBeDefined();
+    walker.actionTimer = 0;
+    /* Advance past the starting tile if already seated on waypoint 0. */
+    stepResidentSimulation(sim, 0.05);
+    const phaseStart = walker.walkPhase;
+    const colStart = walker.col;
+    const rowStart = walker.row;
+
+    stepResidentSimulation(sim, 0.12);
+    const moved = Math.hypot(walker.col - colStart, walker.row - rowStart);
+    expect(moved).toBeGreaterThan(0.05);
+    const phaseDeltaMoving = walker.walkPhase - phaseStart;
+    expect(phaseDeltaMoving).toBeGreaterThan(0);
+
+    /* While standing still performing an action, walkPhase must not drift forward. */
+    walker.actionTimer = 2.0;
+    const phaseStationary = walker.walkPhase;
+    stepResidentSimulation(sim, 0.2);
+    expect(walker.walkPhase).toBeCloseTo(phaseStationary, 6);
+  });
 });

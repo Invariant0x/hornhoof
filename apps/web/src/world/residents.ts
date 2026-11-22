@@ -815,6 +815,9 @@ function applyStaticStatePose(r: ResidentEntity): void {
   }
 }
 
+/* Isometric tile distance covered per full walk stride (2*PI radians), preventing foot sliding at any speed. */
+const WALK_STRIDE_TILES = 0.65;
+
 /* Advances all residents smoothly along their road paths and role behavior loops.
    Zero per-frame allocations on the steady path so 150 residents step in < 0.25 ms. */
 export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): void {
@@ -823,7 +826,6 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
 
   for (let i = 0; i < sim.residents.length; i++) {
     const r = sim.residents[i]!;
-    r.walkPhase += dt * 6.5;
 
     if (r.liveState === 'machine_offline' || r.liveState === 'exhausted' || r.liveState === 'turn_failed' || r.liveState === 'waiting_human') {
       applyStaticStatePose(r);
@@ -837,10 +839,16 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
     }
 
     if (r.liveState === 'idle') {
-      /* Calm stroll near own house. */
+      /* Calm stroll near own house; walkPhase follows actual tile displacement. */
+      const prevCol = r.col;
+      const prevRow = r.row;
       const phase = sim.timeSec * 0.7 + i * 0.9;
       r.col = r.homeTile.col + Math.cos(phase) * 0.45;
       r.row = r.homeTile.row + Math.sin(phase) * 0.45;
+      const idleMoved = Math.hypot(r.col - prevCol, r.row - prevRow);
+      if (idleMoved > 1e-4) {
+        r.walkPhase += (idleMoved / WALK_STRIDE_TILES) * Math.PI * 2;
+      }
       r.pose = 'idle';
       r.carrying = 'none';
       continue;
@@ -907,14 +915,20 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
     const dist = Math.hypot(dc, dr);
     const step = r.speedTilesPerSec * dt;
 
+    let movedTiles = 0;
     if (dist <= step) {
       r.col = target.col;
       r.row = target.row;
+      movedTiles = dist;
       r.pathIndex++;
     } else {
       r.col += (dc / dist) * step;
       r.row += (dr / dist) * step;
+      movedTiles = step;
       r.facing = directionFromDelta(dc, dr);
+    }
+    if (movedTiles > 1e-4) {
+      r.walkPhase += (movedTiles / WALK_STRIDE_TILES) * Math.PI * 2;
     }
 
     /* Enforce class invariants while walking. */

@@ -17,6 +17,7 @@ import {
   houseStageFromLevel,
   machinePowerTier,
   nextLevelProgress,
+  nextSubscriptionResetAt,
   outfitTierFromLevel,
   residenceStageFromAcceptedTasks,
   subscriptionFullness,
@@ -412,5 +413,31 @@ describe('canonical world formulas (single source of truth)', () => {
         recentlyLeveledUp: false,
       }),
     ).toBe('idle');
+  });
+
+  it('extracts earliest future subscription reset timestamp across windows and groups', () => {
+    const now = Date.parse('2026-11-22T10:00:00.000Z');
+    const updated = '2026-11-22T09:58:00.000Z';
+    expect(
+      nextSubscriptionResetAt(
+        {
+          status: 'allowed',
+          windows: [
+            { kind: 'five_hour', utilization: 0.7, resetsAt: '2026-11-22T14:00:00.000Z' },
+            { kind: 'seven_day', utilization: 0.3, resetsAt: '2026-11-26T10:00:00.000Z' },
+          ],
+          groups: [
+            {
+              name: 'opus',
+              status: 'allowed',
+              windows: [{ kind: 'five_hour', utilization: 0.9, resetsAt: '2026-11-22T12:30:00.000Z' }],
+            },
+          ],
+        },
+        updated,
+        now,
+      ),
+    ).toBe('2026-11-22T12:30:00.000Z');
+    expect(nextSubscriptionResetAt(null, null, now)).toBeNull();
   });
 });

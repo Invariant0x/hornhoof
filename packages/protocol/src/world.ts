@@ -516,6 +516,34 @@ export function subscriptionFullness(
   };
 }
 
+/* Extracts the earliest future limit-window reset timestamp for a subscription (ISO string or null). */
+export function nextSubscriptionResetAt(
+  limits: Limits | null,
+  limitsUpdatedAt: string | Date | null,
+  now = Date.now(),
+): string | null {
+  const live = currentLimits(limits, limitsUpdatedAt, now);
+  if (!live) return null;
+  let earliestMs = Infinity;
+  let earliestIso: string | null = null;
+  const consider = (resetsAt: string | null) => {
+    if (!resetsAt) return;
+    const ms = Date.parse(resetsAt);
+    if (!Number.isFinite(ms) || ms <= now) return;
+    if (ms < earliestMs) {
+      earliestMs = ms;
+      earliestIso = resetsAt;
+    }
+  };
+  for (const w of live.windows) consider(w.resetsAt);
+  if (live.groups) {
+    for (const g of live.groups) {
+      for (const w of g.windows) consider(w.resetsAt);
+    }
+  }
+  return earliestIso;
+}
+
 /* Sizes a machine's district hub building from its reported CPU cores and RAM bytes. */
 export function machinePowerTier(cores: number | null, memoryBytes: number | null): MachinePowerResult {
   const cpu = typeof cores === 'number' && cores > 0 ? cores : 2;
@@ -638,6 +666,14 @@ export type WorldLiveSubscription = Readonly<{
   fullness: number;
   exhausted: boolean;
   active: boolean;
+  resetsAt?: string | null;
+}>;
+
+export type WorldLiveChildGoal = Readonly<{
+  id: string;
+  number: number;
+  title: string;
+  status: 'active' | 'reached';
 }>;
 
 export type WorldLiveGoal = Readonly<{
@@ -651,6 +687,7 @@ export type WorldLiveGoal = Readonly<{
   unit: string;
   childGoalsTotal: number;
   childGoalsReached: number;
+  childGoals?: readonly WorldLiveChildGoal[];
   tasksTotal: number;
   tasksDone: number;
   progress: number;

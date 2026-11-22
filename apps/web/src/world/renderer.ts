@@ -48,6 +48,11 @@ import {
   renderConstructionLoopsFallback2D,
   renderConstructionLoopsToPixi,
 } from './construction-renderer';
+import {
+  renderDepartmentFocusFallback2D,
+  renderDepartmentFocusToPixi,
+  type DepartmentFocusSpec,
+} from './department-focus';
 import { cityToPickableObjects } from './live-sync';
 import {
   pickResidentAtScreen,
@@ -168,6 +173,7 @@ export class IsometricWorldEngine {
   private relocationPreview: RelocationTargetPreview | null = null;
   private residentSim: ResidentSimulation | null = null;
   private constructionSim: ConstructionSimulation | null = null;
+  private departmentFocus: DepartmentFocusSpec | null = null;
   private lastConstructionCityVersion = -1;
   private selectedResidentId: string | null = null;
   private residentPickingEnabled = true;
@@ -193,6 +199,7 @@ export class IsometricWorldEngine {
   private cityGraphic: Graphics | null = null;
   private residentsGraphic: Graphics | null = null;
   private constructionGraphic: Graphics | null = null;
+  private departmentFocusGraphic: Graphics | null = null;
   private borderGraphic: Graphics | null = null;
   private overlayGraphic: Graphics | null = null;
 
@@ -315,6 +322,7 @@ export class IsometricWorldEngine {
       const cityGraphic = new Graphics();
       const residentsGraphic = new Graphics();
       const constructionGraphic = new Graphics();
+      const departmentFocusGraphic = new Graphics();
       const borderGraphic = new Graphics();
       const overlayGraphic = new Graphics();
 
@@ -374,6 +382,7 @@ export class IsometricWorldEngine {
       worldContainer.addChild(cityGraphic);
       worldContainer.addChild(residentsGraphic);
       worldContainer.addChild(constructionGraphic);
+      worldContainer.addChild(departmentFocusGraphic);
       worldContainer.addChild(borderGraphic);
       worldContainer.addChild(overlayGraphic);
       app.stage.addChild(worldContainer);
@@ -384,6 +393,7 @@ export class IsometricWorldEngine {
       this.cityGraphic = cityGraphic;
       this.residentsGraphic = residentsGraphic;
       this.constructionGraphic = constructionGraphic;
+      this.departmentFocusGraphic = departmentFocusGraphic;
       this.borderGraphic = borderGraphic;
       this.overlayGraphic = overlayGraphic;
       if (this.cityRenderState) {
@@ -591,11 +601,11 @@ export class IsometricWorldEngine {
     this.emitStats(true);
   }
 
-  zoomIn(): void {
+  zoomBy(factor: number): void {
     const center = { x: this.viewport.width / 2, y: this.viewport.height / 2 };
     this.camera = zoomCameraAt(
       this.camera,
-      ZOOM_STEP_FACTOR,
+      factor,
       center,
       this.viewport,
       this.zoomBounds.minZoom,
@@ -606,19 +616,64 @@ export class IsometricWorldEngine {
     this.emitStats(true);
   }
 
+  zoomIn(): void {
+    this.zoomBy(ZOOM_STEP_FACTOR);
+  }
+
   zoomOut(): void {
-    const center = { x: this.viewport.width / 2, y: this.viewport.height / 2 };
-    this.camera = zoomCameraAt(
-      this.camera,
-      1 / ZOOM_STEP_FACTOR,
-      center,
-      this.viewport,
-      this.zoomBounds.minZoom,
-      this.zoomBounds.maxZoom,
-      this.bounds,
+    this.zoomBy(1 / ZOOM_STEP_FACTOR);
+  }
+
+  fitToCity(): void {
+    const city = this.cityRenderState?.city;
+    if (!city || city.buildings.length === 0) {
+      this.centerOnTile(this.terrainMap?.startCenter ?? { col: Math.floor(this.pack.mapSize / 2), row: Math.floor(this.pack.mapSize / 2) }, 1.0);
+      return;
+    }
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const b of city.buildings) {
+      const top = tileTopVertexToWorld(b.col, b.row, this.tileW, this.tileH);
+      const bottom = tileTopVertexToWorld(b.col + b.spanCol, b.row + b.spanRow, this.tileW, this.tileH);
+      const left = tileTopVertexToWorld(b.col, b.row + b.spanRow, this.tileW, this.tileH);
+      const right = tileTopVertexToWorld(b.col + b.spanCol, b.row, this.tileW, this.tileH);
+      minX = Math.min(minX, left.x);
+      maxX = Math.max(maxX, right.x);
+      minY = Math.min(minY, top.y - 60);
+      maxY = Math.max(maxY, bottom.y + 30);
+    }
+    const spanW = Math.max(240, maxX - minX + 180);
+    const spanH = Math.max(180, maxY - minY + 180);
+    const fitZoom = Math.min(this.viewport.width / spanW, this.viewport.height / spanH);
+    this.setCamera({
+      x: (minX + maxX) * 0.5,
+      y: (minY + maxY) * 0.5,
+      zoom: clamp(fitZoom, this.zoomBounds.minZoom, this.zoomBounds.maxZoom),
+    });
+  }
+
+  centerOnBuilding(buildingId: string, zoom?: number): boolean {
+    const b = this.cityRenderState?.city.buildings.find(item => item.id === buildingId);
+    if (!b) return false;
+    this.centerOnTile(
+      { col: b.col + (b.spanCol - 1) * 0.5, row: b.row + (b.spanRow - 1) * 0.5 },
+      zoom ?? this.camera.zoom,
     );
+    return true;
+  }
+
+  setDepartmentFocus(focus: DepartmentFocusSpec | null): void {
+    this.departmentFocus = focus;
+    if (!focus && this.departmentFocusGraphic) {
+      this.departmentFocusGraphic.clear();
+    }
     this.dirtyScene = true;
-    this.emitStats(true);
+  }
+
+  getDepartmentFocus(): DepartmentFocusSpec | null {
+    return this.departmentFocus;
   }
 
   resetZoom(): void {
@@ -1131,6 +1186,23 @@ export class IsometricWorldEngine {
         }
       }
 
+      if (this.departmentFocusGraphic) {
+        this.departmentFocusGraphic.clear();
+        if (this.departmentFocus && this.cityRenderState) {
+          renderDepartmentFocusToPixi(
+            this.departmentFocusGraphic,
+            this.departmentFocus,
+            this.cityRenderState.city,
+            this.residentSim?.residents ?? [],
+            this.pack.mapSize,
+            this.tileW,
+            this.tileH,
+            this.camera.zoom,
+            this.residentSim?.timeSec ?? 0,
+          );
+        }
+      }
+
       this.drawBuildGridPixi(visibleRect);
       if (this.lastBorderZoom !== this.camera.zoom) {
         this.lastBorderZoom = this.camera.zoom;
@@ -1388,6 +1460,18 @@ export class IsometricWorldEngine {
         rect,
         this.tileW,
         this.tileH,
+      );
+    }
+    if (this.departmentFocus && this.cityRenderState) {
+      renderDepartmentFocusFallback2D(
+        ctx,
+        this.departmentFocus,
+        this.cityRenderState.city,
+        this.residentSim?.residents ?? [],
+        this.pack.mapSize,
+        this.tileW,
+        this.tileH,
+        this.camera.zoom,
       );
     }
 

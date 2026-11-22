@@ -117,7 +117,11 @@ async function openMapWith(page: Page, width: Width, lang: Lang, theme: ThemeCho
   await page.route('**/api/org', route => route.fulfill({ json: sampleOrg() }));
   await page.route('**/api/version', route => route.fulfill({ json: VERSION }));
   await page.goto('/');
-  await expect(page.locator('.map .dept')).toHaveCount(2);
+  if (theme === 'egypt') {
+    await expect(page.locator('[data-world-canvas="egypt"]')).toBeVisible();
+  } else {
+    await expect(page.locator('.map .dept')).toHaveCount(2);
+  }
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
   await expect(page.locator('.map-version')).toBeVisible();
   await page.evaluate(async () => { await document.fonts.ready; });

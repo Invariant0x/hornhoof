@@ -15,11 +15,13 @@ import {
   houseStageFromLevel,
   machinePowerTier,
   nextLevelProgress,
+  nextSubscriptionResetAt,
   outfitTierFromLevel,
   residenceStageFromAcceptedTasks,
   subscriptionFullness,
   type WorldLiveActiveCall,
   type WorldLiveAgent,
+  type WorldLiveChildGoal,
   type WorldLiveCurrentTask,
   type WorldLiveDepartment,
   type WorldLiveGoal,
@@ -262,6 +264,7 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
       fullness: full.fullness,
       exhausted: full.exhausted,
       active: full.active,
+      resetsAt: nextSubscriptionResetAt(s.limits, s.limitsUpdatedAt, now),
     };
   });
   const subById = new Map(liveSubscriptions.map(s => [s.id, s]));
@@ -465,14 +468,20 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
 
   /* Top-level goals (monuments): count child goals & tasks, identify the primary company goal. */
   const topGoals = goalRows.filter(g => g.parentGoalId === null);
-  const childTotals = new Map<string, { total: number; reached: number }>();
+  const childTotals = new Map<string, { total: number; reached: number; list: WorldLiveChildGoal[] }>();
   for (const g of goalRows) {
     if (!g.parentGoalId) continue;
     const root = rootGoalOf(g.id, goalParentById);
     if (!root || root === g.id) continue;
-    const acc = childTotals.get(root) ?? { total: 0, reached: 0 };
+    const acc = childTotals.get(root) ?? { total: 0, reached: 0, list: [] };
     acc.total++;
     if (g.status === 'reached') acc.reached++;
+    acc.list.push({
+      id: g.id,
+      number: g.number,
+      title: g.title,
+      status: g.status === 'reached' ? 'reached' : 'active',
+    });
     childTotals.set(root, acc);
   }
   const primaryGoalId =
@@ -482,7 +491,7 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
     null;
 
   const liveGoals: WorldLiveGoal[] = topGoals.map(g => {
-    const children = childTotals.get(g.id) ?? { total: 0, reached: 0 };
+    const children = childTotals.get(g.id) ?? { total: 0, reached: 0, list: [] };
     const tasksTotal = goalTasksTotal.get(g.id) ?? 0;
     const tasksDone = goalTasksDone.get(g.id) ?? 0;
     const monument = goalMonumentProgress({
@@ -505,6 +514,7 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
       unit: g.unit,
       childGoalsTotal: children.total,
       childGoalsReached: children.reached,
+      childGoals: children.list,
       tasksTotal,
       tasksDone,
       progress: monument.progress,
