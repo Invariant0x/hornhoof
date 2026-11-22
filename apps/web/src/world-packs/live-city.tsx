@@ -25,6 +25,11 @@ import {
   type LiveCitySyncResult,
 } from '../world/live-sync';
 import type { WorldPackManifest } from '../world/manifest';
+import {
+  createConstructionSimulation,
+  startBuildingRelocation,
+  type ConstructionSimulation,
+} from '../world/construction';
 import { IsometricWorldEngine, type RendererDebugInfo, type WorldEngineStats } from '../world/renderer';
 import {
   HumanWakeGate,
@@ -320,6 +325,7 @@ function Stage4LiveWorld() {
   const cityRef = useRef<CityState | null>(null);
   const syncRef = useRef<LiveCitySyncResult | null>(null);
   const simRef = useRef<ResidentSimulation | null>(null);
+  const constructionRef = useRef<ConstructionSimulation | null>(null);
   const wakeGateRef = useRef<HumanWakeGate>(new HumanWakeGate());
   const relocatingRef = useRef<string | null>(null);
   relocatingRef.current = relocatingBuildingId;
@@ -386,6 +392,8 @@ function Stage4LiveWorld() {
     syncRef.current = synced;
     const sim = createResidentSimulation(pack, synced.city, snapshot);
     simRef.current = sim;
+    const constructionSim = createConstructionSimulation(pack);
+    constructionRef.current = constructionSim;
     setResidentsCount(sim.residents.length);
 
     void IsometricWorldEngine.create({
@@ -461,6 +469,7 @@ function Stage4LiveWorld() {
         districtColors: synced.districtColors,
       });
       engine.setResidentSimulation(sim);
+      engine.setConstructionSimulation(constructionSim);
       engine.flushVisibleBakes();
       setStats(engine.getStats());
 
@@ -586,6 +595,12 @@ function Stage4LiveWorld() {
       districtColors: synced.districtColors,
     });
     engineRef.current?.setResidentSimulation(sim);
+    if (!constructionRef.current || constructionRef.current.packId !== pack.id) {
+      constructionRef.current = createConstructionSimulation(pack);
+      engineRef.current?.setConstructionSimulation(constructionRef.current);
+    } else {
+      engineRef.current?.markCityDirty();
+    }
   }, [pack, snapshot]);
 
   /* Toggle build grid cleanly on engine. */
@@ -717,6 +732,21 @@ function Stage4LiveWorld() {
   }, [confirmModal, scenario, apiNotice, relocationSeq]);
 
   const handleResolveDemoRelocation = useCallback((relocationId: string, outcome: 'applied' | 'cancelled') => {
+    if (outcome === 'applied' && constructionRef.current && cityRef.current) {
+      const targetRel = snapshot.relocations.find(r => r.id === relocationId);
+      const oldBuilding = targetRel
+        ? cityRef.current.buildings.find(b => b.id === targetRel.buildingId)
+        : undefined;
+      if (targetRel && oldBuilding) {
+        startBuildingRelocation(
+          constructionRef.current,
+          oldBuilding,
+          targetRel.toCol,
+          targetRel.toRow,
+          1.8,
+        );
+      }
+    }
     setSnapshot(prev => ({
       ...prev,
       relocations: prev.relocations.map(r =>
@@ -730,7 +760,7 @@ function Stage4LiveWorld() {
           : r,
       ),
     }));
-  }, []);
+  }, [snapshot.relocations]);
 
   const summary = syncResult?.summary ?? null;
 

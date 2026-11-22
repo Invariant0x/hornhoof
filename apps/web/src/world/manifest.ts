@@ -39,6 +39,68 @@ export type AltarAnchorSpec = Readonly<{
   label?: Readonly<{ en: string; ru: string }>;
 }>;
 
+export const CONSTRUCTION_STAGE_IDS = [
+  'stakes_and_rope',
+  'foundation',
+  'low_walls_open',
+  'waist_walls_scaffold',
+  'full_walls',
+  'roof_beams',
+  'roof',
+  'finishing',
+  'complete',
+  'upgraded',
+] as const;
+
+export type ConstructionStageId = (typeof CONSTRUCTION_STAGE_IDS)[number];
+
+export type BuildingLoopKind =
+  | 'crane'
+  | 'hoist_block'
+  | 'dust'
+  | 'smoke'
+  | 'water'
+  | 'awning'
+  | 'celebration';
+
+export type WorkSlotAction =
+  | 'interior_mason'
+  | 'hammer_scaffold'
+  | 'carry_ramp'
+  | 'pull_sled'
+  | 'carve_statue'
+  | 'demolish_rubble';
+
+export type ConstructionStageSpec = Readonly<{
+  stage: number;
+  id: ConstructionStageId;
+  label: Readonly<{ en: string; ru: string }>;
+  heightRatio: number;
+  openInteriorVisible: boolean;
+  hasScaffolding: boolean;
+  hasRamp: boolean;
+  hasRoofBeams: boolean;
+  hasRoof: boolean;
+  hasFinishing: boolean;
+  hasUpgrades: boolean;
+  defaultLoops: readonly BuildingLoopKind[];
+}>;
+
+export type ConstructionPaletteSpec = Readonly<{
+  scaffoldWood: string;
+  rampEarth: string;
+  dustColor: string;
+  smokeColor: string;
+  waterColor: string;
+  awningPrimary: string;
+  awningSecondary: string;
+  capstoneColor: string;
+  celebrationPrimary: string;
+  celebrationSecondary: string;
+  statueBaseColor: string;
+  statueFinishedColor: string;
+}>;
+
 export type Direction8 = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
 export type UniqueRenderAngle5 = 'N' | 'NE' | 'E' | 'SE' | 'S';
 export type LodTierId = '1x' | '2x' | '4x' | '8x';
@@ -251,6 +313,9 @@ export type WorldPackManifest = Readonly<{
   /* Pack-owned visual looks keyed by Hornhoof roleKey or generic archetype, plus per-class fallback looks. */
   roleLooks?: Readonly<Record<string, PackRoleLookSpec>>;
   classFallbackLooks?: Readonly<Record<ResidentRoleClass, PackRoleLookSpec>>;
+  /* Pack-owned Stage 6 construction stage sequence (1..10) and visual loop palette. */
+  constructionStages?: readonly ConstructionStageSpec[];
+  constructionPalette?: ConstructionPaletteSpec;
   materials?: readonly GroundMaterialSpec[];
   liquidLayer?: LiquidLayerSpec;
   terrainRecipe?: TerrainRecipeSpec;
@@ -356,6 +421,175 @@ const ENGINE_DEFAULT_CLASS_LOOKS: Readonly<Record<ResidentRoleClass, PackRoleLoo
     headgear: 'none',
   },
 };
+
+export const DEFAULT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = [
+  {
+    stage: 1,
+    id: 'stakes_and_rope',
+    label: { en: 'Stakes and Rope', ru: 'Колышки и веревка' },
+    heightRatio: 0.05,
+    openInteriorVisible: false,
+    hasScaffolding: false,
+    hasRamp: false,
+    hasRoofBeams: false,
+    hasRoof: false,
+    hasFinishing: false,
+    hasUpgrades: false,
+    defaultLoops: ['dust'],
+  },
+  {
+    stage: 2,
+    id: 'foundation',
+    label: { en: 'Site and Foundation', ru: 'Площадка и фундамент' },
+    heightRatio: 0.16,
+    openInteriorVisible: false,
+    hasScaffolding: false,
+    hasRamp: false,
+    hasRoofBeams: false,
+    hasRoof: false,
+    hasFinishing: false,
+    hasUpgrades: false,
+    defaultLoops: ['dust'],
+  },
+  {
+    stage: 3,
+    id: 'low_walls_open',
+    label: { en: 'First Wall Courses (Open Rooms)', ru: 'Первые ряды стен (видны комнаты)' },
+    heightRatio: 0.34,
+    openInteriorVisible: true,
+    hasScaffolding: false,
+    hasRamp: false,
+    hasRoofBeams: false,
+    hasRoof: false,
+    hasFinishing: false,
+    hasUpgrades: false,
+    defaultLoops: ['dust'],
+  },
+  {
+    stage: 4,
+    id: 'waist_walls_scaffold',
+    label: { en: 'Waist Walls with Scaffolding and Ramp', ru: 'Стены по пояс с лесами и пандусом' },
+    heightRatio: 0.56,
+    openInteriorVisible: true,
+    hasScaffolding: true,
+    hasRamp: true,
+    hasRoofBeams: false,
+    hasRoof: false,
+    hasFinishing: false,
+    hasUpgrades: false,
+    defaultLoops: ['crane', 'hoist_block', 'dust'],
+  },
+  {
+    stage: 5,
+    id: 'full_walls',
+    label: { en: 'Full-Height Walls', ru: 'Стены в рост' },
+    heightRatio: 0.82,
+    openInteriorVisible: false,
+    hasScaffolding: true,
+    hasRamp: true,
+    hasRoofBeams: false,
+    hasRoof: false,
+    hasFinishing: false,
+    hasUpgrades: false,
+    defaultLoops: ['crane', 'hoist_block', 'dust'],
+  },
+  {
+    stage: 6,
+    id: 'roof_beams',
+    label: { en: 'Roof Beams', ru: 'Балки' },
+    heightRatio: 0.9,
+    openInteriorVisible: false,
+    hasScaffolding: true,
+    hasRamp: false,
+    hasRoofBeams: true,
+    hasRoof: false,
+    hasFinishing: false,
+    hasUpgrades: false,
+    defaultLoops: ['crane', 'hoist_block', 'dust'],
+  },
+  {
+    stage: 7,
+    id: 'roof',
+    label: { en: 'Roofing', ru: 'Крыша' },
+    heightRatio: 0.96,
+    openInteriorVisible: false,
+    hasScaffolding: true,
+    hasRamp: false,
+    hasRoofBeams: false,
+    hasRoof: true,
+    hasFinishing: false,
+    hasUpgrades: false,
+    defaultLoops: ['dust'],
+  },
+  {
+    stage: 8,
+    id: 'finishing',
+    label: { en: 'Finishing Trim', ru: 'Отделка' },
+    heightRatio: 1.0,
+    openInteriorVisible: false,
+    hasScaffolding: true,
+    hasRamp: false,
+    hasRoofBeams: false,
+    hasRoof: true,
+    hasFinishing: true,
+    hasUpgrades: false,
+    defaultLoops: ['dust', 'awning'],
+  },
+  {
+    stage: 9,
+    id: 'complete',
+    label: { en: 'Complete', ru: 'Готово' },
+    heightRatio: 1.0,
+    openInteriorVisible: false,
+    hasScaffolding: false,
+    hasRamp: false,
+    hasRoofBeams: false,
+    hasRoof: true,
+    hasFinishing: true,
+    hasUpgrades: false,
+    defaultLoops: ['awning', 'smoke'],
+  },
+  {
+    stage: 10,
+    id: 'upgraded',
+    label: { en: 'Upgraded Annex', ru: 'Улучшения' },
+    heightRatio: 1.16,
+    openInteriorVisible: false,
+    hasScaffolding: false,
+    hasRamp: false,
+    hasRoofBeams: false,
+    hasRoof: true,
+    hasFinishing: true,
+    hasUpgrades: true,
+    defaultLoops: ['awning', 'smoke'],
+  },
+];
+
+export const DEFAULT_CONSTRUCTION_PALETTE: ConstructionPaletteSpec = {
+  scaffoldWood: '#B9874A',
+  rampEarth: '#C9AD7F',
+  dustColor: '#DFCFAF',
+  smokeColor: '#6D717C',
+  waterColor: '#56BDE8',
+  awningPrimary: '#C96A4B',
+  awningSecondary: '#F2E5C4',
+  capstoneColor: '#FFDC62',
+  celebrationPrimary: '#FFE270',
+  celebrationSecondary: '#5FD1A8',
+  statueBaseColor: '#C5B89F',
+  statueFinishedColor: '#ECCB6C',
+};
+
+export function resolveConstructionStages(pack: WorldPackManifest): readonly ConstructionStageSpec[] {
+  if (pack.constructionStages && pack.constructionStages.length > 0) {
+    return pack.constructionStages;
+  }
+  return DEFAULT_CONSTRUCTION_STAGES;
+}
+
+export function resolveConstructionPalette(pack: WorldPackManifest): ConstructionPaletteSpec {
+  return pack.constructionPalette ?? DEFAULT_CONSTRUCTION_PALETTE;
+}
 
 /* Resolves a resident's visual look from the active world pack:
    exact roleKey -> archetype -> nearest class fallback -> neutral engine default. */

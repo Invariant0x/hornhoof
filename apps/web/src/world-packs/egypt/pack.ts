@@ -4,7 +4,10 @@
 import type { ResidentRoleClass } from '@hornhoof/protocol/world';
 import {
   DEFAULT_CAMERA_BOUNDS,
+  DEFAULT_CONSTRUCTION_STAGES,
   DEFAULT_ISOMETRIC_PROJECTION,
+  type ConstructionPaletteSpec,
+  type ConstructionStageSpec,
   type GroundMaterialSpec,
   type PackRoleLookSpec,
   type WorldPackManifest,
@@ -238,6 +241,39 @@ const EGYPT_MATERIALS: readonly GroundMaterialSpec[] = [
   },
 ];
 
+const EGYPT_STAGE_LABELS: Readonly<Record<string, Readonly<{ en: string; ru: string }>>> = {
+  stakes_and_rope: { en: 'Papyrus Cord and Stakes', ru: 'Колышки и веревка' },
+  foundation: { en: 'Limestone Foundation Pad', ru: 'Площадка и каменный фундамент' },
+  low_walls_open: { en: 'Mudbrick Courses (Open Rooms)', ru: 'Первые ряды стен (комнаты сверху)' },
+  waist_walls_scaffold: { en: 'Waist Walls, Cedar Scaffold & Ramp', ru: 'Стены по пояс с лесами и пандусом' },
+  full_walls: { en: 'Full Sun-Baked Walls', ru: 'Стены в полный рост' },
+  roof_beams: { en: 'Palm Timber Roof Beams', ru: 'Пальмовые балки перекрытия' },
+  roof: { en: 'Terrace Roof Deck', ru: 'Плоская крыша-терраса' },
+  finishing: { en: 'Stucco Reliefs & Painted Trim', ru: 'Штукатурка, рельефы и отделка' },
+  complete: { en: 'Completed Nile Building', ru: 'Готовое здание' },
+  upgraded: { en: 'Gilded Courtyard & Upper Terrace', ru: 'Улучшения: двор, галерея и золотой фриз' },
+};
+
+const EGYPT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = DEFAULT_CONSTRUCTION_STAGES.map(s => ({
+  ...s,
+  label: EGYPT_STAGE_LABELS[s.id] ?? s.label,
+}));
+
+const EGYPT_CONSTRUCTION_PALETTE: ConstructionPaletteSpec = {
+  scaffoldWood: '#BA8748',
+  rampEarth: '#D2B484',
+  dustColor: '#E8D8B4',
+  smokeColor: '#767880',
+  waterColor: '#4CC3EA',
+  awningPrimary: '#C96A4B',
+  awningSecondary: '#F7EBD0',
+  capstoneColor: '#FFE066',
+  celebrationPrimary: '#FFE474',
+  celebrationSecondary: '#4DA167',
+  statueBaseColor: '#D6C6A6',
+  statueFinishedColor: '#F0CA60',
+};
+
 export const EGYPT_WORLD_PACK: WorldPackManifest = {
   id: 'egypt',
   name: { en: 'Ancient Egypt', ru: 'Древний Египет' },
@@ -255,6 +291,8 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
   },
   roleLooks: EGYPT_ROLE_LOOKS,
   classFallbackLooks: EGYPT_CLASS_FALLBACKS,
+  constructionStages: EGYPT_CONSTRUCTION_STAGES,
+  constructionPalette: EGYPT_CONSTRUCTION_PALETTE,
   tiles: EGYPT_TILE_KINDS.map(k => ({
     id: k.id,
     fill: k.color,
@@ -283,7 +321,7 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
     statue: 20,
     monument: 10,
     flophouse: 6,
-    construction: 8,
+    construction: 10,
   },
   palette: {
     backdrop: '#1A1713',

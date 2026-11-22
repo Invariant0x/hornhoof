@@ -5,7 +5,10 @@
 import type { ResidentRoleClass } from '@hornhoof/protocol/world';
 import {
   DEFAULT_CAMERA_BOUNDS,
+  DEFAULT_CONSTRUCTION_STAGES,
   DEFAULT_ISOMETRIC_PROJECTION,
+  type ConstructionPaletteSpec,
+  type ConstructionStageSpec,
   type GroundMaterialSpec,
   type PackRoleLookSpec,
   type WorldPackManifest,
@@ -135,6 +138,39 @@ const DUNGEON_MATERIALS: readonly GroundMaterialSpec[] = [
   },
 ];
 
+const DUNGEON_STAGE_LABELS: Readonly<Record<string, Readonly<{ en: string; ru: string }>>> = {
+  stakes_and_rope: { en: 'Chalk Marks & Iron Pitons', ru: 'Разметка мелом и железные крючья' },
+  foundation: { en: 'Basalt Floor Slab', ru: 'Базальтовая плита фундамента' },
+  low_walls_open: { en: 'Cut Vault Partitions (Open Chambers)', ru: 'Нижние стены залов (видны комнаты)' },
+  waist_walls_scaffold: { en: 'Ashlar Walls, Iron Scaffold & Ramp', ru: 'Стены по пояс с железными лесами и спуском' },
+  full_walls: { en: 'Full Cavern Buttresses', ru: 'Полные каменные стены зала' },
+  roof_beams: { en: 'Forged Iron Vault Ribs', ru: 'Кованые сводчатые балки' },
+  roof: { en: 'Sealed Stone Vault', ru: 'Каменный свод' },
+  finishing: { en: 'Runic Carving & Brazier Trim', ru: 'Рунная резьба и отделка' },
+  complete: { en: 'Completed Subterranean Hall', ru: 'Готовый подземный зал' },
+  upgraded: { en: 'Crystal Spire & Runic Annex', ru: 'Улучшения: рунный шпиль и пристройка' },
+};
+
+const DUNGEON_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = DEFAULT_CONSTRUCTION_STAGES.map(s => ({
+  ...s,
+  label: DUNGEON_STAGE_LABELS[s.id] ?? s.label,
+}));
+
+const DUNGEON_CONSTRUCTION_PALETTE: ConstructionPaletteSpec = {
+  scaffoldWood: '#7F756A',
+  rampEarth: '#6D6E7A',
+  dustColor: '#A9ABB8',
+  smokeColor: '#56596A',
+  waterColor: '#64E3CE',
+  awningPrimary: '#5D5696',
+  awningSecondary: '#8FE0D4',
+  capstoneColor: '#64F5DC',
+  celebrationPrimary: '#FFD166',
+  celebrationSecondary: '#64E3CE',
+  statueBaseColor: '#8B8E9E',
+  statueFinishedColor: '#6EE8D6',
+};
+
 export const DUNGEON_WORLD_PACK: WorldPackManifest = {
   id: 'dungeon',
   name: { en: 'Subterranean Dungeon', ru: 'Подземелье' },
@@ -152,6 +188,8 @@ export const DUNGEON_WORLD_PACK: WorldPackManifest = {
   },
   roleLooks: DUNGEON_ROLE_LOOKS,
   classFallbackLooks: DUNGEON_CLASS_FALLBACKS,
+  constructionStages: DUNGEON_CONSTRUCTION_STAGES,
+  constructionPalette: DUNGEON_CONSTRUCTION_PALETTE,
   tiles: DUNGEON_TILE_KINDS.map(k => ({
     id: k.id,
     fill: k.color,
@@ -180,7 +218,7 @@ export const DUNGEON_WORLD_PACK: WorldPackManifest = {
     statue: 20,
     monument: 10,
     flophouse: 6,
-    construction: 8,
+    construction: 10,
   },
   palette: {
     backdrop: '#111118',

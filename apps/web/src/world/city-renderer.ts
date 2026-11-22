@@ -8,12 +8,16 @@ import type { WorldMode } from '@hornhoof/protocol/world';
 import type { Graphics } from 'pixi.js';
 import type { CityBuilding, CityState, RoadTier } from './city-layout';
 import {
+  resolveStageSpecForBuilding,
+  type BuildingConstructionState,
+} from './construction';
+import {
   tileCenterToWorld,
   tileDiamondVertices,
   tileTopVertexToWorld,
   type TileCoord,
 } from './coords';
-import type { WorldPackManifest } from './manifest';
+import { resolveConstructionPalette, type WorldPackManifest } from './manifest';
 
 export type RelocationTargetPreview = Readonly<{
   col: number;
@@ -36,6 +40,7 @@ export type CityRenderState = Readonly<{
   emptyLotStakes?: readonly TileCoord[];
   districtColors?: Readonly<Record<string, string>>;
   relocationPreview?: RelocationTargetPreview | null;
+  constructionJobs?: ReadonlyMap<string, BuildingConstructionState>;
 }>;
 
 function parseHex(color: string | undefined, fallback: number): number {
@@ -149,6 +154,9 @@ function drawIsoPyramidPixi(
   leftColor: number,
   rightColor: number,
   reached: boolean,
+  capstoneColor = 0xffdc66,
+  rampColor = 0xc9ad7f,
+  tierCount = 5,
 ): void {
   const cx = (q.top.x + q.bottom.x) * 0.5;
   const cy = (q.top.y + q.bottom.y) * 0.5;
@@ -173,7 +181,7 @@ function drawIsoPyramidPixi(
       .fill({ color: rightColor, alpha: 1 })
       .stroke({ color: 0x3a2c1c, alpha: 0.55, width: 1.1 });
 
-    /* Golden capstone at peak + celebratory glowing ring. */
+    /* Gleaming apex capstone + celebratory glowing halo. */
     const capFrac = 0.24;
     const lx = cx + (q.left.x - cx) * capFrac;
     const ly = apexY + (q.left.y - baseHeight - apexY) * capFrac;
@@ -182,16 +190,18 @@ function drawIsoPyramidPixi(
     const rx = cx + (q.right.x - cx) * capFrac;
     const ry = apexY + (q.right.y - baseHeight - apexY) * capFrac;
 
-    g.moveTo(lx, ly).lineTo(bx, by).lineTo(cx, apexY).closePath().fill({ color: 0xffdc66, alpha: 1 });
-    g.moveTo(bx, by).lineTo(rx, ry).lineTo(cx, apexY).closePath().fill({ color: 0xdca428, alpha: 1 });
-    g.circle(cx, apexY - 6, 12).fill({ color: 0xffe88c, alpha: 0.34 });
-    g.circle(cx, apexY - 6, 5).fill({ color: 0xfff5c0, alpha: 0.95 });
+    g.moveTo(lx, ly).lineTo(bx, by).lineTo(cx, apexY).closePath().fill({ color: capstoneColor, alpha: 1 });
+    g.moveTo(bx, by).lineTo(rx, ry).lineTo(cx, apexY).closePath().fill({ color: shadeHex(capstoneColor, 0.84), alpha: 1 });
+    g.circle(cx, apexY - 6, 12).fill({ color: capstoneColor, alpha: 0.34 });
+    g.circle(cx, apexY - 6, 5).fill({ color: 0xfff7cc, alpha: 0.96 });
   } else {
-    /* Stepped construction tiers proportional to progress. */
-    const tiers = Math.max(2, Math.min(6, Math.round((apexHeight / 28) + 1)));
+    /* Stepped masonry tiers proportional to progress (1..10 tiers) + earthen haul ramp on front face. */
+    const tiers = Math.max(1, Math.min(10, tierCount));
+    const tierH = apexHeight / Math.max(1, tiers);
+    let topEdgeX = q.bottom.x;
+    let topEdgeY = q.bottom.y - baseHeight;
     for (let t = 0; t < tiers; t++) {
-      const f0 = (t / (tiers + 0.6)) * 0.62;
-      const tierH = apexHeight / tiers;
+      const f0 = (t / (Math.max(2, tiers) + 1.1)) * 0.72;
       const yOff = baseHeight + t * tierH;
       const tq: IsoQuad = {
         top: { x: q.top.x + (cx - q.top.x) * f0, y: q.top.y + (cy - q.top.y) * f0 - yOff },
@@ -207,7 +217,331 @@ function drawIsoPyramidPixi(
         shadeHex(leftColor, 0.96),
         shadeHex(rightColor, 0.95),
       );
+      topEdgeX = (tq.bottom.x + tq.right.x) * 0.5;
+      topEdgeY = (tq.bottom.y + tq.right.y) * 0.5 - tierH;
     }
+
+    /* Sloped earthen construction ramp hugging the front-right face up to the active top tier. */
+    const rampFootX = (q.bottom.x + q.right.x) * 0.5 + 14;
+    const rampFootY = (q.bottom.y + q.right.y) * 0.5 + 8;
+    g.moveTo(rampFootX - 10, rampFootY + 4)
+      .lineTo(rampFootX + 10, rampFootY - 4)
+      .lineTo(topEdgeX + 7, topEdgeY - 2)
+      .lineTo(topEdgeX - 7, topEdgeY + 4)
+      .closePath()
+      .fill({ color: rampColor, alpha: 0.95 });
+    g.moveTo(rampFootX - 10, rampFootY + 4)
+      .lineTo(topEdgeX - 7, topEdgeY + 4)
+      .lineTo(topEdgeX - 7, topEdgeY + 12)
+      .lineTo(rampFootX - 10, rampFootY + 10)
+      .closePath()
+      .fill({ color: shadeHex(rampColor, 0.78), alpha: 0.95 });
+  }
+}
+
+/* Draws timber/iron scaffolding frame + optional earthen haul ramp around a structure under construction. */
+function drawScaffoldAndRampPixi(
+  g: Graphics,
+  q: IsoQuad,
+  height: number,
+  woodHex: number,
+  rampHex: number,
+  withRamp: boolean,
+): void {
+  const scH = Math.max(16, height + 6);
+  for (const pt of [q.left, q.bottom, q.right]) {
+    g.rect(pt.x - 1.8, pt.y - scH, 3.6, scH + 2).fill({ color: shadeHex(woodHex, 0.85), alpha: 0.96 });
+  }
+  const levels = scH > 32 ? [0.38, 0.74, 0.96] : [0.5, 0.92];
+  for (const frac of levels) {
+    const yOff = scH * frac;
+    g.moveTo(q.left.x, q.left.y - yOff)
+      .lineTo(q.bottom.x, q.bottom.y - yOff)
+      .lineTo(q.right.x, q.right.y - yOff)
+      .stroke({ color: woodHex, alpha: 0.96, width: 2.5 });
+  }
+  /* Diagonal structural cross-braces on both front faces. */
+  g.moveTo(q.left.x, q.left.y - 3)
+    .lineTo(q.bottom.x, q.bottom.y - scH * 0.85)
+    .moveTo(q.bottom.x, q.bottom.y - 3)
+    .lineTo(q.right.x, q.right.y - scH * 0.85)
+    .stroke({ color: shadeHex(woodHex, 0.78), alpha: 0.84, width: 1.5 });
+
+  if (withRamp) {
+    const midX = (q.bottom.x + q.right.x) * 0.5;
+    const midY = (q.bottom.y + q.right.y) * 0.5;
+    const footX = midX + 22;
+    const footY = midY + 12;
+    g.moveTo(footX - 8, footY + 3)
+      .lineTo(footX + 8, footY - 3)
+      .lineTo(midX + 6, midY - height * 0.78 - 2)
+      .lineTo(midX - 6, midY - height * 0.78 + 3)
+      .closePath()
+      .fill({ color: rampHex, alpha: 0.96 });
+    g.moveTo(footX - 8, footY + 3)
+      .lineTo(midX - 6, midY - height * 0.78 + 3)
+      .lineTo(midX - 6, midY + 2)
+      .lineTo(footX - 8, footY + 7)
+      .closePath()
+      .fill({ color: shadeHex(rampHex, 0.76), alpha: 0.94 });
+  }
+}
+
+/* Draws all 10 pack-driven Stage 6 construction stages for a building (stakes & rope -> foundation ->
+   open interior room walls -> waist walls with scaffold & ramp -> full walls -> roof beams -> roof ->
+   finishing -> complete -> upgraded annex). */
+function drawBuildingConstructionStagesPixi(
+  g: Graphics,
+  b: CityBuilding,
+  job: BuildingConstructionState,
+  pack: WorldPackManifest,
+  districtColor: number,
+  providerColor: number,
+  tileW: number,
+  tileH: number,
+): void {
+  const pal = resolveConstructionPalette(pack);
+  const woodHex = parseHex(pal.scaffoldWood, 0xb9874a);
+  const rampHex = parseHex(pal.rampEarth, 0xc9ad7f);
+  const spec = resolveStageSpecForBuilding(b, job, pack);
+  const q = footprintQuad(b.col, b.row, b.spanCol, b.spanRow, tileW, tileH, b.spanCol >= 3 ? 0.08 : 0.12);
+  const cx = (q.top.x + q.bottom.x) * 0.5;
+  const cy = (q.top.y + q.bottom.y) * 0.5;
+  const maxWallH = 26 + b.spanCol * 6;
+  const wallBase = b.kind === 'department' ? 0xd3c4a7 : 0xd5be9b;
+
+  /* Stage 1: Stakes and taut survey rope around cleared building pad. */
+  if (spec.id === 'stakes_and_rope') {
+    g.moveTo(q.top.x, q.top.y)
+      .lineTo(q.right.x, q.right.y)
+      .lineTo(q.bottom.x, q.bottom.y)
+      .lineTo(q.left.x, q.left.y)
+      .closePath()
+      .fill({ color: rampHex, alpha: 0.45 });
+    g.moveTo(q.top.x, q.top.y - 11)
+      .lineTo(q.right.x, q.right.y - 11)
+      .lineTo(q.bottom.x, q.bottom.y - 11)
+      .lineTo(q.left.x, q.left.y - 11)
+      .closePath()
+      .stroke({ color: 0xe6cfa0, alpha: 0.94, width: 2 });
+    for (const pt of [q.top, q.right, q.bottom, q.left]) {
+      g.rect(pt.x - 1.6, pt.y - 18, 3.2, 19).fill({ color: 0x6b4728, alpha: 1 });
+      g.moveTo(pt.x, pt.y - 18)
+        .lineTo(pt.x + 8, pt.y - 15)
+        .lineTo(pt.x, pt.y - 11)
+        .closePath()
+        .fill({ color: 0xe26245, alpha: 0.95 });
+    }
+    return;
+  }
+
+  /* Stage 2: Leveled site & masonry foundation slab with corner plinth blocks. */
+  if (spec.id === 'foundation') {
+    drawIsoPrismPixi(g, q, 8, 0xcabca0, 0xb2a387, 0x8f826a);
+    const pad = footprintQuad(b.col, b.row, b.spanCol, b.spanRow, tileW, tileH, 0.2);
+    g.moveTo(pad.top.x, pad.top.y - 8)
+      .lineTo(pad.right.x, pad.right.y - 8)
+      .lineTo(pad.bottom.x, pad.bottom.y - 8)
+      .lineTo(pad.left.x, pad.left.y - 8)
+      .closePath()
+      .fill({ color: 0x9c8e77, alpha: 0.65 });
+    return;
+  }
+
+  const wallH = Math.round(maxWallH * Math.min(1, spec.heightRatio));
+
+  /* Stage 3 & 4: Open-top walls where interior rooms & partition walls are clearly visible from above! */
+  if (spec.openInteriorVisible) {
+    drawIsoPrismPixi(g, q, wallH, shadeHex(wallBase, 1.06), wallBase, shadeHex(wallBase, 0.78));
+    /* Recessed interior floor showing divided room bays from above. */
+    const inset = Math.min(0.28, b.spanCol * 0.14);
+    const roomQ = footprintQuad(b.col, b.row, b.spanCol, b.spanRow, tileW, tileH, inset);
+    const floorDrop = Math.max(4, wallH - 6);
+    g.moveTo(roomQ.top.x, roomQ.top.y - floorDrop)
+      .lineTo(roomQ.right.x, roomQ.right.y - floorDrop)
+      .lineTo(roomQ.bottom.x, roomQ.bottom.y - floorDrop)
+      .lineTo(roomQ.left.x, roomQ.left.y - floorDrop)
+      .closePath()
+      .fill({ color: 0x6c5e4b, alpha: 0.96 });
+
+    /* Interior cross-partition walls dividing visible rooms inside the open shell! */
+    const midTL = { x: (roomQ.top.x + roomQ.left.x) * 0.5, y: (roomQ.top.y + roomQ.left.y) * 0.5 - floorDrop };
+    const midBR = { x: (roomQ.bottom.x + roomQ.right.x) * 0.5, y: (roomQ.bottom.y + roomQ.right.y) * 0.5 - floorDrop };
+    const midTR = { x: (roomQ.top.x + roomQ.right.x) * 0.5, y: (roomQ.top.y + roomQ.right.y) * 0.5 - floorDrop };
+    const midBL = { x: (roomQ.bottom.x + roomQ.left.x) * 0.5, y: (roomQ.bottom.y + roomQ.left.y) * 0.5 - floorDrop };
+    g.moveTo(midTL.x, midTL.y)
+      .lineTo(midBR.x, midBR.y)
+      .moveTo(midTR.x, midTR.y)
+      .lineTo(midBL.x, midBL.y)
+      .stroke({ color: shadeHex(wallBase, 1.04), alpha: 0.96, width: 4.5 });
+
+    if (spec.hasScaffolding) {
+      drawScaffoldAndRampPixi(g, q, wallH, woodHex, rampHex, spec.hasRamp);
+    }
+    return;
+  }
+
+  /* Stage 5..10: Full walls -> Roof beams -> Roof -> Finishing -> Complete -> Upgraded Annex. */
+  drawIsoPrismPixi(g, q, wallH, shadeHex(wallBase, 1.07), wallBase, shadeHex(wallBase, 0.79));
+
+  /* Recessed front doorway portal on full walls. */
+  const doorX = (q.left.x + q.bottom.x) * 0.5;
+  const doorY = (q.left.y + q.bottom.y) * 0.5;
+  g.rect(doorX - 6, doorY - 17, 12, 17).fill({ color: 0x3b2f23, alpha: 0.9 });
+
+  if (spec.hasRoofBeams) {
+    /* Stage 6: Exposed dark interior + parallel timber/iron roof beams spanning top! */
+    const insetQ = footprintQuad(b.col, b.row, b.spanCol, b.spanRow, tileW, tileH, 0.22);
+    g.moveTo(insetQ.top.x, insetQ.top.y - wallH)
+      .lineTo(insetQ.right.x, insetQ.right.y - wallH)
+      .lineTo(insetQ.bottom.x, insetQ.bottom.y - wallH)
+      .lineTo(insetQ.left.x, insetQ.left.y - wallH)
+      .closePath()
+      .fill({ color: 0x4b3f33, alpha: 0.94 });
+    const beams = 5;
+    for (let i = 1; i <= beams; i++) {
+      const t = i / (beams + 1);
+      const ax = q.top.x + (q.left.x - q.top.x) * t;
+      const ay = q.top.y + (q.left.y - q.top.y) * t - wallH;
+      const bx = q.right.x + (q.bottom.x - q.right.x) * t;
+      const by = q.right.y + (q.bottom.y - q.right.y) * t - wallH;
+      g.moveTo(ax, ay).lineTo(bx, by).stroke({ color: woodHex, alpha: 1, width: 4.0 });
+    }
+  }
+
+  if (spec.hasRoof) {
+    const roofColor = b.kind === 'department' ? 0x5d84a6 : providerColor;
+    const roofQ = footprintQuad(b.col, b.row, b.spanCol, b.spanRow, tileW, tileH, 0.28);
+    const rq: IsoQuad = {
+      top: { x: roofQ.top.x, y: roofQ.top.y - wallH },
+      right: { x: roofQ.right.x, y: roofQ.right.y - wallH },
+      bottom: { x: roofQ.bottom.x, y: roofQ.bottom.y - wallH },
+      left: { x: roofQ.left.x, y: roofQ.left.y - wallH },
+    };
+    drawIsoPrismPixi(
+      g,
+      rq,
+      spec.hasFinishing ? 10 : 6,
+      shadeHex(roofColor, 1.12),
+      roofColor,
+      shadeHex(roofColor, 0.78),
+    );
+  }
+
+  if (spec.hasFinishing) {
+    /* Painted decorative frieze band along front walls. */
+    const bandY = wallH * 0.74;
+    g.moveTo(q.left.x, q.left.y - bandY)
+      .lineTo(q.bottom.x, q.bottom.y - bandY)
+      .lineTo(q.right.x, q.right.y - bandY)
+      .stroke({ color: 0xebc254, alpha: 0.92, width: 3.2 });
+  }
+
+  if (spec.hasUpgrades) {
+    /* Stage 10: Elevated upper pavilion terrace + gilded trim + prominent banner. */
+    const upQ = footprintQuad(b.col, b.row, b.spanCol, b.spanRow, tileW, tileH, Math.min(0.65, b.spanCol * 0.26));
+    const uq: IsoQuad = {
+      top: { x: upQ.top.x, y: upQ.top.y - wallH - 10 },
+      right: { x: upQ.right.x, y: upQ.right.y - wallH - 10 },
+      bottom: { x: upQ.bottom.x, y: upQ.bottom.y - wallH - 10 },
+      left: { x: upQ.left.x, y: upQ.left.y - wallH - 10 },
+    };
+    drawIsoPrismPixi(g, uq, 16, 0xf5e8c8, 0xe4d2a8, 0xc4b082);
+    drawFlagMastPixi(g, cx, cy - wallH - 26, 22, 0xf2c14e);
+  } else if (!spec.hasScaffolding) {
+    drawFlagMastPixi(g, cx, cy - wallH - 10, 18, b.kind === 'department' ? 0x5ca6e6 : districtColor);
+  }
+
+  if (spec.hasScaffolding) {
+    drawScaffoldAndRampPixi(g, q, wallH, woodHex, rampHex, spec.hasRamp);
+  }
+}
+
+/* Draws all 20 sculptural stages of a department statue (1..20): survey plinth -> rough carved legs ->
+   torso & arms -> head/crown -> fine gilded trim -> gleaming finished colossus at stage 20. */
+function drawStatue20StagesPixi(
+  g: Graphics,
+  b: CityBuilding,
+  stage: number,
+  maxStage: number,
+  pack: WorldPackManifest,
+  tileW: number,
+  tileH: number,
+): void {
+  const pal = resolveConstructionPalette(pack);
+  const woodHex = parseHex(pal.scaffoldWood, 0xb9874a);
+  const baseHex = parseHex(pal.statueBaseColor, 0xc8bca4);
+  const finishHex = parseHex(pal.statueFinishedColor, 0xeecc64);
+  const q = footprintQuad(b.col, b.row, b.spanCol, b.spanRow, tileW, tileH, 0.14);
+  const cx = (q.top.x + q.bottom.x) * 0.5;
+  const cy = (q.top.y + q.bottom.y) * 0.5;
+  const clampedStage = Math.max(1, Math.min(maxStage, stage));
+  const ratio = clampedStage / Math.max(1, maxStage);
+  const finished = clampedStage >= maxStage || Boolean(b.reached);
+  const stoneHex = finished ? finishHex : clampedStage >= 17 ? shadeHex(baseHex, 1.09) : baseHex;
+
+  /* Stage 1..2: Surveyed pedestal pad & foundation stones. */
+  const plinthH = 8 + b.spanCol * 4;
+  if (clampedStage <= 2) {
+    drawIsoPrismPixi(g, q, Math.round(plinthH * (clampedStage / 2)), shadeHex(baseHex, 1.06), baseHex, shadeHex(baseHex, 0.8));
+    return;
+  }
+
+  /* Stepped plinth base. */
+  drawIsoPrismPixi(g, q, plinthH, 0xd8ceb9, 0xbfb39c, 0x9b8f7a);
+
+  const scale = 0.85 + b.spanCol * 0.42;
+  const bodyMaxH = 38 * scale;
+  const carvedH = Math.round(bodyMaxH * Math.min(1, (clampedStage - 2) / 14));
+
+  /* Lower sculpted pedestal & legs block (stages 3..9). */
+  const legH = Math.min(carvedH, Math.round(bodyMaxH * 0.48));
+  const legQ = footprintQuad(b.col, b.row, b.spanCol, b.spanRow, tileW, tileH, 0.32);
+  const lq: IsoQuad = {
+    top: { x: legQ.top.x, y: legQ.top.y - plinthH },
+    right: { x: legQ.right.x, y: legQ.right.y - plinthH },
+    bottom: { x: legQ.bottom.x, y: legQ.bottom.y - plinthH },
+    left: { x: legQ.left.x, y: legQ.left.y - plinthH },
+  };
+  drawIsoPrismPixi(g, lq, legH, shadeHex(stoneHex, 1.1), stoneHex, shadeHex(stoneHex, 0.78));
+
+  /* Sculpted upper torso & arms emerging (stages 10..16). */
+  if (clampedStage >= 10) {
+    const torsoH = Math.round(bodyMaxH * 0.42 * Math.min(1, (clampedStage - 9) / 5));
+    const torsoBaseY = plinthH + legH;
+    const torsoQ = footprintQuad(b.col, b.row, b.spanCol, b.spanRow, tileW, tileH, 0.36);
+    const tq: IsoQuad = {
+      top: { x: torsoQ.top.x, y: torsoQ.top.y - torsoBaseY },
+      right: { x: torsoQ.right.x, y: torsoQ.right.y - torsoBaseY },
+      bottom: { x: torsoQ.bottom.x, y: torsoQ.bottom.y - torsoBaseY },
+      left: { x: torsoQ.left.x, y: torsoQ.left.y - torsoBaseY },
+    };
+    drawIsoPrismPixi(g, tq, torsoH, shadeHex(stoneHex, 1.12), stoneHex, shadeHex(stoneHex, 0.8));
+
+    /* Carved head & ceremonial headdress/crown (stages 14..20). */
+    if (clampedStage >= 14) {
+      const headY = cy - torsoBaseY - torsoH - 9 * scale;
+      g.circle(cx, headY, 8 * scale).fill({ color: stoneHex, alpha: 1 });
+      if (clampedStage >= 16) {
+        g.moveTo(cx - 7 * scale, headY - 4 * scale)
+          .lineTo(cx, headY - 19 * scale)
+          .lineTo(cx + 7 * scale, headY - 4 * scale)
+          .closePath()
+          .fill({ color: clampedStage >= 18 ? 0xffdc64 : shadeHex(stoneHex, 1.08), alpha: 1 });
+      }
+    }
+
+    /* Fine gilded collar & emblem trim (stages 17..20). */
+    if (clampedStage >= 17) {
+      const trimY = cy - torsoBaseY - torsoH * 0.72;
+      g.rect(cx - 10 * scale, trimY, 20 * scale, 4 * scale).fill({ color: 0xf6cf58, alpha: 0.96 });
+    }
+  }
+
+  /* Active timber scaffolding around stages 4..19; cleanly removed at gleaming stage 20! */
+  if (!finished && clampedStage >= 4) {
+    const scH = plinthH + Math.round(bodyMaxH * ratio) + 12;
+    drawScaffoldAndRampPixi(g, q, scH, woodHex, 0xc9ad7f, false);
   }
 }
 
@@ -276,12 +610,55 @@ function drawBuildingPixi(
   districtColors: Readonly<Record<string, string>>,
   tileW: number,
   tileH: number,
+  job: BuildingConstructionState | null = null,
 ): void {
+  if (job && job.phase === 'cleared') return;
+
   const q = footprintQuad(b.col, b.row, b.spanCol, b.spanRow, tileW, tileH, b.spanCol >= 3 ? 0.08 : 0.12);
   const cx = (q.top.x + q.bottom.x) * 0.5;
   const cy = (q.top.y + q.bottom.y) * 0.5;
   const providerColor = b.provider ? parseHex(pack.palette.providers[b.provider], 0xc96a4b) : 0xb89b6a;
   const districtColor = b.districtId ? parseHex(districtColors[b.districtId], 0x4b8ca6) : 0xc8943a;
+  const pal = resolveConstructionPalette(pack);
+
+  if (b.kind === 'monument') {
+    const activeStage = job ? job.currentStage : b.stage;
+    const maxS = Math.max(1, job ? job.maxStage : b.maxStage);
+    const reached = job ? job.phase === 'complete' && activeStage >= maxS : Boolean(b.reached);
+    const progress = job
+      ? Math.max(0.1, Math.min(1, activeStage / maxS))
+      : Math.max(0.12, Math.min(1, b.progress ?? activeStage / maxS));
+    const maxApex = 38 + b.spanCol * 22;
+    const apexH = maxApex * (reached ? 1 : progress);
+    const tierCount = Math.max(1, Math.min(10, Math.round(progress * 10)));
+    drawIsoPyramidPixi(
+      g,
+      q,
+      10,
+      apexH,
+      0xdec48f,
+      0xb89c68,
+      reached,
+      parseHex(pal.capstoneColor, 0xffdc66),
+      parseHex(pal.rampEarth, 0xc9ad7f),
+      tierCount,
+    );
+    return;
+  }
+
+  if (b.kind === 'statue') {
+    const activeStage = job ? job.currentStage : b.stage;
+    const maxS = Math.max(1, job ? job.maxStage : b.maxStage);
+    drawStatue20StagesPixi(g, b, activeStage, maxS, pack, tileW, tileH);
+    return;
+  }
+
+  /* Any non-monument/non-statue structure tracked by a Stage 6 construction/demolition job
+     renders its exact pack-driven 10-stage architecture cleanly through completion & upgrades. */
+  if (job) {
+    drawBuildingConstructionStagesPixi(g, b, job, pack, districtColor, providerColor, tileW, tileH);
+    return;
+  }
 
   if (b.kind === 'residence') {
     if (b.stage <= 1) {
@@ -317,14 +694,6 @@ function drawBuildingPixi(
       drawFlagMastPixi(g, cx, cy - h - 14 - b.stage * 4, 22, 0xf2c14e);
     }
     if (b.resting) drawRestingBadgePixi(g, cx, cy - 54);
-    return;
-  }
-
-  if (b.kind === 'monument') {
-    const progress = Math.max(0.12, Math.min(1, b.progress ?? b.stage / Math.max(1, b.maxStage)));
-    const maxApex = 38 + b.spanCol * 22;
-    const apexH = maxApex * (b.reached ? 1 : progress);
-    drawIsoPyramidPixi(g, q, 10, apexH, 0xdec48f, 0xb89c68, Boolean(b.reached));
     return;
   }
 
@@ -392,23 +761,6 @@ function drawBuildingPixi(
       /* Empty supply emblem (dry basin). */
       g.circle(cx, cy - 16, 7).fill({ color: 0x3b2c26, alpha: 0.9 }).stroke({ color: 0xe26a5a, alpha: 0.95, width: 1.8 });
     }
-    return;
-  }
-
-  if (b.kind === 'statue') {
-    const ratio = Math.max(0.08, Math.min(1, b.stage / Math.max(1, b.maxStage)));
-    const plinthH = 8 + b.spanCol * 3;
-    drawIsoPrismPixi(g, q, plinthH, 0xd0c6b3, 0xb8ad98, 0x928772);
-    const colH = Math.round((20 + b.spanCol * 18) * ratio);
-    const mono = footprintQuad(b.col, b.row, b.spanCol, b.spanRow, tileW, tileH, 0.34);
-    const monoQ: IsoQuad = {
-      top: { x: mono.top.x, y: mono.top.y - plinthH },
-      right: { x: mono.right.x, y: mono.right.y - plinthH },
-      bottom: { x: mono.bottom.x, y: mono.bottom.y - plinthH },
-      left: { x: mono.left.x, y: mono.left.y - plinthH },
-    };
-    const statueColor = b.reached ? 0xe8c468 : 0xc6baa6;
-    drawIsoPrismPixi(g, monoQ, colH, shadeHex(statueColor, 1.1), statueColor, shadeHex(statueColor, 0.78));
     return;
   }
 
@@ -510,16 +862,34 @@ export function renderCityToPixi(
     drawEmptyLotPropsPixi(g, state.emptyLotStakes, city.center, tileW, tileH);
   }
 
-  /* 4. Depth-sorted placeholder structures (viewport-culled). */
-  const sorted = city.buildings
-    .filter(b => rectInWindow(b.col, b.row, b.spanCol, b.spanRow))
-    .sort((a, b) => {
-      const da = a.col + a.row + (a.spanCol + a.spanRow) * 0.5;
-      const db = b.col + b.row + (b.spanCol + b.spanRow) * 0.5;
-      return da - db || a.col - b.col;
-    });
-  for (const b of sorted) {
-    drawBuildingPixi(g, b, pack, districtColors, tileW, tileH);
+  /* 4. Depth-sorted structures + relocating old-site demolition ghosts (viewport-culled). */
+  const jobs = state.constructionJobs;
+  const renderItems: Array<{ building: CityBuilding; job: BuildingConstructionState | null }> = [];
+  const seenIds = new Set<string>();
+  for (const b of city.buildings) {
+    seenIds.add(b.id);
+    const job = jobs?.get(b.id) ?? null;
+    if (job && job.phase === 'cleared') continue;
+    if (!rectInWindow(b.col, b.row, b.spanCol, b.spanRow)) continue;
+    renderItems.push({ building: b, job });
+  }
+  if (jobs) {
+    for (const job of jobs.values()) {
+      if (seenIds.has(job.buildingId) || job.phase === 'cleared') continue;
+      const snap = job.buildingSnapshot;
+      if (!rectInWindow(snap.col, snap.row, snap.spanCol, snap.spanRow)) continue;
+      renderItems.push({ building: snap, job });
+    }
+  }
+  renderItems.sort((a, b) => {
+    const ba = a.building;
+    const bb = b.building;
+    const da = ba.col + ba.row + (ba.spanCol + ba.spanRow) * 0.5;
+    const db = bb.col + bb.row + (bb.spanCol + bb.spanRow) * 0.5;
+    return da - db || ba.col - bb.col;
+  });
+  for (const item of renderItems) {
+    drawBuildingPixi(g, item.building, pack, districtColors, tileW, tileH, item.job);
   }
 
   /* 5. Pending God's Word relocation destination markers (building itself stays at old tile!). */

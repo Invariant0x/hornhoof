@@ -40,6 +40,14 @@ import {
   type RelocationTargetPreview,
   type TileWindow,
 } from './city-renderer';
+import {
+  stepConstructionSimulation,
+  type ConstructionSimulation,
+} from './construction';
+import {
+  renderConstructionLoopsFallback2D,
+  renderConstructionLoopsToPixi,
+} from './construction-renderer';
 import { cityToPickableObjects } from './live-sync';
 import {
   pickResidentAtScreen,
@@ -159,6 +167,8 @@ export class IsometricWorldEngine {
   private cityDirty = false;
   private relocationPreview: RelocationTargetPreview | null = null;
   private residentSim: ResidentSimulation | null = null;
+  private constructionSim: ConstructionSimulation | null = null;
+  private lastConstructionCityVersion = -1;
   private selectedResidentId: string | null = null;
   private residentPickingEnabled = true;
   private viewport: ViewportSize;
@@ -182,6 +192,7 @@ export class IsometricWorldEngine {
   private buildGridGraphic: Graphics | null = null;
   private cityGraphic: Graphics | null = null;
   private residentsGraphic: Graphics | null = null;
+  private constructionGraphic: Graphics | null = null;
   private borderGraphic: Graphics | null = null;
   private overlayGraphic: Graphics | null = null;
 
@@ -303,6 +314,7 @@ export class IsometricWorldEngine {
       const buildGridGraphic = new Graphics();
       const cityGraphic = new Graphics();
       const residentsGraphic = new Graphics();
+      const constructionGraphic = new Graphics();
       const borderGraphic = new Graphics();
       const overlayGraphic = new Graphics();
 
@@ -361,6 +373,7 @@ export class IsometricWorldEngine {
       worldContainer.addChild(buildGridGraphic);
       worldContainer.addChild(cityGraphic);
       worldContainer.addChild(residentsGraphic);
+      worldContainer.addChild(constructionGraphic);
       worldContainer.addChild(borderGraphic);
       worldContainer.addChild(overlayGraphic);
       app.stage.addChild(worldContainer);
@@ -370,6 +383,7 @@ export class IsometricWorldEngine {
       this.buildGridGraphic = buildGridGraphic;
       this.cityGraphic = cityGraphic;
       this.residentsGraphic = residentsGraphic;
+      this.constructionGraphic = constructionGraphic;
       this.borderGraphic = borderGraphic;
       this.overlayGraphic = overlayGraphic;
       if (this.cityRenderState) {
@@ -658,6 +672,22 @@ export class IsometricWorldEngine {
     this.dirtyScene = true;
   }
 
+  /* Attaches or clears the Stage 6 construction, animation loops and demolition/relocation simulation. */
+  setConstructionSimulation(sim: ConstructionSimulation | null): void {
+    this.constructionSim = sim;
+    this.lastConstructionCityVersion = sim ? sim.dirtyCityVersion : -1;
+    if (!sim) {
+      this.constructionGraphic?.clear();
+    }
+    this.cityDirty = true;
+    this.dirtyScene = true;
+  }
+
+  markCityDirty(): void {
+    this.cityDirty = true;
+    this.dirtyScene = true;
+  }
+
   setSelectedResidentId(residentId: string | null): void {
     this.selectedResidentId = residentId;
     if (residentId !== null) {
@@ -790,6 +820,18 @@ export class IsometricWorldEngine {
         this.tileH,
         animationDetailForZoom(this.camera.zoom),
         this.selectedResidentId,
+      );
+    }
+    if (this.app && this.constructionGraphic && this.constructionSim) {
+      renderConstructionLoopsToPixi(
+        this.constructionGraphic,
+        this.constructionSim,
+        this.cityRenderState?.city ?? null,
+        this.pack,
+        rect,
+        this.tileW,
+        this.tileH,
+        animationDetailForZoom(this.camera.zoom),
       );
     }
     this.app?.render();
@@ -927,25 +969,59 @@ export class IsometricWorldEngine {
       }
     }
 
+    /* Advance Stage 6 building loops, construction stages & demolition/relocation timers. */
+    let constructionAnimated = false;
+    if (this.constructionSim) {
+      const stageChanged = stepConstructionSimulation(this.constructionSim, dtMs / 1000);
+      if (stageChanged || this.constructionSim.dirtyCityVersion !== this.lastConstructionCityVersion) {
+        this.lastConstructionCityVersion = this.constructionSim.dirtyCityVersion;
+        this.cityDirty = true;
+        this.dirtyScene = true;
+      }
+      constructionAnimated = true;
+      if (!this.app) {
+        this.dirtyScene = true;
+      }
+    }
+
     const needsSync = this.dirtyScene || this.pendingBakeCount > 0;
     if (needsSync) {
       this.syncScene(BAKE_BUDGET_MS);
     }
-    if (this.app && this.residentsGraphic && this.residentSim && (residentsAnimated || needsSync)) {
+    if (
+      this.app &&
+      ((this.residentsGraphic && this.residentSim && (residentsAnimated || needsSync)) ||
+        (this.constructionGraphic && this.constructionSim && (constructionAnimated || needsSync)))
+    ) {
       const visRect = visibleWorldRect(this.camera, this.viewport, this.tileW);
-      renderResidentsToPixi(
-        this.residentsGraphic,
-        this.residentSim,
-        this.cityRenderState?.city ?? null,
-        this.pack,
-        visRect,
-        this.tileW,
-        this.tileH,
-        animationDetailForZoom(this.camera.zoom),
-        this.selectedResidentId,
-      );
+      const detail = animationDetailForZoom(this.camera.zoom);
+      if (this.residentsGraphic && this.residentSim && (residentsAnimated || needsSync)) {
+        renderResidentsToPixi(
+          this.residentsGraphic,
+          this.residentSim,
+          this.cityRenderState?.city ?? null,
+          this.pack,
+          visRect,
+          this.tileW,
+          this.tileH,
+          detail,
+          this.selectedResidentId,
+        );
+      }
+      if (this.constructionGraphic && this.constructionSim && (constructionAnimated || needsSync)) {
+        renderConstructionLoopsToPixi(
+          this.constructionGraphic,
+          this.constructionSim,
+          this.cityRenderState?.city ?? null,
+          this.pack,
+          visRect,
+          this.tileW,
+          this.tileH,
+          detail,
+        );
+      }
     }
-    if (this.app && (needsSync || liquidAnimated || residentsAnimated)) {
+    if (this.app && (needsSync || liquidAnimated || residentsAnimated || constructionAnimated)) {
       this.app.render();
     }
     this.lastCpuStepMs = performance.now() - stepStart;
@@ -1047,7 +1123,10 @@ export class IsometricWorldEngine {
               maxRow: vMaxR + pad,
             };
             this.cityCullWindow = nextWindow;
-            renderCityToPixi(this.cityGraphic, this.cityRenderState, this.pack, this.tileW, this.tileH, nextWindow);
+            const renderStateWithJobs: CityRenderState = this.constructionSim
+              ? { ...this.cityRenderState, constructionJobs: this.constructionSim.jobs }
+              : this.cityRenderState;
+            renderCityToPixi(this.cityGraphic, renderStateWithJobs, this.pack, this.tileW, this.tileH, nextWindow);
           }
         }
       }
@@ -1299,6 +1378,18 @@ export class IsometricWorldEngine {
         this.selectedResidentId,
       );
     }
+    if (this.constructionSim) {
+      const rect = visibleWorldRect(this.camera, this.viewport, this.tileW);
+      renderConstructionLoopsFallback2D(
+        ctx,
+        this.constructionSim,
+        this.cityRenderState?.city ?? null,
+        this.pack,
+        rect,
+        this.tileW,
+        this.tileH,
+      );
+    }
 
     ctx.beginPath();
     ctx.moveTo(top.x, top.y);
@@ -1407,7 +1498,9 @@ export class IsometricWorldEngine {
     this.buildGridGraphic = null;
     this.cityGraphic = null;
     this.residentsGraphic = null;
+    this.constructionGraphic = null;
     this.residentSim = null;
+    this.constructionSim = null;
 
     if (this.app) {
       this.app.destroy(true, { children: true, texture: true });
