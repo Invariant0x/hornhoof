@@ -3,6 +3,7 @@
    materials, liquid layer and procedural terrain recipe. */
 
 import type { ResidentRoleClass, RoleArchetype } from '@hornhoof/protocol/world';
+import { validateArtCatalog, type WorldArtCatalog } from './art';
 import type { TileCoord } from './coords';
 
 export type EngineKind = 'isometric-2d' | '3d';
@@ -321,6 +322,8 @@ export type WorldPackManifest = Readonly<{
   terrainRecipe?: TerrainRecipeSpec;
   /* Optional pure tile resolver for stub or preview packs; defaults to defaultTileId. */
   resolveEmptyTileId?: (col: number, row: number, chunkSize: number, mapSize: number) => string;
+  /* Slots for artist pictures and sheets (ARTIST_CONTRACT.md); without art the engine draws placeholders. */
+  art?: WorldArtCatalog;
 }>;
 
 /* Canonical 2:1 dimetric asset standard:
@@ -750,6 +753,10 @@ export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation 
 
   if (pack.outerWallMode !== undefined && pack.outerWallMode !== 'ring' && pack.outerWallMode !== 'none') {
     errors.push(`invalid outerWallMode "${String(pack.outerWallMode)}"`);
+  }
+
+  if (pack.art) {
+    errors.push(...validateArtCatalog(pack.art));
   }
 
   for (const [key, value] of Object.entries(pack.stageCounts)) {

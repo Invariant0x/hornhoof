@@ -12,6 +12,7 @@ import type {
 } from '@hornhoof/protocol/world';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import type { WorldArtStats } from '../world/art-runtime';
 import type { CityBuilding, CityState } from '../world/city-layout';
 import type { PickResult, TileCoord } from '../world/coords';
 import {
@@ -38,17 +39,13 @@ import {
   type ResidentSimulation,
 } from '../world/residents';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../world/terrain-engine';
-import { DUNGEON_WORLD_PACK } from './dungeon/pack';
-import { EGYPT_WORLD_PACK } from './egypt/pack';
+import { registeredWorldPacks, worldPackFromParam } from './registry';
 
-type PackKey = 'egypt' | 'dungeon';
+type PackKey = string;
 type ScenarioKey = 'hornhoof' | 'stress150' | 'empty' | 'no_subscription' | 'live';
 type LangKey = 'ru' | 'en';
 
-const PACKS: Record<PackKey, WorldPackManifest> = {
-  egypt: EGYPT_WORLD_PACK,
-  dungeon: DUNGEON_WORLD_PACK,
-};
+const PACKS: Readonly<Record<PackKey, WorldPackManifest>> = Object.fromEntries(registeredWorldPacks().map(p => [p.id, p]));
 
 const TEXT = {
   ru: {
@@ -250,6 +247,7 @@ type PendingModal = {
 type LiveWorldDebugHandle = {
   getStats: () => WorldEngineStats | null;
   getDebugInfo: () => RendererDebugInfo | null;
+  getArtStats: () => WorldArtStats | null;
   getSummary: () => LiveCitySummary | null;
   getBuildings: () => readonly CityBuilding[];
   getResidents: () => readonly ResidentEntity[];
@@ -282,7 +280,7 @@ declare global {
 
 function readParams(): { pack: PackKey; scenario: ScenarioKey; lang: LangKey; zoom: number; grid: boolean } {
   const sp = new URLSearchParams(window.location.search);
-  const pack: PackKey = sp.get('pack') === 'dungeon' ? 'dungeon' : 'egypt';
+  const pack: PackKey = worldPackFromParam(sp.get('pack')).id;
   const rawMode = sp.get('mode');
   const scenario: ScenarioKey =
     rawMode === 'empty' || rawMode === 'no_subscription' || rawMode === 'live' || rawMode === 'stress150'
@@ -476,6 +474,7 @@ function Stage4LiveWorld() {
       window.__WORLD_LIVE__ = {
         getStats: () => engineRef.current?.getStats() ?? null,
         getDebugInfo: () => engineRef.current?.getRendererDebugInfo() ?? null,
+        getArtStats: () => engineRef.current?.getArtStats() ?? null,
         getSummary: () => syncRef.current?.summary ?? null,
         getBuildings: () => cityRef.current?.buildings ?? [],
         getResidents: () => simRef.current?.residents ?? [],
@@ -839,7 +838,7 @@ function Stage4LiveWorld() {
             aria-label="World Pack"
             data-testid="world-stage4-pack-select"
             value={packKey}
-            onChange={e => setPackKey(e.target.value as PackKey)}
+            onChange={e => setPackKey(e.target.value)}
             style={{
               background: '#24201A',
               color: '#F3EAD7',
@@ -849,8 +848,11 @@ function Stage4LiveWorld() {
               fontSize: 12,
             }}
           >
-            <option value="egypt">{EGYPT_WORLD_PACK.name[lang]}</option>
-            <option value="dungeon">{DUNGEON_WORLD_PACK.name[lang]}</option>
+            {registeredWorldPacks().map(p => (
+              <option key={p.id} value={p.id}>
+                {p.name[lang]}
+              </option>
+            ))}
           </select>
 
           <button

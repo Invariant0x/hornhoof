@@ -18,3 +18,13 @@ export function resolveWorldPack(worldId: string | null | undefined): WorldPackM
 export function registeredWorldPackIds(): readonly string[] {
   return Object.keys(WORLD_PACKS);
 }
+
+/* Every registered pack in registration order; demo pages list these, so a new pack needs no page edits. */
+export function registeredWorldPacks(): readonly WorldPackManifest[] {
+  return Object.values(WORLD_PACKS);
+}
+
+/* The pack named in a page address, or the first registered pack. */
+export function worldPackFromParam(raw: string | null | undefined): WorldPackManifest {
+  return (raw ? WORLD_PACKS[raw] : undefined) ?? Object.values(WORLD_PACKS)[0]!;
+}

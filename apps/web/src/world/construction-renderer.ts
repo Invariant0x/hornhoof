@@ -7,6 +7,8 @@
    Contains zero theme-specific words. */
 
 import type { Graphics } from 'pixi.js';
+import { masterTileW, resolveBuildingArt, type ArtPoint, type LoopAttachPoint, type SheetPassport } from './art';
+import type { DisplayRunPool, WorldArtLibrary } from './art-runtime';
 import type { CityBuilding, CityState } from './city-layout';
 import {
   buildingLoopsFor,
@@ -88,6 +90,66 @@ function fillSegment(
 
 function inRect(x: number, y: number, rect: WorldVisibleRect, pad: number): boolean {
   return x >= rect.minX - pad && x <= rect.maxX + pad && y >= rect.minY - pad && y <= rect.maxY + pad;
+}
+
+/* Artist loop sheets, and the attach points of buildings drawn from artist pictures. */
+export type LoopArtContext = Readonly<{
+  library: WorldArtLibrary;
+  pool: DisplayRunPool;
+}>;
+
+type LoopAnchors = Readonly<Record<LoopAttachPoint, { x: number; y: number }>>;
+
+/* Where loops attach on a building drawn from its picture, from the picture's passport; null for placeholders. */
+function artLoopAnchors(
+  art: LoopArtContext,
+  building: CityBuilding,
+  state: BuildingConstructionState | null,
+  pack: WorldPackManifest,
+  ctr: { x: number; y: number },
+  tileW: number,
+): LoopAnchors | null {
+  const index = art.library.index;
+  if (!index) return null;
+  const resolved = resolveBuildingArt(pack, index, building, state);
+  if (!resolved || resolved.layers.some(l => !art.library.frame(l.path, l.frame))) return null;
+  const p = resolved.passport;
+  const s = tileW / resolved.artPxPerTile;
+  const at = (pt: ArtPoint) => ({ x: ctr.x + (pt.x - p.groundAnchor.x) * s, y: ctr.y + (pt.y - p.groundAnchor.y) * s });
+  const top = p.topAnchor
+    ? at(p.topAnchor)
+    : at({ x: p.groundAnchor.x, y: p.roofLine ?? p.wallTopLine ?? p.corners.top.y });
+  return {
+    top,
+    awning: p.awningAnchor ? at(p.awningAnchor) : top,
+    door: p.door ? at(p.door) : ctr,
+    ground: ctr,
+  };
+}
+
+function drawLoopSheet(
+  art: LoopArtContext,
+  kind: string,
+  anchors: LoopAnchors,
+  timeSec: number,
+  phaseOffset: number,
+  intensity: number,
+  scale: number,
+): boolean {
+  const path = `loops/${kind}.png`;
+  const entry = art.library.index?.files[path];
+  const sheet = entry?.passport as SheetPassport | undefined;
+  if (!entry || !sheet || !('frames' in sheet)) return false;
+  const frameIdx = Math.floor((timeSec + phaseOffset) * sheet.fps) % sheet.frames;
+  const tex = art.library.frame(path, { x: frameIdx * sheet.frameW, y: 0, w: sheet.frameW, h: sheet.frameH });
+  if (!tex) return false;
+  const at = anchors[sheet.attach ?? 'top'];
+  const sprite = art.pool.sprite(tex);
+  sprite.anchor.set(sheet.anchor.x / sheet.frameW, sheet.anchor.y / sheet.frameH);
+  sprite.scale.set(scale);
+  sprite.position.set(at.x, at.y);
+  sprite.alpha = Math.max(0.2, Math.min(1, intensity));
+  return true;
 }
 
 function buildingCenter(b: CityBuilding, tileW: number, tileH: number): { x: number; y: number } {
@@ -429,9 +491,12 @@ export function renderConstructionLoopsToPixi(
   tileW: number,
   tileH: number,
   detail: AnimationDetailLevel,
+  art?: LoopArtContext | null,
 ): void {
   g.clear();
+  art?.pool.begin();
   if (!city) return;
+  const loopScale = tileW / masterTileW(pack);
 
   const pal = resolveConstructionPalette(pack);
   const woodHex = parseHex(pal.scaffoldWood, 0xb9874a);
@@ -462,11 +527,15 @@ export function renderConstructionLoopsToPixi(
     if (!inRect(ctr.x, ctr.y, visibleRect, 240)) continue;
 
     const loops = buildingLoopsFor(building, state, pack);
-    const roofH = roofElevationPx(building, state, pack);
+    const anchors = art ? artLoopAnchors(art, building, state, pack, ctr, tileW) : null;
+    const roofH = anchors ? Math.max(0, ctr.y - anchors.top.y) : roofElevationPx(building, state, pack);
     const spanPx = Math.max(tileW * 0.6, building.spanCol * tileW * 0.42);
     const hasHoist = loops.some(l => l.kind === 'hoist_block');
 
     for (const loop of loops) {
+      if (art && anchors && drawLoopSheet(art, loop.kind, anchors, sim.timeSec, loop.phaseOffset, loop.intensity, loopScale)) {
+        continue;
+      }
       switch (loop.kind) {
         case 'water':
           drawWaterLoop(g, ctr.x, ctr.y - 16, sim.timeSec, loop.phaseOffset, waterHex, loop.intensity);

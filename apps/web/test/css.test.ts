@@ -264,3 +264,8 @@ it('sizes the map scale label by its content from tokens without clipping and ke
   expect(decl('.zv', 'overflow')).toBeUndefined();
   expect(decl('.zv', 'text-overflow')).toBeUndefined();
 });
+
+/* The department card's on and off switches take the button colour of the active theme, as Design asked in #1906. */
+it('colours the department card switches with the theme button colour', () => {
+  expect(decl('.world-hier-graph .sw', 'accent-color')).toBe('var(--btn)');
+});

@@ -9,18 +9,14 @@ import {
   type GeneratedWorldMap,
 } from '../world/terrain-engine';
 import { renderProceduralMapPreview } from '../world/terrain-preview';
-import { DUNGEON_WORLD_PACK } from './dungeon/pack';
-import { EGYPT_WORLD_PACK } from './egypt/pack';
+import { registeredWorldPacks } from './registry';
 
 /* Multi-pack Stage 2 gallery viewer and smooth-blended isometric inspector.
    Lives outside engine core (src/world-packs/) and mounts any WorldPackManifest with a terrainRecipe. */
 
 type Lang = 'ru' | 'en';
 
-const AVAILABLE_PACKS: readonly WorldPackManifest[] = [
-  EGYPT_WORLD_PACK,
-  DUNGEON_WORLD_PACK,
-];
+const AVAILABLE_PACKS: readonly WorldPackManifest[] = registeredWorldPacks();
 
 const COPY: Record<
   Lang,
@@ -122,7 +118,7 @@ function readInitialQuery(): { lang: Lang; packId: string; seed: string | null }
   const params = new URLSearchParams(window.location.search);
   const lang: Lang = params.get('lang') === 'en' ? 'en' : 'ru';
   const rawPack = params.get('pack');
-  const packId = AVAILABLE_PACKS.some(p => p.id === rawPack) ? rawPack! : EGYPT_WORLD_PACK.id;
+  const packId = AVAILABLE_PACKS.some(p => p.id === rawPack) ? rawPack! : AVAILABLE_PACKS[0]!.id;
   const rawSeed = params.get('seed');
   return { lang, packId, seed: rawSeed && rawSeed.trim() ? rawSeed.trim() : null };
 }
@@ -525,7 +521,7 @@ function Stage2GalleryApp() {
   const engineRef = useRef<IsometricWorldEngine | null>(null);
 
   const activePack = useMemo(
-    () => AVAILABLE_PACKS.find(p => p.id === packId) ?? EGYPT_WORLD_PACK,
+    () => AVAILABLE_PACKS.find(p => p.id === packId) ?? AVAILABLE_PACKS[0]!,
     [packId],
   );
 

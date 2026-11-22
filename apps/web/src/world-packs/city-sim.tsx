@@ -13,8 +13,7 @@ import {
   SIM_SEEDS,
   type FiveYearSimResult,
 } from '../world/simulator';
-import { DUNGEON_WORLD_PACK } from './dungeon/pack';
-import { EGYPT_WORLD_PACK } from './egypt/pack';
+import { registeredWorldPacks } from './registry';
 
 /* Stage 3 multi-pack 5-year city growth timelapse and 3-seed x 3-knob Order/Chaos comparison viewer.
    Lives outside engine core (src/world-packs/) so engine core stays 100% pack-agnostic. */
@@ -22,10 +21,7 @@ import { EGYPT_WORLD_PACK } from './egypt/pack';
 type Lang = 'ru' | 'en';
 type ViewMode = 'timelapse' | 'matrix';
 
-const AVAILABLE_PACKS: readonly WorldPackManifest[] = [
-  EGYPT_WORLD_PACK,
-  DUNGEON_WORLD_PACK,
-];
+const AVAILABLE_PACKS: readonly WorldPackManifest[] = registeredWorldPacks();
 
 const COPY: Record<
   Lang,
@@ -217,7 +213,7 @@ function readInitialQuery(): { lang: Lang; mode: ViewMode; packId: string } {
   const lang: Lang = params.get('lang') === 'en' ? 'en' : 'ru';
   const mode: ViewMode = params.get('mode') === 'matrix' ? 'matrix' : 'timelapse';
   const rawPack = params.get('pack');
-  const packId = AVAILABLE_PACKS.some(p => p.id === rawPack) ? rawPack! : EGYPT_WORLD_PACK.id;
+  const packId = AVAILABLE_PACKS.some(p => p.id === rawPack) ? rawPack! : AVAILABLE_PACKS[0]!.id;
   return { lang, mode, packId };
 }
 
@@ -293,7 +289,7 @@ function Stage3CityApp() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const activePack = useMemo(
-    () => AVAILABLE_PACKS.find(p => p.id === packId) ?? EGYPT_WORLD_PACK,
+    () => AVAILABLE_PACKS.find(p => p.id === packId) ?? AVAILABLE_PACKS[0]!,
     [packId],
   );
 

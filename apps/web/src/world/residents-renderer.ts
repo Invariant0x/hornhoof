@@ -7,10 +7,25 @@
    so 150 simultaneous residents stay well within a 60 FPS frame budget. Contains zero theme-specific words. */
 
 import type { Graphics } from 'pixi.js';
+import {
+  ALTAR_PICTURE,
+  masterTileW,
+  resolveResidentArt,
+  type ArtIndex,
+  type BuildingPicturePassport,
+  type ResidentArt,
+} from './art';
+import { parseArtTint, type DisplayRunPool, type WorldArtLibrary } from './art-runtime';
 import type { CityBuilding, CityState } from './city-layout';
 import { tileCenterToWorld, tileTopVertexToWorld } from './coords';
 import type { AnimationDetailLevel, WorldPackManifest } from './manifest';
 import type { ResidentEntity, ResidentSimulation } from './residents';
+
+/* Artist sheets for residents and the altar picture, drawn in the pool in depth order. */
+export type ResidentArtContext = Readonly<{
+  library: WorldArtLibrary;
+  pool: DisplayRunPool;
+}>;
 
 export type WorldVisibleRect = Readonly<{
   minX: number;
@@ -679,6 +694,54 @@ function isOccludedByFrontBuilding(r: ResidentEntity, posX: number, posY: number
   return false;
 }
 
+function drawResidentArtPixi(
+  ctx: ResidentArtContext,
+  art: ResidentArt,
+  r: ResidentEntity,
+  pack: WorldPackManifest,
+  tileW: number,
+  tileH: number,
+  selected: boolean,
+): boolean {
+  const textures = art.layers.map(l => ctx.library.frame(l.path, l.frame));
+  if (textures.some(t => !t)) return false;
+  const pos = tileCenterToWorld(r.col, r.row, tileW, tileH);
+  const x = pos.x;
+  const y = pos.y + 2;
+  const g = ctx.pool.graphics();
+  if (selected) {
+    fillOctagon(g, x, y + 1, 23, 11.5, 0xffe484, 0.55);
+    fillOctagon(g, x, y + 1, 18, 9, 0xfff5c2, 0.34);
+  }
+  fillOctagon(g, x + 2, y + 2, 13, 6.2, 0x100c08, 0.28);
+  const s = tileW / masterTileW(pack);
+  art.layers.forEach((layer, i) => {
+    const sprite = ctx.pool.sprite(textures[i]!);
+    sprite.anchor.set(layer.anchor.x / layer.frame.w, layer.anchor.y / layer.frame.h);
+    sprite.scale.set(art.mirror ? -s : s, s);
+    sprite.position.set(x, y);
+    if (layer.tint) sprite.tint = parseArtTint(layer.tint);
+  });
+  ctx.library.stats.residentsDrawn++;
+  return true;
+}
+
+/* The altar picture sits on its tile like a 1x1 building; false keeps the placeholder shrine. */
+function drawAltarArtPixi(ctx: ResidentArtContext, index: ArtIndex, sim: ResidentSimulation, tileW: number, tileH: number): boolean {
+  const entry = index.files[ALTAR_PICTURE];
+  const p = entry?.passport as BuildingPicturePassport | undefined;
+  if (!entry || !p || !('groundAnchor' in p)) return false;
+  const tex = ctx.library.frame(ALTAR_PICTURE, { x: 0, y: 0, w: entry.w, h: entry.h });
+  if (!tex) return false;
+  const ctr = tileCenterToWorld(sim.altarTile.col, sim.altarTile.row, tileW, tileH);
+  const s = tileW / Math.max(1, p.corners.right.x - p.corners.left.x);
+  const sprite = ctx.pool.sprite(tex);
+  sprite.anchor.set(p.groundAnchor.x / entry.w, p.groundAnchor.y / entry.h);
+  sprite.scale.set(s);
+  sprite.position.set(ctr.x, ctr.y);
+  return true;
+}
+
 export function renderResidentsToPixi(
   g: Graphics,
   sim: ResidentSimulation,
@@ -690,9 +753,13 @@ export function renderResidentsToPixi(
   detail: AnimationDetailLevel,
   selectedResidentId: string | null,
   outDrawnIds?: Set<string>,
+  art?: ResidentArtContext | null,
 ): void {
   g.clear();
   outDrawnIds?.clear();
+  art?.pool.begin();
+  if (art) art.library.stats.residentsDrawn = 0;
+  const artIndex = art?.library.index ?? null;
 
   visibleBuildingBoxes.length = 0;
   if (city) {
@@ -722,7 +789,9 @@ export function renderResidentsToPixi(
     if (city.buildings.length > 0) {
       const altarPos = tileCenterToWorld(sim.altarTile.col, sim.altarTile.row, tileW, tileH);
       if (inRect(altarPos.x, altarPos.y, visibleRect, 140)) {
-        drawAltarPixi(g, sim, pack, tileW, tileH, detail);
+        if (!(art && artIndex && drawAltarArtPixi(art, artIndex, sim, tileW, tileH))) {
+          drawAltarPixi(g, sim, pack, tileW, tileH, detail);
+        }
       }
     }
   }
@@ -741,11 +810,19 @@ export function renderResidentsToPixi(
   for (let i = 0; i < visibleScratch.length; i++) {
     const r = visibleScratch[i]!;
     outDrawnIds?.add(r.id);
-    drawResidentPixi(g, r, sim.timeSec, tileW, tileH, detail, r.id === selectedResidentId);
+    const selected = r.id === selectedResidentId;
+    if (art && artIndex) {
+      const resolved = resolveResidentArt(pack, artIndex, r, sim.timeSec);
+      if (!resolved || !drawResidentArtPixi(art, resolved, r, pack, tileW, tileH, selected)) {
+        drawResidentPixi(art.pool.graphics(), r, sim.timeSec, tileW, tileH, detail, selected);
+      }
+      continue;
+    }
+    drawResidentPixi(g, r, sim.timeSec, tileW, tileH, detail, selected);
   }
 
   if (city) {
-    drawDepartmentAlertsPixi(g, sim, city, visibleRect, tileW, tileH, detail);
+    drawDepartmentAlertsPixi(art && artIndex ? art.pool.graphics() : g, sim, city, visibleRect, tileW, tileH, detail);
   }
 }
 

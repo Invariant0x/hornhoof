@@ -3799,6 +3799,9 @@ th.k-prio .sorth { white-space: nowrap; }
 .world-hier-meta-row .sw {
   margin-inline-start: auto;
 }
+.world-hier-graph .sw {
+  accent-color: var(--btn);
+}
 .world-hier-role {
   font-weight: 600;
   letter-spacing: 0.03em;

@@ -18,17 +18,13 @@ import {
 import { resolveConstructionStages, type WorldPackManifest } from '../world/manifest';
 import { IsometricWorldEngine, type WorldEngineStats } from '../world/renderer';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../world/terrain-engine';
-import { DUNGEON_WORLD_PACK } from './dungeon/pack';
-import { EGYPT_WORLD_PACK } from './egypt/pack';
+import { registeredWorldPacks, worldPackFromParam } from './registry';
 
-type PackKey = 'egypt' | 'dungeon';
+type PackKey = string;
 type DemoMode = 'build' | 'demolish';
 type LangKey = 'ru' | 'en';
 
-const PACKS: Record<PackKey, WorldPackManifest> = {
-  egypt: EGYPT_WORLD_PACK,
-  dungeon: DUNGEON_WORLD_PACK,
-};
+const PACKS: Readonly<Record<PackKey, WorldPackManifest>> = Object.fromEntries(registeredWorldPacks().map(p => [p.id, p]));
 
 const TEXT = {
   ru: {
@@ -111,7 +107,7 @@ declare global {
 
 function readParams(): { pack: PackKey; mode: DemoMode; lang: LangKey; zoom: number; autoplay: boolean } {
   const sp = new URLSearchParams(window.location.search);
-  const pack: PackKey = sp.get('pack') === 'dungeon' ? 'dungeon' : 'egypt';
+  const pack: PackKey = worldPackFromParam(sp.get('pack')).id;
   const mode: DemoMode = sp.get('mode') === 'demolish' ? 'demolish' : 'build';
   const lang: LangKey = sp.get('lang') === 'en' ? 'en' : 'ru';
   const zRaw = Number(sp.get('zoom') ?? '100');
@@ -552,7 +548,7 @@ function buildStage6ShowcaseCity(
     anchors,
     readout: {
       mode,
-      pack: pack.id === 'dungeon' ? 'dungeon' : 'egypt',
+      pack: pack.id,
       progress: Math.round(p * 1000) / 1000,
       buildingStage,
       buildingStageId: activeStageSpec.id,
@@ -747,7 +743,7 @@ function Stage6ConstructionStudio() {
             aria-label="World Pack"
             data-testid="world-stage6-pack"
             value={packKey}
-            onChange={e => setPackKey(e.target.value as PackKey)}
+            onChange={e => setPackKey(e.target.value)}
             style={{
               background: '#24201A',
               color: '#F3EAD7',
@@ -757,8 +753,11 @@ function Stage6ConstructionStudio() {
               fontSize: 12,
             }}
           >
-            <option value="egypt">{EGYPT_WORLD_PACK.name[lang]}</option>
-            <option value="dungeon">{DUNGEON_WORLD_PACK.name[lang]}</option>
+            {registeredWorldPacks().map(p => (
+              <option key={p.id} value={p.id}>
+                {p.name[lang]}
+              </option>
+            ))}
           </select>
 
           <button

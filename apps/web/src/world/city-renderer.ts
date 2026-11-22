@@ -6,6 +6,8 @@
 
 import type { WorldMode } from '@hornhoof/protocol/world';
 import type { Graphics } from 'pixi.js';
+import { artFootprintCentre, resolveBuildingArt, type BuildingArt } from './art';
+import { parseArtTint, type DisplayRunPool, type WorldArtLibrary } from './art-runtime';
 import type { CityBuilding, CityState, RoadTier } from './city-layout';
 import {
   resolveStageSpecForBuilding,
@@ -33,6 +35,15 @@ export type TileWindow = Readonly<{
   minRow: number;
   maxRow: number;
 }>;
+
+/* Artist pictures for buildings: drawn as sprites in the pool, with placeholders between them in depth order. */
+export type CityArtContext = Readonly<{
+  library: WorldArtLibrary;
+  pool: DisplayRunPool;
+  upgradingHouseIds?: ReadonlySet<string>;
+}>;
+
+const DEPARTMENT_BANNER_COLOR = '#5CA6E6';
 
 export type CityRenderState = Readonly<{
   city: CityState;
@@ -793,6 +804,37 @@ function drawBuildingPixi(
 
 /* Rebuilds the cached static isometric city geometry layer inside a PixiJS Graphics object,
    strictly frustum-culled to cullWindow so off-screen walls/roads/buildings never inflate GPU triangle counts. */
+/* Draws one building from its pictures; false while any texture is still loading. */
+function drawBuildingArtPixi(
+  ctx: CityArtContext,
+  art: BuildingArt,
+  b: CityBuilding,
+  tileW: number,
+  tileH: number,
+): boolean {
+  const textures = art.layers.map(l => ctx.library.frame(l.path, l.frame));
+  if (textures.some(t => !t)) return false;
+  const centre = artFootprintCentre(b, tileW, tileH);
+  const s = tileW / art.artPxPerTile;
+  art.layers.forEach((layer, i) => {
+    const sprite = ctx.pool.sprite(textures[i]!);
+    sprite.anchor.set(layer.anchor.x / layer.frame.w, layer.anchor.y / layer.frame.h);
+    sprite.scale.set(s);
+    sprite.position.set(centre.x + layer.offset.x * s, centre.y + layer.offset.y * s);
+    if (layer.tint) sprite.tint = parseArtTint(layer.tint);
+  });
+  if (b.resting) {
+    const top = art.passport.topAnchor ?? { x: art.passport.groundAnchor.x, y: 0 };
+    drawRestingBadgePixi(
+      ctx.pool.graphics(),
+      centre.x + (top.x - art.passport.groundAnchor.x) * s + 12,
+      centre.y + (top.y - art.passport.groundAnchor.y) * s + 10,
+    );
+  }
+  ctx.library.stats.buildingsDrawn++;
+  return true;
+}
+
 export function renderCityToPixi(
   g: Graphics,
   state: CityRenderState,
@@ -800,8 +842,12 @@ export function renderCityToPixi(
   tileW: number,
   tileH: number,
   cullWindow?: TileWindow | null,
+  art?: CityArtContext | null,
 ): void {
   g.clear();
+  art?.pool.begin();
+  if (art) art.library.stats.buildingsDrawn = 0;
+  const artIndex = art?.library.index ?? null;
   const { city } = state;
   const districtColors = state.districtColors ?? {};
 
@@ -889,10 +935,23 @@ export function renderCityToPixi(
     return da - db || ba.col - bb.col;
   });
   for (const item of renderItems) {
+    if (art && artIndex) {
+      const b = item.building;
+      const resolved = resolveBuildingArt(pack, artIndex, b, item.job, {
+        upgrading: b.kind === 'house' && Boolean(art.upgradingHouseIds?.has(b.id)),
+        districtColor: b.districtId ? districtColors[b.districtId] : undefined,
+        departmentColor: DEPARTMENT_BANNER_COLOR,
+      });
+      if (!resolved || !drawBuildingArtPixi(art, resolved, b, tileW, tileH)) {
+        drawBuildingPixi(art.pool.graphics(), b, pack, districtColors, tileW, tileH, item.job);
+      }
+      continue;
+    }
     drawBuildingPixi(g, item.building, pack, districtColors, tileW, tileH, item.job);
   }
 
   /* 5. Pending God's Word relocation destination markers (building itself stays at old tile!). */
+  const markerG = art && artIndex ? art.pool.graphics() : g;
   for (const b of city.buildings) {
     const pend = b.pendingRelocation;
     if (!pend) continue;
@@ -905,17 +964,17 @@ export function renderCityToPixi(
     const fromPt = tileCenterToWorld(b.col + b.spanCol * 0.5 - 0.5, b.row + b.spanRow * 0.5 - 0.5, tileW, tileH);
     const toPt = tileCenterToWorld(pend.toCol + b.spanCol * 0.5 - 0.5, pend.toRow + b.spanRow * 0.5 - 0.5, tileW, tileH);
     const tq = footprintQuad(pend.toCol, pend.toRow, b.spanCol, b.spanRow, tileW, tileH, 0.05);
-    g.moveTo(tq.top.x, tq.top.y)
+    markerG.moveTo(tq.top.x, tq.top.y)
       .lineTo(tq.right.x, tq.right.y)
       .lineTo(tq.bottom.x, tq.bottom.y)
       .lineTo(tq.left.x, tq.left.y)
       .closePath()
       .fill({ color: 0xffd166, alpha: 0.25 })
       .stroke({ color: 0xffd166, alpha: 0.96, width: 2.4 });
-    g.moveTo(fromPt.x, fromPt.y - 24)
+    markerG.moveTo(fromPt.x, fromPt.y - 24)
       .lineTo(toPt.x, toPt.y - 8)
       .stroke({ color: 0xffd166, alpha: 0.9, width: 2.2 });
-    g.circle(toPt.x, toPt.y - 8, 5).fill({ color: 0xffd166, alpha: 1 });
+    markerG.circle(toPt.x, toPt.y - 8, 5).fill({ color: 0xffd166, alpha: 1 });
   }
 }
 

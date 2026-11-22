@@ -16,6 +16,7 @@ import {
   type EffectiveZoomBounds,
   type ViewportSize,
 } from './camera';
+import { DisplayRunPool, WorldArtLibrary, type WorldArtStats } from './art-runtime';
 import { bakeChunkCanvas, buildTileLookup, type BakedChunk } from './chunk-baker';
 import { buildChunkGrid, ChunkLruCache, cullVisibleChunks, type ChunkCoord, type ChunkGrid } from './chunks';
 import {
@@ -36,6 +37,7 @@ import type { AnimationDetailLevel, LodTierId, LodTierSpec, TileSlotSpec, WorldP
 import {
   renderCityFallback2D,
   renderCityToPixi,
+  type CityArtContext,
   type CityRenderState,
   type RelocationTargetPreview,
   type TileWindow,
@@ -47,6 +49,7 @@ import {
 import {
   renderConstructionLoopsFallback2D,
   renderConstructionLoopsToPixi,
+  type LoopArtContext,
 } from './construction-renderer';
 import {
   renderDepartmentFocusFallback2D,
@@ -60,7 +63,7 @@ import {
   type ResidentEntity,
   type ResidentSimulation,
 } from './residents';
-import { renderResidentsFallback2D, renderResidentsToPixi } from './residents-renderer';
+import { renderResidentsFallback2D, renderResidentsToPixi, type ResidentArtContext } from './residents-renderer';
 import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas } from './smooth-terrain-baker';
 import type { GeneratedWorldMap } from './terrain-engine';
 
@@ -203,6 +206,12 @@ export class IsometricWorldEngine {
   private borderGraphic: Graphics | null = null;
   private overlayGraphic: Graphics | null = null;
   private readonly drawnResidentIds = new Set<string>();
+  /* Artist pictures and sheets from the pack's art folder; empty until art-index.json loads. */
+  private artLibrary: WorldArtLibrary = WorldArtLibrary.none();
+  private buildingArtPool: DisplayRunPool | null = null;
+  private residentArtPool: DisplayRunPool | null = null;
+  private loopArtPool: DisplayRunPool | null = null;
+  private lastScaffoldSig = '';
 
   /* Dirty-tracking keys eliminate per-frame scene-graph rebuilds during smooth 60 FPS panning. */
   private lastVisibleChunkSig = '';
@@ -321,8 +330,11 @@ export class IsometricWorldEngine {
       const chunkLayer = new Container();
       const buildGridGraphic = new Graphics();
       const cityGraphic = new Graphics();
+      const buildingArtLayer = new Container();
       const residentsGraphic = new Graphics();
+      const residentArtLayer = new Container();
       const constructionGraphic = new Graphics();
+      const loopArtLayer = new Container();
       const departmentFocusGraphic = new Graphics();
       const borderGraphic = new Graphics();
       const overlayGraphic = new Graphics();
@@ -381,8 +393,11 @@ export class IsometricWorldEngine {
       worldContainer.addChild(chunkLayer);
       worldContainer.addChild(buildGridGraphic);
       worldContainer.addChild(cityGraphic);
+      worldContainer.addChild(buildingArtLayer);
       worldContainer.addChild(residentsGraphic);
+      worldContainer.addChild(residentArtLayer);
       worldContainer.addChild(constructionGraphic);
+      worldContainer.addChild(loopArtLayer);
       worldContainer.addChild(departmentFocusGraphic);
       worldContainer.addChild(borderGraphic);
       worldContainer.addChild(overlayGraphic);
@@ -392,8 +407,11 @@ export class IsometricWorldEngine {
       this.chunkLayer = chunkLayer;
       this.buildGridGraphic = buildGridGraphic;
       this.cityGraphic = cityGraphic;
+      this.buildingArtPool = new DisplayRunPool(buildingArtLayer);
       this.residentsGraphic = residentsGraphic;
+      this.residentArtPool = new DisplayRunPool(residentArtLayer);
       this.constructionGraphic = constructionGraphic;
+      this.loopArtPool = new DisplayRunPool(loopArtLayer);
       this.departmentFocusGraphic = departmentFocusGraphic;
       this.borderGraphic = borderGraphic;
       this.overlayGraphic = overlayGraphic;
@@ -401,6 +419,7 @@ export class IsometricWorldEngine {
         this.cityDirty = true;
       }
       this.drawMapBorderPixi();
+      this.loadArt();
     } catch {
       this.mountFallbackCanvas();
     }
@@ -409,6 +428,49 @@ export class IsometricWorldEngine {
     this.lastFrameTs = performance.now();
     this.stepFrame(this.lastFrameTs);
     this.rafId = requestAnimationFrame(this.onAnimationFrame);
+  }
+
+  /* Reads the pack's art index once; every texture that finishes loading redraws the city. */
+  private loadArt(): void {
+    if (!this.pack.art) return;
+    void WorldArtLibrary.load(this.pack).then(library => {
+      if (this.destroyed) {
+        library.destroy();
+        return;
+      }
+      this.artLibrary.destroy();
+      this.artLibrary = library;
+      library.onChange(() => {
+        this.cityDirty = true;
+        this.dirtyScene = true;
+      });
+      this.cityDirty = true;
+      this.dirtyScene = true;
+    });
+  }
+
+  private cityArtContext(): CityArtContext | null {
+    if (!this.buildingArtPool || !this.pack.art) return null;
+    return {
+      library: this.artLibrary,
+      pool: this.buildingArtPool,
+      upgradingHouseIds: this.residentSim?.scaffoldingHouseIds,
+    };
+  }
+
+  private residentArtContext(): ResidentArtContext | null {
+    if (!this.residentArtPool || !this.pack.art) return null;
+    return { library: this.artLibrary, pool: this.residentArtPool };
+  }
+
+  private loopArtContext(): LoopArtContext | null {
+    if (!this.loopArtPool || !this.pack.art) return null;
+    return { library: this.artLibrary, pool: this.loopArtPool };
+  }
+
+  /* How much of the city is drawn from artist files instead of placeholders. */
+  getArtStats(): WorldArtStats {
+    return { ...this.artLibrary.stats };
   }
 
   private mountFallbackCanvas(): void {
@@ -724,6 +786,7 @@ export class IsometricWorldEngine {
     if (!sim) {
       this.selectedResidentId = null;
       this.residentsGraphic?.clear();
+      this.residentArtPool?.clear();
     }
     this.dirtyScene = true;
   }
@@ -734,6 +797,7 @@ export class IsometricWorldEngine {
     this.lastConstructionCityVersion = sim ? sim.dirtyCityVersion : -1;
     if (!sim) {
       this.constructionGraphic?.clear();
+      this.loopArtPool?.clear();
     }
     this.cityDirty = true;
     this.dirtyScene = true;
@@ -877,6 +941,7 @@ export class IsometricWorldEngine {
         animationDetailForZoom(this.camera.zoom),
         this.selectedResidentId,
         this.drawnResidentIds,
+        this.residentArtContext(),
       );
     }
     this.redrawDepartmentFocusPixi();
@@ -890,6 +955,7 @@ export class IsometricWorldEngine {
         this.tileW,
         this.tileH,
         animationDetailForZoom(this.camera.zoom),
+        this.loopArtContext(),
       );
     }
     this.app?.render();
@@ -1024,6 +1090,15 @@ export class IsometricWorldEngine {
     if (this.residentSim) {
       stepResidentSimulation(this.residentSim, dtMs / 1000);
       residentsAnimated = true;
+      if (this.pack.art) {
+        /* A house that starts or stops growing in place swaps to or from its annex picture. */
+        const sig = [...this.residentSim.scaffoldingHouseIds].join('|');
+        if (sig !== this.lastScaffoldSig) {
+          this.lastScaffoldSig = sig;
+          this.cityDirty = true;
+          this.dirtyScene = true;
+        }
+      }
       if (!this.app) {
         this.dirtyScene = true;
       }
@@ -1067,6 +1142,7 @@ export class IsometricWorldEngine {
           detail,
           this.selectedResidentId,
           this.drawnResidentIds,
+          this.residentArtContext(),
         );
         if (this.departmentFocus) {
           this.redrawDepartmentFocusPixi();
@@ -1082,6 +1158,7 @@ export class IsometricWorldEngine {
           this.tileW,
           this.tileH,
           detail,
+          this.loopArtContext(),
         );
       }
     }
@@ -1173,6 +1250,7 @@ export class IsometricWorldEngine {
             this.cityDirty = false;
             this.cityCullWindow = null;
             this.cityGraphic.clear();
+            this.buildingArtPool?.clear();
           }
         } else {
           const viewCorners = [
@@ -1201,7 +1279,15 @@ export class IsometricWorldEngine {
             const renderStateWithJobs: CityRenderState = this.constructionSim
               ? { ...this.cityRenderState, constructionJobs: this.constructionSim.jobs }
               : this.cityRenderState;
-            renderCityToPixi(this.cityGraphic, renderStateWithJobs, this.pack, this.tileW, this.tileH, nextWindow);
+            renderCityToPixi(
+              this.cityGraphic,
+              renderStateWithJobs,
+              this.pack,
+              this.tileW,
+              this.tileH,
+              nextWindow,
+              this.cityArtContext(),
+            );
           }
         }
       }
@@ -1595,6 +1681,13 @@ export class IsometricWorldEngine {
     this.resizeObserver?.disconnect();
 
     this.chunkCache.clear(this.disposeEntry);
+    this.buildingArtPool?.destroy();
+    this.residentArtPool?.destroy();
+    this.loopArtPool?.destroy();
+    this.buildingArtPool = null;
+    this.residentArtPool = null;
+    this.loopArtPool = null;
+    this.artLibrary.destroy();
     if (this.liquidTexture) {
       this.liquidTexture.destroy(true);
       this.liquidTexture = null;

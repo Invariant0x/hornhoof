@@ -12,6 +12,7 @@ import {
   type PackRoleLookSpec,
   type WorldPackManifest,
 } from '../../world/manifest';
+import { egyptArtCatalog } from './art';
 import { EGYPT_TERRAIN_RECIPE, EGYPT_TILE_KINDS } from './recipe';
 
 const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
@@ -345,4 +346,5 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
     chunkSize: 4,
     orderChaosDefault: 0.5,
   },
+  art: egyptArtCatalog(EGYPT_ROLE_LOOKS),
 };
