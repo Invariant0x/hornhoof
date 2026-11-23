@@ -12,6 +12,7 @@ import type { DisplayRunPool, WorldArtLibrary } from './art-runtime';
 import { cityDepthY, type CityBuilding, type CityState } from './city-layout';
 import {
   buildingLoopsFor,
+  drawsLoopStandIn,
   resolveStageSpecForBuilding,
   workSlotsForBuilding,
   type BuildingConstructionState,
@@ -96,6 +97,8 @@ function inRect(x: number, y: number, rect: WorldVisibleRect, pad: number): bool
 export type LoopArtContext = Readonly<{
   library: WorldArtLibrary;
   pool: DisplayRunPool;
+  /* The drawn variant of each building's step, so loops sit on the variant's own anchors. */
+  variants: ReadonlyMap<string, number>;
 }>;
 
 type LoopAnchors = Readonly<Record<LoopAttachPoint, { x: number; y: number }>>;
@@ -111,7 +114,7 @@ function artLoopAnchors(
 ): LoopAnchors | null {
   const index = art.library.index;
   if (!index) return null;
-  const resolved = resolveBuildingArt(pack, index, building, state);
+  const resolved = resolveBuildingArt(pack, index, building, state, { variant: art.variants.get(building.id) });
   if (!resolved || resolved.layers.some(l => !art.library.frame(l.path, l.frame))) return null;
   const p = resolved.passport;
   const s = tileW / resolved.artPxPerTile;
@@ -124,6 +127,8 @@ function artLoopAnchors(
     awning: p.awningAnchor ? at(p.awningAnchor) : top,
     door: p.door ? at(p.door) : ctr,
     ground: ctr,
+    /* A resident's point (the sleeper's Z): on a building it goes where the top loops go. */
+    head: top,
   };
 }
 
@@ -539,8 +544,8 @@ export function renderConstructionLoopsToPixi(
       if (art && anchors && drawLoopSheet(art, loop.kind, anchors, sim.timeSec, loop.phaseOffset, loop.intensity, loopScale)) {
         continue;
       }
-      /* A painted building brings its own awning (a picture layer) or has none: no stand-in canopy over the art. */
-      if (anchors && loop.kind === 'awning') continue;
+      /* A painted building brings its own awning (a picture layer), and shows no stand-in dust until the loop's art. */
+      if (!drawsLoopStandIn(loop.kind, anchors !== null)) continue;
       switch (loop.kind) {
         case 'water':
           drawWaterLoop(lg, ctr.x, ctr.y - 16, sim.timeSec, loop.phaseOffset, waterHex, loop.intensity);

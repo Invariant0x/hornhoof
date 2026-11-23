@@ -3,6 +3,8 @@ import {
   ART_CONTRACT_VERSION,
   declaredArtFiles,
   resolveBuildingArt,
+  personSheetPath,
+  residentBody,
   resolveResidentArt,
   validateArtIndex,
   type ArtIndex,
@@ -176,6 +178,7 @@ describe('Stage 9 world packs follow the art contract', () => {
         for (const look of pack.art?.people?.looks ?? []) {
           const r = {
             id: 'r',
+            agentId: 'agent-r',
             look: { id: look },
             roleClass: 'executor',
             outfitTier: 5,
@@ -185,7 +188,9 @@ describe('Stage 9 world packs follow the art contract', () => {
             cloakColor: '#123456',
           } as unknown as ResidentEntity;
           const art = resolveResidentArt(pack, index, r, 1.25);
-          expect(art?.layers.map(l => l.path)).toEqual([`people/${look}/tier_5/carry.png`, `people/${look}/tier_5/carry.cloak.png`]);
+          /* Every body's sheets are in the complete folder, so the resident gets its own body's. */
+          const body = residentBody('agent-r');
+          expect(art?.layers.map(l => l.path)).toEqual([personSheetPath(look, 5, 'carry', false, body), personSheetPath(look, 5, 'carry', true, body)]);
           expect(art?.mirror).toBe(true);
         }
       });
