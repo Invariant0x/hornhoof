@@ -9,6 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- Shell bars (update notifications, alerts, error boundaries) and narrow-screen agent strips now overlay the full-viewport map and open department as a HUD layer without shifting or resizing the world underneath, and the full-width bottom version bar is removed from every screen except the map (where the version stays as a HUD label).
 - When the server cannot be reached, restarts or installs an update, the page no longer shows a missing page, "Insufficient permissions" or "Hornhoof is not responding": a layer over the page says "No connection to the server" or "Server is updating" in the person's language, asks the server again with a growing wait, and once it answers every screen and the live stream come back with no reload, also for a page opened or reloaded during the outage. An answer of a hop in front of the server that is not Hornhoof's, such as a 404 page of the public link's relay, is read as a lost connection; what the server itself says is missing still reads as missing.
 - A browser that opens a page while the front or the keeper has no server behind it gets a plain page in English and Russian that says the same, opens by itself once the server answers and makes no request outside itself, instead of an unstyled line of text. The statuses stay 502 and 503, never 404.
 - A person's message to an agent, in its window, by Telegram, through their assistant or in its terminal, closes one of its open questions only when it is clear which: the only one that person may answer, or the one the message names by its task, a link or a quoted line of the question. With more open, none closes by itself, and the agent records which question the message answers with its new tool record_answer by quoting it: Hornhoof finds that message and records it whole as the person's answer on that card alone, with a link to it.
@@ -28,7 +29,6 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ## [0.42.0] - 2026-11-23
 
 ### Fixed
-
 - In the tracker list, the slow-loading notice and load error no longer push the held rows down: they appear over the top rows while the rows underneath stay in place, and a short list keeps room for the notice.
 - On a page right to left, the tracker's graph is drawn mirrored too: its root at the right, each level further to the left, the lines of what a task waits for on the left with their words beside the waiting task, and its zoom at the right as on the other canvases.
 - People and Machines hold the room of their data while it comes, with the same loading ring and Retry: their table heads, and Machines' pool and search, stand at once, and nothing above the rows moves when they come. Once Machines showed its filter buttons in a tab, its next load there holds their room too.
