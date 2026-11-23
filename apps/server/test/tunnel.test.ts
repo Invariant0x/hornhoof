@@ -1,5 +1,5 @@
 import { ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -19,6 +19,7 @@ type Answer = TunnelSettings | null | undefined;
 
 function tunnel({ program = process.execPath, first = null as Answer } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'hh-tunnel-'));
+  onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
   const out = join(dir, 'started.txt');
   const lines: string[] = [];
   let answer = first;
@@ -54,10 +55,21 @@ function tunnel({ program = process.execPath, first = null as Answer } = {}) {
     const from = reads;
     await until(() => reads >= from + count);
   };
-  return { keeper, answers, write, started, alive, lines, readsFrom };
+  return { keeper, dir, out, answers, write, started, alive, lines, readsFrom };
 }
 
 const settingsWith = (token: string): TunnelSettings => ({ url: 'https://acme.hornhoof.test', name: 'acme', key: 'k', tunnel: { token }, mode: 'http' });
+const completeLines = (file: string): string[] => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').slice(0, -1) : []);
+const pidAlive = (pid: string): boolean => {
+  const id = Number(pid);
+  if (!Number.isInteger(id) || id <= 0) throw new Error(`Not a process id: ${JSON.stringify(pid)}`);
+  try {
+    process.kill(id, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
 
 describe('the tunnel keeper', () => {
   it('waits while there are no settings, then starts the client with them', async () => {
@@ -190,6 +202,146 @@ describe('the tunnel keeper', () => {
     await until(() => started().length === 1);
     await keeper.stop();
     expect(alive(started()[0]![1]!)).toBe(false);
+  });
+
+  it('waits in stop() for a client that was already told to stop, and says nothing after stop()', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-tunnel-ending-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    const out = join(dir, 'started.txt');
+    const termFile = join(dir, 'term.txt');
+    const slowClient = `
+      const fs = require('node:fs');
+      const [out, term] = process.argv.slice(1);
+      process.on('SIGTERM', () => fs.writeFileSync(term, '1'));
+      process.on('SIGUSR2', () => process.exit(0));
+      fs.appendFileSync(out, process.pid + '\\n');
+      setInterval(() => {}, 1000);
+    `;
+    let answer: Answer = settingsWith('first');
+    const lines: string[] = [];
+    const keeper = new TunnelKeeper({
+      read: async () => answer,
+      everyMs: 20,
+      restartMs: 30,
+      clientFor: () => ({ program: process.execPath, args: ['-e', slowClient, out, termFile] }),
+      log: line => lines.push(line),
+    });
+    const pidOf = () => completeLines(out)[0];
+    onTestFinished(async () => {
+      const pid = pidOf();
+      if (pid && pidAlive(pid)) process.kill(Number(pid), 'SIGKILL');
+      await keeper.stop();
+    });
+    keeper.start();
+    await until(() => pidOf() !== undefined);
+    const pid = pidOf()!;
+
+    answer = null;
+    await until(() => existsSync(termFile));
+
+    let stopped = false;
+    const stopping = keeper.stop().then(() => {
+      stopped = true;
+    });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(stopped).toBe(false);
+    expect(pidAlive(pid)).toBe(true);
+
+    process.kill(Number(pid), 'SIGUSR2');
+    await stopping;
+    expect(pidAlive(pid)).toBe(false);
+    expect(lines).not.toContain('No public link: the tunnel waits.');
+  });
+
+  it("kills a client that ignores SIGTERM after 5 s on the test's clock", async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const dir = mkdtempSync(join(tmpdir(), 'hh-tunnel-sigkill-'));
+    const out = join(dir, 'started.txt');
+    const termFile = join(dir, 'term.txt');
+    const stubborn = `
+      const fs = require('node:fs');
+      const [out, term] = process.argv.slice(1);
+      process.on('SIGTERM', () => fs.writeFileSync(term, '1'));
+      fs.appendFileSync(out, process.pid + '\\n');
+      setInterval(() => {}, 1000);
+    `;
+    const keeper = new TunnelKeeper({
+      read: async () => settingsWith('first'),
+      everyMs: 1000,
+      restartMs: 30,
+      clientFor: () => ({ program: process.execPath, args: ['-e', stubborn, out, termFile] }),
+      log: () => {},
+    });
+    const pidOf = () => completeLines(out)[0];
+    onTestFinished(() => {
+      const pid = pidOf();
+      if (pid && pidAlive(pid)) process.kill(Number(pid), 'SIGKILL');
+      vi.useRealTimers();
+      rmSync(dir, { recursive: true, force: true });
+    });
+    keeper.start();
+    await until(() => pidOf() !== undefined);
+    const pid = pidOf()!;
+
+    const stopping = keeper.stop();
+    await until(() => existsSync(termFile));
+    expect(pidAlive(pid)).toBe(true);
+    await vi.advanceTimersByTimeAsync(5000);
+    await stopping;
+    expect(pidAlive(pid)).toBe(false);
+  });
+
+  it('finishes stop() when the client binary could not be started', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => void vi.useRealTimers());
+    const dir = mkdtempSync(join(tmpdir(), 'hh-tunnel-missing-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    const lines: string[] = [];
+    const keeper = new TunnelKeeper({
+      read: async () => settingsWith('first'),
+      everyMs: 1000,
+      restartMs: 30,
+      clientFor: () => ({ program: join(dir, 'no-such-frpc'), args: [] }),
+      log: line => lines.push(line),
+    });
+    keeper.start();
+    await until(() => lines.some(l => l.includes('did not start')));
+    let stopped = false;
+    void keeper.stop().then(() => {
+      stopped = true;
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(stopped).toBe(true);
+
+    let spawned = false;
+    const early = new TunnelKeeper({
+      read: async () => settingsWith('first'),
+      everyMs: 1000,
+      restartMs: 30,
+      clientFor: () => {
+        spawned = true;
+        return { program: join(dir, 'no-such-frpc'), args: [] };
+      },
+      log: () => {},
+    });
+    early.start();
+    await until(() => spawned);
+    let earlyStopped = false;
+    void early.stop().then(() => {
+      earlyStopped = true;
+    });
+    await until(() => earlyStopped);
+  });
+
+  it('reads a started client only from a complete line, and never probes pid 0', () => {
+    const { out, started, alive } = tunnel();
+    writeFileSync(out, '');
+    expect(started()).toEqual([]);
+    writeFileSync(out, 'first 42');
+    expect(started()).toEqual([]);
+    expect(() => alive('')).toThrow('Not a process id');
+    expect(() => alive('0')).toThrow('Not a process id');
   });
 
   it('starts no client for a read that answers after it stopped', async () => {

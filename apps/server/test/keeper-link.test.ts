@@ -261,6 +261,63 @@ describe('the link in the keeper', () => {
     expect(second.frpc.config()).toContain(`clientID = "${CLIENT_ID}"`);
   });
 
+  it('waits in stop() for an frpc that is already exiting', async () => {
+    const { db } = await companyWithLink();
+    const dir = folder();
+    const startedFile = join(dir, 'started.txt');
+    const termFile = join(dir, 'term.txt');
+    const slowFrpc = `
+      const fs = require('node:fs');
+      const [out, term] = process.argv.slice(1);
+      process.on('SIGTERM', () => fs.writeFileSync(term, '1'));
+      process.on('SIGUSR2', () => process.exit(0));
+      fs.appendFileSync(out, process.pid + '\\n');
+      setInterval(() => {}, 1000);
+    `;
+    const { keeper, frpc } = await keeperOn(db, {}, {
+      clientFor: () => ({ program: process.execPath, args: ['-e', slowFrpc, startedFile, termFile] }),
+    });
+    const pidOf = () => (existsSync(startedFile) ? readFileSync(startedFile, 'utf8').split('\n').slice(0, -1)[0] : undefined);
+    onTestFinished(() => {
+      const pid = pidOf();
+      if (pid) {
+        try {
+          process.kill(Number(pid), 'SIGKILL');
+        } catch {
+          /* Already gone. */
+        }
+      }
+    });
+    await until(() => pidOf() !== undefined);
+    const pid = pidOf()!;
+
+    await db.delete(publicLinks);
+    await until(() => existsSync(termFile));
+
+    let stopped = false;
+    const stopping = keeper.stop().then(() => {
+      stopped = true;
+    });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(stopped).toBe(false);
+    expect(frpc.alive(pid)).toBe(true);
+
+    process.kill(Number(pid), 'SIGUSR2');
+    await stopping;
+    expect(frpc.alive(pid)).toBe(false);
+  });
+
+  it('reads a started frpc only from a complete pid line, and never probes pid 0', () => {
+    const dir = folder();
+    const frpc = fakeFrpc(dir);
+    writeFileSync(join(dir, 'started.txt'), '');
+    expect(frpc.started()).toEqual([]);
+    writeFileSync(join(dir, 'started.txt'), '42');
+    expect(frpc.started()).toEqual([]);
+    expect(() => frpc.alive('')).toThrow('Not a process id');
+    expect(() => frpc.alive('0')).toThrow('Not a process id');
+  });
+
   it('stops frpc when the link goes', async () => {
     const { db } = await companyWithLink();
     const { frpc, wordOfLink, namesCertificate } = await keeperOn(db);
