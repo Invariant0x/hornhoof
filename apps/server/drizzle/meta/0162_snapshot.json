@@ -1,6 +1,6 @@
 {
-  "id": "0441a4c3-92ca-4d17-a53d-486ddd215c48",
-  "prevId": "02ee6e81-0869-450a-aceb-807baa52b344",
+  "id": "02ee6e81-0869-450a-aceb-807baa52b344",
+  "prevId": "941e2f62-df6d-447c-9415-d0bf0300fc0f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -335,6 +335,28 @@
           ],
           "isUnique": false,
           "where": "data->>'operationsPending' is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_operator_fallback": {
+          "name": "agent_events_operator_fallback",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "(data->>'operatorFallback')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"agent_events\".\"kind\" = 'typed' and data->>'operatorFallback' is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -5096,6 +5118,46 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "jobs_conversation_activity": {
+          "name": "jobs_conversation_activity",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "finished_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"jobs\".\"kind\" = 'conversation'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -13957,221 +14019,6 @@
         }
       },
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.theme_files": {
-      "name": "theme_files",
-      "schema": "",
-      "columns": {
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "theme_id": {
-          "name": "theme_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "version": {
-          "name": "version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "path": {
-          "name": "path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "media_type": {
-          "name": "media_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "bytes": {
-          "name": "bytes",
-          "type": "bytea",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size": {
-          "name": "size",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "theme_files_theme": {
-          "name": "theme_files_theme",
-          "tableFrom": "theme_files",
-          "tableTo": "themes",
-          "columnsFrom": [
-            "company_id",
-            "theme_id",
-            "version"
-          ],
-          "columnsTo": [
-            "company_id",
-            "theme_id",
-            "version"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "theme_files_company_id_theme_id_version_path_pk": {
-          "name": "theme_files_company_id_theme_id_version_path_pk",
-          "columns": [
-            "company_id",
-            "theme_id",
-            "version",
-            "path"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.themes": {
-      "name": "themes",
-      "schema": "",
-      "columns": {
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "theme_id": {
-          "name": "theme_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "version": {
-          "name": "version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "manifest": {
-          "name": "manifest",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "look": {
-          "name": "look",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "fonts": {
-          "name": "fonts",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "kit": {
-          "name": "kit",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "world": {
-          "name": "world",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "skills": {
-          "name": "skills",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "size": {
-          "name": "size",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "installed_by": {
-          "name": "installed_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "installed_at": {
-          "name": "installed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "themes_company_id_companies_id_fk": {
-          "name": "themes_company_id_companies_id_fk",
-          "tableFrom": "themes",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "themes_installed_by_people_id_fk": {
-          "name": "themes_installed_by_people_id_fk",
-          "tableFrom": "themes",
-          "tableTo": "people",
-          "columnsFrom": [
-            "installed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "themes_company_id_theme_id_pk": {
-          "name": "themes_company_id_theme_id_pk",
-          "columns": [
-            "company_id",
-            "theme_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {
-        "themes_version": {
-          "name": "themes_version",
-          "nullsNotDistinct": false,
-          "columns": [
-            "company_id",
-            "theme_id",
-            "version"
-          ]
-        }
-      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

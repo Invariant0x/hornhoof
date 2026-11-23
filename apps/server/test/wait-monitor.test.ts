@@ -4,6 +4,7 @@ import { agents, departments, jobs, requests, tasks, testRuns, turns } from '../
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { quietDepartment as observeQuiet, waitCycles } from '../src/modules/tasks/wait-observations.js';
 import { checkWaitHealth } from '../src/modules/tasks/wait-monitor.js';
+import { statements } from './helpers-db.js';
 import { waitCompany } from './wait-company.js';
 
 const MINUTE = 60_000;
@@ -235,5 +236,36 @@ describe('quiet departments', () => {
     await expect(checkWaitHealth(c.ctx, c.now)).resolves.toBeUndefined();
     expect(await c.messages(c.head.id)).toEqual([]);
     expect(await c.messages(c.orchestrator.id)).toEqual([]);
+  });
+
+  /* #1981: the check runs every minute for every department, and read each conversation of it whole (prompt, tail, result:
+     25 000 rows, 113 MB) to learn two things; under load that ended in the 5 s transaction timeout. */
+  it('asks the database only whether a conversation runs and when the last one ended, never for the conversations', async () => {
+    const c = await unexplained();
+    const seen = statements();
+    await observeQuiet(c.ctx, c.turn.id, c.dev.id, c.now);
+    const reads = seen.filter(({ sql }) => /from "jobs"/.test(sql));
+    expect(reads.length).toBeGreaterThan(0);
+    for (const { sql } of reads) {
+      expect(sql).toMatch(/bool_or\(|max\(/);
+      expect(sql).not.toMatch(/"prompt"|"tail"|"result"|"failure"/);
+    }
+  });
+
+  it('starts its silence at the last end of a conversation of its employees or of its work, and counts no other', async () => {
+    const c = await unexplained();
+    const at = (minutes: number) => new Date(c.now.getTime() + minutes * MINUTE);
+    const conversation = (values: Partial<typeof jobs.$inferInsert>) => c.db.insert(jobs).values({
+      companyId: c.companyId, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Work.', status: 'done', timeoutMs: 1000, startedAt: at(0), ...values,
+    });
+    expect((await observeQuiet(c.ctx, c.turn.id, c.dev.id, at(30)))?.since).toEqual(new Date(c.now.getTime() - 15 * MINUTE));
+    await conversation({ agentId: c.agent.id, finishedAt: at(1) });
+    await conversation({ agentId: c.orchestrator.id, taskId: c.taskRow.id, finishedAt: at(5) });
+    await conversation({ agentId: c.agent.id, kind: 'test', finishedAt: at(9) });
+    await conversation({ agentId: c.agent.id, startedAt: null, status: 'failed', finishedAt: at(8) });
+    await conversation({ agentId: c.watcher.id, finishedAt: at(7) });
+    expect((await observeQuiet(c.ctx, c.turn.id, c.dev.id, at(30)))?.since).toEqual(at(5));
+    await conversation({ agentId: c.agent.id, status: 'running', finishedAt: null });
+    expect(await observeQuiet(c.ctx, c.turn.id, c.dev.id, at(30))).toBeNull();
   });
 });
