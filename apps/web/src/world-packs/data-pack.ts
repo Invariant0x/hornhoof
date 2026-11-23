@@ -119,14 +119,22 @@ function zoomErrors(raw: Raw): string[] {
 
 const inRange = (value: number | undefined, least: number, most: number) => value === undefined || (value >= least && value <= most);
 
+/* A world's tile tiers: a list of objects, none when it names none, null when it names them as anything else. */
+const tiersOf = (lods: unknown): readonly Raw[] | null => (lods === undefined ? [] : Array.isArray(lods) && lods.every(isObject) ? lods : null);
+
+function tiersErrors(lods: readonly Raw[] | null): string[] {
+  if (lods === null) return ['projection.lods must be a list of tiers, each an object'];
+  return lods.length > WORLD_DATA_BOUNDS.lods ? [`projection.lods has at most ${WORLD_DATA_BOUNDS.lods} tiers`] : [];
+}
+
 /* The tile pictures: how many tiers, how wide each, and how many texels a tile of the painted ground takes. */
 function tileErrors(raw: Raw): string[] {
   const B = WORLD_DATA_BOUNDS;
   const projection = isObject(raw.projection) ? raw.projection : {};
-  const lods = Array.isArray(projection.lods) ? projection.lods : [];
-  const errors = lods.length > B.lods ? [`projection.lods has at most ${B.lods} tiers`] : [];
+  const lods = tiersOf(projection.lods);
+  const errors = tiersErrors(lods);
   /* Tiers past the most a world may have are refused for their number, so only the widths of the first ones are read. */
-  const widths: [string, unknown][] = [['projection.defaultTileW', projection.defaultTileW], ...lods.slice(0, B.lods).map((lod, n): [string, unknown] => [`projection.lods.${n}.tileW`, isObject(lod) ? lod.tileW : undefined])];
+  const widths: [string, unknown][] = [['projection.defaultTileW', projection.defaultTileW], ...(lods ?? []).slice(0, B.lods).map((lod, n): [string, unknown] => [`projection.lods.${n}.tileW`, lod.tileW])];
   errors.push(...widths.filter(([, value]) => !inRange(typeof value === 'number' ? value : undefined, -Infinity, B.tileW)).map(([at]) => `${at} is at most ${B.tileW} px`));
   if (!inRange(numberAt(raw, 'terrainArt', 'texelsPerTile'), -Infinity, B.texelsPerTile)) errors.push(`terrainArt.texelsPerTile is at most ${B.texelsPerTile}`);
   return errors;

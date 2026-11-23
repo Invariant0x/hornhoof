@@ -52,7 +52,8 @@ function completeArtOf(pack: WorldPackManifest): ThemeArtFile[] {
     .map(slot => {
       if (slot.passport === 'anchor') return { path: slot.path, head: pngHead(40, 100), passport: { anchor: { x: 20, y: 98 } } };
       if (slot.passport === 'sheet') return { path: slot.path, head: pngHead(8 * 136, (slot.role === 'person' ? 5 : 1) * 200), passport: { frameW: 136, frameH: 200, frames: 8, fps: 10, anchor: { x: 68, y: 190 } } };
-      const fp = pack.projection.buildingFootprintsMaster4x[slot.role === 'module' ? slot.path.split('/')[1]! : footprintOf(slot.path)]!;
+      const footprints = pack.projection.buildingFootprintsMaster4x;
+      const fp = footprints[(slot.role === 'module' ? slot.path.split('/')[1]! : footprintOf(slot.path)) as keyof typeof footprints];
       const [w, h] = [fp.diamondW + 8, Math.min(fp.maxCanvasH, fp.diamondH + 300)];
       const [x, y] = [w / 2, h - fp.diamondH / 2 - 4];
       const corners = { top: { x, y: y - fp.diamondH / 2 }, right: { x: x + fp.diamondW / 2, y }, bottom: { x, y: y + fp.diamondH / 2 }, left: { x: x - fp.diamondW / 2, y } };
@@ -159,10 +160,15 @@ describe('the world of a theme archive', () => {
       ['a zoom of a hundred times', { camera: { ...camera, maxZoom: 100 } }, 'camera.maxZoom is from 0.25 to 4'],
       ['tiles of 100 000 px', { projection: { ...projection, defaultTileW: 100_000, defaultTileH: 50_000 } }, 'projection.defaultTileW is beyond 10000'],
       ['a number of a billion anywhere', { projection: { ...projection, sun: { ...(projection.sun as Raw), kelvin: 1e9 } } }, 'projection.sun.kelvin is beyond 10000'],
+      ['a tier of tiles 2000 px wide', { projection: { ...projection, lods: [{ ...(projection.lods as Raw[])[0], tileW: 2_000 }] } }, 'projection.lods.0.tileW is at most 1024 px'],
+      ['painted ground of 2048 texels a tile', { terrainArt: { texelsPerTile: 2_048 } }, 'terrainArt.texelsPerTile is at most 1024'],
+      ['tiers that are a word', { projection: { ...projection, lods: 'many' } }, 'projection.lods must be a list of tiers, each an object'],
+      ['a tier that is a word', { projection: { ...projection, lods: ['x'] } }, 'projection.lods must be a list of tiers, each an object'],
     ];
     for (const [name, change, said] of cases) {
       expect(worldPackOfData('t-1', { ...data, ...change }, BASE), name).toMatchObject({ ok: false, errors: expect.arrayContaining([said]) });
     }
+    expect(worldPackOfData('t-1', { ...data, projection: 'flat' }, BASE).ok).toBe(false);
     for (const pack of registeredWorldPacks().filter(one => one.terrainRecipe && !one.resolveEmptyTileId)) {
       expect(worldPackOfData('t-1', dataOfWorldPack(pack), BASE).ok, pack.id).toBe(true);
     }
@@ -195,7 +201,7 @@ describe('the world of a theme archive', () => {
     const catalog = world.art as Raw;
     const buildings = catalog.buildings as Raw;
     const [kind] = WORLD_BUILDING_KINDS;
-    const { [kind]: _left, ...otherKinds } = buildings;
+    const otherKinds = Object.fromEntries(Object.entries(buildings).filter(([key]) => key !== kind));
     expect(check(world)).toMatchObject({ ok: true, complete: true, missing: 0 });
     expect(check(world, art.slice(1))).toMatchObject({ ok: true, complete: false, missing: 1 });
     expect(check({ ...world, art: { ...catalog, people: { ...(catalog.people as Raw), looks: [] } } })).toMatchObject({ ok: true, complete: false });
