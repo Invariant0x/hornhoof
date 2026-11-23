@@ -3,7 +3,6 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { departments, taskEvents, tasks, testRuns, turns } from '../../db/schema.js';
-import { loggable } from '../../errors.js';
 import { deptName } from '../departments/templates.js';
 import { GitHubRateLimited } from '../testruns/github-limit.js';
 import type { RepoAddress } from '../testruns/refs.js';
@@ -17,8 +16,6 @@ import { pushRefs } from './ref-push.js';
 
 export type Reader = Pick<Ctx, 'db' | 'config'> & { log: Pick<FastifyBaseLogger, 'info' | 'warn' | 'error'> } & Partial<Pick<Ctx, 'readBranches' | 'readTags' | 'readMerged' | 'pushRefs'>>;
 
-/* How often one repository is pruned by itself: a batch at a time, so a repository of thousands is done over hours. */
-export const PRUNE_EVERY_MS = 10 * 60_000;
 const READ_MS = 30_000;
 const CLOSED = ['done', 'cancelled'];
 
@@ -138,24 +135,4 @@ export async function pruneCompany(ctx: Reader, options: { companyId?: string; a
   const out: Pruning[] = [];
   for (const repository of await repositoriesOf(ctx, options.companyId)) out.push(await pruneOne(ctx, repository, options));
   return out;
-}
-
-/* When each repository may be pruned again: the round runs one repository at a time, gently, and after a used-up request limit
-   not before it ends. */
-const nextRun = new WeakMap<object, Map<string, number>>();
-
-/* What Hornhoof does by itself every minute when it is switched on: the repository whose time has come, once, as a batch. */
-export async function pruneRound(ctx: Reader, now: Date): Promise<void> {
-  if (!ctx.config.branchPrune) return;
-  const next = nextRun.get(ctx.db) ?? new Map<string, number>();
-  nextRun.set(ctx.db, next);
-  const due = (await repositoriesOf(ctx)).find(r => (next.get(r.id) ?? 0) <= now.getTime());
-  if (!due) return;
-  next.set(due.id, now.getTime() + PRUNE_EVERY_MS);
-  try {
-    const { result } = await pruneOne(ctx, due, { apply: true, now: now.getTime() });
-    if (result.stopped?.why === 'limit' && result.stopped.resetAt) next.set(due.id, Math.max(next.get(due.id)!, Date.parse(result.stopped.resetAt) + 1));
-  } catch (error) {
-    ctx.log.error({ error: loggable(error), repository: due.url }, 'Pruning the branches of a repository failed.');
-  }
 }

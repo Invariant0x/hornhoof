@@ -59,22 +59,20 @@ A command that splits the tests with `{part}` must also say how many parts there
 
 ## Which branches does Hornhoof remove?
 
-Branches it made for work pile up, so Hornhoof can tidy them by itself. It is off until the person who runs the server sets `HORNHOOF_BRANCH_PRUNE=on`, and the token then needs the right to write contents (**Contents: Read and write** on a fine-grained token, `repo` on a classic one).
+Branches it made for work pile up. Nothing removes them by itself: a person reads a list first, and Hornhoof removes only what that list says, when someone runs `node apps/server/dist/cli.js branch-prune --apply` on the server. Without `--apply` the command only lists what it would do, and changes nothing. The token needs the right to write contents for `--apply` (**Contents: Read and write** on a fine-grained token, `repo` on a classic one).
 
 - A task's branch (`task-12`, `release-check-12`) is deleted once a turn branch, `main` or a release tag holds its last commit. Nothing is lost: the commits stay in that history.
 - The branch of a task that was cancelled, or closed for seven days, and whose last commit no turn, `main` or tag holds, is first copied to `refs/hornhoof/archive/<branch>` and then deleted.
 - The 20 newest turn branches stay. An older one is deleted only when a release tag `v…` stands on its last commit.
 - It never touches `main`, tags, the branch of an open or paused task, or a branch Hornhoof has no record of making, such as a person's.
 
-It works a batch of 50 changes at a time and stays inside GitHub's request limit, going on after the limit ends. Each deleted or archived branch goes into the log of its task, with its last commit and the reason.
+`--limit N` bounds the changes for each repository (50 by default), `--repo TEXT` picks repositories by their address, `--company ID` one company, and `--all-branches` lists the branches it keeps too. It stays inside GitHub's request limit and says when to run it again. Each deleted or archived branch goes into the log of its task, with its last commit and the reason.
 
 To bring an archived branch back, run in a copy of the repository, with the branch's own name:
 
 ```
 git fetch origin refs/hornhoof/archive/task-12 && git push origin FETCH_HEAD:refs/heads/task-12
 ```
-
-To see what it would do first, or to tidy once by hand, run `node apps/server/dist/cli.js branch-prune` on the server: it only lists, as a dry run, until you add `--apply`. `--limit N` bounds the changes for each repository, `--repo TEXT` picks repositories by their address, and `--all-branches` lists the branches it keeps too.
 
 When Hornhoof can write to the repository, finished turnkey work joins its turn branch as one merge commit of its own, `Take in task-12 (#12)`, whose files are exactly those of the commit that was checked. Work a person already fast-forwarded into the turn branch stays as it is.
 

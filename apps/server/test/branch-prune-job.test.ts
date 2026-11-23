@@ -3,10 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { departments, jobs, taskEvents, tasks, testRuns } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { archiveRef } from '../src/modules/repos/prune-run.js';
-import { PRUNE_EVERY_MS, pruneCompany, pruneRound } from '../src/modules/repos/prune-job.js';
+import { minuteRound } from '../src/modules/agents/timers.js';
+import { pruneCompany } from '../src/modules/repos/prune-job.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 import { prepareTemplates } from './templates-once.js';
-import { serve, serveEach, type Repository } from './turn-release-fixture.js';
+import { serveEach, type Repository } from './turn-release-fixture.js';
 import { company, HOLDS, M1, M2, T1, U1, U2, withTask, type Fixture } from './prune-fixture.js';
 
 await prepareSharedDatabase();
@@ -92,49 +93,20 @@ describe('pruning the repositories of a company by its records', () => {
   });
 });
 
-describe('the round that prunes by itself', () => {
-  const on = (f: Fixture) => { f.ctx.config = { ...f.ctx.config, branchPrune: true }; };
-
-  it('does nothing unless it was switched on', async () => {
+describe('nothing prunes by itself', () => {
+  it('leaves every branch alone in the server\'s minute round, whatever its settings say, and in the round after the limit ended', async () => {
     const f = await company();
     const number = await withTask(f, 'In the turn', { status: 'done', closedDaysAgo: 1 });
     f.repo.heads[`task-${number}`] = T1;
-    await pruneRound(f.ctx, new Date());
-    expect(f.repo.heads[`task-${number}`]).toBe(T1);
+    /* A deletion is a person's step on a list they read: no setting of the server may turn the minute round into one. */
+    f.ctx.config = { ...f.ctx.config, branchPrune: true } as typeof f.ctx.config;
+    process.env.HORNHOOF_BRANCH_PRUNE = 'on';
+    try {
+      for (const minutes of [0, 11, 60 * 24]) await minuteRound(f.ctx, new Date(Date.now() + minutes * 60_000), () => () => undefined);
+    } finally {
+      delete process.env.HORNHOOF_BRANCH_PRUNE;
+    }
     expect(f.pushed).toEqual([]);
-  });
-
-  it('prunes one repository in a round, not again before its time, and again after it', async () => {
-    const f = await company();
-    on(f);
-    const first = await withTask(f, 'One', { status: 'done', closedDaysAgo: 1 });
-    f.repo.heads[`task-${first}`] = T1;
-    const start = new Date('2026-11-23T12:00:00Z');
-    await pruneRound(f.ctx, start);
-    expect(f.repo.heads[`task-${first}`]).toBeUndefined();
-    const second = await withTask(f, 'Two', { status: 'done', closedDaysAgo: 1 });
-    f.repo.heads[`task-${second}`] = T1;
-    await pruneRound(f.ctx, new Date(start.getTime() + PRUNE_EVERY_MS - 1));
-    expect(f.repo.heads[`task-${second}`]).toBe(T1);
-    await pruneRound(f.ctx, new Date(start.getTime() + PRUNE_EVERY_MS));
-    expect(f.repo.heads[`task-${second}`]).toBeUndefined();
-  });
-
-  it('waits out GitHub\'s limit as the reset time says, and goes on after it', async () => {
-    const f = await company();
-    on(f);
-    const number = await withTask(f, 'In the turn', { status: 'done', closedDaysAgo: 1 });
-    f.repo.heads[`task-${number}`] = T1;
-    const start = new Date('2026-11-23T12:00:00Z');
-    const { GitHubRateLimited } = await import('../src/modules/testruns/github-limit.js');
-    const resetAt = start.getTime() + 40 * 60_000;
-    f.ctx.readMerged = async () => { throw new GitHubRateLimited({ remaining: 0, resetAt }); };
-    await pruneRound(f.ctx, start);
     expect(f.repo.heads[`task-${number}`]).toBe(T1);
-    serve(f.ctx, f.repo);
-    await pruneRound(f.ctx, new Date(start.getTime() + PRUNE_EVERY_MS));
-    expect(f.repo.heads[`task-${number}`]).toBe(T1);
-    await pruneRound(f.ctx, new Date(resetAt + 1));
-    expect(f.repo.heads[`task-${number}`]).toBeUndefined();
   });
 });

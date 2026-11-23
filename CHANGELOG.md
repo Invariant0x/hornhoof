@@ -20,8 +20,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Added
 
 - The task watchdog can now see whether a task's commit is in main or a release and close, in any department, the tasks the server proves done, with its reason in the task log and a notice to the head of that department; its role template carries the rules for code, documents and reports, and groups, and never touches paused work.
-- Hornhoof can tidy the branches of a company's repositories by itself, when the server is started with HORNHOOF_BRANCH_PRUNE=on: a task's branch goes once a turn branch, main or a release tag holds it, the branch of a task cancelled or closed for seven days that nothing holds is archived to refs/hornhoof/archive first, the 20 newest turn branches stay, and main, tags, open and paused work and branches it did not make are never touched; each change is written on its task with the one command that restores it.
-- The command `branch-prune` of the server lists what that tidying would do, with the counts by kind, and with --apply does it for one repository or all, a batch at a time.
+- The server's command `branch-prune` lists how Hornhoof would tidy the branches of a company's repositories, and with --apply does it, a batch at a time: a task's branch goes once a turn branch, main or a release tag holds it, the branch of a task cancelled or closed for seven days that nothing holds is archived to refs/hornhoof/archive first, the 20 newest turn branches stay, and main, tags, open and paused work and branches it did not make are never touched; each change is written on its task with the one command that restores it. Nothing runs it by itself.
 
 ### Changed
 

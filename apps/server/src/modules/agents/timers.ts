@@ -23,7 +23,6 @@ import { harnessRound } from '../testruns/harness.js';
 import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
 import { checkOperatorHealth } from '../program-operator/health.js';
-import { pruneRound } from '../repos/prune-job.js';
 import { releaseRound } from '../tasks/releases.js';
 import { closeIdleTurns } from '../tasks/turn-ends.js';
 
@@ -132,7 +131,6 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     retryCallBatches(ctx).catch(failed('recovering one-shot call batches failed')),
     reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
     releaseRound(ctx).catch(failed('closing turns by the tags of their releases failed')),
-    pruneRound(ctx, now).catch(failed('pruning the branches of a repository failed')),
     closeIdleTurns(ctx).catch(failed('closing turns that hold nothing for a release failed')),
     sendWaiting(ctx).catch(failed('sending waiting turns failed')),
     dropOldFiles(ctx, now).catch(failed('removing the files of old turns failed')),
