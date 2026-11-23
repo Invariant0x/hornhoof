@@ -158,9 +158,21 @@ for (const lang of ['en', 'ru'] as const) {
         await live.closeTurn();
         await expect(page.locator('.dept-turn')).toHaveCount(0);
         await expect(hub.locator('.turn-sec, .hub-eq, .hub-focus-tag')).toHaveCount(0);
-        /* All cards return to their resting height, including Development's card with 24 staff squares. */
+        /* All cards return to their resting height, including Development's card with 24 staff squares. A card is 160 px or, where
+           the words of the card that needs the most are taller, as tall as they need (#1917): Development's two lines of squares
+           and its two-line task need 161.08 px, a fresh page of the closed company needs the same, so all six stand at 161. Each
+           card is left to its words for a moment and measured in whole pixels, as the layout does, with no strip of the turn in
+           any of them; a card kept at the turn's height or grown by anything else is not this height. */
         await expect(card(page, 'Development').locator('.cells .cell')).toHaveCount(24);
-        expect(await page.locator('button.dept').evaluateAll(cards => cards.map(c => (c as HTMLElement).style.height))).toEqual(Array(6).fill('160px'));
+        const rest = await page.locator('button.dept').evaluateAll(cards => {
+          const boxes = cards as HTMLElement[];
+          const set = boxes.map(c => c.style.height);
+          for (const c of boxes) c.style.height = 'auto';
+          const need = Math.max(...boxes.map(c => c.offsetHeight));
+          boxes.forEach((c, i) => (c.style.height = set[i]!));
+          return { set, need };
+        });
+        expect(rest.set).toEqual(Array(6).fill(`${Math.max(160, rest.need)}px`));
         await looksRight(page);
         await shot('closed');
         expect(await page.evaluate(initial => document === initial, initialDocument)).toBe(true);
