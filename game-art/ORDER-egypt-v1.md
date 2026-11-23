@@ -438,7 +438,9 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 
 | Animation | Drawn | Mirrored |
 |---|---|---|
-| `walk`, `carry` (`carry_back` is the same sheet as `carry`) | N, NE, E, SE, S | SW, W, NW |
+| `carry` (`carry_back` is the same sheet as `carry`), every set | all 8: N, NE, E, SE, S, SW, W, NW | none |
+| `walk` of a look with a big prop (staff, banner, spear with shield, jar, gong, mattock) | all 8 | none |
+| `walk` of any other look | N, NE, E, SE, S | SW, W, NW |
 | `idle`: standing by the home, facing the viewer | SE | SW |
 | `build`: facing the front wall of the building | NE | NW |
 | `sleep`: lying along one axis | SE | SW |
@@ -459,7 +461,7 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 
 ### 4.4 Sheet layout and passport
 
-* **Rows, top to bottom:** the directions named in the passport's `directions`, in that order, chosen from N, NE, E, SE, S (v3). Without the field the sheet has 5 rows, N, NE, E, SE, S, as before. The engine mirrors SE, E and NE for SW, W and NW, and shows the nearest drawn direction or its mirror, so a person walks in 8 directions from 5 drawn rows. A carried item changes hands in the mirrored rows, and the light comes from the top right there: Design accepts this (23.11).
+* **Rows, top to bottom:** the directions named in the passport's `directions`, in that order, chosen from N, NE, E, SE, S, SW, W, NW (v3). Without the field the sheet has 5 rows, N, NE, E, SE, S, as before. For each facing the engine shows its drawn row when there is one; only a direction that is not drawn is mirrored (SE, E and NE for SW, W and NW), and otherwise the nearest drawn direction or its mirror shows, a drawn row winning at the same distance. A mirrored row moves a carried item to the other hand, which Ivan does not accept for big items (23.11), so `carry` and the `walk` of a look with a big prop are drawn in all 8 directions; `"directions": ["SE", "SW"]` shows both as drawn.
 * **Facing poses** `pray` and `sad_sit` (v3): one row, `"directions": ["S"]`, shown as drawn whatever way the resident faces, never mirrored.
 * **`headAnchor`** (v3, `sleep` only, optional): the point in the frame above the head where `sleep_z` stands, e.g. `[60, 200]` for a figure lying along the ground. Without it the engine uses the standing head, 146 px above the `anchor`.
 * **Frames** run left to right, every frame the same size. The feet sit on the same `anchor` in every frame, so walking does not slide.
@@ -523,7 +525,7 @@ A rejected file keeps its placeholder; it never breaks the city.
 * A sheet passport without `frameW`, `frameH`, `frames`, `fps` and `anchor`.
 * A sheet whose width is not `frameW * frames`.
 * A person's sheet whose height is not `frameH` times the number of its `directions` (5 without the field).
-* A `directions` entry other than N, NE, E, SE or S, or one named twice.
+* A `directions` entry other than N, NE, E, SE, S, SW, W or NW, or one named twice.
 * An anchor outside one frame.
 * A cloak layer without its base sheet, or of another size.
 * An index for another pack or another contract version.

@@ -13,6 +13,7 @@ import {
   CONSTRUCTION_STAGE_IDS,
   type BuildingLoopKind,
   type ConstructionStageId,
+  type Direction8,
   type FootprintKey,
   type UniqueRenderAngle5,
   type WorldPackManifest,
@@ -121,8 +122,9 @@ export type SheetPassport = Readonly<{
   /* Feet point for people, attach point for loops, inside one frame. */
   anchor: ArtPoint;
   attach?: LoopAttachPoint;
-  /* People: the drawn directions, one row each in this order; without it the five rows N, NE, E, SE, S. */
-  directions?: readonly UniqueRenderAngle5[];
+  /* People: the drawn directions, one row each in this order, any of the 8; without it the five rows N, NE, E, SE, S.
+     A direction not drawn shows the nearest drawn one or its mirror. */
+  directions?: readonly Direction8[];
   /* People, sleep: where the Z-z-z loop stands over the head, inside one frame. */
   headAnchor?: ArtPoint;
   /* People, walking sheets: the master px the figure moves on in one cycle, as the E row draws it; without it
@@ -273,6 +275,8 @@ export const POSE_ANIMATIONS: Readonly<Record<ResidentPose, ResidentAnimationId>
 const MOVING_ANIMATIONS: ReadonlySet<ResidentAnimationId> = new Set(['walk', 'carry', 'carry_back']);
 
 export const DIRECTION_ROWS: readonly UniqueRenderAngle5[] = ['N', 'NE', 'E', 'SE', 'S'];
+/* The directions a sheet may draw: the west ones too, so a big carried item keeps its hand when the resident turns. */
+const DRAWABLE_DIRECTIONS: readonly Direction8[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
 export type DeclaredArtRole = 'building' | 'module' | 'altar' | 'flag' | 'capstone' | 'person' | 'cloak' | 'loop';
 
@@ -522,8 +526,8 @@ function personRows(path: string, entry: ArtIndexEntry, errors: string[]): numbe
   const directions = (entry.passport as SheetPassport | undefined)?.directions;
   if (directions === undefined) return DIRECTION_ROWS.length;
   const list = Array.isArray(directions) ? (directions as readonly string[]) : [];
-  if (list.length === 0 || list.some(d => !(DIRECTION_ROWS as readonly string[]).includes(d))) {
-    errors.push(`${path}: directions must name drawn ones among N, NE, E, SE, S`);
+  if (list.length === 0 || list.some(d => !(DRAWABLE_DIRECTIONS as readonly string[]).includes(d))) {
+    errors.push(`${path}: directions must name drawn ones among ${DRAWABLE_DIRECTIONS.join(', ')}`);
   }
   if (new Set(list).size !== list.length) errors.push(`${path}: directions names a direction twice`);
   return Math.max(1, list.length);
@@ -1010,10 +1014,11 @@ export type ResidentArt = Readonly<{
 
 const FACE_ANGLE: Readonly<Record<string, number>> = { N: 0, NE: 45, E: 90, SE: 135, S: 180, SW: 225, W: 270, NW: 315 };
 
-/* The row to show for a resident facing `facing`: the nearest drawn direction or the mirror of one (a tie keeps the
-   drawn one and the earlier row); a facing pose shows its S row, or its first, as drawn. */
+/* The row to show for a resident facing `facing`: the nearest drawn direction or the mirror of one; at the same distance
+   a drawn row wins over a mirror (a big carried item keeps its hand), then the earlier row. A facing pose shows its S
+   row, or its first, as drawn. */
 export function sheetRowFor(
-  directions: readonly UniqueRenderAngle5[] | undefined,
+  directions: readonly Direction8[] | undefined,
   facing: string,
   facingPose: boolean,
 ): { row: number; mirror: boolean } {
@@ -1026,7 +1031,7 @@ export function sheetRowFor(
     for (const mirror of [false, true]) {
       const drawn = FACE_ANGLE[d] ?? 180;
       const angle = mirror ? (360 - drawn) % 360 : drawn;
-      const diff = Math.abs(((want - angle + 540) % 360) - 180);
+      const diff = Math.abs(((want - angle + 540) % 360) - 180) + (mirror ? 0.5 : 0);
       if (diff < bestDiff) {
         bestDiff = diff;
         best = { row, mirror };

@@ -26,7 +26,7 @@ All art is drawn at the **master 4x tier**.
 | Rig source for people | 544 px tall (8x), baked down to 136 px |
 | Camera | 30 degrees above the ground, looking down the diamond's vertical axis; people alone at 19 degrees (section 7) |
 | Sun | top left (azimuth -45 degrees, elevation 55 degrees), 5200 K |
-| Directions | Up to 5 drawn (N, NE, E, SE, S), as the animation needs; SW, W and NW are mirrors of SE, E and NE |
+| Directions | As the animation needs, any of the 8 (N, NE, E, SE, S, SW, W, NW); a direction not drawn shows the nearest drawn one or its mirror (SE, E and NE mirror to SW, W and NW) |
 
 The engine shows the master art at four tiers: 1x (tile 60 x 30, person 34 px), 2x (120 x 60, 68 px, the default 100% zoom), 4x (240 x 120, 136 px, 200% zoom) and 8x (480 x 240, 272 px, Retina at 200%). Do not deliver separate small versions; the engine scales down.
 
@@ -80,7 +80,7 @@ Every point must lie inside the picture; the picture must not be taller than its
 | `fps` | Playback speed. |
 | `anchor` | In one frame: the feet of a person, or the attach point of a loop. |
 | `attach` | Loops only: `top`, `awning`, `door`, `ground` or `head` (section 8). |
-| `directions` | People only, optional: the drawn directions among N, NE, E, SE, S, one row each in this order (section 7). |
+| `directions` | People only, optional: the drawn directions among N, NE, E, SE, S, SW, W, NW, one row each in this order (section 7). |
 | `headAnchor` | People, `sleep` only, optional: in one frame, where the sleeper's Z loop stands (section 7). |
 | `stride` | People, `walk` and `carry`, optional: px the figure moves on in one cycle, as the E row draws it; 92 without it (section 7). |
 
@@ -225,7 +225,7 @@ People are drawn with an orthographic camera tilted 19 degrees down, not the 30 
 A missing animation falls back to `walk` for moving states and to `idle` for the rest.
 
 * **Sheet layout:** one row per drawn direction, in the order of the passport's `directions`; without the field 5 rows top to bottom N, NE, E, SE, S. Frames left to right; every frame the same size; the feet at the same `anchor` in every frame.
-* **Directions:** draw an animation only in the directions its meaning needs. The engine shows the nearest drawn direction or its mirror (SE, E and NE mirror to SW, W and NW). `pray` and `sad_sit` face the camera: drawn S only and shown as drawn whatever way the resident faces, never mirrored.
+* **Directions:** draw an animation only in the directions its meaning needs. For each facing the engine shows the drawn row when there is one; a direction not drawn shows the nearest drawn direction or its mirror (SE, E and NE mirror to SW, W and NW), a drawn row winning at the same distance. A mirror moves a carried item to the other hand, so an animation with a big item in one hand (`carry`, the `walk` of a look with a staff, banner, jar and the like) is drawn in all 8 directions. `pray` and `sad_sit` face the camera: drawn S only and shown as drawn whatever way the resident faces, never mirrored.
 * **Stride:** a walking sheet's `stride` is how far the figure moves on in one cycle, as the E row draws it: twice the distance a planted foot travels back in half a cycle. The engine walks a resident exactly one stride per cycle (`frames` / `fps` seconds), the same ground in every direction, so the feet do not slide. Without the field it takes 92 px, measured on the pilot walk sheets.
 * **The sleeper's Z:** `loops/sleep_z.png`, a loop sheet with `attach` `head`, its `anchor` at the bottom centre of the letters. The engine stands it at the `sleep` sheet's `headAnchor`, or 146 px above the feet without one, and never mirrors the letters.
 * **Cloak layer:** `<animation>.cloak.png`, exactly the same size and grid as its sheet, white or light grey where the cloak is and transparent elsewhere. The engine tints it with the subscription provider's colour from the pack palette, so one drawing serves every provider.

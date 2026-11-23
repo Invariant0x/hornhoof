@@ -78,7 +78,7 @@ describe('Resident sheets drawn only in the directions they need (#1975)', () =>
     }
   });
 
-  it('rejects a sheet whose height is not frameH times its directions, or that names a direction twice or one that is not drawn', () => {
+  it('rejects a sheet whose height is not frameH times its directions, or that names a direction twice or one it does not know', () => {
     const at = 'people/egypt-architect/tier_1/';
     const report = validateArtIndex(
       EGYPT_WORLD_PACK,
@@ -87,10 +87,12 @@ describe('Resident sheets drawn only in the directions they need (#1975)', () =>
         [`${at}idle.png`]: sheet(4, ['SE']),
         [`${at}build.png`]: { ...sheet(6, ['NE']), h: 256 * 5 },
         [`${at}sleep.png`]: sheet(4, ['SE', 'SE']),
-        [`${at}pray.png`]: sheet(4, ['SW']),
+        [`${at}pray.png`]: sheet(4, ['SSW' as 'SW']),
+        /* The west directions may be drawn too (#1983, Ivan 23.11: a big carried item keeps its hand). */
+        [`${at}sad_sit.png`]: sheet(4, ['SE', 'SW']),
       }),
     );
-    expect(report.errors.filter(e => e.startsWith(`${at}walk.png`) || e.startsWith(`${at}idle.png`))).toEqual([]);
+    expect(report.errors.filter(e => [`${at}walk.png`, `${at}idle.png`, `${at}sad_sit.png`].some(p => e.startsWith(p)))).toEqual([]);
     expect(report.errors.some(e => e.startsWith(`${at}build.png`) && /height/.test(e))).toBe(true);
     expect(report.errors.some(e => e.startsWith(`${at}sleep.png`) && /twice/.test(e))).toBe(true);
     expect(report.errors.some(e => e.startsWith(`${at}pray.png`) && /directions/.test(e))).toBe(true);

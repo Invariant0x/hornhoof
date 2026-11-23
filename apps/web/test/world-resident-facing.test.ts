@@ -85,6 +85,17 @@ describe('Residents face where they walk on screen (#1983)', () => {
     }
   });
 
+  /* Ivan, 23.11: a big carried item (a block on the left shoulder, a staff, a jar) must not jump to the other hand when a
+     resident turns, so a sheet may draw all 8 directions; a drawn row always wins over a mirrored one. */
+  it('shows every drawn direction of an 8-row sheet as drawn, never mirrored', () => {
+    const all = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
+    for (const facing of all) expect(sheetRowFor(all, facing, false), facing).toEqual({ row: all.indexOf(facing), mirror: false });
+    /* Two drawn: each shows as drawn; a missing west face still takes a mirror. */
+    expect(sheetRowFor(['SE', 'SW'], 'SW', false)).toEqual({ row: 1, mirror: false });
+    expect(sheetRowFor(['SE', 'SW'], 'SE', false)).toEqual({ row: 0, mirror: false });
+    expect(sheetRowFor(['N', 'NE', 'E', 'SE', 'S'], 'W', false)).toEqual({ row: 2, mirror: true });
+  });
+
   it('turns an idle resident strolling round its house to where it moves', () => {
     const fresh = createResidentSimulation(EGYPT_WORLD_PACK, synced.city, live);
     const idle = fresh.residents.find(r => r.liveState === 'idle');
@@ -186,6 +197,25 @@ describe('Residents cover one drawn stride per walk cycle (#1983)', () => {
     expect(report.errors.some(e => e.startsWith(`${at}carry.png`) && /stride/.test(e))).toBe(true);
     const fine = validateArtIndex(EGYPT_WORLD_PACK, { contract: 2, pack: 'egypt', files: { [`${at}walk.png`]: sheetOf(92) } });
     expect(fine.errors.filter(e => /stride/.test(e))).toEqual([]);
+  });
+
+  it('accepts a sheet that draws the west directions too, one row each, and refuses a name it does not know', () => {
+    const at = 'people/egypt-mason/tier_1/';
+    const sheetOf = (directions: readonly string[], rows = directions.length) => ({
+      w: 192 * 8,
+      h: 256 * rows,
+      passport: { frameW: 192, frameH: 256, frames: 8, fps: 10, anchor: { x: 96, y: 236 }, directions } as unknown as SheetPassport,
+    });
+    const eight = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    const fine = validateArtIndex(EGYPT_WORLD_PACK, { contract: 2, pack: 'egypt', files: { [`${at}carry.png`]: sheetOf(eight), [`${at}idle.png`]: sheetOf(['SE', 'SW']) } });
+    expect(fine.errors.filter(e => e.startsWith(at))).toEqual([]);
+    const bad = validateArtIndex(EGYPT_WORLD_PACK, {
+      contract: 2,
+      pack: 'egypt',
+      files: { [`${at}carry.png`]: sheetOf(eight, 5), [`${at}walk.png`]: sheetOf(['SE', 'WSW']) },
+    });
+    expect(bad.errors.some(e => e.startsWith(`${at}carry.png`)), 'eight directions need eight rows').toBe(true);
+    expect(bad.errors).toContain(`${at}walk.png: directions must name drawn ones among N, NE, E, SE, S, SW, W, NW`);
   });
 
   it('covers the same ground in a cycle whichever way it walks, so the foreshortened rows keep their feet too', () => {
