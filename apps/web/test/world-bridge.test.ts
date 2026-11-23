@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ART_CONTRACT_VERSION, declaredArtFiles, masterTileW, validateArtIndex, type ArtIndex } from '../src/world/art';
-import { bridgeSite, BRIDGE_LENGTH, bridgeTiles, hasBridgeArt, sameBridge, type BridgeSite } from '../src/world/bridge-site';
-import { applyBridgeRule, deserializeCityLayout, keepMapBridge, serializeCityLayout, type CityState } from '../src/world/city-layout';
+import { bridgeSite, BRIDGE_LENGTH, bridgeTiles, hasBridgeArt, residentDepthY, sameBridge, type BridgeSite } from '../src/world/bridge-site';
+import { applyBridgeRule, cityDepthY, deserializeCityLayout, keepMapBridge, serializeCityLayout, type CityState } from '../src/world/city-layout';
 import { drawBridgePieces, roadMarks, type CityArtContext } from '../src/world/city-renderer';
 import { tileCenterToWorld } from '../src/world/coords';
 import { DEFAULT_ISOMETRIC_PROJECTION } from '../src/world/manifest';
@@ -203,5 +203,37 @@ describe('the bridge on the shown map', () => {
     placed.length = 0;
     drawBridgePieces({ library: { ...library, index: null }, pool } as unknown as CityArtContext, EGYPT_WORLD_PACK, marks, W, H);
     expect(placed).toEqual([]);
+  });
+  it('draws the crossing from its far end to its near end, and a resident on it over the deck it walks on', () => {
+    const { defaultTileW: W, defaultTileH: H } = DEFAULT_ISOMETRIC_PROJECTION;
+    for (const axis of ['u', 'v'] as const) {
+      const site: BridgeSite = { axis, col: 10, row: 20, length: 4 };
+      const roads = new Map(bridgeTiles(site).map(t => [`${t.col},${t.row}`, { col: t.col, row: t.row, tier: 'dirt' as const, traffic: 4, bridge: true, wasOldWall: false, grandAvenue: false }]));
+      const depths: number[] = [];
+      const pool = { depth: 0, sprite: () => (depths.push(pool.depth), { anchor: { set: () => undefined }, scale: { set: () => undefined }, position: { set: () => undefined } }) };
+      const library = { index: indexOf(PIECES), texture: (path: string) => ({ path, width: 320, height: 400 }) };
+      drawBridgePieces({ library, pool } as unknown as CityArtContext, EGYPT_WORLD_PACK, roadMarks({ roads, bridge: site }, true).bridge, W, H);
+      /* Each later piece lies over the one before it: the overlap each piece carries is covered by the next. */
+      expect(depths, axis).toHaveLength(site.length);
+      for (let i = 1; i < depths.length; i++) expect(depths[i]!, `${axis} piece ${i}`).toBeGreaterThan(depths[i - 1]!);
+
+      const [dc, dr] = axis === 'u' ? [1, 0] : [0, 1];
+      const tileDepth = (i: number) => cityDepthY({ col: site.col + dc * i, row: site.row + dr * i, spanCol: 1, spanRow: 1 }, H);
+      /* From the far bank onto the start, over every piece, and off the end onto the near bank, both ways. */
+      for (let i = -1; i < site.length; i++) {
+        for (const t of [0, 0.1, 0.5, 0.9]) {
+          if (i === -1 && t === 0) continue;
+          const depth = residentDepthY(site, site.col + dc * (i + t), site.row + dr * (i + t), H);
+          const under = t > 0 ? i + 1 : i;
+          if (under < site.length) expect(depth, `${axis} at ${i + t}`).toBeGreaterThan(tileDepth(under));
+          if (under + 1 < site.length) expect(depth, `${axis} at ${i + t}, under the piece after`).toBeLessThan(tileDepth(under + 1));
+        }
+      }
+      /* Anywhere else a resident keeps the depth of its feet. */
+      const feet = (col: number, row: number) => (col + row + 1) * (H / 2);
+      expect(residentDepthY(site, 3.4, 7.2, H)).toBe(feet(3.4, 7.2));
+      expect(residentDepthY(site, site.col + dr * 2 + 0.5 * dc, site.row + dc * 2 + 0.5 * dr, H), `${axis} beside the bridge`).toBe(feet(site.col + dr * 2 + 0.5 * dc, site.row + dc * 2 + 0.5 * dr));
+      expect(residentDepthY(null, 10.5, 20, H)).toBe(feet(10.5, 20));
+    }
   });
 });
