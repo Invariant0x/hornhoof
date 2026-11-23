@@ -100,7 +100,9 @@ Every picture of one step uses the **same canvas**, so nothing moves between sta
 * the canvas is as wide as the footprint diamond, with the plot's bottom corner at the bottom centre (`[W/2, H-1]`);
 * the canvas height is the footprint's highest picture, used in full;
 * every picture passport repeats the same `groundAnchor` and `corners`;
-* the shared construction modules of a footprint (3.2) use exactly this canvas and passport too.
+* the shared construction modules of a footprint (3.2) use exactly this canvas and passport too;
+* **no ground behind the wall base** on any picture drawn over `scaffold_back` (`complete`, `upgraded`, `annex` and the bare stages): the engine clears the whole lot itself (#1958), and a ground slab there covers the back scaffold's legs;
+* **3x3: keep `front_clear_strip` free.** Along the front right wall, from the wall's outer face (u 1.95 on the shared 3x3 modules) out to 0.40 tile on v 0.04..2.35, and out to 0.66 tile on v 1.78..1.96 for the ladder's foot. The shared front scaffold and ramp stand there, so no fence, yard wall, prop or awning goes into it. Anything in front of the bay's end (v 2.35..2.45) stays lower on screen than the poles' feet. A 3x3 building whose front right wall is shorter than 2.31 tile along v needs its own placement. Plan coordinates: u runs from the plot's top corner to its right corner, v from the top corner to its left corner, in tiles (modules/README.md of modules r3). The engine sets no worker of its own in the strip either.
 
 | Footprint | Canvas W x H | Door height | `groundAnchor` | `corners.top` | `corners.right` | `corners.bottom` | `corners.left` |
 |---|---|---|---|---|---|---|---|
@@ -147,6 +149,7 @@ Optional fields:
 | `roof.png` | Bare stage: the roof closed, before the finish (no paint, cornice or props yet). |
 
 * A bare stage shows the building alone: no scaffolding, ramp, crane, rope, stakes, rubble or dust. Those come from the kit and the loops.
+* A bare stage, like `complete`, paints no ground behind its wall base (3.1): the back scaffold's legs must reach the cleared ground.
 * Same canvas and passport as the step's `complete.png` (`groundAnchor`, `corners`). `door` and `workSlots` are optional.
 * A bare stage may carry its own cast shadow as a `shadow.png` layer (3.3).
 * A step that already has its own `stage_01.png` to `stage_08.png` and `demol_01.png`, `demol_02.png` (the workshop) keeps them: the engine shows them and no kit. Nothing there is redrawn.
@@ -174,6 +177,7 @@ The files of each set:
 | `rubble.png` | After demolition: a rubble heap and broken blocks on the plot. | yes (read once #1955 wires it, section 6) |
 
 * Scaffolding reaches the wall top of the tallest step of that footprint (3.4 to 3.9).
+* On 3x3 the front scaffold's bay, its ladder and the ramp stand only in `front_clear_strip` (3.1), the same for every 3x3 building.
 * Paint no ground plate under a module: the engine clears every lot to bare ground itself (#1958), and stakes and rubble stand on it.
 * Modules take no layers, so leave cast shadows out of them.
 
