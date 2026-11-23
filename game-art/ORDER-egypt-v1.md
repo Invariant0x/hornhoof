@@ -347,7 +347,7 @@ Folder `people/<look>/tier_<n>/`. One look per kind of role. A role without its 
 | `egypt-machine-keeper` | program operator, home devices (OPS-PROGRAM, HOM-NET, HOM-SMART) | tool | cap | 2 |
 | `egypt-day-laborer` | one-off helpers | stone | none | 2 |
 | `egypt-pharaoh` | the orchestrator | staff | crown | 1 |
-| `egypt-architect` | architect (DEV-ARCH) | scroll | circlet | 1 |
+| `egypt-architect` | architect (DEV-ARCH) | scroll | nemes, as the approved tier 3 picture `hd-char-lvl05.png` (the engine's placeholder shows a hood) | 1 |
 | `egypt-canal-builder` | DevOps (DEV-OPS) | tool | none | 1 |
 | `egypt-skirmisher` | red team (DEV-RED) | spear and shield | hood | 1 |
 | `egypt-guard-captain` | head of operations (OPS-HEAD) | staff | helm | 1 |
@@ -368,6 +368,7 @@ Five outfit tiers follow the agent's level:
 * A missing higher tier falls back to the next lower one.
 * The role stays readable in every tier: the same carried item and headgear, with richer cloth, collar, belt and gold as the tier rises.
 * **Cloak layer:** `<animation>.cloak.png`, exactly the same size and grid as its sheet, white or light grey where the cloak is and transparent elsewhere. The engine tints it with the colour of the agent's subscription provider, so one drawing serves every provider: Claude `#C96A4B`, Codex `#3FA796`, Antigravity `#4DA167`, Kimi `#4C84D6`, GLM `#766BD6`, API key `#B89B5E`.
+* **First live resident:** the tier 3 `egypt-architect` `walk` arrives first without its cloak layer; the cloak layer comes in a later pass. Until then the engine draws him with no cloak.
 
 ### 4.3 Animations
 
