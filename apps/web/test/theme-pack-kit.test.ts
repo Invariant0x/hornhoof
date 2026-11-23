@@ -2,10 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-
-type Pack = { themeArchiveFiles: (id: string, options?: object) => Map<string, Buffer> };
-/* The web's script, as theme-routes.test.ts reads it: it packs Hornhoof's own themes from the web's registry. */
-const { themeArchiveFiles } = (await import(new URL('../../web/scripts/theme-pack.ts', import.meta.url).href)) as Pack;
+import { themeArchiveFiles } from '../scripts/theme-pack';
 
 /* The archive of a built-in theme with a painted kit and its fonts brought from outside the repository (#1970): a kit's
    pictures and fonts have their own licence and never go into git (#84, #105), so the script takes them from folders
