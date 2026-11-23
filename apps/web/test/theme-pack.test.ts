@@ -45,7 +45,8 @@ describe('packing a theme Hornhoof ships', () => {
     vi.restoreAllMocks();
   });
 
-  /* An art folder as an artist hands it over: pictures and passports in folders, with the index and notes Hornhoof leaves out. */
+  /* An art folder as an artist hands it over: pictures and passports in folders, with the index, notes and loose data Hornhoof
+     leaves out. */
   const artFolder = () => {
     const art = join(folder, 'art');
     mkdirSync(join(art, 'buildings', 'house'), { recursive: true });
@@ -54,6 +55,8 @@ describe('packing a theme Hornhoof ships', () => {
     writeFileSync(join(art, 'ground.png'), 'ground');
     writeFileSync(join(art, 'art-index.json'), '{}');
     writeFileSync(join(art, 'NOTES.txt'), 'notes');
+    /* An artist's measurements beside the pictures: data of no picture, which an installed theme may not carry. */
+    writeFileSync(join(art, 'colors.json'), '{}');
     return art;
   };
 
