@@ -184,7 +184,8 @@ test(`a world theme without all its art, ${lang} ${width}: the company on it get
   await page.goto('/');
   await expect(page.locator('html')).toHaveAttribute('data-theme', STATION.id);
   expect(await token(page, COLOR_TOKENS.bg)).toBe('#F7F7F2');
-  await expect(page.locator('main .map').first()).toBeVisible();
+  /* The schematic map, loaded: its zoom comes once the company is read, so the shot is never of Loading. */
+  await expect(page.locator('main .map > .zoom')).toBeVisible();
   await expect(page.locator('.map.world-map')).toHaveCount(0);
   await expect(page.locator('.world-canvas-host canvas')).toHaveCount(0);
   expect(await page.locator('html').getAttribute('data-world')).toBeNull();
