@@ -12,7 +12,7 @@ LICENSE                 the licence of everything in the archive (LICENSE.md and
 ui/look.json            colours, fonts and corners of the interface
 ui/fonts.json           the font files and the faces they draw            optional
 ui/fonts/*.woff2                                                          optional
-ui/kit.json             painted interface parts                           optional, carried and checked, not drawn yet
+ui/kit.json             painted interface parts                           optional, checked and drawn
 ui/kit/*.png|*.webp                                                       optional
 ui/NOTES.md             notes on the skin for whoever changes it          optional
 world/world.json        the world map: ground, plants, buildings, residents, stages   only with an engine
@@ -105,9 +105,9 @@ Every value is checked by pattern before it is used. Anything that reads as code
 * Hornhoof writes the `@font-face` rules itself; a font never comes as CSS.
 * A font's licence (OFL for most) goes into `LICENSE` or beside the font as `ui/fonts/<family>-OFL.txt`.
 
-### 3.3 kit.json and kit/: painted parts, carried and checked, not drawn yet
+### 3.3 kit.json and kit/: painted parts
 
-A kit is pictures of interface parts (frames, panels, buttons with their states, fields, chips, counters, rows, dividers) that replace the look of each part without moving it, as the theme UI kit 1.0 (`THEME-UI-KIT.md`) describes them. Hornhoof does not draw kits from an archive yet: that comes with the step that puts a kit on the page (`applyKit` and `kit.css`). An archive may already carry its kit. Hornhoof checks it, stores it and serves it, and a theme with a kit looks like the same theme without one until kits are drawn.
+A kit is pictures of interface parts (frames, panels, buttons with their states, fields, chips, counters, rows, dividers) that replace the look of each part without moving it, as the theme UI kit 1.0 (`THEME-UI-KIT.md`) describes them. Hornhoof checks a kit, stores it, serves it and draws it. When the theme on the page has one, `applyKit` (`apps/web/src/skins/kit.ts`) sets one custom property per slot on the page's root (`--kit-<slot>` for the picture, with `-slice`, `-width`, `-outset`, `-repeat` and `-size` from its values), one per colour (`--kit-c-<name>`), and the marks `data-kit` and `data-kit-faces`. `apps/web/src/kit.css` holds the rules, written once for every kit: a frame is a `border-image`, a fill a background layer, so no box moves or changes its size with a kit. A slot the kit does not paint keeps the theme's own look, and a part painted whole (its slice ends in `fill`) replaces the element's fill. A theme without a kit, or a kit taken away, leaves no trace of one.
 
 A kit's pack folder goes into the archive as it is, but for two files: its `kit.json` is `ui/kit.json`, and its `LICENSE.md` stands at the archive's root as the theme's licence (section 7). Its pictures are in `ui/kit/`.
 
