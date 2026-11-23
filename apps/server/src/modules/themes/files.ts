@@ -117,9 +117,10 @@ export function plainText(path: string, bytes: Buffer, limit: number = THEME_FIL
   return text;
 }
 
-/* A string that would take a browser somewhere: a scheme such as https: or javascript:, a path from the root of another
-   host, or a way out of the folder it stands in. */
-const LINK = /^\s*(?:[a-z][a-z0-9+.-]*:|\/\/|\\\\)/i;
+/* A string that would take a browser somewhere: an address with a scheme or www. anywhere in it, a value that is a
+   scheme a browser runs or opens (javascript:, data: and the like), a path from the root of another host, or a way out of
+   the folder it stands in. Words such as "Tip: ..." are no link. */
+const LINK = /(?:^|[^A-Za-z0-9])(?:[a-z][a-z0-9+.-]*:\/\/|www\.)|^\s*(?:javascript|data|vbscript|blob|file|mailto|about|filesystem):|^\s*(?:\/\/|\\\\)/i;
 const KEYS_NEVER = ['__proto__', 'constructor', 'prototype'];
 const DEEPEST = 32;
 

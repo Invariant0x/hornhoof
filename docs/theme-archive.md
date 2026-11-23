@@ -261,11 +261,13 @@ Each of these refuses the whole archive. The store names the reason and the file
 
 ## 11. Building Hornhoof's own themes as archives
 
-`scripts/themes/pack.ts` writes the archive of a theme Hornhoof ships, from `skins/registry.ts`, its world pack and its world skills. A pack whose art is licensed apart from the repository takes that art from a folder outside it:
+`apps/web/scripts/theme-pack.ts` writes the archive of a theme Hornhoof ships, from `skins/registry.ts`, its world pack and its world voice, in this same format. A world whose art is licensed apart from the repository takes that art, and the licence that goes with it, from outside it:
 
 ```
-npx tsx scripts/themes/pack.ts cyberpunk --out cyberpunk.zip
-npx tsx scripts/themes/pack.ts egypt --art <the Egypt art folder> --out egypt.zip
+npx tsx apps/web/scripts/theme-pack.ts cyberpunk --out cyberpunk.zip
+npx tsx apps/web/scripts/theme-pack.ts egypt --art <the Egypt art folder> --licence <its licence> --out egypt.zip
 ```
 
-The Egypt art never goes into this repository (#105). Its archive is built where the art is and installed on the server by upload.
+Without `--art` a world has no pictures, and the engine draws its placeholders. Packing writes no dates, so the same theme from the same commit always gives the same archive.
+
+The Egypt art never goes into this repository (#105). Its archive is built where the art is and installed on the server by upload, as any theme is.

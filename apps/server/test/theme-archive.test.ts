@@ -45,6 +45,11 @@ describe('a theme archive', () => {
     expect(theme.size).toBe(bytes.reduce((sum, one) => sum + one.length, 0));
   });
 
+  it('takes words with a colon in them, which are no link', async () => {
+    const theme = await check(archiveOf(manifestWith(await plainTheme(), { description: { en: 'Tip: works at night.', ru: 'Совет: для ночи.' } })));
+    expect(theme.manifest.description).toEqual({ en: 'Tip: works at night.', ru: 'Совет: для ночи.' });
+  });
+
   it('takes the files of a theme from the one folder that holds them all', async () => {
     const theme = await check(archiveOf(await plainTheme(), 'night-shift/'));
     expect(served(theme)).toEqual(served(await check(archiveOf(await plainTheme()))));
@@ -93,6 +98,8 @@ describe('a theme archive is refused', () => {
     ['with a field the passport does not have', files => manifestWith(files, { homepage: 'x' }), { code: 'json_shape', path: 'theme.json', detail: 'the file: Unrecognized key: "homepage"' }],
     ['with a version that is not MAJOR.MINOR.PATCH', files => manifestWith(files, { version: 'v1' }), { code: 'json_shape', path: 'theme.json', detail: 'version: MAJOR.MINOR.PATCH' }],
     ['with a link in its words', files => manifestWith(files, { description: { en: 'https://example.com', ru: 'Тема.' } }), { code: 'link_outside', path: 'theme.json', detail: 'description.en' }],
+    ['with an address a browser runs', files => manifestWith(files, { author: 'javascript:alert(1)' }), { code: 'link_outside', path: 'theme.json', detail: 'author' }],
+    ['with an address in the middle of its words', files => manifestWith(files, { description: { en: 'More at www.example.com today.', ru: 'Тема.' } }), { code: 'link_outside', path: 'theme.json', detail: 'description.en' }],
     ['with markup in its words', files => manifestWith(files, { author: '<b>me</b>' }), { code: 'text_not_plain', path: 'theme.json', detail: 'author' }],
     ['with a key that reaches a prototype', files => ({ ...files, 'theme.json': '{"__proto__":{"format":1}}' }), { code: 'json_shape', path: 'theme.json', detail: '__proto__' }],
     ['with text that turns its own direction', files => ({ ...files, LICENSE: 'CC0‮1.0\n' }), { code: 'text_not_plain', path: 'LICENSE' }],

@@ -134,3 +134,30 @@ describe('an uploaded theme with a world', () => {
     expect((await instructionsOf(app.ctx, orchestrator!)).text).not.toContain('Good evening, chief');
   });
 });
+
+/* The pack script of Hornhoof's own themes, loaded when the test runs: the server's type check covers server files only. */
+type Pack = { packTheme: (id: string, options?: object) => Promise<Buffer> };
+const pack = () => import(new URL('../../web/scripts/theme-pack.ts', import.meta.url).href) as Promise<Pack>;
+
+describe("Hornhoof's own themes", () => {
+  it('are packed as archives of the same format and install by upload, Egypt with its world and voice', async () => {
+    const { app } = await testApp();
+    const ceo = await setUpCompany(app);
+    const { packTheme } = await pack();
+    for (const id of ['cyberpunk', 'light', 'matrix', 'pixel']) {
+      const installed = await upload(app, ceo, await packTheme(id));
+      expect(installed.statusCode, `${id}: ${installed.body}`).toBe(201);
+    }
+    /* Egypt's art is never in the repository (#105): packed without it, its world draws the engine's placeholders. */
+    const egypt = await upload(app, ceo, await packTheme('egypt'));
+    expect(egypt.statusCode, egypt.body).toBe(201);
+    expect(egypt.json().themes.map((theme: { id: string; engine: string }) => [theme.id, theme.engine])).toEqual([
+      ['cyberpunk', 'none'], ['light', 'none'], ['matrix', 'none'], ['pixel', 'none'], ['egypt', 'iso2d'],
+    ]);
+    const on = await app.inject({ method: 'PUT', url: '/api/world/theme', payload: { theme: 'egypt' }, ...as(ceo) });
+    expect(on.json()).toMatchObject({ theme: 'egypt', activePack: { id: 'egypt', label: { en: 'Ancient Egypt', ru: 'Древний Египет' }, skillIds: ['world-egypt-voice'] } });
+    expect((await app.inject({ url: '/api/themes/egypt/look', ...as(ceo) })).json()).toMatchObject({ id: 'egypt', world: { recipe: { use: 'egypt-river-valley' } } });
+    /* Packing is the same bytes every time, so an archive can be checked against the one built from the same commit. */
+    expect((await packTheme('cyberpunk')).equals(await packTheme('cyberpunk'))).toBe(true);
+  });
+});
