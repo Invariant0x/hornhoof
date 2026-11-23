@@ -157,6 +157,32 @@ async function barKeepsFrameRoom(page: Page, panel: string, body: string | null)
   expect(Math.abs(gap - room), `${panel}: the bar keeps the frame room from the edge`).toBeLessThanOrEqual(0.5);
 }
 
+/* Every element a frame rule of the kit names, and that is on screen, draws that frame: no screen rule of its own (a border
+   shorthand resets border-image) takes it away, so a face painted whole never leaves its element see-through. */
+async function framesDrawn(page: Page, frame: string) {
+  const lost = await page.evaluate(() => {
+    const root = document.documentElement;
+    const out: string[] = [];
+    const walk = (rules: CSSRuleList) => {
+      for (const rule of [...rules]) {
+        if (!(rule instanceof CSSStyleRule)) {
+          if ('cssRules' in rule) walk((rule as CSSGroupingRule).cssRules);
+          continue;
+        }
+        const slot = /var\(--kit-([a-z0-9-]+)\)/.exec(rule.selectorText.includes('[data-kit') ? rule.style.getPropertyValue('border-image') || rule.style.getPropertyValue('border-image-source') : '')?.[1];
+        if (!slot || !root.style.getPropertyValue(`--kit-${slot}`)) continue;
+        for (const element of document.querySelectorAll(rule.selectorText)) {
+          const box = element.getBoundingClientRect();
+          if (box.width && box.height && getComputedStyle(element).borderImageSource === 'none') out.push(`${slot}: ${element.tagName.toLowerCase()}.${[...element.classList].join('.')}`);
+        }
+      }
+    };
+    for (const sheet of [...document.styleSheets]) walk(sheet.cssRules);
+    return [...new Set(out)];
+  });
+  expect(lost, `${frame}: every kit frame is drawn`).toEqual([]);
+}
+
 /* What a panel's words take: their boxes stay put whether the frame room is there or not, in any theme. */
 async function wordsStayPut(page: Page, scroller: string) {
   const take = () => page.locator(scroller).first().evaluate(element => [...element.querySelectorAll('*')].map(child => {
@@ -181,6 +207,7 @@ for (const language of ['en', 'ru'] as const) {
         await expect(page.locator('.tr-views label').first()).toBeVisible();
         await nothingMoves(page, 'tasks');
         await noSidewaysScroll(page, 'tasks');
+        await framesDrawn(page, 'tasks');
         if (width === 1440) {
           await barKeepsFrameRoom(page, '.tr-side', null);
           await wordsStayPut(page, '.tr-side');
@@ -192,6 +219,7 @@ for (const language of ['en', 'ru'] as const) {
         await kitDrawn(page);
         await nothingMoves(page, 'task card');
         await noSidewaysScroll(page, 'task card');
+        await framesDrawn(page, 'task card');
         await barKeepsFrameRoom(page, '.acard', '.ac-body');
         await wordsStayPut(page, '.ac-body');
         if (process.env.HH_SCREENSHOT_DIR) await capture(page, info, `task-card-${language}-${width}`);
@@ -202,6 +230,7 @@ for (const language of ['en', 'ru'] as const) {
         await kitDrawn(page);
         await nothingMoves(page, 'department panel');
         await noSidewaysScroll(page, 'department panel');
+        await framesDrawn(page, 'department panel');
         await barKeepsFrameRoom(page, '.dv-drawer', '.dv-drawer-b');
         await wordsStayPut(page, '.dv-drawer-b');
         if (process.env.HH_SCREENSHOT_DIR) await capture(page, info, `department-panel-${language}-${width}`);
@@ -218,13 +247,15 @@ for (const language of ['en', 'ru'] as const) {
         const drawn = await stop.evaluate(button => {
           const style = getComputedStyle(button);
           const root = document.documentElement.style;
-          return { source: style.borderImageSource, color: style.color, plate: root.getPropertyValue('--kit-danger'), ink: root.getPropertyValue('--kit-c-danger-on-ink') };
+          const plate = /url\("(.+)"\)/.exec(root.getPropertyValue('--kit-danger'))?.[1];
+          return { source: style.borderImageSource, color: style.color, plate: plate ? `url("${new URL(plate, location.href).href}")` : 'none', ink: root.getPropertyValue('--kit-c-danger-on-ink') };
         });
         expect(drawn.source, 'the danger plate, not the primary one').toBe(drawn.plate);
         const expected = await page.evaluate(ink => { const probe = document.createElement('i'); probe.style.color = ink; document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; }, drawn.ink || 'var(--on-btn)');
         expect(drawn.color, 'the light label made for the plate').toBe(expected);
         await nothingMoves(page, 'machines');
         await noSidewaysScroll(page, 'machines');
+        await framesDrawn(page, 'machines');
         if (process.env.HH_SCREENSHOT_DIR) await capture(page, info, `machines-${language}-${width}`);
       });
     });
