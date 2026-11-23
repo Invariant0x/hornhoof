@@ -11,6 +11,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - When the server cannot be reached, restarts or installs an update, the page no longer shows a missing page, "Insufficient permissions" or "Hornhoof is not responding": a layer over the page says "No connection to the server" or "Server is updating" in the person's language, asks the server again with a growing wait, and once it answers every screen and the live stream come back with no reload, also for a page opened or reloaded during the outage. An answer of a hop in front of the server that is not Hornhoof's, such as a 404 page of the public link's relay, is read as a lost connection; what the server itself says is missing still reads as missing.
 - A browser that opens a page while the front or the keeper has no server behind it gets a plain page in English and Russian that says the same, opens by itself once the server answers and makes no request outside itself, instead of an unstyled line of text. The statuses stay 502 and 503, never 404.
+- The head of Design, named on a task's tracked work to check a screen's final look, can now read that task and its files and comment on it until the check ends, and the task's holder can message that head about it.
 
 ## [0.42.0] - 2026-11-23
 

@@ -28,6 +28,8 @@ import {
 import type { WorldPackManifest } from '../world/manifest';
 import {
   createConstructionSimulation,
+  startBuildingConstruction,
+  startBuildingDemolition,
   startBuildingRelocation,
   type ConstructionSimulation,
 } from '../world/construction';
@@ -270,7 +272,13 @@ type LiveWorldDebugHandle = {
   triggerRelocationModal: (
     buildingId?: string,
   ) => { buildingId: string; fromCol: number; fromRow: number; toCol: number; toRow: number } | null;
+  /* Holds a building at stage n of the pack's whole construction line, building or torn down, so a check can look at that
+     picture: the line runs over the pack's own stage count, whatever the building's own number of stages. */
+  holdBuildingStage: (buildingId: string, stage: number, phase?: 'building' | 'demolishing') => boolean;
 };
+
+/* The slowest the construction timer runs: a held stage stays on screen for 20 seconds. */
+const HELD_STAGES_PER_SEC = 0.05;
 
 declare global {
   interface Window {
@@ -529,6 +537,16 @@ function Stage4LiveWorld() {
         setScenario: (nextScenario, nextPack) => {
           if (nextPack) setPackKey(nextPack);
           setScenario(nextScenario);
+        },
+        holdBuildingStage: (buildingId, stage, phase = 'building') => {
+          const sim = constructionRef.current;
+          const b = cityRef.current?.buildings.find(item => item.id === buildingId);
+          if (!sim || !b) return false;
+          const line = { ...b, maxStage: pack.stageCounts.construction };
+          if (phase === 'demolishing') startBuildingDemolition(sim, { ...line, stage }, HELD_STAGES_PER_SEC);
+          else startBuildingConstruction(sim, line, line.maxStage, stage, HELD_STAGES_PER_SEC);
+          engineRef.current?.flushVisibleBakes();
+          return true;
         },
         triggerRelocationModal: buildingId => {
           const curCity = cityRef.current;
