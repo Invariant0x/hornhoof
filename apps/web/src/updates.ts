@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiFailure } from './api';
+import { connection } from './connection';
 import type { UpdatesView } from './types';
 import type { Version } from './ui/VersionMark';
 import { answeredUpdate } from './update-state';
@@ -127,6 +128,12 @@ export function useUpdates(enabled: boolean): Updates {
   const busy = (sent !== null && !answered) || status?.state === 'running' || Boolean(view?.updater.waiting);
   const starting = sent !== null && status?.id !== sent.id;
   busyNow.current = busy;
+  /* While an update installs, a server that is away is updating: the layer over the page says so. */
+  const installing = status?.state === 'running' || (sent !== null && !answered);
+  useEffect(() => {
+    connection.updateRuns(installing);
+    return () => connection.updateRuns(false);
+  }, [installing]);
   const pollMs = updatesPollMs(busy || outage === 'maintenance', view?.nodeWaits);
 
   useEffect(() => {

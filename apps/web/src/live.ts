@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
+import { connection } from './connection';
 import { rateMeter } from './guard';
 import type { StreamMessage } from './types';
 
@@ -65,6 +66,8 @@ function connect(): void {
   });
   es.addEventListener('error', () => {
     broken = true;
+    /* A stream that breaks while the server answers is nothing to tell: the page looks, and says so only if it is away. */
+    connection.lost();
     /* An error page, such as a proxy's while Hornhoof restarts, closes the stream for good. */
     if (es.readyState !== EventSource.CLOSED || source !== es || retry) return;
     es.close();
@@ -82,11 +85,28 @@ function connect(): void {
   });
 }
 
+/* The server answers again after it was away: a stream that gave up opens at once, not when its own wait is over. */
+function reopen(): void {
+  if (!listeners.size || !source || source.readyState !== EventSource.CLOSED) return;
+  if (retry) clearTimeout(retry);
+  retry = null;
+  wait = RETRY_MS;
+  source = null;
+  connect();
+}
+
 /* The server answers again after an update held it. What the screens asked for meanwhile was refused, so every listener
    hears "reconnected" and fetches what it shows anew, as after a break of the stream. */
 export function heardAgain(): void {
   tell({ type: 'reconnected' });
 }
+
+/* When the server answers again after the layer over the page showed, every screen fetches what it shows anew and the
+   stream opens again. */
+connection.onBack(() => {
+  reopen();
+  heardAgain();
+});
 
 /* A newer answer can arrive before an earlier request completes. Only answers still in order count. */
 export function latestAnswers(): () => () => boolean {
