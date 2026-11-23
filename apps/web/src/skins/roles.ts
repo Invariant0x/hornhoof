@@ -58,9 +58,10 @@ export const PULSE_TOKEN = '--tracker-pulse-low';
 export const SCHEMES = ['dark', 'light'] as const;
 export type Scheme = (typeof SCHEMES)[number];
 
-/* Whether a skin keeps the standard schematic map or renders an interactive world map and interior scenes. */
+/* Whether a skin keeps the standard schematic map or renders an interactive world map and interior scenes: 'standard',
+   or the id of a world pack, shipped or installed from a theme archive. */
 export const WORLD_KINDS = ['standard', 'egypt'] as const;
-export type WorldKind = (typeof WORLD_KINDS)[number];
+export type WorldKind = (typeof WORLD_KINDS)[number] | (string & {});
 
 /* Visual surface treatment applied across screens over the semantic tokens without changing layout geometry. */
 export const SURFACE_STYLES = ['plain', 'papyrus'] as const;
