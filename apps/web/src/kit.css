@@ -1,0 +1,218 @@
+/* Painted interface kit (the theme UI kit 1.0, #1970). When the theme on the page is one the company installed with a
+   ui/kit.json, skins/kit.ts sets one custom property per slot on the root (--kit-<slot> is the picture, -slice, -width,
+   -outset and -repeat its 9-slice, -size a tile's size, -bg transparent for a part painted whole), the kit colours
+   (--kit-c-<name>), data-kit and data-kit-faces. These rules are written once for every kit and name no screen. A slot the
+   kit does not fill leaves its declaration invalid, so that element keeps the token look. Nothing here changes a box:
+   frames are border-image (drawn inside the border box over the padding, or past it by outset) and fills are background
+   layers over the token colour. */
+
+/* Fills */
+:root[data-kit] body,
+:root[data-kit] .map-bg-grain {
+  background-image: var(--kit-ground);
+  background-size: var(--kit-ground-size);
+}
+:root[data-kit] :is(.edge, .side-panel, .acard, .dv-drawer, .tr-side, .tr-col, .tr-card, .wcard, .ptable, .dt, .skin-card, .skins-guide, .phone-form) {
+  background-image: var(--kit-panel);
+  background-size: var(--kit-panel-size);
+}
+:root[data-kit] .edge > .edge-in { background: transparent; box-shadow: none; }
+:root[data-kit] :is(.dialog, .orch, .account-menu, .t-menu, .tr-new-menu) {
+  background-image: var(--kit-dialog-fill);
+  background-size: var(--kit-dialog-fill-size);
+}
+:root[data-kit] :is(.glass, .zoom.glass, .ticker.glass) {
+  background-image: var(--kit-plaque);
+  background-size: var(--kit-plaque-size);
+}
+:root[data-kit] :is(.dv-drawer-h, .ac-head, .tr-top, .form-head, .g-head) {
+  background-image: var(--kit-band);
+  background-size: var(--kit-band-size);
+}
+:root[data-kit] .orch > .t-bar { background: transparent; border-bottom-color: transparent; }
+
+/* Frames on the element itself: the picture's band is drawn over the padding, under the content */
+:root[data-kit] :is(.dialog, .about, .world-confirm-dialog) {
+  border-image: var(--kit-dialog) var(--kit-dialog-slice) / var(--kit-dialog-width) / var(--kit-dialog-outset, 0) var(--kit-dialog-repeat, stretch);
+  box-shadow: 0 16px 40px var(--shadow);
+}
+:root[data-kit] :is(.account-menu, .t-menu, .tr-new-menu) {
+  border-image: var(--kit-menu) var(--kit-menu-slice) / var(--kit-menu-width) / var(--kit-menu-outset, 0) var(--kit-menu-repeat, stretch);
+  box-shadow: 0 10px 30px var(--shadow);
+}
+:root[data-kit] .orch {
+  border-image: var(--kit-window) var(--kit-window-slice) / var(--kit-window-width) / var(--kit-window-outset, 0) var(--kit-window-repeat, stretch);
+  box-shadow: 0 18px 44px var(--shadow);
+}
+:root[data-kit] :is(.acard, .dv-drawer, .side-panel, .tr-side) {
+  border-image: var(--kit-drawer) var(--kit-drawer-slice) / var(--kit-drawer-width) / var(--kit-drawer-outset, 0) var(--kit-drawer-repeat, stretch);
+  box-shadow: 0 12px 28px var(--shadow);
+}
+:root[data-kit] .edge {
+  border-image: var(--kit-card) var(--kit-card-slice) / var(--kit-card-width) / var(--kit-card-outset, 0) var(--kit-card-repeat, stretch);
+  background-color: var(--surface);
+}
+:root[data-kit] :is(.tb-brand.glass, .avatar.glass, .hbtn.glass.ib) {
+  border-image: var(--kit-tile) var(--kit-tile-slice) / var(--kit-tile-width) / var(--kit-tile-outset, 0) var(--kit-tile-repeat, stretch);
+  box-shadow: 0 4px 12px var(--shadow);
+}
+:root[data-kit] :is(.zoom.glass, .ticker.glass, .crumb.glass, .dv-tools.glass, .hbtn.glass:not(.ib), .update-banner, .world-relocate-banner, .tabs.glass) {
+  border-image: var(--kit-plaque-frame) var(--kit-plaque-frame-slice) / var(--kit-plaque-frame-width) / var(--kit-plaque-frame-outset, 0) var(--kit-plaque-frame-repeat, stretch);
+  box-shadow: 0 4px 12px var(--shadow);
+}
+:root[data-kit] .tabs.glass { outline-color: transparent; }
+:root[data-kit] .tabs button + button { border-inline-start-color: color-mix(in srgb, var(--line2) 45%, transparent); }
+:root[data-kit] .tabs button { color: var(--kit-c-tab-ink, var(--muted)); }
+:root[data-kit] .tabs button.on {
+  color: var(--kit-c-tab-on-ink, var(--cyan-ink));
+  background: var(--kit-tab-on) center bottom 5px / var(--kit-tab-on-size) no-repeat, var(--surface);
+  box-shadow: none;
+}
+
+/* Frames painted whole (their slice says "fill"): the picture is the element's face, rounded or frayed edge, rolled
+   ends and all, so the square token fill under it steps aside. Rolled ends and frayed edges past the box are drawn
+   through border-image-outset, which never moves a box. */
+:root[data-kit][data-kit-faces~='dialog'] :is(.dialog, .about, .world-confirm-dialog),
+:root[data-kit][data-kit-faces~='menu'] :is(.account-menu, .t-menu, .tr-new-menu),
+:root[data-kit][data-kit-faces~='window'] .orch,
+:root[data-kit][data-kit-faces~='drawer'] :is(.acard, .dv-drawer, .side-panel, .tr-side),
+:root[data-kit][data-kit-faces~='card'] .edge,
+:root[data-kit][data-kit-faces~='tile'] :is(.tb-brand.glass, .avatar.glass, .hbtn.glass.ib),
+:root[data-kit][data-kit-faces~='plaque-frame'] :is(.zoom.glass, .ticker.glass, .crumb.glass, .dv-tools.glass, .hbtn.glass:not(.ib), .update-banner, .world-relocate-banner, .tabs.glass) {
+  background: transparent;
+  backdrop-filter: none;
+}
+
+/* Tables: border-collapse ignores border-image, so a table painted whole goes on its wrapper (the Edge of SortTable, the
+   fit box of People) and the table's own fill and outline step aside. Only for a table face, so a kit without one keeps
+   the card frame on tables. */
+:root[data-kit][data-kit-faces~='table'] :is(.edge.tbl-frame, .fit:has(> table.ptable)) {
+  border-image: var(--kit-table) var(--kit-table-slice) / var(--kit-table-width) / var(--kit-table-outset, 0) var(--kit-table-repeat, stretch);
+  background: transparent;
+}
+:root[data-kit][data-kit-faces~='table'] .ptable { background: transparent; border-color: transparent; }
+
+/* Buttons and their states. A part painted with its middle replaces the element's fill (--kit-<slot>-bg). */
+:root[data-kit] .btn:not(.ghost) {
+  background: var(--kit-btn-bg, var(--btn));
+  border-image: var(--kit-btn) var(--kit-btn-slice) / var(--kit-btn-width) / var(--kit-btn-outset, 0) var(--kit-btn-repeat, stretch);
+  clip-path: none;
+  box-shadow: none;
+}
+:root[data-kit] .btn:not(.ghost):hover { filter: none; border-image-source: var(--kit-btn-hover, var(--kit-btn)); }
+:root[data-kit] .btn:not(.ghost):active { border-image-source: var(--kit-btn-pressed, var(--kit-btn)); }
+:root[data-kit] .btn:not(.ghost):disabled { border-image-source: var(--kit-btn-disabled, var(--kit-btn)); opacity: .8; }
+:root[data-kit] :is(.btn.ghost, .act, .tr-person-picker) {
+  background: var(--kit-ghost-bg, var(--surface2));
+  border-image: var(--kit-ghost) var(--kit-ghost-slice) / var(--kit-ghost-width) / var(--kit-ghost-outset, 0) var(--kit-ghost-repeat, stretch);
+  box-shadow: none;
+}
+:root[data-kit] :is(.btn.ghost, .act, .tr-person-picker):hover { filter: none; border-image-source: var(--kit-ghost-hover, var(--kit-ghost)); }
+:root[data-kit] :is(.btn.ghost, .act):active { border-image-source: var(--kit-ghost-pressed, var(--kit-ghost)); }
+:root[data-kit] :is(.btn.ghost, .act):disabled { border-image-source: var(--kit-ghost-disabled, var(--kit-ghost)); opacity: .8; }
+:root[data-kit] :is(.btn.ghost.icon-btn, .tr-new, .window-close, .zbtn) {
+  background: var(--kit-iconbtn-bg, var(--surface2));
+  border-image: var(--kit-iconbtn) var(--kit-iconbtn-slice) / var(--kit-iconbtn-width) / var(--kit-iconbtn-outset, 0) var(--kit-iconbtn-repeat, stretch);
+  clip-path: none;
+  box-shadow: none;
+}
+:root[data-kit] :is(.btn.ghost.icon-btn, .tr-new, .window-close, .zbtn):hover { border-image-source: var(--kit-iconbtn-hover, var(--kit-iconbtn)); }
+:root[data-kit] :is(.btn.ghost.icon-btn, .tr-new, .window-close, .zbtn):active { border-image-source: var(--kit-iconbtn-pressed, var(--kit-iconbtn)); }
+:root[data-kit] :is(.chipf, .tr-chip) {
+  background: var(--kit-chip-bg, var(--surface2));
+  border-image: var(--kit-chip) var(--kit-chip-slice) / var(--kit-chip-width) / var(--kit-chip-outset, 0) var(--kit-chip-repeat, stretch);
+}
+:root[data-kit] :is(.chipf, .tr-chip).on { border-image-source: var(--kit-chip-on, var(--kit-chip)); color: var(--kit-c-chip-on-ink, var(--cyan-ink)); }
+:root[data-kit] :is(.btn.ghost, .act).danger { color: var(--kit-c-danger-ink, var(--pink-ink)); }
+:root[data-kit] .btn.danger:not(.ghost) {
+  background: var(--kit-danger-bg, var(--kit-btn-bg, var(--btn)));
+  border-image: var(--kit-danger, var(--kit-btn)) var(--kit-danger-slice, var(--kit-btn-slice)) / var(--kit-danger-width, var(--kit-btn-width)) / var(--kit-danger-outset, var(--kit-btn-outset, 0)) var(--kit-danger-repeat, var(--kit-btn-repeat, stretch));
+  color: var(--kit-c-danger-on-ink, var(--on-btn));
+}
+:root[data-kit] .btn.danger:not(.ghost):hover { border-image-source: var(--kit-danger-hover, var(--kit-danger, var(--kit-btn))); }
+:root[data-kit] .btn.danger:not(.ghost):active { border-image-source: var(--kit-danger, var(--kit-btn)); }
+
+/* Fields */
+:root[data-kit] :is(.field input, .field select, textarea, .search, .keybox, .t-in) {
+  background: var(--kit-field-bg, var(--surface));
+  border-image: var(--kit-field) var(--kit-field-slice) / var(--kit-field-width) / var(--kit-field-outset, 0) var(--kit-field-repeat, stretch);
+  box-shadow: none;
+}
+:root[data-kit] :is(.field input, .field select, textarea, .search, .keybox, .t-in):focus { border-image-source: var(--kit-field-focus, var(--kit-field)); }
+
+/* Small plates, strips and rows */
+:root[data-kit] .nav-count {
+  background: var(--kit-counter-bg, var(--pink));
+  border-image: var(--kit-counter) var(--kit-counter-slice) / var(--kit-counter-width) / var(--kit-counter-outset, 0) var(--kit-counter-repeat, stretch);
+}
+:root[data-kit] .badge {
+  background: var(--kit-badge-bg, transparent);
+  color: var(--kit-c-badge-ink, var(--pink-ink));
+  border-image: var(--kit-badge) var(--kit-badge-slice) / var(--kit-badge-width) / var(--kit-badge-outset, 0) var(--kit-badge-repeat, stretch);
+}
+:root[data-kit] .tick-box input[type='checkbox']:not(:checked) {
+  background: var(--kit-check-bg, var(--surface2));
+  border-image: var(--kit-check) var(--kit-check-slice) / var(--kit-check-width) / var(--kit-check-outset, 0) var(--kit-check-repeat, stretch);
+}
+:root[data-kit] .edge > .corner { border-color: transparent; background: var(--kit-corner) 0 0 / 100% 100% no-repeat; }
+:root[data-kit]:is([dir='rtl'], :lang(ar), :lang(fa), :lang(he)) .edge > .corner { transform: scaleX(-1); }
+:root[data-kit] :is(.bar, .world-level-bar) { background: var(--kit-track) 0 0 / 100% 100% no-repeat, var(--idle); }
+:root[data-kit] :is(.bar i, .world-level-bar i) { background: var(--kit-fill) 0 0 / 100% 100% no-repeat, var(--cyan); }
+:root[data-kit] :is(.am-sep, .about-sep, .nav-sep) {
+  border-image: var(--kit-divider) var(--kit-divider-slice) / var(--kit-divider-width) / var(--kit-divider-outset, 0) var(--kit-divider-repeat, stretch);
+}
+:root[data-kit] :is(.ptable th, .dt th, .tr-head) { background: var(--kit-thead) 0 0 / 100% 100% no-repeat; }
+:root[data-kit] :is(.ptable tbody tr, .dt tbody tr, .tr-row, .tr-item, .mi):hover { background: var(--kit-row-hover) 0 0 / 100% 100% no-repeat; }
+:root[data-kit] :is(.tr-item.on, .mi.on, .mi[aria-current='true']) { background: var(--kit-row-selected) 0 0 / 100% 100% no-repeat; }
+/* Scrollbars take colours only: a picture would draw in one engine and change the measured scrollbar width. */
+:root[data-kit], :root[data-kit] * { scrollbar-color: var(--kit-c-scroll-thumb, auto) var(--kit-c-scroll-track, auto); }
+
+/* Screen tabs: a tab plate each, the selected one its own plate with the bar under it. The plates' papyrus is too strong a
+   pattern for words at 4.5:1 at its darkest spot, so the words sit on a calm opaque backing of the theme's surface, inside
+   the plate's rim: a layer of the tab's own, under its words and over its plate (isolation keeps it in the tab). */
+:root[data-kit] :is(.tr-views label, .spd-tabs [role='tab']) {
+  isolation: isolate;
+  border-image: var(--kit-tab) var(--kit-tab-slice) / var(--kit-tab-width) / var(--kit-tab-outset, 0) var(--kit-tab-repeat, stretch);
+  box-shadow: none;
+}
+:root[data-kit] :is(.tr-views label.on, .spd-tabs [role='tab'][aria-selected='true']) {
+  border-block-end-color: transparent;
+  border-image: var(--kit-tab-sel, var(--kit-tab)) var(--kit-tab-sel-slice, var(--kit-tab-slice)) / var(--kit-tab-sel-width, var(--kit-tab-width)) / var(--kit-tab-sel-outset, 0) var(--kit-tab-sel-repeat, stretch);
+  color: var(--kit-c-tab-on-ink, var(--ink));
+}
+:root[data-kit] :is(.tr-views label, .spd-tabs [role='tab'])::before {
+  content: '';
+  position: absolute;
+  inset: var(--kit-tab-width, 0);
+  z-index: -1;
+  background: var(--surface);
+  pointer-events: none;
+}
+:root[data-kit] :is(.tr-views label, .spd-tabs [role='tab']):not(.on, [aria-selected='true'])::before { background: var(--surface2); }
+:root[data-kit] .spd-tabs [role='tab'] { position: relative; }
+
+/* Statuses: a good state on the good pill, a state that asks for something on the bad one, each with its word and an ink
+   made for its plate; a plain or neutral state keeps the token look. */
+:root[data-kit] .status:is(.active, .ready, .acc-open) {
+  background: var(--kit-pill-ok-bg, transparent);
+  border-image: var(--kit-pill-ok) var(--kit-pill-ok-slice) / var(--kit-pill-ok-width) / var(--kit-pill-ok-outset, 0) var(--kit-pill-ok-repeat, stretch);
+  color: var(--ink);
+}
+:root[data-kit] .status:is(.invited, .needs_login, .needs_setup, .waiting_machine, .not_connected, .unsteady, .limit, .acc-full) {
+  background: var(--kit-pill-bad-bg, transparent);
+  border-image: var(--kit-pill-bad) var(--kit-pill-bad-slice) / var(--kit-pill-bad-width) / var(--kit-pill-bad-outset, 0) var(--kit-pill-bad-repeat, stretch);
+  color: var(--kit-c-danger-on-ink, var(--on-btn));
+}
+
+/* Segmented choices: chips side by side, the chosen one on the selected chip. */
+:root[data-kit] .seg button {
+  background: var(--kit-chip-bg, var(--surface2));
+  border-image: var(--kit-chip) var(--kit-chip-slice) / var(--kit-chip-width) / var(--kit-chip-outset, 0) var(--kit-chip-repeat, stretch);
+}
+:root[data-kit] .seg button[aria-pressed='true'] {
+  border-image-source: var(--kit-chip-on, var(--kit-chip));
+  color: var(--kit-c-chip-on-ink, var(--cyan-ink));
+}
+
+/* The terminal stays dark, as a terminal is, in a rim of the kit's bronze; its own scrollbar takes the kit's colours. */
+:root[data-kit] .t-term:not(:focus-within) { outline: 2px solid var(--kit-c-scroll-thumb, var(--line2)); outline-offset: -2px; }

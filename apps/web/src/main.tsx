@@ -7,6 +7,7 @@ import './fonts/handjet/handjet.css';
 import './fonts/alegreya/alegreya.css';
 import './fonts/golos-text/golos-text.css';
 import './theme.css';
+import './kit.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';

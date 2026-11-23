@@ -5,6 +5,10 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { height: 100%; }
+/* The room a side panel keeps between its edge and its scrollbar, so a frame on the panel's edge, a theme's painted one
+   too, is never under the bar (#1970, Design 2b). Its words keep their place: the scroller gives the room back from its
+   own padding. A theme's kit may set it; it is the same in every theme otherwise. */
+:root { --frame-room: 10px; }
 /* A browser never fakes a weight or a slant a font does not ship: Handjet ships one weight, and drawn over itself, its
    dots run into blots. Every other font Hornhoof carries ships the weights its text uses. */
 html { scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); font-synthesis: none; }
@@ -1680,7 +1684,7 @@ body:has(.dview) .version-mark { display: none; }
 .dv-drawer { top: var(--tree-top, 68px); bottom: var(--tree-bottom, 76px); }
 .dv-drawer-h { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 6px 6px 18px; border-bottom: 1px solid var(--line); }
 .dv-drawer-h b { font-family: var(--f-display); font-size: 16px; font-weight: 600; }
-.dv-drawer-b { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; gap: 24px; align-content: start; padding: 16px 18px 20px; }
+.dv-drawer-b { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; gap: 24px; align-content: start; padding: 16px 18px 20px; margin-inline-end: var(--frame-room); padding-inline-end: calc(18px - var(--frame-room)); }
 .dv-drawer h3 { margin-bottom: 10px; font-size: 13px; font-weight: 600; color: var(--muted); }
 .dv-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .dv-list li { display: grid; padding-left: 10px; border-left: 2px solid var(--line2); }
@@ -1827,7 +1831,7 @@ body:has(.dview) .version-mark { display: none; }
 @media (max-width: 760px) { .body.page ~ .orch:not(.fullscreen) { top: var(--shell-top, 56px); } }
 /* The body scrolls with the same 18 px of room at its end for a scrollbar in every browser, so its words are as wide in each:
    --sb is what this browser's scrollbar takes of it (style book section 9). */
-.ac-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-content: start; padding: 16px 18px 20px; padding-inline-end: calc(18px + max(0px, 18px - var(--sb, 0px))); }
+.ac-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-content: start; padding: 16px 18px 20px; margin-inline-end: var(--frame-room); padding-inline-end: calc(18px - var(--frame-room) + max(0px, 18px - var(--sb, 0px))); }
 .ac-body > * { min-width: 0; }
 .ac-body :where(p, h3, h4, dd, li, pre, code) { overflow-wrap: anywhere; }
 .ac-head { display: grid; gap: 4px; justify-items: start; min-width: 0; }
@@ -2140,7 +2144,10 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 /* The tracker stands right under the header, which leaves a bar of the shell above it a gap of its own. */
 .body.tracker-page > :is(.update-banner, .alert, .guard-stop):first-child { margin-block-start: var(--bar-gap); }
 /* The mockup's .side: the panel's surface, 12px by 8px inside, its rows of 32px for a mouse (44px for a finger, below). */
-.tr-side { position: sticky; inset-block-start: 0; display: block; min-inline-size: 0; block-size: 100cqb; overflow: auto; overflow-wrap: break-word; scrollbar-gutter: stable; padding: 12px 8px 20px; box-sizing: border-box; background: var(--surface); border-inline-end: 1px solid var(--line); border-block-start: 1px solid var(--line); }
+/* It scrolls itself, so the room for a frame is a clear end border, as much of the frame room as its 8px of padding gives
+   back (the words keep their place); its line is drawn at the border's outer edge. */
+.tr-side { --side-room: min(var(--frame-room), 8px); position: sticky; inset-block-start: 0; display: block; min-inline-size: 0; block-size: 100cqb; overflow: auto; overflow-wrap: break-word; scrollbar-gutter: stable; padding: 12px calc(8px - var(--side-room)) 20px 8px; box-sizing: border-box; background: linear-gradient(var(--line), var(--line)) right top / 1px 100% no-repeat border-box, var(--surface); border-inline-end: calc(1px + var(--side-room)) solid transparent; border-block-start: 1px solid var(--line); }
+:root[dir='rtl'] .tr-side { padding: 12px 8px 20px calc(8px - var(--side-room)); background-position: left top; }
 .tr-side-title { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-block-size: 30px; margin: 2px 8px 10px; font: 600 18px var(--f-display); }
 .tr-side-title > h2 { flex: 1 1 auto; min-inline-size: 0; margin: 0; font: inherit; }
 .tr-new { --cut: calc(5px * var(--cut-k)); display: grid; place-items: center; flex: none; inline-size: 30px; block-size: 30px; margin: 0; padding: 0; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; cursor: pointer; clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }
@@ -2554,7 +2561,7 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 }
 .acard.plain > .t-bar { height: auto; min-block-size: 38px; padding-block: 2px; padding-inline: 14px 6px; justify-content: space-between; }
 .acard.plain > .t-bar > span { text-align: start; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
-.acard.plain > .ac-body { gap: 16px; padding: 16px 18px 24px; padding-inline-end: calc(18px + max(0px, 18px - var(--sb, 0px))); }
+.acard.plain > .ac-body { gap: 16px; padding: 16px 18px 24px; padding-inline-end: calc(18px - var(--frame-room) + max(0px, 18px - var(--sb, 0px))); }
 .tp-head { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; min-inline-size: 0; }
 .tp-path { justify-self: stretch; min-inline-size: 0; font-size: 12.5px; color: var(--muted); }
 .tp-path ol { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 0; padding: 0; list-style: none; }
@@ -3684,6 +3691,16 @@ th.k-prio .sorth { white-space: nowrap; }
   box-shadow:
     inset 0 0 0 3px var(--surface),
     inset 0 0 0 4px var(--line);
+}
+/* The tracker's side keeps its end line at its border's outer edge on papyrus too. */
+:where(:root[data-surface='papyrus']) .tr-side {
+  background-image:
+    linear-gradient(var(--line), var(--line)),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 55%, transparent), color-mix(in srgb, var(--surface2) 32%, transparent)),
+    repeating-linear-gradient(0deg, transparent 0 14px, color-mix(in srgb, var(--line) 10%, transparent) 14px 15px);
+  background-size: 1px 100%, auto, auto;
+  background-repeat: no-repeat;
+  background-origin: border-box, padding-box, padding-box;
 }
 :where(:root[data-surface='papyrus']) .dialog,
 :where(:root[data-surface='papyrus']) .account-menu,
