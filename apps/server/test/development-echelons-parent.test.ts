@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadTask, report, submit } from '../src/modules/tasks/engine.js';
 import { BASE, fixture } from './development-echelons-fixture.js';
+import { RECORDED } from './recorded-fixture.js';
 
 async function parentFixture() {
   const f = await fixture();
@@ -20,7 +21,7 @@ describe('a parent with its own executable result', () => {
   it('submits its own code to Review after its checked children close', async () => {
     const f = await parentFixture();
     const child = (await f.create({ title: 'Checked coordination', parentId: f.parent.id, assigneeAgentId: f.head.id, executor: false, resultKind: 'coordination' })).task;
-    await report(f.ctx, f.head.id, child.id, { done: true, summary: 'Checked the referenced results.' });
+    await report(f.ctx, f.head.id, child.id, { done: true, summary: 'Checked the referenced results.', recorded: RECORDED });
     const moved = await submit(f.ctx, f.head.id, f.parent.id, { summary: 'Own integration implementation.', evidence: 'Affected checks.', review: { baseCommit: BASE } });
     expect(moved.task.assigneeAgentId).toBe(f.reviewer.id);
     expect((await f.detail(f.parent.id)).echelons).toMatchObject({ resultKind: 'code', stage: 'review', phase: 'active', candidateId: expect.any(String) });

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, people, subscriptions, tasks } from '../src/db/schema.js';
 import { createTask, report } from '../src/modules/tasks/engine.js';
 import { setUpCompany, statements, testApp } from './helpers.js';
+import { attached } from './recorded-fixture.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -18,7 +19,7 @@ async function company() {
   const ctx = app.ctx;
   const parent = (await createTask(ctx, { personId: ceo!.id }, { title: 'Checked report group', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head!.id, resultKind: 'coordination' })).task;
   const member = async (parentId: string | null = parent.id) => (await createTask(ctx, { agentId: head!.id }, { title: 'Checked aggregate', brief: '', body: '', departmentId: dev!.id, parentId, assigneeAgentId: worker!.id, resultKind: 'coordination' })).task;
-  const done = (id: string) => report(ctx, worker!.id, id, { done: true, summary: 'Checked the referenced results.' });
+  const done = async (id: string) => report(ctx, worker!.id, id, { done: true, summary: 'Checked the referenced results.', recorded: await attached(db, { id, companyId: acme!.id }, worker!.id, 'result.md') });
   return { ctx, db, parent, member, done, head: head!, worker: worker! };
 }
 const woken = (r: { wakes: { agentId: string; why: string }[] }) => r.wakes.map(w => [w.agentId, w.why]);
