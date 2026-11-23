@@ -61,8 +61,9 @@ export class ViewSessions {
   /* The size each view's window asks for, from the moment Hornhoof opens it: a resize that comes while it still opens
      counts too, since Hornhoof says the view is ready as it asks for it. */
   private readonly wanted = new Map<string, { key: string; size: Size }>();
-  /* When a view of each agent last went. */
+  /* When a view of each agent last went, and the views Hornhoof ended for good, which do not come back. */
   private readonly left = new Map<string, number>();
+  private readonly forGood = new Set<string>();
 
   constructor(private readonly opts: ViewOptions, private readonly host: ViewHost) {}
 
@@ -72,7 +73,8 @@ export class ViewSessions {
   }
 
   private gone(termId: string, key: string): void {
-    if (this.wanted.delete(termId)) this.left.set(key, Date.now());
+    const ended = this.forGood.delete(termId);
+    if (this.wanted.delete(termId) && !ended) this.left.set(key, Date.now());
   }
 
   /* Every view of an agent hears whether its program runs or sleeps. */
@@ -290,6 +292,7 @@ export class ViewSessions {
 
   close(m: Msg<'term.close'>): void {
     const view = this.views.get(m.termId);
+    if (m.final && (view || this.viewsOpening.has(m.termId))) this.forGood.add(m.termId);
     if (view) {
       view.child.kill();
       /* Its viewer process takes a while to end; the others get their size back at once. */

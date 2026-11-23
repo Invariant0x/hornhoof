@@ -23,6 +23,9 @@ function pingOpen(socket: WebSocket): void {
   if (socket.readyState === 1) socket.ping();
 }
 
+/* A view the person may no longer have, or the node cannot show, ends for good: the browser does not try it again. */
+const final = ([code]: Close) => code === CLOSE.noAccess[0] || code === CLOSE.noTerminal[0];
+
 /* An open view goes on only as long as what let it open still holds. It looks on every ping and at once when anyone's access
    changes, and ends with nothing more going out: why says how it ends, or nothing while it may go on. What comes back tells
    whether a frame of the browser may still go to the node. */
@@ -30,15 +33,15 @@ export function keepLooking(ctx: Ctx, socket: WebSocket, { termId, node, company
   let open = true;
   let looked = Date.now();
   let wantsPing = false;
-  const closeOnNode = () => {
-    if (ctx.terminals.remove(termId)) ctx.hub.send(node, { type: 'term.close', termId });
+  const closeOnNode = (forGood = false) => {
+    if (ctx.terminals.remove(termId)) ctx.hub.send(node, { type: 'term.close', termId, ...(forGood ? { final: true as const } : {}) });
   };
   const lookNow = async () => {
     looked = Date.now();
     const close: Close | null = await why().catch((): Close => CLOSE.noAccess);
     if (!close || !open) return;
     open = false;
-    closeOnNode();
+    closeOnNode(final(close));
     socket.close(close[0], close[1]);
   };
   const ping = () => {
