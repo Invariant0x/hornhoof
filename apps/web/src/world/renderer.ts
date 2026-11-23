@@ -66,6 +66,7 @@ import {
 import { renderResidentsFallback2D, renderResidentsToPixi, type ResidentArtContext } from './residents-renderer';
 import { PlantRenderer, type PlantStats } from './plant-renderer';
 import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas } from './smooth-terrain-baker';
+import { loadTerrainArt, terrainArtFor, type ArtPixels } from './terrain-art';
 import type { GeneratedWorldMap } from './terrain-engine';
 
 export type RendererKind = 'webgl' | 'canvas2d';
@@ -196,6 +197,8 @@ export class IsometricWorldEngine {
   private worldContainer: Container | null = null;
   private liquidSpriteA: TilingSprite | null = null;
   private liquidSpriteB: TilingSprite | null = null;
+  private liquidOrigin = { x: 0, y: 0 };
+  private liquidArtTextures: Texture[] = [];
   private liquidTexture: Texture | null = null;
   private liquidCanvas: HTMLCanvasElement | null = null;
   private liquidPhaseX = 0;
@@ -308,6 +311,8 @@ export class IsometricWorldEngine {
     this.host.innerHTML = '';
 
     try {
+      /* Painted ground and plants load while the GPU starts; the world waits for them a while, then draws what it has. */
+      const artJob = loadTerrainArt(this.pack);
       const app = new Application();
       await app.init({
         width: this.viewport.width,
@@ -319,6 +324,11 @@ export class IsometricWorldEngine {
         autoStart: false,
         preference: 'webgl',
       });
+      if (this.destroyed) {
+        app.destroy(true, { children: true, texture: true });
+        return;
+      }
+      await Promise.race([artJob, new Promise(resolve => setTimeout(resolve, 15000))]);
       if (this.destroyed) {
         app.destroy(true, { children: true, texture: true });
         return;
@@ -346,7 +356,10 @@ export class IsometricWorldEngine {
       const borderGraphic = new Graphics();
       const overlayGraphic = new Graphics();
 
-      if (this.terrainMap && this.pack.liquidLayer) {
+      const paintedLiquid = terrainArtFor(this.pack)?.liquid ?? null;
+      if (this.terrainMap && this.pack.liquidLayer && paintedLiquid) {
+        this.mountPaintedLiquid(liquidLayer, paintedLiquid);
+      } else if (this.terrainMap && this.pack.liquidLayer) {
         const liqCanvas = buildLiquidSurfaceCanvas(this.pack.liquidLayer, 256);
         const liqTex = Texture.from(liqCanvas);
         /* Explicit repeat wrapping prevents bilinear clamp seams at tile borders in WebGL. */
@@ -397,12 +410,15 @@ export class IsometricWorldEngine {
       }
 
       worldContainer.addChild(liquidLayer);
+      /* Reflections of the plants by the water: under the ground, which is see-through only over open water. */
+      const reflectionLayer = new Container();
+      worldContainer.addChild(reflectionLayer);
       worldContainer.addChild(chunkLayer);
       worldContainer.addChild(buildGridGraphic);
       /* Shadows and plants, depth-sorted among themselves; buildings and people draw above this layer. */
       const plantLayer = new Container();
       worldContainer.addChild(plantLayer);
-      this.plantRenderer?.attachPixi(plantLayer);
+      this.plantRenderer?.attachPixi(plantLayer, reflectionLayer);
       worldContainer.addChild(cityGraphic);
       worldContainer.addChild(buildingArtLayer);
       worldContainer.addChild(residentsGraphic);
@@ -500,6 +516,84 @@ export class IsometricWorldEngine {
     if (this.terrainMap && this.pack.liquidLayer) {
       this.liquidCanvas = buildLiquidSurfaceCanvas(this.pack.liquidLayer, 256);
     }
+  }
+
+  /* Painted water in layers, as its art set describes: the base colour shaded by the bed's relief, and two drifting
+     ripple layers (the second finer) that lighten the crests and darken the troughs. The textures are seen from above;
+     a squashed, turned tiling maps them onto the 2:1 ground the same way the ground textures are. */
+  private mountPaintedLiquid(layer: Container, liquid: Readonly<{ bed: ArtPixels; ripples: ArtPixels; baseColor: string }>): void {
+    const base = parseHexColor(liquid.baseColor);
+    const br = ((base >> 16) & 255) / 255;
+    const bg = ((base >> 8) & 255) / 255;
+    const bb = (base & 255) / 255;
+    const bedCanvas = document.createElement('canvas');
+    bedCanvas.width = liquid.bed.width;
+    bedCanvas.height = liquid.bed.height;
+    const bctx = bedCanvas.getContext('2d');
+    const ripCanvas = document.createElement('canvas');
+    ripCanvas.width = liquid.ripples.width;
+    ripCanvas.height = liquid.ripples.height;
+    const rctx = ripCanvas.getContext('2d');
+    if (!bctx || !rctx) return;
+    const bed = bctx.createImageData(bedCanvas.width, bedCanvas.height);
+    const src = liquid.bed.data;
+    for (let i = 0; i < src.length; i += 4) {
+      bed.data[i] = Math.max(0, Math.min(255, (br + (src[i]! / 255 - 0.54) * 0.45) * 255));
+      bed.data[i + 1] = Math.max(0, Math.min(255, (bg + (src[i + 1]! / 255 - 0.54) * 0.55) * 255));
+      bed.data[i + 2] = Math.max(0, Math.min(255, (bb + (src[i + 2]! / 255 - 0.54) * 0.4) * 255));
+      bed.data[i + 3] = 255;
+    }
+    bctx.putImageData(bed, 0, 0);
+    const rip = rctx.createImageData(ripCanvas.width, ripCanvas.height);
+    const rs = liquid.ripples.data;
+    for (let i = 0; i < rs.length; i += 4) {
+      const delta = rs[i]! / 255 - 0.5;
+      if (delta >= 0) {
+        rip.data[i] = 255;
+        rip.data[i + 1] = 255;
+        rip.data[i + 2] = 255;
+        rip.data[i + 3] = Math.min(255, delta * 2.2 * 255);
+      } else {
+        rip.data[i] = br * 0.35 * 255;
+        rip.data[i + 1] = bg * 0.4 * 255;
+        rip.data[i + 2] = bb * 0.45 * 255;
+        rip.data[i + 3] = Math.min(255, -delta * 1.8 * 255);
+      }
+    }
+    rctx.putImageData(rip, 0, 0);
+
+    const iso = new Container();
+    iso.scale.set(1, 0.5);
+    const tilePx = this.tileW / Math.SQRT2 / (terrainArtFor(this.pack)?.texelsPerTile ?? 256);
+    const make = (canvas: HTMLCanvasElement, scale: number, alpha: number): TilingSprite => {
+      const tex = Texture.from(canvas);
+      tex.source.style.addressMode = 'repeat';
+      this.liquidArtTextures.push(tex);
+      const sprite = new TilingSprite({ texture: tex, width: this.bounds.width, height: this.bounds.height * 2 });
+      sprite.x = this.bounds.minX;
+      sprite.y = this.bounds.minY * 2;
+      sprite.tileScale.set(tilePx * scale, tilePx * scale);
+      sprite.tileRotation = Math.PI / 4;
+      sprite.tilePosition.set(-this.bounds.minX, -this.bounds.minY * 2);
+      sprite.alpha = alpha;
+      iso.addChild(sprite);
+      return sprite;
+    };
+    make(bedCanvas, 1, 1);
+    this.liquidSpriteA = make(ripCanvas, 1, 0.6);
+    this.liquidSpriteB = make(ripCanvas, 1 / 1.37, 0.4);
+    this.liquidOrigin = { x: -this.bounds.minX, y: -this.bounds.minY * 2 };
+
+    const n = this.pack.mapSize;
+    const mTop = tileTopVertexToWorld(0, 0, this.tileW, this.tileH);
+    const mRight = tileTopVertexToWorld(n, 0, this.tileW, this.tileH);
+    const mBottom = tileTopVertexToWorld(n, n, this.tileW, this.tileH);
+    const mLeft = tileTopVertexToWorld(0, n, this.tileW, this.tileH);
+    const mask = new Graphics();
+    mask.moveTo(mTop.x, mTop.y).lineTo(mRight.x, mRight.y).lineTo(mBottom.x, mBottom.y).lineTo(mLeft.x, mLeft.y).closePath().fill({ color: 0xffffff });
+    layer.addChild(iso);
+    layer.addChild(mask);
+    layer.mask = mask;
   }
 
   private drawMapBorderPixi(): void {
@@ -1101,12 +1195,13 @@ export class IsometricWorldEngine {
         this.liquidPhaseX = (this.liquidPhaseX + this.pack.liquidLayer.speedX * dtSec * speedScale) % 256;
         this.liquidPhaseY = (this.liquidPhaseY + this.pack.liquidLayer.speedY * dtSec * speedScale) % 256;
       }
+      const o = this.liquidOrigin;
       if (this.liquidSpriteA) {
-        this.liquidSpriteA.tilePosition.set(this.liquidPhaseX, this.liquidPhaseY);
+        this.liquidSpriteA.tilePosition.set(o.x + this.liquidPhaseX, o.y + this.liquidPhaseY);
       }
       if (this.liquidSpriteB) {
         this.liquidSpriteB.visible = animDetail !== 'reduced';
-        this.liquidSpriteB.tilePosition.set(-this.liquidPhaseX * 0.65, this.liquidPhaseY * 0.85);
+        this.liquidSpriteB.tilePosition.set(o.x - this.liquidPhaseX * 0.65, o.y + this.liquidPhaseY * 0.85);
       }
       if (!this.app) {
         this.dirtyScene = true;
@@ -1729,6 +1824,8 @@ export class IsometricWorldEngine {
     this.residentArtPool = null;
     this.loopArtPool = null;
     this.artLibrary.destroy();
+    for (const t of this.liquidArtTextures) if (!t.destroyed) t.destroy(true);
+    this.liquidArtTextures = [];
     if (this.liquidTexture) {
       this.liquidTexture.destroy(true);
       this.liquidTexture = null;

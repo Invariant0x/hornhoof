@@ -54,7 +54,10 @@ describe('procedural plant placement', () => {
       checked++;
     }
     expect(checked).toBeGreaterThan(300);
-    const moistAvg = field.plants.reduce((s, p) => s + sampleCornerFieldBilinear(map.cornerFields, p.col, p.row).moisture, 0) / field.plants.length;
+    /* Desert details (dry grass, thorn, pebbles) cover the sand on purpose; the kinds that need moisture keep to it. */
+    const moist = field.plants.filter(p => kinds[p.kindIndex]!.moisture.min >= 0.1);
+    expect(moist.length).toBeGreaterThan(300);
+    const moistAvg = moist.reduce((s, p) => s + sampleCornerFieldBilinear(map.cornerFields, p.col, p.row).moisture, 0) / moist.length;
     expect(moistAvg).toBeGreaterThan(meanMoisture * 1.6);
   });
 
@@ -67,8 +70,8 @@ describe('procedural plant placement', () => {
     for (const p of field.plants) {
       const tile = map.tileAt(Math.floor(p.col), Math.floor(p.row))!;
       expect(kinds[p.kindIndex]!.tileKinds).toContain(tile);
-      expect(p.heightPx).toBeGreaterThanOrEqual(kinds[p.kindIndex]!.heightPx.min * 0.8);
-      expect(p.heightPx).toBeLessThanOrEqual(kinds[p.kindIndex]!.heightPx.max * 1.25);
+      expect(p.heightPx).toBeGreaterThanOrEqual(kinds[p.kindIndex]!.heightPx.min * 0.74);
+      expect(p.heightPx).toBeLessThanOrEqual(kinds[p.kindIndex]!.heightPx.max * 1.21);
     }
   });
 

@@ -14,6 +14,7 @@ import type {
   WorldPackManifest,
 } from './manifest';
 import { createRng, hash2i, hashSeed, valueNoise2D } from './prng';
+import { terrainArtFor, type ArtPixels, type LoadedTerrainArt } from './terrain-art';
 import type { CornerFieldGrid, GeneratedWorldMap } from './terrain-engine';
 
 type Rgb = readonly [number, number, number];
@@ -182,6 +183,27 @@ function addTextureDetail(buf: Uint8ClampedArray, spec: GroundMaterialSpec, c: r
     for (let i = 0; i < 3800; i++) {
       plotDot(buf, rng() * TEX_SIZE, rng() * TEX_SIZE, 0.7 + rng() * 1.6, rng() < 0.5 ? mixRgb(base, dark, 0.9) : mixRgb(base, light, 0.7), 0.35 + 0.3 * rng());
     }
+  } else if (spec.pattern === 'crop_rows') {
+    /* Rows of leafy seedlings along the first texture axis, wobbling a little, with gaps and uneven clumps. The soil
+       between them is the secondary colour, the leaves the base colour lit toward the accent on their upper left. */
+    const rows = 20;
+    const pitch = TEX_SIZE / rows;
+    for (let k = 0; k < rows; k++) {
+      const y0 = (k + 0.5) * pitch;
+      const wob = rng() * Math.PI * 2;
+      let x = rng() * 6;
+      while (x < TEX_SIZE) {
+        const step = 4.5 + rng() * 4.5;
+        if (rng() > 0.1) {
+          const y = y0 + Math.sin(x * 0.03 + wob) * 1.4 + (rng() - 0.5) * 1.6;
+          const rad = 1.9 + rng() * 1.6;
+          plotDot(buf, x + 0.9, y + 1.1, rad * 1.05, mixRgb(dark, [40, 30, 18], 0.55), 0.55);
+          plotDot(buf, x, y, rad, base, 0.95);
+          plotDot(buf, x - rad * 0.35, y - rad * 0.35, rad * 0.55, mixRgb(base, light, 0.75), 0.8);
+        }
+        x += step;
+      }
+    }
   } else if (spec.pattern === 'cracked_rock' || spec.pattern === 'cut_stone') {
     for (let i = 0; i < 2600; i++) {
       plotDot(buf, rng() * TEX_SIZE, rng() * TEX_SIZE, 0.6 + rng() * 1.1, rng() < 0.5 ? mixRgb(base, dark, 0.8) : mixRgb(base, light, 0.7), 0.3 + 0.25 * rng());
@@ -222,6 +244,7 @@ export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArr
 
       let blend = macro * 0.55 + mid * 0.45;
       let accent = 0;
+      let mul = 1;
 
       if (spec.pattern === 'fine_grain') {
         const drift = periodicNoise2D(u * 8, v * 8, 8, 8, seed + 83);
@@ -240,6 +263,12 @@ export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArr
         const stripe = 0.5 + 0.5 * Math.sin(phase);
         blend = stripe * 0.58 + macro * 0.28 + mid * 0.14 + fine * 0.08;
         if (stripe > 0.7) accent = smoothstep(0.7, 0.98, stripe) * 0.32;
+      } else if (spec.pattern === 'crop_rows') {
+        /* Tilled earth between rows of young plants: rows run along the first texture axis, 5 to a tile, with a dark
+           furrow between them; the plants themselves are drawn on afterwards (addTextureDetail). */
+        const row = 0.5 + 0.5 * Math.cos(v * 20 * Math.PI * 2 + (mid - 0.5) * 0.6);
+        blend = 0.03 + macro * 0.1 + fine * 0.08;
+        mul = 0.8 + 0.26 * row;
       } else if (spec.pattern === 'wind_ripples') {
         const phase = (u * 5 + v * 5) * Math.PI * 2 + (macro - 0.5) * 2.1;
         const wave = 0.5 + 0.5 * Math.sin(phase);
@@ -309,9 +338,9 @@ export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArr
         b += (c2[2] - b) * a;
       }
 
-      buf[off++] = clampByte(r);
-      buf[off++] = clampByte(g);
-      buf[off++] = clampByte(b);
+      buf[off++] = clampByte(r * mul);
+      buf[off++] = clampByte(g * mul);
+      buf[off++] = clampByte(b * mul);
     }
   }
 
@@ -444,8 +473,230 @@ export type SmoothBakedPixels = Readonly<{
   tileCount: number;
 }>;
 
-/* Pure pixel baker for one chunk using smooth bilinear corner fields, noise-feathered masks,
-   seamless material textures, directional top-left elevation shading and curved liquid cutouts.
+/* ---------- painted soil edges ---------- */
+
+/* How far each ground's weight is nudged by its own ragged noise; how wide the band is where two grounds share a pixel;
+   how far from the edge the darker rim reaches (all in blend-weight units). */
+const EDGE_NOISE = 0.2;
+const EDGE_BAND = 0.02;
+const RIM_BAND = 0.07;
+const RIM_DARK = 0.13;
+/* A pixel whose strongest ground leads the next one by more than this cannot change hands under the edge noise. */
+const EDGE_FAST_GAP = EDGE_NOISE * 1.3 + EDGE_BAND;
+
+/* Ragged noise of one ground at (u, v): a slow wobble, a mid ripple and a fine fray, each ground with its own offset. */
+function edgeNoise(m: number, u: number, v: number, coarse: Float32Array, detail: Float32Array): number {
+  return (
+    sampleLutFast(coarse, u * 2.2 + m * 37.3, v * 2.2 + m * 21.9) * 0.75 +
+    sampleLutFast(detail, u * 9 + m * 13.1, v * 9 - m * 7.7) * 0.3 +
+    sampleLutFast(detail, u * 23 - m * 5.3, v * 23 + m * 3.1) * 0.12
+  );
+}
+
+/* The two grounds a pixel shows and how much of the first: grounds meet along a drawn ragged line, not a wide smear. */
+export type GroundMix = { a: number; b: number; shareA: number; rim: number };
+
+function mixGround(w: Float32Array, count: number, u: number, v: number, coarse: Float32Array, detail: Float32Array, out: GroundMix): void {
+  let a = 0;
+  let wa = -1;
+  let b = -1;
+  let wb = -1;
+  for (let m = 0; m < count; m++) {
+    const x = w[m]!;
+    if (x > wa) {
+      b = a;
+      wb = wa;
+      a = m;
+      wa = x;
+    } else if (x > wb) {
+      b = m;
+      wb = x;
+    }
+  }
+  if (wa - wb > EDGE_FAST_GAP) {
+    out.a = a;
+    out.b = a;
+    out.shareA = 1;
+    out.rim = 0;
+    return;
+  }
+  let sa = -Infinity;
+  let sb = -Infinity;
+  a = -1;
+  b = -1;
+  for (let m = 0; m < count; m++) {
+    const x = w[m]!;
+    if (x < 0.02) continue;
+    const s = x + EDGE_NOISE * edgeNoise(m, u, v, coarse, detail);
+    if (s > sa) {
+      sb = sa;
+      b = a;
+      sa = s;
+      a = m;
+    } else if (s > sb) {
+      sb = s;
+      b = m;
+    }
+  }
+  if (b < 0) {
+    out.a = a;
+    out.b = a;
+    out.shareA = 1;
+    out.rim = 0;
+    return;
+  }
+  const diff = sa - sb;
+  out.a = a;
+  out.b = b;
+  out.shareA = smoothstep(-EDGE_BAND, EDGE_BAND, diff);
+  out.rim = 1 - smoothstep(0, RIM_BAND, diff);
+}
+
+/* ---------- field plots ---------- */
+
+type PlotLayout = Readonly<{
+  material: number;
+  sizeU: number;
+  sizeV: number;
+  ridge: Rgb;
+  ditch: Rgb | null;
+  layer: Float32Array;
+}>;
+
+const PLOT_SALT = 0x5bd1e995;
+/* Plot edge, in tiles: the raised earth strip, the ditch in the middle of it, and the ditch's wet rim. */
+const RIDGE_W = 0.11;
+const DITCH_W = 0.035;
+const DITCH_RIM_W = 0.07;
+
+type PlotHit = { inside: boolean; cx: number; cy: number; edgeU: number; edgeV: number; alongV: boolean };
+
+function layerAt(cf: CornerFieldGrid, arr: Float32Array, u: number, v: number): number {
+  const lu = Math.max(0, Math.min(cf.cols - 1.001, u - cf.minCol));
+  const lv = Math.max(0, Math.min(cf.rows - 1.001, v - cf.minRow));
+  const x0 = lu | 0;
+  const y0 = lv | 0;
+  const fx = lu - x0;
+  const fy = lv - y0;
+  const i = y0 * cf.cols + x0;
+  return (arr[i]! * (1 - fx) + arr[i + 1]! * fx) * (1 - fy) + (arr[i + cf.cols]! * (1 - fx) + arr[i + cf.cols + 1]! * fx) * fy;
+}
+
+/* Which plot (u, v) lies in, whether that plot is tilled (the field's weight at its middle), and the distance in tiles
+   to the plot's nearest edge along each axis. Columns of plots are staggered so the grid does not run in long lines. */
+function plotAt(cf: CornerFieldGrid, p: PlotLayout, u: number, v: number, out: PlotHit): void {
+  const cx = Math.floor(u / p.sizeU);
+  const off = hash2i(cx, 17, PLOT_SALT) * p.sizeV;
+  const cy = Math.floor((v + off) / p.sizeV);
+  out.cx = cx;
+  out.cy = cy;
+  out.inside = layerAt(cf, p.layer, (cx + 0.5) * p.sizeU, (cy + 0.5) * p.sizeV - off) > 0.45;
+  if (!out.inside) return;
+  const fx = u / p.sizeU - cx;
+  const fy = (v + off) / p.sizeV - cy;
+  out.edgeU = Math.min(fx, 1 - fx) * p.sizeU;
+  out.edgeV = Math.min(fy, 1 - fy) * p.sizeV;
+  out.alongV = hash2i(cx, cy, PLOT_SALT + 3) < 0.5;
+}
+
+/* ---------- sand ripples and paths ---------- */
+
+/* Ripple crests run at a slant across the tile axes, about 26 px apart at 100% zoom, and wander with the noise. */
+const RIPPLE_NU = 0.196;
+const RIPPLE_NV = 0.98;
+const RIPPLE_FREQ = 2.6;
+
+/* Brightness factor of wind ripples at (u, v): a broad lit windward slope, a thin bright crest and a narrow shaded lee
+   slope on the side away from a sun at the upper left. 1 means no change. */
+function rippleShade(u: number, v: number, strength: number, coarse: Float32Array, detail: Float32Array): number {
+  const warp = sampleLutFast(coarse, u * 1.1 + 5.3, v * 1.1 - 2.9) * 3.2 + sampleLutFast(detail, u * 3.3 + 1.7, v * 3.3 - 4.1) * 0.9;
+  const ph = (u * RIPPLE_NU + v * RIPPLE_NV) * RIPPLE_FREQ + warp;
+  const f = ph - Math.floor(ph);
+  const lee = smoothstep(0.74, 0.8, f) * (1 - smoothstep(0.9, 0.99, f));
+  const crest = smoothstep(0.6, 0.73, f) * (1 - smoothstep(0.73, 0.77, f));
+  const patch = 0.6 + 0.4 * smoothstep(-0.25, 0.25, sampleLutFast(coarse, u * 0.55 + 71, v * 0.55 - 33));
+  const k = strength * patch;
+  return 1 + k * (0.08 * crest - 0.17 * lee);
+}
+
+type PathLook = Readonly<{
+  color: Rgb;
+  rut: Rgb;
+  halfWidth: number;
+  scale: number;
+  materials: readonly number[];
+}>;
+
+/* How much of a worn path covers (u, v), and how much of a rut or footprint: 0 where there is none. The path follows a
+   contour line of a slow noise, so it winds and forks like a track walked over years; it fades in and out along its
+   length. Width comes from the noise slope, so the path keeps one width in tiles. */
+function pathAt(p: PathLook, u: number, v: number, coarse: Float32Array, out: { core: number; rut: number }): void {
+  out.core = 0;
+  out.rut = 0;
+  const gate = smoothstep(0.0, 0.12, sampleLutFast(coarse, u * 0.8 - 61, v * 0.8 + 17));
+  if (gate <= 0) return;
+  const s = p.scale;
+  const e = 0.05;
+  const n = sampleLutFast(coarse, u * s + 13.7, v * s - 41.2);
+  if (Math.abs(n) > 0.06) return;
+  const nu = sampleLutFast(coarse, (u + e) * s + 13.7, v * s - 41.2);
+  const nv = sampleLutFast(coarse, u * s + 13.7, (v + e) * s - 41.2);
+  const grad = Math.hypot(nu - n, nv - n) / e;
+  if (grad < 1e-4) return;
+  const dist = Math.abs(n) / grad;
+  if (dist > p.halfWidth + 0.04) return;
+  out.core = gate * (1 - smoothstep(p.halfWidth * 0.75, p.halfWidth + 0.04, dist));
+  const rutLine = Math.exp(-Math.pow((dist - p.halfWidth * 0.42) / 0.02, 2));
+  const print = hash2i(Math.floor(u * 15), Math.floor(v * 15), 0x2f6b1d) > 0.86 && dist < p.halfWidth * 0.3 ? 0.6 : 0;
+  out.rut = gate * Math.max(rutLine, print);
+}
+
+/* The painted path strip at (u, v) into out[0..3] (colour and its opacity in [0, 1]): rows across the path follow the
+   signed distance from the path's middle line, columns run along it. Opacity 0 off the path. */
+function pathStripAt(p: PathLook, strip: ArtPixels, tpt: number, u: number, v: number, coarse: Float32Array, out: number[]): void {
+  out[3] = 0;
+  const gate = smoothstep(0.0, 0.12, sampleLutFast(coarse, u * 0.8 - 61, v * 0.8 + 17));
+  if (gate <= 0) return;
+  const s = p.scale;
+  const e = 0.05;
+  const n = sampleLutFast(coarse, u * s + 13.7, v * s - 41.2);
+  if (Math.abs(n) > 0.06) return;
+  const nu = (sampleLutFast(coarse, (u + e) * s + 13.7, v * s - 41.2) - n) / e;
+  const nv = (sampleLutFast(coarse, u * s + 13.7, (v + e) * s - 41.2) - n) / e;
+  const grad = Math.hypot(nu, nv);
+  if (grad < 1e-4) return;
+  const sd = n / grad;
+  const y = strip.height / 2 + sd * tpt;
+  if (y < 0 || y > strip.height - 1) return;
+  const tu = -nv / grad;
+  const tv = nu / grad;
+  const wu = tu * tu;
+  const wv = tv * tv;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let a = 0;
+  for (const [x, wt] of [[u * tpt, wu], [v * tpt + 311, wv]] as const) {
+    if (wt < 0.02) continue;
+    const xi = ((Math.floor(x) % strip.width) + strip.width) % strip.width;
+    const o = ((y | 0) * strip.width + xi) * 4;
+    const al = (strip.data[o + 3]! / 255) * wt;
+    r += strip.data[o]! * al;
+    g += strip.data[o + 1]! * al;
+    b += strip.data[o + 2]! * al;
+    a += al;
+  }
+  if (a <= 0) return;
+  out[0] = r / a;
+  out[1] = g / a;
+  out[2] = b / a;
+  out[3] = Math.min(1, a / (wu + wv)) * gate;
+}
+
+/* ---------- chunk baking ---------- */
+
+/* Pure pixel baker for one chunk using smooth bilinear corner fields, painted soil edges, seamless material textures,
+   field plots, wind ripples, worn paths, top-left elevation shading and curved liquid cutouts with a depth tint.
    Works both in Node/jsdom unit tests (no canvas 2D needed) and live browser WebGL texture upload. */
 export function bakeSmoothChunkPixels(
   chunk: ChunkCoord,
@@ -469,22 +720,15 @@ export function bakeSmoothChunkPixels(
   const worldY = chunk.bounds.minY - BAKE_PAD_PX * invScale;
 
   const cf = map.cornerFields;
-  const matCount = cf.materialIds.length;
-  const matById = new Map((pack.materials ?? []).map(m => [m.id, m]));
-  const textures: Uint8ClampedArray[] = cf.materialIds.map(id => {
-    const spec = matById.get(id) ?? pack.materials?.[0] ?? {
-      id,
-      baseColor: '#B8A888',
-      secondaryColor: '#9E8E70',
-      accentColor: '#D0C0A0',
-      pattern: 'fine_grain' as const,
-    };
-    return getMaterialTextureRgb(spec);
-  });
+  const look = groundLook(map, pack);
+  const { textures, matCount } = look;
 
   const liquid = pack.liquidLayer;
   const shallowRgb = parseHexRgb(liquid?.shallowTintColor ?? '#489FB5', [72, 159, 181]);
   const foamRgb = parseHexRgb(liquid?.shoreFoamColor ?? '#CFEAEF', [207, 234, 239]);
+  const deepRgb = parseHexRgb(liquid?.deepColor ?? '#1C5F86', [28, 95, 134]);
+  const deepTint: Rgb = [deepRgb[0] * 0.5, deepRgb[1] * 0.55, deepRgb[2] * 0.62];
+  const depthShade = liquid?.depthShade ?? 0;
   const isGlowLiquid = Boolean(liquid?.glow);
   const sun = parseHexRgb(pack.lighting?.sunTint ?? '#FFFFFF', [255, 255, 255]);
   const sunR = sun[0] / 255;
@@ -510,8 +754,15 @@ export function bakeSmoothChunkPixels(
   const rStart = chunk.rowStart - eps;
   const rEnd = chunk.rowEnd + eps;
 
-  /* Reusable scratch buffer avoids per-pixel GC allocations. */
+  /* Reusable scratch values avoid per-pixel GC allocations. */
   const wBuf = new Float32Array(matCount);
+  const mix: GroundMix = { a: 0, b: 0, shareA: 1, rim: 0 };
+  const plotHit: PlotHit = { inside: false, cx: 0, cy: 0, edgeU: 0, edgeV: 0, alongV: false };
+  const path = { core: 0, rut: 0 };
+  const rgb = [0, 0, 0, 0];
+  const painted = look.art !== null;
+  const shore = look.art?.shoreEdge ?? null;
+  const strip = look.art?.pathStrip ?? null;
 
   for (let py = 0; py < pixelHeight; py++) {
     const wy = worldY + (py + 0.5) * invScale;
@@ -536,6 +787,8 @@ export function bakeSmoothChunkPixels(
       const lu = u - minCol;
       const lv = v - minRow;
       if (lu < 0 || lv < 0 || lu >= cMaxX || lv >= cMaxY) continue;
+      /* Translucent pixels are drawn only by the chunk that owns them, so chunk overlaps never darken twice. */
+      const owned = u >= chunk.colStart && u < chunk.colEnd && v >= chunk.rowStart && v < chunk.rowEnd;
 
       const x0 = lu | 0;
       const y0 = lv | 0;
@@ -558,17 +811,21 @@ export function bakeSmoothChunkPixels(
         waterArr[i01]! * w01 +
         waterArr[i11]! * w11;
 
-      /* Fast reject deep interior liquid well clear of the shoreline noise band. */
-      if (rawWater < -0.95) continue;
-
       let dWater = rawWater;
       let nCoarse = 0;
+      let nDetail = 0;
       if (rawWater < 1.35) {
         nCoarse = sampleLutFast(coarse, u * 4.5, v * 4.5);
-        const nDetail = sampleLutFast(detail, u * 5.0, v * 5.0);
+        nDetail = sampleLutFast(detail, u * 5.0, v * 5.0);
         dWater = rawWater + nCoarse * 0.5 + nDetail * 0.1;
-        /* Deep liquid cutout: transparent alpha lets the separate animated liquid layer shine through. */
-        if (dWater < -0.26) continue;
+      }
+
+      /* Open liquid: transparent, so the animated liquid layer shines through, under a depth tint that darkens the middle
+         and lightens the shallows, with a few broken ripple lines along the shore. */
+      if (dWater < -0.26) {
+        if (depthShade <= 0 || !owned) continue;
+        waterTint(u, v, dWater, depthShade, deepTint, shallowRgb, foamRgb, coarse, detail, !painted, rgba, out);
+        continue;
       }
 
       /* Compute directional top-left 5200K hillshading from continuous elevation gradient. */
@@ -578,82 +835,83 @@ export function bakeSmoothChunkPixels(
       const e11 = elevArr[i11]!;
       const dEdu = (e10 - e00) * (1 - fy) + (e11 - e01) * fy;
       const dEdv = (e01 - e00) * (1 - fx) + (e11 - e10) * fx;
-      const shade = Math.max(0.76, Math.min(1.22, 1.0 - (dEdu * 0.55 + dEdv * 0.55)));
+      let shade = Math.max(0.76, Math.min(1.22, 1.0 - (dEdu * 0.55 + dEdv * 0.55)));
+      /* Slow light and dark drifts over large areas, so a wide stretch of one ground is never flat and a painted texture
+         does not show its repeat. */
+      shade *= 1 + (painted ? 0.06 : 0.09) * sampleLutFast(coarse, u * 0.45 + 11, v * 0.45 + 7);
 
-      /* Project material textures onto the isometric ground plane via global tile coordinates (u, v):
-         64 texels per tile = one seamless 256x256 texture repeat across every 4x4 ground tiles. */
-      const tfx = u * TEXELS_PER_TILE;
-      const tfy = v * TEXELS_PER_TILE;
-      const tx0 = Math.floor(tfx);
-      const ty0 = Math.floor(tfy);
-      const tFracX = tfx - tx0;
-      const tFracY = tfy - ty0;
-      const tx0m = tx0 & TEX_MASK;
-      const tx1m = (tx0 + 1) & TEX_MASK;
-      const row0Off = (ty0 & TEX_MASK) * TEX_SIZE;
-      const row1Off = ((ty0 + 1) & TEX_MASK) * TEX_SIZE;
-      const idx00 = (row0Off + tx0m) * 3;
-      const idx10 = (row0Off + tx1m) * 3;
-      const idx01 = (row1Off + tx0m) * 3;
-      const idx11 = (row1Off + tx1m) * 3;
-      const tw00 = (1 - tFracX) * (1 - tFracY);
-      const tw10 = tFracX * (1 - tFracY);
-      const tw01 = (1 - tFracX) * tFracY;
-      const tw11 = tFracX * tFracY;
-
-      /* Fast single-material path when one layer dominates (> 0.96); full smooth noise blend on borders. */
-      let maxM = 0;
-      let maxW = -1;
       for (let m = 0; m < matCount; m++) {
         const arr = layerArrs[m]!;
-        const raw = arr[i00]! * w00 + arr[i10]! * w10 + arr[i01]! * w01 + arr[i11]! * w11;
-        wBuf[m] = raw;
-        if (raw > maxW) {
-          maxW = raw;
-          maxM = m;
-        }
+        wBuf[m] = arr[i00]! * w00 + arr[i10]! * w10 + arr[i01]! * w01 + arr[i11]! * w11;
       }
 
+      let rippleStrength = 0;
       let r = 0;
       let g = 0;
       let b = 0;
-      if (maxW >= 0.96) {
-        const tex = textures[maxM]!;
-        r = tex[idx00]! * tw00 + tex[idx10]! * tw10 + tex[idx01]! * tw01 + tex[idx11]! * tw11;
-        g = tex[idx00 + 1]! * tw00 + tex[idx10 + 1]! * tw10 + tex[idx01 + 1]! * tw01 + tex[idx11 + 1]! * tw11;
-        b = tex[idx00 + 2]! * tw00 + tex[idx10 + 2]! * tw10 + tex[idx01 + 2]! * tw01 + tex[idx11 + 2]! * tw11;
+      plotHit.inside = false;
+      if (look.plot) {
+        plotAt(cf, look.plot, u, v, plotHit);
+        if (!plotHit.inside) wBuf[look.plot.material] = 0;
+      }
+      if (plotHit.inside) {
+        plotColor(look, plotHit, u, v, coarse, rgb);
+        r = rgb[0]!;
+        g = rgb[1]!;
+        b = rgb[2]!;
       } else {
-        const edgeN = nCoarse !== 0 ? nCoarse : sampleLutFast(coarse, u * 5.5, v * 5.5);
-        let wSum = 0;
-        for (let m = 0; m < matCount; m++) {
-          const raw = wBuf[m]!;
-          if (raw <= 0.005) {
-            wBuf[m] = 0;
-            continue;
-          }
-          const sign = (m & 1) === 0 ? 1 : -1;
-          const perturbed = Math.max(0, raw + edgeN * sign * 0.14);
-          const sharp = perturbed * perturbed;
-          wBuf[m] = sharp;
-          wSum += sharp;
+        if (painted) mixGroundArt(look, cf, wBuf, u, v, coarse, mix);
+        else mixGround(wBuf, matCount, u, v, coarse, detail, mix);
+        sampleTexture(textures[mix.a]!, u, v, rgb);
+        r = rgb[0]!;
+        g = rgb[1]!;
+        b = rgb[2]!;
+        rippleStrength = look.ripples[mix.a]!;
+        if (mix.shareA < 1) {
+          sampleTexture(textures[mix.b]!, u, v, rgb);
+          const k = mix.shareA;
+          r = r * k + rgb[0]! * (1 - k);
+          g = g * k + rgb[1]! * (1 - k);
+          b = b * k + rgb[2]! * (1 - k);
+          rippleStrength = rippleStrength * k + look.ripples[mix.b]! * (1 - k);
         }
-        if (wSum > 1e-6) {
-          const invSum = 1 / wSum;
-          for (let m = 0; m < matCount; m++) {
-            const wm = wBuf[m]!;
-            if (wm <= 0) continue;
-            const k = wm * invSum;
-            const tex = textures[m]!;
-            r += (tex[idx00]! * tw00 + tex[idx10]! * tw10 + tex[idx01]! * tw01 + tex[idx11]! * tw11) * k;
-            g += (tex[idx00 + 1]! * tw00 + tex[idx10 + 1]! * tw10 + tex[idx01 + 1]! * tw01 + tex[idx11 + 1]! * tw11) * k;
-            b += (tex[idx00 + 2]! * tw00 + tex[idx10 + 2]! * tw10 + tex[idx01 + 2]! * tw01 + tex[idx11 + 2]! * tw11) * k;
+        if (mix.rim > 0) shade *= 1 - RIM_DARK * mix.rim;
+      }
+
+      /* Worn paths over open dry ground, then the wind ripples, which the paths have trodden flat. */
+      if (look.path && dWater > 0.7) {
+        let onPath = 0;
+        for (const m of look.path.materials) onPath += wBuf[m]!;
+        if (onPath > 0.5) {
+          const k = smoothstep(0.5, 0.8, onPath);
+          if (strip) {
+            pathStripAt(look.path, strip, look.art!.texelsPerTile, u, v, coarse, rgb);
+            const t = rgb[3]! * k;
+            if (t > 0) {
+              r += (rgb[0]! - r) * t;
+              g += (rgb[1]! - g) * t;
+              b += (rgb[2]! - b) * t;
+            }
+          } else pathAt(look.path, u, v, coarse, path);
+          if (!strip && path.core > 0) {
+            const c = look.path.color;
+            const t = path.core * k * 0.55;
+            r += (c[0] - r) * t;
+            g += (c[1] - g) * t;
+            b += (c[2] - b) * t;
+            rippleStrength *= 1 - path.core;
           }
-        } else {
-          const tex = textures[maxM]!;
-          r = tex[idx00]! * tw00 + tex[idx10]! * tw10 + tex[idx01]! * tw01 + tex[idx11]! * tw11;
-          g = tex[idx00 + 1]! * tw00 + tex[idx10 + 1]! * tw10 + tex[idx01 + 1]! * tw01 + tex[idx11 + 1]! * tw11;
-          b = tex[idx00 + 2]! * tw00 + tex[idx10 + 2]! * tw10 + tex[idx01 + 2]! * tw01 + tex[idx11 + 2]! * tw11;
+          if (!strip && path.rut > 0) {
+            const c = look.path.rut;
+            const t = path.rut * k * 0.5;
+            r += (c[0] - r) * t;
+            g += (c[1] - g) * t;
+            b += (c[2] - b) * t;
+          }
         }
+      }
+      if (rippleStrength > 0.01 && dWater > 0.45) {
+        shade *= rippleShade(u, v, rippleStrength * smoothstep(0.45, 1.3, dWater), coarse, detail);
       }
 
       /* The sun's tint warms what it lights. */
@@ -662,43 +920,61 @@ export function bakeSmoothChunkPixels(
       b *= shade * sunB;
 
       let alpha = 255;
-      if (dWater < 0.62) {
-        /* Damp shore darkening (or warm emissive rim glow) hugging the curved coastline smoothly. */
-        const wetFactor = 1 - smoothstep(0.05, 0.62, dWater);
+      if (shore && dWater < 0.6) {
+        /* The painted waterline: the land fades out where the shore mask says water, so the liquid layer shows. */
+        const gwu = (waterArr[i10]! - waterArr[i00]!) * (1 - fy) + (waterArr[i11]! - waterArr[i01]!) * fy;
+        const gwv = (waterArr[i01]! - waterArr[i00]!) * (1 - fx) + (waterArr[i11]! - waterArr[i10]!) * fx;
+        const gl = Math.hypot(gwu, gwv) || 1;
+        const liquidShare = maskShare(shore, look.art!.texelsPerTile, u, v, -dWater, -gwv / gl, gwu / gl);
+        alpha = clampByte((1 - liquidShare) * 255);
+      } else if (!painted && dWater < 0.75) {
         if (isGlowLiquid) {
+          /* Warm emissive rim glow hugging the curved coastline smoothly. */
+          const wetFactor = 1 - smoothstep(0.05, 0.62, dWater);
           r += (shallowRgb[0] - r) * wetFactor * 0.52;
           g += (shallowRgb[1] - g) * wetFactor * 0.52;
           b += (shallowRgb[2] - b) * wetFactor * 0.52;
         } else {
-          const damp = 1 - wetFactor * 0.2;
-          r *= damp;
-          g *= damp;
-          b *= damp;
+          /* A dark band of wet sand along the water, with a ragged inland edge, and a soft damp fade beyond it. */
+          const wet = 1 - smoothstep(0.1, 0.3 + 0.12 * (nDetail + 0.5), dWater);
+          const damp = 1 - smoothstep(0.25, 0.75, dWater);
+          const k = 1 - 0.3 * wet - 0.08 * damp;
+          r *= k;
+          g *= k * 0.99;
+          b *= k * 0.95;
         }
 
         if (dWater < 0.08) {
           /* Curved feathered shoreline edge blending seamlessly into the animated liquid layer. */
           const shoreMask = smoothstep(-0.26, 0.08, dWater);
-          alpha = clampByte(shoreMask * 255);
           const shallowMix = 1 - smoothstep(-0.18, 0.08, dWater);
           r += (shallowRgb[0] - r) * shallowMix * 0.62;
           g += (shallowRgb[1] - g) * shallowMix * 0.62;
           b += (shallowRgb[2] - b) * shallowMix * 0.62;
 
-          const foamBand = Math.exp(-Math.pow((dWater + 0.04) / 0.075, 2));
-          const foamStrength = isGlowLiquid ? 0.68 : 0.36;
+          /* Foam along the waterline, broken into lumps rather than one even line. */
+          const lumps = Math.max(0, Math.min(1, 0.45 + 1.6 * sampleLutFast(detail, u * 7.3 + 3.1, v * 7.3 - 2.2)));
+          const foamBand = Math.exp(-Math.pow((dWater + 0.04) / 0.075, 2)) * (isGlowLiquid ? 1 : lumps);
+          const foamStrength = isGlowLiquid ? 0.68 : 0.5;
           r += (foamRgb[0] - r) * foamBand * foamStrength;
           g += (foamRgb[1] - g) * foamBand * foamStrength;
           b += (foamRgb[2] - b) * foamBand * foamStrength;
+
+          if (depthShade > 0 && shoreMask < 1) {
+            /* Under the feathered edge lies the light shallow tint, so the shore does not show a dark seam. */
+            const under = 0.24 * (1 - shoreMask);
+            const a = shoreMask + under;
+            r = (r * shoreMask + shallowRgb[0] * 1.08 * under) / a;
+            g = (g * shoreMask + shallowRgb[1] * 1.08 * under) / a;
+            b = (b * shoreMask + shallowRgb[2] * 1.04 * under) / a;
+            alpha = clampByte(a * 255);
+          } else {
+            alpha = clampByte(shoreMask * 255);
+          }
         }
       }
 
-      if (
-        alpha < 255 &&
-        (u < chunk.colStart || u >= chunk.colEnd || v < chunk.rowStart || v >= chunk.rowEnd)
-      ) {
-        continue;
-      }
+      if (alpha < 255 && !owned) continue;
 
       rgba[out] = clampByte(r);
       rgba[out + 1] = clampByte(g);
@@ -716,6 +992,390 @@ export function bakeSmoothChunkPixels(
     pixelHeight,
     tileCount: (chunk.colEnd - chunk.colStart) * (chunk.rowEnd - chunk.rowStart),
   };
+}
+
+/* One open-liquid pixel: a dark tint toward the middle with slow patches, a light tint in the shallows, and broken
+   light ripple lines a little way off the shore. */
+function waterTint(
+  u: number,
+  v: number,
+  d: number,
+  depthShade: number,
+  deep: Rgb,
+  shallow: Rgb,
+  foam: Rgb,
+  coarse: Float32Array,
+  detail: Float32Array,
+  drawLines: boolean,
+  rgba: Uint8ClampedArray,
+  out: number,
+): void {
+  const depth = smoothstep(-0.3, -2.0, d);
+  const patches = 0.8 + 0.5 * (sampleLutFast(coarse, u * 0.7 + 21, v * 0.7 - 9) + 0.5) * 0.8;
+  const aDeep = Math.min(0.85, depthShade * depth * patches);
+  const aShallow = drawLines ? 0.24 * (1 - smoothstep(-0.3, -0.95, d)) : 0;
+  const broken = drawLines ? Math.max(0, Math.min(1, 0.2 + 1.8 * sampleLutFast(detail, u * 6.1 - 7.3, v * 6.1 + 2.9))) : 0;
+  const lines =
+    (Math.exp(-Math.pow((d + 0.42) / 0.03, 2)) * 0.5 + Math.exp(-Math.pow((d + 0.7) / 0.03, 2)) * 0.3) * broken;
+  const a = Math.min(1, aDeep + aShallow + lines);
+  if (a <= 0.004) return;
+  rgba[out] = clampByte((deep[0] * aDeep + shallow[0] * 1.1 * aShallow + foam[0] * lines) / a);
+  rgba[out + 1] = clampByte((deep[1] * aDeep + shallow[1] * 1.1 * aShallow + foam[1] * lines) / a);
+  rgba[out + 2] = clampByte((deep[2] * aDeep + shallow[2] * 1.05 * aShallow + foam[2] * lines) / a);
+  rgba[out + 3] = clampByte(a * 255);
+}
+
+/* A seamless square ground texture: procedural (RGB) or painted (RGBA), with its texels per tile. */
+type GroundTex = Readonly<{ data: Uint8ClampedArray; size: number; mask: number; tpt: number; stride: number }>;
+
+function proceduralTex(data: Uint8ClampedArray): GroundTex {
+  return { data, size: TEX_SIZE, mask: TEX_MASK, tpt: TEXELS_PER_TILE, stride: 3 };
+}
+
+function artTex(p: ArtPixels, tpt: number): GroundTex {
+  return { data: p.data, size: p.width, mask: p.width - 1, tpt, stride: 4 };
+}
+
+/* Bilinear sample of a seamless ground texture at tile coordinates (u, v) into out[0..2]. */
+function sampleTexture(tex: GroundTex, u: number, v: number, out: number[]): void {
+  const tfx = u * tex.tpt;
+  const tfy = v * tex.tpt;
+  const tx0 = Math.floor(tfx);
+  const ty0 = Math.floor(tfy);
+  const ax = tfx - tx0;
+  const ay = tfy - ty0;
+  const m = tex.mask;
+  const st = tex.stride;
+  const c0 = tx0 & m;
+  const c1 = (tx0 + 1) & m;
+  const r0 = (ty0 & m) * tex.size;
+  const r1 = ((ty0 + 1) & m) * tex.size;
+  const d = tex.data;
+  const i00 = (r0 + c0) * st;
+  const i10 = (r0 + c1) * st;
+  const i01 = (r1 + c0) * st;
+  const i11 = (r1 + c1) * st;
+  const w00 = (1 - ax) * (1 - ay);
+  const w10 = ax * (1 - ay);
+  const w01 = (1 - ax) * ay;
+  const w11 = ax * ay;
+  out[0] = d[i00]! * w00 + d[i10]! * w10 + d[i01]! * w01 + d[i11]! * w11;
+  out[1] = d[i00 + 1]! * w00 + d[i10 + 1]! * w10 + d[i01 + 1]! * w01 + d[i11 + 1]! * w11;
+  out[2] = d[i00 + 2]! * w00 + d[i10 + 2]! * w10 + d[i01 + 2]! * w01 + d[i11 + 2]! * w11;
+}
+
+/* Painted edge mask value in [0, 1] (1 = the mask's first ground) at a column along the edge (wrapping) and a row
+   across it (clamped), bilinear. */
+function sampleMask(mask: ArtPixels, x: number, y: number): number {
+  const w = mask.width;
+  const h = mask.height;
+  const yc = Math.max(0, Math.min(h - 1.001, y));
+  const x0 = Math.floor(x);
+  const y0 = yc | 0;
+  const ax = x - x0;
+  const ay = yc - y0;
+  const c0 = ((x0 % w) + w) % w;
+  const c1 = (c0 + 1) % w;
+  const d = mask.data;
+  const r0 = y0 * w;
+  const r1 = (y0 + 1) * w;
+  const a = d[(r0 + c0) * 4]! * (1 - ax) + d[(r0 + c1) * 4]! * ax;
+  const b = d[(r1 + c0) * 4]! * (1 - ax) + d[(r1 + c1) * 4]! * ax;
+  return (a + (b - a) * ay) / 255;
+}
+
+/* A painted edge across a boundary, at signed distance `d` tiles into the mask's first ground (negative: into the
+   second), with the boundary's direction (tu, tv) along the tile axes: columns follow whichever tile axis the edge
+   runs along more, blended where it runs at a slant, so the mask never stretches. Returns the first ground's share. */
+function maskShare(mask: ArtPixels, tpt: number, u: number, v: number, d: number, tu: number, tv: number): number {
+  const y = mask.height / 2 - d * tpt;
+  const wu = tu * tu;
+  const wv = tv * tv;
+  const sum = wu + wv || 1;
+  let s = 0;
+  if (wu > 0.02) s += sampleMask(mask, u * tpt, y) * wu;
+  if (wv > 0.02) s += sampleMask(mask, v * tpt + 517, y) * wv;
+  return s / sum;
+}
+
+/* One tilled-plot pixel: crop rows one way or the other, a growth stage per plot, the raised earth strip at the plot's
+   edge with a thin shadow on its lower side, and a narrow irrigation ditch along some edges. With painted art the
+   strip is the painted edge between the surrounding grass and the field, and the ditch is painted water. */
+function plotColor(look: GroundLook, hit: PlotHit, u: number, v: number, coarse: Float32Array, out: number[]): void {
+  const p = look.plot!;
+  sampleTexture(hit.alongV ? look.plotRowsV! : look.textures[p.material]!, u, v, out);
+  const art = look.art !== null;
+  if (!art) {
+    const stage = hash2i(hit.cx, hit.cy, PLOT_SALT + 7);
+    /* Young plots show more earth, ripe ones turn yellow; the rest are in full leaf. */
+    const kr = stage < 0.25 ? 0.97 : stage > 0.8 ? 1.1 : 1;
+    const kg = stage < 0.25 ? 0.9 : stage > 0.8 ? 1.03 : 1.02;
+    const kb = stage < 0.25 ? 0.92 : stage > 0.8 ? 0.86 : 0.98;
+    out[0] = out[0]! * kr;
+    out[1] = out[1]! * kg;
+    out[2] = out[2]! * kb;
+  }
+  const alongU = hit.edgeV < hit.edgeU;
+  const edge = Math.min(hit.edgeU, hit.edgeV) + (art ? 0 : sampleLutFast(coarse, u * 7.7, v * 7.7) * 0.03);
+  const ditchHere = hit.edgeV < hit.edgeU && hash2i(hit.cx, hit.cy, PLOT_SALT + 11) < 0.2;
+  if (art) {
+    if (look.ditch && ditchHere && edge < DITCH_RIM_W) {
+      const t = 1 - smoothstep(DITCH_W, DITCH_RIM_W, edge);
+      const c = [0, 0, 0];
+      sampleTexture(look.ditch, u, v, c);
+      out[0] = out[0]! + (c[0]! - out[0]!) * t;
+      out[1] = out[1]! + (c[1]! - out[1]!) * t;
+      out[2] = out[2]! + (c[2]! - out[2]!) * t;
+      return;
+    }
+    if (look.plotEdge && edge < 0.5) {
+      const tpt = look.art!.texelsPerTile;
+      /* Distance into the field from the middle of the painted strip, which sits a little inside the plot. */
+      const share = maskShare(look.plotEdge.mask, tpt, u, v, -(edge - 0.16), alongU ? 1 : 0, alongU ? 0 : 1);
+      if (share > 0.004) {
+        const c = [0, 0, 0];
+        sampleTexture(look.textures[look.grassForPlots]!, u, v, c);
+        out[0] = out[0]! + (c[0]! - out[0]!) * share;
+        out[1] = out[1]! + (c[1]! - out[1]!) * share;
+        out[2] = out[2]! + (c[2]! - out[2]!) * share;
+      }
+    }
+    return;
+  }
+  if (edge < RIDGE_W) {
+    const t = 1 - smoothstep(RIDGE_W - 0.03, RIDGE_W, edge);
+    out[0] = out[0]! + (p.ridge[0] - out[0]!) * t;
+    out[1] = out[1]! + (p.ridge[1] - out[1]!) * t;
+    out[2] = out[2]! + (p.ridge[2] - out[2]!) * t;
+    /* The ridge stands a little higher than the plot: its inner foot is in shade. */
+    const foot = Math.exp(-Math.pow((edge - RIDGE_W) / 0.02, 2)) * 0.18;
+    out[0] = out[0]! * (1 - foot);
+    out[1] = out[1]! * (1 - foot);
+    out[2] = out[2]! * (1 - foot);
+    if (p.ditch && ditchHere) {
+      const rim = 1 - smoothstep(DITCH_W, DITCH_RIM_W, edge);
+      const water = 1 - smoothstep(DITCH_W * 0.6, DITCH_W, edge);
+      out[0] = out[0]! * (1 - 0.3 * rim) + (p.ditch[0] - out[0]! * (1 - 0.3 * rim)) * water;
+      out[1] = out[1]! * (1 - 0.3 * rim) + (p.ditch[1] - out[1]! * (1 - 0.3 * rim)) * water;
+      out[2] = out[2]! * (1 - 0.25 * rim) + (p.ditch[2] - out[2]! * (1 - 0.25 * rim)) * water;
+    }
+  }
+}
+
+/* An edge mask for a pair of grounds, and whether the pair's first ground is the mask's second. */
+type EdgeLook = Readonly<{ mask: ArtPixels; flip: boolean }>;
+
+/* Everything the baker needs from the pack's grounds, worked out once per map, pack and art. */
+type GroundLook = Readonly<{
+  matCount: number;
+  textures: readonly GroundTex[];
+  ripples: Float32Array;
+  plot: PlotLayout | null;
+  plotRowsV: GroundTex | null;
+  path: PathLook | null;
+  /* Painted look; null draws everything procedurally. */
+  art: LoadedTerrainArt | null;
+  /* edges[a * matCount + b]: the painted mask between grounds a and b. */
+  edges: readonly (EdgeLook | null)[];
+  plotEdge: EdgeLook | null;
+  grassForPlots: number;
+  ditch: GroundTex | null;
+}>;
+
+const lookCache = new WeakMap<GeneratedWorldMap, { pack: WorldPackManifest; art: LoadedTerrainArt | null; look: GroundLook }>();
+
+function groundLook(map: GeneratedWorldMap, pack: WorldPackManifest): GroundLook {
+  const art = terrainArtFor(pack);
+  const hit = lookCache.get(map);
+  if (hit && hit.pack === pack && hit.art === art) return hit.look;
+  const cf = map.cornerFields;
+  const matById = new Map((pack.materials ?? []).map(m => [m.id, m]));
+  const specs: GroundMaterialSpec[] = cf.materialIds.map(
+    id =>
+      matById.get(id) ??
+      pack.materials?.[0] ?? {
+        id,
+        baseColor: '#B8A888',
+        secondaryColor: '#9E8E70',
+        accentColor: '#D0C0A0',
+        pattern: 'fine_grain' as const,
+      },
+  );
+  const tpt = art?.texelsPerTile ?? TEXELS_PER_TILE;
+  const textures = specs.map(s => {
+    const painted = art?.ground.get(s.id);
+    return painted ? artTex(painted, tpt) : proceduralTex(getMaterialTextureRgb(s));
+  });
+  /* Painted sand already carries its ripples; procedural ones go only on procedural ground. */
+  const ripples = new Float32Array(specs.map((s, i) => (textures[i]!.stride === 3 ? (s.ripples ?? 0) : 0)));
+  const plotIdx = specs.findIndex(s => s.plots !== undefined);
+  let plot: PlotLayout | null = null;
+  let plotRowsV: GroundTex | null = null;
+  if (plotIdx >= 0) {
+    const ps = specs[plotIdx]!.plots!;
+    plot = {
+      material: plotIdx,
+      sizeU: ps.sizeU,
+      sizeV: ps.sizeV,
+      ridge: parseHexRgb(ps.ridgeColor, [150, 160, 90]),
+      ditch: ps.ditchColor ? parseHexRgb(ps.ditchColor, [70, 140, 160]) : null,
+      layer: cf.layerWeights[plotIdx]!,
+    };
+    plotRowsV = transposedTexture(textures[plotIdx]!);
+  }
+  const ps = pack.paths;
+  const path: PathLook | null = ps
+    ? {
+        color: parseHexRgb(ps.color, [220, 200, 160]),
+        rut: parseHexRgb(ps.rutColor, [150, 120, 80]),
+        halfWidth: ps.widthTiles / 2,
+        /* The coarse noise crosses zero about every 21 of its texels: scale it so paths lie about spacingTiles apart. */
+        scale: 21 / ps.spacingTiles,
+        materials: ps.materials.map(id => cf.materialIds.indexOf(id)).filter(i => i >= 0),
+      }
+    : null;
+
+  const n = specs.length;
+  const edges: (EdgeLook | null)[] = new Array<EdgeLook | null>(n * n).fill(null);
+  if (art) {
+    for (let a = 0; a < n; a++) {
+      for (let b = 0; b < n; b++) {
+        if (a === b) continue;
+        const ida = specs[a]!.id;
+        const idb = specs[b]!.id;
+        const direct = art.edges.get(`${ida}|${idb}`);
+        const turned = art.edges.get(`${idb}|${ida}`);
+        edges[a * n + b] = direct ? { mask: direct, flip: false } : turned ? { mask: turned, flip: true } : art.defaultEdge ? { mask: art.defaultEdge, flip: false } : null;
+      }
+    }
+  }
+  /* A plot's edge is painted with the mask between the ground around fields and the field itself. */
+  let grassForPlots = -1;
+  let plotEdge: EdgeLook | null = null;
+  if (art && plot) {
+    for (let a = 0; a < n && !plotEdge; a++) {
+      const e = art.edges.get(`${specs[a]!.id}|${specs[plot.material]!.id}`);
+      if (e) {
+        plotEdge = { mask: e, flip: false };
+        grassForPlots = a;
+      }
+    }
+  }
+  const surface = art?.liquid?.surface;
+  const look: GroundLook = {
+    matCount: n,
+    textures,
+    ripples,
+    plot,
+    plotRowsV,
+    path,
+    art,
+    edges,
+    plotEdge,
+    grassForPlots,
+    ditch: surface ? artTex(surface, tpt) : null,
+  };
+  lookCache.set(map, { pack, art, look });
+  return look;
+}
+
+const transposedCache = new WeakMap<Uint8ClampedArray, GroundTex>();
+
+/* The same seamless texture turned a quarter, for plots whose rows run along the other tile axis. */
+function transposedTexture(tex: GroundTex): GroundTex {
+  const cached = transposedCache.get(tex.data);
+  if (cached) return cached;
+  const src = tex.data;
+  const st = tex.stride;
+  const size = tex.size;
+  const dst = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const a = (y * size + x) * st;
+      const b = (x * size + y) * st;
+      for (let c = 0; c < st; c++) dst[b + c] = src[a + c]!;
+    }
+  }
+  const out: GroundTex = { ...tex, data: dst };
+  transposedCache.set(tex.data, out);
+  return out;
+}
+
+/* Painted soil edge: the two strongest grounds after a slow wobble, and the first one's share from the painted mask
+   at the pixel's distance from their boundary. The distance comes from the slope of the two weights. */
+function mixGroundArt(
+  look: GroundLook,
+  cf: CornerFieldGrid,
+  w: Float32Array,
+  u: number,
+  v: number,
+  coarse: Float32Array,
+  out: GroundMix,
+): void {
+  const count = look.matCount;
+  let a = -1;
+  let b = -1;
+  let sa = -Infinity;
+  let sb = -Infinity;
+  for (let m = 0; m < count; m++) {
+    const x = w[m]!;
+    if (x < 0.01) continue;
+    const s = x + 0.12 * sampleLutFast(coarse, u * 2.2 + m * 37.3, v * 2.2 + m * 21.9);
+    if (s > sa) {
+      sb = sa;
+      b = a;
+      sa = s;
+      a = m;
+    } else if (s > sb) {
+      sb = s;
+      b = m;
+    }
+  }
+  out.a = Math.max(0, a);
+  out.b = out.a;
+  out.shareA = 1;
+  out.rim = 0;
+  if (b < 0) return;
+  const edge = look.edges[a * count + b];
+  if (!edge) {
+    out.b = b;
+    out.shareA = smoothstep(-EDGE_BAND, EDGE_BAND, sa - sb);
+    return;
+  }
+  const e = 0.05;
+  const la = cf.layerWeights[a]!;
+  const lb = cf.layerWeights[b]!;
+  const g0 = layerAt(cf, la, u, v) - layerAt(cf, lb, u, v);
+  const gu = (layerAt(cf, la, u + e, v) - layerAt(cf, lb, u + e, v) - g0) / e;
+  const gv = (layerAt(cf, la, u, v + e) - layerAt(cf, lb, u, v + e) - g0) / e;
+  const grad = Math.max(0.08, Math.hypot(gu, gv));
+  const d = (sa - sb) / grad;
+  if (d > 0.55) return;
+  const share = maskShare(edge.mask, look.art!.texelsPerTile, u, v, edge.flip ? -d : d, -gv / grad, gu / grad);
+  out.b = b;
+  out.shareA = edge.flip ? 1 - share : share;
+}
+
+/* The two grounds and their shares that the baker paints at (u, v): what a soil edge looks like, as numbers. */
+export function groundMixAt(map: GeneratedWorldMap, pack: WorldPackManifest, u: number, v: number): GroundMix {
+  const look = groundLook(map, pack);
+  const s = sampleCornerFieldBilinear(map.cornerFields, u, v);
+  const w = new Float32Array(s.weights);
+  const out: GroundMix = { a: 0, b: 0, shareA: 1, rim: 0 };
+  if (look.plot) {
+    const hit: PlotHit = { inside: false, cx: 0, cy: 0, edgeU: 0, edgeV: 0, alongV: false };
+    plotAt(map.cornerFields, look.plot, u, v, hit);
+    if (hit.inside) {
+      out.a = look.plot.material;
+      out.b = look.plot.material;
+      return out;
+    }
+    w[look.plot.material] = 0;
+  }
+  const { coarse, detail } = getNoiseLuts();
+  if (look.art) mixGroundArt(look, map.cornerFields, w, u, v, coarse, out);
+  else mixGround(w, look.matCount, u, v, coarse, detail, out);
+  return out;
 }
 
 export function bakeSmoothChunkCanvas(

@@ -5,6 +5,12 @@
 
 import type { PlantKindSpec, PlantPassport, WorldPackManifest } from './manifest';
 import { createRng, hashSeed } from './prng';
+import type { LoadedTerrainArt, PlantArtImage } from './terrain-art';
+
+/* Grid of the bendable mesh laid over a painted plant: columns x rows of vertices, under the 100 a mesh may have to
+   be drawn in one batch with the others. */
+export const MESH_COLS = 6;
+export const MESH_ROWS = 9;
 
 /* Atlas pixels per world pixel at 100% zoom: crisp up to 200% zoom. */
 export const PLANT_TEXTURE_SCALE = 2;
@@ -29,6 +35,10 @@ export type PlantSpriteInfo = Readonly<{
   /* Height of the picture's plant in atlas pixels: scales it to the planted height. */
   heightPx: number;
   passport: PlantPassport;
+  /* Painted plants: world pixels per picture pixel at scale 1 (the picture keeps its drawn size), and the wind weight
+     at each vertex of the bending mesh, row by row from the top, MESH_COLS x MESH_ROWS. */
+  pxToWorld?: number;
+  meshWeights?: Float32Array;
 }>;
 
 export type PlantAtlas = Readonly<{
@@ -553,20 +563,74 @@ function makeShadow(d: Drawn): Part {
   return { canvas: small.canvas, pivotX: rootX / k, pivotY: rootY / k };
 }
 
-/* Draws every kind and variant of the pack into one atlas. */
-export function buildPlantAtlas(pack: WorldPackManifest): PlantAtlas {
+/* Wind weight at each mesh vertex: the strongest weight within half a cell, so a vertex just outside the painted
+   silhouette moves with the leaf tip beside it. A picture without a weight map bends from the root up. */
+function meshWeights(img: PlantArtImage): Float32Array {
+  const { width: w, height: h } = img.pixels;
+  const out = new Float32Array(MESH_COLS * MESH_ROWS);
+  const rx = Math.ceil(w / (MESH_COLS - 1) / 2);
+  const ry = Math.ceil(h / (MESH_ROWS - 1) / 2);
+  const rootY = img.passport.rootPoint[1];
+  const height = img.passport.heightPx;
+  for (let r = 0; r < MESH_ROWS; r++) {
+    for (let c = 0; c < MESH_COLS; c++) {
+      const x = Math.round((c / (MESH_COLS - 1)) * (w - 1));
+      const y = Math.round((r / (MESH_ROWS - 1)) * (h - 1));
+      let best = 0;
+      if (img.weights) {
+        for (let yy = Math.max(0, y - ry); yy <= Math.min(h - 1, y + ry); yy += 2) {
+          for (let xx = Math.max(0, x - rx); xx <= Math.min(w - 1, x + rx); xx += 2) best = Math.max(best, img.weights[yy * w + xx]!);
+        }
+        best /= 255;
+      } else {
+        best = Math.pow(Math.max(0, Math.min(1, (rootY - y) / height)), 1.75);
+      }
+      /* The root row never moves. */
+      out[r * MESH_COLS + c] = y >= rootY - 1 ? 0 : best;
+    }
+  }
+  return out;
+}
+
+/* Draws every kind and variant of the pack into one atlas: painted pictures where the art has loaded, procedural
+   silhouettes for the rest. */
+export function buildPlantAtlas(pack: WorldPackManifest, art: LoadedTerrainArt | null = null, pxToWorld = 0.5): PlantAtlas {
   const S = PLANT_TEXTURE_SCALE;
   const kinds = pack.plants ?? [];
   type Pending = { canvas: HTMLCanvasElement; kind: number; variant: number; role: 'base' | 'crown' | 'shadow' };
   const pending: Pending[] = [];
   const drawn: Drawn[][] = [];
   const shadows: Part[][] = [];
+  const painted: (Float32Array | null)[][] = [];
 
   kinds.forEach((k, ki) => {
     const nominal = ((k.heightPx.min + k.heightPx.max) / 2) * S;
     drawn[ki] = [];
     shadows[ki] = [];
+    painted[ki] = [];
+    const pictures = art?.plants.get(k.id);
+    if (pictures && pictures.length > 0) {
+      /* Placement picks a variant out of k.variants; wrap onto the pictures that loaded. */
+      for (let v = 0; v < k.variants; v++) {
+        const img = pictures[v % pictures.length]!;
+        const d: Drawn = {
+          base: { canvas: img.canvas, pivotX: img.passport.rootPoint[0], pivotY: img.passport.rootPoint[1] },
+          hubX: 0,
+          hubY: 0,
+          heightPx: img.passport.heightPx,
+          crownWidthPx: img.passport.crownWidthPx,
+        };
+        const shadow = makeShadow(d);
+        drawn[ki]!.push(d);
+        shadows[ki]!.push(shadow);
+        painted[ki]!.push(meshWeights(img));
+        pending.push({ canvas: d.base.canvas, kind: ki, variant: v, role: 'base' });
+        pending.push({ canvas: shadow.canvas, kind: ki, variant: v, role: 'shadow' });
+      }
+      return;
+    }
     for (let v = 0; v < k.variants; v++) {
+      painted[ki]!.push(null);
       const d = drawKind(k, v, nominal);
       const shadow = makeShadow(d);
       drawn[ki]!.push(d);
@@ -614,7 +678,9 @@ export function buildPlantAtlas(pack: WorldPackManifest): PlantAtlas {
         heightPx: d.heightPx,
         crownWidthPx: d.crownWidthPx,
       };
+      const weights = painted[ki]![v] ?? null;
       return {
+        ...(weights ? { pxToWorld, meshWeights: weights } : {}),
         base: { frame: baseFrame, pivotX: d.base.pivotX, pivotY: d.base.pivotY },
         crown: d.crown && crownFrame !== undefined ? { frame: crownFrame, pivotX: d.crown.pivotX, pivotY: d.crown.pivotY } : undefined,
         shadow: { frame: shadowFrame, pivotX: sh.pivotX, pivotY: sh.pivotY },

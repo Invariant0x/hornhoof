@@ -26,6 +26,8 @@ export type PlacedPlant = Readonly<{
   phase: number;
   /* Height in world pixels at 100% zoom, scale included. */
   heightPx: number;
+  /* Water lies just below the root on screen, so the plant shows a reflection there. */
+  nearWater: boolean;
 }>;
 
 export type PlantField = Readonly<{
@@ -38,12 +40,18 @@ export type PlantField = Readonly<{
 const EMPTY_FIELD: PlantField = { plants: [], countsByKind: [], maxHeightPx: 0 };
 const TAU = Math.PI * 2;
 /* A root must stand this far (tiles) from the painted water and foam; the check is only made near the shore. */
-const DRAWN_SHORE_CLEARANCE = 0.14;
+const DRAWN_SHORE_CLEARANCE = 0.2;
 const DRAWN_SHORE_CLEARANCE_BELOW = 1.35;
+/* A kind whose waterDist window starts this close to the water is a waterline kind. */
+const WATERLINE_KIND = 0.25;
 /* A plant whose root is just above a view can still cast its shadow into it: this share of the reach. */
 const SHADOW_REACH = 0.4;
 
-const SALT = { draw: 101, jitterU: 211, jitterV: 223, score: 307, variant: 401, size: 503, flip: 601, phase: 701, height: 809, bedU: 911, bedV: 929, bedPick: 947 } as const;
+const SALT = { draw: 101, jitterU: 211, jitterV: 223, score: 307, variant: 401, size: 503, flip: 601, phase: 701, height: 809, bedU: 911, bedV: 929, bedPick: 947, cell: 1013, cellU: 1031, cellV: 1049 } as const;
+/* Golden angle: beds and groves spread their members on a sunflower spiral, evenly, with no two on one spot. */
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+/* Points below a root on screen (tiles along both axes) where water makes the plant show a reflection. */
+const REFLECTION_PROBES = [0.35, 0.7, 1.1, 1.6, 2.2] as const;
 
 function lerp(r: PlantRange, t: number): number {
   return r.min + (r.max - r.min) * t;
@@ -71,6 +79,8 @@ type Prepared = Readonly<{
   tileKinds: ReadonlySet<string>;
   /* Positions in the cornerFields material list for each capped material. */
   caps: readonly (readonly [number, number])[];
+  /* Positions of the grounds the kind needs; empty when it needs none. */
+  needs: readonly number[];
 }>;
 
 /* Whether a spot is fit for a kind, and how well, from the smooth fields at that exact spot. Returns 0 if unfit. */
@@ -83,8 +93,15 @@ function suitability(map: GeneratedWorldMap, p: Prepared, u: number, v: number):
   if (s.moisture < moisture.min || s.moisture > moisture.max) return 0;
   if (s.signedWaterDist < waterDist.min || s.signedWaterDist > waterDist.max) return 0;
   for (const [idx, cap] of p.caps) if ((s.weights[idx] ?? 0) > cap) return 0;
-  /* The drawn shoreline wiggles around the field's zero line; keep roots clear of the water and foam that are painted. */
-  if (s.signedWaterDist < DRAWN_SHORE_CLEARANCE_BELOW && displayedWaterDistance(map.cornerFields, u, v) < DRAWN_SHORE_CLEARANCE) return 0;
+  if (p.needs.length > 0) {
+    let on = 0;
+    for (const idx of p.needs) on += s.weights[idx] ?? 0;
+    if (on < 0.35) return 0;
+  }
+  /* The drawn shoreline wiggles around the field's zero line; keep roots clear of the water and foam that are painted.
+     Waterline kinds (reeds, papyrus) may stand right on the drawn edge, so they seem to grow out of the water. */
+  const clearance = p.spec.waterDist.min <= WATERLINE_KIND ? 0.02 : DRAWN_SHORE_CLEARANCE;
+  if (s.signedWaterDist < DRAWN_SHORE_CLEARANCE_BELOW && displayedWaterDistance(map.cornerFields, u, v) < clearance) return 0;
   return windowWeight(s.moisture, moisture) * windowWeight(s.signedWaterDist, waterDist);
 }
 
@@ -97,6 +114,7 @@ function prepareKinds(pack: WorldPackManifest, map: GeneratedWorldMap): Prepared
     caps: Object.entries(spec.materialCaps ?? {})
       .map(([id, cap]) => [materialIds.indexOf(id), cap] as const)
       .filter(([idx]) => idx >= 0),
+    needs: (spec.onMaterials ?? []).map(id => materialIds.indexOf(id)).filter(idx => idx >= 0),
   }));
 }
 
@@ -105,6 +123,7 @@ function candidateAt(map: GeneratedWorldMap, kinds: readonly Prepared[], col: nu
   let best: Candidate | null = null;
   for (let k = 0; k < kinds.length; k++) {
     const p = kinds[k]!;
+    if (p.spec.evenCell) continue;
     const tile = map.tileAt(col, row);
     if (tile === null || !p.tileKinds.has(tile)) continue;
     /* The cheap random draw comes first: suitability is at most 1, so a draw above density can never pass. */
@@ -126,10 +145,16 @@ function candidateAt(map: GeneratedWorldMap, kinds: readonly Prepared[], col: nu
   return best;
 }
 
-function placed(pack: WorldPackManifest, p: Prepared, kindIndex: number, u: number, v: number, salt: number, c: number, r: number): PlacedPlant {
+function nearWater(map: GeneratedWorldMap, u: number, v: number): boolean {
+  if (sampleCornerFieldBilinear(map.cornerFields, u, v).signedWaterDist > 4) return false;
+  return REFLECTION_PROBES.some(t => displayedWaterDistance(map.cornerFields, u + t, v + t) < -0.1);
+}
+
+function placed(map: GeneratedWorldMap, pack: WorldPackManifest, p: Prepared, kindIndex: number, u: number, v: number, salt: number, c: number, r: number): PlacedPlant {
   const h = (s: number) => hash2i(c + salt * 1031, r - salt * 577, p.seed + s);
   const world = tileTopVertexToWorld(u, v, pack.projection.defaultTileW, pack.projection.defaultTileH);
-  const scale = 0.88 + 0.24 * h(SALT.size);
+  /* Sizes vary within a kind: from three quarters to six fifths of the drawn size. */
+  const scale = 0.75 + 0.45 * h(SALT.size);
   return {
     kindIndex,
     col: u,
@@ -141,6 +166,7 @@ function placed(pack: WorldPackManifest, p: Prepared, kindIndex: number, u: numb
     scale,
     phase: h(SALT.phase) * TAU,
     heightPx: lerp(p.spec.heightPx, h(SALT.height)) * scale,
+    nearWater: !p.spec.flat && nearWater(map, u, v),
   };
 }
 
@@ -186,7 +212,7 @@ export function generatePlants(pack: WorldPackManifest, map: GeneratedWorldMap):
       }
       if (beaten) continue;
 
-      plants.push(placed(pack, p, c.kind, c.u, c.v, 0, col, row));
+      plants.push(placed(map, pack, p, c.kind, c.u, c.v, 0, col, row));
       counts[c.kind]!++;
 
       /* A bed (reeds, tufts) spreads more plants around the chosen one, each checked at its own exact spot. */
@@ -194,19 +220,41 @@ export function generatePlants(pack: WorldPackManifest, map: GeneratedWorldMap):
       if (bed && (p.spec.clusterRadius ?? 0) > 0) {
         const n = Math.round(lerp(bed, hash2i(col, row, p.seed + SALT.bedPick))) - 1;
         const radius = p.spec.clusterRadius!;
+        const turn = hash2i(col, row, p.seed + SALT.bedU) * TAU;
         for (let i = 1; i <= n; i++) {
-          const ang = hash2i(col + i * 1031, row - i * 577, p.seed + SALT.bedU) * TAU;
-          const dist = radius * Math.sqrt(hash2i(col + i * 1031, row - i * 577, p.seed + SALT.bedV));
+          const ang = turn + i * GOLDEN_ANGLE + (hash2i(col + i * 1031, row - i * 577, p.seed + SALT.bedU) - 0.5) * 0.5;
+          const dist = radius * Math.sqrt((i + 0.15) / (n + 0.4)) * (0.88 + 0.24 * hash2i(col + i * 1031, row - i * 577, p.seed + SALT.bedV));
           const u = c.u + Math.cos(ang) * dist;
           const v = c.v + Math.sin(ang) * dist;
           if (u < minCol || u >= maxCol || v < minRow || v >= maxRow) continue;
           if (suitability(map, p, u, v) <= 0) continue;
-          plants.push(placed(pack, p, c.kind, u, v, i, col, row));
+          plants.push(placed(map, pack, p, c.kind, u, v, i, col, row));
           counts[c.kind]!++;
         }
       }
     }
   }
+
+  /* Pass 3: kinds spread evenly, one try-set per cell of evenCell tiles; cells sit on whole multiples of their size,
+     so growing the map at its edges leaves the inner cells as they were. */
+  kinds.forEach((p, k) => {
+    const n = p.spec.evenCell;
+    if (!n) return;
+    for (let cy = Math.floor(minRow / n); cy * n < maxRow; cy++) {
+      for (let cx = Math.floor(minCol / n); cx * n < maxCol; cx++) {
+        if (hash2i(cx, cy, p.seed + SALT.cell) >= p.spec.density) continue;
+        for (let t = 0; t < 4; t++) {
+          const u = (cx + 0.08 + 0.84 * hash2i(cx + t * 7919, cy, p.seed + SALT.cellU)) * n;
+          const v = (cy + 0.08 + 0.84 * hash2i(cx, cy + t * 7919, p.seed + SALT.cellV)) * n;
+          if (u < minCol || u >= maxCol || v < minRow || v >= maxRow) continue;
+          if (suitability(map, p, u, v) <= 0) continue;
+          plants.push(placed(map, pack, p, k, u, v, t + 50, cx, cy));
+          counts[k]!++;
+          break;
+        }
+      }
+    }
+  });
 
   plants.sort((a, b) => a.y - b.y || a.x - b.x);
   let maxHeightPx = 0;
@@ -241,16 +289,17 @@ function point(raw: unknown): readonly [number, number] | null {
   return typeof x === 'number' && typeof y === 'number' && Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
 }
 
-/* Reads the passport file that comes with an artist's plant image (root_point, crown_center, crown_hub, height,
-   crown_width); null when anything is missing or not a number. */
+/* Reads the passport file that comes with an artist's plant image: root_point, crown_center, optional crown_hub (the
+   crown centre stands in for it) and the height and crown width, written height_px / crown_width_px or height /
+   crown_width; null when anything required is missing or not a number. */
 export function parsePlantPassport(raw: unknown): PlantPassport | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const j = raw as Record<string, unknown>;
   const rootPoint = point(j.root_point);
   const crownCenter = point(j.crown_center);
-  const crownHub = point(j.crown_hub);
-  const heightPx = j.height;
-  const crownWidthPx = j.crown_width;
+  const crownHub = j.crown_hub === undefined ? crownCenter : point(j.crown_hub);
+  const heightPx = j.height_px ?? j.height;
+  const crownWidthPx = j.crown_width_px ?? j.crown_width;
   if (!rootPoint || !crownCenter || !crownHub) return null;
   if (typeof heightPx !== 'number' || typeof crownWidthPx !== 'number') return null;
   if (!(heightPx > 0) || !(crownWidthPx > 0)) return null;

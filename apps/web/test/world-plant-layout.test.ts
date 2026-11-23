@@ -49,8 +49,9 @@ describe('plant layer layout', () => {
 
     const list = createDrawList();
     layout.build(VIEW, 3, list);
-    expect(list.shadowCount).toBeGreaterThan(0);
-    for (let i = 0; i < Math.min(list.shadowCount, 40); i++) {
+    expect(list.shadowCount).toBeGreaterThan(list.flatCount);
+    /* Flat ground details come first, then the shadows. */
+    for (let i = list.flatCount; i < Math.min(list.shadowCount, list.flatCount + 40); i++) {
       const s = itemAt(list, i);
       /* The shadow picture's tip (its top row, 90 px above the root pivot) lands right of and below the root. */
       const rootX = s.a * 40 + s.c * 90 + s.tx;
@@ -68,7 +69,7 @@ describe('plant layer layout', () => {
     expect(inView).toBeGreaterThan(5);
     expect(list.count).toBeGreaterThan(list.shadowCount);
     const shadowFrames = new Set<number>();
-    for (let i = 0; i < list.shadowCount; i++) shadowFrames.add(itemAt(list, i).frame);
+    for (let i = list.flatCount; i < list.shadowCount; i++) shadowFrames.add(itemAt(list, i).frame);
     for (let i = list.shadowCount; i < list.count; i++) expect(itemAt(list, i).frame % 3).not.toBe(2);
     for (const f of shadowFrames) expect(f % 3).toBe(2);
   });
@@ -109,7 +110,7 @@ describe('plant layer layout', () => {
     const dark = new PlantLayout({ pack: EGYPT_WORLD_PACK, field, sprites });
     const list = createDrawList();
     dark.build(VIEW, 1, list);
-    expect(list.shadowCount).toBe(0);
+    expect(list.shadowCount).toBe(list.flatCount);
     expect(list.count).toBeGreaterThan(0);
 
     const bare = new PlantLayout({ pack: { ...EGYPT_WORLD_PACK, plants: undefined }, field: { plants: [], countsByKind: [], maxHeightPx: 0 }, sprites: [] });
