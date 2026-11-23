@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { BUILTIN_SKINS, type BuiltinSkinId } from '../src/skins/registry';
+import { BUILTIN_SKINS, type BuiltinSkin, type BuiltinSkinId } from '../src/skins/registry';
 import { dataOfWorldPack } from '../src/world-packs/data-pack';
 import { resolveWorldPack } from '../src/world-packs/registry';
 
@@ -49,7 +49,7 @@ function artFiles(folder: string): [string, Buffer][] {
 
 /* The files of the archive of a built-in theme, by path. */
 export function themeArchiveFiles(id: BuiltinSkinId, options: PackOptions = {}): Map<string, Buffer> {
-  const skin = BUILTIN_SKINS.find(one => one.id === id);
+  const skin: BuiltinSkin | undefined = BUILTIN_SKINS.find(one => one.id === id);
   if (!skin) throw new Error(`Hornhoof ships no theme "${id}".`);
   const pack = skin.world && skin.world !== 'standard' ? resolveWorldPack(skin.world) : null;
   const look: Record<string, unknown> = JSON.parse(JSON.stringify(skin)) as Record<string, unknown>;
