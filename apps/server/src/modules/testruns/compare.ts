@@ -168,16 +168,34 @@ async function treeAt(json: JsonReader, repo: RepoAddress, commitSha: string, ti
   } catch (error) { return failed(error, 'tree'); }
 }
 
+/* The tree a commit holds, by the id git gives it: none where GitHub cannot say. Two commits that hold one tree hold the same files
+   and the same modes, which is what a merge that makes no change of its own must show. */
+export type TreeShaReader = (repo: RepoAddress, commitSha: string, timeoutMs?: number) => Promise<string | null>;
+const TreeRoot = z.object({ sha: Sha });
+
+async function treeShaAt(json: JsonReader, repo: RepoAddress, commitSha: string, timeoutMs: number): Promise<string | null> {
+  if (!Sha.safeParse(commitSha).success) return null;
+  try {
+    const answer = await json(repo, `git/trees/${commitSha}`, timeoutMs);
+    const parsed = answer ? TreeRoot.safeParse(answer.body) : null;
+    return parsed?.success ? parsed.data.sha : null;
+  } catch (error) {
+    if (error instanceof GitHubRateLimited) throw error;
+    return null;
+  }
+}
+
 const READ_MS = 10_000;
 
 /* A server shares one request limit across every REST reader, including each page of a comparison. */
-export function githubReaders(limits?: GitHubLimits): { readCompare: CompareReader; readMerged: MergeReader; readTree: TreeReader } {
+export function githubReaders(limits?: GitHubLimits): { readCompare: CompareReader; readMerged: MergeReader; readTree: TreeReader; readTreeSha: TreeShaReader } {
   const json: JsonReader = limits ? (repo, path, timeout) => limits.request(repo, () => githubJson(repo, path, timeout)) : githubJson;
   return {
     readCompare: (repo, refs, timeout = READ_MS) => compareAt(json, repo, refs, timeout),
     readMerged: (repo, refs, timeout = READ_MS) => mergedAt(json, repo, refs, timeout),
     readTree: (repo, commit, timeout = READ_MS) => treeAt(json, repo, commit, timeout),
+    readTreeSha: (repo, commit, timeout = READ_MS) => treeShaAt(json, repo, commit, timeout),
   };
 }
 
-export const { readCompare, readMerged, readTree } = githubReaders();
+export const { readCompare, readMerged, readTree, readTreeSha } = githubReaders();

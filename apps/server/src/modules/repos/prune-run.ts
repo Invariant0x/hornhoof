@@ -1,7 +1,7 @@
 import type { RateLimit } from '../testruns/github-limit.js';
 import type { RepoAddress } from '../testruns/refs.js';
 import { planPrune, type Facts, type Holds, type Verdict } from './prune-plan.js';
-import { pushRefs, REFS_PER_PUSH, type Push, type RefUpdate } from './ref-push.js';
+import { pushRefs, refusalOf, REFS_PER_PUSH, type Push, type RefUpdate } from './ref-push.js';
 
 /* A repository's branches pruned by what the plan says (#1964): a branch whose work a turn, main or tag holds is deleted; one
    of a closed task that nothing holds goes to a hidden ref first and is deleted after, so it can come back. */
@@ -32,7 +32,7 @@ async function pushAll(push: Push, updates: readonly RefUpdate[]): Promise<Map<s
   const done = new Map<string, string | null>();
   for (const chunk of chunks(updates)) {
     const pushed = await push(chunk);
-    for (const { ref } of chunk) done.set(ref, 'problem' in pushed ? pushed.problem : (pushed.refs[ref] ?? 'its answer says nothing of this ref'));
+    for (const { ref } of chunk) done.set(ref, refusalOf(pushed, ref));
   }
   return done;
 }
@@ -86,7 +86,7 @@ export async function restoreBranch(repo: RepoAddress, branch: string, refs: Ref
   const head = read[archiveRef(branch)];
   if (!head) return { problem: `There is no archive of ${branch}.` };
   const pushed = await push([{ ref: headRef(branch), old: null, next: head }]);
-  const refused = 'problem' in pushed ? pushed.problem : pushed.refs[headRef(branch)];
-  return refused ? { problem: `${branch} was not restored: ${refused}` } : { restored: head };
+  const why = refusalOf(pushed, headRef(branch));
+  return why ? { problem: `${branch} was not restored: ${why}` } : { restored: head };
 }
 

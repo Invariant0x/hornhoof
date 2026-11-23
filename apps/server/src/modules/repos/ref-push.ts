@@ -33,6 +33,13 @@ function refused(updates: readonly RefUpdate[]): string | null {
   return null;
 }
 
+/* Why a push did not change a ref, or null where it did: a ref its answer does not name was not changed. */
+export function refusalOf(pushed: Pushed, ref: string): string | null {
+  if ('problem' in pushed) return pushed.problem;
+  const reason = pushed.refs[ref];
+  return reason === undefined ? 'its answer says nothing of this ref' : reason;
+}
+
 /* The pushed commands, the first with what the push asks of the repository: its answer per ref, and deleting where it says it
    can. A pack follows unless every command deletes, as git sends it. */
 function requestOf(updates: readonly RefUpdate[], canDelete: boolean, pack?: Buffer): Buffer {
