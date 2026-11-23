@@ -96,6 +96,8 @@ function inRect(x: number, y: number, rect: WorldVisibleRect, pad: number): bool
 export type LoopArtContext = Readonly<{
   library: WorldArtLibrary;
   pool: DisplayRunPool;
+  /* The drawn variant of each building's step, so loops sit on the variant's own anchors. */
+  variants: ReadonlyMap<string, number>;
 }>;
 
 type LoopAnchors = Readonly<Record<LoopAttachPoint, { x: number; y: number }>>;
@@ -111,7 +113,7 @@ function artLoopAnchors(
 ): LoopAnchors | null {
   const index = art.library.index;
   if (!index) return null;
-  const resolved = resolveBuildingArt(pack, index, building, state);
+  const resolved = resolveBuildingArt(pack, index, building, state, { variant: art.variants.get(building.id) });
   if (!resolved || resolved.layers.some(l => !art.library.frame(l.path, l.frame))) return null;
   const p = resolved.passport;
   const s = tileW / resolved.artPxPerTile;

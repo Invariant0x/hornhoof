@@ -5,6 +5,7 @@
    placeholder for everything else, so art can arrive one file at a time.
    Pure data and math only: loading textures lives in art-runtime.ts. */
 
+import type { VariantStep } from './building-variants';
 import type { BuildingKind, CityBuilding } from './city-layout';
 import { resolveStageSpecForBuilding, type BuildingConstructionState } from './construction';
 import { tileTopVertexToWorld, type Point2D } from './coords';
@@ -111,6 +112,8 @@ export type ArtBuildingStep = Readonly<{
   fromStage?: number;
   fromLevel?: number;
   label: Readonly<{ en: string; ru: string }>;
+  /* Drawn variants of the step, each a full set in its own folder v01, v02, ...; v01 is required, the rest optional. */
+  variants?: number;
 }>;
 
 export type ArtStagePictureRule = Readonly<{
@@ -236,8 +239,13 @@ function footprintSpan(key: FootprintKey): number {
   return Number(key.split('x')[0]);
 }
 
-function stepPicturePath(kind: BuildingKind, step: ArtBuildingStep, picture: string): string {
-  return `buildings/${kind}/${step.id}/${picture}.png`;
+/* The folder of a step's pictures, or of one of its variants (0 = v01). */
+function stepFolder(kind: BuildingKind, step: ArtBuildingStep, variant?: number): string {
+  return variant === undefined ? `buildings/${kind}/${step.id}/` : `buildings/${kind}/${step.id}/v${pad2(variant + 1)}/`;
+}
+
+function stepPicturePath(kind: BuildingKind, step: ArtBuildingStep, picture: string, variant?: number): string {
+  return `${stepFolder(kind, step, variant)}${picture}.png`;
 }
 
 export function modulePath(footprint: FootprintKey, module: (typeof CONSTRUCTION_MODULES)[number]): string {
@@ -246,6 +254,39 @@ export function modulePath(footprint: FootprintKey, module: (typeof CONSTRUCTION
 
 export function personSheetPath(lookId: string, tier: number, anim: ResidentAnimationId, cloak = false): string {
   return `people/${lookId}/tier_${tier}/${anim}${cloak ? '.cloak' : ''}.png`;
+}
+
+/* The files of one step's folder (or one variant's), with `at` naming a picture's path. */
+function declaredStepFiles(pack: WorldPackManifest, kind: BuildingKind, step: ArtBuildingStep, at: (picture: string) => string): DeclaredArtFile[] {
+  const out: DeclaredArtFile[] = [];
+  const picture = (name: string, required: boolean, role: DeclaredArtRole = 'building'): DeclaredArtFile => ({
+    path: at(name),
+    role,
+    passport: role === 'capstone' ? 'anchor' : 'picture',
+    required,
+  });
+  if (kind === 'statue') {
+    for (let s = 1; s <= pack.stageCounts.statue; s++) out.push(picture(`stage_${pad2(s)}`, true));
+    return out;
+  }
+  if (kind === 'monument') {
+    for (let t = 1; t <= pack.stageCounts.monument; t++) out.push(picture(`tier_${pad2(t)}`, true));
+    out.push(picture('capstone', true, 'capstone'));
+    return out;
+  }
+  for (const name of STANDARD_BUILDING_PICTURES) {
+    if (kind === 'supply' && name === 'complete') continue;
+    const stage = STAGE_OF_PICTURE[name];
+    out.push({ ...picture(name, !OPTIONAL_BUILDING_PICTURES.has(name)), ...(stage ? { alternative: at(`stage_${pad2(stage)}`) } : {}) });
+  }
+  if (kind === 'supply') {
+    for (let f = 0; f < SUPPLY_FILL_LEVELS; f++) out.push(picture(`fill_${f}`, true));
+    return out;
+  }
+  /* Contract 2: the whole construction line drawn on the step's own canvas, and its demolition. */
+  for (let n = 1; n <= pack.stageCounts.construction; n++) out.push(picture(`stage_${pad2(n)}`, false));
+  for (const name of DEMOLITION_PICTURES) out.push(picture(name, false));
+  return out;
 }
 
 /* Every file the pack's catalog has a slot for, with the passport kind each one needs. */
@@ -258,44 +299,14 @@ export function declaredArtFiles(pack: WorldPackManifest): readonly DeclaredArtF
   for (const [kindKey, steps] of Object.entries(art.buildings)) {
     const kind = kindKey as BuildingKind;
     for (const step of steps ?? []) {
-      if (kind === 'statue') {
-        for (let s = 1; s <= pack.stageCounts.statue; s++) {
-          out.push({ path: stepPicturePath(kind, step, `stage_${pad2(s)}`), role: 'building', passport: 'picture', required: true });
-        }
+      if (kind !== 'statue' && kind !== 'monument') moduleFootprints.add(step.footprint);
+      if (!step.variants) {
+        out.push(...declaredStepFiles(pack, kind, step, picture => stepPicturePath(kind, step, picture)));
         continue;
       }
-      if (kind === 'monument') {
-        for (let t = 1; t <= pack.stageCounts.monument; t++) {
-          out.push({ path: stepPicturePath(kind, step, `tier_${pad2(t)}`), role: 'building', passport: 'picture', required: true });
-        }
-        out.push({ path: stepPicturePath(kind, step, 'capstone'), role: 'capstone', passport: 'anchor', required: true });
-        continue;
-      }
-      moduleFootprints.add(step.footprint);
-      for (const picture of STANDARD_BUILDING_PICTURES) {
-        if (kind === 'supply' && picture === 'complete') continue;
-        const stage = STAGE_OF_PICTURE[picture];
-        out.push({
-          path: stepPicturePath(kind, step, picture),
-          role: 'building',
-          passport: 'picture',
-          required: !OPTIONAL_BUILDING_PICTURES.has(picture),
-          ...(stage ? { alternative: stepPicturePath(kind, step, `stage_${pad2(stage)}`) } : {}),
-        });
-      }
-      /* Contract 2: the whole construction line drawn on the step's own canvas, and its demolition. */
-      if (kind !== 'supply') {
-        for (let n = 1; n <= pack.stageCounts.construction; n++) {
-          out.push({ path: stepPicturePath(kind, step, `stage_${pad2(n)}`), role: 'building', passport: 'picture', required: false });
-        }
-        for (const picture of DEMOLITION_PICTURES) {
-          out.push({ path: stepPicturePath(kind, step, picture), role: 'building', passport: 'picture', required: false });
-        }
-      }
-      if (kind === 'supply') {
-        for (let f = 0; f < SUPPLY_FILL_LEVELS; f++) {
-          out.push({ path: stepPicturePath(kind, step, `fill_${f}`), role: 'building', passport: 'picture', required: true });
-        }
+      for (let v = 0; v < step.variants; v++) {
+        const files = declaredStepFiles(pack, kind, step, picture => stepPicturePath(kind, step, picture, v));
+        out.push(...(v === 0 ? files : files.map(f => ({ ...f, required: false }))));
       }
     }
   }
@@ -596,6 +607,8 @@ export type BuildingArtOptions = Readonly<{
   upgrading?: boolean;
   districtColor?: string;
   departmentColor?: string;
+  /* The variant of its step the building shows (0 = v01), from chooseBuildingVariants. */
+  variant?: number;
 }>;
 
 function pickStep(
@@ -670,6 +683,24 @@ function passportLayers(files: ArtIndex['files'], path: string, main: BuildingPi
   return out;
 }
 
+/* The variant to draw: the wanted one when its finished picture is in the folder, else the next delivered one going
+   round; undefined for a step without variants, null when none is delivered. */
+function deliveredVariant(files: ArtIndex['files'], kind: BuildingKind, step: ArtBuildingStep, wanted: number): number | null | undefined {
+  const count = step.variants;
+  if (!count) return undefined;
+  for (let k = 0; k < count; k++) {
+    const v = (((wanted + k) % count) + count) % count;
+    if (files[stepPicturePath(kind, step, 'complete', v)]) return v;
+  }
+  return null;
+}
+
+/* The step a building shows and its number of variants, for chooseBuildingVariants; null without variants. */
+export function variantStepOf(pack: WorldPackManifest, building: CityBuilding): VariantStep | null {
+  const step = pickStep(pack.art?.buildings[building.kind], building, building.stage);
+  return step?.variants ? { key: `${building.kind}/${step.id}`, count: step.variants } : null;
+}
+
 function hasPicturePassport(entry: ArtIndexEntry | undefined): entry is ArtIndexEntry & { passport: BuildingPicturePassport } {
   return Boolean(entry?.passport && 'groundAnchor' in entry.passport && 'corners' in entry.passport);
 }
@@ -713,7 +744,9 @@ export function resolveBuildingArt(
   /* Growth steps follow the building's own stage or level; a construction job only walks pictures inside the step. */
   const step = pickStep(art.buildings[building.kind], building, building.stage);
   if (!step) return null;
-  const base = (picture: string) => stepPicturePath(building.kind, step, picture);
+  const variant = deliveredVariant(files, building.kind, step, options.variant ?? 0);
+  if (variant === null) return null;
+  const base = (picture: string) => stepPicturePath(building.kind, step, picture, variant);
 
   const finish = (layers: BuildingArtLayer[], mainPath: string): BuildingArt | null => {
     const mainEntry = files[mainPath];

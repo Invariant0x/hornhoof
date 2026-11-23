@@ -59,6 +59,7 @@ import {
   type DepartmentFocusSpec,
 } from './department-focus';
 import { cityToPickableObjects } from './live-sync';
+import { cityBuildingVariants } from './building-variants';
 import { cityGround, cityGroundKey } from './city-ground';
 import { ChunkLotKeys, type LotClearing } from './lot-clearing';
 import { RoadStripPainter } from './road-strips';
@@ -277,6 +278,7 @@ export class IsometricWorldEngine {
   /* Per chunk: the lots reaching into it as part of its cache key, and the key of its last baked picture, drawn while a
      changed clearing bakes it again. */
   private readonly chunkLotKeys = new ChunkLotKeys();
+  private buildingVariants: ReadonlyMap<string, number> = new Map();
   private readonly roadPainter = new RoadStripPainter();
   /* Awnings and cloth of the building pictures drawn by the last city pass, moved every frame by the wind. */
   private readonly swayingLayers: SwayingLayer[] = [];
@@ -524,6 +526,7 @@ export class IsometricWorldEngine {
       library: this.artLibrary,
       pool: this.buildingArtPool,
       upgradingHouseIds: this.residentSim?.scaffoldingHouseIds,
+      variants: this.buildingVariants,
       paintedRoads: this.roadPainter.ready,
       swaying: this.swayingLayers,
     };
@@ -536,7 +539,7 @@ export class IsometricWorldEngine {
 
   private loopArtContext(): LoopArtContext | null {
     if (!this.loopArtPool) return null;
-    return { library: this.artLibrary, pool: this.loopArtPool };
+    return { library: this.artLibrary, pool: this.loopArtPool, variants: this.buildingVariants };
   }
 
   /* How much of the city is drawn from artist files instead of placeholders. */
@@ -925,6 +928,7 @@ export class IsometricWorldEngine {
   /* Updates the Stage 4 isometric city placeholder layer and its pickable building footprints. */
   setCityRenderState(state: CityRenderState | null): void {
     this.cityRenderState = state;
+    this.buildingVariants = cityBuildingVariants(state?.city.buildings ?? [], this.pack);
     this.refreshCityGround();
     this.cityDirty = true;
     this.cityCullWindow = null;
