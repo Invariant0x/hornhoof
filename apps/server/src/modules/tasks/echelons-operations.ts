@@ -4,14 +4,15 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { taskEvents } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
+import type { Recorded } from './recorded.js';
 import { refuse, type Moved, type Task } from './state.js';
 
-export type Submission = { summary: string; evidence: string; review?: { baseCommit: string; branch?: string; commit?: string }; operationId?: string };
+export type Submission = { summary: string; evidence: string; review?: { baseCommit: string; branch?: string; commit?: string }; recorded?: Recorded; operationId?: string };
 
 export function submissionOperation(input: Submission): { id: string; digest: string } | null {
   if (!input.operationId) return null;
   if (!z.uuid().safeParse(input.operationId).success) throw refuse(400, 'task_invalid', 'The operation ID must be a UUID.');
-  const digest = createHash('sha256').update(JSON.stringify([input.summary, input.evidence, input.review ?? null])).digest('hex');
+  const digest = createHash('sha256').update(JSON.stringify([input.summary, input.evidence, input.review ?? null, ...(input.recorded ? [input.recorded] : [])])).digest('hex');
   return { id: input.operationId, digest };
 }
 

@@ -124,7 +124,7 @@ async function chooseLanguages(page: Page): Promise<Language[]> {
 async function geometry(page: Page): Promise<unknown[]> {
   return page.evaluate(() => {
     for (const scrolled of document.querySelectorAll('.dialog, .settings-scroll')) scrolled.scrollTop = 0;
-    const selectors = ['.dialog', '.dialog > *', '.settings-body > *', '.settings-nav > *', '.skins > *', '.skins-head > *', '.skins-add .btn', '.skins-catalog > *', '.skin-cards > *', '.skin-card > *', '.skin-preview > *', '.skins-guide > *'];
+    const selectors = ['.dialog', '.dialog > *', '.settings-body > *', '.settings-nav > *', '.skins > *', '.skins-head > *', '.skins-adds .btn', '.skins-catalog > *', '.skin-cards > *', '.skin-card > *', '.skin-preview > *', '.skins-guide > *'];
     /* Named by place, not by text: the line that says which skin is on changes its words with the skin. */
     return [...new Set(selectors.flatMap(selector => [...document.querySelectorAll<HTMLElement>(selector)]))].map((element, at) => {
       const box = element.getBoundingClientRect();
@@ -343,11 +343,11 @@ test('Pixel writes headings and buttons in Handjet, served by Hornhoof itself in
   expect(fonts.filter(path => path.includes('handjet-latin-500'))).not.toEqual([]);
   /* Twelve corners of two steps against the six of a slant; a ghost button is square. */
   const points = (locator: Locator) => locator.evaluate(element => getComputedStyle(element).clipPath.split(',').length);
-  expect(await points(dialog.getByRole('button', { name: words.skins.add, exact: true }))).toBe(12);
+  expect(await points(dialog.getByRole('button', { name: words.skins.archive.upload, exact: true }))).toBe(12);
   expect(await dialog.getByRole('button', { name: `${words.skins.download}: ${words.skins.names.pixel}`, exact: true }).evaluate(element => getComputedStyle(element).clipPath)).toBe('none');
   await dialog.getByRole('button', { name: `${words.skins.apply}: ${words.skins.names.light}`, exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-  expect(await points(dialog.getByRole('button', { name: words.skins.add, exact: true }))).toBe(6);
+  expect(await points(dialog.getByRole('button', { name: words.skins.archive.upload, exact: true }))).toBe(6);
   expect(problems).toEqual([]);
 });
 
@@ -396,7 +396,7 @@ test('a skin file is added beside the others, a bad one is refused in plain word
   await expect(dialog.getByRole('alert')).toHaveText(`${words.skins.addFailed}${words.skins.errors.unsafe('colors.bg', '')}`);
   await add('proto.json', skinText(OWN).replace('{', '{"__proto__": {"polluted": true},'));
   await expect(dialog.getByRole('alert')).toHaveText(`${words.skins.addFailed}${words.skins.errors.forbidden_key('__proto__', '')}`);
-  await expect(dialog.getByRole('button', { name: words.skins.add, exact: true })).toBeFocused();
+  await expect(dialog.getByRole('button', { name: words.skins.archive.upload, exact: true })).toBeFocused();
   await add('dusk.json', skinText(OWN));
   await expect(dialog.getByRole('status')).toHaveText(words.skins.added('Dusk'));
   await add('dawn.json', skinText({ ...OWN, name: { ru: 'Рассвет', en: 'Dawn' } }));

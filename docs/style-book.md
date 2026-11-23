@@ -42,7 +42,7 @@ All colours are tokens in `:root` of `theme.css`. Light is the default. Dark app
 | `--red` | `#C62828` | `#FF6B6B` | Alarm fill, line and text |
 | `--on-red` | `#FFFFFF` | `#2A0606` | Text on `--red` |
 | `--on-pink` | `#000000` | `#141A22` | Text on `--pink` fills: `.nav-count`. Skin role `on_attention` |
-| `--scrim` | `rgba(10, 20, 30, .35)` | `rgba(10, 20, 30, .35)` | Dim layer behind a dialog: `.dialog-back`. Skin role `scrim` |
+| `--scrim` | `rgba(10, 20, 30, .35)` | `rgba(4, 8, 12, .64)` | Dim layer behind a dialog: `.dialog-back`. Skin role `scrim`. Cyberpunk is denser since 23.11 (#1938, Head of design round 3): the map falls behind and the window reads first |
 | `--scrollbar-thumb` | `#768695` | `#687A8F` | Thumb of the page scrollbar, `scrollbar-color`. Skin role `scrollbar_thumb` |
 | `--scrollbar-track` | `#F8FAFC` | `#1B232D` | Track of the page scrollbar, `scrollbar-color`. Skin role `scrollbar_track` |
 | `--idle` | `#C5D0DB` | `#2C3744` | Empty track, `.spinner` ring, panel bar lights |

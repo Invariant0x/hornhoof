@@ -1,5 +1,5 @@
 import {
-  THEME_ARCHIVE_FORMAT, THEME_ENGINES, THEME_FILE_LIMITS, THEME_KIT_COLORS, THEME_KIT_SLOTS, THEME_KIT_VALUE_LENGTH, THEME_KIT_VALUES, THEME_LIMITS, type ThemeArtFile, type ThemeLimits, type ThemeProblemCode, type ThemeWebCheck,
+  THEME_ARCHIVE_FORMAT, THEME_ENGINES, THEME_FILE_LIMITS, THEME_KIT_COLORS, THEME_KIT_SLOTS, THEME_KIT_VALUE_LENGTH, THEME_KIT_VALUES, THEME_LIMITS, type ThemeArtFile, type ThemeLimits, type ThemeProblemCode, type ThemeWebCheck, type ThemeWorldLeftOut,
 } from '@hornhoof/protocol/themes';
 import type { WorldPackBehaviorSpec } from '@hornhoof/protocol/world';
 import { z } from 'zod';
@@ -76,6 +76,8 @@ export type CheckedTheme = Readonly<{
   kit: ThemeKit | null;
   world: unknown;
   skills: WorldPackBehaviorSpec | null;
+  /* A world the theme declares but which is not kept, and why: the theme is then its interface alone. */
+  worldLeftOut: ThemeWorldLeftOut | null;
   files: readonly ServedFile[];
   size: number;
 }>;
@@ -183,28 +185,41 @@ async function previewOf(files: Reader, served: ServedFile[]): Promise<void> {
 }
 
 /* The world: the art's pictures with their passports, then the pack and the art checks of the engine's own code. */
-async function worldOf(manifest: ThemeManifest, files: Reader, web: ThemeWebCheck, baseUrl: string, served: ServedFile[]): Promise<{ world: unknown; index: unknown } | null> {
+/* The world of an iso2d theme, checked whole. A world is kept only with all its own art: one that does not bring every
+   picture its catalog requires is left out, its art not stored, and the theme is its interface alone, so no person gets
+   a world of the engine's placeholders (docs/theme-archive.md, 4.2). */
+async function worldOf(manifest: ThemeManifest, files: Reader, web: ThemeWebCheck, baseUrl: string, served: ServedFile[]): Promise<{ world: unknown; leftOut: ThemeWorldLeftOut | null } | null> {
   if (manifest.engine !== 'iso2d') return null;
   const world = await files.json('world/world.json', THEME_FILE_LIMITS.worldBytes);
-  const art: ThemeArtFile[] = [];
   const all = files.under('world/art/').filter(path => files.kinds.get(path) !== 'index');
+  const { art, kept } = await artOf(files, all);
+  const checked = web.checkWorld({ id: manifest.id, world, baseUrl: `${baseUrl}world/art/`, art, files: all.map(path => path.slice('world/art/'.length)) });
+  if (!checked.ok) refuse(checked.code, checked.code === 'world_bad' ? 'world/world.json' : 'world/art/', checked.detail);
+  if (!checked.complete) return { world: null, leftOut: 'art_missing' };
+  const index = Buffer.from(`${JSON.stringify(checked.artIndex)}\n`);
+  served.push(...kept, { path: 'world/art/art-index.json', mediaType: MEDIA.json, size: index.length, read: () => Promise.resolve(index) });
+  return { world: checked.world, leftOut: null };
+}
+
+/* The world's pictures, each with its passport where it has one, and every file of the art as it would be served. */
+async function artOf(files: Reader, all: readonly string[]): Promise<{ art: ThemeArtFile[]; kept: ServedFile[] }> {
+  const art: ThemeArtFile[] = [];
+  const kept: ServedFile[] = [];
   for (const path of all.filter(name => name.endsWith('.png'))) {
     const bytes = await files.read(path);
     pictureOf(path, 'png', bytes);
     const passportPath = path.replace(/\.png$/, '.json');
     const passport = files.has(passportPath) ? await files.json(passportPath, THEME_FILE_LIMITS.passportBytes) : undefined;
     art.push({ path: path.slice('world/art/'.length), head: Buffer.from(bytes.subarray(0, 33)), ...(passport === undefined ? {} : { passport }) });
-    served.push(files.served(path, MEDIA.png));
+    kept.push(files.served(path, MEDIA.png));
+    /* Each picture's whole walk costs the request's time: the next one waits for other requests first. */
+    await new Promise(resolve => setImmediate(resolve));
   }
   for (const path of all.filter(name => name.endsWith('.json'))) {
     if (!files.has(path.replace(/\.json$/, '.png'))) refuse('file_place', path, 'a passport with no picture beside it');
-    served.push(files.served(path, MEDIA.json));
+    kept.push(files.served(path, MEDIA.json));
   }
-  const checked = web.checkWorld({ id: manifest.id, world, baseUrl: `${baseUrl}world/art/`, art, files: all.map(path => path.slice('world/art/'.length)) });
-  if (!checked.ok) refuse(checked.code, checked.code === 'world_bad' ? 'world/world.json' : 'world/art/', checked.detail);
-  const index = Buffer.from(`${JSON.stringify(checked.artIndex)}\n`);
-  served.push({ path: 'world/art/art-index.json', mediaType: MEDIA.json, size: index.length, read: () => Promise.resolve(index) });
-  return { world: checked.world, index: checked.artIndex };
+  return { art, kept };
 }
 
 async function skillsOf(manifest: ThemeManifest, files: Reader): Promise<WorldPackBehaviorSpec | null> {
@@ -242,7 +257,12 @@ export async function checkThemeArchive(source: ZipSource, web: ThemeWebCheck, b
   const kit = await kitOf(files, served);
   await previewOf(files, served);
   const world = await worldOf(manifest, files, web, baseUrl(manifest), served);
+  /* The voice is checked either way, but a world left out takes its voice and era names with it. */
   const skills = await skillsOf(manifest, files);
-  return { manifest, look: look.value, fonts, kit, world: world?.world ?? null, skills, files: served, size: served.reduce((sum, file) => sum + file.size, 0) };
+  const leftOut = world?.leftOut ?? null;
+  return {
+    manifest, look: look.value, fonts, kit, world: world?.world ?? null, skills: leftOut ? null : skills, worldLeftOut: leftOut, files: served,
+    size: served.reduce((sum, file) => sum + file.size, 0),
+  };
 }
 

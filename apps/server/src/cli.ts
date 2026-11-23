@@ -111,45 +111,78 @@ const flagOf = (args: readonly string[], name: string) => {
 /* Installs a theme archive for one named company by the same check and install as the store's upload (#1960), for
    when no screen does it. Every attempt is one JSON line appended to the log, theme-installs.log in the folder it runs
    in unless --log names another file: when, which company, the archive's SHA-256, and what came of it. */
-async function themeInstall(args: string[], { db, print, now }: Deps): Promise<number> {
-  const [path] = args;
-  const companyId = flagOf(args, '--company');
-  if (!path || path.startsWith('--') || !companyId || !UUID.test(companyId)) {
-    print(USAGE);
+async function themeInstall(args: string[], deps: Deps): Promise<number> {
+  const named = installArgs(args);
+  if (!named) {
+    deps.print(USAGE);
     return 1;
   }
-  const logFile = resolve(flagOf(args, '--log') ?? 'theme-installs.log');
-  const record = async (entry: Record<string, unknown>) => {
-    const line = JSON.stringify({ at: (now?.() ?? new Date()).toISOString(), companyId, archive: resolve(path), ...entry });
-    await appendFile(logFile, `${line}\n`, { mode: 0o600 });
-    print(`THEME_INSTALL ${line}`);
-  };
-  const [company] = await db.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId));
-  const [owner] = company ? await db.select({ id: people.id }).from(people).where(and(eq(people.companyId, company.id), eq(people.isOwner, true))) : [];
-  if (!company || !owner) {
-    await record({ result: 'refused', reason: company ? 'The company has no owner to install it in the name of.' : 'There is no such company.' });
-    return 1;
-  }
-  const handle = await open(path, 'r');
+  const { path, companyId } = named;
+  const record = installLog(deps, resolve(flagOf(args, '--log') ?? 'theme-installs.log'), { companyId, archive: resolve(path) });
+  const owner = await ownerOf(deps.db, companyId);
+  if (typeof owner === 'string') return refused(record, owner);
+  let handle: FileHandle;
   try {
-    const sha256 = await sha256Of(handle);
-    try {
-      const theme = await checkThemeArchive(await fileSource(handle), await webThemeCheck(), manifest => themeBase(manifest.id, manifest.version));
-      const { id, version } = theme.manifest;
-      if ((await installedVersion(db, company.id, id)) === version) {
-        await record({ sha256, result: 'refused', problem: { code: 'same_version', path: 'theme.json' }, theme: id, version });
-        return 1;
-      }
-      await installTheme(db, company.id, owner.id, theme);
-      await record({ sha256, result: 'installed', theme: id, version, files: theme.files.length, size: theme.size, installedBy: owner.id });
-      return 0;
-    } catch (err) {
-      if (!(err instanceof ArchiveRefused)) throw err;
-      await record({ sha256, result: 'refused', problem: err.problem });
-      return 1;
-    }
+    handle = await open(path, 'r');
+  } catch (err) {
+    return refused(record, `The archive cannot be read: ${(err as NodeJS.ErrnoException).code ?? 'unreadable'}.`);
+  }
+  try {
+    return await installFrom(handle, { db: deps.db, companyId, ownerId: owner.id, record });
   } finally {
     await handle.close();
+  }
+}
+
+/* The archive and the company a call names, when it names both. */
+function installArgs(args: string[]): { path: string; companyId: string } | null {
+  const [path] = args;
+  const companyId = flagOf(args, '--company');
+  return path && !path.startsWith('--') && companyId && UUID.test(companyId) ? { path, companyId } : null;
+}
+
+type LogLine = (entry: Record<string, unknown>) => Promise<void>;
+
+/* Each attempt as one JSON line appended to the log and printed: when, which company and archive, and what came of it. */
+function installLog(deps: Deps, logFile: string, about: { companyId: string; archive: string }): LogLine {
+  return async entry => {
+    const line = JSON.stringify({ at: (deps.now?.() ?? new Date()).toISOString(), ...about, ...entry });
+    await appendFile(logFile, `${line}\n`, { mode: 0o600 });
+    deps.print(`THEME_INSTALL ${line}`);
+  };
+}
+
+async function refused(record: LogLine, reason: string): Promise<number> {
+  await record({ result: 'refused', reason });
+  return 1;
+}
+
+/* The owner of the company named, in whose name a theme is installed; why not when there is none. */
+async function ownerOf(db: Deps['db'], companyId: string): Promise<{ id: string } | string> {
+  const [company] = await db.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId));
+  if (!company) return 'There is no such company.';
+  const [owner] = await db.select({ id: people.id }).from(people).where(and(eq(people.companyId, company.id), eq(people.isOwner, true)));
+  return owner ?? 'The company has no owner to install it in the name of.';
+}
+
+/* Checks the archive open in the handle as an upload is checked, and installs it unless the same version is there. */
+async function installFrom(handle: FileHandle, to: { db: Deps['db']; companyId: string; ownerId: string; record: LogLine }): Promise<number> {
+  const { db, companyId, ownerId, record } = to;
+  const sha256 = await sha256Of(handle);
+  try {
+    const theme = await checkThemeArchive(await fileSource(handle), await webThemeCheck(), manifest => themeBase(manifest.id, manifest.version));
+    const { id, version } = theme.manifest;
+    if ((await installedVersion(db, companyId, id)) === version) {
+      await record({ sha256, result: 'refused', problem: { code: 'same_version', path: 'theme.json' }, theme: id, version });
+      return 1;
+    }
+    await installTheme(db, companyId, ownerId, theme);
+    await record({ sha256, result: 'installed', theme: id, version, files: theme.files.length, size: theme.size, installedBy: ownerId, ...(theme.worldLeftOut ? { worldLeftOut: theme.worldLeftOut } : {}) });
+    return 0;
+  } catch (err) {
+    if (!(err instanceof ArchiveRefused)) throw err;
+    await record({ sha256, result: 'refused', problem: err.problem });
+    return 1;
   }
 }
 

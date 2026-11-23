@@ -2,7 +2,7 @@ import { parseNodeMessage } from '@hornhoof/protocol';
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { jobs, requests, subscriptions, testParts, testRuns } from '../src/db/schema.js';
-import { runEnd } from '../src/modules/testruns/runs.js';
+import { oldRefusal, runEnd } from '../src/modules/testruns/runs.js';
 import { as, until } from './helpers.js';
 import { company, done, nextOf } from './test-runs-company.js';
 
@@ -75,6 +75,28 @@ describe('a refusal is a hint, never a failure', () => {
     await until(async () => (await runsOf(c))[0]?.status !== 'running');
     expect(await runsOf(c)).toEqual([{ number: 1, status: 'refused' }]);
     expect(await failures(c)).toEqual([]);
+  });
+
+  it("keeps a work run failed whose own command printed the refusal's words and was ended by a signal", async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'dev-mac');
+    /* The node writes the command as the first line; what the command printed follows, and a signal leaves no exit code. */
+    const said = REFUSAL.slice(0, REFUSAL.indexOf('.') + 1);
+    const command = `echo '${said}'; kill -9 $$`;
+    await runWork(c, ivan, command, { ok: false, exitCode: null, error: 'failed', log: `$ ${command}\n${said}\n` });
+    await until(async () => (await runsOf(c))[0]?.status !== 'running');
+    expect(await runsOf(c)).toEqual([{ number: 1, status: 'failed' }]);
+    expect(await failures(c)).toEqual([expect.objectContaining({ kind: 'work', reason: '1', failure: 'run' })]);
+  });
+
+  it('takes as an old refusal only a log that is the guard\'s refusal alone, from its first character', () => {
+    expect(oldRefusal(`запусти через run_tests\n${REFUSAL}`)).toBe(true);
+    expect(oldRefusal(`${REFUSAL}\n`)).toBe(true);
+    expect(oldRefusal(`$ npm test\n${REFUSAL}`)).toBe(false);
+    expect(oldRefusal(`$ npm test\nзапусти через run_tests\n${REFUSAL}`)).toBe(false);
+    expect(oldRefusal(`${REFUSAL}\nkilled`)).toBe(false);
+    expect(oldRefusal(`запусти через run_tests\n${REFUSAL}\nkilled`)).toBe(false);
+    expect(oldRefusal(` ${REFUSAL}`)).toBe(false);
   });
 
   it('refuses a run none of whose parts failed, and fails one where a started part failed', () => {

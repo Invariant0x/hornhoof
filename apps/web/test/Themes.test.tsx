@@ -1,3 +1,4 @@
+import type { InstalledThemeView } from '@hornhoof/protocol/themes';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +8,8 @@ import { Shell } from '../src/screens/Shell';
 import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
 import { COLOR_TOKENS, type Skin } from '../src/skins/roles';
 import { initSkins, skinsState } from '../src/skins/store';
+import { forgetInstalledTheme } from '../src/themes/installed';
+import { THEME_GUIDE_URL } from '../src/ui/Themes';
 import { builtinFile, parseSkin, SKIN_FILE_LIMIT, skinText } from '../src/skins/validate';
 import { ME, mockApi, ORG } from './api-mock';
 import { decl } from './css';
@@ -17,8 +20,8 @@ const own = (name: string, bg = '#010203', base = 'cyberpunk'): Skin => {
   return { ...sample, base, colors: { ...sample.colors, bg } };
 };
 const file = (body: string, name = 'dusk.json') => new File([body], name, { type: 'application/json' });
-const EN = { account: 'Account', item: 'Settings', title: 'Settings', group: 'Company & access', add: 'Add from file' };
-const RU = { account: 'Аккаунт', item: 'Настройки', title: 'Настройки', group: 'Компания и доступ', add: 'Добавить из файла' };
+const EN = { account: 'Account', item: 'Settings', title: 'Settings', group: 'Company & access', add: 'Upload theme' };
+const RU = { account: 'Аккаунт', item: 'Настройки', title: 'Настройки', group: 'Компания и доступ', add: 'Загрузить тему' };
 
 function renderShell(person = ME.person) {
   mockApi({
@@ -123,7 +126,7 @@ describe('the Themes section of the settings', () => {
     expect(within(cyberpunk).getByText('Built-in · Default')).toBeInTheDocument();
     expect(within(cyberpunk).getByText('A night console with a cyan accent.')).toBeInTheDocument();
     expect(within(light).getByText('Built-in')).toBeInTheDocument();
-    expect(within(egypt).getByText('Built-in · 3D map')).toBeInTheDocument();
+    expect(within(egypt).getByText('Built-in · Game world')).toBeInTheDocument();
     expect(within(egypt).getByText('Warm papyrus, sandstone and an isometric desert map.')).toBeInTheDocument();
     expect(egypt.querySelector('.skin-preview')!.getAttribute('data-world')).toBe('egypt');
     expect(labels(cyberpunk)).toEqual(['Download: Cyberpunk']);
@@ -138,8 +141,12 @@ describe('the Themes section of the settings', () => {
     expect(within(dialog).queryAllByRole('button', { pressed: true }).map(button => button.textContent)).toEqual(['All']);
     /* No button on a card is filled: Apply is as quiet as Download. */
     expect(cards(dialog).flatMap(card => within(card).getAllByRole('button')).every(button => button.classList.contains('ghost'))).toBe(true);
-    expect(within(dialog).getByText('No custom skins yet')).toBeInTheDocument();
-    expect(within(dialog).getByText('Add a file. Download any built-in skin to use as a sample.')).toBeInTheDocument();
+    expect(within(dialog).getByText('No custom themes yet')).toBeInTheDocument();
+    expect(within(dialog).getByText('Upload a theme as a .zip, or a skin file as a .json. Download any built-in skin to use as a sample.')).toBeInTheDocument();
+    /* One way in for a theme of any kind: Upload theme takes an archive and a skin file alike (Design, #1960). */
+    expect(within(dialog).getAllByRole('button', { name: /^(Upload theme|Add from file)$/ })).toEqual([within(dialog).getByRole('button', { name: 'Upload theme' })]);
+    expect(dialog.querySelectorAll('input[type="file"]')).toHaveLength(1);
+    expect(input(dialog).accept.split(',')).toEqual(['.zip', 'application/zip', '.json', 'application/json']);
     expect(cards(dialog).map(card => card.querySelector('.skin-preview')!.getAttribute('data-cut'))).toEqual(['bevel', 'bevel', 'bevel', 'steps', 'bevel']);
     expect((cards(dialog)[3]!.querySelector('.skin-preview') as HTMLElement).style.getPropertyValue(COLOR_TOKENS.bg)).toBe('#151523');
   });
@@ -148,12 +155,12 @@ describe('the Themes section of the settings', () => {
     const user = userEvent.setup();
     renderShell();
     const dialog = await openThemes(user);
-    await user.click(within(dialog).getByRole('button', { name: '3D worlds' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Game worlds' }));
     expect(titles(dialog)).toEqual(['Ancient Egypt']);
     await user.click(within(dialog).getByRole('button', { name: 'Classic' }));
     expect(titles(dialog)).toEqual(['Cyberpunk', 'Light', 'Matrix', 'Pixel']);
     await user.click(within(dialog).getByRole('button', { name: 'Custom' }));
-    expect(within(dialog).getByText('No custom skins yet')).toBeInTheDocument();
+    expect(within(dialog).getByText('No custom themes yet')).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'All' }));
     expect(titles(dialog)).toEqual(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Ancient Egypt']);
 
@@ -161,8 +168,9 @@ describe('the Themes section of the settings', () => {
     expect([root.dataset.theme, root.dataset.world, root.dataset.surface]).toEqual(['egypt', 'egypt', 'papyrus']);
     /* Ivan's correction: Cyberpunk stays an equal card in the store, with no separate Back to Cyberpunk banner or button. */
     expect(within(dialog).queryByText(/Return to Cyberpunk|Вернуться к Киберпанку/i)).not.toBeInTheDocument();
-    /* Egypt card explains 3D isometric map weight and reduced-motion support, and previews contain no SVG <text>. */
-    expect(within(dialog).getByText('Uses a 3D isometric map that is heavier on older or low-spec machines. Respects reduced motion.')).toBeInTheDocument();
+    /* Egypt card explains the game world's weight and reduced-motion support, and previews contain no SVG <text>. */
+    expect(within(dialog).getByText('Uses an isometric game world that is heavier on older or low-spec machines. Respects reduced motion.')).toBeInTheDocument();
+    expect(dialog.textContent).not.toMatch(/3D/);
     expect(dialog.querySelectorAll('.skin-preview svg text')).toHaveLength(0);
     /* Papyrus map-grain toggle appears under Egypt and leaves no trace when switching back. */
     const grain = within(dialog).getByRole('checkbox', { name: 'Papyrus grain on map background' });
@@ -253,7 +261,7 @@ describe('the collection of a person\'s own skins', () => {
     const user = userEvent.setup();
     renderShell();
     const dialog = await openThemes(user);
-    const add = within(dialog).getByRole('button', { name: 'Add from file' });
+    const add = within(dialog).getByRole('button', { name: 'Upload theme' });
     expect(input(dialog)).not.toHaveAttribute('multiple');
     await addFile(user, dialog, skinText(own('Dusk')));
     expect(within(dialog).getByRole('status')).toHaveTextContent('“Dusk” was added. You can now apply it.');
@@ -263,7 +271,7 @@ describe('the collection of a person\'s own skins', () => {
     await addFile(user, dialog, skinText(own('Cyberpunk', '#121212')), 'cyberpunk.json');
     expect(within(dialog).getByRole('status')).toHaveTextContent('“Cyberpunk (2)” was added.');
     expect(titles(dialog)).toEqual(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Ancient Egypt', 'Dusk', 'Dawn', 'Dusk (2)', 'Cyberpunk (2)']);
-    expect(within(dialog).queryByText('No custom skins yet')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('No custom themes yet')).not.toBeInTheDocument();
     const dawn = cards(dialog)[6]!;
     expect(within(dawn).getByText('Custom')).toBeInTheDocument();
     expect(within(dawn).getByText('A skin from your file.')).toBeInTheDocument();
@@ -298,7 +306,7 @@ describe('the collection of a person\'s own skins', () => {
     ['text hard to read', () => skinText({ ...own('Dim'), colors: { ...own('Dim').colors, muted: '#30363F' } }), 'Text in “muted” is hard to read on “bg”. Change one of the colors and add the file again.'],
     ['a base that is no skin', () => JSON.stringify({ ...JSON.parse(skinText(own('Neon'))), base: 'neon' }), 'The base field needs a built-in skin: cyberpunk, light, matrix, pixel, egypt. Fix the field and add the file again.'],
     ['a see-through text colour', () => skinText({ ...own('Glass'), colors: { ...own('Glass').colors, ink: 'rgba(227, 234, 241, .5)' } }), 'The colors.ink field needs a solid color: only dot, glow, hud, shadow, scrim may be see-through. Fix the field and add the file again.'],
-  ])('refuses %s with what to fix, keeps the collection and the skin on, and gives focus back to Add from file', async (_what, body, words) => {
+  ])('refuses %s with what to fix, keeps the collection and the skin on, and gives focus back to Upload theme', async (_what, body, words) => {
     const user = userEvent.setup();
     renderShell();
     const dialog = await openThemes(user);
@@ -311,7 +319,7 @@ describe('the collection of a person\'s own skins', () => {
     expect(alert).toHaveAttribute('data-tone', 'alert');
     expect(titles(dialog)).toEqual(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Ancient Egypt', 'Dusk']);
     expect(root.dataset.theme).toBe('custom-1');
-    expect(within(dialog).getByRole('button', { name: 'Add from file' })).toHaveFocus();
+    expect(within(dialog).getByRole('button', { name: 'Upload theme' })).toHaveFocus();
   });
 
   it('says the browser could not keep the skin and adds nothing', async () => {
@@ -340,7 +348,7 @@ describe('the collection of a person\'s own skins', () => {
     expect(within(dialog).getByRole('status')).toHaveTextContent('Reading the file. Your other skins are still available.');
     expect(within(dialog).getByRole('button', { name: 'Apply: Light' })).toBeEnabled();
     await act(async () => finish(skinText(own('Dusk'))));
-    expect(within(dialog).getByRole('button', { name: 'Add from file' })).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: 'Upload theme' })).toBeEnabled();
     expect(within(dialog).getByRole('status')).toHaveTextContent('“Dusk” was added.');
   });
 
@@ -395,13 +403,162 @@ describe('the collection of a person\'s own skins', () => {
   });
 });
 
+/* A theme the company uploaded as one archive (docs/theme-archive.md): the CEO uploads it, the server checks and keeps it,
+   and its card stands in the store with its licence, to be applied like any theme, or deleted after a second ask. */
+describe('themes uploaded as an archive', () => {
+  const BASE = '/api/themes/files/night-shift/1.0.0/';
+  /* The look of an archive: a skin with no id of a built-in one, here Pixel's on another ground. */
+  const pixel = builtinSkin('pixel')!;
+  const LOOK = { ...Object.fromEntries(Object.entries(pixel).filter(([key]) => key !== 'id')), colors: { ...pixel.colors, bg: '#0A0B0C' } };
+  const VIEW: InstalledThemeView = {
+    id: 'night-shift', version: '1.0.0', name: { en: 'Night shift', ru: 'Ночная смена' }, description: { en: 'For the night.', ru: 'Для ночи.' }, author: 'Test',
+    license: 'CC0-1.0', engine: 'none', languages: ['en', 'ru'], base: BASE, cover: null, shots: [], licenseFile: `${BASE}LICENSE`, hasWorld: false, worldLeftOut: null,
+    hasKit: false, size: 2048, installedAt: '2026-11-23T10:00:00.000Z',
+  };
+  const zip = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], 'night-shift.zip', { type: 'application/zip' });
+  const upload = (dialog: HTMLElement) => dialog.querySelector<HTMLInputElement>('input[data-upload-input]')!;
+
+  function renderStore(routes: Record<string, Parameters<typeof mockApi>[0][string]>, view: InstalledThemeView = VIEW) {
+    let themes: InstalledThemeView[] = [];
+    const calls = mockApi({
+      'GET /api/org': [200, ORG],
+      'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }],
+      'GET /api/world/theme': [200, { theme: 'cyberpunk', activePack: null, canEdit: true }],
+      'PUT /api/world/theme': body => [200, { theme: (body as { theme: string }).theme, activePack: null, canEdit: true }],
+      'GET /api/themes': () => [200, { themes }],
+      'POST /api/themes': () => {
+        themes = [view];
+        return [201, { themes }];
+      },
+      'GET /api/themes/night-shift/look': [200, { id: VIEW.id, version: VIEW.version, base: BASE, look: LOOK, fonts: [], kit: null, world: null }],
+      'DELETE /api/themes/night-shift': () => {
+        themes = [];
+        return [200, { themes }];
+      },
+      ...routes,
+    });
+    render(
+      <LanguageProvider>
+        <Shell me={ME} onSignOut={() => {}} />
+      </LanguageProvider>,
+    );
+    return calls;
+  }
+
+  afterEach(() => forgetInstalledTheme(VIEW.id));
+
+  it('installs an archive the CEO uploads: its card comes into the store with its licence, focused, and applies like any theme', async () => {
+    const user = userEvent.setup();
+    const calls = renderStore({});
+    const dialog = await openThemes(user);
+    await user.upload(upload(dialog), zip);
+    const card = await within(catalog(dialog)).findByText('Night shift');
+    const item = card.closest('li')!;
+    expect(within(dialog).getByRole('status')).toHaveTextContent('Night shift is installed. Apply it in its card to turn it on for the company.');
+    expect(within(item).getByText('Uploaded')).toBeInTheDocument();
+    const licence = within(item).getByRole('link', { name: 'License: CC0-1.0' });
+    expect([licence.getAttribute('href'), licence.getAttribute('target'), licence.getAttribute('rel')]).toEqual([`${BASE}LICENSE`, '_blank', 'noopener noreferrer']);
+    expect(within(item).getByRole('button', { name: 'Apply: Night shift' })).toHaveFocus();
+    expect(labels(item)).toEqual(['Apply: Night shift', 'Remove: Night shift']);
+    expect(calls.filter(call => call.method === 'POST').map(call => call.path)).toEqual(['/api/themes']);
+
+    await user.click(within(item).getByRole('button', { name: 'Apply: Night shift' }));
+    expect(calls.filter(call => call.method === 'PUT' && call.path === '/api/world/theme').map(call => call.body)).toEqual([{ theme: 'night-shift' }]);
+    expect(root.dataset.theme).toBe('night-shift');
+    expect(root.style.getPropertyValue(COLOR_TOKENS.bg)).toBe('#0A0B0C');
+  });
+
+  it('says what is wrong with a refused archive and where, and gives the focus back to Upload theme', async () => {
+    const user = userEvent.setup();
+    renderStore({
+      'POST /api/themes': [422, { error: { code: 'validation', message: 'Refused.', reason: 'theme_refused', details: { problem: { code: 'file_script', path: 'ui/kit/run.js' } } } }],
+    });
+    const dialog = await openThemes(user);
+    await user.upload(upload(dialog), zip);
+    const alert = await within(dialog).findByRole('alert');
+    expect(alert).toHaveTextContent('The theme was not installed');
+    expect(alert).toHaveTextContent('ui/kit/run.js is a script, a page or a style sheet. A theme holds no code: remove it.');
+    expect(within(dialog).getByRole('button', { name: 'Upload theme' })).toHaveFocus();
+    expect(within(catalog(dialog)).queryByText('Night shift')).toBeNull();
+  });
+
+  it('deletes an uploaded theme only after a second ask, and a theme that was on gives way to Cyberpunk', async () => {
+    const user = userEvent.setup();
+    const calls = renderStore({});
+    const dialog = await openThemes(user);
+    await user.upload(upload(dialog), zip);
+    await user.click(await within(dialog).findByRole('button', { name: 'Apply: Night shift' }));
+    const item = within(catalog(dialog)).getByText('Night shift').closest('li')!;
+    await user.click(within(item).getByRole('button', { name: 'Remove: Night shift' }));
+    const ask = within(item).getByRole('group', { name: 'Delete Night shift with all its files? If it is on, the company goes back to Cyberpunk.' });
+    await user.click(within(ask).getByRole('button', { name: 'Keep it' }));
+    expect(calls.some(call => call.method === 'DELETE')).toBe(false);
+    await user.click(within(item).getByRole('button', { name: 'Remove: Night shift' }));
+    await user.click(within(item).getByRole('button', { name: 'Delete theme' }));
+    expect(calls.filter(call => call.method === 'DELETE').map(call => call.path)).toEqual(['/api/themes/night-shift']);
+    expect(within(catalog(dialog)).queryByText('Night shift')).toBeNull();
+    expect(within(dialog).getByRole('status')).toHaveTextContent('Night shift is deleted.');
+    expect(skinsState().active).toBe('cyberpunk');
+  });
+
+  /* Uploaded themes are the company's own: they stand with a person's own skins under Custom, not among the built-in ones. */
+  it('puts an uploaded theme in the Custom group, and says there are no custom themes only while there are none', async () => {
+    const user = userEvent.setup();
+    renderStore({});
+    const dialog = await openThemes(user);
+    expect(within(dialog).getByText('No custom themes yet')).toBeInTheDocument();
+    await user.upload(upload(dialog), zip);
+    await within(catalog(dialog)).findByText('Night shift');
+    expect(within(dialog).queryByText('No custom themes yet')).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Custom' }));
+    expect(titles(dialog)).toEqual(['Night shift']);
+    await user.click(within(dialog).getByRole('button', { name: 'Classic' }));
+    expect(titles(dialog)).toEqual(['Cyberpunk', 'Light', 'Matrix', 'Pixel']);
+    await user.click(within(dialog).getByRole('button', { name: 'Game worlds' }));
+    expect(titles(dialog)).toEqual(['Ancient Egypt']);
+  });
+
+  /* A person gets a world with all its own art or none (#1972): the store kept this theme as its interface alone. */
+  it('shows a world theme installed without its world as interface only, says why on its card, and puts on no world', async () => {
+    const user = userEvent.setup();
+    renderStore({}, { ...VIEW, engine: 'iso2d', hasWorld: false, worldLeftOut: 'art_missing' });
+    const dialog = await openThemes(user);
+    await user.upload(upload(dialog), zip);
+    const item = (await within(catalog(dialog)).findByText('Night shift')).closest('li')!;
+    expect(within(item).getByText('Uploaded')).toBeInTheDocument();
+    expect(within(item).getByText('Interface only: its world does not bring all its own art, so the company keeps the schematic map.')).toBeInTheDocument();
+    expect(item.querySelector('.skin-perf-note')).toBeNull();
+    await user.click(within(item).getByRole('button', { name: 'Apply: Night shift' }));
+    expect(root.dataset.theme).toBe('night-shift');
+    expect(root.dataset.world).toBeUndefined();
+    await user.click(within(dialog).getByRole('button', { name: 'Game worlds' }));
+    expect(titles(dialog)).toEqual(['Ancient Egypt']);
+  });
+
+  it('takes a skin file through the same Upload theme, kept in this browser and never sent to the server', async () => {
+    const user = userEvent.setup();
+    const calls = renderStore({});
+    const dialog = await openThemes(user);
+    await user.upload(upload(dialog), file(skinText(own('Dusk'))));
+    expect(within(dialog).getByRole('status')).toHaveTextContent('“Dusk” was added. You can now apply it.');
+    expect(within(dialog).getByRole('button', { name: 'Upload theme' })).toHaveFocus();
+    expect(calls.filter(call => call.method === 'POST')).toEqual([]);
+    await user.click(within(dialog).getByRole('button', { name: 'Custom' }));
+    expect(titles(dialog)).toEqual(['Dusk']);
+  });
+});
+
 describe('the guide in the Themes section', () => {
-  it('gives three steps, a request for an AI to copy and why the layout stays, in English', async () => {
+  it('says what each kind of theme holds, links the guide in a new tab, and gives a request for an AI to copy, in English', async () => {
     const user = userEvent.setup();
     renderShell();
     const dialog = await openThemes(user);
-    const guide = within(dialog).getByRole('region', { name: 'Your own skin in a minute' });
-    expect(within(guide).getAllByRole('listitem').map(step => step.textContent)).toEqual(en.skins.steps);
+    const guide = within(dialog).getByRole('region', { name: 'Make your own theme: interface only, or a whole world' });
+    expect(within(guide).queryAllByRole('listitem')).toEqual([]);
+    expect(guide).toHaveTextContent(en.skins.guideText);
+    const link = within(guide).getByRole('link', { name: 'Open the theme guide' });
+    expect([link.getAttribute('href'), link.getAttribute('target'), link.getAttribute('rel')]).toEqual([THEME_GUIDE_URL, '_blank', 'noopener noreferrer']);
+    expect(THEME_GUIDE_URL).toBe('https://github.com/Invariant0x/hornhoof/blob/main/docs/theme-archive.md');
     expect(guide).toHaveTextContent('The grid, spacing and button sizes stay the same in every theme. Words and actions keep their places.');
     await user.click(within(guide).getByRole('button', { name: 'Copy request for AI' }));
     expect(within(guide).getByRole('status')).toHaveTextContent('Request copied');
@@ -426,7 +583,13 @@ describe('the guide in the Themes section', () => {
     expect(within(dialog).getByText('Встроенная · По умолчанию')).toBeInTheDocument();
     expect(state(cards(dialog)[0]!)).toHaveTextContent('Включена');
     expect(within(dialog).getByRole('button', { name: 'Включить: Светлая' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('region', { name: 'Свой скин за минуту' })).toBeInTheDocument();
+    const guide = within(dialog).getByRole('region', { name: 'Своя тема: только интерфейс или целый мир' });
+    expect(within(guide).getByRole('link', { name: 'Открыть руководство по темам' })).toHaveAttribute('href', THEME_GUIDE_URL);
+    expect(within(dialog).getByRole('button', { name: 'Игровые миры' })).toBeInTheDocument();
+    expect(within(dialog).getByText('Встроенная · Игровой мир')).toBeInTheDocument();
+    expect(within(dialog).getByText('Своих тем пока нет')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Загрузить тему' })).toBeInTheDocument();
+    expect(dialog.textContent).not.toMatch(/3D/);
     expect(within(dialog).getByRole('button', { name: 'Скопировать просьбу для ИИ' })).toBeInTheDocument();
     await addFile(user, dialog, JSON.stringify({ ...JSON.parse(skinText(own('Плохой'))), cut: 3 }), 'bad.json');
     expect(within(dialog).getByRole('alert')).toHaveTextContent('Не удалось добавить скинВ поле cut нужно число от 0 до 1,5. Исправьте поле и добавьте файл снова.');
@@ -453,7 +616,12 @@ describe('the look of the Themes section', () => {
     expect(decl('.skins .btn', 'min-height')).toBe('44px');
     expect(decl('.skins .btn', 'white-space')).toBe('normal');
     expect(decl('.skin-card-head', 'flex-wrap')).toBe('wrap');
-    expect(decl('.skins-add .btn', 'width')).toBe('180px');
+    /* The heading's text and the hint on top, then the one button under them at the end edge (Design, #1960), the hint
+       a step of the 8 px scale above it, out of the way of its focus ring. */
+    expect(decl('.skins-head', 'display')).toBe('grid');
+    expect(decl('.skins-adds', 'justify-items')).toBe('end');
+    expect(decl('.skins-adds', 'gap')).toBe('8px');
+    expect(decl('.skins-adds .btn', 'width')).toBe('180px');
     expect(decl('.swap-label > .sizer', 'visibility')).toBe('hidden');
     /* The line of what was done marks its kind at its start only: the shared .status and .alert classes would frame it. */
     expect(decl('.skins-notice', 'border-inline-start')).toBe('4px solid var(--line2)');

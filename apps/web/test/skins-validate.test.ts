@@ -189,6 +189,12 @@ describe('the safety check of a skin file', () => {
     expect(refused(file(raw => (colors(raw).line2 = '#42425C')))).toEqual({ code: 'faint_line', key: 'line2', value: 'bg' });
   });
 
+  /* A button reads as a button only by its edge: its fill stands out from what it stands on at 3:1 (WCAG 1.4.11), or a
+     person sees words with no control around them (Design, #1960). */
+  it('refuses a button whose fill fades into the ground it stands on, as a faint edge', () => {
+    expect(refused(file(raw => Object.assign(colors(raw), { button: '#3A4250', on_button: '#FFFFFF' })))).toEqual({ code: 'faint_line', key: 'button', value: 'bg' });
+  });
+
   it('refuses glass so thin that muted text on it fades over a white or a black page under it', () => {
     expect(refused(file(raw => (colors(raw).hud = 'rgba(26, 26, 43, .3)')))).toEqual({ code: 'low_contrast', key: 'muted', value: 'hud' });
     expect(refused(file(raw => (colors(raw).hud = 'rgba(255, 255, 255, .9)')))).toEqual({ code: 'low_contrast', key: 'muted', value: 'hud' });

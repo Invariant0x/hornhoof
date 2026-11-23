@@ -40,6 +40,8 @@ function viewOf(row: ThemeRow, files: readonly string[]): InstalledThemeView {
     shots: [1, 2, 3, 4, 5, 6].map(n => picture(`shot-${n}`)).filter((path): path is string => path !== undefined).map(path => base + path),
     licenseFile: base + licence,
     hasWorld: row.world !== null,
+    /* A theme stored without the world it declares had its world left out at the check: only for a lack of its art. */
+    worldLeftOut: manifest.engine !== 'none' && row.world === null ? 'art_missing' : null,
     hasKit: row.kit !== null,
     size: row.size,
     installedAt: row.installedAt.toISOString(),

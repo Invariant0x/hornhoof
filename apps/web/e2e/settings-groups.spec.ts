@@ -106,7 +106,7 @@ async function layout(page: Page) {
     const small = targets.filter(shown).filter(target => Math.round(target.getBoundingClientRect().height) < 44).map(say);
     /* The last button of each row of actions ends where the column ends; on a skin's card, where the card's content ends. */
     const edge: string[] = [];
-    for (const row of group.querySelectorAll(':is(.settings-actions, .repo-actions, .skins-add)')) {
+    for (const row of group.querySelectorAll(':is(.settings-actions, .repo-actions, .skins-adds)')) {
       const buttons = [...row.querySelectorAll(':scope > .btn, :scope > .entry-actions > .btn')].filter(shown);
       const last = buttons.at(-1);
       if (last && Math.abs(end(last.getBoundingClientRect()) - end(main)) > 1) edge.push(say(last));
@@ -239,8 +239,9 @@ async function tonesOf(page: Page) {
   });
 }
 
-/* Checks a group the person has, and waits for what it holds. */
-async function checkGroup(page: Page, t: Messages, group: GroupId, look: string) {
+/* Checks a group the person has, and waits for what it holds. ownSkins: the skins of the person's own in the company's
+   collection, each with its pink Remove last of its card's row. */
+async function checkGroup(page: Page, t: Messages, group: GroupId, look: string, ownSkins = 0) {
   const dialog = page.getByRole('dialog', { name: t.settings.title, exact: true });
   if (group === 'profile') await expect(dialog.getByRole('textbox', { name: t.common.name, exact: true })).toBeVisible();
   if (group === 'appearance') {
@@ -269,7 +270,10 @@ async function checkGroup(page: Page, t: Messages, group: GroupId, look: string)
   if (group === 'passwords') await expect(dialog.getByText(t.vault.none, { exact: true })).toBeVisible();
   if (group === 'company') {
     await expect(dialog.getByRole('link', { name: 'https://acme.hornhoof.org', exact: true })).toBeVisible();
-    expect((await tonesOf(page)).danger, `${look}: Remove link is pink, last of its row`).toEqual([[t.settings.remove, true, true]]);
+    expect((await tonesOf(page)).danger, `${look}: Remove link and each own skin's Remove are pink, last of their rows`).toEqual([
+      [t.settings.remove, true, true],
+      ...Array.from({ length: ownSkins }, () => [t.skins.remove, true, true]),
+    ]);
     await expect(dialog.getByRole('heading', { name: t.repoHost.title, exact: true })).toHaveCount(0);
     const grid = await skinGrid(page);
     expect(grid.columns, `${look}: ${grid.room} px of room`).toBe(grid.room >= 560 ? 2 : 1);
@@ -394,7 +398,7 @@ for (const skin of SKINS) for (const width of RTL_WIDTHS) {
     const grid = await skinGrid(page);
     expect(grid.widths).toHaveLength(6);
     await expect(dialog.locator('.skin-card .btn:not(.ghost)')).toHaveCount(0);
-    await checkGroup(page, ru, 'company', `${look} six skins`);
+    await checkGroup(page, ru, 'company', `${look} six skins`, 1);
     await shot(page, info, `settings-skins-6-${look}`);
     expect(problems).toEqual([]);
   });

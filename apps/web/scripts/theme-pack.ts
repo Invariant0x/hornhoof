@@ -5,14 +5,14 @@
      npx tsx apps/web/scripts/theme-pack.ts egypt --kit <a kit's pack folder> --fonts <a fonts folder> \
        --display-font "El Messiri" --body-font "Fira Sans" [--id egypt-gold --name-en ... --name-ru ...] --out egypt.zip
    A world whose art is licensed apart from the repository (#105) takes its art and its licence from outside it; without
-   --art the world has no pictures and the engine draws its placeholders. So does a painted kit (#1970): --kit names its
-   pack folder (kit.json beside its pictures, and its LICENSE.md, the theme's licence unless --licence gives one), and
-   --fonts a folder of fonts.json in the archive's form, the font files it names and their *-OFL.txt licences; the fonts
-   head the look's display and body stacks. --id and the names pack a second theme of the same look, such as a second
-   kit of it. */
+   --art the world has no pictures, and the theme installs as its interface alone (docs/theme-archive.md, 4.2). A painted
+   kit (#1970) comes from outside the repository too: --kit names its pack folder (kit.json beside its pictures, and its
+   LICENSE.md, the theme's licence unless --licence gives one), and --fonts a folder of fonts.json in the archive's form,
+   the font files it names and their *-OFL.txt licences; the fonts head the look's display and body stacks. --id and the
+   names pack a second theme of the same look, such as a second kit of it. */
 
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { en } from '../src/i18n/en';
@@ -20,6 +20,7 @@ import { ru } from '../src/i18n/ru';
 import { BUILTIN_SKINS, type BuiltinSkin, type BuiltinSkinId } from '../src/skins/registry';
 import { dataOfWorldPack } from '../src/world-packs/data-pack';
 import { resolveWorldPack } from '../src/world-packs/registry';
+import type { WorldPackManifest } from '../src/world/manifest';
 
 type Lang = Readonly<{ en: string; ru: string }>;
 /* The words of a world's voice and its era names, as skills/world.json holds them. */
@@ -29,7 +30,8 @@ export type PackOptions = Readonly<{
   kit?: string | null; fonts?: string | null; displayFont?: string; bodyFont?: string; id?: string; names?: Lang;
 }>;
 
-const REPO = fileURLToPath(new URL('../../../', import.meta.url));
+/* From this file's own path: Vite reads new URL(..., import.meta.url) as a web asset when the screens' tests load it. */
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const json = (value: unknown) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
 
 /* The server's world voice of a pack it ships, read from its source: the web's type check covers web files only. */
@@ -105,27 +107,36 @@ export function themeArchiveFiles(id: BuiltinSkinId, options: PackOptions = {}):
   }
   const licence = options.licence ? readFileSync(options.licence) : kit?.licence ?? null;
   const files = new Map<string, Buffer>();
-  files.set('theme.json', json({
+  files.set('theme.json', json(manifestOf(id, Boolean(pack), Boolean(licence), options)));
+  files.set('LICENSE', licence ?? readFileSync(join(REPO, 'LICENSE')));
+  files.set('ui/look.json', json(look));
+  for (const [path, bytes] of [...(fonts?.files ?? []), ...(kit?.files ?? [])]) files.set(path, bytes);
+  if (pack) for (const [path, bytes] of worldFiles(pack, options)) files.set(path, bytes);
+  return files;
+}
+
+function manifestOf(id: BuiltinSkinId, world: boolean, ownLicence: boolean, options: PackOptions): Record<string, unknown> {
+  return {
     format: 1,
     id: options.id ?? id,
     name: options.names ?? { en: en.skins.names[id], ru: ru.skins.names[id] },
     description: { en: en.skins.descs[id], ru: ru.skins.descs[id] },
     version: options.version ?? '1.0.0',
     author: 'Hornhoof',
-    license: licence ? 'see LICENSE' : 'MIT',
-    contract: pack ? { ui: 1, world: 2 } : { ui: 1 },
-    engine: pack ? 'iso2d' : 'none',
+    license: ownLicence ? 'see LICENSE' : 'MIT',
+    contract: world ? { ui: 1, world: 2 } : { ui: 1 },
+    engine: world ? 'iso2d' : 'none',
     languages: ['en', 'ru'],
-  }));
-  files.set('LICENSE', licence ?? readFileSync(join(REPO, 'LICENSE')));
-  files.set('ui/look.json', json(look));
-  for (const [path, bytes] of [...(fonts?.files ?? []), ...(kit?.files ?? [])]) files.set(path, bytes);
-  if (pack) {
-    files.set('world/world.json', json(dataOfWorldPack(pack)));
-    for (const [path, bytes] of options.art ? artFiles(options.art) : []) files.set(path, bytes);
-    if (options.voice) files.set('skills/world.json', json(options.voice));
-  }
-  return files;
+  };
+}
+
+/* A world's data, its art when it is given from outside the repository, and its voice. */
+function worldFiles(pack: WorldPackManifest, options: PackOptions): [string, Buffer][] {
+  return [
+    ['world/world.json', json(dataOfWorldPack(pack))],
+    ...(options.art ? artFiles(options.art) : []),
+    ...(options.voice ? [['skills/world.json', json(options.voice)] as [string, Buffer]] : []),
+  ];
 }
 
 /* A plain zip of the files, deflated, with no dates, so the same theme always packs to the same bytes. */

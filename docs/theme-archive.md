@@ -80,7 +80,7 @@ The interface's colours, fonts and corners. It is the skin of Hornhoof's theme s
 * `scheme` is `dark` or `light`.
 * `colors` names every colour role of the theme sheet. The example above is shortened; the full list of 35 roles is `COLOR_TOKENS` in `apps/web/src/skins/roles.ts`, and the store's sample skin file names them all.
   * A colour is `#RRGGBB`, `#RGB` or `rgb()` / `rgba()`. Only the roles drawn over something else may be see-through: `dot`, `glow`, `hud`, `shadow` and `scrim`.
-  * Text must stand out from what it stands on: 4.5:1 for text and 3:1 for lines. The upload is checked as an own skin file is checked.
+  * Text must stand out from what it stands on: 4.5:1 for text, 3:1 for lines and 3:1 for the fill of a button, which is its edge. The upload is checked as an own skin file is checked.
 * `fonts` gives the three stacks, `display`, `body` and `mono`. Each may name the fonts Hornhoof ships, a family of `ui/fonts.json`, and the generic families (`sans-serif`, `serif`, `monospace`, `system-ui`). A stack ends with a generic family.
 * `cut` is how far the corners are cut, from 0 to 1.5. `shape` is `bevel` or `steps`.
 * `surface` is how panels are drawn: `plain`, or a surface style Hornhoof ships (`papyrus`).
@@ -145,7 +145,7 @@ A kit's pack folder goes into the archive as it is, but for two files: its `kit.
   | `size` | one or two of: a number with `px` or `%`, `auto`, `calc(100% - Npx)`: `96px 96px`, `100% 100%`, `calc(100% - 20px) 5px` |
 
 * `pack` and `licence` are text for people, up to 80 characters each; Hornhoof keeps them and reads neither.
-* A kit colour is `#RRGGBB`, under one of the 7 names the screens read (`THEME_KIT_COLORS`): `tab-ink`, `tab-on-ink`, `chip-on-ink`, `danger-ink`, `badge-ink`, `scroll-thumb`, `scroll-track`.
+* A kit colour is `#RRGGBB`, under one of the 8 names the screens read (`THEME_KIT_COLORS`): `tab-ink`, `tab-on-ink`, `chip-on-ink`, `danger-ink`, `danger-on-ink` (the light label on the danger plates), `badge-ink`, `scroll-thumb`, `scroll-track`.
 
 Anything else is refused, with the value's place and the form it should have: a slot, colour or key the kit does not have, a value of another form, a picture no slot names, or a slot whose picture is not there. So a kit can never carry CSS, a script or a link. A vector picture (`.svg`, `.svgz`) is refused in the kit as anywhere else (section 9). The rules the kit's guide gives for the pictures themselves (a state of the same size and slice as its normal picture, a slice that leaves a middle, the 1.5 MB budget of a pack) are for its author and `kitcheck.py`; Hornhoof holds a kit to its forms and to the limits of section 8.
 
@@ -194,7 +194,9 @@ The art folder as the world art contract asks (`apps/web/src/world/ARTIST_CONTRA
 * buildings, people, loops and flags, each picture with its passport JSON beside it;
 * ground textures, transitions, liquid, roads, decals and plants, at the paths `world.json` names.
 
-Hornhoof runs the same art check as `world-art-index.ts` on it and writes `art-index.json` itself. An `art-index.json` in the archive is ignored. A file the check rejects refuses the archive, with the check's own words. A slot with no file keeps its placeholder, as everywhere.
+Hornhoof runs the same art check as `world-art-index.ts` on it and writes `art-index.json` itself. An `art-index.json` in the archive is ignored. A file the check rejects refuses the archive, with the check's own words.
+
+**A world comes with all its own art, or the theme is its interface alone.** A person never gets a world the engine fills with its placeholders. So a world is kept only when its art catalog (`art` in `world.json`) has pictures for every kind of building the city grows (`residence`, `monument`, `department`, `district_hub`, `supply`, `house`, `statue`, `flophouse`) and for its residents, and the archive holds every picture the catalog marks as required. A theme whose world falls short is still installed: as its interface alone, without its world, its art or its voice and era names (section 5), and the company keeps the schematic map. Its card in the store says so (`worldLeftOut: "art_missing"` in `GET /api/themes`). The world is still checked whole, so a world that is wrong, not only short of art, refuses the archive.
 
 Art is PNG, RGBA, sRGB, with straight alpha. The size standard (master 4x tier):
 
@@ -261,6 +263,8 @@ Plain UTF-8 text, up to 64 KB, required. It covers everything in the archive. A 
 | How much one file grows when unpacked | 100 times its packed size |
 | A path | 200 characters, folders and names of Latin letters, digits, `.`, `_`, `-` and `@` |
 | A JSON file | 1 MB (`world/world.json` 2 MB, a passport 64 KB) |
+| A string in a JSON file | 1 000 characters, one line |
+| A world's map | 512 tiles a side, in chunks of 2 to 64 tiles, at most 128 chunks a side; zoom 0.25 to 4; a tile picture at most 1024 px wide; any number at most 10 000 |
 | A picture | PNG or WebP, up to 8192 px a side and 50 million pixels |
 | A picture of the kit | PNG or WebP, up to 2 MB |
 | A font | WOFF2, up to 2 MB, at most 24 |
@@ -273,13 +277,15 @@ Each of these refuses the whole archive. The store names the reason and the file
 * A file of a kind the archive has no place for, in particular any script, style sheet or page (`.js`, `.mjs`, `.css`, `.html`, `.svg` and the like), wherever it stands, or a file whose bytes are not what its name says.
 * A file over its limit, or one that unpacks to more than its header says.
 * JSON that is not of the shape this document gives, a key no part knows, or a value that reads as code (3.1).
-* A link to anything outside the archive.
+* Text a person cannot see whole: a control or format character, an invisible or private one, a variation selector, a line or paragraph separator. A text file (`LICENSE`, `ui/NOTES.md`, a font's licence) keeps its tabs and line breaks; a string in a JSON file is one line.
+* A link to anything outside the archive, in any string of a JSON file. A text file may name an address, as a licence does: it is served as plain text only, and nothing opens it.
 * A world that the world pack check or the art check refuses (4.1, 4.2), or skills that the world skill check refuses (5).
 
 ## 10. Turning a theme on, off and deleting it
 
-* Uploading installs the theme for the company. It does not turn it on.
-* The CEO turns a theme on for the whole company in Settings, Themes. Hornhoof applies the look, loads the fonts, draws the world, and gives agents the world's names.
+* The CEO uploads a theme in Settings, Company & access, Themes, with the one button Upload theme. It takes a `.zip` theme archive, sent to the server and checked there, or a skin file (`.json`), which stays in that person's browser. A refused archive leaves the store as it was and says what is wrong and in which file.
+* Uploading installs the theme for the company. It does not turn it on. Its card joins the store under Custom, with its licence linked, and focus goes to its Apply.
+* The CEO turns a theme on for the whole company in Settings, Themes. Hornhoof applies the look, loads the fonts, draws the world, and gives agents the world's names. A theme kept as its interface alone (4.2) says so on its card, and the company keeps the schematic map.
 * Turning it off means choosing another theme. The look goes back to that theme, the map goes back to that theme's map, and agents get their own names back. Nothing of the theme stays in the interface.
 * Deleting a theme that is on turns it off first, back to Cyberpunk, and then removes all its files.
 
@@ -300,6 +306,6 @@ npx tsx apps/web/scripts/theme-pack.ts cyberpunk --out cyberpunk.zip
 npx tsx apps/web/scripts/theme-pack.ts egypt --art <the Egypt art folder> --licence <its licence> --out egypt.zip
 ```
 
-Without `--art` a world has no pictures, and the engine draws its placeholders. Packing writes no dates, so the same theme from the same commit always gives the same archive.
+Without `--art` a world has no pictures, so the theme installs as its interface alone (4.2). Packing writes no dates, so the same theme from the same commit always gives the same archive.
 
-The Egypt art never goes into this repository (#105). Its archive is built where the art is and installed on the server by upload, as any theme is.
+The Egypt art never goes into this repository. Its archive is built where the art is and installed on the server by upload, as any theme is.

@@ -158,12 +158,13 @@ describe('the contrast a skin must hold', () => {
     for (const bad of ['#FFF', '#FFFFFFFF', 'rgb(0, 0, 0)', 'rgba(256, 0, 0, 1)', 'rgba(0, 0, 0, 2)', 'red']) expect(readColor(bad), bad).toBeNull();
   });
 
-  it('checks text on the three surfaces, the three fills and the borders of controls, and names the first pair that fails', () => {
-    expect(CONTRAST_PAIRS).toHaveLength(11 * 3 + 3 + 3);
+  it('checks text on the three surfaces, the three fills, the borders of controls and the edge of a button, and names the first pair that fails', () => {
+    expect(CONTRAST_PAIRS).toHaveLength(11 * 3 + 3 + 3 + 3);
     const light = builtinSkin('light')!.colors;
     expect(weakPair({ ...light, muted: '#AAAAAA' })).toEqual({ text: 'muted', on: 'bg', least: 4.5, kind: 'text' });
     expect(weakPair({ ...light, on_attention: '#FFFFFF' })).toEqual({ text: 'on_attention', on: 'attention', least: 4.5, kind: 'text' });
     expect(weakPair({ ...light, line2: '#C0C8D0' })).toEqual({ text: 'line2', on: 'bg', least: 3, kind: 'line' });
+    expect(weakPair({ ...light, button: '#C8D4E0', on_button: '#101820' })).toEqual({ text: 'button', on: 'bg', least: 3, kind: 'line' });
     expect(weakPair({ ...light, ink: 'url(x)' })).toMatchObject({ text: 'ink' });
   });
 

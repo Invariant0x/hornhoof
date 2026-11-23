@@ -87,16 +87,21 @@ describe("an assistant's message", () => {
     expect(run.prompt).toContain("Max is the personal assistant of Sara and wrote this for Sara, at their request. Sara is responsible for your department.");
   });
 
-  it('answers the questions its owner takes, one about administering the company too, recorded as the assistant\'s', async () => {
+  /* Of two open questions, the words close the one they quote, and the last one by itself. */
+  it('answers the question its owner takes that its words name, one about administering the company too, recorded as the assistant\'s', async () => {
     const c = await company();
     const { task } = await createTask(c.app.ctx, { agentId: c.head.id }, { title: 'Leads', brief: '', body: 'Find leads.', departmentId: c.sales.id, assigneeAgentId: c.worker.id, executor: true });
     const work = (await ask(c.app.ctx, c.worker.id, task.id, { kind: 'question', text: 'Which region first?', topic: 'task' })).request;
     const machine = (await ask(c.app.ctx, c.worker.id, task.id, { kind: 'question', text: 'May I use the Mac mini?', topic: 'machines' })).request;
+    const saved = async (id: string) => (await c.db.select().from(requests).where(eq(requests.id, id)))[0]!;
     const ava = await assistantOf(c, c.ceo, c.owner.id);
     expect((await write(c, ava.key, c.worker.id, 'Start with Europe.')).statusCode).toBe(202);
-    const [answered] = await c.db.select().from(requests).where(eq(requests.id, work.id));
-    expect(answered).toMatchObject({ status: 'answered', answer: 'Start with Europe.', answeredBy: c.owner.id, answeredByAssistantId: ava.id });
-    expect((await c.db.select().from(requests).where(eq(requests.id, machine.id)))[0]).toMatchObject({ status: 'answered', answeredBy: c.owner.id, answeredByAssistantId: ava.id });
+    expect([(await saved(work.id)).status, (await saved(machine.id)).status]).toEqual(['open', 'open']);
+    expect((await write(c, ava.key, c.worker.id, '> Which region first?\nStart with Europe.')).statusCode).toBe(202);
+    expect(await saved(work.id)).toMatchObject({ status: 'answered', answer: '> Which region first?\nStart with Europe.', answeredBy: c.owner.id, answeredByAssistantId: ava.id });
+    expect((await saved(machine.id)).status).toBe('open');
+    expect((await write(c, ava.key, c.worker.id, 'Yes, use it.')).statusCode).toBe(202);
+    expect(await saved(machine.id)).toMatchObject({ status: 'answered', answer: 'Yes, use it.', answeredBy: c.owner.id, answeredByAssistantId: ava.id });
     const lines = await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'answered')));
     expect(lines.map(l => l.data)).toEqual(expect.arrayContaining([expect.objectContaining({ requestId: work.id, assistantId: ava.id }), expect.objectContaining({ requestId: machine.id, assistantId: ava.id })]));
   });

@@ -112,14 +112,18 @@ describe('cli theme-install', () => {
     expect(refused.code).toBe(1);
     const missing = await cli(['theme-install', file.archive, '--company', randomUUID(), '--log', file.log], { db, config });
     expect(missing.code).toBe(1);
+    /* An archive that is not there is logged as an attempt too. */
+    const gone = await cli(['theme-install', `${file.archive}.gone`, '--company', acme!.id, '--log', file.log], { db, config });
+    expect(gone.code).toBe(1);
     expect(await file.lines()).toEqual([
       expect.objectContaining({ companyId: acme!.id, sha256: file.sha256, result: 'refused', problem: { code: 'file_script', path: 'ui/kit/run.js' } }),
       expect.objectContaining({ result: 'refused', reason: 'There is no such company.' }),
+      expect.objectContaining({ companyId: acme!.id, archive: `${file.archive}.gone`, result: 'refused', reason: 'The archive cannot be read: ENOENT.' }),
     ]);
     /* With no company named it does nothing and writes nothing: it says how it is called. */
     const unnamed = await cli(['theme-install', file.archive, '--log', file.log], { db, config });
     expect([unnamed.code, unnamed.out]).toEqual([1, expect.stringContaining('theme-install <archive.zip> --company <company id>')]);
-    expect(await file.lines()).toHaveLength(2);
+    expect(await file.lines()).toHaveLength(3);
     expect(await db.select().from(themes)).toEqual([]);
   });
 });

@@ -561,9 +561,15 @@ export async function partStarted(ctx: Ctx, id: NodeIdentity, partId: string): P
 type PartEnd = 'passed' | 'failed' | 'refused';
 /* A node from before refusals had a word of their own says "failed" for a part its command guard stopped. Its part holds a
    start time all the same, from when the part was given to it, so the refusal is known by what the node says: no exit
-   code, and a log that is the guard's refusal, with Hornhoof's own sentence on its first or second line. */
+   code, and a log that is the guard's refusal and nothing else, from its first character, its mark on the first line and
+   Hornhoof's sentence on the second. A command never writes the first line of a log: the node writes "$ <command>" or
+   where the run stands there first, so no command's output passes for a refusal (#1953, Trinity's F1). */
 const OLD_REFUSAL = 'Hornhoof stopped this command before it started.';
-const oldRefusal = (log: string) => log.split('\n', 2).some(line => line.startsWith(OLD_REFUSAL));
+const OLD_MARK = 'запусти через run_tests';
+export function oldRefusal(log: string): boolean {
+  const lines = log.replace(/\s+$/, '').split('\n');
+  return (lines.length === 1 && lines[0]!.startsWith(OLD_REFUSAL)) || (lines.length === 2 && lines[0] === OLD_MARK && lines[1]!.startsWith(OLD_REFUSAL));
+}
 const refusedBefore = (msg: Pick<TestsDone, 'ok' | 'error' | 'exitCode' | 'log'>) =>
   !msg.ok && (msg.error === 'refused' || (msg.error === 'failed' && msg.exitCode === null && oldRefusal(msg.log)));
 function partEnd(run: Pick<Run, 'commitSha'>, msg: Pick<TestsDone, 'ok' | 'commit' | 'error' | 'exitCode' | 'log'>): { status: PartEnd; error: string | null } {

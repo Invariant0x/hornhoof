@@ -383,6 +383,14 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
 }
 
 /* Setup or an accepted invitation opens the orchestrator's first contact at once. */
+/* The company's theme on the page: a member gets it as it is; the CEO keeps a skin of their own until the company's theme
+   changes. */
+function putOnCompanyTheme(theme: string, isOwner: boolean, last: { current: string | null }): void {
+  const changed = last.current !== null && last.current !== theme;
+  last.current = theme;
+  if (!isOwner || changed || !skinsState().active.startsWith('custom-')) syncCompanySkin(theme);
+}
+
 export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: boolean; onSignOut: () => void }) {
   const t = useT();
   const isWorld = useWorld() !== 'standard';
@@ -418,18 +426,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
     let alive = true;
     /* A theme the company installed from an archive is read from the server before it goes on, and stands in place of a
        built-in one of its id; with none installed, the built-in one goes on. */
-    void loadInstalledTheme(companyTheme).then(() => {
-      if (!alive) return;
-      if (!me.person.isOwner) {
-        lastServerTheme.current = companyTheme;
-        syncCompanySkin(companyTheme);
-        return;
-      }
-      const changed = lastServerTheme.current !== null && lastServerTheme.current !== companyTheme;
-      const isCustom = skinsState().active.startsWith('custom-');
-      lastServerTheme.current = companyTheme;
-      if (changed || !isCustom) syncCompanySkin(companyTheme);
-    });
+    void loadInstalledTheme(companyTheme).then(() => alive && putOnCompanyTheme(companyTheme, me.person.isOwner, lastServerTheme));
     return () => {
       alive = false;
     };
