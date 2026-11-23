@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { heldLineage, readCompare, readMerged, readTree, treePaths } from '../src/modules/testruns/compare.js';
+import { heldLineage, readCompare, readMerged, readTree, readTreeSha, treePaths } from '../src/modules/testruns/compare.js';
+import { GitHubRateLimited } from '../src/modules/testruns/github-limit.js';
 import { exactComparison } from '../src/modules/tasks/review-context.js';
 import { branchHolds } from '../src/modules/tasks/turn-integration.js';
 
@@ -191,5 +192,33 @@ describe('a branch holds a commit, however many files lie between them', () => {
     expect(await branchHolds({ readMerged: async () => null, readCompare: async (_repo, refs) => capped(refs.base, refs.head) }, at, head, sha)).toBe(true);
     expect(await branchHolds({ readMerged: async () => null, readCompare: async () => capped(sha, 'd'.repeat(40)) }, at, head, sha)).toBe(false);
     expect(await branchHolds({ readMerged: async () => null, readCompare: async () => ({ complete: false, reason: 'not-an-ancestor' }) }, at, head, sha)).toBe(false);
+  });
+});
+
+describe('the tree a commit holds, by the id git gives it', () => {
+  const tree = 'e'.repeat(40);
+  it('reads the id of the tree of the commit, pinned to the commit and without following redirects', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ sha: tree, tree: [] })));
+    vi.stubGlobal('fetch', fetcher);
+    expect(await readTreeSha(repo, sha)).toBe(tree);
+    expect(fetcher.mock.calls[0][0]).toBe(`https://api.github.com/repos/acme/shop/git/trees/${sha}`);
+    expect(fetcher.mock.calls[0][1]).toMatchObject({ redirect: 'manual', headers: { authorization: `Bearer ${repo.token}` } });
+  });
+
+  it.each([
+    ['a name that is no commit id', async () => { vi.stubGlobal('fetch', vi.fn()); return readTreeSha(repo, 'main'); }],
+    ['an address that is not GitHub\'s', async () => { vi.stubGlobal('fetch', vi.fn()); return readTreeSha({ ...repo, url: 'https://gitlab.com/acme/shop' }, sha); }],
+    ['an answer with no tree id', async () => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ tree: [] })))); return readTreeSha(repo, sha); }],
+    ['an answer that is not a commit id', async () => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ sha: 'not-a-tree' })))); return readTreeSha(repo, sha); }],
+    ['a refusal', async () => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 }))); return readTreeSha(repo, sha); }],
+    ['a request that fails', async () => { vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('socket hang up'))); return readTreeSha(repo, sha); }],
+  ])('says none for %s, so no commit is taken for one that holds the same files', async (_name, read) => {
+    expect(await read()).toBeNull();
+  });
+
+  it('stops at a used-up request limit instead of taking it for a tree it could not read', async () => {
+    const reset = String(Math.floor(Date.parse('2026-11-23T20:00:00Z') / 1000));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 403, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': reset } })));
+    await expect(readTreeSha(repo, sha)).rejects.toBeInstanceOf(GitHubRateLimited);
   });
 });

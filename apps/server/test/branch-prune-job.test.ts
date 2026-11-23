@@ -5,6 +5,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { archiveRef } from '../src/modules/repos/prune-run.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { pruneCompany } from '../src/modules/repos/prune-job.js';
+import { GitHubRateLimited } from '../src/modules/testruns/github-limit.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 import { prepareTemplates } from './templates-once.js';
 import { serveEach, type Repository } from './turn-release-fixture.js';
@@ -107,6 +108,23 @@ describe('pruning the repositories of a company by its records', () => {
     expect(f.repo.heads['release-checks-x']).toBeUndefined();
     expect(f.repo.heads['scratch-by-hand']).toBe(M1);
     expect(f.repo.heads[f.branch]).toBe(T1);
+  });
+
+  it('keeps a branch whose comparison GitHub could not make, and stops where its request limit is used up', async () => {
+    const f = await company();
+    const number = await withTask(f, 'Closed', { status: 'done', closedDaysAgo: 1 });
+    f.repo.heads[`task-${number}`] = U1;
+    for (const readMerged of [async () => { throw new Error('GitHub did not answer'); }, undefined, async () => null]) {
+      f.ctx.readMerged = readMerged;
+      const [run] = await pruneCompany(f.ctx, { companyId: f.task.companyId, apply: true });
+      expect(run!.result.entries).toEqual([]);
+      expect(run!.result.verdicts.find(v => v.branch === `task-${number}`)).toMatchObject({ action: 'keep', reason: expect.stringContaining('could not be read') as unknown });
+    }
+    f.ctx.readMerged = async () => { throw new GitHubRateLimited({ remaining: 0, resetAt: Date.parse('2026-11-23T20:00:00Z') }); };
+    const [limited] = await pruneCompany(f.ctx, { companyId: f.task.companyId, apply: true });
+    expect(limited!.result.stopped).toEqual({ why: 'limit', resetAt: '2026-11-23T20:00:00.000Z' });
+    expect(f.pushed).toEqual([]);
+    expect(f.repo.heads[`task-${number}`]).toBe(U1);
   });
 
   it('prunes nothing of a repository it could not read whole, and says why', async () => {

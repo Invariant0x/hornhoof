@@ -1,6 +1,8 @@
+import type { ServerResponse } from 'node:http';
 import { describe, expect, it } from 'vitest';
 import { pushRefs } from '../src/modules/repos/ref-push.js';
-import { git, headOf, host, origin } from './git-origin.js';
+import { pktLine } from '../src/modules/testruns/refs.js';
+import { git, headOf, host, origin, RESULT } from './git-origin.js';
 
 const refOf = (dir: string, ref: string): string | null => {
   try { return git(dir, 'rev-parse', '--verify', '--quiet', ref); } catch { return null; }
@@ -95,5 +97,33 @@ describe('changing refs of a repository by a push git itself takes', () => {
     expect(answer).toEqual({ problem: expect.stringMatching(/403/) as unknown });
     expect(JSON.stringify(answer)).not.toContain('secret-token');
     expect(headOf(dir, 'task-7')).toBe(other);
+  });
+  /* What a host that took the pack says of it and of each ref, in git's report: its lines, then a flush. */
+  const saying = (...lines: string[]) => (res: ServerResponse) => {
+    res.writeHead(200, { 'content-type': RESULT });
+    res.end(Buffer.concat([...lines.map(line => pktLine(`${line}\n`)), Buffer.from('0000')]));
+  };
+
+  it.each([
+    ['it did not unpack the pack', ['unpack index-pack abnormal exit'], /it refused: unpack index-pack abnormal exit/],
+    ['it said nothing of the pack', [], /it refused: it did not say it took the pack/],
+  ])('says why when %s, and changes no ref', async (_name, lines, why) => {
+    const { dir, other } = origin();
+    git(dir, 'branch', 'task-7', other);
+    const { url } = await host(dir, { push: saying(...lines) });
+    expect(await pushRefs({ url, token: '' }, [{ ref: 'refs/heads/task-7', old: other, next: null }])).toEqual({ problem: expect.stringMatching(why) as unknown });
+    expect(headOf(dir, 'task-7')).toBe(other);
+  });
+
+  it('says of a ref its report leaves out that it did not hear of it, and takes none for done', async () => {
+    const { dir, other } = origin();
+    git(dir, 'branch', 'task-1', other);
+    git(dir, 'branch', 'task-2', other);
+    const { url } = await host(dir, { push: saying('unpack ok', 'ok refs/heads/task-1') });
+    const answer = await pushRefs({ url, token: '' }, [
+      { ref: 'refs/heads/task-1', old: other, next: null },
+      { ref: 'refs/heads/task-2', old: other, next: null },
+    ]);
+    expect(answer).toEqual({ refs: { 'refs/heads/task-1': null, 'refs/heads/task-2': 'its answer says nothing of this ref' } });
   });
 });
