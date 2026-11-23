@@ -42,10 +42,12 @@ describe('the rule of each table in a merge', () => {
     const { tables } = await facts();
     const own = ['server_order', 'server_why', 'memory', 'cores', 'copy_state', 'copy_progress', 'copy_error', 'copy_at', 'copy_name', 'copy_old', 'data_left_at', 'upload_state', 'link_rtt_ms', 'link_mbps', 'internet_rtt_ms', 'internet_mbps'];
     expect(BOOKKEEPING.machines).toEqual(expect.arrayContaining(own));
-    /* How far a bot has read its messages is the leader's own count, and a person's layout has its own clock. */
-    expect([BOOKKEEPING.telegram_bots, BOOKKEEPING.map_layouts]).toEqual([['update_offset'], ['updated_at']]);
-    /* A bot's token is the company's way out to a person: two that differ are the CEO's to settle. */
-    expect([ceosConflict('telegram_bots'), ceosConflict('map_layouts')]).toEqual([true, false]);
+    /* How far a bot has read its messages is the leader's own count, and a person's layout and the company's city have their own clock. */
+    expect([BOOKKEEPING.telegram_bots, BOOKKEEPING.map_layouts, BOOKKEEPING.world_layouts]).toEqual([['update_offset'], ['updated_at'], ['updated_at']]);
+    /* A bot's token is the company's way out to a person: two that differ are the CEO's to settle. Two cities that differ
+       are the company's world, never its people or access: the orchestrator's, like a person's map. */
+    expect([ceosConflict('telegram_bots'), ceosConflict('map_layouts'), ceosConflict('world_layouts')]).toEqual([true, false, false]);
+    expect(ruleOf('world_layouts')).toEqual({ kind: 'rows', topic: 'work' });
     /* A place the CEO pinned is his word, so two that differ are his to settle. */
     expect(BOOKKEEPING.machines).not.toContain('server_pin');
     for (const [table, columns] of Object.entries(BOOKKEEPING)) {

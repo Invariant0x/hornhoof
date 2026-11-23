@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, ApiFailure, onSignedOut } from './api';
+import { api, ApiFailure, isAway, onSignedOut } from './api';
 import { useReloadToNewBuild } from './build';
 import { errorText, useT } from './i18n';
 import { forgetOrg } from './org';
@@ -10,6 +10,7 @@ import { Setup } from './screens/Setup';
 import { Shell } from './screens/Shell';
 import type { Me } from './types';
 import { Card } from './ui/Card';
+import { ConnectionLayer, useLink } from './ui/ConnectionLayer';
 import { parseRoute } from './routes';
 
 type Screen =
@@ -18,12 +19,36 @@ type Screen =
   | { kind: 'setup'; linkDomain?: string; recovering?: boolean }
   | { kind: 'login' }
   | { kind: 'shell'; me: Me; welcome?: boolean }
+  /* The server cannot be reached: the layer over the page says so, and the page asks again after a growing wait, tries times so far. */
+  | { kind: 'away'; tries: number; welcome: boolean }
   | { kind: 'error'; failure: unknown };
 
+/* How long the page waits before it asks again, after so many tries: the layer's own look is quicker, and this is the page's. */
+const ASK_AGAIN_MS = [1_000, 2_000, 4_000, 8_000, 10_000];
+
+/* What the page shows when its first asks fail: the log in for a session that is not there, the wait for a server that is
+   away, which the layer over the page says and the page asks again from, or the error. */
+function screenFor(failure: unknown, welcome: boolean, tries: number): Screen {
+  if (failure instanceof ApiFailure && failure.status === 401) return { kind: 'login' };
+  return isAway(failure) ? { kind: 'away', tries: tries + 1, welcome } : { kind: 'error', failure };
+}
+
+/* While the page waits for a server that is away, it asks again after a growing wait. */
+function useAskAgain(screen: Screen, ask: (welcome: boolean, tries: number) => unknown): void {
+  useEffect(() => {
+    if (screen.kind !== 'away') return;
+    const timer = setTimeout(() => void ask(screen.welcome, screen.tries), ASK_AGAIN_MS[Math.min(screen.tries - 1, ASK_AGAIN_MS.length - 1)]);
+    return () => clearTimeout(timer);
+  }, [screen, ask]);
+}
+
 export function App() {
+  const { away } = useLink();
   return (
     <div className="app-layout">
-      <div className="app-screen"><Screens /></div>
+      {/* Under the layer that says the server is away, nothing takes a key or a click. */}
+      <div className="app-screen" inert={away !== null}><Screens /></div>
+      <ConnectionLayer />
     </div>
   );
 }
@@ -63,7 +88,7 @@ function Screens() {
   const [screen, show] = useScreen();
   useReloadToNewBuild(screen.kind === 'shell');
 
-  const decide = useCallback(async (welcome = false) => {
+  const decide = useCallback(async (welcome = false, tries = 0) => {
     const route = parseRoute(window.location.pathname);
     if (route.kind === 'invite') return show({ kind: 'invite', token: route.token });
     try {
@@ -72,14 +97,15 @@ function Screens() {
       const me = validMe(await api.get<Me>('/api/me'));
       show({ kind: 'shell', me, welcome });
     } catch (err) {
-      if (err instanceof ApiFailure && err.status === 401) return show({ kind: 'login' });
-      show({ kind: 'error', failure: err });
+      show(screenFor(err, welcome, tries));
     }
   }, [show]);
 
   useEffect(() => {
     void decide();
   }, [decide]);
+
+  useAskAgain(screen, decide);
 
   const home = useCallback(
     (welcome = false) => {
@@ -91,6 +117,7 @@ function Screens() {
 
   switch (screen.kind) {
     case 'loading':
+    case 'away':
       return null;
     case 'invite':
       return <AcceptInvite token={screen.token} onDone={home} />;

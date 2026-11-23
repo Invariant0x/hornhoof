@@ -253,3 +253,13 @@ it('sizes the map scale label by its content from tokens without clipping and ke
   expect(decl('.zv', 'overflow')).toBeUndefined();
   expect(decl('.zv', 'text-overflow')).toBeUndefined();
 });
+
+/* The department card's on and off switches take the button colour of the active theme, as Design asked in #1906. */
+it('colours the department card switches with the theme button colour', () => {
+  expect(decl('.world-hier-graph .sw', 'accent-color')).toBe('var(--btn)');
+});
+
+it('moves the held machines pool below the held table when the initial load stalls or fails on a narrow screen', () => {
+  expect(decl('.machines:has(.held-table .load-fail) > .held-pool', 'order', '(max-width: 760px)')).toBe('1');
+  expect(decl('.machines:has(.held-table .load-fail) > .held-pool', 'order')).toBeUndefined();
+});

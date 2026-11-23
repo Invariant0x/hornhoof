@@ -3,7 +3,7 @@ import { useRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GuardBoundary } from '../src/ui/GuardBoundary';
 import { ShellBarsHost, shellTopOf, useMeasuredShellTop } from '../src/ui/shellBars';
-import { decl, rulesFor } from './css';
+import { decl, RULES, rulesFor } from './css';
 
 /* #1639: on the map the header and the bars of the shell float over the canvas and an open department, which start what
    they show under the last bar. */
@@ -140,8 +140,17 @@ describe('the map and an open department under the bars of the shell', () => {
   /* A page keeps its own opaque header room (#1635 is for the map and the department): its windows and cards open under it
      as before, or under a bar of the shell while one stands. */
   it('opens the windows and the cards of a page under its header room, as before', () => {
-    expect(decl('.body.page ~ :is(.orch, .dv-drawer, .acard, .agent-strips)', 'top', '(min-width: 761px)')).toBe('var(--shell-top, 68px)');
-    expect(decl('.body.page ~ .orch', 'top', '(max-width: 760px)')).toBe('var(--shell-top, 56px)');
+    expect(decl('.body.page ~ :is(.orch:not(.fullscreen), .dv-drawer, .acard, .agent-strips)', 'top', '(min-width: 761px)')).toBe('var(--shell-top, 68px)');
+    expect(decl('.body.page ~ .orch:not(.fullscreen)', 'top', '(max-width: 760px)')).toBe('var(--shell-top, 56px)');
+  });
+
+  /* A window in full screen covers the whole screen on a page too, as before #1635: a page's rule for where its windows
+     open stands one class above the full-screen one, so it must not name a window in full screen. */
+  it('leaves a window in full screen over the whole screen of a page, its header room too', () => {
+    expect(decl('.orch.fullscreen', 'inset')).toBe('0 var(--inset) 0 0');
+    const where = RULES.filter(r => 'top' in r.decls).flatMap(r => r.selectors).filter(s => s.startsWith('.body.page ~') && /\.orch\b/.test(s));
+    expect(where).toHaveLength(2);
+    for (const selector of where) expect(selector).toContain('.orch:not(.fullscreen)');
   });
 
   it("starts the department's name under the bars while one stands, and 8 px under the menu while none does, on every screen", () => {

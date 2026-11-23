@@ -58,6 +58,10 @@
     "./redaction": {
       "types": "./dist/redaction.d.ts",
       "default": "./dist/redaction.js"
+    },
+    "./world": {
+      "types": "./dist/world.d.ts",
+      "default": "./dist/world.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -74,5 +78,5 @@
     "typescript": "^5.9.3",
     "vitest": "^5.0.5"
   },
-  "version": "0.40.2"
+  "version": "0.42.0"
 }

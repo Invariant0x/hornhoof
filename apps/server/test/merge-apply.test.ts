@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import {
   agentChanges, agentEvents, agents, attachments, companies, computerRuns, departments, jobs, machineAccess, machines, mapReturns, nodes, notebookNotes, people, personAccess, programInstances,
-  programOperatorCases, sessions, subscriptions, taskEvents, tasks, teams, testParts, testRuns, turns,
+  programOperatorCases, sessions, subscriptions, taskEvents, tasks, teams, testParts, testRuns, turns, worldLayouts,
 } from '../src/db/schema.js';
 import { idOnly, only } from '../src/db/selections.js';
 import { nodeSource, withSource } from '../src/db/sources.js';
@@ -145,6 +145,56 @@ describe('a merge applied', () => {
     expect(conflict!.why).toBe('task #1 "Here": title: here "Here", there "There"');
     expect(await s.consumed(id)).toMatchObject([{ how: 'conflict' }]);
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it("brings over a company's city the leader lacks, and keeps the leader's own city on a difference", async () => {
+    const s = await stand();
+    const city = () => s.db.select({ packId: worldLayouts.packId, seed: worldLayouts.seed, layout: worldLayouts.layout, relocations: worldLayouts.relocations }).from(worldLayouts);
+    const fork = await s.sides.fork();
+    /* The CEO's order to move Ana's house, given on the copy while it led. */
+    const relocation = {
+      id: 'r1', buildingId: 'house-ana', buildingKind: 'house' as const, buildingLabel: 'Ana', fromCol: 2, fromRow: 3, toCol: 4, toRow: 7,
+      taskId: s.one.id, taskNumber: 1, assigneeAgentId: s.ana.id, departmentId: s.dev.id, createdAt: '2026-11-23T10:00:00.000Z',
+    };
+    await fork.db.insert(worldLayouts).values({ companyId: s.acme.id, packId: 'space', seed: 'seed-1', layout: { buildings: 3 }, relocations: [relocation] });
+    const first = await s.merge(fork);
+    expect(first.result.counts.byTable.world_layouts).toEqual({ added: 1, changed: 0, deleted: 0, conflicts: 0 });
+    expect(await city()).toEqual([{ packId: 'space', seed: 'seed-1', layout: { buildings: 3 }, relocations: [relocation] }]);
+    expect(await s.checked(fork, first.id)).toEqual({ ok: true, missing: [] });
+    /* Both went on building, each its own way: the leader keeps its city and the orchestrator hears of the other. */
+    const second = await s.sides.fork();
+    await second.db.update(worldLayouts).set({ layout: { buildings: 4 }, updatedAt: new Date('2026-11-23T11:00:00Z') }).where(eq(worldLayouts.companyId, s.acme.id));
+    await s.db.update(worldLayouts).set({ layout: { buildings: 5 }, updatedAt: new Date('2026-11-23T12:00:00Z') }).where(eq(worldLayouts.companyId, s.acme.id));
+    const { id } = await s.merge(second);
+    expect((await city())[0]!.layout).toEqual({ buildings: 5 });
+    expect(await s.conflicts(id)).toMatchObject([{ tbl: 'world_layouts', key: { company_id: s.acme.id }, op: 'update', kind: 'differs', topic: 'work', cols: ['layout'] }]);
+  });
+
+  it("keeps each company's city its own through a merge, and a conflict over one city names that city alone", async () => {
+    const s = await stand();
+    /* Another company in the same database, as only a test makes one: a deployment serves one company. */
+    const [other] = await s.db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+    const theirs = { buildings: 9, marker: 'the-other-city' };
+    await s.db.insert(worldLayouts).values([
+      { companyId: s.acme.id, packId: 'space', seed: 'acme', layout: { buildings: 1 } },
+      { companyId: other!.id, packId: 'space', seed: 'other', layout: theirs },
+    ]);
+    const fork = await s.sides.fork();
+    /* Both sides build on Acme's city, each its own way; only the leader moves the other company's city on. */
+    await fork.db.update(worldLayouts).set({ layout: { buildings: 2 } }).where(eq(worldLayouts.companyId, s.acme.id));
+    await s.db.update(worldLayouts).set({ layout: { buildings: 3 } }).where(eq(worldLayouts.companyId, s.acme.id));
+    await s.db.update(worldLayouts).set({ layout: { ...theirs, buildings: 10 } }).where(eq(worldLayouts.companyId, other!.id));
+    const { id } = await s.merge(fork);
+    expect(await s.db.select({ companyId: worldLayouts.companyId, seed: worldLayouts.seed, layout: worldLayouts.layout }).from(worldLayouts).orderBy(worldLayouts.seed)).toEqual([
+      { companyId: s.acme.id, seed: 'acme', layout: { buildings: 3 } },
+      { companyId: other!.id, seed: 'other', layout: { ...theirs, buildings: 10 } },
+    ]);
+    const conflicts = await s.conflicts(id);
+    expect(conflicts).toMatchObject([{ tbl: 'world_layouts', key: { company_id: s.acme.id }, kind: 'differs', topic: 'work', cols: ['layout'] }]);
+    /* What the orchestrator is shown of it holds Acme's city and nothing of the other company's. */
+    expect([conflicts[0]!.here?.layout, conflicts[0]!.there?.layout]).toEqual([{ buildings: 3 }, { buildings: 2 }]);
+    expect(JSON.stringify(conflicts)).not.toContain(theirs.marker);
+    expect(JSON.stringify(conflicts)).not.toContain(other!.id);
   });
 
   it('keeps a value the leader changed where its journal lost it', async () => {
@@ -802,7 +852,8 @@ describe('a merge applied', () => {
     /* The merge counts on this clock: 150 ms go by on it while the write waits, and nobody waits for real time. */
     let now = 1_000;
     const merging = s.merge(fork, { onUnit: n => (n === 1 ? (reached(), waits) : undefined), log: line => lines.push(line), clock: () => now });
-    await atFirst;
+    /* A merge that ends before its first unit fails the test with its own reason, instead of leaving it to wait. */
+    await Promise.race([atFirst, merging.then(() => Promise.reject(new Error('The merge ended before its first unit.')))]);
     const order: string[] = [];
     const write = s.db.update(tasks).set({ title: 'Meanwhile' }).where(and(eq(tasks.id, s.two.id))).then(() => {
       order.push('written');

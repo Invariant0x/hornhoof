@@ -427,6 +427,52 @@ describe("an agent's live terminal", () => {
     await expect(watch(url, seller)).rejects.toThrow('HTTP 403');
     await expect(watch(url, 'not-a-session')).rejects.toThrow('HTTP 401');
   });
+
+  it('sends WebSocket ping frames on an idle terminal so proxies keep the connection open', async () => {
+    const { url, ceo, builtin } = await live(true, { STREAM_PING_MS: '50' });
+    const screen = await watch(url, ceo);
+    await next(builtin, 'term.open');
+    let pings = 0;
+    screen.ws.on('ping', () => { pings++; });
+    await until(() => pings >= 2);
+    expect(screen.ws.readyState).toBe(WebSocket.OPEN);
+    expect(screen.frames).toEqual([{ type: 'ready', write: true, message: true }]);
+    screen.ws.close();
+  });
+
+  it.each(['claude', 'codex', 'kimi', 'antigravity'] as const)(
+    'keeps a %s personal-plan terminal open across checks when the agent has no pinned node yet and the plan node holds new starts',
+    async provider => {
+      const { app, db, url, ceo, orchestratorId } = await live(true, { STREAM_PING_MS: '50' });
+      const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: [provider] }, ...as(ceo) });
+      const code = connected.json().command.split('--join ')[1];
+      const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: `fallback-${provider}`, hostname: `fallback-${provider}`, os: 'linux', arch: 'arm64' } });
+      const node = joined.json().nodes[0] as { id: string; subscriptionId: string; key: string };
+      const plan = await connectNode(url, node.key);
+      plan.send({
+        type: 'hello', version: '0.9.0', loggedIn: true, running: [], terminals: true,
+        load: { cpus: 4, load: 1, memFree: 4 * 1024 ** 3, memTotal: 8 * 1024 ** 3, tests: 0, jobs: 0, memoryShort: true },
+      });
+      expect((await app.inject({ method: 'POST', url: `/api/subscriptions/${node.subscriptionId}/orchestrator`, ...as(ceo) })).statusCode).toBe(200);
+      await until(async () => (await state(app, ceo)).ready);
+      expect((await db.select({ nodeId: agents.nodeId }).from(agents).where(eq(agents.id, orchestratorId)))[0]!.nodeId).toBeNull();
+
+      const screen = await watch(url, ceo);
+      await next(plan, 'term.open');
+      let pings = 0;
+      screen.ws.on('ping', () => { pings++; });
+      await until(() => pings >= 2 || screen.ws.readyState !== WebSocket.OPEN);
+      expect(screen.ws.readyState).toBe(WebSocket.OPEN);
+      expect(pings).toBeGreaterThanOrEqual(2);
+
+      /* Moving the agent off that subscription still ends the old view so the browser reconnects on the new one. */
+      const [ceoRow] = await db.select().from(people);
+      const [acme] = await db.select().from(companies);
+      const [other] = await db.insert(subscriptions).values({ companyId: acme!.id, provider, kind: 'personal', label: 'Other', ownerPersonId: ceoRow!.id, status: 'ready' }).returning();
+      await db.update(agents).set({ subscriptionId: other!.id }).where(eq(agents.id, orchestratorId));
+      expect(await screen.closed).toEqual({ code: 4410, reason: 'node_offline' });
+    },
+  );
 });
 
 describe('a turn a person typed into the terminal', () => {

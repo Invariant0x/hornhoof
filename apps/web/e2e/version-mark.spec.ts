@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { BUILTIN_SKINS, type BuiltinSkinId } from '../src/skins/registry';
+import { BUILTIN_SKINS, builtinSkin, type BuiltinSkinId } from '../src/skins/registry';
 import type { Org } from '../src/types';
 import { ME, serveApi } from './api';
 import { captureWith } from './capture';
@@ -72,7 +72,9 @@ async function openMap(page: Page, look: Look, arranged = false) {
   /* A person who moved a department sees Put back in a bar of its own over the orchestrator's line. */
   if (arranged) await page.route('**/api/map/layout', route => route.fulfill({ json: { blocks: { [`dept:${DEV}`]: { x: 900, y: 900 } } } }));
   await page.goto('/');
-  await expect(page.locator('.map .dept')).toHaveCount(2);
+  const world = builtinSkin(look.skin)?.world;
+  if (world) await expect(page.locator(`[data-world-canvas="${world}"]`)).toBeVisible();
+  else await expect(page.locator('.map .dept')).toHaveCount(2);
   await expect(page.locator('html')).toHaveAttribute('data-theme', look.skin);
   if (arranged) await expect(page.locator('.map-arrange button')).toBeVisible();
   await expect(mark(page)).toHaveCount(1);

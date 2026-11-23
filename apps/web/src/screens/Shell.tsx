@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type RefObject } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, useT } from '../i18n';
+import { useStream } from '../live';
 import { notOpened, useOrg } from '../org';
 import { forgetOwnerKey } from '../owner-key';
+import { skinsState, syncCompanySkin } from '../skins/store';
+import { useWorld } from '../skins/use-skin';
 import type { Me, Org } from '../types';
 import { ListIcon, LogoMark, MachineIcon, MapIcon, PeopleIcon, PlugIcon } from '../ui/icons';
 import { Idents } from '../ui/Idents';
@@ -63,14 +66,15 @@ function workspaceOf(route: Route, backgrounds: Route[]) {
 
 /* The window of the account menu open over the page. The groups of Settings are one window, so switching between them
    keeps the window and its focus. */
-function AccountDialog({ route, me, updates, inbox, onRenamed, onGroup, onClose, onHome }: {
+function AccountDialog({ route, me, updates, inbox, onRenamed, onCompanyTheme, onGroup, onClose, onHome }: {
   route: Route | null; me: Me; updates: Updates; inbox: boolean; onRenamed: (name: string) => void;
+  onCompanyTheme: (theme: string) => void;
   onGroup: (group?: SettingsGroup) => void; onClose: () => void; onHome: () => void;
 }) {
   if (route?.kind === 'about') return <About inbox={inbox} onClose={onClose} />;
   if (route?.kind === 'versions') return <Versions updates={updates} onClose={onClose} onHome={onHome} />;
   if (route?.kind !== 'settings') return null;
-  return <Settings me={me} group={route.group} onGroup={onGroup} onRenamed={onRenamed} onClose={onClose} />;
+  return <Settings me={me} group={route.group} onGroup={onGroup} onRenamed={onRenamed} onCompanyTheme={onCompanyTheme} onClose={onClose} />;
 }
 
 /* One row of the account menu: it closes the menu, then does what it says. */
@@ -276,10 +280,33 @@ type MapRouteProps = {
   goHome: () => void; openAgent: (id: string) => void; openDecisions: (id: string) => void;
 };
 
-function MapWorkspace({ tab, me, dept, deptId, denied, missingDepartment, panel, goHome, openAgent, navigate, openDecisions }: MapRouteProps & {
-  deptId: string | null; denied: boolean; panel: 'window' | 'task' | null; navigate: ReturnType<typeof useRoute>['navigate'];
+function MapWorkspace({
+  tab,
+  me,
+  dept,
+  deptId,
+  denied,
+  missingDepartment,
+  panel,
+  isWorld,
+  goHome,
+  openAgent,
+  openTask,
+  openGoal,
+  navigate,
+  openDecisions,
+  onHire,
+}: MapRouteProps & {
+  deptId: string | null;
+  denied: boolean;
+  panel: 'window' | 'task' | null;
+  isWorld: boolean;
+  openTask: (id: string) => void;
+  openGoal: (id: string) => void;
+  navigate: ReturnType<typeof useRoute>['navigate'];
+  onHire: (dept: Department) => void;
 }) {
-  if (tab !== 'map' || denied || missingDepartment || (deptId && !dept)) return null;
+  if (tab !== 'map' || denied || missingDepartment || (!isWorld && deptId && !dept)) return null;
   return (
     <MapScreen
       me={me}
@@ -287,9 +314,17 @@ function MapWorkspace({ tab, me, dept, deptId, denied, missingDepartment, panel,
       windowOpen={panel === 'window'}
       leftPanelOpen={panel === 'task'}
       onOpenOrchestrator={() => openAgent('orchestrator')}
-      inside={!!dept}
-      onOpenDepartment={id => navigate(id ? { kind: 'department', id } : { kind: 'map' })}
+      onOpenAgent={openAgent}
+      inside={!isWorld && !!dept}
+      activeDepartmentId={isWorld ? deptId : null}
+      onOpenDepartment={id => navigate({ kind: 'department', id })}
+      onCloseDepartment={() => navigate({ kind: 'map' })}
       onOpenDecisions={openDecisions}
+      onOpenTask={openTask}
+      onOpenGoal={openGoal}
+      onOpenTracker={id => navigate({ kind: 'tasks', department: id })}
+      onOpenTab={nextTab => navigate({ kind: nextTab })}
+      onHire={onHire}
     />
   );
 }
@@ -349,6 +384,7 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
 /* Setup or an accepted invitation opens the orchestrator's first contact at once. */
 export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: boolean; onSignOut: () => void }) {
   const t = useT();
+  const isWorld = useWorld() !== 'standard';
   const { route, navigate, backgrounds, switchOverlay, closeOverlay } = useRoute();
   const { accountDialog, pageRoute, taskId, card, tab, deptId } = workspaceOf(route, backgrounds);
   const goHome = () => navigate({ kind: 'map' });
@@ -356,7 +392,9 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const [menu, setMenu] = useState(false);
   const [contact, setContact] = useState(welcome);
   const [selfName, setSelfName] = useState(me.person.name);
-  const currentMe = { ...me, person: { ...me.person, name: selfName } };
+  const [companyTheme, setCompanyTheme] = useState<string | undefined>(me.company.theme);
+  const lastServerTheme = useRef<string | null>(null);
+  const currentMe = { ...me, person: { ...me.person, name: selfName }, company: { ...me.company, ...(companyTheme ? { theme: companyTheme } : {}) } };
   const company = me.person.scopeKind === 'company';
   const inbox = useFeedbackInbox();
   const denied = !company && ['improvements', 'inbox', 'versions'].some(kind => kind === route.kind || kind === pageRoute.kind);
@@ -365,6 +403,27 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   /* A task's panel stands on the left, on its own: it and a window on the screen take each other's place. */
   const [staff, setStaff] = useState<StaffAsk | null>(null);
   const { org, failure: orgFailure, load: loadOrg } = useOrg(windows.ids.length > 0 || taskId !== null || deptId !== null);
+  useEffect(() => {
+    if (me.company.theme) setCompanyTheme(me.company.theme);
+  }, [me.company.theme]);
+  useEffect(() => {
+    if (org?.company.theme) setCompanyTheme(org.company.theme);
+  }, [org?.company.theme]);
+  useStream(m => {
+    if (m.type === 'company_theme') setCompanyTheme(m.theme);
+  });
+  useEffect(() => {
+    if (!companyTheme) return;
+    if (!me.person.isOwner) {
+      lastServerTheme.current = companyTheme;
+      syncCompanySkin(companyTheme);
+      return;
+    }
+    const changed = lastServerTheme.current !== null && lastServerTheme.current !== companyTheme;
+    const isCustom = skinsState().active.startsWith('custom-');
+    lastServerTheme.current = companyTheme;
+    if (changed || !isCustom) syncCompanySkin(companyTheme);
+  }, [companyTheme, me.person.isOwner]);
   const orchestratorId = org?.orchestrator?.id;
   if (orchestratorId && windows.ids.includes(orchestratorId)) windows.nameOrchestrator(orchestratorId);
   const { open: openWindow, hide: hideWindow } = windows;
@@ -470,14 +529,35 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         </div>
         {(route.kind === 'unavailable' || route.kind === 'invite' || missingDepartment || denied) && <RouteUnavailable onHome={goHome} />}
         <GuardBoundary block="map" reset={deptId}>
-          <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
+          <MapWorkspace
+            tab={tab}
+            me={me}
+            dept={dept}
+            deptId={deptId}
+            denied={denied}
+            missingDepartment={missingDepartment}
+            panel={shownPanel}
+            isWorld={isWorld}
+            goHome={goHome}
+            openAgent={openAgent}
+            openTask={openTask}
+            openGoal={openGoal}
+            navigate={navigate}
+            openDecisions={openDecisions}
+            onHire={d => {
+              setStaff({ id: d.id, name: deptLabel(t, d), at: Date.now() });
+              openAgent('orchestrator');
+            }}
+          />
         </GuardBoundary>
-        <GuardBoundary block="department" reset={deptId}>
-        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} loadOrg={loadOrg} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onPlate={setPlateRoom} onHire={dept => {
-          setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
-          openAgent('orchestrator');
-        }} />
-        </GuardBoundary>
+        {!isWorld && (
+          <GuardBoundary block="department" reset={deptId}>
+            <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} loadOrg={loadOrg} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} openDepartment={id => navigate({ kind: 'department', id })} onPlate={setPlateRoom} onHire={dept => {
+              setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
+              openAgent('orchestrator');
+            }} />
+          </GuardBoundary>
+        )}
         {tab === 'tasks' && (
           <GuardBoundary block="tasks">
           <Tasks
@@ -533,7 +613,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onHome={goHome}
         />
       )}
-      <AccountDialog route={!accountDialog || (!company && accountDialog === 'versions') ? null : route} me={currentMe} updates={updates} inbox={inbox} onHome={goHome} onRenamed={setSelfName} onGroup={group => switchOverlay(group ? { kind: 'settings', group } : { kind: 'settings' })} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
+      <AccountDialog route={!accountDialog || (!company && accountDialog === 'versions') ? null : route} me={currentMe} updates={updates} inbox={inbox} onHome={goHome} onRenamed={setSelfName} onCompanyTheme={setCompanyTheme} onGroup={group => switchOverlay(group ? { kind: 'settings', group } : { kind: 'settings' })} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
       {company && updates.cut && <UpdateCut cut={updates.cut} updates={updates} />}
     </div>
     </ShellTop>

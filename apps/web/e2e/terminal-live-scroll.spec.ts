@@ -210,7 +210,11 @@ async function countFrames(page: Page): Promise<void> {
   });
 }
 
-type Window = { page: Page; program: RecordedProgram; rows: Locator };
+type Window = { page: Page; program: RecordedProgram; rows: Locator; live: AgentFixture };
+
+async function socketClosed(page: Page): Promise<void> {
+  await expect.poll(() => page.evaluate(() => (window as unknown as Seen).terminalSocket?.readyState)).toBe(3);
+}
 
 /* The page took in every frame the node sent to the view it keeps, and its time went on for it to draw them. */
 async function drawn({ page, program }: Window): Promise<void> {
@@ -255,17 +259,20 @@ async function openWindow(page: Page, recording: Recording, write: boolean): Pro
   await page.clock.install({ time: START - 60_000 });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
+  /* Wait for the map's initial load to finish before pausing the clock, or pauseAt(+60 s) trips useLoad's 30 s timeout. */
+  const department = page.getByRole('button', { name: /^Development/ });
+  await expect(department).toBeVisible();
   await page.clock.pauseAt(START);
-  await page.getByRole('button', { name: /^Development/ }).click();
+  await department.click();
   await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
-  const window = { page, program, rows: page.locator('.xterm-rows') };
+  const window = { page, program, rows: page.locator('.xterm-rows'), live };
   await drawn(window);
   await program.clock.settle();
   await drawn(window);
   return window;
 }
 
-test('history stays in place and grows while the program redraws', async ({ page }, info) => {
+test('history stays in place and grows while the program redraws, and survives reconnect', async ({ page }, info) => {
   const window = await openWindow(page, RECORDED.alternate, false);
   const { program } = window;
   expect(program.streamed).toContain('ALT-START');
@@ -278,6 +285,20 @@ test('history stays in place and grows while the program redraws', async ({ page
   }
   expect(program.streamed).toContain('TICK-3');
   await page.screenshot({ path: info.outputPath('live-history.png') });
+  const views = program.views.length;
+  program.view.history.stop();
+  await program.view.ws.close({ code: 4410, reason: 'node_offline' });
+  await socketClosed(page);
+  await page.clock.runFor(FRAMES_MS);
+  await expect(page.locator('.t-load')).toHaveCount(0);
+  await showsNow(window, 'LINE-0');
+  await page.clock.runFor(RETRY_MS);
+  await expect.poll(() => program.views.length).toBe(views + 1);
+  await drawn(window);
+  await program.clock.settle();
+  await drawn(window);
+  await expect(page.locator('.t-load')).toHaveCount(0);
+  await showsNow(window, 'LINE-0');
   await wheel(window, 8000);
   await comesTo(window, /TICK-\d+/);
   await wheel(window, -8000);
@@ -287,7 +308,7 @@ test('history stays in place and grows while the program redraws', async ({ page
 for (const write of [false, true]) {
   test(`early view keeps 200 old and 44 new lines through repaint, resize and reconnect, write=${write}`, async ({ page }, info) => {
     const window = await openWindow(page, RECORDED.early, write);
-    const { program, rows } = window;
+    const { program, rows, live } = window;
     await expect(rows).toBeVisible();
     await step(window, 's\n');
     await showsNow(window, 'LINE-199');
@@ -310,22 +331,61 @@ for (const write of [false, true]) {
     await expect.poll(() => program.resizes.length).toBeGreaterThan(resizes);
     await drawn(window);
     await showsNow(window, 'LINE-0');
+    await page.screenshot({ path: info.outputPath(`reconnect-before-write-${write}.png`) });
     const views = program.views.length;
+    live.awake = false;
     program.view.history.stop();
     await program.view.ws.close({ code: 4410, reason: 'node_offline' });
-    await expect(page.locator('.t-load')).toBeVisible();
+    await socketClosed(page);
+    await page.clock.runFor(FRAMES_MS);
+    await expect(page.locator('.t-load')).toHaveCount(0);
+    await showsNow(window, 'LINE-0');
+    await page.screenshot({ path: info.outputPath(`reconnect-during-write-${write}.png`) });
     await page.clock.runFor(RETRY_MS);
     await expect.poll(() => program.views.length).toBe(views + 1);
+    live.awake = true;
     await drawn(window);
     await program.clock.settle();
     await drawn(window);
-    await showsNow(window, 'NEW-43');
+    await expect(page.locator('.t-load')).toHaveCount(0);
+    await showsNow(window, 'LINE-0');
+    await page.screenshot({ path: info.outputPath(`reconnect-after-write-${write}.png`) });
     const inputsBeforeReconnectWheel = program.inputs.length;
+    await wheel(window, 12000);
+    await comesTo(window, 'NEW-43');
     await wheel(window, -12000);
     await comesTo(window, 'LINE-0');
     expect(program.inputs).toHaveLength(inputsBeforeReconnectWheel);
   });
 }
+
+test('stays mounted and at the bottom across a transient terminal=false poll and reconnect without flicker', async ({ page }, info) => {
+  const window = await openWindow(page, RECORDED.early, true);
+  const { program, live } = window;
+  await step(window, 's\n');
+  for (let tick = 0; tick < 6; tick++) await step(window, 't\n');
+  await step(window, 'm\n');
+  await showsNow(window, 'NEW-43');
+  await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
+  const views = program.views.length;
+  live.awake = false;
+  program.view.history.stop();
+  await program.view.ws.close({ code: 4410, reason: 'node_offline' });
+  await socketClosed(page);
+  /* A 15 s background poll reports terminal=false while the node is reconnecting: the terminal stays mounted without flicker. */
+  await page.clock.runFor(15_000);
+  await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(0);
+  await expect(page.locator('.t-load')).toHaveCount(0);
+  await expect(page.getByRole('status', { name: 'Terminal' })).toHaveCount(0);
+  await expect.poll(() => program.views.length).toBeGreaterThan(views);
+  live.awake = true;
+  await drawn(window);
+  await program.clock.settle();
+  await drawn(window);
+  await expect(page.locator('.t-load')).toHaveCount(0);
+  await showsNow(window, 'NEW-43');
+  await page.screenshot({ path: info.outputPath('reconnect-bottom-after.png') });
+});
 
 test('3J preserves the reading place and the bottom on the real terminal', async ({ page }, info) => {
   const window = await openWindow(page, RECORDED.clear, false);

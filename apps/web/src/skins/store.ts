@@ -1,6 +1,6 @@
 import { COLLECTION_LIMIT, collectionText, readCollection, withAdded, withRestored, without, type CustomSkin } from './collection';
 import { builtinSkin, DEFAULT_SKIN, ownLook } from './registry';
-import { declarations, type Skin, type SkinLook } from './roles';
+import { declarations, extraDeclarations, type Skin, type SkinLook, type WorldKind } from './roles';
 
 /* The skin on the page and the collection of a person's own, kept in this browser. The skin on the page is always one
    that exists: a name the browser kept that names no skin, from an older version or a deleted skin, means Cyberpunk. */
@@ -12,8 +12,10 @@ export type Added = { ok: true; entry: CustomSkin } | { ok: false; reason: 'full
 
 const ACTIVE_KEY = 'hh-theme';
 const COLLECTION_KEY = 'hh-skins';
+const GRAIN_KEY = 'hh-map-grain';
 
 let state: SkinsState = { active: DEFAULT_SKIN, custom: [] };
+let grain = true;
 /* How many times a person picked a skin, so putting a deleted skin back knows whether they chose another since. */
 let choices = 0;
 const listeners = new Set<() => void>();
@@ -41,14 +43,23 @@ function lookIn(custom: readonly CustomSkin[], id: string): SkinLook | null {
   return builtinSkin(id) ?? (own ? ownLook(own.skin) : null);
 }
 
-/* Every token of the skin at once, so switching never shows a mix of two skins. */
+/* Every token and root attribute of the skin at once, so switching never shows a mix of two themes. */
 function apply({ active, custom }: SkinsState): void {
   const look = lookIn(custom, active)!;
   const page = document.documentElement;
   page.dataset.theme = active;
   page.dataset.scheme = look.scheme;
   page.dataset.cut = look.shape;
+  if (look.world && look.world !== 'standard') page.dataset.world = look.world;
+  else delete page.dataset.world;
+  if (look.surface && look.surface !== 'plain') page.dataset.surface = look.surface;
+  else delete page.dataset.surface;
+  if (look.surface === 'papyrus' && !grain) page.dataset.grain = 'off';
+  else delete page.dataset.grain;
   for (const [property, value] of declarations(look)) page.style.setProperty(property, value);
+  const extra = extraDeclarations(look);
+  for (const property of extra.clear) page.style.removeProperty(property);
+  for (const [property, value] of extra.set) page.style.setProperty(property, value);
 }
 
 function change(next: SkinsState): void {
@@ -59,9 +70,20 @@ function change(next: SkinsState): void {
 
 /* Runs before the page draws, from the script at the top of index.html, and again when the app starts. */
 export function initSkins(): void {
+  grain = stored(GRAIN_KEY) !== 'off';
   const custom = readCollection(stored(COLLECTION_KEY));
   const saved = stored(ACTIVE_KEY) ?? '';
   change({ active: lookIn(custom, saved) ? saved : DEFAULT_SKIN, custom });
+}
+
+export const mapGrain = (): boolean => grain;
+
+/* Toggles the subtle papyrus grain on map backgrounds for papyrus themes; persists in this browser. */
+export function setMapGrain(on: boolean): void {
+  grain = on;
+  keep(GRAIN_KEY, on ? 'on' : 'off');
+  apply(state);
+  listeners.forEach(listener => listener());
 }
 
 export const skinsState = (): SkinsState => state;
@@ -74,12 +96,25 @@ export function subscribeSkins(listener: () => void): () => void {
 /* The look of a built-in skin or one of the collection, by its name. */
 export const lookOf = (id: string): SkinLook | null => lookIn(state.custom, id);
 
+/* The active skin's full look and interactive world kind. */
+export const activeLook = (): SkinLook => lookIn(state.custom, state.active)!;
+export const activeWorld = (): WorldKind => activeLook().world ?? 'standard';
+
 /* Puts a skin on the page at once and keeps the choice; a name of no skin changes nothing. */
 export function chooseSkin(id: string): boolean {
   if (!lookOf(id)) return false;
   choices += 1;
   keep(ACTIVE_KEY, id);
   change({ ...state, active: id });
+  return true;
+}
+
+/* Applies the company-wide theme reported by the server and caches it locally for reload boot. */
+export function syncCompanySkin(themeId: string): boolean {
+  const next = builtinSkin(themeId) ? themeId : DEFAULT_SKIN;
+  keep(ACTIVE_KEY, next);
+  if (state.active === next) return false;
+  change({ ...state, active: next });
   return true;
 }
 
