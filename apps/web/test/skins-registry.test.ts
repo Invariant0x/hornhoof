@@ -37,14 +37,21 @@ describe('the registry of built-in skins', () => {
     });
   });
 
-  it('slants the corners of Cyberpunk, Light and Ancient Egypt, keeps Matrix square and cuts Pixel in two steps', () => {
+  /* Ancient Egypt is square, as a painted kit needs: a cut corner would clip the kit's frames (theme UI kit 1.0, section 3). */
+  it('slants the corners of Cyberpunk and Light, keeps Matrix and Ancient Egypt square and cuts Pixel in two steps', () => {
     expect(Object.fromEntries(BUILTIN_SKINS.map(skin => [skin.id, [skin.shape, skin.cut]]))).toEqual({
       cyberpunk: ['bevel', 1],
       light: ['bevel', 1],
       matrix: ['bevel', 0],
       pixel: ['steps', 1],
-      egypt: ['bevel', 1],
+      egypt: ['bevel', 0],
     });
+  });
+
+  /* The inks of words that stand on the kit's painted papyrus, a link on a hovered row too, at 4.5:1 at the worst spot (#1970). */
+  it('gives Ancient Egypt the darker inks that keep 4.5:1 on its painted kit', () => {
+    const { colors } = builtinSkin('egypt')!;
+    expect([colors.muted, colors.accent_ink, colors.attention_ink]).toEqual(['#43362A', '#0F3A64', '#74173E']);
   });
 
   it('writes Pixel headings in Handjet, Ancient Egypt in Alegreya and Golos Text, and the others in Tektur and Onest', () => {
