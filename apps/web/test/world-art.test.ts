@@ -398,8 +398,9 @@ describe('Stage 9 art contract: declared files, index validation and art resolut
     expect(resolveResidentArt(PACK, files, resident({ pose: 'walking', facing: 'NW' }), 0)?.layers[0]?.frame.y).toBe(1 * 180);
     expect(resolveResidentArt(PACK, files, resident({ pose: 'walking', facing: 'S' }), 0)?.layers[0]?.frame.y).toBe(4 * 180);
 
-    /* 8 fps: at 0.5 s the walk shows frame 4. */
-    expect(resolveResidentArt(PACK, files, resident({ pose: 'walking' }), 0.5)?.layers[0]?.frame.x).toBe(4 * 120);
+    /* 8 fps: 0.5 s on, the walk shows the frame 4 after the one it showed (each resident starts on its own frame, #1983). */
+    const frameAt = (t: number) => resolveResidentArt(PACK, files, resident({ pose: 'walking' }), t)!.layers[0]!.frame.x / 120;
+    expect((frameAt(0.5) - frameAt(0) + 8) % 8).toBe(4);
 
     /* A pose with its own sheet uses it; carrying falls back to walking, inspecting to idle. */
     expect(resolveResidentArt(PACK, files, resident({ pose: 'praying' }), 0)?.layers[0]?.path).toBe('people/look-a/tier_1/pray.png');

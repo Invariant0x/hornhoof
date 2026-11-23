@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { DIRECTION_ROWS, sheetRowFor, type SheetPassport } from '../src/world/art';
+import {
+  DIRECTION_ROWS,
+  masterTileW,
+  personSheetPath,
+  residentWalkSpeed,
+  resolveResidentArt,
+  sheetRowFor,
+  validateArtIndex,
+  WALK_STRIDE_PX,
+  type ArtIndex,
+  type SheetPassport,
+} from '../src/world/art';
 import { tileCenterToWorld } from '../src/world/coords';
 import { createHornhoofLiveFixture, syncLiveSnapshotToCity } from '../src/world/live-sync';
 import { createResidentSimulation, stepResidentSimulation, type ResidentSimulation } from '../src/world/residents';
@@ -101,5 +112,66 @@ describe('Residents face where they walk on screen (#1983)', () => {
       checked += 1;
     }
     expect(checked, 'walkers with a step ahead').toBeGreaterThan(3);
+  });
+});
+
+/* #1983, Ivan: the feet never slide. In one walk cycle (frames / fps seconds) a resident covers exactly the stride its
+   sheet draws: `stride` master px of the E row, or the default measured on the pilot sheets. */
+describe('Residents cover one drawn stride per walk cycle (#1983)', () => {
+  const { live, synced } = city();
+  const master = masterTileW(EGYPT_WORLD_PACK);
+
+  function walkSheetIndex(lookId: string, extra: Partial<SheetPassport>): ArtIndex {
+    const passport = { frameW: 192, frameH: 256, frames: 8, fps: 10, anchor: { x: 96, y: 236 }, ...extra } as SheetPassport;
+    return { contract: 2, pack: 'egypt', files: { [personSheetPath(lookId, 1, 'walk')]: { w: 192 * passport.frames, h: 256 * 5, passport } } };
+  }
+
+  /* Walks one resident in a straight grid direction for one cycle and gives its move in master px on screen and in tiles. */
+  function oneCycle(extra: Partial<SheetPassport>, dc: number, dr: number) {
+    const sim = createResidentSimulation(EGYPT_WORLD_PACK, synced.city, live);
+    const r = sim.residents.find(x => x.liveState === 'working' && EGYPT_WORLD_PACK.art!.people!.looks.includes(x.look.id))!;
+    const index = walkSheetIndex(r.look.id, extra);
+    sim.walkSpeedOf = resident => residentWalkSpeed(EGYPT_WORLD_PACK, index, resident);
+    Object.assign(r, { col: 60, row: 60, path: [{ col: 60 + dc * 40, row: 60 + dr * 40 }], pathIndex: 0, actionTimer: 0, outfitTier: 1, pose: 'walking' });
+    const fps = extra.fps ?? 10;
+    const frames = extra.frames ?? 8;
+    const frameAt = () => resolveResidentArt(EGYPT_WORLD_PACK, index, r, sim.timeSec)!.layers[0]!.frame.x;
+    const startFrame = frameAt();
+    const cycle = frames / fps;
+    const steps = 40;
+    for (let i = 0; i < steps; i++) stepResidentSimulation(sim, cycle / steps);
+    const d = { dc: r.col - 60, dr: r.row - 60 };
+    return { screenX: ((d.dc - d.dr) * master) / 2, tiles: Math.hypot(d.dc, d.dr), sameFrame: frameAt() === startFrame };
+  }
+
+  it('walking east covers the default stride of the pilot sheets in one cycle, back on its first frame', () => {
+    const { screenX, sameFrame } = oneCycle({}, 1, -1);
+    expect(screenX).toBeCloseTo(WALK_STRIDE_PX, 0);
+    expect(sameFrame).toBe(true);
+  });
+
+  it('takes the stride and the cycle from the passport when the sheet carries them', () => {
+    const { screenX, sameFrame } = oneCycle({ stride: 120, frames: 6, fps: 12 }, 1, -1);
+    expect(screenX).toBeCloseTo(120, 0);
+    expect(sameFrame).toBe(true);
+  });
+
+  it('refuses a stride that is not a number of px above zero, which would stop the resident dead', () => {
+    const at = 'people/egypt-mason/tier_1/';
+    const sheetOf = (stride: unknown) => ({ w: 192 * 8, h: 256 * 5, passport: { frameW: 192, frameH: 256, frames: 8, fps: 10, anchor: { x: 96, y: 236 }, stride } as unknown as SheetPassport });
+    const report = validateArtIndex(EGYPT_WORLD_PACK, {
+      contract: 2,
+      pack: 'egypt',
+      files: { [`${at}walk.png`]: sheetOf(0), [`${at}carry.png`]: sheetOf('92') },
+    });
+    expect(report.errors.some(e => e.startsWith(`${at}walk.png`) && /stride/.test(e))).toBe(true);
+    expect(report.errors.some(e => e.startsWith(`${at}carry.png`) && /stride/.test(e))).toBe(true);
+    const fine = validateArtIndex(EGYPT_WORLD_PACK, { contract: 2, pack: 'egypt', files: { [`${at}walk.png`]: sheetOf(92) } });
+    expect(fine.errors.filter(e => /stride/.test(e))).toEqual([]);
+  });
+
+  it('covers the same ground in a cycle whichever way it walks, so the foreshortened rows keep their feet too', () => {
+    const east = oneCycle({}, 1, -1).tiles;
+    for (const [dc, dr] of GRID_STEPS) expect(oneCycle({}, dc, dr).tiles, `step (${dc}, ${dr})`).toBeCloseTo(east, 3);
   });
 });

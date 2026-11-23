@@ -99,6 +99,9 @@ export type SheetPassport = Readonly<{
   directions?: readonly UniqueRenderAngle5[];
   /* People, sleep: where the Z-z-z loop stands over the head, inside one frame. */
   headAnchor?: ArtPoint;
+  /* People, walking sheets: the master px the figure moves on in one cycle, as the E row draws it; without it
+     WALK_STRIDE_PX. The engine walks a resident one stride per cycle, so its feet never slide. */
+  stride?: number;
 }>;
 
 export type ArtPassport = BuildingPicturePassport | AnchorPassport | SheetPassport;
@@ -216,6 +219,9 @@ export function residentBody(agentId: string): ResidentBody {
 export const SLEEP_LOOP = 'loops/sleep_z.png';
 /* Where the head is above the feet when a sheet names no headAnchor: the standing 136 px figure's crown, less 10 px. */
 const STANDING_HEAD_PX = 146;
+/* The stride of a walking sheet that names none: on the pilot walk sheets (tier 1 mason, tier 3 architect) a planted
+   foot travels 46 master px in the E row in half a cycle of 8 frames. */
+export const WALK_STRIDE_PX = 92;
 
 export const POSE_ANIMATIONS: Readonly<Record<ResidentPose, ResidentAnimationId>> = {
   walking: 'walk',
@@ -485,8 +491,9 @@ export function artLayerPath(picturePath: string, file: string): string {
   return picturePath.slice(0, picturePath.lastIndexOf('/') + 1) + file;
 }
 
-/* The rows a person's sheet must hold: one per drawn direction it names, five without the field. */
+/* The rows a person's sheet must hold: one per drawn direction it names, five without the field; its stride checked too. */
 function personRows(path: string, entry: ArtIndexEntry, errors: string[]): number {
+  checkStride(path, entry, errors);
   const directions = (entry.passport as SheetPassport | undefined)?.directions;
   if (directions === undefined) return DIRECTION_ROWS.length;
   const list = Array.isArray(directions) ? (directions as readonly string[]) : [];
@@ -495,6 +502,12 @@ function personRows(path: string, entry: ArtIndexEntry, errors: string[]): numbe
   }
   if (new Set(list).size !== list.length) errors.push(`${path}: directions names a direction twice`);
   return Math.max(1, list.length);
+}
+
+/* A stride the engine walks by: px above zero, or none for the default. */
+function checkStride(path: string, entry: ArtIndexEntry, errors: string[]): void {
+  const stride = (entry.passport as SheetPassport | undefined)?.stride;
+  if (stride !== undefined && (!isFiniteNum(stride) || stride <= 0)) errors.push(`${path}: stride must be a number of px above zero`);
 }
 
 function checkSheet(path: string, entry: ArtIndexEntry, rows: number | null, errors: string[]): void {
@@ -1030,8 +1043,8 @@ type FoundSheet = Readonly<{ look: string; tier: number; anim: ResidentAnimation
 function sheetArt(index: ArtIndex, found: FoundSheet, resident: ResidentEntity, timeSec: number): ResidentArt {
   const s = found.entry.passport;
   const { row, mirror } = sheetRowFor(s.directions, resident.facing, FACING_ANIMATIONS.has(found.anim));
-  const phase = (resident.walkPhase / (Math.PI * 2)) * s.frames;
-  const frameIdx = ((Math.floor(timeSec * s.fps + phase) % s.frames) + s.frames) % s.frames;
+  /* The cycle runs on time alone, each resident from its own frame; the walking speed comes from the stride. */
+  const frameIdx = (Math.floor(timeSec * s.fps) + (hashSeed(resident.id) % s.frames)) % s.frames;
   const frame: ArtRect = { x: frameIdx * s.frameW, y: row * s.frameH, w: s.frameW, h: s.frameH };
   const layers: ResidentArtLayer[] = [{ path: found.path, frame, anchor: s.anchor }];
   const cloakPath = personSheetPath(found.look, found.tier, found.anim, true, found.body);
@@ -1052,13 +1065,27 @@ export function resolveResidentArt(
   resident: ResidentEntity,
   timeSec: number,
 ): ResidentArt | null {
+  const found = residentSheet(pack, index, resident);
+  return found && index ? sheetArt(index, found, resident, timeSec) : null;
+}
+
+/* The sheet a resident shows from the pack's art, its own look first, then its class's. */
+function residentSheet(pack: WorldPackManifest, index: ArtIndex | null, resident: ResidentEntity): FoundSheet | null {
   const people = pack.art?.people;
   if (!people || !index) return null;
   const looks = [resident.look.id, pack.classFallbackLooks?.[resident.roleClass]?.id].filter(
     (id): id is string => Boolean(id) && people.looks.includes(id!),
   );
-  if (looks.length === 0) return null;
+  return looks.length > 0 ? foundSheet(people, index, resident, looks) : null;
+}
 
+/* The sheet a resident shows: its pose's animation, else walking or standing, from its outfit tier down. */
+function foundSheet(
+  people: NonNullable<WorldArtCatalog['people']>,
+  index: ArtIndex,
+  resident: ResidentEntity,
+  looks: readonly string[],
+): FoundSheet | null {
   const wanted = POSE_ANIMATIONS[resident.pose] ?? 'idle';
   const anims: ResidentAnimationId[] = [wanted];
   if (MOVING_ANIMATIONS.has(wanted) && wanted !== 'walk') anims.push('walk');
@@ -1070,9 +1097,19 @@ export function resolveResidentArt(
     for (const anim of anims) {
       for (let tier = topTier; tier >= 1; tier--) {
         const found = bodySheet(index, look, tier, anim, bodies);
-        if (found) return sheetArt(index, { look, tier, anim, ...found }, resident, timeSec);
+        if (found) return { look, tier, anim, ...found };
       }
     }
   }
   return null;
+}
+
+/* Tiles a resident walks per second so the moving sheet it shows covers one stride per cycle; null when it shows no
+   moving sheet. A stride along the E row is a screen-level step of tile diagonals: master px * sqrt 2 / master tile. */
+export function residentWalkSpeed(pack: WorldPackManifest, index: ArtIndex | null, resident: ResidentEntity): number | null {
+  const found = residentSheet(pack, index, resident);
+  if (!found || !MOVING_ANIMATIONS.has(found.anim)) return null;
+  const s = found.entry.passport;
+  const strideTiles = ((s.stride ?? WALK_STRIDE_PX) * Math.SQRT2) / masterTileW(pack);
+  return (strideTiles * s.fps) / Math.max(1, s.frames);
 }

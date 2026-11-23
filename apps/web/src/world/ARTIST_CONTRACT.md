@@ -82,6 +82,7 @@ Every point must lie inside the picture; the picture must not be taller than its
 | `attach` | Loops only: `top`, `awning`, `door`, `ground` or `head` (section 8). |
 | `directions` | People only, optional: the drawn directions among N, NE, E, SE, S, one row each in this order (section 7). |
 | `headAnchor` | People, `sleep` only, optional: in one frame, where the sleeper's Z loop stands (section 7). |
+| `stride` | People, `walk` and `carry`, optional: px the figure moves on in one cycle, as the E row draws it; 92 without it (section 7). |
 
 ## 4. Buildings
 
@@ -225,6 +226,7 @@ A missing animation falls back to `walk` for moving states and to `idle` for the
 
 * **Sheet layout:** one row per drawn direction, in the order of the passport's `directions`; without the field 5 rows top to bottom N, NE, E, SE, S. Frames left to right; every frame the same size; the feet at the same `anchor` in every frame.
 * **Directions:** draw an animation only in the directions its meaning needs. The engine shows the nearest drawn direction or its mirror (SE, E and NE mirror to SW, W and NW). `pray` and `sad_sit` face the camera: drawn S only and shown as drawn whatever way the resident faces, never mirrored.
+* **Stride:** a walking sheet's `stride` is how far the figure moves on in one cycle, as the E row draws it: twice the distance a planted foot travels back in half a cycle. The engine walks a resident exactly one stride per cycle (`frames` / `fps` seconds), the same ground in every direction, so the feet do not slide. Without the field it takes 92 px, measured on the pilot walk sheets.
 * **The sleeper's Z:** `loops/sleep_z.png`, a loop sheet with `attach` `head`, its `anchor` at the bottom centre of the letters. The engine stands it at the `sleep` sheet's `headAnchor`, or 146 px above the feet without one, and never mirrors the letters.
 * **Cloak layer:** `<animation>.cloak.png`, exactly the same size and grid as its sheet, white or light grey where the cloak is and transparent elsewhere. The engine tints it with the subscription provider's colour from the pack palette, so one drawing serves every provider.
 * **Rig and baking:** characters may be rigged by parts (body, head, arms, legs, outfit, cloak, prop) at the 544 px source and baked to sheets at 136 px. Keep the cloak as its own baked layer, keep the light at 5200 K from the top left, bake no ground shadow, and keep the feet on the anchor so walking does not slide.

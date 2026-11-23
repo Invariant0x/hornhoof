@@ -462,6 +462,7 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 * **Facing poses** `pray` and `sad_sit` (v3): one row, `"directions": ["S"]`, shown as drawn whatever way the resident faces, never mirrored.
 * **`headAnchor`** (v3, `sleep` only, optional): the point in the frame above the head where `sleep_z` stands, e.g. `[60, 200]` for a figure lying along the ground. Without it the engine uses the standing head, 146 px above the `anchor`.
 * **Frames** run left to right, every frame the same size. The feet sit on the same `anchor` in every frame, so walking does not slide.
+* **`stride`** (v3, `walk` and `carry`, optional): how many px the figure moves on in one cycle, as the E row draws it: twice the distance a planted foot travels back in half a cycle. The engine walks the resident exactly one stride per cycle (`frames` / `fps` seconds), so the feet do not slide, and the same ground in every direction. Without it the engine takes 92 px, measured on the pilot walk sheets (a planted foot travels 46 px in 4 of 8 frames). Example: `"stride": 92`.
 * **Suggested frame:** 192 x 256 px with the feet at `[96, 236]`. The person is 136 px tall and stands from y 100 to y 236; the room above holds a stone on the head, a banner or a raised spear.
 * Rig and bake as the contract says: parts at the 544 px source baked down to 136 px, the cloak as its own baked layer, no ground shadow.
 * **Camera: the one exception to the 30 degrees of section 1.** Residents are drawn with an orthographic camera tilted 19 degrees down (Ivan's word, 23.11.2026): at 30 degrees the shoulders came out 24% wider and a step looked like a hop. Buildings, ground and the construction kit stay at 30 degrees. The sheet format does not change: 5 rows N to S, frame 192 x 256, feet at `[96, 236]`, the person 136 px tall.
@@ -470,7 +471,7 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 Passport of an 8-frame walk with that frame (sheet 1536 x 1280):
 
 ```json
-{ "frameW": 192, "frameH": 256, "frames": 8, "fps": 10, "anchor": [96, 236] }
+{ "frameW": 192, "frameH": 256, "frames": 8, "fps": 10, "anchor": [96, 236], "stride": 92 }
 ```
 
 An idle drawn facing SE only (sheet 768 x 256), and a sleep lying along the ground with its Z point:

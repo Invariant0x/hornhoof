@@ -99,6 +99,9 @@ export type ResidentEntity = {
 export type ResidentSimulation = {
   packId: string;
   timeSec: number;
+  /* Tiles per second a resident walks so its drawn stride fits one walk cycle, set by the renderer from the sheet it
+     shows; null or unset keeps the resident's own speed. */
+  walkSpeedOf?: (resident: ResidentEntity) => number | null;
   altarTile: TileCoord;
   altarLabel: Readonly<{ en: string; ru: string }>;
   residents: ResidentEntity[];
@@ -151,7 +154,13 @@ function facingOfStep(dc: number, dr: number): Direction8 {
   return order[oct] ?? 'S';
 }
 
-/* A new resident faces its first step on the path, or the spot it stands round; the camera only with neither. */
+/* Tiles per second a resident walks: what its drawn stride asks for, else its own speed. */
+function walkSpeed(sim: ResidentSimulation, r: ResidentEntity): number {
+  return sim.walkSpeedOf?.(r) ?? r.speedTilesPerSec;
+}
+
+/* A new resident faces its first step on the path (a resident not at work has its focal spot for a path), or the spot it
+   stands round; the camera only with neither. */
 function startFacing(path: readonly TileCoord[], from: number, at: TileCoord, focus: TileCoord): Direction8 {
   const next = path.slice(from).find(p => Math.hypot(p.col - at.col, p.row - at.row) > 1e-3) ?? focus;
   return facingOfStep(next.col - at.col, next.row - at.row);
@@ -638,7 +647,7 @@ export function createResidentSimulation(
       talkingToAgentId: agent.talkingToAgentId ?? null,
       col: startPt.col,
       row: startPt.row,
-      facing: liveState === 'working' ? startFacing(initialPath, startIdx, startPt, workTile) : startFacing([], 0, startPt, basePt),
+      facing: startFacing(initialPath, startIdx, startPt, basePt),
       walkPhase: (hashStr(agent.id) % 628) / 100,
       speedTilesPerSec:
         archetype === 'firefighter' || archetype === 'red_team'
@@ -922,7 +931,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
     const dc = target.col - r.col;
     const dr = target.row - r.row;
     const dist = Math.hypot(dc, dr);
-    const step = r.speedTilesPerSec * dt;
+    const step = walkSpeed(sim, r) * dt;
 
     let movedTiles = 0;
     if (dist <= step) {
