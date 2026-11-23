@@ -29,19 +29,19 @@ function NoShare({ sub, limits, named }: { sub: SubView; limits: Limits | null; 
   return <>{limits?.complete && !named ? t.subs.notOnPlan : unknownLimitData(t, language, sub)}</>;
 }
 
-function LimitGauge({ sub, name, limits, now, showBar }: { sub: SubView; name: string; limits: Limits | null; now: number; showBar: boolean }) {
+function LimitGauge({ sub, name, limits, now }: { sub: SubView; name: string; limits: Limits | null; now: number }) {
   const t = useT();
   const { w, used } = windowUse(limits, name);
   const figure = used === null ? <NoShare sub={sub} limits={limits} named={Boolean(w)} /> : <bdi dir="ltr"><Share>{`${percent(used)}%`}</Share></bdi>;
-  return <Gauge label={<WindowName name={name} />} figure={figure} unit={used === null ? undefined : t.cards.used} empty={used === null} used={showBar ? used : undefined} sub={w && <ResetTime at={w.resetsAt} now={now} />} />;
+  return <Gauge label={<WindowName name={name} />} figure={figure} unit={used === null ? undefined : t.cards.used} empty={used === null} used={used} sub={w && <ResetTime at={w.resetsAt} now={now} />} />;
 }
 
 /* The gauges of the plan's limits as a whole, or of one group of its models. */
-function Gauges({ sub, limits, now, showBars = true }: { sub: SubView; limits: Limits | null; now: number; showBars?: boolean }) {
+function Gauges({ sub, limits, now }: { sub: SubView; limits: Limits | null; now: number }) {
   const t = useT();
   const state = limitState(limits, now);
   const names = [...MAIN_WINDOWS, ...(limits?.windows ?? []).filter(w => !MAIN_WINDOWS.includes(w.name) && w.utilization !== null).map(w => w.name)];
-  return <div className="gauges" role="group" aria-label={state.reached ? t.subs.limitReached(resetDurationAt(t, state.resetsAt, now)) : t.subs.limits}>{names.map(name => <LimitGauge key={name} sub={sub} name={name} limits={limits} now={now} showBar={showBars} />)}</div>;
+  return <div className="gauges" role="group" aria-label={state.reached ? t.subs.limitReached(resetDurationAt(t, state.resetsAt, now)) : t.subs.limits}>{names.map(name => <LimitGauge key={name} sub={sub} name={name} limits={limits} now={now} />)}</div>;
 }
 
 /* A group's limits read as the plan's own: its windows, its state, and whether it names every window it has. */
@@ -63,9 +63,9 @@ export function LimitMeters({ sub, now, model }: { sub: SubView; now: number; mo
 }
 
 /* Each group's limits in a part of its own, under the group's name. */
-function GroupParts({ sub, groups, now, main }: { sub: SubView; groups: LimitGroup[]; now: number; main?: LimitGroup }) {
+function GroupParts({ sub, groups, now }: { sub: SubView; groups: LimitGroup[]; now: number }) {
   const t = useT();
-  return <>{groups.map(group => <Part key={group.name} title={t.subs.groupLimits(group.name)}><Gauges sub={sub} limits={groupLimits(group)} now={now} showBars={!main || group === main} /></Part>)}</>;
+  return <>{groups.map(group => <Part key={group.name} title={t.subs.groupLimits(group.name)}><Gauges sub={sub} limits={groupLimits(group)} now={now} /></Part>)}</>;
 }
 
 /* The plan card's limits: one part for each group of models the plan keeps its limits by, under the group's own name,
@@ -73,9 +73,8 @@ function GroupParts({ sub, groups, now, main }: { sub: SubView; groups: LimitGro
 export function PlanLimitParts({ sub, now }: { sub: SubView; now: number }) {
   const t = useT();
   const groups = sub.kind === 'api_key' ? undefined : currentPlanLimits(sub, now)?.groups;
-  const main = mainLimitGroup(sub, groups);
-  if (!groups || !main) return <Part title={t.subs.limits}><LimitMeters sub={sub} now={now} /></Part>;
-  return <GroupParts sub={sub} groups={groups} now={now} main={main} />;
+  if (!groups?.length) return <Part title={t.subs.limits}><LimitMeters sub={sub} now={now} /></Part>;
+  return <GroupParts sub={sub} groups={groups} now={now} />;
 }
 
 /* A window's used share, then when it resets, as one phrase of the dictionary, whole in the direction of its words: the

@@ -29,19 +29,31 @@ const serve = (sub: SubView) => lists({ 'GET /api/subscriptions': [200, { subscr
 const agentOn = (id: string, model: string): RunningAgent => ({ ...RUNNING_AGENTS[0]!, id, name: id, model });
 
 describe('a plan that keeps its limits by model group', () => {
-  it("shows each group on its card with its usage and reset, and bars for the plan's main group", async () => {
-    serve(AGY);
+  it('shows each group on its card with its usage, reset, visible bar track and full fill at 100%', async () => {
+    const zeroAndFull: SubView = {
+      ...AGY,
+      limits: {
+        ...GROUPED,
+        groups: [
+          { ...GEMINI, windows: [{ name: 'five_hour', utilization: 0, resetsAt: '2099-11-19T22:00:00.000Z' }, { name: 'seven_day', utilization: 0.1, resetsAt: '2099-11-24T10:00:00.000Z' }] },
+          OTHERS,
+        ],
+      },
+    };
+    serve(zeroAndFull);
     render(<Subscriptions me={ME} />);
     await openAll();
     const card = rowOf('Antigravity');
     expect(within(card).queryByRole('heading', { name: 'Limits' })).toBeNull();
-    for (const [group, shares] of [['Gemini Models', ['10%', '6%']], ['Claude and GPT models', ['100%', '100%']]] as const) {
+    for (const [group, shares, maxBars] of [['Gemini Models', ['0%', '10%'], 0], ['Claude and GPT models', ['100%', '100%'], 2]] as const) {
       const part = within(card).getByRole('heading', { name: `Limits: ${group}` }).closest('section')!;
       const gauges = [...part.querySelectorAll('.gauge')];
       expect(gauges.map(g => g.querySelector('.g-l')!.textContent)).toEqual(['5\u00a0hours', '7\u00a0days']);
       expect(gauges.map(g => g.querySelector('.g-f b')!.textContent)).toEqual(shares);
       for (const g of gauges) expect(g.querySelector('.g-s')!.textContent).toMatch(/^resets in /);
-      expect(part.querySelectorAll('.bar')).toHaveLength(group === 'Gemini Models' ? 2 : 0);
+      expect(part.querySelectorAll('.bar')).toHaveLength(2);
+      expect(part.querySelectorAll('.bar.max')).toHaveLength(maxBars);
+      expect([...part.querySelectorAll<HTMLElement>('.bar i')].map(fill => fill.style.width)).toEqual(shares);
     }
   });
 
