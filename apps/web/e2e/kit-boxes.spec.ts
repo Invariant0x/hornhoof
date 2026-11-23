@@ -236,6 +236,21 @@ for (const language of ['en', 'ru'] as const) {
         if (process.env.HH_SCREENSHOT_DIR) await capture(page, info, `department-panel-${language}-${width}`);
       });
 
+      test(`shows nothing square behind a card painted whole: its wrapper paints no fill and no lines, ${language} ${width}`, async ({ page }) => {
+        await setup(page, language, width, true);
+        await page.goto('/machines');
+        await expect(page.getByRole('heading', { name: t.phones.heading })).toBeVisible();
+        await kitDrawn(page);
+        const card = page.locator('.phone-cards .wcard').first();
+        await expect(card.locator(':scope > .edge')).toBeVisible();
+        const painted = await card.evaluate(wrapper => {
+          const style = getComputedStyle(wrapper);
+          const face = getComputedStyle(wrapper.querySelector(':scope > .edge')!).borderImageSource;
+          return { face: face !== 'none', fill: style.backgroundImage, color: style.backgroundColor, lines: style.boxShadow };
+        });
+        expect(painted).toEqual({ face: true, fill: 'none', color: 'rgba(0, 0, 0, 0)', lines: 'none' });
+      });
+
       test(`keeps a field in error marked in pink once focus leaves it, and its focus ring while it has focus, ${language} ${width}`, async ({ page }) => {
         await setup(page, language, width, true);
         await page.goto('/about');
