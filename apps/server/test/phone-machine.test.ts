@@ -125,6 +125,13 @@ describe('a phone that is a machine of the company', () => {
     expect(phone.queued()).toBe(0);
   });
 
+  it('takes a limit of programs only for a phone: a computer runs as many as its memory takes', async () => {
+    const { app, db, ceo, machine } = await planOnPhone();
+    const [computer] = await db.insert(machines).values({ companyId: machine.companyId, personId: machine.personId, machineKey: 'computer-0001-abcd', hostname: 'desk', os: 'linux', arch: 'x86_64' }).returning();
+    expect((await app.inject({ method: 'PATCH', url: `/api/machines/${computer!.id}`, payload: { sessions: 1 }, ...as(ceo) })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'PATCH', url: `/api/machines/${machine.id}`, payload: { sessions: 1 }, ...as(ceo) })).json()).toMatchObject({ sessions: 1 });
+  });
+
   it('lets a turn of a program that runs there go on, at its limit too', async () => {
     const { app, ceo, phone, bruno, online } = await planOnPhone();
     await online([bruno.id]);
