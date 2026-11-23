@@ -25,6 +25,7 @@ import {
   type ArtIndexEntry,
   type ArtPassport,
 } from '../src/world/art';
+import type { WorldPackManifest } from '../src/world/manifest';
 import { resolveWorldPack } from '../src/world-packs/registry';
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -127,63 +128,84 @@ export type DistArtCheckOptions = Readonly<{
   print: (line: string) => void;
 }>;
 
+/* The dist's art index, or in words why the build has none. */
+function readDistIndex(folder: string, label: string): ArtIndex | string {
+  const indexPath = join(folder, ART_INDEX_FILE);
+  if (!existsSync(indexPath)) return `${label}/${ART_INDEX_FILE} is missing`;
+  let index: Partial<ArtIndex> | null;
+  try {
+    index = JSON.parse(readFileSync(indexPath, 'utf8')) as Partial<ArtIndex> | null;
+  } catch (err) {
+    return `${label}/${ART_INDEX_FILE} is not readable JSON: ${(err as Error).message}`;
+  }
+  return typeof index?.files === 'object' && index.files ? (index as ArtIndex) : `${label}/${ART_INDEX_FILE} has no files list`;
+}
+
+function distFileProblem(folder: string, label: string, path: string, entry: ArtIndexEntry): string | null {
+  const full = join(folder, path);
+  const size = existsSync(full) ? readPngSize(readFileSync(full)) : null;
+  if (!size) return `${label}/${path} is listed but not in the build`;
+  if (size.w === entry.w && size.h === entry.h) return null;
+  return `${label}/${path} is ${size.w} x ${size.h} in the build, the index says ${entry.w} x ${entry.h}`;
+}
+
+function drawnFiles(pack: WorldPackManifest, index: ArtIndex): string[] {
+  const declared = new Set(declaredArtFiles(pack).map(d => d.path));
+  return Object.keys(index.files).filter(path => declared.has(path));
+}
+
+function distIndexProblem(pack: WorldPackManifest, folder: string, label: string, index: ArtIndex): string | null {
+  const { errors } = validateArtIndex(pack, index);
+  if (errors.length > 0) return `${label}/${ART_INDEX_FILE}: ${errors.join('; ')}`;
+  if (drawnFiles(pack, index).length === 0) return `${label}/${ART_INDEX_FILE} lists no art the pack draws`;
+  for (const [path, entry] of Object.entries(index.files)) {
+    const problem = distFileProblem(folder, label, path, entry);
+    if (problem) return problem;
+  }
+  return null;
+}
+
+function distFailed(opts: DistArtCheckOptions, problem: string): { ok: false } {
+  opts.print(`ERROR ${problem} (web dist ${opts.dist}).`);
+  opts.print(`The build would show the placeholder look of pack "${opts.pack}" instead of its art.`);
+  return { ok: false };
+}
+
 /* The production check: the built web dist must hold the pack's art index, with art the pack draws, and every file it lists. */
 export function checkDistArt(opts: DistArtCheckOptions): { ok: boolean } {
-  const fail = (line: string): { ok: false } => {
-    opts.print(`ERROR ${line}`);
-    opts.print(`The build would show the placeholder look of pack "${opts.pack}" instead of its art.`);
-    return { ok: false };
-  };
   const pack = resolveWorldPack(opts.pack);
   if (!pack?.art) {
     opts.print(`Unknown pack "${opts.pack}" or a pack without an art catalog.`);
     return { ok: false };
   }
-  const rel = `world-art/${pack.id}/${ART_INDEX_FILE}`;
+  const label = `world-art/${pack.id}`;
   const folder = join(opts.dist, 'world-art', pack.id);
-  const indexPath = join(folder, ART_INDEX_FILE);
-  if (!existsSync(indexPath)) return fail(`${rel} is missing from ${opts.dist}.`);
-  let index: ArtIndex;
-  try {
-    index = JSON.parse(readFileSync(indexPath, 'utf8')) as ArtIndex;
-  } catch (err) {
-    return fail(`${rel} is not readable JSON: ${(err as Error).message}`);
-  }
-  if (!index || typeof index !== 'object' || !index.files || typeof index.files !== 'object') {
-    return fail(`${rel} has no files list.`);
-  }
-  const report = validateArtIndex(pack, index);
-  if (report.errors.length > 0) return fail(`${rel}: ${report.errors.join('; ')}`);
-  const declared = new Set(declaredArtFiles(pack).map(d => d.path));
-  const drawn = Object.keys(index.files).filter(path => declared.has(path));
-  if (drawn.length === 0) return fail(`${rel} lists no art the pack draws.`);
-  for (const [path, entry] of Object.entries(index.files)) {
-    const full = join(folder, path);
-    const size = existsSync(full) ? readPngSize(readFileSync(full)) : null;
-    if (!size) return fail(`world-art/${pack.id}/${path} is listed but not in the build.`);
-    if (size.w !== entry.w || size.h !== entry.h) {
-      return fail(`world-art/${pack.id}/${path} is ${size.w} x ${size.h} in the build, the index says ${entry.w} x ${entry.h}.`);
-    }
-  }
-  opts.print(`${drawn.length} art files of pack "${pack.id}" in the build (${Object.keys(index.files).length} files listed in all).`);
+  const index = readDistIndex(folder, label);
+  if (typeof index === 'string') return distFailed(opts, index);
+  const problem = distIndexProblem(pack, folder, label, index);
+  if (problem) return distFailed(opts, problem);
+  opts.print(`${drawnFiles(pack, index).length} art files of pack "${pack.id}" in the build (${Object.keys(index.files).length} files listed in all).`);
   return { ok: true };
 }
 
+const USAGE = 'Usage: world-art-index.ts <art folder> --pack <id> [--write] | --pack <id> --list | --dist <web dist> --pack <id>';
+
+function flagValue(argv: readonly string[], flag: string): string | undefined {
+  const value = argv[argv.indexOf(flag) + 1];
+  return argv.includes(flag) && value && !value.startsWith('--') ? value : undefined;
+}
+
 export function main(argv: readonly string[], print: (line: string) => void = l => console.log(l)): number {
-  const valueOf = (flag: string): string | undefined => {
-    const at = argv.indexOf(flag);
-    return at >= 0 ? argv[at + 1] : undefined;
-  };
-  const pack = valueOf('--pack');
-  const dist = valueOf('--dist');
-  const usage = 'Usage: world-art-index.ts <art folder> --pack <id> [--write] | --pack <id> --list | --dist <web dist> --pack <id>';
+  const pack = flagValue(argv, '--pack');
+  const dist = flagValue(argv, '--dist');
   if (!pack || (argv.includes('--dist') && !dist)) {
-    print(usage);
+    print(USAGE);
     return 2;
   }
-  if (dist) return checkDistArt({ dist, pack, print }).ok ? 0 : 1;
   const folder = argv.find((a, i) => !a.startsWith('--') && argv[i - 1] !== '--pack') ?? null;
-  const result = runArtCheck({ folder, pack, write: argv.includes('--write'), list: argv.includes('--list'), print });
+  const result = dist
+    ? checkDistArt({ dist, pack, print })
+    : runArtCheck({ folder, pack, write: argv.includes('--write'), list: argv.includes('--list'), print });
   return result.ok ? 0 : 1;
 }
 

@@ -164,6 +164,10 @@ describe('Production build art check: fails when the web dist has no world-art/<
     const a: string[] = [];
     expect(checkDistArt({ dist: broken, pack: 'egypt', print: l => a.push(l) }).ok).toBe(false);
     expect(a.join('\n')).toMatch(/art-index\.json is not readable/);
+    put(broken, 'world-art/egypt/art-index.json', 'null');
+    const n: string[] = [];
+    expect(checkDistArt({ dist: broken, pack: 'egypt', print: l => n.push(l) }).ok).toBe(false);
+    expect(n.join('\n')).toMatch(/art-index\.json has no files list/);
 
     const dist = distWithArt();
     rmSync(join(dist, 'world-art/egypt/buildings/department/shrine/complete.png'));
@@ -186,6 +190,28 @@ describe('Production build art check: fails when the web dist has no world-art/<
     const quiet = (): void => {};
     expect(main(['--dist', tempArt(), '--pack', 'egypt'], quiet)).toBe(1);
     expect(main(['--dist', distWithArt(), '--pack', 'egypt'], quiet)).toBe(0);
-    expect(main(['--dist'], quiet)).toBe(2);
+    expect(main(['--dist', '--pack', 'egypt'], quiet)).toBe(2);
+    expect(main(['--dist', tempArt()], quiet)).toBe(2);
+  });
+
+  it('keeps the artist commands of the same script: --list and a folder check', () => {
+    const lines: string[] = [];
+    expect(main(['--pack', 'egypt', '--list'], l => lines.push(l))).toBe(0);
+    expect(lines).toContain('required  buildings/house/hut/complete.png');
+    const root = tempArt();
+    put(root, 'buildings/department/shrine/complete.png', pngHeader(736, 900));
+    put(root, 'buildings/department/shrine/complete.json', JSON.stringify({ groundAnchor: [100, 100] }));
+    expect(main([root, '--pack', 'egypt'], () => {})).toBe(1);
+  });
+
+  it('fails a dist whose file has another size than its index says, and an unknown pack', () => {
+    const dist = distWithArt();
+    put(dist, 'world-art/egypt/buildings/department/shrine/complete.png', pngHeader(700, 900));
+    const lines: string[] = [];
+    expect(checkDistArt({ dist, pack: 'egypt', print: l => lines.push(l) }).ok).toBe(false);
+    expect(lines.join('\n')).toMatch(/complete\.png is 700 x 900 in the build, the index says 736 x 900/);
+    const other: string[] = [];
+    expect(checkDistArt({ dist, pack: 'nope', print: l => other.push(l) }).ok).toBe(false);
+    expect(other.join('\n')).toMatch(/Unknown pack "nope"/);
   });
 });
