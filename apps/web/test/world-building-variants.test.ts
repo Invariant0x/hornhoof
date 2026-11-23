@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { declaredArtFiles, resolveBuildingArt, variantStepOf, type ArtIndex, type ArtIndexEntry } from '../src/world/art';
+import { declaredArtFiles, resolveBuildingArt, validateArtIndex, variantStepOf, type ArtIndex, type ArtIndexEntry } from '../src/world/art';
 import { chooseBuildingVariants } from '../src/world/building-variants';
 import type { CityBuilding } from '../src/world/city-layout';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
@@ -89,6 +89,24 @@ describe('Variant folders in the art (#1975)', () => {
     expect(files.some(f => f.path === 'buildings/house/hut/complete.png')).toBe(false);
     expect(variantStepOf(EGYPT_WORLD_PACK, hut)).toEqual({ key: 'house/hut', count: 15 });
     expect(variantStepOf(EGYPT_WORLD_PACK, { ...hut, kind: 'district_hub', stage: 1 })).toBeNull();
+  });
+
+  it('checks a variant picture against its step’s footprint, as any other picture of the step', () => {
+    const wide: ArtIndexEntry = { ...picture, w: 720, h: 760 };
+    const report = validateArtIndex(EGYPT_WORLD_PACK, {
+      contract: 2,
+      pack: 'egypt',
+      files: { 'buildings/house/hut/v01/complete.png': picture, 'buildings/house/hut/v02/complete.png': { ...wide, passport: { groundAnchor: { x: 360, y: 559 }, corners: { top: { x: 360, y: 379 }, right: { x: 720, y: 559 }, bottom: { x: 360, y: 739 }, left: { x: 0, y: 559 } } } } },
+    });
+    expect(report.errors.filter(e => e.startsWith('buildings/house/hut/v01/'))).toEqual([]);
+    expect(report.errors).toContain('buildings/house/hut/v02/complete.png: diamond width 720 px does not match footprint 2x2 (480 px)');
+  });
+
+  it('gives a home the lot of its largest step in every pack with house art', () => {
+    for (const pack of [EGYPT_WORLD_PACK]) {
+      const largest = Math.max(...(pack.art?.buildings.house ?? []).map(s => Number(s.footprint.split('x')[0])));
+      expect(pack.buildingLayout?.house?.spans.at(-1), pack.id).toBe(largest);
+    }
   });
 
   it('draws the chosen variant, the next delivered one when it is missing, and nothing without art', () => {

@@ -295,10 +295,10 @@ export function workSlotsForBuilding(
     const tierElev = Math.round(16 + progress * (sc >= 6 ? 78 : 52));
 
     /* Place the 2-worker sled team on an open ground lane beside the monument (never overlapping another roof!). */
-    const sledCandidates: Array<{ col: number; row: number; facing: 'N' | 'W' | 'E' }> = [
+    /* Only in front of the monument: a worker behind it would face a back wall, which is never drawn (#1975). */
+    const sledCandidates: Array<{ col: number; row: number; facing: 'N' | 'W' }> = [
       { col: c0 + sc * 0.55, row: r0 + sr + 0.75, facing: 'N' },
       { col: c0 + sc + 0.75, row: r0 + sr * 0.55, facing: 'W' },
-      { col: c0 - 0.8, row: r0 + sr * 0.65, facing: 'E' },
     ];
     const sledSpot = sledCandidates.find(pt => isGroundClear(pt.col, pt.row) && isGroundClear(pt.col + 0.6, pt.row));
     if (sledSpot) {
@@ -327,7 +327,7 @@ export function workSlotsForBuilding(
       col: c0 + sc * 0.52,
       row: r0 + sr * 0.52,
       elevationPx: tierElev,
-      facing: 'S',
+      facing: 'N',
     });
     return slots;
   }
@@ -367,7 +367,7 @@ export function workSlotsForBuilding(
     if (spec.openInteriorVisible) {
       /* Workers visibly laying walls inside the exposed interior rooms! */
       slots.push(
-        { id: `${building.id}-int-1`, action: 'interior_mason', col: c0 + sc * 0.34, row: r0 + sr * 0.44, elevationPx: 5, facing: 'E' },
+        { id: `${building.id}-int-1`, action: 'interior_mason', col: c0 + sc * 0.34, row: r0 + sr * 0.44, elevationPx: 5, facing: 'N' },
         { id: `${building.id}-int-2`, action: 'interior_mason', col: c0 + sc * 0.68, row: r0 + sr * 0.64, elevationPx: 5, facing: 'W' },
       );
     }

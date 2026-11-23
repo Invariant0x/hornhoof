@@ -126,6 +126,8 @@ function artLoopAnchors(
     awning: p.awningAnchor ? at(p.awningAnchor) : top,
     door: p.door ? at(p.door) : ctr,
     ground: ctr,
+    /* A resident's point (the sleeper's Z): on a building it goes where the top loops go. */
+    head: top,
   };
 }
 

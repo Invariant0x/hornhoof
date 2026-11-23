@@ -17,6 +17,7 @@ import {
   type UniqueRenderAngle5,
   type WorldPackManifest,
 } from './manifest';
+import { hashSeed } from './prng';
 import type { ResidentEntity, ResidentPose } from './residents';
 
 export const ART_CONTRACT_VERSION = 2;
@@ -81,7 +82,7 @@ export type ArtLayerSpec = Readonly<{
 /* Passport of a small attached picture (flag, capstone): the point that touches its parent. */
 export type AnchorPassport = Readonly<{ anchor: ArtPoint }>;
 
-export type LoopAttachPoint = 'top' | 'awning' | 'door' | 'ground';
+export type LoopAttachPoint = 'top' | 'awning' | 'door' | 'ground' | 'head';
 
 /* Passport of an animation sheet: frames left to right; people have one row per direction. */
 export type SheetPassport = Readonly<{
@@ -92,6 +93,10 @@ export type SheetPassport = Readonly<{
   /* Feet point for people, attach point for loops, inside one frame. */
   anchor: ArtPoint;
   attach?: LoopAttachPoint;
+  /* People: the drawn directions, one row each in this order; without it the five rows N, NE, E, SE, S. */
+  directions?: readonly UniqueRenderAngle5[];
+  /* People, sleep: where the Z-z-z loop stands over the head, inside one frame. */
+  headAnchor?: ArtPoint;
 }>;
 
 export type ArtPassport = BuildingPicturePassport | AnchorPassport | SheetPassport;
@@ -189,8 +194,26 @@ export const RESIDENT_ANIMATION_IDS = [
   'pray',
   'broken_tool',
   'sleep',
+  'sad_sit',
 ] as const;
 export type ResidentAnimationId = (typeof RESIDENT_ANIMATION_IDS)[number];
+
+/* Poses drawn facing the camera: shown as drawn whatever way the resident faces, never mirrored. */
+const FACING_ANIMATIONS: ReadonlySet<ResidentAnimationId> = new Set(['pray', 'sad_sit']);
+
+/* Body types of residents; male_slim sheets lie directly in the tier folder, the others in a folder of their name. */
+export const RESIDENT_BODIES = ['male_slim', 'female_slim', 'male_heavy', 'female_full'] as const;
+export type ResidentBody = (typeof RESIDENT_BODIES)[number];
+
+/* A resident's body type, from its agent's id so it stays the same in every session. */
+export function residentBody(agentId: string): ResidentBody {
+  return RESIDENT_BODIES[hashSeed(agentId) % RESIDENT_BODIES.length]!;
+}
+
+/* The sleeper's Z-z-z loop, placed at the sleep sheet's headAnchor. */
+export const SLEEP_LOOP = 'loops/sleep_z.png';
+/* Where the head is above the feet when a sheet names no headAnchor: the standing 136 px figure's crown, less 10 px. */
+const STANDING_HEAD_PX = 146;
 
 export const POSE_ANIMATIONS: Readonly<Record<ResidentPose, ResidentAnimationId>> = {
   walking: 'walk',
@@ -254,8 +277,9 @@ export function modulePath(footprint: FootprintKey, module: (typeof CONSTRUCTION
   return `modules/${footprint}/${module}.png`;
 }
 
-export function personSheetPath(lookId: string, tier: number, anim: ResidentAnimationId, cloak = false): string {
-  return `people/${lookId}/tier_${tier}/${anim}${cloak ? '.cloak' : ''}.png`;
+export function personSheetPath(lookId: string, tier: number, anim: ResidentAnimationId, cloak = false, body: ResidentBody = 'male_slim'): string {
+  const folder = body === 'male_slim' ? '' : `${body}/`;
+  return `people/${lookId}/tier_${tier}/${folder}${anim}${cloak ? '.cloak' : ''}.png`;
 }
 
 /* The files of one step's folder (or one variant's), with `at` naming a picture's path. */
@@ -330,9 +354,11 @@ export function declaredArtFiles(pack: WorldPackManifest): readonly DeclaredArtF
     for (const look of art.people.looks) {
       for (let tier = 1; tier <= art.people.tiers; tier++) {
         for (const anim of RESIDENT_ANIMATION_IDS) {
-          const base = personSheetPath(look, tier, anim);
-          out.push({ path: base, role: 'person', passport: 'sheet', required: tier === 1 });
-          out.push({ path: personSheetPath(look, tier, anim, true), role: 'cloak', passport: 'none', required: false, baseSheet: base });
+          for (const body of RESIDENT_BODIES) {
+            const base = personSheetPath(look, tier, anim, false, body);
+            out.push({ path: base, role: 'person', passport: 'sheet', required: tier === 1 && body === 'male_slim' });
+            out.push({ path: personSheetPath(look, tier, anim, true, body), role: 'cloak', passport: 'none', required: false, baseSheet: base });
+          }
         }
       }
     }
@@ -341,6 +367,7 @@ export function declaredArtFiles(pack: WorldPackManifest): readonly DeclaredArtF
   for (const loop of art.loops ?? []) {
     out.push({ path: `loops/${loop}.png`, role: 'loop', passport: 'sheet', required: true });
   }
+  if (art.people) out.push({ path: SLEEP_LOOP, role: 'loop', passport: 'sheet', required: false });
   return out;
 }
 
@@ -451,6 +478,18 @@ export function artLayerPath(picturePath: string, file: string): string {
   return picturePath.slice(0, picturePath.lastIndexOf('/') + 1) + file;
 }
 
+/* The rows a person's sheet must hold: one per drawn direction it names, five without the field. */
+function personRows(path: string, entry: ArtIndexEntry, errors: string[]): number {
+  const directions = (entry.passport as SheetPassport | undefined)?.directions;
+  if (directions === undefined) return DIRECTION_ROWS.length;
+  const list = Array.isArray(directions) ? (directions as readonly string[]) : [];
+  if (list.length === 0 || list.some(d => !(DIRECTION_ROWS as readonly string[]).includes(d))) {
+    errors.push(`${path}: directions must name drawn ones among N, NE, E, SE, S`);
+  }
+  if (new Set(list).size !== list.length) errors.push(`${path}: directions names a direction twice`);
+  return Math.max(1, list.length);
+}
+
 function checkSheet(path: string, entry: ArtIndexEntry, rows: number | null, errors: string[]): void {
   const s = entry.passport as SheetPassport | undefined;
   if (!s || !isFiniteNum(s.frameW) || !isFiniteNum(s.frameH) || !isFiniteNum(s.frames) || !isFiniteNum(s.fps) || !isPoint(s.anchor)) {
@@ -465,7 +504,7 @@ function checkSheet(path: string, entry: ArtIndexEntry, rows: number | null, err
   }
   if (rows !== null) {
     if (entry.h !== s.frameH * rows) {
-      errors.push(`${path}: height ${entry.h} px must hold ${rows} direction rows of ${s.frameH} px (N, NE, E, SE, S)`);
+      errors.push(`${path}: height ${entry.h} px must hold ${rows} direction rows of ${s.frameH} px, one per drawn direction`);
     }
   } else if (entry.h % s.frameH !== 0 || entry.h === 0) {
     errors.push(`${path}: height ${entry.h} px must be a whole number of ${s.frameH} px rows`);
@@ -491,7 +530,10 @@ export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtI
 
   const footprintOf = new Map<string, FootprintKey>();
   for (const [kindKey, steps] of Object.entries(pack.art?.buildings ?? {})) {
-    for (const step of steps ?? []) footprintOf.set(`buildings/${kindKey}/${step.id}/`, step.footprint);
+    for (const step of steps ?? []) {
+      footprintOf.set(stepFolder(kindKey as BuildingKind, step), step.footprint);
+      for (let v = 0; v < (step.variants ?? 0); v++) footprintOf.set(stepFolder(kindKey as BuildingKind, step, v), step.footprint);
+    }
   }
 
   /* Layer files are declared by the passports that name them and must match their picture's canvas. */
@@ -531,7 +573,7 @@ export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtI
         errors.push(`${path}: needs a passport with an anchor inside the picture`);
       }
     } else if (slot.passport === 'sheet') {
-      checkSheet(path, entry, slot.role === 'person' ? DIRECTION_ROWS.length : null, errors);
+      checkSheet(path, entry, slot.role === 'person' ? personRows(path, entry, errors) : null, errors);
     } else if (slot.role === 'cloak' && slot.baseSheet) {
       const base = index.files[slot.baseSheet];
       if (!base) {
@@ -869,14 +911,56 @@ export function artFootprintCentre(
   return tileTopVertexToWorld(building.col + building.spanCol / 2, building.row + building.spanRow / 2, tileW, tileH);
 }
 
-export type ResidentArtLayer = Readonly<{ path: string; frame: ArtRect; anchor: ArtPoint; tint?: string }>;
+export type ResidentArtLayer = Readonly<{
+  path: string;
+  frame: ArtRect;
+  anchor: ArtPoint;
+  tint?: string;
+  /* Where the layer's anchor stands from the feet, in master px; at the feet without it. */
+  at?: ArtPoint;
+  /* Never mirrored with the resident (lettering). */
+  upright?: boolean;
+}>;
 
 export type ResidentArt = Readonly<{
   layers: readonly ResidentArtLayer[];
   mirror: boolean;
 }>;
 
-const MIRRORED_FACES: Readonly<Record<string, UniqueRenderAngle5>> = { SW: 'SE', W: 'E', NW: 'NE' };
+const FACE_ANGLE: Readonly<Record<string, number>> = { N: 0, NE: 45, E: 90, SE: 135, S: 180, SW: 225, W: 270, NW: 315 };
+
+/* The row to show for a resident facing `facing`: the nearest drawn direction or the mirror of one (a tie keeps the
+   drawn one and the earlier row); a facing pose shows its S row, or its first, as drawn. */
+export function sheetRowFor(
+  directions: readonly UniqueRenderAngle5[] | undefined,
+  facing: string,
+  facingPose: boolean,
+): { row: number; mirror: boolean } {
+  const rows = directions ?? DIRECTION_ROWS;
+  if (facingPose) return { row: Math.max(0, rows.indexOf('S')), mirror: false };
+  const want = FACE_ANGLE[facing] ?? 180;
+  let best = { row: 0, mirror: false };
+  let bestDiff = Infinity;
+  rows.forEach((d, row) => {
+    for (const mirror of [false, true]) {
+      const drawn = FACE_ANGLE[d] ?? 180;
+      const angle = mirror ? (360 - drawn) % 360 : drawn;
+      const diff = Math.abs(((want - angle + 540) % 360) - 180);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = { row, mirror };
+      }
+    }
+  });
+  return best;
+}
+
+/* Where a resident layer's sprite goes and its horizontal scale, the feet at (x, y) and s world px per master px. */
+export function residentLayerPlacement(layer: ResidentArtLayer, mirror: boolean, s: number, x: number, y: number): { x: number; y: number; scaleX: number } {
+  const side = mirror ? -1 : 1;
+  const at = layer.at ?? { x: 0, y: 0 };
+  return { x: x + side * at.x * s, y: y + at.y * s, scaleX: mirror && !layer.upright ? -s : s };
+}
 
 function sheetEntry(index: ArtIndex, path: string): (ArtIndexEntry & { passport: SheetPassport }) | null {
   const entry = index.files[path];
@@ -884,8 +968,33 @@ function sheetEntry(index: ArtIndex, path: string): (ArtIndexEntry & { passport:
   return entry as ArtIndexEntry & { passport: SheetPassport };
 }
 
-/* Chooses a resident's sheet (look, outfit tier, animation) and the frame to show,
-   falling back to lower outfit tiers, then to walking or standing, then to the placeholder. */
+/* The first sheet of the look, animation and tier among the bodies, the resident's own first. */
+function bodySheet(index: ArtIndex, look: string, tier: number, anim: ResidentAnimationId, bodies: readonly ResidentBody[]) {
+  for (const body of bodies) {
+    const path = personSheetPath(look, tier, anim, false, body);
+    const entry = sheetEntry(index, path);
+    if (entry) return { path, body, entry };
+  }
+  return null;
+}
+
+/* The Z-z-z over a sleeper, standing at the sheet's headAnchor (or the standing head), never mirrored. */
+function sleepLoopLayer(index: ArtIndex, sheet: SheetPassport, timeSec: number): ResidentArtLayer | null {
+  const z = sheetEntry(index, SLEEP_LOOP);
+  if (!z) return null;
+  const head = sheet.headAnchor ?? { x: sheet.anchor.x, y: sheet.anchor.y - STANDING_HEAD_PX };
+  const frameIdx = Math.floor(timeSec * z.passport.fps) % z.passport.frames;
+  return {
+    path: SLEEP_LOOP,
+    frame: { x: frameIdx * z.passport.frameW, y: 0, w: z.passport.frameW, h: z.passport.frameH },
+    anchor: z.passport.anchor,
+    at: { x: head.x - sheet.anchor.x, y: head.y - sheet.anchor.y },
+    upright: true,
+  };
+}
+
+/* Chooses a resident's sheet (look, outfit tier, animation, body) and the frame to show, falling back to lower
+   outfit tiers, then to walking or standing, then to the placeholder; a missing body takes the male_slim sheet. */
 export function resolveResidentArt(
   pack: WorldPackManifest,
   index: ArtIndex | null,
@@ -903,28 +1012,28 @@ export function resolveResidentArt(
   const anims: ResidentAnimationId[] = [wanted];
   if (MOVING_ANIMATIONS.has(wanted) && wanted !== 'walk') anims.push('walk');
   if (wanted !== 'idle') anims.push('idle');
+  const bodies = [...new Set<ResidentBody>([residentBody(resident.agentId), 'male_slim'])];
 
   const topTier = Math.max(1, Math.min(people.tiers, resident.outfitTier));
   for (const look of looks) {
     for (const anim of anims) {
       for (let tier = topTier; tier >= 1; tier--) {
-        const path = personSheetPath(look, tier, anim);
-        const entry = sheetEntry(index, path);
-        if (!entry) continue;
-        const s = entry.passport;
-        const mirroredFrom = MIRRORED_FACES[resident.facing];
-        const face = mirroredFrom ?? (resident.facing as UniqueRenderAngle5);
-        const row = Math.max(0, DIRECTION_ROWS.indexOf(face));
+        const found = bodySheet(index, look, tier, anim, bodies);
+        if (!found) continue;
+        const s = found.entry.passport;
+        const { row, mirror } = sheetRowFor(s.directions, resident.facing, FACING_ANIMATIONS.has(anim));
         const phase = (resident.walkPhase / (Math.PI * 2)) * s.frames;
         const frameIdx = ((Math.floor(timeSec * s.fps + phase) % s.frames) + s.frames) % s.frames;
         const frame: ArtRect = { x: frameIdx * s.frameW, y: row * s.frameH, w: s.frameW, h: s.frameH };
-        const layers: ResidentArtLayer[] = [{ path, frame, anchor: s.anchor }];
-        const cloakPath = personSheetPath(look, tier, anim, true);
+        const layers: ResidentArtLayer[] = [{ path: found.path, frame, anchor: s.anchor }];
+        const cloakPath = personSheetPath(look, tier, anim, true, found.body);
         const cloak = index.files[cloakPath];
-        if (cloak && cloak.w === entry.w && cloak.h === entry.h) {
+        if (cloak && cloak.w === found.entry.w && cloak.h === found.entry.h) {
           layers.push({ path: cloakPath, frame, anchor: s.anchor, tint: resident.cloakColor });
         }
-        return { layers, mirror: Boolean(mirroredFrom) };
+        const z = anim === 'sleep' ? sleepLoopLayer(index, s, timeSec) : null;
+        if (z) layers.push(z);
+        return { layers, mirror };
       }
     }
   }
