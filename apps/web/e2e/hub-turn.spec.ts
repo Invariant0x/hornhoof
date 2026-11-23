@@ -160,9 +160,9 @@ for (const lang of ['en', 'ru'] as const) {
         await expect(hub.locator('.turn-sec, .hub-eq, .hub-focus-tag')).toHaveCount(0);
         /* All cards return to their resting height, including Development's card with 24 staff squares. A card is 160 px or, where
            the words of the card that needs the most are taller, as tall as they need (#1917): Development's two lines of squares
-           and its two-line task need 161.08 px, a fresh page of the closed company needs the same, so all six stand at 161. Each
-           card is left to its words for a moment and measured in whole pixels, as the layout does, with no strip of the turn in
-           any of them; a card kept at the turn's height or grown by anything else is not this height. */
+           and its two-line task need 161.08 px, so all six stand at 161 in these fonts, whatever they are in others. Each card is
+           left to its words for a moment and measured in whole pixels, as the layout does, with no strip of the turn in any of
+           them; a card kept at the turn's height or at another floor is not this height. */
         await expect(card(page, 'Development').locator('.cells .cell')).toHaveCount(24);
         const rest = await page.locator('button.dept').evaluateAll(cards => {
           const boxes = cards as HTMLElement[];
@@ -178,6 +178,14 @@ for (const lang of ['en', 'ru'] as const) {
         expect(await page.evaluate(initial => document === initial, initialDocument)).toBe(true);
         expect(errors).toEqual([]);
         expect(failures).toEqual([]);
+
+        /* The same page loaded again with the turn closed lays the company out from the start: the cards that came back live stand
+           at the heights it gives them, so nothing of the turn stays in them and no measure of theirs is out of date. */
+        await page.reload();
+        await expect(hub).toBeVisible();
+        await page.evaluate(async () => { await document.fonts.ready; });
+        await expect(card(page, 'Development').locator('.cells .cell')).toHaveCount(24);
+        expect(await page.locator('button.dept').evaluateAll(cards => cards.map(c => (c as HTMLElement).style.height))).toEqual(rest.set);
       });
     }
   }
