@@ -602,7 +602,7 @@ select:disabled { opacity: .55; }
 }
 .body { position: absolute; inset: 0; overflow: auto; }
 /* Pages scroll under the floating header, so a sticky band in the page's own background keeps text from showing around
-   the header blocks. On the world container (.body:not(.page) — map, department, and future game worlds), the world always
+   the header blocks. On the world container (.body:not(.page), map, department, and game worlds), the world always
    fills the entire viewport beneath the UI with no flow spacer and no scrolling (#1874). */
 .body::before { content: ''; position: sticky; top: 0; display: block; block-size: var(--header-room); pointer-events: none; }
 .body.page::before { z-index: 5; background: var(--bg); pointer-events: auto; }
@@ -617,7 +617,7 @@ select:disabled { opacity: .55; }
   pointer-events: none;
 }
 .body:not(.page) > .shell-bars > :is(.update-banner, .alert, .guard-stop) {
-  position: relative; margin: 0; max-inline-size: 100%; overflow-wrap: anywhere; pointer-events: auto;
+  position: relative; box-sizing: border-box; margin: 0; max-inline-size: 100%; overflow-wrap: anywhere; pointer-events: auto;
   background: var(--bar-glass); border: 1px solid var(--line); box-shadow: none;
   animation: bar-in var(--shell-shift) ease-out;
 }
@@ -629,9 +629,9 @@ select:disabled { opacity: .55; }
 @keyframes bar-in { from { clip-path: inset(0 0 calc(100% + var(--bar-above, var(--bar-top))) 0); } }
 /* On scrollable pages (.body.page), shell bars stay in document flow under the header band. */
 .body.page > .shell-bars:empty { display: none; }
-.body.page > .shell-bars > :is(.update-banner, .alert) { position: relative; z-index: auto; margin-block: 0 var(--bar-gap); margin-inline: var(--bar-edge); }
+.body.page > .shell-bars > :is(.update-banner, .alert) { position: relative; z-index: auto; box-sizing: border-box; margin-block: 0 var(--bar-gap); margin-inline: var(--bar-edge); }
 .body.page > .shell-bars > .update-banner { margin-inline: auto; max-inline-size: calc(100% - 2 * var(--bar-edge)); overflow-wrap: anywhere; }
-.body.page > .shell-bars > .guard-stop { position: relative; z-index: auto; }
+.body.page > .shell-bars > .guard-stop { position: relative; z-index: auto; box-sizing: border-box; }
 /* On a phone every bar after the first folds to one line with More, which opens it whole (Design's decision on #1635): two
    bars would take a third of the screen. More is hidden elsewhere: a .btn's display beats the hidden attribute by itself. */
 .bar-more[hidden] { display: none; }

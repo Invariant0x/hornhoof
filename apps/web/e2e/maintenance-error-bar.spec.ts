@@ -179,18 +179,19 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     await expect(world ? page.locator(`.map[data-world-canvas="${world}"] > .ticker[role="button"]`) : page.getByRole('button', { name: /^Development/ })).toBeVisible();
     await expect(panel).toContainText(t.updates.steps.health);
     expect(await page.getByRole('alert').count()).toBe(0);
-    /* The open map runs under the header and the panel to the top of the window, and the panel floats over it (#1639): it
-       covers no card, chip, hub or control of the map. */
+    /* The open map always fills the viewport under the header and the update panel, and the panel overlays the world as a
+       HUD block (#1874): it never shifts or shrinks the map, and stays clear of the map's bottom controls. */
     expect(rowsHold(await places(page, t), width)).toEqual([]);
     const mapBox = await boxOf(page.locator('.map'), 'the map');
     const panelBox = await boxOf(panel, 'the update panel');
     expect(mapBox.y, 'the map starts at the top of the window').toBeLessThanOrEqual(0.5);
+    expect(Math.abs(mapBox.y + mapBox.height - 900), 'the map reaches the bottom of the window').toBeLessThanOrEqual(0.5);
     const covered: string[] = [];
-    for (const part of await page.locator('.map .world :is(.dept, .hub, .chip), .map > :is(.zoom, .ticker, .map-arrange)').all()) {
+    for (const part of await page.locator('.map > :is(.zoom, .ticker, .map-arrange)').all()) {
       const b = await part.boundingBox();
       if (b && b.width > 0 && b.height > 0 && meet(b, panelBox)) covered.push((await part.textContent())?.slice(0, 40) ?? '');
     }
-    expect(covered, 'the panel covers nothing the map shows').toEqual([]);
+    expect(covered, 'the panel stays clear of the map controls').toEqual([]);
     expect(problems).toEqual([]);
   });
 

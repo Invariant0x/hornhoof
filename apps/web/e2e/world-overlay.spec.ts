@@ -2,9 +2,8 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import type { Messages } from '../src/i18n';
+import { DICTIONARIES, LANGUAGES, type Language, type Messages } from '../src/i18n';
 import { en } from '../src/i18n/en';
-import { ru } from '../src/i18n/ru';
 import type { Org, UpdatesView } from '../src/types';
 import { ME, serveApi } from './api';
 
@@ -16,12 +15,22 @@ test.describe.configure({ timeout: 0 });
 const HEIGHT = 812;
 const WIDTHS = [1440, 375] as const;
 const SKINS = ['cyberpunk', 'light'] as const;
-const LOCALES = [
-  { name: 'en', lang: 'en', dir: 'ltr' },
-  { name: 'ru', lang: 'ru', dir: 'ltr' },
-  { name: 'en-rtl', lang: 'en', dir: 'rtl' },
-] as const;
-const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
+
+/* Dynamically select the shortest and longest actually shipped locales by summing the real strings rendered on this view. */
+const touchedWords = (t: Messages) => [
+  t.shell.tabs.map, t.shell.tabs.tasks, t.shell.tabs.people, t.shell.tabs.subscriptions, t.shell.tabs.machines,
+  t.updates.updatedTo('0.40.2 (5012dc3)'), t.updates.ok, t.errors.codes.internal, t.guard.stopped, t.guard.restart,
+  t.map.openOrchestrator, t.window.minimize,
+].join('');
+const rankedLocales = LANGUAGES.map(l => ({ id: l.id, length: touchedWords(DICTIONARIES[l.id]).length })).sort((a, b) => a.length - b.length);
+const SHORTEST_LANG = rankedLocales[0]!.id;
+const LONGEST_LANG = rankedLocales.at(-1)!.id;
+const LOCALES: { name: string; lang: Language; dir: 'ltr' | 'rtl' }[] = [
+  { name: SHORTEST_LANG, lang: SHORTEST_LANG, dir: 'ltr' },
+  ...(LONGEST_LANG === SHORTEST_LANG ? [] : [{ name: LONGEST_LANG, lang: LONGEST_LANG, dir: 'ltr' as const }]),
+  { name: `${SHORTEST_LANG}-rtl`, lang: SHORTEST_LANG, dir: 'rtl' },
+];
+const MESSAGES = DICTIONARIES;
 
 const CURRENT = { version: '0.40.2', commit: '5012dc32' + '0'.repeat(32), migrations: 156 };
 const VERSION_TEXT = '0.40.2 (5012dc3)';
@@ -43,7 +52,7 @@ const SHOTS = process.env.HH_OUT ?? '';
 const PREFIX = process.env.HH_SHOT_PREFIX ?? 'after';
 
 type Box = { x: number; y: number; width: number; height: number };
-type Snapshot = { map: Box; hub: Box; dept: Box };
+type Snapshot = { map: Box | null; hub: Box | null; dept: Box | null };
 
 function saveShot(png: Buffer, name: string) {
   if (!SHOTS) return;
@@ -56,8 +65,10 @@ function saveShot(png: Buffer, name: string) {
 const settled = (page: Page) => page.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
 
 const snapshot = (page: Page): Promise<Snapshot> => page.evaluate(() => {
-  const box = (sel: string): Box => {
-    const r = document.querySelector(sel)!.getBoundingClientRect();
+  const box = (sel: string): Box | null => {
+    const el = document.querySelector(sel);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
     return { x: r.x, y: r.y, width: r.width, height: r.height };
   };
   return {
@@ -82,10 +93,13 @@ async function settledSnapshot(page: Page): Promise<Snapshot> {
 
 function expectSameGeometry(after: Snapshot, before: Snapshot, label: string) {
   for (const [part, a, b] of [['.map', after.map, before.map], ['.map .hub', after.hub, before.hub], ['.map .dept', after.dept, before.dept]] as const) {
-    expect(Math.abs(a.x - b.x), `${label}: ${part} deltaX (${a.x} vs ${b.x})`).toBeLessThanOrEqual(0.5);
-    expect(Math.abs(a.y - b.y), `${label}: ${part} deltaY (${a.y} vs ${b.y})`).toBeLessThanOrEqual(0.5);
-    expect(Math.abs(a.width - b.width), `${label}: ${part} deltaWidth (${a.width} vs ${b.width})`).toBeLessThanOrEqual(0.5);
-    expect(Math.abs(a.height - b.height), `${label}: ${part} deltaHeight (${a.height} vs ${b.height})`).toBeLessThanOrEqual(0.5);
+    expect.soft(a, `${label}: ${part} stays mounted`).not.toBeNull();
+    expect.soft(b, `${label}: ${part} baseline mounted`).not.toBeNull();
+    if (!a || !b) continue;
+    expect.soft(Math.abs(a.x - b.x), `${label}: ${part} deltaX (${a.x} vs ${b.x})`).toBeLessThanOrEqual(0.5);
+    expect.soft(Math.abs(a.y - b.y), `${label}: ${part} deltaY (${a.y} vs ${b.y})`).toBeLessThanOrEqual(0.5);
+    expect.soft(Math.abs(a.width - b.width), `${label}: ${part} deltaWidth (${a.width} vs ${b.width})`).toBeLessThanOrEqual(0.5);
+    expect.soft(Math.abs(a.height - b.height), `${label}: ${part} deltaHeight (${a.height} vs ${b.height})`).toBeLessThanOrEqual(0.5);
   }
 }
 
@@ -95,14 +109,14 @@ async function expectBarVisibleUnclipped(locator: Locator, width: number, height
     const r = el.getBoundingClientRect();
     return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, width: r.width, height: r.height, sw: el.scrollWidth, cw: el.clientWidth, sh: el.scrollHeight, ch: el.clientHeight };
   });
-  expect(metrics.width, `${label}: non-zero width`).toBeGreaterThan(0);
-  expect(metrics.height, `${label}: non-zero height`).toBeGreaterThan(0);
-  expect(metrics.x, `${label}: left edge inside viewport`).toBeGreaterThanOrEqual(edge - 1);
-  expect(metrics.right, `${label}: right edge inside viewport`).toBeLessThanOrEqual(width - edge + 1);
-  expect(metrics.y, `${label}: top inside viewport`).toBeGreaterThanOrEqual(0);
-  expect(metrics.bottom, `${label}: bottom inside viewport`).toBeLessThanOrEqual(height + 1);
-  expect(metrics.sw, `${label}: no horizontal clipping`).toBeLessThanOrEqual(metrics.cw + 1);
-  expect(metrics.sh, `${label}: no vertical clipping`).toBeLessThanOrEqual(metrics.ch + 1);
+  expect.soft(metrics.width, `${label}: non-zero width`).toBeGreaterThan(0);
+  expect.soft(metrics.height, `${label}: non-zero height`).toBeGreaterThan(0);
+  expect.soft(metrics.x, `${label}: left edge inside viewport`).toBeGreaterThanOrEqual(edge - 1);
+  expect.soft(metrics.right, `${label}: right edge inside viewport`).toBeLessThanOrEqual(width - edge + 1);
+  expect.soft(metrics.y, `${label}: top inside viewport`).toBeGreaterThanOrEqual(0);
+  expect.soft(metrics.bottom, `${label}: bottom inside viewport`).toBeLessThanOrEqual(height + 1);
+  expect.soft(metrics.sw, `${label}: no horizontal clipping`).toBeLessThanOrEqual(metrics.cw + 1);
+  expect.soft(metrics.sh, `${label}: no vertical clipping`).toBeLessThanOrEqual(metrics.ch + 1);
   return metrics;
 }
 
@@ -149,19 +163,20 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const locale of LOCAL
     await page.goto('/');
     await expect(page.locator('.map .dept', { hasText: 'Development' })).toBeVisible();
     await expect(page.locator('.map-version')).toHaveText(VERSION_TEXT);
-    await expect(page.locator('.version-mark, [role="contentinfo"]')).toHaveCount(0);
+    expect.soft(await page.locator('.version-mark, [role="contentinfo"]').count(), 'no footer bar on map').toBe(0);
     await page.evaluate(d => { document.documentElement.dir = d; }, locale.dir);
 
     const base = await settledSnapshot(page);
-    expect(Math.round(base.map.x), 'map left is 0').toBe(0);
-    expect(Math.round(base.map.y), 'map top is 0').toBe(0);
-    expect(Math.round(base.map.width), 'map fills viewport width').toBe(width);
-    expect(Math.round(base.map.height), 'map fills viewport height').toBe(HEIGHT);
+    expect.soft(Math.round(base.map!.x), 'map left is 0').toBe(0);
+    expect.soft(Math.round(base.map!.y), 'map top is 0').toBe(0);
+    expect.soft(Math.round(base.map!.width), 'map fills viewport width').toBe(width);
+    expect.soft(Math.round(base.map!.height), 'map fills viewport height').toBe(HEIGHT);
 
-    const isCanonical = skin === 'cyberpunk' && locale.name === 'en';
+    const isCanonical = skin === 'cyberpunk' && locale.name === SHORTEST_LANG;
     if (isCanonical) saveShot(await page.screenshot({ animations: 'disabled' }), `map-version-hud-${width}`);
 
     const t = MESSAGES[locale.lang];
+    const barEdge = width <= 420 ? 12 : 16;
 
     const refetch = async (path: string) => {
       await Promise.all([
@@ -173,23 +188,42 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const locale of LOCAL
     /* 1) Update banner (done state with OK button) */
     updatesMode = 'done';
     await refetch('/api/updates');
-    const banner = page.locator('main.body > .shell-bars > .update-banner');
-    const bannerBox = await expectBarVisibleUnclipped(banner, width, HEIGHT, 'update banner');
+    const banner = page.locator('main.body .update-banner');
+    const bannerBox = await expectBarVisibleUnclipped(banner, width, HEIGHT, 'update banner', barEdge);
+    expect.soft(await page.locator('main.body > .shell-bars > .update-banner').count(), 'update banner inside .shell-bars HUD stack').toBe(1);
     await expect(banner.getByRole('button', { name: t.updates.ok, exact: true })).toBeVisible();
     const afterBanner = await settledSnapshot(page);
     expectSameGeometry(afterBanner, base, 'update banner shown');
 
     /* Map clicks outside the centered update banner still reach .map. */
     const hitBelow = await page.evaluate(y => !!document.elementFromPoint(24, y)?.closest('.map'), Math.min(HEIGHT - 80, bannerBox.bottom + 12));
-    expect(hitBelow, 'clicks under update banner reach the map').toBe(true);
+    expect.soft(hitBelow, 'clicks under update banner reach the map').toBe(true);
     if (width === 1440 && bannerBox.x > 48) {
       const hitBeside = await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('.map'), { x: 24, y: bannerBox.y + bannerBox.height / 2 });
-      expect(hitBeside, 'clicks beside update banner reach the map').toBe(true);
+      expect.soft(hitBeside, 'clicks beside update banner reach the map').toBe(true);
     }
 
     if (isCanonical) saveShot(await page.screenshot({ animations: 'disabled' }), `map-update-banner-${width}`);
-    if (width === 1440 && skin === 'light' && locale.name === 'ru') saveShot(await page.screenshot({ animations: 'disabled' }), 'map-update-banner-light-ru-1440');
-    if (width === 375 && skin === 'light' && locale.name === 'en-rtl') saveShot(await page.screenshot({ animations: 'disabled' }), 'map-update-banner-light-rtl-375');
+    if (width === 1440 && skin === 'light' && locale.name === LONGEST_LANG) saveShot(await page.screenshot({ animations: 'disabled' }), 'map-update-banner-light-ru-1440');
+    if (width === 375 && skin === 'light' && locale.dir === 'rtl') saveShot(await page.screenshot({ animations: 'disabled' }), 'map-update-banner-light-rtl-375');
+
+    /* Department opened with banner visible fills the viewport with no map peeking beside it, and returns map intact. */
+    if (isCanonical) {
+      await page.evaluate(() => {
+        history.pushState(null, '', '/departments/d2');
+        dispatchEvent(new PopStateEvent('popstate'));
+      });
+      await expect(page.locator('.dview .shead')).toBeVisible();
+      await settled(page);
+      const dviewBox = await page.locator('.dview').boundingBox();
+      expect.soft(Math.round(dviewBox!.y), 'department starts at viewport top').toBe(0);
+      expect.soft(Math.round(dviewBox!.height), 'department fills viewport height').toBe(HEIGHT);
+      saveShot(await page.screenshot({ animations: 'disabled' }), `department-banner-${width}`);
+      await page.getByRole('button', { name: t.dept.back, exact: true }).click();
+      await expect(page.locator('.dview')).toHaveCount(0);
+      await expect(page.locator('.map .dept', { hasText: 'Development' })).toBeVisible();
+      expectSameGeometry(await settledSnapshot(page), base, 'returned from department with update banner');
+    }
 
     await banner.getByRole('button', { name: t.updates.ok, exact: true }).click();
     await expect(banner).toHaveCount(0);
@@ -198,14 +232,16 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const locale of LOCAL
     /* 2) .alert overlay on the map */
     orgMode = 'fail';
     await refetch('/api/org');
-    const alert = page.locator('main.body > .shell-bars > .alert');
-    await expectBarVisibleUnclipped(alert, width, HEIGHT, 'alert bar');
+    const alert = page.locator('main.body .alert');
+    await expectBarVisibleUnclipped(alert, width, HEIGHT, 'alert bar', barEdge);
+    expect.soft(await page.locator('main.body > .shell-bars > .alert').count(), 'alert inside .shell-bars HUD stack').toBe(1);
     expectSameGeometry(await settledSnapshot(page), base, 'alert shown');
     if (isCanonical) saveShot(await page.screenshot({ animations: 'disabled' }), `map-alert-${width}`);
 
     orgMode = 'ok';
     await refetch('/api/org');
     await expect(alert).toHaveCount(0);
+    await expect(page.locator('.map .dept', { hasText: 'Development' })).toBeVisible();
     expectSameGeometry(await settledSnapshot(page), base, 'alert cleared');
 
     /* 3) .guard-stop overlay on the map */
@@ -217,8 +253,9 @@ for (const width of WIDTHS) for (const skin of SKINS) for (const locale of LOCAL
       history.pushState(null, '', '/departments/d2');
       dispatchEvent(new PopStateEvent('popstate'));
     });
-    const guardStop = page.locator('main.body > .shell-bars > .guard-stop');
-    await expectBarVisibleUnclipped(guardStop, width, HEIGHT, 'guard-stop bar');
+    const guardStop = page.locator('main.body .guard-stop');
+    await expectBarVisibleUnclipped(guardStop, width, HEIGHT, 'guard-stop bar', barEdge);
+    expect.soft(await page.locator('main.body > .shell-bars > .guard-stop').count(), 'guard-stop inside .shell-bars HUD stack').toBe(1);
     await expect(guardStop.getByRole('button', { name: t.guard.restart, exact: true })).toBeVisible();
     expectSameGeometry(await settledSnapshot(page), base, 'guard-stop shown');
     if (isCanonical && width === 375) saveShot(await page.screenshot({ animations: 'disabled' }), 'map-guard-stop-375');
@@ -282,14 +319,14 @@ for (const width of WIDTHS) for (const skin of SKINS) {
       await expect(page.locator(screen.ready).first()).toBeVisible();
       await settled(page);
 
-      await expect(page.locator('.version-mark, [role="contentinfo"], .map-version'), `${screen.name}: no version bar or map-version in DOM`).toHaveCount(0);
+      expect.soft(await page.locator('.version-mark, [role="contentinfo"], .map-version').count(), `${screen.name}: no version bar or map-version in DOM`).toBe(0);
       const bottoms = await page.evaluate(() => ({
         screen: document.querySelector('.app-screen')!.getBoundingClientRect().bottom,
         body: document.querySelector('main.body')!.getBoundingClientRect().bottom,
         viewport: innerHeight,
       }));
-      expect(Math.abs(bottoms.screen - bottoms.viewport), `${screen.name}: .app-screen reaches viewport bottom`).toBeLessThanOrEqual(1);
-      expect(Math.abs(bottoms.body - bottoms.viewport), `${screen.name}: main.body reaches viewport bottom`).toBeLessThanOrEqual(1);
+      expect.soft(Math.abs(bottoms.screen - bottoms.viewport), `${screen.name}: .app-screen reaches viewport bottom`).toBeLessThanOrEqual(1);
+      expect.soft(Math.abs(bottoms.body - bottoms.viewport), `${screen.name}: main.body reaches viewport bottom`).toBeLessThanOrEqual(1);
 
       if (screen.name === 'tasks' && skin === 'cyberpunk') {
         saveShot(await page.screenshot({ animations: 'disabled' }), `tasks-no-version-bar-${width}`);
@@ -302,15 +339,15 @@ for (const width of WIDTHS) for (const skin of SKINS) {
     await page.getByRole('button', { name: en.shell.account, exact: true }).click();
     await page.locator('.account-menu').getByRole('button', { name: en.settings.menu, exact: true }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.locator('.version-mark, [role="contentinfo"], .map-version')).toHaveCount(0);
+    expect.soft(await page.locator('.version-mark, [role="contentinfo"], .map-version').count(), 'settings dialog: no bottom version bar').toBe(0);
 
     /* Map keeps version only as a HUD overlay with zero world shift/shrink. */
     await page.goto('/');
     await expect(page.locator('.map .dept')).toBeVisible();
     await expect(page.locator('.map-version')).toHaveText(VERSION_TEXT);
-    await expect(page.locator('.version-mark, [role="contentinfo"]')).toHaveCount(0);
+    expect.soft(await page.locator('.version-mark, [role="contentinfo"]').count(), 'map: no footer version bar').toBe(0);
     const mapBox = await page.locator('.map').boundingBox();
-    expect(Math.round(mapBox!.y + mapBox!.height)).toBe(HEIGHT);
+    expect.soft(Math.round(mapBox!.y + mapBox!.height)).toBe(HEIGHT);
 
     expect(errors).toEqual([]);
   });

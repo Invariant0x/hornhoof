@@ -623,7 +623,7 @@ function useChipNeed(box: { current: HTMLDivElement | null }, org: Org | null, l
    of each, as a department's schema and tree do there: what scrolls under them goes out of sight, and the dots run on under
    the glass. Measured as the map opens, as its bars come, go or grow, and as the screen changes size. Transient shell bars
    overlay as HUD and never clip or shift the map (#1874). */
-export function useMapRoom(box: { current: HTMLDivElement | null }, bars: string, _shellTop?: number | null): CSSProperties | undefined {
+export function useMapRoom(box: { current: HTMLDivElement | null }, ...[bars]: [bars: string, shellTop?: number | null]): CSSProperties | undefined {
   const [room, setRoom] = useState<{ top: number; bottom: number } | null>(null);
   useLayoutEffect(() => {
     const el = box.current;
@@ -939,22 +939,25 @@ export function MapScreen({
 
   if (worldPack) {
     return (
-      <WorldMapView
-        me={me}
-        org={org}
-        pack={worldPack}
-        inside={inside}
-        windowOpen={windowOpen}
-        activeDepartmentId={activeDepartmentId}
-        onOpenOrchestrator={onOpenOrchestrator}
-        onOpenAgent={onOpenAgent ?? (() => {})}
-        onCloseDepartment={onCloseDepartment}
-        onOpenTask={onOpenTask}
-        onOpenGoal={onOpenGoal}
-        onOpenTracker={onOpenTracker}
-        onOpenTab={onOpenTab}
-        onHire={onHire}
-      />
+      <>
+        <MapAlert failure={failure} inside={inside} host={barsHost} />
+        <WorldMapView
+          me={me}
+          org={org}
+          pack={worldPack}
+          inside={inside}
+          windowOpen={windowOpen}
+          activeDepartmentId={activeDepartmentId}
+          onOpenOrchestrator={onOpenOrchestrator}
+          onOpenAgent={onOpenAgent ?? (() => {})}
+          onCloseDepartment={onCloseDepartment}
+          onOpenTask={onOpenTask}
+          onOpenGoal={onOpenGoal}
+          onOpenTracker={onOpenTracker}
+          onOpenTab={onOpenTab}
+          onHire={onHire}
+        />
+      </>
     );
   }
 
