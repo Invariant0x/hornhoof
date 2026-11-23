@@ -16,6 +16,14 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - An employee's program that waits between turns no longer starts anew when the terminal showing it loses its connection for a moment: the node keeps it for 30 seconds after its last view went, so the view that comes back finds it. A view ended because its person may no longer see the agent holds it no longer, and a program whose agent moved to another plan still goes at once.
 - A merge of a copy's database no longer stops with "No merge rule for public.world_layouts": the company's city and the CEO's orders to move its buildings merge like a person's map, and two cities that differ keep the leading one and go to the orchestrator.
 
+### Added
+
+- The task watchdog can now see whether a task's commit is in main or a release and close, in any department, the tasks the server proves done, with its reason in the task log and a notice to the head of that department; its role template carries the rules for code, documents and reports, and groups, and never touches paused work.
+
+### Changed
+
+- A hand-in of work that is not code (a document, a group report, turnkey work that joined no turn) must now name where its result is recorded, a path in the department's repository or a file on the task, and is refused without it.
+
 ## [0.42.0] - 2026-11-23
 
 ### Fixed

@@ -5,6 +5,7 @@ import { taskDetail } from '../src/modules/tasks/views.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import type { TemplateKey } from '@hornhoof/protocol';
 import { echelonsTurn, setUpCompany, testApp } from './helpers.js';
+import { attached } from './recorded-fixture.js';
 
 const BASE = 'a'.repeat(40);
 const HEAD = 'b'.repeat(40);
@@ -131,7 +132,7 @@ describe('a department that keeps no repository', () => {
   it('hands the document to the checker, and to the head once it passed', async () => {
     const f = await office();
     const { task } = await f.create({ paths: undefined });
-    const handed = await submit(f.ctx, f.author.id, task.id, HAND_IN);
+    const handed = await submit(f.ctx, f.author.id, task.id, { ...HAND_IN, recorded: await attached(f.db, task, f.author.id, 'launch.md') });
     expect(handed.task).toMatchObject({ status: 'review', assigneeAgentId: f.checker.id });
     const candidate = await f.handedIn(task.id);
     expect(candidate).toMatchObject({ parentId: null, digest: expect.stringMatching(/^[a-f0-9]{64}$/), producedBy: { agentId: f.author.id, stage: 'development' } });
@@ -148,12 +149,12 @@ describe('a department that keeps no repository', () => {
   it('keeps a document that did not pass with its checker, who corrects it and hands the corrected one on', async () => {
     const f = await office();
     const { task } = await f.create({ paths: undefined });
-    await submit(f.ctx, f.author.id, task.id, HAND_IN);
+    await submit(f.ctx, f.author.id, task.id, { ...HAND_IN, recorded: await attached(f.db, task, f.author.id, 'launch.md') });
     const first = (await f.echelons(task.id)).candidateId!;
     await expect(verdict(f.ctx, f.checker.id, task.id, { pass: true, comment: 'Fine.', candidateId: f.author.id }).then(() => null)).rejects.toMatchObject({ status: 409 });
     const failed = await verdict(f.ctx, f.checker.id, task.id, { pass: false, comment: 'The second price is last year\'s.', candidateId: first });
     expect(failed.task).toMatchObject({ status: 'working', assigneeAgentId: f.checker.id });
-    const corrected = await submit(f.ctx, f.checker.id, task.id, { summary: 'Corrected the second price.', evidence: 'Compared with the price list again.' });
+    const corrected = await submit(f.ctx, f.checker.id, task.id, { summary: 'Corrected the second price.', evidence: 'Compared with the price list again.', recorded: { file: 'launch.md' } });
     expect(corrected.task).toMatchObject({ status: 'open', assigneeAgentId: f.head.id });
     const candidate = await f.handedIn(task.id);
     expect(candidate).toMatchObject({ parentId: first, producedBy: { agentId: f.checker.id, stage: 'review' } });
@@ -164,7 +165,7 @@ describe('a department that keeps no repository', () => {
     const { task } = await f.create({ paths: undefined });
     await expect(submit(f.ctx, f.author.id, task.id, { ...HAND_IN, review: { baseCommit: BASE } }).then(() => null)).rejects.toMatchObject({ status: 400 });
     await expect(report(f.ctx, f.author.id, task.id, { done: true, summary: 'Done.' }).then(() => null)).rejects.toMatchObject({ status: 400 });
-    await submit(f.ctx, f.author.id, task.id, HAND_IN);
+    await submit(f.ctx, f.author.id, task.id, { ...HAND_IN, recorded: await attached(f.db, task, f.author.id, 'launch.md') });
     await expect(report(f.ctx, f.head.id, task.id, { done: true, summary: 'Accepted.' }).then(() => null)).rejects.toMatchObject({ status: 400 });
   });
 
@@ -172,10 +173,10 @@ describe('a department that keeps no repository', () => {
     const f = await office();
     const group = await createTask(f.ctx, { agentId: f.head.id }, { title: 'Launch', brief: 'Prepare the launch.', body: 'Texts for the launch.', departmentId: f.head.departmentId!, assigneeAgentId: f.head.id });
     const { task } = await f.create({ paths: undefined, parentId: group.task.id });
-    await submit(f.ctx, f.author.id, task.id, HAND_IN);
+    await submit(f.ctx, f.author.id, task.id, { ...HAND_IN, recorded: await attached(f.db, task, f.author.id, 'launch.md') });
     await verdict(f.ctx, f.checker.id, task.id, { pass: true, comment: 'Checked.', candidateId: (await f.echelons(task.id)).candidateId! });
     await report(f.ctx, f.head.id, task.id, { done: true, summary: 'Accepted the checked text.' });
-    const closed = await report(f.ctx, f.head.id, group.task.id, { done: true, summary: 'The launch texts are ready.' });
+    const closed = await report(f.ctx, f.head.id, group.task.id, { done: true, summary: 'The launch texts are ready.', recorded: await attached(f.db, group.task, f.head.id, 'launch-texts.md') });
     expect(closed.task).toMatchObject({ status: 'done' });
   });
 
@@ -194,7 +195,7 @@ describe('a department that keeps no repository', () => {
     const { task } = await f.create({ paths: undefined });
     expect(task.executorAgentId).toBeNull();
     expect(await f.echelons(task.id)).toMatchObject({ resultKind: 'coordination', stages: [] });
-    expect((await report(f.ctx, f.author.id, task.id, { done: true, summary: 'Wrote the launch text.' })).task).toMatchObject({ status: 'done' });
+    expect((await report(f.ctx, f.author.id, task.id, { done: true, summary: 'Wrote the launch text.', recorded: await attached(f.db, task, f.author.id, 'launch.md') })).task).toMatchObject({ status: 'done' });
   });
 
   it('takes the work through its stages with an open turn or none, and as before in a department whose route has no check', async () => {

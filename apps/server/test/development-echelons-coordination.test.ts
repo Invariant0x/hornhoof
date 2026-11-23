@@ -8,6 +8,7 @@ import { routeOf } from '../src/modules/tasks/echelons-store.js';
 import { currentCandidate } from '../src/modules/tasks/echelons-candidates.js';
 import { changeReport, testsFixture } from './development-echelons-verification.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
+import { RECORDED } from './recorded-fixture.js';
 
 /* Exercise a real child handoff, Tests report and authorized acceptance, not synthetic receipts. */
 async function groupFixture(accepted: boolean, stale = false) {
@@ -44,7 +45,7 @@ async function reported(f: { db: Db }, groupId: string) {
 describe('coordination results in the required engine', () => {
   it('closes a checked aggregate with real child references and no invented code candidate', async () => {
     const f = await groupFixture(true);
-    const moved = await report(f.ctx, f.head.id, f.group.id, { done: true, summary: 'Checked the child result and its recorded evidence.' });
+    const moved = await report(f.ctx, f.head.id, f.group.id, { done: true, summary: 'Checked the child result and its recorded evidence.', recorded: RECORDED });
     expect(moved.task.status).toBe('done');
     const detail = await f.detail(f.group.id);
     expect(detail.echelons).toMatchObject({ resultKind: 'coordination', phase: 'done', stage: null, stages: [], candidateId: null });
@@ -54,13 +55,13 @@ describe('coordination results in the required engine', () => {
      report as closed without an accepted result, saying how it stood and who closed it, and is taken for accepted by nobody. */
   it.each([false, true])('closes over an unaccepted or stale closed child, recorded as not accepted (stale=%s)', async stale => {
     const f = await groupFixture(stale, stale);
-    expect((await report(f.ctx, f.head.id, f.group.id, { done: true, summary: 'The child is closed.' })).task.status).toBe('done');
+    expect((await report(f.ctx, f.head.id, f.group.id, { done: true, summary: 'The child is closed.', recorded: RECORDED })).task.status).toBe('done');
     expect(await f.closedOver()).toEqual([{ taskId: f.child.id, unaccepted: { status: 'done', phase: 'done', closedBy: stale ? { agentId: f.head.id } : null } }]);
   });
   it('closes over a child whose Tests report no longer names its candidate, recorded as not accepted', async () => {
     const f = await groupFixture(true);
     await f.misreported();
-    expect((await report(f.ctx, f.head.id, f.group.id, { done: true, summary: 'The child report changed.' })).task.status).toBe('done');
+    expect((await report(f.ctx, f.head.id, f.group.id, { done: true, summary: 'The child report changed.', recorded: RECORDED })).task.status).toBe('done');
     expect(await f.closedOver()).toEqual([{ taskId: f.child.id, unaccepted: { status: 'done', phase: 'done', closedBy: { agentId: f.head.id } } }]);
   });
   /* As in a company whose child task was closed by hand in its database: its status changed, and nothing else. */
@@ -69,7 +70,7 @@ describe('coordination results in the required engine', () => {
     const group = (await f.create({ title: 'Coordinate totals', assigneeAgentId: f.head.id, executor: false, resultKind: 'coordination' })).task;
     await f.db.update(tasks).set({ parentId: group.id }).where(eq(tasks.id, f.task.id));
     await f.db.update(tasks).set({ status: 'done', closedAt: new Date('2026-11-17T12:00:00.000Z') }).where(eq(tasks.id, f.task.id));
-    expect((await report(f.ctx, f.head.id, group.id, { done: true, summary: 'The child is closed.' })).task.status).toBe('done');
+    expect((await report(f.ctx, f.head.id, group.id, { done: true, summary: 'The child is closed.', recorded: RECORDED })).task.status).toBe('done');
     expect(await reported(f, group.id)).toEqual([{ taskId: f.task.id, unaccepted: { status: 'done', phase: 'active', closedBy: null } }]);
   });
   it('closes over a child the orchestrator closed, recorded as closed by it', async () => {
@@ -78,7 +79,7 @@ describe('coordination results in the required engine', () => {
     const group = (await f.create({ title: 'Coordinate totals', assigneeAgentId: f.head.id, executor: false, resultKind: 'coordination' })).task;
     await f.db.update(tasks).set({ parentId: group.id }).where(eq(tasks.id, f.task.id));
     await closeTask(f.ctx, { agentId: orchestrator!.id }, f.task.id, { status: 'done', why: 'Closed by hand; the work is over.' });
-    expect((await report(f.ctx, f.head.id, group.id, { done: true, summary: 'The child is closed.' })).task.status).toBe('done');
+    expect((await report(f.ctx, f.head.id, group.id, { done: true, summary: 'The child is closed.', recorded: RECORDED })).task.status).toBe('done');
     expect(await reported(f, group.id)).toEqual([{ taskId: f.task.id, unaccepted: { status: 'done', phase: 'done', closedBy: { agentId: orchestrator!.id } } }]);
   });
   it('closes over a group closed directly in the database before its children', async () => {
@@ -86,7 +87,7 @@ describe('coordination results in the required engine', () => {
     const outer = (await f.create({ title: 'Outer checked group', assigneeAgentId: f.head.id, executor: false, resultKind: 'coordination' })).task;
     await f.db.update(tasks).set({ parentId: outer.id }).where(eq(tasks.id, f.group.id));
     await f.db.update(tasks).set({ status: 'done', closedAt: new Date('2026-11-17T12:00:00.000Z') }).where(eq(tasks.id, f.group.id));
-    expect((await report(f.ctx, f.head.id, outer.id, { done: true, summary: 'The inner group is closed.' })).task.status).toBe('done');
+    expect((await report(f.ctx, f.head.id, outer.id, { done: true, summary: 'The inner group is closed.', recorded: RECORDED })).task.status).toBe('done');
     expect(await reported(f, outer.id)).toEqual([{ taskId: f.group.id, unaccepted: { status: 'done', phase: 'active', closedBy: null } }]);
   });
   it('closes over results accepted when reports still named test runs', async () => {
@@ -94,19 +95,19 @@ describe('coordination results in the required engine', () => {
     const runs = (proof: Record<string, unknown>) => ({ ...proof, evidence: [{ runId: randomUUID(), commit: HEAD }] });
     await changeReport(f.db, f.child.id, 'verifiedCandidate', runs);
     await changeReport(f.db, f.child.id, 'acceptedCandidate', runs);
-    expect((await report(f.ctx, f.head.id, f.group.id, { done: true, summary: 'Checked the child result.' })).task.status).toBe('done');
+    expect((await report(f.ctx, f.head.id, f.group.id, { done: true, summary: 'Checked the child result.', recorded: RECORDED })).task.status).toBe('done');
     const outer = (await f.create({ title: 'Outer checked group', assigneeAgentId: f.head.id, executor: false, resultKind: 'coordination' })).task;
     await f.db.update(tasks).set({ parentId: outer.id }).where(eq(tasks.id, f.group.id));
     await changeReport(f.db, f.group.id, 'acceptedChildren', children => (children as unknown as Record<string, unknown>[]).map(runs));
-    expect((await report(f.ctx, f.head.id, outer.id, { done: true, summary: 'Checked the nested results.' })).task.status).toBe('done');
+    expect((await report(f.ctx, f.head.id, outer.id, { done: true, summary: 'Checked the nested results.', recorded: RECORDED })).task.status).toBe('done');
   });
   it.each([false, true])('revalidates nested accepted results (changed report=%s)', async invalid => {
     const f = await groupFixture(true);
-    await report(f.ctx, f.head.id, f.group.id, { done: true, summary: 'Checked the child result.' });
+    await report(f.ctx, f.head.id, f.group.id, { done: true, summary: 'Checked the child result.', recorded: RECORDED });
     const outer = (await f.create({ title: 'Outer checked group', assigneeAgentId: f.head.id, executor: false, resultKind: 'coordination' })).task;
     await f.db.update(tasks).set({ parentId: outer.id }).where(eq(tasks.id, f.group.id));
     if (invalid) await f.misreported();
-    expect((await report(f.ctx, f.head.id, outer.id, { done: true, summary: 'Checked the nested results.' })).task.status).toBe('done');
+    expect((await report(f.ctx, f.head.id, outer.id, { done: true, summary: 'Checked the nested results.', recorded: RECORDED })).task.status).toBe('done');
     /* A group whose accepted results changed since it closed is closed without an accepted result now. */
     expect(await reported(f, outer.id)).toEqual([invalid
       ? { taskId: f.group.id, unaccepted: { status: 'done', phase: 'done', closedBy: { agentId: f.head.id } } }

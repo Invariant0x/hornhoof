@@ -11,6 +11,7 @@ import { resolveStuck } from '../src/modules/tasks/stuck.js';
 import { afterSourceKey, recordRunWait, requestSourceKey, reviewSourceKey, waitForSourceKey } from '../src/modules/tasks/wait-state.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { setUpCompany, testApp, echelonsTurn } from './helpers.js';
+import { recorded } from './recorded-fixture.js';
 
 const HOUR = 3_600_000;
 const later = (hours: number) => new Date(Date.now() + hours * HOUR).toISOString();
@@ -60,7 +61,7 @@ describe('a task that comes after others', () => {
     await c.db.update(departments).set({ repoUrl: null });
     const first = await c.task('First', { assigneeAgentId: c.rita.id });
     const finished = await c.task('Finished decision', { executor: false, resultKind: 'coordination' });
-    await report(c.ctx, c.bruno.id, finished.id, { done: true, summary: 'Checked the scope decision.' });
+    await report(c.ctx, c.bruno.id, finished.id, { done: true, summary: 'Checked the scope decision.', ...(await recorded(c.ctx, finished.id, c.bruno.id)) });
     const follow = await c.task('Follow', { after: [first.id, finished.id], independentNone: 'One piece.' });
     expect(await c.waitsOf(follow)).toMatchObject([{
       kind: 'after', sourceKey: afterSourceKey(first.id), state: 'legacy_needs_plan', ownerAgentId: c.rita.id, plan: null, ownerDueAt: null, nextActionAt: null, level: 0,
@@ -162,13 +163,13 @@ describe('a task that comes after others', () => {
     const [one, two] = [await c.task('One decision', { assigneeAgentId: c.rita.id, executor: false, resultKind: 'coordination' }), await c.task('Two decisions', { assigneeAgentId: c.rita.id, executor: false, resultKind: 'coordination' })];
     const follow = await c.task('Follow', { after: [one.id, two.id], independentNone: 'One piece.' });
     await updateTask(c.ctx, c.head.id, one.id, { ownerAgentId: c.bruno.id });
-    await report(c.ctx, c.bruno.id, one.id, { done: true, summary: 'Checked the first decision.' });
+    await report(c.ctx, c.bruno.id, one.id, { done: true, summary: 'Checked the first decision.', ...(await recorded(c.ctx, one.id, c.bruno.id)) });
     const rows = await c.waitsOf(follow);
     const edge = (t: Task) => rows.find(w => w.sourceKey === afterSourceKey(t.id))!;
     expect([edge(one).state, edge(two).state]).toEqual(['resolved', 'active']);
     expect(edge(one).proofRef).toBe(`task:${one.id}:done`);
     expect((await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, follow.id), eq(taskEvents.kind, 'started'))))).toEqual([]);
-    await report(c.ctx, c.rita.id, two.id, { done: true, summary: 'Checked the second decision.' });
+    await report(c.ctx, c.rita.id, two.id, { done: true, summary: 'Checked the second decision.', ...(await recorded(c.ctx, two.id, c.rita.id)) });
     expect((await c.waitsOf(follow)).map(w => w.state)).toEqual(['resolved', 'resolved']);
     expect((await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, follow.id), eq(taskEvents.kind, 'started'))))).toHaveLength(1);
   });
