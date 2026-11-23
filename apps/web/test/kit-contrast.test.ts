@@ -49,7 +49,7 @@ describe('the contrast of an ink on a painted part', () => {
 
   it('measures a strip between its rims, where a row puts its words', () => {
     const strip = picture(100, 50, (_x, y) => (y < 11 || y >= 39 ? [90, 60, 20, 255] : [250, 230, 190, 255]));
-    expect(faceOf(strip, { size: '100% 100%' }, 'strip')).toEqual({ x: 0, y: 11, width: 100, height: 28 });
+    expect(faceOf(strip, {}, 'strip')).toEqual({ x: 0, y: 11, width: 100, height: 28 });
     expect(contrastOn(strip, faceOf(strip, {}, 'strip'), ink).darkest).toBe('#FAE6BE');
   });
 });
