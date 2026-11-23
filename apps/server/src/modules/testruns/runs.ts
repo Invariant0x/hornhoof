@@ -154,9 +154,17 @@ function scopeLines(run: Run): string[] {
   return runPurpose(snapshot, suite) === 'final' ? left : [...left, `It leaves no ${TESTS_CONTEXT} on its commit: only a run of the whole product, with no one suite, does.`];
 }
 
+/* A refused run tells why first, in Hornhoof's own words of the refusal, and what to do instead: it is a hint, no result. */
+function refusedAccount(run: Run, parts: Part[]): string {
+  const why = parts.find(p => p.status === 'refused' && p.tail)?.tail.trim();
+  const said = why ? ['', quote(why)] : [];
+  return [`${named(run)} was refused before it started, so nothing ran: this is no result and no failure.${pinLine(run)}`, ...said, '', readAgain(run)].join('\n');
+}
+
 /* Hornhoof's account of a run that ended: each part, where it ran and how long, the end of what failed, and the files
    on the task. */
 function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set<string>): string {
+  if (run.status === 'refused') return refusedAccount(run, parts);
   const lines = [`${named(run)} ${run.kind === 'work' && run.status === 'passed' ? 'is done' : run.status} after ${took((run.finishedAt ?? new Date()).getTime() - run.createdAt.getTime())}.${pinLine(run)}`, ...scopeLines(run), ...reuseLines(run.fileCache, parts)];
   for (const p of parts) {
     const where = p.machineName ? ` on ${p.machineName}` : '';
@@ -430,7 +438,7 @@ async function keepMark(tx: Tx, run: Run, task: Task, mark: RunMark | null): Pro
   return `\n\n${mark.line}`;
 }
 
-async function recordRunEnd(ctx: Ctx, runId: string, parts: Part[], status: 'passed' | 'failed', mark: RunMark | null): Promise<RunEnd | null> {
+async function recordRunEnd(ctx: Ctx, runId: string, parts: Part[], status: 'passed' | 'failed' | 'refused', mark: RunMark | null): Promise<RunEnd | null> {
   return ctx.db.transaction(async tx => {
     /* The task first, then the run: the order every write that holds both takes. */
     const [found] = await tx.select({ task: tasks }).from(testRuns).innerJoin(tasks, eq(tasks.id, testRuns.taskId)).where(eq(testRuns.id, runId)).for('update', { of: tasks });
@@ -455,14 +463,21 @@ async function everythingReused(ctx: Ctx, runId: string): Promise<boolean> {
   return run !== undefined;
 }
 
+/* A part that started and failed fails its run. A run none of whose parts failed, but one of which Hornhoof refused before it
+   started, is refused: it proves nothing, and it is no failure either. */
+export function runEnd(parts: Pick<Part, 'status'>[]): 'passed' | 'failed' | 'refused' {
+  if (parts.every(p => p.status === 'passed')) return 'passed';
+  return parts.some(p => p.status === 'refused') && !parts.some(p => p.status === 'failed') ? 'refused' : 'failed';
+}
+
 /* A run whose parts all ended ends with them, and its agent hears how it went on its task. The mark goes out before the
    write that ends the run, so the one result the agent hears says how it went; a crash in between ends and marks it again. */
 async function settleRun(ctx: Ctx, runId: string): Promise<void> {
   const parts = await ctx.db.select().from(testParts).where(eq(testParts.runId, runId)).orderBy(asc(testParts.part));
   if (parts.some(p => p.status === 'queued' || p.status === 'running')) return;
   if (!parts.length && !await everythingReused(ctx, runId)) return;
-  const status = parts.every(p => p.status === 'passed') ? 'passed' : 'failed';
-  const mark = await markRun(ctx, runId, status);
+  const status = runEnd(parts);
+  const mark = status === 'refused' ? null : await markRun(ctx, runId, status);
   const end = await recordRunEnd(ctx, runId, parts, status, mark);
   if (end) await told(ctx, end);
 }
@@ -543,7 +558,14 @@ export async function partStarted(ctx: Ctx, id: NodeIdentity, partId: string): P
 /* How a part's end counts for its run. A part of a pinned run that checked another commit, or passed without saying
    which, proves nothing about that commit, whatever its command did. One that failed before it reached any commit keeps
    its own reason. */
-function partEnd(run: Pick<Run, 'commitSha'>, msg: Pick<TestsDone, 'ok' | 'commit' | 'error'>): { status: 'passed' | 'failed'; error: string | null } {
+type PartEnd = 'passed' | 'failed' | 'refused';
+/* A node from before refusals had a word of their own says "failed" for a part its command guard stopped: one that never
+   started, has no exit code and says it was stopped before it started. */
+const OLD_REFUSAL = 'Hornhoof stopped this command before it started.';
+const refusedBefore = (part: Pick<Part, 'startedAt'>, msg: Pick<TestsDone, 'ok' | 'error' | 'exitCode' | 'log'>) =>
+  !msg.ok && (msg.error === 'refused' || (msg.error === 'failed' && msg.exitCode === null && part.startedAt === null && msg.log.includes(OLD_REFUSAL)));
+function partEnd(run: Pick<Run, 'commitSha'>, part: Pick<Part, 'startedAt'>, msg: Pick<TestsDone, 'ok' | 'commit' | 'error' | 'exitCode' | 'log'>): { status: PartEnd; error: string | null } {
+  if (refusedBefore(part, msg)) return { status: 'refused', error: 'refused' };
   const skewed = run.commitSha !== null && (msg.commit ? msg.commit !== run.commitSha : msg.ok);
   if (skewed) return { status: 'failed', error: COMMIT_MISMATCH };
   return msg.ok ? { status: 'passed', error: null } : { status: 'failed', error: msg.error ?? 'failed' };
@@ -905,7 +927,7 @@ async function productPartReady(ctx: Ctx, part: Part): Promise<boolean> {
   const after = part.environmentSelection?.after ?? [];
   if (!after.length) return true;
   const prerequisites = await ctx.db.select().from(testParts).where(and(eq(testParts.runId, part.runId), inArray(testParts.part, after)));
-  if (prerequisites.some(p => p.status === 'failed' || p.status === 'stopped')) {
+  if (prerequisites.some(p => p.status === 'failed' || p.status === 'stopped' || p.status === 'refused')) {
     await endParts(ctx, eq(testParts.id, part.id), 'prerequisite_failed', 'A required suite part failed; final checks did not run.'); return false;
   }
   return prerequisites.length === after.length && prerequisites.every(p => p.status === 'passed');
@@ -918,8 +940,8 @@ function productPartView(part: Part): object {
   return part.environmentSelection ? { selection: part.environmentSelection.selection, environmentReceipt: part.environmentReceipt } : {};
 }
 
-function productPartEnd(ctx: Ctx, id: NodeIdentity, run: Run, part: Part, message: TestsDone): { status: 'passed' | 'failed'; error: string | null; environmentReceipt: Part['environmentReceipt'] } {
-  const end = partEnd(run, message), environmentReceipt = productReceipt(run.environmentSnapshot, part.environmentSelection, message, testCapabilities(ctx, id).testRuntimes ?? []);
+function productPartEnd(ctx: Ctx, id: NodeIdentity, run: Run, part: Part, message: TestsDone): { status: PartEnd; error: string | null; environmentReceipt: Part['environmentReceipt'] } {
+  const end = partEnd(run, part, message), environmentReceipt = productReceipt(run.environmentSnapshot, part.environmentSelection, message, testCapabilities(ctx, id).testRuntimes ?? []);
   if (run.environmentSnapshot && message.ok && !environmentReceipt) return { status: 'failed', error: 'environment_invalid', environmentReceipt: null };
   return { ...end, environmentReceipt };
 }

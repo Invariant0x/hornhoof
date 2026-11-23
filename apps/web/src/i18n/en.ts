@@ -2738,7 +2738,18 @@ export const en = {
       machine: 'Machine unavailable',
       expired: 'Time ran out',
       unavailable: 'Employee unavailable',
+      stuck: 'Stuck and asks for help',
+      turn: 'Its last turn failed',
       failedRun: (number: string | null, work: boolean) => `${work ? 'Work' : 'Test'} run${number ? `\u00a0#${number}` : ''} failed`,
+      /* What to do about each failure, in plain words; it goes away by itself once its cause is gone. */
+      todo: {
+        run: "Open the run's log on the task and fix what failed. A new run that passes clears this.",
+        expired: 'Nobody answered in time. Answer, or give the work a new wait.',
+        machine: 'The machine is away. Turn it on, or ask its owner. This clears when it is back.',
+        unavailable: 'The employee is unavailable. Give the work to someone else.',
+        stuck: 'The agent cannot go on alone. Answer its request for help.',
+        turn: "The agent's last turn failed and will not be tried again by itself. Ask Operations to find the cause.",
+      },
       runErrors: {
         timeout: 'Time ran out', machine: 'Machine unavailable', repository: 'Could not open the repository',
         files: 'Could not load the task files', revision: 'Checked the wrong version', stopped: 'Stopped on the machine',
