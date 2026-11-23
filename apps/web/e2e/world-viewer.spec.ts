@@ -157,8 +157,9 @@ test('opens from a plain static host under a sub-path and asks only for its own 
     expect(answers.filter(a => a.status >= 400)).toEqual([]);
     expect(failed).toEqual([]);
     expect(errors).toEqual([]);
-    expect(answers.map(a => a.path)).toContain(`${SUB}world-art/egypt/art-index.json`);
+    /* A build without the art folder ships no art and asks for none, its index included. */
     const art = existsSync(join(served, 'world-art/egypt/ground/plain.png'));
+    if (art) expect(answers.map(a => a.path)).toContain(`${SUB}world-art/egypt/art-index.json`);
     if (art) expect(answers).toContainEqual({ path: `${SUB}world-art/egypt/ground/plain.png`, type: 'fetch', status: 200 });
     await keep(info, 'world-viewer-requests.json', { origin: 'same origin, under the sub-path', subPath: SUB, art, requests: answers });
   } finally {

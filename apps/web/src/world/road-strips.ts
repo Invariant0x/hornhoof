@@ -4,7 +4,7 @@
    where the street turns or stops, so corners close. Bridges keep their own look. Knows no world: tiers and pictures
    come from the pack. */
 
-import { Assets, Container, Matrix, Texture, TilingSprite } from 'pixi.js';
+import { Container, Matrix, Texture, TilingSprite } from 'pixi.js';
 import type { RoadTile, RoadTier } from './city-layout';
 import { tileTopVertexToWorld } from './coords';
 import type { TileWindow } from './city-renderer';
@@ -95,7 +95,11 @@ export class RoadStripPainter {
         const path = paths[tier];
         if (!path) return null;
         try {
-          const tex = await Assets.load<Texture>(`${baseUrl}${path}`);
+          /* A plain image request, like the rest of the ground art: no loader worker started from a blob. */
+          const img = new Image();
+          img.src = `${baseUrl}${path}`;
+          await img.decode();
+          const tex = Texture.from(img);
           tex.source.style.addressModeU = 'repeat';
           tex.source.style.scaleMode = 'linear';
           return [tier, tex] as const;
@@ -163,6 +167,7 @@ export class RoadStripPainter {
   destroy(): void {
     if (!this.container.destroyed) this.container.destroy({ children: true });
     this.pool.length = 0;
+    for (const tex of this.textures.values()) tex.destroy(true);
     this.textures.clear();
     this.loaded = false;
   }

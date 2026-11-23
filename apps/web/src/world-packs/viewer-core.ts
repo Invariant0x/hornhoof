@@ -27,7 +27,7 @@ export function viewerPack(pack: WorldPackManifest, mode: ViewerArtMode, pageUrl
   return { ...pack, art: { ...pack.art, baseUrl: new URL(`world-art/${pack.id}/`, pageUrl).href } };
 }
 
-/* Every ground, water, path and plant file the pack names, relative to its art folder, sorted, each once. */
+/* Every ground, water, path, street and plant file the pack names, relative to its art folder, sorted, each once. */
 export function packArtFiles(pack: WorldPackManifest): string[] {
   const files = new Set<string>();
   const add = (path: string | undefined) => {
@@ -43,6 +43,7 @@ export function packArtFiles(pack: WorldPackManifest): string[] {
     add(spec.liquid?.ripples);
     add(spec.liquid?.surface);
     add(spec.pathStrip);
+    Object.values(spec.roads ?? {}).forEach(add);
   }
   for (const kind of pack.plants ?? []) {
     for (const art of kind.art ?? []) {
