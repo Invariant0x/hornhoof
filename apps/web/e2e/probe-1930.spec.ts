@@ -12,6 +12,8 @@ async function snap(page: Page, what: string) {
       stripEls: [...document.querySelectorAll('.agent-strip')].map(el => `${(el.textContent ?? '').trim().slice(0, 18)}:${r(el)}`),
       windows: [...document.querySelectorAll('aside')].map(el => `${String(el.className).slice(0, 30)}:${r(el)}:${getComputedStyle(el).display}`),
       topbar: [...document.querySelectorAll('.topbar > *')].map(el => r(el)),
+      drawer: [...document.querySelectorAll('.dv-drawer, .dv-drawer-b, .dview, .body, .dv-dock, .dv-acts, .ticker, .zoom')].map(el => `${String(el.className).split(' ').slice(0, 2).join('.')}:${r(el)}${el.scrollHeight > el.clientHeight + 1 ? `:sh${el.scrollHeight}/ch${el.clientHeight}/st${Math.round(el.scrollTop)}` : ''}`),
+      hit: [...document.querySelectorAll('[aria-label] button')].filter(b => /Egor/.test(b.textContent ?? '')).map(b => { const q = b.getBoundingClientRect(); const x = (q.left + q.right) / 2, y = (q.top + q.bottom) / 2; return `${Math.round(x)},${Math.round(y)} -> ${document.elementsFromPoint(x, y).slice(0, 5).map(e => `${e.tagName}.${String(e.className).split(' ')[0]}`).join(' > ')}`; }),
       members: [...document.querySelectorAll('[aria-label] button')].filter(b => /Bruno|Clara|Dana|Egor/.test(b.textContent ?? '')).map(b => `${(b.textContent ?? '').trim().slice(0, 10)}:${r(b)}`).slice(0, 8),
     };
   });
@@ -21,21 +23,24 @@ async function snap(page: Page, what: string) {
 
 for (const width of [1440, 375]) {
   test(`probe 1930 at ${width}`, async ({ page }) => {
-    const { windowOf, stripOf, anyStrip, openEmployee, minimize } = await openCompany(page, { lang: 'ru', theme: 'dark', width });
+    const { words, tab, windowOf, stripOf, anyStrip, minimize } = await openCompany(page, { lang: 'ru', theme: 'dark', width });
     const step = async (what: string, run: () => Promise<unknown>) => {
       let timer: NodeJS.Timeout | undefined;
       try {
         await Promise.race([run(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('stood 20 s')), 20000); })]);
         console.log(`STEP ok ${what}`);
       } catch (e) {
-        console.log(`STEP FAIL ${what}: ${(e as Error).message.split('\n')[0]}`);
+        console.log(`STEP FAIL ${what}: ${(e as Error).message.replace(/\n/g, ' | ').slice(0, 1400)}`);
         await snap(page, what);
         throw e;
       } finally { clearTimeout(timer); }
     };
     const names = ['Bruno', 'Clara', 'Dana', 'Egor'];
     for (const name of names) {
-      await step(`open ${name}`, () => openEmployee(name));
+      await step(`tab ${name}`, () => tab(words.tabs[0]!).click({ timeout: 15000 }));
+      await step(`department ${name}`, async () => { if (!(await page.locator('.dview').count())) await page.getByRole('button', { name: /^Development/ }).click({ timeout: 15000 }); });
+      await step(`members ${name}`, () => page.getByRole('region', { name: words.members }).getByRole('button', { name: new RegExp(name) }).click({ timeout: 15000 }));
+      await step(`window ${name}`, () => expect(windowOf(name)).toBeVisible({ timeout: 15000 }));
       await step(`minimize ${name}`, () => minimize(name));
     }
     await snap(page, 'after-minimizing');
