@@ -92,9 +92,21 @@ describe('Stage 2 pack-owned procedural generation and modularity', () => {
     /* All 12 gallery seeds contain every expected Egypt terrain slot. */
     for (const seed of GALLERY_SEEDS) {
       const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed, mapSize: 150 });
-      for (const id of ['river', 'bank', 'fertile', 'field', 'plain', 'dune', 'ridge', 'quarry', 'oasis_water', 'oasis_grove']) {
+      for (const id of ['river', 'bank', 'fertile', 'plain', 'dune', 'ridge', 'quarry', 'oasis_water', 'oasis_grove']) {
         expect(map.stats.counts[id] ?? 0, `${seed}: missing ${id}`).toBeGreaterThan(0);
       }
+    }
+  });
+
+  /* Ivan's word, 23.11.2026: sown fields are a game object people work on, not landscape, so the map grows none. Where
+     they stood, the fertile land's grass grows. */
+  it('grows no sown fields on the Egypt map: no field tiles, no field ground and no tilled plots on any gallery seed', () => {
+    expect(EGYPT_WORLD_PACK.terrainRecipe!.tileKinds.map(k => k.id)).not.toContain('field');
+    expect(EGYPT_WORLD_PACK.materials.filter(m => m.id === 'field' || m.plots).map(m => m.id)).toEqual([]);
+    for (const seed of GALLERY_SEEDS) {
+      const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed, mapSize: 150 });
+      expect(map.stats.counts.field ?? 0, `${seed}: field tiles`).toBe(0);
+      expect(map.cornerFields.materialIds, `${seed}: field ground`).not.toContain('field');
     }
   });
 
