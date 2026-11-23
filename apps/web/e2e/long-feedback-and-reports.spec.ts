@@ -517,11 +517,11 @@ test('preserves 12,000-char input on refusal, supports pick: 0 + 12k comment and
   });
 
   await page.goto('/tasks');
-  const readOnlyCard = page.locator('.waiting').getByRole('article', { name: new RegExp(`^#${sc.taskNumber} `) });
-  await expect(readOnlyCard).toBeVisible();
-  await expect(readOnlyCard).toContainText(ru.tasks.decidedByCeo);
-  await expect(readOnlyCard.getByRole('textbox')).toHaveCount(0);
-  await expect(readOnlyCard.getByRole('button', { name: ru.tasks.sendFeedback })).toHaveCount(0);
+  /* The page holds what this member can answer (#1806): the pick request of their department stands there, so the page has
+     come, and the CEO's choice, which they cannot answer, has no card on it, no field and no button to send. The server
+     refuses their answer all the same, below. */
+  await expect(page.locator('.waiting').getByRole('article', { name: new RegExp(`^#${sc.pickTaskNumber} `) })).toBeVisible();
+  await expect(page.locator('.waiting').getByRole('article', { name: new RegExp(`^#${sc.taskNumber} `) })).toHaveCount(0);
 
   const devPostRes = await fetch(`${srv.origin}/api/requests/${sc.choiceRequestId}`, {
     method: 'POST',
