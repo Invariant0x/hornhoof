@@ -1,7 +1,7 @@
 import type { ColorRole, SkinColors } from './roles';
 
 /* How readable the colours of a skin are, by WCAG 2: text 4.5:1 on every surface it stands on and on its own fill,
-   borders of controls 3:1. A file whose colours fail one pair is refused, and a built-in skin passes every pair. */
+   borders of controls and the fill of a button, its only edge, 3:1 (1.4.11). A file whose colours fail one pair is refused, and a built-in skin passes every pair. */
 
 /* The colour forms a skin takes: #RRGGBB, or rgba() with channels 0 to 255 and an alpha from 0 to 1. */
 const HEX = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i;
@@ -42,6 +42,8 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = [
   { text: 'on_danger', on: 'danger', least: 4.5, kind: 'text' },
   { text: 'on_attention', on: 'attention', least: 4.5, kind: 'text' },
   ...SURFACES.map((on): ContrastPair => ({ text: 'line2', on, least: 3, kind: 'line' })),
+  /* A filled button has no border: its fill is the edge that makes it read as a button on what it stands on. */
+  ...SURFACES.map((on): ContrastPair => ({ text: 'button', on, least: 3, kind: 'line' })),
 ];
 
 /* Glass is see-through: muted text on it stands on the glass over whatever the page shows under it, held here over a white

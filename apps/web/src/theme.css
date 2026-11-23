@@ -547,18 +547,17 @@ select:disabled { opacity: .55; }
 .skins :is(p, h4, h5, h6) { margin: 0; overflow-wrap: break-word; }
 .skins :is(h4, h5, h6) { font-family: var(--f-display); font-size: 15px; font-weight: 600; line-height: 1.4; }
 .skins .btn { min-width: 44px; min-height: 44px; padding: 8px 12px; font-size: 14px; line-height: 1.4; white-space: normal; text-align: center; overflow-wrap: anywhere; }
-.skins-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 16px; }
-.skins-intro { display: grid; gap: 4px; flex: 1 1 320px; min-width: 0; }
+.skins-head { display: grid; gap: 16px; }
+.skins-intro { display: grid; gap: 4px; min-width: 0; }
 .skins-intro p { max-width: 65ch; }
-.skins-add { margin-inline-start: auto; max-width: 100%; }
-/* Upload theme above Add from file, the CEO's alone; a theme uploaded shows its own cover in its card, and asks once more
-   in its card before it is deleted. */
-.skins-adds { display: grid; justify-items: end; gap: 8px; margin-inline-start: auto; max-width: 100%; }
-.skins-adds .skins-add { margin-inline-start: 0; }
-.skins-upload-hint { max-width: 32ch; margin: 0; text-align: end; }
+/* The heading's text on top, then the hint and under it the one Upload theme at the end edge (Design, #1960): the hint a
+   step of the 8 px scale above the button, clear of its focus ring. A theme uploaded shows its own cover in its card, and
+   asks once more in its card before it is deleted. */
+.skins-adds { display: grid; justify-items: end; gap: 8px; min-width: 0; }
+.skins-upload-hint { max-width: 48ch; text-align: end; }
 .skin-cover { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border: 1px solid var(--line2); background: var(--bg); }
 .skin-confirm { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--red); background: var(--surface); }
-.skins-add .btn { width: 180px; max-width: 100%; }
+.skins-adds .btn { width: 180px; max-width: 100%; }
 .swap-label { display: grid; }
 .swap-label > span { grid-area: 1 / 1; }
 .swap-label > .sizer { visibility: hidden; }
@@ -610,12 +609,10 @@ select:disabled { opacity: .55; }
 .skins-empty { display: grid; gap: 4px; padding: 16px; border: 1px dashed var(--line2); background: var(--surface); }
 .skins-empty-title { font-weight: 600; }
 .skins-guide { display: grid; gap: 12px; padding: 20px; border: 1px solid var(--line); background: var(--surface); }
-.skins-guide ol { display: grid; gap: 8px; max-width: 560px; margin: 0; padding-inline-start: 24px; }
+.skins-guide > p { max-width: 65ch; }
 .skins-guide > .entry-actions { justify-content: flex-end; }
 .skins-note { max-width: 75ch; padding-block-start: 12px; border-block-start: 1px solid var(--line); color: var(--muted); }
 @media (max-width: 760px) {
-  .skins-add { width: 100%; display: flex; justify-content: flex-end; }
-  .skins-adds { width: 100%; }
   .skins-guide { padding: 16px; }
 }
 .body { position: absolute; inset: 0; overflow: auto; }

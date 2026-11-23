@@ -106,7 +106,7 @@ async function layout(page: Page) {
     const small = targets.filter(shown).filter(target => Math.round(target.getBoundingClientRect().height) < 44).map(say);
     /* The last button of each row of actions ends where the column ends; on a skin's card, where the card's content ends. */
     const edge: string[] = [];
-    for (const row of group.querySelectorAll(':is(.settings-actions, .repo-actions, .skins-add)')) {
+    for (const row of group.querySelectorAll(':is(.settings-actions, .repo-actions, .skins-adds)')) {
       const buttons = [...row.querySelectorAll(':scope > .btn, :scope > .entry-actions > .btn')].filter(shown);
       const last = buttons.at(-1);
       if (last && Math.abs(end(last.getBoundingClientRect()) - end(main)) > 1) edge.push(say(last));

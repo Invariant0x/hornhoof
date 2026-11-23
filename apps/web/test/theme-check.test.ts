@@ -60,6 +60,8 @@ describe('the look of a theme archive', () => {
     expect(refusal(raw => ((raw.terminal as Raw).ansi = ['#000000']))).toEqual({ code: 'bad_color', key: 'terminal.ansi' });
     expect(refusal(raw => ((raw.terminal as Raw).bell = '#000000'))).toEqual({ code: 'unknown_key', key: 'terminal.bell' });
     expect(refusal(raw => ((raw.colors as Raw).ink = (raw.colors as Raw).bg))).toMatchObject({ code: 'low_contrast' });
+    /* An uploaded theme whose buttons have no visible edge is refused as a skin file is (Design, #1960). */
+    expect(refusal(raw => Object.assign(raw.colors as Raw, { button: (raw.colors as Raw).bg, on_button: (raw.colors as Raw).ink }))).toMatchObject({ code: 'faint_line', key: 'button', value: 'bg' });
     expect(parseLook(JSON.parse('{"__proto__":{"x":1}}'), [])).toEqual({ ok: false, error: { code: 'forbidden_key', key: '__proto__' } });
   });
 

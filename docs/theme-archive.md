@@ -80,7 +80,7 @@ The interface's colours, fonts and corners. It is the skin of Hornhoof's theme s
 * `scheme` is `dark` or `light`.
 * `colors` names every colour role of the theme sheet. The example above is shortened; the full list of 35 roles is `COLOR_TOKENS` in `apps/web/src/skins/roles.ts`, and the store's sample skin file names them all.
   * A colour is `#RRGGBB`, `#RGB` or `rgb()` / `rgba()`. Only the roles drawn over something else may be see-through: `dot`, `glow`, `hud`, `shadow` and `scrim`.
-  * Text must stand out from what it stands on: 4.5:1 for text and 3:1 for lines. The upload is checked as an own skin file is checked.
+  * Text must stand out from what it stands on: 4.5:1 for text, 3:1 for lines and 3:1 for the fill of a button, which is its edge. The upload is checked as an own skin file is checked.
 * `fonts` gives the three stacks, `display`, `body` and `mono`. Each may name the fonts Hornhoof ships, a family of `ui/fonts.json`, and the generic families (`sans-serif`, `serif`, `monospace`, `system-ui`). A stack ends with a generic family.
 * `cut` is how far the corners are cut, from 0 to 1.5. `shape` is `bevel` or `steps`.
 * `surface` is how panels are drawn: `plain`, or a surface style Hornhoof ships (`papyrus`).
@@ -283,8 +283,9 @@ Each of these refuses the whole archive. The store names the reason and the file
 
 ## 10. Turning a theme on, off and deleting it
 
-* Uploading installs the theme for the company. It does not turn it on.
-* The CEO turns a theme on for the whole company in Settings, Themes. Hornhoof applies the look, loads the fonts, draws the world, and gives agents the world's names.
+* The CEO uploads a theme in Settings, Company & access, Themes, with the one button Upload theme. It takes a `.zip` theme archive, sent to the server and checked there, or a skin file (`.json`), which stays in that person's browser. A refused archive leaves the store as it was and says what is wrong and in which file.
+* Uploading installs the theme for the company. It does not turn it on. Its card joins the store under Custom, with its licence linked, and focus goes to its Apply.
+* The CEO turns a theme on for the whole company in Settings, Themes. Hornhoof applies the look, loads the fonts, draws the world, and gives agents the world's names. A theme kept as its interface alone (4.2) says so on its card, and the company keeps the schematic map.
 * Turning it off means choosing another theme. The look goes back to that theme, the map goes back to that theme's map, and agents get their own names back. Nothing of the theme stays in the interface.
 * Deleting a theme that is on turns it off first, back to Cyberpunk, and then removes all its files.
 

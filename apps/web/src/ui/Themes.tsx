@@ -26,12 +26,18 @@ type Card = { id: string; look: SkinLook; name: string; desc: string; own: boole
 type StoreFilter = 'all' | 'worlds' | 'classic' | 'custom';
 const STORE_FILTERS: readonly StoreFilter[] = ['all', 'worlds', 'classic', 'custom'];
 
+/* Where theme authors read what a theme holds: one address in every language, which becomes the guide page of #1969 once
+   that is published. */
+export const THEME_GUIDE_URL = 'https://github.com/Invariant0x/hornhoof/blob/main/docs/theme-archive.md';
+
 const isWorldCard = (card: Card) => !!card.look.world && card.look.world !== 'standard';
+/* The company's own: a theme it uploaded, or a person's own skin. */
+const isCustomCard = (card: Card) => card.own || Boolean(card.installed);
 function matchesFilter(card: Card, filter: StoreFilter): boolean {
   if (filter === 'all') return true;
   if (filter === 'worlds') return isWorldCard(card);
-  if (filter === 'custom') return card.own;
-  return !card.own && !isWorldCard(card);
+  if (filter === 'custom') return isCustomCard(card);
+  return !isCustomCard(card) && !isWorldCard(card);
 }
 
 const nameIn = (names: SkinNames, language: Language) => (language === 'ru' ? names.ru : names.en);
@@ -174,6 +180,8 @@ function SkinCard({ card, on, canDelete, onApply, onDownload, onRemove }: CardPr
             </a>
           </p>
         )}
+        {/* A world the store left out for lack of its art: the theme is its interface alone, and the card says why (#1972). */}
+        {card.installed?.worldLeftOut && <p className="skin-meta skin-left-out">{words.archive.worldLeftOut}</p>}
         {world && <p className="skin-perf-note">{words.perfNote}</p>}
       </div>
       <div className="entry-actions skin-actions">
@@ -234,7 +242,8 @@ function NoticeBar({ notice, onUndo }: { notice: Notice; onUndo: (removal: Remov
   );
 }
 
-/* Three steps, the request to give an AI with the sample, and why the layout never changes. */
+/* What each kind of theme holds, the guide for its author, the request to give an AI with the sample, and why the
+   layout never changes. */
 function Guide() {
   const t = useT();
   const id = useId();
@@ -252,7 +261,12 @@ function Guide() {
   return (
     <section className="skins-guide" aria-labelledby={id}>
       <h5 id={id}>{t.skins.guide}</h5>
-      <ol>{t.skins.steps.map(step => <li key={step}>{step}</li>)}</ol>
+      <p>{t.skins.guideText}</p>
+      <p>
+        <a href={THEME_GUIDE_URL} target="_blank" rel="noopener noreferrer">
+          {t.skins.guideLink}
+        </a>
+      </p>
       <div className="entry-actions">
         <button className="btn small ghost" type="button" onClick={() => void copy()}>
           {t.skins.askAi}
@@ -296,7 +310,7 @@ function keepRead(t: Messages, language: Language, read: Skin | Problem): Notice
   return failure(t, added.reason === 'full' ? t.skins.full(COLLECTION_LIMIT) : t.skins.notKept);
 }
 
-/* Removes one's own skin and says so with Undo; focus goes to the next card, else the one before, else Add from file. */
+/* Removes one's own skin and says so with Undo; focus goes to the next card, else the one before, else Upload theme. */
 function removeCard(t: Messages, cards: readonly Card[], card: Card): { notice: Notice; focus: string } | null {
   const removal = removeSkin(card.id);
   if (!removal) return null;
@@ -324,61 +338,40 @@ function download(t: Messages, card: Card, say: (notice: Notice) => void): void 
   }
 }
 
-/* Focus after the catalog has drawn again: the Apply of the card named, or its state when it is on, else Add from file. */
+/* Focus after the catalog has drawn again: the Apply of the card named, or its state when it is on, else Upload theme. */
 function moveFocus(root: HTMLElement | null, to: string): void {
-  const named = to === 'upload' ? root?.querySelector<HTMLElement>('[data-upload]') : root?.querySelector<HTMLElement>(`[data-focus-skin="${to}"]`);
-  const target = named ?? root?.querySelector<HTMLElement>('[data-add]');
+  const named = to === 'upload' ? null : root?.querySelector<HTMLElement>(`[data-focus-skin="${to}"]`);
+  const target = named ?? root?.querySelector<HTMLElement>('[data-upload]');
   target?.focus();
 }
 
 type Talk = { say: (notice: Notice) => void; focusOn: (id: string) => void };
 
-/* Add from file: one file at a time, the button kept in place and its label saying so while the file is read. */
-function AddFromFile({ say, focusOn }: Talk) {
-  const t = useT();
-  const { language } = useLanguage();
-  const [reading, setReading] = useState(false);
-  const picker = useRef<HTMLInputElement>(null);
+/* A skin file is read in this browser and kept for this person; anything else goes to the server as a theme archive. */
+const isSkinFile = (file: File) => /\.json$/i.test(file.name) || file.type === 'application/json';
 
-  async function load(event: ChangeEvent<HTMLInputElement>) {
-    const input = event.currentTarget;
-    const file = input.files?.[0];
-    /* The same file can be picked again after it is fixed; no file picked changes nothing. */
-    input.value = '';
-    if (!file) return;
-    setReading(true);
-    say({ tone: 'busy', text: t.skins.busy });
-    const read = await readSkin(file);
-    setReading(false);
-    say(keepRead(t, language, read));
-    focusOn('');
-  }
-
-  return (
-    <div className="skins-add">
-      <button className="btn small" type="button" data-add disabled={reading} aria-busy={reading || undefined} onClick={() => picker.current?.click()}>
-        <SwapLabel first={t.skins.add} second={t.skins.loading} showSecond={reading} />
-      </button>
-      <input ref={picker} type="file" accept=".json,application/json" hidden onChange={event => void load(event)} />
-    </div>
-  );
-}
-
-/* Upload theme: one archive at a time, sent whole to the server, which checks it and installs it for the company or
-   says what to fix and in which file. The CEO alone has it. */
+/* Upload theme, the one way in for a theme of either kind (Design, #1960), one file at a time with the button kept in place
+   and its label saying what it does meanwhile. A skin file is read here and kept in this browser; an archive is sent whole
+   to the server, which checks it and installs it for the company, or says what to fix and in which file. */
 function UploadTheme({ say, focusOn, onInstalled }: Talk & { onInstalled: (themes: InstalledThemeView[], id: string | null) => void }) {
   const t = useT();
+  const { language } = useLanguage();
   const words = t.skins.archive;
-  const [sending, setSending] = useState(false);
+  const [busy, setBusy] = useState<'reading' | 'sending' | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const hintId = useId();
 
-  async function send(event: ChangeEvent<HTMLInputElement>) {
-    const input = event.currentTarget;
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file) return;
-    setSending(true);
+  async function readSkinFile(file: File) {
+    setBusy('reading');
+    say({ tone: 'busy', text: t.skins.busy });
+    const read = await readSkin(file);
+    setBusy(null);
+    say(keepRead(t, language, read));
+    focusOn('upload');
+  }
+
+  async function sendArchive(file: File) {
+    setBusy('sending');
     say({ tone: 'busy', text: words.busy });
     try {
       const { themes } = await api.upload<{ themes: InstalledThemeView[] }>('/api/themes', file);
@@ -389,17 +382,26 @@ function UploadTheme({ say, focusOn, onInstalled }: Talk & { onInstalled: (theme
       say({ tone: 'alert', title: words.refused, text: problem ? archiveProblemText(t, problem) : errorText(t, err) });
       focusOn('upload');
     } finally {
-      setSending(false);
+      setBusy(null);
     }
   }
 
+  function pick(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    /* The same file can be picked again after it is fixed; no file picked changes nothing. */
+    input.value = '';
+    if (!file) return;
+    void (isSkinFile(file) ? readSkinFile(file) : sendArchive(file));
+  }
+
   return (
-    <div className="skins-add">
-      <button className="btn small" type="button" data-upload disabled={sending} aria-busy={sending || undefined} aria-describedby={hintId} onClick={() => picker.current?.click()}>
-        <SwapLabel first={words.upload} second={words.uploading} showSecond={sending} />
-      </button>
-      <input ref={picker} type="file" accept=".zip,application/zip" hidden data-upload-input onChange={event => void send(event)} />
+    <div className="skins-adds">
       <p className="muted skins-upload-hint" id={hintId}>{words.hint}</p>
+      <button className="btn small" type="button" data-upload disabled={busy !== null} aria-busy={busy !== null || undefined} aria-describedby={hintId} onClick={() => picker.current?.click()}>
+        <SwapLabel first={words.upload} second={busy === 'reading' ? t.skins.loading : words.uploading} showSecond={busy !== null} />
+      </button>
+      <input ref={picker} type="file" accept=".zip,application/zip,.json,application/json" hidden data-upload-input onChange={pick} />
     </div>
   );
 }
@@ -434,7 +436,7 @@ function Catalog({ cards, active, canDelete, onApply, onDownload, onRemove }: Ca
   const id = useId();
   const [filter, setFilter] = useState<StoreFilter>('all');
   const shown = cards.filter(card => matchesFilter(card, filter));
-  const showOwnEmpty = filter === 'all' && !cards.some(card => card.own);
+  const showOwnEmpty = filter === 'all' && !cards.some(isCustomCard);
   return (
     <section className="skins-catalog" aria-labelledby={id}>
       <div className="skins-catalog-head">
@@ -658,7 +660,7 @@ export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) =>
   const [installed, setInstalled] = useState<InstalledThemeView[]>([]);
   const [canEdit, setCanEdit] = useState(false);
   const root = useRef<HTMLDivElement>(null);
-  /* Where focus goes once the catalog has drawn again: the Apply of a card, or Add from file. */
+  /* Where focus goes once the catalog has drawn again: the Apply of a card, or Upload theme. */
   const focusTo = useRef<string | null>(null);
   const headingId = useId();
 
@@ -780,10 +782,7 @@ export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) =>
           <p>{t.skins.desc}</p>
           <p className="muted">{t.skins.local}</p>
         </div>
-        <div className="skins-adds">
-          {canEdit && <UploadTheme say={setNotice} focusOn={focusOn} onInstalled={(themes, id) => void installedNow(themes, id)} />}
-          <AddFromFile say={setNotice} focusOn={focusOn} />
-        </div>
+        <UploadTheme say={setNotice} focusOn={focusOn} onInstalled={(themes, id) => void installedNow(themes, id)} />
       </div>
       {notice && <NoticeBar notice={notice} onUndo={undo} />}
       <Catalog cards={cards} active={active} canDelete={canEdit} onApply={card => void apply(card)} onDownload={card => download(t, card, setNotice)} onRemove={remove} />
