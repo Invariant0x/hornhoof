@@ -110,6 +110,36 @@ describe('Stage 2 pack-owned procedural generation and modularity', () => {
     }
   });
 
+  /* Checksums taken from the recipe that still grew fields (23.11.2026), reading every field tile as fertile: tile ids
+     row by row, relief and water distance at every corner, and the start. */
+  it('keeps the Egypt map as it was outside the former fields: tiles, relief, water and start on four seeds', () => {
+    const fnv = (parts: Iterable<string>): string => {
+      let h = 0x811c9dc5;
+      for (const s of parts) {
+        for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
+        h = Math.imul(h ^ 0x2c, 0x01000193) >>> 0;
+      }
+      return h.toString(16).padStart(8, '0');
+    };
+    const before: Record<string, Readonly<{ tiles: string; relief: string; water: string; start: { col: number; row: number } }>> = {
+      hornhoof: { tiles: 'f61a8db1', relief: 'cce01568', water: '593ac891', start: { col: 75, row: 82 } },
+      'acme-corp': { tiles: 'b13ccb6b', relief: '142ec900', water: '8dcd3574', start: { col: 54, row: 75 } },
+      'solar-labs': { tiles: 'a7990643', relief: '01c390f3', water: '0e804107', start: { col: 83, row: 82 } },
+      'north-star': { tiles: '2386d3b9', relief: 'e756c805', water: '7c005c48', start: { col: 78, row: 64 } },
+    };
+    for (const [seed, was] of Object.entries(before)) {
+      const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed, mapSize: 150 });
+      const ids: string[] = [];
+      for (let row = 0; row < 150; row++) for (let col = 0; col < 150; col++) ids.push(String(map.tileAt(col, row)));
+      expect({
+        tiles: fnv(ids),
+        relief: fnv(Array.from(map.cornerFields.elevation, e => e.toFixed(4))),
+        water: fnv(Array.from(map.cornerFields.signedWaterDist, e => e.toFixed(4))),
+        start: map.startCenter,
+      }, seed).toEqual(was);
+    }
+  });
+
   it('proves modularity with the Dungeon pack: bedrock, caverns, continuous magma stream and central carved hall across 12 seeds', () => {
     const a1 = generateWorldTerrain(DUNGEON_WORLD_PACK, { seed: 'hornhoof', mapSize: 150 });
     const a2 = generateWorldTerrain(DUNGEON_WORLD_PACK, { seed: 'hornhoof', mapSize: 150 });
