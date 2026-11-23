@@ -108,6 +108,23 @@ export function bridgePieceAt(site: BridgeSite, index: number): BridgePiece {
   return index === site.length - 1 ? 'end' : 'span';
 }
 
+/* How far over the tile it stands before, a resident on the bridge is drawn: past that piece, short of the next. */
+const OVER_PIECE = 0.25;
+
+/* The depth a resident is drawn at, at (col, row) with tile centres on whole numbers. Anywhere but the bridge, the
+   depth of its feet. On the bridge, or stepping onto it, the depth of the nearer of the two tiles it is between, a
+   little over that piece: the deck it walks on is drawn under it, never over its legs, while the pieces further on
+   still lie over it. */
+export function residentDepthY(site: BridgeSite | null, col: number, row: number, tileH: number): number {
+  if (!site) return (col + row + 1) * (tileH / 2);
+  const [along, across] = site.axis === 'u' ? [col, row] : [row, col];
+  const [first, line] = site.axis === 'u' ? [site.col, site.row] : [site.row, site.col];
+  const ahead = Math.ceil(along) - first;
+  const touches = Math.round(across) === line && ahead >= 0 && Math.floor(along) - first < site.length;
+  if (!touches) return (col + row + 1) * (tileH / 2);
+  return (Math.ceil(along) + across + 1 + OVER_PIECE) * (tileH / 2);
+}
+
 /* Two sites are the same bridge. */
 export function sameBridge(a: BridgeSite | null | undefined, b: BridgeSite | null | undefined): boolean {
   if (!a || !b) return !a && !b;

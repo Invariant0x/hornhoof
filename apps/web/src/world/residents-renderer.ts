@@ -17,6 +17,7 @@ import {
   type ResidentArt,
 } from './art';
 import { parseArtTint, type DisplayRunPool, type WorldArtLibrary } from './art-runtime';
+import { residentDepthY } from './bridge-site';
 import type { CityBuilding, CityState } from './city-layout';
 import { tileCenterToWorld, tileTopVertexToWorld } from './coords';
 import type { AnimationDetailLevel, WorldPackManifest } from './manifest';
@@ -816,7 +817,7 @@ export function renderResidentsToPixi(
     const selected = r.id === selectedResidentId;
     if (art) {
       /* Through the pool, art or placeholder, at the depth of the feet among buildings and plants. */
-      art.pool.depth = tileCenterToWorld(r.col, r.row, tileW, tileH).y;
+      art.pool.depth = residentDepthY(city?.bridge ?? null, r.col, r.row, tileH);
       const resolved = artIndex ? resolveResidentArt(pack, artIndex, r, sim.timeSec) : null;
       if (!resolved || !drawResidentArtPixi(art, resolved, r, pack, tileW, tileH, selected)) {
         drawResidentPixi(art.pool.graphics(), r, sim.timeSec, tileW, tileH, detail, selected);
