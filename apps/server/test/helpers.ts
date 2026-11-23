@@ -102,6 +102,8 @@ const noGitHost: RepositoryCreator = async () => ({ problem: 'Tests reach no git
 const noIssues: IssueCreator = async () => ({ problem: 'Tests reach no git host.' });
 /* Nor do they push a branch to any host: a test that makes one says what its repository does with it. */
 const noBranches: BranchCreator = async () => ({ problem: 'Tests reach no git host.' });
+/* Nor do they take refs in by a push: with no pusher, work joins its turn branch by the fast-forward its holder makes, and a test that
+   takes it in says what its repository does with the push. */
 /* Nor any API's list of models: a test that loads one answers through ctx.readModels. */
 const noApis: ModelsReader = async () => ({ ok: false, reason: 'unreachable' });
 
@@ -133,7 +135,7 @@ async function builtOn(client: PGlite, env: NodeJS.ProcessEnv, logger?: Deps['lo
   const db = recordSources(drizzle(client, { schema }) as unknown as Db);
   /* Tests never reach the real registry or a real CA unless they ask. */
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ACME_DIRECTORY: 'off', ...env });
-  const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, createRepository: noGitHost, createIssue: noIssues, readModels: noApis, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }), readBranches: async () => ({ heads: {} }), createBranch: noBranches, readTags: async () => ({ tags: {} }), readMerged: async () => null }));
+  const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, createRepository: noGitHost, createIssue: noIssues, readModels: noApis, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }), readBranches: async () => ({ heads: {} }), createBranch: noBranches, pushRefs: undefined, readTreeSha: undefined, readTags: async () => ({ tags: {} }), readMerged: async () => null }));
   return { app, db, config };
 }
 

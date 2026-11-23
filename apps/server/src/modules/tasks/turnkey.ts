@@ -8,7 +8,8 @@ import { changeRoute, type Route } from './route-records.js';
 import { giver, refuse, type Live, type Moved, type Task, type Tx } from './state.js';
 import { move } from './transitions.js';
 import { openTurnOf } from './turn-department.js';
-import { branchHolds, integrationTarget, requireInTurn, requireSameTurn, type IntegrationTarget } from './turn-integration.js';
+import { takeIn } from '../repos/take-in.js';
+import { branchHolds, headOf, holdsOrNull, integrationTarget, requireInTurn, requireSameTurn, type IntegrationTarget } from './turn-integration.js';
 
 /* A turnkey team: each member does a task end to end alone on its task branch with local changed-area checks (never
    per-task run_tests), never enters the echelons and calls no other member of the department onto its work. The mark is
@@ -37,7 +38,7 @@ export const throughEchelons = (db: Db | Tx, task: Pick<Task, 'companyId' | 'exe
 export const turnkeyWork = (task: Pick<Task, 'number'>) =>
   refuse(409, 'task_invalid', `#${task.number} is turnkey work: its holder does it end to end alone and closes it with report, so no echelon takes it.`);
 
-type Reader = Parameters<typeof move>[0] & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readMerged'>>;
+type Reader = Parameters<typeof move>[0] & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readMerged' | 'pushRefs' | 'readTreeSha' | 'clock'>>;
 
 /* What the holder of turnkey work names as it closes it: the exact commit it checked and took into the turn branch by
    fast-forward, a commit it made on its own branch, and the commit right under its first own commit, which is another
@@ -141,8 +142,29 @@ async function ownBranchOf(readCommit: NonNullable<Ctx['readCommit']>, repo: Int
   throw unreadable();
 }
 
+/* The turn branch takes the commit the holder checked in as a merge commit of its own, which names the task, unless it holds the
+   commit already, as where its holder fast-forwarded it. The merge is made only where Hornhoof can push to the repository and
+   read the tree of a commit: elsewhere the holder joins the turn branch itself, as it always did. The merge, or none. */
+async function takenIntoTurn(ctx: Reader, task: Task, target: IntegrationTarget, own: Own, named: TurnkeyChecked): Promise<string | null> {
+  const { pushRefs, readTreeSha } = ctx;
+  const head = pushRefs && readTreeSha ? await headOf(ctx, target.repo, target.branch) : null;
+  if (!pushRefs || !readTreeSha || !head || (await branchHolds(ctx, target.repo, head, named.commit))) return null;
+  const who = target.repo.author;
+  if (!who) throw refuse(409, 'task_invalid', `Hornhoof takes #${task.number} into ${target.branch} as a merge commit it signs, and the repository of the department names no author for its commits. Ask the head of the department to set it, then report done again.`);
+  const taken = await takeIn({ task: task.number, turn: target.branch, turnHead: head, candidate: named.commit, who, branch: own.branch }, {
+    holds: (holder, held) => holdsOrNull(ctx, target.repo, holder, held),
+    treeOf: commit => readTreeSha(target.repo, commit, 10_000),
+    push: (updates, options) => pushRefs(target.repo, updates, options),
+    now: ctx.clock ?? Date.now,
+  });
+  if ('merge' in taken) return taken.merge;
+  if ('already' in taken) return null;
+  throw refuse(409, 'task_changed', taken.problem);
+}
+
 /* Where turnkey work of a department with a repository joins its open turn: its own branch, task-<number>, which the turn
-   branch holds by fast-forward. Work with no branch of its own changed no code and joins no release. */
+   branch holds, taken in by Hornhoof as a merge commit of its own or already there by a fast-forward. Work with no branch of
+   its own changed no code and joins no release. */
 async function turnkeyIntegration(ctx: Reader, task: Task, named?: TurnkeyChecked) {
   const target = await integrationTarget(ctx, task);
   const turn = target?.turn;
@@ -153,10 +175,11 @@ async function turnkeyIntegration(ctx: Reader, task: Task, named?: TurnkeyChecke
   if (!named) throw unnamed(task, own, branch);
   await requireNamed(ctx, target.repo, own, named);
   const workStart = await requireStarted(ctx, target.repo, task, named);
+  const merge = await takenIntoTurn(ctx, task, target, own, named);
   await requireInTurn(ctx, { ...target, turn }, named.commit, (head, holdsHead) => holdsHead
     ? `fast-forward ${branch} to ${own.branch} first, so the release takes it, then report done.`
     : `${own.branch} does not hold ${head}, the head of ${branch}, so ${branch} cannot go to it by fast-forward: take ${branch} into ${own.branch} first, then fast-forward ${branch} to it and report done.`);
-  return { turn, integration: { branch, commit: named.commit, start: named.baseCommit, workStart, from: own.branch, observedAt: new Date().toISOString() } };
+  return { turn, integration: { branch, commit: named.commit, ...(merge ? { merge } : {}), start: named.baseCommit, workStart, from: own.branch, observedAt: new Date().toISOString() } };
 }
 
 /* Its holder closes turnkey work alone: nobody checks it after, and whoever gave it hears that it is done. */

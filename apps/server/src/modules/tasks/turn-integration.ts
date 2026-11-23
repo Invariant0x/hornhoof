@@ -35,17 +35,22 @@ export async function integrationTarget(ctx: Reader, task: Pick<Task, 'companyId
 }
 
 /* A branch at head holds commit: it is there, or the branch went on from it. GitHub says so by the status of their comparison,
-   however many files it has; where it cannot, the line of their full comparison proves it. Anything unread proves nothing. */
-export async function branchHolds(ctx: Partial<Pick<Ctx, 'readMerged' | 'readCompare'>>, repo: Repo, head: string, commit: string): Promise<boolean> {
+   however many files it has; where it cannot, the line of their full comparison proves it. None where nothing could be read. */
+export async function holdsOrNull(ctx: Partial<Pick<Ctx, 'readMerged' | 'readCompare'>>, repo: Repo, head: string, commit: string): Promise<boolean | null> {
   if (head === commit) return true;
   try {
     const merged = await ctx.readMerged?.(repo, { base: head, head: commit }, 10_000);
     if (merged !== undefined && merged !== null) return merged;
     const compared = await ctx.readCompare?.(repo, { base: commit, head }, 10_000);
-    return !!compared && !!heldLineage(compared, commit, head);
+    return compared ? !!heldLineage(compared, commit, head) : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/* Whether a branch at head holds commit; anything unread proves nothing. */
+export async function branchHolds(ctx: Partial<Pick<Ctx, 'readMerged' | 'readCompare'>>, repo: Repo, head: string, commit: string): Promise<boolean> {
+  return (await holdsOrNull(ctx, repo, head, commit)) === true;
 }
 
 /* The head of a branch as the repository says it now, or why it could not say. A tag of its name is no branch: it stands for

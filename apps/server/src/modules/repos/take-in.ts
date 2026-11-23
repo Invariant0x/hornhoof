@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { deflateSync } from 'node:zlib';
 import type { Holds } from './prune-plan.js';
-import type { Push } from './ref-push.js';
+import { refusalOf, type Push } from './ref-push.js';
 
 /* A checked candidate taken into a turn branch as a merge commit of its own, which names the task (#1964). The merge has the
    candidate's own tree, so what the candidate's checks proved is what the turn branch holds, and the turn's history shows
@@ -9,7 +9,8 @@ import type { Push } from './ref-push.js';
    would bring other work in, with a tree nobody checked: it is refused and the task goes back for a take-in. */
 
 export type Who = { name: string; email: string };
-export type TakeIn = { task: number; turn: string; turnHead: string; candidate: string; who: Who };
+/* branch: the branch of the candidate, for the words that tell its holder what to do. */
+export type TakeIn = { task: number; turn: string; turnHead: string; candidate: string; who: Who; branch?: string };
 export type TakeInDeps = {
   holds: Holds;
   /* The tree a commit has, or none where the repository could not say. */
@@ -62,19 +63,19 @@ async function stateOf(input: TakeIn, holds: Holds): Promise<Ready> {
 
 /* Takes the candidate into the turn branch by a merge of its own, once, only while the turn branch is still where it was read. */
 export async function takeIn(input: TakeIn, deps: TakeInDeps): Promise<Taken> {
-  const { task, turn, turnHead, candidate, who } = input;
+  const { task, turn, turnHead, candidate, who, branch } = input;
   if (!TURN.test(turn)) return { problem: `${JSON.stringify(turn)} is not a turn branch: work is taken into a turn branch alone.` };
   if (![turnHead, candidate].every(sha => SHA1.test(sha))) return { problem: 'A commit is not one git takes.' };
   const state = await stateOf(input, deps.holds);
   if (state === 'already') return { already: true };
   if (state === 'unreadable') return unreadable(`Whether ${turn} and the candidate hold each other`);
-  if (state === 'stale') return { problem: `The candidate ${candidate.slice(0, 9)} does not hold ${turn} at ${turnHead.slice(0, 9)}: take ${turn} into the task's branch, check it again, and report it again.`, stale: true };
+  if (state === 'stale') return { problem: `The candidate ${candidate.slice(0, 9)} does not hold ${turn} at ${turnHead.slice(0, 9)}: take ${turn} into ${branch ?? "the task's branch"}, check it again, and report it again.`, stale: true };
   const tree = await deps.treeOf(candidate);
   if (!tree || !SHA1.test(tree)) return unreadable(`The tree of ${candidate.slice(0, 9)}`);
   const body = commitText(tree, [turnHead, candidate], who, Math.floor(deps.now() / 1000), takeInMessage(task, who));
   const merge = objectId(body);
   const ref = `refs/heads/${turn}`;
   const pushed = await deps.push([{ ref, old: turnHead, next: merge }], { pack: packOf(body) });
-  const refused = 'problem' in pushed ? pushed.problem : pushed.refs[ref];
-  return refused ? { problem: `${turn} went on while #${task} was taken in (${refused}): take it into the task's branch, check it again, and report it again.`, stale: true } : { merge };
+  const refused = refusalOf(pushed, ref);
+  return refused ? { problem: `${turn} went on while #${task} was taken in (${refused}): take it into ${branch ?? "the task's branch"}, check it again, and report it again.`, stale: true } : { merge };
 }

@@ -101,7 +101,8 @@ import { overLink } from './auth/tunnel.js';
 import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
 
-import { githubReaders, type CompareReader, type MergeReader, type TreeReader } from './modules/testruns/compare.js';
+import { githubReaders, type CompareReader, type MergeReader, type TreeReader, type TreeShaReader } from './modules/testruns/compare.js';
+import { pushRefs, type RefPusher } from './modules/repos/ref-push.js';
 import { GitHubLimits, limitRecord } from './modules/testruns/github-limit.js';
 import { MergedAnswers } from './modules/departments/branches.js';
 import { createOnGitHub } from './modules/departments/github-create.js';
@@ -120,7 +121,7 @@ import { modelsReader, type ModelsReader } from './modules/subscriptions/api-mod
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. templates are read
    from config.templatesDir unless given: a test file reads them once for all its servers. onRoute is called for every
    route before any is added; a test uses it to ask each route what it tells a stranger. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; onRoute?: (route: { method: string | string[]; url: string }) => void; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; readBranches?: BranchReader; createBranch?: BranchCreator; readTags?: TagReader; readMerged?: MergeReader; createRepository?: RepositoryCreator; createSpreadsheet?: SpreadsheetCreator; createIssue?: IssueCreator; readModels?: ModelsReader; clock?: () => number; templates?: Templates; released?: readonly Released[]; worldPacks?: WorldPackRegistry };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; onRoute?: (route: { method: string | string[]; url: string }) => void; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; readTreeSha?: TreeShaReader; pushRefs?: RefPusher; readBranches?: BranchReader; createBranch?: BranchCreator; readTags?: TagReader; readMerged?: MergeReader; createRepository?: RepositoryCreator; createSpreadsheet?: SpreadsheetCreator; createIssue?: IssueCreator; readModels?: ModelsReader; clock?: () => number; templates?: Templates; released?: readonly Released[]; worldPacks?: WorldPackRegistry };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, its ACME answers and
@@ -250,6 +251,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     ...githubReaders(githubLimits),
     readBranches,
     createBranch,
+    pushRefs,
     readTags,
     githubLimits,
     mergedAnswers: new MergedAnswers(),
