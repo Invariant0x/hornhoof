@@ -14,7 +14,6 @@ import {
   displayedWaterDistance,
   groundMixAt,
   sampleCornerFieldBilinear,
-  tilledPlotAt,
   waterDistanceAt,
   waterlineShareAt,
 } from '../src/world/smooth-terrain-baker';
@@ -38,12 +37,11 @@ function mapFor(seed: string): GeneratedWorldMap {
   return map;
 }
 
-/* Open ground: dry land that is not a tilled field plot or bare rock, which are drawn ground of their own. */
+/* Open ground: dry land that is not bare rock, which is drawn ground of its own. */
 function isOpenGround(map: GeneratedWorldMap, u: number, v: number): boolean {
   const tile = map.tileAt(Math.floor(u), Math.floor(v));
   if (tile === null || tile === 'ridge' || map.kindById.get(tile)?.liquid) return false;
   if (displayedWaterDistance(map.cornerFields, u, v) <= 0.1) return false;
-  if (tilledPlotAt(map, EGYPT_WORLD_PACK, u, v)) return false;
   const ids = map.cornerFields.materialIds;
   const w = sampleCornerFieldBilinear(map.cornerFields, u, v).weights;
   return (w[ids.indexOf('rock')] ?? 0) < 0.45;

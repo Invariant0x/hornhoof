@@ -16,7 +16,6 @@ export const EGYPT_TILE_KINDS: readonly TerrainKindSpec[] = [
   { id: 'river', label: { en: 'River', ru: 'Река' }, color: '#2678A6', materialId: 'bank', buildable: false, walkable: false, liquid: true },
   { id: 'bank', label: { en: 'Riverbank', ru: 'Берег' }, color: '#D4BA86', materialId: 'bank', buildable: false, walkable: true },
   { id: 'fertile', label: { en: 'Fertile strip', ru: 'Зеленая полоса' }, color: '#5E8E46', materialId: 'grass', buildable: true, walkable: true },
-  { id: 'field', label: { en: 'Fields', ru: 'Поля' }, color: '#9BA44E', materialId: 'field', buildable: true, walkable: true },
   { id: 'plain', label: { en: 'Flat sand plain', ru: 'Ровная земля' }, color: '#D8C294', materialId: 'sand', buildable: true, walkable: true },
   { id: 'dune', label: { en: 'Dunes', ru: 'Барханы' }, color: '#CFA666', materialId: 'dune', buildable: false, walkable: true },
   { id: 'ridge', label: { en: 'Cliffs & ridges', ru: 'Скалы и гряды' }, color: '#94816A', materialId: 'rock', buildable: false, walkable: false },
@@ -28,7 +27,6 @@ export const EGYPT_TILE_KINDS: readonly TerrainKindSpec[] = [
 export const EGYPT_MATERIAL_IDS = [
   'bank',
   'grass',
-  'field',
   'sand',
   'dune',
   'rock',
@@ -64,11 +62,11 @@ type EgyptSeedParams = Readonly<{
   ridgeSin: number;
   duneCos: number;
   duneSin: number;
-  fieldCos: number;
-  fieldSin: number;
+  meadowCos: number;
+  meadowSin: number;
   bankSeed: number;
   fertileSeed: number;
-  fieldSeed: number;
+  meadowSeed: number;
   ridgeSeed: number;
   quarrySeed: number;
   duneSeed: number;
@@ -299,7 +297,7 @@ export const EGYPT_TERRAIN_RECIPE: TerrainRecipeSpec = {
 
     const ridgeAngle = rng() * Math.PI;
     const duneAngle = rng() * Math.PI;
-    const fieldAngle = theta + (rng() * 0.25 - 0.125);
+    const meadowAngle = theta + (rng() * 0.25 - 0.125);
 
     const joinCenter =
       baseOffset +
@@ -335,11 +333,11 @@ export const EGYPT_TERRAIN_RECIPE: TerrainRecipeSpec = {
       ridgeSin: Math.sin(ridgeAngle),
       duneCos: Math.cos(duneAngle),
       duneSin: Math.sin(duneAngle),
-      fieldCos: Math.cos(fieldAngle),
-      fieldSin: Math.sin(fieldAngle),
+      meadowCos: Math.cos(meadowAngle),
+      meadowSin: Math.sin(meadowAngle),
       bankSeed: (numericSeed ^ 0x1a2b3c4d) >>> 0,
       fertileSeed: (numericSeed ^ 0x2b3c4d5e) >>> 0,
-      fieldSeed: (numericSeed ^ 0x3c4d5e6f) >>> 0,
+      meadowSeed: (numericSeed ^ 0x3c4d5e6f) >>> 0,
       ridgeSeed: (numericSeed ^ 0x4d5e6f71) >>> 0,
       quarrySeed: (numericSeed ^ 0x5e6f7182) >>> 0,
       duneSeed: (numericSeed ^ 0x6f718293) >>> 0,
@@ -361,12 +359,14 @@ export const EGYPT_TERRAIN_RECIPE: TerrainRecipeSpec = {
       const fertileW = fertileWidthAt(params, noise, gx, gy);
       const distCenter = Math.hypot(gx - params.startCenter.col, gy - params.startCenter.row);
 
+      /* Meadows reach out of the green strip in rectangular patches. Sown fields once stood here; on Ivan's word
+         (23.11.2026) they are a game object people work on, not landscape, so the land is the strip's grass. */
       if (dRiver > bankW + 1.2 && dRiver <= fertileW + 3.5 && distCenter > 4.5) {
-        const fx = gx * params.fieldCos - gy * params.fieldSin;
-        const fy = gx * params.fieldSin + gy * params.fieldCos;
-        const plotHash = noise.hash2i(Math.floor(fx / 6), Math.floor(fy / 5), params.fieldSeed);
-        const localBreak = noise.fbm2D(gx * 0.11, gy * 0.11, (params.fieldSeed + 997) >>> 0, 2);
-        if (plotHash > 0.52 && localBreak > 0.34) return 'field';
+        const fx = gx * params.meadowCos - gy * params.meadowSin;
+        const fy = gx * params.meadowSin + gy * params.meadowCos;
+        const plotHash = noise.hash2i(Math.floor(fx / 6), Math.floor(fy / 5), params.meadowSeed);
+        const localBreak = noise.fbm2D(gx * 0.11, gy * 0.11, (params.meadowSeed + 997) >>> 0, 2);
+        if (plotHash > 0.52 && localBreak > 0.34) return 'fertile';
       }
 
       if (dRiver <= fertileW) return 'fertile';
@@ -408,10 +408,24 @@ export const EGYPT_TERRAIN_RECIPE: TerrainRecipeSpec = {
       const oasis = distCenter > 10 ? sampleOasisDistances(params, noise, vx, vy) : { waterDist: Infinity, groveDist: Infinity };
       const signedWaterDist = Math.min(dRiver, oasis.waterDist);
 
-      /* Smooth moisture field peaks along riverbanks and oases, tapering naturally into the desert. */
+      /* The green strip along the water is one to three tiles wide and narrows and widens along the river. Meadow
+         patches reach out of it where the sown fields and the grass around them were (see sampleTile): an edge as
+         steep as the strip's keeps their painted edge as narrow as every other. */
+      const stripW = 1.3 + 2.0 * smoothstep(0.32, 0.68, noise.fbm2D(vx * 0.06 + 9.1, vy * 0.06 - 3.3, (params.bankSeed + 77) >>> 0, 3));
+      const fx = vx * params.meadowCos - vy * params.meadowSin;
+      const fy = vx * params.meadowSin + vy * params.meadowCos;
+      const meadowPatch = noise.fbm2D(fx * 0.085, fy * 0.095, params.meadowSeed, 2);
+      const meadowBand =
+        smoothstep(stripW * 0.7, stripW * 0.7 + 1.2, dRiver) *
+        (1 - smoothstep(fertileW - 1.5, fertileW + 1.5, dRiver)) *
+        smoothstep(3.5, 6.5, distCenter);
+      const meadowGrass = smoothstep(0.3, 0.7, smoothstep(0.4, 0.64, meadowPatch) * meadowBand);
+
+      /* Smooth moisture field peaks along riverbanks and oases, tapering naturally into the desert. The meadows are
+         watered land, so their grass grows the strip's plants. */
       const riverMoist = 1 - smoothstep(0, fertileW + 2.5, Math.max(0, dRiver));
       const oasisMoist = oasis.groveDist < 3 ? 1 - smoothstep(-1.5, 2.2, oasis.groveDist) : 0;
-      const moisture = Math.max(riverMoist, oasisMoist);
+      const moisture = Math.max(riverMoist, oasisMoist, meadowGrass * 0.6);
 
       /* Continuous elevation: recessed river bed -> sloped bank -> flat plain -> rolling dunes -> steep cliffs. */
       const bankSlope = smoothstep(-1.2, 2.4, signedWaterDist) * 0.24;
@@ -437,26 +451,14 @@ export const EGYPT_TERRAIN_RECIPE: TerrainRecipeSpec = {
         smoothstep(fertileW + 7, fertileW + 14, dRiver) * smoothstep(20, 29, distCenter) * (1 - rockWeight);
       const duneWeight = smoothstep(0.635, 0.71, duneMacro + outerBias) * duneMask;
 
-      /* Golden sand is the main ground. The water is edged by a narrow strip of wet bank, then a green strip one to
-         three tiles wide that narrows and widens along the river; beyond it sand, with fields in rectangular plots and
-         grass around them and around the oases. */
+      /* Golden sand is the main ground. The water is edged by a narrow strip of wet bank, then the green strip; beyond
+         it sand, with the meadow patches and grass around the oases. */
       const wetW = 0.45 + 0.25 * noise.fbm2D(vx * 0.11 + 4.7, vy * 0.11 - 8.2, (params.bankSeed + 31) >>> 0, 2);
-      const stripW = 1.3 + 2.0 * smoothstep(0.32, 0.68, noise.fbm2D(vx * 0.06 + 9.1, vy * 0.06 - 3.3, (params.bankSeed + 77) >>> 0, 3));
       const bankWeight = (1 - smoothstep(wetW - 0.25, wetW + 0.25, Math.max(0, signedWaterDist))) * (1 - rockWeight);
-
-      const fx = vx * params.fieldCos - vy * params.fieldSin;
-      const fy = vx * params.fieldSin + vy * params.fieldCos;
-      const fieldPatch = noise.fbm2D(fx * 0.085, fy * 0.095, params.fieldSeed, 2);
-      const fieldBand =
-        smoothstep(stripW * 0.7, stripW * 0.7 + 1.2, dRiver) *
-        (1 - smoothstep(fertileW - 1.5, fertileW + 1.5, dRiver)) *
-        smoothstep(3.5, 6.5, distCenter);
-      const fieldWeight = smoothstep(0.5, 0.64, fieldPatch) * fieldBand * (1 - rockWeight);
 
       const valleyGrass = smoothstep(wetW - 0.2, wetW + 0.3, dRiver) * (1 - smoothstep(stripW - 0.4, stripW + 0.4, dRiver));
       const oasisGrass = oasis.groveDist < 3 ? 1 - smoothstep(-0.6, 1.0, oasis.groveDist) : 0;
-      const aroundFields = smoothstep(0.4, 0.54, fieldPatch) * fieldBand * 0.45;
-      const grassWeight = Math.max(valleyGrass, oasisGrass, aroundFields) * (1 - fieldWeight * 0.75) * (1 - rockWeight);
+      const grassWeight = Math.max(valleyGrass, oasisGrass, meadowGrass) * (1 - rockWeight);
 
       /* Dark Nile silt in a patchy band just above the waterline, and trodden dust on the city site around the start. */
       const siltNoise = noise.fbm2D(vx * 0.12 + 3.1, vy * 0.12 - 1.7, (params.bankSeed + 211) >>> 0, 2);
@@ -467,7 +469,7 @@ export const EGYPT_TERRAIN_RECIPE: TerrainRecipeSpec = {
       const dustWeight =
         (1 - smoothstep(5, 12.5, distCenter)) * smoothstep(0.28, 0.55, dustNoise) * 0.85 * (1 - bankWeight) * (1 - grassWeight * 0.6);
 
-      const used = bankWeight + grassWeight + fieldWeight + duneWeight + rockWeight + quarryBand + siltWeight + dustWeight;
+      const used = bankWeight + grassWeight + duneWeight + rockWeight + quarryBand + siltWeight + dustWeight;
       const sandWeight = Math.max(0.04, 1 - Math.min(1, used));
 
       const elevation =
@@ -484,7 +486,6 @@ export const EGYPT_TERRAIN_RECIPE: TerrainRecipeSpec = {
         layerWeights: {
           bank: bankWeight,
           grass: grassWeight,
-          field: fieldWeight,
           sand: sandWeight,
           dune: duneWeight,
           rock: rockWeight,
