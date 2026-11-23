@@ -11,8 +11,8 @@ export function egyptArtCatalog(roleLooks: Readonly<Record<string, PackRoleLookS
     baseUrl: '/world-art/egypt/',
     buildings: {
       house: [
-        { id: 'hut', footprint: '1x1', fromLevel: 1, label: { en: 'Reed hut', ru: 'Хижина' } },
-        { id: 'mudbrick', footprint: '2x2', fromLevel: 4, label: { en: 'Mudbrick house', ru: 'Глинобитный дом' } },
+        { id: 'hut', footprint: '2x2', fromLevel: 1, label: { en: 'Reed hut', ru: 'Хижина' } },
+        { id: 'mudbrick', footprint: '3x3', fromLevel: 4, label: { en: 'Mudbrick house', ru: 'Глинобитный дом' } },
         { id: 'painted', footprint: '3x3', fromLevel: 8, label: { en: 'Painted house', ru: 'Расписной дом' } },
         { id: 'villa', footprint: '4x4', fromLevel: 15, label: { en: 'Villa with a pool', ru: 'Вилла с бассейном' } },
       ],

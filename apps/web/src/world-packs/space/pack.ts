@@ -140,6 +140,8 @@ export const SPACE_WORLD_PACK: WorldPackManifest = {
   },
   tiles: SPACE_TILE_KINDS.map(k => ({ id: k.id, fill: k.color, stroke: k.color, buildable: k.buildable, walkable: k.walkable })),
   materials: SPACE_MATERIALS,
+  /* Building lots are bare deck plate; an empty lot is refitted with the deck around it in two days. */
+  lotGround: { material: 'deck_plate', edgeTiles: 0.35, regrowthHours: 48 },
   liquidLayer: {
     baseColor: '#0B1026',
     deepColor: '#05081A',

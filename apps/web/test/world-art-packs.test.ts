@@ -111,9 +111,11 @@ describe('Stage 9 world packs follow the art contract', () => {
     describe(`pack ${pack.id}`, () => {
       it('validates and declares a step for every size the engine grows each building kind to', () => {
         expect(validateWorldPack(pack)).toEqual({ ok: true });
-        for (const [kind, spans] of Object.entries(ENGINE_SPANS)) {
+        for (const [kind, engineSpans] of Object.entries(ENGINE_SPANS)) {
           const steps = pack.art?.buildings[kind as BuildingKind] ?? [];
           const covered = new Set(steps.map(s => Number(s.footprint.split('x')[0])));
+          /* A pack's layout rule replaces the engine's sizes of a kind. */
+          const spans = pack.buildingLayout?.[kind as BuildingKind]?.spans ?? engineSpans;
           for (const span of spans) expect(covered.has(span), `${pack.id} ${kind} ${span}x${span}`).toBe(true);
         }
         expect(pack.art?.altar).toBe(true);

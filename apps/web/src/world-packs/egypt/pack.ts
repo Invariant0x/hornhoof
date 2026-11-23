@@ -203,15 +203,6 @@ const EGYPT_MATERIALS: readonly GroundMaterialSpec[] = [
     contrast: 1.15,
   },
   {
-    id: 'field',
-    baseColor: '#5E8A2E',
-    secondaryColor: '#6B4A2A',
-    accentColor: '#A9C65A',
-    pattern: 'crop_rows',
-    contrast: 1.05,
-    plots: { sizeU: 3, sizeV: 2, ridgeColor: '#9DA348', ditchColor: '#4F93AE', margin: 'grass', fallow: 'sand' },
-  },
-  {
     id: 'sand',
     baseColor: '#E6C07A',
     secondaryColor: '#CFA05A',
@@ -261,6 +252,16 @@ const EGYPT_MATERIALS: readonly GroundMaterialSpec[] = [
     pattern: 'packed_dust',
     contrast: 0.95,
     ripples: 0.3,
+  },
+  /* Trodden earth of a cleared building lot: the packed dust about 9% darker, its ripples walked flat. */
+  {
+    id: 'cleared',
+    baseColor: '#C9AD7A',
+    secondaryColor: '#B2925F',
+    accentColor: '#D9C397',
+    pattern: 'packed_dust',
+    contrast: 0.95,
+    ripples: 0.1,
   },
 ];
 
@@ -312,6 +313,8 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
      storeroom wing (4x4) and a hall (5x5) grow behind it. */
   buildingLayout: {
     district_hub: { door: { wall: 'front_right', fromFront: 2 }, spans: [3, 4, 5] },
+    /* Order v2, 3.4: hut 2x2 from level 1, mudbrick 3x3 from 4, painted 3x3 from 8, villa 4x4 from 15; the lot is the villa's. */
+    house: { door: { wall: 'front_right', fromFront: 0 }, spans: [2, 3, 3, 4] },
   },
   altarAnchor: {
     offsetCol: 3,
@@ -330,6 +333,8 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
     walkable: k.walkable,
   })),
   materials: EGYPT_MATERIALS,
+  /* Building lots are trodden dust; a lot nobody took grows back in three days. */
+  lotGround: { material: 'cleared', edgeTiles: 0.45, regrowthHours: 72 },
   liquidLayer: {
     baseColor: '#2A89B0',
     deepColor: '#28648A',
@@ -347,11 +352,11 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
     ground: {
       sand: 'ground/plain.png',
       dust: 'ground/plain.png',
+      cleared: 'ground/cleared.png',
       dune: 'ground/dune.png',
       bank: 'ground/bank.png',
       silt: 'ground/bank.png',
       grass: 'ground/fertile.png',
-      field: 'ground/field.png',
       rock: 'ground/ridge.png',
       quarry: 'ground/quarry.png',
     },
@@ -361,7 +366,8 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
       'bank|grass': 'ground/edges/bank_fertile.png',
       'sand|grass': 'ground/edges/bank_fertile.png',
       'dust|grass': 'ground/edges/bank_fertile.png',
-      'grass|field': 'ground/edges/fertile_field.png',
+      'cleared|bank': 'ground/edges/plain_bank.png',
+      'cleared|grass': 'ground/edges/bank_fertile.png',
       'sand|dune': 'ground/edges/plain_dune.png',
       'sand|rock': 'ground/edges/plain_ridge.png',
       'sand|quarry': 'ground/edges/plain_ridge.png',

@@ -9,6 +9,7 @@ import {
   buildLiquidSurfacePixels,
   displayedWaterDistance,
   getMaterialTextureRgb,
+  groundMixAt,
   sampleCornerFieldBilinear,
   startSmoothChunkBake,
 } from '../src/world/smooth-terrain-baker';
@@ -92,9 +93,51 @@ describe('Stage 2 pack-owned procedural generation and modularity', () => {
     /* All 12 gallery seeds contain every expected Egypt terrain slot. */
     for (const seed of GALLERY_SEEDS) {
       const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed, mapSize: 150 });
-      for (const id of ['river', 'bank', 'fertile', 'field', 'plain', 'dune', 'ridge', 'quarry', 'oasis_water', 'oasis_grove']) {
+      for (const id of ['river', 'bank', 'fertile', 'plain', 'dune', 'ridge', 'quarry', 'oasis_water', 'oasis_grove']) {
         expect(map.stats.counts[id] ?? 0, `${seed}: missing ${id}`).toBeGreaterThan(0);
       }
+    }
+  });
+
+  /* Ivan's word, 23.11.2026: sown fields are a game object people work on, not landscape, so the map grows none. Where
+     they stood, the fertile land's grass grows. */
+  it('grows no sown fields on the Egypt map: no field tiles, no field ground and no tilled plots on any gallery seed', () => {
+    expect(EGYPT_WORLD_PACK.terrainRecipe!.tileKinds.map(k => k.id)).not.toContain('field');
+    expect((EGYPT_WORLD_PACK.materials ?? []).filter(m => m.id === 'field' || m.plots).map(m => m.id)).toEqual([]);
+    for (const seed of GALLERY_SEEDS) {
+      const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed, mapSize: 150 });
+      expect(map.stats.counts.field ?? 0, `${seed}: field tiles`).toBe(0);
+      expect(map.cornerFields.materialIds, `${seed}: field ground`).not.toContain('field');
+    }
+  });
+
+  /* Checksums taken from the recipe that still grew fields (23.11.2026), reading every field tile as fertile: tile ids
+     row by row, relief and water distance at every corner, and the start. */
+  it('keeps the Egypt map as it was outside the former fields: tiles, relief, water and start on four seeds', () => {
+    const fnv = (parts: Iterable<string>): string => {
+      let h = 0x811c9dc5;
+      for (const s of parts) {
+        for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
+        h = Math.imul(h ^ 0x2c, 0x01000193) >>> 0;
+      }
+      return h.toString(16).padStart(8, '0');
+    };
+    const before: Record<string, Readonly<{ tiles: string; relief: string; water: string; start: { col: number; row: number } }>> = {
+      hornhoof: { tiles: 'f61a8db1', relief: 'cce01568', water: '593ac891', start: { col: 75, row: 82 } },
+      'acme-corp': { tiles: 'b13ccb6b', relief: '142ec900', water: '8dcd3574', start: { col: 54, row: 75 } },
+      'solar-labs': { tiles: 'a7990643', relief: '01c390f3', water: '0e804107', start: { col: 83, row: 82 } },
+      'north-star': { tiles: '2386d3b9', relief: 'e756c805', water: '7c005c48', start: { col: 78, row: 64 } },
+    };
+    for (const [seed, was] of Object.entries(before)) {
+      const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed, mapSize: 150 });
+      const ids: string[] = [];
+      for (let row = 0; row < 150; row++) for (let col = 0; col < 150; col++) ids.push(String(map.tileAt(col, row)));
+      expect({
+        tiles: fnv(ids),
+        relief: fnv(Array.from(map.cornerFields.elevation, e => e.toFixed(4))),
+        water: fnv(Array.from(map.cornerFields.signedWaterDist, e => e.toFixed(4))),
+        start: map.startCenter,
+      }, seed).toEqual(was);
     }
   });
 
@@ -320,6 +363,37 @@ describe('painted art in the ground baker', () => {
       const job = startSmoothChunkBake(shoreChunk, map, EGYPT_WORLD_PACK, lod2x, null);
       expect(job.advance(Infinity, () => 0)).toBe(true);
       expect(same(job.pixels.rgba, before)).toBe(true);
+    } finally {
+      registerTerrainArt(EGYPT_WORLD_PACK, null);
+    }
+  });
+
+  /* Every ground painted with one flat picture: what tells grass from sand is only the meadow's sunlit patches and its
+     extra colour, which the painted grass keeps with or without tilled fields beside it. */
+  it('paints the meadow livelier than other ground drawn from the same picture', () => {
+    const ids = map.cornerFields.materialIds;
+    const one = flat([120, 132, 84]);
+    registerTerrainArt(EGYPT_WORLD_PACK, { ...art(true), ground: new Map(ids.map(id => [id, one] as const)) });
+    try {
+      const baked = bakeSmoothChunkPixels(shoreChunk, map, EGYPT_WORLD_PACK, lod2x);
+      const chroma = { grass: [] as number[], sand: [] as number[] };
+      for (let y = 0; y < baked.pixelHeight; y += 3) {
+        for (let x = 0; x < baked.pixelWidth; x += 3) {
+          const i = (y * baked.pixelWidth + x) * 4;
+          if (baked.rgba[i + 3]! < 255) continue;
+          const t = worldToTileFloat(baked.worldX + (x + 0.5) / baked.scale, baked.worldY + (y + 0.5) / baked.scale, 120, 60);
+          const mix = groundMixAt(map, EGYPT_WORLD_PACK, t.col, t.row);
+          if (mix.shareA < 1) continue;
+          const id = ids[mix.a];
+          if (id !== 'grass' && id !== 'sand') continue;
+          const rgb = [baked.rgba[i]!, baked.rgba[i + 1]!, baked.rgba[i + 2]!];
+          chroma[id].push(Math.max(...rgb) - Math.min(...rgb));
+        }
+      }
+      const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+      expect(chroma.grass.length).toBeGreaterThan(200);
+      expect(chroma.sand.length).toBeGreaterThan(200);
+      expect(mean(chroma.grass)).toBeGreaterThan(mean(chroma.sand) * 1.06);
     } finally {
       registerTerrainArt(EGYPT_WORLD_PACK, null);
     }
