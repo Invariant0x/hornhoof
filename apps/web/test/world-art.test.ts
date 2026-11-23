@@ -282,6 +282,23 @@ describe('Stage 9 art contract: declared files, index validation and art resolut
     expect(resolveBuildingArt(PACK, files, building({ stage: 10 }), null)?.layers[0]?.path).toBe('buildings/department/hall/upgraded.png');
   });
 
+  it('takes a module drawn as an empty canvas, its passport saying why, as valid and lays nothing for it', () => {
+    const why = 'nothing fits inside the lot in front of the walls';
+    const files = index({
+      'modules/3x3/scaffold_back.png': picture('3x3', 800),
+      'modules/3x3/scaffold_front.png': picture('3x3', 800, { empty: why }),
+      'modules/3x3/ramp.png': picture('3x3', 500, { empty: why }),
+      'buildings/department/hall/low_walls_open.png': picture('3x3', 600),
+      'buildings/department/hall/complete.png': picture('3x3', 900),
+    });
+    const report = validateArtIndex(PACK, files);
+    expect(report.errors.filter(e => /modules\/3x3\/(scaffold_front|ramp)/.test(e))).toEqual([]);
+    expect(report.warnings.filter(e => /modules\/3x3\/(scaffold_front|ramp)/.test(e))).toEqual([]);
+    const paths = (stage: number) => resolveBuildingArt(PACK, files, building({}), job(stage))?.layers.map(l => l.path);
+    expect(paths(4)).toEqual(['modules/3x3/scaffold_back.png', 'buildings/department/hall/low_walls_open.png']);
+    expect(paths(8)).toEqual(['modules/3x3/scaffold_back.png', 'buildings/department/hall/complete.png']);
+  });
+
   it('assembles construction stages from shared modules and the building own pictures, in the right drawing order', () => {
     const files = index({
       'modules/3x3/stakes.png': picture('3x3', 400),

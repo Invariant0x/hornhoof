@@ -528,6 +528,7 @@ function buildStage6ShowcaseCity(
     wallTiles: new Set(),
     excavatedTiles: new Set(),
     relocations: [],
+    vacatedLots: [],
     footprintOccupant,
     lotReservation: new Map(),
     metrics: {

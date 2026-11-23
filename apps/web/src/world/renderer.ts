@@ -59,7 +59,8 @@ import {
   type DepartmentFocusSpec,
 } from './department-focus';
 import { cityToPickableObjects } from './live-sync';
-import { cityPlantCover } from './city-layout';
+import { cityGround, cityGroundKey } from './city-ground';
+import { ChunkLotKeys, type LotClearing } from './lot-clearing';
 import { RoadStripPainter } from './road-strips';
 import {
   pickResidentAtScreen,
@@ -270,7 +271,12 @@ export class IsometricWorldEngine {
   private resizeObserver: ResizeObserver | null = null;
   private canvasElement: HTMLCanvasElement | null = null;
   private plantRenderer: PlantRenderer | null = null;
-  private plantCoverKey = 'none';
+  private cityGroundKey = 'none';
+  /* Cleared ground under the city's lots, baked into the chunks; null without a city or a pack lot ground. */
+  private lotClearing: LotClearing | null = null;
+  /* Per chunk: the lots reaching into it as part of its cache key, and the key of its last baked picture, drawn while a
+     changed clearing bakes it again. */
+  private readonly chunkLotKeys = new ChunkLotKeys();
   private readonly roadPainter = new RoadStripPainter();
   /* Awnings and cloth of the building pictures drawn by the last city pass, moved every frame by the wind. */
   private readonly swayingLayers: SwayingLayer[] = [];
@@ -919,7 +925,7 @@ export class IsometricWorldEngine {
   /* Updates the Stage 4 isometric city placeholder layer and its pickable building footprints. */
   setCityRenderState(state: CityRenderState | null): void {
     this.cityRenderState = state;
-    this.refreshPlantCover();
+    this.refreshCityGround();
     this.cityDirty = true;
     this.cityCullWindow = null;
     this.objects = state ? cityToPickableObjects(state.city) : [];
@@ -958,24 +964,27 @@ export class IsometricWorldEngine {
   }
 
   markCityDirty(): void {
-    this.refreshPlantCover();
+    this.refreshCityGround();
     this.cityDirty = true;
     this.dirtyScene = true;
   }
 
-  /* Plants of the map leave the ground the city stands on; recomputed only when the city's ground changes. */
-  private refreshPlantCover(): void {
-    if (!this.plantRenderer) return;
-    const city = this.cityRenderState?.city ?? null;
-    let key = 'none';
-    if (city) {
-      let sum = 0;
-      for (const b of city.buildings) sum = (sum * 31 + b.col * 7 + b.row * 13 + b.spanCol * 3 + b.spanRow) % 1_000_000_007;
-      key = `${city.buildings.length}|${city.roads.size}|${city.wallTiles.size}|${sum}`;
-    }
-    if (key === this.plantCoverKey) return;
-    this.plantCoverKey = key;
-    this.plantRenderer.setCityCover(city ? cityPlantCover(city) : null);
+  /* The ground the city stands on: its lots are cleared in the baked ground and plants leave them, its streets and walls
+     too. Recomputed only when that ground changes. */
+  private refreshCityGround(): void {
+    const key = cityGroundKey(this.cityRenderState);
+    if (key === this.cityGroundKey) return;
+    this.cityGroundKey = key;
+    const ground = cityGround(this.cityRenderState, this.pack);
+    this.lotClearing = ground.clearing;
+    this.chunkLotKeys.reset(ground.clearing);
+    this.dirtyScene = true;
+    this.coverPlants(ground.cover);
+  }
+
+  /* Plants leave the tiles the city covers. */
+  private coverPlants(cover: ((col: number, row: number) => boolean) | null): void {
+    this.plantRenderer?.setCityCover(cover);
   }
 
   setSelectedResidentId(residentId: string | null): void {
@@ -1177,7 +1186,7 @@ export class IsometricWorldEngine {
   }
 
   private cacheKey(chunk: ChunkCoord, lodId: LodTierId): string {
-    return `${chunk.key}@${lodId}`;
+    return `${chunk.key}@${lodId}${this.chunkLotKeys.keyOf(chunk)}`;
   }
 
   private disposeEntry = (entry: CachedChunkEntry): void => {
@@ -1199,7 +1208,7 @@ export class IsometricWorldEngine {
     this.bakeJobs.delete(key);
     const baked =
       this.terrainMap && this.hasSmoothGround()
-        ? bakeSmoothChunkCanvas(chunk, this.terrainMap, this.pack, lod, this.art)
+        ? bakeSmoothChunkCanvas(chunk, this.terrainMap, this.pack, lod, this.art, this.lotClearing)
         : bakeChunkCanvas(chunk, this.pack, this.tileLookup, lod, this.resolveTileId);
     return this.cacheBakedChunk(key, baked);
   }
@@ -1225,7 +1234,7 @@ export class IsometricWorldEngine {
     if (!this.terrainMap || !this.hasSmoothGround()) return this.ensureChunkBaked(chunk, lod);
     let job = this.bakeJobs.get(key);
     if (!job) {
-      job = startSmoothChunkBake(chunk, this.terrainMap, this.pack, lod, this.art);
+      job = startSmoothChunkBake(chunk, this.terrainMap, this.pack, lod, this.art, this.lotClearing);
       this.bakeJobs.set(key, job);
     }
     if (!job.advance(deadline, () => performance.now())) return null;
@@ -1247,6 +1256,7 @@ export class IsometricWorldEngine {
     }
     const entry: CachedChunkEntry = { key, baked, texture, sprite };
     this.chunkCache.set(key, entry);
+    this.chunkLotKeys.baked(key);
     return entry;
   }
 
@@ -1416,7 +1426,8 @@ export class IsometricWorldEngine {
       const hit = this.chunkCache.get(k);
       if (hit) return { key: k, entry: hit };
     }
-    return null;
+    /* The picture baked before the lots changed, until the new one is done. */
+    return this.chunkLotKeys.lastBakedHit(chunk.key, lods.map(l => l.id), k => this.chunkCache.get(k));
   }
 
   private syncScene(bakeBudgetMs: number): void {

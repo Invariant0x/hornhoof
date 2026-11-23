@@ -198,6 +198,8 @@ export const DUNGEON_WORLD_PACK: WorldPackManifest = {
     walkable: k.walkable,
   })),
   materials: DUNGEON_MATERIALS,
+  /* Building lots are dressed hall stone; fungus creeps back over an empty one in a week. */
+  lotGround: { material: 'hall_stone', edgeTiles: 0.4, regrowthHours: 168 },
   liquidLayer: {
     baseColor: '#E85D1F',
     deepColor: '#9E240F',
