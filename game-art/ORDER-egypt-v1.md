@@ -447,7 +447,7 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 | `pray`, `sad_sit`: facing the camera | S | none, shown as drawn in every direction |
 | `inspect`, `write`, `carve`, `guard` and the like, later | one | its mirror |
 
-* A resident walks the grid's four steps, which show on screen as NE, SE, SW and NW (#1983), so walking needs only those rows. Sheets already made with N, E and S rows keep them: the engine shows any drawn row.
+* **Diagonals only (Ivan's word, 23.11):** roads and paths run along the grid axes, so on screen residents walk only along the diagonals NE, SE, SW and NW (#1983); a step straight up, down or sideways is rare and takes the nearest drawn diagonal. Sheets already made with N, E and S rows keep them: the engine shows any drawn row.
 * The god's caravan (Design's checklist G2: animals, drivers and sacks) counts as a large load: its walk is drawn in NE, SE, SW and NW too. The engine has no caravan slot yet; the check takes it with the same rule when its slot comes.
 * A builder always faces a front wall: the engine sets no build place at a back wall, where NE and NW would not fit.
 * Role animations are needed only for the looks that do that work: `inspect` for inspectors, `direct` for overseers, `write` for scribes, and so on.
@@ -528,7 +528,7 @@ A rejected file keeps its placeholder; it never breaks the city.
 * A sheet whose width is not `frameW * frames`.
 * A person's sheet whose height is not `frameH` times the number of its `directions` (5 without the field).
 * A `directions` entry other than N, NE, E, SE, S, SW, W or NW, or one named twice.
-* A `carry` sheet without NE, SE, SW and NW, or the `walk` of a look with a large item without them, or that look's `idle` without SE and SW.
+* A `carry` sheet without all 4 diagonals (NE, SE, SW, NW), or the `walk` of a look with a large item without them, or that look's `idle` without SE and SW.
 * An anchor outside one frame.
 * A cloak layer without its base sheet, or of another size.
 * An index for another pack or another contract version.
