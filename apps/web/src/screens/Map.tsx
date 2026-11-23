@@ -13,9 +13,10 @@ import { mapPeople, useOrg, wholeCompanyPeople, type MapPerson } from '../org';
 import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
 import { Bar, percent } from '../ui/Bar';
-import { CANVAS_NARROW, CANVAS_ZOOM_LIMITS, DRAG_PX, FLOAT_GAP, LEFT_PANEL_COVER, SIDE_GAP, canvasSpace, freeRoom, usePanZoom, ZoomBar, type Box, type Edges, type View } from '../ui/canvas';
+import { CANVAS_NARROW, CANVAS_ZOOM_LIMITS, DRAG_PX, FLOAT_GAP, LEFT_PANEL_COVER, SIDE_GAP, canvasSpace, freeRoom, underShell, useFitMove, usePanZoom, worldTransition, ZoomBar, type Box, type Edges, type View } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { useLoadFailure } from '../ui/LoadFailure';
+import { LoadState, useLoad, type Load } from '../ui/Loading';
 import { MapVersion } from '../ui/VersionMark';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
@@ -27,6 +28,7 @@ import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
 import { clock } from './Subscriptions';
 import { guardedResizeObserver, useRenderGuard } from '../guard';
+import { useShellTop } from '../ui/shellBars';
 import { useWorld } from '../skins/use-skin';
 import { resolveWorldPack } from '../world-packs/registry';
 import { WorldMapView } from './WorldMapView';
@@ -45,7 +47,8 @@ export const MAP_READABLE_K = 11 / 20;
    tall as well, and its cards' names larger still. */
 export const PHONE_MAP_READABLE_K = 11 / 14;
 /* The screen's bar floats over the top of the map, the zoom and the line of the orchestrator over its bottom: the map keeps
-   this much room from them at least, and Fit this much from the sides. The screen's bar ends this far down. */
+   this much room from them at least, and Fit this much from the sides. The screen's bar ends this far down. The bars of the
+   shell float over the map's top too, and while one stands the room starts under them (#1639). */
 const MAP_ROOM = { top: 76, bottom: 72 }, FIT_SIDE = 32, TOP_BAR = 56;
 /* What floats over the bottom of the map: the zoom, the line of the orchestrator and Put back. */
 const MAP_BARS = ':scope > .zoom, :scope > .ticker, :scope > .map-arrange';
@@ -618,8 +621,8 @@ function useChipNeed(box: { current: HTMLDivElement | null }, org: Org | null, l
 /* On a phone the map shows its cards and chips only between the screen's bar and the bars along its bottom, FLOAT_GAP clear
    of each, as a department's schema and tree do there: what scrolls under them goes out of sight, and the dots run on under
    the glass. Measured as the map opens, as its bars come, go or grow, and as the screen changes size. bars: what says which
-   bars stand now. */
-export function useMapRoom(box: { current: HTMLDivElement | null }, bars: string): CSSProperties | undefined {
+   bars stand now. shellTop: where the room under the bars of the shell starts while one stands over the map (#1639). */
+export function useMapRoom(box: { current: HTMLDivElement | null }, bars: string, shellTop: number | null): CSSProperties | undefined {
   const [room, setRoom] = useState<{ top: number; bottom: number } | null>(null);
   useLayoutEffect(() => {
     const el = box.current;
@@ -627,7 +630,7 @@ export function useMapRoom(box: { current: HTMLDivElement | null }, bars: string
     const measure = () => {
       const phone = el.clientWidth > 0 && el.clientWidth <= CANVAS_NARROW;
       const free = phone ? freeRoom(el, el.querySelectorAll(MAP_BARS), { left: 0, width: el.clientWidth }) : null;
-      const next = free && { top: TOP_BAR + FLOAT_GAP, bottom: el.clientHeight - free.y1 };
+      const next = free && { top: underShell(TOP_BAR + FLOAT_GAP, shellTop), bottom: el.clientHeight - free.y1 };
       setRoom(was => (was?.top === next?.top && was?.bottom === next?.bottom ? was : next));
     };
     measure();
@@ -636,7 +639,7 @@ export function useMapRoom(box: { current: HTMLDivElement | null }, bars: string
     observer.observe(el);
     for (const bar of el.querySelectorAll(MAP_BARS)) observer.observe(bar);
     return () => observer.disconnect();
-  }, [box, bars]);
+  }, [box, bars, shellTop]);
   return room ? ({ '--map-top': `${room.top}px`, '--map-bottom': `${room.bottom}px` } as CSSProperties) : undefined;
 }
 
@@ -653,6 +656,24 @@ export function mapView(room: Box, b: Box, whole: boolean, readable = MAP_READAB
   const fits = whole || fitK >= readable, k = fits ? fitK : readable;
   const y = bh * k <= h + 0.5 ? room.y0 + (h - bh * k) / 2 - b.y0 * k : room.y0 - b.y0 * k;
   return { k, x: room.x0 + w / 2 - (fits ? (b.x0 + b.x1) / 2 : hub) * k, y };
+}
+
+/* One load of the map: the company and the person's arrangement. ready: the company, once both came, for what the map
+   draws, measures and places; null before. An arrangement that fails to come leaves the map as it places itself; only one
+   still on its way holds the map. */
+function useMapLoad(org: Org | null, failure: unknown, loadOrg: () => void, layout: { arrived: boolean; load(): void }) {
+  const load = useLoad([{ data: org, failure, load: loadOrg }, { data: layout.arrived || null, failure: null, load: layout.load }]);
+  return { load, ready: load.phase === 'done' ? org : null };
+}
+
+/* What the map shows in its place before it can draw itself: where the route leads nowhere, the shared indicator while the
+   company and the person's arrangement come, why they did not with Retry, or a failure of a later look at the company;
+   null once there is a map to draw. It draws only once both came, so no block moves after the first frame. */
+function mapStandIn(t: Messages, failure: unknown, load: Load, onHome?: () => void) {
+  if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
+  if (load.phase !== 'done') return <div className="map map-wait" aria-busy={load.phase !== 'failed'}><LoadState load={load} form="screen" /><MapVersion /></div>;
+  if (failure !== null) return <p className="alert" role="alert">{errorText(t, failure)}</p>;
+  return null;
 }
 
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
@@ -702,7 +723,9 @@ export function MapScreen({
   const still = useReducedMotion();
   const wirePrefix = useId();
   const company = me.person.scopeKind === 'company';
-  const { org, failure: loadFailure } = useOrg();
+  /* Where the room under the bars of the shell starts while one stands over the map. */
+  const shellTop = useShellTop();
+  const { org, failure: loadFailure, load: loadOrg } = useOrg();
   /* While the update panel says the server takes no changes, the map keeps what it last showed. */
   const failure = useLoadFailure(loadFailure);
   const [shots, setShots] = useState<Shot[]>([]);
@@ -712,7 +735,13 @@ export function MapScreen({
   const box = useRef<HTMLDivElement>(null);
   /* What the hand scrolls: the map as it stands, between the bars floating over it. */
   const edges = useRef<() => Edges | null>(() => null);
-  const { view, setView, zoomAt, handlers, dragged, touched } = usePanZoom(box, org, { min: minZoom, max: MAX_K }, kept ?? undefined, () => edges.current());
+  /* Where this person put blocks, and the one load of the company and that arrangement. */
+  const layout = useMapLayout();
+  const { load: mapLoad, ready } = useMapLoad(org, loadFailure, loadOrg, layout);
+  /* The wheel finds the map once it stands, which is once both came (#1620), not as soon as the company did. */
+  const { view, setView, zoomAt, handlers, dragged, touched } = usePanZoom(box, ready, { min: minZoom, max: MAX_K }, kept ?? undefined, () => edges.current());
+  const viewNow = useRef(view);
+  viewNow.current = view;
   /* Whether the view is the person's own: kept from before, shown with Fit, or dragged or zoomed. Only the person moves it
      then; until then the map shows all of itself, or readable. */
   const chose = useRef(!!kept);
@@ -724,8 +753,7 @@ export function MapScreen({
   const held = useRef<{ m: Extract<LiveMessage, { type: 'pulse' }>; at: number }[]>([]);
   const [flashing, setFlashing] = useState<Set<string>>(new Set());
   const flashTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  /* Where this person put blocks, and the block their hand moves now. */
-  const layout = useMapLayout();
+  /* The block the person's hand moves now. */
   const [moving, setMoving] = useState<{ key: string; at: At } | null>(null);
   /* The bend the hand moves now: on which line, which of its bends, and where. */
   const [bending, setBending] = useState<{ line: string; i: number; at: Point } | null>(null);
@@ -737,9 +765,9 @@ export function MapScreen({
   const [pointed, setPointed] = useState<string | null>(null);
   /* Every card of the map is as tall as the words of the card that has the most need, and every people chip of a row as
      the words of the chip that has the most. */
-  const need = useCardNeed(box, org, language);
-  const chipNeed = useChipNeed(box, org, language);
-  const arr = useMemo(() => (org ? arrangeMap(org, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed, bends, need, chipNeed) : null), [org, layout.placed, moving, bends, need, chipNeed]);
+  const need = useCardNeed(box, ready, language);
+  const chipNeed = useChipNeed(box, ready, language);
+  const arr = useMemo(() => (ready ? arrangeMap(ready, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed, bends, need, chipNeed) : null), [ready, layout.placed, moving, bends, need, chipNeed]);
   /* Pulses and Fit read the map as it stands, without waiting for it to settle. */
   const arrRef = useRef(arr);
   arrRef.current = arr;
@@ -816,24 +844,30 @@ export function MapScreen({
       const el = box.current;
       if (!el || !el.clientWidth) return null;
       const space = canvasSpace(el.clientWidth, leftPanelOpen ? LEFT_PANEL_COVER : 0, windowOpen ? WINDOW_W : 0);
-      return freeRoom(el, el.querySelectorAll(MAP_BARS), space, { ...MAP_ROOM, side });
+      return freeRoom(el, el.querySelectorAll(MAP_BARS), space, { ...MAP_ROOM, top: underShell(MAP_ROOM.top, shellTop), side });
     },
-    [windowOpen, leftPanelOpen],
+    [windowOpen, leftPanelOpen, shellTop],
   );
   edges.current = () => {
     const shown = arrRef.current, room = roomOf(SIDE_GAP);
     return room && org && shown && !inside ? { content: arrangedBounds(shown, org), room } : null;
   };
 
-  /* Show everything when whole; otherwise as the map opens, readable. */
-  const fit = useCallback((whole: boolean) => {
+  /* Show everything when whole; otherwise as the map opens, readable. smooth: it moves there, as when the person asks; the
+     map placing itself stands there at once, so it never glides after its first frame (#1620). A fit because a bar of the
+     shell came or went follows the bars in the shell's time (#1635). */
+  const fitMove = useFitMove(shellTop);
+  const fit = useCallback((whole: boolean, smooth = true) => {
     const shown = arrRef.current, room = roomOf(FIT_SIDE);
     if (!room || !org || !shown || inside) return;
     const phone = box.current!.clientWidth <= CANVAS_NARROW;
     const v = mapView(room, arrangedBounds(shown, org), whole, phone ? PHONE_MAP_READABLE_K : MAP_READABLE_K, shown.hub.x + HUB);
     setMinZoom(Math.min(MIN_K, v.k));
-    setView({ ...v, smooth: true });
-  }, [org, inside, setView, roomOf]);
+    const move = fitMove(viewNow.current, v, smooth);
+    if (!move) return;
+    viewNow.current = move;
+    setView(move);
+  }, [org, inside, setView, roomOf, fitMove]);
   const fitRef = useRef(fit);
   fitRef.current = fit;
 
@@ -849,13 +883,14 @@ export function MapScreen({
      panel and moving a block leave the view alone. */
   const shown = !!arr;
   const putBack = Object.keys(layout.placed).length > 0 || Object.keys(layout.bends).length > 0 || layout.failed;
-  const roomStyle = useMapRoom(box, `${shown}|${windowOpen}|${putBack}`);
+  const roomStyle = useMapRoom(box, `${shown}|${windowOpen}|${putBack}`, shellTop);
   const cardH = arr?.depts[0]?.h ?? 0, chipH = `${arr?.top[0]?.h ?? 0}:${arr?.people.chips[0]?.h ?? 0}`;
   usePauseHiddenMap(box, inside, shown);
-  useEffect(() => {
+  /* Before the first frame, so the map is first drawn where it stands and does not move there. */
+  useLayoutEffect(() => {
     if (!shown || inside) return;
     const auto = () => {
-      if (!mine() && !back.current) fitRef.current(false);
+      if (!mine() && !back.current) fitRef.current(false, false);
     };
     auto();
     const el = box.current;
@@ -863,7 +898,7 @@ export function MapScreen({
     const ro = guardedResizeObserver(auto, 'map');
     ro.observe(el);
     return () => ro.disconnect();
-  }, [shown, inside, layout.version, mine, cardH, chipH]);
+  }, [shown, inside, layout.version, mine, cardH, chipH, shellTop]);
 
   /* The person's own view stays for the next visit; the flight into a department is not theirs. */
   useEffect(() => {
@@ -893,9 +928,8 @@ export function MapScreen({
     timers.current.add(timer);
   }
 
-  if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
-  if (failure !== null) return <p className="alert" role="alert">{errorText(t, failure)}</p>;
-  if (!org || !arr) return <div className="map" aria-busy="true"><MapVersion /></div>;
+  const standIn = mapStandIn(t, failure, mapLoad, onHome);
+  if (standIn || !org || !arr) return standIn ?? <div className="map" aria-busy="true"><MapVersion /></div>;
 
   if (worldPack) {
     return (
@@ -1015,7 +1049,7 @@ export function MapScreen({
             width: W,
             height: H,
             transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`,
-            transition: still || !view.smooth ? 'none' : view.smooth === 'fly' ? `transform ${FLY_MS / 1000}s cubic-bezier(.55,0,.25,1)` : 'transform .8s cubic-bezier(.3,.7,.2,1)',
+            transition: worldTransition(view.smooth, still, `transform ${FLY_MS / 1000}s cubic-bezier(.55,0,.25,1)`),
           }}
         >
           <div className="halo" style={{ left: mx - HALO, top: my - HALO, width: 2 * HALO, height: 2 * HALO }} />

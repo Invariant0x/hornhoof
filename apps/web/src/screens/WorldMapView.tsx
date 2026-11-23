@@ -33,6 +33,7 @@ import {
   type ResidentSimulation,
 } from '../world/residents';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../world/terrain-engine';
+import { useShellTop } from '../ui/shellBars';
 import { orchestratorStatus, useMapRoom } from './Map';
 import { clock } from './Subscriptions';
 import { WorldSideCards, type WorldSelection } from './WorldSideCards';
@@ -127,7 +128,7 @@ export function WorldMapView({
 
   const boxRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
-  const roomStyle = useMapRoom(boxRef, `${windowOpen}`);
+  const roomStyle = useMapRoom(boxRef, `${windowOpen}`, useShellTop());
   const engineRef = useRef<IsometricWorldEngine | null>(null);
   const mapRef = useRef<GeneratedWorldMap | null>(null);
   const cityRef = useRef<CityState | null>(null);

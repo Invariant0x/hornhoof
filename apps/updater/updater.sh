@@ -17,6 +17,7 @@
 #   handoff.sh    a machine that comes to keep the company's data, or gives it up and is wiped
 #   computer.sh   the orchestrator's commands on this computer, and what the computer is
 #   nodes.sh      the nodes of this server, on this computer and on others
+#   disk.sh       Docker's own share of the disk: old images, leftover test stands, build cache and figures for the nodes
 #
 # They share state.sh, the state of an update that a stop never loses, server.sh, the server's folder, settings,
 # compose project, images and database, and shared.sh, how the updater writes and reads the files of the folders it
@@ -70,6 +71,8 @@ PARTS="$(dirname "${BASH_SOURCE[0]}")/lib"
 . "$PARTS/computer.sh"
 # shellcheck source=lib/nodes.sh
 . "$PARTS/nodes.sh"
+# shellcheck source=lib/disk.sh
+. "$PARTS/disk.sh"
 
 case "${1:-}" in
   nodes) nodes_mode "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
@@ -121,7 +124,7 @@ RUNS=$!
   sleep 5
 done) &
 ADDRS=$!
-trap 'kill $ALIVE $RUNS $ADDRS $NODES_LOOK 2> /dev/null || true' EXIT
+trap 'kill $ALIVE $RUNS $ADDRS $NODES_LOOK 2> /dev/null || true; [ -z "${DISK_PRIVATE_DIR:-}" ] || rm -rf -- "${DISK_PRIVATE_DIR:?}" 2> /dev/null || true' EXIT
 while true; do
   handle_request
   become_data
@@ -135,5 +138,6 @@ while true; do
   restore_request
   start_unstarted || true
   catch_up_nodes || printf 'Could not look at the nodes.\n'
+  disk_care || printf 'Could not look after the Docker disk.\n'
   sleep 2
 done

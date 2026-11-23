@@ -18,6 +18,7 @@ import { CommandCard } from '../ui/CommandCard';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { Markdown } from '../ui/Markdown';
 import { Inbox, useInboxCount } from '../ui/Inbox';
+import { LoadState, onTop, useLoad, type Load, type LoadPart } from '../ui/Loading';
 import { Notebook } from '../ui/Notebook';
 import { framedPanel, type WindowPanel } from '../ui/SidePanels';
 import { StaffCard } from '../ui/StaffCard';
@@ -266,21 +267,48 @@ function WorldAgentLevelStrip({ t, agent, departmentName }: { t: Messages; agent
 /* The program the window names: its subscription's, an API's by its protocol, else the one the map knows. */
 const windowProgram = (sub: SubView | null, provider: ProviderId | null | undefined): string => (sub ? programName(sub) : provider ? PROGRAM_NAMES[provider] : 'Claude');
 
-/* The terminal view until the agent's state comes, and of an agent whose terminal cannot show now: a program that sleeps
-   wakes when someone writes. */
-function TerminalPlace({ t, state, program }: { t: Messages; state: OrchestratorState | null; program: string }) {
+/* The terminal view of an agent whose terminal cannot show now: a program that sleeps wakes when someone writes. */
+function TerminalPlace({ t, state, program }: { t: Messages; state: OrchestratorState; program: string }) {
   return (
     <div className="t-term">
       <div className="t-load" role="status" aria-label={t.window.showTerminal}>
-        {state ? (
-          <p>{state.ready && !state.busy ? t.window.noTerminal.asleep(program) : t.window.noTerminal.away}</p>
-        ) : (
-          <>
-            <span className="spinner" aria-hidden="true" />
-            <span>{t.window.opening(program)}</span>
-          </>
-        )}
+        <p>{state.ready && !state.busy ? t.window.noTerminal.asleep(program) : t.window.noTerminal.away}</p>
       </div>
+    </div>
+  );
+}
+
+type WindowLoadOf = {
+  terminal: boolean; orchestrator: boolean; state: OrchestratorState | null; card: AgentCardView | null; historyIn: boolean;
+  failure: unknown; historyFailure: unknown; cardFailure: unknown; catchUp(): Promise<void>; loadCard(): void;
+  ownsCommands: boolean; commandsIn: boolean; loadCommands(): Promise<void>;
+};
+
+/* What the conversation waits for besides its history, so it never says it is empty while one of them still comes: an
+   employee's card, and the CEO's machine commands in the orchestrator's window. Commands that fail to come count as none,
+   as before. */
+function chatParts(o: WindowLoadOf): LoadPart[] {
+  const card: LoadPart[] = o.orchestrator ? [] : [{ data: o.card, failure: o.cardFailure, load: o.loadCard }];
+  const commands: LoadPart[] = o.ownsCommands ? [{ data: o.commandsIn || null, failure: null, load: () => void o.loadCommands() }] : [];
+  return [...card, ...commands];
+}
+
+/* What the window waits for before it shows the agent: his state for the terminal; for the conversation his whole history
+   and the parts above. said: what went wrong to say under the cards, what the person did first, then a look that failed
+   after the window showed him; before that, the load says it where he will stand. */
+function useWindowLoad(o: WindowLoadOf) {
+  const history: LoadPart = { data: o.terminal ? o.state : o.historyIn || null, failure: o.historyFailure, load: () => void o.catchUp() };
+  return { load: useLoad([history, ...(o.terminal ? [] : chatParts(o))]), said: o.failure ?? onTop(o.state, o.historyFailure ?? o.cardFailure) };
+}
+
+/* Where the conversation or the terminal will stand while the window's load comes: the terminal names the program it
+   opens beside the shared ring, until its load stalls. */
+function WindowWait({ load, terminal, program }: { load: Load; terminal: boolean; program: string }) {
+  const t = useT();
+  if (!terminal) return <div className="t-log t-wait"><LoadState load={load} /></div>;
+  return (
+    <div className="t-term">
+      <div className="t-load"><LoadState load={load} words={t.window.opening(program)} /></div>
     </div>
   );
 }
@@ -354,7 +382,10 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const [text, setText] = useState('');
   /* The hand-made card: null follows the orchestrator (shown while he cannot answer), true or false is the CEO's choice. */
   const [manual, setManual] = useState<boolean | null>(null);
+  /* What the person did that failed; and the window's own looks at the agent that failed, his history and his card. */
   const [failure, setFailure] = useState<unknown>(null);
+  const [historyFailure, setHistoryFailure] = useState<unknown>(null);
+  const [cardFailure, setCardFailure] = useState<unknown>(null);
   /* The department to staff by hand, when the orchestrator could not answer the CEO's "+ Hire". */
   const [staffByHand, setStaffByHand] = useState<{ id: string; name: string } | null>(null);
   /* The chat shows unless the person chose the terminal. */
@@ -363,6 +394,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* The machine commands he asked Hornhoof for. They are the CEO's alone: only the CEO's screen gets them, and shows them
      here, apart from his conversation. */
   const [commands, setCommands] = useState<ShownCommand[]>([]);
+  const [commandsIn, setCommandsIn] = useState(false);
   const ownsCommands = orchestrator && me.person.isOwner;
   /* What the terminal has to say, at the foot of the window with the other notes. */
   const [termNotes, setTermNotes] = useState<WindowNote[]>([]);
@@ -389,8 +421,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* Every agent's current task comes from its card; the company supplies the orchestrator's other details. */
   const loadCard = useCallback(() => {
     api.get<AgentCardView>(path).then(
-      c => applyLoadedCard(mounted.current, c, setCard),
-      err => mounted.current && setFailure(err),
+      c => applyLoadedCard(mounted.current, c, got => { setCard(got); setCardFailure(null); }),
+      err => mounted.current && setCardFailure(err),
     );
   }, [path]);
 
@@ -411,7 +443,9 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const loadCommands = useCallback(async () => {
     if (!ownsCommands) return;
     const res = await api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null);
-    if (mounted.current && res) setCommands(res.commands.filter(commandBlockOpen));
+    if (!mounted.current) return;
+    if (res) setCommands(res.commands.filter(commandBlockOpen));
+    setCommandsIn(true);
   }, [ownsCommands]);
 
   const hideCommand = (id: string) =>
@@ -429,6 +463,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         const fresh = last.current === 0;
         const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(fresh ? `${path}/events?last=${KEEP}` : `${path}/events?after=${last.current}`);
         if (!readyEvents(mounted.current, res)) return;
+        setHistoryFailure(null);
         merge(res.events);
         if (n > stateFrom.current) {
           stateFrom.current = n;
@@ -443,7 +478,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       }
     } catch (err) {
       if (mounted.current) {
-        setFailure(err);
+        setHistoryFailure(err);
         /* The server no longer lets this person reach the agent: nothing of it stays open, its line to write included. */
         if (err instanceof ApiFailure && err.status === 403) setState(null);
       }
@@ -566,9 +601,11 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* The map already knows an employee's program, before its card comes. */
   const provider = sub?.provider ?? org.departments.flatMap(d => d.employees).find(e => e.id === agentId)?.provider;
   const program = windowProgram(sub, provider);
-  /* The terminal opens as soon as the agent's state says it can, without waiting for the card. */
-  const opens = terminal && state !== null;
-  const chat = known && !terminal && historyIn;
+  /* The terminal opens as soon as the agent's state says it can, without waiting for the card; the conversation once all it
+     waits for came. */
+  const { load: windowLoad, said } = useWindowLoad({ terminal, orchestrator, state, card, historyIn, failure, historyFailure, cardFailure, catchUp, loadCard, ownsCommands, commandsIn, loadCommands });
+  const opens = terminal && windowLoad.phase === 'done';
+  const chat = known && !terminal && windowLoad.phase === 'done';
   /* A terminal takes its words and pictures itself; only a window without one has a line to write in. */
   const dragging = usePictureDrop(box, chat, state?.ready ?? false, pictures.add);
 
@@ -649,8 +686,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       ))}
     </>
   );
-  const after = <WindowAfter offerByHand={offerByHand} needsOrchestrator={needsOrchestrator} failure={failure} t={t} onPickByHand={() => setManual(true)} />;
-  const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || needsOrchestrator || failure !== null || commands.length);
+  const after = <WindowAfter offerByHand={offerByHand} needsOrchestrator={needsOrchestrator} failure={said} t={t} onPickByHand={() => setManual(true)} />;
+  const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || needsOrchestrator || said !== null || commands.length);
   const { log, onScroll } = useChatScroll(chat && !place?.minimized, `${events.length} ${state?.busy} ${commands.length} ${hasCards}`);
   useLayoutEffect(() => {
     const el = log.current;
@@ -766,21 +803,12 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   return (
     <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} agentState={card?.state} place={place} requests={requests} onRequestsChanged={onRequestsChanged} panels={sidePanels} toolbar={<WindowToolbar t={t} terminal={terminal} isWorld={isWorld} state={state} stop={stop} onToggle={toggleView} />}>
       {isWorld && !orchestrator && worldAgent && <WorldAgentLevelStrip t={t} agent={worldAgent} departmentName={worldDeptName} />}
-      {terminal && state === null && failure === null && <TerminalPlace t={t} state={null} program={program} />}
-      {((!known && !opens && !(terminal && failure === null)) || (!terminal && !historyIn)) && (
-        <div className="t-log" aria-busy="true">
-          {failure !== null && (
-            <p className="alert" role="alert">
-              {errorText(t, failure)}
-            </p>
-          )}
-        </div>
-      )}
+      {windowLoad.phase !== 'done' && <WindowWait load={windowLoad} terminal={terminal} program={program} />}
       {opens && hasTerminal && <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={program} onGone={() => setNoTerminal(true)} onNotes={setTermNotes} />}
-      {opens && !hasTerminal && <TerminalPlace t={t} state={state} program={program} />}
-      {opens && !known && failure !== null && (
+      {opens && !hasTerminal && state && <TerminalPlace t={t} state={state} program={program} />}
+      {opens && !known && said !== null && (
         <p className="alert" role="alert">
-          {errorText(t, failure)}
+          {errorText(t, said)}
         </p>
       )}
       {known && terminal && hasCards && (

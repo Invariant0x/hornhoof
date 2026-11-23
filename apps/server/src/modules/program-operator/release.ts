@@ -13,8 +13,8 @@ import { authorizeAccess } from './access.js';
 import { operatorRefused, type OperatorCaller } from './authorization.js';
 import { syncOperatorCases } from './cases.js';
 import { fromStart, releaseStartHold } from './not-started.js';
+import { currentRecoveryState, recoveryScreenRefusal } from './recovery-state.js';
 import { continueRecovery, runsATurn } from './recovery.js';
-import { requestRecoveryState } from './rpc.js';
 import { operatorTransaction } from './transactions.js';
 
 type Agent = typeof agents.$inferSelect;
@@ -22,19 +22,6 @@ type Case = typeof programOperatorCases.$inferSelect;
 export type ReleaseInput = { case: string; reason: string };
 type Refusal = OperatorError | 'no_plan';
 type ReleaseResult = { result: 'released'; continuation: string | null } | { result: 'no_hold'; status: Case['status']; continuation: string | null } | { result: 'refused'; reason: Refusal };
-
-/* Hornhoof's own words that never went are erased by the saved words, which go in once in their place. */
-const READY_INPUT = new Set<OperatorRecoveryState['input']>(['empty', 'hornhoof']);
-
-/* Only what the node sees right now counts; the database may be behind what the program does. */
-function refusalOf(state: OperatorRecoveryState | null): OperatorError | null {
-  if (!state) return 'node_unavailable';
-  if (state.program === 'gone') return null;
-  if (state.wait === 'protected') return 'protected_screen';
-  if (state.wait) return 'input_not_proven';
-  if (state.runningTool || state.retrying || state.busy) return 'program_busy';
-  return READY_INPUT.has(state.input) ? null : 'input_not_proven';
-}
 
 const noHold = (row: Case): ReleaseResult => ({ result: 'no_hold', status: row.status, continuation: row.continuationJobId });
 
@@ -50,7 +37,7 @@ export async function releaseRecoveryHold(ctx: Ctx, caller: OperatorCaller, inpu
   const found = await caseToRelease(ctx, me, input.case);
   if (!found.recoveryHold) return noHold(found);
   if (fromStart(found)) return await releaseStartHold(ctx, me, found, input.reason, await agentParty(ctx, found.companyId, me.id)) ? { result: 'released', continuation: found.continuationJobId } : noHold(found);
-  const state = await requestRecoveryState(ctx, found);
+  const state = await currentRecoveryState(ctx, found);
   const result = await operatorTransaction(ctx, async (tx, inside) => {
     await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, found.agentId)).for('update');
     const [row] = await tx.select().from(programOperatorCases).where(eq(programOperatorCases.id, found.id)).for('update');
@@ -61,7 +48,7 @@ export async function releaseRecoveryHold(ctx: Ctx, caller: OperatorCaller, inpu
 }
 
 async function refusalNow(ctx: Ctx, row: Case, state: OperatorRecoveryState | null): Promise<Refusal | null> {
-  const seen = refusalOf(state);
+  const seen = recoveryScreenRefusal(state);
   if (seen) return seen;
   if (await runsATurn(ctx, row.agentId)) return 'program_busy';
   return await liveSubscription(ctx, row.agentId) ? null : 'no_plan';

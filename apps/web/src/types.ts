@@ -5,7 +5,7 @@ import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from 
 import type { ExternalWait, TaskWaitFact, WaitSourceKind } from '@hornhoof/protocol/waits';
 import type { SigninStep } from '@hornhoof/protocol/signin';
 import type { Notification } from '@hornhoof/protocol';
-import type { ConnectionEnd, DepartmentTurnProgress, FailureKind, Limits, MachineDrain, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { ConnectionEnd, DepartmentTurnProgress, DiskReport, FailureKind, Limits, MachineDrain, MachineReplicas, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { RiskClass, WorkKind } from '@hornhoof/protocol/pipeline-report';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
@@ -495,7 +495,7 @@ export type TaskPlace = { id: string; name: string } | null;
 export type PersonRef = { id: string; name: string };
 /* What a task's time says, worked out on the server: since when it is in its status, how long its turns ran, and whom it
    waits for since when. */
-export type TimeFacts = { inStatusSince: string; workSeconds: number; waitsOn: TaskWaitFact[] };
+export type TimeFacts = { inStatusSince: string; workSeconds: number; waitsOn: (TaskWaitFact & { request?: true })[] };
 /* A task another one comes after, or that comes after it, and where it stands. */
 export type TaskLink = { id: string; number: number; title: string; status: TaskStatus };
 
@@ -733,6 +733,18 @@ export type MachineAwayCard = {
   important: { name: string; kind: 'orchestrator' | 'head' }[];
 };
 
+/* A machine short of disk space, whose node takes no new checks or builds since: for its owner and the CEO, gone by itself
+   once the node has room again or is off the line. */
+export type MachineLowCard = {
+  id: string;
+  hostname: string;
+  owner: { id: string; name: string } | null;
+  since: string;
+  disk: DiskReport;
+  /* The names of the company's employees whose work the machine keeps, by its folder. A server from before sends none. */
+  names?: Record<string, string>;
+};
+
 /* Everything that waits for people as /api/requests shows it to this person, and the counts of all of it: per owner, per
    asking agent and in total. */
 export type Decisions = {
@@ -743,6 +755,8 @@ export type Decisions = {
   /* What merges left for the CEO alone. A server from before merges sends none. */
   merges?: MergeDecision[];
   machinesAway?: MachineAwayCard[];
+  /* A server from before nodes said how full their disk is sends none. */
+  machinesLow?: MachineLowCard[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
 
@@ -905,6 +919,11 @@ export type MachineView = {
   plans: { id: string; provider: ProviderId; status: PlanStatus; online: boolean }[];
   /* What its nodes said last about how busy it is; none while no node of it is connected. */
   load: NodeLoad | null;
+  /* The copies of company databases it holds, inside Docker's volumes: none while unmeasured. Older servers omit it. */
+  replicas?: MachineReplicas | null;
+  /* The employees' working folders of each of its nodes, by the plan the node serves (none for the machine's own node), the
+     biggest first: none of a node that says nothing of its disk. Older servers omit it. */
+  folders?: { plan: string | null; bytes: number }[];
   /* Takes the company's test runs when it is the freest machine. */
   lendsTests: boolean;
   running: Running;
@@ -1018,7 +1037,7 @@ export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add' | 'co
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
 /* webPort: where the company opens on the server's own machine. refusedBy: the machines on the server's network whose
    connections it did not take. Older servers omit both. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; checkError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null };
+export type BuiltinView = { online: boolean; load: NodeLoad | null; replicas?: MachineReplicas | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; checkError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null };
 
 export type JobView = {
   id: string;

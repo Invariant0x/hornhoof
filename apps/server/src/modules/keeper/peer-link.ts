@@ -59,6 +59,8 @@ type PeerLinkOptions = {
   commit: string;
   identity: MachineIdentity;
   mode: () => Mode;
+  /* An active handover still needs replication after the keeper fences the old leader. */
+  keepsPeerTunnel?: () => boolean;
   /* The public link's settings now: null without a link, undefined when they could not be read. */
   settings: () => Promise<TunnelSettings | null | undefined>;
   ports: PeerPorts;
@@ -296,8 +298,8 @@ export class PeerLink {
     return { machine: held.machine, role: held.role, lead: this.opts.mode() === 'lead', commit: this.opts.commit, ...this.opts.helloMore?.() };
   }
 
-  /* A second frpc of the keeper offers the two doors through hornhoof.org, while the app leads and the company has a
-     link with both secrets. */
+  /* A second frpc of the keeper offers the two doors through hornhoof.org while leading or handing the server over,
+     with both secrets for the company's link. */
   private offer(ports: PeerPorts): void {
     const local = { data: ports.peer, app: ports.peerApp };
     const { machineId } = this.opts;
@@ -313,12 +315,12 @@ export class PeerLink {
     this.tunnel.start();
   }
 
-  /* Null: not leading, no link or no secrets, and the client stops. Undefined: not known now, and the client it runs stays. */
+  /* Null stops the client. Undefined keeps it while the link settings cannot be read. */
   private async services(): Promise<PeerServices | null | undefined> {
     if (!this.answer) return undefined;
     const settings = await this.opts.settings().catch(() => undefined);
     if (settings !== undefined) this.lastSettings = settings;
-    if (this.opts.mode() !== 'lead') return null;
+    if (this.opts.mode() !== 'lead' && !this.opts.keepsPeerTunnel?.()) return null;
     return settings === undefined ? undefined : this.servicesFor(settings);
   }
 

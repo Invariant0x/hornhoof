@@ -120,27 +120,23 @@ export class Hander {
   private goAt = -Infinity;
   private waitingSaidAt: number | null = null;
   private unfindableSaid = false;
-  private phase: Handing['phase'] | null;
-  /* The machine this keeper hands the server to, while a switch is written down. */
-  private target: Handing['to'] | null = null;
+  private handing: Handing | null = null;
   /* What it wrote down of a switch is there and cannot be read: it may have given the server away, so it holds. */
   private unreadable = false;
 
   constructor(private readonly opts: HanderOptions) {
-    this.phase = null;
     try {
       this.noted(readHanding(opts.dir));
     } catch (err) {
       if (!(err instanceof NoteUnreadable)) throw err;
       this.unreadable = true;
     }
-    this.under = this.unreadable || this.phase !== null;
+    this.under = this.unreadable || this.handing !== null;
   }
 
   /* What the note says now, as far as the other parts of the keeper ask. */
   private noted(handing: Handing | null): Handing | null {
-    this.phase = handing?.phase ?? null;
-    this.target = handing?.to ?? null;
+    this.handing = handing;
     this.unreadable = false;
     return handing;
   }
@@ -169,12 +165,21 @@ export class Hander {
   /* From the moment it stopped until it follows or leads again: this keeper takes no lease, says in its hello that it
      does not lead, and keeps its front door shut and its link's client stopped. */
   holds(): boolean {
-    return this.unreadable || this.phase === 'stopped' || this.phase === 'go' || this.phase === 'followed';
+    const phase = this.handing?.phase;
+    return this.unreadable || phase === 'stopped' || phase === 'go' || phase === 'followed';
+  }
+
+  /* Fencing stops writes, but the copy still needs the peer tunnel to confirm the last WAL position.
+     The stored deadline bounds the tunnel when the outcome of go cannot be read. */
+  keepsPeerTunnel(): boolean {
+    const handing = this.handing;
+    return !this.unreadable && handing !== null && (handing.phase === 'stopped' || handing.phase === 'go') && this.now() < handing.deadline;
   }
 
   /* The machine the server goes to, while this keeper holds for the switch. */
   to(): { machine: string; networkId: string } | null {
-    return this.holds() && this.target ? { machine: this.target.machine, networkId: this.target.networkId } : null;
+    const target = this.handing?.to;
+    return this.holds() && target ? { machine: target.machine, networkId: target.networkId } : null;
   }
 
   /* One look at a time; a look that fails changes nothing, and is said once an outage. */
@@ -204,15 +209,13 @@ export class Hander {
 
   private keep(handing: Handing): Handing {
     writeHanding(this.opts.dir, handing);
-    this.phase = handing.phase;
-    this.target = handing.to;
+    this.noted(handing);
     return handing;
   }
 
   private forget(): void {
     rmSync(join(this.opts.dir, HANDING_FILE), { force: true });
-    this.phase = null;
-    this.target = null;
+    this.noted(null);
   }
 
   private async lookOnce(): Promise<void> {

@@ -4,7 +4,7 @@ import type { AddressInfo, Socket } from 'node:net';
 import { privateToolCall, toolPrivacy, type ToolPrivacyPolicy } from '@hornhoof/protocol';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { OwnerUnknown, socketOf, type Capture, type Owns, type Peer } from './peer.js';
+import { CALLER_LEFT, OwnerUnknown, socketOf, type Capture, type Owns, type Peer } from './peer.js';
 import { serveCheckCommand } from '../check-command-runner.js';
 import { HookCalls } from './hook-calls.js';
 import { HookFailures, type HookRejected } from './hook-failures.js';
@@ -46,6 +46,10 @@ const HOOKS = new Set(['start', 'prompt', 'invocation', 'queued', 'stop', 'statu
 type Verdict = { owner: true } | { owner: false; why: string };
 const FORWARD = ['content-type', 'content-length', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
 
+/* Why a call was refused, for the node's log and Hornhoof: a caller that left before its check is said apart from a check
+   that found the caller is not the agent's. */
+const refusal = (why: string) => (why === CALLER_LEFT ? why : why ? `owner check failed: ${why}` : 'owner check failed');
+
 /* The agent's secret a program sends as a bearer token to the tools address that carries none. */
 function bearerSecret(req: IncomingMessage): string | undefined {
   return /^Bearer ([0-9a-f]+)$/.exec(req.headers.authorization ?? '')?.[1];
@@ -66,6 +70,8 @@ export class Bridge {
   /* When each agent's program last connected to its tools and was turned away, as no turn ran and the node knew no answer
      for Hornhoof: it does not try again, and keeps no tools for the rest of its session. */
   private readonly refusedAt = new Map<string, number>();
+  /* Answers the program stopped waiting for: Hornhoof's tools that come in one reach no program. */
+  private readonly abandoned = new WeakSet<ServerResponse>();
   /* How long an agent's tool calls between turns wait for a turn to open, and the calls waiting now. */
   private readonly patience = new Map<string, number>();
   private readonly waiting = new Map<string, Set<() => void>>();
@@ -88,7 +94,7 @@ export class Bridge {
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; ownerRejected?: HookRejected; ownerReported?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening; checkStep?: OpensCheck; sensitive?: (key: string, name: string, input: unknown, answer?: unknown, policy?: ToolPrivacyPolicy) => void | Promise<void> } = {},
+    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; ownerRejected?: HookRejected; ownerReported?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; gaveUp?: (key: string, method: string) => void; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening; checkStep?: OpensCheck; sensitive?: (key: string, name: string, input: unknown, answer?: unknown, policy?: ToolPrivacyPolicy) => void | Promise<void> } = {},
   ) {
     this.failures = new HookFailures(options.rejected);
     this.ownerFailures = options.ownerReported ? new HookFailures(options.ownerReported) : this.failures;
@@ -231,7 +237,7 @@ export class Bridge {
     if (found instanceof OwnerUnknown) return this.notOwned(res, key, kind, event, 502, `owner check unavailable: ${found.message}`);
     if (found.owner) return true;
     if (kind === 'hook' && event) this.options.unowned?.(key, event);
-    return this.notOwned(res, key, kind, event, 403, found.why ? `owner check failed: ${found.why}` : 'owner check failed');
+    return this.notOwned(res, key, kind, event, 403, refusal(found.why));
   }
 
   /* Use only recognized event and call names in rejection logs. */
@@ -319,6 +325,7 @@ export class Bridge {
     await this.observeSensitive(key, kind, body);
     /* Only the bridge asks for upload permissions; never hand one back to the program as an MCP response. */
     if (kind === 'mcp' && asks(body, 'attachments/token')) return reply(res, 403, '');
+    this.watchJoin(res, key, kind, body, asked);
     if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body, peer.pid);
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
     if (kind === 'mcp' && req.method === 'POST' && !this.tokens.has(key) && (await this.withoutTurn(req, res, key, body, asked))) return;
@@ -345,7 +352,7 @@ export class Bridge {
     await this.observeSensitive(key, kind, body, answer);
     if (kind === 'mcp' && up.ok) this.keepTools(key, body, answer);
     res.end(answer);
-    if (kind === 'mcp' && up.ok && asks(body, 'tools/list')) this.heardList(key, asked);
+    if (kind === 'mcp' && up.ok && asks(body, 'tools/list')) this.heardList(key, asked, res);
   }
 
   private attachmentTokenFor(key: string, method: string | undefined, event: string | undefined): Promise<string | undefined> {
@@ -402,14 +409,14 @@ export class Bridge {
       return true;
     }
     this.keepTools(key, body, answer);
-    if (asks(body, 'tools/list')) this.heardList(key, asked);
+    if (asks(body, 'tools/list')) this.heardList(key, asked, res);
     return true;
   }
 
   /* With no turn open, a program that connects or lists its tools hears what Hornhoof said to the same before. */
   private answered(res: ServerResponse, key: string, body: Buffer, known: string, asked: number): void {
     reply(res, known ? 200 : 202, known);
-    if (asks(body, 'tools/list')) this.heardList(key, asked);
+    if (asks(body, 'tools/list')) this.heardList(key, asked, res);
   }
 
   toolPolicy(key: string, name: string): ToolPrivacyPolicy | undefined {
@@ -486,8 +493,24 @@ export class Bridge {
     finally { res.removeListener('close', closed); step?.signal.removeEventListener('abort', closed); stops.delete(stop); }
   }
 
-  /* A slow answer to a request from before counts from when it was asked. */
-  private heardList(key: string, asked: number): void {
+  /* A program that stops waiting for an answer as it connects, as Claude Code, Codex and Kimi Code do once their own limit
+     passed, keeps no tools for the rest of its session: it counts as one turned away then. */
+  private watchJoin(res: ServerResponse, key: string, kind: string, body: Buffer, asked: number): void {
+    const method = kind === 'mcp' ? JOINING.find(name => asks(body, name)) : undefined;
+    if (!method) return;
+    const gaveUp = () => {
+      if (res.writableFinished) return;
+      this.abandoned.add(res);
+      this.refusedAt.set(key, asked);
+      this.options.gaveUp?.(key, method);
+    };
+    if (res.destroyed) gaveUp();
+    else res.once('close', gaveUp);
+  }
+
+  /* A slow answer to a request from before counts from when it was asked, and only if the program still waited for it. */
+  private heardList(key: string, asked: number, res?: ServerResponse): void {
+    if (res !== undefined && this.abandoned.has(res)) return;
     if (!this.listedSince(key, asked)) this.listedAt.set(key, asked);
     for (const heard of [...(this.listing.get(key) ?? [])]) heard(asked);
   }

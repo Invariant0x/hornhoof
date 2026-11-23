@@ -1467,4 +1467,15 @@ describe('the filter groups and search of Machines (#1020)', () => {
     expect([statusLine.firstElementChild?.tagName, statusLine.firstElementChild?.textContent]).toEqual(['BDI', shownCount]);
     expect(within(statusLine).getByRole('button', { name: t.tables.clear })).toBeInTheDocument();
   });
+
+  it('marks the held pool as a direct .held-pool child beside .held-table when the initial load fails', async () => {
+    lists({ 'GET /api/machines': [500, { error: { code: 'internal', message: 'Something went wrong.' } }] });
+    const { container } = render(<Machines me={ME} />);
+    await screen.findByRole('alert');
+    const page = container.querySelector('section.machines')!;
+    const children = [...page.children];
+    expect(children.some(el => el.classList.contains('held-pool'))).toBe(true);
+    const heldTable = children.find(el => el.classList.contains('held-table'));
+    expect(heldTable?.querySelector('.load-fail[role="alert"]')).not.toBeNull();
+  });
 });

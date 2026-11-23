@@ -1685,7 +1685,11 @@ export const programOperatorCases = pgTable('program_operator_cases', {
   openedAt: timestamp('opened_at', { withTimezone: true }).notNull().defaultNow(),
   deadlineAt: timestamp('deadline_at', { withTimezone: true }).notNull(),
   escalatedAt: timestamp('escalated_at', { withTimezone: true }),
-  resolution: jsonb('resolution').$type<{ outcome: string; text: string; image: string | null; actor?: MessageParty; question?: OperatorQuestion; holdCall?: { job: string; to: string; at: string; operations: boolean } }>(),
+  resolution: jsonb('resolution').$type<{
+    outcome: string; text: string; image: string | null; actor?: MessageParty; question?: OperatorQuestion;
+    holdCall?: { job: string; to: string; at: string; operations: boolean };
+    holdNoticeJobs?: { orchestrator?: string; operations?: string };
+  }>(),
   recoveryHold: boolean('recovery_hold').notNull().default(false),
   continuationJobId: uuid('continuation_job_id').references(() => jobs.id),
   pictureId: uuid('picture_id').references((): AnyPgColumn => attachments.id),

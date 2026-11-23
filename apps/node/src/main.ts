@@ -18,6 +18,7 @@ import { startCheckClient, stopChecks, isProgramControl, applyProgramControl, ru
 import { TestPartUser, NodeTestMessages, isNodeTestMessage, nodeTestCapabilities, type readTestEnvironment, type TestCapabilities } from './test-environment.js';
 import { machineLoad, type MachineLoad } from './load.js';
 import { MemoryShort } from './memory-short.js';
+import { startDiskCare } from './disk/care.js';
 import { CallRoom } from './call-room.js';
 import { removalWatch } from './removal.js';
 import { clearOutbox, endId, helloIds, isEnd, Outbox, sendPending, type Entry } from './outbox.js';
@@ -427,9 +428,17 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run, and whether its kernel killed a
      process for want of memory since the report before. The count of kills stays here. */
   const memory = new MemoryShort();
+  /* The care of the machine's disk: what of it is Hornhoof's, what went, and whether new checks and builds wait for room.
+     A check's files stay while any check runs here. */
+  const diskOfMachine = () => {
+    const { diskTotal, diskFree } = machine();
+    return diskTotal ? { total: diskTotal, free: Math.min(diskFree ?? 0, diskTotal) } : null;
+  };
+  const diskCare = startDiskCare({ dir, owner: { user: credUser, home: credHome }, checking: () => testing.size > 0 || checks.leaseIds().length > 0, log, disk: diskOfMachine });
   const load = (): NodeLoad => {
     const { oomKills, ...now } = machine();
-    return { ...now, tests: testing.size, jobs: running.size, memoryShort: memory.report(oomKills) };
+    const disk = diskCare.report();
+    return { ...now, tests: testing.size, jobs: running.size, memoryShort: memory.report(oomKills), ...(disk ? { disk } : {}) };
   };
   /* One-shot calls wait while the machine's last report found such a kill. */
   const calls = new CallRoom(() => memory.now);
@@ -700,6 +709,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       await programs.ready(signal);
       const chosen = pick(m);
       await learn([m.toolToken, m.secret, m.workspace?.repo?.token]);
+      diskCare.noteTasks(m.workspace?.tasks);
       /* An agent's turn runs in its session; a test job, with no agent, runs as before. */
       const runIn = async (input: Parameters<ProviderAdapter['run']>[0]): Promise<RunResult> => {
         if (!(host && terminal && input.agentKey)) return chosen.run(input);
@@ -792,6 +802,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     phones.close();
     authorChecks.stop();
     stopChecks(checks, testing); testMessages.cancelDescriptions();
+    diskCare.stop();
     clearInterval(timer);
     if (learning) clearInterval(learning);
     clearInterval(asking);
