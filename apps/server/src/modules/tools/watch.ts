@@ -266,7 +266,22 @@ const nobody = (employee: string): Refusal => ({ reason: 'recipient_unknown', te
 
 /* The sender and the employee it writes to, or why it may not: the employee is not there, is the sender itself, is a
    person's own assistant, is out of its reach, or is switched off. */
-async function partiesOf(ctx: Pick<Ctx, 'db'>, job: ToolJob, employee: string, reachable: (me: Agent, target: Agent) => Promise<boolean>): Promise<{ me: Agent; target: Agent } | Refusal> {
+type Reach = (me: Agent, target: Agent) => Promise<boolean>;
+
+/* Whether one of the ways one employee may write to another holds, tried in turn. */
+const anyReach = (...ways: Reach[]): Reach => async (me, target) => {
+  for (const way of ways) if (await way(me, target)) return true;
+  return false;
+};
+
+/* The one who sees a task writes about it to the head of another department named on its open wait, as for a look check. */
+const checkerOf = (ctx: Pick<Ctx, 'db'>, companyId: string, ref: number | string | undefined): Reach => async (me, target) => {
+  if (ref === undefined) return false;
+  const task = await taskByRef(ctx, companyId, ref);
+  return Boolean(task && agentSeesTask(me, task) && await checksTask(ctx.db, target, task));
+};
+
+async function partiesOf(ctx: Pick<Ctx, 'db'>, job: ToolJob, employee: string, reachable: Reach): Promise<{ me: Agent; target: Agent } | Refusal> {
   const [me] = await ctx.db.select().from(agents).where(eq(agents.id, job.agentId));
   const [target] = await ctx.db.select().from(agents).where(and(eq(agents.id, employee), eq(agents.companyId, job.companyId), isNull(agents.removedAt)));
   if (!me || !target) return nobody(employee);
@@ -556,15 +571,8 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       .limit(1);
     return !answered;
   };
-  /* The one who sees a task writes about it to the head of another department named on its open wait, as for a look check. */
-  const checksFor = async (me: Agent, target: Agent, ref: number | string | undefined): Promise<boolean> => {
-    if (ref === undefined) return false;
-    const task = await taskByRef(ctx, job.companyId, ref);
-    return Boolean(task && agentSeesTask(me, task) && await checksTask(db, target, task));
-  };
   /* Who may write to whom: within reach, answering the one who wrote last, or about a task to the head named to check it. */
-  const reachable = (ref: number | string | undefined) => async (me: Agent, target: Agent) =>
-    (await inReach(me, target)) || (await owesAnswer(me, target)) || (await checksFor(me, target, ref));
+  const reachable = (ref: number | string | undefined) => anyReach(inReach, owesAnswer, checkerOf(ctx, job.companyId, ref));
 
   server.registerTool(
     'message_employee',
