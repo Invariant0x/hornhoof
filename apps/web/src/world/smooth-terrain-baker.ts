@@ -561,7 +561,7 @@ type PlotLayout = Readonly<{
   ridge: Rgb;
   ditch: Rgb | null;
   layer: Float32Array;
-  /* Weights of the plots' margin ground (painted art only), and the ground untilled field ground turns into, or -1. */
+  /* Weights of the plots' margin ground and its index, and the ground untilled field ground turns into, or -1. */
   margin: Float32Array | null;
   marginMaterial: number;
   fallow: number;
@@ -1042,7 +1042,18 @@ export function bakeSmoothChunkPixels(
         const gwv = (waterArr[i01]! - waterArr[i00]!) * (1 - fx) + (waterArr[i11]! - waterArr[i10]!) * fx;
         const gl = Math.hypot(gwu, gwv) || 1;
         const liquidShare = maskShare(shore, look.art!.texelsPerTile, u, v, -dWater, -gwv / gl, gwu / gl);
-        alpha = clampByte((1 - liquidShare) * 255);
+        const landA = 1 - liquidShare;
+        /* Under the fading land lies the same light shallow tint the open water starts with, so the tint runs on to
+           the waterline without a seam. */
+        const tintA = depthShade > 0 ? paintedShallowAlpha(u, v, dWater, coarse) : 0;
+        const outA = landA + tintA * (1 - landA);
+        if (outA > 0.004 && tintA > 0) {
+          const under = tintA * (1 - landA);
+          r = (r * landA + shallowRgb[0] * 1.1 * under) / outA;
+          g = (g * landA + shallowRgb[1] * 1.1 * under) / outA;
+          b = (b * landA + shallowRgb[2] * 1.05 * under) / outA;
+        }
+        alpha = clampByte(outA * 255);
       } else if (!painted && dWater < 0.75) {
         if (isGlowLiquid) {
           /* Warm emissive rim glow hugging the curved coastline smoothly. */
@@ -1110,6 +1121,17 @@ export function bakeSmoothChunkPixels(
   };
 }
 
+/* Slow light and dark patches over open water. */
+function waterPatches(u: number, v: number, coarse: Float32Array): number {
+  return 0.8 + 0.5 * (sampleLutFast(coarse, u * 0.7 + 21, v * 0.7 - 9) + 0.5) * 0.8;
+}
+
+/* Strength of the light shallow tint of painted water at water distance d (negative in the water): strongest at the
+   waterline, gone about three quarters of a tile out. */
+function paintedShallowAlpha(u: number, v: number, d: number, coarse: Float32Array): number {
+  return 0.5 * (1 - smoothstep(-0.06, -0.75, d)) * (0.55 + 0.3 * waterPatches(u, v, coarse));
+}
+
 /* One open-liquid pixel: a dark tint toward the middle with slow patches, a light tint in the shallows, and broken
    light ripple lines a little way off the shore. */
 function waterTint(
@@ -1127,10 +1149,10 @@ function waterTint(
   out: number,
 ): void {
   const depth = smoothstep(-0.3, -2.0, d);
-  const patches = 0.8 + 0.5 * (sampleLutFast(coarse, u * 0.7 + 21, v * 0.7 - 9) + 0.5) * 0.8;
+  const patches = waterPatches(u, v, coarse);
   const aDeep = Math.min(drawLines ? 0.85 : 0.5, depthShade * depth * patches);
   /* Painted water gets a light shallow band along the whole shore; procedural water a fainter one. */
-  const aShallow = drawLines ? 0.24 * (1 - smoothstep(-0.3, -0.95, d)) : 0.5 * (1 - smoothstep(-0.06, -0.75, d)) * (0.55 + 0.3 * patches);
+  const aShallow = drawLines ? 0.24 * (1 - smoothstep(-0.3, -0.95, d)) : paintedShallowAlpha(u, v, d, coarse);
   const broken = drawLines ? Math.max(0, Math.min(1, 0.2 + 1.8 * sampleLutFast(detail, u * 6.1 - 7.3, v * 6.1 + 2.9))) : 0;
   const lines =
     (Math.exp(-Math.pow((d + 0.42) / 0.03, 2)) * 0.5 + Math.exp(-Math.pow((d + 0.7) / 0.03, 2)) * 0.3) * broken;
@@ -1202,17 +1224,14 @@ function sampleMask(mask: ArtPixels, x: number, y: number): number {
 }
 
 /* A painted edge across a boundary, at signed distance `d` tiles into the mask's first ground (negative: into the
-   second), with the boundary's direction (tu, tv) along the tile axes: columns follow whichever tile axis the edge
-   runs along more, blended where it runs at a slant, so the mask never stretches. Returns the first ground's share. */
+   second), with the boundary's direction (tu, tv) in tile axes: the mask's columns run along the boundary. Returns
+   the first ground's share. */
 function maskShare(mask: ArtPixels, tpt: number, u: number, v: number, d: number, tu: number, tv: number): number {
   const y = mask.height / 2 - d * tpt;
-  const wu = tu * tu;
-  const wv = tv * tv;
-  const sum = wu + wv || 1;
-  let s = 0;
-  if (wu > 0.02) s += sampleMask(mask, u * tpt, y) * wu;
-  if (wv > 0.02) s += sampleMask(mask, v * tpt + 517, y) * wv;
-  return s / sum;
+  /* One sample, at the position along the edge: blending two samples taken along each axis would lay two different
+     ragged lines over each other on a slanted edge and smear it. */
+  const len = Math.hypot(tu, tv) || 1;
+  return sampleMask(mask, ((u * tu + v * tv) / len) * tpt, y);
 }
 
 /* One tilled-plot pixel: crop rows one way or the other, a growth stage per plot, the raised earth strip at the plot's
@@ -1335,6 +1354,46 @@ type GroundLook = Readonly<{
 
 const lookCache = new WeakMap<GeneratedWorldMap, { pack: WorldPackManifest; art: LoadedTerrainArt | null; look: GroundLook }>();
 
+const plotCache = new WeakMap<GeneratedWorldMap, { pack: WorldPackManifest; plot: PlotLayout | null }>();
+
+/* The tilled-plot grid of a map: which ground is tilled in plots, their size, their margin and fallow grounds. It needs
+   no art, so plant placement asks the same plots the baker draws. */
+function plotLayoutFor(map: GeneratedWorldMap, pack: WorldPackManifest): PlotLayout | null {
+  const hit = plotCache.get(map);
+  if (hit && hit.pack === pack) return hit.plot;
+  const cf = map.cornerFields;
+  const ids = cf.materialIds;
+  const spec = (pack.materials ?? []).find(m => m.plots !== undefined && ids.includes(m.id));
+  let plot: PlotLayout | null = null;
+  if (spec) {
+    const ps = spec.plots!;
+    const material = ids.indexOf(spec.id);
+    const marginMaterial = ps.margin ? ids.indexOf(ps.margin) : -1;
+    plot = {
+      material,
+      sizeU: ps.sizeU,
+      sizeV: ps.sizeV,
+      ridge: parseHexRgb(ps.ridgeColor, [150, 160, 90]),
+      ditch: ps.ditchColor ? parseHexRgb(ps.ditchColor, [70, 140, 160]) : null,
+      layer: cf.layerWeights[material]!,
+      margin: marginMaterial >= 0 ? cf.layerWeights[marginMaterial]! : null,
+      marginMaterial,
+      fallow: ps.fallow ? ids.indexOf(ps.fallow) : -1,
+      tilled: new Map(),
+    };
+  }
+  plotCache.set(map, { pack, plot });
+  return plot;
+}
+
+/* Whether (u, v) lies in a tilled plot, as the baker draws it. */
+export function tilledPlotAt(map: GeneratedWorldMap, pack: WorldPackManifest, u: number, v: number): boolean {
+  const p = plotLayoutFor(map, pack);
+  if (!p) return false;
+  const cx = Math.floor(u / p.sizeU);
+  return plotTilled(map.cornerFields, p, cx, Math.floor((v + plotOffset(p, cx)) / p.sizeV));
+}
+
 function groundLook(map: GeneratedWorldMap, pack: WorldPackManifest): GroundLook {
   const art = terrainArtFor(pack);
   const hit = lookCache.get(map);
@@ -1359,25 +1418,8 @@ function groundLook(map: GeneratedWorldMap, pack: WorldPackManifest): GroundLook
   });
   /* Painted sand already carries its ripples; procedural ones go only on procedural ground. */
   const ripples = new Float32Array(specs.map((s, i) => (textures[i]!.stride === 3 ? (s.ripples ?? 0) : 0)));
-  const plotIdx = specs.findIndex(s => s.plots !== undefined);
-  let plot: PlotLayout | null = null;
-  let plotRowsV: GroundTex | null = null;
-  if (plotIdx >= 0) {
-    const ps = specs[plotIdx]!.plots!;
-    plot = {
-      material: plotIdx,
-      sizeU: ps.sizeU,
-      sizeV: ps.sizeV,
-      ridge: parseHexRgb(ps.ridgeColor, [150, 160, 90]),
-      ditch: ps.ditchColor ? parseHexRgb(ps.ditchColor, [70, 140, 160]) : null,
-      layer: cf.layerWeights[plotIdx]!,
-      margin: null,
-      marginMaterial: -1,
-      fallow: ps.fallow ? specs.findIndex(s => s.id === ps.fallow) : -1,
-      tilled: new Map(),
-    };
-    plotRowsV = transposedTexture(textures[plotIdx]!);
-  }
+  const plot = plotLayoutFor(map, pack);
+  const plotRowsV = plot ? transposedTexture(textures[plot.material]!) : null;
   const ps = pack.paths;
   const path: PathLook | null = ps
     ? {
@@ -1416,8 +1458,6 @@ function groundLook(map: GeneratedWorldMap, pack: WorldPackManifest): GroundLook
       }
     }
   }
-  /* With a painted margin the plots grow their margin ground around them; the procedural look keeps plain plots. */
-  if (plot && plotEdge && grassForPlots >= 0) plot = { ...plot, margin: cf.layerWeights[grassForPlots]!, marginMaterial: grassForPlots };
   const surface = art?.liquid?.surface;
   const look: GroundLook = {
     matCount: n,

@@ -13,6 +13,9 @@ import { terrainArtFor } from './terrain-art';
 import type { GeneratedWorldMap } from './terrain-engine';
 
 const MESH_VERTS = MESH_COLS * MESH_ROWS;
+/* Painted plants at least this tall (picture pixels) bend as a mesh; smaller ones, and plants without a wind map,
+   sway as one sprite, which costs far less per frame. */
+const MESH_MIN_PICTURE_H = 180;
 /* Weight at the top of a palm trunk where the fronds attach: flutter starts above it, so leaves never tear off. */
 const FLUTTER_HUB_WEIGHT = 0.25;
 
@@ -110,6 +113,7 @@ export class PlantRenderer {
   private reflectionLayer: Container | null = null;
   private readonly shadowPool: Sprite[] = [];
   private readonly bodyPool: MeshSimple[] = [];
+  private readonly bodySpritePool: Sprite[] = [];
   private readonly bodyFrame: number[] = [];
   private readonly flatPool: Sprite[] = [];
   private readonly reflectionPool: Sprite[] = [];
@@ -181,9 +185,12 @@ export class PlantRenderer {
     }
   }
 
+  /* Draw slot i of the plant bodies: a sprite and a bending mesh, added next to each other so the slots keep their
+     back-to-front order whichever of the two a plant uses. */
   private body(i: number): MeshSimple {
     let mesh = this.bodyPool[i];
     if (!mesh) {
+      this.sprite(this.bodySpritePool, this.bodyLayer!, i, false);
       mesh = new MeshSimple({
         texture: this.atlasTexture!,
         vertices: new Float32Array(MESH_VERTS * 2),
@@ -268,18 +275,39 @@ export class PlantRenderer {
       const o = i * ITEM_STRIDE;
       const k = i - shadowCount;
       const mesh = this.body(k);
+      const sprite = this.bodySpritePool[k]!;
       const frame = data[o]!;
-      if (this.bodyFrame[k] !== frame) {
-        this.setUvs(mesh, frame);
-        this.bodyFrame[k] = frame;
+      const bf = this.bendFrames[frame]!;
+      const a = data[o + 1]!;
+      const b = data[o + 2]!;
+      const c = data[o + 3]!;
+      const d = data[o + 4]!;
+      const push = data[o + 7]!;
+      if (bf.weights && bf.h >= MESH_MIN_PICTURE_H) {
+        if (this.bodyFrame[k] !== frame) {
+          this.setUvs(mesh, frame);
+          this.bodyFrame[k] = frame;
+        }
+        bendPlantMesh(mesh.geometry.positions, bf, a, b, c, d, data[o + 5]!, data[o + 6]!, push, data[o + 8]!, data[o + 9]!);
+        mesh.geometry.getBuffer('aPosition').update();
+        mesh.visible = true;
+        sprite.visible = false;
+      } else {
+        /* Small plants sway as a whole: the top moves by the push, the root stays. */
+        sprite.texture = this.textures[frame]!;
+        const k2 = push / Math.max(1, bf.h);
+        m.set(a, b, c - a * k2, d - b * k2, data[o + 5]! + a * push, data[o + 6]! + b * push);
+        sprite.setFromMatrix(m);
+        sprite.visible = true;
+        mesh.visible = false;
       }
-      bendPlantMesh(mesh.geometry.positions, this.bendFrames[frame]!, data[o + 1]!, data[o + 2]!, data[o + 3]!, data[o + 4]!, data[o + 5]!, data[o + 6]!, data[o + 7]!, data[o + 8]!, data[o + 9]!);
-      mesh.geometry.getBuffer('aPosition').update();
-      mesh.visible = true;
     }
     for (let i = flatCount; i < this.flatPool.length; i++) this.flatPool[i]!.visible = false;
     for (let i = shadowCount - flatCount; i < this.shadowPool.length; i++) this.shadowPool[i]!.visible = false;
-    for (let i = count - shadowCount; i < this.bodyPool.length; i++) this.bodyPool[i]!.visible = false;
+    for (let i = count - shadowCount; i < this.bodyPool.length; i++) {
+      this.bodyPool[i]!.visible = false;
+      this.bodySpritePool[i]!.visible = false;
+    }
 
     if (this.reflectionLayer) {
       const rd = this.reflections.data;
@@ -337,6 +365,7 @@ export class PlantRenderer {
     this.atlasTexture = null;
     this.shadowPool.length = 0;
     this.bodyPool.length = 0;
+    this.bodySpritePool.length = 0;
     this.bodyFrame.length = 0;
     this.flatPool.length = 0;
     this.reflectionPool.length = 0;

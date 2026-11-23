@@ -9,7 +9,8 @@ import { DEFAULT_ISOMETRIC_PROJECTION } from '../src/world/manifest';
 import { createDrawList, ITEM_STRIDE, PlantLayout } from '../src/world/plant-layer';
 import type { PlantSpriteInfo } from '../src/world/plant-sprites';
 import { generatePlants } from '../src/world/plants';
-import { bakeSmoothChunkPixels, displayedWaterDistance, groundMixAt, sampleCornerFieldBilinear } from '../src/world/smooth-terrain-baker';
+import { bakeSmoothChunkPixels, displayedWaterDistance, groundMixAt, sampleCornerFieldBilinear, tilledPlotAt } from '../src/world/smooth-terrain-baker';
+import { registerTerrainArt, type LoadedTerrainArt } from '../src/world/terrain-art';
 import { GALLERY_SEEDS, generateWorldTerrain, type GeneratedWorldMap } from '../src/world/terrain-engine';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
 
@@ -34,13 +35,42 @@ function isOpenGround(map: GeneratedWorldMap, u: number, v: number): boolean {
   const tile = map.tileAt(Math.floor(u), Math.floor(v));
   if (tile === null || tile === 'ridge' || map.kindById.get(tile)?.liquid) return false;
   if (displayedWaterDistance(map.cornerFields, u, v) <= 0.1) return false;
+  if (tilledPlotAt(map, EGYPT_WORLD_PACK, u, v)) return false;
   const ids = map.cornerFields.materialIds;
   const w = sampleCornerFieldBilinear(map.cornerFields, u, v).weights;
-  return (w[ids.indexOf('field')] ?? 0) < 0.45 && (w[ids.indexOf('rock')] ?? 0) < 0.45;
+  return (w[ids.indexOf('rock')] ?? 0) < 0.45;
+}
+
+/* Painted edge masks as an artist delivers them: a ragged line between the two grounds, antialiased over a few rows.
+   With them registered the baker paints its edges; the real pictures are not in the repository. */
+function paintedEdgeArt(): LoadedTerrainArt {
+  const w = 64;
+  const h = 256;
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const line = h / 2 + 14 * Math.sin((x / w) * Math.PI * 6) + 6 * Math.sin((x / w) * Math.PI * 14);
+      const value = Math.max(0, Math.min(255, (line - y) * 64 + 128));
+      const i = (y * w + x) * 4;
+      data[i] = data[i + 1] = data[i + 2] = value;
+      data[i + 3] = 255;
+    }
+  }
+  const mask = { data, width: w, height: h };
+  return { ground: new Map(), texelsPerTile: 256, edges: new Map(), defaultEdge: mask, shoreEdge: null, liquid: null, pathStrip: null, plants: new Map() };
 }
 
 describe('Egypt map look from the design check', () => {
   it('paints soil edges narrow: two soils share a pixel over at most 12 px at 100%', () => {
+    registerTerrainArt(EGYPT_WORLD_PACK, paintedEdgeArt());
+    try {
+      expectNarrowEdges();
+    } finally {
+      registerTerrainArt(EGYPT_WORLD_PACK, null);
+    }
+  });
+
+  function expectNarrowEdges(): void {
     const map = mapFor('hornhoof');
     const step = 0.5 / PX_PER_TILE_STEP;
     const dirs = [
@@ -79,7 +109,7 @@ describe('Egypt map look from the design check', () => {
     }
     expect(edgesSeen).toBeGreaterThan(20);
     expect(widest).toBeLessThanOrEqual(12);
-  });
+  }
 
   it('leaves no bare 300 x 300 px stretch of open ground at 100% on any of six seeds', () => {
     for (const seed of SEEDS) {

@@ -7,7 +7,7 @@ import type { WorldRect } from './coords';
 import { tileTopVertexToWorld } from './coords';
 import type { PlantKindSpec, PlantPassport, PlantRange, WorldPackManifest } from './manifest';
 import { fbm2D, hash2i, hashSeed } from './prng';
-import { displayedWaterDistance, sampleCornerFieldBilinear } from './smooth-terrain-baker';
+import { displayedWaterDistance, sampleCornerFieldBilinear, tilledPlotAt } from './smooth-terrain-baker';
 import type { GeneratedWorldMap } from './terrain-engine';
 
 export type PlacedPlant = Readonly<{
@@ -81,6 +81,10 @@ type Prepared = Readonly<{
   caps: readonly (readonly [number, number])[];
   /* Positions of the grounds the kind needs; empty when it needs none. */
   needs: readonly number[];
+  /* The pack's tilled-plot ground caps a kind by the plots as drawn, not by its raw weight: untilled plot ground is
+     drawn as open ground. Null when the kind has no cap on it. */
+  plotCap: number | null;
+  tilledAt: (u: number, v: number) => boolean;
 }>;
 
 /* Whether a spot is fit for a kind, and how well, from the smooth fields at that exact spot. Returns 0 if unfit. */
@@ -93,13 +97,14 @@ function suitability(map: GeneratedWorldMap, p: Prepared, u: number, v: number):
   if (s.moisture < moisture.min || s.moisture > moisture.max) return 0;
   if (s.signedWaterDist < waterDist.min || s.signedWaterDist > waterDist.max) return 0;
   for (const [idx, cap] of p.caps) if ((s.weights[idx] ?? 0) > cap) return 0;
+  if (p.plotCap !== null && p.plotCap < 1 && p.tilledAt(u, v)) return 0;
   if (p.needs.length > 0) {
     let on = 0;
     for (const idx of p.needs) on += s.weights[idx] ?? 0;
     if (on < 0.35) return 0;
   }
   /* The drawn shoreline wiggles around the field's zero line; keep roots clear of the water and foam that are painted.
-     Waterline kinds (reeds, papyrus) may stand right on the drawn edge, so they seem to grow out of the water. */
+     Waterline kinds (whose water window starts at the edge) may stand right on it, so they seem to grow out of the water. */
   const clearance = p.spec.waterDist.min <= WATERLINE_KIND ? 0.02 : DRAWN_SHORE_CLEARANCE;
   if (s.signedWaterDist < DRAWN_SHORE_CLEARANCE_BELOW && displayedWaterDistance(map.cornerFields, u, v) < clearance) return 0;
   return windowWeight(s.moisture, moisture) * windowWeight(s.signedWaterDist, waterDist);
@@ -107,15 +112,23 @@ function suitability(map: GeneratedWorldMap, p: Prepared, u: number, v: number):
 
 function prepareKinds(pack: WorldPackManifest, map: GeneratedWorldMap): Prepared[] {
   const materialIds = map.cornerFields.materialIds;
-  return (pack.plants ?? []).map(spec => ({
-    spec,
-    seed: (map.numericSeed ^ hashSeed(spec.id)) >>> 0,
-    tileKinds: new Set(spec.tileKinds),
-    caps: Object.entries(spec.materialCaps ?? {})
-      .map(([id, cap]) => [materialIds.indexOf(id), cap] as const)
-      .filter(([idx]) => idx >= 0),
-    needs: (spec.onMaterials ?? []).map(id => materialIds.indexOf(id)).filter(idx => idx >= 0),
-  }));
+  const plotId = (pack.materials ?? []).find(m => m.plots !== undefined)?.id;
+  const tilledAt = (u: number, v: number) => tilledPlotAt(map, pack, u, v);
+  return (pack.plants ?? []).map(spec => {
+    const caps = Object.entries(spec.materialCaps ?? {});
+    return {
+      spec,
+      seed: (map.numericSeed ^ hashSeed(spec.id)) >>> 0,
+      tileKinds: new Set(spec.tileKinds),
+      caps: caps
+        .filter(([id]) => id !== plotId)
+        .map(([id, cap]) => [materialIds.indexOf(id), cap] as const)
+        .filter(([idx]) => idx >= 0),
+      needs: (spec.onMaterials ?? []).map(id => materialIds.indexOf(id)).filter(idx => idx >= 0),
+      plotCap: caps.find(([id]) => id === plotId)?.[1] ?? null,
+      tilledAt,
+    };
+  });
 }
 
 /* The best candidate of any kind at one tile, or null. */
@@ -191,7 +204,7 @@ export function generatePlants(pack: WorldPackManifest, map: GeneratedWorldMap):
 
   /* A bed (reeds, tufts, palm groups) spreads more plants around a chosen one on a Vogel spiral, each checked at its
      own exact spot. */
-  const spreadBed = (p: KindPlan, kind: number, cu: number, cv: number, col: number, row: number): void => {
+  const spreadBed = (p: Prepared, kind: number, cu: number, cv: number, col: number, row: number): void => {
     const bed = p.spec.clusterSize;
     if (!bed || (p.spec.clusterRadius ?? 0) <= 0) return;
     const n = Math.round(lerp(bed, hash2i(col, row, p.seed + SALT.bedPick))) - 1;

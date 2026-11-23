@@ -37,9 +37,11 @@ export function terrainArtFor(pack: WorldPackManifest): LoadedTerrainArt | null 
   return loaded.get(pack) ?? null;
 }
 
-/* Hands art to the engine without loading it: for tests and tools that decode pictures their own way. */
-export function registerTerrainArt(pack: WorldPackManifest, art: LoadedTerrainArt): void {
-  loaded.set(pack, art);
+/* Hands art to the engine without loading it, or takes it away with null: for tests and tools that decode pictures
+   their own way. */
+export function registerTerrainArt(pack: WorldPackManifest, art: LoadedTerrainArt | null): void {
+  if (art) loaded.set(pack, art);
+  else loaded.delete(pack);
 }
 
 function canvasOf(width: number, height: number): HTMLCanvasElement {

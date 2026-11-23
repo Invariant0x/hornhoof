@@ -539,10 +539,12 @@ export class IsometricWorldEngine {
     if (!bctx || !rctx) return;
     const bed = bctx.createImageData(bedCanvas.width, bedCanvas.height);
     const src = liquid.bed.data;
+    /* The bed's sand bars are painted with crisp edges; at full strength one of them reads as a seam along the river. */
+    const kBed = 0.5;
     for (let i = 0; i < src.length; i += 4) {
-      bed.data[i] = Math.max(0, Math.min(255, (br + (src[i]! / 255 - 0.54) * 0.45) * 255));
-      bed.data[i + 1] = Math.max(0, Math.min(255, (bg + (src[i + 1]! / 255 - 0.54) * 0.55) * 255));
-      bed.data[i + 2] = Math.max(0, Math.min(255, (bb + (src[i + 2]! / 255 - 0.54) * 0.4) * 255));
+      bed.data[i] = Math.max(0, Math.min(255, (br + (src[i]! / 255 - 0.54) * 0.45 * kBed) * 255));
+      bed.data[i + 1] = Math.max(0, Math.min(255, (bg + (src[i + 1]! / 255 - 0.54) * 0.55 * kBed) * 255));
+      bed.data[i + 2] = Math.max(0, Math.min(255, (bb + (src[i + 2]! / 255 - 0.54) * 0.4 * kBed) * 255));
       bed.data[i + 3] = 255;
     }
     bctx.putImageData(bed, 0, 0);
@@ -587,7 +589,7 @@ export class IsometricWorldEngine {
       iso.addChild(sprite);
       return sprite;
     };
-    make(bedCanvas, 1.6, 1);
+    make(bedCanvas, 1, 1);
     this.liquidSpriteA = make(ripCanvas, 1, 0.65);
     this.liquidSpriteB = make(ripCanvas, 1 / 1.37, 0.45);
     this.liquidOrigin = { x: -this.bounds.minX, y: -this.bounds.minY * 2 };

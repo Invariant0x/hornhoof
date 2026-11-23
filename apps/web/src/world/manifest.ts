@@ -186,8 +186,10 @@ export type GroundPlotSpec = Readonly<{
   sizeV: number;
   ridgeColor: string;
   ditchColor?: string;
-  /* Material id that untilled field ground turns into away from the tilled plots (with painted art); near a tilled
-     plot it turns into the plots' margin ground instead. Without it, untilled field ground is left out. */
+  /* Material id of the margin around tilled plots: plots are tilled only where this ground and the plot's own cover
+     the plot's corners, and untilled plot ground next to a tilled plot turns into it. */
+  margin?: string;
+  /* Material id that untilled plot ground turns into away from the tilled plots. Without it, it is left out. */
   fallow?: string;
 }>;
 
@@ -934,9 +936,11 @@ export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation 
         if (plots.ditchColor !== undefined && !COLOR_PATTERN.test(plots.ditchColor)) errors.push(`invalid plots.ditchColor on material ${mat.id}`);
       }
     }
-    for (const mat of pack.ground.materials) {
-      const fallow = mat.plots?.fallow;
-      if (fallow !== undefined && (!materialIds.has(fallow) || fallow === mat.id)) errors.push(`material ${mat.id} plots.fallow must name another material`);
+    for (const mat of pack.materials) {
+      for (const key of ['fallow', 'margin'] as const) {
+        const other = mat.plots?.[key];
+        if (other !== undefined && (!materialIds.has(other) || other === mat.id)) errors.push(`material ${mat.id} plots.${key} must name another material`);
+      }
     }
   }
   if (pack.terrainArt) {

@@ -208,7 +208,7 @@ const EGYPT_MATERIALS: readonly GroundMaterialSpec[] = [
     accentColor: '#A9C65A',
     pattern: 'crop_rows',
     contrast: 1.05,
-    plots: { sizeU: 3, sizeV: 2, ridgeColor: '#9DA348', ditchColor: '#4F93AE', fallow: 'sand' },
+    plots: { sizeU: 3, sizeV: 2, ridgeColor: '#9DA348', ditchColor: '#4F93AE', margin: 'grass', fallow: 'sand' },
   },
   {
     id: 'sand',
