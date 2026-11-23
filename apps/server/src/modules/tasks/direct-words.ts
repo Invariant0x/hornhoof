@@ -10,18 +10,23 @@ export type Pointed = { taskId: string; number: number; text: string };
 
 type Pointers = { refs: Set<string>; quoted: string[] };
 
-/* The task given with the words, the tasks they name (#12) or link (…/tasks/<id>), and the lines they quote ("> …"). */
+/* The task given with the words, the tasks they name (#12) or link (…/tasks/<id>), and the lines they quote ("> …"). Anyone
+   who may write to the agent sends these words, of any length: every pattern stays within one line, so reading them takes
+   time in step with their length. */
 function pointersOf(said: string, task: number | string | undefined): Pointers {
   const refs = new Set<string>();
   if (task !== undefined) refs.add(String(task).replace(/^#/, '').toLowerCase());
   for (const [, n] of said.matchAll(/#(\d+)\b/g)) refs.add(n!);
   for (const [, ref] of said.matchAll(/\/tasks\/([0-9a-f-]{36}|\d+)/gi)) refs.add(ref!.toLowerCase());
-  const quoted = [...said.matchAll(/^\s*>\s?(.+)$/gm)].map(([, line]) => flat(line!)).filter(Boolean);
-  return { refs, quoted };
+  const quoted = new Set([...said.matchAll(/^[ \t]*>[ \t]?(.+)$/gm)].map(([, line]) => flat(line!)).filter(Boolean));
+  return { refs, quoted: [...quoted] };
 }
 
-const pointsAt = (q: Pointed, { refs, quoted }: Pointers): boolean =>
-  refs.has(String(q.number)) || refs.has(q.taskId) || quoted.some(line => flat(q.text).includes(line));
+function pointsAt(q: Pointed, { refs, quoted }: Pointers): boolean {
+  if (refs.has(String(q.number)) || refs.has(q.taskId)) return true;
+  const text = flat(q.text);
+  return quoted.some(line => text.includes(line));
+}
 
 /* Of the open questions a person may answer, the one their words answer by themselves: the only one, or the only one they
    point at. None when it is not clear which. */

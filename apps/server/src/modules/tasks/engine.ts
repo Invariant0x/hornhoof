@@ -32,7 +32,7 @@ import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, attachments, companies, jobs, people, requests, taskEvents, tasks, type DecisionTopic, type RequestOption } from '../../db/schema.js';
-import { clearlyAnswered, holds } from './direct-words.js';
+import { clearlyAnswered, flat, holds } from './direct-words.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
@@ -1278,15 +1278,22 @@ async function writerTakes(db: Live['db'], r: OpenForPeople, m: Words): Promise<
   return !!taking && takes({ ...taking.person, assistant: assistantOf(m.data) }, taking.access, r);
 }
 
-/* The one message holding these words that a person who may take the request wrote to the agent since it was asked. */
+/* A message and its copies, repeated into later turns because the program never took it, are one message: the same person,
+   through the same assistant, with the same words. */
+const sameMessage = (m: Words): string => JSON.stringify([m.personId, assistantOf(m.data) ?? null, flat(textOf(m.data))]);
+
+/* The one message holding these words that a person who may take the request wrote to the agent since it was asked: of a
+   message and its copies, the first. */
 async function citedMessage(db: Live['db'], agentId: string, r: OpenForPeople, quote: string): Promise<Words> {
   const holding = (await wordsOfPeople(db, agentId, r.createdAt)).filter(m => holds(textOf(m.data), quote));
   if (!holding.length) throw refuse(400, 'task_invalid', 'No person wrote these words to you since you asked this. Quote their message exactly as they wrote it.');
   const theirs: Words[] = [];
   for (const m of holding) if (await writerTakes(db, r, m)) theirs.push(m);
   if (!theirs.length) throw refuse(403, 'decision_not_allowed', 'The person who wrote these words may not answer this. Ask the person who takes it.');
-  if (theirs.length > 1) throw refuse(400, 'task_invalid', 'More than one message holds these words. Quote more of the one that answers it.');
-  return theirs[0]!;
+  /* Rows come newest first and a later one replaces an earlier in the map: each message ends with its earliest row. */
+  const messages = new Map(theirs.map(m => [sameMessage(m), m]));
+  if (messages.size > 1) throw refuse(400, 'task_invalid', 'More than one message holds these words. Quote more of the one that answers it.');
+  return [...messages.values()][0]!;
 }
 
 /* The agent says which of its open questions, or which piece of work it is stuck on for people, a person's message answered,
