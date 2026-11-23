@@ -1,10 +1,16 @@
-# Egypt world: art order v1
+# Egypt world: art order v1, with v2 (construction from shared modules)
 
 For the art pipeline (Design, #1956). Written on 23.11.2026 from the world art contract, version 2 ([`apps/web/src/world/ARTIST_CONTRACT.md`](../apps/web/src/world/ARTIST_CONTRACT.md)), and the Egypt pack's catalog ([`apps/web/src/world-packs/egypt/ART.md`](../apps/web/src/world-packs/egypt/ART.md)). Where this order and the contract differ, the contract wins.
 
 **The bar:** the delivered district workshop (`egypt-workshop-3x3`), as Design accepted it: stone, a painted cornice, light and shade, a paved yard, and 10 construction stages that read as real building work. Every building and person below is drawn to that level, in the approved style (references 01 to 05, 10 to 12, and `egypt-hd-references`).
 
 **The art never goes into this repository.** It is licensed for Hornhoof only (its `LICENSE.md` lives with the art). Deliver into the art folder outside git, as the workshop was delivered.
+
+**What v2 changes (23.11.2026, Ivan AI by Ivan's word, agreed by the Head of design):**
+
+* Construction is put together from a shared kit and each building's bare stages, no longer from 10 pictures per building. The kit is drawn once per footprint (3.2); a building keeps only `low_walls_open`, `full_walls`, `roof_beams`, `roof` and `complete`.
+* Houses are not drawn anew: each comes from a crop of reference 01, on a larger lot (3.4).
+* Wave 2 (section 2), items 3.2, 3.4, 3.7 and 3.12, and sections 5 and 6 are rewritten for this. Wave 1 is unchanged.
 
 Contents:
 
@@ -19,7 +25,7 @@ Contents:
 
 * PNG, RGBA, sRGB, straight (not premultiplied) alpha, transparent background.
 * **Master scale (4x):** a ground tile is a 240 x 120 px diamond (2:1). A grown person is 136 px from feet to the top of the head.
-* **Camera and light:** the camera is 30 degrees above the ground. The sun is at the top left (azimuth -45, elevation 55), 5200 K.
+* **Camera and light:** the camera is 30 degrees above the ground; residents alone are drawn at 19 degrees (4.4). The sun is at the top left (azimuth -45, elevation 55), 5200 K.
 * **Shadows:** no shadow is painted on the ground under a building or a person; the engine draws those. A building's own cast shadow goes in its `shadow.png` layer (3.3).
 * **Passports:** every picture or sheet has a passport JSON beside it with the same name: `complete.png` and `complete.json`.
   * Points are in the picture's own pixels, origin at the top left, y going down.
@@ -59,18 +65,19 @@ Of the 59 residents:
 
 **Wave 2: building work and growth look real.**
 
-1. The construction line (`stage_01` to `stage_10`, `demol_01`, `demol_02`, with layers) for the first step of house, department, residence and flophouse. Then `annex.png` for every larger step (3.2).
-2. Day labourers' `camp` and `barracks` (3.9).
-3. The remaining district workshop steps' own lines: `great_workshop`, `workshop_hall` (3.7).
-4. Statues (3.10), pyramids with capstones (3.10), the altar (3.11), the seven loops (3.12).
-5. People: every other look at tier 1 with the same five animations. Then tiers 2 to 5 of `walk`, `idle`, `carry`, `build` for the Wave 1 looks, so level progression shows.
+1. **The construction kit, once** (3.2): the modules `stakes`, `foundation`, `scaffold_back`, `scaffold_front`, `ramp` and `rubble` for the footprints in this order: 2x2, 3x3, 4x4, 5x5, 6x6 (1x1 only if a 1x1 building is ever built; after v2 none is). With them the loops `crane`, `hoist_block`, `dust` and `smoke`, drawn once for all buildings (3.12).
+2. The bare stages (3.2) of the first step of house (`hut`), department (`shrine`), residence (`tent`) and flophouse (`camp`). Then `annex.png` for every larger step.
+3. Day labourers' `camp` and `barracks` (3.9).
+4. The bare stages of the remaining district workshop steps, `great_workshop` and `workshop_hall` (3.7).
+5. Statues (3.10), pyramids with capstones (3.10), the altar (3.11), the loops `water`, `awning` and `celebration` (3.12).
+6. People: every other look at tier 1 with the same five animations. Then tiers 2 to 5 of `walk`, `idle`, `carry`, `build` for the Wave 1 looks, so level progression shows.
 
 **Wave 3: the rest.**
 
 1. Every look, every tier, every animation of 4.3.
 2. The daily-life animations for #1951 (4.3, last table).
 3. Night lights (3.13): **on hold** by Ivan's word, 23.11.2026.
-4. The construction line for every larger step, used when a grown building is rebuilt elsewhere.
+4. The bare stages (3.2) of every larger step, used when a grown building is rebuilt elsewhere.
 
 ## 3. Buildings
 
@@ -80,7 +87,8 @@ Every picture of one step uses the **same canvas**, so nothing moves between sta
 
 * the canvas is as wide as the footprint diamond, with the plot's bottom corner at the bottom centre (`[W/2, H-1]`);
 * the canvas height is the footprint's highest picture, used in full;
-* every picture passport repeats the same `groundAnchor` and `corners`.
+* every picture passport repeats the same `groundAnchor` and `corners`;
+* the shared construction modules of a footprint (3.2) use exactly this canvas and passport too.
 
 | Footprint | Canvas W x H | Door height | `groundAnchor` | `corners.top` | `corners.right` | `corners.bottom` | `corners.left` |
 |---|---|---|---|---|---|---|---|
@@ -112,19 +120,70 @@ Optional fields:
 * `workSlots`: up to 3 points `{ "x", "y", "layer": "front" | "inside" }` where workers stand;
 * `layers` (3.3).
 
-### 3.2 Pictures of one step
+### 3.2 Pictures of one step, and the construction kit (v2)
 
-Folder `buildings/<kind>/<step>/`.
+**A step's own pictures.** Folder `buildings/<kind>/<step>/`.
 
 | File | When it shows |
 |---|---|
 | `complete.png` | The finished building. **Required** for every step. |
 | `upgraded.png` | The building at its last growth stage (courtyard, gallery, extra floor). Optional. |
 | `annex.png` | The building growing into the next step: the finished look with the extension under work. Optional. |
-| `stage_01.png` to `stage_10.png` | The construction line, scaffolding, ramps and ropes drawn in, as the workshop has it: 1 stakes and rope, 2 foundation, 3 first courses with open rooms, 4 walls to the waist, 5 full walls with no roof, 6 roof beams, 7 roof closed, 8 finishing, 9 finished (the same as `complete`), 10 upgraded. |
-| `demol_01.png`, `demol_02.png` | Demolition: half torn down, then rubble. |
+| `low_walls_open.png` | Bare stage: the first courses of the walls, the rooms open from above. |
+| `full_walls.png` | Bare stage: the walls at full height, no roof. |
+| `roof_beams.png` | Bare stage: the beams laid across the walls, no roof covering. |
+| `roof.png` | Bare stage: the roof closed, before the finish (no paint, cornice or props yet). |
 
-With its own construction line, a step needs none of the shared modules (`modules/`). This order asks for no modules.
+* A bare stage shows the building alone: no scaffolding, ramp, crane, rope, stakes, rubble or dust. Those come from the kit and the loops.
+* Same canvas and passport as the step's `complete.png` (`groundAnchor`, `corners`). `door` and `workSlots` are optional.
+* A bare stage may carry its own cast shadow as a `shadow.png` layer (3.3).
+* A step that already has its own `stage_01.png` to `stage_08.png` and `demol_01.png`, `demol_02.png` (the workshop) keeps them: the engine shows them and no kit. Nothing there is redrawn.
+
+**The construction kit.** Folder `modules/<footprint>/`, one set per footprint, drawn once and used by every building of that footprint. Every module of a footprint has exactly the canvas, `groundAnchor` and `corners` of 3.1:
+
+| Folder | Canvas W x H | `groundAnchor` | `corners` |
+|---|---|---|---|
+| `modules/1x1/` | 240 x 420 | [120, 359] | as 1x1 in 3.1 |
+| `modules/2x2/` | 480 x 680 | [240, 559] | as 2x2 in 3.1 |
+| `modules/3x3/` | 720 x 960 | [360, 779] | as 3x3 in 3.1 |
+| `modules/4x4/` | 960 x 1200 | [480, 959] | as 4x4 in 3.1 |
+| `modules/5x5/` | 1200 x 1440 | [600, 1139] | as 5x5 in 3.1 |
+| `modules/6x6/` | 1440 x 1680 | [720, 1319] | as 6x6 in 3.1 |
+
+The files of each set:
+
+| File | What it shows | Required |
+|---|---|---|
+| `stakes.png` | Stakes at the four corners of the plot, a taut rope between them, a few pegs. No building. | yes |
+| `foundation.png` | The plot levelled, the foundation course laid, a few blocks stacked at its side. | yes |
+| `scaffold_back.png` | Scaffolding along the two back walls, behind the building. | no |
+| `scaffold_front.png` | Scaffolding along the two front walls, open enough that the walls show through. | yes |
+| `ramp.png` | The building ramp leaning against a front wall, as on the workshop's stages 4 and 5. | yes |
+| `rubble.png` | After demolition: a rubble heap and broken blocks on the plot. | yes (read once #1955 wires it, section 6) |
+
+* Scaffolding reaches the wall top of the tallest step of that footprint (3.4 to 3.9).
+* Paint no ground plate under a module: the engine clears every lot to bare ground itself (#1958), and stakes and rubble stand on it.
+* Modules take no layers, so leave cast shadows out of them.
+
+**How the 10 steps on screen are put together.** Back to front, as the engine draws them; the loops are added by the engine (3.12):
+
+| Step | Stage | Drawn, back to front | Loops |
+|---|---|---|---|
+| 1 | stakes and rope | `stakes` | `dust` |
+| 2 | foundation | `foundation` | `dust` |
+| 3 | low walls, rooms open | `low_walls_open` and its layers | `dust` |
+| 4 | walls to the waist | `scaffold_back`, `low_walls_open` and its layers, `ramp`, `scaffold_front` | `crane`, `hoist_block`, `dust` |
+| 5 | full walls | `scaffold_back`, `full_walls` and its layers, `ramp`, `scaffold_front` | `crane`, `hoist_block`, `dust` |
+| 6 | roof beams | `scaffold_back`, `roof_beams` and its layers, `scaffold_front` | `crane`, `hoist_block`, `dust` |
+| 7 | roof | `scaffold_back`, `roof` and its layers, `scaffold_front` | `dust` |
+| 8 | finishing | `scaffold_back`, `complete` and its layers, `scaffold_front` | `dust`, `awning` |
+| 9 | finished | `complete` and its layers, the flag | `awning`, `smoke` |
+| 10 | upgraded | `upgraded` (or `complete`) and its layers, the flag | `awning`, `smoke` |
+| demolition | | steps 8 to 1 backwards, then `rubble` | `dust` |
+
+"Its layers" are the picture's passport layers (3.3): its `shadow.png` comes right after it, under the ramp and the front scaffolding.
+
+**Design's condition:** put together, the construction must read at least as well as the workshop's own strip from #1944. Design checks it on live-city shots.
 
 **Door and growth.** A building stands at the front (bottom) corner of its lot and grows backward: a larger step keeps the same front corner, door and scale, and the new rooms go behind. Draw the door on the **front right wall** (from the plot's right corner down to the bottom corner), in the tile row this order names for the kind (counted from the bottom corner, 0 = the front tile). Keep it in that row in every step of the kind.
 
@@ -148,14 +207,20 @@ Keep to a layer only what moves or must stay separate.
 
 ### 3.4 House: an agent's home, the most common building
 
-| Step | Footprint | Shown from | What |
-|---|---|---|---|
-| `hut` | 1x1 | level 1 | Reed hut |
-| `mudbrick` | 2x2 | level 4 | Mudbrick house |
-| `painted` | 3x3 | level 8 | Painted house |
-| `villa` | 4x4 | level 15 | Villa with a pool |
+By Ivan's word (23.11): no new houses are drawn. Each house comes from a crop of reference 01, in `egypt-etalon-house-crops.tar.gz` on #1956 (attachment `c234f111-57df-4c14-8a89-7ba2f9620f84`, folder `etcrop/`).
 
-* Lot 4x4. Door row 0.
+| Step | Footprint | Shown from | Source |
+|---|---|---|---|
+| `hut` | 2x2 | level 1 | crop `hut_A_square_pyramid_roof.png` |
+| `mudbrick` | 3x3 | level 4 | crop `mud_B_roof_pots.png` |
+| `painted` | pending | level 8 | pending: Design names the crop and measures the lot |
+| `villa` | pending | level 15 | pending, as `painted` |
+
+* The other crops, `hut_B_gable_reed.png`, `hut_C_gable_big.png`, `hut_D_round_mud.png`, `mud_A_plain.png`, `mud_C_awning.png` and `mud_D_reed_awning.png`, are variants for `painted`, `villa` and variations.
+* Why the larger lots: with a person at 136 px the reference huts' walls are about 1.6 x 1.6 cells. Squeezed into 1x1, a hut comes out narrow and tall. As with the workshop, the lot follows from the reference at standard scale.
+* Canvas, `groundAnchor` and `corners`: table 3.1 for the step's footprint, unchanged.
+* Door: as in the reference at standard scale, never lower than 100 px: a low door is what poor housing looks like. The 148 to 168 px doors of 3.1 stay for stone and public buildings. Door row 0, on the front right wall.
+* The house lot equals the lot of its largest step. It is pending until Design measures `villa` (4x4 today).
 * `flagAnchor` on every `complete.png`: the district flag flies from homes.
 
 ### 3.5 Department: a department's temple in the city centre
@@ -192,7 +257,7 @@ Delivered:
 Still to deliver:
 
 * `upgraded.png` where wanted;
-* the own construction line of `great_workshop` and `workshop_hall` (Wave 2).
+* the bare stages (3.2) of `great_workshop` and `workshop_hall` (Wave 2); the workshop keeps its own delivered line.
 
 Lot 5x5. Door: front right wall, row 2, as delivered.
 
@@ -239,7 +304,7 @@ Lot 5x5. Door: front right wall, row 2, as delivered.
 
 ### 3.12 Loops
 
-`loops/<name>.png`: one row of frames, with a sheet passport (4.5) and `attach`.
+`loops/<name>.png`: one row of frames, with a sheet passport (4.5) and `attach`. Each loop is drawn once and serves every building; `crane`, `hoist_block`, `dust` and `smoke` belong to the construction kit (Wave 2, item 1), and the table in 3.2 says at which step each shows.
 
 | Loop | `attach` |
 |---|---|
@@ -348,6 +413,8 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 * **Frames** run left to right, every frame the same size. The feet sit on the same `anchor` in every frame, so walking does not slide.
 * **Suggested frame:** 192 x 256 px with the feet at `[96, 236]`. The person is 136 px tall and stands from y 100 to y 236; the room above holds a stone on the head, a banner or a raised spear.
 * Rig and bake as the contract says: parts at the 544 px source baked down to 136 px, the cloak as its own baked layer, no ground shadow.
+* **Camera: the one exception to the 30 degrees of section 1.** Residents are drawn with an orthographic camera tilted 19 degrees down (Ivan's word, 23.11.2026): at 30 degrees the shoulders came out 24% wider and a step looked like a hop. Buildings, ground and the construction kit stay at 30 degrees. The sheet format does not change: 5 rows N to S, frame 192 x 256, feet at `[96, 236]`, the person 136 px tall.
+* **What Design checks on the city shots:** the feet stand on the 30-degree ground, neither floating nor sinking; the engine's shadow under a resident stays at 30 degrees; in `build` the hands touch the building's wall and do not go into it.
 
 Passport of an 8-frame walk with that frame (sheet 1536 x 1280):
 
@@ -408,7 +475,8 @@ Look at each delivery for these yourself:
 
 * The plot's bottom corner is at the same canvas point in every picture of a step, and in its growth steps.
 * The door is on the front right wall, in the row this order names, in every step.
-* A person in the art is 136 px tall, and door heights match the table in 3.1.
+* A person in the art is 136 px tall, and door heights match the table in 3.1; a house door is as in its reference crop and at least 100 px (3.4).
+* A kit module sits on the same canvas point as the buildings of its footprint: stakes at the plot's corners, scaffolding along the walls of the tallest step.
 * Light from the top left; no painted ground shadow except in `shadow.png`.
 * The style matches the workshop and the references.
 
@@ -416,7 +484,7 @@ Look at each delivery for these yourself:
 
 **Read today, with no code change:**
 
-* every building file of 3.2 to 3.12: `complete`, `upgraded`, `annex`, `stage_01..10`, `demol_01/02`, layers with multiply and sway, statue stages, pyramid tiers and capstone, granary fills, the altar, flags on `flagAnchor`, and loops by `attach`;
+* every building file of 3.2 to 3.12: `complete`, `upgraded`, `annex`, the bare stages put together with the kit modules `stakes`, `foundation`, `scaffold_back`, `scaffold_front` and `ramp` as the table in 3.2 says, a step's own `stage_01..08` and `demol_01/02`, layers with multiply and sway, statue stages, pyramid tiers and capstone, granary fills, the altar, flags on `flagAnchor`, and loops by `attach`;
 * people sheets of the 17 contract animations in 5 tiers by level, with the provider-tinted cloak and the fallbacks of 4.2 and 4.3;
 * the import of a building delivered in the workshop's format, and the check.
 
@@ -433,3 +501,6 @@ Look at each delivery for these yourself:
 4. **Night lights** `night.png`: on hold by Ivan's word, 23.11.2026 (3.13). #1955 does not depend on it.
 5. **People delivery.** There is no import script for people. Lay sheets out as 4.4 says, or ask for a small import script matched to the delivery's layout.
 6. **Retina 2K art** (8x). The engine scales the master up at 200% on Retina today; using the 2K set needs wiring later. It is not ordered here.
+7. **The kit at demolition.** The engine runs the steps backwards today; showing `rubble.png` last, and the scaffolds while tearing down, comes with #1955. Until then the check warns that `rubble.png` is not declared.
+8. **Residents at 19 degrees (4.4): nothing to wire.** The engine stands a sheet on its `anchor` at the feet's point on the ground and draws the shadow itself, a flat 2:1 ellipse at 30 degrees. If feet float or sink on the shots, the fix is the sheet's `anchor`; if hands go into a wall in `build`, the fix is that building's `workSlots`.
+9. **House step sizes.** The pack catalog gives `hut` 1x1 and `mudbrick` 2x2 today. The new sizes (3.4) go into the pack's `buildingLayout` as one line per step with its lot when the art lands, and the house lot once Design has measured `villa`. Not built in #1954.

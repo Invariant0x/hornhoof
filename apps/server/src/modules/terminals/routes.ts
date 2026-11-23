@@ -8,7 +8,8 @@ import { agentHidden, requireAgentView } from '../../auth/agent-view.js';
 import { namedAgent } from '../agents/find.js';
 import { enterPressed } from '../conversation/decision-context.js';
 import { windowNode } from '../conversation/placement.js';
-import { identityOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { identityOf, nodeIdentity, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { planNodes } from '../nodes/nodes.js';
 import { mayTypeTo, programAccess } from './access.js';
 import { readKeys } from './keys.js';
 import { cols, followFrames, keepLooking, rows, type BrowserFrame } from './look.js';
@@ -30,12 +31,21 @@ async function programFor(ctx: Ctx, req: FastifyRequest) {
   return { me, agent, plan };
 }
 
+/* The node an open view belongs to now: its pinned or running node, or the personal plan's fallback node when the agent
+   has not been pinned to a node yet (matching windowNode without moving the agent). */
+async function viewNode(ctx: Ctx, plan: NonNullable<Awaited<ReturnType<typeof programFor>>['plan']>): Promise<NodeIdentity | null> {
+  const at = identityOf(plan, plan.nodeId, plan.builtinMachine, ownBuiltin(ctx.config));
+  if (at || plan.kind !== 'personal') return at;
+  const [first] = await planNodes(ctx.db, [plan.id]);
+  return first ? nodeIdentity(first.id) : null;
+}
+
 /* Why a view that is open ends now. An agent that moved to another subscription or machine runs on another node once its
    running turn is over, and the browser opens the view again there; so too when the person no longer types into what it
    shows, for the node to hear that. */
 async function whyEnd(ctx: Ctx, req: FastifyRequest, { node, personId, write }: Open) {
   const { me, agent, plan } = await programFor(ctx, req);
-  const at = plan && identityOf(plan, plan.nodeId, plan.builtinMachine, ownBuiltin(ctx.config));
+  const at = plan && (await viewNode(ctx, plan));
   return !at || !sameNode(at, node) || (mayTypeTo(me, agent) && plan.ownerPersonId === personId) !== write ? CLOSE.nodeOffline : null;
 }
 

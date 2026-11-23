@@ -143,6 +143,10 @@ const DRAG_THRESHOLD_PX = 5;
 const KEY_PAN_PX_PER_SEC = 540;
 const CHUNK_CACHE_CAP = 260;
 const ZOOM_STEP_FACTOR = 1.25;
+/* How a world's Pixi application ends: its canvas leaves the page, and Pixi's pools shared by every application on the page
+   stay. Ending with `true` would also empty those pools and break the batches of a map still drawing, as when React's
+   development mode ends the first of a map's two mounts, or a skin switch ends one map while another draws. */
+const APP_ENDS_ALONE = { removeView: true, releaseGlobalResources: false } as const;
 
 function parseHexColor(color: string, fallback = 0x141b24): number {
   const m = /^#([0-9a-f]{6})$/i.exec(color.trim());
@@ -347,12 +351,12 @@ export class IsometricWorldEngine {
         preference: 'webgl',
       });
       if (this.destroyed) {
-        app.destroy(true, { children: true, texture: true });
+        app.destroy(APP_ENDS_ALONE, { children: true, texture: true });
         return;
       }
       await Promise.race([artJob, new Promise(resolve => setTimeout(resolve, 15000))]);
       if (this.destroyed) {
-        app.destroy(true, { children: true, texture: true });
+        app.destroy(APP_ENDS_ALONE, { children: true, texture: true });
         return;
       }
       this.useArt(terrainArtFor(this.pack));
@@ -1955,7 +1959,7 @@ export class IsometricWorldEngine {
     this.constructionSim = null;
 
     if (this.app) {
-      this.app.destroy(true, { children: true, texture: true });
+      this.app.destroy(APP_ENDS_ALONE, { children: true, texture: true });
       this.app = null;
     }
     this.plantRenderer?.destroy();
