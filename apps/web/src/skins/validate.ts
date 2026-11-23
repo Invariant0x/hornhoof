@@ -1,6 +1,9 @@
 import { readColor, weakPair } from './contrast';
-import { BUILTIN_SKINS, type BuiltinSkin } from './registry';
-import { COLOR_ROLES, CUT_RANGE, FONT_ROLES, GENERIC_FONTS, SCHEMES, type ColorRole, type FontRole, type Scheme, type Skin, type SkinNames } from './roles';
+import { BUILTIN_SKINS, SHIPPED_FONTS, type BuiltinSkin } from './registry';
+import {
+  COLOR_ROLES, CUT_RANGE, CUT_SHAPES, FONT_ROLES, GENERIC_FONTS, SCHEMES, SURFACE_STYLES, WORLD_COLOR_ROLES,
+  type ColorRole, type FontRole, type Scheme, type Skin, type SkinLook, type SkinNames,
+} from './roles';
 
 /* The strict check of a skin file a person adds, version 2 of the skin format, and the file Hornhoof
    gives out as a sample. A skin is taken only when it is whole and every value is known, safe, of its form and readable;
@@ -27,6 +30,7 @@ export const SEE_THROUGH: readonly ColorRole[] = ['dot', 'glow', 'hud', 'shadow'
 export const SKIN_ERROR_CODES = [
   'too_large', 'not_json', 'not_skin', 'forbidden_key', 'bad_version', 'layout_locked', 'unknown_key', 'missing', 'not_object', 'bad_base',
   'bad_name', 'bad_scheme', 'unsafe', 'bad_color', 'opaque', 'bad_font', 'font_list', 'bad_cut', 'low_contrast', 'faint_line',
+  'bad_shape', 'bad_surface', 'bad_pulse',
 ] as const;
 export type SkinErrorCode = (typeof SKIN_ERROR_CODES)[number];
 /* What is wrong: the field to fix, and for a font or a pair of colours the value it is about. */
@@ -208,3 +212,81 @@ export const builtinFile = (skin: BuiltinSkin, name: SkinNames): Skin => ({
   fonts: byKey(FONT_ROLES, role => skin.fonts[role].filter(font => FILE_FONTS[role].includes(font))),
   cut: skin.cut,
 });
+
+/* The look of a theme archive (docs/theme-archive.md, 3.1): the whole look of a built-in skin, checked by the same checks
+   as a person's own skin file, with the fonts of the archive's own ui/fonts.json besides the shipped ones and the
+   system fonts the built-in skins name. */
+const LOOK_FIELDS = ['scheme', 'colors', 'fonts', 'cut', 'shape', 'pulse', 'surface', 'worldColors', 'terminal'];
+const SYSTEM_FONTS = [...new Set(BUILTIN_SKINS.flatMap(skin => FONT_ROLES.flatMap(role => skin.fonts[role])))].filter(font => !GENERIC_FONTS.includes(font));
+const TERMINAL_KEYS = ['bg', 'ink', 'cursor', 'cursorAccent', 'selection', 'selectionInk', 'idle', 'ansi'] as const;
+const ANSI_COLORS = 16;
+type ParsedLook = { ok: true; look: SkinLook } | { ok: false; error: SkinError };
+
+function lookFonts(families: readonly string[]): EntryCheck<FontRole> {
+  const allowed = new Set([...SHIPPED_FONTS, ...SYSTEM_FONTS, ...families, ...GENERIC_FONTS]);
+  return (where, _role, value) => {
+    if (!Array.isArray(value) || value.length === 0 || value.length > MAX_FONT_LIST) return problem('font_list', where);
+    const foreign = value.find(font => typeof font !== 'string' || !allowed.has(font));
+    if (foreign !== undefined) return problem('bad_font', where, String(foreign).slice(0, SHOWN));
+    return new Set(value).size === value.length && GENERIC_FONTS.includes(value[value.length - 1] as string) ? null : problem('font_list', where);
+  };
+}
+
+const plainColor: EntryCheck<string> = (where, _key, value) => (typeof value === 'string' && readColor(value) ? null : problem('bad_color', where));
+
+function checkTerminal(raw: unknown): SkinError | null {
+  if (!isObject(raw)) return problem('not_object', 'terminal');
+  for (const key of Object.keys(raw)) {
+    const found = checkEntry('terminal', TERMINAL_KEYS, key, raw[key], (where, name, value) => {
+      if (name !== 'ansi') return plainColor(where, name, value);
+      return Array.isArray(value) && value.length === ANSI_COLORS && value.every(color => typeof color === 'string' && readColor(color)) ? null : problem('bad_color', where);
+    });
+    if (found) return found;
+  }
+  return raw.bg === undefined ? problem('missing', 'terminal.bg') : raw.ink === undefined ? problem('missing', 'terminal.ink') : null;
+}
+
+function lookChecks(families: readonly string[]): Check[] {
+  const optional = (key: string, check: Check): Check => raw => (raw[key] === undefined ? null : check(raw));
+  return [
+    raw => {
+      const extra = Object.keys(raw).find(key => !LOOK_FIELDS.includes(key));
+      return extra === undefined ? null : stranger(extra, extra);
+    },
+    raw => (raw.scheme === undefined ? problem('missing', 'scheme') : isScheme(raw.scheme) ? null : problem('bad_scheme', 'scheme')),
+    raw => checkGroup(raw.colors, 'colors', COLOR_ROLES, checkColor),
+    raw => checkGroup(raw.fonts, 'fonts', FONT_ROLES, lookFonts(families)),
+    raw => (raw.cut === undefined ? problem('missing', 'cut') : isCut(raw.cut) ? null : problem('bad_cut', 'cut')),
+    raw => (raw.shape === undefined ? problem('missing', 'shape') : (CUT_SHAPES as readonly unknown[]).includes(raw.shape) ? null : problem('bad_shape', 'shape')),
+    optional('pulse', raw => (typeof raw.pulse === 'number' && raw.pulse > 0 && raw.pulse <= 1 ? null : problem('bad_pulse', 'pulse'))),
+    optional('surface', raw => ((SURFACE_STYLES as readonly unknown[]).includes(raw.surface) ? null : problem('bad_surface', 'surface'))),
+    optional('worldColors', raw => checkGroup(raw.worldColors, 'worldColors', WORLD_COLOR_ROLES, plainColor)),
+    optional('terminal', raw => checkTerminal(raw.terminal)),
+    checkContrast,
+  ];
+}
+
+/* Reads the look of a theme archive strictly, the first problem saying what to fix; the look is built anew from what passed. */
+export function parseLook(raw: unknown, families: readonly string[]): ParsedLook {
+  const forbidden = forbiddenKey(raw);
+  if (forbidden !== null) return { ok: false, error: problem('forbidden_key', forbidden) };
+  if (!isObject(raw)) return { ok: false, error: problem('not_skin') };
+  for (const check of lookChecks(families)) {
+    const found = check(raw);
+    if (found) return { ok: false, error: found };
+  }
+  const colors = raw.colors as Record<string, string>;
+  const fonts = raw.fonts as Record<string, string[]>;
+  const look: SkinLook = {
+    scheme: raw.scheme as Scheme,
+    colors: byKey(COLOR_ROLES, role => colors[role]!),
+    fonts: byKey(FONT_ROLES, role => [...fonts[role]!]),
+    cut: raw.cut as number,
+    shape: raw.shape as SkinLook['shape'],
+    ...(raw.pulse === undefined ? {} : { pulse: raw.pulse as number }),
+    ...(raw.surface === undefined ? {} : { surface: raw.surface as NonNullable<SkinLook['surface']> }),
+    ...(raw.worldColors === undefined ? {} : { worldColors: byKey(WORLD_COLOR_ROLES, role => (raw.worldColors as Record<string, string>)[role]!) }),
+    ...(raw.terminal === undefined ? {} : { terminal: Object.fromEntries(TERMINAL_KEYS.filter(key => (raw.terminal as Raw)[key] !== undefined).map(key => [key, (raw.terminal as Raw)[key]])) as unknown as NonNullable<SkinLook['terminal']> }),
+  };
+  return { ok: true, look };
+}

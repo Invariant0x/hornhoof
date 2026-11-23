@@ -604,6 +604,9 @@ export const en = {
       bad_cut: key => `The ${key} field needs a number from 0 to 1.5. Fix the field and add the file again.`,
       low_contrast: (key, value) => `Text in “${key}” is hard to read on “${value}”. Change one of the colors and add the file again.`,
       faint_line: (key, value) => `Borders in “${key}” are hard to see on “${value}”. Change one of the colors and add the file again.`,
+      bad_shape: key => `The ${key} field needs bevel or steps. Fix the field and add the file again.`,
+      bad_surface: key => `The ${key} field needs plain or a surface style Hornhoof ships, such as papyrus. Fix the field and add the file again.`,
+      bad_pulse: key => `The ${key} field needs a number above 0 and at most 1. Fix the field and add the file again.`,
     } satisfies SkinErrorWords as SkinErrorWords,
   },
   workers: {
