@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- The head of Design, named on a task's tracked work to check a screen's final look, can now read that task and its files and comment on it until the check ends, and the task's holder can message that head about it.
+
 ## [0.42.0] - 2026-11-23
 
 ### Fixed
