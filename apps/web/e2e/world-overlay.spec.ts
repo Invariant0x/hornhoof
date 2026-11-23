@@ -352,3 +352,208 @@ for (const width of WIDTHS) for (const skin of SKINS) {
     expect(errors).toEqual([]);
   });
 }
+
+/* Egypt game-world container (.map.world-map, .world-canvas-host, canvas, and isometric city building screen coordinates)
+   likewise fills the viewport and never shifts or shrinks when HUD banners, Department Mode, alerts, or narrow-screen
+   agent strips appear, and non-map pages have no bottom version bar in the Egypt theme. */
+type WorldDebug = {
+  getStats: () => { camera: { x: number; y: number; zoom: number } } | null;
+  getBuildings: () => readonly { col: number; row: number }[];
+  flushVisibleBakes: () => void;
+};
+type WorldSnapshot = {
+  worldMap: Box | null;
+  canvasHost: Box | null;
+  canvas: Box | null;
+  buildingScreen: { x: number; y: number } | null;
+  zoom: number | null;
+};
+
+const worldSnapshot = (page: Page): Promise<WorldSnapshot> => page.evaluate(() => {
+  const box = (sel: string): Box | null => {
+    const el = document.querySelector(sel);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  };
+  const worldMap = box('.map.world-map');
+  const canvasHost = box('.world-canvas-host');
+  const canvas = box('.world-canvas-host canvas');
+  const h = (window as unknown as { __WORLD_PRODUCT__?: WorldDebug }).__WORLD_PRODUCT__;
+  h?.flushVisibleBakes();
+  const stats = h?.getStats() ?? null;
+  const bld = h?.getBuildings()[0] ?? null;
+  let buildingScreen: { x: number; y: number } | null = null;
+  if (canvas && stats && bld) {
+    const wx = (bld.col - bld.row) * 60;
+    const wy = (bld.col + bld.row + 1) * 30;
+    buildingScreen = {
+      x: canvas.x + canvas.width / 2 + (wx - stats.camera.x) * stats.camera.zoom,
+      y: canvas.y + canvas.height / 2 + (wy - stats.camera.y) * stats.camera.zoom,
+    };
+  }
+  return { worldMap, canvasHost, canvas, buildingScreen, zoom: stats?.camera.zoom ?? null };
+});
+
+async function settledWorldSnapshot(page: Page): Promise<WorldSnapshot> {
+  await page.evaluate(async () => { await document.fonts.ready; });
+  let last = '';
+  await expect.poll(async () => {
+    await settled(page);
+    const now = JSON.stringify(await worldSnapshot(page));
+    const same = now === last;
+    last = now;
+    return same;
+  }).toBe(true);
+  return JSON.parse(last) as WorldSnapshot;
+}
+
+function expectSameWorldGeometry(after: WorldSnapshot, before: WorldSnapshot, label: string) {
+  for (const [part, a, b] of [
+    ['.map.world-map', after.worldMap, before.worldMap],
+    ['.world-canvas-host', after.canvasHost, before.canvasHost],
+    ['.world-canvas-host canvas', after.canvas, before.canvas],
+  ] as const) {
+    expect.soft(a, `${label}: ${part} stays mounted`).not.toBeNull();
+    expect.soft(b, `${label}: ${part} baseline mounted`).not.toBeNull();
+    if (!a || !b) continue;
+    expect.soft(Math.abs(a.x - b.x), `${label}: ${part} deltaX (${a.x} vs ${b.x})`).toBeLessThanOrEqual(0.5);
+    expect.soft(Math.abs(a.y - b.y), `${label}: ${part} deltaY (${a.y} vs ${b.y})`).toBeLessThanOrEqual(0.5);
+    expect.soft(Math.abs(a.width - b.width), `${label}: ${part} deltaWidth (${a.width} vs ${b.width})`).toBeLessThanOrEqual(0.5);
+    expect.soft(Math.abs(a.height - b.height), `${label}: ${part} deltaHeight (${a.height} vs ${b.height})`).toBeLessThanOrEqual(0.5);
+  }
+  expect.soft(after.buildingScreen, `${label}: building screen point available`).not.toBeNull();
+  expect.soft(before.buildingScreen, `${label}: baseline building screen point available`).not.toBeNull();
+  if (after.buildingScreen && before.buildingScreen) {
+    expect.soft(Math.abs(after.buildingScreen.x - before.buildingScreen.x), `${label}: building deltaX`).toBeLessThanOrEqual(0.5);
+    expect.soft(Math.abs(after.buildingScreen.y - before.buildingScreen.y), `${label}: building deltaY`).toBeLessThanOrEqual(0.5);
+  }
+  if (after.zoom !== null && before.zoom !== null) {
+    expect.soft(Math.abs(after.zoom - before.zoom), `${label}: zoom unchanged`).toBeLessThanOrEqual(0.001);
+  }
+}
+
+for (const width of WIDTHS) {
+  test(`game-world container and building screen point stay identical across update banner, department mode, alert, agent strip, and tasks: ${width}px egypt`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', e => errors.push(e.message));
+
+    let updatesMode: 'quiet' | 'done' = 'quiet';
+    let orgMode: 'ok' | 'fail' = 'ok';
+    const egyptCompany = { ...ME.company, theme: 'egypt' };
+
+    await page.setViewportSize({ width, height: HEIGHT });
+    await page.addInitScript(() => {
+      localStorage.setItem('hh-lang', 'en');
+      localStorage.setItem('hh-theme', 'egypt');
+    });
+
+    await serveApi(page);
+    await page.route('**/api/me', route => route.fulfill({ json: { ...ME, company: egyptCompany } }));
+    await page.route('**/api/version', route => route.fulfill({ json: CURRENT }));
+    await page.route('**/api/updates', route => route.fulfill({ json: updatesMode === 'done' ? DONE_UPDATES : QUIET_UPDATES }));
+    await page.route('**/api/org', route => {
+      if (orgMode === 'fail') return route.fulfill(BROKEN);
+      return route.fulfill({ json: { ...ORG, company: egyptCompany } });
+    });
+
+    await page.goto('/');
+    await expect(page.locator('[data-world-canvas="egypt"]')).toBeVisible();
+    await page.waitForFunction(() => {
+      const h = (window as unknown as { __WORLD_PRODUCT__?: WorldDebug }).__WORLD_PRODUCT__;
+      return Boolean(h && h.getStats() && h.getBuildings().length > 0);
+    });
+    await expect(page.locator('.map-version')).toHaveText(VERSION_TEXT);
+    expect.soft(await page.locator('.version-mark, [role="contentinfo"]').count(), 'no footer bar on egypt map').toBe(0);
+
+    const base = await settledWorldSnapshot(page);
+    expect.soft(Math.round(base.worldMap!.x), 'egypt worldMap left is 0').toBe(0);
+    expect.soft(Math.round(base.worldMap!.y), 'egypt worldMap top is 0').toBe(0);
+    expect.soft(Math.round(base.worldMap!.width), 'egypt worldMap fills width').toBe(width);
+    expect.soft(Math.round(base.worldMap!.height), 'egypt worldMap fills height').toBe(HEIGHT);
+
+    const barEdge = width <= 420 ? 12 : 16;
+    const refetch = async (path: string) => {
+      await Promise.all([
+        page.waitForResponse(r => new URL(r.url()).pathname === path),
+        page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))),
+      ]);
+    };
+
+    /* 1) Update banner over Egypt game world */
+    updatesMode = 'done';
+    await refetch('/api/updates');
+    const banner = page.locator('main.body .update-banner');
+    const bannerBox = await expectBarVisibleUnclipped(banner, width, HEIGHT, 'egypt update banner', barEdge);
+    expect.soft(await page.locator('main.body > .shell-bars > .update-banner').count(), 'egypt update banner inside .shell-bars').toBe(1);
+    const hitBelow = await page.evaluate(y => !!document.elementFromPoint(24, y)?.closest('.map.world-map'), Math.min(HEIGHT - 80, bannerBox.bottom + 12));
+    expect.soft(hitBelow, 'clicks below egypt update banner reach .map.world-map').toBe(true);
+    expectSameWorldGeometry(await settledWorldSnapshot(page), base, 'egypt update banner shown');
+    if (width === 1440) saveShot(await page.screenshot({ animations: 'disabled' }), 'egypt-update-banner-1440');
+
+    /* 2) On-map Department Mode opened while update banner is visible */
+    await page.evaluate(() => {
+      history.pushState(null, '', '/departments/d2');
+      dispatchEvent(new PopStateEvent('popstate'));
+    });
+    const card = page.getByTestId('world-side-card');
+    await expect(card).toBeVisible();
+    await settled(page);
+    const cardBox = await card.boundingBox();
+    expect.soft(cardBox!.y, 'egypt department card clears update banner').toBeGreaterThanOrEqual(bannerBox.bottom - 1);
+    expectSameWorldGeometry(await settledWorldSnapshot(page), base, 'egypt department mode with update banner');
+    if (width === 1440) saveShot(await page.screenshot({ animations: 'disabled' }), 'egypt-department-banner-1440');
+
+    await card.getByRole('button', { name: en.skins.worldCard.close, exact: true }).click();
+    await expect(card).toHaveCount(0);
+    await banner.getByRole('button', { name: en.updates.ok, exact: true }).click();
+    await expect(banner).toHaveCount(0);
+    expectSameWorldGeometry(await settledWorldSnapshot(page), base, 'egypt update banner dismissed');
+
+    /* 3) Reload .alert over Egypt game world */
+    orgMode = 'fail';
+    await refetch('/api/org');
+    await settled(page);
+    const alert = page.locator('main.body .alert');
+    const alertCount = await alert.count();
+    expect.soft(alertCount, 'egypt alert rendered').toBe(1);
+    expect.soft(await page.locator('main.body > .shell-bars > .alert').count(), 'egypt alert inside .shell-bars').toBe(1);
+    if (alertCount > 0) await expectBarVisibleUnclipped(alert, width, HEIGHT, 'egypt alert', barEdge);
+    expectSameWorldGeometry(await settledWorldSnapshot(page), base, 'egypt alert shown');
+
+    orgMode = 'ok';
+    await refetch('/api/org');
+    await expect(alert).toHaveCount(0);
+    expectSameWorldGeometry(await settledWorldSnapshot(page), base, 'egypt alert cleared');
+
+    /* 4) Narrow-screen .agent-strip over Egypt game world */
+    await page.locator('.map.world-map > .ticker').click();
+    const win = page.locator('.orch');
+    await expect(win).toBeVisible();
+    await win.getByRole('button', { name: en.window.minimize, exact: true }).click();
+    await expect(win).toBeHidden();
+    const strip = page.locator('.agent-strip');
+    await expectBarVisibleUnclipped(strip, width, HEIGHT, 'egypt agent-strip', 0);
+    expectSameWorldGeometry(await settledWorldSnapshot(page), base, 'egypt agent-strip shown');
+    if (width === 375) saveShot(await page.screenshot({ animations: 'disabled' }), 'egypt-agent-strip-375');
+
+    await strip.locator('.agent-strip-close').click();
+    await expect(strip).toHaveCount(0);
+    expectSameWorldGeometry(await settledWorldSnapshot(page), base, 'egypt agent-strip closed');
+
+    /* 5) Non-map page (/tasks) in Egypt theme has no bottom version bar */
+    await page.goto('/tasks');
+    await expect(page.locator('.tracker')).toBeVisible();
+    await settled(page);
+    expect.soft(await page.locator('.version-mark, [role="contentinfo"], .map-version').count(), 'egypt tasks: no version bar').toBe(0);
+    const bottoms = await page.evaluate(() => ({
+      screen: document.querySelector('.app-screen')!.getBoundingClientRect().bottom,
+      body: document.querySelector('main.body')!.getBoundingClientRect().bottom,
+      viewport: innerHeight,
+    }));
+    expect.soft(Math.abs(bottoms.screen - bottoms.viewport), 'egypt tasks .app-screen reaches viewport bottom').toBeLessThanOrEqual(1);
+    expect.soft(Math.abs(bottoms.body - bottoms.viewport), 'egypt tasks main.body reaches viewport bottom').toBeLessThanOrEqual(1);
+
+    expect(errors).toEqual([]);
+  });
+}
