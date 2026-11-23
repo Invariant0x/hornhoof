@@ -86,6 +86,20 @@ describe('a person who speaks to an agent directly', () => {
     expect(await c.db.select({ status: tasks.status, silent: tasks.silent }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting', silent: SILENT_TURNS }]);
   });
 
+  /* Which of two questions words typed in the terminal answer is the agent's to say, with record_answer. */
+  it('closes none of several open questions with words typed in the terminal', async () => {
+    const c = await company();
+    const first = await c.memberTask({ title: 'Prices' });
+    const second = await c.memberTask({ title: 'Payments' });
+    await ask(c.ctx, c.bruno.id, first.id, { kind: 'question', text: 'EUR or USD?', topic: 'task' });
+    await ask(c.ctx, c.bruno.id, second.id, { kind: 'question', text: 'Which bank takes the cards?', topic: 'task' });
+    expect(await typedTurn(c.ctx, identityOf(c.sub, null, null, BUILTIN)!, c.bruno.id, 'EUR only.', c.ceo.id)).not.toBeNull();
+    expect(await requestsOf(c)).toEqual([
+      { kind: 'question', status: 'open', answer: null, answeredBy: null },
+      { kind: 'question', status: 'open', answer: null, answeredBy: null },
+    ]);
+  });
+
   it('leaves what waits on a task alone for a person who cannot reach the task', async () => {
     const c = await stuck();
     const [sales] = await c.db.insert(departments).values({ companyId: c.dev.companyId, templateKey: 'sales', roleCode: 'SAL' }).returning();
