@@ -1,5 +1,7 @@
 /// <reference types="node" />
 import { EventEmitter } from 'node:events';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -125,7 +127,7 @@ vi.mock('@playwright/test', () => {
   return { expect: () => ({}), test: testFn };
 });
 
-import { startServer } from '../e2e/real-server';
+import { pageFolder, startServer } from '../e2e/real-server';
 import '../e2e/long-feedback-and-reports.spec';
 
 describe('the environment of a real server', () => {
@@ -144,6 +146,31 @@ describe('the environment of a real server', () => {
     } finally {
       delete process.env.HH_WEB_DIST;
     }
+  });
+});
+
+describe('the page of a real server', () => {
+  it('is a folder with an index.html of its own each time it is asked for', () => {
+    const [first, second] = [pageFolder('hh-test-web-'), pageFolder('hh-test-web-')];
+    try {
+      expect(first).not.toBe(second);
+      for (const folder of [first, second]) expect(readFileSync(join(folder, 'index.html'), 'utf8')).toContain('<title>Hornhoof</title>');
+    } finally {
+      rmSync(first, { recursive: true, force: true });
+      rmSync(second, { recursive: true, force: true });
+    }
+  });
+
+  /* A server names the build of its page at /api/build only with a page of its own; without one it answers 404, which the
+     browser logs as a console error and the feedback test counts (#1923). */
+  it('is given by long-feedback-and-reports to its server before it starts and removed when the tests end', async () => {
+    harness.setOnSpawn(child => queueMicrotask(() => void child.stdout.write(JSON.stringify({ origin: 'http://127.0.0.1:4199' }) + '\n')));
+    await harness.runBeforeAll();
+    const folder = harness.spawnedWith.at(-1)!.env?.HH_WEB_DIST;
+    expect(folder).toBeTruthy();
+    expect(readFileSync(join(folder!, 'index.html'), 'utf8')).toContain('<title>Hornhoof</title>');
+    await harness.runAfterAll();
+    expect(existsSync(folder!)).toBe(false);
   });
 });
 

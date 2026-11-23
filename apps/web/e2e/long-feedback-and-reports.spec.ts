@@ -1,7 +1,7 @@
-import { startServer } from './real-server';
+import { pageFolder, startServer } from './real-server';
 /// <reference types="node" />
 import { createHash } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
@@ -74,6 +74,7 @@ const config = loadConfig({
   HORNHOOF_SECRET: secret,
   UPDATE_CHECK_MS: '0',
   PUBLIC_URL: process.env.HH_PUBLIC_URL ?? 'http://localhost:4179',
+  WEB_DIST: process.env.HH_WEB_DIST,
 });
 const app = await buildApp({
   db,
@@ -286,8 +287,8 @@ process.stdin.on('end', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
 `;
 
-async function startRealServer(publicUrl: string): Promise<RealServerBoot> {
-  return startServer<Omit<RealServerBoot, 'stop'>>(REAL_SERVER_SCRIPT, { cwd: SERVER_CWD, publicUrl, invalidBoot: 'Invalid server boot line' });
+async function startRealServer(publicUrl: string, webDist: string): Promise<RealServerBoot> {
+  return startServer<Omit<RealServerBoot, 'stop'>>(REAL_SERVER_SCRIPT, { cwd: SERVER_CWD, publicUrl, invalidBoot: 'Invalid server boot line', env: { HH_WEB_DIST: webDist } });
 }
 
 async function createScenario(
@@ -326,11 +327,14 @@ async function proxyRealApi(page: Page, serverOrigin: string, intercept?: (url: 
 test.describe.configure({ mode: 'serial' });
 
 let srv: RealServerBoot;
+let webDist: string | undefined;
 
 test.beforeAll(async () => {
   /* Server startup waits for the readiness line rather than the clock; 0 disables Playwright's 30 s hook timeout. */
   test.setTimeout(0);
-  srv = await startRealServer(`http://localhost:${process.env.HORNHOOF_BROWSER_PORT ?? '4179'}`);
+  /* The server has a page of its own to name at /api/build, so the page's asks for it are answered, not logged as 404 (#1923). */
+  const folder = (webDist = pageFolder('hh-feedback-web-'));
+  srv = await startRealServer(`http://localhost:${process.env.HORNHOOF_BROWSER_PORT ?? '4179'}`, folder);
 });
 
 /* The page still asks the server while a test ends, and what it asked then has no test left to answer. It leaves the app
@@ -342,6 +346,7 @@ test.afterEach(async ({ page }) => {
 
 test.afterAll(async () => {
   await srv?.stop();
+  if (webDist) rmSync(webDist, { recursive: true, force: true });
 });
 
 const LANGUAGES = ['ru', 'en'] as const;

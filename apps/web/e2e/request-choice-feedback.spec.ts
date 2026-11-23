@@ -1,8 +1,7 @@
-import { startServer } from './real-server';
+import { pageFolder, startServer } from './real-server';
 /// <reference types="node" />
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Locator, type Page, type Route, type TestInfo } from '@playwright/test';
 import { LANGUAGES, type Language } from '../src/i18n';
@@ -931,15 +930,6 @@ process.stdin.on('end', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
 `;
 
-/* A server answers /api/build, which the page asks every few minutes, only with a page of its own to name. Left to find the
-   built app in this checkout, it answered 404 wherever the app was not built, and the browser logs each as a console error.
-   The server gets a small page of its own, as a production one has. */
-function pageFolder(): string {
-  const folder = mkdtempSync(join(tmpdir(), 'hh-choice-web-'));
-  writeFileSync(join(folder, 'index.html'), '<!doctype html><title>Hornhoof</title>\n');
-  return folder;
-}
-
 async function startRealServer(publicUrl: string, webDist: string): Promise<RealServerBoot> {
   return startServer<Omit<RealServerBoot, 'stop'>>(REAL_SERVER_SCRIPT, { cwd: resolve(HERE, '../../server'), publicUrl, invalidBoot: 'Invalid server boot line', env: { HH_WEB_DIST: webDist } });
 }
@@ -947,7 +937,7 @@ async function startRealServer(publicUrl: string, webDist: string): Promise<Real
 test('saves neutral feedback without pick, delivers words to author, and preserves explicit pick: 0 on a real server', async ({ page, baseURL }, info) => {
   test.setTimeout(0);
   const webOrigin = baseURL ?? 'http://localhost:4179';
-  const webDist = pageFolder();
+  const webDist = pageFolder('hh-choice-web-');
   const srv = await startRealServer(webOrigin, webDist).catch(err => {
     rmSync(webDist, { recursive: true, force: true });
     throw err;
