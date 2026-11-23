@@ -191,9 +191,20 @@ async function previewOf(files: Reader, served: ServedFile[]): Promise<void> {
 async function worldOf(manifest: ThemeManifest, files: Reader, web: ThemeWebCheck, baseUrl: string, served: ServedFile[]): Promise<{ world: unknown; leftOut: ThemeWorldLeftOut | null } | null> {
   if (manifest.engine !== 'iso2d') return null;
   const world = await files.json('world/world.json', THEME_FILE_LIMITS.worldBytes);
+  const all = files.under('world/art/').filter(path => files.kinds.get(path) !== 'index');
+  const { art, kept } = await artOf(files, all);
+  const checked = web.checkWorld({ id: manifest.id, world, baseUrl: `${baseUrl}world/art/`, art, files: all.map(path => path.slice('world/art/'.length)) });
+  if (!checked.ok) refuse(checked.code, checked.code === 'world_bad' ? 'world/world.json' : 'world/art/', checked.detail);
+  if (!checked.complete) return { world: null, leftOut: 'art_missing' };
+  const index = Buffer.from(`${JSON.stringify(checked.artIndex)}\n`);
+  served.push(...kept, { path: 'world/art/art-index.json', mediaType: MEDIA.json, size: index.length, read: () => Promise.resolve(index) });
+  return { world: checked.world, leftOut: null };
+}
+
+/* The world's pictures, each with its passport where it has one, and every file of the art as it would be served. */
+async function artOf(files: Reader, all: readonly string[]): Promise<{ art: ThemeArtFile[]; kept: ServedFile[] }> {
   const art: ThemeArtFile[] = [];
   const kept: ServedFile[] = [];
-  const all = files.under('world/art/').filter(path => files.kinds.get(path) !== 'index');
   for (const path of all.filter(name => name.endsWith('.png'))) {
     const bytes = await files.read(path);
     pictureOf(path, 'png', bytes);
@@ -208,12 +219,7 @@ async function worldOf(manifest: ThemeManifest, files: Reader, web: ThemeWebChec
     if (!files.has(path.replace(/\.json$/, '.png'))) refuse('file_place', path, 'a passport with no picture beside it');
     kept.push(files.served(path, MEDIA.json));
   }
-  const checked = web.checkWorld({ id: manifest.id, world, baseUrl: `${baseUrl}world/art/`, art, files: all.map(path => path.slice('world/art/'.length)) });
-  if (!checked.ok) refuse(checked.code, checked.code === 'world_bad' ? 'world/world.json' : 'world/art/', checked.detail);
-  if (!checked.complete) return { world: null, leftOut: 'art_missing' };
-  const index = Buffer.from(`${JSON.stringify(checked.artIndex)}\n`);
-  served.push(...kept, { path: 'world/art/art-index.json', mediaType: MEDIA.json, size: index.length, read: () => Promise.resolve(index) });
-  return { world: checked.world, leftOut: null };
+  return { art, kept };
 }
 
 async function skillsOf(manifest: ThemeManifest, files: Reader): Promise<WorldPackBehaviorSpec | null> {

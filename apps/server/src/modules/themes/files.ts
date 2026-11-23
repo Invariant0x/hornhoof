@@ -57,37 +57,41 @@ export type Picture = { width: number; height: number };
    chunks than a picture has: a picture that carries another file behind it, or a walk of a million empty chunks, is not
    one. */
 function pngSize(bytes: Buffer): Picture | null {
-  if (bytes.length < 45 || !bytes.subarray(0, 8).equals(PNG) || bytes.toString('latin1', 12, 16) !== 'IHDR' || bytes.readUInt32BE(8) !== 13) return null;
+  if (!pngHead(bytes)) return null;
   let at = 8;
   let type = '';
   for (let chunks = 0; at + 12 <= bytes.length && type !== 'IEND'; chunks += 1) {
-    if (chunks >= THEME_FILE_LIMITS.pngChunks) return null;
-    const length = bytes.readUInt32BE(at);
-    const end = at + 12 + length;
+    const end = chunks < THEME_FILE_LIMITS.pngChunks ? chunkEnd(bytes, at) : null;
+    if (end === null) return null;
     type = bytes.toString('latin1', at + 4, at + 8);
-    if (!/^[A-Za-z]{4}$/.test(type) || end > bytes.length || crc32(bytes.subarray(at + 4, end - 4)) >>> 0 !== bytes.readUInt32BE(end - 4)) return null;
     at = end;
   }
   return type === 'IEND' && at === bytes.length ? { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) } : null;
+}
+
+/* The signature of a PNG, then its IHDR chunk of 13 bytes. */
+const pngHead = (bytes: Buffer) => bytes.length >= 45 && bytes.subarray(0, 8).equals(PNG) && bytes.toString('latin1', 12, 16) === 'IHDR' && bytes.readUInt32BE(8) === 13;
+
+/* Where the chunk at `at` ends, when it is whole: a name of four letters, inside the file, and its checksum right. */
+function chunkEnd(bytes: Buffer, at: number): number | null {
+  const end = at + 12 + bytes.readUInt32BE(at);
+  const named = /^[A-Za-z]{4}$/.test(bytes.toString('latin1', at + 4, at + 8));
+  return named && end <= bytes.length && crc32(bytes.subarray(at + 4, end - 4)) >>> 0 === bytes.readUInt32BE(end - 4) ? end : null;
 }
 
 /* A WebP's canvas from its first chunk: lossy VP8, lossless VP8L or the extended VP8X. */
 function webpSize(bytes: Buffer): Picture | null {
   if (bytes.length < 30 || bytes.toString('latin1', 0, 4) !== 'RIFF' || bytes.toString('latin1', 8, 12) !== 'WEBP') return null;
   if (bytes.readUInt32LE(4) + 8 !== bytes.length) return null;
-  const chunk = bytes.toString('latin1', 12, 16);
-  if (chunk === 'VP8 ') {
-    if (bytes[23] !== 0x9d || bytes[24] !== 0x01 || bytes[25] !== 0x2a) return null;
-    return { width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff };
-  }
-  if (chunk === 'VP8L') {
-    if (bytes[20] !== 0x2f) return null;
-    const bits = bytes.readUInt32LE(21);
-    return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
-  }
-  if (chunk === 'VP8X') return { width: bytes.readUIntLE(24, 3) + 1, height: bytes.readUIntLE(27, 3) + 1 };
-  return null;
+  return WEBP_CANVAS.get(bytes.toString('latin1', 12, 16))?.(bytes) ?? null;
 }
+
+/* The canvas each kind of first chunk gives, when its own signature is there. */
+const WEBP_CANVAS = new Map<string, (bytes: Buffer) => Picture | null>([
+  ['VP8 ', bytes => (bytes[23] === 0x9d && bytes[24] === 0x01 && bytes[25] === 0x2a ? { width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff } : null)],
+  ['VP8L', bytes => (bytes[20] === 0x2f ? { width: (bytes.readUInt32LE(21) & 0x3fff) + 1, height: ((bytes.readUInt32LE(21) >>> 14) & 0x3fff) + 1 } : null)],
+  ['VP8X', bytes => ({ width: bytes.readUIntLE(24, 3) + 1, height: bytes.readUIntLE(27, 3) + 1 })],
+]);
 
 /* A picture whose bytes say it is one, no larger than the limits: a picture's size is what a browser unpacks it to. */
 export function pictureOf(path: string, kind: 'png' | 'webp', bytes: Buffer, side: number = THEME_FILE_LIMITS.imageSide): Picture {
@@ -103,8 +107,6 @@ export function checkFont(path: string, bytes: Buffer): void {
   if (bytes.length > THEME_FILE_LIMITS.fontBytes) refuse('file_too_large', path);
 }
 
-/* Characters that never belong in plain text: controls other than line breaks and tabs, the ones that turn the direction
-   of text, invisible ones and a byte order mark. */
 /* What text never holds, as no person sees it: control and format characters, private and unassigned code points,
    line and paragraph separators, characters a renderer ignores, variation selectors and the blank braille cell. A text
    file keeps its tabs and line breaks; a string of JSON is one line (NOT_ONE_LINE), so a voice line or a name never
@@ -138,20 +140,29 @@ function plainJson(path: string, root: unknown): void {
   const stack: [unknown, string, number][] = [[root, '', 0]];
   for (let next = stack.pop(); next; next = stack.pop()) {
     const [value, where, depth] = next;
-    if (depth > DEEPEST) refuse('json_shape', path, `${where || 'the file'} goes deeper than ${DEEPEST} levels`);
-    if (typeof value === 'string') {
-      if (value.length > THEME_FILE_LIMITS.jsonText) refuse('json_shape', path, `${where || 'the file'}: longer than ${THEME_FILE_LIMITS.jsonText} characters`);
-      if (NOT_ONE_LINE.test(value) || /[<>]/.test(value)) refuse('text_not_plain', path, where);
-      if (LINK.test(value) || value.includes('../')) refuse('link_outside', path, where);
-      continue;
-    }
+    if (depth > DEEPEST) refuse('json_shape', path, `${placeIn(where)} goes deeper than ${DEEPEST} levels`);
+    if (typeof value === 'string') plainString(path, value, where);
     if (typeof value !== 'object' || value === null) continue;
     for (const key of Object.keys(value)) {
       const at = where ? `${where}.${key}` : key;
-      if (KEYS_NEVER.includes(key) || key.length > THEME_FILE_LIMITS.jsonText || NOT_ONE_LINE.test(key)) refuse('json_shape', path, at.slice(0, THEME_FILE_LIMITS.shown));
+      plainKey(path, key, at);
       stack.push([(value as Record<string, unknown>)[key], at, depth + 1]);
     }
   }
+}
+
+const placeIn = (where: string) => where || 'the file';
+
+/* One string of a JSON file: no longer than a label, one line of plain text, with no link in it. */
+function plainString(path: string, value: string, where: string): void {
+  if (value.length > THEME_FILE_LIMITS.jsonText) refuse('json_shape', path, `${placeIn(where)}: longer than ${THEME_FILE_LIMITS.jsonText} characters`);
+  if (NOT_ONE_LINE.test(value) || /[<>]/.test(value)) refuse('text_not_plain', path, where);
+  if (LINK.test(value) || value.includes('../')) refuse('link_outside', path, where);
+}
+
+/* One key of a JSON object: a short line of plain text that reaches no prototype. */
+function plainKey(path: string, key: string, at: string): void {
+  if (KEYS_NEVER.includes(key) || key.length > THEME_FILE_LIMITS.jsonText || NOT_ONE_LINE.test(key)) refuse('json_shape', path, at.slice(0, THEME_FILE_LIMITS.shown));
 }
 
 export function jsonOf(path: string, bytes: Buffer, limit: number = THEME_FILE_LIMITS.jsonBytes): unknown {
