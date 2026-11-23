@@ -6,6 +6,7 @@ import { readCommit } from '../src/modules/testruns/refs.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { as } from './helpers.js';
+import { RECORDED } from './recorded-fixture.js';
 
 /* A department with a team whose members each do a task end to end alone, and the ordinary members of the route. */
 async function turnkeyFixture(turnkey = true) {
@@ -55,7 +56,7 @@ describe('a task of a turnkey team never enters the echelons', () => {
     onTestFinished(() => { fetch.mockRestore(); });
     f.ctx.readCommit = readCommit;
 
-    const closed = await report(f.ctx, f.player.id, task.id, { done: true, summary: 'Checked.' });
+    const closed = await report(f.ctx, f.player.id, task.id, { done: true, summary: 'Checked.', recorded: RECORDED });
     expect(closed.task).toMatchObject({ status: 'done', turnId: null });
   });
 

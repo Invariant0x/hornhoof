@@ -17,6 +17,7 @@ import {
 } from '../src/db/schema.js';
 import { cancel, report } from '../src/modules/tasks/engine.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { recorded } from './recorded-fixture.js';
 
 describe('Stage 4 live read-only world API and God\'s Word relocation', () => {
   it('requires authentication on all world routes', async () => {
@@ -550,7 +551,7 @@ describe('Stage 4 live read-only world API and God\'s Word relocation', () => {
     expect(beforeDone.relocations.every((r: { status: string }) => r.status === 'pending')).toBe(true);
 
     /* Accept Tank's house relocation task -> becomes 'applied'; cancel palace relocation task -> becomes 'cancelled'. */
-    await report(app.ctx, devWorker!.id, houseBody.task.id, { summary: 'Order accepted and house relocated.', done: true });
+    await report(app.ctx, devWorker!.id, houseBody.task.id, { summary: 'Order accepted and house relocated.', done: true, ...(await recorded(app.ctx, houseBody.task.id, devWorker!.id)) });
     await cancel(app.ctx, { personId: (await db.select().from(people))[0]!.id }, commonBody.task.id, 'Changed mind');
 
     const afterState = (await app.inject({ url: '/api/world/state', ...as(ceo) })).json();

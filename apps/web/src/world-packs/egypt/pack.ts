@@ -50,7 +50,8 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
     tunicColor: '#F2E7CF',
     trimColor: '#4888B5',
     prop: 'scroll',
-    headgear: 'circlet',
+    /* The approved tier 3 architect (hd-char-lvl05) wears a nemes; the hood is the engine's nearest headwear. */
+    headgear: 'hood',
   },
   checker: {
     id: 'egypt-inspector',

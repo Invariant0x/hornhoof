@@ -24,7 +24,7 @@ All art is drawn at the **master 4x tier**.
 | Ground tile | diamond 240 x 120 px, 2:1, edges at 26.565 degrees |
 | Person | 136 px from feet to top of head |
 | Rig source for people | 544 px tall (8x), baked down to 136 px |
-| Camera | 30 degrees above the ground, looking down the diamond's vertical axis |
+| Camera | 30 degrees above the ground, looking down the diamond's vertical axis; people alone at 19 degrees (section 7) |
 | Sun | top left (azimuth -45 degrees, elevation 55 degrees), 5200 K |
 | Directions | 5 drawn (N, NE, E, SE, S); SW, W and NW are mirrors of SE, E and NE |
 
@@ -190,6 +190,8 @@ Drawing order: `scaffold_back`, the building picture, `ramp`, `scaffold_front`.
 ## 7. People
 
 Folder: `people/<look>/tier_<n>/`.
+
+People are drawn with an orthographic camera tilted 19 degrees down, not the 30 degrees of buildings and ground: at 30 degrees shoulders come out too wide and a step looks like a hop. The sheet stands on the 30-degree ground by its `anchor`, and the engine draws the shadow.
 
 * **Looks** are the pack's role looks (one per kind of role, plus one per role class for roles without their own); `--list` names them.
 * **Tiers** 1 to 5 are outfits by agent level: tier 1 from level 1, tier 2 from 3, tier 3 from 6, tier 4 from 10, tier 5 from 18. Tier 1 is required; a missing higher tier falls back to the next lower one.

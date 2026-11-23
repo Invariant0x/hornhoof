@@ -16,6 +16,7 @@ import { replayedSubmission, submissionOperation, type Submission } from './eche
 import { checkerFor, checkingIdentity, hasChecker, heldCheckingIdentity, keptFromReview, producerIdentity } from './echelons-assign.js';
 import { producedCandidate, currentCandidate, currentHanded, requireRepairHistory } from './echelons-candidates.js';
 import { acceptDocument, documentHandIn } from './echelons-document.js';
+import type { Recorded } from './recorded.js';
 import { submittedHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
 import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons, type TurnkeyChecked } from './turnkey.js';
@@ -27,15 +28,17 @@ import { isStaged, type EchelonStage } from '@hornhoof/protocol/echelons';
 import type { StageRoute } from '../templates/load.js';
 import { lastTaskNumber } from './numbers.js';
 import type { ApprovalChannel } from '@hornhoof/protocol';
-import { and, asc, eq, gt, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, attachments, companies, jobs, people, requests, taskEvents, tasks, type DecisionTopic, type RequestOption } from '../../db/schema.js';
+import { agentEvents, agents, attachments, companies, jobs, people, requests, taskEvents, tasks, type DecisionTopic, type RequestOption } from '../../db/schema.js';
+import { clearlyAnswered, flat, holds } from './direct-words.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
 import { checkDelegation, contextMissing, requireDecider, type Delegation } from '../conversation/decision-context.js';
+import { incomingWords } from '../conversation/turn-words.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { dropEarlierWakes, keepWakes } from './outbox.js';
 import { handOff } from './pulses.js';
@@ -419,7 +422,7 @@ async function commitHandIn(ctx: Live, agentId: string, task: Task, route: Route
   const candidate = producedCandidate(route, producer, review);
   if (prior) await requireRepairHistory(ctx, task, prior, candidate);
   if (!checkerStage) await requireBaseOnLine(ctx, task, candidate.baseCommit);
-  return { input: checkerStage ? prior : null, candidate, review };
+  return { input: checkerStage ? prior : null, candidate, review, recorded: undefined };
 }
 
 async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Submission, operation: ReturnType<typeof submissionOperation>): Promise<Moved> {
@@ -427,12 +430,12 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   const route = await routeOf(ctx.db, task);
   requireSubmissionStage(task, route);
   if (route.state.stage === 'tests') return submitAtTests(ctx, agentId, task, route, r, operation);
-  const { input, candidate, review } = route.state.resultKind === 'document' ? await documentHandIn(ctx, agentId, task, route, r) : await commitHandIn(ctx, agentId, task, route, r);
+  const { input, candidate, review, recorded } = route.state.resultKind === 'document' ? await documentHandIn(ctx, agentId, task, route, r) : await commitHandIn(ctx, agentId, task, route, r);
   const next = await submittedHandoff(ctx, task, route, candidate);
   const unstuck = stuckGoes(ctx, task);
   const row = await move(ctx, task, next.set, {
     kind: 'submitted', actor: { agentId }, text: r.summary, returned: true,
-    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...(next.authorCheckSkip ? { authorCheckSkip: next.authorCheckSkip } : {}), ...skippedData(next.skipped) },
+    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...(recorded ? { recorded } : {}), ...(next.authorCheckSkip ? { authorCheckSkip: next.authorCheckSkip } : {}), ...skippedData(next.skipped) },
   }, async tx => {
     if (input) await heldCheckingIdentity(tx, task, route, input);
     await changeRoute(tx, route, next.state);
@@ -469,7 +472,7 @@ async function reportToResolver(ctx: Live, agentId: string, task: Task, summary:
   return { task: row, wakes };
 }
 
-type ReportInput = { done: boolean; summary: string; verification?: Verification; acceptance?: AcceptanceInput; turnkey?: TurnkeyChecked };
+type ReportInput = { done: boolean; summary: string; verification?: Verification; acceptance?: AcceptanceInput; turnkey?: TurnkeyChecked; recorded?: Recorded };
 type ReportStage = 'acceptance' | 'tests' | 'architecture' | 'coordination' | 'turnkey';
 
 function reportedStage(route: Route, done: boolean): ReportStage | null {
@@ -488,10 +491,10 @@ async function reportStage(ctx: Live, task: Task, route: Route, agentId: string,
     case 'acceptance': return route.state.resultKind === 'document' ? acceptDocument(ctx, task, route, agentId, input.summary) : acceptCandidate(ctx, task, route, agentId, input.summary, input.acceptance);
     case 'tests': return testsReport(ctx, task, route, agentId, input.summary, input.verification, input.done);
     case 'architecture': return architectureReport(ctx, task, route, agentId, input.summary);
-    case 'coordination': return coordinationReport(ctx, task, route, agentId, input.summary);
+    case 'coordination': return coordinationReport(ctx, task, route, agentId, input.summary, input.recorded);
     case 'turnkey':
       if (input.verification || input.acceptance) throw turnkeyWork(task);
-      return turnkeyReport(ctx, task, route, agentId, input.summary, input.turnkey);
+      return turnkeyReport(ctx, task, route, agentId, input.summary, input.turnkey, input.recorded);
   }
 }
 
@@ -1137,9 +1140,16 @@ async function statusAfterWait(tx: Tx, task: Task, was: Task['status'] | undefin
    on: the orchestrator answers for the person its turn answers, under that agent's input lock. */
 /* How an answer came: inline in words the window already delivered, from the person's assistant, or from the orchestrator
    of its own as the owner's, each recorded with it. */
-type AnswerWay = { inlineText?: true; assistant?: string; orchestrator?: string };
+/* recorded: the agent that said which of its questions a person's message answered, and that message. */
+type Recorded = { agentId: string; jobId: string | null; seq: number };
+type AnswerWay = { inlineText?: true; assistant?: string; orchestrator?: string; recorded?: Recorded };
 
-export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, { inlineText, assistant, orchestrator }: AnswerWay = {}): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
+/* What the request keeps of an answer an agent recorded from a person's message: the agent, and the message's turn and place. */
+const recordedAudit = (r?: Recorded) => (r ? { answeredByAgentId: r.agentId, answerJobId: r.jobId, answerSourceSeq: r.seq } : {});
+/* What the task's log keeps of it: the message in the agent's window, and who recorded it. */
+const recordedNote = (r?: Recorded) => (r ? { message: { agentId: r.agentId, seq: r.seq }, recordedBy: r.agentId } : {});
+
+export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, { inlineText, assistant, orchestrator, recorded }: AnswerWay = {}): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
   if (found.status !== 'open') throw refuse(409, 'request_closed', 'This request is answered already.');
@@ -1169,7 +1179,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     const { audit, forWhom } = auditOf(on);
     const [request] = await tx
       .update(requests)
-      .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy, ...audit, ...(orchestrator ? { answeredByAgentId: orchestrator } : {}), answeredByAssistantId: assistant ?? null, answeredAt: new Date() })
+      .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy, ...audit, ...(orchestrator ? { answeredByAgentId: orchestrator } : {}), ...recordedAudit(recorded), answeredByAssistantId: assistant ?? null, answeredAt: new Date() })
       .where(and(eq(requests.id, requestId), eq(requests.status, 'open')))
       .returning();
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
@@ -1177,7 +1187,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     await tx.update(tasks).set({ externalWait: null, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
     const back = await statusAfterWait(tx, task, current?.status);
-    const answered: Note = { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom, ...(assistant ? { assistantId: assistant } : {}), ...(orchestrator ? { byOrchestrator: true } : {}) }, inlineText };
+    const answered: Note = { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom, ...(assistant ? { assistantId: assistant } : {}), ...(orchestrator ? { byOrchestrator: true } : {}), ...recordedNote(recorded) }, inlineText };
     const event = await note(tx, task, back ? statusNoted(answered, 'waiting', back) : answered, ctx.config);
     if (back) {
       await tx
@@ -1206,28 +1216,39 @@ function takes(person: Parameters<typeof canDecide>[1], access: Access, r: Param
   return (r.recipientPersonId === person.id || canReach(access, taskSpot(r))) && canDecide(requestSubject(r, r), person, access, r.companyId);
 }
 
-/* A person spoke to the agent directly, in its window or its terminal: what they said answers the questions it asked people
-   and tells it how to go on where it was stuck, on the tasks that person reaches. A commit to approve and a choice wait for
-   their own answer. The task's own turn still follows, which watches that the task moves. */
-export async function answerDirectly(ctx: Live, personId: string, agentId: string, text: string, { assistant }: { assistant?: string } = {}): Promise<Wake[]> {
-  const said = text.trim();
-  if (!said) return [];
-  const [person] = await ctx.db
-    .select({ id: people.id, companyId: people.companyId, status: people.status, scopeKind: people.scopeKind, isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate })
-    .from(people)
-    .where(eq(people.id, personId));
-  if (!person) return [];
-  const access = await accessOf(ctx.db, person);
-  const open = await ctx.db
-    .select({ id: requests.id, companyId: requests.companyId, kind: requests.kind, decisionTopic: requests.decisionTopic, recipientPersonId: requests.recipientPersonId, departmentId: tasks.departmentId, productId: tasks.productId })
+/* The open questions an agent asked people, and the work it is stuck on for them, with what a person's words may point at. */
+const openForPeople = (db: Live['db'], agentId: string) =>
+  db
+    .select({ id: requests.id, companyId: requests.companyId, kind: requests.kind, decisionTopic: requests.decisionTopic, recipientPersonId: requests.recipientPersonId, departmentId: tasks.departmentId, productId: tasks.productId, text: requests.text, taskId: tasks.id, number: tasks.number, createdAt: requests.createdAt })
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
     .where(and(eq(requests.agentId, agentId), eq(requests.status, 'open'), inArray(requests.kind, ['question', 'stuck']), or(ne(requests.kind, 'stuck'), eq(requests.audience, 'human'))))
     .orderBy(asc(requests.createdAt));
+type OpenForPeople = Awaited<ReturnType<typeof openForPeople>>[number];
+
+/* A person, as far as what they may take goes. */
+async function personTaking(db: Live['db'], personId: string) {
+  const [person] = await db
+    .select({ id: people.id, companyId: people.companyId, status: people.status, scopeKind: people.scopeKind, isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate })
+    .from(people)
+    .where(eq(people.id, personId));
+  return person ? { person, access: await accessOf(db, person) } : null;
+}
+
+/* A person spoke to the agent directly: in its window, by Telegram, through their assistant or in its terminal. Their words
+   answer one question it asked people, or one piece of work it is stuck on for them, when it is clear which: the only one that
+   person may take, or the one the words point at, by the task given with them, a #number, a link or a quoted line of the
+   question. Otherwise none closes: the words reach the agent as its message, and the agent says which they answer with
+   record_answer. A commit to approve and a choice wait for their own answer. The task's own turn still follows. */
+export async function answerDirectly(ctx: Live, personId: string, agentId: string, text: string, { assistant, task }: { assistant?: string; task?: number | string } = {}): Promise<Wake[]> {
+  const said = text.trim();
+  if (!said) return [];
+  const taking = await personTaking(ctx.db, personId);
+  if (!taking) return [];
+  /* Only what this person may take: someone else's question stays open. */
+  const theirs = (await openForPeople(ctx.db, agentId)).filter(r => takes({ ...taking.person, assistant }, taking.access, r));
   const wakes: Wake[] = [];
-  for (const r of open) {
-    /* Only what this person may take: the words still reach the agent, and someone else's question stays open. */
-    if (!takes({ ...person, assistant }, access, r)) continue;
+  for (const r of clearlyAnswered(theirs, said, task)) {
     try {
       /* The window already delivered these words; its complete mirror must not introduce a later file-quota failure. */
       wakes.push(...(await answer(ctx, { personId }, r.id, { answer: said }, undefined, { inlineText: true, assistant })).wakes);
@@ -1238,6 +1259,56 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
   }
   return wakes;
 }
+
+/* The words people wrote to the agent since a moment, newest first: in its window, by Telegram, through their assistant or in
+   its terminal. Never a copy it sent, a notice or a line folded into other input. */
+const wordsOfPeople = (db: Live['db'], agentId: string, since: Date) =>
+  db
+    .select({ seq: agentEvents.seq, jobId: agentEvents.jobId, personId: agentEvents.personId, data: agentEvents.data })
+    .from(agentEvents)
+    .where(and(eq(agentEvents.agentId, agentId), inArray(agentEvents.kind, ['message', 'typed']), isNotNull(agentEvents.personId), incomingWords, sql`${agentEvents.data}->'notification' is null`, gte(agentEvents.createdAt, since)))
+    .orderBy(desc(agentEvents.seq))
+    .limit(200);
+type Words = Awaited<ReturnType<typeof wordsOfPeople>>[number];
+const textOf = (data: unknown): string => String((data as { text?: unknown } | null)?.text ?? '');
+const assistantOf = (data: unknown): string | undefined => (data as { assistant?: { id?: string } } | null)?.assistant?.id;
+
+/* Whether the person who wrote this message, as the message carries them, may take the request. */
+async function writerTakes(db: Live['db'], r: OpenForPeople, m: Words): Promise<boolean> {
+  const taking = await personTaking(db, m.personId!);
+  return !!taking && takes({ ...taking.person, assistant: assistantOf(m.data) }, taking.access, r);
+}
+
+/* A message and its copies, repeated into later turns because the program never took it, are one message: the same person,
+   through the same assistant, with the same words. */
+const sameMessage = (m: Words): string => JSON.stringify([m.personId, assistantOf(m.data) ?? null, flat(textOf(m.data))]);
+
+/* The one message holding these words that a person who may take the request wrote to the agent since it was asked: of a
+   message and its copies, the first. */
+async function citedMessage(db: Live['db'], agentId: string, r: OpenForPeople, quote: string): Promise<Words> {
+  const holding = (await wordsOfPeople(db, agentId, r.createdAt)).filter(m => holds(textOf(m.data), quote));
+  if (!holding.length) throw refuse(400, 'task_invalid', 'No person wrote these words to you since you asked this. Quote their message exactly as they wrote it.');
+  const theirs: Words[] = [];
+  for (const m of holding) if (await writerTakes(db, r, m)) theirs.push(m);
+  if (!theirs.length) throw refuse(403, 'decision_not_allowed', 'The person who wrote these words may not answer this. Ask the person who takes it.');
+  /* Rows come newest first and a later one replaces an earlier in the map: each message ends with its earliest row. */
+  const messages = new Map(theirs.map(m => [sameMessage(m), m]));
+  if (messages.size > 1) throw refuse(400, 'task_invalid', 'More than one message holds these words. Quote more of the one that answers it.');
+  return [...messages.values()][0]!;
+}
+
+/* The agent says which of its open questions, or which piece of work it is stuck on for people, a person's message answered,
+   quoting it: Hornhoof finds that message, written to the agent since it asked by a person who may take it, and records the
+   whole message as that person's answer on that card alone, with the agent that recorded it and a link to the message. The
+   agent picks the message, never the words: nothing it quotes or leaves out turns into an answer the person did not give. */
+export async function recordAnswer(ctx: Live, agentId: string, requestId: string, quote: string): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
+  const r = (await openForPeople(ctx.db, agentId)).find(q => q.id === requestId);
+  if (!r) throw refuse(404, 'request_unknown', 'You have no such question open to people. A choice and an approval keep their own card.');
+  const m = await citedMessage(ctx.db, agentId, r, quote.trim());
+  const assistant = assistantOf(m.data);
+  return answer(ctx, { personId: m.personId! }, r.id, { answer: textOf(m.data).trim() }, undefined, { inlineText: true, ...(assistant ? { assistant } : {}), recorded: { agentId, jobId: m.jobId, seq: m.seq } });
+}
+
 export { CLOSED, SILENT_TURNS, GOING_ON_TURNS, refuse, loadTask, listed, openAfter, taskSpot, giver, waitsForPerson, liveAgent, mayAsk, requestSubject } from './state.js';
 export type { Task, Request, Actor, WakeWhy, Wake, Moved, Tx } from './state.js';
 export { note, ownNote, published, NOT_A_MOVE, lastMove, uncountedSinceMove } from './events.js';
