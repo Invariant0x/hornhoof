@@ -58,6 +58,10 @@
     "./redaction": {
       "types": "./dist/redaction.d.ts",
       "default": "./dist/redaction.js"
+    },
+    "./world": {
+      "types": "./dist/world.d.ts",
+      "default": "./dist/world.js"
     }
   },
   "types": "./dist/index.d.ts",

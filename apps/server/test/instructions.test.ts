@@ -55,6 +55,7 @@ const agent = (over: Partial<AgentRow> = {}): AgentRow => ({
   companyId: '00000000-0000-4000-8000-000000000002',
   kind: 'worker',
   name: 'Bruno',
+  originalName: null,
   model: 'sonnet',
   departmentId: null,
   teamId: null,

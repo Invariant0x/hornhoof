@@ -75,7 +75,7 @@ function imageBitmap() {
 
 function canvasBlobs(blobs: (Blob | null)[]) {
   const context = { fillStyle: '', fillRect: vi.fn(), drawImage: vi.fn() };
-  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D);
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as ReturnType<HTMLCanvasElement['getContext']>);
   const widths: number[] = [];
   vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(function (this: HTMLCanvasElement, done: BlobCallback) {
     widths.push(this.width);
