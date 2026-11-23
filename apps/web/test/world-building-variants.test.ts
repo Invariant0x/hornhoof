@@ -100,7 +100,8 @@ describe('Variant folders in the art (#1975)', () => {
     const hutComplete = files.filter(f => /^buildings\/house\/hut\/v\d\d\/complete\.png$/.test(f.path));
     expect(hutComplete.map(f => f.path)).toHaveLength(15);
     expect(hutComplete.filter(f => f.required).map(f => f.path)).toEqual(['buildings/house/hut/v01/complete.png']);
-    expect(files.some(f => f.path === 'buildings/house/hut/complete.png')).toBe(false);
+    /* The step folder itself stands for v01 (order v3: a step with no variant folders keeps its pictures there). */
+    expect(files.find(f => f.path === 'buildings/house/hut/complete.png')?.required).toBe(false);
     expect(variantStepOf(EGYPT_WORLD_PACK, hut)).toEqual({ key: 'house/hut', count: 15 });
     expect(variantStepOf(EGYPT_WORLD_PACK, { ...hut, kind: 'district_hub', stage: 1 })).toBeNull();
   });
@@ -130,5 +131,40 @@ describe('Variant folders in the art (#1975)', () => {
     expect(path(resolveBuildingArt(EGYPT_WORLD_PACK, index(['v01', 'v03']), hut, null, { variant: 13 }))).toBe('buildings/house/hut/v01/complete.png');
     expect(path(resolveBuildingArt(EGYPT_WORLD_PACK, index(['v01']), hut, null))).toBe('buildings/house/hut/v01/complete.png');
     expect(resolveBuildingArt(EGYPT_WORLD_PACK, index([]), hut, null, { variant: 0 })).toBeNull();
+  });
+
+  /* Order v3: a step with no variant folders keeps its pictures directly in the step folder. Delivered that way, the
+     set is the step's v01, so art delivered before the variants came and any folder laid out flat still draws (#1983). */
+  const flat = (more: Record<string, ArtIndexEntry> = {}): ArtIndex => ({
+    contract: 2,
+    pack: 'egypt',
+    files: { 'buildings/house/hut/complete.png': picture, ...more },
+  });
+
+  it('draws a step delivered flat, with no variant folders, as its v01 for every home', () => {
+    const path = (art: ReturnType<typeof resolveBuildingArt>) => art?.layers[0]?.path ?? null;
+    for (const variant of [0, 4, 14]) {
+      expect(path(resolveBuildingArt(EGYPT_WORLD_PACK, flat(), hut, null, { variant })), `variant ${variant}`).toBe('buildings/house/hut/complete.png');
+    }
+    /* A v01 folder of its own wins over the flat set. */
+    expect(path(resolveBuildingArt(EGYPT_WORLD_PACK, flat({ 'buildings/house/hut/v01/complete.png': picture }), hut, null, { variant: 3 }))).toBe(
+      'buildings/house/hut/v01/complete.png',
+    );
+  });
+
+  it('accepts a flat step folder in the art check as the step’s v01: declared, checked, and v01 not missing', () => {
+    const report = validateArtIndex(EGYPT_WORLD_PACK, flat());
+    expect(report.warnings.filter(w => w.startsWith('buildings/house/hut/'))).toEqual([]);
+    expect(report.missingRequired).not.toContain('buildings/house/hut/v01/complete.png');
+    expect(validateArtIndex(EGYPT_WORLD_PACK, index([])).missingRequired).toContain('buildings/house/hut/v01/complete.png');
+    /* Checked against the step's footprint like the v01 it stands for. */
+    const wide: ArtIndexEntry = {
+      w: 720,
+      h: 760,
+      passport: { groundAnchor: { x: 360, y: 559 }, corners: { top: { x: 360, y: 379 }, right: { x: 720, y: 559 }, bottom: { x: 360, y: 739 }, left: { x: 0, y: 559 } } },
+    };
+    expect(validateArtIndex(EGYPT_WORLD_PACK, { ...flat(), files: { 'buildings/house/hut/complete.png': wide } }).errors).toContain(
+      'buildings/house/hut/complete.png: diamond width 720 px does not match footprint 2x2 (480 px)',
+    );
   });
 });

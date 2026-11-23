@@ -108,7 +108,7 @@ The door is on one of the two front walls, the walls that face the viewer: `fron
 
 ### Pictures of one step
 
-A step may come in drawn **variants** (`variants` in the pack catalog): each a full set of the step's pictures in its own folder, `<step>/v01/`, `<step>/v02/`, and so on, with the step's canvas, anchor, door row and lot. `v01` is required, the others optional. The engine gives each building one variant from its id, the same in every session; next-door buildings of the same step do not repeat one while another is free, and a variant not delivered yet gives way to the next delivered one.
+A step may come in drawn **variants** (`variants` in the pack catalog): each a full set of the step's pictures in its own folder, `<step>/v01/`, `<step>/v02/`, and so on, with the step's canvas, anchor, door row and lot. `v01` is required, the others optional. The engine gives each building one variant from its id, the same in every session; next-door buildings of the same step do not repeat one while another is free, and a variant not delivered yet gives way to the next delivered one. A step delivered with no variant folders, its pictures directly in `<step>/`, counts as its `v01`; a `v01/` folder of its own wins over it.
 
 | File | Shown when |
 |---|---|

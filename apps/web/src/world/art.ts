@@ -281,8 +281,8 @@ export type DeclaredArtFile = Readonly<{
   role: DeclaredArtRole;
   passport: 'picture' | 'anchor' | 'sheet' | 'none';
   required: boolean;
-  /* A required picture another file stands in for: with that file in the folder this one is not needed. */
-  alternative?: string;
+  /* Files that stand in for a required picture: with any of them in the folder this one is not needed. */
+  alternatives?: readonly string[];
   /* For a cloak layer: the base sheet it must match pixel for pixel. */
   baseSheet?: string;
 }>;
@@ -334,7 +334,7 @@ function standardStepFiles(kind: BuildingKind, at: (picture: string) => string, 
   const names = STANDARD_BUILDING_PICTURES.filter(name => kind !== 'supply' || name !== 'complete');
   return names.map(name => {
     const stage = STAGE_OF_PICTURE[name];
-    return { ...picture(name, !OPTIONAL_BUILDING_PICTURES.has(name)), ...(stage ? { alternative: at(`stage_${pad2(stage)}`) } : {}) };
+    return { ...picture(name, !OPTIONAL_BUILDING_PICTURES.has(name)), ...(stage ? { alternatives: [at(`stage_${pad2(stage)}`)] } : {}) };
   });
 }
 
@@ -354,6 +354,24 @@ function declaredStepFiles(pack: WorldPackManifest, kind: BuildingKind, at: (pic
   return ownStageFiles(pack, kind, picture) ?? [...standardStepFiles(kind, at, picture), ...lineStepFiles(pack, kind, picture)];
 }
 
+/* A step's files: in its own folder, or in its variant folders v01 (required), v02, ... (optional). A step delivered
+   with no variant folders keeps its pictures in the step folder (order v3), so that set stands in for v01. */
+function stepFolderFiles(pack: WorldPackManifest, kind: BuildingKind, step: ArtBuildingStep): DeclaredArtFile[] {
+  const flat = declaredStepFiles(pack, kind, picture => stepPicturePath(kind, step, picture));
+  if (!step.variants) return flat;
+  const out: DeclaredArtFile[] = flat.map(f => ({ ...f, required: false }));
+  for (let v = 0; v < step.variants; v++) {
+    const files = declaredStepFiles(pack, kind, picture => stepPicturePath(kind, step, picture, v));
+    out.push(...(v === 0 ? files.map((f, i) => asVariantOne(f, flat[i]!)) : files.map(f => ({ ...f, required: false }))));
+  }
+  return out;
+}
+
+/* A v01 file the same file of the flat step folder stands in for, as well as what stands in for that one. */
+function asVariantOne(file: DeclaredArtFile, flat: DeclaredArtFile): DeclaredArtFile {
+  return { ...file, alternatives: [...(file.alternatives ?? []), flat.path, ...(flat.alternatives ?? [])] };
+}
+
 /* Every file the pack's catalog has a slot for, with the passport kind each one needs. */
 export function declaredArtFiles(pack: WorldPackManifest): readonly DeclaredArtFile[] {
   const art = pack.art;
@@ -365,14 +383,7 @@ export function declaredArtFiles(pack: WorldPackManifest): readonly DeclaredArtF
     const kind = kindKey as BuildingKind;
     for (const step of steps ?? []) {
       if (kind !== 'statue' && kind !== 'monument') moduleFootprints.add(step.footprint);
-      if (!step.variants) {
-        out.push(...declaredStepFiles(pack, kind, picture => stepPicturePath(kind, step, picture)));
-        continue;
-      }
-      for (let v = 0; v < step.variants; v++) {
-        const files = declaredStepFiles(pack, kind, picture => stepPicturePath(kind, step, picture, v));
-        out.push(...(v === 0 ? files : files.map(f => ({ ...f, required: false }))));
-      }
+      out.push(...stepFolderFiles(pack, kind, step));
     }
   }
 
@@ -620,7 +631,7 @@ export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtI
   }
 
   const missingRequired = declared
-    .filter(d => d.required && !index.files[d.path] && !(d.alternative && index.files[d.alternative]))
+    .filter(d => d.required && !index.files[d.path] && !d.alternatives?.some(a => index.files[a]))
     .map(d => d.path);
   return {
     ok: errors.length === 0,
@@ -778,10 +789,17 @@ function deliveredVariant(files: ArtIndex['files'], kind: BuildingKind, step: Ar
   const count = step.variants;
   if (!count) return undefined;
   for (let k = 0; k < count; k++) {
-    const v = (((wanted + k) % count) + count) % count;
-    if (files[stepPicturePath(kind, step, 'complete', v)]) return v;
+    const at = variantFolder(files, kind, step, (((wanted + k) % count) + count) % count);
+    if (at !== null) return at;
   }
   return null;
+}
+
+/* Where variant v of a step is delivered: its own folder, the step folder for v01 when the step came with no variant
+   folders (order v3), or nowhere (null). */
+function variantFolder(files: ArtIndex['files'], kind: BuildingKind, step: ArtBuildingStep, v: number): number | null | undefined {
+  if (files[stepPicturePath(kind, step, 'complete', v)]) return v;
+  return v === 0 && files[stepPicturePath(kind, step, 'complete')] ? undefined : null;
 }
 
 /* The step a building shows and the paths of its pictures in the variant to draw; null without art for it. */
