@@ -64,6 +64,8 @@ export type BuildingPicturePassport = Readonly<{
   workSlots?: readonly ArtWorkSlotSpec[];
   /* Pictures on the same canvas drawn over this one, in order (contract section 4, layers). */
   layers?: readonly ArtLayerSpec[];
+  /* A shared module drawn as an empty canvas says why here (nothing of it fits the lot); the engine lays nothing. */
+  empty?: string;
 }>;
 
 /* One layer over a building picture: a file beside it on the same canvas and registration. A shadow layer multiplies
@@ -770,6 +772,13 @@ export function variantStepOf(pack: WorldPackManifest, building: CityBuilding): 
   return step?.variants ? { key: `${building.kind}/${step.id}`, count: step.variants } : null;
 }
 
+/* A shared module laid over a building's picture; none when it is missing or drawn as an empty canvas. */
+function moduleLayer(files: ArtIndex['files'], path: string): BuildingArtLayer | null {
+  const entry = files[path];
+  if (!hasPicturePassport(entry) || entry.passport.empty) return null;
+  return pictureLayer(path, entry);
+}
+
 function hasPicturePassport(entry: ArtIndexEntry | undefined): entry is ArtIndexEntry & { passport: BuildingPicturePassport } {
   return Boolean(entry?.passport && 'groundAnchor' in entry.passport && 'corners' in entry.passport);
 }
@@ -911,9 +920,8 @@ export function resolveBuildingArt(
 
   const scaffold = spec.hasScaffolding;
   const pushModule = (mod: (typeof CONSTRUCTION_MODULES)[number]) => {
-    const path = modulePath(footprint, mod);
-    const entry = files[path];
-    if (hasPicturePassport(entry)) layers.push(pictureLayer(path, entry));
+    const layer = moduleLayer(files, modulePath(footprint, mod));
+    if (layer) layers.push(layer);
   };
   if (scaffold) pushModule('scaffold_back');
   layers.push(pictureLayer(mainPath, mainEntry, cutY));

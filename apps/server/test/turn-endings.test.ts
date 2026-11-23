@@ -10,6 +10,7 @@ import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { connectNode, listen, setUpCompany, testApp, until, type FakeNode, echelonsTurn } from './helpers.js';
+import { recorded } from './recorded-fixture.js';
 import { BUILTIN } from './builtin.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -204,7 +205,7 @@ describe("a turn whose program ended without the work done", () => {
     const other = (await createTask(c.ctx, { agentId: c.hana.id }, { title: 'Refund email', brief: '', body: 'Send it.', departmentId: c.task.departmentId, assigneeAgentId: c.bruno.id })).task;
     const work = await c.brunoAtWork();
     /* While his turn on the checkout runs, he reports on the refund email, and nothing on the checkout. */
-    await report(c.ctx, c.bruno.id, other.id, { done: true, summary: 'Refund email sent.' });
+    await report(c.ctx, c.bruno.id, other.id, { done: true, summary: 'Refund email sent.', ...(await recorded(c.ctx, other.id, c.bruno.id)) });
     await c.failed(work, { code: 1, signal: null }, { sessionId: 'bruno-session' });
     expect(await c.jobOf(work.jobId)).toMatchObject({ status: 'failed', error: 'agent_failed' });
     const more = await c.nextTurn(c.bruno.id, 1);
@@ -223,7 +224,7 @@ describe("a turn whose program ended without the work done", () => {
     await c.ended({ type: 'job.run', jobId: busy!.id, prompt: 'Plan the turn.', sessionId: null });
     const work = await c.nextTurn(c.hana.id, 1);
     await until(async () => (await c.turnsOf(c.hana.id)).some(j => j.taskId === refunds.id && j.result === GONE_ALONG));
-    await report(c.ctx, c.hana.id, refunds.id, { done: true, summary: 'Refunds shipped.' });
+    await report(c.ctx, c.hana.id, refunds.id, { done: true, summary: 'Refunds shipped.', ...(await recorded(c.ctx, refunds.id, c.hana.id)) });
     await c.failed(work, { code: 1, signal: null });
     expect(await c.jobOf(work.jobId)).toMatchObject({ status: 'done', error: null, exitCode: 1 });
   });

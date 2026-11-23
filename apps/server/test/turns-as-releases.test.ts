@@ -5,6 +5,7 @@ import { agents, approvalPolicies, departments, jobs, tasks, teams, turns } from
 import { answer, ask, loadTask, report } from '../src/modules/tasks/engine.js';
 import { BASE, fixture } from './development-echelons-fixture.js';
 import { as, listen, mcp, SETUP, testApp } from './helpers.js';
+import { recorded } from './recorded-fixture.js';
 import { sessionFrom } from './helpers-basic.js';
 import { readyInTurn, serve, type Repository } from './turn-release-fixture.js';
 
@@ -236,7 +237,7 @@ async function turnkeyInTurn() {
   const own = 'c'.repeat(40);
   const repo: Repository = { heads: { main: 'a'.repeat(40), [`turn-${turn!.number}`]: PAST, [`task-${task.number}`]: own }, tags: {}, holds: { [PAST]: [own, 'a'.repeat(40)], [own]: ['a'.repeat(40)] }, between: {}, cut: new Set<string>() };
   serve(f.ctx, repo);
-  const done = () => report(f.ctx, player.id, task.id, { done: true, summary: 'Fast-forwarded the turn to task-N, checks in the log.', turnkey: { commit: own, baseCommit: 'a'.repeat(40) } });
+  const done = async () => report(f.ctx, player.id, task.id, { done: true, summary: 'Fast-forwarded the turn to task-N, checks in the log.', turnkey: { commit: own, baseCommit: 'a'.repeat(40) }, ...(await recorded(f.ctx, task.id, player.id)) });
   const lastReport = async () => (await f.detail(task.id)).log.findLast(event => event.kind === 'report')?.data;
   return { ...f, player, task, turn: turn!, own, repo, done, lastReport };
 }

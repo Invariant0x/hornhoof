@@ -711,7 +711,8 @@
         ],
         "suiteIds": [
           "server",
-          "node"
+          "node",
+          "protocol"
         ],
         "tests": [
           "apps/node/test/image.test.ts",
@@ -740,6 +741,7 @@
           "apps/server/test/operations-recovery.test.ts",
           "apps/server/test/operations-required.test.ts",
           "apps/server/test/orchestrator-control.test.ts",
+          "apps/server/test/orchestrator-self.test.ts",
           "apps/server/test/org.test.ts",
           "apps/server/test/person-standing.test.ts",
           "apps/server/test/pipeline-guidance.test.ts",
@@ -752,6 +754,7 @@
           "apps/server/test/staff.test.ts",
           "apps/server/test/stuck-policy.test.ts",
           "apps/server/test/submit-starts-no-run.test.ts",
+          "apps/server/test/task-settle.test.ts",
           "apps/server/test/task-urgency.test.ts",
           "apps/server/test/tasks-after.test.ts",
           "apps/server/test/tasks-engine.test.ts",
@@ -780,7 +783,8 @@
           "apps/server/test/turn-endings.test.ts",
           "apps/server/test/video-template.test.ts",
           "apps/server/test/wait-producers.test.ts",
-          "apps/server/test/work-tree-route.test.ts"
+          "apps/server/test/work-tree-route.test.ts",
+          "packages/protocol/test/world.test.ts"
         ]
       },
       {

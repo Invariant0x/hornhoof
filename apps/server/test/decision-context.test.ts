@@ -358,7 +358,9 @@ describe('words typed into a running orchestrator turn', () => {
 });
 
 describe('words of a person to an agent directly', () => {
-  it('answer only the questions that person may take', async () => {
+  /* Only what that person may take counts, and of that only one question closes by itself: of several, the agent says which
+     with record_answer. */
+  it('answer the only question that person may take, and none of several', async () => {
     const c = await company();
     const own = await c.asking({ kind: 'question', text: 'Which cards?', topic: 'task' });
     const ceos = await c.asking({ kind: 'question', text: 'Hire a designer?', topic: 'people' });
@@ -368,7 +370,7 @@ describe('words of a person to an agent directly', () => {
     await answerDirectly(c.ctx, c.ids.dan, c.bruno.id, 'Visa.');
     expect([await c.open(own.id), await c.open(ceos.id), await c.open(plain.id)]).toEqual([false, true, true]);
     await answerDirectly(c.ctx, c.ids.dave, c.bruno.id, 'Yes.');
-    expect([await c.open(ceos.id), await c.open(plain.id)]).toEqual([false, false]);
+    expect([await c.open(ceos.id), await c.open(plain.id)]).toEqual([true, true]);
   });
 });
 
