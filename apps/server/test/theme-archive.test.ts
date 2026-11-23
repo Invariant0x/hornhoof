@@ -31,7 +31,7 @@ describe('a theme archive', () => {
     expect(theme.manifest).toMatchObject({ id: 'night-shift', version: '1.0.0', engine: 'none' });
     expect(theme.look).toMatchObject({ scheme: (await lookOf('pixel')).scheme, fonts: { body: ['Night Sans', 'sans-serif'] } });
     expect(theme.fonts).toEqual([{ family: 'Night Sans', file: 'night-sans.woff2', weight: 400, style: 'normal' }]);
-    expect(theme.kit).toEqual({ slots: { 'panel-frame': { file: 'panel.png', slice: '8 8 8 8 fill', width: '8px' } } });
+    expect(theme.kit).toEqual({ slots: { card: { file: 'panel.png', slice: '8 8 8 8 fill', width: '8px' } } });
     expect([theme.world, theme.skills]).toEqual([null, null]);
     expect(served(theme)).toEqual({
       LICENSE: 'text/plain; charset=utf-8',
@@ -127,7 +127,11 @@ describe('a theme archive is refused', () => {
       },
       { code: 'look_bad', path: 'ui/look.json' },
     ]),
-    ['with a kit slot that is not data', files => ({ ...files, 'ui/kit.json': JSON.stringify({ slots: { frame: { file: 'panel.png', width: 'calc(1px)' } } }) }), { code: 'json_shape', path: 'ui/kit.json' }],
+    ['with a kit slot that is not data', files => ({ ...files, 'ui/kit.json': JSON.stringify({ slots: { card: { file: 'panel.png', width: 'calc(1px)' } } }) }), { code: 'json_shape', path: 'ui/kit.json' }],
+    /* A kit paints only the parts the screens know, and sets only the colours they read. */
+    ['with a kit part the screens do not know', files => ({ ...files, 'ui/kit.json': JSON.stringify({ slots: { card: { file: 'panel.png' }, 'sidebar-glow': { file: 'panel.png' } } }) }), { code: 'json_shape', path: 'ui/kit.json', detail: expect.stringContaining('sidebar-glow') }],
+    ['with a kit colour the screens do not read', files => ({ ...files, 'ui/kit.json': JSON.stringify({ slots: { card: { file: 'panel.png' } }, colors: { 'glow-ink': '#FFFFFF' } }) }), { code: 'json_shape', path: 'ui/kit.json', detail: expect.stringContaining('glow-ink') }],
+    ['with a kit that paints nothing', files => ({ ...without(files, 'ui/kit/panel.png'), 'ui/kit.json': JSON.stringify({ slots: {} }) }), { code: 'json_shape', path: 'ui/kit.json' }],
     ['with a look the screens cannot read', files => ({ ...files, 'ui/look.json': JSON.stringify({ scheme: 'dark' }) }), { code: 'look_bad', path: 'ui/look.json', detail: '["missing","colors",""]' }],
     ['with a look in a font it does not bring', async files => ({ ...files, 'ui/look.json': JSON.stringify({ ...(await lookOf('pixel')), fonts: { ...((await lookOf('pixel')).fonts as object), body: ['Other', 'serif'] } }) }), { code: 'look_bad', detail: '["bad_font","fonts.body","Other"]' }],
   ];
@@ -151,14 +155,20 @@ describe('a theme archive is refused', () => {
   ].join('\n');
   const drawn = async (svg: string, name = 'ui/kit/frame.svg') => ({
     ...(await plainTheme()),
-    'ui/kit.json': JSON.stringify({ slots: { 'panel-frame': { file: 'panel.png', slice: '8 8 8 8 fill', width: '8px' }, 'panel-art': { file: 'frame.svg' } } }),
+    'ui/kit.json': JSON.stringify({ slots: { card: { file: 'panel.png', slice: '8 8 8 8 fill', width: '8px' }, corner: { file: 'frame.svg' } } }),
     [name]: svg,
   });
   const inside = (more: string) => DRAWING.replace('</svg>', `${more}\n</svg>`);
 
+  it('takes a kit of the parts and colours the screens know, with lengths of a fraction of a pixel', async () => {
+    const kit = { slots: { card: { file: 'panel.png', slice: '8 fill', width: '6.5px' }, 'plaque-frame': { file: 'panel.png', outset: '1.25px 0' } }, colors: { 'tab-ink': '#502704', 'scroll-thumb': '#8A6A3B' } };
+    const theme = await check(archiveOf({ ...(await plainTheme()), 'ui/kit.json': JSON.stringify(kit) }));
+    expect(theme.kit).toEqual(kit);
+  });
+
   it('takes a drawing of the kit, served as SVG', async () => {
     const theme = await check(archiveOf(await drawn(DRAWING)));
-    expect(theme.kit?.slots['panel-art']).toEqual({ file: 'frame.svg' });
+    expect(theme.kit?.slots.corner).toEqual({ file: 'frame.svg' });
     expect(served(theme)['ui/kit/frame.svg']).toBe('image/svg+xml');
   });
 

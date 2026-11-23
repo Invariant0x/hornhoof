@@ -1,5 +1,5 @@
 import {
-  THEME_ARCHIVE_FORMAT, THEME_ENGINES, THEME_FILE_LIMITS, THEME_LIMITS, type ThemeArtFile, type ThemeLimits, type ThemeProblemCode, type ThemeWebCheck,
+  THEME_ARCHIVE_FORMAT, THEME_ENGINES, THEME_FILE_LIMITS, THEME_KIT_COLORS, THEME_KIT_SLOTS, THEME_LIMITS, type ThemeArtFile, type ThemeLimits, type ThemeProblemCode, type ThemeWebCheck,
 } from '@hornhoof/protocol/themes';
 import type { WorldPackBehaviorSpec } from '@hornhoof/protocol/world';
 import { z } from 'zod';
@@ -53,9 +53,10 @@ const KitSlot = z.strictObject({
   outset: z.string().regex(LENGTHS, 'up to four lengths in px or %').optional(),
   size: z.string().regex(LENGTHS, 'up to four lengths in px or %').optional(),
 });
+/* Only the parts and colours the screens know (THEME_KIT_SLOTS, THEME_KIT_COLORS), each at most once. */
 const Kit = z.strictObject({
-  slots: z.record(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, 'lower case letters, digits and -, up to 40'), KitSlot),
-  colors: z.record(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/), z.string().regex(/^#[0-9A-Fa-f]{6}$/, '#RRGGBB')).optional(),
+  slots: z.partialRecord(z.enum(THEME_KIT_SLOTS), KitSlot).refine(slots => Object.keys(slots).length > 0, 'at least one slot'),
+  colors: z.partialRecord(z.enum(THEME_KIT_COLORS), z.string().regex(/^#[0-9A-Fa-f]{6}$/, '#RRGGBB')).optional(),
 });
 export type ThemeKit = z.infer<typeof Kit>;
 

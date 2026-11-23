@@ -114,17 +114,25 @@ A kit is pictures of interface parts (frames, panels, buttons with their states,
   "slots": {
     "dialog": { "file": "dialog.frame@2x.webp", "slice": "34", "width": "17px" },
     "btn": { "file": "btn@2x.webp", "slice": "10 fill", "width": "5px" },
+    "plaque-frame": { "file": "plaque.frame@2x.webp", "slice": "13", "width": "6.5px" },
     "panel": { "file": "panel.fill@2x.webp", "size": "128px 128px" }
   },
   "colors": { "tab-ink": "#502704", "danger-ink": "#6A1030" }
 }
 ```
 
-* A slot's name is 1 to 40 lower case letters, digits and `-`.
+* A slot's name is one of the parts the screens draw, as `THEME_KIT_SLOTS` in `packages/protocol/src/themes.ts` lists them, each at most once:
+  * frames, nine-sliced: `dialog`, `window`, `drawer`, `menu`, `card`, `table`, `plaque-frame`, `tile`;
+  * fills, tiled: `ground`, `panel`, `dialog-fill`, `plaque`, `band`;
+  * controls, a plate for each state: `btn`, `btn-hover`, `btn-pressed`, `btn-disabled`, `ghost`, `ghost-hover`, `ghost-pressed`, `ghost-disabled`, `danger`, `danger-hover`, `chip`, `chip-on`, `field`, `field-focus`, `iconbtn`, `iconbtn-pressed`;
+  * small parts: `counter`, `badge`, `check`, `corner`, `tab-on`, `tab`, `tab-sel`, `pill-ok`, `pill-bad`;
+  * strips: `thead`, `row-hover`, `row-selected`, `track`, `fill`, `divider`.
+
+  A kit names at least one of them and paints only the ones it names; the list is preliminary until the Egypt UI kit 1.0.
 * Its `file` is a PNG, WebP or SVG in `ui/kit/`, of at most 2 MB.
 * `slice` is up to four whole numbers of picture pixels, with an optional `fill`.
-* `width`, `outset` and `size` are up to four lengths in `px` or `%`.
-* A kit colour is `#RRGGBB`.
+* `width`, `outset` and `size` are up to four lengths in `px` or `%`, with up to three decimals (`6.5px`), `0` or `auto`; no `calc()` or other function.
+* A kit colour is `#RRGGBB`, under one of the names the screens read (`THEME_KIT_COLORS`): `tab-ink`, `tab-on-ink`, `chip-on-ink`, `danger-ink`, `badge-ink`, `scroll-thumb`, `scroll-track`.
 
 Anything else is refused, so a kit can never carry CSS. The screens get the kit as stored from `GET /api/themes/:id/look`, beside `base`: a slot's picture is served at `base` + `ui/kit/` + its `file`.
 

@@ -59,6 +59,26 @@ export const THEME_FILE_LIMITS = {
   shown: 80,
 } as const;
 
+/* The parts of the interface a kit may paint, by the names the screens draw them under (docs/theme-archive.md, 3.3),
+   and the colours it may set beside them. A kit names no other part or colour. Preliminary: from draft 0.3 of the
+   Egypt UI kit (#1970), compared again with its 1.0. */
+export const THEME_KIT_SLOTS = [
+  /* Frames, nine-sliced. */
+  'dialog', 'window', 'drawer', 'menu', 'card', 'table', 'plaque-frame', 'tile',
+  /* Fills, tiled. */
+  'ground', 'panel', 'dialog-fill', 'plaque', 'band',
+  /* Controls, a plate for each state. */
+  'btn', 'btn-hover', 'btn-pressed', 'btn-disabled', 'ghost', 'ghost-hover', 'ghost-pressed', 'ghost-disabled',
+  'danger', 'danger-hover', 'chip', 'chip-on', 'field', 'field-focus', 'iconbtn', 'iconbtn-pressed',
+  /* Small parts. */
+  'counter', 'badge', 'check', 'corner', 'tab-on', 'tab', 'tab-sel', 'pill-ok', 'pill-bad',
+  /* Strips. */
+  'thead', 'row-hover', 'row-selected', 'track', 'fill', 'divider',
+] as const;
+export type ThemeKitSlot = (typeof THEME_KIT_SLOTS)[number];
+export const THEME_KIT_COLORS = ['tab-ink', 'tab-on-ink', 'chip-on-ink', 'danger-ink', 'badge-ink', 'scroll-thumb', 'scroll-track'] as const;
+export type ThemeKitColor = (typeof THEME_KIT_COLORS)[number];
+
 /* An installed theme as the store shows it. */
 export type InstalledThemeView = Readonly<{
   id: string;

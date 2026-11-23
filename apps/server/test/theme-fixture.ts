@@ -85,7 +85,7 @@ export async function plainTheme(): Promise<ThemeFiles> {
     'ui/fonts.json': JSON.stringify({ faces: [{ family: 'Night Sans', file: 'night-sans.woff2', weight: 400, style: 'normal' }] }),
     'ui/fonts/night-sans.woff2': woff2(),
     'ui/fonts/OFL.txt': 'Synthetic font licence.\n',
-    'ui/kit.json': JSON.stringify({ slots: { 'panel-frame': { file: 'panel.png', slice: '8 8 8 8 fill', width: '8px' } } }),
+    'ui/kit.json': JSON.stringify({ slots: { card: { file: 'panel.png', slice: '8 8 8 8 fill', width: '8px' } } }),
     'ui/kit/panel.png': png(32, 32),
     'ui/NOTES.md': 'Notes for the next author.\n',
     'preview/cover.png': png(640, 360),
