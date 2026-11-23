@@ -5,7 +5,7 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
-## [Unreleased]
+## [0.42.0] - 2026-11-23
 
 ### Fixed
 
@@ -19,7 +19,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - In a page that reads right to left, the glow of the map's hub stands around the hub instead of at the map's right edge.
 - An Antigravity turn that launches a subagent keeps the employee's main conversation as its session, ignores hooks from child conversations, and resumes the main conversation with its Hornhoof tools on the next turn.
 - An Antigravity turn that fails with `UNAUTHENTICATED (code 401)` because its program kept an hour-old access token is no longer lost as an unknown failure: the program starts anew with the saved sign-in and the turn is tried once more with no person involved, and a second refusal right after that is a sign-in failure with a clear reason for Operations.
-- When the updater's copy of a loaded dump, or the folder it kept it in, cannot be removed, and even when its warning about that cannot be written because the updater's output closed, the updater no longer stops: the restore ends done or undone as before, and the updater goes on.
+- When the updater cannot remove its copy of a loaded dump, or the folder it kept it in, it says so and the restore ends done or undone as before; a failed or interrupted write of that warning no longer stops the updater, though an output that stays closed can still stop it at its next line.
+- An upload whose table is 8 GiB or more, which tar writes with a base-256 size, is read correctly and accepted within the upload limit.
 
 ### Added
 
