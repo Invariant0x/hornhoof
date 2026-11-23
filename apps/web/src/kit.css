@@ -139,6 +139,9 @@
   box-shadow: none;
 }
 :root[data-kit] :is(.field input, .field select, textarea, .search, .keybox, .t-in):focus { border-image-source: var(--kit-field-focus, var(--kit-field)); }
+/* A field in error keeps its mark: its border is the kit's picture, so the token look's pink border cannot show. A pink
+   line inside its edge stands for it while the field has no focus; with focus, the focus ring shows as in every theme. */
+:root[data-kit] .field :is(input, select, textarea)[aria-invalid='true']:not(:focus) { outline: 2px solid var(--pink); outline-offset: -2px; }
 
 /* Small plates, strips and rows */
 :root[data-kit] .nav-count {
