@@ -189,6 +189,34 @@ describe('a program that sleeps between turns', () => {
     await c.until(() => c.stop.mock.calls.length > 0);
   });
 
+  /* What the time a view has to come back must never hold: a program of a person who may no longer see it, and a program its
+     agent took to another plan. */
+  it('lets an idle program sleep at its next look once the server closed its view for good, as for a person who lost access', async () => {
+    const c = await atWorkThatSleeps('claude');
+    await viewOpens(c);
+    c.finish();
+    await c.on(c.running);
+    await c.pass(5000);
+    c.host.close({ type: 'term.close', termId: 'view', final: true });
+    await c.pass(1000);
+    expect(c.stop.mock.calls).toEqual([['a-receipt']]);
+  });
+
+  it('closes the program of an agent that left this plan at once, while a view that dropped may still come back', async () => {
+    const c = await atWorkThatSleeps('claude');
+    const has = vi.spyOn(c.tmux, 'has').mockResolvedValue(true);
+    c.kill.mockImplementation(async () => { c.alive.mockResolvedValue(false); has.mockResolvedValue(false); });
+    const view = await viewOpens(c);
+    c.finish();
+    await c.on(c.running);
+    view.leaves();
+    await c.pass(1000);
+    expect(c.stop).not.toHaveBeenCalled();
+    void c.host.release('receipt', 'job-receipt');
+    await c.pass(1000);
+    expect(c.kill.mock.calls).toEqual([['a-receipt']]);
+  });
+
   it('keeps a program awake while words someone left sit in its input', async () => {
     const c = await atWorkThatSleeps('claude');
     const view = await viewOpens(c);
