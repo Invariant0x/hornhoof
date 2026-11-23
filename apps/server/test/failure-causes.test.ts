@@ -1,3 +1,4 @@
+import { parseNodeMessage } from '@hornhoof/protocol';
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { jobs, requests, subscriptions, testParts, testRuns } from '../src/db/schema.js';
@@ -16,12 +17,16 @@ const factsOf = async (c: Company) => {
 };
 const failures = async (c: Company) => (await factsOf(c)).filter(fact => fact.failure);
 
-/* Bruno runs work on #1 on Ivan's machine, and the node ends its one part as it says. */
+/* Bruno runs work on #1 on Ivan's machine, and the node ends its one part as it says. The server drops a message it
+   cannot read, and would never answer it, so the test first holds that it can: a protocol without the word fails here,
+   at once, instead of waiting for an answer that never comes. */
 async function runWork(c: Company, ivan: Awaited<ReturnType<Company['machine']>>, command: string, end: object) {
   const { call } = await c.turn(c.bruno);
   expect((await call('run_work', { command })).error).toBe(false);
   const run = await nextOf(ivan.node, 'tests.run');
-  ivan.node.send(done(run, { commit: null, ...end }));
+  const message = done(run, { commit: null, ...end });
+  expect(parseNodeMessage(JSON.stringify(message)), 'the server reads the node\'s end of the part').not.toBeNull();
+  ivan.node.send(message);
   await nextOf(ivan.node, 'tests.ack');
   return call;
 }
@@ -54,10 +59,12 @@ describe('a refusal is a hint, never a failure', () => {
     await until(async () => (await runsOf(c)).length === 1 && (await runsOf(c))[0]!.status !== 'running');
     expect(await failures(c)).toEqual([expect.objectContaining({ kind: 'work', reason: '1', failure: 'run' })]);
     await runWork(c, ivan, 'npm test', { ok: false, exitCode: null, error: 'refused', log: REFUSAL });
-    await until(async () => (await runsOf(c)).at(-1)!.status === 'refused');
+    await until(async () => (await runsOf(c)).length === 2 && (await runsOf(c)).at(-1)!.status !== 'running');
+    expect((await runsOf(c)).at(-1)!.status).toBe('refused');
     expect(await failures(c)).toEqual([expect.objectContaining({ kind: 'work', reason: '1', failure: 'run' })]);
     await runWork(c, ivan, 'make report', { ok: true, exitCode: 0, error: null, log: 'done\n' });
-    await until(async () => (await runsOf(c)).at(-1)!.status === 'passed');
+    await until(async () => (await runsOf(c)).length === 3 && (await runsOf(c)).at(-1)!.status !== 'running');
+    expect((await runsOf(c)).at(-1)!.status).toBe('passed');
     expect(await failures(c)).toEqual([]);
   });
 
