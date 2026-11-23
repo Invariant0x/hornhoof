@@ -242,9 +242,12 @@ The terrain and plant layers load these files straight from the pack's art folde
 npx tsx apps/web/scripts/world-art-index.ts <art folder> --pack <pack>          check, write nothing
 npx tsx apps/web/scripts/world-art-index.ts <art folder> --pack <pack> --write  check and write art-index.json
 npx tsx apps/web/scripts/world-art-index.ts --pack <pack> --list                every slot, required or optional
+npx tsx apps/web/scripts/world-art-index.ts --dist <web dist> --pack <pack>     a production build holds the pack's art
 npx tsx apps/web/scripts/world-art-import.ts <delivery> --to <art folder> --pack <pack> --kind <kind> --steps <a,b,c>
 ```
 
 The import command takes one building as the art pipeline delivers it (its construction line, demolition, layers and the larger steps it grows into, on plot canvases) and lays it out in the art folder with passports, as this contract asks; its header lists the delivery's layout.
 
 The check prints every error with the file it is about, every file the pack has no slot for, and how many required files are still missing. It writes `art-index.json` only when there are no errors. Deliver the folder with its fresh `art-index.json`; the engine needs nothing else.
+
+The `--dist` check reads a built web dist. It fails unless `<web dist>/world-art/<pack>/art-index.json` lists art the pack draws and the dist holds every file it lists with the size the index gives, so a production build can't ship the placeholder look without anyone noticing. It isn't a step of the image build yet: the Egypt art is licensed for Hornhoof only and may not go into the public repository or the public image, so the build has no source for it yet, and the check would stop every image from main. It joins the image build in the change that brings the art source (#1944).

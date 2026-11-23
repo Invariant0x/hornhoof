@@ -1,11 +1,19 @@
 /* Art check for world pack artists (ARTIST_CONTRACT.md):
      npx tsx apps/web/scripts/world-art-index.ts <art folder> --pack <id> [--write]
      npx tsx apps/web/scripts/world-art-index.ts --pack <id> --list
+     npx tsx apps/web/scripts/world-art-index.ts --dist <web dist> --pack <id>
    Reads every PNG in the folder with the passport JSON beside it, checks them against the pack
    catalog and the contract, prints what is wrong or missing, and with --write saves
-   art-index.json, which the engine reads to know which files to draw. */
+   art-index.json, which the engine reads to know which files to draw.
+   With --dist it checks a built web dist instead: it fails unless <dist>/world-art/<id>/art-index.json
+   lists art the pack draws and the dist holds every file it lists, so a production build cannot ship
+   the placeholder look without anyone noticing.
+   Not yet a step of the image build (Dockerfile): the art is licensed for Hornhoof only and may not
+   go into the public repository or the public image, so the build has no source for it yet, and the
+   check would stop every image from main. It joins the image build in the change that brings the art
+   source (#1944). */
 
-import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -113,15 +121,69 @@ export function runArtCheck(opts: ArtCheckOptions): { ok: boolean } {
   return { ok: true };
 }
 
-function main(argv: readonly string[]): number {
-  const packAt = argv.indexOf('--pack');
-  const pack = packAt >= 0 ? argv[packAt + 1] : undefined;
-  const folder = argv.find((a, i) => !a.startsWith('--') && argv[i - 1] !== '--pack') ?? null;
-  if (!pack) {
-    console.error('Usage: world-art-index.ts <art folder> --pack <id> [--write] | --pack <id> --list');
+export type DistArtCheckOptions = Readonly<{
+  dist: string;
+  pack: string;
+  print: (line: string) => void;
+}>;
+
+/* The production check: the built web dist must hold the pack's art index, with art the pack draws, and every file it lists. */
+export function checkDistArt(opts: DistArtCheckOptions): { ok: boolean } {
+  const fail = (line: string): { ok: false } => {
+    opts.print(`ERROR ${line}`);
+    opts.print(`The build would show the placeholder look of pack "${opts.pack}" instead of its art.`);
+    return { ok: false };
+  };
+  const pack = resolveWorldPack(opts.pack);
+  if (!pack?.art) {
+    opts.print(`Unknown pack "${opts.pack}" or a pack without an art catalog.`);
+    return { ok: false };
+  }
+  const rel = `world-art/${pack.id}/${ART_INDEX_FILE}`;
+  const folder = join(opts.dist, 'world-art', pack.id);
+  const indexPath = join(folder, ART_INDEX_FILE);
+  if (!existsSync(indexPath)) return fail(`${rel} is missing from ${opts.dist}.`);
+  let index: ArtIndex;
+  try {
+    index = JSON.parse(readFileSync(indexPath, 'utf8')) as ArtIndex;
+  } catch (err) {
+    return fail(`${rel} is not readable JSON: ${(err as Error).message}`);
+  }
+  if (!index || typeof index !== 'object' || !index.files || typeof index.files !== 'object') {
+    return fail(`${rel} has no files list.`);
+  }
+  const report = validateArtIndex(pack, index);
+  if (report.errors.length > 0) return fail(`${rel}: ${report.errors.join('; ')}`);
+  const declared = new Set(declaredArtFiles(pack).map(d => d.path));
+  const drawn = Object.keys(index.files).filter(path => declared.has(path));
+  if (drawn.length === 0) return fail(`${rel} lists no art the pack draws.`);
+  for (const [path, entry] of Object.entries(index.files)) {
+    const full = join(folder, path);
+    const size = existsSync(full) ? readPngSize(readFileSync(full)) : null;
+    if (!size) return fail(`world-art/${pack.id}/${path} is listed but not in the build.`);
+    if (size.w !== entry.w || size.h !== entry.h) {
+      return fail(`world-art/${pack.id}/${path} is ${size.w} x ${size.h} in the build, the index says ${entry.w} x ${entry.h}.`);
+    }
+  }
+  opts.print(`${drawn.length} art files of pack "${pack.id}" in the build (${Object.keys(index.files).length} files listed in all).`);
+  return { ok: true };
+}
+
+export function main(argv: readonly string[], print: (line: string) => void = l => console.log(l)): number {
+  const valueOf = (flag: string): string | undefined => {
+    const at = argv.indexOf(flag);
+    return at >= 0 ? argv[at + 1] : undefined;
+  };
+  const pack = valueOf('--pack');
+  const dist = valueOf('--dist');
+  const usage = 'Usage: world-art-index.ts <art folder> --pack <id> [--write] | --pack <id> --list | --dist <web dist> --pack <id>';
+  if (!pack || (argv.includes('--dist') && !dist)) {
+    print(usage);
     return 2;
   }
-  const result = runArtCheck({ folder, pack, write: argv.includes('--write'), list: argv.includes('--list'), print: l => console.log(l) });
+  if (dist) return checkDistArt({ dist, pack, print }).ok ? 0 : 1;
+  const folder = argv.find((a, i) => !a.startsWith('--') && argv[i - 1] !== '--pack') ?? null;
+  const result = runArtCheck({ folder, pack, write: argv.includes('--write'), list: argv.includes('--list'), print });
   return result.ok ? 0 : 1;
 }
 

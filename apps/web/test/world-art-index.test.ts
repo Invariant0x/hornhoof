@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildArtIndexFromFolder, normalizePassport, readPngSize, runArtCheck } from '../scripts/world-art-index';
+import { buildArtIndexFromFolder, checkDistArt, main, normalizePassport, readPngSize, runArtCheck } from '../scripts/world-art-index';
 import { ART_CONTRACT_VERSION, type BuildingPicturePassport } from '../src/world/art';
 
 /* PNG signature and IHDR chunk are all the size reader needs. */
@@ -114,5 +114,78 @@ describe('Stage 9 art check command: builds art-index.json from an artist folder
     const lines: string[] = [];
     expect(runArtCheck({ folder: null, pack: 'nope', write: false, list: true, print: l => lines.push(l) }).ok).toBe(false);
     expect(lines.join('\n')).toMatch(/Unknown pack "nope"/);
+  });
+});
+
+/* #1944: the production web build must carry the pack's art, or the city ships on placeholders without anyone noticing. */
+describe('Production build art check: fails when the web dist has no world-art/<pack>/art-index.json with art in it', () => {
+  function shrine(root: string): void {
+    put(root, 'buildings/department/shrine/complete.png', pngHeader(736, 900));
+    put(
+      root,
+      'buildings/department/shrine/complete.json',
+      JSON.stringify({ groundAnchor: [368, 712], corners: { top: [368, 532], right: [728, 712], bottom: [368, 892], left: [8, 712] } }),
+    );
+  }
+
+  function distWithArt(): string {
+    const dist = tempArt();
+    const art = join(dist, 'world-art', 'egypt');
+    shrine(art);
+    expect(runArtCheck({ folder: art, pack: 'egypt', write: true, list: false, print: () => {} }).ok).toBe(true);
+    return dist;
+  }
+
+  it('passes a dist whose art index lists art that the dist holds', () => {
+    const lines: string[] = [];
+    expect(checkDistArt({ dist: distWithArt(), pack: 'egypt', print: l => lines.push(l) }).ok).toBe(true);
+    expect(lines.join('\n')).toMatch(/1 art files of pack "egypt" in the build/);
+  });
+
+  it('fails a dist with no art folder, naming the missing index and the placeholders', () => {
+    const lines: string[] = [];
+    expect(checkDistArt({ dist: tempArt(), pack: 'egypt', print: l => lines.push(l) }).ok).toBe(false);
+    const out = lines.join('\n');
+    expect(out).toMatch(/world-art\/egypt\/art-index\.json is missing/);
+    expect(out).toMatch(/placeholder look/);
+  });
+
+  it('fails a dist whose art index lists no art', () => {
+    const dist = tempArt();
+    put(dist, 'world-art/egypt/art-index.json', JSON.stringify({ contract: ART_CONTRACT_VERSION, pack: 'egypt', files: {} }));
+    const lines: string[] = [];
+    expect(checkDistArt({ dist, pack: 'egypt', print: l => lines.push(l) }).ok).toBe(false);
+    expect(lines.join('\n')).toMatch(/lists no art the pack draws/);
+  });
+
+  it('fails a dist whose index is not JSON, or lists a file the build left out', () => {
+    const broken = tempArt();
+    put(broken, 'world-art/egypt/art-index.json', 'not json');
+    const a: string[] = [];
+    expect(checkDistArt({ dist: broken, pack: 'egypt', print: l => a.push(l) }).ok).toBe(false);
+    expect(a.join('\n')).toMatch(/art-index\.json is not readable/);
+
+    const dist = distWithArt();
+    rmSync(join(dist, 'world-art/egypt/buildings/department/shrine/complete.png'));
+    const b: string[] = [];
+    expect(checkDistArt({ dist, pack: 'egypt', print: l => b.push(l) }).ok).toBe(false);
+    expect(b.join('\n')).toMatch(/buildings\/department\/shrine\/complete\.png is listed but not in the build/);
+  });
+
+  it('fails an index for another pack or contract', () => {
+    const dist = tempArt();
+    shrine(join(dist, 'world-art', 'egypt'));
+    const index = buildArtIndexFromFolder(join(dist, 'world-art', 'egypt'), 'dungeon');
+    put(dist, 'world-art/egypt/art-index.json', JSON.stringify(index));
+    const lines: string[] = [];
+    expect(checkDistArt({ dist, pack: 'egypt', print: l => lines.push(l) }).ok).toBe(false);
+    expect(lines.join('\n')).toMatch(/belongs to pack "dungeon"/);
+  });
+
+  it('runs from the command line with --dist and exits 1 without art, 0 with it', () => {
+    const quiet = (): void => {};
+    expect(main(['--dist', tempArt(), '--pack', 'egypt'], quiet)).toBe(1);
+    expect(main(['--dist', distWithArt(), '--pack', 'egypt'], quiet)).toBe(0);
+    expect(main(['--dist'], quiet)).toBe(2);
   });
 });
