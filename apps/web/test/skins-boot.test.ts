@@ -35,6 +35,9 @@ function devServer(plugin: Plugin) {
 afterEach(() => {
   delete root.dataset.theme;
   delete root.dataset.scheme;
+  delete root.dataset.cut;
+  delete root.dataset.world;
+  delete root.dataset.surface;
   root.removeAttribute('style');
   localStorage.clear();
 });
@@ -97,5 +100,13 @@ describe('the skin before the page draws', () => {
     new Function(code)();
     expect([root.dataset.theme, root.dataset.cut]).toEqual(['custom-1', 'steps']);
     expect(root.style.getPropertyValue(COLOR_TOKENS.bg)).toBe('#010203');
+  });
+
+  it('applies Ancient Egypt world and surface attributes before the app runs', async () => {
+    const code = await bundleSkinsBoot();
+    localStorage.setItem('hh-theme', 'egypt');
+    new Function(code)();
+    expect([root.dataset.theme, root.dataset.scheme, root.dataset.world, root.dataset.surface]).toEqual(['egypt', 'light', 'egypt', 'papyrus']);
+    expect(root.style.getPropertyValue(COLOR_TOKENS.bg)).toBe(builtinSkin('egypt')!.colors.bg);
   });
 });

@@ -4,6 +4,8 @@ import '@fontsource/onest/600.css';
 import '@fontsource/tektur/500.css';
 import '@fontsource/tektur/600.css';
 import './fonts/handjet/handjet.css';
+import './fonts/alegreya/alegreya.css';
+import './fonts/golos-text/golos-text.css';
 import './theme.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';

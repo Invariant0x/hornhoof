@@ -25,6 +25,7 @@ import { tryAutonomousCommitApproval } from './autonomous-release.js';
 import { Text } from './long-text.js';
 import { Recorded } from './recorded.js';
 import { agentSeesTask as sees, taskLines, type TaskDetail } from './views.js';
+import { checksTask } from './look-checker.js';
 import { taskByRef } from './lookup.js';
 import { editTurn, giveTasks, turnName, turnRows, type Scope } from './turns.js';
 import { recordRelease, uncheckedInRelease } from './releases.js';
@@ -255,12 +256,18 @@ class TaskTools {
 
   private async me(): Promise<Agent> { return (await this.db.select().from(agents).where(eq(agents.id, this.job.agentId)))[0]!; }
 
-  /* A company watchdog can inspect tasks across departments. Task moves keep the normal scope. */
-  private async find(ref: number | string, inspect = false): Promise<{ agent: Agent; task: Task }> {
+  /* A company watchdog can inspect tasks across departments, and the head of Design its holder named on its open wait
+     reads it and comments on it. Task moves keep the normal scope. */
+  private async find(ref: number | string, sight: 'move' | 'read' | 'comment' = 'move'): Promise<{ agent: Agent; task: Task }> {
     const agent = await this.me();
     const task = await taskByRef(this.ctx, this.job.companyId, ref);
-    if (!task || (!sees(agent, task) && !(inspect && await this.canInspect(agent, task)))) throw refuse(404, 'task_unknown', `There is no task ${ref} you can see. Call tasks for yours.`);
+    if (!task || !(sees(agent, task) || await this.seesFor(sight, agent, task))) throw refuse(404, 'task_unknown', `There is no task ${ref} you can see. Call tasks for yours.`);
     return { agent, task };
+  }
+
+  private async seesFor(sight: 'move' | 'read' | 'comment', agent: Agent, task: Task): Promise<boolean> {
+    if (sight === 'move') return false;
+    return (sight === 'read' && await this.canInspect(agent, task)) || checksTask(this.db, agent, task);
   }
 
   private async canInspect(agent: Agent, task: Task): Promise<boolean> {
@@ -408,7 +415,7 @@ class TaskTools {
         inputSchema: { task: Ref },
       },
       async ({ task: ref }) =>
-        this.find(ref, true).then(
+        this.find(ref, 'read').then(
           async ({ agent, task }) => {
             const detail = { ...await agentTaskDetail(this.ctx, agent, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id), ...await earlierWork(this.ctx, agent, task) };
             return say(fitted(sees(agent, task) ? detail : cleaned(detail)));
@@ -437,7 +444,7 @@ class TaskTools {
     this.server.registerTool(
       'track_work',
       {
-        description: 'Records an operation already in progress on a task you hold, such as tests or delegated work. Name the operation and the next time to check it. Name the employee doing the work so they get a notice. You will be woken to check progress or if that employee becomes unavailable. Diagnose and repair a failed operation.',
+        description: 'Records an operation already in progress on a task you hold, such as tests or delegated work. Name the operation and the next time to check it. Name the employee doing the work so they get a notice. The head of Design named so, to check the final look of a screen, reads this task and comments on it until the wait ends, and you can write to that head about it with message_employee naming the task; its comment ends the wait and wakes you. You will be woken to check progress or if that employee becomes unavailable. Diagnose and repair a failed operation.',
         inputSchema: { task: Ref, work: z.string().trim().min(1), nextCheck: z.iso.datetime({ offset: true }), employee: z.uuid().optional() },
       },
       async ({ task: ref, work, nextCheck, employee }) => this.run(async () => {
@@ -462,7 +469,7 @@ class TaskTools {
       },
       async ({ task: ref, text }) =>
         this.run(async () => {
-          const { task } = await this.find(ref);
+          const { task } = await this.find(ref, 'comment');
           this.plain(task, text);
           const moved = (await resolveStuckComment(this.ctx, this.job, task.id, text)) ?? (await comment(this.ctx, { agentId: this.job.agentId }, task.id, text));
           if ('held' in moved && moved.held) return { text: `Noted on #${task.number}. It stays blocked: its executor blocked it again after a comment opened it. Write the answer into the task with update_task, which opens it again, give it to someone else, or cancel it.`, moved };

@@ -1,4 +1,5 @@
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
+import type { WorldRelocationStored } from '@hornhoof/protocol/world';
 import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
 import type { QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
 import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, PROVIDER_IDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
@@ -93,6 +94,8 @@ export const companies = pgTable('companies', {
   /* A company from before the tracker gets its open tasks' responsible people and a product manager in each department
      once, by the server's own rules; a new one starts with them. */
   trackerDue: boolean('tracker_due').notNull().default(false),
+  /* Single company-wide UI theme or active world pack id, chosen by the CEO in company settings. */
+  theme: text('theme').notNull().default('cyberpunk'),
   createdAt: createdAt(),
 });
 
@@ -239,6 +242,17 @@ export const mapLayouts = pgTable('map_layouts', {
   companyId: companyId(),
   blocks: jsonb('blocks').$type<MapBlocks>().notNull().default({}),
   anchors: jsonb('anchors').$type<MapAnchors>().notNull().default({}),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* Saved isometric world layout and pending God's Word relocation orders for a company.
+   Isolated from company work tables so viewing or saving the world never alters work records. */
+export const worldLayouts = pgTable('world_layouts', {
+  companyId: uuid('company_id').primaryKey().references(() => companies.id, { onDelete: 'cascade' }),
+  packId: text('pack_id').notNull().default('default'),
+  seed: text('seed').notNull().default(''),
+  layout: jsonb('layout').$type<Record<string, unknown> | null>(),
+  relocations: jsonb('relocations').$type<WorldRelocationStored[]>().notNull().default([]),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -675,6 +689,8 @@ export const agents = pgTable(
     /* An assistant's own agent belongs to the assistant's owner alone, outside every department. */
     kind: text('kind', { enum: ['orchestrator', 'head', 'worker', 'assistant'] }).notNull(),
     name: text('name').notNull(),
+    /* Pre-world agent name preserved on the first world-era bulk rename and restored when leaving the world. */
+    originalName: text('original_name'),
     model: text('model').notNull(),
     departmentId: uuid('department_id').references(() => departments.id),
     teamId: uuid('team_id').references(() => teams.id),

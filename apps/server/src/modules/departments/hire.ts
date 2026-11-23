@@ -1,15 +1,55 @@
+import { pickNextWorldEraName, type WorldNameLanguage } from '@hornhoof/protocol/world';
 import type { Ctx } from '../../app.js';
-import { eq } from 'drizzle-orm';
-import { agentChanges, agents, subscriptions, teams } from '../../db/schema.js';
+import { and, eq, isNull, ne } from 'drizzle-orm';
+import { agentChanges, agents, companies, subscriptions, teams } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { modelOnPlan, tierIn } from '../agents/role-model.js';
 import type { Tx } from '../tasks/state.js';
+import type { Role } from '../templates/load.js';
 import type { HireLine } from '../tools/staff.js';
+import { defaultWorldPacks, worldPackForTheme } from '../world/packs/index.js';
 
 export type Hired = { id: string; name: string; role: string; title: string };
 
 /* Who a hire is by: a person, the orchestrator for one, or Hornhoof itself, which is neither. */
 export type HiredBy = { personId: string | null; byOrchestrator: boolean; actingAgentId?: string | null };
+
+const CYRILLIC = /[\u0400-\u04FF]/;
+
+/* True when a hire line carries a generated default role title (or numbered/parenthesized variant)
+   rather than a custom manual name typed by a person. */
+function isDefaultRoleName(name: string, role: Role): boolean {
+  const clean = name.trim().toLowerCase();
+  for (const title of [role.title.en.trim().toLowerCase(), role.title.ru.trim().toLowerCase()]) {
+    if (!title) continue;
+    if (clean === title) return true;
+    if (clean.startsWith(`${title} (`)) return true;
+    if (/^\s+\d+(\s+\(.*\))?$/.test(clean.slice(title.length)) && clean.startsWith(title)) return true;
+  }
+  return false;
+}
+
+/* Resolves an era name for newly hired agents when a company world pack is active and no manual name was given. */
+async function resolveHireName(
+  ctx: Pick<Ctx, 'templates'> & Partial<Pick<Ctx, 'worldPacks'>>,
+  tx: Tx,
+  companyId: string,
+  role: Role,
+  requestedName: string,
+): Promise<string> {
+  if (!isDefaultRoleName(requestedName, role)) return requestedName;
+  const [company] = await tx.select({ theme: companies.theme }).from(companies).where(eq(companies.id, companyId));
+  const pack = worldPackForTheme(ctx.worldPacks ?? defaultWorldPacks(), company?.theme);
+  if (!pack) return requestedName;
+
+  const existing = await tx
+    .select({ name: agents.name })
+    .from(agents)
+    .where(and(eq(agents.companyId, companyId), isNull(agents.removedAt), ne(agents.kind, 'assistant')));
+  const existingNames = existing.map(row => row.name);
+  const lang: WorldNameLanguage = CYRILLIC.test(requestedName) || existingNames.some(n => CYRILLIC.test(n)) ? 'ru' : 'en';
+  return pickNextWorldEraName(pack, lang, existingNames, role.kind === 'head' ? 'head' : 'worker');
+}
 
 /* A hire that names no model runs the one its role's tier asks for on its plan, by name, and the strongest in a turnkey
    team: the stages of a task's route take only a model they know. With no plan yet it stays the program's default until it gets one. */
@@ -19,10 +59,17 @@ async function modelByRole(tx: Tx, tier: Parameters<typeof modelOnPlan>[0], subs
 }
 
 /* One employee joins a department, with its role's kind, template hashes and timer, and a record of who hired it. */
-export async function hireEmployee(ctx: Pick<Ctx, 'templates'>, tx: Tx, place: { companyId: string; departmentId: string }, asked: HireLine, by: HiredBy): Promise<Hired> {
+export async function hireEmployee(
+  ctx: Pick<Ctx, 'templates'> & Partial<Pick<Ctx, 'worldPacks'>>,
+  tx: Tx,
+  place: { companyId: string; departmentId: string },
+  asked: HireLine,
+  by: HiredBy,
+): Promise<Hired> {
   const role = ctx.templates.roles.get(asked.role)!;
   const [team] = asked.team ? await tx.select(only(teams, 'turnkey')).from(teams).where(eq(teams.id, asked.team)) : [];
-  const line = { ...asked, model: asked.model || await modelByRole(tx, tierIn(role, team), asked.subscription) };
+  const name = await resolveHireName(ctx, tx, place.companyId, role, asked.name);
+  const line = { ...asked, name, model: asked.model || await modelByRole(tx, tierIn(role, team), asked.subscription) };
   const hashes = Object.fromEntries([[role.id, role.hash], ...line.skills.map(id => [id, ctx.templates.skills.get(id)!.hash])]);
   const [agent] = await tx
     .insert(agents)

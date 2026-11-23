@@ -256,10 +256,7 @@ async function checkGroup(page: Page, t: Messages, group: GroupId, look: string)
       return [Math.round((hint!.top - heading!.bottom) * 10) / 10, Math.round((wrap!.top - hint!.bottom) * 10) / 10];
     });
     expect(gaps, `${look}: the hint 4 px under the heading, the list 8 px under the hint`).toEqual([4, 8]);
-    const grid = await skinGrid(page);
-    expect(grid.columns, `${look}: ${grid.room} px of room`).toBe(grid.room >= 560 ? 2 : 1);
-    await expect(dialog.locator('.skin-card[data-current]').getByText(t.skins.applied, { exact: true })).toBeVisible();
-    await expect(dialog.locator('.skin-card .btn:not(.ghost)')).toHaveCount(0);
+    await expect(dialog.locator('.skin-card')).toHaveCount(0);
   }
   if (group === 'integrations') {
     await expect(dialog.getByRole('article', { name: t.googleSheets.title, exact: true }).getByText(t.integrations.connected, { exact: true })).toBeVisible();
@@ -274,6 +271,10 @@ async function checkGroup(page: Page, t: Messages, group: GroupId, look: string)
     await expect(dialog.getByRole('link', { name: 'https://acme.hornhoof.org', exact: true })).toBeVisible();
     expect((await tonesOf(page)).danger, `${look}: Remove link is pink, last of its row`).toEqual([[t.settings.remove, true, true]]);
     await expect(dialog.getByRole('heading', { name: t.repoHost.title, exact: true })).toHaveCount(0);
+    const grid = await skinGrid(page);
+    expect(grid.columns, `${look}: ${grid.room} px of room`).toBe(grid.room >= 560 ? 2 : 1);
+    await expect(dialog.locator('.skin-card[data-current]').getByText(t.skins.applied, { exact: true })).toBeVisible();
+    await expect(dialog.locator('.skin-card .btn:not(.ghost)')).toHaveCount(0);
   }
   const found = await layout(page);
   expect(found.pageScroll, `${look}: the page does not scroll sideways`).toBe(false);
@@ -381,18 +382,20 @@ for (const skin of SKINS) for (const width of RTL_WIDTHS) {
 
 for (const skin of SKINS) for (const width of RTL_WIDTHS) {
   const look = `ru-ltr-${skin}-${width}`;
-  test(`five skins: an odd last card takes the whole row, no card has a filled button: ${look}`, async ({ page }, info) => {
+  test(`odd last card takes the whole row, no card has a filled button: ${look}`, async ({ page }, info) => {
     const problems = await prepare(page, 'ru', skin, width);
-    const dialog = await openGroup(page, ru, 'appearance', '/settings', 'ltr', ALL);
+    const dialog = await openGroup(page, ru, 'company', '/settings/company', 'ltr', ALL);
+    const initial = await skinGrid(page);
+    expect(initial.widths).toHaveLength(5);
+    expect(Math.abs(initial.lastWidth - initial.room), `${look}: the fifth card takes the row`).toBeLessThanOrEqual(1);
     const dusk = builtinFile(builtinSkin('cyberpunk')!, { ru: 'Сумерки', en: 'Dusk' });
     await dialog.locator('input[type="file"]').setInputFiles({ name: 'dusk.json', mimeType: 'application/json', buffer: Buffer.from(skinText(dusk)) });
     await expect(dialog.getByRole('status')).toHaveText(ru.skins.added('Сумерки'));
     const grid = await skinGrid(page);
-    expect(grid.widths).toHaveLength(5);
-    expect(Math.abs(grid.lastWidth - grid.room), `${look}: the fifth card takes the row`).toBeLessThanOrEqual(1);
+    expect(grid.widths).toHaveLength(6);
     await expect(dialog.locator('.skin-card .btn:not(.ghost)')).toHaveCount(0);
-    await checkGroup(page, ru, 'appearance', `${look} five skins`);
-    await shot(page, info, `settings-skins-5-${look}`);
+    await checkGroup(page, ru, 'company', `${look} six skins`);
+    await shot(page, info, `settings-skins-6-${look}`);
     expect(problems).toEqual([]);
   });
 }
