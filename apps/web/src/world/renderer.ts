@@ -202,6 +202,8 @@ export class IsometricWorldEngine {
   private liquidTexture: Texture | null = null;
   private liquidCanvas: HTMLCanvasElement | null = null;
   private liquidPhaseX = 0;
+  /* The drift wraps where the water picture repeats; painted layers of several sizes never wrap, so they never jump. */
+  private liquidWrap = 256;
   private liquidPhaseY = 0;
   private chunkLayer: Container | null = null;
   private buildGridGraphic: Graphics | null = null;
@@ -544,27 +546,34 @@ export class IsometricWorldEngine {
       bed.data[i + 3] = 255;
     }
     bctx.putImageData(bed, 0, 0);
+    /* Only the crests of the ripple map turn into short white glints; the troughs darken a little. */
     const rip = rctx.createImageData(ripCanvas.width, ripCanvas.height);
     const rs = liquid.ripples.data;
+    const step = (lo: number, hi: number, x: number): number => {
+      const t = Math.max(0, Math.min(1, (x - lo) / (hi - lo)));
+      return t * t * (3 - 2 * t);
+    };
     for (let i = 0; i < rs.length; i += 4) {
       const delta = rs[i]! / 255 - 0.5;
       if (delta >= 0) {
         rip.data[i] = 255;
         rip.data[i + 1] = 255;
         rip.data[i + 2] = 255;
-        rip.data[i + 3] = Math.min(255, delta * 2.2 * 255);
+        rip.data[i + 3] = 255 * (0.25 * step(0, 0.1, delta) + 0.75 * step(0.08, 0.28, delta));
       } else {
         rip.data[i] = br * 0.35 * 255;
-        rip.data[i + 1] = bg * 0.4 * 255;
-        rip.data[i + 2] = bb * 0.45 * 255;
-        rip.data[i + 3] = Math.min(255, -delta * 1.8 * 255);
+        rip.data[i + 1] = bg * 0.45 * 255;
+        rip.data[i + 2] = bb * 0.55 * 255;
+        rip.data[i + 3] = 255 * 0.45 * step(0.02, 0.16, -delta);
       }
     }
     rctx.putImageData(rip, 0, 0);
 
+    /* The ripples are painted as waves running across the picture; laid flat on the 2:1 ground without turning them,
+       they read as short horizontal strokes, as on the reference. One ripple picture spans three tiles' width. */
     const iso = new Container();
     iso.scale.set(1, 0.5);
-    const tilePx = this.tileW / Math.SQRT2 / (terrainArtFor(this.pack)?.texelsPerTile ?? 256);
+    const tilePx = (this.tileW * 3) / Math.max(1, liquid.ripples.width);
     const make = (canvas: HTMLCanvasElement, scale: number, alpha: number): TilingSprite => {
       const tex = Texture.from(canvas);
       tex.source.style.addressMode = 'repeat';
@@ -573,16 +582,16 @@ export class IsometricWorldEngine {
       sprite.x = this.bounds.minX;
       sprite.y = this.bounds.minY * 2;
       sprite.tileScale.set(tilePx * scale, tilePx * scale);
-      sprite.tileRotation = Math.PI / 4;
       sprite.tilePosition.set(-this.bounds.minX, -this.bounds.minY * 2);
       sprite.alpha = alpha;
       iso.addChild(sprite);
       return sprite;
     };
-    make(bedCanvas, 1, 1);
-    this.liquidSpriteA = make(ripCanvas, 1, 0.6);
-    this.liquidSpriteB = make(ripCanvas, 1 / 1.37, 0.4);
+    make(bedCanvas, 1.6, 1);
+    this.liquidSpriteA = make(ripCanvas, 1, 0.65);
+    this.liquidSpriteB = make(ripCanvas, 1 / 1.37, 0.45);
     this.liquidOrigin = { x: -this.bounds.minX, y: -this.bounds.minY * 2 };
+    this.liquidWrap = Infinity;
 
     const n = this.pack.mapSize;
     const mTop = tileTopVertexToWorld(0, 0, this.tileW, this.tileH);
@@ -1189,11 +1198,11 @@ export class IsometricWorldEngine {
       const speedScale = animDetail === 'reduced' ? 0.55 : 1.0;
       if (this.windClockSec !== null) {
         /* A fixed clock moves the water by the clock, not by how long the frames took. */
-        this.liquidPhaseX = (this.pack.liquidLayer.speedX * this.windClockSec * speedScale) % 256;
-        this.liquidPhaseY = (this.pack.liquidLayer.speedY * this.windClockSec * speedScale) % 256;
+        this.liquidPhaseX = (this.pack.liquidLayer.speedX * this.windClockSec * speedScale) % this.liquidWrap;
+        this.liquidPhaseY = (this.pack.liquidLayer.speedY * this.windClockSec * speedScale) % this.liquidWrap;
       } else {
-        this.liquidPhaseX = (this.liquidPhaseX + this.pack.liquidLayer.speedX * dtSec * speedScale) % 256;
-        this.liquidPhaseY = (this.liquidPhaseY + this.pack.liquidLayer.speedY * dtSec * speedScale) % 256;
+        this.liquidPhaseX = (this.liquidPhaseX + this.pack.liquidLayer.speedX * dtSec * speedScale) % this.liquidWrap;
+        this.liquidPhaseY = (this.liquidPhaseY + this.pack.liquidLayer.speedY * dtSec * speedScale) % this.liquidWrap;
       }
       const o = this.liquidOrigin;
       if (this.liquidSpriteA) {

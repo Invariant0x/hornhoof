@@ -208,7 +208,7 @@ const EGYPT_MATERIALS: readonly GroundMaterialSpec[] = [
     accentColor: '#A9C65A',
     pattern: 'crop_rows',
     contrast: 1.05,
-    plots: { sizeU: 3, sizeV: 2, ridgeColor: '#9DA348', ditchColor: '#4F93AE' },
+    plots: { sizeU: 3, sizeV: 2, ridgeColor: '#9DA348', ditchColor: '#4F93AE', fallow: 'sand' },
   },
   {
     id: 'sand',
@@ -325,10 +325,10 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
   materials: EGYPT_MATERIALS,
   liquidLayer: {
     baseColor: '#2A89B0',
-    deepColor: '#19628A',
+    deepColor: '#28648A',
     highlightColor: '#8CE0F0',
     shoreFoamColor: '#D6F0F2',
-    shallowTintColor: '#4BAAB8',
+    shallowTintColor: '#A6D8E0',
     speedX: 16,
     speedY: 9,
     glow: false,

@@ -544,11 +544,20 @@ function makeShadow(d: Drawn): Part {
   const rootY = h - PAD;
   whole.ctx.drawImage(d.base.canvas, rootX - d.base.pivotX, rootY - d.base.pivotY);
   if (d.crown && hub) whole.ctx.drawImage(d.crown.canvas, rootX + hub.x - d.crown.pivotX, rootY + hub.y - d.crown.pivotY);
-  /* A blob at the root so the foot of the plant is always shaded. */
-  whole.ctx.fillStyle = '#000';
+  /* A soft patch at the root so the foot of the plant, and the foot of a group, is always shaded. */
+  const foot = whole.ctx.createRadialGradient(rootX, rootY, 0, rootX, rootY, d.crownWidthPx * 0.24);
+  foot.addColorStop(0, 'rgba(0,0,0,1)');
+  foot.addColorStop(0.55, 'rgba(0,0,0,0.6)');
+  foot.addColorStop(1, 'rgba(0,0,0,0)');
+  whole.ctx.fillStyle = foot;
+  whole.ctx.save();
+  whole.ctx.translate(rootX, rootY);
+  whole.ctx.scale(1, 0.42);
+  whole.ctx.translate(-rootX, -rootY);
   whole.ctx.beginPath();
-  whole.ctx.ellipse(rootX, rootY, d.crownWidthPx * 0.16, d.crownWidthPx * 0.07, 0, 0, Math.PI * 2);
+  whole.ctx.arc(rootX, rootY, d.crownWidthPx * 0.24, 0, Math.PI * 2);
   whole.ctx.fill();
+  whole.ctx.restore();
 
   const k = 3;
   const sw = Math.ceil(w / k);
@@ -558,6 +567,14 @@ function makeShadow(d: Drawn): Part {
   for (const [ox, oy] of [[0, 0], [0.7, 0], [-0.7, 0], [0, 0.7], [0, -0.7]] as const) small.ctx.drawImage(whole.canvas, ox, oy, sw, sh);
   small.ctx.globalCompositeOperation = 'source-in';
   small.ctx.fillStyle = '#fff';
+  small.ctx.fillRect(0, 0, sw, sh);
+  /* Densest at the root, lighter toward the far end of the shadow (the top of the plant). */
+  const fade = small.ctx.createLinearGradient(0, rootY / k, 0, 0);
+  fade.addColorStop(0, 'rgba(0,0,0,1)');
+  fade.addColorStop(0.35, 'rgba(0,0,0,0.8)');
+  fade.addColorStop(1, 'rgba(0,0,0,0.42)');
+  small.ctx.globalCompositeOperation = 'destination-in';
+  small.ctx.fillStyle = fade;
   small.ctx.fillRect(0, 0, sw, sh);
   /* The soft silhouette is stored at 1/3 size; the renderer scales it back up, which blurs it further. */
   return { canvas: small.canvas, pivotX: rootX / k, pivotY: rootY / k };

@@ -188,6 +188,26 @@ export function generatePlants(pack: WorldPackManifest, map: GeneratedWorldMap):
 
   /* Pass 2: a candidate stays only if no better one stands within its kind's spacing. Local rule, so scan order is moot. */
   const plants: PlacedPlant[] = [];
+
+  /* A bed (reeds, tufts, palm groups) spreads more plants around a chosen one on a Vogel spiral, each checked at its
+     own exact spot. */
+  const spreadBed = (p: KindPlan, kind: number, cu: number, cv: number, col: number, row: number): void => {
+    const bed = p.spec.clusterSize;
+    if (!bed || (p.spec.clusterRadius ?? 0) <= 0) return;
+    const n = Math.round(lerp(bed, hash2i(col, row, p.seed + SALT.bedPick))) - 1;
+    const radius = p.spec.clusterRadius!;
+    const turn = hash2i(col, row, p.seed + SALT.bedU) * TAU;
+    for (let i = 1; i <= n; i++) {
+      const ang = turn + i * GOLDEN_ANGLE + (hash2i(col + i * 1031, row - i * 577, p.seed + SALT.bedU) - 0.5) * 0.5;
+      const dist = radius * Math.sqrt((i + 0.15) / (n + 0.4)) * (0.88 + 0.24 * hash2i(col + i * 1031, row - i * 577, p.seed + SALT.bedV));
+      const u = cu + Math.cos(ang) * dist;
+      const v = cv + Math.sin(ang) * dist;
+      if (u < minCol || u >= maxCol || v < minRow || v >= maxRow) continue;
+      if (suitability(map, p, u, v) <= 0) continue;
+      plants.push(placed(map, pack, p, kind, u, v, i, col, row));
+      counts[kind]!++;
+    }
+  };
   const counts = kinds.map(() => 0);
   for (let row = minRow; row < maxRow; row++) {
     for (let col = minCol; col < maxCol; col++) {
@@ -214,24 +234,7 @@ export function generatePlants(pack: WorldPackManifest, map: GeneratedWorldMap):
 
       plants.push(placed(map, pack, p, c.kind, c.u, c.v, 0, col, row));
       counts[c.kind]!++;
-
-      /* A bed (reeds, tufts) spreads more plants around the chosen one, each checked at its own exact spot. */
-      const bed = p.spec.clusterSize;
-      if (bed && (p.spec.clusterRadius ?? 0) > 0) {
-        const n = Math.round(lerp(bed, hash2i(col, row, p.seed + SALT.bedPick))) - 1;
-        const radius = p.spec.clusterRadius!;
-        const turn = hash2i(col, row, p.seed + SALT.bedU) * TAU;
-        for (let i = 1; i <= n; i++) {
-          const ang = turn + i * GOLDEN_ANGLE + (hash2i(col + i * 1031, row - i * 577, p.seed + SALT.bedU) - 0.5) * 0.5;
-          const dist = radius * Math.sqrt((i + 0.15) / (n + 0.4)) * (0.88 + 0.24 * hash2i(col + i * 1031, row - i * 577, p.seed + SALT.bedV));
-          const u = c.u + Math.cos(ang) * dist;
-          const v = c.v + Math.sin(ang) * dist;
-          if (u < minCol || u >= maxCol || v < minRow || v >= maxRow) continue;
-          if (suitability(map, p, u, v) <= 0) continue;
-          plants.push(placed(map, pack, p, c.kind, u, v, i, col, row));
-          counts[c.kind]!++;
-        }
-      }
+      spreadBed(p, c.kind, c.u, c.v, col, row);
     }
   }
 
@@ -250,6 +253,7 @@ export function generatePlants(pack: WorldPackManifest, map: GeneratedWorldMap):
           if (suitability(map, p, u, v) <= 0) continue;
           plants.push(placed(map, pack, p, k, u, v, t + 50, cx, cy));
           counts[k]!++;
+          spreadBed(p, k, u, v, cx, cy);
           break;
         }
       }

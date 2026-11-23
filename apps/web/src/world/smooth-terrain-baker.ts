@@ -561,6 +561,12 @@ type PlotLayout = Readonly<{
   ridge: Rgb;
   ditch: Rgb | null;
   layer: Float32Array;
+  /* Weights of the plots' margin ground (painted art only), and the ground untilled field ground turns into, or -1. */
+  margin: Float32Array | null;
+  marginMaterial: number;
+  fallow: number;
+  /* Tilled or not, per plot, filled as the baker asks. */
+  tilled: Map<number, boolean>;
 }>;
 
 const PLOT_SALT = 0x5bd1e995;
@@ -569,7 +575,26 @@ const RIDGE_W = 0.11;
 const DITCH_W = 0.035;
 const DITCH_RIM_W = 0.07;
 
-type PlotHit = { inside: boolean; cx: number; cy: number; edgeU: number; edgeV: number; alongV: boolean };
+/* inside: the point is in a tilled plot. margin: outside one, how much of the untilled field ground there belongs to the
+   margin of a tilled plot next to it (1 at its edge, 0 from PLOT_REACH on). */
+type PlotHit = {
+  inside: boolean;
+  cx: number;
+  cy: number;
+  edgeU: number;
+  edgeV: number;
+  alongV: boolean;
+  margin: number;
+  /* Outside a tilled plot: signed distance in tiles to the outer edge of its margin (positive inside the margin), and
+     the direction along that edge. */
+  marginEdge: number;
+  edgeTu: number;
+  edgeTv: number;
+};
+
+function newPlotHit(): PlotHit {
+  return { inside: false, cx: 0, cy: 0, edgeU: 0, edgeV: 0, alongV: false, margin: 0, marginEdge: -Infinity, edgeTu: 1, edgeTv: 0 };
+}
 
 function layerAt(cf: CornerFieldGrid, arr: Float32Array, u: number, v: number): number {
   const lu = Math.max(0, Math.min(cf.cols - 1.001, u - cf.minCol));
@@ -582,18 +607,91 @@ function layerAt(cf: CornerFieldGrid, arr: Float32Array, u: number, v: number): 
   return (arr[i]! * (1 - fx) + arr[i + 1]! * fx) * (1 - fy) + (arr[i + cf.cols]! * (1 - fx) + arr[i + cf.cols + 1]! * fx) * fy;
 }
 
-/* Which plot (u, v) lies in, whether that plot is tilled (the field's weight at its middle), and the distance in tiles
-   to the plot's nearest edge along each axis. Columns of plots are staggered so the grid does not run in long lines. */
+/* Mean width in tiles of the margin around tilled plots, how far it swells or thins, and how far to look for a tilled
+   neighbour (the widest margin). */
+const PLOT_REACH = 0.8;
+const PLOT_WOBBLE = 0.7;
+const PLOT_LOOK = PLOT_REACH + PLOT_WOBBLE + 0.3;
+
+function plotOffset(p: PlotLayout, cx: number): number {
+  return hash2i(cx, 17, PLOT_SALT) * p.sizeV;
+}
+
+/* Whether plot (cx, cy) is tilled: the field's weight at its middle, and with a margin ground also the field zone
+   (field and margin together) at its four corners, so a tilled plot never ends straight in the open ground. Kept per
+   plot, as every pixel near a plot asks about it and its neighbours. */
+function plotTilled(cf: CornerFieldGrid, p: PlotLayout, cx: number, cy: number): boolean {
+  const key = (cx + 32768) * 65536 + (cy + 32768);
+  const known = p.tilled.get(key);
+  if (known !== undefined) return known;
+  const off = plotOffset(p, cx);
+  const u0 = cx * p.sizeU;
+  const u1 = u0 + p.sizeU;
+  const v0 = cy * p.sizeV - off;
+  const v1 = v0 + p.sizeV;
+  let tilled = layerAt(cf, p.layer, (u0 + u1) / 2, (v0 + v1) / 2) > 0.45;
+  const m = p.margin;
+  if (tilled && m) {
+    const zone = (cu: number, cv: number): number => layerAt(cf, p.layer, cu, cv) + layerAt(cf, m, cu, cv);
+    tilled = Math.min(zone(u0, v0), zone(u1, v0), zone(u0, v1), zone(u1, v1)) > 0.5;
+  }
+  p.tilled.set(key, tilled);
+  return tilled;
+}
+
+/* Which plot (u, v) lies in, whether that plot is tilled, and the distance in tiles to the plot's nearest edge along
+   each axis; outside a tilled plot, how close the nearest tilled neighbour is. Columns of plots are staggered so the
+   grid does not run in long lines. */
 function plotAt(cf: CornerFieldGrid, p: PlotLayout, u: number, v: number, out: PlotHit): void {
   const cx = Math.floor(u / p.sizeU);
-  const off = hash2i(cx, 17, PLOT_SALT) * p.sizeV;
+  const off = plotOffset(p, cx);
   const cy = Math.floor((v + off) / p.sizeV);
   out.cx = cx;
   out.cy = cy;
-  out.inside = layerAt(cf, p.layer, (cx + 0.5) * p.sizeU, (cy + 0.5) * p.sizeV - off) > 0.45;
-  if (!out.inside) return;
+  out.inside = plotTilled(cf, p, cx, cy);
   const fx = u / p.sizeU - cx;
   const fy = (v + off) / p.sizeV - cy;
+  if (!out.inside) {
+    out.margin = 0;
+    out.marginEdge = -Infinity;
+    if (!p.margin) return;
+    /* Distance to the nearest tilled plot among the eight around, measured to its rectangle, so the margin rounds the
+       plot's corners and is the same on both sides of a plot boundary. */
+    let d = Infinity;
+    let nu = 0;
+    let nv = 0;
+    for (let dx = -1; dx <= 1; dx++) {
+      const ncx = cx + dx;
+      const noff = dx === 0 ? off : plotOffset(p, ncx);
+      const ncy0 = Math.floor((v + noff) / p.sizeV);
+      for (let dy = -1; dy <= 1; dy++) {
+        const ncy = ncy0 + dy;
+        if (ncx === cx && ncy === cy) continue;
+        const ru0 = ncx * p.sizeU;
+        const rv0 = ncy * p.sizeV - noff;
+        const du = Math.max(ru0 - u, 0, u - ru0 - p.sizeU);
+        const dv = Math.max(rv0 - v, 0, v - rv0 - p.sizeV);
+        const dist = Math.hypot(du, dv);
+        if (dist < PLOT_LOOK && dist < d && plotTilled(cf, p, ncx, ncy)) {
+          d = dist;
+          nu = u < ru0 ? -du : du;
+          nv = v < rv0 ? -dv : dv;
+        }
+      }
+    }
+    if (d < Infinity) {
+      /* The margin swells and thins along the plot, so its outer edge does not copy the plot's straight side. */
+      const { coarse } = getNoiseLuts();
+      const n = 0.6 * sampleLutFast(coarse, u * 9.1 + 3.3, v * 9.1 - 8.1) + 0.4 * sampleLutFast(coarse, u * 21.7 - 1.1, v * 21.7 + 6.2);
+      const reach = PLOT_REACH + PLOT_WOBBLE * Math.max(-1, Math.min(1, n * 2.4));
+      out.margin = 1 - smoothstep(reach - 0.3, reach + 0.3, d);
+      out.marginEdge = reach - d;
+      const len = Math.hypot(nu, nv) || 1;
+      out.edgeTu = -nv / len;
+      out.edgeTv = nu / len;
+    }
+    return;
+  }
   out.edgeU = Math.min(fx, 1 - fx) * p.sizeU;
   out.edgeV = Math.min(fy, 1 - fy) * p.sizeV;
   out.alongV = hash2i(cx, cy, PLOT_SALT + 3) < 0.5;
@@ -757,7 +855,7 @@ export function bakeSmoothChunkPixels(
   /* Reusable scratch values avoid per-pixel GC allocations. */
   const wBuf = new Float32Array(matCount);
   const mix: GroundMix = { a: 0, b: 0, shareA: 1, rim: 0 };
-  const plotHit: PlotHit = { inside: false, cx: 0, cy: 0, edgeU: 0, edgeV: 0, alongV: false };
+  const plotHit = newPlotHit();
   const path = { core: 0, rut: 0 };
   const rgb = [0, 0, 0, 0];
   const painted = look.art !== null;
@@ -824,7 +922,7 @@ export function bakeSmoothChunkPixels(
          and lightens the shallows, with a few broken ripple lines along the shore. */
       if (dWater < -0.26) {
         if (depthShade <= 0 || !owned) continue;
-        waterTint(u, v, dWater, depthShade, deepTint, shallowRgb, foamRgb, coarse, detail, !painted, rgba, out);
+        waterTint(u, v, dWater, depthShade, painted ? deepRgb : deepTint, shallowRgb, foamRgb, coarse, detail, !painted, rgba, out);
         continue;
       }
 
@@ -850,9 +948,11 @@ export function bakeSmoothChunkPixels(
       let g = 0;
       let b = 0;
       plotHit.inside = false;
+      let fieldHere = 0;
       if (look.plot) {
         plotAt(cf, look.plot, u, v, plotHit);
-        if (!plotHit.inside) wBuf[look.plot.material] = 0;
+        fieldHere = wBuf[look.plot.material]!;
+        if (!plotHit.inside) untilledGround(look.plot, wBuf, plotHit.margin);
       }
       if (plotHit.inside) {
         plotColor(look, plotHit, u, v, coarse, rgb);
@@ -860,7 +960,9 @@ export function bakeSmoothChunkPixels(
         g = rgb[1]!;
         b = rgb[2]!;
       } else {
-        if (painted) mixGroundArt(look, cf, wBuf, u, v, coarse, mix);
+        if (painted && marginEdgeMix(look, plotHit, fieldHere, u, v, mix)) {
+          /* The painted edge of a plot margin. */
+        } else if (painted) mixGroundArt(look, cf, wBuf, u, v, coarse, mix);
         else mixGround(wBuf, matCount, u, v, coarse, detail, mix);
         sampleTexture(textures[mix.a]!, u, v, rgb);
         r = rgb[0]!;
@@ -876,6 +978,20 @@ export function bakeSmoothChunkPixels(
           rippleStrength = rippleStrength * k + look.ripples[mix.b]! * (1 - k);
         }
         if (mix.rim > 0) shade *= 1 - RIM_DARK * mix.rim;
+        /* Painted meadow: sunlit patches and a little more colour, so a green stretch is lively, not flat. */
+        const gi = look.grassForPlots;
+        if (painted && gi >= 0) {
+          const gs = (mix.a === gi ? mix.shareA : 0) + (mix.b === gi && mix.b !== mix.a ? 1 - mix.shareA : 0);
+          if (gs > 0) {
+            const sunlit = smoothstep(-0.05, 0.3, sampleLutFast(coarse, u * 0.9 + 31, v * 0.9 - 17));
+            const lift = 1 + gs * (0.03 + MEADOW_SUNLIT * sunlit);
+            const sat = 1 + gs * MEADOW_SATURATION;
+            const mean = (r + g + b) / 3;
+            r = (mean + (r - mean) * sat) * lift;
+            g = (mean + (g - mean) * sat) * lift;
+            b = (mean + (b - mean) * sat) * lift;
+          }
+        }
       }
 
       /* Worn paths over open dry ground, then the wind ripples, which the paths have trodden flat. */
@@ -1012,8 +1128,9 @@ function waterTint(
 ): void {
   const depth = smoothstep(-0.3, -2.0, d);
   const patches = 0.8 + 0.5 * (sampleLutFast(coarse, u * 0.7 + 21, v * 0.7 - 9) + 0.5) * 0.8;
-  const aDeep = Math.min(0.85, depthShade * depth * patches);
-  const aShallow = drawLines ? 0.24 * (1 - smoothstep(-0.3, -0.95, d)) : 0;
+  const aDeep = Math.min(drawLines ? 0.85 : 0.5, depthShade * depth * patches);
+  /* Painted water gets a light shallow band along the whole shore; procedural water a fainter one. */
+  const aShallow = drawLines ? 0.24 * (1 - smoothstep(-0.3, -0.95, d)) : 0.5 * (1 - smoothstep(-0.06, -0.75, d)) * (0.55 + 0.3 * patches);
   const broken = drawLines ? Math.max(0, Math.min(1, 0.2 + 1.8 * sampleLutFast(detail, u * 6.1 - 7.3, v * 6.1 + 2.9))) : 0;
   const lines =
     (Math.exp(-Math.pow((d + 0.42) / 0.03, 2)) * 0.5 + Math.exp(-Math.pow((d + 0.7) / 0.03, 2)) * 0.3) * broken;
@@ -1162,6 +1279,40 @@ function plotColor(look: GroundLook, hit: PlotHit, u: number, v: number, coarse:
   }
 }
 
+/* How far, in tiles, a painted soil edge wanders off the contour of the corner weights. */
+const EDGE_MEANDER = 0.7;
+
+/* Brightening of the sunlit meadow patches and the extra saturation of painted grass. */
+const MEADOW_SUNLIT = 0.11;
+const MEADOW_SATURATION = 0.14;
+
+/* Field ground outside the tilled plots: next to a tilled plot it becomes the plots' margin, further away the pack's
+   fallow ground, so tilled plots sit in a narrow margin and the open ground stays open. */
+function untilledGround(p: PlotLayout, w: Float32Array, margin: number): void {
+  const f = w[p.material]!;
+  w[p.material] = 0;
+  if (!p.margin) return;
+  w[p.marginMaterial] = w[p.marginMaterial]! + f * margin;
+  if (p.fallow >= 0) w[p.fallow] = w[p.fallow]! + f * (1 - margin);
+}
+
+/* Where untilled field ground is most of the ground, the edge between a plot's margin and the fallow ground around it
+   is painted from the mask between the two, at the true distance from the plot, rather than from the weights (which
+   are flat there). Returns false when the pixel is not at such an edge. */
+function marginEdgeMix(look: GroundLook, hit: PlotHit, field: number, u: number, v: number, out: GroundMix): boolean {
+  const p = look.plot;
+  if (!p || hit.inside || !p.margin || p.fallow < 0 || field < 0.5 || Math.abs(hit.marginEdge) > 0.5) return false;
+  const edge = look.edges[p.marginMaterial * look.matCount + p.fallow];
+  if (!edge) return false;
+  const d = hit.marginEdge;
+  const share = maskShare(edge.mask, look.art!.texelsPerTile, u, v, edge.flip ? -d : d, hit.edgeTu, hit.edgeTv);
+  out.a = p.marginMaterial;
+  out.b = p.fallow;
+  out.shareA = edge.flip ? 1 - share : share;
+  out.rim = 0;
+  return true;
+}
+
 /* An edge mask for a pair of grounds, and whether the pair's first ground is the mask's second. */
 type EdgeLook = Readonly<{ mask: ArtPixels; flip: boolean }>;
 
@@ -1220,6 +1371,10 @@ function groundLook(map: GeneratedWorldMap, pack: WorldPackManifest): GroundLook
       ridge: parseHexRgb(ps.ridgeColor, [150, 160, 90]),
       ditch: ps.ditchColor ? parseHexRgb(ps.ditchColor, [70, 140, 160]) : null,
       layer: cf.layerWeights[plotIdx]!,
+      margin: null,
+      marginMaterial: -1,
+      fallow: ps.fallow ? specs.findIndex(s => s.id === ps.fallow) : -1,
+      tilled: new Map(),
     };
     plotRowsV = transposedTexture(textures[plotIdx]!);
   }
@@ -1261,6 +1416,8 @@ function groundLook(map: GeneratedWorldMap, pack: WorldPackManifest): GroundLook
       }
     }
   }
+  /* With a painted margin the plots grow their margin ground around them; the procedural look keeps plain plots. */
+  if (plot && plotEdge && grassForPlots >= 0) plot = { ...plot, margin: cf.layerWeights[grassForPlots]!, marginMaterial: grassForPlots };
   const surface = art?.liquid?.surface;
   const look: GroundLook = {
     matCount: n,
@@ -1349,7 +1506,10 @@ function mixGroundArt(
   const gu = (layerAt(cf, la, u + e, v) - layerAt(cf, lb, u + e, v) - g0) / e;
   const gv = (layerAt(cf, la, u, v + e) - layerAt(cf, lb, u, v + e) - g0) / e;
   const grad = Math.max(0.08, Math.hypot(gu, gv));
-  const d = (sa - sb) / grad;
+  /* The weights come from tile corners, so their contour runs along the tile diamonds; a slow meander, the same for
+     both sides of the edge (its sign follows the ground order), lets the edge wander off that grid. */
+  const meander = (a < b ? 1 : -1) * (EDGE_MEANDER * sampleLutFast(coarse, u * 3.1 + 17.3, v * 3.1 - 5.9) + EDGE_MEANDER * 0.45 * sampleLutFast(coarse, u * 7.3 - 2.2, v * 7.3 + 9.4));
+  const d = (sa - sb) / grad + meander;
   if (d > 0.55) return;
   const share = maskShare(edge.mask, look.art!.texelsPerTile, u, v, edge.flip ? -d : d, -gv / grad, gu / grad);
   out.b = b;
@@ -1363,14 +1523,16 @@ export function groundMixAt(map: GeneratedWorldMap, pack: WorldPackManifest, u: 
   const w = new Float32Array(s.weights);
   const out: GroundMix = { a: 0, b: 0, shareA: 1, rim: 0 };
   if (look.plot) {
-    const hit: PlotHit = { inside: false, cx: 0, cy: 0, edgeU: 0, edgeV: 0, alongV: false };
+    const hit = newPlotHit();
     plotAt(map.cornerFields, look.plot, u, v, hit);
     if (hit.inside) {
       out.a = look.plot.material;
       out.b = look.plot.material;
       return out;
     }
-    w[look.plot.material] = 0;
+    const fieldHere = w[look.plot.material]!;
+    untilledGround(look.plot, w, hit.margin);
+    if (look.art && marginEdgeMix(look, hit, fieldHere, u, v, out)) return out;
   }
   const { coarse, detail } = getNoiseLuts();
   if (look.art) mixGroundArt(look, map.cornerFields, w, u, v, coarse, out);

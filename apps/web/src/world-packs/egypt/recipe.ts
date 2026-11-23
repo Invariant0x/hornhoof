@@ -438,10 +438,10 @@ export const EGYPT_TERRAIN_RECIPE: TerrainRecipeSpec = {
       const duneWeight = smoothstep(0.635, 0.71, duneMacro + outerBias) * duneMask;
 
       /* Golden sand is the main ground. The water is edged by a narrow strip of wet bank, then a green strip one to
-         three tiles wide that thins out and breaks in places; beyond it sand, with fields in rectangular plots and
+         three tiles wide that narrows and widens along the river; beyond it sand, with fields in rectangular plots and
          grass around them and around the oases. */
-      const wetW = 0.35 + 0.3 * noise.fbm2D(vx * 0.11 + 4.7, vy * 0.11 - 8.2, (params.bankSeed + 31) >>> 0, 2);
-      const stripW = 0.4 + 3.0 * smoothstep(0.32, 0.68, noise.fbm2D(vx * 0.06 + 9.1, vy * 0.06 - 3.3, (params.bankSeed + 77) >>> 0, 3));
+      const wetW = 0.45 + 0.25 * noise.fbm2D(vx * 0.11 + 4.7, vy * 0.11 - 8.2, (params.bankSeed + 31) >>> 0, 2);
+      const stripW = 1.3 + 2.0 * smoothstep(0.32, 0.68, noise.fbm2D(vx * 0.06 + 9.1, vy * 0.06 - 3.3, (params.bankSeed + 77) >>> 0, 3));
       const bankWeight = (1 - smoothstep(wetW - 0.25, wetW + 0.25, Math.max(0, signedWaterDist))) * (1 - rockWeight);
 
       const fx = vx * params.fieldCos - vy * params.fieldSin;
@@ -451,11 +451,11 @@ export const EGYPT_TERRAIN_RECIPE: TerrainRecipeSpec = {
         smoothstep(stripW * 0.7, stripW * 0.7 + 1.2, dRiver) *
         (1 - smoothstep(fertileW - 1.5, fertileW + 1.5, dRiver)) *
         smoothstep(3.5, 6.5, distCenter);
-      const fieldWeight = smoothstep(0.54, 0.62, fieldPatch) * fieldBand * (1 - rockWeight);
+      const fieldWeight = smoothstep(0.5, 0.64, fieldPatch) * fieldBand * (1 - rockWeight);
 
       const valleyGrass = smoothstep(wetW - 0.2, wetW + 0.3, dRiver) * (1 - smoothstep(stripW - 0.4, stripW + 0.4, dRiver));
       const oasisGrass = oasis.groveDist < 3 ? 1 - smoothstep(-0.6, 1.0, oasis.groveDist) : 0;
-      const aroundFields = smoothstep(0.49, 0.54, fieldPatch) * fieldBand;
+      const aroundFields = smoothstep(0.4, 0.54, fieldPatch) * fieldBand * 0.45;
       const grassWeight = Math.max(valleyGrass, oasisGrass, aroundFields) * (1 - fieldWeight * 0.75) * (1 - rockWeight);
 
       /* Dark Nile silt in a patchy band just above the waterline, and trodden dust on the city site around the start. */

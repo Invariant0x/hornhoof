@@ -186,6 +186,9 @@ export type GroundPlotSpec = Readonly<{
   sizeV: number;
   ridgeColor: string;
   ditchColor?: string;
+  /* Material id that untilled field ground turns into away from the tilled plots (with painted art); near a tilled
+     plot it turns into the plots' margin ground instead. Without it, untilled field ground is left out. */
+  fallow?: string;
 }>;
 
 /* Seamless tileable ground material blended across smooth corner-field masks during chunk baking. */
@@ -930,6 +933,10 @@ export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation 
         if (!COLOR_PATTERN.test(plots.ridgeColor)) errors.push(`invalid plots.ridgeColor on material ${mat.id}`);
         if (plots.ditchColor !== undefined && !COLOR_PATTERN.test(plots.ditchColor)) errors.push(`invalid plots.ditchColor on material ${mat.id}`);
       }
+    }
+    for (const mat of pack.ground.materials) {
+      const fallow = mat.plots?.fallow;
+      if (fallow !== undefined && (!materialIds.has(fallow) || fallow === mat.id)) errors.push(`material ${mat.id} plots.fallow must name another material`);
     }
   }
   if (pack.terrainArt) {
