@@ -3,7 +3,7 @@ import { COMMIT_SHA, ownBranch } from '@hornhoof/protocol';
 import { bodyWithin } from './bounded.js';
 
 /* How long a repository may take to say where its branches are. */
-const READ_MS = 30_000;
+export const READ_MS = 30_000;
 /* The most of a repository's answer the server reads: hundreds of thousands of refs. */
 export const REFS_MAX_BYTES = 32 * 1024 * 1024;
 const ADVERTISEMENT = 'application/x-git-upload-pack-advertisement';
@@ -68,17 +68,17 @@ function commitIn(refs: Map<string, string>, want: CommitWanted): CommitAt {
 }
 
 /* An address of git's smart HTTP beside the repository: the refs it advertises for a service, or where a push goes. */
-function gitAddress(url: string, path: string, search = ''): URL {
+export function gitAddress(url: string, path: string, search = ''): URL {
   const at = new URL(url);
   at.pathname = `${at.pathname.replace(/\/+$/, '')}/${path}`;
   at.search = search;
   return at;
 }
 
-const refsAddress = (url: string, service = 'git-upload-pack'): URL => gitAddress(url, 'info/refs', `?service=${service}`);
+export const refsAddress = (url: string, service = 'git-upload-pack'): URL => gitAddress(url, 'info/refs', `?service=${service}`);
 
 /* The token goes as git sends it from a node. fetch drops it when a redirect leaves the repository's host. */
-const headersFor = (token: string, accept = ADVERTISEMENT): Record<string, string> => ({
+export const headersFor = (token: string, accept = ADVERTISEMENT): Record<string, string> => ({
   accept,
   'user-agent': 'git/hornhoof',
   ...(token ? { authorization: `Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}` } : {}),
@@ -142,21 +142,21 @@ export const readTags: TagReader = async (repo, timeoutMs = READ_MS) => {
 type BranchMade = { made: true } | { problem: string };
 export type BranchCreator = (repo: RepoAddress, branch: string, commit: string, timeoutMs?: number) => Promise<BranchMade>;
 
-const RECEIVE_ADVERTISEMENT = 'application/x-git-receive-pack-advertisement';
+export const RECEIVE_ADVERTISEMENT = 'application/x-git-receive-pack-advertisement';
 const RECEIVE_PREAMBLE = Buffer.from('001f# service=git-receive-pack\n0000');
-const RECEIVE_RESULT = 'application/x-git-receive-pack-result';
+export const RECEIVE_RESULT = 'application/x-git-receive-pack-result';
 /* The most of a push's answer the server reads: a few lines on the one branch. */
-const RESULT_MAX_BYTES = 64 * 1024;
+export const RESULT_MAX_BYTES = 64 * 1024;
 /* A branch name git takes as one ref: no spaces, control characters or the forms git refuses. */
 const BRANCH = /^(?!\/|.*(?:\/\/|\.\.|@\{|\/\.|\.lock(?:\/|$)|\/$|\.$))[A-Za-z0-9._/-]+$/;
 
-const pktLine = (text: string): Buffer => {
+export const pktLine = (text: string): Buffer => {
   const bytes = Buffer.from(text, 'utf8');
   return Buffer.concat([Buffer.from((bytes.length + 4).toString(16).padStart(4, '0'), 'latin1'), bytes]);
 };
 
 /* The lines of git's answer in its smart HTTP, each without its length and line end. */
-function pktLines(body: Buffer): string[] {
+export function pktLines(body: Buffer): string[] {
   const lines: string[] = [];
   let at = 0;
   while (at + 4 <= body.length) {
@@ -169,7 +169,7 @@ function pktLines(body: Buffer): string[] {
 }
 
 /* A pack with no objects in it: the commit is in the repository already, and git takes a new branch only with a pack. */
-function emptyPack(hash: 'sha1' | 'sha256'): Buffer {
+export function emptyPack(hash: 'sha1' | 'sha256'): Buffer {
   const head = Buffer.from([0x50, 0x41, 0x43, 0x4b, 0, 0, 0, 2, 0, 0, 0, 0]);
   return Buffer.concat([head, createHash(hash).update(head).digest()]);
 }
@@ -182,7 +182,7 @@ function pushOf(ref: string, commit: string): Buffer {
 }
 
 /* What a repository answered, up to max bytes, or why it is no answer of the kind asked for. */
-async function answerOf(address: URL, init: RequestInit, type: string, max: number): Promise<Buffer | string> {
+export async function answerOf(address: URL, init: RequestInit, type: string, max: number): Promise<Buffer | string> {
   const res = await fetch(address, init);
   if (res.status >= 300 && res.status < 400) return 'it moved, so give the repository its new address';
   if (res.status === 401 || res.status === 403) return `it answered ${res.status}, so its token may not push to it`;
