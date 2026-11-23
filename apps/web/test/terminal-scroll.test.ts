@@ -1,6 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { attachTerminalScroll, restoreLiveTerminal, scrollTerminal, writeTerminalData } from '../src/ui/terminal-scroll';
+import { attachTerminalScroll, readingHistoryLine, restoreHistoryLine, restoreLiveTerminal, scrollTerminal, writeTerminalData } from '../src/ui/terminal-scroll';
 
 const terms: Terminal[] = [];
 type TestCore = { buffers: { active: { hasScrollback: boolean } }; viewport: { getLinesScrolled(event: WheelEvent): number }; _customWheelEventHandler(event: WheelEvent): boolean };
@@ -151,5 +151,32 @@ describe('local terminal scrollback', () => {
     expect(handled).toBe(false);
     expect(term.buffer.active.viewportY).toBe(term.buffer.active.baseY - 3);
     expect(data).not.toHaveBeenCalled();
+  });
+
+  it('reads and restores a scrolled-up history line on both normal and alternate screens', async () => {
+    const normal = await fixture();
+    expect(readingHistoryLine(normal)).toBeNull();
+    scrollTerminal(normal, -12);
+    const normalLine = readingHistoryLine(normal);
+    expect(normalLine).toBe(normal.buffer.active.baseY - 12);
+    normal.scrollToBottom();
+    restoreHistoryLine(normal, normalLine!);
+    expect(normal.buffer.active.viewportY).toBe(normalLine);
+    restoreHistoryLine(normal, 9999);
+    expect(normal.buffer.active.viewportY).toBe(normal.buffer.active.baseY);
+
+    const alt = await fixture(true);
+    expect(readingHistoryLine(alt)).toBeNull();
+    scrollTerminal(alt, -10);
+    const altLine = readingHistoryLine(alt);
+    expect(altLine).toBe(alt.buffer.normal.baseY - 10);
+    restoreLiveTerminal(alt);
+    expect(alt.buffer.active.type).toBe('alternate');
+    restoreHistoryLine(alt, altLine!);
+    expect(core(alt).buffers.active.hasScrollback).toBe(true);
+    expect(alt.buffer.normal.viewportY).toBe(altLine);
+    restoreLiveTerminal(alt);
+    restoreHistoryLine(alt, 9999);
+    expect(alt.buffer.active.type).toBe('alternate');
   });
 });

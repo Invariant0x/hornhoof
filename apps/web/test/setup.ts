@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, configure } from '@testing-library/react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, expect, vi } from 'vitest';
+import { connection } from '../src/connection';
 import { leaveLight } from '../src/guard';
 import { forgetOrg } from '../src/org';
 import { forgetRequestDrafts } from '../src/ui/Requests';
@@ -24,6 +25,8 @@ keyDefaults.iterations = 1000;
 
 afterEach(() => {
   cleanup();
+  /* A test that lost the server leaves no look waiting for the next one. */
+  connection.reset();
   /* Each test starts with no company known from the one before, and no answer typed in it. */
   forgetOrg();
   forgetRequestDrafts();

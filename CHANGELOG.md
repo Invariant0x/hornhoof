@@ -9,7 +9,11 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- When the server cannot be reached, restarts or installs an update, the page no longer shows a missing page, "Insufficient permissions" or "Hornhoof is not responding": a layer over the page says "No connection to the server" or "Server is updating" in the person's language, asks the server again with a growing wait, and once it answers every screen and the live stream come back with no reload, also for a page opened or reloaded during the outage. An answer of a hop in front of the server that is not Hornhoof's, such as a 404 page of the public link's relay, is read as a lost connection; what the server itself says is missing still reads as missing.
+- A browser that opens a page while the front or the keeper has no server behind it gets a plain page in English and Russian that says the same, opens by itself once the server answers and makes no request outside itself, instead of an unstyled line of text. The statuses stay 502 and 503, never 404.
 - The head of Design, named on a task's tracked work to check a screen's final look, can now read that task and its files and comment on it until the check ends, and the task's holder can message that head about it.
+- An employee's open terminal stays connected when idle or on a personal-plan fallback machine: the server sends WebSocket keepalive pings and checks fallback placement consistently, the window keeps the terminal mounted across brief node drops, and unavoidable reconnects or program restarts recover without flashing the loader or losing scrollback history and reading position.
+- An employee's program that waits between turns no longer starts anew when the terminal showing it loses its connection for a moment: the node keeps it for 30 seconds after its last view went, so the view that comes back finds it. A view ended because its person may no longer see the agent holds it no longer, and a program whose agent moved to another plan still goes at once.
 - A merge of a copy's database no longer stops with "No merge rule for public.world_layouts": the company's city and the CEO's orders to move its buildings merge like a person's map, and two cities that differ keep the leading one and go to the orchestrator.
 
 ## [0.42.0] - 2026-11-23
