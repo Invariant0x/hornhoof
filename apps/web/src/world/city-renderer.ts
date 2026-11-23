@@ -8,7 +8,7 @@ import type { WorldMode } from '@hornhoof/protocol/world';
 import type { Graphics } from 'pixi.js';
 import { artFootprintCentre, resolveBuildingArt, type BuildingArt } from './art';
 import { parseArtTint, type DisplayRunPool, type WorldArtLibrary } from './art-runtime';
-import type { CityBuilding, CityState, RoadTier } from './city-layout';
+import { cityDepthY, type CityBuilding, type CityState, type RoadTier } from './city-layout';
 import {
   resolveStageSpecForBuilding,
   type BuildingConstructionState,
@@ -935,13 +935,17 @@ export function renderCityToPixi(
     return da - db || ba.col - bb.col;
   });
   for (const item of renderItems) {
-    if (art && artIndex) {
+    if (art) {
+      /* Through the pool, art or placeholder, each building at its own depth among the plants and people. */
       const b = item.building;
-      const resolved = resolveBuildingArt(pack, artIndex, b, item.job, {
-        upgrading: b.kind === 'house' && Boolean(art.upgradingHouseIds?.has(b.id)),
-        districtColor: b.districtId ? districtColors[b.districtId] : undefined,
-        departmentColor: DEPARTMENT_BANNER_COLOR,
-      });
+      art.pool.depth = cityDepthY(b, tileH);
+      const resolved = artIndex
+        ? resolveBuildingArt(pack, artIndex, b, item.job, {
+            upgrading: b.kind === 'house' && Boolean(art.upgradingHouseIds?.has(b.id)),
+            districtColor: b.districtId ? districtColors[b.districtId] : undefined,
+            departmentColor: DEPARTMENT_BANNER_COLOR,
+          })
+        : null;
       if (!resolved || !drawBuildingArtPixi(art, resolved, b, tileW, tileH)) {
         drawBuildingPixi(art.pool.graphics(), b, pack, districtColors, tileW, tileH, item.job);
       }
@@ -950,8 +954,9 @@ export function renderCityToPixi(
     drawBuildingPixi(g, item.building, pack, districtColors, tileW, tileH, item.job);
   }
 
-  /* 5. Pending God's Word relocation destination markers (building itself stays at old tile!). */
-  const markerG = art && artIndex ? art.pool.graphics() : g;
+  /* 5. Pending God's Word relocation destination markers (building itself stays at old tile!), above everything. */
+  if (art) art.pool.depth = Number.MAX_SAFE_INTEGER;
+  const markerG = art ? art.pool.graphics() : g;
   for (const b of city.buildings) {
     const pend = b.pendingRelocation;
     if (!pend) continue;

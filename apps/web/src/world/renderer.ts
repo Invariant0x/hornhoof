@@ -1,7 +1,7 @@
 /* PixiJS v8 chunked isometric world renderer with hard zoom bounds, Retina/DPR-aware LOD baking,
    frustum culling, drag pan / cursor zoom / click picking and graceful Canvas 2D fallback. */
 
-import { Application, Container, Graphics, Sprite, Texture, TilingSprite } from 'pixi.js';
+import { Application, Container, Graphics, RenderLayer, Sprite, Texture, TilingSprite } from 'pixi.js';
 import {
   animationDetailForZoom,
   clamp,
@@ -57,6 +57,7 @@ import {
   type DepartmentFocusSpec,
 } from './department-focus';
 import { cityToPickableObjects } from './live-sync';
+import { cityPlantCover } from './city-layout';
 import {
   pickResidentAtScreen,
   stepResidentSimulation,
@@ -262,6 +263,7 @@ export class IsometricWorldEngine {
   private resizeObserver: ResizeObserver | null = null;
   private canvasElement: HTMLCanvasElement | null = null;
   private plantRenderer: PlantRenderer | null = null;
+  private plantCoverKey = 'none';
   /* A fixed wind clock in seconds for steady shots and video; null follows real time. */
   private windClockSec: number | null = null;
 
@@ -424,12 +426,16 @@ export class IsometricWorldEngine {
       worldContainer.addChild(reflectionLayer);
       worldContainer.addChild(chunkLayer);
       worldContainer.addChild(buildGridGraphic);
-      /* Shadows and plants, depth-sorted among themselves; buildings and people draw above this layer. */
+      /* Flat details and shadows of the plants lie on the ground under the city; plant bodies, buildings and people
+         render through one depth layer sorted by the world y of their ground point, so a palm in front of a wall
+         covers it and one behind is covered. */
       const plantLayer = new Container();
       worldContainer.addChild(plantLayer);
-      this.plantRenderer?.attachPixi(plantLayer, reflectionLayer);
+      const depthLayer = new RenderLayer({ sortableChildren: true });
+      this.plantRenderer?.attachPixi(plantLayer, reflectionLayer, depthLayer);
       worldContainer.addChild(cityGraphic);
       worldContainer.addChild(buildingArtLayer);
+      worldContainer.addChild(depthLayer);
       worldContainer.addChild(residentsGraphic);
       worldContainer.addChild(residentArtLayer);
       worldContainer.addChild(constructionGraphic);
@@ -443,9 +449,9 @@ export class IsometricWorldEngine {
       this.chunkLayer = chunkLayer;
       this.buildGridGraphic = buildGridGraphic;
       this.cityGraphic = cityGraphic;
-      this.buildingArtPool = new DisplayRunPool(buildingArtLayer);
+      this.buildingArtPool = new DisplayRunPool(buildingArtLayer, depthLayer);
       this.residentsGraphic = residentsGraphic;
-      this.residentArtPool = new DisplayRunPool(residentArtLayer);
+      this.residentArtPool = new DisplayRunPool(residentArtLayer, depthLayer);
       this.constructionGraphic = constructionGraphic;
       this.loopArtPool = new DisplayRunPool(loopArtLayer);
       this.departmentFocusGraphic = departmentFocusGraphic;
@@ -485,8 +491,9 @@ export class IsometricWorldEngine {
     });
   }
 
+  /* Also without pack art: placeholders then go through the pool too, to sort among the plants. */
   private cityArtContext(): CityArtContext | null {
-    if (!this.buildingArtPool || !this.pack.art) return null;
+    if (!this.buildingArtPool) return null;
     return {
       library: this.artLibrary,
       pool: this.buildingArtPool,
@@ -495,7 +502,7 @@ export class IsometricWorldEngine {
   }
 
   private residentArtContext(): ResidentArtContext | null {
-    if (!this.residentArtPool || !this.pack.art) return null;
+    if (!this.residentArtPool) return null;
     return { library: this.artLibrary, pool: this.residentArtPool };
   }
 
@@ -890,6 +897,7 @@ export class IsometricWorldEngine {
   /* Updates the Stage 4 isometric city placeholder layer and its pickable building footprints. */
   setCityRenderState(state: CityRenderState | null): void {
     this.cityRenderState = state;
+    this.refreshPlantCover();
     this.cityDirty = true;
     this.cityCullWindow = null;
     this.objects = state ? cityToPickableObjects(state.city) : [];
@@ -928,8 +936,24 @@ export class IsometricWorldEngine {
   }
 
   markCityDirty(): void {
+    this.refreshPlantCover();
     this.cityDirty = true;
     this.dirtyScene = true;
+  }
+
+  /* Plants of the map leave the ground the city stands on; recomputed only when the city's ground changes. */
+  private refreshPlantCover(): void {
+    if (!this.plantRenderer) return;
+    const city = this.cityRenderState?.city ?? null;
+    let key = 'none';
+    if (city) {
+      let sum = 0;
+      for (const b of city.buildings) sum = (sum * 31 + b.col * 7 + b.row * 13 + b.spanCol * 3 + b.spanRow) % 1_000_000_007;
+      key = `${city.buildings.length}|${city.roads.size}|${city.wallTiles.size}|${sum}`;
+    }
+    if (key === this.plantCoverKey) return;
+    this.plantCoverKey = key;
+    this.plantRenderer.setCityCover(city ? cityPlantCover(city) : null);
   }
 
   setSelectedResidentId(residentId: string | null): void {

@@ -789,6 +789,7 @@ export function renderResidentsToPixi(
     if (city.buildings.length > 0) {
       const altarPos = tileCenterToWorld(sim.altarTile.col, sim.altarTile.row, tileW, tileH);
       if (inRect(altarPos.x, altarPos.y, visibleRect, 140)) {
+        if (art) art.pool.depth = altarPos.y;
         if (!(art && artIndex && drawAltarArtPixi(art, artIndex, sim, tileW, tileH))) {
           drawAltarPixi(g, sim, pack, tileW, tileH, detail);
         }
@@ -811,8 +812,10 @@ export function renderResidentsToPixi(
     const r = visibleScratch[i]!;
     outDrawnIds?.add(r.id);
     const selected = r.id === selectedResidentId;
-    if (art && artIndex) {
-      const resolved = resolveResidentArt(pack, artIndex, r, sim.timeSec);
+    if (art) {
+      /* Through the pool, art or placeholder, at the depth of the feet among buildings and plants. */
+      art.pool.depth = tileCenterToWorld(r.col, r.row, tileW, tileH).y;
+      const resolved = artIndex ? resolveResidentArt(pack, artIndex, r, sim.timeSec) : null;
       if (!resolved || !drawResidentArtPixi(art, resolved, r, pack, tileW, tileH, selected)) {
         drawResidentPixi(art.pool.graphics(), r, sim.timeSec, tileW, tileH, detail, selected);
       }
@@ -822,7 +825,8 @@ export function renderResidentsToPixi(
   }
 
   if (city) {
-    drawDepartmentAlertsPixi(art && artIndex ? art.pool.graphics() : g, sim, city, visibleRect, tileW, tileH, detail);
+    if (art) art.pool.depth = Number.MAX_SAFE_INTEGER;
+    drawDepartmentAlertsPixi(art ? art.pool.graphics() : g, sim, city, visibleRect, tileW, tileH, detail);
   }
 }
 

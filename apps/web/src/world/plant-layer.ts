@@ -12,8 +12,9 @@ import { sampleWind } from './wind';
 
 /* Floats per draw item: atlas frame, the affine matrix a, b, c, d, tx, ty (world pixels), then for a painted plant
    bent by its wind weights: the sideways push of a fully free pixel (picture pixels), the leaf flutter in picture pixels
-   and the flutter's phase. Zero for everything else. */
-export const ITEM_STRIDE = 10;
+   and the flutter's phase (zero for everything else), and for a plant's own parts the world y of its root: the depth
+   it sorts by among buildings and people. */
+export const ITEM_STRIDE = 11;
 /* Share of a painted plant's height its free tips move per unit of wind lean (README of the painted set: about 3 to
    4% of the height from side to side in an ordinary wind). */
 const PAINTED_SWAY = 0.11;
@@ -150,6 +151,7 @@ export class PlantLayout {
       data[o + 7] = bent ? w.lean * PAINTED_SWAY * info.heightPx * fx : 0;
       data[o + 8] = bent ? PAINTED_FLUTTER_PX * kind.sway.flutter : 0;
       data[o + 9] = bent ? timeSec * Math.PI * 2 * kind.sway.frequency * FLUTTER_SPEEDUP + p.phase : 0;
+      data[o + 10] = p.y;
 
       if (reflections && p.nearWater) {
         /* The plant mirrored about the line through its root: it hangs below the root, over the water. */
@@ -186,6 +188,7 @@ export class PlantLayout {
         data[o + 4] = cd;
         data[o + 5] = hubX - (ca * cp.pivotX + cc * cp.pivotY);
         data[o + 6] = hubY - (cb * cp.pivotX + cd * cp.pivotY);
+        data[o + 10] = p.y;
       }
 
       if (shadows) {

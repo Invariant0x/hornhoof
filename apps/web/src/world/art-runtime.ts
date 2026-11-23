@@ -3,7 +3,7 @@
    A pack without art, a folder without an index or a file that fails to load all leave
    the geometric placeholders in place. */
 
-import { Assets, Container, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
+import { Assets, Container, Graphics, Rectangle, RenderLayer, Sprite, Texture } from 'pixi.js';
 import {
   ART_CONTRACT_VERSION,
   ART_INDEX_FILE,
@@ -136,14 +136,28 @@ export class WorldArtLibrary {
 }
 
 /* Keeps placeholder graphics and art sprites interleaved in painter's order inside one container:
-   consecutive placeholders share one Graphics, each sprite sits between them where it belongs. */
+   consecutive placeholders share one Graphics, each sprite sits between them where it belongs.
+   With a depth layer, every object also renders through that layer at the current `depth` (world y of its ground
+   point), so the plants and people of other pools sort in between; placeholders share a Graphics only at one depth. */
 export class DisplayRunPool {
   readonly container: Container;
   private readonly freeGraphics: Graphics[] = [];
   private readonly freeSprites: Sprite[] = [];
+  private readonly depthLayer: RenderLayer | null;
+  /* Depth of the objects handed out next. */
+  depth = 0;
 
-  constructor(container: Container) {
+  constructor(container: Container, depthLayer: RenderLayer | null = null) {
     this.container = container;
+    this.depthLayer = depthLayer;
+  }
+
+  private place(child: Graphics | Sprite): void {
+    this.container.addChild(child);
+    if (this.depthLayer) {
+      child.zIndex = this.depth;
+      this.depthLayer.attach(child);
+    }
   }
 
   begin(): void {
@@ -155,10 +169,10 @@ export class DisplayRunPool {
 
   graphics(): Graphics {
     const last = this.container.children[this.container.children.length - 1];
-    if (last instanceof Graphics) return last;
+    if (last instanceof Graphics && (!this.depthLayer || last.zIndex === this.depth)) return last;
     const g = this.freeGraphics.pop() ?? new Graphics();
     g.clear();
-    this.container.addChild(g);
+    this.place(g);
     return g;
   }
 
@@ -169,7 +183,7 @@ export class DisplayRunPool {
     s.alpha = 1;
     s.rotation = 0;
     s.visible = true;
-    this.container.addChild(s);
+    this.place(s);
     return s;
   }
 

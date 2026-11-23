@@ -1983,6 +1983,39 @@ export function verifyCityInvariants(city: CityState, map: GeneratedWorldMap): C
   };
 }
 
+/* How far (tiles) plants keep from a footprint's edge, so no root stands right against a wall. */
+const PLANT_CLEARANCE = 0.15;
+
+/* Whether the city claims the ground at a point (fractional tile coordinates): a footprint with a thin margin, a
+   street or a wall. Plants of the map do not grow there. */
+export function cityPlantCover(city: CityState): (col: number, row: number) => boolean {
+  const near = new Set<string>();
+  for (const b of city.buildings) {
+    for (let r = b.row - 1; r <= b.row + b.spanRow; r++) {
+      for (let c = b.col - 1; c <= b.col + b.spanCol; c++) near.add(tileKey(c, r));
+    }
+  }
+  return (col, row) => {
+    const k = tileKey(Math.floor(col), Math.floor(row));
+    if (city.roads.has(k) || city.wallTiles.has(k)) return true;
+    if (!near.has(k)) return false;
+    return city.buildings.some(
+      b =>
+        col > b.col - PLANT_CLEARANCE &&
+        col < b.col + b.spanCol + PLANT_CLEARANCE &&
+        row > b.row - PLANT_CLEARANCE &&
+        row < b.row + b.spanRow + PLANT_CLEARANCE,
+    );
+  };
+}
+
+/* Depth key of a building in world y: the height of its side corners. A point (plant root, feet) in front of either
+   front wall lies lower on screen than this, a point behind either back wall higher, so one sort by y draws plants,
+   people and buildings in the right order. The order buildings sort among themselves by is the same key. */
+export function cityDepthY(b: Pick<CityBuilding, 'col' | 'row' | 'spanCol' | 'spanRow'>, tileH: number): number {
+  return (b.col + b.row + (b.spanCol + b.spanRow) / 2) * (tileH / 2);
+}
+
 export function bindCityMap(city: CityState, map: GeneratedWorldMap): CityState {
   (city as CityState & { _map?: GeneratedWorldMap })._map = map;
   return city;

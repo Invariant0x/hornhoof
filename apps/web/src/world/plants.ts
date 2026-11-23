@@ -281,6 +281,16 @@ export function generatePlants(pack: WorldPackManifest, map: GeneratedWorldMap):
 
 /* The plants whose body can show inside a world rectangle. `reach` is the largest plant height and half-width to allow
    for: a root below the bottom edge can still have its crown in view, and one beside the edge can lean in. */
+/* The field without the plants whose root `cover` claims (a city's buildings, streets and walls), in the same order;
+   every other plant keeps its place, so the map looks the same wherever the city does not stand. */
+export function clearPlantsFromCity(field: PlantField, cover: (col: number, row: number) => boolean): PlantField {
+  const plants = field.plants.filter(p => !cover(p.col, p.row));
+  if (plants.length === field.plants.length) return field;
+  const countsByKind = field.countsByKind.map(() => 0);
+  for (const p of plants) countsByKind[p.kindIndex] = (countsByKind[p.kindIndex] ?? 0) + 1;
+  return { plants, countsByKind, maxHeightPx: field.maxHeightPx };
+}
+
 export function visiblePlants(field: PlantField, rect: WorldRect, reach: number): PlacedPlant[] {
   const { plants } = field;
   let lo = 0;

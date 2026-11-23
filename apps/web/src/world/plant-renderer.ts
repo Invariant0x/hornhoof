@@ -2,13 +2,13 @@
    One instance per map. WebGL draws sprites from one shared atlas; the canvas fallback draws the same layout with
    drawImage. The engine keeps one call per frame: update (WebGL) or drawFallback2D. Knows no species and no world. */
 
-import { Container, Matrix, MeshSimple, Rectangle, Sprite, Texture } from 'pixi.js';
+import { Container, Matrix, MeshSimple, Rectangle, RenderLayer, Sprite, Texture } from 'pixi.js';
 import { masterTileW } from './art';
 import type { WorldRect } from './coords';
 import type { WorldPackManifest } from './manifest';
 import { createDrawList, ITEM_STRIDE, PlantLayout, type PlantDrawList } from './plant-layer';
 import { buildPlantAtlas, MESH_COLS, MESH_ROWS, type PlantAtlas } from './plant-sprites';
-import { generatePlants, type PlantField } from './plants';
+import { clearPlantsFromCity, generatePlants, type PlantField } from './plants';
 import type { LoadedTerrainArt } from './terrain-art';
 import type { GeneratedWorldMap } from './terrain-engine';
 
@@ -100,8 +100,11 @@ function parseColor(color: string): number {
 }
 
 export class PlantRenderer {
-  readonly field: PlantField;
+  /* The plants drawn: the map's own (wild) ones, less those a city stands on. */
+  field: PlantField;
+  private readonly wild: PlantField;
   private readonly pack: WorldPackManifest;
+  private depthLayer: RenderLayer | null = null;
   private atlas: PlantAtlas | null = null;
   private layout: PlantLayout | null = null;
   private readonly list: PlantDrawList = createDrawList();
@@ -128,6 +131,17 @@ export class PlantRenderer {
   private constructor(pack: WorldPackManifest, field: PlantField) {
     this.pack = pack;
     this.field = field;
+    this.wild = field;
+  }
+
+  /* Leaves out the plants whose root the city covers (its footprints, streets and walls); null brings them all back. */
+  setCityCover(cover: ((col: number, row: number) => boolean) | null): void {
+    const next = cover ? clearPlantsFromCity(this.wild, cover) : this.wild;
+    if (next === this.field) return;
+    this.field = next;
+    if (this.layout && this.atlas) {
+      this.layout = new PlantLayout({ pack: this.pack, field: this.field, sprites: this.atlas.sprites, lighting: this.pack.lighting });
+    }
   }
 
   /* Null when the pack has no plants or the map grows none, so the engine pays nothing for a bare world. */
@@ -161,7 +175,8 @@ export class PlantRenderer {
 
   /* WebGL: puts the flat details, shadow and plant layers into `parent`, between the ground and whatever stands on
      it, and the reflections into `waterParent`, which lies under the ground so only open water shows them. */
-  attachPixi(parent: Container, waterParent?: Container): void {
+  attachPixi(parent: Container, waterParent?: Container, depthLayer?: RenderLayer): void {
+    this.depthLayer = depthLayer ?? null;
     const atlas = this.ensureAtlas();
     const source = Texture.from(atlas.canvas);
     source.source.autoGenerateMipmaps = true;
@@ -197,7 +212,8 @@ export class PlantRenderer {
   private body(i: number): MeshSimple {
     let mesh = this.bodyPool[i];
     if (!mesh) {
-      this.sprite(this.bodySpritePool, this.bodyLayer!, i, false);
+      const sprite = this.sprite(this.bodySpritePool, this.bodyLayer!, i, false);
+      this.depthLayer?.attach(sprite);
       mesh = new MeshSimple({
         texture: this.atlasTexture!,
         vertices: new Float32Array(MESH_VERTS * 2),
@@ -206,6 +222,7 @@ export class PlantRenderer {
       });
       if (this.pack.lighting) mesh.tint = parseColor(this.pack.lighting.sunTint);
       this.bodyLayer!.addChild(mesh);
+      this.depthLayer?.attach(mesh);
       this.bodyPool.push(mesh);
       this.bodyFrame.push(-1);
     }
@@ -290,6 +307,8 @@ export class PlantRenderer {
       const c = data[o + 3]!;
       const d = data[o + 4]!;
       const push = data[o + 7]!;
+      mesh.zIndex = data[o + 10]!;
+      sprite.zIndex = data[o + 10]!;
       if (bf.weights && bf.h >= MESH_MIN_PICTURE_H) {
         if (this.bodyFrame[k] !== frame) {
           this.setUvs(mesh, frame);
