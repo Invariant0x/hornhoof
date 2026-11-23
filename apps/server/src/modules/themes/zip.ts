@@ -14,9 +14,10 @@ export class ArchiveRefused extends Error {
   }
 }
 
-const refuse = (code: ThemeProblemCode, path?: string): never => {
+/* Throws, so a check that fails narrows the code after it. */
+function refuse(code: ThemeProblemCode, path?: string): never {
   throw new ArchiveRefused(path === undefined ? { code } : { code, path });
-};
+}
 
 /* Where the bytes of an archive come from: a file on disk, read where it is needed, or bytes already in memory. */
 export type ZipSource = Readonly<{ size: number; read: (position: number, length: number) => Promise<Buffer> }>;

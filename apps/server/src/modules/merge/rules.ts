@@ -117,6 +117,9 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ...each(['request_internal', 'proposals', 'approval_policies', 'wait_policies'], rows('protected')),
 
   ...each(['companies', 'departments', 'teams', 'agents', 'improvements', 'improvement_submissions', 'test_parts', 'backlog_items', 'briefings', 'map_layouts'], rows('work')),
+  /* The themes the company installed and their files: two copies that hold another version of one theme keep the
+     leader's, and a file of a version the leader does not hold stays out with it. */
+  ...each(['themes', 'theme_files'], rows('work')),
   /* The cards of Hornhoof's own feedback inbox and who sent each: a card only the source holds whose number or finding the
      leader gave another card stays out. */
   ...each(['feedback_inbox', 'feedback_signals', 'feedback_submissions'], rows('work')),

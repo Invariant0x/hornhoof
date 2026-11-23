@@ -39,23 +39,24 @@ import { orchestratorOf } from '../conversation/turn-records.js';
 import { createTask } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
 import { readWorldLiveState } from './live-data.js';
-import { isAllowedCompanyTheme, worldPackForTheme } from './packs/index.js';
+import { companyWorldPacks, isInstalledTheme } from '../themes/store.js';
+import { isAllowedCompanyTheme, worldPackForTheme, type WorldPackRegistry } from './packs/index.js';
 
 const MAX_STORED_RELOCATIONS = 200;
 
-function requireWorldCeo(me: Person): void {
+export function requireWorldCeo(me: Person): void {
   if (!me.isOwner || me.viaHead) {
     throw new ApiError(403, 'forbidden', 'Only the CEO can change the company theme or rename agents for a world.', 'not_owner_session');
   }
 }
 
 function themeViewOf(
-  ctx: Ctx,
+  packs: WorldPackRegistry,
   theme: string,
   canEdit: boolean,
   extra?: { renamedAgentsCount?: number; restoredNamesCount?: number },
 ): WorldThemeView {
-  const pack = worldPackForTheme(ctx.worldPacks, theme);
+  const pack = worldPackForTheme(packs, theme);
   const voiceSamples = pack?.skills.find(s => s.voice)?.voice?.samples;
   return {
     theme,
@@ -126,6 +127,40 @@ async function restoreCompanyAgentNames(db: Ctx['db'], me: Person): Promise<Worl
   return { restoredCount: items.length, items };
 }
 
+/* Turns a theme on for the whole company: a standard one, a world Hornhoof ships, or one the company installed. Leaving a
+   world for a theme with none gives agents back their own names, so no trace of the world stays. */
+export async function setCompanyTheme(ctx: Ctx, me: Person, theme: string): Promise<WorldThemeView> {
+  const { db } = ctx;
+  const packs = await companyWorldPacks(ctx, me.companyId);
+  if (!isAllowedCompanyTheme(packs, theme) && !(await isInstalledTheme(db, me.companyId, theme))) {
+    throw new ApiError(400, 'validation', `Unknown company theme "${theme}".`);
+  }
+  await db.update(companies).set({ theme }).where(eq(companies.id, me.companyId));
+
+  let restoredNamesCount = 0;
+  const nextPack = worldPackForTheme(packs, theme);
+  if (!nextPack) {
+    const restored = await restoreCompanyAgentNames(db, me);
+    restoredNamesCount = restored.restoredCount;
+  }
+
+  const remainingRenamed = nextPack
+    ? (
+        await db
+          .select({ id: agents.id })
+          .from(agents)
+          .where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), ne(agents.kind, 'assistant'), isNotNull(agents.originalName)))
+      ).length
+    : 0;
+
+  ctx.bus.publish(me.companyId, { type: 'company_theme', theme });
+  ctx.bus.publish(me.companyId, { type: 'org' });
+  return themeViewOf(packs, theme, true, {
+    renamedAgentsCount: remainingRenamed,
+    ...(restoredNamesCount > 0 ? { restoredNamesCount } : {}),
+  });
+}
+
 export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
@@ -146,7 +181,7 @@ export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
       .select({ id: agents.id })
       .from(agents)
       .where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), ne(agents.kind, 'assistant'), isNotNull(agents.originalName)));
-    return themeViewOf(ctx, company?.theme ?? DEFAULT_COMPANY_THEME, Boolean(me.isOwner && !me.viaHead), {
+    return themeViewOf(await companyWorldPacks(ctx, me.companyId), company?.theme ?? DEFAULT_COMPANY_THEME, Boolean(me.isOwner && !me.viaHead), {
       renamedAgentsCount: renamed.length,
     });
   });
@@ -157,36 +192,7 @@ export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     requireWorldCeo(me);
     const body = WorldThemeUpdateSchema.parse(req.body);
-    if (!isAllowedCompanyTheme(ctx.worldPacks, body.theme)) {
-      throw new ApiError(400, 'validation', `Unknown company theme "${body.theme}".`);
-    }
-    await db
-      .update(companies)
-      .set({ theme: body.theme })
-      .where(eq(companies.id, me.companyId));
-
-    let restoredNamesCount = 0;
-    const nextPack = worldPackForTheme(ctx.worldPacks, body.theme);
-    if (!nextPack) {
-      const restored = await restoreCompanyAgentNames(db, me);
-      restoredNamesCount = restored.restoredCount;
-    }
-
-    const remainingRenamed = nextPack
-      ? (
-          await db
-            .select({ id: agents.id })
-            .from(agents)
-            .where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), ne(agents.kind, 'assistant'), isNotNull(agents.originalName)))
-        ).length
-      : 0;
-
-    ctx.bus.publish(me.companyId, { type: 'company_theme', theme: body.theme });
-    ctx.bus.publish(me.companyId, { type: 'org' });
-    return themeViewOf(ctx, body.theme, true, {
-      renamedAgentsCount: remainingRenamed,
-      ...(restoredNamesCount > 0 ? { restoredNamesCount } : {}),
-    });
+    return setCompanyTheme(ctx, me, body.theme);
   });
 
   /* Preview of era names for all active non-assistant agents before CEO confirmation. */
@@ -195,7 +201,7 @@ export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
     requireWorldCeo(me);
     const { lang } = WorldRenamePreviewQuerySchema.parse(req.query);
     const [company] = await db.select({ theme: companies.theme }).from(companies).where(eq(companies.id, me.companyId));
-    const pack = worldPackForTheme(ctx.worldPacks, company?.theme);
+    const pack = worldPackForTheme(await companyWorldPacks(ctx, me.companyId), company?.theme);
     if (!pack) {
       throw new ApiError(409, 'conflict', 'No active world pack is selected for this company.');
     }
@@ -218,7 +224,7 @@ export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
     requireWorldCeo(me);
     const body = WorldRenameExecuteSchema.parse(req.body);
     const [company] = await db.select({ theme: companies.theme }).from(companies).where(eq(companies.id, me.companyId));
-    const pack = worldPackForTheme(ctx.worldPacks, company?.theme);
+    const pack = worldPackForTheme(await companyWorldPacks(ctx, me.companyId), company?.theme);
     if (!pack) {
       throw new ApiError(409, 'conflict', 'No active world pack is selected for this company.');
     }

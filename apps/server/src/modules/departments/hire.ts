@@ -7,7 +7,8 @@ import { modelOnPlan, tierIn } from '../agents/role-model.js';
 import type { Tx } from '../tasks/state.js';
 import type { Role } from '../templates/load.js';
 import type { HireLine } from '../tools/staff.js';
-import { defaultWorldPacks, worldPackForTheme } from '../world/packs/index.js';
+import { companyWorldPacks } from '../themes/store.js';
+import { worldPackForTheme } from '../world/packs/index.js';
 
 export type Hired = { id: string; name: string; role: string; title: string };
 
@@ -39,7 +40,7 @@ async function resolveHireName(
 ): Promise<string> {
   if (!isDefaultRoleName(requestedName, role)) return requestedName;
   const [company] = await tx.select({ theme: companies.theme }).from(companies).where(eq(companies.id, companyId));
-  const pack = worldPackForTheme(ctx.worldPacks ?? defaultWorldPacks(), company?.theme);
+  const pack = worldPackForTheme(await companyWorldPacks({ db: tx, worldPacks: ctx.worldPacks }, companyId), company?.theme);
   if (!pack) return requestedName;
 
   const existing = await tx

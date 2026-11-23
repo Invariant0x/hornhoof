@@ -11,9 +11,10 @@ import { ArchiveRefused, openZip, type ZipFile, type ZipSource } from './zip.js'
    each part by its own check. The first problem refuses the archive. What passed is built anew from the values that
    passed, and only the files the theme serves are kept. */
 
-const refuse = (code: ThemeProblemCode, path?: string, detail?: string): never => {
+/* Throws, so a check that fails narrows the code after it. */
+function refuse(code: ThemeProblemCode, path?: string, detail?: string): never {
   throw new ArchiveRefused({ code, ...(path === undefined ? {} : { path }), ...(detail === undefined ? {} : { detail: detail.slice(0, THEME_FILE_LIMITS.shown * 3) }) });
-};
+}
 
 const LANGUAGE = /^[a-z]{2,3}(?:-[A-Z]{2})?$/;
 const plain = (max: number) => z.string().trim().min(1).max(max);

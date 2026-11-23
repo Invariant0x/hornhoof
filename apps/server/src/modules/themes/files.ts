@@ -17,9 +17,10 @@ export const MEDIA: Readonly<Record<Exclude<FileKind, 'index'>, MediaType>> = {
   woff2: 'font/woff2',
 };
 
-const refuse = (code: ThemeProblemCode, path: string, detail?: string): never => {
+/* Throws, so a check that fails narrows the code after it. */
+function refuse(code: ThemeProblemCode, path: string, detail?: string): never {
   throw new ArchiveRefused(detail === undefined ? { code, path } : { code, path, detail });
-};
+}
 
 /* Files that run or render as a page in a browser, refused with their own reason so an author knows why. */
 const SCRIPT = /\.(?:m?js|cjs|jsx|tsx?|wasm|html?|xhtml|xml|svgz?|css|php|sh|bat|cmd|exe|dll|so|dylib|jar|py|rb|pl)$/i;
