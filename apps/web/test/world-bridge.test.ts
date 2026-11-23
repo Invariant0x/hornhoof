@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { bridgeSite, BRIDGE_LENGTH, bridgeTiles, type BridgeSite } from '../src/world/bridge-site';
+import { ART_CONTRACT_VERSION, declaredArtFiles, validateArtIndex, type ArtIndex } from '../src/world/art';
+import { bridgeSite, BRIDGE_LENGTH, bridgeTiles, hasBridgeArt, type BridgeSite } from '../src/world/bridge-site';
 import { applyBridgeRule, deserializeCityLayout, serializeCityLayout, type CityState } from '../src/world/city-layout';
+import { roadMarks } from '../src/world/city-renderer';
 import { runFiveYearSimulation } from '../src/world/simulator';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../src/world/terrain-engine';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
@@ -104,5 +106,51 @@ describe("a city's roads over water", () => {
     expect(waterRoads(without, map)).toEqual([]);
     const withArt = applyBridgeRule(deserializeCityLayout(old), map, site);
     expect(waterRoads(withArt, map).sort()).toEqual(bridgeTiles(site).map(t => `${t.col},${t.row}`).sort());
+  });
+});
+
+describe("a map's bridge in the pictures", () => {
+  const PIECES = ['bridge/u_start.png', 'bridge/u_span.png', 'bridge/u_end.png', 'bridge/v_start.png', 'bridge/v_span.png', 'bridge/v_end.png'];
+  const piece = { w: 320, h: 400, passport: { groundAnchor: { x: 160, y: 330 }, corners: { top: { x: 160, y: 270 }, right: { x: 280, y: 330 }, bottom: { x: 160, y: 390 }, left: { x: 40, y: 330 } } } };
+  const indexOf = (paths: readonly string[]): ArtIndex => ({ contract: ART_CONTRACT_VERSION, pack: EGYPT_WORLD_PACK.id, files: Object.fromEntries(paths.map(p => [p, piece])) });
+
+  it('is a slot of the pack: start, span and end pieces in both directions, each a one-tile picture with a passport', () => {
+    const declared = declaredArtFiles(EGYPT_WORLD_PACK).filter(f => f.role === 'bridge');
+    expect(declared.map(f => f.path).sort()).toEqual([...PIECES].sort());
+    expect(declared.every(f => f.passport === 'picture' && f.required)).toBe(true);
+    expect(validateArtIndex(EGYPT_WORLD_PACK, indexOf(PIECES)).errors).toEqual([]);
+    const wide = { ...indexOf(PIECES), files: { ...indexOf(PIECES).files, 'bridge/u_span.png': { ...piece, passport: { ...piece.passport, corners: { ...piece.passport.corners, left: { x: 0, y: 330 }, right: { x: 320, y: 330 } } } } } };
+    expect(validateArtIndex(EGYPT_WORLD_PACK, wide).errors.join('\n')).toMatch(/bridge\/u_span\.png/);
+  });
+
+  it('counts as there only when every piece is in the folder', () => {
+    expect(hasBridgeArt(EGYPT_WORLD_PACK, indexOf(PIECES))).toBe(true);
+    expect(hasBridgeArt(EGYPT_WORLD_PACK, indexOf(PIECES.slice(1)))).toBe(false);
+    expect(hasBridgeArt(EGYPT_WORLD_PACK, null)).toBe(false);
+  });
+
+  it('draws nothing on water while there is no bridge: no stand-in, and no street tile left there', () => {
+    const map = mapOf('hornhoof');
+    const site = bridgeSite(map)!;
+    const { city } = runFiveYearSimulation(EGYPT_WORLD_PACK, { seed: 'hornhoof', mapSize: EGYPT_WORLD_PACK.mapSize, orderChaos: 0.5, recordSnapshots: false, bridge: null });
+    /* A street tile an old rule left on the water. */
+    city.roads.set(`${site.col},${site.row}`, { col: site.col, row: site.row, tier: 'dirt', traffic: 4, bridge: true, wasOldWall: false, grandAvenue: false });
+    for (const painted of [false, true]) {
+      const marks = roadMarks(city, painted);
+      expect(marks.bridge).toEqual([]);
+      expect(marks.streets.filter(road => map.isLiquid(road.col, road.row))).toEqual([]);
+    }
+  });
+
+  it('draws the bridge from its pieces along its axis, start, spans and end, and the painted streets in the ground only', () => {
+    const map = mapOf('hornhoof');
+    const site = bridgeSite(map)!;
+    const { city } = runFiveYearSimulation(EGYPT_WORLD_PACK, { seed: 'hornhoof', mapSize: EGYPT_WORLD_PACK.mapSize, orderChaos: 0.5, recordSnapshots: false, bridge: site });
+    const marks = roadMarks(city, true);
+    expect(marks.streets).toEqual([]);
+    const pieces = ['start', ...Array.from({ length: site.length - 2 }, () => 'span'), 'end'].map(p => `bridge/${site.axis}_${p}.png`);
+    expect(marks.bridge.map(m => m.path)).toEqual(pieces);
+    expect(marks.bridge.map(m => `${m.road.col},${m.road.row}`)).toEqual(bridgeTiles(site).map(t => `${t.col},${t.row}`));
+    expect(roadMarks(city, false).streets.length).toBe(city.roads.size - site.length);
   });
 });
