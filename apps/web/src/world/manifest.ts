@@ -54,7 +54,8 @@ export type FrontWall = 'front_right' | 'front_left';
 
 /* How the artist drew a building kind: which front wall holds the door and at which tile row of that wall,
    counted from the front corner (0 = the row at the corner). The building keeps its front corner while it
-   grows through spans (square sizes in tiles, smallest first); the last span is its lot. */
+   grows through spans (square sizes in tiles, one per growth step of the kind, never smaller than the one
+   before, so a kind may keep a size for two steps); the last span is its lot. */
 export type BuildingLayoutSpec = Readonly<{
   door: Readonly<{ wall: FrontWall; fromFront: number }>;
   spans: readonly number[];
@@ -922,8 +923,8 @@ function validateBuildingLayout(rules: BuildingLayoutRules): string[] {
     const spansOk =
       spans.length > 0 &&
       spans.every(s => Number.isInteger(s) && s >= 1 && s <= 6) &&
-      spans.every((s, i) => i === 0 || s > spans[i - 1]!);
-    if (!spansOk) errors.push(`${at}.spans must be growing whole sizes from 1 to 6`);
+      spans.every((s, i) => i === 0 || s >= spans[i - 1]!);
+    if (!spansOk) errors.push(`${at}.spans must be whole sizes from 1 to 6 that never shrink`);
     const wall = rule.door?.wall;
     if (wall !== 'front_right' && wall !== 'front_left') {
       errors.push(`${at}.door.wall must be front_right or front_left`);

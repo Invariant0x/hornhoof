@@ -14,8 +14,8 @@ npx tsx apps/web/scripts/world-art-index.ts --pack egypt --list
 
 | Kind | Step folder | Footprint | From | What |
 |---|---|---|---|---|
-| house | `hut` | 1x1 | level 1 | Reed hut |
-| house | `mudbrick` | 2x2 | level 4 | Mudbrick house |
+| house | `hut` | 2x2 | level 1 | Reed hut (reference 01, crop hut_A) |
+| house | `mudbrick` | 3x3 | level 4 | Mudbrick house (reference 01, crop mud_B) |
 | house | `painted` | 3x3 | level 8 | Painted house |
 | house | `villa` | 4x4 | level 15 | Villa with a pool |
 | department | `shrine` | 3x3 | stage 1 | Department shrine |

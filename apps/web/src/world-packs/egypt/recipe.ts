@@ -33,6 +33,8 @@ export const EGYPT_MATERIAL_IDS = [
   'quarry',
   'silt',
   'dust',
+  /* Cleared building lots (#1958): the recipe never places it, the city lays it over each lot. */
+  'cleared',
 ] as const;
 
 type EgyptSeedParams = Readonly<{

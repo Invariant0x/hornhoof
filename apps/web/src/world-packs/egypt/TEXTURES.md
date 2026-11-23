@@ -14,7 +14,7 @@ archives `egypt-ground-painted.tar.gz` and `egypt-veg-painted.tar.gz` attached t
 
 | Picture | Files in the art folder | Used for |
 |---|---|---|
-| Ground textures, 1024 x 1024, 256 texels per tile, seamless | `ground/plain.png`, `dune.png`, `bank.png`, `fertile.png`, `ridge.png`, `quarry.png` | materials sand and dust, dune, bank and silt, grass, rock, quarry (`terrainArt.ground` in `pack.ts`) |
+| Ground textures, 1024 x 1024, 256 texels per tile, seamless | `ground/plain.png`, `cleared.png`, `dune.png`, `bank.png`, `fertile.png`, `ridge.png`, `quarry.png` | materials sand and dust, cleared (building lots, #1958), dune, bank and silt, grass, rock, quarry (`terrainArt.ground` in `pack.ts`) |
 | Edge masks, 1024 x 256 grey | `ground/edges/plain_bank.png`, `bank_fertile.png`, `plain_dune.png`, `plain_ridge.png`, `river_bank.png` | painted edges between grounds and at the waterline (`terrainArt.edges`, `shoreEdge`) |
 | Water layers | `ground/river_bed.png`, `river_ripples.png`, `river.png` | the animated water (bed relief and two drifting ripple layers over the base colour) and irrigation ditches |
 | Path strip | `roads/trail.png` | worn paths over the sand (`terrainArt.pathStrip`) |

@@ -1,6 +1,7 @@
 import { Matrix, type Sprite } from 'pixi.js';
 import { describe, expect, it } from 'vitest';
-import { validateArtIndex, type ArtIndex, type BuildingPicturePassport } from '../src/world/art';
+import { resolveBuildingArt, validateArtIndex, type ArtIndex, type BuildingPicturePassport } from '../src/world/art';
+import type { CityBuilding } from '../src/world/city-layout';
 import { swayBuildingLayers, type SwayingLayer } from '../src/world/city-renderer';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
 
@@ -38,6 +39,37 @@ describe('Building layers over a picture (contract 2)', () => {
     expect(Math.max(...ys)).toBeGreaterThan(0.5);
     expect(Math.min(...ys)).toBeLessThan(-0.5);
     for (const dy of ys) expect(Math.abs(dy)).toBeLessThanOrEqual(0.03 * dist * 0.25 + 1e-9);
+  });
+
+  it('draws a home with a yard as the pilot passport orders its layers: the house, its shadow, the yard fence (props), then the swaying awning', () => {
+    const at = 'buildings/house/mudbrick/';
+    const corners = { top: { x: 360, y: 599 }, right: { x: 720, y: 779 }, bottom: { x: 360, y: 959 }, left: { x: 0, y: 779 } };
+    const layers = [
+      { file: 'shadow.png', blend: 'multiply' as const },
+      { file: 'props.png' },
+      { file: 'awning.png', sway: { pivot: [{ x: 378, y: 680 }, { x: 503, y: 618 }] as const } },
+    ];
+    const index: ArtIndex = {
+      contract: 2,
+      pack: 'egypt',
+      files: {
+        [`${at}complete.png`]: { w: 720, h: 960, passport: { groundAnchor: { x: 360, y: 779 }, corners, layers } },
+        [`${at}shadow.png`]: { w: 720, h: 960 },
+        [`${at}props.png`]: { w: 720, h: 960 },
+        [`${at}awning.png`]: { w: 720, h: 960 },
+      },
+    };
+    const report = validateArtIndex(EGYPT_WORLD_PACK, index);
+    expect(report.errors).toEqual([]);
+    expect(report.warnings).toEqual([]);
+    const house = {
+      id: 'h1', kind: 'house', label: 'h1', col: 40, row: 40, spanCol: 3, spanRow: 3, lot: { col: 39, row: 39, spanCol: 4, spanRow: 4 },
+      door: { col: 43, row: 42 }, stage: 10, maxStage: 10, floors: 1, level: 5, residentIds: [], mergedFromIds: [], goalCount: 0, placedAtStep: 0,
+    } as CityBuilding;
+    const art = resolveBuildingArt(EGYPT_WORLD_PACK, index, house, null)!;
+    expect(art.layers.map(l => l.path)).toEqual([`${at}complete.png`, `${at}shadow.png`, `${at}props.png`, `${at}awning.png`]);
+    expect(art.layers.map(l => l.blend ?? null)).toEqual([null, 'multiply', null, null]);
+    expect(art.layers.map(l => Boolean(l.sway))).toEqual([false, false, false, true]);
   });
 
   it('refuses layers missing from the folder, of another canvas, or with a broken sway line', () => {
