@@ -141,12 +141,20 @@ function hashStr(s: string): number {
   return h >>> 0;
 }
 
-function directionFromDelta(dc: number, dr: number): Direction8 {
+/* Where a step of (dc, dr) tiles points on screen, the way a sheet row is drawn: on the 2:1 diamond a column step runs
+   down right and a row step down left, so a step along a road shows as SE, SW, NE or NW (#1983). */
+function facingOfStep(dc: number, dr: number): Direction8 {
   if (Math.abs(dc) < 1e-4 && Math.abs(dr) < 1e-4) return 'S';
-  const angle = Math.atan2(dr, dc);
+  const angle = Math.atan2((dc + dr) / 2, dc - dr);
   const oct = Math.round((angle / (Math.PI * 2)) * 8 + 8) % 8;
   const order: readonly Direction8[] = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'];
   return order[oct] ?? 'S';
+}
+
+/* A new resident faces its first step on the path, or the spot it stands round; the camera only with neither. */
+function startFacing(path: readonly TileCoord[], from: number, at: TileCoord, focus: TileCoord): Direction8 {
+  const next = path.slice(from).find(p => Math.hypot(p.col - at.col, p.row - at.row) > 1e-3) ?? focus;
+  return facingOfStep(next.col - at.col, next.row - at.row);
 }
 
 function nearestRoadTile(target: TileCoord, roadTiles: readonly TileCoord[]): TileCoord {
@@ -630,7 +638,7 @@ export function createResidentSimulation(
       talkingToAgentId: agent.talkingToAgentId ?? null,
       col: startPt.col,
       row: startPt.row,
-      facing: 'S',
+      facing: liveState === 'working' ? startFacing(initialPath, startIdx, startPt, workTile) : startFacing([], 0, startPt, basePt),
       walkPhase: (hashStr(agent.id) % 628) / 100,
       speedTilesPerSec:
         archetype === 'firefighter' || archetype === 'red_team'
@@ -701,7 +709,7 @@ export function createResidentSimulation(
       talkingToAgentId: null,
       col: pt.col,
       row: pt.row,
-      facing: 'S',
+      facing: startFacing(route, startIdx, pt, dest),
       walkPhase: idx * 1.1,
       speedTilesPerSec: 2.4,
       path: route,
@@ -848,6 +856,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
       const idleMoved = Math.hypot(r.col - prevCol, r.row - prevRow);
       if (idleMoved > 1e-4) {
         r.walkPhase += (idleMoved / WALK_STRIDE_TILES) * Math.PI * 2;
+        r.facing = facingOfStep(r.col - prevCol, r.row - prevRow);
       }
       r.pose = 'idle';
       r.carrying = 'none';
@@ -925,7 +934,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
       r.col += (dc / dist) * step;
       r.row += (dr / dist) * step;
       movedTiles = step;
-      r.facing = directionFromDelta(dc, dr);
+      r.facing = facingOfStep(dc, dr);
     }
     if (movedTiles > 1e-4) {
       r.walkPhase += (movedTiles / WALK_STRIDE_TILES) * Math.PI * 2;
