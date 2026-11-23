@@ -26,7 +26,7 @@ All art is drawn at the **master 4x tier**.
 | Rig source for people | 544 px tall (8x), baked down to 136 px |
 | Camera | 30 degrees above the ground, looking down the diamond's vertical axis; people alone at 19 degrees (section 7) |
 | Sun | top left (azimuth -45 degrees, elevation 55 degrees), 5200 K |
-| Directions | 5 drawn (N, NE, E, SE, S); SW, W and NW are mirrors of SE, E and NE |
+| Directions | Up to 5 drawn (N, NE, E, SE, S), as the animation needs; SW, W and NW are mirrors of SE, E and NE |
 
 The engine shows the master art at four tiers: 1x (tile 60 x 30, person 34 px), 2x (120 x 60, 68 px, the default 100% zoom), 4x (240 x 120, 136 px, 200% zoom) and 8x (480 x 240, 272 px, Retina at 200%). Do not deliver separate small versions; the engine scales down.
 
@@ -79,7 +79,9 @@ Every point must lie inside the picture; the picture must not be taller than its
 | `frames` | Frames from left to right; picture width = `frameW * frames`. |
 | `fps` | Playback speed. |
 | `anchor` | In one frame: the feet of a person, or the attach point of a loop. |
-| `attach` | Loops only: `top`, `awning`, `door` or `ground` (section 8). |
+| `attach` | Loops only: `top`, `awning`, `door`, `ground` or `head` (section 8). |
+| `directions` | People only, optional: the drawn directions among N, NE, E, SE, S, one row each in this order (section 7). |
+| `headAnchor` | People, `sleep` only, optional: in one frame, where the sleeper's Z loop stands (section 7). |
 
 ## 4. Buildings
 
@@ -87,7 +89,7 @@ Folder: `buildings/<kind>/<step>/`. The pack's catalog names the steps of each k
 
 | Kind | What it is in the company |
 |---|---|
-| `house` | An agent's home; grows with the agent's level (1x1 to 4x4). |
+| `house` | An agent's home; grows with the agent's level (sizes from the pack's layout, 1x1 to 4x4). |
 | `department` | A department's hall in the centre (3x3 to 5x5). |
 | `residence` | The ruler's (orchestrator's) residence, 5 growth stages (2x2 to 6x6). |
 | `district_hub` | A machine's building in its district (3x3 to 4x4, or the sizes its pack names). |
@@ -104,6 +106,8 @@ A building stands at the front (bottom) corner of its lot and grows backward: a 
 The door is on one of the two front walls, the walls that face the viewer: `front_right` (from the plot's right corner down to the bottom corner) or `front_left` (from the bottom corner up to the left corner). Draw it where the street can reach it, never on a back wall. When the pack names a door for a kind (`buildingLayout` in its manifest: the wall, the tile row of the door counted from the bottom corner, and the sizes the kind grows through), the city puts the street in front of exactly that row, so draw the door there in every step. Kinds the pack does not name get their door on whichever front wall the street reaches best.
 
 ### Pictures of one step
+
+A step may come in drawn **variants** (`variants` in the pack catalog): each a full set of the step's pictures in its own folder, `<step>/v01/`, `<step>/v02/`, and so on, with the step's canvas, anchor, door row and lot. `v01` is required, the others optional. The engine gives each building one variant from its id, the same in every session; next-door buildings of the same step do not repeat one while another is free, and a variant not delivered yet gives way to the next delivered one.
 
 | File | Shown when |
 |---|---|
@@ -168,6 +172,7 @@ Kinds without construction pictures:
 
 * `statue`: `stage_01.png` to `stage_20.png` (the pack's statue stage count), one set per size step.
 * `monument`: `tier_01.png` to `tier_10.png` (the pack's monument stage count), shown by how much of the goal is done, plus `capstone.png` (anchor passport) placed at the last tier's `topAnchor` when the goal is reached.
+* Kinds the pack lists in `ownConstruction` carry their scaffolds and ramps in their own stage pictures: the engine lays no module, crane or hoist over them.
 * `supply`: `fill_0.png` (empty) to `fill_4.png` (full) in place of `complete.png`, by the share of the limit left; empty while the subscription is used up.
 
 ## 5. Shared construction modules
@@ -192,7 +197,7 @@ When nothing of `scaffold_front` or `ramp` fits inside the lot in front of the f
 
 ## 7. People
 
-Folder: `people/<look>/tier_<n>/`.
+Folder: `people/<look>/tier_<n>/` for the `male_slim` body, `people/<look>/tier_<n>/<body>/` for the others: `female_slim`, `male_heavy`, `female_full`. The engine gives each resident a body from its agent's id, the same in every session, and uses the `male_slim` sheet where that body's is missing.
 
 People are drawn with an orthographic camera tilted 19 degrees down, not the 30 degrees of buildings and ground: at 30 degrees shoulders come out too wide and a step looks like a hop. The sheet stands on the 30-degree ground by its `anchor`, and the engine draws the shadow.
 
@@ -211,19 +216,22 @@ People are drawn with an orthographic camera tilted 19 degrees down, not the 30 
 | `direct` | A department head showing where to carry, urging on |
 | `survey`, `write`, `carve`, `gong`, `extinguish`, `guard` | Role work: surveying, writing, carving, ringing the alarm, putting out fires, standing guard |
 | `hold_scroll` | Waiting at the altar for a person's answer |
-| `pray` | Lying exhausted and praying by an empty store (limit used up) |
+| `pray` | Facing the camera, hands raised: the limit used up, and by an empty store |
+| `sad_sit` | Sitting on the ground, sad: the limit used up |
 | `broken_tool` | Sitting with a broken tool (a failed turn) |
-| `sleep` | Sleeping (its machine is offline, night in the district) |
+| `sleep` | Lying asleep (its machine is offline, night in the district, or the limit used up), with the `sleep_z` loop over the head |
 
 A missing animation falls back to `walk` for moving states and to `idle` for the rest.
 
-* **Sheet layout:** 5 rows top to bottom N, NE, E, SE, S; frames left to right; every frame the same size; the feet at the same `anchor` in every frame.
+* **Sheet layout:** one row per drawn direction, in the order of the passport's `directions`; without the field 5 rows top to bottom N, NE, E, SE, S. Frames left to right; every frame the same size; the feet at the same `anchor` in every frame.
+* **Directions:** draw an animation only in the directions its meaning needs. The engine shows the nearest drawn direction or its mirror (SE, E and NE mirror to SW, W and NW). `pray` and `sad_sit` face the camera: drawn S only and shown as drawn whatever way the resident faces, never mirrored.
+* **The sleeper's Z:** `loops/sleep_z.png`, a loop sheet with `attach` `head`, its `anchor` at the bottom centre of the letters. The engine stands it at the `sleep` sheet's `headAnchor`, or 146 px above the feet without one, and never mirrors the letters.
 * **Cloak layer:** `<animation>.cloak.png`, exactly the same size and grid as its sheet, white or light grey where the cloak is and transparent elsewhere. The engine tints it with the subscription provider's colour from the pack palette, so one drawing serves every provider.
 * **Rig and baking:** characters may be rigged by parts (body, head, arms, legs, outfit, cloak, prop) at the 544 px source and baked to sheets at 136 px. Keep the cloak as its own baked layer, keep the light at 5200 K from the top left, bake no ground shadow, and keep the feet on the anchor so walking does not slide.
 
 ## 8. Animation loops
 
-`loops/<loop>.png` with a sheet passport, one row of frames: `crane`, `hoist_block`, `dust`, `smoke`, `water`, `awning`, `celebration`. On a building drawn from its picture, a loop is placed at the point named by its `attach`: `top` (the picture's `topAnchor`, or its roof line), `awning` (`awningAnchor`), `door` (`door`) or `ground` (the lot centre). Loops of buildings still on placeholders stay placeholders.
+`loops/<loop>.png` with a sheet passport, one row of frames: `crane`, `hoist_block`, `dust`, `smoke`, `water`, `awning`, `celebration`, and for people `sleep_z` (section 7). On a building drawn from its picture, a loop is placed at the point named by its `attach`: `top` (the picture's `topAnchor`, or its roof line), `awning` (`awningAnchor`), `door` (`door`) or `ground` (the lot centre). Loops of buildings still on placeholders stay placeholders.
 
 ## 9. Ground, roads, decals and plants
 

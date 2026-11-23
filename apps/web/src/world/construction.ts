@@ -149,6 +149,49 @@ export function computeStatueAlleyProgress(
   return items;
 }
 
+type AddLoop = (kind: BuildingLoopKind, intensity?: number) => void;
+
+/* Whether the shared building kit (crane, hoist) goes over this kind: not over kinds whose stage pictures carry their
+   own scaffolds and ramps (WorldArtCatalog.ownConstruction). */
+function laysKit(pack: WorldPackManifest, kind: CityBuilding['kind']): boolean {
+  return !(pack.art?.ownConstruction ?? []).includes(kind);
+}
+
+/* Goal monuments: dust, and cranes and hoists where the kit is laid, while growing; golden capstone celebration at 100%. */
+function monumentLoops(building: CityBuilding, state: BuildingConstructionState | null, kit: boolean, add: AddLoop): void {
+  const reached = state ? state.phase === 'complete' && state.currentStage >= state.maxStage : Boolean(building.reached);
+  if (reached) {
+    add('celebration', 1.0);
+    return;
+  }
+  const stage = state ? state.currentStage : building.stage;
+  add('dust', 1.0);
+  if (kit && stage >= 2) {
+    add('crane', 1.0);
+    add('hoist_block', 1.0);
+  }
+}
+
+/* A statue's stage, its last stage and whether it is finished, from its job or, without one, from the building. */
+function statueProgress(building: CityBuilding, state: BuildingConstructionState | null): { stage: number; maxS: number; finished: boolean } {
+  if (state) return { stage: state.currentStage, maxS: state.maxStage, finished: state.phase === 'complete' && state.currentStage >= state.maxStage };
+  return { stage: building.stage, maxS: building.maxStage, finished: Boolean(building.reached) || building.stage >= building.maxStage };
+}
+
+/* 20-stage statues: dust, and cranes and hoists where the kit is laid, while carving; celebration shimmer when finished. */
+function statueLoops(building: CityBuilding, state: BuildingConstructionState | null, kit: boolean, add: AddLoop): void {
+  const { stage, maxS, finished } = statueProgress(building, state);
+  if (finished) {
+    add('celebration', 0.55);
+    return;
+  }
+  add('dust', 0.85);
+  if (kit && stage >= 4 && stage <= maxS - 2) {
+    add('crane', 0.85);
+    add('hoist_block', 0.85);
+  }
+}
+
 /* Returns the active Stage 6 animation loops layered over a building for its kind and stage. */
 export function buildingLoopsFor(
   building: CityBuilding,
@@ -175,36 +218,12 @@ export function buildingLoopsFor(
     return loops;
   }
 
-  /* Goal monuments: active cranes/hoists/dust while growing; golden capstone celebration at 100%. */
   if (building.kind === 'monument') {
-    const reached = state ? state.phase === 'complete' && state.currentStage >= state.maxStage : Boolean(building.reached);
-    if (reached) {
-      add('celebration', 1.0);
-    } else {
-      const stage = state ? state.currentStage : building.stage;
-      add('dust', 1.0);
-      if (stage >= 2) {
-        add('crane', 1.0);
-        add('hoist_block', 1.0);
-      }
-    }
+    monumentLoops(building, state, laysKit(pack, building.kind), add);
     return loops;
   }
-
-  /* 20-stage statues: scaffolding cranes/hoists/dust while carving; celebration shimmer when finished. */
   if (building.kind === 'statue') {
-    const stage = state ? state.currentStage : building.stage;
-    const maxS = state ? state.maxStage : building.maxStage;
-    const finished = state ? state.phase === 'complete' && stage >= maxS : Boolean(building.reached) || stage >= maxS;
-    if (finished) {
-      add('celebration', 0.55);
-    } else {
-      add('dust', 0.85);
-      if (stage >= 4 && stage <= maxS - 2) {
-        add('crane', 0.85);
-        add('hoist_block', 0.85);
-      }
-    }
+    statueLoops(building, state, laysKit(pack, building.kind), add);
     return loops;
   }
 
@@ -289,10 +308,10 @@ export function workSlotsForBuilding(
     const tierElev = Math.round(16 + progress * (sc >= 6 ? 78 : 52));
 
     /* Place the 2-worker sled team on an open ground lane beside the monument (never overlapping another roof!). */
-    const sledCandidates: Array<{ col: number; row: number; facing: 'N' | 'W' | 'E' }> = [
+    /* Only in front of the monument: a worker behind it would face a back wall, which is never drawn (#1975). */
+    const sledCandidates: Array<{ col: number; row: number; facing: 'N' | 'W' }> = [
       { col: c0 + sc * 0.55, row: r0 + sr + 0.75, facing: 'N' },
       { col: c0 + sc + 0.75, row: r0 + sr * 0.55, facing: 'W' },
-      { col: c0 - 0.8, row: r0 + sr * 0.65, facing: 'E' },
     ];
     const sledSpot = sledCandidates.find(pt => isGroundClear(pt.col, pt.row) && isGroundClear(pt.col + 0.6, pt.row));
     if (sledSpot) {
@@ -321,7 +340,7 @@ export function workSlotsForBuilding(
       col: c0 + sc * 0.52,
       row: r0 + sr * 0.52,
       elevationPx: tierElev,
-      facing: 'S',
+      facing: 'N',
     });
     return slots;
   }
@@ -359,10 +378,11 @@ export function workSlotsForBuilding(
   if (state && state.phase === 'building') {
     const spec = resolveStageSpecForBuilding(building, state, pack);
     if (spec.openInteriorVisible) {
-      /* Workers visibly laying walls inside the exposed interior rooms! */
+      /* Workers visibly laying walls inside the exposed interior rooms, both well inside the walls: on a 3x3 the strip
+         along the front right wall (from u 1.95 out) belongs to the shared front scaffold and ramp (#1975). */
       slots.push(
-        { id: `${building.id}-int-1`, action: 'interior_mason', col: c0 + sc * 0.34, row: r0 + sr * 0.44, elevationPx: 5, facing: 'E' },
-        { id: `${building.id}-int-2`, action: 'interior_mason', col: c0 + sc * 0.68, row: r0 + sr * 0.64, elevationPx: 5, facing: 'W' },
+        { id: `${building.id}-int-1`, action: 'interior_mason', col: c0 + sc * 0.34, row: r0 + sr * 0.44, elevationPx: 5, facing: 'N' },
+        { id: `${building.id}-int-2`, action: 'interior_mason', col: c0 + sc * 0.56, row: r0 + sr * 0.66, elevationPx: 5, facing: 'W' },
       );
     }
     if (spec.hasScaffolding) {

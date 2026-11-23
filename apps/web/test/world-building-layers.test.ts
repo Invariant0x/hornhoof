@@ -42,7 +42,7 @@ describe('Building layers over a picture (contract 2)', () => {
   });
 
   it('draws a home with a yard as the pilot passport orders its layers: the house, its shadow, the yard fence (props), then the swaying awning', () => {
-    const at = 'buildings/house/mudbrick/';
+    const at = 'buildings/house/mudbrick/v01/';
     const corners = { top: { x: 360, y: 599 }, right: { x: 720, y: 779 }, bottom: { x: 360, y: 959 }, left: { x: 0, y: 779 } };
     const layers = [
       { file: 'shadow.png', blend: 'multiply' as const },

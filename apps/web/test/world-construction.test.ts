@@ -128,7 +128,10 @@ describe('Stage 6 construction stages, building animation loops, work slots, 20-
     });
     const pyrLoopsActive = buildingLoopsFor(buildingPyramid, null, EGYPT_WORLD_PACK);
     const pyrSlotsActive = workSlotsForBuilding(buildingPyramid, null, EGYPT_WORLD_PACK);
-    expect(pyrLoopsActive.map(l => l.kind)).toEqual(expect.arrayContaining(['crane', 'hoist_block', 'dust']));
+    /* Egypt draws its pyramids' ramps and scaffolds into the tiers (#1975): dust, no crane; a pack that does not gets the crane. */
+    expect(pyrLoopsActive.map(l => l.kind)).toEqual(['dust']);
+    const kitPack = { ...EGYPT_WORLD_PACK, art: { ...EGYPT_WORLD_PACK.art!, ownConstruction: undefined } };
+    expect(buildingLoopsFor(buildingPyramid, null, kitPack).map(l => l.kind)).toEqual(expect.arrayContaining(['crane', 'hoist_block', 'dust']));
     expect(pyrLoopsActive.map(l => l.kind)).not.toContain('celebration');
     expect(pyrSlotsActive.some(s => s.action === 'pull_sled')).toBe(true);
 
