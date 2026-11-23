@@ -10,11 +10,12 @@ import { ApiError } from './errors.js';
 import { linkOf, publicUrl, saveLink, tunnelSettings, writeTunnelSettings } from './modules/link/link.js';
 import { Relay } from './modules/link/relay.js';
 import { reinvite } from './modules/people/routes.js';
+import { branchPrune, type PruneReaders } from './modules/repos/prune-cli.js';
 import { setupLink } from './modules/setup/code.js';
 
-const USAGE = 'Usage: node apps/server/dist/cli.js owner-link | setup-link | link <name> < key-file';
+const USAGE = 'Usage: node apps/server/dist/cli.js owner-link | setup-link | link <name> < key-file | branch-prune [options]';
 
-type Deps = { db: Db; config: Config; print: (line: string) => void; read?: () => Promise<string> };
+type Deps = { db: Db; config: Config; print: (line: string) => void; read?: () => Promise<string>; prune?: PruneReaders };
 
 /* The way back in for an owner who lost the password: a one-time link that sets a new one. */
 async function ownerLink({ db, config, print }: Deps): Promise<number> {
@@ -87,6 +88,7 @@ export async function runCli(args: string[], deps: Deps): Promise<number> {
   if (args[0] === 'owner-link') return ownerLink(deps);
   if (args[0] === 'setup-link') return printSetupLink(deps);
   if (args[0] === 'link') return takeLink(args[1], deps);
+  if (args[0] === 'branch-prune') return branchPrune(args.slice(1), deps);
   deps.print(USAGE);
   return 1;
 }

@@ -16,7 +16,8 @@ export const restoreCommand = (branch: string): string => `git fetch origin ${ar
 /* What was done to one branch: it is gone (deleted), or kept at its archive and gone (archived), or the repository refused. */
 export type Entry = Verdict & { done: 'deleted' | 'archived' | 'refused'; problem?: string };
 export type Stopped = { why: 'batch' } | { why: 'budget' } | { why: 'limit'; resetAt: string | null } | { why: 'unreadable'; problem: string };
-export type Pruned = { verdicts: Verdict[]; entries: Entry[]; stopped: Stopped | null };
+/* branches: how many the repository had when it was read, none where it could not be. */
+export type Pruned = { verdicts: Verdict[]; entries: Entry[]; stopped: Stopped | null; branches: number };
 export type Deps = {
   facts: () => Promise<Facts | { problem: string }>;
   holds: Holds;
@@ -94,15 +95,16 @@ function budgeted(holds: Holds, budget: number): { holds: Holds; spent: () => bo
    changes nothing and says what it would. It never touches a ref the plan did not name, and never a tag or main. */
 export async function pruneRepository(deps: Deps, { apply, limit = BATCH, budget = Infinity }: { apply: boolean; limit?: number; budget?: number }): Promise<Pruned> {
   const read = await deps.facts();
-  if ('problem' in read) return { verdicts: [], entries: [], stopped: { why: 'unreadable', problem: read.problem } };
+  if ('problem' in read) return { verdicts: [], entries: [], stopped: { why: 'unreadable', problem: read.problem }, branches: 0 };
+  const branches = Object.keys(read.heads).length;
   const reader = budgeted(deps.holds, budget);
   const { verdicts, stopped } = await planPrune(read, reader.holds, apply ? limit + 1 : Infinity);
   const rest = stopped ? limitStop(stopped) : reader.spent() ? { why: 'budget' as const } : null;
-  if (!apply) return { verdicts, entries: [], stopped: rest };
+  if (!apply) return { verdicts, entries: [], stopped: rest, branches };
   const work = verdicts.filter(v => v.action !== 'keep');
   const entries = await applyAll(work.slice(0, limit), deps.push);
   for (const entry of entries) await deps.record(entry);
-  return { verdicts, entries, stopped: rest ?? (work.length > limit ? { why: 'batch' } : null) };
+  return { verdicts, entries, stopped: rest ?? (work.length > limit ? { why: 'batch' } : null), branches };
 }
 
 /* The refs of the repository as it advertises them, by name, or why it could not. */

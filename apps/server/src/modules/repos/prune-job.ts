@@ -1,4 +1,5 @@
 import { and, eq, isNotNull } from 'drizzle-orm';
+import type { FastifyBaseLogger } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { departments, taskEvents, tasks, testRuns, turns } from '../../db/schema.js';
@@ -14,7 +15,7 @@ import { pushRefs } from './ref-push.js';
    runs say, and what each repository says of its branches. This builds what the plan needs from them, does a run of it and
    writes down each change on the task it belongs to. */
 
-type Reader = Pick<Ctx, 'db' | 'config' | 'log'> & Partial<Pick<Ctx, 'readBranches' | 'readTags' | 'readMerged' | 'pushRefs'>>;
+export type Reader = Pick<Ctx, 'db' | 'config'> & { log: Pick<FastifyBaseLogger, 'info' | 'warn' | 'error'> } & Partial<Pick<Ctx, 'readBranches' | 'readTags' | 'readMerged' | 'pushRefs'>>;
 
 /* How often one repository is pruned by itself: a batch at a time, so a repository of thousands is done over hours. */
 export const PRUNE_EVERY_MS = 10 * 60_000;
