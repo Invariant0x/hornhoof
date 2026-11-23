@@ -67,6 +67,16 @@ Roles not listed take the look of their class (head, checker, executor, turnkey,
 
 Cloak colours by subscription provider (the engine tints the cloak layer): Claude `#C96A4B`, Codex `#3FA796`, Antigravity `#4DA167`, Kimi `#4C84D6`, GLM `#766BD6`, API key `#B89B5E`.
 
+## Ground and plants
+
+Delivered by the ground and plant artists; the terrain and plant layers load them through the pack's `terrainArt` and plant kinds (contract section 9).
+
+* Ground materials: `plain` (golden building sand with wind ripples), `dune`, `bank` (sandy silt bank), `fertile` (green strip), `field` (irrigated rows, 3 per tile), `ridge` (rock), `quarry` (limestone), `oasis_grove` (grass under palms), and two liquids, `river` and `oasis_water`, each as surface, `_bed` and `_ripples`.
+* Transitions: `plain_bank`, `bank_fertile`, `fertile_field`, `plain_dune`, `plain_ridge`, `river_bank`.
+* Roads: `trail` (0.4 tile), `dirt` (0.8), `brick` (1), `stone` (1), `avenue` (2).
+* Decals: grass tufts, pebbles, cracks, tracks, sherds, shore bushes.
+* Plants (29): date palms (4 adult, 1 young), doum palms (2), acacias (2), sycamores (2), tamarisks (2), bushes (4), papyrus clumps (3), reeds (3), dry grass tufts (4), desert thorns (2).
+
 ## Loops and flags
 
 All seven loops of the contract: crane, hoist block, dust, smoke, water, awning, celebration. District flags on homes and workshops, department banners on temples, both painted light for tinting.

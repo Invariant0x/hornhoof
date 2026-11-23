@@ -8,12 +8,12 @@ What is specific to one world (which buildings, which looks, its colours and sty
 
 ## 1. Where the art lives
 
-* Art is licensed per pack and **never goes into this repository**.
+* Art is licensed per pack and **never goes into this repository**. Put the pack's license note next to its art (for example `LICENSE.md` in the art folder).
 * A pack's art folder is served at the pack's `art.baseUrl`, for example `/world-art/<pack>/`.
   * Local work and builds: put the folder at `apps/web/public/world-art/<pack>/`. The path is ignored by git; Vite serves it and copies it into the build.
   * A running server: put the folder at `<WEB_DIST>/world-art/<pack>/`.
-* The folder holds `art-index.json` at its root. The engine reads only that file at start and then downloads each picture the first time it is on screen. Without `art-index.json` the whole world draws on placeholders.
-* Build and check the index with the art check command (section 10). A file the check rejects is left out of the index and keeps its placeholder; one broken file never breaks the city.
+* Buildings, people, loops and flags (sections 4 to 8): the folder holds `art-index.json` at its root. The engine reads only that file at start and then downloads each picture the first time it is on screen. Without `art-index.json` they all draw on placeholders. Build and check the index with the art check command (section 10). A file the check rejects is left out of the index and keeps its placeholder; one broken file never breaks the city.
+* Ground and plants (section 9) are loaded straight from the paths the pack's manifest names, without `art-index.json`.
 
 ## 2. Standard sizes
 
@@ -187,14 +187,19 @@ A missing animation falls back to `walk` for moving states and to `idle` for the
 
 ## 9. Ground, roads, decals and plants
 
-Ground art uses the formats agreed with the terrain and plant layers:
+The terrain and plant layers load these files straight from the pack's art folder, not through `art-index.json`. The pack names every file in its manifest: `terrainArt` for ground, transitions, roads and liquid, and the `art` list of each plant kind (one entry per drawn variant). A slot whose file is missing keeps its procedural look. The paths below are the usual layout; the manifest is what counts.
 
-* `ground/<material>.png`: 1024 x 1024 px, seamless, seen from straight above (the engine projects it onto the 2:1 ground), 4 x 4 tiles per texture; one per material id of the pack's terrain recipe.
-* `ground/edges/`: transition masks between materials.
-* `roads/<tier>.png`: road strips for `trail`, `dirt`, `brick` and `stone`.
-* `decals/`: small ground details.
-* Liquid: a bed texture and a ripple texture, with the base colours in `colors.json`.
-* Plants: `veg/<name>.png`, a sway weight map `veg/<name>_w.png` (0 at the root, 1 at the tips) and a passport `veg/<name>.json` with `root_point`, `crown_center`, `crown_hub`, `height` and `crown_width`.
+* **Ground:** one texture per ground material id of the pack's terrain recipe, `ground/<material>.png`, 1024 x 1024 px, seamless on both axes, seen from straight above, with no objects and no cast shadows. One map tile is 256 x 256 px of the texture, so one texture covers 4 x 4 tiles: tile (x, y) starts at ((x * 256) mod 1024, (y * 256) mod 1024). The engine projects it onto the 2:1 ground.
+* **Transitions:** `ground/edges/<first>_<second>.png`, 1024 x 256 px, 8-bit grey, one file per pair of material ids the pack declares. Rows run across the border, one tile deep: 255 is the first material, 0 the second. Columns wrap, so the border has no seam along its length.
+* **Liquid:** a surface texture, a bed texture (the relief of the bottom without the liquid's tint) and a ripple map (8-bit grey, mean 128), each 1024 x 1024 and seamless, plus the base colour in the manifest. The engine mixes them every frame, so the surface moves without a sheet of frames.
+* **Roads:** `roads/<tier>.png`, seamless along the length (1024 px = 4 tiles), alpha 0 on the first and last row, as tall as the road is wide (256 px per tile of width: a 0.4 tile path is 102 px, a 2 tile avenue 512 px).
+* **Decals:** `decals/<name>.png`, small RGBA details laid on the ground at master scale.
+* **Plants:** three files per plant, all at master scale next to the 136 px person:
+  * `veg/<name>.png`: RGBA, transparent background, no ground shadow;
+  * `veg/<name>_w.png`: 8-bit grey sway weights, the same size: 0 stays still, 255 moves the most;
+  * `veg/<name>.json`: `root_point` [x, y] (the pivot on the ground), `crown_center` [x, y], `height_px`, `crown_width_px` (older passports say `height` and `crown_width`), optional `crown_hub` [x, y] (where a palm's leaves meet the trunk, the pivot of their flutter; `crown_center` without it) and optional `recommended_sway` (frequency range in Hz, largest tip excursion in percent of the height, secondary flutter in px).
+
+  Every plant sways with its own phase, so a grove never moves as one.
 
 ## 10. Checking and delivering
 
