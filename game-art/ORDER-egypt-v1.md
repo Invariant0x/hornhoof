@@ -355,9 +355,9 @@ Design asked for one warm light in a district whose machine is off: a lit window
 
 ### 4.1 Looks
 
-Folder `people/<look>/tier_<n>/<body>/`. One look per kind of role. A role without its own look takes its class's look.
+Folder `people/<look>/tier_<n>/` for the `male_slim` body, as the pilot architect's walk came, and `people/<look>/tier_<n>/<body>/` for the other three bodies. One look per kind of role. A role without its own look takes its class's look.
 
-**Body types (v3).** Four figures: `male_slim`, `female_slim`, `male_heavy`, `female_full`, drawn in that order, each from the body generator's own blank. The engine gives each resident a body from its agent's id, the same in every session. Where that body's sheet is missing it uses `male_slim`, and sheets laid directly in `tier_<n>/`, as the pilot architect's walk was delivered, count as `male_slim`.
+**Body types (v3).** Four figures: `male_slim`, `female_slim`, `male_heavy`, `female_full`, drawn in that order, each from the body generator's own blank. The engine gives each resident a body from its agent's id, the same in every session. Where that body's sheet is missing it uses the `male_slim` sheet.
 
 | Look | Who (role keys) | Carries | Head | In the demo company |
 |---|---|---|---|---|
