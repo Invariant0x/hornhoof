@@ -3237,3 +3237,5 @@ export const en = {
 };
 
 export type Messages = typeof en;
+
+export default en;

@@ -35,6 +35,7 @@ describe('the registry of languages', () => {
       expect(info.script).toMatch(/^[A-Z][a-z]{3}$/);
       expect(() => new Intl.PluralRules(info.id)).not.toThrow();
       expect(Intl.DateTimeFormat.supportedLocalesOf(info.id)).toEqual([info.id]);
+      expect(Intl.DateTimeFormat.supportedLocalesOf(locales.formatTagOf(info.id))).toEqual([locales.formatTagOf(info.id)]);
     }
     expect(new Set(locales.LOCALES.map(info => info.id)).size).toBe(locales.LOCALES.length);
   });
@@ -56,6 +57,13 @@ describe('the registry of languages', () => {
     expect(locales.directionOf('ar-XB')).toBe('rtl');
     expect(locales.directionOf('unknown')).toBe('ltr');
     expect(locales.directionOf('ar', TWELVE)).toBe('rtl');
+  });
+
+  it('names the tag dates and numbers follow, the language itself unless the registry says another', () => {
+    expect(locales.formatTagOf('en')).toBe('en-GB');
+    expect(locales.formatTagOf('ru')).toBe('ru-RU');
+    expect(locales.formatTagOf('hi', TWELVE)).toBe('hi');
+    expect(locales.formatTagOf('en-XL')).toBe('en-XL');
   });
 });
 

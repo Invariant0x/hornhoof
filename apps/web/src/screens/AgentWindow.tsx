@@ -28,6 +28,7 @@ import { orchestratorStatus } from './Map';
 import { clock } from './Subscriptions';
 import { AgentWindowLayout, WordButton, type WindowPlace } from './AgentWindowLayout';
 import { everyVisible, useRenderGuard } from '../guard';
+import { say, sayIf } from '@hornhoof/protocol';
 
 /* The most events the server sends at a time. */
 const PAGE = 500;
@@ -112,7 +113,7 @@ function listedName(org: Org, agentId: string): string {
 }
 
 function windowTitle(t: Messages, language: Language, org: Org, agentId: string, card: AgentCardView | null): string {
-  const role = card?.role?.title[language];
+  const role = sayIf(card?.role?.title, language);
   return agentId === 'orchestrator' ? t.window.title : card ? [card.name, role !== card.name && role].filter(Boolean).join(', ') : listedName(org, agentId);
 }
 

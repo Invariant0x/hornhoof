@@ -3211,3 +3211,5 @@ export const ru: Messages = {
     telegram_person_taken: 'Этот Telegram уже указан у другого человека.',
   },
 };
+
+export default ru;

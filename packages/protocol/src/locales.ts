@@ -6,18 +6,22 @@
    name: the language in its own words, as the picker shows it.
    english: its name in English, for a sentence that tells a program which language to write in.
    script: the ISO 15924 code of the script it is written in, which picks its fonts.
-   dir: the direction it reads in, which the page mirrors. */
+   dir: the direction it reads in, which the page mirrors.
+   format: the tag whose habits dates, times and numbers follow when they differ from the language's own: English is
+   written day first with a 24-hour clock here, which no tag of plain "en" does. */
 export type Direction = 'ltr' | 'rtl';
-export type LocaleInfo = { id: string; name: string; english: string; script: string; dir: Direction };
+export type LocaleInfo = { id: string; name: string; english: string; script: string; dir: Direction; format?: string };
 
 /* English comes first: it is the source every other language is a translation of, and the one a missing text falls back to. */
 export const LOCALES = [
-  { id: 'en', name: 'English', english: 'English', script: 'Latn', dir: 'ltr' },
-  { id: 'ru', name: 'Русский', english: 'Russian', script: 'Cyrl', dir: 'ltr' },
+  { id: 'en', name: 'English', english: 'English', script: 'Latn', dir: 'ltr', format: 'en-GB' },
+  { id: 'ru', name: 'Русский', english: 'Russian', script: 'Cyrl', dir: 'ltr', format: 'ru-RU' },
 ] as const satisfies readonly LocaleInfo[];
 
 export type LocaleId = (typeof LOCALES)[number]['id'];
 export const SOURCE_LOCALE: LocaleId = 'en';
+/* The server writes its own words in the source language; a person who reads another gets them from the files instead. */
+export const isSourceLocale = (id: string): boolean => id === SOURCE_LOCALE;
 
 /* Languages that exist for tests alone: a text 40% longer than English, and the same text mirrored. They are never
    offered to a person and never count as a shipped language. */
@@ -39,6 +43,9 @@ export const isPseudoLocaleId = (value: unknown): value is PseudoLocaleId => typ
 export function localeInfo(id: string, registry: readonly LocaleInfo[] = [...LOCALES, ...PSEUDO_LOCALES]): LocaleInfo | undefined {
   return registry.find(info => info.id === id);
 }
+
+/* The tag Intl takes to write a date, a time or a number in a language. */
+export const formatTagOf = (id: string, registry?: readonly LocaleInfo[]): string => localeInfo(id, registry)?.format ?? id;
 
 export const directionOf = (id: string, registry?: readonly LocaleInfo[]): Direction => localeInfo(id, registry)?.dir ?? 'ltr';
 
@@ -100,3 +107,6 @@ export function localeOfHeader(header: string | undefined, registry: readonly Lo
 export type Texts = { readonly en: string } & { readonly [id: string]: string | undefined };
 
 export const say = (texts: Texts, language: string): string => texts[language] ?? texts[SOURCE_LOCALE];
+
+/* The same for a text that may be missing altogether. */
+export const sayIf = (texts: Texts | null | undefined, language: string): string | undefined => (texts ? say(texts, language) : undefined);

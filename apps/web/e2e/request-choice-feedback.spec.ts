@@ -4,7 +4,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Locator, type Page, type Route, type TestInfo } from '@playwright/test';
-import { LANGUAGES, type Language } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage,  } from '../src/i18n';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { Decisions, Org, WaitingRequest } from '../src/types';
@@ -12,7 +12,7 @@ import { openTaskAction, box, ME, openTaskCard, serveApi, TASKS } from './api';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-const MESSAGES: Record<Language, Messages> = { en, ru };
+const MESSAGES: Record<ShippedLanguage, Messages> = { en, ru };
 const SCREENSHOT_DIR = process.env.HH_SCREENSHOT_DIR;
 const RTL_LANGUAGE_CODES = new Set(['ar', 'he', 'fa', 'ur', 'ps', 'sd', 'ug', 'yi']);
 
@@ -40,12 +40,12 @@ const SORTED_SHIPPED_LOCALES = [...LANGUAGES]
 const LONGEST_SHIPPED_LOCALE = SORTED_SHIPPED_LOCALES[0]!.id;
 const SHORTEST_SHIPPED_LOCALE = SORTED_SHIPPED_LOCALES.at(-1)!.id;
 const SHIPPED_RTL_LOCALES = LANGUAGES.map(l => l.id).filter(id => RTL_LANGUAGE_CODES.has(id));
-const CHECKED_LOCALES: readonly Language[] = Array.from(new Set([LONGEST_SHIPPED_LOCALE, SHORTEST_SHIPPED_LOCALE]));
+const CHECKED_LOCALES: readonly ShippedLanguage[] = Array.from(new Set([LONGEST_SHIPPED_LOCALE, SHORTEST_SHIPPED_LOCALE]));
 
 type ShotProvenance = {
   file: string;
   provenance: 'playwright-route-fixture' | 'real-fastify-pglite-server';
-  lang: Language;
+  lang: ShippedLanguage;
   theme: 'light' | 'dark';
   width: number;
   surface: string;
@@ -394,7 +394,7 @@ for (const lang of ['ru', 'en'] as const) {
   }
 }
 
-function makePanelRequests(lang: Language): WaitingRequest[] {
+function makePanelRequests(lang: ShippedLanguage): WaitingRequest[] {
   const ruLang = lang === 'ru';
   const taskOne = {
     id: 't1',

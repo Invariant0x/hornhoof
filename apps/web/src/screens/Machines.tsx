@@ -29,6 +29,7 @@ import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUna
 import { addablePlans, machinePool, machineRows, type MachineRow } from './machine-rows';
 import { everyVisible } from '../guard';
 import { Phones } from '../ui/Phones';
+import { sayIf } from '@hornhoof/protocol';
 
 const REFRESH_MS = 5000;
 /* Docker's system on a Mac keeps a little of what it is given, so only a clear gap says it was set smaller. */
@@ -232,7 +233,7 @@ function machineFilters(t: Messages): FilterGroup<MachineRow>[] {
 
 function machineSearch(t: Messages, language: Language, subs: SubView[], row: MachineRow): string {
   const plans = row.plans.map(p => { const s = subs.find(s => s.id === p.id); return s ? subName(t, s) : PROVIDER_NAMES[p.provider]; });
-  return [row.hostname, row.owner?.name, ...plans, ...row.running.agents.flatMap(a => [a.name, a.title?.[language], a.department?.name])].join(' ');
+  return [row.hostname, row.owner?.name, ...plans, ...row.running.agents.flatMap(a => [a.name, sayIf(a.title, language), a.department?.name])].join(' ');
 }
 
 /* A machine's place in the order the server passes on in: 1 where the server runs, whatever that machine's own row

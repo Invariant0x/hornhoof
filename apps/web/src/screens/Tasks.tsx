@@ -26,6 +26,7 @@ import { sinceSeconds, spanText, waitText } from '../ui/tracker-words';
 import { cardWords, WaitCards } from '../ui/WaitCards';
 import { WaitingQueue, type WaitQueueEntry } from '../ui/WaitingQueue';
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
+import { sayIf } from '@hornhoof/protocol';
 
 type Props = {
   me: Me;
@@ -612,7 +613,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
     selected, onOpenTask, asksYou, questionAt, placeName: place_, now: id => workingIds.has(id),
     departmentTemplate: id => places?.departments.find(d => d.id === id)?.templateKey ?? org?.departments.find(d => d.id === id)?.templateKey,
     turnkeyOf: id => employees.get(id)?.turnkey,
-    stageOwner: (stage: PipelineStage) => org?.departments.flatMap(d => d.roles).find(r => r.id === stage.ownerRole)?.title[language] ?? stage.owner?.name,
+    stageOwner: (stage: PipelineStage) => sayIf(org?.departments.flatMap(d => d.roles).find(r => r.id === stage.ownerRole)?.title, language) ?? stage.owner?.name,
     programOf: id => {
       const employee = employees.get(id);
       if (employee?.provider) return programOf(employee.provider, employee.apiProtocol);

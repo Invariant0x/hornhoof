@@ -5,6 +5,7 @@ import { useStream } from '../live';
 import { useOpenWindowTask } from '../screens/AgentWindowContext';
 import type { InboxLetter, InboxMode, InboxView, MessageParty } from '../types';
 import { PanelFrame } from './SidePanels';
+import { say, sayIf } from '@hornhoof/protocol';
 
 type Choice = InboxMode | 'rule';
 const CHOICES: Choice[] = ['rule', 'inbox', 'direct'];
@@ -108,9 +109,9 @@ function senderOf(t: Messages, language: Language, p: MessageParty): { name: str
   if (p.kind === 'hornhoof') return { name: t.window.hornhoof, about: t.agentInbox.system };
   if (p.agentKind === 'orchestrator') return { name: t.window.orchestrator, about: t.window.hornhoof };
   if (p.kind === 'agent' && p.id === null) return { name: t.window.hiddenEmployee, about: null };
-  const role = p.role?.[language];
+  const role = sayIf(p.role, language);
   const named = role && role.toLocaleLowerCase(language) !== p.name.toLocaleLowerCase(language) ? role : null;
-  const about = [named, p.department?.name[language]].filter(Boolean).join(' · ');
+  const about = [named, sayIf(p.department?.name, language)].filter(Boolean).join(' · ');
   return { name: p.name, about: about || null };
 }
 
