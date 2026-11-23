@@ -722,10 +722,14 @@ test('shows what waits for the person and the cards kept for them inside the pag
   }
   await open(page, 'en', 375, '/tasks?show=waits');
   await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
-  await page.getByRole('region', { name: MESSAGES.en.tasks.waiting }).getByRole('button', { name: MESSAGES.en.tasks.cards.tag('v1.7.0', 24, 'unrecorded') }).click();
-  const tag = page.getByRole('region', { name: MESSAGES.en.tasks.cards.tagTitle });
-  /* Its edge line moves to the right, where the text starts. */
-  expect(await tag.evaluate(el => getComputedStyle(el).borderRightWidth)).toBe('2px');
+  const waiting = page.getByRole('region', { name: MESSAGES.en.tasks.waiting });
+  await waiting.getByRole('button', { name: MESSAGES.en.tasks.cards.tag('v1.7.0', 24, 'unrecorded') }).click();
+  await expect(page.getByRole('region', { name: MESSAGES.en.tasks.cards.tagTitle })).toBeVisible();
+  /* The card of the queue has no edge line of its own; the lines of the other cards under it mirror: the icon of a line
+     stands at its right, where its text starts. */
+  const line = waiting.locator('.wait-strip').first();
+  const [icon, words] = [(await line.locator('.ic').boundingBox())!, (await line.locator('.wait-strip-lines').boundingBox())!];
+  expect(icon.x).toBeGreaterThanOrEqual(words.x + words.width - 1);
   await inside(page, 'waits rtl');
   await capture(page, info, 'waits-rtl-375');
 });
