@@ -140,6 +140,45 @@ export function computeStatueAlleyProgress(
   return items;
 }
 
+type AddLoop = (kind: BuildingLoopKind, intensity?: number) => void;
+
+/* Whether the shared building kit (crane, hoist) goes over this kind: not over kinds whose stage pictures carry their
+   own scaffolds and ramps (WorldArtCatalog.ownConstruction). */
+function laysKit(pack: WorldPackManifest, kind: CityBuilding['kind']): boolean {
+  return !(pack.art?.ownConstruction ?? []).includes(kind);
+}
+
+/* Goal monuments: dust, and cranes and hoists where the kit is laid, while growing; golden capstone celebration at 100%. */
+function monumentLoops(building: CityBuilding, state: BuildingConstructionState | null, kit: boolean, add: AddLoop): void {
+  const reached = state ? state.phase === 'complete' && state.currentStage >= state.maxStage : Boolean(building.reached);
+  if (reached) {
+    add('celebration', 1.0);
+    return;
+  }
+  const stage = state ? state.currentStage : building.stage;
+  add('dust', 1.0);
+  if (kit && stage >= 2) {
+    add('crane', 1.0);
+    add('hoist_block', 1.0);
+  }
+}
+
+/* 20-stage statues: dust, and cranes and hoists where the kit is laid, while carving; celebration shimmer when finished. */
+function statueLoops(building: CityBuilding, state: BuildingConstructionState | null, kit: boolean, add: AddLoop): void {
+  const stage = state ? state.currentStage : building.stage;
+  const maxS = state ? state.maxStage : building.maxStage;
+  const finished = state ? state.phase === 'complete' && stage >= maxS : Boolean(building.reached) || stage >= maxS;
+  if (finished) {
+    add('celebration', 0.55);
+    return;
+  }
+  add('dust', 0.85);
+  if (kit && stage >= 4 && stage <= maxS - 2) {
+    add('crane', 0.85);
+    add('hoist_block', 0.85);
+  }
+}
+
 /* Returns the active Stage 6 animation loops layered over a building for its kind and stage. */
 export function buildingLoopsFor(
   building: CityBuilding,
@@ -166,36 +205,12 @@ export function buildingLoopsFor(
     return loops;
   }
 
-  /* Goal monuments: active cranes/hoists/dust while growing; golden capstone celebration at 100%. */
   if (building.kind === 'monument') {
-    const reached = state ? state.phase === 'complete' && state.currentStage >= state.maxStage : Boolean(building.reached);
-    if (reached) {
-      add('celebration', 1.0);
-    } else {
-      const stage = state ? state.currentStage : building.stage;
-      add('dust', 1.0);
-      if (stage >= 2) {
-        add('crane', 1.0);
-        add('hoist_block', 1.0);
-      }
-    }
+    monumentLoops(building, state, laysKit(pack, building.kind), add);
     return loops;
   }
-
-  /* 20-stage statues: scaffolding cranes/hoists/dust while carving; celebration shimmer when finished. */
   if (building.kind === 'statue') {
-    const stage = state ? state.currentStage : building.stage;
-    const maxS = state ? state.maxStage : building.maxStage;
-    const finished = state ? state.phase === 'complete' && stage >= maxS : Boolean(building.reached) || stage >= maxS;
-    if (finished) {
-      add('celebration', 0.55);
-    } else {
-      add('dust', 0.85);
-      if (stage >= 4 && stage <= maxS - 2) {
-        add('crane', 0.85);
-        add('hoist_block', 0.85);
-      }
-    }
+    statueLoops(building, state, laysKit(pack, building.kind), add);
     return loops;
   }
 

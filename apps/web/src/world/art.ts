@@ -133,6 +133,8 @@ export type WorldArtCatalog = Readonly<{
   flags?: Readonly<{ district?: boolean; department?: boolean }>;
   people?: Readonly<{ looks: readonly string[]; tiers: number }>;
   loops?: readonly BuildingLoopKind[];
+  /* Kinds whose stage pictures carry their own scaffolds and ramps: no kit module, crane or hoist goes over them. */
+  ownConstruction?: readonly BuildingKind[];
 }>;
 
 export const STANDARD_BUILDING_PICTURES = [
