@@ -16,7 +16,7 @@ import { agents, DECISION_TOPICS, departments, people, tasks, type AgentKind, ty
 import { repoAt } from '../departments/repository.js';
 import { ApiError } from '../../errors.js';
 import { commitApprovalRequired } from './commit-approval.js';
-import { ask, blocked, cancel, closeTask, createTask, report, submit, updateTask, verdict } from './engine.js';
+import { ask, blocked, cancel, closeTask, createTask, recordAnswer, report, submit, updateTask, verdict } from './engine.js';
 import { comment } from './comments.js';
 import { CLOSED, listed, mayAsk, openAfter, refuse, taskSpot, type Moved, type Task } from './state.js';
 import { replanWait } from './wait-state.js';
@@ -188,6 +188,7 @@ class TaskTools {
     this.registerComment();
     this.registerReplanWait();
     this.registerAskPerson();
+    this.registerRecordAnswer();
     this.registerReport();
     if (this.job.agentKind !== 'worker') this.registerTurnTools();
     if (this.job.agentKind === 'head') this.registerCreateTask();
@@ -506,7 +507,7 @@ class TaskTools {
       'ask_person',
       {
         description:
-          'Asks the people responsible for the task a question, (with commit) for approval of that exact commit under the department\'s rule, or (with options) to pick one of 2 to 4 ways. The task waits; you are woken with the answer. ' +
+          'Asks the people responsible for the task a question, (with commit) for approval of that exact commit under the department\'s rule, or (with options) to pick one of 2 to 4 ways. The task waits; you are woken with the answer. A person\'s message to you that answers one of several open questions without naming it closes none: record which with record_answer. ' +
           "Ask only once every instruction and material the question promises is ready, attached to it instead of a pointer to a task's log, and let one sender ask it once. " +
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
@@ -547,6 +548,24 @@ class TaskTools {
           const moved = await ask(this.ctx, this.job.agentId, task.id, { kind, text, ...(commit ? { commit, approval: { channel: 'commit', kind: 'commit', amount: null } } : {}), ...uncheckedCard(unchecked), images, options: ways, link: link ?? null, topic, ...(recipient ? { recipientPersonId: recipient } : {}), ...(plan ? { plan } : {}) });
           await recordQuestion(this.ctx, this.job, task, { kind, text, topic: commit ? 'release' : topic, ...(recipient ? { recipient } : {}) });
           return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
+        }),
+    );
+  }
+
+  /* A person's words to the agent closed none of its questions by themselves: the agent says which they answer, citing them. */
+  private registerRecordAnswer(): void {
+    this.server.registerTool(
+      'record_answer',
+      {
+        description:
+          "Records which of your open questions to people, or which work you are stuck on for them, a person's message to you answers. Their words close one by themselves only when it is clear which: the only one they may answer, or the one they name by its task, a link or a quoted line. With more open, read their message, and record here each question it answers. " +
+          'request: the id of that question, as task shows it. words: a part of their message, exactly as they wrote it, enough to find that one message, from your window, Telegram, their assistant or your terminal. Hornhoof finds the message, written to you since you asked, and records the whole message as their answer on that card alone, with a link to it. It refuses words no person wrote to you, words more than one message holds, and a person who may not answer it. A choice and an approval keep their own card.',
+        inputSchema: { request: z.uuid(), words: z.string().trim().min(1).max(12_000) },
+      },
+      async ({ request, words }) =>
+        this.run(async () => {
+          const { task, wakes } = await recordAnswer(this.ctx, this.job.agentId, request, words);
+          return { text: `Recorded as their answer on #${task.number}. Your other questions stay open.`, moved: { wakes: wakes.filter(w => w.agentId !== this.job.agentId) } };
         }),
     );
   }
