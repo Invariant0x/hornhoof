@@ -36,6 +36,9 @@ const stty = (tty: string, size: Size) =>
   new Promise<void>(resolve => execFile('stty', [process.platform === 'darwin' ? '-f' : '-F', tty, 'cols', String(size.cols), 'rows', String(size.rows)], () => resolve()));
 
 const MAX_EARLY_KEYS = 256;
+/* A browser opens a view again within seconds of a connection it lost, its retries reaching ten. Until then the agent still
+   counts as watched, so its idle program is there for the view that comes back and is not started anew under the person. */
+const VIEW_RETURN_MS = 30_000;
 
 type ViewOptions = { tmux: Tmux; send(m: NodeMessage): void; secrets(): string[] };
 /* What a view needs of the agent it shows: its session, and whether a program runs, sleeps or has a turn. */
@@ -58,12 +61,18 @@ export class ViewSessions {
   /* The size each view's window asks for, from the moment Hornhoof opens it: a resize that comes while it still opens
      counts too, since Hornhoof says the view is ready as it asks for it. */
   private readonly wanted = new Map<string, { key: string; size: Size }>();
+  /* When a view of each agent last went. */
+  private readonly left = new Map<string, number>();
 
   constructor(private readonly opts: ViewOptions, private readonly host: ViewHost) {}
 
-  /* Someone has a window on this agent's session, or is opening one. */
+  /* Someone has a window on this agent's session, is opening one, or lost one so lately that it comes back. */
   watched(key: string): boolean {
-    return [...this.wanted.values()].some(view => view.key === key);
+    return [...this.wanted.values()].some(view => view.key === key) || Date.now() - (this.left.get(key) ?? -Infinity) < VIEW_RETURN_MS;
+  }
+
+  private gone(termId: string, key: string): void {
+    if (this.wanted.delete(termId)) this.left.set(key, Date.now());
   }
 
   /* Every view of an agent hears whether its program runs or sleeps. */
@@ -91,7 +100,7 @@ export class ViewSessions {
 
   /* The others may have got smaller for a view that is gone. */
   private forget(termId: string, key: string): Promise<void> {
-    this.wanted.delete(termId);
+    this.gone(termId, key);
     return this.fit(key);
   }
 
@@ -127,7 +136,7 @@ export class ViewSessions {
       if (view.quiet) clearTimeout(view.quiet);
       view.out(view.mask.end());
       this.views.delete(m.termId);
-      this.wanted.delete(m.termId);
+      this.gone(m.termId, m.agentKey);
       this.opts.send({ type: 'term.exit', termId: m.termId });
       void this.fit(m.agentKey);
     });
