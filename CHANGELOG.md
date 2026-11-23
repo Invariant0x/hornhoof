@@ -10,6 +10,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Fixed
 
 - The head of Design, named on a task's tracked work to check a screen's final look, can now read that task and its files and comment on it until the check ends, and the task's holder can message that head about it.
+- A merge of a copy's database no longer stops with "No merge rule for public.world_layouts": the company's city and the CEO's orders to move its buildings merge like a person's map, and two cities that differ keep the leading one and go to the orchestrator.
 
 ## [0.42.0] - 2026-11-23
 
