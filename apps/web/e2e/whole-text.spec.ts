@@ -425,11 +425,14 @@ async function dragBy(page: Page, screen: Screen, dx: number, dy: number): Promi
   const world = page.locator(`${CANVAS[screen]} .world`);
   const before = await world.boundingBox();
   await page.mouse.move(start.x, start.y);
+  const under = await page.evaluate(({ x, y }) => { const e = document.elementFromPoint(x, y); return `${e?.tagName}.${String(e?.className).slice(0, 40)}`; }, start);
   await page.mouse.down();
   await page.mouse.move(start.x + dx * start.f, start.y + dy * start.f, { steps: 8 });
+  const mid = await world.boundingBox();
   await page.mouse.up();
   await settle(page);
   const after = await world.boundingBox();
+  if (screen === 'department') console.log(`TRACE2 at ${under} before ${JSON.stringify(before)} mid ${JSON.stringify(mid)} after ${JSON.stringify(after)}`);
   return Math.abs(after!.x - before!.x) >= 0.5 || Math.abs(after!.y - before!.y) >= 0.5;
 }
 
