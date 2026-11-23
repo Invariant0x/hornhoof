@@ -423,13 +423,26 @@ async function dragBy(page: Page, screen: Screen, dx: number, dy: number, presse
   if (!start) return false;
   const world = page.locator(`${CANVAS[screen]} .world`);
   const before = await world.boundingBox();
+  await page.evaluate(() => {
+    const w = window as unknown as { __ev?: string[] };
+    if (w.__ev) return;
+    w.__ev = [];
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'dragstart', 'selectstart', 'lostpointercapture', 'gotpointercapture'])
+      window.addEventListener(type, e => { if (w.__ev!.length < 40) w.__ev!.push(`${type}@${String((e.target as Element)?.className ?? e.target).slice(0, 24)}${(e as PointerEvent).clientX !== undefined ? `:${Math.round((e as PointerEvent).clientX)},${Math.round((e as PointerEvent).clientY)}` : ''}${e.defaultPrevented ? ' PREVENTED' : ''}`); }, true);
+  });
+  await page.evaluate(() => { (window as unknown as { __ev: string[] }).__ev.length = 0; });
   await page.mouse.move(start.x, start.y);
+  const stack = await page.evaluate(({ x, y }) => document.elementsFromPoint(x, y).slice(0, 6).map(e => `${e.tagName}.${String(e.className).slice(0, 24)}`).join(' > '), start);
   await page.mouse.down();
   await page.mouse.move(start.x + dx * start.f, start.y + dy * start.f, { steps: 8 });
   await page.mouse.up();
   await settle(page);
   const after = await world.boundingBox();
   const moved = Math.abs(after!.x - before!.x) >= 0.5 || Math.abs(after!.y - before!.y) >= 0.5;
+  if (!moved && screen === 'department') {
+    const ev = await page.evaluate(() => (window as unknown as { __ev: string[] }).__ev.join(' | '));
+    console.log(`DEAD press ${start.x},${start.y} for ${Math.round(dx)},${Math.round(dy)} stack ${stack} world ${JSON.stringify(before)} events ${ev}`);
+  }
   if (!moved) pressed.add(`${start.x},${start.y}`);
   return moved;
 }
