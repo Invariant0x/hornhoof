@@ -37,7 +37,7 @@ const MACHINE: MachineView = {
   load: { cpus: 10, load: 1, memFree: 10 * GIB, memTotal: 12 * GIB, jobs: 0, tests: 0, cpuModel: 'Apple M2 Pro', diskFree: DISK.free, diskTotal: DISK.total, disk: DISK },
   lendsTests: true, running: { agents: [], parts: [] },
   /* Two copies of company databases inside the volumes, one of them a company the server serves, with a long name. */
-  replicas: { count: 2, bytes: 38.6 * GIB, companies: [{ name: 'Northwind Logistics & Cold Chain International', bytes: 21.4 * GIB }] },
+  replicas: { count: 2, bytes: 38.6 * GIB, companies: [{ name: 'Moonfern Logistics & Cold Chain International', bytes: 21.4 * GIB }] },
   /* The working copies node by node: its two plans' and its own node's, 17.3 GB together. */
   folders: [{ plan: 's-claude', bytes: 11.9 * GIB }, { plan: 's-codex', bytes: 5.4 * GIB }, { plan: null, bytes: 0 }],
 };
