@@ -167,6 +167,25 @@ test(`a theme with no engine, ${lang} ${width}: refused with what to fix and the
   await fits(page);
   await capture(page, info, `store-remove-focus-${at}`);
 
+  /* Remove asks first, in the shared confirmation over the page: the theme is on, so it also says what the company gets
+     instead. Cancel holds the focus with its ring, and Escape keeps the theme and gives the focus back to Remove
+     (ui/ConfirmAction.tsx; Design, 21.11). */
+  await page.keyboard.press('Enter');
+  const ask = page.getByRole('alertdialog', { name: words.archive.deleteTitle(night) });
+  await expect(ask).toBeVisible();
+  await expect(ask).toContainText(words.archive.deleteEffect);
+  await expect(ask).toContainText(said.confirm.final);
+  await expect(ask).toContainText(words.archive.deleteActive);
+  const cancel = ask.getByRole('button', { name: said.common.cancel, exact: true });
+  await expect(cancel).toBeFocused();
+  expect(await cancel.evaluate(button => button.matches(':focus-visible'))).toBe(true);
+  await fits(page);
+  await capture(page, info, `store-delete-ask-${at}`);
+  await page.keyboard.press('Escape');
+  await expect(ask).toHaveCount(0);
+  await expect(remove).toBeFocused();
+  await expect(card).toBeVisible();
+
   /* The licence it came with opens as plain text from the theme's own files. */
   const [licence] = await Promise.all([page.waitForEvent('popup'), card.getByRole('link', { name: words.archive.license('CC0-1.0') }).click()]);
   await expect(licence.locator('body')).toContainText('Synthetic test data, CC0-1.0.');

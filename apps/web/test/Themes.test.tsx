@@ -454,7 +454,49 @@ describe('themes uploaded as an archive', () => {
     expect(within(catalog(dialog)).queryByText('Night shift')).toBeNull();
   });
 
-  it('deletes an uploaded theme only after a second ask, and a theme that was on gives way to Cyberpunk', async () => {
+  /* Deleting an uploaded theme removes its files for good, so it asks first in the shared confirmation (ui/ConfirmAction.tsx;
+     Design, 21.11): Cancel holds the focus, and Cancel, Escape or a press on the dim layer keep the theme. */
+  const TITLE = 'Do you really want to delete the theme “Night shift”?';
+  const EFFECT = 'The theme and its pictures will be removed from the company.';
+  const ACTIVE = 'The company will go back to the default theme.';
+
+  it('asks before deleting an uploaded theme, and Cancel, Escape or a press outside keep it', async () => {
+    const user = userEvent.setup();
+    const calls = renderStore({});
+    const dialog = await openThemes(user);
+    await user.upload(upload(dialog), zip);
+    const item = (await within(catalog(dialog)).findByText('Night shift')).closest('li')!;
+    const remove = within(item).getByRole('button', { name: 'Remove: Night shift' });
+    const ask = async () => {
+      await user.click(remove);
+      return screen.getByRole('alertdialog', { name: TITLE });
+    };
+
+    let question = await ask();
+    expect(question).toHaveAccessibleDescription(EFFECT);
+    expect(question).toHaveTextContent('This cannot be undone.');
+    expect(within(question).queryByText(ACTIVE)).toBeNull();
+    expect(within(question).getByRole('button', { name: 'Delete' })).toHaveClass('btn', 'danger');
+    expect(within(question).getByRole('button', { name: 'Cancel' })).toHaveClass('btn', 'ghost');
+    expect(within(question).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(question).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(remove).toHaveFocus();
+
+    await ask();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(dialog).toBeInTheDocument();
+
+    question = await ask();
+    await user.pointer({ keys: '[MouseLeft]', target: question });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    expect(calls.some(call => call.method === 'DELETE')).toBe(false);
+    expect(within(catalog(dialog)).getByText('Night shift')).toBeInTheDocument();
+  });
+
+  it('deletes an uploaded theme with Delete, and says the company goes back to the default theme only when it is on', async () => {
     const user = userEvent.setup();
     const calls = renderStore({});
     const dialog = await openThemes(user);
@@ -462,14 +504,13 @@ describe('themes uploaded as an archive', () => {
     await user.click(await within(dialog).findByRole('button', { name: 'Apply: Night shift' }));
     const item = within(catalog(dialog)).getByText('Night shift').closest('li')!;
     await user.click(within(item).getByRole('button', { name: 'Remove: Night shift' }));
-    const ask = within(item).getByRole('group', { name: 'Delete Night shift with all its files? If it is on, the company goes back to Cyberpunk.' });
-    await user.click(within(ask).getByRole('button', { name: 'Keep it' }));
-    expect(calls.some(call => call.method === 'DELETE')).toBe(false);
-    await user.click(within(item).getByRole('button', { name: 'Remove: Night shift' }));
-    await user.click(within(item).getByRole('button', { name: 'Delete theme' }));
+    const question = screen.getByRole('alertdialog', { name: TITLE });
+    expect(within(question).getByText(ACTIVE)).toBeInTheDocument();
+    await user.click(within(question).getByRole('button', { name: 'Delete' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(calls.filter(call => call.method === 'DELETE').map(call => call.path)).toEqual(['/api/themes/night-shift']);
+    expect(await within(dialog).findByRole('status')).toHaveTextContent('Night shift is deleted.');
     expect(within(catalog(dialog)).queryByText('Night shift')).toBeNull();
-    expect(within(dialog).getByRole('status')).toHaveTextContent('Night shift is deleted.');
     expect(skinsState().active).toBe('cyberpunk');
   });
 

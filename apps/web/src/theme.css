@@ -571,7 +571,6 @@ dialog.dialog-back .btn .spinner { border-color: color-mix(in srgb, currentColor
 .skins-adds { display: grid; justify-items: end; gap: 8px; min-width: 0; }
 .skins-upload-hint { max-width: 48ch; text-align: end; }
 .skin-cover { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border: 1px solid var(--line2); background: var(--bg); }
-.skin-confirm { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--red); background: var(--surface); }
 .skins-adds .btn { width: 180px; max-width: 100%; }
 .swap-label { display: grid; }
 .swap-label > span { grid-area: 1 / 1; }

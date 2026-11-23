@@ -13,6 +13,7 @@ import { forgetInstalledTheme, installedThemes, loadInstalledTheme } from '../th
 import { archiveProblemText } from '../themes/problem-text';
 import { useMapGrain, useSkins } from '../skins/use-skin';
 import { builtinFile, parseSkin, SEE_THROUGH, SKIN_FILE_LIMIT, skinText, type SkinError } from '../skins/validate';
+import { useConfirmAction } from './ConfirmAction';
 import { ThemeShopIcon } from './icons';
 
 /* The Theme store section of a person's settings: full interactive world themes, classic built-in skins and every skin
@@ -133,14 +134,18 @@ function cardOrigin(words: Messages['skins'], card: Card): string {
 /* A skin's card: its preview, name, origin and description, then its quiet buttons on the end edge. The skin on says so
    by a state beside its name instead of Apply, and that state holds the focus once Apply is gone. */
 function SkinCard({ card, on, canDelete, onApply, onDownload, onRemove }: CardProps) {
-  /* Deleting an uploaded theme removes its files on the server: the card asks once more before it does. */
-  const [asking, setAsking] = useState(false);
+  const words = useT().skins.archive;
+  /* Deleting an uploaded theme removes its files on the server for good, so it asks first in the shared confirmation
+     (ui/ConfirmAction.tsx; Design, 21.11): for the theme that is on, also what the company gets instead. */
+  const { ask, question } = useConfirmAction();
+  const askDelete = () =>
+    ask({ title: words.deleteTitle(card.name), effect: words.deleteEffect, warnings: on ? [words.deleteActive] : [], final: true, danger: true, yes: words.deleteYes, working: words.deleteWorking, onYes: onRemove });
   return (
     <li className="skin-card" data-current={on || undefined} aria-current={on || undefined} data-installed={installedIdOf(card)}>
       <CardPicture card={card} />
       <CardText card={card} on={on} />
-      <CardActions card={card} on={on} removable={!asking && canRemove(card, canDelete)} onApply={onApply} onDownload={onDownload} onRemove={onRemove} onAsk={() => setAsking(true)} />
-      {asking && <DeleteAsk name={card.name} onYes={() => { setAsking(false); onRemove(); }} onNo={() => setAsking(false)} />}
+      <CardActions card={card} on={on} removable={canRemove(card, canDelete)} onApply={onApply} onDownload={onDownload} onRemove={card.installed ? askDelete : onRemove} />
+      {question}
     </li>
   );
 }
@@ -192,9 +197,9 @@ function InstalledNotes({ view }: { view: InstalledThemeView }) {
 }
 
 /* onAsk: an uploaded theme's Remove asks once more first. */
-type ActionsProps = { card: Card; on: boolean; removable: boolean; onApply: () => void; onDownload: () => void; onRemove: () => void; onAsk: () => void };
+type ActionsProps = { card: Card; on: boolean; removable: boolean; onApply: () => void; onDownload: () => void; onRemove: () => void };
 
-function CardActions({ card, on, removable, onApply, onDownload, onRemove, onAsk }: ActionsProps) {
+function CardActions({ card, on, removable, onApply, onDownload, onRemove }: ActionsProps) {
   const words = useT().skins;
   return (
     <div className="entry-actions skin-actions">
@@ -215,27 +220,10 @@ function CardActions({ card, on, removable, onApply, onDownload, onRemove, onAsk
         </button>
       )}
       {removable && (
-        <button className="btn small ghost danger" type="button" aria-label={`${words.remove}: ${card.name}`} data-focus-remove={card.id} onClick={card.installed ? onAsk : onRemove}>
+        <button className="btn small ghost danger" type="button" aria-label={`${words.remove}: ${card.name}`} data-focus-remove={card.id} onClick={onRemove}>
           {words.remove}
         </button>
       )}
-    </div>
-  );
-}
-
-function DeleteAsk({ name, onYes, onNo }: { name: string; onYes: () => void; onNo: () => void }) {
-  const words = useT().skins.archive;
-  return (
-    <div className="skin-confirm" role="group" aria-label={words.deleteConfirm(name)}>
-      <p>{words.deleteConfirm(name)}</p>
-      <div className="entry-actions">
-        <button className="btn small danger" type="button" autoFocus onClick={onYes}>
-          {words.deleteYes}
-        </button>
-        <button className="btn small ghost" type="button" onClick={onNo}>
-          {words.deleteNo}
-        </button>
-      </div>
     </div>
   );
 }

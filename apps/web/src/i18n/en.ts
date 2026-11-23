@@ -716,12 +716,15 @@ export const en = {
       origin: 'Uploaded',
       refused: 'The theme was not installed',
       deleted: (name: string) => `${name} is deleted.`,
-      deleteConfirm: (name: string) => `Delete ${name} with all its files? If it is on, the company goes back to Cyberpunk.`,
+      /* The question before an uploaded theme is deleted for good (ui/ConfirmAction.tsx; Design, 21.11). */
+      deleteTitle: (name: string) => `Do you really want to delete the theme “${name}”?`,
+      deleteEffect: 'The theme and its pictures will be removed from the company.',
+      deleteActive: 'The company will go back to the default theme.',
       cover: (name: string) => `Picture of ${name}`,
       license: (id: string) => `License: ${id}`,
       worldLeftOut: 'Interface only: its world does not bring all its own art, so the company keeps the schematic map.',
-      deleteYes: 'Delete theme',
-      deleteNo: 'Keep it',
+      deleteYes: 'Delete',
+      deleteWorking: 'Deleting…',
       problems: {
         not_zip: () => 'This file is not a zip archive. Pack the theme folder as .zip and upload it again.',
         zip_split: () => 'This archive is split into parts. Pack the theme as one .zip file.',
