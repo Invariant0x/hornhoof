@@ -8,6 +8,7 @@ import { sweepWaits } from '../src/modules/tasks/wait-escalation.js';
 import * as goals from '../src/modules/tasks/wait-goals.js';
 import { deliverWaitNotices } from '../src/modules/tasks/wait-notices.js';
 import { as } from './helpers.js';
+import { recorded } from './recorded-fixture.js';
 import { waitCompany } from './wait-company.js';
 
 const HOUR = 3_600_000;
@@ -165,7 +166,7 @@ describe('the summary of a turn', () => {
   };
   /* Both results go into the turn as they are accepted, and the tag of its release closes it, as releaseRound does. */
   const close = async (c: Awaited<ReturnType<typeof inTurn>>) => {
-    await report(c.ctx, c.head.id, c.reported.id, { done: true, summary: 'Shipped.' });
+    await report(c.ctx, c.head.id, c.reported.id, { done: true, summary: 'Shipped.', ...(await recorded(c.ctx, c.reported.id, c.head.id)) });
     await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, c.silent.id));
     await c.db.update(tasks).set({ turnId: c.turn.id }).where(inArray(tasks.id, [c.reported.id, c.silent.id]));
     await c.db.transaction(async tx => {
