@@ -2549,7 +2549,7 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
    of running under the card. On a phone it takes the whole screen under the top bar. Its bar names what it is; its body goes
    from the path, the kind, the title, the status, why and the bar, through the facts and the graph from here, to its sections. */
 @media (min-width: 761px) {
-  .body.tracker-page ~ .acard.at-end { inset-block: 68px 0; inset-inline-start: auto; inset-inline-end: 0; inline-size: var(--tracker-card-size); max-inline-size: 100vw; border: 0; border-inline-start: 1px solid var(--line2); box-shadow: -12px 0 30px var(--shadow); }
+  .body.tracker-page ~ .acard.at-end { inset-block: 68px 0; inset-inline-start: auto; inset-inline-end: 0; inline-size: var(--tracker-card-size); max-inline-size: 100vw; border-width: 0; border-inline-start: 1px solid var(--line2); box-shadow: -12px 0 30px var(--shadow); }
   .body.tracker-page ~ .acard.at-end:dir(rtl) { box-shadow: 12px 0 30px var(--shadow); }
   .body.tracker-page:has(~ .acard.at-end) { inset-inline-end: var(--tracker-card-size); }
   /* The strips of minimized windows stand at the right edge; the drawer leaves them in reach beside it. */
@@ -2557,7 +2557,7 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
   .shell:has(.agent-strips:not(:empty)) .body.tracker-page:has(~ .acard.at-end):dir(ltr) { inset-inline-end: calc(var(--tracker-card-size) + var(--tracker-strips-room)); }
 }
 @media (max-width: 760px) {
-  .body.tracker-page ~ .acard.at-end { inset: 68px 0 0; inline-size: auto; max-inline-size: none; border: 0; box-shadow: none; }
+  .body.tracker-page ~ .acard.at-end { inset: 68px 0 0; inline-size: auto; max-inline-size: none; border-width: 0; box-shadow: none; }
 }
 .acard.plain > .t-bar { height: auto; min-block-size: 38px; padding-block: 2px; padding-inline: 14px 6px; justify-content: space-between; }
 .acard.plain > .t-bar > span { text-align: start; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
