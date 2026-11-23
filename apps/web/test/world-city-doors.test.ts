@@ -99,6 +99,27 @@ describe('Buildings stand at the front corner of their lot with the door on a fr
     expect(restored.buildings.find(b => b.id === 'hub-1')).toEqual(hub);
   });
 
+  it('builds an Egypt home as the pilot art: a 2x2 hut from level 1, a 3x3 mudbrick house from level 4, kept through level 14, 4x4 from 15, in a 4x4 lot with the door on the front right wall, row 0', () => {
+    expect(EGYPT_WORLD_PACK.buildingLayout?.house).toEqual({ door: { wall: 'front_right', fromFront: 0 }, spans: [2, 3, 3, 4] });
+    const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: 'hornhoof', mapSize: 150 });
+    const city = createCity(map, { orderChaos: 0.5, buildingLayout: EGYPT_WORLD_PACK.buildingLayout });
+    const house = placeBuilding(city, { id: 'house-1', kind: 'house', departmentId: 'd1' }, map)!;
+    expect(house).not.toBeNull();
+    expect([house.spanCol, house.spanRow, house.lot.spanCol, house.lot.spanRow]).toEqual([2, 2, 4, 4]);
+    expect(house.door).toEqual({ col: house.col + 2, row: house.row + 2 - 1 });
+    const corner = frontCorner(house);
+    const door = { ...house.door };
+    for (const [level, span] of [[3, 2], [4, 3], [14, 3], [15, 4]] as const) {
+      house.level = level;
+      growBuildingForProgress(city, map, house);
+      expect(house.spanCol, `level ${level}`).toBe(span);
+      expect(frontCorner(house)).toEqual(corner);
+      expect(house.door).toEqual(door);
+    }
+    const check = verifyCityInvariants(city, map);
+    expect(check.ok, JSON.stringify(check.errors)).toBe(true);
+  });
+
   it('gives a live machine the workshop size of its power: weak 3x3, middle 4x4, strong 5x5, all in a 5x5 lot', () => {
     const live = createHornhoofLiveFixture();
     const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: live.company.seed, mapSize: 150 });
@@ -136,7 +157,7 @@ describe('Buildings stand at the front corner of their lot with the door on a fr
     }
   });
 
-  it('rejects a layout rule with an unknown wall, a door row past the smallest size or sizes that do not grow', () => {
+  it('rejects a layout rule with an unknown wall, a door row past the smallest size or sizes that shrink, and lets a kind keep a size for two steps', () => {
     const withRule = (rule: unknown): WorldPackManifest =>
       ({ ...EGYPT_WORLD_PACK, buildingLayout: { district_hub: rule } }) as unknown as WorldPackManifest;
     expect(validateWorldPack(EGYPT_WORLD_PACK)).toEqual({ ok: true });
@@ -148,6 +169,7 @@ describe('Buildings stand at the front corner of their lot with the door on a fr
     expect(errorsOf({ door: { wall: 'front_left', fromFront: 3 }, spans: [3, 4] }).join()).toMatch(/fromFront/);
     expect(errorsOf({ door: { wall: 'front_left', fromFront: -1 }, spans: [3] }).join()).toMatch(/fromFront/);
     expect(errorsOf({ door: { wall: 'front_left', fromFront: 0 }, spans: [4, 3] }).join()).toMatch(/spans/);
+    expect(errorsOf({ door: { wall: 'front_right', fromFront: 1 }, spans: [2, 3, 3, 4] })).toEqual([]);
     expect(errorsOf({ door: { wall: 'front_left', fromFront: 0 }, spans: [0, 7] }).join()).toMatch(/spans/);
     expect(errorsOf({ door: { wall: 'front_left', fromFront: 0 }, spans: [] }).join()).toMatch(/spans/);
     const unknownKind = { ...EGYPT_WORLD_PACK, buildingLayout: { castle: { door: { wall: 'front_left', fromFront: 0 }, spans: [2] } } };
