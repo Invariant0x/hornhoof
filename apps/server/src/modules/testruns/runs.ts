@@ -559,13 +559,15 @@ export async function partStarted(ctx: Ctx, id: NodeIdentity, partId: string): P
    which, proves nothing about that commit, whatever its command did. One that failed before it reached any commit keeps
    its own reason. */
 type PartEnd = 'passed' | 'failed' | 'refused';
-/* A node from before refusals had a word of their own says "failed" for a part its command guard stopped: one that never
-   started, has no exit code and says it was stopped before it started. */
+/* A node from before refusals had a word of their own says "failed" for a part its command guard stopped. Its part holds a
+   start time all the same, from when the part was given to it, so the refusal is known by what the node says: no exit
+   code, and a log that is the guard's refusal, with Hornhoof's own sentence on its first or second line. */
 const OLD_REFUSAL = 'Hornhoof stopped this command before it started.';
-const refusedBefore = (part: Pick<Part, 'startedAt'>, msg: Pick<TestsDone, 'ok' | 'error' | 'exitCode' | 'log'>) =>
-  !msg.ok && (msg.error === 'refused' || (msg.error === 'failed' && msg.exitCode === null && part.startedAt === null && msg.log.includes(OLD_REFUSAL)));
-function partEnd(run: Pick<Run, 'commitSha'>, part: Pick<Part, 'startedAt'>, msg: Pick<TestsDone, 'ok' | 'commit' | 'error' | 'exitCode' | 'log'>): { status: PartEnd; error: string | null } {
-  if (refusedBefore(part, msg)) return { status: 'refused', error: 'refused' };
+const oldRefusal = (log: string) => log.split('\n', 2).some(line => line.startsWith(OLD_REFUSAL));
+const refusedBefore = (msg: Pick<TestsDone, 'ok' | 'error' | 'exitCode' | 'log'>) =>
+  !msg.ok && (msg.error === 'refused' || (msg.error === 'failed' && msg.exitCode === null && oldRefusal(msg.log)));
+function partEnd(run: Pick<Run, 'commitSha'>, msg: Pick<TestsDone, 'ok' | 'commit' | 'error' | 'exitCode' | 'log'>): { status: PartEnd; error: string | null } {
+  if (refusedBefore(msg)) return { status: 'refused', error: 'refused' };
   const skewed = run.commitSha !== null && (msg.commit ? msg.commit !== run.commitSha : msg.ok);
   if (skewed) return { status: 'failed', error: COMMIT_MISMATCH };
   return msg.ok ? { status: 'passed', error: null } : { status: 'failed', error: msg.error ?? 'failed' };
@@ -941,7 +943,7 @@ function productPartView(part: Part): object {
 }
 
 function productPartEnd(ctx: Ctx, id: NodeIdentity, run: Run, part: Part, message: TestsDone): { status: PartEnd; error: string | null; environmentReceipt: Part['environmentReceipt'] } {
-  const end = partEnd(run, part, message), environmentReceipt = productReceipt(run.environmentSnapshot, part.environmentSelection, message, testCapabilities(ctx, id).testRuntimes ?? []);
+  const end = partEnd(run, message), environmentReceipt = productReceipt(run.environmentSnapshot, part.environmentSelection, message, testCapabilities(ctx, id).testRuntimes ?? []);
   if (run.environmentSnapshot && message.ok && !environmentReceipt) return { status: 'failed', error: 'environment_invalid', environmentReceipt: null };
   return { ...end, environmentReceipt };
 }
