@@ -2,10 +2,22 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agentEvents, telegramChatLanguages } from '../../db/schema.js';
 import type { TelegramMessage } from './api.js';
+import { LOCALES } from '@hornhoof/protocol';
 import { langOf, type BotLang } from './words.js';
 
-const writtenLanguage = (text: string): BotLang | undefined =>
-  /\p{Script=Cyrillic}/u.test(text) ? 'ru' : /\p{L}/u.test(text) ? 'en' : undefined;
+/* The scripts a text can be written in, by the ISO 15924 code the registry gives each language, the more telling first. */
+const WRITTEN: [script: string, pattern: RegExp][] = [
+  ['Jpan', /[\p{Script=Hiragana}\p{Script=Katakana}]/u], ['Kore', /\p{Script=Hangul}/u], ['Hans', /\p{Script=Han}/u], ['Deva', /\p{Script=Devanagari}/u],
+  ['Arab', /\p{Script=Arabic}/u], ['Cyrl', /\p{Script=Cyrillic}/u], ['Latn', /\p{Script=Latin}/u],
+];
+
+/* The language a text is written in, when its script names one: a script that one language of the registry has. A script
+   that several share (Latin) says nothing, and the person's Telegram language code decides. */
+const writtenLanguage = (text: string): BotLang | undefined => {
+  const script = WRITTEN.find(([, pattern]) => pattern.test(text))?.[0];
+  const same = LOCALES.filter(locale => locale.script === script);
+  return same.length === 1 ? same[0]!.id : undefined;
+};
 
 /* Older events kept the person's text and Hornhoof's notes together. A bare file was shown by its name. */
 const note = /(?:^|\n\n)\[(?:A (?:voice message|round video message|sticker|contact:|place:|location:|poll:)|[^\]\n]+ did not come)/;

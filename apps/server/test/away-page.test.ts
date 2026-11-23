@@ -71,7 +71,7 @@ describe('the page of a hop with no server behind it', () => {
     expect(answer.headers['retry-after']).toBe('5');
     expect(answer.headers['cache-control']).toBe('no-store');
     expect(answer.headers.vary).toBe('Accept-Language');
-    expect(answer.body).toContain('<html lang="en">');
+    expect(answer.body).toContain('<html lang="en" dir="ltr">');
     expect(answer.body).toContain('<h1>No connection to the server</h1>');
     expect(answer.body).toContain('This page opens by itself when the server answers.');
     expect(answer.body).toContain('Checking every 5\u00a0s');
@@ -89,7 +89,7 @@ describe('the page of a hop with no server behind it', () => {
     const door = await frontWithNoKeeper();
     const answer = await send(door, { path: '/', headers: RU });
     expect(answer.status).toBe(502);
-    expect(answer.body).toContain('<html lang="ru">');
+    expect(answer.body).toContain('<html lang="ru" dir="ltr">');
     expect(answer.body).toContain('<h1>Нет связи с сервером</h1>');
     expect(answer.body).toContain('Страница откроется сама, когда сервер ответит.');
     expect(answer.body).toContain('Проверяем каждые 5\u00a0с');

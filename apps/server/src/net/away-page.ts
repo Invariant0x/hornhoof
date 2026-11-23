@@ -5,43 +5,17 @@
    no request of its own: no font, no image, no link, nothing but its own text, style and one line of script, which a policy
    of its own lets run and nothing else, so it shows the same with no internet. Its colours are the tokens of the style
    book, light and dark by the visitor's setting. */
+import { directionOf, localeOfHeader, type LocaleId } from '@hornhoof/protocol';
+import { wordsFor } from '../locales/index.js';
+
 export type Away = 'lost' | 'updating';
-export type Language = 'en' | 'ru';
-
-type Words = { lost: [title: string, hint: string]; updating: [title: string, hint: string]; checking: (seconds: number) => string; reload: string };
-
-const WORDS: Record<Language, Words> = {
-  en: {
-    lost: ['No connection to the server', 'This page opens by itself when the server answers.'],
-    updating: ['Server is updating', 'This takes a few minutes. The page opens by itself.'],
-    checking: seconds => `Checking every ${seconds} s`,
-    reload: 'Reload page',
-  },
-  ru: {
-    lost: ['Нет связи с сервером', 'Страница откроется сама, когда сервер ответит.'],
-    updating: ['Сервер обновляется', 'Это займет несколько минут. Страница откроется сама.'],
-    checking: seconds => `Проверяем каждые ${seconds} с`,
-    reload: 'Обновить страницу',
-  },
-};
 
 /* How often the page asks again, in seconds: the Retry-After the answer carries. */
 const EVERY_S: Record<Away, number> = { lost: 5, updating: 10 };
 export const awayEveryS = (kind: Away): number => EVERY_S[kind];
 
 /* The first language of an Accept-Language header that Hornhoof ships, by the weights the visitor gave, or English. */
-export function languageOf(header: string | undefined): Language {
-  const asked = String(header ?? '')
-    .split(',')
-    .map((part, order) => {
-      const [tag = '', ...params] = part.trim().split(';');
-      const weight = params.map(param => /^\s*q\s*=\s*([\d.]+)\s*$/i.exec(param)?.[1]).find(Boolean);
-      return { base: tag.trim().toLowerCase().split('-')[0], weight: weight === undefined ? 1 : Number(weight), order };
-    })
-    .filter(entry => entry.weight > 0)
-    .sort((a, b) => b.weight - a.weight || a.order - b.order);
-  return asked.map(entry => entry.base).find((base): base is Language => base === 'en' || base === 'ru') ?? 'en';
-}
+export const languageOf = (header: string | undefined): LocaleId => localeOfHeader(header);
 
 /* The sign of Hornhoof, as the app draws it, in the ink colour. */
 const SIGN = `<svg class="sign" viewBox="0 0 30 30" width="48" height="48" aria-hidden="true"><path d="M 5 20 A 10 10 0 0 1 25 20" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M 2 24.5 L 28 24.5" stroke="currentColor" stroke-width="2.4"/><circle cx="15" cy="16" r="2.4" fill="currentColor"/></svg>`;
@@ -64,11 +38,11 @@ button:focus-visible { clip-path: none; outline: 2px solid var(--cyan-ink); outl
 
 export function awayPage(kind: Away, acceptLanguage?: string): string {
   const language = languageOf(acceptLanguage);
-  const words = WORDS[language];
+  const words = wordsFor(language).away;
   const [title, hint] = words[kind];
   const every = awayEveryS(kind);
   return `<!doctype html>
-<html lang="${language}">
+<html lang="${language}" dir="${directionOf(language)}">
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">

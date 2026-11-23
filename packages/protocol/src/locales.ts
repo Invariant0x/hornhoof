@@ -19,6 +19,8 @@ export const LOCALES = [
 ] as const satisfies readonly LocaleInfo[];
 
 export type LocaleId = (typeof LOCALES)[number]['id'];
+/* The ids as a list a column or a schema can take as its values. */
+export const LOCALE_IDS = LOCALES.map(locale => locale.id) as [LocaleId, ...LocaleId[]];
 export const SOURCE_LOCALE: LocaleId = 'en';
 /* The server writes its own words in the source language; a person who reads another gets them from the files instead. */
 export const isSourceLocale = (id: string): boolean => id === SOURCE_LOCALE;
