@@ -492,22 +492,38 @@ async function cutFollowsBars(page: Page, screen: Screen) {
 
 /* The canvas as it opens, at each of its edges in turn, and then brought to each card and chip a person has not seen whole
    yet: nothing stands under what floats over it anywhere, it stops at every edge, and every card and chip shows whole. */
+
+async function dump(page: Page, tag: string) {
+  const d = await page.evaluate(({ blocks, floating }) => {
+    const r = (el: Element) => { const b = el.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.right), Math.round(b.bottom)].join(','); };
+    const world = document.querySelector('.dview .dcanvas .world');
+    return { w: innerWidth, h: innerHeight, canvas: r(document.querySelector('.dview .dcanvas')!), world: world ? r(world) : null,
+      blocks: [...document.querySelectorAll(blocks)].map((el, i) => `${i}:${String(el.className).split(' ')[0]}:${(el.textContent ?? '').trim().slice(0, 8)}:${r(el)}`),
+      floats: [...document.querySelectorAll(floating)].filter(el => el.getBoundingClientRect().width > 0).map(el => `${String(el.className).split(' ')[0]}:${r(el)}`) };
+  }, { blocks: BLOCKS.department, floating: FLOATING.department });
+  console.log(`DUMP ${tag} ${JSON.stringify(d)}`);
+}
+
 async function scrollsClear(page: Page, screen: Screen, shot: (where: string) => Promise<void>) {
   const all = await page.locator(BLOCKS[screen]).count();
   const whole = new Set<number>();
+  if (screen === 'department') await dump(page, 'open');
   const opened = await inView(page, screen);
   expect.soft(opened.under, `${screen}: nothing under what floats over it as it opens`).toEqual([]);
   opened.whole.forEach(i => whole.add(i));
   for (const edge of EDGES) {
     expect.soft(await scrollToEdge(page, screen, edge), `${screen}: the canvas stops at its ${edge} edge`).toBe(true);
     await shot(edge);
+    if (screen === 'department') await dump(page, `edge-${edge}`);
     const at = await inView(page, screen);
     expect.soft(at.under, `${screen}: nothing under what floats over it at the ${edge} edge`).toEqual([]);
     at.whole.forEach(i => whole.add(i));
   }
   for (let i = 0; i < all; i++) {
     if (whole.has(i)) continue;
-    expect.soft(await scrollToBlock(page, screen, i), `${screen}: card or chip ${i} can be scrolled into view whole`).toBe(true);
+    const reached = await scrollToBlock(page, screen, i);
+    if (screen === 'department') await dump(page, `block-${i}-${reached}`);
+    expect.soft(reached, `${screen}: card or chip ${i} can be scrolled into view whole`).toBe(true);
     const at = await inView(page, screen);
     expect.soft(at.under, `${screen}: nothing under what floats over it, scrolled to card or chip ${i}`).toEqual([]);
     at.whole.forEach(j => whole.add(j));
