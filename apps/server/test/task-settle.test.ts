@@ -1,3 +1,4 @@
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
@@ -5,6 +6,8 @@ import { agents, attachments, departments, jobs, pendingWakes, taskEvents, tasks
 import { routeOf } from '../src/modules/tasks/echelons-store.js';
 import { loadTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { setPaused } from '../src/modules/tasks/pause.js';
+import { registerSettleTools } from '../src/modules/tasks/settle.js';
+import type { Grant } from '../src/modules/templates/load.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { listen, mcp } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
@@ -21,7 +24,9 @@ const TAG = 'e'.repeat(40);
 const AT = new Date('2026-11-23T12:00:00.000Z');
 const WHY = 'The release took its commit.';
 
-type Holds = { main?: string[]; turn?: string[]; tag?: string[]; unreadable?: boolean };
+/* branch is where the repository says the task's own branch, task-<n>, is; own is false where the commit a hand-in names does
+   not hold the base it names. */
+type Holds = { main?: string[]; turn?: string[]; tag?: string[]; unreadable?: boolean; branch?: string | null; own?: boolean; mainDown?: boolean; tagsDown?: boolean };
 
 async function watched() {
   const f = await fixture();
@@ -34,11 +39,17 @@ async function watched() {
   }).returning();
   /* What the repository says: which commits main, the open turn and the release tag hold. */
   const remote = (holds: Holds) => {
-    f.ctx.readCommit = async (_repo, want) => ('branch' in want ? { branch: want.branch, commitSha: want.branch === 'main' ? MAIN : TURN } : { branch: `task-${want.task}`, commitSha: HEAD });
-    f.ctx.readTags = async () => ({ tags: { 'v0.41.0': TAG } });
+    f.ctx.readCommit = async (_repo, want) => {
+      if ('branch' in want) return holds.mainDown && want.branch === 'main' ? { problem: 'GitHub is down.' } : { branch: want.branch, commitSha: want.branch === 'main' ? MAIN : TURN };
+      return holds.branch === null ? { problem: 'No such branch.', missing: true } : { branch: `task-${want.task}`, commitSha: holds.branch ?? HEAD };
+    };
+    f.ctx.readTags = async () => {
+      if (holds.tagsDown) throw new Error('GitHub is down');
+      return { tags: { 'v0.41.0': TAG } };
+    };
     f.ctx.readMerged = async (_repo, { base, head }) => {
       if (holds.unreadable) throw new Error('GitHub is down');
-      const lines: Record<string, string[]> = { [MAIN]: holds.main ?? [], [TURN]: holds.turn ?? [], [TAG]: holds.tag ?? [] };
+      const lines: Record<string, string[]> = { [MAIN]: holds.main ?? [], [TURN]: holds.turn ?? [], [TAG]: holds.tag ?? [], [HEAD]: holds.own === false ? [] : [BASE] };
       return (lines[base] ?? []).includes(head);
     };
   };
@@ -88,6 +99,68 @@ describe('the commit of a task against the releases', () => {
     const said = JSON.parse((await (await f.tools(f.watchdog.id)).call('task_released', { task: task.number })).content[0]!.text) as Record<string, unknown>;
     expect(said).toMatchObject({ released: false });
   });
+
+  it('does not take the head of the task\'s branch for its work when no hand-in names a commit', async () => {
+    const f = await watched();
+    const watchdog = await f.tools(f.watchdog.id);
+    /* A branch pushed at main before its first commit, or one that only took main in, holds nothing of the task's own. */
+    for (const branch of [MAIN, HEAD]) {
+      f.remote({ main: [HEAD], branch });
+      const said = JSON.parse((await watchdog.call('task_released', { task: f.task.number })).content[0]!.text) as { why: string } & Record<string, unknown>;
+      expect(said).toMatchObject({ commit: branch, source: 'branch', released: false });
+      expect(said.why).toMatch(/branch/);
+      const closed = await watchdog.call('settle_task', { task: f.task.number, why: WHY });
+      expect(closed.isError).toBe(true);
+      expect((await f.read(f.task.id)).status).not.toBe('done');
+    }
+  });
+
+  it('does not take a hand-in whose commit is its own base for work, though main holds it', async () => {
+    const f = await watched();
+    f.atCommit(BASE);
+    const task = await f.shipped();
+    f.remote({ main: [BASE] });
+    const watchdog = await f.tools(f.watchdog.id);
+    const said = JSON.parse((await watchdog.call('task_released', { task: task.number })).content[0]!.text) as { why: string } & Record<string, unknown>;
+    expect(said).toMatchObject({ commit: BASE, source: 'record', released: false });
+    expect(said.why).toMatch(/base/);
+    expect((await watchdog.call('settle_task', { task: task.number, why: WHY })).isError).toBe(true);
+    expect((await f.read(task.id)).status).not.toBe('done');
+  });
+
+  it('does not take a hand-in whose commit does not hold the base it names for work', async () => {
+    const f = await watched();
+    const task = await f.shipped();
+    f.remote({ main: [HEAD], own: false });
+    const watchdog = await f.tools(f.watchdog.id);
+    const said = JSON.parse((await watchdog.call('task_released', { task: task.number })).content[0]!.text) as { why: string } & Record<string, unknown>;
+    expect(said).toMatchObject({ commit: HEAD, released: false });
+    expect(said.why).toMatch(/base/);
+    expect((await watchdog.call('settle_task', { task: task.number, why: WHY })).isError).toBe(true);
+    expect((await f.read(task.id)).status).not.toBe('done');
+  });
+
+  it('proves nothing when main cannot be read, or the release tags cannot, or the task has no branch and no hand-in', async () => {
+    const f = await watched();
+    const task = await f.shipped();
+    const watchdog = await f.tools(f.watchdog.id);
+    const said = async (ref: number) => JSON.parse((await watchdog.call('task_released', { task: ref })).content[0]!.text) as { why: string } & Record<string, unknown>;
+    f.remote({ main: [HEAD], mainDown: true });
+    expect(await said(task.number)).toMatchObject({ commit: HEAD, released: false, why: expect.stringContaining('could not be read') as unknown });
+    f.remote({ turn: [HEAD], tagsDown: true });
+    expect(await said(task.number)).toMatchObject({ commit: HEAD, inMain: false, release: null, released: false });
+    f.remote({ branch: null });
+    const bare = (await f.create({ title: 'Nothing yet' })).task;
+    expect(await said(bare.number)).toMatchObject({ commit: null, source: null, released: false, why: expect.stringContaining('no branch of its own') as unknown });
+  });
+
+  it('counts the commit turnkey work joined a turn with, when its start is behind it', async () => {
+    const f = await watched();
+    await f.db.insert(taskEvents).values({ companyId: f.task.companyId, taskId: f.task.id, kind: 'report', agentId: f.author.id, text: 'Done.', data: { done: true, integration: { branch: 'turn-43', commit: HEAD, start: BASE } } });
+    f.remote({ main: [HEAD] });
+    const said = JSON.parse((await (await f.tools(f.watchdog.id)).call('task_released', { task: f.task.number })).content[0]!.text) as Record<string, unknown>;
+    expect(said).toMatchObject({ commit: HEAD, source: 'record', inMain: true, released: true });
+  });
 });
 
 describe('settle_task closes the clear cases, in any department', () => {
@@ -135,6 +208,44 @@ describe('settle_task closes the clear cases, in any department', () => {
     expect((await f.read(unrecorded.id)).status).not.toBe('done');
   });
 
+  it('tells the head the close is the server\'s proof, and lets a parent close over a document it settled', async () => {
+    const f = await watched();
+    const group = (await f.create({ title: 'Handbook set', assigneeAgentId: f.head.id, executor: false, resultKind: 'coordination' })).task;
+    const doc = (await f.create({ resultKind: 'document', paths: undefined, testsAgentId: undefined, securityAgentId: undefined, title: 'Handbook', parentId: group.id })).task;
+    await submit(f.ctx, f.author.id, doc.id, { summary: 'Wrote the handbook.', evidence: 'Read it through.', recorded: { path: 'docs/handbook.md' } });
+    const route = await routeOf(f.db, await f.read(doc.id));
+    await verdict(f.ctx, f.reviewer.id, doc.id, { pass: true, comment: 'Checked.', candidateId: route.state.candidateId! });
+    expect((await (await f.tools(f.watchdog.id)).call('settle_task', { task: doc.number, why: 'Its handbook is in docs/handbook.md.' })).isError).toBeFalsy();
+    const told = await f.db.select().from(pendingWakes).where(eq(pendingWakes.taskId, doc.id));
+    expect(told.map(w => w.text).join('\n')).toMatch(/server's own proof[\s\S]*not by an accepted result/);
+    /* The settled document has no accepted result of its route, and the parent closes over it as a child closed without one. */
+    const closed = await report(f.ctx, f.head.id, group.id, { done: true, summary: 'The handbook is in.', recorded: { path: 'reports/handbook.md' } });
+    expect(closed.task.status).toBe('done');
+    expect((await f.log(group.id)).find(e => 'acceptedChildren' in e.data)?.data).toMatchObject({ acceptedChildren: [{ taskId: doc.id, unaccepted: { status: 'done' } }] });
+  });
+
+  it('closes a document recorded as a file on the task while the file is there, and not once it is gone', async () => {
+    const f = await watched();
+    const make = async (title: string) => {
+      const doc = (await f.create({ resultKind: 'document', paths: undefined, testsAgentId: undefined, securityAgentId: undefined, title })).task;
+      await f.db.insert(attachments).values({ companyId: doc.companyId, taskId: doc.id, agentId: f.author.id, name: 'handbook.md', mediaType: 'text/markdown', bytes: Buffer.from('# Handbook'), size: 10 });
+      await submit(f.ctx, f.author.id, doc.id, { summary: 'Wrote the handbook.', evidence: 'Read it through.', recorded: { file: 'handbook.md' } });
+      const route = await routeOf(f.db, await f.read(doc.id));
+      await verdict(f.ctx, f.reviewer.id, doc.id, { pass: true, comment: 'Checked.', candidateId: route.state.candidateId! });
+      return doc;
+    };
+    const kept = await make('Kept handbook');
+    const lost = await make('Lost handbook');
+    await f.db.delete(attachments).where(eq(attachments.taskId, lost.id));
+    const watchdog = await f.tools(f.watchdog.id);
+    const refused = await watchdog.call('settle_task', { task: lost.number, why: WHY });
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0]!.text).toMatch(/not recorded/);
+    expect((await f.read(lost.id)).status).not.toBe('done');
+    expect((await watchdog.call('settle_task', { task: kept.number, why: WHY })).isError).toBeFalsy();
+    expect((await f.log(kept.id)).at(-1)?.data).toMatchObject({ settled: { rule: 'recorded', evidence: { recorded: { file: 'handbook.md' } } } });
+  });
+
   it('closes a parent with no work left and leaves one with work under it', async () => {
     const f = await watched();
     const group = (await f.create({ title: 'Totals', assigneeAgentId: f.head.id, executor: false, resultKind: 'coordination' })).task;
@@ -175,6 +286,11 @@ describe('settle_task closes the clear cases, in any department', () => {
     expect(refused.isError).toBe(true);
     expect(refused.content[0]!.text).toMatch(/assistant/);
     expect((await f.read(task.id)).status).not.toBe('done');
+    /* Nor does the read tell where a person's own work stands. */
+    const read = await watchdog.call('task_released', { task: task.number });
+    expect(read.isError).toBe(true);
+    expect(read.content[0]!.text).toMatch(/assistant/);
+    expect(read.content[0]!.text).not.toContain(HEAD);
   });
 
   it('gives the two tools to the watchdog the template hires, and to nobody who holds none of its skills', async () => {
@@ -185,6 +301,22 @@ describe('settle_task closes the clear cases, in any department', () => {
       expect(names).not.toContain('task_released');
       expect(names).not.toContain('settle_task');
     }
+  });
+});
+
+describe('who is given the two tools', () => {
+  it('registers them for a skill that carries settle, not for any other skill, and not for the orchestrator', async () => {
+    const f = await watched();
+    const registered = (kind: 'worker' | 'orchestrator', grants: string[]) => {
+      const names: string[] = [];
+      const server = { registerTool: (name: string) => { names.push(name); } } as unknown as McpServer;
+      registerSettleTools(server, f.ctx, { id: 'job', companyId: f.task.companyId, agentId: f.watchdog.id, agentKind: kind, departmentId: null }, new Set(grants as Grant[]));
+      return names;
+    };
+    expect(registered('worker', ['settle'])).toEqual(['task_released', 'settle_task']);
+    expect(registered('worker', ['tracker'])).toEqual([]);
+    /* The orchestrator holds every grant, yet closes with close_task: settling is the watchdog's. */
+    expect(registered('orchestrator', ['agents', 'tracker', 'settle'])).toEqual([]);
   });
 });
 

@@ -104,8 +104,7 @@ async function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation
   shelf?.shelve();
   const grants = new Set(shelf ? GRANTS : job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? []));
   registerWatchTools(server, ctx, job, grants);
-  /* The orchestrator closes any task with close_task already: settling is the watchdog's, by its skill. */
-  if (!shelf) registerSettleTools(server, ctx, job, grants);
+  registerSettleTools(server, ctx, job, grants);
   registerTestTools(server, ctx, job);
   registerCallTools(server, ctx, job);
   if (shelf) registerHolderTools(server, ctx, job);
