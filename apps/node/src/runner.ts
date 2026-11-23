@@ -5,6 +5,7 @@ import { ToolPrivacy, type PrivateValues } from '@hornhoof/protocol';
 import type { SigninStep } from '@hornhoof/protocol/signin';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { ensureRepoBrowser, writeBrowserError } from './browser.js';
+import { packageStoreEnv } from './disk/store.js';
 import type { JobUser } from './isolation.js';
 import { redact } from './redact.js';
 import { withModel } from './turn-tokens.js';
@@ -56,9 +57,6 @@ export class ProgramNotStarted extends Error {
 }
 /* step: where a sign-in is after its code, for the running node to pass on, when the program shows it. */
 export type LoginIo = { input: NodeJS.ReadableStream; output: NodeJS.WritableStream; urlFile: string; step?: (step: SigninStep) => void };
-
-/* Where a sign-in is after its code, said to whoever listens. */
-export const sayStep = (io: LoginIo, step: SigninStep): void => io.step?.(step);
 
 /* One agent program (Claude Code, Codex, Kimi) as the node drives it. */
 export interface ProviderAdapter {
@@ -305,7 +303,9 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
     if (placed) emit({ kind: 'text', text: placed });
     /* hh-attach sends the turn's pictures with its token. The name has no KEY, SECRET or TOKEN in it, so Codex passes it on. */
     const attachEnv = tools ? { HH_ATTACH_URL: tools.url.replace(/\/mcp$/, '/api/attachments'), HH_ATTACH_PASS: tools.token } : undefined;
-    const env = repoEnv || attachEnv ? { ...repoEnv, ...attachEnv } : undefined;
+    const rawStoreEnv = msg.workspace ? packageStoreEnv(dir, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, process.env) : undefined;
+    const storeEnv = rawStoreEnv && Object.keys(rawStoreEnv).length > 0 ? rawStoreEnv : undefined;
+    const env = storeEnv || repoEnv || attachEnv ? { ...storeEnv, ...repoEnv, ...attachEnv } : undefined;
     const input: RunInput = {
       agentKey: call ? null : (msg.workspace?.key ?? null),
       jobId: msg.jobId,

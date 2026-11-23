@@ -4,7 +4,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { EventView } from '../src/types';
-import { detail, ME, openTaskCard, serveApi, TASKS } from './api';
+import { detail, ME, openTaskCard, serveApi, TASKS, writeToOrchestrator } from './api';
 import { taskStream } from './hub-turn-api';
 
 const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
@@ -141,7 +141,7 @@ test('a person sees and downloads an attached .xlsx in 1 click from both the tas
     }
 
     await taskPanel.getByRole('button', { name: t.window.close }).click();
-    await page.getByRole('button', { name: t.tasks.writeOrchestrator }).click();
+    await writeToOrchestrator(page, 'ru');
     const chatWindow = page.getByRole('complementary', { name: t.map.orchestrator });
     await expect(chatWindow.getByText('Готовая таблица контактов приложена ниже.')).toBeVisible();
     const chatLink = chatWindow.getByRole('link', { name: /контакты-чат\.xlsx/ });

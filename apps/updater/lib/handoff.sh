@@ -85,7 +85,7 @@ finish_become() {
 # not. The password is read from the request into this one command's environment: it stands on no command line and in
 # no line said, and goes on into the file the copy's subscription reads it from, in the database's own folder.
 load_schema() {
-  local database=$1 port=$2 password=$3 db tables dump
+  local database=$1 port=$2 password=$3 db tables dump status=0 said
   [ -n "$password" ] || { printf 'The schema request has no password.'; return 1; }
   db=$(compose ps -q db 2> /dev/null || true)
   [ -n "$db" ] || { printf "This machine's database does not run."; return 1; }
@@ -96,17 +96,52 @@ load_schema() {
   (
     umask 077
     export PGPASSWORD="$password"
-    docker exec -e PGPASSWORD "$db" pg_dump -h keeper -p "$port" -U hornhoof_replica --schema-only --no-owner --no-publications --no-subscriptions --no-privileges hornhoof > "$dump" 2> /dev/null &&
+    policy_roles "$db" "$port" > "$dump" || exit $?
+    docker exec -e PGPASSWORD "$db" pg_dump -h keeper -p "$port" -U hornhoof_replica --schema-only --no-owner --no-publications --no-subscriptions --no-privileges hornhoof >> "$dump" 2> /dev/null &&
       docker exec -e PGPASSWORD "$db" pg_dump -h keeper -p "$port" -U hornhoof_replica --data-only --table=drizzle.__drizzle_migrations hornhoof >> "$dump" 2> /dev/null &&
       # The schema comes with no rights, since the leader's roles are not this machine's. A function is open to
       # everyone until it is closed, and a keeper leads on no database whose network functions are: they are closed
       # as the leader's own migration closes them, so a copy that takes the server over may lead.
       printf '%s\n' 'REVOKE ALL ON ALL FUNCTIONS IN SCHEMA net FROM PUBLIC;' >> "$dump"
-  ) || { rm -f "$dump"; printf "The company server's schema could not be read."; return 1; }
+  ) || status=$?
+  if [ "$status" -ne 0 ]; then
+    rm -f "$dump"
+    if [ "$status" -eq 2 ]; then printf "The company server's schema names a role that is not a plain name."; else printf "The company server's schema could not be read."; fi
+    return 1
+  fi
   write_passfile "$db" "$password" || { rm -f "$dump"; printf "The password file of the copy could not be written."; return 1; }
-  docker exec -i "$db" psql -U hornhoof -1 -v ON_ERROR_STOP=1 -d "$database" < "$dump" > /dev/null 2>&1 ||
-    { rm -f "$dump"; printf 'The schema could not be loaded into the database.'; return 1; }
+  # What psql said goes into the line, without its place in the dump: no log would show why otherwise.
+  if ! said=$(docker exec -i "$db" psql -U hornhoof -1 -v ON_ERROR_STOP=1 -d "$database" < "$dump" 2>&1 > /dev/null); then
+    rm -f "$dump"
+    said=$(printf '%s\n' "$said" | grep -m 1 -E 'ERROR|FATAL|error' | sed -E 's/^psql:[^ ]*: //' | cut -c 1-300)
+    printf 'The schema could not be loaded into the database%s' "${said:+: $said}"
+    return 1
+  fi
   rm -f "$dump"
+}
+
+# policy_roles <db container> <port>: the leader's app gives roles of its own row policies as it runs, and its schema
+# keeps those policies, while a copy's cluster has none of the roles before its own app makes them: the schema would
+# never load whole. So each role a policy of the leader names, asked through the keeper's door with the password in
+# the environment, is made first, with no login and no right, in the same transaction as the schema, and the copy keeps
+# every policy the leader has. It fails with 2 when a name is not a plain role's: such a name stands in no statement.
+policy_roles() {
+  local db=$1 port=$2 roles role
+  roles=$(docker exec -e PGPASSWORD "$db" psql -h keeper -p "$port" -U hornhoof_replica -d hornhoof -At -c "SELECT DISTINCT r FROM pg_policies, unnest(roles) AS r WHERE r <> 'public' ORDER BY 1" 2> /dev/null) || return 1
+  [ -n "$roles" ] || return 0
+  while IFS= read -r role; do plain_role "$role" || return 2; done <<< "$roles"
+  # shellcheck disable=SC2016 # $roles$ quotes the block for Postgres; the shell expands nothing in it.
+  printf '%s\n' 'DO $roles$ BEGIN'
+  while IFS= read -r role; do
+    printf "IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '%s') THEN CREATE ROLE \"%s\" NOLOGIN; END IF;\n" "$role" "$role"
+  done <<< "$roles"
+  # shellcheck disable=SC2016 # as above
+  printf '%s\n' 'END $roles$;'
+}
+
+# The name of a role as Postgres keeps one made without quotes, and no other.
+plain_role() {
+  [[ "$1" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]
 }
 
 # write_passfile: the password of the role that only reads, into the file the copy's subscription
@@ -571,7 +606,8 @@ wipe_step() {
       ;;
     files)
       WIPE_WHY='could not remove the files of its database'
-      rm -rf "$CONTROL/dumps" "$CONTROL/restore" "$CONTROL/schema" "$CONTROL/uploads" &&
+      # Remove the shared trees by direct names from opened directories on the control mount.
+      remove_folders dumps restore schema uploads &&
         rm -f "$SERVER_DIR"/backups/hornhoof-*.sql.gz "$SERVER_DIR"/backups/hornhoof-*.sql.gz.part "$SERVER_DIR"/backups/hornhoof-*.tunnel.json "$CONTROL/schema.json" "$CONTROL/dump.json" "$CONTROL/upload.json"
       ;;
     env)

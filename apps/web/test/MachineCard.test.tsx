@@ -6,6 +6,7 @@ import { Machines } from '../src/screens/Machines';
 import type { ConnectionHistory, MachineView } from '../src/types';
 import { accessView, MACHINES, ME, mockApi, SUBS } from './api-mock';
 import { decl } from './css';
+import { shownTable } from './shown-table';
 
 /* The lower part of a machine's card (#1027): under the top, which stays as it was, three blocks of their own with a
    heading each, what the machine is for the company's server, what it is and who may reach it, and what its owner sets,
@@ -43,7 +44,7 @@ function show(language: 'en' | 'ru' = 'en', machine: MachineView = LAPTOP, more:
 }
 
 async function open(name = 'dev-laptop') {
-  await screen.findByRole('table');
+  await shownTable();
   fireEvent.click(screen.getByRole('button', { name: new RegExp(`^(Open the card of |Открыть карточку )${name}$`) }));
   return screen.getByRole('article', { name });
 }

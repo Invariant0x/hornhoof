@@ -29,12 +29,12 @@ import { agyTranscript, prepareAgy } from '../providers/antigravity-terminal.js'
 import { acceptClaudeDialogs, claudeToolsFile, claudeTranscript, writeClaudeTools } from '../providers/claude-terminal.js';
 import { findRollout, rolloutFiles } from '../providers/codex-terminal.js';
 import { findKimiWire, prepareKimi } from '../providers/kimi-terminal.js';
-import { FAILURE, failure } from './failures.js';
-import { TurnEnds, hookCalls, claudeEnd, stopIsLate, type TurnEnd } from './turn-signals.js';
+import { AGY_TOKEN_REFUSED, FAILURE, failure } from './failures.js';
+import { TurnEnds, agyHookSession, claudeEnd, foreignAgyHook, hookCalls, keepsAgySession, stopIsLate, stopSession, type TurnEnd } from './turn-signals.js';
 import { busy, enterPending, hasSettled, idleRefusal, RETIRED, stale, type IdleEvidence, type RetireResult } from './program-retire.js';
-import { claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
+import { claudeOwn, claudeTook, claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
 import { CALLS } from './tool-calls.js';
-import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
+import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type LogMark, type WireNews } from './transcripts.js';
 import type { RecordingCursor } from './recordings.js';
 import { envFile, type Tmux } from './tmux.js';
 import { holdsWords, LostWords } from './lost-words.js';
@@ -96,8 +96,12 @@ type Turn = {
   sourceDelivery?: OperatorDelivery;
   operatorInstance?: string;
   ownActivity?: boolean;
+  /* Hornhoof called the turn off: its program got its Escape, and nothing that comes later stops it again. */
+  calledOff?: boolean;
 };
 type JobError = RunResult['error'];
+/* What the end of a turn Hornhoof gave tells as Hornhoof calls it off. */
+export type CalledOff = { sessionId: string | null; tokens: TurnTokens | null };
 type LiveWords = { turn: Turn; program: TermProgram; text: string; deadline: number; reason?: string; operatorDelivery?: OperatorDelivery };
 type TakenWords = { jobId: string | null; text: string; operatorDelivery?: OperatorDelivery };
 
@@ -135,6 +139,8 @@ type Agent = {
   ownerTyped?: boolean;
   /* The prompt Hornhoof typed, until the program's prompt hook says what it got. */
   typing?: string | null;
+  /* Where the log stood as Hornhoof's words went in: only what it reads on from there can be their receipt. */
+  receiptFrom?: LogMark | null;
   limits: Limits | null;
   /* How full the context is as Hornhoof last heard it, and how many tokens Kimi's model takes in it. */
   contextUsed: number | null;
@@ -208,6 +214,9 @@ type Agent = {
   agyAnswered: boolean;
   /* Diagnostics visible before this invocation cannot classify its failure. */
   agyCursor: RecordingCursor | null;
+  /* agy refused its sign-in token (401), the program starts anew with the saved sign-in, and no turn has ended since: a second
+     refusal now is a sign-in that no longer works. */
+  agyRenewed?: boolean;
   /* Recording position before this turn: an older completion must never answer a new prompt. */
   completionStart: Promise<RecordingCursor | null> | null;
   /* Interruption notices already on screen when this turn started belong to older turns. */
@@ -310,6 +319,7 @@ const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000,
 /* The options given, without those set to nothing. */
 const defined = (opts: Options): Partial<Options> => Object.fromEntries(Object.entries(opts).filter(([, value]) => value !== undefined));
 const withSession = (m: NodeMessage, session: string | null): NodeMessage => (m.type === 'job.program' && session ? { ...m, session } : m);
+const hookPayload = (body: unknown): Record<string, unknown> => (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
 /* When the host last looked at the program, and the tool it ran then. */
 type Look = { at: number; call: Pending | null; retry?: ProgramRetry | null };
 type ObservedProgram = { watch: ProgramWatch; look: Look };
@@ -417,6 +427,7 @@ export class TerminalHost {
       ownerRejected: (key, event, reason) => this.logHookRejection(key, event, reason),
       ownerReported: (key, event, reason) => this.reportHookRejection(key, event, reason),
       refused: (key, method, reason) => this.log(`Hornhoof's tools refused ${method} of agent ${key}: ${reason}.`),
+      gaveUp: (key, method) => this.log(`Agent ${key}'s program gave up on ${method} of Hornhoof's tools before Hornhoof answered: it has no tools until it starts again.`),
       outside: opts.toolsOutside, opening: key => this.openingTurn(key), checkStep: opts.checkStep,
       sensitive: (key, name, input, answer, policy) => this.sensitiveTool(key, name, input, answer, policy),
     });
@@ -997,8 +1008,9 @@ export class TerminalHost {
     await this.prepare(job, urls);
     if (a.sessionId) a.left.add(a.sessionId);
     Object.assign(a, { ...startedState(job, spec), hash, instance: randomUUID() });
-    if (job.program.kind === 'claude' && !job.input.sessionId) await this.keepNew(job.input, spec.sessionId);
-    a.tail = this.tailFor(a);
+    const fresh = job.program.kind === 'claude' && !job.input.sessionId;
+    if (fresh) await this.keepNew(job.input, spec.sessionId);
+    a.tail = this.tailFor(a, fresh);
   }
 
   private async launchAttempt(a: Agent, job: TermJob, spec: LaunchSpec): Promise<void> {
@@ -1089,7 +1101,7 @@ export class TerminalHost {
   private async typePlainPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
     a.fresh = false;
     a.took = false;
-    a.typing = prompt;
+    this.typingNow(a, prompt);
     if (typedSinceStart(a) && !(await this.freeOfPerson(a, job))) return this.inputNotFree(a, job);
     a.ownerTyped = false;
     await this.opts.tmux.paste(a.name, prompt);
@@ -1212,7 +1224,8 @@ export class TerminalHost {
   }
 
   private async deliverOperatorPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
-    a.fresh = false; a.took = false; a.typing = prompt; a.ownerTyped = false;
+    a.fresh = false; a.took = false; a.ownerTyped = false;
+    this.typingNow(a, prompt);
     const failed = await this.pasteOperatorPrompt(a, job, prompt);
     return failed ?? this.waitOperatorReceipt(a, job, prompt);
   }
@@ -1520,17 +1533,18 @@ export class TerminalHost {
   }
 
   /* A program that connects to its tools only after the short turn that started it ended is turned away, as no turn answers
-     for them then, and goes without them for the rest of its session. Its turns end saying so, not as turns that left
-     their task where it was, and the next one starts it anew, to connect while that turn runs. */
+     for them then, and one that gave up waiting for Hornhoof's answer as it connected has none either: each goes without
+     them for the rest of its session. Its turns end saying so, not as turns that left their task where it was, which the
+     server repeats, and the next one starts it anew, to connect while that turn runs. */
   private withoutTools(a: Agent, job: TermJob): Promise<RunResult> {
     a.hash = null;
-    a.failure = failure('tools', "The program has no Hornhoof tools in this session: it connected to them between turns, when no turn could answer for them. The next turn starts it anew.");
+    a.failure = failure('tools', "The program has no Hornhoof tools in this session: it connected to them between turns, when no turn could answer for them, or gave up waiting for Hornhoof's answer as it connected. The next turn starts it anew.");
     return this.failedTurn(a, job, 'agent_failed');
   }
 
   private async stopTurn(a: Agent, job: TermJob, ended: Deferred<string>): Promise<RunResult> {
     this.intentional(a, 'cancelled');
-    await this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Escape'));
+    if (!a.turn?.calledOff) await this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Escape'));
     await Promise.race([ended.promise, sleep(STOP_WAIT_MS)]);
     a.busy = false;
     return await this.failedTurn(a, job, 'cancelled');
@@ -1581,7 +1595,7 @@ export class TerminalHost {
     const raw = agyError(this.agyOutput(a), undefined);
     if (!raw) return;
     a.signAt = Date.now();
-    const detail = FAILURE.antigravity(raw);
+    const detail = FAILURE.antigravity(raw, a.agyRenewed);
     this.turnFailed(a, detail.text, detail);
   }
 
@@ -1685,7 +1699,7 @@ export class TerminalHost {
   /* A person cleared the conversation in Claude Code, which goes on in a new session with a log of its own; or Kimi Code
      named its session, whose log the host finds once Kimi writes it; or Antigravity named its conversation. */
   private follow(a: Agent, sessionId: string): void {
-    if (!sessionId || sessionId === a.sessionId) return;
+    if (!sessionId || sessionId === a.sessionId || keepsAgySession(a.program?.kind, a.sessionId)) return;
     if (a.sessionId) a.blank = sessionId;
     this.leaveSession(a);
     a.sessionId = sessionId;
@@ -1818,6 +1832,7 @@ export class TerminalHost {
     this.intentional(a, end.status === 'stopped' ? 'cancelled' : 'completed');
     this.endWords(a, turn);
     this.notBusyAfter(a, end);
+    this.agyTokenEnded(a, end);
     turn.ending = end;
     if (!turn.typed) return a.ended?.resolve(end.message);
     this.settleTyped(a, end, turn);
@@ -1831,6 +1846,22 @@ export class TerminalHost {
     a.question = null;
     a.stopped = end.status === 'stopped';
     a.failure = end.failure ?? null;
+  }
+
+  /* agy keeps the Google access token it started with for as long as its program runs, and it lasts an hour. A turn it ends
+     with a 401 leaves the program to start anew for the next turn, which reads the saved sign-in and gets a new token; the
+     server tries the turn once more by then. That start's first turn may be refused again, and the failure is then a
+     sign-in one, whose reason Operations read. Any other end of a turn clears the mark. */
+  private agyTokenEnded(a: Agent, end: TurnEnd): void {
+    if (a.program?.kind !== 'antigravity') return;
+    const refused = end.status === 'failed' && AGY_TOKEN_REFUSED.test(end.failure?.text ?? '');
+    const again = end.failure?.kind === 'auth';
+    a.agyRenewed = refused && !again;
+    if (!refused) return;
+    a.hash = null;
+    this.log(`Agent ${a.key} (antigravity): 401 UNAUTHENTICATED${again
+      ? ' again, right after the program started anew with the saved sign-in. The turn fails as a sign-in failure.'
+      : ', its access token ran out. The program starts anew with the saved sign-in for the turn\'s one retry.'}`);
   }
 
   private settleTyped(a: Agent, end: TurnEnd, turn: Turn): void {
@@ -1980,10 +2011,11 @@ export class TerminalHost {
     return `Hornhoof: this message reached you cut short, ${got.length} of its ${typed.length} characters. The whole message is in ${file}. Read it there before you go on.`;
   }
 
-  private tailFor(a: Agent): LineTail | null {
+  /* fresh: a session the program starts now, whose log holds only what it writes from now on, even before it exists. */
+  private tailFor(a: Agent, fresh = false): LineTail | null {
     if (a.program?.kind === 'antigravity') a.agyRead = agySteps();
     const file = this.transcriptFile(a);
-    return file ? new LineTail(file, { fromEnd: true }) : null;
+    return file ? new LineTail(file, fresh ? { empty: true } : { fromEnd: true }) : null;
   }
 
   private transcriptFile(a: Agent): string | null {
@@ -2092,13 +2124,58 @@ export class TerminalHost {
     }
   }
 
+  /* An entry of the user's delivers an operator's assignment; one Claude wrote of its own, as a summary of a compacted
+     conversation that holds the assignment word for word, does not. */
   private takeOperatorOriginal(a: Agent, line: Record<string, unknown>): void {
-    if (this.operator?.enabled(a.key) && line.type === 'user' && isRecord(line.message)) a.turn?.words.takeOriginal(contentText(line.message.content));
+    if (this.assignmentMayGoIn(a) && line.type === 'user' && isRecord(line.message) && !claudeOwn(line)) a.turn?.words.takeOriginal(contentText(line.message.content));
+  }
+
+  /* While Hornhoof's words wait to go in, what the program takes is a person's: never the delivery of an assignment. */
+  private assignmentMayGoIn(a: Agent): boolean {
+    return Boolean(this.operator?.enabled(a.key)) && !a.promptWaits;
   }
 
   private claudeReceivedWords(a: Agent, line: Record<string, unknown>): void {
     const receipt = claudeWordReceipt(line, a.enqueuedWords);
     if (receipt && !this.knownClaudeWord(a, receipt) && receipt.state === 'queued') this.ownerQueued(a, receipt.text);
+    this.claudeTookTyped(a, line);
+  }
+
+  /* Hornhoof's words go in from here. What the program logged before is read first, while no words wait, so no entry of it
+     counts as their receipt. A program that comes back is read from the end of its log the node marked as it came up, and
+     the node reads nothing before the words go in. A log whose end it could not find then, or that stopped inside a line,
+     can hold earlier entries, and gives no receipt; nor does a log a look fails at later, or the log of a session the
+     program changes to, which is read from its start. This
+     takes Claude's --resume to go on in the same file, adding to it and copying no earlier entry into it once up, as the
+     transcripts of Claude Code up to 2.1.329 on a node show: one file across launches and versions, with no entry of
+     another session and no words of the user twice. */
+  private typingNow(a: Agent, words: string): void {
+    this.drain(a);
+    a.typing = words;
+    a.receiptFrom = a.tail?.mark() ?? null;
+  }
+
+  /* Claude's transcript records the words Hornhoof typed as it takes them: the receipt its prompt hook gives, should Claude
+     have given up on that hook, as on a busy machine, and the node take the program's own end for another turn's. Words
+     Claude queued and dequeued have their own receipts. */
+  private claudeTookTyped(a: Agent, line: Record<string, unknown>): void {
+    const typed = this.awaitingReceipt(a);
+    if (typed === null || !claudeTook(line, typed)) return;
+    /* What Claude takes while Hornhoof's words wait to go in came of a person's Enter, were it the same words: theirs. */
+    if (a.promptWaits) return this.personSent(a);
+    if (!this.takeRetainedAssignment(a, typed)) a.turn!.words.taken(typed);
+    a.typing = null;
+    this.tookTurn(a);
+  }
+
+  /* The words Hornhoof typed whose receipt the line read now can be. */
+  private awaitingReceipt(a: Agent): string | null {
+    if (a.typing == null || a.dequeued || !a.turn || this.overIn(a)) return null;
+    return this.readUpToTyping(a) ? a.typing : null;
+  }
+
+  private readUpToTyping(a: Agent): boolean {
+    return Boolean(a.receiptFrom && a.tail?.holds(a.receiptFrom));
   }
 
   private knownClaudeWord(a: Agent, receipt: NonNullable<ReturnType<typeof claudeWordReceipt>>): boolean {
@@ -2138,8 +2215,8 @@ export class TerminalHost {
 
   private observeRetainedAssignment(a: Agent, words: TurnWords, line: Record<string, unknown>): void {
     if (!a.program) return;
-    if (a.program.kind === 'claude' && line.type === 'user' && isRecord(line.message)) words.takeOriginal(contentText(line.message.content));
-    else words.observe(a.program.kind, line);
+    if (a.program.kind !== 'claude' || line.type !== 'user' || !isRecord(line.message)) words.observe(a.program.kind, line);
+    else if (!claudeOwn(line)) words.takeOriginal(contentText(line.message.content));
   }
 
   private takeRetainedAssignment(a: Agent, prompt: string): boolean {
@@ -2380,8 +2457,13 @@ export class TerminalHost {
     const a = this.agents.get(key);
     if (!a) return;
     if (event !== 'status') a.signAt = Date.now();
-    const data = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+    const data = hookPayload(body);
+    if (this.foreignAgy(a, data)) return;
     return this.hooks.get(event)?.(a, data);
+  }
+
+  private foreignAgy(a: Agent, data: Record<string, unknown>): boolean {
+    return foreignAgyHook(a.program?.kind, a.sessionId, a.left, data);
   }
 
   private readonly hooks = new Map<string, Hook>([
@@ -2465,8 +2547,9 @@ export class TerminalHost {
   private async finalStoppedHook(a: Agent, data: Record<string, unknown>): Promise<void> {
     this.drain(a);
     const id = typeof data.turn_id === 'string' ? data.turn_id : undefined;
-    if (stopIsLate({ promptIn: this.stoppable(a), answersPerson: Boolean(a.personWords), from: data.session_id, session: a.sessionId, left: a.left })) return this.lateStop(a, data, id);
-    if (typeof data.session_id === 'string') this.follow(a, data.session_id);
+    const from = stopSession(a.program?.kind, data);
+    if (stopIsLate({ promptIn: this.stoppable(a), answersPerson: Boolean(a.personWords), from, session: a.sessionId, left: a.left })) return this.lateStop(a, data, id);
+    if (typeof from === 'string') this.follow(a, from);
     if (data.stopped === true) return this.interrupted(a, id);
     const detail = this.stopFailure(a, data);
     if (detail) return this.turnFailed(a, detail.text, detail, id);
@@ -2488,7 +2571,8 @@ export class TerminalHost {
     const failed = data.hook_event_name === 'StopFailure' || Boolean(data.error) || Boolean(data.error_type);
     if (!failed) return null;
     const raw = this.stopFailureData(a, data);
-    return a.program ? FAILURE[a.program.kind](raw) : failure('unknown', String(data.error));
+    if (!a.program) return failure('unknown', String(data.error));
+    return a.program.kind === 'antigravity' ? FAILURE.antigravity(raw, a.agyRenewed) : FAILURE[a.program.kind](raw);
   }
 
   private stopFailureData(a: Agent, data: Record<string, unknown>): Record<string, unknown> {
@@ -2520,7 +2604,8 @@ export class TerminalHost {
 
   private async invocation(a: Agent, data: Record<string, unknown>): Promise<void> {
     if (a.program?.kind !== 'antigravity') return;
-    if (typeof data.conversationId === 'string') this.follow(a, data.conversationId);
+    const session = agyHookSession(data);
+    if (session) this.follow(a, session);
     if (data.invocationNum !== 0) {
       a.agyAnswered = false;
       a.busy = true;
@@ -2944,7 +3029,7 @@ export class TerminalHost {
     const text = [note, ...turn.words.pending()].filter(Boolean).join('\n\n');
     turn.words.replay(text);
     a.took = false;
-    a.typing = text;
+    this.typingNow(a, text);
     await this.inputLane(a, () => this.opts.tmux.paste(a.name, text));
     const pastedAt = Date.now();
     a.pastedAt = pastedAt;
@@ -3146,16 +3231,37 @@ export class TerminalHost {
     if (a.program?.kind === 'claude' && a.workDir) await this.fs.remove(claudeToolsFile(a.workDir)).catch(() => {});
   }
 
-  /* Hornhoof calls off a turn a person typed: the program stops as on Escape, and the turn ends as stopped. */
+  /* Hornhoof calls off a turn: the program stops as on Escape, and the turn ends as stopped. A turn a person typed tells
+     its end here. One Hornhoof gave waits for no end signal any more, and its node tells its end. A turn called off once,
+     or one this host does not hold, has nothing left to stop. */
   async cancel(jobId: string): Promise<void> {
-    const a = [...this.agents.values()].find(x => x.turn?.typed && x.turn.jobId === jobId);
+    const a = this.holding(jobId);
     if (!a) return;
     this.intentional(a, 'cancelled');
-    this.finishTyped(a, '', 'cancelled');
+    if (a.turn!.typed) this.finishTyped(a, '', 'cancelled');
+    else this.callOff(a, a.turn!);
     /* A session that is gone took its program with it; the turn ends all the same. */
     a.cancelling = this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Escape')).catch(() => {});
     await a.cancelling;
     a.busy = false;
+  }
+
+  /* What the end of a turn Hornhoof gave tells as Hornhoof calls it off now: none for a turn a person typed, which tells
+     its own, or one this host does not hold. */
+  calledOffEnd(jobId: string): CalledOff | null {
+    const a = this.holding(jobId);
+    return a && !a.turn!.typed ? { sessionId: a.sessionId, tokens: a.tally.tokens() } : null;
+  }
+
+  private holding(jobId: string): Agent | undefined {
+    return [...this.agents.values()].find(x => x.turn?.jobId === jobId && !x.turn.calledOff);
+  }
+
+  /* Its run waits for nothing more: it ends as stopped, whatever the program says or leaves unsaid. */
+  private callOff(a: Agent, turn: Turn): void {
+    turn.calledOff = true;
+    a.stopped = true;
+    a.ended?.resolve('');
   }
 
   /* The agent's views hear when its program comes up or goes. */

@@ -13,7 +13,7 @@ import { adapterFor, programFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
 import { codexEvents, codexRateLimits } from '../src/providers/codex.js';
 import { kimiContextSize, kimiEvents, kimiModels } from '../src/providers/kimi.js';
-import { agyModels, agyPlanLimits, agyStream, agyUsageLimits, installAgy } from '../src/providers/antigravity.js';
+import { agyModels, agyPlanLimits, agyStream, agyStreamSession, agyUsageLimits, installAgy } from '../src/providers/antigravity.js';
 import { childEnv, lastUrl } from '../src/providers/process.js';
 import { CODEX_HEAD } from '../src/program-folder.js';
 import { runJob, type RunInput } from '../src/runner.js';
@@ -744,6 +744,35 @@ describe('Antigravity CLI', () => {
     expect(again).toMatchObject({ ok: true, sessionId: AGY_RESUMED, result: 'apple' });
   });
 
+  it('keeps the main conversation id in print mode when a subagent step reports another conversation id', async () => {
+    process.env.FAKE_MODE = 'subagent';
+    const res = await adapter('antigravity').run(input());
+    expect(res).toMatchObject({ ok: true, sessionId: AGY_NEW, result: 'Done.' });
+
+    /* init wins over later inits, steps and results; without init, result beats requested, and requested beats stray steps. */
+    const withInit = agyStreamSession('requested');
+    withInit.observe({ event: 'init', conversation_id: 'main' });
+    withInit.observe({ event: 'init', conversation_id: 'child-init' });
+    withInit.observe({ event: 'step_update', step_update: { conversation_id: 'sub' } });
+    withInit.observe({ event: 'result', result: { conversation_id: 'other' } });
+    expect(withInit.current()).toBe('main');
+
+    const withRequested = agyStreamSession('requested');
+    withRequested.observe({ event: 'step_update', step_update: { conversation_id: 'sub' } });
+    withRequested.observe({ event: 'result', result: { conversation_id: '' } });
+    withRequested.observe({ event: 'result', result: 'not-a-record' });
+    expect(withRequested.current()).toBe('requested');
+
+    const fromSteps = agyStreamSession(null);
+    fromSteps.observe({ event: 'other', conversation_id: 'first-main' });
+    fromSteps.observe({ event: 'step_update', step_update: { conversation_id: 'sub' } });
+    expect(fromSteps.current()).toBe('first-main');
+
+    const fromResult = agyStreamSession('requested');
+    fromResult.observe({ event: 'result', result: { conversation_id: 'confirmed' } });
+    expect(fromResult.current()).toBe('confirmed');
+  });
+
   it('reports a failed run as agent_failed with its error, and a signed-out one as not_logged_in', async () => {
     process.env.FAKE_MODE = 'fail';
     const failed = await adapter('antigravity').run(input());
@@ -1051,6 +1080,8 @@ describe('Hornhoof tools and instructions', () => {
     expect(mcpConfig!.json).toEqual({ mcpServers: { hornhoof: { type: 'http', url: TOOLS.url, headers: { Authorization: `Bearer ${TOOLS.token}` } } } });
     expect(mcpConfig!.mode & 0o777).toBe(0o600);
     expect(existsSync(mcpConfig!.path)).toBe(false);
+    /* Two minutes to connect to them as it starts, not Claude Code's own 30 seconds. */
+    expect(lastRun().env.MCP_TIMEOUT).toBe('120000');
     expect(events).toContainEqual({ kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' });
   });
 
@@ -1059,12 +1090,12 @@ describe('Hornhoof tools and instructions', () => {
     await run();
     const { argv, env, agentsMd } = lastRun();
     expect(agentsMd).toBe(CODEX_HEAD + INSTRUCTIONS + '\n');
-    expect(argv).toEqual(['exec', '-c', `mcp_servers.hornhoof.url="${TOOLS.url}"`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"', ...FLAGS, '-C', work, '--', 'say ready']);
+    expect(argv).toEqual(['exec', '-c', `mcp_servers.hornhoof.url="${TOOLS.url}"`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"', '-c', 'mcp_servers.hornhoof.startup_timeout_sec=120', ...FLAGS, '-C', work, '--', 'say ready']);
     expect(env.HH_TOOL_TOKEN).toBe(TOOLS.token);
     expect(events).toContainEqual({ kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' });
 
     await run({ sessionId: CODEX_THREAD });
-    expect(lastRun().argv.slice(0, 6)).toEqual(['exec', 'resume', '-c', `mcp_servers.hornhoof.url="${TOOLS.url}"`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"']);
+    expect(lastRun().argv.slice(0, 8)).toEqual(['exec', 'resume', '-c', `mcp_servers.hornhoof.url="${TOOLS.url}"`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"', '-c', 'mcp_servers.hornhoof.startup_timeout_sec=120']);
   });
 
   it('give Kimi Code AGENTS.md and an mcp.json in its home that names the env variable, not the token', async () => {
@@ -1072,7 +1103,7 @@ describe('Hornhoof tools and instructions', () => {
     await run();
     const { env, agentsMd, kimiMcp } = lastRun();
     expect(agentsMd).toBe(INSTRUCTIONS + '\n');
-    expect(kimiMcp).toEqual({ mcpServers: { hornhoof: { transport: 'http', url: TOOLS.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN' } } });
+    expect(kimiMcp).toEqual({ mcpServers: { hornhoof: { transport: 'http', url: TOOLS.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN', startupTimeoutMs: 120_000 } } });
     expect(env.HH_TOOL_TOKEN).toBe(TOOLS.token);
     expect(events).toContainEqual({ kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' });
   });

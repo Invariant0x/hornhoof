@@ -265,6 +265,24 @@ describe('joining the company as a machine', () => {
     expect((await c.rowOf(machine)).signKey).toBe(other.pem);
   });
 
+  it('keeps one replica on its machine when the keeper reuses the company core', async () => {
+    const c = await company();
+    const keys = newKeys();
+    const { machine, ticket } = await c.cored();
+    expect((await c.redeem(ticket, MAC.machineId, keys)).statusCode).toBe(200);
+    await c.db.update(machines).set({ role: 'data' }).where(eq(machines.id, machine));
+
+    const other = await invitePerson(c.app, c.ceo, { name: 'Chris', email: 'chris@example.test', access: { whole: true } });
+    const duplicate = await c.cored(MAC, other);
+    expect(errorOf(await c.redeem(duplicate.ticket, MAC.machineId, newKeys()))).toBe('machine_taken');
+    expect(await c.rowOf(duplicate.machine)).toMatchObject({ networkId: null, role: null });
+
+    const back = await c.redeem(await issueTicket(c.db, machine), MAC.machineId, keys);
+    expect(back.statusCode).toBe(200);
+    expect(back.json()).toMatchObject({ role: 'worker', view: { role: 'worker', copy: null } });
+    expect(await c.rowOf(machine)).toMatchObject({ networkId: hostIdOf(MAC.machineId), role: 'data' });
+  });
+
   it('refuses a ticket of a disabled person, of a disconnected machine and of a computer another row holds', async () => {
     const c = await company();
     const maria = await invitePerson(c.app, c.ceo, { name: 'Maria', email: 'maria@acme.com', access: { whole: true } });

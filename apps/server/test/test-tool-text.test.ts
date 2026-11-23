@@ -16,4 +16,12 @@ describe('test tool guidance', () => {
     for (const fact of ['hornhoof/tests', 'pins the commit', 'wakes you', '{part}', '{parts}']) expect(text).toContain(fact);
     expect(text).not.toMatch(/candidate|tests_not_release|full_run_early|every so many turns/i);
   });
+
+  it('says that what a part running a command leaves in $HH_OUT goes on the task, and that a run of the suites has no $HH_OUT', () => {
+    const text = descriptions().get('run_tests')!;
+    expect(text).toContain('A part that runs a command gets an empty folder in $HH_OUT');
+    expect(text).toContain('test-<run>-<part>-<name>');
+    expect(text).toContain("A run of the product's suites, without command, has no $HH_OUT.");
+    expect(descriptions().get('test_run')).toContain('the files it left in $HH_OUT as made');
+  });
 });

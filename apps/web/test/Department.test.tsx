@@ -720,13 +720,17 @@ describe('Department view', () => {
 
   it('keeps the department actions in the free strip after the zoom while a window or task is open', () => {
     /* Windows and tasks end above the strip at the bottom where the zoom and the actions sit, so the actions
-       stay there, right after the zoom, at every width a window leaves beside them; on a phone the window covers all. */
+       stay there, right after the zoom, at every width a window leaves beside them; on a phone the window covers all.
+       A window stands at the right in either direction, so right to left the actions keep the end, away from it (#1658). */
     const strip = px(decl('.dv-acts', 'bottom')) + px(decl('.hbtn', 'height'));
     for (const panel of ['.orch', '.acard']) expect(px(decl(panel, 'bottom'))).toBeGreaterThan(strip);
-    for (const kind of ['window', 'task'])
-      expect(rulesFor(`.body.with-${kind} .dv-acts`).map(r => [r.media, r.decls.left, r.decls.right, r.decls.bottom])).toEqual([
-        ['(min-width: 761px)', decl('.dview .ticker', 'left'), 'auto', undefined],
+    const afterZoom = decl('.dview .ticker', 'inset-inline')!.split(' ')[0];
+    for (const kind of ['window', 'task']) {
+      expect(rulesFor(`.body.with-${kind} .dv-acts:dir(ltr)`).map(r => [r.media, r.decls['inset-inline'], r.decls.bottom])).toEqual([
+        ['(min-width: 761px)', `${afterZoom} auto`, undefined],
       ]);
+      expect(rulesFor(`.body.with-${kind} .dv-acts`)).toEqual([]);
+    }
   });
 
   it('keeps an idle reviewer in its role frame behind gate 1, with no return arrows', async () => {
@@ -1791,9 +1795,10 @@ describe('the department bar', () => {
   });
 
   it('lets the name of the department wrap on a phone, and starts the tree and the drawers under it', () => {
-    /* The name wraps on every screen; a phone gives it the whole width under the top bar. */
+    /* The name wraps on every screen, which gives it the whole width under the menu (#1635). */
     for (const prop of ['white-space', 'overflow', 'text-overflow', 'overflow-wrap']) expect(decl('.crumbs h2', prop, PHONE)).toBeUndefined();
-    expect(decl('.crumbs', 'max-width', PHONE)).toBe('calc(100% - 32px)');
+    expect(decl('.crumbs', 'max-width')).toBe('calc(100% - 2 * var(--bar-edge))');
+    expect(decl('.crumbs', 'max-width', PHONE)).toBeUndefined();
     expect(decl('.dv-drawer', 'top', PHONE)).toBe('var(--tree-top, 116px)');
     expect(decl('.tview', 'top', PHONE)).toBe('var(--tree-top, 116px)');
   });
@@ -1807,17 +1812,19 @@ describe('the department bar', () => {
     expect(root.style.getPropertyValue('--tree-top')).toBe('142px');
   });
 
+  /* The name stands 8 px under the menu on a wide screen too, its 44 px blocks 12 px from the top (#1635), and the tree 8 px
+     under the name as tall as it wraps (#1610). It moves there by transform, which offsetTop does not see. */
   it('wraps a name of the department too long for its room on a wide screen, and starts the tree and drawers under it', async () => {
     const measure = observed();
     await open(1440);
     const root = document.querySelector<HTMLElement>('.dview')!;
     const crumbs = root.querySelector<HTMLElement>('.crumbs')!;
-    Object.defineProperties(crumbs, { offsetTop: { configurable: true, value: 12 }, offsetHeight: { configurable: true, value: 44 } });
+    Object.defineProperties(crumbs, { offsetTop: { configurable: true, value: 0 }, offsetHeight: { configurable: true, value: 44 } });
     measure();
-    expect(root.style.getPropertyValue('--tree-top')).toBe('68px');
+    expect(root.style.getPropertyValue('--tree-top')).toBe(`${64 + 44 + 8}px`);
     Object.defineProperty(crumbs, 'offsetHeight', { configurable: true, value: 70 });
     measure();
-    expect(root.style.getPropertyValue('--tree-top')).toBe(`${12 + 70 + 12}px`);
+    expect(root.style.getPropertyValue('--tree-top')).toBe(`${64 + 70 + 8}px`);
     for (const part of ['.tview', '.dv-drawer']) expect(decl(part, 'top')).toBe('var(--tree-top, 68px)');
     expect(decl('.crumbs h2', 'white-space')).toBe('normal');
     expect(decl('.crumbs h2', 'overflow-wrap')).toBe('break-word');
@@ -1826,7 +1833,9 @@ describe('the department bar', () => {
     expect([decl('.crumbs', 'height'), decl('.crumbs', 'align-items'), decl('.crumb', 'height'), decl('.crumb', 'min-height')]).toEqual(['auto', 'flex-start', 'auto', '44px']);
   });
 
-  it('tells the top bar how much room its name takes beside the logo on a wide screen', async () => {
+  /* The name no longer stands beside the logo (#1635): however long it is, the tabs keep the room between the logo and the
+     account, and keep their words while those fit it. */
+  it('leaves the tabs their room between the logo and the account on a wide screen, however long its name is', async () => {
     const measure = observed();
     await open();
     const root = document.querySelector<HTMLElement>('.dview')!;
@@ -1839,13 +1848,10 @@ describe('the department bar', () => {
     Object.defineProperty(document.querySelector('.tb-brand')!, 'offsetWidth', { configurable: true, value: 44 });
     Object.defineProperty(document.querySelector('.tb-right')!, 'offsetWidth', { configurable: true, value: 44 });
     Object.defineProperty(nav, 'scrollWidth', { configurable: true, value: 400 });
-    /* The name wants 120 px more than the 220 it has: 340 px after the 44 px logo leave the centred tabs 992 - 2 * 384 = 224. */
+    /* A name of 220 px that wants 120 px more once took 340 px beside the logo and left the tabs 224: now the tabs have
+       992 - 2 * 52 = 888, room for their 400 px of words. */
     Object.defineProperty(crumbs, 'offsetWidth', { configurable: true, value: 220 });
     Object.defineProperties(name, { scrollWidth: { configurable: true, value: 240 }, clientWidth: { configurable: true, value: 120 } });
-    measure();
-    expect(nav).toHaveAttribute('data-fit', 'icons');
-    /* A name that fits its 220 px leaves them 992 - 2 * 264 = 464, room for their 400 px of words. */
-    Object.defineProperty(name, 'scrollWidth', { configurable: true, value: 120 });
     measure();
     expect(nav).not.toHaveAttribute('data-fit');
   });

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 const LOGGED_ENV = ['HH_API_KEY', 
   'CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_AUTO_COMPACT_WINDOW', 'CODEX_HOME', 'KIMI_CODE_HOME', 'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN',
-  'API_TIMEOUT_MS', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'API_TIMEOUT_MS', 'MCP_TIMEOUT', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   'CODEX_API_KEY', 'NODE_KEY', 'HORNHOOF_DATA', 'HH_TOOL_TOKEN', 'HOME', 'PATH', 'GIT_ASKPASS', 'HH_GIT_PASSWORD', 'GIT_TERMINAL_PROMPT',
   'KIMI_MODEL_THINKING_EFFORT', 'AGY_CLI_DISABLE_AUTO_UPDATE', 'CLAUDE_CODE_OAUTH_TOKEN',
   'DISABLE_AUTOUPDATER', 'KIMI_CODE_NO_AUTO_UPDATE', 'KIMI_CLI_NO_AUTO_UPDATE',
@@ -229,6 +229,13 @@ const AGY_RUNS = {
   cut: () => {
     agyToolStep('ACTIVE');
     setInterval(() => {}, 1000);
+  },
+  /* Main conversation starts, a subagent step reports its own conversation_id, and the final result omits conversation_id. */
+  subagent: () => {
+    process.stdout.write(JSON.stringify({ event: 'init', conversation_id: 'c3b66b04-872b-4fbe-a3a4-058a026ef20a', init: { cwd: '/home/user/project', tools: ['run_command'] } }) + '\n');
+    process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { conversation_id: 'c3b66b04-872b-4fbe-a3a4-058a026ef20a', step_index: 0, state: 'DONE', step_type: 'user_input' } }) + '\n');
+    process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { conversation_id: 'subagent-0000-4000-8000-000000000001', step_index: 1, state: 'DONE', step_type: 'tool', tool_name: 'generate_image', tool_info: { name: 'generate_image', parameters: {}, output: 'ok' } } }) + '\n');
+    process.stdout.write(JSON.stringify({ event: 'result', result: { conversation_id: '', status: 'SUCCESS', response: 'Done.\n', duration_seconds: 1, num_turns: 1 } }) + '\n');
   },
 };
 

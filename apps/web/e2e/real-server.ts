@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
-type ServerOptions = { cwd: string; publicUrl: string; invalidBoot: string };
+type ServerOptions = { cwd: string; publicUrl: string; invalidBoot: string; env?: NodeJS.ProcessEnv };
 
 function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
   if (child.exitCode !== null || child.killed) return Promise.resolve();
@@ -38,10 +38,10 @@ function readBootLine<Boot>(child: ChildProcessWithoutNullStreams, invalidBoot: 
   });
 }
 
-export async function startServer<Boot>(script: string, { cwd, publicUrl, invalidBoot }: ServerOptions): Promise<Boot & { stop: () => Promise<void> }> {
+export async function startServer<Boot>(script: string, { cwd, publicUrl, invalidBoot, env }: ServerOptions): Promise<Boot & { stop: () => Promise<void> }> {
   const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
     cwd,
-    env: { ...process.env, HH_PUBLIC_URL: publicUrl },
+    env: { ...process.env, ...env, HH_PUBLIC_URL: publicUrl },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   let stderr = '';

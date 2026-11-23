@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { APP, DIGESTS, JQ, runOnce, runUpdaterStep, stand, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
+import { APP, DIGESTS, HOSTILE_UPLOADS, JOURNAL, JQ, runOnce, runUpdaterStep, stand, stubbed, tarOf, TASKS, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
 
 /* A machine that keeps a copy of the company's data, and the company server it uploads to. */
 const OWN_IMAGE = `${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`;
@@ -62,47 +62,6 @@ const loggedTar = (s: Stand) => {
   writeFileSync(join(tools, 'tar'), `#!/bin/sh\nprintf '%s\\n' "$*" >> ${log}\ncase "$1" in -tvf) ${TAR} "$@" | sed 's/^h/-/' ;; *) exec ${TAR} "$@" ;; esac\n`, { mode: 0o755 });
   return { env: { PATH: `${tools}:${dirname(fileURLToPath(new URL('./updater-stubs/docker', import.meta.url)))}:${dirname(JQ)}:/usr/bin:/bin` }, calls: () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []) };
 };
-/* A tar archive written header by header, for members no tar of this machine would pack as they are. */
-type Member = { name: string; type?: string; data?: string; link?: string; prefix?: string } | { block: Buffer };
-function tarOf(members: Member[]): Buffer {
-  const blocks: Buffer[] = [];
-  for (const member of members) {
-    if ('block' in member) {
-      blocks.push(member.block);
-      continue;
-    }
-    const { name, type = '0', data = '', link = '', prefix = '' } = member;
-    const header = Buffer.alloc(512);
-    const body = Buffer.from(data);
-    const put = (at: number, value: string) => header.write(value, at, 'latin1');
-    put(0, name);
-    put(100, '0000644\0');
-    put(108, '0000000\0');
-    put(116, '0000000\0');
-    put(124, `${body.length.toString(8).padStart(11, '0')}\0`);
-    put(136, '00000000000\0');
-    put(148, '        ');
-    put(156, type);
-    put(157, link);
-    put(257, 'ustar\x0000');
-    put(345, prefix);
-    let sum = 0;
-    for (const byte of header) sum += byte;
-    put(148, `${sum.toString(8).padStart(6, '0')}\0 `);
-    blocks.push(header, body, Buffer.alloc((512 - (body.length % 512)) % 512));
-  }
-  blocks.push(Buffer.alloc(1024));
-  return Buffer.concat(blocks);
-}
-/* A pax header's record: its length counts itself. */
-const pax = (key: string, value: string) => {
-  const rest = ` ${key}=${value}\n`;
-  let length = rest.length + 1;
-  while (`${length}${rest}`.length !== length) length += 1;
-  return `${length}${rest}`;
-};
-const TASKS = 'id,title\n1,first\n2,"two\n\\.\nDROP DATABASE hornhoof;"\n';
-const JOURNAL = 'id,tbl\n7,tasks\n';
 const load = (s: Stand, id: string, file: string, over: object = {}) =>
   writeFileSync(join(s.control, 'load.json'), JSON.stringify({ id, machine: randomUUID(), file, database: DATABASE, unpackMax: 1024 * 1024, ...over }), { mode: 0o600 });
 const copies = (calls: string[]) => calls.filter(c => c.includes('\\copy '));
@@ -202,28 +161,7 @@ describe('the updater and what a machine held when it stopped holding the data',
   /* Every member is looked at in the archive's own headers before tar touches anything: tar's own listing can show a
      second name of a file, even one outside the folder, as a plain file, and BusyBox tar makes such a name as it unpacks.
      Only plain files go, and tar unpacks none of an upload that holds anything else. */
-  it.each<{ what: string; members: (out: string) => Member[]; line: string }>([
-    { what: 'a second name of a file outside the folder', members: (out: string) => [{ name: 'net.journal.csv', type: '1', link: out }], line: 'The upload holds what is no file.' },
-    { what: 'a plain file that names a link, which BusyBox makes a second name of', members: (out: string) => [{ name: 'net.journal.csv', link: out }], line: 'The upload holds what is no file.' },
-    { what: 'a link', members: (out: string) => [{ name: 'net.journal.csv', type: '2', link: out }], line: 'The upload holds what is no file.' },
-    { what: 'a folder', members: () => [{ name: 'net.journal.csv', type: '5' }], line: 'The upload holds what is no file.' },
-    { what: 'a named pipe', members: () => [{ name: 'net.journal.csv', type: '6' }], line: 'The upload holds what is no file.' },
-    { what: 'a device', members: () => [{ name: 'net.journal.csv', type: '3' }], line: 'The upload holds what is no file.' },
-    { what: 'a file of a kind this updater never packs', members: () => [{ name: 'net.journal.csv', type: '7', data: JOURNAL }], line: 'The upload holds what is no file.' },
-    { what: 'a file with no kind at all, as the oldest tars wrote one', members: () => [{ name: 'net.journal.csv', type: '\0', data: JOURNAL }], line: 'The upload holds what is no file.' },
-    { what: 'a name with a folder before it', members: () => [{ name: 'net.journal.csv', prefix: 'public.tasks', data: JOURNAL }], line: 'The upload holds what is no file.' },
-    {
-      what: 'a header that gives the next file another name',
-      members: () => [{ name: 'public.pax.csv', type: 'x', data: pax('path', 'net.journal.csv') }, { name: 'public.other.csv', data: JOURNAL }],
-      line: 'The upload holds what is no file.',
-    },
-    { what: 'a table twice', members: () => [{ name: 'public.tasks.csv', data: TASKS }], line: 'The upload holds a table twice.' },
-    /* Tar reads on past one empty block, or stops at it, as it is made: after one, only empty blocks may follow. */
-    { what: 'a link after one empty block', members: (out: string) => [{ block: Buffer.alloc(512) }, { name: 'net.journal.csv', type: '1', link: out }], line: 'The upload cannot be read.' },
-    { what: 'something after its end', members: () => [{ block: Buffer.alloc(1024) }, { block: Buffer.alloc(512, 'x') }], line: 'The upload cannot be read.' },
-    /* Each header is read on its own, so an upload of more files than the company could ever have tables is not read on. */
-    { what: 'more files than the company could have tables', members: () => Array.from({ length: 1000 }, (_, i) => ({ name: `public.t${i}.csv` })), line: 'The upload holds a file that is no table of the company.' },
-  ])('unpacks nothing of an upload that holds $what', async ({ members, line }) => {
+  it.each(HOSTILE_UPLOADS)('unpacks nothing of an upload that holds $what', async ({ members, line }) => {
     const s = stand();
     const id = randomUUID();
     const outside = join(s.dir, 'outside.csv');
@@ -504,6 +442,84 @@ describe('the updater and what a machine held when it stopped holding the data',
     expect(r.calls.findIndex(c => c.startsWith('docker run') && c.includes(`--entrypoint docker ${OWN_IMAGE} compose up -d --no-build updater`))).toBeGreaterThan(up);
     const all = everything(s, r);
     for (const secret of [SECRETS.HORNHOOF_SECRET, SECRETS.NODE_KEY, SECRETS.POSTGRES_PASSWORD]) expect(all.includes(secret)).toBe(false);
+  });
+
+  it('keeps an unrelated private folder when clearing named folders', async () => {
+    const s = stand();
+    const unrelated = join(s.control, '.remove.unrelated');
+    mkdirSync(unrelated, { mode: 0o700 });
+    writeFileSync(join(unrelated, 'kept'), 'rows');
+    const r = await runUpdaterStep(s, 'remove_folders dumps');
+    expect(r.code, r.out).toBe(0);
+    expect(existsSync(join(unrelated, 'kept'))).toBe(true);
+  });
+
+  it('clears directory names ending in newlines', async () => {
+    const s = stand();
+    const dir = join(s.control, 'dumps', 'retained\n', 'tables\n\n');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'old.csv'), 'rows');
+    const r = await runUpdaterStep(s, 'remove_folders dumps');
+    expect(r.code, r.out).toBe(0);
+    expect(existsSync(join(s.control, 'dumps'))).toBe(false);
+  });
+
+  it.each(['dumps', 'dumps/mounted'])('leaves files at the %s mount boundary', async path => {
+    const s = stand();
+    const mounted = join(s.control, path);
+    mkdirSync(mounted, { recursive: true });
+    writeFileSync(join(mounted, 'kept'), 'rows');
+    const r = await runUpdaterStep(s, `
+      directory_mount() {
+        case "$(physical_dir)" in
+          */${path.split('/').at(-1)}) printf '%s\\n' 2 ;;
+          *) printf '%s\\n' 1 ;;
+        esac
+      }
+      remove_folders dumps
+    `);
+    expect(r.code, r.out).toBe(1);
+    expect(readFileSync(join(mounted, 'kept'), 'utf8')).toBe('rows');
+  });
+
+  /* The app and the keeper can put a link in a shared folder, or swap a folder in one for a link, at any moment, also
+     while the wipe deletes. The wipe deletes nothing through either. Here rm deletes as BusyBox rm -rf does, by whole
+     paths, and a folder of dumps is swapped for a link to a folder outside right after its first file went. */
+  it('deletes nothing outside through a link in a shared folder', async () => {
+    const { s } = copyToWipe();
+    const outside = join(s.dir, 'outside');
+    const sub = join(s.control, 'dumps', 'sub');
+    mkdirSync(outside);
+    mkdirSync(sub);
+    for (const dir of [outside, sub]) for (const name of ['a', 'b', 'c']) writeFileSync(join(dir, name), 'rows');
+    symlinkSync(outside, join(s.control, 'uploads', 'planted'));
+    const first = await runOnce(s, null, { ...COPY, ...stubbed(s, 'rm', 'rm-bypath'), RM_SWAP: `${sub}=${outside}` });
+    if (!has(s, 'wiped.json')) {
+      expect(stepOf(s), first.out).toBe('files');
+      const retry = await runOnce(s, null, COPY);
+      expect(retry.code, retry.out).toBe(0);
+    }
+    expect(readdirSync(outside).sort(), first.out).toEqual(['a', 'b', 'c']);
+    for (const name of ['dumps', 'restore', 'schema', 'uploads']) expect(has(s, name), name).toBe(false);
+    expect(readdirSync(s.control).filter(name => name.startsWith('.'))).toEqual([]);
+    expect(has(s, 'wiped.json')).toBe(true);
+  });
+
+  /* The opened folder is emptied, and the link that took its name remains for the retry. */
+  it('empties a folder without following a folder in it swapped for a link meanwhile', async () => {
+    const s = stand();
+    const outside = join(s.dir, 'outside');
+    const tree = join(s.dir, 'tree');
+    const sub = join(tree, 'sub');
+    mkdirSync(outside);
+    mkdirSync(sub, { recursive: true });
+    for (const dir of [outside, sub]) for (const name of ['a', 'b', 'c']) writeFileSync(join(dir, name), 'rows');
+    writeFileSync(join(tree, '.hidden'), 'rows');
+    const r = await runUpdaterStep(s, `cd -P -- '${tree}' && if clear_here; then echo emptied; else echo 'not emptied'; fi`, { ...stubbed(s, 'rm', 'rm-bypath'), RM_SWAP: `${sub}=${outside}` });
+    expect(readdirSync(outside).sort(), r.out).toEqual(['a', 'b', 'c']);
+    expect(readdirSync(join(tree, 'sub.moved'))).toEqual([]);
+    expect(readdirSync(tree).sort()).toEqual(['sub', 'sub.moved']);
+    expect(r.out.trim()).toBe('not emptied');
   });
 
   it('goes on with a wipe that failed', async () => {

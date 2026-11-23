@@ -16,6 +16,7 @@ type FakeChild = EventEmitter & {
 const harness = vi.hoisted(() => {
   const DEFAULT_HOOK_TIMEOUT_MS = 30_000;
   let onSpawn: ((child: FakeChild) => void) | null = null;
+  const spawnedWith: { env?: NodeJS.ProcessEnv }[] = [];
   const beforeAllHooks: Array<(args: Record<string, never>, info: { setTimeout: (ms: number) => void; project: { timeout: number; expect: { timeout: number }; use: { actionTimeout: number; navigationTimeout: number } } }) => Promise<unknown>> = [];
   const afterAllHooks: Array<() => Promise<unknown>> = [];
   let activeSlot: { timeout: number; update: () => void } | null = null;
@@ -67,6 +68,7 @@ const harness = vi.hoisted(() => {
   };
 
   return {
+    spawnedWith,
     setOnSpawn: (fn: (child: FakeChild) => void) => {
       onSpawn = fn;
     },
@@ -103,7 +105,8 @@ function makeFakeChild(autoStopOnStdinEnd = true): FakeChild {
 }
 
 vi.mock('node:child_process', () => ({
-  spawn: () => {
+  spawn: (_command: string, _args: string[], options: { env?: NodeJS.ProcessEnv }) => {
+    harness.spawnedWith.push(options);
     const child = makeFakeChild();
     harness.takeOnSpawn()?.(child);
     return child;
@@ -124,6 +127,25 @@ vi.mock('@playwright/test', () => {
 
 import { startServer } from '../e2e/real-server';
 import '../e2e/long-feedback-and-reports.spec';
+
+describe('the environment of a real server', () => {
+  it('has what the test names beside the public address, over the machine\'s own, and none of it without a name', async () => {
+    const boot = JSON.stringify({ origin: 'http://127.0.0.1:4199' }) + '\n';
+    harness.setOnSpawn(child => queueMicrotask(() => void child.stdout.write(boot)));
+    process.env.HH_WEB_DIST = 'from the machine';
+    try {
+      const named = await startServer('/* stub */', { cwd: '/tmp', publicUrl: 'http://localhost:4179', invalidBoot: 'Invalid server boot line', env: { HH_WEB_DIST: '/tmp/page' } });
+      await named.stop();
+      expect(harness.spawnedWith.at(-1)!.env).toMatchObject({ HH_WEB_DIST: '/tmp/page', HH_PUBLIC_URL: 'http://localhost:4179' });
+
+      const unnamed = await startServer('/* stub */', { cwd: '/tmp', publicUrl: 'http://localhost:4180', invalidBoot: 'Invalid server boot line' });
+      await unnamed.stop();
+      expect(harness.spawnedWith.at(-1)!.env).toMatchObject({ HH_WEB_DIST: 'from the machine', HH_PUBLIC_URL: 'http://localhost:4180' });
+    } finally {
+      delete process.env.HH_WEB_DIST;
+    }
+  });
+});
 
 describe('real server startup in long-feedback-and-reports', () => {
   it('waits past 30 s for the server readiness line in beforeAll without a speed-dependent timeout', async () => {
