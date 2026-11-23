@@ -15,6 +15,7 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from '
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { crc32, deflateRawSync } from 'node:zlib';
+import { THEME_KIT_VALUES } from '@hornhoof/protocol/themes';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { BUILTIN_SKINS, type BuiltinSkin, type BuiltinSkinId } from '../src/skins/registry';
@@ -58,22 +59,34 @@ function artFiles(folder: string): [string, Buffer][] {
   return found;
 }
 
+/* A font file of ui/fonts as the server takes it (apps/server/src/modules/themes/archive.ts). */
+const FONT_FILE = /^[A-Za-z0-9._@-]+\.woff2$/;
+
+/* A pack folder may come from someone else: every name it gives must be a flat file name of the form the server takes,
+   checked before anything is read, so nothing outside the folder goes into the archive. */
+function flatNames(names: readonly string[], form: RegExp, what: string): readonly string[] {
+  const bad = names.filter(name => !form.test(name));
+  if (bad.length) throw new Error(`${what} names files that are not plain names of its folder: ${bad.map(name => JSON.stringify(name)).join(', ')}`);
+  return names;
+}
+
 /* A kit's pack folder: its kit.json as ui/kit.json, each picture a slot names under ui/kit/, and its licence. */
 function kitFiles(folder: string): { files: [string, Buffer][]; licence: Buffer | null } {
   const manifest = readFileSync(join(folder, 'kit.json'));
   const kit = JSON.parse(manifest.toString('utf8')) as { slots?: Record<string, { file?: string }> };
-  const pictures = [...new Set(Object.values(kit.slots ?? {}).map(slot => slot.file).filter((file): file is string => typeof file === 'string'))];
+  const named = [...new Set(Object.values(kit.slots ?? {}).map(slot => slot.file).filter((file): file is string => typeof file === 'string'))];
+  const pictures = flatNames(named, THEME_KIT_VALUES.file, "The kit's kit.json");
   const missing = pictures.filter(file => !existsSync(join(folder, file)));
   if (missing.length) throw new Error(`The kit's kit.json names pictures its folder does not have: ${missing.join(', ')}`);
   const licence = ['LICENSE.md', 'LICENSE', 'LICENSE.txt'].map(name => join(folder, name)).find(path => existsSync(path));
-  return { files: [['ui/kit.json', manifest], ...pictures.sort().map((file): [string, Buffer] => [`ui/kit/${file}`, readFileSync(join(folder, file))])], licence: licence ? readFileSync(licence) : null };
+  return { files: [['ui/kit.json', manifest], ...[...pictures].sort().map((file): [string, Buffer] => [`ui/kit/${file}`, readFileSync(join(folder, file))])], licence: licence ? readFileSync(licence) : null };
 }
 
 /* A fonts folder: fonts.json as ui/fonts.json, each file a face names, and the fonts' OFL texts beside them. */
 function fontFiles(folder: string): { files: [string, Buffer][]; families: Set<string> } {
   const manifest = readFileSync(join(folder, 'fonts.json'));
   const { faces } = JSON.parse(manifest.toString('utf8')) as { faces: { family: string; file: string }[] };
-  const named = [...new Set(faces.map(face => face.file))].sort();
+  const named = flatNames([...new Set(faces.map(face => face.file))].sort(), FONT_FILE, 'fonts.json');
   const missing = named.filter(file => !existsSync(join(folder, file)));
   if (missing.length) throw new Error(`fonts.json names fonts its folder does not have: ${missing.join(', ')}`);
   const licences = readdirSync(folder).filter(name => name.endsWith('-OFL.txt')).sort();
