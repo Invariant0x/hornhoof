@@ -266,6 +266,14 @@ Each of these refuses the whole archive. The store names the reason and the file
 * Turning it off means choosing another theme. The look goes back to that theme, the map goes back to that theme's map, and agents get their own names back. Nothing of the theme stays in the interface.
 * Deleting a theme that is on turns it off first, back to Cyberpunk, and then removes all its files.
 
+Without the screen, whoever runs the server installs an archive for one company with the same check and the same install, in the name of that company's owner:
+
+```
+node apps/server/dist/cli.js theme-install egypt.zip --company <company id> [--log <file>]
+```
+
+It refuses what an upload refuses, the same version twice among it, and a company that is not there. Each attempt is one JSON line appended to the log (`theme-installs.log` in the folder it runs in unless `--log` names another): when, which company, the archive's SHA-256, and whether it was installed or why not. It turns nothing on.
+
 ## 11. Building Hornhoof's own themes as archives
 
 `apps/web/scripts/theme-pack.ts` writes the archive of a theme Hornhoof ships, from `skins/registry.ts`, its world pack and its world voice, in this same format. A world whose art is licensed apart from the repository takes that art, and the licence that goes with it, from outside it:
