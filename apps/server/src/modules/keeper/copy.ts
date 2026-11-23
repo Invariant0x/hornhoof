@@ -429,6 +429,14 @@ export class CopyMaker {
     this.keep({ phase: 'ready', slot: null, migrations: order?.migrations ?? this.kept.migrations, seen: false, missing: 0, moved: null, ...(order?.leader === undefined ? {} : { leader: order.leader }) });
   }
 
+  private firstSchema(): SchemaAttempt {
+    return this.kept.schema ?? { attempt: this.kept.attempt, since: new Date(this.now()).toISOString() };
+  }
+
+  private rememberSchema(first: SchemaAttempt): void {
+    if (!this.kept.schema) this.keep({ schema: first });
+  }
+
   /* The updater loads the leader's schema; until it has, the request waits in the control folder. A load that failed
      is one line, and the next attempt asks ten minutes later under the next number. */
   private async schema(sql: Sql): Promise<void> {
@@ -440,14 +448,14 @@ export class CopyMaker {
     }
     const { controlDir } = this.opts;
     const failed = join(controlDir, SCHEMA_DIR, `${this.kept.attempt}.failed`);
-    const first = this.kept.schema ?? { attempt: this.kept.attempt, since: new Date(this.now()).toISOString() };
+    const first = this.firstSchema();
     if (existsSync(failed)) {
       this.opts.log(`Could not load the company's schema for a copy: ${readFileSync(failed, 'utf8').trim() || 'no reason was given'}`);
       return this.keep({ attempt: this.kept.attempt + 1, notBefore: new Date(this.now() + RETRY_MS).toISOString(), schema: first });
     }
     if (this.kept.notBefore && this.now() < Date.parse(this.kept.notBefore)) return;
     const request = join(controlDir, SCHEMA_FILE);
-    if (!this.kept.schema) this.keep({ schema: first });
+    this.rememberSchema(first);
     if (existsSync(request)) return;
     const { port } = this.publisher();
     writePrivately(request, JSON.stringify({ attempt: this.kept.attempt, database: this.kept.database, port, password: this.opts.password }));

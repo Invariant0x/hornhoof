@@ -46,3 +46,11 @@ export function CopySchemaFailure({ card }: { card: CopySchemaFailureCard }) {
     </section>
   );
 }
+
+export function CopySchemaFailures({ cards }: { cards: CopySchemaFailureCard[] }) {
+  return (
+    <>
+      {cards.map(card => <CopySchemaFailure key={card.id} card={card} />)}
+    </>
+  );
+}

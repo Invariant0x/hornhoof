@@ -37,8 +37,17 @@ export async function tellOfCopySchemaFailures(ctx: Pick<Ctx, 'db' | 'bus'>, now
   }
 }
 
+type MachineRow = typeof machines.$inferSelect;
+
+const schemaChanged = (before: MachineRow, after: MachineRow): boolean =>
+  before.copySchemaSince?.getTime() !== after.copySchemaSince?.getTime() || before.copySchemaAttempt !== after.copySchemaAttempt;
+
 /* A keeper can report recovery between rounds. Refresh right away if the changed attempt was or is old enough. */
-export function schemaNoticeChanged(before: typeof machines.$inferSelect, after: typeof machines.$inferSelect, now: number): boolean {
-  return (before.copySchemaSince?.getTime() !== after.copySchemaSince?.getTime() || before.copySchemaAttempt !== after.copySchemaAttempt)
-    && (overdue(before.copySchemaSince, now) || overdue(after.copySchemaSince, now));
+export function schemaNoticeChanged(before: MachineRow | undefined, after: MachineRow | undefined, now: number): boolean {
+  return Boolean(before && after && schemaChanged(before, after) && (overdue(before.copySchemaSince, now) || overdue(after.copySchemaSince, now)));
+}
+
+/* Refresh the screens right away when a keeper's report changes an overdue schema wait. */
+export function notifySchemaChange(ctx: Pick<Ctx, 'bus'>, companyId: string | undefined, changed: boolean): void {
+  if (changed && companyId) ctx.bus.publish(companyId, { type: 'requests', machines: true });
 }

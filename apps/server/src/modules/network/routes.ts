@@ -9,7 +9,7 @@ import { ApiError } from '../../errors.js';
 import { REPORT_MAX } from '../backups/types.js';
 import { holdsData } from '../copies/holds.js';
 import { noteReplicaBytes } from '../copies/measured.js';
-import { schemaNoticeChanged } from '../copies/schema-failures.js';
+import { notifySchemaChange, schemaNoticeChanged } from '../copies/schema-failures.js';
 import { copyOrder } from '../copies/slots.js';
 import { isPrivate } from '../keeper/addresses.js';
 import { TABLE_SYNC_SLOT } from '../keeper/slots.js';
@@ -103,13 +103,17 @@ const keyChanged = () => new ApiError(409, 'conflict', "This machine's key chang
    database to be read as a copy's, which is compared the whole way all the same once it wrote. */
 const ledOf = (led: number | undefined): number | null => (led !== undefined && led >= 1 && led <= 999_999_999 ? led : null);
 
+function copySchemaColumns(copy: NonNullable<z.infer<typeof ReportBody>['copy']>) {
+  const schema = copy.state === 'making' || copy.state === 'remaking' ? copy.schema : null;
+  return { copySchemaSince: schema ? new Date(schema.since) : null, copySchemaAttempt: schema?.attempt ?? null };
+}
+
 /* How a machine's row keeps what its keeper said of its copy; a copy that names no subscription keeps the one the row has. */
 function copyColumns(copy: NonNullable<z.infer<typeof ReportBody>['copy']>, copyName: string | null) {
-  const schema = copy.state === 'making' || copy.state === 'remaking' ? copy.schema : null;
   return {
     copyState: copy.state, copyProgress: copy.progress, copyError: copy.error, copyAt: copy.at ? new Date(copy.at) : null,
     copyName: copy.name ?? copyName ?? null, copyOld: copy.old?.attempt ?? null, copyOldLed: ledOf(copy.old?.led),
-    copySchemaSince: schema ? new Date(schema.since) : null, copySchemaAttempt: schema?.attempt ?? null,
+    ...copySchemaColumns(copy),
   };
 }
 
@@ -269,7 +273,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
       return {
         installed: Boolean(row && after && installs(row, now) && !installs(after, now)),
         looked: pin !== undefined && pin !== row?.ownerPin,
-        schemaChanged: Boolean(row && after && schemaNoticeChanged(row, after, ctx.clock())),
+        schemaChanged: schemaNoticeChanged(row, after, ctx.clock()),
         companyId: row?.companyId,
         measured: !who.own && (row?.role === 'data' || Boolean(row?.uploadState)),
         wiped: 'uploadState' in left,
@@ -278,7 +282,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (installed.wiped) noteReplicaBytes(ctx, machine.id, null);
     else if (installed.measured && replicaBytes !== undefined) noteReplicaBytes(ctx, machine.id, replicaBytes);
     if (installed.installed) void releaseHeld(ctx);
-    if (installed.schemaChanged && installed.companyId) ctx.bus.publish(installed.companyId, { type: 'requests', machines: true });
+    notifySchemaChange(ctx, installed.companyId, installed.schemaChanged);
     /* The screens load the machine again when its pinned key changes. */
     if (installed.looked && installed.companyId) ctx.bus.publish(installed.companyId, { type: 'computer' });
     return reply.code(204).send();

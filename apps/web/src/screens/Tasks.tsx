@@ -12,7 +12,7 @@ import { programOf, TrackerIcon } from '../ui/icons';
 import { DepartmentMark, PersonMark } from '../ui/TrackerMarks';
 import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
 import { Busy, Hold, LoadState, noneYet, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
-import { CopySchemaFailure, MachineAway } from '../ui/MachineAway';
+import { CopySchemaFailures, MachineAway } from '../ui/MachineAway';
 import { MachineLow } from '../ui/MachineLow';
 import { MergeCard } from '../ui/MergeCard';
 import { namedReadOnly, Requests, wordsAnswer } from '../ui/Requests';
@@ -548,6 +548,7 @@ function MakeHere({ org, places, department, pipeline, loose, making, setMaking,
 
 /* The machines short of disk space among what waits for people; a server from before sends none. */
 const lowMachines = (decisions: Decisions | null | undefined) => decisions?.machinesLow ?? [];
+const schemaFailures = (decisions: Decisions | null | undefined) => decisions?.copySchemaFailures ?? [];
 
 /* The tracker keeps the same task and goal cards across its views. */
 export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, onDecisionsChanged, selected, onOpenTask, onOpenGoal, onOpenAgent, onOpenOrchestrator, onHome }: Props) {
@@ -627,7 +628,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const waitsOnPeople = waitingOnPeople(otherWaits);
   const failures = all.filter(task => boardStatus(task) === 'failure');
   const machinesAway = decisions?.machinesAway ?? [];
-  const copySchemaFailures = decisions?.copySchemaFailures ?? [];
+  const copySchemaFailures = schemaFailures(decisions);
   const machinesLow = lowMachines(decisions);
   const pipeline = place.pipeline ? pipelines.find(p => p.id === place.pipeline) ?? null : null;
   /* The department where the person is: its work, or its goals. */
@@ -838,7 +839,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
               {section.kind === 'failures' && (
                 <>
                   <MachineAway machines={machinesAway} />
-                  {copySchemaFailures.map(card => <CopySchemaFailure key={card.id} card={card} />)}
+                  <CopySchemaFailures cards={copySchemaFailures} />
                   <MachineLow machines={machinesLow} />
                 </>
               )}
