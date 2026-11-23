@@ -107,7 +107,7 @@ export function checkFont(path: string, bytes: Buffer): void {
 
 /* Characters that never belong in plain text: controls other than line breaks and tabs, the ones that turn the direction
    of text, invisible ones and a byte order mark. */
-const NOT_PLAIN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f​-‏ -‮⁠-⁩﻿]/;
+const NOT_PLAIN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
 
 export function plainText(path: string, bytes: Buffer, limit: number = THEME_FILE_LIMITS.textBytes): string {
   if (bytes.length > limit) refuse('file_too_large', path);

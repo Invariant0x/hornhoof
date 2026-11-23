@@ -84,8 +84,8 @@ describe('the world of a theme archive', () => {
       expect(built.ok ? [] : built.errors, pack.id).toEqual([]);
       if (!built.ok) continue;
       expect(built.pack.id).toBe('t-1');
-      expect(built.pack.terrainRecipe.prepare).toBe(pack.terrainRecipe.prepare);
-      expect(built.pack.terrainRecipe.tileKinds).toEqual(pack.terrainRecipe.tileKinds);
+      expect(built.pack.terrainRecipe?.prepare).toBe(pack.terrainRecipe?.prepare);
+      expect(built.pack.terrainRecipe?.tileKinds).toEqual(pack.terrainRecipe?.tileKinds);
       expect(built.pack.art?.baseUrl).toBe(pack.art ? BASE : undefined);
     }
   });
@@ -93,11 +93,13 @@ describe('the world of a theme archive', () => {
   it('renames and recolours a recipe\'s tile kinds, and refuses a kind the recipe does not have', () => {
     const pack = registeredWorldPacks().find(one => one.id === 'dungeon')!;
     const data = dataOfWorldPack(pack);
-    const [first] = pack.terrainRecipe.tileKinds;
-    const recipe = (tiles: Raw) => ({ ...data, recipe: { use: pack.terrainRecipe.id, tiles } });
+    const shipped = pack.terrainRecipe!;
+    const [first] = shipped.tileKinds;
+    const recipe = (tiles: Raw) => ({ ...data, recipe: { use: shipped.id, tiles } });
     const built = worldPackOfData('t-1', recipe({ [first!.id]: { label: { en: 'Moss', ru: 'Мох' }, color: '#335533' } }), BASE);
-    expect(built.ok && built.pack.terrainRecipe.tileKinds[0]).toEqual({ ...first, label: { en: 'Moss', ru: 'Мох' }, color: '#335533' });
-    expect(worldPackOfData('t-1', recipe({ lava: { color: '#FF0000' } }), BASE)).toEqual({ ok: false, errors: [`recipe.tiles names "lava", a tile kind recipe ${pack.terrainRecipe.id} does not have`] });
+    expect(built.ok && built.pack.terrainRecipe?.tileKinds[0]).toEqual({ ...first, label: { en: 'Moss', ru: 'Мох' }, color: '#335533' });
+    /* The dungeon has a river of lava; a meadow it has not. */
+    expect(worldPackOfData('t-1', recipe({ meadow: { color: '#33AA33' } }), BASE)).toEqual({ ok: false, errors: [`recipe.tiles names "meadow", a tile kind recipe ${shipped.id} does not have`] });
     expect(worldPackOfData('t-1', recipe({ [first!.id]: { color: 'red' } }), BASE)).toEqual({ ok: false, errors: [`recipe.tiles.${first!.id}.color needs #RRGGBB`] });
     expect(worldPackOfData('t-1', recipe({ [first!.id]: { buildable: false } }), BASE)).toEqual({ ok: false, errors: [`recipe.tiles.${first!.id} has an unknown field "buildable"`] });
   });

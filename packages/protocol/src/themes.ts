@@ -61,7 +61,7 @@ export const THEME_FILE_LIMITS = {
 
 /* The parts of the interface a kit may paint, by the names the screens draw them under (docs/theme-archive.md, 3.3),
    and the colours it may set beside them. A kit names no other part or colour. Preliminary: from draft 0.3 of the
-   Egypt UI kit (#1970), compared again with its 1.0. */
+   Egypt UI kit (#1970), 44 parts, compared again with its 1.0. */
 export const THEME_KIT_SLOTS = [
   /* Frames, nine-sliced. */
   'dialog', 'window', 'drawer', 'menu', 'card', 'table', 'plaque-frame', 'tile',

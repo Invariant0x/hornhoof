@@ -83,8 +83,9 @@ export function worldPackOfData(id: string, raw: unknown, baseUrl: string): Buil
    chooses its empty tiles by code cannot be written as data. */
 export function dataOfWorldPack(pack: WorldPackManifest): Record<string, unknown> {
   if (pack.resolveEmptyTileId) throw new Error(`World pack "${pack.id}" chooses its empty tiles by code, which a world written as data cannot.`);
-  if (!shippedRecipe(pack.terrainRecipe.id)) throw new Error(`World pack "${pack.id}" uses recipe "${pack.terrainRecipe.id}", which Hornhoof does not ship.`);
   const { terrainRecipe, art } = pack;
+  if (!terrainRecipe) throw new Error(`World pack "${pack.id}" has no map recipe, which a world written as data names.`);
+  if (!shippedRecipe(terrainRecipe.id)) throw new Error(`World pack "${pack.id}" uses recipe "${terrainRecipe.id}", which Hornhoof does not ship.`);
   const fields = Object.fromEntries(Object.entries(pack).filter(([key]) => FIELDS.includes(key) && key !== 'art'));
   const tiles = Object.fromEntries(terrainRecipe.tileKinds.map(kind => [kind.id, { label: { en: kind.label.en, ru: kind.label.ru }, color: kind.color }]));
   const catalog = art ? { art: Object.fromEntries(Object.entries(art).filter(([key]) => key !== 'baseUrl')) } : {};
