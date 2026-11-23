@@ -42,13 +42,17 @@ it('turns the refusals kept as failed runs into refused ones, and leaves every r
   await run(592, 'work'); await part(592, 1, { status: 'failed', error: 'failed', exit: null, started: true, tail: `$ npm test\n${REFUSAL}` });
   /* 593: the words first, and more after them: not the guard's refusal alone. */
   await run(593, 'work'); await part(593, 1, { status: 'failed', error: 'failed', exit: null, started: true, tail: `${REFUSAL}\nkilled` });
+  /* 594: the guard's sentence alone, as a node before the mark wrote it. */
+  await run(594, 'work'); await part(594, 1, { ...refused, tail: REFUSAL.slice(REFUSAL.indexOf('\n') + 1) });
+  /* 595: a first line that only looks like the mark: compared as it is, not as a pattern. */
+  await run(595, 'work'); await part(595, 1, { ...refused, tail: REFUSAL.replace('run_tests', 'runXtests') });
 
   await migrate(db, { migrationsFolder: MIGRATIONS });
   await migrate(db, { migrationsFolder: MIGRATIONS });
 
   expect((await db.execute(sql`select number, status from test_runs order by number`)).rows).toEqual([
     { number: 587, status: 'refused' }, { number: 588, status: 'refused' }, { number: 589, status: 'failed' }, { number: 590, status: 'failed' }, { number: 591, status: 'failed' },
-    { number: 592, status: 'failed' }, { number: 593, status: 'failed' },
+    { number: 592, status: 'failed' }, { number: 593, status: 'failed' }, { number: 594, status: 'refused' }, { number: 595, status: 'failed' },
   ]);
   expect((await db.execute(sql`select r.number, p.part, p.status, p.error from test_parts p join test_runs r on r.id = p.run_id order by r.number, p.part`)).rows).toEqual([
     { number: 587, part: 1, status: 'refused', error: 'refused' },
@@ -59,5 +63,7 @@ it('turns the refusals kept as failed runs into refused ones, and leaves every r
     { number: 591, part: 1, status: 'failed', error: 'no_machine' },
     { number: 592, part: 1, status: 'failed', error: 'failed' },
     { number: 593, part: 1, status: 'failed', error: 'failed' },
+    { number: 594, part: 1, status: 'refused', error: 'refused' },
+    { number: 595, part: 1, status: 'failed', error: 'failed' },
   ]);
 });
