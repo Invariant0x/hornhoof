@@ -67,8 +67,9 @@ describe('silence measured by signs of life', () => {
     expect(ended).toMatchObject({ status: 'failed', error: 'stale', failure: stale.failure });
     expect(ended.tail).toBe(lines.slice(-200).join('\n'));
     expect(ended.tail).not.toContain('line 1\n');
+    /* The turn gave way because its task moved on: the job keeps the evidence, and the card shows no failure (#1953). */
     const card = (await c.app.inject({ url: `/api/agents/${c.agent.id}`, ...c.as(c.ceo) })).json();
-    expect(card.failure).toMatchObject({ text: stale.failure!.text, tail: ended.tail });
+    expect(card.failure).toBeNull();
   });
 
   it('says when a running stale turn never reported its program state or a sign of life', async () => {

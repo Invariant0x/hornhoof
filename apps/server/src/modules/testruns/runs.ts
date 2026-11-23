@@ -164,7 +164,6 @@ function refusedAccount(run: Run, parts: Part[]): string {
 /* Hornhoof's account of a run that ended: each part, where it ran and how long, the end of what failed, and the files
    on the task. */
 function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set<string>): string {
-  if (run.status === 'refused') return refusedAccount(run, parts);
   const lines = [`${named(run)} ${run.kind === 'work' && run.status === 'passed' ? 'is done' : run.status} after ${took((run.finishedAt ?? new Date()).getTime() - run.createdAt.getTime())}.${pinLine(run)}`, ...scopeLines(run), ...reuseLines(run.fileCache, parts)];
   for (const p of parts) {
     const where = p.machineName ? ` on ${p.machineName}` : '';
@@ -453,7 +452,8 @@ async function recordRunEnd(ctx: Ctx, runId: string, parts: Part[], status: 'pas
     const run = await closeFileCache(tx, ended);
     const files = await tx.select(only(attachments, 'name')).from(attachments).where(and(eq(attachments.taskId, run.taskId), filesOf(run)));
     const marked = await keepMark(tx, run, task, mark);
-    return tellEnd(tx, run, task, account(run, task, parts, new Set(files.map(l => l.name!))) + marked, true);
+    const said = run.status === 'refused' ? refusedAccount(run, parts) : account(run, task, parts, new Set(files.map(l => l.name!)));
+    return tellEnd(tx, run, task, said + marked, true);
   });
 }
 

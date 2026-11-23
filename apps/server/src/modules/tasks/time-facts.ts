@@ -109,6 +109,25 @@ async function failedTurns(db: Ctx['db'], open: TimedTask[], since: Map<string, 
 
 export type WaitNames = { agent(id: string): string | undefined; task(id: string): number | undefined };
 
+type StuckAsk = { triage: string | null; at: Date };
+
+/* An agent stuck on its task asked for help: the task fails until someone answers. The first open ask of each task counts. */
+async function stuckAsks(db: Ctx['db'], openIds: string[]): Promise<Map<string, StuckAsk>> {
+  if (!openIds.length) return new Map();
+  const asks = await db.select({ taskId: requests.taskId, triage: requests.triageAgentId, at: requests.createdAt }).from(requests)
+    .where(and(inArray(requests.taskId, openIds), eq(requests.kind, 'stuck'), eq(requests.status, 'open'))).orderBy(asc(requests.createdAt));
+  return asks.reduce((byTask, ask) => (byTask.has(ask.taskId) ? byTask : byTask.set(ask.taskId, ask)), new Map<string, StuckAsk>());
+}
+
+/* The failures of a task that need someone: its holder's last turn failed, or an agent stuck on it asked for help. */
+function failureFacts(turn: Date | undefined, asked: StuckAsk | undefined, names: WaitNames): WaitFact[] {
+  const who = (id: string): Who => ({ kind: 'agent', id, name: names.agent(id) ?? '' });
+  return [
+    ...(turn ? [{ kind: 'external' as const, who: null, reason: null, since: turn.toISOString(), failure: 'turn' as const }] : []),
+    ...(asked ? [{ kind: 'external' as const, who: asked.triage ? who(asked.triage) : null, reason: null, since: asked.at.toISOString(), failure: 'stuck' as const }] : []),
+  ];
+}
+
 /* The facts of every task at once. The task lookup exposes only prerequisites this reader sees. */
 export async function timeFacts(db: Ctx['db'], rows: TimedTask[], waits: (t: TimedTask) => TaskWait[], names: WaitNames, now = Date.now()): Promise<Map<string, TimeFacts>> {
   if (!rows.length) return new Map();
@@ -137,10 +156,7 @@ export async function timeFacts(db: Ctx['db'], rows: TimedTask[], waits: (t: Tim
   const latestRuns = (openIds.length ? await db.selectDistinctOn([testRuns.taskId, testRuns.kind], runFields).from(testRuns)
     .where(and(inArray(testRuns.taskId, openIds), inArray(testRuns.status, ['running', 'passed', 'failed']))).orderBy(testRuns.taskId, testRuns.kind, desc(testRuns.number)) : [])
     .reduce((byTask, run) => byTask.set(run.taskId, [...(byTask.get(run.taskId) ?? []), run]), new Map<string, typeof runs>());
-  /* An agent stuck on its task asked for help: the task fails until someone answers. */
-  const stuck = (openIds.length ? await db.select({ taskId: requests.taskId, triage: requests.triageAgentId, at: requests.createdAt }).from(requests)
-    .where(and(inArray(requests.taskId, openIds), eq(requests.kind, 'stuck'), eq(requests.status, 'open'))).orderBy(asc(requests.createdAt)) : [])
-    .reduce((byTask, ask) => byTask.has(ask.taskId) ? byTask : byTask.set(ask.taskId, ask), new Map<string, { triage: string | null; at: Date }>());
+  const stuck = await stuckAsks(db, openIds);
   const open = new Set(openIds);
   const turnsFailed = await failedTurns(db, rows.filter(t => open.has(t.id)), sinceByTask);
   const byRun = new Map(runs.map(r => [r.id, r]));
@@ -199,10 +215,7 @@ export async function timeFacts(db: Ctx['db'], rows: TimedTask[], waits: (t: Tim
       if (latest.status === 'failed' && at < (sinceByTask.get(task.id) ?? task.createdAt)) continue;
       facts.push(runFact(latest, at.toISOString()));
     }
-    const turn = turnsFailed.get(task.id);
-    if (turn) facts.push({ kind: 'external', who: null, reason: null, since: turn.toISOString(), failure: 'turn' });
-    const asked = stuck.get(task.id);
-    if (asked) facts.push({ kind: 'external', who: asked.triage ? { kind: 'agent', id: asked.triage, name: names.agent(asked.triage) ?? '' } : null, reason: null, since: asked.at.toISOString(), failure: 'stuck' });
+    facts.push(...failureFacts(turnsFailed.get(task.id), stuck.get(task.id), names));
     if (external) {
       const on = external.on;
       const owner = owners.get(task.companyId);

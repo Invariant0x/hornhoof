@@ -54,7 +54,7 @@ export async function agentFailureStates(ctx: Ctx, companyId: string, agentIds: 
     const before = next?.continueOf ? history.get(next.continueOf) : undefined;
     const retry = before?.failure && passing(before.failure)
       ? { attempt: await passingAttempts(ctx, before, history), max: RETRY_MINUTES.length, at: Number(next?.notBefore), kind: before.failure.kind } : null;
-    const failure = ended && turnFailed(ended, goesOn) ? lastFailureOf(ended) : null;
+    const failure = failureShown(ended, goesOn);
     return [id, { retry, failure, obsolete: obsolete ? { at: +(obsolete.finishedAt === null ? obsolete.createdAt : obsolete.finishedAt) } : null }] as const;
   })));
 }
@@ -78,6 +78,9 @@ async function continuedTurns(db: Ctx['db'], companyId: string, ended: Pick<Job,
    on by itself. */
 export const turnFailed = (job: Pick<Job, 'id' | 'status' | 'error' | 'failure'>, continued: ReadonlySet<string>): boolean =>
   job.status === 'failed' && !!job.failure && !NO_FAILURE.includes(job.error ?? '') && (!continued.has(job.id) || NEEDS_OWNER.has(job.failure.kind));
+
+/* The failure an agent's card shows: its last ended turn's, when that turn failed in a way that needs someone. */
+const failureShown = (ended: Job | undefined, continued: ReadonlySet<string>): LastFailure | null => (ended && turnFailed(ended, continued) ? lastFailureOf(ended) : null);
 
 export function lastFailureOf(ended: Job | undefined): LastFailure | null {
   if (ended?.status !== 'failed' || !ended.failure) return null;
