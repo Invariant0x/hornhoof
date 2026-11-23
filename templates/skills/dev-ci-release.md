@@ -1,7 +1,5 @@
 ---
 id: dev-ci-release
-title: { en: "Release a version", ru: "Выпустить версию" }
-description: { en: "Prepares an authorized version from its exact candidate, checks, approval and rollback evidence.", ru: "Готовит согласованный выпуск по точному коммиту, проверкам, одобрению и доказанному плану возврата." }
 kind: procedure
 sources: [addyosmani/agent-skills skills/ci-cd-and-automation/SKILL.md, wshobson/agents plugins/cicd-automation/skills/deployment-pipeline-design/SKILL.md, openai/skills skills/.curated/gh-fix-ci/SKILL.md]
 ---

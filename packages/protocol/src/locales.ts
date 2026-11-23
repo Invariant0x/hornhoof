@@ -104,7 +104,7 @@ export function localeOfHeader(header: string | undefined, registry: readonly Lo
 }
 
 /* A text in as many languages as it has been written in; English is always there, and is what a missing one reads as. */
-export type Texts = { readonly en: string } & { readonly [id: string]: string | undefined };
+export type Texts = { en: string } & { [id: string]: string | undefined };
 
 export const say = (texts: Texts, language: string): string => texts[language] ?? texts[SOURCE_LOCALE];
 

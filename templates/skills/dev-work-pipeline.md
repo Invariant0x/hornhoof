@@ -1,7 +1,5 @@
 ---
 id: dev-work-pipeline
-title: { en: "Development pipeline", ru: "Конвейер разработки" }
-description: { en: "Item, batch, sample and code checks; read when laying out work or changing a check.", ru: "Проверки по штуке, пакетом, выборкой и кодом; читай при раздаче работы или смене проверки." }
 kind: procedure
 sources: []
 ---

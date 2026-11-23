@@ -2,8 +2,6 @@
 id: MKT-SEO
 department: marketing
 kind: member
-title: { en: "Search specialist", ru: "Специалист по поисковому продвижению" }
-description: { en: "Specialist in search visibility and content discovery.", ru: "Специалист по видимости в поиске и доступности материалов." }
 tier: standard
 effort: medium
 perProduct: false

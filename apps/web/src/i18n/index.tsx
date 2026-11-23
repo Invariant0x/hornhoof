@@ -1,5 +1,5 @@
 import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { isLocaleId, isPseudoLocaleId, LOCALES, localeInfo, matchLocale, SOURCE_LOCALE, type Direction } from '@hornhoof/protocol';
+import { isLocaleId, isPseudoLocaleId, LOCALES, localeInfo, matchLocale, say, SOURCE_LOCALE, type Direction, type Texts } from '@hornhoof/protocol';
 import { ApiFailure } from '../api';
 import { en, type Messages } from './en';
 import type { Language, ShippedLanguage } from './plural';
@@ -149,6 +149,14 @@ export function errorText(t: Messages, err: unknown): string {
 export function restoreEnded(t: Messages, status: { state: 'running' | 'done' | 'failed'; step: keyof Messages['backups']['steps']; line: string }): string {
   if (t === en && status.line) return status.line;
   return status.state === 'done' ? t.backups.done : t.backups.failedAt(t.backups.steps[status.step]);
+}
+
+/* A department as a message names it: a template department by its template's name in the reader's language, a typed
+   one as typed. */
+export function partyDepartment(t: Messages, language: string, d: { name: Texts; templateKey?: string | null } | null | undefined): string | undefined {
+  if (!d) return undefined;
+  const template = d.templateKey ? (t.templates as Record<string, { name: string } | undefined>)[d.templateKey] : undefined;
+  return template?.name ?? say(d.name, language);
 }
 
 /* A typed name as typed; a template department without one by its template's name in the person's language. */

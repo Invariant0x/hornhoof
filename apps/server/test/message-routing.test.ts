@@ -36,7 +36,7 @@ describe('message participants', () => {
   it('identifies a head by its stored id, role and department, and identifies Hornhoof notices', async () => {
     const { app, companyId, dev, head, worker } = await company();
     const letter = await appendEvent(app.ctx, { companyId, agentId: worker.id, kind: 'message', data: { text: 'Run the focused checks.', from: 'agent', by: head.id, name: head.name } });
-    expect(letter.message).toMatchObject({ from: { kind: 'agent', id: head.id, name: 'Hana', agentKind: 'head', role: { en: 'Head of development', ru: 'Руководитель разработки' }, department: { id: dev.id, name: { en: 'Development', ru: 'Разработка' } } }, to: { id: worker.id } });
+    expect(letter.message).toMatchObject({ from: { kind: 'agent', id: head.id, name: 'Hana', agentKind: 'head', role: { en: 'Head of development', ru: 'Руководитель разработки' }, department: { id: dev.id, name: { en: 'Development' }, templateKey: 'development' } }, to: { id: worker.id } });
     const notice = await appendEvent(app.ctx, { companyId, agentId: worker.id, kind: 'message', data: { text: 'A task is yours to do.' } });
     expect(notice.message).toMatchObject({ direction: 'in', from: { kind: 'hornhoof', id: null, name: 'Hornhoof', role: null, department: null }, to: { kind: 'agent', id: worker.id, role: { en: 'Backend engineer' } } });
   });
@@ -80,7 +80,7 @@ describe('message participants', () => {
     await db.update(departments).set({ name: 'Billing' }).where(eq(departments.id, dev.id));
     await db.update(agents).set({ roleKey: null }).where(eq(agents.id, worker.id));
     await db.update(people).set({ title: '' }).where(eq(people.id, person.id));
-    expect(await agentParty(app.ctx, companyId, worker.id)).toMatchObject({ role: null, department: { name: { en: 'Billing', ru: 'Billing' } } });
+    expect(await agentParty(app.ctx, companyId, worker.id)).toMatchObject({ role: null, department: { name: { en: 'Billing' }, templateKey: null } });
     expect(await personParty(app.ctx, companyId, person.id)).toMatchObject({ role: null });
     const otherCompany = '00000000-0000-4000-8000-000000000000';
     await expect(agentParty(app.ctx, otherCompany, worker.id)).rejects.toThrow('does not exist in this company');

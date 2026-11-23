@@ -1,7 +1,5 @@
 ---
 id: dev-testing-policy
-title: { en: "Testing policy", ru: "Политика тестирования" }
-description: { en: "Who runs which check on which commit, T1 to T13 for any project and language, and how the company applies the engineering rules.", ru: "Кто и на каком коммите запускает каждую проверку, правила T1-T13 для любого проекта и языка и как компания применяет инженерные правила." }
 kind: checklist
 sources: [unclebob/crapper README.md, unclebob/dryer README.md, unclebob/mutator README.md]
 ---

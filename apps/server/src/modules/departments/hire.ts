@@ -20,7 +20,7 @@ const CYRILLIC = /[\u0400-\u04FF]/;
    rather than a custom manual name typed by a person. */
 function isDefaultRoleName(name: string, role: Role): boolean {
   const clean = name.trim().toLowerCase();
-  for (const title of [role.title.en.trim().toLowerCase(), role.title.ru.trim().toLowerCase()]) {
+  for (const title of Object.values(role.title).map(text => (text ?? '').trim().toLowerCase())) {
     if (!title) continue;
     if (clean === title) return true;
     if (clean.startsWith(`${title} (`)) return true;

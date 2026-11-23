@@ -1,7 +1,5 @@
 ---
 id: ops-task-watch
-title: { en: "Watch the tasks", ru: "Следить за задачами" }
-description: { en: "On each timer round, goes over every agent, nudges the ones that are stuck, tells their head when a nudge did not help, tells a head when people of its department stand free while work waits, and closes the tasks whose work is done by the rule for their kind of result.", ru: "На каждом обходе по таймеру проверяет всех агентов, подталкивает застрявших, сообщает их руководителю, если это не помогло, сообщает руководителю, когда люди его отдела свободны, а работа ждет, и закрывает задачи, работа в которых сделана, по правилу для вида их результата." }
 kind: procedure
 grants: [agents, message_employee, restart_program, settle]
 ---

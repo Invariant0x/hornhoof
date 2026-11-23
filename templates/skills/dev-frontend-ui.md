@@ -1,7 +1,5 @@
 ---
 id: dev-frontend-ui
-title: { en: "User interface engineering", ru: "Разработка интерфейса" }
-description: { en: "Builds the interface users meet on the design system: every state, every input, every size.", ru: "Делает интерфейс, который встречает пользователь, на дизайн-системе: все состояния, все способы ввода, все размеры." }
 kind: checklist
 sources: [addyosmani/agent-skills skills/frontend-ui-engineering/SKILL.md, anthropics/skills skills/frontend-design/SKILL.md]
 ---

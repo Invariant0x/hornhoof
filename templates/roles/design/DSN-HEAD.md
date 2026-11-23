@@ -2,8 +2,6 @@
 id: DSN-HEAD
 department: design
 kind: head
-title: { en: "Head of design", ru: "Руководитель отдела дизайна" }
-description: { en: "Leader for product design and design quality.", ru: "Руководитель продуктового дизайна и качества проектирования." }
 tier: standard
 effort: medium
 perProduct: false

@@ -2,8 +2,6 @@
 id: SAL-HEAD
 department: sales
 kind: head
-title: { en: "Head of sales", ru: "Руководитель отдела продаж" }
-description: { en: "Leader for sales opportunities, forecasts and customer relationships.", ru: "Руководитель продаж, прогнозирования и отношений с клиентами." }
 tier: standard
 effort: medium
 perProduct: false

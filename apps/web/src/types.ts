@@ -439,7 +439,8 @@ export type MessageParty = {
   id: string | null;
   name: string;
   role: Lang | null;
-  department: { id: string; name: Lang } | null;
+  /* A typed name reads as typed in every language; a template department names its template, which the screen words in the reader's language. */
+  department: { id: string; name: Lang; templateKey?: string | null } | null;
   agentKind?: 'orchestrator' | 'head' | 'worker' | 'assistant';
 };
 

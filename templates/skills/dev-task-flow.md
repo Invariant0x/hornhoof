@@ -1,7 +1,5 @@
 ---
 id: dev-task-flow
-title: { en: "Code work through tasks", ru: "Работа с кодом через задачи" }
-description: { en: "What working through tasks adds when the work is code: a branch per task, commits, the evidence of a submission and the small-task check.", ru: "Что добавляет работа через задачи, когда работа это код: ветка на задачу, коммиты, доказательства при сдаче и проверка маленькой задачи." }
 kind: core
 ---
 You can deliver executable work through the required route with exact-version evidence.

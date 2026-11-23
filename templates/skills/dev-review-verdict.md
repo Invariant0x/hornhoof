@@ -1,7 +1,5 @@
 ---
 id: dev-review-verdict
-title: { en: "Review verdict", ru: "Вердикт ревью" }
-description: { en: "Records exact-candidate findings and keeps repairs with the current checking owner.", ru: "Фиксирует находки точного кандидата и оставляет исправления текущему владельцу проверки." }
 kind: gate
 sources: [obra/superpowers skills/requesting-code-review/code-reviewer.md]
 ---

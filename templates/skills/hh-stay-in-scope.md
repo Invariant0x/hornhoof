@@ -1,7 +1,5 @@
 ---
 id: hh-stay-in-scope
-title: { en: "Stay in scope", ru: "Оставаться в рамках задачи" }
-description: { en: "Does the task it was given with the access it was given, and nothing beyond.", ru: "Делает порученную задачу с выданным доступом и ничего сверх этого." }
 kind: core
 sources: [affaan-m/ECC skills/safety-guard/SKILL.md]
 ---

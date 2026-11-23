@@ -1,7 +1,5 @@
 ---
 id: hh-keep-tracker
-title: { en: "Keep the tracker clear", ru: "Держать трекер понятным" }
-description: { en: "Keeps the department's tasks, goals and pipelines clear for people: a short title, a why, a responsible person and a goal for each, current numbers, and the work itself left to the head.", ru: "Следит, чтобы задачи, цели и конвейеры отдела были понятны людям: у каждой короткое название, зачем она, ответственный и цель, цифры свежие, а саму работу раздает руководитель." }
 kind: procedure
 grants: [tracker]
 ---

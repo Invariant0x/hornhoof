@@ -1,7 +1,5 @@
 ---
 id: dev-migrations
-title: { en: "Database migrations", ru: "Миграции базы данных" }
-description: { en: "Changes the database schema safely, with existing data in mind: a shipped migration is never edited.", ru: "Безопасно меняет схему базы данных с учетом существующих данных: выпущенная миграция не правится." }
 kind: checklist
 sources: [affaan-m/ECC skills/database-migrations/SKILL.md]
 ---

@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { useLanguage, useT, type Language, type Messages } from '../i18n';
+import { partyDepartment, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { useOpenWindowTask } from '../screens/AgentWindowContext';
 import type { InboxLetter, InboxMode, InboxView, MessageParty } from '../types';
@@ -111,7 +111,7 @@ function senderOf(t: Messages, language: Language, p: MessageParty): { name: str
   if (p.kind === 'agent' && p.id === null) return { name: t.window.hiddenEmployee, about: null };
   const role = sayIf(p.role, language);
   const named = role && role.toLocaleLowerCase(language) !== p.name.toLocaleLowerCase(language) ? role : null;
-  const about = [named, sayIf(p.department?.name, language)].filter(Boolean).join(' · ');
+  const about = [named, partyDepartment(t, language, p.department)].filter(Boolean).join(' · ');
   return { name: p.name, about: about || null };
 }
 

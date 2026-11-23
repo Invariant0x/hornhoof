@@ -1,7 +1,5 @@
 ---
 id: sup-support-report
-title: { en: "Support report", ru: "Отчет поддержки" }
-description: { en: "Reports the support numbers of the turn and the customer themes the rest of the company should hear.", ru: "Сообщает показатели поддержки за ход и темы клиентов, которые должна услышать остальная компания." }
 kind: procedure
 sources: [msitarzewski/agency-agents support/support-analytics-reporter.md, msitarzewski/agency-agents product/product-feedback-synthesizer.md]
 ---

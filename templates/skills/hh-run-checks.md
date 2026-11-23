@@ -1,7 +1,5 @@
 ---
 id: hh-run-checks
-title: { en: "Run change checks and whole suites", ru: "Проверки изменения и полные наборы тестов" }
-description: { en: "Runs affected checks in the workspace and uses the shared runner for assigned release checks.", ru: "Запускает проверки изменений в рабочей папке, а проверки выпуска передает общему инструменту." }
 kind: core
 ---
 You can choose the checks that prove the assigned result.
