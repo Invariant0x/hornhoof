@@ -84,4 +84,23 @@ describe('the archive of a built-in theme with a kit', () => {
     writeFileSync(join(broken, 'kit.json'), JSON.stringify({ ...KIT, slots: { ...KIT.slots, tab: { file: 'tab@2x.webp', slice: '12 fill', width: '6px' } } }));
     expect(() => themeArchiveFiles('egypt', { kit: broken })).toThrow(/tab@2x\.webp/);
   });
+
+  /* A pack folder may come from someone else: a name in its kit.json or fonts.json is a flat file name of the form the
+     server takes, checked before anything is read, so no file outside the folder ends up in the archive. */
+  it('refuses a picture or font name that would reach outside its folder, before reading anything', () => {
+    const kitRoot = folder({
+      'pack/kit.json': JSON.stringify({ ...KIT, slots: { ...KIT.slots, tab: { file: '../outside.webp', slice: '12 fill', width: '6px' } } }),
+      'pack/btn@2x.webp': Buffer.from('btn picture'),
+      'pack/panel.weave@2x.webp': Buffer.from('panel picture'),
+      'outside.webp': Buffer.from('a file beside the pack folder'),
+    });
+    expect(() => themeArchiveFiles('egypt', { kit: join(kitRoot, 'pack') })).toThrow(/"\.\.\/outside\.webp"/);
+    const fontRoot = folder({
+      'fonts/fonts.json': JSON.stringify({ faces: [...FONTS.faces, { family: 'Sand Serif', file: '../outside.woff2', weight: 400, style: 'normal' }] }),
+      'fonts/sand-serif-latin-600.woff2': Buffer.from('wOF2 serif'),
+      'fonts/sand-sans-latin-400.woff2': Buffer.from('wOF2 sans'),
+      'outside.woff2': Buffer.from('a file beside the fonts folder'),
+    });
+    expect(() => themeArchiveFiles('egypt', { fonts: join(fontRoot, 'fonts') })).toThrow(/"\.\.\/outside\.woff2"/);
+  });
 });
