@@ -420,6 +420,7 @@ async function dragBy(page: Page, screen: Screen, dx: number, dy: number): Promi
     }
     return best && best.f * Math.hypot(dx, dy) >= 20 ? best : null;
   }, { canvas: CANVAS[screen], floating: FLOATING[screen], dx, dy });
+  if (screen === 'department') console.log(`TRACE start ${JSON.stringify(start)} for ${Math.round(dx)},${Math.round(dy)}`);
   if (!start) return false;
   const world = page.locator(`${CANVAS[screen]} .world`);
   const before = await world.boundingBox();
@@ -451,7 +452,9 @@ async function scrollToBlock(page: Page, screen: Screen, i: number): Promise<boo
       const top = Math.max(room.top, 0), bottom = Math.min(room.bottom, innerHeight);
       return [(room.left + room.right) / 2 - (r.left + r.right) / 2, (top + bottom) / 2 - (r.top + r.bottom) / 2];
     }, { blocks: BLOCKS[screen], canvas: CANVAS[screen], i });
-    if (Math.hypot(dx, dy) >= 1 && !(await dragBy(page, screen, dx, dy))) break;
+    const moved = Math.hypot(dx, dy) >= 1 ? await dragBy(page, screen, dx, dy) : null;
+    if (screen === 'department') console.log(`TRACE block ${i} turn ${turn} want ${Math.round(dx)},${Math.round(dy)} moved ${moved}`);
+    if (moved === false) break;
     if ((await inView(page, screen)).whole.includes(i)) return true;
   }
   return (await inView(page, screen)).whole.includes(i);
