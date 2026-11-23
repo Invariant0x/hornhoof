@@ -169,7 +169,15 @@ export type WorldArtCatalog = Readonly<{
   stagePictures?: Readonly<Partial<Record<ConstructionStageId, ArtStagePictureRule>>>;
   altar?: boolean;
   flags?: Readonly<{ district?: boolean; department?: boolean }>;
-  people?: Readonly<{ looks: readonly string[]; tiers: number }>;
+  people?: Readonly<{
+    looks: readonly string[];
+    tiers: number;
+    /* Looks whose prop is a large item (PackRoleLookSpec.largeItem). */
+    largeItemLooks?: readonly string[];
+    /* Sheets accepted before a rule of order v3 4.4 changed, by path, each naming its set: the check warns about them
+       instead of rejecting them, until a delivery that meets the rule replaces them. */
+    acceptedSheets?: Readonly<Record<string, string>>;
+  }>;
   loops?: readonly BuildingLoopKind[];
   /* Kinds whose stage pictures carry their own scaffolds and ramps: no kit module, crane or hoist goes over them. */
   ownConstruction?: readonly BuildingKind[];
@@ -289,7 +297,13 @@ export type DeclaredArtFile = Readonly<{
   alternatives?: readonly string[];
   /* For a cloak layer: the base sheet it must match pixel for pixel. */
   baseSheet?: string;
+  /* For a person's sheet holding an item that must not change hands: the directions it must draw. */
+  held?: HeldItemRule;
 }>;
+
+/* A sheet whose held item a mirror would move to the other hand (order v3 4.4): what it is, the directions it must
+   draw, and the accepted set it belongs to when it was accepted before the rule. */
+export type HeldItemRule = Readonly<{ what: string; need: readonly Direction8[]; accepted?: string }>;
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 
@@ -410,7 +424,8 @@ export function declaredArtFiles(pack: WorldPackManifest): readonly DeclaredArtF
         for (const anim of RESIDENT_ANIMATION_IDS) {
           for (const body of RESIDENT_BODIES) {
             const base = personSheetPath(look, tier, anim, false, body);
-            out.push({ path: base, role: 'person', passport: 'sheet', required: tier === 1 && body === 'male_slim' });
+            const held = heldItemRule(art.people, look, anim, base);
+            out.push({ path: base, role: 'person', passport: 'sheet', required: tier === 1 && body === 'male_slim', ...(held ? { held } : {}) });
             out.push({ path: personSheetPath(look, tier, anim, true, body), role: 'cloak', passport: 'none', required: false, baseSheet: base });
           }
         }
@@ -520,6 +535,41 @@ export function artLayerPath(picturePath: string, file: string): string {
   return picturePath.slice(0, picturePath.lastIndexOf('/') + 1) + file;
 }
 
+const CARRY_ANIMATIONS: ReadonlySet<ResidentAnimationId> = new Set(['carry', 'carry_back']);
+/* The four ways a resident faces on screen as it walks the grid's four steps (#1983). */
+const WALKED_DIRECTIONS: readonly Direction8[] = ['NE', 'SE', 'SW', 'NW'];
+const LARGE_ITEM_DIRECTIONS: Readonly<Partial<Record<ResidentAnimationId, readonly Direction8[]>>> = { walk: WALKED_DIRECTIONS, idle: ['SE', 'SW'] };
+
+/* Order v3 4.4 (Ivan, 23.11): a carry, and the walk of a look with a large item, draw every way a resident walks on
+   screen, NE, SE, SW and NW, and that look's idle SE and SW, so no mirrored row moves the item to the other hand.
+   Other sheets keep their drawn rows and a mirror. */
+function heldItemRule(people: NonNullable<WorldArtCatalog['people']>, look: string, anim: ResidentAnimationId, path: string): HeldItemRule | undefined {
+  const large = people.largeItemLooks?.includes(look) ?? false;
+  const need = CARRY_ANIMATIONS.has(anim) ? WALKED_DIRECTIONS : large ? LARGE_ITEM_DIRECTIONS[anim] : undefined;
+  if (!need) return undefined;
+  const accepted = people.acceptedSheets?.[path];
+  return { what: CARRY_ANIMATIONS.has(anim) ? anim : `${anim} of a look with a large item`, need, ...(accepted ? { accepted } : {}) };
+}
+
+/* "SE and SW", "NE, SE, SW and NW". */
+function listOf(items: readonly string[]): string {
+  return items.length < 3 ? items.join(' and ') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
+}
+
+/* A sheet missing a direction its held item needs: an error, or a named warning for a set accepted before the rule. */
+function checkHeldItem(path: string, entry: ArtIndexEntry, rule: HeldItemRule, errors: string[], warnings: string[]): void {
+  const drawn = (entry.passport as SheetPassport | undefined)?.directions ?? DIRECTION_ROWS;
+  const missing = rule.need.filter(d => !drawn.includes(d));
+  if (missing.length === 0) return;
+  if (rule.accepted) {
+    warnings.push(
+      `${path}: ${rule.what} lacks ${listOf(missing)}: the accepted set ${rule.accepted} stays in play until its export in ${listOf(rule.need)} replaces it (order v3 4.4)`,
+    );
+  } else {
+    errors.push(`${path}: ${rule.what} must be drawn in ${listOf(rule.need)} (order v3 4.4), it has ${drawn.join(', ')}`);
+  }
+}
+
 /* The rows a person's sheet must hold: one per drawn direction it names, five without the field; its stride checked too. */
 function personRows(path: string, entry: ArtIndexEntry, errors: string[]): number {
   checkStride(path, entry, errors);
@@ -624,6 +674,7 @@ export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtI
       }
     } else if (slot.passport === 'sheet') {
       checkSheet(path, entry, slot.role === 'person' ? personRows(path, entry, errors) : null, errors);
+      if (slot.held) checkHeldItem(path, entry, slot.held, errors, warnings);
     } else if (slot.role === 'cloak' && slot.baseSheet) {
       const base = index.files[slot.baseSheet];
       if (!base) {

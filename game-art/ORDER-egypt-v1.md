@@ -438,15 +438,17 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 
 | Animation | Drawn | Mirrored |
 |---|---|---|
-| `carry` (`carry_back` is the same sheet as `carry`), every set | all 8: N, NE, E, SE, S, SW, W, NW | none |
-| `walk` of a look with a big prop (staff, banner, spear with shield, jar, gong, mattock) | all 8 | none |
-| `walk` of any other look | N, NE, E, SE, S | SW, W, NW |
-| `idle`: standing by the home, facing the viewer | SE | SW |
+| `carry` (`carry_back` is the same sheet as `carry`), every set | NE, SE, SW, NW | none |
+| `walk` of a look with a large item (staff, banner, spear with shield, water jar, gong, hoe) | NE, SE, SW, NW | none |
+| `walk` of any other look, small prop or empty hands | NE, SE | NW, SW |
+| `idle`: standing by the home, facing the viewer | SE; SE and SW for a look with a large item | SW; none with a large item |
 | `build`: facing the front wall of the building | NE | NW |
 | `sleep`: lying along one axis | SE | SW |
 | `pray`, `sad_sit`: facing the camera | S | none, shown as drawn in every direction |
 | `inspect`, `write`, `carve`, `guard` and the like, later | one | its mirror |
 
+* A resident walks the grid's four steps, which show on screen as NE, SE, SW and NW (#1983), so walking needs only those rows. Sheets already made with N, E and S rows keep them: the engine shows any drawn row.
+* The god's caravan (Design's checklist G2: animals, drivers and sacks) counts as a large load: its walk is drawn in NE, SE, SW and NW too. The engine has no caravan slot yet; the check takes it with the same rule when its slot comes.
 * A builder always faces a front wall: the engine sets no build place at a back wall, where NE and NW would not fit.
 * Role animations are needed only for the looks that do that work: `inspect` for inspectors, `direct` for overseers, `write` for scribes, and so on.
 
@@ -461,7 +463,7 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 
 ### 4.4 Sheet layout and passport
 
-* **Rows, top to bottom:** the directions named in the passport's `directions`, in that order, chosen from N, NE, E, SE, S, SW, W, NW (v3). Without the field the sheet has 5 rows, N, NE, E, SE, S, as before. For each facing the engine shows its drawn row when there is one; only a direction that is not drawn is mirrored (SE, E and NE for SW, W and NW), and otherwise the nearest drawn direction or its mirror shows, a drawn row winning at the same distance. A mirrored row moves a carried item to the other hand, which Ivan does not accept for big items (23.11), so `carry` and the `walk` of a look with a big prop are drawn in all 8 directions; `"directions": ["SE", "SW"]` shows both as drawn.
+* **Rows, top to bottom:** the directions named in the passport's `directions`, in that order, chosen from N, NE, E, SE, S, SW, W, NW (v3). Without the field the sheet has 5 rows, N, NE, E, SE, S, as before. For each facing the engine shows its drawn row when there is one; only a direction that is not drawn is mirrored (SE, E and NE for SW, W and NW), and otherwise the nearest drawn direction or its mirror shows, a drawn row winning at the same distance. A mirrored row moves a carried item to the other hand or shoulder, which Ivan does not accept (23.11, replacing the earlier acceptance), so `carry` and the `walk` of a look with a large item are drawn in NE, SE, SW and NW, `"directions": ["NE", "SE", "SW", "NW"]`, and that look's `idle` in SE and SW, `"directions": ["SE", "SW"]`, both shown as drawn. Everything else draws only what it needs and the engine mirrors the rest.
 * **Facing poses** `pray` and `sad_sit` (v3): one row, `"directions": ["S"]`, shown as drawn whatever way the resident faces, never mirrored.
 * **`headAnchor`** (v3, `sleep` only, optional): the point in the frame above the head where `sleep_z` stands, e.g. `[60, 200]` for a figure lying along the ground. Without it the engine uses the standing head, 146 px above the `anchor`.
 * **Frames** run left to right, every frame the same size. The feet sit on the same `anchor` in every frame, so walking does not slide.
@@ -526,11 +528,12 @@ A rejected file keeps its placeholder; it never breaks the city.
 * A sheet whose width is not `frameW * frames`.
 * A person's sheet whose height is not `frameH` times the number of its `directions` (5 without the field).
 * A `directions` entry other than N, NE, E, SE, S, SW, W or NW, or one named twice.
+* A `carry` sheet without NE, SE, SW and NW, or the `walk` of a look with a large item without them, or that look's `idle` without SE and SW.
 * An anchor outside one frame.
 * A cloak layer without its base sheet, or of another size.
 * An index for another pack or another contract version.
 
-It **warns**, without rejecting, about a file no slot names: the #1951 animations until they are wired, and a `night.png` (on hold, 3.13).
+It **warns**, without rejecting, about a file no slot names: the #1951 animations until they are wired, and a `night.png` (on hold, 3.13). It also warns, naming the set, about the tier 1 mason `carry` of `egypt-mason-t1-r1`, accepted in 5 rows before the rule above: it stays in play until its export in NE, SE, SW and NW replaces it.
 
 ### 5.3 What the check cannot see
 

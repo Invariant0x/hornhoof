@@ -32,6 +32,9 @@ export type PackRoleLookSpec = Readonly<{
   prop: RolePropKind;
   headgear: RoleHeadgearKind;
   insignia?: boolean;
+  /* Its prop is a large item held in one hand or on one shoulder (a staff, a banner, a jar): a mirrored row would move
+     it to the other side, so its walk is drawn in all 8 directions and its idle in SE and SW (order v3 4.4). */
+  largeItem?: boolean;
 }>;
 
 /* Building kinds the city engine places; a pack's layout rules and stage counts refer to them. */

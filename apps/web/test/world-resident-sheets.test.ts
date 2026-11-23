@@ -11,6 +11,7 @@ import {
   type ArtIndexEntry,
   type SheetPassport,
 } from '../src/world/art';
+import { WorldArtLibrary } from '../src/world/art-runtime';
 import type { CityBuilding } from '../src/world/city-layout';
 import { createConstructionSimulation, startBuildingConstruction, startBuildingDemolition, workSlotsForBuilding } from '../src/world/construction';
 import type { ResidentEntity } from '../src/world/residents';
@@ -189,5 +190,78 @@ describe('Builders face a front wall (#1975)', () => {
         }
       }
     }
+  });
+});
+
+/* Ivan, 23.11 (order v3 4.4): a mirrored row moves a held item to the other hand or shoulder, which shows at once. A
+   resident walking the grid faces NE, SE, SW or NW on screen, so a carry and the walk of a look with a large item draw
+   those four, and that look's idle SE and SW; the rest keep their drawn rows and a mirror. The tier 1 mason set accepted
+   before the rule keeps its 5-row carry with a named warning. */
+describe('Held items keep their hand: sheets drawn in the directions of 4.4 (#1983, Ivan 23.11)', () => {
+  const EIGHT = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  const WALKED = ['NE', 'SE', 'SW', 'NW'];
+  const errorsOf = (files: Record<string, ArtIndexEntry>) => validateArtIndex(EGYPT_WORLD_PACK, index(files)).errors;
+  const about = (errors: readonly string[], path: string) => errors.filter(e => e.startsWith(`${path}:`));
+
+  it('rejects a carry without NE, SE, SW and NW, for every look, and shows its drawn SW and W rows as drawn', () => {
+    const at = 'people/egypt-architect/tier_3/';
+    const errors = errorsOf({
+      [`${at}carry.png`]: sheet(8),
+      [`${at}female_full/carry.png`]: sheet(8, ['N', 'NE', 'E', 'SE', 'S', 'SW']),
+      [`${at}female_slim/carry.png`]: sheet(8, WALKED),
+      [`${at}male_heavy/carry.png`]: sheet(8, EIGHT),
+    });
+    expect(about(errors, `${at}carry.png`)).toEqual([`${at}carry.png: carry must be drawn in NE, SE, SW and NW (order v3 4.4), it has N, NE, E, SE, S`]);
+    expect(about(errors, `${at}female_full/carry.png`), 'no NW').toHaveLength(1);
+    expect(about(errors, `${at}female_slim/carry.png`)).toEqual([]);
+    expect(about(errors, `${at}male_heavy/carry.png`), 'rows already drawn in N, E and S stay').toEqual([]);
+    const four = index({ [`${at}carry.png`]: sheet(8, WALKED) });
+    const sw = resolveResidentArt(EGYPT_WORLD_PACK, four, resident({ pose: 'carrying_stone', facing: 'SW' }), 0)!;
+    expect([sw.layers[0]!.path, sw.layers[0]!.frame.y, sw.mirror]).toEqual([`${at}carry.png`, 256 * WALKED.indexOf('SW'), false]);
+    const eight = index({ [`${at}carry.png`]: sheet(8, EIGHT) });
+    const w = resolveResidentArt(EGYPT_WORLD_PACK, eight, resident({ pose: 'carrying_stone', facing: 'W' }), 0)!;
+    expect([w.layers[0]!.frame.y, w.mirror]).toEqual([256 * EIGHT.indexOf('W'), false]);
+  });
+
+  it('rejects the walk of a look with a large item without NE, SE, SW and NW and its idle without SE and SW; other looks keep a mirror', () => {
+    const overseer = 'people/egypt-overseer/tier_1/';
+    const hoe = 'people/egypt-canal-builder/tier_1/';
+    const errors = errorsOf({
+      [`${overseer}walk.png`]: sheet(8),
+      [`${overseer}idle.png`]: sheet(4, ['SE']),
+      [`${hoe}walk.png`]: sheet(8),
+      [`${hoe}idle.png`]: sheet(4, ['SW', 'SE']),
+    });
+    expect(about(errors, `${overseer}walk.png`)).toEqual([`${overseer}walk.png: walk of a look with a large item must be drawn in NE, SE, SW and NW (order v3 4.4), it has N, NE, E, SE, S`]);
+    expect(about(errors, `${overseer}idle.png`)).toEqual([`${overseer}idle.png: idle of a look with a large item must be drawn in SE and SW (order v3 4.4), it has SE`]);
+    expect(about(errors, `${hoe}walk.png`), 'the hoe is a large item').toHaveLength(1);
+    expect(about(errors, `${hoe}idle.png`)).toEqual([]);
+    expect(about(errorsOf({ [`${overseer}walk.png`]: sheet(8, WALKED), [`${overseer}idle.png`]: sheet(4, ['SE', 'SW']) }), overseer.slice(0, -1))).toEqual([]);
+    /* A scroll, a key or a workshop tool is small: NE and SE drawn and a mirror, or the 5 rows of sheets already made. */
+    for (const look of ['egypt-architect', 'egypt-scribe', 'egypt-keykeeper', 'egypt-machine-keeper', 'egypt-mason']) {
+      const at = `people/${look}/tier_2/`;
+      const files = { [`${at}walk.png`]: sheet(8, ['NE', 'SE']), [`${at}female_full/walk.png`]: sheet(8), [`${at}idle.png`]: sheet(4, ['SE']) };
+      expect(about(errorsOf(files), at.slice(0, -1)), look).toEqual([]);
+    }
+    const large = Object.values(EGYPT_WORLD_PACK.roleLooks!).filter(l => l.largeItem).map(l => l.prop);
+    expect(new Set(large)).toEqual(new Set(['staff', 'banner', 'spear_shield', 'water_jar', 'gong', 'tool']));
+  });
+
+  it('keeps the accepted mason carry egypt-mason-t1-r1 in play with a named warning, not an error, until its new export', async () => {
+    const carry = 'people/egypt-mason/tier_1/carry.png';
+    const old = index({ [carry]: sheet(8) });
+    const report = validateArtIndex(EGYPT_WORLD_PACK, old);
+    expect(about(report.errors, carry)).toEqual([]);
+    expect(report.warnings).toContain(
+      `${carry}: carry lacks SW and NW: the accepted set egypt-mason-t1-r1 stays in play until its export in NE, SE, SW and NW replaces it (order v3 4.4)`,
+    );
+    /* The game, the film and the pilot still draw it: the runtime keeps the sheet. */
+    const lib = await WorldArtLibrary.load(EGYPT_WORLD_PACK, async () => ({ ok: true, json: async () => old }));
+    expect(lib.index?.files[carry]).toBeDefined();
+    lib.destroy();
+    /* The new export passes with no warning; the grace covers that one file only. */
+    const fresh = validateArtIndex(EGYPT_WORLD_PACK, index({ [carry]: sheet(8, WALKED) }));
+    expect(fresh.warnings.filter(w => w.startsWith(carry))).toEqual([]);
+    expect(about(errorsOf({ 'people/egypt-mason/tier_2/carry.png': sheet(8) }), 'people/egypt-mason/tier_2/carry.png')).toHaveLength(1);
   });
 });

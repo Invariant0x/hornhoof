@@ -24,6 +24,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
     trimColor: '#F2C14E',
     prop: 'staff',
     headgear: 'crown',
+    largeItem: true,
     insignia: true,
   },
   head: {
@@ -33,6 +34,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
     trimColor: '#D69A3A',
     prop: 'staff',
     headgear: 'circlet',
+    largeItem: true,
     insignia: true,
   },
   guard_captain: {
@@ -42,6 +44,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
     trimColor: '#C44536',
     prop: 'staff',
     headgear: 'helm',
+    largeItem: true,
     insignia: true,
   },
   architect: {
@@ -92,6 +95,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
     trimColor: '#D97B29',
     prop: 'gong',
     headgear: 'helm',
+    largeItem: true,
   },
   inspector_scout: {
     id: 'egypt-scout',
@@ -108,6 +112,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
     trimColor: '#2E8BC0',
     prop: 'water_jar',
     headgear: 'cap',
+    largeItem: true,
   },
   caravan_runner: {
     id: 'egypt-caravan-messenger',
@@ -116,6 +121,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
     trimColor: '#2F9E8F',
     prop: 'banner',
     headgear: 'hood',
+    largeItem: true,
   },
   keykeeper: {
     id: 'egypt-keykeeper',
@@ -140,6 +146,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
     trimColor: '#B84A39',
     prop: 'spear_shield',
     headgear: 'helm',
+    largeItem: true,
   },
   red_team: {
     id: 'egypt-skirmisher',
@@ -148,6 +155,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
     trimColor: '#E05D44',
     prop: 'spear_shield',
     headgear: 'hood',
+    largeItem: true,
   },
   road_builder: {
     id: 'egypt-canal-builder',
@@ -156,6 +164,8 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
     trimColor: '#5C8D6B',
     prop: 'tool',
     headgear: 'none',
+    /* Its tool is a hoe, a large item (order v3 4.4). */
+    largeItem: true,
   },
   turnkey_specialist: {
     id: 'egypt-royal-master',
@@ -164,6 +174,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
     trimColor: '#F2C14E',
     prop: 'banner',
     headgear: 'circlet',
+    largeItem: true,
     insignia: true,
   },
   day_laborer: {
