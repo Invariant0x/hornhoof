@@ -10,7 +10,7 @@ import { worldPackOfData } from '../world-packs/data-pack';
 import { forgetInstalledWorldPack, registerInstalledWorldPack } from '../world-packs/registry';
 
 type Face = Readonly<{ family: string; file: string; weight: number; style: 'normal' | 'italic'; unicodeRange?: string }>;
-export type InstalledThemeLook = Readonly<{ id: string; version: string; base: string; look: unknown; fonts: readonly Face[]; world: unknown }>;
+export type InstalledThemeLook = Readonly<{ id: string; version: string; base: string; look: unknown; fonts: readonly Face[]; kit: unknown; world: unknown }>;
 
 export const installedThemes = async (): Promise<InstalledThemeView[]> => (await api.get<{ themes: InstalledThemeView[] }>('/api/themes')).themes;
 

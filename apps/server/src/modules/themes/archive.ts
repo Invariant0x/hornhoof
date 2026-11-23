@@ -5,6 +5,7 @@ import type { WorldPackBehaviorSpec } from '@hornhoof/protocol/world';
 import { z } from 'zod';
 import { checkFont, jsonOf, kindOf, MEDIA, pictureOf, plainText, type FileKind, type MediaType } from './files.js';
 import { archiveWorldSkills } from './skills.js';
+import { checkSvg } from './svg.js';
 import { ArchiveRefused, openZip, type ZipFile, type ZipSource } from './zip.js';
 
 /* The whole check of a theme archive (docs/theme-archive.md): the zip, then each file by its place and its bytes, then
@@ -46,7 +47,7 @@ const Fonts = z.strictObject({ faces: z.array(FontFace).min(1).max(THEME_FILE_LI
 
 const LENGTHS = /^(?:(?:\d{1,4}(?:\.\d{1,3})?(?:px|%)|0|auto)(?:\s+|$)){1,4}$/;
 const KitSlot = z.strictObject({
-  file: z.string().regex(/^[A-Za-z0-9._@-]+\.(?:png|webp)$/, 'a .png or .webp file of ui/kit'),
+  file: z.string().regex(/^[A-Za-z0-9._@-]+\.(?:png|webp|svg)$/, 'a .png, .webp or .svg file of ui/kit'),
   slice: z.string().regex(/^(?:\d{1,4}(?:\s+|$)){1,4}(?:fill)?$/, 'up to four whole numbers and an optional fill').optional(),
   width: z.string().regex(LENGTHS, 'up to four lengths in px or %').optional(),
   outset: z.string().regex(LENGTHS, 'up to four lengths in px or %').optional(),
@@ -151,9 +152,11 @@ async function kitOf(files: Reader, served: ServedFile[]): Promise<ThemeKit | nu
   if (unnamed) refuse('kit_bad', unnamed, 'no slot of ui/kit.json names it');
   for (const path of named) {
     if (!files.has(path)) refuse('file_missing', path, 'ui/kit.json names it');
-    const kind = path.endsWith('.png') ? 'png' : 'webp';
+    const kind = path.endsWith('.png') ? 'png' : path.endsWith('.webp') ? 'webp' : 'svg';
     const bytes = await files.read(path);
-    pictureOf(path, kind, bytes);
+    if (bytes.length > THEME_FILE_LIMITS.kitBytes) refuse('file_too_large', path);
+    if (kind === 'svg') checkSvg(path, plainText(path, bytes, THEME_FILE_LIMITS.kitBytes));
+    else pictureOf(path, kind, bytes);
     served.push(files.served(path, MEDIA[kind]));
   }
   return kit;

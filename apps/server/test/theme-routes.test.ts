@@ -48,6 +48,9 @@ describe('an uploaded theme', () => {
 
     const look = await app.inject({ url: '/api/themes/night-shift/look', ...as(wes) });
     expect(look.json()).toMatchObject({ id: 'night-shift', version: '1.0.0', base: BASE, fonts: [{ family: 'Night Sans', file: 'night-sans.woff2' }], world: null });
+    /* The kit as stored, whose pictures are served below base. */
+    expect(look.json().kit).toEqual({ slots: { 'panel-frame': { file: 'panel.png', slice: '8 8 8 8 fill', width: '8px' } } });
+    expect((await app.inject({ url: `${BASE}ui/kit/${look.json().kit.slots['panel-frame'].file}`, ...as(wes) })).headers['content-type']).toBe('image/png');
     expect(look.json().look.fonts.body).toEqual(['Night Sans', 'sans-serif']);
   });
 

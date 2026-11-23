@@ -13,7 +13,7 @@ ui/look.json            colours, fonts and corners of the interface
 ui/fonts.json           the font files and the faces they draw            optional
 ui/fonts/*.woff2                                                          optional
 ui/kit.json             painted interface parts                           optional, carried and checked, not drawn yet
-ui/kit/*.png|*.webp                                                       optional
+ui/kit/*.png|*.webp|*.svg                                                 optional
 ui/NOTES.md             notes on the skin for whoever changes it          optional
 world/world.json        the world map: ground, plants, buildings, residents, stages   only with an engine
 world/art/...           the world's art, as the world art contract asks              only with an engine
@@ -121,12 +121,18 @@ A kit is pictures of interface parts (frames, panels, buttons with their states,
 ```
 
 * A slot's name is 1 to 40 lower case letters, digits and `-`.
-* Its `file` is a PNG or WebP in `ui/kit/`.
+* Its `file` is a PNG, WebP or SVG in `ui/kit/`, of at most 2 MB.
 * `slice` is up to four whole numbers of picture pixels, with an optional `fill`.
 * `width`, `outset` and `size` are up to four lengths in `px` or `%`.
 * A kit colour is `#RRGGBB`.
 
-Anything else is refused, so a kit can never carry CSS.
+Anything else is refused, so a kit can never carry CSS. The screens get the kit as stored from `GET /api/themes/:id/look`, beside `base`: a slot's picture is served at `base` + `ui/kit/` + its `file`.
+
+An SVG of the kit is taken as a drawing only, and it is the one SVG a theme may hold (`.svg` anywhere else is refused as a page, and `.svgz` everywhere). It is one `<svg>` element of shapes (`path`, `rect`, `circle`, `ellipse`, `line`, `polyline`, `polygon`, `text`, `tspan`), groups and reuse (`g`, `defs`, `symbol`, `use`, `title`, `desc`), paint (`linearGradient`, `radialGradient`, `stop`, `pattern`), `clipPath`, `mask`, and `filter` with its `fe` primitives, with their geometry and presentation attributes. Refused, with `svg_unsafe` or `link_outside` and the element or attribute it is about:
+* any other element, among them `script`, `foreignObject`, `style`, `image`, `a` and the animation elements;
+* an event attribute (`on...`), a `style` attribute, or an attribute not named above, such as an editor's own;
+* an `href`, `xlink:href` or `url()` that is not `#id` of an element of the same drawing, also when written with character references;
+* a namespace other than SVG's and XLink's, a document type, an entity of its own, character data, a processing instruction other than the XML declaration, or text outside the drawing.
 
 ## 4. world/: the world map (engine iso2d)
 
@@ -239,6 +245,7 @@ Plain UTF-8 text, up to 64 KB, required. It covers everything in the archive. A 
 | A path | 200 characters, folders and names of Latin letters, digits, `.`, `_`, `-` and `@` |
 | A JSON file | 1 MB (`world/world.json` 2 MB, a passport 64 KB) |
 | A picture | PNG or WebP, up to 8192 px a side and 50 million pixels |
+| A picture of the kit | PNG, WebP or SVG, up to 2 MB |
 | A font | WOFF2, up to 2 MB, at most 24 |
 
 ## 9. What refuses an archive
@@ -246,7 +253,7 @@ Plain UTF-8 text, up to 64 KB, required. It covers everything in the archive. A 
 Each of these refuses the whole archive. The store names the reason and the file:
 * A zip that is not a plain zip: encrypted, split, ZIP64, or packed in a way other than stored or deflate.
 * A path that leaves the archive or hides what it is: an absolute path, `..`, a backslash, a drive letter, an empty part, a control character, a link, or two names that differ only in upper and lower case.
-* A file of a kind the archive has no place for, in particular any script or page (`.js`, `.mjs`, `.html`, `.svg`, `.css` and the like), or a file whose bytes are not what its name says.
+* A file of a kind the archive has no place for, in particular any script or page (`.js`, `.mjs`, `.html`, `.svg` outside the kit, `.css` and the like), a drawing of the kit with more than a drawing in it (3.3), or a file whose bytes are not what its name says.
 * A file over its limit, or one that unpacks to more than its header says.
 * JSON that is not of the shape this document gives, a key no part knows, or a value that reads as code (3.1).
 * A link to anything outside the archive.

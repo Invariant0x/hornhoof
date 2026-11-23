@@ -17,6 +17,8 @@ export const THEME_PROBLEMS = [
      too large, text that is not plain, JSON that is not JSON or not of its shape, a link out, a file a JSON names that is
      not there, or one file too many of a kind. */
   'file_script', 'file_place', 'file_bytes', 'image_too_large', 'text_not_plain', 'json_bad', 'json_shape', 'link_outside', 'file_missing', 'too_many_of_kind',
+  /* A drawing of the kit with more in it than shapes: a script, an event, a style sheet, a foreign object or the like. */
+  'svg_unsafe',
   /* The theme as a whole. */
   'theme_missing', 'license_missing', 'look_missing', 'engine_3d', 'engine_none_world', 'world_missing', 'same_version',
   /* Its parts, refused by the check of each with that check's own words in detail. */
@@ -46,6 +48,7 @@ export const THEME_FILE_LIMITS = {
   passportBytes: 64 * 1024,
   textBytes: 64 * 1024,
   fontBytes: 2 * 1024 * 1024,
+  kitBytes: 2 * 1024 * 1024,
   fonts: 24,
   imageSide: 8192,
   imagePixels: 50_000_000,

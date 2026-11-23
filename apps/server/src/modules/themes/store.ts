@@ -52,15 +52,16 @@ export async function installedThemes(db: Reader, companyId: string): Promise<In
   return rows.map(row => viewOf(row, previews.filter(file => file.themeId === row.themeId && file.path.startsWith('preview/')).map(file => file.path)));
 }
 
-/* What the screens need to put an installed theme on: its look, its fonts and its world, with where its files are. */
-export type InstalledThemeLook = Readonly<{ id: string; version: string; base: string; look: unknown; fonts: unknown; world: unknown }>;
+/* What the screens need to put an installed theme on: its look, its fonts, its kit and its world, with where its files
+   are: a kit picture is at base + ui/kit/ + its slot's file. */
+export type InstalledThemeLook = Readonly<{ id: string; version: string; base: string; look: unknown; fonts: unknown; kit: unknown; world: unknown }>;
 
 export async function installedThemeLook(db: Reader, companyId: string, themeId: string): Promise<InstalledThemeLook | null> {
   const [row] = await db
-    .select({ version: themes.version, look: themes.look, fonts: themes.fonts, world: themes.world })
+    .select({ version: themes.version, look: themes.look, fonts: themes.fonts, kit: themes.kit, world: themes.world })
     .from(themes)
     .where(and(eq(themes.companyId, companyId), eq(themes.themeId, themeId)));
-  return row ? { id: themeId, version: row.version, base: themeBase(themeId, row.version), look: row.look, fonts: row.fonts, world: row.world } : null;
+  return row ? { id: themeId, version: row.version, base: themeBase(themeId, row.version), look: row.look, fonts: row.fonts, kit: row.kit, world: row.world } : null;
 }
 
 export async function isInstalledTheme(db: Reader, companyId: string, themeId: string): Promise<boolean> {

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import type { ThemeProblem } from '@hornhoof/protocol/themes';
 import { describe, expect, it } from 'vitest';
 import { checkThemeArchive, type CheckedTheme } from '../src/modules/themes/archive.js';
@@ -124,6 +125,65 @@ describe('a theme archive is refused', () => {
       expect(await refusal(await change(await plainTheme()))).toMatchObject(problem);
     });
   }
+
+  /* A drawing of the kit (docs/theme-archive.md, 3.3): shapes, gradients, clips and filters, each reference within the
+     drawing itself. */
+  const DRAWING = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!-- A frame for a panel. -->',
+    '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 32 32" width="32" height="32">',
+    '  <defs><linearGradient id="sand" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E8C77A"/><stop offset="1" stop-color="#B8893E"/></linearGradient>',
+    '  <filter id="soft"><feGaussianBlur stdDeviation="0.5"/></filter><path id="edge" d="M0 0H32V32H0Z"/></defs>',
+    '  <title>Panel &amp; frame</title>',
+    '  <use xlink:href="#edge" fill="url(#sand)" filter="url(#soft)"/><rect x="4" y="4" width="24" height="24" rx="2" fill="none" stroke="#5A3E1B"/>',
+    '</svg>',
+  ].join('\n');
+  const drawn = async (svg: string, name = 'ui/kit/frame.svg') => ({
+    ...(await plainTheme()),
+    'ui/kit.json': JSON.stringify({ slots: { 'panel-frame': { file: 'panel.png', slice: '8 8 8 8 fill', width: '8px' }, 'panel-art': { file: 'frame.svg' } } }),
+    [name]: svg,
+  });
+  const inside = (more: string) => DRAWING.replace('</svg>', `${more}\n</svg>`);
+
+  it('takes a drawing of the kit, served as SVG', async () => {
+    const theme = await check(archiveOf(await drawn(DRAWING)));
+    expect(theme.kit?.slots['panel-art']).toEqual({ file: 'frame.svg' });
+    expect(served(theme)['ui/kit/frame.svg']).toBe('image/svg+xml');
+  });
+
+  const drawings: [string, string, Partial<ThemeProblem>][] = [
+    ['a script', inside('<script>alert(1)</script>'), { code: 'svg_unsafe', detail: '<script>' }],
+    ['a foreign object', inside('<foreignObject width="9" height="9"><div>x</div></foreignObject>'), { code: 'svg_unsafe', detail: '<foreignObject>' }],
+    ['an event', DRAWING.replace('<rect ', '<rect onload="alert(1)" '), { code: 'svg_unsafe', detail: 'rect onload' }],
+    ['an event of another namespace', DRAWING.replace('<rect ', '<rect xlink:onclick="alert(1)" '), { code: 'svg_unsafe', detail: 'rect xlink:onclick' }],
+    ['a link out', DRAWING.replace('xlink:href="#edge"', 'xlink:href="https://example.com/a.svg#edge"'), { code: 'link_outside', path: 'ui/kit/frame.svg' }],
+    ['a script as a link', DRAWING.replace('xlink:href="#edge"', 'href="javascript:alert(1)"'), { code: 'link_outside' }],
+    ['a script as a link in character references', DRAWING.replace('xlink:href="#edge"', 'href="&#106;avascript:alert(1)"'), { code: 'link_outside' }],
+    ['a paint from another address', DRAWING.replace('fill="url(#sand)"', 'fill="url(https://example.com/p.svg#sand)"'), { code: 'link_outside' }],
+    ['a paint from another host by its path', DRAWING.replace('fill="url(#sand)"', "fill=\"url('//example.com/p.svg#sand')\""), { code: 'link_outside' }],
+    ['a style sheet', inside('<style>rect{fill:red}</style>'), { code: 'svg_unsafe', detail: '<style>' }],
+    ['a style of its own', DRAWING.replace('<rect ', '<rect style="fill:red" '), { code: 'svg_unsafe', detail: 'rect style' }],
+    ['a picture inside it', inside('<image href="#edge" width="9" height="9"/>'), { code: 'svg_unsafe', detail: '<image>' }],
+    ['an animation that can change a link', inside('<set attributeName="href" to="javascript:alert(1)"/>'), { code: 'svg_unsafe', detail: '<set>' }],
+    ['a link element', inside('<a href="#edge"><rect width="1" height="1"/></a>'), { code: 'svg_unsafe', detail: '<a>' }],
+    ['a document type with an entity of its own', DRAWING.replace('<svg ', '<!DOCTYPE svg [<!ENTITY x "y">]>\n<svg '), { code: 'svg_unsafe' }],
+    ['character data', inside('<text><![CDATA[x]]></text>'), { code: 'svg_unsafe' }],
+    ['an entity XML does not know', DRAWING.replace('&amp;', '&nbsp;'), { code: 'svg_unsafe' }],
+    ['a second picture after the first', `${DRAWING}\n<svg xmlns="http://www.w3.org/2000/svg"></svg>`, { code: 'svg_unsafe' }],
+    ['an element never closed', DRAWING.replace('</svg>', ''), { code: 'svg_unsafe' }],
+    ['another namespace', DRAWING.replace('xmlns="http://www.w3.org/2000/svg"', 'xmlns="http://www.w3.org/1999/xhtml"'), { code: 'link_outside' }],
+    ['more than a kit picture may be', DRAWING.replace('</svg>', `<desc>${randomBytes(1_100_000).toString('hex')}</desc></svg>`), { code: 'file_too_large', path: 'ui/kit/frame.svg' }],
+  ];
+  for (const [name, svg, problem] of drawings) {
+    it(`refuses a drawing of the kit with ${name}`, async () => {
+      expect(await refusal(await drawn(svg))).toMatchObject({ path: 'ui/kit/frame.svg', ...problem });
+    });
+  }
+
+  it('refuses an SVG anywhere but the kit, as a page it could be', async () => {
+    expect(await refusal({ ...(await plainTheme()), 'preview/cover.svg': DRAWING })).toMatchObject({ code: 'file_script', path: 'preview/cover.svg' });
+    expect(await refusal({ ...(await plainTheme()), 'ui/kit/frame.svgz': DRAWING })).toMatchObject({ code: 'file_script', path: 'ui/kit/frame.svgz' });
+  });
 
   const worldCases: [string, (files: ThemeFiles) => ThemeFiles, Partial<ThemeProblem>][] = [
     ['with a world on a recipe Hornhoof does not ship', files => ({ ...files, 'world/world.json': JSON.stringify({ ...(JSON.parse(String(files['world/world.json'])) as object), recipe: { use: 'volcano' } }) }), { code: 'world_bad', path: 'world/world.json' }],
