@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { LANGUAGES, type Language } from '../src/i18n/index';
 import { ru } from '../src/i18n/ru';
-import { BUILTIN_SKINS } from '../src/skins/registry';
+import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
 import type { UpdatesView } from '../src/types';
 import { serveApi } from './api';
 
@@ -145,6 +145,7 @@ const shot = (page: Page, path: string) => page.screenshot({ path, animations: '
 for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) for (const skin of SKINS) {
   const name = `${lookName} ${skin} ${width}`;
   const pictured = skin === 'cyberpunk';
+  const world = builtinSkin(skin)?.world;
 
   test(`during an update the map draws no bar of a maintenance refusal and comes back after it, ${name}`, async ({ page }, info) => {
     const t = DICTS[lang];
@@ -173,7 +174,9 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     server.end();
     await page.clock.runFor(BUSY_POLL_MS);
     await loaded;
-    await expect(page.getByRole('button', { name: /^Development/ })).toBeVisible();
+    /* The map is back with the company: the plain map shows the department's card, a world map draws its city on a canvas
+       and shows the company's ticker over it. */
+    await expect(world ? page.locator(`.map[data-world-canvas="${world}"] > .ticker[role="button"]`) : page.getByRole('button', { name: /^Development/ })).toBeVisible();
     await expect(panel).toContainText(t.updates.steps.health);
     expect(await page.getByRole('alert').count()).toBe(0);
     /* The open map runs under the header and the panel to the top of the window, and the panel floats over it (#1639): it
