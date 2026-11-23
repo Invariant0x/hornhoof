@@ -1797,9 +1797,10 @@ body:has(.dview) .version-mark { display: none; }
    keeps its width and place under it. */
 .body.page ~ .acard, .body.page ~ .orch { bottom: 0; }
 /* A page keeps its own opaque header room, which #1635 leaves as it is: its windows and cards open under that room as before,
-   or under a bar of the shell while one stands, where on the map and in a department they open 8 px under the menu. */
-@media (min-width: 761px) { .body.page ~ :is(.orch, .dv-drawer, .acard, .agent-strips) { top: var(--shell-top, 68px); } }
-@media (max-width: 760px) { .body.page ~ .orch { top: var(--shell-top, 56px); } }
+   or under a bar of the shell while one stands, where on the map and in a department they open 8 px under the menu. A window
+   in full screen has no room to keep: it covers the whole screen, the header too, as it does on the map. */
+@media (min-width: 761px) { .body.page ~ :is(.orch:not(.fullscreen), .dv-drawer, .acard, .agent-strips) { top: var(--shell-top, 68px); } }
+@media (max-width: 760px) { .body.page ~ .orch:not(.fullscreen) { top: var(--shell-top, 56px); } }
 /* The body scrolls with the same 18 px of room at its end for a scrollbar in every browser, so its words are as wide in each:
    --sb is what this browser's scrollbar takes of it (style book section 9). */
 .ac-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-content: start; padding: 16px 18px 20px; padding-inline-end: calc(18px + max(0px, 18px - var(--sb, 0px))); }
