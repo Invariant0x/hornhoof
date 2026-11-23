@@ -8,6 +8,7 @@ import { mapLines, recordMapReturn, returnAlongLine, workStarts, type MapLine } 
 import { ask, brokeDown, comment, createTask, leaveWork, loadTask, report, startWork, submit, verdict } from '../src/modules/tasks/engine.js';
 import type { Db } from '../src/db/client.js';
 import { invitePerson, until } from './helpers.js';
+import { recorded } from './recorded-fixture.js';
 import { rowsRead } from './rows-read.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { testsFixture } from './development-echelons-verification.js';
@@ -166,9 +167,9 @@ describe('lines between the orchestrator and a department', () => {
     await run(hana.id, top.id, started);
     /* The second task's turn went out inside the first one. */
     await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: hana.id, taskId: second.id, kind: 'conversation', prompt: 'go', status: 'done', result: GONE_ALONG, startedAt: new Date(started.getTime() + 1), finishedAt: new Date(started.getTime() + 1), timeoutMs: 900000 });
-    await report(ctx, hana.id, top.id, { done: true, summary: 'Payments are live.' });
+    await report(ctx, hana.id, top.id, { done: true, summary: 'Payments are live.', ...(await recorded(ctx, top.id, hana.id)) });
     expect(stateOf(await org(), orchestrator, hana)).toBe('blue');
-    await report(ctx, hana.id, second.id, { done: true, summary: 'Refunds are live.' });
+    await report(ctx, hana.id, second.id, { done: true, summary: 'Refunds are live.', ...(await recorded(ctx, second.id, hana.id)) });
     expect(stateOf(await org(), orchestrator, hana)).toBe('yellow');
   });
 

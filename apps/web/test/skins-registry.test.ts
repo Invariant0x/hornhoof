@@ -11,35 +11,82 @@ const ratio = (a: string, b: string) => contrast(readColor(a)!, readColor(b)!);
 const NAMES = { ru: 'Образец', en: 'Sample' };
 
 describe('the registry of built-in skins', () => {
-  it('holds Cyberpunk, Light, Matrix and Pixel in this order, Cyberpunk first and on by default, and no Neon', () => {
-    expect(BUILTIN_SKINS.map(skin => skin.id)).toEqual(['cyberpunk', 'light', 'matrix', 'pixel']);
+  it('holds Cyberpunk, Light, Matrix, Pixel and Ancient Egypt in this order, Cyberpunk first and on by default, and no Neon', () => {
+    expect(BUILTIN_SKINS.map(skin => skin.id)).toEqual(['cyberpunk', 'light', 'matrix', 'pixel', 'egypt']);
     expect(DEFAULT_SKIN).toBe('cyberpunk');
     expect(builtinSkin('cyberpunk')).toBe(BUILTIN_SKINS[0]);
+    expect(builtinSkin('egypt')?.world).toBe('egypt');
+    expect(builtinSkin('egypt')?.surface).toBe('papyrus');
+    for (const entry of BUILTIN_SKINS) {
+      const skin = builtinSkin(entry.id)!;
+      if (skin.id !== 'egypt') {
+        expect(skin.world ?? 'standard', skin.id).toBe('standard');
+        expect(skin.surface ?? 'plain', skin.id).toBe('plain');
+      }
+    }
     for (const gone of ['neon', 'dark', '__proto__', 'constructor']) expect(builtinSkin(gone), gone).toBeUndefined();
   });
 
-  it('gives each skin its own mark of dark or light, and Light alone is light', () => {
-    expect(Object.fromEntries(BUILTIN_SKINS.map(skin => [skin.id, skin.scheme]))).toEqual({ cyberpunk: 'dark', light: 'light', matrix: 'dark', pixel: 'dark' });
+  it('gives each skin its own mark of dark or light, and Light and Ancient Egypt are light', () => {
+    expect(Object.fromEntries(BUILTIN_SKINS.map(skin => [skin.id, skin.scheme]))).toEqual({
+      cyberpunk: 'dark',
+      light: 'light',
+      matrix: 'dark',
+      pixel: 'dark',
+      egypt: 'light',
+    });
   });
 
-  it('slants the corners of Cyberpunk and Light, keeps Matrix square and cuts Pixel in two steps', () => {
+  it('slants the corners of Cyberpunk, Light and Ancient Egypt, keeps Matrix square and cuts Pixel in two steps', () => {
     expect(Object.fromEntries(BUILTIN_SKINS.map(skin => [skin.id, [skin.shape, skin.cut]]))).toEqual({
       cyberpunk: ['bevel', 1],
       light: ['bevel', 1],
       matrix: ['bevel', 0],
       pixel: ['steps', 1],
+      egypt: ['bevel', 1],
     });
   });
 
-  it('writes Pixel headings and buttons in Handjet and its text in Onest; the others in Tektur and Onest', () => {
+  it('writes Pixel headings in Handjet, Ancient Egypt in Alegreya and Golos Text, and the others in Tektur and Onest', () => {
     const pixel = builtinSkin('pixel')!;
+    const egypt = builtinSkin('egypt')!;
     expect(pixel.fonts.display).toEqual(['Handjet', 'Onest', 'system-ui', 'sans-serif']);
+    expect(egypt.fonts.display).toEqual(['Alegreya', 'Golos Text', 'Georgia', 'system-ui', 'serif']);
+    expect(egypt.fonts.body).toEqual(['Golos Text', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif']);
     for (const skin of BUILTIN_SKINS) {
-      expect(skin.fonts.body[0], skin.id).toBe('Onest');
       expect(skin.fonts.mono[0], skin.id).toBe('ui-monospace');
-      if (skin.id !== 'pixel') expect(skin.fonts.display[0], skin.id).toBe('Tektur');
+      if (skin.id !== 'egypt') expect(skin.fonts.body[0], skin.id).toBe('Onest');
+      if (skin.id !== 'pixel' && skin.id !== 'egypt') expect(skin.fonts.display[0], skin.id).toBe('Tektur');
     }
-    expect(SHIPPED_FONTS).toEqual(['Onest', 'Tektur', 'Handjet']);
+    expect(SHIPPED_FONTS).toEqual(['Onest', 'Tektur', 'Handjet', 'Alegreya', 'Golos Text']);
+  });
+
+  it('takes the approved Ancient Egypt Design sheet with world map roles and dark terminal colours', () => {
+    const egypt = builtinSkin('egypt')!;
+    expect([egypt.colors.bg, egypt.colors.surface, egypt.colors.surface2, egypt.colors.ink, egypt.colors.accent, egypt.colors.button, egypt.colors.on_button]).toEqual([
+      '#E6D9BE', '#FAF4E6', '#F1E6D2', '#221A12', '#1A5A8F', '#154B7D', '#FAF4E6',
+    ]);
+    expect(egypt.worldColors).toEqual({
+      ground: '#E4D1AA',
+      path: '#C6A46D',
+      field: '#7E9A54',
+      water: '#2B6E9B',
+      structure: '#D7BE92',
+      shade: 'rgba(42, 31, 18, .28)',
+    });
+    expect(egypt.terminal).toEqual({
+      bg: '#17130F',
+      ink: '#EFE4CE',
+      cursor: '#E6B34C',
+      cursorAccent: '#1A130B',
+      selection: '#5CA4E8',
+      selectionInk: '#0E1722',
+      idle: '#332A21',
+      ansi: [
+        '#1D1712', '#F07067', '#5ED69E', '#E6B74C', '#6EB0FA', '#EC83B0', '#56D6D2', '#E5D8C0',
+        '#A69680', '#FF9890', '#8AE8BC', '#FAD375', '#9AC9FF', '#F7A8CB', '#8CE8E5', '#FAF4E6',
+      ],
+    });
   });
 
   it('takes the warm Pixel sheet of Design whole, with the new on_attention of Cyberpunk and Light', () => {
@@ -59,6 +106,7 @@ describe('the registry of built-in skins', () => {
       ['light', 'rgba(240, 244, 247, .94)'],
       ['matrix', 'rgba(8, 16, 11, .94)'],
       ['pixel', 'rgba(26, 26, 43, .94)'],
+      ['egypt', 'rgba(248, 241, 226, .94)'],
     ]);
   });
 
@@ -89,8 +137,8 @@ describe('the registry of built-in skins', () => {
         expect(words.skins.descs[id], id).toMatch(/\S/);
       }
     }
-    expect(Object.values(ru.skins.names)).toEqual(['Киберпанк', 'Светлая', 'Матрица', 'Пиксельная']);
-    expect(Object.values(en.skins.names)).toEqual(['Cyberpunk', 'Light', 'Matrix', 'Pixel']);
+    expect(Object.values(ru.skins.names)).toEqual(['Киберпанк', 'Светлая', 'Матрица', 'Пиксельная', 'Древний Египет']);
+    expect(Object.values(en.skins.names)).toEqual(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Ancient Egypt']);
   });
 });
 
@@ -141,6 +189,15 @@ describe('one source for the values of a skin', () => {
     expect(value('html', 'scrollbar-color')).toBe('var(--scrollbar-thumb) var(--scrollbar-track)');
   });
 
+  it('dims a dark skin by at least .64 and a light one by at least .32, so a window over the map reads first (#1938)', () => {
+    const alpha = (value: string) => Number(/,\s*(\.?\d*\.?\d+)\)$/.exec(value)![1]);
+    expect(builtinSkin('cyberpunk')!.colors.scrim).toBe('rgba(4, 8, 12, .64)');
+    for (const skin of BUILTIN_SKINS) {
+      const floor = skin.scheme === 'dark' ? .64 : .32;
+      expect(alpha(skin.colors.scrim), skin.id).toBeGreaterThanOrEqual(floor);
+    }
+  });
+
   it('cuts the parts of a stepped skin in steps, and leaves ghost and focused buttons square', () => {
     const stepped = RULES.filter(rule => rule.selectors.some(selector => selector.includes("[data-cut='steps']")));
     expect(stepped.flatMap(rule => rule.selectors)).toEqual([
@@ -183,7 +240,7 @@ describe('one source for the values of a skin', () => {
      measured, so its core stays full and still. */
   it('gives the breath of work going on now its weakest core per built-in skin, and a skin of a person\'s own none', () => {
     const low = (look: SkinLook) => Object.fromEntries(declarations(look))[PULSE_TOKEN];
-    expect(Object.fromEntries(BUILTIN_SKINS.map(skin => [skin.id, low(skin)]))).toEqual({ cyberpunk: '0.55', light: '0.8', matrix: '0.55', pixel: '0.55' });
+    expect(Object.fromEntries(BUILTIN_SKINS.map(skin => [skin.id, low(skin)]))).toEqual({ cyberpunk: '0.55', light: '0.8', matrix: '0.55', pixel: '0.55', egypt: '0.8' });
     const light = builtinSkin('light')!;
     expect(low(ownLook({ base: 'light', name: NAMES, scheme: light.scheme, colors: light.colors, fonts: light.fonts, cut: light.cut }))).toBe('1');
   });

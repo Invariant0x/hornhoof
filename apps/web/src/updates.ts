@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiFailure } from './api';
+import { connection } from './connection';
 import type { UpdatesView } from './types';
 import type { Version } from './ui/VersionMark';
 import { answeredUpdate } from './update-state';
@@ -77,6 +78,17 @@ function outageOf(err: unknown, updating: boolean): Outage {
   return updating ? 'offline' : 'none';
 }
 
+/* An update is asked for and not answered, or runs. */
+const isInstalling = (status: UpdatesView['updater']['status'] | undefined, sent: unknown, answered: boolean): boolean => status?.state === 'running' || (sent !== null && !answered);
+
+/* While an update installs, a server that is away is updating: the layer over the page says so. */
+function useUpdateKnown(installing: boolean): void {
+  useEffect(() => {
+    connection.updateRuns(installing);
+    return () => connection.updateRuns(false);
+  }, [installing]);
+}
+
 /* What Hornhoof knows about newer builds and the updater, for people who see the whole company. */
 export function useUpdates(enabled: boolean): Updates {
   const [failure, setFailure] = useState<unknown>(null);
@@ -127,6 +139,7 @@ export function useUpdates(enabled: boolean): Updates {
   const busy = (sent !== null && !answered) || status?.state === 'running' || Boolean(view?.updater.waiting);
   const starting = sent !== null && status?.id !== sent.id;
   busyNow.current = busy;
+  useUpdateKnown(isInstalling(status, sent, answered));
   const pollMs = updatesPollMs(busy || outage === 'maintenance', view?.nodeWaits);
 
   useEffect(() => {

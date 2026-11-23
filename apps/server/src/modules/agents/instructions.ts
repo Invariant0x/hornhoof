@@ -1,13 +1,14 @@
 import type { SkillFile } from '@hornhoof/protocol';
+import type { WorldPackSkillSpec } from '@hornhoof/protocol/world';
 import { eq, inArray } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { Ctx } from '../../app.js';
 import { assistants, companies, departments, people, type agents } from '../../db/schema.js';
-import { only } from '../../db/selections.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../conversation/prompt.js';
 import { type Book, companyBook, departmentBook, listNotes } from '../notebook/book.js';
 import { deptName } from '../departments/templates.js';
 import { CORE_SKILLS, HEAD_SKILLS, MEMBER_SKILLS, textHash, type Lang, type Role, type Skill, type Templates } from '../templates/load.js';
+import { worldSkillsForTheme } from '../world/packs/index.js';
 
 /* One piece of an employee's instructions, as the card shows it. */
 export type Part = { kind: 'header' | 'base' | 'assignment' | 'skill' | 'notebook'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
@@ -16,7 +17,7 @@ export type Part = { kind: 'header' | 'base' | 'assignment' | 'skill' | 'noteboo
 export type Rendered = { parts: Part[]; raw: string; text: string; hash: string; skills: SkillFile[] };
 
 type AgentRow = typeof agents.$inferSelect;
-type Place = { company: string; department: string; product: string | null };
+type Place = { company: string; department: string; product: string | null; theme?: string | null };
 
 /* Who the employee is and where it works: the one line of its instructions that is no skill. Everything else it knows,
    down to working in Hornhoof, comes in skills its card holds. Always English; it answers in the language people write in. */
@@ -124,8 +125,28 @@ function collectSkills(t: Templates, role: Role | undefined, agent: AgentRow): {
   return { parts, kept, files };
 }
 
+function collectWorldSkills(worldSkills: readonly WorldPackSkillSpec[]): { parts: Part[]; kept: string[]; files: SkillFile[] } {
+  const parts: Part[] = [];
+  const kept: string[] = [];
+  const files: SkillFile[] = [];
+  for (const skill of worldSkills) {
+    const text = skillBlock(skill.id, skill.title.en, skill.body);
+    parts.push({ kind: 'skill', id: skill.id, title: skill.title, text, overridden: false, templateChanged: false });
+    if (skill.kind === 'core') {
+      kept.push(text);
+    } else {
+      files.push({
+        name: skill.id,
+        description: skill.description.en ? `${skill.title.en}. ${skill.description.en}` : skill.title.en,
+        body: `# ${skill.title.en}\n\n${skill.body}`,
+      });
+    }
+  }
+  return { parts, kept, files };
+}
+
 /* Identity and assignment stay separate; only a skill's own text can replace its template. */
-export function renderInstructions(t: Templates, agent: AgentRow, place: Place): Rendered {
+export function renderInstructions(t: Templates, agent: AgentRow, place: Place, worldSkills: readonly WorldPackSkillSpec[] = []): Rendered {
   const role = agent.roleKey ? t.roles.get(agent.roleKey) : undefined;
   const said = header(agent, role?.title.en ?? 'employee', place);
   const parts: Part[] = [{ kind: 'header', id: null, title: null, text: said, overridden: false, templateChanged: false }];
@@ -135,22 +156,24 @@ export function renderInstructions(t: Templates, agent: AgentRow, place: Place):
   const initialKept = parts.map(p => p.text);
 
   const collected = collectSkills(t, role, agent);
-  parts.push(...collected.parts);
+  const world = collectWorldSkills(worldSkills);
+  parts.push(...collected.parts, ...world.parts);
 
-  const text = told([...initialKept, ...collected.kept], collected.files);
-  return { parts, raw: parts.map(p => p.text).join('\n\n'), text, hash: textHash(text), skills: collected.files };
+  const files = [...collected.files, ...world.files];
+  const text = told([...initialKept, ...collected.kept, ...world.kept], files);
+  return { parts, raw: parts.map(p => p.text).join('\n\n'), text, hash: textHash(text), skills: files };
 }
 
-/* The names an employee's header uses: its company, department and product. */
+/* The names an employee's header uses: its company, department, product, and active company theme. */
 export async function placeOf(db: Ctx['db'], agent: AgentRow): Promise<Place> {
-  const [company] = await db.select(only(companies, 'name')).from(companies).where(eq(companies.id, agent.companyId));
+  const [company] = await db.select({ name: companies.name, theme: companies.theme }).from(companies).where(eq(companies.id, agent.companyId));
   const ids = [agent.departmentId, agent.productId].filter((id): id is string => Boolean(id));
   const depts = ids.length ? await db.select().from(departments).where(inArray(departments.id, ids)) : [];
   const nameOf = (id: string | null) => {
     const d = depts.find(x => x.id === id);
     return d ? deptName(d) : null;
   };
-  return { company: company?.name ?? '', department: nameOf(agent.departmentId) ?? '', product: nameOf(agent.productId) };
+  return { company: company?.name ?? '', department: nameOf(agent.departmentId) ?? '', product: nameOf(agent.productId), theme: company?.theme ?? null };
 }
 
 /* The orchestrator's skills, always on after his standing role: working in Hornhoof as everyone does, leading as every
@@ -164,12 +187,12 @@ export const ORCHESTRATOR_SKILLS = [
 const ASSISTANT_SKILLS = ['hh-assistant'] as const;
 
 /* The orchestrator's instructions apart from the notebook: his standing role, then his skills as an employee's go. */
-export function orchestratorSteady(t: Templates, assignment?: string): { parts: Part[]; text: string; skills: SkillFile[] } {
-  return steadyOf(t, ORCHESTRATOR_INSTRUCTIONS, ORCHESTRATOR_SKILLS, assignment);
+export function orchestratorSteady(t: Templates, assignment?: string, worldSkills: readonly WorldPackSkillSpec[] = []): { parts: Part[]; text: string; skills: SkillFile[] } {
+  return steadyOf(t, ORCHESTRATOR_INSTRUCTIONS, ORCHESTRATOR_SKILLS, assignment, worldSkills);
 }
 
 /* A standing role, the assignment, then fixed skills as an employee's go. */
-function steadyOf(t: Templates, base: string, ids: readonly string[], assignment?: string): { parts: Part[]; text: string; skills: SkillFile[] } {
+function steadyOf(t: Templates, base: string, ids: readonly string[], assignment?: string, worldSkills: readonly WorldPackSkillSpec[] = []): { parts: Part[]; text: string; skills: SkillFile[] } {
   const parts: Part[] = [{ kind: 'base', id: null, title: null, text: base, overridden: false, templateChanged: false }, assignmentPart(assignment)];
   const kept = parts.map(p => p.text);
   const skills: SkillFile[] = [];
@@ -181,6 +204,10 @@ function steadyOf(t: Templates, base: string, ids: readonly string[], assignment
     if (inline(skill)) kept.push(text);
     else skills.push(skillFile(id, skill, skill.body));
   }
+  const world = collectWorldSkills(worldSkills);
+  parts.push(...world.parts);
+  kept.push(...world.kept);
+  skills.push(...world.files);
   return { parts, text: told(kept, skills), skills };
 }
 
@@ -196,8 +223,10 @@ export async function notebookPart(db: Ctx['db'], book: Book): Promise<string> {
 
 const notebookOf = (text: string): Part => ({ kind: 'notebook', id: null, title: null, text, overridden: false, templateChanged: false });
 
-async function orchestratorInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow): Promise<Rendered> {
-  const steady = orchestratorSteady(ctx.templates, agent.overrides.base);
+async function orchestratorInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'> & Partial<Pick<Ctx, 'worldPacks'>>, agent: AgentRow): Promise<Rendered> {
+  const [company] = await ctx.db.select({ theme: companies.theme }).from(companies).where(eq(companies.id, agent.companyId));
+  const worldSkills = worldSkillsForTheme(ctx.worldPacks, company?.theme);
+  const steady = orchestratorSteady(ctx.templates, agent.overrides.base, worldSkills);
   const notebook = await notebookPart(ctx.db, companyBook(agent.companyId));
   const parts = [...steady.parts, notebookOf(notebook)];
   return { parts, raw: parts.map(p => p.text).join('\n\n'), text: `${steady.text}\n\n${notebook}`, hash: textHash(steady.text), skills: steady.skills };
@@ -215,17 +244,18 @@ const skillsLine = (assistant: { skillsUrl: string | null } | undefined) => (ass
 
 /* An assistant's own agent: whose assistant it is and where, what it may do of its program's skills, then the assistant's
    skills. */
-async function assistantInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow): Promise<Rendered> {
+async function assistantInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'> & Partial<Pick<Ctx, 'worldPacks'>>, agent: AgentRow): Promise<Rendered> {
   const owners = alias(people, 'owners');
   const [who] = await ctx.db
-    .select({ name: people.name, owner: owners.name, company: companies.name, skillsUrl: assistants.skillsUrl })
+    .select({ name: people.name, owner: owners.name, company: companies.name, theme: companies.theme, skillsUrl: assistants.skillsUrl })
     .from(assistants)
     .innerJoin(people, eq(people.id, assistants.personId))
     .innerJoin(owners, eq(owners.id, people.assistantOf))
     .innerJoin(companies, eq(companies.id, assistants.companyId))
     .where(eq(assistants.agentId, agent.id));
+  const worldSkills = worldSkillsForTheme(ctx.worldPacks, who?.theme);
   const base = `You are ${who?.name ?? agent.name}, the personal assistant of ${who?.owner ?? 'your owner'} at ${who?.company ?? 'the company'}.\n\n${skillsLine(who)}`;
-  const steady = steadyOf(ctx.templates, base, ASSISTANT_SKILLS, agent.overrides.base);
+  const steady = steadyOf(ctx.templates, base, ASSISTANT_SKILLS, agent.overrides.base, worldSkills);
   return { parts: steady.parts, raw: steady.parts.map(p => p.text).join('\n\n'), text: steady.text, hash: textHash(steady.text), skills: steady.skills };
 }
 
@@ -248,10 +278,11 @@ async function appendDepartmentNotebook(
    instructions, a head's with its department's notebook. The hash leaves a notebook out: a new note reaches the program
    as it starts again in the same session, or as it reads the notebook with its tool. So it does a skill's body, which
    the program reads from its file. */
-export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow): Promise<Rendered> {
+export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'> & Partial<Pick<Ctx, 'worldPacks'>>, agent: AgentRow): Promise<Rendered> {
   if (agent.kind === 'orchestrator') return orchestratorInstructionsOf(ctx, agent);
   if (agent.kind === 'assistant') return assistantInstructionsOf(ctx, agent);
-  const rendered = renderInstructions(ctx.templates, agent, await placeOf(ctx.db, agent));
+  const place = await placeOf(ctx.db, agent);
+  const rendered = renderInstructions(ctx.templates, agent, place, worldSkillsForTheme(ctx.worldPacks, place.theme));
   const dept = await headDepartment(ctx.db, agent);
   return dept ? appendDepartmentNotebook(ctx.db, rendered, dept) : rendered;
 }

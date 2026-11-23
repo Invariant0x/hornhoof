@@ -45,6 +45,10 @@ const orgOf = (n: number): Org => ({
 
 type Opened = { set(n: number): Promise<void> };
 
+/* The browser tests look as a person who asked for less motion does (playwright.config.ts), so a test of the breath asks for
+   motion first, as e2e/motion.spec.ts does where it checks motion. */
+const withMotion = (page: Page) => page.emulateMedia({ reducedMotion: 'no-preference' });
+
 /* The tracker's list of the department, with employees at work on the n newest tasks; set says the company changed, as the
    stream would, and the page reads the company again. */
 async function openList(page: Page, look: Look, n: number): Promise<Opened> {
@@ -98,6 +102,7 @@ test.describe('the status dot of a task an employee works on now', () => {
   for (const look of LOOKS) {
     test(`has a filled core in its ring's colour that breathes, and says so in one phrase with no title, ${look.theme} ${look.lang}`, async ({ page }) => {
       const t = words(look.lang);
+      await withMotion(page);
       await openList(page, look, 1);
       const now = dotOf(page, 30), still = dotOf(page, 29);
       await expect(now).toHaveClass(/\bworking\b.*\bnow\b/);
@@ -113,6 +118,7 @@ test.describe('the status dot of a task an employee works on now', () => {
   }
 
   test('starts and stops breathing as the company says who works on what, with no reload', async ({ page }) => {
+    await withMotion(page);
     const opened = await openList(page, LOOKS[0]!, 0);
     await page.evaluate(() => { (window as unknown as { kept: boolean }).kept = true; });
     await opened.set(1);
@@ -125,6 +131,7 @@ test.describe('the status dot of a task an employee works on now', () => {
 
   /* Spec section 6: a ripple down the list pulls the eye from the text; one shared phase reads as one quiet beat. */
   test('breathes every working-now dot in one phase on the wall clock, a dot that comes later too', async ({ page }) => {
+    await withMotion(page);
     const opened = await openList(page, LOOKS[0]!, 15);
     const phases = () => page.evaluate(period => {
       const pulses = [...document.querySelectorAll('.tr-status-dot.now')].flatMap(dot => dot.getAnimations({ subtree: true }))

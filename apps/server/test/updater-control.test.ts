@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { UpdaterControl } from '../src/modules/updates/control.js';
-import { JQ, refs, runUpdaterStep, stand, type Stand } from './updater-fixture.js';
+import { ask, JQ, refs, runOnce, runUpdaterStep, stand, type Stand } from './updater-fixture.js';
 
 const roots: string[] = [];
 const STATUS = { id: 'requested-build', version: '0.5.0', state: 'running', step: 'pull', log: '', at: '2026-11-03T10:00:00Z' };
@@ -351,4 +351,79 @@ describe('the control folder of an installer the updater runs', () => {
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain('Refused addresses.json: it is not a plain file.');
   }, 8_000);
+});
+
+/* Older builds from a remote builder shipped /control with setgid (2755), so mktemp -d inherited 2700 inside it. */
+describe('shared control folder with setgid (2755)', () => {
+  it('writes alive and status.json and reads request.json cleanly when control has mode 2755', async () => {
+    const s = stand();
+    chmodSync(s.control, 0o2755);
+    chmodSync(s.computerControl, 0o2755);
+    expect(lstatSync(s.control).mode & 0o7777).toBe(0o2755);
+
+    const r = await runOnce(s, ask('u-setgid'));
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).not.toContain('Refused request.json');
+    expect(r.out).not.toContain('Could not write');
+    expect(lstatSync(join(s.control, 'alive')).isFile()).toBe(true);
+    expect(lstatSync(join(s.computerControl, 'alive')).isFile()).toBe(true);
+    expect(r.status).toMatchObject({ id: 'u-setgid', version: '0.4.1', state: 'done', step: 'finished' });
+    expect(readdirSync(s.control).filter(name => name.startsWith('.'))).toEqual([]);
+    expect(lstatSync(join(s.control, 'dumps')).mode & 0o7777).toBe(0o700);
+  });
+
+  it('clears setgid on a pre-existing keeper directory inside a 2755 control directory', async () => {
+    const s = stand();
+    chmodSync(s.control, 0o2755);
+    const dumps = join(s.control, 'dumps');
+    mkdirSync(dumps);
+    chmodSync(dumps, 0o2700);
+
+    const r = await runUpdaterStep(s, 'dumps_dir && publish "$CONTROL/dumps/sample.done" keeper printf ok');
+    expect(r.code, r.out).toBe(0);
+    expect(lstatSync(dumps).mode & 0o7777).toBe(0o700);
+    expect(lstatSync(join(dumps, 'sample.done')).isFile()).toBe(true);
+    expect(readFileSync(join(dumps, 'sample.done'), 'utf8')).toBe('ok');
+  });
+
+  it('accepts 700 and normalizes 2700 in enter_stage while refusing wider modes, other special bits, and symlinks', async () => {
+    const s = stand();
+    const accepted = [
+      { name: 'ok-700', mode: 0o700 },
+      { name: 'ok-2700', mode: 0o2700 },
+    ];
+    const refused = [
+      { name: 'bad-2755', mode: 0o2755 },
+      { name: 'bad-2770', mode: 0o2770 },
+      { name: 'bad-755', mode: 0o755 },
+      { name: 'bad-750', mode: 0o750 },
+      { name: 'bad-4700', mode: 0o4700 },
+      { name: 'bad-1700', mode: 0o1700 },
+    ];
+    for (const entry of [...accepted, ...refused]) {
+      const p = join(s.control, entry.name);
+      mkdirSync(p);
+      chmodSync(p, entry.mode);
+    }
+    const outside = join(s.dir, 'outside-stage');
+    mkdirSync(outside);
+    chmodSync(outside, 0o700);
+    symlinkSync(outside, join(s.control, 'bad-link'));
+
+    const lines = [
+      'enter_shared "$CONTROL" && here=$(physical_dir)',
+      ...accepted.map(e => `(enter_stage "$here" '${e.name}') && printf 'accepted:%s\\n' '${e.name}'`),
+      ...refused.map(e => `(enter_stage "$here" '${e.name}') || printf 'refused:%s\\n' '${e.name}'`),
+      '(enter_stage "$here" bad-link) || printf \'refused:bad-link\\n\'',
+    ];
+    const r = await runUpdaterStep(s, lines.join('\n'));
+    expect(r.code, r.out).toBe(0);
+    expect(r.out.trim().split('\n').sort()).toEqual([
+      ...accepted.map(e => `accepted:${e.name}`),
+      ...refused.map(e => `refused:${e.name}`),
+      'refused:bad-link',
+    ].sort());
+    expect(lstatSync(join(s.control, 'ok-2700')).mode & 0o7777).toBe(0o700);
+    expect(lstatSync(join(s.control, 'bad-2755')).mode & 0o7777).toBe(0o2755);
+  });
 });

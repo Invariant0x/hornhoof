@@ -399,7 +399,9 @@ async function inView(page: Page, screen: Screen): Promise<{ under: string[]; wh
 
 /* The bare canvas a person's hand presses and drags by dx, dy: clear of cards, chips, the handles of lines and what floats
    over the canvas, where the drag stays on the part of the canvas the screen shows, as much of it as that lets. Whether the
-   world moved. */
+   world moved. The press stands 8 px clear of what floats, and the hand first moves 6 px, as a hand does before it goes on:
+   the canvas takes the pointer once a press has moved more than a few pixels, and until then a move onto the glass over it
+   goes to the glass, so a first step across a bar, as a coarse one would make, drags nothing. */
 async function dragBy(page: Page, screen: Screen, dx: number, dy: number): Promise<boolean> {
   const start = await page.evaluate(({ canvas, floating, dx, dy }) => {
     let box = document.querySelector(canvas)!.getBoundingClientRect();
@@ -411,7 +413,7 @@ async function dragBy(page: Page, screen: Screen, dx: number, dy: number): Promi
     let best: { x: number; y: number; f: number } | null = null;
     for (let y = top + 6; y < bottom - 6; y += 10) {
       for (let x = left + 6; x < right - 6; x += 10) {
-        if (over.some(r => x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 4 && y <= r.bottom + 4)) continue;
+        if (over.some(r => x >= r.left - 8 && x <= r.right + 8 && y >= r.top - 8 && y <= r.bottom + 8)) continue;
         const hit = document.elementFromPoint(x, y);
         if (!hit || !hit.closest(canvas) || hit.closest(busy)) continue;
         const f = Math.min(1, reach(x, dx, left, right), reach(y, dy, top, bottom));
@@ -425,7 +427,9 @@ async function dragBy(page: Page, screen: Screen, dx: number, dy: number): Promi
   const before = await world.boundingBox();
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
-  await page.mouse.move(start.x + dx * start.f, start.y + dy * start.f, { steps: 8 });
+  const [mx, my] = [dx * start.f, dy * start.f], lead = 6 / Math.hypot(mx, my);
+  await page.mouse.move(start.x + mx * lead, start.y + my * lead);
+  await page.mouse.move(start.x + mx, start.y + my, { steps: 8 });
   await page.mouse.up();
   await settle(page);
   const after = await world.boundingBox();
@@ -457,13 +461,12 @@ async function scrollToBlock(page: Page, screen: Screen, i: number): Promise<boo
   return (await inView(page, screen)).whole.includes(i);
 }
 
-/* Where a phone's canvas cuts what it shows, against the bars as they stand now: its top 8 px under the lowest bar along the
+/* Where a phone's map cuts what it shows, against the bars as they stand now: its top 8 px under the lowest bar along the
    top, its bottom 8 px over the highest along the bottom, within 1 px, across the whole width in either direction. */
-const CUTS: Record<Screen, { cut: string; top: string; bottom: string; line: string }> = {
+const CUTS = {
   map: { cut: '.map .map-room', top: '.topbar > *', bottom: '.map .zoom, .map > .ticker, .map-arrange', line: '.map > .ticker .tx' },
-  department: { cut: '.dview .dcanvas', top: '.topbar > *, .dview .crumbs', bottom: '.dview .dv-dock :is(.zoom, .ticker, .dv-acts)', line: '.dview .ticker .tx' },
 };
-async function cutAt(page: Page, screen: Screen) {
+async function cutAt(page: Page, screen: keyof typeof CUTS) {
   return page.evaluate(({ cut, top, bottom }) => {
     const rects = (s: string) => [...document.querySelectorAll(s)].map(el => el.getBoundingClientRect()).filter(r => r.width > 0 && r.height > 0);
     const c = document.querySelector(cut)!.getBoundingClientRect();
@@ -474,7 +477,7 @@ async function cutAt(page: Page, screen: Screen) {
 /* The head of Development's word for #1554: the cut follows the bars' real height, as measured, not a constant. As it stands
    and again after the line of what happened grows by a long text, the cut stands 8 px clear of the bars, and nothing stands
    under them. */
-async function cutFollowsBars(page: Page, screen: Screen) {
+async function cutFollowsBars(page: Page, screen: keyof typeof CUTS) {
   const check = async (when: string) => {
     const at = await cutAt(page, screen);
     expect.soft(Math.abs(at.top - (at.under + 8)), `${screen}, ${when}: the cut stands 8 px under the bars along the top`).toBeLessThanOrEqual(1);
@@ -490,9 +493,9 @@ async function cutFollowsBars(page: Page, screen: Screen) {
   expect.soft(before.over - after.over, `${screen}: the line grew taller, so the check means something`).toBeGreaterThan(10);
 }
 
-/* The canvas as it opens, at each of its edges in turn, and then brought to each card and chip a person has not seen whole
-   yet: nothing stands under what floats over it anywhere, it stops at every edge, and every card and chip shows whole. */
-async function scrollsClear(page: Page, screen: Screen, shot: (where: string) => Promise<void>) {
+/* The map's canvas as it opens, at each of its edges in turn, and then brought to each card and chip a person has not seen
+   whole yet: nothing stands under what floats over it anywhere, it stops at every edge, and every card and chip shows whole. */
+async function scrollsClear(page: Page, screen: 'map', shot: (where: string) => Promise<void>) {
   const all = await page.locator(BLOCKS[screen]).count();
   const whole = new Set<number>();
   const opened = await inView(page, screen);
@@ -512,6 +515,66 @@ async function scrollsClear(page: Page, screen: Screen, shot: (where: string) =>
     expect.soft(at.under, `${screen}: nothing under what floats over it, scrolled to card or chip ${i}`).toEqual([]);
     at.whole.forEach(j => whole.add(j));
   }
+}
+
+/* The department's canvas runs from the top of the window to its bottom, and the top bar, the department's name, the zoom, the
+   line of what happened and the tools are glass blocks over it with no band of their own (#1635, variant A, which replaced
+   #1556's band): the schema opens and fits clear of them, and what the person drags or zooms passes under the glass, so
+   nothing is cut and a block of the schema may stand under a bar. What the canvas keeps is the room the bars leave the schema:
+   dragged to an edge, the box of the schema stops there with its own edge on the room's, 8 px clear of the bars along the
+   top or the bottom and 16 px in from the sides of the screen, within 1 px, as the bars stand now. */
+const SCHEMA = { box: '.dview .dcanvas .world', top: '.topbar > *, .dview .crumbs', bottom: '.dview .dv-dock :is(.zoom, .ticker, .dv-acts)', line: '.dview .ticker .tx' };
+async function schemaAt(page: Page) {
+  return page.evaluate(({ box, top, bottom }) => {
+    const rects = (s: string) => [...document.querySelectorAll(s)].map(el => el.getBoundingClientRect()).filter(r => r.width > 0 && r.height > 0);
+    const b = document.querySelector(box)!.getBoundingClientRect();
+    return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: innerWidth, under: Math.max(...rects(top).map(r => r.bottom)), over: Math.min(...rects(bottom).map(r => r.top)) };
+  }, SCHEMA);
+}
+
+/* The schema dragged to one edge: whether it stops there, and where, against the room the bars leave it. */
+async function schemaStopsAt(page: Page, edge: (typeof EDGES)[number], when: string) {
+  expect.soft(await scrollToEdge(page, 'department', edge), `department, ${when}: the canvas stops at its ${edge} edge`).toBe(true);
+  const at = await schemaAt(page);
+  const room = { left: 16, right: at.width - 16, top: at.under + 8, bottom: at.over - 8 };
+  expect.soft(Math.abs(at[edge] - room[edge]), `department, ${when}: the schema stops with its ${edge} edge at ${at[edge].toFixed(1)}, where the room the bars leave it ends, ${room[edge].toFixed(1)}`).toBeLessThanOrEqual(1);
+  /* A schema smaller than its room on a side moves only inside it, and the stop means nothing there. */
+  expect.soft(at.right - at.left > room.right - room.left && at.bottom - at.top > room.bottom - room.top, `department, ${when}: the schema is larger than its room, so the check means something`).toBe(true);
+  return at;
+}
+
+/* The schema as it opens, at each of its edges in turn, and then brought to each card and chip a person has not seen whole
+   yet: it stops at every edge on the room the bars leave it, and every card and chip shows whole, clear of all that floats
+   over it, once the person brings it there, whatever passes under the glass on the way. */
+async function schemaScrolls(page: Page, shot: (where: string) => Promise<void>) {
+  const all = await page.locator(BLOCKS.department).count();
+  const whole = new Set<number>();
+  (await inView(page, 'department')).whole.forEach(i => whole.add(i));
+  for (const edge of EDGES) {
+    await schemaStopsAt(page, edge, 'as it opens');
+    await shot(edge);
+    (await inView(page, 'department')).whole.forEach(i => whole.add(i));
+  }
+  for (let i = 0; i < all; i++) {
+    if (whole.has(i)) continue;
+    expect.soft(await scrollToBlock(page, 'department', i), `department: card or chip ${i} can be scrolled into view whole`).toBe(true);
+    (await inView(page, 'department')).whole.forEach(j => whole.add(j));
+  }
+}
+
+/* The head of Development's word for #1554: the room follows the bars' real height, as measured, not a constant. As it stands
+   and again after the line of what happened grows by a long text, the schema stops at every edge on the room the bars leave
+   it, and the line, which grows up from the bottom, takes that much of the room at the bottom. */
+async function schemaFollowsBars(page: Page) {
+  const check = async (when: string) => {
+    for (const edge of ['left', 'right', 'top'] as const) await schemaStopsAt(page, edge, when);
+    return schemaStopsAt(page, 'bottom', when);
+  };
+  const before = await check('as it stands');
+  await page.locator(SCHEMA.line).first().evaluate((el, text) => { el.textContent = text; }, LONG_HINT);
+  await settle(page);
+  const after = await check('after the line grows');
+  expect.soft(before.over - after.over, 'department: the line grew taller, so the check means something').toBeGreaterThan(10);
 }
 
 /* The API fixture, the company of these words, and the version the app root asks for and the updates its shell asks for
@@ -754,7 +817,7 @@ for (const look of LOOKS.filter(l => l.width === 375)) {
 
   /* The department in English, Russian and the long pseudo translation, and, by the head of Development's word, right to left. */
   if (look.script === 'cjk') continue;
-  test(`a department on a phone opens on its head card and scrolls clear of what floats: ${look.script}, ${look.dir}`, async ({ page, browserName }, info) => {
+  test(`a department on a phone opens on its head card, stops at the room the bars leave it and brings every card clear of them: ${look.script}, ${look.dir}`, async ({ page, browserName }, info) => {
     const errors = errorsOf(page);
     await open(page);
     /* A card can stand under the top bar on a phone: it is pressed as a person's tap on it would press it. */
@@ -775,8 +838,8 @@ for (const look of LOOKS.filter(l => l.width === 375)) {
     expect.soft(Math.min(at.left, at.right), 'the head card shows whole across the screen').toBeGreaterThanOrEqual(0);
     const head = await page.locator(BLOCKS.department).evaluateAll(all => all.findIndex(el => el.matches('.shead')));
     expect.soft((await inView(page, 'department')).whole, 'the head card shows whole as it opens').toContain(head);
-    await scrollsClear(page, 'department', shot);
-    await cutFollowsBars(page, 'department');
+    await schemaScrolls(page, shot);
+    await schemaFollowsBars(page);
     expect.soft(errors).toEqual([]);
   });
 }
