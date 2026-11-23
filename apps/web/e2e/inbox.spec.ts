@@ -73,6 +73,21 @@ type Setup = { lang: Lang; skin?: string; width: number; readOnly?: boolean; unr
 type Opened = { window: Locator; bar: Locator; icon: Locator; panel: Locator; errors: string[]; marked: unknown[]; modes: unknown[] };
 
 /* Opens the head Bruno's window from its department, and its inbox when asked. unread: what the card counts, 3 unless said. */
+type WorldResident = { agentId: string | null; roleClass: string };
+type WorldHandle = { __WORLD_PRODUCT__?: { getResidents: () => WorldResident[]; selectResidentByRoleClass: (roleClass?: string) => WorldResident | null } };
+
+/* A world map draws its departments and residents on a canvas, with no card to click: the map's own handle selects the
+   employee's resident there, as a click on it does, and that opens the window. */
+async function openFromWorld(page: Page, agentId: string) {
+  await page.waitForFunction(id => (window as unknown as WorldHandle).__WORLD_PRODUCT__?.getResidents().some(r => r.agentId === id) ?? false, agentId);
+  const picked = await page.evaluate(id => {
+    const world = (window as unknown as WorldHandle).__WORLD_PRODUCT__!;
+    const resident = world.getResidents().find(r => r.agentId === id)!;
+    return world.selectResidentByRoleClass(resident.roleClass)?.agentId ?? null;
+  }, agentId);
+  expect(picked, 'the first resident of its role class is the employee').toBe(agentId);
+}
+
 async function openWindow(page: Page, { lang, skin = 'cyberpunk', width, readOnly = false, unread, failMark = false }: Setup): Promise<Opened> {
   await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
   await page.clock.setFixedTime(NOW);
@@ -109,8 +124,11 @@ async function openWindow(page: Page, { lang, skin = 'cyberpunk', width, readOnl
     return route.fulfill({ json: { mode: { own: mode, inherited: 'inbox', effective: view.effectiveMode } } });
   });
   await page.goto('/');
-  await page.getByRole('button', { name: /^Development|^Разработка/ }).first().click();
-  await page.getByRole('region', { name: WORDS[lang].members }).getByRole('button', { name: /Bruno/ }).click();
+  if (builtinSkin(skin)?.world) await openFromWorld(page, 'b1');
+  else {
+    await page.getByRole('button', { name: /^Development|^Разработка/ }).first().click();
+    await page.getByRole('region', { name: WORDS[lang].members }).getByRole('button', { name: /Bruno/ }).click();
+  }
   const window = page.getByRole('complementary', { name: /^Bruno,/ });
   const bar = window.locator(':scope > .t-bar');
   const icon = bar.locator('[data-panel="inbox"]');
