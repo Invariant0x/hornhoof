@@ -120,6 +120,9 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   /* The company's city and the CEO's orders to move its buildings: its world, kept apart from its work tables, compared
      row by row like a person's map, and two that differ are the orchestrator's to settle. */
   world_layouts: rows('work'),
+  /* The themes the company installed and their files: two copies that hold another version of one theme keep the
+     leader's, and a file of a version the leader does not hold stays out with it. */
+  ...each(['themes', 'theme_files'], rows('work')),
   /* The cards of Hornhoof's own feedback inbox and who sent each: a card only the source holds whose number or finding the
      leader gave another card stays out. */
   ...each(['feedback_inbox', 'feedback_signals', 'feedback_submissions'], rows('work')),

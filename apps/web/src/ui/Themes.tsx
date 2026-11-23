@@ -1,13 +1,15 @@
+import type { InstalledThemeView, ThemeProblem } from '@hornhoof/protocol/themes';
 import type { WorldNameLanguage, WorldRenamePreview, WorldRenameResult, WorldRestoreNamesResult, WorldThemeView } from '@hornhoof/protocol/world';
 import { useEffect, useId, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
-import { api } from '../api';
+import { api, ApiFailure } from '../api';
 import { errorText, useLanguage, useT, type Language } from '../i18n';
 import { en, type Messages } from '../i18n/en';
 import { ru } from '../i18n/ru';
 import { COLLECTION_LIMIT, uniqueName, type CustomSkin } from '../skins/collection';
 import { BUILTIN_SKINS, DEFAULT_SKIN, ownLook, type BuiltinSkinId } from '../skins/registry';
 import { declarations, extraDeclarations, type Skin, type SkinLook, type SkinNames } from '../skins/roles';
-import { addSkin, chooseSkin, removeSkin, restoreSkin, setMapGrain, skinsState, type Removal } from '../skins/store';
+import { addSkin, chooseSkin, installedLookOf, removeSkin, restoreSkin, setMapGrain, skinsState, type Removal } from '../skins/store';
+import { forgetInstalledTheme, installedThemes, loadInstalledTheme } from '../themes/installed';
 import { useMapGrain, useSkins } from '../skins/use-skin';
 import { builtinFile, parseSkin, SEE_THROUGH, SKIN_FILE_LIMIT, skinText, type SkinError } from '../skins/validate';
 import { ThemeShopIcon } from './icons';
@@ -19,7 +21,8 @@ import { ThemeShopIcon } from './icons';
 type Problem = SkinError | { code: 'read_failed'; key?: undefined; value?: undefined };
 /* The line under the heading that says what the last action did: a status, an alert, or a file still being read. */
 type Notice = { tone: 'status' | 'alert' | 'busy'; title?: string; text: string; removal?: Removal };
-type Card = { id: string; look: SkinLook; name: string; desc: string; own: boolean; file: () => Skin };
+/* installed: a theme the company uploaded as an archive, which gives no skin file to download. */
+type Card = { id: string; look: SkinLook; name: string; desc: string; own: boolean; file?: () => Skin; installed?: InstalledThemeView };
 type StoreFilter = 'all' | 'worlds' | 'classic' | 'custom';
 const STORE_FILTERS: readonly StoreFilter[] = ['all', 'worlds', 'classic', 'custom'];
 
@@ -37,6 +40,24 @@ const builtinNames = (id: BuiltinSkinId): SkinNames => ({ ru: ru.skins.names[id]
 /* The tokens of a skin on its own preview only, so each card shows its skin and world colours in the same drawing. */
 const previewStyle = (look: SkinLook) =>
   Object.fromEntries([...declarations(look), ...extraDeclarations(look).set].filter(([property]) => property.startsWith('--'))) as CSSProperties;
+
+/* What is wrong with an uploaded archive and how to fix it; a look the skin check refused says which field, in the
+   words of a skin file's refusals, and the world's checks add their own detail. */
+function archiveProblemText(t: Messages, problem: ThemeProblem): string {
+  const words = t.skins.archive.problems;
+  const text = (words[problem.code] ?? words.zip_corrupt)(problem.path ?? '');
+  if (!problem.detail) return text;
+  if (problem.code === 'look_bad') {
+    try {
+      const [code, key, value] = JSON.parse(problem.detail) as [keyof Messages['skins']['errors'], string, string];
+      const said = t.skins.errors[code];
+      if (said) return `${text} ${said(key, value)}`;
+    } catch {
+      return text;
+    }
+  }
+  return `${text} (${problem.detail})`;
+}
 
 function problemText(t: Messages, problem: Problem): string {
   const value = problem.code === 'bad_base' ? BUILTIN_SKINS.map(skin => skin.id).join(', ') : problem.code === 'opaque' ? SEE_THROUGH.join(', ') : (problem.value ?? '');
@@ -109,10 +130,12 @@ function Preview({ look }: { look: SkinLook }) {
   );
 }
 
-type CardProps = { card: Card; on: boolean; onApply: () => void; onDownload: () => void; onRemove: () => void };
+/* canDelete: the CEO, who alone deletes a theme the company uploaded. */
+type CardProps = { card: Card; on: boolean; canDelete: boolean; onApply: () => void; onDownload: () => void; onRemove: () => void };
 
 function cardOrigin(words: Messages['skins'], card: Card): string {
   if (card.own) return words.own;
+  if (card.installed) return isWorldCard(card) ? `${words.archive.origin} · ${words.worldBadge}` : words.archive.origin;
   if (card.id === DEFAULT_SKIN) return `${words.builtIn} · ${words.byDefault}`;
   if (isWorldCard(card)) return `${words.builtIn} · ${words.worldBadge}`;
   return words.builtIn;
@@ -120,14 +143,18 @@ function cardOrigin(words: Messages['skins'], card: Card): string {
 
 /* A skin's card: its preview, name, origin and description, then its quiet buttons on the end edge. The skin on says so
    by a state beside its name instead of Apply, and that state holds the focus once Apply is gone. */
-function SkinCard({ card, on, onApply, onDownload, onRemove }: CardProps) {
+function SkinCard({ card, on, canDelete, onApply, onDownload, onRemove }: CardProps) {
   const t = useT();
   const words = t.skins;
   const origin = cardOrigin(words, card);
   const world = isWorldCard(card);
+  /* Deleting an uploaded theme removes its files on the server: the card asks once more before it does. */
+  const [asking, setAsking] = useState(false);
+  const removable = card.own || (Boolean(card.installed) && canDelete);
+  const cover = card.installed?.cover;
   return (
-    <li className="skin-card" data-current={on || undefined} aria-current={on || undefined}>
-      <Preview look={card.look} />
+    <li className="skin-card" data-current={on || undefined} aria-current={on || undefined} data-installed={card.installed ? card.id : undefined}>
+      {cover ? <img className="skin-cover" src={cover} alt={words.archive.cover(card.name)} /> : <Preview look={card.look} />}
       <div className="skin-card-text">
         <div className="skin-card-head">
           <h6 className="skin-name">{card.name}</h6>
@@ -153,15 +180,30 @@ function SkinCard({ card, on, onApply, onDownload, onRemove }: CardProps) {
             {words.apply}
           </button>
         )}
-        <button className="btn small ghost" type="button" aria-label={`${words.download}: ${card.name}`} onClick={onDownload}>
-          {words.download}
-        </button>
-        {card.own && (
-          <button className="btn small ghost danger" type="button" aria-label={`${words.remove}: ${card.name}`} onClick={onRemove}>
+        {card.file && (
+          <button className="btn small ghost" type="button" aria-label={`${words.download}: ${card.name}`} onClick={onDownload}>
+            {words.download}
+          </button>
+        )}
+        {removable && !asking && (
+          <button className="btn small ghost danger" type="button" aria-label={`${words.remove}: ${card.name}`} data-focus-remove={card.id} onClick={card.installed ? () => setAsking(true) : onRemove}>
             {words.remove}
           </button>
         )}
       </div>
+      {asking && (
+        <div className="skin-confirm" role="group" aria-label={words.archive.deleteConfirm(card.name)}>
+          <p>{words.archive.deleteConfirm(card.name)}</p>
+          <div className="entry-actions">
+            <button className="btn small danger" type="button" autoFocus onClick={() => { setAsking(false); onRemove(); }}>
+              {words.archive.deleteYes}
+            </button>
+            <button className="btn small ghost" type="button" onClick={() => setAsking(false)}>
+              {words.archive.deleteNo}
+            </button>
+          </div>
+        </div>
+      )}
     </li>
   );
 }
@@ -214,10 +256,22 @@ function Guide() {
   );
 }
 
-/* The built-in skins in the order of the registry, then a person's own in the order they were added. */
-function catalogCards(t: Messages, language: Language, custom: readonly CustomSkin[]): Card[] {
+/* An uploaded theme's card, once its look is read; one of a built-in skin's id takes that skin's place. */
+function installedCard(view: InstalledThemeView, language: Language): Card | null {
+  const look = installedLookOf(view.id);
+  if (!look) return null;
+  const said = (words: Record<string, string> | null) => (words ? (words[language] ?? words.en ?? '') : '');
+  return { id: view.id, look, name: said(view.name), desc: said(view.description), own: false, installed: view };
+}
+
+/* The built-in skins in the order of the registry, then the themes the company uploaded, then a person's own in the
+   order they were added. */
+function catalogCards(t: Messages, language: Language, custom: readonly CustomSkin[], installed: readonly InstalledThemeView[] = []): Card[] {
+  const uploaded = installed.map(view => installedCard(view, language)).filter((card): card is Card => card !== null);
+  const builtins: Card[] = BUILTIN_SKINS.map(skin => ({ id: skin.id, look: skin, name: t.skins.names[skin.id], desc: t.skins.descs[skin.id], own: false, file: () => builtinFile(skin, builtinNames(skin.id)) }));
   return [
-    ...BUILTIN_SKINS.map(skin => ({ id: skin.id, look: skin, name: t.skins.names[skin.id], desc: t.skins.descs[skin.id], own: false, file: () => builtinFile(skin, builtinNames(skin.id)) })),
+    ...builtins.map(card => uploaded.find(own => own.id === card.id) ?? card),
+    ...uploaded.filter(card => !builtins.some(builtin => builtin.id === card.id)),
     ...custom.map(({ id, skin }) => ({ id, look: ownLook(skin), name: nameIn(skin.name, language), desc: t.skins.ownDesc, own: true, file: () => skin })),
   ];
 }
@@ -245,6 +299,7 @@ function removeCard(t: Messages, cards: readonly Card[], card: Card): { notice: 
 
 /* Gives a skin as a file of the format a person can change and add back. */
 function saveFile(card: Card): void {
+  if (!card.file) return;
   const link = document.createElement('a');
   link.href = `data:application/json;charset=utf-8,${encodeURIComponent(skinText(card.file()))}`;
   link.download = `hornhoof-skin-${card.id}.json`;
@@ -263,7 +318,8 @@ function download(t: Messages, card: Card, say: (notice: Notice) => void): void 
 
 /* Focus after the catalog has drawn again: the Apply of the card named, or its state when it is on, else Add from file. */
 function moveFocus(root: HTMLElement | null, to: string): void {
-  const target = root?.querySelector<HTMLElement>(`[data-focus-skin="${to}"]`) ?? root?.querySelector<HTMLElement>('[data-add]');
+  const named = to === 'upload' ? root?.querySelector<HTMLElement>('[data-upload]') : root?.querySelector<HTMLElement>(`[data-focus-skin="${to}"]`);
+  const target = named ?? root?.querySelector<HTMLElement>('[data-add]');
   target?.focus();
 }
 
@@ -300,7 +356,47 @@ function AddFromFile({ say, focusOn }: Talk) {
   );
 }
 
-type CatalogProps = { cards: readonly Card[]; active: string; onApply: (card: Card) => void; onDownload: (card: Card) => void; onRemove: (card: Card) => void };
+/* Upload theme: one archive at a time, sent whole to the server, which checks it and installs it for the company or
+   says what to fix and in which file. The CEO alone has it. */
+function UploadTheme({ say, focusOn, onInstalled }: Talk & { onInstalled: (themes: InstalledThemeView[], id: string | null) => void }) {
+  const t = useT();
+  const words = t.skins.archive;
+  const [sending, setSending] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
+  const hintId = useId();
+
+  async function send(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    setSending(true);
+    say({ tone: 'busy', text: words.busy });
+    try {
+      const { themes } = await api.upload<{ themes: InstalledThemeView[] }>('/api/themes', file);
+      const newest = [...themes].sort((a, b) => b.installedAt.localeCompare(a.installedAt))[0] ?? null;
+      onInstalled(themes, newest?.id ?? null);
+    } catch (err) {
+      const problem = err instanceof ApiFailure ? (err.details?.problem as ThemeProblem | undefined) : undefined;
+      say({ tone: 'alert', title: words.refused, text: problem ? archiveProblemText(t, problem) : errorText(t, err) });
+      focusOn('upload');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="skins-add">
+      <button className="btn small" type="button" data-upload disabled={sending} aria-busy={sending || undefined} aria-describedby={hintId} onClick={() => picker.current?.click()}>
+        <SwapLabel first={words.upload} second={words.uploading} showSecond={sending} />
+      </button>
+      <input ref={picker} type="file" accept=".zip,application/zip" hidden data-upload-input onChange={event => void send(event)} />
+      <p className="muted skins-upload-hint" id={hintId}>{words.hint}</p>
+    </div>
+  );
+}
+
+type CatalogProps = { cards: readonly Card[]; active: string; canDelete: boolean; onApply: (card: Card) => void; onDownload: (card: Card) => void; onRemove: (card: Card) => void };
 
 function StoreFilters({ filter, onSelect }: { filter: StoreFilter; onSelect: (next: StoreFilter) => void }) {
   const t = useT();
@@ -325,7 +421,7 @@ function CatalogEmpty({ custom }: { custom: boolean }) {
   );
 }
 
-function Catalog({ cards, active, onApply, onDownload, onRemove }: CatalogProps) {
+function Catalog({ cards, active, canDelete, onApply, onDownload, onRemove }: CatalogProps) {
   const t = useT();
   const id = useId();
   const [filter, setFilter] = useState<StoreFilter>('all');
@@ -342,7 +438,7 @@ function Catalog({ cards, active, onApply, onDownload, onRemove }: CatalogProps)
         <div className="skin-wrap">
           <ul className="skin-cards">
             {shown.map(card => (
-              <SkinCard key={card.id} card={card} on={card.id === active} onApply={() => onApply(card)} onDownload={() => onDownload(card)} onRemove={() => onRemove(card)} />
+              <SkinCard key={card.id} card={card} on={card.id === active} canDelete={canDelete} onApply={() => onApply(card)} onDownload={() => onDownload(card)} onRemove={() => onRemove(card)} />
             ))}
           </ul>
         </div>
@@ -550,6 +646,9 @@ export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) =>
   const [notice, setNotice] = useState<Notice | null>(null);
   const [saving, setSaving] = useState(false);
   const [renamedCount, setRenamedCount] = useState(0);
+  /* The themes the company uploaded, and whether this person is the CEO, who alone uploads and deletes them. */
+  const [installed, setInstalled] = useState<InstalledThemeView[]>([]);
+  const [canEdit, setCanEdit] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   /* Where focus goes once the catalog has drawn again: the Apply of a card, or Add from file. */
   const focusTo = useRef<string | null>(null);
@@ -563,6 +662,7 @@ export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) =>
         if (alive && typeof res?.renamedAgentsCount === 'number') {
           setRenamedCount(res.renamedAgentsCount);
         }
+        if (alive) setCanEdit(Boolean(res?.canEdit));
       })
       .catch(() => {});
     return () => {
@@ -570,13 +670,27 @@ export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) =>
     };
   }, [active]);
 
+  /* Each uploaded theme's look is read once, for its card's preview and to put it on. */
+  useEffect(() => {
+    let alive = true;
+    void installedThemes()
+      .then(async themes => {
+        await Promise.all(themes.map(theme => loadInstalledTheme(theme.id)));
+        if (alive) setInstalled(themes);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   useEffect(() => {
     if (focusTo.current === null) return;
     moveFocus(root.current, focusTo.current);
     focusTo.current = null;
   });
 
-  const cards = catalogCards(t, language, custom);
+  const cards = catalogCards(t, language, custom, installed);
   const activeCard = cards.find(card => card.id === active);
   const focusOn = (id: string) => {
     focusTo.current = id;
@@ -604,7 +718,36 @@ export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) =>
     }
   }
 
+  /* A theme just uploaded: its look is read anew, as its version may be new, and focus goes to its card. */
+  async function installedNow(themes: InstalledThemeView[], id: string | null) {
+    if (id) {
+      forgetInstalledTheme(id);
+      await loadInstalledTheme(id);
+    }
+    setInstalled(themes);
+    const view = themes.find(theme => theme.id === id);
+    if (view) setNotice({ tone: 'status', text: t.skins.archive.installed(view.name[language] ?? view.name.en ?? view.id) });
+    focusOn(id ?? 'upload');
+  }
+
+  async function deleteInstalled(card: Card) {
+    const wasOn = card.id === active;
+    try {
+      const { themes } = await api.del<{ themes: InstalledThemeView[] }>(`/api/themes/${encodeURIComponent(card.id)}`);
+      forgetInstalledTheme(card.id);
+      setInstalled(themes);
+      if (wasOn) onCompanyTheme?.(DEFAULT_SKIN);
+      const fellBack = wasOn ? ` ${t.skins.nowOn(t.skins.names[DEFAULT_SKIN])}` : '';
+      setNotice({ tone: 'status', text: `${t.skins.archive.deleted(card.name)}${fellBack}` });
+      const at = cards.indexOf(card);
+      focusOn((cards[at + 1] ?? cards[at - 1])?.id ?? 'upload');
+    } catch (err) {
+      setNotice({ tone: 'alert', text: errorText(t, err) });
+    }
+  }
+
   function remove(card: Card) {
+    if (card.installed) return void deleteInstalled(card);
     const removed = removeCard(t, cards, card);
     if (!removed) return;
     setNotice(removed.notice);
@@ -629,10 +772,13 @@ export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) =>
           <p>{t.skins.desc}</p>
           <p className="muted">{t.skins.local}</p>
         </div>
-        <AddFromFile say={setNotice} focusOn={focusOn} />
+        <div className="skins-adds">
+          {canEdit && <UploadTheme say={setNotice} focusOn={focusOn} onInstalled={(themes, id) => void installedNow(themes, id)} />}
+          <AddFromFile say={setNotice} focusOn={focusOn} />
+        </div>
       </div>
       {notice && <NoticeBar notice={notice} onUndo={undo} />}
-      <Catalog cards={cards} active={active} onApply={card => void apply(card)} onDownload={card => download(t, card, setNotice)} onRemove={remove} />
+      <Catalog cards={cards} active={active} canDelete={canEdit} onApply={card => void apply(card)} onDownload={card => download(t, card, setNotice)} onRemove={remove} />
       <WorldEraNamesPanel
         worldActive={Boolean(activeCard && isWorldCard(activeCard))}
         renamedCount={renamedCount}

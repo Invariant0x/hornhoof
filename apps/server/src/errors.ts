@@ -244,7 +244,10 @@ export type ErrorReason =
   | 'assistant_agent_card'
   | 'assistant_not_allowed'
   | 'assistant_agent_refused'
-  | 'assistant_switched_off';
+  | 'assistant_switched_off'
+  /* A theme archive that its check refused: details.problem names the reason and the file (docs/theme-archive.md, 9). */
+  | 'theme_refused'
+  | 'theme_same_version';
 
 export const READ_ONLY_MESSAGE = 'Hornhoof only reads on this machine now, so nothing was changed.';
 export const NOT_CONFIRMED = 'Hornhoof could not confirm this change. It may be saved; look before you try again.';

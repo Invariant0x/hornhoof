@@ -5,6 +5,7 @@ import { useStream } from '../live';
 import { notOpened, useOrg } from '../org';
 import { forgetOwnerKey } from '../owner-key';
 import { skinsState, syncCompanySkin } from '../skins/store';
+import { loadInstalledTheme } from '../themes/installed';
 import { useWorld } from '../skins/use-skin';
 import type { Me, Org } from '../types';
 import { ListIcon, LogoMark, MachineIcon, MapIcon, PeopleIcon, PlugIcon } from '../ui/icons';
@@ -414,15 +415,24 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   });
   useEffect(() => {
     if (!companyTheme) return;
-    if (!me.person.isOwner) {
+    let alive = true;
+    /* A theme the company installed from an archive is read from the server before it goes on, and stands in place of a
+       built-in one of its id; with none installed, the built-in one goes on. */
+    void loadInstalledTheme(companyTheme).then(() => {
+      if (!alive) return;
+      if (!me.person.isOwner) {
+        lastServerTheme.current = companyTheme;
+        syncCompanySkin(companyTheme);
+        return;
+      }
+      const changed = lastServerTheme.current !== null && lastServerTheme.current !== companyTheme;
+      const isCustom = skinsState().active.startsWith('custom-');
       lastServerTheme.current = companyTheme;
-      syncCompanySkin(companyTheme);
-      return;
-    }
-    const changed = lastServerTheme.current !== null && lastServerTheme.current !== companyTheme;
-    const isCustom = skinsState().active.startsWith('custom-');
-    lastServerTheme.current = companyTheme;
-    if (changed || !isCustom) syncCompanySkin(companyTheme);
+      if (changed || !isCustom) syncCompanySkin(companyTheme);
+    });
+    return () => {
+      alive = false;
+    };
   }, [companyTheme, me.person.isOwner]);
   const orchestratorId = org?.orchestrator?.id;
   if (orchestratorId && windows.ids.includes(orchestratorId)) windows.nameOrchestrator(orchestratorId);

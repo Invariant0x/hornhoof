@@ -38,10 +38,29 @@ function keep(key: string, value: string): boolean {
   }
 }
 
+/* The looks of themes the company installed from archives, put on by themes/installed.ts once their look is read; each
+   stands in place of a built-in skin of its id. */
+const installedLooks = new Map<string, SkinLook>();
+
 function lookIn(custom: readonly CustomSkin[], id: string): SkinLook | null {
   const own = custom.find(entry => entry.id === id);
-  return builtinSkin(id) ?? (own ? ownLook(own.skin) : null);
+  return installedLooks.get(id) ?? builtinSkin(id) ?? (own ? ownLook(own.skin) : null);
 }
+
+/* Keeps an installed theme's look under its id; the page changes at once when that theme is on. */
+export function keepInstalledLook(id: string, look: SkinLook): void {
+  installedLooks.set(id, look);
+  if (state.active === id) change(state);
+  else listeners.forEach(listener => listener());
+}
+
+/* Forgets an installed theme's look; when it was on, Cyberpunk takes its place, as for any skin that is gone. */
+export function forgetInstalledLook(id: string): void {
+  if (!installedLooks.delete(id)) return;
+  change(state.active === id && !lookIn(state.custom, id) ? { ...state, active: DEFAULT_SKIN } : state);
+}
+
+export const installedLookOf = (id: string): SkinLook | null => installedLooks.get(id) ?? null;
 
 /* Every token and root attribute of the skin at once, so switching never shows a mix of two themes. */
 function apply({ active, custom }: SkinsState): void {
@@ -111,7 +130,7 @@ export function chooseSkin(id: string): boolean {
 
 /* Applies the company-wide theme reported by the server and caches it locally for reload boot. */
 export function syncCompanySkin(themeId: string): boolean {
-  const next = builtinSkin(themeId) ? themeId : DEFAULT_SKIN;
+  const next = installedLooks.has(themeId) || builtinSkin(themeId) ? themeId : DEFAULT_SKIN;
   keep(ACTIVE_KEY, next);
   if (state.active === next) return false;
   change({ ...state, active: next });

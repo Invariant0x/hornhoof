@@ -59,6 +59,10 @@
       "types": "./dist/redaction.d.ts",
       "default": "./dist/redaction.js"
     },
+    "./themes": {
+      "types": "./dist/themes.d.ts",
+      "default": "./dist/themes.js"
+    },
     "./world": {
       "types": "./dist/world.d.ts",
       "default": "./dist/world.js"

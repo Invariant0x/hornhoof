@@ -12,9 +12,20 @@ const WORLD_PACKS: Readonly<Record<string, WorldPackManifest>> = {
   space: SPACE_WORLD_PACK,
 };
 
+/* Worlds of themes the company installed, written as data (data-pack.ts): each stands in place of a shipped pack of its id. */
+const installed = new Map<string, WorldPackManifest>();
+
+export function registerInstalledWorldPack(pack: WorldPackManifest): void {
+  installed.set(pack.id, pack);
+}
+
+export function forgetInstalledWorldPack(id: string): void {
+  installed.delete(id);
+}
+
 export function resolveWorldPack(worldId: string | null | undefined): WorldPackManifest | null {
   if (!worldId || worldId === 'standard') return null;
-  return WORLD_PACKS[worldId] ?? null;
+  return installed.get(worldId) ?? (Object.hasOwn(WORLD_PACKS, worldId) ? WORLD_PACKS[worldId]! : null);
 }
 
 export function registeredWorldPackIds(): readonly string[] {

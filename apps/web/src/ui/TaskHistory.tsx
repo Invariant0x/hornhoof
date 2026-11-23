@@ -7,7 +7,7 @@ import type { TaskDetail, TaskLogLine } from '../types';
 import { HideSecret } from './HideSecret';
 import { resetDuration } from './reset';
 import { fullTextOf, LogParagraph } from './TaskAttachments';
-import { localeOf, momentText, trackerLine, waitLabel } from './tracker-words';
+import { failureTodo, localeOf, momentText, trackerLine, waitLabel } from './tracker-words';
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
 
@@ -196,7 +196,7 @@ function currentWaits(t: Messages, task: TaskDetail, language: Language, asksYou
     if (wait.nextCheck) return { at: wait.since, title };
     const reason = recorded && (wait.kind === 'run' || wait.kind === 'work') ? recorded.reason : null;
     const deadline = until && (setter ? t.tracker.wait.setBy(setter, until) : t.tracker.wait.until(until));
-    return { at: wait.since, title: t.tasks.waitStep(wait.who?.name ?? (setter || t.window.hornhoof), title), note: [reason, deadline].filter(Boolean).join(' · ') };
+    return { at: wait.since, title: t.tasks.waitStep(wait.who?.name ?? (setter || t.window.hornhoof), title), note: [reason, deadline, failureTodo(t, wait)].filter(Boolean).join(' · ') };
   });
 }
 

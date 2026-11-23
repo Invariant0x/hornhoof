@@ -1,5 +1,5 @@
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
-import type { WorldRelocationStored } from '@hornhoof/protocol/world';
+import type { WorldPackBehaviorSpec, WorldRelocationStored } from '@hornhoof/protocol/world';
 import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
 import type { QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
 import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, PROVIDER_IDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
@@ -255,6 +255,47 @@ export const worldLayouts = pgTable('world_layouts', {
   relocations: jsonb('relocations').$type<WorldRelocationStored[]>().notNull().default([]),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/* A theme the company installed from an archive (docs/theme-archive.md): only what passed its check, built anew. One
+   version of a theme id per company; uploading another version replaces it, files and all. */
+export const themes = pgTable(
+  'themes',
+  {
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    themeId: text('theme_id').notNull(),
+    version: text('version').notNull(),
+    manifest: jsonb('manifest').$type<Record<string, unknown>>().notNull(),
+    look: jsonb('look').$type<Record<string, unknown>>().notNull(),
+    fonts: jsonb('fonts').$type<Record<string, unknown>[]>().notNull().default([]),
+    /* The painted parts of the interface, carried and checked but not drawn yet. */
+    kit: jsonb('kit').$type<Record<string, unknown> | null>(),
+    world: jsonb('world').$type<Record<string, unknown> | null>(),
+    /* The world voice and names, written by Hornhoof from the archive's words (modules/themes/skills.ts). */
+    skills: jsonb('skills').$type<WorldPackBehaviorSpec | null>(),
+    size: integer('size').notNull(),
+    installedBy: uuid('installed_by').notNull().references(() => people.id),
+    installedAt: timestamp('installed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [primaryKey({ columns: [t.companyId, t.themeId] }), unique('themes_version').on(t.companyId, t.themeId, t.version)],
+);
+
+/* The files an installed theme serves, each served only as the type its check gave it. */
+export const themeFiles = pgTable(
+  'theme_files',
+  {
+    companyId: uuid('company_id').notNull(),
+    themeId: text('theme_id').notNull(),
+    version: text('version').notNull(),
+    path: text('path').notNull(),
+    mediaType: text('media_type').notNull(),
+    bytes: bytea('bytes').notNull(),
+    size: integer('size').notNull(),
+  },
+  t => [
+    primaryKey({ columns: [t.companyId, t.themeId, t.version, t.path] }),
+    foreignKey({ name: 'theme_files_theme', columns: [t.companyId, t.themeId, t.version], foreignColumns: [themes.companyId, themes.themeId, themes.version] }).onDelete('cascade'),
+  ],
+);
 
 export const sessions = pgTable(
   'sessions',
@@ -1705,7 +1746,9 @@ export const programOperatorSignals = pgTable('program_operator_signals', {
   caseId: uuid('case_id').notNull().references(() => programOperatorCases.id),
 }, t => [primaryKey({ columns: [t.agentId, t.instance, t.reason, t.evidenceKey] })]);
 
-export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as const;
+/* refused: Hornhoof refused what it was asked to run before any of it started, as a command a part may not run or a product
+   with no tests set up. It is a hint to the one who asked: no result, and no failure. */
+export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped', 'refused'] as const;
 
 /* A command an agent runs for a task on whichever machines of the company are free, in parts when it splits: the full
    test suite of a task's branch, or any other work, on a branch or in an empty folder with the task's files. The agent
@@ -1848,7 +1891,7 @@ export const updateWaits = pgTable('update_waits', {
   error: text('error'),
 }, t => [index('update_waits_open').on(t.endedAt), index('update_waits_company_since').on(t.companyId, t.since)]);
 
-export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
+export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped', 'refused'] as const;
 /* A machine that lost a part of a run as it ran: the place (a machine's id, or builtin), its name then, and why. */
 export type LostRun = { key: string; machine: string; why: string; computer?: string };
 

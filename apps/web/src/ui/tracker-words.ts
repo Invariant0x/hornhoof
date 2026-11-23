@@ -30,6 +30,9 @@ export function dueText(t: Messages, language: Language, task: Pick<TaskLine, 'd
   return { text: late ? t.tracker.late(day) : day, late };
 }
 
+/* What a person does about a failure, in plain words; none for a wait that is no failure. */
+export const failureTodo = (t: Messages, wait: TaskWaitFact): string | null => (wait.failure ? t.tracker.wait.todo[wait.failure] : null);
+
 export const waitClass = (wait: TaskWaitFact) => wait.failure ? 'failure' : isPersonWait(wait) ? 'person' : wait.event === 'time' ? 'scheduled' : 'working';
 
 export function waitLabel(t: Messages, task: WaitTask, wait: TaskWaitFact, now = Date.now(), language: Language = 'en', asksYou = false): string {

@@ -15,6 +15,11 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - An employee's open terminal stays connected when idle or on a personal-plan fallback machine: the server sends WebSocket keepalive pings and checks fallback placement consistently, the window keeps the terminal mounted across brief node drops, and unavoidable reconnects or program restarts recover without flashing the loader or losing scrollback history and reading position.
 - An employee's program that waits between turns no longer starts anew when the terminal showing it loses its connection for a moment: the node keeps it for 30 seconds after its last view went, so the view that comes back finds it. A view ended because its person may no longer see the agent holds it no longer, and a program whose agent moved to another plan still goes at once.
 - A merge of a copy's database no longer stops with "No merge rule for public.world_layouts": the company's city and the CEO's orders to move its buildings merge like a person's map, and two cities that differ keep the leading one and go to the orchestrator.
+- A task reaches Failures only for a cause that needs a person: a command Hornhoof refuses before it starts ends as refused, with the refusal told to its agent at once as a hint, and neither it, a stopped run, a turn that retries by itself after an overloaded provider or a usage limit, nor a turn replaced because its task moved on marks a task, the agent card or the map as failed; a stuck agent asking for help and a turn that failed with nothing to take it on now do, each until it is answered or a turn goes well, and the failure card says what to do. Refusals kept as failed runs become refused when the update runs.
+
+### Added
+
+- A theme is one zip archive (docs/theme-archive.md): the CEO uploads it in the theme store, Hornhoof checks every file in it as data and refuses one that holds code, links or more than its limits with what to fix and where, and an installed theme changes the interface's colours and fonts, the world map and the agents' world voice and names with no change to Hornhoof's code.
 
 ## [0.42.0] - 2026-11-23
 
