@@ -1207,8 +1207,8 @@ function bakeSmoothChunkRows(
   }
 }
 
-/* The darkest tint of painted water, in the middle of a wide river. */
-const PAINTED_DEEP_MAX = 0.75;
+/* How much darker the middle of a river is than the shallows' deep tint, with painted water. */
+const PAINTED_MIDDLE_EXTRA = 0.26;
 
 /* Slow light and dark patches over open water. */
 function waterPatches(u: number, v: number, coarse: Float32Array): number {
@@ -1238,10 +1238,12 @@ function waterTint(
   out: number,
 ): void {
   const patches = waterPatches(u, v, coarse);
-  /* Painted water keeps darkening past the shallows to the middle of the river, about four tiles out. */
+  const depth = smoothstep(-0.3, -2.0, d);
+  /* Painted water keeps darkening past the shallows to the middle of the river: the middle of an ordinary river lies
+     about two tiles from either shore. */
   const aDeep = drawLines
-    ? Math.min(0.85, depthShade * smoothstep(-0.3, -2.0, d) * patches)
-    : PAINTED_DEEP_MAX * (0.7 * smoothstep(-0.3, -2.0, d) + 0.3 * smoothstep(-1.6, -3.8, d)) * (0.85 + 0.375 * (patches - 0.8));
+    ? Math.min(0.85, depthShade * depth * patches)
+    : Math.min(0.5, depthShade * depth * patches) + PAINTED_MIDDLE_EXTRA * smoothstep(-0.9, -2.3, d) * patches;
   /* Painted water gets a light shallow band along the whole shore; procedural water a fainter one. */
   const aShallow = drawLines ? 0.24 * (1 - smoothstep(-0.3, -0.95, d)) : paintedShallowAlpha(u, v, d, coarse);
   const broken = drawLines ? Math.max(0, Math.min(1, 0.2 + 1.8 * sampleLutFast(detail, u * 6.1 - 7.3, v * 6.1 + 2.9))) : 0;

@@ -380,8 +380,8 @@ describe('Egypt map look from the design check', () => {
       /* Depth bins as [shallow end, deep end] of the water distance. */
       const bins = [
         [-0.6, -1.0],
-        [-1.8, -2.2],
-        [-3.0, -3.4],
+        [-1.4, -1.8],
+        [-2.4, -2.8],
       ] as const;
       const sum = bins.map(() => 0);
       const count = bins.map(() => 0);
@@ -417,7 +417,7 @@ describe('Egypt map look from the design check', () => {
       /* Darker step by step toward the middle, and the middle carries a deep tint. */
       expect(mean[1]!).toBeGreaterThan(mean[0]! + 20);
       expect(mean[2]!).toBeGreaterThan(mean[1]! + 20);
-      expect(mean[2]!).toBeGreaterThan(160);
+      expect(mean[2]!).toBeGreaterThan(180);
       /* No hard band: neighbouring water pixels never differ by more than a few levels of tint. */
       expect(steepest).toBeLessThanOrEqual(6);
     } finally {
