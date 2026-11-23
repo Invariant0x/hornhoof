@@ -203,6 +203,14 @@ const appliedLines = (t: Messages, applied: Applied): string[] => [
 
 /* The switch between the chat and the terminal names and draws what it opens, in every window and at every width.
    When a game world theme is active, the window stays in its human conversation view instead of raw terminal mode. */
+/* Once the live terminal is open, it stays mounted across brief node reconnects, when the agent's state says for a moment
+   that there is none; a real absence ends through onGone. */
+function useKeptTerminal(terminal: boolean, gone: boolean): boolean {
+  const [had, setHad] = useState(false);
+  if (terminal && !had) setHad(true);
+  return (terminal || had) && !gone;
+}
+
 function WindowToolbar({ t, terminal, isWorld, state, stop, onToggle }: { t: Messages; terminal: boolean; isWorld: boolean; state: OrchestratorState | null; stop(): void; onToggle(): void }) {
   return (
     <>
@@ -391,7 +399,6 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* The chat shows unless the person chose the terminal. */
   const [view, toggleView] = useAgentView();
   const [noTerminal, setNoTerminal] = useState(false);
-  const [hadTerminal, setHadTerminal] = useState(false);
   /* The machine commands he asked Hornhoof for. They are the CEO's alone: only the CEO's screen gets them, and shows them
      here, apart from his conversation. */
   const [commands, setCommands] = useState<ShownCommand[]>([]);
@@ -469,7 +476,6 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         if (n > stateFrom.current) {
           stateFrom.current = n;
           setState(res.state);
-          if (res.state.terminal) setHadTerminal(true);
         }
         if (res.events.length) last.current = Math.max(last.current, ...res.events.map(e => e.seq));
         if (fresh && res.events.length === KEEP) setOlder(true);
@@ -598,8 +604,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* Until its state and card come, the window cannot tell a terminal from a conversation, nor whether the agent can work. */
   const known = state !== null && (orchestrator || card !== null);
   const pictures = useDraftPictures(path);
-  /* Once the live terminal is open, keep it mounted across brief node reconnects; a real absence ends through onGone. */
-  const hasTerminal = (Boolean(state?.terminal) || hadTerminal) && !noTerminal;
+  const hasTerminal = useKeptTerminal(Boolean(state?.terminal), noTerminal);
   const terminal = !isWorld && view === 'terminal';
   /* The map already knows an employee's program, before its card comes. */
   const provider = sub?.provider ?? org.departments.flatMap(d => d.employees).find(e => e.id === agentId)?.provider;
