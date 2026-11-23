@@ -211,7 +211,11 @@ test('Stage 9: Egypt runs whole on placeholders when its art folder is empty', a
   const requested = await serveArt(page, egypt, null);
   await openLive(page, 'egypt');
   await settle(page);
-  expect(requested).toEqual(['art-index.json']);
+  /* Buildings, people, loops and flags ask only for the index; ground and plants (contract section 9) load
+     straight from the manifest's paths and fall back to their procedural look. */
+  const terrainArt = /^(ground|roads|decals|veg)\//;
+  expect(requested.filter(rel => !terrainArt.test(rel))).toEqual(['art-index.json']);
+  expect(requested.some(rel => terrainArt.test(rel))).toBe(true);
   const stats = await artStats(page);
   expect(stats).toMatchObject({ indexedFiles: 0, loadedTextures: 0, buildingsDrawn: 0, residentsDrawn: 0 });
   await centreOn(page, 'residence', 1);
