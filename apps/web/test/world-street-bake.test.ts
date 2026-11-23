@@ -130,6 +130,49 @@ describe('a street baked into the ground', () => {
   });
 });
 
+/* A strip whose green tells the strip row a pixel was taken from: the row is how far across the street it lies. */
+function rowStrip(width: number): ArtPixels {
+  const base = strip(width);
+  const data = new Uint8ClampedArray(base.data);
+  for (let y = 0; y < base.height; y++) for (let x = 0; x < base.width; x++) data[(y * base.width + x) * 4 + 1] = y;
+  return { ...base, data };
+}
+
+describe('the ruts along a street', () => {
+  const rows = rowStrip(0.8);
+  const rowAcross = (offset: number) => Math.floor(rows.height / 2 + offset * TPT);
+
+  it('run straight from tile to tile with no ring where one tile meets the next', () => {
+    const field = streetField(tiles('dirt', ARM_U), { ...STRIPS, dirt: rows }, TPT)!;
+    const out = [0, 0, 0, 0];
+    for (const offset of [-0.3, -0.15, 0, 0.15, 0.3]) {
+      for (let u = 3.5; u <= 7.5; u += 1 / (2 * TPT)) {
+        field.at(u, 5.5 + offset, out);
+        expect(Math.round(out[1]!), `${offset} across at u ${u.toFixed(3)}`).toBe(rowAcross(offset));
+      }
+    }
+  });
+
+  it('run straight on to where a street ends and fade out there, instead of turning round its end', () => {
+    const field = streetField(tiles('dirt', ARM_U), { ...STRIPS, dirt: rows }, TPT)!;
+    const out = [0, 0, 0, 0];
+    for (const offset of [-0.2, 0, 0.2]) {
+      for (let past = 0; past < 0.4; past += 1 / TPT) {
+        field.at(7.5 + past, 5.5 + offset, out);
+        if (out[3]! < 0.05) continue;
+        expect(Math.round(out[1]!), `${offset} across, ${past.toFixed(3)} past the end`).toBe(rowAcross(offset));
+      }
+      field.at(3.5 - 0.1, 5.5 + offset, out);
+      expect(Math.round(out[1]!), `${offset} across, before the start`).toBe(rowAcross(offset));
+    }
+    /* The end itself stays round: it fades sooner off the middle line. */
+    field.at(7.5 + 0.3, 5.5, out);
+    const middle = out[3]!;
+    field.at(7.5 + 0.3, 5.5 + 0.25, out);
+    expect(out[3]!).toBeLessThan(middle);
+  });
+});
+
 describe('a street and the bridge', () => {
   it('runs into the bridge up to the edge of its first water tile, and lays nothing on the bridge itself', () => {
     const cells: StreetTile[] = [...tiles('dirt', [[3, 5], [4, 5], [5, 5]]), { col: 6, row: 5, tier: 'dirt', bridge: true }, { col: 7, row: 5, tier: 'dirt', bridge: true }];
