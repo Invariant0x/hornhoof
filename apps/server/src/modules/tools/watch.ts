@@ -25,6 +25,8 @@ import type { Grant } from '../templates/load.js';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
 import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
 import { agentSeesTask } from '../tasks/views.js';
+import { checksTask } from '../tasks/look-checker.js';
+import { taskByRef } from '../tasks/lookup.js';
 import { authorizeAccess } from '../program-operator/access.js';
 import { OPERATIONS_ROLES } from '../program-operator/staff.js';
 import { registerOperatorTools, registerProgramAccessTools, registerStopTool } from '../program-operator/tools.js';
@@ -554,8 +556,15 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       .limit(1);
     return !answered;
   };
-  /* Who may write to whom: within reach, or answering the one who wrote last. */
-  const reachable = async (me: Agent, target: Agent) => (await inReach(me, target)) || (await owesAnswer(me, target));
+  /* The one who sees a task writes about it to the head of another department named on its open wait, as for a look check. */
+  const checksFor = async (me: Agent, target: Agent, ref: number | string | undefined): Promise<boolean> => {
+    if (ref === undefined) return false;
+    const task = await taskByRef(ctx, job.companyId, ref);
+    return Boolean(task && agentSeesTask(me, task) && await checksTask(db, target, task));
+  };
+  /* Who may write to whom: within reach, answering the one who wrote last, or about a task to the head named to check it. */
+  const reachable = (ref: number | string | undefined) => async (me: Agent, target: Agent) =>
+    (await inReach(me, target)) || (await owesAnswer(me, target)) || (await checksFor(me, target, ref));
 
   server.registerTool(
     'message_employee',
@@ -564,13 +573,14 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         ? `Writes to another employee, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Use it to nudge a stuck agent or to tell a head.`
         : `Writes to another employee of your department, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Ask the one whose work yours builds on, or the one whose findings you do not understand, instead of waiting for your head.`) +
         ' It also answers the one who wrote to you last, in any department, with one message: an answer in your window reaches only people, never an agent.' +
+        ' Naming a task you see, it also reaches the head of another department that task\'s open work names with track_work, such as the head who checks its look.' +
         ' Write to the orchestrator with it at any time: it helps every employee.' +
         MESSAGE_TASK_HINT,
       inputSchema: { employee: z.uuid().describe("The employee's id, from agents or company."), text: Text.trim().min(1), task: TaskReference.optional() },
     },
     async ({ employee, text, task: ref }) => {
       if (carriesFile(text)) return say(encodedHint(), true);
-      const parties = await partiesOf(ctx, job, employee, reachable);
+      const parties = await partiesOf(ctx, job, employee, reachable(ref));
       if ('reason' in parties) return refused(ctx, job, parties, employee, ref);
       const { me, target } = parties;
       const state = await agentState(ctx, target.id);
