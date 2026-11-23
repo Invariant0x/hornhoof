@@ -66,7 +66,7 @@ import {
 import { renderResidentsFallback2D, renderResidentsToPixi, type ResidentArtContext } from './residents-renderer';
 import { PlantRenderer, type PlantStats } from './plant-renderer';
 import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas, smoothPixelsToCanvas, startSmoothChunkBake, type SmoothChunkBake } from './smooth-terrain-baker';
-import { loadTerrainArt, terrainArtFor, type ArtPixels } from './terrain-art';
+import { loadTerrainArt, terrainArtFor, type ArtPixels, type LoadedTerrainArt } from './terrain-art';
 import type { GeneratedWorldMap } from './terrain-engine';
 
 export type RendererKind = 'webgl' | 'canvas2d';
@@ -235,6 +235,10 @@ export class IsometricWorldEngine {
   private readonly chunkCache = new ChunkLruCache<CachedChunkEntry>(CHUNK_CACHE_CAP);
   /* Smooth chunk bakes in progress, a few rows per frame, by cache key; only chunks still in view keep theirs. */
   private readonly bakeJobs = new Map<string, SmoothChunkBake>();
+  /* The painted art this engine draws with, fixed when it mounts: art that arrives later stays out of this session, so
+     ground, water and plants never mix painted and procedural pictures. */
+  private art: LoadedTerrainArt | null = null;
+  private artPinned = false;
   private visibleChunkList: ChunkCoord[] = [];
   private pendingBakeCount = 0;
 
@@ -337,6 +341,7 @@ export class IsometricWorldEngine {
         app.destroy(true, { children: true, texture: true });
         return;
       }
+      this.useArt(terrainArtFor(this.pack));
       this.app = app;
       this.rendererKind = 'webgl';
       this.canvasElement = app.canvas;
@@ -360,7 +365,7 @@ export class IsometricWorldEngine {
       const borderGraphic = new Graphics();
       const overlayGraphic = new Graphics();
 
-      const paintedLiquid = terrainArtFor(this.pack)?.liquid ?? null;
+      const paintedLiquid = this.art?.liquid ?? null;
       if (this.terrainMap && this.pack.liquidLayer && paintedLiquid) {
         this.mountPaintedLiquid(liquidLayer, paintedLiquid);
       } else if (this.terrainMap && this.pack.liquidLayer) {
@@ -517,6 +522,7 @@ export class IsometricWorldEngine {
     this.fallbackCtx = canvas.getContext('2d');
     this.canvasElement = canvas;
     this.rendererKind = 'canvas2d';
+    this.useArt(terrainArtFor(this.pack));
     if (this.terrainMap && this.pack.liquidLayer) {
       this.liquidCanvas = buildLiquidSurfaceCanvas(this.pack.liquidLayer, 256);
     }
@@ -1147,9 +1153,17 @@ export class IsometricWorldEngine {
     this.bakeJobs.delete(key);
     const baked =
       this.terrainMap && this.hasSmoothGround()
-        ? bakeSmoothChunkCanvas(chunk, this.terrainMap, this.pack, lod)
+        ? bakeSmoothChunkCanvas(chunk, this.terrainMap, this.pack, lod, this.art)
         : bakeChunkCanvas(chunk, this.pack, this.tileLookup, lod, this.resolveTileId);
     return this.cacheBakedChunk(key, baked);
+  }
+
+  /* The first mount that gets this far fixes the art; a fallback after a failed GPU start keeps the same art. */
+  private useArt(art: LoadedTerrainArt | null): void {
+    if (this.artPinned) return;
+    this.artPinned = true;
+    this.art = art;
+    this.plantRenderer?.useArt(art);
   }
 
   private hasSmoothGround(): boolean {
@@ -1165,7 +1179,7 @@ export class IsometricWorldEngine {
     if (!this.terrainMap || !this.hasSmoothGround()) return this.ensureChunkBaked(chunk, lod);
     let job = this.bakeJobs.get(key);
     if (!job) {
-      job = startSmoothChunkBake(chunk, this.terrainMap, this.pack, lod);
+      job = startSmoothChunkBake(chunk, this.terrainMap, this.pack, lod, this.art);
       this.bakeJobs.set(key, job);
     }
     if (!job.advance(deadline, () => performance.now())) return null;

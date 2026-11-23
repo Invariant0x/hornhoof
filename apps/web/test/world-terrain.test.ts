@@ -2,10 +2,12 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildChunkGrid } from '../src/world/chunks';
+import { worldToTileFloat } from '../src/world/coords';
 import { DEFAULT_ISOMETRIC_PROJECTION, validateWorldPack } from '../src/world/manifest';
 import {
   bakeSmoothChunkPixels,
   buildLiquidSurfacePixels,
+  displayedWaterDistance,
   getMaterialTextureRgb,
   sampleCornerFieldBilinear,
   startSmoothChunkBake,
@@ -15,6 +17,7 @@ import {
   generateWorldTerrain,
   verifyTileContinuity,
 } from '../src/world/terrain-engine';
+import { registerTerrainArt, type ArtPixels, type LoadedTerrainArt } from '../src/world/terrain-art';
 import { DUNGEON_WORLD_PACK } from '../src/world-packs/dungeon/pack';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
 
@@ -272,6 +275,96 @@ describe('Stage 2 pack-owned procedural generation and modularity', () => {
         expect(horizRatio, `${pack.id} liquid horizontal wrap seam`).toBeLessThan(1.15);
         expect(vertRatio, `${pack.id} liquid vertical wrap seam`).toBeLessThan(1.15);
       }
+    }
+  });
+});
+
+describe('painted art in the ground baker', () => {
+  const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: 'hornhoof', mapSize: 150 });
+  const grid = buildChunkGrid(150, 4, DEFAULT_ISOMETRIC_PROJECTION.defaultTileW, DEFAULT_ISOMETRIC_PROJECTION.defaultTileH);
+  const lod2x = DEFAULT_ISOMETRIC_PROJECTION.lods.find(l => l.id === '2x')!;
+  const shoreChunk = grid.chunks.find(ch => {
+    const ids = new Set<string | null>();
+    for (let r = ch.rowStart; r < ch.rowEnd; r++) for (let c = ch.colStart; c < ch.colEnd; c++) ids.add(map.tileAt(c, r));
+    return ids.has('river') && (ids.has('bank') || ids.has('fertile'));
+  })!;
+
+  /* A flat seamless picture for every ground, as a painted set would bring. */
+  const flat = (rgb: readonly [number, number, number]): ArtPixels => {
+    const data = new Uint8ClampedArray(64 * 64 * 4);
+    for (let i = 0; i < data.length; i += 4) data.set([rgb[0], rgb[1], rgb[2], 255], i);
+    return { data, width: 64, height: 64 };
+  };
+  const art = (ground: boolean): LoadedTerrainArt => ({
+    ground: new Map(ground ? map.cornerFields.materialIds.map((id, i) => [id, flat([90 + i * 20, 140, 60 + i * 15])] as const) : []),
+    texelsPerTile: 256,
+    edges: new Map(),
+    defaultEdge: null,
+    shoreEdge: null,
+    liquid: null,
+    pathStrip: null,
+    plants: new Map([['date_palm', []]]),
+  });
+  const same = (a: Uint8ClampedArray, b: Uint8ClampedArray) => Buffer.from(a).equals(Buffer.from(b));
+  const procedural = () => {
+    registerTerrainArt(EGYPT_WORLD_PACK, null);
+    return bakeSmoothChunkPixels(shoreChunk, map, EGYPT_WORLD_PACK, lod2x).rgba;
+  };
+
+  it('draws with the art an engine pinned, so art that arrives later never mixes into its picture', () => {
+    const before = procedural();
+    registerTerrainArt(EGYPT_WORLD_PACK, art(true));
+    try {
+      expect(same(bakeSmoothChunkPixels(shoreChunk, map, EGYPT_WORLD_PACK, lod2x).rgba, before)).toBe(false);
+      expect(same(bakeSmoothChunkPixels(shoreChunk, map, EGYPT_WORLD_PACK, lod2x, null).rgba, before)).toBe(true);
+      const job = startSmoothChunkBake(shoreChunk, map, EGYPT_WORLD_PACK, lod2x, null);
+      expect(job.advance(Infinity, () => 0)).toBe(true);
+      expect(same(job.pixels.rgba, before)).toBe(true);
+    } finally {
+      registerTerrainArt(EGYPT_WORLD_PACK, null);
+    }
+  });
+
+  it('keeps the procedural ground when the art brought only plants', () => {
+    const before = procedural();
+    registerTerrainArt(EGYPT_WORLD_PACK, art(false));
+    try {
+      expect(same(bakeSmoothChunkPixels(shoreChunk, map, EGYPT_WORLD_PACK, lod2x).rgba, before)).toBe(true);
+    } finally {
+      registerTerrainArt(EGYPT_WORLD_PACK, null);
+    }
+  });
+
+  it('feathers the shore procedurally when painted ground has no shore mask', () => {
+    registerTerrainArt(EGYPT_WORLD_PACK, art(true));
+    try {
+      const baked = bakeSmoothChunkPixels(shoreChunk, map, EGYPT_WORLD_PACK, lod2x);
+      const { defaultTileW: tw, defaultTileH: th } = DEFAULT_ISOMETRIC_PROJECTION;
+      /* Just inside the waterline the land fades into the water; well inland it is opaque. */
+      let edgeAlpha = 0;
+      let edgeN = 0;
+      let inlandOpaque = 0;
+      let inlandN = 0;
+      for (let py = 0; py < baked.pixelHeight; py++) {
+        for (let px = 0; px < baked.pixelWidth; px++) {
+          const t = worldToTileFloat(baked.worldX + (px + 0.5) / baked.scale, baked.worldY + (py + 0.5) / baked.scale, tw, th);
+          if (t.col < shoreChunk.colStart || t.col >= shoreChunk.colEnd || t.row < shoreChunk.rowStart || t.row >= shoreChunk.rowEnd) continue;
+          const d = displayedWaterDistance(map.cornerFields, t.col, t.row);
+          const a = baked.rgba[(py * baked.pixelWidth + px) * 4 + 3]!;
+          if (d > -0.2 && d < -0.05) {
+            edgeAlpha += a;
+            edgeN++;
+          } else if (d > 1) {
+            inlandN++;
+            if (a === 255) inlandOpaque++;
+          }
+        }
+      }
+      expect(edgeN).toBeGreaterThan(50);
+      expect(edgeAlpha / edgeN).toBeLessThan(200);
+      expect(inlandOpaque).toBe(inlandN);
+    } finally {
+      registerTerrainArt(EGYPT_WORLD_PACK, null);
     }
   });
 });

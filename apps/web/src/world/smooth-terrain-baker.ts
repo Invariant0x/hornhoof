@@ -815,14 +815,17 @@ function smoothChunkRaster(chunk: ChunkCoord, pack: WorldPackManifest, lod: LodT
   };
 }
 
+/* `art` is the painted art the bake draws with: by default what has loaded for the pack; an engine passes the art it
+   started with, so art that arrives later never mixes into its picture. */
 export function bakeSmoothChunkPixels(
   chunk: ChunkCoord,
   map: GeneratedWorldMap,
   pack: WorldPackManifest,
   lod: LodTierSpec,
+  art: LoadedTerrainArt | null = terrainArtFor(pack),
 ): SmoothBakedPixels {
   const raster = smoothChunkRaster(chunk, pack, lod);
-  bakeSmoothChunkRows(chunk, map, pack, raster, 0, raster.pixelHeight);
+  bakeSmoothChunkRows(chunk, map, pack, art, raster, 0, raster.pixelHeight);
   return raster;
 }
 
@@ -841,6 +844,7 @@ export function startSmoothChunkBake(
   map: GeneratedWorldMap,
   pack: WorldPackManifest,
   lod: LodTierSpec,
+  art: LoadedTerrainArt | null = terrainArtFor(pack),
 ): SmoothChunkBake {
   const pixels = smoothChunkRaster(chunk, pack, lod);
   let next = 0;
@@ -849,7 +853,7 @@ export function startSmoothChunkBake(
     advance: (deadline, now) => {
       while (next < pixels.pixelHeight) {
         const end = Math.min(pixels.pixelHeight, next + BAKE_SLICE_ROWS);
-        bakeSmoothChunkRows(chunk, map, pack, pixels, next, end);
+        bakeSmoothChunkRows(chunk, map, pack, art, pixels, next, end);
         next = end;
         if (now() >= deadline) break;
       }
@@ -864,6 +868,7 @@ function bakeSmoothChunkRows(
   chunk: ChunkCoord,
   map: GeneratedWorldMap,
   pack: WorldPackManifest,
+  art: LoadedTerrainArt | null,
   raster: SmoothBakedPixels,
   pyStart: number,
   pyEnd: number,
@@ -874,7 +879,7 @@ function bakeSmoothChunkRows(
   const invScale = 1 / scale;
 
   const cf = map.cornerFields;
-  const look = groundLook(map, pack);
+  const look = groundLook(map, pack, art);
   const { textures, matCount } = look;
 
   const liquid = pack.liquidLayer;
@@ -978,7 +983,7 @@ function bakeSmoothChunkRows(
          and lightens the shallows, with a few broken ripple lines along the shore. */
       if (dWater < -0.26) {
         if (depthShade <= 0 || !owned) continue;
-        waterTint(u, v, dWater, depthShade, painted ? deepRgb : deepTint, shallowRgb, foamRgb, coarse, detail, !painted, rgba, out);
+        waterTint(u, v, dWater, depthShade, look.paintedWater ? deepRgb : deepTint, shallowRgb, foamRgb, coarse, detail, !look.paintedWater, rgba, out);
         continue;
       }
 
@@ -1110,7 +1115,7 @@ function bakeSmoothChunkRows(
           b = (b * landA + shallowRgb[2] * 1.05 * under) / outA;
         }
         alpha = clampByte(outA * 255);
-      } else if (!painted && dWater < 0.75) {
+      } else if (!shore && dWater < 0.75) {
         if (isGlowLiquid) {
           /* Warm emissive rim glow hugging the curved coastline smoothly. */
           const wetFactor = 1 - smoothstep(0.05, 0.62, dWater);
@@ -1389,8 +1394,10 @@ type GroundLook = Readonly<{
   plot: PlotLayout | null;
   plotRowsV: GroundTex | null;
   path: PathLook | null;
-  /* Painted look; null draws everything procedurally. */
+  /* Painted ground; null draws the ground procedurally. Art that brought no ground textures counts as none. */
   art: LoadedTerrainArt | null;
+  /* Whether the water layer above is painted (its tint style follows it). */
+  paintedWater: boolean;
   /* edges[a * matCount + b]: the painted mask between grounds a and b. */
   edges: readonly (EdgeLook | null)[];
   plotEdge: EdgeLook | null;
@@ -1440,10 +1447,11 @@ export function tilledPlotAt(map: GeneratedWorldMap, pack: WorldPackManifest, u:
   return plotTilled(map.cornerFields, p, cx, Math.floor((v + plotOffset(p, cx)) / p.sizeV));
 }
 
-function groundLook(map: GeneratedWorldMap, pack: WorldPackManifest): GroundLook {
-  const art = terrainArtFor(pack);
+function groundLook(map: GeneratedWorldMap, pack: WorldPackManifest, pinned: LoadedTerrainArt | null = terrainArtFor(pack)): GroundLook {
   const hit = lookCache.get(map);
-  if (hit && hit.pack === pack && hit.art === art) return hit.look;
+  if (hit && hit.pack === pack && hit.art === pinned) return hit.look;
+  /* A missing file keeps the procedural look: art that loaded only plants leaves the ground procedural. */
+  const art = pinned && pinned.ground.size > 0 ? pinned : null;
   const cf = map.cornerFields;
   const matById = new Map((pack.materials ?? []).map(m => [m.id, m]));
   const specs: GroundMaterialSpec[] = cf.materialIds.map(
@@ -1513,12 +1521,13 @@ function groundLook(map: GeneratedWorldMap, pack: WorldPackManifest): GroundLook
     plotRowsV,
     path,
     art,
+    paintedWater: Boolean(pinned?.liquid),
     edges,
     plotEdge,
     grassForPlots,
     ditch: surface ? artTex(surface, tpt) : null,
   };
-  lookCache.set(map, { pack, art, look });
+  lookCache.set(map, { pack, art: pinned, look });
   return look;
 }
 
@@ -1642,8 +1651,9 @@ export function bakeSmoothChunkCanvas(
   map: GeneratedWorldMap,
   pack: WorldPackManifest,
   lod: LodTierSpec,
+  art: LoadedTerrainArt | null = terrainArtFor(pack),
 ): BakedChunk {
-  return smoothPixelsToCanvas(bakeSmoothChunkPixels(chunk, map, pack, lod), lod.id);
+  return smoothPixelsToCanvas(bakeSmoothChunkPixels(chunk, map, pack, lod, art), lod.id);
 }
 
 /* A baked raster on a canvas, ready for upload to the GPU or for drawing in 2D. */

@@ -9,7 +9,7 @@ import type { WorldPackManifest } from './manifest';
 import { createDrawList, ITEM_STRIDE, PlantLayout, type PlantDrawList } from './plant-layer';
 import { buildPlantAtlas, MESH_COLS, MESH_ROWS, type PlantAtlas } from './plant-sprites';
 import { generatePlants, type PlantField } from './plants';
-import { terrainArtFor } from './terrain-art';
+import type { LoadedTerrainArt } from './terrain-art';
 import type { GeneratedWorldMap } from './terrain-engine';
 
 const MESH_VERTS = MESH_COLS * MESH_ROWS;
@@ -122,6 +122,8 @@ export class PlantRenderer {
   private readonly matrix = new Matrix();
   private tintedAtlas: HTMLCanvasElement | null = null;
   private inView = 0;
+  /* The painted plants to draw with, as the engine fixed them when it mounted; none draws procedural plants. */
+  private art: LoadedTerrainArt | null = null;
 
   private constructor(pack: WorldPackManifest, field: PlantField) {
     this.pack = pack;
@@ -143,10 +145,15 @@ export class PlantRenderer {
     return { total: this.field.plants.length, inView: this.inView, drawn: this.list.count - this.list.shadowCount, byKind, leanSpan: this.layout ? this.layout.leanMax - this.layout.leanMin : 0 };
   }
 
+  /* The art to build the plant pictures from; once they are built they stay for the session. */
+  useArt(art: LoadedTerrainArt | null): void {
+    if (!this.atlas) this.art = art;
+  }
+
   private ensureAtlas(): PlantAtlas {
     if (!this.atlas) {
       const pxToWorld = this.pack.projection.defaultTileW / masterTileW(this.pack);
-      this.atlas = buildPlantAtlas(this.pack, terrainArtFor(this.pack), pxToWorld);
+      this.atlas = buildPlantAtlas(this.pack, this.art, pxToWorld);
       this.layout = new PlantLayout({ pack: this.pack, field: this.field, sprites: this.atlas.sprites, lighting: this.pack.lighting });
     }
     return this.atlas;
