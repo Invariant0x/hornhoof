@@ -648,6 +648,7 @@ export const ru: Messages = {
       deleted: name => `Тема «${name}» удалена.`,
       deleteConfirm: name => `Удалить тему «${name}» со всеми файлами? Если она включена, компания вернется к теме Cyberpunk.`,
       cover: name => `Картинка темы «${name}»`,
+      license: id => `Лицензия: ${id}`,
       deleteYes: 'Удалить тему',
       deleteNo: 'Оставить',
       problems: {

@@ -631,6 +631,7 @@ export const en = {
       deleted: (name: string) => `${name} is deleted.`,
       deleteConfirm: (name: string) => `Delete ${name} with all its files? If it is on, the company goes back to Cyberpunk.`,
       cover: (name: string) => `Picture of ${name}`,
+      license: (id: string) => `License: ${id}`,
       deleteYes: 'Delete theme',
       deleteNo: 'Keep it',
       problems: {
@@ -660,7 +661,7 @@ export const en = {
         file_missing: path => `${path} is named in the theme but missing from the archive. Add it.`,
         too_many_of_kind: path => `${path} is one too many of its kind. Keep one.`,
         theme_missing: () => 'The archive has no theme.json. Put it at the top of the theme folder.',
-        license_missing: () => 'The archive has no LICENSE. Add the licence of its pictures, fonts and words.',
+        license_missing: () => 'The archive has no LICENSE. Add the license of its pictures, fonts and words.',
         look_missing: () => 'The archive has no ui/look.json. Every theme sets the look of the interface.',
         engine_3d: () => 'This theme needs a 3D world, which Hornhoof does not have yet. Set engine to iso2d or none in theme.json.',
         engine_none_world: path => `${path} belongs to a theme with a world. Set engine to iso2d in theme.json, or remove it.`,

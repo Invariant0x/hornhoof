@@ -166,6 +166,14 @@ function SkinCard({ card, on, canDelete, onApply, onDownload, onRemove }: CardPr
         </div>
         <p className="skin-meta">{origin}</p>
         <p className="skin-meta">{card.desc}</p>
+        {card.installed && (
+          /* The licence the theme's archive gave, word for word, for whoever puts it on. */
+          <p className="skin-meta">
+            <a href={card.installed.licenseFile} target="_blank" rel="noopener noreferrer">
+              {words.archive.license(card.installed.license)}
+            </a>
+          </p>
+        )}
         {world && <p className="skin-perf-note">{words.perfNote}</p>}
       </div>
       <div className="entry-actions skin-actions">

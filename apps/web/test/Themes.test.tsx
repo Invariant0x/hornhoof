@@ -1,3 +1,4 @@
+import type { InstalledThemeView } from '@hornhoof/protocol/themes';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +8,7 @@ import { Shell } from '../src/screens/Shell';
 import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
 import { COLOR_TOKENS, type Skin } from '../src/skins/roles';
 import { initSkins, skinsState } from '../src/skins/store';
+import { forgetInstalledTheme } from '../src/themes/installed';
 import { builtinFile, parseSkin, SKIN_FILE_LIMIT, skinText } from '../src/skins/validate';
 import { ME, mockApi, ORG } from './api-mock';
 import { decl } from './css';
@@ -364,6 +366,105 @@ describe('the collection of a person\'s own skins', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Remove: Dawn' }));
     expect(within(dialog).getByRole('status')).toHaveTextContent('“Dawn” was removed.Undo');
     expect(state(cards(dialog)[5]!)).toHaveFocus();
+  });
+});
+
+/* A theme the company uploaded as one archive (docs/theme-archive.md): the CEO uploads it, the server checks and keeps it,
+   and its card stands in the store with its licence, to be applied like any theme, or deleted after a second ask. */
+describe('themes uploaded as an archive', () => {
+  const BASE = '/api/themes/files/night-shift/1.0.0/';
+  /* The look of an archive: a skin with no id of a built-in one, here Pixel's on another ground. */
+  const pixel = builtinSkin('pixel')!;
+  const LOOK = { ...Object.fromEntries(Object.entries(pixel).filter(([key]) => key !== 'id')), colors: { ...pixel.colors, bg: '#0A0B0C' } };
+  const VIEW: InstalledThemeView = {
+    id: 'night-shift', version: '1.0.0', name: { en: 'Night shift', ru: 'Ночная смена' }, description: { en: 'For the night.', ru: 'Для ночи.' }, author: 'Test',
+    license: 'CC0-1.0', engine: 'none', languages: ['en', 'ru'], base: BASE, cover: null, shots: [], licenseFile: `${BASE}LICENSE`, hasWorld: false, hasKit: false,
+    size: 2048, installedAt: '2026-11-23T10:00:00.000Z',
+  };
+  const zip = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], 'night-shift.zip', { type: 'application/zip' });
+  const upload = (dialog: HTMLElement) => dialog.querySelector<HTMLInputElement>('input[data-upload-input]')!;
+
+  function renderStore(routes: Record<string, Parameters<typeof mockApi>[0][string]>) {
+    let themes: InstalledThemeView[] = [];
+    const calls = mockApi({
+      'GET /api/org': [200, ORG],
+      'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }],
+      'GET /api/world/theme': [200, { theme: 'cyberpunk', activePack: null, canEdit: true }],
+      'PUT /api/world/theme': body => [200, { theme: (body as { theme: string }).theme, activePack: null, canEdit: true }],
+      'GET /api/themes': () => [200, { themes }],
+      'POST /api/themes': () => {
+        themes = [VIEW];
+        return [201, { themes }];
+      },
+      'GET /api/themes/night-shift/look': [200, { id: VIEW.id, version: VIEW.version, base: BASE, look: LOOK, fonts: [], kit: null, world: null }],
+      'DELETE /api/themes/night-shift': () => {
+        themes = [];
+        return [200, { themes }];
+      },
+      ...routes,
+    });
+    render(
+      <LanguageProvider>
+        <Shell me={ME} onSignOut={() => {}} />
+      </LanguageProvider>,
+    );
+    return calls;
+  }
+
+  afterEach(() => forgetInstalledTheme(VIEW.id));
+
+  it('installs an archive the CEO uploads: its card comes into the store with its licence, focused, and applies like any theme', async () => {
+    const user = userEvent.setup();
+    const calls = renderStore({});
+    const dialog = await openThemes(user);
+    await user.upload(upload(dialog), zip);
+    const card = await within(catalog(dialog)).findByText('Night shift');
+    const item = card.closest('li')!;
+    expect(within(dialog).getByRole('status')).toHaveTextContent('Night shift is installed. Apply it in its card to turn it on for the company.');
+    expect(within(item).getByText('Uploaded')).toBeInTheDocument();
+    const licence = within(item).getByRole('link', { name: 'License: CC0-1.0' });
+    expect([licence.getAttribute('href'), licence.getAttribute('target'), licence.getAttribute('rel')]).toEqual([`${BASE}LICENSE`, '_blank', 'noopener noreferrer']);
+    expect(within(item).getByRole('button', { name: 'Apply: Night shift' })).toHaveFocus();
+    expect(labels(item)).toEqual(['Apply: Night shift', 'Remove: Night shift']);
+    expect(calls.filter(call => call.method === 'POST').map(call => call.path)).toEqual(['/api/themes']);
+
+    await user.click(within(item).getByRole('button', { name: 'Apply: Night shift' }));
+    expect(calls.filter(call => call.method === 'PUT' && call.path === '/api/world/theme').map(call => call.body)).toEqual([{ theme: 'night-shift' }]);
+    expect(root.dataset.theme).toBe('night-shift');
+    expect(root.style.getPropertyValue(COLOR_TOKENS.bg)).toBe('#0A0B0C');
+  });
+
+  it('says what is wrong with a refused archive and where, and gives the focus back to Upload theme', async () => {
+    const user = userEvent.setup();
+    renderStore({
+      'POST /api/themes': [422, { error: { code: 'validation', message: 'Refused.', reason: 'theme_refused', details: { problem: { code: 'file_script', path: 'ui/kit/run.js' } } } }],
+    });
+    const dialog = await openThemes(user);
+    await user.upload(upload(dialog), zip);
+    const alert = await within(dialog).findByRole('alert');
+    expect(alert).toHaveTextContent('The theme was not installed');
+    expect(alert).toHaveTextContent('ui/kit/run.js is a script, a page or a style sheet. A theme holds no code: remove it.');
+    expect(within(dialog).getByRole('button', { name: 'Upload theme' })).toHaveFocus();
+    expect(within(catalog(dialog)).queryByText('Night shift')).toBeNull();
+  });
+
+  it('deletes an uploaded theme only after a second ask, and a theme that was on gives way to Cyberpunk', async () => {
+    const user = userEvent.setup();
+    const calls = renderStore({});
+    const dialog = await openThemes(user);
+    await user.upload(upload(dialog), zip);
+    await user.click(await within(dialog).findByRole('button', { name: 'Apply: Night shift' }));
+    const item = within(catalog(dialog)).getByText('Night shift').closest('li')!;
+    await user.click(within(item).getByRole('button', { name: 'Remove: Night shift' }));
+    const ask = within(item).getByRole('group', { name: 'Delete Night shift with all its files? If it is on, the company goes back to Cyberpunk.' });
+    await user.click(within(ask).getByRole('button', { name: 'Keep it' }));
+    expect(calls.some(call => call.method === 'DELETE')).toBe(false);
+    await user.click(within(item).getByRole('button', { name: 'Remove: Night shift' }));
+    await user.click(within(item).getByRole('button', { name: 'Delete theme' }));
+    expect(calls.filter(call => call.method === 'DELETE').map(call => call.path)).toEqual(['/api/themes/night-shift']);
+    expect(within(catalog(dialog)).queryByText('Night shift')).toBeNull();
+    expect(within(dialog).getByRole('status')).toHaveTextContent('Night shift is deleted.');
+    expect(skinsState().active).toBe('cyberpunk');
   });
 });
 
