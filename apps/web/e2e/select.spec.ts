@@ -188,9 +188,12 @@ async function serveSelectScreens(page: Page) {
           {
             id: 'prop-staff',
             kind: 'staff',
+            agent: { id: 'a1', name: 'Orchestrator' },
             brief: 'Hire the backend engineer.',
             department: LONG_DEPT,
+            at: '2026-11-06T09:00:00.000Z',
             ownerPersonId: 'p1',
+            canAnswer: true,
             items: [{ role: 'DEV-BE', name: 'Backend engineer', product: null, model: '', subscription: 's-claude', skills: [] }],
           },
         ],
