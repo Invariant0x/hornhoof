@@ -174,6 +174,30 @@ describe('the world of a theme archive', () => {
     }
   });
 
+  /* A world with smooth ground names how a building lot clears it (#1958): the field goes into the archive with the world
+     and is held to the engine's own check. */
+  it('carries the lot ground of a world with smooth ground, and refuses one the ground does not blend', () => {
+    for (const pack of registeredWorldPacks().filter(one => one.lotGround)) {
+      const data = dataOfWorldPack(pack) as Raw;
+      expect(data.lotGround, pack.id).toEqual(pack.lotGround);
+      expect(worldPackOfData('t-1', data, BASE), pack.id).toMatchObject({ ok: true, pack: { lotGround: pack.lotGround } });
+    }
+    const egypt = dataOfWorldPack(registeredWorldPacks().find(one => one.id === 'egypt')!) as Raw;
+    expect(worldPackOfData('t-1', { ...egypt, lotGround: { ...(egypt.lotGround as Raw), material: 'lava' } }, BASE)).toEqual({
+      ok: false,
+      errors: ['lotGround references material "lava" the ground does not blend'],
+    });
+    expect(worldPackOfData('t-1', Object.fromEntries(Object.entries(egypt).filter(([key]) => key !== 'lotGround')), BASE)).toEqual({
+      ok: false,
+      errors: ['lotGround is required with smooth ground materials'],
+    });
+    const shape = 'lotGround must be { material, edgeTiles, regrowthHours }: a material id and two numbers';
+    for (const lotGround of ['cleared', [], { material: 'cleared', edgeTiles: '1', regrowthHours: 72 }, { material: 'cleared', edgeTiles: 0.45, regrowthHours: '72' },
+      { material: ['cleared'], edgeTiles: 0.45, regrowthHours: 72 }, { material: 'cleared', edgeTiles: 0.45, regrowthHours: 72, more: 1 }]) {
+      expect(worldPackOfData('t-1', { ...egypt, lotGround }, BASE), JSON.stringify(lotGround)).toEqual({ ok: false, errors: [shape] });
+    }
+  });
+
   /* A world with very many wrong numbers is refused as one with a few: the check says the first of them and never
      breaks on how many there are (#1960, F4). */
   it('refuses a world of 150 000 numbers beyond their bounds as it refuses one with a few, without breaking', () => {

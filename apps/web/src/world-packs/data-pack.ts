@@ -10,7 +10,7 @@ import { shippedRecipe, shippedRecipeIds } from './recipes';
 const FIELDS = [
   'name', 'engine', 'mapSize', 'projection', 'camera', 'defaultTileId', 'tiles', 'sprites', 'stageCounts', 'palette', 'params',
   'showGridByDefault', 'outerWallMode', 'buildingLayout', 'altarAnchor', 'roleLooks', 'classFallbackLooks', 'constructionStages',
-  'constructionPalette', 'materials', 'liquidLayer', 'plants', 'wind', 'lighting', 'paths', 'terrainArt', 'art', 'recipe',
+  'constructionPalette', 'materials', 'liquidLayer', 'plants', 'wind', 'lighting', 'paths', 'terrainArt', 'lotGround', 'art', 'recipe',
 ];
 const COLOR = /^#[0-9A-Fa-f]{6}$/;
 const LABEL = 60;
@@ -80,7 +80,7 @@ const numberAt = (raw: unknown, ...path: string[]): number | undefined => {
   return typeof value === 'number' ? value : undefined;
 };
 
-const boundsErrors = (raw: Raw): string[] => [...numberErrors(raw), ...gridErrors(raw), ...zoomErrors(raw), ...tileErrors(raw)];
+const boundsErrors = (raw: Raw): string[] => [...numberErrors(raw), ...gridErrors(raw), ...zoomErrors(raw), ...tileErrors(raw), ...lotGroundErrors(raw.lotGround)];
 
 /* At most this many wrong numbers are said: a world with thousands of them is refused as one with a few, and the check
    never holds or passes on more than it says (#1960, F4). */
@@ -116,6 +116,13 @@ function zoomErrors(raw: Raw): string[] {
     .filter(zoom => !inRange(numberAt(raw, 'camera', zoom), least, most))
     .map(zoom => `camera.${zoom} is from ${least} to ${most}`);
 }
+
+/* How a building lot clears smooth ground (#1958): the engine compares its numbers, which a string would pass, so the
+   archive holds it to its shape first. */
+const lotGroundErrors = (lot: unknown): string[] =>
+  lot === undefined || (isObject(lot) && Object.keys(lot).length === 3 && typeof lot.material === 'string' && typeof lot.edgeTiles === 'number' && typeof lot.regrowthHours === 'number')
+    ? []
+    : ['lotGround must be { material, edgeTiles, regrowthHours }: a material id and two numbers'];
 
 const inRange = (value: number | undefined, least: number, most: number) => value === undefined || (value >= least && value <= most);
 
