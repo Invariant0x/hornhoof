@@ -255,8 +255,8 @@ class TaskTools {
 
   private async me(): Promise<Agent> { return (await this.db.select().from(agents).where(eq(agents.id, this.job.agentId)))[0]!; }
 
-  /* A company watchdog can inspect tasks across departments, and a head its holder named on its open wait reads it and
-     comments on it. Task moves keep the normal scope. */
+  /* A company watchdog can inspect tasks across departments, and the head of Design its holder named on its open wait
+     reads it and comments on it. Task moves keep the normal scope. */
   private async find(ref: number | string, sight: 'move' | 'read' | 'comment' = 'move'): Promise<{ agent: Agent; task: Task }> {
     const agent = await this.me();
     const task = await taskByRef(this.ctx, this.job.companyId, ref);
@@ -443,7 +443,7 @@ class TaskTools {
     this.server.registerTool(
       'track_work',
       {
-        description: 'Records an operation already in progress on a task you hold, such as tests or delegated work. Name the operation and the next time to check it. Name the employee doing the work so they get a notice. A head of another department named so, such as the head who checks the final look of a screen, reads this task and comments on it until the wait ends, and you can write to that head about it with message_employee naming the task; its comment ends the wait and wakes you. You will be woken to check progress or if that employee becomes unavailable. Diagnose and repair a failed operation.',
+        description: 'Records an operation already in progress on a task you hold, such as tests or delegated work. Name the operation and the next time to check it. Name the employee doing the work so they get a notice. The head of Design named so, to check the final look of a screen, reads this task and comments on it until the wait ends, and you can write to that head about it with message_employee naming the task; its comment ends the wait and wakes you. You will be woken to check progress or if that employee becomes unavailable. Diagnose and repair a failed operation.',
         inputSchema: { task: Ref, work: z.string().trim().min(1), nextCheck: z.iso.datetime({ offset: true }), employee: z.uuid().optional() },
       },
       async ({ task: ref, work, nextCheck, employee }) => this.run(async () => {

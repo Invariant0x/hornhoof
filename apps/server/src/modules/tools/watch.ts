@@ -274,7 +274,7 @@ const anyReach = (...ways: Reach[]): Reach => async (me, target) => {
   return false;
 };
 
-/* The one who sees a task writes about it to the head of another department named on its open wait, as for a look check. */
+/* The one who sees a task writes about it to the head of Design named on its open wait, for a look check. */
 const checkerOf = (ctx: Pick<Ctx, 'db'>, companyId: string, ref: number | string | undefined): Reach => async (me, target) => {
   if (ref === undefined) return false;
   const task = await taskByRef(ctx, companyId, ref);
@@ -581,7 +581,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         ? `Writes to another employee, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Use it to nudge a stuck agent or to tell a head.`
         : `Writes to another employee of your department, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Ask the one whose work yours builds on, or the one whose findings you do not understand, instead of waiting for your head.`) +
         ' It also answers the one who wrote to you last, in any department, with one message: an answer in your window reaches only people, never an agent.' +
-        ' Naming a task you see, it also reaches the head of another department that task\'s open work names with track_work, such as the head who checks its look.' +
+        ' Naming a task you see, it also reaches the head of Design when that task\'s open work names that head with track_work, for a look check.' +
         ' Write to the orchestrator with it at any time: it helps every employee.' +
         MESSAGE_TASK_HINT,
       inputSchema: { employee: z.uuid().describe("The employee's id, from agents or company."), text: Text.trim().min(1), task: TaskReference.optional() },

@@ -63,7 +63,7 @@ async function company() {
 
 const unknown = (number: number) => `There is no task ${number} you can see. Call tasks for yours.`;
 
-describe('a head of another department named to check the look of a task', () => {
+describe('the head of Design named to check the look of a Development task', () => {
   it('reads the task and its file, and gives the verdict as a comment that wakes its holder', async () => {
     const c = await company();
     expect((await c.attach(c.asBruno.token, 'checkout-100.png', 'screenshot')).statusCode).toBe(201);
@@ -142,6 +142,15 @@ describe('a head of another department named to check the look of a task', () =>
     expect((await call(c.asDana.client, 'task', { task: c.task.number })).content[0]!.text).toBe(unknown(c.task.number));
     expect((await call(c.asDana.client, 'comment', { task: c.task.number, text: 'Private.' })).isError).toBe(true);
     expect((await call(c.asBruno.client, 'message_employee', { employee: c.dana.id, task: c.task.number, text: 'Look?' })).content[0]!.text).toContain('other_department');
+  });
+
+  it('is not opened to the head of a department that does not check the look, even when the holder names that head', async () => {
+    const c = await company();
+    expect((await c.askLook(c.mona.id)).isError).toBeFalsy();
+    expect((await call(c.asMona.client, 'task', { task: c.task.number })).content[0]!.text).toBe(unknown(c.task.number));
+    expect((await call(c.asMona.client, 'comment', { task: c.task.number, text: 'Marketing likes it.' })).isError).toBe(true);
+    expect((await call(c.asBruno.client, 'message_employee', { employee: c.mona.id, task: c.task.number, text: 'Read this and act on it.' })).content[0]!.text).toContain('other_department');
+    expect((await c.state()).externalWait).not.toBeNull();
   });
 
   it('is not opened to a worker of another department named on the work', async () => {
