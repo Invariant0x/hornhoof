@@ -147,6 +147,26 @@ describe('Builders face a front wall (#1975)', () => {
     };
   }
 
+  it('keeps every work place of a 3x3 building out of the strip its shared front scaffold and ramp stand in', () => {
+    /* modules/README.md (r3), front_clear_strip: from the front right wall's outer face (u 1.95 on the shared 3x3
+       modules) out to 0.40 tile on v 0.04..2.35, and out to 0.66 tile on v 1.78..1.96 for the ladder's foot. */
+    const inStrip = (u: number, v: number) =>
+      (u > 1.95 && u < 2.35 && v > 0.04 && v < 2.35) || (u > 1.95 && u < 2.61 && v > 1.78 && v < 1.96);
+    for (const kind of ['house', 'department', 'flophouse', 'district_hub', 'granary', 'residence'] as const) {
+      const sim = createConstructionSimulation(EGYPT_WORLD_PACK);
+      for (let stage = 1; stage <= 10; stage++) {
+        const b = { ...site(kind, 3, 10), stage };
+        for (const job of [startBuildingConstruction(sim, b, 10, stage, 0.05), startBuildingDemolition(sim, b, 0.05), null]) {
+          for (const slot of workSlotsForBuilding(b, job, EGYPT_WORLD_PACK)) {
+            const u = slot.col - b.col;
+            const v = slot.row - b.row;
+            expect(inStrip(u, v), `${kind} stage ${stage} ${job?.phase ?? 'none'} ${slot.id} at u ${u.toFixed(2)} v ${v.toFixed(2)}`).toBe(false);
+          }
+        }
+      }
+    }
+  });
+
   it('sets no work place behind a building or facing a back wall, at any stage, building or tearing down', () => {
     /* Everything in front of and beside the site taken, so a place behind it would be the only one left. */
     const busy = new Map<string, string>();

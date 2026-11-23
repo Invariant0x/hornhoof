@@ -369,10 +369,11 @@ export function workSlotsForBuilding(
   if (state && state.phase === 'building') {
     const spec = resolveStageSpecForBuilding(building, state, pack);
     if (spec.openInteriorVisible) {
-      /* Workers visibly laying walls inside the exposed interior rooms! */
+      /* Workers visibly laying walls inside the exposed interior rooms, both well inside the walls: on a 3x3 the strip
+         along the front right wall (from u 1.95 out) belongs to the shared front scaffold and ramp (#1975). */
       slots.push(
         { id: `${building.id}-int-1`, action: 'interior_mason', col: c0 + sc * 0.34, row: r0 + sr * 0.44, elevationPx: 5, facing: 'N' },
-        { id: `${building.id}-int-2`, action: 'interior_mason', col: c0 + sc * 0.68, row: r0 + sr * 0.64, elevationPx: 5, facing: 'W' },
+        { id: `${building.id}-int-2`, action: 'interior_mason', col: c0 + sc * 0.56, row: r0 + sr * 0.66, elevationPx: 5, facing: 'W' },
       );
     }
     if (spec.hasScaffolding) {
