@@ -423,14 +423,14 @@ describe('canonical world formulas (single source of truth)', () => {
         {
           status: 'allowed',
           windows: [
-            { kind: 'five_hour', utilization: 0.7, resetsAt: '2026-11-22T14:00:00.000Z' },
-            { kind: 'seven_day', utilization: 0.3, resetsAt: '2026-11-26T10:00:00.000Z' },
+            { name: 'five_hour', utilization: 0.7, resetsAt: '2026-11-22T14:00:00.000Z' },
+            { name: 'seven_day', utilization: 0.3, resetsAt: '2026-11-26T10:00:00.000Z' },
           ],
           groups: [
             {
               name: 'opus',
               status: 'allowed',
-              windows: [{ kind: 'five_hour', utilization: 0.9, resetsAt: '2026-11-22T12:30:00.000Z' }],
+              windows: [{ name: 'five_hour', utilization: 0.9, resetsAt: '2026-11-22T12:30:00.000Z' }],
             },
           ],
         },
