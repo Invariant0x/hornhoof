@@ -10,6 +10,7 @@ import { worldToTileFloat } from './coords';
 import type {
   GroundMaterialSpec,
   LiquidLayerSpec,
+  LodTierId,
   LodTierSpec,
   WorldPackManifest,
 } from './manifest';
@@ -796,26 +797,81 @@ function pathStripAt(p: PathLook, strip: ArtPixels, tpt: number, u: number, v: n
 /* Pure pixel baker for one chunk using smooth bilinear corner fields, painted soil edges, seamless material textures,
    field plots, wind ripples, worn paths, top-left elevation shading and curved liquid cutouts with a depth tint.
    Works both in Node/jsdom unit tests (no canvas 2D needed) and live browser WebGL texture upload. */
+/* The empty raster a chunk bakes into at a LOD: its size, where it sits in the world and its scale. */
+function smoothChunkRaster(chunk: ChunkCoord, pack: WorldPackManifest, lod: LodTierSpec): SmoothBakedPixels {
+  /* Cap raster scale at 2x (4x LOD = 240x120) so smooth terrain chunks stay crisp and fast to bake. */
+  const scale = Math.min(2, lod.tileW / pack.projection.defaultTileW);
+  const invScale = 1 / scale;
+  const pixelWidth = Math.max(2, Math.ceil((chunk.bounds.maxX - chunk.bounds.minX) * scale) + BAKE_PAD_PX * 2);
+  const pixelHeight = Math.max(2, Math.ceil((chunk.bounds.maxY - chunk.bounds.minY) * scale) + BAKE_PAD_PX * 2);
+  return {
+    rgba: new Uint8ClampedArray(pixelWidth * pixelHeight * 4),
+    worldX: chunk.bounds.minX - BAKE_PAD_PX * invScale,
+    worldY: chunk.bounds.minY - BAKE_PAD_PX * invScale,
+    scale,
+    pixelWidth,
+    pixelHeight,
+    tileCount: (chunk.colEnd - chunk.colStart) * (chunk.rowEnd - chunk.rowStart),
+  };
+}
+
 export function bakeSmoothChunkPixels(
   chunk: ChunkCoord,
   map: GeneratedWorldMap,
   pack: WorldPackManifest,
   lod: LodTierSpec,
 ): SmoothBakedPixels {
+  const raster = smoothChunkRaster(chunk, pack, lod);
+  bakeSmoothChunkRows(chunk, map, pack, raster, 0, raster.pixelHeight);
+  return raster;
+}
+
+/* A chunk bake that runs a few rows at a time, so one frame never spends much more than its budget on the ground. */
+export type SmoothChunkBake = Readonly<{
+  pixels: SmoothBakedPixels;
+  /* Bakes rows until now() reaches the deadline, at least one slice; true once every row is baked. */
+  advance: (deadline: number, now: () => number) => boolean;
+}>;
+
+/* Rows baked between two looks at the clock: a few milliseconds of work at the largest raster. */
+const BAKE_SLICE_ROWS = 8;
+
+export function startSmoothChunkBake(
+  chunk: ChunkCoord,
+  map: GeneratedWorldMap,
+  pack: WorldPackManifest,
+  lod: LodTierSpec,
+): SmoothChunkBake {
+  const pixels = smoothChunkRaster(chunk, pack, lod);
+  let next = 0;
+  return {
+    pixels,
+    advance: (deadline, now) => {
+      while (next < pixels.pixelHeight) {
+        const end = Math.min(pixels.pixelHeight, next + BAKE_SLICE_ROWS);
+        bakeSmoothChunkRows(chunk, map, pack, pixels, next, end);
+        next = end;
+        if (now() >= deadline) break;
+      }
+      return next >= pixels.pixelHeight;
+    },
+  };
+}
+
+/* Bakes the raster's rows pyStart to pyEnd (exclusive). Each row depends only on the map, so any split of the rows
+   gives the same pixels as one pass. */
+function bakeSmoothChunkRows(
+  chunk: ChunkCoord,
+  map: GeneratedWorldMap,
+  pack: WorldPackManifest,
+  raster: SmoothBakedPixels,
+  pyStart: number,
+  pyEnd: number,
+): void {
   const baseTileW = pack.projection.defaultTileW;
   const baseTileH = pack.projection.defaultTileH;
-  /* Cap raster scale at 2x (4x LOD = 240x120) so smooth terrain chunks stay crisp and fast to bake. */
-  const scale = Math.min(2, lod.tileW / baseTileW);
+  const { rgba, worldX, worldY, scale, pixelWidth } = raster;
   const invScale = 1 / scale;
-
-  const worldWidth = chunk.bounds.maxX - chunk.bounds.minX;
-  const worldHeight = chunk.bounds.maxY - chunk.bounds.minY;
-  const pixelWidth = Math.max(2, Math.ceil(worldWidth * scale) + BAKE_PAD_PX * 2);
-  const pixelHeight = Math.max(2, Math.ceil(worldHeight * scale) + BAKE_PAD_PX * 2);
-  const rgba = new Uint8ClampedArray(pixelWidth * pixelHeight * 4);
-
-  const worldX = chunk.bounds.minX - BAKE_PAD_PX * invScale;
-  const worldY = chunk.bounds.minY - BAKE_PAD_PX * invScale;
 
   const cf = map.cornerFields;
   const look = groundLook(map, pack);
@@ -862,7 +918,7 @@ export function bakeSmoothChunkPixels(
   const shore = look.art?.shoreEdge ?? null;
   const strip = look.art?.pathStrip ?? null;
 
-  for (let py = 0; py < pixelHeight; py++) {
+  for (let py = pyStart; py < pyEnd; py++) {
     const wy = worldY + (py + 0.5) * invScale;
     const rowStartTile = worldToTileFloat(worldX + 0.5 * invScale, wy, baseTileW, baseTileH);
     const u0 = rowStartTile.col;
@@ -1109,16 +1165,6 @@ export function bakeSmoothChunkPixels(
       rgba[out + 3] = alpha;
     }
   }
-
-  return {
-    rgba,
-    worldX,
-    worldY,
-    scale,
-    pixelWidth,
-    pixelHeight,
-    tileCount: (chunk.colEnd - chunk.colStart) * (chunk.rowEnd - chunk.rowStart),
-  };
 }
 
 /* Slow light and dark patches over open water. */
@@ -1556,7 +1602,8 @@ function mixGroundArt(
   out.shareA = edge.flip ? 1 - share : share;
 }
 
-/* The two grounds and their shares that the baker paints at (u, v): what a soil edge looks like, as numbers. */
+/* The two grounds and their shares that the baker paints at (u, v): what a soil edge looks like, as numbers. The
+   first ground is the one that covers most of the pixel (shareA >= 0.5); the baker's colour is the same blend. */
 export function groundMixAt(map: GeneratedWorldMap, pack: WorldPackManifest, u: number, v: number): GroundMix {
   const look = groundLook(map, pack);
   const s = sampleCornerFieldBilinear(map.cornerFields, u, v);
@@ -1572,12 +1619,22 @@ export function groundMixAt(map: GeneratedWorldMap, pack: WorldPackManifest, u: 
     }
     const fieldHere = w[look.plot.material]!;
     untilledGround(look.plot, w, hit.margin);
-    if (look.art && marginEdgeMix(look, hit, fieldHere, u, v, out)) return out;
+    if (look.art && marginEdgeMix(look, hit, fieldHere, u, v, out)) return coveringFirst(out);
   }
   const { coarse, detail } = getNoiseLuts();
   if (look.art) mixGroundArt(look, map.cornerFields, w, u, v, coarse, out);
   else mixGround(w, look.matCount, u, v, coarse, detail, out);
-  return out;
+  return coveringFirst(out);
+}
+
+/* A painted mask can give the stronger ground the smaller share; swap the two so the first one covers the pixel. */
+function coveringFirst(mix: GroundMix): GroundMix {
+  if (mix.shareA >= 0.5) return mix;
+  const a = mix.a;
+  mix.a = mix.b;
+  mix.b = a;
+  mix.shareA = 1 - mix.shareA;
+  return mix;
 }
 
 export function bakeSmoothChunkCanvas(
@@ -1586,7 +1643,11 @@ export function bakeSmoothChunkCanvas(
   pack: WorldPackManifest,
   lod: LodTierSpec,
 ): BakedChunk {
-  const baked = bakeSmoothChunkPixels(chunk, map, pack, lod);
+  return smoothPixelsToCanvas(bakeSmoothChunkPixels(chunk, map, pack, lod), lod.id);
+}
+
+/* A baked raster on a canvas, ready for upload to the GPU or for drawing in 2D. */
+export function smoothPixelsToCanvas(baked: SmoothBakedPixels, lodId: LodTierId): BakedChunk {
   const canvas = document.createElement('canvas');
   canvas.width = baked.pixelWidth;
   canvas.height = baked.pixelHeight;
@@ -1604,7 +1665,7 @@ export function bakeSmoothChunkCanvas(
     pixelWidth: baked.pixelWidth,
     pixelHeight: baked.pixelHeight,
     tileCount: baked.tileCount,
-    lodId: lod.id,
+    lodId,
   };
 }
 

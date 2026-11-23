@@ -286,6 +286,30 @@ export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
     sway: { amplitude: 0.5, frequency: 0.17, flutter: 0.9 },
     variants: 2,
   },
+  {
+    /* Chips and cracks on the quarry floor and on the stony fringe of the rock, where the pebbles of open sand stop;
+       never on a ridge or the rock itself (from 0.3 of it a spot counts as bedrock). */
+    id: 'quarry_rubble',
+    label: { en: 'Rubble', ru: 'Щебень' },
+    shape: 'stone_cluster',
+    art: decals('pebbles_01', 'pebbles_02', 'pebbles_03', 'cracks_01', 'cracks_02'),
+    flat: true,
+    tileKinds: ['quarry', 'plain'],
+    onMaterials: ['quarry', 'rock'],
+    density: 0.6,
+    evenCell: 2,
+    moisture: { min: 0, max: 1 },
+    waterDist: { min: 0.9, max: 400 },
+    materialCaps: { rock: 0.29 },
+    clumping: 0,
+    clumpScale: 7,
+    spacing: 0,
+    priority: 0,
+    heightPx: { min: 15, max: 20 },
+    palette: { primary: '#B49F7E', secondary: '#7A6A54', accent: '#D4C4A4' },
+    sway: { amplitude: 0, frequency: 0.3, flutter: 0 },
+    variants: 5,
+  },
 ];
 
 /* A warm breeze from the left, with gusts that pass over the valley every few seconds. */

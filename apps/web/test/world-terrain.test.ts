@@ -8,6 +8,7 @@ import {
   buildLiquidSurfacePixels,
   getMaterialTextureRgb,
   sampleCornerFieldBilinear,
+  startSmoothChunkBake,
 } from '../src/world/smooth-terrain-baker';
 import {
   GALLERY_SEEDS,
@@ -206,6 +207,29 @@ describe('Stage 2 pack-owned procedural generation and modularity', () => {
     expect(opaqueLandPx).toBeGreaterThan(200);
     /* Smooth shoreline mask produces anti-aliased feathered edge pixels rather than hard binary tile steps. */
     expect(featheredShorePx).toBeGreaterThan(50);
+  });
+
+  it('bakes a chunk a few rows per frame to exactly the pixels of one pass, so no frame bakes a whole chunk', () => {
+    const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: 'hornhoof', mapSize: EGYPT_WORLD_PACK.mapSize });
+    const grid = buildChunkGrid(150, 4, DEFAULT_ISOMETRIC_PROJECTION.defaultTileW, DEFAULT_ISOMETRIC_PROJECTION.defaultTileH);
+    const chunk = grid.chunks[Math.floor(grid.chunks.length / 2) + 7]!;
+    const lod2x = DEFAULT_ISOMETRIC_PROJECTION.lods.find(l => l.id === '2x')!;
+    const whole = bakeSmoothChunkPixels(chunk, map, EGYPT_WORLD_PACK, lod2x);
+
+    /* A clock that is always past the deadline: every frame gets exactly one slice of rows. */
+    const job = startSmoothChunkBake(chunk, map, EGYPT_WORLD_PACK, lod2x);
+    let frames = 0;
+    while (!job.advance(0, () => 1)) frames++;
+    frames++;
+    expect(frames).toBeGreaterThan(10);
+    expect(job.advance(0, () => 1)).toBe(true);
+    expect({ ...job.pixels, rgba: null }).toEqual({ ...whole, rgba: null });
+    expect(Buffer.from(job.pixels.rgba).equals(Buffer.from(whole.rgba))).toBe(true);
+
+    /* With time left before the deadline, one call bakes the whole chunk. */
+    const quick = startSmoothChunkBake(chunk, map, EGYPT_WORLD_PACK, lod2x);
+    expect(quick.advance(Infinity, () => 0)).toBe(true);
+    expect(Buffer.from(quick.pixels.rgba).equals(Buffer.from(whole.rgba))).toBe(true);
   });
 
   it('synthesizes strictly toroidal seamless ground and liquid textures with zero wrap seams', () => {

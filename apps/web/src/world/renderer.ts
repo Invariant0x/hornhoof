@@ -65,7 +65,7 @@ import {
 } from './residents';
 import { renderResidentsFallback2D, renderResidentsToPixi, type ResidentArtContext } from './residents-renderer';
 import { PlantRenderer, type PlantStats } from './plant-renderer';
-import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas } from './smooth-terrain-baker';
+import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas, smoothPixelsToCanvas, startSmoothChunkBake, type SmoothChunkBake } from './smooth-terrain-baker';
 import { loadTerrainArt, terrainArtFor, type ArtPixels } from './terrain-art';
 import type { GeneratedWorldMap } from './terrain-engine';
 
@@ -233,6 +233,8 @@ export class IsometricWorldEngine {
   private rendererKind: RendererKind = 'webgl';
 
   private readonly chunkCache = new ChunkLruCache<CachedChunkEntry>(CHUNK_CACHE_CAP);
+  /* Smooth chunk bakes in progress, a few rows per frame, by cache key; only chunks still in view keep theirs. */
+  private readonly bakeJobs = new Map<string, SmoothChunkBake>();
   private visibleChunkList: ChunkCoord[] = [];
   private pendingBakeCount = 0;
 
@@ -1142,10 +1144,36 @@ export class IsometricWorldEngine {
     const existing = this.chunkCache.get(key);
     if (existing) return existing;
 
+    this.bakeJobs.delete(key);
     const baked =
-      this.terrainMap && this.pack.materials && this.pack.materials.length > 0
+      this.terrainMap && this.hasSmoothGround()
         ? bakeSmoothChunkCanvas(chunk, this.terrainMap, this.pack, lod)
         : bakeChunkCanvas(chunk, this.pack, this.tileLookup, lod, this.resolveTileId);
+    return this.cacheBakedChunk(key, baked);
+  }
+
+  private hasSmoothGround(): boolean {
+    return Boolean(this.pack.materials && this.pack.materials.length > 0);
+  }
+
+  /* Bakes part of a chunk within the frame's deadline; the chunk's entry once its last row is baked, else null. Tile
+     ground bakes whole, as it is cheap. */
+  private advanceChunkBake(chunk: ChunkCoord, lod: LodTierSpec, deadline: number): CachedChunkEntry | null {
+    const key = this.cacheKey(chunk, lod.id);
+    const existing = this.chunkCache.get(key);
+    if (existing) return existing;
+    if (!this.terrainMap || !this.hasSmoothGround()) return this.ensureChunkBaked(chunk, lod);
+    let job = this.bakeJobs.get(key);
+    if (!job) {
+      job = startSmoothChunkBake(chunk, this.terrainMap, this.pack, lod);
+      this.bakeJobs.set(key, job);
+    }
+    if (!job.advance(deadline, () => performance.now())) return null;
+    this.bakeJobs.delete(key);
+    return this.cacheBakedChunk(key, smoothPixelsToCanvas(job.pixels, lod.id));
+  }
+
+  private cacheBakedChunk(key: string, baked: BakedChunk): CachedChunkEntry {
     let texture: Texture | null = null;
     let sprite: Sprite | null = null;
     if (this.app) {
@@ -1343,21 +1371,23 @@ export class IsometricWorldEngine {
       const key = this.cacheKey(chunk, lod.id);
       protectedKeys.add(key);
       let entry = this.chunkCache.get(key);
+      if (!entry && performance.now() - bakeStart < bakeBudgetMs) {
+        entry = this.advanceChunkBake(chunk, lod, bakeStart + bakeBudgetMs) ?? undefined;
+      }
       if (!entry) {
-        if (performance.now() - bakeStart < bakeBudgetMs) {
-          entry = this.ensureChunkBaked(chunk, lod);
-        } else {
-          pending++;
-          const fallback = this.findAnyCachedLod(chunk);
-          if (fallback) {
-            protectedKeys.add(fallback.key);
-            entry = fallback.entry;
-          }
+        pending++;
+        const fallback = this.findAnyCachedLod(chunk);
+        if (fallback) {
+          protectedKeys.add(fallback.key);
+          entry = fallback.entry;
         }
       }
       if (entry) drawEntries.push(entry);
     }
 
+    for (const key of this.bakeJobs.keys()) {
+      if (!protectedKeys.has(key)) this.bakeJobs.delete(key);
+    }
     this.pendingBakeCount = pending;
     this.dirtyScene = pending > 0;
     this.chunkCache.evictIfNeeded(protectedKeys, this.disposeEntry);
@@ -1828,6 +1858,7 @@ export class IsometricWorldEngine {
     this.resizeObserver?.disconnect();
 
     this.chunkCache.clear(this.disposeEntry);
+    this.bakeJobs.clear();
     this.buildingArtPool?.destroy();
     this.residentArtPool?.destroy();
     this.loopArtPool?.destroy();
