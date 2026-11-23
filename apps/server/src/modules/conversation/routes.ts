@@ -114,9 +114,9 @@ export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input:
     from: me.via ? { kind: 'orchestrator' } : { kind: 'person', id: me.id },
     to: agent.kind === 'orchestrator' ? { kind: 'orchestrator' } : { kind: 'department', id: agent.departmentId ?? '' },
   });
-  /* Once the words are on their way, a person's words answer what the agent waits for from people; the orchestrator
-     answers requests with its own tool. */
-  if (!me.via) await wakeAll(ctx, await answerDirectly(ctx, me.id, agent.id, input.text, { assistant: me.assistant?.id }));
+  /* Once the words are on their way, a person's words answer the one question the agent waits on them for, when it is
+     clear which; the orchestrator answers requests with its own tool. */
+  if (!me.via) await wakeAll(ctx, await answerDirectly(ctx, me.id, agent.id, input.text, { assistant: me.assistant?.id, task: input.task }));
   return jobId;
 }
 
