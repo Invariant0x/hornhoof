@@ -5,6 +5,16 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Added
+
+- The task watchdog can now see whether a task's commit is in main or a release and close, in any department, the tasks the server proves done, with its reason in the task log and a notice to the head of that department; its role template carries the rules for code, documents and reports, and groups, and never touches paused work.
+
+### Changed
+
+- A hand-in of work that is not code (a document, a group report, turnkey work that joined no turn) must now name where its result is recorded, a path in the department's repository or a file on the task, and is refused without it.
+
 ## [0.42.0] - 2026-11-23
 
 ### Fixed

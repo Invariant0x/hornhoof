@@ -34,6 +34,7 @@ import { registerTestTools } from '../testruns/tools.js';
 import { registerCallTools } from '../calls/tools.js';
 import { registerInboxTools } from './inbox.js';
 import { registerWatchTools } from './watch.js';
+import { registerSettleTools } from '../tasks/settle.js';
 import { registerHeadNotebookTools } from '../notebook/tools.js';
 import { registerBriefingTool } from '../briefings/tools.js';
 import { registerImprovementTools, registerOrchestratorImprovementTools } from '../improvements/tools.js';
@@ -103,6 +104,8 @@ async function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation
   shelf?.shelve();
   const grants = new Set(shelf ? GRANTS : job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? []));
   registerWatchTools(server, ctx, job, grants);
+  /* The orchestrator closes any task with close_task already: settling is the watchdog's, by its skill. */
+  if (!shelf) registerSettleTools(server, ctx, job, grants);
   registerTestTools(server, ctx, job);
   registerCallTools(server, ctx, job);
   if (shelf) registerHolderTools(server, ctx, job);

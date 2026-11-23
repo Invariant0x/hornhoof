@@ -23,6 +23,7 @@ import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { tryAutonomousCommitApproval } from './autonomous-release.js';
 import { Text } from './long-text.js';
+import { Recorded } from './recorded.js';
 import { agentSeesTask as sees, taskLines, type TaskDetail } from './views.js';
 import { taskByRef } from './lookup.js';
 import { editTurn, giveTasks, turnName, turnRows, type Scope } from './turns.js';
@@ -730,14 +731,15 @@ class TaskTools {
       'report',
       {
         description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision it checked with local tests, and done false returns a source defect to Development when verification.delta describes the repair, or otherwise gives the failure to the head; the accepting head names the ready candidate/revision and observed integration commit, or nothing but the summary where the result is a document. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report. ' +
-          `If you hold turnkey work with a branch of its own, close it with done true and turnkey: commit, the ${CHECKED_COMMIT}, and baseCommit, the ${START_COMMIT}. A release counts as checked only the first-parent line from that commit down to that start, and nothing the turn branch held as the work started: anything else it brings is named for a person to approve.`,
-        inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional(), acceptance: AcceptanceInput.optional(), turnkey: TurnkeyInput.optional() },
+          `If you hold turnkey work with a branch of its own, close it with done true and turnkey: commit, the ${CHECKED_COMMIT}, and baseCommit, the ${START_COMMIT}. A release counts as checked only the first-parent line from that commit down to that start, and nothing the turn branch held as the work started: anything else it brings is named for a person to approve. ` +
+          `A report that closes work that is not code (a group, or turnkey work that joined no turn) names where its result is recorded with recorded: path, a path in the department's repository, or file, the name of a file attached to the task. Without it the report is refused.`,
+        inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional(), acceptance: AcceptanceInput.optional(), turnkey: TurnkeyInput.optional(), recorded: Recorded.optional() },
       },
-      async ({ task: ref, done, summary, verification, acceptance, turnkey }) =>
+      async ({ task: ref, done, summary, verification, acceptance, turnkey, recorded }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, summary, ...(verification?.delta ? [verification.delta] : []));
-          const moved = await report(this.ctx, this.job.agentId, task.id, { done, summary, verification, acceptance, turnkey });
+          const moved = await report(this.ctx, this.job.agentId, task.id, { done, summary, verification, acceptance, turnkey, recorded });
           return { text: `Reported. ${await this.where(moved.task)}`, moved };
         }),
     );
@@ -798,14 +800,14 @@ class TaskTools {
     this.server.registerTool(
       'submit',
       {
-        description: 'Hands the current Development or checking-stage candidate forward. Where task.echelons says document: attach the files to the task, give summary and evidence, and name no review. Review and Security fix findings themselves on the same branch, without returning to the author. At Tests, submit a new test-only repair on the same branch and base: the delta from the current candidate may change only test, tests or e2e directories, or *.test.* and *.spec.* files. Source repairs use report with done false and verification.delta, preserving the task and candidate history. When the candidate\'s own change passed and it only needs the main line, or the open turn branch of its department that went on (the turn takes a candidate only by fast-forward), its owner merges that line into the candidate branch and submits the merge with review.baseCommit naming the commit taken in: the candidate stays at Tests to be checked again, unless its previous Review was skipped on an author receipt. A new commit then needs Review. summary: what you did; evidence: the command you ran and what it printed, the link, the check. review.baseCommit is the commit the change starts from. The server reads the head of the branch named after the task (task-<number> or the only task-<number>-...), or of review.branch when the work is on another branch; a repair stays on the branch of the candidate it repairs. review.commit, when given, must be that head. Without a readable commit the submission is refused with the reason. Check the change before handing it forward. Submitting starts no test run.',
-        inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional(), operationId: z.uuid().optional() },
+        description: 'Hands the current Development or checking-stage candidate forward. Where task.echelons says document: attach the files to the task, give summary and evidence, and name no review. Review and Security fix findings themselves on the same branch, without returning to the author. At Tests, submit a new test-only repair on the same branch and base: the delta from the current candidate may change only test, tests or e2e directories, or *.test.* and *.spec.* files. Source repairs use report with done false and verification.delta, preserving the task and candidate history. When the candidate\'s own change passed and it only needs the main line, or the open turn branch of its department that went on (the turn takes a candidate only by fast-forward), its owner merges that line into the candidate branch and submits the merge with review.baseCommit naming the commit taken in: the candidate stays at Tests to be checked again, unless its previous Review was skipped on an author receipt. A new commit then needs Review. summary: what you did; evidence: the command you ran and what it printed, the link, the check. review.baseCommit is the commit the change starts from. The server reads the head of the branch named after the task (task-<number> or the only task-<number>-...), or of review.branch when the work is on another branch; a repair stays on the branch of the candidate it repairs. review.commit, when given, must be that head. Without a readable commit the submission is refused with the reason. Check the change before handing it forward. Where task.echelons says document, recorded names where the result is recorded (a path in the department\'s repository, or the name of a file attached to the task), and the hand-in is refused without it. Submitting starts no test run.',
+        inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional(), recorded: Recorded.optional(), operationId: z.uuid().optional() },
       },
-      async ({ task: ref, summary, evidence, review, operationId }) =>
+      async ({ task: ref, summary, evidence, review, recorded, operationId }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, summary, evidence);
-          const moved = await submit(this.ctx, this.job.agentId, task.id, { summary, evidence, review, operationId });
+          const moved = await submit(this.ctx, this.job.agentId, task.id, { summary, evidence, review, recorded, operationId });
           return { text: `Submitted. ${await this.where(moved.task)}`, moved };
         }),
     );
