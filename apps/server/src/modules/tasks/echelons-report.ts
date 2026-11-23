@@ -9,6 +9,7 @@ import { currentCandidate } from './echelons-candidates.js';
 import { acceptedDocument } from './echelons-document.js';
 import type { Ctx } from '../../app.js';
 import { requiredStagesComplete } from './echelons-accept.js';
+import { requireRecorded, type Recorded } from './recorded.js';
 import { changeRoute, type Route } from './route-records.js';
 import { giver, refuse, type Moved, type Task, type Tx, type Wake } from './state.js';
 import { move } from './transitions.js';
@@ -131,18 +132,19 @@ async function closableBy(ctx: Reader, tx: Tx, task: Task, agentId: string, chil
 }
 
 /* The aggregate pins existing accepted results. It never manufactures a repository candidate for itself. */
-export async function coordinationReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string): Promise<Moved> {
+export async function coordinationReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, recorded?: Recorded): Promise<Moved> {
   if (task.assigneeAgentId !== agentId || route.state.phase !== 'active') throw refuse(403, 'task_not_yours', 'Only the current coordination owner can close its report.');
   if (!summary.trim()) throw refuse(400, 'task_invalid', 'A coordination result needs a checked report.');
   if (route.state.candidateId) throw refuse(409, 'task_invalid', 'This task produced code and needs the executable route.');
+  const where = await requireRecorded(ctx, task, recorded);
   const wakes = giver(task, 'reported', agentId, summary.trim());
   const row = await move(ctx, task, { status: 'done', closedAt: new Date(), assigneeAgentId: null, silent: 0 }, {
-    kind: 'report', actor: { agentId }, text: summary.trim(), data: { done: true }, returned: true,
+    kind: 'report', actor: { agentId }, text: summary.trim(), data: { done: true, recorded: where }, returned: true,
   }, async tx => {
     const acceptedChildren = await acceptedUnder(tx, task);
     await closableBy(ctx, tx, task, agentId, acceptedChildren);
     await changeRoute(tx, route, { ...route.state, phase: 'done' });
-    await note(tx, task, { kind: 'report', actor: { agentId }, text: summary.trim(), data: { done: true, acceptedChildren, routeRevision: route.revision + 1 } });
+    await note(tx, task, { kind: 'report', actor: { agentId }, text: summary.trim(), data: { done: true, recorded: where, acceptedChildren, routeRevision: route.revision + 1 } });
   }, wakes);
   return { task: row, wakes };
 }

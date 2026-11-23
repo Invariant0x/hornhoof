@@ -5,6 +5,7 @@ import { createTask, loadTask, report, submit, verdict, type NewTask } from '../
 import { taskDetail } from '../src/modules/tasks/views.js';
 import type { TemplateKey } from '@hornhoof/protocol';
 import { echelonsTurn, listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { attached } from './recorded-fixture.js';
 
 const BASE = 'a'.repeat(40);
 const HEAD = 'b'.repeat(40);
@@ -100,7 +101,7 @@ describe('a document in a department that keeps a repository', () => {
     const route = await f.echelons(task.id);
     expect(route).toMatchObject({ resultKind: 'document' });
     expect(route.stages.map(step => step.stage)).toEqual(['development', 'review']);
-    const handed = await submit(f.ctx, f.author.id, task.id, HAND_IN);
+    const handed = await submit(f.ctx, f.author.id, task.id, { ...HAND_IN, recorded: await attached(f.db, task, f.author.id, 'layouts.pdf') });
     expect(handed.task).toMatchObject({ status: 'open', assigneeAgentId: f.head.id });
     expect(await f.echelons(task.id)).toMatchObject({ phase: 'ready' });
     const done = await report(f.ctx, f.head.id, task.id, { done: true, summary: 'Accepted the layouts.' });
@@ -112,7 +113,7 @@ describe('a document in a department that keeps a repository', () => {
     const f = await department('design', 'DSN-HEAD', ['DSN-UI', 'DSN-QA']);
     const { task } = await f.create({ resultKind: 'document', paths: undefined });
     await expect(submit(f.ctx, f.author.id, task.id, { ...HAND_IN, review: { baseCommit: BASE } }).then(() => null)).rejects.toMatchObject({ status: 400 });
-    const handed = await submit(f.ctx, f.author.id, task.id, HAND_IN);
+    const handed = await submit(f.ctx, f.author.id, task.id, { ...HAND_IN, recorded: await attached(f.db, task, f.author.id, 'layouts.pdf') });
     expect(handed.task).toMatchObject({ status: 'review', assigneeAgentId: f.staff[1]!.id });
   });
 

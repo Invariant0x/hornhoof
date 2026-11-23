@@ -79,24 +79,13 @@ export function rankOf(all: Candidate[], o: { leader: string; link: boolean; now
 
 const HANDOVER_EVERY_MS = 86_400_000;
 
-/* grant: the machines that get the company's data now. retire: the copy that gives it up now, one a run. handover: a
-   grant took no free seat, so a copy is being handed from one machine to another. */
+/* A handover first retires one copy. Its seat stays occupied until the machine reports its wipe. */
 export type Roles = { grant: string[]; retire: string | null; handover: boolean };
 
-/* Who holds a copy after a ranking. numbered: the machines with a place from 2 on. data: the machines that hold the
-   data besides the leader; out: kept from the server by hand. eligible: may get the data now: it is there, and holds
-   nothing of a copy it gave up. ready: its copy is up to date; sync: the one commits wait for. The machines at 2 and 3
-   are to hold the copies. A free seat is filled at once, by the first machine in the order that may get the data, so a
-   machine that is away does not leave the company short of a copy; back, it takes its copy by a handover.
-   With none free, a copy is handed over: the machine at 2 or 3 without one gets the data, at most one a day unless the
-   CEO asked, and only while no other copy is being made. The copy that was ranked out goes only once both places hold
-   an up-to-date copy, never the one commits wait for, and one that only stopped qualifying stays until a machine took
-   its place. target: the machine the CEO asked the server moved to, while that request stands: when it has a number
-   and may get the data now it gets it at once, beside the two copies when it is neither of them, and nothing here
-   retires it; no other copy is handed over in the run that gives it the data. */
 export function planRoles(o: {
   numbered: { id: string; number: number }[];
   data: { id: string; number: number | null; out: boolean }[];
+  releasing: string[];
   eligible: Set<string>;
   ready: Set<string>;
   sync: string | null;
@@ -106,29 +95,24 @@ export function planRoles(o: {
   target?: string | null;
 }): Roles {
   const holding = new Set(o.data.map(row => row.id));
-  const top = o.numbered.filter(row => row.number <= COPIES + 1).sort((a, b) => a.number - b.number);
-  const target = o.target != null && o.numbered.some(row => row.id === o.target) ? o.target : null;
-  /* A target that is neither of the two places holds its copy beside them, and takes no seat of theirs. */
-  const beside = target !== null && !top.some(row => row.id === target);
-  /* Asked for or not, a machine gets the data only while it may: one that still owes what it held, or is away, waits. */
-  const forced = target !== null && !holding.has(target) && o.eligible.has(target);
-  const without = top.filter(row => !holding.has(row.id) && o.eligible.has(row.id)).map(row => row.id);
-  const seats = COPIES - o.data.filter(row => !(beside && row.id === target)).length;
-  const there = [...o.numbered]
-    .sort((a, b) => a.number - b.number)
-    .filter(row => !holding.has(row.id) && o.eligible.has(row.id) && !(beside && row.id === target))
-    .map(row => row.id);
-  const grant = seats > 0 ? there.slice(0, seats) : [];
-  const made = top.filter(row => holding.has(row.id)).every(row => o.ready.has(row.id));
-  const due = o.ceo || o.handoverAt === null || o.now.getTime() - o.handoverAt.getTime() >= HANDOVER_EVERY_MS;
-  const handover = seats <= 0 && without.length > 0 && made && due && !forced;
-  if (handover) grant.push(without[0]!);
-  if (forced && !grant.includes(target)) grant.push(target);
-  const settled = top.length > 0 && top.every(row => holding.has(row.id) && o.ready.has(row.id));
+  const occupied = new Set([...holding, ...o.releasing]);
+  const ordered = [...new Set([...o.numbered].sort((a, b) => a.number - b.number).map(row => row.id))];
+  const target = o.target && ordered.includes(o.target) && (holding.has(o.target) || o.eligible.has(o.target)) ? o.target : null;
+  const priority = target ? [target, ...ordered.filter(id => id !== target)] : ordered;
+  const preferred = priority.slice(0, COPIES);
+  const available = priority.filter(id => o.eligible.has(id) && !occupied.has(id));
+  const seats = COPIES - occupied.size;
+  const grant = available.slice(0, Math.max(0, seats));
+  const settled = preferred.length > 0 && preferred.every(id => o.ready.has(id));
+  const due = target !== null || o.ceo || o.handoverAt === null || o.now.getTime() - o.handoverAt.getTime() >= HANDOVER_EVERY_MS;
+  const wanted = target ? [target] : preferred;
+  const replacing = seats <= 0 && occupied.size === holding.size && due && wanted.some(id => available.includes(id))
+    && preferred.every(id => !holding.has(id) || o.ready.has(id));
   const outside = o.data
-    .filter(row => row.id !== target && !top.some(one => one.id === row.id) && row.id !== o.sync && (top.length >= COPIES || row.out))
+    .filter(row => row.id !== o.sync && !preferred.includes(row.id) && (preferred.length === COPIES || row.out))
     .sort((a, b) => (b.number ?? Infinity) - (a.number ?? Infinity) || (a.id < b.id ? -1 : 1));
-  return { grant, retire: settled ? (outside[0]?.id ?? null) : null, handover };
+  const retire = settled || replacing ? outside.find(row => [...o.ready].some(id => id !== row.id && holding.has(id))) : undefined;
+  return { grant, retire: retire?.id ?? null, handover: retire !== undefined && replacing };
 }
 
 /* The live machines with their owners, what they measure, and how much of the last week each was online; shares
@@ -164,7 +148,8 @@ export async function candidates(db: Db, now = new Date(), opts: { shares?: bool
 /* Whether a machine may take the server: it fits and was not kept out by hand. */
 const mayTake = (m: Candidate, o: { link: boolean }): boolean => m.pin !== 'none' && unfit(m, o) === null;
 
-type Placed = { changed: number; scored: boolean; leave: Leaving[]; retire: { id: string; networkId: string | null; copyName: string | null } | null; top: string[] };
+type Retirement = { id: string; retained: string[]; handover: boolean };
+type Placed = { changed: number; scored: boolean; leave: Leaving[]; retire: Retirement | null };
 
 /* The copies that are up to date, and the one commits wait for, as the keeper that leads reads them from its own
    Postgres, by machine. A word that is old or missing names none. */
@@ -180,16 +165,15 @@ export function readyCopies(ctx: Ctx, rows: { id: string; copyName: string | nul
 /* Numbers the machines and says who holds a copy, in one transaction, writing only the rows that change. The order is
    scored once a day, when a machine joined or left, when the leader's row is not number 1, and when the caller asks;
    any other run keeps the order and places the pins again. A machine that gets a seat gets the role data here and
-   nothing else: its keeper sees it and makes its copy. After it: a machine whose person no longer sees the whole
-   company gives its data up, and a copy that was ranked out is retired, once both places hold an up-to-date copy and
-   commits wait for another. Without the row of the machine this app runs on there is no leader to count from, and
-   nothing is written. */
+   nothing else: its keeper sees it and makes its copy. A machine whose person no longer sees the whole company
+   gives its data up. A ranked-out copy can be retired while another is up to date and commits do not wait for it.
+   Without the row of the machine this app runs on there is no leader to count from, and nothing is written. */
 export async function rank(ctx: Ctx, now = new Date(), opts: { rescore?: boolean; ceo?: boolean } = {}): Promise<{ changed: number; scored: boolean }> {
   const { db, config } = ctx;
   const own = await findThisMachine(db, config);
   if (!own) return { changed: 0, scored: false };
   await hiddenName(ctx, own.id);
-  const { changed, scored, leave, retire, top } = await place(ctx, now, opts);
+  const { changed, scored, leave, retire } = await place(ctx, now, opts);
   /* A machine that holds the data and whose person no longer sees the whole company, as a restore of an older backup
      can bring one back, gives the data up as it does when the scope is taken. */
   if (leave.length > 0) {
@@ -200,7 +184,7 @@ export async function rank(ctx: Ctx, now = new Date(), opts: { rescore?: boolean
     /* A change of the link's key that the relay did not take yet is tried again with each ranking. */
     await ctx.links.finishKey().catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, "Could not change the key of the company's link yet. The next minute tries again."));
   }
-  if (retire) await retireCopy(ctx, retire, top, now);
+  if (retire) await retireCopy(ctx, retire, now);
   return { changed, scored };
 }
 
@@ -221,16 +205,24 @@ async function hiddenName(ctx: Ctx, own: string): Promise<void> {
   if (other) await ctx.links.ensureHidden(other.companyId);
 }
 
-/* Asked again right before the cut, since the keeper may have named this copy the one commits wait for meanwhile:
-   only while both places still hold an up-to-date copy and the setting does not name it is it cut from the leader's
-   changes and told to give up what it holds. Else it stays, and the next run looks again. */
-async function retireCopy(ctx: Ctx, copy: NonNullable<Placed['retire']>, top: string[], now: Date): Promise<void> {
-  const rows = await ctx.db.select({ id: machines.id, copyName: machines.copyName }).from(machines).where(inArray(machines.id, top));
-  const { ready } = readyCopies(ctx, rows, new Date());
-  if (!top.every(id => ready.has(id))) return;
-  if (copy.copyName && (await ctx.replication.standby()).includes(copy.copyName)) return;
-  await cutReplication(ctx.replication, [copy]);
-  await ctx.db.transaction(tx => leaveData(ctx, tx, [copy.id], now, { lost: false }));
+/* A move request and ranking both lock machine rows in id order. Recheck the target, remaining ready copies and
+   the actual synchronous standby before cutting anything. A skipped retirement does not spend the day's handover. */
+async function retireCopy(ctx: Ctx, retirement: Retirement, now: Date): Promise<void> {
+  await ctx.db.transaction(async tx => {
+    const { id, retained, handover } = retirement;
+    const rows = await tx.select({ id: machines.id, copyName: machines.copyName, networkId: machines.networkId, copyState: machines.copyState }).from(machines)
+      .where(and(inArray(machines.id, [id, ...retained]), eq(machines.role, 'data'), isNull(machines.revokedAt)))
+      .orderBy(asc(machines.id)).for('update');
+    const copy = rows.find(row => row.id === id);
+    if (!copy || await moveTargetRow(tx) === id) return;
+    const { ready } = readyCopies(ctx, rows.filter(row => row.copyState === 'ready'), new Date());
+    if (!retained.some(other => ready.has(other))) return;
+    const replication = ctx.replication.within?.(tx) ?? ctx.replication;
+    if (copy.copyName && (await replication.standby()).includes(copy.copyName)) return;
+    await cutReplication(replication, [copy]);
+    await leaveData(ctx, tx, [id], now, { lost: false });
+    if (handover) await queryOf(tx)('UPDATE net.ranking SET handover_at = $1::timestamptz', [now]);
+  });
 }
 
 async function place(ctx: Ctx, now: Date, opts: { rescore?: boolean; ceo?: boolean }): Promise<Placed> {
@@ -244,13 +236,13 @@ async function place(ctx: Ctx, now: Date, opts: { rescore?: boolean; ceo?: boole
       .where(and(isNotNull(machines.revokedAt), or(isNotNull(machines.serverOrder), isNotNull(machines.serverPin))))
       .returning({ id: machines.id });
     const before = await tx
-      .select({ id: machines.id, networkId: machines.networkId, serverOrder: machines.serverOrder, serverWhy: machines.serverWhy, role: machines.role, copyName: machines.copyName })
+      .select({ id: machines.id, networkId: machines.networkId, serverOrder: machines.serverOrder, serverWhy: machines.serverWhy, role: machines.role, copyName: machines.copyName, copyState: machines.copyState, uploadState: machines.uploadState })
       .from(machines)
       .where(isNull(machines.revokedAt))
       .orderBy(asc(machines.id))
       .for('update');
     const leader = await findThisMachine(tx, config);
-    if (!leader) return { changed: 0, scored: false, leave: [], retire: null, top: [] };
+    if (!leader) return { changed: 0, scored: false, leave: [], retire: null };
     const q = queryOf(tx);
     await q('INSERT INTO net.ranking (id) VALUES (true) ON CONFLICT (id) DO NOTHING');
     const [kept] = await q<{ rescored_at: Date | string | null; handover_at: Date | string | null }>('SELECT rescored_at, handover_at FROM net.ranking FOR UPDATE');
@@ -269,14 +261,17 @@ async function place(ctx: Ctx, now: Date, opts: { rescore?: boolean; ceo?: boole
 
     /* Who holds a copy: the machines at 2 and 3, by what the keeper says of the copies there are. */
     const holding = before.filter(row => row.role === 'data' && row.id !== leader.id && !places.get(row.id)?.leave);
+    /* A live copy awaiting a wipe still occupies disk even after its role changed to worker. */
+    const releasing = before.filter(row => row.id !== leader.id && (row.uploadState !== null || places.get(row.id)?.leave)).map(row => row.id);
     const pinOf = new Map(all.map(m => [m.id, m.pin]));
     const { ready, sync } = readyCopies(ctx, holding, now);
+    for (const row of holding) if (row.copyState !== 'ready') ready.delete(row.id);
     const numbered = ranked.flatMap(one => (one.number !== null && one.number >= 2 ? [{ id: one.id, number: one.number }] : []));
     const roles = planRoles({
       numbered,
       data: holding.map(row => ({ id: row.id, number: places.get(row.id)?.number ?? null, out: pinOf.get(row.id) === 'none' })),
       eligible: new Set(others.filter(m => unfit(m, fit) === null && !m.owes && m.reportAt !== null && now.getTime() - m.reportAt.getTime() <= REPORT_FRESH_MS).map(m => m.id)),
-      ready, sync,
+      releasing, ready, sync,
       handoverAt: kept?.handover_at ? new Date(kept.handover_at) : null,
       now, ceo: Boolean(opts.ceo),
       /* The machine the CEO asked the server moved to holds its copy while the request stands. */
@@ -296,15 +291,11 @@ async function place(ctx: Ctx, now: Date, opts: { rescore?: boolean; ceo?: boole
       await tx.update(machines).set({ serverOrder: null }).where(inArray(machines.id, changes.map(change => change.id)));
       for (const change of changes) await tx.update(machines).set(change.set).where(eq(machines.id, change.id));
     }
-    if (scored || roles.handover) {
-      await q('UPDATE net.ranking SET rescored_at = CASE WHEN $1 THEN $3::timestamptz ELSE rescored_at END, handover_at = CASE WHEN $2 THEN $3::timestamptz ELSE handover_at END', [scored, roles.handover, now]);
-    }
+    if (scored) await q('UPDATE net.ranking SET rescored_at = $1::timestamptz', [now]);
     const leave = before.filter(row => places.get(row.id)?.leave).map(({ id, networkId }) => ({ id, networkId }));
-    const retiring = before.find(row => row.id === roles.retire);
     return {
       changed: changes.length + cleared.length, scored, leave,
-      retire: retiring ? { id: retiring.id, networkId: retiring.networkId, copyName: retiring.copyName } : null,
-      top: numbered.filter(one => one.number <= COPIES + 1).map(one => one.id),
+      retire: roles.retire ? { id: roles.retire, retained: [...ready].filter(id => id !== roles.retire), handover: roles.handover } : null,
     };
   });
 }

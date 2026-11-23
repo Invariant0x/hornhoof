@@ -9,20 +9,24 @@ import { join } from 'node:path';
 import { performance as observedTime } from 'node:perf_hooks';
 import type { TLSSocket } from 'node:tls';
 import { gzipSync } from 'node:zlib';
-import { eq } from 'drizzle-orm';
+import { eq, sql as raw } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { PGlite } from '@electric-sql/pglite';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import { loadConfig } from '../src/config.js';
-import { certificates, companies, machines, people, publicLinks } from '../src/db/schema.js';
+import { encryptSecret } from '../src/crypto/secrets.js';
+import { certificates, companies, machines, peerSecrets, people, publicLinks } from '../src/db/schema.js';
 import { bundleRows } from '../src/modules/backups/records.js';
 import { AGE_KEY_FILE } from '../src/modules/keeper/age-key.js';
 import { BUNDLES_DIR } from '../src/modules/keeper/backups.js';
+import { REPLICA_FILE } from '../src/modules/keeper/become.js';
 import { CERT_FILE, type HeldCertificate } from '../src/modules/keeper/certificate.js';
+import { Hander, readHanding } from '../src/modules/keeper/handing.js';
 import { Keeper, type HandingParts, type KeeperOptions } from '../src/modules/keeper/keeper.js';
 import { machineKey, type MachineKey } from '../src/modules/keeper/machine-keys.js';
 import { CRL_FILE } from '../src/modules/keeper/peer-link.js';
+import { BEHIND_MS, SWITCH_MS } from '../src/modules/keeper/switch-step.js';
 import { saveLink } from '../src/modules/link/link.js';
 import { linkClientId } from '../src/modules/link/client.js';
 import { Relay } from '../src/modules/link/relay.js';
@@ -34,13 +38,14 @@ import { certFacts, issueCertificate, makeAuthority, makeCrl } from '../src/modu
 import { authorityOf, peerSecret } from '../src/modules/network/store.js';
 import { readKeeperState } from '../src/modules/keeper/state.js';
 import { PeerDoor } from '../src/net/peer-door.js';
-import type { PeerSessions } from '../src/net/peer-sessions.js';
+import { PeerSessions } from '../src/net/peer-sessions.js';
 import { APP_AUTHORITY, PeerServer } from '../src/net/peer-server.js';
 import type { Target } from '../src/net/proxy.js';
 import { fakeLease } from './fake-lease.js';
 import { fixture, setUpCompany, TEST_SECRET, testApp } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 import { advance, certificate, leaseRound, leaseStep, leaseUntil, networkRound, peerTime, registerKeeper, state as waitForState, tunnelRound, WALL_TIME } from './keeper-peer-time.js';
+import { createDelayGate } from './lab/network.js';
 
 /* The keeper's frpc commands are observed, and its child lifecycle is a recorded sample, without waiting on Node or frpc. */
 vi.mock('node:child_process', async importOriginal => {
@@ -146,17 +151,17 @@ async function keeperBeside(c: Stand, app: Target, dir = folder(), extra: Partia
   return { keeper, dir, controlDir, lines, ports, offered, round };
 }
 
-/* A worker of the company's network: a row with its key, and a certificate of the database's authority for it. */
-async function worker(c: Stand) {
+/* A machine of the company's network: a row with its key, and a certificate of the database's authority for it. */
+async function worker(c: Stand, role: 'worker' | 'data' = 'worker') {
   const key = ed25519();
-  const [row] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ownerId, machineKey: `worker-${Math.random()}`, role: 'worker', signKey: key.publicPem }).returning();
+  const [row] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ownerId, machineKey: `worker-${Math.random()}`, role, signKey: key.publicPem }).returning();
   const authority = (await authorityOf(c.db, c.config))!;
-  const issued = await issueCertificate(authority, { machineId: row!.id, role: 'worker', signKey: key.publicPem });
+  const issued = await issueCertificate(authority, { machineId: row!.id, role, signKey: key.publicPem });
   await c.db.insert(certificates).values({ serial: issued.serial, machineId: row!.id, until: issued.until });
-  return { id: row!.id, key, certPem: issued.certPem, serial: issued.serial, authorityPem: authority.certPem };
+  return { id: row!.id, key, certPem: issued.certPem, serial: issued.serial, authorityPem: authority.certPem, until: issued.until.toISOString() };
 }
 
-type Worker = Awaited<ReturnType<typeof worker>>;
+type Worker = Omit<Awaited<ReturnType<typeof worker>>, 'until'>;
 
 function sessionOf(port: number, w: Worker): ClientHttp2Session {
   const session = http2.connect(`https://127.0.0.1:${port}`, { ca: w.authorityPem, cert: w.certPem, key: w.key.privatePem, checkServerIdentity: () => undefined });
@@ -336,6 +341,103 @@ describe('the peer link in the keeper', () => {
     expect(offered[0]!.config).toContain('clientID = "acme-ab12cd34-peer"');
     expect(offered[0]!.config).toContain(`name = "acme-ab12cd34-data"\ntype = "stcp"\nsecretKey = "${said.link.dataSecret}"\nlocalIP = "127.0.0.1"\nlocalPort = ${ports.peer}`);
     expect(offered[0]!.config).toContain(`name = "acme-ab12cd34-app"\ntype = "stcp"\nsecretKey = "${said.link.appSecret}"\nlocalIP = "127.0.0.1"\nlocalPort = ${ports.peerApp}`);
+  });
+
+  it('hands over to a copy that receives the final WAL position only through the relay', async () => {
+    const c = await company();
+    const copyId = 'c0'.repeat(16);
+    const slot = `copy_${copyId.slice(0, 16)}_1`;
+    const w = '0/3000000';
+    const db = net.createServer(socket => void socket.on('error', ignore).on('data', chunk => socket.write(chunk)));
+    await new Promise<void>(resolve => db.listen(0, '127.0.0.1', resolve));
+    onTestFinished(() => void db.close());
+    const client = (c.db as unknown as { $client: PGlite }).$client;
+    const sql: Sql = { query: (text, params) => client.query(text, params) };
+    const dir = folder();
+    const controlDir = folder();
+    const request = randomUUID();
+    const lease = fakeLease({ take: async () => ({ number: 1, machine: MACHINE_ID, split: false }) });
+    await c.db.insert(peerSecrets).values({ kind: 'visit', secretEnc: encryptSecret(JSON.stringify({ name: 'acme', key: 'test visitor key' }), c.config.secret) });
+    let applied = false;
+    let go: unknown;
+    const { keeper } = await keeperBeside(c, await listening(c.app), dir, {
+      lease, dbTarget: { host: '127.0.0.1', port: (db.address() as AddressInfo).port },
+      handing: parts => new Hander({
+        ...parts, dir, controlDir, sql, secret: Buffer.from(TEST_SECRET, 'base64'), machine: { networkId: MACHINE_ID },
+        sync: {
+          named: () => copyId, generation: () => 1,
+          record: () => ({ state: 'on', copy: copyId, epoch: 1, generation: 1, at: 1 }),
+          copies: () => [{ name: slot, networkId: copyId, state: 'sync' }],
+        },
+        peer: () => ({ request: async (_method, path, body) => {
+          if (path.endsWith('/go')) go = body;
+          if (path.includes('/state')) return { status: 200, body: {
+            state: 'leading', switch: request, term: { number: 2, machine: copyId, split: false },
+            slots: { [MACHINE_ID]: `copy_${MACHINE_ID.slice(0, 16)}_2` },
+          } };
+          return { status: 200, body: { ok: true } };
+        } }),
+        exit: ignore, wal: { position: async () => w, slots: async () => [{ name: slot, read: true, atW: applied }] },
+        log: ignore,
+      }),
+    });
+    const hander = keeper['hander'] as Hander;
+    const leader = (await c.db.select().from(machines).where(eq(machines.networkId, MACHINE_ID)))[0]!;
+    const peerPort = (await keeper.peerPorts()).peer;
+    const copy = await worker(c, 'data');
+    await c.db.update(machines).set({ networkId: copyId, serverOrder: 2, copyName: slot, copyState: 'ready' }).where(eq(machines.id, copy.id));
+    await networkRound(keeper);
+    await tunnelRound(keeper);
+    const relay = createDelayGate({ schedule: {
+      now: () => performance.now(),
+      after: (_ms, deliver) => {
+        const turn = setImmediate(deliver);
+        return () => clearImmediate(turn);
+      },
+      noteLocal: work => work,
+    } });
+    const visit = await relay.tcpProxy({ host: '127.0.0.1', port: peerPort });
+    const tunnel = keeper['peers']!['tunnel']!;
+    await waitForState(() => tunnel['child'] !== null);
+    tunnel['child']!.once('exit', () => relay.setCut(true));
+    const sessions = new PeerSessions({
+      held: () => ({ ...copy, machine: copy.id, role: 'data' }), key: copy.key, revoked: () => new Set(), own: () => [], log: ignore,
+    });
+    onTestFinished(() => sessions.close());
+    sessions.use([{ machine: leader.id, networkId: MACHINE_ID, addresses: [], peerPort: null, relayPort: visit.port }]);
+    await waitForState(() => sessions.leader()?.path === 'relay');
+    const replication = await sessions.connectDb();
+
+    await c.db.execute(raw`INSERT INTO net.move (request, machine_id, from_machine_id, asked_by, asked_at, state)
+      VALUES (${request}, ${copy.id}, ${leader.id}, ${c.ownerId}, to_timestamp(${Date.now() / 1000}), 'preparing')`);
+    await hander.look();
+    await hander.look();
+    await hander.look();
+    expect(keeper.mode()).toBe('read');
+    expect(readHanding(dir)).toMatchObject({ phase: 'stopped', fenced: true, w });
+    for (let n = 0; n < 2; n++) {
+      advance(3000);
+      await tunnelRound(keeper);
+    }
+    applied = await new Promise<boolean>(resolve => {
+      if (replication.destroyed) return resolve(false);
+      replication.once('close', () => resolve(false));
+      replication.once('data', chunk => resolve(String(chunk) === w));
+      replication.write(w);
+    });
+    advance(SWITCH_MS - BEHIND_MS - 6000);
+    await hander.look();
+    expect(readHanding(dir)).toMatchObject({ phase: 'go', reason: null, w });
+    expect(go).toEqual({ switch: request, w, copies: [] });
+    for (let n = 0; n < 2; n++) {
+      advance(3000);
+      await tunnelRound(keeper);
+    }
+    expect(relay.cut()).toBe(false);
+    await hander.look();
+    await hander.look();
+    expect(readHanding(dir)).toBeNull();
+    expect(existsSync(join(controlDir, REPLICA_FILE))).toBe(true);
   });
 
   it('offers nothing through the relay for a company without a link, and still serves the peer port', async () => {

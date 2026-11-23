@@ -9,6 +9,7 @@ export { OUTSIDE_MATERIAL } from './model-instructions.js';
 export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, approvalNeeded, defaultRule, kindKey, GOING_OUT_CHANNELS, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
 export { MachineDrain, NodeWait } from './machine-drain.js';
+export { DISK_CLEANED_MAX, DISK_IGNORED_MAX, DISK_KEPT_MAX, DISK_PARTS, DiskPart, DiskReport, MachineReplicas, NODE_DISK_PARTS } from './disk-report.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
 export * from './test-terminals.js';
@@ -19,6 +20,7 @@ import { NodeExit, NodeLog } from './node-exit.js';
 import { CommitSha } from './test-commit.js';
 import { FileOutcome, KeptFiles, RepositoryScope, RuntimeCapability, ProductCommitSha, TestExecution, TestEnvironmentReceipt, TestsDescribed } from './test-environment.js';
 import { HarnessSynced } from './harness.js';
+import { DiskReport } from './disk-report.js';
 export { HarnessClaim, HarnessDone, HarnessFailed, HarnessSynced, HarnessUnit } from './harness.js';
 export * from './phones.js';
 import { PhoneProbe, PhoneList, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke, PhoneReply, PhoneFrame } from './phones.js';
@@ -304,7 +306,9 @@ export const isTerminalReport = (data: string): boolean => TERMINAL_REPORT.test(
    Newer nodes also name the machine's processor and the free and total space of the disk their folders are on, and
    identify the physical host together with its own processors, load and memory. memoryShort: the machine's kernel
    killed a process for want of memory since the node's report before, so Hornhoof starts no new agent program there
-   until a report without one; older nodes and machines that do not count such kills never say so. */
+   until a report without one; older nodes and machines that do not count such kills never say so. disk: what of the disk
+   is Hornhoof's and whether the node is short of it, from newer nodes; a report that is not one counts as none said, so
+   the rest of the load still counts. */
 const Load = z.object({
   cpus: z.number().int().min(1).max(4096),
   load: z.number().min(0).max(100_000),
@@ -321,6 +325,7 @@ const Load = z.object({
   hostMemFree: z.number().int().min(0).optional(),
   hostMemory: z.number().int().min(0).optional(),
   memoryShort: z.boolean().optional(),
+  disk: DiskReport.optional().catch(undefined),
 });
 export type NodeLoad = z.infer<typeof Load>;
 export const LOAD_MS = 20_000;
@@ -746,7 +751,8 @@ const ServerMessage = z.discriminatedUnion('type', [
      program's own queue after that turn. */
   z.object({ type: z.literal('term.input'), termId: TermId, data: z.string().max(TERM_CHUNK), pressedIn: Id.optional() }),
   z.object({ type: z.literal('term.resize'), termId: TermId, cols: Cols, rows: Rows }),
-  z.object({ type: z.literal('term.close'), termId: TermId }),
+  /* final: the view ended for good, as for a person who may no longer see it, so no view of theirs comes back to it. */
+  z.object({ type: z.literal('term.close'), termId: TermId, final: z.literal(true).optional() }),
   /* The turn Hornhoof opened for what a person typed, or none when it could not. */
   z.object({ type: z.literal('turn.opened'), agentKey: Id, jobId: Id.nullable(), toolToken: z.string().max(200).nullable(), ref: z.string().max(64).optional() }),
   /* A part of a run: the node clones the branch into a fresh folder, runs the command there as a user that reaches

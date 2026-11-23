@@ -253,10 +253,12 @@ export function RequestMaterialsZone({
   items,
   failure,
   onOpen,
+  heading,
 }: {
   items: MaterialItem[];
   failure?: unknown;
   onOpen: (id: string, opener: HTMLElement | null) => void;
+  heading?: string;
 }) {
   const t = useT();
   const { expanded, listRef, expand } = useExpandFocus();
@@ -264,12 +266,13 @@ export function RequestMaterialsZone({
   if (!items.length && !showError) return null;
   const collapsed = !expanded && items.length >= COLLAPSE_THRESHOLD;
   const shown = visibleMaterials(items, collapsed);
+  const title = heading ?? t.tasks.materials.heading;
 
   return (
-    <section className="mat-zone" aria-label={t.tasks.materials.heading}>
+    <section className="mat-zone" aria-label={title}>
       <div className="mat-head">
-        <span className="mat-title">{t.tasks.materials.heading}</span>
-        <span className="mat-hint">{t.tasks.materials.hint}</span>
+        <span className="mat-title">{title}</span>
+        <bdi className="mat-hint">{t.tasks.materials.hint}</bdi>
       </div>
       {showError && (
         <p className="alert" role="alert">

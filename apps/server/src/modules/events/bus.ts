@@ -20,6 +20,8 @@ export type StreamMessage =
   | { type: 'agent_event'; agentId: string; event: EventView; spot: Spot }
   | { type: 'working'; working: number }
   | { type: 'org' }
+  /* The company's active theme or world changed; every signed-in browser switches at once. */
+  | { type: 'company_theme'; theme: string }
   | { type: 'pulse'; from: Endpoint; to: Endpoint }
   /* A task changed; people who reach its place fetch it again. */
   | { type: 'task'; id: string; spot: Spot }

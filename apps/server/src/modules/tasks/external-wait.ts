@@ -20,7 +20,7 @@ import { withInputLock } from '../conversation/decision-context.js';
 import { messageNotDelivered, NOT_DELIVERED, refusedMessage, taskNamed, undeliveredLine } from '../conversation/undelivered.js';
 import { dropMail, inboxChanged } from '../conversation/inbox.js';
 import { recordRequestedNotice, requestedWaitNotice } from './wait-notices.js';
-import { checkWaitHealth } from './wait-monitor.js';
+import { tryWaitHealth } from './wait-monitor.js';
 import { bindSource } from './wait-producers.js';
 import { endSourceWait, supersedeWaitFor, waitForSourceKey } from './wait-state.js';
 import { checkedWaitTarget } from './wait-target.js';
@@ -78,7 +78,7 @@ export async function waitFor(ctx: Ctx, agentId: string, taskId: string, input: 
   const at = now ?? new Date();
   const called = heard ?? (await lastEventOf(ctx, agentId));
   const moved = await onAgent(ctx, agentId, () => placeWait(ctx, agentId, taskId, input, at, called));
-  await checkWaitHealth(ctx, at);
+  await tryWaitHealth(ctx, at);
   return moved;
 }
 
@@ -151,7 +151,7 @@ export async function trackWork(ctx: Ctx, agentId: string, taskId: string, reaso
     });
     return { task: row, wakes: [] };
   });
-  if (employee) await checkWaitHealth(ctx, new Date(ctx.clock()));
+  if (employee) await tryWaitHealth(ctx, new Date(ctx.clock()));
   return moved;
 }
 

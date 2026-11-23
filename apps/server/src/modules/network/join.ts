@@ -191,13 +191,14 @@ export async function workerLink(ctx: Ctx, withData = false): Promise<WorkerLink
 /* What a worker knows of the network: who it is, whom to trust and whom not, where the data machines are, and the link.
    The server's build and the word to install it are told only through the peer link, to the machine's own keeper: a view
    that goes with a join or a renewal carries none. */
-export async function workerView(ctx: Ctx, machineId: string): Promise<WorkerView> {
+export async function workerView(ctx: Ctx, machineId: string, joiningAs?: MachineRole): Promise<WorkerView> {
   const row = await networkMachine(ctx.db, machineId);
   if (!row) throw notAMachine();
   const authority = await authorityOf(ctx.db, ctx.config);
-  const link = await workerLink(ctx, row.role === 'data' && (await holdsData(ctx.db, row.personId)));
-  const copy = row.role === 'data' || row.uploadState ? await copyOrder(ctx, row) : null;
-  return { machine: row.id, role: row.role!, authorityPem: authority?.certPem ?? null, revoked: await revokedSerials(ctx.db), data: await dataMachines(ctx.db), ...(link === undefined ? {} : { link }), build: null, go: null, copy };
+  const role = joiningAs ?? row.role!;
+  const link = await workerLink(ctx, role === 'data' && (await holdsData(ctx.db, row.personId)));
+  const copy = role === 'data' || row.uploadState ? await copyOrder(ctx, row) : null;
+  return { machine: row.id, role, authorityPem: authority?.certPem ?? null, revoked: await revokedSerials(ctx.db), data: await dataMachines(ctx.db), ...(link === undefined ? {} : { link }), build: null, go: null, copy };
 }
 
 const dayOf = (at: Date): string => at.toISOString().slice(0, 10);
@@ -277,7 +278,9 @@ export async function redeemTicket(ctx: Ctx, ask: JoinAsk): Promise<Certified> {
     const holders = await tx.select({ id: machines.id, revokedAt: machines.revokedAt }).from(machines).where(and(eq(machines.networkId, ask.networkId), ne(machines.id, row.id)));
     if (holders.some(holder => !holder.revokedAt)) throw machineTaken();
     if (holders.length > 0) await tx.update(machines).set({ networkId: null }).where(inArray(machines.id, holders.map(holder => holder.id)));
-    await tx.update(machines).set({ networkId: ask.networkId, role: 'worker', signKey }).where(eq(machines.id, row.id));
+    /* A new ticket for the same core does not free its replica seat. The core still holds that database. */
+    const keptRole = row.networkId === ask.networkId && row.role === 'data' ? 'data' : 'worker';
+    await tx.update(machines).set({ networkId: ask.networkId, role: keptRole, signKey }).where(eq(machines.id, row.id));
     /* A core installed anew has a new key, and what the old key held ends with it. */
     if (row.signKey && row.signKey !== signKey) await tx.update(certificates).set({ revokedAt: now }).where(and(eq(certificates.machineId, row.id), isNull(certificates.revokedAt)));
     const authority = await makeAuthorityOnce(tx, ctx.config, row.companyId);

@@ -549,6 +549,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       machineAccess: [],
       merges: decisions.merges.filter(merge => picked(merge.ownerPersonId)).map(({ id, label, after, open, ownerPersonId }) => ({ id, label, after, open, ownerPersonId })),
       machinesAway: machineCards(me, person, decisions.machines),
+      machinesLow: decisions.low.filter(card => !person || person === me.id || person === card.owner?.id),
       githubLimits: await githubLimitCards(me, person, ctx),
       counts: decisions.counts,
     };

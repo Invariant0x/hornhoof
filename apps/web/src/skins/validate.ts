@@ -17,8 +17,8 @@ const NAME_LANGUAGES = ['ru', 'en'] as const;
 /* The fonts a file may name for each role: the ones Hornhoof ships and the common families behind them. With no repeats
    a list holds at most as many as its role allows, never more than six. */
 export const FILE_FONTS: Readonly<Record<FontRole, readonly string[]>> = {
-  display: ['Tektur', 'Handjet', 'Onest', 'system-ui', 'sans-serif'],
-  body: ['Onest', 'system-ui', 'sans-serif'],
+  display: ['Tektur', 'Handjet', 'Alegreya', 'Onest', 'system-ui', 'sans-serif', 'serif'],
+  body: ['Golos Text', 'Onest', 'system-ui', 'sans-serif'],
   mono: ['ui-monospace', 'Menlo', 'Consolas', 'monospace'],
 };
 /* Roles drawn over something else, which may let it show through. Text, lines and surfaces are always opaque. */
@@ -105,9 +105,11 @@ function checkColor(where: string, role: ColorRole, value: unknown): SkinError |
   return color.a < 1 && !SEE_THROUGH.includes(role) ? problem('opaque', where) : null;
 }
 
-/* A list of fonts the role allows, without repeats, that ends with a common family. */
+const MAX_FONT_LIST = 6;
+
+/* A list of up to six fonts the role allows, without repeats, that ends with a common family. */
 function checkFonts(where: string, role: FontRole, value: unknown): SkinError | null {
-  if (!Array.isArray(value) || value.length === 0) return problem('font_list', where);
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_FONT_LIST) return problem('font_list', where);
   const foreign = value.find(font => !FILE_FONTS[role].includes(font as string));
   if (foreign !== undefined) return problem('bad_font', where, String(foreign).slice(0, SHOWN));
   return new Set(value).size === value.length && GENERIC_FONTS.includes(value[value.length - 1] as string) ? null : problem('font_list', where);

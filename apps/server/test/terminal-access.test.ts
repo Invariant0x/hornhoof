@@ -150,11 +150,19 @@ describe('a terminal open when the right to it goes', () => {
   };
   afterEach(() => vi.useRealTimers());
 
-  it('closes at once when the agent moves to a plan of someone else, and tells the node', async () => {
+  /* A view that ends for good tells the node so: no view of this person comes back to it, so it holds the program no longer. */
+  it('closes at once when the agent moves to a plan of someone else, and tells the node the view ended for good', async () => {
     const c = await company();
     const { screen, termId } = await watching(c);
     expect((await moved(c, c.crew.mine.id, c.plans.bob.id)).statusCode).toBe(200);
     expect(await screen.closed).toEqual(noAccess);
+    expect(await next(c.node, 'term.close')).toEqual({ type: 'term.close', termId, final: true });
+  });
+
+  it('tells the node of a view the browser closed that it may come back', async () => {
+    const c = await company();
+    const { screen, termId } = await watching(c);
+    screen.ws.close();
     expect(await next(c.node, 'term.close')).toEqual({ type: 'term.close', termId });
   });
 

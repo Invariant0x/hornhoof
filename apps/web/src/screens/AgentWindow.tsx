@@ -1,3 +1,4 @@
+import { nextLevelProgress, type WorldLiveAgent, type WorldLiveSnapshot } from '@hornhoof/protocol/world';
 import { commandBlockOpen } from '../ui/CommandBox';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api';
@@ -5,6 +6,7 @@ import { deptLabel, errorText, useLanguage, useT, type Language, type Messages }
 import { useStream } from '../live';
 import { liveOf } from '../org';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
+import { useWorld } from '../skins/use-skin';
 import type { AgentCardView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ProviderId, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, TurnRefusal, WaitingRequest } from '../types';
 import { ChatEntry, ChatState, ChatSteps, chatItems, useAgentView } from '../ui/AgentChat';
 import { EventMessage, isMessage, messageKey, partyName, useFolding } from '../ui/AgentMessage';
@@ -199,13 +201,74 @@ const appliedLines = (t: Messages, applied: Applied): string[] => [
   ...(applied.hired ?? []).map(h => t.window.hiredLine(h.name)),
 ];
 
-/* The switch between the chat and the terminal names and draws what it opens, in every window and at every width. */
-function WindowToolbar({ t, terminal, state, stop, onToggle }: { t: Messages; terminal: boolean; state: OrchestratorState | null; stop(): void; onToggle(): void }) {
+/* The switch between the chat and the terminal names and draws what it opens, in every window and at every width.
+   When a game world theme is active, the window stays in its human conversation view instead of raw terminal mode. */
+/* Once the live terminal is open, it stays mounted across brief node reconnects, when the agent's state says for a moment
+   that there is none; a real absence ends through onGone. */
+function useKeptTerminal(terminal: boolean, gone: boolean): boolean {
+  const [had, setHad] = useState(false);
+  if (terminal && !had) setHad(true);
+  return (terminal || had) && !gone;
+}
+
+function WindowToolbar({ t, terminal, isWorld, state, stop, onToggle }: { t: Messages; terminal: boolean; isWorld: boolean; state: OrchestratorState | null; stop(): void; onToggle(): void }) {
   return (
     <>
       {terminal && state?.busy && <WordButton label={t.window.stop} icon={STOP_ICON} onClick={stop} />}
-      <WordButton label={terminal ? t.window.showChat : t.window.showTerminal} icon={terminal ? CHAT_ICON : TERMINAL_ICON} onClick={onToggle} both />
+      {!isWorld && <WordButton label={terminal ? t.window.showChat : t.window.showTerminal} icon={terminal ? CHAT_ICON : TERMINAL_ICON} onClick={onToggle} both />}
     </>
+  );
+}
+
+/* Read-only world progression for an employee inside an active world theme (used for the single level strip). */
+function useWorldAgentLevel(agentId: string, enabled: boolean): WorldLiveAgent | null {
+  const [agent, setAgent] = useState<WorldLiveAgent | null>(null);
+  useEffect(() => {
+    if (!enabled) {
+      setAgent(null);
+      return;
+    }
+    let alive = true;
+    void api
+      .get<WorldLiveSnapshot>('/api/world/state')
+      .then(snap => {
+        if (!alive || !snap || !Array.isArray(snap.agents)) return;
+        setAgent(snap.agents.find(a => a.id === agentId) ?? null);
+      })
+      .catch(() => {
+        if (alive) setAgent(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [agentId, enabled]);
+  return agent;
+}
+
+/* One compact level strip shown inside an employee's AgentWindow when a world theme is active.
+   Never repeats the agent's name (already shown in the window header). */
+function WorldAgentLevelStrip({ t, agent, departmentName }: { t: Messages; agent: WorldLiveAgent; departmentName: string | null }) {
+  const wc = t.skins.worldCard;
+  const progress = nextLevelProgress(agent.acceptedTasks);
+  const ratio =
+    progress.nextThreshold === null
+      ? 1
+      : Math.max(0, Math.min(1, (agent.acceptedTasks - progress.currentThreshold) / Math.max(1, progress.nextThreshold - progress.currentThreshold)));
+  const pct = Math.round(ratio * 100);
+  return (
+    <div className="world-agent-strip" data-testid="world-agent-level-strip" aria-label={wc.levelStripAria}>
+      <span className="world-level-badge">{wc.levelStripLevel(agent.level)}</span>
+      <span className="world-level-bar" aria-hidden="true">
+        <i style={{ width: `${pct}%` }} />
+      </span>
+      <span className="world-level-meta">
+        <span>{wc.levelStripAccepted(agent.acceptedTasks)}</span>
+        <span>
+          {progress.nextThreshold === null ? wc.maxLevel : wc.levelStripNext(progress.remaining, agent.level + 1)}
+        </span>
+        {departmentName && <span className="world-level-dept">{departmentName}</span>}
+      </span>
+    </div>
   );
 }
 
@@ -309,7 +372,10 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   useRenderGuard('agent-window');
   const t = useT();
   const { language } = useLanguage();
+  const world = useWorld();
+  const isWorld = world !== 'standard';
   const orchestrator = agentId === 'orchestrator';
+  const worldAgent = useWorldAgentLevel(agentId, isWorld && !orchestrator);
   const path = `/api/agents/${agentId}`;
   const [card, setCard] = useState<AgentCardView | null>(null);
   const [events, setEvents] = useState<EventView[]>([]);
@@ -538,8 +604,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* Until its state and card come, the window cannot tell a terminal from a conversation, nor whether the agent can work. */
   const known = state !== null && (orchestrator || card !== null);
   const pictures = useDraftPictures(path);
-  const hasTerminal = Boolean(state?.terminal) && !noTerminal;
-  const terminal = view === 'terminal';
+  const hasTerminal = useKeptTerminal(Boolean(state?.terminal), noTerminal);
+  const terminal = !isWorld && view === 'terminal';
   /* The map already knows an employee's program, before its card comes. */
   const provider = sub?.provider ?? org.departments.flatMap(d => d.employees).find(e => e.id === agentId)?.provider;
   const program = windowProgram(sub, provider);
@@ -740,8 +806,11 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     { id: 'card', label: t.window.card, icon: CARD_ICON, render: close => <AgentCard agentId={agentId} {...liveOf(org, agentId)} onClose={close} onRemoved={onClose} /> },
   ];
 
+  const worldDeptName = card?.department?.name ?? (worldAgent?.departmentId ? org.departments.find(d => d.id === worldAgent.departmentId)?.name ?? null : null);
+
   return (
-    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} agentState={card?.state} place={place} requests={requests} onRequestsChanged={onRequestsChanged} panels={sidePanels} toolbar={<WindowToolbar t={t} terminal={terminal} state={state} stop={stop} onToggle={toggleView} />}>
+    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} agentState={card?.state} place={place} requests={requests} onRequestsChanged={onRequestsChanged} panels={sidePanels} toolbar={<WindowToolbar t={t} terminal={terminal} isWorld={isWorld} state={state} stop={stop} onToggle={toggleView} />}>
+      {isWorld && !orchestrator && worldAgent && <WorldAgentLevelStrip t={t} agent={worldAgent} departmentName={worldDeptName} />}
       {windowLoad.phase !== 'done' && <WindowWait load={windowLoad} terminal={terminal} program={program} />}
       {opens && hasTerminal && <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={program} onGone={() => setNoTerminal(true)} onNotes={setTermNotes} />}
       {opens && !hasTerminal && state && <TerminalPlace t={t} state={state} program={program} />}

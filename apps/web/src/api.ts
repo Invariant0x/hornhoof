@@ -1,3 +1,4 @@
+import { awayOf, connection, fromAHop, joined } from './connection';
 import { forgetOwnerKey } from './owner-key-store';
 /* message: the server's own words, empty when it gave none; the screens word the rest from the dictionaries. */
 export class ApiFailure extends Error {
@@ -14,6 +15,13 @@ export class ApiFailure extends Error {
   }
 }
 
+/* Whether a failure is the server being away, not anything the server said of the request: no answer at all, or the answer
+   of the front or the keeper for a server that is not there, or of an update. Such a failure ends when the server returns. */
+export function isAway(failure: unknown): boolean {
+  if (!(failure instanceof ApiFailure)) return false;
+  return failure.status === 0 || failure.reason === 'starting' || failure.reason === 'maintenance' || failure.reason === 'no_leader';
+}
+
 type Said = { code?: string; message?: string; reason?: string; details?: Record<string, unknown> };
 
 /* A failure as the server answered it, with what it said of it; an answer with nothing readable is an internal one. */
@@ -24,10 +32,14 @@ function failure(status: number, data: unknown): ApiFailure {
   return failed;
 }
 
+/* A request the page itself gave up, as a load that outlived its limit, says nothing of the server. */
+const gaveUp = (init: RequestInit): boolean => init.signal?.aborted === true;
+
 async function fetchOrigin(path: string, init: RequestInit = {}): Promise<Response> {
   try {
     return await fetch(path, { credentials: 'same-origin', ...init });
   } catch {
+    if (!gaveUp(init)) connection.lost();
     throw new ApiFailure(0, 'network', '');
   }
 }
@@ -35,14 +47,16 @@ async function fetchOrigin(path: string, init: RequestInit = {}): Promise<Respon
 const signedOut = new Set<() => void>();
 
 /* Calls back each time the server answers that this page's session is over; the returned function stops it. */
-export function onSignedOut(listener: () => void): () => void {
-  signedOut.add(listener);
-  return () => void signedOut.delete(listener);
-}
+export const onSignedOut = (listener: () => void): (() => void) => joined(signedOut, listener);
 
 /* A session the server no longer knows is over on this device too: the person's key goes with it, and the page hears of
-   it. A wrong password is no such end. */
+   it. A wrong password is no such end. An answer that says the server is away is told to the page's connection, and one
+   that came from a hop in front of the server, with none of Hornhoof's words, is no answer of the server's about the
+   request, so it fails as a read that reached none: a 404 of a hop is no missing page. */
 async function failed(status: number, data: unknown): Promise<ApiFailure> {
+  const away = awayOf(status, data);
+  if (away) connection.lost(away);
+  if (fromAHop(status, data)) return new ApiFailure(0, 'network', '');
   const why = failure(status, data);
   if (status !== 401 || why.reason !== 'signed_out') return why;
   await forgetOwnerKey();
@@ -50,13 +64,23 @@ async function failed(status: number, data: unknown): Promise<ApiFailure> {
   return why;
 }
 
-/* The answer's JSON, null for an answer with no body, and undefined when the body breaks off before its end. */
+/* What a body that is whole but is not JSON, as a hop's page of its own is, reads as. */
+const NOT_JSON = Symbol('not json');
+
+/* The answer's JSON, null for an answer with no body, NOT_JSON for a whole body that is not JSON, and undefined when the
+   body breaks off before its end. */
 async function wholeJson(res: Response): Promise<unknown> {
+  let text: string;
   try {
-    const text = await res.text();
-    return text === '' ? null : (JSON.parse(text) as unknown);
+    text = await res.text();
   } catch {
     return undefined;
+  }
+  if (text === '') return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return res.ok ? undefined : NOT_JSON;
   }
 }
 
@@ -66,14 +90,14 @@ async function respond<T>(path: string, init: RequestInit): Promise<T> {
   const res = await fetchOrigin(path, init);
   if (res.status === 204) return undefined as T;
   const data = await wholeJson(res);
-  if (!res.ok) throw await failed(res.status, data ?? null);
+  if (!res.ok) throw await failed(res.status, data);
   if (data === undefined) throw new ApiFailure(0, 'network', '');
   return data as T;
 }
 
 async function respondText(path: string): Promise<string> {
   const res = await fetchOrigin(path);
-  if (!res.ok) throw await failed(res.status, await res.json().catch(() => null));
+  if (!res.ok) throw await failed(res.status, await wholeJson(res));
   return res.text();
 }
 
@@ -128,7 +152,7 @@ function finalizeStreamResult(bytes: Uint8Array, expected: number | null, stream
 
 async function respondBytes(path: string, signal?: AbortSignal): Promise<{ bytes: Uint8Array; complete: boolean; error: string | null }> {
   const res = await fetchOrigin(path, signal ? { signal } : {});
-  if (!res.ok) throw await failed(res.status, await res.json().catch(() => null));
+  if (!res.ok) throw await failed(res.status, await wholeJson(res));
   const expected = expectedByteLength(res);
   if (!res.body) return readArrayBufferResult(res, expected);
   const { bytes, streamError } = await readBodyChunks(res.body.getReader());
@@ -167,6 +191,7 @@ function waitOf(res: Response | null): number {
 /* The server is starting, or could not confirm the change, or a hop before it answered with no words of the server: the
    request id makes the same change safe to send again. What the server refused in its own words is never sent again. */
 function passes(status: number, data: unknown): boolean {
+  if (fromAHop(status, data)) return true;
   if (status !== 502 && status !== 503) return false;
   const said = (data as { error?: Said } | null | undefined)?.error;
   return !said || said.reason === 'starting' || said.reason === 'not_confirmed';
@@ -177,13 +202,18 @@ async function tryChange<T>(path: string, init: RequestInit): Promise<Tried<T>> 
   try {
     res = await fetch(path, { credentials: 'same-origin', ...init });
   } catch {
+    if (!gaveUp(init)) connection.lost();
     return { lost: new ApiFailure(0, 'network', ''), waitMs: waitOf(null) };
   }
   if (res.status === 204) return { value: undefined as T };
   const data = await wholeJson(res);
   if (res.ok) return data === undefined ? { lost: new ApiFailure(0, 'network', ''), waitMs: waitOf(res) } : { value: data as T };
-  if (passes(res.status, data)) return { lost: failure(res.status, data ?? null), waitMs: waitOf(res) };
-  throw await failed(res.status, data ?? null);
+  if (passes(res.status, data)) {
+    const away = awayOf(res.status, data);
+    if (away) connection.lost(away);
+    return { lost: fromAHop(res.status, data) ? new ApiFailure(0, 'network', '') : failure(res.status, data), waitMs: waitOf(res) };
+  }
+  throw await failed(res.status, data);
 }
 
 const pause = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));

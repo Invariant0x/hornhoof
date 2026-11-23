@@ -3,6 +3,7 @@ import type { Ctx } from '../../app.js';
 import { agents, jobs, programOperatorCases } from '../../db/schema.js';
 import { insertTurn } from '../conversation/queue.js';
 import { liveSubscription } from '../conversation/placement.js';
+import { appendEvent } from '../events/store.js';
 import { operationsStaff } from './staff.js';
 import { operatorNotification } from './notifications.js';
 import { operatorRecoveryHolds } from './recovery-state.js';
@@ -31,7 +32,7 @@ const holdText = (row: Case, name: string, to: Agent) =>
   `Look at the program with program_screen for employee ${row.agentId}. If it asks something or stands on words a person typed, answer or clear it with program_keys. ` +
   `Then release the hold with program_recovery_release, this case and your reason: that delivers the saved words once. It refuses while the program asks something, runs a tool or holds words a person typed. Never free a hold any other way.`;
 
-const watchDue = (row: Case, now: Date) => Boolean(row.escalatedAt) && +now - +row.escalatedAt! > HOLD_WATCH_MS && !row.resolution?.holdCall?.operations;
+export const holdWatchDue = (row: Case, now: Date): boolean => row.escalatedAt !== null && +now - +row.escalatedAt > HOLD_WATCH_MS;
 
 /* What the one who can release a hold is told of it: the words of its turn, and the line people see. */
 export type HoldWords = { text: (row: Case, name: string, to: Agent) => string; detail: (name: string) => { en: string; ru: string } };
@@ -40,7 +41,7 @@ const wordsOnHold: HoldWords = { text: holdText, detail: name => ({ en: `${name}
 /* Called with the agent row locked, once a round for a case on hold. It calls Operations once, and the orchestrator once
    while Operations cannot take it: the turn it queues is no case of its own. */
 export async function callOperationsOnHold(ctx: Ctx, row: Case, now: Date, words = wordsOnHold): Promise<void> {
-  if (watchDue(row, now)) await callOperations(ctx, row, now, words);
+  if (holdWatchDue(row, now) && !row.resolution?.holdCall?.operations) await callOperations(ctx, row, now, words);
 }
 
 /* Tells of a hold the one who can release it, in these words, and notes the call on its case. The turn it queued, or none
@@ -53,10 +54,49 @@ export async function callOperations(ctx: Ctx, row: Case, now: Date, words: Hold
   return job;
 }
 
+const unavailableHoldWords: HoldWords = {
+  text: (row, name, to) =>
+    `Hornhoof: ${name}'s queue has been on hold since ${row.escalatedAt!.toISOString()} (case ${row.id}). The program operator was unavailable and the server could not release the hold safely. ` +
+    (to.id === row.agentId ? 'Open the employee window and have another responder check the program. ' : `Use program_screen for employee ${row.agentId} to see what blocks it. `) +
+    'If the program needs its owner, ask them to clear the screen. When the screen is ready, use program_recovery_release with the case and your reason.',
+  detail: name => ({ en: `${name}: recovery hold needs attention`, ru: `${name}: удержание требует внимания` }),
+};
+
+async function activeOrchestrator(ctx: Ctx, companyId: string): Promise<Agent | undefined> {
+  const [orchestrator] = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+  return orchestrator;
+}
+
+async function operationsHead(ctx: Ctx, companyId: string): Promise<Agent | undefined> {
+  const staff = await operationsStaff(ctx, companyId);
+  return staff.find(agent => agent.kind === 'head');
+}
+
+async function notifyResponder(ctx: Ctx, row: Case, to: Agent | undefined, sent: string | undefined): Promise<string | undefined> {
+  if (sent || !to) return sent;
+  if (to.id !== row.agentId && !await liveSubscription(ctx, to.id)) return undefined;
+  return tellOfHold(ctx, row, to, unavailableHoldWords);
+}
+
+/* Keep one visible letter per responder with the held case, including after a restart. The caller holds the employee. */
+export async function callRecoveryResponders(ctx: Ctx, row: Case): Promise<void> {
+  const resolution = row.resolution!;
+  const previous = resolution.holdNoticeJobs ?? {};
+  if (previous.orchestrator && previous.operations) return;
+  const orchestrator = await notifyResponder(ctx, row, await activeOrchestrator(ctx, row.companyId), previous.orchestrator);
+  const operations = await notifyResponder(ctx, row, await operationsHead(ctx, row.companyId), previous.operations);
+  if (orchestrator === previous.orchestrator && operations === previous.operations) return;
+  await ctx.db.update(programOperatorCases).set({ resolution: { ...resolution, holdNoticeJobs: { orchestrator, operations } } }).where(eq(programOperatorCases.id, row.id));
+}
+
 async function tellOfHold(ctx: Ctx, row: Case, to: Agent, words: HoldWords): Promise<string> {
   const [target] = await ctx.db.select({ name: agents.name, taskId: jobs.taskId }).from(agents).innerJoin(jobs, eq(jobs.id, row.jobId)).where(eq(agents.id, row.agentId));
   const name = target?.name ?? row.agentId;
   const text = words.text(row, name, to);
   const notification = await operatorNotification(ctx, { companyId: row.companyId, taskId: target?.taskId ?? null }, words.detail(name));
+  if (to.id === row.agentId) {
+    await appendEvent(ctx, { companyId: row.companyId, agentId: to.id, jobId: row.jobId, kind: 'message', data: { text, notification, turnFact: true } });
+    return row.jobId;
+  }
   return insertTurn(ctx, { companyId: row.companyId, agentId: to.id, prompt: text, createdBy: null, message: { personId: null, text, notification } });
 }

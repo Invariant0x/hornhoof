@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { COLLECTION_LIMIT, collectionText, readCollection, uniqueName, withAdded, withRestored, without, type CustomSkin } from '../src/skins/collection';
 import { BUILTIN_SKINS, builtinSkin, ownLook } from '../src/skins/registry';
-import { COLOR_TOKENS, CUT_TOKEN, FONT_TOKENS, SKIN_PROPERTIES, type Skin } from '../src/skins/roles';
-import { addSkin, chooseSkin, initSkins, lookOf, removeSkin, restoreSkin, skinsState, subscribeSkins } from '../src/skins/store';
+import { COLOR_TOKENS, CUT_TOKEN, FONT_TOKENS, SKIN_PROPERTIES, TERMINAL_PROPERTIES, WORLD_COLOR_TOKENS, WORLD_PROPERTIES, type Skin } from '../src/skins/roles';
+import { activeWorld, addSkin, chooseSkin, initSkins, lookOf, mapGrain, removeSkin, restoreSkin, setMapGrain, skinsState, subscribeSkins } from '../src/skins/store';
 import { builtinFile, skinText } from '../src/skins/validate';
 
 const root = document.documentElement;
@@ -22,6 +22,9 @@ function clearPage() {
   delete root.dataset.theme;
   delete root.dataset.scheme;
   delete root.dataset.cut;
+  delete root.dataset.world;
+  delete root.dataset.surface;
+  delete root.dataset.grain;
   root.removeAttribute('style');
 }
 
@@ -246,5 +249,73 @@ describe('the skin on the page', () => {
     stop();
     chooseSkin('light');
     expect(heard).toHaveBeenCalledTimes(4);
+  });
+
+  it('switches to Ancient Egypt with its world and surface attributes, and switching back restores the previous theme without a trace', () => {
+    for (const previous of ['cyberpunk', 'matrix', 'light', 'pixel'] as const) {
+      chooseSkin(previous);
+      const beforeDataset = { ...root.dataset };
+      const beforeTokens = inline();
+      expect(activeWorld()).toBe('standard');
+      expect(root.dataset.world).toBeUndefined();
+      expect(root.dataset.surface).toBeUndefined();
+
+      expect(chooseSkin('egypt')).toBe(true);
+      expect(activeWorld()).toBe('egypt');
+      expect([root.dataset.theme, root.dataset.scheme, root.dataset.cut, root.dataset.world, root.dataset.surface]).toEqual([
+        'egypt',
+        'light',
+        'bevel',
+        'egypt',
+        'papyrus',
+      ]);
+      expect(inline()[COLOR_TOKENS.bg]).toBe(builtinSkin('egypt')!.colors.bg);
+      expect(root.style.getPropertyValue(WORLD_COLOR_TOKENS.ground)).toBe('#E4D1AA');
+      expect(root.style.getPropertyValue(WORLD_COLOR_TOKENS.water)).toBe('#2B6E9B');
+      expect(root.style.getPropertyValue('--term-bg')).toBe('#17130F');
+      expect(root.style.getPropertyValue('--term-ink')).toBe('#EFE4CE');
+
+      nextVisit();
+      expect(skinsState().active).toBe('egypt');
+      expect(activeWorld()).toBe('egypt');
+      expect(root.dataset.world).toBe('egypt');
+      expect(root.dataset.surface).toBe('papyrus');
+      expect(root.style.getPropertyValue(WORLD_COLOR_TOKENS.ground)).toBe('#E4D1AA');
+
+      expect(chooseSkin(previous)).toBe(true);
+      expect(activeWorld()).toBe('standard');
+      expect(root.dataset.world).toBeUndefined();
+      expect(root.dataset.surface).toBeUndefined();
+      for (const property of [...WORLD_PROPERTIES, ...TERMINAL_PROPERTIES]) {
+        expect(root.style.getPropertyValue(property), property).toBe('');
+      }
+      expect({ ...root.dataset }).toEqual(beforeDataset);
+      expect(inline()).toEqual(beforeTokens);
+    }
+  });
+
+  it('persists the optional papyrus map grain toggle and leaves no data-grain trace on non-papyrus themes', () => {
+    expect(mapGrain()).toBe(true);
+    expect(root.dataset.grain).toBeUndefined();
+
+    chooseSkin('egypt');
+    expect(root.dataset.grain).toBeUndefined();
+    setMapGrain(false);
+    expect(mapGrain()).toBe(false);
+    expect(localStorage.getItem('hh-map-grain')).toBe('off');
+    expect(root.dataset.grain).toBe('off');
+
+    nextVisit();
+    expect(mapGrain()).toBe(false);
+    expect(root.dataset.grain).toBe('off');
+
+    chooseSkin('cyberpunk');
+    expect(root.dataset.grain).toBeUndefined();
+
+    chooseSkin('egypt');
+    expect(root.dataset.grain).toBe('off');
+    setMapGrain(true);
+    expect(mapGrain()).toBe(true);
+    expect(root.dataset.grain).toBeUndefined();
   });
 });

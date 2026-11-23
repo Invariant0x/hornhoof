@@ -71,10 +71,21 @@ const AGY: [FailureKind, RegExp][] = [
   ['usage_limit', /quota/i], ['network', /network issue/i],
 ];
 
-function agyFailure(raw: Record<string, unknown>): Failure {
+/* What agy says when the Google access token it holds ran out: the token lasts an hour, and a program that has run longer
+   keeps using the old one. The saved sign-in is still good, so a program started anew gets a new token from it. */
+export const AGY_TOKEN_REFUSED = /UNAUTHENTICATED|\(code 401\)|invalid authentication credentials|Expected OAuth 2 access token/i;
+
+/* renewed: the program started anew after a refusal and answered no turn since. */
+function agyTokenFailure(message: string, renewed: boolean): Failure {
+  if (renewed) return failure('auth', `Antigravity refused its sign-in again (401 UNAUTHENTICATED), right after its program started anew with the saved sign-in, so the saved sign-in no longer works. The plan's owner signs in again on the machine of this node. It said: ${message}`, false);
+  return failure('unknown', `Antigravity refused its sign-in token (401 UNAUTHENTICATED): the program holds a token that ran out. Hornhoof starts the program anew with the saved sign-in and tries the turn once more. It said: ${message}`, true);
+}
+
+function agyFailure(raw: Record<string, unknown>, renewed = false): Failure {
   const message = text(raw.short_error) || text(raw.error) || 'unknown';
-  const kind = AGY_SIGNED_OUT.test(message) ? 'auth' : AGY.find(([, pattern]) => pattern.test(message))?.[0] ?? 'unknown';
-  return failure(kind, message, raw.retryable);
+  if (AGY_SIGNED_OUT.test(message)) return failure('auth', message, raw.retryable);
+  if (AGY_TOKEN_REFUSED.test(message)) return agyTokenFailure(message, renewed);
+  return failure(AGY.find(([, pattern]) => pattern.test(message))?.[0] ?? 'unknown', message, raw.retryable);
 }
 
 export const FAILURE = { claude: claudeFailure, codex: codexFailure, kimi: kimiFailure, antigravity: agyFailure };
