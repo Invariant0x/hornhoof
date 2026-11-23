@@ -20,17 +20,19 @@ const MAIN = /^refs\/heads\/(?:main|master)$/;
 /* One push carries this many refs at most: the answer to it is read whole. */
 export const REFS_PER_PUSH = 100;
 
+/* Why one change is none Hornhoof makes, or null. */
+function refusedUpdate({ ref, old, next }: RefUpdate): string | null {
+  if (!REF.test(ref)) return `${JSON.stringify(ref)} is not a ref Hornhoof changes: only a branch, or a ref under refs/hornhoof/, never a tag.`;
+  if (old === null && next === null) return `There is nothing to change in ${ref}.`;
+  if ([old, next].some(sha => sha !== null && !COMMIT_SHA.test(sha))) return `${ref}: a commit is not one git takes.`;
+  return next === null && MAIN.test(ref) ? `${ref}: main is never deleted.` : null;
+}
+
 /* Why the push is no push Hornhoof makes, or null. */
 function refused(updates: readonly RefUpdate[]): string | null {
   if (!updates.length) return 'There is nothing to change.';
   if (updates.length > REFS_PER_PUSH) return `A push changes ${REFS_PER_PUSH} refs at most.`;
-  for (const { ref, old, next } of updates) {
-    if (!REF.test(ref)) return `${JSON.stringify(ref)} is not a ref Hornhoof changes: only a branch, or a ref under refs/hornhoof/, never a tag.`;
-    if (old === null && next === null) return `There is nothing to change in ${ref}.`;
-    if ([old, next].some(sha => sha !== null && !COMMIT_SHA.test(sha))) return `${ref}: a commit is not one git takes.`;
-    if (next === null && MAIN.test(ref)) return `${ref}: main is never deleted.`;
-  }
-  return null;
+  return updates.map(refusedUpdate).find(why => why !== null) ?? null;
 }
 
 /* Why a push did not change a ref, or null where it did: a ref its answer does not name was not changed. */

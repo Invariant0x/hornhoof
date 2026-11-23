@@ -66,23 +66,37 @@ function stopOf({ stopped }: Pruning['result']): string | null {
 
 const done = (entries: readonly Entry[], what: Entry['done']): number => entries.filter(entry => entry.done === what).length;
 
+/* What each change is, or came to when applied. */
+const doingOf = ({ verdicts, entries }: Pruning['result'], apply: boolean): Entry[] =>
+  apply ? entries : verdicts.filter(v => v.action !== 'keep').map(v => ({ ...v, done: v.action === 'archive' ? 'archived' : 'deleted' }) as Entry);
+
+const rowOf = (url: string, entry: Entry, apply: boolean): string =>
+  line(url, entry.branch, entry.head, apply ? entry.done : entry.action, entry.category, entry.done === 'refused' ? `refused: ${entry.problem ?? ''}` : entry.reason);
+
+/* The line of each change, and of each branch it keeps where those are asked for. */
+function listing(url: string, result: Pruning['result'], options: Options, doing: readonly Entry[]): string[] {
+  const kept = options.allBranches ? result.verdicts.filter(v => v.action === 'keep') : [];
+  return [...kept.map(v => line(url, v.branch, v.head, v.action, v.category, v.reason)), ...doing.map(entry => rowOf(url, entry, options.apply))];
+}
+
+/* The totals: by kind, what would be or was done, branches before and after, and how to bring an archived branch back. */
+function totals(url: string, { result, counts }: Pruning, apply: boolean, doing: readonly Entry[]): string[] {
+  const [deleted, archived] = [done(doing, 'deleted'), done(doing, 'archived')];
+  const kinds = `# ${url}: ${result.branches} branches, by kind: ${counted(counts)}`;
+  if (!apply) return [kinds, `# ${url}: ${result.branches} branches, dry run: ${deleted} to delete, ${archived} to archive`];
+  const after = result.branches - deleted - archived;
+  return [kinds, `# ${url}: applied: ${deleted} deleted, ${archived} archived, ${done(doing, 'refused')} refused; branches before ${result.branches}, after ${after}`,
+    ...doing.filter(e => e.done === 'archived').map(entry => `# restore ${entry.branch}: ${restoreCommand(entry.branch)}`)];
+}
+
 /* What one repository's run says: the changes (or every branch), then the totals. */
 function report(pruning: Pruning, options: Options, print: (line: string) => void): void {
-  const { repository, result, counts } = pruning;
-  const url = repository.url;
+  const { url } = pruning.repository;
+  const { result } = pruning;
   if (result.stopped?.why === 'unreadable') return print(`# ${url}: ${stopOf(result)}`);
-  const doing = options.apply ? result.entries : result.verdicts.filter(v => v.action !== 'keep').map(v => ({ ...v, done: v.action === 'archive' ? 'archived' : 'deleted' }) as Entry);
-  for (const v of options.allBranches ? result.verdicts.filter(v => v.action === 'keep') : []) print(line(url, v.branch, v.head, v.action, v.category, v.reason));
-  for (const entry of doing) print(line(url, entry.branch, entry.head, options.apply ? entry.done : entry.action, entry.category, entry.done === 'refused' ? `refused: ${entry.problem ?? ''}` : entry.reason));
-  const [deleted, archived] = [done(doing, 'deleted'), done(doing, 'archived')];
-  print(`# ${url}: ${result.branches} branches, by kind: ${counted(counts)}`);
-  if (options.apply) {
-    const refused = done(doing, 'refused');
-    print(`# ${url}: applied: ${deleted} deleted, ${archived} archived, ${refused} refused; branches before ${result.branches}, after ${result.branches - deleted - archived}`);
-    for (const entry of doing.filter(e => e.done === 'archived')) print(`# restore ${entry.branch}: ${restoreCommand(entry.branch)}`);
-  } else print(`# ${url}: ${result.branches} branches, dry run: ${deleted} to delete, ${archived} to archive`);
+  const doing = doingOf(result, options.apply);
   const more = stopOf(result);
-  if (more) print(`# ${url}: ${more}`);
+  for (const text of [...listing(url, result, options, doing), ...totals(url, pruning, options.apply, doing), ...(more ? [`# ${url}: ${more}`] : [])]) print(text);
 }
 
 /* The command: a run over each repository that fits, and the exit code 0 when every one was read. */

@@ -302,13 +302,18 @@ function turnkeyCommits(brought: Compared[], lines: { tip: string; start: string
   const at = new Map(brought.map(c => [c.sha, c]));
   const own = new Set<string>();
   for (const { tip, start, workStart, merge } of lines) {
-    const under = heldWithin(at, [start, workStart]);
-    const line = new Set<string>();
-    for (let sha = tip; at.has(sha) && !others.has(sha) && !under.has(sha) && !line.has(sha); sha = at.get(sha)!.parents[0] ?? '') line.add(sha);
+    const line = firstParentLine(at, tip, heldWithin(at, [start, workStart]), others);
     for (const sha of line) own.add(sha);
     if (merge && line.has(tip) && isTakeIn(at.get(merge), tip)) own.add(merge);
   }
   return own;
+}
+
+/* The commits from the tip down its first parents, up to those the start holds or another result of the turn counts as its own. */
+function firstParentLine(at: Map<string, Compared>, tip: string, under: Set<string>, others: Set<string>): Set<string> {
+  const line = new Set<string>();
+  for (let sha = tip; at.has(sha) && !others.has(sha) && !under.has(sha) && !line.has(sha); sha = at.get(sha)!.parents[0] ?? '') line.add(sha);
+  return line;
 }
 
 /* The merge Hornhoof made to take the checked commit into the turn branch: two parents, the turn branch's and the commit itself.

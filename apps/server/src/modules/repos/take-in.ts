@@ -61,21 +61,33 @@ async function stateOf(input: TakeIn, holds: Holds): Promise<Ready> {
   return holdsTurn ? 'ready' : 'stale';
 }
 
+const behind = (input: TakeIn): string => `take ${input.turn} into ${input.branch ?? "the task's branch"}, check it again, and report it again.`;
+
+/* Why the input is none this takes in, or null. */
+function refusedInput({ turn, turnHead, candidate }: TakeIn): Taken | null {
+  if (!TURN.test(turn)) return { problem: `${JSON.stringify(turn)} is not a turn branch: work is taken into a turn branch alone.` };
+  return [turnHead, candidate].every(sha => SHA1.test(sha)) ? null : { problem: 'A commit is not one git takes.' };
+}
+
+/* The answer where the candidate is not ready for a merge, or null where it is. */
+async function notReady(input: TakeIn, holds: Holds): Promise<Taken | null> {
+  const state = await stateOf(input, holds);
+  if (state === 'already') return { already: true };
+  if (state === 'unreadable') return unreadable(`Whether ${input.turn} and the candidate hold each other`);
+  if (state !== 'stale') return null;
+  return { problem: `The candidate ${input.candidate.slice(0, 9)} does not hold ${input.turn} at ${input.turnHead.slice(0, 9)}: ${behind(input)}`, stale: true };
+}
+
 /* Takes the candidate into the turn branch by a merge of its own, once, only while the turn branch is still where it was read. */
 export async function takeIn(input: TakeIn, deps: TakeInDeps): Promise<Taken> {
-  const { task, turn, turnHead, candidate, who, branch } = input;
-  if (!TURN.test(turn)) return { problem: `${JSON.stringify(turn)} is not a turn branch: work is taken into a turn branch alone.` };
-  if (![turnHead, candidate].every(sha => SHA1.test(sha))) return { problem: 'A commit is not one git takes.' };
-  const state = await stateOf(input, deps.holds);
-  if (state === 'already') return { already: true };
-  if (state === 'unreadable') return unreadable(`Whether ${turn} and the candidate hold each other`);
-  if (state === 'stale') return { problem: `The candidate ${candidate.slice(0, 9)} does not hold ${turn} at ${turnHead.slice(0, 9)}: take ${turn} into ${branch ?? "the task's branch"}, check it again, and report it again.`, stale: true };
+  const { task, turn, turnHead, candidate, who } = input;
+  const answer = refusedInput(input) ?? (await notReady(input, deps.holds));
+  if (answer) return answer;
   const tree = await deps.treeOf(candidate);
   if (!tree || !SHA1.test(tree)) return unreadable(`The tree of ${candidate.slice(0, 9)}`);
   const body = commitText(tree, [turnHead, candidate], who, Math.floor(deps.now() / 1000), takeInMessage(task, who));
   const merge = objectId(body);
   const ref = `refs/heads/${turn}`;
-  const pushed = await deps.push([{ ref, old: turnHead, next: merge }], { pack: packOf(body) });
-  const refused = refusalOf(pushed, ref);
-  return refused ? { problem: `${turn} went on while #${task} was taken in (${refused}): take it into ${branch ?? "the task's branch"}, check it again, and report it again.`, stale: true } : { merge };
+  const refused = refusalOf(await deps.push([{ ref, old: turnHead, next: merge }], { pack: packOf(body) }), ref);
+  return refused ? { problem: `${turn} went on while #${task} was taken in (${refused}): ${behind(input)}`, stale: true } : { merge };
 }

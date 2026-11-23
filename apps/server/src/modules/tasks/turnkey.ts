@@ -145,10 +145,19 @@ async function ownBranchOf(readCommit: NonNullable<Ctx['readCommit']>, repo: Int
 /* The turn branch takes the commit the holder checked in as a merge commit of its own, which names the task, unless it holds the
    commit already, as where its holder fast-forwarded it. The merge is made only where Hornhoof can push to the repository and
    read the tree of a commit: elsewhere the holder joins the turn branch itself, as it always did. The merge, or none. */
-async function takenIntoTurn(ctx: Reader, task: Task, target: IntegrationTarget, own: Own, named: TurnkeyChecked): Promise<string | null> {
+/* What taking work in needs: where Hornhoof can push and read the tree of a commit, and the head of the turn branch where it does
+   not hold the commit yet. None elsewhere. */
+async function takeInGround(ctx: Reader, target: IntegrationTarget, commit: string) {
   const { pushRefs, readTreeSha } = ctx;
-  const head = pushRefs && readTreeSha ? await headOf(ctx, target.repo, target.branch) : null;
-  if (!pushRefs || !readTreeSha || !head || (await branchHolds(ctx, target.repo, head, named.commit))) return null;
+  if (!pushRefs || !readTreeSha) return null;
+  const head = await headOf(ctx, target.repo, target.branch);
+  return !head || (await branchHolds(ctx, target.repo, head, commit)) ? null : { pushRefs, readTreeSha, head };
+}
+
+async function takenIntoTurn(ctx: Reader, task: Task, target: IntegrationTarget, own: Own, named: TurnkeyChecked): Promise<string | null> {
+  const ground = await takeInGround(ctx, target, named.commit);
+  if (!ground) return null;
+  const { pushRefs, readTreeSha, head } = ground;
   const who = target.repo.author;
   if (!who) throw refuse(409, 'task_invalid', `Hornhoof takes #${task.number} into ${target.branch} as a merge commit it signs, and the repository of the department names no author for its commits. Ask the head of the department to set it, then report done again.`);
   const taken = await takeIn({ task: task.number, turn: target.branch, turnHead: head, candidate: named.commit, who, branch: own.branch }, {
