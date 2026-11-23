@@ -236,6 +236,28 @@ for (const language of ['en', 'ru'] as const) {
         if (process.env.HH_SCREENSHOT_DIR) await capture(page, info, `department-panel-${language}-${width}`);
       });
 
+      test(`keeps a field in error marked in pink once focus leaves it, and its focus ring while it has focus, ${language} ${width}`, async ({ page }) => {
+        await setup(page, language, width, true);
+        await page.goto('/about');
+        const about = page.getByRole('dialog', { name: t.about.title, exact: true });
+        await expect(about).toBeVisible();
+        await kitDrawn(page);
+        const part = about.getByRole('region', { name: t.feedback.section, exact: true });
+        await part.getByRole('button', { name: t.feedback.write, exact: true }).click();
+        const text = part.getByLabel(t.feedback.text, { exact: true });
+        await text.fill(language === 'en' ? 'The terminal stopped answering after the update.' : 'После обновления окно терминала перестало отвечать.');
+        await part.getByRole('button', { name: t.common.next, exact: true }).click();
+        await expect(part.getByText(t.feedback.titleRequired, { exact: true })).toBeVisible();
+        const title = part.getByLabel(t.feedback.titleLabel, { exact: true });
+        await expect(title).toHaveAttribute('aria-invalid', 'true');
+        const colour = (name: string) => page.evaluate(token => { const probe = document.createElement('i'); probe.style.color = `var(${token})`; document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; }, name);
+        const line = () => title.evaluate(field => { const style = getComputedStyle(field); return { style: style.outlineStyle, width: parseFloat(style.outlineWidth), color: style.outlineColor }; });
+        await text.focus();
+        expect(await line(), 'a field in error without focus keeps a pink line').toEqual({ style: 'solid', width: 2, color: await colour('--pink') });
+        await title.focus();
+        expect(await line(), 'with focus it shows the focus ring').toEqual({ style: 'solid', width: 2, color: await colour('--cyan-ink') });
+      });
+
       test(`tells a danger action by its verb and its last place, on its own plate and light label, ${language} ${width}`, async ({ page }, info: TestInfo) => {
         await setup(page, language, width, true);
         await page.goto('/machines');
