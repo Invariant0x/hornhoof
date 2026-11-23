@@ -2,7 +2,7 @@
    and kept as decoded pixels for the chunk baker and the plant layer. A file that fails to load leaves its slot on
    the procedural look; a pack without art loads nothing. Needs a browser (fetch and createImageBitmap). */
 
-import type { PlantPassport, WorldPackManifest } from './manifest';
+import type { PlantPassport, TerrainArtSpec, WorldPackManifest } from './manifest';
 import { parsePlantPassport } from './plants';
 
 /* Straight (not premultiplied) RGBA pixels. */
@@ -25,6 +25,9 @@ export type LoadedTerrainArt = Readonly<{
   shoreEdge: ArtPixels | null;
   liquid: Readonly<{ bed: ArtPixels; ripples: ArtPixels; surface: ArtPixels | null; baseColor: string }> | null;
   pathStrip: ArtPixels | null;
+  /* The city's street strips by tier (terrainArt.roads), baked into the ground (street-field.ts); a tier without one
+     keeps its street tiles drawn by the city. */
+  roads?: Readonly<Partial<Record<'trail' | 'dirt' | 'brick' | 'stone', ArtPixels>>>;
   /* Plant kind id -> its loaded variants, in the order the pack lists them. */
   plants: ReadonlyMap<string, readonly PlantArtImage[]>;
 }>;
@@ -128,6 +131,20 @@ export function loadTerrainArt(pack: WorldPackManifest): Promise<LoadedTerrainAr
   return job;
 }
 
+type StreetStripPixels = Partial<Record<'trail' | 'dirt' | 'brick' | 'stone', ArtPixels>>;
+
+/* The street strips the pack names, by tier; a strip that fails to load is left out. */
+export async function loadRoadStrips(
+  base: string,
+  spec: Pick<TerrainArtSpec, 'roads'> | undefined,
+  load: (url: string) => Promise<ArtPixels | null> = loadPixels,
+): Promise<StreetStripPixels> {
+  const loadedStrips = await Promise.all(Object.entries(spec?.roads ?? {}).map(async ([tier, file]) => [tier, file ? await load(base + file) : null] as const));
+  const roads: StreetStripPixels = {};
+  for (const [tier, px] of loadedStrips) if (px) roads[tier as keyof StreetStripPixels] = px;
+  return roads;
+}
+
 async function loadAll(pack: WorldPackManifest): Promise<LoadedTerrainArt | null> {
   const base = pack.art?.baseUrl;
   const spec = pack.terrainArt;
@@ -138,7 +155,7 @@ async function loadAll(pack: WorldPackManifest): Promise<LoadedTerrainArt | null
   const edgeJobs = Object.entries(spec?.edges ?? {}).map(async ([pair, file]) => [pair, await loadPixels(base + file)] as const);
   const plantJobs = plantKinds.map(async k => [k.id, (await Promise.all(k.art!.map(a => loadPlant(base, a.image, a.windMask, a.passport)))).filter((x): x is PlantArtImage => x !== null)] as const);
   const liq = spec?.liquid;
-  const [ground, edges, plants, defaultEdge, shoreEdge, bed, ripples, surface, pathStrip] = await Promise.all([
+  const [ground, edges, plants, defaultEdge, shoreEdge, bed, ripples, surface, pathStrip, roadStrips] = await Promise.all([
     Promise.all(groundJobs),
     Promise.all(edgeJobs),
     Promise.all(plantJobs),
@@ -148,6 +165,7 @@ async function loadAll(pack: WorldPackManifest): Promise<LoadedTerrainArt | null
     liq ? loadPixels(base + liq.ripples) : Promise.resolve(null),
     liq?.surface ? loadPixels(base + liq.surface) : Promise.resolve(null),
     spec?.pathStrip ? loadPixels(base + spec.pathStrip) : Promise.resolve(null),
+    loadRoadStrips(base, spec),
   ]);
 
   const groundMap = new Map<string, ArtPixels>();
@@ -166,6 +184,7 @@ async function loadAll(pack: WorldPackManifest): Promise<LoadedTerrainArt | null
     shoreEdge,
     liquid: liq && bed && ripples ? { bed, ripples, surface: squareTexture(surface), baseColor: liq.baseColor } : null,
     pathStrip,
+    roads: roadStrips,
     plants: plantMap,
   };
   loaded.set(pack, art);

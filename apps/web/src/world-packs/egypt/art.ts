@@ -56,5 +56,6 @@ export function egyptArtCatalog(roleLooks: Readonly<Record<string, PackRoleLookS
     loops: ['crane', 'hoist_block', 'dust', 'smoke', 'water', 'awning', 'celebration'],
     /* Statues and pyramids carry their scaffolds and ramps in their own stages (order v3, 3.10). */
     ownConstruction: ['statue', 'monument'],
+    bridge: true,
   };
 }

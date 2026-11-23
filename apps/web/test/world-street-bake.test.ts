@@ -8,7 +8,7 @@ import { tileTopVertexToWorld } from '../src/world/coords';
 import { DEFAULT_ISOMETRIC_PROJECTION } from '../src/world/manifest';
 import { bakeSmoothChunkPixels } from '../src/world/smooth-terrain-baker';
 import { streetField, type StreetTile } from '../src/world/street-field';
-import { registerTerrainArt, type ArtPixels } from '../src/world/terrain-art';
+import { loadRoadStrips, registerTerrainArt, type ArtPixels, type LoadedTerrainArt } from '../src/world/terrain-art';
 import { generateWorldTerrain } from '../src/world/terrain-engine';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
 
@@ -47,10 +47,10 @@ const JOINS: Readonly<Record<string, ReadonlyArray<readonly [number, number]>>> 
 const STEP = 1 / Math.hypot(120, 60);
 
 type Sample = { alpha: number; lum: number };
-function rayFromJoin(field: NonNullable<ReturnType<typeof streetField>>, angle: number): Sample[] {
+function rayFromJoin(field: NonNullable<ReturnType<typeof streetField>>, angle: number, reach = 1.6): Sample[] {
   const out = [0, 0, 0, 0];
   const samples: Sample[] = [];
-  for (let t = 0; t <= 1.6; t += STEP) {
+  for (let t = 0; t <= reach; t += STEP) {
     field.at(5.5 + Math.cos(angle) * t, 5.5 + Math.sin(angle) * t, out);
     samples.push({ alpha: out[3]!, lum: (out[0]! + out[1]! + out[2]!) / 3 });
   }
@@ -91,7 +91,8 @@ describe('a street baked into the ground', () => {
   it('runs one tier into another without a second edge where they meet, the higher over the lower', () => {
     const cells = [...tiles('stone', ARM_U), ...tiles('dirt', [[5, 6], [5, 7], [5, 8]])];
     const field = streetField(cells, STRIPS, TPT)!;
-    for (let i = 0; i < 96; i++) expect(lightRuns(rayFromJoin(field, (i / 96) * Math.PI * 2))).toBeLessThanOrEqual(1);
+    /* Within the join, where the dirt street reaches the stone avenue's edge. */
+    for (let i = 0; i < 96; i++) expect(lightRuns(rayFromJoin(field, (i / 96) * Math.PI * 2, 0.75))).toBeLessThanOrEqual(1);
     const out = [0, 0, 0, 0];
     field.at(5.5, 5.5, out);
     expect(out[3]).toBeGreaterThan(0.99);
@@ -129,6 +130,29 @@ describe('a street baked into the ground', () => {
   });
 });
 
+describe('a street and the bridge', () => {
+  it('runs into the bridge up to the edge of its first water tile, and lays nothing on the bridge itself', () => {
+    const cells: StreetTile[] = [...tiles('dirt', [[3, 5], [4, 5], [5, 5]]), { col: 6, row: 5, tier: 'dirt', bridge: true }, { col: 7, row: 5, tier: 'dirt', bridge: true }];
+    const field = streetField(cells, STRIPS, TPT)!;
+    const out = [0, 0, 0, 0];
+    field.at(5.99, 5.5, out);
+    expect(out[3]).toBeGreaterThan(0.99);
+    field.at(6.5, 5.5, out);
+    expect(out[3]).toBe(0);
+    field.at(7.5, 5.5, out);
+    expect(out[3]).toBe(0);
+  });
+});
+
+describe('the street strips of a pack', () => {
+  it('load by tier from the names the pack gives, and a strip that fails is left out', async () => {
+    const px = strip(0.8);
+    const roads = await loadRoadStrips('/art/', { roads: { trail: 'roads/trail.png', dirt: 'roads/dirt.png' } }, async url => (url === '/art/roads/dirt.png' ? null : px));
+    expect(roads).toEqual({ trail: px });
+    expect(await loadRoadStrips('/art/', undefined, async () => px)).toEqual({});
+  });
+});
+
 describe("a chunk's baked ground", () => {
   afterEach(() => registerTerrainArt(EGYPT_WORLD_PACK, null));
 
@@ -137,7 +161,7 @@ describe("a chunk's baked ground", () => {
     const red = strip(0.8, [250, 20, 20]);
     const flat: ArtPixels = { data: new Uint8ClampedArray(16 * 16 * 4).fill(200), width: 16, height: 16 };
     const ids = EGYPT_WORLD_PACK.terrainRecipe!.materialIds;
-    registerTerrainArt(EGYPT_WORLD_PACK, {
+    const art: LoadedTerrainArt = {
       ground: new Map(ids.map(id => [id, flat] as const)),
       texelsPerTile: TPT,
       edges: new Map(),
@@ -147,7 +171,8 @@ describe("a chunk's baked ground", () => {
       pathStrip: null,
       roads: { trail: red, dirt: red, brick: red, stone: red },
       plants: new Map(),
-    });
+    };
+    registerTerrainArt(EGYPT_WORLD_PACK, art);
     const { col, row } = map.startCenter;
     const street = tiles('dirt', [[col - 1, row], [col, row], [col + 1, row]]);
     const { defaultTileW: W, defaultTileH: H } = DEFAULT_ISOMETRIC_PROJECTION;
@@ -159,8 +184,8 @@ describe("a chunk's baked ground", () => {
       const o = (Math.floor((w.y - worldY) * scale) * width + Math.floor((w.x - worldX) * scale)) * 4;
       return [rgba[o]!, rgba[o + 1]!, rgba[o + 2]!];
     };
-    const withStreets = bakeSmoothChunkPixels(chunk, map, EGYPT_WORLD_PACK, lod, null, { lots: [], edge: 0, streets: street });
-    const without = bakeSmoothChunkPixels(chunk, map, EGYPT_WORLD_PACK, lod, null, { lots: [], edge: 0 });
+    const withStreets = bakeSmoothChunkPixels(chunk, map, EGYPT_WORLD_PACK, lod, art, { lots: [], edge: 0, streets: street });
+    const without = bakeSmoothChunkPixels(chunk, map, EGYPT_WORLD_PACK, lod, art, { lots: [], edge: 0 });
     const on = pixelAt(withStreets.rgba, withStreets.pixelWidth, withStreets.worldX, withStreets.worldY, withStreets.scale, col + 0.5, row + 0.5);
     const off = pixelAt(without.rgba, without.pixelWidth, without.worldX, without.worldY, without.scale, col + 0.5, row + 0.5);
     expect(on[0]! - on[1]!, `street pixel ${on.join(',')}`).toBeGreaterThan(120);

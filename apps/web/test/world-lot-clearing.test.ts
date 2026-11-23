@@ -358,7 +358,14 @@ describe('The rules and keys of cleared lots', () => {
     const b = base.city.buildings.find(x => x.stage >= 1)!;
     const unstarted = { ...live, city: { ...base.city, buildings: base.city.buildings.map(x => (x.id === b.id ? { ...x, stage: 0 } : x)) } };
     expect(cityGroundKey(unstarted), 'a lot before its first stage').not.toBe(key);
-    expect(cityGround(live, EGYPT_WORLD_PACK).clearing).toEqual(cityLotClearing(base.city, EGYPT_WORLD_PACK));
+    /* The ground also carries the city's streets (#1985). */
+    const streets = [...base.city.roads.values()].map(t => ({ col: t.col, row: t.row, tier: t.tier, bridge: t.bridge }));
+    expect(cityGround(live, EGYPT_WORLD_PACK).clearing).toEqual({ ...cityLotClearing(base.city, EGYPT_WORLD_PACK), streets });
+    const roads = new Map(base.city.roads);
+    const [firstKey, first] = [...roads][0]!;
+    roads.set(firstKey, { ...first, tier: first.tier === 'stone' ? 'dirt' : 'stone' });
+    const upgraded = { ...live, city: { ...base.city, roads } };
+    expect(cityGroundKey(upgraded), 'a street that changed its tier').not.toBe(key);
 
     const stakes = [{ col: 40, row: 40 }, { col: 43, row: 40 }, { col: 40, row: 42 }, { col: 43, row: 42 }];
     const empty = { city: base.city, worldMode: 'empty_lot' as const, emptyLotStakes: stakes };
@@ -367,6 +374,6 @@ describe('The rules and keys of cleared lots', () => {
     expect(ground.clearing!.lots).toContainEqual({ col: 40, row: 40, spanCol: 4, spanRow: 3 });
     expect(ground.cover!(41.5, 41), 'no plant inside the rope').toBe(true);
     expect(ground.cover!(60, 60)).toBe(cityPlantCover(base.city)(60, 60));
-    expect(cityGround({ ...empty, emptyLotStakes: undefined }, EGYPT_WORLD_PACK).clearing).toEqual(cityLotClearing(base.city, EGYPT_WORLD_PACK));
+    expect(cityGround({ ...empty, emptyLotStakes: undefined }, EGYPT_WORLD_PACK).clearing).toEqual({ ...cityLotClearing(base.city, EGYPT_WORLD_PACK), streets });
   });
 });

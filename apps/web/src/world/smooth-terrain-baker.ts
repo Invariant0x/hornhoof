@@ -16,6 +16,7 @@ import type {
 } from './manifest';
 import { chunkLotClearing, lotClearingAt, type LotClearing } from './lot-clearing';
 import { createRng, hash2i, hashSeed, valueNoise2D } from './prng';
+import { paintsEveryStreet, streetField, type StreetField } from './street-field';
 import { terrainArtFor, type ArtPixels, type LoadedTerrainArt } from './terrain-art';
 import type { CornerFieldGrid, GeneratedWorldMap } from './terrain-engine';
 
@@ -873,6 +874,38 @@ function pathStripAt(p: PathLook, strip: ArtPixels, tpt: number, u: number, v: n
   out[3] = Math.min(1, a / (wu + wv)) * gate;
 }
 
+/* The city's streets a bake paints, under the pack's street strips; null without strips or streets. One field per
+   clearing, so the slices of one chunk's bake share it. */
+/* Nowhere a street: the field of a bake without streets or without every street strip. */
+const NO_STREETS: StreetField = {
+  at: (_u, _v, out) => {
+    out[3] = 0;
+  },
+};
+
+const streetCache = new WeakMap<LotClearing, { art: LoadedTerrainArt; field: StreetField }>();
+function streetsFor(look: GroundLook, clearing: LotClearing | null): StreetField {
+  const art = look.art;
+  if (!clearing?.streets?.length || !art || !paintsEveryStreet(art.roads)) return NO_STREETS;
+  const hit = streetCache.get(clearing);
+  if (hit?.art === art) return hit.field;
+  const field = streetField(clearing.streets, art.roads!, art.texelsPerTile) ?? NO_STREETS;
+  streetCache.set(clearing, { art, field });
+  return field;
+}
+
+/* Lays the street at (u, v) over the ground colour in ground[0..2] (out holds the street's own colour and opacity),
+   and gives back how much of the ground still shows, for the ripples the street has trodden flat. */
+function paintStreet(streets: StreetField, u: number, v: number, ground: number[], out: number[]): number {
+  streets.at(u, v, out);
+  const t = out[3]!;
+  if (t <= 0) return 1;
+  ground[0] = ground[0]! + (out[0]! - ground[0]!) * t;
+  ground[1] = ground[1]! + (out[1]! - ground[1]!) * t;
+  ground[2] = ground[2]! + (out[2]! - ground[2]!) * t;
+  return 1 - t;
+}
+
 /* ---------- chunk baking ---------- */
 
 /* Pure pixel baker for one chunk using smooth bilinear corner fields, painted soil edges, seamless material textures,
@@ -968,6 +1001,9 @@ function bakeSmoothChunkRows(
   const { textures, matCount } = look;
   const lots = lotsFor(look, clearing);
   const lotPx = newLotPixel();
+  const streets = streetsFor(look, clearing);
+  const streetPx = [0, 0, 0, 0];
+  const groundPx = [0, 0, 0];
 
   const liquid = pack.liquidLayer;
   const shallowRgb = parseHexRgb(liquid?.shallowTintColor ?? '#489FB5', [72, 159, 181]);
@@ -1176,6 +1212,14 @@ function bakeSmoothChunkRows(
           }
         }
       }
+      /* The city's streets over all of it (#1985). */
+      groundPx[0] = r;
+      groundPx[1] = g;
+      groundPx[2] = b;
+      rippleStrength *= paintStreet(streets, u, v, groundPx, streetPx);
+      r = groundPx[0]!;
+      g = groundPx[1]!;
+      b = groundPx[2]!;
       if (rippleStrength > 0.01 && dWater > 0.45) {
         shade *= rippleShade(u, v, rippleStrength * smoothstep(0.45, 1.3, dWater), coarse, detail);
       }

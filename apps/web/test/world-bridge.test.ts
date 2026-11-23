@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ART_CONTRACT_VERSION, declaredArtFiles, validateArtIndex, type ArtIndex } from '../src/world/art';
-import { bridgeSite, BRIDGE_LENGTH, bridgeTiles, hasBridgeArt, type BridgeSite } from '../src/world/bridge-site';
-import { applyBridgeRule, deserializeCityLayout, serializeCityLayout, type CityState } from '../src/world/city-layout';
-import { roadMarks } from '../src/world/city-renderer';
+import { ART_CONTRACT_VERSION, declaredArtFiles, masterTileW, validateArtIndex, type ArtIndex } from '../src/world/art';
+import { bridgeSite, BRIDGE_LENGTH, bridgeTiles, hasBridgeArt, sameBridge, type BridgeSite } from '../src/world/bridge-site';
+import { applyBridgeRule, deserializeCityLayout, keepMapBridge, serializeCityLayout, type CityState } from '../src/world/city-layout';
+import { drawBridgePieces, roadMarks, type CityArtContext } from '../src/world/city-renderer';
+import { tileCenterToWorld } from '../src/world/coords';
+import { DEFAULT_ISOMETRIC_PROJECTION } from '../src/world/manifest';
 import { runFiveYearSimulation } from '../src/world/simulator';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../src/world/terrain-engine';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
@@ -109,10 +111,11 @@ describe("a city's roads over water", () => {
   });
 });
 
+const PIECES = ['bridge/u_start.png', 'bridge/u_span.png', 'bridge/u_end.png', 'bridge/v_start.png', 'bridge/v_span.png', 'bridge/v_end.png'];
+const piece = { w: 320, h: 400, passport: { groundAnchor: { x: 160, y: 330 }, corners: { top: { x: 160, y: 270 }, right: { x: 280, y: 330 }, bottom: { x: 160, y: 390 }, left: { x: 40, y: 330 } } } };
+const indexOf = (paths: readonly string[]): ArtIndex => ({ contract: ART_CONTRACT_VERSION, pack: EGYPT_WORLD_PACK.id, files: Object.fromEntries(paths.map(p => [p, piece])) });
+
 describe("a map's bridge in the pictures", () => {
-  const PIECES = ['bridge/u_start.png', 'bridge/u_span.png', 'bridge/u_end.png', 'bridge/v_start.png', 'bridge/v_span.png', 'bridge/v_end.png'];
-  const piece = { w: 320, h: 400, passport: { groundAnchor: { x: 160, y: 330 }, corners: { top: { x: 160, y: 270 }, right: { x: 280, y: 330 }, bottom: { x: 160, y: 390 }, left: { x: 40, y: 330 } } } };
-  const indexOf = (paths: readonly string[]): ArtIndex => ({ contract: ART_CONTRACT_VERSION, pack: EGYPT_WORLD_PACK.id, files: Object.fromEntries(paths.map(p => [p, piece])) });
 
   it('is a slot of the pack: start, span and end pieces in both directions, each a one-tile picture with a passport', () => {
     const declared = declaredArtFiles(EGYPT_WORLD_PACK).filter(f => f.role === 'bridge');
@@ -152,5 +155,53 @@ describe("a map's bridge in the pictures", () => {
     expect(marks.bridge.map(m => m.path)).toEqual(pieces);
     expect(marks.bridge.map(m => `${m.road.col},${m.road.row}`)).toEqual(bridgeTiles(site).map(t => `${t.col},${t.row}`));
     expect(roadMarks(city, false).streets.length).toBe(city.roads.size - site.length);
+  });
+});
+
+describe('the bridge on the shown map', () => {
+  it('comes when all its pictures are there and goes when they are not, its street laid and taken away with it', () => {
+    const map = mapOf('hornhoof');
+    const site = bridgeSite(map)!;
+    const { city } = runFiveYearSimulation(EGYPT_WORLD_PACK, { seed: 'hornhoof', mapSize: EGYPT_WORLD_PACK.mapSize, orderChaos: 0.5, recordSnapshots: false, bridge: null });
+    const state = { city };
+    keepMapBridge(state, map, false);
+    expect(city.bridge ?? null).toBeNull();
+    expect(waterRoads(city, map)).toEqual([]);
+    keepMapBridge(state, map, true);
+    expect(sameBridge(city.bridge, site)).toBe(true);
+    expect(waterRoads(city, map).sort()).toEqual(bridgeTiles(site).map(t => `${t.col},${t.row}`).sort());
+    const roads = city.roads.size;
+    keepMapBridge(state, map, true);
+    expect(city.roads.size).toBe(roads);
+    keepMapBridge(state, map, false);
+    expect(waterRoads(city, map)).toEqual([]);
+    expect(() => keepMapBridge(null, map, true)).not.toThrow();
+    keepMapBridge(state, undefined, true);
+    expect(city.bridge ?? null).toBeNull();
+  });
+
+  it('puts each piece with its ground anchor on its tile centre at its tile depth, and leaves out a piece still loading', () => {
+    const site: BridgeSite = { axis: 'v', col: 10, row: 20, length: 3 };
+    const roads = new Map(bridgeTiles(site).map(t => [`${t.col},${t.row}`, { col: t.col, row: t.row, tier: 'dirt' as const, traffic: 4, bridge: true, wasOldWall: false, grandAvenue: false }]));
+    const marks = roadMarks({ roads, bridge: site }, true).bridge;
+    type Placed = { path: string; depth: number; anchor: number[]; scale: number; at: number[] };
+    const placed: Placed[] = [];
+    const pool = {
+      depth: 0,
+      sprite(tex: { path: string }) {
+        const p: Placed = { path: tex.path, depth: pool.depth, anchor: [], scale: 0, at: [] };
+        placed.push(p);
+        return { anchor: { set: (x: number, y: number) => (p.anchor = [x, y]) }, scale: { set: (s: number) => (p.scale = s) }, position: { set: (x: number, y: number) => (p.at = [x, y]) } };
+      },
+    };
+    const library = { index: indexOf(PIECES), texture: (path: string) => (path.endsWith('_span.png') ? null : { path, width: 320, height: 400 }) };
+    const { defaultTileW: W, defaultTileH: H } = DEFAULT_ISOMETRIC_PROJECTION;
+    drawBridgePieces({ library, pool } as unknown as CityArtContext, EGYPT_WORLD_PACK, marks, W, H);
+    expect(placed.map(p => p.path)).toEqual(['bridge/v_start.png', 'bridge/v_end.png']);
+    const centre = tileCenterToWorld(10, 22, W, H);
+    expect(placed[1]).toEqual({ path: 'bridge/v_end.png', depth: (10 + 22 + 1) * (H / 2), anchor: [0.5, 330 / 400], scale: W / masterTileW(EGYPT_WORLD_PACK), at: [centre.x, centre.y] });
+    placed.length = 0;
+    drawBridgePieces({ library: { ...library, index: null }, pool } as unknown as CityArtContext, EGYPT_WORLD_PACK, marks, W, H);
+    expect(placed).toEqual([]);
   });
 });

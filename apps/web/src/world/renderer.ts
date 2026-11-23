@@ -60,9 +60,11 @@ import {
 } from './department-focus';
 import { cityToPickableObjects } from './live-sync';
 import { cityBuildingVariants } from './building-variants';
+import { hasBridgeArt } from './bridge-site';
 import { cityGround, cityGroundKey } from './city-ground';
+import { keepMapBridge } from './city-layout';
+import { paintsEveryStreet } from './street-field';
 import { ChunkLotKeys, type LotClearing } from './lot-clearing';
-import { RoadStripPainter } from './road-strips';
 import {
   pickResidentAtScreen,
   stepResidentSimulation,
@@ -279,7 +281,6 @@ export class IsometricWorldEngine {
      changed clearing bakes it again. */
   private readonly chunkLotKeys = new ChunkLotKeys();
   private buildingVariants: ReadonlyMap<string, number> = new Map();
-  private readonly roadPainter = new RoadStripPainter();
   /* Awnings and cloth of the building pictures drawn by the last city pass, moved every frame by the wind. */
   private readonly swayingLayers: SwayingLayer[] = [];
   /* A fixed wind clock in seconds for steady shots and video; null follows real time. */
@@ -363,14 +364,6 @@ export class IsometricWorldEngine {
       }
       this.useArt(terrainArtFor(this.pack));
       this.app = app;
-      const roadArt = this.pack.terrainArt?.roads;
-      const artBase = this.pack.art?.baseUrl;
-      if (roadArt && artBase) {
-        /* Streets turn painted once every tier's strip is in; until then (or without them) the city draws street tiles. */
-        void this.roadPainter.load(artBase, roadArt).then(ok => {
-          if (ok && !this.destroyed) this.markCityDirty();
-        });
-      }
       this.rendererKind = 'webgl';
       this.canvasElement = app.canvas;
       app.canvas.style.display = 'block';
@@ -452,8 +445,6 @@ export class IsometricWorldEngine {
       worldContainer.addChild(reflectionLayer);
       worldContainer.addChild(chunkLayer);
       worldContainer.addChild(buildGridGraphic);
-      /* Painted streets lie on the ground, under the plants' shadows and everything standing. */
-      worldContainer.addChild(this.roadPainter.container);
       /* Flat details and shadows of the plants lie on the ground under the city; plant bodies, buildings and people
          render through one depth layer sorted by the world y of their ground point, so a palm in front of a wall
          covers it and one behind is covered. */
@@ -514,9 +505,16 @@ export class IsometricWorldEngine {
         this.cityDirty = true;
         this.dirtyScene = true;
       });
+      this.applyBridge();
+      this.refreshCityGround();
       this.cityDirty = true;
       this.dirtyScene = true;
     });
+  }
+
+  /* Lays the street over the bridge once all its pictures are in the art folder; without them none crosses water. */
+  private applyBridge(): void {
+    keepMapBridge(this.cityRenderState, this.terrainMap, hasBridgeArt(this.pack, this.artLibrary.index));
   }
 
   /* Also without pack art: placeholders then go through the pool too, to sort among the plants. */
@@ -527,9 +525,14 @@ export class IsometricWorldEngine {
       pool: this.buildingArtPool,
       upgradingHouseIds: this.residentSim?.scaffoldingHouseIds,
       variants: this.buildingVariants,
-      paintedRoads: this.roadPainter.ready,
+      paintedRoads: this.paintsStreets(),
       swaying: this.swayingLayers,
     };
+  }
+
+  /* With every street strip, the streets are baked into the ground (street-field.ts) and the city draws only the bridge. */
+  private paintsStreets(): boolean {
+    return paintsEveryStreet(this.art?.roads);
   }
 
   private residentArtContext(): ResidentArtContext | null {
@@ -928,6 +931,7 @@ export class IsometricWorldEngine {
   /* Updates the Stage 4 isometric city placeholder layer and its pickable building footprints. */
   setCityRenderState(state: CityRenderState | null): void {
     this.cityRenderState = state;
+    this.applyBridge();
     this.buildingVariants = cityBuildingVariants(state, this.pack);
     this.refreshCityGround();
     this.cityDirty = true;
@@ -1504,7 +1508,6 @@ export class IsometricWorldEngine {
             this.cityCullWindow = null;
             this.cityGraphic.clear();
             this.buildingArtPool?.clear();
-            this.roadPainter.draw(new Map(), null, this.tileW, this.tileH);
           }
         } else {
           const viewCorners = [
@@ -1542,7 +1545,6 @@ export class IsometricWorldEngine {
               nextWindow,
               this.cityArtContext(),
             );
-            this.roadPainter.draw(this.cityRenderState.city.roads, nextWindow, this.tileW, this.tileH, this.pack.terrainArt?.texelsPerTile);
           }
         }
       }
@@ -1967,7 +1969,6 @@ export class IsometricWorldEngine {
       this.app = null;
     }
     this.plantRenderer?.destroy();
-    this.roadPainter.destroy();
     this.plantRenderer = null;
     if (this.fallbackCanvas) {
       this.fallbackCanvas.remove();
