@@ -28,6 +28,7 @@ type LiveHandle = {
   getBuildings: () => readonly CityBuilding[];
   centerOnBuilding: (id: string, zoom?: number) => boolean;
   flushVisibleBakes: () => void;
+  holdBuildingStage: (id: string, stage: number, phase?: 'building' | 'demolishing') => boolean;
 };
 
 async function shot(page: Page, info: TestInfo, name: string): Promise<void> {
@@ -256,6 +257,64 @@ test('Stage 9: Egypt draws artist files through the contract as they appear, and
 
   await centreOn(page, 'monument', 1);
   await shot(page, info, 'egypt-test-pictures-with-placeholders');
+});
+
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+
+/* Generated pictures of the 3x3 workshop's own line: a box that rises stage by stage, is finished, then torn down. */
+function workshopLine(pack: WorldPackManifest): { art: FixtureArt; base: string } {
+  const step = pack.art!.buildings.district_hub!.find(s => s.footprint === '3x3')!;
+  const base = `buildings/district_hub/${step.id}/`;
+  const files: Record<string, ArtIndexEntry> = {};
+  const pngs = new Map<string, Buffer>();
+  const add = (name: string, wallH: number, color: Rgb): void => {
+    const pic = boxPicture(pack, '3x3', wallH, color);
+    files[`${base}${name}.png`] = pic.entry;
+    pngs.set(`${base}${name}.png`, pic.png);
+  };
+  for (let n = 1; n <= pack.stageCounts.construction; n++) add(`stage_${pad2(n)}`, 8 + n * 18, [230 - n * 12, 110 + n * 10, 70 + n * 6]);
+  add('complete', 190, [120, 200, 170]);
+  add('demol_01', 110, [170, 120, 90]);
+  add('demol_02', 20, [130, 100, 80]);
+  return { art: { index: { contract: ART_CONTRACT_VERSION, pack: pack.id, files }, pngs }, base };
+}
+
+test('Stage 9: the 3x3 workshop draws its own picture at each construction stage and both demolition steps', async ({ page }, info) => {
+  const egypt = resolveWorldPack('egypt')!;
+  const { art, base } = workshopLine(egypt);
+  const requested = await serveArt(page, egypt, art);
+  await openLive(page, 'egypt');
+  const hub = await page.evaluate(() => {
+    const b = (window as unknown as { __WORLD_LIVE__: LiveHandle }).__WORLD_LIVE__
+      .getBuildings()
+      .find(item => item.kind === 'district_hub' && item.spanCol === 3);
+    return b ? { id: b.id } : null;
+  });
+  expect(hub, 'a district workshop on a 3x3 plot').not.toBeNull();
+  await page.evaluate(id => (window as unknown as { __WORLD_LIVE__: LiveHandle }).__WORLD_LIVE__.centerOnBuilding(id, 1.5), hub!.id);
+
+  /* Each held stage asks for its own picture, and the shot waits until every picture asked for is on the GPU. */
+  const show = async (stage: number, phase: 'building' | 'demolishing', picture: string): Promise<void> => {
+    const held = await page.evaluate(
+      ([id, st, ph]) => (window as unknown as { __WORLD_LIVE__: LiveHandle }).__WORLD_LIVE__.holdBuildingStage(id as string, st as number, ph as 'building' | 'demolishing'),
+      [hub!.id, stage, phase] as const,
+    );
+    expect(held).toBe(true);
+    await expect.poll(() => requested.includes(`${base}${picture}.png`), { message: `${picture} asked for`, timeout: 10_000 }).toBe(true);
+    const served = new Set(requested.filter(rel => art.pngs.has(rel))).size;
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __WORLD_LIVE__: LiveHandle }).__WORLD_LIVE__.getArtStats()?.loadedTextures ?? 0), {
+        message: `${picture}: every picture asked for is loaded`,
+        timeout: 15_000,
+      })
+      .toBeGreaterThanOrEqual(served);
+    await settle(page);
+    await shot(page, info, `workshop-${picture}`);
+  };
+  /* Stages 1 to 8 are the construction line; 9 and 10 are the finished and the upgraded workshop. */
+  for (let n = 1; n <= 8; n++) await show(n, 'building', `stage_${pad2(n)}`);
+  await show(egypt.stageCounts.construction, 'demolishing', 'demol_01');
+  await show(1, 'demolishing', 'demol_02');
 });
 
 test('Stage 9: the second test pack runs on the same engine with its own world', async ({ page }, info) => {
