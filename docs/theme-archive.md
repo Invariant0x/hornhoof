@@ -308,4 +308,4 @@ npx tsx apps/web/scripts/theme-pack.ts egypt --art <the Egypt art folder> --lice
 
 Without `--art` a world has no pictures, so the theme installs as its interface alone (4.2). Packing writes no dates, so the same theme from the same commit always gives the same archive.
 
-The Egypt art never goes into this repository (#105). Its archive is built where the art is and installed on the server by upload, as any theme is.
+The Egypt art never goes into this repository. Its archive is built where the art is and installed on the server by upload, as any theme is.

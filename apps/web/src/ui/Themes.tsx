@@ -10,6 +10,7 @@ import { BUILTIN_SKINS, DEFAULT_SKIN, ownLook, type BuiltinSkinId } from '../ski
 import { declarations, extraDeclarations, type Skin, type SkinLook, type SkinNames } from '../skins/roles';
 import { addSkin, chooseSkin, installedLookOf, removeSkin, restoreSkin, setMapGrain, skinsState, type Removal } from '../skins/store';
 import { forgetInstalledTheme, installedThemes, loadInstalledTheme } from '../themes/installed';
+import { archiveProblemText } from '../themes/problem-text';
 import { useMapGrain, useSkins } from '../skins/use-skin';
 import { builtinFile, parseSkin, SEE_THROUGH, SKIN_FILE_LIMIT, skinText, type SkinError } from '../skins/validate';
 import { ThemeShopIcon } from './icons';
@@ -46,24 +47,6 @@ const builtinNames = (id: BuiltinSkinId): SkinNames => ({ ru: ru.skins.names[id]
 /* The tokens of a skin on its own preview only, so each card shows its skin and world colours in the same drawing. */
 const previewStyle = (look: SkinLook) =>
   Object.fromEntries([...declarations(look), ...extraDeclarations(look).set].filter(([property]) => property.startsWith('--'))) as CSSProperties;
-
-/* What is wrong with an uploaded archive and how to fix it; a look the skin check refused says which field, in the
-   words of a skin file's refusals, and the world's checks add their own detail. */
-function archiveProblemText(t: Messages, problem: ThemeProblem): string {
-  const words = t.skins.archive.problems;
-  const text = (words[problem.code] ?? words.zip_corrupt)(problem.path ?? '');
-  if (!problem.detail) return text;
-  if (problem.code === 'look_bad') {
-    try {
-      const [code, key, value] = JSON.parse(problem.detail) as [keyof Messages['skins']['errors'], string, string];
-      const said = t.skins.errors[code];
-      if (said) return `${text} ${said(key, value)}`;
-    } catch {
-      return text;
-    }
-  }
-  return `${text} (${problem.detail})`;
-}
 
 function problemText(t: Messages, problem: Problem): string {
   const value = problem.code === 'bad_base' ? BUILTIN_SKINS.map(skin => skin.id).join(', ') : problem.code === 'opaque' ? SEE_THROUGH.join(', ') : (problem.value ?? '');
@@ -150,77 +133,110 @@ function cardOrigin(words: Messages['skins'], card: Card): string {
 /* A skin's card: its preview, name, origin and description, then its quiet buttons on the end edge. The skin on says so
    by a state beside its name instead of Apply, and that state holds the focus once Apply is gone. */
 function SkinCard({ card, on, canDelete, onApply, onDownload, onRemove }: CardProps) {
-  const t = useT();
-  const words = t.skins;
-  const origin = cardOrigin(words, card);
-  const world = isWorldCard(card);
   /* Deleting an uploaded theme removes its files on the server: the card asks once more before it does. */
   const [asking, setAsking] = useState(false);
-  const removable = card.own || (Boolean(card.installed) && canDelete);
-  const cover = card.installed?.cover;
   return (
-    <li className="skin-card" data-current={on || undefined} aria-current={on || undefined} data-installed={card.installed ? card.id : undefined}>
-      {cover ? <img className="skin-cover" src={cover} alt={words.archive.cover(card.name)} /> : <Preview look={card.look} />}
-      <div className="skin-card-text">
-        <div className="skin-card-head">
-          <h6 className="skin-name">{card.name}</h6>
-          {on && (
-            <span className="skin-state" tabIndex={-1} data-focus-skin={card.id}>
-              {words.applied}
-            </span>
-          )}
-        </div>
-        <p className="skin-meta">{origin}</p>
-        <p className="skin-meta">{card.desc}</p>
-        {card.installed && (
-          /* The licence the theme's archive gave, word for word, for whoever puts it on. */
-          <p className="skin-meta">
-            <a href={card.installed.licenseFile} target="_blank" rel="noopener noreferrer">
-              {words.archive.license(card.installed.license)}
-            </a>
-          </p>
-        )}
-        {/* A world the store left out for lack of its art: the theme is its interface alone, and the card says why (#1972). */}
-        {card.installed?.worldLeftOut && <p className="skin-meta skin-left-out">{words.archive.worldLeftOut}</p>}
-        {world && <p className="skin-perf-note">{words.perfNote}</p>}
-      </div>
-      <div className="entry-actions skin-actions">
-        {on ? (
-          /* Apply's room, unseen and out of reach: the other buttons stand where every card has them, and the card keeps
-             its height when its skin is turned on. */
-          <span className="btn small ghost skin-apply-room" aria-hidden="true">
-            {words.apply}
-          </span>
-        ) : (
-          <button className="btn small ghost" type="button" aria-label={`${words.apply}: ${card.name}`} data-focus-skin={card.id} onClick={onApply}>
-            {words.apply}
-          </button>
-        )}
-        {card.file && (
-          <button className="btn small ghost" type="button" aria-label={`${words.download}: ${card.name}`} onClick={onDownload}>
-            {words.download}
-          </button>
-        )}
-        {removable && !asking && (
-          <button className="btn small ghost danger" type="button" aria-label={`${words.remove}: ${card.name}`} data-focus-remove={card.id} onClick={card.installed ? () => setAsking(true) : onRemove}>
-            {words.remove}
-          </button>
-        )}
-      </div>
-      {asking && (
-        <div className="skin-confirm" role="group" aria-label={words.archive.deleteConfirm(card.name)}>
-          <p>{words.archive.deleteConfirm(card.name)}</p>
-          <div className="entry-actions">
-            <button className="btn small danger" type="button" autoFocus onClick={() => { setAsking(false); onRemove(); }}>
-              {words.archive.deleteYes}
-            </button>
-            <button className="btn small ghost" type="button" onClick={() => setAsking(false)}>
-              {words.archive.deleteNo}
-            </button>
-          </div>
-        </div>
-      )}
+    <li className="skin-card" data-current={on || undefined} aria-current={on || undefined} data-installed={installedIdOf(card)}>
+      <CardPicture card={card} />
+      <CardText card={card} on={on} />
+      <CardActions card={card} on={on} removable={!asking && canRemove(card, canDelete)} onApply={onApply} onDownload={onDownload} onRemove={onRemove} onAsk={() => setAsking(true)} />
+      {asking && <DeleteAsk name={card.name} onYes={() => { setAsking(false); onRemove(); }} onNo={() => setAsking(false)} />}
     </li>
+  );
+}
+
+const installedIdOf = (card: Card) => (card.installed ? card.id : undefined);
+/* One's own skin, or for the CEO a theme the company uploaded. */
+const canRemove = (card: Card, canDelete: boolean) => card.own || (Boolean(card.installed) && canDelete);
+
+function CardPicture({ card }: { card: Card }) {
+  const words = useT().skins;
+  const cover = card.installed?.cover;
+  return cover ? <img className="skin-cover" src={cover} alt={words.archive.cover(card.name)} /> : <Preview look={card.look} />;
+}
+
+function CardText({ card, on }: { card: Card; on: boolean }) {
+  const words = useT().skins;
+  return (
+    <div className="skin-card-text">
+      <div className="skin-card-head">
+        <h6 className="skin-name">{card.name}</h6>
+        {on && (
+          <span className="skin-state" tabIndex={-1} data-focus-skin={card.id}>
+            {words.applied}
+          </span>
+        )}
+      </div>
+      <p className="skin-meta">{cardOrigin(words, card)}</p>
+      <p className="skin-meta">{card.desc}</p>
+      {card.installed && <InstalledNotes view={card.installed} />}
+      {isWorldCard(card) && <p className="skin-perf-note">{words.perfNote}</p>}
+    </div>
+  );
+}
+
+/* What an uploaded theme's card says besides: the licence its archive gave, word for word, for whoever puts it on, and,
+   when the store left its world out for lack of its art, that the theme is its interface alone (#1972). */
+function InstalledNotes({ view }: { view: InstalledThemeView }) {
+  const words = useT().skins.archive;
+  return (
+    <>
+      <p className="skin-meta">
+        <a href={view.licenseFile} target="_blank" rel="noopener noreferrer">
+          {words.license(view.license)}
+        </a>
+      </p>
+      {view.worldLeftOut && <p className="skin-meta skin-left-out">{words.worldLeftOut}</p>}
+    </>
+  );
+}
+
+/* onAsk: an uploaded theme's Remove asks once more first. */
+type ActionsProps = { card: Card; on: boolean; removable: boolean; onApply: () => void; onDownload: () => void; onRemove: () => void; onAsk: () => void };
+
+function CardActions({ card, on, removable, onApply, onDownload, onRemove, onAsk }: ActionsProps) {
+  const words = useT().skins;
+  return (
+    <div className="entry-actions skin-actions">
+      {on ? (
+        /* Apply's room, unseen and out of reach: the other buttons stand where every card has them, and the card keeps
+           its height when its skin is turned on. */
+        <span className="btn small ghost skin-apply-room" aria-hidden="true">
+          {words.apply}
+        </span>
+      ) : (
+        <button className="btn small ghost" type="button" aria-label={`${words.apply}: ${card.name}`} data-focus-skin={card.id} onClick={onApply}>
+          {words.apply}
+        </button>
+      )}
+      {card.file && (
+        <button className="btn small ghost" type="button" aria-label={`${words.download}: ${card.name}`} onClick={onDownload}>
+          {words.download}
+        </button>
+      )}
+      {removable && (
+        <button className="btn small ghost danger" type="button" aria-label={`${words.remove}: ${card.name}`} data-focus-remove={card.id} onClick={card.installed ? onAsk : onRemove}>
+          {words.remove}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function DeleteAsk({ name, onYes, onNo }: { name: string; onYes: () => void; onNo: () => void }) {
+  const words = useT().skins.archive;
+  return (
+    <div className="skin-confirm" role="group" aria-label={words.deleteConfirm(name)}>
+      <p>{words.deleteConfirm(name)}</p>
+      <div className="entry-actions">
+        <button className="btn small danger" type="button" autoFocus onClick={onYes}>
+          {words.deleteYes}
+        </button>
+        <button className="btn small ghost" type="button" onClick={onNo}>
+          {words.deleteNo}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -353,57 +369,81 @@ const isSkinFile = (file: File) => /\.json$/i.test(file.name) || file.type === '
 /* Upload theme, the one way in for a theme of either kind (Design, #1960), one file at a time with the button kept in place
    and its label saying what it does meanwhile. A skin file is read here and kept in this browser; an archive is sent whole
    to the server, which checks it and installs it for the company, or says what to fix and in which file. */
-function UploadTheme({ say, focusOn, onInstalled }: Talk & { onInstalled: (themes: InstalledThemeView[], id: string | null) => void }) {
+function UploadTheme({ say, focusOn, onInstalled }: Talk & { onInstalled: Installed }) {
   const t = useT();
   const { language } = useLanguage();
   const words = t.skins.archive;
-  const [busy, setBusy] = useState<'reading' | 'sending' | null>(null);
+  const [busy, setBusy] = useState<Busy>(null);
   const picker = useRef<HTMLInputElement>(null);
   const hintId = useId();
 
-  async function readSkinFile(file: File) {
-    setBusy('reading');
-    say({ tone: 'busy', text: t.skins.busy });
-    const read = await readSkin(file);
-    setBusy(null);
-    say(keepRead(t, language, read));
-    focusOn('upload');
-  }
-
-  async function sendArchive(file: File) {
-    setBusy('sending');
-    say({ tone: 'busy', text: words.busy });
-    try {
-      const { themes } = await api.upload<{ themes: InstalledThemeView[] }>('/api/themes', file);
-      const newest = [...themes].sort((a, b) => b.installedAt.localeCompare(a.installedAt))[0] ?? null;
-      onInstalled(themes, newest?.id ?? null);
-    } catch (err) {
-      const problem = err instanceof ApiFailure ? (err.details?.problem as ThemeProblem | undefined) : undefined;
-      say({ tone: 'alert', title: words.refused, text: problem ? archiveProblemText(t, problem) : errorText(t, err) });
-      focusOn('upload');
-    } finally {
+  /* Upload theme stays busy until the file is taken or refused, and is free again in the same moment it says so. */
+  function take(file: File) {
+    const skin = isSkinFile(file);
+    setBusy(skin ? 'reading' : 'sending');
+    const done = (back: boolean) => {
       setBusy(null);
-    }
-  }
-
-  function pick(event: ChangeEvent<HTMLInputElement>) {
-    const input = event.currentTarget;
-    const file = input.files?.[0];
-    /* The same file can be picked again after it is fixed; no file picked changes nothing. */
-    input.value = '';
-    if (!file) return;
-    void (isSkinFile(file) ? readSkinFile(file) : sendArchive(file));
+      if (back) focusOn('upload');
+    };
+    const upload: Upload = { t, language, say, onInstalled, done };
+    void (skin ? readSkinFile(file, upload) : sendArchive(file, upload));
   }
 
   return (
     <div className="skins-adds">
       <p className="muted skins-upload-hint" id={hintId}>{words.hint}</p>
       <button className="btn small" type="button" data-upload disabled={busy !== null} aria-busy={busy !== null || undefined} aria-describedby={hintId} onClick={() => picker.current?.click()}>
-        <SwapLabel first={words.upload} second={busy === 'reading' ? t.skins.loading : words.uploading} showSecond={busy !== null} />
+        <SwapLabel first={words.upload} second={busyLabel(t, busy)} showSecond={busy !== null} />
       </button>
-      <input ref={picker} type="file" accept=".zip,application/zip,.json,application/json" hidden data-upload-input onChange={pick} />
+      <input ref={picker} type="file" accept=".zip,application/zip,.json,application/json" hidden data-upload-input onChange={event => {
+          const file = pickedFile(event);
+          if (file) take(file);
+        }} />
     </div>
   );
+}
+
+type Busy = 'reading' | 'sending' | null;
+type Installed = (themes: InstalledThemeView[], id: string | null) => void;
+/* done: the file is taken or refused; back, the focus comes back to Upload theme. */
+type Upload = Pick<Talk, 'say'> & { t: Messages; language: Language; onInstalled: Installed; done: (back: boolean) => void };
+
+const busyLabel = (t: Messages, busy: Busy) => (busy === 'reading' ? t.skins.loading : t.skins.archive.uploading);
+
+/* The file picked, its input cleared so the same file can be picked again after it is fixed; none when none was picked. */
+function pickedFile(event: ChangeEvent<HTMLInputElement>): File | undefined {
+  const input = event.currentTarget;
+  const file = input.files?.[0];
+  input.value = '';
+  return file;
+}
+
+/* A skin file, read and kept in this browser for this person; the focus comes back to Upload theme. */
+async function readSkinFile(file: File, { t, language, say, done }: Upload): Promise<void> {
+  say({ tone: 'busy', text: t.skins.busy });
+  say(keepRead(t, language, await readSkin(file)));
+  done(true);
+}
+
+/* An archive, sent whole to the server, which checks it and installs it for the company, or says what to fix and where.
+   Refused, the focus comes back to Upload theme; installed, it goes to the theme's card. */
+async function sendArchive(file: File, { t, say, onInstalled, done }: Upload): Promise<void> {
+  say({ tone: 'busy', text: t.skins.archive.busy });
+  try {
+    const { themes } = await api.upload<{ themes: InstalledThemeView[] }>('/api/themes', file);
+    onInstalled(themes, newestOf(themes));
+    done(false);
+  } catch (err) {
+    say(refusalOf(t, err));
+    done(true);
+  }
+}
+
+const newestOf = (themes: readonly InstalledThemeView[]) => [...themes].sort((a, b) => b.installedAt.localeCompare(a.installedAt))[0]?.id ?? null;
+
+function refusalOf(t: Messages, err: unknown): Notice {
+  const problem = err instanceof ApiFailure ? (err.details?.problem as ThemeProblem | undefined) : undefined;
+  return { tone: 'alert', title: t.skins.archive.refused, text: problem ? archiveProblemText(t, problem) : errorText(t, err) };
 }
 
 type CatalogProps = { cards: readonly Card[]; active: string; canDelete: boolean; onApply: (card: Card) => void; onDownload: (card: Card) => void; onRemove: (card: Card) => void };
@@ -649,38 +689,9 @@ function WorldEraNamesPanel({
   );
 }
 
-export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) => void } = {}) {
-  const t = useT();
-  const { language } = useLanguage();
-  const { active, custom } = useSkins();
-  const [notice, setNotice] = useState<Notice | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [renamedCount, setRenamedCount] = useState(0);
-  /* The themes the company uploaded, and whether this person is the CEO, who alone uploads and deletes them. */
+/* The themes the company uploaded, each with its look read once, for its card's preview and to put it on. */
+function useInstalledThemes(): [InstalledThemeView[], (themes: InstalledThemeView[]) => void] {
   const [installed, setInstalled] = useState<InstalledThemeView[]>([]);
-  const [canEdit, setCanEdit] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
-  /* Where focus goes once the catalog has drawn again: the Apply of a card, or Upload theme. */
-  const focusTo = useRef<string | null>(null);
-  const headingId = useId();
-
-  useEffect(() => {
-    let alive = true;
-    void api
-      .get<WorldThemeView>('/api/world/theme')
-      .then(res => {
-        if (alive && typeof res?.renamedAgentsCount === 'number') {
-          setRenamedCount(res.renamedAgentsCount);
-        }
-        if (alive) setCanEdit(Boolean(res?.canEdit));
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [active]);
-
-  /* Each uploaded theme's look is read once, for its card's preview and to put it on. */
   useEffect(() => {
     let alive = true;
     void installedThemes()
@@ -693,6 +704,77 @@ export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) =>
       alive = false;
     };
   }, []);
+  return [installed, setInstalled];
+}
+
+/* What the company's theme says of this person and the agents: how many agents carry an era name, and whether this
+   person may upload and delete themes. */
+function takeThemeView(res: WorldThemeView | undefined, setRenamedCount: (count: number) => void, setCanEdit: (can: boolean) => void): void {
+  if (typeof res?.renamedAgentsCount === 'number') setRenamedCount(res.renamedAgentsCount);
+  setCanEdit(Boolean(res?.canEdit));
+}
+
+type Store = Talk & { t: Messages; language: Language; setInstalled: (themes: InstalledThemeView[]) => void; onCompanyTheme?: (theme: string) => void };
+
+/* A theme just uploaded: its look is read anew, as its version may be new; the store says so and focus goes to its card. */
+async function takeInstalled(themes: InstalledThemeView[], id: string | null, { t, language, setInstalled, say, focusOn }: Store): Promise<void> {
+  if (id) {
+    forgetInstalledTheme(id);
+    await loadInstalledTheme(id);
+  }
+  setInstalled(themes);
+  const view = themes.find(theme => theme.id === id);
+  if (view) say({ tone: 'status', text: t.skins.archive.installed(viewName(view, language)) });
+  focusOn(id ?? 'upload');
+}
+
+const viewName = (view: InstalledThemeView, language: Language) => view.name[language] ?? view.name.en ?? view.id;
+
+/* Deletes an uploaded theme with all its files; one that was on gives way to the default theme. Focus goes to the card
+   after it, else the one before, else Upload theme. */
+async function deleteInstalled(card: Card, { wasOn, next }: { wasOn: boolean; next: string }, { t, setInstalled, say, focusOn, onCompanyTheme }: Store): Promise<void> {
+  try {
+    const { themes } = await api.del<{ themes: InstalledThemeView[] }>(`/api/themes/${encodeURIComponent(card.id)}`);
+    forgetInstalledTheme(card.id);
+    setInstalled(themes);
+    if (wasOn) onCompanyTheme?.(DEFAULT_SKIN);
+    say({ tone: 'status', text: `${t.skins.archive.deleted(card.name)}${wasOn ? ` ${t.skins.nowOn(t.skins.names[DEFAULT_SKIN])}` : ''}` });
+    focusOn(next);
+  } catch (err) {
+    say({ tone: 'alert', text: errorText(t, err) });
+  }
+}
+
+function neighbourOf(cards: readonly Card[], card: Card): string {
+  const at = cards.indexOf(card);
+  return (cards[at + 1] ?? cards[at - 1])?.id ?? 'upload';
+}
+
+export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) => void } = {}) {
+  const t = useT();
+  const { language } = useLanguage();
+  const { active, custom } = useSkins();
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [renamedCount, setRenamedCount] = useState(0);
+  /* The themes the company uploaded, and whether this person is the CEO, who alone uploads and deletes them. */
+  const [installed, setInstalled] = useInstalledThemes();
+  const [canEdit, setCanEdit] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  /* Where focus goes once the catalog has drawn again: the Apply of a card, or Upload theme. */
+  const focusTo = useRef<string | null>(null);
+  const headingId = useId();
+
+  useEffect(() => {
+    let alive = true;
+    void api
+      .get<WorldThemeView>('/api/world/theme')
+      .then(res => alive && takeThemeView(res, setRenamedCount, setCanEdit))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [active]);
 
   useEffect(() => {
     if (focusTo.current === null) return;
@@ -728,36 +810,10 @@ export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) =>
     }
   }
 
-  /* A theme just uploaded: its look is read anew, as its version may be new, and focus goes to its card. */
-  async function installedNow(themes: InstalledThemeView[], id: string | null) {
-    if (id) {
-      forgetInstalledTheme(id);
-      await loadInstalledTheme(id);
-    }
-    setInstalled(themes);
-    const view = themes.find(theme => theme.id === id);
-    if (view) setNotice({ tone: 'status', text: t.skins.archive.installed(view.name[language] ?? view.name.en ?? view.id) });
-    focusOn(id ?? 'upload');
-  }
-
-  async function deleteInstalled(card: Card) {
-    const wasOn = card.id === active;
-    try {
-      const { themes } = await api.del<{ themes: InstalledThemeView[] }>(`/api/themes/${encodeURIComponent(card.id)}`);
-      forgetInstalledTheme(card.id);
-      setInstalled(themes);
-      if (wasOn) onCompanyTheme?.(DEFAULT_SKIN);
-      const fellBack = wasOn ? ` ${t.skins.nowOn(t.skins.names[DEFAULT_SKIN])}` : '';
-      setNotice({ tone: 'status', text: `${t.skins.archive.deleted(card.name)}${fellBack}` });
-      const at = cards.indexOf(card);
-      focusOn((cards[at + 1] ?? cards[at - 1])?.id ?? 'upload');
-    } catch (err) {
-      setNotice({ tone: 'alert', text: errorText(t, err) });
-    }
-  }
+  const store: Store = { t, language, setInstalled, say: setNotice, focusOn, onCompanyTheme };
 
   function remove(card: Card) {
-    if (card.installed) return void deleteInstalled(card);
+    if (card.installed) return void deleteInstalled(card, { wasOn: card.id === active, next: neighbourOf(cards, card) }, store);
     const removed = removeCard(t, cards, card);
     if (!removed) return;
     setNotice(removed.notice);
@@ -782,7 +838,7 @@ export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) =>
           <p>{t.skins.desc}</p>
           <p className="muted">{t.skins.local}</p>
         </div>
-        <UploadTheme say={setNotice} focusOn={focusOn} onInstalled={(themes, id) => void installedNow(themes, id)} />
+        <UploadTheme say={setNotice} focusOn={focusOn} onInstalled={(themes, id) => void takeInstalled(themes, id, store)} />
       </div>
       {notice && <NoticeBar notice={notice} onUndo={undo} />}
       <Catalog cards={cards} active={active} canDelete={canEdit} onApply={card => void apply(card)} onDownload={card => download(t, card, setNotice)} onRemove={remove} />
