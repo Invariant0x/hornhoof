@@ -33,6 +33,8 @@ export const EGYPT_MATERIAL_IDS = [
   'dune',
   'rock',
   'quarry',
+  'silt',
+  'dust',
 ] as const;
 
 type EgyptSeedParams = Readonly<{
@@ -435,24 +437,37 @@ export const EGYPT_TERRAIN_RECIPE: TerrainRecipeSpec = {
         smoothstep(fertileW + 7, fertileW + 14, dRiver) * smoothstep(20, 29, distCenter) * (1 - rockWeight);
       const duneWeight = smoothstep(0.635, 0.71, duneMacro + outerBias) * duneMask;
 
-      /* Smooth bank -> grass -> field -> sand material transitions. */
-      const bankWeight = (1 - smoothstep(bankW - 0.5, bankW + 1.4, Math.max(0, signedWaterDist))) * (1 - rockWeight);
+      /* Golden sand is the main ground. The water is edged by a narrow strip of wet bank, then a green strip one to
+         three tiles wide that narrows and widens along the river; beyond it sand, with fields in rectangular plots and
+         grass around them and around the oases. */
+      const wetW = 0.45 + 0.25 * noise.fbm2D(vx * 0.11 + 4.7, vy * 0.11 - 8.2, (params.bankSeed + 31) >>> 0, 2);
+      const stripW = 1.3 + 2.0 * smoothstep(0.32, 0.68, noise.fbm2D(vx * 0.06 + 9.1, vy * 0.06 - 3.3, (params.bankSeed + 77) >>> 0, 3));
+      const bankWeight = (1 - smoothstep(wetW - 0.25, wetW + 0.25, Math.max(0, signedWaterDist))) * (1 - rockWeight);
 
       const fx = vx * params.fieldCos - vy * params.fieldSin;
       const fy = vx * params.fieldSin + vy * params.fieldCos;
       const fieldPatch = noise.fbm2D(fx * 0.085, fy * 0.095, params.fieldSeed, 2);
       const fieldBand =
-        smoothstep(bankW + 0.6, bankW + 2.4, dRiver) *
-        (1 - smoothstep(fertileW + 1.5, fertileW + 5.0, dRiver)) *
+        smoothstep(stripW * 0.7, stripW * 0.7 + 1.2, dRiver) *
+        (1 - smoothstep(fertileW - 1.5, fertileW + 1.5, dRiver)) *
         smoothstep(3.5, 6.5, distCenter);
-      const fieldWeight = smoothstep(0.47, 0.62, fieldPatch) * fieldBand * (1 - rockWeight);
+      const fieldWeight = smoothstep(0.5, 0.64, fieldPatch) * fieldBand * (1 - rockWeight);
 
-      const valleyGrass =
-        smoothstep(bankW - 0.4, bankW + 1.4, dRiver) * (1 - smoothstep(fertileW - 1.5, fertileW + 2.2, dRiver));
-      const oasisGrass = oasis.groveDist < 3 ? 1 - smoothstep(-1.0, 2.0, oasis.groveDist) : 0;
-      const grassWeight = Math.max(valleyGrass, oasisGrass) * (1 - fieldWeight * 0.75) * (1 - rockWeight);
+      const valleyGrass = smoothstep(wetW - 0.2, wetW + 0.3, dRiver) * (1 - smoothstep(stripW - 0.4, stripW + 0.4, dRiver));
+      const oasisGrass = oasis.groveDist < 3 ? 1 - smoothstep(-0.6, 1.0, oasis.groveDist) : 0;
+      const aroundFields = smoothstep(0.4, 0.54, fieldPatch) * fieldBand * 0.45;
+      const grassWeight = Math.max(valleyGrass, oasisGrass, aroundFields) * (1 - fieldWeight * 0.75) * (1 - rockWeight);
 
-      const used = bankWeight + grassWeight + fieldWeight + duneWeight + rockWeight + quarryBand;
+      /* Dark Nile silt in a patchy band just above the waterline, and trodden dust on the city site around the start. */
+      const siltNoise = noise.fbm2D(vx * 0.12 + 3.1, vy * 0.12 - 1.7, (params.bankSeed + 211) >>> 0, 2);
+      const siltBand =
+        smoothstep(bankW - 0.2, bankW + 0.7, dRiver) * (1 - smoothstep(bankW + 1.2, bankW + 2.6, dRiver));
+      const siltWeight = siltBand * smoothstep(0.4, 0.66, siltNoise) * 0.3 * (1 - rockWeight);
+      const dustNoise = noise.fbm2D(vx * 0.16, vy * 0.16, (params.oasisSeed + 4423) >>> 0, 3);
+      const dustWeight =
+        (1 - smoothstep(5, 12.5, distCenter)) * smoothstep(0.28, 0.55, dustNoise) * 0.85 * (1 - bankWeight) * (1 - grassWeight * 0.6);
+
+      const used = bankWeight + grassWeight + fieldWeight + duneWeight + rockWeight + quarryBand + siltWeight + dustWeight;
       const sandWeight = Math.max(0.04, 1 - Math.min(1, used));
 
       const elevation =
@@ -474,6 +489,8 @@ export const EGYPT_TERRAIN_RECIPE: TerrainRecipeSpec = {
           dune: duneWeight,
           rock: rockWeight,
           quarry: quarryBand,
+          silt: siltWeight,
+          dust: dustWeight,
         },
       };
     };

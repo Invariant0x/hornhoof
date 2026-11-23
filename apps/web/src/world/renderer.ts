@@ -64,7 +64,9 @@ import {
   type ResidentSimulation,
 } from './residents';
 import { renderResidentsFallback2D, renderResidentsToPixi, type ResidentArtContext } from './residents-renderer';
-import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas } from './smooth-terrain-baker';
+import { PlantRenderer, type PlantStats } from './plant-renderer';
+import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas, smoothPixelsToCanvas, startSmoothChunkBake, type SmoothChunkBake } from './smooth-terrain-baker';
+import { loadTerrainArt, terrainArtFor, type ArtPixels, type LoadedTerrainArt } from './terrain-art';
 import type { GeneratedWorldMap } from './terrain-engine';
 
 export type RendererKind = 'webgl' | 'canvas2d';
@@ -100,6 +102,8 @@ export type WorldEngineStats = Readonly<{
   rendererKind: RendererKind;
   buildGridVisible: boolean;
   hasAnimatedLiquid: boolean;
+  /* Plants on the map and in view; null for a pack without plants. */
+  plants?: PlantStats | null;
   hoveredTile: TileCoord | null;
   selectedPick: PickResult | null;
   camera: CameraState;
@@ -193,9 +197,13 @@ export class IsometricWorldEngine {
   private worldContainer: Container | null = null;
   private liquidSpriteA: TilingSprite | null = null;
   private liquidSpriteB: TilingSprite | null = null;
+  private liquidOrigin = { x: 0, y: 0 };
+  private liquidArtTextures: Texture[] = [];
   private liquidTexture: Texture | null = null;
   private liquidCanvas: HTMLCanvasElement | null = null;
   private liquidPhaseX = 0;
+  /* The drift wraps where the water picture repeats; painted layers of several sizes never wrap, so they never jump. */
+  private liquidWrap = 256;
   private liquidPhaseY = 0;
   private chunkLayer: Container | null = null;
   private buildGridGraphic: Graphics | null = null;
@@ -225,6 +233,12 @@ export class IsometricWorldEngine {
   private rendererKind: RendererKind = 'webgl';
 
   private readonly chunkCache = new ChunkLruCache<CachedChunkEntry>(CHUNK_CACHE_CAP);
+  /* Smooth chunk bakes in progress, a few rows per frame, by cache key; only chunks still in view keep theirs. */
+  private readonly bakeJobs = new Map<string, SmoothChunkBake>();
+  /* The painted art this engine draws with, fixed when it mounts: art that arrives later stays out of this session, so
+     ground, water and plants never mix painted and procedural pictures. */
+  private art: LoadedTerrainArt | null = null;
+  private artPinned = false;
   private visibleChunkList: ChunkCoord[] = [];
   private pendingBakeCount = 0;
 
@@ -247,11 +261,15 @@ export class IsometricWorldEngine {
   private readonly pressedKeys = new Set<string>();
   private resizeObserver: ResizeObserver | null = null;
   private canvasElement: HTMLCanvasElement | null = null;
+  private plantRenderer: PlantRenderer | null = null;
+  /* A fixed wind clock in seconds for steady shots and video; null follows real time. */
+  private windClockSec: number | null = null;
 
   private constructor(options: WorldEngineOptions) {
     this.host = options.host;
     this.pack = options.pack;
     this.terrainMap = options.terrainMap;
+    this.plantRenderer = PlantRenderer.create(options.pack, options.terrainMap);
     this.buildGridVisible = options.showBuildGrid ?? options.pack.showGridByDefault ?? true;
     this.tileW = options.pack.projection.defaultTileW;
     this.tileH = options.pack.projection.defaultTileH;
@@ -301,6 +319,8 @@ export class IsometricWorldEngine {
     this.host.innerHTML = '';
 
     try {
+      /* Painted ground and plants load while the GPU starts; the world waits for them a while, then draws what it has. */
+      const artJob = loadTerrainArt(this.pack);
       const app = new Application();
       await app.init({
         width: this.viewport.width,
@@ -316,6 +336,12 @@ export class IsometricWorldEngine {
         app.destroy(true, { children: true, texture: true });
         return;
       }
+      await Promise.race([artJob, new Promise(resolve => setTimeout(resolve, 15000))]);
+      if (this.destroyed) {
+        app.destroy(true, { children: true, texture: true });
+        return;
+      }
+      this.useArt(terrainArtFor(this.pack));
       this.app = app;
       this.rendererKind = 'webgl';
       this.canvasElement = app.canvas;
@@ -339,7 +365,10 @@ export class IsometricWorldEngine {
       const borderGraphic = new Graphics();
       const overlayGraphic = new Graphics();
 
-      if (this.terrainMap && this.pack.liquidLayer) {
+      const paintedLiquid = this.art?.liquid ?? null;
+      if (this.terrainMap && this.pack.liquidLayer && paintedLiquid) {
+        this.mountPaintedLiquid(liquidLayer, paintedLiquid);
+      } else if (this.terrainMap && this.pack.liquidLayer) {
         const liqCanvas = buildLiquidSurfaceCanvas(this.pack.liquidLayer, 256);
         const liqTex = Texture.from(liqCanvas);
         /* Explicit repeat wrapping prevents bilinear clamp seams at tile borders in WebGL. */
@@ -390,8 +419,15 @@ export class IsometricWorldEngine {
       }
 
       worldContainer.addChild(liquidLayer);
+      /* Reflections of the plants by the water: under the ground, which is see-through only over open water. */
+      const reflectionLayer = new Container();
+      worldContainer.addChild(reflectionLayer);
       worldContainer.addChild(chunkLayer);
       worldContainer.addChild(buildGridGraphic);
+      /* Shadows and plants, depth-sorted among themselves; buildings and people draw above this layer. */
+      const plantLayer = new Container();
+      worldContainer.addChild(plantLayer);
+      this.plantRenderer?.attachPixi(plantLayer, reflectionLayer);
       worldContainer.addChild(cityGraphic);
       worldContainer.addChild(buildingArtLayer);
       worldContainer.addChild(residentsGraphic);
@@ -486,9 +522,97 @@ export class IsometricWorldEngine {
     this.fallbackCtx = canvas.getContext('2d');
     this.canvasElement = canvas;
     this.rendererKind = 'canvas2d';
+    this.useArt(terrainArtFor(this.pack));
     if (this.terrainMap && this.pack.liquidLayer) {
       this.liquidCanvas = buildLiquidSurfaceCanvas(this.pack.liquidLayer, 256);
     }
+  }
+
+  /* Painted water in layers, as its art set describes: the base colour shaded by the bed's relief, and two drifting
+     ripple layers (the second finer) that lighten the crests and darken the troughs. The textures are seen from above;
+     a squashed, turned tiling maps them onto the 2:1 ground the same way the ground textures are. */
+  private mountPaintedLiquid(layer: Container, liquid: Readonly<{ bed: ArtPixels; ripples: ArtPixels; baseColor: string }>): void {
+    const base = parseHexColor(liquid.baseColor);
+    const br = ((base >> 16) & 255) / 255;
+    const bg = ((base >> 8) & 255) / 255;
+    const bb = (base & 255) / 255;
+    const bedCanvas = document.createElement('canvas');
+    bedCanvas.width = liquid.bed.width;
+    bedCanvas.height = liquid.bed.height;
+    const bctx = bedCanvas.getContext('2d');
+    const ripCanvas = document.createElement('canvas');
+    ripCanvas.width = liquid.ripples.width;
+    ripCanvas.height = liquid.ripples.height;
+    const rctx = ripCanvas.getContext('2d');
+    if (!bctx || !rctx) return;
+    const bed = bctx.createImageData(bedCanvas.width, bedCanvas.height);
+    const src = liquid.bed.data;
+    /* The bed's sand bars are painted with crisp edges; at full strength one of them reads as a seam along the river. */
+    const kBed = 0.5;
+    for (let i = 0; i < src.length; i += 4) {
+      bed.data[i] = Math.max(0, Math.min(255, (br + (src[i]! / 255 - 0.54) * 0.45 * kBed) * 255));
+      bed.data[i + 1] = Math.max(0, Math.min(255, (bg + (src[i + 1]! / 255 - 0.54) * 0.55 * kBed) * 255));
+      bed.data[i + 2] = Math.max(0, Math.min(255, (bb + (src[i + 2]! / 255 - 0.54) * 0.4 * kBed) * 255));
+      bed.data[i + 3] = 255;
+    }
+    bctx.putImageData(bed, 0, 0);
+    /* Only the crests of the ripple map turn into short white glints; the troughs darken a little. */
+    const rip = rctx.createImageData(ripCanvas.width, ripCanvas.height);
+    const rs = liquid.ripples.data;
+    const step = (lo: number, hi: number, x: number): number => {
+      const t = Math.max(0, Math.min(1, (x - lo) / (hi - lo)));
+      return t * t * (3 - 2 * t);
+    };
+    for (let i = 0; i < rs.length; i += 4) {
+      const delta = rs[i]! / 255 - 0.5;
+      if (delta >= 0) {
+        rip.data[i] = 255;
+        rip.data[i + 1] = 255;
+        rip.data[i + 2] = 255;
+        rip.data[i + 3] = 255 * (0.25 * step(0, 0.1, delta) + 0.75 * step(0.08, 0.28, delta));
+      } else {
+        rip.data[i] = br * 0.35 * 255;
+        rip.data[i + 1] = bg * 0.45 * 255;
+        rip.data[i + 2] = bb * 0.55 * 255;
+        rip.data[i + 3] = 255 * 0.45 * step(0.02, 0.16, -delta);
+      }
+    }
+    rctx.putImageData(rip, 0, 0);
+
+    /* The ripples are painted as waves running across the picture; laid flat on the 2:1 ground without turning them,
+       they read as short horizontal strokes, as on the reference. One ripple picture spans three tiles' width. */
+    const iso = new Container();
+    iso.scale.set(1, 0.5);
+    const tilePx = (this.tileW * 3) / Math.max(1, liquid.ripples.width);
+    const make = (canvas: HTMLCanvasElement, scale: number, alpha: number): TilingSprite => {
+      const tex = Texture.from(canvas);
+      tex.source.style.addressMode = 'repeat';
+      this.liquidArtTextures.push(tex);
+      const sprite = new TilingSprite({ texture: tex, width: this.bounds.width, height: this.bounds.height * 2 });
+      sprite.x = this.bounds.minX;
+      sprite.y = this.bounds.minY * 2;
+      sprite.tileScale.set(tilePx * scale, tilePx * scale);
+      sprite.tilePosition.set(-this.bounds.minX, -this.bounds.minY * 2);
+      sprite.alpha = alpha;
+      iso.addChild(sprite);
+      return sprite;
+    };
+    make(bedCanvas, 1, 1);
+    this.liquidSpriteA = make(ripCanvas, 1, 0.65);
+    this.liquidSpriteB = make(ripCanvas, 1 / 1.37, 0.45);
+    this.liquidOrigin = { x: -this.bounds.minX, y: -this.bounds.minY * 2 };
+    this.liquidWrap = Infinity;
+
+    const n = this.pack.mapSize;
+    const mTop = tileTopVertexToWorld(0, 0, this.tileW, this.tileH);
+    const mRight = tileTopVertexToWorld(n, 0, this.tileW, this.tileH);
+    const mBottom = tileTopVertexToWorld(n, n, this.tileW, this.tileH);
+    const mLeft = tileTopVertexToWorld(0, n, this.tileW, this.tileH);
+    const mask = new Graphics();
+    mask.moveTo(mTop.x, mTop.y).lineTo(mRight.x, mRight.y).lineTo(mBottom.x, mBottom.y).lineTo(mLeft.x, mLeft.y).closePath().fill({ color: 0xffffff });
+    layer.addChild(iso);
+    layer.addChild(mask);
+    layer.mask = mask;
   }
 
   private drawMapBorderPixi(): void {
@@ -871,6 +995,16 @@ export class IsometricWorldEngine {
     return { rendererKind: this.rendererKind, glRenderer, glVendor };
   }
 
+  /* Fixes the clock (seconds) of the wind and the water so shots and video repeat exactly; null goes back to real time. */
+  setWindClock(seconds: number | null): void {
+    this.windClockSec = seconds;
+    this.dirtyScene = true;
+  }
+
+  private windTime(): number {
+    return this.windClockSec ?? performance.now() / 1000;
+  }
+
   setBuildGridVisible(visible: boolean): void {
     if (this.buildGridVisible === visible) return;
     this.buildGridVisible = visible;
@@ -989,6 +1123,7 @@ export class IsometricWorldEngine {
       rendererKind: this.rendererKind,
       buildGridVisible: this.buildGridVisible,
       hasAnimatedLiquid: Boolean(this.terrainMap && this.pack.liquidLayer),
+      plants: this.plantRenderer?.stats ?? null,
       hoveredTile: this.hoveredTile,
       selectedPick: this.selectedPick,
       camera: this.camera,
@@ -1015,10 +1150,44 @@ export class IsometricWorldEngine {
     const existing = this.chunkCache.get(key);
     if (existing) return existing;
 
+    this.bakeJobs.delete(key);
     const baked =
-      this.terrainMap && this.pack.materials && this.pack.materials.length > 0
-        ? bakeSmoothChunkCanvas(chunk, this.terrainMap, this.pack, lod)
+      this.terrainMap && this.hasSmoothGround()
+        ? bakeSmoothChunkCanvas(chunk, this.terrainMap, this.pack, lod, this.art)
         : bakeChunkCanvas(chunk, this.pack, this.tileLookup, lod, this.resolveTileId);
+    return this.cacheBakedChunk(key, baked);
+  }
+
+  /* The first mount that gets this far fixes the art; a fallback after a failed GPU start keeps the same art. */
+  private useArt(art: LoadedTerrainArt | null): void {
+    if (this.artPinned) return;
+    this.artPinned = true;
+    this.art = art;
+    this.plantRenderer?.useArt(art);
+  }
+
+  private hasSmoothGround(): boolean {
+    return Boolean(this.pack.materials && this.pack.materials.length > 0);
+  }
+
+  /* Bakes part of a chunk within the frame's deadline; the chunk's entry once its last row is baked, else null. Tile
+     ground bakes whole, as it is cheap. */
+  private advanceChunkBake(chunk: ChunkCoord, lod: LodTierSpec, deadline: number): CachedChunkEntry | null {
+    const key = this.cacheKey(chunk, lod.id);
+    const existing = this.chunkCache.get(key);
+    if (existing) return existing;
+    if (!this.terrainMap || !this.hasSmoothGround()) return this.ensureChunkBaked(chunk, lod);
+    let job = this.bakeJobs.get(key);
+    if (!job) {
+      job = startSmoothChunkBake(chunk, this.terrainMap, this.pack, lod, this.art);
+      this.bakeJobs.set(key, job);
+    }
+    if (!job.advance(deadline, () => performance.now())) return null;
+    this.bakeJobs.delete(key);
+    return this.cacheBakedChunk(key, smoothPixelsToCanvas(job.pixels, lod.id));
+  }
+
+  private cacheBakedChunk(key: string, baked: BakedChunk): CachedChunkEntry {
     let texture: Texture | null = null;
     let sprite: Sprite | null = null;
     if (this.app) {
@@ -1071,14 +1240,21 @@ export class IsometricWorldEngine {
       const dtSec = dtMs / 1000;
       const animDetail = animationDetailForZoom(this.camera.zoom);
       const speedScale = animDetail === 'reduced' ? 0.55 : 1.0;
-      this.liquidPhaseX = (this.liquidPhaseX + this.pack.liquidLayer.speedX * dtSec * speedScale) % 256;
-      this.liquidPhaseY = (this.liquidPhaseY + this.pack.liquidLayer.speedY * dtSec * speedScale) % 256;
+      if (this.windClockSec !== null) {
+        /* A fixed clock moves the water by the clock, not by how long the frames took. */
+        this.liquidPhaseX = (this.pack.liquidLayer.speedX * this.windClockSec * speedScale) % this.liquidWrap;
+        this.liquidPhaseY = (this.pack.liquidLayer.speedY * this.windClockSec * speedScale) % this.liquidWrap;
+      } else {
+        this.liquidPhaseX = (this.liquidPhaseX + this.pack.liquidLayer.speedX * dtSec * speedScale) % this.liquidWrap;
+        this.liquidPhaseY = (this.liquidPhaseY + this.pack.liquidLayer.speedY * dtSec * speedScale) % this.liquidWrap;
+      }
+      const o = this.liquidOrigin;
       if (this.liquidSpriteA) {
-        this.liquidSpriteA.tilePosition.set(this.liquidPhaseX, this.liquidPhaseY);
+        this.liquidSpriteA.tilePosition.set(o.x + this.liquidPhaseX, o.y + this.liquidPhaseY);
       }
       if (this.liquidSpriteB) {
         this.liquidSpriteB.visible = animDetail !== 'reduced';
-        this.liquidSpriteB.tilePosition.set(-this.liquidPhaseX * 0.65, this.liquidPhaseY * 0.85);
+        this.liquidSpriteB.tilePosition.set(o.x - this.liquidPhaseX * 0.65, o.y + this.liquidPhaseY * 0.85);
       }
       if (!this.app) {
         this.dirtyScene = true;
@@ -1115,6 +1291,17 @@ export class IsometricWorldEngine {
       }
       constructionAnimated = true;
       if (!this.app) {
+        this.dirtyScene = true;
+      }
+    }
+
+    /* Plants sway in the wind, so a map with plants redraws every frame. */
+    let plantsAnimated = false;
+    if (this.plantRenderer) {
+      plantsAnimated = true;
+      if (this.app) {
+        this.plantRenderer.update(visibleWorldRect(this.camera, this.viewport, this.tileW), this.windTime());
+      } else {
         this.dirtyScene = true;
       }
     }
@@ -1162,7 +1349,7 @@ export class IsometricWorldEngine {
         );
       }
     }
-    if (this.app && (needsSync || liquidAnimated || residentsAnimated || constructionAnimated)) {
+    if (this.app && (needsSync || liquidAnimated || residentsAnimated || constructionAnimated || plantsAnimated)) {
       this.app.render();
     }
     this.lastCpuStepMs = performance.now() - stepStart;
@@ -1198,21 +1385,23 @@ export class IsometricWorldEngine {
       const key = this.cacheKey(chunk, lod.id);
       protectedKeys.add(key);
       let entry = this.chunkCache.get(key);
+      if (!entry && performance.now() - bakeStart < bakeBudgetMs) {
+        entry = this.advanceChunkBake(chunk, lod, bakeStart + bakeBudgetMs) ?? undefined;
+      }
       if (!entry) {
-        if (performance.now() - bakeStart < bakeBudgetMs) {
-          entry = this.ensureChunkBaked(chunk, lod);
-        } else {
-          pending++;
-          const fallback = this.findAnyCachedLod(chunk);
-          if (fallback) {
-            protectedKeys.add(fallback.key);
-            entry = fallback.entry;
-          }
+        pending++;
+        const fallback = this.findAnyCachedLod(chunk);
+        if (fallback) {
+          protectedKeys.add(fallback.key);
+          entry = fallback.entry;
         }
       }
       if (entry) drawEntries.push(entry);
     }
 
+    for (const key of this.bakeJobs.keys()) {
+      if (!protectedKeys.has(key)) this.bakeJobs.delete(key);
+    }
     this.pendingBakeCount = pending;
     this.dirtyScene = pending > 0;
     this.chunkCache.evictIfNeeded(protectedKeys, this.disposeEntry);
@@ -1513,6 +1702,8 @@ export class IsometricWorldEngine {
       ctx.drawImage(b.canvas, b.worldX, b.worldY, b.pixelWidth / b.scale, b.pixelHeight / b.scale);
     }
 
+    this.plantRenderer?.drawFallback2D(ctx, visibleWorldRect(this.camera, this.viewport, this.tileW), this.windTime());
+
     if (this.terrainMap && this.buildGridVisible) {
       const rect = visibleWorldRect(this.camera, this.viewport, this.tileW);
       const corners = [
@@ -1681,6 +1872,7 @@ export class IsometricWorldEngine {
     this.resizeObserver?.disconnect();
 
     this.chunkCache.clear(this.disposeEntry);
+    this.bakeJobs.clear();
     this.buildingArtPool?.destroy();
     this.residentArtPool?.destroy();
     this.loopArtPool?.destroy();
@@ -1688,6 +1880,8 @@ export class IsometricWorldEngine {
     this.residentArtPool = null;
     this.loopArtPool = null;
     this.artLibrary.destroy();
+    for (const t of this.liquidArtTextures) if (!t.destroyed) t.destroy(true);
+    this.liquidArtTextures = [];
     if (this.liquidTexture) {
       this.liquidTexture.destroy(true);
       this.liquidTexture = null;
@@ -1706,6 +1900,8 @@ export class IsometricWorldEngine {
       this.app.destroy(true, { children: true, texture: true });
       this.app = null;
     }
+    this.plantRenderer?.destroy();
+    this.plantRenderer = null;
     if (this.fallbackCanvas) {
       this.fallbackCanvas.remove();
       this.fallbackCanvas = null;

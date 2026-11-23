@@ -101,7 +101,13 @@ type GalleryHandle = {
   setZoom: (zoom: number) => void;
   setBuildGridVisible: (visible: boolean) => void;
   focusTile: (col: number, row: number) => void;
+  /* Camera in world pixels and zoom (1 = 100%); for scripted shots and video. */
+  setCamera: (camera: { x: number; y: number; zoom: number }) => void;
+  /* Fixes the wind clock in seconds so a shot repeats exactly; null follows real time. */
+  setWindClock: (seconds: number | null) => void;
   focusNearestShore: () => TileCoord;
+  /* Tile kind id at a tile of the open map, null outside it; for scripted camera paths. */
+  tileKindAt: (col: number, row: number) => string | null;
   flushVisibleBakes: () => void;
   getStats: () => WorldEngineStats | null;
   screenPointOfTile: (col: number, row: number) => { x: number; y: number } | null;
@@ -254,7 +260,7 @@ function IsometricInspector({
       terrainMap: map,
       showBuildGrid: false,
       initialCenterTile: initialMid,
-      markerTile: map.startCenter,
+      markerTile: new URLSearchParams(window.location.search).get('marker') === '0' ? null : map.startCenter,
       resolveTileId: (col, row) => map.tileAt(col, row) ?? pack.defaultTileId,
       onStats: next => {
         if (alive) setStats(next);
@@ -547,6 +553,8 @@ function Stage2GalleryApp() {
       setLang: next => setLang(next),
       setZoom: z => engineRef.current?.setZoom(z),
       setBuildGridVisible: v => engineRef.current?.setBuildGridVisible(v),
+      setCamera: camera => engineRef.current?.setCamera(camera),
+      setWindClock: seconds => engineRef.current?.setWindClock(seconds),
       focusTile: (col, row) => {
         const engine = engineRef.current;
         if (!engine) return;
@@ -567,6 +575,7 @@ function Stage2GalleryApp() {
         }
         return target;
       },
+      tileKindAt: (col, row) => activeMap?.tileAt(col, row) ?? null,
       flushVisibleBakes: () => engineRef.current?.flushVisibleBakes(),
       getStats: () => engineRef.current?.getStats() ?? null,
       screenPointOfTile: (col, row) => {
