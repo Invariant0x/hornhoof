@@ -86,8 +86,13 @@ function apply({ active, custom }: SkinsState): void {
   const extra = extraDeclarations(look);
   for (const property of extra.clear) page.style.removeProperty(property);
   for (const [property, value] of extra.set) page.style.setProperty(property, value);
+  putKit(page, active);
+}
+
+/* The active theme's painted interface parts on the page, or every trace of a kit taken away when it has none. */
+function putKit(page: HTMLElement, active: string): void {
   const kit = installedKits.get(active);
-  applyKit(page, kit?.kit ?? null, kit?.base ?? '');
+  applyKit(page, kit ? kit.kit : null, kit ? kit.base : '');
 }
 
 function change(next: SkinsState): void {

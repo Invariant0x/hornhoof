@@ -103,6 +103,32 @@ function headed(stack: unknown, family: string | undefined, families: ReadonlySe
   return [family, ...(stack as string[]).filter(font => font !== family)];
 }
 
+type KitFiles = ReturnType<typeof kitFiles>;
+type FontFiles = ReturnType<typeof fontFiles>;
+
+/* The look with its display and body stacks headed by the fonts the archive brings, when it brings them. */
+function headedLook(look: Record<string, unknown>, fonts: FontFiles | null, options: PackOptions): Record<string, unknown> {
+  if (!fonts) {
+    if (options.displayFont || options.bodyFont) throw new Error('--display-font and --body-font name fonts that --fonts brings');
+    return look;
+  }
+  const stacks = look.fonts as Record<string, unknown>;
+  return { ...look, fonts: { ...stacks, display: headed(stacks.display, options.displayFont, fonts.families), body: headed(stacks.body, options.bodyFont, fonts.families) } };
+}
+
+/* The theme's licence: the one given, else the kit's own, else the repository's, and whether it is the theme's own. */
+function licenceOf(options: PackOptions, kit: KitFiles | null): { bytes: Buffer; own: boolean } {
+  const own = options.licence ? readFileSync(options.licence) : kit?.licence ?? null;
+  return own ? { bytes: own, own: true } : { bytes: readFileSync(join(REPO, 'LICENSE')), own: false };
+}
+
+/* The kit and the fonts the options name, read from their folders. */
+const kitIn = (options: PackOptions): KitFiles | null => (options.kit ? kitFiles(options.kit) : null);
+const fontsIn = (options: PackOptions): FontFiles | null => (options.fonts ? fontFiles(options.fonts) : null);
+
+/* The fonts' and the kit's files of the archive. */
+const uiFiles = (kit: KitFiles | null, fonts: FontFiles | null): [string, Buffer][] => [...(fonts?.files ?? []), ...(kit?.files ?? [])];
+
 /* The files of the archive of a built-in theme, by path. */
 export function themeArchiveFiles(id: BuiltinSkinId, options: PackOptions = {}): Map<string, Buffer> {
   const skin: BuiltinSkin | undefined = BUILTIN_SKINS.find(one => one.id === id);
@@ -111,19 +137,14 @@ export function themeArchiveFiles(id: BuiltinSkinId, options: PackOptions = {}):
   const look: Record<string, unknown> = JSON.parse(JSON.stringify(skin)) as Record<string, unknown>;
   delete look.id;
   delete look.world;
-  const kit = options.kit ? kitFiles(options.kit) : null;
-  const fonts = options.fonts ? fontFiles(options.fonts) : null;
-  if ((options.displayFont || options.bodyFont) && !fonts) throw new Error('--display-font and --body-font name fonts that --fonts brings');
-  if (fonts) {
-    const stacks = look.fonts as Record<string, unknown>;
-    look.fonts = { ...stacks, display: headed(stacks.display, options.displayFont, fonts.families), body: headed(stacks.body, options.bodyFont, fonts.families) };
-  }
-  const licence = options.licence ? readFileSync(options.licence) : kit?.licence ?? null;
+  const kit = kitIn(options);
+  const fonts = fontsIn(options);
+  const licence = licenceOf(options, kit);
   const files = new Map<string, Buffer>();
-  files.set('theme.json', json(manifestOf(id, Boolean(pack), Boolean(licence), options)));
-  files.set('LICENSE', licence ?? readFileSync(join(REPO, 'LICENSE')));
-  files.set('ui/look.json', json(look));
-  for (const [path, bytes] of [...(fonts?.files ?? []), ...(kit?.files ?? [])]) files.set(path, bytes);
+  files.set('theme.json', json(manifestOf(id, Boolean(pack), licence.own, options)));
+  files.set('LICENSE', licence.bytes);
+  files.set('ui/look.json', json(headedLook(look, fonts, options)));
+  for (const [path, bytes] of uiFiles(kit, fonts)) files.set(path, bytes);
   if (pack) for (const [path, bytes] of worldFiles(pack, options)) files.set(path, bytes);
   return files;
 }
@@ -207,6 +228,15 @@ const flag = (argv: readonly string[], name: string) => {
   return at >= 0 ? argv[at + 1] : undefined;
 };
 
+/* The options a run names, by their flags; a flag left out is an option left out. */
+const FLAGS = { art: '--art', licence: '--licence', kit: '--kit', fonts: '--fonts', version: '--version', displayFont: '--display-font', bodyFont: '--body-font' } as const;
+
+function optionsOf(argv: readonly string[]): PackOptions {
+  const given = Object.entries(FLAGS).map(([key, name]) => [key, flag(argv, name)] as const).filter(([, value]) => value !== undefined);
+  const id = flag(argv, '--id');
+  return { ...(Object.fromEntries(given) as Partial<Record<keyof typeof FLAGS, string>>), ...(id ? { id, names: { en: flag(argv, '--name-en')!, ru: flag(argv, '--name-ru')! } } : {}) };
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   const [id] = argv;
   const out = flag(argv, '--out');
@@ -215,18 +245,11 @@ export async function main(argv: readonly string[]): Promise<number> {
       + ' [--kit <pack folder>] [--fonts <folder> --display-font <family> --body-font <family>] [--id <id> --name-en <name> --name-ru <name>]');
     return 2;
   }
-  const [nameEn, nameRu] = [flag(argv, '--name-en'), flag(argv, '--name-ru')];
-  if (flag(argv, '--id') && (!nameEn || !nameRu)) {
+  if (flag(argv, '--id') && (!flag(argv, '--name-en') || !flag(argv, '--name-ru'))) {
     console.log('A theme of its own id needs its names: --name-en and --name-ru.');
     return 2;
   }
-  const zip = await packTheme(id as BuiltinSkinId, {
-    art: flag(argv, '--art') ?? null, licence: flag(argv, '--licence') ?? null, kit: flag(argv, '--kit') ?? null, fonts: flag(argv, '--fonts') ?? null,
-    ...(flag(argv, '--version') ? { version: flag(argv, '--version')! } : {}),
-    ...(flag(argv, '--display-font') ? { displayFont: flag(argv, '--display-font')! } : {}),
-    ...(flag(argv, '--body-font') ? { bodyFont: flag(argv, '--body-font')! } : {}),
-    ...(flag(argv, '--id') ? { id: flag(argv, '--id')!, names: { en: nameEn!, ru: nameRu! } } : {}),
-  });
+  const zip = await packTheme(id as BuiltinSkinId, optionsOf(argv));
   writeFileSync(out, zip);
   console.log(`${out}: ${zip.length} bytes`);
   return 0;

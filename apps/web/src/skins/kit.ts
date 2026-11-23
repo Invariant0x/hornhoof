@@ -25,23 +25,30 @@ const fitsValue = (measure: Measure, value: unknown): value is string =>
 
 type Declared = { set: [string, string][]; faces: string[] };
 
+/* One slot's picture and measures, when its name is one of the kit's and its file and values have their forms. */
+function slotDeclarations(name: string, slot: KitSlot | undefined, base: string, out: Declared): void {
+  if (!SLOTS.has(name) || !slot || !fitsFile(slot.file)) return;
+  out.set.push([`--kit-${name}`, `url("${base}ui/kit/${encodeURIComponent(slot.file)}")`]);
+  for (const measure of MEASURES) if (fitsValue(measure, slot[measure])) out.set.push([`--kit-${name}-${measure}`, slot[measure]!]);
+  /* A part painted with its middle ("fill" in its slice) is the element's whole face, so its own fill steps aside. */
+  if (fitsValue('slice', slot.slice) && slot.slice.endsWith(' fill')) {
+    out.set.push([`--kit-${name}-bg`, 'transparent']);
+    out.faces.push(name);
+  }
+}
+
+/* The kit's colours whose names are the kit's and whose values are #RRGGBB. */
+function colorDeclarations(colors: Readonly<Record<string, unknown>>, out: Declared): void {
+  for (const [name, color] of Object.entries(colors)) {
+    if (COLORS.has(name) && typeof color === 'string' && THEME_KIT_VALUES.color.test(color)) out.set.push([`--kit-c-${name}`, color]);
+  }
+}
+
 function declarations(kit: Kit, base: string): Declared {
-  const set: [string, string][] = [];
-  const faces: string[] = [];
-  for (const [name, slot] of Object.entries(kit.slots ?? {})) {
-    if (!SLOTS.has(name) || !slot || !fitsFile(slot.file)) continue;
-    set.push([`--kit-${name}`, `url("${base}ui/kit/${encodeURIComponent(slot.file)}")`]);
-    for (const measure of MEASURES) if (fitsValue(measure, slot[measure])) set.push([`--kit-${name}-${measure}`, slot[measure]!]);
-    /* A part painted with its middle ("fill" in its slice) is the element's whole face, so its own fill steps aside. */
-    if (fitsValue('slice', slot.slice) && slot.slice.endsWith(' fill')) {
-      set.push([`--kit-${name}-bg`, 'transparent']);
-      faces.push(name);
-    }
-  }
-  for (const [name, color] of Object.entries(kit.colors ?? {})) {
-    if (COLORS.has(name) && typeof color === 'string' && THEME_KIT_VALUES.color.test(color)) set.push([`--kit-c-${name}`, color]);
-  }
-  return { set, faces };
+  const out: Declared = { set: [], faces: [] };
+  for (const [name, slot] of Object.entries(kit.slots ?? {})) slotDeclarations(name, slot, base, out);
+  colorDeclarations(kit.colors ?? {}, out);
+  return out;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
