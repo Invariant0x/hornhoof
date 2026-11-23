@@ -69,7 +69,7 @@ Of the 59 residents:
 
 1. Every look, every tier, every animation of 4.3.
 2. The daily-life animations for #1951 (4.3, last table).
-3. Night lights (3.13).
+3. Night lights (3.13): **on hold** by Ivan's word, 23.11.2026.
 4. The construction line for every larger step, used when a grown building is rebuilt elsewhere.
 
 ## 3. Buildings
@@ -251,12 +251,14 @@ Lot 5x5. Door: front right wall, row 2, as delivered.
 | `awning` | `awning` |
 | `celebration` | `top` |
 
-### 3.13 Night lights (for #1955, Wave 3)
+### 3.13 Night lights (on hold)
+
+**On hold by Ivan's word, 23.11.2026: do not prepare `night.png` until Ivan says otherwise.** The description below stays for when he does.
 
 Design asked for one warm light in a district whose machine is off: a lit window or a torch at the door, with a small warm spot on the ground.
 
 * Deliver it as `night.png` beside `complete.png`, on the same canvas. Leave it **out of the `layers` list**: listed there it would also shine by day.
-* The engine draws it once #1955 wires it. Until then the check only warns that the file is not declared.
+* Nothing in the engine waits for it: #1955 does not depend on a night layer. A delivered `night.png` only makes the check warn that the file is not declared.
 
 ## 4. Residents
 
@@ -398,7 +400,7 @@ A rejected file keeps its placeholder; it never breaks the city.
 * A cloak layer without its base sheet, or of another size.
 * An index for another pack or another contract version.
 
-It **warns**, without rejecting, about a file no slot names: the night lights and the #1951 animations until they are wired.
+It **warns**, without rejecting, about a file no slot names: the #1951 animations until they are wired, and a `night.png` (on hold, 3.13).
 
 ### 5.3 What the check cannot see
 
@@ -428,6 +430,6 @@ Look at each delivery for these yourself:
 
    #1947 (item 7) makes every kind walk all 10.
 3. **The daily-life animations** `drink`, `sit`, `talk`, `bow`: the contract, the pack catalog and the resident states (#1951).
-4. **Night lights** `night.png` (#1955).
+4. **Night lights** `night.png`: on hold by Ivan's word, 23.11.2026 (3.13). #1955 does not depend on it.
 5. **People delivery.** There is no import script for people. Lay sheets out as 4.4 says, or ask for a small import script matched to the delivery's layout.
 6. **Retina 2K art** (8x). The engine scales the master up at 200% on Retina today; using the 2K set needs wiring later. It is not ordered here.
