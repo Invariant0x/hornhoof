@@ -26,31 +26,14 @@ function pingOpen(socket: WebSocket): void {
 /* A view the person may no longer have, or the node cannot show, ends for good: the browser does not try it again. */
 const final = ([code]: Close) => code === CLOSE.noAccess[0] || code === CLOSE.noTerminal[0];
 
-/* An open view goes on only as long as what let it open still holds. It looks on every ping and at once when anyone's access
-   changes, and ends with nothing more going out: why says how it ends, or nothing while it may go on. What comes back tells
-   whether a frame of the browser may still go to the node. */
-export function keepLooking(ctx: Ctx, socket: WebSocket, { termId, node, companyId }: { termId: string; node: NodeIdentity; companyId: string }, why: () => Promise<Close | null>): () => Promise<boolean> {
-  let open = true;
-  let looked = Date.now();
-  let wantsPing = false;
-  const closeOnNode = (forGood = false) => {
-    if (ctx.terminals.remove(termId)) ctx.hub.send(node, { type: 'term.close', termId, ...(forGood ? { final: true as const } : {}) });
-  };
-  const lookNow = async () => {
-    looked = Date.now();
-    const close: Close | null = await why().catch((): Close => CLOSE.noAccess);
-    if (!close || !open) return;
-    open = false;
-    closeOnNode(final(close));
-    socket.close(close[0], close[1]);
-  };
-  const ping = () => {
-    if (!wantsPing || !open) return;
-    wantsPing = false;
-    pingOpen(socket);
-  };
-  /* One look at a time, as a look can take longer than a ping, and those that ask meanwhile share the one after it: what runs
-     may have read from before they asked. */
+/* The node hears once that a view ended, and whether for good. */
+function closeOnNode(ctx: Ctx, termId: string, node: NodeIdentity, forGood: boolean): void {
+  if (ctx.terminals.remove(termId)) ctx.hub.send(node, { type: 'term.close', termId, ...(forGood ? { final: true as const } : {}) });
+}
+
+/* One look at a time, as a look can take longer than a ping, and those that ask meanwhile share the one after it: what runs
+   may have read from before they asked. */
+function oneAtATime(lookNow: () => Promise<void>, goesOn: () => boolean): () => Promise<void> {
   let running: Promise<void> | null = null;
   let waiting: Promise<void> | null = null;
   const look = (): Promise<void> => {
@@ -60,10 +43,34 @@ export function keepLooking(ctx: Ctx, socket: WebSocket, { termId, node, company
     }
     waiting ??= running.then(() => {
       waiting = null;
-      return open ? look() : undefined;
+      return goesOn() ? look() : undefined;
     });
     return waiting;
   };
+  return look;
+}
+
+/* An open view goes on only as long as what let it open still holds. It looks on every ping and at once when anyone's access
+   changes, and ends with nothing more going out: why says how it ends, or nothing while it may go on. What comes back tells
+   whether a frame of the browser may still go to the node. */
+export function keepLooking(ctx: Ctx, socket: WebSocket, { termId, node, companyId }: { termId: string; node: NodeIdentity; companyId: string }, why: () => Promise<Close | null>): () => Promise<boolean> {
+  let open = true;
+  let looked = Date.now();
+  let wantsPing = false;
+  const lookNow = async () => {
+    looked = Date.now();
+    const close: Close | null = await why().catch((): Close => CLOSE.noAccess);
+    if (!close || !open) return;
+    open = false;
+    closeOnNode(ctx, termId, node, final(close));
+    socket.close(close[0], close[1]);
+  };
+  const ping = () => {
+    if (!wantsPing || !open) return;
+    wantsPing = false;
+    pingOpen(socket);
+  };
+  const look = oneAtATime(lookNow, () => open);
   const check = setInterval(() => {
     wantsPing = true;
     void look().then(ping);
@@ -73,7 +80,7 @@ export function keepLooking(ctx: Ctx, socket: WebSocket, { termId, node, company
     open = false;
     clearInterval(check);
     stopLooking();
-    closeOnNode();
+    closeOnNode(ctx, termId, node, false);
   });
   return async () => {
     if (open && Date.now() - looked >= KEYS_LOOK_MS) await look();

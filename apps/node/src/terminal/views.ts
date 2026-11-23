@@ -292,7 +292,7 @@ export class ViewSessions {
 
   close(m: Msg<'term.close'>): void {
     const view = this.views.get(m.termId);
-    if (m.final && (view || this.viewsOpening.has(m.termId))) this.forGood.add(m.termId);
+    if (m.final) this.forGood.add(m.termId);
     if (view) {
       view.child.kill();
       /* Its viewer process takes a while to end; the others get their size back at once. */
