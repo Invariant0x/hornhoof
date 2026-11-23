@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { tasks, turns } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
 import { echelonsTurn } from './helpers.js';
+import { attached } from './recorded-fixture.js';
 import { call, company, text, work } from './turns-company.js';
 
 const rows = async (db: Awaited<ReturnType<typeof company>>['db']) =>
@@ -27,7 +28,8 @@ describe('tasks flow outside every turn until their results are accepted', () =>
     const { db, companyId, orchestrator, dev, hana, tools } = await company();
     const open = await echelonsTurn(db, companyId);
     await call(await tools(orchestrator), 'add_tasks', { tasks: [work(dev.id, 'Checkout')] });
-    const done = await call(await tools(hana), 'report', { task: 1, done: true, summary: 'Shipped.' });
+    const [task] = await db.select().from(tasks).where(eq(tasks.number, 1));
+    const done = await call(await tools(hana), 'report', { task: 1, done: true, summary: 'Shipped.', recorded: await attached(db, task!, hana.id, 'result.md') });
     expect(done.isError, text(done)).toBeFalsy();
     expect((await db.select(only(turns, 'status')).from(turns).where(eq(turns.id, open.id)))[0]).toEqual({ status: 'open' });
     expect((await rows(db)).map(r => [r.number, r.status, r.turnId])).toEqual([[1, 'done', null]]);
