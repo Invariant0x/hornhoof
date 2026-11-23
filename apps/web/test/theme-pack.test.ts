@@ -4,7 +4,7 @@
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateRawSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,7 +12,7 @@ import { main, packTheme, shippedVoice, themeArchiveFiles, zipOf, type ThemeVoic
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 
-const REPO_LICENSE = readFileSync(fileURLToPath(new URL('../../../LICENSE', import.meta.url)));
+const REPO_LICENSE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'LICENSE'));
 const VOICE: ThemeVoice = {
   label: { en: 'Night shift', ru: 'Ночная смена' },
   address: { en: 'Good night', ru: 'Доброй ночи' },
