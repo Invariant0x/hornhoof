@@ -82,7 +82,10 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, hub, templates, bus } = ctx;
   app.get('/api/org', async req => {
     const me = await requirePerson(req, db);
-    const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
+    const [company] = await db
+      .select({ id: companies.id, name: companies.name, theme: companies.theme })
+      .from(companies)
+      .where(eq(companies.id, me.companyId));
     const viewer = await viewerOf(db, me);
     const companyAgents = await db.select().from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt)));
     /* Everything below shows every agent of the company with its state and work, but another person's assistant's own; which

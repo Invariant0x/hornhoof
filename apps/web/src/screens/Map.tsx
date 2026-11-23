@@ -29,6 +29,9 @@ import { AgentState } from '../ui/AgentState';
 import { clock } from './Subscriptions';
 import { guardedResizeObserver, useRenderGuard } from '../guard';
 import { useShellTop } from '../ui/shellBars';
+import { useWorld } from '../skins/use-skin';
+import { resolveWorldPack } from '../world-packs/registry';
+import { WorldMapView } from './WorldMapView';
 
 export { deptLayout, type DeptSpot } from '../map-arrange';
 
@@ -619,7 +622,7 @@ function useChipNeed(box: { current: HTMLDivElement | null }, org: Org | null, l
    of each, as a department's schema and tree do there: what scrolls under them goes out of sight, and the dots run on under
    the glass. Measured as the map opens, as its bars come, go or grow, and as the screen changes size. bars: what says which
    bars stand now. shellTop: where the room under the bars of the shell starts while one stands over the map (#1639). */
-function useMapRoom(box: { current: HTMLDivElement | null }, bars: string, shellTop: number | null): CSSProperties | undefined {
+export function useMapRoom(box: { current: HTMLDivElement | null }, bars: string, shellTop: number | null): CSSProperties | undefined {
   const [room, setRoom] = useState<{ top: number; bottom: number } | null>(null);
   useLayoutEffect(() => {
     const el = box.current;
@@ -674,11 +677,47 @@ function mapStandIn(t: Messages, failure: unknown, load: Load, onHome?: () => vo
 }
 
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
-type Props = { me: Me; windowOpen: boolean; leftPanelOpen?: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void; onOpenDecisions?(personId: string): void; onHome?: () => void };
+type Props = {
+  me: Me;
+  windowOpen: boolean;
+  leftPanelOpen?: boolean;
+  onOpenOrchestrator(): void;
+  inside?: boolean;
+  activeDepartmentId?: string | null;
+  onOpenAgent?(agentId: string): void;
+  onOpenDepartment?(id: string): void;
+  onCloseDepartment?(): void;
+  onOpenDecisions?(personId: string): void;
+  onOpenTask?(taskId: string): void;
+  onOpenGoal?(goalId: string): void;
+  onOpenTracker?(departmentId: string): void;
+  onOpenTab?(tab: 'subscriptions' | 'machines'): void;
+  onHire?(dept: Department): void;
+  onHome?: () => void;
+};
 
 /* inside: a department's view is open over the map, which stays flown into it until the view closes. */
-export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchestrator, inside = false, onOpenDepartment, onOpenDecisions, onHome }: Props) {
+export function MapScreen({
+  me,
+  windowOpen,
+  leftPanelOpen = false,
+  onOpenOrchestrator,
+  inside = false,
+  activeDepartmentId = null,
+  onOpenAgent,
+  onOpenDepartment,
+  onCloseDepartment,
+  onOpenDecisions,
+  onOpenTask,
+  onOpenGoal,
+  onOpenTracker,
+  onOpenTab,
+  onHire,
+  onHome,
+}: Props) {
   useRenderGuard('map');
+  const world = useWorld();
+  const worldPack = resolveWorldPack(world);
   const t = useT();
   const { language } = useLanguage();
   const still = useReducedMotion();
@@ -891,6 +930,27 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
 
   const standIn = mapStandIn(t, failure, mapLoad, onHome);
   if (standIn || !org || !arr) return standIn ?? <div className="map" aria-busy="true"><MapVersion /></div>;
+
+  if (worldPack) {
+    return (
+      <WorldMapView
+        me={me}
+        org={org}
+        pack={worldPack}
+        inside={inside}
+        windowOpen={windowOpen}
+        activeDepartmentId={activeDepartmentId}
+        onOpenOrchestrator={onOpenOrchestrator}
+        onOpenAgent={onOpenAgent ?? (() => {})}
+        onCloseDepartment={onCloseDepartment}
+        onOpenTask={onOpenTask}
+        onOpenGoal={onOpenGoal}
+        onOpenTracker={onOpenTracker}
+        onOpenTab={onOpenTab}
+        onHire={onHire}
+      />
+    );
+  }
 
   const depts = org.departments;
   const sub = org.orchestrator?.subscription ?? null;

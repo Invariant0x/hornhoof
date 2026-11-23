@@ -11,7 +11,8 @@ test.describe.configure({ timeout: 0 });
 /* The map opens still, so it fits the screen at once; the glow is let breathe only while it is measured. */
 test.use({ reducedMotion: 'reduce' });
 
-const SKINS: readonly BuiltinSkinId[] = BUILTIN_SKINS.map(s => s.id);
+/* World themes render the interactive isometric world canvas on .map instead of schematic cut-corner department cards. */
+const SKINS: readonly BuiltinSkinId[] = BUILTIN_SKINS.filter(s => !('world' in s && s.world)).map(s => s.id);
 const PLACES = [['ru', 'ltr'], ['ru', 'rtl']] as const;
 const WIDTHS = [1440, 375] as const;
 /* Room around a card in a picture: the glow fades well inside it. */
