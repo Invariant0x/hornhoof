@@ -9,12 +9,12 @@ For the art pipeline (Design, #1956). Written on 23.11.2026 from the world art c
 **What v2 changes (23.11.2026, Ivan AI by Ivan's word, agreed by the Head of design):**
 
 * Construction is put together from a shared kit and each building's bare stages, no longer from 10 pictures per building. The kit is drawn once per footprint (3.2); a building keeps only `low_walls_open`, `full_walls`, `roof_beams`, `roof` and `complete`.
-* Houses are not drawn anew: each comes from a crop of reference 01, on a larger lot (3.4).
+* Houses come from crops of reference 01, on a larger lot (3.4). From v3 this holds for each step's first variant, `v01`; the other variants are drawn new.
 * Wave 2 (section 2), items 3.2, 3.4, 3.7 and 3.12, and sections 5 and 6 are rewritten for this. Wave 1 is unchanged.
 
-**What v3 changes (23.11.2026, Ivan's word through Ivan AI and the Orchestrator, for the Head of design's catalogue `CATALOG.md` on #1956):**
+**What v3 changes (23.11.2026, Ivan's word through Ivan AI and the Orchestrator, for the Head of design's catalogue, now part of `ART-CHECKLIST.md` on #1956):**
 
-* The art grows to about 81 kinds. Deliveries follow the catalogue's batches (section 2).
+* The art grows to about 81 kinds. Deliveries follow the batches of `ART-CHECKLIST.md` (section 2).
 * Houses come in variants inside each step: 15 `hut`, 20 `mudbrick`, 15 `painted`, 10 `villa` (3.4).
 * `painted` and `villa` get their lots; the house lot is the lot of its largest step (3.4).
 * Statues and pyramids are full size with their own stages, scaffolds and ramps painted in; the engine lays no kit over them (3.10). The obelisk waits for Ivan's answer (3.10).
@@ -64,7 +64,7 @@ Of the 59 residents:
 * 5 Inspectors, 4 Scribes, 3 Overseers, 3 Water Bearers;
 * every other look has 1 or 2 people.
 
-**From v3 the delivery order is the catalogue's batch list** (`CATALOG.md` section 6 on #1956): 01 the pilot (accepted), 02 the rest of wave 1, 03 the construction kit and bare stages, 04 the first 25 house variants, 05 statues, 06 pyramids, 07 the next 20 house variants, 08 the flophouse, altar, workshop lines and the last loops, 09 the last 15 house variants. People go in parallel by their own pipeline. The waves below stay as the reason for that order.
+**From v3 the delivery order is the batch list of `ART-CHECKLIST.md` on #1956** (its order-of-work section, batches 02 to 09): 01 the pilot (accepted), 02 the rest of wave 1, 03 the construction kit and bare stages, 04 the first 25 house variants, 05 statues, 06 pyramids, 07 the next 20 house variants, 08 the flophouse, altar, workshop lines and the last loops, 09 the last 15 house variants. People go in parallel by their own pipeline. The waves below stay as the reason for that order.
 
 **Wave 1: the city stops showing boxes.**
 
@@ -221,7 +221,7 @@ Keep to a layer only what moves or must stay separate.
 
 Reference 01 shows the style, not the limit (Ivan's word, 23.11, in v3): the first variant of each step is a crop of reference 01, in `egypt-etalon-house-crops.tar.gz` on #1956 (attachment `c234f111-57df-4c14-8a89-7ba2f9620f84`, folder `etcrop/`); the other variants are drawn new in the same style.
 
-| Step | Footprint | Lot | Shown from | Variants | Source (catalogue 1) |
+| Step | Footprint | Lot | Shown from | Variants | Source (`ART-CHECKLIST.md`, houses) |
 |---|---|---|---|---|---|
 | `hut` | 2x2 | 4x4 | level 1 | 15 | `v01` crop `hut_A_square_pyramid_roof.png` (accepted, pilot 01); crops `hut_B`, `hut_C`, `hut_D`; 11 new |
 | `mudbrick` | 3x3 | 4x4 | level 4 | 20 | `v01` crop `mud_B_roof_pots.png` (accepted, pilot 01); crops `mud_A`, `mud_C`, `mud_D`; 16 new |
