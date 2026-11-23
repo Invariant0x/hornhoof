@@ -149,12 +149,13 @@ const SCREENS: Screen[] = [
   {
     name: 'waits',
     held: '/api/wait-cards',
-    /* What waits for the person says that nothing does only once its kept cards came too. */
+    /* What waits for the person says that nothing does only once its kept cards came too; the queue of this tab says it in its
+       own words (#1806), the list of another person's page in the others. */
     open: async page => { await page.goto('/tasks?show=waits', { waitUntil: 'domcontentloaded' }); },
     answer: route => route.fulfill({ json: { cards: [], next: null } }),
     shown: (page, lang) => [page.getByRole('navigation').first(), page.locator('h1.tr-where'), page.locator('section.waiting').getByRole('heading', { name: words(lang).tasks.waiting, exact: true })],
     place: page => page.locator('section.waiting'),
-    arrived: (page, lang) => page.locator('section.waiting').getByText(words(lang).tasks.nothingWaiting, { exact: true }),
+    arrived: (page, lang) => page.locator('section.waiting').getByText(words(lang).tasks.queue.empty, { exact: true }),
   },
   {
     name: 'waits-cards',
