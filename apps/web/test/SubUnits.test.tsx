@@ -59,20 +59,52 @@ describe('SubUnits', () => {
     expect(calls.find(c => c.path === '/api/agents/b2')?.body).toEqual({ team: null });
 
     const subUnits = screen.getByRole('region', { name: 'Sub-units' });
+    /* Delete asks in ConfirmAction, cancels without DELETE, shows failure inside dialog, then succeeds. */
     await user.click(within(subUnits).getByRole('button', { name: 'Delete sub-unit' }));
-    expect(await within(subUnits).findByRole('alert')).toHaveTextContent('This department or team no longer exists. Reload the page and pick again.');
+    const deleteDialog = screen.getByRole('alertdialog', { name: 'Do you really want to delete this sub-unit?' });
+    expect(deleteDialog).toHaveAccessibleDescription("Urgent fixes will be deleted from Development. Its employees will return to the department's pipeline.");
+    expect([...deleteDialog.querySelectorAll('bdi')].map(n => n.textContent)).toEqual(['Urgent fixes', 'Development']);
+    expect(deleteDialog).toHaveTextContent('This cannot be undone.');
+    expect(within(deleteDialog).getByRole('button', { name: 'Delete' })).toHaveClass('danger');
+    expect(within(deleteDialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(deleteDialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.filter(c => c.method === 'DELETE')).toHaveLength(0);
 
+    await user.click(within(subUnits).getByRole('button', { name: 'Delete sub-unit' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }));
+    expect(await within(screen.getByRole('alertdialog')).findByRole('alert')).toHaveTextContent('This department or team no longer exists. Reload the page and pick again.');
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+
+    /* Rename with unchanged name closes rename mode directly without confirmation or PATCH. */
+    await user.click(within(subUnits).getByRole('button', { name: 'Rename' }));
+    await user.click(within(subUnits).getByRole('button', { name: 'Save' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(within(subUnits).queryByLabelText('Sub-unit name')).not.toBeInTheDocument();
+    expect(calls.filter(c => c.path === '/api/departments/d2/teams/u1')).toHaveLength(1);
+
+    /* Rename with new name asks in ConfirmAction, names team, department, and new name in <bdi>, keeps failure in dialog, then succeeds. */
     await user.click(within(subUnits).getByRole('button', { name: 'Rename' }));
     const renameInput = within(subUnits).getByLabelText('Sub-unit name');
     await user.clear(renameInput);
     await user.type(renameInput, 'Fast lane');
     await user.click(within(subUnits).getByRole('button', { name: 'Save' }));
-    expect(await within(subUnits).findByRole('alert')).toHaveTextContent('This department or team no longer exists. Reload the page and pick again.');
+    const renameDialog = screen.getByRole('alertdialog', { name: 'Do you really want to rename this sub-unit?' });
+    expect(renameDialog).toHaveAccessibleDescription('Urgent fixes in Development will be renamed to Fast lane.');
+    expect([...renameDialog.querySelectorAll('bdi')].map(n => n.textContent)).toEqual(['Urgent fixes', 'Development', 'Fast lane']);
+    const confirmRename = within(renameDialog).getByRole('button', { name: 'Rename' });
+    expect(confirmRename).not.toHaveClass('danger');
+    expect(confirmRename).toHaveFocus();
+    await user.click(within(renameDialog).getByRole('button', { name: 'Cancel' }));
+    expect(within(subUnits).getByLabelText('Sub-unit name')).toHaveValue('Fast lane');
+
+    await user.click(within(subUnits).getByRole('button', { name: 'Save' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Rename' }));
+    expect(await within(screen.getByRole('alertdialog')).findByRole('alert')).toHaveTextContent('This department or team no longer exists. Reload the page and pick again.');
     expect(within(subUnits).getByLabelText('Sub-unit name')).toHaveValue('Fast lane');
 
     fail = false;
-    await user.click(within(subUnits).getByRole('button', { name: 'Save' }));
-    expect(within(subUnits).queryByRole('alert')).not.toBeInTheDocument();
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Rename' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(within(subUnits).queryByLabelText('Sub-unit name')).not.toBeInTheDocument();
 
     fail = true;

@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LANGUAGES, LanguageProvider } from '../src/i18n';
 import type { StructureItem } from '../src/types';
@@ -69,12 +70,75 @@ describe('StructureCard', () => {
     expect(calls[0]!.body).toEqual({ items: [{ template: 'development', note: '', staff: true }, { template: 'marketing', note: '', staff: true }, { template: 'business_development', note: '', staff: true }] });
   });
 
-  it('shows a change to an existing department by its name', () => {
+  it('shows a change to an existing department by its name and confirms removals as dangerous and final', async () => {
+    const user = userEvent.setup();
+    let fail = true;
+    const calls = mockApi({
+      'POST /api/departments/build': () => (fail ? [409, { error: { code: 'conflict', message: 'Already applied.', reason: 'proposal_closed' } }] : [201, { created: [], removed: ['d9'] }]),
+    });
     const departments = [{ id: 'd9', name: null, templateKey: 'finance' as const, roleCode: 'FIN', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [] }];
     render(<StructureCard proposal={{ id: 'pr2', brief: 'b', items: [{ department: 'd9', checked: true, note: 'Not yet', remove: true }] }} departments={departments} onCorrect={noop} />);
     expect(screen.getByText('Finance')).toBeInTheDocument();
     expect(screen.getByText('Remove')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Apply changes (1)' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Apply changes (1)' }));
+    expect(calls).toHaveLength(0);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to remove this department?' });
+    expect(dialog).toHaveAccessibleDescription('Finance will be removed from the company.');
+    expect([...dialog.querySelectorAll('bdi')].map(n => n.textContent)).toEqual(['Finance']);
+    expect(dialog).toHaveTextContent('This cannot be undone.');
+    expect(within(dialog).getByRole('button', { name: 'Remove' })).toHaveClass('danger');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Apply changes (1)' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
+    expect(await within(screen.getByRole('alertdialog')).findByRole('alert')).toHaveTextContent('This card was already applied or replaced by a newer one.');
+    expect(screen.queryByText('Applied')).not.toBeInTheDocument();
+
+    fail = false;
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
+    expect(await screen.findByText('Applied')).toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
+  it('confirms non-destructive existing-department updates as ordinary and lists multiple selected changes in <bdi>', async () => {
+    const user = userEvent.setup();
+    const calls = mockApi({ 'POST /api/departments/build': [201, { created: [], removed: [] }] });
+    const departments = [
+      { id: 'd2', name: 'Development', templateKey: 'development' as const, roleCode: 'DEV', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [] },
+      { id: 'd9', name: null, templateKey: 'finance' as const, roleCode: 'FIN', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [] },
+    ];
+    const items: StructureItem[] = [
+      { department: 'd2', checked: true, note: 'Add new product', products: ['Mobile'] },
+      { department: 'd9', checked: false, note: 'Drop', remove: true },
+    ];
+    render(<StructureCard proposal={{ id: 'pr3', brief: 'b', items }} departments={departments} onCorrect={noop} />);
+
+    /* Only an existing-department update checked: ordinary confirmation, not danger/final. */
+    await user.click(screen.getByRole('button', { name: 'Apply changes (1)' }));
+    const updateDialog = screen.getByRole('alertdialog', { name: 'Do you really want to change this department?' });
+    expect(updateDialog).toHaveAccessibleDescription('Development will be updated (products: Mobile).');
+    expect([...updateDialog.querySelectorAll('bdi')].map(n => n.textContent)).toEqual(['Development', 'Mobile']);
+    expect(updateDialog).not.toHaveTextContent('This cannot be undone.');
+    const yesUpdate = within(updateDialog).getByRole('button', { name: 'Apply changes' });
+    expect(yesUpdate).not.toHaveClass('danger');
+    expect(yesUpdate).toHaveFocus();
+    await user.click(within(updateDialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls).toHaveLength(0);
+
+    /* Tick the removal too: both named in <bdi>, danger + final because one removes. */
+    await user.click(screen.getByRole('checkbox', { name: /Finance/ }));
+    await user.click(screen.getByRole('button', { name: 'Apply changes (2)' }));
+    const bothDialog = screen.getByRole('alertdialog', { name: 'Do you really want to apply these structure changes?' });
+    expect(bothDialog).toHaveAccessibleDescription('Development will be updated (products: Mobile).');
+    expect(bothDialog).toHaveTextContent('Finance will be removed from the company.');
+    expect([...bothDialog.querySelectorAll('bdi')].map(n => n.textContent)).toEqual(['Development', 'Mobile', 'Finance']);
+    expect(bothDialog).toHaveTextContent('This cannot be undone.');
+    expect(within(bothDialog).getByRole('button', { name: 'Apply changes' })).toHaveClass('danger');
+    expect(within(bothDialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(bothDialog).getByRole('button', { name: 'Apply changes' }));
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
   });
 
   it.each(LANGUAGES)('offers Video production by hand in $name and creates it with its people', async ({ id }) => {

@@ -92,14 +92,43 @@ describe("the company's key in Settings, under Integrations", () => {
     await user.clear(within(part).getByLabelText('GitHub owner'));
     await user.type(within(part).getByLabelText('GitHub owner'), 'acme-labs');
     await user.click(within(part).getByRole('button', { name: 'Save' }));
+    const replaceDialog = screen.getByRole('alertdialog', { name: 'Do you really want to replace this GitHub key?' });
+    expect(replaceDialog).toHaveAccessibleDescription('The saved GitHub key settings for acme-labs will be replaced.');
+    expect(within(replaceDialog).getByText('acme-labs').tagName).toBe('BDI');
+    expect(within(replaceDialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(replaceDialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.some(c => c.method === 'PUT')).toBe(false);
+    await user.click(within(part).getByRole('button', { name: 'Save' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Replace' }));
     await waitFor(() => expect(part).toHaveTextContent(/for acme-labs, with the key ending in 1111/));
     expect(calls.find(c => c.method === 'PUT')!.body).toEqual({ owner: 'acme-labs' });
 
     await user.click(within(part).getByRole('button', { name: 'Remove key' }));
-    expect(within(part).getByText('Hornhoof stops creating repositories with this key. The repositories it created keep working.')).toBeInTheDocument();
-    await user.click(within(part).getByRole('button', { name: 'Remove' }));
+    const removeDialog = screen.getByRole('alertdialog', { name: 'Do you really want to remove this GitHub key?' });
+    expect(removeDialog).toHaveAccessibleDescription('Hornhoof will stop creating repositories for acme-labs with this key. The repositories it created keep working.');
+    expect(removeDialog).toHaveTextContent('This cannot be undone.');
+    expect(within(removeDialog).getByText('acme-labs').tagName).toBe('BDI');
+    await user.click(within(removeDialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.some(c => c.method === 'DELETE')).toBe(false);
+    await user.click(within(part).getByRole('button', { name: 'Remove key' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
     expect(await within(part).findByText(/No GitHub key is saved/)).toBeInTheDocument();
     expect(calls.map(c => `${c.method} ${c.path}`)).toContain('DELETE /api/repo-host');
+  });
+
+  it('omits the pasted token value when confirming a replacement and keeps errors in the dialog', async () => {
+    const user = userEvent.setup();
+    const { part } = await settings({
+      'GET /api/repo-host': [200, { host: KEY }],
+      'PUT /api/repo-host': [400, { error: { code: 'validation', message: 'x', reason: 'repo_host_invalid' } }],
+    });
+    await user.click(await within(part).findByRole('button', { name: 'Change key' }));
+    await user.type(within(part).getByLabelText('Key'), 'ghp_secret_replacement_9999');
+    await user.click(within(part).getByRole('button', { name: 'Save' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to replace this GitHub key?' });
+    expect(dialog.textContent).not.toContain('ghp_secret_replacement_9999');
+    await user.click(within(dialog).getByRole('button', { name: 'Replace' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(en.errors.repo_host_invalid);
   });
 
   it('makes Save a key the main button of a record with no key, and Remove key the pink one, last of its row', async () => {
@@ -146,7 +175,7 @@ describe("a department's key on its screen", () => {
     const { calls, part } = department({ ...KEY, owner: 'acme-dev', tokenLast4: '2222', own: true }, { 'DELETE /api/departments/d2/repo-host': [204] });
     expect(part).toHaveTextContent("The orchestrator creates this department's repositories on GitHub for acme-dev, with its own key ending in 2222.");
     await user.click(within(part).getByRole('button', { name: 'Remove key' }));
-    await user.click(within(part).getByRole('button', { name: 'Remove' }));
+    await user.click(within(screen.getByRole('alertdialog', { name: 'Do you really want to remove this GitHub key?' })).getByRole('button', { name: 'Remove' }));
     await vi.waitFor(() => expect(calls.map(c => `${c.method} ${c.path}`)).toContain('DELETE /api/departments/d2/repo-host'));
   });
 

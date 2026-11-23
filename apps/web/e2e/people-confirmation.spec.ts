@@ -1,0 +1,157 @@
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { PersonView } from '../src/types';
+import { ME, serveApi } from './api';
+
+const PERSON: PersonView = {
+  ...ME.person, id: 'p2', name: 'Morgan', title: 'Editor', isOwner: false, isCeoDelegate: false,
+  access: { whole: false, departments: [], teams: [] },
+};
+
+const ASSISTANT: PersonView = {
+  ...ME.person, id: 'h1', name: 'Ava', title: 'Assistant', isOwner: false, isCeoDelegate: false,
+  access: { whole: false, departments: [], teams: [] },
+  assistant: {
+    owner: { id: ME.person.id, name: ME.person.name },
+    program: 'openclaw',
+    eventsUrl: null,
+    skillsUrl: null,
+    key: { createdAt: '2030-01-01T09:00:00.000Z' },
+    agent: null,
+  },
+};
+
+const DEPUTY: PersonView = {
+  ...ME.person, id: 'p3', name: 'Dana', title: 'Deputy', isOwner: false, isCeoDelegate: true,
+  access: { whole: true, departments: [], teams: [] },
+};
+
+async function people(page: Page, list: PersonView[] = [PERSON]) {
+  const changes: { method: string; path: string; body?: object }[] = [];
+  await serveApi(page);
+  await page.route('**/api/people/**', async route => {
+    const request = route.request();
+    const method = request.method();
+    const path = new URL(request.url()).pathname;
+    if (path === '/api/people') return route.fulfill({ json: { people: list } });
+    const target = list.find(p => path.startsWith(`/api/people/${p.id}`)) ?? PERSON;
+    if (method === 'GET') return route.fulfill({ json: { person: target } });
+    const body = request.postDataJSON() as object | undefined;
+    changes.push({ method, path, body });
+    if (method === 'DELETE') return route.fulfill({ status: 204 });
+    return route.fulfill({ json: { person: { ...target, ...body } } });
+  });
+  await page.route('**/api/people', route => route.fulfill({ json: { people: list } }));
+  await page.goto('/people');
+  return changes;
+}
+
+const question = (page: Page) => page.getByRole('alertdialog');
+
+/* The action's own verb, or Cancel. */
+async function answer(page: Page, choice: string) {
+  await question(page).getByRole('button', { name: choice, exact: true }).click();
+}
+
+async function asksBeforeWriting(page: Page, trigger: Locator, method: 'PATCH' | 'DELETE') {
+  const request = page.waitForRequest(req => new URL(req.url()).pathname === '/api/people/p2' && req.method() === method);
+  await trigger.click();
+  expect(await Promise.race([page.getByRole('alertdialog').waitFor().then(() => 'question'), request.then(() => 'request')])).toBe('question');
+  expect(await question(page).count()).toBe(1);
+  await expect(question(page)).toContainText('Morgan');
+}
+
+test('confirms permanent removal of a named person', async ({ page }) => {
+  const changes = await people(page);
+  const remove = page.getByRole('button', { name: 'Delete Morgan' });
+  await asksBeforeWriting(page, remove, 'DELETE');
+  await expect(question(page)).toHaveAccessibleName('Do you really want to delete this person?');
+  await expect(question(page)).toHaveAccessibleDescription('Morgan will be deleted from the company.');
+  await expect(question(page)).toContainText('This cannot be undone.');
+  await expect(question(page).getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+  await answer(page, 'Cancel');
+  await expect(remove).toBeFocused();
+  await remove.click();
+  await page.keyboard.press('Escape');
+  await expect(question(page)).toHaveCount(0);
+  await remove.click();
+  await page.mouse.click(2, 2);
+  await expect(question(page)).toHaveCount(0);
+  expect(changes).toEqual([]);
+  await remove.click();
+  await answer(page, 'Delete');
+  await expect.poll(() => changes.map(change => [change.method, change.path])).toEqual([['DELETE', '/api/people/p2']]);
+  await expect(page.getByRole('cell', { name: 'Morgan' })).toHaveCount(0);
+});
+
+test('confirms disabling a person', async ({ page }) => {
+  const changes = await people(page);
+  const disable = page.getByRole('button', { name: 'Disable Morgan' });
+  await asksBeforeWriting(page, disable, 'PATCH');
+  await expect(question(page)).toHaveAccessibleName('Do you really want to disable this person?');
+  await expect(question(page)).toHaveAccessibleDescription('Morgan will no longer be able to sign in.');
+  await answer(page, 'Cancel');
+  expect(changes).toEqual([]);
+  await disable.click();
+  await answer(page, 'Disable');
+  await expect.poll(() => changes).toEqual([{ method: 'PATCH', path: '/api/people/p2', body: { status: 'disabled' } }]);
+});
+
+test('confirms the name and authority changes before saving a person', async ({ page }) => {
+  const changes = await people(page);
+  await page.getByRole('button', { name: 'Edit Morgan' }).click();
+  await page.getByLabel('Name', { exact: true }).fill('Morgan Vale');
+  await page.getByRole('switch', { name: 'Deputy CEO' }).check();
+  const save = page.getByRole('button', { name: 'Save', exact: true });
+  await asksBeforeWriting(page, save, 'PATCH');
+  await expect(question(page)).toHaveAccessibleName('Do you really want to save these changes?');
+  await expect(question(page)).toHaveAccessibleDescription('Morgan will be renamed to Morgan Vale.');
+  await expect(question(page)).toContainText("Morgan will take the CEO's decisions and see the whole company.");
+  await answer(page, 'Cancel');
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Morgan Vale');
+  expect(changes).toEqual([]);
+  await save.click();
+  await answer(page, 'Save');
+  await expect.poll(() => changes.map(change => [change.method, change.path])).toEqual([
+    ['PATCH', '/api/people/p2'],
+    ['PUT', '/api/people/p2/ceo-delegate'],
+  ]);
+  expect(changes[0]?.body).toMatchObject({ name: 'Morgan Vale', access: { whole: true } });
+  expect(changes[1]?.body).toEqual({ isCeoDelegate: true });
+});
+
+test('confirms permanent deletion of a named assistant', async ({ page }) => {
+  const changes = await people(page, [PERSON, ASSISTANT]);
+  const remove = page.getByRole('button', { name: 'Delete Ava' });
+  await remove.click();
+  await expect(question(page)).toHaveAccessibleName('Do you really want to delete this assistant?');
+  await expect(question(page)).toHaveAccessibleDescription('Ava will be deleted from the company.');
+  await expect(question(page)).toContainText('This cannot be undone.');
+  await expect(question(page).getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+  await answer(page, 'Cancel');
+  expect(changes).toEqual([]);
+  await remove.click();
+  await answer(page, 'Delete');
+  await expect.poll(() => changes.map(change => [change.method, change.path])).toEqual([['DELETE', '/api/people/h1']]);
+  await expect(page.getByRole('cell', { name: 'Ava' })).toHaveCount(0);
+});
+
+test('confirms revoking Deputy CEO authority with danger focus on Cancel', async ({ page }) => {
+  const changes = await people(page, [DEPUTY]);
+  await page.getByRole('button', { name: 'Edit Dana' }).click();
+  await page.getByLabel('Name', { exact: true }).fill('Dana Ray');
+  await page.getByRole('switch', { name: 'Deputy CEO' }).uncheck();
+  const save = page.getByRole('button', { name: 'Save', exact: true });
+  await save.click();
+  await expect(question(page)).toHaveAccessibleName('Do you really want to save these changes?');
+  await expect(question(page).getByRole('button', { name: 'Save', exact: true })).toHaveClass(/\bdanger\b/);
+  await expect(question(page).getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+  await answer(page, 'Cancel');
+  expect(changes).toEqual([]);
+  await save.click();
+  await answer(page, 'Save');
+  await expect.poll(() => changes.map(change => [change.method, change.path])).toEqual([
+    ['PATCH', '/api/people/p3'],
+    ['PUT', '/api/people/p3/ceo-delegate'],
+  ]);
+  expect(changes[1]?.body).toEqual({ isCeoDelegate: false });
+});

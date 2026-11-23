@@ -721,11 +721,12 @@ test('shows accessible sending status, preserves draft on server failure, and su
       surface: '/tasks approval card 503 failure state with preserved draft',
     });
 
-    /* Retry via mobile touch tap, then cancel stuck task via touch tap without extra confirmation dialog. */
+    /* Retry via mobile touch tap, then cancel stuck task via touch tap and confirm in the dialog. */
     await approveBtn.tap();
     await expect(cards).toHaveCount(1);
     const cancelBtn = cards.nth(0).getByRole('button', { name: ru.tasks.cancelTask, exact: true });
     await cancelBtn.tap();
+    await page.getByRole('alertdialog').getByRole('button', { name: ru.tasks.confirm.cancel.yes, exact: true }).tap();
     await expect(cards).toHaveCount(0);
 
     expect(posts).toEqual([

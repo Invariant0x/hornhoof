@@ -11,10 +11,11 @@ export function egyptArtCatalog(roleLooks: Readonly<Record<string, PackRoleLookS
     baseUrl: '/world-art/egypt/',
     buildings: {
       house: [
-        { id: 'hut', footprint: '2x2', fromLevel: 1, label: { en: 'Reed hut', ru: 'Хижина' } },
-        { id: 'mudbrick', footprint: '3x3', fromLevel: 4, label: { en: 'Mudbrick house', ru: 'Глинобитный дом' } },
-        { id: 'painted', footprint: '3x3', fromLevel: 8, label: { en: 'Painted house', ru: 'Расписной дом' } },
-        { id: 'villa', footprint: '4x4', fromLevel: 15, label: { en: 'Villa with a pool', ru: 'Вилла с бассейном' } },
+        /* Variants per step from the art order v3, 3.4 (#1975). */
+        { id: 'hut', footprint: '2x2', fromLevel: 1, variants: 15, label: { en: 'Reed hut', ru: 'Хижина' } },
+        { id: 'mudbrick', footprint: '3x3', fromLevel: 4, variants: 20, label: { en: 'Mudbrick house', ru: 'Глинобитный дом' } },
+        { id: 'painted', footprint: '3x3', fromLevel: 8, variants: 15, label: { en: 'Painted house', ru: 'Расписной дом' } },
+        { id: 'villa', footprint: '4x4', fromLevel: 15, variants: 10, label: { en: 'Villa with a pool', ru: 'Вилла с бассейном' } },
       ],
       department: [
         { id: 'shrine', footprint: '3x3', fromStage: 1, label: { en: 'Department shrine', ru: 'Святилище отдела' } },
@@ -53,5 +54,7 @@ export function egyptArtCatalog(roleLooks: Readonly<Record<string, PackRoleLookS
     flags: { district: true, department: true },
     people: { looks: [...new Set(Object.values(roleLooks).map(look => look.id))], tiers: 5 },
     loops: ['crane', 'hoist_block', 'dust', 'smoke', 'water', 'awning', 'celebration'],
+    /* Statues and pyramids carry their scaffolds and ramps in their own stages (order v3, 3.10). */
+    ownConstruction: ['statue', 'monument'],
   };
 }

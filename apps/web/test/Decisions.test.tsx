@@ -140,6 +140,7 @@ describe('the deputy CEO on People', () => {
     expect(access.nextElementSibling).toBe(deputy.closest('.field'));
     await user.click(deputy);
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Make deputy' }));
     expect(calls.filter(c => c.method !== 'GET')).toEqual([
       { method: 'PATCH', path: '/api/people/p2', body: { title: 'Deputy CEO', access: { whole: true } } },
       { method: 'PUT', path: '/api/people/p2/ceo-delegate', body: { isCeoDelegate: true } },
@@ -161,6 +162,7 @@ describe('the deputy CEO on People', () => {
     expect(deputy).toBeChecked();
     await user.click(deputy);
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Take away' }));
     expect(calls.filter(c => c.method === 'PUT')).toEqual([{ method: 'PUT', path: '/api/people/p4/ceo-delegate', body: { isCeoDelegate: false } }]);
     const dave = await screen.findByRole('row', { name: /^Dave\b/ });
     expect(within(dave).queryByRole('img', { name: 'Deputy CEO' })).not.toBeInTheDocument();
@@ -210,6 +212,7 @@ describe('the deputy CEO on People', () => {
     await user.click(await screen.findByRole('button', { name: 'Edit Lena' }));
     await user.click(screen.getByRole('switch', { name: 'Deputy CEO' }));
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Save' }));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: 'Deputy CEO' })).toBeInTheDocument();
     expect(within(screen.getByRole('row', { name: /^Lena\b/ })).getByText('Whole company')).toBeInTheDocument();
@@ -298,6 +301,7 @@ describe('the deputy CEO on People', () => {
       expect(screen.getByRole('checkbox', { name: whole })).toBeChecked();
       expect(screen.queryByRole('checkbox', { name: 'Development' })).not.toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: save }));
+      await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: save }));
       await vi.waitFor(() => expect(screen.queryByRole('button', { name: save })).not.toBeInTheDocument());
       expect(calls.filter(c => c.method !== 'GET')).toEqual([
         { method: 'PATCH', path: '/api/people/p5', body: { title: 'Analyst', access: { whole: true } } },
@@ -320,6 +324,9 @@ describe('the deputy CEO on People', () => {
       expect(screen.getByRole('switch', { name: deputy })).not.toBeChecked();
       await user.click(screen.getByRole('checkbox', { name: 'Development' }));
       await user.click(screen.getByRole('button', { name: save }));
+      const confirm = screen.getByRole('alertdialog');
+      expect(within(confirm).getByRole('button', { name: save })).toHaveClass('danger');
+      await user.click(within(confirm).getByRole('button', { name: save }));
       await vi.waitFor(() => expect(screen.queryByRole('button', { name: save })).not.toBeInTheDocument());
       expect(calls.filter(c => c.method !== 'GET')).toEqual([{ method: 'PATCH', path: '/api/people/p4', body: { title: 'Designer', access: { departments: ['d2'], teams: [] } } }]);
       expect(server.person()).toMatchObject({ isCeoDelegate: false, access: { whole: false } });

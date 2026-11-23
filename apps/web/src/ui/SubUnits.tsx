@@ -1,7 +1,8 @@
 import { useId, useState } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT } from '../i18n';
+import { deptLabel, errorText, Phrase, useLanguage, useT } from '../i18n';
 import type { Department, Employee, Team } from '../types';
+import { useConfirmAction } from './ConfirmAction';
 import { employeeKind, WorkerMark } from './WorkerMark';
 
 type EmployeeGroup = { key: string; title: string; members: Employee[] };
@@ -91,17 +92,41 @@ function TurnkeyMark({ departmentId, team, onFail }: { departmentId: string; tea
   );
 }
 
-function SubUnitRow({ departmentId, team, onFail }: { departmentId: string; team: Team; onFail: (err: unknown) => void }) {
+function SubUnitRow({ departmentId, departmentName, team, onFail }: { departmentId: string; departmentName: string; team: Team; onFail: (err: unknown) => void }) {
   const t = useT();
   const id = useId();
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(team.name);
-  async function save() {
-    await runAction(onFail, async () => {
-      await api.patch(`/api/departments/${departmentId}/teams/${team.id}`, { name: name.trim() });
-      setRenaming(false);
+  const confirmation = useConfirmAction();
+
+  function save() {
+    const next = name.trim();
+    if (!next) return;
+    if (next === team.name) return setRenaming(false);
+    onFail(null);
+    const words = t.dept.subUnitConfirm.rename;
+    confirmation.ask({
+      ...words,
+      effect: <Phrase words={words.effect} values={[<bdi>{team.name}</bdi>, <bdi>{departmentName}</bdi>, <bdi>{next}</bdi>]} />,
+      onYes: async () => {
+        await api.patch(`/api/departments/${departmentId}/teams/${team.id}`, { name: next });
+        setRenaming(false);
+      },
     });
   }
+
+  function askDelete() {
+    onFail(null);
+    const words = t.dept.subUnitConfirm.delete;
+    confirmation.ask({
+      ...words,
+      effect: <Phrase words={words.effect} values={[<bdi>{team.name}</bdi>, <bdi>{departmentName}</bdi>]} />,
+      danger: true,
+      final: true,
+      onYes: () => api.del(`/api/departments/${departmentId}/teams/${team.id}`),
+    });
+  }
+
   return (
     <li>
       {renaming ? (
@@ -110,7 +135,7 @@ function SubUnitRow({ departmentId, team, onFail }: { departmentId: string; team
             {t.dept.subUnitName}
           </label>
           <input id={id} value={name} onChange={e => setName(e.target.value)} />
-          <button className="btn small" type="button" onClick={() => void save()}>
+          <button className="btn small" type="button" onClick={save}>
             {t.common.save}
           </button>
         </div>
@@ -122,12 +147,13 @@ function SubUnitRow({ departmentId, team, onFail }: { departmentId: string; team
             <button className="btn small ghost" type="button" onClick={() => { setName(team.name); setRenaming(true); }}>
               {t.dept.renameSubUnit}
             </button>
-            <button className="btn small ghost" type="button" onClick={() => void runAction(onFail, () => api.del(`/api/departments/${departmentId}/teams/${team.id}`))}>
+            <button className="btn small ghost" type="button" onClick={askDelete}>
               {t.dept.deleteSubUnit}
             </button>
           </div>
         </>
       )}
+      {confirmation.question}
     </li>
   );
 }
@@ -139,6 +165,7 @@ export function DeptSubUnits({ department: d, company }: { department: Departmen
   const [name, setName] = useState('');
   const [failure, setFailure] = useState<unknown>(null);
   if (!company) return null;
+  const departmentName = deptLabel(t, d);
   async function create() {
     await runAction(setFailure, async () => {
       await api.post(`/api/departments/${d.id}/teams`, { name: name.trim() });
@@ -159,7 +186,7 @@ export function DeptSubUnits({ department: d, company }: { department: Departmen
       {d.teams.length > 0 ? (
         <ul className="dv-list">
           {d.teams.map(tm => (
-            <SubUnitRow key={tm.id} departmentId={d.id} team={tm} onFail={setFailure} />
+            <SubUnitRow key={tm.id} departmentId={d.id} departmentName={departmentName} team={tm} onFail={setFailure} />
           ))}
         </ul>
       ) : (

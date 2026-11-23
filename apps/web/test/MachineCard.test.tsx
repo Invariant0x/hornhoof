@@ -99,7 +99,7 @@ describe("the lower part of a machine's card", () => {
     expect(within(access).getByRole('button', { name: 'Close access' })).toBeInTheDocument();
   });
 
-  it("keeps every setting and action of the owner in the third block, the question before Disconnect too", async () => {
+  it("keeps every setting and action of the owner in the third block, and asks before Disconnect in a modal dialog", async () => {
     show();
     const owner = block(await open(), 'Settings and actions');
     expect(within(owner).getByRole('checkbox', { name: "Lend dev-laptop to the company's test runs" })).toBeChecked();
@@ -108,8 +108,10 @@ describe("the lower part of a machine's card", () => {
     const actions = within(owner).getAllByRole('button').map(button => button.textContent);
     expect(actions).toEqual(['Add my plan', 'Make dev-laptop a full machine of the company', 'Disconnect']);
     await userEvent.setup().click(within(owner).getByRole('button', { name: 'Disconnect dev-laptop' }));
-    expect(within(owner).getByText(/^Disconnect dev-laptop\?/)).toBeInTheDocument();
-    expect(within(owner).getByRole('button', { name: 'Yes, disconnect' })).toBeInTheDocument();
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to disconnect this machine?' });
+    expect(dialog).toHaveAccessibleDescription('Everything on dev-laptop stops, and a plan that runs nowhere else waits for a machine again.');
+    expect(dialog.querySelector('p bdi')).toHaveTextContent('dev-laptop');
+    expect(within(dialog).getByRole('button', { name: 'Disconnect' })).toHaveClass('danger');
   });
 
   it("puts the owner's buttons in one group under the settings: the main one, the next, Disconnect last (#1036)", async () => {

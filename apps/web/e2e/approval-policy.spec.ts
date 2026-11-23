@@ -163,12 +163,16 @@ for (const lang of CHECKED_LOCALES) {
         await expect(part.getByRole('group', { name: a.channels.spend, exact: true }).getByRole('spinbutton', { name: a.limit, exact: true })).toHaveValue('100');
 
         await owner.selectOption('p2');
+        await page.getByRole('alertdialog').getByRole('button', { name: a.confirm.owner.yes, exact: true }).click();
         await expect.poll(() => puts.at(-1)).toEqual({ url: '/api/departments/d2/owner', body: { personId: 'p2' } });
         await expect(owner).toHaveValue('p2');
 
-        /* Someone the server refuses: the choice stays with the owner there is, and the reason shows. */
+        /* Someone the server refuses: the choice stays with the owner there is, and the reason shows in the dialog. */
         await owner.selectOption('p3');
-        await expect(part.getByRole('alert')).toHaveText(t.errors.owner_no_access);
+        const refusedDialog = page.getByRole('alertdialog');
+        await refusedDialog.getByRole('button', { name: a.confirm.owner.yes, exact: true }).click();
+        await expect(refusedDialog.getByRole('alert')).toHaveText(t.errors.owner_no_access);
+        await refusedDialog.getByRole('button', { name: t.common.cancel, exact: true }).click();
         await expect(owner).toHaveValue('p2');
 
         const price = part.getByRole('group', { name: a.channels.price, exact: true });
@@ -177,11 +181,13 @@ for (const lang of CHECKED_LOCALES) {
         await price.getByRole('spinbutton', { name: a.limit, exact: true }).fill('250');
         await price.getByRole('textbox', { name: a.unit, exact: true }).fill('USD');
         await price.getByRole('button', { name: t.common.save, exact: true }).click();
+        await page.getByRole('alertdialog').getByRole('button', { name: a.confirm.rule.yes, exact: true }).click();
         await expect.poll(() => puts.at(-1)).toEqual({ url: '/api/departments/d2/approval-policy/price', body: { mode: 'within_limits', limit: 250, unit: 'USD' } });
 
         const autoSwitch = part.getByRole('switch', { name: a.autonomousRelease, exact: true });
         await expect(autoSwitch).not.toBeChecked();
         await autoSwitch.click();
+        await page.getByRole('alertdialog').getByRole('button', { name: a.confirm.enableAutonomous.yes, exact: true }).click();
         await expect.poll(() => puts.at(-1)).toEqual({ url: '/api/departments/d2/approval-policy/autonomous-release', body: { enabled: true } });
         await expect(autoSwitch).toBeChecked();
         await expect(part.getByText('d7a1eb2b34edb970a2c5abbaadf25e50d4dc4031')).toBeVisible();
@@ -263,6 +269,7 @@ for (const { lang, skin, width, dir } of OWNER_LOOKS) {
     await around(page, line, info.outputPath(`approvals-focus-${look}-${browserName}.png`));
 
     await own.click();
+    await page.getByRole('alertdialog').getByRole('button', { name: a.confirm.enableAutonomous.yes, exact: true }).click();
     await expect.poll(() => puts.at(-1)).toEqual({ url: '/api/departments/d2/approval-policy/autonomous-release', body: { enabled: true } });
     await expect(own).toBeChecked();
     await expect(line).toContainText(a.autonomousReleaseWord(true));

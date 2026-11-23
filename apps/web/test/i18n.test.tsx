@@ -293,11 +293,13 @@ describe('work tree words', () => {
 
 describe("the words of a copy's question to the CEO", () => {
   it('words the question in both languages', () => {
-    const said = (dict: typeof en): Record<string, string> =>
-      Object.fromEntries(Object.entries(dict.question).map(([key, value]) => [key, typeof value === 'function' ? (value as (...words: string[]) => string)('a', 'b', 'c', 'd') : value]));
-    const [english, russian] = [said(en), said(ru)];
+    const flat = (part: object, under = ''): [string, string][] =>
+      Object.entries(part).flatMap(([key, value]): [string, string][] =>
+        typeof value === 'function' ? [[under + key, (value as (...words: string[]) => string)('a', 'b', 'c', 'd')]]
+          : typeof value === 'string' ? [[under + key, value]] : flat(value as object, `${under}${key}.`));
+    const [english, russian] = [Object.fromEntries(flat(en.question)), Object.fromEntries(flat(ru.question))];
     expect(Object.keys(russian).sort()).toEqual(Object.keys(english).sort());
-    expect(Object.keys(english)).toEqual(expect.arrayContaining(['oneCopy', 'moreCopies', 'goOn', 'goOnAt', 'wait', 'warning', 'waiting', 'ceoOnly']));
+    expect(Object.keys(english)).toEqual(expect.arrayContaining(['oneCopy', 'moreCopies', 'goOn', 'goOnAt', 'wait', 'warning', 'waiting', 'ceoOnly', 'confirm.title', 'confirm.effectAt', 'confirm.effect', 'confirm.yes', 'confirm.working']));
     for (const [key, text] of Object.entries(russian)) {
       expect(text.length, key).toBeGreaterThan(0);
       expect(text, key).not.toMatch(/[ёЁ—]|компьютер|узел|узл/i);

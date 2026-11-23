@@ -202,4 +202,57 @@ describe('a pipeline', () => {
       stages: [{ key: 'n1', parent: null, name: 'Build', ownerAgentId: 'b1' }, { key: 'n2', parent: 'n1', name: 'Check', ownerRole: 'DEV-HEAD' }],
     }));
   });
+
+  it('confirms before removing saved stages from a pipeline and keeps failures in the dialog', async () => {
+    const user = userEvent.setup();
+    let fail = true;
+    const calls = mockApi({
+      'PATCH /api/pipelines/pl1': () => (fail ? [500, { error: { code: 'internal', message: 'Cannot save pipeline.' } }] : [200, { pipeline: PIPELINE }]),
+    });
+    const onDone = vi.fn();
+    render(ui(<PipelineForm pipeline={PIPELINE} department={DEPARTMENT} onDone={onDone} onCancel={() => {}} />));
+    await user.click(within(screen.getByRole('group', { name: 'Stage 2' })).getByRole('button', { name: 'Remove the stage' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(patches(calls)).toEqual([]);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to remove this stage?' });
+    expect(dialog).toHaveAccessibleDescription('Check will be removed from Flow.');
+    expect([...dialog.querySelectorAll('bdi')].map(el => el.textContent)).toEqual(['Check', 'Flow']);
+    expect(dialog).toHaveTextContent('This cannot be undone.');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(patches(calls)).toEqual([]);
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const again = screen.getByRole('alertdialog');
+    await user.click(within(again).getByRole('button', { name: 'Remove' }));
+    expect(await within(again).findByRole('alert')).toHaveTextContent('Cannot save pipeline.');
+    expect(onDone).not.toHaveBeenCalled();
+
+    fail = false;
+    await user.click(within(again).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(patches(calls)).toHaveLength(2);
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('names every removed saved stage in the confirmation and skips confirmation when removing only an unsaved stage', async () => {
+    const user = userEvent.setup();
+    const calls = mockApi({ 'PATCH /api/pipelines/pl1': [200, { pipeline: PIPELINE }] });
+    render(ui(<PipelineForm pipeline={PIPELINE} department={DEPARTMENT} onDone={() => {}} onCancel={() => {}} />));
+    await user.click(screen.getByRole('button', { name: 'Add a stage' }));
+    await user.click(within(screen.getByRole('group', { name: 'Stage 3' })).getByRole('button', { name: 'Remove the stage' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(patches(calls)).toHaveLength(1));
+
+    await user.click(within(screen.getByRole('group', { name: 'Stage 2' })).getByRole('button', { name: 'Remove the stage' }));
+    await user.click(within(screen.getByRole('group', { name: 'Stage 1' })).getByRole('button', { name: 'Remove the stage' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to remove these stages?' });
+    expect(dialog).toHaveAccessibleDescription('Build, Check will be removed from Flow.');
+    expect([...dialog.querySelectorAll('bdi')].map(el => el.textContent)).toEqual(['Build', 'Check', 'Flow']);
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(patches(calls)).toHaveLength(2));
+  });
 });

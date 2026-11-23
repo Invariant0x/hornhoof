@@ -47,6 +47,14 @@ export const en = {
     live: 'Live screen', waitingFrame: 'Waiting for a screen. An assistant session starts the recording.', paused: 'The screen is paused. The phone is in your hands.', noPicture: 'This screen could not be read.', updated: (at: string) => `Screen from ${at}`, screenFor: (name: string) => `Screen of ${name}`, screenError: 'The screen did not load. Try again.',
     recordings: 'Phone recordings', noRecordings: 'No phone sessions on this task yet.', play: 'Play', pause: 'Pause', previous: 'Previous frame', next: 'Next frame', replay: 'Open recording', closeReplay: 'Close recording', frameOf: (n: number, total: number) => `Frame ${n} of ${total}`,
     recordingStates: { queued: 'Waiting', starting: 'Starting', active: 'Recording', revoking: 'Stopping', ended: 'Finished', cancelled: 'Cancelled' },
+    confirm: {
+      stop: {
+        title: 'Do you really want to stop lending this phone?',
+        effect: (name: string) => `${name} will stop taking work from assistants and return to your hands.`,
+        yes: 'Stop lending',
+        working: 'Stopping…',
+      },
+    },
   },
   routes: {
     unavailable: 'Not found or no access',
@@ -97,6 +105,23 @@ export const en = {
     title: 'Title',
     atLeast10: 'At least 10 characters.',
     useAtLeast10: 'Use at least 10 characters.',
+  },
+  /* The question before a person's critical action (ui/ConfirmAction.tsx; style book 1.9, section 4 "Confirmation"): the
+     question names the action, the line under it says what happens to what, and the action's button carries its verb. */
+  confirm: {
+    final: 'This cannot be undone.',
+    working: 'Working…',
+    several: 'Do you really want to save these changes?',
+    deletePerson: { title: 'Do you really want to delete this person?', effect: (name: string) => `${name} will be deleted from the company.`, yes: 'Delete', working: 'Deleting…' },
+    deleteAssistant: { title: 'Do you really want to delete this assistant?', effect: (name: string) => `${name} will be deleted from the company.`, yes: 'Delete', working: 'Deleting…' },
+    disablePerson: { title: 'Do you really want to disable this person?', effect: (name: string) => `${name} will no longer be able to sign in.`, yes: 'Disable', working: 'Disabling…' },
+    renamePerson: { title: 'Do you really want to rename this person?', effect: (from: string, to: string) => `${from} will be renamed to ${to}.`, yes: 'Rename', working: 'Renaming…' },
+    renameSelf: { title: 'Do you really want to change your name?', effect: (from: string, to: string) => `Your name will change from ${from} to ${to}.`, yes: 'Change name', working: 'Saving…' },
+    access: { title: "Do you really want to change this person's access?", effect: (name: string, places: string) => `${name} will have access to ${places}.`, yes: 'Change access', working: 'Saving…' },
+    makeDeputy: { title: 'Do you really want to make this person the Deputy CEO?', effect: (name: string) => `${name} will take the CEO's decisions and see the whole company.`, yes: 'Make deputy', working: 'Saving…' },
+    dropDeputy: { title: 'Do you really want to take Deputy CEO authority away?', effect: (name: string) => `${name} will no longer take the CEO's decisions.`, yes: 'Take away', working: 'Saving…' },
+    removeLink: { title: 'Do you really want to remove the public link?', yes: 'Remove', working: 'Removing…' },
+    changeLink: { title: 'Do you really want to change the public link?', effect: (before: string, after: string) => `The link ${before} will change to ${after}.`, yes: 'Change link', working: 'Saving…' },
   },
   /* A screen's data while it comes (style book 1.5, section 4): the words beside the ring, and for a load that failed one
      whole sentence of what failed and why, then what to do. */
@@ -285,6 +310,20 @@ export const en = {
     banner: 'Save the recovery file, so the company can be restored if this server is lost.',
     bannerLink: 'The public link changed, so the recovery file is out of date. Save a new one.',
     openSettings: 'Open Company & access',
+    confirm: {
+      restore: {
+        title: 'Do you really want to restore this backup?',
+        effect: (time: string) => `The company will be restored to the backup of ${time}.`,
+        yes: 'Restore',
+        working: 'Restoring…',
+      },
+      leaveOut: {
+        title: 'Do you really want to leave this database out?',
+        effect: (time: string) => `The database from before the restore of ${time} will be left out.`,
+        yes: 'Leave out',
+        working: 'Leaving out…',
+      },
+    },
   },
   merge: {
     after: (time: string) => `What came after ${time}`,
@@ -298,6 +337,15 @@ export const en = {
     takeAll: 'Take all from there',
     topics: { people: 'People', access: 'Access', plans: 'Plans', machines: 'Machines', protected: 'Protected records', work: 'Work' },
     notTaken: (n: number) => (n === 1 ? '1 could not be taken and stays as it is here.' : `${n} could not be taken and stay as they are here.`),
+    confirm: {
+      title: 'Do you really want to apply this merge decision?',
+      keepHere: (what: string, merge: string) => `For ${what} in ${merge}, the current value here will be kept.`,
+      takeThere: (what: string, merge: string) => `For ${what} in ${merge}, the value from there will replace what is here.`,
+      keepAll: (section: string, merge: string) => `For all of ${section} in ${merge}, the current values here will be kept.`,
+      takeAll: (section: string, merge: string) => `For all of ${section} in ${merge}, the values from there will replace what is here.`,
+      yes: 'Apply',
+      working: 'Applying…',
+    },
   },
   /* The GitHub key Hornhoof creates repositories with: the whole company's in its settings, a department's own on its screen. */
   repoHost: {
@@ -320,6 +368,20 @@ export const en = {
     key: 'Key',
     keyHint: "A GitHub token that may create repositories for this owner and push to them: on a fine-grained token, Administration and Contents set to Read and write for all its repositories; on a classic one, repo. With each repository it creates, it goes to the machines of that department's agents.",
     keyKeep: 'Leave it empty to keep the saved key.',
+    confirm: {
+      remove: {
+        title: 'Do you really want to remove this GitHub key?',
+        effect: (owner: string) => `Hornhoof will stop creating repositories for ${owner} with this key. The repositories it created keep working.`,
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+      replace: {
+        title: 'Do you really want to replace this GitHub key?',
+        effect: (owner: string) => `The saved GitHub key settings for ${owner} will be replaced.`,
+        yes: 'Replace',
+        working: 'Replacing…',
+      },
+    },
   },
   /* The Integrations group: one card for each outside tool, with its name, what it gives, whether it is connected and what to do. */
   integrations: {
@@ -371,6 +433,26 @@ export const en = {
     removeAsk: (name: string) => `Remove ${name}? Employees can no longer sign in with it.`,
     yesRemove: 'Remove',
     keep: 'Keep',
+    confirm: {
+      remove: {
+        title: 'Do you really want to remove this sign-in?',
+        effect: (name: string) => `${name} will be removed. Employees can no longer sign in with it.`,
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+      edit: {
+        title: 'Do you really want to update this sign-in?',
+        effect: (name: string) => `The saved sign-in ${name} will be updated.`,
+        password: 'The saved password will be replaced.',
+        code: 'The saved one-time code key will be replaced.',
+        removeCode: 'The saved one-time code key will be removed.',
+        rename: (to: string) => `It will be renamed to ${to}.`,
+        site: (site: string) => `Its site will change to ${site}.`,
+        login: (login: string) => `Its login will change to ${login}.`,
+        yes: 'Save',
+        working: 'Saving…',
+      },
+    },
   },
   googleSheets: {
     title: 'Google Sheets',
@@ -389,6 +471,14 @@ export const en = {
     keyKeep: 'Leave it empty to keep the saved key.',
     shareLabel: 'Share new spreadsheets with',
     shareHint: 'The Google account that gets editor access to each new spreadsheet. A service account key needs it, as it opens its spreadsheets to no one else; with an OAuth key it is optional.',
+    confirm: {
+      disconnect: {
+        title: 'Do you really want to disconnect Google Sheets?',
+        effect: (account: string) => `Google Sheets for ${account} will be disconnected. Employees will stop creating new Google Sheets links and will attach .xlsx files instead.`,
+        yes: 'Disconnect',
+        working: 'Disconnecting…',
+      },
+    },
   },
   invite: {
     heading: 'Invite link',
@@ -760,8 +850,8 @@ export const en = {
     delete: 'Delete',
     deleteLabel: (name: string) => `Delete ${name}`,
     deleteAsk: (name: string) => `Delete ${name} for good?`,
-    deleteNote: 'They can no longer sign in, and their keys, machines and personal plans stop working. Their own assistants are deleted with them. Old tasks and answers keep the name. This cannot be undone.',
-    deleteAssistantNote: 'Its key stops working and its own agent leaves the company. Old tasks and answers keep the name. This cannot be undone.',
+    deleteNote: 'They can no longer sign in, and their keys, machines and personal plans stop working. Their own assistants are deleted with them. Old tasks and answers keep the name.',
+    deleteAssistantNote: 'Its key stops working and its own agent leaves the company. Old tasks and answers keep the name.',
     yesDelete: 'Yes, delete',
     agentsNote: 'Agents are not listed here. They live on the map, inside their departments.',
     ceoDelegate: 'Deputy CEO',
@@ -812,6 +902,11 @@ export const en = {
     setupFor: (program: string) => `Settings for ${program}`,
     setupWhere: (file: string) => `Add these lines to ${file} on the computer where the program runs, next to what is there already. The key is in them, so keep them as safe as the key.`,
     copySetup: 'Copy settings',
+    confirm: {
+      renameAssistant: { title: 'Do you really want to rename this assistant?', effect: (from: string, to: string) => `${from} will be renamed to ${to}.`, yes: 'Rename', working: 'Renaming…' },
+      replaceKey: { title: "Do you really want to replace this assistant's key?", effect: (name: string) => `The current key for ${name} will stop working and a new one will be issued.`, yes: 'Replace key', working: 'Replacing…' },
+      revokeKey: { title: "Do you really want to revoke this assistant's key?", effect: (name: string) => `The key for ${name} will stop working immediately.`, yes: 'Revoke key', working: 'Revoking…' },
+    },
   },
   subs: {
     heading: 'Subscriptions & API',
@@ -969,6 +1064,45 @@ export const en = {
     removeAsk: (name: string) => `Remove ${name}? Its login will be deleted from the machine.`,
     removeKeyAsk: (name: string) => `Remove ${name}? The key is deleted from Hornhoof.`,
     yesRemove: 'Yes, remove',
+    confirm: {
+      removePlan: {
+        title: 'Do you really want to remove this subscription?',
+        effect: (name: string) => `${name} will be removed. Its login will be deleted from the machine.`,
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+      removeKey: {
+        title: 'Do you really want to remove this API key?',
+        effect: (name: string) => `${name} will be removed. The key will be deleted from Hornhoof.`,
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+      orchestrator: {
+        title: 'Do you really want to move the orchestrator to this plan?',
+        effect: (name: string) => `The orchestrator will run on ${name}.`,
+        yes: 'Move',
+        working: 'Moving…',
+      },
+      replaceKey: {
+        title: "Do you really want to replace this plan's key?",
+        effect: (name: string) => `The saved key for ${name} will be replaced on its machines.`,
+        yes: 'Replace key',
+        working: 'Replacing…',
+      },
+      editApi: {
+        title: 'Do you really want to update this API connection?',
+        rename: (name: string, to: string) => `${name} will be renamed to ${to}.`,
+        target: (name: string, place: string) => `${name} will serve ${place}.`,
+        yes: 'Save changes',
+        working: 'Saving…',
+      },
+      removeFallback: {
+        title: 'Do you really want to remove this fallback plan?',
+        effect: (fallback: string, main: string) => `${fallback} will no longer be a fallback plan for ${main}.`,
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+    },
     empty: 'No subscriptions yet. Connect yours so the agents can work.',
     signedInOnce: (owner: string, n: number) => `Signed in once, runs on any of ${owner}'s machines (${n} online)`,
     signedInOn: (machines: string) => `Signed in on ${machines} only`,
@@ -1363,6 +1497,57 @@ export const en = {
     keepsBackups: 'Keeps company backups',
     keepsNoBackups: 'Keeps no company backups',
     backupsHeld: (n: number) => `Backups held: ${n}`,
+    confirm: {
+      disconnect: {
+        title: 'Do you really want to disconnect this machine?',
+        effect: (host: string) => `Everything on ${host} stops, and a plan that runs nowhere else waits for a machine again.`,
+        yes: 'Disconnect',
+        working: 'Disconnecting…',
+      },
+      move: {
+        title: 'Do you really want to move the company server?',
+        effect: (host: string) => `The company server will move to ${host}.`,
+        warning: 'Hornhoof stops for a short while as it moves; your work is kept.',
+        yes: 'Move server',
+        working: 'Moving…',
+      },
+      stopMove: {
+        title: 'Do you really want to stop moving the server?',
+        effect: (host: string) => `The company server will stay where it is and will not move to ${host}.`,
+        yes: 'Stop move',
+        working: 'Stopping…',
+      },
+      keepBackupsOn: {
+        title: 'Do you really want to keep company backups on this machine?',
+        effect: (host: string) => `Future company backups will also be kept on ${host}.`,
+        yes: 'Keep backups',
+        working: 'Saving…',
+      },
+      keepBackupsOff: {
+        title: 'Do you really want to stop keeping company backups on this machine?',
+        effect: (host: string) => `Future company backups will no longer be placed on ${host}.`,
+        yes: 'Stop keeping backups',
+        working: 'Saving…',
+      },
+      openAccess: {
+        title: 'Do you really want to open access to this machine?',
+        effect: (host: string) => `Access to ${host} will open for the orchestrator.`,
+        yes: 'Open access',
+        working: 'Opening access…',
+      },
+      closeAccess: {
+        title: 'Do you really want to close access to this machine?',
+        effect: (host: string) => `Access to ${host} will close for agents.`,
+        yes: 'Close access',
+        working: 'Closing access…',
+      },
+      updatePrograms: {
+        title: 'Do you really want to update agent programs?',
+        effect: (host: string) => `Installed agent programs on ${host} will be updated.`,
+        yes: 'Update',
+        working: 'Updating…',
+      },
+    },
     /* Its nodes are of another build than the one the server's nodes are: here is a list of theirs, or olderBuild for
        nodes from before builds. */
     otherBuild: 'Other build',
@@ -1410,6 +1595,14 @@ export const en = {
     note: (n: number) => `Note #${n}`,
     changeNote: (n: number) => `Change note #${n}`,
     removeNote: (n: number) => `Remove note #${n}`,
+    confirm: {
+      remove: {
+        title: 'Do you really want to delete this note?',
+        effect: (note: string) => `Note ${note} will be deleted from the notebook.`,
+        yes: 'Delete',
+        working: 'Deleting…',
+      },
+    },
   },
   agentInbox: {
     panel: 'Inbox',
@@ -1579,6 +1772,9 @@ export const en = {
       subscription_removed: 'The subscription was removed during this turn.',
       other: 'This turn failed.',
     },
+    confirm: {
+      stop: { title: 'Do you really want to stop current work?', effect: (name: string) => `${name} will stop its current turn right away.`, yes: 'Stop', working: 'Stopping…' },
+    },
   },
   card: {
     title: 'Company structure',
@@ -1590,6 +1786,18 @@ export const en = {
     remove: 'Remove',
     products: 'Products',
     withPeople: 'Hire the people of each template with its department. One no subscription serves yet waits for it.',
+    confirm: {
+      removeTitle: 'Do you really want to remove this department?',
+      changeTitle: 'Do you really want to change this department?',
+      manyTitle: 'Do you really want to apply these structure changes?',
+      removeEffect: (name: string) => `${name} will be removed from the company.`,
+      updateEffect: (name: string) => `${name} will be updated.`,
+      updateProducts: (name: string, products: string) => `${name} will be updated (products: ${products}).`,
+      removeYes: 'Remove',
+      removing: 'Removing…',
+      applyYes: 'Apply changes',
+      applying: 'Applying…',
+    },
   },
   /* The guard that stops a block drawing without end and turns heavy effects off while the page slows down. */
   guard: {
@@ -1637,6 +1845,35 @@ export const en = {
       autonomousJournalEmpty: 'No commits have been auto-approved yet.',
       autonomousJournalWho: (agent: string, task: string) => `${agent} on #${task}`,
       autonomousJournalProof: (run: string, reviewer: string) => `full run #${run}, PASS by ${reviewer}`,
+      confirm: {
+        thisDepartment: 'this department',
+        ceo: 'CEO',
+        owner: {
+          title: 'Do you really want to change the department owner?',
+          effect: (owner: string, dept: string) => `${owner} will be the owner of ${dept}.`,
+          effectCeo: (owner: string, dept: string) => `${dept} will have no separate owner; ${owner} will decide.`,
+          yes: 'Change owner',
+          working: 'Saving…',
+        },
+        rule: {
+          title: 'Do you really want to change this approval rule?',
+          effect: (channel: string, dept: string, rule: string) => `For ${channel} in ${dept}, the rule will change to ${rule}.`,
+          yes: 'Change rule',
+          working: 'Saving…',
+        },
+        enableAutonomous: {
+          title: 'Do you really want to enable autonomous release?',
+          effect: (dept: string) => `Verified commits in ${dept} will be able to release to main without an approval card.`,
+          yes: 'Enable',
+          working: 'Enabling…',
+        },
+        disableAutonomous: {
+          title: 'Do you really want to disable autonomous release?',
+          effect: (dept: string) => `Releases to main in ${dept} will require an approval card again.`,
+          yes: 'Disable',
+          working: 'Disabling…',
+        },
+      },
     },
     structure: 'Department structure',
     staffMap: 'Staff map',
@@ -1815,6 +2052,24 @@ export const en = {
     remove: 'Remove',
     removeAsk: 'Remove the repository? Agents keep their clones and the token is deleted.',
     yesRemove: 'Yes, remove',
+    repoConfirm: {
+      remove: {
+        title: 'Do you really want to remove this repository?',
+        effect: (url: string) => `${url} will be removed. Agents keep their clones and the token is deleted.`,
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+      update: {
+        title: 'Do you really want to update this repository?',
+        url: (from: string, to: string) => `The repository ${from} will change to ${to}.`,
+        branch: (url: string, branch: string) => `The branch of ${url} will change to ${branch}.`,
+        branchNote: (branch: string) => `Default branch will change to ${branch}.`,
+        token: (url: string) => `The saved access token for ${url} will be replaced.`,
+        tokenNote: 'The saved access token will be replaced.',
+        yes: 'Save',
+        working: 'Saving…',
+      },
+    },
     schema: 'Department schema',
     status: { working: 'working', queued: 'queued', handed: 'handed on', waiting: 'needs a decision', idle: 'free', off: 'No subscription yet' },
     statusSummary: (counts: StatusCounts) => summary(counts, { working: 'working', queued: 'queued', handed: 'handed on', waiting: 'needs a decision', idle: 'free', off: 'no subscription' }),
@@ -1870,6 +2125,10 @@ export const en = {
     addSubUnit: 'Add sub-unit',
     renameSubUnit: 'Rename',
     deleteSubUnit: 'Delete sub-unit',
+    subUnitConfirm: {
+      rename: { title: 'Do you really want to rename this sub-unit?', effect: (name: string, department: string, next: string) => `${name} in ${department} will be renamed to ${next}.`, yes: 'Rename', working: 'Renaming…' },
+      delete: { title: 'Do you really want to delete this sub-unit?', effect: (name: string, department: string) => `${name} will be deleted from ${department}. Its employees will return to the department's pipeline.`, yes: 'Delete', working: 'Deleting…' },
+    },
     inPipeline: 'In the pipeline',
     subUnitOf: (name: string) => `Sub-unit for ${name}`,
     turnkey: 'Works turnkey',
@@ -1957,6 +2216,36 @@ export const en = {
     byOrchestrator: 'Orchestrator',
     viewOnly: "Only people with access to this employee's department or the whole company can change it.",
     orchestratorNote: 'The orchestrator\'s instructions and skills come with Hornhoof. The company notebook at their end is in his window.',
+    confirm: {
+      remove: {
+        title: 'Do you really want to remove this employee?',
+        effect: (name: string, department: string) => `${name} will be removed from ${department}.`,
+        effectNoDept: (name: string) => `${name} will be removed from the company.`,
+        warning: 'Its conversation stays in the history.',
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+      reset: {
+        title: 'Do you really want to reset these instructions?',
+        effect: (name: string) => `${name}'s skills and effort choice will be reset to the template.`,
+        warning: 'Its assignment is kept.',
+        yes: 'Reset',
+        working: 'Resetting…',
+      },
+      disconnectPlan: {
+        title: 'Do you really want to disconnect this plan?',
+        effect: (name: string, plan: string) => `${name} will be disconnected from ${plan} and will stop taking turns until another plan is chosen.`,
+        yes: 'Disconnect',
+        working: 'Disconnecting…',
+      },
+      disconnectTelegram: {
+        title: 'Do you really want to disconnect this Telegram bot?',
+        effect: (bot: string, agent: string) => `${bot} will be disconnected from ${agent}. Telegram messages will stop reaching them.`,
+        effectUnnamed: (bot: string) => `${bot} will be disconnected. Telegram messages will stop reaching this employee.`,
+        yes: 'Disconnect',
+        working: 'Disconnecting…',
+      },
+    },
   },
   staff: {
     title: (name: string) => `Hiring for ${name}`,
@@ -2004,6 +2293,27 @@ export const en = {
   },
   tasks: {
     hideSecret: { vault: 'Save passwords in the company vault', action: 'Hide secret', value: 'Secret to hide', hint: 'Select the secret in the task or its log, or paste it here: at least 8 characters. All stored copies will be replaced with [hidden].', confirm: 'Hide everywhere', hiding: 'Hiding...', done: 'Secret hidden.', failed: 'The secret could not be hidden. Check your access and select the text again.' },
+    confirm: {
+      cancel: {
+        title: 'Do you really want to cancel this task?',
+        effect: (task: string) => `${task} and its open subtasks will be cancelled. Its record stays in history.`,
+        yes: 'Cancel task',
+        working: 'Cancelling…',
+      },
+      pause: {
+        title: 'Do you really want to pause this task?',
+        effect: (task: string) => `Active work on ${task} will stop until it is resumed.`,
+        yes: 'Pause',
+        working: 'Pausing…',
+      },
+      hideSecret: {
+        title: 'Do you really want to hide this secret?',
+        effect: (task: string) => `All stored copies of this secret in ${task} will be replaced with [hidden].`,
+        effectGeneric: 'All stored copies of this secret in this task will be replaced with [hidden].',
+        yes: 'Hide secret',
+        working: 'Hiding…',
+      },
+    },
     echelons: {
       coordination: 'Checked coordination report',
       turnkey: 'No stages: the employee does it alone from start to finish',
@@ -2899,6 +3209,16 @@ export const en = {
       whole: { goal: 'the goal', task: 'the task' },
       and: (...items: string[]) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`),
     },
+    confirm: {
+      removeStage: {
+        title: 'Do you really want to remove this stage?',
+        titleMany: 'Do you really want to remove these stages?',
+        effect: (stage: string, pipeline: string) => `${stage} will be removed from ${pipeline}.`,
+        effectMany: (stages: string, pipeline: string) => `${stages} will be removed from ${pipeline}.`,
+        yes: 'Remove',
+        working: 'Removing…',
+      },
+    },
   },
   /* A turn a node restart cut off: on which node and when, why, which turn, and what Hornhoof did about it. */
   restarts: {
@@ -2940,6 +3260,14 @@ export const en = {
     removeLabel: (title: string) => `Remove from the list: ${title}`,
     schedule: (n: number) => (n ? `Give to the head of the department: ${n}` : 'Give to the head of the department'),
     scheduled: (tasks: string) => `Given to the head of the department: ${tasks}.`,
+    confirm: {
+      remove: {
+        title: 'Do you really want to delete this item?',
+        effect: (title: string) => `${title} will be deleted from the off-turn list.`,
+        yes: 'Delete',
+        working: 'Deleting…',
+      },
+    },
   },
   improvements: {
     title: 'Improvements',
@@ -3024,6 +3352,13 @@ export const en = {
     waiting: (leader: string) => `Waiting for ${leader}. You can still choose a copy to go on from.`,
     ceoOnly: 'Only the CEO answers this, from their own session.',
     goingOn: 'Hornhoof goes on from the copy you chose. About a minute.',
+    confirm: {
+      title: 'Do you really want to continue from this copy?',
+      effectAt: (host: string, reach: string) => `Hornhoof will continue from the copy on ${host} as of ${reach}.`,
+      effect: (host: string) => `Hornhoof will continue from the copy on ${host}.`,
+      yes: 'Continue',
+      working: 'Continuing…',
+    },
   },
   switch: {
     label: 'Where Hornhoof runs',
@@ -3088,6 +3423,26 @@ export const en = {
     nodeOn: (plan: string, machine: string) => `${plan} on ${machine}`,
     nodeFree: 'Free: being replaced now, then takes work again by itself',
     nodeWaitsFor: (work: string) => `Waits for: ${work}`,
+    confirm: {
+      update: {
+        title: 'Do you really want to update Hornhoof?',
+        effect: (build: string) => `Hornhoof will update to ${build} and restart.`,
+        yes: 'Update',
+        working: 'Updating…',
+      },
+      install: {
+        title: 'Do you really want to install this build?',
+        effect: (build: string) => `Hornhoof will install ${build} and restart.`,
+        yes: 'Install',
+        working: 'Installing…',
+      },
+      goBack: {
+        title: 'Do you really want to go back to this build?',
+        effect: (build: string) => `Hornhoof will go back to ${build} and restart.`,
+        yes: 'Go back',
+        working: 'Installing…',
+      },
+    },
   },
   errors: {
     phone_invalid: 'Check the phone name, computer and address.',

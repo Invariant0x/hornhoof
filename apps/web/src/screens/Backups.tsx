@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import { api, ApiFailure } from '../api';
-import { errorText, restoreEnded, useLanguage, useT, type Language, type Messages } from '../i18n';
+import { errorText, Phrase, restoreEnded, useLanguage, useT, type Language, type Messages } from '../i18n';
 import type { BackupBundle, BackupsView, RestoreStatus, RestoreStep, RestoreWarning } from '../types';
-import { Ask } from '../ui/Ask';
+import { useConfirmAction } from '../ui/ConfirmAction';
 
 /* A backup older than this is worth a look at the server's disk. */
 const STALE_MS = 12 * 3_600_000;
@@ -157,7 +157,7 @@ type Kept = BackupsView['kept'][number];
 
 /* A database a restore set aside: that it is kept, how far the bringing back of what it holds has got, and the way to
    leave it out while that still waits or runs. */
-function KeptDatabase({ kept, asking, onAsk, onLeave, onNo }: { kept: Kept; asking: boolean; onAsk: () => void; onLeave: () => void; onNo: () => void }) {
+function KeptDatabase({ kept, onLeave }: { kept: Kept; onLeave: () => void }) {
   const t = useT();
   const { language } = useLanguage();
   const time = when(language, kept.at);
@@ -174,12 +174,11 @@ function KeptDatabase({ kept, asking, onAsk, onLeave, onNo }: { kept: Kept; aski
         <span className="muted">{t.backups.kept(time)}</span>
         {state && <><br /><span>{state}</span></>}
       </span>
-      {waits && !asking && (
+      {waits && (
         <div className="entry-actions">
-          <button className="btn small ghost" type="button" aria-label={t.backups.leaveOutLabel(time)} onClick={onAsk}>{t.backups.leaveOut}</button>
+          <button className="btn small ghost" type="button" aria-label={t.backups.leaveOutLabel(time)} onClick={onLeave}>{t.backups.leaveOut}</button>
         </div>
       )}
-      {asking && <Ask text={t.backups.leaveOutAsk} yes={t.backups.leaveOut} onYes={onLeave} onNo={onNo} />}
     </div>
   );
 }
@@ -194,10 +193,9 @@ export function Backups() {
   const [asking, setAsking] = useState<{ bundle: BackupBundle; warning: RestoreWarning } | null>(null);
   const [busy, setBusy] = useState(false);
   const [absent, setAbsent] = useState(false);
-  /* The kept database the CEO is asked about before it is left out. */
-  const [leaving, setLeaving] = useState<string | null>(null);
   /* The session ended under a restore that ran: the restored company signs everyone out. */
   const [signedOut, setSignedOut] = useState(false);
+  const confirmation = useConfirmAction();
   const running = view?.restore?.state === 'running';
 
   const load = useCallback(async () => {
@@ -226,29 +224,46 @@ export function Backups() {
     }
   }
 
-  async function leave(name: string) {
+  function confirmLeave(kept: Kept) {
+    const words = t.backups.confirm.leaveOut;
+    const time = when(language, kept.at);
     setFailure(null);
-    setLeaving(null);
-    try {
-      await api.post(`/api/backups/kept/${name}/leave`);
-      await load();
-    } catch (err) {
-      setFailure(err);
-    }
+    confirmation.ask({
+      ...words,
+      effect: <Phrase words={words.effect} values={[<bdi>{time}</bdi>]} />,
+      warnings: [t.backups.leaveOutAsk],
+      final: true,
+      danger: true,
+      onYes: async () => {
+        await api.post(`/api/backups/kept/${kept.name}/leave`);
+        await load();
+      },
+    });
   }
 
   async function restore(bundle: BackupBundle, bringBack: boolean, recoveryFile?: string) {
     setBusy(true);
-    setFailure(null);
     try {
       await api.post(`/api/backups/${bundle.id}/restore`, { ...(recoveryFile === undefined ? {} : { recoveryFile }), bringBack });
       setAsking(null);
       await load();
-    } catch (err) {
-      setFailure(err);
     } finally {
       setBusy(false);
     }
+  }
+
+  function confirmRestore(bundle: BackupBundle, bringBack: boolean, recoveryFile?: string) {
+    const words = t.backups.confirm.restore;
+    const time = when(language, bundle.dumpedAt);
+    setFailure(null);
+    confirmation.ask({
+      ...words,
+      effect: <Phrase words={words.effect} values={[<bdi>{time}</bdi>]} />,
+      warnings: [bringBack ? t.backups.bringBackOn(time) : t.backups.bringBackOff(time), t.backups.signInAgain],
+      final: true,
+      danger: true,
+      onYes: () => restore(bundle, bringBack, recoveryFile),
+    });
   }
 
   if (absent) return null;
@@ -270,13 +285,14 @@ export function Backups() {
           {view.last && Date.now() - Date.parse(view.last) > STALE_MS && <p className="update-note">{t.backups.stale}</p>}
           <RecoveryFile view={view} onSaved={load} fail={setFailure} />
           {view.restore && <RestoreProgress status={view.restore} />}
-          {view.kept.map(kept => <KeptDatabase key={kept.name} kept={kept} asking={leaving === kept.name} onAsk={() => setLeaving(kept.name)} onLeave={() => void leave(kept.name)} onNo={() => setLeaving(null)} />)}
+          {view.kept.map(kept => <KeptDatabase key={kept.name} kept={kept} onLeave={() => confirmLeave(kept)} />)}
           {view.bundles.length > 0 && <h3>{t.backups.restoreFrom}</h3>}
           {asking
-            ? <RestoreAsk bundle={asking.bundle} warning={asking.warning} busy={busy} onYes={(bringBack, file) => void restore(asking.bundle, bringBack, file)} onNo={() => setAsking(null)} />
+            ? <RestoreAsk bundle={asking.bundle} warning={asking.warning} busy={busy} onYes={(bringBack, file) => confirmRestore(asking.bundle, bringBack, file)} onNo={() => setAsking(null)} />
             : view.bundles.map(bundle => <Bundle key={bundle.id} bundle={bundle} restoring={running} onRestore={() => void ask(bundle)} />)}
         </>
       )}
+      {confirmation.question}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
     </section>
   );

@@ -102,6 +102,15 @@ describe('updates', () => {
     await user.click(screen.getByRole('button', { name: 'Call off' }));
     expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/updates')).toBe(true);
     await user.click(await screen.findByRole('button', { name: 'Update' }));
+    const confirm = screen.getByRole('alertdialog', { name: 'Do you really want to update Hornhoof?' });
+    expect(confirm).toHaveAccessibleDescription('Hornhoof will update to 0.4.1 (bbbbbbb) and restart.');
+    expect(confirm.querySelector('p bdi')).toHaveTextContent('0.4.1 (bbbbbbb)');
+    expect(within(confirm).getByRole('button', { name: 'Update' })).toHaveFocus();
+    await user.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.filter(c => c.method === 'POST' && c.path === '/api/updates')).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Update' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Update' }));
     expect(calls.filter(c => c.method === 'POST' && c.path === '/api/updates').pop()!.body).toEqual({ version: 'latest', whenIdle: false });
     expect(await screen.findByText('Updating Hornhoof to 0.4.1 (bbbbbbb)')).toBeInTheDocument();
     const bar = screen.getByRole('progressbar', { name: 'Update progress' });
@@ -152,8 +161,11 @@ describe('updates', () => {
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     const update = await screen.findByRole('button', { name: 'Update' });
-    await user.dblClick(update);
+    await user.click(update);
+    const confirm = within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Update' });
+    await user.dblClick(confirm);
     expect(calls.filter(c => c.method === 'POST' && c.path === '/api/updates')).toHaveLength(1);
+    expect(confirm).toBeDisabled();
     expect(update).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Update when agents finish' })).toBeDisabled();
     await act(async () => {
@@ -175,6 +187,7 @@ describe('updates', () => {
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     await user.click(await screen.findByRole('button', { name: 'Update' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Update' }));
     /* The updater has not picked it up yet, and the banner already moves. */
     expect(await screen.findByText('Updating Hornhoof to 0.4.1 (bbbbbbb)')).toBeInTheDocument();
     expect(await screen.findByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Getting the update ready');
@@ -243,7 +256,7 @@ describe('updates', () => {
     render(<Shell me={ME} onSignOut={() => {}} />);
     const dialog = await openVersions(user);
     await user.click(within(within(dialog).getAllByRole('listitem')[2]!).getByRole('button', { name: 'Install' }));
-    await user.click(within(dialog).getByRole('button', { name: 'Go back to 0.3.0 (ccccccc)' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Go back' }));
     expect(await within(dialog).findByText('Updating Hornhoof to 0.3.0 (ccccccc)')).toBeInTheDocument();
     expect(within(screen.getByRole('status', { name: 'Hornhoof update' })).getByText('Updating Hornhoof to 0.3.0 (ccccccc)')).toBeInTheDocument();
     expect(calls.find(c => c.method === 'POST' && c.path === '/api/updates')!.body).toEqual({ version: '0.3.0', whenIdle: false });
@@ -258,16 +271,33 @@ describe('updates', () => {
     expect(within(dialog).getByText('The update to 0.4.1 (?) failed. What the updater wrote is in Versions.')).toBeInTheDocument();
   });
 
-  it('warns before going back past a database change', async () => {
+  it('confirms installing any build and warns before going back past a database change', async () => {
     const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()], 'POST /api/updates': [202, { id: 'u2' }] });
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     const dialog = await openVersions(user);
+    const newer = within(dialog).getAllByRole('listitem')[0]!;
+    await user.click(within(newer).getByRole('button', { name: 'Install' }));
+    const normal = screen.getByRole('alertdialog', { name: 'Do you really want to install this build?' });
+    expect(normal).toHaveAccessibleDescription('Hornhoof will install 0.4.1 (bbbbbbb) and restart.');
+    expect(normal.querySelector('p bdi')).toHaveTextContent('0.4.1 (bbbbbbb)');
+    expect(within(normal).getByRole('button', { name: 'Install' })).toHaveFocus();
+    expect(within(normal).getByRole('button', { name: 'Install' })).not.toHaveClass('danger');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Versions' })).toBeInTheDocument();
+    expect(calls.some(c => c.method === 'POST' && c.path === '/api/updates')).toBe(false);
+
     const old = within(dialog).getAllByRole('listitem')[2]!;
     await user.click(within(old).getByRole('button', { name: 'Install' }));
-    expect(within(dialog).getByText('Going back past a database change may not start. If it does not, update to the newest version again.')).toBeInTheDocument();
+    const back = screen.getByRole('alertdialog', { name: 'Do you really want to go back to this build?' });
+    expect(back).toHaveAccessibleDescription('Hornhoof will go back to 0.3.0 (ccccccc) and restart.');
+    expect(back.querySelector('p bdi')).toHaveTextContent('0.3.0 (ccccccc)');
+    expect(back).toHaveTextContent('Going back past a database change may not start. If it does not, update to the newest version again.');
+    expect(within(back).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(within(back).getByRole('button', { name: 'Go back' })).toHaveClass('danger');
     expect(calls.some(c => c.method === 'POST' && c.path === '/api/updates')).toBe(false);
-    await user.click(within(dialog).getByRole('button', { name: 'Go back to 0.3.0 (ccccccc)' }));
+    await user.click(within(back).getByRole('button', { name: 'Go back' }));
     expect(calls.find(c => c.method === 'POST' && c.path === '/api/updates')!.body).toEqual({ version: '0.3.0', whenIdle: false });
   });
 
@@ -346,13 +376,20 @@ describe('updates', () => {
       });
     }
 
+    const startUpdate = async (user: ReturnType<typeof userEvent.setup>, button = 'Update') => {
+      await user.click(await screen.findByRole('button', { name: button }));
+      await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: button }));
+    };
+
     it('says how many turns would stop and starts nothing until the person agrees', async () => {
       const calls = server(wouldStop(3), [202, { id: 'u1' }]);
       const user = userEvent.setup();
       render(<Shell me={ME} onSignOut={() => {}} />);
-      await user.click(await screen.findByRole('button', { name: 'Update' }));
+      await startUpdate(user);
       const ask = await screen.findByRole('alertdialog', { name: 'Update now?' });
       expect(ask).toHaveTextContent('3 agent turns are running. If you update now, they stop midway, and Hornhoof starts them again after the update.');
+      expect(within(ask).getByRole('button', { name: 'Update now' })).toHaveClass('danger');
+      expect(within(ask).getByRole('button', { name: 'Cancel' })).toHaveFocus();
       expect(posts(calls)).toHaveLength(1);
       expect(screen.queryByRole('progressbar', { name: 'Update progress' })).not.toBeInTheDocument();
       await user.click(within(ask).getByRole('button', { name: 'Update now' }));
@@ -365,8 +402,8 @@ describe('updates', () => {
       server(wouldStop(1));
       const user = userEvent.setup();
       render(<Shell me={ME} onSignOut={() => {}} />);
-      await user.click(await screen.findByRole('button', { name: 'Update' }));
-      expect(await screen.findByRole('alertdialog')).toHaveTextContent('1 agent turn is running. If you update now, it stops midway, and Hornhoof starts it again after the update.');
+      await startUpdate(user);
+      expect(await screen.findByRole('alertdialog', { name: 'Update now?' })).toHaveTextContent('1 agent turn is running. If you update now, it stops midway, and Hornhoof starts it again after the update.');
     });
 
     it.each([
@@ -378,7 +415,7 @@ describe('updates', () => {
       server(wouldStop(turns));
       const user = userEvent.setup();
       render(<LanguageProvider><Shell me={ME} onSignOut={() => {}} /></LanguageProvider>);
-      await user.click(await screen.findByRole('button', { name: 'Обновить' }));
+      await startUpdate(user, 'Обновить');
       const ask = await screen.findByRole('alertdialog', { name: 'Обновить сейчас?' });
       expect(ask).toHaveTextContent(text);
       expect(within(ask).getByRole('button', { name: 'Обновить сейчас' })).toBeInTheDocument();
@@ -388,9 +425,9 @@ describe('updates', () => {
       const calls = server(wouldStop(3));
       const user = userEvent.setup();
       render(<Shell me={ME} onSignOut={() => {}} />);
-      await user.click(await screen.findByRole('button', { name: 'Update' }));
-      const ask = await screen.findByRole('alertdialog');
-      expect(ask).toHaveFocus();
+      await startUpdate(user);
+      const ask = await screen.findByRole('alertdialog', { name: 'Update now?' });
+      expect(within(ask).getByRole('button', { name: 'Cancel' })).toHaveFocus();
       await user.click(within(ask).getByRole('button', { name: 'Cancel' }));
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
       expect(posts(calls)).toHaveLength(1);
@@ -402,19 +439,19 @@ describe('updates', () => {
       const calls = server(wouldStop(3), wouldStop(5), [202, { id: 'u1' }]);
       const user = userEvent.setup();
       render(<Shell me={ME} onSignOut={() => {}} />);
-      await user.click(await screen.findByRole('button', { name: 'Update' }));
-      await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Update now' }));
+      await startUpdate(user);
+      await user.click(within(await screen.findByRole('alertdialog', { name: 'Update now?' })).getByRole('button', { name: 'Update now' }));
       expect(await screen.findByText(/^5 agent turns are running/)).toBeInTheDocument();
-      await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Update now' }));
+      await user.click(within(screen.getByRole('alertdialog', { name: 'Update now?' })).getByRole('button', { name: 'Update now' }));
       expect(posts(calls).at(-1)!.body).toEqual({ version: 'latest', whenIdle: false, confirmTurns: 5 });
       expect(posts(calls)).toHaveLength(3);
     });
 
-    it('asks nothing when no turn would stop', async () => {
+    it('asks nothing about turns when no turn would stop', async () => {
       const calls = server([202, { id: 'u1' }]);
       const user = userEvent.setup();
       render(<Shell me={ME} onSignOut={() => {}} />);
-      await user.click(await screen.findByRole('button', { name: 'Update' }));
+      await startUpdate(user);
       expect(await screen.findByRole('progressbar', { name: 'Update progress' })).toBeInTheDocument();
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
       expect(posts(calls)[0]!.body).toEqual({ version: 'latest', whenIdle: false });
@@ -426,7 +463,8 @@ describe('updates', () => {
       render(<Shell me={ME} onSignOut={() => {}} />);
       const versions = await openVersions(user);
       await user.click(within(versions).getAllByRole('button', { name: 'Install' })[0]!);
-      expect(await screen.findByRole('alertdialog')).toHaveTextContent(/^Update now\?2 agent turns are running/);
+      await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Install' }));
+      expect(await screen.findByRole('alertdialog', { name: 'Update now?' })).toHaveTextContent(/^Update now\?2 agent turns are running/);
       await user.keyboard('{Escape}');
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
       expect(screen.getByRole('dialog', { name: 'Versions' })).toBeInTheDocument();
@@ -437,30 +475,32 @@ describe('updates', () => {
       server(wouldStop(3), [503, { error: { code: 'unavailable', message: 'The updater is not running. Run install.sh server again to update.', reason: 'updater_missing' } }]);
       const user = userEvent.setup();
       render(<Shell me={ME} onSignOut={() => {}} />);
-      await user.click(await screen.findByRole('button', { name: 'Update' }));
-      const ask = await screen.findByRole('alertdialog');
+      await startUpdate(user);
+      const ask = await screen.findByRole('alertdialog', { name: 'Update now?' });
       await user.click(within(ask).getByRole('button', { name: 'Update now' }));
       expect(await within(ask).findByRole('alert')).toHaveTextContent(/updater is not running/i);
       expect(screen.queryByRole('progressbar', { name: 'Update progress' })).not.toBeInTheDocument();
     });
 
-    it('starts nothing and asks nothing when the refusal does not say how many', async () => {
+    it('starts nothing and keeps the refusal in the confirmation dialog when turns_would_stop does not say how many', async () => {
       const calls = server([409, { error: { code: 'conflict', message: 'Running turns would stop.', reason: 'turns_would_stop' } }]);
       const user = userEvent.setup();
       render(<Shell me={ME} onSignOut={() => {}} />);
-      await user.click(await screen.findByRole('button', { name: 'Update' }));
-      expect(await screen.findByRole('alert')).toBeInTheDocument();
-      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      await startUpdate(user);
+      const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to update Hornhoof?' });
+      expect(await within(dialog).findByRole('alert')).toBeInTheDocument();
+      expect(screen.queryByRole('alertdialog', { name: 'Update now?' })).not.toBeInTheDocument();
       expect(posts(calls)).toHaveLength(1);
     });
 
-    it('still shows any other refusal in the banner', async () => {
+    it('shows any other refusal inside the confirmation dialog', async () => {
       server([409, { error: { code: 'conflict', message: 'An update is running already.', reason: 'update_running', details: { turns: 2 } } }]);
       const user = userEvent.setup();
       render(<Shell me={ME} onSignOut={() => {}} />);
-      await user.click(await screen.findByRole('button', { name: 'Update' }));
-      expect(await screen.findByRole('alert')).toBeInTheDocument();
-      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      await startUpdate(user);
+      const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to update Hornhoof?' });
+      expect(await within(dialog).findByRole('alert')).toBeInTheDocument();
+      expect(screen.queryByRole('alertdialog', { name: 'Update now?' })).not.toBeInTheDocument();
     });
   });
 });

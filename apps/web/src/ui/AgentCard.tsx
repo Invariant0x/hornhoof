@@ -1,14 +1,14 @@
 import { OfflinePlan } from './OfflineMachine';
 import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT, type Messages } from '../i18n';
+import { errorText, Phrase, useLanguage, useT, type Messages } from '../i18n';
 import { cutLine } from '../restarts';
 import { effortsOf, ORCHESTRATOR_EFFORT } from '@hornhoof/protocol/efforts';
 import { defaultEffort, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, Part, SubView } from '../types';
 import { TimerSettings } from './TimerSettings';
 import { TelegramBot } from './TelegramBot';
-import { Ask } from './Ask';
+import { useConfirmAction, type Question } from './ConfirmAction';
 import { PanelFrame } from './SidePanels';
 import { LimitMeters } from './PlanLimits';
 import { FallbackLine } from './PlanFallbacks';
@@ -165,6 +165,31 @@ const keepLoadedCard = (live: boolean, card: AgentCardView | null, save: (c: Age
   if (live && card) save(card);
 };
 
+function removeAgentQuestion(t: Messages, current: AgentCardView, onYes: () => Promise<void>): Question {
+  const words = t.agent.confirm.remove;
+  const dept = current.department?.name;
+  return {
+    ...words,
+    effect: dept
+      ? <Phrase words={words.effect} values={[<bdi>{current.name}</bdi>, <bdi>{dept}</bdi>]} />
+      : <Phrase words={words.effectNoDept} values={[<bdi>{current.name}</bdi>]} />,
+    warnings: [words.warning],
+    danger: true,
+    final: true,
+    onYes,
+  };
+}
+
+function disconnectPlanQuestion(t: Messages, employeeTitle: string, subscription: SubView, onYes: () => Promise<void>): Question {
+  const words = t.agent.confirm.disconnectPlan;
+  return {
+    ...words,
+    effect: <Phrase words={words.effect} values={[<bdi>{employeeTitle}</bdi>, <bdi>{subLabel(subscription)}</bdi>]} />,
+    danger: true,
+    onYes,
+  };
+}
+
 export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClose }: Props) {
   const t = useT();
   const { language } = useLanguage();
@@ -178,7 +203,7 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [rawDraft, setRawDraft] = useState<string | null>(null);
   const [broken, setBroken] = useState(false);
-  const [asking, setAsking] = useState<'reset' | 'remove' | null>(null);
+  const confirmation = useConfirmAction();
   const base = `/api/agents/${agentId}`;
 
   useEffect(() => {
@@ -193,20 +218,24 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
   }, [base]);
 
   /* sent: the prompt edits a save carries. Only those clear once it is saved; what the person typed meanwhile stays. */
-  async function save(run: () => Promise<AgentCardView>, sent?: { drafts: Record<string, string>; raw: string | null }) {
+  async function applyCard(run: () => Promise<AgentCardView>, sent?: { drafts: Record<string, string>; raw: string | null }) {
     setFailure(null);
     setSaved(false);
+    setCard(await run());
+    if (sent) {
+      setDrafts(now => Object.fromEntries(Object.entries(now).filter(([key, text]) => sent.drafts[key] !== text)));
+      setRawDraft(now => (now === sent.raw ? null : now));
+    } else {
+      setDrafts({});
+      setRawDraft(null);
+    }
+    setBroken(false);
+    setSaved(true);
+  }
+
+  async function save(run: () => Promise<AgentCardView>, sent?: { drafts: Record<string, string>; raw: string | null }) {
     try {
-      setCard(await run());
-      if (sent) {
-        setDrafts(now => Object.fromEntries(Object.entries(now).filter(([key, text]) => sent.drafts[key] !== text)));
-        setRawDraft(now => (now === sent.raw ? null : now));
-      } else {
-        setDrafts({});
-        setRawDraft(null);
-      }
-      setBroken(false);
-      setSaved(true);
+      await applyCard(run, sent);
     } catch (err) {
       setFailure(err);
     }
@@ -239,14 +268,34 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
     void save(() => api.patch<AgentCardView>(base, body), { drafts, raw: rawDraft });
   }
 
-  async function remove() {
-    setAsking(null);
-    try {
+  function askReset(current: AgentCardView) {
+    setFailure(null);
+    const words = t.agent.confirm.reset;
+    confirmation.ask({
+      ...words,
+      effect: <Phrase words={words.effect} values={[<bdi>{current.name}</bdi>]} />,
+      warnings: [words.warning],
+      danger: true,
+      final: true,
+      onYes: () => applyCard(() => api.post<AgentCardView>(`${base}/reset`)),
+    });
+  }
+
+  function askRemove(current: AgentCardView) {
+    setFailure(null);
+    confirmation.ask(removeAgentQuestion(t, current, async () => {
       await api.del(base);
       onRemoved();
-    } catch (err) {
-      setFailure(err);
+    }));
+  }
+
+  function pickSubscription(current: AgentCardView, employeeTitle: string, next: string) {
+    if (!next && current.subscription) {
+      setFailure(null);
+      confirmation.ask(disconnectPlanQuestion(t, employeeTitle, current.subscription, () => applyCard(() => api.patch<AgentCardView>(base, { subscription: null }))));
+      return;
     }
+    void change({ subscription: next || null });
   }
 
   if (!card) {
@@ -331,7 +380,7 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
         <div className="ac-pick">
           <div className="field">
             <label htmlFor={`${id}-sub`}>{t.agent.runsOn}</label>
-            <select id={`${id}-sub`} value={card.subscription?.id ?? ''} disabled={!editable} onChange={e => void change({ subscription: e.target.value || null })}>
+            <select id={`${id}-sub`} value={card.subscription?.id ?? ''} disabled={!editable} onChange={e => pickSubscription(card, title, e.target.value)}>
               {(!orchestrator || !card.subscription) && <option value="">{t.agent.noSubscription}</option>}
               {byProvider(subs, r => r.subscription.provider).map(([p, list]) => (
                 <optgroup key={p} label={PROVIDER_NAMES[p]}>
@@ -385,7 +434,7 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
 
         {!orchestrator && <TimerSettings timer={card.timer} editable={editable} onChange={body => void change(body)} />}
         {/* Whoever may remove this agent keeps its bot too: the whole company, or the person responsible for its department. */}
-        {(orchestrator || card.kind === 'head') && <TelegramBot agentId={agentId} telegram={card.telegram ?? null} editable={card.canRemove} onChange={telegram => setCard(c => c && { ...c, telegram })} />}
+        {(orchestrator || card.kind === 'head') && <TelegramBot agentId={agentId} agentName={title} telegram={card.telegram ?? null} editable={card.canRemove} onChange={telegram => setCard(c => c && { ...c, telegram })} />}
 
         {!orchestrator && (
           <section className="ac-skills" aria-labelledby={`${id}-skills`}>
@@ -495,26 +544,20 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
 
         {editable && !orchestrator && (
           <div className="ac-actions">
-            {asking === 'reset' ? (
-              <Ask text={t.agent.resetAsk(card.name)} yes={t.agent.yesReset} onYes={() => { setAsking(null); void save(() => api.post<AgentCardView>(`${base}/reset`)); }} onNo={() => setAsking(null)} />
-            ) : asking === 'remove' ? (
-              <Ask text={t.agent.removeAsk(card.name)} yes={t.agent.yesRemove} onYes={() => void remove()} onNo={() => setAsking(null)} />
-            ) : (
-              <>
-                {card.role && (
-                  <button className="act" type="button" onClick={() => setAsking('reset')}>
-                    {t.agent.reset}
-                  </button>
-                )}
-                {card.canRemove && (
-                  <button className="act danger" type="button" onClick={() => setAsking('remove')}>
-                    {t.agent.remove}
-                  </button>
-                )}
-              </>
+            {card.role && (
+              <button className="act" type="button" onClick={() => askReset(card)}>
+                {t.agent.reset}
+              </button>
+            )}
+            {card.canRemove && (
+              <button className="act danger" type="button" onClick={() => askRemove(card)}>
+                {t.agent.remove}
+              </button>
             )}
           </div>
         )}
+
+        {confirmation.question}
 
         <Interruptions list={card.interrupted} headingId={`${id}-restarts`} when={when} />
 

@@ -155,6 +155,10 @@ test('Escape stops only the agent on the screen', async ({ page }) => {
   await openEmployee('Clara');
   await windowOf('Clara').focus();
   await page.keyboard.press('Escape');
+  const dialog = page.getByRole('alertdialog', { name: en.window.confirm.stop.title });
+  await expect(dialog).toHaveAccessibleDescription(en.window.confirm.stop.effect('Clara'));
+  expect(live.stops).toEqual([]);
+  await dialog.getByRole('button', { name: en.window.confirm.stop.yes, exact: true }).click();
   await expect.poll(() => live.stops).toEqual(['clara']);
   expect(errors).toEqual([]);
 });

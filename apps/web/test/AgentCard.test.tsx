@@ -489,15 +489,118 @@ describe('AgentCard', () => {
     expect(await screen.findByText('Works on the machine build-tower')).toBeInTheDocument();
   });
 
-  it('resets to the template after asking', async () => {
+  it('resets to the template after asking in a confirmation dialog', async () => {
     const user = userEvent.setup();
-    const { calls } = open({ 'POST /api/agents/b1/reset': [200, { ...CARD, changes: [{ field: 'reset', personName: 'Ivan', byOrchestrator: false, at: '2026-10-30T09:00:00.000Z' }, ...CARD.changes] }] });
+    let fail = true;
+    const { calls } = open({
+      'POST /api/agents/b1/reset': () => (fail ? [500, { error: { code: 'internal', message: 'Reset failed.' } }] : [200, { ...CARD, changes: [{ field: 'reset', personName: 'Ivan', byOrchestrator: false, at: '2026-10-30T09:00:00.000Z' }, ...CARD.changes] }]),
+    });
     await user.click(await screen.findByRole('button', { name: 'Reset to template' }));
     expect(calls.some(c => c.path === '/api/agents/b1/reset')).toBe(false);
-    expect(screen.getByText('Reset Bruno to the template? Skill changes and effort choice are lost. Its assignment is kept.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Yes, reset' }));
-    await vi.waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/b1/reset')).toBe(true));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to reset these instructions?' });
+    expect(dialog).toHaveAccessibleDescription("Bruno's skills and effort choice will be reset to the template.");
+    expect([...dialog.querySelectorAll('bdi')].map(n => n.textContent)).toEqual(['Bruno']);
+    expect(dialog).toHaveTextContent('Its assignment is kept.');
+    expect(dialog).toHaveTextContent('This cannot be undone.');
+    expect(within(dialog).getByRole('button', { name: 'Reset' })).toHaveClass('danger');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.some(c => c.path === '/api/agents/b1/reset')).toBe(false);
+
+    await user.click(screen.getByRole('button', { name: 'Reset to template' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Reset' }));
+    expect(await within(screen.getByRole('alertdialog')).findByRole('alert')).toHaveTextContent('Reset failed.');
+
+    fail = false;
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Reset' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'POST' && c.path === '/api/agents/b1/reset')).toHaveLength(2));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(await screen.findByText(/Reset to the template: Ivan/)).toBeInTheDocument();
+  });
+
+  it('asks in a confirmation dialog before removing an employee, naming employee and department in <bdi>', async () => {
+    const user = userEvent.setup();
+    const onRemoved = vi.fn();
+    let fail = true;
+    const calls = mockApi({
+      'GET /api/agents/b1': [200, CARD],
+      'DELETE /api/agents/b1': () => (fail ? [403, { error: { code: 'forbidden', message: 'Cannot remove.' } }] : [204]),
+    });
+    render(<LanguageProvider><AgentCard agentId="b1" onClose={() => {}} onRemoved={onRemoved} /></LanguageProvider>);
+    await user.click(await screen.findByRole('button', { name: 'Remove from the company' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to remove this employee?' });
+    expect(dialog).toHaveAccessibleDescription('Bruno will be removed from Development.');
+    expect([...dialog.querySelectorAll('bdi')].map(n => n.textContent)).toEqual(['Bruno', 'Development']);
+    expect(dialog).toHaveTextContent('Its conversation stays in the history.');
+    expect(dialog).toHaveTextContent('This cannot be undone.');
+    expect(within(dialog).getByRole('button', { name: 'Remove' })).toHaveClass('danger');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.some(c => c.method === 'DELETE')).toBe(false);
+
+    await user.click(screen.getByRole('button', { name: 'Remove from the company' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
+    expect(await within(screen.getByRole('alertdialog')).findByRole('alert')).toHaveTextContent('Cannot remove.');
+    expect(onRemoved).not.toHaveBeenCalled();
+
+    fail = false;
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
+    await vi.waitFor(() => expect(onRemoved).toHaveBeenCalledTimes(1));
+  });
+
+  it('asks before disconnecting an employee plan, keeps the select controlled on cancel, and patches directly for another plan', async () => {
+    const user = userEvent.setup();
+    let fail = true;
+    const { calls } = open({
+      'PATCH /api/agents/b1': (body: unknown) => {
+        const subId = (body as { subscription?: string | null }).subscription;
+        if (subId === null) {
+          return fail ? [500, { error: { code: 'internal', message: 'Disconnect failed.' } }] : [200, { ...CARD, subscription: null, model: '' }];
+        }
+        const picked = CARD.runsOn.find(r => r.subscription.id === subId)?.subscription ?? CARD.subscription;
+        return [200, { ...CARD, subscription: picked, model: '' }];
+      },
+    });
+    const runs = await screen.findByRole('combobox', { name: 'Runs on' });
+    expect(runs).toHaveValue('s-key');
+    /* Switching to another non-empty plan patches directly without confirmation. */
+    await user.selectOptions(runs, CARD.runsOn[1]!.subscription.id);
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(1));
+    expect(runs).toHaveValue(CARD.runsOn[1]!.subscription.id);
+
+    /* Switching back to Team key is also direct. */
+    await user.selectOptions(runs, 's-key');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(2));
+
+    /* Disconnecting the plan opens ConfirmAction, keeps select controlled on cancel, shows error in dialog, then disconnects. */
+    await user.selectOptions(runs, '');
+    expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(2);
+    expect(runs).toHaveValue('s-key');
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to disconnect this plan?' });
+    expect(dialog).toHaveAccessibleDescription('Bruno will be disconnected from Team key (Anthropic) and will stop taking turns until another plan is chosen.');
+    expect([...dialog.querySelectorAll('bdi')].map(n => n.textContent)).toEqual(['Bruno', 'Team key (Anthropic)']);
+    expect(dialog).not.toHaveTextContent('This cannot be undone.');
+    expect(within(dialog).getByRole('button', { name: 'Disconnect' })).toHaveClass('danger');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(runs).toHaveValue('s-key');
+    expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(2);
+
+    await user.selectOptions(runs, '');
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Disconnect' }));
+    expect(await within(screen.getByRole('alertdialog')).findByRole('alert')).toHaveTextContent('Disconnect failed.');
+    expect(runs).toHaveValue('s-key');
+
+    fail = false;
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Disconnect' }));
+    await vi.waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(runs).toHaveValue('');
+    expect(calls.filter(c => c.method === 'PATCH').at(-1)?.body).toEqual({ subscription: null });
   });
 
   it('names an employee once when it is called after its role', async () => {
@@ -595,13 +698,30 @@ describe('the Telegram bot on a head\'s card', () => {
     expect(await within(bot).findByRole('alert')).toHaveTextContent('Telegram не принимает этот токен');
   });
 
-  it('takes the bot off after asking', async () => {
+  it('takes the bot off after asking in a confirmation dialog naming bot and agent', async () => {
     const user = userEvent.setup();
-    const { calls } = open({ 'GET /api/agents/b1': [200, { ...HEAD, telegram: { username: 'acme_sales_bot' } }], 'DELETE /api/agents/b1/telegram': [204, undefined] });
+    let fail = true;
+    const { calls } = open({
+      'GET /api/agents/b1': [200, { ...HEAD, telegram: { username: 'acme_sales_bot' } }],
+      'DELETE /api/agents/b1/telegram': () => (fail ? [500, { error: { code: 'internal', message: 'Telegram failed.' } }] : [204, undefined]),
+    });
     const bot = await screen.findByRole('region', { name: 'Telegram bot' });
     await user.click(within(bot).getByRole('button', { name: 'Remove bot' }));
-    await user.click(within(bot).getByRole('button', { name: 'Yes, remove' }));
-    await vi.waitFor(() => expect(calls.find(c => c.method === 'DELETE')?.path).toBe('/api/agents/b1/telegram'));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to disconnect this Telegram bot?' });
+    expect(dialog).toHaveAccessibleDescription('@acme_sales_bot will be disconnected from Sasha. Telegram messages will stop reaching them.');
+    expect([...dialog.querySelectorAll('bdi')].map(n => n.textContent)).toEqual(['@acme_sales_bot', 'Sasha']);
+    expect(within(dialog).getByRole('button', { name: 'Disconnect' })).toHaveClass('danger');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.filter(c => c.method === 'DELETE')).toHaveLength(0);
+
+    await user.click(within(bot).getByRole('button', { name: 'Remove bot' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Disconnect' }));
+    expect(await within(screen.getByRole('alertdialog')).findByRole('alert')).toHaveTextContent('Telegram failed.');
+
+    fail = false;
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Disconnect' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'DELETE')).toHaveLength(2));
     expect(await within(bot).findByLabelText('Token from @BotFather')).toBeInTheDocument();
   });
 
@@ -736,8 +856,9 @@ describe('AgentCard assignment', () => {
     const card = assignmentCard(assignment);
     const { calls } = open({ 'GET /api/agents/b1': [200, card], 'POST /api/agents/b1/reset': [200, card] });
     await user.click(await screen.findByRole('button', { name: 'Reset to template' }));
-    expect(screen.getByText(/assignment is kept/i)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Yes, reset' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to reset these instructions?' });
+    expect(within(dialog).getByText(/assignment is kept/i)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Reset' }));
 
     await vi.waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/b1/reset')).toBe(true));
     expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveValue(assignment);

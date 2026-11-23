@@ -212,12 +212,26 @@ describe('AgentWindow', () => {
     expect(input).toHaveValue('then parents');
   });
 
-  it('shows that he works and stops him on Esc', async () => {
+  it('shows that he works and asks before stopping him on Esc, dismissing on a second Esc', async () => {
+    const user = userEvent.setup();
     const { calls } = await act(async () => open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...BUSY, queued: 2 } }], 'POST /api/agents/orchestrator/stop': [202] }));
     expect(screen.getByRole('status', { name: 'Agent state' })).toHaveTextContent('Working on it');
     expect(screen.getByText('2 more messages wait their turn')).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(true);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to stop current work?' });
+    expect(dialog).toHaveAccessibleDescription('Orchestrator will stop its current turn right away.');
+    expect([...dialog.querySelectorAll('bdi')].map(n => n.textContent)).toEqual(['Orchestrator']);
+    expect(within(dialog).getByRole('button', { name: 'Stop' })).toHaveClass('danger');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(false);
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(false);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Stop' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toHaveLength(1));
   });
 
   it('says why he cannot answer and offers the card by hand', async () => {

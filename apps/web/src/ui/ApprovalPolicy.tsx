@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { errorText, useT } from '../i18n';
+import { errorText, Phrase, useT, type Messages } from '../i18n';
 import type { ApprovalMode, ApprovalPolicyView, ApprovalRule, AutonomousReleaseEntry } from '../types';
+import { ConfirmAction, useConfirmAction, type Question } from './ConfirmAction';
 import { Field } from './Field';
 import { TickBox } from './TickBox';
 
 type Props = {
   departmentId: string;
+  departmentName?: string;
   /* The owner as the company reads it now, so a change made elsewhere shows here too. */
   ownerPersonId?: string | null;
 };
@@ -19,6 +21,12 @@ const draftOf = (rule: ApprovalRule): Draft => (rule.mode === 'within_limits' ? 
 const MODES: ApprovalMode[] = ['every', 'new_kinds', 'within_limits', 'none'];
 
 type RuleBody = { mode: ApprovalMode; limit?: number; unit?: string };
+
+const deptTarget = (departmentName: string | undefined, fallback: string) => (departmentName ? <bdi>{departmentName}</bdi> : fallback);
+
+function ruleLabel(t: Messages['dept']['approvals'], modes: Record<ApprovalMode, string>, body: RuleBody): string {
+  return body.mode === 'within_limits' ? t.limitIs(body.limit!, body.unit ?? '') : modes[body.mode];
+}
 
 /* A rule as typed, ready to send; none until a limit is typed. */
 function ruleBody(draft: Draft): RuleBody | null {
@@ -35,31 +43,54 @@ function RuleWords({ rule }: { rule: ApprovalRule }) {
   return <span>{rule.mode === 'within_limits' ? t.limitIs(rule.limit, rule.unit ?? '') : t.readModes[rule.mode]}</span>;
 }
 
-/* One channel's rule to change. A way without a limit is saved as it is picked; a limit waits for its number. */
-function RuleForm({ path, rule, modes, onSaved }: { path: string; rule: ApprovalRule; modes: Record<ApprovalMode, string>; onSaved(view: ApprovalPolicyView): void }) {
-  const tt = useT();
-  const t = tt.dept.approvals;
-  const [draft, setDraft] = useState(() => draftOf(rule));
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<unknown>(null);
+type PendingRule = { body: RuleBody; revert: boolean };
 
-  async function save(body: RuleBody) {
+function useRuleSave(path: string, rule: ApprovalRule, onDraft: (draft: Draft) => void, onSaved: (view: ApprovalPolicyView) => void) {
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<PendingRule | null>(null);
+  const committed = useRef(false);
+
+  async function save(body: RuleBody, revert: boolean) {
     setBusy(true);
-    setFailure(null);
     try {
-      onSaved(await api.put<ApprovalPolicyView>(`${path}/${rule.channel}`, body));
+      const next = await api.put<ApprovalPolicyView>(`${path}/${rule.channel}`, body);
+      const updated = next.rules.find(r => r.channel === rule.channel);
+      if (updated) onDraft(draftOf(updated));
+      committed.current = true;
+      onSaved(next);
     } catch (err) {
-      setFailure(err);
       /* A way saved as it is picked goes back to what is stored; a typed limit stays to fix. */
-      if (body.mode !== 'within_limits') setDraft(draftOf(rule));
+      if (revert) onDraft(draftOf(rule));
+      throw err;
     } finally {
       setBusy(false);
     }
   }
 
+  function ask(body: RuleBody, revert: boolean) {
+    committed.current = false;
+    setPending({ body, revert });
+  }
+
+  function close() {
+    if (pending?.revert && !committed.current) onDraft(draftOf(rule));
+    committed.current = false;
+    setPending(null);
+  }
+
+  return { busy, pending, ask, save, close };
+}
+
+/* One channel's rule to change. A way without a limit asks to confirm as it is picked; a limit waits for its number. */
+function RuleForm({ path, departmentName, rule, modes, onSaved }: { path: string; departmentName?: string; rule: ApprovalRule; modes: Record<ApprovalMode, string>; onSaved(view: ApprovalPolicyView): void }) {
+  const tt = useT();
+  const t = tt.dept.approvals;
+  const [draft, setDraft] = useState(() => draftOf(rule));
+  const { busy, pending, ask, save, close } = useRuleSave(path, rule, setDraft, onSaved);
+
   function pick(mode: ApprovalMode) {
     setDraft({ ...draft, mode });
-    if (mode !== 'within_limits') void save({ mode });
+    if (mode !== 'within_limits') ask({ mode }, true);
   }
 
   const body = ruleBody(draft);
@@ -74,41 +105,69 @@ function RuleForm({ path, rule, modes, onSaved }: { path: string; rule: Approval
         <div className="appr-limit">
           <Field label={t.limit}>{p => <input {...p} type="number" min={0} step="any" value={draft.limit} onChange={e => setDraft({ ...draft, limit: e.target.value })} />}</Field>
           <Field label={t.unit}>{p => <input {...p} value={draft.unit} maxLength={16} placeholder={t.unitPlaceholder} onChange={e => setDraft({ ...draft, unit: e.target.value })} />}</Field>
-          <button className="btn" type="button" disabled={busy || !body} onClick={() => body && void save(body)}>{tt.common.save}</button>
+          <button className="btn" type="button" disabled={busy || !body} onClick={() => body && ask(body, false)}>
+            {tt.common.save}
+          </button>
         </div>
       )}
-      {failure !== null && <p className="alert" role="alert">{errorText(tt, failure)}</p>}
+      {pending && (
+        <ConfirmAction
+          title={t.confirm.rule.title}
+          effect={<Phrase words={t.confirm.rule.effect} values={[<bdi>{t.channels[rule.channel]}</bdi>, deptTarget(departmentName, t.confirm.thisDepartment), <bdi>{ruleLabel(t, modes, pending.body)}</bdi>]} />}
+          yes={t.confirm.rule.yes}
+          working={t.confirm.rule.working}
+          danger={pending.body.mode === 'none'}
+          onYes={() => save(pending.body, pending.revert)}
+          onClose={close}
+        />
+      )}
     </div>
   );
 }
 
 const candidateLabel = (c: ApprovalPolicyView['candidates'][number]) => (c.title ? `${c.name}, ${c.title}` : c.name);
 
+function ownerConfirmQuestion(t: Messages['dept']['approvals'], view: ApprovalPolicyView, personId: string | null, departmentName: string | undefined, onYes: () => Promise<void>): Question | null {
+  if (personId === (view.owner?.id ?? null)) return null;
+  const ownerName = personId ? (view.candidates.find(c => c.id === personId)?.name ?? personId) : t.confirm.ceo;
+  const words = t.confirm.owner;
+  return {
+    title: words.title,
+    effect: <Phrase words={personId ? words.effect : words.effectCeo} values={[<bdi>{ownerName}</bdi>, deptTarget(departmentName, t.confirm.thisDepartment)]} />,
+    yes: words.yes,
+    working: words.working,
+    danger: false,
+    onYes,
+  };
+}
+
 /* The CEO picks the owner among those who may be. */
-function OwnerPick({ view, path, onChanged }: { view: ApprovalPolicyView; path: string; onChanged(): Promise<void> }) {
+function OwnerPick({ view, path, departmentName, onChanged }: { view: ApprovalPolicyView; path: string; departmentName?: string; onChanged(): Promise<void> }) {
   const tt = useT();
   const t = tt.dept.approvals;
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<unknown>(null);
+  const confirmation = useConfirmAction();
 
   async function name(personId: string | null) {
     setBusy(true);
-    setFailure(null);
     try {
       await api.put(`${path}/owner`, { personId });
       await onChanged();
-    } catch (err) {
-      setFailure(err);
     } finally {
       setBusy(false);
     }
+  }
+
+  function askOwner(personId: string | null) {
+    const question = ownerConfirmQuestion(t, view, personId, departmentName, () => name(personId));
+    if (question) confirmation.ask(question);
   }
 
   return (
     <div className="appr-owner">
       <Field label={t.owner} hint={t.ownerHint}>
         {p => (
-          <select {...p} value={view.owner?.id ?? ''} disabled={busy} onChange={e => void name(e.target.value || null)}>
+          <select {...p} value={view.owner?.id ?? ''} disabled={busy} onChange={e => askOwner(e.target.value || null)}>
             <option value="">{t.ownerCeo}</option>
             {view.candidates.map(c => (
               <option key={c.id} value={c.id}>{candidateLabel(c)}</option>
@@ -117,7 +176,7 @@ function OwnerPick({ view, path, onChanged }: { view: ApprovalPolicyView; path: 
         )}
       </Field>
       {view.candidates.length === 0 && <p className="muted">{t.noCandidates}</p>}
-      {failure !== null && <p className="alert" role="alert">{errorText(tt, failure)}</p>}
+      {confirmation.question}
     </div>
   );
 }
@@ -195,11 +254,13 @@ function AutonomousToggleOrState({
 /* The department's own switch for exact-commit autonomous release to main, for the people who run it, and its journal. */
 function AutonomousReleaseControl({
   departmentId,
+  departmentName,
   path,
   view,
   onSaved,
 }: {
   departmentId: string;
+  departmentName?: string;
   path: string;
   view: ApprovalPolicyView;
   onSaved(next: ApprovalPolicyView): void;
@@ -209,37 +270,43 @@ function AutonomousReleaseControl({
   const enabled = Boolean(view.autonomousRelease);
   const showJournal = enabled || Boolean(view.hasAutonomousReleases);
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<unknown>(null);
+  const confirmation = useConfirmAction();
   const entries = useAutonomousJournal(departmentId, showJournal, enabled);
 
   async function toggle(next: boolean) {
     setBusy(true);
-    setFailure(null);
     try {
       onSaved(await api.put<ApprovalPolicyView>(`${path}/autonomous-release`, { enabled: next }));
-    } catch (err) {
-      setFailure(err);
     } finally {
       setBusy(false);
     }
   }
 
+  function askToggle(next: boolean) {
+    const words = next ? t.confirm.enableAutonomous : t.confirm.disableAutonomous;
+    confirmation.ask({
+      title: words.title,
+      effect: <Phrase words={words.effect} values={[deptTarget(departmentName, t.confirm.thisDepartment)]} />,
+      yes: words.yes,
+      working: words.working,
+      danger: next,
+      onYes: () => toggle(next),
+    });
+  }
+
   return (
     <div className="appr-auto">
-      <AutonomousToggleOrState canSet={Boolean(view.canSetAutonomousRelease)} enabled={enabled} busy={busy} onToggle={next => void toggle(next)} />
+      <AutonomousToggleOrState canSet={Boolean(view.canSetAutonomousRelease)} enabled={enabled} busy={busy} onToggle={askToggle} />
       <p className="muted">{t.autonomousReleaseHint}</p>
-      {failure !== null && (
-        <p className="alert" role="alert">
-          {errorText(tt, failure)}
-        </p>
-      )}
       <AutonomousJournalView entries={entries} />
+      {confirmation.question}
     </div>
   );
 }
 
 function ChannelFieldset({
   departmentId,
+  departmentName,
   path,
   view,
   rule,
@@ -247,6 +314,7 @@ function ChannelFieldset({
   onSaved,
 }: {
   departmentId: string;
+  departmentName?: string;
   path: string;
   view: ApprovalPolicyView;
   rule: ApprovalRule;
@@ -259,15 +327,15 @@ function ChannelFieldset({
     <fieldset className="field-group appr-rule">
       <legend>{t.channels[rule.channel]}</legend>
       <div className="field-group-body">
-        {editable ? <RuleForm path={path} rule={rule} modes={modes} onSaved={onSaved} /> : <RuleWords rule={rule} />}
-        {rule.channel === 'commit' && <AutonomousReleaseControl departmentId={departmentId} path={path} view={view} onSaved={onSaved} />}
+        {editable ? <RuleForm path={path} departmentName={departmentName} rule={rule} modes={modes} onSaved={onSaved} /> : <RuleWords rule={rule} />}
+        {rule.channel === 'commit' && <AutonomousReleaseControl departmentId={departmentId} departmentName={departmentName} path={path} view={view} onSaved={onSaved} />}
       </div>
     </fieldset>
   );
 }
 
 /* Who owns a department and how its approvals go on each channel. The rules stay when the owner changes. */
-export function ApprovalPolicy({ departmentId, ownerPersonId }: Props) {
+export function ApprovalPolicy({ departmentId, departmentName, ownerPersonId }: Props) {
   const tt = useT();
   const t = tt.dept.approvals;
   const [view, setView] = useState<ApprovalPolicyView | null>(null);
@@ -294,12 +362,12 @@ export function ApprovalPolicy({ departmentId, ownerPersonId }: Props) {
   const modes = view.owner && view.canSetOwner ? { ...t.modes, every: t.everyToOwner } : t.modes;
   return (
     <div className="appr">
-      {view.canSetOwner ? <OwnerPick view={view} path={departmentPath} onChanged={load} /> : <OwnerWords owner={view.owner} />}
+      {view.canSetOwner ? <OwnerPick view={view} path={departmentPath} departmentName={departmentName} onChanged={load} /> : <OwnerWords owner={view.owner} />}
       <p className="muted">{t.defaultHint}</p>
       <p className="muted">{t.rulesHint}</p>
       <div className="appr-rules">
         {view.rules.map(rule => (
-          <ChannelFieldset key={rule.channel} departmentId={departmentId} path={path} view={view} rule={rule} modes={modes} onSaved={setView} />
+          <ChannelFieldset key={rule.channel} departmentId={departmentId} departmentName={departmentName} path={path} view={view} rule={rule} modes={modes} onSaved={setView} />
         ))}
       </div>
     </div>

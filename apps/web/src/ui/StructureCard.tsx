@@ -1,9 +1,11 @@
 import { DEPARTMENT_TEMPLATES } from '@hornhoof/protocol/catalog';
 import { useState } from 'react';
-import { deptLabel, errorText, useT, type Messages } from '../i18n';
-import type { DecidedBy, MaterialStampView, NewItem, Org, StructureItem, TemplateKey } from '../types';
+import { api } from '../api';
+import { deptLabel, errorText, Phrase, useT, type Messages } from '../i18n';
+import type { ChangeItem, DecidedBy, MaterialStampView, NewItem, Org, StructureItem, TemplateKey } from '../types';
+import { useConfirmAction, type Question } from './ConfirmAction';
 import { Decides, frozenBy, WaitsForNote } from './DecidedBy';
-import { ProposalMaterialsSection, useProposalCardPost, useProposalMaterials } from './RequestMaterials';
+import { ProposalMaterialsSection, useProposalMaterials } from './RequestMaterials';
 
 type Props = {
   proposal?: MaterialStampView & { id: string; brief: string; items: StructureItem[] };
@@ -155,12 +157,38 @@ function patchTickAt(ticks: boolean[], index: number, nextChecked: boolean): boo
   return ticks.map((v, j) => (j === index ? nextChecked : v));
 }
 
+function changeEffectLine(t: Messages, item: ChangeItem, departments: Org['departments']) {
+  const dept = <bdi>{nameOf(t, item, departments)}</bdi>;
+  if (item.remove) return <Phrase words={t.card.confirm.removeEffect} values={[dept]} />;
+  if (item.products?.length) return <Phrase words={t.card.confirm.updateProducts} values={[dept, <bdi>{item.products.join(', ')}</bdi>]} />;
+  return <Phrase words={t.card.confirm.updateEffect} values={[dept]} />;
+}
+
+function structureQuestion(t: Messages, changes: ChangeItem[], departments: Org['departments'], onYes: () => Promise<void>): Question {
+  const [first, ...more] = changes.map(item => changeEffectLine(t, item, departments));
+  const hasRemove = changes.some(item => Boolean(item.remove));
+  const singleRemove = changes.length === 1 && hasRemove;
+  return {
+    title: singleRemove ? t.card.confirm.removeTitle : changes.length === 1 ? t.card.confirm.changeTitle : t.card.confirm.manyTitle,
+    effect: first!,
+    warnings: more,
+    yes: singleRemove ? t.card.confirm.removeYes : t.card.confirm.applyYes,
+    working: singleRemove ? t.card.confirm.removing : t.card.confirm.applying,
+    danger: hasRemove,
+    final: hasRemove,
+    onYes,
+  };
+}
+
 /* The orchestrator's proposal, or the hand-made one: ticks, and one click that creates them. */
 export function StructureCard({ proposal, manual, departments, onCorrect, onDone, onHide, locked, waitsFor }: Props) {
   const t = useT();
   const [items] = useState<StructureItem[]>(() => initialStructureItems(proposal, manual));
   const [ticks, setTicks] = useState(() => items.map(i => i.checked || fixed(i)));
-  const { busy, sent, failure, postProposal } = useProposalCardPost(onDone);
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const confirmation = useConfirmAction();
   const proposalMaterials = useProposalMaterials(proposal);
   const chosen = items.filter((_, i) => ticks[i]);
   const label = structureActionLabel(t, chosen);
@@ -169,7 +197,34 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
   const rowDisabled = frozenBy(sent, locked);
   const canCreate = canSubmitStructure(sent, busy, chosen.length);
   const [withPeople, setWithPeople] = useState(true);
-  const create = () => void postProposal('/api/departments/build', buildStructureBody(proposal, proposalMaterials.stamp, chosen, withPeople));
+
+  async function submitBody(body: unknown) {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await api.post('/api/departments/build', body);
+      setSent(true);
+      onDone?.();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function directSubmit(body: unknown) {
+    try {
+      await submitBody(body);
+    } catch (err) {
+      setFailure(err);
+    }
+  }
+
+  const create = () => {
+    const body = buildStructureBody(proposal, proposalMaterials.stamp, chosen, withPeople);
+    const changes = chosen.filter((item): item is ChangeItem => !isNew(item));
+    if (!changes.length) return void directSubmit(body);
+    setFailure(null);
+    confirmation.ask(structureQuestion(t, changes, departments, () => submitBody(body)));
+  };
 
   return (
     <div className={sent ? 't-card done' : 't-card'}>
@@ -191,6 +246,7 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
         </p>
       )}
       <StructureFooter locked={locked} sent={sent} canCreate={canCreate} label={label} t={t} onCreate={create} onCorrect={onCorrect} onHide={onHide} />
+      {confirmation.question}
     </div>
   );
 }

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { errorText, useT } from '../i18n';
+import { errorText, Phrase, useT } from '../i18n';
 import { useStream } from '../live';
 import type { NoteView } from '../types';
+import { useConfirmAction } from './ConfirmAction';
 
 type Editing = { number: number; text: string };
 
@@ -89,6 +90,7 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
   const [failure, setFailure] = useState<unknown>(null);
   /* Why the notes could not be read, until they are read again. */
   const [unread, setUnread] = useState<unknown>(null);
+  const confirmation = useConfirmAction();
 
   const base = notebookBase(departmentId);
   const load = useCallback(async () => {
@@ -106,18 +108,35 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
     if (notebookChanged(m, departmentId)) void load();
   });
 
-  async function run(action: () => Promise<unknown>, after: () => void) {
+  async function perform(action: () => Promise<unknown>, after: () => void) {
     setBusy(true);
     setFailure(null);
     try {
       await action();
       after();
       await load();
-    } catch (err) {
-      setFailure(err);
     } finally {
       setBusy(false);
     }
+  }
+
+  async function run(action: () => Promise<unknown>, after: () => void) {
+    try {
+      await perform(action, after);
+    } catch (err) {
+      setFailure(err);
+    }
+  }
+
+  function askRemove(note: NoteView) {
+    setFailure(null);
+    confirmation.ask({
+      ...t.notebook.confirm.remove,
+      effect: <Phrase words={t.notebook.confirm.remove.effect} values={[<bdi>{`#${note.number}`}</bdi>]} />,
+      final: true,
+      danger: true,
+      onYes: () => perform(() => api.del(`${base}/${note.number}`), () => {}),
+    });
   }
 
   const loading = notes === null && unread === null;
@@ -126,13 +145,14 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
     <section className="notebook" aria-label={t.notebook.title} aria-busy={busy || loading}>
       <p className="muted">{departmentId ? t.notebook.departmentIntro : t.notebook.intro}</p>
       <NotebookFeedback loading={loading} unread={unread} saving={busy} failure={failure} onRetry={() => void load()} />
-      <NotebookItems notes={notes} editing={editing} busy={busy} onEdit={n => setEditing({ number: n.number, text: n.text })} onSave={e => void saveNote(e, editing, base, run, setEditing)} onCancel={() => setEditing(null)} onRemove={n => void run(() => api.del(`${base}/${n.number}`), () => {})} />
+      <NotebookItems notes={notes} editing={editing} busy={busy} onEdit={n => setEditing({ number: n.number, text: n.text })} onSave={e => void saveNote(e, editing, base, run, setEditing)} onCancel={() => setEditing(null)} onRemove={askRemove} />
       <form className="notebook-add" onSubmit={e => void addNote(e, text, base, run, setText)}>
         <textarea aria-label={t.notebook.newNote} placeholder={t.notebook.placeholder} value={text} rows={2} onChange={e => setText(e.target.value)} />
         <div className="form-foot" role="group" aria-label={t.notebook.newNote}>
           <button className="btn" type="submit" disabled={busy || !text.trim()}>{t.notebook.add}</button>
         </div>
       </form>
+      {confirmation.question}
     </section>
   );
 }

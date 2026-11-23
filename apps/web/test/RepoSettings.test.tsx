@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -125,5 +125,53 @@ describe("the repository's full test command", () => {
     onTestFinished(() => localStorage.removeItem('hh-lang'));
     shown(REPO);
     expect(screen.getByText('Полной команды тестов нет, поэтому GitHub сам проверяет каждый коммит')).toBeInTheDocument();
+  });
+});
+
+describe('repository confirmation', () => {
+  it('confirms removing a repository in a dialog naming its address and keeps errors inside', async () => {
+    const user = userEvent.setup();
+    let fail = true;
+    const calls = mockApi({ 'DELETE /api/departments/d2/repository': () => (fail ? [500, { error: { code: 'internal', message: 'Cannot remove.' } }] : [204]) });
+    render(<LanguageProvider><RepoSettings placeId="d2" repository={REPO} /></LanguageProvider>);
+    await user.click(screen.getByRole('button', { name: 'Remove' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to remove this repository?' });
+    expect(dialog).toHaveAccessibleDescription('https://github.com/acme/app.git will be removed. Agents keep their clones and the token is deleted.');
+    expect(within(dialog).getByText(REPO.url).tagName).toBe('BDI');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.some(c => c.method === 'DELETE')).toBe(false);
+
+    await user.click(screen.getByRole('button', { name: 'Remove' }));
+    const again = screen.getByRole('alertdialog');
+    await user.click(within(again).getByRole('button', { name: 'Remove' }));
+    expect(await within(again).findByRole('alert')).toHaveTextContent('Cannot remove.');
+    fail = false;
+    await user.click(within(again).getByRole('button', { name: 'Remove' }));
+    await vi.waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(calls.filter(c => c.method === 'DELETE')).toHaveLength(2);
+  });
+
+  it('confirms changing address, branch or token on an existing repository without showing the token value', async () => {
+    const user = userEvent.setup();
+    const calls = shown(REPO);
+    await user.click(screen.getByRole('button', { name: 'Change' }));
+    await user.clear(screen.getByLabelText('Address'));
+    await user.type(screen.getByLabelText('Address'), 'https://github.com/acme/next.git');
+    await user.type(screen.getByLabelText('Token'), 'ghp_super_secret_token_9876');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to update this repository?' });
+    expect(dialog).toHaveAccessibleDescription('The repository https://github.com/acme/app.git will change to https://github.com/acme/next.git.');
+    expect(within(dialog).getByText(REPO.url).tagName).toBe('BDI');
+    expect(within(dialog).getByText('https://github.com/acme/next.git').tagName).toBe('BDI');
+    expect(dialog).toHaveTextContent('The saved access token will be replaced.');
+    expect(dialog.textContent).not.toContain('ghp_super_secret_token_9876');
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(puts(calls)).toEqual([]);
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(puts(calls)).toEqual([{ url: 'https://github.com/acme/next.git', branch: 'main', token: 'ghp_super_secret_token_9876' }]));
   });
 });

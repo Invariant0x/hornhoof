@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -41,21 +41,36 @@ describe('program versions on a machine', () => {
     expect(screen.queryByText(/sign in|войти|вход/i)).toBeNull();
   });
 
-  it.each(['machine-1', 'builtin'])('requests %s once while waiting and refreshes the card after the response', async id => {
+  it.each([
+    ['machine-1', 'dev-laptop', 'dev-laptop'],
+    ['builtin', undefined, 'builtin'],
+  ] as const)('asks before updating %s, sends once while waiting and refreshes the card after the response', async (id, hostname, shown) => {
     let release!: () => void;
     const pending = new Promise<void>(resolve => { release = resolve; });
     const calls = mockApi({ [`POST /api/machines/${id}/programs/update`]: async () => { await pending; return [202, { updating: true }]; } });
     const onUpdated = vi.fn(async () => {});
-    render(<ProgramVersions {...defaults} id={id} onUpdated={onUpdated} />);
+    render(<ProgramVersions {...defaults} id={id} hostname={hostname} onUpdated={onUpdated} />);
     const user = userEvent.setup();
     const update = screen.getByRole('button', { name: 'Update programs' });
     await user.click(update);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to update agent programs?' });
+    expect(dialog).toHaveAccessibleDescription(`Installed agent programs on ${shown} will be updated.`);
+    expect(dialog.querySelector('p bdi')).toHaveTextContent(shown);
+    const confirm = within(dialog).getByRole('button', { name: 'Update' });
+    expect(confirm).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(calls).toEqual([]);
+    await user.click(update);
+    const yes = within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Update' });
+    await user.click(yes);
+    expect(yes).toBeDisabled();
     expect(update).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent('Updating programs...');
-    await user.click(update);
+    await user.click(yes);
     expect(calls).toEqual([{ method: 'POST', path: `/api/machines/${id}/programs/update`, body: undefined }]);
     release();
-    await screen.findByRole('button', { name: 'Update programs' });
+    await vi.waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
     await vi.waitFor(() => expect(update).toBeEnabled());
     expect(onUpdated).toHaveBeenCalledOnce();
   });
@@ -69,18 +84,22 @@ describe('program versions on a machine', () => {
     expect(screen.getByText('3.0.0')).toBeInTheDocument();
   });
 
-  it('shows a request failure, permits retry and clears the error on success', async () => {
+  it('keeps a request failure inside the confirmation dialog, permits retry and closes on success', async () => {
     let attempts = 0;
     mockApi({ 'POST /api/machines/machine-1/programs/update': () => ++attempts === 1
       ? [409, { error: { code: 'conflict', reason: 'programs_unavailable' } }] : [202, { updating: true }] });
-    render(<ProgramVersions {...defaults} />);
+    render(<ProgramVersions {...defaults} hostname="dev-laptop" />);
     const user = userEvent.setup();
     const update = screen.getByRole('button', { name: 'Update programs' });
     await user.click(update);
-    expect(await screen.findByRole('alert')).toHaveTextContent('Programs cannot be updated on this machine right now.');
-    expect(update).toBeEnabled();
-    await user.click(update);
-    await vi.waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to update agent programs?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Update' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Programs cannot be updated on this machine right now.');
+    const retry = within(dialog).getByRole('button', { name: 'Update' });
+    expect(retry).toBeEnabled();
+    await user.click(retry);
+    await vi.waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(screen.queryByRole('alert')).toBeNull();
     expect(attempts).toBe(2);
   });
 

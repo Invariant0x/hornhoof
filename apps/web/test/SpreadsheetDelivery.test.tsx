@@ -182,4 +182,42 @@ describe('1-click spreadsheet download in the task card materials, AgentWindow c
     }
     localStorage.removeItem('hh-lang');
   });
+
+  it('confirms disconnecting Google Sheets in a dialog naming its account and keeps errors inside', async () => {
+    const user = userEvent.setup();
+    let fail = true;
+    const calls = mockApi({
+      'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }],
+      'GET /api/repo-host': [200, { host: null }],
+      'GET /api/google-sheets': [
+        200,
+        { google: { kind: 'service_account', account: 'sheets-bot@acme.iam.gserviceaccount.com', shareEmail: 'ivan@acme.com', keyLast4: '9876' } },
+      ],
+      'DELETE /api/google-sheets': () => (fail ? [500, { error: { code: 'internal', message: 'Cannot disconnect.' } }] : [204]),
+    });
+    render(
+      <LanguageProvider>
+        <Settings me={ME} group="integrations" onClose={() => {}} />
+      </LanguageProvider>,
+    );
+    const part = await screen.findByRole('article', { name: 'Google Sheets' });
+    await user.click(within(part).getByRole('button', { name: 'Disconnect' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to disconnect Google Sheets?' });
+    expect(dialog).toHaveAccessibleDescription(
+      'Google Sheets for sheets-bot@acme.iam.gserviceaccount.com will be disconnected. Employees will stop creating new Google Sheets links and will attach .xlsx files instead.',
+    );
+    expect(within(dialog).getByText('sheets-bot@acme.iam.gserviceaccount.com').tagName).toBe('BDI');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.some(c => c.method === 'DELETE')).toBe(false);
+
+    await user.click(within(part).getByRole('button', { name: 'Disconnect' }));
+    const again = screen.getByRole('alertdialog');
+    await user.click(within(again).getByRole('button', { name: 'Disconnect' }));
+    expect(await within(again).findByRole('alert')).toHaveTextContent('Cannot disconnect.');
+    fail = false;
+    await user.click(within(again).getByRole('button', { name: 'Disconnect' }));
+    expect(await within(part).findByRole('button', { name: 'Connect Google Sheets' })).toBeInTheDocument();
+    expect(calls.filter(c => c.method === 'DELETE' && c.path === '/api/google-sheets')).toHaveLength(2);
+  });
 });

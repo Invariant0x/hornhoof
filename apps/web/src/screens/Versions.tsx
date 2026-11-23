@@ -1,8 +1,9 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useState } from 'react';
-import { errorText, useLanguage, useT } from '../i18n';
+import { errorText, Phrase, useLanguage, useT } from '../i18n';
 import type { Build } from '../types';
 import type { Updates } from '../updates';
+import { useConfirmAction } from '../ui/ConfirmAction';
 import { NodeWaits } from '../ui/MachineDrain';
 import { UpdateProgress } from '../ui/UpdateProgress';
 import { buildText, versionText } from '../ui/VersionMark';
@@ -14,9 +15,9 @@ export function Versions({ updates, onClose, onHome }: { updates: Updates; onClo
   const t = useT();
   const { language } = useLanguage();
   const { view, busy } = updates;
-  const [confirm, setConfirm] = useState<Build | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const [checking, setChecking] = useState(false);
+  const confirmation = useConfirmAction();
   const box = useDialogClose(onClose);
 
   async function act(run: () => Promise<void>) {
@@ -28,9 +29,17 @@ export function Versions({ updates, onClose, onHome }: { updates: Updates; onClo
     }
   }
 
-  async function install(build: Build) {
-    setConfirm(null);
-    await act(() => updates.update(build === view?.latest ? 'latest' : build.tag, false));
+  function askInstall(build: Build, past: boolean) {
+    const words = past ? t.updates.confirm.goBack : t.updates.confirm.install;
+    const target = build === view?.latest ? 'latest' : build.tag;
+    setFailure(null);
+    confirmation.ask({
+      ...words,
+      effect: <Phrase words={words.effect} values={[<bdi>{buildText(build)}</bdi>]} />,
+      warnings: past ? [t.updates.pastMigration] : [],
+      danger: past,
+      onYes: () => updates.update(target, false),
+    });
   }
 
   if (unavailableFailure(updates.failure)) return <RouteUnavailable dialog onHome={onHome} />;
@@ -90,7 +99,7 @@ export function Versions({ updates, onClose, onHome }: { updates: Updates; onClo
                 updater.present &&
                 !busy &&
                 !updates.asking && (
-                  <button className="act" type="button" onClick={() => (b.migrations < current.migrations ? setConfirm(b) : void install(b))}>
+                  <button className="act" type="button" onClick={() => askInstall(b, b.migrations < current.migrations)}>
                     {t.updates.install}
                   </button>
                 )
@@ -98,16 +107,8 @@ export function Versions({ updates, onClose, onHome }: { updates: Updates; onClo
             </li>
           ))}
         </ul>
-        {confirm && (
-          <div className="update-confirm">
-            <p>{t.updates.pastMigration}</p>
-            <div className="actions">
-              <button className="btn small" type="button" onClick={() => void install(confirm)}>{t.updates.goBack(buildText(confirm))}</button>
-              <button className="btn small ghost" type="button" onClick={() => setConfirm(null)}>{t.common.cancel}</button>
-            </div>
-          </div>
-        )}
       </div>
+      {confirmation.question}
     </div>
   );
 }

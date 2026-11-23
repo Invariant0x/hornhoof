@@ -1,4 +1,4 @@
-import { act, fireEvent, render, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
@@ -74,19 +74,23 @@ describe("a working plan's card, lower part", () => {
     expect(filled(card)).toEqual([]);
   });
 
-  it('asks before removing in place of the foot, and gives the focus back to Remove on cancel', async () => {
+  it('asks before removing in a dialog without moving the foot, and gives the focus back to Remove on cancel', async () => {
     const calls = lists();
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
     await openAll();
     const card = rowOf('Claude');
     const foot = card.querySelector<HTMLElement>('.plan-card-actions')!;
-    await user.click(within(foot).getByRole('button', { name: 'Remove Claude' }));
-    expect(foot.querySelector('.form-foot')).toBeNull();
-    expect(within(foot).getByText('Remove Claude? Its login will be deleted from the machine.')).toBeInTheDocument();
+    const remove = within(foot).getByRole('button', { name: 'Remove Claude' });
+    remove.focus();
+    await user.click(remove);
+    expect(foot.querySelector('.form-foot')).not.toBeNull();
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to remove this subscription?' });
+    expect(dialog).toHaveAccessibleDescription('Claude will be removed. Its login will be deleted from the machine.');
+    expect(dialog).toHaveTextContent('This cannot be undone.');
     /* The question takes the focus Remove had, on its safe answer. */
     expect(active()).toHaveTextContent('Cancel');
-    await user.click(within(foot).getByRole('button', { name: 'Cancel' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(active()).toHaveAccessibleName('Remove Claude'));
     expect(foot.querySelector('.form-foot')).not.toBeNull();
     expect(calls.some(c => c.method === 'DELETE')).toBe(false);
@@ -216,9 +220,11 @@ describe("a working plan's fallback plans", () => {
     await openAll();
     const card = rowOf('Claude');
     await user.click(within(card).getByRole('button', { name: 'Remove Orchestrator (Anthropic) from the fallback plans' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(saved).toEqual(one));
     await waitFor(() => expect(active()).toHaveAccessibleName('Model on Codex, Ivan'));
     await user.click(within(card).getByRole('button', { name: 'Remove Codex, Ivan from the fallback plans' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(saved).toEqual([]));
     await waitFor(() => expect(active()).toHaveAccessibleName('Add a fallback plan for Claude, Ivan'));
   });

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { NodeLoad } from '@hornhoof/protocol';
 import { ApiFailure, api } from '../api';
-import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
+import { errorText, Phrase, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import type { BuiltinView, CopiesView, DataView, MachineView, Me, MoveView, SubView, TlsView, Unfit } from '../types';
-import { Ask } from '../ui/Ask';
 import { Bar, Share } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
+import { useConfirmAction, type Question } from '../ui/ConfirmAction';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
 import { doneOf, Idle, useHeldRows, useLoad, type Load } from '../ui/Loading';
@@ -314,9 +314,7 @@ type MachineControls = {
   coreCommands: Record<string, ActiveCommand>;
   makeCore: (machine: MachineView) => unknown;
   cancelCore: (machineId: string, id: string) => unknown;
-  confirm: string | null;
   setPicking: (machineId: string | null) => void;
-  setConfirm: (id: string | null) => void;
   addPlan: (machine: MachineView, sub: SubView) => unknown;
   cancelAdd: (machineId: string, id: string) => unknown;
   lend: (machine: MachineView, value: boolean) => unknown;
@@ -382,10 +380,6 @@ function CoreCommand({ machine, shown, controls }: { machine: MachineView; shown
   );
 }
 
-/* A machine that ran Claude keeps a sign-in of Claude's own, which a Disconnect here cannot end. */
-const disconnectQuestion = (t: Messages, m: MachineView): string =>
-  m.plans.some(plan => plan.provider === 'claude') ? `${t.machines.disconnectAsk(m.hostname)} ${t.machines.disconnectClaude}` : t.machines.disconnectAsk(m.hostname);
-
 /* What the owner can do with the machine: add a plan or bring the core while no command stands open, and disconnect it,
    last. The machine the company was installed on is no computer someone joined: it is not disconnected. */
 type OwnerAction = { key: string; text: string; label?: string; danger?: boolean; run: () => unknown };
@@ -395,7 +389,7 @@ function ownerActions(t: Messages, m: MachineView, editable: boolean, addable: S
     ...(addable.length ? [{ key: 'add', text: t.machines.addPlan, label: t.machines.addPlanLabel(m.hostname), run: () => controls.setPicking(m.id) }] : []),
     ...(m.needsCore ? [{ key: 'core', text: t.machines.makeCore(m.hostname), run: () => controls.makeCore(m) }] : []),
   ];
-  return editable && !m.serverInstall ? [...free, { key: 'off', text: t.machines.disconnect, label: t.machines.disconnectLabel(m.hostname), danger: true, run: () => controls.setConfirm(m.id) }] : free;
+  return editable && !m.serverInstall ? [...free, { key: 'off', text: t.machines.disconnect, label: t.machines.disconnectLabel(m.hostname), danger: true, run: () => controls.disconnect(m) }] : free;
 }
 
 function OwnerActions({ actions }: { actions: OwnerAction[] }) {
@@ -403,15 +397,13 @@ function OwnerActions({ actions }: { actions: OwnerAction[] }) {
   return <div className="machine-actions entry-actions">{actions.map(action => <button key={action.key} className={action.danger ? 'act danger' : 'act'} type="button" aria-label={action.label} onClick={action.run}>{action.text}</button>)}</div>;
 }
 
-/* The third block: what the owner lets the company use the machine for, then what they can do with it, the question
-   before Disconnect standing under the buttons. */
+/* The third block: what the owner lets the company use the machine for, then what they can do with it. */
 function OwnerBlock({ machine: m, editable, addable, busy, controls }: { machine: MachineView; editable: boolean; addable: SubView[]; busy: boolean; controls: MachineControls }) {
   const t = useT();
   return (
     <CardBlock title={t.cards.ownerBlock}>
       <OwnerSettings machine={m} editable={editable} onLend={value => controls.lend(m, value)} onKeep={value => controls.keepBackups(m, value)} />
       <OwnerActions actions={ownerActions(t, m, editable, addable, busy, controls)} />
-      {controls.confirm === m.id && <Ask text={disconnectQuestion(t, m)} yes={t.machines.yesDisconnect} onYes={() => controls.disconnect(m)} onNo={() => controls.setConfirm(null)} />}
     </CardBlock>
   );
 }
@@ -510,68 +502,65 @@ function PriorityChoice({ row, data, last, refresh }: { row: MachineRow; data: D
 /* What the server says of moving it to another machine, and whether this person may ask for that. */
 type Moving = { move: MoveView | null; canMove: boolean };
 
+/* What the move line says for a machine asked to take the server. */
+function moveLine(words: Messages['machines']['move'], host: string, target: MoveView | null): string | null {
+  if (!target) return null;
+  if (target.state === 'preparing') return words.waiting(host, target.progress);
+  if (target.state === 'switching') return words.switching(host);
+  return words.failed(target.leader, words.reason[target.reason ?? 'no_answer'](host));
+}
+
 /* The move of the server, on a machine's card. On the machine asked to take it, everyone who sees the part reads how
    far the move is: its copy being made, the server moving, or why it stayed. The CEO may call a move off while the
-   copy is made, and may ask a machine that has a number to take the server: the question stands in the button's
-   place, the focus on its first answer, and Cancel gives the focus back to the button. While an answer is sent nothing
-   can be pressed, and a refusal is said under the buttons. */
+   copy is made, and may ask a machine that has a number to take the server; both ask in the confirmation window first. */
 function MovePart({ row, data, moving, refresh }: { row: MachineRow; data: DataView; moving: Moving; refresh: () => Promise<void> }) {
   const t = useT();
   const { language } = useLanguage();
   const words = t.machines.move;
-  const [asking, setAsking] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<unknown>(null);
-  const hereButton = useRef<HTMLButtonElement>(null);
-  const yesButton = useRef<HTMLButtonElement>(null);
-  const backToButton = useRef(false);
-  useEffect(() => {
-    if (asking) yesButton.current?.focus();
-    else if (backToButton.current) hereButton.current?.focus();
-    backToButton.current = false;
-  }, [asking]);
+  const confirmation = useConfirmAction();
   const { move, canMove } = moving;
   const target = move?.machine === row.id ? move : null;
   const mayTake = data.number !== null && data.number >= 2 && data.pin !== 'none';
   const offered = canMove && mayTake && move?.state !== 'switching' && (!target || target.state === 'failed');
-  const send = async (call: () => Promise<unknown>) => {
-    setBusy(true);
-    setFailure(null);
-    try {
-      await call();
-      setAsking(false);
-      await refresh();
-    } catch (err) {
-      setFailure(err);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const said = target
-    ? target.state === 'preparing' ? words.waiting(row.hostname, target.progress)
-      : target.state === 'switching' ? words.switching(row.hostname)
-        : words.failed(target.leader, words.reason[target.reason ?? 'no_answer'](row.hostname))
-    : null;
+  const said = moveLine(words, row.hostname, target);
   /* The machine the server last moved from says so once its copy is up to date again, whoever reads the card. */
   const until = data.led ? clock(language, data.led.until) : null;
   const led = until ? words.led(row.hostname, until) : null;
   if (!said && !offered && !led) return null;
-  const question = words.ask(row.hostname);
+
+  const askMove = () => {
+    const c = t.machines.confirm.move;
+    confirmation.ask({
+      title: c.title,
+      effect: <Phrase words={c.effect} values={[<bdi>{row.hostname}</bdi>]} />,
+      warnings: [c.warning],
+      yes: c.yes,
+      working: c.working,
+      onYes: async () => {
+        await api.post(`/api/machines/${row.id}/move`);
+        await refresh();
+      },
+    });
+  };
+  const askStop = () => {
+    const c = t.machines.confirm.stopMove;
+    confirmation.ask({
+      ...c,
+      effect: <Phrase words={c.effect} values={[<bdi>{row.hostname}</bdi>]} />,
+      danger: true,
+      onYes: async () => {
+        await api.del(`/api/machines/${row.id}/move`);
+        await refresh();
+      },
+    });
+  };
+
   return <>
     {led && <p>{led}</p>}
     {said && <p>{said}</p>}
-    {target?.state === 'preparing' && canMove && <div className="entry-actions"><button className="act" type="button" disabled={busy} onClick={() => void send(() => api.del(`/api/machines/${row.id}/move`))}>{words.stop}</button></div>}
-    {offered && !asking && <div className="entry-actions"><button ref={hereButton} className="act" type="button" onClick={() => setAsking(true)}>{words.here}</button></div>}
-    {offered && asking && (
-      <div className="ask">
-        <span className="entry-main">{question}</span>
-        <div className="entry-actions" role="group" aria-label={question}>
-          <button ref={yesButton} className="btn" type="button" disabled={busy} onClick={() => void send(() => api.post(`/api/machines/${row.id}/move`))}>{words.yes}</button>
-          <button className="btn ghost" type="button" disabled={busy} onClick={() => { backToButton.current = true; setFailure(null); setAsking(false); }}>{words.cancel}</button>
-        </div>
-      </div>
-    )}
-    {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+    {target?.state === 'preparing' && canMove && <div className="entry-actions"><button className="act" type="button" onClick={askStop}>{words.stop}</button></div>}
+    {offered && <div className="entry-actions"><button className="act" type="button" onClick={askMove}>{words.here}</button></div>}
+    {confirmation.question}
   </>;
 }
 
@@ -673,7 +662,7 @@ function SystemBlock({ row, editable, controls }: { row: MachineRow; editable: b
   return (
     <CardBlock title={t.cards.systemBlock}>
       {facts.length > 0 && <Facts items={facts} />}
-      <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
+      <ProgramVersions id={row.id} hostname={row.hostname} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
       {row.access && <MachineAccessBlock view={row.access} onChanged={() => void controls.refresh()} />}
     </CardBlock>
   );
@@ -721,6 +710,22 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
   );
 }
 
+function keepBackupsQuestion(t: Messages, m: MachineView, keepsBackups: boolean, onYes: () => Promise<void>): Question {
+  const c = keepsBackups ? t.machines.confirm.keepBackupsOn : t.machines.confirm.keepBackupsOff;
+  return { ...c, effect: <Phrase words={c.effect} values={[<bdi>{m.hostname}</bdi>]} />, danger: !keepsBackups, onYes };
+}
+
+function disconnectMachineQuestion(t: Messages, m: MachineView, onYes: () => Promise<void>): Question {
+  const c = t.machines.confirm.disconnect;
+  return {
+    ...c,
+    effect: <Phrase words={c.effect} values={[<bdi>{m.hostname}</bdi>]} />,
+    warnings: m.plans.some(plan => plan.provider === 'claude') ? [t.machines.disconnectClaude] : [],
+    danger: true,
+    onYes,
+  };
+}
+
 export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRoute) {
   const t = useT();
   const { language } = useLanguage();
@@ -736,11 +741,11 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const [command, setCommand] = useState<ActiveCommand | null>(null);
   const [addCommands, setAddCommands] = useState<Record<string, ActiveCommand>>({});
   const [coreCommands, setCoreCommands] = useState<Record<string, ActiveCommand>>({});
-  const [confirm, setConfirm] = useState<string | null>(null);
   const [picking, setPicking] = useState<string | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [askMachines] = useState(latestAnswers);
+  const confirmation = useConfirmAction();
   const live = useRef(true);
   /* Each change the person makes to the shown commands counts here, so a look that began before it leaves them alone. */
   const commandChanges = useRef(0);
@@ -857,18 +862,21 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       setMachines(list => list?.map(x => (x.id === m.id ? { ...x, lendsTests } : x)) ?? null);
     });
 
-  const keepBackups = (m: MachineView, keepsBackups: boolean) =>
-    run(async () => {
+  const keepBackups = (m: MachineView, keepsBackups: boolean) => {
+    setFailure(null);
+    confirmation.ask(keepBackupsQuestion(t, m, keepsBackups, async () => {
       await api.patch(`/api/machines/${m.id}`, { keepsBackups });
       setMachines(list => list?.map(x => (x.id === m.id ? { ...x, keepsBackups } : x)) ?? null);
-    });
+    }));
+  };
 
-  const disconnect = (m: MachineView) =>
-    run(async () => {
-      setConfirm(null);
+  const disconnect = (m: MachineView) => {
+    setFailure(null);
+    confirmation.ask(disconnectMachineQuestion(t, m, async () => {
       await api.post(`/api/machines/${m.id}/disconnect`);
       await load();
-    });
+    }));
+  };
 
   const pool = machinePool(machines ?? [], builtin);
   const activeCommand = liveCommand(command, now);
@@ -917,10 +925,11 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           search={search}
           filters={machineFilters(t)}
           card={row => <MachineDetails row={row} subs={subs} me={me} now={now} order={{ shown: priority, last: Math.max(1, ...rows.map(one => placeOf(one) ?? 0)), moving }} controls={{
-            picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, disconnect, refresh: load, fail: setFailure,
+            picking, addCommands, coreCommands, setPicking, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, disconnect, refresh: load, fail: setFailure,
           }} />}
         />
       )} />
+      {confirmation.question}
     </section>
   );
 }

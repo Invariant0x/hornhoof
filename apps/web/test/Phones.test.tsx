@@ -29,6 +29,11 @@ it('shows only the owner controls and hides the live picture as soon as Stop ret
   await until(() => screen.queryByRole('img'));
   expect(screen.getByRole('img')).toHaveAttribute('src', '/api/phones/ph1/live/image?s=s1&v=1');
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+  const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to stop lending this phone?' });
+  expect(dialog).toHaveAccessibleDescription('My Pixel will stop taking work from assistants and return to your hands.');
+  expect(within(dialog).getByText('My Pixel').tagName).toBe('BDI');
+  expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Stop lending' }));
   await until(() => screen.queryByText('The screen is paused. The phone is in your hands.'));
   expect(screen.queryByRole('img')).not.toBeInTheDocument();
   expect(screen.getByText('Stop requested. Waiting for the computer to confirm.')).toBeInTheDocument();
@@ -67,6 +72,7 @@ it('keeps Stop when an older list request finishes afterwards', async () => {
   await until(() => screen.queryByRole('button', { name: 'Stop' }));
   await act(() => vi.advanceTimersByTimeAsync(5000));
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Stop lending' }));
   await until(() => screen.queryByText('In your hands'));
   await act(async () => resolveList([200, { phones: [PHONE] }]));
   expect(screen.getByText('In your hands')).toBeInTheDocument();
@@ -93,6 +99,7 @@ it('adds a network phone through labelled fields and returns control with Stop',
   await until(() => screen.queryByRole('article', { name: PHONE.name }));
   expect(calls.find(c => c.method === 'POST' && c.path === '/api/phones')?.body).toEqual({ machineId: MACHINE.id, name: PHONE.name, endpoint: PHONE.endpoint });
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Stop lending' }));
   await until(() => screen.queryByText('In your hands'));
   expect(screen.getByRole('button', { name: 'Lend to assistants' })).toBeInTheDocument();
 });
@@ -142,6 +149,7 @@ it.each([['en', en], ['ru', ru]] as const)('in %s shows a phone its computer doe
   const stop = within(card).getByRole('button', { name: t.phones.stop });
   expect(stop).toBeEnabled();
   fireEvent.click(stop);
+  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: language === 'en' ? 'Stop lending' : 'Отключить' }));
   await until(() => calls.find(c => c.method === 'POST' && c.path === '/api/phones/ph1/stop'));
   const ready = screen.getByRole('article', { name: here.name });
   expect(within(ready).getByText(t.phones.states.available)).not.toHaveClass('not_connected');
@@ -201,7 +209,33 @@ it.each([['en', en], ['ru', ru]] as const)('in %s shows available as a good stat
   const stop = within(off).getByRole('button', { name: t.phones.stop });
   expect(stop).toBeEnabled();
   fireEvent.click(stop);
+  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: language === 'en' ? 'Stop lending' : 'Отключить' }));
   await until(() => calls.find(c => c.method === 'POST' && c.path === '/api/phones/ph2/stop'));
+});
+
+it('cancels Stop without calling the server, keeps errors in the dialog, and resumes without asking', async () => {
+  const calls = mockApi({
+    'GET /api/phones': [200, { phones: [PHONE, { ...PHONE, id: 'ph2', name: 'Spare Pixel', lending: false, state: 'owner' }] }],
+    'POST /api/phones/ph1/stop': [500, { error: { code: 'internal', message: 'Stop refused.' } }],
+    'POST /api/phones/ph2/resume': [200, { ...PHONE, id: 'ph2', name: 'Spare Pixel', lending: true, state: 'available' }],
+  });
+  render(<Phones me={ME} machines={[MACHINE]} />);
+  const first = await until(() => screen.queryByRole('article', { name: 'My Pixel' }));
+  fireEvent.click(within(first).getByRole('button', { name: 'Stop' }));
+  const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to stop lending this phone?' });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(calls.some(c => c.path.endsWith('/stop'))).toBe(false);
+
+  fireEvent.click(within(first).getByRole('button', { name: 'Stop' }));
+  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Stop lending' }));
+  expect(await until(() => within(screen.getByRole('alertdialog')).queryByRole('alert'))).toHaveTextContent('Stop refused.');
+  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+
+  const spare = screen.getByRole('article', { name: 'Spare Pixel' });
+  fireEvent.click(within(spare).getByRole('button', { name: 'Lend to assistants' }));
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  await until(() => calls.find(c => c.method === 'POST' && c.path === '/api/phones/ph2/resume'));
 });
 
 /* Settings belong to a phone that is there: a missing phone or an offline computer shows its own state and no settings. */

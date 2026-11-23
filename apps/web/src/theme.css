@@ -98,6 +98,9 @@ input[type='number']::-webkit-outer-spin-button, input[type='number']::-webkit-i
 .btn.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); clip-path: none; }
 .btn.ghost:hover { box-shadow: inset 0 0 0 1px var(--cyan); }
 .btn.small { min-height: 30px; padding: 0 12px; font-size: 13px; }
+/* The action of a confirmation that removes, disconnects, takes back access or cannot be undone: --red fill, --on-red words,
+   the cut, hover and focus of .btn (style book 1.9, section 4 "Confirmation"). */
+.btn.danger { background: var(--red); color: var(--on-red); }
 /* A row's small action. */
 .act { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-family: var(--f-display); font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: border-color .15s, color .15s; }
 .act:hover { border-color: var(--cyan); color: var(--cyan-ink); }
@@ -386,6 +389,18 @@ select:disabled { opacity: .55; }
 .conn-foot > .entry-actions { flex: 0 0 auto; inline-size: auto; margin-inline-start: auto; }
 @media (prefers-reduced-motion: reduce) { .conn-try .spinner { animation: none; } }
 .dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+/* A confirmation (ui/ConfirmAction.tsx): a modal dialog element in the top layer that is the dim layer itself, with the
+   window in it. Its question and what happens wrap whole, breaking a word only when it is longer than the line; the line
+   that the action cannot be undone in --pink-ink; the turning ring beside the words of the waiting button. */
+dialog.dialog-back { inline-size: auto; block-size: auto; max-inline-size: none; max-block-size: none; margin: 0; border: 0; color: var(--ink); }
+dialog.dialog-back:not([open]) { display: none; }
+dialog.dialog-back::backdrop { background: transparent; }
+dialog.dialog-back > .dialog > :is(h2, p) { min-inline-size: 0; overflow-wrap: anywhere; }
+dialog.dialog-back > .dialog > p bdi { font-weight: 600; }
+dialog.dialog-back > .dialog > p[data-final] { font-size: 13px; color: var(--pink-ink); }
+dialog.dialog-back > .dialog > .alert { margin: 0; }
+dialog.dialog-back .busy-swap > * { display: inline-flex; align-items: center; gap: 8px; }
+dialog.dialog-back .btn .spinner { border-color: color-mix(in srgb, currentColor 30%, transparent); border-block-start-color: currentColor; }
 .first-contact > *, .first-contact h2 { min-inline-size: 0; overflow-wrap: anywhere; }
 .versions-check { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .update-note { padding: 10px 12px; border-left: 3px solid var(--amber); background: var(--surface2); font-size: 13px; }

@@ -1,13 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { errorText, useT } from '../i18n';
+import { errorText, Phrase, useT } from '../i18n';
 import type { GoogleSheetsConfig } from '../types';
+import { useConfirmAction } from './ConfirmAction';
 import { Field } from './Field';
 import { Idents } from './Idents';
 import { IntegrationCard } from './IntegrationCard';
 import { NOT_A_LOGIN } from './SecretInput';
 
-type Mode = 'view' | 'edit' | 'remove';
+type Mode = 'view' | 'edit';
 type Change = (action: () => Promise<GoogleSheetsConfig | null>) => void;
 
 /* The key and the Google account new spreadsheets are shared with, as typed; an empty key keeps the saved one. */
@@ -65,22 +66,9 @@ function GoogleSheetsForm({ google, busy, change, onCancel }: { google: GoogleSh
 }
 
 /* The buttons under the saved settings: Connect, the main button while nothing is connected; Change and the pink
-   Disconnect once it is; and the question before disconnecting. */
-function GoogleSheetsActions({ google, mode, busy, change, setMode }: { google: GoogleSheetsConfig | null; mode: Mode; busy: boolean; change: Change; setMode(mode: Mode): void }) {
+   Disconnect once it is. */
+function GoogleSheetsActions({ google, setMode, onDisconnect }: { google: GoogleSheetsConfig | null; setMode(mode: Mode): void; onDisconnect(account: string): void }) {
   const t = useT();
-  if (mode === 'remove') {
-    return (
-      <div className="repo-actions">
-        <span>{t.googleSheets.removeAsk}</span>
-        <button className="btn small" type="button" disabled={busy} onClick={() => change(async () => (await api.del('/api/google-sheets'), null))}>
-          {t.googleSheets.yesRemove}
-        </button>
-        <button className="btn small ghost" type="button" onClick={() => setMode('view')}>
-          {t.googleSheets.keep}
-        </button>
-      </div>
-    );
-  }
   if (!google) {
     return (
       <div className="repo-actions">
@@ -95,7 +83,7 @@ function GoogleSheetsActions({ google, mode, busy, change, setMode }: { google: 
       <button className="btn small ghost" type="button" onClick={() => setMode('edit')}>
         {t.googleSheets.change}
       </button>
-      <button className="btn small ghost danger" type="button" onClick={() => setMode('remove')}>
+      <button className="btn small ghost danger" type="button" onClick={() => onDisconnect(google.account)}>
         {t.googleSheets.remove}
       </button>
     </div>
@@ -134,19 +122,24 @@ function useGoogleSheets() {
     }
   }
   const change: Change = action => void applyChange(action);
+  const disconnect = async () => {
+    await api.del('/api/google-sheets');
+    setGoogle(null);
+    setMode('view');
+  };
 
-  return { google, mode, busy, failure, pick, change };
+  return { google, mode, busy, failure, pick, change, disconnect };
 }
 
 /* The form while it is open, else what is saved and the buttons under it. */
-function GoogleSheetsBody({ google, mode, busy, change, pick }: { google: GoogleSheetsConfig | null | undefined; mode: Mode; busy: boolean; change: Change; pick(mode: Mode): void }) {
+function GoogleSheetsBody({ google, mode, busy, change, pick, onDisconnect }: { google: GoogleSheetsConfig | null | undefined; mode: Mode; busy: boolean; change: Change; pick(mode: Mode): void; onDisconnect(account: string): void }) {
   const t = useT();
   if (google === undefined) return null;
   if (mode === 'edit') return <GoogleSheetsForm google={google} busy={busy} change={change} onCancel={() => pick('view')} />;
   return (
     <div className="repo">
       <p>{google ? <Idents text={t.googleSheets.saved(google.account, google.keyLast4, google.shareEmail)} idents={[google.account, google.shareEmail]} /> : t.googleSheets.none}</p>
-      <GoogleSheetsActions google={google} mode={mode} busy={busy} change={change} setMode={pick} />
+      <GoogleSheetsActions google={google} setMode={pick} onDisconnect={onDisconnect} />
     </div>
   );
 }
@@ -154,16 +147,26 @@ function GoogleSheetsBody({ google, mode, busy, change, pick }: { google: Google
 /* Google Sheets as a card of the Integrations group: connected while a key is saved. */
 export function GoogleSheetsCard() {
   const t = useT();
-  const { google, mode, busy, failure, pick, change } = useGoogleSheets();
+  const { google, mode, busy, failure, pick, change, disconnect } = useGoogleSheets();
+  const confirmation = useConfirmAction();
   if (google === undefined && failure === null) return null;
+  const askDisconnect = (account: string) => {
+    confirmation.ask({
+      ...t.googleSheets.confirm.disconnect,
+      effect: <Phrase words={t.googleSheets.confirm.disconnect.effect} values={[<bdi>{account}</bdi>]} />,
+      danger: true,
+      onYes: disconnect,
+    });
+  };
   return (
     <IntegrationCard name={t.googleSheets.title} about={t.googleSheets.about} connected={Boolean(google)}>
-      <GoogleSheetsBody google={google} mode={mode} busy={busy} change={change} pick={pick} />
+      <GoogleSheetsBody google={google} mode={mode} busy={busy} change={change} pick={pick} onDisconnect={askDisconnect} />
       {failure !== null && (
         <p className="alert" role="alert">
           {errorText(t, failure)}
         </p>
       )}
+      {confirmation.question}
     </IntegrationCard>
   );
 }

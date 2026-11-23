@@ -109,7 +109,22 @@ describe('Backups in Settings', () => {
     await user.click(within(ask).getByRole('button', { name: 'Cancel' }));
     expect(calls.filter(call => call.method === 'POST')).toEqual([]);
     await user.click(screen.getByRole('button', { name: /^Restore the backup of / }));
-    await user.click(within(await screen.findByRole('group', { name: /^Restore the company/ })).getByRole('button', { name: 'Restore' }));
+    const askAgain = await screen.findByRole('group', { name: /^Restore the company/ });
+    await user.click(within(askAgain).getByRole('button', { name: 'Restore' }));
+    const confirm = screen.getByRole('alertdialog', { name: 'Do you really want to restore this backup?' });
+    expect(confirm.querySelector('p bdi')).not.toBeNull();
+    expect(confirm).toHaveTextContent(/comes back as additions/);
+    expect(confirm).toHaveTextContent('Everyone signs in again afterwards.');
+    expect(confirm).toHaveTextContent('This cannot be undone.');
+    expect(within(confirm).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(within(confirm).getByRole('button', { name: 'Restore' })).toHaveClass('danger');
+    /* Cancelling the confirmation dialog leaves RestoreAsk open and sends nothing. */
+    await user.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: /^Restore the company/ })).toBeInTheDocument();
+    expect(calls.filter(call => call.method === 'POST')).toEqual([]);
+    await user.click(within(screen.getByRole('group', { name: /^Restore the company/ })).getByRole('button', { name: 'Restore' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Restore' }));
     await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toEqual([{ method: 'POST', path: `/api/backups/${ID}/restore`, body: { bringBack: true } }]));
     /* The steps it went through so far, and no button to start another meanwhile. */
     expect(await screen.findByText('Opening it')).toHaveAttribute('aria-current', 'step');
@@ -174,6 +189,15 @@ describe('Backups in Settings', () => {
     const ask = await screen.findByRole('group', { name: /^Restore the company/ });
     await user.click(within(ask).getByRole('checkbox', { name: /^Bring back what came after / }));
     await user.click(within(ask).getByRole('button', { name: 'Restore' }));
+    const confirm = screen.getByRole('alertdialog', { name: 'Do you really want to restore this backup?' });
+    expect(confirm).toHaveTextContent(/does not come back\./);
+    expect(confirm).toHaveTextContent('Everyone signs in again afterwards.');
+    await user.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+    /* Cancelling leaves the unticked checkbox intact. */
+    expect(within(ask).getByRole('checkbox', { name: /^Bring back what came after / })).not.toBeChecked();
+    expect(calls.filter(call => call.method === 'POST')).toEqual([]);
+    await user.click(within(ask).getByRole('button', { name: 'Restore' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Restore' }));
     await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toEqual([{ method: 'POST', path: `/api/backups/${ID}/restore`, body: { bringBack: false } }]));
   });
 
@@ -205,11 +229,17 @@ describe('Backups in Settings', () => {
     const buttons = screen.getAllByRole('button', { name: /^Leave out the database from before the restore of / });
     expect(buttons).toHaveLength(2);
     await user.click(buttons[0]!);
-    const question = 'What it held after the backup will not come back. It stays as an encrypted backup for 30 days.';
-    await user.click(within(screen.getByRole('group', { name: question })).getByRole('button', { name: 'Cancel' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to leave this database out?' });
+    expect(dialog.querySelector('p bdi')).not.toBeNull();
+    expect(dialog).toHaveTextContent('What it held after the backup will not come back. It stays as an encrypted backup for 30 days.');
+    expect(dialog).toHaveTextContent('This cannot be undone.');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(within(dialog).getByRole('button', { name: 'Leave out' })).toHaveClass('danger');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(calls.filter(call => call.method === 'POST')).toEqual([]);
     await user.click(screen.getAllByRole('button', { name: /^Leave out the database from before the restore of / })[0]!);
-    await user.click(within(screen.getByRole('group', { name: question })).getByRole('button', { name: 'Leave it out' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Leave out' }));
     await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toEqual([{ method: 'POST', path: '/api/backups/kept/hornhoof_before_20261110_090000/leave', body: undefined }]));
     await waitFor(() => expect(screen.getAllByText('Left out. Removed once its backup is made.')).toHaveLength(2));
   });
@@ -246,10 +276,16 @@ describe('Backups in Settings', () => {
     await user.upload(screen.getByLabelText('Recovery file'), new File(['# Hornhoof recovery file for Acme.\n{"v":1}\n'], 'hornhoof-recovery.txt', { type: 'text/plain' }));
     await waitFor(() => expect(within(ask).getByRole('button', { name: 'Restore' })).toBeEnabled());
     await user.click(within(ask).getByRole('button', { name: 'Restore' }));
+    /* Cancelling leaves the uploaded recovery file intact so Restore stays enabled. */
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+    expect(within(ask).getByRole('button', { name: 'Restore' })).toBeEnabled();
+    expect(calls.filter(call => call.method === 'POST')).toEqual([]);
+    await user.click(within(ask).getByRole('button', { name: 'Restore' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Restore' }));
     await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toEqual([{ method: 'POST', path: `/api/backups/${ID}/restore`, body: { recoveryFile: '# Hornhoof recovery file for Acme.\n{"v":1}\n', bringBack: true } }]));
   });
 
-  it('says why a restore could not start', async () => {
+  it('says why a restore could not start inside the confirmation dialog', async () => {
     mockApi({
       'GET /api/backups': [200, viewOf()],
       [`GET /api/backups/${ID}/warning`]: [200, { machines: [], people: [] }],
@@ -259,6 +295,8 @@ describe('Backups in Settings', () => {
     shown();
     await user.click(await screen.findByRole('button', { name: /^Restore the backup of / }));
     await user.click(within(await screen.findByRole('group', { name: /^Restore the company/ })).getByRole('button', { name: 'Restore' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('A restore or an update is running already. Wait for it to finish.');
+    const dialog = screen.getByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Restore' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('A restore or an update is running already. Wait for it to finish.');
   });
 });

@@ -72,6 +72,10 @@ test('Escape closes the newest panel first, and the terminal does not hear it', 
   await expect.poll(heard).toHaveLength(1);
   await window.focus();
   await page.keyboard.press('Escape');
+  const stopDialog = page.getByRole('alertdialog');
+  await expect(stopDialog).toBeVisible();
+  expect(stops).toEqual([]);
+  await stopDialog.getByRole('button', { name: 'Stop', exact: true }).click();
   await expect.poll(() => stops).toEqual(['POST']);
   expect(errors).toEqual([]);
 });

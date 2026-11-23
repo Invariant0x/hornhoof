@@ -259,14 +259,21 @@ describe('the chat', () => {
     expect(screen.getByText('No departments')).toBeInTheDocument();
   });
 
-  it('says plainly that the agent works, and stops it', async () => {
+  it('says plainly that the agent works, and asks before stopping it', async () => {
     const user = userEvent.setup();
     const { calls } = await act(async () => open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...BUSY, queued: 2 } }], 'POST /api/agents/orchestrator/stop': [202] }));
     const state = await screen.findByRole('status', { name: 'Agent state' });
     expect(state).toHaveTextContent('Working on it');
     expect(state).toHaveTextContent('2 more messages wait their turn');
     await user.click(within(state).getByRole('button', { name: 'Stop' }));
-    expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(true);
+    expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(false);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to stop current work?' });
+    expect(dialog).toHaveAccessibleDescription('Orchestrator will stop its current turn right away.');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(false);
+    await user.click(within(state).getByRole('button', { name: 'Stop' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Stop' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toHaveLength(1));
   });
 
   it('says that an agent with nothing to do sleeps until its next task', async () => {

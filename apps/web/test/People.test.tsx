@@ -16,6 +16,8 @@ const iconOf = (element: HTMLElement) => element.querySelector('svg')!.outerHTML
 const drawn = (icon: ReactElement) => render(icon).container.innerHTML;
 
 const rowOf = (name: string) => screen.getByRole('row', { name: new RegExp(`^${name}\\b`) });
+/* The first button of a confirmation is its action, named by its verb. */
+const confirm = (user: ReturnType<typeof userEvent.setup>) => user.click(within(screen.getByRole('alertdialog')).getAllByRole('button')[0]);
 
 describe('People', () => {
   it('lists everyone with title, access and status', async () => {
@@ -149,6 +151,8 @@ describe('People', () => {
       expect(within(rowOf(name)).getAllByRole('button').map(b => b.textContent)).toEqual(['Edit']);
     }
     await user.click(within(rowOf('Sasha')).getByRole('button', { name: 'Disable Sasha' }));
+    expect(calls.some(c => c.method === 'PATCH')).toBe(false);
+    await confirm(user);
     expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/people/p3', body: { status: 'disabled' } });
   });
 
@@ -192,11 +196,13 @@ describe('deleting a person', () => {
     const user = userEvent.setup();
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Delete Sasha' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Delete Sasha for good?' });
-    expect(dialog).toHaveAccessibleDescription(/cannot be undone/);
-    expect(dialog).toHaveFocus();
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to delete this person?' });
+    expect(dialog).toHaveAccessibleDescription('Sasha will be deleted from the company.');
+    expect(dialog).toHaveTextContent(/stop working.*This cannot be undone\./);
+    expect(within(dialog).getByRole('button', { name: 'Delete' })).toHaveClass('danger');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
     expect(calls.some(c => c.method === 'DELETE')).toBe(false);
-    await user.click(within(dialog).getByRole('button', { name: 'Yes, delete' }));
+    await confirm(user);
     expect(calls.filter(c => c.method === 'DELETE')).toEqual([{ method: 'DELETE', path: '/api/people/p3', body: undefined }]);
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(screen.queryByRole('cell', { name: 'Sasha' })).not.toBeInTheDocument();
@@ -208,7 +214,9 @@ describe('deleting a person', () => {
     const user = userEvent.setup();
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Delete Ava' }));
-    expect(screen.getByRole('alertdialog', { name: 'Delete Ava for good?' })).toHaveAccessibleDescription(/key stops working and its own agent leaves the company/);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to delete this assistant?' });
+    expect(dialog).toHaveAccessibleDescription('Ava will be deleted from the company.');
+    expect(dialog).toHaveTextContent(/key stops working and its own agent leaves the company/);
   });
 
   it('leaves the person as they are on Cancel or Escape', async () => {
@@ -231,11 +239,11 @@ describe('deleting a person', () => {
     const user = userEvent.setup();
     render(<People me={ME} selected="p3" onSelect={onSelect} />);
     await user.click(await screen.findByRole('button', { name: 'Delete Maria' }));
-    await user.click(screen.getByRole('button', { name: 'Yes, delete' }));
+    await confirm(user);
     expect(screen.queryByRole('cell', { name: 'Maria' })).not.toBeInTheDocument();
     expect(onSelect).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Delete Sasha' }));
-    await user.click(screen.getByRole('button', { name: 'Yes, delete' }));
+    await confirm(user);
     expect(onSelect).toHaveBeenCalledWith(null);
   });
 
@@ -245,7 +253,7 @@ describe('deleting a person', () => {
     const user = userEvent.setup();
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Delete Maria' }));
-    await user.click(screen.getByRole('button', { name: 'Yes, delete' }));
+    await confirm(user);
     expect(await screen.findByRole('alert')).toHaveTextContent('maria-box runs the company server');
     expect(screen.getByRole('cell', { name: 'Maria' })).toBeInTheDocument();
   });
@@ -256,13 +264,14 @@ describe('deleting a person', () => {
     const user = userEvent.setup();
     render(<LanguageProvider><People me={ME} /></LanguageProvider>);
     await user.click(await screen.findByRole('button', { name: 'Удалить Sasha' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Удалить Sasha навсегда?' });
-    expect(dialog).toHaveAccessibleDescription(/Отменить это нельзя/);
-    expect(within(dialog).getByRole('button', { name: 'Да, удалить' })).toBeInTheDocument();
+    const dialog = screen.getByRole('alertdialog', { name: 'Вы действительно хотите удалить этого человека?' });
+    expect(dialog).toHaveAccessibleDescription('Учетная запись Sasha будет удалена из компании.');
+    expect(dialog).toHaveTextContent(/Это нельзя отменить\./);
+    expect(within(dialog).getByRole('button', { name: 'Удалить' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: ru.common.cancel })).toBeInTheDocument();
     await user.keyboard('{Escape}');
     await user.click(screen.getByRole('button', { name: 'Удалить Ava' }));
-    expect(screen.getByRole('alertdialog', { name: 'Удалить Ava навсегда?' })).toHaveAccessibleDescription(/ключ перестанет работать/);
+    expect(screen.getByRole('alertdialog', { name: 'Вы действительно хотите удалить этого помощника?' })).toHaveTextContent(/Помощник Ava будет удален из компании\..*ключ перестанет работать/);
     localStorage.clear();
   });
 });
@@ -337,6 +346,7 @@ describe('People row actions', () => {
     await user.type(title, 'Head of social');
     await user.click(screen.getByRole('checkbox', { name: 'Marketing' }));
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await confirm(user);
     expect(calls.find(c => c.method === 'PATCH')).toEqual({
       method: 'PATCH',
       path: '/api/people/p3',
@@ -377,6 +387,7 @@ describe('the name in the edit form', () => {
     await retype(user, 'Name', '  Maria Ray  ');
     await retype(user, 'Title', 'COO');
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await confirm(user);
     expect(patched(calls)).toEqual({ method: 'PATCH', path: '/api/people/p2', body: { name: 'Maria Ray', title: 'COO', access: { whole: true } } });
     expect(await screen.findByRole('cell', { name: 'Maria Ray' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
@@ -386,6 +397,7 @@ describe('the name in the edit form', () => {
     const { calls, user } = await open(DEPUTY, 'Sasha', { 'PATCH /api/people/p3': [200, { person: { ...PEOPLE[2], name: 'Sasha Lee' } }] });
     await retype(user, 'Name', 'Sasha Lee');
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await confirm(user);
     expect(patched(calls)!.body).toMatchObject({ name: 'Sasha Lee' });
     expect(await screen.findByRole('cell', { name: 'Sasha Lee' })).toBeInTheDocument();
   });
@@ -395,6 +407,7 @@ describe('the name in the edit form', () => {
     expect(screen.queryByRole('checkbox', { name: 'Whole company' })).not.toBeInTheDocument();
     await retype(user, 'Name', 'Ivan R');
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await confirm(user);
     expect(patched(calls)!.body).toEqual({ name: 'Ivan R', title: 'CEO' });
   });
 
@@ -403,6 +416,7 @@ describe('the name in the edit form', () => {
     const { calls, user } = await open(LISTED, 'Sasha', { 'PATCH /api/people/p3': [200, { person: { ...PEOPLE[2], name: 'Sasha Lee' } }] }, onRenamed);
     await retype(user, 'Name', 'Sasha Lee');
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await confirm(user);
     expect(patched(calls)!.body).toEqual({ name: 'Sasha Lee', title: 'SMM' });
     expect(await screen.findByRole('cell', { name: 'Sasha Lee' })).toBeInTheDocument();
     expect(onRenamed).toHaveBeenCalledWith('Sasha Lee');
@@ -413,6 +427,7 @@ describe('the name in the edit form', () => {
     const { user } = await open(ME, 'Maria', { 'PATCH /api/people/p2': [200, { person: { ...PEOPLE[1], name: 'Maria Ray' } }] }, onRenamed);
     await retype(user, 'Name', 'Maria Ray');
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await confirm(user);
     expect(await screen.findByRole('cell', { name: 'Maria Ray' })).toBeInTheDocument();
     expect(onRenamed).not.toHaveBeenCalled();
   });
@@ -458,6 +473,7 @@ describe('the name in the edit form', () => {
     const { user } = await open(ME, 'Maria', { 'PATCH /api/people/p2': [403, { error: { code: 'forbidden', message: 'Only the CEO or the CEO delegate changes another person\'s name.', reason: 'owner_locked' } }] });
     await retype(user, 'Name', 'Maria Ray');
     await user.click(screen.getByRole('button', { name: 'Save' }));
+    await confirm(user);
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.getByLabelText('Name')).toHaveValue('Maria Ray');
     expect(within(rowOf('Maria')).queryByText('Maria Ray')).not.toBeInTheDocument();
@@ -572,7 +588,7 @@ describe("a person's assistant", () => {
     expect(within(rowOf('Ava')).getByText('Assistant of Maria')).toBeInTheDocument();
   });
 
-  it('makes a key and shows it with the signing secret once, then replaces and revokes it', async () => {
+  it('makes a key and shows it with the signing secret once, then replaces and revokes it after asking', async () => {
     const calls = mockApi({
       ...lists([...PEOPLE, AVA]),
       'POST /api/people/h1/key': [201, { key: 'hha_KEY', signingSecret: 'hhs_SECRET', person: KEYED }],
@@ -582,7 +598,9 @@ describe("a person's assistant", () => {
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
     expect(screen.getByText('No key yet.')).toBeInTheDocument();
+    /* First-time Issue key runs directly with no confirmation dialog. */
     await user.click(screen.getByRole('button', { name: 'Issue key' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(await screen.findByText('hha_KEY')).toBeInTheDocument();
     expect(screen.getByText('hhs_SECRET')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy key' })).toBeInTheDocument();
@@ -591,10 +609,107 @@ describe("a person's assistant", () => {
     await user.click(screen.getByRole('button', { name: 'Hide key' }));
     expect(screen.queryByText('hha_KEY')).not.toBeInTheDocument();
     expect(screen.getByText(/^Key made on/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Replace key' })).toBeInTheDocument();
+
+    /* Replace key asks first, names the assistant in <bdi>, warns it cannot be undone, and cancels cleanly. */
+    await user.click(screen.getByRole('button', { name: 'Replace key' }));
+    const replaceDialog = screen.getByRole('alertdialog', { name: "Do you really want to replace this assistant's key?" });
+    expect(replaceDialog).toHaveAccessibleDescription('The current key for Ava will stop working and a new one will be issued.');
+    expect(replaceDialog.querySelectorAll('bdi').length).toBe(1);
+    expect(replaceDialog).toHaveTextContent('This cannot be undone.');
+    expect(within(replaceDialog).getByRole('button', { name: 'Replace key' })).toHaveClass('danger');
+    expect(within(replaceDialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(replaceDialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.filter(c => c.path === '/api/people/h1/key')).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Replace key' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Replace key' }));
+    expect(await screen.findByText('hha_KEY')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Hide key' }));
+
+    /* Revoke key asks first, names the assistant in <bdi>, warns it cannot be undone, and cancels cleanly on Escape. */
     await user.click(screen.getByRole('button', { name: 'Revoke key' }));
+    const revokeDialog = screen.getByRole('alertdialog', { name: "Do you really want to revoke this assistant's key?" });
+    expect(revokeDialog).toHaveAccessibleDescription('The key for Ava will stop working immediately.');
+    expect(revokeDialog.querySelectorAll('bdi').length).toBe(1);
+    expect(revokeDialog).toHaveTextContent('This cannot be undone.');
+    expect(within(revokeDialog).getByRole('button', { name: 'Revoke key' })).toHaveClass('danger');
+    expect(within(revokeDialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.filter(c => c.method === 'DELETE')).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Revoke key' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Revoke key' }));
     expect(await screen.findByText('No key yet.')).toBeInTheDocument();
-    expect(calls.filter(c => c.path === '/api/people/h1/key').map(c => c.method)).toEqual(['POST', 'DELETE']);
+    expect(calls.filter(c => c.path === '/api/people/h1/key').map(c => c.method)).toEqual(['POST', 'POST', 'DELETE']);
+  });
+
+  it('asks before renaming an assistant, names old and new in <bdi>, keeps failures in the dialog, and saves directly when name is unchanged', async () => {
+    let fail = true;
+    let current: PersonView = AVA;
+    const calls = mockApi({
+      ...lists([...PEOPLE, AVA]),
+      'PATCH /api/people/h1': (body: unknown) => {
+        if ((body as { name?: string }).name && fail) return [500, { error: { code: 'internal', message: 'Could not rename.' } }];
+        current = { ...current, ...(body as Partial<PersonView>) };
+        return [200, { person: current }];
+      },
+      'PATCH /api/people/h1/assistant': () => [200, { person: current }],
+    });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
+    /* Saving with an unchanged assistant name saves directly with no confirmation dialog. */
+    const titleField = screen.getByLabelText('Title');
+    await user.type(titleField, 'Daily helper');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PATCH').map(c => c.path)).toEqual(['/api/people/h1', '/api/people/h1/assistant']));
+
+    /* Reopen and rename: confirms with old and new names in <bdi>, keeps failures in the dialog, then succeeds. */
+    await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
+    const field = screen.getByLabelText('Assistant name');
+    await user.clear(field);
+    await user.type(field, 'Nova');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to rename this assistant?' });
+    expect(dialog).toHaveAccessibleDescription('Ava will be renamed to Nova.');
+    expect([...dialog.querySelectorAll('bdi')].map(n => n.textContent)).toEqual(['Ava', 'Nova']);
+    const yes = within(dialog).getByRole('button', { name: 'Rename' });
+    expect(yes).not.toHaveClass('danger');
+    expect(yes).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(2);
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Rename' }));
+    expect(await within(screen.getByRole('alertdialog')).findByRole('alert')).toHaveTextContent('Could not rename.');
+
+    fail = false;
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Rename' }));
+    await vi.waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(calls.filter(c => c.method === 'PATCH').map(c => c.path)).toEqual(['/api/people/h1', '/api/people/h1/assistant', '/api/people/h1', '/api/people/h1', '/api/people/h1/assistant']);
+    expect(within(rowOf('Nova')).getByText('Assistant of Maria')).toBeInTheDocument();
+  });
+
+  it('keeps replace and revoke key failures inside the confirmation dialog', async () => {
+    mockApi({
+      ...lists([...PEOPLE, KEYED]),
+      'POST /api/people/h1/key': [503, { error: { code: 'unavailable', message: 'Key service busy.' } }],
+      'DELETE /api/people/h1/key': [503, { error: { code: 'unavailable', message: 'Cannot revoke now.' } }],
+    });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
+    await user.click(screen.getByRole('button', { name: 'Replace key' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Replace key' }));
+    expect(await within(screen.getByRole('alertdialog')).findByRole('alert')).toHaveTextContent('Key service busy.');
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+
+    await user.click(screen.getByRole('button', { name: 'Revoke key' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Revoke key' }));
+    expect(await within(screen.getByRole('alertdialog')).findByRole('alert')).toHaveTextContent('Cannot revoke now.');
   });
 
   it.each([

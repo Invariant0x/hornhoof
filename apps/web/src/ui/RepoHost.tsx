@@ -1,7 +1,8 @@
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
-import { errorText, useT } from '../i18n';
+import { errorText, Phrase, useT } from '../i18n';
 import type { RepoHost, RepoKey } from '../types';
+import { useConfirmAction } from './ConfirmAction';
 import { Field } from './Field';
 import { Idents } from './Idents';
 import { IntegrationCard } from './IntegrationCard';
@@ -24,20 +25,25 @@ type Props = {
 /* One GitHub key, saved, changed or removed in place. An empty key field keeps the saved key. */
 function KeyPart({ path, saved, says, first, firstClass, onSaved }: Props) {
   const t = useT();
-  const [mode, setMode] = useState<'view' | 'edit' | 'remove'>('view');
+  const [mode, setMode] = useState<'view' | 'edit'>('view');
   const [owner, setOwner] = useState('');
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
+  const confirmation = useConfirmAction();
+
+  async function apply(change: () => Promise<RepoKey | null>) {
+    const key = await change();
+    onSaved?.(key);
+    setMode('view');
+    setToken('');
+  }
 
   async function run(change: () => Promise<RepoKey | null>) {
     setBusy(true);
     setFailure(null);
     try {
-      const key = await change();
-      onSaved?.(key);
-      setMode('view');
-      setToken('');
+      await apply(change);
     } catch (err) {
       setFailure(err);
     } finally {
@@ -54,41 +60,51 @@ function KeyPart({ path, saved, says, first, firstClass, onSaved }: Props) {
 
   function save(e: FormEvent) {
     e.preventDefault();
-    const body = { owner: owner.trim(), ...(token.trim() ? { token: token.trim() } : {}) };
-    void run(async () => (await api.put<{ host: RepoKey }>(path, body)).host);
+    const trimmedOwner = owner.trim();
+    const body = { owner: trimmedOwner, ...(token.trim() ? { token: token.trim() } : {}) };
+    const putKey = async () => (await api.put<{ host: RepoKey }>(path, body)).host;
+    if (!saved) return void run(putKey);
+    setFailure(null);
+    confirmation.ask({
+      ...t.repoHost.confirm.replace,
+      effect: <Phrase words={t.repoHost.confirm.replace.effect} values={[<bdi>{trimmedOwner}</bdi>]} />,
+      danger: true,
+      onYes: () => apply(putKey),
+    });
+  }
+
+  function askRemove(current: RepoKey) {
+    setFailure(null);
+    confirmation.ask({
+      ...t.repoHost.confirm.remove,
+      effect: <Phrase words={t.repoHost.confirm.remove.effect} values={[<bdi>{current.owner}</bdi>]} />,
+      final: true,
+      danger: true,
+      onYes: () => apply(async () => (await api.del(path), null)),
+    });
   }
 
   const alert = failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>;
 
-  if (mode === 'edit') {
-    return (
-      <form className="repo-form" onSubmit={save}>
-        <Field label={t.repoHost.owner} hint={t.repoHost.ownerHint}>{p => <input {...p} {...NOT_A_LOGIN} value={owner} onChange={e => setOwner(e.target.value)} maxLength={100} autoComplete="off" required />}</Field>
-        <Field label={t.repoHost.key} hint={saved ? t.repoHost.keyKeep : t.repoHost.keyHint}>
-          {p => <SecretInput {...p} value={token} onChange={e => setToken(e.target.value)} maxLength={500} />}
-        </Field>
-        <div className="form-foot">
-          <button className="btn" type="submit" disabled={busy || !owner.trim() || (!saved && !token.trim())}>{t.common.save}</button>
-          <button className="btn ghost" type="button" onClick={() => setMode('view')}>{t.common.cancel}</button>
-        </div>
-        {alert}
-      </form>
-    );
-  }
-
-  return (
+  const content = mode === 'edit' ? (
+    <form className="repo-form" onSubmit={save}>
+      <Field label={t.repoHost.owner} hint={t.repoHost.ownerHint}>{p => <input {...p} {...NOT_A_LOGIN} value={owner} onChange={e => setOwner(e.target.value)} maxLength={100} autoComplete="off" required />}</Field>
+      <Field label={t.repoHost.key} hint={saved ? t.repoHost.keyKeep : t.repoHost.keyHint}>
+        {p => <SecretInput {...p} value={token} onChange={e => setToken(e.target.value)} maxLength={500} />}
+      </Field>
+      <div className="form-foot">
+        <button className="btn" type="submit" disabled={busy || !owner.trim() || (!saved && !token.trim())}>{t.common.save}</button>
+        <button className="btn ghost" type="button" onClick={() => setMode('view')}>{t.common.cancel}</button>
+      </div>
+      {alert}
+    </form>
+  ) : (
     <div className="repo">
       <p>{says}</p>
-      {mode === 'remove' ? (
-        <div className="repo-actions">
-          <span>{t.repoHost.removeAsk}</span>
-          <button className="btn small" type="button" disabled={busy} onClick={() => void run(async () => (await api.del(path), null))}>{t.repoHost.yesRemove}</button>
-          <button className="btn small ghost" type="button" onClick={() => setMode('view')}>{t.repoHost.keep}</button>
-        </div>
-      ) : saved ? (
+      {saved ? (
         <div className="repo-actions">
           <button className="btn small ghost" type="button" onClick={edit}>{t.repoHost.change}</button>
-          <button className="btn small ghost danger" type="button" onClick={() => setMode('remove')}>{t.repoHost.remove}</button>
+          <button className="btn small ghost danger" type="button" onClick={() => askRemove(saved)}>{t.repoHost.remove}</button>
         </div>
       ) : (
         <div className="repo-actions">
@@ -98,6 +114,8 @@ function KeyPart({ path, saved, says, first, firstClass, onSaved }: Props) {
       {alert}
     </div>
   );
+
+  return <>{content}{confirmation.question}</>;
 }
 
 /* The whole company's key, as a card of the Integrations group: connected while a key is saved, shown once it is read. */

@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT } from '../i18n';
+import { deptLabel, errorText, Phrase, useLanguage, useT, type Messages } from '../i18n';
 import { fitTable } from '../ui/fit-table';
 import type { AccessInput, Me, Org, PersonView } from '../types';
 import { accessEmpty, accessInput, AccessPicker, accessText } from '../ui/AccessPicker';
 import { CopyButton } from '../ui/CopyButton';
+import { useConfirmAction, type Question } from '../ui/ConfirmAction';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
 import { doneOf, Hold, Idle, LoadLine, useHeldRows, useLoad, type Load } from '../ui/Loading';
@@ -16,8 +17,6 @@ import { AgentIcon, DeputyIcon, EditIcon, PersonIcon } from '../ui/icons';
 import { AssistantCard, KindSwitch, looksAfter, NewAssistant } from './PeopleAssistant';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 import { guardedResizeObserver } from '../guard';
-import { useDialogClose } from '../ui/use-dialog-close';
-import { useSteady } from './Feedback';
 
 /* assistant: a person without the whole company adds their own assistant. */
 type Panel =
@@ -25,7 +24,6 @@ type Panel =
   | { kind: 'assistant' }
   | { kind: 'link'; name: string; url: string }
   | { kind: 'edit'; person: PersonView; titleOnly: boolean; deputy: boolean }
-  | { kind: 'delete'; person: PersonView }
   | null;
 
 /* The link, shown once: its note, the link right under it, and Copy and Done under the link. */
@@ -42,38 +40,6 @@ function InviteLink({ name, url, onClose }: { name: string; url: string; onClose
         <div className="form-foot">
           <CopyButton text={url} className="btn" />
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.done}</button>
-        </div>
-      </div>
-    </Edge>
-  );
-}
-
-/* The CEO deletes a person or an assistant for good: one question that says what ends with them and that it cannot be
-   undone. The focus goes to it, and Escape leaves the person as they are. */
-function DeleteAsk({ person, onYes, onClose }: { person: PersonView; onYes: () => Promise<void>; onClose: () => void }) {
-  const t = useT();
-  const box = useDialogClose(useSteady(onClose));
-  const title = useId();
-  const note = useId();
-  const [busy, setBusy] = useState(false);
-  const yes = async () => {
-    setBusy(true);
-    try {
-      await onYes();
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Edge className="panel form-card" cut={12}>
-      <div ref={box} role="alertdialog" aria-labelledby={title} aria-describedby={note} tabIndex={-1}>
-        <div className="form-head">
-          <h2 className="form-title" id={title}>{person.assistant ? <AgentIcon /> : <PersonIcon />}{t.people.deleteAsk(person.name)}</h2>
-        </div>
-        <p className="muted" id={note}>{person.assistant ? t.people.deleteAssistantNote : t.people.deleteNote}</p>
-        <div className="form-foot">
-          <button className="btn" type="button" disabled={busy} onClick={() => void yes()}>{t.people.yesDelete}</button>
-          <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
         </div>
       </div>
     </Edge>
@@ -200,6 +166,70 @@ function changesOf(person: PersonView, { rename, titleOnly, telegram: tg }: Edit
 
 const fillable = ({ rename, titleOnly }: EditRights, draft: EditDraft): boolean => (!rename || draft.name.trim() !== '') && (titleOnly || !accessEmpty(draft.access));
 
+function sameAccess(a: AccessInput, b: AccessInput): boolean {
+  if ('whole' in a || 'whole' in b) return 'whole' in a && 'whole' in b;
+  const sameIds = (left: string[], right: string[]) => left.length === right.length && left.every(id => right.includes(id));
+  return sameIds(a.departments, b.departments) && sameIds(a.teams, b.teams);
+}
+
+function namedAccess(t: Messages, org: Org | null, access: AccessInput): string {
+  if ('whole' in access) return t.people.wholeCompany;
+  return (org?.departments ?? []).flatMap(d => [
+    ...(access.departments.includes(d.id) ? [deptLabel(t, d)] : []),
+    ...d.teams.filter(team => access.teams.includes(team.id)).map(team => `${deptLabel(t, d)} / ${team.name}`),
+  ]).join(', ');
+}
+
+type EditAsk = { title: string; yes: string; working: string; line: ReactNode; danger?: boolean };
+
+function editAsks(t: Messages, org: Org | null, person: PersonView, changes: ReturnType<typeof changesOf>, isDeputy: boolean): EditAsk[] {
+  const name = <bdi>{person.name}</bdi>;
+  const asks: EditAsk[] = [];
+  if (changes.name) asks.push({ ...t.confirm.renamePerson, line: <Phrase words={t.confirm.renamePerson.effect} values={[name, <bdi>{changes.name}</bdi>]} /> });
+  if (changes.access && !sameAccess(changes.access, accessInput(person.access))) {
+    asks.push({ ...t.confirm.access, line: <Phrase words={t.confirm.access.effect} values={[name, <bdi>{namedAccess(t, org, changes.access)}</bdi>]} /> });
+  }
+  if (isDeputy !== Boolean(person.isCeoDelegate)) {
+    const words = isDeputy ? t.confirm.makeDeputy : t.confirm.dropDeputy;
+    asks.push({ ...words, danger: !isDeputy, line: <Phrase words={words.effect} values={[name]} /> });
+  }
+  return asks;
+}
+
+function personEditQuestion(t: Messages, org: Org | null, person: PersonView, changes: ReturnType<typeof changesOf>, isDeputy: boolean, onYes: () => Promise<void>): Question | null {
+  const asks = editAsks(t, org, person, changes, isDeputy);
+  const [first, ...more] = asks;
+  if (!first) return null;
+  return {
+    title: more.length ? t.confirm.several : first.title,
+    effect: first.line,
+    warnings: more.map(ask => ask.line),
+    yes: more.length ? t.common.save : first.yes,
+    working: more.length ? t.confirm.working : first.working,
+    danger: asks.some(ask => Boolean(ask.danger)),
+    onYes,
+  };
+}
+
+function deletePersonQuestion(t: Messages, person: PersonView, onYes: () => Promise<void>): Question {
+  const words = person.assistant ? t.confirm.deleteAssistant : t.confirm.deletePerson;
+  return {
+    ...words,
+    effect: <Phrase words={words.effect} values={[<bdi>{person.name}</bdi>]} />,
+    warnings: [person.assistant ? t.people.deleteAssistantNote : t.people.deleteNote],
+    final: true,
+    danger: true,
+    onYes,
+  };
+}
+
+async function savePersonAndDeputy(person: PersonView, changes: ReturnType<typeof changesOf>, isDeputy: boolean, onUpdated: (p: PersonView) => void, onSaved: (p: PersonView) => void) {
+  const res = await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, changes);
+  /* The row shows what is saved even if the deputy's own call, which needs that access, fails after it. */
+  onUpdated(res.person);
+  onSaved(deputyCall(isDeputy, person, res.person) ? (await api.put<{ person: PersonView }>(`/api/people/${person.id}/ceo-delegate`, { isCeoDelegate: isDeputy })).person : res.person);
+}
+
 /* The name, when the form shows it, above the title. */
 function NameAndTitle({ rename, name, title, onName, onTitle }: { rename: boolean; name: string; title: string; onName: (name: string) => void; onTitle: (title: string) => void }) {
   const t = useT();
@@ -222,19 +252,25 @@ function EditForm({ person, org, titleOnly, rename, telegram: telegramShown, dep
   const draft = { name, title, access, telegram };
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
+  const confirmation = useConfirmAction();
 
-  async function submit(e: FormEvent) {
+  /* A new name, other access or the deputy's authority is asked once, every change of them named; a title or a Telegram
+     account alone saves at once. */
+  function submit(e: FormEvent) {
     e.preventDefault();
+    const changes = changesOf(person, rights, draft);
+    const question = personEditQuestion(t, org, person, changes, isDeputy, () => send(changes));
+    if (question) confirmation.ask(question);
+    else void save(changes);
+  }
+
+  const send = (changes: ReturnType<typeof changesOf>) => savePersonAndDeputy(person, changes, isDeputy, onUpdated, onSaved);
+
+  async function save(changes: ReturnType<typeof changesOf>) {
     setBusy(true);
     setFailure('');
     try {
-      const res = await api.patch<{ person: PersonView }>(
-        `/api/people/${person.id}`,
-        changesOf(person, rights, draft),
-      );
-      /* The row shows what is saved even if the deputy's own call, which needs that access, fails after it. */
-      onUpdated(res.person);
-      onSaved(deputyCall(isDeputy, person, res.person) ? (await api.put<{ person: PersonView }>(`/api/people/${person.id}/ceo-delegate`, { isCeoDelegate: isDeputy })).person : res.person);
+      await send(changes);
     } catch (err) {
       setFailure(errorText(t, err));
       setBusy(false);
@@ -246,7 +282,7 @@ function EditForm({ person, org, titleOnly, rename, telegram: telegramShown, dep
       <div className="form-head">
         <h2 className="form-title"><EditIcon />{t.people.editHeading(person.name)}</h2>
       </div>
-      <form onSubmit={e => void submit(e)} className="form-grid">
+      <form onSubmit={submit} className="form-grid">
         <NameAndTitle rename={rename} name={name} title={title} onName={setName} onTitle={setTitle} />
         {telegramShown && (
           <Field label={t.people.telegram} hint={t.people.telegramHint}>
@@ -263,6 +299,7 @@ function EditForm({ person, org, titleOnly, rename, telegram: telegramShown, dep
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
         </div>
       </form>
+      {confirmation.question}
     </Edge>
   );
 }
@@ -536,6 +573,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
   const [failure, setFailure] = useState<unknown>(null);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [askPeople] = useState(latestAnswers);
+  const confirmation = useConfirmAction();
   const canManage = me.person.scopeKind === 'company';
 
   const load = useCallback(async () => {
@@ -592,16 +630,30 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
     }
   }
 
-  const setStatus = (person: PersonView, status: 'active' | 'disabled') =>
-    run(async () => replace((await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, { status })).person));
-
-  const removePerson = (person: PersonView) =>
-    run(async () => {
-      await api.del(`/api/people/${person.id}`);
-      if (selected === person.id) onSelect?.(null);
-      setPeople(list => list?.filter(p => p.id !== person.id) ?? null);
-      setPanel(null);
+  const sendStatus = async (person: PersonView, status: 'active' | 'disabled') => replace((await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, { status })).person);
+  /* Turning a person off is asked first; turning them back on is not. */
+  async function setStatus(person: PersonView, status: 'active' | 'disabled') {
+    if (status === 'active') return run(() => sendStatus(person, status));
+    setFailure(null);
+    confirmation.ask({
+      ...t.confirm.disablePerson,
+      effect: <Phrase words={t.confirm.disablePerson.effect} values={[<bdi>{person.name}</bdi>]} />,
+      danger: true,
+      onYes: () => sendStatus(person, status),
     });
+  }
+
+  const removePerson = async (person: PersonView) => {
+    await api.del(`/api/people/${person.id}`);
+    if (selected === person.id) onSelect?.(null);
+    setPeople(list => list?.filter(p => p.id !== person.id) ?? null);
+    setPanel(null);
+  };
+  /* Deleting for good says what ends with the person or the assistant, and that it cannot be undone. */
+  const askDelete = (person: PersonView) => {
+    setFailure(null);
+    confirmation.ask(deletePersonQuestion(t, person, () => removePerson(person)));
+  };
 
   const newLink = (person: PersonView) =>
     run(async () => {
@@ -640,7 +692,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
         }}
         onClose={closePerson}
       />
-      {panel?.kind === 'delete' && <DeleteAsk person={panel.person} onYes={() => removePerson(panel.person)} onClose={() => setPanel(null)} />}
+      {confirmation.question}
       <LoadFailure failure={overPeople(people, loadFailure)} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
@@ -649,7 +701,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
           <table className="ptable">
             <PeopleHead />
             <tbody>
-              {shown.map(p => <PersonRow key={p.id} p={p} me={me} org={org} people={shown} routed={Boolean(onSelect)} openPerson={openPerson} newLink={newLink} setStatus={setStatus} askDelete={person => setPanel({ kind: 'delete', person })} />)}
+              {shown.map(p => <PersonRow key={p.id} p={p} me={me} org={org} people={shown} routed={Boolean(onSelect)} openPerson={openPerson} newLink={newLink} setStatus={setStatus} askDelete={askDelete} />)}
             </tbody>
           </table>
         </div>

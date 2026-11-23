@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { PhoneEndpoint, networkEndpoint, type PhoneDevice, type PhoneReadinessIssue } from '@hornhoof/protocol';
 import { api } from '../api';
-import { errorText, useT } from '../i18n';
+import { errorText, Phrase, useT } from '../i18n';
 import type { MachineView, Me } from '../types';
 import { CardFrame, CardHead, EmptyBox, Facts, Part } from './Cards';
+import { useConfirmAction } from './ConfirmAction';
 import { Field } from './Field';
 import { PhoneScreen } from './PhoneScreen';
 import { NOT_A_LOGIN } from './SecretInput';
@@ -130,12 +131,23 @@ function PhoneCard({ phone, mine, machine, onChanged }: { phone: PhoneView; mine
   const [watching, setWatching] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
-  async function control(action: 'stop' | 'resume') {
+  const confirmation = useConfirmAction();
+  const sendControl = async (action: 'stop' | 'resume') => onChanged(await api.post<PhoneView>(`/api/phones/${phone.id}/${action}`));
+  async function resume() {
     if (busy) return;
     setBusy(true); setFailure(null);
-    try { onChanged(await api.post<PhoneView>(`/api/phones/${phone.id}/${action}`)); }
+    try { await sendControl('resume'); }
     catch (error) { setFailure(error); }
     finally { setBusy(false); }
+  }
+  function askStop() {
+    setFailure(null);
+    confirmation.ask({
+      ...t.phones.confirm.stop,
+      effect: <Phrase words={t.phones.confirm.stop.effect} values={[<bdi>{phone.name}</bdi>]} />,
+      danger: true,
+      onYes: () => sendControl('stop'),
+    });
   }
   const missing = phone.connection === 'not_connected';
   /* Watching needs the phone on its computer and the computer online; noScreen names which of them is away. */
@@ -160,12 +172,13 @@ function PhoneCard({ phone, mine, machine, onChanged }: { phone: PhoneView; mine
     </Part>
     {mine && <Part title={t.phones.control}>
       <div className="entry-actions"><button type="button" className="act" aria-expanded={open} disabled={noScreen !== null} aria-describedby={noScreen ? reason : undefined} onClick={() => setWatching(v => !v)}>{open ? t.phones.hide : t.phones.watch}</button>
-        {phone.lending ? <button type="button" className="btn danger" disabled={busy} onClick={() => void control('stop')}>{t.phones.stop}</button> : <button type="button" className="btn" disabled={busy || phone.stopping} onClick={() => void control('resume')}>{t.phones.resume}</button>}
+        {phone.lending ? <button type="button" className="btn danger" disabled={busy} onClick={askStop}>{t.phones.stop}</button> : <button type="button" className="btn" disabled={busy || phone.stopping} onClick={() => void resume()}>{t.phones.resume}</button>}
       </div>
       {noScreen && <p id={reason} className="part-note">{t.phones.noScreen[noScreen]}</p>}
       {phone.stopping && <p role="status">{t.phones.stopping}</p>}
       {failure !== null && <p className="bad" role="alert">{errorText(t, failure)}</p>}
       {open && <PhoneScreen phone={phone} />}
     </Part>}
+    {confirmation.question}
   </CardFrame>;
 }

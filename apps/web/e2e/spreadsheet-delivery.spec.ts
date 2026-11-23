@@ -219,8 +219,10 @@ for (const lang of ['en', 'ru'] as const) {
         );
 
         await part.getByRole('button', { name: t.googleSheets.remove, exact: true }).click();
-        await fits(page, '.dialog', width);
-        await part.getByRole('button', { name: t.googleSheets.yesRemove, exact: true }).click();
+        const disconnectAsk = page.getByRole('alertdialog', { name: t.googleSheets.confirm.disconnect.title });
+        await expect(disconnectAsk).toBeVisible();
+        await fits(page, '[role="alertdialog"]', width);
+        await disconnectAsk.getByRole('button', { name: t.googleSheets.confirm.disconnect.yes, exact: true }).click();
         await expect(part.getByRole('button', { name: t.googleSheets.connect, exact: true })).toBeVisible();
         await fits(page, '.dialog', width);
         expect(errors).toEqual([]);

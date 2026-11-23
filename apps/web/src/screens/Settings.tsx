@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { errorText, LANGUAGES, useLanguage, useT } from '../i18n';
+import { errorText, LANGUAGES, Phrase, useLanguage, useT, type Messages } from '../i18n';
 import type { SettingsGroup } from '../routes';
 import { useLive } from '../tasks';
 import type { Me, PersonView, TlsView } from '../types';
 import { CopyButton } from '../ui/CopyButton';
+import { useConfirmAction, type Question } from '../ui/ConfirmAction';
 import { takeEscape } from '../ui/escape';
 import { Field } from '../ui/Field';
 import { INTEGRATIONS, Integrations } from '../ui/Integrations';
@@ -59,17 +60,32 @@ function NameForm({ me, onRenamed }: { me: Me; onRenamed?: (name: string) => voi
   const [name, setName] = useState(me.person.name);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState('');
+  const confirmation = useConfirmAction();
 
-  async function save(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) return setFailure(t.profile.nameRequired);
+    if (trimmed === me.person.name) return void save(trimmed);
+    setFailure('');
+    confirmation.ask({
+      ...t.confirm.renameSelf,
+      effect: <Phrase words={t.confirm.renameSelf.effect} values={[<bdi>{me.person.name}</bdi>, <bdi>{trimmed}</bdi>]} />,
+      onYes: () => send(trimmed),
+    });
+  }
+
+  async function send(trimmed: string) {
+    const res = await api.patch<{ person: PersonView }>(`/api/people/${me.person.id}`, { name: trimmed });
+    setName(res.person.name);
+    onRenamed?.(res.person.name);
+  }
+
+  async function save(trimmed: string) {
     setBusy(true);
     setFailure('');
     try {
-      const res = await api.patch<{ person: PersonView }>(`/api/people/${me.person.id}`, { name: trimmed });
-      setName(res.person.name);
-      onRenamed?.(res.person.name);
+      await send(trimmed);
     } catch (err) {
       setFailure(errorText(t, err));
     } finally {
@@ -79,7 +95,7 @@ function NameForm({ me, onRenamed }: { me: Me; onRenamed?: (name: string) => voi
 
   return (
     <section className="settings-part" aria-label={t.settings.groups.profile}>
-      <form className="settings-form" noValidate onSubmit={e => void save(e)}>
+      <form className="settings-form" noValidate onSubmit={submit}>
         <Field label={t.common.name} problem={failure || undefined}>
           {p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} required />}
         </Field>
@@ -87,6 +103,7 @@ function NameForm({ me, onRenamed }: { me: Me; onRenamed?: (name: string) => voi
           <button className="btn small" type="submit" disabled={busy}>{t.common.save}</button>
         </div>
       </form>
+      {confirmation.question}
     </section>
   );
 }
@@ -129,10 +146,26 @@ function Encryption({ tls }: { tls: TlsView | null }) {
 
 /* The company's public link at hornhoof.org, which a person who sees the whole company copies, moves to another name or
    removes. A company with no link starts on a long random name, as link names are public. */
+function changeLinkQuestion(t: Messages, loaded: Loaded | null, name: string, onYes: () => Promise<void>): Question | null {
+  const link = loaded?.link;
+  if (!link || link.name === name) return null;
+  return {
+    ...t.confirm.changeLink,
+    effect: <Phrase words={t.confirm.changeLink.effect} values={[<bdi>{link.url}</bdi>, <bdi>{`${name}.${loaded.domain}`}</bdi>]} />,
+    warnings: [t.settings.moveNote],
+    onYes,
+  };
+}
+
+function removeLinkQuestion(t: Messages, url: string, onYes: () => Promise<void>): Question {
+  return { ...t.confirm.removeLink, effect: <Phrase words={t.settings.removeAsk} values={[<bdi>{url}</bdi>]} />, danger: true, onYes };
+}
+
 function CompanyLink() {
   const t = useT();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [mode, setMode] = useState<'view' | 'edit' | 'remove'>('view');
+  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  const confirmation = useConfirmAction();
   const [name, setName] = useState('');
   const [state, setState] = useState<NameState>('empty');
   const [busy, setBusy] = useState(false);
@@ -143,15 +176,18 @@ function CompanyLink() {
     if (data) setLoaded(data);
   }, [data]);
 
+  const settle = (link: Link | null) => {
+    /* The old certificate is not shown after a change, since it was for the old name. */
+    setLoaded(was => ({ domain: was?.domain ?? '', link, tls: null }));
+    setMode('view');
+    if (!link) setName('');
+  };
+
   async function run(change: () => Promise<Link | null>) {
     setBusy(true);
     setFailure(null);
     try {
-      const link = await change();
-      /* The old certificate is not shown after a change, since it was for the old name. */
-      setLoaded(was => ({ domain: was?.domain ?? '', link, tls: null }));
-      setMode('view');
-      if (!link) setName('');
+      settle(await change());
     } catch (err) {
       setFailure(err);
     } finally {
@@ -159,10 +195,23 @@ function CompanyLink() {
     }
   }
 
-  const save = () => run(async () => (await api.put<{ link: Link }>('/api/link', { name })).link);
-  const remove = () => run(async () => (await api.del('/api/link'), null));
+  const putLink = async () => (await api.put<{ link: Link }>('/api/link', { name })).link;
+  const save = () => run(putLink);
   const check = (n: string) => api.get<NameCheck>(`/api/link/names/${encodeURIComponent(n)}`);
   const link = loaded?.link ?? null;
+  /* Opening the link saves at once; another name for a link in use is asked first, as is removing it. */
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    const question = changeLinkQuestion(t, loaded, name, async () => settle(await putLink()));
+    if (!question) return void save();
+    setFailure(null);
+    confirmation.ask(question);
+  }
+  const askRemove = (url: string) => {
+    setFailure(null);
+    confirmation.ask(removeLinkQuestion(t, url, async () => settle((await api.del('/api/link'), null))));
+  };
+
   if (unavailableFailure(loadFailure) || unavailableFailure(failure)) return null;
 
   return (
@@ -178,39 +227,26 @@ function CompanyLink() {
                 <CopyButton text={link.url} />
               </div>
               <Encryption tls={loaded.tls ?? null} />
-              {mode === 'remove' ? (
-                <div className="settings-actions">
-                  <span className="entry-main">{t.settings.removeAsk(link.url)}</span>
-                  <div className="entry-actions" role="group" aria-label={t.settings.removeAsk(link.url)}>
-                    <button className="btn" type="button" disabled={busy} onClick={() => void remove()}>{t.settings.yesRemove}</button>
-                    <button className="btn ghost" type="button" onClick={() => setMode('view')}>{t.settings.keep}</button>
-                  </div>
-                </div>
-              ) : (
-                <div className="settings-actions">
-                  <button
-                    className="btn small ghost"
-                    type="button"
-                    onClick={() => {
-                      setName(link.name);
-                      setFailure(null);
-                      setMode('edit');
-                    }}
-                  >
-                    {t.settings.change}
-                  </button>
-                  <button className="btn small ghost danger" type="button" onClick={() => setMode('remove')}>{t.settings.remove}</button>
-                </div>
-              )}
+              <div className="settings-actions">
+                <button
+                  className="btn small ghost"
+                  type="button"
+                  onClick={() => {
+                    setName(link.name);
+                    setFailure(null);
+                    setMode('edit');
+                  }}
+                >
+                  {t.settings.change}
+                </button>
+                <button className="btn small ghost danger" type="button" disabled={busy}
+                  onClick={() => askRemove(link.url)}>
+                  {t.settings.remove}
+                </button>
+              </div>
             </>
           ) : (
-            <form
-              className="settings-form"
-              onSubmit={e => {
-                e.preventDefault();
-                void save();
-              }}
-            >
+            <form className="settings-form" onSubmit={submit}>
               {!link && <p>{t.settings.closed}</p>}
               <LinkName name={name} onName={setName} domain={loaded.domain} check={check} onState={setState} current={link?.name} startRandom={!link} />
               {link && <p className="update-note">{t.settings.moveNote}</p>}
@@ -224,6 +260,7 @@ function CompanyLink() {
       )}
       <LoadFailure failure={loadFailure} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      {confirmation.question}
     </>
   );
 }

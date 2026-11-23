@@ -1,7 +1,8 @@
-import { useLayoutEffect, useState } from 'react';
-import { errorText, useLanguage, useT } from '../i18n';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { errorText, Phrase, useLanguage, useT } from '../i18n';
 import type { UpdateCalledOff, UpdatesView, UpdateWaiting } from '../types';
 import type { Updates } from '../updates';
+import { useConfirmAction } from './ConfirmAction';
 import { useBarFold } from './shellBars';
 import { UpdateProgress } from './UpdateProgress';
 import { buildText, versionText } from './VersionMark';
@@ -63,6 +64,27 @@ function showsUpdate(updates: Updates): boolean {
   return updates.view !== null && (updates.starting || updates.view.updater.status?.state === 'running');
 }
 
+type CutTrack = { asked: boolean; saw: boolean };
+
+/* Tracks whether an update requested from this banner hit a running-turns cut and was then dismissed. */
+function nextCutTrack(track: CutTrack, updates: Updates, showingProgress: boolean): { next: CutTrack; focus: boolean } {
+  if (updates.cut) return { next: { asked: track.asked, saw: track.saw || track.asked }, focus: false };
+  if (track.saw) return { next: { asked: false, saw: false }, focus: !updates.starting && !showingProgress };
+  return { next: { asked: updates.asking && track.asked, saw: false }, focus: false };
+}
+
+/* When an update asked from this banner is held for running turns and then cancelled, return focus to its Update button. */
+function useCutFocusReturn(updates: Updates, showingProgress: boolean) {
+  const button = useRef<HTMLButtonElement>(null);
+  const track = useRef<CutTrack>({ asked: false, saw: false });
+  useEffect(() => {
+    const { next, focus } = nextCutTrack(track.current, updates, showingProgress);
+    track.current = next;
+    if (focus) button.current?.focus();
+  }, [updates.cut, updates.asking, updates.starting, showingProgress]);
+  return { button, markAsked: () => { track.current.asked = true; } };
+}
+
 /* Under the top bar: a newer build to take, an update waiting for the agents or running, or how the last one ended. */
 export function UpdateBanner({ updates, onDetails, onProgressShown }: {
   updates: Updates; onDetails: () => void; onProgressShown?: (shown: boolean) => void;
@@ -70,8 +92,10 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
   const t = useT();
   const [, rerender] = useState(0);
   const [failure, setFailure] = useState<unknown>(null);
+  const confirmation = useConfirmAction();
   const fold = useBarFold();
   const showingProgress = showsUpdate(updates);
+  const cutReturn = useCutFocusReturn(updates, showingProgress);
   useLayoutEffect(() => {
     if (!showingProgress || !onProgressShown) return;
     onProgressShown(true);
@@ -96,6 +120,19 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
     rerender(n => n + 1);
   };
 
+  const askUpdate = (build: string) => {
+    const words = t.updates.confirm.update;
+    setFailure(null);
+    confirmation.ask({
+      ...words,
+      effect: <Phrase words={words.effect} values={[<bdi>{build}</bdi>]} />,
+      onYes: () => {
+        cutReturn.markAsked();
+        return updates.update('latest', false);
+      },
+    });
+  };
+
   let body: React.ReactNode = null;
   if (showingProgress) {
     body = (
@@ -116,10 +153,11 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
     );
   } else if (view.available && view.latest && stored(LATER) !== view.latest.commit) {
     const latest = view.latest;
+    const build = buildText(latest);
     body = (
       <>
-        <span dir="auto">{t.updates.out(buildText(latest), latest.title)}</span>
-        <button className="btn small" type="button" disabled={updates.asking} onClick={() => void act(() => updates.update('latest', false))}>{t.updates.update}</button>
+        <span dir="auto">{t.updates.out(build, latest.title)}</span>
+        <button ref={cutReturn.button} className="btn small" type="button" disabled={updates.asking} onClick={() => askUpdate(build)}>{t.updates.update}</button>
         <button className="btn small ghost" type="button" disabled={updates.asking} onClick={() => void act(() => updates.update('latest', true))}>{t.updates.whenIdle}</button>
         <button className="btn small ghost" type="button" onClick={() => hide(LATER, latest.commit)}>{t.updates.later}</button>
       </>
@@ -130,6 +168,7 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
     <div className={fold.className} role="status" aria-label={t.updates.label}>
       {body}
       {fold.more}
+      {confirmation.question}
       {failure !== null && <p className="update-error" role="alert" dir="auto">{errorText(t, failure)}</p>}
     </div>
   );

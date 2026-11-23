@@ -16,6 +16,7 @@ for (const lang of ['en', 'ru'] as const) {
     for (const width of [1440, 375]) {
       test(`self rename in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
         let person = VIEW;
+        const namesSaved: string[] = [];
         await serveApi(page);
         await page.addInitScript(({ lang, theme }) => {
           localStorage.setItem('hh-lang', lang);
@@ -32,6 +33,7 @@ for (const lang of ['en', 'ru'] as const) {
         await page.route('**/api/people/p1', async route => {
           if (route.request().method() !== 'PATCH') return route.fallback();
           const body = route.request().postDataJSON() as { name: string };
+          namesSaved.push(body.name);
           person = { ...person, name: body.name };
           await route.fulfill({ json: { person } });
         });
@@ -46,12 +48,50 @@ for (const lang of ['en', 'ru'] as const) {
         const field = dialog.getByLabel(lang === 'en' ? 'Name' : 'Имя', { exact: true });
         await expect(field).toHaveValue('Lisa');
         await page.screenshot({ path: info.outputPath(`self-rename-field-${width}-${lang}-${theme}.png`) });
-        await field.fill(lang === 'en' ? '  Lisa Ray  ' : '  Лиза Рей  ');
-        await dialog.getByRole('button', { name: lang === 'en' ? 'Save' : 'Сохранить', exact: true }).click();
+        const name = lang === 'en' ? 'Lisa Ray' : 'Лиза Рей';
+        await field.fill(`  ${name}  `);
+        const save = dialog.getByRole('button', { name: lang === 'en' ? 'Save' : 'Сохранить', exact: true });
+        const confirmation = page.getByRole('alertdialog', { name: lang === 'en' ? 'Do you really want to change your name?' : 'Вы действительно хотите изменить свое имя?' });
+        const no = confirmation.getByRole('button', { name: lang === 'en' ? 'Cancel' : 'Отмена', exact: true });
+        const yes = confirmation.getByRole('button', { name: lang === 'en' ? 'Change name' : 'Изменить имя', exact: true });
+        const firstSave = page.waitForRequest(request => request.method() === 'PATCH' && new URL(request.url()).pathname === '/api/people/p1');
+        await save.click();
+        expect(await Promise.race([confirmation.waitFor().then(() => 'question'), firstSave.then(() => 'request')])).toBe('question');
+        await expect(confirmation).toContainText('Lisa');
+        await expect(confirmation).toContainText(name);
+        expect(namesSaved).toEqual([]);
+        /* A rename is not dangerous: the focus opens on its own button, and Tab goes round the two. */
+        await expect(yes).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(no).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(yes).toBeFocused();
+        await page.keyboard.press('Shift+Tab');
+        await expect(no).toBeFocused();
+        await no.click();
+        await expect(confirmation).toHaveCount(0);
+        await expect(save).toBeFocused();
+        expect(namesSaved).toEqual([]);
+        await save.click();
+        await page.keyboard.press('Escape');
+        await expect(confirmation).toHaveCount(0);
+        await expect(save).toBeFocused();
+        expect(namesSaved).toEqual([]);
+        await save.click();
+        await expect(confirmation).toBeVisible();
+        await page.mouse.click(2, 2);
+        await expect(confirmation).toHaveCount(0);
+        await expect(save).toBeFocused();
+        expect(namesSaved).toEqual([]);
+        await expect(field).toHaveValue(`  ${name}  `);
+        await save.click();
+        await yes.click();
+        await expect.poll(() => namesSaved).toEqual([name]);
+        await expect(confirmation).toHaveCount(0);
         await dialog.getByRole('button', { name: lang === 'en' ? 'Done' : 'Готово' }).click();
-        await expect(page.getByText(lang === 'en' ? 'Lisa Ray' : 'Лиза Рей', { exact: true })).toBeVisible();
+        await expect(page.getByText(name, { exact: true })).toBeVisible();
         await page.getByRole('button', { name: lang === 'en' ? 'Account' : 'Аккаунт' }).click();
-        await expect(page.locator('.account-menu').getByText(lang === 'en' ? 'Lisa Ray' : 'Лиза Рей', { exact: true })).toBeVisible();
+        await expect(page.locator('.account-menu').getByText(name, { exact: true })).toBeVisible();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         await page.screenshot({ path: info.outputPath(`self-rename-menu-${width}-${lang}-${theme}.png`) });
         expect(errors).toEqual([]);

@@ -98,9 +98,14 @@ describe('agent window task and controls', () => {
     await user.keyboard('{Escape}');
     expect(surface).not.toBeInTheDocument();
     expect(calls.filter(c => c.path.endsWith('/stop'))).toHaveLength(0);
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(window).toBeVisible();
     await user.keyboard('{Escape}');
-    expect(calls.filter(c => c.path.endsWith('/stop'))).toHaveLength(1);
+    const stopDialog = screen.getByRole('alertdialog', { name: 'Do you really want to stop current work?' });
+    expect(stopDialog).toHaveAccessibleDescription('Bruno will stop its current turn right away.');
+    expect(calls.filter(c => c.path.endsWith('/stop'))).toHaveLength(0);
+    await user.click(within(stopDialog).getByRole('button', { name: 'Stop' }));
+    await waitFor(() => expect(calls.filter(c => c.path.endsWith('/stop'))).toHaveLength(1));
   });
 
   it('closes the account dialog before the drawer underneath on separate Escapes', async () => {
@@ -144,7 +149,7 @@ describe('agent window task and controls', () => {
     await user.click(within(window).getByRole('button', { name: 'Card' }));
     const card = await within(window).findByRole('complementary', { name: 'Card: Bruno' });
     await user.click(await within(card).findByRole('button', { name: 'Remove from the company' }));
-    await user.click(within(card).getByRole('button', { name: 'Yes, remove' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(window).not.toBeInTheDocument());
     expect(calls).toContainEqual({ method: 'DELETE', path: '/api/agents/b1', body: undefined });
   });
@@ -251,7 +256,15 @@ describe('agent window task and controls', () => {
     expect(calls.filter(c => c.path.endsWith('/stop'))).toHaveLength(0);
     await user.click(screen.getByRole('button', { name: 'Restore Bruno, Backend engineer' }));
     await user.keyboard('{Escape}');
-    expect(calls.filter(c => c.path.endsWith('/stop'))).toHaveLength(1);
+    expect(screen.getByRole('alertdialog', { name: 'Do you really want to stop current work?' })).toBeInTheDocument();
+    expect(calls.filter(c => c.path.endsWith('/stop'))).toHaveLength(0);
+    /* A second Escape dismisses only the confirmation dialog without sending /stop. */
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.filter(c => c.path.endsWith('/stop'))).toHaveLength(0);
+    await user.keyboard('{Escape}');
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Stop' }));
+    await waitFor(() => expect(calls.filter(c => c.path.endsWith('/stop'))).toHaveLength(1));
   });
 
   it('restores a minimized window when the same employee is opened again', async () => {

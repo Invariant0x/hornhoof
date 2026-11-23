@@ -364,14 +364,35 @@ describe('choice request free-form feedback and option picking', () => {
     expect(noteBox).toHaveValue('Within Q4 limit');
     expect(within(approvalCard).getByRole('button', { name: en.tasks.decline })).toBeEnabled();
 
+    const stuckDraft = within(stuckCard).getByLabelText(en.tasks.yourAnswer);
+    await user.type(stuckDraft, 'Check the logs first');
     await user.click(within(stuckCard).getByRole('button', { name: en.tasks.cancelTask }));
+    expect(net.posted.filter(p => p.url === '/api/tasks/t404/cancel')).toEqual([]);
+    const cancelDialog = screen.getByRole('alertdialog', { name: 'Do you really want to cancel this task?' });
+    expect(cancelDialog).toHaveAccessibleDescription('#404 Stuck worker recovery and its open subtasks will be cancelled. Its record stays in history.');
+    expect(cancelDialog.querySelector('bdi')).toHaveTextContent('#404 Stuck worker recovery');
+    expect(within(cancelDialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(cancelDialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(net.posted.filter(p => p.url === '/api/tasks/t404/cancel')).toEqual([]);
+    expect(stuckDraft).toHaveValue('Check the logs first');
+
+    await user.click(within(stuckCard).getByRole('button', { name: en.tasks.cancelTask }));
+    const confirmCancel = screen.getByRole('alertdialog');
+    await user.click(within(confirmCancel).getByRole('button', { name: en.tasks.cancelTask }));
     expect(net.posted.at(-1)).toEqual({ url: '/api/tasks/t404/cancel', body: {} });
     expect(stuckCard).toHaveAttribute('aria-busy', 'true');
     expect(within(stuckCard).getByRole('status')).toHaveTextContent('Sending');
     expect(within(stuckCard).getByRole('button', { name: en.tasks.cancelTask })).toBeDisabled();
 
+    net.answerUrl('/api/tasks/t404/cancel', 500, { error: { code: 'internal', message: 'Cannot cancel now.' } });
+    expect(await within(confirmCancel).findByRole('alert')).toHaveTextContent('Cannot cancel now.');
+    expect(stuckDraft).toHaveValue('Check the logs first');
+
+    await user.click(within(confirmCancel).getByRole('button', { name: en.tasks.cancelTask }));
     net.answerUrl('/api/tasks/t404/cancel', 200, {});
     await vi.waitFor(() => expect(props.onChanged).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   });
 
   it('supports full keyboard navigation for both multi-line feedback submit and option pick', async () => {
@@ -476,6 +497,8 @@ describe('choice request free-form feedback and option picking', () => {
     await user.click(within(stuckCard!).getByRole('button', { name: en.tasks.openTerminal('Interface Designer (Gemini)') }));
     expect(onOpenAgent).toHaveBeenCalledWith('a-design');
     await user.click(within(stuckCard!).getByRole('button', { name: en.tasks.cancelTask }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: en.tasks.cancelTask }));
+    await vi.waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
 
     expect(within(policyCard!).getByText(en.tasks.asksApprovalOf('Interface Designer (Gemini)'))).toBeInTheDocument();
     await user.type(within(policyCard!).getByLabelText(en.tasks.note), 'Needs budget sign-off');

@@ -2,7 +2,7 @@ import { nextLevelProgress, type WorldLiveAgent, type WorldLiveSnapshot } from '
 import { commandBlockOpen } from '../ui/CommandBox';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api';
-import { deptLabel, errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
+import { deptLabel, errorText, Phrase, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { liveOf } from '../org';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
@@ -15,6 +15,7 @@ import { AddPicture, PictureTray, SentPictures, useDraftPictures, usePictureDrop
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { useChatScroll } from '../ui/chat-scroll';
 import { CommandCard } from '../ui/CommandCard';
+import { useConfirmAction } from '../ui/ConfirmAction';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { Markdown } from '../ui/Markdown';
 import { Inbox, useInboxCount } from '../ui/Inbox';
@@ -155,7 +156,25 @@ function useCardLocks(me: Me, open: unknown): { cardLock?: DecidedBy; handLock?:
 
 /* A task takes Escape before the terminal; a minimized agent leaves the rest of the screen alone. */
 function stopOnEscape(e: globalThis.KeyboardEvent, box: HTMLElement | null, stop: () => void): void {
-  if (e.key === 'Escape' && !e.defaultPrevented && !box?.hidden) stop();
+  if (e.key !== 'Escape' || e.defaultPrevented || box?.hidden) return;
+  e.preventDefault();
+  stop();
+}
+
+function useStopConfirm(runningJobId: string | null | undefined, path: string, agentName: string) {
+  const t = useT();
+  const { ask, question } = useConfirmAction();
+  const stop = useCallback(() => {
+    if (!runningJobId) return;
+    const words = t.window.confirm.stop;
+    ask({
+      ...words,
+      effect: <Phrase words={words.effect} values={[<bdi>{agentName || t.window.hiddenEmployee}</bdi>]} />,
+      danger: true,
+      onYes: () => api.post(`${path}/stop`),
+    });
+  }, [runningJobId, path, agentName, t.window.confirm.stop, t.window.hiddenEmployee, ask]);
+  return { stop, confirmQuestion: question };
 }
 
 /* Words a person wrote to the agent, as the chat shows them on the person's side. A notice Hornhoof passed on is not. */
@@ -590,9 +609,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     );
   }, [staff, state, path, t, catchUp]);
 
-  const stop = useCallback(() => {
-    if (state?.runningJobId) void api.post(`${path}/stop`).catch(setFailure);
-  }, [state?.runningJobId, path]);
+  const agentName = orchestrator ? t.window.orchestrator : card?.name || listedName(org, agentId);
+  const { stop, confirmQuestion } = useStopConfirm(state?.runningJobId, path, agentName);
 
   useEffect(() => {
     if (!state?.busy) return;
@@ -704,7 +722,6 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     fromEnd.current = null;
   }, [events, log]);
 
-  const agentName = orchestrator ? t.window.orchestrator : card?.name || listedName(org, agentId);
   const authorOf = (e: LogEvent): string => {
     if (!isMessage(e)) return e.person?.id === me.person.id ? t.window.chat.you : (e.person?.name ?? '');
     const name = e.message.from.id === me.person.id ? t.window.chat.you : partyName(t, language, e.message.from);
@@ -897,6 +914,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         {known && <span>{where}</span>}
         {chat && <span>{t.window.hint}</span>}
       </div>
+      {confirmQuestion}
     </AgentWindowLayout>
   );
 }

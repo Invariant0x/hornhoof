@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
-import { deptLabel, errorText, useT } from '../i18n';
+import { deptLabel, errorText, Phrase, useT, type Messages } from '../i18n';
 import { useOrg } from '../org';
-import type { ModelOption, SubView } from '../types';
+import type { ModelOption, Org, SubView } from '../types';
 import { subName } from './subscription';
 import { BusyLabel } from './BusyLabel';
+import { useConfirmAction, type Question } from './ConfirmAction';
 import { Field, type InputProps } from './Field';
 import { NOT_A_LOGIN, SecretInput } from './SecretInput';
 import { TickBox } from './TickBox';
@@ -36,6 +37,38 @@ const startTarget = (sub: SubView | undefined, places: readonly string[] | null)
 };
 const ownModels = (sub?: SubView): Model[] => (sub?.models ?? []).map(({ id, name }) => ({ id, name }));
 const isApi = (provider: string): provider is ApiProvider => (PROVIDERS as readonly string[]).includes(provider);
+
+function targetLabel(t: Messages, org: Org | null, value: string): string {
+  if (value === 'any') return t.subs.serves.any;
+  if (value === 'orchestrator') return t.subs.serves.orchestrator;
+  const places = (org?.departments ?? []).flatMap(d => [
+    [`department:${d.id}`, deptLabel(t, d)],
+    ...d.teams.map(team => [`team:${team.id}`, `${deptLabel(t, d)}, ${team.name}`]),
+  ]);
+  return places.find(([key]) => key === value)?.[1] ?? value;
+}
+
+function apiEditLines(t: Messages, org: Org | null, sub: SubView, label: string, scope: string, initialScope: string): ReactNode[] {
+  const plan = <bdi>{subName(t, sub)}</bdi>;
+  const lines: ReactNode[] = [];
+  if (label !== (sub.label ?? '')) lines.push(<Phrase words={t.subs.confirm.editApi.rename} values={[plan, <bdi>{label}</bdi>]} />);
+  if (scope !== initialScope) lines.push(<Phrase words={t.subs.confirm.editApi.target} values={[plan, <bdi>{targetLabel(t, org, scope)}</bdi>]} />);
+  return lines;
+}
+
+function apiEditQuestion(t: Messages, org: Org | null, sub: SubView | undefined, label: string, scope: string, initialScope: string, onYes: () => Promise<void>): Question | null {
+  if (!sub) return null;
+  const lines = apiEditLines(t, org, sub, label, scope, initialScope);
+  if (!lines.length) return null;
+  return {
+    title: t.subs.confirm.editApi.title,
+    effect: lines[0],
+    warnings: lines.slice(1),
+    yes: t.subs.confirm.editApi.yes,
+    working: t.subs.confirm.editApi.working,
+    onYes,
+  };
+}
 
 function ScopeField({ value, places, onChange }: { value: string; places: readonly string[] | null; onChange(value: string): void }) {
   const t = useT();
@@ -178,16 +211,31 @@ function NewFields({ form, set }: { form: NewForm; set(patch: Partial<NewForm>):
 
 type NewForm = { provider: ApiProvider; apiKey: string; baseUrl: string; protocol: Protocol };
 
+function apiFormBody(sub: SubView | undefined, fresh: NewForm, label: string, scope: string, models: Model[]) {
+  const target = targetOf(scope);
+  if (sub) return { label: label.trim(), target, models };
+  const custom = fresh.provider === 'custom_api';
+  return {
+    kind: 'api_key', provider: fresh.provider, label: label.trim(), apiKey: fresh.apiKey.trim(), target,
+    ...(custom ? { baseUrl: fresh.baseUrl.trim() } : {}),
+    ...(custom || fresh.provider === 'openrouter' ? { protocol: fresh.protocol } : {}),
+    ...(models.length ? { models } : {}),
+  };
+}
+
 /* sub: the connection to change; without it the form connects a new one. */
 export function ApiForm({ sub, places = null, onSaved, onCancel }: { sub?: SubView; places?: readonly string[] | null; onSaved(sub: SubView): void; onCancel(): void }) {
   const t = useT();
+  const { org } = useOrg();
   const editing = Boolean(sub);
+  const initialScope = targetValue(startTarget(sub, places));
   const [fresh, setFresh] = useState<NewForm>({ provider: 'anthropic_api', apiKey: '', baseUrl: '', protocol: 'anthropic' });
   const [label, setLabel] = useState(sub?.label ?? '');
-  const [scope, setScope] = useState(targetValue(startTarget(sub, places)));
+  const [scope, setScope] = useState(initialScope);
   const [models, setModels] = useState<Model[]>(ownModels(sub));
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const confirmation = useConfirmAction();
   const set = (patch: Partial<NewForm>) => setFresh(was => ({ ...was, ...patch }));
   const custom = fresh.provider === 'custom_api';
   const title = sub ? t.subs.editApiLabel(subName(t, sub)) : t.subs.connectApi;
@@ -198,27 +246,19 @@ export function ApiForm({ sub, places = null, onSaved, onCancel }: { sub?: SubVi
     return (await api.post<{ models: Model[] }>('/api/subscriptions/models', { provider: fresh.provider, apiKey: fresh.apiKey.trim(), ...where })).models;
   }
 
-  function body() {
-    const target = targetOf(scope);
-    if (sub) return { label: label.trim(), target, models };
-    return {
-      kind: 'api_key', provider: fresh.provider, label: label.trim(), apiKey: fresh.apiKey.trim(), target,
-      ...(custom ? { baseUrl: fresh.baseUrl.trim() } : {}),
-      ...(custom || fresh.provider === 'openrouter' ? { protocol: fresh.protocol } : {}),
-      ...(models.length ? { models } : {}),
-    };
+  async function send() {
+    const payload = apiFormBody(sub, fresh, label, scope, models);
+    const { subscription } = sub
+      ? await api.patch<{ subscription: SubView }>(`/api/subscriptions/${sub.id}`, payload)
+      : await api.post<{ subscription: SubView }>('/api/subscriptions', payload);
+    onSaved(subscription);
   }
 
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    if (busy) return;
+  async function saveDirect() {
     setBusy(true);
     setProblem(null);
     try {
-      const { subscription } = sub
-        ? await api.patch<{ subscription: SubView }>(`/api/subscriptions/${sub.id}`, body())
-        : await api.post<{ subscription: SubView }>('/api/subscriptions', body());
-      onSaved(subscription);
+      await send();
     } catch (err) {
       setProblem(errorText(t, err));
     } finally {
@@ -226,22 +266,34 @@ export function ApiForm({ sub, places = null, onSaved, onCancel }: { sub?: SubVi
     }
   }
 
+  function save(e: FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    const question = apiEditQuestion(t, org, sub, label.trim(), scope, initialScope, send);
+    if (!question) return void saveDirect();
+    setProblem(null);
+    confirmation.ask(question);
+  }
+
   const ready = label.trim() && (editing || (fresh.apiKey.trim().length >= 8 && (!custom || fresh.baseUrl.trim())));
   return (
-    <form className="key-form form-grid api-form" aria-label={title} onSubmit={e => void save(e)}>
-      {!editing && <NewFields form={fresh} set={set} />}
-      <Field label={t.subs.apiName}>
-        {p => <input {...p} {...NOT_A_LOGIN} autoComplete="off" maxLength={80} value={label} onChange={e => setLabel(e.target.value)} />}
-      </Field>
-      {(editing ? sub && isApi(sub.provider) : true) && <ModelsField models={models} setModels={setModels} load={load} />}
-      <ScopeField value={scope} places={places} onChange={setScope} />
-      {problem && <p className="alert" role="alert">{problem}</p>}
-      <div className="form-foot">
-        <button className="btn" type="submit" aria-busy={busy} disabled={busy || !ready}>
-          <BusyLabel busy={busy} idle={editing ? t.subs.saveChanges : t.subs.saveApi} working={editing ? t.subs.savingChanges : t.subs.savingApi} />
-        </button>
-        <button className="btn ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
-      </div>
-    </form>
+    <>
+      <form className="key-form form-grid api-form" aria-label={title} onSubmit={save}>
+        {!editing && <NewFields form={fresh} set={set} />}
+        <Field label={t.subs.apiName}>
+          {p => <input {...p} {...NOT_A_LOGIN} autoComplete="off" maxLength={80} value={label} onChange={e => setLabel(e.target.value)} />}
+        </Field>
+        {(editing ? sub && isApi(sub.provider) : true) && <ModelsField models={models} setModels={setModels} load={load} />}
+        <ScopeField value={scope} places={places} onChange={setScope} />
+        {problem && <p className="alert" role="alert">{problem}</p>}
+        <div className="form-foot">
+          <button className="btn" type="submit" aria-busy={busy} disabled={busy || !ready}>
+            <BusyLabel busy={busy} idle={editing ? t.subs.saveChanges : t.subs.saveApi} working={editing ? t.subs.savingChanges : t.subs.savingApi} />
+          </button>
+          <button className="btn ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
+        </div>
+      </form>
+      {confirmation.question}
+    </>
   );
 }

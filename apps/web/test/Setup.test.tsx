@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ru } from '../src/i18n/ru';
@@ -499,6 +499,18 @@ describe('Setup from a recovery file', () => {
     const pick = await screen.findByRole('button', { name: /^Restore the backup of / });
     expect(pick).toHaveTextContent('Restore this one');
     await user.click(pick);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to restore this backup?' });
+    expect(dialog.querySelector('p bdi')).not.toBeNull();
+    expect(dialog).toHaveTextContent('This cannot be undone.');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(within(dialog).getByRole('button', { name: 'Restore' })).toHaveClass('danger');
+    /* Cancelling sends nothing and keeps the backup options and upload available. */
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(posted(calls).filter(call => call.path === '/api/recovery/restore')).toEqual([]);
+    expect(screen.getByLabelText('Or upload a backup file')).toBeInTheDocument();
+    await user.click(pick);
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Restore' }));
     expect(posted(calls).at(-1)).toEqual({ method: 'POST', path: '/api/recovery/restore', body: { code: 'LINK-CODE-123', id: ID } });
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(await screen.findByText('Loading it into a new database')).toHaveAttribute('aria-current', 'step');
@@ -527,6 +539,7 @@ describe('Setup from a recovery file', () => {
     await user.click(screen.getByRole('button', { name: 'Restore from a recovery file' }));
     await user.upload(screen.getByLabelText('Recovery file'), new File([FILE], 'hornhoof-recovery.txt', { type: 'text/plain' }));
     await user.click(await screen.findByRole('button', { name: /^Restore the backup of / }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Restore' }));
     expect(await screen.findByText('Getting the backup')).toHaveAttribute('aria-current', 'step');
     expect(screen.queryByRole('button', { name: 'Set up a new company instead' })).not.toBeInTheDocument();
     /* The keeper could not open it: the server still has the file, so the backups and the way out are back. */
@@ -540,6 +553,7 @@ describe('Setup from a recovery file', () => {
     /* A restore that got as far as the databases restarts the server, which then has no file any more and no company
        either: the person is asked for the file again. */
     await user.click(screen.getByRole('button', { name: /^Restore the backup of / }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Restore' }));
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(await screen.findByText('Getting the backup')).toBeInTheDocument();
     has = false;

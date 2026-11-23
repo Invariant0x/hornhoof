@@ -899,10 +899,29 @@ describe('Department view', () => {
     const calls = shell({});
     await flyIn(user);
     await drawer(user, 'About the department');
-    expect(await screen.findByRole('region', { name: 'Approvals' })).toBeInTheDocument();
+    const approvals = await screen.findByRole('region', { name: 'Approvals' });
+    expect(approvals).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'How it works' })).toBeNull();
     expect(screen.queryByRole('radio', { name: 'Works in turns' })).toBeNull();
     expect(calls.some(c => c.path.endsWith('/work-mode'))).toBe(false);
+  });
+
+  it('passes the department name to approval confirmations from About the department', async () => {
+    const user = userEvent.setup();
+    shell({
+      'GET /api/departments/d2/approval-policy': [200, {
+        departmentId: 'd2', owner: null, canSetOwner: true, canChangePolicy: true, autonomousRelease: false, canSetAutonomousRelease: true,
+        candidates: [{ id: 'p6', name: 'Lena', title: 'Lead' }],
+        rules: [{ channel: 'commit', mode: 'every' }],
+      }],
+    });
+    await flyIn(user);
+    await drawer(user, 'About the department');
+    const approvals = await screen.findByRole('region', { name: 'Approvals' });
+    await user.selectOptions(await within(approvals).findByRole('combobox', { name: 'Department owner' }), 'p6');
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to change the department owner?' });
+    expect([...dialog.querySelectorAll('bdi')].map(el => el.textContent)).toEqual(['Lena', 'Development']);
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
   });
 
   it('lets the owner of the department hire into it, and change its repository and sub-units, without the orchestrator', async () => {
@@ -977,10 +996,11 @@ describe('Department view', () => {
     await user.clear(branch);
     await user.type(branch, 'develop');
     await user.click(within(repo).getByRole('button', { name: 'Save' }));
+    await user.click(within(screen.getByRole('alertdialog', { name: 'Do you really want to update this repository?' })).getByRole('button', { name: 'Save' }));
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ url: 'https://github.com/acme/app.git', branch: 'develop' }));
     expect(within(repo).queryByLabelText('Branch')).not.toBeInTheDocument();
     await user.click(within(repo).getByRole('button', { name: 'Remove' }));
-    await user.click(within(repo).getByRole('button', { name: 'Yes, remove' }));
+    await user.click(within(screen.getByRole('alertdialog', { name: 'Do you really want to remove this repository?' })).getByRole('button', { name: 'Remove' }));
     await vi.waitFor(() => expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/departments/d2/repository')).toBe(true));
   });
 
@@ -1192,6 +1212,7 @@ describe('Department view', () => {
     await user.clear(renameBox);
     await user.type(renameBox, 'Fast lane');
     await user.click(within(subUnits).getByRole('button', { name: 'Save' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Rename' }));
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH' && c.path === '/api/departments/d2/teams/u1')?.body).toEqual({ name: 'Fast lane' }));
 
     await user.click(within(subUnits).getByRole('button', { name: 'New sub-unit' }));
@@ -1200,6 +1221,7 @@ describe('Department view', () => {
     await vi.waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === '/api/departments/d2/teams')?.body).toEqual({ name: 'Hotfixes' }));
 
     await user.click(within(subUnits).getByRole('button', { name: 'Delete sub-unit' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }));
     await vi.waitFor(() => expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/departments/d2/teams/u1')).toBe(true));
   });
 });

@@ -244,7 +244,7 @@ describe('a task', () => {
     expect(within(panel).getByRole('link', { name: label })).toHaveAttribute('href', '/settings/passwords');
   });
 
-  it('lets an authorized person hide an existing secret, then clears the input', async () => {
+  it('lets an authorized person hide an existing secret after confirming without putting the secret in the dialog, then clears the input', async () => {
     const user = userEvent.setup();
     const task = { ...TASK_DETAIL, mayHideSecret: true, body: 'OldMarker1077!' };
     const calls = shell({
@@ -255,8 +255,37 @@ describe('a task', () => {
     await openTaskAction(user, panel, 'Hide secret');
     await user.type(within(panel).getByLabelText('Secret to hide'), 'OldMarker1077!');
     await user.click(within(panel).getByRole('button', { name: 'Hide everywhere' }));
+    expect(calls.some(c => c.path === '/api/tasks/t12/hide-secret')).toBe(false);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to hide this secret?' });
+    expect(dialog).toHaveAccessibleDescription('All stored copies of this secret in #12 Checkout API will be replaced with [hidden].');
+    expect(dialog.querySelector('bdi')).toHaveTextContent('#12 Checkout API');
+    expect(dialog).toHaveTextContent('This cannot be undone.');
+    expect(dialog.innerHTML).not.toContain('OldMarker1077!');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.some(c => c.path === '/api/tasks/t12/hide-secret')).toBe(false);
+    expect(within(panel).getByLabelText('Secret to hide')).toHaveValue('OldMarker1077!');
+
+    await user.click(within(panel).getByRole('button', { name: 'Hide everywhere' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Hide secret' }));
     await waitFor(() => expect(calls.some(c => c.path === '/api/tasks/t12/hide-secret')).toBe(true));
     await waitFor(() => expect(within(panel).queryByLabelText('Secret to hide')).not.toBeInTheDocument());
+  });
+
+  it('passes the task label to HideSecret from the full log too', async () => {
+    const user = userEvent.setup();
+    const task = { ...TASK_DETAIL, mayHideSecret: true };
+    shell({ 'GET /api/tasks/t12': [200, { task }], 'POST /api/tasks/t12/hide-secret': [200, { task }] });
+    const panel = await openTask(user);
+    await openTaskAction(user, panel, 'Full log');
+    await user.click(within(panel).getAllByRole('button', { name: 'Hide secret' })[0]!);
+    await user.type(within(panel).getByLabelText('Secret to hide'), 'LogSecret1077!');
+    await user.click(within(panel).getByRole('button', { name: 'Hide everywhere' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to hide this secret?' });
+    expect(dialog.querySelector('bdi')).toHaveTextContent('#12 Checkout API');
+    expect(dialog.innerHTML).not.toContain('LogSecret1077!');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
   });
 
   it('does not offer secret hiding without permission from the server', async () => {
@@ -267,7 +296,7 @@ describe('a task', () => {
     expect(within(panel).queryByRole('button', { name: 'Hide secret' })).not.toBeInTheDocument();
   });
 
-  it('clears a secret after a failed request and lets the person cancel', async () => {
+  it('clears a secret after a failed request, keeps the failure in the dialog, and lets the person cancel', async () => {
     const user = userEvent.setup();
     shell({
       'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, mayHideSecret: true } }],
@@ -279,8 +308,11 @@ describe('a task', () => {
     expect(within(panel).getByRole('button', { name: 'Hide everywhere' })).toBeDisabled();
     await user.type(input, 'OldMarker1077!');
     await user.click(within(panel).getByRole('button', { name: 'Hide everywhere' }));
-    expect(await within(panel).findByRole('alert')).toHaveTextContent('The secret could not be hidden.');
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to hide this secret?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Hide secret' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Access changed.');
     expect(input).toHaveValue('');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await user.click(within(panel).getByRole('button', { name: /^Cancel$/ }));
     expect(within(panel).queryByLabelText('Secret to hide')).not.toBeInTheDocument();
   });
@@ -700,14 +732,37 @@ describe('a task', () => {
     expect(calls.find(c => c.path === '/api/tasks/t12/comments')?.body).toEqual({ text: 'Ship it today.' });
   });
 
-  it('lets the CEO pause a task with a reason and shows it paused', async () => {
+  it('lets the CEO pause a task with a reason after confirming, keeping the reason on Cancel and failures in the dialog', async () => {
     const user = userEvent.setup();
     const paused = { at: '2026-11-09T05:00:00.000Z', reason: 'Wait for the release.', root: 't12', by: { personId: 'p1' } };
-    const calls = shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, mayPause: true } }], 'PUT /api/tasks/t12/paused': [200, { task: { ...TASK_DETAIL, mayPause: true, paused } }] });
+    let fail = true;
+    const calls = shell({
+      'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, mayPause: true } }],
+      'PUT /api/tasks/t12/paused': () => (fail ? [500, { error: { code: 'internal', message: 'Pause failed.' } }] : [200, { task: { ...TASK_DETAIL, mayPause: true, paused } }]),
+    });
     const panel = await openTask(user);
     await openTaskAction(user, panel, 'Pause');
-    await user.type(within(panel).getByRole('textbox', { name: 'Why pause it' }), 'Wait for the release.');
+    const reason = within(panel).getByRole('textbox', { name: 'Why pause it' });
+    await user.type(reason, 'Wait for the release.');
     await user.click(within(panel).getByRole('button', { name: 'Yes, pause it' }));
+    expect(calls.filter(c => c.path === '/api/tasks/t12/paused')).toEqual([]);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to pause this task?' });
+    expect(dialog).toHaveAccessibleDescription('Active work on #12 Checkout API will stop until it is resumed.');
+    expect(dialog.querySelector('bdi')).toHaveTextContent('#12 Checkout API');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.filter(c => c.path === '/api/tasks/t12/paused')).toEqual([]);
+    expect(within(panel).getByRole('textbox', { name: 'Why pause it' })).toHaveValue('Wait for the release.');
+
+    await user.click(within(panel).getByRole('button', { name: 'Yes, pause it' }));
+    const again = screen.getByRole('alertdialog');
+    await user.click(within(again).getByRole('button', { name: 'Pause' }));
+    expect(await within(again).findByRole('alert')).toHaveTextContent('Pause failed.');
+
+    fail = false;
+    await user.click(within(again).getByRole('button', { name: 'Pause' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
     expect(calls.find(c => c.method === 'PUT' && c.path === '/api/tasks/t12/paused')?.body).toEqual({ paused: true, reason: 'Wait for the release.' });
   });
 
@@ -729,15 +784,32 @@ describe('a task', () => {
     expect(within(panel).queryByRole('button', { name: 'Pause' })).toBeNull();
   });
 
-  it('asks before cancelling a task and the tasks under it', async () => {
+  it('asks in a confirmation dialog before cancelling a task and keeps failures inside it', async () => {
     const user = userEvent.setup();
-    const calls = shell({ 'POST /api/tasks/t12/cancel': [200, { task: { ...TASK_DETAIL, status: 'cancelled' } }] });
+    let fail = true;
+    const calls = shell({
+      'POST /api/tasks/t12/cancel': () => (fail ? [500, { error: { code: 'internal', message: 'Cancel failed.' } }] : [200, { task: { ...TASK_DETAIL, status: 'cancelled' } }]),
+    });
     const panel = await openTask(user);
     await openTaskAction(user, panel, 'Cancel task');
     expect(calls.some(c => c.path === '/api/tasks/t12/cancel')).toBe(false);
-    expect(panel).toHaveTextContent('Cancel #12 and its open subtasks?');
-    await user.click(within(panel).getByRole('button', { name: 'Yes, cancel it' }));
-    expect(calls.some(c => c.method === 'POST' && c.path === '/api/tasks/t12/cancel')).toBe(true);
+    const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to cancel this task?' });
+    expect(dialog).toHaveAccessibleDescription('#12 Checkout API and its open subtasks will be cancelled. Its record stays in history.');
+    expect(dialog.querySelector('bdi')).toHaveTextContent('#12 Checkout API');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.some(c => c.path === '/api/tasks/t12/cancel')).toBe(false);
+
+    await user.click(within(panel).getByRole('button', { name: 'Cancel task' }));
+    const again = screen.getByRole('alertdialog');
+    await user.click(within(again).getByRole('button', { name: 'Cancel task' }));
+    expect(await within(again).findByRole('alert')).toHaveTextContent('Cancel failed.');
+
+    fail = false;
+    await user.click(within(again).getByRole('button', { name: 'Cancel task' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(calls.filter(c => c.method === 'POST' && c.path === '/api/tasks/t12/cancel')).toHaveLength(2);
   });
 
   it('opens a subtask from the list', async () => {

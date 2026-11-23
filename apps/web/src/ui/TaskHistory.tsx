@@ -132,7 +132,7 @@ function LogEntry({ entry, when, words, task, onChanged }: { entry: TaskLogLine;
       </span>
       <LogParagraph text={said} fullRef={fullTextOf(entry.data, 'text')} />
       <LogParagraph text={evidence} fullRef={fullTextOf(entry.data, 'evidence')} prefix={`${t.tasks.evidence}: `} className="tp-evidence" />
-      {task?.mayHideSecret && onChanged && (said || evidence) && <HideSecret taskId={task.id} onChanged={onChanged} />}
+      {task?.mayHideSecret && onChanged && (said || evidence) && <HideSecret taskId={task.id} taskLabel={`#${task.number} ${task.title}`} onChanged={onChanged} />}
       {entry.kind === 'call' && <CallParts data={entry.data} />}
     </li>
   );
