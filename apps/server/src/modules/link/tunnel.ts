@@ -65,12 +65,28 @@ export function holdThroughOneEmptyRead<T>(read: () => Promise<T | null | undefi
   };
 }
 
+function stopChild(child: ChildProcess): Promise<void> {
+  return new Promise(done => {
+    const kill = setTimeout(() => child.kill('SIGKILL'), 5000);
+    const gone = () => {
+      clearTimeout(kill);
+      child.off('exit', gone);
+      child.off('error', gone);
+      done();
+    };
+    child.once('exit', gone);
+    child.once('error', gone);
+    child.kill('SIGTERM');
+  });
+}
+
 /* It waits while there is no link, runs the client once there is, starts it again when the settings change, and stops it
    when they go. Only a change starts it again, since each start may cost the link up to 40 s at the relay. */
 export class TunnelKeeper<T = TunnelSettings> {
   private timer: NodeJS.Timeout | null = null;
   private text: string | null = null;
   private child: ChildProcess | null = null;
+  private ending: Promise<void> = Promise.resolve();
   private again: NodeJS.Timeout | null = null;
   private pause: number;
   /* A read may outlast the pause between reads, and an older answer must not land after a newer one. */
@@ -113,7 +129,7 @@ export class TunnelKeeper<T = TunnelSettings> {
     this.text = text;
     this.pause = this.opts.restartMs;
     void this.end().then(() => {
-      if (this.text !== text) return;
+      if (!this.timer || this.text !== text) return;
       if (text && settings) this.run(text, settings);
       else this.opts.log((this.opts.says ?? LINK_WORDS).waiting);
     });
@@ -133,7 +149,10 @@ export class TunnelKeeper<T = TunnelSettings> {
        what the relay gave, and that environment holds the company's secret and the database's password. */
     const child = spawn(client.program, client.args, { stdio: ['ignore', 'inherit', 'inherit'], env: { PATH: process.env.PATH, ...client.env } });
     this.child = child;
-    child.on('error', err => this.opts.log(`The tunnel client did not start: ${err.message}`));
+    child.on('error', err => {
+      if (this.child === child) this.child = null;
+      this.opts.log(`The tunnel client did not start: ${err.message}`);
+    });
     child.on('exit', (code, signal) => {
       if (this.child !== child) return;
       this.child = null;
@@ -148,20 +167,13 @@ export class TunnelKeeper<T = TunnelSettings> {
     });
   }
 
-  /* Stops the running client and waits until it is gone. */
+  /* Stops the running client and waits until every client it started is gone. */
   private end(): Promise<void> {
     if (this.again) clearTimeout(this.again);
     this.again = null;
     const child = this.child;
     this.child = null;
-    if (!child || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-    return new Promise(done => {
-      const kill = setTimeout(() => child.kill('SIGKILL'), 5000);
-      child.once('exit', () => {
-        clearTimeout(kill);
-        done();
-      });
-      child.kill('SIGTERM');
-    });
+    if (child) this.ending = Promise.all([this.ending, stopChild(child)]).then(() => undefined);
+    return this.ending;
   }
 }

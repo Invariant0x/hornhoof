@@ -42,15 +42,8 @@ function tunnel({ program = process.execPath, first = null as Answer } = {}) {
     answer = next;
   };
   const write = (token: string) => answers(settingsWith(token));
-  const started = () => (existsSync(out) ? readFileSync(out, 'utf8').trim().split('\n').map(l => l.split(' ')) : []);
-  const alive = (pid: string) => {
-    try {
-      process.kill(Number(pid), 0);
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  const started = () => completeLines(out).map(l => l.split(' '));
+  const alive = (pid: string) => pidAlive(pid);
   const readsFrom = async (count: number) => {
     const from = reads;
     await until(() => reads >= from + count);

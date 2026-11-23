@@ -73,13 +73,15 @@ function fakeFrpc(dir: string) {
     writeFileSync(configFile, configFor(settings, { clientId, local }));
     return { program: process.execPath, args: ['-e', SLEEPER, startedFile] };
   };
-  const started = () => (existsSync(startedFile) ? readFileSync(startedFile, 'utf8').trim().split('\n') : []);
+  const started = () => (existsSync(startedFile) ? readFileSync(startedFile, 'utf8').split('\n').slice(0, -1) : []);
   const alive = (pid: string) => {
+    const id = Number(pid);
+    if (!Number.isInteger(id) || id <= 0) throw new Error(`Not a process id: ${JSON.stringify(pid)}`);
     try {
-      process.kill(Number(pid), 0);
+      process.kill(id, 0);
       return true;
-    } catch {
-      return false;
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === 'EPERM';
     }
   };
   return { clientFor, started, alive, config: () => readFileSync(configFile, 'utf8') };
