@@ -22,6 +22,7 @@ const refusal = async (files: ThemeFiles): Promise<ThemeProblem> => {
 };
 const served = (theme: CheckedTheme) => Object.fromEntries(theme.files.map(file => [file.path, file.mediaType]));
 const without = (files: ThemeFiles, ...paths: string[]) => Object.fromEntries(Object.entries(files).filter(([path]) => !paths.includes(path)));
+type Case = [string, (files: ThemeFiles) => ThemeFiles | Promise<ThemeFiles>, ThemeProblem | Partial<ThemeProblem>];
 const manifestWith = (files: ThemeFiles, change: object) => ({ ...files, 'theme.json': JSON.stringify({ ...(JSON.parse(String(files['theme.json'])) as object), ...change }) });
 
 describe('a theme archive', () => {
@@ -82,7 +83,7 @@ describe('a theme archive', () => {
 });
 
 describe('a theme archive is refused', () => {
-  const cases: [string, (files: ThemeFiles) => ThemeFiles | Promise<ThemeFiles>, ThemeProblem | Partial<ThemeProblem>][] = [
+  const cases: Case[] = [
     ['without a passport', files => without(files, 'theme.json'), { code: 'theme_missing' }],
     ['without a licence', files => without(files, 'LICENSE'), { code: 'license_missing', path: 'LICENSE' }],
     ['with two licences', files => ({ ...files, 'LICENSE.md': 'Twice.\n' }), { code: 'too_many_of_kind', path: 'LICENSE.md' }],
@@ -116,6 +117,16 @@ describe('a theme archive is refused', () => {
     ['with a face whose font is not there', files => without(files, 'ui/fonts/night-sans.woff2'), { code: 'file_missing', path: 'ui/fonts/night-sans.woff2' }],
     ['with a font that is not WOFF2', files => ({ ...files, 'ui/fonts/night-sans.woff2': Buffer.alloc(64) }), { code: 'file_bytes', path: 'ui/fonts/night-sans.woff2' }],
     ['with a kit picture no slot names', files => ({ ...files, 'ui/kit/spare.png': png(8, 8) }), { code: 'kit_bad', path: 'ui/kit/spare.png' }],
+    ['with a kit picture over its limit', files => ({ ...files, 'ui/kit/panel.png': png(32, 32, randomBytes(2 * 1024 * 1024)) }), { code: 'file_too_large', path: 'ui/kit/panel.png' }],
+    /* A look reaches a picture only through a slot of the kit: a picture of its own in a value is refused. */
+    ...(['url(ui/kit/panel.png)', 'image(ui/kit/panel.png)'] as const).map((picture): Case => [
+      `with a picture in its look by ${picture.slice(0, picture.indexOf('('))}()`,
+      async files => {
+        const look = await lookOf('pixel');
+        return { ...files, 'ui/look.json': JSON.stringify({ ...look, colors: { ...(look.colors as object), accent: picture } }) };
+      },
+      { code: 'look_bad', path: 'ui/look.json' },
+    ]),
     ['with a kit slot that is not data', files => ({ ...files, 'ui/kit.json': JSON.stringify({ slots: { frame: { file: 'panel.png', width: 'calc(1px)' } } }) }), { code: 'json_shape', path: 'ui/kit.json' }],
     ['with a look the screens cannot read', files => ({ ...files, 'ui/look.json': JSON.stringify({ scheme: 'dark' }) }), { code: 'look_bad', path: 'ui/look.json', detail: '["missing","colors",""]' }],
     ['with a look in a font it does not bring', async files => ({ ...files, 'ui/look.json': JSON.stringify({ ...(await lookOf('pixel')), fonts: { ...((await lookOf('pixel')).fonts as object), body: ['Other', 'serif'] } }) }), { code: 'look_bad', detail: '["bad_font","fonts.body","Other"]' }],
