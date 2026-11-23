@@ -122,11 +122,12 @@ export const en = {
     tryAgain: 'Try again',
   },
   /* The layer over the page while the server cannot be reached, or is installing an update: what happened, what Hornhoof does,
-     and the one button that asks again at once. */
+     when it tries next, a line once the wait is long, and the one button that asks again at once. */
   connection: {
-    lost: { title: 'No connection to the server', hint: 'Hornhoof keeps trying and comes back by itself. You do not need to reload the page.' },
-    updating: { title: 'Server is updating', hint: 'This takes a few minutes. Hornhoof comes back by itself, with no reload.' },
-    trying: 'Trying again\u2026',
+    lost: { title: 'No connection to the server', hint: 'Hornhoof reconnects by itself, no need to reload the page.', long: 'No connection for 2\u00a0min. Check your internet.' },
+    updating: { title: 'Server is updating', hint: 'This takes a few minutes. Hornhoof comes back by itself, with no reload.', long: 'The update is taking longer than usual.' },
+    trying: 'Trying again…',
+    next: (seconds: number) => `Next try in ${seconds}\u00a0s`,
     tryNow: 'Try now',
   },
   login: {

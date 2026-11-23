@@ -27,6 +27,22 @@ type Screen =
 /* How long the page waits before it asks again, after so many tries: the layer's own look is quicker, and this is the page's. */
 const ASK_AGAIN_MS = [1_000, 2_000, 4_000, 8_000, 10_000];
 
+/* What the page shows when its first asks fail: the log in for a session that is not there, the wait for a server that is
+   away, which the layer over the page says and the page asks again from, or the error. */
+function screenFor(failure: unknown, welcome: boolean, tries: number): Screen {
+  if (failure instanceof ApiFailure && failure.status === 401) return { kind: 'login' };
+  return isAway(failure) ? { kind: 'away', tries: tries + 1, welcome } : { kind: 'error', failure };
+}
+
+/* While the page waits for a server that is away, it asks again after a growing wait. */
+function useAskAgain(screen: Screen, ask: (welcome: boolean, tries: number) => unknown): void {
+  useEffect(() => {
+    if (screen.kind !== 'away') return;
+    const timer = setTimeout(() => void ask(screen.welcome, screen.tries), ASK_AGAIN_MS[Math.min(screen.tries - 1, ASK_AGAIN_MS.length - 1)]);
+    return () => clearTimeout(timer);
+  }, [screen, ask]);
+}
+
 export function App() {
   const { away } = useLink();
   return (
@@ -83,10 +99,7 @@ function Screens() {
       const me = validMe(await api.get<Me>('/api/me'));
       show({ kind: 'shell', me, welcome });
     } catch (err) {
-      if (err instanceof ApiFailure && err.status === 401) return show({ kind: 'login' });
-      /* A server that is away is no error of this page: the layer says it, and the page asks again by itself. */
-      if (isAway(err)) return show({ kind: 'away', tries: tries + 1, welcome });
-      show({ kind: 'error', failure: err });
+      show(screenFor(err, welcome, tries));
     }
   }, [show]);
 
@@ -94,11 +107,7 @@ function Screens() {
     void decide();
   }, [decide]);
 
-  useEffect(() => {
-    if (screen.kind !== 'away') return;
-    const timer = setTimeout(() => void decide(screen.welcome, screen.tries), ASK_AGAIN_MS[Math.min(screen.tries - 1, ASK_AGAIN_MS.length - 1)]);
-    return () => clearTimeout(timer);
-  }, [screen, decide]);
+  useAskAgain(screen, decide);
 
   const home = useCallback(
     (welcome = false) => {

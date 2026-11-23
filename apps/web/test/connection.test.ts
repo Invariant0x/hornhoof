@@ -97,6 +97,21 @@ describe('looking again until the server answers', () => {
     expect(asked()).toBe(7);
   });
 
+  it('tells when the server was first missed and when the next look comes, and nothing once it answers', async () => {
+    vi.setSystemTime(new Date('2026-11-23T10:00:00Z'));
+    const missed = Date.now();
+    answering(refusedNow, refusedNow, up);
+    expect(connection.snapshot()).toMatchObject({ since: null, nextAt: null });
+    connection.lost();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connection.snapshot()).toEqual({ away: 'lost', trying: false, since: missed, nextAt: missed + 1000 });
+    /* A look on its way has no next one yet; the second miss keeps the first moment, and the wait doubles. */
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(connection.snapshot()).toEqual({ away: 'lost', trying: false, since: missed, nextAt: missed + 1000 + 2000 });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(connection.snapshot()).toEqual({ away: null, trying: false, since: null, nextAt: null });
+  });
+
   it('says an update when a request was refused for one and the server stays away, through the restart that follows', async () => {
     answering(refusedNow, up);
     connection.lost('updating');
@@ -175,6 +190,6 @@ describe('looking again until the server answers', () => {
     expect(connection.snapshot().trying).toBe(true);
     finish(hop());
     await vi.advanceTimersByTimeAsync(0);
-    expect(connection.snapshot()).toEqual({ away: 'lost', trying: false });
+    expect(connection.snapshot()).toMatchObject({ away: 'lost', trying: false });
   });
 });

@@ -5,8 +5,16 @@
    it again with a growing wait until the server answers, then asks every screen to fetch what it shows anew, with no reload. */
 
 export type Away = 'lost' | 'updating';
-/* What the layer over the page shows: nothing while the server answers, or why it does not. trying: a look is on its way. */
-export type Link = { away: Away | null; trying: boolean };
+/* What the layer over the page shows: nothing while the server answers, or why it does not. trying: a look is on its way.
+   since: when the server was first missed, and nextAt: when the next look comes, both in ms of the page's clock, null where
+   there is none. */
+export type Link = { away: Away | null; trying: boolean; since: number | null; nextAt: number | null };
+
+/* Puts fn in the set and gives back the way to take it out. */
+export function joined(set: Set<() => void>, fn: () => void): () => void {
+  set.add(fn);
+  return () => void set.delete(fn);
+}
 
 type Said = { code?: unknown; reason?: unknown };
 
@@ -41,12 +49,15 @@ const SUSPECT_EVERY_MS = 5_000;
 /* What the server answers to anyone, signed in or not; an answer in its own words, 404 included, is the server. */
 const LOOK_AT = '/api/build';
 
-let link: Link = { away: null, trying: false };
+let link: Link = { away: null, trying: false, since: null, nextAt: null };
 let phase: 'ok' | 'looking' | 'away' = 'ok';
 let kind: Away = 'lost';
 let updateRuns = false;
 let tries = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
+/* When this outage began and when the next look comes; null while none stands. */
+let since: number | null = null;
+let nextAt: number | null = null;
 let lookedAt = Number.NEGATIVE_INFINITY;
 /* The look on its way, if any, by its number: the answer of one that was given up for a newer look counts for nothing. */
 let looks = 0;
@@ -57,8 +68,8 @@ const returns = new Set<() => void>();
 const shown = (): Away => (kind === 'updating' || updateRuns ? 'updating' : 'lost');
 
 function publish(): void {
-  const next: Link = { away: phase === 'away' ? shown() : null, trying: phase !== 'ok' && busy };
-  if (next.away === link.away && next.trying === link.trying) return;
+  const next: Link = { away: phase === 'away' ? shown() : null, trying: phase !== 'ok' && busy, since, nextAt };
+  if (next.away === link.away && next.trying === link.trying && next.since === link.since && next.nextAt === link.nextAt) return;
   link = next;
   for (const watch of [...watchers]) watch();
 }
@@ -85,6 +96,8 @@ function back(): void {
   phase = 'ok';
   tries = 0;
   kind = 'lost';
+  since = null;
+  nextAt = null;
   if (timer) clearTimeout(timer);
   timer = null;
   publish();
@@ -97,12 +110,14 @@ function wait(): void {
   if (timer) clearTimeout(timer);
   const ms = WAITS_MS[Math.min(tries, WAITS_MS.length - 1)]!;
   tries++;
+  nextAt = Date.now() + ms;
   timer = setTimeout(() => void look(), ms);
 }
 
 async function look(): Promise<void> {
   if (timer) clearTimeout(timer);
   timer = null;
+  nextAt = null;
   const mine = ++looks;
   busy = true;
   publish();
@@ -115,8 +130,9 @@ async function look(): Promise<void> {
   /* Once an update was heard of, the layer keeps saying so through the restart that follows it. */
   if (away === 'updating') kind = 'updating';
   phase = 'away';
-  publish();
+  since ??= Date.now();
   wait();
+  publish();
 }
 
 /* A request met no server: the browser's own request failed, or the answer was a hop's or the front's or the keeper's for a
@@ -148,14 +164,8 @@ export const connection = {
     void look();
   },
   /* Calls back each time the server answered again after the layer showed; the returned function stops it. */
-  onBack(fn: () => void): () => void {
-    returns.add(fn);
-    return () => void returns.delete(fn);
-  },
-  subscribe(fn: () => void): () => void {
-    watchers.add(fn);
-    return () => void watchers.delete(fn);
-  },
+  onBack: (fn: () => void): (() => void) => joined(returns, fn),
+  subscribe: (fn: () => void): (() => void) => joined(watchers, fn),
   snapshot: (): Link => link,
   /* For a test: as it was before the page asked anything. */
   reset(): void {
@@ -165,6 +175,8 @@ export const connection = {
     busy = false;
     phase = 'ok';
     kind = 'lost';
+    since = null;
+    nextAt = null;
     updateRuns = false;
     tries = 0;
     lookedAt = Number.NEGATIVE_INFINITY;

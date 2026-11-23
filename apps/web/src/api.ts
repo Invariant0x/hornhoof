@@ -1,4 +1,4 @@
-import { awayOf, connection, fromAHop } from './connection';
+import { awayOf, connection, fromAHop, joined } from './connection';
 import { forgetOwnerKey } from './owner-key-store';
 /* message: the server's own words, empty when it gave none; the screens word the rest from the dictionaries. */
 export class ApiFailure extends Error {
@@ -47,10 +47,7 @@ async function fetchOrigin(path: string, init: RequestInit = {}): Promise<Respon
 const signedOut = new Set<() => void>();
 
 /* Calls back each time the server answers that this page's session is over; the returned function stops it. */
-export function onSignedOut(listener: () => void): () => void {
-  signedOut.add(listener);
-  return () => void signedOut.delete(listener);
-}
+export const onSignedOut = (listener: () => void): (() => void) => joined(signedOut, listener);
 
 /* A session the server no longer knows is over on this device too: the person's key goes with it, and the page hears of
    it. A wrong password is no such end. An answer that says the server is away is told to the page's connection, and one

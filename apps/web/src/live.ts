@@ -87,11 +87,10 @@ function connect(): void {
 
 /* The server answers again after it was away: a stream that gave up opens at once, not when its own wait is over. */
 function reopen(): void {
-  if (!listeners.size || !source || source.readyState !== EventSource.CLOSED) return;
-  if (retry) clearTimeout(retry);
+  if (!source || source.readyState !== EventSource.CLOSED) return;
+  clearTimeout(retry ?? undefined);
   retry = null;
   wait = RETRY_MS;
-  source = null;
   connect();
 }
 

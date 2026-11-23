@@ -382,7 +382,7 @@ export function awayAnswer(req: http.IncomingMessage, answer: { status: number; 
   const headers = { 'Retry-After': String(answer.retryS) };
   switch (asksFor(req)) {
     case 'data': return { status: answer.status, headers: { ...headers, 'Content-Type': 'application/json' }, body: answer.json };
-    case 'page': return { status: answer.status, headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }, body: awayPage(answer.kind) };
+    case 'page': return { status: answer.status, headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', Vary: 'Accept-Language' }, body: awayPage(answer.kind, String(req.headers['accept-language'] ?? '')) };
     case 'words': return { status: answer.status, headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }, body: answer.text };
   }
 }
