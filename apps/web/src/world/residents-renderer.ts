@@ -10,6 +10,7 @@ import type { Graphics } from 'pixi.js';
 import {
   ALTAR_PICTURE,
   masterTileW,
+  residentLayerPlacement,
   resolveResidentArt,
   type ArtIndex,
   type BuildingPicturePassport,
@@ -717,9 +718,10 @@ function drawResidentArtPixi(
   const s = tileW / masterTileW(pack);
   art.layers.forEach((layer, i) => {
     const sprite = ctx.pool.sprite(textures[i]!);
+    const place = residentLayerPlacement(layer, art.mirror, s, x, y);
     sprite.anchor.set(layer.anchor.x / layer.frame.w, layer.anchor.y / layer.frame.h);
-    sprite.scale.set(art.mirror ? -s : s, s);
-    sprite.position.set(x, y);
+    sprite.scale.set(place.scaleX, s);
+    sprite.position.set(place.x, place.y);
     if (layer.tint) sprite.tint = parseArtTint(layer.tint);
   });
   ctx.library.stats.residentsDrawn++;
