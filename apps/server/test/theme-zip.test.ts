@@ -1,4 +1,4 @@
-import { THEME_LIMITS, type ThemeProblem } from '@hornhoof/protocol/themes';
+import { THEME_LIMITS, type ThemeLimits, type ThemeProblem } from '@hornhoof/protocol/themes';
 import { mkdtemp, open, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,11 +9,11 @@ import { zipOf, type ZipFixtureEntry } from './zip-fixture.js';
 /* The zip reader of theme archives (docs/theme-archive.md, sections 8 and 9): it takes a plain zip and refuses one that
    hides more than it says, before it unpacks a byte of it. */
 
-const read = async (zip: Buffer, limits = THEME_LIMITS) => {
+const read = async (zip: Buffer, limits: ThemeLimits = THEME_LIMITS) => {
   const files = await openZip(bufferSource(zip), limits);
   return Promise.all(files.map(async file => [file.path, (await file.read()).toString('utf8')]));
 };
-const refusal = async (zip: Buffer, limits = THEME_LIMITS): Promise<ThemeProblem> => {
+const refusal = async (zip: Buffer, limits: ThemeLimits = THEME_LIMITS): Promise<ThemeProblem> => {
   try {
     const files = await openZip(bufferSource(zip), limits);
     for (const file of files) await file.read();
@@ -95,7 +95,7 @@ describe('its paths', () => {
 });
 
 describe('its size', () => {
-  const small = { ...THEME_LIMITS, archiveBytes: 4096, unpackedBytes: 4096, files: 3, fileBytes: 2048, ratioFrom: 1024 };
+  const small: ThemeLimits = { ...THEME_LIMITS, archiveBytes: 4096, unpackedBytes: 4096, files: 3, fileBytes: 2048, ratioFrom: 1024 };
 
   it('refuses an archive over its limit before it reads it', async () => {
     expect(await refusal(zipOf([{ name: 'a.json', data: Buffer.alloc(8192, 7), method: 0 }]), small)).toEqual({ code: 'archive_too_large' });
