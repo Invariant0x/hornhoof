@@ -12,6 +12,7 @@ import type { DisplayRunPool, WorldArtLibrary } from './art-runtime';
 import { cityDepthY, type CityBuilding, type CityState } from './city-layout';
 import {
   buildingLoopsFor,
+  drawsLoopStandIn,
   resolveStageSpecForBuilding,
   workSlotsForBuilding,
   type BuildingConstructionState,
@@ -539,8 +540,8 @@ export function renderConstructionLoopsToPixi(
       if (art && anchors && drawLoopSheet(art, loop.kind, anchors, sim.timeSec, loop.phaseOffset, loop.intensity, loopScale)) {
         continue;
       }
-      /* A painted building brings its own awning (a picture layer) or has none: no stand-in canopy over the art. */
-      if (anchors && loop.kind === 'awning') continue;
+      /* A painted building brings its own awning (a picture layer), and shows no stand-in dust until the loop's art. */
+      if (!drawsLoopStandIn(loop.kind, anchors !== null)) continue;
       switch (loop.kind) {
         case 'water':
           drawWaterLoop(lg, ctr.x, ctr.y - 16, sim.timeSec, loop.phaseOffset, waterHex, loop.intensity);
