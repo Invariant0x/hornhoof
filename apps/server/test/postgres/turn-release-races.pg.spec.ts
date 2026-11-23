@@ -130,7 +130,7 @@ describe('closing a turn by its tag races the results that join it', () => {
         f.repo.heads[f.branch] = LATER;
         joined = ready
           ? report(f.a.ctx, f.head.id, ready.task.id, { done: true, summary: 'Fast-forwarded the turn.', acceptance: ready.acceptance })
-          : report(f.a.ctx, f.player.id, turnkey!.id, { done: true, summary: 'Fast-forwarded the turn to task-N.' });
+          : report(f.a.ctx, f.player.id, turnkey!.id, { done: true, summary: 'Fast-forwarded the turn to task-N.', turnkey: { commit: OWN, baseCommit: MAIN } });
         await joined;
       }
       return at;
