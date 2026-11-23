@@ -152,7 +152,7 @@ describe('Builders face a front wall (#1975)', () => {
        modules) out to 0.40 tile on v 0.04..2.35, and out to 0.66 tile on v 1.78..1.96 for the ladder's foot. */
     const inStrip = (u: number, v: number) =>
       (u > 1.95 && u < 2.35 && v > 0.04 && v < 2.35) || (u > 1.95 && u < 2.61 && v > 1.78 && v < 1.96);
-    for (const kind of ['house', 'department', 'flophouse', 'district_hub', 'granary', 'residence'] as const) {
+    for (const kind of ['house', 'department', 'flophouse', 'district_hub', 'supply', 'residence'] as const) {
       const sim = createConstructionSimulation(EGYPT_WORLD_PACK);
       for (let stage = 1; stage <= 10; stage++) {
         const b = { ...site(kind, 3, 10), stage };
