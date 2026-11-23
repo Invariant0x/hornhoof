@@ -3,7 +3,7 @@
      npx tsx apps/web/scripts/theme-pack.ts cyberpunk --out cyberpunk.zip
      npx tsx apps/web/scripts/theme-pack.ts egypt --art <the Egypt art folder> --licence <its licence> --out egypt.zip
    A world whose art is licensed apart from the repository (#105) takes its art and its licence from outside it; without
-   --art the world has no pictures and the engine draws its placeholders. */
+   --art the world has no pictures, and the theme installs as its interface alone (docs/theme-archive.md, 4.2). */
 
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';

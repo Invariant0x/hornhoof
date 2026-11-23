@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { agents, companies, themeFiles, themes } from '../src/db/schema.js';
 import { instructionsOf } from '../src/modules/agents/instructions.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
-import { archiveOf, plainTheme, png, SKILLS, worldOf, worldTheme } from './theme-fixture.js';
+import { archiveOf, completeArt, plainTheme, png, SKILLS, worldOf, worldTheme } from './theme-fixture.js';
 
 /* The themes a company installs from archives (docs/theme-archive.md, 10): the CEO uploads one, everyone of the company
    sees it, its files are served as data only and only to that company, turning it on changes the look, the world and the
@@ -30,7 +30,7 @@ describe('an uploaded theme', () => {
     const [card] = installed.json().themes;
     expect(card).toMatchObject({
       id: 'night-shift', version: '1.0.0', engine: 'none', name: { en: 'Night shift', ru: 'Ночная смена' }, base: BASE,
-      cover: `${BASE}preview/cover.png`, shots: [`${BASE}preview/shot-1.png`], licenseFile: `${BASE}LICENSE`, hasWorld: false, hasKit: true,
+      cover: `${BASE}preview/cover.png`, shots: [`${BASE}preview/shot-1.png`], licenseFile: `${BASE}LICENSE`, hasWorld: false, worldLeftOut: null, hasKit: true,
     });
     expect((await app.inject({ url: '/api/themes', ...as(wes) })).json()).toEqual({ themes: [card] });
 
@@ -100,14 +100,29 @@ describe('an uploaded theme', () => {
 });
 
 describe('an uploaded theme with a world', () => {
+  /* A person gets a world with all its own art or none (#1972): the store keeps such a theme as its interface alone. */
+  it('without all its art is installed as its interface alone, says so on its card, and gives the company no world and no voice', async () => {
+    const { app } = await testApp();
+    const ceo = await setUpCompany(app);
+    const installed = await upload(app, ceo, archiveOf(await worldTheme('space')));
+    expect(installed.statusCode, installed.body).toBe(201);
+    expect(installed.json().themes[0]).toMatchObject({ id: 'night-shift', engine: 'iso2d', hasWorld: false, worldLeftOut: 'art_missing' });
+    expect((await app.inject({ url: '/api/themes/night-shift/look', ...as(ceo) })).json()).toMatchObject({ world: null });
+    expect((await app.inject({ url: `${BASE}world/art/loose/one.png`, ...as(ceo) })).statusCode).toBe(404);
+    const on = await app.inject({ method: 'PUT', url: '/api/world/theme', payload: { theme: 'night-shift' }, ...as(ceo) });
+    expect(on.json()).toMatchObject({ theme: 'night-shift', activePack: null });
+  });
+
   it('is turned on for the company with its voice and names, and off and deleted leaving nothing of it', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
     const wes = await invitePerson(app, ceo, { name: 'Wes', email: 'wes@acme.com', access: { whole: true } });
-    expect((await upload(app, ceo, archiveOf(await worldTheme()))).statusCode).toBe(201);
-    expect((await app.inject({ url: '/api/themes/night-shift/look', ...as(ceo) })).json().world).toEqual(await worldOf('dungeon'));
+    const installed = await upload(app, ceo, archiveOf({ ...(await worldTheme('space')), ...(await completeArt('space')) }));
+    expect(installed.statusCode, installed.body).toBe(201);
+    expect(installed.json().themes[0]).toMatchObject({ engine: 'iso2d', hasWorld: true, worldLeftOut: null });
+    expect((await app.inject({ url: '/api/themes/night-shift/look', ...as(ceo) })).json().world).toEqual(await worldOf('space'));
     const index = await app.inject({ url: `${BASE}world/art/art-index.json`, ...as(ceo) });
-    expect(index.json()).toEqual({ contract: 2, pack: 'night-shift', files: { 'loose/one.png': { w: 16, h: 16 } } });
+    expect(index.json()).toMatchObject({ contract: 2, pack: 'night-shift', files: { 'loose/one.png': { w: 16, h: 16 } } });
 
     expect((await app.inject({ method: 'PUT', url: '/api/world/theme', payload: { theme: 'night-shift' }, ...as(wes) })).statusCode).toBe(403);
     const on = await app.inject({ method: 'PUT', url: '/api/world/theme', payload: { theme: 'night-shift' }, ...as(ceo) });
@@ -153,15 +168,14 @@ describe("Hornhoof's own themes", () => {
       const installed = await upload(app, ceo, await packTheme(id));
       expect(installed.statusCode, `${id}: ${installed.body}`).toBe(201);
     }
-    /* Egypt's art is never in the repository (#105): packed without it, its world draws the engine's placeholders. */
+    /* Egypt's art is never in the repository (#105): packed without it, Egypt installs as its interface alone. */
     const egypt = await upload(app, ceo, await packTheme('egypt'));
     expect(egypt.statusCode, egypt.body).toBe(201);
     expect(egypt.json().themes.map((theme: { id: string; engine: string }) => [theme.id, theme.engine])).toEqual([
       ['cyberpunk', 'none'], ['light', 'none'], ['matrix', 'none'], ['pixel', 'none'], ['egypt', 'iso2d'],
     ]);
-    const on = await app.inject({ method: 'PUT', url: '/api/world/theme', payload: { theme: 'egypt' }, ...as(ceo) });
-    expect(on.json()).toMatchObject({ theme: 'egypt', activePack: { id: 'egypt', label: { en: 'Ancient Egypt', ru: 'Древний Египет' }, skillIds: ['world-egypt-voice'] } });
-    expect((await app.inject({ url: '/api/themes/egypt/look', ...as(ceo) })).json()).toMatchObject({ id: 'egypt', world: { recipe: { use: 'egypt-river-valley' } } });
+    expect(egypt.json().themes.at(-1)).toMatchObject({ id: 'egypt', hasWorld: false, worldLeftOut: 'art_missing' });
+    expect((await app.inject({ url: '/api/themes/egypt/look', ...as(ceo) })).json()).toMatchObject({ id: 'egypt', world: null });
     /* Packing is the same bytes every time, so an archive can be checked against the one built from the same commit. */
     expect((await packTheme('cyberpunk')).equals(await packTheme('cyberpunk'))).toBe(true);
   });

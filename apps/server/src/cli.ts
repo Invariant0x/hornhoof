@@ -130,7 +130,13 @@ async function themeInstall(args: string[], { db, print, now }: Deps): Promise<n
     await record({ result: 'refused', reason: company ? 'The company has no owner to install it in the name of.' : 'There is no such company.' });
     return 1;
   }
-  const handle = await open(path, 'r');
+  let handle: FileHandle;
+  try {
+    handle = await open(path, 'r');
+  } catch (err) {
+    await record({ result: 'refused', reason: `The archive cannot be read: ${(err as NodeJS.ErrnoException).code ?? 'unreadable'}.` });
+    return 1;
+  }
   try {
     const sha256 = await sha256Of(handle);
     try {
@@ -141,7 +147,7 @@ async function themeInstall(args: string[], { db, print, now }: Deps): Promise<n
         return 1;
       }
       await installTheme(db, company.id, owner.id, theme);
-      await record({ sha256, result: 'installed', theme: id, version, files: theme.files.length, size: theme.size, installedBy: owner.id });
+      await record({ sha256, result: 'installed', theme: id, version, files: theme.files.length, size: theme.size, installedBy: owner.id, ...(theme.worldLeftOut ? { worldLeftOut: theme.worldLeftOut } : {}) });
       return 0;
     } catch (err) {
       if (!(err instanceof ArchiveRefused)) throw err;

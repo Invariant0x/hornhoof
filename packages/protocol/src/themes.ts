@@ -53,13 +53,17 @@ export const THEME_FILE_LIMITS = {
   previewBytes: 2 * 1024 * 1024,
   previewSide: 2560,
   shots: 6,
+  /* The longest string a JSON file of a theme may hold, refused before any pattern reads it: a label is not a page. */
+  jsonText: 1000,
+  /* Chunks a PNG may have: a real picture has a few dozen. */
+  pngChunks: 1000,
   /* How much of a refused value a problem repeats. */
   shown: 80,
 } as const;
 
 /* The parts of the interface a kit may paint, by the names the screens draw them under (docs/theme-archive.md, 3.3),
-   and the colours it may set beside them: the 45 slots and 7 colours of the theme UI kit 1.0, section 4.2 (#1970). A
-   kit names no other part or colour. */
+   and the colours it may set beside them: the 45 slots and 7 colours of the theme UI kit 1.0, section 4.2, and the
+   light label on the danger plates Design added after it (#1970). A kit names no other part or colour. */
 export const THEME_KIT_SLOTS = [
   /* Frames, nine-sliced. */
   'dialog', 'window', 'drawer', 'menu', 'card', 'table', 'plaque-frame', 'tile',
@@ -74,7 +78,7 @@ export const THEME_KIT_SLOTS = [
   'thead', 'row-hover', 'row-selected', 'track', 'fill', 'divider',
 ] as const;
 export type ThemeKitSlot = (typeof THEME_KIT_SLOTS)[number];
-export const THEME_KIT_COLORS = ['tab-ink', 'tab-on-ink', 'chip-on-ink', 'danger-ink', 'badge-ink', 'scroll-thumb', 'scroll-track'] as const;
+export const THEME_KIT_COLORS = ['tab-ink', 'tab-on-ink', 'chip-on-ink', 'danger-ink', 'danger-on-ink', 'badge-ink', 'scroll-thumb', 'scroll-track'] as const;
 export type ThemeKitColor = (typeof THEME_KIT_COLORS)[number];
 
 /* What each value of a kit's slot may be, in exactly the forms of the theme UI kit 1.0, section 6.2, and of its
@@ -114,6 +118,10 @@ export type InstalledThemeView = Readonly<{
   /* The theme's licence as its archive gave it, word for word. */
   licenseFile: string;
   hasWorld: boolean;
+  /* Why a theme that declares a world was installed with the interface alone: its world did not bring every picture its
+     manifest asks for (docs/theme-archive.md, 4.2), so the company keeps the schematic map. Null for one that has its world
+     or declares none. */
+  worldLeftOut: ThemeWorldLeftOut | null;
   hasKit: boolean;
   size: number;
   installedAt: string;
@@ -125,7 +133,12 @@ export type InstalledThemeView = Readonly<{
 export type ThemeArtFile = Readonly<{ path: string; head: Uint8Array; passport?: unknown }>;
 export type ThemeWorldInput = Readonly<{ id: string; world: unknown; baseUrl: string; art: readonly ThemeArtFile[]; files: readonly string[] }>;
 export type ThemeCheckResult<T> = Readonly<{ ok: true; value: T }> | Readonly<{ ok: false; detail: string }>;
+/* complete: the world's art catalog declares pictures and the archive holds every one it requires, so the engine draws
+   no placeholder of its own; missing counts the required ones it does not hold. */
 export type ThemeWebCheck = Readonly<{
   checkLook: (raw: unknown, families: readonly string[]) => ThemeCheckResult<unknown>;
-  checkWorld: (input: ThemeWorldInput) => Readonly<{ ok: true; world: unknown; artIndex: unknown }> | Readonly<{ ok: false; code: 'world_bad' | 'art_bad'; detail: string }>;
+  checkWorld: (input: ThemeWorldInput) => Readonly<{ ok: true; world: unknown; artIndex: unknown; complete: boolean; missing: number }> | Readonly<{ ok: false; code: 'world_bad' | 'art_bad'; detail: string }>;
 }>;
+/* A world declared but left out: without all its art, a person never gets a world of placeholders (#1960, #1972). */
+export const THEME_WORLD_LEFT_OUT = ['art_missing'] as const;
+export type ThemeWorldLeftOut = (typeof THEME_WORLD_LEFT_OUT)[number];

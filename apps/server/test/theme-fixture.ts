@@ -105,4 +105,37 @@ export async function worldTheme(pack = 'dungeon'): Promise<ThemeFiles> {
   };
 }
 
+type Declared = { path: string; role: string; passport: string; required: boolean };
+type Footprint = { diamondW: number; diamondH: number; maxCanvasH: number };
+type Pack = { art?: { buildings: Record<string, { id: string; footprint: string }[] | undefined> }; projection: { buildingFootprintsMaster4x: Record<string, Footprint> } };
+
+/* Every picture a shipped pack's art catalog requires, at the size and with the passport its slot asks for, as a finished
+   pack brings them: a world with all its own art. Test pictures only (#105). */
+export async function completeArt(pack: string, without: readonly string[] = []): Promise<ThemeFiles> {
+  const registry = await web<{ resolveWorldPack: (id: string) => Pack | null }>('world-packs/registry.ts');
+  const { declaredArtFiles } = await web<{ declaredArtFiles: (pack: Pack) => readonly Declared[] }>('world/art.ts');
+  const manifest = registry.resolveWorldPack(pack)!;
+  const footprintOf = (path: string) => {
+    const [, kind, step] = path.split('/');
+    return manifest.art?.buildings[kind!]?.find(one => one.id === step)?.footprint ?? '1x1';
+  };
+  const entryOf = (d: Declared): { w: number; h: number; passport?: object } => {
+    if (d.passport === 'anchor') return { w: 40, h: 100, passport: { anchor: { x: 20, y: 98 } } };
+    if (d.passport === 'sheet') return { w: 8 * 136, h: (d.role === 'person' ? 5 : 1) * 200, passport: { frameW: 136, frameH: 200, frames: 8, fps: 10, anchor: { x: 68, y: 190 } } };
+    const fp = manifest.projection.buildingFootprintsMaster4x[d.role === 'module' ? d.path.split('/')[1]! : footprintOf(d.path)]!;
+    const w = fp.diamondW + 8;
+    const h = Math.min(fp.maxCanvasH, fp.diamondH + 300);
+    const [cx, cy] = [w / 2, h - fp.diamondH / 2 - 4];
+    const corners = { top: { x: cx, y: cy - fp.diamondH / 2 }, right: { x: cx + fp.diamondW / 2, y: cy }, bottom: { x: cx, y: cy + fp.diamondH / 2 }, left: { x: cx - fp.diamondW / 2, y: cy } };
+    return { w, h, passport: { groundAnchor: { x: cx, y: cy }, corners, flagAnchor: { x: cx + 10, y: 20 }, topAnchor: { x: cx, y: 10 } } };
+  };
+  const files: ThemeFiles = {};
+  for (const d of declaredArtFiles(manifest).filter(one => one.required && !without.includes(one.path))) {
+    const { w, h, passport } = entryOf(d);
+    files[`world/art/${d.path}`] = png(w, h);
+    if (passport) files[`world/art/${d.path.replace(/\.png$/, '.json')}`] = JSON.stringify(passport);
+  }
+  return files;
+}
+
 export const archiveOf = (files: ThemeFiles, folder = '') => zipOf(Object.entries(files).map(([name, data]) => ({ name: folder + name, data })));
