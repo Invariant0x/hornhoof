@@ -300,12 +300,11 @@ test('Stage 9: the 3x3 workshop draws its own picture at each construction stage
       [hub!.id, stage, phase] as const,
     );
     expect(held).toBe(true);
-    await expect.poll(() => requested.includes(`${base}${picture}.png`), { message: `${picture} asked for`, timeout: 10_000 }).toBe(true);
+    await expect.poll(() => requested.includes(`${base}${picture}.png`), { message: `${picture} asked for` }).toBe(true);
     const served = new Set(requested.filter(rel => art.pngs.has(rel))).size;
     await expect
       .poll(() => page.evaluate(() => (window as unknown as { __WORLD_LIVE__: LiveHandle }).__WORLD_LIVE__.getArtStats()?.loadedTextures ?? 0), {
         message: `${picture}: every picture asked for is loaded`,
-        timeout: 15_000,
       })
       .toBeGreaterThanOrEqual(served);
     await settle(page);

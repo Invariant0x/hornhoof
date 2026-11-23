@@ -320,6 +320,8 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
     walkable: k.walkable,
   })),
   materials: EGYPT_MATERIALS,
+  /* Building lots are trodden dust; a lot nobody took grows back in three days. */
+  lotGround: { material: 'dust', edgeTiles: 0.45, regrowthHours: 72 },
   liquidLayer: {
     baseColor: '#2A89B0',
     deepColor: '#28648A',

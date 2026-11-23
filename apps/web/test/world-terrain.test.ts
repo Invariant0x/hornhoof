@@ -9,6 +9,7 @@ import {
   buildLiquidSurfacePixels,
   displayedWaterDistance,
   getMaterialTextureRgb,
+  groundMixAt,
   sampleCornerFieldBilinear,
   startSmoothChunkBake,
 } from '../src/world/smooth-terrain-baker';
@@ -102,7 +103,7 @@ describe('Stage 2 pack-owned procedural generation and modularity', () => {
      they stood, the fertile land's grass grows. */
   it('grows no sown fields on the Egypt map: no field tiles, no field ground and no tilled plots on any gallery seed', () => {
     expect(EGYPT_WORLD_PACK.terrainRecipe!.tileKinds.map(k => k.id)).not.toContain('field');
-    expect(EGYPT_WORLD_PACK.materials.filter(m => m.id === 'field' || m.plots).map(m => m.id)).toEqual([]);
+    expect((EGYPT_WORLD_PACK.materials ?? []).filter(m => m.id === 'field' || m.plots).map(m => m.id)).toEqual([]);
     for (const seed of GALLERY_SEEDS) {
       const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed, mapSize: 150 });
       expect(map.stats.counts.field ?? 0, `${seed}: field tiles`).toBe(0);
@@ -362,6 +363,37 @@ describe('painted art in the ground baker', () => {
       const job = startSmoothChunkBake(shoreChunk, map, EGYPT_WORLD_PACK, lod2x, null);
       expect(job.advance(Infinity, () => 0)).toBe(true);
       expect(same(job.pixels.rgba, before)).toBe(true);
+    } finally {
+      registerTerrainArt(EGYPT_WORLD_PACK, null);
+    }
+  });
+
+  /* Every ground painted with one flat picture: what tells grass from sand is only the meadow's sunlit patches and its
+     extra colour, which the painted grass keeps with or without tilled fields beside it. */
+  it('paints the meadow livelier than other ground drawn from the same picture', () => {
+    const ids = map.cornerFields.materialIds;
+    const one = flat([120, 132, 84]);
+    registerTerrainArt(EGYPT_WORLD_PACK, { ...art(true), ground: new Map(ids.map(id => [id, one] as const)) });
+    try {
+      const baked = bakeSmoothChunkPixels(shoreChunk, map, EGYPT_WORLD_PACK, lod2x);
+      const chroma = { grass: [] as number[], sand: [] as number[] };
+      for (let y = 0; y < baked.pixelHeight; y += 3) {
+        for (let x = 0; x < baked.pixelWidth; x += 3) {
+          const i = (y * baked.pixelWidth + x) * 4;
+          if (baked.rgba[i + 3]! < 255) continue;
+          const t = worldToTileFloat(baked.worldX + (x + 0.5) / baked.scale, baked.worldY + (y + 0.5) / baked.scale, 120, 60);
+          const mix = groundMixAt(map, EGYPT_WORLD_PACK, t.col, t.row);
+          if (mix.shareA < 1) continue;
+          const id = ids[mix.a];
+          if (id !== 'grass' && id !== 'sand') continue;
+          const rgb = [baked.rgba[i]!, baked.rgba[i + 1]!, baked.rgba[i + 2]!];
+          chroma[id].push(Math.max(...rgb) - Math.min(...rgb));
+        }
+      }
+      const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+      expect(chroma.grass.length).toBeGreaterThan(200);
+      expect(chroma.sand.length).toBeGreaterThan(200);
+      expect(mean(chroma.grass)).toBeGreaterThan(mean(chroma.sand) * 1.06);
     } finally {
       registerTerrainArt(EGYPT_WORLD_PACK, null);
     }

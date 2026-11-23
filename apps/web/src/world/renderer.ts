@@ -60,6 +60,7 @@ import {
 } from './department-focus';
 import { cityToPickableObjects } from './live-sync';
 import { cityPlantCover } from './city-layout';
+import { chunkLotClearing, cityLotClearing, lotClearingKey, surveyedLot, type LotClearing } from './lot-clearing';
 import { RoadStripPainter } from './road-strips';
 import {
   pickResidentAtScreen,
@@ -266,7 +267,13 @@ export class IsometricWorldEngine {
   private resizeObserver: ResizeObserver | null = null;
   private canvasElement: HTMLCanvasElement | null = null;
   private plantRenderer: PlantRenderer | null = null;
-  private plantCoverKey = 'none';
+  private cityGroundKey = 'none';
+  /* Cleared ground under the city's lots, baked into the chunks; null without a city or a pack lot ground. */
+  private lotClearing: LotClearing | null = null;
+  /* Per chunk: the lots reaching into it, as part of its cache key under the current clearing. */
+  private readonly chunkLotKeys = new Map<string, string>();
+  /* Per chunk and LOD: the key of its last baked picture, drawn while a changed clearing bakes it again. */
+  private readonly lastBakedKey = new Map<string, string>();
   private readonly roadPainter = new RoadStripPainter();
   /* Awnings and cloth of the building pictures drawn by the last city pass, moved every frame by the wind. */
   private readonly swayingLayers: SwayingLayer[] = [];
@@ -915,7 +922,7 @@ export class IsometricWorldEngine {
   /* Updates the Stage 4 isometric city placeholder layer and its pickable building footprints. */
   setCityRenderState(state: CityRenderState | null): void {
     this.cityRenderState = state;
-    this.refreshPlantCover();
+    this.refreshCityGround();
     this.cityDirty = true;
     this.cityCullWindow = null;
     this.objects = state ? cityToPickableObjects(state.city) : [];
@@ -954,24 +961,36 @@ export class IsometricWorldEngine {
   }
 
   markCityDirty(): void {
-    this.refreshPlantCover();
+    this.refreshCityGround();
     this.cityDirty = true;
     this.dirtyScene = true;
   }
 
-  /* Plants of the map leave the ground the city stands on; recomputed only when the city's ground changes. */
-  private refreshPlantCover(): void {
-    if (!this.plantRenderer) return;
-    const city = this.cityRenderState?.city ?? null;
+  /* The ground the city stands on: its lots are cleared in the baked ground and plants leave them, its streets and walls
+     too. Recomputed only when that ground changes. */
+  private refreshCityGround(): void {
+    const state = this.cityRenderState;
+    const city = state?.city ?? null;
+    const survey = state && state.worldMode === 'empty_lot' ? surveyedLot(state.emptyLotStakes ?? []) : null;
     let key = 'none';
     if (city) {
       let sum = 0;
-      for (const b of city.buildings) sum = (sum * 31 + b.col * 7 + b.row * 13 + b.spanCol * 3 + b.spanRow) % 1_000_000_007;
-      key = `${city.buildings.length}|${city.roads.size}|${city.wallTiles.size}|${sum}`;
+      for (const b of city.buildings) sum = (sum * 31 + b.col * 7 + b.row * 13 + b.spanCol * 3 + b.spanRow + (b.stage >= 1 ? 17 : 0)) % 1_000_000_007;
+      for (const l of [...city.vacatedLots, ...(survey ? [survey] : [])]) sum = (sum * 31 + l.col * 5 + l.row * 11 + l.spanCol * 3 + l.spanRow) % 1_000_000_007;
+      key = `${city.buildings.length}|${city.vacatedLots.length}|${city.roads.size}|${city.wallTiles.size}|${sum}`;
     }
-    if (key === this.plantCoverKey) return;
-    this.plantCoverKey = key;
-    this.plantRenderer.setCityCover(city ? cityPlantCover(city) : null);
+    if (key === this.cityGroundKey) return;
+    this.cityGroundKey = key;
+    this.lotClearing = city ? cityLotClearing(city, this.pack, survey ? [survey] : []) : null;
+    this.chunkLotKeys.clear();
+    this.dirtyScene = true;
+    if (!this.plantRenderer) return;
+    const cover = city ? cityPlantCover(city) : null;
+    this.plantRenderer.setCityCover(
+      cover && survey
+        ? (col, row) => cover(col, row) || (col >= survey.col && col <= survey.col + survey.spanCol && row >= survey.row && row <= survey.row + survey.spanRow)
+        : cover,
+    );
   }
 
   setSelectedResidentId(residentId: string | null): void {
@@ -1173,7 +1192,19 @@ export class IsometricWorldEngine {
   }
 
   private cacheKey(chunk: ChunkCoord, lodId: LodTierId): string {
-    return `${chunk.key}@${lodId}`;
+    return `${chunk.key}@${lodId}${this.chunkLotKey(chunk)}`;
+  }
+
+  /* The lots reaching into a chunk under the current clearing, as a cache key part; empty when none does. */
+  private chunkLotKey(chunk: ChunkCoord): string {
+    if (!this.lotClearing) return '';
+    let k = this.chunkLotKeys.get(chunk.key);
+    if (k === undefined) {
+      const near = chunkLotClearing(this.lotClearing, chunk);
+      k = near ? `#${lotClearingKey(near)}` : '';
+      this.chunkLotKeys.set(chunk.key, k);
+    }
+    return k;
   }
 
   private disposeEntry = (entry: CachedChunkEntry): void => {
@@ -1195,7 +1226,7 @@ export class IsometricWorldEngine {
     this.bakeJobs.delete(key);
     const baked =
       this.terrainMap && this.hasSmoothGround()
-        ? bakeSmoothChunkCanvas(chunk, this.terrainMap, this.pack, lod, this.art)
+        ? bakeSmoothChunkCanvas(chunk, this.terrainMap, this.pack, lod, this.art, this.lotClearing)
         : bakeChunkCanvas(chunk, this.pack, this.tileLookup, lod, this.resolveTileId);
     return this.cacheBakedChunk(key, baked);
   }
@@ -1221,7 +1252,7 @@ export class IsometricWorldEngine {
     if (!this.terrainMap || !this.hasSmoothGround()) return this.ensureChunkBaked(chunk, lod);
     let job = this.bakeJobs.get(key);
     if (!job) {
-      job = startSmoothChunkBake(chunk, this.terrainMap, this.pack, lod, this.art);
+      job = startSmoothChunkBake(chunk, this.terrainMap, this.pack, lod, this.art, this.lotClearing);
       this.bakeJobs.set(key, job);
     }
     if (!job.advance(deadline, () => performance.now())) return null;
@@ -1243,6 +1274,7 @@ export class IsometricWorldEngine {
     }
     const entry: CachedChunkEntry = { key, baked, texture, sprite };
     this.chunkCache.set(key, entry);
+    this.lastBakedKey.set(key.split('#')[0]!, key);
     return entry;
   }
 
@@ -1411,6 +1443,12 @@ export class IsometricWorldEngine {
       const k = this.cacheKey(chunk, lods[i]!.id);
       const hit = this.chunkCache.get(k);
       if (hit) return { key: k, entry: hit };
+    }
+    /* The picture baked before the lots changed, until the new one is done. */
+    for (let i = lods.length - 1; i >= 0; i--) {
+      const k = this.lastBakedKey.get(`${chunk.key}@${lods[i]!.id}`);
+      const hit = k ? this.chunkCache.get(k) : undefined;
+      if (k && hit) return { key: k, entry: hit };
     }
     return null;
   }

@@ -261,6 +261,17 @@ export type TerrainArtSpec = Readonly<{
   roads?: Readonly<Partial<Record<'trail' | 'dirt' | 'brick' | 'stone', string>>>;
 }>;
 
+/* Ground under a building's lot: the city clears it from the first construction stage, eases its edge into the land
+   around and keeps it cleared after a demolition until another building takes the lot or the regrowth time is over. */
+export type LotGroundSpec = Readonly<{
+  /* Material id the cleared lot is drawn with: packed earth, bare sand or a floor, never grass or crops. */
+  material: string;
+  /* Width in tiles of the soft edge outside the footprint over which the cleared ground fades into the land. */
+  edgeTiles: number;
+  /* Hours after a building left a lot before the land grows back over it, when nothing was built there. */
+  regrowthHours: number;
+}>;
+
 /* Worn footpaths over open ground: thin winding lines with cart ruts and footprints, on the listed materials only. */
 export type GroundPathSpec = Readonly<{
   color: string;
@@ -514,6 +525,8 @@ export type WorldPackManifest = Readonly<{
   wind?: WindSpec;
   lighting?: LightingSpec;
   paths?: GroundPathSpec;
+  /* Cleared ground under building lots; every pack with smooth ground names one. */
+  lotGround?: LotGroundSpec;
   terrainArt?: TerrainArtSpec;
   /* Optional pure tile resolver for stub or preview packs; defaults to defaultTileId. */
   resolveEmptyTileId?: (col: number, row: number, chunkSize: number, mapSize: number) => string;
@@ -924,6 +937,18 @@ function validateBuildingLayout(rules: BuildingLayoutRules): string[] {
   return errors;
 }
 
+function validateLotGround(pack: WorldPackManifest, materialIds: ReadonlySet<string>, errors: string[]): void {
+  const spec = pack.lotGround;
+  if (!spec) {
+    if (materialIds.size > 0) errors.push('lotGround is required with smooth ground materials');
+    return;
+  }
+  const blended = pack.terrainRecipe?.materialIds ?? [...materialIds];
+  if (!blended.includes(spec.material)) errors.push(`lotGround references material "${spec.material}" the ground does not blend`);
+  if (!(spec.edgeTiles > 0 && spec.edgeTiles <= 2)) errors.push('lotGround.edgeTiles must be in (0, 2]');
+  if (!(spec.regrowthHours > 0)) errors.push('lotGround.regrowthHours must be positive');
+}
+
 export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation {
   const errors: string[] = [];
 
@@ -1058,6 +1083,7 @@ export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation 
   }
 
   validatePlants(pack, materialIds, errors);
+  validateLotGround(pack, materialIds, errors);
 
   if (pack.outerWallMode !== undefined && pack.outerWallMode !== 'ring' && pack.outerWallMode !== 'none') {
     errors.push(`invalid outerWallMode "${String(pack.outerWallMode)}"`);

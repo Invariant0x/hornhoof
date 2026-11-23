@@ -9,6 +9,7 @@
    Contains zero theme-specific words, files or colours. */
 
 import type { TileCoord } from './coords';
+import { openVacatedLots, type VacatedLot } from './lot-clearing';
 import type { BuildingLayoutRules, BuildingLayoutSpec, CityBuildingKind, OuterWallMode } from './manifest';
 import { createRng, hash2i } from './prng';
 import type { GeneratedWorldMap } from './terrain-engine';
@@ -136,6 +137,9 @@ export type CityState = {
   wallTiles: Set<string>;
   excavatedTiles: Set<string>;
   relocations: CityRelocation[];
+  /* Lots buildings moved away from that are still cleared ground, from the relocations the server keeps; recomputed
+     on every sync and never saved with the layout. */
+  vacatedLots: VacatedLot[];
   footprintOccupant: Map<string, string>;
   lotReservation: Map<string, string>;
   metrics: CityMetrics;
@@ -965,6 +969,7 @@ export function createCity(
     wallTiles: new Set(),
     excavatedTiles: new Set(),
     relocations: [],
+    vacatedLots: [],
     footprintOccupant: new Map(),
     lotReservation: new Map(),
     metrics: {
@@ -1888,6 +1893,7 @@ export function deserializeCityLayout(
     wallTiles: new Set(snapshot.wallTiles),
     excavatedTiles: new Set(snapshot.excavatedTiles),
     relocations: snapshot.relocations.map(r => ({ ...r })),
+    vacatedLots: [],
     footprintOccupant: new Map(),
     lotReservation: new Map(),
     metrics: { ...snapshot.metrics },
@@ -1986,11 +1992,12 @@ export function verifyCityInvariants(city: CityState, map: GeneratedWorldMap): C
 /* How far (tiles) plants keep from a footprint's edge, so no root stands right against a wall. */
 const PLANT_CLEARANCE = 0.15;
 
-/* Whether the city claims the ground at a point (fractional tile coordinates): a footprint with a thin margin, a
-   street or a wall. Plants of the map do not grow there. */
+/* Whether the city claims the ground at a point (fractional tile coordinates): a footprint with a thin margin, a lot a
+   building left while it is still cleared, a street or a wall. Plants of the map do not grow there. */
 export function cityPlantCover(city: CityState): (col: number, row: number) => boolean {
+  const lots: readonly Pick<CityBuilding, 'col' | 'row' | 'spanCol' | 'spanRow'>[] = [...city.buildings, ...openVacatedLots(city)];
   const near = new Set<string>();
-  for (const b of city.buildings) {
+  for (const b of lots) {
     for (let r = b.row - 1; r <= b.row + b.spanRow; r++) {
       for (let c = b.col - 1; c <= b.col + b.spanCol; c++) near.add(tileKey(c, r));
     }
@@ -1999,7 +2006,7 @@ export function cityPlantCover(city: CityState): (col: number, row: number) => b
     const k = tileKey(Math.floor(col), Math.floor(row));
     if (city.roads.has(k) || city.wallTiles.has(k)) return true;
     if (!near.has(k)) return false;
-    return city.buildings.some(
+    return lots.some(
       b =>
         col > b.col - PLANT_CLEARANCE &&
         col < b.col + b.spanCol + PLANT_CLEARANCE &&

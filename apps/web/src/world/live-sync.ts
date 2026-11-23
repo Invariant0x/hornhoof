@@ -47,6 +47,7 @@ import {
   type CityState,
 } from './city-layout';
 import type { PickableObject, TileCoord } from './coords';
+import { vacatedLotsFromRelocations } from './lot-clearing';
 import type { WorldPackManifest } from './manifest';
 import type { GeneratedWorldMap } from './terrain-engine';
 
@@ -566,6 +567,11 @@ export function syncLiveSnapshotToCity(
       }
     }
   }
+
+  /* 8b. The lots moved buildings left stay cleared ground until built on again or grown back (#1958). */
+  city.vacatedLots = pack.lotGround
+    ? vacatedLotsFromRelocations(snapshot.relocations, city.buildings, pack.lotGround, Date.parse(snapshot.generatedAt))
+    : [];
 
   /* 9. Outer wall: respects pack.outerWallMode ('ring' vs 'none'). */
   if (isActive) {
