@@ -38,9 +38,9 @@ import type { AnimationDetailLevel, LodTierId, LodTierSpec, TileSlotSpec, WorldP
 import {
   renderCityFallback2D,
   renderCityToPixi,
-  swayBuildingLayers,
+  swayCloths,
   type CityArtContext,
-  type SwayingLayer,
+  type ClothLayer,
   type CityRenderState,
   type RelocationTargetPreview,
   type TileWindow,
@@ -282,7 +282,7 @@ export class IsometricWorldEngine {
   private buildingVariants: ReadonlyMap<string, number> = new Map();
   private readonly roadPainter = new RoadStripPainter();
   /* Awnings and cloth of the building pictures drawn by the last city pass, moved every frame by the wind. */
-  private readonly swayingLayers: SwayingLayer[] = [];
+  private readonly swayingLayers: ClothLayer[] = [];
   /* A fixed wind clock in seconds for steady shots and video; null follows real time. */
   private windClockSec: number | null = null;
 
@@ -1375,7 +1375,7 @@ export class IsometricWorldEngine {
     }
     /* Awnings and cloth of the buildings in view move with the wind, after the city pass that placed them. */
     const swayAnimated = Boolean(this.app) && this.swayingLayers.length > 0;
-    if (swayAnimated) swayBuildingLayers(this.swayingLayers, this.windTime());
+    if (swayAnimated) swayCloths(this.swayingLayers, this.windTime());
     if (
       this.app &&
       ((this.residentsGraphic && this.residentSim && (residentsAnimated || needsSync)) ||

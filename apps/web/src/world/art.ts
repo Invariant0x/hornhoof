@@ -69,17 +69,43 @@ export type BuildingPicturePassport = Readonly<{
 }>;
 
 /* One layer over a building picture: a file beside it on the same canvas and registration. A shadow layer multiplies
-   the ground and walls under it; a swaying layer (awning, cloth) moves in the wind about a line where it is fixed. */
+   the ground and walls under it. A layer sways in the wind only by its cloth mask, `<layer>_w.png` beside it (cloth.ts),
+   a little, or by the `amplitude` its own passport names; with no mask it never moves. */
 export type ArtLayerSpec = Readonly<{
   file: string;
   blend?: 'multiply';
-  sway?: Readonly<{
-    /* Two points of the line the layer hangs from; the cloth on the far side of it sways. */
-    pivot: readonly [ArtPoint, ArtPoint];
-    /* Vertical shift of a pixel per pixel of distance from the line at the strongest gust (default 0.03). */
-    amplitude?: number;
-  }>;
 }>;
+
+/* How far a cloth's free edge (mask 255) lifts at the strongest wind, picture px, and the most a passport may ask. */
+export const CLOTH_SWAY_PX = 3;
+const CLOTH_SWAY_MAX_PX = 8;
+
+/* A layer named by a picture's passport, with its cloth mask and amplitude if it has them: each in the folder, on the
+   picture's canvas; both files belong to the picture, so neither counts as undeclared. */
+function checkLayerFiles(index: ArtIndex, path: string, entry: ArtIndexEntry, lp: string, errors: string[], layerOf: Map<string, string>): void {
+  const le = index.files[lp];
+  if (!le) errors.push(`${path}: layer ${lp.slice(lp.lastIndexOf('/') + 1)} is not in the folder`);
+  else if (le.w !== entry.w || le.h !== entry.h) errors.push(`${lp}: a layer must be the same size as ${path} (${entry.w} x ${entry.h})`);
+  layerOf.set(lp, path);
+  checkClothAmplitude(lp, le, errors);
+  const mp = clothMaskPath(lp);
+  const mask = index.files[mp];
+  if (!mask) return;
+  layerOf.set(mp, path);
+  if (mask.w !== entry.w || mask.h !== entry.h) errors.push(`${mp}: a cloth mask must be the same size as ${path} (${entry.w} x ${entry.h})`);
+}
+
+function checkClothAmplitude(lp: string, le: ArtIndexEntry | undefined, errors: string[]): void {
+  const amplitude = (le?.passport as { amplitude?: unknown } | undefined)?.amplitude;
+  if (amplitude !== undefined && !(isFiniteNum(amplitude) && amplitude > 0 && amplitude <= CLOTH_SWAY_MAX_PX)) {
+    errors.push(`${lp}: amplitude must be above 0 and at most ${CLOTH_SWAY_MAX_PX} px`);
+  }
+}
+
+/* The cloth mask beside a layer: awning.png -> awning_w.png. */
+export function clothMaskPath(layerPath: string): string {
+  return layerPath.replace(/\.png$/, '_w.png');
+}
 
 /* Passport of a small attached picture (flag, capstone): the point that touches its parent. */
 export type AnchorPassport = Readonly<{ anchor: ArtPoint }>;
@@ -468,18 +494,6 @@ function checkPicture(
       continue;
     }
     if (layer.blend !== undefined && layer.blend !== 'multiply') errors.push(`${path}: layer ${layer.file} blend must be multiply`);
-    if (layer.sway !== undefined) {
-      const pv = layer.sway.pivot;
-      const amp = layer.sway.amplitude;
-      if (!Array.isArray(pv) || pv.length !== 2 || !pv.every(pt => isPoint(pt) && pointInside(pt, entry.w, entry.h))) {
-        errors.push(`${path}: layer ${layer.file} sway needs two pivot points inside the picture`);
-      } else if (Math.hypot(pv[1]!.x - pv[0]!.x, pv[1]!.y - pv[0]!.y) < 1) {
-        errors.push(`${path}: layer ${layer.file} sway pivot points must differ`);
-      }
-      if (amp !== undefined && !(isFiniteNum(amp) && amp > 0 && amp <= 0.2)) {
-        errors.push(`${path}: layer ${layer.file} sway amplitude must be above 0 and at most 0.2`);
-      }
-    }
   }
 }
 
@@ -568,12 +582,7 @@ export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtI
     const layers = (entry.passport as BuildingPicturePassport | undefined)?.layers;
     if (!byPath.has(path) || !Array.isArray(layers)) continue;
     for (const layer of layers) {
-      if (typeof layer?.file !== 'string') continue;
-      const lp = artLayerPath(path, layer.file);
-      const le = index.files[lp];
-      if (!le) errors.push(`${path}: layer ${layer.file} is not in the folder`);
-      else if (le.w !== entry.w || le.h !== entry.h) errors.push(`${lp}: a layer must be the same size as ${path} (${entry.w} x ${entry.h})`);
-      layerOf.set(lp, path);
+      if (typeof layer?.file === 'string') checkLayerFiles(index, path, entry, artLayerPath(path, layer.file), errors, layerOf);
     }
   }
 
@@ -662,8 +671,8 @@ export type BuildingArtLayer = Readonly<{
   offset: ArtPoint;
   tint?: string;
   blend?: 'multiply';
-  /* Sways about the line a-b (picture pixels), by up to `amplitude` pixels per pixel away from it. */
-  sway?: Readonly<{ a: ArtPoint; b: ArtPoint; amplitude: number }>;
+  /* Sways by the cloth mask at `mask`, its free edge lifting up to `amplitude` picture px (cloth.ts). */
+  sway?: Readonly<{ mask: string; amplitude: number }>;
 }>;
 
 export type BuildingArt = Readonly<{
@@ -734,6 +743,16 @@ function attachedLayer(
 }
 
 /* A picture's own layers from its passport, on its canvas; a layer whose file is not in the folder is left out. */
+/* A layer's sway when its cloth mask lies beside it on the same canvas: the passport's amplitude, else CLOTH_SWAY_PX. */
+function clothSway(files: ArtIndex['files'], lp: string, entry: ArtIndexEntry): { sway?: { mask: string; amplitude: number } } {
+  const mask = clothMaskPath(lp);
+  const m = files[mask];
+  if (!m || m.w !== entry.w || m.h !== entry.h) return {};
+  const own = (entry.passport as { amplitude?: unknown } | undefined)?.amplitude;
+  const amplitude = isFiniteNum(own) && own > 0 ? Math.min(own, CLOTH_SWAY_MAX_PX) : CLOTH_SWAY_PX;
+  return { sway: { mask, amplitude } };
+}
+
 function passportLayers(files: ArtIndex['files'], path: string, main: BuildingPicturePassport): BuildingArtLayer[] {
   const out: BuildingArtLayer[] = [];
   for (const spec of Array.isArray(main.layers) ? main.layers : []) {
@@ -747,7 +766,7 @@ function passportLayers(files: ArtIndex['files'], path: string, main: BuildingPi
       anchor: { x: main.groundAnchor.x, y: main.groundAnchor.y },
       offset: { x: 0, y: 0 },
       ...(spec.blend ? { blend: spec.blend } : {}),
-      ...(spec.sway ? { sway: { a: spec.sway.pivot[0], b: spec.sway.pivot[1], amplitude: spec.sway.amplitude ?? 0.03 } } : {}),
+      ...clothSway(files, lp, entry),
     });
   }
   return out;

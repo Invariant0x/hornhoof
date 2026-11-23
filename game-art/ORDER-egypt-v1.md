@@ -211,13 +211,14 @@ A picture's passport may name layers. A layer is a PNG beside the picture, of ex
 "layers": [
   { "file": "shadow.png", "blend": "multiply" },
   { "file": "props.png" },
-  { "file": "awning.png", "sway": { "pivot": [[210, 542], [426, 650]] } }
+  { "file": "awning.png" }
 ]
 ```
 
 * `shadow.png` with `multiply`: the building's cast shadow, black or tinted with alpha for strength.
 * `props.png`: tables, jars, tools in the yard.
-* `awning.png` with `sway`: the cloth moves in the wind about the line through the two `pivot` points, where it is fixed. `amplitude` is optional: 0.03 by default, at most 0.2.
+* `awning.png`: the cloth of an awning, and nothing wooden. Posts, poles and frames never move, so they go into `complete.png` or `props.png`. A rigid reed mat is no awning either: it goes into the picture and needs no mask.
+* `awning_w.png` (v3), the cloth mask, the plants' format: 8-bit grey beside `awning.png`, the same size, 0 still (the line where the cloth is fastened), 255 moves the most (the free edge). The engine lifts and drops the cloth by the mask, a little; a pixel at 0 never moves. Without `awning_w.png` the awning stays still. `awning.json` may carry `"amplitude"`: how many px the free edge lifts at the strongest wind, 3 by default, at most 8. The `sway` field with a `pivot` line is gone (#1983).
 
 Keep to a layer only what moves or must stay separate.
 

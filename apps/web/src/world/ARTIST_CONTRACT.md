@@ -140,12 +140,12 @@ A picture passport may name layers: PNG files beside the picture, of exactly the
 "layers": [
   { "file": "shadow.png", "blend": "multiply" },
   { "file": "props.png" },
-  { "file": "awning.png", "sway": { "pivot": [[210, 542], [426, 650]] } }
+  { "file": "awning.png" }
 ]
 ```
 
 * `blend: "multiply"` multiplies what is under the layer by the layer's colour: a shadow keeps the colour of the ground and walls it falls on. Black with alpha for its strength works, and so does a tinted shadow.
-* `sway` moves the layer in the wind about the line through the two `pivot` points (picture pixels), where the cloth is fixed: the line stays put and the free edge lifts and drops. `amplitude` (default 0.03, at most 0.2) is how many pixels a point shifts per pixel of distance from the line at the strongest gust. Neighbouring buildings sway with different phases.
+* A layer sways in the wind only by its cloth mask, `<layer>_w.png` beside it (for example `awning_w.png`), in the plants' format (section 9): 8-bit grey, the same size, 0 still (the line where the cloth is fastened, posts and frame), 255 moves the most (the free edge). The engine lifts and drops the cloth by the mask, a little; a pixel at 0 never moves, and a layer without a mask never moves. The layer's own passport (`awning.json`) may carry `amplitude`: how many px the free edge lifts at the strongest wind, 3 by default, at most 8. Neighbouring buildings sway with different phases. Wooden posts and frames go into the picture or `props.png`, never into a swaying layer.
 * Keep a layer to what moves or must stay separate; whatever never moves belongs in the picture itself.
 
 ### Construction stages
@@ -247,6 +247,7 @@ The terrain and plant layers load these files straight from the pack's art folde
 * **Plants:** three files per plant, all at master scale next to the 136 px person:
   * `veg/<name>.png`: RGBA, transparent background, no ground shadow;
   * `veg/<name>_w.png`: 8-bit grey sway weights, the same size: 0 stays still, 255 moves the most;
+    a building layer's cloth mask, `<layer>_w.png`, has the same format (section 4, layers);
   * `veg/<name>.json`: `root_point` [x, y] (the pivot on the ground), `crown_center` [x, y], `height_px`, `crown_width_px` (older passports say `height` and `crown_width`), optional `crown_hub` [x, y] (where a palm's leaves meet the trunk, the pivot of their flutter; `crown_center` without it) and optional `recommended_sway` (frequency range in Hz, largest tip excursion in percent of the height, secondary flutter in px).
 
   Every plant sways with its own phase, so a grove never moves as one.

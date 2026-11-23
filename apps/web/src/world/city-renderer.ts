@@ -5,10 +5,11 @@
    and pending God's Word relocation overlays. Contains zero theme-specific words. */
 
 import type { WorldMode } from '@hornhoof/protocol/world';
-import { Matrix, type Graphics, type Sprite } from 'pixi.js';
-import { artFootprintCentre, resolveBuildingArt, type BuildingArt } from './art';
+import type { Graphics, MeshSimple, Texture } from 'pixi.js';
+import { artFootprintCentre, resolveBuildingArt, type BuildingArt, type BuildingArtLayer } from './art';
 import { parseArtTint, type DisplayRunPool, type WorldArtLibrary } from './art-runtime';
 import { cityDepthY, type CityBuilding, type CityState, type RoadTier } from './city-layout';
+import { clothWind, swayClothVertices } from './cloth';
 import {
   resolveStageSpecForBuilding,
   type BuildingConstructionState,
@@ -17,6 +18,7 @@ import {
   tileCenterToWorld,
   tileDiamondVertices,
   tileTopVertexToWorld,
+  type Point2D,
   type TileCoord,
 } from './coords';
 import { resolveConstructionPalette, type WorldPackManifest } from './manifest';
@@ -45,39 +47,29 @@ export type CityArtContext = Readonly<{
   variants: ReadonlyMap<string, number>;
   /* Streets are painted on the ground (road-strips.ts): draw only the bridges. */
   paintedRoads?: boolean;
-  /* Filled with the swaying layers drawn, for the per-frame wind pass (swayBuildingLayers). */
-  swaying?: SwayingLayer[];
+  /* Filled with the cloth layers drawn, for the per-frame wind pass (swayCloths). */
+  swaying?: ClothLayer[];
 }>;
 
-/* A building layer that sways about a fixed line, as placed by the last city pass. */
-export type SwayingLayer = {
-  sprite: Sprite;
-  scale: number;
-  /* World position of the layer's picture pixel (0, 0). */
-  originX: number;
-  originY: number;
-  ax: number;
-  ay: number;
-  /* Unit normal of the fixed line, pointing to the side that hangs free. */
-  nx: number;
-  ny: number;
+/* A cloth layer drawn as a mesh by the last city pass (cloth.ts), for the per-frame wind pass. */
+export type ClothLayer = {
+  mesh: MeshSimple;
+  /* Vertex weights from the cloth mask, and the layer's size in picture pixels. */
+  weights: Float32Array;
+  w: number;
+  h: number;
   amplitude: number;
   phase: number;
 };
 
-/* Moves every swaying layer for the wind at `timeSec`: a pixel shifts down or up by the amplitude times its distance
-   from the fixed line, so the line itself stays put and the free edge lifts and drops. Gusts are two slow waves. */
-export function swayBuildingLayers(layers: readonly SwayingLayer[], timeSec: number): void {
-  const m = SWAY_MATRIX;
-  for (const l of layers) {
-    if (l.sprite.destroyed) continue;
-    const w = 0.65 * Math.sin(timeSec * 2.4 + l.phase) + 0.35 * Math.sin(timeSec * 6.3 + l.phase * 2.1);
-    const k = l.amplitude * w;
-    m.set(l.scale, l.scale * k * l.nx, 0, l.scale * (1 + k * l.ny), l.originX, l.originY - l.scale * k * (l.nx * l.ax + l.ny * l.ay));
-    l.sprite.setFromMatrix(m);
+/* Lifts and drops every cloth by its mask for the wind at `timeSec`; the still parts of its mask never move. */
+export function swayCloths(cloths: readonly ClothLayer[], timeSec: number): void {
+  for (const c of cloths) {
+    if (c.mesh.destroyed) continue;
+    swayClothVertices(c.mesh.geometry.positions, c.w, c.h, c.weights, c.amplitude, clothWind(timeSec, c.phase));
+    c.mesh.geometry.getBuffer('aPosition').update();
   }
 }
-const SWAY_MATRIX = new Matrix();
 
 /* A steady phase in [0, 2pi) per building, so neighbouring awnings do not flap in step. */
 function hashPhase(id: string): number {
@@ -847,6 +839,31 @@ function drawBuildingPixi(
 
 /* Rebuilds the cached static isometric city geometry layer inside a PixiJS Graphics object,
    strictly frustum-culled to cullWindow so off-screen walls/roads/buildings never inflate GPU triangle counts. */
+/* A layer drawn still: a sprite on the picture's registration, tinted or multiplied as the layer says. */
+export function placeLayerSprite(ctx: CityArtContext, layer: BuildingArtLayer, texture: Texture, centre: Point2D, s: number): void {
+  const sprite = ctx.pool.sprite(texture);
+  sprite.anchor.set(layer.anchor.x / layer.frame.w, layer.anchor.y / layer.frame.h);
+  sprite.scale.set(s);
+  sprite.position.set(centre.x + layer.offset.x * s, centre.y + layer.offset.y * s);
+  if (layer.tint) sprite.tint = parseArtTint(layer.tint);
+  if (layer.blend === 'multiply') sprite.blendMode = 'multiply';
+}
+
+/* A layer with a loaded cloth mask goes in as a cloth mesh for the wind pass; false for any other, drawn still. */
+export function placeCloth(ctx: CityArtContext, layer: BuildingArtLayer, centre: Point2D, s: number, buildingId: string): boolean {
+  const weights = layer.sway && ctx.swaying ? ctx.library.clothWeights(layer.sway.mask) : null;
+  const texture = weights ? ctx.library.texture(layer.path) : null;
+  if (!weights || !texture || !layer.sway || !ctx.swaying) return false;
+  const mesh = ctx.pool.cloth(texture);
+  mesh.scale.set(s);
+  mesh.position.set(centre.x + (layer.offset.x - layer.anchor.x) * s, centre.y + (layer.offset.y - layer.anchor.y) * s);
+  const cloth: ClothLayer = { mesh, weights, w: layer.frame.w, h: layer.frame.h, amplitude: layer.sway.amplitude, phase: hashPhase(buildingId) };
+  swayClothVertices(mesh.geometry.positions, cloth.w, cloth.h, weights, cloth.amplitude, 0);
+  mesh.geometry.getBuffer('aPosition').update();
+  ctx.swaying.push(cloth);
+  return true;
+}
+
 /* Draws one building from its pictures; false while any texture is still loading. */
 function drawBuildingArtPixi(
   ctx: CityArtContext,
@@ -860,28 +877,7 @@ function drawBuildingArtPixi(
   const centre = artFootprintCentre(b, tileW, tileH);
   const s = tileW / art.artPxPerTile;
   art.layers.forEach((layer, i) => {
-    const sprite = ctx.pool.sprite(textures[i]!);
-    sprite.anchor.set(layer.anchor.x / layer.frame.w, layer.anchor.y / layer.frame.h);
-    sprite.scale.set(s);
-    sprite.position.set(centre.x + layer.offset.x * s, centre.y + layer.offset.y * s);
-    if (layer.tint) sprite.tint = parseArtTint(layer.tint);
-    if (layer.blend === 'multiply') sprite.blendMode = 'multiply';
-    if (layer.sway && ctx.swaying) {
-      const { a, b: pb, amplitude } = layer.sway;
-      const len = Math.max(1e-6, Math.hypot(pb.x - a.x, pb.y - a.y));
-      /* The free side hangs toward the viewer: the normal that points down the screen. */
-      let nx = -(pb.y - a.y) / len;
-      let ny = (pb.x - a.x) / len;
-      if (ny < 0) {
-        nx = -nx;
-        ny = -ny;
-      }
-      sprite.anchor.set(0, 0);
-      const originX = centre.x + (layer.offset.x - layer.anchor.x) * s;
-      const originY = centre.y + (layer.offset.y - layer.anchor.y) * s;
-      sprite.position.set(originX, originY);
-      ctx.swaying.push({ sprite, scale: s, originX, originY, ax: a.x, ay: a.y, nx, ny, amplitude, phase: hashPhase(b.id) });
-    }
+    if (!placeCloth(ctx, layer, centre, s, b.id)) placeLayerSprite(ctx, layer, textures[i]!, centre, s);
   });
   if (b.resting) {
     const top = art.passport.topAnchor ?? { x: art.passport.groundAnchor.x, y: 0 };

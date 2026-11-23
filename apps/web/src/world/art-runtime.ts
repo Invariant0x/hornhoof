@@ -3,7 +3,7 @@
    A pack without art, a folder without an index or a file that fails to load all leave
    the geometric placeholders in place. */
 
-import { Assets, Container, Graphics, Rectangle, RenderLayer, Sprite, Texture } from 'pixi.js';
+import { Assets, Container, Graphics, MeshSimple, Rectangle, RenderLayer, Sprite, Texture } from 'pixi.js';
 import {
   ART_CONTRACT_VERSION,
   ART_INDEX_FILE,
@@ -12,6 +12,7 @@ import {
   type ArtIndexEntry,
   type ArtRect,
 } from './art';
+import { CLOTH_COLS, CLOTH_ROWS, clothIndices, clothUvs, clothVertexWeights, greyOf } from './cloth';
 import type { WorldPackManifest } from './manifest';
 
 export type ArtFetch = (url: string) => Promise<Pick<Response, 'ok' | 'json'>>;
@@ -42,18 +43,33 @@ function usableIndex(pack: WorldPackManifest, raw: ArtIndex): ArtIndex | null {
   return { ...raw, files };
 }
 
+export type GreyPicture = Readonly<{ data: Uint8ClampedArray; w: number; h: number }>;
+/* Reads a grey picture (a cloth mask) one byte per pixel; rejects when it cannot. */
+export type GreyReader = (url: string) => Promise<GreyPicture>;
+
+const readGrey: GreyReader = async url => {
+  const bitmap = await createImageBitmap(await (await fetch(url, { cache: 'no-cache' })).blob());
+  const ctx = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d')!;
+  ctx.drawImage(bitmap, 0, 0);
+  return { data: greyOf(ctx.getImageData(0, 0, bitmap.width, bitmap.height).data), w: bitmap.width, h: bitmap.height };
+};
+
 export class WorldArtLibrary {
   readonly index: ArtIndex | null;
   readonly stats: WorldArtStats;
   private readonly baseUrl: string;
   private readonly textures = new Map<string, Texture | 'loading' | 'failed'>();
   private readonly frames = new Map<string, Texture>();
+  private readonly cloths = new Map<string, Float32Array | 'loading' | 'failed'>();
   private readonly listeners = new Set<() => void>();
   private destroyed = false;
 
-  private constructor(baseUrl: string, index: ArtIndex | null) {
+  private readonly grey: GreyReader;
+
+  private constructor(baseUrl: string, index: ArtIndex | null, grey: GreyReader = readGrey) {
     this.baseUrl = baseUrl;
     this.index = index;
+    this.grey = grey;
     this.stats = {
       indexedFiles: index ? Object.keys(index.files).length : 0,
       loadedTextures: 0,
@@ -66,7 +82,11 @@ export class WorldArtLibrary {
     return new WorldArtLibrary('', null);
   }
 
-  static async load(pack: WorldPackManifest, fetchImpl: ArtFetch = url => fetch(url, { cache: 'no-cache' })): Promise<WorldArtLibrary> {
+  static async load(
+    pack: WorldPackManifest,
+    fetchImpl: ArtFetch = url => fetch(url, { cache: 'no-cache' }),
+    grey: GreyReader = readGrey,
+  ): Promise<WorldArtLibrary> {
     const baseUrl = pack.art?.baseUrl;
     if (!baseUrl) return WorldArtLibrary.none();
     try {
@@ -75,7 +95,7 @@ export class WorldArtLibrary {
       const raw: unknown = await res.json();
       if (!isIndexShape(raw)) return WorldArtLibrary.none();
       const index = usableIndex(pack, raw);
-      return index ? new WorldArtLibrary(baseUrl, index) : WorldArtLibrary.none();
+      return index ? new WorldArtLibrary(baseUrl, index, grey) : WorldArtLibrary.none();
     } catch {
       return WorldArtLibrary.none();
     }
@@ -103,6 +123,24 @@ export class WorldArtLibrary {
       () => {
         if (!this.destroyed) this.textures.set(path, 'failed');
       },
+    );
+    return null;
+  }
+
+  /* The cloth mesh's vertex weights from a cloth mask (cloth.ts), or null while it loads or after it failed. */
+  clothWeights(path: string): Float32Array | null {
+    if (!this.index?.files[path]) return null;
+    const known = this.cloths.get(path);
+    if (known instanceof Float32Array) return known;
+    if (known) return null;
+    this.cloths.set(path, 'loading');
+    this.grey(`${this.baseUrl}${path}`).then(
+      grey => {
+        if (this.destroyed) return;
+        this.cloths.set(path, clothVertexWeights(grey.data, grey.w, grey.h, CLOTH_COLS, CLOTH_ROWS));
+        this.listeners.forEach(l => l());
+      },
+      () => this.cloths.set(path, 'failed'),
     );
     return null;
   }
@@ -143,6 +181,7 @@ export class DisplayRunPool {
   readonly container: Container;
   private readonly freeGraphics: Graphics[] = [];
   private readonly freeSprites: Sprite[] = [];
+  private readonly freeCloths: MeshSimple[] = [];
   private readonly depthLayer: RenderLayer | null;
   /* Depth of the objects handed out next. */
   depth = 0;
@@ -152,7 +191,7 @@ export class DisplayRunPool {
     this.depthLayer = depthLayer;
   }
 
-  private place(child: Graphics | Sprite): void {
+  private place(child: Graphics | Sprite | MeshSimple): void {
     this.container.addChild(child);
     if (this.depthLayer) {
       child.zIndex = this.depth;
@@ -164,6 +203,7 @@ export class DisplayRunPool {
     for (const child of this.container.removeChildren()) {
       if (child instanceof Sprite) this.freeSprites.push(child);
       else if (child instanceof Graphics) this.freeGraphics.push(child);
+      else if (child instanceof MeshSimple) this.freeCloths.push(child);
     }
   }
 
@@ -189,6 +229,18 @@ export class DisplayRunPool {
     return s;
   }
 
+  /* A cloth mesh over the whole of `texture` (cloth.ts); its vertices are set by the wind pass. */
+  cloth(texture: Texture): MeshSimple {
+    const mesh =
+      this.freeCloths.pop() ??
+      new MeshSimple({ texture, vertices: new Float32Array(CLOTH_COLS * CLOTH_ROWS * 2), uvs: clothUvs(), indices: clothIndices() });
+    mesh.texture = texture;
+    mesh.tint = 0xffffff;
+    mesh.visible = true;
+    this.place(mesh);
+    return mesh;
+  }
+
   clear(): void {
     this.begin();
   }
@@ -197,8 +249,10 @@ export class DisplayRunPool {
     this.begin();
     for (const g of this.freeGraphics) g.destroy();
     for (const s of this.freeSprites) s.destroy();
+    for (const m of this.freeCloths) m.destroy();
     this.freeGraphics.length = 0;
     this.freeSprites.length = 0;
+    this.freeCloths.length = 0;
   }
 }
 
