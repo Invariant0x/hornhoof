@@ -82,16 +82,21 @@ const numberAt = (raw: unknown, ...path: string[]): number | undefined => {
 
 const boundsErrors = (raw: Raw): string[] => [...numberErrors(raw), ...gridErrors(raw), ...zoomErrors(raw), ...tileErrors(raw)];
 
-/* Every number anywhere in the world, its place said. */
+/* At most this many wrong numbers are said: a world with thousands of them is refused as one with a few, and the check
+   never holds or passes on more than it says (#1960, F4). */
+const NUMBERS_SAID = 20;
+
+/* Every number anywhere in the world, its place said, in the order the file gives them. */
 function numberErrors(raw: Raw): string[] {
   const errors: string[] = [];
   const stack: [unknown, string][] = [[raw, '']];
-  for (let next = stack.pop(); next; next = stack.pop()) {
-    const [value, at] = next;
-    if (typeof value === 'number' && !(Math.abs(value) <= WORLD_DATA_BOUNDS.anyNumber)) errors.push(`${at} is beyond ${WORLD_DATA_BOUNDS.anyNumber}`);
-    else if (typeof value === 'object' && value !== null) for (const [key, inner] of Object.entries(value)) stack.push([inner, at ? `${at}.${key}` : key]);
-  }
+  for (let next = stack.pop(); next && errors.length < NUMBERS_SAID; next = stack.pop()) visitNumber(next, stack, errors);
   return errors;
+}
+
+function visitNumber([value, at]: [unknown, string], stack: [unknown, string][], errors: string[]): void {
+  if (typeof value === 'number' && !(Math.abs(value) <= WORLD_DATA_BOUNDS.anyNumber)) errors.push(`${at} is beyond ${WORLD_DATA_BOUNDS.anyNumber}`);
+  else if (typeof value === 'object' && value !== null) for (const [key, inner] of Object.entries(value).reverse()) stack.push([inner, at ? `${at}.${key}` : key]);
 }
 
 /* The map, its chunks and how many of them a side. */
@@ -114,13 +119,22 @@ function zoomErrors(raw: Raw): string[] {
 
 const inRange = (value: number | undefined, least: number, most: number) => value === undefined || (value >= least && value <= most);
 
+/* A world's tile tiers: a list of objects, none when it names none, null when it names them as anything else. */
+const tiersOf = (lods: unknown): readonly Raw[] | null => (lods === undefined ? [] : Array.isArray(lods) && lods.every(isObject) ? lods : null);
+
+function tiersErrors(lods: readonly Raw[] | null): string[] {
+  if (lods === null) return ['projection.lods must be a list of tiers, each an object'];
+  return lods.length > WORLD_DATA_BOUNDS.lods ? [`projection.lods has at most ${WORLD_DATA_BOUNDS.lods} tiers`] : [];
+}
+
 /* The tile pictures: how many tiers, how wide each, and how many texels a tile of the painted ground takes. */
 function tileErrors(raw: Raw): string[] {
   const B = WORLD_DATA_BOUNDS;
   const projection = isObject(raw.projection) ? raw.projection : {};
-  const lods = Array.isArray(projection.lods) ? projection.lods : [];
-  const errors = lods.length > B.lods ? [`projection.lods has at most ${B.lods} tiers`] : [];
-  const widths: [string, unknown][] = [['projection.defaultTileW', projection.defaultTileW], ...lods.map((lod, n): [string, unknown] => [`projection.lods.${n}.tileW`, isObject(lod) ? lod.tileW : undefined])];
+  const lods = tiersOf(projection.lods);
+  const errors = tiersErrors(lods);
+  /* Tiers past the most a world may have are refused for their number, so only the widths of the first ones are read. */
+  const widths: [string, unknown][] = [['projection.defaultTileW', projection.defaultTileW], ...(lods ?? []).slice(0, B.lods).map((lod, n): [string, unknown] => [`projection.lods.${n}.tileW`, lod.tileW])];
   errors.push(...widths.filter(([, value]) => !inRange(typeof value === 'number' ? value : undefined, -Infinity, B.tileW)).map(([at]) => `${at} is at most ${B.tileW} px`));
   if (!inRange(numberAt(raw, 'terrainArt', 'texelsPerTile'), -Infinity, B.texelsPerTile)) errors.push(`terrainArt.texelsPerTile is at most ${B.texelsPerTile}`);
   return errors;

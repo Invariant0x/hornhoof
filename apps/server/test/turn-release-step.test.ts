@@ -5,6 +5,7 @@ import { orchestratorHeaders } from '../src/auth/internal.js';
 import { ask, closeTask, report } from '../src/modules/tasks/engine.js';
 import { BASE } from './development-echelons-fixture.js';
 import { as } from './helpers.js';
+import { recorded as recordedFile } from './recorded-fixture.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 import { prepareTemplates } from './templates-once.js';
 import { joinedAfterR, releasing, turnkeyAfterR } from './turn-release-fixture.js';
@@ -402,7 +403,7 @@ describe('the release step with autonomous release on', () => {
       const [orchestrator] = await f.db.select().from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.kind, 'orchestrator')));
       await closeTask(f.ctx, { agentId: orchestrator!.id }, task.id, { status: 'done', why: 'Closed by hand; the work is over.' });
     } else await f.db.update(tasks).set({ status: 'done', closedAt: new Date('2026-11-17T12:00:00.000Z'), turnId: f.turn.id }).where(eq(tasks.id, task.id));
-    expect((await report(f.ctx, f.head.id, group.id, { done: true, summary: 'Closed over the late change.' })).task.status).toBe('done');
+    expect((await report(f.ctx, f.head.id, group.id, { done: true, summary: 'Closed over the late change.', ...(await recordedFile(f.ctx, group.id, f.head.id)) })).task.status).toBe('done');
     const run = await f.fullRun({ commit: joined.head });
     const result = await f.recordRelease({ commit: joined.head, runId: run.id });
     expect(result).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });

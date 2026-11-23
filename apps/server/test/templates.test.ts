@@ -471,9 +471,24 @@ describe('templates', () => {
     expect([watch.timer?.forWork, bugs.timer?.forWork]).toEqual([true, true]);
     expect(watch.skills.find(s => s.id === 'ops-task-watch')?.on).toBe(true);
     expect(bugs.skills.find(s => s.id === 'ops-failure-review')?.on).toBe(true);
-    expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'message_employee', 'restart_program']);
+    expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'message_employee', 'restart_program', 'settle']);
     expect(templates.skills.get('ops-failure-review')!.grants).toEqual(['failures', 'agents', 'message_employee', 'improvements']);
     expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-PM', 'HOM-PM', 'MKT-PM', 'OPS-BUGS', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SUP-PM', 'VID-PM']);
+  });
+
+  it('keeps the done rules for each kind of result in the watchdog skill and its role, in English with names and descriptions in both languages', () => {
+    const skill = templates.skills.get('ops-task-watch')!;
+    expect(skill.body).toMatch(/Code\. Done only when the task's commit is an ancestor of a release tag or of main/);
+    expect(skill.body).toMatch(/task_released[\s\S]*never the turn number/i);
+    expect(skill.body).toMatch(/only a turn branch or a branch of its own holds is unfinished work, and is never closed/);
+    expect(skill.body).toMatch(/recorded where a colleague will find it[\s\S]*a path in the department's repository, or a file on the task/);
+    expect(skill.body).toMatch(/If it is not recorded, the task is not done/);
+    expect(skill.body).toMatch(/Coordination[\s\S]*every subtask is closed and it has no new work/);
+    expect(skill.body).toMatch(/duplicate[\s\S]*Ask the head of its department; never close it blind\. Never touch paused work on your own/);
+    expect(skill.body).toMatch(/settle_task[\s\S]*head of that department is told/);
+    expect(templates.roles.get('OPS-WATCH')!.timer?.order).toMatch(/Close the tasks whose work is done by the rule for their kind of result/);
+    for (const text of [skill.description, templates.roles.get('OPS-WATCH')!.description]) expect(text.ru).toMatch(/[а-я]/i);
+    expect(skill.description.en).toMatch(/closes the tasks whose work is done/);
   });
 
   it('keeps scheduled drains active and checks actual stalls separately', () => {

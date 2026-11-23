@@ -6,7 +6,7 @@
    --art the world has no pictures, and the theme installs as its interface alone (docs/theme-archive.md, 4.2). */
 
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { en } from '../src/i18n/en';
@@ -21,7 +21,8 @@ type Lang = Readonly<{ en: string; ru: string }>;
 export type ThemeVoice = Readonly<{ label: Lang; address: Lang; salutations: readonly string[]; names: Readonly<{ ruler: Lang; employees: Readonly<{ en: readonly string[]; ru: readonly string[] }> }> }>;
 export type PackOptions = Readonly<{ version?: string; art?: string | null; licence?: string | null; voice?: ThemeVoice | null }>;
 
-const REPO = fileURLToPath(new URL('../../../', import.meta.url));
+/* From this file's own path: Vite reads new URL(..., import.meta.url) as a web asset when the screens' tests load it. */
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const json = (value: unknown) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
 
 /* The server's world voice of a pack it ships, read from its source: the web's type check covers web files only. */
