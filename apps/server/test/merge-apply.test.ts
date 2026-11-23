@@ -170,6 +170,33 @@ describe('a merge applied', () => {
     expect(await s.conflicts(id)).toMatchObject([{ tbl: 'world_layouts', key: { company_id: s.acme.id }, op: 'update', kind: 'differs', topic: 'work', cols: ['layout'] }]);
   });
 
+  it("keeps each company's city its own through a merge, and a conflict over one city names that city alone", async () => {
+    const s = await stand();
+    /* Another company in the same database, as only a test makes one: a deployment serves one company. */
+    const [other] = await s.db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+    const theirs = { buildings: 9, marker: 'the-other-city' };
+    await s.db.insert(worldLayouts).values([
+      { companyId: s.acme.id, packId: 'space', seed: 'acme', layout: { buildings: 1 } },
+      { companyId: other!.id, packId: 'space', seed: 'other', layout: theirs },
+    ]);
+    const fork = await s.sides.fork();
+    /* Both sides build on Acme's city, each its own way; only the leader moves the other company's city on. */
+    await fork.db.update(worldLayouts).set({ layout: { buildings: 2 } }).where(eq(worldLayouts.companyId, s.acme.id));
+    await s.db.update(worldLayouts).set({ layout: { buildings: 3 } }).where(eq(worldLayouts.companyId, s.acme.id));
+    await s.db.update(worldLayouts).set({ layout: { ...theirs, buildings: 10 } }).where(eq(worldLayouts.companyId, other!.id));
+    const { id } = await s.merge(fork);
+    expect(await s.db.select({ companyId: worldLayouts.companyId, seed: worldLayouts.seed, layout: worldLayouts.layout }).from(worldLayouts).orderBy(worldLayouts.seed)).toEqual([
+      { companyId: s.acme.id, seed: 'acme', layout: { buildings: 3 } },
+      { companyId: other!.id, seed: 'other', layout: { ...theirs, buildings: 10 } },
+    ]);
+    const conflicts = await s.conflicts(id);
+    expect(conflicts).toMatchObject([{ tbl: 'world_layouts', key: { company_id: s.acme.id }, kind: 'differs', topic: 'work', cols: ['layout'] }]);
+    /* What the orchestrator is shown of it holds Acme's city and nothing of the other company's. */
+    expect([conflicts[0]!.here?.layout, conflicts[0]!.there?.layout]).toEqual([{ buildings: 3 }, { buildings: 2 }]);
+    expect(JSON.stringify(conflicts)).not.toContain(theirs.marker);
+    expect(JSON.stringify(conflicts)).not.toContain(other!.id);
+  });
+
   it('keeps a value the leader changed where its journal lost it', async () => {
     const s = await stand();
     const fork = await s.sides.fork();
