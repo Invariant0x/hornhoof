@@ -59,7 +59,8 @@ type PartOptions = Parameters<typeof runTests>[1] & { partUser?: TestPartUser; o
 export async function runQueuedPart(message: Parameters<typeof runTests>[0], runPart: typeof runTests, options: PartOptions, waiting: (position: number) => void, started: () => void): Promise<TestsDone> {
   try {
     const refusal = await workCommandRefusal(message, options.dir);
-    if (refusal) throw new Error(refusal);
+    /* Refused before it started: a hint to the one who asked, never a failed check. */
+    if (refusal) return { type: 'tests.done', partId: message.partId, ok: false, exitCode: null, error: 'refused', commit: null, log: refusal };
     return await withCheckSlot(signal => {
       const run = () => { started(); return watchPart(message, runPart, options, signal); };
       return options.partUser?.run(signal, run, waiting) ?? run();
