@@ -1,4 +1,5 @@
 import { COLLECTION_LIMIT, collectionText, readCollection, withAdded, withRestored, without, type CustomSkin } from './collection';
+import { applyKit, type Kit } from './kit';
 import { builtinSkin, DEFAULT_SKIN, ownLook } from './registry';
 import { declarations, extraDeclarations, type Skin, type SkinLook, type WorldKind } from './roles';
 
@@ -41,21 +42,27 @@ function keep(key: string, value: string): boolean {
 /* The looks of themes the company installed from archives, put on by themes/installed.ts once their look is read; each
    stands in place of a built-in skin of its id. */
 const installedLooks = new Map<string, SkinLook>();
+/* The painted interface parts of an installed theme that has them, with where its files are served (#1970). */
+export type InstalledKit = Readonly<{ kit: Kit; base: string }>;
+const installedKits = new Map<string, InstalledKit>();
 
 function lookIn(custom: readonly CustomSkin[], id: string): SkinLook | null {
   const own = custom.find(entry => entry.id === id);
   return installedLooks.get(id) ?? builtinSkin(id) ?? (own ? ownLook(own.skin) : null);
 }
 
-/* Keeps an installed theme's look under its id; the page changes at once when that theme is on. */
-export function keepInstalledLook(id: string, look: SkinLook): void {
+/* Keeps an installed theme's look, and its kit if it has one, under its id; the page changes at once when that theme is on. */
+export function keepInstalledLook(id: string, look: SkinLook, kit: InstalledKit | null = null): void {
   installedLooks.set(id, look);
+  if (kit) installedKits.set(id, kit);
+  else installedKits.delete(id);
   if (state.active === id) change(state);
   else listeners.forEach(listener => listener());
 }
 
 /* Forgets an installed theme's look; when it was on, Cyberpunk takes its place, as for any skin that is gone. */
 export function forgetInstalledLook(id: string): void {
+  installedKits.delete(id);
   if (!installedLooks.delete(id)) return;
   change(state.active === id && !lookIn(state.custom, id) ? { ...state, active: DEFAULT_SKIN } : state);
 }
@@ -79,6 +86,8 @@ function apply({ active, custom }: SkinsState): void {
   const extra = extraDeclarations(look);
   for (const property of extra.clear) page.style.removeProperty(property);
   for (const [property, value] of extra.set) page.style.setProperty(property, value);
+  const kit = installedKits.get(active);
+  applyKit(page, kit?.kit ?? null, kit?.base ?? '');
 }
 
 function change(next: SkinsState): void {

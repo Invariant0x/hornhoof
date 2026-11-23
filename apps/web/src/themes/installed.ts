@@ -4,6 +4,7 @@
 
 import type { InstalledThemeView } from '@hornhoof/protocol/themes';
 import { api } from '../api';
+import { kitOf } from '../skins/kit';
 import { forgetInstalledLook, installedLookOf, keepInstalledLook } from '../skins/store';
 import { parseLook } from '../skins/validate';
 import { worldPackOfData } from '../world-packs/data-pack';
@@ -44,7 +45,8 @@ export function keepInstalledTheme(theme: InstalledThemeLook): boolean {
     forgetInstalledWorldPack(theme.id);
   }
   loadFonts(theme);
-  keepInstalledLook(theme.id, { ...look.look, world });
+  const kit = kitOf(theme.kit);
+  keepInstalledLook(theme.id, { ...look.look, world }, kit ? { kit, base: theme.base } : null);
   return true;
 }
 

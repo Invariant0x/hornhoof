@@ -44,6 +44,15 @@ function declarations(kit: Kit, base: string): Declared {
   return { set, faces };
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/* What the server gave as a theme's kit, when it has the kit's shape: an object of slots, and colours if any. Each name
+   and value in it is checked when it goes on the page. */
+export function kitOf(raw: unknown): Kit | null {
+  if (!isRecord(raw) || !isRecord(raw.slots) || (raw.colors !== undefined && !isRecord(raw.colors))) return null;
+  return raw as Kit;
+}
+
 /* Puts the active theme's kit on the page in place of the last one, or takes every trace of a kit away when the theme has
    none or its pictures would come from anywhere but the theme's files on this server. */
 export function applyKit(page: HTMLElement, kit: Kit | null, base: string): void {
