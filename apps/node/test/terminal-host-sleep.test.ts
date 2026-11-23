@@ -164,6 +164,59 @@ describe('a program that sleeps between turns', () => {
     await c.until(() => c.stop.mock.calls.length > 0);
   });
 
+  /* Seen on 23.11 at 13:08: the CEO's open terminal of the Orchestrator lost its connection while the program waited between
+     turns. The node put the program to sleep within its next look, the browser opened the view again a second later, and
+     that view started the program anew, so the terminal seemed to reopen by itself. A view that comes back within the
+     browser's retries finds the program it left. */
+  it('keeps an idle program through a brief drop of its terminal, so the view that comes back finds it and starts none', async () => {
+    const c = await atWorkThatSleeps('claude');
+    const view = await viewOpens(c);
+    c.finish();
+    await c.on(c.running);
+    await c.pass(5000);
+    const launched = c.launch.mock.calls.length;
+    view.leaves();
+    await c.pass(2000);
+    expect(c.stop).not.toHaveBeenCalled();
+    const back = await viewOpens(c);
+    await c.pass(1000);
+    expect(c.stop).not.toHaveBeenCalled();
+    expect(c.launch.mock.calls.length).toBe(launched);
+    expect(c.sent.filter(m => m.type === 'agent.start')).toEqual([]);
+    /* Once the person is gone for good, the program sleeps as before. */
+    back.leaves();
+    vi.setSystemTime(Date.now() + 60_000);
+    await c.until(() => c.stop.mock.calls.length > 0);
+  });
+
+  /* What the time a view has to come back must never hold: a program of a person who may no longer see it, and a program its
+     agent took to another plan. */
+  it('lets an idle program sleep at its next look once the server closed its view for good, as for a person who lost access', async () => {
+    const c = await atWorkThatSleeps('claude');
+    await viewOpens(c);
+    c.finish();
+    await c.on(c.running);
+    await c.pass(5000);
+    c.host.close({ type: 'term.close', termId: 'view', final: true });
+    await c.pass(1000);
+    expect(c.stop.mock.calls).toEqual([['a-receipt']]);
+  });
+
+  it('closes the program of an agent that left this plan at once, while a view that dropped may still come back', async () => {
+    const c = await atWorkThatSleeps('claude');
+    const has = vi.spyOn(c.tmux, 'has').mockResolvedValue(true);
+    c.kill.mockImplementation(async () => { c.alive.mockResolvedValue(false); has.mockResolvedValue(false); });
+    const view = await viewOpens(c);
+    c.finish();
+    await c.on(c.running);
+    view.leaves();
+    await c.pass(1000);
+    expect(c.stop).not.toHaveBeenCalled();
+    void c.host.release('receipt', 'job-receipt');
+    await c.pass(1000);
+    expect(c.kill.mock.calls).toEqual([['a-receipt']]);
+  });
+
   it('keeps a program awake while words someone left sit in its input', async () => {
     const c = await atWorkThatSleeps('claude');
     const view = await viewOpens(c);
@@ -171,6 +224,7 @@ describe('a program that sleeps between turns', () => {
     await c.on(c.running);
     await c.tmux.paste('a-receipt', 'half a thought');
     view.leaves();
+    vi.setSystemTime(Date.now() + 60_000);
     await c.pass(5000);
     expect(c.stop).not.toHaveBeenCalled();
     await c.tmux.keys('a-receipt', 'C-u');

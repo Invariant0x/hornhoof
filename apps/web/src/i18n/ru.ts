@@ -152,6 +152,13 @@ export const ru: Messages = {
     notResponding: 'Hornhoof не отвечает',
     tryAgain: 'Попробовать снова',
   },
+  connection: {
+    lost: { title: 'Нет связи с сервером', hint: 'Hornhoof подключится сам, перезагружать страницу не нужно.', long: 'Связи нет уже 2\u00a0мин. Проверьте интернет.' },
+    updating: { title: 'Сервер обновляется', hint: 'Это займет несколько минут. Hornhoof вернется сам, без перезагрузки.', long: 'Обновление идет дольше обычного.' },
+    trying: 'Пробуем снова…',
+    next: (seconds: number) => `Следующая попытка через ${seconds}\u00a0с`,
+    tryNow: 'Попробовать сейчас',
+  },
   login: {
     heading: 'Вход',
     submit: 'Войти',
