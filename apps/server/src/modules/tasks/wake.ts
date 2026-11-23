@@ -863,8 +863,8 @@ async function requestCancellation(ctx: Ctx, jobId: string) {
   return sub ? { job, sub } : null;
 }
 
-/* A person typed into the agent's terminal: the turn opens, and what they typed answers what the agent asked them, out of
-   the agent's line, which the pump of its task's turn waits on. */
+/* A person typed into the agent's terminal: the turn opens, and what they typed answers the one question the agent asked
+   them, when it is clear which, out of the agent's line, which the pump of its task's turn waits on. */
 export async function typedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null, queuedFrom?: string): Promise<{ jobId: string; token: string } | null> {
   const opened = await openTypedTurn(ctx, node, agentId, text, personId, queuedFrom);
   if (!opened) await turnRefused(ctx, node, agentId, text, queuedFrom);

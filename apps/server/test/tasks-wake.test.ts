@@ -14,6 +14,7 @@ import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { as, connectNode, listen, setUpCompany, statements, testApp, until, type FakeNode, echelonsTurn } from './helpers.js';
+import { recorded } from './recorded-fixture.js';
 import { BUILTIN } from './builtin.js';
 
 async function company(env?: NodeJS.ProcessEnv) {
@@ -84,6 +85,20 @@ describe('a person who speaks to an agent directly', () => {
     expect(await typedTurn(c.ctx, identityOf(c.sub, null, null, BUILTIN)!, c.bruno.id, 'Run the tests first, then submit.', c.ceo.id)).not.toBeNull();
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'open', answer: null, answeredBy: null }]);
     expect(await c.db.select({ status: tasks.status, silent: tasks.silent }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting', silent: SILENT_TURNS }]);
+  });
+
+  /* Which of two questions words typed in the terminal answer is the agent's to say, with record_answer. */
+  it('closes none of several open questions with words typed in the terminal', async () => {
+    const c = await company();
+    const first = await c.memberTask({ title: 'Prices' });
+    const second = await c.memberTask({ title: 'Payments' });
+    await ask(c.ctx, c.bruno.id, first.id, { kind: 'question', text: 'EUR or USD?', topic: 'task' });
+    await ask(c.ctx, c.bruno.id, second.id, { kind: 'question', text: 'Which bank takes the cards?', topic: 'task' });
+    expect(await typedTurn(c.ctx, identityOf(c.sub, null, null, BUILTIN)!, c.bruno.id, 'EUR only.', c.ceo.id)).not.toBeNull();
+    expect(await requestsOf(c)).toEqual([
+      { kind: 'question', status: 'open', answer: null, answeredBy: null },
+      { kind: 'question', status: 'open', answer: null, answeredBy: null },
+    ]);
   });
 
   it('leaves what waits on a task alone for a person who cannot reach the task', async () => {
@@ -455,7 +470,7 @@ describe("Hornhoof's note that a task stands still", () => {
     const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Plan the sprint', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id });
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
     for (let i = 0; i < SILENT_TURNS; i++) await c.finish(c.bruno.id);
-    await report(c.ctx, c.bruno.id, task.id, { done: true, summary: 'Planned.' });
+    await report(c.ctx, c.bruno.id, task.id, { done: true, summary: 'Planned.', ...(await recorded(c.ctx, task.id, c.bruno.id)) });
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'withdrawn' }]);
   });
 

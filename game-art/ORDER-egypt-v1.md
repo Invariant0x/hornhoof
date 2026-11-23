@@ -25,7 +25,7 @@ Contents:
 
 * PNG, RGBA, sRGB, straight (not premultiplied) alpha, transparent background.
 * **Master scale (4x):** a ground tile is a 240 x 120 px diamond (2:1). A grown person is 136 px from feet to the top of the head.
-* **Camera and light:** the camera is 30 degrees above the ground. The sun is at the top left (azimuth -45, elevation 55), 5200 K.
+* **Camera and light:** the camera is 30 degrees above the ground; residents alone are drawn at 19 degrees (4.4). The sun is at the top left (azimuth -45, elevation 55), 5200 K.
 * **Shadows:** no shadow is painted on the ground under a building or a person; the engine draws those. A building's own cast shadow goes in its `shadow.png` layer (3.3).
 * **Passports:** every picture or sheet has a passport JSON beside it with the same name: `complete.png` and `complete.json`.
   * Points are in the picture's own pixels, origin at the top left, y going down.
@@ -347,7 +347,7 @@ Folder `people/<look>/tier_<n>/`. One look per kind of role. A role without its 
 | `egypt-machine-keeper` | program operator, home devices (OPS-PROGRAM, HOM-NET, HOM-SMART) | tool | cap | 2 |
 | `egypt-day-laborer` | one-off helpers | stone | none | 2 |
 | `egypt-pharaoh` | the orchestrator | staff | crown | 1 |
-| `egypt-architect` | architect (DEV-ARCH) | scroll | circlet | 1 |
+| `egypt-architect` | architect (DEV-ARCH) | scroll | nemes, as the approved tier 3 picture `hd-char-lvl05.png` (the engine's placeholder shows a hood) | 1 |
 | `egypt-canal-builder` | DevOps (DEV-OPS) | tool | none | 1 |
 | `egypt-skirmisher` | red team (DEV-RED) | spear and shield | hood | 1 |
 | `egypt-guard-captain` | head of operations (OPS-HEAD) | staff | helm | 1 |
@@ -368,6 +368,7 @@ Five outfit tiers follow the agent's level:
 * A missing higher tier falls back to the next lower one.
 * The role stays readable in every tier: the same carried item and headgear, with richer cloth, collar, belt and gold as the tier rises.
 * **Cloak layer:** `<animation>.cloak.png`, exactly the same size and grid as its sheet, white or light grey where the cloak is and transparent elsewhere. The engine tints it with the colour of the agent's subscription provider, so one drawing serves every provider: Claude `#C96A4B`, Codex `#3FA796`, Antigravity `#4DA167`, Kimi `#4C84D6`, GLM `#766BD6`, API key `#B89B5E`.
+* **First live resident:** the tier 3 `egypt-architect` `walk` arrives first without its cloak layer; the cloak layer comes in a later pass. Until then the engine draws him with no cloak.
 
 ### 4.3 Animations
 
@@ -413,6 +414,8 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 * **Frames** run left to right, every frame the same size. The feet sit on the same `anchor` in every frame, so walking does not slide.
 * **Suggested frame:** 192 x 256 px with the feet at `[96, 236]`. The person is 136 px tall and stands from y 100 to y 236; the room above holds a stone on the head, a banner or a raised spear.
 * Rig and bake as the contract says: parts at the 544 px source baked down to 136 px, the cloak as its own baked layer, no ground shadow.
+* **Camera: the one exception to the 30 degrees of section 1.** Residents are drawn with an orthographic camera tilted 19 degrees down (Ivan's word, 23.11.2026): at 30 degrees the shoulders came out 24% wider and a step looked like a hop. Buildings, ground and the construction kit stay at 30 degrees. The sheet format does not change: 5 rows N to S, frame 192 x 256, feet at `[96, 236]`, the person 136 px tall.
+* **What Design checks on the city shots:** the feet stand on the 30-degree ground, neither floating nor sinking; the engine's shadow under a resident stays at 30 degrees; in `build` the hands touch the building's wall and do not go into it.
 
 Passport of an 8-frame walk with that frame (sheet 1536 x 1280):
 
@@ -500,4 +503,5 @@ Look at each delivery for these yourself:
 5. **People delivery.** There is no import script for people. Lay sheets out as 4.4 says, or ask for a small import script matched to the delivery's layout.
 6. **Retina 2K art** (8x). The engine scales the master up at 200% on Retina today; using the 2K set needs wiring later. It is not ordered here.
 7. **The kit at demolition.** The engine runs the steps backwards today; showing `rubble.png` last, and the scaffolds while tearing down, comes with #1955. Until then the check warns that `rubble.png` is not declared.
-8. **House step sizes.** The pack catalog gives `hut` 1x1 and `mudbrick` 2x2 today. The new sizes (3.4) go into the pack's `buildingLayout` as one line per step with its lot when the art lands, and the house lot once Design has measured `villa`. Not built in #1954.
+8. **Residents at 19 degrees (4.4): nothing to wire.** The engine stands a sheet on its `anchor` at the feet's point on the ground and draws the shadow itself, a flat 2:1 ellipse at 30 degrees. If feet float or sink on the shots, the fix is the sheet's `anchor`; if hands go into a wall in `build`, the fix is that building's `workSlots`.
+9. **House step sizes.** The pack catalog gives `hut` 1x1 and `mudbrick` 2x2 today. The new sizes (3.4) go into the pack's `buildingLayout` as one line per step with its lot when the art lands, and the house lot once Design has measured `villa`. Not built in #1954.
