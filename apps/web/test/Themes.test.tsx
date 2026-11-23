@@ -220,6 +220,34 @@ describe('the Themes section of the settings', () => {
   });
 });
 
+describe('a theme the company installed from an archive', () => {
+  /* A danger action is told by its verb and its place, last in its row (Design, #1970), not by its colour alone. */
+  it('asks before deleting it, with the verb that deletes it last in the row', async () => {
+    const look = JSON.parse(JSON.stringify(builtinSkin('egypt'))) as Record<string, unknown>;
+    delete look.id;
+    delete look.world;
+    const view = {
+      id: 'sand', version: '1.0.0', name: { en: 'Sand', ru: 'Песок' }, description: null, author: 'Someone', license: 'see LICENSE', engine: 'none',
+      languages: ['en', 'ru'], base: '/api/themes/files/sand/1.0.0/', cover: null, shots: [], licenseFile: 'All rights kept.', hasWorld: false, hasKit: false, size: 1000, installedAt: '2026-11-23T12:00:00.000Z',
+    };
+    renderShell();
+    mockApi({
+      'GET /api/org': [200, ORG],
+      'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }],
+      'GET /api/world/theme': [200, { theme: 'cyberpunk', activePack: null, canEdit: true }],
+      'GET /api/themes': [200, { themes: [view] }],
+      'GET /api/themes/sand/look': [200, { id: 'sand', version: '1.0.0', base: view.base, look, fonts: [], kit: null, world: null }],
+    });
+    const user = userEvent.setup();
+    const dialog = await openThemes(user);
+    const card = await within(dialog).findByRole('heading', { name: 'Sand' }).then(heading => heading.closest('li')!);
+    await user.click(await within(card).findByRole('button', { name: `${en.skins.remove}: Sand` }));
+    const ask = within(card).getByRole('group', { name: en.skins.archive.deleteConfirm('Sand') });
+    expect(within(ask).getAllByRole('button').map(button => button.textContent)).toEqual([en.skins.archive.deleteNo, en.skins.archive.deleteYes]);
+    expect(within(ask).getByRole('button', { name: en.skins.archive.deleteYes }).className).toMatch(/\bdanger\b/);
+  });
+});
+
 describe('the collection of a person\'s own skins', () => {
   it('adds a file at a time after the skins added before, without applying it, and numbers a name already shown', async () => {
     const user = userEvent.setup();
