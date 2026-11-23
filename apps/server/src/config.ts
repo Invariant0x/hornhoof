@@ -66,6 +66,9 @@ export type Config = {
   tunnelHost?: string;
   /* Set by compose when a keeper sits in front: the app then takes its mode from the keeper's word. */
   keeper: boolean;
+  /* Whether Hornhoof prunes the branches of the company's repositories by itself, a batch every few minutes (#1964). Off until
+     the operator says on: what it deletes is gone from the repository, and what no turn, main or tag holds is archived first. */
+  branchPrune: boolean;
   /* How much all the files on the company's tasks may take together. */
   taskFilesBytes: number;
   /* Where the bundles of products' test harnesses lie, and how much they may take. No folder: each machine builds its own. */
@@ -146,6 +149,7 @@ const Env = z.object({
   ),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the keeper container, like keeper.').optional()),
   HORNHOOF_KEEPER: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_KEEPER must be on, or not set.' }).optional()),
+  HORNHOOF_BRANCH_PRUNE: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_BRANCH_PRUNE must be on, or not set.' }).optional()),
   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
   HARNESS_DIR: z.preprocess(unset, z.string().min(1).optional()),
   FILES_DIR: z.preprocess(unset, z.string().min(1).optional()),
@@ -269,6 +273,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     apiInternalHosts: (set.API_INTERNAL_HOSTS ?? '').split(',').map(host => host.trim().toLowerCase()).filter(Boolean),
     tunnelHost: set.TUNNEL_HOST,
     keeper: set.HORNHOOF_KEEPER === 'on',
+    branchPrune: set.HORNHOOF_BRANCH_PRUNE === 'on',
     acmeDirectory: acmeDirectoryOf(set.ACME_DIRECTORY),
     ...harnessSettings(set),
     ...(set.FILES_DIR ? { filesDir: set.FILES_DIR } : {}),

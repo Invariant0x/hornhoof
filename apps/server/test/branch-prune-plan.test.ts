@@ -115,6 +115,31 @@ describe('which branches of a repository Hornhoof deletes, archives and keeps', 
     expect(verdictOf(all, 'task-3')).toMatchObject({ action: 'archive' });
   });
 
+  it('names what each branch is to Hornhoof, for counting a plan', async () => {
+    const all = await plan(base(), holds);
+    const categories = Object.fromEntries(all.map(v => [v.branch, v.category]));
+    expect(categories).toMatchObject({
+      main: 'main', 'turn-43': 'turn-kept', 'task-1': 'held', 'task-2': 'held', 'task-3': 'archive', 'task-4': 'archive', 'task-5': 'closed-lately',
+      'task-6': 'live', 'task-7': 'live', 'task-999': 'foreign', 'feature/x': 'foreign',
+    });
+    const unsure: Holds = async (holder, head) => (head === M2 ? null : holds(holder, head));
+    expect(verdictOf(await plan(base(), unsure), 'task-1')).toMatchObject({ category: 'unreadable' });
+  });
+
+  it('plans only up to the number of changes it is asked for, and none of the requests after', async () => {
+    let asked = 0;
+    const counting: Holds = async (holder, head) => { asked++; return holds(holder, head); };
+    const everything = await planPrune(base(), counting);
+    const all = asked;
+    asked = 0;
+    const { verdicts, stopped } = await planPrune(base(), counting, 2);
+    expect(stopped).toBeNull();
+    expect(verdicts.filter(v => v.action !== 'keep').map(v => v.branch)).toEqual(everything.verdicts.filter(v => v.action !== 'keep').slice(0, 2).map(v => v.branch));
+    expect(verdicts.at(-1)!.action).not.toBe('keep');
+    expect(verdicts.length).toBeLessThan(everything.verdicts.length);
+    expect(asked).toBeLessThan(all);
+  });
+
   it('stops where the repository\'s request limit is used up, and says what it planned before and when it ends', async () => {
     let asked = 0;
     const limited: Holds = async (holder, head) => {

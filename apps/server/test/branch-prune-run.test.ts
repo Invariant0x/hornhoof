@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { pushRefs, type Push } from '../src/modules/repos/ref-push.js';
 import type { Facts, Holds } from '../src/modules/repos/prune-plan.js';
-import { archiveRef, pruneRepository, restoreBranch, restoreCommand, type Entry } from '../src/modules/repos/prune-run.js';
+import { archiveRef, pruneRepository, restoreBranch, restoreCommand, type Deps, type Entry } from '../src/modules/repos/prune-run.js';
 import { GitHubRateLimited } from '../src/modules/testruns/github-limit.js';
 import { git, headOf, host, origin } from './git-origin.js';
 
@@ -132,7 +132,7 @@ describe('pruning the branches of a repository', () => {
   it('does a batch of the size asked and says there is more, then the next run does the rest', async () => {
     const { dir } = repository();
     const { url } = await host(dir);
-    const deps = { facts: async () => factsOf(dir, tasks()), holds: holdsIn(dir), push: updates => pushRefs({ url, token: '' }, updates), record: recording().record };
+    const deps: Deps = { facts: async () => factsOf(dir, tasks()), holds: holdsIn(dir), push: updates => pushRefs({ url, token: '' }, updates), record: recording().record };
     const first = await pruneRepository(deps, { apply: true, limit: 1 });
     expect(first.entries).toHaveLength(1);
     expect(first.stopped).toEqual({ why: 'batch' });
@@ -147,7 +147,7 @@ describe('pruning the branches of a repository', () => {
     let asked = 0;
     const holds = holdsIn(dir);
     const limited: Holds = async (holder, head) => {
-      if (++asked > 2) throw new GitHubRateLimited({ remaining: 0, resetAt: NOW + 60_000 });
+      if (++asked > 1) throw new GitHubRateLimited({ remaining: 0, resetAt: NOW + 60_000 });
       return holds(holder, head);
     };
     const { entries, record } = recording();
@@ -156,6 +156,58 @@ describe('pruning the branches of a repository', () => {
     expect(entries.length).toBeLessThan(3);
     expect(headOf(dir, 'main')).toBe(main);
     expect(headOf(dir, 'task-3')).not.toBeNull();
+  });
+
+  it('spends no more requests than its budget, keeps the branches it could not tell of, and says the budget was spent', async () => {
+    const { dir, main } = repository();
+    const { url, pushes } = await host(dir);
+    let asked = 0;
+    const real = holdsIn(dir);
+    const counting: Holds = async (holder, head) => { asked++; return real(holder, head); };
+    const deps: Deps = { facts: async () => factsOf(dir, tasks()), holds: counting, push: updates => pushRefs({ url, token: '' }, updates), record: recording().record };
+    const none = await pruneRepository(deps, { apply: true, budget: 0 });
+    expect(none).toMatchObject({ entries: [], stopped: { why: 'budget' } });
+    expect(asked).toBe(0);
+    expect(pushes).toHaveLength(0);
+    expect(headOf(dir, 'task-1')).toBe(main);
+    asked = 0;
+    const some = await pruneRepository(deps, { apply: true, budget: 1 });
+    expect(asked).toBe(1);
+    expect(some.stopped).toEqual({ why: 'budget' });
+    asked = 0;
+    const enough = await pruneRepository(deps, { apply: true, budget: 100 });
+    expect(enough.stopped).toBeNull();
+    expect(asked).toBeLessThanOrEqual(100);
+    expect(headOf(dir, 'task-2')).toBeNull();
+  });
+
+  it('plans only the batch it will change, so a big repository costs few requests a run', async () => {
+    const { dir, main } = repository();
+    /* Six more branches, each on a commit of its own that main holds already, so each costs a request to plan. */
+    const extra = new Map<number, { status: string; paused: boolean; closedAt: number | null }>();
+    let tip = main;
+    for (let n = 10; n < 16; n++) {
+      const commit = git(dir, 'commit-tree', '-p', tip, '-m', `work ${n}`, `${main}^{tree}`);
+      git(dir, 'update-ref', `refs/heads/task-${n}`, commit);
+      git(dir, 'update-ref', 'refs/heads/main', commit);
+      tip = commit;
+      extra.set(n, { status: 'done', paused: false, closedAt: NOW - 2 * DAY });
+    }
+    const { url } = await host(dir);
+    let asked = 0;
+    const real = holdsIn(dir);
+    const counting: Holds = async (holder, head) => { asked++; return real(holder, head); };
+    const deps: Deps = { facts: async () => factsOf(dir, new Map([...tasks(), ...extra])), holds: counting, push: updates => pushRefs({ url, token: '' }, updates), record: recording().record };
+    await pruneRepository(deps, { apply: false });
+    const whole = asked;
+    asked = 0;
+    const first = await pruneRepository(deps, { apply: true, limit: 1 });
+    expect(first.entries).toHaveLength(1);
+    /* One more than it changes, to know there is more. */
+    expect(first.verdicts.filter(v => v.action !== 'keep')).toHaveLength(2);
+    expect(first.stopped).toEqual({ why: 'batch' });
+    expect(asked).toBeLessThan(whole);
+    expect(asked).toBeLessThanOrEqual(2);
   });
 
   it('says why a repository it cannot read is left as it is', async () => {

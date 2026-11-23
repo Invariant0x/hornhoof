@@ -15,7 +15,7 @@ export const restoreCommand = (branch: string): string => `git fetch origin ${ar
 
 /* What was done to one branch: it is gone (deleted), or kept at its archive and gone (archived), or the repository refused. */
 export type Entry = Verdict & { done: 'deleted' | 'archived' | 'refused'; problem?: string };
-export type Stopped = { why: 'batch' } | { why: 'limit'; resetAt: string | null } | { why: 'unreadable'; problem: string };
+export type Stopped = { why: 'batch' } | { why: 'budget' } | { why: 'limit'; resetAt: string | null } | { why: 'unreadable'; problem: string };
 export type Pruned = { verdicts: Verdict[]; entries: Entry[]; stopped: Stopped | null };
 export type Deps = {
   facts: () => Promise<Facts | { problem: string }>;
@@ -62,13 +62,42 @@ async function applyAll(todo: readonly Verdict[], push: Push): Promise<Entry[]> 
 
 const limitStop = (limit: RateLimit): Stopped => ({ why: 'limit', resetAt: limit.resetAt === null ? null : new Date(limit.resetAt).toISOString() });
 
+/* How many requests to GitHub one run makes at most, so the pruning of a repository of thousands of branches stays well inside
+   the hour's limit of the account it shares with everything else Hornhoof reads. */
+export const BUDGET = 300;
+
+/* The reader of what a commit holds, asking at most budget times and the same question once: past that it says it could not
+   read, and the branch asked about is kept. spent says whether it ran out. */
+function budgeted(holds: Holds, budget: number): { holds: Holds; spent: () => boolean } {
+  const answers = new Map<string, Promise<boolean | null>>();
+  let asked = 0;
+  let spent = false;
+  return {
+    spent: () => spent,
+    holds: (holder, head) => {
+      const key = `${holder} ${head}`;
+      const known = answers.get(key);
+      if (known) return known;
+      if (asked >= budget) {
+        spent = true;
+        return Promise.resolve(null);
+      }
+      asked += 1;
+      const answer = holds(holder, head);
+      answers.set(key, answer);
+      return answer;
+    },
+  };
+}
+
 /* One run over one repository: the plan, and with apply the first limit changes of it, recorded one by one. Without apply it
    changes nothing and says what it would. It never touches a ref the plan did not name, and never a tag or main. */
-export async function pruneRepository(deps: Deps, { apply, limit = BATCH }: { apply: boolean; limit?: number }): Promise<Pruned> {
+export async function pruneRepository(deps: Deps, { apply, limit = BATCH, budget = Infinity }: { apply: boolean; limit?: number; budget?: number }): Promise<Pruned> {
   const read = await deps.facts();
   if ('problem' in read) return { verdicts: [], entries: [], stopped: { why: 'unreadable', problem: read.problem } };
-  const { verdicts, stopped } = await planPrune(read, deps.holds);
-  const rest = stopped ? limitStop(stopped) : null;
+  const reader = budgeted(deps.holds, budget);
+  const { verdicts, stopped } = await planPrune(read, reader.holds, apply ? limit + 1 : Infinity);
+  const rest = stopped ? limitStop(stopped) : reader.spent() ? { why: 'budget' as const } : null;
   if (!apply) return { verdicts, entries: [], stopped: rest };
   const work = verdicts.filter(v => v.action !== 'keep');
   const entries = await applyAll(work.slice(0, limit), deps.push);
