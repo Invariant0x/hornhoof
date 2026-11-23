@@ -1,5 +1,5 @@
 {
-  "id": "75a80ef9-8e5a-4053-a492-47fdd4dc3a4c",
+  "id": "941e2f62-df6d-447c-9415-d0bf0300fc0f",
   "prevId": "a36087a6-852c-453c-b19b-9b883bcfe25d",
   "version": "7",
   "dialect": "postgresql",
@@ -335,6 +335,28 @@
           ],
           "isUnique": false,
           "where": "data->>'operationsPending' is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_operator_fallback": {
+          "name": "agent_events_operator_fallback",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "(data->>'operatorFallback')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"agent_events\".\"kind\" = 'typed' and data->>'operatorFallback' is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -5099,6 +5121,46 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "jobs_conversation_activity": {
+          "name": "jobs_conversation_activity",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "finished_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"jobs\".\"kind\" = 'conversation'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -5834,18 +5896,6 @@
         "copy_name": {
           "name": "copy_name",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "copy_schema_since": {
-          "name": "copy_schema_since",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "copy_schema_attempt": {
-          "name": "copy_schema_attempt",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
