@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { awayOf, connection, fromAHop } from '../src/connection';
 
 /* The page's idea of whether the server answers (#1938): which answers say it is away, and how the page looks again until it
@@ -36,8 +36,8 @@ describe('which answers say the server is away', () => {
 
 describe('looking again until the server answers', () => {
   const asked = () => fetchStub.mock.calls.length;
-  let fetchStub: ReturnType<typeof vi.fn>;
-  let back: ReturnType<typeof vi.fn>;
+  let fetchStub: Mock<(path: string) => Promise<Response>>;
+  let back: Mock<() => void>;
   let stopBack: () => void;
   /* What the next looks are answered with, the last for every look after it. */
   const answering = (...next: (() => Response)[]) => {
@@ -52,9 +52,9 @@ describe('looking again until the server answers', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    fetchStub = vi.fn();
+    fetchStub = vi.fn<(path: string) => Promise<Response>>();
     vi.stubGlobal('fetch', fetchStub);
-    back = vi.fn();
+    back = vi.fn<() => void>();
     stopBack = connection.onBack(back);
   });
 
