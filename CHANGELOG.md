@@ -9,6 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- A person's message to an agent, in its window, by Telegram, through their assistant or in its terminal, closes one of its open questions only when it is clear which: the only one that person may answer, or the one the message names by its task, a link or a quoted line of the question. With more open, none closes by itself, and the agent records which question the message answers with its new tool record_answer by quoting it: Hornhoof finds that message and records it whole as the person's answer on that card alone, with a link to it.
 - The head of Design, named on a task's tracked work to check a screen's final look, can now read that task and its files and comment on it until the check ends, and the task's holder can message that head about it.
 
 ## [0.42.0] - 2026-11-23
