@@ -13,7 +13,7 @@ ui/look.json            colours, fonts and corners of the interface
 ui/fonts.json           the font files and the faces they draw            optional
 ui/fonts/*.woff2                                                          optional
 ui/kit.json             painted interface parts                           optional, carried and checked, not drawn yet
-ui/kit/*.png|*.webp|*.svg                                                 optional
+ui/kit/*.png|*.webp                                                       optional
 ui/NOTES.md             notes on the skin for whoever changes it          optional
 world/world.json        the world map: ground, plants, buildings, residents, stages   only with an engine
 world/art/...           the world's art, as the world art contract asks              only with an engine
@@ -107,40 +107,49 @@ Every value is checked by pattern before it is used. Anything that reads as code
 
 ### 3.3 kit.json and kit/: painted parts, carried and checked, not drawn yet
 
-A kit is pictures of interface parts (frames, panels, buttons with their states, fields, chips, counters, rows, dividers) that would replace the look of each part without moving it. Hornhoof does not draw kits yet: drawing them is a separate step with the head of Design, after the kit guide leaves its draft. An archive may already carry its kit. Hornhoof checks it, stores it and serves it, and a theme with a kit looks like the same theme without one until kits are drawn.
+A kit is pictures of interface parts (frames, panels, buttons with their states, fields, chips, counters, rows, dividers) that replace the look of each part without moving it, as the theme UI kit 1.0 (`THEME-UI-KIT.md`) describes them. Hornhoof does not draw kits from an archive yet: that comes with the step that puts a kit on the page (`applyKit` and `kit.css`). An archive may already carry its kit. Hornhoof checks it, stores it and serves it, and a theme with a kit looks like the same theme without one until kits are drawn.
+
+A kit's pack folder goes into the archive as it is, but for two files: its `kit.json` is `ui/kit.json`, and its `LICENSE.md` stands at the archive's root as the theme's licence (section 7). Its pictures are in `ui/kit/`.
 
 ```json
 {
+  "pack": "night-shift",
+  "licence": "LICENSE.md",
   "slots": {
-    "dialog": { "file": "dialog.frame@2x.webp", "slice": "34", "width": "17px" },
-    "btn": { "file": "btn@2x.webp", "slice": "10 fill", "width": "5px" },
-    "plaque-frame": { "file": "plaque.frame@2x.webp", "slice": "13", "width": "6.5px" },
-    "panel": { "file": "panel.fill@2x.webp", "size": "128px 128px" }
+    "dialog": { "file": "dialog.face@2x.webp", "slice": "63 62 56 62 fill", "width": "31.5px 31px 28px 31px", "outset": "12.9px 11.2px 11.2px 11.2px", "repeat": "round" },
+    "btn": { "file": "btn@2x.webp", "slice": "18 fill", "width": "9px" },
+    "panel": { "file": "panel.fill@2x.webp", "size": "96px 96px" },
+    "tab-on": { "file": "tab-on@2x.webp", "size": "calc(100% - 20px) 5px" }
   },
   "colors": { "tab-ink": "#502704", "danger-ink": "#6A1030" }
 }
 ```
 
-* A slot's name is one of the parts the screens draw, as `THEME_KIT_SLOTS` in `packages/protocol/src/themes.ts` lists them, each at most once:
-  * frames, nine-sliced: `dialog`, `window`, `drawer`, `menu`, `card`, `table`, `plaque-frame`, `tile`;
+* A slot's name is one of the 45 parts of the theme UI kit 1.0, section 4.2, as `THEME_KIT_SLOTS` in `packages/protocol/src/themes.ts` lists them, each at most once:
+  * frames and faces of big surfaces: `dialog`, `window`, `drawer`, `menu`, `card`, `table`, `plaque-frame`, `tile`;
   * fills, tiled: `ground`, `panel`, `dialog-fill`, `plaque`, `band`;
-  * controls, a plate for each state: `btn`, `btn-hover`, `btn-pressed`, `btn-disabled`, `ghost`, `ghost-hover`, `ghost-pressed`, `ghost-disabled`, `danger`, `danger-hover`, `chip`, `chip-on`, `field`, `field-focus`, `iconbtn`, `iconbtn-pressed`;
+  * controls, a plate for each state: `btn`, `btn-hover`, `btn-pressed`, `btn-disabled`, `ghost`, `ghost-hover`, `ghost-pressed`, `ghost-disabled`, `danger`, `danger-hover`, `chip`, `chip-on`, `field`, `field-focus`, `iconbtn`, `iconbtn-hover`, `iconbtn-pressed`;
   * small parts: `counter`, `badge`, `check`, `corner`, `tab-on`, `tab`, `tab-sel`, `pill-ok`, `pill-bad`;
   * strips: `thead`, `row-hover`, `row-selected`, `track`, `fill`, `divider`.
 
-  A kit names at least one of them and paints only the ones it names; the list is preliminary until the Egypt UI kit 1.0.
-* Its `file` is a PNG, WebP or SVG in `ui/kit/`, of at most 2 MB.
-* `slice` is up to four whole numbers of picture pixels, with an optional `fill`.
-* `width`, `outset` and `size` are up to four lengths in `px` or `%`, with up to three decimals (`6.5px`), `0` or `auto`; no `calc()` or other function.
-* A kit colour is `#RRGGBB`, under one of the names the screens read (`THEME_KIT_COLORS`): `tab-ink`, `tab-on-ink`, `chip-on-ink`, `danger-ink`, `badge-ink`, `scroll-thumb`, `scroll-track`.
+  A kit names at least one of them and paints only the ones it names.
+* Each value has the form of the kit's section 6.2, the same forms the kit's `kitcheck.py` and the screens take (`THEME_KIT_VALUES`), with single spaces between its parts and at most 120 characters:
 
-Anything else is refused, so a kit can never carry CSS. The screens get the kit as stored from `GET /api/themes/:id/look`, beside `base`: a slot's picture is served at `base` + `ui/kit/` + its `file`.
+  | Key | Accepted |
+  |---|---|
+  | `file` | a picture in `ui/kit/`: lowercase letters, digits, `.`, `@` and `-`, ending in `.webp` or `.png`; WebP or PNG by its bytes, up to 2 MB |
+  | `slice` | 1 to 4 numbers, each optionally with `%`, then optionally ` fill`: `36`, `0 24 fill`, `63 62 56 62 fill` |
+  | `width` | 1 to 4 of: a number with `px` or `%`, a plain number, `auto`: `9px`, `0 12px`, `31.5px 31px 28px 31px` |
+  | `outset` | 1 to 4 numbers, each optionally with `px`: `1.5px`, `12.9px 11.2px 11.2px 11.2px` |
+  | `repeat` | one or two of `stretch`, `repeat`, `round`, `space` |
+  | `size` | one or two of: a number with `px` or `%`, `auto`, `calc(100% - Npx)`: `96px 96px`, `100% 100%`, `calc(100% - 20px) 5px` |
 
-An SVG of the kit is taken as a drawing only, and it is the one SVG a theme may hold (`.svg` anywhere else is refused as a page, and `.svgz` everywhere). It is one `<svg>` element of shapes (`path`, `rect`, `circle`, `ellipse`, `line`, `polyline`, `polygon`, `text`, `tspan`), groups and reuse (`g`, `defs`, `symbol`, `use`, `title`, `desc`), paint (`linearGradient`, `radialGradient`, `stop`, `pattern`), `clipPath`, `mask`, and `filter` with its `fe` primitives, with their geometry and presentation attributes. Refused, with `svg_unsafe` or `link_outside` and the element or attribute it is about:
-* any other element, among them `script`, `foreignObject`, `style`, `image`, `a` and the animation elements;
-* an event attribute (`on...`), a `style` attribute, or an attribute not named above, such as an editor's own;
-* an `href`, `xlink:href` or `url()` that is not `#id` of an element of the same drawing, also when written with character references;
-* a namespace other than SVG's and XLink's, a document type, an entity of its own, character data, a processing instruction other than the XML declaration, or text outside the drawing.
+* `pack` and `licence` are text for people, up to 80 characters each; Hornhoof keeps them and reads neither.
+* A kit colour is `#RRGGBB`, under one of the 7 names the screens read (`THEME_KIT_COLORS`): `tab-ink`, `tab-on-ink`, `chip-on-ink`, `danger-ink`, `badge-ink`, `scroll-thumb`, `scroll-track`.
+
+Anything else is refused, with the value's place and the form it should have: a slot, colour or key the kit does not have, a value of another form, a picture no slot names, or a slot whose picture is not there. So a kit can never carry CSS, a script or a link. A vector picture (`.svg`, `.svgz`) is refused in the kit as anywhere else (section 9). The rules the kit's guide gives for the pictures themselves (a state of the same size and slice as its normal picture, a slice that leaves a middle, the 1.5 MB budget of a pack) are for its author and `kitcheck.py`; Hornhoof holds a kit to its forms and to the limits of section 8.
+
+The screens get the kit as stored from `GET /api/themes/:id/look`, beside `base`: a slot's picture is served at `base` + `ui/kit/` + its `file`.
 
 ## 4. world/: the world map (engine iso2d)
 
@@ -239,7 +248,7 @@ Turning the theme off gives every agent its own name back.
 
 ## 7. LICENSE
 
-Plain UTF-8 text, up to 64 KB, required. It covers everything in the archive. A theme's art may be under a licence other than Hornhoof's MIT, and may forbid commercial use; that is the author's choice, and the store shows `license` from `theme.json` beside the theme.
+Plain UTF-8 text, up to 64 KB, required. It covers everything in the archive. A theme's art may be under a licence other than Hornhoof's MIT, and may forbid commercial use; that is the author's choice, and the store shows `license` from `theme.json` beside the theme. Hornhoof keeps the file word for word with the theme and serves it to the company at the card's `licenseFile` (`GET /api/themes`), so whoever installs or uses the theme can read it.
 
 ## 8. Limits
 
@@ -253,7 +262,7 @@ Plain UTF-8 text, up to 64 KB, required. It covers everything in the archive. A 
 | A path | 200 characters, folders and names of Latin letters, digits, `.`, `_`, `-` and `@` |
 | A JSON file | 1 MB (`world/world.json` 2 MB, a passport 64 KB) |
 | A picture | PNG or WebP, up to 8192 px a side and 50 million pixels |
-| A picture of the kit | PNG, WebP or SVG, up to 2 MB |
+| A picture of the kit | PNG or WebP, up to 2 MB |
 | A font | WOFF2, up to 2 MB, at most 24 |
 
 ## 9. What refuses an archive
@@ -261,7 +270,7 @@ Plain UTF-8 text, up to 64 KB, required. It covers everything in the archive. A 
 Each of these refuses the whole archive. The store names the reason and the file:
 * A zip that is not a plain zip: encrypted, split, ZIP64, or packed in a way other than stored or deflate.
 * A path that leaves the archive or hides what it is: an absolute path, `..`, a backslash, a drive letter, an empty part, a control character, a link, or two names that differ only in upper and lower case.
-* A file of a kind the archive has no place for, in particular any script or page (`.js`, `.mjs`, `.html`, `.svg` outside the kit, `.css` and the like), a drawing of the kit with more than a drawing in it (3.3), or a file whose bytes are not what its name says.
+* A file of a kind the archive has no place for, in particular any script, style sheet or page (`.js`, `.mjs`, `.css`, `.html`, `.svg` and the like), wherever it stands, or a file whose bytes are not what its name says.
 * A file over its limit, or one that unpacks to more than its header says.
 * JSON that is not of the shape this document gives, a key no part knows, or a value that reads as code (3.1).
 * A link to anything outside the archive.

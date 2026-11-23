@@ -127,7 +127,8 @@ describe('a theme archive is refused', () => {
       },
       { code: 'look_bad', path: 'ui/look.json' },
     ]),
-    ['with a kit slot that is not data', files => ({ ...files, 'ui/kit.json': JSON.stringify({ slots: { card: { file: 'panel.png', width: 'calc(1px)' } } }) }), { code: 'json_shape', path: 'ui/kit.json' }],
+    ['with a style sheet beside the kit\'s pictures', files => ({ ...files, 'ui/kit/kit.css': '.btn{}' }), { code: 'file_script', path: 'ui/kit/kit.css' }],
+    ['with a script beside the kit\'s pictures', files => ({ ...files, 'ui/kit/kit.mjs': 'export {}' }), { code: 'file_script', path: 'ui/kit/kit.mjs' }],
     /* A kit paints only the parts the screens know, and sets only the colours they read. */
     ['with a kit part the screens do not know', files => ({ ...files, 'ui/kit.json': JSON.stringify({ slots: { card: { file: 'panel.png' }, 'sidebar-glow': { file: 'panel.png' } } }) }), { code: 'json_shape', path: 'ui/kit.json', detail: expect.stringContaining('sidebar-glow') }],
     ['with a kit colour the screens do not read', files => ({ ...files, 'ui/kit.json': JSON.stringify({ slots: { card: { file: 'panel.png' } }, colors: { 'glow-ink': '#FFFFFF' } }) }), { code: 'json_shape', path: 'ui/kit.json', detail: expect.stringContaining('glow-ink') }],
@@ -141,69 +142,67 @@ describe('a theme archive is refused', () => {
     });
   }
 
-  /* A drawing of the kit (docs/theme-archive.md, 3.3): shapes, gradients, clips and filters, each reference within the
-     drawing itself. */
-  const DRAWING = [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    '<!-- A frame for a panel. -->',
-    '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 32 32" width="32" height="32">',
-    '  <defs><linearGradient id="sand" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E8C77A"/><stop offset="1" stop-color="#B8893E"/></linearGradient>',
-    '  <filter id="soft"><feGaussianBlur stdDeviation="0.5"/></filter><path id="edge" d="M0 0H32V32H0Z"/></defs>',
-    '  <title>Panel &amp; frame</title>',
-    '  <use xlink:href="#edge" fill="url(#sand)" filter="url(#soft)"/><rect x="4" y="4" width="24" height="24" rx="2" fill="none" stroke="#5A3E1B"/>',
-    '</svg>',
-  ].join('\n');
-  const drawn = async (svg: string, name = 'ui/kit/frame.svg') => ({
-    ...(await plainTheme()),
-    'ui/kit.json': JSON.stringify({ slots: { card: { file: 'panel.png', slice: '8 8 8 8 fill', width: '8px' }, corner: { file: 'frame.svg' } } }),
-    [name]: svg,
-  });
-  const inside = (more: string) => DRAWING.replace('</svg>', `${more}\n</svg>`);
+  /* A kit as the theme UI kit 1.0 writes its kit.json (its section 6.2): every value in exactly the forms the app's
+     applyKit and the kit's own kitcheck.py take, so a value the app would skip never gets in. */
+  const CARD = { file: 'panel.png', slice: '8 8 8 8 fill', width: '8px' };
+  const kitWith = (files: ThemeFiles, kit: object): ThemeFiles => ({ ...files, 'ui/kit.json': JSON.stringify(kit) });
+  const cardWith = (files: ThemeFiles, change: object) => kitWith(files, { slots: { card: { ...CARD, ...change } } });
 
-  it('takes a kit of the parts and colours the screens know, with lengths of a fraction of a pixel', async () => {
-    const kit = { slots: { card: { file: 'panel.png', slice: '8 fill', width: '6.5px' }, 'plaque-frame': { file: 'panel.png', outset: '1.25px 0' } }, colors: { 'tab-ink': '#502704', 'scroll-thumb': '#8A6A3B' } };
-    const theme = await check(archiveOf({ ...(await plainTheme()), 'ui/kit.json': JSON.stringify(kit) }));
+  it('takes a kit as the theme UI kit 1.0 writes it: its pack and licence, and every form of value it gives', async () => {
+    const kit = {
+      pack: 'night-shift',
+      licence: 'LICENSE.md',
+      slots: {
+        dialog: { file: 'dialog.face@2x.webp', slice: '63 62 56 62 fill', width: '31.5px 31px 28px 31px', outset: '12.9px 11.2px 11.2px 11.2px', repeat: 'round' },
+        card: { file: 'panel.png', slice: '8 fill', width: '6.5px' },
+        'plaque-frame': { file: 'panel.png', slice: '25% 10.5%', width: '2 auto', outset: '1.25 0', repeat: 'repeat space' },
+        'tab-on': { file: 'panel.png', size: 'calc(100% - 20px) 5px' },
+        divider: { file: 'panel.png', slice: '0 24 fill', width: '0 12px', outset: '3px 0' },
+        thead: { file: 'panel.png', size: '100% auto' },
+        'iconbtn-hover': { file: 'panel.png', slice: '16 fill', width: '8px' },
+      },
+      colors: { 'tab-ink': '#502704', 'scroll-thumb': '#8a6a3b' },
+    };
+    const theme = await check(archiveOf({ ...kitWith(await plainTheme(), kit), 'ui/kit/dialog.face@2x.webp': webp(64, 64) }));
     expect(theme.kit).toEqual(kit);
+    expect(served(theme)['ui/kit/dialog.face@2x.webp']).toBe('image/webp');
   });
 
-  it('takes a drawing of the kit, served as SVG', async () => {
-    const theme = await check(archiveOf(await drawn(DRAWING)));
-    expect(theme.kit?.slots.corner).toEqual({ file: 'frame.svg' });
-    expect(served(theme)['ui/kit/frame.svg']).toBe('image/svg+xml');
-  });
-
-  const drawings: [string, string, Partial<ThemeProblem>][] = [
-    ['a script', inside('<script>alert(1)</script>'), { code: 'svg_unsafe', detail: '<script>' }],
-    ['a foreign object', inside('<foreignObject width="9" height="9"><div>x</div></foreignObject>'), { code: 'svg_unsafe', detail: '<foreignObject>' }],
-    ['an event', DRAWING.replace('<rect ', '<rect onload="alert(1)" '), { code: 'svg_unsafe', detail: 'rect onload' }],
-    ['an event of another namespace', DRAWING.replace('<rect ', '<rect xlink:onclick="alert(1)" '), { code: 'svg_unsafe', detail: 'rect xlink:onclick' }],
-    ['a link out', DRAWING.replace('xlink:href="#edge"', 'xlink:href="https://example.com/a.svg#edge"'), { code: 'link_outside', path: 'ui/kit/frame.svg' }],
-    ['a script as a link', DRAWING.replace('xlink:href="#edge"', 'href="javascript:alert(1)"'), { code: 'link_outside' }],
-    ['a script as a link in character references', DRAWING.replace('xlink:href="#edge"', 'href="&#106;avascript:alert(1)"'), { code: 'link_outside' }],
-    ['a paint from another address', DRAWING.replace('fill="url(#sand)"', 'fill="url(https://example.com/p.svg#sand)"'), { code: 'link_outside' }],
-    ['a paint from another host by its path', DRAWING.replace('fill="url(#sand)"', "fill=\"url('//example.com/p.svg#sand')\""), { code: 'link_outside' }],
-    ['a style sheet', inside('<style>rect{fill:red}</style>'), { code: 'svg_unsafe', detail: '<style>' }],
-    ['a style of its own', DRAWING.replace('<rect ', '<rect style="fill:red" '), { code: 'svg_unsafe', detail: 'rect style' }],
-    ['a picture inside it', inside('<image href="#edge" width="9" height="9"/>'), { code: 'svg_unsafe', detail: '<image>' }],
-    ['an animation that can change a link', inside('<set attributeName="href" to="javascript:alert(1)"/>'), { code: 'svg_unsafe', detail: '<set>' }],
-    ['a link element', inside('<a href="#edge"><rect width="1" height="1"/></a>'), { code: 'svg_unsafe', detail: '<a>' }],
-    ['a document type with an entity of its own', DRAWING.replace('<svg ', '<!DOCTYPE svg [<!ENTITY x "y">]>\n<svg '), { code: 'svg_unsafe' }],
-    ['character data', inside('<text><![CDATA[x]]></text>'), { code: 'svg_unsafe' }],
-    ['an entity XML does not know', DRAWING.replace('&amp;', '&nbsp;'), { code: 'svg_unsafe' }],
-    ['a second picture after the first', `${DRAWING}\n<svg xmlns="http://www.w3.org/2000/svg"></svg>`, { code: 'svg_unsafe' }],
-    ['an element never closed', DRAWING.replace('</svg>', ''), { code: 'svg_unsafe' }],
-    ['another namespace', DRAWING.replace('xmlns="http://www.w3.org/2000/svg"', 'xmlns="http://www.w3.org/1999/xhtml"'), { code: 'link_outside' }],
-    ['more than a kit picture may be', DRAWING.replace('</svg>', `<desc>${randomBytes(1_100_000).toString('hex')}</desc></svg>`), { code: 'file_too_large', path: 'ui/kit/frame.svg' }],
+  const kitValues: [string, object, string][] = [
+    ['a file name with a capital', { file: 'Panel.png' }, 'slots.card.file'],
+    ['a file in a folder', { file: 'kit/panel.png' }, 'slots.card.file'],
+    ['a vector picture', { file: 'panel.svg' }, 'slots.card.file'],
+    ['a slice of five numbers', { slice: '8 8 8 8 8' }, 'slots.card.slice'],
+    ['a slice with two spaces', { slice: '8  8' }, 'slots.card.slice'],
+    ['a slice of fill alone', { slice: 'fill' }, 'slots.card.slice'],
+    ['a slice as a number', { slice: 8 }, 'slots.card.slice'],
+    ['a width of a function', { width: 'calc(1px)' }, 'slots.card.width'],
+    ['a width in a unit the kit does not use', { width: '8em' }, 'slots.card.width'],
+    ['an outset in percent', { outset: '2%' }, 'slots.card.outset'],
+    ['a size of another sum', { size: 'calc(100% + 20px)' }, 'slots.card.size'],
+    ['a size of three lengths', { size: '1px 2px 3px' }, 'slots.card.size'],
+    ['a repeat CSS does not have', { repeat: 'mirror' }, 'slots.card.repeat'],
+    ['a value with more CSS after it', { width: '8px; background: red' }, 'slots.card.width'],
+    ['a key the kit does not have', { image: 'panel.png' }, 'slots.card'],
   ];
-  for (const [name, svg, problem] of drawings) {
-    it(`refuses a drawing of the kit with ${name}`, async () => {
-      expect(await refusal(await drawn(svg))).toMatchObject({ path: 'ui/kit/frame.svg', ...problem });
+  for (const [name, change, where] of kitValues) {
+    it(`refuses a kit part with ${name}`, async () => {
+      expect(await refusal(cardWith(await plainTheme(), change))).toMatchObject({ code: 'json_shape', path: 'ui/kit.json', detail: expect.stringContaining(where) });
     });
   }
 
-  it('refuses an SVG anywhere but the kit, as a page it could be', async () => {
-    expect(await refusal({ ...(await plainTheme()), 'preview/cover.svg': DRAWING })).toMatchObject({ code: 'file_script', path: 'preview/cover.svg' });
-    expect(await refusal({ ...(await plainTheme()), 'ui/kit/frame.svgz': DRAWING })).toMatchObject({ code: 'file_script', path: 'ui/kit/frame.svgz' });
+  it('refuses a kit with a colour that is not #RRGGBB, a key of its own or a pack name that is not text', async () => {
+    const files = await plainTheme();
+    expect(await refusal(kitWith(files, { slots: { card: CARD }, colors: { 'tab-ink': '#FFF' } }))).toMatchObject({ code: 'json_shape', detail: expect.stringContaining('colors.tab-ink') });
+    expect(await refusal(kitWith(files, { slots: { card: CARD }, css: '.btn{}' }))).toMatchObject({ code: 'json_shape', detail: expect.stringContaining('css') });
+    expect(await refusal(kitWith(files, { pack: 7, slots: { card: CARD } }))).toMatchObject({ code: 'json_shape', detail: expect.stringContaining('pack') });
+  });
+
+  it('refuses a vector picture in the kit as anywhere else: a kit is WebP and PNG pictures only', async () => {
+    const drawing = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8"/></svg>';
+    for (const path of ['ui/kit/frame.svg', 'ui/kit/frame.svgz', 'preview/cover.svg']) {
+      expect(await refusal({ ...(await plainTheme()), [path]: drawing })).toMatchObject({ code: 'file_script', path });
+    }
   });
 
   const worldCases: [string, (files: ThemeFiles) => ThemeFiles, Partial<ThemeProblem>][] = [

@@ -1,6 +1,6 @@
 import type { InstalledThemeView, ThemeEngine } from '@hornhoof/protocol/themes';
 import type { WorldPackBehaviorSpec } from '@hornhoof/protocol/world';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray, like, or } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { themeFiles, themes } from '../../db/schema.js';
 import type { Tx } from '../tasks/state.js';
@@ -24,6 +24,8 @@ function viewOf(row: ThemeRow, files: readonly string[]): InstalledThemeView {
   const base = themeBase(row.themeId, row.version);
   const picture = (name: string) => files.find(path => path === `preview/${name}.png` || path === `preview/${name}.webp`);
   const cover = picture('cover');
+  /* Every archive has exactly one licence file: the check refuses one without it or with two. */
+  const licence = files.find(path => /^LICENSE(?:\.md|\.txt)?$/.test(path)) ?? 'LICENSE';
   return {
     id: row.themeId,
     version: row.version,
@@ -36,6 +38,7 @@ function viewOf(row: ThemeRow, files: readonly string[]): InstalledThemeView {
     base,
     cover: cover ? base + cover : null,
     shots: [1, 2, 3, 4, 5, 6].map(n => picture(`shot-${n}`)).filter((path): path is string => path !== undefined).map(path => base + path),
+    licenseFile: base + licence,
     hasWorld: row.world !== null,
     hasKit: row.kit !== null,
     size: row.size,
@@ -45,11 +48,12 @@ function viewOf(row: ThemeRow, files: readonly string[]): InstalledThemeView {
 
 export async function installedThemes(db: Reader, companyId: string): Promise<InstalledThemeView[]> {
   const rows = await db.select().from(themes).where(eq(themes.companyId, companyId)).orderBy(asc(themes.installedAt), asc(themes.themeId));
-  const previews = await db
+  /* The files a card names: its pictures and its licence. */
+  const shown = await db
     .select({ themeId: themeFiles.themeId, path: themeFiles.path })
     .from(themeFiles)
-    .where(and(eq(themeFiles.companyId, companyId)));
-  return rows.map(row => viewOf(row, previews.filter(file => file.themeId === row.themeId && file.path.startsWith('preview/')).map(file => file.path)));
+    .where(and(eq(themeFiles.companyId, companyId), or(like(themeFiles.path, 'preview/%'), inArray(themeFiles.path, ['LICENSE', 'LICENSE.md', 'LICENSE.txt']))));
+  return rows.map(row => viewOf(row, shown.filter(file => file.themeId === row.themeId).map(file => file.path)));
 }
 
 /* What the screens need to put an installed theme on: its look, its fonts, its kit and its world, with where its files

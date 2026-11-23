@@ -30,7 +30,7 @@ describe('an uploaded theme', () => {
     const [card] = installed.json().themes;
     expect(card).toMatchObject({
       id: 'night-shift', version: '1.0.0', engine: 'none', name: { en: 'Night shift', ru: 'Ночная смена' }, base: BASE,
-      cover: `${BASE}preview/cover.png`, shots: [`${BASE}preview/shot-1.png`], hasWorld: false, hasKit: true,
+      cover: `${BASE}preview/cover.png`, shots: [`${BASE}preview/shot-1.png`], licenseFile: `${BASE}LICENSE`, hasWorld: false, hasKit: true,
     });
     expect((await app.inject({ url: '/api/themes', ...as(wes) })).json()).toEqual({ themes: [card] });
 
@@ -39,7 +39,9 @@ describe('an uploaded theme', () => {
     expect(cover.rawPayload.equals(files['preview/cover.png'] as Buffer)).toBe(true);
     expect(cover.headers).toMatchObject({ 'content-type': 'image/png', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox" });
     expect((await app.inject({ url: `${BASE}ui/fonts/night-sans.woff2`, ...as(wes) })).headers['content-type']).toBe('font/woff2');
-    expect((await app.inject({ url: `${BASE}LICENSE`, ...as(wes) })).headers['content-type']).toBe('text/plain; charset=utf-8');
+    /* The licence is kept with the theme, word for word, for whoever installs or uses it to read. */
+    const licence = await app.inject({ url: card.licenseFile, ...as(wes) });
+    expect([licence.headers['content-type'], licence.body]).toEqual(['text/plain; charset=utf-8', files.LICENSE]);
     /* What the theme holds as data, not as a file it serves, is not a file. */
     expect((await app.inject({ url: `${BASE}theme.json`, ...as(wes) })).statusCode).toBe(404);
     expect((await app.inject({ url: `${BASE}ui/look.json`, ...as(wes) })).statusCode).toBe(404);

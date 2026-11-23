@@ -17,8 +17,6 @@ export const THEME_PROBLEMS = [
      too large, text that is not plain, JSON that is not JSON or not of its shape, a link out, a file a JSON names that is
      not there, or one file too many of a kind. */
   'file_script', 'file_place', 'file_bytes', 'image_too_large', 'text_not_plain', 'json_bad', 'json_shape', 'link_outside', 'file_missing', 'too_many_of_kind',
-  /* A drawing of the kit with more in it than shapes: a script, an event, a style sheet, a foreign object or the like. */
-  'svg_unsafe',
   /* The theme as a whole. */
   'theme_missing', 'license_missing', 'look_missing', 'engine_3d', 'engine_none_world', 'world_missing', 'same_version',
   /* Its parts, refused by the check of each with that check's own words in detail. */
@@ -60,8 +58,8 @@ export const THEME_FILE_LIMITS = {
 } as const;
 
 /* The parts of the interface a kit may paint, by the names the screens draw them under (docs/theme-archive.md, 3.3),
-   and the colours it may set beside them. A kit names no other part or colour. Preliminary: from draft 0.3 of the
-   Egypt UI kit (#1970), 44 parts, compared again with its 1.0. */
+   and the colours it may set beside them: the 45 slots and 7 colours of the theme UI kit 1.0, section 4.2 (#1970). A
+   kit names no other part or colour. */
 export const THEME_KIT_SLOTS = [
   /* Frames, nine-sliced. */
   'dialog', 'window', 'drawer', 'menu', 'card', 'table', 'plaque-frame', 'tile',
@@ -69,7 +67,7 @@ export const THEME_KIT_SLOTS = [
   'ground', 'panel', 'dialog-fill', 'plaque', 'band',
   /* Controls, a plate for each state. */
   'btn', 'btn-hover', 'btn-pressed', 'btn-disabled', 'ghost', 'ghost-hover', 'ghost-pressed', 'ghost-disabled',
-  'danger', 'danger-hover', 'chip', 'chip-on', 'field', 'field-focus', 'iconbtn', 'iconbtn-pressed',
+  'danger', 'danger-hover', 'chip', 'chip-on', 'field', 'field-focus', 'iconbtn', 'iconbtn-hover', 'iconbtn-pressed',
   /* Small parts. */
   'counter', 'badge', 'check', 'corner', 'tab-on', 'tab', 'tab-sel', 'pill-ok', 'pill-bad',
   /* Strips. */
@@ -78,6 +76,26 @@ export const THEME_KIT_SLOTS = [
 export type ThemeKitSlot = (typeof THEME_KIT_SLOTS)[number];
 export const THEME_KIT_COLORS = ['tab-ink', 'tab-on-ink', 'chip-on-ink', 'danger-ink', 'badge-ink', 'scroll-thumb', 'scroll-track'] as const;
 export type ThemeKitColor = (typeof THEME_KIT_COLORS)[number];
+
+/* What each value of a kit's slot may be, in exactly the forms of the theme UI kit 1.0, section 6.2, and of its
+   kitcheck.py: the server takes a kit only when every value fits, and the screens set a value only when it fits, so a
+   kit gives names, file names, numbers, lengths, keywords and #RRGGBB colours, never other CSS. */
+const NUMBER = String.raw`\d+(?:\.\d+)?`;
+const LENGTH = String.raw`(?:${NUMBER}(?:px|%)?|auto)`;
+const SIZE = String.raw`(?:${LENGTH}|calc\(100% - ${NUMBER}px\))`;
+const REPEAT = '(?:stretch|repeat|round|space)';
+export const THEME_KIT_VALUES = {
+  /* A picture beside kit.json in ui/kit/: lowercase letters, digits, ".", "@" and "-", a WebP or a PNG. */
+  file: /^[a-z0-9.@-]+\.(?:webp|png)$/,
+  slice: new RegExp(`^${NUMBER}%?(?: ${NUMBER}%?){0,3}(?: fill)?$`),
+  width: new RegExp(`^${LENGTH}(?: ${LENGTH}){0,3}$`),
+  outset: new RegExp(`^${NUMBER}(?:px)?(?: ${NUMBER}(?:px)?){0,3}$`),
+  size: new RegExp(`^${SIZE}(?: ${SIZE})?$`),
+  repeat: new RegExp(`^${REPEAT}(?: ${REPEAT})?$`),
+  color: /^#[0-9a-fA-F]{6}$/,
+} as const;
+/* The longest value a kit's slot holds: four lengths of a fraction of a pixel fit many times over. */
+export const THEME_KIT_VALUE_LENGTH = 120;
 
 /* An installed theme as the store shows it. */
 export type InstalledThemeView = Readonly<{
@@ -93,6 +111,8 @@ export type InstalledThemeView = Readonly<{
   base: string;
   cover: string | null;
   shots: readonly string[];
+  /* The theme's licence as its archive gave it, word for word. */
+  licenseFile: string;
   hasWorld: boolean;
   hasKit: boolean;
   size: number;

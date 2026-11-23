@@ -1,11 +1,10 @@
 import {
-  THEME_ARCHIVE_FORMAT, THEME_ENGINES, THEME_FILE_LIMITS, THEME_KIT_COLORS, THEME_KIT_SLOTS, THEME_LIMITS, type ThemeArtFile, type ThemeLimits, type ThemeProblemCode, type ThemeWebCheck,
+  THEME_ARCHIVE_FORMAT, THEME_ENGINES, THEME_FILE_LIMITS, THEME_KIT_COLORS, THEME_KIT_SLOTS, THEME_KIT_VALUE_LENGTH, THEME_KIT_VALUES, THEME_LIMITS, type ThemeArtFile, type ThemeLimits, type ThemeProblemCode, type ThemeWebCheck,
 } from '@hornhoof/protocol/themes';
 import type { WorldPackBehaviorSpec } from '@hornhoof/protocol/world';
 import { z } from 'zod';
 import { checkFont, jsonOf, kindOf, MEDIA, pictureOf, plainText, type FileKind, type MediaType } from './files.js';
 import { archiveWorldSkills } from './skills.js';
-import { checkSvg } from './svg.js';
 import { ArchiveRefused, openZip, type ZipFile, type ZipSource } from './zip.js';
 
 /* The whole check of a theme archive (docs/theme-archive.md): the zip, then each file by its place and its bytes, then
@@ -45,18 +44,24 @@ const FontFace = z.strictObject({
 export type ThemeFontFace = z.infer<typeof FontFace>;
 const Fonts = z.strictObject({ faces: z.array(FontFace).min(1).max(THEME_FILE_LIMITS.fonts) });
 
-const LENGTHS = /^(?:(?:\d{1,4}(?:\.\d{1,3})?(?:px|%)|0|auto)(?:\s+|$)){1,4}$/;
+/* A slot of ui/kit.json in the forms of the theme UI kit 1.0, section 6.2 (THEME_KIT_VALUES): what the screens would
+   skip is refused here, with the form it should have. */
+const kitValue = (key: Exclude<keyof typeof THEME_KIT_VALUES, 'file' | 'color'>, form: string) => z.string().max(THEME_KIT_VALUE_LENGTH).regex(THEME_KIT_VALUES[key], form).optional();
 const KitSlot = z.strictObject({
-  file: z.string().regex(/^[A-Za-z0-9._@-]+\.(?:png|webp|svg)$/, 'a .png, .webp or .svg file of ui/kit'),
-  slice: z.string().regex(/^(?:\d{1,4}(?:\s+|$)){1,4}(?:fill)?$/, 'up to four whole numbers and an optional fill').optional(),
-  width: z.string().regex(LENGTHS, 'up to four lengths in px or %').optional(),
-  outset: z.string().regex(LENGTHS, 'up to four lengths in px or %').optional(),
-  size: z.string().regex(LENGTHS, 'up to four lengths in px or %').optional(),
+  file: z.string().max(THEME_LIMITS.pathLength).regex(THEME_KIT_VALUES.file, 'a .webp or .png file of ui/kit: lowercase letters, digits, ".", "@" and "-"'),
+  slice: kitValue('slice', '1 to 4 numbers, each with an optional %, then an optional " fill"'),
+  width: kitValue('width', '1 to 4 of: a number with px or %, a plain number, auto'),
+  outset: kitValue('outset', '1 to 4 numbers, each with an optional px'),
+  size: kitValue('size', '1 or 2 of: a number with px or %, auto, calc(100% - Npx)'),
+  repeat: kitValue('repeat', '1 or 2 of: stretch, repeat, round, space'),
 });
-/* Only the parts and colours the screens know (THEME_KIT_SLOTS, THEME_KIT_COLORS), each at most once. */
+/* Only the parts and colours the screens know (THEME_KIT_SLOTS, THEME_KIT_COLORS), each at most once. The pack's name
+   and the name of its licence are for people, as the kit writes them. */
 const Kit = z.strictObject({
+  pack: plain(80).optional(),
+  licence: plain(80).optional(),
   slots: z.partialRecord(z.enum(THEME_KIT_SLOTS), KitSlot).refine(slots => Object.keys(slots).length > 0, 'at least one slot'),
-  colors: z.partialRecord(z.enum(THEME_KIT_COLORS), z.string().regex(/^#[0-9A-Fa-f]{6}$/, '#RRGGBB')).optional(),
+  colors: z.partialRecord(z.enum(THEME_KIT_COLORS), z.string().regex(THEME_KIT_VALUES.color, '#RRGGBB')).optional(),
 });
 export type ThemeKit = z.infer<typeof Kit>;
 
@@ -153,11 +158,10 @@ async function kitOf(files: Reader, served: ServedFile[]): Promise<ThemeKit | nu
   if (unnamed) refuse('kit_bad', unnamed, 'no slot of ui/kit.json names it');
   for (const path of named) {
     if (!files.has(path)) refuse('file_missing', path, 'ui/kit.json names it');
-    const kind = path.endsWith('.png') ? 'png' : path.endsWith('.webp') ? 'webp' : 'svg';
+    const kind = path.endsWith('.png') ? 'png' : 'webp';
     const bytes = await files.read(path);
     if (bytes.length > THEME_FILE_LIMITS.kitBytes) refuse('file_too_large', path);
-    if (kind === 'svg') checkSvg(path, plainText(path, bytes, THEME_FILE_LIMITS.kitBytes));
-    else pictureOf(path, kind, bytes);
+    pictureOf(path, kind, bytes);
     served.push(files.served(path, MEDIA[kind]));
   }
   return kit;

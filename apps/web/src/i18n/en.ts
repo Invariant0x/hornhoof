@@ -659,7 +659,6 @@ export const en = {
         link_outside: path => `${path} links outside the archive. A theme holds no links: remove them.`,
         file_missing: path => `${path} is named in the theme but missing from the archive. Add it.`,
         too_many_of_kind: path => `${path} is one too many of its kind. Keep one.`,
-        svg_unsafe: path => `${path} holds more than a drawing: a script, an event, a style, an embedded picture or a foreign object. Keep shapes, gradients and filters only.`,
         theme_missing: () => 'The archive has no theme.json. Put it at the top of the theme folder.',
         license_missing: () => 'The archive has no LICENSE. Add the licence of its pictures, fonts and words.',
         look_missing: () => 'The archive has no ui/look.json. Every theme sets the look of the interface.',

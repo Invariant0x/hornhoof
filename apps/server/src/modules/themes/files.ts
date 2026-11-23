@@ -6,15 +6,14 @@ import { ArchiveRefused } from './zip.js';
    its name says (docs/theme-archive.md, sections 1 and 9). A file with no place is refused; a script or a page is
    refused by name, wherever it stands. */
 
-export type FileKind = 'json' | 'text' | 'png' | 'webp' | 'svg' | 'woff2' | 'index';
-export type MediaType = 'application/json' | 'text/plain; charset=utf-8' | 'image/png' | 'image/webp' | 'image/svg+xml' | 'font/woff2';
+export type FileKind = 'json' | 'text' | 'png' | 'webp' | 'woff2' | 'index';
+export type MediaType = 'application/json' | 'text/plain; charset=utf-8' | 'image/png' | 'image/webp' | 'font/woff2';
 
 export const MEDIA: Readonly<Record<Exclude<FileKind, 'index'>, MediaType>> = {
   json: 'application/json',
   text: 'text/plain; charset=utf-8',
   png: 'image/png',
   webp: 'image/webp',
-  svg: 'image/svg+xml',
   woff2: 'font/woff2',
 };
 
@@ -24,7 +23,6 @@ function refuse(code: ThemeProblemCode, path: string, detail?: string): never {
 }
 
 /* Files that run or render as a page in a browser, refused with their own reason so an author knows why. */
-const KIT_SVG = /^ui\/kit\/[^/]+\.svg$/;
 const SCRIPT = /\.(?:m?js|cjs|jsx|tsx?|wasm|html?|xhtml|xml|svgz?|css|php|sh|bat|cmd|exe|dll|so|dylib|jar|py|rb|pl)$/i;
 
 const PLACES: readonly [RegExp, FileKind][] = [
@@ -36,7 +34,6 @@ const PLACES: readonly [RegExp, FileKind][] = [
   [/^ui\/fonts\/[^/]+\.txt$/, 'text'],
   [/^ui\/kit\/[^/]+\.png$/, 'png'],
   [/^ui\/kit\/[^/]+\.webp$/, 'webp'],
-  [KIT_SVG, 'svg'],
   [/^world\/world\.json$/, 'json'],
   [/^world\/art\/art-index\.json$/, 'index'],
   [/^world\/art\/.+\.png$/, 'png'],
@@ -47,8 +44,7 @@ const PLACES: readonly [RegExp, FileKind][] = [
 ];
 
 export function kindOf(path: string): FileKind {
-  /* A drawing of the kit is the one SVG a theme may hold: checkSvg reads it as a drawing alone. */
-  if (SCRIPT.test(path) && !KIT_SVG.test(path)) refuse('file_script', path);
+  if (SCRIPT.test(path)) refuse('file_script', path);
   const place = PLACES.find(([pattern]) => pattern.test(path));
   return place ? place[1] : refuse('file_place', path);
 }
