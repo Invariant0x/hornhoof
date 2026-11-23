@@ -1,6 +1,6 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import type { LineState } from '@hornhoof/protocol/map';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
@@ -30,8 +30,8 @@ import { clock } from './Subscriptions';
 import { guardedResizeObserver, useRenderGuard } from '../guard';
 import { useShellTop } from '../ui/shellBars';
 import { useWorld } from '../skins/use-skin';
-import { resolveWorldPack } from '../world-packs/registry';
-import { WorldMapView } from './WorldMapView';
+/* The world map, its packs and PixiJS load only for a theme with a world (#1973). */
+const WorldMapScreen = lazy(() => import('./WorldMapScreen'));
 
 export { deptLayout, type DeptSpot } from '../map-arrange';
 
@@ -717,7 +717,6 @@ export function MapScreen({
 }: Props) {
   useRenderGuard('map');
   const world = useWorld();
-  const worldPack = resolveWorldPack(world);
   const t = useT();
   const { language } = useLanguage();
   const still = useReducedMotion();
@@ -931,24 +930,26 @@ export function MapScreen({
   const standIn = mapStandIn(t, failure, mapLoad, onHome);
   if (standIn || !org || !arr) return standIn ?? <div className="map" aria-busy="true"><MapVersion /></div>;
 
-  if (worldPack) {
+  if (world !== 'standard') {
     return (
-      <WorldMapView
-        me={me}
-        org={org}
-        pack={worldPack}
-        inside={inside}
-        windowOpen={windowOpen}
-        activeDepartmentId={activeDepartmentId}
-        onOpenOrchestrator={onOpenOrchestrator}
-        onOpenAgent={onOpenAgent ?? (() => {})}
-        onCloseDepartment={onCloseDepartment}
-        onOpenTask={onOpenTask}
-        onOpenGoal={onOpenGoal}
-        onOpenTracker={onOpenTracker}
-        onOpenTab={onOpenTab}
-        onHire={onHire}
-      />
+      <Suspense fallback={<div className="map" aria-busy="true"><MapVersion /></div>}>
+        <WorldMapScreen
+          world={world}
+          me={me}
+          org={org}
+          inside={inside}
+          windowOpen={windowOpen}
+          activeDepartmentId={activeDepartmentId}
+          onOpenOrchestrator={onOpenOrchestrator}
+          onOpenAgent={onOpenAgent ?? (() => {})}
+          onCloseDepartment={onCloseDepartment}
+          onOpenTask={onOpenTask}
+          onOpenGoal={onOpenGoal}
+          onOpenTracker={onOpenTracker}
+          onOpenTab={onOpenTab}
+          onHire={onHire}
+        />
+      </Suspense>
     );
   }
 
