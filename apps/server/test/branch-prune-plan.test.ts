@@ -109,6 +109,37 @@ describe('which branches of a repository Hornhoof deletes, archives and keeps', 
     expect(all.filter(v => v.action !== 'keep')).toEqual([]);
   });
 
+  it('keeps exactly the twenty newest of twenty-one turn branches by their numbers, and deletes only the oldest, tagged one', async () => {
+    const heads: Record<string, string> = { main: M3 };
+    for (let n = 1; n <= 21; n++) heads[`turn-${n}`] = M3;
+    heads['turn-1'] = M1;
+    const all = await plan(facts({ heads, recorded: new Set(Object.keys(heads)), tags: { 'v1.0.0': M1 } }), holds);
+    expect(all.filter(v => v.action !== 'keep').map(v => v.branch)).toEqual(['turn-1']);
+    /* By number, not by name: turn-9 is older than turn-10. */
+    const wide: Record<string, string> = { main: M3 };
+    for (let n = 1; n <= 21; n++) wide[`turn-${n + 8}`] = M1;
+    const byNumber = await plan(facts({ heads: wide, recorded: new Set(Object.keys(wide)), tags: { 'v1.0.0': M1 } }), holds);
+    expect(byNumber.filter(v => v.action !== 'keep').map(v => v.branch)).toEqual(['turn-9']);
+  });
+
+  it('judges no turn branch Hornhoof has no record of, however many there are and whatever stands on their heads', async () => {
+    const heads: Record<string, string> = { main: M3 };
+    for (let n = 1; n <= 22; n++) heads[`turn-${n}`] = M1;
+    const all = await plan(facts({ heads, recorded: new Set(['turn-22']), tags: { 'v1.0.0': M1 } }), holds);
+    expect(all.filter(v => v.action !== 'keep')).toEqual([]);
+    expect(verdictOf(all, 'turn-1')).toMatchObject({ category: 'foreign' });
+    expect(verdictOf(all, 'turn-22')).toMatchObject({ category: 'turn-kept' });
+  });
+
+  it('deletes a service branch of its records only where something holds its head, and keeps it where that could not be read', async () => {
+    const f = () => facts({ heads: { main: M3, 'release-run-a': M2, 'release-run-b': U1 }, recorded: new Set(['release-run-a', 'release-run-b']) });
+    const all = await plan(f(), holds);
+    expect(verdictOf(all, 'release-run-a')).toMatchObject({ action: 'delete', category: 'held' });
+    expect(verdictOf(all, 'release-run-b')).toMatchObject({ action: 'keep', category: 'waiting' });
+    const unsure: Holds = async (holder, head) => (head === M2 ? null : holds(holder, head));
+    expect(verdictOf(await plan(f(), unsure), 'release-run-a')).toMatchObject({ action: 'keep', category: 'unreadable' });
+  });
+
   it('never plans a tag, whatever its name or what it holds', async () => {
     const all = await plan(facts({ ...base(), tags: { 'v1.0.0': M3, 'task-3': U1, 'turn-1': M1 } }), holds);
     expect(all.every(v => !v.branch.startsWith('v1.') && v.branch !== 'turn-1')).toBe(true);

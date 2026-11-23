@@ -175,6 +175,16 @@ describe('turnkey work reported with the turn branch not at its commit is taken 
     expect((await work.closing())!.data.integration).not.toHaveProperty('merge');
   });
 
+  it('takes a fast-forward its holder made even where the department names no author: nothing is signed then', async () => {
+    const f = await releasing();
+    const work = await turnkeyTask(f, { author: false });
+    const { pushes } = pushing(f, [{ sha: OWN, parents: [f.R] }]);
+    f.repo.heads[work.branch] = OWN;
+    f.repo.heads[f.branch] = OWN;
+    expect((await work.done()).task).toMatchObject({ status: 'done', turnId: f.turn.id });
+    expect(pushes).toHaveLength(0);
+  });
+
   it('refuses to make a merge nobody can sign when the department names no author for its commits, and pushes nothing', async () => {
     const f = await releasing();
     const work = await turnkeyTask(f, { author: false });
