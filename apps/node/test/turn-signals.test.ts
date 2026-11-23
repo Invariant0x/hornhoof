@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TurnEnds, hookCalls, claudeEnd, stopIsLate } from '../src/terminal/turn-signals.js';
+import { TurnEnds, agyHookSession, claudeEnd, foreignAgyHook, hookCalls, keepsAgySession, stopIsLate, stopSession } from '../src/terminal/turn-signals.js';
 import { kimiWire } from '../src/terminal/transcripts.js';
 import { ProgramWatch, programState } from '../src/terminal/program-state.js';
 import hooks from './fixtures/turn-hooks.json' with { type: 'json' };
@@ -44,6 +44,26 @@ describe('whose a stop hook is', () => {
     ["that answers a person's own words, sent while the prompt waited", { promptIn: false, answersPerson: true, from: 'new', session: 'new', left }, false],
   ])('%s', (_, stop, late) => {
     expect(stopIsLate(stop)).toBe(late);
+  });
+
+  it('tells Antigravity main conversation hooks apart from subagent and left conversations', () => {
+    expect(agyHookSession({ conversationId: ' main ' })).toBe('main');
+    expect(agyHookSession({ conversationId: '  ', session_id: 'fallback' })).toBe('fallback');
+    expect(agyHookSession({ conversationId: 42 })).toBeNull();
+    expect(stopSession('antigravity', { conversationId: 'main' })).toBe('main');
+    expect(stopSession('claude', { session_id: 'c1', conversationId: 'ignored' })).toBe('c1');
+
+    expect(foreignAgyHook('claude', 'main', left, { conversationId: 'sub' })).toBe(false);
+    expect(foreignAgyHook(undefined, 'main', left, { conversationId: 'sub' })).toBe(false);
+    expect(foreignAgyHook('antigravity', 'main', left, {})).toBe(false);
+    expect(foreignAgyHook('antigravity', 'main', left, { conversationId: 'main' })).toBe(false);
+    expect(foreignAgyHook('antigravity', 'main', left, { conversationId: 'sub' })).toBe(true);
+    expect(foreignAgyHook('antigravity', 'main', left, { session_id: 'sub' })).toBe(true);
+    expect(foreignAgyHook('antigravity', null, left, { conversationId: 'old' })).toBe(true);
+    expect(foreignAgyHook('antigravity', null, left, { conversationId: 'fresh' })).toBe(false);
+    expect(keepsAgySession('antigravity', 'main')).toBe(true);
+    expect(keepsAgySession('antigravity', null)).toBe(false);
+    expect(keepsAgySession('claude', 'main')).toBe(false);
   });
 });
 

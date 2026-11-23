@@ -228,23 +228,24 @@ function CompanyLink() {
   );
 }
 
-/* Company & access: for a person who sees the whole company the public link, and for the CEO alone the backups. */
-function CompanyGroup({ me }: { me: Me }) {
+/* Company & access: for a person who sees the whole company the public link, and for the CEO alone the company theme and backups. */
+function CompanyGroup({ me, onCompanyTheme }: { me: Me; onCompanyTheme?: (theme: string) => void }) {
   return (
     <div className="settings-group">
       {me.person.scopeKind === 'company' && <CompanyLink />}
+      {me.person.isOwner && <Themes onCompanyTheme={onCompanyTheme} />}
       {me.person.isOwner && <Backups />}
     </div>
   );
 }
 
-type GroupProps = { group: Group; me: Me; reached: ReadonlySet<string> | null; onRenamed?: (name: string) => void };
+type GroupProps = { group: Group; me: Me; reached: ReadonlySet<string> | null; onRenamed?: (name: string) => void; onCompanyTheme?: (theme: string) => void };
 
 /* What the open group holds, once the server said which groups this person has; one it does not give them says so. */
-function GroupContent({ group, me, reached, onRenamed }: GroupProps) {
+function GroupContent({ group, me, reached, onRenamed, onCompanyTheme }: GroupProps) {
   const t = useT();
   if (group === 'profile') return <div className="settings-group"><NameForm me={me} onRenamed={onRenamed} /></div>;
-  if (group === 'appearance') return <div className="settings-group"><LanguagePart /><Themes /></div>;
+  if (group === 'appearance') return <div className="settings-group"><LanguagePart /></div>;
   if (!reached && group !== 'company') return <p className="muted" role="status">{t.common.loading}</p>;
   if (!groupShown(group, me, reached)) {
     return (
@@ -254,7 +255,7 @@ function GroupContent({ group, me, reached, onRenamed }: GroupProps) {
       </section>
     );
   }
-  if (group === 'company') return <CompanyGroup me={me} />;
+  if (group === 'company') return <CompanyGroup me={me} onCompanyTheme={onCompanyTheme} />;
   if (group === 'passwords') return <Vault />;
   return <Integrations reached={reached!} />;
 }
@@ -298,6 +299,7 @@ type SettingsProps = {
   group?: SettingsGroup;
   onGroup?: (group?: SettingsGroup) => void;
   onRenamed?: (name: string) => void;
+  onCompanyTheme?: (theme: string) => void;
   onClose: () => void;
 };
 
@@ -305,7 +307,7 @@ const nothing = () => {};
 
 /* Settings, for everyone signed in: Profile, then four groups, Appearance & language, Integrations, Passwords and Company &
    access. Each has its own address under /settings, and the switch between them keeps what lies under the window. */
-export function Settings({ me, group, onGroup = nothing, onRenamed, onClose }: SettingsProps) {
+export function Settings({ me, group, onGroup = nothing, onRenamed, onCompanyTheme, onClose }: SettingsProps) {
   const t = useT();
   const box = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
@@ -338,7 +340,7 @@ export function Settings({ me, group, onGroup = nothing, onRenamed, onClose }: S
           <div className="settings-body">
             <GroupNav group={current} me={me} reached={reached} onGroup={onGroup} />
             <div className="settings-main">
-              <GroupBody group={current} me={me} reached={reached} onRenamed={onRenamed} />
+              <GroupBody group={current} me={me} reached={reached} onRenamed={onRenamed} onCompanyTheme={onCompanyTheme} />
             </div>
           </div>
         </div>

@@ -48,6 +48,16 @@ function fakeGit(origin = REPO.url) {
   return { git, calls };
 }
 
+/* The package store a turn gets when the node's own environment names none, under the work folder of a node whose agents
+   share one user. The node leaves a name alone that its environment already sets, so a test that looks at the whole
+   environment of a turn first clears both names, and then no host decides what it sees. */
+const STORE_NAMES = ['PNPM_STORE_DIR', 'npm_config_cache'];
+function withoutHostStore(): void {
+  for (const name of STORE_NAMES) vi.stubEnv(name, '');
+  onTestFinished(() => { vi.unstubAllEnvs(); });
+}
+const storeOf = (dir: string) => ({ PNPM_STORE_DIR: join(dir, 'work', '.pkg-store', 'pnpm'), npm_config_cache: join(dir, 'work', '.pkg-store', 'npm') });
+
 describe("an agent's folder and its repository", () => {
   it('keeps a folder per job for a job without a workspace', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-ws-'));
@@ -68,6 +78,7 @@ describe("an agent's folder and its repository", () => {
   });
 
   it('clones the repository into the agent folder with the token only in the environment', async () => {
+    withoutHostStore();
     const dir = mkdtempSync(join(tmpdir(), 'hh-ws-'));
     const { git, calls } = fakeGit();
     const adapter = fakeAdapter();
@@ -80,7 +91,7 @@ describe("an agent's folder and its repository", () => {
     expect(calls[0]!.env).toMatchObject({ GIT_ASKPASS: ASKPASS, HH_GIT_PASSWORD: TOKEN, HH_GIT_HOST: 'github.com', GIT_TERMINAL_PROMPT: '0' });
     expect(calls[0]!.env.NODE_KEY).toBeUndefined();
     expect(adapter.inputs[0]!.workDir).toBe(folder);
-    expect(adapter.inputs[0]!.env).toEqual({ GIT_ASKPASS: ASKPASS, HH_GIT_PASSWORD: TOKEN, HH_GIT_HOST: 'github.com', GIT_TERMINAL_PROMPT: '0' });
+    expect(adapter.inputs[0]!.env).toEqual({ GIT_ASKPASS: ASKPASS, HH_GIT_PASSWORD: TOKEN, HH_GIT_HOST: 'github.com', GIT_TERMINAL_PROMPT: '0', ...storeOf(dir) });
   });
 
   it('reuses the clone on the next turn and follows a repository that moved', async () => {
@@ -142,12 +153,13 @@ describe("an agent's folder and its repository", () => {
   });
 
   it('leaves out the askpass helper for a public repository without a token', async () => {
+    withoutHostStore();
     const dir = mkdtempSync(join(tmpdir(), 'hh-ws-'));
     const { git, calls } = fakeGit();
     const adapter = fakeAdapter();
     await runJob(adapter, job({ workspace: { key: AGENT, repo: { ...REPO, token: '' } } }), dir, { git });
     expect(calls[0]!.env.GIT_ASKPASS).toBeUndefined();
-    expect(adapter.inputs[0]!.env).toEqual({ GIT_TERMINAL_PROMPT: '0' });
+    expect(adapter.inputs[0]!.env).toEqual({ GIT_TERMINAL_PROMPT: '0', ...storeOf(dir) });
   });
 
   it('hides the repository token in everything that goes back', async () => {

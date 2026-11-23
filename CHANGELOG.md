@@ -9,14 +9,50 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
-- An employee's program waits two minutes for Hornhoof's tools to connect as it starts, not 30 seconds: Claude Code (`MCP_TIMEOUT`, unless the node was started with one), Codex and Kimi Code. One that still gave up before Hornhoof answered ends its turn as one without tools, which Hornhoof repeats, and the next turn starts it again in its session, where it connects.
+- The head of Design, named on a task's tracked work to check a screen's final look, can now read that task and its files and comment on it until the check ends, and the task's holder can message that head about it.
+- An employee's open terminal stays connected when idle or on a personal-plan fallback machine: the server sends WebSocket keepalive pings and checks fallback placement consistently, the window keeps the terminal mounted across brief node drops, and unavoidable reconnects or program restarts recover without flashing the loader or losing scrollback history and reading position.
+
+## [0.42.0] - 2026-11-23
+
+### Fixed
+
+- In the tracker list, the slow-loading notice and load error no longer push the held rows down: they appear over the top rows while the rows underneath stay in place, and a short list keeps room for the notice.
 - On a page right to left, the tracker's graph is drawn mirrored too: its root at the right, each level further to the left, the lines of what a task waits for on the left with their words beside the waiting task, and its zoom at the right as on the other canvases.
 - People and Machines hold the room of their data while it comes, with the same loading ring and Retry: their table heads, and Machines' pool and search, stand at once, and nothing above the rows moves when they come. Once Machines showed its filter buttons in a tab, its next load there holds their room too.
 - The map, a department with its tree and speed, and an employee's window show the same loading indicator where their data will stand. The map is drawn only once the company and the person's own arrangement came, so its blocks no longer jump into place. A department opened at its own address keeps back, the plate of its name and its tools while its company comes, so a failure there has a way out. Their loads say why they failed, or that they take longer than usual, as the tracker's do. None of them says it is empty, such as a conversation with no messages yet, while something it shows is still on its way.
-- On a heavily loaded machine a node no longer refuses an agent's own hooks as callers outside its terminal: it checks a caller the moment its call arrives, each hook waits for the node as long as its program allows, and a caller that left before its check is refused under that reason.
-- Reading a task no longer spends GitHub's request limit: what GitHub said of whether a department's task branches are in main is kept, one read asks it of 10 branches at most, and once GitHub answers that the account's limit is used up nothing more is asked until its reset.
 - A summary Claude writes of a compacted conversation, or an entry only its transcript shows, no longer counts as the delivery of an operator's assignment it repeats word for word, and a new session's log the node cannot look at for any reason but that it is not there yet gives no receipt.
-- An employee's open terminal stays connected when idle or on a personal-plan fallback machine: the server sends WebSocket keepalive pings and checks fallback placement consistently, the window keeps the terminal mounted across brief node drops, and unavoidable reconnects or program restarts recover without flashing the loader or losing scrollback history and reading position.
+- A bar over the map, such as an update's, no longer pushes the map and an open department down: they reach the top of the window under the header and the bars, and what they show starts under the bars. Windows and cards open 8 px under the bars, and a card opened over a department 8 px under its name, however many lines the name takes.
+- On the map and in an open department the menu, the bars and the bottom bar are separate glass blocks with no shadow and no band between them, so the map shows around them to the top and the bottom of the window, the department's schema too. The chosen tab stands on a solid backing. The department's name and the windows that open there stand 8 px under the menu or the last bar on every screen. When a bar comes or goes the name and the map or the schema slide to their new place in 200 ms, at once with less motion. On a phone every bar after the first folds to one line with More.
+- In a page that reads right to left, the glow of the map's hub stands around the hub instead of at the map's right edge.
+- An Antigravity turn that launches a subagent keeps the employee's main conversation as its session, ignores hooks from child conversations, and resumes the main conversation with its Hornhoof tools on the next turn.
+- An Antigravity turn that fails with `UNAUTHENTICATED (code 401)` because its program kept an hour-old access token is no longer lost as an unknown failure: the program starts anew with the saved sign-in and the turn is tried once more with no person involved, and a second refusal right after that is a sign-in failure with a clear reason for Operations.
+- When the updater cannot remove its copy of a loaded dump, or the folder it kept it in, it says so and the restore ends done or undone as before; a failed or interrupted write of that warning no longer stops the updater, though an output that stays closed can still stop it at its next line.
+- An upload whose table is 8 GiB or more, which tar writes with a base-256 size, is read correctly and accepted within the upload limit.
+
+### Added
+
+- A machine's card shows its disk and Hornhoof's share of it part by part, the largest first, with the employees' working folders of each of its nodes and the copies of company databases it holds, each counted once inside the volumes, and a machine short of space gives its owner and the CEO one card with the numbers, what it already removed and what it did not remove because a person needs to check it; the card goes by itself once there is room.
+- Each node looks after its disk every ten minutes: it removes what can come back (left-over check files, the working copies of finished tasks once everything in them is on GitHub and all they ignore is dependencies, builds, caches or test output, the installed dependencies of those that stay, and terminal recordings a stopped node left), deduplicates ignored `node_modules` across clones through a per-user read-only hard-link package store (`PNPM_STORE_DIR` / `npm_config_cache` plus content-addressed CAS with automatic GC), reports its disk and Hornhoof's share by part, and while it is still short of space takes no new checks or builds, with the reason; turns go on. The threshold is the larger of a share of the disk and an amount, 10% and 20 GB by default (`HORNHOOF_DISK_SHARE`, `HORNHOOF_DISK_GB`). Unsaved work and files git ignores that no remote has are never touched and are named in the report.
+- Each machine's updater cleans Hornhoof's own Docker leftovers once an hour outside active updates: old Hornhoof images (keeping the two newest per repository and any image in use, without force), day-old leftover test stands (`hornhoof.lab`) and stale port-lock containers, and Docker build cache unused for 72 hours when Docker's disk is low or the cache exceeds its limit (10% or 10 GB by default). Node volumes, database volumes and non-Hornhoof resources are never touched. The updater hands Hornhoof's Docker sizes and recent removals to each running node to include in its disk report.
+
+## [0.40.3] - 2026-11-21
+
+### Fixed
+
+- An updater on an older installation whose shared control folder kept the setgid bit (`2755`) no longer refuses its own staging folders silently: it clears setgid on private staging and keeper folders so heartbeats and update requests work again, and re-running the installer clears setgid on an existing control volume and its subdirectories.
+
+## [0.40.2] - 2026-11-21
+
+### Fixed
+
+- On a heavily loaded machine a node no longer refuses an agent's own hooks as callers outside its terminal, so finished turns end: it checks a caller the moment its call arrives, each hook waits for the node as long as its program allows, and a caller that left before its check is refused under that reason.
+- Reading a task no longer spends GitHub's request limit: what GitHub said of whether a department's task branches are in main is kept, one read asks it of 10 branches at most, and once GitHub answers that the account's limit is used up nothing more is asked until its reset.
+
+## [0.40.1] - 2026-11-21
+
+### Fixed
+
+- An employee's program waits two minutes for Hornhoof's tools to connect as it starts, not 30 seconds: Claude Code (`MCP_TIMEOUT`, unless the node was started with one), Codex and Kimi Code. One that still gave up before Hornhoof answered ends its turn as one without tools, which Hornhoof repeats, and the next turn starts it again in its session, where it connects.
 
 ## [0.40.0] - 2026-11-20
 

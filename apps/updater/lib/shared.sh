@@ -35,10 +35,16 @@ entered() {
 }
 
 # Enter only a staging directory at the expected path, owned by this updater and private.
+# A shared parent with setgid makes mktemp -d inherit mode 2700; clear setgid once verified private.
 enter_stage() {
   local mode
   cd -P -- "./$2" && [ "$(physical_dir)" = "${1%/}/$2" ] && [ -O . ] || return 1
-  mode=$(stat -c '%a' . 2> /dev/null || stat -f '%Lp' . 2> /dev/null) && [ "$mode" = 700 ]
+  mode=$(stat -c '%a' . 2> /dev/null || stat -f '%Lp' . 2> /dev/null) || return 1
+  if [ "$mode" = 2700 ]; then
+    chmod g-s . 2> /dev/null || return 1
+    mode=$(stat -c '%a' . 2> /dev/null || stat -f '%Lp' . 2> /dev/null) || return 1
+  fi
+  [ "$mode" = 700 ]
 }
 
 # move_over <file> <name>: rename a file over a name in the same folder, replacing a link there instead of following it.
@@ -224,7 +230,7 @@ keeper_dir() (
     printf 'Refused %s: it is not a keeper folder.\n' "$name" >&2
     exit 1
   fi
-  chmod 700 .
+  chmod g-s . && chmod 700 .
 )
 
 # remove_in <folder> <name>...: files of a shared folder go. A link goes itself, never what it points to, and a folder
@@ -234,4 +240,68 @@ remove_in() (
   shift
   local name
   for name in "$@"; do rm -f -- "./${name:?}" 2> /dev/null || true; done
+)
+
+# The mount of the opened directory. On Linux a bind mount can have the same device number, so use its mount ID.
+# The updater's macOS shell tests use the device number.
+directory_mount() (
+  local field value
+  if [[ "$OSTYPE" != linux* ]]; then
+    stat -f '%d' -- . 2> /dev/null
+    exit
+  fi
+  exec 8< . || exit 1
+  while read -r field value; do
+    [ "$field" = mnt_id: ] || continue
+    case "$value" in '' | *[!0-9]*) exit 1 ;; esac
+    printf '%s\n' "$value"
+    exit
+  done < /proc/self/fdinfo/8
+  exit 1
+)
+
+# Save the physical path including any trailing newlines in the directory name.
+read_cleanup_path() {
+  local output
+  output=$(physical_dir && printf '.') || return 1
+  printf -v "$1" '%s' "${output%$'\n.'}"
+}
+
+# Remove a direct entry. Walk a directory only from its own working directory on the parent's mount.
+# A link is unlinked by its name, and a directory left after a failed walk stays for the next pass.
+clear_entry() {
+  local item=$1 here=$2 mount=$3 depth=$4 child_path child_mount
+  [ -L "$item" ] || [ -e "$item" ] || return 0
+  if [ ! -L "$item" ] && [ -d "$item" ]; then
+    (
+      cd -P -- "$item" 2> /dev/null &&
+        read_cleanup_path child_path && [ "$child_path" = "${here%/}/${item#./}" ] &&
+        child_mount=$(directory_mount) && [ "$child_mount" = "$mount" ] &&
+        clear_here "$((depth + 1))"
+    ) && rmdir -- "$item" 2> /dev/null
+  else
+    rm -f -- "$item" 2> /dev/null
+  fi
+}
+
+# clear_here [depth]: empties the opened folder by direct names, within the updater's supported tree depth.
+clear_here() {
+  local depth=${1:-0} here mount item status=0
+  [ "$depth" -lt 16 ] || return 1
+  read_cleanup_path here && mount=$(directory_mount) || return 1
+  for item in ./* ./.[!.]* ./..?*; do
+    clear_entry "$item" "$here" "$mount" "$depth" || status=1
+  done
+  return "$status"
+}
+
+# remove_folders <name>...: clear only the named entries of the control folder. Keep an incomplete tree at its name
+# so the files step can try again without relying on private directory names in the shared parent.
+remove_folders() (
+  local name here mount status=0
+  entered "$CONTROL" && read_cleanup_path here && mount=$(directory_mount) || exit 1
+  for name in "$@"; do
+    clear_entry "./${name:?}" "$here" "$mount" 0 || status=1
+  done
+  exit "$status"
 )
