@@ -97,15 +97,15 @@ export const BUILTIN_SKINS = [
   {
     id: 'egypt',
     scheme: 'light',
-    cut: 1,
+    cut: 0,
     shape: 'bevel',
     pulse: .8,
     world: 'egypt',
     surface: 'papyrus',
     fonts: EGYPT_FONTS,
     colors: {
-      bg: '#E6D9BE', surface: '#FAF4E6', surface2: '#F1E6D2', line: '#D2C2A5', line2: '#806F57', ink: '#221A12', muted: '#554736',
-      accent: '#1A5A8F', accent_ink: '#124270', warning: '#9E6A00', warning_ink: '#6F4900', attention: '#A3245B', attention_ink: '#851B48',
+      bg: '#E6D9BE', surface: '#FAF4E6', surface2: '#F1E6D2', line: '#D2C2A5', line2: '#806F57', ink: '#221A12', muted: '#43362A',
+      accent: '#1A5A8F', accent_ink: '#0F3A64', warning: '#9E6A00', warning_ink: '#6F4900', attention: '#A3245B', attention_ink: '#74173E',
       success: '#0D6748', danger: '#AD1D14', on_danger: '#FAF4E6', idle: '#CCBFA3', dot: 'rgba(92, 74, 48, .18)', glow: 'rgba(26, 90, 143, .11)',
       button: '#154B7D', on_button: '#FAF4E6', hud: 'rgba(248, 241, 226, .94)', shadow: 'rgba(42, 31, 18, .18)',
       provider_claude: '#9C3B1D', provider_kimi: '#1454BF', provider_glm: '#3A40BD', provider_antigravity: '#11652B',
