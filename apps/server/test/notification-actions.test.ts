@@ -13,6 +13,7 @@ import { messageHeading } from '../src/modules/conversation/prompt.js';
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
 import { appendEvent, listEvents } from '../src/modules/events/store.js';
 import { setUpCompany, testApp, echelonsTurn } from './helpers.js';
+import { recorded } from './recorded-fixture.js';
 
 /* Reports are combined within ten seconds of the server's clock, and waits end by it: here it stands still unless a test
    moves it, so no window or wait runs out while a test works. */
@@ -100,7 +101,7 @@ describe('recorded action authors', () => {
     const c = await fixture();
     const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
     const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
-    const moved = await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Shipped.' });
+    const moved = await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Shipped.', ...(await recorded(c.app.ctx, task.id, c.head.id)) });
     await wakeAll(c.app.ctx, moved.wakes);
     attributed((await c.notices(orchestrator.id))[0]!, 'Hana', 'reported work done');
   });
@@ -114,7 +115,7 @@ describe('one report per recipient', () => {
     const make = async () => (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
     const first = await make();
     const second = await make();
-    for (const task of [first, second]) await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.' })).wakes);
+    for (const task of [first, second]) await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.', ...(await recorded(c.app.ctx, task.id, c.head.id)) })).wakes);
     await enqueueTurn(c.app.ctx, { companyId: first.companyId, agentId: orchestrator.id, prompt: 'Release verified.', createdBy: null, message: { personId: null, text: 'Release verified.', from: 'agent', by: c.worker.id } });
     const notices = await c.notices(orchestrator.id);
     expect(notices).toHaveLength(1);
@@ -134,7 +135,7 @@ describe('one report per recipient', () => {
     const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
     for (const summary of ['Release verified.', 'A second report.']) {
       const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
-      await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary })).wakes);
+      await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary, ...(await recorded(c.app.ctx, task.id, c.head.id)) })).wakes);
     }
     expect(await c.notices(orchestrator.id)).toHaveLength(2);
   });
@@ -152,7 +153,7 @@ describe('report window boundaries', () => {
       return true;
     });
     const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
-    await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Shipped.' })).wakes);
+    await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Shipped.', ...(await recorded(c.app.ctx, task.id, c.head.id)) })).wakes);
     expect((await c.db.select().from(jobs).where(eq(jobs.taskId, task.id)))[0]!.notBefore!.getTime()).toBeGreaterThan(Date.now());
     const delivered = await enqueueTurn(c.app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, prompt: 'New instruction.', createdBy: c.ceo.id, message: { personId: c.ceo.id, text: 'New instruction.' } });
     expect(delivered).toBe(run!.id);
@@ -178,7 +179,7 @@ it('combines a queued direct copy that arrived before the service report', async
   const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
   await enqueueTurn(c.app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, createdBy: null, prompt: 'Release verified.', message: { personId: null, from: 'agent', by: c.head.id, text: 'Release verified.' } });
   const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
-  await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.' })).wakes);
+  await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.', ...(await recorded(c.app.ctx, task.id, c.head.id)) })).wakes);
   const notices = await c.notices(orchestrator.id);
   expect(notices).toHaveLength(1);
   expect(notices[0]!.message!.notification!.tasks).toEqual([{ id: task.id, number: task.number }]);
@@ -201,7 +202,7 @@ it('delivers an employee copy into the live turn immediately, combining the queu
   const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
   const [run] = await c.db.insert(jobs).values({ companyId: orchestrator.companyId, subscriptionId: orchestrator.subscriptionId!, agentId: orchestrator.id, kind: 'conversation', prompt: 'Working.', status: 'running', timeoutMs: 1000 }).returning();
   const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
-  await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.' })).wakes);
+  await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.', ...(await recorded(c.app.ctx, task.id, c.head.id)) })).wakes);
   await appendEvent(c.app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: run!.id, kind: 'message', personId: c.ceo.id, data: { text: 'A newer personal instruction.' } });
   expect((await decisionPrincipal(c.db, run!.id))!.personId).toBe(c.ceo.id);
   const saidTexts: string[] = [];
@@ -226,7 +227,7 @@ it('keeps the same report separate after its ten second window', async () => {
   const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
   for (const index of [0, 1]) {
     const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
-    await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.' })).wakes);
+    await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.', ...(await recorded(c.app.ctx, task.id, c.head.id)) })).wakes);
     if (index === 0) await c.db.update(agentEvents).set({ createdAt: new Date(Date.now() - 11_000) }).where(eq(agentEvents.agentId, orchestrator.id));
   }
   expect(await c.notices(orchestrator.id)).toHaveLength(2);
@@ -285,7 +286,7 @@ it('keeps other queued words when a direct report is combined and delivered live
   await appendEvent(c.app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: id, kind: 'message', personId: c.ceo.id, data: { text: 'Keep the separate instruction.' } });
   await c.db.update(jobs).set({ prompt: 'Hana wrote:\n\n> Release verified.\n\nIvan commented: Keep the separate instruction.' }).where(eq(jobs.id, id));
   const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
-  await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.' })).wakes);
+  await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.', ...(await recorded(c.app.ctx, task.id, c.head.id)) })).wakes);
   expect((await c.db.select().from(jobs).where(eq(jobs.id, id)))[0]!.prompt).toContain('Keep the separate instruction.');
   const [run] = await c.db.insert(jobs).values({ companyId: orchestrator.companyId, subscriptionId: orchestrator.subscriptionId!, agentId: orchestrator.id, kind: 'conversation', prompt: 'Working.', status: 'running', timeoutMs: 1000 }).returning();
   const spoken: string[] = [];
@@ -324,7 +325,7 @@ it('updates a delivered copy for known tasks without another input or changing t
   const c = await deliveredReport();
   const original = (await c.notices(c.orchestrator.id))[0]!;
   await appendEvent(c.app.ctx, { companyId: c.orchestrator.companyId, agentId: c.orchestrator.id, jobId: c.run.id, kind: 'message', personId: c.ceo.id, data: { text: 'A newer personal instruction.' } });
-  await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, c.first.id, { done: true, summary: c.text })).wakes);
+  await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, c.first.id, { done: true, summary: c.text, ...(await recorded(c.app.ctx, c.first.id, c.head.id)) })).wakes);
   await enqueueTurn(c.app.ctx, { companyId: c.orchestrator.companyId, agentId: c.orchestrator.id, createdBy: null, prompt: c.text, message: { personId: null, from: 'agent', by: c.worker.id, text: c.text, task: { id: c.first.id, number: c.first.number } } });
   const notices = (await c.notices(c.orchestrator.id)).filter(e => e.message!.from.kind !== 'person');
   expect(notices).toHaveLength(1);
@@ -344,7 +345,7 @@ it.each(['different text', 'new task'] as const)('delivers %s even after a simil
   const c = await deliveredReport();
   const task = difference === 'new task' ? c.second : c.first;
   const text = difference === 'different text' ? 'A different report.' : c.text;
-  await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: text })).wakes);
+  await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: text, ...(await recorded(c.app.ctx, task.id, c.head.id)) })).wakes);
   const notices = await c.notices(c.orchestrator.id);
   expect(notices).toHaveLength(2);
   expect((notices[1]!.data as { text: string }).text).toContain(text);

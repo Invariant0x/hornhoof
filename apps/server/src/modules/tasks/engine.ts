@@ -16,6 +16,7 @@ import { replayedSubmission, submissionOperation, type Submission } from './eche
 import { checkerFor, checkingIdentity, hasChecker, heldCheckingIdentity, keptFromReview, producerIdentity } from './echelons-assign.js';
 import { producedCandidate, currentCandidate, currentHanded, requireRepairHistory } from './echelons-candidates.js';
 import { acceptDocument, documentHandIn } from './echelons-document.js';
+import type { Recorded } from './recorded.js';
 import { submittedHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
 import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons, type TurnkeyChecked } from './turnkey.js';
@@ -421,7 +422,7 @@ async function commitHandIn(ctx: Live, agentId: string, task: Task, route: Route
   const candidate = producedCandidate(route, producer, review);
   if (prior) await requireRepairHistory(ctx, task, prior, candidate);
   if (!checkerStage) await requireBaseOnLine(ctx, task, candidate.baseCommit);
-  return { input: checkerStage ? prior : null, candidate, review };
+  return { input: checkerStage ? prior : null, candidate, review, recorded: undefined };
 }
 
 async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Submission, operation: ReturnType<typeof submissionOperation>): Promise<Moved> {
@@ -429,12 +430,12 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   const route = await routeOf(ctx.db, task);
   requireSubmissionStage(task, route);
   if (route.state.stage === 'tests') return submitAtTests(ctx, agentId, task, route, r, operation);
-  const { input, candidate, review } = route.state.resultKind === 'document' ? await documentHandIn(ctx, agentId, task, route, r) : await commitHandIn(ctx, agentId, task, route, r);
+  const { input, candidate, review, recorded } = route.state.resultKind === 'document' ? await documentHandIn(ctx, agentId, task, route, r) : await commitHandIn(ctx, agentId, task, route, r);
   const next = await submittedHandoff(ctx, task, route, candidate);
   const unstuck = stuckGoes(ctx, task);
   const row = await move(ctx, task, next.set, {
     kind: 'submitted', actor: { agentId }, text: r.summary, returned: true,
-    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...(next.authorCheckSkip ? { authorCheckSkip: next.authorCheckSkip } : {}), ...skippedData(next.skipped) },
+    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...(recorded ? { recorded } : {}), ...(next.authorCheckSkip ? { authorCheckSkip: next.authorCheckSkip } : {}), ...skippedData(next.skipped) },
   }, async tx => {
     if (input) await heldCheckingIdentity(tx, task, route, input);
     await changeRoute(tx, route, next.state);
@@ -471,7 +472,7 @@ async function reportToResolver(ctx: Live, agentId: string, task: Task, summary:
   return { task: row, wakes };
 }
 
-type ReportInput = { done: boolean; summary: string; verification?: Verification; acceptance?: AcceptanceInput; turnkey?: TurnkeyChecked };
+type ReportInput = { done: boolean; summary: string; verification?: Verification; acceptance?: AcceptanceInput; turnkey?: TurnkeyChecked; recorded?: Recorded };
 type ReportStage = 'acceptance' | 'tests' | 'architecture' | 'coordination' | 'turnkey';
 
 function reportedStage(route: Route, done: boolean): ReportStage | null {
@@ -490,10 +491,10 @@ async function reportStage(ctx: Live, task: Task, route: Route, agentId: string,
     case 'acceptance': return route.state.resultKind === 'document' ? acceptDocument(ctx, task, route, agentId, input.summary) : acceptCandidate(ctx, task, route, agentId, input.summary, input.acceptance);
     case 'tests': return testsReport(ctx, task, route, agentId, input.summary, input.verification, input.done);
     case 'architecture': return architectureReport(ctx, task, route, agentId, input.summary);
-    case 'coordination': return coordinationReport(ctx, task, route, agentId, input.summary);
+    case 'coordination': return coordinationReport(ctx, task, route, agentId, input.summary, input.recorded);
     case 'turnkey':
       if (input.verification || input.acceptance) throw turnkeyWork(task);
-      return turnkeyReport(ctx, task, route, agentId, input.summary, input.turnkey);
+      return turnkeyReport(ctx, task, route, agentId, input.summary, input.turnkey, input.recorded);
   }
 }
 

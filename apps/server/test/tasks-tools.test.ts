@@ -80,7 +80,7 @@ describe('task tools', () => {
     const owner = kind === 'report' ? c.head : c.bruno;
     const task = (await createTask(c.ctx, { agentId: c.orchestrator.id }, { title: 'Long report', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: owner.id, executor: kind !== 'report', small: true, paths: ['logic/totals.ts'] })).task;
     const client = await c.tools(owner);
-    const args = kind === 'comment' ? { text: words } : kind === 'submit' ? { summary: words, evidence: words, review: { baseCommit: BASE } } : { done: true, summary: words };
+    const args = kind === 'comment' ? { text: words } : kind === 'submit' ? { summary: words, evidence: words, review: { baseCommit: BASE } } : { done: true, summary: words, recorded: { path: 'reports/long.md' } };
     const result = await call(client, kind, { task: task.number, ...args });
     expect(result.isError, text(result)).toBeFalsy();
     const detail = JSON.parse(text(await call(client, 'task', { task: task.number })));

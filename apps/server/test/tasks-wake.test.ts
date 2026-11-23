@@ -14,6 +14,7 @@ import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { as, connectNode, listen, setUpCompany, statements, testApp, until, type FakeNode, echelonsTurn } from './helpers.js';
+import { recorded } from './recorded-fixture.js';
 import { BUILTIN } from './builtin.js';
 
 async function company(env?: NodeJS.ProcessEnv) {
@@ -469,7 +470,7 @@ describe("Hornhoof's note that a task stands still", () => {
     const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Plan the sprint', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id });
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
     for (let i = 0; i < SILENT_TURNS; i++) await c.finish(c.bruno.id);
-    await report(c.ctx, c.bruno.id, task.id, { done: true, summary: 'Planned.' });
+    await report(c.ctx, c.bruno.id, task.id, { done: true, summary: 'Planned.', ...(await recorded(c.ctx, task.id, c.bruno.id)) });
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'withdrawn' }]);
   });
 
