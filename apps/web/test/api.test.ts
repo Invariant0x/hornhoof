@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { api, ApiFailure, newRequestId, RETRY_FOR_MS } from '../src/api';
+import { api, ApiFailure, isAway, newRequestId, RETRY_FOR_MS } from '../src/api';
+import { connection } from '../src/connection';
 
 type Step = (() => Response | Promise<Response>) | Response;
 
@@ -37,8 +38,14 @@ async function settled<T>(call: Promise<T>): Promise<{ value: T } | { failure: A
   return outcome;
 }
 
+/* What the page's connection was told: the monitor itself looks with a fetch of its own, which these tests count and move
+   the clock for, so it is tested apart (connection.test.ts) and here only listened to. */
+const told = vi.spyOn(connection, 'lost');
+
 beforeEach(() => {
   vi.useFakeTimers();
+  told.mockReset();
+  told.mockImplementation(() => undefined);
 });
 
 afterEach(() => {
@@ -157,6 +164,83 @@ describe('a read from the page', () => {
   it('keeps the status of a refusal whose words break off', async () => {
     fetchAnswering(aborted(503));
     expect(await settled(api.get('/api/org'))).toMatchObject({ failure: { status: 503, code: 'internal' } });
+  });
+});
+
+/* A hop that is not Hornhoof answers with a page of its own (the public link's relay does when no keeper holds the name): the
+   server did not say the request is missing, so it is no missing page. */
+const hopPage = (status: number) => new Response('<html><h1>The page you requested was not found.</h1></html>', { status, headers: { 'content-type': 'text/html' } });
+const serverNotFound = () => json(404, { error: { code: 'not_found', message: 'Not found.' } });
+
+describe('a server that is away', () => {
+  it('fails a read that a hop answered 404 as one that met no server, and tells the connection', async () => {
+    for (const read of [() => api.get('/api/org'), () => api.text('/api/export.txt'), () => api.streamBytes('/api/files/f1')]) {
+      told.mockClear();
+      fetchAnswering(hopPage(404));
+      expect(await settled(read())).toMatchObject({ failure: { status: 0, code: 'network' } });
+      expect(told).toHaveBeenCalledWith('lost');
+    }
+  });
+
+  it('fails any answer of a hop with no words of Hornhoof as no server: 404, 500, 502, 504 and an empty body', async () => {
+    for (const answer of [hopPage(404), hopPage(500), hopPage(502), hopPage(504), new Response(null, { status: 404 }), new Response('', { status: 503 })]) {
+      fetchAnswering(answer);
+      expect(await settled(api.get('/api/org'))).toMatchObject({ failure: { status: 0, code: 'network' } });
+    }
+  });
+
+  it('keeps what the server itself says is missing as it said it, and tells the connection nothing', async () => {
+    fetchAnswering(serverNotFound());
+    expect(await settled(api.get('/api/tasks/nope'))).toMatchObject({ failure: { status: 404, code: 'not_found' } });
+    fetchAnswering(json(500, { error: { code: 'internal', message: 'Something went wrong.' } }));
+    expect(await settled(api.get('/api/org'))).toMatchObject({ failure: { status: 500, code: 'internal' } });
+    fetchAnswering(refused(503, 'read_only'));
+    expect(await settled(api.get('/api/org'))).toMatchObject({ failure: { status: 503, reason: 'read_only' } });
+    expect(told).not.toHaveBeenCalled();
+  });
+
+  it('tells the connection when the browser cannot reach the server, and not when the page gave the request up', async () => {
+    fetchAnswering(unreachable);
+    await settled(api.get('/api/org'));
+    expect(told).toHaveBeenCalledTimes(1);
+    told.mockClear();
+    const stop = new AbortController();
+    stop.abort();
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new DOMException('The operation was aborted.', 'AbortError');
+    }));
+    expect(await settled(api.get('/api/org', stop.signal))).toMatchObject({ failure: { status: 0, code: 'network' } });
+    expect(told).not.toHaveBeenCalled();
+  });
+
+  it('tells the connection that the front or the keeper has no server behind it, and that an update installs', async () => {
+    fetchAnswering(refused(502, 'starting'));
+    await settled(api.get('/api/org'));
+    expect(told).toHaveBeenLastCalledWith('lost');
+    fetchAnswering(refused(503, 'maintenance'));
+    expect(await settled(api.get('/api/org'))).toMatchObject({ failure: { status: 503, reason: 'maintenance' } });
+    expect(told).toHaveBeenLastCalledWith('updating');
+  });
+
+  it('sends a change again when a hop answered 404, with the same id, and gives up as no server after a minute', async () => {
+    const again = fetchAnswering(hopPage(404), json(200, { ok: true }));
+    expect(await settled(api.post('/api/notebook', { text: 'x' }))).toEqual({ value: { ok: true } });
+    expect(new Set(again.keys).size).toBe(1);
+    fetchAnswering(hopPage(404));
+    expect(await settled(api.post('/api/notebook', { text: 'x' }))).toMatchObject({ failure: { status: 0, code: 'network' } });
+    /* What the server itself says is missing is not sent again. */
+    const missing = fetchAnswering(serverNotFound());
+    expect(await settled(api.post('/api/notebook', { text: 'x' }))).toMatchObject({ failure: { status: 404 } });
+    expect(missing.calls).toHaveBeenCalledTimes(1);
+  });
+
+  it('knows a failure that ends when the server returns', () => {
+    expect(isAway(new ApiFailure(0, 'network', ''))).toBe(true);
+    expect(isAway(new ApiFailure(502, 'unavailable', '', 'starting'))).toBe(true);
+    expect(isAway(new ApiFailure(503, 'unavailable', '', 'maintenance'))).toBe(true);
+    expect(isAway(new ApiFailure(404, 'not_found', ''))).toBe(false);
+    expect(isAway(new ApiFailure(503, 'unavailable', '', 'read_only'))).toBe(false);
+    expect(isAway(new Error('x'))).toBe(false);
   });
 });
 

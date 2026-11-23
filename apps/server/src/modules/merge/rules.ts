@@ -117,6 +117,9 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ...each(['request_internal', 'proposals', 'approval_policies', 'wait_policies'], rows('protected')),
 
   ...each(['companies', 'departments', 'teams', 'agents', 'improvements', 'improvement_submissions', 'test_parts', 'backlog_items', 'briefings', 'map_layouts'], rows('work')),
+  /* The company's city and the CEO's orders to move its buildings: its world, kept apart from its work tables, compared
+     row by row like a person's map, and two that differ are the orchestrator's to settle. */
+  world_layouts: rows('work'),
   /* The cards of Hornhoof's own feedback inbox and who sent each: a card only the source holds whose number or finding the
      leader gave another card stays out. */
   ...each(['feedback_inbox', 'feedback_signals', 'feedback_submissions'], rows('work')),
@@ -143,6 +146,7 @@ export const BOOKKEEPING: Readonly<Record<string, readonly string[]>> = {
   approval_policies: ['updated_at'],
   task_waits: ['updated_at'],
   map_layouts: ['updated_at'],
+  world_layouts: ['updated_at'],
   feedback_inbox: ['updated_at'],
   feedback_signals: ['signals', 'updated_at'],
   telegram_bots: ['update_offset'],
