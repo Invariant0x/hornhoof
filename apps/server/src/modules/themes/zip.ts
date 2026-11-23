@@ -72,17 +72,26 @@ async function endRecord(source: ZipSource, limits: ThemeLimits): Promise<{ coun
   const from = Math.max(0, source.size - END_BYTES - LONGEST_COMMENT);
   const tail = await source.read(from, source.size - from);
   for (let at = tail.length - END_BYTES; at >= 0; at -= 1) {
-    if (tail.readUInt32LE(at) !== END) continue;
-    /* The record that ends the archive, comment and all: bytes after it are something the zip does not account for. */
-    if (at + END_BYTES + tail.readUInt16LE(at + 20) !== tail.length) continue;
-    if (tail.readUInt16LE(at + 4) !== 0 || tail.readUInt16LE(at + 6) !== 0) refuse('zip_split');
-    if (at >= 20 && tail.readUInt32LE(at - 20) === ZIP64_LOCATOR) refuse('zip64');
-    const [here, count, size, offset] = [tail.readUInt16LE(at + 8), tail.readUInt16LE(at + 10), tail.readUInt32LE(at + 12), tail.readUInt32LE(at + 16)];
-    if (count === FULL16 || size === FULL32 || offset === FULL32) refuse('zip64');
-    if (here !== count) refuse('zip_split');
-    return { count, size, offset, at: from + at };
+    const end = endAt(tail, at);
+    if (end) return { ...end, at: from + at };
   }
   return refuse('not_zip');
+}
+
+/* The end record at `at` of the archive's tail, when it is the one that ends the archive, comment and all: bytes after it
+   are something the zip does not account for. One of another part, or of ZIP64, refuses the archive. */
+function endAt(tail: Buffer, at: number): { count: number; size: number; offset: number } | null {
+  if (tail.readUInt32LE(at) !== END || at + END_BYTES + tail.readUInt16LE(at + 20) !== tail.length) return null;
+  if (tail.readUInt16LE(at + 4) !== 0 || tail.readUInt16LE(at + 6) !== 0) refuse('zip_split');
+  if (at >= 20 && tail.readUInt32LE(at - 20) === ZIP64_LOCATOR) refuse('zip64');
+  return endFields(tail, at);
+}
+
+function endFields(tail: Buffer, at: number): { count: number; size: number; offset: number } {
+  const [here, count, size, offset] = [tail.readUInt16LE(at + 8), tail.readUInt16LE(at + 10), tail.readUInt32LE(at + 12), tail.readUInt32LE(at + 16)];
+  if (count === FULL16 || size === FULL32 || offset === FULL32) refuse('zip64');
+  if (here !== count) refuse('zip_split');
+  return { count, size, offset };
 }
 
 function pathOf(raw: Buffer, flags: number, limits: ThemeLimits): string {
@@ -100,8 +109,17 @@ function entryAt(directory: Buffer, at: number, limits: ThemeLimits): { entry: E
   const next = at + 46 + nameLength + extraLength + commentLength;
   if (next > directory.length) refuse('zip_corrupt');
   const raw = directory.subarray(at + 46, at + 46 + nameLength);
-  const name = raw.toString(flags & UTF8_NAME ? 'utf8' : 'latin1');
-  const entry: Entry = {
+  const entry = entryFields(directory, at, raw.toString(flags & UTF8_NAME ? 'utf8' : 'latin1'));
+  if (MAC_EXTRA(entry.path)) return { entry, next };
+  wholeEntry(directory, at, entry);
+  entry.path = pathOf(raw, flags, limits);
+  plainEntry(directory, at, entry, flags);
+  return { entry, next };
+}
+
+/* What the central directory says of one file, under its name as written. */
+function entryFields(directory: Buffer, at: number, name: string): Entry {
+  return {
     path: name,
     method: directory.readUInt16LE(at + 10),
     crc: directory.readUInt32LE(at + 16),
@@ -110,16 +128,21 @@ function entryAt(directory: Buffer, at: number, limits: ThemeLimits): { entry: E
     offset: directory.readUInt32LE(at + 42),
     folder: name.endsWith('/'),
   };
-  if (MAC_EXTRA(name)) return { entry, next };
+}
+
+/* A file of one part, in no ZIP64. */
+function wholeEntry(directory: Buffer, at: number, entry: Entry): void {
   if (entry.packed === FULL32 || entry.size === FULL32 || entry.offset === FULL32 || directory.readUInt16LE(at + 34) === FULL16) refuse('zip64');
   if (directory.readUInt16LE(at + 34) !== 0) refuse('zip_split');
-  entry.path = pathOf(raw, flags, limits);
+}
+
+/* A file packed plainly: not encrypted, stored or deflated, and no link. */
+function plainEntry(directory: Buffer, at: number, entry: Entry, flags: number): void {
   if (flags & ENCRYPTED) refuse('zip_encrypted', entry.path);
   if (entry.method !== STORED && entry.method !== DEFLATED) refuse('zip_method', entry.path);
   /* The high byte of "version made by" names the system; on Unix the high half of the outer attributes is the mode. */
   const unixMode = directory.readUInt8(at + 5) === UNIX ? directory.readUInt32LE(at + 38) >>> 16 : 0;
   if ((unixMode & TYPE_BITS) === LINK) refuse('path_link', entry.path);
-  return { entry, next };
 }
 
 function sizeProblem(entry: Entry, limits: ThemeLimits): void {

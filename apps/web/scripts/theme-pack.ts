@@ -14,6 +14,7 @@ import { ru } from '../src/i18n/ru';
 import { BUILTIN_SKINS, type BuiltinSkin, type BuiltinSkinId } from '../src/skins/registry';
 import { dataOfWorldPack } from '../src/world-packs/data-pack';
 import { resolveWorldPack } from '../src/world-packs/registry';
+import type { WorldPackManifest } from '../src/world/manifest';
 
 type Lang = Readonly<{ en: string; ru: string }>;
 /* The words of a world's voice and its era names, as skills/world.json holds them. */
@@ -56,7 +57,15 @@ export function themeArchiveFiles(id: BuiltinSkinId, options: PackOptions = {}):
   delete look.id;
   delete look.world;
   const files = new Map<string, Buffer>();
-  files.set('theme.json', json({
+  files.set('theme.json', json(manifestOf(id, Boolean(pack), options)));
+  files.set('LICENSE', options.licence ? readFileSync(options.licence) : readFileSync(join(REPO, 'LICENSE')));
+  files.set('ui/look.json', json(look));
+  if (pack) for (const [path, bytes] of worldFiles(pack, options)) files.set(path, bytes);
+  return files;
+}
+
+function manifestOf(id: BuiltinSkinId, world: boolean, options: PackOptions): Record<string, unknown> {
+  return {
     format: 1,
     id,
     name: { en: en.skins.names[id], ru: ru.skins.names[id] },
@@ -64,18 +73,19 @@ export function themeArchiveFiles(id: BuiltinSkinId, options: PackOptions = {}):
     version: options.version ?? '1.0.0',
     author: 'Hornhoof',
     license: options.licence ? 'see LICENSE' : 'MIT',
-    contract: pack ? { ui: 1, world: 2 } : { ui: 1 },
-    engine: pack ? 'iso2d' : 'none',
+    contract: world ? { ui: 1, world: 2 } : { ui: 1 },
+    engine: world ? 'iso2d' : 'none',
     languages: ['en', 'ru'],
-  }));
-  files.set('LICENSE', options.licence ? readFileSync(options.licence) : readFileSync(join(REPO, 'LICENSE')));
-  files.set('ui/look.json', json(look));
-  if (pack) {
-    files.set('world/world.json', json(dataOfWorldPack(pack)));
-    for (const [path, bytes] of options.art ? artFiles(options.art) : []) files.set(path, bytes);
-    if (options.voice) files.set('skills/world.json', json(options.voice));
-  }
-  return files;
+  };
+}
+
+/* A world's data, its art when it is given from outside the repository, and its voice. */
+function worldFiles(pack: WorldPackManifest, options: PackOptions): [string, Buffer][] {
+  return [
+    ['world/world.json', json(dataOfWorldPack(pack))],
+    ...(options.art ? artFiles(options.art) : []),
+    ...(options.voice ? [['skills/world.json', json(options.voice)] as [string, Buffer]] : []),
+  ];
 }
 
 /* A plain zip of the files, deflated, with no dates, so the same theme always packs to the same bytes. */

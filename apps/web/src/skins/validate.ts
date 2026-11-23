@@ -237,31 +237,43 @@ const plainColor: EntryCheck<string> = (where, _key, value) => (typeof value ===
 function checkTerminal(raw: unknown): SkinError | null {
   if (!isObject(raw)) return problem('not_object', 'terminal');
   for (const key of Object.keys(raw)) {
-    const found = checkEntry('terminal', TERMINAL_KEYS, key, raw[key], (where, name, value) => {
-      if (name !== 'ansi') return plainColor(where, name, value);
-      return Array.isArray(value) && value.length === ANSI_COLORS && value.every(color => typeof color === 'string' && readColor(color)) ? null : problem('bad_color', where);
-    });
+    const found = checkEntry('terminal', TERMINAL_KEYS, key, raw[key], terminalColor);
     if (found) return found;
   }
   return raw.bg === undefined ? problem('missing', 'terminal.bg') : raw.ink === undefined ? problem('missing', 'terminal.ink') : null;
 }
 
+/* A colour of the terminal, and its 16 ANSI colours as one list. */
+function terminalColor(where: string, name: (typeof TERMINAL_KEYS)[number], value: unknown): SkinError | null {
+  if (name !== 'ansi') return plainColor(where, name, value);
+  return Array.isArray(value) && value.length === ANSI_COLORS && value.every(color => typeof color === 'string' && readColor(color)) ? null : problem('bad_color', where);
+}
+
+/* A field of a look held to what it takes: missing when a look needs it, refused with its own code when it holds another
+   value. */
+const needed = (key: string, holds: (value: unknown) => boolean, bad: SkinErrorCode): Check => raw => (raw[key] === undefined ? problem('missing', key) : holds(raw[key]) ? null : problem(bad, key));
+const optional = (key: string, holds: (value: unknown) => boolean, bad: SkinErrorCode): Check => raw => (raw[key] === undefined || holds(raw[key]) ? null : problem(bad, key));
+const isShape = (value: unknown) => (CUT_SHAPES as readonly unknown[]).includes(value);
+const isPulse = (value: unknown) => typeof value === 'number' && value > 0 && value <= 1;
+const isSurface = (value: unknown) => (SURFACE_STYLES as readonly unknown[]).includes(value);
+
+function strangerField(raw: Raw): SkinError | null {
+  const extra = Object.keys(raw).find(key => !LOOK_FIELDS.includes(key));
+  return extra === undefined ? null : stranger(extra, extra);
+}
+
 function lookChecks(families: readonly string[]): Check[] {
-  const optional = (key: string, check: Check): Check => raw => (raw[key] === undefined ? null : check(raw));
   return [
-    raw => {
-      const extra = Object.keys(raw).find(key => !LOOK_FIELDS.includes(key));
-      return extra === undefined ? null : stranger(extra, extra);
-    },
-    raw => (raw.scheme === undefined ? problem('missing', 'scheme') : isScheme(raw.scheme) ? null : problem('bad_scheme', 'scheme')),
+    strangerField,
+    needed('scheme', isScheme, 'bad_scheme'),
     raw => checkGroup(raw.colors, 'colors', COLOR_ROLES, checkColor),
     raw => checkGroup(raw.fonts, 'fonts', FONT_ROLES, lookFonts(families)),
-    raw => (raw.cut === undefined ? problem('missing', 'cut') : isCut(raw.cut) ? null : problem('bad_cut', 'cut')),
-    raw => (raw.shape === undefined ? problem('missing', 'shape') : (CUT_SHAPES as readonly unknown[]).includes(raw.shape) ? null : problem('bad_shape', 'shape')),
-    optional('pulse', raw => (typeof raw.pulse === 'number' && raw.pulse > 0 && raw.pulse <= 1 ? null : problem('bad_pulse', 'pulse'))),
-    optional('surface', raw => ((SURFACE_STYLES as readonly unknown[]).includes(raw.surface) ? null : problem('bad_surface', 'surface'))),
-    optional('worldColors', raw => checkGroup(raw.worldColors, 'worldColors', WORLD_COLOR_ROLES, plainColor)),
-    optional('terminal', raw => checkTerminal(raw.terminal)),
+    needed('cut', isCut, 'bad_cut'),
+    needed('shape', isShape, 'bad_shape'),
+    optional('pulse', isPulse, 'bad_pulse'),
+    optional('surface', isSurface, 'bad_surface'),
+    raw => (raw.worldColors === undefined ? null : checkGroup(raw.worldColors, 'worldColors', WORLD_COLOR_ROLES, plainColor)),
+    raw => (raw.terminal === undefined ? null : checkTerminal(raw.terminal)),
     checkContrast,
   ];
 }

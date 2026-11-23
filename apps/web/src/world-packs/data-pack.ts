@@ -27,15 +27,18 @@ function tileOverride(kind: TerrainKindSpec, raw: unknown, errors: string[]): Te
   }
   const extra = Object.keys(raw).find(key => key !== 'label' && key !== 'color');
   if (extra) errors.push(`recipe.tiles.${kind.id} has an unknown field "${extra}"`);
-  const label = raw.label;
-  if (label !== undefined && !(isObject(label) && isLabel(label.en) && isLabel(label.ru) && Object.keys(label).length === 2)) errors.push(`recipe.tiles.${kind.id}.label needs en and ru, each 1 to ${LABEL} characters`);
-  if (raw.color !== undefined && !(typeof raw.color === 'string' && COLOR.test(raw.color))) errors.push(`recipe.tiles.${kind.id}.color needs #RRGGBB`);
+  if (!labelHolds(raw.label)) errors.push(`recipe.tiles.${kind.id}.label needs en and ru, each 1 to ${LABEL} characters`);
+  if (!colorHolds(raw.color)) errors.push(`recipe.tiles.${kind.id}.color needs #RRGGBB`);
   return {
     ...kind,
-    ...(isObject(label) ? { label: { en: String(label.en), ru: String(label.ru) } } : {}),
+    ...(isObject(raw.label) ? { label: { en: String(raw.label.en), ru: String(raw.label.ru) } } : {}),
     ...(typeof raw.color === 'string' ? { color: raw.color } : {}),
   };
 }
+
+/* A tile kind's own words, when the world gives them: English and Russian, each a label. */
+const labelHolds = (label: unknown) => label === undefined || (isObject(label) && isLabel(label.en) && isLabel(label.ru) && Object.keys(label).length === 2);
+const colorHolds = (color: unknown) => color === undefined || (typeof color === 'string' && COLOR.test(color));
 
 /* The shipped recipe a world names, with its tile kinds renamed and recoloured as the world says. */
 function recipeOf(raw: unknown, errors: string[]): TerrainRecipeSpec | null {
@@ -50,7 +53,11 @@ function recipeOf(raw: unknown, errors: string[]): TerrainRecipeSpec | null {
     errors.push(`recipe.use must be one of ${shippedRecipeIds().join(', ')}`);
     return null;
   }
-  const tiles = raw.tiles === undefined ? {} : raw.tiles;
+  return withTiles(shipped, raw.tiles === undefined ? {} : raw.tiles, errors);
+}
+
+/* A shipped recipe with the tile kinds the world renames and recolours; it brings no kind of its own. */
+function withTiles(shipped: TerrainRecipeSpec, tiles: unknown, errors: string[]): TerrainRecipeSpec {
   if (!isObject(tiles)) {
     errors.push('recipe.tiles must be an object of tile kinds');
     return shipped;
@@ -60,7 +67,6 @@ function recipeOf(raw: unknown, errors: string[]): TerrainRecipeSpec | null {
   return { ...shipped, tileKinds: shipped.tileKinds.map(kind => (kind.id in tiles ? tileOverride(kind, tiles[kind.id], errors) : kind)) };
 }
 
-/* The pack of a world written as data, under the theme's id, its art at baseUrl, checked as the shipped packs are. */
 /* What a world written as data stays within, so an archive never asks a browser for more than a city's work: the map and
    its chunks, the zoom, the tile pictures and every other number. Hornhoof's packs are 150 tiles in chunks of 4, and
    no number of theirs is over 5200. */
@@ -74,45 +80,65 @@ const numberAt = (raw: unknown, ...path: string[]): number | undefined => {
   return typeof value === 'number' ? value : undefined;
 };
 
-function boundsErrors(raw: Raw): string[] {
-  const B = WORLD_DATA_BOUNDS;
+const boundsErrors = (raw: Raw): string[] => [...numberErrors(raw), ...gridErrors(raw), ...zoomErrors(raw), ...tileErrors(raw)];
+
+/* Every number anywhere in the world, its place said. */
+function numberErrors(raw: Raw): string[] {
   const errors: string[] = [];
   const stack: [unknown, string][] = [[raw, '']];
   for (let next = stack.pop(); next; next = stack.pop()) {
     const [value, at] = next;
-    if (typeof value === 'number' && !(Math.abs(value) <= B.anyNumber)) errors.push(`${at} is beyond ${B.anyNumber}`);
+    if (typeof value === 'number' && !(Math.abs(value) <= WORLD_DATA_BOUNDS.anyNumber)) errors.push(`${at} is beyond ${WORLD_DATA_BOUNDS.anyNumber}`);
     else if (typeof value === 'object' && value !== null) for (const [key, inner] of Object.entries(value)) stack.push([inner, at ? `${at}.${key}` : key]);
   }
-  const mapSize = numberAt(raw, 'mapSize') ?? 0;
-  const chunkSize = numberAt(raw, 'params', 'chunkSize') ?? 0;
-  if (mapSize > B.mapSize) errors.push(`mapSize is at most ${B.mapSize} tiles`);
-  if (chunkSize < B.chunkSize[0] || chunkSize > B.chunkSize[1]) errors.push(`params.chunkSize is from ${B.chunkSize[0]} to ${B.chunkSize[1]} tiles`);
-  else if (Math.ceil(mapSize / chunkSize) > B.chunksPerSide) errors.push(`the map is at most ${B.chunksPerSide} chunks a side: mapSize / params.chunkSize`);
-  for (const zoom of ['minZoom', 'defaultZoom', 'maxZoom']) {
-    const value = numberAt(raw, 'camera', zoom);
-    if (value !== undefined && (value < B.zoom[0] || value > B.zoom[1])) errors.push(`camera.${zoom} is from ${B.zoom[0]} to ${B.zoom[1]}`);
-  }
-  const projection = isObject(raw.projection) ? raw.projection : {};
-  const lods = Array.isArray(projection.lods) ? projection.lods : [];
-  if (lods.length > B.lods) errors.push(`projection.lods has at most ${B.lods} tiers`);
-  for (const [at, value] of [['projection.defaultTileW', projection.defaultTileW], ...lods.map((lod, n) => [`projection.lods.${n}.tileW`, isObject(lod) ? lod.tileW : undefined])] as [string, unknown][]) {
-    if (typeof value === 'number' && value > B.tileW) errors.push(`${at} is at most ${B.tileW} px`);
-  }
-  const texels = numberAt(raw, 'terrainArt', 'texelsPerTile');
-  if (texels !== undefined && texels > B.texelsPerTile) errors.push(`terrainArt.texelsPerTile is at most ${B.texelsPerTile}`);
   return errors;
 }
 
+/* The map, its chunks and how many of them a side. */
+function gridErrors(raw: Raw): string[] {
+  const B = WORLD_DATA_BOUNDS;
+  const mapSize = numberAt(raw, 'mapSize') ?? 0;
+  const chunkSize = numberAt(raw, 'params', 'chunkSize') ?? 0;
+  const errors = mapSize > B.mapSize ? [`mapSize is at most ${B.mapSize} tiles`] : [];
+  if (chunkSize < B.chunkSize[0] || chunkSize > B.chunkSize[1]) errors.push(`params.chunkSize is from ${B.chunkSize[0]} to ${B.chunkSize[1]} tiles`);
+  else if (Math.ceil(mapSize / chunkSize) > B.chunksPerSide) errors.push(`the map is at most ${B.chunksPerSide} chunks a side: mapSize / params.chunkSize`);
+  return errors;
+}
+
+function zoomErrors(raw: Raw): string[] {
+  const [least, most] = WORLD_DATA_BOUNDS.zoom;
+  return ['minZoom', 'defaultZoom', 'maxZoom']
+    .filter(zoom => !inRange(numberAt(raw, 'camera', zoom), least, most))
+    .map(zoom => `camera.${zoom} is from ${least} to ${most}`);
+}
+
+const inRange = (value: number | undefined, least: number, most: number) => value === undefined || (value >= least && value <= most);
+
+/* The tile pictures: how many tiers, how wide each, and how many texels a tile of the painted ground takes. */
+function tileErrors(raw: Raw): string[] {
+  const B = WORLD_DATA_BOUNDS;
+  const projection = isObject(raw.projection) ? raw.projection : {};
+  const lods = Array.isArray(projection.lods) ? projection.lods : [];
+  const errors = lods.length > B.lods ? [`projection.lods has at most ${B.lods} tiers`] : [];
+  const widths: [string, unknown][] = [['projection.defaultTileW', projection.defaultTileW], ...lods.map((lod, n): [string, unknown] => [`projection.lods.${n}.tileW`, isObject(lod) ? lod.tileW : undefined])];
+  errors.push(...widths.filter(([, value]) => !inRange(typeof value === 'number' ? value : undefined, -Infinity, B.tileW)).map(([at]) => `${at} is at most ${B.tileW} px`));
+  if (!inRange(numberAt(raw, 'terrainArt', 'texelsPerTile'), -Infinity, B.texelsPerTile)) errors.push(`terrainArt.texelsPerTile is at most ${B.texelsPerTile}`);
+  return errors;
+}
+
+/* The pack of a world written as data, under the theme's id, its art at baseUrl, checked as the shipped packs are. */
 export function worldPackOfData(id: string, raw: unknown, baseUrl: string): Built {
   if (!isObject(raw)) return { ok: false, errors: ['world.json must be an object'] };
-  const errors: string[] = [];
-  for (const key of Object.keys(raw)) if (!FIELDS.includes(key)) errors.push(key === 'id' ? 'id is the theme\'s own: leave it out' : `world.json has an unknown field "${key}"`);
+  const errors = Object.keys(raw).filter(key => !FIELDS.includes(key)).map(key => (key === 'id' ? 'id is the theme\'s own: leave it out' : `world.json has an unknown field "${key}"`));
   errors.push(...boundsErrors(raw));
   const recipe = recipeOf(raw.recipe, errors);
   if (raw.art !== undefined && !isObject(raw.art)) errors.push('art must be the art catalog object');
   if (errors.length || !recipe) return { ok: false, errors };
   const fields = Object.fromEntries(Object.entries(raw).filter(([key]) => key !== 'recipe'));
-  const pack = { ...fields, id, terrainRecipe: recipe, ...(isObject(raw.art) ? { art: { ...raw.art, baseUrl } } : {}) } as unknown as WorldPackManifest;
+  return checkedPack({ ...fields, id, terrainRecipe: recipe, ...(isObject(raw.art) ? { art: { ...raw.art, baseUrl } } : {}) } as unknown as WorldPackManifest);
+}
+
+function checkedPack(pack: WorldPackManifest): Built {
   try {
     const checked = validateWorldPack(pack);
     return checked.ok ? { ok: true, pack } : { ok: false, errors: [...checked.errors] };
