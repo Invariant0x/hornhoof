@@ -194,12 +194,13 @@ function SkinCard({ card, on, canDelete, onApply, onDownload, onRemove }: CardPr
       {asking && (
         <div className="skin-confirm" role="group" aria-label={words.archive.deleteConfirm(card.name)}>
           <p>{words.archive.deleteConfirm(card.name)}</p>
+          {/* The action that deletes is told by its verb and its place, last in the row (Design, #1970). */}
           <div className="entry-actions">
-            <button className="btn small danger" type="button" autoFocus onClick={() => { setAsking(false); onRemove(); }}>
-              {words.archive.deleteYes}
-            </button>
             <button className="btn small ghost" type="button" onClick={() => setAsking(false)}>
               {words.archive.deleteNo}
+            </button>
+            <button className="btn small danger" type="button" autoFocus onClick={() => { setAsking(false); onRemove(); }}>
+              {words.archive.deleteYes}
             </button>
           </div>
         </div>
