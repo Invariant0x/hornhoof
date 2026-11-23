@@ -5,7 +5,7 @@
    and pending God's Word relocation overlays. Contains zero theme-specific words. */
 
 import type { WorldMode } from '@hornhoof/protocol/world';
-import type { Graphics } from 'pixi.js';
+import { Matrix, type Graphics, type Sprite } from 'pixi.js';
 import { artFootprintCentre, resolveBuildingArt, type BuildingArt } from './art';
 import { parseArtTint, type DisplayRunPool, type WorldArtLibrary } from './art-runtime';
 import { cityDepthY, type CityBuilding, type CityState, type RoadTier } from './city-layout';
@@ -43,7 +43,46 @@ export type CityArtContext = Readonly<{
   upgradingHouseIds?: ReadonlySet<string>;
   /* Streets are painted on the ground (road-strips.ts): draw only the bridges. */
   paintedRoads?: boolean;
+  /* Filled with the swaying layers drawn, for the per-frame wind pass (swayBuildingLayers). */
+  swaying?: SwayingLayer[];
 }>;
+
+/* A building layer that sways about a fixed line, as placed by the last city pass. */
+export type SwayingLayer = {
+  sprite: Sprite;
+  scale: number;
+  /* World position of the layer's picture pixel (0, 0). */
+  originX: number;
+  originY: number;
+  ax: number;
+  ay: number;
+  /* Unit normal of the fixed line, pointing to the side that hangs free. */
+  nx: number;
+  ny: number;
+  amplitude: number;
+  phase: number;
+};
+
+/* Moves every swaying layer for the wind at `timeSec`: a pixel shifts down or up by the amplitude times its distance
+   from the fixed line, so the line itself stays put and the free edge lifts and drops. Gusts are two slow waves. */
+export function swayBuildingLayers(layers: readonly SwayingLayer[], timeSec: number): void {
+  const m = SWAY_MATRIX;
+  for (const l of layers) {
+    if (l.sprite.destroyed) continue;
+    const w = 0.65 * Math.sin(timeSec * 2.4 + l.phase) + 0.35 * Math.sin(timeSec * 6.3 + l.phase * 2.1);
+    const k = l.amplitude * w;
+    m.set(l.scale, l.scale * k * l.nx, 0, l.scale * (1 + k * l.ny), l.originX, l.originY - l.scale * k * (l.nx * l.ax + l.ny * l.ay));
+    l.sprite.setFromMatrix(m);
+  }
+}
+const SWAY_MATRIX = new Matrix();
+
+/* A steady phase in [0, 2pi) per building, so neighbouring awnings do not flap in step. */
+function hashPhase(id: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+  return ((h >>> 0) / 4294967296) * Math.PI * 2;
+}
 
 const DEPARTMENT_BANNER_COLOR = '#5CA6E6';
 
@@ -824,6 +863,23 @@ function drawBuildingArtPixi(
     sprite.scale.set(s);
     sprite.position.set(centre.x + layer.offset.x * s, centre.y + layer.offset.y * s);
     if (layer.tint) sprite.tint = parseArtTint(layer.tint);
+    if (layer.blend === 'multiply') sprite.blendMode = 'multiply';
+    if (layer.sway && ctx.swaying) {
+      const { a, b: pb, amplitude } = layer.sway;
+      const len = Math.max(1e-6, Math.hypot(pb.x - a.x, pb.y - a.y));
+      /* The free side hangs toward the viewer: the normal that points down the screen. */
+      let nx = -(pb.y - a.y) / len;
+      let ny = (pb.x - a.x) / len;
+      if (ny < 0) {
+        nx = -nx;
+        ny = -ny;
+      }
+      sprite.anchor.set(0, 0);
+      const originX = centre.x + (layer.offset.x - layer.anchor.x) * s;
+      const originY = centre.y + (layer.offset.y - layer.anchor.y) * s;
+      sprite.position.set(originX, originY);
+      ctx.swaying.push({ sprite, scale: s, originX, originY, ax: a.x, ay: a.y, nx, ny, amplitude, phase: hashPhase(b.id) });
+    }
   });
   if (b.resting) {
     const top = art.passport.topAnchor ?? { x: art.passport.groundAnchor.x, y: 0 };
@@ -849,6 +905,7 @@ export function renderCityToPixi(
   g.clear();
   art?.pool.begin();
   if (art) art.library.stats.buildingsDrawn = 0;
+  if (art?.swaying) art.swaying.length = 0;
   const artIndex = art?.library.index ?? null;
   const { city } = state;
   const districtColors = state.districtColors ?? {};

@@ -182,6 +182,8 @@ export class DisplayRunPool {
     s.tint = 0xffffff;
     s.alpha = 1;
     s.rotation = 0;
+    s.skew.set(0, 0);
+    s.blendMode = 'normal';
     s.visible = true;
     this.place(s);
     return s;

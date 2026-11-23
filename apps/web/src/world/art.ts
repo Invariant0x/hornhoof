@@ -8,16 +8,17 @@
 import type { BuildingKind, CityBuilding } from './city-layout';
 import { resolveStageSpecForBuilding, type BuildingConstructionState } from './construction';
 import { tileTopVertexToWorld, type Point2D } from './coords';
-import type {
-  BuildingLoopKind,
-  ConstructionStageId,
-  FootprintKey,
-  UniqueRenderAngle5,
-  WorldPackManifest,
+import {
+  CONSTRUCTION_STAGE_IDS,
+  type BuildingLoopKind,
+  type ConstructionStageId,
+  type FootprintKey,
+  type UniqueRenderAngle5,
+  type WorldPackManifest,
 } from './manifest';
 import type { ResidentEntity, ResidentPose } from './residents';
 
-export const ART_CONTRACT_VERSION = 1;
+export const ART_CONTRACT_VERSION = 2;
 export const ART_INDEX_FILE = 'art-index.json';
 /* Two pixels of slack on master 4x geometry: one pixel of anti-aliasing on each side. */
 export const ART_GEOMETRY_TOLERANCE_PX = 2;
@@ -59,6 +60,21 @@ export type BuildingPicturePassport = Readonly<{
   /* Top centre (apex, spire, chimney) where a capstone or a top loop attaches. */
   topAnchor?: ArtPoint;
   workSlots?: readonly ArtWorkSlotSpec[];
+  /* Pictures on the same canvas drawn over this one, in order (contract section 4, layers). */
+  layers?: readonly ArtLayerSpec[];
+}>;
+
+/* One layer over a building picture: a file beside it on the same canvas and registration. A shadow layer multiplies
+   the ground and walls under it; a swaying layer (awning, cloth) moves in the wind about a line where it is fixed. */
+export type ArtLayerSpec = Readonly<{
+  file: string;
+  blend?: 'multiply';
+  sway?: Readonly<{
+    /* Two points of the line the layer hangs from; the cloth on the far side of it sways. */
+    pivot: readonly [ArtPoint, ArtPoint];
+    /* Vertical shift of a pixel per pixel of distance from the line at the strongest gust (default 0.03). */
+    amplitude?: number;
+  }>;
 }>;
 
 /* Passport of a small attached picture (flag, capstone): the point that touches its parent. */
@@ -127,6 +143,10 @@ export const STANDARD_BUILDING_PICTURES = [
 ] as const;
 export type BuildingPictureName = (typeof STANDARD_BUILDING_PICTURES)[number];
 const OPTIONAL_BUILDING_PICTURES: ReadonlySet<string> = new Set(['upgraded', 'annex']);
+/* Construction stage a contract 1 picture shows; a step's own stage_NN picture stands in for it. */
+const STAGE_OF_PICTURE: Readonly<Partial<Record<BuildingPictureName, number>>> = { low_walls_open: 3, full_walls: 5, roof_beams: 6, roof: 7 };
+/* Demolition of a step drawn by the artist: half torn down, then rubble. */
+export const DEMOLITION_PICTURES = ['demol_01', 'demol_02'] as const;
 
 export const CONSTRUCTION_MODULES = ['stakes', 'foundation', 'scaffold_back', 'scaffold_front', 'ramp'] as const;
 const OPTIONAL_MODULES: ReadonlySet<string> = new Set(['scaffold_back']);
@@ -199,6 +219,8 @@ export type DeclaredArtFile = Readonly<{
   role: DeclaredArtRole;
   passport: 'picture' | 'anchor' | 'sheet' | 'none';
   required: boolean;
+  /* A required picture another file stands in for: with that file in the folder this one is not needed. */
+  alternative?: string;
   /* For a cloak layer: the base sheet it must match pixel for pixel. */
   baseSheet?: string;
 }>;
@@ -252,12 +274,23 @@ export function declaredArtFiles(pack: WorldPackManifest): readonly DeclaredArtF
       moduleFootprints.add(step.footprint);
       for (const picture of STANDARD_BUILDING_PICTURES) {
         if (kind === 'supply' && picture === 'complete') continue;
+        const stage = STAGE_OF_PICTURE[picture];
         out.push({
           path: stepPicturePath(kind, step, picture),
           role: 'building',
           passport: 'picture',
           required: !OPTIONAL_BUILDING_PICTURES.has(picture),
+          ...(stage ? { alternative: stepPicturePath(kind, step, `stage_${pad2(stage)}`) } : {}),
         });
+      }
+      /* Contract 2: the whole construction line drawn on the step's own canvas, and its demolition. */
+      if (kind !== 'supply') {
+        for (let n = 1; n <= pack.stageCounts.construction; n++) {
+          out.push({ path: stepPicturePath(kind, step, `stage_${pad2(n)}`), role: 'building', passport: 'picture', required: false });
+        }
+        for (const picture of DEMOLITION_PICTURES) {
+          out.push({ path: stepPicturePath(kind, step, picture), role: 'building', passport: 'picture', required: false });
+        }
       }
       if (kind === 'supply') {
         for (let f = 0; f < SUPPLY_FILL_LEVELS; f++) {
@@ -375,6 +408,34 @@ function checkPicture(
       break;
     }
   }
+  if (p.layers !== undefined && !Array.isArray(p.layers)) errors.push(`${path}: layers must be a list`);
+  for (const layer of Array.isArray(p.layers) ? p.layers : []) {
+    if (!layer || typeof layer.file !== 'string' || !LAYER_FILE.test(layer.file) || layer.file.includes('..')) {
+      errors.push(`${path}: every layer needs a file, a png beside the picture`);
+      continue;
+    }
+    if (layer.blend !== undefined && layer.blend !== 'multiply') errors.push(`${path}: layer ${layer.file} blend must be multiply`);
+    if (layer.sway !== undefined) {
+      const pv = layer.sway.pivot;
+      const amp = layer.sway.amplitude;
+      if (!Array.isArray(pv) || pv.length !== 2 || !pv.every(pt => isPoint(pt) && pointInside(pt, entry.w, entry.h))) {
+        errors.push(`${path}: layer ${layer.file} sway needs two pivot points inside the picture`);
+      } else if (Math.hypot(pv[1]!.x - pv[0]!.x, pv[1]!.y - pv[0]!.y) < 1) {
+        errors.push(`${path}: layer ${layer.file} sway pivot points must differ`);
+      }
+      if (amp !== undefined && !(isFiniteNum(amp) && amp > 0 && amp <= 0.2)) {
+        errors.push(`${path}: layer ${layer.file} sway amplitude must be above 0 and at most 0.2`);
+      }
+    }
+  }
+}
+
+/* A layer's file name: a png in the picture's folder or below it. */
+const LAYER_FILE = /^[\w-][\w./-]*\.png$/;
+
+/* Path of a layer file named in a picture's passport: beside the picture. */
+export function artLayerPath(picturePath: string, file: string): string {
+  return picturePath.slice(0, picturePath.lastIndexOf('/') + 1) + file;
 }
 
 function checkSheet(path: string, entry: ArtIndexEntry, rows: number | null, errors: string[]): void {
@@ -420,8 +481,24 @@ export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtI
     for (const step of steps ?? []) footprintOf.set(`buildings/${kindKey}/${step.id}/`, step.footprint);
   }
 
+  /* Layer files are declared by the passports that name them and must match their picture's canvas. */
+  const layerOf = new Map<string, string>();
+  for (const [path, entry] of Object.entries(index.files)) {
+    const layers = (entry.passport as BuildingPicturePassport | undefined)?.layers;
+    if (!byPath.has(path) || !Array.isArray(layers)) continue;
+    for (const layer of layers) {
+      if (typeof layer?.file !== 'string') continue;
+      const lp = artLayerPath(path, layer.file);
+      const le = index.files[lp];
+      if (!le) errors.push(`${path}: layer ${layer.file} is not in the folder`);
+      else if (le.w !== entry.w || le.h !== entry.h) errors.push(`${lp}: a layer must be the same size as ${path} (${entry.w} x ${entry.h})`);
+      layerOf.set(lp, path);
+    }
+  }
+
   for (const [path, entry] of Object.entries(index.files)) {
     const slot = byPath.get(path);
+    if (!slot && layerOf.has(path)) continue;
     if (!slot) {
       warnings.push(`${path}: not declared by the pack catalog, the engine will not draw it`);
       continue;
@@ -452,7 +529,9 @@ export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtI
     }
   }
 
-  const missingRequired = declared.filter(d => d.required && !index.files[d.path]).map(d => d.path);
+  const missingRequired = declared
+    .filter(d => d.required && !index.files[d.path] && !(d.alternative && index.files[d.alternative]))
+    .map(d => d.path);
   return {
     ok: errors.length === 0,
     errors,
@@ -501,6 +580,9 @@ export type BuildingArtLayer = Readonly<{
   /* Art pixels from the building ground point (main picture groundAnchor) to this layer's anchor. */
   offset: ArtPoint;
   tint?: string;
+  blend?: 'multiply';
+  /* Sways about the line a-b (picture pixels), by up to `amplitude` pixels per pixel away from it. */
+  sway?: Readonly<{ a: ArtPoint; b: ArtPoint; amplitude: number }>;
 }>;
 
 export type BuildingArt = Readonly<{
@@ -566,6 +648,26 @@ function attachedLayer(
     offset: { x: at.x - main.groundAnchor.x, y: at.y - main.groundAnchor.y },
     ...(tint ? { tint } : {}),
   };
+}
+
+/* A picture's own layers from its passport, on its canvas; a layer whose file is not in the folder is left out. */
+function passportLayers(files: ArtIndex['files'], path: string, main: BuildingPicturePassport): BuildingArtLayer[] {
+  const out: BuildingArtLayer[] = [];
+  for (const spec of Array.isArray(main.layers) ? main.layers : []) {
+    if (typeof spec?.file !== 'string' || !LAYER_FILE.test(spec.file) || spec.file.includes('..')) continue;
+    const lp = artLayerPath(path, spec.file);
+    const entry = files[lp];
+    if (!entry) continue;
+    out.push({
+      path: lp,
+      frame: { x: 0, y: 0, w: entry.w, h: entry.h },
+      anchor: { x: main.groundAnchor.x, y: main.groundAnchor.y },
+      offset: { x: 0, y: 0 },
+      ...(spec.blend ? { blend: spec.blend } : {}),
+      ...(spec.sway ? { sway: { a: spec.sway.pivot[0], b: spec.sway.pivot[1], amplitude: spec.sway.amplitude ?? 0.03 } } : {}),
+    });
+  }
+  return out;
 }
 
 function hasPicturePassport(entry: ArtIndexEntry | undefined): entry is ArtIndexEntry & { passport: BuildingPicturePassport } {
@@ -663,13 +765,29 @@ export function resolveBuildingArt(
     mainPath = base(picture);
     const entry = files[mainPath];
     if (!hasPicturePassport(entry)) return null;
-    layers.push(pictureLayer(mainPath, entry));
+    layers.push(pictureLayer(mainPath, entry), ...passportLayers(files, mainPath, entry.passport));
     pushFlag(art, files, building, entry.passport, layers, options);
     return finish(layers, mainPath);
   }
 
   const spec = resolveStageSpecForBuilding(building, job, pack);
   const rule = art.stagePictures?.[spec.id] ?? DEFAULT_STAGE_PICTURES[spec.id];
+
+  /* Contract 2: the step's own pictures. Demolition shows the building half torn down, then its rubble; a stage
+     before the finished building shows its own picture of that stage, scaffolding and ramps drawn in it or not. */
+  const own = (path: string): BuildingArt | null => {
+    const entry = files[path];
+    if (!hasPicturePassport(entry)) return null;
+    return finish([pictureLayer(path, entry), ...passportLayers(files, path, entry.passport)], path);
+  };
+  if (job.phase === 'demolishing' && files[base('demol_01')] && files[base('demol_02')]) {
+    return own(base(job.currentStage > job.maxStage / 2 ? 'demol_01' : 'demol_02'));
+  }
+  const stageNo = CONSTRUCTION_STAGE_IDS.indexOf(spec.id) + 1;
+  const stagePath = base(`stage_${pad2(stageNo)}`);
+  if (spec.id !== 'complete' && spec.id !== 'upgraded' && building.kind !== 'supply' && files[stagePath]) {
+    return own(stagePath);
+  }
 
   if (rule.module) {
     mainPath = modulePath(footprint, rule.module);
@@ -699,6 +817,7 @@ export function resolveBuildingArt(
   };
   if (scaffold) pushModule('scaffold_back');
   layers.push(pictureLayer(mainPath, mainEntry, cutY));
+  if (cutY === undefined) layers.push(...passportLayers(files, mainPath, mainEntry.passport));
   if (spec.hasRamp) pushModule('ramp');
   if (scaffold) pushModule('scaffold_front');
 

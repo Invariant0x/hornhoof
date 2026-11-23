@@ -37,7 +37,9 @@ import type { AnimationDetailLevel, LodTierId, LodTierSpec, TileSlotSpec, WorldP
 import {
   renderCityFallback2D,
   renderCityToPixi,
+  swayBuildingLayers,
   type CityArtContext,
+  type SwayingLayer,
   type CityRenderState,
   type RelocationTargetPreview,
   type TileWindow,
@@ -266,6 +268,8 @@ export class IsometricWorldEngine {
   private plantRenderer: PlantRenderer | null = null;
   private plantCoverKey = 'none';
   private readonly roadPainter = new RoadStripPainter();
+  /* Awnings and cloth of the building pictures drawn by the last city pass, moved every frame by the wind. */
+  private readonly swayingLayers: SwayingLayer[] = [];
   /* A fixed wind clock in seconds for steady shots and video; null follows real time. */
   private windClockSec: number | null = null;
 
@@ -465,7 +469,7 @@ export class IsometricWorldEngine {
       this.residentsGraphic = residentsGraphic;
       this.residentArtPool = new DisplayRunPool(residentArtLayer, depthLayer);
       this.constructionGraphic = constructionGraphic;
-      this.loopArtPool = new DisplayRunPool(loopArtLayer);
+      this.loopArtPool = new DisplayRunPool(loopArtLayer, depthLayer);
       this.departmentFocusGraphic = departmentFocusGraphic;
       this.borderGraphic = borderGraphic;
       this.overlayGraphic = overlayGraphic;
@@ -511,6 +515,7 @@ export class IsometricWorldEngine {
       pool: this.buildingArtPool,
       upgradingHouseIds: this.residentSim?.scaffoldingHouseIds,
       paintedRoads: this.roadPainter.ready,
+      swaying: this.swayingLayers,
     };
   }
 
@@ -520,7 +525,7 @@ export class IsometricWorldEngine {
   }
 
   private loopArtContext(): LoopArtContext | null {
-    if (!this.loopArtPool || !this.pack.art) return null;
+    if (!this.loopArtPool) return null;
     return { library: this.artLibrary, pool: this.loopArtPool };
   }
 
@@ -1347,6 +1352,9 @@ export class IsometricWorldEngine {
     if (needsSync) {
       this.syncScene(BAKE_BUDGET_MS);
     }
+    /* Awnings and cloth of the buildings in view move with the wind, after the city pass that placed them. */
+    const swayAnimated = Boolean(this.app) && this.swayingLayers.length > 0;
+    if (swayAnimated) swayBuildingLayers(this.swayingLayers, this.windTime());
     if (
       this.app &&
       ((this.residentsGraphic && this.residentSim && (residentsAnimated || needsSync)) ||
@@ -1386,7 +1394,7 @@ export class IsometricWorldEngine {
         );
       }
     }
-    if (this.app && (needsSync || liquidAnimated || residentsAnimated || constructionAnimated || plantsAnimated)) {
+    if (this.app && (needsSync || liquidAnimated || residentsAnimated || constructionAnimated || plantsAnimated || swayAnimated)) {
       this.app.render();
     }
     this.lastCpuStepMs = performance.now() - stepStart;

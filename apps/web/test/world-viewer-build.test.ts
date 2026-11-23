@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { copyArt, missingArt, packFolder, prepareOutDir } from '../scripts/build-world-viewer';
+import { ART_CONTRACT_VERSION } from '../src/world/art';
 
 /* The build of the static map viewer: which art goes beside the page, and the one archive it ships as. */
 
@@ -41,7 +42,7 @@ describe('the art beside the page', () => {
     expect(readFileSync(join(out, 'ground/edges/river_bank.png'), 'utf8')).toBe('edge');
     expect(existsSync(join(out, 'ground/README.md'))).toBe(false);
     expect(existsSync(join(out, 'SOURCES.md'))).toBe(false);
-    expect(JSON.parse(readFileSync(join(out, 'art-index.json'), 'utf8'))).toEqual({ contract: 1, pack: 'egypt', files: {} });
+    expect(JSON.parse(readFileSync(join(out, 'art-index.json'), 'utf8'))).toEqual({ contract: ART_CONTRACT_VERSION, pack: 'egypt', files: {} });
   });
 });
 

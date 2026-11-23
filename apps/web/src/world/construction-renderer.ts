@@ -9,7 +9,7 @@
 import type { Graphics } from 'pixi.js';
 import { masterTileW, resolveBuildingArt, type ArtPoint, type LoopAttachPoint, type SheetPassport } from './art';
 import type { DisplayRunPool, WorldArtLibrary } from './art-runtime';
-import type { CityBuilding, CityState } from './city-layout';
+import { cityDepthY, type CityBuilding, type CityState } from './city-layout';
 import {
   buildingLoopsFor,
   resolveStageSpecForBuilding,
@@ -528,6 +528,9 @@ export function renderConstructionLoopsToPixi(
 
     const loops = buildingLoopsFor(building, state, pack);
     const anchors = art ? artLoopAnchors(art, building, state, pack, ctr, tileW) : null;
+    /* With a depth-sorted pool the loops sit just over their own building, so a building in front hides them too. */
+    if (art) art.pool.depth = cityDepthY(building, tileH) + 0.5;
+    const lg = art ? art.pool.graphics() : g;
     const roofH = anchors ? Math.max(0, ctr.y - anchors.top.y) : roofElevationPx(building, state, pack);
     const spanPx = Math.max(tileW * 0.6, building.spanCol * tileW * 0.42);
     const hasHoist = loops.some(l => l.kind === 'hoist_block');
@@ -536,13 +539,15 @@ export function renderConstructionLoopsToPixi(
       if (art && anchors && drawLoopSheet(art, loop.kind, anchors, sim.timeSec, loop.phaseOffset, loop.intensity, loopScale)) {
         continue;
       }
+      /* A painted building brings its own awning (a picture layer) or has none: no stand-in canopy over the art. */
+      if (anchors && loop.kind === 'awning') continue;
       switch (loop.kind) {
         case 'water':
-          drawWaterLoop(g, ctr.x, ctr.y - 16, sim.timeSec, loop.phaseOffset, waterHex, loop.intensity);
+          drawWaterLoop(lg, ctr.x, ctr.y - 16, sim.timeSec, loop.phaseOffset, waterHex, loop.intensity);
           break;
         case 'awning':
           drawAwningLoop(
-            g,
+            lg,
             building,
             roofH,
             sim.timeSec,
@@ -555,7 +560,7 @@ export function renderConstructionLoopsToPixi(
           break;
         case 'dust':
           drawDustLoop(
-            g,
+            lg,
             ctr.x,
             ctr.y,
             spanPx,
@@ -568,7 +573,7 @@ export function renderConstructionLoopsToPixi(
           break;
         case 'crane':
           drawCraneLoop(
-            g,
+            lg,
             ctr.x + (building.spanCol >= 4 ? 14 : 4),
             ctr.y - roofH + 4,
             sim.timeSec,
@@ -583,7 +588,7 @@ export function renderConstructionLoopsToPixi(
           break;
         case 'smoke':
           drawSmokeLoop(
-            g,
+            lg,
             ctr.x,
             ctr.y - roofH,
             sim.timeSec,
@@ -595,7 +600,7 @@ export function renderConstructionLoopsToPixi(
           break;
         case 'celebration':
           drawCelebrationLoop(
-            g,
+            lg,
             ctr.x,
             ctr.y - roofH,
             ctr.y + building.spanRow * tileH * 0.35,
@@ -614,7 +619,7 @@ export function renderConstructionLoopsToPixi(
     /* Draw work-slot workers (open interior rooms, scaffolds, ramps, sled teams, sculptors, demolition). */
     const slots = workSlotsForBuilding(building, state, pack, city.footprintOccupant);
     for (const slot of slots) {
-      drawWorkSlotWorker(g, slot, sim.timeSec, tileW, tileH, woodHex, dustHex);
+      drawWorkSlotWorker(lg, slot, sim.timeSec, tileW, tileH, woodHex, dustHex);
     }
   }
 }

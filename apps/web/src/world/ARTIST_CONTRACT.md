@@ -2,7 +2,7 @@
 
 This is the agreement between the artists of a world pack and the world engine. A pack declares slots for pictures and sheets (its art catalog in `world-packs/<pack>/art.ts`); artists fill the slots with PNG files and a small passport JSON beside each; the engine draws a file as soon as it is in the pack's art folder and keeps its geometric placeholder for every slot still empty. Art can arrive one file at a time; nothing in the engine changes when it does.
 
-Contract version: **1** (`ART_CONTRACT_VERSION` in `art.ts`).
+Contract version: **2** (`ART_CONTRACT_VERSION` in `art.ts`). Version 2 adds a building's own construction line (`stage_01.png` to `stage_10.png`, scaffolding drawn in) and demolition (`demol_01.png`, `demol_02.png`), and layers over a picture (a shadow that darkens what is under it, props, an awning that sways); the version 1 construction pictures stay valid. Rebuild `art-index.json` with the version 2 check.
 
 What is specific to one world (which buildings, which looks, its colours and style) lives in that pack's own notes, for example `world-packs/<pack>/ART.md`. This file holds only what is the same for every world.
 
@@ -62,6 +62,7 @@ Building footprints, square, in master pixels:
 | `awningAnchor` | no | Top edge of a swaying awning. |
 | `topAnchor` | no | Top centre (apex, spire, chimney): where a capstone or a top loop attaches. |
 | `workSlots` | no | Up to 3 points `{ x, y, layer }` with `layer` `front` (on scaffolding, in front of walls) or `inside` (in open rooms) where workers stand. |
+| `layers` | no | Pictures drawn over this one, in order (section 4, layers). |
 
 Every point must lie inside the picture; the picture must not be taller than its footprint allows.
 
@@ -115,6 +116,32 @@ The door is on one of the two front walls, the walls that face the viewer: `fron
 
 Draw construction pictures **without scaffolding or ramps**; those are shared modules the engine adds (section 5).
 
+A step may instead carry its whole construction line on its own canvas, scaffolding, ramps and ropes drawn in:
+
+| File | Shown when |
+|---|---|
+| `stage_01.png` to `stage_10.png` | Construction stage N (the table below) before the building is finished. With these the version 1 construction pictures are not needed. |
+| `demol_01.png` | Demolition, first half: the building half torn down. |
+| `demol_02.png` | Demolition, second half: rubble. |
+
+Every one of them has a picture passport with the same footprint diamond as `complete.png`, so the building does not move between stages.
+
+### Layers over a picture
+
+A picture passport may name layers: PNG files beside the picture, of exactly the same size and registration (the same canvas, the plot's bottom corner at the same point), drawn over it in the order given.
+
+```json
+"layers": [
+  { "file": "shadow.png", "blend": "multiply" },
+  { "file": "props.png" },
+  { "file": "awning.png", "sway": { "pivot": [[210, 542], [426, 650]] } }
+]
+```
+
+* `blend: "multiply"` multiplies what is under the layer by the layer's colour: a shadow keeps the colour of the ground and walls it falls on. Black with alpha for its strength works, and so does a tinted shadow.
+* `sway` moves the layer in the wind about the line through the two `pivot` points (picture pixels), where the cloth is fixed: the line stays put and the free edge lifts and drops. `amplitude` (default 0.03, at most 0.2) is how many pixels a point shifts per pixel of distance from the line at the strongest gust. Neighbouring buildings sway with different phases.
+* Keep a layer to what moves or must stay separate; whatever never moves belongs in the picture itself.
+
 ### Construction stages
 
 A building goes through 10 stages when it is built from scratch or rebuilt elsewhere by the god's word; demolition runs the same pictures backwards. Growing in place never starts over: the building switches to the next step's `complete.png`, and a home its agent is extending shows `annex.png` meanwhile.
@@ -131,6 +158,8 @@ A building goes through 10 stages when it is built from scratch or rebuilt elsew
 | 8 | finishing | `complete.png` + scaffolding |
 | 9 | complete | `complete.png` |
 | 10 | upgraded | `upgraded.png`, or `complete.png` without it |
+
+With a step's own `stage_NN.png`, stages 1 to 8 show that picture and no shared modules; demolition shows `demol_01.png`, then `demol_02.png`, when both are there.
 
 A pack may draw stage 4 from `full_walls.png` cut at its `wallCutY` instead (`stagePictures` in the pack catalog). The default keeps the open rooms of stage 3, because a straight cut through an isometric wall shows no wall thickness.
 
@@ -198,7 +227,7 @@ The terrain and plant layers load these files straight from the pack's art folde
 * **Ground:** one texture per ground material id of the pack's terrain recipe, `ground/<material>.png`, 1024 x 1024 px, seamless on both axes, seen from straight above, with no objects and no cast shadows. One map tile is 256 x 256 px of the texture, so one texture covers 4 x 4 tiles: tile (x, y) starts at ((x * 256) mod 1024, (y * 256) mod 1024). The engine projects it onto the 2:1 ground.
 * **Transitions:** `ground/edges/<first>_<second>.png`, 1024 x 256 px, 8-bit grey, one file per pair of material ids the pack declares. Rows run across the border, one tile deep: 255 is the first material, 0 the second. Columns wrap, so the border has no seam along its length.
 * **Liquid:** a surface texture, a bed texture (the relief of the bottom without the liquid's tint) and a ripple map (8-bit grey, mean 128), each 1024 x 1024 and seamless, plus the base colour in the manifest. The engine mixes them every frame, so the surface moves without a sheet of frames.
-* **Roads:** `roads/<tier>.png`, seamless along the length (1024 px = 4 tiles), alpha 0 on the first and last row, as tall as the road is wide (256 px per tile of width: a 0.4 tile path is 102 px, a 2 tile avenue 512 px).
+* **Roads:** `roads/<tier>.png`, seamless along the length (1024 px = 4 tiles), alpha 0 on the first and last row, as tall as the road is wide (256 px per tile of width: a 0.4 tile path is 102 px, a 2 tile avenue 512 px). With a strip for each of the four city street tiers (`terrainArt.roads`: `trail`, `dirt`, `brick`, `stone`), the city lays its streets as these strips from tile centre to tile centre, where two tiers meet the lower one, and keeps only its bridges as drawn tiles.
 * **Decals:** `decals/<name>.png`, small RGBA details laid on the ground at master scale.
 * **Plants:** three files per plant, all at master scale next to the 136 px person:
   * `veg/<name>.png`: RGBA, transparent background, no ground shadow;
@@ -213,6 +242,9 @@ The terrain and plant layers load these files straight from the pack's art folde
 npx tsx apps/web/scripts/world-art-index.ts <art folder> --pack <pack>          check, write nothing
 npx tsx apps/web/scripts/world-art-index.ts <art folder> --pack <pack> --write  check and write art-index.json
 npx tsx apps/web/scripts/world-art-index.ts --pack <pack> --list                every slot, required or optional
+npx tsx apps/web/scripts/world-art-import.ts <delivery> --to <art folder> --pack <pack> --kind <kind> --steps <a,b,c>
 ```
+
+The import command takes one building as the art pipeline delivers it (its construction line, demolition, layers and the larger steps it grows into, on plot canvases) and lays it out in the art folder with passports, as this contract asks; its header lists the delivery's layout.
 
 The check prints every error with the file it is about, every file the pack has no slot for, and how many required files are still missing. It writes `art-index.json` only when there are no errors. Deliver the folder with its fresh `art-index.json`; the engine needs nothing else.
