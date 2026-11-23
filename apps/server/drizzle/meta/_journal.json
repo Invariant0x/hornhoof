@@ -1114,6 +1114,13 @@
       "when": 1795315424151,
       "tag": "0160_agent_original_names",
       "breakpoints": true
+    },
+    {
+      "idx": 160,
+      "version": "7",
+      "when": 1795446591845,
+      "tag": "0161_machine_sessions",
+      "breakpoints": true
     }
   ]
 }

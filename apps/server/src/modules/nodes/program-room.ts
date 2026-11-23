@@ -7,8 +7,17 @@ const STARTING_MS = 2 * 60_000;
 
 /* live: the agents whose programs run on the node as it said last, null while it says nothing of them; liveAt: when it
    said so. starting: the agents a turn went out to start a program for, and when. waiting: the agents whose new programs
-   wait on it. */
-type Room = { live: Set<string> | null; liveAt: number; starting: Map<string, number>; waiting: Set<string> };
+   wait on it. limit: how many programs its machine runs at once, null for as many as its memory takes. */
+type Room = { live: Set<string> | null; liveAt: number; starting: Map<string, number>; waiting: Set<string>; limit: number | null };
+
+/* Why a turn that would start a new program on the node waits: its machine's kernel killed a process for want of memory, or
+   the machine runs as many programs as it may at once. */
+export type RoomWait = 'memory' | 'sessions';
+
+/* How many agent programs a machine runs at once: a phone 1, or 2 when its owner allows; a computer as many as its memory
+   takes. */
+export const SESSIONS_MAX = 2;
+export const sessionLimit = (machine: { kind: string; sessions: number | null }): number | null => (machine.kind === 'phone' ? machine.sessions ?? 1 : null);
 
 const rooms = new WeakMap<NodeHub, Map<string, Room>>();
 
@@ -17,7 +26,7 @@ function roomOf(ctx: Ctx, node: NodeIdentity): Room {
   rooms.set(ctx.hub, all);
   let room = all.get(keyOf(node));
   if (!room) {
-    room = { live: null, liveAt: 0, starting: new Map(), waiting: new Set() };
+    room = { live: null, liveAt: 0, starting: new Map(), waiting: new Set(), limit: null };
     all.set(keyOf(node), room);
   }
   return room;
@@ -39,7 +48,24 @@ export function programsLive(ctx: Ctx, node: NodeIdentity, live: string[] | unde
   const room = roomOf(ctx, node);
   room.live = live ? new Set(live) : null;
   room.liveAt = Date.now();
-  if (!room.waiting.size || memoryShort(ctx, node)) return [];
+  return released(ctx, node, room);
+}
+
+/* How many programs the node's machine runs at once, as its owner set it. The agents whose new programs waited on it, when
+   that leaves room. */
+export function limitRoom(ctx: Ctx, node: NodeIdentity, limit: number | null): string[] {
+  const room = roomOf(ctx, node);
+  room.limit = limit;
+  return released(ctx, node, room);
+}
+
+/* Whether the machine runs as many programs as it may: the ones it names and the ones that start there. */
+const full = (room: Room): boolean => room.limit !== null && (room.live?.size ?? 0) + starting(room).length >= room.limit;
+
+/* The agents that waited, every one at once, when the node has memory and room again; each one's own room decides then, as
+   it is asked again. */
+function released(ctx: Ctx, node: NodeIdentity, room: Room): string[] {
+  if (!room.waiting.size || memoryShort(ctx, node) || full(room)) return [];
   const waited = [...room.waiting];
   room.waiting.clear();
   return waited;
@@ -52,17 +78,26 @@ export function livePrograms(ctx: Ctx, node: NodeIdentity): { agents: ReadonlySe
 }
 
 /* Whether a turn of this agent may go to the node now. After a report that the machine's kernel killed a process for want
-   of memory, a turn that would start a new program there waits, and goes on by itself with the first report that finds
-   no new kill. One whose program runs or starts there goes all the same, so nothing that runs loses anything, the
+   of memory, or while its machine runs as many programs as it may at once, a turn that would start a new program there
+   waits, and goes on by itself with the first report that finds no new kill and room. One whose program runs or starts there goes all the same, so nothing that runs loses anything, the
    orchestrator's and the heads' as everyone's. A node that does not name its programs starts one for each turn, so each of
    its turns waits then. look: only asked, as an agent's window asks where its next turn would go, so the agent is not put
    among the ones that wait. */
 export function roomFor(ctx: Ctx, node: NodeIdentity, agentId: string, look = false): boolean {
-  if (!memoryShort(ctx, node)) return true;
-  const room = roomOf(ctx, node);
-  if (room.live?.has(agentId) || starting(room).includes(agentId)) return true;
-  if (!look) room.waiting.add(agentId);
+  if (!roomWait(ctx, node, agentId)) return true;
+  if (!look) roomOf(ctx, node).waiting.add(agentId);
   return false;
+}
+
+/* Why a turn of this agent would wait for the node, or null when it may go there: one whose program runs or starts there
+   never waits. A machine at its limit of programs holds a new one as a machine short of memory does. */
+export function roomWait(ctx: Ctx, node: NodeIdentity, agentId: string): RoomWait | null {
+  const short = memoryShort(ctx, node);
+  const room = rooms.get(ctx.hub)?.get(keyOf(node));
+  if (!short && !room?.limit) return null;
+  if (room && (room.live?.has(agentId) || starting(room).includes(agentId))) return null;
+  if (short) return 'memory';
+  return room && full(room) ? 'sessions' : null;
 }
 
 /* A turn of this agent went out to the node: a program it starts there counts as there until the node names it, and the

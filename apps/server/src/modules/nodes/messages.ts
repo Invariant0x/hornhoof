@@ -39,6 +39,7 @@ import { hookRejected } from './hook-rejections.js';
 import { checkQueueLoad, nodeCheckQueueAway, releaseRestartedChecks, routeCheckMessage } from './check-slots.js';
 import { applyParked, mergePending, park, type ParkedKind } from './parked.js';
 import { programsLive } from './program-room.js';
+import { loadSessionLimit } from './session-limit.js';
 import { privateTurn } from '../tools/private-turns.js';
 import { holdNotStarted, noteWorkFolder } from '../program-operator/not-started.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
@@ -374,7 +375,9 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running, cut);
       ctx.hub.greet(id, msg.terminals === true, msg.work === true, msg.noRuns || null, msg.build, msg.browserError || null);
       if (msg.load) { ctx.hub.report(id, msg.load); await checkQueueLoad(ctx, id, msg.checkLeases, transport); }
-      /* Every waiting turn is sent below, with what the node says of the programs that run on it. */
+      /* Every waiting turn is sent below, with what the node says of the programs that run on it and how many its machine
+         may run at once. */
+      await loadSessionLimit(ctx, id);
       programsLive(ctx, id, msg.live);
       await testsHello(ctx, id, msg.tests);
       await releaseProgramsOfLeftPlans(ctx, id, jobsOf(id, ctx));

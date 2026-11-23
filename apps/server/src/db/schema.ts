@@ -453,6 +453,8 @@ export const machines = pgTable(
     kind: text('kind', { enum: MACHINE_KINDS }).notNull().default('computer'),
     /* Lends itself to the company's test runs; its owner, or someone who sees the whole company, can take it back. */
     lendsTests: boolean('lends_tests').notNull().default(true),
+    /* How many agent programs a phone runs at once, as its owner set it: 1 when not set, 2 at most. */
+    sessions: integer('sessions'),
     createdAt: createdAt(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     /* What the machine is in the company's network. networkId: the id its keeper runs under; none without a keeper.

@@ -10,6 +10,7 @@ import { agents, jobs } from '../../db/schema.js';
 import type { TurnRefusal } from '../terminals/relay.js';
 import { nodeDrain, nodeHeld } from '../updates/drain.js';
 import { nodeIdentity, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
+import { roomWait as roomWaitOf, type RoomWait } from '../nodes/program-room.js';
 import { planNodes, type NodeRow } from '../nodes/nodes.js';
 import { agentProgramState } from '../tasks/program-state.js';
 import { type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
@@ -22,6 +23,9 @@ export type AgentState = FailureState & {
   /* Its turns would start its program on a machine whose kernel killed a process for want of memory since its node's
      report before, so they wait and go on by themselves with a report that finds no new kill. */
   memoryWait: boolean;
+  /* Why its turns, which would start its program on a machine, wait for that machine: memory, as memoryWait says, or
+     sessions, a phone that runs as many agent programs as it may at once; they go on by themselves once it has room. */
+  roomWait: RoomWait | null;
   /* Its plan is at its limit until then: its turns wait in line, and people may still write to it. */
   limitUntil: string | null;
   /* Its plan used the share set for tasks until then: workers' task turns wait, people's own messages still go. */
@@ -64,7 +68,7 @@ export const planHoldView = (held: HeldPlanTurn | null): PlanHold | null => held
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, machineDrain: null, memoryWait: false, limitUntil: null, budgetUntil: null, held: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, turnRefused: null, program: null, alarm: null, retry: null, failure: null, obsolete: null };
+  if (!agent) return { ready: false, machineDrain: null, memoryWait: false, roomWait: null, limitUntil: null, budgetUntil: null, held: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, turnRefused: null, program: null, alarm: null, retry: null, failure: null, obsolete: null };
   return agentState(ctx, agent.id);
 }
 
@@ -125,10 +129,14 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const shown = await shownNode(ctx, agentId, place);
   const terminal = Boolean(shown && ctx.hub.hasTerminals(shown));
   const browserError = shown ? ctx.hub.browserErrorOf(shown) : null;
+  /* The machine its turn would go to with room everywhere, when it has none now. */
+  const roomless = !running && !place && reason === null && sub && agent ? await placement(ctx, agent, sub, () => true) : null;
+  const roomWait = roomless ? roomWaitOf(ctx, roomless.node, agentId) ?? 'memory' : null;
   return {
     ready: reason === null,
     machineDrain: place || reason !== null ? null : await drainInTheWay(ctx, agent, sub, shown),
-    memoryWait: !running && !place && reason === null && Boolean(sub && agent && (await placement(ctx, agent, sub, () => true))),
+    memoryWait: roomWait === 'memory',
+    roomWait,
     ...await planState(ctx, agent, sub),
     reason,
     browserError,

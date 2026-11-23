@@ -25,6 +25,9 @@ import { holding } from '../copies/view.js';
 import { findThisMachine } from '../network/store.js';
 import { machineNodes, machineState, together } from '../testruns/load.js';
 import { pumpTests } from '../testruns/runs.js';
+import { pump } from '../conversation/queue.js';
+import { SESSIONS_MAX, sessionLimit } from './program-room.js';
+import { machineSessionsSet } from './session-limit.js';
 import { createInstallCommand } from './command.js';
 import { nodeCommandRoutes } from './command-routes.js';
 import { connectionRoutes } from './connection-routes.js';
@@ -67,11 +70,12 @@ const buildLine = (image: string, build: LeaderBuild): string => `build ${build.
 
 const IdParams = z.object({ id: z.uuid() });
 export const LendBody = z.object({ lendsTests: z.boolean() }).strict();
-/* The ticks of a machine's card: whether it takes the company's test runs, and whether it keeps the company's backups. */
+/* The ticks of a machine's card: whether it takes the company's test runs, whether it keeps the company's backups, and how
+   many agent programs a phone runs at once. */
 const TicksBody = z
-  .object({ lendsTests: z.boolean().optional(), keepsBackups: z.boolean().optional() })
+  .object({ lendsTests: z.boolean().optional(), keepsBackups: z.boolean().optional(), sessions: z.number().int().min(1).max(SESSIONS_MAX).optional() })
   .strict()
-  .refine(ticks => ticks.lendsTests !== undefined || ticks.keepsBackups !== undefined, 'Say which tick to change.');
+  .refine(ticks => ticks.lendsTests !== undefined || ticks.keepsBackups !== undefined || ticks.sessions !== undefined, 'Say which tick to change.');
 const PlanBody = z.object({ subscription: z.uuid() }).strict();
 /* A machine's place by hand: null for none, 'none' to keep it from the server, or the place, from 2. */
 const PriorityBody = z.object({ pin: z.union([z.null(), z.literal('none'), z.number().int().min(2).max(999)]) }).strict();
@@ -426,16 +430,23 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     return reply.code(204).send();
   });
 
-  /* Whether the machine takes the company's test runs, and whether it keeps the company's backups. A machine lent again
-     may take a run that waits. */
+  /* Whether the machine takes the company's test runs, whether it keeps the company's backups, and how many agent programs a
+     phone runs at once. A machine lent again may take a run that waits, and a phone allowed more starts a program that
+     waits. */
   app.patch('/api/machines/:id', async req => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const ticks = TicksBody.parse(req.body);
     await ownMachine(me, id);
-    const [now] = await db.update(machines).set(ticks).where(eq(machines.id, id)).returning({ lendsTests: machines.lendsTests, keepsBackups: machines.keepsBackups });
+    if (ticks.sessions !== undefined) {
+      const [machine] = await db.select({ kind: machines.kind }).from(machines).where(eq(machines.id, id));
+      if (machine?.kind !== 'phone') throw new ApiError(400, 'validation', 'Only a phone runs a set number of agent programs at once; a computer runs as many as its memory takes.', 'not_a_phone');
+    }
+    const [now] = await db.update(machines).set(ticks).where(eq(machines.id, id))
+      .returning({ kind: machines.kind, lendsTests: machines.lendsTests, keepsBackups: machines.keepsBackups, sessions: machines.sessions });
     if (ticks.lendsTests) await pumpTests(ctx);
-    return now;
+    if (ticks.sessions !== undefined && now) for (const agentId of await machineSessionsSet(ctx, { id, ...now })) await pump(ctx, agentId);
+    return now && { lendsTests: now.lendsTests, keepsBackups: now.keepsBackups, sessions: sessionLimit(now) };
   });
 
   const imageOf = (part: 'node' | 'updater') => nodeImageOfBuild({
