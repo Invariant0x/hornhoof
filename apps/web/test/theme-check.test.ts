@@ -1,3 +1,5 @@
+import type { ThemeArtFile } from '@hornhoof/protocol/themes';
+import { WORLD_BUILDING_KINDS } from '@hornhoof/protocol/world';
 import { describe, expect, it } from 'vitest';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
@@ -7,6 +9,7 @@ import { checkLook, checkWorld } from '../src/themes/check';
 import { ART_CONTRACT_VERSION, declaredArtFiles } from '../src/world/art';
 import { dataOfWorldPack, worldPackOfData } from '../src/world-packs/data-pack';
 import { registeredWorldPacks } from '../src/world-packs/registry';
+import type { WorldPackManifest } from '../src/world/manifest';
 
 /* The checks of a theme archive's look and world that the server runs from the screens' own code
    (docs/theme-archive.md, 3.1 and 4): a look and a world Hornhoof ships pass them as data, and each thing an archive
@@ -27,6 +30,35 @@ const refusal = (change: (raw: Raw) => void, families: readonly string[] = []) =
   return parsed.ok ? null : parsed.error;
 };
 const BASE = '/api/themes/files/t-1/world/art/';
+
+/* The head of a PNG of a size, which is all the art check reads of a picture. */
+const pngHead = (w: number, h: number) => {
+  const head = new Uint8Array(33);
+  head.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  new DataView(head.buffer).setUint32(16, w);
+  new DataView(head.buffer).setUint32(20, h);
+  return head;
+};
+
+/* Every picture a shipped pack's art catalog requires, at the size and with the passport its slot asks for, as a finished
+   pack brings them (the server's completeArt, in the form the check takes). Test pictures only (#105). */
+function completeArtOf(pack: WorldPackManifest): ThemeArtFile[] {
+  const footprintOf = (path: string) => {
+    const [, kind, step] = path.split('/');
+    return pack.art?.buildings[kind as keyof NonNullable<typeof pack.art>['buildings']]?.find(one => one.id === step)?.footprint ?? '1x1';
+  };
+  return declaredArtFiles(pack)
+    .filter(slot => slot.required)
+    .map(slot => {
+      if (slot.passport === 'anchor') return { path: slot.path, head: pngHead(40, 100), passport: { anchor: { x: 20, y: 98 } } };
+      if (slot.passport === 'sheet') return { path: slot.path, head: pngHead(8 * 136, (slot.role === 'person' ? 5 : 1) * 200), passport: { frameW: 136, frameH: 200, frames: 8, fps: 10, anchor: { x: 68, y: 190 } } };
+      const fp = pack.projection.buildingFootprintsMaster4x[slot.role === 'module' ? slot.path.split('/')[1]! : footprintOf(slot.path)]!;
+      const [w, h] = [fp.diamondW + 8, Math.min(fp.maxCanvasH, fp.diamondH + 300)];
+      const [x, y] = [w / 2, h - fp.diamondH / 2 - 4];
+      const corners = { top: { x, y: y - fp.diamondH / 2 }, right: { x: x + fp.diamondW / 2, y }, bottom: { x, y: y + fp.diamondH / 2 }, left: { x: x - fp.diamondW / 2, y } };
+      return { path: slot.path, head: pngHead(w, h), passport: { groundAnchor: { x, y }, corners, flagAnchor: { x: x + 10, y: 20 }, topAnchor: { x, y: 10 } } };
+    });
+}
 
 describe('the look of a theme archive', () => {
   it('takes the whole look of every built-in skin, built anew', () => {
@@ -151,6 +183,25 @@ describe('the world of a theme archive', () => {
       expect(built, name).toMatchObject({ ok: false, errors: expect.arrayContaining([first]) });
       expect(built.ok ? 0 : built.errors.length, name).toBeLessThanOrEqual(50);
     }
+  });
+
+  /* A world is whole only with its own pictures: every one its catalog requires, a building of every kind the city
+     grows, and its residents. Anything less installs as the interface alone (#1960, #1972). */
+  it('calls a world whole only with every required picture, a building of every kind and residents', () => {
+    const pack = registeredWorldPacks().find(one => one.id === 'egypt')!;
+    const world = dataOfWorldPack(pack) as Raw;
+    const art = completeArtOf(pack);
+    const check = (data: Raw, files: readonly ThemeArtFile[] = art) => checkWorld({ id: 't-1', world: data, baseUrl: BASE, art: files, files: files.map(file => file.path) });
+    const catalog = world.art as Raw;
+    const buildings = catalog.buildings as Raw;
+    const [kind] = WORLD_BUILDING_KINDS;
+    const { [kind]: _left, ...otherKinds } = buildings;
+    expect(check(world)).toMatchObject({ ok: true, complete: true, missing: 0 });
+    expect(check(world, art.slice(1))).toMatchObject({ ok: true, complete: false, missing: 1 });
+    expect(check({ ...world, art: { ...catalog, people: { ...(catalog.people as Raw), looks: [] } } })).toMatchObject({ ok: true, complete: false });
+    expect(check({ ...world, art: { ...catalog, buildings: { ...buildings, [kind]: [] } } })).toMatchObject({ ok: true, complete: false, missing: 0 });
+    expect(check({ ...world, art: { ...catalog, buildings: otherKinds } })).toMatchObject({ ok: true, complete: false, missing: 0 });
+    expect(check(Object.fromEntries(Object.entries(world).filter(([key]) => key !== 'art')))).toMatchObject({ ok: true, complete: false, missing: 0 });
   });
 
   it('checks the art of a world by the art contract, and indexes what passed', () => {

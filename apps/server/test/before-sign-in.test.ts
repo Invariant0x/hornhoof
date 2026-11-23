@@ -63,7 +63,7 @@ async function idsOfEveryTable(db: Db): Promise<string[]> {
   return [...new Set(ids)];
 }
 
-const FIXED_PARAMS: Record<string, string> = { name: 'acme', token: 'x', number: '1', item: '1', index: '1', sequence: '1', channel: 'email', key: 'x', kind: 'x', '*': 'x' };
+const FIXED_PARAMS: Record<string, string> = { name: 'acme', token: 'x', number: '1', item: '1', index: '1', sequence: '1', channel: 'email', key: 'x', kind: 'x', version: '1.0.0', '*': 'x' };
 
 /* The urls a route is asked at: its parameters are filled by name, `:id` once with each real id, `:teamId` with the one
    real team, so that a department and its sub-unit are asked for as a real pair. */
