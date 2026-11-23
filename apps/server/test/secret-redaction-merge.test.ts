@@ -48,18 +48,19 @@ it.each(['leader', 'offline'] as const)('keeps a secret suppressed when the %s r
 
 it.each(['leader', 'offline'] as const)('keeps another company unchanged when the %s receives a suppression', async receiver => {
   const { leader, fork } = await twoSides();
-  const [company, other] = await leader.db.insert(companies).values([{ name: 'Acme' }, { name: 'Other', singleton: false }]).returning();
+  const [company] = await leader.db.insert(companies).values({ name: 'Acme' }).returning();
   const [person] = await leader.db.insert(people).values({ companyId: company!.id, name: 'Ivan', email: 'ivan@acme.test', status: 'active', scopeKind: 'company', isOwner: true }).returning();
   const marker = 'forkCompanyBoundary1077!';
-  const [mine, theirs] = await leader.db.insert(tasks).values([
-    { companyId: company!.id, number: 1, title: 'Mine', body: marker },
-    { companyId: other!.id, number: 1, title: 'Theirs', body: marker },
-  ]).returning();
+  const [mine] = await leader.db.insert(tasks).values({ companyId: company!.id, number: 1, title: 'Mine', body: marker }).returning();
   const offline = await fork();
+  const [target, incoming] = receiver === 'leader' ? [leader, offline] : [offline, leader];
+  /* Another company where the suppression arrives, as only a test makes one: a merge's source holds the company it
+     merges alone (#1967). */
+  const [other] = await target.db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+  const [theirs] = await target.db.insert(tasks).values({ companyId: other!.id, number: 1, title: 'Theirs', body: marker }).returning();
   const { fingerprint, characters, window_hash: windowHash } = fingerprintOf(marker);
   await leader.db.insert(secretRedactions).values({ companyId: company!.id, personId: person!.id, fingerprint, characters, windowHash });
   await offline.db.update(tasks).set({ body: `${marker} copy` }).where(eq(tasks.id, mine!.id));
-  const [target, incoming] = receiver === 'leader' ? [leader, offline] : [offline, leader];
   const merge = await target.client.query<{ id: string }>("insert into net.merges (source, label) values ('machine:other', 'other') returning id");
   const source = await pgliteSource(incoming.client, 'other');
   try {

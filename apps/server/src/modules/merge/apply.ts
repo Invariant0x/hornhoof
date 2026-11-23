@@ -286,6 +286,8 @@ export class UnitWriter {
   private async insert(t: TableFacts, unit: Unit): Promise<void> {
     const row = await this.prepared(t, ruleOf(t.name), unit);
     if (!row) return;
+    const problem = ruleOf(t.name).check?.(row);
+    if (problem) return void (unit.refused = problem);
     if (!(await this.withFiles(t, unit, row, t.columns.map(column => column.name)))) return void (unit.refused = NO_FILE);
     this.masked(t, row);
     await this.q(`INSERT INTO public.${quote(t.name)} SELECT * FROM jsonb_populate_record(NULL::public.${quote(t.name)}, $1::jsonb)`, [JSON.stringify(row)]);
@@ -322,6 +324,9 @@ export class UnitWriter {
       if (numbered && numbered.key === null) return void (unit.refused = `Its ${numbered.table} row is not here.`);
       if (numbered) row.source_key = numbered.key;
     }
+    /* The row as it would be here after the update, as the app would have to save it. */
+    const problem = ruleOf(t.name).check?.({ ...unit.y!, ...Object.fromEntries(set.map(column => [column, row[column]])) });
+    if (problem) return void (unit.refused = problem);
     if (Object.keys(was).length > 0) unit.rewritten = { cols: Object.keys(was), was };
     if (!(await this.withFiles(t, unit, row, set))) return void (unit.refused = NO_FILE);
     this.masked(t, row, set);
@@ -580,6 +585,7 @@ class Merge {
     const ys = rule.kind === 'log' ? null : await rowsByKeys(this.q, t, keys);
     const pairs = keys.map(key => ({ key, text: keyText(key), x: xs.get(keyText(key)) ?? null }));
     const both = pairs.map(pair => ({ ...pair, y: pair.x ? here(pair.x) : (ys?.get(pair.text) ?? null) }));
+    for (const { x, y } of both) this.ours(t, x, y);
     if (t.name === 'map_returns') await withNamedKeys(this.q, both.map(pair => pair.y));
     for (const { key, text, x, y } of both) {
       const mine = histories.get(text)!;
@@ -594,6 +600,7 @@ class Merge {
     for await (const page of this.src.pagesOf(t)) {
       const here = await this.heres(t, rule, page);
       const ys = page.map(x => here(x));
+      for (const [index, x] of page.entries()) this.ours(t, x, ys[index]!);
       if (t.name === 'map_returns') await withNamedKeys(this.q, ys);
       for (const [index, x] of page.entries()) {
         let outcome = addsOnly(rule, compareOutcome(t, x, ys[index]!));
@@ -637,6 +644,13 @@ class Merge {
     }
     if (removed.keys.has(keyText(keyOf(t, x)))) return true;
     return t.name === 'person_access' && removed.places.has(placeOf(x)) && !removed.here.has(placeOf(x));
+  }
+
+  /* Every row a merge reads of a company, the source's and the one here it would write over, is of the company merged:
+     one of another company refuses the whole source before anything is written, and nothing of it is listed (#1967). */
+  private ours(t: TableFacts, ...rows: (Row | null)[]): void {
+    if (!t.columns.some(column => column.name === 'company_id')) return;
+    for (const row of rows) if (row && row.company_id !== this.merge.companyId) throw new MergeRefused(ANOTHER_COMPANY);
   }
 
   private unit(t: TableFacts, rule: TableRule, planned: { key: Record<string, unknown>; x: Row | null; y: Row | null; outcome: Outcome; rows: JournalRow[]; skipped: JournalRow[]; left: boolean }): void {
