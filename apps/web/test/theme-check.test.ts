@@ -136,6 +136,23 @@ describe('the world of a theme archive', () => {
     }
   });
 
+  /* A world with very many wrong numbers is refused as one with a few: the check says the first of them and never
+     breaks on how many there are (#1960, F4). */
+  it('refuses a world of 150 000 numbers beyond their bounds as it refuses one with a few, without breaking', () => {
+    const data = dataOfWorldPack(registeredWorldPacks().find(one => one.id === 'space')!) as Raw;
+    const many = Array.from({ length: 150_000 }, (_, n) => 10_001 + ((n * 7_919) % 89_999));
+    const lods = Array.from({ length: 150_000 }, () => ({ tileW: 2_000 }));
+    const cases: [string, Raw, string][] = [
+      ['numbers', { params: { ...(data.params as Raw), many } }, 'params.many.0 is beyond 10000'],
+      ['tile tiers', { projection: { ...(data.projection as Raw), lods } }, 'projection.lods has at most 8 tiers'],
+    ];
+    for (const [name, change, first] of cases) {
+      const built = worldPackOfData('t-1', { ...data, ...change }, BASE);
+      expect(built, name).toMatchObject({ ok: false, errors: expect.arrayContaining([first]) });
+      expect(built.ok ? 0 : built.errors.length, name).toBeLessThanOrEqual(50);
+    }
+  });
+
   it('checks the art of a world by the art contract, and indexes what passed', () => {
     const pack = registeredWorldPacks().find(one => one.id === 'egypt')!;
     const world = dataOfWorldPack(pack);
