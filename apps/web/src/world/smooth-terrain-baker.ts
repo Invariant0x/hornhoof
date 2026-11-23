@@ -219,7 +219,6 @@ export function getMaterialTextureRgb(spec: GroundMaterialSpec): Uint8ClampedArr
         periodicDiagNoise(u, v, 11, seed + 17) * 0.55 +
         periodicNoise2D(u * 14, v * 14, 14, 14, seed + 29) * 0.45;
       const fine = periodicNoise2D(u * 36, v * 36, 36, 36, seed + 53) - 0.5;
-      const micro = periodicDiagNoise(u, v, 48, seed + 67) - 0.5;
 
       let blend = macro * 0.55 + mid * 0.45;
       let accent = 0;
