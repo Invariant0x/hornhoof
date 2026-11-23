@@ -20,9 +20,21 @@ import { hireEmployee } from '../src/modules/departments/hire.js';
 import { createWorldPackRegistry } from '../src/modules/world/packs/index.js';
 import { DUNGEON_WORLD_PACK } from '../src/modules/world/packs/dungeon.js';
 import { EGYPT_WORLD_PACK } from '../src/modules/world/packs/egypt.js';
-import { placeSkills } from '../../node/src/skills.js';
-import { ownFs } from '../../node/src/agent-fs.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+
+/* The node's own skill placement, loaded when the test runs: the server's type check covers server files only. */
+type NodeFs = { read(path: string): Promise<string | null>; kind(path: string): Promise<'file' | 'dir' | null> };
+type NodeSkills = {
+  placeSkills(fs: NodeFs, workDir: string, provider: 'claude' | 'antigravity', skills: readonly { name: string }[]): Promise<void>;
+  ownFs: NodeFs;
+};
+async function nodeSkills(): Promise<NodeSkills> {
+  const [skills, agentFs] = await Promise.all([
+    import(new URL('../../node/src/skills.ts', import.meta.url).href) as Promise<Pick<NodeSkills, 'placeSkills'>>,
+    import(new URL('../../node/src/agent-fs.ts', import.meta.url).href) as Promise<Pick<NodeSkills, 'ownFs'>>,
+  ]);
+  return { placeSkills: skills.placeSkills, ownFs: agentFs.ownFs };
+}
 
 describe('Stage 7 world skills, voice channel boundaries, and company theme', () => {
   it('validates both Egypt and Dungeon world packs and proves engine/server core has zero hardcoded theme words', () => {
@@ -57,7 +69,6 @@ describe('Stage 7 world skills, voice channel boundaries, and company theme', ()
     const delegate = await invitePerson(app, ceo, {
       name: 'Clara',
       email: 'clara@acme.com',
-      title: 'Delegate',
       access: { whole: true },
     });
     await db.update(people).set({ isCeoDelegate: true }).where(eq(people.email, 'clara@acme.com'));
@@ -65,13 +76,11 @@ describe('Stage 7 world skills, voice channel boundaries, and company theme', ()
     const wholeUser = await invitePerson(app, ceo, {
       name: 'Wes',
       email: 'wes@acme.com',
-      title: 'COO',
       access: { whole: true },
     });
     const listedUser = await invitePerson(app, ceo, {
       name: 'Ann',
       email: 'ann@acme.com',
-      title: 'Engineer',
       access: { departments: [dept!.id], teams: [] },
     });
 
@@ -306,7 +315,7 @@ describe('Stage 7 world skills, voice channel boundaries, and company theme', ()
 
     const workDir = mkdtempSync(join(tmpdir(), 'hh-world-skills-'));
     try {
-      const fs = ownFs;
+      const { placeSkills, ownFs: fs } = await nodeSkills();
 
       await app.inject({ method: 'PUT', url: '/api/world/theme', payload: { theme: 'dungeon' }, ...as(ceo) });
       const onInstructions = await instructionsOf(app.ctx, worker!);
@@ -441,7 +450,7 @@ describe('Stage 7 world skills, voice channel boundaries, and company theme', ()
         {
           from: { kind: 'agent', id: devA!.id, name: devA!.name, role: { en: 'Developer', ru: 'Разработчик' }, department: { id: dept!.id, name: { en: 'Development', ru: 'Разработка' } } },
           to: { kind: 'agent', id: devB!.id, name: devB!.name, role: { en: 'Code reviewer', ru: 'Ревьюер' }, department: { id: dept!.id, name: { en: 'Development', ru: 'Разработка' } } },
-          channel: 'agent',
+          direction: 'in',
         },
       );
       expect(containsWorldVoicePhrase(peerEnvelope, pack), `${pack.id}: peer message`).toBe(false);
@@ -450,8 +459,8 @@ describe('Stage 7 world skills, voice channel boundaries, and company theme', ()
         `${wrote({ name: devA!.name, title: 'Developer' }, 'Deployment check passed on commit abcdef1.')}\n\n${answerBy({ id: devA!.id, name: devA!.name })}`,
         {
           from: { kind: 'agent', id: devA!.id, name: devA!.name, role: { en: 'Developer', ru: 'Разработчик' }, department: { id: dept!.id, name: { en: 'Development', ru: 'Разработка' } } },
-          to: { kind: 'orchestrator', id: orch!.id, name: orch!.name },
-          channel: 'agent',
+          to: { kind: 'agent', id: orch!.id, name: orch!.name, role: { en: 'Orchestrator', ru: 'Оркестратор' }, department: null, agentKind: 'orchestrator' },
+          direction: 'in',
         },
       );
       expect(containsWorldVoicePhrase(orchEnvelope, pack), `${pack.id}: orchestrator message`).toBe(false);
@@ -631,7 +640,7 @@ describe('Stage 7 world skills, voice channel boundaries, and company theme', ()
       .returning();
     await db.insert(assistants).values({ companyId: company!.id, personId: assistantPerson!.id, agentId: assistantAgent!.id, program: 'openclaw' });
 
-    const listed = await invitePerson(app, ceo, { name: 'Ann', email: 'ann2@acme.com', title: 'Dev', access: { departments: [dept!.id], teams: [] } });
+    const listed = await invitePerson(app, ceo, { name: 'Ann', email: 'ann2@acme.com', access: { departments: [dept!.id], teams: [] } });
 
     app.ctx.worldPacks = createWorldPackRegistry([EGYPT_WORLD_PACK, DUNGEON_WORLD_PACK]);
     await app.inject({ method: 'PUT', url: '/api/world/theme', payload: { theme: 'egypt' }, ...as(ceo) });
