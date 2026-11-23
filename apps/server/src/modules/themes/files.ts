@@ -53,13 +53,15 @@ const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export type Picture = { width: number; height: number };
 
-/* A PNG whose every chunk is whole with its checksum, from IHDR first to IEND last with nothing after it: a picture that
-   carries another file behind it is not one. */
+/* A PNG whose every chunk is whole with its checksum, from IHDR first to IEND last with nothing after it, in no more
+   chunks than a picture has: a picture that carries another file behind it, or a walk of a million empty chunks, is not
+   one. */
 function pngSize(bytes: Buffer): Picture | null {
   if (bytes.length < 45 || !bytes.subarray(0, 8).equals(PNG) || bytes.toString('latin1', 12, 16) !== 'IHDR' || bytes.readUInt32BE(8) !== 13) return null;
   let at = 8;
   let type = '';
-  while (at + 12 <= bytes.length && type !== 'IEND') {
+  for (let chunks = 0; at + 12 <= bytes.length && type !== 'IEND'; chunks += 1) {
+    if (chunks >= THEME_FILE_LIMITS.pngChunks) return null;
     const length = bytes.readUInt32BE(at);
     const end = at + 12 + length;
     type = bytes.toString('latin1', at + 4, at + 8);
@@ -103,7 +105,13 @@ export function checkFont(path: string, bytes: Buffer): void {
 
 /* Characters that never belong in plain text: controls other than line breaks and tabs, the ones that turn the direction
    of text, invisible ones and a byte order mark. */
-const NOT_PLAIN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
+/* What text never holds, as no person sees it: control and format characters, private and unassigned code points,
+   line and paragraph separators, characters a renderer ignores, variation selectors and the blank braille cell. A text
+   file keeps its tabs and line breaks; a string of JSON is one line (NOT_ONE_LINE), so a voice line or a name never
+   becomes a paragraph of its own where it is quoted. */
+const UNSEEN = String.raw`\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\p{Variation_Selector}\u2800`;
+const NOT_PLAIN = new RegExp(String.raw`[^\P{Cc}\t\n\r]|[${UNSEEN}]`, 'u');
+export const NOT_ONE_LINE = new RegExp(String.raw`[\p{Cc}${UNSEEN}]`, 'u');
 
 export function plainText(path: string, bytes: Buffer, limit: number = THEME_FILE_LIMITS.textBytes): string {
   if (bytes.length > limit) refuse('file_too_large', path);
@@ -120,25 +128,27 @@ export function plainText(path: string, bytes: Buffer, limit: number = THEME_FIL
 /* A string that would take a browser somewhere: an address with a scheme or www. anywhere in it, a value that is a
    scheme a browser runs or opens (javascript:, data: and the like), a path from the root of another host, or a way out of
    the folder it stands in. Words such as "Tip: ..." are no link. */
-const LINK = /(?:^|[^A-Za-z0-9])(?:[a-z][a-z0-9+.-]*:\/\/|www\.)|^\s*(?:javascript|data|vbscript|blob|file|mailto|about|filesystem):|^\s*(?:\/\/|\\\\)/i;
+const LINK = /(?:^|[^A-Za-z0-9])(?:[a-z][a-z0-9+.-]{0,31}:\/\/|www\.)|^\s*(?:javascript|data|vbscript|blob|file|mailto|about|filesystem):|^\s*(?:\/\/|\\\\)/i;
 const KEYS_NEVER = ['__proto__', 'constructor', 'prototype'];
 const DEEPEST = 32;
 
-/* Every string of a JSON value, and every key, held to plain text with no link in it; no key reaches a prototype. */
+/* Every string of a JSON value, and every key, held to one line of plain text with no link in it; no key reaches a
+   prototype. A string longer than any label is refused before a pattern reads it, so no string costs the server time. */
 function plainJson(path: string, root: unknown): void {
   const stack: [unknown, string, number][] = [[root, '', 0]];
   for (let next = stack.pop(); next; next = stack.pop()) {
     const [value, where, depth] = next;
     if (depth > DEEPEST) refuse('json_shape', path, `${where || 'the file'} goes deeper than ${DEEPEST} levels`);
     if (typeof value === 'string') {
-      if (NOT_PLAIN.test(value) || /[<>]/.test(value)) refuse('text_not_plain', path, where);
+      if (value.length > THEME_FILE_LIMITS.jsonText) refuse('json_shape', path, `${where || 'the file'}: longer than ${THEME_FILE_LIMITS.jsonText} characters`);
+      if (NOT_ONE_LINE.test(value) || /[<>]/.test(value)) refuse('text_not_plain', path, where);
       if (LINK.test(value) || value.includes('../')) refuse('link_outside', path, where);
       continue;
     }
     if (typeof value !== 'object' || value === null) continue;
     for (const key of Object.keys(value)) {
       const at = where ? `${where}.${key}` : key;
-      if (KEYS_NEVER.includes(key) || NOT_PLAIN.test(key)) refuse('json_shape', path, at);
+      if (KEYS_NEVER.includes(key) || key.length > THEME_FILE_LIMITS.jsonText || NOT_ONE_LINE.test(key)) refuse('json_shape', path, at.slice(0, THEME_FILE_LIMITS.shown));
       stack.push([(value as Record<string, unknown>)[key], at, depth + 1]);
     }
   }

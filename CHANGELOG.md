@@ -19,7 +19,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Added
 
-- A theme is one zip archive (docs/theme-archive.md): the CEO uploads it in the theme store, Hornhoof checks every file in it as data and refuses one that holds code, links or more than its limits with what to fix and where, and an installed theme changes the interface's colours and fonts, the world map and the agents' world voice and names with no change to Hornhoof's code.
+- A theme can now come as one zip archive (docs/theme-archive.md): its look, fonts, painted interface parts in the forms of the theme UI kit 1.0, world, world voice, pictures and licence, all data and no code. The server checks it whole, says plainly what is wrong and where, stores it for the company with its licence word for word, and serves its files only to that company; whoever runs the server can install one for a named company from the command line, with a log of each attempt. The CEO uploads it in the theme store and gets what to fix and where when it is refused; an installed theme changes the interface and, with all its own art, the world map and the agents' world voice and names, with no change to Hornhoof's code. A world theme that does not bring all its art installs as its interface alone, and its card says so.
 
 ## [0.42.0] - 2026-11-23
 

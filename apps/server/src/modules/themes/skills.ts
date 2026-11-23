@@ -1,5 +1,6 @@
 import { validateWorldPackBehavior, type WorldLangText, type WorldPackBehaviorSpec } from '@hornhoof/protocol/world';
 import { z } from 'zod';
+import { NOT_ONE_LINE } from './files.js';
 
 /* The world voice and era names of an uploaded theme (docs/theme-archive.md, section 5). An archive gives words, never
    instructions: Hornhoof writes the voice skill from its own fixed text and quotes the archive's lines in it as examples
@@ -10,9 +11,12 @@ const NAME = 40;
 const NAMES = 120;
 const SALUTATIONS = 12;
 
-const line = z.string().trim().min(1).max(LINE);
+/* One line a person sees whole: no line break, tab, invisible or format character, so a line quoted in the voice stays
+   inside its quotes. */
+const visible = (text: string) => !NOT_ONE_LINE.test(text);
+const line = z.string().trim().min(1).max(LINE).refine(visible, 'one line of visible text');
 const lang = z.strictObject({ en: line, ru: line });
-const name = z.string().trim().min(1).max(NAME).regex(/^[\p{L}\p{M}][\p{L}\p{M} '-]*$/u, 'a name is letters, spaces, - and \'');
+const name = z.string().trim().min(1).max(NAME).regex(/^[\p{L}\p{M}][\p{L}\p{M} '-]*$/u, 'a name is letters, spaces, - and \'').refine(visible, 'a name is letters a person sees');
 const names = z.array(name).min(1).max(NAMES);
 
 export const ArchiveSkills = z.strictObject({

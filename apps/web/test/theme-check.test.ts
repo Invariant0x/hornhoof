@@ -114,6 +114,28 @@ describe('the world of a theme archive', () => {
     expect(worldPackOfData('t-1', [], BASE)).toEqual({ ok: false, errors: ['world.json must be an object'] });
   });
 
+  /* A world asks every browser of the company for its map: an archive's world stays within a city's work (#1960, F3). */
+  it('refuses a world whose numbers ask a browser for more than a city', () => {
+    const data = dataOfWorldPack(registeredWorldPacks().find(one => one.id === 'space')!) as Raw;
+    const params = data.params as Raw;
+    const camera = data.camera as Raw;
+    const projection = data.projection as Raw;
+    const cases: [string, Raw, string][] = [
+      ['a map of 100 000 tiles a side', { mapSize: 100_000 }, 'mapSize is at most 512 tiles'],
+      ['chunks of one tile', { params: { ...params, chunkSize: 1 } }, 'params.chunkSize is from 2 to 64 tiles'],
+      ['more chunks a side than a browser holds', { mapSize: 512, params: { ...params, chunkSize: 2 } }, 'the map is at most 128 chunks a side: mapSize / params.chunkSize'],
+      ['a zoom of a hundred times', { camera: { ...camera, maxZoom: 100 } }, 'camera.maxZoom is from 0.25 to 4'],
+      ['tiles of 100 000 px', { projection: { ...projection, defaultTileW: 100_000, defaultTileH: 50_000 } }, 'projection.defaultTileW is beyond 10000'],
+      ['a number of a billion anywhere', { projection: { ...projection, sun: { ...(projection.sun as Raw), kelvin: 1e9 } } }, 'projection.sun.kelvin is beyond 10000'],
+    ];
+    for (const [name, change, said] of cases) {
+      expect(worldPackOfData('t-1', { ...data, ...change }, BASE), name).toMatchObject({ ok: false, errors: expect.arrayContaining([said]) });
+    }
+    for (const pack of registeredWorldPacks().filter(one => one.terrainRecipe && !one.resolveEmptyTileId)) {
+      expect(worldPackOfData('t-1', dataOfWorldPack(pack), BASE).ok, pack.id).toBe(true);
+    }
+  });
+
   it('checks the art of a world by the art contract, and indexes what passed', () => {
     const pack = registeredWorldPacks().find(one => one.id === 'egypt')!;
     const world = dataOfWorldPack(pack);
@@ -125,14 +147,18 @@ describe('the world of a theme archive', () => {
       return head;
     };
     const empty = checkWorld({ id: 't-1', world, baseUrl: BASE, art: [], files: [] });
-    expect(empty).toEqual({ ok: true, world, artIndex: { contract: ART_CONTRACT_VERSION, pack: 't-1', files: {} } });
+    /* A world passes with any art the contract takes; it is whole only with every picture its catalog requires. */
+    const required = declaredArtFiles(pack).filter(slot => slot.required).length;
+    expect(empty).toEqual({ ok: true, world, artIndex: { contract: ART_CONTRACT_VERSION, pack: 't-1', files: {} }, complete: false, missing: required });
     const loose = checkWorld({ id: 't-1', world, baseUrl: BASE, art: [{ path: 'loose/one.png', head: png(4, 4) }], files: ['loose/one.png'] });
     expect(loose).toMatchObject({ ok: true, artIndex: { files: { 'loose/one.png': { w: 4, h: 4 } } } });
     const anchored = declaredArtFiles(pack).find(slot => slot.passport === 'anchor')!;
     const bare = checkWorld({ id: 't-1', world, baseUrl: BASE, art: [{ path: anchored.path, head: png(64, 64) }], files: [anchored.path] });
     expect(bare).toEqual({ ok: false, code: 'art_bad', detail: `${anchored.path}: needs a passport with an anchor inside the picture` });
     const held = checkWorld({ id: 't-1', world, baseUrl: BASE, art: [{ path: anchored.path, head: png(64, 64), passport: { anchor: [32, 60] } }], files: [anchored.path] });
-    expect(held).toMatchObject({ ok: true, artIndex: { files: { [anchored.path]: { w: 64, h: 64, passport: { anchor: { x: 32, y: 60 } } } } } });
+    expect(held).toMatchObject({ ok: true, artIndex: { files: { [anchored.path]: { w: 64, h: 64, passport: { anchor: { x: 32, y: 60 } } } } }, complete: false, missing: required - 1 });
+    const dungeon = registeredWorldPacks().find(one => one.id === 'dungeon')!;
+    expect(checkWorld({ id: 't-1', world: dataOfWorldPack(dungeon), baseUrl: BASE, art: [], files: [] })).toMatchObject({ ok: true, complete: false, missing: 0 });
     expect(checkWorld({ id: 't-1', world: { ...world, recipe: { use: 'volcano' } }, baseUrl: BASE, art: [], files: [] })).toMatchObject({ ok: false, code: 'world_bad' });
   });
 });

@@ -61,10 +61,53 @@ function recipeOf(raw: unknown, errors: string[]): TerrainRecipeSpec | null {
 }
 
 /* The pack of a world written as data, under the theme's id, its art at baseUrl, checked as the shipped packs are. */
+/* What a world written as data stays within, so an archive never asks a browser for more than a city's work: the map and
+   its chunks, the zoom, the tile pictures and every other number. Hornhoof's packs are 150 tiles in chunks of 4, and
+   no number of theirs is over 5200. */
+export const WORLD_DATA_BOUNDS = {
+  anyNumber: 10_000, mapSize: 512, chunkSize: [2, 64], chunksPerSide: 128, zoom: [0.25, 4], tileW: 1024, lods: 8, texelsPerTile: 1024,
+} as const;
+
+const numberAt = (raw: unknown, ...path: string[]): number | undefined => {
+  let value = raw;
+  for (const key of path) value = isObject(value) ? value[key] : undefined;
+  return typeof value === 'number' ? value : undefined;
+};
+
+function boundsErrors(raw: Raw): string[] {
+  const B = WORLD_DATA_BOUNDS;
+  const errors: string[] = [];
+  const stack: [unknown, string][] = [[raw, '']];
+  for (let next = stack.pop(); next; next = stack.pop()) {
+    const [value, at] = next;
+    if (typeof value === 'number' && !(Math.abs(value) <= B.anyNumber)) errors.push(`${at} is beyond ${B.anyNumber}`);
+    else if (typeof value === 'object' && value !== null) for (const [key, inner] of Object.entries(value)) stack.push([inner, at ? `${at}.${key}` : key]);
+  }
+  const mapSize = numberAt(raw, 'mapSize') ?? 0;
+  const chunkSize = numberAt(raw, 'params', 'chunkSize') ?? 0;
+  if (mapSize > B.mapSize) errors.push(`mapSize is at most ${B.mapSize} tiles`);
+  if (chunkSize < B.chunkSize[0] || chunkSize > B.chunkSize[1]) errors.push(`params.chunkSize is from ${B.chunkSize[0]} to ${B.chunkSize[1]} tiles`);
+  else if (Math.ceil(mapSize / chunkSize) > B.chunksPerSide) errors.push(`the map is at most ${B.chunksPerSide} chunks a side: mapSize / params.chunkSize`);
+  for (const zoom of ['minZoom', 'defaultZoom', 'maxZoom']) {
+    const value = numberAt(raw, 'camera', zoom);
+    if (value !== undefined && (value < B.zoom[0] || value > B.zoom[1])) errors.push(`camera.${zoom} is from ${B.zoom[0]} to ${B.zoom[1]}`);
+  }
+  const projection = isObject(raw.projection) ? raw.projection : {};
+  const lods = Array.isArray(projection.lods) ? projection.lods : [];
+  if (lods.length > B.lods) errors.push(`projection.lods has at most ${B.lods} tiers`);
+  for (const [at, value] of [['projection.defaultTileW', projection.defaultTileW], ...lods.map((lod, n) => [`projection.lods.${n}.tileW`, isObject(lod) ? lod.tileW : undefined])] as [string, unknown][]) {
+    if (typeof value === 'number' && value > B.tileW) errors.push(`${at} is at most ${B.tileW} px`);
+  }
+  const texels = numberAt(raw, 'terrainArt', 'texelsPerTile');
+  if (texels !== undefined && texels > B.texelsPerTile) errors.push(`terrainArt.texelsPerTile is at most ${B.texelsPerTile}`);
+  return errors;
+}
+
 export function worldPackOfData(id: string, raw: unknown, baseUrl: string): Built {
   if (!isObject(raw)) return { ok: false, errors: ['world.json must be an object'] };
   const errors: string[] = [];
   for (const key of Object.keys(raw)) if (!FIELDS.includes(key)) errors.push(key === 'id' ? 'id is the theme\'s own: leave it out' : `world.json has an unknown field "${key}"`);
+  errors.push(...boundsErrors(raw));
   const recipe = recipeOf(raw.recipe, errors);
   if (raw.art !== undefined && !isObject(raw.art)) errors.push('art must be the art catalog object');
   if (errors.length || !recipe) return { ok: false, errors };
