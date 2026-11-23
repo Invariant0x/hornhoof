@@ -31,7 +31,8 @@ export async function firstOfRun(ctx: Ctx, row: Case): Promise<Case | null> {
   if (!outcome || !at || !REPEATING.has(outcome)) return null;
   const earlier = or(lt(programOperatorCases.escalatedAt, at), and(eq(programOperatorCases.escalatedAt, at), lt(programOperatorCases.id, row.id)));
   const [first] = await ctx.db.select().from(programOperatorCases)
-    .where(and(await runScope(ctx, row, at), earlier, sql`${programOperatorCases.resolution}->>'outcome' = ${outcome}`))
+    .where(and(await runScope(ctx, row, at), earlier, sql`${programOperatorCases.resolution}->>'outcome' = ${outcome}`,
+      outcome === 'operator_unavailable' ? eq(programOperatorCases.recoveryHold, false) : undefined))
     .orderBy(asc(programOperatorCases.escalatedAt), asc(programOperatorCases.id)).limit(1);
   return first ?? null;
 }

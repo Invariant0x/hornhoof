@@ -188,9 +188,12 @@ async function serveSelectScreens(page: Page) {
           {
             id: 'prop-staff',
             kind: 'staff',
+            agent: { id: 'a1', name: 'Orchestrator' },
             brief: 'Hire the backend engineer.',
             department: LONG_DEPT,
+            at: '2026-11-06T09:00:00.000Z',
             ownerPersonId: 'p1',
+            canAnswer: true,
             items: [{ role: 'DEV-BE', name: 'Backend engineer', product: null, model: '', subscription: 's-claude', skills: [] }],
           },
         ],
@@ -276,11 +279,10 @@ async function expectChoiceInside(page: Page, phone: boolean) {
 test('keeps the department choice and the search box inside a 375 px phone screen and a 1280 px one when a department name is long', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await serveSelectScreens(page);
-  await page.goto('/');
-  await page.getByRole('button', { name: /^Tasks/ }).click();
-  await expect(page.getByRole('heading', { level: 1, name: 'My tasks' })).toBeVisible();
+  await page.goto('/tasks?show=waits');
+  await expect(page.getByRole('heading', { level: 1, name: en.tracker.where.waits })).toBeVisible();
 
-  /* StaffCard selects in what waits for the person */
+  /* StaffCard selects in what waits for the person: the queue of "Waits for me" brings up the staff proposal. */
   const staffSelects = page.locator('.staff-pick select');
   await expect(staffSelects).toHaveCount(2);
   for (let i = 0; i < 2; i++) {

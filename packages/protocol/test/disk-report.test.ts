@@ -30,8 +30,8 @@ describe("a node's disk report", () => {
 
   it("names the work it keeps because it can't be restored, biggest first, and leaves the list out where it keeps none", () => {
     const kept = [
-      { part: 'workingCopies', agent: '479e2112-3e30-40a7-89a2-2e6786f56a70', path: 'hornhoof', task: 1750, bytes: 9 * GB, why: 'uncommitted' },
-      { part: 'workingCopies', agent: 'f7863b74-d43d-49db-9d48-774326e62283', path: 'scratch/copy', task: null, bytes: 2 * GB, why: 'unpushed' },
+      { part: 'workingCopies', agent: '11111111-1111-4111-8111-111111111111', path: 'shop', task: 42, bytes: 9 * GB, why: 'uncommitted' },
+      { part: 'workingCopies', agent: '22222222-2222-4222-8222-222222222222', path: 'scratch/copy', task: null, bytes: 2 * GB, why: 'unpushed' },
       { part: 'workingCopies', agent: 'agent-c', path: 'shop-7', task: 7, bytes: GB, why: 'ignored', ignored: ['.env', 'local/'] },
     ];
     expect(load({ disk: { ...DISK, kept } })).toEqual({ type: 'load', ...LOAD, disk: { ...DISK, kept } });

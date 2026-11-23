@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { runJob, type ProviderAdapter } from '../src/runner.js';
-import { removeClosedCopies } from '../src/task-copies.js';
+import { agentGit, closedCopies, removeClosedCopies } from '../src/task-copies.js';
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' });
@@ -57,6 +57,49 @@ describe("the worktrees of an agent's closed tasks", () => {
     expect(existsSync(join(dirty, 'notes.md'))).toBe(true);
     expect(trees()).toEqual([clone, dirty]);
     expect(lines).toEqual([`Kept the worktree of closed task #8 at ${dirty}: it has changes that are not committed.`]);
+  });
+
+  it('removes the copy of a closed task whose ignored files all come back by themselves: dependencies, builds, caches, test output', async () => {
+    const { agent, clone, copy } = agentFolder();
+    const done = copy('shop-14', 'task-14');
+    writeFileSync(join(clone, '.git', 'info', 'exclude'), 'node_modules/\ndist/\n.cache/\n*.tsbuildinfo\napps/web/e2e/results/\n');
+    for (const folder of ['node_modules/left-pad', 'packages/web/dist', '.cache/vite', 'apps/web/e2e/results/run-1']) {
+      mkdirSync(join(done, folder), { recursive: true });
+      writeFileSync(join(done, folder, 'x'), 'x\n');
+    }
+    writeFileSync(join(done, 'tsconfig.tsbuildinfo'), '{}\n');
+    const lines = await removeClosedCopies(clone, agent, { open: [], upTo: 14 }, OWNER);
+    expect(existsSync(done)).toBe(false);
+    expect(lines).toEqual([`Removed the worktree of closed task #14 at ${done}.`]);
+  });
+
+  it('keeps the copy of a closed task that holds an ignored file that comes back from nowhere, and names it', async () => {
+    const { agent, clone, copy, trees } = agentFolder();
+    const done = copy('shop-15', 'task-15');
+    writeFileSync(join(clone, '.git', 'info', 'exclude'), 'node_modules/\n.env\nlocal/\n');
+    writeFileSync(join(done, '.env'), 'KEY=made-up\n');
+    mkdirSync(join(done, 'local'));
+    writeFileSync(join(done, 'local', 'data.db'), 'rows\n');
+    mkdirSync(join(done, 'node_modules'));
+    const lines = await removeClosedCopies(clone, agent, { open: [], upTo: 15 }, OWNER);
+    expect(existsSync(join(done, '.env'))).toBe(true);
+    expect(trees()).toEqual([clone, done]);
+    expect(lines).toEqual([`Kept the worktree of closed task #15 at ${done}: it holds what git ignores and no remote has: .env, local/.`]);
+  });
+
+  it('keeps the copy if an ignored file that comes back from nowhere appears while its size is being measured', async () => {
+    const { agent, clone, copy, trees } = agentFolder();
+    const done = copy('shop-16', 'task-16');
+    writeFileSync(join(clone, '.git', 'info', 'exclude'), '.env\n');
+    const run = agentGit(agent, OWNER)!;
+    const { copies } = await closedCopies(clone, agent, { open: [], upTo: 16 }, run, async path => {
+      writeFileSync(join(path, '.env'), 'KEY=late\n');
+    });
+    expect(existsSync(join(done, '.env'))).toBe(true);
+    expect(trees()).toEqual([clone, done]);
+    expect(copies).toEqual([
+      { path: done, task: 16, removed: false, why: 'ignored', reason: 'it holds what git ignores and no remote has: .env', ignored: ['.env'] },
+    ]);
   });
 
   it('keeps the copy of a closed task with a commit that is not on the remote, and says why', async () => {

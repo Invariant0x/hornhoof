@@ -32,7 +32,7 @@ export type Person = {
   isCeoDelegate?: boolean;
 };
 
-export type Company = { id: string; name: string };
+export type Company = { id: string; name: string; theme?: string };
 
 /* canDecideCompany: this person takes the decisions only the CEO takes, the orchestrator's cards among them. */
 export type Me = { person: Person; company: Company; canDecideCompany?: boolean };
@@ -469,6 +469,7 @@ export type StreamMessage =
   | { type: 'inbox'; agentId: string }
   | { type: 'working'; working: number }
   | { type: 'org' }
+  | { type: 'company_theme'; theme: string }
   | { type: 'notebook'; spot: { departmentId: string | null } }
   | { type: 'pulse'; from: Endpoint; to: Endpoint }
   | { type: 'task'; id: string; spot: { departmentId: string | null; parentId?: string | null } }

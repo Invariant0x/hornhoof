@@ -1,5 +1,5 @@
 {
-  "id": "7d5df824-a742-4e79-afb8-1e87428bc4c6",
+  "id": "47692e49-b71c-4e8e-a4b3-a5534e15c771",
   "prevId": "1ea1683c-5c0d-437a-a105-6312a329d5e9",
   "version": "7",
   "dialect": "postgresql",
@@ -5821,18 +5821,6 @@
         "copy_name": {
           "name": "copy_name",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "copy_schema_since": {
-          "name": "copy_schema_since",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "copy_schema_attempt": {
-          "name": "copy_schema_attempt",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -15701,6 +15689,73 @@
           "value": "(\"wait_policies\".\"created_by_person_id\" IS NULL) <> (\"wait_policies\".\"created_by_agent_id\" IS NULL)"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.world_layouts": {
+      "name": "world_layouts",
+      "schema": "",
+      "columns": {
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "pack_id": {
+          "name": "pack_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'default'"
+        },
+        "seed": {
+          "name": "seed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "layout": {
+          "name": "layout",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "relocations": {
+          "name": "relocations",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "world_layouts_company_id_companies_id_fk": {
+          "name": "world_layouts_company_id_companies_id_fk",
+          "tableFrom": "world_layouts",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },

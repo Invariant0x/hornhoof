@@ -5,6 +5,7 @@ import { approvalPolicies, departments, tasks, turns } from '../src/db/schema.js
 import { answer, ask, loadTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { BASE } from './development-echelons-fixture.js';
 import { changeReport, testsFixture, verified } from './development-echelons-verification.js';
+import { RECORDED } from './recorded-fixture.js';
 
 /* A checked candidate of the department's work, which goes into its open turn, or of a product with a repository of its
    own, which goes to main with a person's approval. */
@@ -167,7 +168,7 @@ describe('accepting only a checked and integrated candidate', () => {
         integration: { branch: `turn-${turn.number}`, commit: f.finalCommit },
       },
     });
-    const closedParent = await report(f.ctx, f.head.id, group.id, { done: true, summary: 'All turn branches accepted; ready for one release full run.' });
+    const closedParent = await report(f.ctx, f.head.id, group.id, { done: true, summary: 'All turn branches accepted; ready for one release full run.', recorded: RECORDED });
     expect(closedParent.task).toMatchObject({ status: 'done' });
   });
   it('verifies without run_tests a task of the department, which goes into its open turn though it joins none until accepted', async () => {

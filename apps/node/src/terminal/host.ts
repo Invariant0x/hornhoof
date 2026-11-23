@@ -29,8 +29,8 @@ import { agyTranscript, prepareAgy } from '../providers/antigravity-terminal.js'
 import { acceptClaudeDialogs, claudeToolsFile, claudeTranscript, writeClaudeTools } from '../providers/claude-terminal.js';
 import { findRollout, rolloutFiles } from '../providers/codex-terminal.js';
 import { findKimiWire, prepareKimi } from '../providers/kimi-terminal.js';
-import { FAILURE, failure } from './failures.js';
-import { TurnEnds, hookCalls, claudeEnd, stopIsLate, type TurnEnd } from './turn-signals.js';
+import { AGY_TOKEN_REFUSED, FAILURE, failure } from './failures.js';
+import { TurnEnds, agyHookSession, claudeEnd, foreignAgyHook, hookCalls, keepsAgySession, stopIsLate, stopSession, type TurnEnd } from './turn-signals.js';
 import { busy, enterPending, hasSettled, idleRefusal, RETIRED, stale, type IdleEvidence, type RetireResult } from './program-retire.js';
 import { claudeOwn, claudeTook, claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
 import { CALLS } from './tool-calls.js';
@@ -214,6 +214,9 @@ type Agent = {
   agyAnswered: boolean;
   /* Diagnostics visible before this invocation cannot classify its failure. */
   agyCursor: RecordingCursor | null;
+  /* agy refused its sign-in token (401), the program starts anew with the saved sign-in, and no turn has ended since: a second
+     refusal now is a sign-in that no longer works. */
+  agyRenewed?: boolean;
   /* Recording position before this turn: an older completion must never answer a new prompt. */
   completionStart: Promise<RecordingCursor | null> | null;
   /* Interruption notices already on screen when this turn started belong to older turns. */
@@ -316,6 +319,7 @@ const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000,
 /* The options given, without those set to nothing. */
 const defined = (opts: Options): Partial<Options> => Object.fromEntries(Object.entries(opts).filter(([, value]) => value !== undefined));
 const withSession = (m: NodeMessage, session: string | null): NodeMessage => (m.type === 'job.program' && session ? { ...m, session } : m);
+const hookPayload = (body: unknown): Record<string, unknown> => (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
 /* When the host last looked at the program, and the tool it ran then. */
 type Look = { at: number; call: Pending | null; retry?: ProgramRetry | null };
 type ObservedProgram = { watch: ProgramWatch; look: Look };
@@ -1591,7 +1595,7 @@ export class TerminalHost {
     const raw = agyError(this.agyOutput(a), undefined);
     if (!raw) return;
     a.signAt = Date.now();
-    const detail = FAILURE.antigravity(raw);
+    const detail = FAILURE.antigravity(raw, a.agyRenewed);
     this.turnFailed(a, detail.text, detail);
   }
 
@@ -1695,7 +1699,7 @@ export class TerminalHost {
   /* A person cleared the conversation in Claude Code, which goes on in a new session with a log of its own; or Kimi Code
      named its session, whose log the host finds once Kimi writes it; or Antigravity named its conversation. */
   private follow(a: Agent, sessionId: string): void {
-    if (!sessionId || sessionId === a.sessionId) return;
+    if (!sessionId || sessionId === a.sessionId || keepsAgySession(a.program?.kind, a.sessionId)) return;
     if (a.sessionId) a.blank = sessionId;
     this.leaveSession(a);
     a.sessionId = sessionId;
@@ -1828,6 +1832,7 @@ export class TerminalHost {
     this.intentional(a, end.status === 'stopped' ? 'cancelled' : 'completed');
     this.endWords(a, turn);
     this.notBusyAfter(a, end);
+    this.agyTokenEnded(a, end);
     turn.ending = end;
     if (!turn.typed) return a.ended?.resolve(end.message);
     this.settleTyped(a, end, turn);
@@ -1841,6 +1846,22 @@ export class TerminalHost {
     a.question = null;
     a.stopped = end.status === 'stopped';
     a.failure = end.failure ?? null;
+  }
+
+  /* agy keeps the Google access token it started with for as long as its program runs, and it lasts an hour. A turn it ends
+     with a 401 leaves the program to start anew for the next turn, which reads the saved sign-in and gets a new token; the
+     server tries the turn once more by then. That start's first turn may be refused again, and the failure is then a
+     sign-in one, whose reason Operations read. Any other end of a turn clears the mark. */
+  private agyTokenEnded(a: Agent, end: TurnEnd): void {
+    if (a.program?.kind !== 'antigravity') return;
+    const refused = end.status === 'failed' && AGY_TOKEN_REFUSED.test(end.failure?.text ?? '');
+    const again = end.failure?.kind === 'auth';
+    a.agyRenewed = refused && !again;
+    if (!refused) return;
+    a.hash = null;
+    this.log(`Agent ${a.key} (antigravity): 401 UNAUTHENTICATED${again
+      ? ' again, right after the program started anew with the saved sign-in. The turn fails as a sign-in failure.'
+      : ', its access token ran out. The program starts anew with the saved sign-in for the turn\'s one retry.'}`);
   }
 
   private settleTyped(a: Agent, end: TurnEnd, turn: Turn): void {
@@ -2436,8 +2457,13 @@ export class TerminalHost {
     const a = this.agents.get(key);
     if (!a) return;
     if (event !== 'status') a.signAt = Date.now();
-    const data = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+    const data = hookPayload(body);
+    if (this.foreignAgy(a, data)) return;
     return this.hooks.get(event)?.(a, data);
+  }
+
+  private foreignAgy(a: Agent, data: Record<string, unknown>): boolean {
+    return foreignAgyHook(a.program?.kind, a.sessionId, a.left, data);
   }
 
   private readonly hooks = new Map<string, Hook>([
@@ -2521,8 +2547,9 @@ export class TerminalHost {
   private async finalStoppedHook(a: Agent, data: Record<string, unknown>): Promise<void> {
     this.drain(a);
     const id = typeof data.turn_id === 'string' ? data.turn_id : undefined;
-    if (stopIsLate({ promptIn: this.stoppable(a), answersPerson: Boolean(a.personWords), from: data.session_id, session: a.sessionId, left: a.left })) return this.lateStop(a, data, id);
-    if (typeof data.session_id === 'string') this.follow(a, data.session_id);
+    const from = stopSession(a.program?.kind, data);
+    if (stopIsLate({ promptIn: this.stoppable(a), answersPerson: Boolean(a.personWords), from, session: a.sessionId, left: a.left })) return this.lateStop(a, data, id);
+    if (typeof from === 'string') this.follow(a, from);
     if (data.stopped === true) return this.interrupted(a, id);
     const detail = this.stopFailure(a, data);
     if (detail) return this.turnFailed(a, detail.text, detail, id);
@@ -2544,7 +2571,8 @@ export class TerminalHost {
     const failed = data.hook_event_name === 'StopFailure' || Boolean(data.error) || Boolean(data.error_type);
     if (!failed) return null;
     const raw = this.stopFailureData(a, data);
-    return a.program ? FAILURE[a.program.kind](raw) : failure('unknown', String(data.error));
+    if (!a.program) return failure('unknown', String(data.error));
+    return a.program.kind === 'antigravity' ? FAILURE.antigravity(raw, a.agyRenewed) : FAILURE[a.program.kind](raw);
   }
 
   private stopFailureData(a: Agent, data: Record<string, unknown>): Record<string, unknown> {
@@ -2576,7 +2604,8 @@ export class TerminalHost {
 
   private async invocation(a: Agent, data: Record<string, unknown>): Promise<void> {
     if (a.program?.kind !== 'antigravity') return;
-    if (typeof data.conversationId === 'string') this.follow(a, data.conversationId);
+    const session = agyHookSession(data);
+    if (session) this.follow(a, session);
     if (data.invocationNum !== 0) {
       a.agyAnswered = false;
       a.busy = true;

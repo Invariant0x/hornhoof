@@ -82,7 +82,10 @@ export function authRoutes(app: FastifyInstance, { db, config, bus, mode }: Ctx)
 
   app.get('/api/me', async req => {
     const person = await requirePerson(req, db);
-    const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, person.companyId));
+    const [company] = await db
+      .select({ id: companies.id, name: companies.name, theme: companies.theme })
+      .from(companies)
+      .where(eq(companies.id, person.companyId));
     /* Whether the cards only the CEO and the delegate decide show their buttons to this person. */
     return { person, company, canDecideCompany: actsAsCeo(person) };
   });

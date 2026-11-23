@@ -75,6 +75,27 @@ function wheelLines(viewport: WheelViewport | undefined, event: WheelEvent): num
   return viewport?.getLinesScrolled(event) ?? (event.deltaY < 0 ? -3 : 3);
 }
 
+/* Where the person is reading in history, or null when they follow the bottom of the live screen. */
+export function readingHistoryLine(term: Terminal): number | null {
+  const buffers = buffersOf(term);
+  if (borrowed.has(buffers)) return buffers.normal.ydisp;
+  if (!buffers.active.hasScrollback) return null;
+  const { viewportY, baseY } = term.buffer.active;
+  return baseY > 0 && viewportY < baseY ? viewportY : null;
+}
+
+/* Returns the terminal to the history line the person was reading, borrowing normal history over an alternate live screen. */
+export function restoreHistoryLine(term: Terminal, line: number): void {
+  const buffers = buffersOf(term);
+  if (!buffers.active.hasScrollback) {
+    if (buffers.normal.ybase === 0 || line >= buffers.normal.ybase) return;
+    borrowNormal(buffers);
+  }
+  const max = term.buffer.active.baseY;
+  if (max > 0) term.scrollToLine(Math.min(line, max));
+  if (borrowed.has(buffers)) term.refresh(0, term.rows - 1);
+}
+
 /* Both xterm's mouse protocol and its alt-screen arrows are suppressed before they can become terminal data. */
 export function attachTerminalScroll(term: Terminal): void {
   const viewport = (term as unknown as { _core: XtermCore })._core.viewport;

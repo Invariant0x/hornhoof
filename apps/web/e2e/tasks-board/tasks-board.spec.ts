@@ -692,7 +692,8 @@ for (const lang of LANGUAGES.map(l => l.id)) for (const dir of ['ltr', 'rtl'] as
 }
 
 /* What waits for the person: the question on the urgent task, and the cards Hornhoof kept, inside the page in every
-   language, at a desk and on a phone, and mirrored right to left. */
+   language, at a desk and on a phone, and mirrored right to left. The queue shows one card at a time with the others as
+   lines under it, so each card is brought up by its line. */
 test('shows what waits for the person and the cards kept for them inside the page', async ({ page }, info) => {
   await serveTasksBoard(page);
   const top = TASKS.find(x => x.turn !== null && !x.parentId)!;
@@ -708,16 +709,27 @@ test('shows what waits for the person and the cards kept for them inside the pag
     await expect(page.getByRole('heading', { level: 1 })).toHaveText(t.tracker.where.waits);
     const waiting = page.getByRole('region', { name: t.tasks.waiting });
     await expect(waiting).toContainText(QUESTION);
-    await expect(page.getByRole('region', { name: t.tasks.cards.tagTitle })).toContainText(t.tasks.cards.tag('v1.7.0', 24, 'unrecorded'));
-    await expect(page.getByRole('region', { name: t.tasks.cards.summaryTitle(23) })).toContainText(t.tasks.cards.summary(23, 'v1.6.0', t.tracker.side.turns));
     await inside(page, `waits ${lang} ${width}`);
+    const tagText = t.tasks.cards.tag('v1.7.0', 24, 'unrecorded');
+    await waiting.getByRole('button', { name: tagText }).click();
+    await expect(page.getByRole('region', { name: t.tasks.cards.tagTitle })).toContainText(tagText);
+    await inside(page, `waits tag ${lang} ${width}`);
+    const summaryText = t.tasks.cards.summary(23, 'v1.6.0', t.tracker.side.turns);
+    await waiting.getByRole('button', { name: summaryText }).click();
+    await expect(page.getByRole('region', { name: t.tasks.cards.summaryTitle(23) })).toContainText(summaryText);
+    await inside(page, `waits summary ${lang} ${width}`);
     await capture(page, info, `waits-${lang}-${width}`);
   }
   await open(page, 'en', 375, '/tasks?show=waits');
   await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
-  const tag = page.getByRole('region', { name: MESSAGES.en.tasks.cards.tagTitle });
-  /* Its edge line moves to the right, where the text starts. */
-  expect(await tag.evaluate(el => getComputedStyle(el).borderRightWidth)).toBe('2px');
+  const waiting = page.getByRole('region', { name: MESSAGES.en.tasks.waiting });
+  await waiting.getByRole('button', { name: MESSAGES.en.tasks.cards.tag('v1.7.0', 24, 'unrecorded') }).click();
+  await expect(page.getByRole('region', { name: MESSAGES.en.tasks.cards.tagTitle })).toBeVisible();
+  /* The card of the queue has no edge line of its own; the lines of the other cards under it mirror: the icon of a line
+     stands at its right, where its text starts. */
+  const line = waiting.locator('.wait-strip').first();
+  const [icon, words] = [(await line.locator('.ic').boundingBox())!, (await line.locator('.wait-strip-lines').boundingBox())!];
+  expect(icon.x).toBeGreaterThanOrEqual(words.x + words.width - 1);
   await inside(page, 'waits rtl');
   await capture(page, info, 'waits-rtl-375');
 });

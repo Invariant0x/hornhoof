@@ -123,20 +123,23 @@ describe('closing a turn by its tag races the results that join it', () => {
     const ready = kind === 'echelons' ? await f.designTask() : null;
     const turnkey = kind === 'turnkey' ? await f.turnkeyTask() : null;
     const read = f.b.ctx.readCommit;
-    let joined: Promise<unknown> | null = null;
+    let joined = null as Promise<unknown> | null;
     f.b.ctx.readCommit = async (repo, want) => {
       const at = await read(repo, want);
       if (!joined && 'branch' in want && want.branch === f.branch) {
         f.repo.heads[f.branch] = LATER;
         joined = ready
           ? report(f.a.ctx, f.head.id, ready.task.id, { done: true, summary: 'Fast-forwarded the turn.', acceptance: ready.acceptance })
-          : report(f.a.ctx, f.player.id, turnkey!.id, { done: true, summary: 'Fast-forwarded the turn to task-N.' });
+          : report(f.a.ctx, f.player.id, turnkey!.id, { done: true, summary: 'Fast-forwarded the turn to task-N.', turnkey: { commit: OWN, baseCommit: MAIN } });
         await joined;
       }
       return at;
     };
     await minuteRound(f.b.ctx, new Date(), () => () => undefined);
     expect(joined).not.toBeNull();
+    /* The join happens inside the read of the head, whose failure the release round swallows: a report the server turned
+       down has to say so here, in its own words, and not show up below as a task still open. */
+    await joined;
     const id = (ready?.task ?? turnkey!).id;
     expect(await loadTask(pg.db, id)).toMatchObject({ status: 'done', turnId: f.turn.id });
     expect(await f.openTurn()).toMatchObject({ id: f.turn.id });

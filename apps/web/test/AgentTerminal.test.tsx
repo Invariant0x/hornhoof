@@ -313,6 +313,7 @@ function view() {
 }
 
 const frame = () => new Promise(r => requestAnimationFrame(() => r(undefined)));
+const answersTakenIn = () => new Promise<void>(resolve => setImmediate(resolve));
 
 const socket = async () => {
   await waitFor(() => expect(FakeSocket.all.length).toBeGreaterThan(0));
@@ -563,6 +564,117 @@ describe("an agent's live terminal in its window", () => {
     FakeSocket.all[1]!.opened();
     FakeSocket.all[1]!.screen('new screen');
     expect(terms[0]!.written).toEqual(['new screen']);
+  });
+
+  it('recovers from a transient socket drop without flashing the loader or clearing the screen before new output arrives', async () => {
+    const { container } = open();
+    const first = await socket();
+    const terminal = within(container.querySelector<HTMLElement>('.t-term')!);
+    act(() => {
+      first.opened();
+      first.program(true);
+      first.screen('old screen');
+    });
+    expect(terminal.queryByRole('status')).not.toBeInTheDocument();
+    reconnects(() => first.ended(4410, 'node_offline'));
+    expect(FakeSocket.all).toHaveLength(2);
+    expect(terminal.queryByRole('status')).not.toBeInTheDocument();
+    expect(terms[0]!.written).toEqual(['old screen']);
+    act(() => {
+      FakeSocket.all[1]!.opened();
+      FakeSocket.all[1]!.program(true);
+    });
+    expect(terminal.queryByRole('status')).not.toBeInTheDocument();
+    expect(terms[0]!.written).toEqual(['old screen']);
+    act(() => FakeSocket.all[1]!.screen('new screen'));
+    expect(terms[0]!.written).toEqual(['new screen']);
+    expect(terminal.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('buffers history and live screen together on reconnect and restores the scrolled-up reading line', async () => {
+    open();
+    const first = await socket();
+    act(() => {
+      first.opened();
+      first.program(true);
+      first.screen('old screen');
+    });
+    const term = terms[0]!;
+    term.buffer.active.baseY = 200;
+    term.buffer.active.viewportY = 50;
+    const resets = vi.spyOn(term as unknown as { reset(): void }, 'reset').mockImplementation(() => {
+      term.written = [];
+      term.buffer.active.baseY = 0;
+      term.buffer.active.viewportY = 0;
+    });
+    const origWrite = term.write.bind(term);
+    term.write = (data, onWritten) => {
+      origWrite(data);
+      if (data.includes('\x1b[1;2r')) term.buffer.active.baseY = 200;
+      onWritten?.();
+    };
+    reconnects(() => first.ended(4410, 'node_offline'));
+    expect(FakeSocket.all).toHaveLength(2);
+    const historyChunk = '\x1b7\x1b[0m\x1b[1;2r\x1b[1;1H\x1b[2K\x1b[2;1H\x1b[2K\x1b[1;1HLINE-0\x1b[0m\r\n\n\x1b[r\x1b8';
+    act(() => {
+      FakeSocket.all[1]!.opened();
+      FakeSocket.all[1]!.program(true);
+      FakeSocket.all[1]!.screen(historyChunk);
+    });
+    /* Still holding the history-only chunk until the live screen attach arrives, so the terminal never flashes empty. */
+    expect(resets).not.toHaveBeenCalled();
+    act(() => FakeSocket.all[1]!.screen('\x1b[H\x1b[2JNEW-43'));
+    expect(resets).toHaveBeenCalledTimes(1);
+    expect(term.written).toEqual([`${historyChunk}\x1b[H\x1b[2JNEW-43`]);
+    expect(term.buffer.active.viewportY).toBe(50);
+  });
+
+  it('does not flash the opening loader over live output when a running program restarts', async () => {
+    const { container } = open();
+    const ws = await socket();
+    const terminal = within(container.querySelector<HTMLElement>('.t-term')!);
+    act(() => {
+      ws.opened();
+      ws.program(true);
+      ws.screen('previous work');
+    });
+    expect(terminal.queryByRole('status')).not.toBeInTheDocument();
+    act(() => ws.program(false));
+    expect(terminal.queryByRole('status')).not.toBeInTheDocument();
+    act(() => ws.program(true));
+    expect(terminal.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('keeps the terminal mounted when a background poll briefly reports terminal=false while the node reconnects', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame'] });
+    let first: FakeSocket | undefined;
+    try {
+      const { calls } = open(true, {}, {
+        [`GET ${EVENTS}?after=1`]: [200, { events: [], state: { ...READY, terminal: false, reason: 'machine_offline', ready: false } }],
+      });
+      await act(answersTakenIn);
+      await act(answersTakenIn);
+      first = FakeSocket.all.at(-1);
+      expect(first).toBeDefined();
+      act(() => {
+        first!.opened();
+        first!.program(true);
+        first!.screen('old screen');
+      });
+      const firstTerm = terms[0]!;
+      await act(() => vi.advanceTimersByTimeAsync(15_000));
+      await act(answersTakenIn);
+      expect(calls.some(c => c.path === `${EVENTS}?after=1`)).toBe(true);
+      expect(screen.getByText(/offline|не в сети/i)).toBeInTheDocument();
+      expect(firstTerm.disposed).toBe(false);
+      expect(terms).toHaveLength(1);
+      expect(screen.queryByRole('status', { name: 'Terminal' })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+    /* A real final close still hands the window back to the unavailable screen. */
+    act(() => first!.ended(4404, 'no_terminal'));
+    expect(screen.getByRole('status', { name: 'Terminal' })).toBeInTheDocument();
   });
 
   it.each([

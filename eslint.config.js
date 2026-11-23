@@ -18,6 +18,7 @@ const typedFiles = [
   'packages/*/*.config.ts',
   'apps/*/{src,test}/**/*.{ts,tsx}',
   'apps/web/e2e/**/*.{ts,tsx}',
+  'apps/web/scripts/**/*.ts',
   'apps/*/*.config.ts',
 ];
 
