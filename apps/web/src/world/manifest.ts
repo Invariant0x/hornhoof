@@ -34,6 +34,34 @@ export type PackRoleLookSpec = Readonly<{
   insignia?: boolean;
 }>;
 
+/* Building kinds the city engine places; a pack's layout rules and stage counts refer to them. */
+export const CITY_BUILDING_KINDS = [
+  'residence',
+  'monument',
+  'department',
+  'district_hub',
+  'supply',
+  'house',
+  'statue',
+  'flophouse',
+] as const;
+
+export type CityBuildingKind = (typeof CITY_BUILDING_KINDS)[number];
+
+/* The two walls that face the viewer in the 2:1 projection. They meet at the plot's front (bottom) corner:
+   the front-right wall runs along the plot's last column, the front-left wall along its last row. */
+export type FrontWall = 'front_right' | 'front_left';
+
+/* How the artist drew a building kind: which front wall holds the door and at which tile row of that wall,
+   counted from the front corner (0 = the row at the corner). The building keeps its front corner while it
+   grows through spans (square sizes in tiles, smallest first); the last span is its lot. */
+export type BuildingLayoutSpec = Readonly<{
+  door: Readonly<{ wall: FrontWall; fromFront: number }>;
+  spans: readonly number[];
+}>;
+
+export type BuildingLayoutRules = Readonly<Partial<Record<CityBuildingKind, BuildingLayoutSpec>>>;
+
 export type AltarAnchorSpec = Readonly<{
   offsetCol: number;
   offsetRow: number;
@@ -304,7 +332,7 @@ export type PlantKindSpec = Readonly<{
   moisture: PlantRange;
   /* Signed distance to liquid in tiles: positive on land, near zero at the waterline. */
   waterDist: PlantRange;
-  /* Highest blend weight each ground material may have at the exact spot (keeps plants off bedrock and quarries). */
+  /* Highest blend weight each ground material may have at the exact spot (keeps plants off bare rock and quarries). */
   materialCaps?: Readonly<Record<string, number>>;
   /* 0 = even spread, 1 = tight groves; clumpScale is the grove size in tiles. */
   clumping: number;
@@ -464,6 +492,9 @@ export type WorldPackManifest = Readonly<{
   showGridByDefault?: boolean;
   /* Whether the city builds an expanding outer wall ring ('ring', default) or relies on natural boundaries ('none'). */
   outerWallMode?: OuterWallMode;
+  /* Door wall, door row and growth sizes per building kind, as the art draws them; kinds left out keep the
+     engine's sizes and take the door on whichever front wall reaches the street best. */
+  buildingLayout?: BuildingLayoutRules;
   /* Dedicated shrine/altar offset near the ruler residence where agents waiting for a human stand with a scroll. */
   altarAnchor?: AltarAnchorSpec;
   /* Pack-owned visual looks keyed by Hornhoof roleKey or generic archetype, plus per-class fallback looks. */
@@ -861,6 +892,35 @@ function validatePlants(pack: WorldPackManifest, materialIds: ReadonlySet<string
   }
 }
 
+function validateBuildingLayout(rules: BuildingLayoutRules): string[] {
+  const errors: string[] = [];
+  const kinds = new Set<string>(CITY_BUILDING_KINDS);
+  for (const [kind, rule] of Object.entries(rules) as [string, BuildingLayoutSpec | undefined][]) {
+    const at = `buildingLayout.${kind}`;
+    if (!kinds.has(kind)) {
+      errors.push(`${at} names no building kind of the engine`);
+      continue;
+    }
+    if (!rule) continue;
+    const spans = Array.isArray(rule.spans) ? rule.spans : [];
+    const spansOk =
+      spans.length > 0 &&
+      spans.every(s => Number.isInteger(s) && s >= 1 && s <= 6) &&
+      spans.every((s, i) => i === 0 || s > spans[i - 1]!);
+    if (!spansOk) errors.push(`${at}.spans must be growing whole sizes from 1 to 6`);
+    const wall = rule.door?.wall;
+    if (wall !== 'front_right' && wall !== 'front_left') {
+      errors.push(`${at}.door.wall must be front_right or front_left`);
+    }
+    const fromFront = rule.door?.fromFront;
+    const smallest = spansOk ? spans[0]! : 1;
+    if (!Number.isInteger(fromFront) || fromFront! < 0 || fromFront! >= smallest) {
+      errors.push(`${at}.door.fromFront must be a tile row of the smallest span (0 to ${smallest - 1})`);
+    }
+  }
+  return errors;
+}
+
 export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation {
   const errors: string[] = [];
 
@@ -998,6 +1058,10 @@ export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation 
 
   if (pack.outerWallMode !== undefined && pack.outerWallMode !== 'ring' && pack.outerWallMode !== 'none') {
     errors.push(`invalid outerWallMode "${String(pack.outerWallMode)}"`);
+  }
+
+  if (pack.buildingLayout) {
+    errors.push(...validateBuildingLayout(pack.buildingLayout));
   }
 
   if (pack.art) {

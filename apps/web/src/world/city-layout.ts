@@ -4,22 +4,16 @@
    expanding outer city wall rings (old walls convert to ring streets), excavation support for
    subterranean worlds (city growth carves halls and tunnels out of rock), urban densification,
    server-persistable stable snapshots and staged relocation by explicit acceptance.
+   Every building keeps the front (bottom) corner of its lot and grows backward from it, with its door on a
+   front wall, so the door, the plot corner and the art's registration never move while it grows.
    Contains zero theme-specific words, files or colours. */
 
 import type { TileCoord } from './coords';
-import type { OuterWallMode } from './manifest';
+import type { BuildingLayoutRules, BuildingLayoutSpec, CityBuildingKind, OuterWallMode } from './manifest';
 import { createRng, hash2i } from './prng';
 import type { GeneratedWorldMap } from './terrain-engine';
 
-export type BuildingKind =
-  | 'residence'
-  | 'monument'
-  | 'department'
-  | 'district_hub'
-  | 'supply'
-  | 'house'
-  | 'statue'
-  | 'flophouse';
+export type BuildingKind = CityBuildingKind;
 
 export const ALL_BUILDING_KINDS: readonly BuildingKind[] = [
   'residence',
@@ -146,6 +140,8 @@ export type CityState = {
   lotReservation: Map<string, string>;
   metrics: CityMetrics;
   rngState: number;
+  /* The pack's door and growth rules per kind; pack data, so snapshots leave it out. */
+  buildingLayout: BuildingLayoutRules;
 };
 
 export type PlaceBuildingRequest = Readonly<{
@@ -164,7 +160,7 @@ export type PlaceBuildingRequest = Readonly<{
 }>;
 
 export type CityLayoutSnapshot = Readonly<{
-  version: 2;
+  version: 3;
   packId: string;
   seed: string;
   baseSize: number;
@@ -190,6 +186,7 @@ export type CityInvariantReport = Readonly<{
   invalidTerrainTiles: number;
   roadBuildingCollisions: number;
   disconnectedBuildings: number;
+  doorsOffFrontWalls: number;
 }>;
 
 export type KindTileStats = Readonly<{
@@ -255,37 +252,85 @@ function nextRand(city: CityState): number {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
+/* Engine growth ladders (sizes from 10-standart-razmerov.json, smallest first) for kinds that grow in place;
+   a pack's buildingLayout replaces a kind's ladder. The last size is the lot. */
+const ENGINE_SPANS: Readonly<Partial<Record<BuildingKind, readonly number[]>>> = {
+  /* 2x2 starter shelter up to a 6x6 grand compound across 5 stages. */
+  residence: [2, 3, 4, 5, 6],
+  /* 3x3 -> 4x4 -> 5x5 across 10 department stages. */
+  department: [3, 4, 5],
+  district_hub: [3, 4],
+  /* Agent home by level: Lv 1-3 = 1x1, Lv 4-7 = 2x2, Lv 8-14 = 3x3, Lv 15+ = 4x4. */
+  house: [1, 2, 3, 4],
+  flophouse: [2, 3],
+};
+
+/* The growth step (index into the kind's ladder) a building has reached by its level or stage; -1 = no growth. */
+function growthStepForProgress(kind: BuildingKind, level: number, stage: number): number {
+  switch (kind) {
+    case 'residence':
+      return Math.max(0, stage - 1);
+    /* A district hub's stage is its machine's power tier (1..3) in the live city and its age in years in the
+       simulator: one size per step. */
+    case 'district_hub':
+      return Math.max(0, stage - 1);
+    case 'department':
+      return stage >= 8 ? 2 : stage >= 4 ? 1 : 0;
+    case 'house':
+      return level >= 15 ? 3 : level >= 8 ? 2 : level >= 4 ? 1 : 0;
+    case 'flophouse':
+      return stage >= 3 ? 1 : 0;
+    case 'monument':
+    case 'statue':
+    case 'supply':
+      return -1;
+  }
+}
+
 /* Standard footprints (1x1..6x6 from 10-standart-razmerov.json) and reserved growth lots. */
 export function targetSpanForProgress(
   kind: BuildingKind,
   level: number,
   stage: number,
   lot: LotRect,
+  rules?: BuildingLayoutRules,
 ): { spanCol: number; spanRow: number } {
-  let desired = 1;
-  if (kind === 'residence') {
-    /* Grows from 2x2 starter shelter up to 6x6 grand compound across 5 stages. */
-    desired = Math.min(6, Math.max(2, stage + 1));
-  } else if (kind === 'department') {
-    /* Grows from 3x3 -> 4x4 -> 5x5 across 10 department stages. */
-    desired = stage >= 8 ? 5 : stage >= 4 ? 4 : 3;
-  } else if (kind === 'district_hub') {
-    desired = stage >= 4 ? 4 : 3;
-  } else if (kind === 'house') {
-    /* Agent home grows with agent level: Lv 1-3 = 1x1, Lv 4-7 = 2x2, Lv 8-14 = 3x3, Lv 15+ = 4x4. */
-    desired = level >= 15 ? 4 : level >= 8 ? 3 : level >= 4 ? 2 : 1;
-  } else if (kind === 'flophouse') {
-    desired = stage >= 3 ? 3 : 2;
-  } else {
-    return { spanCol: lot.spanCol, spanRow: lot.spanRow };
-  }
+  const step = growthStepForProgress(kind, level, stage);
+  const ladder = rules?.[kind]?.spans ?? ENGINE_SPANS[kind];
+  if (step < 0 || !ladder) return { spanCol: lot.spanCol, spanRow: lot.spanRow };
+  const desired = ladder[Math.min(step, ladder.length - 1)]!;
   return {
     spanCol: Math.min(lot.spanCol, desired),
     spanRow: Math.min(lot.spanRow, desired),
   };
 }
 
+/* The lot shares the building's front corner (col + spanCol, row + spanRow) and reaches back from it. */
+function lotBehind(col: number, row: number, spanCol: number, spanRow: number, lotC: number, lotR: number): LotRect {
+  return { col: col + spanCol - lotC, row: row + spanRow - lotR, spanCol: lotC, spanRow: lotR };
+}
+
 function defaultFootprint(
+  kind: BuildingKind,
+  indexOfKind: number,
+  deptStatueIndex: number,
+  rules?: BuildingLayoutRules,
+): {
+  spanCol: number;
+  spanRow: number;
+  lotSpanCol: number;
+  lotSpanRow: number;
+  maxStage: number;
+} {
+  const engine = engineFootprint(kind, indexOfKind, deptStatueIndex);
+  const spans = rules?.[kind]?.spans;
+  if (!spans || spans.length === 0) return engine;
+  const first = spans[0]!;
+  const last = spans[spans.length - 1]!;
+  return { spanCol: first, spanRow: first, lotSpanCol: last, lotSpanRow: last, maxStage: engine.maxStage };
+}
+
+function engineFootprint(
   kind: BuildingKind,
   indexOfKind: number,
   deptStatueIndex: number,
@@ -473,9 +518,18 @@ function canWalkRoad(
   return true;
 }
 
-/* Picks a door tile adjacent to the building footprint. Strongly prefers North (row - 1) and
-   West (col - 1) perimeter tiles so East/South in-place growth inside the reserved lot never
-   collides with the building's own door. */
+/* The door tile of a pack rule: on the named front wall, fromFront tile rows back from the front corner.
+   The front corner never moves while the building grows, so neither does this tile. */
+function ruleDoorTile(col: number, row: number, spanCol: number, spanRow: number, rule: BuildingLayoutSpec): TileCoord {
+  const k = Math.max(0, Math.min(rule.door.fromFront, (rule.door.wall === 'front_right' ? spanRow : spanCol) - 1));
+  return rule.door.wall === 'front_right'
+    ? { col: col + spanCol, row: row + spanRow - 1 - k }
+    : { col: col + spanCol - 1 - k, row: row + spanRow };
+}
+
+/* Picks the door tile in front of a front wall: the pack's painted door when the kind has a rule, otherwise
+   the front-wall tile that reaches the street best. Back walls never hold a door: the lot and the growth
+   lie behind the building. */
 function pickDoorForFootprint(
   city: CityState,
   map: GeneratedWorldMap,
@@ -484,36 +538,52 @@ function pickDoorForFootprint(
   spanCol: number,
   spanRow: number,
   target: TileCoord,
-  lot?: LotRect,
+  rule?: BuildingLayoutSpec,
 ): TileCoord | null {
-  const candidates: { coord: TileCoord; insideLot: boolean }[] = [];
-  const inLot = (c: number, r: number): boolean =>
-    Boolean(lot && c >= lot.col && c < lot.col + lot.spanCol && r >= lot.row && r < lot.row + lot.spanRow);
-
-  for (let c = col; c < col + spanCol; c++) {
-    candidates.push({ coord: { col: c, row: row - 1 }, insideLot: inLot(c, row - 1) });
-    candidates.push({ coord: { col: c, row: row + spanRow }, insideLot: inLot(c, row + spanRow) });
+  if (rule) {
+    const door = ruleDoorTile(col, row, spanCol, spanRow, rule);
+    return canWalkRoad(city, map, door.col, door.row, false) ? door : null;
   }
-  for (let r = row; r < row + spanRow; r++) {
-    candidates.push({ coord: { col: col - 1, row: r }, insideLot: inLot(col - 1, r) });
-    candidates.push({ coord: { col: col + spanCol, row: r }, insideLot: inLot(col + spanCol, r) });
-  }
+  const candidates: TileCoord[] = [];
+  for (let r = row; r < row + spanRow; r++) candidates.push({ col: col + spanCol, row: r });
+  for (let c = col; c < col + spanCol; c++) candidates.push({ col: c, row: row + spanRow });
 
   let best: TileCoord | null = null;
   let bestScore = Infinity;
-  for (const { coord: cand, insideLot } of candidates) {
+  for (const cand of candidates) {
     if (!canWalkRoad(city, map, cand.col, cand.row, false)) continue;
     const k = tileKey(cand.col, cand.row);
     const alreadyRoad = city.roads.has(k);
     const insideOtherLot = !alreadyRoad && city.lotReservation.has(k);
     const d = Math.abs(cand.col - target.col) + Math.abs(cand.row - target.row);
-    const score = (insideLot || insideOtherLot ? 80 : 0) + (alreadyRoad ? -100 : 0) + d;
+    const score = (insideOtherLot ? 80 : 0) + (alreadyRoad ? -100 : 0) + d;
     if (score < bestScore) {
       bestScore = score;
       best = cand;
     }
   }
   return best;
+}
+
+/* Whether a door tile sits in front of one of the building's two front walls. */
+export function isDoorOnFrontWall(b: Pick<CityBuilding, 'col' | 'row' | 'spanCol' | 'spanRow' | 'door'>): boolean {
+  const { col, row } = b.door;
+  if (col === b.col + b.spanCol && row >= b.row && row < b.row + b.spanRow) return true;
+  return row === b.row + b.spanRow && col >= b.col && col < b.col + b.spanCol;
+}
+
+/* Grows a building toward the back to spanCol x spanRow, keeping its front corner; false when the tiles are taken. */
+function growBackward(city: CityState, map: GeneratedWorldMap, b: CityBuilding, spanCol: number, spanRow: number): boolean {
+  const col = b.col + b.spanCol - spanCol;
+  const row = b.row + b.spanRow - spanRow;
+  if (!canPlaceFootprint(city, map, col, row, spanCol, spanRow, b.id, false)) return false;
+  /* The door stands in front of a front wall, outside every footprint this growth can reach. */
+  b.col = col;
+  b.row = row;
+  b.spanCol = spanCol;
+  b.spanRow = spanRow;
+  stampBuildingOccupancy(city, map, b);
+  return true;
 }
 
 type HeapNode = {
@@ -875,7 +945,7 @@ export function refreshCityMetrics(city: CityState): void {
 /* Creates a new city centered on the generated map's startCenter, with initial residence and starter avenue. */
 export function createCity(
   map: GeneratedWorldMap,
-  options?: { orderChaos?: number; outerWallMode?: OuterWallMode },
+  options?: { orderChaos?: number; outerWallMode?: OuterWallMode; buildingLayout?: BuildingLayoutRules },
 ): CityState {
   const orderChaos = Math.max(0, Math.min(1, options?.orderChaos ?? 0.5));
   const outerWallMode: OuterWallMode = options?.outerWallMode ?? 'ring';
@@ -907,34 +977,28 @@ export function createCity(
       excavatedCount: 0,
     },
     rngState: Math.floor(rng() * 0xffffffff) >>> 0,
+    buildingLayout: options?.buildingLayout ?? {},
   };
 
-  /* Place the ruler's residence right on startCenter with a clear reserved 6x6 royal growth lot. */
-  const spec = defaultFootprint('residence', 0, 0);
+  /* Place the ruler's residence right on startCenter with a clear reserved royal growth lot behind it. */
+  const rules = city.buildingLayout;
+  const spec = defaultFootprint('residence', 0, 0, rules);
+  const fits = (col: number, row: number, fullLot: boolean): boolean => {
+    const lot = fullLot ? lotBehind(col, row, spec.spanCol, spec.spanRow, spec.lotSpanCol, spec.lotSpanRow) : null;
+    return lot
+      ? canPlaceFootprint(city, map, lot.col, lot.row, lot.spanCol, lot.spanRow, undefined, false)
+      : canPlaceFootprint(city, map, col, row, spec.spanCol, spec.spanRow, undefined, false);
+  };
   let resCol = map.startCenter.col - 1;
   let resRow = map.startCenter.row - 1;
-  if (!canPlaceFootprint(city, map, resCol, resRow, spec.lotSpanCol, spec.lotSpanRow, undefined, false)) {
+  if (!fits(resCol, resRow, true)) {
     let found = false;
-    for (const [needC, needR] of [
-      [spec.lotSpanCol, spec.lotSpanRow],
-      [spec.spanCol, spec.spanRow],
-    ] as const) {
+    for (const fullLot of [true, false]) {
       if (found) break;
       for (let rad = 0; rad <= 10 && !found; rad++) {
         for (let dr = -rad; dr <= rad && !found; dr++) {
           for (let dc = -rad; dc <= rad && !found; dc++) {
-            if (
-              canPlaceFootprint(
-                city,
-                map,
-                map.startCenter.col + dc,
-                map.startCenter.row + dr,
-                needC,
-                needR,
-                undefined,
-                false,
-              )
-            ) {
+            if (fits(map.startCenter.col + dc, map.startCenter.row + dr, fullLot)) {
               resCol = map.startCenter.col + dc;
               resRow = map.startCenter.row + dr;
               found = true;
@@ -945,17 +1009,12 @@ export function createCity(
     }
   }
 
-  const resLot: LotRect = {
-    col: resCol,
-    row: resRow,
-    spanCol: spec.lotSpanCol,
-    spanRow: spec.lotSpanRow,
-  };
+  const resLot = lotBehind(resCol, resRow, spec.spanCol, spec.spanRow, spec.lotSpanCol, spec.lotSpanRow);
   const shore = findNearestLiquidShoreTile(map, { col: resCol, row: resRow }, 32);
   const door =
-    pickDoorForFootprint(city, map, resCol, resRow, spec.spanCol, spec.spanRow, shore, resLot) ?? {
+    pickDoorForFootprint(city, map, resCol, resRow, spec.spanCol, spec.spanRow, shore, rules.residence) ?? {
       col: resCol,
-      row: resRow - 1,
+      row: resRow + spec.spanRow,
     };
 
   const residence: CityBuilding = {
@@ -1139,7 +1198,8 @@ export function placeBuilding(
     req.kind === 'statue' && req.departmentId
       ? city.buildings.filter(b => b.kind === 'statue' && b.departmentId === req.departmentId).length
       : 0;
-  const spec = defaultFootprint(req.kind, indexOfKind, deptStatueIndex);
+  const rule = city.buildingLayout[req.kind];
+  const spec = defaultFootprint(req.kind, indexOfKind, deptStatueIndex, city.buildingLayout);
   const spanCol = req.spanCol ?? spec.spanCol;
   const spanRow = req.spanRow ?? spec.spanRow;
   const desiredLotC = req.lotSpanCol ?? Math.max(spanCol, spec.lotSpanCol);
@@ -1176,7 +1236,8 @@ export function placeBuilding(
           const col = anchor.col + dc;
           const row = anchor.row + dr;
           if (requireFullLot) {
-            if (!canPlaceFootprint(city, map, col, row, desiredLotC, desiredLotR, undefined, true)) continue;
+            const full = lotBehind(col, row, spanCol, spanRow, desiredLotC, desiredLotR);
+            if (!canPlaceFootprint(city, map, full.col, full.row, desiredLotC, desiredLotR, undefined, true)) continue;
           } else {
             if (!canPlaceFootprint(city, map, col, row, spanCol, spanRow, undefined, respectLots)) continue;
           }
@@ -1192,22 +1253,23 @@ export function placeBuilding(
           /* Keep new buildings anchored to the existing city frontier. */
           if (req.kind !== 'district_hub' && req.kind !== 'supply' && roadDist > 22 + radius * 0.45) continue;
 
-          /* Reserve the full growth lot when clear, or shrink lot cleanly when space is tight. */
+          /* Reserve the full growth lot behind the building when clear, or shrink it from the back when tight. */
           let lotC = desiredLotC;
           let lotR = desiredLotR;
           if (!requireFullLot && (lotC > spanCol || lotR > spanRow)) {
-            while (
-              (lotC > spanCol || lotR > spanRow) &&
-              !canPlaceFootprint(city, map, col, row, lotC, lotR, undefined, true)
-            ) {
+            const fitsLot = (c: number, r: number): boolean => {
+              const back = lotBehind(col, row, spanCol, spanRow, c, r);
+              return canPlaceFootprint(city, map, back.col, back.row, c, r, undefined, true);
+            };
+            while ((lotC > spanCol || lotR > spanRow) && !fitsLot(lotC, lotR)) {
               if (lotC > spanCol) lotC--;
               if (lotR > spanRow) lotR--;
             }
           }
-          const lot: LotRect = { col, row, spanCol: lotC, spanRow: lotR };
+          const lot = lotBehind(col, row, spanCol, spanRow, lotC, lotR);
 
           const nearestRoad = findNearestRoadTile(city, { col, row });
-          const door = pickDoorForFootprint(city, map, col, row, spanCol, spanRow, nearestRoad, lot);
+          const door = pickDoorForFootprint(city, map, col, row, spanCol, spanRow, nearestRoad, rule);
           if (!door) continue;
 
           const distAnchor = Math.hypot(col - anchor.col, row - anchor.row);
@@ -1300,27 +1362,21 @@ export function placeBuilding(
   return null;
 }
 
-/* Grows a building's footprint smoothly in place inside its reserved lot as its level or stage rises.
-   Anchor coordinates (b.col, b.row) NEVER move (zero coordinate jumps). */
+/* Grows a building's footprint smoothly backward inside its reserved lot as its level or stage rises.
+   Its front corner (col + spanCol, row + spanRow) and its door NEVER move (zero coordinate jumps). */
 export function growBuildingForProgress(
   city: CityState,
   map: GeneratedWorldMap,
   b: CityBuilding,
 ): boolean {
-  const target = targetSpanForProgress(b.kind, b.level, b.stage, b.lot);
+  const target = targetSpanForProgress(b.kind, b.level, b.stage, b.lot, city.buildingLayout);
   if (target.spanCol <= b.spanCol && target.spanRow <= b.spanRow) return false;
 
   let expanded = false;
   while (b.spanCol < target.spanCol || b.spanRow < target.spanRow) {
     const nextC = Math.min(target.spanCol, b.spanCol + 1);
     const nextR = Math.min(target.spanRow, b.spanRow + 1);
-    if (!canPlaceFootprint(city, map, b.col, b.row, nextC, nextR, b.id, false)) {
-      break;
-    }
-    /* Because b.door is already in city.roads and canPlaceFootprint rejects roads, b.door is guaranteed untouched. */
-    b.spanCol = nextC;
-    b.spanRow = nextR;
-    stampBuildingOccupancy(city, map, b);
+    if (!growBackward(city, map, b, nextC, nextR)) break;
     expanded = true;
   }
   return expanded;
@@ -1547,12 +1603,9 @@ export function densifyCity(
     if (b.spanCol < b.lot.spanCol || b.spanRow < b.lot.spanRow) {
       const nextSpanC = Math.min(b.lot.spanCol, b.spanCol + 1);
       const nextSpanR = Math.min(b.lot.spanRow, b.spanRow + 1);
-      if (canPlaceFootprint(city, map, b.col, b.row, nextSpanC, nextSpanR, b.id, false)) {
-        b.spanCol = nextSpanC;
-        b.spanRow = nextSpanR;
+      if (growBackward(city, map, b, nextSpanC, nextSpanR)) {
         b.floors = Math.min(4, b.floors + 1);
         b.stage = Math.min(b.maxStage, b.stage + 1);
-        stampBuildingOccupancy(city, map, b);
         city.metrics.densifiedUpgrades++;
         upgraded++;
         continue;
@@ -1674,17 +1727,28 @@ export function advanceRelocationStep(
   if (rel.phase === 'building') {
     if (rel.newStage < rel.targetStage) rel.newStage++;
     if (rel.newStage >= rel.targetStage) {
-      const nextLot: LotRect = {
-        col: rel.toCol,
-        row: rel.toRow,
-        spanCol: Math.max(building.spanCol, building.lot.spanCol),
-        spanRow: Math.max(building.spanRow, building.lot.spanRow),
-      };
+      const nextLot = lotBehind(
+        rel.toCol,
+        rel.toRow,
+        building.spanCol,
+        building.spanRow,
+        Math.max(building.spanCol, building.lot.spanCol),
+        Math.max(building.spanRow, building.lot.spanRow),
+      );
       const nearestRoad = findNearestRoadTile(city, { col: rel.toCol, row: rel.toRow });
       const newDoor =
-        pickDoorForFootprint(city, map, rel.toCol, rel.toRow, building.spanCol, building.spanRow, nearestRoad, nextLot) ?? {
+        pickDoorForFootprint(
+          city,
+          map,
+          rel.toCol,
+          rel.toRow,
+          building.spanCol,
+          building.spanRow,
+          nearestRoad,
+          city.buildingLayout[building.kind],
+        ) ?? {
           col: rel.toCol,
-          row: rel.toRow - 1,
+          row: rel.toRow + building.spanRow,
         };
       clearBuildingOccupancy(city, building);
       building.col = rel.toCol;
@@ -1773,7 +1837,7 @@ export function computeCityTileBreakdown(city: CityState, map: GeneratedWorldMap
 
 export function serializeCityLayout(city: CityState): CityLayoutSnapshot {
   return {
-    version: 2,
+    version: 3,
     packId: city.packId,
     seed: city.seed,
     baseSize: city.baseSize,
@@ -1799,7 +1863,10 @@ export function serializeCityLayout(city: CityState): CityLayoutSnapshot {
   };
 }
 
-export function deserializeCityLayout(snapshot: CityLayoutSnapshot): CityState {
+export function deserializeCityLayout(
+  snapshot: CityLayoutSnapshot,
+  options?: { buildingLayout?: BuildingLayoutRules },
+): CityState {
   const city: CityState = {
     packId: snapshot.packId,
     seed: snapshot.seed,
@@ -1825,6 +1892,7 @@ export function deserializeCityLayout(snapshot: CityLayoutSnapshot): CityState {
     lotReservation: new Map(),
     metrics: { ...snapshot.metrics },
     rngState: snapshot.rngState,
+    buildingLayout: options?.buildingLayout ?? {},
   };
   for (const b of city.buildings) {
     stampBuildingOccupancy(city, undefined, b);
@@ -1886,21 +1954,32 @@ export function verifyCityInvariants(city: CityState, map: GeneratedWorldMap): C
   }
 
   let disconnectedBuildings = 0;
+  let doorsOffFrontWalls = 0;
   for (const b of city.buildings) {
     const dk = tileKey(b.door.col, b.door.row);
     if (!reachable.has(dk)) {
       disconnectedBuildings++;
       if (errors.length < 8) errors.push(`building ${b.id} door (${b.door.col},${b.door.row}) disconnected`);
     }
+    if (!isDoorOnFrontWall(b)) {
+      doorsOffFrontWalls++;
+      if (errors.length < 8) errors.push(`building ${b.id} door (${b.door.col},${b.door.row}) is not on a front wall`);
+    }
   }
 
   return {
-    ok: overlappingPairs === 0 && invalidTerrainTiles === 0 && roadBuildingCollisions === 0 && disconnectedBuildings === 0,
+    ok:
+      overlappingPairs === 0 &&
+      invalidTerrainTiles === 0 &&
+      roadBuildingCollisions === 0 &&
+      disconnectedBuildings === 0 &&
+      doorsOffFrontWalls === 0,
     errors,
     overlappingPairs,
     invalidTerrainTiles,
     roadBuildingCollisions,
     disconnectedBuildings,
+    doorsOffFrontWalls,
   };
 }
 

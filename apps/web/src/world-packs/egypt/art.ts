@@ -30,7 +30,8 @@ export function egyptArtCatalog(roleLooks: Readonly<Record<string, PackRoleLookS
       ],
       district_hub: [
         { id: 'workshop', footprint: '3x3', fromStage: 1, label: { en: 'District workshop', ru: 'Мастерская района' } },
-        { id: 'great_workshop', footprint: '4x4', fromStage: 4, label: { en: 'Large district workshop', ru: 'Большая мастерская района' } },
+        { id: 'great_workshop', footprint: '4x4', fromStage: 2, label: { en: 'Large district workshop', ru: 'Большая мастерская района' } },
+        { id: 'workshop_hall', footprint: '5x5', fromStage: 3, label: { en: 'District workshop with a hall', ru: 'Мастерская района с залом' } },
       ],
       supply: [{ id: 'granary', footprint: '3x3', label: { en: 'Granary by the water', ru: 'Амбар у воды' } }],
       flophouse: [

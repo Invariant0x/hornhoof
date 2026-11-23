@@ -138,8 +138,10 @@ describe('Stage 9 world packs follow the art contract', () => {
 
       it('draws each kind with the step of its exact size at every stage and level the engine produces', () => {
         const index = completeIndex(pack);
-        /* Reserved growth lots from city-layout.ts defaultFootprint. */
-        const lotSpans: Partial<Record<BuildingKind, number>> = { house: 4, department: 5, residence: 6, district_hub: 4, flophouse: 3, supply: 3 };
+        /* Reserved growth lots from city-layout.ts defaultFootprint, or the last size of the pack's layout rule. */
+        const engineLots: Partial<Record<BuildingKind, number>> = { house: 4, department: 5, residence: 6, district_hub: 4, flophouse: 3, supply: 3 };
+        const lotSpans: Partial<Record<BuildingKind, number>> = { ...engineLots };
+        for (const [kind, rule] of Object.entries(pack.buildingLayout ?? {})) lotSpans[kind as BuildingKind] = rule.spans.at(-1);
         const standardKinds: BuildingKind[] = ['house', 'department', 'residence', 'district_hub', 'flophouse', 'supply'];
         const maxStages: Partial<Record<BuildingKind, number>> = { residence: 5, flophouse: 6, supply: 6 };
         for (const kind of standardKinds) {
@@ -147,7 +149,8 @@ describe('Stage 9 world packs follow the art contract', () => {
           for (let stage = 1; stage <= maxStage; stage++) {
             for (const level of kind === 'house' ? [1, 3, 4, 7, 8, 14, 15, 30] : [1]) {
               const lotSpan = lotSpans[kind]!;
-              const span = targetSpanForProgress(kind, level, stage, { col: 40, row: 40, spanCol: lotSpan, spanRow: lotSpan }).spanCol;
+              const lot = { col: 40, row: 40, spanCol: lotSpan, spanRow: lotSpan };
+              const span = targetSpanForProgress(kind, level, stage, lot, pack.buildingLayout).spanCol;
               const art = resolveBuildingArt(pack, index, cityBuilding(kind, span, stage, level, maxStage), null);
               expect(art, `${pack.id} ${kind} stage ${stage} level ${level}`).not.toBeNull();
               const mainPath = art!.layers.find(l => l.path.startsWith('buildings/') || l.path.startsWith('modules/'))!.path;

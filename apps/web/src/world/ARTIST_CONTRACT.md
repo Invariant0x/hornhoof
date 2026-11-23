@@ -52,7 +52,7 @@ Building footprints, square, in master pixels:
 
 | Field | Required | Meaning |
 |---|---|---|
-| `groundAnchor` | yes | Centre of the footprint diamond on the ground. This point lands on the centre of the lot. Must be the centre of `corners`. |
+| `groundAnchor` | yes | Centre of the footprint diamond on the ground. This point lands on the centre of the building's footprint (its lot can be larger, behind it). Must be the centre of `corners`. |
 | `corners` | yes | `top`, `right`, `bottom`, `left` of the footprint diamond on the ground. Width must match the footprint (section 2), 2:1. |
 | `door` | no | Foot of the door on the ground. |
 | `wallTopLine` | no | y of the top of the walls. |
@@ -88,12 +88,18 @@ Folder: `buildings/<kind>/<step>/`. The pack's catalog names the steps of each k
 | `house` | An agent's home; grows with the agent's level (1x1 to 4x4). |
 | `department` | A department's hall in the centre (3x3 to 5x5). |
 | `residence` | The ruler's (orchestrator's) residence, 5 growth stages (2x2 to 6x6). |
-| `district_hub` | A machine's building in its district (3x3 to 4x4). |
+| `district_hub` | A machine's building in its district (3x3 to 4x4, or the sizes its pack names). |
 | `supply` | A subscription's store by the water; shows how much of its limit is left. |
 | `flophouse` | Lodging of one-off helpers at the edge of a district (2x2 to 3x3). |
 | `statue` | A department's statue, 20 stages; an alley of them grows larger (1x1, 2x2, 3x3). |
 | `monument` | A top goal's monument in tiers with a capstone (4x4 to 6x6). |
 | altar | The god's altar where agents wait for a person's answer: `buildings/altar/complete.png`, 1x1. |
+
+### Door and growth
+
+A building stands at the front (bottom) corner of its lot and grows backward: a bigger step keeps the same front corner, the old building stays in front and the new rooms go behind it. So the plot's bottom corner, the door and the scale of a person never move between the steps of one kind, and every step's picture puts the plot's bottom corner at the bottom centre of its canvas.
+
+The door is on one of the two front walls, the walls that face the viewer: `front_right` (from the plot's right corner down to the bottom corner) or `front_left` (from the bottom corner up to the left corner). Draw it where the street can reach it, never on a back wall. When the pack names a door for a kind (`buildingLayout` in its manifest: the wall, the tile row of the door counted from the bottom corner, and the sizes the kind grows through), the city puts the street in front of exactly that row, so draw the door there in every step. Kinds the pack does not name get their door on whichever front wall the street reaches best.
 
 ### Pictures of one step
 

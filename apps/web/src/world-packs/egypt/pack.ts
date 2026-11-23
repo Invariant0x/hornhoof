@@ -306,6 +306,12 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
   defaultTileId: 'plain',
   showGridByDefault: false,
   outerWallMode: 'ring',
+  /* As the workshop art draws it (game art: egypt-workshop-3x3): the door on the front-right wall in the row
+     two tiles back from the front corner, the 3x3 house keeping the front corner of a 5x5 lot while a
+     storeroom wing (4x4) and a hall (5x5) grow behind it. */
+  buildingLayout: {
+    district_hub: { door: { wall: 'front_right', fromFront: 2 }, spans: [3, 4, 5] },
+  },
   altarAnchor: {
     offsetCol: 3,
     offsetRow: -2,

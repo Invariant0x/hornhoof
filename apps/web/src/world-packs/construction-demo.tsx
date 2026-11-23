@@ -518,6 +518,7 @@ function buildStage6ShowcaseCity(
     baseSize: pack.mapSize,
     orderChaos: 0.85,
     outerWallMode: pack.outerWallMode ?? 'ring',
+    buildingLayout: pack.buildingLayout ?? {},
     center: { col: centerCol, row: centerRow },
     stepCounter: 1,
     wallGeneration: 0,

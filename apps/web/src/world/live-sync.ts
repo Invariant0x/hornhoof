@@ -94,7 +94,7 @@ function isCityLayoutSnapshot(value: unknown, packId: string, seed: string): val
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<CityLayoutSnapshot>;
   return (
-    candidate.version === 2 &&
+    candidate.version === 3 &&
     candidate.packId === packId &&
     candidate.seed === seed &&
     Array.isArray(candidate.buildings) &&
@@ -150,7 +150,11 @@ export function syncLiveSnapshotToCity(
   /* Brand-new company without a template and without staff: empty lot with stakes, boards, and starter camp. */
   if (worldMode === 'empty_lot') {
     const emptyCity = bindCityMap(
-      createCity(map, { orderChaos: pack.params.orderChaosDefault, outerWallMode: 'none' }),
+      createCity(map, {
+        orderChaos: pack.params.orderChaosDefault,
+        outerWallMode: 'none',
+        buildingLayout: pack.buildingLayout,
+      }),
       map,
     );
     const camp = emptyCity.buildings.find(b => b.kind === 'residence');
@@ -196,12 +200,13 @@ export function syncLiveSnapshotToCity(
   if (existingCity && existingCity.packId === pack.id && existingCity.seed === map.seed) {
     city = bindCityMap(existingCity, map);
   } else if (isCityLayoutSnapshot(snapshot.savedLayout, pack.id, map.seed)) {
-    city = bindCityMap(deserializeCityLayout(snapshot.savedLayout), map);
+    city = bindCityMap(deserializeCityLayout(snapshot.savedLayout, { buildingLayout: pack.buildingLayout }), map);
   } else {
     city = bindCityMap(
       createCity(map, {
         orderChaos: pack.params.orderChaosDefault,
         outerWallMode: pack.outerWallMode ?? 'ring',
+        buildingLayout: pack.buildingLayout,
       }),
       map,
     );
@@ -401,8 +406,12 @@ export function syncLiveSnapshotToCity(
     }
   }
 
-  /* 5. Machines as district hubs sized by CPU cores and RAM. */
+  /* 5. Machines as district hubs sized by CPU cores and RAM: the power tier picks a size of the pack's ladder
+     when the pack has one, else the engine's span for that tier. */
+  const hubSpans = pack.buildingLayout?.district_hub?.spans;
   for (const m of snapshot.machines) {
+    const hubSpan = hubSpans ? hubSpans[Math.min(hubSpans.length, Math.max(1, m.powerTier)) - 1]! : m.hubSpan;
+    const hubLot = hubSpans ? hubSpans[hubSpans.length - 1]! : Math.min(4, m.hubSpan + 1);
     const id = `hub-${m.id}`;
     const existing = byId.get(id);
     if (existing) {
@@ -426,10 +435,10 @@ export function syncLiveSnapshotToCity(
         label: m.hostname,
         districtId: m.id,
         stage: m.powerTier,
-        spanCol: m.hubSpan,
-        spanRow: m.hubSpan,
-        lotSpanCol: Math.min(4, m.hubSpan + 1),
-        lotSpanRow: Math.min(4, m.hubSpan + 1),
+        spanCol: hubSpan,
+        spanRow: hubSpan,
+        lotSpanCol: hubLot,
+        lotSpanRow: hubLot,
       });
       if (placed) {
         placed.maxStage = 3;

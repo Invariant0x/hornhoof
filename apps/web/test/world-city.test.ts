@@ -77,14 +77,14 @@ describe('Stage 3 pack-agnostic organic city growth, standard 1x1..6x6 footprint
     }
     expect(ownDistSum).toBeLessThan(otherDistSum);
 
-    /* Agent houses grow smoothly in place (1x1 -> 2x2 -> 3x3 -> 4x4) without jumping coordinates. */
+    /* Agent houses grow smoothly in place (1x1 -> 2x2 -> 3x3 -> 4x4) backward from a front corner that never jumps. */
     const sampleHouse = city.buildings.find(b => b.id === 'agent-m1-0')!;
-    const origCol = sampleHouse.col;
-    const origRow = sampleHouse.row;
+    const front = { col: sampleHouse.col + sampleHouse.spanCol, row: sampleHouse.row + sampleHouse.spanRow };
+    const door = { ...sampleHouse.door };
     sampleHouse.level = 18;
     growBuildingForProgress(city, map, sampleHouse);
-    expect(sampleHouse.col).toBe(origCol);
-    expect(sampleHouse.row).toBe(origRow);
+    expect({ col: sampleHouse.col + sampleHouse.spanCol, row: sampleHouse.row + sampleHouse.spanRow }).toEqual(front);
+    expect(sampleHouse.door).toEqual(door);
     expect(sampleHouse.spanCol).toBeGreaterThanOrEqual(3);
 
     /* Ruler residence grows smoothly from 2x2 up to 6x6 as stages climb. */

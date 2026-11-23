@@ -86,7 +86,7 @@ const SPACE_ART_CATALOG: WorldArtCatalog = {
     ],
     district_hub: [
       { id: 'server_node', footprint: '3x3', fromStage: 1, label: { en: 'Server node', ru: 'Серверный узел' } },
-      { id: 'server_hall', footprint: '4x4', fromStage: 4, label: { en: 'Server hall', ru: 'Серверный зал' } },
+      { id: 'server_hall', footprint: '4x4', fromStage: 2, label: { en: 'Server hall', ru: 'Серверный зал' } },
     ],
     supply: [{ id: 'fuel_tank', footprint: '3x3', label: { en: 'Fuel tank', ru: 'Топливный бак' } }],
     flophouse: [

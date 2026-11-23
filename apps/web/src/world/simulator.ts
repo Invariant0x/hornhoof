@@ -107,7 +107,11 @@ export function runFiveYearSimulation(
   const mapSize = options.mapSize ?? pack.mapSize;
   const map = generateWorldTerrain(pack, { seed: options.seed, mapSize });
   const city = bindCityMap(
-    createCity(map, { orderChaos: options.orderChaos, outerWallMode: pack.outerWallMode ?? 'ring' }),
+    createCity(map, {
+      orderChaos: options.orderChaos,
+      outerWallMode: pack.outerWallMode ?? 'ring',
+      buildingLayout: pack.buildingLayout,
+    }),
     map,
   );
   const recordSnapshots = options.recordSnapshots ?? true;
@@ -131,13 +135,15 @@ export function runFiveYearSimulation(
   let year2Breakdown: CityTileBreakdown | null = null;
   let year5Breakdown: CityTileBreakdown | null = null;
 
+  /* A building grows backward from its front corner, so the front corner is the place that must never jump. */
   const checkStability = () => {
     for (const b of city.buildings) {
       const prev = prevCoords.get(b.id);
-      if (prev && (prev.col !== b.col || prev.row !== b.row)) {
+      const front = { col: b.col + b.spanCol, row: b.row + b.spanRow };
+      if (prev && (prev.col !== front.col || prev.row !== front.row)) {
         coordinateJumps++;
       }
-      prevCoords.set(b.id, { col: b.col, row: b.row });
+      prevCoords.set(b.id, front);
     }
   };
 

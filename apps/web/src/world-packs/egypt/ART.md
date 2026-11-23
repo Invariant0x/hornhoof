@@ -27,7 +27,8 @@ npx tsx apps/web/scripts/world-art-index.ts --pack egypt --list
 | residence | `column_palace` | 5x5 | stage 4 | Palace with columns |
 | residence | `grand_palace` | 6x6 | stage 5 | Grand palace with gardens |
 | district_hub | `workshop` | 3x3 | stage 1 | Machine workshop of a district |
-| district_hub | `great_workshop` | 4x4 | stage 4 | Large district workshop |
+| district_hub | `great_workshop` | 4x4 | stage 2 | Large district workshop: a storeroom wing behind the workshop |
+| district_hub | `workshop_hall` | 5x5 | stage 3 | The workshop with its wing and a tall hall at the back |
 | supply | `granary` | 3x3 | | Granary by the water, `fill_0` (empty, workers lie praying by it) to `fill_4` (full) |
 | flophouse | `camp` | 2x2 | stage 1 | Day laborer camp |
 | flophouse | `barracks` | 3x3 | stage 3 | Day laborer barracks |
