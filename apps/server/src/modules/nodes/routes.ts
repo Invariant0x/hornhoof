@@ -31,6 +31,7 @@ import { connectionRoutes } from './connection-routes.js';
 import { disconnectMachines, refuseLeader, removalWarnings } from './disconnect.js';
 import { nodeIdentity, ownBuiltin, ownMachine as machineOfServer, type NodeHub } from './hub.js';
 import { nodeImageOfBuild } from './image.js';
+import { machineFolders } from './machine-disk.js';
 import { builtinMachine, isServerInstall, liveNode, otherBuild, settlePlans, shownMachine } from './nodes.js';
 import { machineProgramNodes, machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
 import { machineDrain, nodeDrain } from '../updates/drain.js';
@@ -342,6 +343,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         otherBuild: otherBuild(hub, on(m.id).map(n => n.id), config.nodeBuild),
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
         plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
+        folders: machineFolders(hub, on(m.id)),
         lendsTests: m.lendsTests,
         /* Where the company opens on that machine, and how the machine reaches the server; none without the core. */
         core: m.networkId ? { webPort: m.webPort, path: m.path } : null,

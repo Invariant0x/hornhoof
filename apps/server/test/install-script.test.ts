@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1352,5 +1352,66 @@ describe('install.sh', () => {
     const r = install({ args: ['--uninstall'], tty: 'n\n', env: { STUB_CONTAINERS: 'hornhoof-claude-1c07dac4' } });
     expect(r.code).toBe(0);
     expect(r.calls.some(c => c.startsWith('docker rm'))).toBe(false);
+  });
+
+  it('clears setgid on an existing control volume and its subdirectories on server re-run without following symlinks or creating a missing volume', () => {
+    const work = mkdtempSync(join(tmpdir(), 'hh-setgid-'));
+    try {
+      const serverDir = join(work, 'hornhoof');
+      const controlDir = join(work, 'control');
+      const outsideDir = join(work, 'outside');
+      mkdirSync(serverDir);
+      writeFileSync(join(serverDir, '.env'), 'HORNHOOF_SECRET=keep-me\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nCOMPOSE_PROJECT_NAME=hornhoof\n');
+      mkdirSync(join(controlDir, 'dumps'), { recursive: true });
+      mkdirSync(join(controlDir, 'uploads', 'nested'), { recursive: true });
+      mkdirSync(outsideDir);
+      chmodSync(controlDir, 0o2755);
+      chmodSync(join(controlDir, 'dumps'), 0o2700);
+      chmodSync(join(controlDir, 'uploads'), 0o2755);
+      chmodSync(join(controlDir, 'uploads', 'nested'), 0o2755);
+      chmodSync(outsideDir, 0o2755);
+      writeFileSync(join(controlDir, 'alive'), '', { mode: 0o644 });
+      chmodSync(join(controlDir, 'alive'), 0o644);
+      symlinkSync(outsideDir, join(controlDir, 'escape'));
+
+      const rerun = install({
+        args: ['server'],
+        tty: '\n',
+        env: { HORNHOOF_DIR: serverDir, STUB_CONTROL_VOLUMES: `hornhoof_control=${controlDir}` },
+      });
+      expect(rerun.code, rerun.out).toBe(0);
+      expect(rerun.calls).toContain('docker volume inspect hornhoof_control');
+      const clearIdx = rerun.calls.findIndex(c => c.includes('-v hornhoof_control:/control') && c.includes('chmod g-s'));
+      expect(clearIdx).toBeGreaterThanOrEqual(0);
+      expect(clearIdx).toBeLessThan(rerun.calls.findIndex(c => c.startsWith('docker compose up')));
+      expect(rerun.calls[clearIdx]).toMatch(/--rm --network none --user 0:0 --cap-drop ALL --cap-add DAC_OVERRIDE --cap-add FOWNER --security-opt no-new-privileges/);
+      expect(statSync(controlDir).mode & 0o7777).toBe(0o755);
+      expect(statSync(join(controlDir, 'dumps')).mode & 0o7777).toBe(0o700);
+      expect(statSync(join(controlDir, 'uploads')).mode & 0o7777).toBe(0o755);
+      expect(statSync(join(controlDir, 'uploads', 'nested')).mode & 0o7777).toBe(0o755);
+      expect(statSync(join(controlDir, 'alive')).mode & 0o7777).toBe(0o644);
+      expect(statSync(outsideDir).mode & 0o7777).toBe(0o2755);
+
+      /* Named server re-run targets <project>_control. */
+      const namedControl = join(work, 'control-acme');
+      mkdirSync(join(namedControl, 'schema'), { recursive: true });
+      chmodSync(namedControl, 0o2755);
+      chmodSync(join(namedControl, 'schema'), 0o2700);
+      const named = install({
+        args: ['server', '--name', 'acme'],
+        tty: '\n',
+        env: { STUB_CONTROL_VOLUMES: `hornhoof-acme_control=${namedControl}` },
+      });
+      expect(named.code, named.out).toBe(0);
+      expect(statSync(namedControl).mode & 0o7777).toBe(0o755);
+      expect(statSync(join(namedControl, 'schema')).mode & 0o7777).toBe(0o700);
+
+      /* Fresh install where the volume does not exist yet must not pre-create an unlabeled volume. */
+      const fresh = install({ args: ['server'], tty: '\n' });
+      expect(fresh.code, fresh.out).toBe(0);
+      expect(fresh.calls.some(c => c.includes('_control:/control'))).toBe(false);
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
   });
 });

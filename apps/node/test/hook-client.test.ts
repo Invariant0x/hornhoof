@@ -6,8 +6,8 @@ const cleanups: (() => void)[] = [];
 afterEach(() => cleanups.splice(0).forEach(close => close()));
 
 describe('hh-hook', () => {
-  it('retries an interrupted stop with the same call id and its actual pid', async () => {
-    const c = await client(n => n < 3 ? 'disconnect' : 'ok', cleanups);
+  it.each(['stop', 'start'] as const)('retries an interrupted %s with the same call id and its actual pid', async event => {
+    const c = await client(n => n < 3 ? 'disconnect' : 'ok', cleanups, event);
     await eventually(() => c.calls.length === 3);
     const ids = c.calls.map(call => call.headers['x-hh-call']);
     expect(ids[0]).toMatch(/^[0-9a-f-]{36}$/);
@@ -19,7 +19,7 @@ describe('hh-hook', () => {
     expect(c.errors()).toBe('');
   });
 
-  it('retries timed out stops but gives up visibly after three attempts', async () => {
+  it('gives up visibly on a timed out stop after its one fifty-second wait without retrying', async () => {
     const c = await client(() => 'timeout', cleanups);
     /* A diagnostic may still be in the pipe when its process exits. */
     c.stderr.pause();
@@ -29,30 +29,30 @@ describe('hh-hook', () => {
     cleanups.push(drain);
     /* Node also resumes pipes after exit; keep that resumption behind the same real I/O gate. */
     c.child.once('exit', () => setImmediate(drain));
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      await eventually(() => c.calls.length === attempt);
-      await c.clock.advance(15_000);
-    }
+    await eventually(() => c.calls.length === 1);
+    await c.clock.advance(50_000);
     await c.closed;
     expect(c.child.exitCode).toBe(0);
-    expect(c.calls).toHaveLength(3);
+    expect(c.calls).toHaveLength(1);
     expect(c.errors()).toContain('not confirmed');
+    expect(c.errors()).toContain('timeout');
     expect(c.errors()).not.toContain('http://');
   });
 
   /* A busy node may check the caller of a start longer than a short wait: a caller gone by then is refused, and the node
-     never hears that its program started. */
-  it('waits for a start as long as for a stop and tries it three times', async () => {
+     never hears that its program started. Once that one wait runs out it stops instead of starting the check over. */
+  it('waits fifty seconds for a start without sending again once that wait runs out', async () => {
     const c = await client(() => 'timeout', cleanups, 'start');
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      await eventually(() => c.calls.length === attempt);
-      await c.clock.advance(14_999);
-      expect(c.calls).toHaveLength(attempt);
-      await c.clock.advance(1);
-    }
+    await eventually(() => c.calls.length === 1);
+    await c.clock.advance(49_999);
+    expect(c.child.exitCode).toBeNull();
+    expect(c.calls).toHaveLength(1);
+    await c.clock.advance(1);
     await c.closed;
-    expect(c.calls).toHaveLength(3);
-    expect(new Set(c.calls.map(call => call.headers['x-hh-call'])).size).toBe(1);
+    expect(c.child.exitCode).toBe(0);
+    expect(c.calls).toHaveLength(1);
+    expect(c.errors()).toContain('not confirmed');
+    expect(c.errors()).toContain('timeout');
   });
 
   it('reports an owner refusal without retrying a permanent HTTP error', async () => {

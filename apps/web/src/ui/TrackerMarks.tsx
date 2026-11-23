@@ -1,7 +1,7 @@
 import { useT } from '../i18n';
 import { priorityOf } from '../tracker';
 import type { AgentRef, PersonRef, TaskLine } from '../types';
-import { PriorityArrow, type Program } from './icons';
+import { PriorityArrow, ProgramMark, programName, type Program } from './icons';
 import { employeeKind, WorkerMark } from './WorkerMark';
 
 const PALETTE = ['accent', 'warning', 'attention', 'success', 'blue', 'violet'] as const;
@@ -41,8 +41,12 @@ export function PersonMark({ person, decorative = false }: { person: PersonRef; 
   );
 }
 
-export function ExecutorMark({ agent, program, turnkey }: { agent: AgentRef; program?: Program | null; turnkey?: boolean }) {
-  const words = useT().workers;
+/* withProgram: the logo of the program it works in now right after the initials, as the list's Executor column has it (#1770),
+   named "Program: Codex" for a screen reader and in its tooltip, so no one has to tell the program by its look. With no plan
+   an empty place as wide stands there instead, so the initials keep their place in a mirrored column too. */
+export function ExecutorMark({ agent, program, turnkey, withProgram = false }: { agent: AgentRef; program?: Program | null; turnkey?: boolean; withProgram?: boolean }) {
+  const t = useT();
+  const words = t.workers;
   const kind = agent.kind === 'worker' || agent.kind === 'head' ? employeeKind(turnkey) : undefined;
   const detail = kind && words[kind];
   return (
@@ -52,6 +56,7 @@ export function ExecutorMark({ agent, program, turnkey }: { agent: AgentRef; pro
         {initials(agent.name, 2)}
         {kind === 'generalist' && <WorkerMark kind={kind} decorative />}
       </span>
+      {withProgram && (program ? <ProgramMark program={program} label={t.tracker.list.program(programName(program))} /> : <span className="pm-none" aria-hidden="true" />)}
       <span className="tr-id-name" aria-hidden="true" dir="auto">{agent.name}</span>
     </>
   );

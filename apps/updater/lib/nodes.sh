@@ -337,12 +337,14 @@ nodes_mode() {
     printf 'Usage: updater.sh nodes <server address> <updater image by digest> <host hash> [--once]\n' >&2
     exit 2
   fi
+  trap '[ -z "${DISK_PRIVATE_DIR:-}" ] || rm -rf -- "${DISK_PRIVATE_DIR:?}" 2> /dev/null || true' EXIT
   while true; do
     WORK=$(mktemp -d)
     code=0
     nodes_look "$1" "$2" "$3" || code=1
     rm -rf "$WORK"
     if [ "${4:-}" = --once ]; then exit "$code"; fi
+    disk_care || printf 'Could not look after the Docker disk.\n'
     if [ "$code" = 0 ]; then sleep "$NODES_EVERY"; else sleep "$NODES_BACKOFF"; fi
   done
 }

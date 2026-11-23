@@ -35,10 +35,16 @@ entered() {
 }
 
 # Enter only a staging directory at the expected path, owned by this updater and private.
+# A shared parent with setgid makes mktemp -d inherit mode 2700; clear setgid once verified private.
 enter_stage() {
   local mode
   cd -P -- "./$2" && [ "$(physical_dir)" = "${1%/}/$2" ] && [ -O . ] || return 1
-  mode=$(stat -c '%a' . 2> /dev/null || stat -f '%Lp' . 2> /dev/null) && [ "$mode" = 700 ]
+  mode=$(stat -c '%a' . 2> /dev/null || stat -f '%Lp' . 2> /dev/null) || return 1
+  if [ "$mode" = 2700 ]; then
+    chmod g-s . 2> /dev/null || return 1
+    mode=$(stat -c '%a' . 2> /dev/null || stat -f '%Lp' . 2> /dev/null) || return 1
+  fi
+  [ "$mode" = 700 ]
 }
 
 # move_over <file> <name>: rename a file over a name in the same folder, replacing a link there instead of following it.
@@ -224,7 +230,7 @@ keeper_dir() (
     printf 'Refused %s: it is not a keeper folder.\n' "$name" >&2
     exit 1
   fi
-  chmod 700 .
+  chmod g-s . && chmod 700 .
 )
 
 # remove_in <folder> <name>...: files of a shared folder go. A link goes itself, never what it points to, and a folder

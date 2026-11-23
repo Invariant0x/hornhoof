@@ -143,6 +143,7 @@ describe('the host transcript and session branches', () => {
 
   it('follows an invalid agy transcript id without accepting its path or leaking pending tools', () => {
     const c = fixture('antigravity');
+    c.agent.sessionId = null;
     c.agent.agyRead = agySteps();
     c.agent.agyRead({ type: 'PLANNER_RESPONSE', step_index: 1, tool_calls: [{ name: 'Bash' }] });
     c.host['follow'](c.agent, '../other');
@@ -395,8 +396,8 @@ describe('program reports and invocation hooks', () => {
     c.agent.busy = false;
     c.agent.agyCursor = { file: 'current-recording', offset: 23 };
     c.agent.typing = 'pending';
-    await c.host['hook']('branches', 'invocation', { conversationId: 'new', invocationNum: 1 });
-    expect(c.agent.sessionId).toBe('new');
+    await c.host['hook']('branches', 'invocation', { conversationId: 'old', invocationNum: 1 });
+    expect(c.agent.sessionId).toBe('old');
     expect(c.agent.busy).toBe(true);
     expect(c.agent.agyCursor).toEqual({ file: 'current-recording', offset: 23 });
     expect(c.agent.typing).toBe('pending');

@@ -169,12 +169,12 @@ async function zoomOutUntilShown(page: Page) {
   }
 }
 
-/* A zoom in on the part of a card that shows keeps the card in the room: the point under the pointer stays where it is.
-   Seen failing on #1639 in one run of three at 375 px (cyberpunk, and earlier matrix): a zoom in on the card at the edge of
-   the room left it out of the room. Suspected cause: the pan edges of #1596 (keptToEdges in ui/canvas.tsx), which keep a
-   zoomed view to the content's edges and so move it away from the pointer. Fixme until that defect's own task fixes it. */
+/* A zoom in on the part of a card that shows keeps the card in the room: the point under the pointer stays where it is. The
+   pan edges of #1596 (keptToEdges in ui/canvas.tsx) only pull the content's edges toward the room's, so they can move this
+   card, the content's top-left corner, toward the room and never out of it. Once seen failing on #1639 on a loaded machine
+   whose tree changed during the run; #1733 found no cause in 338 runs, with the CPU slowed and on a loaded test machine. */
 for (const skin of SKINS) {
-  test.fixme(`a zoom in on the part of a card that shows keeps the card in the room, 375px ${skin}`, async ({ page }) => {
+  test(`a zoom in on the part of a card that shows keeps the card in the room, 375px ${skin}`, async ({ page }) => {
     await page.setViewportSize({ width: 375, height: HEIGHT });
     await page.addInitScript(skin => {
       localStorage.setItem('hh-lang', 'en');

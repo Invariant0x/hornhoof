@@ -168,7 +168,9 @@ export async function openCompany(page: Page, { lang, theme, width }: Settings, 
     openEmployee: async (name: string) => {
       await tab(words.tabs[0]!).click();
       if (!(await page.locator('.dview').count())) await page.getByRole('button', { name: /^Development/ }).click();
-      await page.getByRole('region', { name: words.members }).getByRole('button', { name: new RegExp(name) }).click();
+      const card = page.getByRole('region', { name: words.members }).getByRole('button', { name: new RegExp(name) });
+      await bringClear(page, card);
+      await card.click();
       await expect(windowOf(name)).toBeVisible();
     },
     minimize: async (name: string) => {
@@ -176,6 +178,42 @@ export async function openCompany(page: Page, { lang, theme, width }: Settings, 
       await expect(windowOf(name)).toBeHidden();
     },
   };
+}
+
+/* A card that the bars floating over the department's canvas cover, as the cards low in a phone's tall department do until the
+   canvas is moved, is brought clear the way a person does it: the bare canvas is dragged until the card's middle is the top
+   thing there. A click on a card that stays covered waits for as long as nothing uncovers it, so this ends by saying the card
+   stays covered. The press stands 8 px clear of the bars and the hand first moves 6 px, as the canvas takes the pointer only
+   once a press has moved a few pixels, and a first step onto a bar goes to the bar. */
+async function bringClear(page: Page, card: Locator): Promise<void> {
+  const bars = '.topbar > *, .dview .crumbs, .dview .dv-dock :is(.zoom, .ticker, .dv-acts)';
+  for (let turn = 0; turn < 8; turn++) {
+    const hand = await card.evaluate((el, bars) => {
+      const at = el.getBoundingClientRect(), [x, y] = [(at.left + at.right) / 2, (at.top + at.bottom) / 2];
+      const hit = document.elementFromPoint(x, y);
+      if (hit && el.contains(hit)) return null;
+      const glass = [...document.querySelectorAll(bars)].map(bar => bar.getBoundingClientRect()).filter(r => r.width && r.height);
+      const [under, over] = [Math.max(0, ...glass.filter(r => r.top + r.bottom < innerHeight).map(r => r.bottom)), Math.min(innerHeight, ...glass.filter(r => r.top + r.bottom >= innerHeight).map(r => r.top))];
+      const busy = 'button, a, input, label, [role="button"], [role="checkbox"], .glass';
+      let start: { x: number; y: number } | null = null;
+      for (let py = under + 16; py < over - 16 && !start; py += 10) {
+        for (let px = 6; px < innerWidth - 6; px += 10) {
+          if (glass.some(r => px >= r.left - 8 && px <= r.right + 8 && py >= r.top - 8 && py <= r.bottom + 8)) continue;
+          const top = document.elementFromPoint(px, py);
+          if (top?.closest('.dview .dcanvas') && !top.closest(busy)) { start = { x: px, y: py }; break; }
+        }
+      }
+      return start && { ...start, dy: (under + over) / 2 - y };
+    }, bars);
+    if (!hand) return;
+    expect(hand, `a bare spot of the canvas to drag the covered card ${await card.textContent()} by`).not.toBeNull();
+    await page.mouse.move(hand.x, hand.y);
+    await page.mouse.down();
+    await page.mouse.move(hand.x, hand.y + Math.sign(hand.dy) * 6);
+    await page.mouse.move(hand.x, hand.y + hand.dy, { steps: 8 });
+    await page.mouse.up();
+  }
+  throw new Error(`The card ${await card.textContent()} stays under the bars after 8 drags of the canvas.`);
 }
 
 /* A picture from the clipboard, pasted with the focus nowhere in particular. */

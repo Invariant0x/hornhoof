@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -496,6 +496,44 @@ describe('install.sh server', () => {
     const after = readFileSync(join(folder, '.env'), 'utf8');
     expect(valueOf(after, 'HORNHOOF_HOSTNAME')).toEqual(valueOf(before, 'HORNHOOF_HOSTNAME'));
     expect(valueOf(after, 'HORNHOOF_HOST_OS')).toEqual(['linux']);
+  });
+
+  it('clears setgid on an existing worker core control volume on worker update and join re-run', () => {
+    const first = install({ env: { STUB_JOIN_BODY: body(CORE) } });
+    expect(first.code, first.out).toBe(0);
+    const core = join(home(first.dir), 'hornhoof-qwerty');
+    const controlDir = join(first.dir, 'control');
+    mkdirSync(join(controlDir, 'dumps'), { recursive: true });
+    chmodSync(controlDir, 0o2755);
+    chmodSync(join(controlDir, 'dumps'), 0o2700);
+
+    const shared = {
+      HOME: home(first.dir),
+      HORNHOOF_HOME: join(home(first.dir), '.hornhoof'),
+      HORNHOOF_DIR: join(home(first.dir), 'hornhoof'),
+      STUB_PORTS_DIR: first.dir,
+      STUB_CONTROL_VOLUMES: `hornhoof-qwerty_control=${controlDir}`,
+    };
+
+    /* Manual or updater worker run clears setgid on hornhoof-qwerty_control. */
+    const workerRun = install({
+      args: ['worker'],
+      tty: '',
+      env: { ...shared, HORNHOOF_SERVER_DIR: core, HORNHOOF_PULLED: '1' },
+    });
+    expect(workerRun.code, workerRun.out).toBe(0);
+    expect(statSync(controlDir).mode & 0o7777).toBe(0o755);
+    expect(statSync(join(controlDir, 'dumps')).mode & 0o7777).toBe(0o700);
+
+    /* Re-running --join against the same existing core also clears setgid. */
+    chmodSync(controlDir, 0o2755);
+    chmodSync(join(controlDir, 'dumps'), 0o2700);
+    const rejoin = install({
+      env: { ...shared, STUB_JOIN_BODY: body(CORE) },
+    });
+    expect(rejoin.code, rejoin.out).toBe(0);
+    expect(statSync(controlDir).mode & 0o7777).toBe(0o755);
+    expect(statSync(join(controlDir, 'dumps')).mode & 0o7777).toBe(0o700);
   });
 });
 

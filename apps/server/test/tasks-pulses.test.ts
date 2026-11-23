@@ -5,6 +5,7 @@ import type { StreamMessage } from '../src/modules/events/bus.js';
 import { answer, ask, cancel, createTask, report, submit } from '../src/modules/tasks/engine.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { setUpCompany, testApp, echelonsTurn } from './helpers.js';
+import { recorded } from './recorded-fixture.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -38,7 +39,7 @@ describe('pulses on the map for tasks', () => {
     const { ctx, orchestrator, dev, head, pulses } = await company();
     const { task } = await createTask(ctx, { agentId: orchestrator.id }, { title: 'Icons', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id });
     expect(pulses()).toEqual([`orchestrator -> department:${dev.id}`]);
-    await report(ctx, head.id, task.id, { done: true, summary: 'Shipped.' });
+    await report(ctx, head.id, task.id, { done: true, summary: 'Shipped.', ...(await recorded(ctx, task.id, head.id)) });
     expect(pulses()).toEqual([`department:${dev.id} -> orchestrator`]);
   });
 

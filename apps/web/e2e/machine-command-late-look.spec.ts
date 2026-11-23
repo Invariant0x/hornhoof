@@ -6,7 +6,9 @@ import { serveRoutes } from './routes-api';
 /* The Machines screen looks at the server again every 5 s (REFRESH_MS in Machines.tsx). An answer to a look can reach the
    page after the person cancelled or made a command, though the server read it before: such an answer is older than the
    screen and must change none of its commands. The page runs on a paused clock, so the only look between the steps is
-   the one the test makes, and the test lets its answer through itself. */
+   the one the test makes, and the test lets its answer through itself. The clock stands still from the page's first
+   moment: a table whose data came while its ring showed waits for the ring's least time, counted by a timer, so a clock
+   paused after the page began could stop it with the rows held back for good. */
 const NOW = Date.parse('2026-11-17T10:00:00Z');
 const REFRESH_MS = 5000;
 const HOST = 'first-box';
@@ -129,9 +131,9 @@ for (const c of CASES) {
     page.on('pageerror', error => errors.push(error.message));
     page.on('response', response => { if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`); });
     await page.clock.install({ time: NOW - 60_000 });
+    await page.clock.pauseAt(NOW);
     const server = await serve(page, c.commands);
     await page.goto(c.path);
-    await page.clock.pauseAt(NOW);
     await expect(page.getByRole('button', { name: t.tables.openCard(HOST), exact: true })).toBeVisible();
     const block = c.block(page);
     if (c.commands.length) await expect(block.locator('code').first()).toHaveText(c.commands[0]!.command);

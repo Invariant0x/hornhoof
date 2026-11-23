@@ -460,10 +460,36 @@ case "$1" in
       for v in ${STUB_PROJECT_VOLUMES:-}; do
         case "$* " in *"com.docker.compose.project=$v "*) echo "${v}_pgdata" ;; esac
       done
+    elif [ "${2:-}" = inspect ]; then
+      # STUB_CONTROL_VOLUMES words are "volume=host_dir", existing control volumes that tests inspect and repair.
+      found=''
+      for entry in ${STUB_CONTROL_VOLUMES:-}; do
+        if [ "${entry%%=*}" = "${3:-}" ]; then found=1; break; fi
+      done
+      [ -n "$found" ] || exit 1
     fi ;;
   run)
     # STUB_WAIT_UPDATE is what the node's wait-update ends with.
     WORD=wait-update; if has "$@"; then exit "${STUB_WAIT_UPDATE:-0}"; fi
+    if [ -n "${STUB_CONTROL_VOLUMES:-}" ]; then
+      ctrl_vol='' ctrl_cmd='' prev=''
+      for a in "$@"; do
+        case "$prev:$a" in
+          -v:*:/control) ctrl_vol=${a%:/control} ;;
+          -c:*) ctrl_cmd=$a ;;
+        esac
+        prev=$a
+      done
+      if [ -n "$ctrl_vol" ] && [ -n "$ctrl_cmd" ]; then
+        for entry in ${STUB_CONTROL_VOLUMES:-}; do
+          if [ "${entry%%=*}" = "$ctrl_vol" ]; then
+            host_ctrl=${entry#*=}
+            sh -c "${ctrl_cmd//\/control/\"$host_ctrl\"}"
+            exit $?
+          fi
+        done
+      fi
+    fi
     case "$*" in
       # STUB_REGISTRY=fail: the write fails; STUB_REGISTRY=unreadable: the read does.
       *'cat > /ports/registry.new'*)

@@ -45,6 +45,7 @@ const FILTERS: Filters = {
     return task && seesTask(viewer, task) ? m : null;
   },
   org: passes,
+  company_theme: passes,
   tracker: passes,
   requests: passes,
   notebook: passes,

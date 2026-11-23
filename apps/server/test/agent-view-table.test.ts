@@ -136,6 +136,8 @@ const WHOLE_ONLY = { ann: 403, olga: 403, wes: 200, clara: 200, ceo: 200 };
 const DEPARTMENT_ITSELF = { ann: 404, olga: 200, wes: 200, clara: 200, ceo: 200 };
 const LISTS: Listed[] = [
   { route: 'GET /api/org', url: () => '/api/org', statuses: ALL_OK, company: true },
+  { route: 'GET /api/world/state', url: () => '/api/world/state', statuses: ALL_OK, company: true },
+  { route: 'GET /api/world/theme', url: () => '/api/world/theme', statuses: ALL_OK, company: true },
   { route: 'GET /api/tasks', url: c => `/api/tasks?status=all&department=${c.dev.id}`, statuses: ALL_OK, company: true },
   { route: 'GET /api/requests', url: () => '/api/requests', statuses: ALL_OK },
   { route: 'GET /api/wait-cards', url: () => '/api/wait-cards', statuses: ALL_OK },
@@ -222,6 +224,12 @@ const ELSEWHERE: Record<string, string> = {
   'DELETE /api/assistant/mcp': 'assistants-mcp.test.ts: 405, the MCP door takes POST alone',
   'GET /api/feedback/inbox': "feedback-inbox.test.ts: only on Hornhoof's own installation, a person with the whole company, 403 for another one; its cards came from installations, not from this company's agents",
   'POST /api/feedback/inbox/:id/issue': "feedback-issue.test.ts: only on Hornhoof's own installation, a person with the whole company, 403 for another one",
+  'POST /api/world/relocations': 'world-live.test.ts: CEO or whole-company owner for common buildings, department reach for department structures and agent houses, 403 otherwise',
+  'PUT /api/world/theme': 'world-skills.test.ts: the CEO alone (isOwner && !viaHead), 403 for delegate, whole-company non-owner, department owner, listed person and head',
+  'GET /api/world/rename-preview': 'world-skills.test.ts: the CEO alone (isOwner && !viaHead), 403 for everyone else',
+  'POST /api/world/rename-agents': 'world-skills.test.ts: the CEO alone (isOwner && !viaHead), 403 for everyone else',
+  'POST /api/world/restore-names': 'world-skills.test.ts: the CEO alone (isOwner && !viaHead), 403 for everyone else',
+  'GET /api/machines/:id/removal': "network-routes.test.ts: machine owner or whole-company viewer only, 403 otherwise; masks another person's private assistant in kept",
 };
 
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */
@@ -240,8 +248,8 @@ const NO_AGENT_DATA: string[] = [
   'POST /api/departments/:id/teams', 'PATCH /api/departments/:id/teams/:teamId', 'DELETE /api/departments/:id/teams/:teamId', 'POST /api/departments/build',
   'GET /api/health', 'GET /api/invites/:token', 'POST /api/invites/:token/accept',
   'GET /api/link', 'PUT /api/link', 'DELETE /api/link', 'GET /api/link/names/:name',
-  'GET /api/map/layout', 'PATCH /api/map/layout', 'DELETE /api/map/layout',
-  'PATCH /api/machines/:id', 'GET /api/machines/:id/connections', 'POST /api/machines/:id/core', 'GET /api/machines/:id/removal', 'POST /api/machines/:id/disconnect', 'PUT /api/machines/:id/priority', 'POST /api/machines/:id/move', 'DELETE /api/machines/:id/move', 'POST /api/machines/:id/plans', 'POST /api/machines/:id/programs/update', 'POST /api/machines/command',
+  'GET /api/map/layout', 'PATCH /api/map/layout', 'DELETE /api/map/layout', 'PUT /api/world/layout',
+  'PATCH /api/machines/:id', 'GET /api/machines/:id/connections', 'POST /api/machines/:id/core', 'POST /api/machines/:id/disconnect', 'PUT /api/machines/:id/priority', 'POST /api/machines/:id/move', 'DELETE /api/machines/:id/move', 'POST /api/machines/:id/plans', 'POST /api/machines/:id/programs/update', 'POST /api/machines/command',
   'GET /api/me/key', 'PUT /api/me/key',
   'GET /api/backups', 'POST /api/backups/recovery', 'GET /api/backups/recovery', 'GET /api/backups/:id/warning', 'POST /api/backups/:id/restore', 'POST /api/backups/kept/:name/leave', 'GET /api/merges/:id/conflicts', 'POST /api/merges/pick', 'GET /api/network/backups', 'POST /api/network/backups', 'GET /api/network/switch', 'GET /api/network/switched', 'GET /api/network/question', 'POST /api/network/question/go-on', 'POST /api/network/question/wait', 'POST /api/network/certificate', 'GET /api/network/computer', 'POST /api/network/computer/:id', 'POST /api/network/join', 'GET /api/network/peers', 'POST /api/network/renew', 'POST /api/network/report', 'POST /api/network/secrets',
   'GET /api/nodes/commands', 'POST /api/nodes/commands/:id/hide', 'POST /api/nodes/join', 'GET /api/nodes/socket', 'POST /api/nodes/update', 'DELETE /api/nodes/update',

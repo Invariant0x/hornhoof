@@ -1,6 +1,6 @@
-import { startServer } from './real-server';
+import { pageFolder, startServer } from './real-server';
 /// <reference types="node" />
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Locator, type Page, type Route, type TestInfo } from '@playwright/test';
@@ -563,7 +563,9 @@ for (const lang of CHECKED_LOCALES) {
 
         await page.goto('/tasks');
         const mainCards = page.locator('.page article.req');
-        await expect(mainCards).toHaveCount(3);
+        /* The page holds what this person can answer; the read-only choice of another person waits under Waiting for people (#1806). */
+        await expect(mainCards).toHaveCount(2);
+        await expect(mainCards.filter({ hasText: panelRequests.find(request => !request.canAnswer)!.text })).toHaveCount(0);
         await page.evaluate(async () => {
           await document.fonts.ready;
         });
@@ -806,6 +808,7 @@ const config = loadConfig({
   HORNHOOF_SECRET: secret,
   UPDATE_CHECK_MS: '0',
   PUBLIC_URL: process.env.HH_PUBLIC_URL ?? 'http://localhost:4179',
+  WEB_DIST: process.env.HH_WEB_DIST,
 });
 const app = await buildApp({
   db,
@@ -927,14 +930,18 @@ process.stdin.on('end', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
 `;
 
-async function startRealServer(publicUrl: string): Promise<RealServerBoot> {
-  return startServer<Omit<RealServerBoot, 'stop'>>(REAL_SERVER_SCRIPT, { cwd: resolve(HERE, '../../server'), publicUrl, invalidBoot: 'Invalid server boot line' });
+async function startRealServer(publicUrl: string, webDist: string): Promise<RealServerBoot> {
+  return startServer<Omit<RealServerBoot, 'stop'>>(REAL_SERVER_SCRIPT, { cwd: resolve(HERE, '../../server'), publicUrl, invalidBoot: 'Invalid server boot line', env: { HH_WEB_DIST: webDist } });
 }
 
 test('saves neutral feedback without pick, delivers words to author, and preserves explicit pick: 0 on a real server', async ({ page, baseURL }, info) => {
   test.setTimeout(0);
   const webOrigin = baseURL ?? 'http://localhost:4179';
-  const srv = await startRealServer(webOrigin);
+  const webDist = pageFolder('hh-choice-web-');
+  const srv = await startRealServer(webOrigin, webDist).catch(err => {
+    rmSync(webDist, { recursive: true, force: true });
+    throw err;
+  });
   try {
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.addInitScript(() => {
@@ -1067,5 +1074,6 @@ test('saves neutral feedback without pick, delivers words to author, and preserv
     expect(errors).toEqual([]);
   } finally {
     await srv.stop();
+    rmSync(webDist, { recursive: true, force: true });
   }
 });

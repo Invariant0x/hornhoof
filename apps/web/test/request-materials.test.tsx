@@ -840,30 +840,33 @@ describe('separate question materials preview and explicit answering', () => {
     expect(await within(reopened).findByText('Includes Support and Finance before edits.')).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
 
-    /* Open staff proposal sealed document too, then close with zero POSTs. */
+    /* The queue shows one card at a time, so the structure is submitted first, with the exact { materialRevision,
+       materialDigest } stamps passed through Tasks.tsx, and the staff card comes up when it is done. */
+    await user.click(screen.getByRole('button', { name: en.card.create(1) }));
+    const structPost = {
+      method: 'POST',
+      path: '/api/departments/build',
+      body: {
+        proposalId: structId,
+        materialRevision: 2,
+        materialDigest: structDigest,
+        items: [{ template: 'support', note: 'Customer helpdesk', staff: true }],
+      },
+    };
+    expect(calls.filter(c => c.method === 'POST')).toEqual([structPost]);
+
+    /* Open staff proposal sealed document too, then close: looking at it hires no one. */
     await user.click(await screen.findByRole('button', { name: /Open material: Staffing plan\.md/ }));
     const staffDialog = await screen.findByRole('dialog', { name: 'Staffing plan.md' });
     expect(await within(staffDialog).findByText('Hire Bruno on Team key.')).toBeInTheDocument();
     expect(within(staffDialog).getByText(en.tasks.materials.proposalNote)).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+    expect(calls.filter(c => c.method === 'POST')).toEqual([structPost]);
 
-    /* Submitting structure and staff sends the exact { materialRevision, materialDigest } stamps passed through Tasks.tsx. */
-    await user.click(screen.getByRole('button', { name: en.card.create(1) }));
+    /* Submitting the staff sends its stamps the same way. */
     await user.click(screen.getByRole('button', { name: en.staff.hire(1) }));
-
-    const postCalls = calls.filter(c => c.method === 'POST');
-    expect(postCalls).toEqual([
-      {
-        method: 'POST',
-        path: '/api/departments/build',
-        body: {
-          proposalId: structId,
-          materialRevision: 2,
-          materialDigest: structDigest,
-          items: [{ template: 'support', note: 'Customer helpdesk', staff: true }],
-        },
-      },
+    expect(calls.filter(c => c.method === 'POST')).toEqual([
+      structPost,
       {
         method: 'POST',
         path: '/api/departments/d2/staff',

@@ -961,6 +961,7 @@ worker_core() {
   fi
   WANT_WEB=$CORE_PORT
   reserve_ports
+  clear_control_setgid "$(server_project)"
   say "Starting the company's core on this machine, in $SERVER_DIR."
   if [ -n "$SUBNET_MOVED" ]; then compose_step "${COMPOSE[@]}" down --remove-orphans || true; fi
   start_keeper_and_front "${COMPOSE[@]}"
@@ -2468,6 +2469,18 @@ start_services() {
   fi
 }
 
+# Older builds shipped /control with the setgid bit (2755), which an existing control volume kept across updates.
+# Clear setgid on an existing control volume and directories inside it without creating an unlabeled volume first.
+clear_control_setgid() {
+  local volume="${1}_control"
+  [ -n "$1" ] || return 0
+  "${DOCKER[@]}" volume inspect "$volume" > /dev/null 2>&1 || return 0
+  "${DOCKER[@]}" run --rm --network none --user 0:0 --cap-drop ALL --cap-add DAC_OVERRIDE --cap-add FOWNER \
+    --security-opt no-new-privileges -v "$volume:/control" --entrypoint sh "$APP_REF" \
+    -c 'chmod g-s /control && find /control -type d -exec chmod g-s {} +' > /dev/null 2>&1 ||
+    say "Could not clear setgid permissions on $volume; continuing."
+}
+
 # Only a revision it can read as 2 or more goes on, so a value it cannot read ends in the handover, which is safe.
 older_updater_runs_this() { [ -n "$FROM_UPDATER" ] && ! [ "${HORNHOOF_UPDATER_REV:-1}" -ge 2 ] 2> /dev/null; }
 
@@ -2563,6 +2576,7 @@ server_mode() {
     (cd "$SERVER_DIR" && "${compose[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
   fi
   reserve_ports
+  if [ -z "$NODES_ONLY" ]; then clear_control_setgid "$project"; fi
   # The updater checks the new server's answer itself, and replaces itself once it comes.
   start_server_services "${compose[@]}"
   if [ -n "$FROM_UPDATER" ]; then return 0; fi
@@ -2637,6 +2651,7 @@ worker_core_update() {
   fi
   if ! grep -q '^HORNHOOF_PORT=$' "$SERVER_DIR/.env"; then ENV_BEFORE=1; fi
   reserve_ports
+  clear_control_setgid "$(server_project)"
   say "Starting the company's core${PIN:+ $PIN}."
   if [ -z "$FROM_UPDATER" ] && [ -n "$SUBNET_MOVED" ]; then
     compose_step "${COMPOSE[@]}" down --remove-orphans || true
