@@ -520,14 +520,14 @@ function checkSheet(path: string, entry: ArtIndexEntry, rows: number | null, err
 }
 
 /* Checks the art folder's index against the pack's catalog and the contract's geometry rules. */
+/* A step's own folder (undefined), then each of its variant folders (0 = v01). */
+const variantNumbers = (step: ArtBuildingStep): (number | undefined)[] => [undefined, ...Array.from({ length: step.variants ?? 0 }, (_, v) => v)];
+
 /* The footprint of every step folder of the catalog, its variant folders included. */
-function stepFootprints(pack: WorldPackManifest): Map<string, FootprintKey> {
+function stepFootprints(buildings: WorldArtCatalog['buildings']): Map<string, FootprintKey> {
   const out = new Map<string, FootprintKey>();
-  for (const [kind, steps] of Object.entries(pack.art?.buildings ?? {}) as [BuildingKind, readonly ArtBuildingStep[] | undefined][]) {
-    for (const step of steps ?? []) {
-      const variants = Array.from({ length: step.variants ?? 0 }, (_, v) => v);
-      for (const v of [undefined, ...variants]) out.set(stepFolder(kind, step, v), step.footprint);
-    }
+  for (const [kind, steps] of Object.entries(buildings) as [BuildingKind, readonly ArtBuildingStep[]][]) {
+    for (const step of steps) for (const v of variantNumbers(step)) out.set(stepFolder(kind, step, v), step.footprint);
   }
   return out;
 }
@@ -545,7 +545,7 @@ export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtI
     errors.push(`art-index.json belongs to pack "${index.pack}", not "${pack.id}"`);
   }
 
-  const footprintOf = stepFootprints(pack);
+  const footprintOf = stepFootprints(pack.art?.buildings ?? {});
 
   /* Layer files are declared by the passports that name them and must match their picture's canvas. */
   const layerOf = new Map<string, string>();
