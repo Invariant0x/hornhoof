@@ -34,14 +34,16 @@ export function openVacatedLots(city: Pick<CityState, 'buildings' | 'vacatedLots
 }
 
 /* The lots the city's accepted moves left behind and that have not grown back by `now`: each move's starting lot with the
-   moved building's footprint, while no building stands on it. Only what the server already keeps is read. */
+   moved building's footprint, while no building stands on it. Only what the server already keeps is read. A pack with no
+   lot ground keeps none. */
 export function vacatedLotsFromRelocations(
   relocations: readonly WorldRelocationRecord[],
   buildings: readonly CityBuilding[],
-  spec: LotGroundSpec,
+  spec: LotGroundSpec | undefined,
   now: number,
 ): VacatedLot[] {
   const out: VacatedLot[] = [];
+  if (!spec) return out;
   for (const rel of relocations) {
     if (rel.status !== 'applied' || !rel.resolvedAt) continue;
     const moved = buildings.find(b => b.id === rel.buildingId);
@@ -132,4 +134,44 @@ export function surveyedLot(stakes: readonly Readonly<{ col: number; row: number
 export function lotClearingKey(clearing: LotClearing | null): string {
   if (!clearing) return '';
   return clearing.lots.map(l => `${l.col},${l.row},${l.spanCol},${l.spanRow}`).join(';');
+}
+
+/* The cache-key part of the cleared lots for each chunk under one clearing, and the last key each chunk was baked under:
+   a chunk whose lots changed shows that picture until the one with the new lots is baked. */
+export class ChunkLotKeys {
+  private clearing: LotClearing | null = null;
+  private readonly byChunk = new Map<string, string>();
+  private readonly lastBaked = new Map<string, string>();
+
+  /* A new clearing: every chunk's key part is worked out again. */
+  reset(clearing: LotClearing | null): void {
+    this.clearing = clearing;
+    this.byChunk.clear();
+  }
+
+  /* '#' and the lots reaching into the chunk, or '' when none does. */
+  keyOf(chunk: Readonly<{ key: string; colStart: number; colEnd: number; rowStart: number; rowEnd: number }>): string {
+    let k = this.byChunk.get(chunk.key);
+    if (k === undefined) {
+      const near = chunkLotClearing(this.clearing, chunk);
+      k = near ? `#${lotClearingKey(near)}` : '';
+      this.byChunk.set(chunk.key, k);
+    }
+    return k;
+  }
+
+  /* A chunk's picture was baked under this whole cache key. */
+  baked(key: string): void {
+    this.lastBaked.set(key.split('#')[0]!, key);
+  }
+
+  /* The picture last baked for a chunk under any clearing, at the levels of detail in the order the cache is searched. */
+  lastBakedHit<T>(chunkKey: string, lodIds: readonly string[], get: (key: string) => T | undefined): { key: string; entry: T } | null {
+    for (let i = lodIds.length - 1; i >= 0; i--) {
+      const key = this.lastBaked.get(`${chunkKey}@${lodIds[i]}`);
+      const entry = key === undefined ? undefined : get(key);
+      if (entry !== undefined) return { key: key!, entry };
+    }
+    return null;
+  }
 }

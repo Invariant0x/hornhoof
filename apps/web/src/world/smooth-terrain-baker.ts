@@ -644,12 +644,38 @@ function clearLotGround(w: Float32Array, count: number, lot: number, cleared: nu
   return cleared;
 }
 
+/* The cleared lots at one pixel: the share of the lot ground moved into its weights, the lots whose edge reaches it (null
+   where none does), and the tilled plots that still show under it (none on a lot). */
+type LotPixel = { share: number; lots: LotClearing | null; plot: PlotLayout | null };
+
+function newLotPixel(): LotPixel {
+  return { share: 0, lots: null, plot: null };
+}
+
+/* The lots a bake mixes in: none when the pack names no lot ground. */
+function lotsFor(look: GroundLook, clearing: LotClearing | null): LotClearing | null {
+  return look.lotGround >= 0 ? clearing : null;
+}
+
+/* Clears the pixel's ground weights by the share of lot ground at (u, v) and says what the pixel shows of the lots. */
+function clearPixel(look: GroundLook, lots: LotClearing | null, w: Float32Array, u: number, v: number, out: LotPixel): LotPixel {
+  out.share = lots ? clearLotGround(w, look.matCount, look.lotGround, lotClearingAt(lots, u, v)) : 0;
+  out.lots = out.share > 0 ? lots : null;
+  out.plot = out.share < 0.5 ? look.plot : null;
+  return out;
+}
+
 /* Weight of ground m at (u, v) with the cleared lots laid over the map's ground. */
 function clearedLayerAt(look: GroundLook, cf: CornerFieldGrid, m: number, u: number, v: number, lots: LotClearing | null): number {
   const raw = layerAt(cf, cf.layerWeights[m]!, u, v);
   if (!lots) return raw;
   const cleared = lotClearingAt(lots, u, v);
   return raw * (1 - cleared) + (m === look.lotGround ? cleared : 0);
+}
+
+/* Index of the pack's lot ground among the map's grounds; -1 when the pack names none. */
+function lotGroundIndex(cf: CornerFieldGrid, pack: WorldPackManifest): number {
+  return pack.lotGround ? cf.materialIds.indexOf(pack.lotGround.material) : -1;
 }
 
 function layerAt(cf: CornerFieldGrid, arr: Float32Array, u: number, v: number): number {
@@ -940,7 +966,8 @@ function bakeSmoothChunkRows(
   const cf = map.cornerFields;
   const look = groundLook(map, pack, art);
   const { textures, matCount } = look;
-  const lots = look.lotGround >= 0 ? clearing : null;
+  const lots = lotsFor(look, clearing);
+  const lotPx = newLotPixel();
 
   const liquid = pack.liquidLayer;
   const shallowRgb = parseHexRgb(liquid?.shallowTintColor ?? '#489FB5', [72, 159, 181]);
@@ -1064,7 +1091,7 @@ function bakeSmoothChunkRows(
         const arr = layerArrs[m]!;
         wBuf[m] = arr[i00]! * w00 + arr[i10]! * w10 + arr[i01]! * w01 + arr[i11]! * w11;
       }
-      const cleared = lots ? clearLotGround(wBuf, matCount, look.lotGround, lotClearingAt(lots, u, v)) : 0;
+      const { plot, lots: lotsHere } = clearPixel(look, lots, wBuf, u, v, lotPx);
 
       let rippleStrength = 0;
       let r = 0;
@@ -1072,10 +1099,10 @@ function bakeSmoothChunkRows(
       let b = 0;
       plotHit.inside = false;
       let fieldHere = 0;
-      if (look.plot && cleared < 0.5) {
-        plotAt(cf, look.plot, u, v, plotHit);
-        fieldHere = wBuf[look.plot.material]!;
-        if (!plotHit.inside) untilledGround(look.plot, wBuf, plotHit.margin);
+      if (plot) {
+        plotAt(cf, plot, u, v, plotHit);
+        fieldHere = wBuf[plot.material]!;
+        if (!plotHit.inside) untilledGround(plot, wBuf, plotHit.margin);
       }
       if (plotHit.inside) {
         plotColor(look, plotHit, u, v, coarse, rgb);
@@ -1085,7 +1112,7 @@ function bakeSmoothChunkRows(
       } else {
         if (painted && marginEdgeMix(look, plotHit, fieldHere, u, v, mix)) {
           /* The painted edge of a plot margin. */
-        } else if (painted) mixGroundArt(look, cf, wBuf, u, v, coarse, mix, cleared > 0 ? lots : null);
+        } else if (painted) mixGroundArt(look, cf, wBuf, u, v, coarse, mix, lotsHere);
         else mixGround(wBuf, matCount, u, v, coarse, detail, mix);
         sampleTexture(textures[mix.a]!, u, v, rgb);
         r = rgb[0]!;
@@ -1622,7 +1649,7 @@ function groundLook(map: GeneratedWorldMap, pack: WorldPackManifest, pinned: Loa
     plotEdge,
     grassForPlots,
     meadow: specs.findIndex(sp => sp.pattern === 'grass_tufts'),
-    lotGround: pack.lotGround ? cf.materialIds.indexOf(pack.lotGround.material) : -1,
+    lotGround: lotGroundIndex(cf, pack),
     ditch: surface ? artTex(surface, tpt) : null,
   };
   lookCache.set(map, { pack, art: pinned, look });
@@ -1722,22 +1749,21 @@ export function groundMixAt(
   const s = sampleCornerFieldBilinear(map.cornerFields, u, v);
   const w = new Float32Array(s.weights);
   const out: GroundMix = { a: 0, b: 0, shareA: 1, rim: 0 };
-  const lots = look.lotGround >= 0 ? clearing : null;
-  const cleared = lots ? clearLotGround(w, look.matCount, look.lotGround, lotClearingAt(lots, u, v)) : 0;
-  if (look.plot && cleared < 0.5) {
+  const { plot, lots } = clearPixel(look, lotsFor(look, clearing), w, u, v, newLotPixel());
+  if (plot) {
     const hit = newPlotHit();
-    plotAt(map.cornerFields, look.plot, u, v, hit);
+    plotAt(map.cornerFields, plot, u, v, hit);
     if (hit.inside) {
-      out.a = look.plot.material;
-      out.b = look.plot.material;
+      out.a = plot.material;
+      out.b = plot.material;
       return out;
     }
-    const fieldHere = w[look.plot.material]!;
-    untilledGround(look.plot, w, hit.margin);
+    const fieldHere = w[plot.material]!;
+    untilledGround(plot, w, hit.margin);
     if (look.art && marginEdgeMix(look, hit, fieldHere, u, v, out)) return coveringFirst(out);
   }
   const { coarse, detail } = getNoiseLuts();
-  if (look.art) mixGroundArt(look, map.cornerFields, w, u, v, coarse, out, cleared > 0 ? lots : null);
+  if (look.art) mixGroundArt(look, map.cornerFields, w, u, v, coarse, out, lots);
   else mixGround(w, look.matCount, u, v, coarse, detail, out);
   return coveringFirst(out);
 }

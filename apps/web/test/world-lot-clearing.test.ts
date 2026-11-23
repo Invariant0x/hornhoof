@@ -7,7 +7,8 @@ import type { WorldLiveSnapshot } from '@hornhoof/protocol/world';
 import { describe, expect, it } from 'vitest';
 import { cityPlantCover, type CityBuilding, type CityState } from '../src/world/city-layout';
 import { canRelocateBuildingTo, createHornhoofLiveFixture, syncLiveSnapshotToCity } from '../src/world/live-sync';
-import { cityLotClearing, lotClearingAt, type LotClearing } from '../src/world/lot-clearing';
+import { cityGround, cityGroundKey } from '../src/world/city-ground';
+import { ChunkLotKeys, cityLotClearing, lotClearingAt, lotClearingNear, vacatedLotsFromRelocations, type LotClearing } from '../src/world/lot-clearing';
 import { DEFAULT_ISOMETRIC_PROJECTION, validateWorldPack, type WorldPackManifest } from '../src/world/manifest';
 import { clearPlantsFromCity, generatePlants } from '../src/world/plants';
 import { groundMixAt } from '../src/world/smooth-terrain-baker';
@@ -287,5 +288,85 @@ describe('Cleared ground under building lots', () => {
       buildings: [...city.buildings, { ...city.buildings[0]!, id: 'newcomer', col: from.col, row: from.row, spanCol: 1, spanRow: 1, stage: 1 }],
     };
     expect(cityLotClearing(taken, EGYPT_WORLD_PACK)!.lots.filter(l => l.col === from.col && l.row === from.row && l.spanCol === from.spanCol)).toEqual([]);
+  });
+});
+
+describe('The rules and keys of cleared lots', () => {
+  it('checks a pack lot ground: needed with blended grounds, one of them, an edge of up to two tiles, a positive regrowth time', () => {
+    const errorsOf = (pack: WorldPackManifest) => {
+      const verdict = validateWorldPack(pack);
+      return verdict.ok ? [] : verdict.errors;
+    };
+    const spec = EGYPT_WORLD_PACK.lotGround!;
+    expect(errorsOf({ ...EGYPT_WORLD_PACK, lotGround: undefined })).toContain('lotGround is required with smooth ground materials');
+    expect(errorsOf({ ...EGYPT_WORLD_PACK, materials: undefined, lotGround: undefined })).not.toContain('lotGround is required with smooth ground materials');
+    for (const edgeTiles of [0, 2.5]) expect(errorsOf({ ...EGYPT_WORLD_PACK, lotGround: { ...spec, edgeTiles } })).toContain('lotGround.edgeTiles must be in (0, 2]');
+    expect(errorsOf({ ...EGYPT_WORLD_PACK, lotGround: { ...spec, edgeTiles: 2 } })).toEqual([]);
+    expect(errorsOf({ ...EGYPT_WORLD_PACK, lotGround: { ...spec, regrowthHours: 0 } })).toContain('lotGround.regrowthHours must be positive');
+    /* Without a recipe the pack's own grounds are the ones it blends. */
+    expect(errorsOf({ ...EGYPT_WORLD_PACK, terrainRecipe: undefined })).not.toContain(`lotGround references material "${spec.material}" the ground does not blend`);
+  });
+
+  it('keeps no lot a building left in a pack with no lot ground', () => {
+    const base = liveCity(EGYPT_WORLD_PACK);
+    const left = Date.parse('2026-11-22T08:00:00Z');
+    const { snapshot } = withMovedHouse(base, new Date(left).toISOString(), new Date(left + HOUR_MS).toISOString());
+    const moved = syncLiveSnapshotToCity(EGYPT_WORLD_PACK, base.map, snapshot, null).city;
+    const now = left + HOUR_MS;
+    expect(vacatedLotsFromRelocations(snapshot.relocations, moved.buildings, EGYPT_WORLD_PACK.lotGround, now)).toHaveLength(1);
+    expect(vacatedLotsFromRelocations(snapshot.relocations, moved.buildings, undefined, now)).toEqual([]);
+  });
+
+  it('finds the lots whose cleared edge reaches into an area, the edge widened by its wobble', () => {
+    const clearing: LotClearing = { lots: [{ col: 10, row: 10, spanCol: 2, spanRow: 2 }, { col: 30, row: 30, spanCol: 1, spanRow: 1 }], edge: 0.5 };
+    const near = lotClearingNear(clearing, { colStart: 12, colEnd: 16, rowStart: 8, rowEnd: 12 });
+    expect(near?.lots).toEqual([clearing.lots[0]]);
+    expect(near!.edge).toBeGreaterThan(clearing.edge);
+    expect(lotClearingNear(clearing, { colStart: 13, colEnd: 16, rowStart: 8, rowEnd: 12 })).toBeNull();
+    expect(lotClearingNear(clearing, { colStart: 0, colEnd: 9, rowStart: 0, rowEnd: 40 })).toBeNull();
+    expect(lotClearingNear(clearing, { colStart: 20, colEnd: 40, rowStart: 31, rowEnd: 40 })?.lots).toEqual([clearing.lots[1]]);
+  });
+
+  it('keys a chunk picture by the lots reaching it, and finds the picture last baked under another clearing', () => {
+    const chunk = { key: '0,0', colStart: 0, colEnd: 8, rowStart: 0, rowEnd: 8 };
+    const far = { key: '2,2', colStart: 16, colEnd: 24, rowStart: 16, rowEnd: 24 };
+    const keys = new ChunkLotKeys();
+    expect(keys.keyOf(chunk)).toBe('');
+    keys.reset({ lots: [{ col: 3, row: 4, spanCol: 2, spanRow: 1 }], edge: 0.4 });
+    expect(keys.keyOf(chunk)).toBe('#3,4,2,1');
+    expect(keys.keyOf(chunk), 'kept for the chunk').toBe('#3,4,2,1');
+    expect(keys.keyOf(far)).toBe('');
+    keys.reset({ lots: [{ col: 5, row: 4, spanCol: 2, spanRow: 1 }], edge: 0.4 });
+    expect(keys.keyOf(chunk), 'worked out again under the new clearing').toBe('#5,4,2,1');
+
+    const pictures = new Map([['0,0@lod1#3,4,2,1', 'old fine'], ['0,0@lod0#3,4,2,1', 'old coarse']]);
+    keys.baked('0,0@lod0#3,4,2,1');
+    keys.baked('0,0@lod1#3,4,2,1');
+    expect(keys.lastBakedHit('0,0', ['lod0', 'lod1'], k => pictures.get(k))).toEqual({ key: '0,0@lod1#3,4,2,1', entry: 'old fine' });
+    pictures.delete('0,0@lod1#3,4,2,1');
+    expect(keys.lastBakedHit('0,0', ['lod0', 'lod1'], k => pictures.get(k)), 'one the cache dropped is passed over').toEqual({ key: '0,0@lod0#3,4,2,1', entry: 'old coarse' });
+    expect(keys.lastBakedHit('2,2', ['lod0', 'lod1'], k => pictures.get(k))).toBeNull();
+  });
+
+  it('keys the city ground by its lots, and clears the surveyed plot of an empty lot with no plants on it', () => {
+    const base = liveCity(EGYPT_WORLD_PACK);
+    expect(cityGroundKey(null)).toBe('none');
+    expect(cityGround(null, EGYPT_WORLD_PACK)).toEqual({ clearing: null, cover: null });
+    const live = { city: base.city, worldMode: 'active' as const };
+    const key = cityGroundKey(live);
+    expect(cityGroundKey({ ...live }), 'the same ground, the same key').toBe(key);
+    const b = base.city.buildings.find(x => x.stage >= 1)!;
+    const unstarted = { ...live, city: { ...base.city, buildings: base.city.buildings.map(x => (x.id === b.id ? { ...x, stage: 0 } : x)) } };
+    expect(cityGroundKey(unstarted), 'a lot before its first stage').not.toBe(key);
+    expect(cityGround(live, EGYPT_WORLD_PACK).clearing).toEqual(cityLotClearing(base.city, EGYPT_WORLD_PACK));
+
+    const stakes = [{ col: 40, row: 40 }, { col: 43, row: 40 }, { col: 40, row: 42 }, { col: 43, row: 42 }];
+    const empty = { city: base.city, worldMode: 'empty_lot' as const, emptyLotStakes: stakes };
+    expect(cityGroundKey(empty), 'the surveyed plot is part of the ground').not.toBe(key);
+    const ground = cityGround(empty, EGYPT_WORLD_PACK);
+    expect(ground.clearing!.lots).toContainEqual({ col: 40, row: 40, spanCol: 4, spanRow: 3 });
+    expect(ground.cover!(41.5, 41), 'no plant inside the rope').toBe(true);
+    expect(ground.cover!(60, 60)).toBe(cityPlantCover(base.city)(60, 60));
+    expect(cityGround({ ...empty, emptyLotStakes: undefined }, EGYPT_WORLD_PACK).clearing).toEqual(cityLotClearing(base.city, EGYPT_WORLD_PACK));
   });
 });
