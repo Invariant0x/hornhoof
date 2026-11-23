@@ -82,6 +82,9 @@
   background: transparent;
   backdrop-filter: none;
 }
+/* A card painted whole is drawn on its Edge. The card's wrapper (.wcard, which holds only that Edge) steps aside, so
+   neither its fill nor the papyrus look's inset lines show through the face's rounded or frayed edge. */
+:root[data-kit][data-kit-faces~='card'] .wcard { background: transparent; box-shadow: none; }
 
 /* Tables: border-collapse ignores border-image, so a table painted whole goes on its wrapper (the Edge of SortTable, the
    fit box of People) and the table's own fill and outline step aside. Only for a table face, so a kit without one keeps
