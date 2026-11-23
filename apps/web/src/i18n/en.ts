@@ -613,6 +613,9 @@ export const en = {
       bad_cut: key => `The ${key} field needs a number from 0 to 1.5. Fix the field and add the file again.`,
       low_contrast: (key, value) => `Text in “${key}” is hard to read on “${value}”. Change one of the colors and add the file again.`,
       faint_line: (key, value) => `Borders in “${key}” are hard to see on “${value}”. Change one of the colors and add the file again.`,
+      bad_shape: key => `The ${key} field needs bevel or steps. Fix the field and add the file again.`,
+      bad_surface: key => `The ${key} field needs plain or a surface style Hornhoof ships, such as papyrus. Fix the field and add the file again.`,
+      bad_pulse: key => `The ${key} field needs a number above 0 and at most 1. Fix the field and add the file again.`,
     } satisfies SkinErrorWords as SkinErrorWords,
   },
   workers: {
@@ -3238,6 +3241,8 @@ export const en = {
     assistant_not_allowed: 'An assistant is set up by a person on their own screen.',
     assistant_agent_refused: 'The person this assistant works for does not write to this employee, so the assistant does not either.',
     assistant_switched_off: 'This assistant is switched off. Switch it on first, then pick the plan for it.',
+    theme_refused: 'This theme archive was refused. The theme store says what to fix.',
+    theme_same_version: 'This version of the theme is installed already. Change its version in theme.json and upload it again.',
     assistant_plan_owner_only: 'Only the person this assistant works for picks the plan its agent thinks on.',
     assistant_plan_invalid: "An assistant's agent thinks only on a personal plan of the person it works for.",
     assistant_agent_card: "This agent thinks for an assistant. Change it on the assistant's card in People.",

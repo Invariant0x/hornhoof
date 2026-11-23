@@ -32,6 +32,7 @@ import type { Lang, Role, RoleSkill, Skill } from '../templates/load.js';
 import { companySkill } from '../tools/staff.js';
 import { agentFor, type AgentRow } from './find.js';
 import { instructionsOf, renderInstructions, placeOf, type Part } from './instructions.js';
+import { companyWorldPacks } from '../themes/store.js';
 import { worldSkillsForTheme } from '../world/packs/index.js';
 import { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX, timerOf } from './timers.js';
 import { currentAgentTask } from './work.js';
@@ -264,7 +265,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
   const [running] = await db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'), notStep)).limit(1);
   /* A head's department notebook has its own window and its own access. */
   const place = await placeOf(db, agent);
-  const worldSkills = worldSkillsForTheme(ctx.worldPacks, place.theme);
+  const worldSkills = worldSkillsForTheme(await companyWorldPacks(ctx, agent.companyId), place.theme);
   const { parts, raw } = agent.kind === 'orchestrator' ? await instructionsOf(ctx, agent) : renderInstructions(ctx.templates, agent, place, worldSkills);
   const offered = offeredSkills(agent, role);
   const worldCardSkills: AgentCard['skills'] = worldSkills.map(s => ({

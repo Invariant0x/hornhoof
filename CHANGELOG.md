@@ -17,6 +17,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A merge of a copy's database no longer stops with "No merge rule for public.world_layouts": the company's city and the CEO's orders to move its buildings merge like a person's map, and two cities that differ keep the leading one and go to the orchestrator.
 - A task reaches Failures only for a cause that needs a person: a command Hornhoof refuses before it starts ends as refused, with the refusal told to its agent at once as a hint, and neither it, a stopped run, a turn that retries by itself after an overloaded provider or a usage limit, nor a turn replaced because its task moved on marks a task, the agent card or the map as failed; a stuck agent asking for help and a turn that failed with nothing to take it on now do, each until it is answered or a turn goes well, and the failure card says what to do. Refusals kept as failed runs become refused when the update runs.
 
+### Added
+
+- A theme can now come as one zip archive (docs/theme-archive.md): its look, fonts, painted interface parts in the forms of the theme UI kit 1.0, world, world voice, pictures and licence, all data and no code. The server checks it whole, says plainly what is wrong and where, stores it for the company with its licence word for word, and serves its files only to that company; whoever runs the server can install one for a named company from the command line, with a log of each attempt. The upload screen follows.
+
 ## [0.42.0] - 2026-11-23
 
 ### Fixed

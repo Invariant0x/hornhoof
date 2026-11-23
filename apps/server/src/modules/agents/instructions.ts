@@ -8,6 +8,7 @@ import { ORCHESTRATOR_INSTRUCTIONS } from '../conversation/prompt.js';
 import { type Book, companyBook, departmentBook, listNotes } from '../notebook/book.js';
 import { deptName } from '../departments/templates.js';
 import { CORE_SKILLS, HEAD_SKILLS, MEMBER_SKILLS, textHash, type Lang, type Role, type Skill, type Templates } from '../templates/load.js';
+import { companyWorldPacks } from '../themes/store.js';
 import { worldSkillsForTheme } from '../world/packs/index.js';
 
 /* One piece of an employee's instructions, as the card shows it. */
@@ -225,7 +226,7 @@ const notebookOf = (text: string): Part => ({ kind: 'notebook', id: null, title:
 
 async function orchestratorInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'> & Partial<Pick<Ctx, 'worldPacks'>>, agent: AgentRow): Promise<Rendered> {
   const [company] = await ctx.db.select({ theme: companies.theme }).from(companies).where(eq(companies.id, agent.companyId));
-  const worldSkills = worldSkillsForTheme(ctx.worldPacks, company?.theme);
+  const worldSkills = worldSkillsForTheme(await companyWorldPacks(ctx, agent.companyId), company?.theme);
   const steady = orchestratorSteady(ctx.templates, agent.overrides.base, worldSkills);
   const notebook = await notebookPart(ctx.db, companyBook(agent.companyId));
   const parts = [...steady.parts, notebookOf(notebook)];
@@ -253,7 +254,7 @@ async function assistantInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'> & Part
     .innerJoin(owners, eq(owners.id, people.assistantOf))
     .innerJoin(companies, eq(companies.id, assistants.companyId))
     .where(eq(assistants.agentId, agent.id));
-  const worldSkills = worldSkillsForTheme(ctx.worldPacks, who?.theme);
+  const worldSkills = worldSkillsForTheme(await companyWorldPacks(ctx, agent.companyId), who?.theme);
   const base = `You are ${who?.name ?? agent.name}, the personal assistant of ${who?.owner ?? 'your owner'} at ${who?.company ?? 'the company'}.\n\n${skillsLine(who)}`;
   const steady = steadyOf(ctx.templates, base, ASSISTANT_SKILLS, agent.overrides.base, worldSkills);
   return { parts: steady.parts, raw: steady.parts.map(p => p.text).join('\n\n'), text: steady.text, hash: textHash(steady.text), skills: steady.skills };
@@ -282,7 +283,7 @@ export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'> & Partia
   if (agent.kind === 'orchestrator') return orchestratorInstructionsOf(ctx, agent);
   if (agent.kind === 'assistant') return assistantInstructionsOf(ctx, agent);
   const place = await placeOf(ctx.db, agent);
-  const rendered = renderInstructions(ctx.templates, agent, place, worldSkillsForTheme(ctx.worldPacks, place.theme));
+  const rendered = renderInstructions(ctx.templates, agent, place, worldSkillsForTheme(await companyWorldPacks(ctx, agent.companyId), place.theme));
   const dept = await headDepartment(ctx.db, agent);
   return dept ? appendDepartmentNotebook(ctx.db, rendered, dept) : rendered;
 }

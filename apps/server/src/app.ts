@@ -42,6 +42,7 @@ import { startOperationsCheck } from './modules/operations/ensure.js';
 import { startTrackerUpgrade } from './modules/tracker/upgrade.js';
 import { orgRoutes } from './modules/org/routes.js';
 import { mapLayoutRoutes } from './modules/org/layout.js';
+import { themeRoutes } from './modules/themes/routes.js';
 import { worldRoutes } from './modules/world/routes.js';
 import { defaultWorldPacks, type WorldPackRegistry } from './modules/world/packs/index.js';
 import { peopleRoutes } from './modules/people/routes.js';
@@ -422,6 +423,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   orgRoutes(app, ctx);
   mapLayoutRoutes(app, ctx);
   worldRoutes(app, ctx);
+  themeRoutes(app, ctx);
   subscriptionRoutes(app, ctx);
   signinRoutes(app, ctx);
   nodeRoutes(app, ctx);

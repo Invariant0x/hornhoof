@@ -40,6 +40,8 @@ COPY --from=deps /app /app
 COPY --from=build /app/packages/protocol/dist packages/protocol/dist
 COPY --from=build /app/apps/server/dist apps/server/dist
 COPY --from=build /app/apps/web/dist apps/web/dist
+# The checks of an uploaded theme's look and world, from the screens' own code (apps/web/theme-check.config.ts).
+COPY --from=build /app/apps/web/dist-check apps/web/dist-check
 # The keeper runs frpc as its child, and frpc carries the company's public link from hornhoof.org to the keeper.
 # It is the client the relay is built for, taken from its own image.
 COPY --from=fatedier/frpc:v0.71.1@sha256:7a0a18bc9c83dc106a7e5213a890f521affdf90d595829c56b0ed8481377d50e /usr/bin/frpc /usr/local/bin/frpc
