@@ -1,9 +1,9 @@
+import { isLocaleId, say } from '@hornhoof/protocol';
 import type { WorldNameLanguage, WorldRenamePreview, WorldRenameResult, WorldRestoreNamesResult, WorldThemeView } from '@hornhoof/protocol/world';
 import { useEffect, useId, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT, type Language } from '../i18n';
-import { en, type Messages } from '../i18n/en';
-import { ru } from '../i18n/ru';
+import { cachedMessages, errorText, LANGUAGES, useLanguage, useT, type Language } from '../i18n';
+import type { Messages } from '../i18n/en';
 import { COLLECTION_LIMIT, uniqueName, type CustomSkin } from '../skins/collection';
 import { BUILTIN_SKINS, DEFAULT_SKIN, ownLook, type BuiltinSkinId } from '../skins/registry';
 import { declarations, extraDeclarations, type Skin, type SkinLook, type SkinNames } from '../skins/roles';
@@ -31,8 +31,12 @@ function matchesFilter(card: Card, filter: StoreFilter): boolean {
   return !card.own && !isWorldCard(card);
 }
 
-const nameIn = (names: SkinNames, language: Language) => (language === 'ru' ? names.ru : names.en);
-const builtinNames = (id: BuiltinSkinId): SkinNames => ({ ru: ru.skins.names[id], en: en.skins.names[id] });
+const nameIn = (names: SkinNames, language: Language) => say(names, language);
+/* A built-in skin's name in English and in every language whose words are loaded. */
+const builtinNames = (id: BuiltinSkinId): SkinNames => ({
+  en: cachedMessages('en')!.skins.names[id],
+  ...Object.fromEntries(LANGUAGES.flatMap(({ id: language }) => (language === 'en' ? [] : [[language, cachedMessages(language)?.skins.names[id]] as const])).filter(([, own]) => own !== undefined)),
+});
 
 /* The tokens of a skin on its own preview only, so each card shows its skin and world colours in the same drawing. */
 const previewStyle = (look: SkinLook) =>
@@ -386,7 +390,7 @@ function WorldEraNamesPanel({
   const wn = t.skins.worldNames;
   const { language } = useLanguage();
   const [preview, setPreview] = useState<WorldRenamePreview | null>(null);
-  const [nameLang, setNameLang] = useState<WorldNameLanguage>(language === 'ru' ? 'ru' : 'en');
+  const [nameLang, setNameLang] = useState<WorldNameLanguage>(isLocaleId(language) ? language : 'en');
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const headingId = useId();
@@ -472,22 +476,17 @@ function WorldEraNamesPanel({
             <p className="muted" style={{ margin: 0 }}>{wn.dialogIntro}</p>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <span className="muted">{wn.langLabel}:</span>
-              <button
-                type="button"
-                className={`btn small ghost${nameLang === 'ru' ? ' on' : ''}`}
-                disabled={busy}
-                onClick={() => void openRenamePreview('ru')}
-              >
-                Русский
-              </button>
-              <button
-                type="button"
-                className={`btn small ghost${nameLang === 'en' ? ' on' : ''}`}
-                disabled={busy}
-                onClick={() => void openRenamePreview('en')}
-              >
-                English
-              </button>
+              {LANGUAGES.map(choice => (
+                <button
+                  key={choice.id}
+                  type="button"
+                  className={`btn small ghost${nameLang === choice.id ? ' on' : ''}`}
+                  disabled={busy}
+                  onClick={() => void openRenamePreview(choice.id)}
+                >
+                  {choice.name}
+                </button>
+              ))}
             </div>
             {preview.items.length === 0 ? (
               <p className="muted" style={{ margin: 0 }}>{wn.previewEmpty}</p>

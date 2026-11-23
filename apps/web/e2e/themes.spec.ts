@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
+import { say } from '@hornhoof/protocol';
 import { LANGUAGES, type ShippedLanguage, type Messages } from '../src/i18n';
 import { collectionText } from '../src/skins/collection';
 import { BUILTIN_SKINS, builtinSkin, type BuiltinSkinId } from '../src/skins/registry';
@@ -30,7 +31,7 @@ const fontsOf = (choice: string) => {
   const { fonts } = builtinSkin(choice) ?? OWN;
   return `${fonts.display[0]} ${fonts.body[0]}`;
 };
-const nameOf = (words: Messages, language: ShippedLanguage, choice: string) => (builtinSkin(choice) ? words.skins.names[choice as BuiltinSkinId] : OWN.name[language]);
+const nameOf = (words: Messages, language: ShippedLanguage, choice: string) => (builtinSkin(choice) ? words.skins.names[choice as BuiltinSkinId] : say(OWN.name, language));
 
 async function messagesFor(locale: ShippedLanguage): Promise<Messages> {
   const dictionary = await import(`../src/i18n/${locale}.ts`) as Record<string, Messages>;
