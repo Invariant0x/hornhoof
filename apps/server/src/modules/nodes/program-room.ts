@@ -7,8 +7,9 @@ const STARTING_MS = 2 * 60_000;
 
 /* live: the agents whose programs run on the node as it said last, null while it says nothing of them; liveAt: when it
    said so. starting: the agents a turn went out to start a program for, and when. waiting: the agents whose new programs
-   wait on it. limit: how many programs its machine runs at once, null for as many as its memory takes. */
-type Room = { live: Set<string> | null; liveAt: number; starting: Map<string, number>; waiting: Set<string>; limit: number | null };
+   wait on it. limit: how many programs its machine runs at once, null for as many as its memory takes. closing: the agents
+   whose programs the node was told to close, to make room, until it names them no more. */
+type Room = { live: Set<string> | null; liveAt: number; starting: Map<string, number>; waiting: Set<string>; limit: number | null; closing: Set<string> };
 
 /* Why a turn that would start a new program on the node waits: its machine's kernel killed a process for want of memory, or
    the machine runs as many programs as it may at once. */
@@ -26,7 +27,7 @@ function roomOf(ctx: Ctx, node: NodeIdentity): Room {
   rooms.set(ctx.hub, all);
   let room = all.get(keyOf(node));
   if (!room) {
-    room = { live: null, liveAt: 0, starting: new Map(), waiting: new Set(), limit: null };
+    room = { live: null, liveAt: 0, starting: new Map(), waiting: new Set(), limit: null, closing: new Set() };
     all.set(keyOf(node), room);
   }
   return room;
@@ -48,6 +49,7 @@ export function programsLive(ctx: Ctx, node: NodeIdentity, live: string[] | unde
   const room = roomOf(ctx, node);
   room.live = live ? new Set(live) : null;
   room.liveAt = Date.now();
+  for (const agentId of room.closing) if (!room.live?.has(agentId)) room.closing.delete(agentId);
   return released(ctx, node, room);
 }
 
@@ -57,6 +59,26 @@ export function limitRoom(ctx: Ctx, node: NodeIdentity, limit: number | null): s
   const room = roomOf(ctx, node);
   room.limit = limit;
   return released(ctx, node, room);
+}
+
+/* How many of the node's programs to close so the turns that wait for its room start: none while it has room, is short of
+   memory, or takes as many programs as its memory does. Programs it was told to close already count as gone. */
+export function closingNeeded(ctx: Ctx, node: NodeIdentity): number {
+  const room = rooms.get(ctx.hub)?.get(keyOf(node));
+  if (!room?.waiting.size || room.limit === null || !room.live || memoryShort(ctx, node)) return 0;
+  const there = room.live.size + starting(room).length - [...room.closing].filter(agentId => room.live!.has(agentId)).length;
+  return Math.max(0, there - room.limit + Math.min(room.waiting.size, room.limit));
+}
+
+/* The programs on the node that may be closed to make room: the ones it names and was not told to close yet. */
+export const closable = (ctx: Ctx, node: NodeIdentity): string[] => {
+  const room = rooms.get(ctx.hub)?.get(keyOf(node));
+  return room?.live ? [...room.live].filter(agentId => !room.closing.has(agentId)) : [];
+};
+
+/* The node was told to close the agent's program once its turn there is over. */
+export function closing(ctx: Ctx, node: NodeIdentity, agentId: string): void {
+  roomOf(ctx, node).closing.add(agentId);
 }
 
 /* Whether the machine runs as many programs as it may: the ones it names and the ones that start there. */

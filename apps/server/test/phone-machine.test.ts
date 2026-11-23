@@ -50,6 +50,8 @@ async function nextRun(node: FakeNode): Promise<Run> {
   return m as Run;
 }
 
+const done = (node: FakeNode, jobId: string) => node.send({ type: 'job.done', jobId, ok: true, sessionId: 's-1', result: 'ok', tail: '', error: null });
+
 describe('a phone that is a machine of the company', () => {
   it('runs one agent program at a time, and starts the next one once the first is gone', async () => {
     const { app, ceo, phone, bruno, vera, online } = await planOnPhone();
@@ -75,6 +77,51 @@ describe('a phone that is a machine of the company', () => {
     phone.send({ type: 'load', ...load(), live: [bruno.id, vera.id] });
     await write(app, ceo, rita.id, 'Third');
     expect(await state(app, ceo, rita.id)).toMatchObject({ queued: 1, roomWait: 'sessions' });
+    expect(phone.queued()).toBe(0);
+  });
+
+  /* A program stays on the phone after its turn, so it holds the room until the phone closes it. It is closed only once its
+     turn is over, and only when a turn of another agent waits for the room. */
+  it("closes another agent's program once its turn is over, when a turn waits for its room", async () => {
+    const { app, ceo, phone, bruno, vera, online } = await planOnPhone();
+    await online([]);
+    await write(app, ceo, bruno.id, 'First');
+    const first = await nextRun(phone);
+    phone.send({ type: 'job.started', jobId: first.jobId });
+    phone.send({ type: 'load', ...load(), live: [bruno.id] });
+    await write(app, ceo, vera.id, 'Second');
+    expect(await state(app, ceo, vera.id)).toMatchObject({ queued: 1, roomWait: 'sessions' });
+    expect(phone.queued()).toBe(0);
+    done(phone, first.jobId);
+    expect(await phone.next()).toEqual({ type: 'agent.release', agentKey: bruno.id, jobId: first.jobId });
+    phone.send({ type: 'load', ...load(), live: [] });
+    expect((await nextRun(phone)).prompt).toContain('Second');
+  });
+
+  it('closes the program of an agent whose turn is over when a turn comes for the full phone', async () => {
+    const { app, ceo, phone, bruno, vera, online } = await planOnPhone();
+    await online([]);
+    await write(app, ceo, bruno.id, 'First');
+    const first = await nextRun(phone);
+    phone.send({ type: 'job.started', jobId: first.jobId });
+    phone.send({ type: 'load', ...load(), live: [bruno.id] });
+    done(phone, first.jobId);
+    await until(async () => !(await state(app, ceo, bruno.id)).busy);
+    await write(app, ceo, vera.id, 'Second');
+    expect(await phone.next()).toEqual({ type: 'agent.release', agentKey: bruno.id, jobId: first.jobId });
+    phone.send({ type: 'load', ...load(), live: [] });
+    expect((await nextRun(phone)).prompt).toContain('Second');
+  });
+
+  it('closes no program while no turn waits for its room', async () => {
+    const { app, ceo, phone, bruno, online } = await planOnPhone();
+    await online([]);
+    await write(app, ceo, bruno.id, 'First');
+    const first = await nextRun(phone);
+    phone.send({ type: 'job.started', jobId: first.jobId });
+    phone.send({ type: 'load', ...load(), live: [bruno.id] });
+    done(phone, first.jobId);
+    await until(async () => !(await state(app, ceo, bruno.id)).busy);
     expect(phone.queued()).toBe(0);
   });
 

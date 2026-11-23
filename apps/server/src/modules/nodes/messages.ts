@@ -39,7 +39,7 @@ import { hookRejected } from './hook-rejections.js';
 import { checkQueueLoad, nodeCheckQueueAway, releaseRestartedChecks, routeCheckMessage } from './check-slots.js';
 import { applyParked, mergePending, park, type ParkedKind } from './parked.js';
 import { programsLive } from './program-room.js';
-import { loadSessionLimit } from './session-limit.js';
+import { loadSessionLimit, makeRoom } from './session-limit.js';
 import { privateTurn } from '../tools/private-turns.js';
 import { holdNotStarted, noteWorkFolder } from '../program-operator/not-started.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
@@ -454,6 +454,8 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       if (finished.length) await afterJob(ctx, msg.jobId);
       /* Everyone on the plan goes on to a fallback, not only the one whose turn it refused. */
       await fallBackIfHeld(ctx, refused);
+      /* A phone at its limit closes a program whose turn is over for a turn that waits for its room. */
+      if (finished.length) await makeRoom(ctx, id);
       /* The node keeps the end until it hears this, and sends it again after a reconnect; a second one changes nothing. */
       ctx.hub.send(id, { type: 'job.ack', jobId: msg.jobId });
       return;

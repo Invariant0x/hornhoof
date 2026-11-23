@@ -440,7 +440,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     await ownMachine(me, id);
     if (ticks.sessions !== undefined) {
       const [machine] = await db.select({ kind: machines.kind }).from(machines).where(eq(machines.id, id));
-      if (machine?.kind !== 'phone') throw new ApiError(400, 'validation', 'Only a phone runs a set number of agent programs at once; a computer runs as many as its memory takes.', 'not_a_phone');
+      if (machine?.kind !== 'phone') throw new ApiError(400, 'validation', 'Only a phone runs a set number of agent programs at once; a computer runs as many as its memory takes.');
     }
     const [now] = await db.update(machines).set(ticks).where(eq(machines.id, id))
       .returning({ kind: machines.kind, lendsTests: machines.lendsTests, keepsBackups: machines.keepsBackups, sessions: machines.sessions });

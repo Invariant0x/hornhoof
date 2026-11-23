@@ -1,3 +1,4 @@
+import { makeRoom } from '../nodes/session-limit.js';
 import type { DispatchQueue } from './queue.js';
 import { turnOperatorDeliveries, failedTurnDelivery, heldByOperator } from './deliveries.js';
 import { queuedSession, withOriginal, freshConversation, forgetFresh } from './sessions.js';
@@ -37,7 +38,13 @@ export async function sendNext(ctx: Ctx, agentId: string, queue: DispatchQueue):
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready') return;
   const [agent] = await db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
-  if (!agent || !(await placement(ctx, agent, sub))) return;
+  if (!agent) return;
+  if (!(await placement(ctx, agent, sub))) {
+    /* A phone at its limit closes a program whose turn is over, so this turn gets its room. */
+    const roomless = await placement(ctx, agent, sub, () => true);
+    if (roomless) await makeRoom(ctx, roomless.node);
+    return;
+  }
   if (await heldByOperator(ctx, agent)) return;
   /* An update waits for the turns that run: new ones start after it, the orchestrator's go on. */
   if (agent.kind !== 'orchestrator' && turnsHeld(ctx, agent.companyId)) return;
