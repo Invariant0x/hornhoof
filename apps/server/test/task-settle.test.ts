@@ -2,7 +2,8 @@ import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, attachments, departments, jobs, pendingWakes, taskEvents, tasks, teams } from '../src/db/schema.js';
-import { loadTask, report, submit } from '../src/modules/tasks/engine.js';
+import { routeOf } from '../src/modules/tasks/echelons-store.js';
+import { loadTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { setPaused } from '../src/modules/tasks/pause.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { listen, mcp } from './helpers.js';
@@ -121,6 +122,13 @@ describe('settle_task closes the clear cases, in any department', () => {
     await submit(f.ctx, f.author.id, recorded.id, { summary: 'Wrote the handbook.', evidence: 'Read it through.', recorded: { path: 'docs/handbook.md' } });
     await f.db.update(tasks).set({ status: 'working' }).where(eq(tasks.id, unrecorded.id));
     const watchdog = await f.tools(f.watchdog.id);
+    /* Recorded, but its checker has not passed it: the check is never skipped by closing the record. */
+    const early = await watchdog.call('settle_task', { task: recorded.number, why: 'Its handbook is in docs/handbook.md.' });
+    expect(early.isError).toBe(true);
+    expect(early.content[0]!.text).toMatch(/checked|check/i);
+    expect((await f.read(recorded.id)).status).not.toBe('done');
+    const route = await routeOf(f.db, await f.read(recorded.id));
+    await verdict(f.ctx, f.reviewer.id, recorded.id, { pass: true, comment: 'Checked.', candidateId: route.state.candidateId! });
     expect((await watchdog.call('settle_task', { task: recorded.number, why: 'Its handbook is in docs/handbook.md.' })).isError).toBeFalsy();
     expect((await f.read(recorded.id)).status).toBe('done');
     expect((await watchdog.call('settle_task', { task: unrecorded.number, why: 'Looks done.' })).isError).toBe(true);

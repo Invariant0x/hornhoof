@@ -7,6 +7,7 @@ import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { repoAt } from '../departments/repository.js';
 import type { Grant } from '../templates/load.js';
+import { requiredStagesComplete } from './echelons-accept.js';
 import { routeOf } from './echelons-store.js';
 import { filesOf } from './file-views.js';
 import { taskByRef } from './lookup.js';
@@ -20,7 +21,8 @@ import type { ToolJob } from './tools.js';
 /* A watchdog of the company finds tasks whose work is done or has lost its point, and closes the clear cases itself, in any
    department (#1942). What it may close is what the server proves, never what the watchdog says:
    - code: the commit the task recorded is in main or in a release tag (the ancestry, never the turn number);
-   - recorded: a hand-in of work that is not code named where its result is recorded, and it is still there;
+   - recorded: a hand-in of work that is not code named where its result is recorded, it is still there, and a document has
+     passed every check its route requires;
    - coordination: a parent with subtasks, every one of them closed.
    Anything else stays open: a commit outside every release is unfinished work, work paused or held by a person's own assistant
    is never touched, and a duplicate or a task paused long is a question for the head of its department. */
@@ -111,7 +113,8 @@ export async function settleVerdict(ctx: Readers, task: Task): Promise<Verdict> 
   const children = await ctx.db.select({ number: tasks.number, status: tasks.status }).from(tasks).where(and(eq(tasks.parentId, task.id), eq(tasks.companyId, task.companyId)));
   const open = children.filter(child => !CLOSED.includes(child.status));
   if (open.length) return no(`#${task.number} still has open subtasks (${open.map(child => `#${child.number}`).join(', ')}). ${ASK_HEAD}.`);
-  const kind = (await routeOf(ctx.db, task)).state.resultKind;
+  const route = await routeOf(ctx.db, task);
+  const kind = route.state.resultKind;
   if (kind === 'coordination') {
     if (!children.length) return no(`#${task.number} is a parent with no subtasks yet: it has not started, so nothing proves it is done.`);
     if (await waitsForPerson(ctx.db, task.id)) return no(`#${task.number} waits for a person's answer.`);
@@ -122,6 +125,8 @@ export async function settleVerdict(ctx: Readers, task: Task): Promise<Verdict> 
     if (state.released) return { clear: true, settle: { rule: 'code', evidence: { commit: state.commit, inMain: state.inMain, release: state.release, source: state.source } } };
     if (kind === 'code' || state.commit) return no(state.why ?? `The commit of #${task.number} is not in a release.`);
   }
+  /* A document goes to its checker: recording it never skips a stage its route still has to pass. */
+  if (kind === 'document' && (route.state.phase !== 'ready' || !requiredStagesComplete(route))) return no(`The result of #${task.number} has not passed every check its route requires, and closing the record would skip them. ${ASK_HEAD}.`);
   const place = await recordedPlace(ctx.db, task);
   if (!place) return no(`The result of #${task.number} is not recorded anywhere a colleague finds it: no hand-in names a path in the repository or a file still on the task, so it is not done.`);
   return { clear: true, settle: { rule: 'recorded', evidence: { recorded: place } } };
