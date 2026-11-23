@@ -157,6 +157,20 @@ describe('record_answer', () => {
     expect(await c.saved(legal.request.id)).toMatchObject({ status: 'answered', answeredBy: c.ids.ivan });
   });
 
+  /* A message the program never took goes again with its next turn: the copy is the same message, not a second one. */
+  it('takes a message repeated into the next turn as the one message it is', async () => {
+    const c = await company();
+    const { legal } = await c.three();
+    const { client, job } = await c.client(c.bruno);
+    await c.wrote(c.tokens.ceo, 'Acme Legal keeps the table.');
+    const message = await c.lastMessage();
+    await appendEvent(c.ctx, { companyId: c.acme.id, agentId: c.bruno.id, jobId: job.id, kind: 'typed', personId: c.ids.ivan, data: { ...(message.data as object), queuedEvent: message.seq } });
+    await appendEvent(c.ctx, { companyId: c.acme.id, agentId: c.bruno.id, jobId: job.id, kind: 'typed', personId: c.ids.ivan, data: { ...(message.data as object), unheardFrom: message.jobId } });
+    const recorded = await call(client, 'record_answer', { request: legal.request.id, words: 'Acme Legal keeps' });
+    expect(recorded.isError, recorded.content[0]?.text).toBeFalsy();
+    expect(await c.saved(legal.request.id)).toMatchObject({ status: 'answered', answeredBy: c.ids.ivan, answerSourceSeq: message.seq });
+  });
+
   it("refuses words nobody wrote, words from before the question, a person who may not answer, words of two messages, and another agent's question", async () => {
     const c = await company();
     /* His turn runs, so each message reaches it, and his window, at once. */
