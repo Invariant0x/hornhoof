@@ -41,6 +41,8 @@ export type CityArtContext = Readonly<{
   library: WorldArtLibrary;
   pool: DisplayRunPool;
   upgradingHouseIds?: ReadonlySet<string>;
+  /* The drawn variant of each building's step (building-variants.ts). */
+  variants: ReadonlyMap<string, number>;
   /* Streets are painted on the ground (road-strips.ts): draw only the bridges. */
   paintedRoads?: boolean;
   /* Filled with the swaying layers drawn, for the per-frame wind pass (swayBuildingLayers). */
@@ -1005,6 +1007,7 @@ export function renderCityToPixi(
             upgrading: b.kind === 'house' && Boolean(art.upgradingHouseIds?.has(b.id)),
             districtColor: b.districtId ? districtColors[b.districtId] : undefined,
             departmentColor: DEPARTMENT_BANNER_COLOR,
+            variant: art.variants.get(b.id),
           })
         : null;
       if (!resolved || !drawBuildingArtPixi(art, resolved, b, tileW, tileH)) {
