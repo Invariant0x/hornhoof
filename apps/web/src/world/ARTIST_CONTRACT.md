@@ -63,6 +63,7 @@ Building footprints, square, in master pixels:
 | `topAnchor` | no | Top centre (apex, spire, chimney): where a capstone or a top loop attaches. |
 | `workSlots` | no | Up to 3 points `{ x, y, layer }` with `layer` `front` (on scaffolding, in front of walls) or `inside` (in open rooms) where workers stand. |
 | `layers` | no | Pictures drawn over this one, in order (section 4, layers). |
+| `empty` | no | Shared modules only: why this module is an empty canvas (section 5). |
 
 Every point must lie inside the picture; the picture must not be taller than its footprint allows.
 
@@ -182,6 +183,8 @@ Folder: `modules/<footprint>/`, one set per footprint that any building with con
 | `ramp.png` | The building ramp. |
 
 Drawing order: `scaffold_back`, the building picture, `ramp`, `scaffold_front`.
+
+When nothing of `scaffold_front` or `ramp` fits inside the lot in front of the footprint's walls, deliver it as an empty transparent canvas of the footprint with `empty` in its passport saying why. It counts as delivered, and the engine lays nothing for it.
 
 ## 6. Flags
 

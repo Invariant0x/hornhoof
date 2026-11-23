@@ -54,7 +54,8 @@ export type FrontWall = 'front_right' | 'front_left';
 
 /* How the artist drew a building kind: which front wall holds the door and at which tile row of that wall,
    counted from the front corner (0 = the row at the corner). The building keeps its front corner while it
-   grows through spans (square sizes in tiles, smallest first); the last span is its lot. */
+   grows through spans (square sizes in tiles, one per growth step of the kind, never smaller than the one
+   before, so a kind may keep a size for two steps); the last span is its lot. */
 export type BuildingLayoutSpec = Readonly<{
   door: Readonly<{ wall: FrontWall; fromFront: number }>;
   spans: readonly number[];
@@ -259,6 +260,17 @@ export type TerrainArtSpec = Readonly<{
   /* City streets by tier, strips like pathStrip: texelsPerTile columns per tile, a street as wide as the strip is tall.
      With all four the city paints its streets on the ground instead of drawing street tiles. */
   roads?: Readonly<Partial<Record<'trail' | 'dirt' | 'brick' | 'stone', string>>>;
+}>;
+
+/* Ground under a building's lot: the city clears it from the first construction stage, eases its edge into the land
+   around and keeps it cleared after a demolition until another building takes the lot or the regrowth time is over. */
+export type LotGroundSpec = Readonly<{
+  /* Material id the cleared lot is drawn with: packed earth, bare sand or a floor, never grass or crops. */
+  material: string;
+  /* Width in tiles of the soft edge outside the footprint over which the cleared ground fades into the land. */
+  edgeTiles: number;
+  /* Hours after a building left a lot before the land grows back over it, when nothing was built there. */
+  regrowthHours: number;
 }>;
 
 /* Worn footpaths over open ground: thin winding lines with cart ruts and footprints, on the listed materials only. */
@@ -514,6 +526,8 @@ export type WorldPackManifest = Readonly<{
   wind?: WindSpec;
   lighting?: LightingSpec;
   paths?: GroundPathSpec;
+  /* Cleared ground under building lots; every pack with smooth ground names one. */
+  lotGround?: LotGroundSpec;
   terrainArt?: TerrainArtSpec;
   /* Optional pure tile resolver for stub or preview packs; defaults to defaultTileId. */
   resolveEmptyTileId?: (col: number, row: number, chunkSize: number, mapSize: number) => string;
@@ -909,8 +923,8 @@ function validateBuildingLayout(rules: BuildingLayoutRules): string[] {
     const spansOk =
       spans.length > 0 &&
       spans.every(s => Number.isInteger(s) && s >= 1 && s <= 6) &&
-      spans.every((s, i) => i === 0 || s > spans[i - 1]!);
-    if (!spansOk) errors.push(`${at}.spans must be growing whole sizes from 1 to 6`);
+      spans.every((s, i) => i === 0 || s >= spans[i - 1]!);
+    if (!spansOk) errors.push(`${at}.spans must be whole sizes from 1 to 6 that never shrink`);
     const wall = rule.door?.wall;
     if (wall !== 'front_right' && wall !== 'front_left') {
       errors.push(`${at}.door.wall must be front_right or front_left`);
@@ -922,6 +936,18 @@ function validateBuildingLayout(rules: BuildingLayoutRules): string[] {
     }
   }
   return errors;
+}
+
+function validateLotGround(pack: WorldPackManifest, materialIds: ReadonlySet<string>, errors: string[]): void {
+  const spec = pack.lotGround;
+  if (!spec) {
+    if (materialIds.size > 0) errors.push('lotGround is required with smooth ground materials');
+    return;
+  }
+  const blended = pack.terrainRecipe?.materialIds ?? [...materialIds];
+  if (!blended.includes(spec.material)) errors.push(`lotGround references material "${spec.material}" the ground does not blend`);
+  if (!(spec.edgeTiles > 0 && spec.edgeTiles <= 2)) errors.push('lotGround.edgeTiles must be in (0, 2]');
+  if (!(spec.regrowthHours > 0)) errors.push('lotGround.regrowthHours must be positive');
 }
 
 export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation {
@@ -1058,6 +1084,7 @@ export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation 
   }
 
   validatePlants(pack, materialIds, errors);
+  validateLotGround(pack, materialIds, errors);
 
   if (pack.outerWallMode !== undefined && pack.outerWallMode !== 'ring' && pack.outerWallMode !== 'none') {
     errors.push(`invalid outerWallMode "${String(pack.outerWallMode)}"`);

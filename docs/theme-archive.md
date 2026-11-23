@@ -158,6 +158,7 @@ The screens get the kit as stored from `GET /api/themes/:id/look`, beside `base`
 The world pack of the isometric engine, as data: the world pack manifest of `apps/web/src/world/manifest.ts` (`WorldPackManifest`) in JSON, every field but the two functions. It holds:
 * the map size, projection and camera;
 * tiles, ground materials, the liquid layer, paths and ground art;
+* `lotGround`, how a building lot clears smooth ground: the material it lays, how far its edge reaches in tiles (above 0, at most 2) and in how many hours the ground grows back. A world with smooth ground materials must give it;
 * plants, wind and light;
 * the buildings and how they are laid out;
 * the residents' looks per role and their fallbacks;

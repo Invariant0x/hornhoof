@@ -14,8 +14,8 @@ npx tsx apps/web/scripts/world-art-index.ts --pack egypt --list
 
 | Kind | Step folder | Footprint | From | What |
 |---|---|---|---|---|
-| house | `hut` | 1x1 | level 1 | Reed hut |
-| house | `mudbrick` | 2x2 | level 4 | Mudbrick house |
+| house | `hut` | 2x2 | level 1 | Reed hut (reference 01, crop hut_A) |
+| house | `mudbrick` | 3x3 | level 4 | Mudbrick house (reference 01, crop mud_B) |
 | house | `painted` | 3x3 | level 8 | Painted house |
 | house | `villa` | 4x4 | level 15 | Villa with a pool |
 | department | `shrine` | 3x3 | stage 1 | Department shrine |
@@ -72,11 +72,17 @@ Cloak colours by subscription provider (the engine tints the cloak layer): Claud
 
 Delivered by the ground and plant artists; the terrain and plant layers load them through the pack's `terrainArt` and plant kinds (contract section 9).
 
-* Ground materials: `plain` (golden building sand with wind ripples), `dune`, `bank` (sandy silt bank), `fertile` (green strip), `field` (irrigated rows, 3 per tile), `ridge` (rock), `quarry` (limestone), `oasis_grove` (grass under palms), and two liquids, `river` and `oasis_water`, each as surface, `_bed` and `_ripples`.
-* Transitions: `plain_bank`, `bank_fertile`, `fertile_field`, `plain_dune`, `plain_ridge`, `river_bank`.
+* Ground materials: `plain` (golden building sand with wind ripples), `dune`, `bank` (sandy silt bank), `fertile` (green strip and its meadows), `ridge` (rock), `quarry` (limestone), `oasis_grove` (grass under palms), and two liquids, `river` and `oasis_water`, each as surface, `_bed` and `_ripples`.
+* Transitions: `plain_bank`, `bank_fertile`, `plain_dune`, `plain_ridge`, `river_bank`.
 * Roads: `trail` (0.4 tile), `dirt` (0.8), `brick` (1), `stone` (1), `avenue` (2).
 * Decals: grass tufts, pebbles, cracks, tracks, sherds, shore bushes.
 * Plants (29): date palms (4 adult, 1 young), doum palms (2), acacias (2), sycamores (2), tamarisks (2), bushes (4), papyrus clumps (3), reeds (3), dry grass tufts (4), desert thorns (2).
+
+### Sown fields are not landscape
+
+On Ivan's word (23.11.2026) sown fields are a game object people work on and that is placed where it is needed, not part of the landscape, and the map does not need them now. The recipe grows none: where they stood, the fertile land's grass grows. The delivered `field` ground (irrigated rows, 3 per tile) and the `fertile_field` edge stay in the art folder, but nothing draws them.
+
+An idea for later, not built: fields as a subscription object, like the granary. They would show how much of the limit is left: in a drought, as the limit runs out, the crops darken and dry, and after the reset they turn green again.
 
 ## Loops and flags
 
