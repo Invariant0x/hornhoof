@@ -1141,13 +1141,13 @@ async function statusAfterWait(tx: Tx, task: Task, was: Task['status'] | undefin
 /* How an answer came: inline in words the window already delivered, from the person's assistant, or from the orchestrator
    of its own as the owner's, each recorded with it. */
 /* recorded: the agent that said which of its questions a person's message answered, and that message. */
-type Recorded = { agentId: string; jobId: string | null; seq: number };
-type AnswerWay = { inlineText?: true; assistant?: string; orchestrator?: string; recorded?: Recorded };
+type AnswerRecord = { agentId: string; jobId: string | null; seq: number };
+type AnswerWay = { inlineText?: true; assistant?: string; orchestrator?: string; recorded?: AnswerRecord };
 
 /* What the request keeps of an answer an agent recorded from a person's message: the agent, and the message's turn and place. */
-const recordedAudit = (r?: Recorded) => (r ? { answeredByAgentId: r.agentId, answerJobId: r.jobId, answerSourceSeq: r.seq } : {});
+const recordedAudit = (r?: AnswerRecord) => (r ? { answeredByAgentId: r.agentId, answerJobId: r.jobId, answerSourceSeq: r.seq } : {});
 /* What the task's log keeps of it: the message in the agent's window, and who recorded it. */
-const recordedNote = (r?: Recorded) => (r ? { message: { agentId: r.agentId, seq: r.seq }, recordedBy: r.agentId } : {});
+const recordedNote = (r?: AnswerRecord) => (r ? { message: { agentId: r.agentId, seq: r.seq }, recordedBy: r.agentId } : {});
 
 export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, { inlineText, assistant, orchestrator, recorded }: AnswerWay = {}): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
