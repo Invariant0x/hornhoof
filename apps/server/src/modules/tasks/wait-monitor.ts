@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { departments, turns } from '../../db/schema.js';
+import { loggable } from '../../errors.js';
 import { notificationMessage } from '../events/notifications.js';
 import { quietRecipient, waitOrchestrator } from './wait-recipients.js';
 import { checkWaitDependencies } from './wait-dependencies.js';
@@ -55,4 +56,11 @@ export async function checkWaitHealth(ctx: Ctx, now = new Date()): Promise<void>
   await recordQuietDepartments(ctx, now);
   await sweepWaits(ctx, now);
   await deliverWaitNotices(ctx, now);
+}
+
+/* The check as a tool call asks for it, after its own move: the check reads a lot and may fail (the 5 s transaction timeout of a
+   busy minute), but the move is done by then, so the call does not fail for it. The failure is logged, and the next minute's
+   round does the check again. */
+export async function tryWaitHealth(ctx: Ctx, now = new Date()): Promise<void> {
+  await checkWaitHealth(ctx, now).catch((error: unknown) => ctx.log.error({ error: loggable(error) }, 'Checking task waits after a tool call failed; the next minute round does it again.'));
 }
