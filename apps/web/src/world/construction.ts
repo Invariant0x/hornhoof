@@ -163,11 +163,15 @@ function monumentLoops(building: CityBuilding, state: BuildingConstructionState 
   }
 }
 
+/* A statue's stage, its last stage and whether it is finished, from its job or, without one, from the building. */
+function statueProgress(building: CityBuilding, state: BuildingConstructionState | null): { stage: number; maxS: number; finished: boolean } {
+  if (state) return { stage: state.currentStage, maxS: state.maxStage, finished: state.phase === 'complete' && state.currentStage >= state.maxStage };
+  return { stage: building.stage, maxS: building.maxStage, finished: Boolean(building.reached) || building.stage >= building.maxStage };
+}
+
 /* 20-stage statues: dust, and cranes and hoists where the kit is laid, while carving; celebration shimmer when finished. */
 function statueLoops(building: CityBuilding, state: BuildingConstructionState | null, kit: boolean, add: AddLoop): void {
-  const stage = state ? state.currentStage : building.stage;
-  const maxS = state ? state.maxStage : building.maxStage;
-  const finished = state ? state.phase === 'complete' && stage >= maxS : Boolean(building.reached) || stage >= maxS;
+  const { stage, maxS, finished } = statueProgress(building, state);
   if (finished) {
     add('celebration', 0.55);
     return;

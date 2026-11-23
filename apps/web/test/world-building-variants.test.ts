@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { declaredArtFiles, resolveBuildingArt, validateArtIndex, variantStepOf, type ArtIndex, type ArtIndexEntry } from '../src/world/art';
-import { chooseBuildingVariants } from '../src/world/building-variants';
+import { chooseBuildingVariants, cityBuildingVariants } from '../src/world/building-variants';
 import type { CityBuilding } from '../src/world/city-layout';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
 
@@ -62,6 +62,20 @@ describe('Drawn variants of a building step (#1975)', () => {
     const before = chooseBuildingVariants(homes, byStep(4));
     const after = chooseBuildingVariants([...homes, home('house-agent-new', 40 + 3 * 5, 40, 1, 99)], byStep(4));
     for (const h of homes) expect(after.get(h.id), h.id).toBe(before.get(h.id));
+  });
+
+  it('settles homes placed in the same step by their ids, so the order of the list never matters', () => {
+    const homes = street(12).map(h => ({ ...h, placedAtStep: 0 }));
+    const first = chooseBuildingVariants(homes, byStep(3));
+    expect([...chooseBuildingVariants([...homes].reverse(), byStep(3)).entries()].sort()).toEqual([...first.entries()].sort());
+  });
+
+  it('chooses for the city shown under the pack, and for none without a city', () => {
+    const homes = street(6);
+    expect(cityBuildingVariants(null, EGYPT_WORLD_PACK).size).toBe(0);
+    expect([...cityBuildingVariants({ city: { buildings: homes } }, EGYPT_WORLD_PACK).entries()]).toEqual([
+      ...chooseBuildingVariants(homes, b => variantStepOf(EGYPT_WORLD_PACK, b)).entries(),
+    ]);
   });
 
   it('gives every home the only variant when a step has one, and leaves kinds without variants out', () => {

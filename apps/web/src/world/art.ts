@@ -283,36 +283,41 @@ export function personSheetPath(lookId: string, tier: number, anim: ResidentAnim
 }
 
 /* The files of one step's folder (or one variant's), with `at` naming a picture's path. */
-function declaredStepFiles(pack: WorldPackManifest, kind: BuildingKind, step: ArtBuildingStep, at: (picture: string) => string): DeclaredArtFile[] {
-  const out: DeclaredArtFile[] = [];
-  const picture = (name: string, required: boolean, role: DeclaredArtRole = 'building'): DeclaredArtFile => ({
+type StepPicture = (name: string, required: boolean, role?: DeclaredArtRole) => DeclaredArtFile;
+
+/* prefix_01 .. prefix_<count>. */
+const numbered = (prefix: string, count: number): string[] => Array.from({ length: count }, (_, i) => `${prefix}_${pad2(i + 1)}`);
+
+/* Statues and monuments: their own stage pictures (and the monument's capstone) in place of the standard ones. */
+function ownStageFiles(pack: WorldPackManifest, kind: BuildingKind, picture: StepPicture): DeclaredArtFile[] | null {
+  if (kind === 'statue') return numbered('stage', pack.stageCounts.statue).map(n => picture(n, true));
+  if (kind === 'monument') return [...numbered('tier', pack.stageCounts.monument).map(n => picture(n, true)), picture('capstone', true, 'capstone')];
+  return null;
+}
+
+/* The finished and staged pictures every other kind has; a supply shows its fills in place of complete. */
+function standardStepFiles(kind: BuildingKind, at: (picture: string) => string, picture: StepPicture): DeclaredArtFile[] {
+  const names = STANDARD_BUILDING_PICTURES.filter(name => kind !== 'supply' || name !== 'complete');
+  return names.map(name => {
+    const stage = STAGE_OF_PICTURE[name];
+    return { ...picture(name, !OPTIONAL_BUILDING_PICTURES.has(name)), ...(stage ? { alternative: at(`stage_${pad2(stage)}`) } : {}) };
+  });
+}
+
+/* A supply's fill levels; any other kind's construction line on its own canvas (contract 2) and its demolition. */
+function lineStepFiles(pack: WorldPackManifest, kind: BuildingKind, picture: StepPicture): DeclaredArtFile[] {
+  if (kind === 'supply') return Array.from({ length: SUPPLY_FILL_LEVELS }, (_, f) => picture(`fill_${f}`, true));
+  return [...numbered('stage', pack.stageCounts.construction).map(n => picture(n, false)), ...DEMOLITION_PICTURES.map(name => picture(name, false))];
+}
+
+function declaredStepFiles(pack: WorldPackManifest, kind: BuildingKind, at: (picture: string) => string): DeclaredArtFile[] {
+  const picture: StepPicture = (name, required, role = 'building') => ({
     path: at(name),
     role,
     passport: role === 'capstone' ? 'anchor' : 'picture',
     required,
   });
-  if (kind === 'statue') {
-    for (let s = 1; s <= pack.stageCounts.statue; s++) out.push(picture(`stage_${pad2(s)}`, true));
-    return out;
-  }
-  if (kind === 'monument') {
-    for (let t = 1; t <= pack.stageCounts.monument; t++) out.push(picture(`tier_${pad2(t)}`, true));
-    out.push(picture('capstone', true, 'capstone'));
-    return out;
-  }
-  for (const name of STANDARD_BUILDING_PICTURES) {
-    if (kind === 'supply' && name === 'complete') continue;
-    const stage = STAGE_OF_PICTURE[name];
-    out.push({ ...picture(name, !OPTIONAL_BUILDING_PICTURES.has(name)), ...(stage ? { alternative: at(`stage_${pad2(stage)}`) } : {}) });
-  }
-  if (kind === 'supply') {
-    for (let f = 0; f < SUPPLY_FILL_LEVELS; f++) out.push(picture(`fill_${f}`, true));
-    return out;
-  }
-  /* Contract 2: the whole construction line drawn on the step's own canvas, and its demolition. */
-  for (let n = 1; n <= pack.stageCounts.construction; n++) out.push(picture(`stage_${pad2(n)}`, false));
-  for (const name of DEMOLITION_PICTURES) out.push(picture(name, false));
-  return out;
+  return ownStageFiles(pack, kind, picture) ?? [...standardStepFiles(kind, at, picture), ...lineStepFiles(pack, kind, picture)];
 }
 
 /* Every file the pack's catalog has a slot for, with the passport kind each one needs. */
@@ -327,11 +332,11 @@ export function declaredArtFiles(pack: WorldPackManifest): readonly DeclaredArtF
     for (const step of steps ?? []) {
       if (kind !== 'statue' && kind !== 'monument') moduleFootprints.add(step.footprint);
       if (!step.variants) {
-        out.push(...declaredStepFiles(pack, kind, step, picture => stepPicturePath(kind, step, picture)));
+        out.push(...declaredStepFiles(pack, kind, picture => stepPicturePath(kind, step, picture)));
         continue;
       }
       for (let v = 0; v < step.variants; v++) {
-        const files = declaredStepFiles(pack, kind, step, picture => stepPicturePath(kind, step, picture, v));
+        const files = declaredStepFiles(pack, kind, picture => stepPicturePath(kind, step, picture, v));
         out.push(...(v === 0 ? files : files.map(f => ({ ...f, required: false }))));
       }
     }
@@ -515,6 +520,18 @@ function checkSheet(path: string, entry: ArtIndexEntry, rows: number | null, err
 }
 
 /* Checks the art folder's index against the pack's catalog and the contract's geometry rules. */
+/* The footprint of every step folder of the catalog, its variant folders included. */
+function stepFootprints(pack: WorldPackManifest): Map<string, FootprintKey> {
+  const out = new Map<string, FootprintKey>();
+  for (const [kind, steps] of Object.entries(pack.art?.buildings ?? {}) as [BuildingKind, readonly ArtBuildingStep[] | undefined][]) {
+    for (const step of steps ?? []) {
+      const variants = Array.from({ length: step.variants ?? 0 }, (_, v) => v);
+      for (const v of [undefined, ...variants]) out.set(stepFolder(kind, step, v), step.footprint);
+    }
+  }
+  return out;
+}
+
 export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtIndexReport {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -528,13 +545,7 @@ export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtI
     errors.push(`art-index.json belongs to pack "${index.pack}", not "${pack.id}"`);
   }
 
-  const footprintOf = new Map<string, FootprintKey>();
-  for (const [kindKey, steps] of Object.entries(pack.art?.buildings ?? {})) {
-    for (const step of steps ?? []) {
-      footprintOf.set(stepFolder(kindKey as BuildingKind, step), step.footprint);
-      for (let v = 0; v < (step.variants ?? 0); v++) footprintOf.set(stepFolder(kindKey as BuildingKind, step, v), step.footprint);
-    }
-  }
+  const footprintOf = stepFootprints(pack);
 
   /* Layer files are declared by the passports that name them and must match their picture's canvas. */
   const layerOf = new Map<string, string>();
@@ -739,6 +750,20 @@ function deliveredVariant(files: ArtIndex['files'], kind: BuildingKind, step: Ar
   return null;
 }
 
+/* The step a building shows and the paths of its pictures in the variant to draw; null without art for it. */
+function shownStep(
+  art: WorldArtCatalog,
+  files: ArtIndex['files'],
+  building: CityBuilding,
+  wanted: number | undefined,
+): { step: ArtBuildingStep; base: (picture: string) => string } | null {
+  const step = pickStep(art.buildings[building.kind], building, building.stage);
+  if (!step) return null;
+  const variant = deliveredVariant(files, building.kind, step, wanted ?? 0);
+  if (variant === null) return null;
+  return { step, base: picture => stepPicturePath(building.kind, step, picture, variant) };
+}
+
 /* The step a building shows and its number of variants, for chooseBuildingVariants; null without variants. */
 export function variantStepOf(pack: WorldPackManifest, building: CityBuilding): VariantStep | null {
   const step = pickStep(pack.art?.buildings[building.kind], building, building.stage);
@@ -786,11 +811,9 @@ export function resolveBuildingArt(
   const files = index.files;
   const stage = job ? job.currentStage : building.stage;
   /* Growth steps follow the building's own stage or level; a construction job only walks pictures inside the step. */
-  const step = pickStep(art.buildings[building.kind], building, building.stage);
-  if (!step) return null;
-  const variant = deliveredVariant(files, building.kind, step, options.variant ?? 0);
-  if (variant === null) return null;
-  const base = (picture: string) => stepPicturePath(building.kind, step, picture, variant);
+  const shown = shownStep(art, files, building, options.variant);
+  if (!shown) return null;
+  const { step, base } = shown;
 
   const finish = (layers: BuildingArtLayer[], mainPath: string): BuildingArt | null => {
     const mainEntry = files[mainPath];
@@ -993,6 +1016,26 @@ function sleepLoopLayer(index: ArtIndex, sheet: SheetPassport, timeSec: number):
   };
 }
 
+type FoundSheet = Readonly<{ look: string; tier: number; anim: ResidentAnimationId; body: ResidentBody; path: string; entry: ArtIndexEntry & { passport: SheetPassport } }>;
+
+/* The frame of a found sheet to show now, in the row of the resident's facing, with its cloak and the sleeper's Z. */
+function sheetArt(index: ArtIndex, found: FoundSheet, resident: ResidentEntity, timeSec: number): ResidentArt {
+  const s = found.entry.passport;
+  const { row, mirror } = sheetRowFor(s.directions, resident.facing, FACING_ANIMATIONS.has(found.anim));
+  const phase = (resident.walkPhase / (Math.PI * 2)) * s.frames;
+  const frameIdx = ((Math.floor(timeSec * s.fps + phase) % s.frames) + s.frames) % s.frames;
+  const frame: ArtRect = { x: frameIdx * s.frameW, y: row * s.frameH, w: s.frameW, h: s.frameH };
+  const layers: ResidentArtLayer[] = [{ path: found.path, frame, anchor: s.anchor }];
+  const cloakPath = personSheetPath(found.look, found.tier, found.anim, true, found.body);
+  const cloak = index.files[cloakPath];
+  if (cloak && cloak.w === found.entry.w && cloak.h === found.entry.h) {
+    layers.push({ path: cloakPath, frame, anchor: s.anchor, tint: resident.cloakColor });
+  }
+  const z = found.anim === 'sleep' ? sleepLoopLayer(index, s, timeSec) : null;
+  if (z) layers.push(z);
+  return { layers, mirror };
+}
+
 /* Chooses a resident's sheet (look, outfit tier, animation, body) and the frame to show, falling back to lower
    outfit tiers, then to walking or standing, then to the placeholder; a missing body takes the male_slim sheet. */
 export function resolveResidentArt(
@@ -1019,21 +1062,7 @@ export function resolveResidentArt(
     for (const anim of anims) {
       for (let tier = topTier; tier >= 1; tier--) {
         const found = bodySheet(index, look, tier, anim, bodies);
-        if (!found) continue;
-        const s = found.entry.passport;
-        const { row, mirror } = sheetRowFor(s.directions, resident.facing, FACING_ANIMATIONS.has(anim));
-        const phase = (resident.walkPhase / (Math.PI * 2)) * s.frames;
-        const frameIdx = ((Math.floor(timeSec * s.fps + phase) % s.frames) + s.frames) % s.frames;
-        const frame: ArtRect = { x: frameIdx * s.frameW, y: row * s.frameH, w: s.frameW, h: s.frameH };
-        const layers: ResidentArtLayer[] = [{ path: found.path, frame, anchor: s.anchor }];
-        const cloakPath = personSheetPath(look, tier, anim, true, found.body);
-        const cloak = index.files[cloakPath];
-        if (cloak && cloak.w === found.entry.w && cloak.h === found.entry.h) {
-          layers.push({ path: cloakPath, frame, anchor: s.anchor, tint: resident.cloakColor });
-        }
-        const z = anim === 'sleep' ? sleepLoopLayer(index, s, timeSec) : null;
-        if (z) layers.push(z);
-        return { layers, mirror };
+        if (found) return sheetArt(index, { look, tier, anim, ...found }, resident, timeSec);
       }
     }
   }

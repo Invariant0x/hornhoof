@@ -65,6 +65,21 @@ describe('Statues and pyramids are built from their own stages (#1975)', () => {
     expect(buildingLoopsFor(statue, job, DUNGEON_WORLD_PACK).map(l => l.kind)).toContain('crane');
   });
 
+  it('reads a statue with no job from its own stage: carving dust with the kit’s crane between stages 4 and 18, shimmer when finished', () => {
+    const loops = (pack: typeof DUNGEON_WORLD_PACK, b: CityBuilding) => buildingLoopsFor(b, null, pack).map(l => l.kind);
+    const at = (stage: number, reached = false) => ({ ...monument('statue', 2, 20), stage, reached });
+    expect(loops(DUNGEON_WORLD_PACK, at(3))).toEqual(['dust']);
+    expect(loops(DUNGEON_WORLD_PACK, at(4))).toEqual(['dust', 'crane', 'hoist_block']);
+    expect(loops(DUNGEON_WORLD_PACK, at(19))).toEqual(['dust']);
+    expect(loops(DUNGEON_WORLD_PACK, at(20))).toEqual(['celebration']);
+    expect(loops(DUNGEON_WORLD_PACK, at(9, true))).toEqual(['celebration']);
+    expect(loops(EGYPT_WORLD_PACK, at(9))).toEqual(['dust']);
+    const sim = createConstructionSimulation(DUNGEON_WORLD_PACK);
+    const statue = monument('statue', 2, 20);
+    const job = startBuildingConstruction(sim, statue, 20, 20, 0.05);
+    expect(buildingLoopsFor(statue, { ...job, phase: 'complete', currentStage: 20 }, DUNGEON_WORLD_PACK).map(l => l.kind)).toEqual(['celebration']);
+  });
+
   it('shows a statue’s 20 stages and a pyramid’s 10 tiers in order, each from its own picture with no kit module', () => {
     const index = monumentIndex();
     const sim = createConstructionSimulation(EGYPT_WORLD_PACK);

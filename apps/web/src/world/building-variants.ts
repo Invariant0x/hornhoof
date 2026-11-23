@@ -21,7 +21,7 @@ function gap(a: CityBuilding['lot'], b: CityBuilding['lot']): number {
 }
 
 function olderFirst(a: CityBuilding, b: CityBuilding): number {
-  return a.placedAtStep - b.placedAtStep || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  return a.placedAtStep - b.placedAtStep || a.id.localeCompare(b.id);
 }
 
 /* The first variant from the building's own, going round, that no neighbour shows; its own when all are taken. */
@@ -51,7 +51,10 @@ export function chooseBuildingVariants(
   return chosen;
 }
 
-/* The variants of a city's buildings under the pack's art catalog. */
-export function cityBuildingVariants(buildings: readonly CityBuilding[], pack: WorldPackManifest): ReadonlyMap<string, number> {
-  return chooseBuildingVariants(buildings, b => variantStepOf(pack, b));
+/* The variants of the buildings of the city shown, if any, under the pack's art catalog. */
+export function cityBuildingVariants(
+  state: Readonly<{ city: Readonly<{ buildings: readonly CityBuilding[] }> }> | null,
+  pack: WorldPackManifest,
+): ReadonlyMap<string, number> {
+  return chooseBuildingVariants(state?.city.buildings ?? [], b => variantStepOf(pack, b));
 }

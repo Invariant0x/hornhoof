@@ -928,7 +928,7 @@ export class IsometricWorldEngine {
   /* Updates the Stage 4 isometric city placeholder layer and its pickable building footprints. */
   setCityRenderState(state: CityRenderState | null): void {
     this.cityRenderState = state;
-    this.buildingVariants = cityBuildingVariants(state?.city.buildings ?? [], this.pack);
+    this.buildingVariants = cityBuildingVariants(state, this.pack);
     this.refreshCityGround();
     this.cityDirty = true;
     this.cityCullWindow = null;
