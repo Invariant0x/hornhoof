@@ -161,7 +161,7 @@ Hornhoof sets two fields itself: `id` (the theme's id) and `art.baseUrl` (where 
 | `space-station` | One large station in open space: an outer hull with docking arms, ring corridors and spokes, garden and cargo bays, and open frame the city builds into |
 | `dungeon-subterranean` | Bedrock the city digs into, natural caverns, glowing pockets and ore veins, a winding underground river of fire and a carved starting hall |
 
-The pack's `materials` must give every material id the recipe uses, and its tiles must cover the recipe's tile kinds. A new map shape is a new recipe in Hornhoof's code, not part of an archive.
+The pack's `materials` must give every material id the recipe uses, and its tiles must cover the recipe's tile kinds; a tile kind or material the recipe does not have is refused. A pack with materials also gives `lotGround`, the ground under building lots: `{ "material": "<a material the recipe blends>", "edgeTiles": <above 0, at most 2>, "regrowthHours": <above 0> }`. A new map shape is a new recipe in Hornhoof's code, not part of an archive.
 
 The world pack check of `validateWorldPack` runs on the manifest Hornhoof rebuilds, as it does for the packs Hornhoof ships.
 
