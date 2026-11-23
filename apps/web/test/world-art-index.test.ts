@@ -104,8 +104,8 @@ describe('Stage 9 art check command: builds art-index.json from an artist folder
     const lines: string[] = [];
     const result = runArtCheck({ folder: null, pack: 'egypt', write: false, list: true, print: l => lines.push(l) });
     expect(result.ok).toBe(true);
-    expect(lines).toContain('required  buildings/house/hut/complete.png');
-    expect(lines).toContain('optional  buildings/house/villa/annex.png');
+    expect(lines).toContain('required  buildings/house/hut/v01/complete.png');
+    expect(lines).toContain('optional  buildings/house/villa/v01/annex.png');
     expect(lines).toContain('required  modules/6x6/stakes.png');
     expect(lines.some(l => l.endsWith('people/egypt-pharaoh/tier_5/pray.png'))).toBe(true);
   });
@@ -197,7 +197,7 @@ describe('Production build art check: fails when the web dist has no world-art/<
   it('keeps the artist commands of the same script: --list and a folder check', () => {
     const lines: string[] = [];
     expect(main(['--pack', 'egypt', '--list'], l => lines.push(l))).toBe(0);
-    expect(lines).toContain('required  buildings/house/hut/complete.png');
+    expect(lines).toContain('required  buildings/house/hut/v01/complete.png');
     const root = tempArt();
     put(root, 'buildings/department/shrine/complete.png', pngHeader(736, 900));
     put(root, 'buildings/department/shrine/complete.json', JSON.stringify({ groundAnchor: [100, 100] }));
