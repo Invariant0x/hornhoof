@@ -24,6 +24,7 @@ import type { Direction8, PackRoleLookSpec, WorldPackManifest } from './manifest
 import { resolvePackRoleLook } from './manifest';
 import { tileCenterToWorld, worldToScreen, type TileCoord } from './coords';
 import type { CameraState, ViewportSize } from './camera';
+import { text } from './pack-text';
 
 export type ResidentPose =
   | 'walking'
@@ -100,7 +101,7 @@ export type ResidentSimulation = {
   packId: string;
   timeSec: number;
   altarTile: TileCoord;
-  altarLabel: Readonly<{ en: string; ru: string }>;
+  altarLabel: string;
   residents: ResidentEntity[];
   smokingDepartmentIds: Set<string>;
   stuckDepartmentIds: Set<string>;
@@ -363,7 +364,7 @@ export function createResidentSimulation(
   const residence = city.buildings.find(b => b.kind === 'residence');
   const residenceTile = residence ? frontTileForBuilding(residence, city, roadSet) : { ...city.center };
   const altarTile = resolveAltarTile(pack, city, residence);
-  const altarLabel = pack.altarAnchor?.label ?? { en: "God's Altar", ru: 'Алтарь бога' };
+  const altarLabel = pack.altarAnchor?.label ?? text("God's Altar");
 
   const deptTiles = new Map<string, TileCoord>();
   const goalTiles = new Map<string, TileCoord>();

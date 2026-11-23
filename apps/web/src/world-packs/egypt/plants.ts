@@ -5,6 +5,7 @@
    the art folder; the procedural silhouettes stand in only while it is missing. */
 
 import type { LightingSpec, PlantArtSpec, PlantKindSpec, WindSpec } from '../../world/manifest';
+import { text } from '../../world/pack-text';
 
 /* Ground the plants must stay off: bare rock and quarry stone. */
 const NO_STONE = { rock: 0.12, quarry: 0.08 } as const;
@@ -22,7 +23,7 @@ function decals(...names: string[]): PlantArtSpec[] {
 export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
   {
     id: 'date_palm',
-    label: { en: 'Date palm', ru: 'Финиковая пальма' },
+    label: text('Date palm'),
     shape: 'fronded_tree',
     art: veg('date_palm_01', 'date_palm_02', 'date_palm_03', 'date_palm_04', 'date_palm_young'),
     tileKinds: ['bank', 'fertile', 'plain', 'oasis_grove'],
@@ -43,7 +44,7 @@ export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
   },
   {
     id: 'doum_palm',
-    label: { en: 'Doum palm', ru: 'Дум-пальма' },
+    label: text('Doum palm'),
     shape: 'fronded_tree',
     art: veg('doum_palm_01', 'doum_palm_02'),
     tileKinds: ['fertile', 'plain', 'oasis_grove'],
@@ -62,7 +63,7 @@ export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
   },
   {
     id: 'papyrus',
-    label: { en: 'Papyrus', ru: 'Папирус' },
+    label: text('Papyrus'),
     shape: 'umbel_reed',
     art: veg('papyrus_01', 'papyrus_02', 'papyrus_03'),
     tileKinds: ['bank', 'fertile', 'plain', 'oasis_grove'],
@@ -83,7 +84,7 @@ export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
   },
   {
     id: 'river_reed',
-    label: { en: 'River reed', ru: 'Тростник' },
+    label: text('River reed'),
     shape: 'blade_cluster',
     art: veg('reed_01', 'reed_02', 'reed_03'),
     tileKinds: ['bank', 'fertile', 'plain', 'oasis_grove'],
@@ -105,7 +106,7 @@ export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
   },
   {
     id: 'shore_bush',
-    label: { en: 'Green bush', ru: 'Зеленый куст' },
+    label: text('Green bush'),
     shape: 'round_shrub',
     art: veg('bush_01', 'bush_02'),
     tileKinds: ['bank', 'fertile', 'plain', 'oasis_grove'],
@@ -125,7 +126,7 @@ export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
   },
   {
     id: 'tamarisk',
-    label: { en: 'Tamarisk', ru: 'Тамариск' },
+    label: text('Tamarisk'),
     shape: 'round_shrub',
     art: veg('tamarisk_01', 'tamarisk_02'),
     tileKinds: ['fertile', 'plain', 'oasis_grove'],
@@ -144,7 +145,7 @@ export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
   },
   {
     id: 'meadow_tuft',
-    label: { en: 'Grass tuft', ru: 'Пучок травы' },
+    label: text('Grass tuft'),
     shape: 'blade_cluster',
     art: decals('grass_tuft_01', 'grass_tuft_02', 'grass_tuft_03', 'grass_tuft_04'),
     flat: true,
@@ -167,7 +168,7 @@ export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
   },
   {
     id: 'dry_grass',
-    label: { en: 'Dry grass', ru: 'Сухая трава' },
+    label: text('Dry grass'),
     shape: 'blade_cluster',
     art: veg('dry_grass_01', 'dry_grass_02', 'dry_grass_03', 'dry_grass_04'),
     tileKinds: ['plain', 'dune', 'fertile', 'bank', 'oasis_grove', 'quarry'],
@@ -187,7 +188,7 @@ export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
   },
   {
     id: 'desert_scrub',
-    label: { en: 'Dry bush', ru: 'Сухой куст' },
+    label: text('Dry bush'),
     shape: 'round_shrub',
     art: veg('bush_03', 'bush_04', 'desert_thorn_01', 'desert_thorn_02'),
     tileKinds: ['plain', 'dune', 'quarry'],
@@ -207,7 +208,7 @@ export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
   },
   {
     id: 'sandstone',
-    label: { en: 'Pebbles', ru: 'Камни' },
+    label: text('Pebbles'),
     shape: 'stone_cluster',
     art: decals('pebbles_01', 'pebbles_02', 'pebbles_03', 'sherds_01', 'cracks_01', 'cracks_02'),
     flat: true,
@@ -228,7 +229,7 @@ export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
   },
   {
     id: 'cart_tracks',
-    label: { en: 'Tracks', ru: 'Следы' },
+    label: text('Tracks'),
     shape: 'stone_cluster',
     art: decals('tracks_01', 'tracks_02'),
     flat: true,
@@ -249,7 +250,7 @@ export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
   },
   {
     id: 'acacia',
-    label: { en: 'Acacia', ru: 'Акация' },
+    label: text('Acacia'),
     shape: 'broad_tree',
     art: veg('acacia_01', 'acacia_02'),
     tileKinds: ['plain', 'dune'],
@@ -269,7 +270,7 @@ export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
   },
   {
     id: 'sycamore_fig',
-    label: { en: 'Sycamore fig', ru: 'Смоковница' },
+    label: text('Sycamore fig'),
     shape: 'broad_tree',
     art: veg('sycamore_01', 'sycamore_02'),
     tileKinds: ['oasis_grove', 'fertile'],
@@ -290,7 +291,7 @@ export const EGYPT_PLANTS: readonly PlantKindSpec[] = [
     /* Chips and cracks on the quarry floor and on the stony fringe of the rock, where the pebbles of open sand stop;
        never on a ridge or the rock itself (from 0.3 of it a spot counts as bedrock). */
     id: 'quarry_rubble',
-    label: { en: 'Rubble', ru: 'Щебень' },
+    label: text('Rubble'),
     shape: 'stone_cluster',
     art: decals('pebbles_01', 'pebbles_02', 'pebbles_03', 'cracks_01', 'cracks_02'),
     flat: true,

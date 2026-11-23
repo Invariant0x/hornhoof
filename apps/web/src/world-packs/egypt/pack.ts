@@ -15,11 +15,12 @@ import {
 import { egyptArtCatalog } from './art';
 import { EGYPT_LIGHTING, EGYPT_PLANTS, EGYPT_WIND } from './plants';
 import { EGYPT_TERRAIN_RECIPE, EGYPT_TILE_KINDS } from './recipe';
+import { text } from '../../world/pack-text';
 
 const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   ruler: {
     id: 'egypt-pharaoh',
-    label: { en: 'Pharaoh', ru: 'Фараон' },
+    label: text('Pharaoh'),
     tunicColor: '#F6EFE0',
     trimColor: '#F2C14E',
     prop: 'staff',
@@ -28,7 +29,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   head: {
     id: 'egypt-overseer',
-    label: { en: 'Overseer', ru: 'Надсмотрщик' },
+    label: text('Overseer'),
     tunicColor: '#EFE3C8',
     trimColor: '#D69A3A',
     prop: 'staff',
@@ -37,7 +38,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   guard_captain: {
     id: 'egypt-guard-captain',
-    label: { en: 'Captain of the Guard', ru: 'Начальник стражи' },
+    label: text('Captain of the Guard'),
     tunicColor: '#C9B18A',
     trimColor: '#C44536',
     prop: 'staff',
@@ -46,7 +47,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   architect: {
     id: 'egypt-architect',
-    label: { en: 'Master Architect', ru: 'Зодчий со свитком' },
+    label: text('Master Architect'),
     tunicColor: '#F2E7CF',
     trimColor: '#4888B5',
     prop: 'scroll',
@@ -55,7 +56,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   checker: {
     id: 'egypt-inspector',
-    label: { en: 'Stone Inspector', ru: 'Проверяющий со свитком' },
+    label: text('Stone Inspector'),
     tunicColor: '#E4DFD2',
     trimColor: '#3E7A9C',
     prop: 'scroll',
@@ -63,7 +64,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   builder: {
     id: 'egypt-mason',
-    label: { en: 'Stone Mason', ru: 'Каменщик-строитель' },
+    label: text('Stone Mason'),
     tunicColor: '#DFC59B',
     trimColor: '#9E7348',
     prop: 'stone',
@@ -71,7 +72,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   scribe: {
     id: 'egypt-scribe',
-    label: { en: 'Papyrus Scribe', ru: 'Писец с папирусом' },
+    label: text('Papyrus Scribe'),
     tunicColor: '#F5EEDB',
     trimColor: '#5B8A5B',
     prop: 'scroll',
@@ -79,7 +80,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   artisan: {
     id: 'egypt-relief-carver',
-    label: { en: 'Relief Carver', ru: 'Резчик рельефов' },
+    label: text('Relief Carver'),
     tunicColor: '#E8D3B0',
     trimColor: '#C25B7C',
     prop: 'chisel',
@@ -87,7 +88,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   patrol: {
     id: 'egypt-medjay',
-    label: { en: 'Medjay Patrol', ru: 'Патрульный меджай' },
+    label: text('Medjay Patrol'),
     tunicColor: '#C8A97E',
     trimColor: '#D97B29',
     prop: 'gong',
@@ -95,7 +96,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   inspector_scout: {
     id: 'egypt-scout',
-    label: { en: 'Wall Scout', ru: 'Дозорный-следопыт' },
+    label: text('Wall Scout'),
     tunicColor: '#BDA782',
     trimColor: '#D64933',
     prop: 'scroll',
@@ -103,7 +104,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   firefighter: {
     id: 'egypt-firefighter',
-    label: { en: 'Water Bearer & Repairer', ru: 'Пожарный и ремонтник' },
+    label: text('Water Bearer & Repairer'),
     tunicColor: '#D9C29C',
     trimColor: '#2E8BC0',
     prop: 'water_jar',
@@ -111,7 +112,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   caravan_runner: {
     id: 'egypt-caravan-messenger',
-    label: { en: 'Caravan Messenger', ru: 'Гонец и караванщик' },
+    label: text('Caravan Messenger'),
     tunicColor: '#E5CFA8',
     trimColor: '#2F9E8F',
     prop: 'banner',
@@ -119,7 +120,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   keykeeper: {
     id: 'egypt-keykeeper',
-    label: { en: 'Granary Keykeeper', ru: 'Ключник амбаров' },
+    label: text('Granary Keykeeper'),
     tunicColor: '#E6D6B5',
     trimColor: '#C79B3B',
     prop: 'key',
@@ -127,7 +128,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   machine_keeper: {
     id: 'egypt-machine-keeper',
-    label: { en: 'Workshop Keeper', ru: 'Смотритель машин' },
+    label: text('Workshop Keeper'),
     tunicColor: '#CFC2AA',
     trimColor: '#6D819C',
     prop: 'tool',
@@ -135,7 +136,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   gate_guard: {
     id: 'egypt-gate-guard',
-    label: { en: 'Gate Sentinel', ru: 'Стражник у ворот' },
+    label: text('Gate Sentinel'),
     tunicColor: '#C9B38C',
     trimColor: '#B84A39',
     prop: 'spear_shield',
@@ -143,7 +144,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   red_team: {
     id: 'egypt-skirmisher',
-    label: { en: 'Wall Tester', ru: 'Лазутчик учений' },
+    label: text('Wall Tester'),
     tunicColor: '#7A5448',
     trimColor: '#E05D44',
     prop: 'spear_shield',
@@ -151,7 +152,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   road_builder: {
     id: 'egypt-canal-builder',
-    label: { en: 'Canal & Ramp Builder', ru: 'Строитель каналов и пандусов' },
+    label: text('Canal & Ramp Builder'),
     tunicColor: '#D4BA8E',
     trimColor: '#5C8D6B',
     prop: 'tool',
@@ -159,7 +160,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   turnkey_specialist: {
     id: 'egypt-royal-master',
-    label: { en: 'Royal Master Builder', ru: 'Мастер под ключ' },
+    label: text('Royal Master Builder'),
     tunicColor: '#2E5673',
     trimColor: '#F2C14E',
     prop: 'banner',
@@ -168,7 +169,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   day_laborer: {
     id: 'egypt-day-laborer',
-    label: { en: 'Day Laborer', ru: 'Поденщик' },
+    label: text('Day Laborer'),
     tunicColor: '#B39B76',
     trimColor: '#7D6A4E',
     prop: 'stone',
@@ -265,17 +266,17 @@ const EGYPT_MATERIALS: readonly GroundMaterialSpec[] = [
   },
 ];
 
-const EGYPT_STAGE_LABELS: Readonly<Record<string, Readonly<{ en: string; ru: string }>>> = {
-  stakes_and_rope: { en: 'Papyrus Cord and Stakes', ru: 'Колышки и веревка' },
-  foundation: { en: 'Limestone Foundation Pad', ru: 'Площадка и каменный фундамент' },
-  low_walls_open: { en: 'Mudbrick Courses (Open Rooms)', ru: 'Первые ряды стен (комнаты сверху)' },
-  waist_walls_scaffold: { en: 'Waist Walls, Cedar Scaffold & Ramp', ru: 'Стены по пояс с лесами и пандусом' },
-  full_walls: { en: 'Full Sun-Baked Walls', ru: 'Стены в полный рост' },
-  roof_beams: { en: 'Palm Timber Roof Beams', ru: 'Пальмовые балки перекрытия' },
-  roof: { en: 'Terrace Roof Deck', ru: 'Плоская крыша-терраса' },
-  finishing: { en: 'Stucco Reliefs & Painted Trim', ru: 'Штукатурка, рельефы и отделка' },
-  complete: { en: 'Completed Nile Building', ru: 'Готовое здание' },
-  upgraded: { en: 'Gilded Courtyard & Upper Terrace', ru: 'Улучшения: двор, галерея и золотой фриз' },
+const EGYPT_STAGE_LABELS: Readonly<Record<string, string>> = {
+  stakes_and_rope: text('Papyrus Cord and Stakes'),
+  foundation: text('Limestone Foundation Pad'),
+  low_walls_open: text('Mudbrick Courses (Open Rooms)'),
+  waist_walls_scaffold: text('Waist Walls, Cedar Scaffold & Ramp'),
+  full_walls: text('Full Sun-Baked Walls'),
+  roof_beams: text('Palm Timber Roof Beams'),
+  roof: text('Terrace Roof Deck'),
+  finishing: text('Stucco Reliefs & Painted Trim'),
+  complete: text('Completed Nile Building'),
+  upgraded: text('Gilded Courtyard & Upper Terrace'),
 };
 
 const EGYPT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = DEFAULT_CONSTRUCTION_STAGES.map(s => ({
@@ -300,7 +301,7 @@ const EGYPT_CONSTRUCTION_PALETTE: ConstructionPaletteSpec = {
 
 export const EGYPT_WORLD_PACK: WorldPackManifest = {
   id: 'egypt',
-  name: { en: 'Ancient Egypt', ru: 'Древний Египет' },
+  name: text('Ancient Egypt'),
   engine: 'isometric-2d',
   mapSize: 150,
   projection: DEFAULT_ISOMETRIC_PROJECTION,
@@ -319,7 +320,7 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
   altarAnchor: {
     offsetCol: 3,
     offsetRow: -2,
-    label: { en: "God's Altar", ru: 'Алтарь бога' },
+    label: text("God's Altar"),
   },
   roleLooks: EGYPT_ROLE_LOOKS,
   classFallbackLooks: EGYPT_CLASS_FALLBACKS,

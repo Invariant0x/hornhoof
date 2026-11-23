@@ -22,13 +22,13 @@ const CATALOG: WorldArtCatalog = {
   baseUrl: '/world-art/test/',
   buildings: {
     house: [
-      { id: 'small', footprint: '1x1', label: { en: 'Small', ru: 'Малый' } },
-      { id: 'large', footprint: '3x3', label: { en: 'Large', ru: 'Большой' } },
+      { id: 'small', footprint: '1x1', label: 'Small' },
+      { id: 'large', footprint: '3x3', label: 'Large' },
     ],
-    department: [{ id: 'hall', footprint: '3x3', label: { en: 'Hall', ru: 'Зал' } }],
-    statue: [{ id: 'figure', footprint: '1x1', label: { en: 'Figure', ru: 'Фигура' } }],
-    monument: [{ id: 'mound', footprint: '4x4', label: { en: 'Mound', ru: 'Курган' } }],
-    supply: [{ id: 'store', footprint: '3x3', label: { en: 'Store', ru: 'Склад' } }],
+    department: [{ id: 'hall', footprint: '3x3', label: 'Hall' }],
+    statue: [{ id: 'figure', footprint: '1x1', label: 'Figure' }],
+    monument: [{ id: 'mound', footprint: '4x4', label: 'Mound' }],
+    supply: [{ id: 'store', footprint: '3x3', label: 'Store' }],
   },
   altar: true,
   flags: { district: true, department: true },
@@ -118,7 +118,7 @@ function resident(partial: Partial<ResidentEntity>): ResidentEntity {
     roleKey: null,
     roleClass: 'executor',
     archetype: 'builder',
-    look: { id: 'look-a', label: { en: 'A', ru: 'А' }, tunicColor: '#ffffff', trimColor: '#000000', prop: 'none', headgear: 'none' },
+    look: { id: 'look-a', label: 'A', tunicColor: '#ffffff', trimColor: '#000000', prop: 'none', headgear: 'none' },
     level: 1,
     outfitTier: 1,
     cloakColor: '#C96A4B',
@@ -414,7 +414,7 @@ describe('Stage 9 art contract: declared files, index validation and art resolut
 
   it('rejects art catalogs with unknown footprints, duplicate steps or people tiers out of 1..5', () => {
     expect(validateWorldPack(PACK)).toEqual({ ok: true });
-    const badFootprint = { ...PACK, art: { ...CATALOG, buildings: { house: [{ id: 'x', footprint: '7x7' as FootprintKey, label: { en: 'X', ru: 'X' } }] } } };
+    const badFootprint = { ...PACK, art: { ...CATALOG, buildings: { house: [{ id: 'x', footprint: '7x7' as FootprintKey, label: 'X' }] } } };
     expect(validateWorldPack(badFootprint)).toMatchObject({ ok: false });
     const dupSteps = {
       ...PACK,
@@ -422,8 +422,8 @@ describe('Stage 9 art contract: declared files, index validation and art resolut
         ...CATALOG,
         buildings: {
           house: [
-            { id: 'x', footprint: '1x1' as FootprintKey, label: { en: 'X', ru: 'X' } },
-            { id: 'x', footprint: '2x2' as FootprintKey, label: { en: 'X', ru: 'X' } },
+            { id: 'x', footprint: '1x1' as FootprintKey, label: 'X' },
+            { id: 'x', footprint: '2x2' as FootprintKey, label: 'X' },
           ],
         },
       },

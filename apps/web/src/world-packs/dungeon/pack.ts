@@ -14,11 +14,12 @@ import {
   type WorldPackManifest,
 } from '../../world/manifest';
 import { DUNGEON_TERRAIN_RECIPE, DUNGEON_TILE_KINDS } from './recipe';
+import { text } from '../../world/pack-text';
 
 const DUNGEON_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   ruler: {
     id: 'dungeon-archmage',
-    label: { en: 'Delve Lord', ru: 'Владыка подземелья' },
+    label: text('Delve Lord'),
     tunicColor: '#2E2B42',
     trimColor: '#FFD166',
     prop: 'staff',
@@ -27,7 +28,7 @@ const DUNGEON_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   head: {
     id: 'dungeon-foreman',
-    label: { en: 'Hall Foreman', ru: 'Мастер зала' },
+    label: text('Hall Foreman'),
     tunicColor: '#484D63',
     trimColor: '#64E3CE',
     prop: 'staff',
@@ -36,7 +37,7 @@ const DUNGEON_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   guard_captain: {
     id: 'dungeon-warden',
-    label: { en: 'Gate Warden', ru: 'Начальник дозора' },
+    label: text('Gate Warden'),
     tunicColor: '#3B3647',
     trimColor: '#FF8C42',
     prop: 'staff',
@@ -45,7 +46,7 @@ const DUNGEON_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   checker: {
     id: 'dungeon-rune-checker',
-    label: { en: 'Rune Inspector', ru: 'Хранитель рун' },
+    label: text('Rune Inspector'),
     tunicColor: '#525A70',
     trimColor: '#64E3CE',
     prop: 'scroll',
@@ -53,7 +54,7 @@ const DUNGEON_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   builder: {
     id: 'dungeon-delver',
-    label: { en: 'Stone Delver', ru: 'Каменотес глубин' },
+    label: text('Stone Delver'),
     tunicColor: '#6E6962',
     trimColor: '#D99B52',
     prop: 'stone',
@@ -61,7 +62,7 @@ const DUNGEON_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   turnkey_specialist: {
     id: 'dungeon-master-delver',
-    label: { en: 'Guild Artificer', ru: 'Универсал гильдии' },
+    label: text('Guild Artificer'),
     tunicColor: '#3B5868',
     trimColor: '#FFD166',
     prop: 'banner',
@@ -70,7 +71,7 @@ const DUNGEON_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   day_laborer: {
     id: 'dungeon-drifter',
-    label: { en: 'Tunnel Drifter', ru: 'Поденщик туннелей' },
+    label: text('Tunnel Drifter'),
     tunicColor: '#5C5852',
     trimColor: '#8B857C',
     prop: 'stone',
@@ -138,17 +139,17 @@ const DUNGEON_MATERIALS: readonly GroundMaterialSpec[] = [
   },
 ];
 
-const DUNGEON_STAGE_LABELS: Readonly<Record<string, Readonly<{ en: string; ru: string }>>> = {
-  stakes_and_rope: { en: 'Chalk Marks & Iron Pitons', ru: 'Разметка мелом и железные крючья' },
-  foundation: { en: 'Basalt Floor Slab', ru: 'Базальтовая плита фундамента' },
-  low_walls_open: { en: 'Cut Vault Partitions (Open Chambers)', ru: 'Нижние стены залов (видны комнаты)' },
-  waist_walls_scaffold: { en: 'Ashlar Walls, Iron Scaffold & Ramp', ru: 'Стены по пояс с железными лесами и спуском' },
-  full_walls: { en: 'Full Cavern Buttresses', ru: 'Полные каменные стены зала' },
-  roof_beams: { en: 'Forged Iron Vault Ribs', ru: 'Кованые сводчатые балки' },
-  roof: { en: 'Sealed Stone Vault', ru: 'Каменный свод' },
-  finishing: { en: 'Runic Carving & Brazier Trim', ru: 'Рунная резьба и отделка' },
-  complete: { en: 'Completed Subterranean Hall', ru: 'Готовый подземный зал' },
-  upgraded: { en: 'Crystal Spire & Runic Annex', ru: 'Улучшения: рунный шпиль и пристройка' },
+const DUNGEON_STAGE_LABELS: Readonly<Record<string, string>> = {
+  stakes_and_rope: text('Chalk Marks & Iron Pitons'),
+  foundation: text('Basalt Floor Slab'),
+  low_walls_open: text('Cut Vault Partitions (Open Chambers)'),
+  waist_walls_scaffold: text('Ashlar Walls, Iron Scaffold & Ramp'),
+  full_walls: text('Full Cavern Buttresses'),
+  roof_beams: text('Forged Iron Vault Ribs'),
+  roof: text('Sealed Stone Vault'),
+  finishing: text('Runic Carving & Brazier Trim'),
+  complete: text('Completed Subterranean Hall'),
+  upgraded: text('Crystal Spire & Runic Annex'),
 };
 
 const DUNGEON_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = DEFAULT_CONSTRUCTION_STAGES.map(s => ({
@@ -173,7 +174,7 @@ const DUNGEON_CONSTRUCTION_PALETTE: ConstructionPaletteSpec = {
 
 export const DUNGEON_WORLD_PACK: WorldPackManifest = {
   id: 'dungeon',
-  name: { en: 'Subterranean Dungeon', ru: 'Подземелье' },
+  name: text('Subterranean Dungeon'),
   engine: 'isometric-2d',
   mapSize: 150,
   projection: DEFAULT_ISOMETRIC_PROJECTION,
@@ -184,7 +185,7 @@ export const DUNGEON_WORLD_PACK: WorldPackManifest = {
   altarAnchor: {
     offsetCol: -3,
     offsetRow: 2,
-    label: { en: 'Runic Shrine', ru: 'Рунный алтарь' },
+    label: text('Runic Shrine'),
   },
   roleLooks: DUNGEON_ROLE_LOOKS,
   classFallbackLooks: DUNGEON_CLASS_FALLBACKS,

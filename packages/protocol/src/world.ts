@@ -2,6 +2,7 @@
    Single source of truth shared between server and web; contains zero theme-specific words. */
 
 import { z } from 'zod';
+import { LOCALE_IDS, say, SOURCE_LOCALE, type Texts } from './locales.js';
 import { currentLimits, type Limits, type ProviderId } from './index.js';
 
 export const MAX_AGENT_LEVEL = 30;
@@ -797,7 +798,8 @@ export function isWorldVoiceAllowed(channel: WorldVoiceChannel): boolean {
   return channel === 'human_chat';
 }
 
-export type WorldLangText = Readonly<{ en: string; ru: string }>;
+/* A text in every language the pack has it in; English always. */
+export type WorldLangText = Texts;
 
 export type WorldSkillKind = 'core' | 'procedure' | 'checklist' | 'gate';
 
@@ -830,7 +832,8 @@ export type WorldPackSkillSpec = Readonly<{
 
 export type WorldPackNamesSpec = Readonly<{
   ruler: WorldLangText;
-  employees: Readonly<{ en: readonly string[]; ru: readonly string[] }>;
+  /* The crew's names by language: English always, and a language with no list takes the English one. */
+  employees: Readonly<{ en: readonly string[] } & { [language: string]: readonly string[] | undefined }>;
 }>;
 
 export type WorldPackBehaviorSpec = Readonly<{
@@ -853,8 +856,8 @@ export type WorldThemeView = Readonly<{
   restoredNamesCount?: number;
 }>;
 
-export const WORLD_NAME_LANGUAGES = ['en', 'ru'] as const;
-export type WorldNameLanguage = (typeof WORLD_NAME_LANGUAGES)[number];
+export const WORLD_NAME_LANGUAGES = LOCALE_IDS;
+export type WorldNameLanguage = (typeof LOCALE_IDS)[number];
 
 export type WorldAgentRenameCandidate = Readonly<{
   id: string;
@@ -922,8 +925,8 @@ export function pickNextWorldEraName(
     const clean = name.trim().toLowerCase();
     if (clean) taken.add(clean);
   }
-  const baseList = kind === 'orchestrator' ? [pack.names.ruler[language]] : pack.names.employees[language];
-  const fallback = baseList.length ? baseList : [pack.label[language]];
+  const baseList: readonly string[] = kind === 'orchestrator' ? [say(pack.names.ruler, language)] : (pack.names.employees[language] ?? pack.names.employees[SOURCE_LOCALE]);
+  const fallback = baseList.length ? baseList : [say(pack.label, language)];
 
   for (const candidate of fallback) {
     const clean = candidate.trim();
@@ -985,8 +988,8 @@ export function validateWorldPackBehavior(pack: WorldPackBehaviorSpec): string[]
   if (!THEME_ID_PATTERN.test(pack.id)) {
     issues.push(`Invalid world pack id "${pack.id}".`);
   }
-  if (!pack.label.en.trim() || !pack.label.ru.trim()) {
-    issues.push(`World pack "${pack.id}" must declare en and ru labels.`);
+  if (!pack.label.en.trim()) {
+    issues.push(`World pack "${pack.id}" must declare an en label.`);
   }
   if (!pack.skills.length) {
     issues.push(`World pack "${pack.id}" must declare at least one skill.`);
@@ -1002,11 +1005,11 @@ export function validateWorldPackBehavior(pack: WorldPackBehaviorSpec): string[]
       issues.push(`Duplicate skill id "${skill.id}" in world pack "${pack.id}".`);
     }
     skillIds.add(skill.id);
-    if (!skill.title.en.trim() || !skill.title.ru.trim()) {
-      issues.push(`Skill "${skill.id}" must declare en and ru titles.`);
+    if (!skill.title.en.trim()) {
+      issues.push(`Skill "${skill.id}" must declare an en title.`);
     }
-    if (!skill.description.en.trim() || !skill.description.ru.trim()) {
-      issues.push(`Skill "${skill.id}" must declare en and ru descriptions.`);
+    if (!skill.description.en.trim()) {
+      issues.push(`Skill "${skill.id}" must declare an en description.`);
     }
     if (!skill.body.trim()) {
       issues.push(`Skill "${skill.id}" body must be non-empty.`);
@@ -1014,8 +1017,8 @@ export function validateWorldPackBehavior(pack: WorldPackBehaviorSpec): string[]
     if (skill.voice) {
       voiceSkills += 1;
       const { samples, salutations, channels } = skill.voice;
-      if (!samples.en.trim() || !samples.ru.trim()) {
-        issues.push(`Voice skill "${skill.id}" must declare en and ru sample phrases.`);
+      if (!samples.en.trim()) {
+        issues.push(`Voice skill "${skill.id}" must declare an en sample phrase.`);
       }
       if (!salutations.length || salutations.some(s => !s.trim())) {
         issues.push(`Voice skill "${skill.id}" must declare non-empty salutations.`);
@@ -1046,11 +1049,10 @@ export function validateWorldPackBehavior(pack: WorldPackBehaviorSpec): string[]
     issues.push(`World pack "${pack.id}" must declare at least one voice skill.`);
   }
 
-  if (!pack.names.ruler.en.trim() || !pack.names.ruler.ru.trim()) {
-    issues.push(`World pack "${pack.id}" must declare ruler names in en and ru.`);
+  if (!pack.names.ruler.en.trim()) {
+    issues.push(`World pack "${pack.id}" must declare a ruler name in en.`);
   }
-  for (const lang of ['en', 'ru'] as const) {
-    const list = pack.names.employees[lang];
+  for (const [lang, list] of Object.entries(pack.names.employees) as [string, readonly string[]][]) {
     if (!list.length) {
       issues.push(`World pack "${pack.id}" must declare employee names for "${lang}".`);
     }
@@ -1079,8 +1081,7 @@ export function containsWorldVoicePhrase(text: string, pack: WorldPackBehaviorSp
   for (const skill of pack.skills) {
     if (!skill.voice) continue;
     const phrases = new Set<string>([
-      skill.voice.samples.en,
-      skill.voice.samples.ru,
+      ...Object.values(skill.voice.samples).filter((sample): sample is string => sample !== undefined),
       ...skill.voice.salutations,
     ]);
     for (const phrase of phrases) {

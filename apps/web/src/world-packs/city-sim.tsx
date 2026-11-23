@@ -14,6 +14,11 @@ import {
   type FiveYearSimResult,
 } from '../world/simulator';
 import { registeredWorldPacks } from './registry';
+import { packText } from '../world/pack-text';
+import { loadEveryPackTexts } from './pack-text-load';
+
+/* A demo page shows a pack's words in the language its own switch picks, so every language is at hand. */
+loadEveryPackTexts();
 
 /* Stage 3 multi-pack 5-year city growth timelapse and 3-seed x 3-knob Order/Chaos comparison viewer.
    Lives outside engine core (src/world-packs/) so engine core stays 100% pack-agnostic. */
@@ -381,7 +386,7 @@ function Stage3CityApp() {
       >
         <div>
           <h1 data-testid="stage3-title" style={{ margin: 0, fontSize: 18, color: '#9BD9FF' }}>
-            {t.title} ({activePack.name[lang]})
+            {t.title} ({packText(activePack.name, lang)})
           </h1>
           <div style={{ fontSize: 12.5, color: '#A5B9CE', marginTop: 3 }}>{t.subtitle}</div>
         </div>
@@ -395,7 +400,7 @@ function Stage3CityApp() {
               onClick={() => setPackId(p.id)}
               style={btnStyle(packId === p.id, '#FFE08A')}
             >
-              {p.name[lang]}
+              {packText(p.name, lang)}
             </button>
           ))}
           <button

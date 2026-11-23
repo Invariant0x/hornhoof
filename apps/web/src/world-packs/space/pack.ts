@@ -14,15 +14,16 @@ import {
   type WorldPackManifest,
 } from '../../world/manifest';
 import { SPACE_TERRAIN_RECIPE, SPACE_TILE_KINDS } from './recipe';
+import { text } from '../../world/pack-text';
 
 const SPACE_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
-  ruler: { id: 'space-admiral', label: { en: 'Fleet Admiral', ru: 'Адмирал флота' }, tunicColor: '#1E2A44', trimColor: '#F2C14E', prop: 'staff', headgear: 'crown', insignia: true },
-  head: { id: 'space-officer', label: { en: 'Deck Officer', ru: 'Офицер палубы' }, tunicColor: '#2E3F63', trimColor: '#7FD1FF', prop: 'staff', headgear: 'circlet', insignia: true },
-  checker: { id: 'space-inspector', label: { en: 'Systems Inspector', ru: 'Инспектор систем' }, tunicColor: '#D9DEE8', trimColor: '#3D7BD9', prop: 'scroll', headgear: 'cap' },
-  builder: { id: 'space-engineer', label: { en: 'Module Engineer', ru: 'Инженер модулей' }, tunicColor: '#E07B39', trimColor: '#3A3F4A', prop: 'tool', headgear: 'helm' },
-  gate_guard: { id: 'space-security', label: { en: 'Security Officer', ru: 'Офицер безопасности' }, tunicColor: '#3B3F4C', trimColor: '#E04F4F', prop: 'spear_shield', headgear: 'helm' },
-  turnkey_specialist: { id: 'space-pilot', label: { en: 'Test Pilot', ru: 'Пилот-испытатель' }, tunicColor: '#F2F2F2', trimColor: '#E5B85C', prop: 'banner', headgear: 'helm', insignia: true },
-  day_laborer: { id: 'space-contractor', label: { en: 'Dock Contractor', ru: 'Докер по контракту' }, tunicColor: '#8C8F99', trimColor: '#5C606B', prop: 'stone', headgear: 'cap' },
+  ruler: { id: 'space-admiral', label: text('Fleet Admiral'), tunicColor: '#1E2A44', trimColor: '#F2C14E', prop: 'staff', headgear: 'crown', insignia: true },
+  head: { id: 'space-officer', label: text('Deck Officer'), tunicColor: '#2E3F63', trimColor: '#7FD1FF', prop: 'staff', headgear: 'circlet', insignia: true },
+  checker: { id: 'space-inspector', label: text('Systems Inspector'), tunicColor: '#D9DEE8', trimColor: '#3D7BD9', prop: 'scroll', headgear: 'cap' },
+  builder: { id: 'space-engineer', label: text('Module Engineer'), tunicColor: '#E07B39', trimColor: '#3A3F4A', prop: 'tool', headgear: 'helm' },
+  gate_guard: { id: 'space-security', label: text('Security Officer'), tunicColor: '#3B3F4C', trimColor: '#E04F4F', prop: 'spear_shield', headgear: 'helm' },
+  turnkey_specialist: { id: 'space-pilot', label: text('Test Pilot'), tunicColor: '#F2F2F2', trimColor: '#E5B85C', prop: 'banner', headgear: 'helm', insignia: true },
+  day_laborer: { id: 'space-contractor', label: text('Dock Contractor'), tunicColor: '#8C8F99', trimColor: '#5C606B', prop: 'stone', headgear: 'cap' },
 };
 
 const SPACE_CLASS_FALLBACKS: Readonly<Record<ResidentRoleClass, PackRoleLookSpec>> = {
@@ -45,17 +46,17 @@ const SPACE_MATERIALS: readonly GroundMaterialSpec[] = [
   { id: 'frame_truss', baseColor: '#3B414D', secondaryColor: '#272C35', accentColor: '#59606E', pattern: 'cracked_rock', contrast: 1.2 },
 ];
 
-const SPACE_STAGE_LABELS: Readonly<Record<string, Readonly<{ en: string; ru: string }>>> = {
-  stakes_and_rope: { en: 'Marker Beacons', ru: 'Маячки разметки' },
-  foundation: { en: 'Docking Frame', ru: 'Стыковочная рама' },
-  low_walls_open: { en: 'Open Module Frame', ru: 'Открытый каркас модуля' },
-  waist_walls_scaffold: { en: 'Half Plated with Gantry', ru: 'Обшивка до половины, монтажная ферма' },
-  full_walls: { en: 'Fully Plated', ru: 'Обшивка целиком' },
-  roof_beams: { en: 'Roof Ribs', ru: 'Ребра купола' },
-  roof: { en: 'Pressure Dome', ru: 'Герметичный купол' },
-  finishing: { en: 'Lights and Markings', ru: 'Огни и разметка' },
-  complete: { en: 'Module Online', ru: 'Модуль в строю' },
-  upgraded: { en: 'Extended Module', ru: 'Расширенный модуль' },
+const SPACE_STAGE_LABELS: Readonly<Record<string, string>> = {
+  stakes_and_rope: text('Marker Beacons'),
+  foundation: text('Docking Frame'),
+  low_walls_open: text('Open Module Frame'),
+  waist_walls_scaffold: text('Half Plated with Gantry'),
+  full_walls: text('Fully Plated'),
+  roof_beams: text('Roof Ribs'),
+  roof: text('Pressure Dome'),
+  finishing: text('Lights and Markings'),
+  complete: text('Module Online'),
+  upgraded: text('Extended Module'),
 };
 
 const SPACE_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = DEFAULT_CONSTRUCTION_STAGES.map(s => ({
@@ -67,41 +68,41 @@ const SPACE_ART_CATALOG: WorldArtCatalog = {
   baseUrl: '/world-art/space/',
   buildings: {
     house: [
-      { id: 'bunk_pod', footprint: '1x1', fromLevel: 1, label: { en: 'Bunk pod', ru: 'Спальная капсула' } },
-      { id: 'cabin', footprint: '2x2', fromLevel: 4, label: { en: 'Cabin', ru: 'Каюта' } },
-      { id: 'quarters', footprint: '3x3', fromLevel: 8, label: { en: 'Quarters', ru: 'Жилой блок' } },
-      { id: 'suite', footprint: '4x4', fromLevel: 15, label: { en: 'Suite with a view', ru: 'Люкс с иллюминатором' } },
+      { id: 'bunk_pod', footprint: '1x1', fromLevel: 1, label: text('Bunk pod') },
+      { id: 'cabin', footprint: '2x2', fromLevel: 4, label: text('Cabin') },
+      { id: 'quarters', footprint: '3x3', fromLevel: 8, label: text('Quarters') },
+      { id: 'suite', footprint: '4x4', fromLevel: 15, label: text('Suite with a view') },
     ],
     department: [
-      { id: 'lab', footprint: '3x3', fromStage: 1, label: { en: 'Lab module', ru: 'Лабораторный модуль' } },
-      { id: 'wing', footprint: '4x4', fromStage: 4, label: { en: 'Research wing', ru: 'Научное крыло' } },
-      { id: 'dome', footprint: '5x5', fromStage: 8, label: { en: 'Science dome', ru: 'Научный купол' } },
+      { id: 'lab', footprint: '3x3', fromStage: 1, label: text('Lab module') },
+      { id: 'wing', footprint: '4x4', fromStage: 4, label: text('Research wing') },
+      { id: 'dome', footprint: '5x5', fromStage: 8, label: text('Science dome') },
     ],
     residence: [
-      { id: 'shuttle', footprint: '2x2', fromStage: 1, label: { en: 'Landed shuttle', ru: 'Посадочный челнок' } },
-      { id: 'command_cabin', footprint: '3x3', fromStage: 2, label: { en: 'Command cabin', ru: 'Командная каюта' } },
-      { id: 'bridge', footprint: '4x4', fromStage: 3, label: { en: 'Bridge', ru: 'Мостик' } },
-      { id: 'flag_bridge', footprint: '5x5', fromStage: 4, label: { en: 'Flag bridge', ru: 'Флагманский мостик' } },
-      { id: 'command_tower', footprint: '6x6', fromStage: 5, label: { en: 'Command tower', ru: 'Командная башня' } },
+      { id: 'shuttle', footprint: '2x2', fromStage: 1, label: text('Landed shuttle') },
+      { id: 'command_cabin', footprint: '3x3', fromStage: 2, label: text('Command cabin') },
+      { id: 'bridge', footprint: '4x4', fromStage: 3, label: text('Bridge') },
+      { id: 'flag_bridge', footprint: '5x5', fromStage: 4, label: text('Flag bridge') },
+      { id: 'command_tower', footprint: '6x6', fromStage: 5, label: text('Command tower') },
     ],
     district_hub: [
-      { id: 'server_node', footprint: '3x3', fromStage: 1, label: { en: 'Server node', ru: 'Серверный узел' } },
-      { id: 'server_hall', footprint: '4x4', fromStage: 2, label: { en: 'Server hall', ru: 'Серверный зал' } },
+      { id: 'server_node', footprint: '3x3', fromStage: 1, label: text('Server node') },
+      { id: 'server_hall', footprint: '4x4', fromStage: 2, label: text('Server hall') },
     ],
-    supply: [{ id: 'fuel_tank', footprint: '3x3', label: { en: 'Fuel tank', ru: 'Топливный бак' } }],
+    supply: [{ id: 'fuel_tank', footprint: '3x3', label: text('Fuel tank') }],
     flophouse: [
-      { id: 'crew_pods', footprint: '2x2', fromStage: 1, label: { en: 'Crew pods', ru: 'Капсулы экипажа' } },
-      { id: 'crew_deck', footprint: '3x3', fromStage: 3, label: { en: 'Crew deck', ru: 'Палуба экипажа' } },
+      { id: 'crew_pods', footprint: '2x2', fromStage: 1, label: text('Crew pods') },
+      { id: 'crew_deck', footprint: '3x3', fromStage: 3, label: text('Crew deck') },
     ],
     statue: [
-      { id: 'beacon', footprint: '1x1', label: { en: 'Beacon', ru: 'Маяк' } },
-      { id: 'mast', footprint: '2x2', label: { en: 'Signal mast', ru: 'Сигнальная мачта' } },
-      { id: 'monolith', footprint: '3x3', label: { en: 'Monolith', ru: 'Монолит' } },
+      { id: 'beacon', footprint: '1x1', label: text('Beacon') },
+      { id: 'mast', footprint: '2x2', label: text('Signal mast') },
+      { id: 'monolith', footprint: '3x3', label: text('Monolith') },
     ],
     monument: [
-      { id: 'antenna', footprint: '4x4', label: { en: 'Goal antenna', ru: 'Антенна цели' } },
-      { id: 'array', footprint: '5x5', label: { en: 'Antenna array', ru: 'Антенная решетка' } },
-      { id: 'deep_array', footprint: '6x6', label: { en: 'Deep space array', ru: 'Дальняя антенная решетка' } },
+      { id: 'antenna', footprint: '4x4', label: text('Goal antenna') },
+      { id: 'array', footprint: '5x5', label: text('Antenna array') },
+      { id: 'deep_array', footprint: '6x6', label: text('Deep space array') },
     ],
   },
   altar: true,
@@ -112,7 +113,7 @@ const SPACE_ART_CATALOG: WorldArtCatalog = {
 
 export const SPACE_WORLD_PACK: WorldPackManifest = {
   id: 'space',
-  name: { en: 'Orbital Station', ru: 'Орбитальная станция' },
+  name: text('Orbital Station'),
   engine: 'isometric-2d',
   mapSize: 150,
   projection: DEFAULT_ISOMETRIC_PROJECTION,
@@ -120,7 +121,7 @@ export const SPACE_WORLD_PACK: WorldPackManifest = {
   defaultTileId: 'open_space',
   showGridByDefault: false,
   outerWallMode: 'none',
-  altarAnchor: { offsetCol: 3, offsetRow: 2, label: { en: 'Signal shrine', ru: 'Сигнальный алтарь' } },
+  altarAnchor: { offsetCol: 3, offsetRow: 2, label: text('Signal shrine') },
   roleLooks: SPACE_ROLE_LOOKS,
   classFallbackLooks: SPACE_CLASS_FALLBACKS,
   constructionStages: SPACE_CONSTRUCTION_STAGES,
