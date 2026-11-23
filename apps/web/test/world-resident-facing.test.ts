@@ -3,6 +3,7 @@ import {
   DIRECTION_ROWS,
   masterTileW,
   personSheetPath,
+  residentStandsStill,
   residentWalkSpeed,
   resolveResidentArt,
   sheetRowFor,
@@ -173,5 +174,31 @@ describe('Residents cover one drawn stride per walk cycle (#1983)', () => {
   it('covers the same ground in a cycle whichever way it walks, so the foreshortened rows keep their feet too', () => {
     const east = oneCycle({}, 1, -1).tiles;
     for (const [dc, dr] of GRID_STEPS) expect(oneCycle({}, dc, dr).tiles, `step (${dc}, ${dr})`).toBeCloseTo(east, 3);
+  });
+
+  /* Ivan: one idle at a house. A standing sheet (idle) has no stride, so a resident drawn from it stands still instead
+     of sliding round its house; a placeholder keeps strolling (the test above). */
+  it('keeps an idle resident drawn from a standing sheet in place at its house, its sheet still running', () => {
+    const sim = createResidentSimulation(EGYPT_WORLD_PACK, synced.city, live);
+    const idle = sim.residents.find(r => r.liveState === 'idle' && EGYPT_WORLD_PACK.art!.people!.looks.includes(r.look.id))!;
+    expect(idle, 'the fixture has an idle resident with an art look').toBeTruthy();
+    const passport = { frameW: 192, frameH: 256, frames: 4, fps: 4, anchor: { x: 96, y: 236 }, directions: ['SE'] } as SheetPassport;
+    const index: ArtIndex = { contract: 2, pack: 'egypt', files: { [personSheetPath(idle.look.id, 1, 'idle')]: { w: 768, h: 256, passport } } };
+    idle.outfitTier = 1;
+    sim.standsStillOf = r => residentStandsStill(EGYPT_WORLD_PACK, index, r);
+    stepResidentSimulation(sim, 0.1);
+    const at = { col: idle.col, row: idle.row, facing: idle.facing };
+    const frames = new Set<number>();
+    for (let i = 0; i < 30; i++) {
+      stepResidentSimulation(sim, 0.1);
+      expect({ col: idle.col, row: idle.row, facing: idle.facing }, `step ${i}`).toEqual(at);
+      expect(idle.pose).toBe('idle');
+      frames.add(resolveResidentArt(EGYPT_WORLD_PACK, index, idle, sim.timeSec)!.layers[0]!.frame.x);
+    }
+    expect(frames.size, 'the idle loop plays in place').toBe(4);
+
+    /* Without art, or with only a walking sheet, there is no standing sheet to keep it in place. */
+    expect(residentStandsStill(EGYPT_WORLD_PACK, null, idle)).toBe(false);
+    expect(residentStandsStill(EGYPT_WORLD_PACK, walkSheetIndex(idle.look.id, {}), idle)).toBe(false);
   });
 });

@@ -17,7 +17,7 @@ import {
   type ViewportSize,
 } from './camera';
 import { DisplayRunPool, WorldArtLibrary, type WorldArtStats } from './art-runtime';
-import { residentWalkSpeed } from './art';
+import { residentStandsStill, residentWalkSpeed } from './art';
 import { bakeChunkCanvas, buildTileLookup, type BakedChunk } from './chunk-baker';
 import { buildChunkGrid, ChunkLruCache, cullVisibleChunks, type ChunkCoord, type ChunkGrid } from './chunks';
 import {
@@ -1327,6 +1327,7 @@ export class IsometricWorldEngine {
     if (this.residentSim) {
       /* Residents drawn from a walking sheet walk its stride per cycle; without art the speed stays their own. */
       this.residentSim.walkSpeedOf = r => residentWalkSpeed(this.pack, this.artLibrary.index, r);
+      this.residentSim.standsStillOf = r => residentStandsStill(this.pack, this.artLibrary.index, r);
       stepResidentSimulation(this.residentSim, dtMs / 1000);
       residentsAnimated = true;
       if (this.pack.art) {

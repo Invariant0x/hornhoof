@@ -1125,6 +1125,13 @@ function foundSheet(
 
 /* Tiles a resident walks per second so the moving sheet it shows covers one stride per cycle; null when it shows no
    moving sheet. A stride along the E row is a screen-level step of tile diagonals: master px * sqrt 2 / master tile. */
+/* True when a resident is drawn from a standing sheet for its pose (idle, build and the like): it has no stride, so the
+   resident keeps its place instead of sliding (#1983). False without art, where the placeholder draws its own steps. */
+export function residentStandsStill(pack: WorldPackManifest, index: ArtIndex | null, resident: ResidentEntity): boolean {
+  const found = residentSheet(pack, index, resident);
+  return found !== null && !MOVING_ANIMATIONS.has(found.anim);
+}
+
 export function residentWalkSpeed(pack: WorldPackManifest, index: ArtIndex | null, resident: ResidentEntity): number | null {
   const found = residentSheet(pack, index, resident);
   if (!found || !MOVING_ANIMATIONS.has(found.anim)) return null;

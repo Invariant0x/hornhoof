@@ -102,6 +102,8 @@ export type ResidentSimulation = {
   /* Tiles per second a resident walks so its drawn stride fits one walk cycle, set by the renderer from the sheet it
      shows; null or unset keeps the resident's own speed. */
   walkSpeedOf?: (resident: ResidentEntity) => number | null;
+  /* True for a resident drawn from a standing sheet, which then keeps its place instead of strolling (#1983). */
+  standsStillOf?: (resident: ResidentEntity) => boolean;
   altarTile: TileCoord;
   altarLabel: Readonly<{ en: string; ru: string }>;
   residents: ResidentEntity[];
@@ -823,17 +825,36 @@ function applyStaticStatePose(r: ResidentEntity): void {
     return;
   }
   /* Builders, turnkey generalists, road builders and day-laborers carry stones outbound and build! */
-  if (r.leg === 'outbound') {
-    r.carrying = 'stone';
-    r.pose = 'carrying_stone';
-  } else {
-    r.carrying = 'none';
-    r.pose = 'walking';
-  }
+  carrierPose(r);
+}
+
+/* A carrier leaves home with a stone, lays it at the site while it pauses there, and walks back empty (#1983). */
+function carrierPose(r: ResidentEntity): void {
+  const atSite = r.leg === 'inbound';
+  r.carrying = atSite ? 'none' : 'stone';
+  r.pose = !atSite ? 'carrying_stone' : r.actionTimer > 0 ? 'building' : 'walking';
 }
 
 /* Isometric tile distance covered per full walk stride (2*PI radians), preventing foot sliding at any speed. */
 const WALK_STRIDE_TILES = 0.65;
+
+/* An idle resident: drawn from a standing sheet it keeps its place by its house; otherwise a calm stroll round the
+   house, its walkPhase following the actual tile displacement. */
+function stepIdle(sim: ResidentSimulation, r: ResidentEntity, i: number): void {
+  r.pose = 'idle';
+  r.carrying = 'none';
+  if (sim.standsStillOf?.(r)) return;
+  const prevCol = r.col;
+  const prevRow = r.row;
+  const phase = sim.timeSec * 0.7 + i * 0.9;
+  r.col = r.homeTile.col + Math.cos(phase) * 0.45;
+  r.row = r.homeTile.row + Math.sin(phase) * 0.45;
+  const idleMoved = Math.hypot(r.col - prevCol, r.row - prevRow);
+  if (idleMoved > 1e-4) {
+    r.walkPhase += (idleMoved / WALK_STRIDE_TILES) * Math.PI * 2;
+    r.facing = facingOfStep(r.col - prevCol, r.row - prevRow);
+  }
+}
 
 /* Advances all residents smoothly along their road paths and role behavior loops.
    Zero per-frame allocations on the steady path so 150 residents step in < 0.25 ms. */
@@ -856,19 +877,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
     }
 
     if (r.liveState === 'idle') {
-      /* Calm stroll near own house; walkPhase follows actual tile displacement. */
-      const prevCol = r.col;
-      const prevRow = r.row;
-      const phase = sim.timeSec * 0.7 + i * 0.9;
-      r.col = r.homeTile.col + Math.cos(phase) * 0.45;
-      r.row = r.homeTile.row + Math.sin(phase) * 0.45;
-      const idleMoved = Math.hypot(r.col - prevCol, r.row - prevRow);
-      if (idleMoved > 1e-4) {
-        r.walkPhase += (idleMoved / WALK_STRIDE_TILES) * Math.PI * 2;
-        r.facing = facingOfStep(r.col - prevCol, r.row - prevRow);
-      }
-      r.pose = 'idle';
-      r.carrying = 'none';
+      stepIdle(sim, r, i);
       continue;
     }
 
@@ -904,7 +913,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
         r.carrying = 'none';
         r.pose = 'directing';
       } else {
-        r.pose = r.leg === 'outbound' ? 'building' : 'carrying_stone';
+        carrierPose(r);
       }
       continue;
     }
