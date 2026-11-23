@@ -1,4 +1,5 @@
 import { THEME_FILE_LIMITS, type ThemeProblemCode } from '@hornhoof/protocol/themes';
+import { crc32 } from 'node:zlib';
 import { ArchiveRefused } from './zip.js';
 
 /* What each file of a theme archive is, from its place in the archive, and the proof from its own bytes that it is what
@@ -51,9 +52,20 @@ const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export type Picture = { width: number; height: number };
 
+/* A PNG whose every chunk is whole with its checksum, from IHDR first to IEND last with nothing after it: a picture that
+   carries another file behind it is not one. */
 function pngSize(bytes: Buffer): Picture | null {
-  if (bytes.length < 33 || !bytes.subarray(0, 8).equals(PNG) || bytes.toString('latin1', 12, 16) !== 'IHDR' || bytes.readUInt32BE(8) !== 13) return null;
-  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  if (bytes.length < 45 || !bytes.subarray(0, 8).equals(PNG) || bytes.toString('latin1', 12, 16) !== 'IHDR' || bytes.readUInt32BE(8) !== 13) return null;
+  let at = 8;
+  let type = '';
+  while (at + 12 <= bytes.length && type !== 'IEND') {
+    const length = bytes.readUInt32BE(at);
+    const end = at + 12 + length;
+    type = bytes.toString('latin1', at + 4, at + 8);
+    if (!/^[A-Za-z]{4}$/.test(type) || end > bytes.length || crc32(bytes.subarray(at + 4, end - 4)) >>> 0 !== bytes.readUInt32BE(end - 4)) return null;
+    at = end;
+  }
+  return type === 'IEND' && at === bytes.length ? { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) } : null;
 }
 
 /* A WebP's canvas from its first chunk: lossy VP8, lossless VP8L or the extended VP8X. */

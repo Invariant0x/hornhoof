@@ -6,7 +6,6 @@ import { defineConfig } from 'vite';
    when a theme is uploaded (apps/server/src/modules/themes/web-check.ts). Everything it imports is in it; only node's own
    modules stay outside. */
 export default defineConfig({
-  configFile: false,
   logLevel: 'warn',
   ssr: { noExternal: true },
   build: {

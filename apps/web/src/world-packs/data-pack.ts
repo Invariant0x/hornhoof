@@ -10,7 +10,7 @@ import { shippedRecipe, shippedRecipeIds } from './recipes';
 const FIELDS = [
   'name', 'engine', 'mapSize', 'projection', 'camera', 'defaultTileId', 'tiles', 'sprites', 'stageCounts', 'palette', 'params',
   'showGridByDefault', 'outerWallMode', 'buildingLayout', 'altarAnchor', 'roleLooks', 'classFallbackLooks', 'constructionStages',
-  'constructionPalette', 'materials', 'liquidLayer', 'plants', 'wind', 'lighting', 'paths', 'terrainArt', 'lotGround', 'art', 'recipe',
+  'constructionPalette', 'materials', 'liquidLayer', 'plants', 'wind', 'lighting', 'paths', 'terrainArt', 'art', 'recipe',
 ];
 const COLOR = /^#[0-9A-Fa-f]{6}$/;
 const LABEL = 60;
@@ -76,4 +76,17 @@ export function worldPackOfData(id: string, raw: unknown, baseUrl: string): Buil
   } catch (error) {
     return { ok: false, errors: [`world.json is not a world pack: ${error instanceof Error ? error.message : String(error)}`] };
   }
+}
+
+/* A shipped pack as a world written as data: what packs Hornhoof's own themes as archives. Its recipe is named by id
+   with each tile kind's words and colour; the art's address and the pack's id are the installed theme's. A pack that
+   chooses its empty tiles by code cannot be written as data. */
+export function dataOfWorldPack(pack: WorldPackManifest): Record<string, unknown> {
+  if (pack.resolveEmptyTileId) throw new Error(`World pack "${pack.id}" chooses its empty tiles by code, which a world written as data cannot.`);
+  if (!shippedRecipe(pack.terrainRecipe.id)) throw new Error(`World pack "${pack.id}" uses recipe "${pack.terrainRecipe.id}", which Hornhoof does not ship.`);
+  const { terrainRecipe, art } = pack;
+  const fields = Object.fromEntries(Object.entries(pack).filter(([key]) => FIELDS.includes(key) && key !== 'art'));
+  const tiles = Object.fromEntries(terrainRecipe.tileKinds.map(kind => [kind.id, { label: { en: kind.label.en, ru: kind.label.ru }, color: kind.color }]));
+  const catalog = art ? { art: Object.fromEntries(Object.entries(art).filter(([key]) => key !== 'baseUrl')) } : {};
+  return JSON.parse(JSON.stringify({ ...fields, recipe: { use: terrainRecipe.id, tiles }, ...catalog })) as Record<string, unknown>;
 }

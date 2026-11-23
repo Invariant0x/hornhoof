@@ -57,8 +57,9 @@ const Kit = z.strictObject({
 });
 export type ThemeKit = z.infer<typeof Kit>;
 
-/* A file the theme serves to the screens, with the type it is served as. */
-export type ServedFile = Readonly<{ path: string; mediaType: MediaType; bytes: Buffer }>;
+/* A file the theme serves to the screens, with the type it is served as. It is read again from the archive when it is
+   stored, so a theme is never held in memory whole. */
+export type ServedFile = Readonly<{ path: string; mediaType: MediaType; size: number; read: () => Promise<Buffer> }>;
 
 export type CheckedTheme = Readonly<{
   manifest: ThemeManifest;
@@ -78,8 +79,9 @@ function rooted(files: readonly ZipFile[]): Map<string, ZipFile> {
   const tops = new Set(files.map(file => file.path.split('/')[0]!));
   const [top] = [...tops];
   if (tops.size !== 1 || !byPath.has(`${top}/theme.json`)) {
-    const folder = [...byPath.keys()].find(path => path.endsWith('/theme.json'));
-    return folder ? refuse('path_outside', [...byPath.keys()].find(path => !path.startsWith(folder.slice(0, -'theme.json'.length)))) : refuse('theme_missing');
+    const folder = [...byPath.keys()].find(path => path.endsWith('/theme.json'))?.slice(0, -'theme.json'.length);
+    const stray = folder === undefined ? undefined : [...byPath.keys()].find(path => !path.startsWith(folder));
+    return stray === undefined ? refuse('theme_missing', 'theme.json') : refuse('path_outside', stray);
   }
   return new Map(files.map(file => [file.path.slice(top!.length + 1), file]));
 }
@@ -95,18 +97,17 @@ function parsed<T>(path: string, schema: z.ZodType<T>, raw: unknown): T {
 }
 
 class Reader {
-  private readonly bytes = new Map<string, Buffer>();
   constructor(readonly files: Map<string, ZipFile>, readonly kinds: Map<string, FileKind>) {}
   has(path: string): boolean {
     return this.files.has(path);
   }
   async read(path: string): Promise<Buffer> {
-    const kept = this.bytes.get(path);
-    if (kept) return kept;
+    return (this.files.get(path) ?? refuse('file_missing', path)).read();
+  }
+  /* The file as the theme serves it, once its bytes passed. */
+  served(path: string, mediaType: MediaType): ServedFile {
     const file = this.files.get(path) ?? refuse('file_missing', path);
-    const bytes = await file.read();
-    this.bytes.set(path, bytes);
-    return bytes;
+    return { path, mediaType, size: file.size, read: file.read };
   }
   async json(path: string, limit?: number): Promise<unknown> {
     return jsonOf(path, await this.read(path), limit);
@@ -135,7 +136,7 @@ async function fontsOf(files: Reader, served: ServedFile[]): Promise<ThemeFontFa
     if (!files.has(path)) refuse('file_missing', path, 'ui/fonts.json names it');
     const bytes = await files.read(path);
     checkFont(path, bytes);
-    served.push({ path, mediaType: MEDIA.woff2, bytes });
+    served.push(files.served(path, MEDIA.woff2));
   }
   return faces;
 }
@@ -152,7 +153,7 @@ async function kitOf(files: Reader, served: ServedFile[]): Promise<ThemeKit | nu
     const kind = path.endsWith('.png') ? 'png' : 'webp';
     const bytes = await files.read(path);
     pictureOf(path, kind, bytes);
-    served.push({ path, mediaType: MEDIA[kind], bytes });
+    served.push(files.served(path, MEDIA[kind]));
   }
   return kit;
 }
@@ -163,7 +164,7 @@ async function previewOf(files: Reader, served: ServedFile[]): Promise<void> {
     const bytes = await files.read(path);
     if (bytes.length > THEME_FILE_LIMITS.previewBytes) refuse('file_too_large', path);
     pictureOf(path, kind, bytes, THEME_FILE_LIMITS.previewSide);
-    served.push({ path, mediaType: MEDIA[kind], bytes });
+    served.push(files.served(path, MEDIA[kind]));
   }
   const covers = files.under('preview/cover.');
   if (covers.length > 1) refuse('too_many_of_kind', covers[1], 'one cover');
@@ -183,16 +184,17 @@ async function worldOf(manifest: ThemeManifest, files: Reader, web: ThemeWebChec
     pictureOf(path, 'png', bytes);
     const passportPath = path.replace(/\.png$/, '.json');
     const passport = files.has(passportPath) ? await files.json(passportPath, THEME_FILE_LIMITS.passportBytes) : undefined;
-    art.push({ path: path.slice('world/art/'.length), head: bytes.subarray(0, 33), ...(passport === undefined ? {} : { passport }) });
-    served.push({ path, mediaType: MEDIA.png, bytes });
+    art.push({ path: path.slice('world/art/'.length), head: Buffer.from(bytes.subarray(0, 33)), ...(passport === undefined ? {} : { passport }) });
+    served.push(files.served(path, MEDIA.png));
   }
   for (const path of all.filter(name => name.endsWith('.json'))) {
     if (!files.has(path.replace(/\.json$/, '.png'))) refuse('file_place', path, 'a passport with no picture beside it');
-    served.push({ path, mediaType: MEDIA.json, bytes: await files.read(path) });
+    served.push(files.served(path, MEDIA.json));
   }
   const checked = web.checkWorld({ id: manifest.id, world, baseUrl: `${baseUrl}world/art/`, art, files: all.map(path => path.slice('world/art/'.length)) });
   if (!checked.ok) refuse(checked.code, checked.code === 'world_bad' ? 'world/world.json' : 'world/art/', checked.detail);
-  served.push({ path: 'world/art/art-index.json', mediaType: MEDIA.json, bytes: Buffer.from(`${JSON.stringify(checked.artIndex)}\n`) });
+  const index = Buffer.from(`${JSON.stringify(checked.artIndex)}\n`);
+  served.push({ path: 'world/art/art-index.json', mediaType: MEDIA.json, size: index.length, read: () => Promise.resolve(index) });
   return { world: checked.world, index: checked.artIndex };
 }
 
@@ -209,7 +211,7 @@ async function textsOf(files: Reader, served: ServedFile[]): Promise<void> {
   for (const path of [...licence, ...['ui/NOTES.md'].filter(name => files.has(name)), ...files.under('ui/fonts/').filter(name => name.endsWith('.txt'))]) {
     const bytes = await files.read(path);
     plainText(path, bytes);
-    served.push({ path, mediaType: MEDIA.text, bytes });
+    served.push(files.served(path, MEDIA.text));
   }
 }
 
@@ -232,6 +234,6 @@ export async function checkThemeArchive(source: ZipSource, web: ThemeWebCheck, b
   await previewOf(files, served);
   const world = await worldOf(manifest, files, web, baseUrl(manifest), served);
   const skills = await skillsOf(manifest, files);
-  return { manifest, look: look.value, fonts, kit, world: world?.world ?? null, skills, files: served, size: served.reduce((sum, file) => sum + file.bytes.length, 0) };
+  return { manifest, look: look.value, fonts, kit, world: world?.world ?? null, skills, files: served, size: served.reduce((sum, file) => sum + file.size, 0) };
 }
 

@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /* The checks of a theme archive's look and world that the screens' own code holds (docs/theme-archive.md, 3.1, 4.1 and
    4.2), as one module the server loads: the web build bundles it for node (theme-check.config.ts), and the server's
    tests read it from here. An uploaded theme is so held to exactly what Hornhoof's own themes are. */
