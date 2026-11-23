@@ -62,6 +62,7 @@ test('keys typed while the view of the session connects again reach the program 
   const got: string[] = [];
   let connections = 0;
   let dropped = false;
+  let closed = false;
   await page.routeWebSocket('**/api/agents/b1/terminal*', ws => {
     connections++;
     ws.onMessage(message => {
@@ -71,7 +72,7 @@ test('keys typed while the view of the session connects again reach the program 
          the first view twice, so that is not always the first view opened. */
       if (!dropped && type === 'input') {
         dropped = true;
-        void ws.close({ code: 4410, reason: 'node_offline' });
+        void ws.close({ code: 4410, reason: 'node_offline' }).then(() => { closed = true; });
       }
     });
     ws.send(JSON.stringify({ type: 'ready', write: true }));
@@ -85,8 +86,10 @@ test('keys typed while the view of the session connects again reach the program 
   await page.clock.pauseAt(start + 60_000);
   await page.keyboard.type('x');
   await expect.poll(() => got.length).toBeGreaterThan(0);
-  /* The view went down: its loader is back, and it waits half a second on the page's clock before it connects again. */
-  await expect(window.locator('.t-load')).toBeVisible();
+  await expect.poll(() => closed).toBe(true);
+  await page.clock.runFor(10);
+  /* The view went down without flashing its loader over the screen, and waits half a second before reconnecting. */
+  await expect(window.locator('.t-load')).toHaveCount(0);
   await page.keyboard.type('queued');
   await page.keyboard.press('Enter');
   await page.clock.runFor(500);

@@ -307,7 +307,7 @@ describe('Settings in the account menu', () => {
       ['Integrations', '/settings/integrations', 'Google Sheets is not connected yet. Until a key is saved here, employees attach a ready .xlsx file to the task and chat instead.'],
       ['Passwords', '/settings/passwords', 'No sign-ins are saved yet.'],
       ['Company & access', '/settings/company', 'Hornhoof opens from anywhere at this link:'],
-      ['Appearance & language', '/settings', 'Only for you and only in this browser. Other members keep their language and theme.'],
+      ['Appearance & language', '/settings', 'Only for you and only in this browser. Other members keep their language.'],
       ['Profile', '/settings/profile', 'Name'],
     ] as const) {
       await user.click(within(dialog).getByRole('button', { name }));

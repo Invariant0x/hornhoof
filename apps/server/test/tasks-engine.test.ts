@@ -7,6 +7,7 @@ import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { listen, mcp, setUpCompany, testApp, echelonsTurn } from './helpers.js';
+import { RECORDED } from './recorded-fixture.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -220,7 +221,7 @@ describe('the task engine', () => {
   it('refuses to cancel a finished task', async () => {
     const { ctx, CEO, head, deptTask } = await company();
     const task = await deptTask();
-    expect((await report(ctx, head.id, task.id, { done: true, summary: 'Checked the coordination result.' })).task.status).toBe('done');
+    expect((await report(ctx, head.id, task.id, { done: true, summary: 'Checked the coordination result.', recorded: RECORDED })).task.status).toBe('done');
     expect(await reason(cancel(ctx, CEO, task.id, 'Not needed.'))).toBe('task_closed');
   });
 
@@ -237,7 +238,7 @@ describe('the task engine', () => {
   it('tells whoever gave a department task when its head reports, and asks a person when a head is blocked on theirs, whose question the orchestrator puts into plain words', async () => {
     const { ctx, db, orchestrator, dev, head, deptTask } = await company();
     const given = await createTask(ctx, { agentId: orchestrator.id }, { title: 'Pricing page', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id });
-    const done = await report(ctx, head.id, given.task.id, { done: true, summary: 'Shipped behind a flag.' });
+    const done = await report(ctx, head.id, given.task.id, { done: true, summary: 'Shipped behind a flag.', recorded: RECORDED });
     expect(done.task.status).toBe('done');
     expect(woken(done)).toEqual([[orchestrator.id, 'reported']]);
     const mine = await deptTask();
@@ -313,7 +314,7 @@ describe('the task engine', () => {
     expect(await reason(submit(ctx, bruno.id, task.id, code))).toBe('task_invalid');
     expect((await read(task.id)).status).toBe('open');
     /* Where the department keeps code, a coordination piece without accepted subtasks is the head's to close. */
-    const finished = await report(ctx, head.id, under.id, { done: true, summary: 'Checked refund scope.' });
+    const finished = await report(ctx, head.id, under.id, { done: true, summary: 'Checked refund scope.', recorded: RECORDED });
     const log = await db.select().from(taskEvents).where(eq(taskEvents.taskId, under.id)).orderBy(taskEvents.id);
     expect(log.at(-1)).toMatchObject({ kind: 'report', agentId: head.id, text: 'Checked refund scope.' });
     expect(finished.wakes).toContainEqual({

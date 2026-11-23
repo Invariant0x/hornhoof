@@ -8,6 +8,7 @@ import { checkingIdentity, producerIdentity } from './echelons-assign.js';
 import { currentDocument } from './echelons-candidates.js';
 import type { Submission } from './echelons-operations.js';
 import { changeRoute, type Route } from './route-records.js';
+import { requireRecorded } from './recorded.js';
 import { requireTaskHead } from './echelons-update.js';
 import { giver, refuse, type Moved, type Task, type Tx } from './state.js';
 import { move } from './transitions.js';
@@ -15,18 +16,19 @@ import { move } from './transitions.js';
 /* A document goes through its stages as the words of the hand-in and the files on its task: the work of a department that
    keeps no repository, or a task made as a document where one does. Nothing here reads a commit, and Tests and Cleanup, which need one, are not among its stages. */
 
-type Reader = Pick<Ctx, 'db' | 'bus'>;
+type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config'>>;
 
 /* The document as it is handed in: a later hand-in with other words or other files is another candidate. */
 export async function documentHandIn(ctx: Reader, agentId: string, task: Task, route: Route, r: Submission) {
   if (r.review) throw refuse(400, 'task_invalid', `#${task.number} is handed in as a document: name no commit. Attach the files to the task and say in the summary what you hand in.`);
+  const recorded = await requireRecorded(ctx, task, r.recorded);
   const input = route.state.stage === 'development' ? null : await currentDocument(ctx.db, task, route);
   const producer = await producerIdentity(ctx.db, task, agentId);
   if (input) await checkingIdentity(ctx, task, route, input);
   const files = (await filesOf(ctx.db, task.id)).map(file => [file.id, file.name, file.size]);
-  const digest = createHash('sha256').update(JSON.stringify([r.summary, r.evidence, files])).digest('hex');
+  const digest = createHash('sha256').update(JSON.stringify([r.summary, r.evidence, files, recorded])).digest('hex');
   const candidate = DocumentCandidate.parse({ id: randomUUID(), parentId: route.state.candidateId, revision: route.revision + 1, digest, producedBy: { ...producer, stage: route.state.stage } });
-  return { input, candidate, review: null };
+  return { input, candidate, review: null, recorded };
 }
 
 /* The head of the department closes a document every stage of its route passed. There is nothing to merge, so the head

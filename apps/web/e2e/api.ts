@@ -1,4 +1,5 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
+import { snapshotFromOrg } from '../src/world/org-fallback';
 import { taskRoute } from '../test/task-route';
 import type { Locator, Page, Request } from '@playwright/test';
 import type { Messages } from '../src/i18n';
@@ -126,12 +127,34 @@ const ROUTES: Record<string, unknown> = {
 
 /* Every /api call of the page gets the answer above, a task its detail, and anything else a 404 as the server gives it. */
 export async function serveApi(page: Page) {
+  /* The company the page last loaded, whoever answered it: the world the server shows any member is drawn from it. */
+  let org: Promise<Org> = Promise.resolve(ORG);
+  page.on('response', response => {
+    if (new URL(response.url()).pathname !== '/api/org' || !response.ok()) return;
+    const before = org;
+    org = (response.json() as Promise<Org>).catch(() => before);
+  });
   await page.route('**/api/**', route => {
     const url = new URL(route.request().url());
     const path = url.pathname + url.search;
     /* A stream with nothing to say stays open. An answer would end it: the browser reconnects within seconds, and on each
        reconnect the whole app fetches what it missed, which keeps every page in every test busy. */
     if (path === '/api/stream') return;
+    if (path === '/api/world/theme' && route.request().method() === 'PUT') {
+      const parsed = route.request().postDataJSON() as { theme?: string } | null;
+      return route.fulfill(json({ theme: parsed?.theme ?? 'cyberpunk', activePack: null, canEdit: true, renamedAgentsCount: 0 }));
+    }
+    if (path === '/api/world/theme') return route.fulfill(json({ theme: 'cyberpunk', activePack: null, canEdit: true, renamedAgentsCount: 0 }));
+    if (path === '/api/world/state') return org.then(company => route.fulfill(json(snapshotFromOrg(company))));
+    if (path.startsWith('/api/world/rename-preview')) {
+      return route.fulfill(json({ packId: 'egypt', packLabel: { en: 'Ancient Egypt', ru: 'Древний Египет' }, lang: 'en', alreadyRenamedCount: 0, items: [] }));
+    }
+    if (path === '/api/world/rename-agents' && route.request().method() === 'POST') {
+      return route.fulfill(json({ packId: 'egypt', lang: 'en', renamedCount: 0, items: [] }));
+    }
+    if (path === '/api/world/restore-names' && route.request().method() === 'POST') {
+      return route.fulfill(json({ restoredCount: 0, items: [] }));
+    }
     if (path in ROUTES) return route.fulfill(json(ROUTES[path]));
     if (/^\/api\/tasks\/[^/]+\/phone-recordings$/.test(path)) return route.fulfill(json({ recordings: [] }));
     if (/^\/api\/machines\/[^/]+\/connections$/.test(path)) return route.fulfill(json({ summary: { drops: 0, averageMs: null, cause: null }, events: [] }));

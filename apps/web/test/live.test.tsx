@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import { connection } from '../src/connection';
 import { useStream } from '../src/live';
 import { fakeStream } from './fake-stream';
 
@@ -76,6 +77,35 @@ describe('useStream', () => {
       source.fire('open');
     });
     expect(heard).toHaveBeenCalledWith({ type: 'reconnected' });
+  });
+
+  it('opens the stream again at once, not at its own wait, when the server answers after it was away', async () => {
+    vi.useFakeTimers();
+    try {
+      const stream = fakeStream();
+      const heard = vi.fn();
+      vi.stubGlobal('fetch', vi.fn<() => Promise<Response>>().mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValue(new Response('{"build":"b1"}')));
+      const { unmount } = render(<Listener onMessage={heard} />);
+      act(() => {
+        stream.sources()[0]!.readyState = 2;
+        stream.sources()[0]!.fire('error');
+      });
+      /* The look at the server fails: it is away, and the stream is closed for good until it opens again. */
+      await act(async () => void (await vi.advanceTimersByTimeAsync(0)));
+      expect(connection.snapshot().away).toBe('lost');
+      expect(stream.sources()).toHaveLength(1);
+      /* The next look answers, well before the stream's own second. */
+      await act(async () => {
+        connection.tryNow();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(connection.snapshot().away).toBeNull();
+      expect(stream.sources()).toHaveLength(2);
+      expect(heard).toHaveBeenCalledWith({ type: 'reconnected' });
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('opens a new stream when the browser gives up on the old one, and says it came back', () => {

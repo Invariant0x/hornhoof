@@ -8,6 +8,7 @@ import { createTask, report, submit } from '../src/modules/tasks/engine.js';
 import { afterJob, wakeAll } from '../src/modules/tasks/wake.js';
 import type { Db } from '../src/db/client.js';
 import { type FakeNode, ownDatabases } from './helpers.js';
+import { recorded } from './recorded-fixture.js';
 import { BASE } from './development-echelons-fixture.js';
 import { lineOf, online, stateOf } from './map-state-fixture.js';
 
@@ -46,7 +47,7 @@ describe('a turn the queue takes', () => {
       return { ...c, up: hana, down: bruno, next: await member('Checkout page', bruno.id) };
     }
     const first = await run(hana.id, top.id);
-    await report(ctx, hana.id, top.id, { done: true, summary: 'Payments are live.' });
+    await report(ctx, hana.id, top.id, { done: true, summary: 'Payments are live.', ...(await recorded(ctx, top.id, hana.id)) });
     await end(first.id);
     const next = (await createTask(ctx, { agentId: orchestrator.id }, { title: 'Refunds', brief: '', body: '', departmentId: top.departmentId, assigneeAgentId: hana.id })).task;
     return { ...c, up: orchestrator, down: hana, next };

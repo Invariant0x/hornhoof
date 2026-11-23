@@ -27,3 +27,6 @@ target/
 /docs/task-*-series.mjs
 /docs/superpowers/reports/*.json
 /docs/superpowers/reports/*.sh.txt
+
+# Licensed world pack art is served from here locally and never committed (ARTIST_CONTRACT.md).
+/apps/web/public/world-art/

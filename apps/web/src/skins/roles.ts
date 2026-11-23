@@ -58,9 +58,56 @@ export const PULSE_TOKEN = '--tracker-pulse-low';
 export const SCHEMES = ['dark', 'light'] as const;
 export type Scheme = (typeof SCHEMES)[number];
 
+/* Whether a skin keeps the standard schematic map or renders an interactive world map and interior scenes. */
+export const WORLD_KINDS = ['standard', 'egypt'] as const;
+export type WorldKind = (typeof WORLD_KINDS)[number];
+
+/* Visual surface treatment applied across screens over the semantic tokens without changing layout geometry. */
+export const SURFACE_STYLES = ['plain', 'papyrus'] as const;
+export type SurfaceStyle = (typeof SURFACE_STYLES)[number];
+
+/* Shared world map colour roles for interactive world themes; non-world themes leave them unset. */
+export const WORLD_COLOR_TOKENS = {
+  ground: '--world-ground',
+  path: '--world-path',
+  field: '--world-field',
+  water: '--world-water',
+  structure: '--world-structure',
+  shade: '--world-shade',
+} as const;
+export type WorldColorRole = keyof typeof WORLD_COLOR_TOKENS;
+export const WORLD_COLOR_ROLES = Object.keys(WORLD_COLOR_TOKENS) as WorldColorRole[];
+export type WorldColors = Readonly<Record<WorldColorRole, string>>;
+export const WORLD_PROPERTIES = Object.values(WORLD_COLOR_TOKENS);
+
+/* Optional dark terminal overrides for themes that adjust the terminal surface, ink and ANSI palette. */
+export const TERMINAL_TOKENS = { bg: '--term-bg', ink: '--term-ink' } as const;
+export type SkinTerminal = Readonly<{
+  bg: string;
+  ink: string;
+  cursor?: string;
+  cursorAccent?: string;
+  selection?: string;
+  selectionInk?: string;
+  idle?: string;
+  ansi?: readonly string[];
+}>;
+export const TERMINAL_PROPERTIES = Object.values(TERMINAL_TOKENS);
+
 export type SkinColors = Readonly<Record<ColorRole, string>>;
 type SkinFonts = Readonly<Record<FontRole, readonly string[]>>;
-export type SkinLook = { scheme: Scheme; colors: SkinColors; fonts: SkinFonts; cut: number; shape: CutShape; pulse?: number };
+export type SkinLook = {
+  scheme: Scheme;
+  colors: SkinColors;
+  fonts: SkinFonts;
+  cut: number;
+  shape: CutShape;
+  pulse?: number;
+  world?: WorldKind;
+  surface?: SurfaceStyle;
+  worldColors?: WorldColors;
+  terminal?: SkinTerminal;
+};
 /* The name of a person's own skin in each language Hornhoof speaks. */
 export type SkinNames = Readonly<{ ru: string; en: string }>;
 /* A skin of a person's own, as its file holds it: the built-in skin it stands on, which gives it the shape of its cut,
@@ -80,6 +127,23 @@ export function declarations(look: SkinLook): [string, string][] {
   const colors = COLOR_ROLES.map((role): [string, string] => [COLOR_TOKENS[role], look.colors[role]]);
   const fonts = FONT_ROLES.map((role): [string, string] => [FONT_TOKENS[role], fontStack(look.fonts[role])]);
   return [...colors, ...fonts, [CUT_TOKEN, String(look.cut)], [PULSE_TOKEN, String(look.pulse ?? 1)], ['color-scheme', look.scheme]];
+}
+
+/* Optional world and terminal tokens a skin adds, paired with the keys to clear when switching back to a plain skin. */
+export function extraDeclarations(look: SkinLook): { set: [string, string][]; clear: string[] } {
+  const set: [string, string][] = [];
+  const clear: string[] = [];
+  if (look.worldColors) {
+    for (const role of WORLD_COLOR_ROLES) set.push([WORLD_COLOR_TOKENS[role], look.worldColors[role]]);
+  } else {
+    clear.push(...WORLD_PROPERTIES);
+  }
+  if (look.terminal) {
+    set.push([TERMINAL_TOKENS.bg, look.terminal.bg], [TERMINAL_TOKENS.ink, look.terminal.ink]);
+  } else {
+    clear.push(...TERMINAL_PROPERTIES);
+  }
+  return { set, clear };
 }
 
 export const SKIN_PROPERTIES = [...Object.values(COLOR_TOKENS), ...Object.values(FONT_TOKENS), CUT_TOKEN, PULSE_TOKEN, 'color-scheme'];
