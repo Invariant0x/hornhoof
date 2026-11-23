@@ -3624,8 +3624,12 @@ th.k-prio .sorth { white-space: nowrap; }
    window does, keeps to the corner of the page. */
 /* Guard plate: one line and one button of 44 px on the second surface with the strong line; logical sides, so a
    right-to-left page mirrors them. A plate that floats stands above the bottom row of the map and the department, so it
-   hides none of their controls. */
-.guard-stop, .light-note { display: flex; align-items: center; gap: 12px; padding-block: 8px; padding-inline: 14px 8px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-size: 14px; }
+   hides none of their controls.
+   The fill is the second surface at 99%, on purpose: do not round it up to 100%. Chromium drawing WebGL in software
+   (SwiftShader, on machines without a GPU) leaves undrawn the part of the world map's canvas under a single fully opaque
+   box laid over it, taken upside down, so a solid plate cut a black hole in the map across the page's middle line
+   (#1978). A plate that is not fully opaque keeps the canvas whole and looks the same. */
+.guard-stop, .light-note { display: flex; align-items: center; gap: 12px; padding-block: 8px; padding-inline: 14px 8px; border: 1px solid var(--line2); background: color-mix(in srgb, var(--surface2) 99%, transparent); color: var(--ink); font-size: 14px; }
 .guard-stop p, .light-note p { margin: 0; }
 .guard-stop .btn, .light-note .btn { flex: none; min-block-size: 44px; }
 /* Turning the effects back on is the second choice: a ghost button framed by a border, since the light mode it stands in
