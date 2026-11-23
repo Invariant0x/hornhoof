@@ -9,8 +9,16 @@ import { DEFAULT_ISOMETRIC_PROJECTION } from '../src/world/manifest';
 import { createDrawList, ITEM_STRIDE, PlantLayout } from '../src/world/plant-layer';
 import type { PlantSpriteInfo } from '../src/world/plant-sprites';
 import { generatePlants } from '../src/world/plants';
-import { bakeSmoothChunkPixels, displayedWaterDistance, groundMixAt, sampleCornerFieldBilinear, tilledPlotAt } from '../src/world/smooth-terrain-baker';
-import { registerTerrainArt, type LoadedTerrainArt } from '../src/world/terrain-art';
+import {
+  bakeSmoothChunkPixels,
+  displayedWaterDistance,
+  groundMixAt,
+  sampleCornerFieldBilinear,
+  tilledPlotAt,
+  waterDistanceAt,
+  waterlineShareAt,
+} from '../src/world/smooth-terrain-baker';
+import { registerTerrainArt, type ArtPixels, type LoadedTerrainArt } from '../src/world/terrain-art';
 import { GALLERY_SEEDS, generateWorldTerrain, type GeneratedWorldMap } from '../src/world/terrain-engine';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
 
@@ -268,5 +276,152 @@ describe('Egypt map look from the design check', () => {
     expect(reflections.count).toBe(byWater);
     /* A reflection hangs below its root: its vertical scale is negative. */
     for (let i = 0; i < reflections.count; i++) expect(reflections.data[i * ITEM_STRIDE + 4]!).toBeLessThan(0);
+  });
+
+  /* Design's notes on the accepted map (#1934): the water distance the waterline and the depth tint follow has no
+     kinks along the tiles, the drawn waterline does not jump where it crosses a tile border, and the painted water keeps
+     darkening toward the middle of the river. */
+  it('follows a water distance without kinks along the tile borders', () => {
+    const map = mapFor('hornhoof');
+    const cf = map.cornerFields;
+    const h = 0.01;
+    let points = 0;
+    let worst = 0;
+    let worstBilinear = 0;
+    const bilinear = (u: number, v: number) => sampleCornerFieldBilinear(cf, u, v).signedWaterDist;
+    for (let k = 20; k < 130; k++) {
+      for (let t = 20; t < 130; t += 0.37) {
+        for (const [u, v, du, dv] of [
+          [k, t, 1, 0],
+          [t, k, 0, 1],
+        ] as const) {
+          if (Math.abs(bilinear(u, v)) > 4) continue;
+          points++;
+          const slope = (f: (u: number, v: number) => number, s: number) => (f(u + du * h * s, v + dv * h * s) - f(u, v)) / h;
+          worst = Math.max(worst, Math.abs(slope(waterDistanceAt.bind(null, cf), 1) + slope(waterDistanceAt.bind(null, cf), -1)));
+          worstBilinear = Math.max(worstBilinear, Math.abs(slope(bilinear, 1) + slope(bilinear, -1)));
+        }
+      }
+    }
+    expect(points).toBeGreaterThan(500);
+    /* The bilinear field bends at every tile border; the field the water is drawn from does not. */
+    expect(worstBilinear).toBeGreaterThan(0.2);
+    expect(worst).toBeLessThan(0.05);
+  });
+
+  it('draws the waterline without a step where it crosses a tile border', () => {
+    const map = mapFor('hornhoof');
+    const flat: ArtPixels = { data: new Uint8ClampedArray(64 * 64 * 4).fill(200), width: 64, height: 64 };
+    /* A shore mask as an artist paints it: a ragged line, antialiased over a few rows. */
+    const w = 256;
+    const hgt = 256;
+    const data = new Uint8ClampedArray(w * hgt * 4);
+    for (let y = 0; y < hgt; y++) {
+      for (let x = 0; x < w; x++) {
+        const line = hgt / 2 + 24 * Math.sin((x / w) * Math.PI * 2) + 8 * Math.sin((x / w) * Math.PI * 6);
+        const value = Math.max(0, Math.min(255, (line - y) * 64 + 128));
+        data.fill(value, (y * w + x) * 4, (y * w + x) * 4 + 3);
+        data[(y * w + x) * 4 + 3] = 255;
+      }
+    }
+    const art: LoadedTerrainArt = {
+      ground: new Map(map.cornerFields.materialIds.map(id => [id, flat] as const)),
+      texelsPerTile: 256,
+      edges: new Map(),
+      defaultEdge: null,
+      shoreEdge: { data, width: w, height: hgt },
+      liquid: null,
+      pathStrip: null,
+      plants: new Map(),
+    };
+    registerTerrainArt(EGYPT_WORLD_PACK, art);
+    try {
+      const eps = 0.001;
+      let points = 0;
+      let worst = 0;
+      for (let k = 10; k < 140; k++) {
+        for (let t = 10; t < 140; t += 0.02) {
+          for (const [u, v, du, dv] of [
+            [k, t, 1, 0],
+            [t, k, 0, 1],
+          ] as const) {
+            if (Math.abs(displayedWaterDistance(map.cornerFields, u, v)) > 0.2) continue;
+            points++;
+            const before = waterlineShareAt(map, EGYPT_WORLD_PACK, u - du * eps, v - dv * eps);
+            const after = waterlineShareAt(map, EGYPT_WORLD_PACK, u + du * eps, v + dv * eps);
+            worst = Math.max(worst, Math.abs(after - before));
+          }
+        }
+      }
+      expect(points).toBeGreaterThan(2000);
+      /* The mask's rows blend over a few texels: two points 0.002 tile apart differ by a small part of the way, a step by all of it. */
+      expect(worst).toBeLessThan(0.3);
+    } finally {
+      registerTerrainArt(EGYPT_WORLD_PACK, null);
+    }
+  });
+
+  it('darkens painted water smoothly all the way to the middle of the river', () => {
+    const map = mapFor('hornhoof');
+    const tiny: ArtPixels = { data: new Uint8ClampedArray(4 * 4 * 4).fill(128), width: 4, height: 4 };
+    registerTerrainArt(EGYPT_WORLD_PACK, {
+      ground: new Map(),
+      texelsPerTile: 256,
+      edges: new Map(),
+      defaultEdge: null,
+      shoreEdge: null,
+      liquid: { bed: tiny, ripples: tiny, surface: null, baseColor: '#68A1BA' },
+      pathStrip: null,
+      plants: new Map(),
+    });
+    try {
+      const grid = buildChunkGrid(150, 4, TILE_W, TILE_H);
+      const lod1x = DEFAULT_ISOMETRIC_PROJECTION.lods.find(l => l.id === '1x')!;
+      /* Depth bins as [shallow end, deep end] of the water distance. */
+      const bins = [
+        [-0.6, -1.0],
+        [-1.8, -2.2],
+        [-3.0, -3.4],
+      ] as const;
+      const sum = bins.map(() => 0);
+      const count = bins.map(() => 0);
+      let steepest = 0;
+      for (const ch of grid.chunks) {
+        let river = 0;
+        for (let r = ch.rowStart; r < ch.rowEnd; r++) for (let c = ch.colStart; c < ch.colEnd; c++) if (map.tileAt(c, r) === 'river') river++;
+        if (river < 12) continue;
+        const baked = bakeSmoothChunkPixels(ch, map, EGYPT_WORLD_PACK, lod1x);
+        const depthAt = (px: number, py: number) => {
+          const t = worldToTileFloat(baked.worldX + (px + 0.5) / baked.scale, baked.worldY + (py + 0.5) / baked.scale, TILE_W, TILE_H);
+          if (t.col < ch.colStart || t.col >= ch.colEnd || t.row < ch.rowStart || t.row >= ch.rowEnd) return null;
+          return displayedWaterDistance(map.cornerFields, t.col, t.row);
+        };
+        for (let py = 0; py < baked.pixelHeight; py += 2) {
+          for (let px = 0; px < baked.pixelWidth - 1; px += 2) {
+            const d = depthAt(px, py);
+            if (d === null || d > -0.4) continue;
+            const a = baked.rgba[(py * baked.pixelWidth + px) * 4 + 3]!;
+            bins.forEach(([hi, lo], i) => {
+              if (d <= hi && d > lo) {
+                sum[i] += a;
+                count[i]++;
+              }
+            });
+            const d2 = depthAt(px + 1, py);
+            if (d2 !== null && d2 < -0.4) steepest = Math.max(steepest, Math.abs(baked.rgba[(py * baked.pixelWidth + px + 1) * 4 + 3]! - a));
+          }
+        }
+      }
+      const mean = sum.map((s, i) => s / Math.max(1, count[i]!));
+      for (const n of count) expect(n).toBeGreaterThan(200);
+      /* Darker step by step toward the middle, and the middle carries a deep tint. */
+      expect(mean[1]!).toBeGreaterThan(mean[0]! + 20);
+      expect(mean[2]!).toBeGreaterThan(mean[1]! + 20);
+      expect(mean[2]!).toBeGreaterThan(160);
+      /* No hard band: neighbouring water pixels never differ by more than a few levels of tint. */
+      expect(steepest).toBeLessThanOrEqual(6);
+    } finally {
+      registerTerrainArt(EGYPT_WORLD_PACK, null);
+    }
   });
 });

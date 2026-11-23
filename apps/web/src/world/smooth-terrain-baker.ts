@@ -455,10 +455,48 @@ export function sampleCornerFieldBilinear(cf: CornerFieldGrid, u: number, v: num
   };
 }
 
+/* Beyond this bilinear water distance nothing drawn depends on the exact value, so the smooth one is not worked out. */
+const SMOOTH_WATER_REACH = 2;
+
+/* Catmull-Rom weights of the four corners around a fraction t: smooth across corners, through every corner value. */
+function cubicWeights(t: number, out: Float64Array): void {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  out[0] = (-t3 + 2 * t2 - t) / 2;
+  out[1] = (3 * t3 - 5 * t2 + 2) / 2;
+  out[2] = (-3 * t3 + 4 * t2 + t) / 2;
+  out[3] = (t3 - t2) / 2;
+}
+
+const cubicU = new Float64Array(4);
+const cubicV = new Float64Array(4);
+
+/* Signed water distance at (u, v) from the corner values, interpolated so that its slope is continuous across tile
+   borders: its contours (the waterline, the depth of the river) bend smoothly instead of turning at every tile edge. */
+export function waterDistanceAt(cf: CornerFieldGrid, u: number, v: number): number {
+  const lu = Math.max(0, Math.min(cf.cols - 1, u - cf.minCol));
+  const lv = Math.max(0, Math.min(cf.rows - 1, v - cf.minRow));
+  const x0 = Math.min(cf.cols - 2, Math.floor(lu));
+  const y0 = Math.min(cf.rows - 2, Math.floor(lv));
+  cubicWeights(lu - x0, cubicU);
+  cubicWeights(lv - y0, cubicV);
+  const arr = cf.signedWaterDist;
+  let sum = 0;
+  for (let j = 0; j < 4; j++) {
+    const row = Math.max(0, Math.min(cf.rows - 1, y0 - 1 + j)) * cf.cols;
+    let line = 0;
+    for (let i = 0; i < 4; i++) line += arr[row + Math.max(0, Math.min(cf.cols - 1, x0 - 1 + i))]! * cubicU[i]!;
+    sum += line * cubicV[j]!;
+  }
+  return sum;
+}
+
 /* Signed water distance as the baker draws it, with the same shoreline noise: below about 0.08 the picture is water or
    foam. Anything that must stand on dry land (plants, later buildings) checks this, not the raw field. */
 export function displayedWaterDistance(cf: CornerFieldGrid, u: number, v: number): number {
-  const raw = sampleCornerFieldBilinear(cf, u, v).signedWaterDist;
+  const bilinear = sampleCornerFieldBilinear(cf, u, v).signedWaterDist;
+  if (bilinear >= SMOOTH_WATER_REACH) return bilinear;
+  const raw = waterDistanceAt(cf, u, v);
   if (raw >= 1.35) return raw;
   const { coarse, detail } = getNoiseLuts();
   return raw + sampleLutFast(coarse, u * 4.5, v * 4.5) * 0.5 + sampleLutFast(detail, u * 5.0, v * 5.0) * 0.1;
@@ -964,11 +1002,12 @@ function bakeSmoothChunkRows(
       const w01 = (1 - fx) * fy;
       const w11 = fx * fy;
 
-      const rawWater =
+      let rawWater =
         waterArr[i00]! * w00 +
         waterArr[i10]! * w10 +
         waterArr[i01]! * w01 +
         waterArr[i11]! * w11;
+      if (rawWater < SMOOTH_WATER_REACH) rawWater = waterDistanceAt(cf, u, v);
 
       let dWater = rawWater;
       let nCoarse = 0;
@@ -1099,11 +1138,7 @@ function bakeSmoothChunkRows(
       let alpha = 255;
       if (shore && dWater < 0.6) {
         /* The painted waterline: the land fades out where the shore mask says water, so the liquid layer shows. */
-        const gwu = (waterArr[i10]! - waterArr[i00]!) * (1 - fy) + (waterArr[i11]! - waterArr[i01]!) * fy;
-        const gwv = (waterArr[i01]! - waterArr[i00]!) * (1 - fx) + (waterArr[i11]! - waterArr[i10]!) * fx;
-        const gl = Math.hypot(gwu, gwv) || 1;
-        const liquidShare = maskShare(shore, look.art!.texelsPerTile, u, v, -dWater, -gwv / gl, gwu / gl);
-        const landA = 1 - liquidShare;
+        const landA = 1 - waterlineLiquidShare(shore, look.art!.texelsPerTile, cf, u, v, dWater);
         /* Under the fading land lies the same light shallow tint the open water starts with, so the tint runs on to
            the waterline without a seam. */
         const tintA = depthShade > 0 ? paintedShallowAlpha(u, v, dWater, coarse) : 0;
@@ -1172,6 +1207,9 @@ function bakeSmoothChunkRows(
   }
 }
 
+/* The darkest tint of painted water, in the middle of a wide river. */
+const PAINTED_DEEP_MAX = 0.75;
+
 /* Slow light and dark patches over open water. */
 function waterPatches(u: number, v: number, coarse: Float32Array): number {
   return 0.8 + 0.5 * (sampleLutFast(coarse, u * 0.7 + 21, v * 0.7 - 9) + 0.5) * 0.8;
@@ -1199,9 +1237,11 @@ function waterTint(
   rgba: Uint8ClampedArray,
   out: number,
 ): void {
-  const depth = smoothstep(-0.3, -2.0, d);
   const patches = waterPatches(u, v, coarse);
-  const aDeep = Math.min(drawLines ? 0.85 : 0.5, depthShade * depth * patches);
+  /* Painted water keeps darkening past the shallows to the middle of the river, about four tiles out. */
+  const aDeep = drawLines
+    ? Math.min(0.85, depthShade * smoothstep(-0.3, -2.0, d) * patches)
+    : PAINTED_DEEP_MAX * (0.7 * smoothstep(-0.3, -2.0, d) + 0.3 * smoothstep(-1.6, -3.8, d)) * (0.85 + 0.375 * (patches - 0.8));
   /* Painted water gets a light shallow band along the whole shore; procedural water a fainter one. */
   const aShallow = drawLines ? 0.24 * (1 - smoothstep(-0.3, -0.95, d)) : paintedShallowAlpha(u, v, d, coarse);
   const broken = drawLines ? Math.max(0, Math.min(1, 0.2 + 1.8 * sampleLutFast(detail, u * 6.1 - 7.3, v * 6.1 + 2.9))) : 0;
@@ -1283,6 +1323,33 @@ function maskShare(mask: ArtPixels, tpt: number, u: number, v: number, d: number
      ragged lines over each other on a slanted edge and smear it. */
   const len = Math.hypot(tu, tv) || 1;
   return sampleMask(mask, ((u * tu + v * tv) / len) * tpt, y);
+}
+
+/* The painted waterline's water share at (u, v), dWater tiles from the water. The mask's columns run along the tile
+   axis closest to the shore's direction, blended with the other axis only where the shore runs near a diagonal: the
+   rag keeps the size it was painted at and never jumps. (Columns along the shore's own direction jumped wherever that
+   direction turned, which on the bilinear field was every tile border, and ran far faster than painted on curves.) The
+   direction comes from the smooth water distance. */
+function waterlineLiquidShare(shore: ArtPixels, tpt: number, cf: CornerFieldGrid, u: number, v: number, dWater: number): number {
+  const e = 0.02;
+  const w0 = waterDistanceAt(cf, u, v);
+  const gu = waterDistanceAt(cf, u + e, v) - w0;
+  const gv = waterDistanceAt(cf, u, v + e) - w0;
+  /* The shore runs square to the slope: along u where the water distance changes mostly along v. */
+  const alongU = smoothstep(-0.2, 0.2, (Math.abs(gv) - Math.abs(gu)) / (Math.hypot(gu, gv) || 1));
+  const y = shore.height / 2 + dWater * tpt;
+  const byU = alongU > 0 ? sampleMask(shore, u * tpt, y) : 0;
+  const byV = alongU < 1 ? sampleMask(shore, v * tpt, y) : 0;
+  return byU * alongU + byV * (1 - alongU);
+}
+
+/* The painted waterline's land share at (u, v) as the baker draws it: 1 on land, 0 in open water. */
+export function waterlineShareAt(map: GeneratedWorldMap, pack: WorldPackManifest, u: number, v: number): number {
+  const look = groundLook(map, pack);
+  const shore = look.art?.shoreEdge;
+  const d = displayedWaterDistance(map.cornerFields, u, v);
+  if (!shore || d >= 0.6) return d >= 0.08 ? 1 : 0;
+  return 1 - waterlineLiquidShare(shore, look.art!.texelsPerTile, map.cornerFields, u, v, d);
 }
 
 /* One tilled-plot pixel: crop rows one way or the other, a growth stage per plot, the raised earth strip at the plot's
