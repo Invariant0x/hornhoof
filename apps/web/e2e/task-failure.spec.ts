@@ -21,7 +21,13 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     }, { language, theme });
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+    /* The other screens ask for answers e2e/api.ts leaves out, which it answers 404 on purpose: the browser's line for each
+       says no address. The two answers this card is drawn from must come whole. */
+    page.on('console', message => { if (message.type() === 'error' && !message.text().startsWith('Failed to load resource')) errors.push(message.text()); });
+    page.on('response', response => {
+      const { pathname, search } = new URL(response.url());
+      if (!response.ok() && ['/api/tasks?status=all', '/api/tasks/t1'].includes(pathname + search)) errors.push(`${response.status()} ${pathname}${search}`);
+    });
     page.on('requestfailed', request => { if (!streamEndedByPage(request)) errors.push(request.url()); });
     await serveApi(page);
     const line = failing(TASKS[0]!);
