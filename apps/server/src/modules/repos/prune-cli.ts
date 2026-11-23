@@ -58,6 +58,7 @@ const counted = (counts: Pruning['counts']): string => Object.entries(counts).fi
 
 function stopOf({ stopped }: Pruning['result']): string | null {
   if (!stopped) return null;
+  if (stopped.why === 'shared') return 'left as it is: another company keeps this repository too, and a branch name such as task-12 could mean a task of either';
   if (stopped.why === 'batch') return 'more to do: run it again';
   if (stopped.why === 'budget') return 'more to do: the budget of requests was spent, run it again';
   if (stopped.why === 'limit') return `more to do: GitHub's request limit is used up${stopped.resetAt ? `, it ends at ${stopped.resetAt}` : ''}, run it again after`;
@@ -93,7 +94,7 @@ function totals(url: string, { result, counts }: Pruning, apply: boolean, doing:
 function report(pruning: Pruning, options: Options, print: (line: string) => void): void {
   const { url } = pruning.repository;
   const { result } = pruning;
-  if (result.stopped?.why === 'unreadable') return print(`# ${url}: ${stopOf(result)}`);
+  if (result.stopped?.why === 'unreadable' || result.stopped?.why === 'shared') return print(`# ${url}: ${stopOf(result)}`);
   const doing = doingOf(result, options.apply);
   const more = stopOf(result);
   for (const text of [...listing(url, result, options, doing), ...totals(url, pruning, options.apply, doing), ...(more ? [`# ${url}: ${more}`] : [])]) print(text);

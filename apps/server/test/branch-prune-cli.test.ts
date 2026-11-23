@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runCli } from '../src/cli.js';
 import { archiveRef } from '../src/modules/repos/prune-run.js';
+import { companies, departments } from '../src/db/schema.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 import { prepareTemplates } from './templates-once.js';
 import { company, M1, T1, U1, U2, withTask, type Fixture } from './prune-fixture.js';
@@ -78,6 +79,16 @@ describe('the branch-prune command', () => {
     expect(some.out).toContain('shop.git');
     const wrong = await cli(f, ['--company', '00000000-0000-4000-8000-000000000000']);
     expect(wrong.code).toBe(1);
+  });
+
+  it('says a repository another company keeps as well is left as it is, and changes nothing there', async () => {
+    const { f } = await repository();
+    const [other] = await f.db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+    await f.db.insert(departments).values({ companyId: other!.id, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' });
+    const { code, out } = await cli(f, ['--apply']);
+    expect(code).toBe(0);
+    expect(out).toContain('https://github.com/acme/shop.git: left as it is: another company keeps this repository too');
+    expect(f.pushed).toEqual([]);
   });
 
   it('refuses an option it does not know and a number that is none, before it reads anything', async () => {

@@ -15,7 +15,7 @@ export const restoreCommand = (branch: string): string => `git fetch origin ${ar
 
 /* What was done to one branch: it is gone (deleted), or kept at its archive and gone (archived), or the repository refused. */
 export type Entry = Verdict & { done: 'deleted' | 'archived' | 'refused'; problem?: string };
-export type Stopped = { why: 'batch' } | { why: 'budget' } | { why: 'limit'; resetAt: string | null } | { why: 'unreadable'; problem: string };
+export type Stopped = { why: 'batch' } | { why: 'budget' } | { why: 'shared' } | { why: 'limit'; resetAt: string | null } | { why: 'unreadable'; problem: string };
 /* branches: how many the repository had when it was read, none where it could not be. */
 export type Pruned = { verdicts: Verdict[]; entries: Entry[]; stopped: Stopped | null; branches: number };
 export type Deps = {

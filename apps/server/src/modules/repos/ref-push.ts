@@ -10,8 +10,9 @@ export type RefUpdate = { ref: string; old: string | null; next: string | null }
 /* What each ref came to: none where it was changed, or why it was not. A problem is a push that came to nothing at all. */
 export type Pushed = { refs: Record<string, string | null> } | { problem: string };
 /* The same bound to one repository: what a caller that only pushes holds. */
-export type Push = (updates: readonly RefUpdate[], options?: { pack?: Buffer }) => Promise<Pushed>;
-export type RefPusher = (repo: RepoAddress, updates: readonly RefUpdate[], options?: { pack?: Buffer; timeoutMs?: number }) => Promise<Pushed>;
+export type Push = (updates: readonly RefUpdate[], options?: { pack?: Buffer; main?: string }) => Promise<Pushed>;
+/* main: the repository's main line, never deleted, whatever it is called. */
+export type RefPusher = (repo: RepoAddress, updates: readonly RefUpdate[], options?: { pack?: Buffer; timeoutMs?: number; main?: string }) => Promise<Pushed>;
 
 /* A branch, or a ref under Hornhoof's own refs/hornhoof/: never a tag, and no form git refuses. */
 const REF = /^refs\/(?:heads|hornhoof)\/(?!\/|.*(?:\/\/|\.\.|@\{|\/\.|\.lock(?:\/|$)|\/$|\.$))[A-Za-z0-9._/-]+$/;
@@ -21,18 +22,18 @@ const MAIN = /^refs\/heads\/(?:main|master)$/;
 export const REFS_PER_PUSH = 100;
 
 /* Why one change is none Hornhoof makes, or null. */
-function refusedUpdate({ ref, old, next }: RefUpdate): string | null {
+function refusedUpdate({ ref, old, next }: RefUpdate, main?: string): string | null {
   if (!REF.test(ref)) return `${JSON.stringify(ref)} is not a ref Hornhoof changes: only a branch, or a ref under refs/hornhoof/, never a tag.`;
   if (old === null && next === null) return `There is nothing to change in ${ref}.`;
   if ([old, next].some(sha => sha !== null && !COMMIT_SHA.test(sha))) return `${ref}: a commit is not one git takes.`;
-  return next === null && MAIN.test(ref) ? `${ref}: main is never deleted.` : null;
+  return next === null && (MAIN.test(ref) || ref === `refs/heads/${main}`) ? `${ref}: main is never deleted.` : null;
 }
 
 /* Why the push is no push Hornhoof makes, or null. */
-function refused(updates: readonly RefUpdate[]): string | null {
+function refused(updates: readonly RefUpdate[], main?: string): string | null {
   if (!updates.length) return 'There is nothing to change.';
   if (updates.length > REFS_PER_PUSH) return `A push changes ${REFS_PER_PUSH} refs at most.`;
-  return updates.map(refusedUpdate).find(why => why !== null) ?? null;
+  return updates.map(update => refusedUpdate(update, main)).find(why => why !== null) ?? null;
 }
 
 /* Why a push did not change a ref, or null where it did: a ref its answer does not name was not changed. */
@@ -69,8 +70,8 @@ function resultOf(lines: string[], updates: readonly RefUpdate[]): Pushed {
 /* Changes the refs by a push git takes, as a node's would: its old value is named for each ref, so a ref that moved since the
    caller saw it is kept, not overwritten. Git's own protocol over HTTP, as the server's image has no git. It says what went
    wrong rather than throw, and never with the token, and follows no redirect with the push. */
-export const pushRefs: RefPusher = async (repo, updates, { pack, timeoutMs = READ_MS } = {}) => {
-  const why = refused(updates);
+export const pushRefs: RefPusher = async (repo, updates, { pack, timeoutMs = READ_MS, main } = {}) => {
+  const why = refused(updates, main);
   if (why) return { problem: why };
   const cannot = (reason: string): Pushed => ({ problem: `Hornhoof could not change refs in ${repo.url}: ${reason}.` });
   const signal = AbortSignal.timeout(timeoutMs);

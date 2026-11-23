@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { departments, jobs, taskEvents, tasks, testRuns } from '../src/db/schema.js';
+import { companies, departments, jobs, taskEvents, tasks, testRuns } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { archiveRef } from '../src/modules/repos/prune-run.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
@@ -66,6 +66,34 @@ describe('pruning the repositories of a company by its records', () => {
     const [first] = (await pruneCompany(f.ctx, { companyId: f.task.companyId, apply: true })).filter(r => r.repository.url.endsWith('shop.git'));
     expect(first!.result.verdicts.find(v => v.branch === `task-${number}`)).toMatchObject({ action: 'keep', category: 'foreign' });
     expect(f.repo.heads[`task-${number}`]).toBe(T1);
+  });
+
+  it('leaves a repository that another company keeps as well, whichever company is asked: a task-12 of one is not the other\'s', async () => {
+    const f = await company();
+    const number = await withTask(f, 'In the turn', { status: 'done', closedDaysAgo: 1 });
+    f.repo.heads[`task-${number}`] = T1;
+    const [other] = await f.db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+    await f.db.insert(departments).values({ companyId: other!.id, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://GitHub.com/acme/shop' });
+    for (const companyId of [f.task.companyId, undefined]) {
+      const shop = (await pruneCompany(f.ctx, { companyId, apply: true })).filter(run => run.repository.url.toLowerCase().includes('acme/shop'));
+      expect(shop).toHaveLength(companyId ? 1 : 2);
+      for (const run of shop) expect(run.result).toMatchObject({ entries: [], verdicts: [], stopped: { why: 'shared' } });
+    }
+    expect(f.pushed).toEqual([]);
+    expect(f.repo.heads[`task-${number}`]).toBe(T1);
+  });
+
+  it('counts the tasks of every department of the company that keeps the same repository, as one repository', async () => {
+    const f = await company();
+    const first = await withTask(f, 'In the department', { status: 'done', closedDaysAgo: 1 });
+    const second = await withTask(f, 'In another department', { status: 'done', closedDaysAgo: 1 });
+    const [sub] = await f.db.insert(departments).values({ companyId: f.task.companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop' }).returning();
+    await f.db.update(tasks).set({ departmentId: sub!.id }).where(eq(tasks.id, await idOf(f, second)));
+    Object.assign(f.repo.heads, { [`task-${first}`]: T1, [`task-${second}`]: T1 });
+    const runs = (await pruneCompany(f.ctx, { companyId: f.task.companyId, apply: true })).filter(run => run.repository.url.toLowerCase().includes('acme/shop'));
+    expect(runs).toHaveLength(1);
+    expect(f.repo.heads[`task-${first}`]).toBeUndefined();
+    expect(f.repo.heads[`task-${second}`]).toBeUndefined();
   });
 
   it('knows a test run\'s own branch as a record, and the turns of its department, and keeps a name it has no record of', async () => {

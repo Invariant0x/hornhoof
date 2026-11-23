@@ -95,6 +95,16 @@ describe('taking a checked candidate into the turn branch as a merge commit of i
     expect(headOf(dir, 'turn-7')).toBe(moved);
   });
 
+  it('writes no commit for an author whose name or address could break its header, and pushes nothing', async () => {
+    const { dir, main, candidate } = turn();
+    const { url, pushes } = await host(dir);
+    for (const who of [{ name: 'Ivan\ncommitter: Eve <eve@example.com>', email: 'ivan@example.com' }, { name: 'Ivan <x>', email: 'ivan@example.com' }, { name: 'Ivan', email: 'ivan@example.com>\nparent ' + main }, { name: '', email: 'ivan@example.com' }]) {
+      expect(await takeIn(input(main, candidate, { who }), depsOf(dir, url))).toEqual({ problem: expect.stringContaining('author') as unknown });
+    }
+    expect(pushes).toHaveLength(0);
+    expect(headOf(dir, 'turn-7')).toBe(main);
+  });
+
   it('takes work only into a turn branch', async () => {
     const { dir, main, candidate } = turn();
     const { url, pushes } = await host(dir);

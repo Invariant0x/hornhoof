@@ -64,7 +64,7 @@ Branches it made for work pile up. Nothing removes them by itself: a person read
 - A task's branch (`task-12`, `release-check-12`) is deleted once a turn branch, `main` or a release tag holds its last commit. Nothing is lost: the commits stay in that history.
 - The branch of a task that was cancelled, or closed for seven days, and whose last commit no turn, `main` or tag holds, is first copied to `refs/hornhoof/archive/<branch>` and then deleted.
 - The 20 newest turn branches stay. An older one is deleted only when a release tag `v…` stands on its last commit.
-- It never touches `main`, tags, the branch of an open or paused task, or a branch Hornhoof has no record of making, such as a person's.
+- It never touches `main`, tags, the branch of an open or paused task, or a branch Hornhoof has no record of making, such as a person's. A person's branch named like a task's (`task-12-fix`) is read as that task's: it goes only where its commits are held, or after they are archived. A repository that two companies on the same server keep is left alone, as a name such as `task-12` could mean either company's task.
 
 `--limit N` bounds the changes for each repository (50 by default), `--repo TEXT` picks repositories by their address, `--company ID` one company, and `--all-branches` lists the branches it keeps too. It stays inside GitHub's request limit and says when to run it again. Each deleted or archived branch goes into the log of its task, with its last commit and the reason.
 

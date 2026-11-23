@@ -38,6 +38,19 @@ describe('changing refs of a repository by a push git itself takes', () => {
     expect(refOf(dir, archive)).toBe(other);
   });
 
+  it('does not delete the main line the caller names, whatever it is called, and asks the repository nothing', async () => {
+    const { dir, main } = origin();
+    git(dir, 'branch', 'develop', main);
+    const { url, pushes } = await host(dir);
+    const answer = await pushRefs({ url, token: '' }, [{ ref: 'refs/heads/develop', old: main, next: null }], { main: 'develop' });
+    expect(answer).toEqual({ problem: expect.stringContaining('develop') as unknown });
+    expect(pushes).toHaveLength(0);
+    expect(headOf(dir, 'develop')).toBe(main);
+    /* A branch of another name goes, with the same option. */
+    git(dir, 'branch', 'task-9', main);
+    expect(await pushRefs({ url, token: '' }, [{ ref: 'refs/heads/task-9', old: main, next: null }], { main: 'develop' })).toEqual({ refs: { 'refs/heads/task-9': null } });
+  });
+
   it('takes several refs in one push and says for each whether it was done', async () => {
     const { dir, main, other } = origin();
     git(dir, 'branch', 'task-1', other);

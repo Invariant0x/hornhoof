@@ -1,4 +1,4 @@
-import { and, eq, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
@@ -6,7 +6,7 @@ import { departments, taskEvents, tasks, testRuns, turns } from '../../db/schema
 import { deptName } from '../departments/templates.js';
 import { GitHubRateLimited } from '../testruns/github-limit.js';
 import type { RepoAddress } from '../testruns/refs.js';
-import { taskNumberOf, type Category, type Facts, type Holds, type TaskFact } from './prune-plan.js';
+import { taskNumberOf, type Category, type Facts, type Holds, type TaskFact, type Verdict } from './prune-plan.js';
 import { BATCH, BUDGET, pruneRepository, restoreCommand, type Entry, type Pruned } from './prune-run.js';
 import { pushRefs } from './ref-push.js';
 
@@ -19,19 +19,24 @@ export type Reader = Pick<Ctx, 'db' | 'config'> & { log: Pick<FastifyBaseLogger,
 const READ_MS = 30_000;
 const CLOSED = ['done', 'cancelled'];
 
-export type Repository = { id: string; companyId: string; name: string; url: string; branch: string; address: RepoAddress };
+/* shared: another company keeps the same address too. A branch name such as task-12 then means a task of either company, so
+   neither is judged by the other's records. */
+export type Repository = { id: string; companyId: string; name: string; url: string; branch: string; address: RepoAddress; shared: boolean };
 
 const sameUrl = (url: string) => url.replace(/\/+$/, '').replace(/\.git$/i, '').toLowerCase();
 
 /* Every repository the companies keep, one for each address of a company: its departments' and its products'. */
 export async function repositoriesOf(ctx: Pick<Reader, 'db' | 'config'>, companyId?: string): Promise<Repository[]> {
-  const rows = await ctx.db.select().from(departments).where(and(isNotNull(departments.repoUrl), ...(companyId ? [eq(departments.companyId, companyId)] : [])));
+  const rows = await ctx.db.select().from(departments).where(isNotNull(departments.repoUrl));
+  const keepers = new Map<string, Set<string>>();
+  for (const d of rows) keepers.set(sameUrl(d.repoUrl!), (keepers.get(sameUrl(d.repoUrl!)) ?? new Set()).add(d.companyId));
   const kept = new Map<string, Repository>();
-  for (const d of rows.sort((a, b) => Number(a.parentId !== null) - Number(b.parentId !== null))) {
+  for (const d of rows.filter(row => !companyId || row.companyId === companyId).sort((a, b) => Number(a.parentId !== null) - Number(b.parentId !== null))) {
     const key = `${d.companyId} ${sameUrl(d.repoUrl!)}`;
     if (kept.has(key)) continue;
     const token = d.repoTokenEnc ? decryptSecret(d.repoTokenEnc, ctx.config.secret) : '';
-    kept.set(key, { id: d.id, companyId: d.companyId, name: deptName(d), url: d.repoUrl!, branch: d.repoBranch ?? 'main', address: { url: d.repoUrl!, token } });
+    const shared = keepers.get(sameUrl(d.repoUrl!))!.size > 1;
+    kept.set(key, { id: d.id, companyId: d.companyId, name: deptName(d), url: d.repoUrl!, branch: d.repoBranch ?? 'main', address: { url: d.repoUrl!, token }, shared });
   }
   return [...kept.values()];
 }
@@ -47,14 +52,21 @@ async function branchesAndTags(ctx: Reader, at: RepoAddress): Promise<{ heads: R
   return 'problem' in tags ? { problem: tags.problem } : { heads: branches.heads, tags: tags.tags };
 }
 
-/* The task of a company belongs to the first repository of its product and its department, as its work does. */
-async function taskFacts(ctx: Reader, repository: Repository): Promise<{ facts: Map<number, TaskFact>; ids: Map<number, string> }> {
-  const withRepo = new Set((await ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.companyId, repository.companyId), isNotNull(departments.repoUrl)))).map(d => d.id));
+/* The departments of the company that keep this repository, however its address is written, and the address each keeps. */
+async function keepersOf(ctx: Reader, repository: Repository): Promise<{ keepers: Set<string>; urls: Map<string, string> }> {
+  const rows = await ctx.db.select({ id: departments.id, url: departments.repoUrl }).from(departments).where(and(eq(departments.companyId, repository.companyId), isNotNull(departments.repoUrl)));
+  const urls = new Map(rows.map(d => [d.id, sameUrl(d.url!)]));
+  return { keepers: new Set(rows.filter(d => sameUrl(d.url!) === sameUrl(repository.url)).map(d => d.id)), urls };
+}
+
+/* The task of a company belongs to the repository of its product, else of its department, as its work does. */
+async function taskFacts(ctx: Reader, repository: Repository, kept: { keepers: Set<string>; urls: Map<string, string> }): Promise<{ facts: Map<number, TaskFact>; ids: Map<number, string> }> {
   const rows = await ctx.db.select().from(tasks).where(eq(tasks.companyId, repository.companyId));
   const facts = new Map<number, TaskFact>();
   const ids = new Map<number, string>();
   for (const t of rows) {
-    if ([t.productId, t.departmentId].find(id => id !== null && withRepo.has(id)) !== repository.id) continue;
+    const owner = [t.productId, t.departmentId].find(id => id !== null && kept.urls.has(id));
+    if (!owner || !kept.keepers.has(owner)) continue;
     ids.set(t.number, t.id);
     facts.set(t.number, { status: t.status, paused: t.paused !== null, closedAt: CLOSED.includes(t.status) ? (t.closedAt ?? t.updatedAt).getTime() : null });
   }
@@ -64,9 +76,11 @@ async function taskFacts(ctx: Reader, repository: Repository): Promise<{ facts: 
 async function knownOf(ctx: Reader, repository: Repository, now: number): Promise<Known | { problem: string }> {
   const read = await branchesAndTags(ctx, repository.address);
   if ('problem' in read) return read;
-  const { facts, ids } = await taskFacts(ctx, repository);
-  const turnRows = await ctx.db.select({ number: turns.number }).from(turns).where(and(eq(turns.companyId, repository.companyId), eq(turns.departmentId, repository.id)));
-  const runRows = await ctx.db.selectDistinct({ branch: testRuns.branch }).from(testRuns).where(and(eq(testRuns.companyId, repository.companyId), eq(testRuns.departmentId, repository.id), isNotNull(testRuns.branch)));
+  const kept = await keepersOf(ctx, repository);
+  const { facts, ids } = await taskFacts(ctx, repository, kept);
+  const keepers = [...kept.keepers];
+  const turnRows = await ctx.db.select({ number: turns.number }).from(turns).where(and(eq(turns.companyId, repository.companyId), inArray(turns.departmentId, keepers)));
+  const runRows = await ctx.db.selectDistinct({ branch: testRuns.branch }).from(testRuns).where(and(eq(testRuns.companyId, repository.companyId), inArray(testRuns.departmentId, keepers), isNotNull(testRuns.branch)));
   const recorded = new Set([...turnRows.map(t => `turn-${t.number}`), ...runRows.map(r => r.branch!)]);
   return { facts: { main: repository.branch, heads: read.heads, tags: read.tags, tasks: facts, recorded, now }, taskIds: ids };
 }
@@ -107,14 +121,15 @@ async function recordOf(ctx: Reader, repository: Repository, taskIds: ReadonlyMa
 
 export type Pruning = { repository: Repository; result: Pruned; counts: Record<Category, number> };
 const CATEGORIES: readonly Category[] = ['main', 'held', 'archive', 'live', 'closed-lately', 'foreign', 'turn-kept', 'turn-delete', 'unreadable', 'waiting'];
-const countsOf = (result: Pruned): Record<Category, number> => {
+const countsOf = (verdicts: readonly Verdict[]): Record<Category, number> => {
   const counts = Object.fromEntries(CATEGORIES.map(category => [category, 0])) as Record<Category, number>;
-  for (const v of result.verdicts) counts[v.category] += 1;
+  for (const v of verdicts) counts[v.category] += 1;
   return counts;
 };
 
 /* A run over one repository. */
 export async function pruneOne(ctx: Reader, repository: Repository, { apply, limit = BATCH, budget = BUDGET, now = Date.now() }: { apply: boolean; limit?: number; budget?: number; now?: number }): Promise<Pruning> {
+  if (repository.shared) return { repository, result: { verdicts: [], entries: [], stopped: { why: 'shared' }, branches: 0 }, counts: countsOf([]) };
   let taskIds: ReadonlyMap<number, string> = new Map();
   const result = await pruneRepository({
     facts: async () => {
@@ -124,10 +139,10 @@ export async function pruneOne(ctx: Reader, repository: Repository, { apply, lim
       return known.facts;
     },
     holds: holdsOf(ctx, repository.address),
-    push: (updates, options) => (ctx.pushRefs ?? pushRefs)(repository.address, updates, options),
+    push: (updates, options) => (ctx.pushRefs ?? pushRefs)(repository.address, updates, { ...options, main: repository.branch }),
     record: entry => recordOf(ctx, repository, taskIds, entry),
   }, { apply, limit, budget });
-  return { repository, result, counts: countsOf(result) };
+  return { repository, result, counts: countsOf(result.verdicts) };
 }
 
 /* A run over each repository of a company, or of every company. */

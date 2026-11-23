@@ -22,6 +22,8 @@ export type TakeInDeps = {
    stale: the candidate must take the turn branch in and be checked again. */
 export type Taken = { merge: string } | { already: true } | { problem: string; stale?: true };
 
+/* What may stand in the name and the address of an author: no line break, no angle bracket, no control character, not empty. */
+const WHO_TEXT = /^[^\p{C}<>]+$/u;
 const TURN = /^turn-\d+$/;
 const SHA1 = /^[0-9a-f]{40}$/;
 const unreadable = (what: string): Taken => ({ problem: `${what} could not be read, so nothing was taken in. Try again.` });
@@ -64,7 +66,8 @@ async function stateOf(input: TakeIn, holds: Holds): Promise<Ready> {
 const behind = (input: TakeIn): string => `take ${input.turn} into ${input.branch ?? "the task's branch"}, check it again, and report it again.`;
 
 /* Why the input is none this takes in, or null. */
-function refusedInput({ turn, turnHead, candidate }: TakeIn): Taken | null {
+function refusedInput({ turn, turnHead, candidate, who }: TakeIn): Taken | null {
+  if (!WHO_TEXT.test(who.name) || !WHO_TEXT.test(who.email)) return { problem: 'The author of the commits has a name or an address that cannot be written into a commit.' };
   if (!TURN.test(turn)) return { problem: `${JSON.stringify(turn)} is not a turn branch: work is taken into a turn branch alone.` };
   return [turnHead, candidate].every(sha => SHA1.test(sha)) ? null : { problem: 'A commit is not one git takes.' };
 }
