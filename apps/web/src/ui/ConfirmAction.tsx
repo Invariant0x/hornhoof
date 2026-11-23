@@ -112,6 +112,24 @@ function useEscapeDismiss(dismiss: () => void) {
   }, [dismiss]);
 }
 
+type SubmitDone = { ok: true } | { ok: false; err: unknown };
+
+async function runAction(onYes: () => unknown): Promise<SubmitDone> {
+  try {
+    await onYes();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, err };
+  }
+}
+
+function applySubmitResult(result: SubmitDone, live: boolean, close: () => void, fail: (err: unknown) => void, done: () => void) {
+  if (!live) return;
+  done();
+  if (result.ok) close();
+  else fail(result.err);
+}
+
 function useConfirmSubmit(onYes: () => unknown, live: RefObject<boolean>, busyNow: RefObject<boolean>, close: RefObject<() => void>) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
@@ -120,16 +138,9 @@ function useConfirmSubmit(onYes: () => unknown, live: RefObject<boolean>, busyNo
     busyNow.current = true;
     setBusy(true);
     setFailure(null);
-    try {
-      await onYes();
-      busyNow.current = false;
-      if (live.current) close.current();
-    } catch (err) {
-      busyNow.current = false;
-      if (live.current) setFailure(err);
-    } finally {
-      if (live.current) setBusy(false);
-    }
+    const result = await runAction(onYes);
+    busyNow.current = false;
+    applySubmitResult(result, live.current, () => close.current(), setFailure, () => setBusy(false));
   };
   return { busy, failure, run };
 }
@@ -194,7 +205,7 @@ export function ConfirmAction({ title, effect, warnings = [], final = false, yes
         {warnings.map((line, i) => <p key={i}>{line}</p>)}
         {final && <p data-final="">{t.confirm.final}</p>}
         {failure !== null && <div className="alert" role="alert"><span dir="auto">{errorText(t, failure)}</span></div>}
-        <div className="entry-actions">
+        <div className="entry-actions" role="group">
           <button ref={action} className={danger ? 'btn danger' : 'btn'} type="button" disabled={busy} aria-busy={busy || undefined} onClick={() => void run()}>
             <BusyLabel busy={busy} idle={yes} working={<><span className="spinner" aria-hidden="true" />{working ?? t.confirm.working}</>} />
           </button>

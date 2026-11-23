@@ -38,14 +38,21 @@ const startTarget = (sub: SubView | undefined, places: readonly string[] | null)
 const ownModels = (sub?: SubView): Model[] => (sub?.models ?? []).map(({ id, name }) => ({ id, name }));
 const isApi = (provider: string): provider is ApiProvider => (PROVIDERS as readonly string[]).includes(provider);
 
+const deptScopes = (t: Messages, d: Org['departments'][number]): Array<[string, string]> => [
+  [`department:${d.id}`, deptLabel(t, d)],
+  ...d.teams.map((team): [string, string] => [`team:${team.id}`, `${deptLabel(t, d)}, ${team.name}`]),
+];
+
+const orgScopes = (t: Messages, org: Org | null): Array<[string, string]> =>
+  org ? org.departments.flatMap(d => deptScopes(t, d)) : [];
+
 function targetLabel(t: Messages, org: Org | null, value: string): string {
-  if (value === 'any') return t.subs.serves.any;
-  if (value === 'orchestrator') return t.subs.serves.orchestrator;
-  const places = (org?.departments ?? []).flatMap(d => [
-    [`department:${d.id}`, deptLabel(t, d)],
-    ...d.teams.map(team => [`team:${team.id}`, `${deptLabel(t, d)}, ${team.name}`]),
+  const names = new Map<string, string>([
+    ['any', t.subs.serves.any],
+    ['orchestrator', t.subs.serves.orchestrator],
+    ...orgScopes(t, org),
   ]);
-  return places.find(([key]) => key === value)?.[1] ?? value;
+  return names.get(value) ?? value;
 }
 
 function apiEditLines(t: Messages, org: Org | null, sub: SubView, label: string, scope: string, initialScope: string): ReactNode[] {
@@ -82,8 +89,7 @@ function ScopeField({ value, places, onChange }: { value: string; places: readon
           {places === null && <option value="orchestrator">{t.subs.serves.orchestrator}</option>}
           {shown.map(d => (
             <optgroup key={d.id} label={deptLabel(t, d)}>
-              <option value={`department:${d.id}`}>{deptLabel(t, d)}</option>
-              {d.teams.map(team => <option key={team.id} value={`team:${team.id}`}>{`${deptLabel(t, d)}, ${team.name}`}</option>)}
+              {deptScopes(t, d).map(([option, text]) => <option key={option} value={option}>{text}</option>)}
             </optgroup>
           ))}
         </select>

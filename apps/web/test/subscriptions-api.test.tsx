@@ -174,7 +174,8 @@ describe('Subscriptions & API', () => {
 
   it('confirms target change on an existing API connection and saves model-only changes directly', async () => {
     const calls = lists({
-      'PATCH /api/subscriptions/s-router': [200, { subscription: { ...ROUTER, target: { kind: 'orchestrator', id: null } } }],
+      'GET /api/org': [200, ORG_WITH_TEAMS],
+      'PATCH /api/subscriptions/s-router': [200, { subscription: { ...ROUTER, target: { kind: 'team', id: 't1' } } }],
     });
     const user = userEvent.setup();
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
@@ -191,10 +192,10 @@ describe('Subscriptions & API', () => {
 
     await user.click(within(card).getByRole('button', { name: /^Edit / }));
     const again = within(card).getByRole('form', { name: /^Edit / });
-    await user.selectOptions(within(again).getByLabelText('Serves'), 'any');
+    await user.selectOptions(within(again).getByLabelText('Serves'), 'team:t1');
     await user.click(within(again).getByRole('button', { name: 'Save' }));
     const dialog = screen.getByRole('alertdialog', { name: 'Do you really want to update this API connection?' });
-    expect(dialog).toHaveAccessibleDescription('OpenRouter key ending WXYZ will serve Any department.');
+    expect(dialog).toHaveAccessibleDescription('OpenRouter key ending WXYZ will serve Marketing, Social.');
     await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(2));
   });

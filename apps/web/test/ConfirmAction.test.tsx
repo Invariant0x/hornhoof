@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -41,11 +41,11 @@ function Under({ onClose }: { onClose: () => void }) {
 
 async function open(props: Shown = {}, under?: () => void) {
   const user = userEvent.setup();
-  render(<Opener props={props} under={under} />);
+  const view = render(<Opener props={props} under={under} />);
   const opener = screen.getByRole('button', { name: 'Open' });
   opener.focus();
   await user.click(opener);
-  return { user, opener, dialog: screen.getByRole('alertdialog', { name: 'Do you really want to remove this employee?' }) };
+  return { user, opener, unmount: view.unmount, dialog: screen.getByRole('alertdialog', { name: 'Do you really want to remove this employee?' }) };
 }
 
 describe('the confirmation of a critical action', () => {
@@ -126,17 +126,28 @@ describe('the confirmation of a critical action', () => {
     const onYes = vi.fn(() => new Promise<void>(resolve => (finish = resolve)));
     const { user, dialog } = await open({ onYes, working: 'Removing…' });
     const action = screen.getByRole('button', { name: 'Remove' });
-    await user.click(action);
-    await user.click(action);
+    fireEvent.click(action);
+    fireEvent.click(action);
     expect(onYes).toHaveBeenCalledTimes(1);
-    expect(action).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Removing…' })).toBeDisabled();
     expect(action).toHaveAttribute('aria-busy', 'true');
-    expect(action).toHaveAccessibleName('Removing…');
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
     await user.keyboard('{Escape}');
     expect(dialog).toBeInTheDocument();
     finish();
     await vi.waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  });
+
+  it('does not call onClose when unmounted before a pending action settles', async () => {
+    let finish = () => {};
+    const onClose = vi.fn();
+    const onYes = vi.fn(() => new Promise<void>(resolve => (finish = resolve)));
+    const { user, unmount } = await open({ onYes, onClose });
+    await user.click(screen.getByRole('button', { name: 'Remove' }));
+    unmount();
+    finish();
+    await Promise.resolve();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('keeps a failure in the window with the buttons back', async () => {
