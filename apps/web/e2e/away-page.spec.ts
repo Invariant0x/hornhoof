@@ -85,7 +85,7 @@ const look = (page: Page) => page.evaluate(() => {
     return { size: style.fontSize, weight: style.fontWeight, line: style.lineHeight, color: style.color };
   };
   const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect().toJSON() as { x: number; y: number; width: number; height: number; right: number };
-  return { title: size('h1'), hint: size('main > p:not(.checking)'), checking: size('p.checking'), sign: box('.sign'), button: box('button'), card: box('main'), lang: document.documentElement.lang };
+  return { title: size('h1'), hint: size('main > p:not(.checking)'), checking: size('p.checking'), sign: box('.sign'), button: box('button'), buttonWeight: getComputedStyle(document.querySelector('button')!).fontWeight, card: box('main'), lang: document.documentElement.lang };
 });
 
 test('no server behind the front: the page says no connection in English, makes no outside request, and opens by itself', async ({ page }) => {
@@ -210,6 +210,7 @@ test('the page is the same in every language, scheme and width, wraps, and fits 
               expect(seen.hint).toMatchObject({ size: '14px', weight: '400' });
               expect(seen.checking.size).toBe('13px');
               expect(seen.sign).toMatchObject({ width: 48, height: 48 });
+              expect(seen.buttonWeight).toBe('600');
               expect(seen.button.height).toBeGreaterThanOrEqual(44);
               expect(seen.card.x).toBeGreaterThanOrEqual(0);
               expect(seen.card.right).toBeLessThanOrEqual(width);

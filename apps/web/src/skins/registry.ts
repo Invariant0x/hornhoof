@@ -38,7 +38,7 @@ export const BUILTIN_SKINS = [
       success: '#5FD08A', danger: '#FF6B6B', on_danger: '#2A0606', idle: '#2C3744', dot: 'rgba(140, 175, 205, .15)', glow: 'rgba(70, 224, 239, .10)',
       button: '#46E0EF', on_button: '#05222A', hud: 'rgba(23, 30, 39, .94)', shadow: 'rgba(0, 0, 0, .45)',
       provider_claude: '#F08A66', provider_kimi: '#5E9BFF', provider_glm: '#8D95FF', provider_antigravity: '#6DD58C',
-      on_attention: '#141A22', scrim: 'rgba(10, 20, 30, .35)', scrollbar_thumb: '#687A8F', scrollbar_track: '#1B232D',
+      on_attention: '#141A22', scrim: 'rgba(4, 8, 12, .64)', scrollbar_thumb: '#687A8F', scrollbar_track: '#1B232D',
     },
   },
   /* Day light with text and lines held to their contrast on every surface. */
