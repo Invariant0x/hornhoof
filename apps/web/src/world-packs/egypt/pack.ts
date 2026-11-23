@@ -371,6 +371,7 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
     shoreEdge: 'ground/edges/river_bank.png',
     liquid: { bed: 'ground/river_bed.png', ripples: 'ground/river_ripples.png', surface: 'ground/river.png', baseColor: '#68A1BA' },
     pathStrip: 'roads/trail.png',
+    roads: { trail: 'roads/trail.png', dirt: 'roads/dirt.png', brick: 'roads/brick.png', stone: 'roads/stone.png' },
   },
   paths: {
     color: '#D9B57A',

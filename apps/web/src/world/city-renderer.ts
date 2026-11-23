@@ -41,6 +41,8 @@ export type CityArtContext = Readonly<{
   library: WorldArtLibrary;
   pool: DisplayRunPool;
   upgradingHouseIds?: ReadonlySet<string>;
+  /* Streets are painted on the ground (road-strips.ts): draw only the bridges. */
+  paintedRoads?: boolean;
 }>;
 
 const DEPARTMENT_BANNER_COLOR = '#5CA6E6';
@@ -871,9 +873,11 @@ export function renderCityToPixi(
     );
   };
 
-  /* 1. Roads and bridges (viewport-culled, fill-only without heavy per-tile stroke triangulation). */
+  /* 1. Roads and bridges (viewport-culled, fill-only without heavy per-tile stroke triangulation); with painted
+     streets on the ground only the bridges. */
   for (const road of city.roads.values()) {
     if (!tileInWindow(road.col, road.row)) continue;
+    if (art?.paintedRoads && !road.bridge) continue;
     const pts = tileDiamondVertices(road.col, road.row, tileW, tileH);
     const style = road.bridge
       ? { fill: 0x9b6d3f, stroke: 0x593a1d, alpha: 0.96 }
