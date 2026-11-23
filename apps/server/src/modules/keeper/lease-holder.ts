@@ -56,6 +56,7 @@ export class LeaseHolder {
   /* What the last look at the fences found. Null until the first look: nothing is known to hold yet. */
   private problems: string[] | null = null;
   private prunedAt: number | null = null;
+  private pruning = false;
   private othersHold = false;
   /* The last write of the lease failed for a full disk. */
   private diskFull = false;
@@ -127,7 +128,7 @@ export class LeaseHolder {
     });
     this.last = now;
     await this.take(lease, step);
-    await this.prune(lease, now);
+    this.startPrune(lease, now);
   }
 
   /* How late a tick may come now: without limit where no other machine could lead, else by the disk as measured. */
@@ -182,11 +183,13 @@ export class LeaseHolder {
     const held = this.held!;
     const renewed = await lease.renew(held.term, step.kind, new Date(step.sent.wall + LEASE_MS), step.endSessions, flag).catch((err: unknown) => {
       this.diskFull = isDiskFull(err);
+      this.sayOnce('renew', `Could not renew the lease: ${messageOf(err)}.`);
       return false;
     });
     if (!renewed) return;
     this.held = { term: held.term, kind: step.kind, sent: step.sent };
     this.diskFull = false;
+    this.sayOnce('renew', '');
   }
 
   private async fence(lease: LeaseStore, why: string): Promise<void> {
@@ -199,16 +202,18 @@ export class LeaseHolder {
     });
   }
 
-  private async prune(lease: LeaseStore, now: Clocks): Promise<void> {
+  /* Runs journal pruning asynchronously on the background connection so slow pruning never blocks lease ticks. */
+  private startPrune(lease: LeaseStore, now: Clocks): void {
     this.prunedAt ??= now.mono;
-    if (this.maintenance || now.mono - this.prunedAt < (this.opts.pruneEveryMs ?? PRUNE_EVERY_MS)) return;
+    if (this.maintenance || this.pruning || now.mono - this.prunedAt < (this.opts.pruneEveryMs ?? PRUNE_EVERY_MS)) return;
     this.prunedAt = now.mono;
-    try {
-      await lease.prune();
-      this.sayOnce('prune', '');
-    } catch (err) {
-      this.sayOnce('prune', `Could not prune the journal: ${messageOf(err)}.`);
-    }
+    this.pruning = true;
+    void lease.prune().then(
+      () => this.sayOnce('prune', ''),
+      (err: unknown) => this.sayOnce('prune', `Could not prune the journal: ${messageOf(err)}.`),
+    ).finally(() => {
+      this.pruning = false;
+    });
   }
 
   /* Says a line when it differs from the last of its kind; an empty line only forgets that one. */

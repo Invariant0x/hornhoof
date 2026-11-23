@@ -118,6 +118,17 @@ async function sendWaiting(ctx: Ctx): Promise<void> {
   }
 }
 
+/* Runs independent sweeps with a cap on concurrent database pool use so a minute tick never starves live requests. */
+export async function runBounded(work: readonly (() => Promise<unknown>)[], limit: number): Promise<void> {
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < work.length) await work[next++]!();
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), work.length) }, worker));
+}
+
+const MINUTE_ROUND_CONCURRENCY = 3;
+
 /* What Hornhoof does every minute: due rounds, turns that task moves kept and nobody queued, turns left waiting though
    their agent is free, department turns their release tags close and turns that hold nothing for a release, files of turns closed a month ago, the old history of node connections, test run times, and Codex plans
    to move. */
@@ -125,22 +136,22 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
   await checkExternalWaits(ctx, now).catch(failed('ending external task waits failed'));
   await checkWaitHealth(ctx, now).catch(failed('checking task waits failed'));
   await checkOperatorHealth(ctx, now).catch(failed('checking program operator cases failed'));
-  await Promise.all([
-    timerTick(ctx, now, failed('timer round failed')).catch(failed('timer tick failed')),
-    wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
-    retryCallBatches(ctx).catch(failed('recovering one-shot call batches failed')),
-    reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
-    releaseRound(ctx).catch(failed('closing turns by the tags of their releases failed')),
-    closeIdleTurns(ctx).catch(failed('closing turns that hold nothing for a release failed')),
-    sendWaiting(ctx).catch(failed('sending waiting turns failed')),
-    dropOldFiles(ctx, now).catch(failed('removing the files of old turns failed')),
-    dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),
-    checkTestTimes(ctx).catch(failed('checking test run times failed')),
-    harnessRound(ctx, now).catch(failed('getting test harnesses to the machines failed')),
-    moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
-    tellOfMachinesAway(ctx, now).catch(failed('telling of machines away failed')),
-    tellOfMachinesLow(ctx).catch(failed('telling of machines short of disk space failed')),
-  ]);
+  await runBounded([
+    () => timerTick(ctx, now, failed('timer round failed')).catch(failed('timer tick failed')),
+    () => wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
+    () => retryCallBatches(ctx).catch(failed('recovering one-shot call batches failed')),
+    () => reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
+    () => releaseRound(ctx).catch(failed('closing turns by the tags of their releases failed')),
+    () => closeIdleTurns(ctx).catch(failed('closing turns that hold nothing for a release failed')),
+    () => sendWaiting(ctx).catch(failed('sending waiting turns failed')),
+    () => dropOldFiles(ctx, now).catch(failed('removing the files of old turns failed')),
+    () => dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),
+    () => checkTestTimes(ctx).catch(failed('checking test run times failed')),
+    () => harnessRound(ctx, now).catch(failed('getting test harnesses to the machines failed')),
+    () => moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
+    () => tellOfMachinesAway(ctx, now).catch(failed('telling of machines away failed')),
+    () => tellOfMachinesLow(ctx).catch(failed('telling of machines short of disk space failed')),
+  ], MINUTE_ROUND_CONCURRENCY);
 }
 
 /* What is looked at as the app starts leading, without waiting for the first minute round. */
