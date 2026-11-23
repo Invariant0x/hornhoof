@@ -44,6 +44,13 @@ export async function shippedVoice(id: string): Promise<ThemeVoice | null> {
   return pack && voice ? { label: pack.label, address: voice.samples, salutations: voice.salutations, names: pack.names } : null;
 }
 
+/* A file of an art folder an installed theme carries: a picture, or a picture's passport, the .json of the same name
+   beside it. The art index Hornhoof writes itself, and an artist's loose notes or data the server refuses. */
+function carriedArt(dir: string, name: string): boolean {
+  if (name.endsWith('.png')) return true;
+  return name.endsWith('.json') && name !== 'art-index.json' && existsSync(join(dir, name.replace(/\.json$/, '.png')));
+}
+
 /* Every picture and passport of an art folder, under world/art/, as the art check reads a folder; Hornhoof writes the
    art index itself when the theme is installed. */
 function artFiles(folder: string): [string, Buffer][] {
@@ -52,7 +59,7 @@ function artFiles(folder: string): [string, Buffer][] {
     for (const name of readdirSync(dir).sort()) {
       const path = join(dir, name);
       if (statSync(path).isDirectory()) walk(path);
-      else if ((name.endsWith('.png') || name.endsWith('.json')) && name !== 'art-index.json') found.push([`world/art/${relative(folder, path).split(sep).join('/')}`, readFileSync(path)]);
+      else if (carriedArt(dir, name)) found.push([`world/art/${relative(folder, path).split(sep).join('/')}`, readFileSync(path)]);
     }
   };
   walk(folder);
