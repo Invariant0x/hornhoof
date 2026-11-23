@@ -868,6 +868,8 @@ export const jobs = pgTable(
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
   t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status),
+    /* What the quiet check of a department asks of its conversations (whether one runs, when the last one ended), answered from the index alone. */
+    index('jobs_conversation_activity').on(t.agentId, t.companyId, t.status, t.startedAt, t.finishedAt).where(sql`${t.kind} = 'conversation'`),
     check('jobs_builtin_machine', sql`builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'`),
   ],
 );
@@ -998,6 +1000,8 @@ export const agentEvents = pgTable(
     index('agent_events_failure_case').on(sql`(data->>'failureCase')`).where(sql`data->>'failureCase' is not null`),
     index('agent_events_report_window').on(t.agentId, t.createdAt).where(sql`data->>'report' is not null or data->>'from' = 'agent'`),
     index('agent_events_operations_pending').on(sql`(data->>'operationsPending')`).where(sql`data->>'operationsPending' is not null`),
+    /* The fallback turn an agent has for one of its unheard deliveries: the check of unheard words asks for it once a minute for each. */
+    index('agent_events_operator_fallback').on(t.agentId, sql`(data->>'operatorFallback')`).where(sql`${t.kind} = 'typed' and data->>'operatorFallback' is not null`),
     uniqueIndex('agent_events_operator_evidence').on(t.companyId, sql`(data->>'operatorEvidenceId')`).where(sql`data->>'operatorEvidenceId' is not null`),
     uniqueIndex('agent_events_operator_ordinal').on(t.companyId, sql`(data->'operatorEvidence'->>'instance')`, sql`(data->'operatorEvidence'->>'ordinal')`).where(sql`data->>'operatorEvidenceId' is not null`),
     index('agent_events_operator_instance').on(t.agentId, sql`(data->'operatorEvidence'->>'instance')`).where(sql`data->>'operatorEvidenceId' is not null`),
