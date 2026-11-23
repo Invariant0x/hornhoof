@@ -535,6 +535,19 @@ describe('install.sh', () => {
       expect(existsSync(pc.target)).toBe(true);
       expect(existsSync(pc.other)).toBe(true);
     });
+
+    it('refuses a server folder whose .env or compose.yaml is a symlink', () => {
+      const pc = installed();
+      const realEnv = join(pc.target, '.env.real');
+      writeFileSync(realEnv, readFileSync(join(pc.target, '.env'), 'utf8'));
+      rmSync(join(pc.target, '.env'));
+      symlinkSync(realEnv, join(pc.target, '.env'));
+      const r = pc.remove(['--name', 'sample'], { HORNHOOF_SERVER_DIR: pc.target });
+      expect(r.code).toBe(1);
+      expect(r.out).toContain('No Hornhoof server installation was found');
+      expect(r.calls.some(call => call.includes('pg_dump') || call.includes('down --volumes'))).toBe(false);
+      expect(existsSync(pc.target)).toBe(true);
+    });
   });
 
   it('removes only this server\'s nodes on --uninstall when another company has nodes here too', () => {

@@ -387,7 +387,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const machine = await ownMachine(me, id);
     await refuseLeader(db, config, [id]);
     reply.header('cache-control', 'no-store');
-    return removalWarnings(db, config, machine);
+    return removalWarnings(ctx, me, machine);
   });
 
   app.post('/api/machines/:id/disconnect', async (req, reply) => {

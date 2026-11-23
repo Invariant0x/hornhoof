@@ -891,6 +891,25 @@ export type BackupsView = {
 };
 /* What a restore to a backup's time undoes. */
 export type RestoreWarning = { machines: { name: string; owner: string }[]; people: string[] };
+/* Unsaved work a machine's node reported keeping because it cannot be restored. agent and path are null when the folder
+   belongs to another person's private assistant. */
+export type KeptWork = {
+  agent: string | null;
+  agentName: string | null;
+  path: string | null;
+  task: number | null;
+  bytes: number;
+  why: 'uncommitted' | 'unpushed' | 'ignored';
+  ignored?: string[];
+};
+/* What removing a machine puts at risk, returned by GET /api/machines/:id/removal before the person confirms. */
+export type RemovalWarnings = {
+  lastReplica: boolean;
+  onlyBackup: boolean;
+  uncollectedData: boolean;
+  kept: KeptWork[] | null;
+  keptAt: string | null;
+};
 /* A server set up anew that was given a recovery file: the backups sent to it so far. */
 export type RecoveryView = { company: string; link: string | null; bundles: { id: string; dumpedAt: string; reason: string; size: number; from: string }[]; restore: RestoreStatus | null };
 

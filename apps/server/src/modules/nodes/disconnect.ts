@@ -1,5 +1,8 @@
+import { DISK_KEPT_MAX, type DiskReport } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
+import { knowsAgentId, viewerOf } from '../../auth/agent-view.js';
+import type { Person } from '../../auth/session.js';
 import type { Config } from '../../config.js';
 import type { Db } from '../../db/client.js';
 import { agents, jobs, machines, nodes, testParts } from '../../db/schema.js';
@@ -9,7 +12,7 @@ import { afterLeave, cutReplication, holdsSecrets } from '../copies/scope.js';
 import { ApiError } from '../../errors.js';
 import { revokeMachineRows, visitorKeyOf } from '../network/join.js';
 import { findThisMachine } from '../network/store.js';
-import { nodeIdentity } from './hub.js';
+import { builtinOf, nodeIdentity, type NodeIdentity, type SaidLoad } from './hub.js';
 import { loseParts } from '../testruns/runs.js';
 import { failOpenJobs } from './job-failures.js';
 import { isServerInstall, liveNode, settlePlans } from './nodes.js';
@@ -25,18 +28,89 @@ export async function refuseLeader(db: Db, config: Config, machineIds: string[])
 
 type CopyHolder = Pick<typeof machines.$inferSelect, 'role' | 'copyState' | 'copyAt' | 'machineKey'>;
 
-/* A replica in its first setup is not a spare copy yet. An old server can still hold its database before it reports a replica. */
-const hasReplica = (row: CopyHolder): boolean => row.role === 'data' && (row.copyState === 'ready' || row.copyAt !== null || isServerInstall(row.machineKey));
+/* A machine that may hold a company database copy: a ready or completed replica, or an old server install that still has
+   role data. */
+const holdsCopy = (row: CopyHolder): boolean =>
+  row.role === 'data' && (row.copyState === 'ready' || row.copyAt !== null || isServerInstall(row.machineKey));
 
-export async function removalWarnings(db: Db, config: Config, machine: typeof machines.$inferSelect) {
+/* Another machine that holds an active or completed replica: neither an unreplicated former server nor a stopped replica
+   counts as a live spare copy. */
+const hasSpareReplica = (row: CopyHolder): boolean =>
+  row.role === 'data' && (row.copyState === 'ready' || (row.copyAt !== null && row.copyState !== 'stopped'));
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export type KeptWorkWarning = {
+  agent: string | null;
+  agentName: string | null;
+  path: string | null;
+  task: number | null;
+  bytes: number;
+  why: 'uncommitted' | 'unpushed' | 'ignored';
+  ignored?: string[];
+};
+
+type RawKept = NonNullable<DiskReport['kept']>[number];
+type KeptLoad = SaidLoad & { disk: DiskReport & { kept: NonNullable<DiskReport['kept']> } };
+
+const canonicalAgent = (id: string): string => (UUID.test(id) ? id.toLowerCase() : id);
+const hasKept = (load: SaidLoad | null | undefined): load is KeptLoad => Boolean(load?.disk?.kept);
+
+async function keptAgentNames(
+  db: Db,
+  companyId: string,
+  viewer: Awaited<ReturnType<typeof viewerOf>>,
+  raw: RawKept[],
+): Promise<Map<string, string>> {
+  const uuidIds = [...new Set(raw.map(entry => canonicalAgent(entry.agent)))].filter(id => UUID.test(id) && knowsAgentId(viewer, id));
+  if (!uuidIds.length) return new Map();
+  const rows = await db.select({ id: agents.id, name: agents.name }).from(agents).where(and(eq(agents.companyId, companyId), inArray(agents.id, uuidIds)));
+  return new Map(rows.map(row => [row.id, row.name]));
+}
+
+function toKeptWarning(entry: RawKept, apart: ReadonlySet<string>, names: Map<string, string>): KeptWorkWarning {
+  const key = canonicalAgent(entry.agent);
+  if (apart.has(key)) return { agent: null, agentName: null, path: null, task: null, bytes: entry.bytes, why: entry.why };
+  return {
+    agent: entry.agent,
+    agentName: names.get(key) ?? null,
+    path: entry.path,
+    task: entry.task,
+    bytes: entry.bytes,
+    why: entry.why,
+    ...(entry.ignored?.length ? { ignored: entry.ignored } : {}),
+  };
+}
+
+async function keptWarnings(
+  ctx: Pick<Ctx, 'db' | 'hub'>,
+  me: Person,
+  machine: Pick<typeof machines.$inferSelect, 'id' | 'companyId' | 'networkId'>,
+): Promise<{ kept: KeptWorkWarning[] | null; keptAt: string | null }> {
+  const nodeRows = await ctx.db.select(only(nodes, 'id')).from(nodes).where(and(eq(nodes.machineId, machine.id), liveNode));
+  const identities: NodeIdentity[] = [...nodeRows.map(n => nodeIdentity(n.id)), ...(machine.networkId ? [builtinOf(machine.networkId)] : [])];
+  const withKept = identities.map(id => ctx.hub.loadOf(id)).filter(hasKept);
+  if (withKept.length === 0) return { kept: null, keptAt: null };
+  const keptAt = new Date(Math.max(...withKept.map(load => load.at))).toISOString();
+  const raw = withKept.flatMap(load => load.disk.kept).toSorted((a, b) => b.bytes - a.bytes).slice(0, DISK_KEPT_MAX);
+  const viewer = await viewerOf(ctx.db, me);
+  const names = await keptAgentNames(ctx.db, machine.companyId, viewer, raw);
+  return { kept: raw.map(entry => toKeptWarning(entry, viewer.apart, names)), keptAt };
+}
+
+export async function removalWarnings(ctx: Pick<Ctx, 'db' | 'config' | 'hub'>, me: Person, machine: typeof machines.$inferSelect) {
   const { networkId, role, copyState, copyAt, machineKey, heldBackups } = machines;
-  const others = await db.select({ networkId, role, copyState, copyAt, machineKey, heldBackups }).from(machines)
-    .where(and(eq(machines.companyId, machine.companyId), isNull(machines.revokedAt), ne(machines.id, machine.id)));
+  const [others, kept] = await Promise.all([
+    ctx.db.select({ networkId, role, copyState, copyAt, machineKey, heldBackups }).from(machines)
+      .where(and(eq(machines.companyId, machine.companyId), isNull(machines.revokedAt), ne(machines.id, machine.id))),
+    keptWarnings(ctx, me, machine),
+  ]);
   const otherBackups = new Set(others.flatMap(row => row.heldBackups));
   return {
-    lastReplica: hasReplica(machine) && !others.some(row => row.networkId !== config.machineId && hasReplica(row)),
+    lastReplica: holdsCopy(machine) && !others.some(row => row.networkId !== ctx.config.machineId && hasSpareReplica(row)),
     onlyBackup: machine.heldBackups.some(id => !otherBackups.has(id)),
     uncollectedData: machine.uploadState === 'waiting',
+    ...kept,
   };
 }
 

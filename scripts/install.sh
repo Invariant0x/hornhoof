@@ -1259,8 +1259,9 @@ remove_core() {
 }
 
 is_server_folder() {
-  [ ! -L "$1" ] && [ -f "$1/compose.yaml" ] && [ -n "$(value_in "$1/.env" HORNHOOF_SECRET)" ] &&
-    [ -z "$(value_in "$1/.env" COMPOSE_FILE)" ] && [ "$(value_in "$1/.env" HORNHOOF_ROLE)" != worker ]
+  [ ! -L "$1" ] && [ -f "$1/compose.yaml" ] && [ ! -L "$1/compose.yaml" ] && [ -f "$1/.env" ] && [ ! -L "$1/.env" ] &&
+    [ -n "$(value_in "$1/.env" HORNHOOF_SECRET)" ] && [ -z "$(value_in "$1/.env" COMPOSE_FILE)" ] &&
+    [ "$(value_in "$1/.env" HORNHOOF_ROLE)" != worker ]
 }
 
 # Start only the existing database, then wait for it to answer, including with Compose 2.20.

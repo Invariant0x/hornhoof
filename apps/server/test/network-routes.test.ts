@@ -1,19 +1,21 @@
-import { generateKeyPairSync, randomUUID, X509Certificate } from 'node:crypto';
+import { createHmac, generateKeyPairSync, randomUUID, X509Certificate } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { DiskReport } from '@hornhoof/protocol';
 import * as x509 from '@peculiar/x509';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { authority, certificates, companies, departments, machines, peerSecrets, people } from '../src/db/schema.js';
+import { agents, assistants, authority, certificates, companies, departments, machines, nodes, peerSecrets, people } from '../src/db/schema.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { UPLOAD_SPARE } from '../src/modules/keeper/uploads.js';
 import { saveLink } from '../src/modules/link/link.js';
 import { LEFT_SLOTS_FRESH_MS } from '../src/modules/copies/left-slots.js';
 import { certFacts, issuedBy } from '../src/modules/network/authority.js';
+import { builtinOf, nodeIdentity } from '../src/modules/nodes/hub.js';
 import { fakeRelay } from './fake-relay.js';
-import { as, invitePerson, setUpCompany, testApp, until } from './helpers.js';
+import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 
 const MACHINE_ID = 'a1b2c3d4'.repeat(4);
 const VIA = 'x-hornhoof-via';
@@ -133,6 +135,9 @@ describe('the network routes the keeper calls', () => {
     const c = await company();
     const leader = await c.joined('data', newKey(), { hostname: 'current-server', networkId: MACHINE_ID });
     expect((await c.certificate(newKey())).statusCode).toBe(200);
+    const preview = await c.app.inject({ url: `/api/machines/${leader.id}/removal`, ...as(c.ceo) });
+    expect(preview.statusCode).toBe(409);
+    expect(preview.json()).toMatchObject({ error: { reason: 'leader' } });
     const res = await c.app.inject({ method: 'POST', url: `/api/machines/${leader.id}/disconnect`, ...as(c.ceo) });
     expect(res.statusCode).toBe(409);
     expect(res.json()).toMatchObject({ error: { reason: 'leader' } });
@@ -145,16 +150,100 @@ describe('the network routes the keeper calls', () => {
     const backup = randomUUID();
     const replica = await c.joined('data', newKey(), { copyState: 'ready', heldBackups: [backup] });
     const unfinished = await c.joined('data', newKey(), { copyState: 'making' });
-    const warning = (token = c.ceo) => c.app.inject({ url: `/api/machines/${replica.id}/removal`, ...as(token) });
+    const former = await c.joined('data', newKey(), { machineKey: `server:${'e'.repeat(32)}`, hostname: 'former-server', networkId: 'e'.repeat(32) });
+    const stopped = await c.joined('data', newKey(), { copyState: 'stopped', copyAt: new Date('2026-11-20T00:00:00.000Z') });
+    const warning = (id = replica.id, token = c.ceo) => c.app.inject({ url: `/api/machines/${id}/removal`, ...as(token) });
     const [department] = await c.db.insert(departments).values({ companyId: c.companyId, name: 'Operations', roleCode: 'COO' }).returning();
     const outsider = await invitePerson(c.app, c.ceo, { name: 'Taylor', email: 'taylor@example.test', access: { departments: [department!.id] } });
-    expect((await warning(outsider)).statusCode).toBe(403);
-    expect((await warning()).json()).toEqual({ lastReplica: true, onlyBackup: true, uncollectedData: false });
+    expect((await warning(replica.id, outsider)).statusCode).toBe(403);
+    /* Neither an unreplicated former server nor a stopped replica counts as a live spare copy for another replica. */
+    expect((await warning()).json()).toEqual({ lastReplica: true, onlyBackup: true, uncollectedData: false, kept: null, keptAt: null });
+    /* The former server is not the last copy while the ready replica exists, until that replica leaves. */
+    expect((await warning(former.id)).json()).toEqual({ lastReplica: false, onlyBackup: false, uncollectedData: false, kept: null, keptAt: null });
     await c.db.update(machines).set({ copyState: 'ready', heldBackups: [backup] }).where(eq(machines.id, unfinished.id));
-    expect((await warning()).json()).toEqual({ lastReplica: false, onlyBackup: false, uncollectedData: false });
+    expect((await warning()).json()).toEqual({ lastReplica: false, onlyBackup: false, uncollectedData: false, kept: null, keptAt: null });
     await c.db.update(machines).set({ role: 'worker', uploadState: 'waiting' }).where(eq(machines.id, replica.id));
-    expect((await warning()).json()).toEqual({ lastReplica: false, onlyBackup: false, uncollectedData: true });
-    expect((await c.serverRows()).map(row => row.id)).toContain(replica.id);
+    expect((await warning()).json()).toEqual({ lastReplica: false, onlyBackup: false, uncollectedData: true, kept: null, keptAt: null });
+    await c.db.update(machines).set({ role: 'worker' }).where(eq(machines.id, unfinished.id));
+    expect((await warning(former.id)).json()).toEqual({ lastReplica: true, onlyBackup: false, uncollectedData: false, kept: null, keptAt: null });
+    expect((await c.serverRows()).map(row => row.id)).toEqual(expect.arrayContaining([replica.id, former.id, stopped.id]));
+  });
+
+  it("reports kept work and timestamp from connected nodes and hides another person's private assistant", async () => {
+    const NODE_KEY = 'removal-kept-node-key-0123456789abcdef';
+    const c = await company({ NODE_KEY, NODE_PING_MS: '2147483647' });
+    onTestFinished(() => c.app.close());
+    const url = await listen(c.app);
+    const pat = await invitePerson(c.app, c.ceo, { name: 'Pat', email: 'pat@example.test', access: { whole: true } });
+    const [patRow] = await c.db.select().from(people).where(eq(people.email, 'pat@example.test'));
+    const [department] = await c.db.insert(departments).values({ companyId: c.companyId, name: 'Engineering', roleCode: 'ENG' }).returning();
+    const [casey] = await c.db.insert(agents).values({ companyId: c.companyId, name: 'Casey', kind: 'worker', model: '', departmentId: department!.id }).returning();
+    const [assistantPerson] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Pat Helper', email: null, status: 'active', isAgent: true, assistantOf: patRow!.id, scopeKind: 'company' }).returning();
+    const [assistantAgent] = await c.db.insert(agents).values({ companyId: c.companyId, name: 'Secret Assistant', kind: 'assistant', model: '' }).returning();
+    await c.db.insert(assistants).values({ personId: assistantPerson!.id, companyId: c.companyId, program: 'other', agentId: assistantAgent!.id });
+
+    const connected = (await c.app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(c.ceo) })).json();
+    const code = (connected.command as string).split('--join ')[1];
+    const joined = (await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'linux-kept-0001', hostname: 'worker-kept', os: 'linux', arch: 'x86_64' } })).json();
+    const machineId = joined.machine.id as string;
+    const peerNetId = 'c'.repeat(32);
+    await c.db.update(machines).set({ networkId: peerNetId, role: 'worker' }).where(eq(machines.id, machineId));
+    const [subNodeRow] = await c.db.select().from(nodes).where(eq(nodes.machineId, machineId));
+
+    /* Offline machine: no kept measurement yet. */
+    expect((await c.app.inject({ url: `/api/machines/${machineId}/removal`, ...as(c.ceo) })).json()).toMatchObject({ kept: null, keptAt: null });
+
+    const GB = 1e9;
+    const baseDisk: DiskReport = { total: 500 * GB, free: 200 * GB, threshold: 50 * GB, parts: {}, low: null, cleaned: [] };
+    const loadOf = (disk: DiskReport) => ({ type: 'load' as const, cpus: 4, load: 1, memFree: 4 * GB, memTotal: 8 * GB, tests: 0, jobs: 0, disk });
+
+    const subNode = await connectNode(url, joined.nodes[0].key as string);
+    onTestFinished(() => subNode.close());
+    subNode.send({ type: 'hello', version: '0.41.0', loggedIn: true, running: [], load: loadOf({ ...baseDisk, kept: [] }) });
+    await until(() => Boolean(c.app.ctx.hub.loadOf(nodeIdentity(subNodeRow!.id))?.disk?.kept));
+
+    const emptyPreview = (await c.app.inject({ url: `/api/machines/${machineId}/removal`, ...as(c.ceo) })).json();
+    expect(emptyPreview.kept).toEqual([]);
+    expect(typeof emptyPreview.keptAt).toBe('string');
+
+    /* Subscription node reports an employee worktree and a non-UUID folder; built-in node reports Pat's private assistant. */
+    subNode.send(loadOf({
+      ...baseDisk,
+      kept: [
+        { part: 'workingCopies', agent: casey!.id, path: 'repo-task-42', task: 42, bytes: 3 * GB, why: 'uncommitted' },
+        { part: 'workingCopies', agent: 'scratch-folder', path: 'draft', task: null, bytes: 1 * GB, why: 'unpushed' },
+      ],
+    }));
+    const builtinKey = `builtin.${peerNetId}.${createHmac('sha256', NODE_KEY).update(`hornhoof builtin node ${peerNetId}`).digest('hex')}`;
+    const builtinNode = await connectNode(url, builtinKey);
+    onTestFinished(() => builtinNode.close());
+    builtinNode.send({
+      type: 'hello', version: '0.41.0', loggedIn: true, running: [],
+      load: loadOf({
+        ...baseDisk,
+        kept: [{ part: 'workingCopies', agent: assistantAgent!.id, path: 'private-notes', task: 77, bytes: 5 * GB, why: 'uncommitted' }],
+      }),
+    });
+    await until(() =>
+      (c.app.ctx.hub.loadOf(nodeIdentity(subNodeRow!.id))?.disk?.kept?.length ?? 0) === 2
+      && (c.app.ctx.hub.loadOf(builtinOf(peerNetId))?.disk?.kept?.length ?? 0) === 1,
+    );
+
+    const ceoView = (await c.app.inject({ url: `/api/machines/${machineId}/removal`, ...as(c.ceo) })).json();
+    expect(ceoView.kept).toEqual([
+      { agent: null, agentName: null, path: null, task: null, bytes: 5 * GB, why: 'uncommitted' },
+      { agent: casey!.id, agentName: 'Casey', path: 'repo-task-42', task: 42, bytes: 3 * GB, why: 'uncommitted' },
+      { agent: 'scratch-folder', agentName: null, path: 'draft', task: null, bytes: 1 * GB, why: 'unpushed' },
+    ]);
+    const expectedAt = new Date(Math.max(
+      c.app.ctx.hub.loadOf(nodeIdentity(subNodeRow!.id))!.at,
+      c.app.ctx.hub.loadOf(builtinOf(peerNetId))!.at,
+    )).toISOString();
+    expect(ceoView.keptAt).toBe(expectedAt);
+
+    /* Pat owns the private assistant and sees its name and path. */
+    const patView = (await c.app.inject({ url: `/api/machines/${machineId}/removal`, ...as(pat) })).json();
+    expect(patView.kept[0]).toEqual({ agent: assistantAgent!.id, agentName: 'Secret Assistant', path: 'private-notes', task: 77, bytes: 5 * GB, why: 'uncommitted' });
   });
 
   it("refuses to disable the leader's person", async () => {
