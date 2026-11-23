@@ -114,6 +114,23 @@ describe('Residents face where they walk on screen (#1983)', () => {
     }
     expect(checked, 'walkers with a step ahead').toBeGreaterThan(3);
   });
+
+  it('keeps the face of its last step while it stands at the end of its route, not the camera', () => {
+    const fresh = createResidentSimulation(EGYPT_WORLD_PACK, synced.city, live);
+    const r = fresh.residents.find(x => x.liveState === 'working' && x.archetype === 'builder')!;
+    Object.assign(r, { col: 60, row: 60, path: [{ col: 60, row: 57 }], pathIndex: 0, actionTimer: 0, facing: 'S' });
+    for (let i = 0; i < 100 && r.pathIndex < 1; i++) stepResidentSimulation(fresh, 0.1);
+    const walked = r.facing;
+    expect(gap(BEARING[walked]!, screenBearing(0, -1)), `walked up the row axis, faces ${walked}`).toBeLessThanOrEqual(22.5);
+    let stood = 0;
+    for (let i = 0; i < 8; i++) {
+      stepResidentSimulation(fresh, 0.1);
+      if (r.actionTimer <= 0) continue;
+      expect(r.facing, `standing ${i}`).toBe(walked);
+      stood += 1;
+    }
+    expect(stood, 'it pauses at the end of its route').toBeGreaterThan(3);
+  });
 });
 
 /* #1983, Ivan: the feet never slide. In one walk cycle (frames / fps seconds) a resident covers exactly the stride its
