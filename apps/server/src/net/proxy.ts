@@ -1,6 +1,7 @@
 import http from 'node:http';
 import net from 'node:net';
 import { pipeline, type Duplex } from 'node:stream';
+import { awayEveryS, awayPage, type Away } from './away-page.js';
 
 export type Target = { host: string; port: number };
 export type Refusal = { status: number; headers: Record<string, string>; body: string };
@@ -365,19 +366,39 @@ export function firstForwarded(req: http.IncomingMessage): string {
   return String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
 }
 
+/* Who asks: a program for data under /api or /mcp, a browser for a page, any other client for plain words. A page is only
+   for a browser that says it takes one, so a program that reads the words stays with them. */
+export type Asks = 'data' | 'page' | 'words';
+export function asksFor(req: http.IncomingMessage): Asks {
+  if (UNDER_API_OR_MCP.test(String(req.url))) return 'data';
+  const reads = req.method === 'GET' || req.method === 'HEAD';
+  return reads && String(req.headers.accept ?? '').includes('text/html') ? 'page' : 'words';
+}
+
+/* What a hop answers when no server is behind it, to whoever asks: JSON for a program, the page of away-page.ts for a
+   browser, the words for the rest. Never 404: the status says the server is missing, so the app tells it from a page that
+   is. */
+export function awayAnswer(req: http.IncomingMessage, answer: { status: number; kind: Away; retryS: number; json: string; text: string }): Refusal {
+  const headers = { 'Retry-After': String(answer.retryS) };
+  switch (asksFor(req)) {
+    case 'data': return { status: answer.status, headers: { ...headers, 'Content-Type': 'application/json' }, body: answer.json };
+    case 'page': return { status: answer.status, headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', Vary: 'Accept-Language' }, body: awayPage(answer.kind, String(req.headers['accept-language'] ?? '')) };
+    case 'words': return { status: answer.status, headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }, body: answer.text };
+  }
+}
+
 export function startingAnswer(req: http.IncomingMessage): Refusal {
-  const headers = { 'Retry-After': '5' };
-  return UNDER_API_OR_MCP.test(String(req.url))
-    ? { status: 502, headers: { ...headers, 'Content-Type': 'application/json' }, body: STARTING_JSON }
-    : { status: 502, headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }, body: STARTING_TEXT };
+  return awayAnswer(req, { status: 502, kind: 'lost', retryS: 5, json: STARTING_JSON, text: STARTING_TEXT });
 }
 
 /* What a hop answers once it held a request for as long as it holds one. */
 export function heldAnswer(req: http.IncomingMessage): Refusal {
-  const headers = { 'Retry-After': '5' };
-  return UNDER_API_OR_MCP.test(String(req.url))
-    ? { status: 503, headers: { ...headers, 'Content-Type': 'application/json' }, body: HELD_JSON }
-    : { status: 503, headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }, body: HELD_TEXT };
+  return awayAnswer(req, { status: 503, kind: 'lost', retryS: 5, json: HELD_JSON, text: HELD_TEXT });
+}
+
+/* What the keeper answers while an update installs and takes no changes. */
+export function updatingAnswer(req: http.IncomingMessage, json: string, text: string): Refusal {
+  return awayAnswer(req, { status: 503, kind: 'updating', retryS: awayEveryS('updating'), json, text });
 }
 
 /* Both timeouts are given, since requestTimeout 0 alone also turns headersTimeout off on Node 22. */

@@ -752,7 +752,8 @@ const ServerMessage = z.discriminatedUnion('type', [
      program's own queue after that turn. */
   z.object({ type: z.literal('term.input'), termId: TermId, data: z.string().max(TERM_CHUNK), pressedIn: Id.optional() }),
   z.object({ type: z.literal('term.resize'), termId: TermId, cols: Cols, rows: Rows }),
-  z.object({ type: z.literal('term.close'), termId: TermId }),
+  /* final: the view ended for good, as for a person who may no longer see it, so no view of theirs comes back to it. */
+  z.object({ type: z.literal('term.close'), termId: TermId, final: z.literal(true).optional() }),
   /* The turn Hornhoof opened for what a person typed, or none when it could not. */
   z.object({ type: z.literal('turn.opened'), agentKey: Id, jobId: Id.nullable(), toolToken: z.string().max(200).nullable(), ref: z.string().max(64).optional() }),
   /* A part of a run: the node clones the branch into a fresh folder, runs the command there as a user that reaches

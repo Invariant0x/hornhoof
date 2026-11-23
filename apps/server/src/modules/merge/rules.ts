@@ -117,6 +117,9 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ...each(['request_internal', 'proposals', 'approval_policies', 'wait_policies'], rows('protected')),
 
   ...each(['companies', 'departments', 'teams', 'agents', 'improvements', 'improvement_submissions', 'test_parts', 'backlog_items', 'briefings', 'map_layouts'], rows('work')),
+  /* The company's city and the CEO's orders to move its buildings: its world, kept apart from its work tables, compared
+     row by row like a person's map, and two that differ are the orchestrator's to settle. */
+  world_layouts: rows('work'),
   /* The themes the company installed and their files: two copies that hold another version of one theme keep the
      leader's, and a file of a version the leader does not hold stays out with it. */
   ...each(['themes', 'theme_files'], rows('work')),
@@ -146,6 +149,7 @@ export const BOOKKEEPING: Readonly<Record<string, readonly string[]>> = {
   approval_policies: ['updated_at'],
   task_waits: ['updated_at'],
   map_layouts: ['updated_at'],
+  world_layouts: ['updated_at'],
   feedback_inbox: ['updated_at'],
   feedback_signals: ['signals', 'updated_at'],
   telegram_bots: ['update_offset'],

@@ -189,6 +189,15 @@ describe('one source for the values of a skin', () => {
     expect(value('html', 'scrollbar-color')).toBe('var(--scrollbar-thumb) var(--scrollbar-track)');
   });
 
+  it('dims a dark skin by at least .64 and a light one by at least .32, so a window over the map reads first (#1938)', () => {
+    const alpha = (value: string) => Number(/,\s*(\.?\d*\.?\d+)\)$/.exec(value)![1]);
+    expect(builtinSkin('cyberpunk')!.colors.scrim).toBe('rgba(4, 8, 12, .64)');
+    for (const skin of BUILTIN_SKINS) {
+      const floor = skin.scheme === 'dark' ? .64 : .32;
+      expect(alpha(skin.colors.scrim), skin.id).toBeGreaterThanOrEqual(floor);
+    }
+  });
+
   it('cuts the parts of a stepped skin in steps, and leaves ghost and focused buttons square', () => {
     const stepped = RULES.filter(rule => rule.selectors.some(selector => selector.includes("[data-cut='steps']")));
     expect(stepped.flatMap(rule => rule.selectors)).toEqual([
