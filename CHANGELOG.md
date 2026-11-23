@@ -19,6 +19,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - In a page that reads right to left, the glow of the map's hub stands around the hub instead of at the map's right edge.
 - An Antigravity turn that launches a subagent keeps the employee's main conversation as its session, ignores hooks from child conversations, and resumes the main conversation with its Hornhoof tools on the next turn.
 - An Antigravity turn that fails with `UNAUTHENTICATED (code 401)` because its program kept an hour-old access token is no longer lost as an unknown failure: the program starts anew with the saved sign-in and the turn is tried once more with no person involved, and a second refusal right after that is a sign-in failure with a clear reason for Operations.
+- When the updater's copy of a loaded dump, or the folder it kept it in, cannot be removed, and even when its warning about that cannot be written because the updater's output closed, the updater no longer stops: the restore ends done or undone as before, and the updater goes on.
 
 ### Added
 

@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { chownSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { ask, at, JQ, runOnce, runUpdaterStep, stand, stubbed, type Stand } from './updater-fixture.js';
@@ -428,6 +429,103 @@ describe('updater, restore', () => {
     order(failed);
     await runOnce(failed, null, { STUB_RESTORE: 'fail' });
     expect(statusOf(failed)).toMatchObject({ state: 'failed', dumpedAt: DUMPED });
+  });
+
+  /* The updater's copy of the dump, and the folder it held it in, are its own. Where they cannot be removed, as on a file
+     system that went read-only under it, it says so and goes on: the restore ends as it would, done or undone, and the
+     updater keeps running even if writing the warning reports an error. */
+  it('goes on when its copy of the dump cannot be removed', async () => {
+    for (const [env, state, step] of [[{ STUB_TERM: '7', ...WITH_CARRY }, 'done', 'start'], [{ STUB_RESTORE: 'fail' }, 'failed', 'load']] as const) {
+      const s = stand(OLD_ENV);
+      order(s);
+      const tools = join(s.dir, 'tools');
+      mkdirSync(tools);
+      writeFileSync(
+        join(tools, 'rm'),
+        [
+          '#!/bin/sh',
+          "fail() { printf 'rm: cannot remove %s: Read-only file system\\n' \"$1\" >&2; exit 1; }",
+          'for a in "$@"; do',
+          `  case "$a" in */restore.sql.gz) fail "$a" ;; '${s.dir}'/tmp.*) [ ! -d "$a" ] || fail "$a" ;; esac`,
+          'done',
+          'exec /bin/rm "$@"',
+          '',
+        ].join('\n'),
+        { mode: 0o755 },
+      );
+      const PATH = `${tools}:${dirname(fileURLToPath(new URL('./updater-stubs/docker', import.meta.url)))}:${dirname(JQ)}:/usr/bin:/bin`;
+      const logFailure = join(s.dir, 'cleanup-log.sh');
+      writeFileSync(logFailure, [
+        'printf() {',
+        '  builtin printf "$@" || return',
+        '  case "${2-}" in',
+        '    "Could not remove the updater\'s copy of the backup"*) return 1 ;;',
+        '  esac',
+        '}',
+        '',
+      ].join('\n'));
+      const r = await runOnce(s, null, { ...env, PATH, ...(state === 'failed' ? { BASH_ENV: logFailure } : {}) });
+      expect(r.code, r.out).toBe(0);
+      expect(statusOf(s), r.out).toMatchObject({ state, step });
+      expect(r.out.split('\n').filter(line => line.startsWith("Could not remove the updater's copy of the backup"))).toHaveLength(2);
+      if (state === 'failed') expectAsBefore(s, r.calls);
+      else expect(r.calls).toContain('docker compose up -d --no-build app node');
+    }
+  });
+
+  /* The warning about a copy that would not go may lose its reader too, as when the pipe the updater's output goes to
+     has closed: the write then gets SIGPIPE. That ends neither the restore, with the company down after its copy was
+     loaded, nor the pass after the restore ended: each warning is reached, and the run goes on to its end. */
+  it('goes on when the warning about its copy of the dump gets SIGPIPE', async () => {
+    const cases = [
+      { env: { STUB_TERM: '7', ...WITH_CARRY }, state: 'done', step: 'start', failing: 'both', warned: 2 },
+      { env: { STUB_RESTORE: 'fail' }, state: 'failed', step: 'load', failing: 'both', warned: 2 },
+      { env: { STUB_TERM: '7', ...WITH_CARRY }, state: 'done', step: 'start', failing: 'folder', warned: 1 },
+    ] as const;
+    for (const { env, state, step, failing, warned } of cases) {
+      const s = stand(OLD_ENV);
+      order(s);
+      const tools = join(s.dir, 'tools');
+      mkdirSync(tools);
+      const copy = failing === 'both' ? '*/restore.sql.gz) fail "$a" ;; ' : '';
+      writeFileSync(
+        join(tools, 'rm'),
+        [
+          '#!/bin/sh',
+          "fail() { printf 'rm: cannot remove %s: Read-only file system\\n' \"$1\" >&2; exit 1; }",
+          'for a in "$@"; do',
+          `  case "$a" in ${copy}'${s.dir}'/tmp.*) [ ! -d "$a" ] || fail "$a" ;; esac`,
+          'done',
+          'exec /bin/rm "$@"',
+          '',
+        ].join('\n'),
+        { mode: 0o755 },
+      );
+      const PATH = `${tools}:${dirname(fileURLToPath(new URL('./updater-stubs/docker', import.meta.url)))}:${dirname(JQ)}:/usr/bin:/bin`;
+      const reached = join(s.dir, 'warned');
+      const brokenPipe = join(s.dir, 'cleanup-pipe.sh');
+      /* What a write to a pipe with no reader meets: SIGPIPE to the process that writes, and a failed write where that
+         process ignores it. */
+      writeFileSync(brokenPipe, [
+        'printf() {',
+        '  case "${2-}" in',
+        '    "Could not remove the updater\'s copy of the backup"*)',
+        `      builtin printf '%s\\n' "$2" >> '${reached}'`,
+        '      kill -PIPE "$BASHPID"',
+        '      return 1',
+        '      ;;',
+        '  esac',
+        '  builtin printf "$@"',
+        '}',
+        '',
+      ].join('\n'));
+      const r = await runOnce(s, null, { ...env, PATH, BASH_ENV: brokenPipe });
+      expect(readFileSync(reached, 'utf8').trim().split('\n'), r.out).toHaveLength(warned);
+      expect(r.code, r.out).toBe(0);
+      expect(statusOf(s), r.out).toMatchObject({ state, step });
+      if (state === 'failed') expectAsBefore(s, r.calls);
+      else expect(r.calls).toContain('docker compose up -d --no-build app node');
+    }
   });
 
   it('changes nothing when the backup does not load or the database in use does not close', async () => {
