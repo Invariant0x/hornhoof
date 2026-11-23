@@ -16,6 +16,15 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - An employee's program that waits between turns no longer starts anew when the terminal showing it loses its connection for a moment: the node keeps it for 30 seconds after its last view went, so the view that comes back finds it. A view ended because its person may no longer see the agent holds it no longer, and a program whose agent moved to another plan still goes at once.
 - A merge of a copy's database no longer stops with "No merge rule for public.world_layouts": the company's city and the CEO's orders to move its buildings merge like a person's map, and two cities that differ keep the leading one and go to the orchestrator.
 
+### Added
+
+- Hornhoof can tidy the branches of a company's repositories by itself, when the server is started with HORNHOOF_BRANCH_PRUNE=on: a task's branch goes once a turn branch, main or a release tag holds it, the branch of a task cancelled or closed for seven days that nothing holds is archived to refs/hornhoof/archive first, the 20 newest turn branches stay, and main, tags, open and paused work and branches it did not make are never touched; each change is written on its task with the one command that restores it.
+- The command `branch-prune` of the server lists what that tidying would do, with the counts by kind, and with --apply does it for one repository or all, a batch at a time.
+
+### Changed
+
+- Where Hornhoof can write to a department's repository, finished turnkey work joins its turn branch as one merge commit that names the task, "Take in task-N (#N)", with the files of the commit that was checked; a candidate that does not hold the turn branch is sent back for a take-in, and a release counts the merge as the checked work. Work already fast-forwarded into the turn branch stays accepted.
+
 ## [0.42.0] - 2026-11-23
 
 ### Fixed
