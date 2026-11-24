@@ -82,6 +82,8 @@ function usesService(service: WarmService, repository: string, cwd: string, word
 }
 
 /* The services of the declaration a check needs: none for a program none of them names. */
-export function servicesNeeded(_declaration: WarmServices, _repository: string, _cwd: string, _command: readonly string[]): WarmService[] {
-  return []; // RED stub for #2091
+export function servicesNeeded(declaration: WarmServices, repository: string, cwd: string, command: readonly string[]): WarmService[] {
+  const run = program(command);
+  if (!run) return [];
+  return declaration.services.filter(service => service.uses.programs.includes(run.name) && usesService(service, repository, cwd, run.rest));
 }

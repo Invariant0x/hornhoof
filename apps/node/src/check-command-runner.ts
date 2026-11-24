@@ -10,6 +10,7 @@ import { checkQueueOffline, currentCheckLease, reuseCheckLease, suspendCheckSlot
 import { assertCheckGroup, checkGroupMembers, checkGroupProcess, cleanCheckGroup, signalCheckGroup, type CheckGroup } from './check-group.js';
 import { trackCheckProcess } from './check-processes.js';
 import { refusalText, type AgentCommandVerdict, type CommandInput } from './command-guard.js';
+import type { WarmPiece } from './warm-services.js';
 
 export type CheckCommandGuard = (key: string, input: Pick<CommandInput, 'command' | 'cwd'>) => Promise<AgentCommandVerdict>;
 
@@ -18,8 +19,11 @@ const Command = z.object({ command: z.array(Word).min(1).max(1000), cwd: Word, e
 type Command = z.infer<typeof Command>;
 let user: JobUser | null = null;
 let commandGuard: CheckCommandGuard | undefined;
+/* The warm test services of the machine, of which a check gets a piece with its slot when its repository says it needs one (#2091). */
+export type WarmPieces = { pieceFor(cwd: string, command: readonly string[], owner: string, signal: AbortSignal): Promise<WarmPiece | null> };
+let warm: WarmPieces | undefined;
 
-export function configureCheckCommands(owner: JobUser | null, guard?: CheckCommandGuard): void { user = owner; commandGuard = guard; }
+export function configureCheckCommands(owner: JobUser | null, guard?: CheckCommandGuard, services?: WarmPieces): void { user = owner; commandGuard = guard; warm = services; }
 
 async function commandPolicy(key: string, input: Command): Promise<AgentCommandVerdict> {
   try {
@@ -103,30 +107,48 @@ const holdingOf = (key: string, group: number): string | undefined => {
   return entry?.key === key ? entry.lease : undefined;
 };
 
+/* The variables of the pieces each lease's check got, which a check nested in its slot shares: it runs on the same piece. */
+const piecesOf = new Map<string, Record<string, string>>();
+
+/* The pieces a check gets as its slot starts, or the ones its slot already has; drop ends those it made. */
+async function slotPieces(lease: string | undefined, input: Command, signal: AbortSignal): Promise<{ env?: Record<string, string>; drop(): Promise<void> }> {
+  const shared = lease ? piecesOf.get(lease) : undefined;
+  if (shared || !lease || !warm) return { ...(shared ? { env: shared } : {}), drop: async () => {} };
+  const piece = await warm.pieceFor(input.cwd, input.command, lease, signal);
+  if (!piece) return { drop: async () => {} };
+  piecesOf.set(lease, piece.env);
+  return { env: piece.env, drop: async () => { piecesOf.delete(lease); await piece.drop(); } };
+}
+
 /* The caller owns execution; the node owns cleanup. Closing a request is not evidence that its detached group ended. */
-const held = (res: ServerResponse, group: CheckGroup, uid: number, key: string) => async (signal: AbortSignal): Promise<boolean> => {
+const held = (res: ServerResponse, group: CheckGroup, uid: number, key: string, input: Command) => async (signal: AbortSignal): Promise<boolean> => {
   const lease = currentCheckLease();
   if (lease) holding.set(group.pid, { lease, key });
-  let stop!: () => void;
-  const ended = new Promise<void>(resolve => {
-    stop = () => { send(res, { type: 'stop', message: STOP }); resolve(); };
-    res.once('close', resolve);
-    signal.addEventListener('abort', stop, { once: true });
-    if (res.destroyed || signal.aborted) resolve();
-    else send(res, { type: 'slot', lease });
-  });
-  try { await ended; }
-  finally {
+  let stop: (() => void) | undefined;
+  let pieces: Awaited<ReturnType<typeof slotPieces>> | undefined;
+  try {
+    pieces = await slotPieces(lease, input, signal);
+    const { env } = pieces;
+    await new Promise<void>(resolve => {
+      stop = () => { send(res, { type: 'stop', message: STOP }); resolve(); };
+      res.once('close', resolve);
+      signal.addEventListener('abort', stop, { once: true });
+      if (res.destroyed || signal.aborted) resolve();
+      else send(res, { type: 'slot', lease, ...(env ? { env } : {}) });
+    });
+  } finally {
     if (holding.get(group.pid)?.lease === lease) holding.delete(group.pid);
-    signal.removeEventListener('abort', stop);
+    if (stop) signal.removeEventListener('abort', stop);
     await cleanCheckGroup(group, uid, { list: checkGroupMembers, kill: (_pid, value) => signalCheckGroup(group, uid, user?.gid ?? process.getgid!(), value), block: reason => suspendCheckSlots(group.pid, reason) });
+    /* After the group: what the check ran has let go of its piece. A piece that will not drop goes at the next sweep. */
+    await pieces?.drop().catch(() => {});
   }
   return true;
 };
 
 /* jobId: the step of the tools Hornhoof opened for a command with no turn running, whose slot it is. */
 async function admitCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse, jobId: string | undefined, callerPid: number | undefined): Promise<boolean> {
-  const run = input.wait ? held(res, input.group!, user?.uid ?? process.getuid!(), key) : (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
+  const run = input.wait ? held(res, input.group!, user?.uid ?? process.getuid!(), key, input) : (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
   const lease = input.lease ?? await enclosingLease(key, callerPid);
   if (lease) return reuseCheckLease(lease, key, signal, run);
   return withCheckSlot(run, { agentId: key, ...(jobId ? { jobId } : {}), label: basename(input.command[0]).slice(0, 100), signal, onPosition: position => { send(res, { type: 'queued', position }); } });
@@ -176,6 +198,12 @@ function killCommandGroup(pid: number | undefined, signal: NodeJS.Signals): void
 
 async function runCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse): Promise<boolean> {
   signal.throwIfAborted();
+  const pieces = await slotPieces(currentCheckLease(), input, signal);
+  try { return await runWith(key, { ...input, env: { ...input.env, ...pieces.env } }, signal, res); }
+  finally { await pieces.drop().catch(() => {}); }
+}
+
+async function runWith(key: string, input: Command, signal: AbortSignal, res: ServerResponse): Promise<boolean> {
   /* The shell changes directory after dropping privileges. The node never opens an agent's cwd as root. */
   const child = spawn('/bin/bash', ['-c', 'cd -- "$1" || exit; shift; exec "$@"', 'hh-check', input.cwd, ...input.command], {
     uid: user?.uid, gid: user?.gid, env: { ...input.env, ...(currentCheckLease() ? { HH_CHECK_SLOT: currentCheckLease() } : {}) }, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
