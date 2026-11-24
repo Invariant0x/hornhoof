@@ -12,7 +12,7 @@ import { programOf, TrackerIcon } from '../ui/icons';
 import { DepartmentMark, PersonMark } from '../ui/TrackerMarks';
 import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
 import { Busy, Hold, LoadState, noneYet, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
-import { CopySchemaFailures, MachineAway } from '../ui/MachineAway';
+import { CopyGaveUps, CopySchemaFailures, MachineAway } from '../ui/MachineAway';
 import { MachineLow } from '../ui/MachineLow';
 import { MergeCard } from '../ui/MergeCard';
 import { namedReadOnly, Requests, wordsAnswer } from '../ui/Requests';
@@ -567,6 +567,7 @@ function MakeHere({ org, places, department, pipeline, loose, making, setMaking,
 /* The machines short of disk space among what waits for people; a server from before sends none. */
 const lowMachines = (decisions: Decisions | null | undefined) => decisions?.machinesLow ?? [];
 const schemaFailures = (decisions: Decisions | null | undefined) => decisions?.copySchemaFailures ?? [];
+const gaveUpCopies = (decisions: Decisions | null | undefined) => decisions?.copyGaveUp ?? [];
 
 /* The tracker keeps the same task and goal cards across its views. */
 export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, onDecisionsChanged, selected, onOpenTask, onOpenGoal, onOpenAgent, onOpenOrchestrator, onHome }: Props) {
@@ -647,6 +648,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const failures = all.filter(task => boardStatus(task) === 'failure');
   const machinesAway = decisions?.machinesAway ?? [];
   const copySchemaFailures = schemaFailures(decisions);
+  const copyGaveUp = gaveUpCopies(decisions);
   const machinesLow = lowMachines(decisions);
   const githubLimits = failureCards(decisions);
   const pipeline = place.pipeline ? pipelines.find(p => p.id === place.pipeline) ?? null : null;
@@ -790,7 +792,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
         counts={{
           waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf)), waitsOnWho, keptShown(kept, decisionsOf)),
           people: peopleCount(decisions, waitsOnPeople, company),
-          failures: failures.length + machinesAway.filter(machine => !machine.back).length + copySchemaFailures.length + machinesLow.length + githubLimits.length,
+          failures: failures.length + machinesAway.filter(machine => !machine.back).length + copySchemaFailures.length + copyGaveUp.length + machinesLow.length + githubLimits.length,
           mine: own.tasks.length,
           working: working.length,
         }}
@@ -861,6 +863,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
                 <>
                   <MachineAway machines={machinesAway} />
                   <CopySchemaFailures cards={copySchemaFailures} />
+                  <CopyGaveUps cards={copyGaveUp} />
                   <MachineLow machines={machinesLow} />
                   <GitHubLimitCards limits={githubLimits} />
                 </>
