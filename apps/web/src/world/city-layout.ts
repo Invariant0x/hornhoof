@@ -859,7 +859,7 @@ const landReachKept = new WeakMap<GeneratedWorldMap, Map<string, ReadonlySet<str
 function landOpen(map: GeneratedWorldMap, site: BridgeSite | null, col: number, row: number): boolean {
   const spec = map.kindSpecAt(col, row);
   if (!spec) return false;
-  return spec.liquid ? onBridge(site, col, row) : spec.walkable || spec.excavatable;
+  return spec.liquid ? onBridge(site, col, row) : spec.walkable || spec.excavatable === true;
 }
 
 function landReach(city: CityState, map: GeneratedWorldMap): ReadonlySet<string> {
