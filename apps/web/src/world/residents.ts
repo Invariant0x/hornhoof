@@ -315,16 +315,50 @@ function frontTileForBuilding(b: CityBuilding, city: CityState, roadSet: Readonl
 
 /* The next spot a building hands a resident who comes to work at it, in turn so several residents spread over its
    spots, facing into the building; null for no building or one with no spot by a road (#2001). */
+/* How many residents other than `self` hold each of a building's spots now. */
+function heldSpots(
+  residents: readonly ResidentEntity[],
+  buildingId: string,
+  spots: readonly Readonly<{ col: number; row: number }>[],
+  self: string | null,
+): number[] {
+  const held = spots.map(() => 0);
+  for (const r of residents) {
+    const at = r.workSpot;
+    if (r.id === self || r.workBuildingId !== buildingId || !at) continue;
+    const i = spots.findIndex(s => s.col === at.col && s.row === at.row);
+    if (i >= 0) held[i]!++;
+  }
+  return held;
+}
+
+/* The next spot in turn at a building, passing over spots others hold while one is free: a resident sent here from
+   another building never joins someone on a spot (#2001). */
 function takeWorkSpot(
-  sim: Pick<ResidentSimulation, 'workSpotsByBuilding' | 'workSpotTurns'>,
+  sim: Pick<ResidentSimulation, 'workSpotsByBuilding' | 'workSpotTurns' | 'residents'>,
   buildingId: string | null,
+  self: string | null = null,
 ): (ResidentWorkSpot & { approach: TileCoord }) | null {
   const spots = buildingId ? sim.workSpotsByBuilding.get(buildingId) : undefined;
   if (!buildingId || !spots || spots.length === 0) return null;
   const turn = sim.workSpotTurns.get(buildingId) ?? 0;
   sim.workSpotTurns.set(buildingId, turn + 1);
-  const spot = spots[turn % spots.length]!;
+  const held = heldSpots(sim.residents, buildingId, spots, self);
+  let pick = turn % spots.length;
+  for (let k = 1; k < spots.length; k++) {
+    const i = (turn + k) % spots.length;
+    if (held[i]! < held[pick]!) pick = i;
+  }
+  const spot = spots[pick]!;
   return { col: spot.col, row: spot.row, facing: facingOfStep(spot.inward.dc, spot.inward.dr), approach: spot.approach };
+}
+
+/* Each walk to work takes the freest spot of its building again, so a spot a resident gone elsewhere left is taken
+   up and two never stay on one while another is free (#2001); without a spot the walk ends at `fallback`. */
+function retakeWorkSpot(sim: ResidentSimulation, r: ResidentEntity, fallback: TileCoord): void {
+  const spot = takeWorkSpot(sim, r.workBuildingId, r.id);
+  r.workSpot = spot ? { col: spot.col, row: spot.row, facing: spot.facing } : null;
+  r.workTile = spot?.approach ?? fallback;
 }
 
 /* A road route to work, with the one step off the road onto the building's lot when the resident has a spot there. */
@@ -1012,11 +1046,11 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
         const nextTile = sim.deptTiles.get(nextDept);
         if (nextTile) {
           const buildingId = sim.deptBuildingIds.get(nextDept) ?? null;
-          const spot = takeWorkSpot(sim, buildingId);
           r.workBuildingId = buildingId;
-          r.workSpot = spot ? { col: spot.col, row: spot.row, facing: spot.facing } : null;
-          r.workTile = spot?.approach ?? nextTile;
+          retakeWorkSpot(sim, r, nextTile);
         }
+      } else if (r.leg === 'outbound' && r.workSpot) {
+        retakeWorkSpot(sim, r, r.workTile);
       }
       const nextFrom = r.leg === 'outbound' ? r.homeTile : r.workTile;
       const nextTo = r.leg === 'outbound' ? r.workTile : r.homeTile;

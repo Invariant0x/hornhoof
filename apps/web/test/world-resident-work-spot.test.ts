@@ -84,18 +84,27 @@ describe('A delivery ends at the building it is for (#2001)', () => {
     const live = createHornhoofLiveFixture();
     const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: live.company.seed, mapSize: 150 });
     const { city } = syncLiveSnapshotToCity(EGYPT_WORLD_PACK, map, live);
-    const seen = arrivals(EGYPT_WORLD_PACK, r => expect(r.workBuildingId, `${r.name} knows its building`).toBeTruthy());
-    const spotsInUse = new Map<string, Set<string>>();
-    const residents = new Map<string, Set<string>>();
-    for (const a of seen) {
-      const id = a.buildingId!;
-      spotsInUse.set(id, (spotsInUse.get(id) ?? new Set()).add(`${a.col.toFixed(2)},${a.row.toFixed(2)}`));
-      residents.set(id, (residents.get(id) ?? new Set()).add(a.name));
+    const sim = createResidentSimulation(EGYPT_WORLD_PACK, city, live);
+    const spotsOf = new Map<string, ReturnType<typeof deliverySpotsForBuilding>>();
+    const leg = new Map(sim.residents.map(r => [r.id, r.leg]));
+    let sideBySide = 0;
+    for (let tick = 0; tick < 1600; tick++) {
+      stepResidentSimulation(sim, 0.1);
+      for (const r of sim.residents) {
+        const arrived = leg.get(r.id) === 'outbound' && r.leg === 'inbound';
+        leg.set(r.id, r.leg);
+        if (!arrived || !r.workSpot || !r.workBuildingId || r.liveState !== 'working') continue;
+        const id = r.workBuildingId;
+        if (!spotsOf.has(id)) spotsOf.set(id, deliverySpotsForBuilding(city.buildings.find(b => b.id === id)!, null, EGYPT_WORLD_PACK, city));
+        const spots = spotsOf.get(id)!;
+        /* The spots the others at work here hold as it arrives: it never lands on one of them while one is free. */
+        const others = sim.residents.filter(o => o.id !== r.id && o.workBuildingId === id && o.workSpot && o.liveState === 'working');
+        const held = new Set(others.map(o => `${o.workSpot!.col},${o.workSpot!.row}`));
+        if (held.size < spots.length) expect(held.has(`${r.workSpot.col},${r.workSpot.row}`), `${r.name} at ${id}, tick ${tick}`).toBe(false);
+        if (others.length > 0) sideBySide++;
+      }
     }
-    let spread = 0;
-    for (const [id, names] of residents) {
-      const building = city.buildings.find(b => b.id === id)!;
-      const spots = deliverySpotsForBuilding(building, null, EGYPT_WORLD_PACK, city);
+    for (const [id, spots] of spotsOf) {
       /* Each spot on the lot by a road, one tile from it, and no two the same. */
       for (const spot of spots) {
         expect(city.roads.has(tile(spot.col, spot.row)), `${id} spot on a road`).toBe(false);
@@ -103,11 +112,8 @@ describe('A delivery ends at the building it is for (#2001)', () => {
         expect(Math.hypot(spot.col - spot.approach.col, spot.row - spot.approach.row)).toBeLessThan(1);
       }
       expect(new Set(spots.map(s => `${s.col},${s.row}`)).size).toBe(spots.length);
-      const want = Math.min(names.size, spots.length);
-      expect(spotsInUse.get(id)!.size, `${names.size} residents at ${id} with ${spots.length} spots`).toBe(want);
-      if (want > 1) spread++;
     }
-    expect(spread, 'the fixture has buildings where several residents work side by side').toBeGreaterThan(0);
+    expect(sideBySide, 'the fixture has buildings where several residents work side by side').toBeGreaterThan(0);
   });
 
   /* The map hides a passer-by behind a building in front of it; a resident stepping onto a building's front edge, and
@@ -129,9 +135,11 @@ describe('A delivery ends at the building it is for (#2001)', () => {
         const onLastStep = r.leg === 'outbound' && r.pathIndex === r.path.length - 1 && toSpot > 1e-6 && toSpot < 1;
         return onLastStep || (r.leg === 'inbound' && r.pose === 'building' && toSpot < 1e-6);
       });
-      if (near.length === 0) continue;
-      renderResidentsToPixi(new Graphics(), sim, city, EGYPT_WORLD_PACK, everywhere, 64, 32, null, drawn);
       for (const r of near) {
+        /* Against its own building alone: a neighbour in front of the lot may still hide it, as it hides the lot. */
+        const own = { ...city, buildings: city.buildings.filter(b => b.id === r.workBuildingId) };
+        drawn.clear();
+        renderResidentsToPixi(new Graphics(), sim, own, EGYPT_WORLD_PACK, everywhere, 64, 32, null, drawn);
         expect(drawn.has(r.id), `${r.name} at ${r.col.toFixed(2)}, ${r.row.toFixed(2)} by ${r.workBuildingId}`).toBe(true);
         if (r.leg === 'outbound') stepping++;
         else atSpot++;
