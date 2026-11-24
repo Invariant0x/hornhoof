@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ART_CONTRACT_VERSION, declaredArtFiles, masterTileW, validateArtIndex, type ArtIndex } from '../src/world/art';
-import { bridgeSite, BRIDGE_LENGTH, bridgeTiles, hasBridgeArt, residentDepthY, sameBridge, type BridgeSite } from '../src/world/bridge-site';
+import { bridgePieceTiles, bridgeSite, BRIDGE_LENGTH, bridgeTiles, hasBridgeArt, residentDepthY, sameBridge, type BridgeSite } from '../src/world/bridge-site';
+import { displayedWaterDistance } from '../src/world/smooth-terrain-baker';
 import { applyBridgeRule, cityDepthY, deserializeCityLayout, keepMapBridge, serializeCityLayout, type CityState } from '../src/world/city-layout';
 import { drawBridgePieces, roadMarks, type CityArtContext } from '../src/world/city-renderer';
 import { tileCenterToWorld } from '../src/world/coords';
@@ -34,6 +35,31 @@ describe("a map's bridge", () => {
       expect(bank(site.col - dc, site.row - dr), `${seed} near bank`).toBe(true);
       expect(bank(site.col + dc * site.length, site.row + dr * site.length), `${seed} far bank`).toBe(true);
     }
+  });
+
+  it('reaches the bank as the water is drawn: each end piece meets drawn land, on the bank tile where the water spills over it', () => {
+    /* The drawn waterline bends past the water tiles; land below about 0.08 of drawn water distance shows as water. */
+    const LAND = 0.08;
+    const ends: Record<string, readonly [boolean, boolean]> = {};
+    for (const seed of SEEDS) {
+      const map = mapOf(seed);
+      const site = bridgeSite(map)!;
+      const [dc, dr] = site.axis === 'u' ? [1, 0] : [0, 1];
+      const drawn = bridgePieceTiles(site);
+      const first = drawn[0]!;
+      const last = drawn.at(-1)!;
+      /* The middle of each end piece's outer edge, where the deck comes down to the bank. */
+      const outer = (t: { col: number; row: number }, side: number) => displayedWaterDistance(map.cornerFields, t.col + 0.5 + (dc * side) / 2, t.row + 0.5 + (dr * side) / 2);
+      expect(outer(first, -1), `${seed} far end on land`).toBeGreaterThanOrEqual(LAND);
+      expect(outer(last, 1), `${seed} near end on land`).toBeGreaterThanOrEqual(LAND);
+      /* Every water tile is under a piece, and a piece stands on the bank only where the water's own edge is drawn as water. */
+      for (const t of bridgeTiles(site)) expect(drawn, seed).toContainEqual(t);
+      expect(drawn.length - site.length, seed).toBeLessThanOrEqual(2);
+      ends[seed] = [first.col !== site.col || first.row !== site.row, drawn.length - site.length - (first.col !== site.col || first.row !== site.row ? 1 : 0) === 1];
+    }
+    /* The three maps today: hornhoof's water spills over both banks, solar-labs' only over the far one. */
+    expect(ends.hornhoof).toEqual([true, true]);
+    expect(ends['solar-labs']).toEqual([true, false]);
   });
 
   it('is the crossing nearest the city centre, the shorter one first', () => {
@@ -234,6 +260,22 @@ describe('the bridge on the shown map', () => {
       expect(residentDepthY(site, 3.4, 7.2, H)).toBe(feet(3.4, 7.2));
       expect(residentDepthY(site, site.col + dr * 2 + 0.5 * dc, site.row + dc * 2 + 0.5 * dr, H), `${axis} beside the bridge`).toBe(feet(site.col + dr * 2 + 0.5 * dc, site.row + dc * 2 + 0.5 * dr));
       expect(residentDepthY(null, 10.5, 20, H)).toBe(feet(10.5, 20));
+
+      /* Where the water spills over a bank, the end piece stands on the bank tile, the street's tile there. */
+      const over: BridgeSite = { ...site, overBank: [true, true] };
+      const bank = (i: number) => ({ col: site.col + dc * i, row: site.row + dr * i });
+      const withBanks = new Map(roads);
+      for (const t of [bank(-1), bank(site.length)]) withBanks.set(`${t.col},${t.row}`, { col: t.col, row: t.row, tier: 'dirt' as const, traffic: 4, bridge: false, wasOldWall: false, grandAvenue: false });
+      const marks = roadMarks({ roads: withBanks, bridge: over }, true).bridge;
+      expect(marks.map(m => [m.road.col, m.road.row, m.path]), axis).toEqual([
+        [bank(-1).col, bank(-1).row, `bridge/${axis}_start.png`],
+        ...bridgeTiles(site).map(t => [t.col, t.row, `bridge/${axis}_span.png`]),
+        [bank(site.length).col, bank(site.length).row, `bridge/${axis}_end.png`],
+      ]);
+      const stepOn = residentDepthY(over, site.col + dc * -1.5, site.row + dr * -1.5, H);
+      expect(stepOn, `${axis} stepping onto the start on the bank`).toBeGreaterThan(tileDepth(-1));
+      expect(stepOn).toBeLessThan(tileDepth(0));
+      expect(residentDepthY(over, site.col + dc * (site.length + 0.5), site.row + dr * (site.length + 0.5), H)).toBeGreaterThan(tileDepth(site.length + 1));
     }
   });
 });
