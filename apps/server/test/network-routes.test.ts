@@ -11,7 +11,9 @@ import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { UPLOAD_SPARE } from '../src/modules/keeper/uploads.js';
 import { saveLink } from '../src/modules/link/link.js';
 import { LEFT_SLOTS_FRESH_MS } from '../src/modules/copies/left-slots.js';
+import { dataViews } from '../src/modules/copies/view.js';
 import { certFacts, issuedBy } from '../src/modules/network/authority.js';
+import { thisMachine } from '../src/modules/network/store.js';
 import { as, invitePerson, setUpCompany, testApp, until } from './helpers.js';
 
 const MACHINE_ID = 'a1b2c3d4'.repeat(4);
@@ -481,5 +483,32 @@ describe('the network routes the keeper calls', () => {
     const res = await c.certificate(newKey());
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toMatchObject({ reason: 'no_machine_id', message: 'This server has no machine id. Run the install command again.' });
+  });
+
+  it('tells a former leader how far the server applied its log, and surfaces why saving waits', async () => {
+    const c = await company();
+    const leader = await thisMachine(c.db, c.config, c.companyId);
+    const former = await c.joined('data', newKey(), { networkId: 'b0'.repeat(32), serverOrder: 2 });
+    const third = await c.joined('data', newKey(), { networkId: 'c0'.repeat(32), serverOrder: 3 });
+    await c.db.execute(sql`INSERT INTO net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at, kind)
+      VALUES (gen_random_uuid(), ${former.id}, 7, ${'b0'.repeat(16)}, '0/4500120', ${leader.id}, '2026-11-24T01:08:00.000Z'::timestamptz, 'takeover'),
+             (gen_random_uuid(), ${former.id}, 8, ${'b0'.repeat(16)}, '0/9999999', ${third.id}, '2026-11-24T01:12:00.000Z'::timestamptz, 'takeover')`);
+    expect((await c.peers(from(former.id))).json().copy).toMatchObject({ applied: { term: 7, lsn: '0/4500120' } });
+    const report = (payload: object) => c.app.inject({ method: 'POST', url: '/api/network/report', payload, ...from(former.id) });
+    const saving = {
+      state: 'saving', progress: null, error: null, at: null, name: 'copy_b0b0b0b0b0b0b0b0_1', old: null,
+      saving: { waiting: 'retry', since: '2026-11-24T01:09:00.000Z' },
+    };
+    expect((await report({ copy: saving })).statusCode).toBe(204);
+    expect((await dataViews(c.app.ctx, new Date())).get(former.id)?.copy).toEqual({
+      line: 'saving', waiting: 'retry', since: '2026-11-24T01:09:00.000Z',
+    });
+    expect((await report({ copy: { ...saving, state: 'remaking', progress: 5, saving: undefined } })).statusCode).toBe(204);
+    expect((await dataViews(c.app.ctx, new Date())).get(former.id)?.copy).toEqual({ line: 'remaking', progress: 5 });
+    expect((await report({ copy: { ...saving, saving: undefined } })).statusCode).toBe(204);
+    expect((await dataViews(c.app.ctx, new Date())).get(former.id)?.copy).toEqual({ line: 'saving' });
+    /* A restore from an older backup than the handover means the leader may no longer hold everything up to applied. */
+    await c.db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, kept) VALUES (gen_random_uuid(), gen_random_uuid(), '2026-11-24T01:00:00.000Z'::timestamptz, 'hornhoof_before_20261124_010000')`);
+    expect((await c.peers(from(former.id))).json().copy.applied).toBeNull();
   });
 });

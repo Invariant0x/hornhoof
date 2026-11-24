@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import type { CopyError, CopyState } from '../../db/schema.js';
 import { DB_DOOR_PORT } from '../../net/db-door.js';
+import type { AppliedLed, SavingWait } from './led.js';
 import type { Sql } from './lease-store.js';
 import { reasonOf, writePrivately } from './machine-keys.js';
 import { joinSlot } from './promote.js';
@@ -61,19 +62,23 @@ export const PASSFILE_THERE = 'SELECT (pg_stat_file($1, true)).size IS NOT NULL 
 /* old.led: the number of the term the old database led the company under, when it did. left: while the first copy is
    made, the leader's slots of its tables whose first copy broke off, for the leader to drop; none said while there are
    none. */
-export type CopyReport = { schema?: SchemaAttempt; state: CopyState; progress: number | null; error: CopyError | null; at: string | null; name: string | null; old: { attempt: number; led?: number } | null; left?: string[] };
+export type CopyReport = {
+  schema?: SchemaAttempt; state: CopyState; progress: number | null; error: CopyError | null; at: string | null; name: string | null; old: { attempt: number; led?: number } | null; left?: string[];
+  saving?: { waiting: SavingWait; since: string };
+};
 /* What the leader says of the copy in its view. slot: its slot there. leaderSize: the size of the leader's database.
    migrations: how many the leader's schema has. old: how far the leader is with reading the copy's old database.
    upload: what a machine that stopped holding the data still owes: what it holds, nothing while the leader reads that, or
    its wipe. lastAttempt: the attempt the machine's row names its copy by; null where it never kept one. leader: the
    network id of the leader whose view this is. join: the slot that leader made for this machine when it took the
-   server in a planned switch, for a copy that held everything the leader before had written; none else. A leader of a
-   build before names neither. */
+   server in a planned switch, for a copy that held everything the leader before had written; none else. applied: how
+   far a handover from this machine applied its log on the server. A leader of a build before names none of the last three. */
 export type CopyOrder = {
   slot: 'ok' | 'lost' | 'missing' | null; leaderSize: number | null; migrations: number | null; old: 'waiting' | 'merged' | 'done' | null; upload: 'waiting' | 'received' | 'wipe' | null;
   lastAttempt: number | null;
   leader?: string;
   join?: string | null;
+  applied?: AppliedLed | null;
 };
 
 type Closable = Sql & { close(): Promise<void> };
@@ -128,7 +133,12 @@ export type CopyMakerOptions = {
   /* What saves a database of this machine that led the company, before its copy is made again: asked every ten
      seconds until it is done. state: the term the database led under, and why its dump failed when it did. Without
      it such a database stops the copy, and is never touched. */
-  saver?: { tick(): Promise<void>; done(): boolean; state(): { term: number; failed: string | null } | null; forget(): void };
+  saver?: {
+    tick(applied?: AppliedLed | null): Promise<void>;
+    done(): boolean;
+    state(): { term: number; failed: string | null; skipped?: boolean; waiting?: SavingWait; since?: string } | null;
+    forget(): void;
+  };
   log: (line: string) => void;
   now?: () => Date;
   /* Where the copy's database finds the leader's: the keeper's door, unless a test names the leader itself. */
@@ -161,6 +171,7 @@ export class CopyMaker {
   private busy = false;
   private disabledSince: number | null = null;
   private savedAt: number | null = null;
+  private lastApplied: string | null = null;
   private enabledAt = 0;
   private failing = false;
   private lastOrder: CopyOrder | null = null;
@@ -356,7 +367,7 @@ export class CopyMaker {
     if (this.kept.phase === 'detach') return this.detach();
     if (this.kept.phase === 'drop') return this.drop();
     const sql = this.on(this.kept.database);
-    if (await this.led(sql)) return this.saveLed();
+    if (await this.led(sql)) return this.saveLed(order);
     if (this.kept.phase === 'join') return this.join(sql, order);
     if (this.kept.phase === 'schema') return this.schema(sql);
     if (this.kept.phase === 'grant') return this.grant();
@@ -365,27 +376,48 @@ export class CopyMaker {
     return this.ready(sql, order);
   }
 
+  private saverDue(now: number, applied: AppliedLed | null): boolean {
+    const key = applied ? `${applied.term}:${applied.lsn}` : null;
+    if (key !== null && key !== this.lastApplied) {
+      this.lastApplied = key;
+      return true;
+    }
+    return this.savedAt === null || now - this.savedAt >= SAVE_EVERY_MS;
+  }
+
+  private savingReport(state: ReturnType<NonNullable<CopyMakerOptions['saver']>['state']>): CopyReport {
+    const failed = state?.failed ?? null;
+    if (failed) return this.stopped(/No space left on device/.test(failed) ? 'disk_full' : 'setup');
+    const saving = state?.waiting && state.since ? { saving: { waiting: state.waiting, since: state.since } } : {};
+    return { state: 'saving', progress: null, error: null, at: null, name: this.name(), old: null, ...saving };
+  }
+
   /* The database led the company and no handover ended that: what it holds is saved first, as a backup of the company
-     the keeper that leads records. Then the copy is made again beside it, and it is read until the new one is whole;
-     it goes only once the leader merged it. With nothing to save it by, the copy stops, and the database stays. */
-  private async saveLed(): Promise<void> {
+     the keeper that leads records, unless the leader already applied every WAL byte it wrote. Then the copy is made
+     again beside it, and it is read until the new one is whole; it goes only once the leader merged it. */
+  private async saveLed(order: CopyOrder | null): Promise<void> {
     const saver = this.opts.saver;
     if (!saver) {
       this.said = this.stopped('led');
       return;
     }
+    const applied = order?.applied ?? null;
     if (!saver.done()) {
       const now = this.now();
-      if (this.savedAt === null || now - this.savedAt >= SAVE_EVERY_MS) {
+      if (this.saverDue(now, applied)) {
         this.savedAt = now;
-        await saver.tick();
+        await saver.tick(applied);
       }
-      const failed = saver.state()?.failed ?? null;
-      this.said = failed ? this.stopped(/No space left on device/.test(failed) ? 'disk_full' : 'setup') : { state: 'saving', progress: null, error: null, at: null, name: this.name(), old: null };
+      this.said = this.savingReport(saver.state());
       if (!saver.done()) return;
     }
-    const led = saver.state()?.term;
-    this.opts.log('What this machine did while it led is saved. Its copy is made again; the database that led is read until the new one is whole.');
+    const state = saver.state();
+    const led = state?.term;
+    this.opts.log(
+      state?.skipped
+        ? 'The company server already holds everything this machine did while it led. Its copy is made again; the database that led is read until the new one is whole.'
+        : 'What this machine did while it led is saved. Its copy is made again; the database that led is read until the new one is whole.',
+    );
     this.keep({ old: { attempt: this.kept.attempt, migrations: this.kept.migrations, ...(led === undefined ? {} : { led }) }, attempt: this.kept.attempt + 1, database: NEXT_DB, phase: 'detach', migrations: null, notBefore: null, seen: false, missing: 0 });
     this.disabledSince = null;
   }

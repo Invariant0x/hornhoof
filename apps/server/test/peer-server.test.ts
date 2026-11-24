@@ -1,6 +1,6 @@
 import { createHash, createPrivateKey, generateKeyPairSync, randomBytes, randomUUID, webcrypto } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buffer } from 'node:stream/consumers';
@@ -587,7 +587,10 @@ describe('PeerServer', () => {
   it('serves a bundle only to its holders', async () => {
     const { stand, backups } = await standWithBackups();
     const x = await backups.sealed();
-    backups.keeper.store().put(x.head, x.manifest, x.out);
+    await backups.keeper.store().seal(x.id, part => {
+      copyFileSync(x.out, part);
+      return Promise.resolve({ head: x.head, manifest: x.manifest });
+    });
     backups.view.holders = { [x.id]: [WORKER_ID] };
     await backups.keeper.round();
     for (const kind of ['peer', 'app'] as const) {

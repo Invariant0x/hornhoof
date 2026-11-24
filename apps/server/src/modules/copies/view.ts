@@ -2,9 +2,11 @@ import { isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { machines, publicLinks } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
+import type { SavingWait } from '../keeper/led.js';
 import { freshState } from '../keeper/state.js';
 import { queryOf } from '../merge/leader.js';
 import { findThisMachine } from '../network/store.js';
+import { savingOf } from './measured.js';
 import { candidates } from './order.js';
 import { REPORT_FRESH_MS, unfit, type Unfit } from './qualify.js';
 
@@ -15,7 +17,7 @@ const BEHIND_MS = 60_000;
 export type CopyLine =
   | { line: 'making' | 'remaking'; progress: number }
   /* It led, and saves what it did then before its copy is made again. */
-  | { line: 'saving' }
+  | { line: 'saving'; waiting?: SavingWait; since?: string }
   | { line: 'ready' }
   | { line: 'catching_up' }
   | { line: 'behind'; minutes: number }
@@ -56,17 +58,22 @@ async function read(ctx: Ctx, now: Date): Promise<Read> {
   const pulseAt = pulse ? new Date(pulse.at).getTime() : null;
   for (const row of copies) {
     const state = said.find(copy => copy.name === row.copyName)?.state ?? null;
-    lines.set(row.id, lineOf(row, { now, pulseAt, reads: slots.some(slot => slot.name === row.copyName && slot.pid !== null), state }));
+    lines.set(row.id, lineOf(ctx, row, { now, pulseAt, reads: slots.some(slot => slot.name === row.copyName && slot.pid !== null), state }));
   }
   const sync = copies.find(row => said.some(copy => copy.name === row.copyName && copy.state === 'sync'))?.id ?? null;
   return { rows, leader: rows.find(row => row.id === leader?.id) ?? null, lines, sync };
 }
 
-function lineOf(row: Row, o: { now: Date; pulseAt: number | null; reads: boolean; state: 'sync' | 'pace' | 'behind' | 'silent' | null }): CopyLine {
+function savingLine(ctx: Ctx, id: string): CopyLine {
+  const detail = savingOf(ctx, id);
+  return detail ? { line: 'saving', waiting: detail.waiting, since: detail.since } : { line: 'saving' };
+}
+
+function lineOf(ctx: Ctx, row: Row, o: { now: Date; pulseAt: number | null; reads: boolean; state: 'sync' | 'pace' | 'behind' | 'silent' | null }): CopyLine {
   /* A machine that was given the data and has said nothing of a copy yet is at the start of making one. */
   if (row.copyState === null) return { line: 'making', progress: 0 };
   if (row.copyState === 'making' || row.copyState === 'remaking') return { line: row.copyState, progress: row.copyProgress ?? 0 };
-  if (row.copyState === 'saving') return { line: 'saving' };
+  if (row.copyState === 'saving') return savingLine(ctx, row.id);
   if (row.copyState === 'stopped') return { line: 'stopped', why: row.copyError === 'disk_full' || row.copyError === 'setup' ? row.copyError : null };
   const reported = row.reportAt !== null && o.now.getTime() - row.reportAt.getTime() <= REPORT_FRESH_MS;
   if (!o.reads || !reported) return { line: 'asleep', since: row.copyAt?.toISOString() ?? null };
