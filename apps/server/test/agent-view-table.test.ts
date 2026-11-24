@@ -182,6 +182,7 @@ const ELSEWHERE: Record<string, string> = {
   'PATCH /api/company/file-store': 'file-network.test.ts: the CEO or the orchestrator for him alone, 403 for a person of the whole company and a head acting for the CEO',
   'GET /api/files/move': 'file-move-routes.test.ts: the CEO or the orchestrator for him alone, 403 for a person of the whole company and a head acting for the CEO; counts and digests, no agent',
   'POST /api/files/move/approve': 'file-move-routes.test.ts: the CEO or the orchestrator for him alone, 403 for a person of the whole company and a head acting for the CEO',
+  'POST /api/company/file-store/backup/restore': "file-backup.test.ts: the CEO or the orchestrator for him alone, 403 for a person of the whole company and a head acting for the CEO; the company's own files, a dry run first",
   'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
   'PUT /api/tasks/:id/paused': 'task-pause.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
   'POST /api/tasks/:id/close': 'orchestrator-close.test.ts: the orchestrator alone, through its own calls; 403 for every person, the CEO too, and for a head',

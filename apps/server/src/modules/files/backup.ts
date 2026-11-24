@@ -152,6 +152,7 @@ async function prune(ctx: Pick<Ctx, 'db' | 'files'>, mine: string | null, now: D
    keeps as the backup moves off it, to send back to the leading machine; clear: it keeps nothing of the backup any
    more, so its folder empties. */
 export type BackupView = {
+  /* give: and, for the machine picked, what a restore of the CEO asks it to send back to the live store. */
   keep: boolean;
   hold: { sha256: string; sealedSha256: string; sealedSize: number }[];
   drop: string[];
@@ -172,9 +173,13 @@ export async function backupView(db: FilesDb, machineId: string, leader: string 
   const drop = rowsOf<{ sha256: string }>(
     await db.execute(sql`SELECT sha256 FROM net.file_backups WHERE machine_id = ${machineId} AND drop_at IS NOT NULL ORDER BY sha256 LIMIT ${BATCH}`),
   ).map(row => row.sha256);
-  /* What the leading machine keeps a live copy of, the machine picked fetches from it; the rest it is given back. */
+  /* What the leading machine keeps a live copy of, the machine picked fetches from it; the rest it is given back. The
+     machine picked gives back what a restore asks of it. */
   const give = keep
-    ? []
+    ? rowsOf<{ sha256: string }>(
+        await db.execute(sql`SELECT sha256 FROM net.file_backups WHERE machine_id = ${machineId} AND kept_at IS NOT NULL AND drop_at IS NULL AND restore_at IS NOT NULL
+          ORDER BY restore_at, sha256 LIMIT ${BATCH}`),
+      ).map(row => row.sha256)
     : rowsOf<{ sha256: string }>(
         await db.execute(sql`SELECT b.sha256 FROM net.file_backups b WHERE b.machine_id = ${machineId} AND b.kept_at IS NOT NULL AND b.drop_at IS NULL
           AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = b.sha256 AND c.machine_id IS NOT DISTINCT FROM ${leader}) ORDER BY b.sha256 LIMIT ${BATCH}`),

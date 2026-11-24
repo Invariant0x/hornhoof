@@ -11,7 +11,8 @@ CREATE TABLE net.file_backup_settings (
 --> statement-breakpoint
 -- Each content of the backup once, with the sealed facts of its record when it came: machine_id is the machine that
 -- keeps it, and kept_at when it was found kept there; none yet while it is on its way. drop_at: from when the machine
--- that keeps it is to let it go, as no row named it for the days kept; the row goes once it did.
+-- that keeps it is to let it go, as no row named it for the days kept; the row goes once it did. restore_at: when the
+-- CEO's restore asked the machine that keeps it to send it back to the live store.
 CREATE TABLE net.file_backups (
   sha256 text PRIMARY KEY CHECK (sha256 ~ '^[0-9a-f]{64}$'),
   size bigint NOT NULL CHECK (size >= 0),
@@ -21,7 +22,8 @@ CREATE TABLE net.file_backups (
   at timestamptz NOT NULL DEFAULT now(),
   machine_id uuid,
   kept_at timestamptz,
-  drop_at timestamptz
+  drop_at timestamptz,
+  restore_at timestamptz
 );
 --> statement-breakpoint
 -- Which row of attachments named which content, from when until when: a row deleted or given other bytes closes its

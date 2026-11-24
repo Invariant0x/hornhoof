@@ -1,18 +1,21 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { agents, attachments, machines } from '../src/db/schema.js';
+import { agents, attachments, departments, machines } from '../src/db/schema.js';
 import { fileStoreState } from '../src/modules/files/copies.js';
 import { machineSeats } from '../src/modules/files/place.js';
 import { storeRound } from '../src/modules/files/sweep.js';
 import { BACKUP_FILE_PATH, FILE_PATH, FileHolder, type FileLink } from '../src/modules/keeper/file-holder.js';
 import { LeaderFiles } from '../src/modules/keeper/leader-files.js';
+import { orchestratorHeaders } from '../src/auth/internal.js';
+import { hideSecretIn, storedTexts } from '../src/modules/tasks/hide-secret.js';
 import { backupCompany, from, MACHINE_ID } from './helpers-backups.js';
+import { as, invitePerson } from './helpers.js';
 
 /* The store's own backup (#2056): every content a row names, kept apart from the live store, for 30 days after no row
    names it any more. Synthetic files and machines only; the rounds run at the times the test names. */
@@ -28,11 +31,14 @@ async function stand() {
   const [server] = await c.db.select().from(machines).where(eq(machines.networkId, MACHINE_ID));
   const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   /* A file a person sent: its bytes in the store, and its row. */
-  const sent = async (bytes: Buffer) => {
+  const sent = async (bytes: Buffer, mediaType = 'application/octet-stream') => {
     const { sha256, size } = await c.app.ctx.files.putBytes(c.db, bytes);
-    const [row] = await c.db.insert(attachments).values({ companyId: c.acme.id, agentId: orchestrator!.id, personId: c.owner.id, name: 'notes.bin', mediaType: 'application/octet-stream', sha256, size }).returning();
+    const [row] = await c.db.insert(attachments).values({ companyId: c.acme.id, agentId: orchestrator!.id, personId: c.owner.id, name: 'notes.bin', mediaType, sha256, size }).returning();
     return row!;
   };
+  /* The CEO's restore, a dry run first: the answer names its digest, which the restore itself repeats. */
+  const restore = (payload: object, who: object = as(c.ceo)) => c.app.inject({ method: 'POST', url: '/api/company/file-store/backup/restore', payload, ...who });
+  const rowOf = async (id: string) => (await c.db.select().from(attachments).where(eq(attachments.id, id)))[0];
   const round = (at: Date) => storeRound(c.app.ctx, at);
   const backedUp = (sha256: string) => existsSync(join(dir, 'store-backup', sha256.slice(0, 2), sha256));
   const live = (sha256: string) => c.app.ctx.files.store().has(sha256);
@@ -62,7 +68,7 @@ async function stand() {
   };
   const targetsOf = async (sha256: string) =>
     rowsOf<{ machine_id: string }>(await c.db.execute(sql`SELECT machine_id FROM net.file_targets WHERE sha256 = ${sha256}`)).map(row => row.machine_id).sort();
-  return { ...c, dir, server: server!, sent, round, backedUp, live, recorded, leader, holderOn, targetsOf };
+  return { ...c, dir, server: server!, orchestrator: orchestrator!, sent, restore, rowOf, round, backedUp, live, recorded, leader, holderOn, targetsOf };
 }
 
 describe("the store's own backup", () => {
@@ -295,5 +301,166 @@ describe("the store's backup on another machine", () => {
     /* A machine that keeps nothing of the backup any more neither fetches a content of it nor gives one back. */
     expect((await s.leader.give(one, old.sha256!, true)).status).toBe(403);
     expect(await s.leader.take(one, old.sha256!, Readable.from([randomBytes(4100)]), true)).toBe(403);
+  });
+});
+
+describe('a restore from the store\'s backup', () => {
+  it('puts a deleted file back as it was, only with the digest of a dry run of the same restore', async () => {
+    const s = await stand();
+    const t0 = new Date();
+    const bytes = randomBytes(5000);
+    const row = await s.sent(bytes);
+    await s.round(t0);
+    await s.db.delete(attachments).where(eq(attachments.id, row.id));
+    await s.round(new Date(t0.getTime() + 60_000));
+    await s.round(new Date(t0.getTime() + 2 * DAY));
+    expect(s.live(row.sha256!)).toBe(false);
+    /* No restore without a dry run's digest. */
+    expect((await s.restore({ attachmentId: row.id, dryRun: false })).statusCode).toBe(400);
+    const dry = await s.restore({ attachmentId: row.id, dryRun: true });
+    expect(dry.statusCode).toBe(200);
+    const plan = dry.json() as { digest: string; items: { attachmentId: string; action: string; sha256: string; ready: boolean }[] };
+    expect(plan.items).toEqual([expect.objectContaining({ attachmentId: row.id, action: 'again', sha256: row.sha256, ready: true })]);
+    expect(await s.rowOf(row.id)).toBeUndefined();
+    expect((await s.restore({ attachmentId: row.id, dryRun: false, digest: 'f'.repeat(64) })).statusCode).toBe(409);
+    const done = await s.restore({ attachmentId: row.id, dryRun: false, digest: plan.digest });
+    expect([done.statusCode, (done.json() as { applied: number }).applied]).toEqual([200, 1]);
+    expect(await s.rowOf(row.id)).toMatchObject({ id: row.id, sha256: row.sha256, name: 'notes.bin', size: row.size });
+    expect((await s.app.ctx.files.bytes(s.db, row.sha256!)).equals(bytes)).toBe(true);
+    /* Once back, the same restore has nothing more to do. */
+    expect((await s.restore({ attachmentId: row.id, dryRun: true })).json()).toMatchObject({ items: [] });
+  });
+
+  it('puts back the bytes a row had at the moment the CEO names, before it was overwritten', async () => {
+    const s = await stand();
+    const t0 = new Date();
+    const before = randomBytes(4000);
+    const row = await s.sent(before);
+    await s.round(t0);
+    const after = await s.app.ctx.files.putBytes(s.db, randomBytes(4100));
+    await s.db.update(attachments).set({ sha256: after.sha256, size: after.size }).where(eq(attachments.id, row.id));
+    await s.round(new Date(t0.getTime() + 60_000));
+    await s.round(new Date(t0.getTime() + 2 * DAY));
+    const at = new Date(t0.getTime() + 30_000).toISOString();
+    const plan = (await s.restore({ attachmentId: row.id, at, dryRun: true })).json() as { digest: string; items: { action: string; sha256: string }[] };
+    expect(plan.items).toEqual([expect.objectContaining({ action: 'back', sha256: row.sha256 })]);
+    expect((await s.restore({ attachmentId: row.id, at, dryRun: false, digest: plan.digest })).statusCode).toBe(200);
+    expect(await s.rowOf(row.id)).toMatchObject({ sha256: row.sha256, size: before.length });
+    expect((await s.app.ctx.files.bytes(s.db, row.sha256!)).equals(before)).toBe(true);
+  });
+
+  it('puts the whole store back as it was at a moment, and leaves the files that came after as they are', async () => {
+    const s = await stand();
+    const t0 = new Date();
+    const [one, two] = [await s.sent(randomBytes(3000)), await s.sent(randomBytes(3000))];
+    await s.round(t0);
+    await s.db.delete(attachments).where(eq(attachments.id, one.id));
+    await s.db.delete(attachments).where(eq(attachments.id, two.id));
+    const later = await s.sent(randomBytes(3000));
+    const brief = await s.sent(randomBytes(3000));
+    await s.round(new Date(t0.getTime() + 60_000));
+    /* One that came after the moment and went again, and a name of another company's file: neither comes back. */
+    await s.db.delete(attachments).where(eq(attachments.id, brief.id));
+    await s.round(new Date(t0.getTime() + 90_000));
+    const other = '00000000-0000-4000-8000-0000000000bb';
+    await s.db.execute(sql`INSERT INTO net.file_backup_names (attachment_id, company_id, sha256, "row", since, until)
+      VALUES (gen_random_uuid(), ${other}, ${one.sha256}, ${JSON.stringify({ company_id: other, name: 'theirs.bin' })}::jsonb, ${t0.toISOString()}::timestamptz, ${new Date(t0.getTime() + 40_000).toISOString()}::timestamptz)`);
+    const at = new Date(t0.getTime() + 30_000).toISOString();
+    const plan = (await s.restore({ at, dryRun: true })).json() as { digest: string; items: { attachmentId: string; action: string }[] };
+    expect(plan.items.map(item => [item.attachmentId, item.action]).sort()).toEqual([[one.id, 'again'], [two.id, 'again']].sort());
+    expect((await s.restore({ at, dryRun: false, digest: plan.digest })).json()).toMatchObject({ applied: 2, waiting: 0 });
+    expect([await s.rowOf(one.id), await s.rowOf(two.id), await s.rowOf(later.id), await s.rowOf(brief.id)].map(row => row?.id)).toEqual([one.id, two.id, later.id, undefined]);
+    /* A whole store needs its moment. */
+    expect((await s.restore({ dryRun: true })).statusCode).toBe(400);
+  });
+
+  it('takes a restore from the CEO or the orchestrator for him alone, and of his own company', async () => {
+    const s = await stand();
+    const row = await s.sent(randomBytes(3000));
+    await s.round(new Date());
+    const zed = await invitePerson(s.app, s.ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
+    const [sales] = await s.db.insert(departments).values({ companyId: s.acme.id, name: 'Sales', roleCode: 'SAL' }).returning();
+    const [head] = await s.db.insert(agents).values({ companyId: s.acme.id, departmentId: sales!.id, kind: 'head', name: 'Sales head', model: 'claude-opus-5-5' }).returning();
+    for (const [who, status] of [[as(zed), 403], [{ headers: orchestratorHeaders(s.owner.id, head!.id) }, 403], [{}, 401]] as const)
+      expect((await s.restore({ attachmentId: row.id, dryRun: true }, who)).statusCode, JSON.stringify(who)).toBe(status);
+    expect((await s.restore({ attachmentId: row.id, dryRun: true }, { headers: orchestratorHeaders(s.owner.id, s.orchestrator.id) })).statusCode).toBe(200);
+    for (const wrong of [{ dryRun: 'yes' }, { attachmentId: 'x', dryRun: true }, { at: 'yesterday', dryRun: true }, { dryRun: true, more: 1 }])
+      expect((await s.restore(wrong)).statusCode, JSON.stringify(wrong)).toBe(400);
+  });
+
+  it('says in its dry run which row cannot come back as what it names is gone, and leaves it out', async () => {
+    const s = await stand();
+    const t0 = new Date();
+    const [helper] = await s.db.insert(agents).values({ companyId: s.acme.id, kind: 'worker', name: 'Helper', model: 'claude-opus-5-5' }).returning();
+    const { sha256, size } = await s.app.ctx.files.putBytes(s.db, randomBytes(3000));
+    const [row] = await s.db.insert(attachments).values({ companyId: s.acme.id, agentId: helper!.id, name: 'helper.bin', mediaType: 'application/octet-stream', sha256, size }).returning();
+    await s.round(t0);
+    await s.db.delete(attachments).where(eq(attachments.id, row!.id));
+    await s.db.delete(agents).where(eq(agents.id, helper!.id));
+    await s.round(new Date(t0.getTime() + 60_000));
+    const plan = (await s.restore({ attachmentId: row!.id, dryRun: true })).json() as { digest: string; items: unknown[] };
+    expect(plan.items).toEqual([expect.objectContaining({ action: 'again', ready: false, reason: 'agent gone' })]);
+    expect((await s.restore({ attachmentId: row!.id, dryRun: false, digest: plan.digest })).json()).toMatchObject({ applied: 0, items: [expect.objectContaining({ status: 'gone' })] });
+    expect(await s.rowOf(row!.id)).toBeUndefined();
+  });
+
+  it('puts nothing back from a backup copy changed on its disk', async () => {
+    const s = await stand();
+    const t0 = new Date();
+    const row = await s.sent(randomBytes(5000));
+    await s.round(t0);
+    await s.db.delete(attachments).where(eq(attachments.id, row.id));
+    await s.round(new Date(t0.getTime() + 60_000));
+    await s.round(new Date(t0.getTime() + 2 * DAY));
+    const path = join(s.dir, 'store-backup', row.sha256!.slice(0, 2), row.sha256!);
+    const copy = readFileSync(path);
+    copy[copy.length - 5]! ^= 0xff;
+    writeFileSync(path, copy);
+    const plan = (await s.restore({ attachmentId: row.id, dryRun: true })).json() as { digest: string };
+    const done = await s.restore({ attachmentId: row.id, dryRun: false, digest: plan.digest });
+    expect(done.json()).toMatchObject({ applied: 0, items: [expect.objectContaining({ status: 'refused' })] });
+    expect([await s.rowOf(row.id), s.live(row.sha256!)]).toEqual([undefined, false]);
+  });
+
+  it('asks the machine that keeps the backup for what is to come back, and puts it back once it came', async () => {
+    const s = await stand();
+    const one = await s.worker('one');
+    const t0 = new Date();
+    await s.round(t0);
+    const bytes = randomBytes(6000);
+    const row = await s.sent(bytes);
+    await s.round(new Date());
+    const there = s.holderOn(one);
+    await there.holder.lookOnce();
+    await s.db.delete(attachments).where(eq(attachments.id, row.id));
+    await s.round(new Date());
+    /* No row named it for two days: the live store lets it go, here and on that machine. */
+    await s.db.execute(sql`UPDATE net.files SET unused_since = now() - interval '2 days' WHERE sha256 = ${row.sha256}`);
+    await s.round(new Date());
+    await there.holder.lookOnce();
+    expect([s.live(row.sha256!), there.holder.store.has(row.sha256!), there.backedUp(row.sha256!)]).toEqual([false, false, true]);
+    const plan = (await s.restore({ attachmentId: row.id, dryRun: true })).json() as { digest: string };
+    expect((await s.restore({ attachmentId: row.id, dryRun: false, digest: plan.digest })).json()).toMatchObject({ applied: 0, waiting: 1 });
+    await there.holder.lookOnce();
+    expect((await s.restore({ attachmentId: row.id, dryRun: false, digest: plan.digest })).json()).toMatchObject({ applied: 1, waiting: 0 });
+    expect((await s.app.ctx.files.bytes(s.db, row.sha256!)).equals(bytes)).toBe(true);
+    expect(there.backedUp(row.sha256!)).toBe(true);
+  });
+
+  it('lets go at once of a text a secret was hidden in, and of every row of it that named the secret, so no restore brings it back', async () => {
+    const s = await stand();
+    const t0 = new Date();
+    const secret = 'sk-test-0000-backup-secret';
+    const row = await s.sent(Buffer.from(`token ${secret} here`), 'text/plain');
+    await s.round(t0);
+    await s.db.transaction(tx => hideSecretIn(tx as unknown as typeof s.db, s.acme.id, s.owner.id, secret, storedTexts(s.app.ctx, tx)));
+    const hidden = (await s.rowOf(row.id))!;
+    expect(hidden.sha256).not.toBe(row.sha256);
+    await s.round(new Date(t0.getTime() + 60_000));
+    expect([s.backedUp(row.sha256!), await s.recorded(row.sha256!), s.backedUp(hidden.sha256!)]).toEqual([false, false, true]);
+    const names = rowsOf<{ sha256: string; row: unknown }>(await s.db.execute(sql`SELECT sha256, "row" FROM net.file_backup_names WHERE attachment_id = ${row.id}`));
+    expect(names.map(name => name.sha256)).toEqual([hidden.sha256]);
+    expect(JSON.stringify(names)).not.toContain(secret);
+    expect((await s.restore({ attachmentId: row.id, at: new Date(t0.getTime() + 1).toISOString(), dryRun: true })).json()).toMatchObject({ items: [] });
   });
 });

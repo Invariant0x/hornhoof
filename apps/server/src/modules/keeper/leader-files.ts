@@ -5,6 +5,7 @@ import type { Db } from '../../db/client.js';
 import { backsUpStore } from '../files/backup.js';
 import { recordFile } from '../files/files.js';
 import { keepsFiles, pickedFor } from '../files/network.js';
+import { placeFiles } from '../files/place.js';
 import { challengeOf, macOf } from '../files/proof.js';
 import { sealedSizeOf } from '../files/seal.js';
 import { namedUnrecorded } from '../files/sweep.js';
@@ -115,13 +116,15 @@ export class LeaderFiles {
    long and with the sealed hash the record says, sealed again where it was sealed before. The backup folder here keeps
    it, until the machine picked fetches it. */
   private async takeBackup(machine: string, sha256: string, body: Readable): Promise<number> {
-    const [row] = rowsOf<{ sealed_sha256: string; sealed_size: string; salt: string }>(
-      await this.db.execute(sql`SELECT sealed_sha256, sealed_size, salt FROM net.file_backups WHERE sha256 = ${sha256} AND machine_id = ${machine} AND kept_at IS NOT NULL AND drop_at IS NULL`),
+    const [row] = rowsOf<{ size: string; sealed_sha256: string; sealed_size: string; salt: string; restore: boolean }>(
+      await this.db.execute(sql`SELECT size, sealed_sha256, sealed_size, salt, restore_at IS NOT NULL AS restore FROM net.file_backups
+        WHERE sha256 = ${sha256} AND machine_id = ${machine} AND kept_at IS NOT NULL AND drop_at IS NULL`),
     );
     if (!row) {
       body.destroy();
       return 403;
     }
+    if (row.restore) return this.takeRestored(sha256, body, row);
     try {
       await this.backup.take(sha256, body, { sealedSha256: row.sealed_sha256, sealedSize: Number(row.sealed_size) }, this.key ? { key: await this.key(), salt: row.salt } : undefined);
     } catch (err) {
@@ -129,6 +132,26 @@ export class LeaderFiles {
       throw err;
     }
     await this.db.execute(sql`UPDATE net.file_backups SET machine_id = ${await this.ownRow()}, kept_at = now() WHERE sha256 = ${sha256} AND machine_id = ${machine}`);
+    return 201;
+  }
+
+  /* A content a restore of the CEO asked the backup's machine for: into the live store, once it opens with the store key
+     to bytes of its name, and recorded and placed as an upload is. The backup keeps its copy where it was. */
+  private async takeRestored(sha256: string, body: Readable, row: { size: string; sealed_size: string }): Promise<number> {
+    if (!this.key) {
+      body.destroy();
+      return 403;
+    }
+    try {
+      await this.store.takeOpened(sha256, body, await this.key(), Number(row.sealed_size));
+    } catch (err) {
+      if (err instanceof StoreRefused) return 400;
+      throw err;
+    }
+    const own = await this.ownRow();
+    await recordFile(this.db, { sha256, size: Number(row.size), ...(await this.store.sealedFacts(sha256)) }, own);
+    await placeFiles(this.db, own, { only: [sha256] });
+    await this.db.execute(sql`UPDATE net.file_backups SET restore_at = NULL WHERE sha256 = ${sha256}`);
     return 201;
   }
 

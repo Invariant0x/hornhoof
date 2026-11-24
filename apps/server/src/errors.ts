@@ -180,6 +180,7 @@ export type ErrorReason =
   | 'file_retry'
   | 'file_store_full'
   | 'file_store_busy'
+  | 'restore_changed'
   | 'file_lost'
   | 'move_approved'
   | 'move_unknown'
