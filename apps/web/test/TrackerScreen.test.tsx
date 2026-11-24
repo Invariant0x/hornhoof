@@ -23,11 +23,15 @@ const BRUNO = { id: 'b1', name: 'Bruno', kind: 'worker' as const, role: null };
 const COMPANY_GOAL: GoalView = { id: 'g1', number: 1, title: '500 subscribers', why: 'People pay for the shop.', department: null, parentId: null, responsible: IVAN, target: 500, current: 212, unit: 'subscribers', dueAt: null, status: 'active', progress: 0.424, done: 0, total: 0, version: 2, mayEdit: true };
 const DEPT_GOAL: GoalView = { ...COMPANY_GOAL, id: 'g2', number: 2, title: 'Card payments', why: 'Shops take cards.', department: DEV, parentId: 'g1', responsible: MARIA, target: null, current: null, unit: '', progress: 0.5, done: 1, total: 2, version: 0 };
 const SERVES = { id: 'g2', number: 2, title: 'Card payments' };
-const line = (over: Partial<TaskLine> & { id: string; number: number; title: string }): TaskLine => ({
-  echelons: taskRoute(), brief: '', status: 'working', department: DEV, product: null, assignee: BRUNO, turn: null, parentId: null, waitsFor: [],
-  createdAt: '2026-11-16T08:00:00.000Z', updatedAt: '2026-11-16T09:00:00.000Z', goal: null, responsible: IVAN, why: '', dueAt: null, pipelineId: null, pipelineStageId: null,
-  time: { inStatusSince: '2026-11-16T08:00:00.000Z', workSeconds: 0, waitsOn: [] }, ...over,
-});
+/* A task is asked for by the person who decides it, unless the test says otherwise: "My tasks" holds what a person asked for. */
+const line = (over: Partial<TaskLine> & { id: string; number: number; title: string }): TaskLine => {
+  const made: TaskLine = {
+    echelons: taskRoute(), brief: '', status: 'working', department: DEV, product: null, assignee: BRUNO, turn: null, parentId: null, waitsFor: [],
+    createdAt: '2026-11-16T08:00:00.000Z', updatedAt: '2026-11-16T09:00:00.000Z', goal: null, responsible: IVAN, why: '', dueAt: null, pipelineId: null, pipelineStageId: null,
+    time: { inStatusSince: '2026-11-16T08:00:00.000Z', workSeconds: 0, waitsOn: [] }, ...over,
+  };
+  return { ...made, askedBy: 'askedBy' in over ? over.askedBy : made.responsible };
+};
 const PAY = line({ id: 't21', number: 21, title: 'Take card payments', goal: SERVES, responsible: MARIA, why: 'Shops sell online.', pipelineId: 'pl1', pipelineStageId: 's1' });
 const FORM = line({ id: 't22', number: 22, title: 'Card form', status: 'open', parentId: 't21', goal: SERVES, responsible: MARIA });
 const REFUND = line({ id: 't23', number: 23, title: 'Refund button', status: 'review', goal: SERVES, waitsFor: [21] });
@@ -333,7 +337,7 @@ describe('the views and the card', () => {
     expect(path).toHaveTextContent('Card payments');
     expect(panel).toHaveTextContent('Shops sell online.');
     const facts = within(within(panel).getByRole('group', { name: 'Facts' }));
-    expect(facts.getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Maria');
+    expect(facts.getByRole('definition', { name: 'Decides' })).toHaveTextContent('Maria');
     await waitFor(() => expect(facts.getByRole('definition', { name: 'Pipeline' })).toHaveTextContent('Payments way · stage Build'));
     expect(within(within(panel).getByRole('region', { name: 'Links' })).getByRole('link', { name: '#23 Refund button' })).toHaveAttribute('title', 'Needed for');
     await user.click(within(within(panel).getByRole('region', { name: 'Subtasks' })).getByRole('link', { name: '#22 Card form' }));

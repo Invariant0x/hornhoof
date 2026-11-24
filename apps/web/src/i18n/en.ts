@@ -2775,6 +2775,9 @@ export const en = {
       why: 'Why',
       facts: 'Facts',
       responsible: 'Responsible',
+      /* Of a task: whose request started its tree, and who answers its questions and approvals. */
+      askedBy: 'Asked by',
+      decides: 'Decides',
       executor: 'Executor',
       pipeline: 'Pipeline',
       pipelineStage: (pipeline: string, stage: string) => `${pipeline} · stage ${stage}`,

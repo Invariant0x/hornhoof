@@ -1,5 +1,5 @@
 {
-  "id": "02ee6e81-0869-450a-aceb-807baa52b344",
+  "id": "730eacb0-8db3-428f-bb7c-f1e0fac57d18",
   "prevId": "f87c021c-57fc-4ab5-a45a-d0c2df4ff675",
   "version": "7",
   "dialect": "postgresql",
@@ -12393,6 +12393,18 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "asked_by_person_id": {
+          "name": "asked_by_person_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subtask_reason": {
+          "name": "subtask_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -12543,6 +12555,21 @@
           ],
           "isUnique": false,
           "where": "\"tasks\".\"external_wait\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tasks_asked_by": {
+          "name": "tasks_asked_by",
+          "columns": [
+            {
+              "expression": "asked_by_person_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -12717,6 +12744,19 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "tasks_asked_by_person_id_people_id_fk": {
+          "name": "tasks_asked_by_person_id_people_id_fk",
+          "tableFrom": "tasks",
+          "tableTo": "people",
+          "columnsFrom": [
+            "asked_by_person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -12759,6 +12799,10 @@
         "tasks_risk_class": {
           "name": "tasks_risk_class",
           "value": "\"tasks\".\"risk_class\" IS NULL OR \"tasks\".\"risk_class\" IN ('money', 'access', 'security', 'data', 'none')"
+        },
+        "tasks_subtask_reason_known": {
+          "name": "tasks_subtask_reason_known",
+          "value": "\"tasks\".\"subtask_reason\" IS NULL OR \"tasks\".\"subtask_reason\" IN ('independent_result', 'other_owner', 'parallel_block')"
         }
       },
       "isRLSEnabled": false

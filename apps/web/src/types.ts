@@ -534,6 +534,8 @@ export type TaskLine = {
      it exists, by when, its time, and the pipeline and stage it stands on. An older server sends none. */
   goal?: { id: string; number: number; title: string } | null;
   responsible?: PersonRef | null;
+  /* The person whose request started the tree the task is in; none for work agents started themselves. */
+  askedBy?: PersonRef | null;
   why?: string;
   dueAt?: string | null;
   time?: TimeFacts;

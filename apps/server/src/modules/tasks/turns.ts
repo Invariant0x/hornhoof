@@ -168,6 +168,7 @@ function ownWork(scope: Scope, items: PlanItem[]): PlanItem[] {
 export async function giveTasks(ctx: Ctx, by: By, items: PlanItem[], improvement?: string, backlog: string[] = [], scope: Scope = null): Promise<{ text: string; wakes: Wake[] }> {
   const { companyId, agentId } = by;
   const listed = await readBacklog(ctx.db, companyId, backlog);
+  if (scope && items.some(i => i.askedByPersonId)) throw refuse(403, 'task_not_yours', 'Only the orchestrator names the person whose request work carries out.');
   const placed = await place(ctx, by, companyId, ownWork(scope, [...items, ...fromBacklog(listed, i => i.createdByPersonId)]));
   const done = await ctx.db.transaction(async tx => {
     await lockCompany(tx, companyId);
