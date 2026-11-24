@@ -85,6 +85,9 @@ export type RendererDebugInfo = Readonly<{
 }>;
 
 export type WorldEngineStats = Readonly<{
+  /* Frames stepped since the map started, and whether it is parked behind another tab (#1947 item 3). */
+  framesDrawn: number;
+  paused: boolean;
   fps: number;
   frameTimeMs: number;
   cpuStepMs: number;
@@ -255,6 +258,9 @@ export class IsometricWorldEngine {
   private destroyed = false;
   private dirtyScene = true;
   private rafId = 0;
+  /* Parked behind another tab (#1947 item 3): no frames, no keys, no resizes until shown again. */
+  private paused = false;
+  private framesDrawn = 0;
   private lastFrameTs = 0;
   private fpsSamples: number[] = [];
   private lastFps = 60;
@@ -494,7 +500,7 @@ export class IsometricWorldEngine {
     this.attachEvents();
     this.lastFrameTs = performance.now();
     this.stepFrame(this.lastFrameTs);
-    this.rafId = requestAnimationFrame(this.onAnimationFrame);
+    if (!this.paused) this.rafId = requestAnimationFrame(this.onAnimationFrame);
   }
 
   /* Reads the pack's art index once; every texture that finishes loading redraws the city. */
@@ -690,7 +696,7 @@ export class IsometricWorldEngine {
   }
 
   private readonly handleResize = (): void => {
-    if (this.destroyed) return;
+    if (this.destroyed || this.paused) return;
     const next = this.readHostSize();
     const nextDpr = Math.min(Math.max(1, window.devicePixelRatio || 1), 2);
     if (next.width === this.viewport.width && next.height === this.viewport.height && nextDpr === this.dpr) return;
@@ -806,6 +812,7 @@ export class IsometricWorldEngine {
   };
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
+    if (this.paused) return;
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd', 'W', 'A', 'S', 'D'].includes(e.key)) {
       this.pressedKeys.add(e.key.toLowerCase());
     }
@@ -1163,9 +1170,29 @@ export class IsometricWorldEngine {
     this.emitStats(true);
   }
 
+  /* Parks the map while it is hidden behind another tab (#1947 item 3): it keeps everything it holds and draws no frame,
+     reads no key and follows no resize; shown again, it measures its host and draws on from where it stood. */
+  setPaused(paused: boolean): void {
+    if (this.destroyed || paused === this.paused) return;
+    this.paused = paused;
+    this.pressedKeys.clear();
+    if (paused) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = 0;
+      return;
+    }
+    this.handleResize();
+    this.cityDirty = true;
+    this.dirtyScene = true;
+    this.lastFrameTs = performance.now();
+    this.rafId = requestAnimationFrame(this.onAnimationFrame);
+  }
+
   getStats(): WorldEngineStats {
     const lod = lodForCamera(this.pack, this.camera.zoom, this.dpr);
     return {
+      framesDrawn: this.framesDrawn,
+      paused: this.paused,
       fps: Math.round(this.lastFps),
       frameTimeMs: Math.round(this.lastFrameMs * 10) / 10,
       cpuStepMs: Math.round(this.lastCpuStepMs * 100) / 100,
@@ -1273,12 +1300,13 @@ export class IsometricWorldEngine {
   }
 
   private readonly onAnimationFrame = (ts: number): void => {
-    if (this.destroyed) return;
+    if (this.destroyed || this.paused) return;
     this.stepFrame(ts);
     this.rafId = requestAnimationFrame(this.onAnimationFrame);
   };
 
   private stepFrame(ts: number): void {
+    this.framesDrawn++;
     const stepStart = performance.now();
     const dtMs = Math.max(1, Math.min(100, ts - this.lastFrameTs || 16.67));
     this.lastFrameTs = ts;

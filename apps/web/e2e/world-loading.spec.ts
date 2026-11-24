@@ -1,6 +1,6 @@
 /* #1947 items 1 and 2 in the product: the world loads once behind its loading screen, with progress by the real bytes of
-   its pictures; the pictures are kept in the browser by content hash, so reopening the map or coming back to it from
-   another tab shows no loading screen and downloads no picture, and after an art version change only the changed file downloads. The art folder here is the
+   its pictures; the pictures are kept in the browser by content hash, so reopening the map shows no loading screen and
+   downloads no picture; behind another tab the world stays mounted and paused (item 3); and after an art version change only the changed file downloads. The art folder here is the
    test's own: four ground pictures painted in one colour each, so the test needs no artist files. */
 
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
@@ -99,6 +99,9 @@ async function openMap(page: Page): Promise<void> {
   });
 }
 
+const worldStats = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __WORLD_PRODUCT__: { getStats: () => { paused: boolean; framesDrawn: number } } }).__WORLD_PRODUCT__.getStats());
+
 const loadLog = (page: Page) => page.evaluate(() => (window as unknown as { __worldLoadLog: string[][] }).__worldLoadLog);
 
 test.use({ viewport: { width: 1366, height: 860 } });
@@ -127,14 +130,19 @@ test('the first visit shows the loading screen with the real bytes; reopening an
   expect(await loadLog(page), 'no loading screen on a reload').toEqual([]);
   expect(pictures.length, 'no picture downloads on a reload').toBe(folder.current.size);
 
+  /* Item 3: behind Tasks the world stays mounted, hidden and paused, and comes back as it was. */
+  await page.locator('.world-canvas-host canvas').evaluate(c => ((c as HTMLCanvasElement).dataset.kept = 'yes'));
   const nav = page.getByRole('navigation');
   await nav.getByRole('button', { name: 'Tasks', exact: true }).click();
-  await expect(page.locator('[data-world-canvas="egypt"]')).toHaveCount(0);
+  await expect(page.locator('[data-world-canvas="egypt"]')).toBeHidden();
+  const parked = await worldStats(page);
+  expect(parked.paused, 'the world is parked behind Tasks').toBe(true);
+  await page.evaluate(() => new Promise(done => { let n = 0; const tick = () => (++n < 10 ? requestAnimationFrame(tick) : done(null)); requestAnimationFrame(tick); }));
+  expect((await worldStats(page)).framesDrawn, 'no frame drawn behind Tasks').toBe(parked.framesDrawn);
   await nav.getByRole('button', { name: 'Map', exact: true }).click();
-  await page.waitForFunction(() => {
-    const s = (window as unknown as { __WORLD_PRODUCT__?: { getStats: () => { visibleChunks: number; pendingBakes: number } | null } }).__WORLD_PRODUCT__?.getStats();
-    return Boolean(s && s.visibleChunks > 0 && s.pendingBakes === 0);
-  });
+  await expect(page.locator('[data-world-canvas="egypt"]')).toBeVisible();
+  await expect.poll(async () => (await worldStats(page)).framesDrawn, 'it draws again on the map').toBeGreaterThan(parked.framesDrawn);
+  expect(await page.locator('.world-canvas-host canvas').evaluate(c => (c as HTMLCanvasElement).dataset.kept), 'the same world, not a new one').toBe('yes');
   expect(await loadLog(page), 'no loading screen back from Tasks').toEqual([]);
   expect(pictures.length, 'no picture downloads back from Tasks').toBe(folder.current.size);
 

@@ -55,6 +55,8 @@ export type WorldMapViewProps = Readonly<{
   onOpenTracker?: (departmentId: string) => void;
   onOpenTab?: (tab: 'subscriptions' | 'machines') => void;
   onHire?: (dept: Department) => void;
+  /* Hidden behind another tab: the world stays mounted and paused, and comes back as it was (#1947 item 3). */
+  parked?: boolean;
 }>;
 
 type PendingRelocateModal = Readonly<{
@@ -103,6 +105,7 @@ export function WorldMapView({
   org,
   pack,
   inside = false,
+  parked = false,
   windowOpen,
   activeDepartmentId = null,
   onOpenOrchestrator,
@@ -137,6 +140,12 @@ export function WorldMapView({
   const hostRef = useRef<HTMLDivElement>(null);
   const roomStyle = useMapRoom(boxRef, `${windowOpen}`, useShellTop());
   const engineRef = useRef<IsometricWorldEngine | null>(null);
+  /* Parked behind another tab: the engine draws nothing until the map is shown again (#1947 item 3). */
+  const parkedRef = useRef(parked);
+  parkedRef.current = parked;
+  useEffect(() => {
+    engineRef.current?.setPaused(parked);
+  }, [parked]);
   const mapRef = useRef<GeneratedWorldMap | null>(null);
   const cityRef = useRef<CityState | null>(null);
   const syncRef = useRef<LiveCitySyncResult | null>(null);
@@ -248,6 +257,11 @@ export function WorldMapView({
     if (activeDepartmentId) onCloseDepartment?.();
   }, [activeDepartmentId, onCloseDepartment]);
 
+  /* The engine's handlers call the current choices through refs, so a new callback from the shell (any re-render, such
+     as a tab switch) never remounts the world (#1947 item 3). */
+  const picks = useRef({ clearSelection, selectBuilding, selectResident });
+  picks.current = { clearSelection, selectBuilding, selectResident };
+
   /* Sync external /departments/:id route directly into on-map Department Mode (no separate department screen). */
   useEffect(() => {
     if (!activeDepartmentId) return;
@@ -328,7 +342,7 @@ export function WorldMapView({
         },
         onSelectResident: resident => {
           if (relocatingRef.current) return;
-          if (resident) selectResident(resident);
+          if (resident) picks.current.selectResident(resident);
         },
         onSelect: pick => {
           const rel = relocatingRef.current;
@@ -343,11 +357,11 @@ export function WorldMapView({
           if (pick?.kind === 'object' && curCity) {
             const building = curCity.buildings.find(b => b.id === pick.object.id);
             if (building) {
-              selectBuilding(building);
+              picks.current.selectBuilding(building);
               return;
             }
           }
-          clearSelection();
+          picks.current.clearSelection();
         },
       }).then(engine => {
         if (!alive) {
@@ -363,6 +377,7 @@ export function WorldMapView({
         });
         engine.setResidentSimulation(sim);
         engine.setConstructionSimulation(constructionSim);
+        engine.setPaused(parkedRef.current);
         if (screened) bakeBehindScreen(engine);
         else engine.flushVisibleBakes();
         setZoom(engine.getStats().zoom);
@@ -394,7 +409,7 @@ export function WorldMapView({
             const targetZoom = kind === 'department' ? 0.78 : 1.15;
             engineRef.current?.centerOnBuilding(target.id, targetZoom);
             engineRef.current?.flushVisibleBakes();
-            selectBuilding(target);
+            picks.current.selectBuilding(target);
             return { id: target.id, label: target.label, kind: target.kind };
           },
           selectResidentByRoleClass: roleClass => {
@@ -404,10 +419,10 @@ export function WorldMapView({
             engineRef.current?.centerOnResident(found.id, 1.4);
             engineRef.current?.setSelectedResidentId(found.id);
             engineRef.current?.flushVisibleBakes();
-            selectResident(found);
+            picks.current.selectResident(found);
             return { id: found.id, agentId: found.agentId, name: found.name };
           },
-          clearSelection: () => clearSelection(),
+          clearSelection: () => picks.current.clearSelection(),
           centerOnBuilding: (buildingId, nextZoom) => {
             const ok = engineRef.current?.centerOnBuilding(buildingId, nextZoom) ?? false;
             if (ok) engineRef.current?.flushVisibleBakes();
@@ -452,7 +467,7 @@ export function WorldMapView({
       engineRef.current?.destroy();
       engineRef.current = null;
     };
-  }, [pack, seed, clearSelection, selectBuilding, selectResident]);
+  }, [pack, seed]);
 
   /* Re-sync live snapshot changes cleanly into the running city without remounting PixiJS. */
   useEffect(() => {
@@ -492,7 +507,7 @@ export function WorldMapView({
 
   /* Escape cancels relocation mode or closes the active side card & Department Mode. */
   useEffect(() => {
-    if (!selection && !relocatingBuilding && !confirmRelocate) return;
+    if (parked || (!selection && !relocatingBuilding && !confirmRelocate)) return;
     const onKey = (e: KeyboardEvent) => {
       if (!takeEscape(e)) return;
       if (confirmRelocate) {
@@ -507,7 +522,7 @@ export function WorldMapView({
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [selection, relocatingBuilding, confirmRelocate, clearSelection]);
+  }, [parked, selection, relocatingBuilding, confirmRelocate, clearSelection]);
 
   const canRelocateBuilding = useCallback(
     (building: CityBuilding): boolean => {
@@ -568,7 +583,7 @@ export function WorldMapView({
   const status = orchestratorStatus(t, sub, limitAt, org.orchestrator?.planned);
 
   return (
-    <div className="map world-map" ref={boxRef} data-world-canvas={pack.id} inert={inside} aria-hidden={inside || undefined}>
+    <div className="map world-map" ref={boxRef} data-world-canvas={pack.id} hidden={parked} inert={inside || parked} aria-hidden={inside || parked || undefined}>
       <div className="world-canvas-host" ref={hostRef} />
       {loading && <WorldLoadingScreen progress={loading} />}
       <div className="map-room" style={roomStyle}>
