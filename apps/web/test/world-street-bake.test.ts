@@ -187,6 +187,72 @@ describe('a street and the bridge', () => {
   });
 });
 
+/* An avenue (#2003): a run of tiles along u on row 5 and its lane on row 6, its middle line between them at v = 6; a
+   dirt street meets the run from above at column 5, another meets the lane from below at column 6, and a trail goes on
+   from the run's end along row 5. */
+describe('an avenue two tiles wide', () => {
+  const AVENUE_RGB = [40, 90, 140] as const;
+  const WITH_AVENUE = { ...STRIPS, avenue: strip(2, AVENUE_RGB) };
+  const avenue = (cols: readonly number[], row: number, side: 1 | -1): StreetTile[] => cols.map(col => ({ col, row, tier: 'avenue', avenue: { axis: 'u', side } }));
+  const RUN = [2, 3, 4, 5, 6, 7, 8, 9];
+  const CELLS: StreetTile[] = [
+    ...avenue(RUN, 5, 1),
+    ...avenue(RUN, 6, -1),
+    ...tiles('dirt', [[5, 2], [5, 3], [5, 4]]),
+    ...tiles('dirt', [[6, 7], [6, 8], [6, 9]]),
+    ...tiles('trail', [[10, 5], [11, 5], [12, 5]]),
+  ];
+  const sample = (field: NonNullable<ReturnType<typeof streetField>>, u: number, v: number) => {
+    const out = [0, 0, 0, 0];
+    field.at(u, v, out);
+    return out;
+  };
+
+  it("lies across both its tiles in the avenue's strip, full from edge to edge, and nothing past them", () => {
+    const field = streetField(CELLS, WITH_AVENUE, TPT)!;
+    for (const u of [3.5, 4.5, 7.5, 8.5]) {
+      for (const v of [5.1, 5.5, 6, 6.5, 6.9]) {
+        const [r, g, b, a] = sample(field, u, v);
+        expect(a, `${u},${v}`).toBeGreaterThan(0.99);
+        if (Math.abs(v - 6) < 0.6) expect([r, g, b].map(Math.round), `${u},${v} is the avenue's`).toEqual([...AVENUE_RGB]);
+      }
+      expect(sample(field, u, 4.95)[3], `${u} above`).toBe(0);
+      expect(sample(field, u, 7.05)[3], `${u} below`).toBe(0);
+    }
+    /* Its ends are round within its first and last tiles. */
+    expect(sample(field, 1.95, 6)[3]).toBe(0);
+    expect(sample(field, 2.05, 6)[3]).toBeGreaterThan(0);
+    expect(sample(field, 10.05, 6)[3]).toBe(0);
+  });
+
+  it('takes the streets that meet it at its edge, with no gap and no second edge where they meet', () => {
+    const field = streetField(CELLS, WITH_AVENUE, TPT)!;
+    for (let v = 3.5; v <= 6; v += STEP) expect(sample(field, 5.5, v)[3], `from above at ${v.toFixed(3)}`).toBeGreaterThan(0.99);
+    for (let v = 8.5; v >= 6; v -= STEP) expect(sample(field, 6.5, v)[3], `from below at ${v.toFixed(3)}`).toBeGreaterThan(0.99);
+    for (let u = 9.5; u <= 11.5; u += STEP) expect(sample(field, u, 5.5)[3], `the trail on at ${u.toFixed(3)}`).toBeGreaterThan(0.99);
+    for (const [cu, cv] of [[5.5, 5.5], [6.5, 6.5], [9.5, 5.5]] as const) {
+      for (let i = 0; i < 96; i++) {
+        const angle = (i / 96) * Math.PI * 2;
+        const ray: Sample[] = [];
+        for (let t = 0; t <= 0.75; t += STEP) {
+          const [r, g, b, a] = sample(field, cu + Math.cos(angle) * t, cv + Math.sin(angle) * t);
+          ray.push({ alpha: a!, lum: (r! + g! + b!) / 3 });
+        }
+        expect(lightRuns(ray), `${cu},${cv} ${angle.toFixed(2)}`).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("shows as two stone streets side by side in a pack that has no avenue strip", () => {
+    const field = streetField(CELLS, STRIPS, TPT)!;
+    for (const v of [5.5, 6.5]) {
+      const [r, g, b, a] = sample(field, 4.5, v);
+      expect(a).toBeGreaterThan(0.99);
+      expect([r, g, b].map(Math.round)).toEqual([CORE, CORE, CORE]);
+    }
+  });
+});
+
 describe('the street strips of a pack', () => {
   it('load by tier from the names the pack gives, and a strip that fails is left out', async () => {
     const px = strip(0.8);
