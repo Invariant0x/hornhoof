@@ -124,6 +124,9 @@ type Agent = {
   left: Set<string>;
   /* The session a person's clear began, until a turn types an assistant's whole conversation into it. */
   blank: string | null;
+  /* The conversation Antigravity named first since its program started: the agent's own. One it names later is a
+     sub-agent's. */
+  agyConversation: string | null;
   tail: LineTail | null;
   draining: boolean;
   /* The Codex session logs there were when the program started a new session: its own log is none of them. */
@@ -340,7 +343,7 @@ async function launchHash({ program, bin, input, version = noVersion }: TermJob,
 function startedState({ program, home, input }: TermJob, spec: LaunchSpec): Partial<Agent> {
   const namesLater = (program.kind === 'kimi' || program.kind === 'antigravity') && !input.sessionId;
   return {
-    program, home, workDir: input.workDir, contextDir: input.workDir, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false,
+    program, home, workDir: input.workDir, contextDir: input.workDir, sessionId: spec.sessionId, agyConversation: null, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false,
     oldLogs: program.kind === 'codex' && !spec.sessionId ? rolloutFiles(home) : null,
     keep: namesLater ? (input.context ?? null) : null,
     contextSize: program.kind === 'kimi' ? kimiWindow(home, input.model) : null,
@@ -640,7 +643,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, completionStart: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, agyConversation: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, completionStart: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
       this.agents.set(key, a);
     }
     return a;
@@ -2506,8 +2509,16 @@ export class TerminalHost {
   }
 
   private stoppedHook(a: Agent, data: Record<string, unknown>): Promise<void> {
+    if (this.subAgentHook(a, data)) return Promise.resolve();
     /* agy's Stop ends an execution; fullyIdle distinguishes the conversation's end from more work. */
     return this.agyContinues(a, data) ? Promise.resolve() : this.finalStoppedHook(a, data);
+  }
+
+  /* agy runs a sub-agent, such as the one that draws images, in a conversation of its own with none of the agent's tools,
+     and that conversation's hooks come here too. Only the conversation agy named first moves the agent's turn and session. */
+  private subAgentHook(a: Agent, data: Record<string, unknown>): boolean {
+    const id = data.conversationId;
+    return a.program?.kind === 'antigravity' && a.agyConversation !== null && typeof id === 'string' && id !== '' && id !== a.agyConversation;
   }
 
   private agyContinues(a: Agent, data: Record<string, unknown>): boolean {
@@ -2573,8 +2584,11 @@ export class TerminalHost {
   }
 
   private async invocation(a: Agent, data: Record<string, unknown>): Promise<void> {
-    if (a.program?.kind !== 'antigravity') return;
-    if (typeof data.conversationId === 'string') this.follow(a, data.conversationId);
+    if (a.program?.kind !== 'antigravity' || this.subAgentHook(a, data)) return;
+    if (typeof data.conversationId === 'string' && data.conversationId) {
+      a.agyConversation = data.conversationId;
+      this.follow(a, data.conversationId);
+    }
     if (data.invocationNum !== 0) {
       a.agyAnswered = false;
       a.busy = true;
