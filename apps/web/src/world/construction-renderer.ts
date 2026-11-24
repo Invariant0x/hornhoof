@@ -32,6 +32,12 @@ export type LoopArtContext = Readonly<{
 
 type LoopAnchors = Readonly<Record<LoopAttachPoint, { x: number; y: number }>>;
 
+/* Whether a loop is drawn over a picture with this passport: the awning loop only where the passport asks for it with
+   awningLoop and names its awningAnchor, since a house with its own awning painted in would show two (Ivan AI, 24.11). */
+export function loopDrawsOn(kind: string, p: BuildingPicturePassport): boolean {
+  return kind !== 'awning' || (p.awningLoop === true && p.awningAnchor !== undefined);
+}
+
 /* Where the top loops (smoke, celebration, a sleeper's Z) attach on a picture, in its own pixels: its topAnchor; else the
    foot of its flag pole, since a finished house names neither a top nor a roof line (Ivan AI, 24.11); else its roof line,
    then its wall top, then the back ground corner of its lot, above the lot centre. */
@@ -39,7 +45,7 @@ export function loopTopPoint(p: BuildingPicturePassport): ArtPoint {
   return p.topAnchor ?? p.flagAnchor ?? { x: p.groundAnchor.x, y: p.roofLine ?? p.wallTopLine ?? p.corners.top.y };
 }
 
-/* Where loops attach on a building drawn from its picture, from the picture's passport; null for placeholders. */
+/* Where loops attach on a building drawn from its picture, with the picture's passport; null for placeholders. */
 function artLoopAnchors(
   art: LoopArtContext,
   building: CityBuilding,
@@ -47,7 +53,7 @@ function artLoopAnchors(
   pack: WorldPackManifest,
   ctr: { x: number; y: number },
   tileW: number,
-): LoopAnchors | null {
+): { points: LoopAnchors; passport: BuildingPicturePassport } | null {
   const index = art.library.index;
   if (!index) return null;
   const resolved = resolveBuildingArt(pack, index, building, state, { variant: art.variants.get(building.id) });
@@ -56,7 +62,7 @@ function artLoopAnchors(
   const s = tileW / resolved.artPxPerTile;
   const at = (pt: ArtPoint) => ({ x: ctr.x + (pt.x - p.groundAnchor.x) * s, y: ctr.y + (pt.y - p.groundAnchor.y) * s });
   const top = at(loopTopPoint(p));
-  return {
+  const points: LoopAnchors = {
     top,
     awning: p.awningAnchor ? at(p.awningAnchor) : top,
     door: p.door ? at(p.door) : ctr,
@@ -64,6 +70,7 @@ function artLoopAnchors(
     /* A resident's point (the sleeper's Z): on a building it goes where the top loops go. */
     head: top,
   };
+  return { points, passport: p };
 }
 
 function drawLoopSheet(
@@ -130,7 +137,8 @@ export function renderConstructionLoopsToPixi(
     /* With a depth-sorted pool the loops sit just over their own building, so a building in front hides them too. */
     art.pool.depth = cityDepthY(building, tileH) + 0.5;
     for (const loop of buildingLoopsFor(building, state, pack)) {
-      drawLoopSheet(art, loop.kind, anchors, sim.timeSec, loop.phaseOffset, loop.intensity, loopScale);
+      if (!loopDrawsOn(loop.kind, anchors.passport)) continue;
+      drawLoopSheet(art, loop.kind, anchors.points, sim.timeSec, loop.phaseOffset, loop.intensity, loopScale);
     }
   }
 }

@@ -61,6 +61,7 @@ Building footprints, square, in master pixels:
 | `wallCutY` | no | y where a full-height wall picture may be cut to stand in for waist-high walls (section 4). |
 | `flagAnchor` | no | Foot of the flag pole on the roof. Without it the building has no flag. Top loops attach here when the picture has no `topAnchor`. |
 | `awningAnchor` | no | Top edge of a swaying awning. |
+| `awningLoop` | no | `true`: the building takes the `awning` loop sheet at its `awningAnchor` (section 8), which it then must name. Leave it out on a building whose awning is painted in or comes as a layer. |
 | `topAnchor` | no | Top centre (apex, spire, chimney): where a capstone or a top loop attaches. |
 | `workSlots` | no | Up to 3 points `{ x, y, layer }` with `layer` `front` (on scaffolding, in front of walls) or `inside` (in open rooms) where workers stand. |
 | `layers` | no | Pictures drawn over this one, in order (section 4, layers). |
@@ -235,6 +236,8 @@ A missing animation falls back to `walk` for moving states and to `idle` for the
 ## 8. Animation loops
 
 `loops/<loop>.png` with a sheet passport, one row of frames: `crane`, `hoist_block`, `dust`, `smoke`, `water`, `awning`, `celebration`, and for people `sleep_z` (section 7). On a building drawn from its picture, a loop is placed at the point named by its `attach`: `top` (the picture's `topAnchor`; without it the foot of its flag pole, `flagAnchor`; then its roof line, its wall top, or the back corner of its lot), `awning` (`awningAnchor`), `door` (`door`) or `ground` (the lot centre). Loops of buildings still on placeholders stay placeholders.
+
+The `awning` loop is drawn only on a picture whose passport says `awningLoop: true`, at its `awningAnchor`; without the flag a building gets no awning loop, so a house with its own awning never shows two.
 
 A building site shows one lift, never both: `crane` on a lot of 3 x 3 tiles or more, its sheet drawing its own hanging block, and `hoist_block` alone on a smaller lot.
 

@@ -61,6 +61,8 @@ export type BuildingPicturePassport = Readonly<{
   wallCutY?: number;
   flagAnchor?: ArtPoint;
   awningAnchor?: ArtPoint;
+  /* The building takes the awning loop sheet at its awningAnchor; without it, no awning loop (a painted awning, Ivan AI 24.11). */
+  awningLoop?: boolean;
   /* Top centre (apex, spire, chimney) where a capstone or a top loop attaches. */
   topAnchor?: ArtPoint;
   workSlots?: readonly ArtWorkSlotSpec[];
@@ -508,6 +510,11 @@ function checkPicture(
     if (pt !== undefined && (!isPoint(pt) || !pointInside(pt, entry.w, entry.h))) {
       errors.push(`${path}: ${name} lies outside the ${entry.w} x ${entry.h} picture`);
     }
+  }
+  if (p.awningLoop !== undefined && typeof p.awningLoop !== 'boolean') {
+    errors.push(`${path}: awningLoop must be true or false`);
+  } else if (p.awningLoop === true && p.awningAnchor === undefined) {
+    errors.push(`${path}: awningLoop needs an awningAnchor, the point where the awning loop hangs`);
   }
   for (const [name, y] of [['wallTopLine', p.wallTopLine], ['roofLine', p.roofLine], ['wallCutY', p.wallCutY]] as const) {
     if (y !== undefined && (!isFiniteNum(y) || y < 0 || y >= entry.h)) {
