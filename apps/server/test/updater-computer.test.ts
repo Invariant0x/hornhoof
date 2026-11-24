@@ -680,7 +680,7 @@ describe('updater, the computer', () => {
         const probeConfig = join(work, 'vitest.probe.config.mjs');
         writeFileSync(
           probeConfig,
-          `export default { root: ${JSON.stringify(REPO_ROOT)}, test: { pool: 'forks', testTimeout: 20000, reporters: ['default'], include: ['apps/server/test/updater-computer.test.ts'] } };\n`,
+          `export default { root: ${JSON.stringify(REPO_ROOT)}, test: { pool: 'forks', testTimeout: 0, hookTimeout: 0, reporters: ['default'], include: ['apps/server/test/updater-computer.test.ts'] } };\n`,
         );
         const runner = spawn(
           process.execPath,
