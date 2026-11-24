@@ -17,7 +17,7 @@ describe('the approval and release guides', () => {
     const section = guide('tasks-and-turns').split('## Who approves what reaches the main branch?')[1]!;
     expect(section).toMatch(/commit rule says whether.*approval/);
     expect(section).toMatch(/orchestrator acting for the owner/);
-    expect(section).toMatch(/whole test run.*exact commit/);
+    expect(section).toMatch(/repository's own CI must be green on the exact commit/);
     expect(section).toMatch(/head acting for its people/);
   });
 });
