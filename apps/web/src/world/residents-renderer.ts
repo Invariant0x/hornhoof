@@ -682,15 +682,17 @@ function buildingExtrudedHeight(b: CityBuilding): number {
 
 function isOccludedByFrontBuilding(r: ResidentEntity, posX: number, posY: number): boolean {
   const sampleY = posY - 18;
-  const col = Math.round(r.col);
-  const row = Math.round(r.row);
+  /* The resident's ground point on the grid of tile edges the boxes use: a tile's centre lies half a tile in. */
+  const x = r.col + 0.5;
+  const y = r.row + 0.5;
   for (let i = 0; i < visibleBuildingBoxes.length; i++) {
     const b = visibleBuildingBoxes[i]!;
-    /* A resident on a building's own lot stands at its front edge, at work there (#2001): in front of it, not behind. */
-    if (col >= b.minCol && col < b.maxCol && row >= b.minRow && row < b.maxRow) continue;
-    /* In 2:1 isometric painter's order, building b sits in front of (r.col, r.row) iff
-       r.col < b.maxCol and r.row < b.maxRow (not strictly South or East of the footprint). */
-    if (r.col < b.maxCol - 0.15 && r.row < b.maxRow - 0.15) {
+    /* A resident on a building's own lot, or stepping onto it, stands at its front edge at work there (#2001): in
+       front of it, not behind. */
+    if (x >= b.minCol && x <= b.maxCol && y >= b.minRow && y <= b.maxRow) continue;
+    /* In 2:1 isometric painter's order, building b sits in front of the resident iff its ground point is short of
+       the footprint's south-east and south-west edges. */
+    if (x < b.maxCol - 0.15 && y < b.maxRow - 0.15) {
       if (posX > b.minX + 6 && posX < b.maxX - 6 && sampleY > b.minY + 4 && sampleY < b.maxY - 6) {
         return true;
       }

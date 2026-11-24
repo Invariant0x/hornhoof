@@ -110,32 +110,35 @@ describe('A delivery ends at the building it is for (#2001)', () => {
     expect(spread, 'the fixture has buildings where several residents work side by side').toBeGreaterThan(0);
   });
 
-  /* The map hides a passer-by behind a building in front of it; a resident on the building's own front edge stands in
-     front of it and is drawn. */
-  it('is drawn at its spot, not hidden behind the building it works at', () => {
+  /* The map hides a passer-by behind a building in front of it; a resident stepping onto a building's front edge, and
+     standing there, is in front of it and is drawn all the way. */
+  it('is drawn on its step onto the lot and at its spot, not hidden behind the building it works at', () => {
     const live = createHornhoofLiveFixture();
     const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: live.company.seed, mapSize: 150 });
     const { city } = syncLiveSnapshotToCity(EGYPT_WORLD_PACK, map, live);
     const sim = createResidentSimulation(EGYPT_WORLD_PACK, city, live);
     const everywhere = { minX: -1e7, maxX: 1e7, minY: -1e7, maxY: 1e7 };
     const drawn = new Set<string>();
-    const leg = new Map(sim.residents.map(r => [r.id, r.leg]));
-    let checked = 0;
-    for (let tick = 0; tick < 1600 && checked < 12; tick++) {
-      stepResidentSimulation(sim, 0.1);
-      const atSpot = sim.residents.filter(r => {
-        const arrived = leg.get(r.id) === 'outbound' && r.leg === 'inbound';
-        leg.set(r.id, r.leg);
-        return arrived && r.workSpot !== null && r.pose === 'building';
+    let stepping = 0;
+    let atSpot = 0;
+    for (let tick = 0; tick < 1600; tick++) {
+      stepResidentSimulation(sim, 0.05);
+      const near = sim.residents.filter(r => {
+        if (!r.workSpot || r.liveState !== 'working') return false;
+        const toSpot = Math.hypot(r.col - r.workSpot.col, r.row - r.workSpot.row);
+        const onLastStep = r.leg === 'outbound' && r.pathIndex === r.path.length - 1 && toSpot > 1e-6 && toSpot < 1;
+        return onLastStep || (r.leg === 'inbound' && r.pose === 'building' && toSpot < 1e-6);
       });
-      if (atSpot.length === 0) continue;
+      if (near.length === 0) continue;
       renderResidentsToPixi(new Graphics(), sim, city, EGYPT_WORLD_PACK, everywhere, 64, 32, 'full', null, drawn);
-      for (const r of atSpot) {
-        expect(drawn.has(r.id), `${r.name} at its spot on ${r.workBuildingId}`).toBe(true);
-        checked++;
+      for (const r of near) {
+        expect(drawn.has(r.id), `${r.name} at ${r.col.toFixed(2)}, ${r.row.toFixed(2)} by ${r.workBuildingId}`).toBe(true);
+        if (r.leg === 'outbound') stepping++;
+        else atSpot++;
       }
     }
-    expect(checked).toBeGreaterThanOrEqual(12);
+    expect(stepping).toBeGreaterThan(20);
+    expect(atSpot).toBeGreaterThan(20);
   });
 
   it('leaves the buildings as the accepted results drew them: a delivery grows nothing by itself', () => {
