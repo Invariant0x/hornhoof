@@ -333,7 +333,7 @@ describe('the views and the card', () => {
     expect(path).toHaveTextContent('Card payments');
     expect(panel).toHaveTextContent('Shops sell online.');
     const facts = within(within(panel).getByRole('group', { name: 'Facts' }));
-    expect(facts.getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Maria');
+    expect(facts.getByRole('definition', { name: 'Decides' })).toHaveTextContent('Maria');
     await waitFor(() => expect(facts.getByRole('definition', { name: 'Pipeline' })).toHaveTextContent('Payments way · stage Build'));
     expect(within(within(panel).getByRole('region', { name: 'Links' })).getByRole('link', { name: '#23 Refund button' })).toHaveAttribute('title', 'Needed for');
     await user.click(within(within(panel).getByRole('region', { name: 'Subtasks' })).getByRole('link', { name: '#22 Card form' }));

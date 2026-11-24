@@ -11,7 +11,7 @@ const RITA = { id: 'b2', name: 'Rita', kind: 'worker' as const, role: null };
 
 const task = (over: Partial<TaskLine> & { id: string; number: number }): TaskLine => ({
   echelons: taskRoute(), title: `Task ${over.number}`, brief: '', status: 'working', department: DEV, product: null, assignee: BRUNO, turn: null, parentId: null, waitsFor: [],
-  createdAt: '2026-11-16T08:00:00.000Z', updatedAt: '2026-11-16T09:00:00.000Z', goal: null, responsible: SAM, why: '', dueAt: null, pipelineId: null, pipelineStageId: null, ...over,
+  createdAt: '2026-11-16T08:00:00.000Z', updatedAt: '2026-11-16T09:00:00.000Z', goal: null, responsible: SAM, askedBy: SAM, why: '', dueAt: null, pipelineId: null, pipelineStageId: null, ...over,
 });
 const goal = (over: Partial<GoalView> & { id: string; number: number }): GoalView => ({
   title: `Goal ${over.number}`, why: '', department: DEV, parentId: null, responsible: SAM, target: null, current: null, unit: '', dueAt: null, status: 'active', progress: null, done: 0, total: 0, version: 0, ...over,
@@ -26,7 +26,7 @@ const GOALS = [BIG, SMALL, OTHER];
 const SERVES = { id: 'g2', number: 2, title: 'Invite people to the trial' };
 const T312 = task({ id: 't312', number: 312, title: 'Find pilot teams', goal: SERVES, pipelineId: 'pl1', pipelineStageId: 's1' });
 const S1 = task({ id: 's1t', number: 313, title: 'List from the directory', status: 'done', parentId: 't312', goal: SERVES });
-const S2 = task({ id: 's2t', number: 314, title: 'List from the forum', status: 'waiting', parentId: 't312', goal: SERVES, assignee: RITA, responsible: LEO });
+const S2 = task({ id: 's2t', number: 314, title: 'List from the forum', status: 'waiting', parentId: 't312', goal: SERVES, assignee: RITA, responsible: LEO, askedBy: LEO });
 const T319 = task({ id: 't319', number: 319, title: 'Invite the first group', status: 'review', goal: SERVES, waitsFor: [312], pipelineId: 'pl1', pipelineStageId: 's3' });
 const LOOSE = task({ id: 't500', number: 500, title: 'Tidy the inbox', status: 'open', assignee: null, pipelineId: 'pl1' });
 const GONE = task({ id: 't501', number: 501, title: 'Old idea', status: 'cancelled' });
@@ -105,6 +105,18 @@ describe('the filters', () => {
     expect(ids(filterTasks(TASKS, { status: 'done' }, GOALS))).toEqual(['s1t', 't502']);
     expect(ids(filterTasks(TASKS, { pipeline: 'pl1' }, GOALS))).toEqual(['t312', 't319', 't500', 't502']);
     expect(ids(filterTasks(TASKS, { department: 'none' }, GOALS))).toEqual([]);
+  });
+
+  it('lists for a person only what they asked for and what waits for their decision, never everything they would decide', () => {
+    const DECIDED = task({ id: 'd1', number: 600, title: 'Work an agent started', askedBy: null, responsible: SAM });
+    const OF_LEO = task({ id: 'd2', number: 601, title: "Leo's request", askedBy: LEO, responsible: SAM });
+    const WAITING = task({
+      id: 'd3', number: 602, title: 'Waits for Sam', status: 'waiting', askedBy: LEO, responsible: LEO,
+      time: { inStatusSince: '2026-11-16T09:00:00.000Z', workedSeconds: 0, waitsOn: [{ kind: 'person', who: { kind: 'person', id: 'p2', name: 'Sam' }, reason: 'approval', since: '2026-11-16T09:00:00.000Z' }] },
+    } as Partial<TaskLine> & { id: string; number: number });
+    const own = mine([DECIDED, OF_LEO, WAITING, T312], [], 'p2').tasks;
+    expect(ids(own)).toEqual(['d3', 't312']);
+    expect(ids(mine([DECIDED, OF_LEO, WAITING, T312], [], 'p3').tasks)).toEqual(['d2', 'd3']);
   });
 
   it("finds a person's tasks and goals, only those still open", () => {

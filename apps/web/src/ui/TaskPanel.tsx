@@ -170,7 +170,8 @@ function CardFacts({ task, status }: { task: TaskLine; status: ReturnType<typeof
   return (
     <div role="group" aria-label={words.facts}>
       <dl className="tp-card-facts">
-        <Fact name={words.responsible}><Answers person={task.responsible} /></Fact>
+        <Fact name={words.askedBy}><Answers person={task.askedBy} /></Fact>
+        <Fact name={words.decides}><Answers person={task.responsible} /></Fact>
         <Fact name={words.executor}><bdi>{task.executor?.name ?? task.assignee?.name ?? t.tracker.nobody}</bdi></Fact>
         {pipeline && <Fact name={words.pipeline}>{stage ? words.pipelineStage(pipeline.name, stage.name) : pipeline.name}</Fact>}
         {due ? <Fact name={words.due}><DueDay due={due} />{inStatus && ` · ${inStatus}`}</Fact> : inStatus && <Fact name={words.time}>{inStatus}</Fact>}

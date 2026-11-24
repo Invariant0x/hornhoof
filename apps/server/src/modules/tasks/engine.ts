@@ -32,7 +32,7 @@ import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, notInArray
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agents, attachments, companies, jobs, people, requests, taskEvents, tasks, type DecisionTopic, type RequestOption } from '../../db/schema.js';
+import { agentEvents, agents, attachments, companies, jobs, people, requests, taskEvents, tasks, type DecisionTopic, type RequestOption, type SubtaskReason } from '../../db/schema.js';
 import { clearlyAnswered, flat, holds } from './direct-words.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
@@ -139,6 +139,8 @@ export type NewTask = {
   afterPlans?: AfterPlans;
   independentPart?: IndependentPartInput;
   independentNone?: string;
+  /* Why a task under another is made; the tools and routes that keep the tree rules ask for it, tree-rules.ts. */
+  subtaskReason?: SubtaskReason;
   workKind?: Task['workKind'];
   riskClass?: Task['riskClass'];
   /* Of a task with nothing above it; one under a task is what that task is. */
@@ -298,6 +300,7 @@ function newTaskValues(actor: Actor, input: NewTask, { assignee, architect, pare
         riskClass: input.riskClass,
         urgent: position.urgent,
         small: input.small === true,
+        subtaskReason: parent ? input.subtaskReason ?? null : null,
         createdByPersonId: actor.personId ?? null,
         createdByAgentId: actor.agentId ?? null,
         updatedAt: new Date(),
