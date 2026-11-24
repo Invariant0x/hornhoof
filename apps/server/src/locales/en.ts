@@ -23,6 +23,8 @@ export const en = {
     file_too_big: (megabytes: number) => `the file is bigger than ${megabytes} MB.`,
     file_lost: 'this file was kept on one machine before files had a store, and that machine is gone with it.',
     file_away: 'this file is kept on a machine of the company that is away now. Try again once it is back.',
+    file_store_full: "the company's machines have no room left for it, until files go or a machine gives the files more room.",
+    file_store_busy: "the company's server holds as many files for its other machines as it has room for, until they take them. Try again in a little while.",
     file_link_expired: (days: number) => `the link to the file worked for ${days} days, and they are over.`,
     attachment_invalid: "Hornhoof has no room left for the company's files.",
   },

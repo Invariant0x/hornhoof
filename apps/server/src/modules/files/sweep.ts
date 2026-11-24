@@ -1,8 +1,8 @@
-import { statfsSync } from 'node:fs';
 import { sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { recordFile } from './files.js';
+import { NAMED } from './named.js';
 import { countedNow, keptElsewhere, placeFiles, trimTargets } from './place.js';
 
 /* What the leading app does with the store each minute: picks the machines that keep each file, marks a content no row
@@ -16,9 +16,6 @@ const DROP_BATCH = 500;
 
 const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 
-/* The rows that name a content of the store: files, and a file's row a merge refused and keeps until someone picks it. */
-const NAMED = sql`(EXISTS (SELECT 1 FROM public.attachments a WHERE a.sha256 = f.sha256)
-  OR EXISTS (SELECT 1 FROM net.merge_conflicts c WHERE c.tbl = 'attachments' AND c.picked IS NULL AND f.sha256 IN (c.here ->> 'sha256', c.there ->> 'sha256')))`;
 
 /* The contents a row names and no record describes, with the size the row gives, among those `which` lets through: the
    content of a file's row, as a merge brings it, or of one a merge refused and keeps until someone picks a side. */
@@ -110,18 +107,6 @@ export async function adoptNamed(ctx: Pick<Ctx, 'db' | 'files'>): Promise<number
   return adopted;
 }
 
-/* What this machine keeps of the files it is not picked for: a fifth of its free disk, and at most 2 GiB. */
-const TRANSIT_MAX_BYTES = 2 * 1024 ** 3;
-function transitRoom(ctx: Pick<Ctx, 'files'>): number {
-  if (ctx.files.transitBytes !== null) return ctx.files.transitBytes;
-  try {
-    const { bavail, bsize } = statfsSync(ctx.files.store().dir);
-    return Math.min(TRANSIT_MAX_BYTES, Math.floor((Number(bavail) * Number(bsize)) / 5));
-  } catch {
-    return 0;
-  }
-}
-
 /* The files this machine keeps and is not picked for, as an upload with no room here or a read left them: those whose
    copies wanted stand on machines picked for them go, the longest kept first, until what is left fits the room for
    them. One of them a row names again, or an upload records again, under its record's lock, is kept. Says how many went. */
@@ -136,7 +121,7 @@ export async function trimTransit(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Pr
       FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256 WHERE c.machine_id = ${mine}
       AND NOT EXISTS (SELECT 1 FROM net.file_targets t WHERE t.sha256 = c.sha256 AND t.machine_id = ${mine}) ORDER BY c.at, c.sha256`),
   );
-  let over = loose.reduce((sum, row) => sum + Number(row.size), 0) - transitRoom(ctx);
+  let over = loose.reduce((sum, row) => sum + Number(row.size), 0) - files.transitRoom();
   let gone = 0;
   for (const row of loose) {
     if (over <= 0) break;

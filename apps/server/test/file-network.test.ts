@@ -7,17 +7,17 @@ import { Readable } from 'node:stream';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
-import { agents, machines, people } from '../src/db/schema.js';
+import { agents, attachments, departments, machines, people } from '../src/db/schema.js';
 import { Files } from '../src/modules/files/files.js';
 import { fileStoreState, pooledCapacity, setCopies } from '../src/modules/files/copies.js';
-import { floorOf, headroomOf } from '../src/modules/files/area.js';
+import { floorOf, headroomOf, TRANSIT_LEAST_BYTES, transitRoomOf } from '../src/modules/files/area.js';
 import { apartFromBackup, type Seat } from '../src/modules/files/place.js';
 import { checkOwnCopies, dropDue, storeRound } from '../src/modules/files/sweep.js';
 import { FILE_PATH, FileHolder, type FileLink } from '../src/modules/keeper/file-holder.js';
 import { LeaderFiles } from '../src/modules/keeper/leader-files.js';
 import { backupCompany, from, MACHINE_ID } from './helpers-backups.js';
 import { plainOf, SEAL_HEAD, sealedSizeOf } from '../src/modules/files/seal.js';
-import { checkPictureRoom } from '../src/modules/tasks/file-policy.js';
+import { checkPictureRoom, TASK_FILES_BYTES } from '../src/modules/tasks/file-policy.js';
 import { as, invitePerson, until } from './helpers.js';
 
 /* The files of the store as they go between the company's machines: the leading app and its keeper on one machine, and
@@ -510,7 +510,10 @@ describe('where the files of the store are kept', () => {
     const set = (payload: object, who: object) => s.app.inject({ method: 'PATCH', url: '/api/company/file-store', payload, ...who });
     await s.app.ctx.files.putBytes(s.db, randomBytes(1000));
 
-    for (const [who, status] of [[as(zed), 403], [{}, 401]] as const) expect([(await read(who)).statusCode, (await set({ copies: 3 }, who)).statusCode]).toEqual([status, status]);
+    const [sales] = await s.db.insert(departments).values({ companyId: s.acme.id, name: 'Sales', roleCode: 'SAL' }).returning();
+    const [head] = await s.db.insert(agents).values({ companyId: s.acme.id, departmentId: sales!.id, kind: 'head', name: 'Sales head', model: 'claude-opus-5-5' }).returning();
+    /* A person of the whole company, a head acting for the CEO, and nobody at all. */
+    for (const [who, status] of [[as(zed), 403], [{ headers: orchestratorHeaders(owner!.id, head!.id) }, 403], [{}, 401]] as const) expect([(await read(who)).statusCode, (await set({ copies: 3 }, who)).statusCode]).toEqual([status, status]);
     expect((await read(as(s.ceo))).json()).toMatchObject({ copies: 2, effectiveCopies: 2, machines: 2, filesBytes: 1000, underCopied: 1, stuckBytes: 0, capacityBytes: 10 * 1024 ** 3 });
     for (const bad of [{ copies: 0 }, { copies: 6 }, { copies: 2.5 }, { copies: 2, more: 1 }]) expect((await set(bad, as(s.ceo))).statusCode).toBe(400);
     expect((await set({ copies: 3 }, inside)).json()).toMatchObject({ copies: 3, effectiveCopies: 2 });
@@ -650,6 +653,46 @@ describe('where the files of the store are kept', () => {
     /* A number past what JavaScript counts exactly is refused. */
     const big = await s.app.inject({ method: 'POST', url: '/api/network/report', payload: { fileStoreUsedBytes: 2 ** 60 }, ...from(two) });
     expect(big.statusCode).toBe(400);
+  });
+
+  it('keeps for files it is not picked for no more than its disk leaves above the floor, and room for one task file at least', () => {
+    const GIB = 1024 ** 3;
+    const MIB = 1024 ** 2;
+    expect(TRANSIT_LEAST_BYTES).toBe(TASK_FILES_BYTES + 64 * MIB);
+    expect(transitRoomOf(100 * GIB, 1000 * GIB)).toBe(2 * GIB);
+    /* A fifth of 4 GiB free, with the floor of 2 GiB of a disk not known. */
+    expect(transitRoomOf(4 * GIB, null)).toBe(Math.floor((4 * GIB) / 5));
+    expect(transitRoomOf(2.5 * GIB, 1000 * GIB)).toBe(0.5 * GIB);
+    expect(transitRoomOf(GIB, 1000 * GIB)).toBe(0);
+    expect(transitRoomOf(10 * GIB, 10 * GIB)).toBe(2 * GIB);
+    /* A fifth of 2 GiB is less than one task file: the room is that file's all the same, the floor of 1 GiB kept. */
+    expect(transitRoomOf(2 * GIB, 10 * GIB)).toBe(TRANSIT_LEAST_BYTES);
+  });
+
+  it('refuses a file no machine has room for, and one only the leading machine keeps for now while what it keeps for others fills its room', async () => {
+    const s = await stand();
+    const two = await s.worker('two');
+    /* The leading machine gives the files no area, and two too little for any. */
+    await areaOf(s, s.server.id, 0);
+    await areaOf(s, two, 1);
+    await expect(s.app.ctx.files.putBytes(s.db, randomBytes(4000))).rejects.toMatchObject({ status: 413, reason: 'file_store_full' });
+    /* Room on two: the leading machine keeps each file for it until two took it, within its room for that. */
+    await areaOf(s, two, null);
+    const first = await s.app.ctx.files.putBytes(s.db, randomBytes(4000));
+    expect(await s.targetsOf(first.sha256)).toEqual([two]);
+    /* Its row names it, as an upload's does: a file refused before, which none names, holds no room. */
+    const [orchestrator] = await s.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    await s.db.insert(attachments).values({ companyId: s.acme.id, agentId: orchestrator!.id, personId: s.owner.id, name: 'first.bin', mediaType: 'application/octet-stream', sha256: first.sha256, size: first.size });
+    const sealed = Number(rowsOf<{ sealed_size: string }>(await s.db.execute(sql`SELECT sealed_size FROM net.files WHERE sha256 = ${first.sha256}`))[0]!.sealed_size);
+    s.app.ctx.files.transitBytes = Math.floor(sealed * 1.5);
+    await expect(s.app.ctx.files.putBytes(s.db, randomBytes(4000))).rejects.toMatchObject({ status: 503, reason: 'file_store_busy' });
+    await expect(s.app.ctx.files.putBytes(s.db, randomBytes(4000))).rejects.toMatchObject({ status: 503, reason: 'file_store_busy' });
+    /* Once two keeps the first, there is room again. */
+    const { holder } = s.holderOn(two, () => ({ free: 100 * 1024 ** 3, total: 1000 * 1024 ** 3 }));
+    await holder.lookOnce();
+    expect(await s.copiesOf(first.sha256)).toEqual([s.server.id, two].sort());
+    const next = await s.app.ctx.files.putBytes(s.db, randomBytes(4000));
+    expect(await s.targetsOf(next.sha256)).toEqual([two]);
   });
 
   it('names the most plain bytes a sealed size holds', () => {

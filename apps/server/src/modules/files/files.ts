@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, statfsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -9,7 +9,9 @@ import type { Config } from '../../config.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
-import { copiesStand, FRESH_MS, placeFiles } from './place.js';
+import { transitRoomOf } from './area.js';
+import { NAMED } from './named.js';
+import { copiesStand, counted, countedNow, FRESH_MS, keptElsewhere, placeFiles, seats } from './place.js';
 import { FileStore, type StoreRoom, type StoredFile } from './store.js';
 
 /* How long a read waits for a machine that holds a file this one lacks to send it. */
@@ -68,8 +70,8 @@ export class Files {
   checkedThrough = '';
   placedThrough = '';
   trimmedThrough = '';
-  /* The most this machine keeps of files it is not picked for, as a read or an upload left them, once their copies stand
-     elsewhere: min(2 GiB, a fifth of its free disk) unless set. */
+  /* The most this machine keeps of files it is not picked for, as a read or an upload left them, until their copies stand
+     elsewhere: transitRoomOf its disk unless set. */
   transitBytes: number | null = null;
 
   constructor(private readonly config: Config) {}
@@ -109,6 +111,37 @@ export class Files {
     return this.machine;
   }
 
+  /* The room this machine keeps for files it is not picked for; none where its disk cannot be read. */
+  transitRoom(): number {
+    if (this.transitBytes !== null) return this.transitBytes;
+    try {
+      const { bavail, blocks, bsize } = statfsSync(this.store().dir);
+      return transitRoomOf(Number(bavail) * Number(bsize), Number(blocks) * Number(bsize));
+    } catch {
+      return 0;
+    }
+  }
+
+  /* A file the store has no room for fails closed: one no machine was picked for, and one only this machine keeps for now
+     while what it keeps for others, not kept as often as wanted elsewhere yet, would pass its room for them with it: the
+     files a row names, as one refused before is not. No row names its bytes, and the store's round takes them away. A store with no machine that keeps files, as on a server outside a
+     network, takes every file. */
+  private async fits(db: FilesDb, mine: string | null, kept: StoredFile): Promise<void> {
+    if (!mine || counted(await seats(db, mine)).length === 0) return;
+    const targets = rowsOf<{ machine_id: string }>(await db.execute(sql`SELECT machine_id FROM net.file_targets WHERE sha256 = ${kept.sha256}`)).map(row => row.machine_id);
+    if (targets.length === 0) throw new ApiError(413, 'validation', "The company's machines have no room left for this file. Free some, or give the files more room on a machine.", 'file_store_full');
+    if (targets.includes(mine)) return;
+    const { ids, wanted } = await countedNow(db, mine);
+    const [held] = rowsOf<{ bytes: string }>(
+      await db.execute(sql`SELECT coalesce(sum(f.sealed_size), 0) AS bytes FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256 WHERE c.machine_id = ${mine}
+        AND NOT EXISTS (SELECT 1 FROM net.file_targets t WHERE t.sha256 = c.sha256 AND t.machine_id = ${mine}) AND ${keptElsewhere(sql`c.sha256`, mine, ids)} < ${Math.max(1, wanted)}
+        AND (${NAMED} OR f.sha256 = ${kept.sha256})`),
+    );
+    if (Number(held?.bytes ?? 0) > this.transitRoom()) {
+      throw new ApiError(503, 'unavailable', "The company's server holds as many files for its other machines as it has room for, until they take them. Send it again in a little while.", 'file_store_busy');
+    }
+  }
+
   /* Keeps a file's bytes as they come, records them and picks the machines that are to keep them; the row that names it
      is the caller's. The record names the
      content in use again under its lock, so the store's round cannot take it away after this: a content it took away
@@ -120,6 +153,7 @@ export class Files {
     const mine = await this.machineId(db);
     await recordFile(db, kept, mine);
     await placeFiles(db, mine, { only: [kept.sha256] });
+    await this.fits(db, mine, kept);
     if (!store.has(kept.sha256)) throw new ApiError(503, 'unavailable', 'The same file was leaving the store as it came. Send it again.', 'file_retry');
     return { sha256: kept.sha256, size: kept.size };
   }

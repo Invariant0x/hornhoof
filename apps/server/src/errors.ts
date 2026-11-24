@@ -178,6 +178,8 @@ export type ErrorReason =
   | 'file_link_expired'
   | 'file_away'
   | 'file_retry'
+  | 'file_store_full'
+  | 'file_store_busy'
   | 'file_lost'
   | 'move_approved'
   | 'move_unknown'

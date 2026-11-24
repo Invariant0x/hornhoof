@@ -17,3 +17,11 @@ export function headroomOf(seat: { area: number; used: number; pending: number; 
   const disk = seat.free === null ? Infinity : seat.free - floorOf(seat.total) - seat.pending;
   return Math.max(0, Math.min(area, disk));
 }
+
+/* The room a machine keeps for files it is not picked for, as an upload or a read left them, until their copies stand
+   elsewhere: a fifth of its free disk, at most 2 GiB and at least room for one task file (TASK_FILES_BYTES) and 64 MiB
+   more, and never past what its disk keeps above the floor. */
+export const TRANSIT_LEAST_BYTES = (500 + 64) * 1024 ** 2;
+export function transitRoomOf(free: number, total: number | null): number {
+  return Math.max(0, Math.min(free - floorOf(total), Math.max(TRANSIT_LEAST_BYTES, Math.min(FLOOR_BYTES, Math.floor(free / 5)))));
+}
