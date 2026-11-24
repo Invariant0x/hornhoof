@@ -167,6 +167,17 @@ describe('Stage 3 pack-agnostic organic city growth, standard 1x1..6x6 footprint
     expect(verifyCityInvariants(city, map).ok).toBe(true);
   });
 
+  it('refuses to move a building where no street reaches its door, as on the far bank of a map with no bridge (#1985)', () => {
+    const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: 'hornhoof', mapSize: 150 });
+    const city = createCity(map, { orderChaos: 0.6 });
+    placeBuilding(city, { id: 'dept-1', kind: 'department', departmentId: 'd1', stage: 3 });
+    const house = placeBuilding(city, { id: 'house-1', kind: 'house', departmentId: 'd1', stage: 4 })!;
+    expect(city.bridge ?? null).toBeNull();
+    /* (62, 63) is free land, but its door would stand where streets, which cross water only on a bridge, cannot come. */
+    expect(requestRelocation(city, house.id, 62, 63)).toBeNull();
+    expect(city.relocations).toEqual([]);
+  });
+
   it('persists layout snapshots identically and moves buildings only via accepted staged relocation', () => {
     const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: 'hornhoof', mapSize: 150 });
     const city = createCity(map, { orderChaos: 0.6 });

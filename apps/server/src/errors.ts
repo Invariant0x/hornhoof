@@ -149,6 +149,7 @@ export type ErrorReason =
   | 'github_rate_limited'
   | 'commit_history_unavailable'
   | 'repo_command_invalid'
+  | 'repo_release_workflow_invalid'
   | 'repo_folder_taken'
   | 'product_taken'
   | 'repo_host_invalid'

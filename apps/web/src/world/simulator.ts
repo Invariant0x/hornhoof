@@ -5,6 +5,7 @@
    for Year 1, Year 2 and Year 5. Contains zero theme-specific words, files or colours. */
 
 import { agentLevelFromAcceptedTasks } from '@hornhoof/protocol/world';
+import type { BridgeSite } from './bridge-site';
 import {
   bindCityMap,
   computeCityTileBreakdown,
@@ -58,6 +59,8 @@ export type FiveYearSimOptions = Readonly<{
   mapSize?: number;
   orderChaos: number;
   recordSnapshots?: boolean;
+  /* The map's bridge when the pack has its pictures (#1985); without it no street crosses water. */
+  bridge?: BridgeSite | null;
 }>;
 
 export type FiveYearSimResult = Readonly<{
@@ -111,6 +114,7 @@ export function runFiveYearSimulation(
       orderChaos: options.orderChaos,
       outerWallMode: pack.outerWallMode ?? 'ring',
       buildingLayout: pack.buildingLayout,
+      bridge: options.bridge,
     }),
     map,
   );

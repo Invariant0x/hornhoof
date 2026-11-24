@@ -502,3 +502,63 @@ describe("the repository's full test command", () => {
     expect((await sql.run('SELECT repo_full_test_command FROM departments', 'read'))[0]!.rows).toEqual([]);
   });
 });
+
+describe("the repository's release workflow", () => {
+  const set = (c: Awaited<ReturnType<typeof company>>, payload: object, token = c.ceo) =>
+    c.app.inject({ method: 'PUT', url: `/api/departments/${c.dev.id}/repository`, payload: { url: 'https://github.com/acme/shop.git', branch: 'main', ...payload }, ...as(token) });
+  const shown = async (c: Awaited<ReturnType<typeof company>>) =>
+    (await c.app.inject({ method: 'GET', url: '/api/org', ...as(c.ceo) })).json().departments.find((d: { id: string }) => d.id === c.dev.id).repository.releaseWorkflow;
+  const stored = async (c: Awaited<ReturnType<typeof company>>) => (await c.db.select().from(departments).where(eq(departments.id, c.dev.id)))[0]!.repoReleaseWorkflow;
+
+  it('is none until a person names it, saved by the path of its file, read back, and left as it is when not named again', async () => {
+    const c = await company();
+    expect(await shown(c)).toBeNull();
+    const saved = await set(c, { releaseWorkflow: '  .github/workflows/images.yml  ' });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().repository.releaseWorkflow).toBe('.github/workflows/images.yml');
+    expect(await shown(c)).toBe('.github/workflows/images.yml');
+    expect((await set(c, { branch: 'dev' })).json().repository.releaseWorkflow).toBe('.github/workflows/images.yml');
+  });
+
+  it.each([['images.yml', '.github/workflows/images.yml'], ['release.yaml', '.github/workflows/release.yaml']])('takes a bare file name %s to be in .github/workflows', async (given, path) => {
+    const c = await company();
+    expect((await set(c, { releaseWorkflow: given })).json().repository.releaseWorkflow).toBe(path);
+    expect(await stored(c)).toBe(path);
+  });
+
+  it.each([[null], ['   ']])('goes away with %j', async value => {
+    const c = await company();
+    await set(c, { releaseWorkflow: 'images.yml' });
+    expect((await set(c, { releaseWorkflow: value })).json().repository.releaseWorkflow).toBeNull();
+    expect(await stored(c)).toBeNull();
+  });
+
+  it('goes away with the repository', async () => {
+    const c = await company();
+    await set(c, { releaseWorkflow: 'images.yml' });
+    await c.app.inject({ method: 'DELETE', url: `/api/departments/${c.dev.id}/repository`, ...as(c.ceo) });
+    expect(await stored(c)).toBeNull();
+  });
+
+  it.each(['../x.yml', '.github/workflows/x.txt', '.github/workflows/a/b.yml', '.github/workflows/x y.yml', '/.github/workflows/x.yml', 'workflows/x.yml', '.github/workflows/.yml', 'x.yml?ref=main', 'images'])('refuses %j, which is no path of a workflow file, and saves nothing', async given => {
+    const c = await company();
+    const refused = await set(c, { releaseWorkflow: given });
+    expect([refused.statusCode, refused.json().error.reason]).toEqual([400, 'repo_release_workflow_invalid']);
+    expect(await stored(c)).toBeNull();
+  });
+
+  it('is set by the same tool as the rest of the repository, by the orchestrator, and by no agent that is not the orchestrator through anything it infers', async () => {
+    const c = await company();
+    const [orchestrator] = await c.db.select().from(agents).where(inArray(agents.kind, ['orchestrator']));
+    const token = 'tool-token-orchestrator-0123456789abcdef02';
+    await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: orchestrator!.id, kind: 'conversation', prompt: 'go', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
+    const client = await mcp(c.app, token);
+    const { tools } = await client.listTools();
+    const tool = tools.find(t => t.name === 'set_repository')!;
+    expect(Object.keys(tool.inputSchema.properties ?? {})).toContain('releaseWorkflow');
+    expect(tool.description).toContain('releaseWorkflow');
+    const asked = (await client.callTool({ name: 'set_repository', arguments: { department: c.dev.id, url: 'https://github.com/acme/shop.git', releaseWorkflow: 'images.yml' } })) as Res;
+    expect(asked.isError, asked.content[0]!.text).toBeFalsy();
+    expect(await stored(c)).toBe('.github/workflows/images.yml');
+  });
+});

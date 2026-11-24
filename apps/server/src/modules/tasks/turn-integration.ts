@@ -20,7 +20,8 @@ type Reader = BranchProofReader & Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'c
 type Turn = typeof turns.$inferSelect;
 type Release = typeof turnReleases.$inferSelect;
 type Repo = NonNullable<Awaited<ReturnType<typeof repoAt>>>['repo'];
-export type IntegrationTarget = { repo: Repo; branch: string; turn: Turn | null };
+/* The repository as CI is read and started on it too: with the release workflow its settings name. */
+export type IntegrationTarget = { repo: Repo & { releaseWorkflow: string | null }; branch: string; turn: Turn | null };
 
 const lockCompany = (tx: Tx, companyId: string) => tx.select(idOnly(companies)).from(companies).where(eq(companies.id, companyId)).for('no key update');
 
@@ -30,7 +31,7 @@ export async function integrationTarget(ctx: Reader, task: Pick<Task, 'companyId
   if (!ctx.config) return null;
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]);
   if (!found) return null;
-  const repo = withRepoCompany(found.repo, task.companyId);
+  const repo = withRepoCompany({ ...found.repo, releaseWorkflow: found.department.repoReleaseWorkflow }, task.companyId);
   if (found.department.parentId) return { repo, branch: repo.branch, turn: null };
   const turn = await openTurnOf(ctx.db, task.companyId, found.department.id)
     ?? await ctx.db.transaction(async tx => { await lockCompany(tx, task.companyId); return ensureOpenTurn(tx, task.companyId, found.department.id); });
@@ -210,7 +211,7 @@ async function notInTurn(ctx: Reader, target: IntegrationTarget & { turn: Turn }
   const tag = await tagByHand(ctx, target.repo, target.turn);
   if (!tag) return refuse(409, 'task_changed', `${target.branch} does not hold ${commit}: ${next}`);
   const { branch, repo, turn } = target;
-  return refuse(409, 'task_changed', `${branch} does not hold ${commit}. Turn ${turn.number} is still open: ${tag.version} was tagged on ${tag.commit} with no release recorded with release_turn before ${repo.branch} moved, so it released nothing of Turn ${turn.number}, and its results still join ${branch}. The head of the department releases it: take ${repo.branch} into ${branch}, have the whole run of that release pass, record it with release_turn, then fast-forward ${repo.branch} to it and tag it. For this result: ${next}`);
+  return refuse(409, 'task_changed', `${branch} does not hold ${commit}. Turn ${turn.number} is still open: ${tag.version} was tagged on ${tag.commit} with no release recorded with release_turn before ${repo.branch} moved, so it released nothing of Turn ${turn.number}, and its results still join ${branch}. The head of the department releases it: take ${repo.branch} into ${branch}, have the repository's CI go green on that release, record it with release_turn, then fast-forward ${repo.branch} to it and tag it. For this result: ${next}`);
 }
 
 /* The turn branch holds the result's commit, and the commit the turn started from, the head of the turn before it as that
