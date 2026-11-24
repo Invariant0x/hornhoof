@@ -337,6 +337,8 @@ it('calls the orchestrator when all of Operations is off, and only once', async 
   const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   await checkOperatorHealth(c.ctx, new Date(Date.now() + 6 * MINUTE));
   await checkOperatorHealth(c.ctx, new Date(Date.now() + 7 * MINUTE));
+  for (const job of await c.db.select().from(jobs).where(eq(jobs.agentId, orchestrator!.id)).orderBy(asc(jobs.createdAt))) console.log('DEBUG-1802', job.createdAt.toISOString(), job.prompt.slice(0, 400));
+  console.log('DEBUG-1802-ROW', JSON.stringify(await c.row()));
   expect(await turnsWith(c, orchestrator!.id, c.incident.id)).toHaveLength(1);
 });
 
