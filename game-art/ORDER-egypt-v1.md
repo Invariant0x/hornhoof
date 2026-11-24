@@ -21,6 +21,7 @@ For the art pipeline (Design, #1956). Written on 23.11.2026 from the world art c
 * People: four body types (4.1); `pray`, `sad_sit` and `sleep` for every look, with a Z-z-z loop over a sleeper (4.3, 3.12); each animation drawn only in the directions its meaning needs, named in the passport field `directions` (4.4).
 * Resident sheets are assembled from layers before delivery; format 4.4 unchanged apart from `directions`.
 * Sections 2, 3.4, 3.10, 3.12, 4.1 to 4.5, 5.2 and 6 change for this.
+* The bridge over the river (3.14, #1985): start, span and end pieces in both directions. Road joins need no pictures: the engine bakes the streets into the ground from the four road strips, with one soft edge at every crossing, T-join and bend.
 
 Contents:
 
@@ -356,6 +357,16 @@ Design asked for one warm light in a district whose machine is off: a lit window
 * Deliver it as `night.png` beside `complete.png`, on the same canvas. Leave it **out of the `layers` list**: listed there it would also shine by day.
 * Nothing in the engine waits for it: #1955 does not depend on a night layer. A delivered `night.png` only makes the check warn that the file is not declared.
 
+### 3.14 The bridge (#1985)
+
+The map has one bridge, in a fixed place: the straight crossing of the river nearest the city centre, 2 to 10 water tiles long, the same on every load of a company's map. **Until every piece below is delivered, the city lays no street across the water and no resident crosses it**: each bank keeps its own streets. Nothing stands in for the bridge.
+
+* Six pictures, one map tile of the deck each: `bridge/u_start.png`, `bridge/u_span.png`, `bridge/u_end.png` and `bridge/v_start.png`, `bridge/v_span.png`, `bridge/v_end.png`.
+* `u` runs down and to the right on screen, `v` down and to the left. `start` is the piece at the upper end of the crossing, `end` at the lower end; a crossing of `n` tiles shows `start`, `n - 2` spans and `end`, so a span repeats and must join itself and both ends without a seam.
+* Canvas 320 x 400 px with a picture passport for footprint 1x1 (3.1): the tile's diamond 240 x 120 px in `corners`, `groundAnchor` at its centre. The engine puts `groundAnchor` on the centre of the water tile. Leave the space beside the deck transparent.
+* The deck is one tile wide and meets the street at ground level on each bank: the outer edge of `start` and of `end` lies on the bank's ground, so the street runs onto the deck without a step. The street's own picture stops at the edge of the first water tile, under the deck.
+* Piers, rails and the deck's side stand in the water inside the canvas; no shadow on the water (the engine adds none either). Light from the top left, 5200 K, as every picture (section 1).
+
 ## 4. Residents
 
 ### 4.1 Looks
@@ -571,3 +582,4 @@ Look at each delivery for these yourself:
 8. **Residents at 19 degrees (4.4): nothing to wire.** The engine stands a sheet on its `anchor` at the feet's point on the ground and draws the shadow itself, a flat 2:1 ellipse at 30 degrees. If feet float or sink on the shots, the fix is the sheet's `anchor`; if hands go into a wall in `build`, the fix is that building's `workSlots`.
 9. **House step sizes: done in #1958.** `hut` 2x2, `mudbrick` 3x3, `painted` 3x3, `villa` 4x4, in a 4x4 lot, door on the front right wall in row 0.
 10. **v3, wired in #1975:** house variants in `<step>/<variant>/` folders with the per-agent choice; no kit over statues and pyramids; body types; the `directions` field with nearest-or-mirror and the facing poses; `sad_sit`; `sleep_z` at `headAnchor`; no build place at a back wall.
+11. **The bridge (3.14): wired in #1985.** Its place comes from the map; once all six pieces are in the folder the city lays the street over it and residents cross. Streets are baked into the ground from the road strips, so road joins need no art.

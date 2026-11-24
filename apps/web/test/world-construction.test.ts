@@ -224,6 +224,8 @@ describe('Stage 6 construction stages, building animation loops, work slots, 20-
       'src/world/construction.ts',
       'src/world/construction-renderer.ts',
       'src/world/city-renderer.ts',
+      'src/world/street-field.ts',
+      'src/world/bridge-site.ts',
     ]) {
       const src = readFileSync(resolve(process.cwd(), relPath), 'utf8');
       expect(forbidden.test(src), `${relPath} must contain zero theme words`).toBe(false);
