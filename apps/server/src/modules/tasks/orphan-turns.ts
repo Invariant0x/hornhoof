@@ -102,8 +102,15 @@ function omittedFromLive(ctx: Ctx, node: NodeIdentity, job: Job): boolean {
   return live.at >= turnFloorAt(job, ASK_AFTER_MS) && !live.agents.has(job.agentId);
 }
 
+/* The turn reached its program: the program reported it, or it streamed work or called a tool. Before that its node may still
+   make it ready, as while its programs update or its worktree gets its dependencies, so no program of the employee yet, or a
+   screen that names no turn, says nothing of it. */
+function reachedProgram(ctx: Ctx, job: Job, worked: number | undefined): boolean {
+  return programTurnSign(ctx, job) !== null || worked !== undefined;
+}
+
 function absentWithoutSign(ctx: Ctx, node: NodeIdentity, job: Job, worked: number | undefined, nowMs: number): boolean {
-  return omittedFromLive(ctx, node, job) && !freshPulse(worked, nowMs) && !freshPulse(programTurnSign(ctx, job), nowMs);
+  return reachedProgram(ctx, job, worked) && omittedFromLive(ctx, node, job) && !freshPulse(worked, nowMs) && !freshPulse(programTurnSign(ctx, job), nowMs);
 }
 
 function doubtfulTurns(ctx: Ctx, id: NodeIdentity, asked: string[], held: ReadonlySet<string>): string[] {
@@ -181,9 +188,9 @@ function cleanPrompt(view: ProgramView): boolean {
   return view.input === 'empty' && !view.question && !view.undelivered;
 }
 
-function viewShowsIdle(job: Job, view: ProgramView): boolean {
+function viewShowsIdle(job: Job, view: ProgramView, reached: boolean): boolean {
   if (!readableView(view) || !cleanPrompt(view)) return false;
-  return view.jobId === job.id ? emptyView(view) : view.jobId === null;
+  return view.jobId === job.id ? emptyView(view) : view.jobId === null && reached;
 }
 
 function continuousView(old: IdleView | undefined, current: IdleView): boolean {
@@ -205,7 +212,7 @@ function idleOnView(ctx: Ctx, job: Job, view: ProgramView, now: number): boolean
 }
 
 function noProgramBlocked(ctx: Ctx, job: Job, node: NodeIdentity, worked: number | undefined, now: number): boolean {
-  if (ctx.hub.awaySince(node) !== null || freshPulse(worked, now)) return true;
+  if (ctx.hub.awaySince(node) !== null || freshPulse(worked, now) || !reachedProgram(ctx, job, worked)) return true;
   return Boolean(job.restartedAt && now - job.restartedAt.getTime() < PULSE_MS);
 }
 
@@ -235,7 +242,7 @@ async function applyRefusedView(ctx: Ctx, job: Job, node: NodeIdentity, view: Pr
 }
 
 async function observeScreenView(ctx: Ctx, job: Job, node: NodeIdentity, view: ProgramView | null, now: Date, worked?: number): Promise<void> {
-  if (!view || !viewShowsIdle(job, view)) {
+  if (!view || !viewShowsIdle(job, view, reachedProgram(ctx, job, worked))) {
     idleViews.get(ctx)?.delete(job.id);
     await applyRefusedView(ctx, job, node, view, now.getTime(), worked);
     return;
