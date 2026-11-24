@@ -41,6 +41,11 @@ export const MAX_CUTS = 30;
 export const MAX_GIVEN = 4;
 /* How long a copy must have been whole before the attempts given up ahead of it stop counting. */
 export const STABLE_MS = 3_600_000;
+/* An attempt whose first copy takes no more table through and whose database grows by less than this in this long is
+   given up, though nothing stopped it: a table that starts again and again from its first row, because a link breaks
+   it each time, holds a slot and a snapshot of the leader for as long as it goes on. */
+export const STALL_MS = 7_200_000;
+export const STALL_BYTES = 8 * 2 ** 20;
 const OTHER_VERSION = 'the company server runs another version of the database';
 /* How long the app gets to read that it is off before the databases change places. */
 const OFF_FOR_MS = 2_000;
@@ -127,6 +132,9 @@ const Kept = z.object({
   given: z.number().int().min(0).default(0),
   /* How many times this attempt's subscription was stopped by an error and enabled again. */
   cuts: z.number().int().min(0).default(0),
+  /* The most a first copy had reached, as tables through and bytes, and when: an attempt that goes no further for two
+     hours is given up. */
+  best: z.object({ ready: z.number().int().min(0), size: z.number().min(0), at: z.string() }).nullable().default(null),
   /* When the copy last held every table, which starts the hour that clears the attempts given up before. */
   readyAt: z.string().nullable().default(null),
   /* The copy was given up for good: since when, and after how many attempts. Nothing more is made until it is asked for. */
@@ -554,7 +562,7 @@ export class CopyMaker {
       );
     }
     this.disabledSince = null;
-    this.keep({ phase: 'sync', seen: false, missing: 0 });
+    this.keep({ phase: 'sync', seen: false, missing: 0, best: null });
   }
 
   /* A subscription that stopped is enabled again once a minute. How long it has been stopped for, in a row: one that was
@@ -612,9 +620,21 @@ export class CopyMaker {
       return this.ready(sql, order);
     }
     const size = Number((await this.one<{ size: number }>(sql, 'SELECT pg_database_size(current_database())::float8 AS size'))?.size ?? 0);
+    if (this.stalled(tables.ready, size)) return this.giveUp();
     const progress = order?.leaderSize ? Math.min(99, Math.floor((size * 100) / order.leaderSize)) : 0;
     /* While it is made again, the copy that is read says how far it reaches. */
     this.said = { ...this.making(progress, this.kept.old ? await this.oldPulse() : null), ...(await this.leftSlots(sql, sub.oid)) };
+  }
+
+  /* Whether the first copy went no further for STALL_MS: no table more through, and the database no bigger by STALL_BYTES.
+     What it reached at best is written down when it moves on. */
+  private stalled(ready: number, size: number): boolean {
+    const { best } = this.kept;
+    if (!best || ready > best.ready || size >= best.size + STALL_BYTES) {
+      this.keep({ best: { ready: Math.max(ready, best?.ready ?? 0), size: Math.max(size, best?.size ?? 0), at: new Date(this.now()).toISOString() } });
+      return false;
+    }
+    return this.now() - Date.parse(best.at) >= STALL_MS;
   }
 
   /* The leader's slots of tables whose first copy broke off, to name in the report; nothing when there are none. */
@@ -753,7 +773,7 @@ export class CopyMaker {
     const wait = this.wait(true);
     this.keep({
       old: { attempt: this.kept.attempt, migrations: this.kept.migrations }, attempt: this.kept.attempt + 1, database: NEXT_DB, phase: 'detach', migrations: null,
-      notBefore: wait === 0 || parked ? null : new Date(this.now() + wait).toISOString(), seen: false, missing: 0, given: this.kept.given + 1, cuts: 0, readyAt: null, parked,
+      notBefore: wait === 0 || parked ? null : new Date(this.now() + wait).toISOString(), seen: false, missing: 0, given: this.kept.given + 1, cuts: 0, best: null, readyAt: null, parked,
     });
     this.disabledSince = null;
     if (parked) this.parkLine(parked.attempts);
