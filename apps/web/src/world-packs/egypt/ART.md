@@ -75,7 +75,18 @@ A delivered picture stays out of the art folder while the art check refuses it o
 | Art | Delivered | Held because | Closed by |
 |---|---|---|---|
 | tier 1 `walk` of `egypt-guard-captain`, `egypt-royal-master`, `egypt-caravan-messenger`, `egypt-canal-builder` and `egypt-firefighter` | 24.11.2026, drawn NE and SE | These looks carry a large item, so their walk draws NE, SE, SW and NW: a mirror would move the item to the other hand (contract section 7). No exception is granted. | The same sheets drawn in NE, SE, SW and NW |
-| house `mudbrick` variants `v09`, `v10` and `v11` | 24.11.2026 | Withdrawn by the art pipeline before intake: at `roof_beams` the doorway shows sand or a grey-blue patch instead of a dark room. Until they come, the engine gives their houses the next delivered variant. | The three variants redrawn |
+| tier 1 `idle` of `egypt-canal-builder`, `egypt-firefighter`, `egypt-medjay` and `egypt-skirmisher` | 24.11.2026, drawn SE | The idle of a look with a large item draws SE and SW. | The same sheets drawn in SE and SW |
+| tier 1 `carry` of `egypt-canal-builder`, `egypt-firefighter`, `egypt-inspector`, `egypt-keykeeper`, `egypt-relief-carver` and `egypt-royal-master` | 24.11.2026, drawn NE and SE | A carry draws NE, SE, SW and NW for every look: a mirror would move the load to the other shoulder. | The same sheets drawn in NE, SE, SW and NW |
+| every sheet of `egypt-machine-keeper` | 24.11.2026 | Withdrawn by the art pipeline: drawn with a metal spanner, which ancient Egypt did not have. The look keeps what it had. | The look drawn again with a wooden mallet |
+
+### Delivered in part
+
+These pictures are in the art folder, and their missing stages, fills or tiers come later under the same names. Until then a building shows the nearest drawn picture of its line, and construction takes a house variant with every stage drawn.
+
+* Houses drawn finished only: `villa` v02, v03 and v05 to v10 (v04 is being redrawn), `mudbrick` v13 to v15, `painted` v10.
+* Houses with stages missing: `painted` v07 (no `roof`), `painted` v15 (no `full_walls` or `roof_beams`).
+* `department/temple`: finished and annex, no stages yet. `flophouse/camp`: finished only.
+* `supply/granary`: `fill_4` only. `monument` `great_pyramid`, `pyramid` and `pyramid_small`: `tier_05` only.
 
 ## Ground and plants
 
