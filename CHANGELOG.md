@@ -22,6 +22,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Changed
 
 - While the server cannot be reached or installs an update, the page and the plain page in front of the server show only the Hornhoof sign and one line in English, "No connection" or "Updating", whatever the language of the page.
+- A machine whose copy of the company's data its keeper gave up reads nothing from that copy: the old copy no longer changes, so it is not served as if it were current.
 - A skin file of your own may name the skin in any language of the registry, with the English name required and the others optional, and the names of a world's employees can be taken in any language of the registry.
 - Follower machines that hold company data no longer prune their local backup bundles during worker backup-holder sweeps, keeping their own backups and saved former-leader bundles on disk while still sending any bundle the server asks for.
 
