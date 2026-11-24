@@ -50,7 +50,6 @@ import {
   type ConstructionSimulation,
 } from './construction';
 import {
-  renderConstructionLoopsFallback2D,
   renderConstructionLoopsToPixi,
   type LoopArtContext,
 } from './construction-renderer';
@@ -220,7 +219,6 @@ export class IsometricWorldEngine {
   private buildGridGraphic: Graphics | null = null;
   private cityGraphic: Graphics | null = null;
   private residentsGraphic: Graphics | null = null;
-  private constructionGraphic: Graphics | null = null;
   private departmentFocusGraphic: Graphics | null = null;
   private borderGraphic: Graphics | null = null;
   private overlayGraphic: Graphics | null = null;
@@ -388,7 +386,6 @@ export class IsometricWorldEngine {
       const buildingArtLayer = new Container();
       const residentsGraphic = new Graphics();
       const residentArtLayer = new Container();
-      const constructionGraphic = new Graphics();
       const loopArtLayer = new Container();
       const departmentFocusGraphic = new Graphics();
       const borderGraphic = new Graphics();
@@ -467,7 +464,6 @@ export class IsometricWorldEngine {
       worldContainer.addChild(depthLayer);
       worldContainer.addChild(residentsGraphic);
       worldContainer.addChild(residentArtLayer);
-      worldContainer.addChild(constructionGraphic);
       worldContainer.addChild(loopArtLayer);
       worldContainer.addChild(departmentFocusGraphic);
       worldContainer.addChild(borderGraphic);
@@ -481,7 +477,6 @@ export class IsometricWorldEngine {
       this.buildingArtPool = new DisplayRunPool(buildingArtLayer, depthLayer);
       this.residentsGraphic = residentsGraphic;
       this.residentArtPool = new DisplayRunPool(residentArtLayer, depthLayer);
-      this.constructionGraphic = constructionGraphic;
       this.loopArtPool = new DisplayRunPool(loopArtLayer, depthLayer);
       this.departmentFocusGraphic = departmentFocusGraphic;
       this.borderGraphic = borderGraphic;
@@ -961,7 +956,6 @@ export class IsometricWorldEngine {
     this.constructionSim = sim;
     this.lastConstructionCityVersion = sim ? sim.dirtyCityVersion : -1;
     if (!sim) {
-      this.constructionGraphic?.clear();
       this.loopArtPool?.clear();
     }
     this.cityDirty = true;
@@ -1132,25 +1126,15 @@ export class IsometricWorldEngine {
         rect,
         this.tileW,
         this.tileH,
-        animationDetailForZoom(this.camera.zoom),
         this.selectedResidentId,
         this.drawnResidentIds,
         this.residentArtContext(),
       );
     }
     this.redrawDepartmentFocusPixi();
-    if (this.app && this.constructionGraphic && this.constructionSim) {
-      renderConstructionLoopsToPixi(
-        this.constructionGraphic,
-        this.constructionSim,
-        this.cityRenderState?.city ?? null,
-        this.pack,
-        rect,
-        this.tileW,
-        this.tileH,
-        animationDetailForZoom(this.camera.zoom),
-        this.loopArtContext(),
-      );
+    const loopArt = this.loopArtContext();
+    if (this.app && loopArt && this.constructionSim) {
+      renderConstructionLoopsToPixi(this.constructionSim, this.cityRenderState?.city ?? null, this.pack, rect, this.tileW, this.tileH, loopArt);
     }
     this.app?.render();
     this.emitStats(true);
@@ -1380,10 +1364,9 @@ export class IsometricWorldEngine {
     if (
       this.app &&
       ((this.residentsGraphic && this.residentSim && (residentsAnimated || needsSync)) ||
-        (this.constructionGraphic && this.constructionSim && (constructionAnimated || needsSync)))
+        (this.loopArtPool && this.constructionSim && (constructionAnimated || needsSync)))
     ) {
       const visRect = visibleWorldRect(this.camera, this.viewport, this.tileW);
-      const detail = animationDetailForZoom(this.camera.zoom);
       if (this.residentsGraphic && this.residentSim && (residentsAnimated || needsSync)) {
         renderResidentsToPixi(
           this.residentsGraphic,
@@ -1393,7 +1376,6 @@ export class IsometricWorldEngine {
           visRect,
           this.tileW,
           this.tileH,
-          detail,
           this.selectedResidentId,
           this.drawnResidentIds,
           this.residentArtContext(),
@@ -1402,18 +1384,9 @@ export class IsometricWorldEngine {
           this.redrawDepartmentFocusPixi();
         }
       }
-      if (this.constructionGraphic && this.constructionSim && (constructionAnimated || needsSync)) {
-        renderConstructionLoopsToPixi(
-          this.constructionGraphic,
-          this.constructionSim,
-          this.cityRenderState?.city ?? null,
-          this.pack,
-          visRect,
-          this.tileW,
-          this.tileH,
-          detail,
-          this.loopArtContext(),
-        );
+      const loopArt = this.loopArtContext();
+      if (loopArt && this.constructionSim && (constructionAnimated || needsSync)) {
+        renderConstructionLoopsToPixi(this.constructionSim, this.cityRenderState?.city ?? null, this.pack, visRect, this.tileW, this.tileH, loopArt);
       }
     }
     if (this.app && (needsSync || liquidAnimated || residentsAnimated || constructionAnimated || plantsAnimated || swayAnimated)) {
@@ -1820,18 +1793,6 @@ export class IsometricWorldEngine {
         this.selectedResidentId,
       );
     }
-    if (this.constructionSim) {
-      const rect = visibleWorldRect(this.camera, this.viewport, this.tileW);
-      renderConstructionLoopsFallback2D(
-        ctx,
-        this.constructionSim,
-        this.cityRenderState?.city ?? null,
-        this.pack,
-        rect,
-        this.tileW,
-        this.tileH,
-      );
-    }
     if (this.departmentFocus && this.cityRenderState) {
       renderDepartmentFocusFallback2D(
         ctx,
@@ -1962,7 +1923,6 @@ export class IsometricWorldEngine {
     this.buildGridGraphic = null;
     this.cityGraphic = null;
     this.residentsGraphic = null;
-    this.constructionGraphic = null;
     this.residentSim = null;
     this.constructionSim = null;
 

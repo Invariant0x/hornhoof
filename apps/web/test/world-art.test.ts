@@ -118,7 +118,7 @@ function resident(partial: Partial<ResidentEntity>): ResidentEntity {
     roleKey: null,
     roleClass: 'executor',
     archetype: 'builder',
-    look: { id: 'look-a', label: { en: 'A', ru: 'А' }, tunicColor: '#ffffff', trimColor: '#000000', prop: 'none', headgear: 'none' },
+    look: { id: 'look-a', label: { en: 'A', ru: 'А' }, prop: 'none', headgear: 'none' },
     level: 1,
     outfitTier: 1,
     cloakColor: '#C96A4B',

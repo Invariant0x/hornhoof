@@ -5,7 +5,6 @@ import type { CityBuilding } from '../src/world/city-layout';
 import {
   buildingLoopsFor,
   computeStatueAlleyProgress,
-  drawsLoopStandIn,
   createConstructionSimulation,
   startBuildingConstruction,
   startBuildingDemolition,
@@ -227,14 +226,5 @@ describe('Stage 6 construction stages, building animation loops, work slots, 20-
       const src = readFileSync(resolve(process.cwd(), relPath), 'utf8');
       expect(forbidden.test(src), `${relPath} must contain zero theme words`).toBe(false);
     }
-  });
-});
-
-describe('Stand-in loops over painted buildings (#1958, Design on the pilot video)', () => {
-  it('draws no stand-in dust or awning over a building drawn from its picture, and keeps them over the placeholders', () => {
-    expect(drawsLoopStandIn('dust', true)).toBe(false);
-    expect(drawsLoopStandIn('awning', true)).toBe(false);
-    expect(drawsLoopStandIn('dust', false)).toBe(true);
-    expect(drawsLoopStandIn('awning', false)).toBe(true);
   });
 });

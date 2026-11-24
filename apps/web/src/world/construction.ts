@@ -52,15 +52,6 @@ export type StatueAlleyItem = Readonly<{
   span: 1 | 2 | 3;
 }>;
 
-/* Loops whose engine stand-in is never drawn over a building drawn from its picture: until a loop's own art arrives,
-   a painted building shows nothing for it (Ivan's word, #1947 item 11). The awning comes with the art as a layer. */
-const NO_STAND_IN_OVER_ART: ReadonlySet<BuildingLoopKind> = new Set(['awning', 'dust']);
-
-/* Whether the engine draws its stand-in for a loop with no art, over a painted building or a placeholder one. */
-export function drawsLoopStandIn(kind: BuildingLoopKind, painted: boolean): boolean {
-  return !painted || !NO_STAND_IN_OVER_ART.has(kind);
-}
-
 export type BuildingLoopSpec = Readonly<{
   kind: BuildingLoopKind;
   intensity: number;
