@@ -11,6 +11,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - On the city map, streets read as one trodden strip at every crossing, T-join and bend, with one soft edge instead of strips laid over each other, and the brown stand-in over the river is gone: until the world's bridge pictures are installed no street crosses the water and no resident walks on it, and with them the bridge stands in one fixed place of the map on every load.
 - A task reaches Failures only for a cause that needs a person: a command Hornhoof refuses before it starts ends as refused, with the refusal told to its agent at once as a hint, and neither it, a stopped run, a turn that retries by itself after an overloaded provider or a usage limit, nor a turn replaced because its task moved on marks a task, the agent card or the map as failed; a stuck agent asking for help and a turn that failed with nothing to take it on now do, each until it is answered or a turn goes well, and the failure card says what to do. Refusals kept as failed runs become refused when the update runs.
+- A machine's copy of the company's data no longer tries again without end over a link that keeps cutting it: a subscription stopped by an error and enabled again 30 times in one attempt ends that attempt even when some tables got through, one that takes no table through and grows by less than 8 MiB in two hours ends too, the attempts given up in a row count until the copy has been whole for an hour, a whole copy that breaks soon after is counted too, each wait is twice as long as the one before, and after the fourth attempt given up in a row the keeper parks the copy: its slots on the company server are dropped so the log they held is released, nothing more is made until it is asked for, and the machine's card says it was given up, since when and after how many attempts.
+- A former server machine whose database is being saved before its copy is remade no longer gets stuck in "Saving" when a backup-holder sweep runs during sealing: the keeper keeps one shared record of temporary bundle files in flight, puts the sealed archive in place before its header and clears any leftover header without an archive, skips the save when the current server's copy has already applied the former server's last write, and shows on the machine card what the save is waiting on and since when.
 
 ### Added
 
@@ -21,6 +23,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - While the server cannot be reached or installs an update, the page and the plain page in front of the server show only the Hornhoof sign and one line in English, "No connection" or "Updating", whatever the language of the page.
 - A skin file of your own may name the skin in any language of the registry, with the English name required and the others optional, and the names of a world's employees can be taken in any language of the registry.
+- Follower machines that hold company data no longer prune their local backup bundles during worker backup-holder sweeps, keeping their own backups and saved former-leader bundles on disk while still sending any bundle the server asks for.
 
 ## [0.43.0] - 2026-11-23
 

@@ -14,8 +14,8 @@ export type Lang = Texts;
 export type SkillKind = 'core' | 'procedure' | 'checklist' | 'gate';
 export type Skill = { id: string; title: Lang; description: Lang; kind: SkillKind; body: string; hash: string; sources: string[]; grants: Grant[] };
 
-/* Tools a skill may grant: every agent's state, the failed turns and blocked tasks, restarting a program, putting what to improve under Improvements, writing to employees of other departments, keeping the department's goals, pipelines and task texts in the tracker, and settling tasks: reading whether a task's commit is released and closing the cases the server proves done. */
-export const GRANTS = ['agents', 'failures', 'message_employee', 'restart_program', 'improvements', 'tracker', 'settle'] as const;
+/* Tools a skill may grant: every agent's state, the list of turns suspected to hang, the failed turns and blocked tasks, restarting a program, putting what to improve under Improvements, writing to employees of other departments, keeping the department's goals, pipelines and task texts in the tracker, and settling tasks: reading whether a task's commit is released and closing the cases the server proves done. */
+export const GRANTS = ['agents', 'hangs', 'failures', 'message_employee', 'restart_program', 'improvements', 'tracker', 'settle'] as const;
 export type Grant = (typeof GRANTS)[number];
 export type RoleSkill = { id: string; on: boolean; locked: boolean };
 /* How often, in minutes, an employee may wake on its timer, and how long its order may be; a role's timer keeps to them too. */

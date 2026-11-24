@@ -9,14 +9,14 @@ import { as, echelonsTurn, setUpCompany, testApp } from './helpers.js';
 /* A development department runs its turn in slots, one per developer, five at most. A new task that finds every slot busy
    waits in the queue for the next turn and says which; a small addition may join a running slot; urgent work goes past both. */
 
-async function company(developers: number, slotCap: number | null = 5) {
+async function company(developers: number, slotCap: number | null = 5, repoUrl: string | null = 'https://github.com/acme/shop.git') {
   const { app, db } = await testApp();
   const ceo = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const companyId = acme!.id;
   const [sub] = await db.select().from(subscriptions);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-  const [dev] = await db.insert(departments).values([{ companyId, templateKey: 'development', roleCode: 'DEV', position: 1, slotCap }]).returning();
+  const [dev] = await db.insert(departments).values([{ companyId, templateKey: 'development', roleCode: 'DEV', position: 1, slotCap, repoUrl }]).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
     (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
@@ -52,6 +52,15 @@ describe('turn slots', () => {
     const { give, row } = await company(1, null);
     await give({ title: 'A' }, { title: 'B' }, { title: 'C' });
     expect((await row('C')).queuedAt).toBeNull();
+  });
+
+  it('queues nothing in a department that keeps no repository, as no turn of it could ever take its queue in', async () => {
+    const { give, row, db, dev } = await company(1, 5, null);
+    await give({ title: 'A' }, { title: 'B' }, { title: 'C' });
+    expect((await row('C')).queuedAt).toBeNull();
+    expect((await row('C')).assigneeAgentId).not.toBeNull();
+    const [task] = await db.insert(tasks).values({ companyId: dev.companyId, number: 99, title: 'x', departmentId: dev.id }).returning();
+    expect(await slotsApply(db, task!)).toBe(false);
   });
 
   it('lets one small addition of the same product join a running slot, and queues the next', async () => {

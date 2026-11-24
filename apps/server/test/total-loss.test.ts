@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as age from 'age-encryption';
 import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { answerProof, makeChallenge, uploadProof } from '../src/modules/backups/bundle.js';
+import { answerProof, makeChallenge, uploadProof, type Manifest } from '../src/modules/backups/bundle.js';
 import type { RecoveryFile } from '../src/modules/backups/recovery.js';
 import { knownMigrations } from '../src/modules/backups/restore.js';
 import { BundleStore } from '../src/modules/backups/store.js';
@@ -22,6 +22,11 @@ const LINK = { name: 'acme', url: 'https://acme.hornhoof.test', key: 'k'.repeat(
 const MINUTE = 60_000;
 type Refusal = { error: { reason?: string; details?: { why?: string } } };
 const reasonOf = (answer: { json(): unknown }) => (answer.json() as Refusal).error.reason;
+const storeBundle = (store: BundleStore, b: { id: string; head: string; manifest: Manifest; out: string }) =>
+  store.seal(b.id, part => {
+    copyFileSync(b.out, part);
+    return Promise.resolve({ head: b.head, manifest: b.manifest });
+  });
 
 /* The company that was lost, with its recovery file and bundles made for it; and a server set up anew, which has no
    company yet. */
@@ -241,7 +246,7 @@ describe('a restore after the server was lost', () => {
     const other = await stand();
     const store = new BundleStore(join(s.control, 'restore', 'incoming'));
     const [mine, theirs] = [await s.bundle(), await other.bundle()];
-    for (const bundle of [mine, theirs]) store.put(bundle.head, bundle.manifest, bundle.out);
+    for (const bundle of [mine, theirs]) await storeBundle(store, bundle);
     expect(store.list()).toHaveLength(2);
     expect((await s.begin()).json()).toMatchObject({ bundles: [{ id: mine.id }] });
     expect(store.list().map(bundle => bundle.id)).toEqual([mine.id]);
@@ -253,7 +258,7 @@ describe('a restore after the server was lost', () => {
     const left = await s.bundle();
     /* A restored server starts: the bundles the survivors sent still lie in its control folder. */
     const lying = new BundleStore(join(control, 'restore', 'incoming'));
-    lying.put(left.head, left.manifest, left.out);
+    await storeBundle(lying, left);
     writeFileSync(join(control, RECOVERY_LINK), '{}');
     const restored = await testApp({ HORNHOOF_CONTROL_DIR: control, TUNNEL_HOST: 'localhost' });
     await restored.app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
@@ -262,7 +267,7 @@ describe('a restore after the server was lost', () => {
     /* A server with no company yet keeps what it was sent. */
     const waiting = mkdtempSync(join(tmpdir(), 'hh-control-'));
     const kept = await s.bundle();
-    new BundleStore(join(waiting, 'restore', 'incoming')).put(kept.head, kept.manifest, kept.out);
+    await storeBundle(new BundleStore(join(waiting, 'restore', 'incoming')), kept);
     const fresh = await testApp({ HORNHOOF_CONTROL_DIR: waiting, TUNNEL_HOST: 'localhost' });
     await fresh.app.ctx.totalLoss.tidy();
     expect(new BundleStore(join(waiting, 'restore', 'incoming')).list()).toHaveLength(1);
