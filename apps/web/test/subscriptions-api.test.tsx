@@ -175,7 +175,7 @@ describe('Subscriptions & API', () => {
   it('confirms target change on an existing API connection and saves model-only changes directly', async () => {
     const calls = lists({
       'GET /api/org': [200, ORG_WITH_TEAMS],
-      'PATCH /api/subscriptions/s-router': [200, { subscription: { ...ROUTER, target: { kind: 'team', id: 't1' } } }],
+      'PATCH /api/subscriptions/s-router': [200, { subscription: { ...ROUTER, target: { kind: 'orchestrator', id: null } } }],
     });
     const user = userEvent.setup();
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
