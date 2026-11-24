@@ -18,7 +18,10 @@ export const WaitSourceKind = z.enum(WAIT_SOURCE_KINDS);
 export type WaitSourceKind = z.infer<typeof WaitSourceKind>;
 
 export type WaitWho = { kind: 'person' | 'agent'; id: string; name: string };
-export type WaitFailure = 'machine' | 'expired' | 'run' | 'unavailable';
+/* What needs a person or a head and will not clear by itself: a machine away, a wait past its time with no answer, a run
+   that started and failed, an employee who is gone, an agent stuck on the task that asked for help, and a turn on it that
+   failed with nothing to take it on. A refused run, a stopped one and a turn that retries by itself are none of these. */
+export type WaitFailure = 'machine' | 'expired' | 'run' | 'unavailable' | 'stuck' | 'turn';
 export type WaitRunError = 'timeout' | 'machine' | 'repository' | 'files' | 'revision' | 'stopped';
 export type TaskWaitFact = {
   who: WaitWho | null;

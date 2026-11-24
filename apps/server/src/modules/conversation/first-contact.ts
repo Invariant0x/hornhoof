@@ -1,4 +1,4 @@
-import type { CompanyTemplateKey } from '@hornhoof/protocol';
+import { localeInfo, LOCALE_IDS, type CompanyTemplateKey } from '@hornhoof/protocol';
 import { and, asc, desc, eq, exists, inArray, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -45,7 +45,7 @@ export function greetingOffers(kit: CompanyTemplateKey | null): string {
 }
 
 const PATH = '/api/orchestrator/first-contact';
-const request = z.object({ language: z.enum(['en', 'ru']), replyTo: z.uuid().optional() }).and(z.union([
+const request = z.object({ language: z.enum(LOCALE_IDS), replyTo: z.uuid().optional() }).and(z.union([
   z.object({ offer: z.enum(Object.keys(WORDS) as Offer[]) }).transform(({ offer }) => ({ offer, text: WORDS[offer] })),
   z.object({ text: z.string().trim().min(1) }),
 ]));
@@ -102,7 +102,7 @@ export function firstContactRoutes(app: FastifyInstance, ctx: Ctx): void {
     if ('offer' in input && !offersFor(await kitOf(ctx, me)).includes(input.offer)) throw new ApiError(400, 'validation', 'Choose an offer for your company.');
     const previous = input.replyTo ? await answerOf(ctx, me, input.replyTo) : null;
     const prompt = [
-      `First contact with one person. Answer only the sender (person id ${me.id}). Reply in ${input.language === 'ru' ? 'Russian' : 'English'}.`,
+      `First contact with one person. Answer only the sender (person id ${me.id}). Reply in ${localeInfo(input.language)?.english ?? 'English'}.`,
       'Read the sender\'s access in the company before sharing company information. Start the work requested and ask one question only when you need their answer.',
       ...('offer' in input && input.offer === 'setUpPipeline' ? ['Use the ready pipeline catalog. Ask what work they want to set up, then offer the closest pipeline and apply their choice.'] : []),
       ...(previous?.replies.length ? [`Your last answer to this person:\n${quote(previous.replies.join('\n'))}`] : []),

@@ -1,7 +1,5 @@
 ---
 id: fin-spend-approval
-title: { en: "Spend approval", ru: "Согласование расходов" }
-description: { en: "Checks each expense against the budget and spending rules.", ru: "Проверяет каждый расход по бюджету и правилам." }
 kind: gate
 sources: []
 ---

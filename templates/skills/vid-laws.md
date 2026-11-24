@@ -1,7 +1,5 @@
 ---
 id: vid-laws
-title: { en: "The laws of video production", ru: "Правила производства видео" }
-description: { en: "Eleven rules for making and checking every video.", ru: "Одиннадцать правил создания и проверки любого видео." }
 kind: procedure
 sources: []
 ---

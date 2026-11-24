@@ -18,7 +18,6 @@ function exportShot(srcPath: string, filename: string): void {
 
 test.describe('Stage 7 world skills, company theme, era names, and simple agent quick chat', () => {
   test('CEO switches company theme in Company & access, previews & confirms era renaming, and non-CEO has no theme picker', async ({ page }, info) => {
-    test.setTimeout(60_000);
     await page.setViewportSize({ width: 1366, height: 900 });
     await page.addInitScript(() => {
       localStorage.setItem('hh-lang', 'ru');
@@ -151,7 +150,6 @@ test.describe('Stage 7 world skills, company theme, era names, and simple agent 
   });
 
   test('clicking a resident on the active world map opens the real AgentWindow in conversation view with level strip and world voice', async ({ page }, info) => {
-    test.setTimeout(60_000);
     await page.setViewportSize({ width: 1366, height: 860 });
     await page.addInitScript(() => {
       localStorage.setItem('hh-lang', 'ru');

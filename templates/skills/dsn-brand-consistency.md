@@ -1,7 +1,5 @@
 ---
 id: dsn-brand-consistency
-title: { en: "Brand consistency", ru: "Соответствие бренду" }
-description: { en: "Checks that logos, colours, type and tone match the company's brand rules.", ru: "Проверяет, что логотипы, цвета, шрифты и тон соответствуют правилам бренда компании." }
 kind: checklist
 sources: [msitarzewski/agency-agents design/design-brand-guardian.md, anthropics/skills skills/brand-guidelines/SKILL.md]
 ---

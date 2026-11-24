@@ -6,6 +6,7 @@ import { EmptyBox } from './Cards';
 import { Edge } from './Edge';
 import { AgentIcon, ProviderMark } from './icons';
 import { useNow } from './reset';
+import { sayIf } from '@hornhoof/protocol';
 
 export const workingCount = (agents: readonly RunningAgent[]) => agents.filter(a => a.busy).length;
 export const agentAmounts = (agents: readonly RunningAgent[]) => [agents.length, workingCount(agents)];
@@ -36,7 +37,7 @@ function AgentChip({ agent: a, me, now }: { agent: RunningAgent; me: Me; now: nu
   const openAgent = useOpenAgent();
   const t = useT();
   const { language } = useLanguage();
-  const role = a.title?.[language];
+  const role = sayIf(a.title, language);
   const chip = <Edge className={`run-chip${a.busy ? ' on' : ''}`} cut={8} halo={a.canOpen}>
     <span className="l1"><span className={`ag${a.busy ? ' on' : ''}`}><AgentIcon /></span><b>{a.name}</b><ProviderMark provider={a.provider} /></span>
     {role && role !== a.name && <span className="l2">{role}</span>}

@@ -2,8 +2,6 @@
 id: VID-EDIT
 department: video_production
 kind: member
-title: { en: "Video editor", ru: "Видеомонтажер" }
-description: { en: "Shapes the story from accepted takes and prepares the finished video for export.", ru: "Собирает историю из принятых дублей и готовит видео к выгрузке." }
 tier: standard
 effort: high
 perProduct: false

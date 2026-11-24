@@ -27,13 +27,13 @@ export function withRestored(list: readonly CustomSkin[], entry: CustomSkin, at:
   return { list: [...list.slice(0, at), back, ...list.slice(at)], entry: back };
 }
 
-/* Names that a card already shows get a number, (2), (3) and on, in both languages at once, so every card can be told
+/* Names that a card already shows get a number, (2), (3) and on, in every language at once, so every card can be told
    apart. */
 export function uniqueName(name: SkinNames, taken: readonly SkinNames[]): SkinNames {
-  const used = new Set(taken.flatMap(other => [other.ru, other.en]));
+  const used = new Set(taken.flatMap(other => Object.values(other)));
   for (let n = 1; ; n += 1) {
-    const next = n === 1 ? name : { ru: `${name.ru} (${n})`, en: `${name.en} (${n})` };
-    if (!used.has(next.ru) && !used.has(next.en)) return next;
+    const next = n === 1 ? name : (Object.fromEntries(Object.entries(name).map(([language, own]) => [language, `${own} (${n})`])) as SkinNames);
+    if (!Object.values(next).some(own => used.has(own))) return next;
   }
 }
 

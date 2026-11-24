@@ -1,7 +1,5 @@
 ---
 id: sup-deflection
-title: { en: "Answers from the knowledge base", ru: "Ответы из базы знаний" }
-description: { en: "Answers common questions with the right help article and notes the questions the knowledge base is missing.", ru: "Отвечает на частые вопросы подходящей справочной статьей и отмечает вопросы, которых нет в базе знаний." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins small-business/skills/ticket-deflector/SKILL.md]
 ---

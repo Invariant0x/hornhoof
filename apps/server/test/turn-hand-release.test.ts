@@ -79,13 +79,12 @@ describe('a holder refused after a release made by hand hears why the turn is op
     expect((await f.done()).task).toMatchObject({ status: 'done', turnId: f.turn.id });
   });
 
-  it('names a step for the head that releases the turn: main taken into the turn branch, its whole run, release_turn and the tag', async () => {
+  it('names a step for the head that releases the turn: main taken into the turn branch, its CI, release_turn and the tag', async () => {
     const f = await handReleased({ rewritten: true });
     f.repo.holds[RELEASED] = [f.R, TAGGED, BASE];
     f.repo.heads[f.branch] = RELEASED;
-    const run = await f.fullRun({ commit: RELEASED });
     await f.approve(RELEASED);
-    expect(await f.recordRelease({ commit: RELEASED, runId: run.id })).toMatchObject({ isError: false });
+    expect(await f.recordRelease({ commit: RELEASED })).toMatchObject({ isError: false });
     f.repo.heads.main = RELEASED;
     f.repo.tags['v1.7.1'] = RELEASED;
     /* Before the minute round closes the turn on it, the tag of a recorded release is no tag made by hand. */

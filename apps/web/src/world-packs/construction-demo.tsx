@@ -19,6 +19,11 @@ import { resolveConstructionStages, type WorldPackManifest } from '../world/mani
 import { IsometricWorldEngine, type WorldEngineStats } from '../world/renderer';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../world/terrain-engine';
 import { registeredWorldPacks, worldPackFromParam } from './registry';
+import { packText } from '../world/pack-text';
+import { loadEveryPackTexts } from './pack-text-load';
+
+/* A demo page shows a pack's words in the language its own switch picks, so every language is at hand. */
+loadEveryPackTexts();
 
 type PackKey = string;
 type DemoMode = 'build' | 'demolish';
@@ -757,7 +762,7 @@ function Stage6ConstructionStudio() {
           >
             {registeredWorldPacks().map(p => (
               <option key={p.id} value={p.id}>
-                {p.name[lang]}
+                {packText(p.name, lang)}
               </option>
             ))}
           </select>
@@ -904,7 +909,7 @@ function Stage6ConstructionStudio() {
             <span>
               {t.buildingLabel}:{' '}
               <strong style={{ color: '#F3D28A' }}>
-                {builtState.readout.buildingStage}/10 ({currentStageSpec.label[lang]})
+                {builtState.readout.buildingStage}/10 ({packText(currentStageSpec.label, lang)})
               </strong>
             </span>
             <span>

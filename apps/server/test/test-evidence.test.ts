@@ -267,13 +267,13 @@ describe('a turn has its own branch', () => {
 });
 
 describe('a reviewer', () => {
-  it('is told to check what it touched with local tests, as the full run happens once at release', async () => {
+  it("is told to check what it touched with local tests, as the repository's CI checks the release", async () => {
     const c = await company();
     const review = await reviewOpen(c);
     const [rita] = await c.db.select().from(agents).where(eq(agents.id, c.rita.id));
     for (const w of [{ why: 'review' as const }, { why: 'review' as const, text: 'cart.ts:1 is wrong.' }]) {
       const prompt = wakePrompt(rita!, review, { agentId: c.rita.id, taskId: review.id, ...w });
-      expect(prompt).toContain('Check what you touched with local tests; the full run happens once at release.');
+      expect(prompt).toContain("Check what you touched with local tests; the repository's CI checks the release.");
       expect(prompt).not.toContain('testEvidence');
     }
   });

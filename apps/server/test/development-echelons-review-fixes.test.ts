@@ -139,7 +139,7 @@ describe('the accepted review fixes', () => {
     const wake = moved.wakes.find(each => each.agentId === f.tester.id)!;
     expect(wake).toMatchObject({ taskId: f.task.id, why: 'assigned' });
     const prompt = wakePrompt(f.tester, await loadTask(f.db, f.task.id), wake);
-    expect(prompt).toContain('in Tests check what the change touched with local tests, as the full run happens once at release, and report the exact candidate');
+    expect(prompt).toContain('in Tests check what the change touched with local tests, as the repository\'s CI checks the release, and report the exact candidate');
     expect(prompt).not.toContain('report verified final-candidate runs in Tests');
     expect(prompt).not.toContain('The tests you ran');
   });

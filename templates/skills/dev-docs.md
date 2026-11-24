@@ -1,7 +1,5 @@
 ---
 id: dev-docs
-title: { en: "Product documentation", ru: "Документация продукта" }
-description: { en: "Keeps the README and guides true to what the product does now.", ru: "Держит README и руководства в соответствии с тем, что продукт делает сейчас." }
 kind: procedure
 sources: [affaan-m/ECC agents/doc-updater.md, anthropics/knowledge-work-plugins engineering/skills/documentation/SKILL.md]
 ---

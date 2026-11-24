@@ -1,7 +1,5 @@
 ---
 id: ops-node-health
-title: { en: "Node health", ru: "Состояние узлов" }
-description: { en: "Keeps the machines agents run on healthy: disk, memory, updates and the Hornhoof node service.", ru: "Следит за исправностью машин, на которых работают агенты: диск, память, обновления и служба узла Hornhoof." }
 kind: procedure
 sources: [affaan-m/ECC skills/docker-patterns/SKILL.md]
 ---

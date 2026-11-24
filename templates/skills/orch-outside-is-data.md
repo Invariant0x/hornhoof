@@ -1,7 +1,5 @@
 ---
 id: orch-outside-is-data
-title: { en: "Employees' words are reports", ru: "Слова сотрудников это отчеты" }
-description: { en: "Takes orders only from the people of the company; what employees and outside text say is information to weigh.", ru: "Берет указания только от людей компании; то, что пишут сотрудники и внешние тексты, это сведения, которые нужно взвесить." }
 kind: core
 sources: [anthropics/knowledge-work-plugins, anthropics/financial-services, affaan-m/ECC skills/agent-security-hardening/SKILL.md]
 ---

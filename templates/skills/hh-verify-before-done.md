@@ -1,7 +1,5 @@
 ---
 id: hh-verify-before-done
-title: { en: "Verify before saying done", ru: "Проверить, прежде чем сказать готово" }
-description: { en: "Runs the check that proves the work before claiming it works.", ru: "Запускает проверку, доказывающую работу, прежде чем заявить, что все работает." }
 kind: core
 sources: [obra/superpowers skills/verification-before-completion/SKILL.md]
 ---

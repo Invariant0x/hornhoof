@@ -1,6 +1,7 @@
 import { AGENT_TIMES, EXTERNAL_WAITS, FILE_BUDGET_MS, KIND_LINES, PIPELINE_STAGES, TEST_BUDGET_MS, type AgentTimeKind, type DepartmentReport, type DoneTask, type ExternalWaitKind, type FileTime, type KindFacts, type KindLine, type PackageTime, type PartTimings, type PipelineFacts, type PipelineRow, type PipelineSection, type PipelineStage, type PipelineUnit, type RunWaits, type SlowTest, type Spread, type TestFileTiming, type TestsFacts, type TurnsFacts, type Waited, type WorkKind } from '@hornhoof/protocol';
 import type { TaskEventKind, TaskStatus, TestRunFileCache } from '../../db/schema.js';
 import type { AgentTime } from './tree.js';
+import { wordLanguages, wordsFor } from '../../locales/index.js';
 
 /* The facts of one turn as the database holds them, for all of a company or one department. Everything here is worked out
    from these alone, so a closed turn and an open one are counted the same way. */
@@ -218,12 +219,23 @@ function waited(times: number[]): Waited {
 const ENDED_BY_HORNHOOF: ReadonlySet<string> = new Set(['handed_on', 'waiting', 'cancelled', 'stale', 'removed', 'switched_off', 'message_not_delivered']);
 const isFailure = (j: FactsJob): boolean => j.status === 'failed' && !j.interrupted && !ENDED_BY_HORNHOOF.has(j.error ?? '');
 
-const BODY_KINDS: Record<string, WorkKind> = { ошибка: 'bug', 'известное поведение': 'known_behavior', 'неизвестный путь': 'unknown_path', 'старый код': 'legacy_code' };
+/* The kind a person wrote on the first line of an older task's body, in the words of any language the server has. */
+const KIND_KEYS = ['bug', 'known_behavior', 'unknown_path', 'legacy_code'] as const satisfies readonly WorkKind[];
+
+export function kindWritten(line: string): WorkKind | undefined {
+  for (const language of wordLanguages()) {
+    const words = wordsFor(language).taskKind;
+    const named = new RegExp(`^${escapeRegExp(words.label)}:\\s*([^.]+)`, 'i').exec(line)?.[1]?.trim().toLowerCase();
+    const found = named === undefined ? undefined : KIND_KEYS.find(kind => words[kind].toLowerCase() === named);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function kindOf(task: FactsTask): KindLine {
-  if (task.workKind) return task.workKind;
-  const named = /^Вид:\s*([^.]+)/.exec(task.firstLine)?.[1]?.trim().toLowerCase();
-  return (named && BODY_KINDS[named]) || 'unset';
+  return task.workKind ?? kindWritten(task.firstLine) ?? 'unset';
 }
 
 const isDone = (l: Line): boolean => l.task.status === 'done';

@@ -1,7 +1,5 @@
 ---
 id: sup-work-pipeline
-title: { en: "Support pipeline", ru: "Конвейер поддержки" }
-description: { en: "Where support checks item by item, in a batch, by sample and by code; read it when laying out work or changing a check.", ru: "Где поддержка проверяет по штуке, пакетом, выборкой и кодом; читай, когда раздаешь работу или меняешь проверку." }
 kind: procedure
 sources: []
 ---

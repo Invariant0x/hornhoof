@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
-import { LANGUAGES, type Language } from '../src/i18n/index';
+import { LANGUAGES, type ShippedLanguage } from '../src/i18n/index';
 import { ru } from '../src/i18n/ru';
 import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
 import type { UpdatesView } from '../src/types';
@@ -13,7 +13,7 @@ import { serveApi } from './api';
    the shortest words of this view, or the longest turned right to left: no shipped language is written that way yet. */
 test.describe.configure({ timeout: 0 });
 
-const DICTS: Record<Language, Messages> = { en, ru };
+const DICTS: Record<ShippedLanguage, Messages> = { en, ru };
 const TABS = ['map', 'tasks', 'people', 'subscriptions', 'machines'] as const;
 const TARGET = { version: '0.34.0', commit: '00e5ff3e' + 'f'.repeat(32) };
 /* How often the updates screen asks while an update runs; the page's clock moves only as the test moves it. */
@@ -58,7 +58,7 @@ async function heldServer(page: Page) {
   return { end: () => { held.on = false; } };
 }
 
-async function look(page: Page, lang: Language, skin: string, width: number) {
+async function look(page: Page, lang: ShippedLanguage, skin: string, width: number) {
   await page.setViewportSize({ width, height: 900 });
   await page.addInitScript(({ lang, skin }) => {
     localStorage.setItem('hh-lang', lang);
