@@ -2742,7 +2742,7 @@ export const en = {
     },
     board: {
       subtasks: (done: number, total: number) => `${done} of ${total}`,
-      empty: 'Nothing here',
+      empty: 'No tasks here yet',
     },
     graph: {
       canvas: 'Goals and tasks drawn as a tree',

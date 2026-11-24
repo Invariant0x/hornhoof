@@ -2719,7 +2719,7 @@ export const ru: Messages = {
     },
     board: {
       subtasks: (done: number, total: number) => `${done} из ${total}`,
-      empty: 'Пусто',
+      empty: 'Здесь пока нет задач',
     },
     graph: {
       canvas: 'Цели и задачи в виде дерева',

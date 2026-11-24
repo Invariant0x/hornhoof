@@ -1393,12 +1393,22 @@ describe('a section of the tracker that holds nothing', () => {
     expect(block).not.toHaveClass('first');
   });
 
-  it('says a board column with no card in one line with no icon', async () => {
+  it.each([
+    ['en', 'Done', 'No tasks here yet'],
+    ['ru', 'Готово', 'Здесь пока нет задач'],
+  ])('says a board column with no card in one line with no icon, in %s', async (language, done, sentence) => {
+    localStorage.setItem('hh-lang', language);
     shell('/tasks?department=d2&view=board');
-    const column = await screen.findByRole('region', { name: en.tracker.statuses.done });
-    const line = within(column).getByText(en.tracker.board.empty);
+    const column = await screen.findByRole('region', { name: done });
+    const line = within(column).getByText(sentence);
     expect(line).toHaveClass('empty-line');
     expect(column.querySelector('.empty-state, svg.empty-state-icon')).toBeNull();
+  });
+
+  it("keeps the section's icon in an empty block 20 px, by a token of the tracker", () => {
+    expect(decl('.tr-main', '--empty-icon')).toBe('20px');
+    expect(decl('.empty-state-icon.ic', 'inline-size')).toBe('var(--empty-icon)');
+    expect(decl('.empty-state-icon.ic', 'block-size')).toBe('var(--empty-icon)');
   });
 
   it('offers to make a task from an empty list where the person may plan, and opens its form', async () => {

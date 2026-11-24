@@ -14,6 +14,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Changed
 
+- An empty column of the board says "No tasks here yet" instead of "Nothing here", and the section's icon in an empty block takes its 20 px from a token of the tracker.
 - A skin file of your own may name the skin in any language of the registry, with the English name required and the others optional, and the names of a world's employees can be taken in any language of the registry.
 
 ## [0.43.0] - 2026-11-23
