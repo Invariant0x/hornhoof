@@ -274,11 +274,12 @@ describe('named turn failures', () => {
     expect(await c.turnsOf(c.watcher.id)).toHaveLength(0);
   });
 
-  it('gives the waiting retry and latest failure in both agent APIs', async () => {
+  /* A cut connection retries by itself: both agent APIs give the waiting retry, and no failure while it goes on (#1953). */
+  it('gives the waiting retry in both agent APIs, and no failure while the turn retries by itself', async () => {
     const c = await atWork();
     const at = new Date();
     await c.fail(c.first.id, failure('cut'), at);
-    const expected = { retry: { attempt: 1, max: 4, at: +at + MIN, kind: 'cut' }, failure: { kind: 'cut', text: failure('cut').text, at: +at } };
+    const expected = { retry: { attempt: 1, max: 4, at: +at + MIN, kind: 'cut' }, failure: null };
     const card = (await c.app.inject({ url: `/api/agents/${c.agent.id}`, ...c.as(c.ceo) })).json();
     expect(card).toMatchObject(expected);
     const org = (await c.app.inject({ url: '/api/org', ...c.as(c.ceo) })).json();
@@ -295,13 +296,14 @@ describe('named turn failures', () => {
     { status: 'failed', error: 'switched_off', named: false, shown: 'first' },
     { status: 'running', error: null, named: false, shown: 'first' },
   ] as const)('shows $shown failure after a later $status turn with error $error and named failure $named', async ({ status, error, named, shown }) => {
+    /* The first turn waits for its plan's owner to sign in: a failure that needs a person, and no retry of its own. */
     const c = await atWork();
     const at = new Date();
-    await c.fail(c.first.id, failure('cut'), at);
+    await c.fail(c.first.id, failure('auth', false), at);
     const later = new Date(+at + 1000);
     await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.agent.id, kind: 'conversation', prompt: 'Later work', timeoutMs: 900000, status, error, failure: named ? failure('refused', false) : null, finishedAt: status === 'running' ? null : later });
-    const expectedFailure = shown === 'none' ? null : { kind: shown === 'first' ? 'cut' : 'refused', text: failure('cut').text, at: shown === 'first' ? +at : +later };
-    const expected = { failure: expectedFailure, retry: { attempt: 1, max: 4, at: +at + MIN, kind: 'cut' } };
+    const expectedFailure = shown === 'none' ? null : { kind: shown === 'first' ? 'auth' : 'refused', text: failure('auth').text, at: shown === 'first' ? +at : +later };
+    const expected = { failure: expectedFailure, retry: null };
 
     const card = (await c.app.inject({ url: `/api/agents/${c.agent.id}`, ...c.as(c.ceo) })).json();
     expect(card).toMatchObject(expected);

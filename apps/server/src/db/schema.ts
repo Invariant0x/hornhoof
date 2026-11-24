@@ -1769,7 +1769,9 @@ export const programOperatorSignals = pgTable('program_operator_signals', {
   caseId: uuid('case_id').notNull().references(() => programOperatorCases.id),
 }, t => [primaryKey({ columns: [t.agentId, t.instance, t.reason, t.evidenceKey] })]);
 
-export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as const;
+/* refused: Hornhoof refused what it was asked to run before any of it started, as a command a part may not run or a product
+   with no tests set up. It is a hint to the one who asked: no result, and no failure. */
+export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped', 'refused'] as const;
 
 /* A command an agent runs for a task on whichever machines of the company are free, in parts when it splits: the full
    test suite of a task's branch, or any other work, on a branch or in an empty folder with the task's files. The agent
@@ -1912,7 +1914,7 @@ export const updateWaits = pgTable('update_waits', {
   error: text('error'),
 }, t => [index('update_waits_open').on(t.endedAt), index('update_waits_company_since').on(t.companyId, t.since)]);
 
-export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
+export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped', 'refused'] as const;
 /* A machine that lost a part of a run as it ran: the place (a machine's id, or builtin), its name then, and why. */
 export type LostRun = { key: string; machine: string; why: string; computer?: string };
 

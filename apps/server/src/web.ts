@@ -15,11 +15,11 @@ export const hasWebApp = (dir: string): boolean => existsSync(join(dir, 'index.h
 export const pageBuild = (dir: string): string | null =>
   hasWebApp(dir) ? createHash('sha256').update(readFileSync(join(dir, 'index.html'))).digest('base64url') : null;
 
-/* No other site may show Hornhoof inside its own page, where a person could be tricked into clicking, and browsers take
-   every response as the type it is sent with instead of guessing. The built app runs only its own script files, so an
-   injected script does not run. Styles may be inline because the terminal adds its own style tags, the bundled fonts
-   and the tab icon are data: addresses, a picture waiting at the message line shows from a blob: address, and the
-   terminal's live line is a WebSocket to this same server. */
+/* No other site may show Hornhoof inside its own page, where a person could be tricked into clicking, browsers take
+   every response as the type it is sent with instead of guessing, and outbound links send no Referer header. The built
+   app runs only its own script files, so an injected script does not run. Styles may be inline because the terminal adds
+   its own style tags, the bundled fonts and the tab icon are data: addresses, a picture waiting at the message line
+   shows from a blob: address, and the terminal's live line is a WebSocket to this same server. */
 const SECURITY_HEADERS = {
   'x-frame-options': 'DENY',
   'content-security-policy': [
@@ -35,6 +35,7 @@ const SECURITY_HEADERS = {
     "frame-ancestors 'none'",
   ].join('; '),
   'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
   'x-robots-tag': 'noindex, nofollow',
 };
 

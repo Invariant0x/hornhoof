@@ -677,6 +677,45 @@ describe('Machines', () => {
     for (const [n, [, line]] of lines.entries()) expect(within(card(`host-${n}`)).getByText(line), line).toBeInTheDocument();
   });
 
+  it.each([
+    [
+      'en',
+      [
+        ['dump', (since: string) => `Copy: saving what it did while it led (reading the database, since ${since})`],
+        ['seal', (since: string) => `Copy: saving what it did while it led (encrypting the backup, since ${since})`],
+        ['server', (since: string) => `Copy: saving what it did while it led (waiting for the company server, since ${since})`],
+        ['send', (since: string) => `Copy: saving what it did while it led (sending the backup to the company server, since ${since})`],
+        ['retry', (since: string) => `Copy: saving what it did while it led (retrying after an error, since ${since})`],
+      ] as const,
+    ],
+    [
+      'ru',
+      [
+        ['dump', (since: string) => `Копия: сохраняет то, что сделано, пока она держала сервер (выгружает базу данных, с ${since})`],
+        ['seal', (since: string) => `Копия: сохраняет то, что сделано, пока она держала сервер (шифрует резервную копию, с ${since})`],
+        ['server', (since: string) => `Копия: сохраняет то, что сделано, пока она держала сервер (ждет ответа сервера компании, с ${since})`],
+        ['send', (since: string) => `Копия: сохраняет то, что сделано, пока она держала сервер (отправляет резервную копию на сервер компании, с ${since})`],
+        ['retry', (since: string) => `Копия: сохраняет то, что сделано, пока она держала сервер (повторяет попытку после сбоя, с ${since})`],
+      ] as const,
+    ],
+  ] as const)('shows what a stuck saving machine waits on and since when in %s', async (language, cases) => {
+    const iso = '2026-11-24T01:09:00.000Z';
+    const since = clock(language, iso)!;
+    shown(
+      language,
+      cases.map(([waiting], n) => ({
+        ...MACHINES[0]!,
+        id: `s${n}`,
+        hostname: `save-${n}`,
+        data: held({ number: 2, copy: { line: 'saving', waiting, since: iso } }),
+      })),
+    );
+    await shownTable();
+    for (const [n, [, expected]] of cases.entries()) {
+      expect(within(card(`save-${n}`)).getByText(expected(since))).toBeInTheDocument();
+    }
+  });
+
   const names = () => screen.getAllByRole('button', { name: /^Open the card of / }).map(button => button.getAttribute('aria-label')!.replace('Open the card of ', ''));
   const four = (over: object[] = []) => [
     { number: 1, why: 'server' }, { number: 2, why: 'always.best_link' }, { number: 3, why: 'mostly.good_link' }, { number: 4, why: 'next' },
