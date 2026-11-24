@@ -4,8 +4,9 @@
 -- now, and the link as the relay takes it now with the secrets of the peer services, each sealed as it is stored: a
 -- machine that stopped holding the data holds it no more after a restore, and a key or a secret it knew opens nothing.
 -- And the key the company's files are sealed with, with how many machines keep each: a database from before the store,
--- or before its first file, has no key, and one made then would open none of the files the machines keep. The store's
--- tables are read by name, so the carry of a database from before them says none. One line of JSON.
+-- or before its first file, has no key, and one made then would open none of the files the machines keep. And the area
+-- each machine gives the files, none included, as its owner set it. The store's tables and columns are read by name, so
+-- the carry of a database from before them says none. One line of JSON.
 SELECT jsonb_build_object(
   'people', COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'id', p.id, 'status', p.status, 'passwordHash', p.password_hash, 'scopeKind', p.scope_kind, 'isOwner', p.is_owner, 'isCeoDelegate', p.is_ceo_delegate,
@@ -14,7 +15,8 @@ SELECT jsonb_build_object(
     FROM people p), '[]'::jsonb),
   'invites', COALESCE((SELECT jsonb_agg(token_hash) FROM invites WHERE used_at IS NULL AND expires_at > now()), '[]'::jsonb),
   'machines', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'revoked', revoked_at IS NOT NULL, 'lendsTests', lends_tests, 'keepsBackups', keeps_backups,
-      'computerClosed', to_jsonb(m)->'computer_closed', 'role', role, 'dataLeftAt', data_left_at, 'uploadState', upload_state)) FROM machines m), '[]'::jsonb),
+      'computerClosed', to_jsonb(m)->'computer_closed', 'role', role, 'dataLeftAt', data_left_at, 'uploadState', upload_state)
+      || CASE WHEN to_jsonb(m) ? 'file_store_limit_bytes' THEN jsonb_build_object('fileStoreLimitBytes', to_jsonb(m)->'file_store_limit_bytes') ELSE '{}'::jsonb END) FROM machines m), '[]'::jsonb),
   'link', (SELECT jsonb_build_object('name', name, 'url', url, 'hidden', hidden, 'keyEnc', key_enc, 'nextKeyEnc', next_key_enc, 'tunnelEnc', tunnel_enc, 'createdAt', created_at) FROM public_links LIMIT 1),
   'peerSecrets', COALESCE((SELECT jsonb_agg(jsonb_build_object('kind', kind, 'secretEnc', secret_enc, 'createdAt', created_at)) FROM peer_secrets), '[]'::jsonb),
   'serials', COALESCE((SELECT jsonb_agg(serial) FROM certificates WHERE revoked_at IS NOT NULL), '[]'::jsonb),

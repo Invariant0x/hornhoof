@@ -56,7 +56,7 @@ export type Carry = {
   invites: string[];
   /* role, dataLeftAt, uploadState: whether the machine holds the company's data now, and what one that stopped still
      owes. An updater of the build before says none of the three, and the restored row keeps its own. */
-  machines: { id: string; revoked: boolean; lendsTests: boolean; keepsBackups: boolean; computerClosed?: boolean | null; role?: 'data' | 'worker' | null; dataLeftAt?: string | null; uploadState?: 'waiting' | 'received' | 'kept' | null }[];
+  machines: { id: string; revoked: boolean; lendsTests: boolean; keepsBackups: boolean; computerClosed?: boolean | null; role?: 'data' | 'worker' | null; dataLeftAt?: string | null; uploadState?: 'waiting' | 'received' | 'kept' | null; fileStoreLimitBytes?: number | null }[];
   /* Older updaters carried names alone. Keep the list readable by older servers. */
   serials: string[];
   /* Live revocations from both the certificate rows and earlier restores. */

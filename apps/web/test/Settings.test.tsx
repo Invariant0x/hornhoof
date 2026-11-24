@@ -244,9 +244,13 @@ describe('Backups in Settings', () => {
     mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'GET /api/backups': [200, BACKUPS], 'GET /api/company/file-store': [200, store] });
     render(<Settings me={ME} group="company" onClose={() => {}} />);
     const dialog = await screen.findByRole('dialog', { name: 'Settings' });
-    expect(await within(dialog).findByRole('combobox', { name: 'File copies across machines' })).toHaveValue('2');
+    expect(await within(dialog).findByRole('heading', { name: 'Backups' })).toBeInTheDocument();
+    /* The part is there as the window opens, above the backups; what it says comes with the server's answer. Asked at once,
+       so a window without it fails here rather than waiting for it. */
     const headings = within(dialog).getAllByRole('heading').map(heading => heading.textContent);
+    expect(headings).toContain('File copies across machines');
     expect(headings.indexOf('File copies across machines')).toBeLessThan(headings.indexOf('Backups'));
+    expect(await within(dialog).findByRole('combobox', { name: 'File copies across machines' })).toHaveValue('2');
   });
 
   it('shows no backups to anyone else, and asks the server for none', async () => {

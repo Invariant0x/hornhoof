@@ -73,8 +73,8 @@ describe('the carry of a restore', () => {
     const [openInvite] = await db.select().from(invites).where(sql`${invites.personId} = ${finn.id} AND ${invites.expiresAt} > now()`);
     expect(carry.invites).toEqual([openInvite!.tokenHash]);
     const machine = (id: string) => carry.machines.find(one => one.id === id);
-    expect(machine(live!.id)).toEqual({ id: live!.id, revoked: false, lendsTests: false, keepsBackups: true, computerClosed: true, role: 'worker', dataLeftAt: null, uploadState: null });
-    expect(machine(gone!.id)).toEqual({ id: gone!.id, revoked: true, lendsTests: true, keepsBackups: false, computerClosed: false, role: 'worker', dataLeftAt: null, uploadState: null });
+    expect(machine(live!.id)).toEqual({ id: live!.id, revoked: false, lendsTests: false, keepsBackups: true, computerClosed: true, role: 'worker', dataLeftAt: null, uploadState: null, fileStoreLimitBytes: null });
+    expect(machine(gone!.id)).toEqual({ id: gone!.id, revoked: true, lendsTests: true, keepsBackups: false, computerClosed: false, role: 'worker', dataLeftAt: null, uploadState: null, fileStoreLimitBytes: null });
     /* A company with no link and no secrets of its peer services says so. */
     expect(carry.link).toBeNull();
     expect(carry.peerSecrets).toEqual([]);
@@ -140,5 +140,32 @@ describe('the carry of a restore', () => {
     expect((await read()).fileCopies).toEqual({ copies: 3, setBy: 'person:ceo' });
     expect(((await db.execute(sql`SELECT key_enc FROM net.file_key`)) as unknown as { rows: { key_enc: string }[] }).rows).toEqual([{ key_enc: keyEnc }]);
     expect((await app.ctx.files.bytes(db, kept.sha256)).toString()).toBe('a file of the company');
+  });
+
+  it("carries the area each machine gives the company's files, so a restore neither fills a machine whose owner set less nor drops a limit", async () => {
+    const { app, db } = await testApp();
+    await setUpCompany(app);
+    const [acme] = await db.select().from(companies);
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    const [none, some, plain] = await db.insert(machines).values([
+      { companyId: acme!.id, personId: owner!.id, machineKey: 'none', networkId: hashToken('none'), role: 'worker', fileStoreLimitBytes: 0 },
+      { companyId: acme!.id, personId: owner!.id, machineKey: 'some', networkId: hashToken('some'), role: 'worker', fileStoreLimitBytes: 5 * 1024 ** 3 },
+      { companyId: acme!.id, personId: owner!.id, machineKey: 'plain', networkId: hashToken('plain'), role: 'worker' },
+    ]).returning();
+    const carry = Object.values(((await db.execute(sql.raw(CARRY))) as unknown as { rows: Record<string, unknown>[] }).rows[0]!)[0] as Carry;
+    const limitOf = (id: string) => carry.machines.find(one => one.id === id)!.fileStoreLimitBytes;
+    expect([limitOf(none!.id), limitOf(some!.id), limitOf(plain!.id)]).toEqual([0, 5 * 1024 ** 3, null]);
+
+    /* The restored database had other areas set: the ones the old database had come back, none included. */
+    await db.update(machines).set({ fileStoreLimitBytes: 50 * 1024 ** 3 }).where(eq(machines.id, none!.id));
+    await db.update(machines).set({ fileStoreLimitBytes: null }).where(eq(machines.id, some!.id));
+    await db.update(machines).set({ fileStoreLimitBytes: 1 }).where(eq(machines.id, plain!.id));
+    await applyCarry(app.ctx, carry);
+    const now = async (id: string) => (await db.select().from(machines).where(eq(machines.id, id)))[0]!.fileStoreLimitBytes;
+    expect([await now(none!.id), await now(some!.id), await now(plain!.id)]).toEqual([0, 5 * 1024 ** 3, null]);
+    /* The carry of an updater from before the areas names none, and leaves each as the restored database has it. */
+    await db.update(machines).set({ fileStoreLimitBytes: 7 }).where(eq(machines.id, none!.id));
+    await applyCarry(app.ctx, { ...carry, machines: carry.machines.map(({ fileStoreLimitBytes: _gone, ...rest }) => rest) });
+    expect(await now(none!.id)).toBe(7);
   });
 });
