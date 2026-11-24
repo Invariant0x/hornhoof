@@ -3,7 +3,14 @@
    names. A loop without its sheet, or on a building still shown by its placeholder, draws nothing: the engine keeps
    no home-made cranes, dust, smoke or workers. Contains zero theme-specific words. */
 
-import { masterTileW, resolveBuildingArt, type ArtPoint, type LoopAttachPoint, type SheetPassport } from './art';
+import {
+  masterTileW,
+  resolveBuildingArt,
+  type ArtPoint,
+  type BuildingPicturePassport,
+  type LoopAttachPoint,
+  type SheetPassport,
+} from './art';
 import type { DisplayRunPool, WorldArtLibrary } from './art-runtime';
 import { cityDepthY, type CityBuilding, type CityState } from './city-layout';
 import { buildingLoopsFor, type BuildingConstructionState, type ConstructionSimulation } from './construction';
@@ -25,6 +32,13 @@ export type LoopArtContext = Readonly<{
 
 type LoopAnchors = Readonly<Record<LoopAttachPoint, { x: number; y: number }>>;
 
+/* Where the top loops (smoke, celebration, a sleeper's Z) attach on a picture, in its own pixels: its topAnchor; else the
+   foot of its flag pole, since a finished house names neither a top nor a roof line (Ivan AI, 24.11); else its roof line,
+   then its wall top, then the back ground corner of its lot, above the lot centre. */
+export function loopTopPoint(p: BuildingPicturePassport): ArtPoint {
+  return p.topAnchor ?? p.flagAnchor ?? { x: p.groundAnchor.x, y: p.roofLine ?? p.wallTopLine ?? p.corners.top.y };
+}
+
 /* Where loops attach on a building drawn from its picture, from the picture's passport; null for placeholders. */
 function artLoopAnchors(
   art: LoopArtContext,
@@ -41,9 +55,7 @@ function artLoopAnchors(
   const p = resolved.passport;
   const s = tileW / resolved.artPxPerTile;
   const at = (pt: ArtPoint) => ({ x: ctr.x + (pt.x - p.groundAnchor.x) * s, y: ctr.y + (pt.y - p.groundAnchor.y) * s });
-  const top = p.topAnchor
-    ? at(p.topAnchor)
-    : at({ x: p.groundAnchor.x, y: p.roofLine ?? p.wallTopLine ?? p.corners.top.y });
+  const top = at(loopTopPoint(p));
   return {
     top,
     awning: p.awningAnchor ? at(p.awningAnchor) : top,

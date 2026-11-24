@@ -59,7 +59,7 @@ Building footprints, square, in master pixels:
 | `wallTopLine` | no | y of the top of the walls. |
 | `roofLine` | no | y of the roof edge. |
 | `wallCutY` | no | y where a full-height wall picture may be cut to stand in for waist-high walls (section 4). |
-| `flagAnchor` | no | Foot of the flag pole on the roof. Without it the building has no flag. |
+| `flagAnchor` | no | Foot of the flag pole on the roof. Without it the building has no flag. Top loops attach here when the picture has no `topAnchor`. |
 | `awningAnchor` | no | Top edge of a swaying awning. |
 | `topAnchor` | no | Top centre (apex, spire, chimney): where a capstone or a top loop attaches. |
 | `workSlots` | no | Up to 3 points `{ x, y, layer }` with `layer` `front` (on scaffolding, in front of walls) or `inside` (in open rooms) where workers stand. |
@@ -234,7 +234,9 @@ A missing animation falls back to `walk` for moving states and to `idle` for the
 
 ## 8. Animation loops
 
-`loops/<loop>.png` with a sheet passport, one row of frames: `crane`, `hoist_block`, `dust`, `smoke`, `water`, `awning`, `celebration`, and for people `sleep_z` (section 7). On a building drawn from its picture, a loop is placed at the point named by its `attach`: `top` (the picture's `topAnchor`, or its roof line), `awning` (`awningAnchor`), `door` (`door`) or `ground` (the lot centre). Loops of buildings still on placeholders stay placeholders.
+`loops/<loop>.png` with a sheet passport, one row of frames: `crane`, `hoist_block`, `dust`, `smoke`, `water`, `awning`, `celebration`, and for people `sleep_z` (section 7). On a building drawn from its picture, a loop is placed at the point named by its `attach`: `top` (the picture's `topAnchor`; without it the foot of its flag pole, `flagAnchor`; then its roof line, its wall top, or the back corner of its lot), `awning` (`awningAnchor`), `door` (`door`) or `ground` (the lot centre). Loops of buildings still on placeholders stay placeholders.
+
+A building site shows one lift, never both: `crane` on a lot of 3 x 3 tiles or more, its sheet drawing its own hanging block, and `hoist_block` alone on a smaller lot.
 
 ## 9. Ground, roads, decals and plants
 

@@ -97,11 +97,13 @@ describe('Stage 6 construction stages, building animation loops, work slots, 20-
     expect(openLoops.map(l => l.kind)).toContain('dust');
     expect(openSlots.some(s => s.action === 'interior_mason')).toBe(true);
 
-    /* Stage 4 (waist_walls_scaffold): crane, hoist_block, dust + scaffold hammerers, ramp carriers & sled team! */
+    /* Stage 4 (waist_walls_scaffold): dust and the crane, which on a 4x4 lot carries its own block (no hoist_block),
+       + scaffold hammerers, ramp carriers & sled team! */
     openState.currentStage = 4;
     const midLoops = buildingLoopsFor(dept, openState, EGYPT_WORLD_PACK);
     const midSlots = workSlotsForBuilding(dept, openState, EGYPT_WORLD_PACK);
-    expect(midLoops.map(l => l.kind)).toEqual(expect.arrayContaining(['crane', 'hoist_block', 'dust']));
+    expect(midLoops.map(l => l.kind)).toEqual(expect.arrayContaining(['crane', 'dust']));
+    expect(midLoops.map(l => l.kind)).not.toContain('hoist_block');
     expect(midSlots.map(s => s.action)).toEqual(expect.arrayContaining(['hammer_scaffold', 'carry_ramp', 'pull_sled']));
 
     /* Completed department -> fluttering awning + hearth smoke, zero crane. */
@@ -130,7 +132,7 @@ describe('Stage 6 construction stages, building animation loops, work slots, 20-
     /* Egypt draws its pyramids' ramps and scaffolds into the tiers (#1975): dust, no crane; a pack that does not gets the crane. */
     expect(pyrLoopsActive.map(l => l.kind)).toEqual(['dust']);
     const kitPack = { ...EGYPT_WORLD_PACK, art: { ...EGYPT_WORLD_PACK.art!, ownConstruction: undefined } };
-    expect(buildingLoopsFor(buildingPyramid, null, kitPack).map(l => l.kind)).toEqual(expect.arrayContaining(['crane', 'hoist_block', 'dust']));
+    expect(buildingLoopsFor(buildingPyramid, null, kitPack).map(l => l.kind)).toEqual(['dust', 'crane']);
     expect(pyrLoopsActive.map(l => l.kind)).not.toContain('celebration');
     expect(pyrSlotsActive.some(s => s.action === 'pull_sled')).toBe(true);
 

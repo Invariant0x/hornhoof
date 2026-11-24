@@ -151,13 +151,31 @@ export function computeStatueAlleyProgress(
 
 type AddLoop = (kind: BuildingLoopKind, intensity?: number) => void;
 
+/* The smallest lot side that takes a crane. */
+const CRANE_MIN_SPAN = 3;
+
+/* The one lift over a building site (Ivan AI, 24.11): a lot of 3x3 and up gets the crane, whose sheet draws its own
+   block, and a smaller lot the hoisted block alone; never both, so one block hangs over a site. */
+function addLift(span: number, add: AddLoop, intensity = 1): void {
+  add(span >= CRANE_MIN_SPAN ? 'crane' : 'hoist_block', intensity);
+}
+
+function isLift(kind: BuildingLoopKind): boolean {
+  return kind === 'crane' || kind === 'hoist_block';
+}
+
+/* A site's lot side, from its job when it has one. */
+function siteSpan(building: CityBuilding, state: BuildingConstructionState | null): number {
+  return state ? Math.min(state.spanCol, state.spanRow) : Math.min(building.spanCol, building.spanRow);
+}
+
 /* Whether the shared building kit (crane, hoist) goes over this kind: not over kinds whose stage pictures carry their
    own scaffolds and ramps (WorldArtCatalog.ownConstruction). */
 function laysKit(pack: WorldPackManifest, kind: CityBuilding['kind']): boolean {
   return !(pack.art?.ownConstruction ?? []).includes(kind);
 }
 
-/* Goal monuments: dust, and cranes and hoists where the kit is laid, while growing; golden capstone celebration at 100%. */
+/* Goal monuments: dust, and the lift where the kit is laid, while growing; golden capstone celebration at 100%. */
 function monumentLoops(building: CityBuilding, state: BuildingConstructionState | null, kit: boolean, add: AddLoop): void {
   const reached = state ? state.phase === 'complete' && state.currentStage >= state.maxStage : Boolean(building.reached);
   if (reached) {
@@ -166,10 +184,7 @@ function monumentLoops(building: CityBuilding, state: BuildingConstructionState 
   }
   const stage = state ? state.currentStage : building.stage;
   add('dust', 1.0);
-  if (kit && stage >= 2) {
-    add('crane', 1.0);
-    add('hoist_block', 1.0);
-  }
+  if (kit && stage >= 2) addLift(siteSpan(building, state), add, 1.0);
 }
 
 /* A statue's stage, its last stage and whether it is finished, from its job or, without one, from the building. */
@@ -178,7 +193,7 @@ function statueProgress(building: CityBuilding, state: BuildingConstructionState
   return { stage: building.stage, maxS: building.maxStage, finished: Boolean(building.reached) || building.stage >= building.maxStage };
 }
 
-/* 20-stage statues: dust, and cranes and hoists where the kit is laid, while carving; celebration shimmer when finished. */
+/* 20-stage statues: dust, and the lift where the kit is laid, while carving; celebration shimmer when finished. */
 function statueLoops(building: CityBuilding, state: BuildingConstructionState | null, kit: boolean, add: AddLoop): void {
   const { stage, maxS, finished } = statueProgress(building, state);
   if (finished) {
@@ -186,10 +201,7 @@ function statueLoops(building: CityBuilding, state: BuildingConstructionState | 
     return;
   }
   add('dust', 0.85);
-  if (kit && stage >= 4 && stage <= maxS - 2) {
-    add('crane', 0.85);
-    add('hoist_block', 0.85);
-  }
+  if (kit && stage >= 4 && stage <= maxS - 2) addLift(siteSpan(building, state), add, 0.85);
 }
 
 /* Returns the active Stage 6 animation loops layered over a building for its kind and stage. */
@@ -213,7 +225,7 @@ export function buildingLoopsFor(
   /* Reverse-order demolition emits active rubble dust and dismantling activity. */
   if (state && state.phase === 'demolishing') {
     add('dust', 1.25);
-    if (state.currentStage >= 4) add('crane', 0.9);
+    if (state.currentStage >= 4) addLift(siteSpan(building, state), add, 0.9);
     if (state.currentStage >= 3) add('smoke', 0.65);
     return loops;
   }
@@ -236,11 +248,12 @@ export function buildingLoopsFor(
     return loops;
   }
 
-  /* Active construction job uses pack-declared stage loops directly. */
+  /* Active construction job uses pack-declared stage loops directly; a stage's crane or hoist is the site's one lift. */
   if (state && state.phase === 'building') {
     const spec = resolveStageSpecForBuilding(building, state, pack);
     for (const k of spec.defaultLoops) {
-      add(k, 1.0);
+      if (isLift(k)) addLift(siteSpan(building, state), add, 1.0);
+      else add(k, 1.0);
     }
     return loops;
   }
