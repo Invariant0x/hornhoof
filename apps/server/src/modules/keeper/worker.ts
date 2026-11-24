@@ -11,6 +11,7 @@ import { KEEPER_HOLD_MS, passThrough, serve, startingAnswer, type Refusal, type 
 import { TunnelKeeper, type Client } from '../link/tunnel.js';
 import { visitClientFor, VISIT_FIRST_PORT, type VisitSettings } from '../link/visit-client.js';
 import { keyPrint } from '../computer/owner-key.js';
+import type { BundleStore } from '../backups/store.js';
 import { certFacts } from '../network/authority.js';
 import { joinMessage } from '../network/join-proof.js';
 import type { DataMachine, WorkerLink } from '../network/join.js';
@@ -79,6 +80,7 @@ export type WorkerKeeperOptions = {
   /* How often the keeper asks for its machine's computer access; the carrier's own paces unless a test says otherwise. */
   computer?: Pick<ComputerCarrierOptions, 'openEveryMs' | 'closedEveryMs' | 'deafMs'>;
   /* How often the keeper asks which of the company's backups to hold, and tries again for its key for backups. */
+  bundles?: BundleStore;
   holderEveryMs?: number;
   backupKeyRetryMs?: number;
   /* What the keeper of a machine that keeps a copy changes in the worker's keeper it runs inside it. role: what it
@@ -141,9 +143,10 @@ const Copy = z.object({
   slot: z.enum(['ok', 'lost', 'missing']).nullable(), leaderSize: z.number().nullable(), migrations: z.number().nullable(),
   old: z.enum(['waiting', 'merged', 'done']).nullable().default(null), upload: z.enum(['waiting', 'received', 'wipe']).nullable().default(null),
   lastAttempt: z.number().int().min(1).nullable().default(null),
-  /* The leader whose word this is and the slot it made for this machine to join; a server of the build before names
-     neither. */
+  /* The leader whose word this is, the slot it made for this machine to join, and how far it applied this machine's log;
+     a server of the build before names none of them. */
   leader: z.string().optional(), join: z.string().nullable().optional(),
+  applied: z.object({ term: z.number().int().min(0), lsn: z.string().regex(/^[0-9A-Fa-f]{1,8}\/[0-9A-Fa-f]{1,8}$/) }).nullable().optional(),
 });
 /* dataSecret: a server of the build before says none, which reads as none. hidden: one from before hidden names says
    nothing of it. */
@@ -267,6 +270,7 @@ export class WorkerKeeper {
     this.door = new LeaderDoor({ connect: () => this.sessions.connectApp() });
     this.holder = new HolderKeeper({
       dir: opts.config.dir,
+      bundles: opts.bundles,
       link: {
         leader: () => this.leader(),
         request: async (method, path) => {

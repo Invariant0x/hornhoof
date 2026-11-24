@@ -13,12 +13,16 @@ The word has two meanings in Hornhoof.
 
 ## Where do tasks come from?
 
-People write to the orchestrator or to a department's head, and they lay the work out as tasks. Anyone whose access lists a department can also give it a task in the tracker. Work flows: a new task goes to its department's head at once, and nothing waits for a turn.
+People write to the orchestrator or to a department's head, and they lay the work out as tasks. Anyone whose access lists a department can also give it a task in the tracker. Work flows: a new task goes to its department's head at once, and nothing waits for a turn, unless every slot of a Development department is busy (see "What are slots?" below).
 
 A task runs in one of two ways:
 
 - In stages. Code work goes through the checks below: Architecture, Development, Review, Security and Tests.
 - Turnkey. A task given to a member of a sub-unit marked "Works turnkey" goes through no stages: that member does it alone from start to finish.
+
+## What are slots?
+
+A Development department runs its turn in slots: one for each developer, five at most, and each slot holds one task. A small addition to the same product joins a slot that is running instead of taking another. A new task that finds every slot busy waits in the department's queue for the next turn: nobody is woken for it, its card says "Waits for the next turn" (or the one after it, in batches of the slots), and the Turns and releases screen lists the queue by the turn each task waits for. When a release ends the turn, the turn that opens takes the queue in, in order, each task to the developer it was given to or to the head. A queued task you cancel leaves the queue; one made urgent goes past it at once. Urgent work takes no slot and waits for nothing. Work given to a named developer waits for that developer and never goes to another when they are busy. A department with no slot cap hands every task out at once, as before.
 
 ## What does the Tasks tab show?
 

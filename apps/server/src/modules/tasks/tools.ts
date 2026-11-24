@@ -150,7 +150,7 @@ const TurnkeyInput = z.strictObject({
   baseCommit: z.string().regex(/^[0-9a-f]{40}$/).describe(`The ${START_COMMIT}. It holds where the turn branch was as your work started.`),
 });
 
-const TurnItem = z.object({ department: z.uuid().optional().describe('Its department; a head may leave it out.'), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('Marks this work and its child tasks urgent.'), askedBy: z.uuid().optional().describe('Orchestrator only: the person whose request this work carries out, as company lists people. It is shown as who asked, goes down the whole tree, and puts the work in that person\'s own list. Name it only for a person\'s request; leave it out for work you started yourself.'), ...TrackerFields });
+const TurnItem = z.object({ department: z.uuid().optional().describe('Its department; a head may leave it out.'), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('Marks this work and its child tasks urgent. Urgent work takes no slot and waits for none: it goes past the queue, to the department\'s hotfix lane.'), small: z.boolean().optional().describe('One place, a clear result: a small addition of the same product may join a running slot of the department\'s turn instead of waiting in the queue.'), askedBy: z.uuid().optional().describe('Orchestrator only: the person whose request this work carries out, as company lists people. It is shown as who asked, goes down the whole tree, and puts the work in that person\'s own list. Name it only for a person\'s request; leave it out for work you started yourself.'), ...TrackerFields });
 const Turn = z.number().int().positive().describe('The turn number, like 2.');
 /* The tools an agent gets for tasks, by its kind. Each one checks that the task is the agent's to move. */
 export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
@@ -645,7 +645,7 @@ class TaskTools {
       {
         description:
           (this.boss ? 'Gives tasks to the heads of their departments, each task naming its department, ' : 'Gives tasks of your own department to you as its head, ') +
-          'who take them on at once: work flows, nothing waits for a turn. No turn holds a task: it joins its department\'s open turn, the next release, as its result is accepted into the turn branch. Follow the shared admission rule in hh-lead-tasks. ' +
+          'who take them on at once, unless every slot of the department\'s turn is busy: then the task waits in the department\'s queue for the next turn, with no one woken, and the answer says which. Work flows, nothing else waits for a turn. No turn holds a task: it joins its department\'s open turn, the next release, as its result is accepted into the turn branch. Follow the shared admission rule in hh-lead-tasks. ' +
           'A member of a turnkey team does a task end to end alone; everybody else\'s goes through the route of its department.',
         inputSchema: { tasks: z.array(TurnItem), improvement: Improvement.optional(), backlog: Backlog.optional() },
       },

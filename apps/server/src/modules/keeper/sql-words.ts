@@ -20,3 +20,14 @@ export const walOf = (sql: Sql): Wal => ({
     (await sql.query<{ name: string; read: boolean; atW: boolean }>(
       'SELECT slot_name::text AS name, active_pid IS NOT NULL AS read, COALESCE(confirmed_flush_lsn >= $1::pg_lsn, false) AS "atW" FROM pg_replication_slots WHERE database = current_database()', [w])).rows,
 });
+
+function parseLsn(lsn: string): bigint | null {
+  const match = /^([0-9a-fA-F]{1,8})\/([0-9a-fA-F]{1,8})$/.exec(lsn);
+  return match ? (BigInt(`0x${match[1]}`) << 32n) | BigInt(`0x${match[2]}`) : null;
+}
+
+/* Whether the first WAL position stands at or past the second; false when either is no WAL position. */
+export function lsnAtOrPast(lsn: string, target: string): boolean {
+  const [a, b] = [parseLsn(lsn), parseLsn(target)];
+  return a !== null && b !== null && a >= b;
+}
