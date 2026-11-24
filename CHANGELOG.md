@@ -14,14 +14,18 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Added
 
+- Company achievements are computed on the server from verified records only and taken back when their record is undone; human members read them at `/api/world/rewards`, and `/api/world/rewards/showcase` carries no private data.
 - Every text people see now comes from a file per language, loaded only for the language that is on: the screens, the words of the world packs, what the server says in its own words, the page shown while the server is away, and the names and descriptions of templates. A language is one line in a registry and one file per kind of text, with no code that names a language. Plurals, dates and numbers follow the language through the browser's own rules, a language that reads right to left mirrors the page, and the letters of a script that the product's fonts do not hold load only when a language in that script is on.
 - Two languages made for tests, a text 40% longer than English and the same text mirrored, are checked on the main screens at phone and desktop widths for cut text and sideways scroll. They never reach a person.
+- A development department runs its turn in slots, one task for each of up to five developers: a task that finds them all busy waits in a queue that the task card and the Turns and releases screen show, the next turn takes the queue in, and urgent work goes past it.
+- A task records who asked for it besides who decides it, and the list "Mine" holds what a person asked for and what waits for their decision; new task trees keep three levels, a reason for each sub-task and at most five under a task.
 
 ### Changed
 
 - A copy of the company's data that its keeper gave up can be made again from the machine's card with "Try again", the CEO's alone. The company server gives no data to a machine whose path to it is measured too weak for a copy: under 2 Mbps, a rate at which the whole database would take over six hours, or a round trip over 1.5 seconds. A copy that is not whole on such a path is dropped with its slots on the server and waits, and goes on by itself once the path is no longer measured so; the machine's card says which, and Failures holds one card for each copy given up, with what to do.
 - A skin file of your own may name the skin in any language of the registry, with the English name required and the others optional, and the names of a world's employees can be taken in any language of the registry.
 - Follower machines that hold company data no longer prune their local backup bundles during worker backup-holder sweeps, keeping their own backups and saved former-leader bundles on disk while still sending any bundle the server asks for.
+- The Development template gives a new company the code pipeline as a tree (Development first, then Review, Security, Tests and the release, Architecture on request beside it), one Hotfix unit for urgent work in place of the turnkey team, and one Security read of the whole turn branch instead of one for each task; a function moves existing departments to it for the update, keeping what was changed by hand.
 
 ## [0.43.0] - 2026-11-23
 
