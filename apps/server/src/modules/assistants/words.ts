@@ -30,8 +30,12 @@ export const WORDS: Partial<Record<ErrorReason, Record<BotLang, string>>> = {
   file_empty: { en: 'the file is empty.', ru: 'файл пустой.' },
   file_too_big: { en: `the file is bigger than ${MB} MB.`, ru: `файл больше ${MB} МБ.` },
   file_lost: {
-    en: 'a big file lives only on the machine that took it, and Hornhoof cannot reach it there now.',
-    ru: 'большой файл хранится только на машине, которая его приняла, и сейчас Hornhoof не может его оттуда взять.',
+    en: 'this file was kept on one machine before files had a store, and that machine is gone with it.',
+    ru: 'этот файл хранился на одной машине еще до общего хранилища файлов, и эта машина пропала вместе с ним.',
+  },
+  file_away: {
+    en: 'this file is kept on a machine of the company that is away now. Try again once it is back.',
+    ru: 'этот файл хранится на машине компании, которой сейчас нет в сети. Попробуйте еще раз, когда она вернется.',
   },
   file_link_expired: { en: `the link to the file worked for ${LINK_DAYS} days, and they are over.`, ru: `ссылка на файл работала ${LINK_DAYS} дней, и они прошли.` },
   attachment_invalid: { en: "Hornhoof has no room left for the company's files.", ru: 'в Hornhoof закончилось место для файлов компании.' },

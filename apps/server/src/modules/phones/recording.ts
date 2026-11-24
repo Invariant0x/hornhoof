@@ -6,7 +6,7 @@ import type { Person } from '../../auth/session.js';
 import { agents, attachments, companyPhones, jobs, phoneFrames, phoneSessions, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { checkRoom } from '../tasks/file-policy.js';
-import { pictureType } from '../tasks/attachments.js';
+import { fileBytes, pictureType } from '../tasks/attachments.js';
 import { seesTask } from '../tasks/visibility.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { finishPhoneSession } from './queue.js';
@@ -38,7 +38,8 @@ export async function recordPhoneFrame(ctx: Ctx, node: NodeIdentity, frame: Phon
       let attachmentId: string | null = null;
       if (bytes) {
         await checkRoom({ db: tx, config: ctx.config }, phone.companyId, held.task, bytes.length);
-        const [attachment] = await tx.insert(attachments).values({ companyId: phone.companyId, jobId: held.session.jobId, agentId: held.session.agentId, taskId: held.session.taskId, name: null, bytes, size: bytes.length, mediaType: 'image/jpeg' }).returning({ id: attachments.id });
+        const kept = await ctx.files.putBytes(tx, bytes);
+        const [attachment] = await tx.insert(attachments).values({ companyId: phone.companyId, jobId: held.session.jobId, agentId: held.session.agentId, taskId: held.session.taskId, name: null, sha256: kept.sha256, size: kept.size, mediaType: 'image/jpeg' }).returning({ id: attachments.id });
         attachmentId = attachment!.id;
       }
       await tx.insert(phoneFrames).values({ companyId: phone.companyId, sessionId: frame.sessionId, sequence: frame.sequence, at: new Date(frame.at), attachmentId });
@@ -92,9 +93,9 @@ export async function recordingImage(ctx: Ctx, me: Person, id: string, sequence:
 
 export async function imageBytes(ctx: Ctx, companyId: string, id: string | null): Promise<Buffer> {
   if (!id) throw phoneMissing();
-  const [file] = await ctx.db.select(only(attachments, 'bytes')).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, companyId), isNull(attachments.operatorCaseId)));
+  const [file] = await ctx.db.select(idOnly(attachments)).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, companyId), isNull(attachments.operatorCaseId)));
   if (!file) throw phoneMissing();
-  return Buffer.from(file.bytes);
+  return fileBytes(ctx, file.id);
 }
 
 async function frameBytes(db: Parameters<typeof sensitiveTurn>[0], jobId: string, image: string | null): Promise<Buffer | null> {

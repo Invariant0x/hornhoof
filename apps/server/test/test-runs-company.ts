@@ -11,6 +11,7 @@ import { pumpTests } from '../src/modules/testruns/runs.js';
 import type { Ctx } from '../src/app.js';
 import { appFixture, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 import { BUILTIN } from './builtin.js';
+import { stored } from './files-fixture.js';
 
 export const GIB = 1024 ** 3;
 
@@ -98,13 +99,15 @@ export async function company(env: NodeJS.ProcessEnv = {}) {
   const putFile = async (name: string, text: string, taskId = task.id) => {
     const [made] = await db.select(idOnly(jobs)).from(jobs).limit(1);
     const bytes = Buffer.from(text);
-    await db.insert(attachments).values({ companyId, jobId: made!.id, agentId: bruno.id, taskId, name, mediaType: 'application/octet-stream', bytes, size: bytes.length });
+    await db.insert(attachments).values({ companyId, jobId: made!.id, agentId: bruno.id, taskId, name, mediaType: 'application/octet-stream', sha256: await stored(db, bytes, app.ctx.config), size: bytes.length });
   };
   /* The agent's newest turn waiting on the task. */
   const wokeWith = async (agentId: string, taskId = task.id) =>
     (await db.select().from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt))).pop()?.prompt ?? null;
-  const filesOn = async (taskId = task.id) =>
-    (await db.select({ name: attachments.name, bytes: attachments.bytes }).from(attachments).where(eq(attachments.taskId, taskId)).orderBy(asc(attachments.name))).map(f => ({ name: f.name, text: Buffer.from(f.bytes).toString('utf8') }));
+  const filesOn = async (taskId = task.id) => {
+    const rows = await db.select({ name: attachments.name, sha256: attachments.sha256 }).from(attachments).where(eq(attachments.taskId, taskId)).orderBy(asc(attachments.name));
+    return Promise.all(rows.map(async f => ({ name: f.name, text: (await app.ctx.files.bytes(db, f.sha256!)).toString('utf8') })));
+  };
   /* The built-in node, online with this load. */
   const builtin = async (load: object = idle()) => {
     const node = await connectNode(url, NODE_KEY);

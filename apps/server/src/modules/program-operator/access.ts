@@ -115,7 +115,7 @@ async function keepForCase(ctx: Ctx, caller: OperatorCaller, program: Program, p
   await operatorTransaction(ctx, async tx => {
     await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, program.agentId)).for('update');
     const [row] = await tx.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, program.agentId), eq(programOperatorCases.companyId, caller.companyId), eq(programOperatorCases.operatorJobId, caller.id), eq(programOperatorCases.status, 'open')));
-    if (row) await storeCasePicture(tx, row, png);
+    if (row) await storeCasePicture(tx, ctx.files, row, png);
   });
 }
 

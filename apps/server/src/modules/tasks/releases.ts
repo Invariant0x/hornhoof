@@ -479,7 +479,7 @@ async function closeTurn(ctx: Reader, repo: Repo, turn: Turn, record: Release, v
     if (!open) return 'later' as const;
     if (!(await recordStands(tx, turn, record))) return 'stale' as const;
     const [done] = await tx.update(turns).set({ status: 'closed', version, commit: record.commit, closedAt: new Date() }).where(eq(turns.id, turn.id)).returning();
-    await keepSnapshot(tx, done!, ctx.log);
+    await keepSnapshot(tx, done!, ctx.log, ctx.files);
     await recordTurnSummary(tx, done!);
     const number = (await lastTurnNumber(tx, turn.companyId)) + 1;
     const [next] = await tx.insert(turns).values({ companyId: turn.companyId, departmentId: turn.departmentId, number, goal: 'The next release.', status: 'open', openedAt: new Date(), baseVersion: version, baseCommit: record.commit, startCommit: head }).returning();

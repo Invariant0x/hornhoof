@@ -12,6 +12,7 @@ import { MergeRefused, runMerge, type MergeResult } from '../src/modules/merge/a
 import { complete } from '../src/modules/merge/check.js';
 import { ownDatabases } from './helpers.js';
 import { asPlan7, twoSides, type Side } from './merge-fixture.js';
+import { sha256Of, stored } from './files-fixture.js';
 
 /* Each test forks its database, which a shared one would not survive. */
 ownDatabases();
@@ -492,9 +493,9 @@ describe('a merge applied', () => {
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
   });
 
-  it('reads a file by its hash, and brings its bytes only for a row it writes', async () => {
+  it('brings a file as its hash, which names its bytes in the store', async () => {
     const s = await stand();
-    const file = (side: Db, bytes: string) => side.insert(attachments).values({ ...s.on, agentId: s.ana.id, mediaType: 'text/plain', bytes: Buffer.from(bytes), size: bytes.length, taskId: s.one.id }).returning().then(rows => rows[0]!);
+    const file = async (side: Db, bytes: string) => (await side.insert(attachments).values({ ...s.on, agentId: s.ana.id, mediaType: 'text/plain', sha256: await stored(side, bytes), size: bytes.length, taskId: s.one.id }).returning())[0]!;
     const same = await file(s.db, 'the same on both');
     const fork = await s.sides.fork();
     const added = await file(fork.db, 'only there');
@@ -511,13 +512,10 @@ describe('a merge applied', () => {
     })();
     await source.close();
     const [kept] = await s.db.select().from(attachments).where(eq(attachments.id, added.id));
-    expect(Buffer.from(kept!.bytes).toString()).toBe('only there');
-    expect(Buffer.from((await s.db.select().from(attachments).where(eq(attachments.id, same.id)))[0]!.bytes).toString()).toBe('the same on both');
-    /* Every page of the table comes with a hash in place of each file; the one file that is written is asked for by
-       its key. */
-    const reads = asked.filter(text => text.includes('public."attachments"'));
-    expect(reads.filter(text => !text.includes('sha256')).length).toBe(1);
-    expect(reads.find(text => !text.includes('sha256'))).toContain('jsonb_to_recordset');
+    expect(kept!.sha256).toBe(sha256Of('only there'));
+    expect((await s.db.select().from(attachments).where(eq(attachments.id, same.id)))[0]!.sha256).toBe(sha256Of('the same on both'));
+    /* Its rows name their files by hash, and no read of the source asks for a file's bytes. */
+    expect(asked.some(text => text.includes('public."attachments"'))).toBe(true);
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
   });
 
@@ -622,12 +620,12 @@ describe('a merge applied', () => {
     const [hung] = await fork.db.insert(programOperatorCases).values({
       ...s.on, agentId: s.ana.id, jobId: job!.id, nodeId: node!.id, instance: program!.id, reason: 'recorded_no_activity', evidenceKey: 'k1', capability: 'c'.repeat(32), deadlineAt: new Date(Date.now() + 3_600_000),
     }).returning();
-    const [picture] = await fork.db.insert(attachments).values({ ...s.on, agentId: s.ana.id, mediaType: 'image/png', bytes: Buffer.from('screen'), size: 6, operatorCaseId: hung!.id }).returning();
+    const [picture] = await fork.db.insert(attachments).values({ ...s.on, agentId: s.ana.id, mediaType: 'image/png', sha256: await stored(fork.db, 'screen'), size: 6, operatorCaseId: hung!.id }).returning();
     const { id, result } = await s.merge(fork);
     expect(await s.db.select().from(programInstances)).toEqual([]);
     expect(await s.db.select().from(programOperatorCases)).toEqual([]);
     const [kept] = await s.db.select().from(attachments).where(eq(attachments.id, picture!.id));
-    expect([kept!.operatorCaseId, Buffer.from(kept!.bytes).toString()]).toEqual([null, 'screen']);
+    expect([kept!.operatorCaseId, kept!.sha256]).toEqual([null, sha256Of('screen')]);
     expect(await s.kept(id)).toMatchObject([{ tbl: 'attachments', how: 'rewritten', cols: ['operator_case_id'], was: { operator_case_id: hung!.id } }]);
     expect([result.counts.added, await s.conflicts(id)]).toEqual([2, []]);
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });

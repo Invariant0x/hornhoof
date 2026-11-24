@@ -6,6 +6,7 @@ import { agents, departments, jobs, requests, taskEvents, tasks, testPartTimings
 import { loggable } from '../../errors.js';
 import { deptName } from '../departments/templates.js';
 import { keepTimings } from '../testruns/timings.js';
+import type { Files } from '../files/files.js';
 import { refuse, type Tx } from './state.js';
 import { laterBugsOf, pipelineFacts, reportRows, testsShown, type CountedFacts, type FactsInput, type FactsJob, type FactsTask, type LaterBug } from './pipeline-facts.js';
 import { NUDGES, workTree, type AgentTime } from './tree.js';
@@ -57,12 +58,12 @@ async function readTurns(db: Reader, companyId: string, which: ReturnType<typeof
   return rows.map(({ interruption, agentKind, departmentId, ...turn }) => ({ ...turn, interrupted: interruption !== null, coordination: agentKind === 'orchestrator' || agentKind === 'head' || inOperations(departmentId) }));
 }
 
-async function readRaw(db: Reader, companyId: string, turnTasks: FactsTask[]): Promise<RawInput> {
+async function readRaw(db: Reader, companyId: string, turnTasks: FactsTask[], files?: Files): Promise<RawInput> {
   const ids = turnTasks.map(t => t.id);
   const events = await db.select({ taskId: taskEvents.taskId, kind: taskEvents.kind, data: taskEvents.data, createdAt: taskEvents.createdAt }).from(taskEvents).where(and(inArray(taskEvents.taskId, ids), notInArray(taskEvents.kind, [...NUDGES]))).orderBy(asc(taskEvents.createdAt), asc(taskEvents.id));
   const asks = await db.select({ taskId: requests.taskId, createdAt: requests.createdAt, answeredAt: requests.answeredAt }).from(requests).where(inArray(requests.taskId, ids));
   const turnsOfTasks = await readTurns(db, companyId, inArray(jobs.taskId, ids));
-  await keepTimings(db, companyId, ids);
+  await keepTimings(db, companyId, ids, files);
   const runs = await readRuns(db, ids);
   return {
     tasks: turnTasks,
@@ -90,10 +91,10 @@ function partOf(raw: RawInput, some: FactsTask[]): RawInput {
 }
 
 /* A turn's numbers for each department that had tasks in it and for all of it, from its events up to until. */
-export async function turnFacts(db: Reader, turn: Turn, until: Date): Promise<TurnFacts> {
+export async function turnFacts(db: Reader, turn: Turn, until: Date, files?: Files): Promise<TurnFacts> {
   const rows = await db.select(FACT_TASK).from(tasks).where(eq(tasks.turnId, turn.id)).orderBy(asc(tasks.number));
   const window = { openedAt: turn.openedAt ?? turn.createdAt, until };
-  const raw = rows.length ? await readRaw(db, turn.companyId, rows) : { tasks: [], events: [], requests: [], runs: [], jobs: [], timings: [] };
+  const raw = rows.length ? await readRaw(db, turn.companyId, rows, files) : { tasks: [], events: [], requests: [], runs: [], jobs: [], timings: [] };
   const departmentIds = [...new Set(rows.flatMap(r => r.departmentId ?? []))];
   const places = departmentIds.length ? await db.select().from(departments).where(inArray(departments.id, departmentIds)).orderBy(asc(departments.position)) : [];
   const departmentsFacts: DepartmentFacts[] = [];
@@ -111,10 +112,10 @@ export async function turnFacts(db: Reader, turn: Turn, until: Date): Promise<Tu
 
 /* Kept as the turn closes, before the next one opens. A failure leaves the turn to close all the same, under a savepoint of
    its own, and the snapshot is built from the events the first time someone reads it. */
-export async function keepSnapshot(tx: Tx, turn: Turn, log?: FastifyBaseLogger): Promise<void> {
+export async function keepSnapshot(tx: Tx, turn: Turn, log?: FastifyBaseLogger, files?: Files): Promise<void> {
   try {
     await tx.transaction(async inner => {
-      const facts = await turnFacts(inner, turn, turn.closedAt ?? new Date());
+      const facts = await turnFacts(inner, turn, turn.closedAt ?? new Date(), files);
       await inner.insert(turnSnapshots).values({ turnId: turn.id, companyId: turn.companyId, source: 'closed', facts }).onConflictDoNothing();
     });
   } catch (err) {
@@ -124,10 +125,10 @@ export async function keepSnapshot(tx: Tx, turn: Turn, log?: FastifyBaseLogger):
 
 /* A closed turn as it was kept, or rebuilt from its events and kept the first time someone reads it. The read answers even
    where the database refuses the write, as on a copy that may only read: the snapshot is then kept at a later read. */
-async function snapshotOf(db: Reader, turn: Turn): Promise<Source> {
+async function snapshotOf(db: Reader, turn: Turn, files?: Files): Promise<Source> {
   const [kept] = await db.select({ facts: turnSnapshots.facts, source: turnSnapshots.source }).from(turnSnapshots).where(eq(turnSnapshots.turnId, turn.id));
   if (kept) return kept;
-  const facts = await turnFacts(db, turn, turn.closedAt ?? new Date());
+  const facts = await turnFacts(db, turn, turn.closedAt ?? new Date(), files);
   try {
     await db.transaction(async inner => {
       await inner.insert(turnSnapshots).values({ turnId: turn.id, companyId: turn.companyId, source: 'rebuilt', facts }).onConflictDoNothing();
@@ -138,7 +139,7 @@ async function snapshotOf(db: Reader, turn: Turn): Promise<Source> {
   return { facts, source: 'rebuilt' };
 }
 
-const liveOrKept = async (db: Reader, turn: Turn): Promise<Source> => (turn.status === 'open' ? { facts: await turnFacts(db, turn, new Date()), source: 'live' } : snapshotOf(db, turn));
+const liveOrKept = async (db: Reader, turn: Turn, files?: Files): Promise<Source> => (turn.status === 'open' ? { facts: await turnFacts(db, turn, new Date(), files), source: 'live' } : snapshotOf(db, turn, files));
 
 /* A turn that ran: not one that closed planned, merged into another or with nothing in it. */
 const ran = (t: Turn): boolean => t.status === 'open' || (t.status === 'closed' && !!t.openedAt && !!t.closedAt && t.closedAt > t.openedAt);
@@ -168,21 +169,21 @@ const turnView = (t: Turn, source: PipelineTurn['source']): PipelineTurn => ({
 type Read = { head: PipelineHead; now: TurnFacts; previous: TurnFacts | null; baseline: TurnFacts | null };
 
 /* A turn the report compares with, when it has one. */
-async function comparedOf(db: Reader, turn: Turn | null | undefined): Promise<{ view: PipelineTurn | null; facts: TurnFacts | null }> {
+async function comparedOf(db: Reader, turn: Turn | null | undefined, files?: Files): Promise<{ view: PipelineTurn | null; facts: TurnFacts | null }> {
   if (!turn) return { view: null, facts: null };
-  const kept = await snapshotOf(db, turn);
+  const kept = await snapshotOf(db, turn, files);
   return { view: turnView(turn, kept.source), facts: kept.facts };
 }
 
 /* A turn is compared with the turns of its own department, the one it belongs to. With no number, the department's running
    turn is read, else its last that ran; with no department either, the earliest running turn, else the last that ran. */
-async function readReport(db: Reader, companyId: string, number: number | undefined, departmentId?: string): Promise<Read> {
+async function readReport(db: Reader, companyId: string, number: number | undefined, departmentId?: string, files?: Files): Promise<Read> {
   const rows = await db.select().from(turns).where(eq(turns.companyId, companyId)).orderBy(asc(turns.number));
   const turn = pickTurn(departmentId && number === undefined ? rows.filter(t => t.departmentId === departmentId) : rows, number);
   const running = rows.filter(t => ran(t) && t.departmentId === turn.departmentId);
-  const now = await liveOrKept(db, turn);
-  const previous = await comparedOf(db, running.filter(t => t.number < turn.number).at(-1));
-  const baseline = await comparedOf(db, baselineOf(running, turn));
+  const now = await liveOrKept(db, turn, files);
+  const previous = await comparedOf(db, running.filter(t => t.number < turn.number).at(-1), files);
+  const baseline = await comparedOf(db, baselineOf(running, turn), files);
   return {
     head: { turn: turnView(turn, now.source), previous: previous.view, baseline: baseline.view, turns: running.map(t => t.number).reverse() },
     now: now.facts,
@@ -225,8 +226,8 @@ async function aboutOf(db: Reader, companyId: string): Promise<Map<string, strin
 
 /* The report of a turn with all its departments' parts, by default a running one or else the last that ran, of the
    department named. */
-export async function pipelineReport(db: Reader, companyId: string, number?: number, departmentId?: string): Promise<PipelineReport> {
-  const read = await readReport(db, companyId, number, departmentId);
+export async function pipelineReport(db: Reader, companyId: string, number?: number, departmentId?: string, files?: Files): Promise<PipelineReport> {
+  const read = await readReport(db, companyId, number, departmentId, files);
   const bugs = await earliestBugs(db, companyId, read);
   const about = await aboutOf(db, companyId);
   return {
@@ -237,8 +238,8 @@ export async function pipelineReport(db: Reader, companyId: string, number?: num
 }
 
 /* What one department's screen reads: only that department's numbers. */
-export async function departmentPipeline(db: Reader, companyId: string, departmentId: string, number?: number): Promise<DepartmentPipeline> {
-  const read = await readReport(db, companyId, number, departmentId);
+export async function departmentPipeline(db: Reader, companyId: string, departmentId: string, number?: number, files?: Files): Promise<DepartmentPipeline> {
+  const read = await readReport(db, companyId, number, departmentId, files);
   const facts = read.now.departments.find(d => d.department.id === departmentId);
   if (!facts) return { ...read.head, department: null };
   return { ...read.head, department: departmentReport(facts, read, await earliestBugs(db, companyId, read), await aboutOf(db, companyId)) };

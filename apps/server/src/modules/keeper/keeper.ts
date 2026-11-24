@@ -18,7 +18,8 @@ import { hostFound, ownAddresses } from './addresses.js';
 import type { HeldCertificate } from './certificate.js';
 import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFront } from './doors.js';
 import { MachineIdentity, type Published } from './identity.js';
-import { PEER_PATHS } from '../../net/peer-server.js';
+import { PEER_PATHS, type PeerFiles } from '../../net/peer-server.js';
+import { LeaderFiles } from './leader-files.js';
 import { PeerLink, type PeerPorts } from './peer-link.js';
 import type { PeerServices } from '../link/peer-client.js';
 import { Beats, type Beat } from './beats.js';
@@ -758,6 +759,7 @@ export class Keeper {
       helloMore: () => this.helloMore(),
       /* A machine that led gives what its database held to the keeper that leads now. */
       leds: { put: async (peer, id, body) => (this.backups ? this.backups.takeLed(peer, id, body) : 404) },
+      files: this.peerFiles(),
       log,
     });
     await this.peers.start().catch((err: Error) => log(`The peer link could not start: ${err.message}`));
@@ -889,6 +891,19 @@ export class Keeper {
   }
 
   /* What the peer link serves of backups, also before the keeper of backups is there: nothing yet. */
+  /* The leading keeper gives the files of its store to the machines that hold them, and takes back one its app asked
+     for; while it does not lead, or without a database, neither. */
+  private peerFiles(): PeerFiles | undefined {
+    const { db } = this.opts;
+    const dir = this.opts.config.filesDir;
+    if (!db || !dir) return undefined;
+    const files = new LeaderFiles(db, join(dir, 'store'), this.opts.config.machineId ?? null);
+    return {
+      get: async (peer, sha256) => (this.mode() === 'lead' ? files.give(peer.machine, sha256) : { status: 403 }),
+      put: async (peer, sha256, body) => (this.mode() === 'lead' ? files.take(peer.machine, sha256, body) : 403),
+    };
+  }
+
   private peerBackups(): PeerBackups {
     return {
       get: (peer, id) => this.backups?.peer().get(peer, id) ?? { status: 404 },

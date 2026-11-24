@@ -183,12 +183,14 @@ The task's view lists its files.
 
 ## How much room do task files have?
 
-The files live in the database, so every copy of the database carries them.
+The files live in the company's file store, not in the database. Every machine that keeps the company's data, and every machine picked to keep its backups, keeps a sealed copy of each file, so losing one machine loses no file. The database and its backups keep only each file's name, size and hash.
 
-- One file can be up to 50 MB.
 - One task holds up to 500 MB of files.
-- The whole company holds up to 2 GB, or as many megabytes as `TASK_FILES_MB` in `.env` says.
+- The whole company holds up to 2 GB, or as many megabytes as `TASK_FILES_MB` in `.env` says. The same content counts once, however many tasks carry it.
 - The files of a turn go 30 days after it closes.
+- The files of a task outside any turn go 30 days after the task closes.
+- The logs and files of a test or work run go 30 days after the run ends.
+- A file that no task, message or run names any more leaves the machines a day later.
 
 A comment, message, report or reason that carries a file pasted as a long run of base64 or hex is refused. The refusal says how to put the file on the task instead.
 

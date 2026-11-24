@@ -527,8 +527,8 @@ async function keepLog(ctx: Ctx, run: Run, part: Part, log: string): Promise<voi
   const name = logName(run, part.part);
   const [had] = await ctx.db.select(idOnly(attachments)).from(attachments).where(and(eq(attachments.taskId, run.taskId), eq(attachments.name, name))).limit(1);
   if (had) return;
-  const bytes = Buffer.from(log, 'utf8');
-  await ctx.db.insert(attachments).values({ companyId: run.companyId, jobId: run.jobId, agentId: run.agentId, taskId: run.taskId, name, mediaType: 'text/plain; charset=utf-8', bytes, size: bytes.length });
+  const kept = await ctx.files.putBytes(ctx.db, Buffer.from(log, 'utf8'));
+  await ctx.db.insert(attachments).values({ companyId: run.companyId, jobId: run.jobId, agentId: run.agentId, taskId: run.taskId, name, mediaType: 'text/plain; charset=utf-8', sha256: kept.sha256, size: kept.size });
 }
 
 /* The node began a part: its time counts from now. */
