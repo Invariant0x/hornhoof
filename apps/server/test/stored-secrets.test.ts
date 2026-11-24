@@ -204,9 +204,10 @@ describe('secrets in stored prose', () => {
     await comment(app.ctx, { agentId: agent.id }, task.id, `${'ordinary prose '.repeat(400)}password=archiveValue1077!`);
     const before = await db.select().from(attachments);
     expect(before).toHaveLength(2);
-    expect(before.map(file => Buffer.from(file.bytes).toString()).join('')).not.toContain('archiveValue1077!');
+    const said = async (rows: { sha256: string | null }[]) => (await Promise.all(rows.map(file => app.ctx.files.bytes(db, file.sha256!)))).map(String).join('');
+    expect(await said(before)).not.toContain('archiveValue1077!');
     const response = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/hide-secret`, ...as(ceo), payload: { value: marker } });
     expect(response.statusCode, response.body).toBe(200);
-    for (const file of await db.select().from(attachments)) expect(Buffer.from(file.bytes).toString()).not.toContain(marker);
+    expect(await said(await db.select().from(attachments))).not.toContain(marker);
   });
 });

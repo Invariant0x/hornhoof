@@ -87,11 +87,13 @@ describe('a task file', () => {
     expect((await fetchFile(token, `task=${task.number}&file=notes.txt`)).payload).toBe('second');
   });
 
-  it('is refused from an agent not on the task, past 50 MB, without a name, and for a task or file that is not there', async () => {
+  /* A task file has no limit of its own past the task's and the company's room: one over 50 MB, which a request may not
+     bring whole, is kept as any other. */
+  it('is refused from an agent not on the task, without a name, and for a task or file that is not there, and kept past 50 MB', async () => {
     const { bruno, sam, task, turn, attach, fetchFile } = await company();
     const token = await turn(bruno);
     expect((await attach(await turn(sam), `task=${task.number}&name=a.txt`, Buffer.from('x'))).statusCode).toBe(404);
-    expect((await attach(token, `task=${task.number}&name=big.bin`, Buffer.alloc(FILE_BYTES + 1))).statusCode).toBe(413);
+    expect((await attach(token, `task=${task.number}&name=big.bin`, Buffer.alloc(FILE_BYTES + 1))).statusCode).toBe(201);
     expect((await attach(token, `task=${task.number}&name=`, Buffer.from('x'))).statusCode).toBe(400);
     expect((await attach(token, 'task=999&name=a.txt', Buffer.from('x'))).statusCode).toBe(404);
     expect((await fetchFile(token, `task=${task.number}&file=missing.txt`)).statusCode).toBe(404);

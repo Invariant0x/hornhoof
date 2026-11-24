@@ -164,7 +164,7 @@ describe('a link to one file, for its owner to open on a phone', () => {
 
 it('words every refusal as one neutral reason that reads after "<file name> did not come: ", in both languages', () => {
   const said = Object.values(WORDS).flatMap(words => [words!.en, words!.ru]);
-  expect(said).toHaveLength(32);
+  expect(said).toHaveLength(34);
   for (const words of said) {
     expect(words).toMatch(/^(?:\p{Ll}|Hornhoof )/u);
     expect(words).not.toMatch(/[\u2013\u2014\u0401\u0451]|did not come|did not go|не дошел|не ушло|(?<!\p{L})(?:I|me|my|я|мне|меня|мой)(?!\p{L})/u);

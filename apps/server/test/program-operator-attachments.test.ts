@@ -129,11 +129,15 @@ it('accepts only the exact case and PNG attachment identity with bounded bytes',
   const c = await fixture();
   for (const file of ['program-question.png', `../${c.picture.id}`, c.picture.id + '/else']) expect((await c.fetchPicture(c.operatorTurn.token, file)).statusCode).toBe(404);
   for (const ref of ['operator-case:missing', `operator-case:${randomUUID()}`, `operator-case:${c.incident.id}/else`]) expect((await c.fetchPicture(c.operatorTurn.token, c.picture.id, ref)).statusCode).toBe(404);
-  for (const change of [{ mediaType: 'image/jpeg' }, { bytes: Buffer.from('plain') }, { bytes: Buffer.concat([PNG, Buffer.alloc(3 * 1024 * 1024)]) }, { agentId: c.watcher.id }, { jobId: c.headTurn.job.id }]) {
+  const big = Buffer.concat([PNG, Buffer.alloc(3 * 1024 * 1024)]);
+  /* The row of the too big one still says the size of the picture, so the bytes the store holds are what bound it. */
+  const plain = { sha256: await stored(c.db, 'plain', c.app.ctx.config), size: 5 };
+  const tooBig = { sha256: await stored(c.db, big, c.app.ctx.config) };
+  for (const change of [{ mediaType: 'image/jpeg' }, plain, tooBig, { size: big.length }, { agentId: c.watcher.id }, { jobId: c.headTurn.job.id }]) {
     await c.db.update(attachments).set(change).where(eq(attachments.id, c.picture.id));
     expect((await c.fetchPicture(c.operatorTurn.token)).statusCode).toBe(404);
     expect((await c.app.inject({ method: 'GET', url: `/api/attachments/${c.picture.id}`, ...as(c.ceo) })).statusCode).toBe(404);
-    await c.db.update(attachments).set({ mediaType: 'image/png', bytes: PNG, agentId: c.agent.id, jobId: c.job.id }).where(eq(attachments.id, c.picture.id));
+    await c.db.update(attachments).set({ mediaType: 'image/png', sha256: c.picture.sha256, size: PNG.length, agentId: c.agent.id, jobId: c.job.id }).where(eq(attachments.id, c.picture.id));
   }
 });
 
