@@ -105,6 +105,7 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   place: (p: TaskLine['department']) => string;
   /* Whose: the person looked at, whom the page's title names, or the viewer with none. */
   personId: string | null;
+  viewerId: string;
   queue: boolean;
   /* The tasks that wait for that person. */
   tasks: TaskLine[];
@@ -164,7 +165,7 @@ function ProposalCard({ card, org, onCorrect = nothing, onDone, waitsFor }: { ca
   return <StaffCard department={department} proposal={{ id: card.id, brief: card.brief, people: card.items, ...{ materialRevision: card.materialRevision, materialDigest: card.materialDigest } }} onCorrect={onCorrect} onDone={onDone} locked={locked} waitsFor={waitsFor} />;
 }
 
-type Listed = Pick<Waiting, 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place'> & {
+type Listed = Pick<Waiting, 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place' | 'viewerId'> & {
   shown: ShownDecisions;
   onFailure: (err: unknown) => void;
   /* Whom a decision waits for, by the person it is for, on lists of more people than one. */
@@ -172,12 +173,12 @@ type Listed = Pick<Waiting, 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' 
 };
 
 /* Each decision with the buttons it has elsewhere. */
-function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, onFailure, waitsFor }: Listed) {
+function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, viewerId, onFailure, waitsFor }: Listed) {
   const t = useT();
   const { requests, proposals, merges } = shown;
   return (
     <>
-      {requests.length > 0 && <Requests requests={requests} onChanged={onDecisionsChanged} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} waitsFor={waitsFor} />}
+      {requests.length > 0 && <Requests requests={requests} onChanged={onDecisionsChanged} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} waitsFor={waitsFor} viewerId={viewerId} />}
       {wordsAnswer(requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
       {proposals.map(c => (
         <ProposalCard key={c.id} card={c} org={org} onCorrect={onOpenOrchestrator} onDone={onDecisionsChanged} waitsFor={waitsFor?.(c.ownerPersonId)} />
@@ -213,7 +214,7 @@ function NamedQuestionRow({ request, person, onOpenTask }: { request: WaitingReq
 
 const queueDone = (done: () => void, refresh: () => void) => () => { done(); refresh(); };
 
-function QueueDeck({ shown, tasks, cards, recipient, onCardsSeen, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, onFailure }: Omit<Listed, 'waitsFor'> & {
+function QueueDeck({ shown, tasks, cards, recipient, onCardsSeen, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, viewerId, onFailure }: Omit<Listed, 'waitsFor'> & {
   tasks: TaskLine[];
   cards: WaitCard[];
   recipient: string;
@@ -226,7 +227,7 @@ function QueueDeck({ shown, tasks, cards, recipient, onCardsSeen, onDecisionsCha
       id: `request:${request.id}`, title: taskTitle(request.task), icon: requestIcon[request.kind],
       text: request.kind === 'stuck' ? t.tasks.stuckText(request.agent.name, request.task.number) : request.text,
       meta: <><bdi>{request.agent.name}</bdi><span aria-hidden="true">·</span><bdi dir="ltr">#{request.task.number}</bdi><span aria-hidden="true">·</span><bdi>{age(t, request.at)}</bdi></>,
-      show: (done: () => void, defer: () => void) => <Requests requests={[request]} onChanged={queueDone(done, onDecisionsChanged)} onDefer={defer} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} />,
+      show: (done: () => void, defer: () => void) => <Requests requests={[request]} onChanged={queueDone(done, onDecisionsChanged)} onDefer={defer} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} viewerId={viewerId} />,
     })),
     ...shown.proposals.map(card => ({
       id: `proposal:${card.id}`, title: card.department ? t.staff.title(card.department.name) : t.card.title, text: card.brief, icon: 'list' as const,
@@ -330,7 +331,7 @@ function WaitingForYou({ sources, live, decisionsFailure, ...rest }: Waiting) {
   );
 }
 
-type PeopleWaiting = Pick<Waiting, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place' | 'sources' | 'live'> & {
+type PeopleWaiting = Pick<Waiting, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place' | 'viewerId' | 'sources' | 'live'> & {
   allTasks: TaskLine[];
   /* The tasks that wait for any person. */
   tasks: TaskLine[];
@@ -712,6 +713,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       onOpenOrchestrator={onOpenOrchestrator}
       org={org}
       place={place_}
+      viewerId={me.person.id}
     />
   ) : (
     <WaitingForYou
@@ -719,6 +721,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       decisionsFailure={decisionsFailure}
       onDecisionsChanged={onDecisionsChanged}
       personId={decisionsOf}
+      viewerId={me.person.id}
       queue={section.kind === 'waits'}
       tasks={waitsOnWho}
       recipient={recipient}

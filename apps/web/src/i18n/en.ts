@@ -448,6 +448,19 @@ export const en = {
       restored: (count: number) => `Restored ${count} original names.`,
       restoredOnLeave: (count: number) => `Original names restored (${count}).`,
     },
+    /* The world's loading screen (#1947): its three steps and what each measures. */
+    worldLoad: {
+      title: 'The world is loading',
+      art: 'Pictures',
+      map: 'City and map',
+      bake: 'Ground',
+      megabytes: (loaded: string, total: string) => `${loaded} of ${total} MB`,
+      chunks: (done: number, total: number) => `${done} of ${total} ${plural('en', total, { one: 'piece', other: 'pieces' })}`,
+      waiting: 'Waiting',
+      now: 'Now',
+      done: 'Done',
+      note: 'Only on the first visit and after the pictures change. Next time the world opens at once.',
+    },
     worldCard: {
       levelStripAria: 'Agent level and progress',
       levelStripLevel: (level: number) => `Level ${level}`,
@@ -2061,6 +2074,13 @@ export const en = {
     asksApprovalOf: (agent: string) => `${agent} asks you to approve this`,
     stuck: (agent: string) => `${agent} is stuck`,
     asksChoice: (agent: string) => `${agent} asks you to pick one`,
+    /* Headings for a request addressed to someone else, without addressing the viewer as "you". */
+    asksOther: {
+      question: (agent: string) => `${agent} asks`,
+      choice: (agent: string) => `${agent} asks for a choice`,
+      approval: (agent: string) => `${agent} asks for commit approval`,
+      approvalOf: (agent: string) => `${agent} asks for approval`,
+    },
     stuckText: (agent: string, n: number) =>
       `${agent} ended several turns in a row without moving #${n}, so Hornhoof stopped waking it. Write what it needs to go on, or cancel the task if it is not needed anymore.`,
     inDetail: 'In more detail',

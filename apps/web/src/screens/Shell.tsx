@@ -306,9 +306,13 @@ function MapWorkspace({
   navigate: ReturnType<typeof useRoute>['navigate'];
   onHire: (dept: Department) => void;
 }) {
-  if (tab !== 'map' || denied || missingDepartment || (!isWorld && deptId && !dept)) return null;
+  /* A world stays mounted behind the other tabs, hidden and paused, so coming back neither reloads nor rebuilds it
+     (#1947 item 3); the plain map is drawn afresh each time. */
+  const parked = tab !== 'map';
+  if ((parked && !isWorld) || denied || missingDepartment || (!isWorld && deptId && !dept)) return null;
   return (
     <MapScreen
+      parked={parked}
       me={me}
       onHome={goHome}
       windowOpen={panel === 'window'}
@@ -592,6 +596,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onGraph={openGraph}
           onHome={goHome}
           requests={decisions.requestsOf(taskId)}
+          viewerId={me.person.id}
           onRequestsChanged={decisions.load}
           onOpenAgent={openAgent}
         />

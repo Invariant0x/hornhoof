@@ -96,6 +96,7 @@ import { keyRoutes } from './modules/computer/keys.js';
 import { refreshBuild } from './modules/network/follow.js';
 import { questionRoutes } from './modules/network/question-routes.js';
 import { noteSwitch, switchedRoutes } from './modules/network/switched.js';
+import { joinServerMachines } from './modules/network/server-machine.js';
 import { networkRoutes } from './modules/network/routes.js';
 import { overLink } from './auth/tunnel.js';
 import type { AgentSql } from './db/agent-sql.js';
@@ -333,6 +334,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   /* First of what a leader does: the work its one built-in node ran before each machine had its own is named as this
      machine's, before anything else looks at it. A failure is one line, and the next time it leads tries again. */
   ctx.mode.whenLead(() => nameBuiltinWork(ctx).catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, "Could not name the built-in node's earlier work as this machine's.")), () => undefined);
+  ctx.mode.whenLead(() => joinServerMachines(ctx.db, ctx.config).catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, 'Could not join existing server and node machine rows.')), () => undefined);
   ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
   /* The heads' bots listen only while this app leads: a message one takes is written down, and two apps asking
      Telegram for the same bot's messages would take them from each other. A bot stops before the database and the

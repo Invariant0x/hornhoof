@@ -52,7 +52,13 @@ export function egyptArtCatalog(roleLooks: Readonly<Record<string, PackRoleLookS
     },
     altar: true,
     flags: { district: true, department: true },
-    people: { looks: [...new Set(Object.values(roleLooks).map(look => look.id))], tiers: 5 },
+    people: {
+      looks: [...new Set(Object.values(roleLooks).map(look => look.id))],
+      tiers: 5,
+      largeItemLooks: [...new Set(Object.values(roleLooks).filter(look => look.largeItem).map(look => look.id))],
+      /* Accepted on #1983 under the earlier rule (carry in 5 rows and a mirror); its export in NE, SE, SW and NW replaces it. */
+      acceptedSheets: { 'people/egypt-mason/tier_1/carry.png': 'egypt-mason-t1-r1' },
+    },
     loops: ['crane', 'hoist_block', 'dust', 'smoke', 'water', 'awning', 'celebration'],
     /* Statues and pyramids carry their scaffolds and ramps in their own stages (order v3, 3.10). */
     ownConstruction: ['statue', 'monument'],
