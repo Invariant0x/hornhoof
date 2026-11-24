@@ -5,6 +5,16 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- A former server machine whose database is being saved before its copy is remade no longer gets stuck in "Saving" when a backup-holder sweep runs during sealing: the keeper keeps one shared record of temporary bundle files in flight, puts the sealed archive in place before its header and clears any leftover header without an archive, skips the save when the current server's copy has already applied the former server's last write, and shows on the machine card what the save is waiting on and since when.
+
+### Changed
+
+- Follower machines that hold company data no longer prune their local backup bundles during worker backup-holder sweeps, keeping their own backups and saved former-leader bundles on disk while still sending any bundle the server asks for.
+
 ## [0.43.0] - 2026-11-23
 
 ### Fixed

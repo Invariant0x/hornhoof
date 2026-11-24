@@ -243,11 +243,6 @@ export class BundleStore {
     });
   }
 
-  /* A bundle this machine sealed itself, by an atomic publish of its sealed part and head. */
-  put(head: string, manifest: Manifest, ageFile: string): StoredBundle {
-    return this.publish(manifest.id, head, ageFile);
-  }
-
   remove(id: string): void {
     if (!UUID.test(id)) return;
     rmSync(this.head(id), { force: true });
