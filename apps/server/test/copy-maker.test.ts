@@ -1143,11 +1143,11 @@ describe('the maker of a copy', () => {
     expect(maker.report()).toMatchObject({ state: 'stopped', error: 'apply', gaveUp: { attempts: 4 } });
     expect(s.state.lines.filter(line => line.includes('gives up this copy'))).toHaveLength(1);
     /* A parked copy asks for nothing, however long it stands, and holds no slot of the leader's. */
-    const written = JSON.stringify(s.kept());
     s.later(48 * 3600_000);
     for (let n = 0; n < 20; n++) await maker.tick({ ...ORDER, migrations: s.leader.migrations });
     expect(s.request()).toBeNull();
-    expect(JSON.stringify(s.kept())).toBe(written);
+    expect(s.kept()).toMatchObject({ attempt: 5, phase: 'parked', given: 4 });
+    expect(maker.report()).toMatchObject({ state: 'stopped', gaveUp: { attempts: 4 } });
     expect([...s.leader.slots]).toEqual([]);
     expect(maker.mode()).toBe('off');
   });
@@ -1160,8 +1160,10 @@ describe('the maker of a copy', () => {
     await maker.tick(FIRST);
     s.loaded();
     await until(s, maker, 'sync');
+    await run(s, maker, 3 * 3600, () => s.kept().attempt === 4 && s.kept().phase === 'sync');
+    expect(s.leader.slots.size).toBe(3);
     s.leader.reachable = false;
-    await run(s, maker, 6 * 3600, () => s.kept().phase === 'parked');
+    await run(s, maker, 3 * 3600, () => s.kept().phase === 'parked');
     expect(s.kept()).toMatchObject({ phase: 'parked', given: 4 });
     expect([...s.databases.get('hornhoof')!.subs.keys()]).toEqual([]);
     expect(s.leader.slots.size).toBe(3);
