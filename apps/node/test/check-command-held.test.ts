@@ -7,7 +7,7 @@ import { setCheckClient } from '../src/check-queue.js';
 import { eventually } from '../../../test-support/eventually.mjs';
 
 const { assertGroup, clean } = vi.hoisted(() => ({ assertGroup: vi.fn(), clean: vi.fn() }));
-vi.mock('../src/check-group.js', () => ({ assertCheckGroup: assertGroup, checkGroupMembers: vi.fn(), signalCheckGroup: vi.fn(), cleanCheckGroup: clean }));
+vi.mock('../src/check-group.js', () => ({ assertCheckGroup: assertGroup, checkGroupMembers: vi.fn(), signalCheckGroup: vi.fn(), cleanCheckGroup: clean, checkGroupProcess: vi.fn() }));
 const KEY = '10000000-0000-4000-8000-000000000021';
 const GROUP = { pid: 4242, started: '100' };
 const WAIT = Buffer.from(JSON.stringify({ command: ['recorded-tool'], cwd: '/tmp', env: {}, wait: true, group: GROUP }));
