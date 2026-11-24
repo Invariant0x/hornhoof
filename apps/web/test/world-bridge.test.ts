@@ -76,6 +76,20 @@ describe("a map's bridge", () => {
     const dry = { ...mapOf('hornhoof'), isLiquid: () => false };
     expect(bridgeSite(dry)).toBeNull();
   });
+
+  it('is the same as another only with the same axis, place, length and bank ends', () => {
+    const site: BridgeSite = { axis: 'u', col: 10, row: 12, length: 4, overBank: [false, true] };
+    expect(sameBridge(site, { ...site })).toBe(true);
+    expect(sameBridge(null, undefined)).toBe(true);
+    expect(sameBridge(site, null)).toBe(false);
+    expect(sameBridge(undefined, site)).toBe(false);
+    const others: BridgeSite[] = [
+      { ...site, axis: 'v' }, { ...site, col: 11 }, { ...site, row: 13 }, { ...site, length: 5 },
+      { ...site, overBank: [true, true] }, { ...site, overBank: undefined },
+    ];
+    for (const other of others) expect(sameBridge(site, other)).toBe(false);
+    expect(sameBridge({ ...site, overBank: undefined }, { ...site, overBank: [false, false] })).toBe(true);
+  });
 });
 
 const waterRoads = (city: CityState, map: GeneratedWorldMap) => [...city.roads.values()].filter(road => map.isLiquid(road.col, road.row)).map(road => `${road.col},${road.row}`);
