@@ -1193,6 +1193,33 @@ describe('the maker of a copy', () => {
     expect(s.kept()).toMatchObject({ attempt: 2, given: 1, cuts: 0 });
   });
 
+  it('gives up an attempt that goes no further for two hours although nothing stops its subscription, and goes on with one that still grows', async () => {
+    const s = stand();
+    const maker = s.maker();
+    await maker.tick(null);
+    s.loaded();
+    await until(s, maker, 'sync');
+    const db = s.databases.get('hornhoof')!;
+    db.subs.get(NAME)!.rels = Array.from({ length: 40 }, () => 'i');
+    /* A table that starts again from its first row each time holds the database where it was: a few bytes more or less. */
+    for (let minute = 0; minute < 100; minute++) {
+      db.size = (minute % 2) * 1024;
+      await maker.tick({ ...ORDER });
+      s.later(60_000);
+    }
+    expect(s.kept()).toMatchObject({ attempt: 1, phase: 'sync', given: 0 });
+    /* A copy that grows by 8 MiB in the two hours has not stood still, however slowly. */
+    db.size = 9 * MIB;
+    await maker.tick({ ...ORDER });
+    s.later(100 * 60_000);
+    await maker.tick({ ...ORDER });
+    expect(s.kept()).toMatchObject({ attempt: 1, phase: 'sync', given: 0 });
+    /* Two hours with nothing more: given up, as an attempt whose subscription stopped. */
+    s.later(21 * 60_000);
+    await maker.tick({ ...ORDER });
+    expect(s.kept()).toMatchObject({ attempt: 2, phase: 'drop', given: 1 });
+  });
+
   it('counts attempts given up in a row until the copy has been whole for an hour', async () => {
     const s = stand();
     s.leader.live = true;
