@@ -15,7 +15,7 @@ type Pipeline = typeof pipelines.$inferSelect;
 type Department = typeof departments.$inferSelect;
 /* A stage as it is written: key names it in the list, its id when it is there already; parent: the key of the stage above
    it, none for the first ones after the head. One owner: a role of the department, or one of its employees. */
-type StageInput = { key: string; id?: string; parent: string | null; name: string; ownerRole?: string; ownerAgentId?: string };
+export type StageInput = { key: string; id?: string; parent: string | null; name: string; ownerRole?: string; ownerAgentId?: string };
 type PipelineInput = { name: string; why: string; stages: StageInput[] };
 /* Whoever writes may change pipelines of this department, or it throws. */
 export type PipelineGuard = (spot: Spot) => Promise<void>;
@@ -101,7 +101,7 @@ function checkStages(input: Pick<PipelineInput, 'stages'>): StageInput[] {
 
 /* Writes the stages as listed: one that keeps its id stays with the tasks on it, a new one is added, and one left out goes,
    taking the tasks that stood on it back to not started. */
-async function writeStages(tx: Tx, pipeline: Pipeline, stages: StageInput[]): Promise<Task[]> {
+export async function writeStages(tx: Tx, pipeline: Pipeline, stages: StageInput[]): Promise<Task[]> {
   const kept = stages.flatMap(s => (s.id ? [s.id] : []));
   const there = await tx.select({ id: pipelineStages.id }).from(pipelineStages).where(eq(pipelineStages.pipelineId, pipeline.id));
   if (kept.some(id => !there.some(s => s.id === id))) throw invalid('A stage names an id that is not of this pipeline.');
@@ -142,8 +142,14 @@ async function insertPipeline(tx: Tx, dept: Department, actor: Actor | null, inp
   return row!;
 }
 
+/* The stages of a ready pipeline as they are written: each under the stage it names as its parent, or under the one before it. */
+export function catalogStages(stock: CatalogPipeline): StageInput[] {
+  const keyOf = new Map(stock.stages.map((stage, i) => [stage.name, String(i)]));
+  return stock.stages.map(({ name, ownerRole, parent }, i) => ({ key: String(i), parent: parent ? keyOf.get(parent)! : i ? String(i - 1) : null, name, ownerRole }));
+}
+
 function insertCatalogPipeline(tx: Tx, dept: Department, actor: Actor | null, stock: CatalogPipeline, isDefault: boolean): Promise<Pipeline> {
-  const stages = stock.stages.map(({ name, ownerRole }, i) => ({ key: String(i), parent: i ? String(i - 1) : null, name, ownerRole }));
+  const stages = catalogStages(stock);
   return insertPipeline(tx, dept, actor, { name: stock.name, why: stock.why, stages }, stages, { key: stock.key, isDefault });
 }
 
