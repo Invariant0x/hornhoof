@@ -194,10 +194,12 @@ export async function maskCompanyRows(q: Query, facts: Facts, company: string, m
   let changed = 0;
   const left = new Set<string>();
   const tables = [...facts.tables.values()].filter(t => t.key.length > 0 && (proseColumns(t).length > 0 || t.name === 'attachments') && scopeOf(t, company));
+  /* The old bytes of a file not moved into the store yet are no column of the merge's shape, but are read here all the same. */
+  const oldBytes = (await q("SELECT 1 AS there FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'attachments' AND column_name = 'bytes'")).length > 0;
   for (const t of tables) {
     const prose = proseColumns(t);
     const files = t.name === 'attachments';
-    const has = (name: string) => t.columns.some(column => column.name === name);
+    const has = (name: string) => (name === 'bytes' ? oldBytes : t.columns.some(column => column.name === name));
     const wanted = [...new Set([...t.key, ...prose, ...(files ? ['media_type', ...['bytes', 'sha256'].filter(has)] : [])])];
     const only = files ? " AND (t.media_type LIKE 'text/%' OR t.media_type = 'application/json')" : '';
     await eachBatch(q, `SELECT ${jsonOf(wanted, 't')} AS row FROM public.${quote(t.name)} t WHERE ${scopeOf(t, company)!.rows}${only}`, async rows => {

@@ -78,6 +78,8 @@ export async function lastChange(q: Query): Promise<Date | null> {
    their bytes ever leaving the database; whole: with its bytes, for a row that is written. */
 export const FILE_HASH = 'sha256:';
 const rowOf = (t: TableFacts, whole: boolean): string => {
+  /* The old bytes of attachments, while a side still has them, come only with a whole row. */
+  if (t.name === 'attachments' && !whole) return "to_jsonb(t) - 'bytes'";
   const files = whole ? [] : t.columns.filter(column => column.type === 'bytea').map(column => column.name);
   if (files.length === 0) return 'to_jsonb(t)';
   return `to_jsonb(t) || jsonb_build_object(${files.map(name => `'${name}', '${FILE_HASH}' || encode(sha256(t.${quote(name)}), 'hex')`).join(', ')})`;

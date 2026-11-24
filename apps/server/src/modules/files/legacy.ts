@@ -26,6 +26,11 @@ export async function hasOldBytes(db: Pick<Db, 'execute'>): Promise<boolean> {
   return Boolean(row?.there);
 }
 
+/* The column went from this database just now. */
+export function oldBytesGone(db: Pick<Db, 'execute'>): void {
+  columnGone.add(db);
+}
+
 /* How many bytes the old column of a row holds; 0 when the column or its bytes are gone. */
 export async function oldBytesLength(db: Pick<Db, 'execute'>, id: string): Promise<number> {
   if (!(await hasOldBytes(db))) return 0;
@@ -33,7 +38,7 @@ export async function oldBytesLength(db: Pick<Db, 'execute'>, id: string): Promi
   return Number(row?.n ?? 0);
 }
 
-async function* oldPieces(db: Pick<Db, 'execute'>, id: string, length: number) {
+export async function* oldPieces(db: Pick<Db, 'execute'>, id: string, length: number) {
   for (let at = 0; at < length; at += PIECE_BYTES) {
     const [piece] = rowsOf<{ bytes: Uint8Array | null }>(await db.execute(sql`SELECT substring(bytes from ${at + 1} for ${PIECE_BYTES}) AS bytes FROM attachments WHERE id = ${id}`));
     if (!piece?.bytes) throw new Error('The file was removed or moved while it was being sent.');
@@ -41,11 +46,13 @@ async function* oldPieces(db: Pick<Db, 'execute'>, id: string, length: number) {
   }
 }
 
-/* The bytes of a row from before the store, as they go out. */
+/* The bytes of a row from before the store, as they go out; an empty file has none to keep anywhere. */
 export async function oldFileStream(ctx: { db: Pick<Db, 'execute'>; config: Pick<Config, 'filesDir'> }, id: string): Promise<Readable> {
   const length = await oldBytesLength(ctx.db, id);
   if (length > 0) return Readable.from(oldPieces(ctx.db, id, length));
   const file = ctx.config.filesDir ? await open(join(ctx.config.filesDir, id)).catch(() => null) : null;
-  if (!file) throw fileLost();
-  return file.createReadStream();
+  if (file) return file.createReadStream();
+  const [row] = rowsOf<{ size: number }>(await ctx.db.execute(sql`SELECT size FROM attachments WHERE id = ${id}`));
+  if (row && Number(row.size) === 0) return Readable.from([]);
+  throw fileLost();
 }

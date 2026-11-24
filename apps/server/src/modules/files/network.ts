@@ -29,7 +29,12 @@ const SHA = z.string().regex(/^[0-9a-f]{64}$/);
 /* What a machine hears: whether it holds the company's files, the files to take with what their sealed bytes hash to,
    those to let go of, and those the leading app asks it to send back. */
 export type FileView = { holds: boolean; hold: { sha256: string; sealedSha256: string; sealedSize: number }[]; drop: string[]; want: string[] };
-const Report = z.strictObject({ held: z.array(SHA).max(VIEW_FILES * 5), dropped: z.array(SHA).max(VIEW_FILES * 5) });
+/* A census names every file a machine keeps in a span of names, in their order: whatever it was said to keep in that
+   span and does not name any more, it lost. The span runs after one name and through another; '' before the first, 'g'
+   past the last. */
+const Span = z.strictObject({ after: z.union([z.literal(''), SHA]), through: z.union([z.literal('g'), SHA]) });
+const Report = z.strictObject({ held: z.array(SHA).max(VIEW_FILES * 5), dropped: z.array(SHA).max(VIEW_FILES * 5), span: Span.optional() });
+export type FileReport = z.infer<typeof Report>;
 
 /* The machines that hold the files: every data machine, and those picked as backups are, among the machines that keep
    none of the data, with room for the store as it is. The ones picked before keep their places while they qualify. */
@@ -78,21 +83,33 @@ export async function fileView(db: Tx, machineId: string, now = new Date()): Pro
 /* What a machine said it keeps now and what it let go of. A file let go of by every machine that kept it, once it is to
    go, is no file of the store any more. The answer names the files it keeps that no record knows, which it lets go of
    once they are a day old. A machine that holds no files any more is recorded with none it keeps. */
-export async function takeReport(db: Tx, machineId: string, report: z.infer<typeof Report>): Promise<{ unknown: string[] }> {
+export async function takeReport(db: Tx, machineId: string, report: FileReport): Promise<{ unknown: string[]; send: string[] }> {
   let unknown: string[] = [];
+  let send: string[] = [];
+  if (report.span) {
+    const { after, through } = report.span;
+    await db.execute(sql`DELETE FROM net.file_copies WHERE machine_id = ${machineId} AND sha256 COLLATE "C" > ${after} AND sha256 COLLATE "C" <= ${through}
+      AND NOT (sha256 = ANY(${listOf(report.held)}::text[]))`);
+  }
   if (report.held.length) {
     const holds = await holdsFiles(db, machineId);
     const known = rowsOf<{ sha256: string }>(await db.execute(sql`SELECT sha256 FROM net.files WHERE sha256 = ANY(${listOf(report.held)}::text[])`)).map(row => row.sha256);
     if (holds && known.length) {
       await db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id) SELECT unnest(${listOf(known)}::text[]), ${machineId}::uuid ON CONFLICT DO NOTHING`);
     }
-    unknown = report.held.filter(sha256 => !known.includes(sha256));
+    /* A content a row names, as a merge brings it, and no record describes, is no stranger: it is to come here. */
+    const strangers = report.held.filter(sha256 => !known.includes(sha256));
+    const named = strangers.length
+      ? rowsOf<{ sha256: string }>(await db.execute(sql`SELECT DISTINCT sha256 FROM attachments WHERE sha256 = ANY(${listOf(strangers)}::text[])`)).map(row => row.sha256)
+      : [];
+    unknown = strangers.filter(sha256 => !named.includes(sha256));
+    send = holds ? named : [];
   }
   if (report.dropped.length) {
     await db.execute(sql`DELETE FROM net.file_copies WHERE machine_id = ${machineId} AND sha256 = ANY(${listOf(report.dropped)}::text[])`);
     await db.execute(sql`DELETE FROM net.files f WHERE f.sha256 = ANY(${listOf(report.dropped)}::text[]) AND f.drop_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256)`);
   }
-  return { unknown };
+  return { unknown, send };
 }
 
 const hasWork = (view: FileView): boolean => view.hold.length > 0 || view.drop.length > 0 || view.want.length > 0;

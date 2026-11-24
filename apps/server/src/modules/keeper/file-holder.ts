@@ -22,7 +22,7 @@ const View = z.object({
   want: z.array(SHA),
 });
 export type HeldView = z.infer<typeof View>;
-const Answer = z.object({ unknown: z.array(SHA).default([]) });
+const Answer = z.object({ unknown: z.array(SHA).default([]), send: z.array(SHA).default([]) });
 
 /* The leader as this keeper reaches it: whether one is in reach, a request to its app, and a stream of its own to the
    leading keeper, which carries a file. */
@@ -102,23 +102,34 @@ export class FileHolder {
     }
     for (const sha256 of view.want) await this.send(sha256);
     if (held.length || dropped.length) await this.report(held, dropped);
+    /* A file to send back that is not here any more is one this machine lost. */
+    const lost = view.want.filter(sha256 => !this.store.has(sha256));
+    if (lost.length) await this.report([], lost);
     if (this.now() - this.censusAt >= CENSUS_MS) await this.census();
   }
 
-  private async report(held: string[], dropped: string[]): Promise<string[]> {
-    const answer = await this.opts.link.request('POST', FILES_VIEW_PATH, { held, dropped });
+  /* Says what this machine keeps and let go of; the answer names what of it no record knows, and what of it the leader
+     lacks and asks for, which goes at once. */
+  private async report(held: string[], dropped: string[], span?: { after: string; through: string }): Promise<string[]> {
+    const answer = await this.opts.link.request('POST', FILES_VIEW_PATH, { held, dropped, ...(span ? { span } : {}) });
     if (answer.status >= 300) throw new Error(`the company server answered ${answer.status}`);
-    return Answer.safeParse(answer.body ?? {}).data?.unknown ?? [];
+    const said = Answer.safeParse(answer.body ?? {}).data ?? { unknown: [], send: [] };
+    for (const sha256 of said.send) await this.send(sha256);
+    return said.unknown;
   }
 
-  /* Names every file here, a batch at a time; one no record knows, and older than a day, goes. */
-  private async census(): Promise<void> {
-    const here = await this.store.list();
+  /* Names every file here, a span of names at a time in their order, so the leading app forgets what this machine lost
+     and asks for it again; a file no record knows, and older than a day, goes. */
+  async census(): Promise<void> {
+    const here = (await this.store.list()).sort((x, y) => (x.sha256 < y.sha256 ? -1 : 1));
     const cutoff = this.now() - UNNAMED_MS;
-    for (let at = 0; at < here.length; at += CENSUS_BATCH) {
+    let after = '';
+    for (let at = 0; at === 0 || at < here.length; at += CENSUS_BATCH) {
       const batch = here.slice(at, at + CENSUS_BATCH);
-      const unknown = new Set(await this.report(batch.map(file => file.sha256), []));
+      const through = at + CENSUS_BATCH >= here.length ? 'g' : batch.at(-1)!.sha256;
+      const unknown = new Set(await this.report(batch.map(file => file.sha256), [], { after, through }));
       for (const file of batch) if (unknown.has(file.sha256) && file.at.getTime() < cutoff) await this.store.remove(file.sha256);
+      after = through;
     }
     this.censusAt = this.now();
   }

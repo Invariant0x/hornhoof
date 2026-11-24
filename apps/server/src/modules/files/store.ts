@@ -202,6 +202,27 @@ export class FileStore {
     return fresh;
   }
 
+  /* Takes a sealed file no record describes, as a merge brings a row that names it: it is kept only when it opens with
+     the store key to bytes of its name, and is at most maxBytes long. */
+  async takeOpened(sha256: string, input: Readable, key: Buffer, maxBytes: number): Promise<boolean> {
+    checkName(sha256);
+    if (this.has(sha256)) {
+      input.destroy();
+      return false;
+    }
+    const room: StoreRoom = { bytes: maxBytes, full: () => new StoreRefused('size') };
+    const { fresh } = await this.publish(async part => {
+      await pipeline(input, guard(room, this.idleMs), await intoFile(part));
+      const plain = counter();
+      await pipeline(createReadStream(part), openSealed(key), plain, new Writable({ write: (_chunk, _encoding, done) => done() })).catch(() => {
+        throw new StoreRefused('hash');
+      });
+      if (plain.digest() !== sha256) throw new StoreRefused('hash');
+      return sha256;
+    });
+    return fresh;
+  }
+
   /* Takes a file away; nothing happens when it is not here. */
   async remove(sha256: string): Promise<void> {
     if (SHA256.test(sha256)) await rm(this.path(sha256), { force: true });

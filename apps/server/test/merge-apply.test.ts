@@ -8,11 +8,11 @@ import {
 } from '../src/db/schema.js';
 import { idOnly, only } from '../src/db/selections.js';
 import { nodeSource, withSource } from '../src/db/sources.js';
-import { MergeRefused, runMerge, type MergeResult } from '../src/modules/merge/apply.js';
+import { MergeRefused, runMerge, type MergeFiles, type MergeResult } from '../src/modules/merge/apply.js';
 import { complete } from '../src/modules/merge/check.js';
 import { ownDatabases } from './helpers.js';
 import { asPlan7, twoSides, type Side } from './merge-fixture.js';
-import { sha256Of, stored } from './files-fixture.js';
+import { looseFiles, sha256Of, stored } from './files-fixture.js';
 
 /* Each test forks its database, which a shared one would not survive. */
 ownDatabases();
@@ -44,14 +44,14 @@ async function stand() {
   const [one, two] = [await task(db, 1, 'One'), await task(db, 2, 'Two')];
   let made = 0;
   /* A merge of this fork into the leader, as the merger would run it. */
-  const merge = async (fork: Fork, over: { kept?: boolean; label?: string; onUnit?: (n: number) => void | Promise<void>; log?: (line: string) => void; clock?: () => number } = {}): Promise<{ id: string; result: MergeResult }> => {
+  const merge = async (fork: Fork, over: { kept?: boolean; label?: string; onUnit?: (n: number) => void | Promise<void>; log?: (line: string) => void; clock?: () => number; files?: MergeFiles } = {}): Promise<{ id: string; result: MergeResult }> => {
     made += 1;
     const kept = over.kept ?? false;
     const label = over.label ?? 'the fork';
     const [row] = await rowsOf<{ id: string }>(db, sql`INSERT INTO net.merges (source, label) VALUES (${kept ? `kept:hornhoof_before_t${made}` : `machine:${made}`}, ${label}) RETURNING id`);
     const source = await fork.source();
     try {
-      return { id: row!.id, result: await runMerge(db, { id: row!.id, label, kept, companyId: acme!.id }, source, { onUnit: over.onUnit, log: over.log ?? (() => undefined), clock: over.clock }) };
+      return { id: row!.id, result: await runMerge(db, { id: row!.id, label, kept, companyId: acme!.id }, source, { onUnit: over.onUnit, log: over.log ?? (() => undefined), clock: over.clock, files: over.files }) };
     } finally {
       await source.close();
     }
@@ -607,6 +607,23 @@ describe('a merge applied', () => {
     expect(written.map(row => [row.key.id, row.how])).toEqual(expect.arrayContaining([[waiting!.id, 'rewritten'], [failed!.id, 'rewritten']]));
     expect([...written.find(row => row.key.id === waiting!.id)!.cols].sort()).toEqual(['started_at', 'status']);
     expect(await s.conflicts(id)).toEqual([]);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it("brings a file of a side that still holds its bytes into this side's store, and names it by their hash", async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    /* The fork's database had not moved its files into the store yet: it keeps their bytes in the old column. */
+    await fork.db.execute(sql`ALTER TABLE attachments ADD COLUMN bytes bytea`);
+    const bytes = Buffer.from('the old bytes of a file');
+    const [old] = await fork.db.insert(attachments).values({ ...s.on, agentId: s.ana.id, mediaType: 'application/octet-stream', size: bytes.length, taskId: s.one.id }).returning();
+    await fork.db.execute(sql`UPDATE attachments SET bytes = ${bytes} WHERE id = ${old!.id}`);
+    const files = looseFiles();
+    const { id } = await s.merge(fork, { files });
+    const [kept] = await s.db.select().from(attachments).where(eq(attachments.id, old!.id));
+    expect(kept!.sha256).toBe(sha256Of(bytes));
+    expect((await files.bytes(s.db, kept!.sha256!)).equals(bytes)).toBe(true);
+    expect(await s.kept(id)).toMatchObject([{ tbl: 'attachments', how: 'rewritten', cols: ['sha256'], was: { sha256: null } }]);
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
   });
 

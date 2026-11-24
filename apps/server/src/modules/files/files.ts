@@ -56,6 +56,8 @@ export class Files {
   private machine: string | null = null;
   /* How long a read waits for a file this machine lacks; a test waits less. */
   wantWaitMs = WANT_WAIT_MS;
+  /* The last name the store's round checked this machine's copies through; '' to start again from the first. */
+  checkedThrough = '';
 
   constructor(private readonly config: Config) {}
 

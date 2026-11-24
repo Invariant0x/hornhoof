@@ -14,6 +14,7 @@ import { tellOfMachinesAway } from '../nodes/machine-away.js';
 import { tellOfMachinesLow } from '../nodes/machine-low.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { storeRound } from '../files/sweep.js';
+import { moveOldFiles } from '../files/mover.js';
 import { reconcile, waitsOnPurpose } from '../tasks/reconcile.js';
 import { retryCallBatches } from '../calls/calls.js';
 import { wakeLeftBehind } from '../tasks/wake.js';
@@ -121,7 +122,7 @@ async function sendWaiting(ctx: Ctx): Promise<void> {
 
 /* What Hornhoof does every minute: due rounds, turns that task moves kept and nobody queued, turns left waiting though
    their agent is free, department turns their release tags close and turns that hold nothing for a release, files of turns closed a month ago, the old history of node connections, test run times, and Codex plans
-   to move. */
+   to move; and files an older Hornhoof kept in the database, a few at a time, into the store. */
 export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) => (err: unknown) => void): Promise<void> {
   await checkExternalWaits(ctx, now).catch(failed('ending external task waits failed'));
   await checkWaitHealth(ctx, now).catch(failed('checking task waits failed'));
@@ -135,6 +136,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     closeIdleTurns(ctx).catch(failed('closing turns that hold nothing for a release failed')),
     sendWaiting(ctx).catch(failed('sending waiting turns failed')),
     dropOldFiles(ctx, now).then(() => storeRound(ctx, now)).catch(failed('removing the files of old turns failed')),
+    moveOldFiles(ctx).catch(failed('moving files from the database into the store failed')),
     dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),
     checkTestTimes(ctx).catch(failed('checking test run times failed')),
     harnessRound(ctx, now).catch(failed('getting test harnesses to the machines failed')),

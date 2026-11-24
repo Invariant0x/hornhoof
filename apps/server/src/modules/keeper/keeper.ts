@@ -20,6 +20,7 @@ import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFron
 import { MachineIdentity, type Published } from './identity.js';
 import { PEER_PATHS, type PeerFiles } from '../../net/peer-server.js';
 import { LeaderFiles } from './leader-files.js';
+import { filesFor } from '../files/files.js';
 import { PeerLink, type PeerPorts } from './peer-link.js';
 import type { PeerServices } from '../link/peer-client.js';
 import { Beats, type Beat } from './beats.js';
@@ -897,7 +898,7 @@ export class Keeper {
     const { db } = this.opts;
     const dir = this.opts.config.filesDir;
     if (!db || !dir) return undefined;
-    const files = new LeaderFiles(db, join(dir, 'store'), this.opts.config.machineId ?? null);
+    const files = new LeaderFiles(db, join(dir, 'store'), this.opts.config.machineId ?? null, () => filesFor(this.opts.config).key(db));
     return {
       get: async (peer, sha256) => (this.mode() === 'lead' ? files.give(peer.machine, sha256) : { status: 403 }),
       put: async (peer, sha256, body) => (this.mode() === 'lead' ? files.take(peer.machine, sha256, body) : 403),
