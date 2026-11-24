@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, or, sql } from 'drizzle-orm';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, people, telegramBots, telegramChats, telegramReplies } from '../../db/schema.js';
+import { agentEvents, people, telegramBots, telegramChatLanguages, telegramReplies } from '../../db/schema.js';
 import { ensureChatNumbers, readChatNumber, readReplyQuote } from '../events/numbers.js';
 import type { BotLang } from './words.js';
 
@@ -67,9 +67,9 @@ export async function findHornhoofNumberForTelegram(
 
 async function chatLangOrDefault(db: Db, botId: string, chatId: number): Promise<BotLang> {
   const [chat] = await db
-    .select({ lang: telegramChats.lang })
-    .from(telegramChats)
-    .where(and(eq(telegramChats.botId, botId), eq(telegramChats.chatId, chatId)))
+    .select({ lang: telegramChatLanguages.lang })
+    .from(telegramChatLanguages)
+    .where(and(eq(telegramChatLanguages.botId, botId), eq(telegramChatLanguages.chatId, chatId)))
     .limit(1);
   return chat?.lang ?? 'en';
 }

@@ -368,7 +368,7 @@ describe('the orchestrator\'s conversation', () => {
     const run = await nextRun(builtin);
     expect(run.sessionId).toBeNull();
     expect(run.prompt).toMatch(/^From Ivan \(CEO\) to [^\n]+:\n\nEarlier in this conversation/);
-    expect(run.prompt).toContain('From Ivan (CEO) to Orchestrator:\n> We sell shoes');
+    expect(run.prompt).toContain('From Ivan (CEO) to Orchestrator [#2]:\n> We sell shoes');
     expect(run.prompt.endsWith('Ivan (CEO): What next?')).toBe(true);
     expect(run.prompt.match(/What next\?/g)).toHaveLength(1);
   });
@@ -883,7 +883,7 @@ describe("an employee's conversation", () => {
     expect(fresh.sessionId).toBeNull();
     expect(fresh.instructions).toContain('Keep track of the billing agreements.');
     expect(fresh.prompt).toMatch(/^From Ivan \(CEO\) to [^\n]+:\n\nEarlier in this conversation/);
-    expect(fresh.prompt).toContain('From Ivan (CEO) to Bruno (Head of development, Development):\n> We agreed to support card payments.');
+    expect(fresh.prompt).toContain('From Ivan (CEO) to Bruno (Head of development, Development) [#1]:\n> We agreed to support card payments.');
     expect(fresh.prompt.endsWith(`Ivan (CEO): The new turn starts.${IVAN_IS}`)).toBe(true);
   });
 

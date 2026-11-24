@@ -148,7 +148,7 @@ describe('reply with quote as structured context and masked parties', () => {
     /* Prompt carries structured reply context above the person's own words, while stored data.text stays pure. */
     expect(second.prompt).toContain('Replying to message #2 from Bruno');
     expect(second.prompt).toContain('> Stripe is 2.9% + 30c; Adyen is interchange++.');
-    expect(second.prompt).toContain('Ivan: Use Adyen for EU.');
+    expect(second.prompt).toContain('Ivan (CEO): Use Adyen for EU.');
 
     const events = await eventsOf(c.app, c.ceo, c.bruno.id);
     const third = events.find(e => e.number === 3)!;

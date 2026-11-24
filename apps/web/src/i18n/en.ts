@@ -3083,6 +3083,7 @@ export const en = {
     email_taken: 'Someone with this email is already in the company.',
     deletion_needs_ceo: 'The CEO must approve this permanent deletion.',
     person_unknown: 'This person does not exist.',
+    message_unknown: 'There is no such message in this conversation.',
     owner_locked: 'This cannot be done to the company owner.',
     self_locked: 'You cannot do this to yourself.',
     unknown_place: 'This department or team no longer exists. Reload the page and pick again.',

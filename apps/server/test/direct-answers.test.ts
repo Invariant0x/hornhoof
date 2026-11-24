@@ -132,7 +132,7 @@ describe('record_answer', () => {
     expect(await c.saved(site.request.id)).toMatchObject({ status: 'answered', answer: 'Site: Friday.\nDeck: not before Tuesday.', answeredBy: c.ids.ivan, answeredByAgentId: c.bruno.id, answerJobId: message.jobId, answerSourceSeq: message.seq });
     expect(await c.open(deck, legal)).toEqual([true, true]);
     const [note] = await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, site.task.id), eq(taskEvents.kind, 'answered')));
-    expect(note).toMatchObject({ personId: c.ids.ivan, data: expect.objectContaining({ requestId: site.request.id, message: { agentId: c.bruno.id, seq: message.seq }, recordedBy: c.bruno.id }) });
+    expect(note).toMatchObject({ personId: c.ids.ivan, data: expect.objectContaining({ requestId: site.request.id, message: { agentId: c.bruno.id, seq: message.seq, number: 1 }, recordedBy: c.bruno.id }) });
     expect((await call(client, 'record_answer', { request: deck.request.id, words: 'Deck:   not before\nTuesday.' })).isError).toBeFalsy();
     expect(await c.saved(deck.request.id)).toMatchObject({ answer: 'Site: Friday.\nDeck: not before Tuesday.', answeredBy: c.ids.ivan });
     expect(await c.open(deck, legal)).toEqual([false, true]);

@@ -39,21 +39,27 @@ const pictureNames = (data: unknown): string[] => {
 
 /* Every message or agent answer shown in the conversation gets a sequential number; internal turn plumbing and tool steps do not. */
 export function isNumberedChatEvent(kind: AgentEventKind, data: unknown): boolean {
+  /* Rows from before payloads were objects (a bare text, a list, null) hold no number and keep no key to put it in. */
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
   if (kind === 'message') return !prop(data, 'operatorEvidenceId') && prop(data, 'turnFact') !== true && prop(data, 'inputShadow') !== true;
   if (kind === 'text') return textField(data).trim().length > 0 || pictureNames(data).length > 0;
   return false;
 }
 
-export const numberedChatRow = or(
-  and(
-    eq(agentEvents.kind, 'message'),
-    sql`${agentEvents.data}->>'operatorEvidenceId' is null`,
-    sql`coalesce(${agentEvents.data}->>'turnFact', 'false') <> 'true'`,
-    sql`coalesce(${agentEvents.data}->>'inputShadow', 'false') <> 'true'`,
-  ),
-  and(
-    eq(agentEvents.kind, 'text'),
-    sql`(length(btrim(coalesce(${agentEvents.data}->>'text', ''))) > 0 or jsonb_array_length(case when jsonb_typeof(${agentEvents.data}->'pictures') = 'array' then ${agentEvents.data}->'pictures' else '[]'::jsonb end) > 0)`,
+/* The rows that hold a number: objects only, as a payload that is a bare text, a list or null has no key to put one in. */
+export const numberedChatRow = and(
+  sql`jsonb_typeof(${agentEvents.data}) = 'object'`,
+  or(
+    and(
+      eq(agentEvents.kind, 'message'),
+      sql`${agentEvents.data}->>'operatorEvidenceId' is null`,
+      sql`coalesce(${agentEvents.data}->>'turnFact', 'false') <> 'true'`,
+      sql`coalesce(${agentEvents.data}->>'inputShadow', 'false') <> 'true'`,
+    ),
+    and(
+      eq(agentEvents.kind, 'text'),
+      sql`(length(btrim(coalesce(${agentEvents.data}->>'text', ''))) > 0 or jsonb_array_length(case when jsonb_typeof(${agentEvents.data}->'pictures') = 'array' then ${agentEvents.data}->'pictures' else '[]'::jsonb end) > 0)`,
+    ),
   ),
 )!;
 
@@ -83,10 +89,10 @@ export async function lockAgentChatNumbers(tx: SqlExecutor, agentId: string): Pr
 }
 
 async function maxAssignedNumber(tx: SqlExecutor, agentId: string): Promise<number> {
-  const res = await tx.execute<{ n: number }>(
-    sql`select coalesce(max((${agentEvents.data}->>'_number')::int), 0)::int as n from ${agentEvents} where ${agentEvents.agentId} = ${agentId} and ${agentEvents.data} ? '_number'`,
+  const res = await tx.execute(
+    sql`select coalesce(max((${agentEvents.data}->>'_number')::int), 0)::int as n from ${agentEvents} where ${agentEvents.agentId} = ${agentId} and jsonb_typeof(${agentEvents.data}) = 'object' and ${agentEvents.data} ? '_number'`,
   );
-  return Number(res.rows[0]?.n ?? 0);
+  return Number((res as unknown as { rows: Array<{ n: number }> }).rows[0]?.n ?? 0);
 }
 
 /* Assigns stable sequential numbers to any older unnumbered chat rows of this agent, in seq order, inside a locked transaction. */

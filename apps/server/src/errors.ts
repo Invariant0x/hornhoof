@@ -30,6 +30,7 @@ export type ErrorReason =
   | 'invite_used'
   | 'email_taken'
   | 'person_unknown'
+  | 'message_unknown'
   | 'owner_locked'
   | 'self_locked'
   | 'unknown_place'
