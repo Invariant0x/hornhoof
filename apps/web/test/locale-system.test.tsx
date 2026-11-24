@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -140,6 +141,21 @@ describe('the page in a language', () => {
     expect(await screen.findByTestId('dir')).toHaveTextContent('rtl');
     await waitFor(() => expect(document.documentElement.dir).toBe('rtl'));
     expect(document.documentElement.lang).toBe('ar-XB');
+    act(() => screen.getByRole('button', { name: 'English' }).click());
+    await waitFor(() => expect(document.documentElement.dir).toBe('ltr'));
+  });
+
+  it('leaves a page that was turned right to left before its first draw so, also when an effect runs twice, until the language changes direction', async () => {
+    document.documentElement.dir = 'rtl';
+    render(<StrictMode><LanguageProvider pseudo><Probe /></LanguageProvider></StrictMode>);
+    expect(await screen.findByTestId('language')).toHaveTextContent('en');
+    expect(document.documentElement.dir).toBe('rtl');
+    const russian = LANGUAGES.find(choice => choice.id === 'ru')!;
+    act(() => screen.getByRole('button', { name: russian.name }).click());
+    await waitFor(() => expect(document.documentElement.lang).toBe('ru'));
+    expect(document.documentElement.dir).toBe('rtl');
+    act(() => screen.getByRole('button', { name: 'mirrored' }).click());
+    await waitFor(() => expect(document.documentElement.lang).toBe('ar-XB'));
     act(() => screen.getByRole('button', { name: 'English' }).click());
     await waitFor(() => expect(document.documentElement.dir).toBe('ltr'));
   });

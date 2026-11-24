@@ -95,14 +95,17 @@ export function LanguageProvider({ children, pseudo = false }: { children: React
   const language = shown?.language ?? wanted;
   const dir = localeInfo(language)?.dir ?? 'ltr';
   const script = localeInfo(language)?.script ?? 'Latn';
-  const settled = useRef(false);
+  const applied = useRef<Direction | null>(null);
   useEffect(() => {
     const root = document.documentElement;
     root.lang = language;
-    /* A page that was already turned right to left before its first draw (a test page does) stays so until the language
-       changes; from then on the language decides. */
-    if (settled.current || dir === 'rtl' || root.dir !== 'rtl') root.dir = dir;
-    settled.current = true;
+    /* The page takes the direction of the language when that changes. A page that was already turned right to left before
+       its first draw (a test page does) stays so while the language keeps its direction; an effect that runs again with
+       the same direction, as in development, writes nothing. */
+    if (applied.current !== dir) {
+      if (applied.current !== null || dir === 'rtl' || root.dir !== 'rtl') root.dir = dir;
+      applied.current = dir;
+    }
     root.dataset.script = script;
     void import('./load').then(({ loadScriptFonts }) => loadScriptFonts(script));
   }, [language, dir, script]);
