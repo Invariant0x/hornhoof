@@ -68,6 +68,14 @@ Roles not listed take the look of their class (head, checker, executor, turnkey,
 
 Cloak colours by subscription provider (the engine tints the cloak layer): Claude `#C96A4B`, Codex `#3FA796`, Antigravity `#4DA167`, Kimi `#4C84D6`, GLM `#766BD6`, API key `#B89B5E`.
 
+### Held sheets
+
+A delivered sheet stays out of the art folder while the art check refuses it, and its look keeps the art it had. The next delivery of the same sheet closes the line.
+
+| Sheet | Delivered | Held because | Closed by |
+|---|---|---|---|
+| tier 1 `walk` of `egypt-guard-captain`, `egypt-royal-master`, `egypt-caravan-messenger`, `egypt-canal-builder` and `egypt-firefighter` | 24.11.2026, drawn NE and SE | These looks carry a large item, so their walk draws NE, SE, SW and NW: a mirror would move the item to the other hand (contract section 7). No exception is granted. | The same sheets drawn in NE, SE, SW and NW |
+
 ## Ground and plants
 
 Delivered by the ground and plant artists; the terrain and plant layers load them through the pack's `terrainArt` and plant kinds (contract section 9).
