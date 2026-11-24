@@ -34,6 +34,7 @@ import {
   type PickableObject,
   type PickResult,
   type TileCoord,
+  type WorldRect,
 } from './coords';
 import type { AnimationDetailLevel, LodTierId, LodTierSpec, TileSlotSpec, WorldPackManifest } from './manifest';
 import {
@@ -107,6 +108,11 @@ export type WorldEngineStats = Readonly<{
   totalChunks: number;
   cachedChunks: number;
   pendingBakes: number;
+  /* Ground pieces around the view, baked ahead of the camera, still to bake (#1947 item 4). */
+  aheadBakes: number;
+  /* Pieces in view drawn coarser than the zoom needs, from a tier baked before (#1947 item 4); a finer stand-in is
+     counted in pendingBakes only, as it loses no detail. */
+  lowDetailChunks: number;
   mapSize: number;
   chunkSize: number;
   rendererKind: RendererKind;
@@ -142,11 +148,28 @@ type CachedChunkEntry = {
   sprite: Sprite | null;
 };
 
+/* The ground pieces around the view at one detail, with their cache keys, to bake ahead of the camera. */
+type AheadPlan = Readonly<{ sig: string; lod: LodTierSpec; chunks: readonly ChunkCoord[]; keys: readonly string[] }>;
+
 /* Per-frame baking budget (ms) so lazy LOD texture bakes keep interactive pan/zoom near 60 FPS. */
 const BAKE_BUDGET_MS = 7;
 const DRAG_THRESHOLD_PX = 5;
 const KEY_PAN_PX_PER_SEC = 540;
 const CHUNK_CACHE_CAP = 260;
+/* How far beyond the view the ground is baked ahead of the camera, as a share of the view's width and height on each
+   side, so a pan never shows a piece still baking (#1947 item 4). */
+const BAKE_AHEAD_VIEW_SHARE = 0.5;
+/* The pieces ahead bake first where the camera is heading: where its pace puts it this far ahead. */
+const BAKE_AHEAD_LEAD_MS = 600;
+/* The pieces ahead bake right after a frame, in a slice of the time the frame left over: its interval less its own step
+   and a margin, within these bounds. A slow page is never idle, so idle callbacks would rarely come. */
+const AHEAD_SLICE_MIN_MS = 2;
+const AHEAD_SLICE_MAX_MS = 40;
+const AHEAD_SLICE_MARGIN_MS = 6;
+/* A piece in view with no picture at any detail would be a hole in the ground: such pieces bake at once, over the
+   frame's budget, for up to this long a frame; a move past the pieces baked ahead faster than that leaves the rest for
+   the next frames (#1947 item 4). */
+const HOLE_BUDGET_MS = 24;
 const ZOOM_STEP_FACTOR = 1.25;
 /* How a world's Pixi application ends: its canvas leaves the page, and Pixi's pools shared by every application on the page
    stay. Ending with `true` would also empty those pools and break the batches of a map still drawing, as when React's
@@ -254,6 +277,14 @@ export class IsometricWorldEngine {
   private artPinned = false;
   private visibleChunkList: ChunkCoord[] = [];
   private pendingBakeCount = 0;
+  private aheadBakeCount = 0;
+  /* The pieces around the view, worked out again when the view's pieces or the detail change (item 4). */
+  private aheadPlan: AheadPlan | null = null;
+  private aheadSlice = 0;
+  private lowDetailCount = 0;
+  /* Where the camera stood at the last scene sync and how fast it moved since, in world px per ms (item 4). */
+  private lastSyncCamera: { x: number; y: number; at: number } | null = null;
+  private cameraPace = { x: 0, y: 0 };
 
   private destroyed = false;
   private dirtyScene = true;
@@ -1121,7 +1152,10 @@ export class IsometricWorldEngine {
      then flushVisibleBakes draws the rest. */
   bakeVisibleStep(budgetMs: number): { done: number; total: number } {
     const lod = lodForCamera(this.pack, this.camera.zoom, this.dpr);
-    const visible = cullVisibleChunks(this.chunkGrid, visibleWorldRect(this.camera, this.viewport, this.tileW));
+    const rect = visibleWorldRect(this.camera, this.viewport, this.tileW);
+    const inView = cullVisibleChunks(this.chunkGrid, rect);
+    /* The pieces around the view too, so the first pan after the screen finds them baked (item 4). */
+    const visible = [...inView, ...this.chunksAhead(rect, inView)];
     const deadline = performance.now() + budgetMs;
     let done = 0;
     let bakedNow = 0;
@@ -1179,6 +1213,7 @@ export class IsometricWorldEngine {
     if (paused) {
       cancelAnimationFrame(this.rafId);
       this.rafId = 0;
+      this.cancelAheadBake();
       return;
     }
     this.handleResize();
@@ -1212,6 +1247,8 @@ export class IsometricWorldEngine {
       totalChunks: this.chunkGrid.chunks.length,
       cachedChunks: this.chunkCache.size,
       pendingBakes: this.pendingBakeCount,
+      aheadBakes: this.aheadBakeCount,
+      lowDetailChunks: this.lowDetailCount,
       mapSize: this.pack.mapSize,
       chunkSize: this.pack.params.chunkSize,
       rendererKind: this.rendererKind,
@@ -1303,6 +1340,7 @@ export class IsometricWorldEngine {
     if (this.destroyed || this.paused) return;
     this.stepFrame(ts);
     this.rafId = requestAnimationFrame(this.onAnimationFrame);
+    this.scheduleAheadBake();
   };
 
   private stepFrame(ts: number): void {
@@ -1451,6 +1489,10 @@ export class IsometricWorldEngine {
     }
   }
 
+  private lodTileW(id: LodTierId): number {
+    return this.pack.projection.lods.find(l => l.id === id)?.tileW ?? 0;
+  }
+
   private findAnyCachedLod(chunk: ChunkCoord): { key: string; entry: CachedChunkEntry } | null {
     const lods = this.pack.projection.lods;
     for (let i = lods.length - 1; i >= 0; i--) {
@@ -1462,16 +1504,87 @@ export class IsometricWorldEngine {
     return this.chunkLotKeys.lastBakedHit(chunk.key, lods.map(l => l.id), k => this.chunkCache.get(k));
   }
 
+  /* The pieces around the view to bake ahead of the camera, nearest first to where the camera is heading; the view's
+     own are left out. */
+  private chunksAhead(view: WorldRect, inView: readonly ChunkCoord[]): ChunkCoord[] {
+    const padX = (view.maxX - view.minX) * BAKE_AHEAD_VIEW_SHARE;
+    const padY = (view.maxY - view.minY) * BAKE_AHEAD_VIEW_SHARE;
+    const around = { minX: view.minX - padX, maxX: view.maxX + padX, minY: view.minY - padY, maxY: view.maxY + padY };
+    const seen = new Set(inView.map(c => c.key));
+    const cx = (view.minX + view.maxX) / 2 + this.cameraPace.x * BAKE_AHEAD_LEAD_MS;
+    const cy = (view.minY + view.maxY) / 2 + this.cameraPace.y * BAKE_AHEAD_LEAD_MS;
+    const away = (c: ChunkCoord) => Math.hypot((c.bounds.minX + c.bounds.maxX) / 2 - cx, (c.bounds.minY + c.bounds.maxY) / 2 - cy);
+    return cullVisibleChunks(this.chunkGrid, around)
+      .filter(c => !seen.has(c.key))
+      .sort((a, b) => away(a) - away(b));
+  }
+
+  /* The pieces ahead for this view and detail, kept while the view's own pieces stay the same. */
+  private aheadFor(lod: LodTierSpec, view: WorldRect, inView: readonly ChunkCoord[]): AheadPlan {
+    const first = inView[0];
+    const last = inView[inView.length - 1];
+    const sig = `${lod.id}|${inView.length}|${first?.key ?? ''}|${last?.key ?? ''}`;
+    if (this.aheadPlan?.sig === sig) return this.aheadPlan;
+    const chunks = this.chunksAhead(view, inView);
+    this.aheadPlan = { sig, lod, chunks, keys: chunks.map(c => this.cacheKey(c, lod.id)) };
+    return this.aheadPlan;
+  }
+
+  /* Bakes the pieces ahead after the frame, nearest to where the camera is heading first (#1947 item 4). */
+  private scheduleAheadBake(): void {
+    if (this.aheadSlice || this.destroyed || this.paused || this.aheadBakeCount === 0) return;
+    this.aheadSlice = window.setTimeout(this.onAheadSlice, 0);
+  }
+
+  private cancelAheadBake(): void {
+    if (this.aheadSlice) clearTimeout(this.aheadSlice);
+    this.aheadSlice = 0;
+  }
+
+  private readonly onAheadSlice = (): void => {
+    this.aheadSlice = 0;
+    const plan = this.aheadPlan;
+    if (this.destroyed || this.paused || !plan) return;
+    const spare = this.lastFrameMs - this.lastCpuStepMs - AHEAD_SLICE_MARGIN_MS;
+    const until = performance.now() + Math.max(AHEAD_SLICE_MIN_MS, Math.min(AHEAD_SLICE_MAX_MS, spare));
+    let left = 0;
+    plan.chunks.forEach((chunk, i) => {
+      if (this.chunkCache.get(plan.keys[i]!)) return;
+      if (performance.now() < until && this.advanceChunkBake(chunk, plan.lod, until)) return;
+      left++;
+    });
+    this.aheadBakeCount = left;
+  };
+
+  /* The camera's pace since the last sync, smoothed, for baking ahead where it is heading. */
+  private followCameraPace(): void {
+    const now = performance.now();
+    const last = this.lastSyncCamera;
+    this.lastSyncCamera = { x: this.camera.x, y: this.camera.y, at: now };
+    if (!last || now - last.at > 250) {
+      this.cameraPace = { x: 0, y: 0 };
+      return;
+    }
+    const dt = Math.max(1, now - last.at);
+    const k = 0.5;
+    this.cameraPace = {
+      x: this.cameraPace.x * (1 - k) + ((this.camera.x - last.x) / dt) * k,
+      y: this.cameraPace.y * (1 - k) + ((this.camera.y - last.y) / dt) * k,
+    };
+  }
+
   private syncScene(bakeBudgetMs: number): void {
     const lod = lodForCamera(this.pack, this.camera.zoom, this.dpr);
     const visibleRect = visibleWorldRect(this.camera, this.viewport, this.tileW);
     const visible = cullVisibleChunks(this.chunkGrid, visibleRect);
     this.visibleChunkList = visible;
+    this.followCameraPace();
 
     const protectedKeys = new Set<string>();
     const drawEntries: CachedChunkEntry[] = [];
     const bakeStart = performance.now();
     let pending = 0;
+    let lowDetail = 0;
 
     for (const chunk of visible) {
       const key = this.cacheKey(chunk, lod.id);
@@ -1481,20 +1594,38 @@ export class IsometricWorldEngine {
         entry = this.advanceChunkBake(chunk, lod, bakeStart + bakeBudgetMs) ?? undefined;
       }
       if (!entry) {
-        pending++;
         const fallback = this.findAnyCachedLod(chunk);
         if (fallback) {
+          pending++;
+          if (this.lodTileW(fallback.entry.baked.lodId) < lod.tileW) lowDetail++;
           protectedKeys.add(fallback.key);
           entry = fallback.entry;
+        } else {
+          /* A hole in the ground: baked now, over the frame's budget, up to the hole budget; a piece that needs longer goes
+             on next frame from where it stopped (#1947 item 4). */
+          const holeDeadline = bakeStart + bakeBudgetMs + HOLE_BUDGET_MS;
+          if (performance.now() < holeDeadline) entry = this.advanceChunkBake(chunk, lod, holeDeadline) ?? undefined;
+          if (!entry) pending++;
         }
       }
       if (entry) drawEntries.push(entry);
+      else lowDetail++;
     }
+
+    /* The pieces around the view stay kept and bake in idle time (#1947 item 4). */
+    const ahead = this.aheadFor(lod, visibleRect, visible);
+    let aheadLeft = 0;
+    ahead.keys.forEach(key => {
+      protectedKeys.add(key);
+      if (!this.chunkCache.has(key)) aheadLeft++;
+    });
+    this.aheadBakeCount = aheadLeft;
 
     for (const key of this.bakeJobs.keys()) {
       if (!protectedKeys.has(key)) this.bakeJobs.delete(key);
     }
     this.pendingBakeCount = pending;
+    this.lowDetailCount = lowDetail;
     this.dirtyScene = pending > 0;
     this.chunkCache.evictIfNeeded(protectedKeys, this.disposeEntry);
 
@@ -1938,6 +2069,7 @@ export class IsometricWorldEngine {
   destroy(): void {
     this.destroyed = true;
     if (this.rafId) cancelAnimationFrame(this.rafId);
+    this.cancelAheadBake();
 
     const el = this.canvasElement;
     if (el) {
