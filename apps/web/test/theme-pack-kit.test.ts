@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -102,5 +102,29 @@ describe('the archive of a built-in theme with a kit', () => {
       'outside.woff2': Buffer.from('a file beside the fonts folder'),
     });
     expect(() => themeArchiveFiles('egypt', { fonts: join(fontRoot, 'fonts') })).toThrow(/"\.\.\/outside\.woff2"/);
+  });
+
+  /* A file of this machine a pack folder links to is not the folder's own: the archive would carry its bytes, and the
+     server could not tell (#1970, Trinity's note). Every file read from a kit, fonts or art folder is refused when it
+     is a link, and so is a linked folder under the art. */
+  it('refuses a file or folder of a pack folder that is a link to another place, naming it', () => {
+    const elsewhere = folder({ 'private.txt': 'a file of this machine', 'dir/inside.png': Buffer.from('png') });
+    const linked = (make: () => string, path: string, target: string): string => {
+      const root = make();
+      rmSync(join(root, path), { recursive: true, force: true });
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      symlinkSync(join(elsewhere, target), join(root, path));
+      return root;
+    };
+    expect(() => themeArchiveFiles('egypt', { kit: linked(kitFolder, 'btn@2x.webp', 'private.txt') })).toThrow(/btn@2x\.webp.*link/);
+    expect(() => themeArchiveFiles('egypt', { kit: linked(kitFolder, 'LICENSE.md', 'private.txt') })).toThrow(/LICENSE\.md.*link/);
+    expect(() => themeArchiveFiles('egypt', { kit: linked(kitFolder, 'kit.json', 'private.txt') })).toThrow(/kit\.json.*link/);
+    expect(() => themeArchiveFiles('egypt', { fonts: linked(fontFolder, 'sand-sans-latin-400.woff2', 'private.txt') })).toThrow(/sand-sans-latin-400\.woff2.*link/);
+    expect(() => themeArchiveFiles('egypt', { fonts: linked(fontFolder, 'sand-serif-OFL.txt', 'private.txt') })).toThrow(/sand-serif-OFL\.txt.*link/);
+    const art = () => folder({ 'ground.png': Buffer.from('ground'), 'veg/palm.png': Buffer.from('palm') });
+    expect(() => themeArchiveFiles('egypt', { art: linked(art, 'veg/palm.png', 'private.txt') })).toThrow(/palm\.png.*link/);
+    expect(() => themeArchiveFiles('egypt', { art: linked(art, 'veg', 'dir') })).toThrow(/veg.*link/);
+    /* Its own files, the same folders without a link, pack. */
+    expect(themeArchiveFiles('egypt', { kit: kitFolder(), fonts: fontFolder(), art: art() }).has('world/art/veg/palm.png')).toBe(true);
   });
 });
