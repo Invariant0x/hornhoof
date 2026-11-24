@@ -5891,6 +5891,18 @@
           "notNull": true,
           "default": 0
         },
+        "files_disk_free": {
+          "name": "files_disk_free",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "files_disk_total": {
+          "name": "files_disk_total",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "server_order": {
           "name": "server_order",
           "type": "integer",
@@ -6091,11 +6103,11 @@
         },
         "machines_file_store_limit": {
           "name": "machines_file_store_limit",
-          "value": "file_store_limit_bytes IS NULL OR file_store_limit_bytes >= 0"
+          "value": "file_store_limit_bytes IS NULL OR (file_store_limit_bytes >= 0 AND file_store_limit_bytes <= 9007199254740991)"
         },
         "machines_file_store_used": {
           "name": "machines_file_store_used",
-          "value": "file_store_used_bytes >= 0"
+          "value": "file_store_used_bytes >= 0 AND file_store_used_bytes <= 9007199254740991"
         },
         "machines_update_state": {
           "name": "machines_update_state",
@@ -6128,6 +6140,10 @@
         "machines_measures_range": {
           "name": "machines_measures_range",
           "value": "link_rtt_ms >= 0 AND link_mbps >= 0 AND internet_rtt_ms >= 0 AND internet_mbps >= 0"
+        },
+        "machines_files_disk": {
+          "name": "machines_files_disk",
+          "value": "(files_disk_free IS NULL OR files_disk_free BETWEEN 0 AND 9007199254740991) AND (files_disk_total IS NULL OR files_disk_total BETWEEN 0 AND 9007199254740991)"
         }
       },
       "isRLSEnabled": false

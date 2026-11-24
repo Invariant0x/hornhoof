@@ -492,9 +492,12 @@ export const machines = pgTable(
     keepsBackups: boolean('keeps_backups').notNull().default(true),
     heldBackups: uuid('held_backups').array().notNull().default(sql`'{}'::uuid[]`),
     /* The company's files (#2021): the area of its disk its owner gives them, none for the default of 10 GiB (files/area)
-       and 0 for none; and the sealed bytes of the files it is picked for that its keeper last said it keeps. */
+       and 0 for none; the sealed bytes of the files its keeper last said it keeps; and the free and whole room of the
+       disk FILES_DIR lies on, which the floor is a tenth of, none before its keeper said. */
     fileStoreLimitBytes: bigint('file_store_limit_bytes', { mode: 'number' }),
     fileStoreUsedBytes: bigint('file_store_used_bytes', { mode: 'number' }).notNull().default(0),
+    filesDiskFree: bigint('files_disk_free', { mode: 'number' }),
+    filesDiskTotal: bigint('files_disk_total', { mode: 'number' }),
     /* Its place in taking the company server: 1 leads, none for a machine that may not hold the company's data.
        serverPin: the place the CEO pinned, from 2, or 'none' for a machine that never takes the server. serverWhy: a
        key the card turns into words. */
@@ -530,8 +533,9 @@ export const machines = pgTable(
     unique('machines_person_key').on(t.personId, t.machineKey),
     check('machines_role', sql`role IS NULL OR role IN ('data', 'worker')`),
     check('machines_path', sql`path IS NULL OR path IN ('direct', 'relay')`),
-    check('machines_file_store_limit', sql`file_store_limit_bytes IS NULL OR file_store_limit_bytes >= 0`),
-    check('machines_file_store_used', sql`file_store_used_bytes >= 0`),
+    check('machines_file_store_limit', sql`file_store_limit_bytes IS NULL OR (file_store_limit_bytes >= 0 AND file_store_limit_bytes <= 9007199254740991)`),
+    check('machines_file_store_used', sql`file_store_used_bytes >= 0 AND file_store_used_bytes <= 9007199254740991`),
+    check('machines_files_disk', sql`(files_disk_free IS NULL OR files_disk_free BETWEEN 0 AND 9007199254740991) AND (files_disk_total IS NULL OR files_disk_total BETWEEN 0 AND 9007199254740991)`),
     check('machines_update_state', sql`update_state IS NULL OR update_state IN ('ready', 'installing', 'failed')`),
     uniqueIndex('machines_server_order').on(t.serverOrder),
     uniqueIndex('machines_server_pin').on(t.serverPin).where(sql`server_pin <> 'none'`),

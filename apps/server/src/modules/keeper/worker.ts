@@ -257,7 +257,7 @@ export class WorkerKeeper {
   private readonly stopping = new AbortController();
 
   constructor(private readonly opts: WorkerKeeperOptions) {
-    this.measures = new Measures({ dir: opts.config.dir, sampleMs: opts.sampleMs, internet: opts.internet, copying: opts.copying });
+    this.measures = new Measures({ dir: opts.config.dir, sampleMs: opts.sampleMs, internet: opts.internet, copying: opts.copying, filesDir: opts.config.filesDir });
     this.following = new Following({ dir: opts.config.dir, controlDir: opts.config.controlDir, commit: opts.config.commit, now: opts.now, log: opts.log });
     this.carrier = new ComputerCarrier({
       dir: opts.config.dir,
@@ -781,6 +781,8 @@ export class WorkerKeeper {
         update: this.following.update(),
         pin: this.pinPrint(),
         ...(this.opts.config.hostOs ? { os: this.opts.config.hostOs } : {}),
+        /* What the company's files take in its store, once counted. */
+        ...(this.files?.usedBytes() != null ? { fileStoreUsedBytes: this.files.usedBytes()! } : {}),
       };
       /* What only a build that knows copies takes: a machine that could not become a data machine says so as a copy
          that stopped, and a keeper that keeps a copy says how it does. */

@@ -10,6 +10,7 @@ import { orchestratorHeaders } from '../src/auth/internal.js';
 import { agents, machines, people } from '../src/db/schema.js';
 import { Files } from '../src/modules/files/files.js';
 import { fileStoreState, pooledCapacity, setCopies } from '../src/modules/files/copies.js';
+import { floorOf, headroomOf } from '../src/modules/files/area.js';
 import { apartFromBackup, type Seat } from '../src/modules/files/place.js';
 import { checkOwnCopies, dropDue, storeRound } from '../src/modules/files/sweep.js';
 import { FILE_PATH, FileHolder, type FileLink } from '../src/modules/keeper/file-holder.js';
@@ -36,7 +37,7 @@ async function stand() {
   const [server] = await c.db.select().from(machines).where(eq(machines.networkId, MACHINE_ID));
   /* A machine's keeper as it reaches the leader: its asks go to the leading app's routes under its id, as the peer door
      names it, and its streams to the leading keeper. */
-  const holderOn = (machine: string) => {
+  const holderOn = (machine: string, disk?: () => { free: number; total: number } | null) => {
     const dir = folder();
     const link: FileLink = {
       leader: () => true,
@@ -51,7 +52,7 @@ async function stand() {
         return found.status === 200 ? { status: 200, length: found.length, body: found.stream() } : { status: found.status, length: null, body: empty() };
       },
     };
-    return { dir, holder: new FileHolder({ dir: join(dir, 'store'), link, log: () => undefined }) };
+    return { dir, holder: new FileHolder({ dir: join(dir, 'store'), link, log: () => undefined, ...(disk ? { disk } : {}) }) };
   };
   const copiesOf = async (sha256: string) =>
     rowsOf<{ machine_id: string }>(await c.db.execute(sql`SELECT machine_id FROM net.file_copies WHERE sha256 = ${sha256} ORDER BY machine_id`)).map(row => row.machine_id).sort();
@@ -555,6 +556,98 @@ describe('where the files of the store are kept', () => {
     expect((await say()).json()).toMatchObject({ unknown: [stranger] });
     await s.db.execute(sql.raw('CREATE DATABASE hornhoof_before_20261124_090000'));
     expect((await say()).json()).toMatchObject({ unknown: [] });
+  });
+
+  it('gives a machine no more than its area holds and its disk keeps above the floor, counting what it is still to take', () => {
+    const GIB = 1024 ** 3;
+    /* The floor is a tenth of the disk the files lie on, at most 2 GiB, and 2 GiB where the disk is not known. */
+    expect([floorOf(null), floorOf(10 * GIB), floorOf(100 * GIB)]).toEqual([2 * GIB, GIB, 2 * GIB]);
+    const seat = { area: 10 * GIB, used: 3 * GIB, pending: 2 * GIB, free: 50 * GIB, total: 100 * GIB };
+    expect(headroomOf(seat)).toBe(5 * GIB);
+    /* The disk is the bound: 6 GiB free, less the floor and what is still to come. */
+    expect(headroomOf({ ...seat, free: 6 * GIB })).toBe(2 * GIB);
+    expect(headroomOf({ ...seat, free: 3 * GIB })).toBe(0);
+    /* A disk not reported yet bounds nothing but the area; an area of none gives nothing. */
+    expect(headroomOf({ ...seat, free: null, total: null })).toBe(5 * GIB);
+    expect(headroomOf({ ...seat, area: 0 })).toBe(0);
+  });
+
+  it('places no file on a machine whose area is taken by files it is still to fetch, nor on one whose disk is down to the floor', async () => {
+    const s = await stand();
+    const two = await s.worker('two');
+    /* Two's area holds one file: a second is not picked for it while the first is still to come. */
+    const first = await s.app.ctx.files.putBytes(s.db, randomBytes(9000));
+    expect(await s.targetsOf(first.sha256)).toEqual([s.server.id, two].sort());
+    const sealed = Number(rowsOf<{ sealed_size: string }>(await s.db.execute(sql`SELECT sealed_size FROM net.files WHERE sha256 = ${first.sha256}`))[0]!.sealed_size);
+    await areaOf(s, two, sealed + 100);
+    const second = await s.app.ctx.files.putBytes(s.db, randomBytes(9000));
+    expect(await s.targetsOf(second.sha256)).toEqual([s.server.id]);
+    /* Room in the area again, but the disk its files lie on is down to the floor: still none. */
+    await areaOf(s, two, null);
+    await s.db.update(machines).set({ filesDiskFree: 2 * 1024 ** 3, filesDiskTotal: 500 * 1024 ** 3 }).where(eq(machines.id, two));
+    await s.round();
+    expect(await s.targetsOf(second.sha256)).toEqual([s.server.id]);
+    /* Room on the disk: it is picked. */
+    await s.db.update(machines).set({ filesDiskFree: 3 * 1024 ** 3 }).where(eq(machines.id, two));
+    await s.round();
+    expect(await s.targetsOf(second.sha256)).toEqual([s.server.id, two].sort());
+    /* What it keeps counts against its area though its keeper said nothing of it, as one from before says nothing. */
+    const { holder } = s.holderOn(two, () => ({ free: 100 * 1024 ** 3, total: 1000 * 1024 ** 3 }));
+    await holder.lookOnce();
+    expect([holder.store.has(first.sha256), holder.store.has(second.sha256)]).toEqual([true, true]);
+    await areaOf(s, two, 3 * sealed - 1);
+    const third = await s.app.ctx.files.putBytes(s.db, randomBytes(9000));
+    expect(await s.targetsOf(third.sha256)).toEqual([s.server.id]);
+  });
+
+  it('fetches no file its own area or disk has no room for, whatever it is picked for, and counts what its files take', async () => {
+    const s = await stand();
+    const two = await s.worker('two');
+    const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(9000));
+    expect(await s.targetsOf(kept.sha256)).toContain(two);
+    const sealed = Number(rowsOf<{ sealed_size: string }>(await s.db.execute(sql`SELECT sealed_size FROM net.files WHERE sha256 = ${kept.sha256}`))[0]!.sealed_size);
+    /* Its owner gave the files less since it was picked: it does not take the file. */
+    await areaOf(s, two, sealed - 1);
+    let disk = { free: 100 * 1024 ** 3, total: 1000 * 1024 ** 3 };
+    const { holder } = s.holderOn(two, () => disk);
+    await holder.lookOnce();
+    expect([holder.store.has(kept.sha256), holder.usedBytes()]).toEqual([false, 0]);
+    /* Room in the area, but its disk would go under the floor of 2 GiB. */
+    await areaOf(s, two, null);
+    disk = { free: 2 * 1024 ** 3 + sealed - 1, total: 1000 * 1024 ** 3 };
+    await holder.lookOnce();
+    expect(holder.store.has(kept.sha256)).toBe(false);
+    /* Room on both: it takes the file, and says what it takes. */
+    disk = { free: 2 * 1024 ** 3 + sealed, total: 1000 * 1024 ** 3 };
+    await holder.lookOnce();
+    expect([holder.store.has(kept.sha256), holder.usedBytes()]).toEqual([true, sealed]);
+    /* A disk it cannot read takes nothing more. */
+    const more = await s.app.ctx.files.putBytes(s.db, randomBytes(9000));
+    disk = null as unknown as typeof disk;
+    await holder.lookOnce();
+    expect(holder.store.has(more.sha256)).toBe(false);
+    /* Let go of, it counts it no more. */
+    await holder.drop(kept.sha256);
+    expect(holder.usedBytes()).toBe(0);
+  });
+
+  it('counts what a machine says its files take, and the room of the disk they lie on, from its report', async () => {
+    const s = await stand();
+    const two = await s.worker('two');
+    const said = await s.app.inject({ method: 'POST', url: '/api/network/report', payload: { fileStoreUsedBytes: 12345, filesDiskFree: 7 * 1024 ** 3, filesDiskTotal: 9 * 1024 ** 3 }, ...from(two) });
+    expect(said.statusCode).toBeLessThan(300);
+    const [row] = await s.db.select().from(machines).where(eq(machines.id, two));
+    expect([row!.fileStoreUsedBytes, row!.filesDiskFree, row!.filesDiskTotal]).toEqual([12345, 7 * 1024 ** 3, 9 * 1024 ** 3]);
+    /* The leading machine's is what its copies on record take, which its round writes down. */
+    await s.app.ctx.files.putBytes(s.db, randomBytes(3000));
+    await s.round();
+    const [own] = await s.db.select().from(machines).where(eq(machines.id, s.server.id));
+    const recorded = rowsOf<{ n: string }>(await s.db.execute(sql`SELECT sum(f.sealed_size) AS n FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256 WHERE c.machine_id = ${s.server.id}`))[0]!.n;
+    expect(own!.fileStoreUsedBytes).toBe(Number(recorded));
+    expect(own!.fileStoreUsedBytes).toBeGreaterThan(3000);
+    /* A number past what JavaScript counts exactly is refused. */
+    const big = await s.app.inject({ method: 'POST', url: '/api/network/report', payload: { fileStoreUsedBytes: 2 ** 60 }, ...from(two) });
+    expect(big.statusCode).toBe(400);
   });
 
   it('counts what the areas hold of files kept on as many machines', () => {

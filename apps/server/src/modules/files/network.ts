@@ -32,7 +32,7 @@ const SHA = z.string().regex(/^[0-9a-f]{64}$/);
 
 /* What a machine hears: whether it holds the company's files, the files to take with what their sealed bytes hash to,
    those to let go of, and those the leading app asks it to send back. */
-export type FileView = { holds: boolean; hold: { sha256: string; sealedSha256: string; sealedSize: number }[]; drop: string[]; want: string[]; prove: Challenge[] };
+export type FileView = { holds: boolean; hold: { sha256: string; sealedSha256: string; sealedSize: number }[]; drop: string[]; want: string[]; prove: Challenge[]; area: number };
 /* A census names every file a machine keeps in a span of names, in their order: whatever it was said to keep in that
    span and does not name any more, it lost. The span runs after one name and through another; '' before the first, 'g'
    past the last. */
@@ -106,7 +106,9 @@ export async function fileView(db: Tx, machineId: string, now = new Date(), lead
         AND o.verified AND o.machine_id IS DISTINCT FROM ${leader} AND m.report_at > ${fresh}) < ${WANT_FROM}
       ORDER BY f.wanted_at LIMIT ${VIEW_FILES}`),
   ).map(row => row.sha256);
-  return { holds, hold, drop, want, prove: await proveOf(db, machineId) };
+  /* The area its owner gives the files, so it takes none past it whatever it is picked for. */
+  const [limit] = rowsOf<{ area: string | number }>(await db.execute(sql`SELECT coalesce(file_store_limit_bytes, ${DEFAULT_AREA_BYTES}) AS area FROM machines WHERE id = ${machineId}`));
+  return { holds, hold, drop, want, prove: await proveOf(db, machineId), area: limit ? Number(limit.area) : 0 };
 }
 
 /* The files a machine says it keeps that count as its copies: those it was given, or any for a machine of the data,

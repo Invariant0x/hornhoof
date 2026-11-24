@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
+import { statfsSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type { Readable } from 'node:stream';
 import { z } from 'zod';
+import { floorOf } from '../files/area.js';
 import { Challenge, macOf, type Proof } from '../files/proof.js';
 import { FileStore } from '../files/store.js';
 import { Hourly, reasonOf } from './machine-keys.js';
@@ -23,6 +26,8 @@ const View = z.object({
   drop: z.array(SHA),
   want: z.array(SHA),
   prove: z.array(Challenge).default([]),
+  /* The area its owner gives the files; a leader from before it says none. */
+  area: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
 });
 export type HeldView = z.infer<typeof View>;
 const Answer = z.object({ unknown: z.array(SHA).default([]), send: z.array(SHA).default([]), again: z.array(SHA).default([]), prove: z.array(Challenge).default([]) });
@@ -42,7 +47,22 @@ type FileHolderOptions = {
   log: (line: string) => void;
   everyMs?: number;
   now?: () => number;
+  /* The free and whole room of the disk the store lies on; none where it cannot be read. */
+  disk?: () => { free: number; total: number } | null;
 };
+
+/* The room of the disk a folder lies on, or of the one it is to be made in. */
+function diskOf(dir: string): { free: number; total: number } | null {
+  for (const at of [dir, dirname(dir)]) {
+    try {
+      const { bavail, blocks, bsize } = statfsSync(at);
+      return { free: bavail * bsize, total: blocks * bsize };
+    } catch {
+      /* Not made yet: the folder it is to be made in. */
+    }
+  }
+  return null;
+}
 
 /* Holds the company's files on a machine that gives them an area of its disk: the files the leading app picked it for.
    It takes each file it is to hold from the leading keeper, sealed, and keeps it only when it is as long and hashes to
@@ -55,6 +75,8 @@ export class FileHolder {
   private readonly hourly = new Hourly();
   private censusAt = 0;
   private stopped = false;
+  /* The sealed bytes the store keeps: counted whole once and at each census, and kept up with each file in or out. */
+  private used: number | null = null;
 
   constructor(private readonly opts: FileHolderOptions) {
     this.store = new FileStore(opts.dir);
@@ -79,6 +101,32 @@ export class FileHolder {
     return this.running;
   }
 
+  /* What the company's files take here, as its keeper reports it; none before it was counted. */
+  usedBytes(): number | null {
+    return this.used;
+  }
+
+  private async countUsed(): Promise<void> {
+    let used = 0;
+    for (const file of await this.store.list()) used += this.store.sealed(file.sha256)?.length ?? 0;
+    this.used = used;
+  }
+
+  /* Lets a file go, and counts it no more. */
+  async drop(sha256: string): Promise<void> {
+    const size = this.store.sealed(sha256)?.length ?? 0;
+    await this.store.remove(sha256);
+    if (this.used !== null && size > 0 && !this.store.has(sha256)) this.used = Math.max(0, this.used - size);
+  }
+
+  /* Whether a file of that size fits: in the area its owner gives the files, past what they take, and on a disk that
+     keeps its floor once it came. A disk that cannot be read takes nothing. */
+  private roomFor(size: number, area: number | undefined): boolean {
+    if (area !== undefined && (this.used ?? 0) + size > area) return false;
+    const disk = (this.opts.disk ?? (() => diskOf(this.opts.dir)))();
+    return disk !== null && disk.free - floorOf(disk.total) >= size;
+  }
+
   private now(): number {
     return this.opts.now?.() ?? Date.now();
   }
@@ -93,15 +141,17 @@ export class FileHolder {
     const asked = await this.opts.link.request('GET', `${FILES_VIEW_PATH}?wait=1`);
     if (asked.status !== 200) return;
     const view = View.parse(asked.body);
+    if (this.used === null) await this.countUsed();
     const held: string[] = [];
     const dropped: string[] = [];
+    /* What is let go of first, so its room is there for what comes. */
+    for (const sha256 of view.drop) {
+      await this.drop(sha256);
+      dropped.push(sha256);
+    }
     for (const file of view.hold) {
       if (this.stopped) break;
-      if (this.store.has(file.sha256) || (await this.fetch(file))) held.push(file.sha256);
-    }
-    for (const sha256 of view.drop) {
-      await this.store.remove(sha256);
-      dropped.push(sha256);
+      if (this.store.has(file.sha256) || (await this.fetch(file, view.area))) held.push(file.sha256);
     }
     for (const sha256 of view.want) await this.send(sha256);
     const proofs = await this.proofsOf(view.prove);
@@ -146,20 +196,28 @@ export class FileHolder {
       const batch = here.slice(at, at + CENSUS_BATCH);
       const through = at + CENSUS_BATCH >= here.length ? 'g' : batch.at(-1)!.sha256;
       const unknown = new Set(await this.report(batch.map(file => file.sha256), [], { after, through }));
-      for (const file of batch) if (unknown.has(file.sha256) && file.at.getTime() < cutoff) await this.store.remove(file.sha256);
+      for (const file of batch) if (unknown.has(file.sha256) && file.at.getTime() < cutoff) await this.drop(file.sha256);
       after = through;
     }
+    await this.countUsed();
     this.censusAt = this.now();
   }
 
-  private async fetch(file: HeldView['hold'][number]): Promise<boolean> {
+  private async fetch(file: HeldView['hold'][number], area: number | undefined): Promise<boolean> {
+    if (!this.roomFor(file.sealedSize, area)) {
+      this.say('room', "Has no room for a file of the company it is picked to keep: its area or its disk is full.");
+      return false;
+    }
     let body: Readable | null = null;
     try {
       const answer = await this.opts.link.stream('GET', `${FILE_PATH}${file.sha256}`);
       body = answer.body;
       if (answer.status !== 200) return false;
+      const fresh = !this.store.has(file.sha256);
       await this.store.take(file.sha256, body, { sealedSha256: file.sealedSha256, sealedSize: file.sealedSize });
-      return this.store.has(file.sha256);
+      const has = this.store.has(file.sha256);
+      if (has && fresh && this.used !== null) this.used += file.sealedSize;
+      return has;
     } catch (err) {
       this.say('fetch', `Could not fetch a file of the company: ${reasonOf(err)}`);
       return false;
@@ -180,7 +238,7 @@ export class FileHolder {
          the same bytes goes, and the next look fetches the one the record names. */
       const hash = createHash('sha256');
       for await (const chunk of body) hash.update(chunk as Buffer);
-      if ((await this.store.sealedFacts(sha256)).sealedSha256 !== hash.digest('hex')) await this.store.remove(sha256);
+      if ((await this.store.sealedFacts(sha256)).sealedSha256 !== hash.digest('hex')) await this.drop(sha256);
     } catch (err) {
       this.say('fetch', `Could not fetch a file of the company: ${reasonOf(err)}`);
     } finally {

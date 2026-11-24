@@ -1,7 +1,7 @@
 import { sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { sameHome } from '../backups/holders.js';
-import { DEFAULT_AREA_BYTES, FLOOR_BYTES } from './area.js';
+import { DEFAULT_AREA_BYTES, headroomOf } from './area.js';
 import { storeBackupMachines } from './backup.js';
 
 /* Where the files of the store are kept. Each file is picked machines to keep it: as many as the copies setting asks, as
@@ -31,8 +31,8 @@ const arrayOf = (value: string[] | string | null): string[] =>
   Array.isArray(value) ? value : value ? value.replace(/^\{|\}$/g, '').split(',').filter(Boolean) : [];
 
 /* A machine of the company as the store sees it. fit: it keeps files, its area being more than none. online: heard from
-   just now, or the leading one. lost: not heard from for a day. room: what of its area files are not picked for yet,
-   and no more than its free disk leaves above the floor. backup: it keeps the store's backup (backup.ts). */
+   just now, or the leading one. lost: not heard from for a day. room: what more it can be picked for (headroomOf):
+   its area past what its files take and what it is still to fetch, and no more than its disk keeps above the floor. backup: it keeps the store's backup (backup.ts). */
 export type Seat = {
   id: string;
   leader: boolean;
@@ -49,9 +49,18 @@ export type Seat = {
 
 /* The machines that could keep files: every one with a keeper, of the data or a worker, whose owner is active. */
 export async function seats(db: Tx, leader: string | null, now = new Date()): Promise<Seat[]> {
-  const rows = rowsOf<{ id: string; report_at: Date | string | null; addresses: string[] | string; path: string | null; disk_free: string | number | null; area: string | number; assigned: string | number }>(
-    await db.execute(sql`SELECT m.id, m.report_at, m.addresses, m.path, m.disk_free, coalesce(m.file_store_limit_bytes, ${DEFAULT_AREA_BYTES}) AS area,
-      coalesce((SELECT sum(f.sealed_size) FROM net.file_targets t JOIN net.files f ON f.sha256 = t.sha256 WHERE t.machine_id = m.id), 0) AS assigned
+  type Row = { id: string; report_at: Date | string | null; addresses: string[] | string; path: string | null; free: string | number | null; total: string | number | null; area: string | number;
+    assigned: string | number; used: string | number; pending: string | number };
+  /* What a machine's files take there: what its keeper said, and no less than the copies on record of it, which counts
+     the leading machine's own and those of a keeper from before it said. What it is still to take: the files it is
+     picked for that it keeps no copy of yet. The disk is the one FILES_DIR lies on, or its keeper's where it said none. */
+  const rows = rowsOf<Row>(
+    await db.execute(sql`SELECT m.id, m.report_at, m.addresses, m.path, coalesce(m.files_disk_free, m.disk_free) AS free, m.files_disk_total AS total,
+      coalesce(m.file_store_limit_bytes, ${DEFAULT_AREA_BYTES}) AS area,
+      coalesce((SELECT sum(f.sealed_size) FROM net.file_targets t JOIN net.files f ON f.sha256 = t.sha256 WHERE t.machine_id = m.id), 0) AS assigned,
+      greatest(m.file_store_used_bytes, coalesce((SELECT sum(f.sealed_size) FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256 WHERE c.machine_id = m.id), 0)) AS used,
+      coalesce((SELECT sum(f.sealed_size) FROM net.file_targets t JOIN net.files f ON f.sha256 = t.sha256 WHERE t.machine_id = m.id
+        AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = t.sha256 AND c.machine_id = m.id)), 0) AS pending
       FROM machines m JOIN people p ON p.id = m.person_id
       WHERE m.revoked_at IS NULL AND m.network_id IS NOT NULL AND m.role IN ('data', 'worker') AND p.status = 'active' ORDER BY m.id`),
   );
@@ -60,7 +69,7 @@ export async function seats(db: Tx, leader: string | null, now = new Date()): Pr
     const silent = row.report_at ? now.getTime() - new Date(row.report_at).getTime() : Infinity;
     const area = Number(row.area);
     const assigned = Number(row.assigned);
-    const disk = row.disk_free === null ? Infinity : Number(row.disk_free) - FLOOR_BYTES;
+    const room = headroomOf({ area, used: Number(row.used), pending: Number(row.pending), free: row.free === null ? null : Number(row.free), total: row.total === null ? null : Number(row.total) });
     return {
       id: row.id,
       leader: isLeader,
@@ -71,7 +80,7 @@ export async function seats(db: Tx, leader: string | null, now = new Date()): Pr
       relayed: row.path === 'relay',
       area,
       assigned,
-      room: Math.max(0, Math.min(area - assigned, disk)),
+      room,
       backup: false,
     };
   });

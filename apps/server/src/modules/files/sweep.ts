@@ -173,4 +173,9 @@ export async function storeRound(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Pro
   await db.execute(sql`DELETE FROM net.file_gives WHERE at < ${new Date(now.getTime() - GIFT_LIFE_MS).toISOString()}::timestamptz`);
   await db.execute(sql`DELETE FROM net.file_wants WHERE until < ${now.toISOString()}::timestamptz`);
   await checkOwnCopies(ctx);
+  /* What the files take on the leading machine, which has no keeper of them to say so, for the CEO's cards. */
+  if (mine) {
+    await db.execute(sql`UPDATE machines SET file_store_used_bytes = (SELECT coalesce(sum(f.sealed_size), 0) FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256
+      WHERE c.machine_id = ${mine}) WHERE id = ${mine}`);
+  }
 }
