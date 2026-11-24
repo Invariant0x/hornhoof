@@ -5,6 +5,7 @@ import { agents, autonomousReleases, ciDispatches, companies, departments, peopl
 import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { note } from './events.js';
+import { loadQueue, publishLoaded } from './slots.js';
 import { refuse, type Task, type Tx } from './state.js';
 import { taskByRef } from './lookup.js';
 import { keepSnapshot } from './pipeline-report.js';
@@ -13,11 +14,12 @@ import { uncheckedLine, uncheckedLines, type UncheckedItem } from './unchecked.j
 import { recordTurnSummary } from './wait-goals.js';
 import { lastTurnNumber } from './numbers.js';
 import { recordWaitNotice } from './wait-notices.js';
-import { branchHolds, ensureTurnBranch, headOf, integrationTarget, recordOfTag, type IntegrationTarget } from './turn-integration.js';
+import { branchHolds, BranchProofUnavailable, ensureTurnBranch, headOf, integrationTarget, recordOfTag, type BranchProofReader, type IntegrationTarget } from './turn-integration.js';
 import { newerVersion, versionsNewestFirst } from './turn-tags.js';
 import { openTurnOf } from './turn-department.js';
 import { repoAt } from '../departments/repository.js';
 import { heldLineage } from '../testruns/compare.js';
+import { withRepoCompany } from '../testruns/github-limit.js';
 import { requireCi, type CiResult } from './release-ci.js';
 import { startCi, type CiStarted } from './release-dispatch.js';
 
@@ -32,7 +34,7 @@ import { startCi, type CiStarted } from './release-dispatch.js';
 
 type Turn = typeof turns.$inferSelect;
 type Release = typeof turnReleases.$inferSelect;
-type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readCi' | 'dispatchCi' | 'readTags' | 'readBranches' | 'createBranch' | 'log'>>;
+type Reader = BranchProofReader & Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCi' | 'dispatchCi' | 'readTags' | 'readBranches' | 'createBranch' | 'log'>>;
 type Repo = IntegrationTarget['repo'];
 
 const lockCompany = (tx: Tx, companyId: string) => tx.select(idOnly(companies)).from(companies).where(eq(companies.id, companyId)).for('no key update');
@@ -207,7 +209,7 @@ async function openRelease(ctx: Reader, task: Pick<Task, 'companyId' | 'productI
   if (!found || found.department.parentId) return null;
   const turn = await openTurnOf(ctx.db, task.companyId, found.department.id);
   /* The repository as CI is read and started on it: with the release workflow its settings name. */
-  const repo = { ...found.repo, releaseWorkflow: found.department.repoReleaseWorkflow };
+  const repo = withRepoCompany({ ...found.repo, releaseWorkflow: found.department.repoReleaseWorkflow }, task.companyId);
   return turn ? { repo, turn } : null;
 }
 
@@ -224,9 +226,14 @@ async function mainUnder(ctx: Reader, repo: Repo, branch: string, commit: string
    commit is no release of its department's open turn, or where that could not be read. Recording the release reads it again
    and refuses on its own. */
 export async function uncheckedInRelease(ctx: Reader, task: Pick<Task, 'companyId' | 'productId' | 'departmentId'>, commit: string): Promise<UncheckedItem[] | null> {
-  const at = await openRelease(ctx, task);
-  const base = at ? await mainUnder(ctx, at.repo, `turn-${at.turn.number}`, commit) : null;
-  return at && base ? (await broughtBy(ctx, at.turn, at.repo, base, commit)).uncovered : null;
+  try {
+    const at = await openRelease(ctx, task);
+    const base = at ? await mainUnder(ctx, at.repo, `turn-${at.turn.number}`, commit) : null;
+    return at && base ? (await broughtBy(ctx, at.turn, at.repo, base, commit)).uncovered : null;
+  } catch (error) {
+    if (error instanceof BranchProofUnavailable) return null;
+    throw error;
+  }
 }
 
 type ReleaseAt = { task: Task; turn: Turn; repo: Repo; commit: string; uncovered: UncheckedItem[] };
@@ -485,9 +492,12 @@ async function closeTurn(ctx: Reader, repo: Repo, turn: Turn, record: Release, v
     if (left.length) await tx.update(tasks).set({ turnId: next!.id }).where(inArray(tasks.id, left.map(row => row.id)));
     const by = record.requestedByAgentId;
     if (by) for (const row of left) await note(tx, row, { kind: 'updated', actor: { agentId: by }, text: `${version} was released without it, so it goes into Turn ${next!.number}.`, data: { fields: ['turn'], from: turn.number, to: next!.number } });
-    return { done: done!, next: next! };
+    /* The turn that opens takes the department's queue in, as many as its slots hold. */
+    const queue = await loadQueue(tx, turn.companyId, turn.departmentId);
+    return { done: done!, next: next!, queue };
   });
   if (typeof closed === 'string') return closed;
+  publishLoaded(ctx, closed.queue);
   ctx.bus.publish(turn.companyId, { type: 'org' });
   ctx.log?.info({ companyId: turn.companyId, turn: turn.number, version, next: closed.next.number, startCommit: head }, `Turn ${turn.number} was released as ${version}; turn-${closed.next.number} starts from ${head}.`);
   await makeBranchOf(ctx, repo, closed.next);
@@ -503,19 +513,22 @@ async function makeBranchOf(ctx: Reader, repo: Repo, turn: Turn): Promise<void> 
   else ctx.log?.info({ ...at, head: branch.head, made: branch.made }, branch.made ? `turn-${turn.number} was made from ${branch.head}.` : `turn-${turn.number} was there already, at ${branch.head}.`);
 }
 
+async function releaseTurn(ctx: Reader, turn: Turn): Promise<void> {
+  try {
+    const target = await integrationTarget(ctx, { companyId: turn.companyId, productId: null, departmentId: turn.departmentId });
+    if (target?.turn?.id === turn.id) await releaseOne(ctx, turn, target.repo);
+  } catch (err) {
+    if (err instanceof BranchProofUnavailable) return;
+    ctx.log?.error({ error: loggable(err), companyId: turn.companyId, turn: turn.number }, 'Looking for the release of a turn failed.');
+  }
+}
+
 /* Every minute: each department that keeps a repository, on its tags. One department's trouble keeps no other from it. */
 export async function releaseRound(ctx: Reader): Promise<void> {
   if (!ctx.config || !ctx.readTags) return;
   const open = await ctx.db.select().from(turns).innerJoin(departments, eq(departments.id, turns.departmentId))
     .where(and(eq(turns.status, 'open'), isNull(departments.parentId), isNotNull(departments.repoUrl)));
-  for (const { turns: turn } of open) {
-    try {
-      const target = await integrationTarget(ctx, { companyId: turn.companyId, productId: null, departmentId: turn.departmentId });
-      if (target?.turn?.id === turn.id) await releaseOne(ctx, turn, target.repo);
-    } catch (err) {
-      ctx.log?.error({ error: loggable(err), companyId: turn.companyId, turn: turn.number }, 'Looking for the release of a turn failed.');
-    }
-  }
+  for (const { turns: turn } of open) await releaseTurn(ctx, turn);
 }
 
 export type { Release };

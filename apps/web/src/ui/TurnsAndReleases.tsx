@@ -2,6 +2,7 @@ import { useId, useState } from 'react';
 import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { useTurns } from '../tasks';
 import { ALL_DEPARTMENTS, byRelease, inDepartment, NO_DEPARTMENT, type Preparing, type Released } from '../releases';
+import { taskTrees, type TaskTree } from '../task-tree';
 import type { TaskDepartments, TaskLine, TurnView } from '../types';
 import { Backlog } from './Backlog';
 import { Field } from './Field';
@@ -106,13 +107,37 @@ function ShowPicker({ value, onChange }: { value: Show; onChange: (show: Show) =
   );
 }
 
+/* The tasks waiting in a queue for a turn with a free slot, a batch for each turn ahead, each in its place in the queue. */
+function queueBatches(tasks: TaskLine[]): { ahead: number; trees: TaskTree[] }[] {
+  const waiting = tasks.filter(task => task.queue).sort((a, b) => a.queue!.position - b.queue!.position);
+  const ahead = [...new Set(waiting.map(task => task.queue!.ahead))].sort((a, b) => a - b);
+  return ahead.map(n => ({ ahead: n, trees: taskTrees(waiting.filter(task => task.queue!.ahead === n)) }));
+}
+
+/* What waits for a turn with a free slot: why, and a section for each turn ahead. */
+function QueueSections({ tasks, rows }: { tasks: TaskLine[]; rows: CardRows }) {
+  const t = useT();
+  const queue = queueBatches(tasks);
+  return (
+    <>
+      {queue.length > 0 && <p className="muted" dir="auto">{t.tasks.board.queueWhy}</p>}
+      {queue.map(batch => (
+        <BoardSection key={batch.ahead} heading={t.tasks.board.queueHeading(batch.ahead)}>
+          <GoalRows goals={batch.trees} rows={rows} />
+        </BoardSection>
+      ))}
+    </>
+  );
+}
+
 /* Turns and releases: what a turn is, the next release of each department getting ready with its goals counted, and the
    releases out already, folded; or, on its own choice, the work outside every release. Then the list for later turns of a
    department of the person's own. */
 function Releases({ tasks, turns, rows, department, places }: { tasks: TaskLine[]; turns: TurnView[]; rows: CardRows; department: string; places: TaskDepartments | undefined }) {
   const t = useT();
   const [show, setShow] = useState<Show>('releases');
-  const { preparing, outside, released } = byRelease(tasks, turns, rows.asksYou);
+  /* A task in the queue belongs to no turn yet: it is listed by the turn it waits for, never among the goals of the one getting ready. */
+  const { preparing, outside, released } = byRelease(tasks.filter(task => !task.queue), turns, rows.asksYou);
   const mine = places?.departments.filter(d => d.mine) ?? [];
   return (
     <>
@@ -127,6 +152,7 @@ function Releases({ tasks, turns, rows, department, places }: { tasks: TaskLine[
         <>
           {!preparing.length && !released.length && <EmptyState icon="branch" text={t.tracker.empty.turns} />}
           {preparing.map(next => <NextRelease key={next.turn.id} next={next} rows={rows} />)}
+          <QueueSections tasks={tasks} rows={rows} />
           {released.length > 0 && (
             <BoardSection heading={t.tasks.board.closedReleases}>
               {released.map(release => <ReleasedTurn key={release.turn.id} release={release} rows={rows} />)}

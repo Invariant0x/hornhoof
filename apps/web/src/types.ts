@@ -534,6 +534,11 @@ export type TaskLine = {
      it exists, by when, its time, and the pipeline and stage it stands on. An older server sends none. */
   goal?: { id: string; number: number; title: string } | null;
   responsible?: PersonRef | null;
+  /* The person whose request started the tree the task is in; none for work agents started themselves. */
+  askedBy?: PersonRef | null;
+  /* Where it waits for a turn with a free slot: how many turns ahead (the next is 1), its place in its department's queue and the
+     open turn it waits behind; none for work given out. An older server sends none. */
+  queue?: { ahead: number; position: number; openTurn: number | null } | null;
   why?: string;
   dueAt?: string | null;
   time?: TimeFacts;
@@ -752,6 +757,8 @@ export type MachineLowCard = {
   names?: Record<string, string>;
 };
 
+export type GitHubLimitCard = { repository: string; resetAt: number | null };
+
 /* Everything that waits for people as /api/requests shows it to this person, and the counts of all of it: per owner, per
    asking agent and in total. */
 export type Decisions = {
@@ -765,6 +772,7 @@ export type Decisions = {
   copySchemaFailures?: CopySchemaFailureCard[];
   /* A server from before nodes said how full their disk is sends none. */
   machinesLow?: MachineLowCard[];
+  githubLimits?: GitHubLimitCard[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
 

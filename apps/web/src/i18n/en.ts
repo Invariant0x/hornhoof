@@ -1991,6 +1991,8 @@ export const en = {
       showOutside: 'Outside releases',
       preparing: (n: number, base: string | null) => (base ? `Getting ready: turn ${n}, the release after ${base}` : `Getting ready: turn ${n}, the first release`),
       nextWhy: 'What goes into the next release. What is unfinished moves into it by itself.',
+      queueHeading: (ahead: number) => (ahead === 1 ? 'Waiting for the next turn' : ahead === 2 ? 'Waiting for the turn after next' : `Waiting ${ahead} turns ahead`),
+      queueWhy: 'Every slot of the turn is busy, so these start when a turn opens, in this order.',
       goalsDone: (done: number, total: number) => `${done} of ${total} goals done`,
       closedReleases: 'Closed releases',
       released: (n: number, version: string | null) => (version ? `Turn ${n}: release ${version}` : `Turn ${n}: released`),
@@ -2047,6 +2049,9 @@ export const en = {
     machineAwayKinds: { orchestrator: 'orchestrator', head: 'head' },
     machineAwayImportant: (names: string) => `Among them: ${names}.`,
     machineAwayDo: 'What to do: switch it on and plug it in, sign in to the account, check that Docker has started.',
+    githubLimit: (repository: string) => `GitHub request limit reached for ${repository}`,
+    githubLimitRetry: (time: string) => `Try the blocked action again after ${time} UTC.`,
+    githubLimitUnknown: 'GitHub gave no reset time. Try the action again later.',
     machineBack: (host: string, at: string) => `Machine ${host} is back: ${at}.`,
     /* A machine short of disk space, whose node takes no new checks or builds until it has room again. */
     machineLow: (host: string, owner: string | null) => (owner ? `Machine ${host} (${owner}) is low on disk space` : `Machine ${host} is low on disk space`),
@@ -2726,7 +2731,18 @@ export const en = {
       machine: 'Machine unavailable',
       expired: 'Time ran out',
       unavailable: 'Employee unavailable',
+      stuck: 'Stuck and asks for help',
+      turn: 'Its last turn failed',
       failedRun: (number: string | null, work: boolean) => `${work ? 'Work' : 'Test'} run${number ? `\u00a0#${number}` : ''} failed`,
+      /* What to do about each failure, in plain words; it goes away by itself once its cause is gone. */
+      todo: {
+        run: "Open the run's log on the task and fix what failed. A new run that passes clears this.",
+        expired: 'Nobody answered in time. Answer, or give the work a new wait.',
+        machine: 'The machine is away. Turn it on, or ask its owner. This clears when it is back.',
+        unavailable: 'The employee is unavailable. Give the work to someone else.',
+        stuck: 'The agent cannot go on alone. Answer its request for help.',
+        turn: "The agent's last turn failed and will not be tried again by itself. Ask Operations to find the cause.",
+      },
       runErrors: {
         timeout: 'Time ran out', machine: 'Machine unavailable', repository: 'Could not open the repository',
         files: 'Could not load the task files', revision: 'Checked the wrong version', stopped: 'Stopped on the machine',
@@ -2781,6 +2797,12 @@ export const en = {
       why: 'Why',
       facts: 'Facts',
       responsible: 'Responsible',
+      /* Of a task: whose request started its tree, and who answers its questions and approvals. */
+      askedBy: 'Asked by',
+      decides: 'Decides',
+      /* Where a task waits while every slot of its department's turn is busy. */
+      queue: 'Waits for',
+      queueText: (ahead: number, openTurn: number | null) => `${ahead === 1 ? 'The next turn' : ahead === 2 ? 'The turn after next' : `The turn ${ahead} turns ahead`}${openTurn === null ? '' : `, after turn ${openTurn}`}`,
       executor: 'Executor',
       pipeline: 'Pipeline',
       pipelineStage: (pipeline: string, stage: string) => `${pipeline} · stage ${stage}`,
@@ -3235,6 +3257,10 @@ export const en = {
     no_head: 'This department has no head yet. Hire one first.',
     switched_off: 'This employee is switched off right now. Switch it on on the department schema first.',
     repo_invalid: 'Use an https address with no name or token in it, a plain branch name, and an author name on one line with a full email.',
+    github_rate_limited: (time: string | null) => time
+      ? `GitHub did not answer. The account's request limit is used up until ${time} UTC. Try again after that.`
+      : "GitHub did not answer. The account's request limit is used up. Try again later.",
+    commit_history_unavailable: 'The repository could not confirm the commit history. Try again.',
     repo_release_workflow_invalid: 'Name the release workflow by the path of its file, as .github/workflows/release.yml.',
     repo_command_invalid: 'A full test command that names its part with {part} must also say how many parts there are with {parts}.',
     repo_folder_taken: 'Another repository of this department has an address that ends in the same name. Agents keep each repository in a folder of that name, so one department cannot keep both.',
