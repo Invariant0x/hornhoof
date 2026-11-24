@@ -65,6 +65,8 @@ function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[]
     goal_id: null, responsible_person_id: null, why: '', due_at: null, pipeline_id: null, pipeline_stage_id: null, tracker_revision: 0, priority: null,
     /* Migration 0164: nobody asked for an old task on record, and no sub-task has a reason. */
     asked_by_person_id: null, subtask_reason: null,
+    /* Migration 0165: no task waits in a queue before there is one. */
+    queued_at: null,
     ...(row.external_wait ? { external_wait: { ...(row.external_wait as object), operation: expect.stringMatching(/^[0-9a-f-]{36}$/) as string } } : {}),
   } }));
 }

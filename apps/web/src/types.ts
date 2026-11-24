@@ -536,6 +536,9 @@ export type TaskLine = {
   responsible?: PersonRef | null;
   /* The person whose request started the tree the task is in; none for work agents started themselves. */
   askedBy?: PersonRef | null;
+  /* Where it waits for a turn with a free slot: how many turns ahead (the next is 1), its place in its department's queue and the
+     open turn it waits behind; none for work given out. An older server sends none. */
+  queue?: { ahead: number; position: number; openTurn: number | null } | null;
   why?: string;
   dueAt?: string | null;
   time?: TimeFacts;
