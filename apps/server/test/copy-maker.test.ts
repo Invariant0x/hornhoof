@@ -1267,6 +1267,10 @@ describe('the maker of a copy', () => {
     expect(last.request()).toBeNull();
     expect(parked.mode()).toBe('off');
     expect(parked.report()).toMatchObject({ state: 'stopped', error: 'apply', gaveUp: { attempts: 4 } });
+    /* It is off from the moment it is parked, and reads its old copy again once it is asked for by hand. */
+    await parked.tick({ ...ORDER, retry: true });
+    expect(last.kept()).toMatchObject({ phase: 'schema', given: 0, parked: null, old: { attempt: 1 } });
+    expect(parked.mode()).toBe('read');
     /* One that was whole for an hour first starts the count over, and is remade at once. */
     const stable = stand();
     await (await following(stable)).stop();
