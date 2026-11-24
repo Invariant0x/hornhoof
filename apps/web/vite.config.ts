@@ -4,13 +4,15 @@ import { fileURLToPath } from 'node:url';
 import { searchForWorkspaceRoot } from 'vite';
 import { defineConfig } from 'vitest/config';
 import { linkedPackageDirs } from './linked-packages.config.js';
+import { worldArtIndexPlugin } from './world-art-index.config.js';
 import { skinsBoot } from './skins-boot.config.js';
 
 const WEB = dirname(fileURLToPath(import.meta.url));
 const ROOT = searchForWorkspaceRoot(WEB);
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), ...skinsBoot()],
+  /* worldArtIndexPlugin: the art index of a build with world art is written from the files it ships (#1947). */
+  plugins: [react(), ...skinsBoot(), worldArtIndexPlugin()],
   /* ws: the agent terminal is a WebSocket under /api too. */
   server: {
     proxy: { '/api': { target: 'http://localhost:8080', ws: true } },
