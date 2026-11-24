@@ -473,7 +473,7 @@ export async function verifyAutonomousMainAcceptance(ctx: Reader, task: Task, co
   if (!target) return null;
   const verdict = await verifiedIndependentVerdict(ctx.db, task, target.department.id, commit);
   if (!verdict || !(await verifiedRecordedLine(ctx, target.repo, verdict.baseCommitSha, target.recorded.baseCommitSha, commit))) return null;
-  const ci = await verifiedCi(ctx, target.repo, commit);
+  const ci = await verifiedCi(ctx, ciAddress(target), commit);
   return ci
     ? {
         entryId: target.recorded.id,

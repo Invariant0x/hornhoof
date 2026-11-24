@@ -472,7 +472,7 @@ function copyText(t: Messages, language: Language, copy: NonNullable<DataView['c
     case 'catching_up': return c.catchingUp;
     case 'behind': return c.behind(copy.minutes);
     case 'asleep': return c.asleep(clock(language, copy.since));
-    case 'stopped': return copy.why === 'disk_full' ? c.stoppedDiskFull : copy.why === 'setup' ? c.stoppedSetup : c.stopped;
+    case 'stopped': return copy.why === 'disk_full' ? c.stoppedDiskFull : copy.why === 'setup' ? c.stoppedSetup : copy.why === 'gave_up' ? c.stoppedGaveUp(copy.attempts ?? 0, copy.since ? clock(language, copy.since) : null) : c.stopped;
   }
 }
 
