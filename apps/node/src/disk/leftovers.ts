@@ -1,5 +1,6 @@
+import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { lstat, open, readdir, readFile, readlink, rm } from 'node:fs/promises';
+import { lstat, open, readdir, readFile, readlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { folderBytes } from './clean.js';
 
@@ -17,6 +18,13 @@ export const LEFTOVER_GRACE_MS = 10 * 60_000;
 /* A folder that names no owner is kept while a check or a test runner is alive on the machine, and so long as it is not older
    than the longest run, which a test run's own limit ends well before. */
 export const LEFTOVER_IDLE_MS = 4 * 60 * 60_000;
+/* How long one folder's removal may take before the node gives up on it. */
+export const REMOVE_TIMEOUT_MS = 5 * 60_000;
+
+/* The user and group a folder is removed as. */
+export type Rights = { uid: number; gid: number };
+/* Removes a folder as the user who owns it; whether it all went. */
+export type Remover = (path: string, as: Rights) => Promise<boolean>;
 
 type Options = {
   tmp: string;
@@ -27,11 +35,12 @@ type Options = {
   /* Where the machine's processes are read, as Linux has them. */
   proc?: string;
   now?: () => number;
+  remove?: Remover;
 };
 
 export type Leftovers = { size(): Promise<number>; clean(): Promise<number> };
 
-type Found = { path: string; ageMs: number; dev: number; ino: number };
+type Found = { path: string; ageMs: number; dev: number; ino: number; uid: number; gid: number };
 type Owner = { pid: number; start: string | null };
 /* What the processes of the machine hold, as a look at /proc finds. */
 type Seen = {
@@ -126,7 +135,7 @@ async function found({ tmp, owners, now = Date.now }: Options): Promise<Found[]>
   const list: Found[] = [];
   for (const name of (await readdir(tmp).catch(() => [] as string[])).filter(entry => NAME.test(entry))) {
     const path = join(tmp, name), info = await lstat(path).catch(() => null);
-    if (info?.isDirectory() && owners.includes(info.uid)) list.push({ path, ageMs: now() - info.mtimeMs, dev: info.dev, ino: info.ino });
+    if (info?.isDirectory() && owners.includes(info.uid)) list.push({ path, ageMs: now() - info.mtimeMs, dev: info.dev, ino: info.ino, uid: info.uid, gid: info.gid });
   }
   return list;
 }
@@ -153,12 +162,32 @@ async function doomed(options: Options, list: Found[]): Promise<Found[]> {
   return gone;
 }
 
-/* The folder is still the one that was judged, not taken again by another name since; then it goes, and its bytes are freed. */
-async function remove(one: Found): Promise<number> {
+/* The rights a folder is removed with: the node's own for its own folder, else its owner's. The owner may change what is in
+   its folder while the removal walks it, swapping a folder for a link to anywhere, and a removal with the node's rights, which
+   are root's on the built-in node, would then remove what the owner may not. With the owner's rights it removes no more than
+   the owner could itself. A node that may not take them removes nothing. */
+export function removalRights(owner: Rights, node = process.getuid?.()): Partial<Rights> {
+  return owner.uid === node ? {} : { uid: owner.uid, gid: owner.gid };
+}
+
+/* rm with the owner's rights alone, which walks the folder by what it has open and stays on its file system; a node that may not
+   take those rights, which spawning refuses at once, removes nothing. */
+export const removeAs: Remover = (path, as) =>
+  new Promise(resolve => {
+    try {
+      execFile('rm', ['-rf', '--one-file-system', '--', path], { ...removalRights(as), env: { PATH: '/usr/bin:/bin' }, timeout: REMOVE_TIMEOUT_MS }, error => resolve(!error));
+    } catch {
+      resolve(false);
+    }
+  });
+
+/* The folder is still the one that was judged, not taken again by another name since; then it goes, as its owner, and its
+   bytes are freed. */
+async function remove(one: Found, removal: Remover): Promise<number> {
   const again = await lstat(one.path).catch(() => null);
-  if (!again?.isDirectory() || again.dev !== one.dev || again.ino !== one.ino) return 0;
+  if (!again?.isDirectory() || again.dev !== one.dev || again.ino !== one.ino || again.uid !== one.uid) return 0;
   const bytes = await folderBytes(one.path).catch(() => 0);
-  try { await rm(one.path, { recursive: true, force: true }); return bytes; } catch { return 0; }
+  return (await removal(one.path, { uid: again.uid, gid: again.gid }).catch(() => false)) ? bytes : 0;
 }
 
 /* The folders the test helpers leave in the temporary folder: what nothing owns or holds any more goes. */
@@ -171,7 +200,7 @@ export function testLeftovers(options: Options): Leftovers {
     },
     async clean() {
       let freed = 0;
-      for (const one of await doomed(options, await found(options))) freed += await remove(one);
+      for (const one of await doomed(options, await found(options))) freed += await remove(one, options.remove ?? removeAs);
       return freed;
     },
   };

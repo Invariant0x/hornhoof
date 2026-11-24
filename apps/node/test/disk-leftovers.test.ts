@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, chownSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { LEFTOVER_GRACE_MS, LEFTOVER_IDLE_MS, OWNER_FILE, testLeftovers } from '../src/disk/leftovers.js';
+import { LEFTOVER_GRACE_MS, LEFTOVER_IDLE_MS, OWNER_FILE, removalRights, removeAs, testLeftovers, type Remover } from '../src/disk/leftovers.js';
 
 const MINUTE = 60_000;
 const uid = process.getuid?.() ?? 0;
@@ -43,8 +44,8 @@ function folder(name: string, ageMs: number, owner?: string): string {
   return dir;
 }
 
-const cleaner = (options: { checking?: boolean; owners?: number[] } = {}) =>
-  testLeftovers({ tmp, owners: options.owners ?? [uid], checking: () => options.checking ?? false, proc, now: () => clock });
+const cleaner = (options: { checking?: boolean; owners?: number[]; remove?: Remover } = {}) =>
+  testLeftovers({ tmp, owners: options.owners ?? [uid], checking: () => options.checking ?? false, proc, now: () => clock, ...(options.remove ? { remove: options.remove } : {}) });
 const HOUR = 60 * MINUTE;
 
 describe('the leftovers of test runs in the temporary folder', () => {
@@ -239,6 +240,91 @@ describe('a folder whose owner has gone while a process of the users cannot be r
     expect(existsSync(old)).toBe(false);
     await cleaner({ checking: false }).clean();
     expect(existsSync(dir)).toBe(false);
+  });
+});
+
+describe('the rights a folder is removed with', () => {
+  it('hands each folder to the removal with the user and group that own it, not the node\'s own rights', async () => {
+    processes({ pid: 10 });
+    const dir = folder('hh-test-db-AbCd12', HOUR);
+    const { uid: owner, gid } = lstatSync(dir);
+    const asked: [string, { uid: number; gid: number }][] = [];
+    const freed = await cleaner({ remove: async (path, as) => { asked.push([path, as]); return true; } }).clean();
+    expect(asked).toEqual([[dir, { uid: owner, gid }]]);
+    expect(existsSync(dir)).toBe(true);
+    expect(freed).toBeGreaterThanOrEqual(64 * 1024);
+  });
+
+  it('frees nothing when the removal fails', async () => {
+    processes({ pid: 10 });
+    const dir = folder('hh-test-db-AbCd12', HOUR);
+    expect(await cleaner({ remove: async () => false }).clean()).toBe(0);
+    expect(existsSync(dir)).toBe(true);
+  });
+
+  /* The owner of a folder swaps its folders for links to elsewhere, again and again, while the removal walks it. */
+  const SWAP = `const { renameSync, symlinkSync, unlinkSync } = require('node:fs');
+const [tree, victim, count] = process.argv.slice(1);
+for (;;) for (let i = 0; i < Number(count); i++) {
+  const d = tree + '/d' + i, x = tree + '/x' + i;
+  try { renameSync(d, x); symlinkSync(victim, d); unlinkSync(d); renameSync(x, d); } catch { try { renameSync(x, d); } catch {} }
+}`;
+
+  it('removes nothing outside a folder whose owner swaps a folder in it for a link while it goes', async () => {
+    processes({ pid: 10 });
+    const victim = join(root, 'precious');
+    mkdirSync(victim);
+    for (let i = 0; i < 50; i++) writeFileSync(join(victim, `f${i}`), 'keep');
+    for (let round = 0; round < 20; round++) {
+      const tree = join(tmp, `hh-test-db-Swp${String(round).padStart(3, '0')}`);
+      for (let d = 0; d < 40; d++) {
+        mkdirSync(join(tree, `d${d}`), { recursive: true });
+        for (let i = 0; i < 10; i++) writeFileSync(join(tree, `d${d}`, `f${i}`), 'x');
+      }
+      writeFileSync(join(tree, OWNER_FILE), '4242 777');
+      const swapper = spawn(process.execPath, ['-e', SWAP, tree, victim, '40'], { stdio: 'ignore' });
+      await new Promise(resolve => setTimeout(resolve, 50));
+      await cleaner().clean();
+      swapper.kill('SIGKILL');
+      await new Promise(resolve => swapper.once('exit', resolve));
+      rmSync(tree, { recursive: true, force: true });
+      expect(readdirSync(victim)).toHaveLength(50);
+    }
+  }, 60_000);
+
+  it('runs the removal as the owner wherever the owner is not the node itself', () => {
+    expect(removalRights({ uid: 20001, gid: 20001 }, 0)).toEqual({ uid: 20001, gid: 20001 });
+    expect(removalRights({ uid: 1000, gid: 1000 }, 1000)).toEqual({});
+    expect(removalRights({ uid: 0, gid: 0 }, 0)).toEqual({});
+    expect(removalRights({ uid: 20001, gid: 20001 }, 1000)).toEqual({ uid: 20001, gid: 20001 });
+  });
+
+  it('removes a folder of the node\'s own user, links inside it without what they point to', async () => {
+    const target = join(root, 'precious');
+    mkdirSync(target); writeFileSync(join(target, 'data'), 'keep');
+    const dir = folder('hh-installs-AbCd12', HOUR);
+    symlinkSync(target, join(dir, 'inner', 'link'));
+    expect(await removeAs(dir, { uid, gid: lstatSync(dir).gid })).toBe(true);
+    expect(existsSync(dir)).toBe(false);
+    expect(readFileSync(join(target, 'data'), 'utf8')).toBe('keep');
+  });
+
+  it.runIf(uid !== 0)('removes nothing where the node may not take the owner\'s rights', async () => {
+    const dir = folder('hh-test-db-AbCd12', HOUR);
+    expect(await removeAs(dir, { uid: uid + 4242, gid: uid + 4242 })).toBe(false);
+    expect(existsSync(dir)).toBe(true);
+  });
+
+  it.runIf(uid === 0)('as root, leaves inside another user\'s folder what that user may not remove', async () => {
+    const other = 20_000 + 4242;
+    const dir = folder('hh-test-db-AbCd12', HOUR);
+    chmodSync(root, 0o755); chmodSync(tmp, 0o1777);
+    chownSync(dir, other, other); chownSync(join(dir, 'inner'), other, other); chownSync(join(dir, 'inner', 'x'), other, other);
+    const theirs = join(dir, 'roots');
+    mkdirSync(theirs, { mode: 0o700 }); writeFileSync(join(theirs, 'data'), 'keep');
+    expect(await removeAs(dir, { uid: other, gid: other })).toBe(false);
+    expect(readFileSync(join(theirs, 'data'), 'utf8')).toBe('keep');
+    expect(existsSync(join(dir, 'inner'))).toBe(false);
   });
 });
 
