@@ -284,6 +284,9 @@ function independentData(declaration: IndependentDeclaration | null): Record<str
   return {};
 }
 
+/* Who holds a new task and since when it waits: a task the turn has no free slot for is held by no one until a turn takes it in. */
+const heldBy = (queued: boolean, ownerId: string): { assigneeAgentId: string | null; queuedAt: Date | null } => (queued ? { assigneeAgentId: null, queuedAt: new Date() } : { assigneeAgentId: ownerId, queuedAt: null });
+
 function newTaskValues(actor: Actor, input: NewTask, { assignee, architect, parent, tracker }: NewTaskSetup, position: { urgent: boolean; number: number; queued: boolean }): typeof tasks.$inferInsert {
   const initialOwner = architect ?? assignee;
   return {
@@ -296,8 +299,7 @@ function newTaskValues(actor: Actor, input: NewTask, { assignee, architect, pare
         title: input.title.trim(),
         brief: input.brief.trim(),
         body: input.body,
-        assigneeAgentId: position.queued ? null : initialOwner.id,
-        queuedAt: position.queued ? new Date() : null,
+        ...heldBy(position.queued, initialOwner.id),
         executorAgentId: input.executor ? assignee.id : null,
         after: input.after ?? [],
         workKind: input.workKind,

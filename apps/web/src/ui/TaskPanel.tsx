@@ -157,6 +157,12 @@ export function DueDay({ due }: { due: { text: string; late: boolean } }) {
   return <span className={due.late ? 'tp-late' : undefined} dir="auto">{due.text}</span>;
 }
 
+/* Which turn a task in the queue waits for, in the card's facts; a task given out has no such line. */
+function QueueFact({ task }: { task: TaskLine }) {
+  const words = useT().tracker.card;
+  return task.queue ? <Fact name={words.queue}>{words.queueText(task.queue.ahead, task.queue.openTurn)}</Fact> : null;
+}
+
 /* Who answers for it and who does it, its pipeline and its due day with how long it is in its status, a name beside each. */
 function CardFacts({ task, status }: { task: TaskLine; status: ReturnType<typeof humanStatus> }) {
   const t = useT();
@@ -172,6 +178,7 @@ function CardFacts({ task, status }: { task: TaskLine; status: ReturnType<typeof
       <dl className="tp-card-facts">
         <Fact name={words.askedBy}><Answers person={task.askedBy} /></Fact>
         <Fact name={words.decides}><Answers person={task.responsible} /></Fact>
+        <QueueFact task={task} />
         <Fact name={words.executor}><bdi>{task.executor?.name ?? task.assignee?.name ?? t.tracker.nobody}</bdi></Fact>
         {pipeline && <Fact name={words.pipeline}>{stage ? words.pipelineStage(pipeline.name, stage.name) : pipeline.name}</Fact>}
         {due ? <Fact name={words.due}><DueDay due={due} />{inStatus && ` · ${inStatus}`}</Fact> : inStatus && <Fact name={words.time}>{inStatus}</Fact>}

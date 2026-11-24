@@ -1,7 +1,7 @@
 import { and, asc, eq, isNotNull, isNull, notInArray } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agents, departments, tasks, turns } from '../../db/schema.js';
-import { note } from './events.js';
+import { note, published } from './events.js';
 import { keepWakes } from './outbox.js';
 import { CLOSED, type Task, type Tx, type Wake } from './state.js';
 
@@ -82,6 +82,20 @@ export async function queueFacts(db: Db_, rows: Pick<Task, 'id' | 'departmentId'
   return facts;
 }
 
+/* The queue fact of a task, from the facts read for all of them: none for a task given out. */
+export const queueOf = (facts: Map<string, Queued>) => (t: Pick<Task, 'id'>): Queued | null => facts.get(t.id) ?? null;
+
+/* How many turns ahead a task in the queue waits; none for one that is not in it. */
+export async function turnsAhead(db: Db_, task: Pick<Task, 'id' | 'departmentId' | 'queuedAt'>): Promise<number | null> {
+  return (await queueFacts(db, [task])).get(task.id)?.ahead ?? null;
+}
+
+/* Who holds a task given to a department's head now, and since when it waits: a task that finds no free slot is held by no one. */
+export async function givePlace(tx: Tx, item: { department: string; product?: string | null; small?: boolean; urgent?: boolean | null }, headId: string): Promise<{ assigneeAgentId: string | null; queuedAt: Date | null }> {
+  const queued = (await slotVerdict(tx, item.department, { productId: item.product ?? null, small: item.small === true, urgent: item.urgent })) === 'queue';
+  return { assigneeAgentId: queued ? null : headId, queuedAt: queued ? new Date() : null };
+}
+
 /* The words for the turn a queued task waits for. */
 export const waitsText = (ahead: number): string => (ahead === 1 ? 'waits for the next turn' : ahead === 2 ? 'waits for the turn after next' : `waits ${ahead} turns ahead`);
 
@@ -96,9 +110,13 @@ async function holderOf(tx: Tx, task: Task): Promise<string | null> {
   return head?.id ?? null;
 }
 
+/* The tasks the turn opened took in, told to everyone who watches. */
+export const publishLoaded = (ctx: Parameters<typeof published>[0], loaded: { task: Task }[]): void => loaded.forEach(l => published(ctx, l.task));
+
 /* The turn that opens takes the queue in: in order, as many as the slots hold, each to its named holder or the head, who is
    woken for it. What does not fit, and what has no one to take it, waits for the turn after. */
-export async function loadQueue(tx: Tx, companyId: string, departmentId: string): Promise<{ task: Task; wake: Wake }[]> {
+export async function loadQueue(tx: Tx, companyId: string, departmentId: string | null): Promise<{ task: Task; wake: Wake }[]> {
+  if (!departmentId) return [];
   const cap = await slotCapacity(tx, departmentId);
   if (cap === null) return [];
   const now = await running(tx, departmentId);

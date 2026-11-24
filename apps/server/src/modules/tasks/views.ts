@@ -13,7 +13,7 @@ import { commitProof, type CommitProof } from '../testruns/commit-proof.js';
 import { taskEvidence, type RunEvidence } from '../testruns/evidence.js';
 import type { Lang } from '../templates/load.js';
 import { type Task } from './state.js';
-import { queueFacts, type Queued } from './slots.js';
+import { queueFacts, queueOf, type Queued } from './slots.js';
 import { independentViews, type IndependentPartInput, type IndependentRecord } from './independent.js';
 import type { TaskWait } from './wait-state.js';
 import { openWaitsOf, shownWaits } from './wait-views.js';
@@ -149,7 +149,7 @@ async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Task[], sees: (t:
   const seenAfter = new Map(afterRows.filter(t => t.status !== 'done' && sees(t)).map(t => [t.id, t.number]));
   const tracker = await trackerLookups(ctx.db, rows, lookups.waits, { agent: id => lookups.agent(id)?.name, task: id => seenAfter.get(id) });
   const queues = await queueFacts(ctx.db, rows);
-  return { ...lookups, ...tracker, route: t => routes.get(t.id)!, queue: t => queues.get(t.id) ?? null };
+  return { ...lookups, ...tracker, route: t => routes.get(t.id)!, queue: queueOf(queues) };
 }
 
 type NamedRows = {

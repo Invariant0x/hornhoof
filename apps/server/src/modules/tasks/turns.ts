@@ -8,7 +8,7 @@ import { note, published } from './events.js';
 import { refuse, taskSpot, type Task, type Tx, type Wake } from './state.js';
 import { newTrackerFields, type TrackerFields, type TrackerInput } from '../tracker/task-fields.js';
 import { keepWakes } from './outbox.js';
-import { queueFacts, slotVerdict, waitsText } from './slots.js';
+import { givePlace, turnsAhead, waitsText } from './slots.js';
 import { refuseNotUrgent } from './urgency.js';
 import { handOff } from './pulses.js';
 import { nudgeTrackerKeepers } from '../tracker/nudge.js';
@@ -112,7 +112,7 @@ async function insertGiven(tx: Tx, companyId: string, planner: Planner, items: P
   const given: Given[] = [];
   for (const item of items) {
     /* Whether it joins a slot of its department's turn, or waits in the queue for the next one: nobody holds it until then. */
-    const queued = (await slotVerdict(tx, item.department, { productId: item.product ?? null, small: item.small === true, urgent: item.urgent })) === 'queue';
+    const place = await givePlace(tx, item, item.head.id);
     const [row] = await tx
       .insert(tasks)
       .values({
@@ -129,8 +129,7 @@ async function insertGiven(tx: Tx, companyId: string, planner: Planner, items: P
         urgent: item.urgent,
         small: item.small === true,
         status: 'open',
-        assigneeAgentId: queued ? null : item.head.id,
-        queuedAt: queued ? new Date() : null,
+        ...place,
         createdByAgentId: agentId,
         createdByPersonId: item.from?.personId ?? null,
         updatedAt: new Date(),
@@ -139,8 +138,8 @@ async function insertGiven(tx: Tx, companyId: string, planner: Planner, items: P
     await createCoordinationRoute(tx, row!);
     const actor = personId ? { personId } : { agentId };
     await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: { toStatus: row!.status, ...(item.from ? { backlog: item.from.item } : {}), ...(improvement ? { improvement } : {}) } });
-    if (!queued) await note(tx, row!, { kind: 'assigned', actor: { agentId }, data: { assignee: item.head.id } });
-    given.push({ task: row!, head: item.head, queued: queued ? (await queueFacts(tx, [row!])).get(row!.id)!.ahead : null });
+    if (!place.queuedAt) await note(tx, row!, { kind: 'assigned', actor: { agentId }, data: { assignee: item.head.id } });
+    given.push({ task: row!, head: item.head, queued: await turnsAhead(tx, row!) });
   }
   await keepWakes(tx, companyId, wakesFor(given));
   return given;

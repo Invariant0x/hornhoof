@@ -645,7 +645,7 @@ class TaskTools {
       {
         description:
           (this.boss ? 'Gives tasks to the heads of their departments, each task naming its department, ' : 'Gives tasks of your own department to you as its head, ') +
-          'who take them on at once: work flows, nothing waits for a turn. No turn holds a task: it joins its department\'s open turn, the next release, as its result is accepted into the turn branch. Follow the shared admission rule in hh-lead-tasks. ' +
+          'who take them on at once, unless every slot of the department\'s turn is busy: then the task waits in the department\'s queue for the next turn, with no one woken, and the answer says which. Work flows, nothing else waits for a turn. No turn holds a task: it joins its department\'s open turn, the next release, as its result is accepted into the turn branch. Follow the shared admission rule in hh-lead-tasks. ' +
           'A member of a turnkey team does a task end to end alone; everybody else\'s goes through the route of its department.',
         inputSchema: { tasks: z.array(TurnItem), improvement: Improvement.optional(), backlog: Backlog.optional() },
       },

@@ -1991,6 +1991,8 @@ export const en = {
       showOutside: 'Outside releases',
       preparing: (n: number, base: string | null) => (base ? `Getting ready: turn ${n}, the release after ${base}` : `Getting ready: turn ${n}, the first release`),
       nextWhy: 'What goes into the next release. What is unfinished moves into it by itself.',
+      queueHeading: (ahead: number) => (ahead === 1 ? 'Waiting for the next turn' : ahead === 2 ? 'Waiting for the turn after next' : `Waiting ${ahead} turns ahead`),
+      queueWhy: 'Every slot of the turn is busy, so these start when a turn opens, in this order.',
       goalsDone: (done: number, total: number) => `${done} of ${total} goals done`,
       closedReleases: 'Closed releases',
       released: (n: number, version: string | null) => (version ? `Turn ${n}: release ${version}` : `Turn ${n}: released`),
@@ -2767,6 +2769,9 @@ export const en = {
       /* Of a task: whose request started its tree, and who answers its questions and approvals. */
       askedBy: 'Asked by',
       decides: 'Decides',
+      /* Where a task waits while every slot of its department's turn is busy. */
+      queue: 'Waits for',
+      queueText: (ahead: number, openTurn: number | null) => `${ahead === 1 ? 'The next turn' : ahead === 2 ? 'The turn after next' : `The turn ${ahead} turns ahead`}${openTurn === null ? '' : `, after turn ${openTurn}`}`,
       executor: 'Executor',
       pipeline: 'Pipeline',
       pipelineStage: (pipeline: string, stage: string) => `${pipeline} · stage ${stage}`,
