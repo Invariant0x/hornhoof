@@ -6,12 +6,13 @@ pipelines:
     name: "Software changes"
     why: "For building a feature or fixing a product problem."
     stages:
-      - { name: "Plan the change", ownerRole: "DEV-ARCH", echelon: "architecture" }
       - { name: "Build the change", ownerRole: "DEV-ENG", echelon: "development" }
-      - { name: "Review the change", ownerRole: "DEV-REV", echelon: "review" }
-      - { name: "Tidy the change", ownerRole: "DEV-ENG", echelon: "cleanup" }
-      - { name: "Check security", ownerRole: "DEV-SEC", echelon: "security" }
-      - { name: "Run tests", ownerRole: "DEV-TEST", echelon: "tests" }
+      - { name: "Plan the change", ownerRole: "DEV-ARCH", echelon: "architecture", parent: "Build the change" }
+      - { name: "Review the change", ownerRole: "DEV-REV", echelon: "review", parent: "Build the change" }
+      - { name: "Tidy the change", ownerRole: "DEV-ENG", echelon: "cleanup", parent: "Review the change" }
+      - { name: "Check security", ownerRole: "DEV-SEC", echelon: "security", parent: "Tidy the change" }
+      - { name: "Run tests", ownerRole: "DEV-TEST", echelon: "tests", parent: "Check security" }
+      - { name: "Release the turn", ownerRole: "DEV-OPS", parent: "Run tests" }
   - key: development-docs
     name: "Technical guides"
     why: "For writing instructions or updating examples that people use."

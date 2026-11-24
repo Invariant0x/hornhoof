@@ -9,7 +9,7 @@ export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
    a test keeps it equal to the team templates. */
 export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean; teamMembers: number }[] = [
   { key: 'operations', roleCode: 'OPS', ticked: true, always: true, teamMembers: 1 },
-  { key: 'development', roleCode: 'DEV', ticked: true, always: false, teamMembers: 2 },
+  { key: 'development', roleCode: 'DEV', ticked: true, always: false, teamMembers: 1 },
   { key: 'marketing', roleCode: 'MKT', ticked: true, always: false, teamMembers: 1 },
   { key: 'sales', roleCode: 'SAL', ticked: true, always: false, teamMembers: 1 },
   { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false, teamMembers: 1 },
