@@ -80,7 +80,15 @@ async function askPerson(ctx: Ctx, job: ToolJob, task: Task, q: Ask & { kind: 'q
   if (carriesFile(q.text)) throw refuse(400, 'task_invalid', encodedHint(task.number));
   const moved = await ask(ctx, job.agentId, task.id, q);
   const personId = await decisionPerson(ctx, job.companyId, { source: 'request', kind: q.kind, topic: moved.request.decisionTopic, spot: taskSpot(task) });
-  await appendOutgoing(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, text: q.text, to: await personParty(ctx, job.companyId, personId) });
+  await appendOutgoing(ctx, {
+    companyId: job.companyId,
+    agentId: job.agentId,
+    jobId: job.id,
+    text: q.text,
+    to: await personParty(ctx, job.companyId, personId),
+    task: { id: task.id, number: task.number },
+    requestId: moved.request.id,
+  });
   await wakeAll(ctx, moved.wakes);
 }
 

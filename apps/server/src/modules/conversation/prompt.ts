@@ -1,5 +1,5 @@
 import { NOTIFICATION_NAMES } from '@hornhoof/protocol';
-import type { EventView } from '../events/store.js';
+import type { EventView, ReplyQuote } from '../events/store.js';
 import type { MessageEnvelope, MessageParty } from '../events/parties.js';
 import type { BotLang } from '../telegram/words.js';
 
@@ -24,11 +24,16 @@ export const FIRST_TURN_TEMPLATE =
 export type WrittenFrom = { machine: string; open: boolean };
 
 /* A person's message as he reads it, with who wrote it. When they write from a machine of the company, one line before
-   it says which, so he knows where the person sits and whether that machine is open to him. */
-export function turnPrompt(author: { name: string; title: string }, text: string, from?: WrittenFrom): string {
+   it says which, so he knows where the person sits and whether that machine is open to him. When replying to an earlier
+   message, a structured reply header precedes the person's own words without modifying them. */
+export function turnPrompt(author: { name: string; title: string }, text: string, from?: WrittenFrom, replyTo?: ReplyQuote): string {
   const said = author.title ? `${author.name} (${author.title}): ${text}` : `${author.name}: ${text}`;
-  if (!from) return said;
-  return `${author.name} writes this from ${from.machine}; access to it is ${from.open ? 'open' : 'closed by its owner'}.\n${said}`;
+  const parts = [
+    from ? `${author.name} writes this from ${from.machine}; access to it is ${from.open ? 'open' : 'closed by its owner'}.` : null,
+    replyTo ? replyContextBlock(replyTo) : null,
+    said,
+  ].filter((p): p is string => p !== null);
+  return parts.join('\n');
 }
 
 /* What someone else wrote, inside a prompt: every line of it is marked, so no line of it passes for Hornhoof's own or for
@@ -49,6 +54,13 @@ const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
 function partyLine(party: MessageParty): string {
   const details = detailsOf(party);
   return oneLine(`${nameOf(party)}${details.length ? ` (${details.join(', ')})` : ''}`);
+}
+
+export function replyContextBlock(replyTo: ReplyQuote): string {
+  const onTask = replyTo.task ? ` on #${replyTo.task.number}` : '';
+  const onQuestion = replyTo.requestId ? ` (question ${replyTo.requestId})` : '';
+  const excerpt = replyTo.excerpt ? `\n${quote(replyTo.excerpt)}` : '';
+  return `Replying to message #${replyTo.number} from ${partyLine(replyTo.sender)}${onTask}${onQuestion}:${excerpt}`;
 }
 
 function noticeLine(message: MessageEnvelope): string {
@@ -138,13 +150,19 @@ function senderOf(e: EventView, agentName: string): string {
   return 'Hornhoof';
 }
 
+function prefaceHead(e: EventView, agentName: string): string {
+  const base = e.message ? messageHeading(e.message).replace(/:$/, '') : senderOf(e, agentName);
+  const num = e.number !== undefined ? ` [#${e.number}${e.replyTo ? `, replying to #${e.replyTo.number}` : ''}]` : '';
+  return `${base}${num}:`;
+}
+
 /* The conversation so far, for a new session that never saw it: people's and Hornhoof's messages and the agent's answers,
    oldest first, as many of the newest as fit in PREFACE_BYTES. Each one's lines are marked under its sender. */
 export function preface(events: EventView[], agentName = 'Orchestrator'): string {
   const lines = events
     .filter(e => e.kind === 'message' || e.kind === 'text')
     .slice(-PREFACE_EVENTS)
-    .map(e => `${e.message ? messageHeading(e.message) : `${senderOf(e, agentName)}:`}\n${quote(textOf(e.data))}`);
+    .map(e => `${prefaceHead(e, agentName)}\n${quote(textOf(e.data))}`);
   const kept: string[] = [];
   let bytes = 0;
   for (const line of lines.reverse()) {

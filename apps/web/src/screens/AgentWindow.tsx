@@ -8,8 +8,8 @@ import { liveOf } from '../org';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
 import { useWorld } from '../skins/use-skin';
 import type { AgentCardView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ProviderId, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, TurnRefusal, WaitingRequest } from '../types';
-import { ChatEntry, ChatState, ChatSteps, chatItems, useAgentView } from '../ui/AgentChat';
-import { EventMessage, isMessage, messageKey, partyName, useFolding } from '../ui/AgentMessage';
+import { ChatEntry, ChatQuietEntry, ChatReplyBar, ChatState, ChatSteps, buildMessagePayload, chatItems, quietSender, useAgentView, useChatReplies } from '../ui/AgentChat';
+import { isMessage, messageKey, partyName, useFolding } from '../ui/AgentMessage';
 import { AgentCard } from '../ui/AgentCard';
 import { AddPicture, PictureTray, SentPictures, useDraftPictures, usePictureDrop } from '../ui/MessagePictures';
 import { AgentTerminal } from '../ui/AgentTerminal';
@@ -604,6 +604,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* Until its state and card come, the window cannot tell a terminal from a conversation, nor whether the agent can work. */
   const known = state !== null && (orchestrator || card !== null);
   const pictures = useDraftPictures(path);
+  const replies = useChatReplies({ path, events, box, input, keep, merge, setOlder, setFailure });
   const hasTerminal = useKeptTerminal(Boolean(state?.terminal), noTerminal);
   const terminal = !isWorld && view === 'terminal';
   /* The map already knows an employee's program, before its card comes. */
@@ -633,14 +634,16 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     const body = text.trim();
     const withPictures = pictures.drafts.length > 0;
     if ((!body && !withPictures) || !state?.ready || pictures.sending) return;
+    const replyDraft = replies.takeDraft();
     setText('');
     setFailure(null);
     try {
-      await pictures.deliver(ids => api.post(`${path}/messages`, ids.length ? { text: body, pictures: ids } : { text: body }));
+      await pictures.deliver(ids => api.post(`${path}/messages`, buildMessagePayload(body, ids, replyDraft)));
       void catchUp();
     } catch (err) {
       /* The person may have started the next message meanwhile; that one stays. */
       setText(now => now || body);
+      replies.restoreDraft(replyDraft);
       /* Next to the pictures it is about, which stay. */
       if (withPictures) pictures.setRefused(err);
       else setFailure(err);
@@ -736,8 +739,9 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
 
   function message(e: LogEvent) {
     if (personWords(e)) {
+      const who = authorOf(e);
       return (
-        <ChatEntry side="person" who={authorOf(e)} at={e.at}>
+        <ChatEntry side="person" who={who} at={e.at} {...replies.entryProps(e, who, me.person.id)}>
           <div className="chat-text">{field(e.data, 'text')}</div>
           <SentPictures data={e.data} />
         </ChatEntry>
@@ -745,14 +749,14 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     }
     if (isMessage(e)) {
       return (
-        <div className="chat-quiet">
-          <EventMessage event={e} folding={folding} />
+        <ChatQuietEntry event={e} folding={folding} {...replies.entryProps(e, quietSender(t, language, me.person.id, e.message), me.person.id)}>
           <SentPictures data={e.data} />
-        </div>
+        </ChatQuietEntry>
       );
     }
+    const who = messageAuthor(t, field(e.data, 'from'), field(e.data, 'name'));
     return (
-      <ChatEntry side="quiet" who={messageAuthor(t, field(e.data, 'from'), field(e.data, 'name'))} at={e.at}>
+      <ChatEntry side="quiet" who={who} at={e.at} {...replies.entryProps(e, who, me.person.id)}>
         <div className="chat-text">{field(e.data, 'text')}</div>
         <SentPictures data={e.data} />
       </ChatEntry>
@@ -769,7 +773,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         return message(e);
       case 'text':
         return (
-          <ChatEntry side="agent" who={agentName} at={e.at}>
+          <ChatEntry side="agent" who={agentName} at={e.at} {...replies.entryProps(e, agentName, me.person.id)}>
             <AgentWords data={e.data} />
           </ChatEntry>
         );
@@ -880,6 +884,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
             void send();
           }}
         >
+          <ChatReplyBar draft={replies.draft} onJump={replies.jump} onCancel={replies.cancel} />
           <PictureTray drafts={pictures.drafts} sending={pictures.sending} onRemove={d => { pictures.remove(d); input.current?.focus(); }} onBroken={pictures.asFile} />
           <label className="sr" htmlFor={`input-${agentId}`}>
             {placeholder}

@@ -5,8 +5,8 @@ import { listenAt } from '../../../test-support/ports.mjs';
 
 export type TelegramUser = { id: number; is_bot?: boolean; first_name: string; username?: string; language_code?: string };
 export type TelegramUpdate = { update_id: number; message?: { message_id: number; from?: TelegramUser; chat: { id: number; type: string }; date: number; text?: string } & Record<string, unknown> };
-export type Sent = { token: string; chat_id: number; text: string; parse_mode?: string };
-export type SentDocument = { token: string; chat_id: number; file_name: string; content_type: string; bytes: Buffer; caption?: string };
+export type Sent = { token: string; chat_id: number; text: string; parse_mode?: string; reply_to_message_id?: number };
+export type SentDocument = { token: string; chat_id: number; file_name: string; content_type: string; bytes: Buffer; caption?: string; reply_to_message_id?: number };
 
 export type FakeTelegram = {
   /* The address to give Hornhoof as TELEGRAM_API_URL. */
@@ -144,7 +144,15 @@ export async function fakeTelegram(): Promise<FakeTelegram> {
         if (stranger(token, chatId)) return reply.code(403).send(refuse(403, NOT_STARTED));
         const text = String(body.text ?? '');
         if (!text || text.length > 4096) return reply.code(400).send(refuse(400, 'Bad Request: message text is empty or too long'));
-        tg.sent.push({ token, chat_id: chatId, text, ...(typeof body.parse_mode === 'string' ? { parse_mode: body.parse_mode } : {}) });
+        const replyParams = body.reply_parameters && typeof body.reply_parameters === 'object' ? (body.reply_parameters as { message_id?: unknown }) : undefined;
+        const replyId = typeof replyParams?.message_id === 'number' ? replyParams.message_id : typeof body.reply_to_message_id === 'number' ? body.reply_to_message_id : undefined;
+        tg.sent.push({
+          token,
+          chat_id: chatId,
+          text,
+          ...(typeof body.parse_mode === 'string' ? { parse_mode: body.parse_mode } : {}),
+          ...(replyId !== undefined ? { reply_to_message_id: replyId } : {}),
+        });
         return { ok: true, result: { message_id: nextMessage++, chat: { id: chatId, type: 'private' }, date: Math.floor(Date.now() / 1000), text } };
       }
       case 'sendChatAction':
@@ -165,6 +173,12 @@ export async function fakeTelegram(): Promise<FakeTelegram> {
         }
         const rawCaption = form.get('caption');
         const caption = typeof rawCaption === 'string' && rawCaption.length > 0 ? rawCaption : undefined;
+        const rawReply = form.get('reply_parameters');
+        let replyId: number | undefined;
+        if (typeof rawReply === 'string' && rawReply.length > 0) {
+          const parsed = JSON.parse(rawReply) as { message_id?: unknown };
+          if (typeof parsed.message_id === 'number') replyId = parsed.message_id;
+        }
         const bytes = Buffer.from(await doc.arrayBuffer());
         tg.sentDocuments.push({
           token,
@@ -173,6 +187,7 @@ export async function fakeTelegram(): Promise<FakeTelegram> {
           content_type: doc.type,
           bytes,
           ...(caption !== undefined ? { caption } : {}),
+          ...(replyId !== undefined ? { reply_to_message_id: replyId } : {}),
         });
         return {
           ok: true,

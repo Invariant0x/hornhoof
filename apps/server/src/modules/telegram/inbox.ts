@@ -10,6 +10,7 @@ import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.
 import { writeToAgent } from '../conversation/routes.js';
 import { TELEGRAM_FILE_BYTES, TelegramError, type TelegramFile, type TelegramMessage, type TelegramUpdate, type TelegramUser } from './api.js';
 import { chatLanguage } from './language.js';
+import { findHornhoofNumberForTelegram } from './replies.js';
 import { agentName, WORDS, type BotLang } from './words.js';
 
 type Bot = Pick<typeof telegramBots.$inferSelect, 'id' | 'companyId' | 'agentId'>;
@@ -178,9 +179,17 @@ export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | Tele
   /* Nothing came but what the person already heard did not. */
   if (!said.length && !came.notes.length && !brought.ids.length) return false;
   const before = await lastSeq(ctx, agent.id);
+  const replyTgId = messages.find(m => m.reply_to_message?.message_id)?.reply_to_message?.message_id;
+  const replyTo = replyTgId !== undefined ? await findHornhoofNumberForTelegram(ctx.db, agent.id, bot.id, chatId, replyTgId) : undefined;
+  const messageIds = messages.length > 1 ? { messageIds: messages.map(m => m.message_id) } : {};
   let jobId: string;
   try {
-    jobId = await writeToAgent(ctx, me, agent, { text, pictures: brought.ids, telegram: { bot: bot.id, chat: chatId, update: update.update_id, lang } });
+    jobId = await writeToAgent(ctx, me, agent, {
+      text,
+      pictures: brought.ids,
+      ...(replyTo !== undefined ? { replyTo } : {}),
+      telegram: { bot: bot.id, chat: chatId, update: update.update_id, messageId: message.message_id, ...messageIds, lang },
+    });
   } catch (err) {
     const notReady = err instanceof ApiError && (err.reason === 'agent_not_ready' || err.reason === 'orchestrator_not_ready');
     if (!notReady) ctx.log.warn({ error: loggable(err), agentId: agent.id }, 'A message from Telegram did not reach its agent.');

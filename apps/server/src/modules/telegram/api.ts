@@ -11,6 +11,7 @@ export type TelegramMessage = {
   chat: { id: number; type: string };
   text?: string;
   caption?: string;
+  reply_to_message?: { message_id: number; from?: TelegramUser; text?: string; caption?: string };
   /* The photos and files sent together as one album share it, each in an update of its own. */
   media_group_id?: string;
   /* Each size of one photo, the biggest last. */
@@ -81,9 +82,20 @@ export const deleteWebhook = (base: string, token: string) => callTelegram<boole
 export const getUpdates = (base: string, token: string, offset: number, signal: AbortSignal) =>
   callTelegram<TelegramUpdate[]>(base, token, 'getUpdates', { offset, timeout: POLL_SECONDS, allowed_updates: ['message'] }, signal);
 
+export type SentTelegramMessage = { message_id?: number };
+
+const replyParameters = (replyToMessageId?: number) =>
+  replyToMessageId !== undefined ? { reply_parameters: { message_id: replyToMessageId, allow_sending_without_reply: true } } : {};
+
 /* Plain text, with no formatting, so no character in an answer can break it. */
-export const sendText = (base: string, token: string, chatId: number, text: string, signal?: AbortSignal) =>
-  callTelegram<unknown>(base, token, 'sendMessage', { chat_id: chatId, text, link_preview_options: { is_disabled: true } }, signal);
+export const sendText = (base: string, token: string, chatId: number, text: string, signal?: AbortSignal, replyToMessageId?: number) =>
+  callTelegram<SentTelegramMessage>(
+    base,
+    token,
+    'sendMessage',
+    { chat_id: chatId, text, link_preview_options: { is_disabled: true }, ...replyParameters(replyToMessageId) },
+    signal,
+  );
 
 export const sendTyping = (base: string, token: string, chatId: number, signal: AbortSignal) =>
   callTelegram<unknown>(base, token, 'sendChatAction', { chat_id: chatId, action: 'typing' }, signal);
@@ -98,7 +110,8 @@ export async function sendDocument(
   doc: { bytes: Buffer; name: string; mediaType?: string },
   caption?: string,
   signal?: AbortSignal,
-): Promise<unknown> {
+  replyToMessageId?: number,
+): Promise<SentTelegramMessage> {
   if (!doc.bytes.length || doc.bytes.length > TELEGRAM_SEND_FILE_BYTES) {
     throw new TelegramError(400, 'Bad Request: file must be non-empty and up to 50 MB.');
   }
@@ -106,7 +119,10 @@ export async function sendDocument(
   form.append('chat_id', String(chatId));
   form.append('document', new Blob([new Uint8Array(doc.bytes)], { type: doc.mediaType ?? 'application/octet-stream' }), doc.name || 'file');
   if (caption?.trim()) form.append('caption', splitForTelegram(caption.trim(), TELEGRAM_CAPTION_MAX)[0]!);
-  return postTelegram<unknown>(base, token, 'sendDocument', { method: 'POST', body: form, signal });
+  if (replyToMessageId !== undefined) {
+    form.append('reply_parameters', JSON.stringify({ message_id: replyToMessageId, allow_sending_without_reply: true }));
+  }
+  return postTelegram<SentTelegramMessage>(base, token, 'sendDocument', { method: 'POST', body: form, signal });
 }
 
 /* The most one Telegram message holds. */

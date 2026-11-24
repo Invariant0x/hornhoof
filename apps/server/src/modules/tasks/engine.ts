@@ -33,7 +33,8 @@ import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, attachments, companies, jobs, people, requests, taskEvents, tasks, type DecisionTopic, type RequestOption } from '../../db/schema.js';
-import { clearlyAnswered, flat, holds } from './direct-words.js';
+import { clearlyAnswered, flat, holds, type ReplyPointer } from './direct-words.js';
+import { ensureChatNumbers, readChatNumber, readReplyQuote } from '../events/numbers.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
@@ -1141,13 +1142,25 @@ async function statusAfterWait(tx: Tx, task: Task, was: Task['status'] | undefin
 /* How an answer came: inline in words the window already delivered, from the person's assistant, or from the orchestrator
    of its own as the owner's, each recorded with it. */
 /* recorded: the agent that said which of its questions a person's message answered, and that message. */
-type AnswerRecord = { agentId: string; jobId: string | null; seq: number };
+type AnswerRecord = { agentId: string; jobId: string | null; seq: number; number?: number; replyTo?: number; recordedBy?: string };
 type AnswerWay = { inlineText?: true; assistant?: string; orchestrator?: string; recorded?: AnswerRecord };
 
-/* What the request keeps of an answer an agent recorded from a person's message: the agent, and the message's turn and place. */
-const recordedAudit = (r?: AnswerRecord) => (r ? { answeredByAgentId: r.agentId, answerJobId: r.jobId, answerSourceSeq: r.seq } : {});
-/* What the task's log keeps of it: the message in the agent's window, and who recorded it. */
-const recordedNote = (r?: AnswerRecord) => (r ? { message: { agentId: r.agentId, seq: r.seq }, recordedBy: r.agentId } : {});
+/* What the request keeps of an answer linked to a person's message: the recording agent when an agent recorded it, and the message's turn and place. */
+const recordedAudit = (r?: AnswerRecord) =>
+  r ? { ...(r.recordedBy ? { answeredByAgentId: r.recordedBy } : {}), answerJobId: r.jobId, answerSourceSeq: r.seq } : {};
+/* What the task's log keeps of it: the message in the agent's window, and who recorded it when an agent did. */
+const recordedNote = (r?: AnswerRecord) =>
+  r
+    ? {
+        message: {
+          agentId: r.agentId,
+          seq: r.seq,
+          ...(r.number !== undefined ? { number: r.number } : {}),
+          ...(r.replyTo !== undefined ? { replyTo: r.replyTo } : {}),
+        },
+        ...(r.recordedBy ? { recordedBy: r.recordedBy } : {}),
+      }
+    : {};
 
 export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, { inlineText, assistant, orchestrator, recorded }: AnswerWay = {}): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
@@ -1240,18 +1253,45 @@ async function personTaking(db: Live['db'], personId: string) {
    person may take, or the one the words point at, by the task given with them, a #number, a link or a quoted line of the
    question. Otherwise none closes: the words reach the agent as its message, and the agent says which they answer with
    record_answer. A commit to approve and a choice wait for their own answer. The task's own turn still follows. */
-export async function answerDirectly(ctx: Live, personId: string, agentId: string, text: string, { assistant, task }: { assistant?: string; task?: number | string } = {}): Promise<Wake[]> {
+export async function answerDirectly(
+  ctx: Live,
+  personId: string,
+  agentId: string,
+  text: string,
+  {
+    assistant,
+    task,
+    replyTo,
+    source,
+  }: {
+    assistant?: string;
+    task?: number | string;
+    replyTo?: ReplyPointer & { number?: number };
+    source?: { jobId: string | null; seq: number };
+  } = {},
+): Promise<Wake[]> {
   const said = text.trim();
   if (!said) return [];
   const taking = await personTaking(ctx.db, personId);
   if (!taking) return [];
   /* Only what this person may take: someone else's question stays open. */
   const theirs = (await openForPeople(ctx.db, agentId)).filter(r => takes({ ...taking.person, assistant }, taking.access, r));
+  const target = clearlyAnswered(theirs, said, task, replyTo);
+  if (!target.length) return [];
+  let sourceNum: number | undefined;
+  if (source) {
+    await ensureChatNumbers(ctx.db, agentId);
+    const [row] = await ctx.db.select({ data: agentEvents.data }).from(agentEvents).where(eq(agentEvents.seq, source.seq)).limit(1);
+    sourceNum = row ? readChatNumber(row.data) : undefined;
+  }
+  const recorded: AnswerRecord | undefined = source
+    ? { agentId, jobId: source.jobId, seq: source.seq, ...(sourceNum !== undefined ? { number: sourceNum } : {}), ...(replyTo?.number !== undefined ? { replyTo: replyTo.number } : {}) }
+    : undefined;
   const wakes: Wake[] = [];
-  for (const r of clearlyAnswered(theirs, said, task)) {
+  for (const r of target) {
     try {
       /* The window already delivered these words; its complete mirror must not introduce a later file-quota failure. */
-      wakes.push(...(await answer(ctx, { personId }, r.id, { answer: said }, undefined, { inlineText: true, assistant })).wakes);
+      wakes.push(...(await answer(ctx, { personId }, r.id, { answer: said }, undefined, { inlineText: true, assistant, ...(recorded ? { recorded } : {}) })).wakes);
     } catch (err) {
       /* Someone answered it in the task meanwhile, or the person's right went meanwhile. */
       if (!(err instanceof ApiError && PASSED_OVER.has(err.reason))) throw err;
@@ -1297,16 +1337,54 @@ async function citedMessage(db: Live['db'], agentId: string, r: OpenForPeople, q
   return [...messages.values()][0]!;
 }
 
+async function numberedMessage(db: Live['db'], agentId: string, r: OpenForPeople, messageNumber: number, quote?: string): Promise<Words> {
+  await ensureChatNumbers(db, agentId);
+  const candidates = await wordsOfPeople(db, agentId, r.createdAt);
+  const found = candidates.find(m => readChatNumber(m.data) === messageNumber);
+  if (!found || (quote && !holds(textOf(found.data), quote))) {
+    throw refuse(400, 'task_invalid', `No person message #${messageNumber} was written to you since you asked this.`);
+  }
+  if (!(await writerTakes(db, r, found))) {
+    throw refuse(403, 'decision_not_allowed', 'The person who wrote these words may not answer this. Ask the person who takes it.');
+  }
+  return found;
+}
+
 /* The agent says which of its open questions, or which piece of work it is stuck on for people, a person's message answered,
-   quoting it: Hornhoof finds that message, written to the agent since it asked by a person who may take it, and records the
-   whole message as that person's answer on that card alone, with the agent that recorded it and a link to the message. The
-   agent picks the message, never the words: nothing it quotes or leaves out turns into an answer the person did not give. */
-export async function recordAnswer(ctx: Live, agentId: string, requestId: string, quote: string): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
+   naming its message number or quoting it: Hornhoof finds that message, written to the agent since it asked by a person who may
+   take it, and records the whole message as that person's answer on that card alone, with the agent that recorded it and a link
+   to the message. The agent picks the message, never the words: nothing it quotes or leaves out turns into an answer the person
+   did not give. */
+export async function recordAnswer(
+  ctx: Live,
+  agentId: string,
+  requestId: string,
+  quote?: string,
+  messageNumber?: number,
+): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const r = (await openForPeople(ctx.db, agentId)).find(q => q.id === requestId);
   if (!r) throw refuse(404, 'request_unknown', 'You have no such question open to people. A choice and an approval keep their own card.');
-  const m = await citedMessage(ctx.db, agentId, r, quote.trim());
+  const trimmed = quote?.trim();
+  if (!trimmed && messageNumber === undefined) {
+    throw refuse(400, 'task_invalid', 'Give the message number or quote part of the message.');
+  }
+  await ensureChatNumbers(ctx.db, agentId);
+  const m = messageNumber !== undefined ? await numberedMessage(ctx.db, agentId, r, messageNumber, trimmed) : await citedMessage(ctx.db, agentId, r, trimmed!);
   const assistant = assistantOf(m.data);
-  return answer(ctx, { personId: m.personId! }, r.id, { answer: textOf(m.data).trim() }, undefined, { inlineText: true, ...(assistant ? { assistant } : {}), recorded: { agentId, jobId: m.jobId, seq: m.seq } });
+  const number = readChatNumber(m.data);
+  const replyTo = readReplyQuote(m.data)?.number;
+  return answer(ctx, { personId: m.personId! }, r.id, { answer: textOf(m.data).trim() }, undefined, {
+    inlineText: true,
+    ...(assistant ? { assistant } : {}),
+    recorded: {
+      agentId,
+      jobId: m.jobId,
+      seq: m.seq,
+      recordedBy: agentId,
+      ...(number !== undefined ? { number } : {}),
+      ...(replyTo !== undefined ? { replyTo } : {}),
+    },
+  });
 }
 
 export { CLOSED, SILENT_TURNS, GOING_ON_TURNS, refuse, loadTask, listed, openAfter, taskSpot, giver, waitsForPerson, liveAgent, mayAsk, requestSubject } from './state.js';

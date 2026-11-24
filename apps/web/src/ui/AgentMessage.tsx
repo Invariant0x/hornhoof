@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useState, type RefObject } from 'react';
+import { useCallback, useLayoutEffect, useState, type ReactNode, type RefObject } from 'react';
 import { useLanguage, useT, type Language, type Messages } from '../i18n';
 import type { EventView, MessageParty } from '../types';
 import { isHidden } from './visibility';
@@ -49,15 +49,34 @@ export function messageLine(t: Messages, language: Language, m: AgentMessageView
 }
 
 /* One message as a single line that names who wrote to whom; its whole text, service lines too, opens under it. */
-export function AgentMessage({ message, text, open, onToggle }: { message: AgentMessageView; text: string; open: boolean; onToggle(): void }) {
+export function AgentMessage({
+  message,
+  text,
+  open,
+  onToggle,
+  number,
+  highlighted,
+  actions,
+}: {
+  message: AgentMessageView;
+  text: string;
+  open: boolean;
+  onToggle(): void;
+  number?: number;
+  highlighted?: boolean;
+  actions?: ReactNode;
+}) {
   const t = useT();
   const { language } = useLanguage();
   return (
-    <div className={`t-m ${message.direction}`}>
-      <button className="t-mh" type="button" aria-expanded={open} onClick={onToggle}>
-        <i aria-hidden="true">{open ? '▾' : '▸'}</i>
-        <span>{messageLine(t, language, message)}</span>
-      </button>
+    <div className={`t-m ${message.direction}${highlighted ? ' highlighted' : ''}`} data-msg-number={number}>
+      <div className="t-m-top">
+        <button className="t-mh" type="button" aria-expanded={open} onClick={onToggle}>
+          <i aria-hidden="true">{open ? '▾' : '▸'}</i>
+          <span>{messageLine(t, language, message)}</span>
+        </button>
+        {actions}
+      </div>
       {open ? <div className="t-mb">{text}</div> : <span className="t-mf">{t.window.folded(text.split('\n').length)}</span>}
     </div>
   );
@@ -113,7 +132,27 @@ const textOf = (data: unknown) => {
   return typeof text === 'string' ? text : '';
 };
 
-export function EventMessage({ event, folding }: { event: MessageEvent; folding: Folding }) {
+export function EventMessage({
+  event,
+  folding,
+  highlighted,
+  actions,
+}: {
+  event: MessageEvent;
+  folding: Folding;
+  highlighted?: boolean;
+  actions?: ReactNode;
+}) {
   const key = messageKey(event);
-  return <AgentMessage message={event.message} text={textOf(event.data)} open={folding.opened.has(key)} onToggle={() => folding.toggle(key)} />;
+  return (
+    <AgentMessage
+      message={event.message}
+      text={textOf(event.data)}
+      open={folding.opened.has(key) || Boolean(highlighted)}
+      onToggle={() => folding.toggle(key)}
+      number={event.number}
+      highlighted={highlighted}
+      actions={actions}
+    />
+  );
 }

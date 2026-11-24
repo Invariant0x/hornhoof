@@ -5,8 +5,9 @@ import { routeSnapshots } from './route-records.js';
 import type { TaskWaitView } from '@hornhoof/protocol/waits';
 import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, departments, people, requests, taskEvents, tasks, turns, type AgentKind, type RequestOption } from '../../db/schema.js';
+import { agentEvents, agents, departments, people, requests, taskEvents, tasks, turns, type AgentKind, type RequestOption } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
+import { ensureChatNumbers, readChatNumber, readReplyQuote } from '../events/numbers.js';
 import { commitUrl, filesOf, picturesOf } from './file-views.js';
 import { deptName } from '../departments/templates.js';
 import { commitProof, type CommitProof } from '../testruns/commit-proof.js';
@@ -84,6 +85,8 @@ export type RequestView = {
   answer: string | null;
   byOrchestrator: boolean;
   agent: AgentRef | null;
+  messageNumber?: number;
+  answerMessage?: { number: number; replyTo?: number };
   at: string;
 };
 /* A task another one comes after, and where it stands. */
@@ -273,6 +276,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
   const pictures = await picturesOf(db, asks);
   const commits = await Promise.all(asks.map(r => commitUrl(db, task, r.commit)));
   const proofs = await proofsOf(db, task, asks);
+  const msgLinks = await requestMessageLinks(db, asks);
   const files = await filesOf(db, task.id);
   const [creator] = task.createdByPersonId ? await db.select({ id: people.id, name: people.name }).from(people).where(eq(people.id, task.createdByPersonId)) : [];
   const n = await names(ctx, [task, ...subs], sees, [...events.map(e => e.agentId), ...asks.flatMap(r => [r.agentId, r.answeredByAgentId]), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
@@ -288,30 +292,63 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
     createdBy: creator ? { kind: 'person', ...creator } : task.createdByAgentId ? { kind: 'agent', id: task.createdByAgentId, name: n.agent(task.createdByAgentId)?.name ?? '' } : null,
     subtasks: subs.map(t => line(t, n, sees)),
     log: await logOf(db, events, id => n.agent(id)?.name),
-    requests: asks.map((r, i) => ({
-      id: r.id,
-      kind: r.kind,
-      text: r.text,
-      commit: r.commit,
-      commitUrl: commits[i]!,
-      proof: proofs[i]!,
-      images: pictures.get(r.id) ?? [],
-      options: r.options,
-      link: r.link,
-      picked: r.picked,
-      status: r.status,
-      answer: r.answer,
-      byOrchestrator: n.isOrchestrator(r.answeredByAgentId),
-      agent: n.agent(r.agentId),
-      at: r.createdAt.toISOString(),
-    })),
+    requests: asks.map((r, i) => {
+      const messageNumber = msgLinks.askedByReq.get(r.id);
+      const answerMessage = r.answerSourceSeq !== null ? msgLinks.answeredBySeq.get(r.answerSourceSeq) : undefined;
+      return {
+        id: r.id,
+        kind: r.kind,
+        text: r.text,
+        commit: r.commit,
+        commitUrl: commits[i]!,
+        proof: proofs[i]!,
+        images: pictures.get(r.id) ?? [],
+        options: r.options,
+        link: r.link,
+        picked: r.picked,
+        status: r.status,
+        answer: r.answer,
+        byOrchestrator: n.isOrchestrator(r.answeredByAgentId),
+        agent: n.agent(r.agentId),
+        ...(messageNumber !== undefined ? { messageNumber } : {}),
+        ...(answerMessage ? { answerMessage } : {}),
+        at: r.createdAt.toISOString(),
+      };
+    }),
     files: await fileViews(db, n, files),
     testEvidence: await taskEvidence(ctx, task),
     assigneeOffline: await holderOffline(ctx, task.assigneeAgentId),
   };
 }
 
-/* Without the hub, as in a reader that knows no machine, nothing is said of one. */
+async function requestMessageLinks(
+  db: Ctx['db'],
+  asks: (typeof requests.$inferSelect)[],
+): Promise<{ askedByReq: Map<string, number>; answeredBySeq: Map<number, { number: number; replyTo?: number }> }> {
+  const askedByReq = new Map<string, number>();
+  const answeredBySeq = new Map<number, { number: number; replyTo?: number }>();
+  if (!asks.length) return { askedByReq, answeredBySeq };
+  for (const agentId of new Set(asks.map(a => a.agentId))) await ensureChatNumbers(db, agentId);
+  const reqIds = asks.map(a => a.id);
+  const askedRows = await db
+    .select({ reqId: sql<string>`${agentEvents.data}->>'requestId'`, data: agentEvents.data })
+    .from(agentEvents)
+    .where(inArray(sql`${agentEvents.data}->>'requestId'`, reqIds));
+  for (const row of askedRows) {
+    const n = readChatNumber(row.data);
+    if (row.reqId && n !== undefined) askedByReq.set(row.reqId, n);
+  }
+  const answerSeqs = asks.flatMap(a => (a.answerSourceSeq !== null ? [a.answerSourceSeq] : []));
+  if (answerSeqs.length) {
+    const ansRows = await db.select({ seq: agentEvents.seq, data: agentEvents.data }).from(agentEvents).where(inArray(agentEvents.seq, answerSeqs));
+    for (const row of ansRows) {
+      const n = readChatNumber(row.data);
+      const replyTo = readReplyQuote(row.data)?.number;
+      if (n !== undefined) answeredBySeq.set(row.seq, { number: n, ...(replyTo !== undefined ? { replyTo } : {}) });
+    }
+  }
+  return { askedByReq, answeredBySeq };
+}
 async function holderOffline(ctx: Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'hub'>>, agentId: string | null): Promise<OfflineMachine | null> {
   if (!ctx.hub || !agentId) return null;
   const [holder] = await ctx.db.select(only(agents, 'subscriptionId')).from(agents).where(eq(agents.id, agentId));

@@ -4,13 +4,37 @@ import { and, asc, countDistinct, desc, eq, gt, inArray, isNotNull, isNull, lt, 
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentSpot } from '../../auth/access.js';
-import { agentEvents, agents, jobs, people, type AgentEventKind } from '../../db/schema.js';
+import { agentEvents, agents, jobs, people, tasks, type AgentEventKind } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
+import {
+  assignEventDataNumber,
+  ensureChatNumbers,
+  isNumberedChatEvent,
+  lockAgentChatNumbers,
+  readChatNumber,
+  readReplyQuote,
+  stripChatInternal,
+  taskRefOfEvent,
+  type EventTaskRef,
+  type ReplyQuote,
+} from './numbers.js';
 import { HORNHOOF, agentParty, incomingEnvelope, messageData, readMessage, type MessageEnvelope, type MessageParty } from './parties.js';
 import { notStep } from '../tools/steps.js';
 import { privateTurn } from '../tools/private-turns.js';
 
-export type EventView = { seq: number; kind: AgentEventKind; data: unknown; message?: MessageEnvelope; jobId: string | null; person: { id: string; name: string } | null; at: string };
+export type { EventTaskRef, ReplyQuote };
+export type EventView = {
+  seq: number;
+  number?: number;
+  kind: AgentEventKind;
+  data: unknown;
+  message?: MessageEnvelope;
+  task?: EventTaskRef;
+  replyTo?: ReplyQuote;
+  jobId: string | null;
+  person: { id: string; name: string } | null;
+  at: string;
+};
 
 type NewEvent = { companyId: string; agentId: string; jobId?: string | null; kind: AgentEventKind; data: unknown; message?: MessageEnvelope; personId?: string | null };
 
@@ -26,10 +50,22 @@ const columns = {
   jobId: agentEvents.jobId,
   personId: agentEvents.personId,
   personName: people.name,
+  jobTaskId: tasks.id,
+  jobTaskNumber: tasks.number,
   createdAt: agentEvents.createdAt,
 };
 
-type Row = { seq: number; kind: AgentEventKind; data: unknown; jobId: string | null; personId: string | null; personName: string | null; createdAt: Date };
+type Row = {
+  seq: number;
+  kind: AgentEventKind;
+  data: unknown;
+  jobId: string | null;
+  personId: string | null;
+  personName: string | null;
+  jobTaskId: string | null;
+  jobTaskNumber: number | null;
+  createdAt: Date;
+};
 
 /* Conversation events keep their older join-code guard as well as the shared prose mask. The join code goes first: a
    password label in front of it would otherwise take the flag alone and leave the code open. */
@@ -38,14 +74,25 @@ function hideEventSecrets(data: unknown): unknown {
   return hideCredentialsIn(text?.includes('--join ') ? JSON.parse(hideJoinCodes(text)) : data);
 }
 
-const view = (r: Row): EventView => ({
-  seq: r.seq,
-  kind: r.kind,
-  ...(r.kind === 'message' ? readMessage(r.data) : { data: r.data }),
-  jobId: r.jobId,
-  person: r.personId ? { id: r.personId, name: r.personName ?? '' } : null,
-  at: r.createdAt.toISOString(),
-});
+function view(r: Row): EventView {
+  const number = readChatNumber(r.data);
+  const replyTo = readReplyQuote(r.data);
+  const unpacked = r.kind === 'message' ? readMessage(r.data) : { data: r.data };
+  const jobTask = r.jobTaskId && r.jobTaskNumber !== null ? { id: r.jobTaskId, number: r.jobTaskNumber } : null;
+  const task = number !== undefined ? taskRefOfEvent(r.data, unpacked.message, jobTask) : undefined;
+  return {
+    seq: r.seq,
+    ...(number !== undefined ? { number } : {}),
+    kind: r.kind,
+    data: stripChatInternal(unpacked.data),
+    ...(unpacked.message ? { message: unpacked.message } : {}),
+    ...(task ? { task } : {}),
+    ...(replyTo ? { replyTo } : {}),
+    jobId: r.jobId,
+    person: r.personId ? { id: r.personId, name: r.personName ?? '' } : null,
+    at: r.createdAt.toISOString(),
+  };
+}
 
 /* Stores the event, with what goes along with it, then tells everyone watching. */
 export async function appendEvent(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, e: NewEvent, also?: WithEvent): Promise<EventView> {
@@ -69,7 +116,8 @@ export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: strin
     const state = privateTurn(ctx.db, jobId);
     event = new ToolPrivacy().event(event);
     if (state) event = state.values.hide(event);
-    const [row] = await tx.insert(agentEvents).values({ companyId: job.companyId, agentId: job.agentId, jobId, kind: event.kind, data: cleanTurnEvent(event), personId: null }).returning({ id: agentEvents.id });
+    const numbered = await assignEventDataNumber(tx, job.agentId, event.kind, cleanTurnEvent(event));
+    const [row] = await tx.insert(agentEvents).values({ companyId: job.companyId, agentId: job.agentId, jobId, kind: event.kind, data: numbered, personId: null }).returning({ id: agentEvents.id });
     return { id: row!.id, companyId: job.companyId, agentId: job.agentId };
   });
   if (stored) await publishEvent(ctx, stored.companyId, stored.agentId, stored.id);
@@ -107,18 +155,35 @@ async function outgoingLetter(db: Db, e: NewEvent, message?: MessageEnvelope): P
 
 async function storeEvents(db: Db, values: EventValues, outgoing: EventValues | null, also?: WithEvent) {
   const returning = { id: agentEvents.id, seq: agentEvents.seq, createdAt: agentEvents.createdAt };
-  return also || outgoing
-    ? db.transaction(async tx => {
-        const stored = await tx.insert(agentEvents).values(values).returning(returning);
-        if (also) await also(tx, stored[0]!);
-        if (outgoing) stored.push(...await tx.insert(agentEvents).values(outgoing).returning(returning));
-        return stored;
-      })
-    : db.insert(agentEvents).values(values).returning(returning);
+  const numbered = isNumberedChatEvent(values.kind, values.data);
+  if (!also && !outgoing && !numbered) return db.insert(agentEvents).values(values).returning(returning);
+  return db.transaction(async tx => {
+    const lockedIds = [...new Set([values.agentId, ...(outgoing ? [outgoing.agentId] : [])])].sort();
+    if (numbered || outgoing) {
+      for (const id of lockedIds) await lockAgentChatNumbers(tx, id);
+    }
+    const primaryData = await assignEventDataNumber(tx, values.agentId, values.kind, values.data);
+    const stored = await tx.insert(agentEvents).values({ ...values, data: primaryData }).returning(returning);
+    if (also) await also(tx, stored[0]!);
+    if (outgoing) {
+      const outData = await assignEventDataNumber(tx, outgoing.agentId, outgoing.kind, outgoing.data);
+      stored.push(...(await tx.insert(agentEvents).values({ ...outgoing, data: outData }).returning(returning)));
+    }
+    return stored;
+  });
+}
+
+function selectEventRows(db: Db) {
+  return db
+    .select(columns)
+    .from(agentEvents)
+    .leftJoin(people, eq(people.id, agentEvents.personId))
+    .leftJoin(jobs, eq(jobs.id, agentEvents.jobId))
+    .leftJoin(tasks, eq(tasks.id, jobs.taskId));
 }
 
 export async function publishEvent(ctx: Pick<Ctx, 'db' | 'bus'>, companyId: string, agentId: string, id: string): Promise<EventView> {
-  const [stored] = await ctx.db.select(columns).from(agentEvents).leftJoin(people, eq(people.id, agentEvents.personId)).where(eq(agentEvents.id, id));
+  const [stored] = await selectEventRows(ctx.db).where(eq(agentEvents.id, id));
   const event = view(stored!);
   const [agent] = await ctx.db.select({ departmentId: agents.departmentId, productId: agents.productId, teamId: agents.teamId }).from(agents).where(eq(agents.id, agentId));
   ctx.bus.publish(companyId, { type: 'agent_event', agentId, event, spot: agent ? await agentSpot(ctx.db, agent) : { departmentId: null } });
@@ -126,16 +191,40 @@ export async function publishEvent(ctx: Pick<Ctx, 'db' | 'bus'>, companyId: stri
 }
 
 /* Questions to people have no receiving agent lane to create their outgoing entry. */
-export async function appendOutgoing(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, e: { companyId: string; agentId: string; jobId: string; text: string; to: MessageParty }): Promise<void> {
-  await appendEvent(ctx, { ...e, kind: 'message', data: { text: e.text }, message: { direction: 'out', from: await agentParty(ctx, e.companyId, e.agentId), to: e.to } });
+export async function appendOutgoing(
+  ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>,
+  e: {
+    companyId: string;
+    agentId: string;
+    jobId: string;
+    text: string;
+    to: MessageParty;
+    task?: EventTaskRef;
+    requestId?: string;
+    replyTo?: ReplyQuote;
+    _telegramBridge?: { bot: string; chat: number; replyToMessageId: number };
+  },
+): Promise<EventView> {
+  const extra = {
+    ...(e.task ? { task: e.task } : {}),
+    ...(e.requestId ? { requestId: e.requestId } : {}),
+    ...(e.replyTo ? { replyTo: e.replyTo } : {}),
+    ...(e._telegramBridge ? { _telegramBridge: e._telegramBridge } : {}),
+  };
+  return appendEvent(ctx, {
+    companyId: e.companyId,
+    agentId: e.agentId,
+    jobId: e.jobId,
+    kind: 'message',
+    data: { text: e.text, ...extra },
+    message: { direction: 'out', from: await agentParty(ctx, e.companyId, e.agentId), to: e.to },
+  });
 }
 
 /* An agent's events after seq, oldest first. A program's evidence is the operator's record, said to nobody. */
 export async function listEvents(db: Db, agentId: string, after: number, limit = 500): Promise<EventView[]> {
-  const rows = await db
-    .select(columns)
-    .from(agentEvents)
-    .leftJoin(people, eq(people.id, agentEvents.personId))
+  await ensureChatNumbers(db, agentId);
+  const rows = await selectEventRows(db)
     .where(and(eq(agentEvents.agentId, agentId), gt(agentEvents.seq, after), sql`${agentEvents.data}->>'operatorEvidenceId' is null`))
     .orderBy(asc(agentEvents.seq))
     .limit(limit);
@@ -145,10 +234,8 @@ export async function listEvents(db: Db, agentId: string, after: number, limit =
 /* An agent's newest events, or the newest before seq, oldest first: a window keeps only its last ones and reads further back
    when asked. */
 export async function lastEvents(db: Db, agentId: string, last: number, before?: number): Promise<EventView[]> {
-  const rows = await db
-    .select(columns)
-    .from(agentEvents)
-    .leftJoin(people, eq(people.id, agentEvents.personId))
+  await ensureChatNumbers(db, agentId);
+  const rows = await selectEventRows(db)
     .where(and(eq(agentEvents.agentId, agentId), before === undefined ? undefined : lt(agentEvents.seq, before), sql`${agentEvents.data}->>'operatorEvidenceId' is null`))
     .orderBy(desc(agentEvents.seq))
     .limit(last);
@@ -178,12 +265,10 @@ export async function workingCount(db: Db, companyId: string, among?: string[], 
 
 /* The last people's messages and his answers from turns that are over, oldest first, for a new session to catch up. */
 export async function earlierTalk(db: Db, agentId: string, limit = 20): Promise<EventView[]> {
+  await ensureChatNumbers(db, agentId);
   /* Unsent task wakes stay in the log: a new session must not receive them as catch-up instructions. */
   const unspoken = db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agentId), or(inArray(jobs.status, ['queued', 'running']), inArray(jobs.error, ['stale', 'waiting']))));
-  const rows = await db
-    .select(columns)
-    .from(agentEvents)
-    .leftJoin(people, eq(people.id, agentEvents.personId))
+  const rows = await selectEventRows(db)
     .where(and(eq(agentEvents.agentId, agentId), inArray(agentEvents.kind, ['message', 'text']), sql`coalesce(${agentEvents.data}->>'turnFact', 'false') <> 'true'`, or(isNull(agentEvents.jobId), notInArray(agentEvents.jobId, unspoken))))
     .orderBy(desc(agentEvents.seq))
     .limit(limit);

@@ -443,15 +443,27 @@ export type MessageParty = {
   agentKind?: 'orchestrator' | 'head' | 'worker' | 'assistant';
 };
 
+export type ReplyQuote = {
+  number: number;
+  seq: number;
+  sender: MessageParty;
+  excerpt: string;
+  task?: { id: string; number: number };
+  requestId?: string;
+};
+
 /* One line of an agent's conversation, as the server keeps it. message: who a message came from and went to, and whether
    it came to this agent or went out of it; older events have none. */
 export type EventView = {
   seq: number;
+  number?: number;
   kind: AgentEventKind;
   data: unknown;
   jobId: string | null;
   person: { id: string; name: string } | null;
   at: string;
+  task?: { id: string; number: number };
+  replyTo?: ReplyQuote;
   message?: { direction: 'in' | 'out'; from: MessageParty; to: MessageParty; notification?: Notification; senders?: MessageParty[]; revision?: number; originSeq?: number; channel?: 'telegram' | 'assistant'; assistant?: { id: string; name: string } };
 };
 
@@ -541,7 +553,19 @@ export type TaskLine = {
 
 /* by.for: the person the orchestrator acted for. */
 export type TaskLogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string; for?: { id: string; name: string }; byOrchestrator?: true } | null; at: string };
-export type TaskRequest = { id: string; kind: 'question' | 'choice' | 'approval' | 'stuck'; text: string; commit: string | null; status: string; answer: string | null; byOrchestrator?: boolean; agent: AgentRef | null; at: string };
+export type TaskRequest = {
+  id: string;
+  kind: 'question' | 'choice' | 'approval' | 'stuck';
+  text: string;
+  commit: string | null;
+  status: string;
+  answer: string | null;
+  byOrchestrator?: boolean;
+  agent: AgentRef | null;
+  messageNumber?: number;
+  answerMessage?: { number: number; replyTo?: number };
+  at: string;
+};
 /* big: over 50 MB, it lives 30 days on one machine and is lost if that machine goes. */
 export type TaskFile = { id: string; name: string; size: number; by: { id: string; name: string } | null; at: string; big?: true };
 

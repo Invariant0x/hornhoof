@@ -7,11 +7,12 @@ import { idOnly } from '../../db/selections.js';
 import { deptName } from '../departments/templates.js';
 
 const LangText = z.object({ en: z.string(), ru: z.string() });
-const Party = z.object({
+export const PartySchema = z.object({
   kind: z.enum(['person', 'agent', 'hornhoof']), id: z.string().nullable(), name: z.string(),
   role: LangText.nullable(), department: z.object({ id: z.string(), name: LangText }).nullable(),
   agentKind: z.enum(['orchestrator', 'head', 'worker', 'assistant']).optional(),
 });
+const Party = PartySchema;
 /* channel: the way a person's message came when not from the agent's window. assistant: the person's assistant that wrote it
    for them. */
 export const MessageEnvelopeSchema = z.object({ direction: z.enum(['in', 'out']), from: Party, to: Party, notification: NotificationSchema.optional(), senders: z.array(Party).optional(), revision: z.number().int().nonnegative().optional(), originSeq: z.number().int().positive().optional(), channel: z.enum(['telegram', 'assistant']).optional(), assistant: z.object({ id: z.string(), name: z.string() }).optional() });

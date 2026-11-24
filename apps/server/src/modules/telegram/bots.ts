@@ -14,6 +14,7 @@ import { attachmentBytesForPerson } from '../tasks/attachments.js';
 import { downloadFile, getUpdates, sendDocument, sendText, sendTyping, splitForTelegram, TelegramError, type TelegramUpdate } from './api.js';
 import { transcribe } from './transcribe.js';
 import { receive } from './inbox.js';
+import { pendingWindowBridges, recordTelegramSent, replyTargetForAnswer } from './replies.js';
 import { agentName, WORDS } from './words.js';
 
 type BotRow = typeof telegramBots.$inferSelect;
@@ -111,8 +112,20 @@ class Listener {
     return this.abort.signal.aborted;
   }
 
+  private sayWithIds = async (chatId: number, text: string, replyToMessageId?: number): Promise<number[]> => {
+    const ids: number[] = [];
+    let first = true;
+    for (const piece of splitForTelegram(text)) {
+      if (!piece.trim()) continue;
+      const sent = await sendText(this.ctx.config.telegramApiUrl, this.token, chatId, piece, this.abort.signal, first ? replyToMessageId : undefined);
+      first = false;
+      if (typeof sent?.message_id === 'number') ids.push(sent.message_id);
+    }
+    return ids;
+  };
+
   private say = async (chatId: number, text: string): Promise<void> => {
-    for (const piece of splitForTelegram(text)) if (piece.trim()) await sendText(this.ctx.config.telegramApiUrl, this.token, chatId, piece, this.abort.signal);
+    await this.sayWithIds(chatId, text);
   };
 
   private fetchFile = (fileId: string): Promise<Buffer> => downloadFile(this.ctx.config.telegramApiUrl, this.token, fileId, this.abort.signal);
@@ -174,12 +187,31 @@ class Listener {
       this.settleNext = false;
       if (this.stopped) return;
       try {
+        await this.bridgeWindowEvents();
         const rows = await this.ctx.db.select().from(telegramReplies).where(eq(telegramReplies.botId, this.bot.id)).orderBy(asc(telegramReplies.createdAt));
         for (const row of rows) if (!this.stopped) await this.answerOne(row, settling);
       } catch (err) {
         if (!this.stopped) this.warn(err, 'Could not send an answer to Telegram.');
       }
     });
+  }
+
+  private async bridgeWindowEvents(): Promise<void> {
+    const pending = await pendingWindowBridges(this.ctx.db, this.bot.agentId, this.bot.id);
+    for (const item of pending) {
+      if (this.stopped) return;
+      const person = await authorizedRecipient(this.ctx.db, this.bot, item.chatId);
+      if (!person) continue;
+      const body = textOf(item.data).trim();
+      if (!body) continue;
+      const rendered = item.personId ? `${item.personName || person.name}: ${body}` : body;
+      try {
+        const ids = await this.sayWithIds(item.chatId, rendered, item.replyToMessageId);
+        if (ids[0] !== undefined) await recordTelegramSent(this.ctx.db, item.seq, { bot: this.bot.id, chat: item.chatId, messageId: ids[0] });
+      } catch (err) {
+        if (!chatGone(err)) throw err;
+      }
+    }
   }
 
   private async sendEventFiles(person: Person, row: ReplyRow, data: unknown): Promise<void> {
@@ -213,7 +245,11 @@ class Listener {
     const last = said.findLast(words => textOf(words.data).trim());
     for (const words of said) {
       await this.sendEventFiles(person, row, words.data);
-      if (words === last) await this.say(row.chatId, textOf(words.data));
+      if (words === last) {
+        const replyToId = await replyTargetForAnswer(db, this.bot.agentId, this.bot.id, row.jobId, row.chatId, words.data);
+        const ids = await this.sayWithIds(row.chatId, textOf(words.data), replyToId);
+        for (const messageId of ids) await recordTelegramSent(db, words.seq, { bot: this.bot.id, chat: row.chatId, messageId });
+      }
       await db.update(telegramReplies).set({ afterSeq: words.seq }).where(eq(telegramReplies.id, row.id));
     }
   }

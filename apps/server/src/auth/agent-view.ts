@@ -4,7 +4,7 @@ import { agents, assistants, departments, people, subscriptions } from '../db/sc
 import { idOnly } from '../db/selections.js';
 import { ApiError } from '../errors.js';
 import type { MessageEnvelope, MessageParty } from '../modules/events/parties.js';
-import type { EventView } from '../modules/events/store.js';
+import type { EventView, ReplyQuote } from '../modules/events/store.js';
 import { accessOf, agentSpot, canReach, type Access, type Spot } from './access.js';
 import { actsAsCeo } from './decisions.js';
 import { type Person, viaOrchestrator } from './session.js';
@@ -127,6 +127,14 @@ export function maskEnvelope(viewer: AgentViewer, message: MessageEnvelope): Mes
   return { ...message, from: shown(message.from), to: shown(message.to), ...(message.senders ? { senders: message.senders.map(shown) } : {}) };
 }
 
+function maskReplyQuote(viewer: AgentViewer, replyTo: ReplyQuote): ReplyQuote {
+  if (viewer.full && !viewer.apart.size) return replyTo;
+  const sender = replyTo.sender.kind === 'agent' && !seesAgentId(viewer, replyTo.sender.id) ? hiddenParty(replyTo.sender) : replyTo.sender;
+  return sender === replyTo.sender ? replyTo : { ...replyTo, sender };
+}
+
 export function maskEvent(viewer: AgentViewer, event: EventView): EventView {
-  return event.message ? { ...event, message: maskEnvelope(viewer, event.message) } : event;
+  const message = event.message ? maskEnvelope(viewer, event.message) : undefined;
+  const replyTo = event.replyTo ? maskReplyQuote(viewer, event.replyTo) : undefined;
+  return { ...event, ...(message ? { message } : {}), ...(replyTo ? { replyTo } : {}) };
 }

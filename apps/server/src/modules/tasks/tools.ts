@@ -37,8 +37,10 @@ import { ONLY_CEO_ASKED, ONLY_DEPARTMENT_OWNER } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { refusePaused, setPaused } from './pause.js';
 import { resolveStuckComment } from './stuck.js';
+import { findReplyQuote } from '../events/numbers.js';
 import { appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
+import { preparePersonTelegramChatId, prepareWindowReplyBridge } from '../telegram/replies.js';
 import { decisionPerson } from './decision-people.js';
 import { TaskReference as Ref, trackWork } from './external-wait.js';
 import { pipelineReport } from './pipeline-report.js';
@@ -103,7 +105,7 @@ const Backlog = z
   .array(z.uuid())
   .describe("Items of departments' lists, by id from backlog, that become tasks in their own department and leave the list.");
 
-type Question = { kind: 'question' | 'approval' | 'choice'; text: string; topic?: DecisionTopic; recipient?: string };
+type Question = { kind: 'question' | 'approval' | 'choice'; text: string; requestId: string; topic?: DecisionTopic; recipient?: string; replyTo?: number };
 const HumanRecipient = z.uuid().describe('The person who can supply the missing answer, by id. For a missing sign-in, ask them to add it to the vault and give only the entry name.');
 
 /* What people read of a question, and what its asker hears besides: an approval says what test runs say of its commit as it
@@ -116,10 +118,23 @@ async function questionWords(db: Ctx['db'], task: Task, question: string, commit
   return { text: `${question}\n\nHornhoof checked as this was asked. ${said}`, told: ` ${said}${told}` };
 }
 
-/* Keep the outgoing question with the person responsible for its decision card. */
-async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, topic, recipient }: Question): Promise<void> {
+/* Keep the outgoing question with the person responsible for its decision card, tied to its task and request id. */
+async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, requestId, topic, recipient, replyTo }: Question): Promise<void> {
   const personId = recipient ?? await decisionPerson(ctx, job.companyId, { source: 'request', kind, topic: topic ?? null, spot: taskSpot(task) });
-  await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
+  const quote = replyTo !== undefined ? await findReplyQuote(ctx, job.companyId, job.agentId, replyTo) : null;
+  if (replyTo !== undefined && !quote) throw refuse(404, 'message_unknown', `There is no message #${replyTo} in your conversation.`);
+  const chatId = quote ? await preparePersonTelegramChatId(ctx.db, { id: personId }) : null;
+  const bridge = quote && chatId !== null ? await prepareWindowReplyBridge(ctx.db, job.agentId, chatId, quote.seq) : null;
+  await appendOutgoing(ctx, {
+    ...job,
+    jobId: job.id,
+    text,
+    to: await personParty(ctx, job.companyId, personId),
+    task: { id: task.id, number: task.number },
+    requestId,
+    ...(quote ? { replyTo: quote } : {}),
+    ...(bridge ? { _telegramBridge: { bot: bridge.botId, chat: bridge.chatId, replyToMessageId: bridge.replyToMessageId } } : {}),
+  });
 }
 
 /* What the card keeps apart from its words: what the release of its commit brings that no check covers, where it brings any. */
@@ -431,14 +446,14 @@ class TaskTools {
       'wait_for',
       {
         description: 'Asks a named person for the missing judgment or information on a task you hold. The task waits for their answer, then you are woken. Use track_work for an operation in progress. Diagnose and repair failed work. For a missing sign-in, ask for a vault entry by name.',
-        inputSchema: { task: Ref, person: HumanRecipient, reason: z.string().trim().min(1), plan: AskPlan },
+        inputSchema: { task: Ref, person: HumanRecipient, reason: z.string().trim().min(1), replyTo: z.number().int().positive().optional(), plan: AskPlan },
       },
-      async ({ task: ref, person, reason, plan }) => this.run(async () => {
+      async ({ task: ref, person, reason, replyTo, plan }) => this.run(async () => {
         const { task } = await this.find(ref);
         this.plain(task, reason);
         const recipient = await this.questionRecipient(person);
         const moved = await ask(this.ctx, this.job.agentId, task.id, { kind: 'question', text: reason, recipientPersonId: recipient, ...(plan ? { plan } : {}) });
-        await recordQuestion(this.ctx, this.job, task, { kind: 'question', text: reason, recipient });
+        await recordQuestion(this.ctx, this.job, task, { kind: 'question', text: reason, requestId: moved.request.id, recipient, ...(replyTo !== undefined ? { replyTo } : {}) });
         return { text: `Asked. #${task.number} waits for the person's answer.`, moved };
       }),
     );
@@ -528,9 +543,10 @@ class TaskTools {
             .describe(
               'What the question is about. For people, access, subscriptions, machines, public_link or updates, name the person who can supply the answer. For department work, use task or employee. For its repository or release, use repositories or release.',
             ),
+          replyTo: z.number().int().positive().optional().describe('Message number in your chat this question replies to, when following up on a specific message.'),
         },
       },
-      async ({ task: ref, question, commit, images, options, link, topic, plan, person }) =>
+      async ({ task: ref, question, commit, images, options, link, topic, plan, person, replyTo }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, question);
@@ -546,7 +562,7 @@ class TaskTools {
           const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
           const { text, told } = await questionWords(this.db, task, question, commit, unchecked);
           const moved = await ask(this.ctx, this.job.agentId, task.id, { kind, text, ...(commit ? { commit, approval: { channel: 'commit', kind: 'commit', amount: null } } : {}), ...uncheckedCard(unchecked), images, options: ways, link: link ?? null, topic, ...(recipient ? { recipientPersonId: recipient } : {}), ...(plan ? { plan } : {}) });
-          await recordQuestion(this.ctx, this.job, task, { kind, text, topic: commit ? 'release' : topic, ...(recipient ? { recipient } : {}) });
+          await recordQuestion(this.ctx, this.job, task, { kind, text, requestId: moved.request.id, topic: commit ? 'release' : topic, ...(recipient ? { recipient } : {}), ...(replyTo !== undefined ? { replyTo } : {}) });
           return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
         }),
     );
@@ -558,13 +574,17 @@ class TaskTools {
       'record_answer',
       {
         description:
-          "Records which of your open questions to people, or which work you are stuck on for them, a person's message to you answers. Their words close one by themselves only when it is clear which: the only one they may answer, or the one they name by its task, a link or a quoted line. With more open, read their message, and record here each question it answers. " +
-          'request: the id of that question, as task shows it. words: a part of their message, exactly as they wrote it, enough to find that one message, from your window, Telegram, their assistant or your terminal. Hornhoof finds the message, written to you since you asked, and records the whole message as their answer on that card alone, with a link to it. It refuses words no person wrote to you, words more than one message holds, and a person who may not answer it. A choice and an approval keep their own card.',
-        inputSchema: { request: z.uuid(), words: z.string().trim().min(1).max(12_000) },
+          "Records which of your open questions to people, or which work you are stuck on for them, a person's message to you answers. Their words close one by themselves only when it is clear which: the exact question message they replied to, the only one they may answer, or the one they name by its task, a link or a quoted line. With more open, read their message, and record here each question it answers. " +
+          'request: the id of that question, as task shows it. message: the short number (#N) of their chat message, or words: a part of their message, exactly as they wrote it, enough to find that one message, from your window, Telegram, their assistant or your terminal. Hornhoof finds the message, written to you since you asked, and records the whole message as their answer on that card alone, with a link to it. It refuses words no person wrote to you, words more than one message holds, and a person who may not answer it. A choice and an approval keep their own card.',
+        inputSchema: {
+          request: z.uuid(),
+          message: z.number().int().positive().optional().describe('Short number (#N) of the person message in your conversation.'),
+          words: z.string().trim().min(1).max(12_000).optional(),
+        },
       },
-      async ({ request, words }) =>
+      async ({ request, message, words }) =>
         this.run(async () => {
-          const { task, wakes } = await recordAnswer(this.ctx, this.job.agentId, request, words);
+          const { task, wakes } = await recordAnswer(this.ctx, this.job.agentId, request, words, message);
           return { text: `Recorded as their answer on #${task.number}. Your other questions stay open.`, moved: { wakes: wakes.filter(w => w.agentId !== this.job.agentId) } };
         }),
     );
