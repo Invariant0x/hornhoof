@@ -5,7 +5,7 @@
      cut/stage_01.png .. stage_10.png      the construction line, scaffolding drawn in where there is any
      cut/demol_01.png, demol_02.png        half torn down, then rubble
      layers/stage_09_base.png, stage_10_base.png and the layers over them (shadow, shadow_notable, props, awning),
-       layers/layers.json with sway_pivot_master (the line the awning hangs from)
+       and awning_w.png, the awning's cloth mask, when the cloth sways (0 still, 255 the free edge)
      growth/gN_2_walls_cut.png, gN_3_done_cut.png   the building grown to N x N inside its lot (the old one in front)
      checks.json                           stages.NN.points_master.door.ground_centre: where walkers reach the door
    The first step gets the whole line, each further step its grown picture and the annex under work. Art never goes
@@ -106,10 +106,9 @@ export function importBuildingDelivery(opts: BuildingImportOptions): { written: 
     put(src, s0, `stage_${pad2(n)}`, plot(src, firstFp.diamondW, stageDoor(n)));
   }
   for (const name of ['demol_01', 'demol_02']) put(`cut/${name}.png`, s0, name, plot(`cut/${name}.png`, firstFp.diamondW, null));
-  const layersInfo = readJson(join(delivery, 'layers/layers.json'));
-  const pivot = layersInfo?.sway_pivot_master as readonly Pair[] | undefined;
-  const awning = pivot && pivot.length === 2 ? { file: 'awning.png', sway: { pivot: [pivot[0], pivot[1]] } } : { file: 'awning.png' };
-  for (const f of ['shadow', 'shadow_notable', 'props', 'awning']) put(`layers/${f}.png`, s0, f, null);
+  /* The awning sways by its cloth mask alone, copied beside it (#1983). */
+  const awning = { file: 'awning.png' };
+  for (const f of ['shadow', 'shadow_notable', 'props', 'awning', 'awning_w']) put(`layers/${f}.png`, s0, f, null);
   const present = (f: string): boolean => existsSync(join(delivery, `layers/${f}.png`));
   const doneLayers = [
     ...(present('shadow') ? [{ file: 'shadow.png', blend: 'multiply' }] : []),

@@ -212,13 +212,14 @@ A picture's passport may name layers. A layer is a PNG beside the picture, of ex
 "layers": [
   { "file": "shadow.png", "blend": "multiply" },
   { "file": "props.png" },
-  { "file": "awning.png", "sway": { "pivot": [[210, 542], [426, 650]] } }
+  { "file": "awning.png" }
 ]
 ```
 
 * `shadow.png` with `multiply`: the building's cast shadow, black or tinted with alpha for strength.
 * `props.png`: tables, jars, tools in the yard.
-* `awning.png` with `sway`: the cloth moves in the wind about the line through the two `pivot` points, where it is fixed. `amplitude` is optional: 0.03 by default, at most 0.2.
+* `awning.png`: the cloth of an awning, and nothing wooden. Posts, poles and frames never move, so they go into `complete.png` or `props.png`. A rigid reed mat is no awning either: it goes into the picture and needs no mask.
+* `awning_w.png` (v3), the cloth mask, the plants' format: 8-bit grey beside `awning.png`, the same size, 0 still (the line where the cloth is fastened), 255 moves the most (the free edge). The engine lifts and drops the cloth by the mask, a little; a pixel at 0 never moves. Without `awning_w.png` the awning stays still. `awning.json` may carry `"amplitude"`: how many px the free edge lifts at the strongest wind, 3 by default, at most 8. The `sway` field with a `pivot` line is gone (#1983).
 
 Keep to a layer only what moves or must stay separate.
 
@@ -448,13 +449,17 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 
 | Animation | Drawn | Mirrored |
 |---|---|---|
-| `walk`, `carry` (`carry_back` is the same sheet as `carry`) | N, NE, E, SE, S | SW, W, NW |
-| `idle`: standing by the home, facing the viewer | SE | SW |
+| `carry` (`carry_back` is the same sheet as `carry`), every set | NE, SE, SW, NW | none |
+| `walk` of a look with a large item (staff, banner, spear with shield, water jar, gong, hoe) | NE, SE, SW, NW | none |
+| `walk` of any other look, small prop or empty hands | NE, SE | NW, SW |
+| `idle`: standing by the home, facing the viewer | SE; SE and SW for a look with a large item | SW; none with a large item |
 | `build`: facing the front wall of the building | NE | NW |
 | `sleep`: lying along one axis | SE | SW |
 | `pray`, `sad_sit`: facing the camera | S | none, shown as drawn in every direction |
 | `inspect`, `write`, `carve`, `guard` and the like, later | one | its mirror |
 
+* **Diagonals only (Ivan's word, 23.11):** roads and paths run along the grid axes, so on screen residents walk only along the diagonals NE, SE, SW and NW (#1983); a step straight up, down or sideways is rare and takes the nearest drawn diagonal. Sheets already made with N, E and S rows keep them: the engine shows any drawn row.
+* The god's caravan (Design's checklist G2: animals, drivers and sacks) counts as a large load: its walk is drawn in NE, SE, SW and NW too. The engine has no caravan slot yet; the check takes it with the same rule when its slot comes.
 * A builder always faces a front wall: the engine sets no build place at a back wall, where NE and NW would not fit.
 * Role animations are needed only for the looks that do that work: `inspect` for inspectors, `direct` for overseers, `write` for scribes, and so on.
 
@@ -469,10 +474,11 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 
 ### 4.4 Sheet layout and passport
 
-* **Rows, top to bottom:** the directions named in the passport's `directions`, in that order, chosen from N, NE, E, SE, S (v3). Without the field the sheet has 5 rows, N, NE, E, SE, S, as before. The engine mirrors SE, E and NE for SW, W and NW, and shows the nearest drawn direction or its mirror, so a person walks in 8 directions from 5 drawn rows. A carried item changes hands in the mirrored rows, and the light comes from the top right there: Design accepts this (23.11).
+* **Rows, top to bottom:** the directions named in the passport's `directions`, in that order, chosen from N, NE, E, SE, S, SW, W, NW (v3). Without the field the sheet has 5 rows, N, NE, E, SE, S, as before. For each facing the engine shows its drawn row when there is one; only a direction that is not drawn is mirrored (SE, E and NE for SW, W and NW), and otherwise the nearest drawn direction or its mirror shows, a drawn row winning at the same distance. A mirrored row moves a carried item to the other hand or shoulder, which Ivan does not accept (23.11, replacing the earlier acceptance), so `carry` and the `walk` of a look with a large item are drawn in NE, SE, SW and NW, `"directions": ["NE", "SE", "SW", "NW"]`, and that look's `idle` in SE and SW, `"directions": ["SE", "SW"]`, both shown as drawn. Everything else draws only what it needs and the engine mirrors the rest.
 * **Facing poses** `pray` and `sad_sit` (v3): one row, `"directions": ["S"]`, shown as drawn whatever way the resident faces, never mirrored.
 * **`headAnchor`** (v3, `sleep` only, optional): the point in the frame above the head where `sleep_z` stands, e.g. `[60, 200]` for a figure lying along the ground. Without it the engine uses the standing head, 146 px above the `anchor`.
 * **Frames** run left to right, every frame the same size. The feet sit on the same `anchor` in every frame, so walking does not slide.
+* **`stride`** (v3, `walk` and `carry`, optional): how many px the figure moves on in one cycle, as the E row draws it: twice the distance a planted foot travels back in half a cycle. The engine walks the resident exactly one stride per cycle (`frames` / `fps` seconds), so the feet do not slide, and the same ground in every direction. Without it the engine takes 92 px, measured on the pilot walk sheets (a planted foot travels 46 px in 4 of 8 frames). Example: `"stride": 92`.
 * **Suggested frame:** 192 x 256 px with the feet at `[96, 236]`. The person is 136 px tall and stands from y 100 to y 236; the room above holds a stone on the head, a banner or a raised spear.
 * Rig and bake as the contract says: parts at the 544 px source baked down to 136 px, the cloak as its own baked layer, no ground shadow.
 * **Camera: the one exception to the 30 degrees of section 1.** Residents are drawn with an orthographic camera tilted 19 degrees down (Ivan's word, 23.11.2026): at 30 degrees the shoulders came out 24% wider and a step looked like a hop. Buildings, ground and the construction kit stay at 30 degrees. The sheet format does not change: 5 rows N to S, frame 192 x 256, feet at `[96, 236]`, the person 136 px tall.
@@ -481,7 +487,7 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 Passport of an 8-frame walk with that frame (sheet 1536 x 1280):
 
 ```json
-{ "frameW": 192, "frameH": 256, "frames": 8, "fps": 10, "anchor": [96, 236] }
+{ "frameW": 192, "frameH": 256, "frames": 8, "fps": 10, "anchor": [96, 236], "stride": 92 }
 ```
 
 An idle drawn facing SE only (sheet 768 x 256), and a sleep lying along the ground with its Z point:
@@ -532,12 +538,13 @@ A rejected file keeps its placeholder; it never breaks the city.
 * A sheet passport without `frameW`, `frameH`, `frames`, `fps` and `anchor`.
 * A sheet whose width is not `frameW * frames`.
 * A person's sheet whose height is not `frameH` times the number of its `directions` (5 without the field).
-* A `directions` entry other than N, NE, E, SE or S, or one named twice.
+* A `directions` entry other than N, NE, E, SE, S, SW, W or NW, or one named twice.
+* A `carry` sheet without all 4 diagonals (NE, SE, SW, NW), or the `walk` of a look with a large item without them, or that look's `idle` without SE and SW.
 * An anchor outside one frame.
 * A cloak layer without its base sheet, or of another size.
 * An index for another pack or another contract version.
 
-It **warns**, without rejecting, about a file no slot names: the #1951 animations until they are wired, and a `night.png` (on hold, 3.13).
+It **warns**, without rejecting, about a file no slot names: the #1951 animations until they are wired, and a `night.png` (on hold, 3.13). It also warns, naming the set, about the tier 1 mason `carry` of `egypt-mason-t1-r1`, accepted in 5 rows before the rule above: it stays in play until its export in NE, SE, SW and NW replaces it.
 
 ### 5.3 What the check cannot see
 

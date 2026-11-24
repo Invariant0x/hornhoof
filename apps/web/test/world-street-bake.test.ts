@@ -190,9 +190,9 @@ describe('a street and the bridge', () => {
 describe('the street strips of a pack', () => {
   it('load by tier from the names the pack gives, and a strip that fails is left out', async () => {
     const px = strip(0.8);
-    const roads = await loadRoadStrips('/art/', { roads: { trail: 'roads/trail.png', dirt: 'roads/dirt.png' } }, async url => (url === '/art/roads/dirt.png' ? null : px));
+    const roads = await loadRoadStrips({ roads: { trail: 'roads/trail.png', dirt: 'roads/dirt.png' } }, async path => (path === 'roads/dirt.png' ? null : px));
     expect(roads).toEqual({ trail: px });
-    expect(await loadRoadStrips('/art/', undefined, async () => px)).toEqual({});
+    expect(await loadRoadStrips(undefined, async () => px)).toEqual({});
   });
 });
 

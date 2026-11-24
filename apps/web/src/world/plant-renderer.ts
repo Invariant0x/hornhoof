@@ -107,6 +107,7 @@ export class PlantRenderer {
   private depthLayer: RenderLayer | null = null;
   private atlas: PlantAtlas | null = null;
   private layout: PlantLayout | null = null;
+  private density = 1;
   private readonly list: PlantDrawList = createDrawList();
   private textures: Texture[] = [];
   private atlasTexture: Texture | null = null;
@@ -141,6 +142,7 @@ export class PlantRenderer {
     this.field = next;
     if (this.layout && this.atlas) {
       this.layout = new PlantLayout({ pack: this.pack, field: this.field, sprites: this.atlas.sprites, lighting: this.pack.lighting });
+      this.layout.density = this.density;
     }
   }
 
@@ -149,6 +151,12 @@ export class PlantRenderer {
     if (!map || !pack.plants || pack.plants.length === 0) return null;
     const field = generatePlants(pack, map);
     return field.plants.length > 0 ? new PlantRenderer(pack, field) : null;
+  }
+
+  /* Share of the wild plants drawn, for the world's quality step (#1947 item 6). */
+  setDensity(density: number): void {
+    this.density = Math.max(0, Math.min(1, density));
+    if (this.layout) this.layout.density = this.density;
   }
 
   get stats(): PlantStats {
@@ -169,6 +177,7 @@ export class PlantRenderer {
       const pxToWorld = this.pack.projection.defaultTileW / masterTileW(this.pack);
       this.atlas = buildPlantAtlas(this.pack, this.art, pxToWorld);
       this.layout = new PlantLayout({ pack: this.pack, field: this.field, sprites: this.atlas.sprites, lighting: this.pack.lighting });
+      this.layout.density = this.density;
     }
     return this.atlas;
   }
