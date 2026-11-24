@@ -136,7 +136,11 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     closeIdleTurns(ctx).catch(failed('closing turns that hold nothing for a release failed')),
     sendWaiting(ctx).catch(failed('sending waiting turns failed')),
     dropOldFiles(ctx, now).then(() => storeRound(ctx, now)).catch(failed('removing the files of old turns failed')),
-    moveOldFiles(ctx).catch(failed('moving files from the database into the store failed')),
+    moveOldFiles(ctx)
+      .then(round => {
+        if (round.moved > 0 || round.waiting > 0) ctx.log.info({ moved: round.moved, waiting: round.waiting, finished: round.finished }, 'Files moved from the database into the store.');
+      })
+      .catch(failed('moving files from the database into the store failed')),
     dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),
     checkTestTimes(ctx).catch(failed('checking test run times failed')),
     harnessRound(ctx, now).catch(failed('getting test harnesses to the machines failed')),
