@@ -1760,6 +1760,14 @@ export function densifyCity(
 }
 
 /* Relocation by God's Word: creates a pending request without moving the building until the task is accepted. */
+/* Whether a street could reach the door a building would have at (toCol, toRow): the lot search's rule (landReach), so
+   that a move never takes a building to land the streets cannot come to, as the far bank of a map with no bridge. */
+function movedDoorReached(city: CityState, map: GeneratedWorldMap, building: CityBuilding, toCol: number, toRow: number): boolean {
+  const nearestRoad = findNearestRoadTile(city, { col: toCol, row: toRow });
+  const door = pickDoorForFootprint(city, map, toCol, toRow, building.spanCol, building.spanRow, nearestRoad, city.buildingLayout[building.kind]);
+  return reachableDoor(landReach(city, map), door) !== null;
+}
+
 export function requestRelocation(
   city: CityState,
   buildingId: string,
@@ -1773,6 +1781,7 @@ export function requestRelocation(
   if (!canPlaceFootprint(city, map, toCol, toRow, building.spanCol, building.spanRow, building.id, true)) {
     return null;
   }
+  if (!movedDoorReached(city, map, building, toCol, toRow)) return null;
 
   const rel: CityRelocation = {
     id: `reloc-${city.relocations.length + 1}`,
