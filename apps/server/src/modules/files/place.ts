@@ -1,7 +1,7 @@
 import { sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { sameHome } from '../backups/holders.js';
-import { DEFAULT_AREA_BYTES, headroomOf } from './area.js';
+import { DEFAULT_AREA_BYTES, floorOf, headroomOf } from './area.js';
 import { storeBackupMachines } from './backup.js';
 
 /* Where the files of the store are kept. Each file is picked machines to keep it: as many as the copies setting asks, as
@@ -44,6 +44,7 @@ export type Seat = {
   area: number;
   assigned: number;
   room: number;
+  capacity: number;
   backup: boolean;
 };
 
@@ -69,7 +70,10 @@ export async function seats(db: Tx, leader: string | null, now = new Date()): Pr
     const silent = row.report_at ? now.getTime() - new Date(row.report_at).getTime() : Infinity;
     const area = Number(row.area);
     const assigned = Number(row.assigned);
-    const room = headroomOf({ area, used: Number(row.used), pending: Number(row.pending), free: row.free === null ? null : Number(row.free), total: row.total === null ? null : Number(row.total) });
+    const [used, free, total] = [Number(row.used), row.free === null ? null : Number(row.free), row.total === null ? null : Number(row.total)];
+    const room = headroomOf({ area, used, pending: Number(row.pending), free, total });
+    /* What it could hold in all: its area, and no more than what its files take and its disk keeps above the floor. */
+    const capacity = free === null ? area : Math.min(area, used + Math.max(0, free - floorOf(total)));
     return {
       id: row.id,
       leader: isLeader,
@@ -81,6 +85,7 @@ export async function seats(db: Tx, leader: string | null, now = new Date()): Pr
       area,
       assigned,
       room,
+      capacity,
       backup: false,
     };
   });
@@ -94,7 +99,7 @@ export async function seats(db: Tx, leader: string | null, now = new Date()): Pr
 export function apartFromBackup(all: Seat[], backups: string[], copies: number): Seat[] {
   const marked = all.map(seat => (backups.includes(seat.id) ? { ...seat, backup: true } : seat));
   const others = marked.filter(seat => seat.fit && !seat.backup && !seat.lost).length;
-  return others >= copies ? marked.map(seat => (seat.backup ? { ...seat, fit: false, room: 0 } : seat)) : marked;
+  return others >= copies ? marked.map(seat => (seat.backup ? { ...seat, fit: false, room: 0, capacity: 0 } : seat)) : marked;
 }
 
 /* The machines whose copies count: they keep files and were heard from within a day. */

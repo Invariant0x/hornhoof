@@ -20,6 +20,15 @@ const SEALED_CHUNK = SEAL_CHUNK + TAG;
    too, which an empty file has as well. */
 export const sealedSizeOf = (size: number): number => SEAL_HEAD + size + TAG * Math.max(1, Math.ceil(size / SEAL_CHUNK));
 
+/* The most plain bytes that sealed come to no more than `sealed`: 0 where not even an empty file fits. */
+export function plainOf(sealed: number): number {
+  if (sealed < sealedSizeOf(0)) return 0;
+  let plain = Math.floor(((sealed - SEAL_HEAD) * SEAL_CHUNK) / SEALED_CHUNK);
+  while (plain > 0 && sealedSizeOf(plain) > sealed) plain -= 1;
+  while (sealedSizeOf(plain + 1) <= sealed) plain += 1;
+  return plain;
+}
+
 export class SealRefused extends Error {
   constructor() {
     super('This file is not one the store sealed with this key, or it was changed or cut.');

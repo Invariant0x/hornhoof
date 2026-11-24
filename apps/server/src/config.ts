@@ -68,6 +68,8 @@ export type Config = {
   keeper: boolean;
   /* How much all the files on the company's tasks may take together. */
   taskFilesBytes: number;
+  /* Whether TASK_FILES_MB was set: then it bounds what the company's machines hold of its files too. */
+  taskFilesSet: boolean;
   /* Where the bundles of products' test harnesses lie, and how much they may take. No folder: each machine builds its own. */
   harnessDir?: string;
   harnessBytes: number;
@@ -232,13 +234,14 @@ function placesOf(env: NodeJS.ProcessEnv): Pick<Config, 'webDist' | 'installScri
 }
 
 /* Intervals and limits, with their defaults. */
-function limitsOf(set: z.infer<typeof Env>): Pick<Config, 'port' | 'nodePingMs' | 'streamPingMs' | 'runsPerHost' | 'taskFilesBytes' | 'nodeLeaderHoldMs' | 'nodeUpdateWaitMs' | 'signinConnectMs' | 'signinSlowMs'> {
+function limitsOf(set: z.infer<typeof Env>): Pick<Config, 'port' | 'nodePingMs' | 'streamPingMs' | 'runsPerHost' | 'taskFilesBytes' | 'taskFilesSet' | 'nodeLeaderHoldMs' | 'nodeUpdateWaitMs' | 'signinConnectMs' | 'signinSlowMs'> {
   return {
     port: set.PORT ?? 8080,
     nodePingMs: set.NODE_PING_MS ?? 20000,
     streamPingMs: set.STREAM_PING_MS ?? 25000,
     runsPerHost: set.MAX_RUNS_PER_HOST,
     taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
+    taskFilesSet: set.TASK_FILES_MB !== undefined,
     nodeLeaderHoldMs: set.NODE_LEADER_HOLD_MS,
     nodeUpdateWaitMs: set.NODE_UPDATE_WAIT_MS,
     signinConnectMs: set.SIGNIN_CONNECT_MS,

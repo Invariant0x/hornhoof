@@ -16,6 +16,8 @@ import { checkOwnCopies, dropDue, storeRound } from '../src/modules/files/sweep.
 import { FILE_PATH, FileHolder, type FileLink } from '../src/modules/keeper/file-holder.js';
 import { LeaderFiles } from '../src/modules/keeper/leader-files.js';
 import { backupCompany, from, MACHINE_ID } from './helpers-backups.js';
+import { plainOf, SEAL_HEAD, sealedSizeOf } from '../src/modules/files/seal.js';
+import { checkPictureRoom } from '../src/modules/tasks/file-policy.js';
 import { as, invitePerson, until } from './helpers.js';
 
 /* The files of the store as they go between the company's machines: the leading app and its keeper on one machine, and
@@ -648,6 +650,34 @@ describe('where the files of the store are kept', () => {
     /* A number past what JavaScript counts exactly is refused. */
     const big = await s.app.inject({ method: 'POST', url: '/api/network/report', payload: { fileStoreUsedBytes: 2 ** 60 }, ...from(two) });
     expect(big.statusCode).toBe(400);
+  });
+
+  it('names the most plain bytes a sealed size holds', () => {
+    for (const sealed of [SEAL_HEAD + 16, SEAL_HEAD + 17, 100_000, 3 * 64 * 1024 + 999, 10 * 1024 ** 3]) {
+      const plain = plainOf(sealed);
+      expect(sealedSizeOf(plain), String(sealed)).toBeLessThanOrEqual(sealed);
+      expect(sealedSizeOf(plain + 1), String(sealed)).toBeGreaterThan(sealed);
+    }
+    expect([plainOf(SEAL_HEAD + 15), plainOf(0)]).toEqual([0, 0]);
+  });
+
+  it("caps what the company keeps at what its machines' areas hold of files kept as often as asked, each within its free disk, and at TASK_FILES_MB where it is set", async () => {
+    const s = await stand();
+    const GIB = 1024 ** 3;
+    const two = await s.worker('two');
+    await areaOf(s, s.server.id, 6 * GIB);
+    await areaOf(s, two, 4 * GIB);
+    const roomNow = async () => (await checkPictureRoom(s.app.ctx, s.acme.id, 1)).bytes;
+    /* Two copies of each file: the smaller area bounds them, past the 2 GB of the setting nobody set. */
+    expect(await roomNow()).toBe(plainOf(4 * GIB));
+    await expect(checkPictureRoom(s.app.ctx, s.acme.id, plainOf(4 * GIB) + 1)).rejects.toMatchObject({ status: 413 });
+    /* Two's disk keeps its floor of 2 GiB with 3 GiB free: it holds 1 GiB more, and so does the company. */
+    await s.db.update(machines).set({ filesDiskFree: 3 * GIB, filesDiskTotal: 100 * GIB }).where(eq(machines.id, two));
+    expect(await roomNow()).toBe(plainOf(GIB));
+    expect((await fileStoreState(s.app.ctx)).capacityBytes).toBe(GIB);
+    /* TASK_FILES_MB, where it is set, is a ceiling below that. */
+    Object.assign(s.app.ctx.config, { taskFilesBytes: 100 * 1024 * 1024, taskFilesSet: true });
+    expect(await roomNow()).toBe(100 * 1024 * 1024);
   });
 
   it('counts what the areas hold of files kept on as many machines', () => {

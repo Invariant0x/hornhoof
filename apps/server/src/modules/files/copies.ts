@@ -6,6 +6,7 @@ import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
 import { copiesSet, copiesWanted, counted, countedTargets, MAX_COPIES, seats } from './place.js';
+import { plainOf } from './seal.js';
 
 /* The company's setting for how many machines keep each file, and how the store stands under it: the CEO's alone. */
 
@@ -66,12 +67,20 @@ export async function fileStoreState(ctx: Pick<Ctx, 'db' | 'files'>, now = new D
     filesBytes: Number(row?.files ?? 0),
     usedBytes: Number(row?.used ?? 0),
     capacityBytes: pooledCapacity(
-      counted(all).map(seat => seat.area),
+      counted(all).map(seat => seat.capacity),
       Math.max(1, wanted),
     ),
     underCopied: Number(row?.under ?? 0),
     stuckBytes: Number(row?.stuck ?? 0),
   };
+}
+
+/* The most plain bytes the store holds of the company's files: what the machines that count hold of files kept as often as
+   asked, each within its disk; none where no machine keeps files, as on a server outside a network. */
+export async function storeCap(ctx: { db: Tx; files: Pick<Ctx['files'], 'machineId'> }, now = new Date()): Promise<number | null> {
+  const all = counted(await seats(ctx.db, await ctx.files.machineId(ctx.db), now));
+  if (all.length === 0) return null;
+  return plainOf(pooledCapacity(all.map(seat => seat.capacity), Math.max(1, copiesWanted(await copiesSet(ctx.db), all))));
 }
 
 /* Sets the copies asked for; the store's next rounds place the copies wanted more, or let go of those wanted no more

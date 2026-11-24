@@ -2,6 +2,8 @@ import { and, eq, isNotNull, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { attachments } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { storeCap } from '../files/copies.js';
+import { filesFor } from '../files/files.js';
 import { type RunJob } from '../tools/job.js';
 import { type Task } from './state.js';
 
@@ -44,18 +46,26 @@ export const companyRoom = (used: number, limit: number): UploadRoom => ({ bytes
 const companyUse = (companyId: string) => sql<string>`(SELECT coalesce(sum(one.size), 0) FROM (SELECT max(a.size) AS size FROM attachments a
   WHERE a.company_id = ${companyId} AND (a.task_id IS NOT NULL OR a.person_id IS NOT NULL OR a.name IS NOT NULL) GROUP BY coalesce(a.sha256, a.id::text)) one)`;
 
+/* What the company keeps at most: what the store's machines hold of files kept as often as the CEO asked, within
+   TASK_FILES_MB where it is set; TASK_FILES_MB, 2 GB unless set, where no machine keeps files. */
+async function companyLimit(ctx: { db: Pick<Ctx['db'], 'execute'>; config: Ctx['config'] }): Promise<number> {
+  const cap = await storeCap({ db: ctx.db, files: filesFor(ctx.config) });
+  if (cap === null) return ctx.config.taskFilesBytes;
+  return ctx.config.taskFilesSet ? Math.min(cap, ctx.config.taskFilesBytes) : cap;
+}
+
 /* Refuses a person's picture of this size when the company has no room left for it, and returns the room left. */
 export async function checkPictureRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string, size: number): Promise<UploadRoom> {
   /* One row however many files the company keeps, none among them. */
   const [used] = rowsOf<{ company: string }>(await ctx.db.execute(sql`SELECT ${companyUse(companyId)} AS company`));
   const inCompany = Number(used?.company ?? 0);
-  const room = companyRoom(inCompany, ctx.config.taskFilesBytes);
+  const room = companyRoom(inCompany, await companyLimit(ctx));
   checkUploadRoom(room, size);
   return room;
 }
 
 /* Refuses a new file of this size on the task when the task or the company has no room left for it. */
-export async function checkRoom(ctx: { db: Pick<Ctx['db'], 'select'>; config: Pick<Ctx['config'], 'taskFilesBytes'> }, companyId: string, task: Pick<Task, 'id' | 'number'>, size: number): Promise<UploadRoom> {
+export async function checkRoom(ctx: { db: Pick<Ctx['db'], 'select' | 'execute'>; config: Ctx['config'] }, companyId: string, task: Pick<Task, 'id' | 'number'>, size: number): Promise<UploadRoom> {
   const [used] = await ctx.db
     .select({
       task: sql<string>`coalesce(sum(${attachments.size}) filter (where ${attachments.taskId} = ${task.id}), 0)`,
@@ -65,7 +75,7 @@ export async function checkRoom(ctx: { db: Pick<Ctx['db'], 'select'>; config: Pi
     .where(kept(companyId));
   const [onTask, inCompany] = [Number(used?.task ?? 0), Number(used?.company ?? 0)];
   const taskRoom: UploadRoom = { bytes: TASK_FILES_BYTES - onTask, full: () => new ApiError(413, 'validation', `Task ${task.number} holds ${sizeText(onTask)} of files, and one task holds at most ${sizeText(TASK_FILES_BYTES)}. ${ELSEWHERE}`, 'attachment_invalid') };
-  const room = companyRoom(inCompany, ctx.config.taskFilesBytes);
+  const room = companyRoom(inCompany, await companyLimit(ctx));
   checkUploadRoom(taskRoom, size);
   checkUploadRoom(room, size);
   return smallerRoom(taskRoom, room);
