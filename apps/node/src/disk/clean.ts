@@ -34,7 +34,8 @@ export function folderBytes(path: string, timeoutMs = DU_TIMEOUT_MS): Promise<nu
 /* The temporary files of checks: the node's folder of runs, where each part, harness and author check works, and the folders
    the test helpers leave in the machine's temporary folder. One part runs on a node at a time and the node empties the folder
    of runs when it starts, so while no check runs all that is in it is left over. While one runs, nothing in it goes. A link in
-   it goes, never what it points to. What the helpers left goes when nothing owns or holds it, run or no run. */
+   it goes, never what it points to. What the helpers left goes when nothing owns or holds it, run or no run. The folder of runs
+   is emptied even when what the helpers left could not be cleaned, and that failure is told after. */
 export function checkTemp(dir: string, checking: () => boolean, tests?: Leftovers): Cleaner {
   const runs = join(dir, 'runs');
   return {
@@ -42,15 +43,19 @@ export function checkTemp(dir: string, checking: () => boolean, tests?: Leftover
     size: async () => (await folderBytes(runs)) + (tests ? await tests.size() : 0),
     quick: async () => (tests ? tests.clean() : 0),
     async clean() {
-      const left = tests ? await tests.clean() : 0;
-      if (checking()) return left;
-      const before = await folderBytes(runs);
-      const names = await readdir(runs).catch(() => [] as string[]);
-      for (const name of names) {
-        if (checking()) break;
-        await rm(join(runs, name), { recursive: true, force: true });
+      let freed = 0, failed = false, failure: unknown;
+      if (tests) try { freed = await tests.clean(); } catch (error) { failed = true; failure = error; }
+      if (!checking()) {
+        const before = await folderBytes(runs);
+        const names = await readdir(runs).catch(() => [] as string[]);
+        for (const name of names) {
+          if (checking()) break;
+          await rm(join(runs, name), { recursive: true, force: true });
+        }
+        freed += Math.max(0, before - (await folderBytes(runs)));
       }
-      return left + Math.max(0, before - (await folderBytes(runs)));
+      if (failed) throw failure;
+      return freed;
     },
   };
 }

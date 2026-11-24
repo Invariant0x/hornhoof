@@ -6,6 +6,10 @@ export type SlotOptions = CheckOptions & { label?: string; agentId?: string; job
 export type CheckLease = { id: string; signal: AbortSignal; release(): void };
 type Pending = { options: SlotOptions; frame: CheckQueueRequest; stop: AbortController; state: 'queued' | 'running'; resolve(lease: CheckLease): void; reject(reason: unknown): void; detach(): void };
 
+/* How long a refused check waits for the disk's look again. A full pass under way may take longer; the check is then refused
+   as things stand. */
+export const LOOK_AGAIN_MS = 60_000;
+
 /* A connection that drops for a moment takes no lease with it (#1060): the leases wait as long as the server keeps them,
    and are claimed again once the node is back. One away longer loses them, and what runs under them stops. */
 export class CheckClient {
@@ -16,6 +20,8 @@ export class CheckClient {
   refusalChanged: (() => void) | undefined;
   /* The one that looks after the disk: asked before a check is refused, it may lift the refusal. */
   beforeRefusing: (() => Promise<void>) | undefined;
+  /* How long a refused check waits for that look before it is refused all the same. */
+  lookAgainMs = LOOK_AGAIN_MS;
   isOnline(): boolean { return this.connected; }
   /* Pending claims can be granted at any time. Aborted holders still own their slot during cleanup. */
   leaseIds(): string[] { return [...this.entries.keys()]; }
@@ -64,14 +70,26 @@ export class CheckClient {
     for (const [id, entry] of this.entries) this.lost(id, entry);
   }
 
-  /* Asks the one that looks after the disk to look again, which may lift a refusal. */
-  private async lookAgain(): Promise<void> {
-    await this.beforeRefusing?.().catch(() => {});
+  /* Asks the one that looks after the disk to look again, which may lift a refusal. The check waits for that look only so
+     long, and not once it is called off: a look that does not end leaves the refusal as it is. */
+  private async lookAgain(signal?: AbortSignal): Promise<void> {
+    const look = this.beforeRefusing?.().catch(() => {});
+    if (!look) return;
+    let timer: NodeJS.Timeout | undefined, end: (() => void) | undefined;
+    const over = new Promise<void>(resolve => {
+      end = () => resolve();
+      timer = setTimeout(end, this.lookAgainMs);
+      timer.unref();
+      signal?.addEventListener('abort', end, { once: true });
+    });
+    await Promise.race([look, over]);
+    clearTimeout(timer);
+    if (end) signal?.removeEventListener('abort', end);
   }
 
   async acquire(options: SlotOptions = {}): Promise<CheckLease> {
     options.signal?.throwIfAborted();
-    if (this.refused(options.light)) await this.lookAgain();
+    if (this.refused(options.light)) await this.lookAgain(options.signal);
     options.signal?.throwIfAborted();
     const refusal = this.refused(options.light);
     if (refusal) throw new Error(refusal);
