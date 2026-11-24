@@ -1017,6 +1017,8 @@ export type RunningAgent = {
   title: Lang | null;
   department: { id: string; name: string } | null;
   provider: ProviderId;
+  /* The model the employee runs on; omitted by older servers. */
+  model?: string;
   since: string | null;
   task: { number: number; title: string } | null;
   withCeo: boolean;

@@ -57,6 +57,7 @@ import { deptName } from '../departments/templates.js';
 import { reworkTimes } from '../org/rework.js';
 import { agentFailureStates } from '../tasks/failure-records.js';
 import { seesTask } from '../tasks/visibility.js';
+import { worldPackForTheme } from './packs/index.js';
 
 const MACHINE_ONLINE_WINDOW_MS = 5 * 60_000;
 
@@ -76,18 +77,27 @@ function rootGoalOf(
   return null;
 }
 
-export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiveSnapshot> {
-  const { db } = ctx;
-  const now = ctx.clock();
-  const companyId = me.companyId;
-
-  const [company] = await db
-    .select({ id: companies.id, name: companies.name, template: companies.template })
+/* The viewer's company, only when its theme has a world: a theme with no world is the interface alone, and no city is
+   computed for it (#1973). */
+async function companyWithWorld(ctx: Ctx, companyId: string) {
+  const [company] = await ctx.db
+    .select({ id: companies.id, name: companies.name, template: companies.template, theme: companies.theme })
     .from(companies)
     .where(eq(companies.id, companyId));
   if (!company) {
     throw new ApiError(404, 'not_found', 'Company not found.');
   }
+  if (!worldPackForTheme(ctx.worldPacks, company.theme)) {
+    throw new ApiError(409, 'conflict', "The company's theme has no world, so it has no city.");
+  }
+  return company;
+}
+
+export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiveSnapshot> {
+  const { db } = ctx;
+  const now = ctx.clock();
+  const companyId = me.companyId;
+  const company = await companyWithWorld(ctx, companyId);
 
   const [viewer, access] = await Promise.all([viewerOf(db, me), accessOf(db, me)]);
 

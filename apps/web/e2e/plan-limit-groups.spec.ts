@@ -19,7 +19,7 @@ const HOUR = 3_600_000;
 /* Resets a fixed time from the moment the page opens, so the words of each reset read the same in every engine. */
 function grouped(now: number): Limits {
   const at = (hours: number) => new Date(now + hours * HOUR).toISOString();
-  const gemini = { name: 'Gemini Models', about: 'Models within this group: Gemini Flash, Gemini Pro', status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0, resetsAt: at(3) }, { name: 'seven_day', utilization: 0.06, resetsAt: at(110) }], complete: true };
+  const gemini = { name: 'Gemini Models', about: 'Models within this group: Gemini Flash, Gemini Pro', status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.1, resetsAt: at(3) }, { name: 'seven_day', utilization: 0.06, resetsAt: at(110) }], complete: true };
   const others = { name: 'Claude and GPT models', about: 'Models within this group: Claude Opus, Claude Sonnet, GPT-OSS', status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: at(4) }, { name: 'seven_day', utilization: 1, resetsAt: at(60) }], complete: true };
   return { status: 'rejected', windows: others.windows, complete: true, groups: [gemini, others] };
 }
@@ -46,10 +46,12 @@ async function opened(page: Page, look: Look) {
   const t = DICTIONARIES[look.lang];
   await page.getByRole('navigation').getByRole('button', { name: t.shell.tabs.subscriptions, exact: true }).click();
   const row = page.getByRole('row').filter({ has: page.getByRole('button', { name: t.tables.openCard('Antigravity') }) });
-  const cell = row.locator('td').filter({ hasText: 'Gemini Models: 6%' });
+  const cell = row.locator('td').filter({ hasText: 'Gemini Models: 10%' });
+  const weekCell = row.locator('td').filter({ hasText: 'Gemini Models: 6%' });
   await expect(cell).toBeVisible();
+  await expect(weekCell).toBeVisible();
   await page.evaluate(async () => { await document.fonts.ready; });
-  return { cell, errors };
+  return { cell, weekCell, errors };
 }
 
 async function openCard(page: Page, look: Look): Promise<Locator> {
@@ -102,41 +104,68 @@ const LOOKS: Look[] = [
 ];
 
 for (const look of LOOKS) {
-  test(`shows each model group of the plan with what it used and when it resets, in ${lookName(look)}`, async ({ page, browserName }, info) => {
+  test(`shows the main model group in the list cell and every group on the card, in ${lookName(look)}`, async ({ page, browserName }, info) => {
     const t = DICTIONARIES[look.lang];
-    const { cell, errors } = await opened(page, look);
+    const { cell, weekCell, errors } = await opened(page, look);
     const suffix = `${look.skin}-${look.dir ?? look.lang}-${look.width}.png`;
     if (browserName === 'chromium' && look.skin === 'cyberpunk') {
       const file = `cell-${suffix}`;
       const sha = await shoot(page, cell, info.outputPath(file));
       await info.attach(`${file} sha256`, { body: sha });
     }
-    expect(await whole(cell, '.where-list')).toEqual([]);
-    for (const [group, share] of [['Gemini Models', '6%'], ['Claude and GPT models', '100%']]) {
-      await expect(cell.getByRole('listitem').filter({ hasText: group })).toContainText(t.subs.groupShare(group, t.subs.usedAndReset(share, t.subs.resetsIn(''))).trim());
+    expect(await whole(cell, '.cell-lim')).toEqual([]);
+    expect(await whole(weekCell, '.cell-lim')).toEqual([]);
+    for (const [target, share] of [[cell, '10%'], [weekCell, '6%']] as const) {
+      await expect(target).toContainText(t.subs.groupShare('Gemini Models', t.subs.usedAndReset(share, t.subs.resetsIn(''))).trim());
+      await expect(target).not.toContainText('Claude and GPT models');
+      await expect(target.getByRole('listitem')).toHaveCount(0);
+      await expect(target.locator('.bar')).toHaveCount(1);
+      await expect(target.locator('.bar.max')).toHaveCount(0);
+      await expect(target.locator('.bar i')).toHaveAttribute('style', `width: ${share};`);
     }
-    expect(await cell.locator('.bar').count()).toBe(1);
-    const main = cell.getByRole('listitem').filter({ hasText: 'Claude and GPT models' });
-    const bar = main.locator('.bar');
+    const bar = cell.locator('.bar');
     await expect(bar).toBeVisible();
-    const [barBox, mainText, previous] = await Promise.all([
+    const [barBox, textBox] = await Promise.all([
       bar.boundingBox(),
-      main.locator('.cell-lim > span:last-child').boundingBox(),
-      cell.getByRole('listitem').filter({ hasText: 'Gemini Models' }).boundingBox(),
+      cell.locator('.cell-lim > span:last-child').boundingBox(),
     ]);
-    const gapToOwnText = mainText!.y - (barBox!.y + barBox!.height);
-    expect(gapToOwnText).toBeGreaterThanOrEqual(0);
-    expect(gapToOwnText).toBeLessThanOrEqual(4);
-    expect(barBox!.y - (previous!.y + previous!.height)).toBeGreaterThanOrEqual(12);
+    const stacked = barBox!.y + barBox!.height <= textBox!.y + 1;
+    const beside = look.dir === 'rtl' ? textBox!.x + textBox!.width <= barBox!.x + 1 : barBox!.x + barBox!.width <= textBox!.x + 1;
+    expect(stacked || beside).toBe(true);
+    if (stacked) expect(textBox!.y - (barBox!.y + barBox!.height)).toBeLessThanOrEqual(6);
     const card = await openCard(page, look);
     await expect(card.getByRole('heading', { name: t.subs.limits, exact: true })).toHaveCount(0);
-    for (const [group, shares] of [['Gemini Models', ['0%', '6%']], ['Claude and GPT models', ['100%', '100%']]] as const) {
+    for (const [group, shares, maxBars] of [['Gemini Models', ['10%', '6%'], 0], ['Claude and GPT models', ['100%', '100%'], 2]] as const) {
       const part = card.locator('.part').filter({ has: page.getByRole('heading', { name: t.subs.groupLimits(group) }) });
       await expect(part.locator('.gauge .g-l')).toHaveText([t.subs.hours(5), t.subs.days(7)]);
       await expect(part.locator('.gauge .g-f b')).toHaveText([...shares]);
       for (const reset of await part.locator('.gauge .g-s').allTextContents()) expect(reset).toMatch(look.lang === 'en' ? /^resets in / : /^до сброса /);
-      await expect(part.locator('.bar')).toHaveCount(group === 'Gemini Models' ? 0 : 2);
+      await expect(part.locator('.bar')).toHaveCount(2);
+      await expect(part.locator('.bar.max')).toHaveCount(maxBars);
+      for (let i = 0; i < shares.length; i++) {
+        const track = part.locator('.bar').nth(i);
+        const fill = track.locator('i');
+        await expect(fill).toHaveAttribute('style', `width: ${shares[i]};`);
+        expect(await track.evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+        const [trackBox, fillBox] = await Promise.all([track.boundingBox(), fill.boundingBox()]);
+        expect(trackBox!.width).toBeGreaterThan(0);
+        expect(trackBox!.height).toBeGreaterThan(0);
+        if (shares[i] === '100%') {
+          expect(Math.abs(fillBox!.width - trackBox!.width)).toBeLessThanOrEqual(0.5);
+          expect(Math.abs(fillBox!.height - trackBox!.height)).toBeLessThanOrEqual(0.5);
+        }
+      }
     }
+    const geminiPart = card.locator('.part').filter({ has: page.getByRole('heading', { name: t.subs.groupLimits('Gemini Models') }) });
+    const othersPart = card.locator('.part').filter({ has: page.getByRole('heading', { name: t.subs.groupLimits('Claude and GPT models') }) });
+    const [geminiRow, othersRow, geminiFive, othersFive] = await Promise.all([
+      geminiPart.locator('.gauges').boundingBox(),
+      othersPart.locator('.gauges').boundingBox(),
+      geminiPart.locator('.gauge').first().boundingBox(),
+      othersPart.locator('.gauge').first().boundingBox(),
+    ]);
+    expect(Math.abs(othersRow!.height - geminiRow!.height)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(othersFive!.height - geminiFive!.height)).toBeLessThanOrEqual(0.5);
     /* One group at its limit leaves the plan ready: Gemini's turns go on. */
     await expect(card.locator('.status')).toHaveText(t.subs.states.ready);
     expect(await whole(card, '.part:has(.gauges)')).toEqual([]);
