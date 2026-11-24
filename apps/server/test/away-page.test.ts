@@ -2,13 +2,14 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { maintenanceAnswer } from '../src/modules/keeper/doors.js';
-import { awayPage, languageOf } from '../src/net/away-page.js';
+import { awayPage } from '../src/net/away-page.js';
 import { startFront } from '../src/net/front.js';
 import { heldAnswer, passThrough, serve, startingAnswer, type Refusal, type Target } from '../src/net/proxy.js';
 
-/* A hop with no server behind it must say the server is away, in plain words and never as a missing page (#1938). A browser
-   gets a page, a program the JSON it already read, any other client the words; the status is 502 or 503 for all of them,
-   so the app knows the server is missing. What a live server says is missing still passes as 404. */
+/* A hop with no server behind it must say the server is away, never as a missing page (#1938). A browser gets a page with the
+   Hornhoof sign and one line in English, "No connection" or "Updating" (#2049), a program the JSON it already read, any other
+   client the same line as text; the status is 502 or 503 for all of them, so the app knows the server is missing. What a live
+   server says is missing still passes as 404. */
 
 const PAGE = { accept: 'text/html,application/xhtml+xml' };
 
@@ -51,102 +52,102 @@ async function frontWithNoKeeper(): Promise<Target> {
 
 const fake = (headers: http.IncomingHttpHeaders, url: string, method = 'GET') => ({ headers, url, method }) as http.IncomingMessage;
 
-/* A page that reaches nothing outside itself: no address to fetch, no external script, no font, no frame, and a policy that
-   lets nothing but its own style and one line of script act. */
+/* A page that reaches nothing outside itself: no address to fetch, no script at all, no font, no frame, and a policy that
+   lets nothing but its own style act. */
 function expectSelfContained(body: string): void {
   expect(body).not.toMatch(/https?:\/\//i);
-  expect(body).not.toMatch(/<script|<link|<img|<iframe|<object|<embed|@import|url\(/i);
+  expect(body).not.toMatch(/<script|<link|<img|<iframe|<object|<embed|@import|url\(|\bon[a-z]+=/i);
   expect(body).not.toMatch(/\b(?:src|href)=/i);
-  expect(body).toContain(`default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'`);
+  expect(body).toContain(`default-src 'none'; style-src 'unsafe-inline'`);
+  expect(body).not.toContain('script-src');
+}
+
+/* What a person reads on the page: the text left once the style and the sign are taken out. */
+const readable = (body: string): string =>
+  body.replace(/<head>[^]*?<\/head>/, '').replace(/<svg[^]*?<\/svg>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+/* The sign, once, and nothing else on the page but the one line: no card, hint, counter, button or second language. */
+function expectSignAndOneLine(body: string, line: string): void {
+  expect(readable(body)).toBe(line);
+  expect(body.match(/<svg/g)).toHaveLength(1);
+  expect(body).toContain('class="sign"');
+  expect(body).not.toMatch(/<button|<h[1-6]|<input|<a\b|<form/i);
+  expect(body.match(/<(?:p|div|span)\b/g) ?? []).toHaveLength(1);
+  expect(body).not.toMatch(/[А-Яа-я]/);
 }
 
 const RU = { accept: 'text/html', 'accept-language': 'ru-RU,ru;q=0.9,en;q=0.8' };
 
 describe('the page of a hop with no server behind it', () => {
-  it('says no connection in one language, shows that it asks again by itself and does, and reaches nothing outside itself', async () => {
+  it('shows the sign and the one line "No connection", asks again by itself, and reaches nothing outside itself', async () => {
     const door = await frontWithNoKeeper();
     const answer = await send(door, { path: '/people', headers: PAGE });
     expect(answer.status).toBe(502);
     expect(answer.headers['content-type']).toBe('text/html; charset=utf-8');
     expect(answer.headers['retry-after']).toBe('5');
     expect(answer.headers['cache-control']).toBe('no-store');
-    expect(answer.headers.vary).toBe('Accept-Language');
     expect(answer.body).toContain('<html lang="en">');
-    expect(answer.body).toContain('<h1>No connection to the server</h1>');
-    expect(answer.body).toContain('This page opens by itself when the server answers.');
-    expect(answer.body).toContain('Checking every 5\u00a0s');
     expect(answer.body).toContain('<meta http-equiv="refresh" content="5">');
-    expect(answer.body).toContain('Reload page');
-    expect(answer.body).toContain('onclick="location.reload()"');
     expect(answer.body).toContain('<meta name="viewport"');
-    expect(answer.body).toContain('class="sign"');
-    /* One language, not two in a row. */
-    expect(answer.body).not.toMatch(/[А-Яа-я]/);
+    expectSignAndOneLine(answer.body, 'No connection');
     expectSelfContained(answer.body);
   });
 
-  it('speaks Russian to a browser that asks for it, and only Russian', async () => {
+  it('follows the visitor\'s light or dark setting, and draws the sign and the line in the middle of a plain background', () => {
+    const body = awayPage('lost');
+    expect(body).toContain('color-scheme: light dark');
+    expect(body).toContain('prefers-color-scheme: dark');
+    expect(body).toMatch(/body \{[^}]*display: grid[^}]*place-items: center/);
+    expect(body).not.toMatch(/border|box-shadow|<button/);
+  });
+
+  it('is the same page for every browser language: English only, nothing varies by Accept-Language', async () => {
     const door = await frontWithNoKeeper();
-    const answer = await send(door, { path: '/', headers: RU });
-    expect(answer.status).toBe(502);
-    expect(answer.body).toContain('<html lang="ru">');
-    expect(answer.body).toContain('<h1>Нет связи с сервером</h1>');
-    expect(answer.body).toContain('Страница откроется сама, когда сервер ответит.');
-    expect(answer.body).toContain('Проверяем каждые 5\u00a0с');
-    expect(answer.body).toContain('Обновить страницу');
-    expect(answer.body).not.toContain('No connection');
-    expect(answer.body).not.toContain('Reload page');
-    expectSelfContained(answer.body);
+    const english = await send(door, { path: '/', headers: PAGE });
+    for (const language of ['ru-RU,ru;q=0.9,en;q=0.8', 'de-DE,de;q=0.9', 'ru']) {
+      const answer = await send(door, { path: '/', headers: { ...PAGE, 'accept-language': language } });
+      expect(answer.status).toBe(502);
+      expect(answer.body, language).toBe(english.body);
+      expect(answer.headers.vary, language).toBeUndefined();
+    }
+    expectSignAndOneLine(english.body, 'No connection');
   });
 
-  it('says the server is updating, with the same sizes as the other page, while an update installs', () => {
+  it('shows the one line "Updating", with the same sizes as the other page, while an update installs', () => {
     const answer = maintenanceAnswer(fake(PAGE, '/tasks'));
     expect(answer.status).toBe(503);
     expect(answer.headers['Content-Type']).toBe('text/html; charset=utf-8');
     expect(answer.headers['Retry-After']).toBe('10');
-    expect(answer.body).toContain('<h1>Server is updating</h1>');
-    expect(answer.body).toContain('This takes a few minutes. The page opens by itself.');
-    expect(answer.body).toContain('Checking every 10\u00a0s');
+    expect(answer.headers.Vary).toBeUndefined();
+    expect(answer.body).toContain('<html lang="en">');
     expect(answer.body).toContain('<meta http-equiv="refresh" content="10">');
-    expect(answer.body).not.toContain('No connection to the server');
-    const ru = maintenanceAnswer(fake(RU, '/tasks'));
-    expect(ru.body).toContain('<h1>Сервер обновляется</h1>');
-    expect(ru.body).toContain('Это займет несколько минут. Страница откроется сама.');
+    expectSignAndOneLine(answer.body, 'Updating');
+    expect(maintenanceAnswer(fake(RU, '/tasks')).body).toBe(answer.body);
     /* The one sheet, so the two states cannot differ in size. */
     expect(answer.body.match(/<style>[^]*?<\/style>/)![0]).toBe(awayPage('lost').match(/<style>[^]*?<\/style>/)![0]);
     expectSelfContained(answer.body);
   });
 
-  it('says no connection after a hold that ran out, as a page too', () => {
+  it('shows no connection after a hold that ran out, as a page too', () => {
     const answer = heldAnswer(fake(PAGE, '/'));
     expect(answer.status).toBe(503);
-    expect(answer.body).toBe(awayPage('lost', ''));
+    expect(answer.body).toBe(awayPage('lost'));
+    expectSignAndOneLine(answer.body, 'No connection');
   });
 
-  it('keeps the JSON for a program and the words for any other client, whatever the status', () => {
+  it('keeps the JSON for a program and one English line of text for any other client, whatever the status', () => {
     const json = (answer: Refusal) => JSON.parse(answer.body).error as { code: string; reason: string };
     expect(json(startingAnswer(fake({}, '/api/me'))).reason).toBe('starting');
     expect(json(maintenanceAnswer(fake(PAGE, '/api/me'))).reason).toBe('maintenance');
     expect(json(heldAnswer(fake(PAGE, '/mcp', 'POST'))).reason).toBe('starting');
     for (const answer of [startingAnswer(fake({}, '/')), maintenanceAnswer(fake({ accept: '*/*' }, '/')), heldAnswer(fake(PAGE, '/', 'POST'))]) {
       expect(answer.headers['Content-Type']).toBe('text/plain; charset=utf-8');
+      expect(answer.headers.Vary).toBeUndefined();
     }
-    expect(startingAnswer(fake({}, '/')).body).toContain('Hornhoof is starting.');
-    expect(maintenanceAnswer(fake({}, '/')).body).toContain('Hornhoof ставит обновление.');
-  });
-});
-
-describe('the language of the page', () => {
-  it('takes the first language the visitor asks for that Hornhoof ships, by weight, and English otherwise', () => {
-    expect(languageOf('ru-RU,ru;q=0.9,en;q=0.8')).toBe('ru');
-    expect(languageOf('en-US,en;q=0.9,ru;q=0.8')).toBe('en');
-    expect(languageOf('de-DE,de;q=0.9,ru;q=0.5')).toBe('ru');
-    expect(languageOf('ru;q=0.4, en;q=0.9')).toBe('en');
-    expect(languageOf('ru;q=0, en;q=0.1')).toBe('en');
-    expect(languageOf('de, fr;q=0.8')).toBe('en');
-    expect(languageOf('*')).toBe('en');
-    expect(languageOf('')).toBe('en');
-    expect(languageOf(undefined)).toBe('en');
+    expect(startingAnswer(fake({}, '/')).body).toBe('No connection\n');
+    expect(heldAnswer(fake(PAGE, '/', 'POST')).body).toBe('No connection\n');
+    expect(maintenanceAnswer(fake({}, '/')).body).toBe('Updating\n');
+    expect(maintenanceAnswer(fake({ 'accept-language': 'ru' }, '/')).body).toBe('Updating\n');
   });
 });
 

@@ -1,90 +1,50 @@
 /* The page a browser gets, in place of an unstyled line, when the front or a keeper has no live server behind it (#1938):
-   the server is away, or an update installs. It speaks one language, the first of the visitor's Accept-Language that
-   Hornhoof ships, English otherwise; says what happened in plain words; says how often it asks again and does ask, by
-   itself, so it becomes the app once the server answers; and has a button to ask at once. It wraps at any width and makes
-   no request of its own: no font, no image, no link, nothing but its own text, style and one line of script, which a policy
-   of its own lets run and nothing else, so it shows the same with no internet. Its colours are the tokens of the style
-   book, light and dark by the visitor's setting. */
+   the server is away, or an update installs. It shows the sign of Hornhoof and one line under it, in English whatever the
+   browser speaks, "No connection" or "Updating" (#2049), centred on a plain background, and nothing else. It asks again by
+   itself, invisibly, by its own refresh, so it becomes the app once the server answers. It makes no request of its own: no
+   font, no image, no link, no script, nothing but its own text and style, which a policy of its own lets act and nothing
+   else, so it shows the same with no internet. Its colours are the tokens of the style book, light and dark by the visitor's
+   setting. */
 export type Away = 'lost' | 'updating';
-export type Language = 'en' | 'ru';
 
-type Words = { lost: [title: string, hint: string]; updating: [title: string, hint: string]; checking: (seconds: number) => string; reload: string };
-
-const WORDS: Record<Language, Words> = {
-  en: {
-    lost: ['No connection to the server', 'This page opens by itself when the server answers.'],
-    updating: ['Server is updating', 'This takes a few minutes. The page opens by itself.'],
-    checking: seconds => `Checking every ${seconds} s`,
-    reload: 'Reload page',
-  },
-  ru: {
-    lost: ['Нет связи с сервером', 'Страница откроется сама, когда сервер ответит.'],
-    updating: ['Сервер обновляется', 'Это займет несколько минут. Страница откроется сама.'],
-    checking: seconds => `Проверяем каждые ${seconds} с`,
-    reload: 'Обновить страницу',
-  },
-};
+/* The one line of each state: also what a client that is neither a browser nor a program reads, as text. */
+const LINE: Record<Away, string> = { lost: 'No connection', updating: 'Updating' };
+export const awayLine = (kind: Away): string => LINE[kind];
 
 /* How often the page asks again, in seconds: the Retry-After the answer carries. */
 const EVERY_S: Record<Away, number> = { lost: 5, updating: 10 };
 export const awayEveryS = (kind: Away): number => EVERY_S[kind];
 
-/* The first language of an Accept-Language header that Hornhoof ships, by the weights the visitor gave, or English. */
-export function languageOf(header: string | undefined): Language {
-  const asked = String(header ?? '')
-    .split(',')
-    .map((part, order) => {
-      const [tag = '', ...params] = part.trim().split(';');
-      const weight = params.map(param => /^\s*q\s*=\s*([\d.]+)\s*$/i.exec(param)?.[1]).find(Boolean);
-      return { base: tag.trim().toLowerCase().split('-')[0], weight: weight === undefined ? 1 : Number(weight), order };
-    })
-    .filter(entry => entry.weight > 0)
-    .sort((a, b) => b.weight - a.weight || a.order - b.order);
-  return asked.map(entry => entry.base).find((base): base is Language => base === 'en' || base === 'ru') ?? 'en';
-}
-
-/* The sign of Hornhoof, as the app draws it, in the ink colour. */
-const SIGN = `<svg class="sign" viewBox="0 0 30 30" width="48" height="48" aria-hidden="true"><path d="M 5 20 A 10 10 0 0 1 25 20" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M 2 24.5 L 28 24.5" stroke="currentColor" stroke-width="2.4"/><circle cx="15" cy="16" r="2.4" fill="currentColor"/></svg>`;
+/* The sign of Hornhoof, as the app draws it: the dome in the accent, the base and the dot in the ink. */
+const SIGN = `<svg class="sign" viewBox="0 0 30 30" width="48" height="48" aria-hidden="true"><path class="dome" d="M 5 20 A 10 10 0 0 1 25 20"/><path class="base" d="M 2 24.5 L 28 24.5"/><circle class="dot" cx="15" cy="16" r="2.4"/></svg>`;
 
 const STYLE = `
-:root { color-scheme: light dark; --bg: #E6EBF0; --surface: #F8FAFC; --line2: #768695; --ink: #0F1B27; --muted: #4C5A68; --cyan: #00A3BD; --cyan-ink: #006E80; --btn: #00768A; --on-btn: #FFFFFF; }
-@media (prefers-color-scheme: dark) { :root { --bg: #141A22; --surface: #1B232D; --line2: #687A8F; --ink: #E3EAF1; --muted: #93A0AE; --cyan: #46E0EF; --cyan-ink: #6FE9F5; --btn: #46E0EF; --on-btn: #05222A; } }
+:root { color-scheme: light dark; --bg: #E6EBF0; --ink: #0F1B27; --cyan: #00A3BD; }
+@media (prefers-color-scheme: dark) { :root { --bg: #141A22; --ink: #E3EAF1; --cyan: #46E0EF; } }
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--bg); color: var(--ink); font: 400 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-main { inline-size: min(440px, 100%); display: grid; gap: 12px; padding: 20px; background: var(--surface); border: 1px solid var(--line2); border-block-start: 2px solid var(--cyan); }
-.sign { color: var(--ink); margin-block-end: 4px; }
-h1 { margin: 0; font-size: 22px; font-weight: 600; line-height: 1.15; overflow-wrap: anywhere; }
-p { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
-p.checking { font-size: 13px; }
-.actions { display: flex; flex-wrap: wrap; justify-content: flex-end; }
-button { --cut: 7px; min-block-size: 44px; padding: 8px 18px; border: 0; cursor: pointer; background: var(--btn); color: var(--on-btn); font: 600 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
-button:hover { filter: brightness(1.08); }
-button:focus-visible { clip-path: none; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--bg); color: var(--ink); font: 600 18px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { display: grid; justify-items: center; gap: 12px; max-inline-size: 100%; text-align: center; }
+.dome { fill: none; stroke: var(--cyan); stroke-width: 2.4; }
+.base { stroke: var(--ink); stroke-width: 2.4; }
+.dot { fill: var(--ink); }
+p { margin: 0; overflow-wrap: anywhere; }
 `;
 
-export function awayPage(kind: Away, acceptLanguage?: string): string {
-  const language = languageOf(acceptLanguage);
-  const words = WORDS[language];
-  const [title, hint] = words[kind];
-  const every = awayEveryS(kind);
+export function awayPage(kind: Away): string {
   return `<!doctype html>
-<html lang="${language}">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
-<meta http-equiv="refresh" content="${every}">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<meta http-equiv="refresh" content="${awayEveryS(kind)}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hornhoof</title>
 <style>${STYLE}</style>
-<noscript><style>.actions { display: none; }</style></noscript>
 </head>
 <body>
 <main role="status">
 ${SIGN}
-<h1>${title}</h1>
-<p>${hint}</p>
-<p class="checking">${words.checking(every)}</p>
-<div class="actions"><button type="button" onclick="location.reload()">${words.reload}</button></div>
+<p>${awayLine(kind)}</p>
 </main>
 </body>
 </html>

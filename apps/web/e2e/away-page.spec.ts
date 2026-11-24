@@ -8,8 +8,9 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 import { startServer } from './real-server';
 
 /* A browser that opens or reloads Hornhoof while no server is behind the front gets a page that says so, never a missing page
-   and never an unstyled line (#1938). The front is the real one, run as the company's web port runs it, and the keeper behind
-   it is a stand-in the test starts and stops: down, or answering as it does while an update installs. */
+   and never an unstyled line (#1938): the sign of Hornhoof and one line in English, "No connection" or "Updating", centred on
+   a plain background, and nothing else (#2049). The front is the real one, run as the company's web port runs it, and the
+   keeper behind it is a stand-in the test starts and stops: down, or answering as it does while an update installs. */
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SERVER_CWD = process.env.HH_E2E_SERVER_CWD ?? resolve(HERE, '../../server');
 const SCREENSHOT_DIR = process.env.HH_SCREENSHOT_DIR;
@@ -69,8 +70,7 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: resolve(SCREENSHOT_DIR, `${name}.png`) });
 }
 
-const EN = { lost: 'No connection to the server', updating: 'Server is updating', checking: /^Checking every \d+\s?s$/, reload: 'Reload page' };
-const RU = { lost: 'Нет связи с сервером', updating: 'Сервер обновляется', checking: /^Проверяем каждые \d+\s?с$/, reload: 'Обновить страницу' };
+const LINE = { lost: 'No connection', updating: 'Updating' };
 
 /* A visitor whose browser asks for a language (its Accept-Language) and a colour scheme, on a screen of one size. */
 async function visitor(browser: Browser, locale: string, colorScheme: 'light' | 'dark' = 'light', viewport = { width: 1440, height: 900 }): Promise<{ page: Page; context: BrowserContext }> {
@@ -78,17 +78,24 @@ async function visitor(browser: Browser, locale: string, colorScheme: 'light' | 
   return { page: await context.newPage(), context };
 }
 
-/* What a part of the page looks like, as the browser drew it. */
+/* What the page looks like, as the browser drew it: what a person reads, how many things there are to touch, the sign and the
+   line by their boxes, and the background. */
 const look = (page: Page) => page.evaluate(() => {
-  const size = (selector: string) => {
-    const style = getComputedStyle(document.querySelector(selector)!);
-    return { size: style.fontSize, weight: style.fontWeight, line: style.lineHeight, color: style.color };
+  const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect().toJSON() as { x: number; y: number; width: number; height: number; right: number; bottom: number };
+  const line = getComputedStyle(document.querySelector('p')!);
+  return {
+    text: document.body.innerText.trim(),
+    touchable: document.querySelectorAll('button, a, input, select, textarea, [tabindex], [onclick]').length,
+    sign: box('.sign'),
+    line: box('p'),
+    size: { size: line.fontSize, weight: line.fontWeight },
+    background: getComputedStyle(document.body).backgroundColor,
+    lang: document.documentElement.lang,
+    across: document.documentElement.scrollWidth <= window.innerWidth && document.documentElement.scrollHeight <= window.innerHeight,
   };
-  const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect().toJSON() as { x: number; y: number; width: number; height: number; right: number };
-  return { title: size('h1'), hint: size('main > p:not(.checking)'), checking: size('p.checking'), sign: box('.sign'), button: box('button'), buttonWeight: getComputedStyle(document.querySelector('button')!).fontWeight, card: box('main'), lang: document.documentElement.lang };
 });
 
-test('no server behind the front: the page says no connection in English, makes no outside request, and opens by itself', async ({ page }) => {
+test('no server behind the front: the page is the sign and "No connection", makes no outside request, and opens by itself', async ({ page }) => {
   const front = await startFront('down');
   const outside: string[] = [];
   page.on('request', request => {
@@ -99,12 +106,11 @@ test('no server behind the front: the page says no connection in English, makes 
     const response = await page.goto(front.url + '/tasks');
     /* The status says the server is missing: not 404. */
     expect(response!.status()).toBe(502);
-    await expect(page.getByRole('heading', { name: EN.lost })).toBeVisible();
-    await expect(page.getByText('This page opens by itself when the server answers.')).toBeVisible();
-    await expect(page.getByText(EN.checking)).toBeVisible();
-    await expect(page.getByRole('button', { name: EN.reload })).toBeVisible();
-    /* One language, not two in a row. */
-    await expect(page.getByText(RU.lost)).toHaveCount(0);
+    await expect(page.getByText(LINE.lost, { exact: true })).toBeVisible();
+    const seen = await look(page);
+    expect(seen.text).toBe(LINE.lost);
+    expect(seen.touchable).toBe(0);
+    await expect(page.getByRole('button')).toHaveCount(0);
     await expect(page.getByText('404')).toHaveCount(0);
     await expect(page.getByText(/not found/i)).toHaveCount(0);
 
@@ -118,117 +124,84 @@ test('no server behind the front: the page says no connection in English, makes 
   }
 });
 
-test('the button asks the server at once, before the page asks by itself', async ({ page }) => {
-  const front = await startFront('down');
-  try {
-    await page.goto(front.url + '/tasks');
-    const button = page.getByRole('button', { name: EN.reload });
-    await expect(button).toBeVisible();
-    /* The page's own refresh is 5 s away: a request within 2 s of the click is the button's. No time limit on the
-       wait itself (#59): the elapsed time is checked instead. */
-    const asked = page.waitForRequest(request => request.isNavigationRequest() && request.url().endsWith('/tasks'));
-    const clicked = Date.now();
-    await button.click();
-    await asked;
-    expect(Date.now() - clicked).toBeLessThan(2000);
-  } finally {
-    await front.stop();
-  }
-});
-
-test('a browser that asks for Russian gets the page in Russian only', async ({ browser }) => {
-  const front = await startFront('down');
-  const { page, context } = await visitor(browser, 'ru-RU');
-  try {
-    const response = await page.goto(front.url + '/');
-    expect(response!.status()).toBe(502);
-    await expect(page.getByRole('heading', { name: RU.lost })).toBeVisible();
-    await expect(page.getByText('Страница откроется сама, когда сервер ответит.')).toBeVisible();
-    await expect(page.getByText(RU.checking)).toBeVisible();
-    await expect(page.getByRole('button', { name: RU.reload })).toBeVisible();
-    await expect(page.getByText(EN.lost)).toHaveCount(0);
-    expect(await page.evaluate(() => document.documentElement.lang)).toBe('ru');
-  } finally {
-    await context.close();
-    await front.stop();
-  }
-});
-
-test('a browser that asks for a language Hornhoof does not ship gets English', async ({ browser }) => {
-  const front = await startFront('down');
-  const { page, context } = await visitor(browser, 'de-DE');
-  try {
-    await page.goto(front.url + '/');
-    await expect(page.getByRole('heading', { name: EN.lost })).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.lang)).toBe('en');
-  } finally {
-    await context.close();
-    await front.stop();
-  }
-});
-
-test('an update installing: the page says the server is updating, and its sizes are the other page\'s', async ({ browser }) => {
+test('an update installing: the page is the sign and "Updating", and its sizes are the other page\'s', async ({ page }) => {
   const down = await startFront('down');
   const updating = await startFront('updating');
-  const english = await visitor(browser, 'en-US');
-  const russian = await visitor(browser, 'ru-RU');
-  const page = english.page;
   try {
     await page.goto(down.url + '/');
     const lost = await look(page);
     const response = await page.goto(updating.url + '/');
     expect(response!.status()).toBe(503);
-    await expect(page.getByRole('heading', { name: EN.updating })).toBeVisible();
-    await expect(page.getByText('This takes a few minutes. The page opens by itself.')).toBeVisible();
-    await expect(page.getByRole('heading', { name: EN.lost })).toHaveCount(0);
-    expect(await look(page)).toEqual(lost);
-    await russian.page.goto(updating.url + '/');
-    await expect(russian.page.getByRole('heading', { name: RU.updating })).toBeVisible();
-    await expect(russian.page.getByText('Это займет несколько минут. Страница откроется сама.')).toBeVisible();
+    await expect(page.getByText(LINE.updating, { exact: true })).toBeVisible();
+    await expect(page.getByText(LINE.lost)).toHaveCount(0);
+    const seen = await look(page);
+    expect(seen.text).toBe(LINE.updating);
+    expect(seen.touchable).toBe(0);
+    expect(seen.sign).toEqual(lost.sign);
+    expect(seen.size).toEqual(lost.size);
   } finally {
-    await english.context.close();
-    await russian.context.close();
     await down.stop();
     await updating.stop();
   }
 });
 
-/* Each look the Design checks: both languages, light and dark, wide and narrow, both states. The title is 600 at 22 px, the text
-   14 px, the line that says it asks again 13 px, the sign 48 px, the button from 44 px at the end edge, and nothing runs past the
-   phone. */
-test('the page is the same in every language, scheme and width, wraps, and fits a phone, light and dark', async ({ browser }) => {
+test('the line is English for a browser of any language: Russian, German or none', async ({ browser }) => {
+  const front = await startFront('down');
+  const updating = await startFront('updating');
+  try {
+    for (const locale of ['ru-RU', 'de-DE', 'en-US']) {
+      const { page, context } = await visitor(browser, locale);
+      try {
+        await page.goto(front.url + '/');
+        await expect(page.getByText(LINE.lost, { exact: true })).toBeVisible();
+        expect((await look(page)).text, locale).toBe(LINE.lost);
+        expect((await look(page)).lang, locale).toBe('en');
+        await page.goto(updating.url + '/');
+        await expect(page.getByText(LINE.updating, { exact: true })).toBeVisible();
+        expect((await look(page)).text, locale).toBe(LINE.updating);
+      } finally {
+        await context.close();
+      }
+    }
+  } finally {
+    await front.stop();
+    await updating.stop();
+  }
+});
+
+/* Each look the Design checks: light and dark, wide and narrow, both states. The sign and the line stand in the middle of the
+   window on a plain background of the scheme, nothing runs past a phone, and nothing else is on the page. */
+test('the page is centred and plain in every scheme and width, and fits a phone, light and dark', async ({ browser }) => {
   const fronts = { lost: await startFront('down'), updating: await startFront('updating') };
   try {
-    for (const [language, locale, words] of [['en', 'en-US', EN], ['ru', 'ru-RU', RU]] as const) {
-      for (const scheme of ['light', 'dark'] as const) {
-        for (const [width, height] of [[1440, 900], [375, 700], [320, 640]] as const) {
-          const { page, context } = await visitor(browser, locale, scheme, { width, height });
-          try {
-            for (const state of ['lost', 'updating'] as const) {
-              await page.goto(fronts[state].url + '/');
-              await expect(page.getByRole('heading', { name: words[state] })).toBeVisible();
-              const seen = await look(page);
-              expect(seen.lang).toBe(language);
-              expect(seen.title).toMatchObject({ size: '22px', weight: '600' });
-              expect(seen.hint).toMatchObject({ size: '14px', weight: '400' });
-              expect(seen.checking.size).toBe('13px');
-              expect(seen.sign).toMatchObject({ width: 48, height: 48 });
-              expect(seen.buttonWeight).toBe('600');
-              expect(seen.button.height).toBeGreaterThanOrEqual(44);
-              expect(seen.card.x).toBeGreaterThanOrEqual(0);
-              expect(seen.card.right).toBeLessThanOrEqual(width);
-              expect(seen.card.width).toBeLessThanOrEqual(440);
-              /* The button stands at the end edge of the card's content. */
-              expect(Math.abs(seen.card.right - 1 - 20 - seen.button.right)).toBeLessThanOrEqual(1);
-              expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-              if (width !== 320) await shot(page, `fallback-${language}-${state}-${width === 1440 ? 'wide' : 'narrow'}-${scheme}`);
-            }
-          } finally {
-            await context.close();
+    const backgrounds: Record<string, string> = {};
+    for (const scheme of ['light', 'dark'] as const) {
+      for (const [width, height] of [[1440, 900], [375, 700], [320, 640]] as const) {
+        const { page, context } = await visitor(browser, 'en-US', scheme, { width, height });
+        try {
+          for (const state of ['lost', 'updating'] as const) {
+            await page.goto(fronts[state].url + '/');
+            await expect(page.getByText(LINE[state], { exact: true })).toBeVisible();
+            const seen = await look(page);
+            expect(seen.text).toBe(LINE[state]);
+            expect(seen.touchable).toBe(0);
+            expect(seen.sign).toMatchObject({ width: 48, height: 48 });
+            /* Centred: the sign and the line share the middle of the window, and the two together the middle of its height. */
+            expect(Math.abs(seen.sign.x + seen.sign.width / 2 - width / 2)).toBeLessThanOrEqual(1);
+            expect(Math.abs(seen.line.x + seen.line.width / 2 - width / 2)).toBeLessThanOrEqual(1);
+            expect(seen.line.y).toBeGreaterThan(seen.sign.bottom);
+            expect(Math.abs((seen.sign.y + seen.line.bottom) / 2 - height / 2)).toBeLessThanOrEqual(2);
+            expect(seen.across).toBe(true);
+            backgrounds[`${scheme}`] = seen.background;
+            if (width !== 320) await shot(page, `fallback-${state}-${width === 1440 ? 'wide' : 'narrow'}-${scheme}`);
           }
+        } finally {
+          await context.close();
         }
       }
     }
+    /* The scheme of the browser decides the background, and each is one plain colour. */
+    expect(backgrounds.light).not.toBe(backgrounds.dark);
   } finally {
     await fronts.lost.stop();
     await fronts.updating.stop();

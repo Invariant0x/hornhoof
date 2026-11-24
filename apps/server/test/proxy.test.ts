@@ -24,8 +24,8 @@ import {
 
 const MiB = 1024 * 1024;
 const STARTING_JSON = '{"error":{"code":"unavailable","message":"Hornhoof is starting.","reason":"starting"}}';
-const STARTING_TEXT =
-  'Hornhoof is starting. Try again in a few seconds.\nHornhoof запускается. Попробуйте еще раз через несколько секунд.\n';
+/* The one English line every hop with no server behind it says to a client that is not a browser or a program (#2049). */
+const STARTING_TEXT = 'No connection\n';
 const UPGRADE =
   'GET /socket HTTP/1.1\r\nHost: hornhoof.test\r\nConnection: Upgrade\r\nUpgrade: x-test\r\nX-Stays: kept\r\n\r\n';
 const EARLY_LIMIT = 64 * 1024;
@@ -1491,7 +1491,7 @@ describe('what a hop says about a request', () => {
 
 describe('a request held while the target is down', () => {
   const HELD_JSON = '{"error":{"code":"unavailable","message":"Hornhoof did not answer for a minute. Try again in a few seconds.","reason":"starting"}}';
-  const HELD_TEXT = 'Hornhoof did not answer for a minute. Try again in a few seconds.\nHornhoof не ответил за минуту. Попробуйте еще раз через несколько секунд.\n';
+  const HELD_TEXT = 'No connection\n';
 
   /* A port nothing listens on yet, and a way to bring a target up on it. */
   async function targetToCome() {
