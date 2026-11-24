@@ -198,6 +198,8 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
         goalId: tasks.goalId,
         closedAt: tasks.closedAt,
         createdAt: tasks.createdAt,
+        createdByPersonId: tasks.createdByPersonId,
+        createdByAgentId: tasks.createdByAgentId,
       })
       .from(tasks)
       .where(eq(tasks.companyId, companyId)),
