@@ -78,13 +78,14 @@ A delivered picture stays out of the art folder while the art check refuses it o
 | tier 1 `idle` of `egypt-canal-builder`, `egypt-firefighter`, `egypt-medjay` and `egypt-skirmisher` | 24.11.2026, drawn SE | The idle of a look with a large item draws SE and SW. | The same sheets drawn in SE and SW |
 | tier 1 `carry` of `egypt-canal-builder`, `egypt-firefighter`, `egypt-inspector`, `egypt-keykeeper`, `egypt-relief-carver` and `egypt-royal-master` | 24.11.2026, drawn NE and SE | A carry draws NE, SE, SW and NW for every look: a mirror would move the load to the other shoulder. | The same sheets drawn in NE, SE, SW and NW |
 | every sheet of `egypt-machine-keeper` | 24.11.2026 | Withdrawn by the art pipeline: drawn with a metal spanner, which ancient Egypt did not have. The look keeps what it had. | The look drawn again with a wooden mallet |
+| house `mudbrick` v02, v10 and v13, `painted` v06, v07 and v12 | 24.11.2026 | Sent for redraw by Design's review: mudbrick v02 finished too smooth, mudbrick v10 and v13 and painted v12 with battlements or an arched window, painted v06 with oriental carpets, painted v07 with a low-walls footprint that does not match its other stages. Their houses take the next delivered variant. | The redrawn variants |
 
 ### Delivered in part
 
 These pictures are in the art folder, and their missing stages, fills or tiers come later under the same names. Until then a building shows the nearest drawn picture of its line, and construction takes a house variant with every stage drawn.
 
-* Houses drawn finished only: `villa` v02, v03 and v05 to v10 (v04 is being redrawn), `mudbrick` v13 to v15, `painted` v10.
-* Houses with stages missing: `painted` v07 (no `roof`), `painted` v15 (no `full_walls` or `roof_beams`).
+* Houses drawn finished only: `villa` v02, v03 and v05 to v10 (v04 is being redrawn), `mudbrick` v14 and v15, `painted` v10.
+* Houses with stages missing: `painted` v15 (no `full_walls` or `roof_beams`).
 * `department/temple`: finished and annex, no stages yet. `flophouse/camp`: finished only.
 * `supply/granary`: `fill_4` only. `monument` `great_pyramid`, `pyramid` and `pyramid_small`: `tier_05` only.
 
