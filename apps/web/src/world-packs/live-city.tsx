@@ -40,6 +40,7 @@ import {
   type ResidentEntity,
   type ResidentSimulation,
 } from '../world/residents';
+import { harbourPlanFor } from '../world/harbour';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../world/terrain-engine';
 import { registeredWorldPacks, worldPackFromParam } from './registry';
 
@@ -396,7 +397,7 @@ function Stage4LiveWorld() {
     const synced = syncLiveSnapshotToCity(pack, map, snapshot, null);
     cityRef.current = synced.city;
     syncRef.current = synced;
-    const sim = createResidentSimulation(pack, synced.city, snapshot);
+    const sim = createResidentSimulation(pack, synced.city, snapshot, { harbour: harbourPlanFor(pack, map, synced.city) });
     simRef.current = sim;
     const constructionSim = createConstructionSimulation(pack);
     constructionRef.current = constructionSim;
@@ -606,7 +607,7 @@ function Stage4LiveWorld() {
     cityRef.current = synced.city;
     syncRef.current = synced;
     setSyncResult(synced);
-    const sim = createResidentSimulation(pack, synced.city, snapshot);
+    const sim = createResidentSimulation(pack, synced.city, snapshot, { harbour: harbourPlanFor(pack, map, synced.city) });
     simRef.current = sim;
     setResidentsCount(sim.residents.length);
     engineRef.current?.setCityRenderState({

@@ -18,6 +18,7 @@ import {
   type RoleArchetype,
   type WorldLiveCurrentTask,
   type WorldLiveSnapshot,
+  type WorldLiveTaskFlow,
 } from '@hornhoof/protocol/world';
 import type { CityBuilding, CityState } from './city-layout';
 import { deliverySpotsForBuilding, type DeliverySpot } from './construction';
@@ -25,7 +26,7 @@ import type { Direction8, PackRoleLookSpec, WorldPackManifest } from './manifest
 import { resolvePackRoleLook } from './manifest';
 import { facingOfStep, tileCenterToWorld, worldToScreen, type TileCoord } from './coords';
 import type { CameraState, ViewportSize } from './camera';
-import type { HarbourPlan, YardSpot } from './harbour';
+import { boatCargoMaxOf, scheduleBoats, type CarrierTrip, type HarbourPlan, type YardSpot } from './harbour';
 
 export type ResidentPose =
   | 'walking'
@@ -112,9 +113,22 @@ export type ResidentEntity = {
 
 /* What the city shows beside its buildings when a resident simulation starts. */
 export type ResidentSimulationOptions = Readonly<{
-  /* The harbour the stones come to, when its art is there to draw it (#2006). */
+  /* Where the harbour the stones come to stands (#2006). */
   harbour?: HarbourPlan | null;
+  /* Whether its art is there to draw it from the start; the renderer sets it as the art loads. */
+  harbourShown?: boolean;
 }>;
+
+/* The harbour beside the city while residents walk (#2006): its boat trips for the snapshot's task flow, and the
+   moment it shows, which starts at the snapshot's time and runs with the simulation. */
+export type ResidentHarbour = {
+  plan: HarbourPlan;
+  flow: WorldLiveTaskFlow;
+  trips: readonly CarrierTrip[];
+  nowMs: number;
+  /* True while the art to draw it is there (no placeholder, #105): until then the stones come from home as before. */
+  shown: boolean;
+};
 
 export type ResidentSimulation = {
   packId: string;
@@ -142,7 +156,8 @@ export type ResidentSimulation = {
   workSpotsByBuilding: Map<string, readonly DeliverySpot[]>;
   /* How many residents each building has handed a spot, so the next takes the next spot. */
   workSpotTurns: Map<string, number>;
-  /* The harbour yard's spots, and how many residents it has handed one (#2006). */
+  /* The harbour, its yard's spots, and how many residents the yard has handed one (#2006). */
+  harbour: ResidentHarbour | null;
   yardSpots: readonly YardSpot[];
   yardSpotTurns: number;
   supplyTiles: TileCoord[];
@@ -349,9 +364,22 @@ function walksFromYard(roleClass: ResidentRoleClass, archetype: string, hasRecen
   return archetype === 'builder' || roleClass === 'turnkey' || (roleClass === 'checker' && hasRecentRework);
 }
 
+/* True when a working resident's walks start from the yard and come back to it: it has a yard spot, and the harbour
+   is drawn. */
+function usesYard(sim: Pick<ResidentSimulation, 'harbour'>, r: ResidentEntity): boolean {
+  return Boolean(sim.harbour?.shown && r.yardSpot && r.yardTile);
+}
+
 /* The road tile a working resident's walks to work start from and come back to: the yard's, else home. */
-function baseTileOf(r: ResidentEntity): TileCoord {
-  return r.yardTile ?? r.homeTile;
+function baseTileOf(sim: Pick<ResidentSimulation, 'harbour'>, r: ResidentEntity): TileCoord {
+  return usesYard(sim, r) ? r.yardTile! : r.homeTile;
+}
+
+function harbourOf(pack: WorldPackManifest, plan: HarbourPlan, snapshot: WorldLiveSnapshot, shown: boolean): ResidentHarbour {
+  /* A snapshot without the field (an older server, a test page) has no queue and no arrivals. */
+  const flow = (snapshot.taskFlow as WorldLiveTaskFlow | undefined) ?? { open: 0, arrivals: [] };
+  const at = Date.parse(snapshot.generatedAt);
+  return { plan, flow, trips: scheduleBoats(plan, flow, boatCargoMaxOf(pack)), nowMs: Number.isFinite(at) ? at : 0, shown };
 }
 
 function resolveAltarTile(pack: WorldPackManifest, city: CityState, residence: CityBuilding | undefined): TileCoord {
@@ -529,6 +557,7 @@ export function createResidentSimulation(
     deptBuildingIds,
     workSpotsByBuilding,
     workSpotTurns: new Map(),
+    harbour: options.harbour ? harbourOf(pack, options.harbour, snapshot, options.harbourShown ?? false) : null,
     yardSpots: options.harbour?.yard.spots ?? [],
     yardSpotTurns: 0,
     supplyTiles,
@@ -695,8 +724,9 @@ export function createResidentSimulation(
       liveState === 'waiting_human' || liveState === 'exhausted' || liveState === 'turn_failed'
         ? workTile
         : homeTile;
+    const fromTile = sim.harbour?.shown && yardTile ? yardTile : homeTile;
     const initialPath =
-      liveState === 'working' ? toWorkSpot(findRoadRoute(sim, yardTile ?? homeTile, workTile), workSpot) : [originTile];
+      liveState === 'working' ? toWorkSpot(findRoadRoute(sim, fromTile, workTile), workSpot) : [originTile];
     /* Stagger initial path positions deterministically so streets look bustling from frame 0,
        and spread static-state residents around shared focal spots (altar, empty supply, smoking dept). */
     const startIdx =
@@ -857,7 +887,8 @@ export function createResidentSimulation(
   return sim;
 }
 
-function applyStaticStatePose(r: ResidentEntity): void {
+/* atYard: the resident stands at the harbour yard, where a carrier dresses its next stone (#2006). */
+function applyStaticStatePose(r: ResidentEntity, atYard = false): void {
   if (r.liveState === 'machine_offline') {
     r.pose = 'sleeping';
     r.carrying = 'none';
@@ -941,13 +972,13 @@ function applyStaticStatePose(r: ResidentEntity): void {
     return;
   }
   /* Builders, turnkey generalists, road builders and day-laborers carry stones outbound and build! */
-  carrierPose(r);
+  carrierPose(r, atYard);
 }
 
 /* A carrier leaves home with a stone, lays it at the site while it pauses there, and walks back empty (#1983). */
-function carrierPose(r: ResidentEntity): void {
+function carrierPose(r: ResidentEntity, atYard: boolean): void {
   /* Back at the yard, it dresses the next stone before it carries it off (#2006). */
-  if (r.yardSpot && r.leg === 'outbound' && r.actionTimer > 0) {
+  if (atYard && r.leg === 'outbound' && r.actionTimer > 0) {
     r.carrying = 'stone';
     r.pose = 'building';
     return;
@@ -986,6 +1017,7 @@ function stepIdle(sim: ResidentSimulation, r: ResidentEntity, i: number): void {
 export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): void {
   const dt = Math.max(0.001, Math.min(0.25, dtSec));
   sim.timeSec += dt;
+  if (sim.harbour) sim.harbour.nowMs += dt * 1000;
 
   for (let i = 0; i < sim.residents.length; i++) {
     const r = sim.residents[i]!;
@@ -1038,7 +1070,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
         r.carrying = 'none';
         r.pose = 'directing';
       } else {
-        carrierPose(r);
+        carrierPose(r, usesYard(sim, r));
       }
       continue;
     }
@@ -1048,7 +1080,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
     if (!target) {
       /* At its spot by the building it works at, a resident turns to the building (#2001); at the yard, to the yard. */
       if (r.leg === 'outbound' && r.workSpot) r.facing = r.workSpot.facing;
-      if (r.leg === 'inbound' && r.yardSpot) r.facing = r.yardSpot.facing;
+      if (r.leg === 'inbound' && usesYard(sim, r)) r.facing = r.yardSpot!.facing;
       r.leg = r.leg === 'outbound' ? 'inbound' : 'outbound';
       /* Turnkey generalists rotate cleanly across all company departments. */
       if (r.roleClass === 'turnkey' && r.leg === 'outbound' && sim.allDepartmentIds.length > 1) {
@@ -1062,13 +1094,14 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
           r.workTile = spot?.approach ?? nextTile;
         }
       }
-      const nextFrom = r.leg === 'outbound' ? baseTileOf(r) : r.workTile;
-      const nextTo = r.leg === 'outbound' ? r.workTile : baseTileOf(r);
+      const yard = usesYard(sim, r);
+      const nextFrom = r.leg === 'outbound' ? baseTileOf(sim, r) : r.workTile;
+      const nextTo = r.leg === 'outbound' ? r.workTile : baseTileOf(sim, r);
       const route = findRoadRoute(sim, nextFrom, nextTo);
-      r.path = toWorkSpot(route, r.leg === 'outbound' ? r.workSpot : r.yardSpot);
+      r.path = toWorkSpot(route, r.leg === 'outbound' ? r.workSpot : yard ? r.yardSpot : null);
       r.pathIndex = 0;
-      r.actionTimer = r.roleClass === 'head' ? 1.4 : r.roleClass === 'checker' ? 1.3 : r.yardSpot && r.leg === 'outbound' ? YARD_DRESS_SEC : 0.9;
-      applyStaticStatePose(r);
+      r.actionTimer = r.roleClass === 'head' ? 1.4 : r.roleClass === 'checker' ? 1.3 : yard && r.leg === 'outbound' ? YARD_DRESS_SEC : 0.9;
+      applyStaticStatePose(r, yard);
       continue;
     }
 

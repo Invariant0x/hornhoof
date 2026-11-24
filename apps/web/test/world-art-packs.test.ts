@@ -44,7 +44,7 @@ function completeIndex(pack: WorldPackManifest): ArtIndex {
   const held = new Map(declared.filter(d => d.held).map(d => [d.path, d.held!.need]));
   const entryFor = (d: DeclaredArtFile): ArtIndexEntry | null => {
     if (d.passport === 'picture') {
-      const fpKey = d.role === 'module' ? (d.path.split('/')[1] as FootprintKey) : (stepFootprintOf(pack, d.path) ?? '1x1');
+      const fpKey = d.role === 'module' ? (d.path.split('/')[1] as FootprintKey) : (d.footprint ?? stepFootprintOf(pack, d.path) ?? '1x1');
       const fp = pack.projection.buildingFootprintsMaster4x[fpKey];
       const w = fp.diamondW + 8;
       const h = Math.min(fp.maxCanvasH, fp.diamondH + 300);

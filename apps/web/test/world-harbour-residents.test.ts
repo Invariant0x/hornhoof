@@ -57,7 +57,7 @@ describe('Residents take the stones at the harbour yard (#2006)', () => {
   it('a taken task: its resident fetches the stone from the yard, dresses it there, and carries it to its building', () => {
     const live = createHornhoofLiveFixture();
     const { city, plan } = cityOf(live);
-    const sim = createResidentSimulation(pack, city, live, { harbour: plan });
+    const sim = createResidentSimulation(pack, city, live, { harbour: plan, harbourShown: true });
     const carriers = sim.residents.filter(isCarrier);
     expect(carriers.length).toBeGreaterThan(2);
     for (const r of carriers) {
@@ -93,7 +93,7 @@ describe('Residents take the stones at the harbour yard (#2006)', () => {
       agents: base.agents.map(a => (a.liveState === 'working' ? { ...a, hasRecentRework: true } : a)),
     };
     const { city, plan } = cityOf(live);
-    const sim = createResidentSimulation(pack, city, live, { harbour: plan });
+    const sim = createResidentSimulation(pack, city, live, { harbour: plan, harbourShown: true });
     /* A checker at a building takes the stone back; one out at the gates has none to take. */
     const checkers = sim.residents.filter(r => r.roleClass === 'checker' && r.liveState === 'working' && r.hasRecentRework && r.workSpot);
     expect(checkers.length).toBeGreaterThan(0);
@@ -109,12 +109,15 @@ describe('Residents take the stones at the harbour yard (#2006)', () => {
     }
   });
 
-  it('with no harbour shown, a resident brings its stone from home as before', () => {
+  it.each([
+    ['no harbour', false],
+    ['a harbour with no art to draw it', true],
+  ])('with %s, a resident brings its stone from home as before', (_name, planned) => {
     const live = createHornhoofLiveFixture();
-    const { city } = cityOf(live);
-    const sim = createResidentSimulation(pack, city, live);
+    const { city, plan: placed } = cityOf(live);
+    const sim = createResidentSimulation(pack, city, live, planned ? { harbour: placed } : {});
     const carriers = sim.residents.filter(isCarrier);
-    for (const r of carriers) expect(r.yardSpot).toBeNull();
+    if (!planned) for (const r of carriers) expect(r.yardSpot).toBeNull();
     const homes = new Map(carriers.map(r => [r.id, r.homeTile]));
     const { ends } = walk(sim, 160);
     const home = ends.filter(e => homes.has(e.id) && e.from === 'inbound');

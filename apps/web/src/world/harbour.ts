@@ -156,6 +156,11 @@ function groundOf(pack: WorldPackManifest, map: GeneratedWorldMap, city: CitySta
   };
 }
 
+/* The harbour of a pack that has art slots for one; a pack without them never shows a harbour, so none is planned. */
+export function harbourPlanFor(pack: WorldPackManifest, map: GeneratedWorldMap, city: CityState): HarbourPlan | null {
+  return pack.art?.harbour ? planHarbour(pack, map, city) : null;
+}
+
 /* Where the harbour stands for this city, or null when there is nowhere for it. On the boat-water bank nearest the
    city centre whose water lies on the side the camera sees; with no such bank, a caravan gate at the city's edge. */
 export function planHarbour(pack: WorldPackManifest, map: GeneratedWorldMap, city: CityState): HarbourPlan | null {

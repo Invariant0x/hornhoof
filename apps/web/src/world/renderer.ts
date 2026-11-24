@@ -71,6 +71,8 @@ import {
   type ResidentSimulation,
 } from './residents';
 import { renderResidentsFallback2D, renderResidentsToPixi, type ResidentArtContext } from './residents-renderer';
+import { boatCargoMaxOf } from './harbour';
+import { harbourArtReady } from './harbour-renderer';
 import { PlantRenderer, type PlantStats } from './plant-renderer';
 import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas, smoothPixelsToCanvas, startSmoothChunkBake, type SmoothChunkBake } from './smooth-terrain-baker';
 import { loadTerrainArt, terrainArtFor, type ArtPixels, type LoadedTerrainArt } from './terrain-art';
@@ -1328,6 +1330,9 @@ export class IsometricWorldEngine {
       /* Residents drawn from a walking sheet walk its stride per cycle; without art the speed stays their own. */
       this.residentSim.walkSpeedOf = r => residentWalkSpeed(this.pack, this.artLibrary.index, r);
       this.residentSim.standsStillOf = r => residentStandsStill(this.pack, this.artLibrary.index, r);
+      /* The harbour shows, and its carriers walk from the yard, once its art is in (#2006). */
+      const harbour = this.residentSim.harbour;
+      if (harbour) harbour.shown = harbourArtReady(this.pack, this.artLibrary.index, harbour.plan, boatCargoMaxOf(this.pack));
       stepResidentSimulation(this.residentSim, dtMs / 1000);
       residentsAnimated = true;
       if (this.pack.art) {

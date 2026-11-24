@@ -235,6 +235,17 @@ A missing animation falls back to `walk` for moving states and to `idle` for the
 
 `loops/<loop>.png` with a sheet passport, one row of frames: `crane`, `hoist_block`, `dust`, `smoke`, `water`, `awning`, `celebration`, and for people `sleep_z` (section 7). On a building drawn from its picture, a loop is placed at the point named by its `attach`: `top` (the picture's `topAnchor`, or its roof line), `awning` (`awningAnchor`), `door` (`door`) or `ground` (the lot centre). Loops of buildings still on placeholders stay placeholders.
 
+## 8a. The harbour
+
+Where the work comes from (#2006): a task created comes down the river as a stone on a cargo boat, waits in the harbour's stone yard (the open queue) and is carried from there to its building. A pack declares the harbour in its catalog (`harbour: { yards: [...] }`). There is no placeholder: until the art folder holds every file a harbour needs, the engine shows no harbour at all, and the stones come from the residents' homes as before. Every file below is optional to the check.
+
+* **Quay and pier pieces:** `harbour/quay_<s>.png`, `harbour/quay_end_<s>1.png` and `_<s>2.png` (the end higher on screen, then the other), `harbour/pier_root_<s>.png`, `harbour/pier_<s>.png`, `harbour/pier_head_<s>.png`, each a 1x1 picture with a picture passport. `<s>` is `a` where the bank runs from the top left to the bottom right on screen with the water lower left, `b` where it runs the other diagonal; both are drawn, never mirrored. A pier head may name `mooring` [x, y] on its water line; pier and pier head may name `workSlots`.
+* **Cargo boat:** sheets `harbour/boat_sail.png`, `harbour/boat_moored.png` and `harbour/boat_unload.png` (unload optional; moored stands in), with a sheet passport whose `anchor` is the centre of the hull at the water line and whose `directions` are `NE`, `SE`, `SW` and `NW`, one row each; the check rejects a boat sheet without all four. Cargo layers `harbour/boat_cargo_1.png` to `_4.png` have the same frame and rows, one frame per row, laid over every frame of the boat: 1 to 4 blocks in one row on deck. The engine never shows more blocks than the pack's `harbour.boatCargoMax` (4 when unset).
+* **Stone yard:** `harbour/yard/<footprint>/fill_0.png` to `fill_5.png` for each footprint the catalog lists, one canvas for every stage, the picture passport of that footprint. `fill_0` is the empty yard; the engine steps up a picture at 1, 3, 6, 10 and 15 stones waiting.
+* **No river:** with `harbour.gate`, `harbour/gate_<s>.png` (2x2) and the caravan sheet `harbour/caravan_walk.png` in the same four diagonals; the yard is the same.
+
+What a harbour needs before it is shown: `quay_<s>`, `pier_root_<s>`, `pier_head_<s>` (and `pier_<s>` for a pier longer than two tiles), `boat_sail`, `boat_moored`, `boat_cargo_1` to `boat_cargo_<boatCargoMax>`, and the six fill pictures of its yard's size; by land, the gate of its orientation, the caravan sheet and the yard.
+
 ## 9. Ground, roads, decals and plants
 
 The terrain and plant layers load these files straight from the pack's art folder, not through `art-index.json`. The pack names every file in its manifest: `terrainArt` for ground, transitions, roads and liquid, and the `art` list of each plant kind (one entry per drawn variant). A slot whose file is missing keeps its procedural look. The paths below are the usual layout; the manifest is what counts.

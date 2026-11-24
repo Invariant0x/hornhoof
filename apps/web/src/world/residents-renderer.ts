@@ -19,6 +19,7 @@ import {
 import { parseArtTint, type DisplayRunPool, type WorldArtLibrary } from './art-runtime';
 import type { CityBuilding, CityState } from './city-layout';
 import { tileCenterToWorld, tileTopVertexToWorld } from './coords';
+import { drawHarbourArtPixi } from './harbour-renderer';
 import type { AnimationDetailLevel, WorldPackManifest } from './manifest';
 import type { ResidentEntity, ResidentSimulation } from './residents';
 
@@ -803,6 +804,8 @@ export function renderResidentsToPixi(
         }
       }
     }
+    /* The harbour has no placeholder: drawn only from its art (#2006). */
+    if (art && artIndex && sim.harbour?.shown) drawHarbourArtPixi(art, pack, artIndex, sim.harbour, sim.timeSec, visibleRect, tileW, tileH);
   }
 
   /* Viewport-cull, skip passersby occluded behind tall front buildings, and depth-sort visible residents. */

@@ -32,6 +32,7 @@ import {
   type ResidentEntity,
   type ResidentSimulation,
 } from '../world/residents';
+import { harbourPlanFor } from '../world/harbour';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../world/terrain-engine';
 import { useShellTop } from '../ui/shellBars';
 import { orchestratorStatus, useMapRoom } from './Map';
@@ -264,7 +265,7 @@ export function WorldMapView({
     cityRef.current = synced.city;
     syncRef.current = synced;
 
-    const sim = createResidentSimulation(pack, synced.city, snapshotRef.current);
+    const sim = createResidentSimulation(pack, synced.city, snapshotRef.current, { harbour: harbourPlanFor(pack, map, synced.city) });
     simRef.current = sim;
     setResidentsTick(n => n + 1);
 
@@ -407,7 +408,7 @@ export function WorldMapView({
     const synced = syncLiveSnapshotToCity(pack, map, snapshot, cityRef.current);
     cityRef.current = synced.city;
     syncRef.current = synced;
-    const sim = createResidentSimulation(pack, synced.city, snapshot);
+    const sim = createResidentSimulation(pack, synced.city, snapshot, { harbour: harbourPlanFor(pack, map, synced.city) });
     simRef.current = sim;
     setResidentsTick(n => n + 1);
     const constructionSim = createConstructionSimulation(pack);

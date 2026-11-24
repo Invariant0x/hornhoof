@@ -62,5 +62,7 @@ export function egyptArtCatalog(roleLooks: Readonly<Record<string, PackRoleLookS
     loops: ['crane', 'hoist_block', 'dust', 'smoke', 'water', 'awning', 'celebration'],
     /* Statues and pyramids carry their scaffolds and ramps in their own stages (order v3, 3.10). */
     ownConstruction: ['statue', 'monument'],
+    /* The Nile harbour (#2006, checklist H1 to H6); the land gate is for worlds without a river. */
+    harbour: { yards: ['2x2', '3x3', '4x4'] },
   };
 }
