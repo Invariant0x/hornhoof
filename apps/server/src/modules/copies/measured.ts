@@ -59,6 +59,11 @@ export function gaveUpOf(ctx: Ctx, machineId: string): GaveUpDetail | undefined 
   return gaveUpDetails.get(ctx)?.get(machineId);
 }
 
+/* Every copy given up, by its machine's id. */
+export function gaveUpAll(ctx: Ctx): [string, GaveUpDetail][] {
+  return [...(gaveUpDetails.get(ctx) ?? [])];
+}
+
 /* What a former leader's keeper says it waits on while saving what it did, and since when. */
 const savingDetails = new WeakMap<Ctx, Map<string, SavingDetail>>();
 
