@@ -40,6 +40,9 @@ const STATEMENT = /^[ \t]*(?:import|export)\b[^;'"`]*?\bfrom\s*(['"])([^'"\n]+)\
 const BARE_IMPORT = /^[ \t]*import\s*(['"])([^'"\n]+)\1/gm;
 const CALLED = /\b(?:import|require|import\.meta\.resolve|(?:vi|jest)\.(?:mock|doMock|unmock|doUnmock|importActual|importMock|requireActual|requireMock))\s*\(\s*(['"`])([^'"`\n]+)\1/g;
 const COMPUTED = /\b(?:import|require|import\.meta\.resolve)\s*\(\s*(?:[^'"`\s)]|`[^`]*\$\{)/;
+const COMPUTED_CALLS = new RegExp(COMPUTED.source, 'g');
+/* A computed import whose text starts with a fixed relative folder, as import(`./${id}.js`): it can only load what that folder holds. */
+const FOLDER_TEMPLATE = /^(?:import|require|import\.meta\.resolve)\s*\(\s*`(\.{1,2}\/(?:[^`$]*\/)?)\$\{/;
 const STRING = /(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g;
 const GLOB_IMPORT = /\bimport\.meta\.glob\s*\(\s*\[?\s*(['"`])([^'"`\n]+)\1/g;
 /* A type alone is gone before anything runs, as Vitest's graph knows too. */
@@ -219,8 +222,17 @@ function globImports(tree: Tree, from: string, text: string): string[] {
 }
 function scanCode(tree: Tree, from: string, source: string): Scan {
   const runs = new Set<string>(), many = new Set<string>(), text = source.replace(TYPE_ONLY, '');
-  let opaque = COMPUTED.test(text);
+  let opaque = false;
+  for (const call of text.matchAll(COMPUTED_CALLS)) {
+    const prefix = FOLDER_TEMPLATE.exec(text.slice(call.index!))?.[1];
+    const held = prefix ? tree.under(posix.join(posix.dirname(from), prefix).replace(/\/$/, '')) : [];
+    /* A folder with nothing in it tells nothing about what the call loads, so it stays unreadable as any computed import. */
+    if (held.length) for (const path of held) many.add(path);
+    else opaque = true;
+  }
   for (const pattern of [STATEMENT, BARE_IMPORT, CALLED]) for (const [, , literal] of text.matchAll(pattern)) {
+    /* A template with a hole is a computed import, read above. */
+    if (literal!.includes('${')) continue;
     const found = importedBy(tree, from, literal!);
     if (found) for (const path of found) runs.add(path);
     else opaque = true;
