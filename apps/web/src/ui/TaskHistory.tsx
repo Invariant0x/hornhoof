@@ -196,7 +196,7 @@ function currentWaits(t: Messages, task: TaskDetail, language: Language, asksYou
     if (wait.nextCheck) return { at: wait.since, title };
     const reason = recorded && (wait.kind === 'run' || wait.kind === 'work') ? recorded.reason : null;
     const deadline = until && (setter ? t.tracker.wait.setBy(setter, until) : t.tracker.wait.until(until));
-    return { at: wait.since, title: t.tasks.waitStep(wait.who?.name ?? (setter || t.window.hornhoof), title), note: [reason, deadline, failureTodo(t, wait)].filter(Boolean).join(' · ') };
+    return { at: wait.since, title: t.tasks.waitStep(wait.who?.name || setter || t.window.hornhoof, title), note: [reason, deadline, failureTodo(t, wait)].filter(Boolean).join(' · ') };
   });
 }
 

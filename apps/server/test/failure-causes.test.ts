@@ -1,7 +1,7 @@
 import { parseNodeMessage } from '@hornhoof/protocol';
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { jobs, requests, subscriptions, testParts, testRuns } from '../src/db/schema.js';
+import { jobs, requests, subscriptions, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { oldRefusal, runEnd } from '../src/modules/testruns/runs.js';
 import { as, until } from './helpers.js';
 import { company, done, nextOf } from './test-runs-company.js';
@@ -44,12 +44,34 @@ describe('a refusal is a hint, never a failure', () => {
     expect(prompt).toMatch(/Work run 1 was refused before it started, so nothing ran: this is no result and no failure\./);
     expect(prompt).toContain('Name the test files of your change to run them here.');
     expect(prompt).not.toMatch(/Part 1 of 1 failed/);
-    expect(JSON.parse((await call('work_run', { run: 1 })).text)).toMatchObject({ run: 1, status: 'refused', parts: [{ part: 1, status: 'refused' }] });
+    expect(JSON.parse((await call('work_run', { run: 1 })).text)).toMatchObject({ run: 1, status: 'refused', parts: [{ part: 1, status: 'refused', why: 'Hornhoof refused it before it started, so nothing ran', end: REFUSAL }] });
     expect(await failures(c)).toEqual([]);
     /* The agent's own wait on the work stays a wait, with no failure in it. */
     expect((await call('track_work', { task: 1, work: 'Release check', nextCheck: new Date(Date.now() + 3_600_000).toISOString() })).error).toBe(false);
     expect(await factsOf(c)).toEqual([expect.objectContaining({ kind: 'work' })]);
     expect(await failures(c)).toEqual([]);
+  });
+
+  it('says of a refused part that it was refused, with its words, beside a part of the same run that failed', async () => {
+    const c = await company();
+    const [ivan, ann] = [await c.machine(c.ceo, 'dev-mac'), await c.machine(c.ann, 'ann-pc')];
+    const { call } = await c.turn(c.bruno);
+    expect((await call('run_work', { command: 'npm test --workspaces --shard={part}/{parts}', parts: 2 })).error).toBe(false);
+    const [one, two] = [await nextOf(ivan.node, 'tests.run'), await nextOf(ann.node, 'tests.run')];
+    const [refusedOn, failedOn] = one.part === 1 ? [ivan, ann] : [ann, ivan];
+    const [first, second] = one.part === 1 ? [one, two] : [two, one];
+    refusedOn.node.send(done(first, { ok: false, exitCode: null, error: 'refused', commit: null, log: REFUSAL }));
+    await nextOf(refusedOn.node, 'tests.ack');
+    failedOn.node.send(done(second, { ok: false, exitCode: 1, error: 'failed', commit: null, log: 'one test failed\n' }));
+    await nextOf(failedOn.node, 'tests.ack');
+    await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
+    const prompt = (await c.wokeWith(c.bruno.id))!;
+    expect(prompt).toMatch(/Part 1 of 2 was refused[^\n]*: Hornhoof refused it before it started, so nothing ran\./);
+    expect(prompt).toMatch(/Part 2 of 2 failed[^\n]*: exit code 1\./);
+    expect(JSON.parse((await call('work_run', { run: 1 })).text)).toMatchObject({ parts: [
+      { part: 1, status: 'refused', why: 'Hornhoof refused it before it started, so nothing ran', end: REFUSAL },
+      { part: 2, status: 'failed', why: 'exit code 1', end: 'one test failed\n' },
+    ] });
   });
 
   it('fails the task for a started run that failed, keeps it failed through a refused run, and clears it with a green one', async () => {
@@ -116,9 +138,32 @@ describe('a stuck agent asking for help', () => {
     await c.db.update(requests).set({ status: 'resolved_internal', answer: 'Use the other branch.' }).where(eq(requests.id, asked!.id));
     expect(await failures(c)).toEqual([]);
   });
+
+  it('names who is to answer, though nothing else on the task names them', async () => {
+    const c = await company();
+    await c.db.insert(requests).values({ companyId: c.task.companyId, taskId: c.task.id, agentId: c.bruno.id, kind: 'stuck', text: 'I cannot go on.', decisionTopic: 'task', audience: 'internal', triageAgentId: c.sam.id });
+    expect(await failures(c)).toEqual([expect.objectContaining({ failure: 'stuck', who: expect.objectContaining({ kind: 'agent', id: c.sam.id, name: 'Sam' }) })]);
+  });
 });
 
 describe('turn errors on a task', () => {
+  it('fail it for the turns of whoever holds it now, as a reviewer does, and not for its executor while another holds it', async () => {
+    const c = await company();
+    const [sub] = await c.db.select().from(subscriptions);
+    const base = Date.now();
+    const at = (minutes: number) => new Date(base + minutes * 60_000);
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date(base) }).where(eq(jobs.taskId, c.task.id));
+    /* Sam reads Bruno's work: Sam holds the task now, and Bruno stays the one who does it. */
+    await c.db.update(tasks).set({ assigneeAgentId: c.sam.id, executorAgentId: c.bruno.id }).where(eq(tasks.id, c.task.id));
+    const crashed = { kind: 'unknown' as const, retryable: false, text: 'The program stopped.' };
+    const turn = (agentId: string, minute: number) =>
+      c.db.insert(jobs).values({ companyId: c.task.companyId, subscriptionId: sub!.id, agentId, taskId: c.task.id, kind: 'conversation', prompt: 'Work.', timeoutMs: 1000, status: 'failed', failure: crashed, createdAt: at(minute), finishedAt: at(minute) });
+    await turn(c.bruno.id, 1);
+    expect(await failures(c)).toEqual([]);
+    await turn(c.sam.id, 2);
+    expect(await failures(c)).toEqual([expect.objectContaining({ kind: 'external', failure: 'turn' })]);
+  });
+
   it('fail the task only when no turn takes it on by itself, and a turn that goes well clears it', async () => {
     const c = await company();
     const [sub] = await c.db.select().from(subscriptions);

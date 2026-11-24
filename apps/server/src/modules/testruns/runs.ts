@@ -110,6 +110,8 @@ const ENDED_HOW: Record<string, (run: Pick<Run, 'timeoutMs' | 'commitSha'>, p: P
   subscription_removed: () => 'its machine lost the plan its node ran for',
   no_machine: () => `no machine was free for it within ${took(WAIT_MS)}`,
   no_repository: () => 'the repository is no longer set',
+  refused: () => 'Hornhoof refused it before it started, so nothing ran',
+  environment_missing: () => 'the product has no test environment at this commit, so nothing ran',
   [COMMIT_MISMATCH]: (run, p) =>
     p.commit
       ? `it checked ${p.commit}, not the pinned commit ${run.commitSha}, so the run proves nothing about that commit`
@@ -161,6 +163,9 @@ function refusedAccount(run: Run, parts: Part[]): string {
   return [`${named(run)} was refused before it started, so nothing ran: this is no result and no failure.${pinLine(run)}`, ...said, '', readAgain(run)].join('\n');
 }
 
+/* How a part ended, after its number: a refused one ran nothing, which is no failure. */
+const partEnded = (run: Run, p: Part): string => (p.status === 'passed' ? stateOf(run, 'passed') : p.status === 'refused' ? 'was refused' : 'failed');
+
 /* Hornhoof's account of a run that ended: each part, where it ran and how long, the end of what failed, and the files
    on the task. */
 function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set<string>): string {
@@ -170,7 +175,7 @@ function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set
     const time = p.startedAt && p.finishedAt ? ` in ${took(p.finishedAt.getTime() - p.startedAt.getTime())}` : '';
     const at = p.commit ? `, at ${p.commit.slice(0, 12)}` : '';
     const why = p.status === 'passed' ? '' : `: ${endedBy(run, p)}`;
-    lines.push(`Part ${p.part} of ${run.parts} ${p.status === 'passed' ? stateOf(run, 'passed') : 'failed'}${where}${time}${at}${why}.${ranAgain(p.lost)}`);
+    lines.push(`Part ${p.part} of ${run.parts} ${partEnded(run, p)}${where}${time}${at}${why}.${ranAgain(p.lost)}`);
   }
   const failed = parts.filter(p => p.status !== 'passed' && p.tail);
   for (const p of failed.slice(0, SHOWN_FAILURES)) lines.push('', `The end of part ${p.part}:`, '', quote(p.tail));
@@ -849,7 +854,7 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: Run
       log: has.has(logName(run, p.part)) ? logName(run, p.part) : null,
       ...madeView(run, p.part, has),
       ...(p.lost.length ? { ranAgain: p.lost.map(lostLine) } : {}),
-      ...(p.status === 'failed' && p.tail ? { end: p.tail } : {}),
+      ...((p.status === 'failed' || p.status === 'refused') && p.tail ? { end: p.tail } : {}),
     })),
   };
 }

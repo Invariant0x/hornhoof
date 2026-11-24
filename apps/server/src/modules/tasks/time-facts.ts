@@ -2,7 +2,7 @@ import { externalWaitFact, validSourceKey, type TaskWaitFact as WaitFact, type W
 import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { jobs, people, requests, taskEvents, testParts, testRuns } from '../../db/schema.js';
+import { agents, jobs, people, requests, taskEvents, testParts, testRuns } from '../../db/schema.js';
 import { candidates } from './decision-people.js';
 import { NO_FAILURE, turnFailed } from './failure-records.js';
 import { decisionOwner, openPersonRequests } from './decisions.js';
@@ -97,7 +97,8 @@ async function failedTurns(db: Ctx['db'], open: TimedTask[], since: Map<string, 
   const last = await db.selectDistinctOn([jobs.taskId, jobs.agentId], ended)
     .from(jobs).where(and(inArray(jobs.taskId, ids), eq(jobs.kind, 'conversation'), inArray(jobs.status, ['done', 'failed']), or(isNull(jobs.error), notInArray(jobs.error, NO_FAILURE))))
     .orderBy(jobs.taskId, jobs.agentId, desc(sql`coalesce(${jobs.finishedAt}, ${jobs.createdAt})`), desc(jobs.createdAt));
-  const holders = new Map(open.map(t => [t.id, t.executorAgentId ?? t.assigneeAgentId]));
+  /* Whoever holds it now, as a reviewer does, before whoever does its work. */
+  const holders = new Map(open.map(t => [t.id, t.assigneeAgentId ?? t.executorAgentId]));
   const at = (j: { finishedAt: Date | null; createdAt: Date }) => j.finishedAt ?? j.createdAt;
   const own = last.filter(j => j.taskId && holders.get(j.taskId) === j.agentId && at(j) >= (since.get(j.taskId) ?? new Date(0)));
   if (!own.some(j => j.status === 'failed')) return new Map();
@@ -109,22 +110,24 @@ async function failedTurns(db: Ctx['db'], open: TimedTask[], since: Map<string, 
 
 export type WaitNames = { agent(id: string): string | undefined; task(id: string): number | undefined };
 
-type StuckAsk = { triage: string | null; at: Date };
+type StuckAsk = { triage: string | null; triageName: string | null; at: Date };
 
-/* An agent stuck on its task asked for help: the task fails until someone answers. The first open ask of each task counts. */
+/* An agent stuck on its task asked for help: the task fails until someone answers. The first open ask of each task counts,
+   with the name of who is to answer, which nothing else on the task may name. */
 async function stuckAsks(db: Ctx['db'], openIds: string[]): Promise<Map<string, StuckAsk>> {
   if (!openIds.length) return new Map();
-  const asks = await db.select({ taskId: requests.taskId, triage: requests.triageAgentId, at: requests.createdAt }).from(requests)
+  const asks = await db.select({ taskId: requests.taskId, triage: requests.triageAgentId, triageName: agents.name, at: requests.createdAt }).from(requests)
+    .leftJoin(agents, eq(agents.id, requests.triageAgentId))
     .where(and(inArray(requests.taskId, openIds), eq(requests.kind, 'stuck'), eq(requests.status, 'open'))).orderBy(asc(requests.createdAt));
   return asks.reduce((byTask, ask) => (byTask.has(ask.taskId) ? byTask : byTask.set(ask.taskId, ask)), new Map<string, StuckAsk>());
 }
 
 /* The failures of a task that need someone: its holder's last turn failed, or an agent stuck on it asked for help. */
 function failureFacts(turn: Date | undefined, asked: StuckAsk | undefined, names: WaitNames): WaitFact[] {
-  const who = (id: string): Who => ({ kind: 'agent', id, name: names.agent(id) ?? '' });
+  const who = (id: string, name: string | null): Who => ({ kind: 'agent', id, name: name ?? names.agent(id) ?? '' });
   return [
     ...(turn ? [{ kind: 'external' as const, who: null, reason: null, since: turn.toISOString(), failure: 'turn' as const }] : []),
-    ...(asked ? [{ kind: 'external' as const, who: asked.triage ? who(asked.triage) : null, reason: null, since: asked.at.toISOString(), failure: 'stuck' as const }] : []),
+    ...(asked ? [{ kind: 'external' as const, who: asked.triage ? who(asked.triage, asked.triageName) : null, reason: null, since: asked.at.toISOString(), failure: 'stuck' as const }] : []),
   ];
 }
 
