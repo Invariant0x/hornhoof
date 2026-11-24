@@ -78,4 +78,38 @@ describe('Antigravity terminal transcripts', () => {
     expect(read({ type: 'GENERIC', step_index: 2, status: 'DONE', content: 'source' }).ended).toEqual(['1:0']);
   });
 
+  it('closes a backgrounded running tool at the next planner response so a later failed MCP call closes itself', () => {
+    const read = agySteps();
+    expect(read({ step_index: 1, type: 'PLANNER_RESPONSE', status: 'DONE', tool_calls: [{ name: 'run_command', args: { CommandLine: 'npm test' } }] }).began).toEqual([
+      { id: '1:0', name: 'run_command' },
+    ]);
+    expect(read({ step_index: 2, type: 'GENERIC', status: 'RUNNING', content: 'Tool is running as a background task' })).toEqual({
+      events: [],
+      began: [],
+      ended: [],
+    });
+    const next = read({
+      step_index: 3,
+      type: 'PLANNER_RESPONSE',
+      status: 'DONE',
+      tool_calls: [{ name: 'call_mcp_tool', args: { ServerName: 'hornhoof', ToolName: 'track_work', Arguments: { task: 12 } } }],
+    });
+    expect(next.ended).toEqual(['1:0']);
+    expect(next.began).toEqual([{ id: '3:0', name: 'call_mcp_tool' }]);
+    const failed = read({ step_index: 4, type: 'GENERIC', status: 'ERROR', content: 'Encountered error in step execution: task is paused' });
+    expect(failed.ended).toEqual(['3:0']);
+    expect(failed.events).toEqual([{ kind: 'tool_result', ok: false, summary: 'Encountered error in step execution: task is paused' }]);
+    const final = read({ step_index: 5, type: 'PLANNER_RESPONSE', status: 'DONE', content: 'Recorded progress.' });
+    expect(final).toEqual({ events: [{ kind: 'text', text: 'Recorded progress.' }], began: [], ended: [], answered: true });
+  });
+
+  it('closes a tool call whose result never arrived once the planner answers', () => {
+    const read = agySteps();
+    expect(read({ step_index: 1, type: 'PLANNER_RESPONSE', status: 'DONE', tool_calls: [{ name: 'call_mcp_tool', args: { ToolName: 'test_run' } }] }).began).toEqual([
+      { id: '1:0', name: 'call_mcp_tool' },
+    ]);
+    const final = read({ step_index: 2, type: 'PLANNER_RESPONSE', status: 'DONE', content: 'Finished.' });
+    expect(final).toEqual({ events: [{ kind: 'text', text: 'Finished.' }], began: [], ended: ['1:0'], answered: true });
+  });
+
 });
