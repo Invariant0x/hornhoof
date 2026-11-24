@@ -2007,7 +2007,7 @@ describe('checking work before admission', () => {
     expect(existsSync(sentinel)).toBe(false);
     expect(server.received.filter(frame => frame.type === 'check.acquire')).toEqual([]);
     expect(server.received.filter(frame => frame.type === 'tests.started')).toEqual([]);
-    expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'checking-work')).toMatchObject({ ok: false, exitCode: null, error: 'failed', commit: null, log: expect.stringContaining('запусти через run_tests') });
+    expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'checking-work')).toMatchObject({ ok: false, exitCode: null, error: 'refused', commit: null, log: expect.stringContaining('запусти через run_tests') });
   });
 
   it('refuses a product selection labelled work before its lifecycle starts', async () => {
@@ -2031,7 +2031,7 @@ describe('checking work before admission', () => {
     await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'product-work'));
     expect(existsSync(sentinel)).toBe(false);
     expect(server.received.filter(frame => frame.type === 'check.acquire' || frame.type === 'tests.started')).toEqual([]);
-    expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'product-work')).toMatchObject({ ok: false, exitCode: null, log: expect.stringMatching(/^запусти через run_tests\n/) });
+    expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'product-work')).toMatchObject({ ok: false, exitCode: null, error: 'refused', log: expect.stringMatching(/^запусти через run_tests\n/) });
   });
 
   it.each(['npm ci', 'echo prepared'])('keeps non-check work %s inside one existing slot', async command => {
