@@ -1,5 +1,5 @@
 {
-  "id": "7b0b24fb-014d-4d09-b197-0397ee5f7f15",
+  "id": "f87c021c-57fc-4ab5-a45a-d0c2df4ff675",
   "prevId": "941e2f62-df6d-447c-9415-d0bf0300fc0f",
   "version": "7",
   "dialect": "postgresql",
@@ -2734,6 +2734,215 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": true
+    },
+    "public.ci_dispatches": {
+      "name": "ci_dispatches",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "turn_id": {
+          "name": "turn_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "commit": {
+          "name": "commit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "branch": {
+          "name": "branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workflow": {
+          "name": "workflow",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'waiting'"
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "release_id": {
+          "name": "release_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "settled_at": {
+          "name": "settled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "ci_dispatches_waiting": {
+          "name": "ci_dispatches_waiting",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "state = 'waiting'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "ci_dispatches_company_id_companies_id_fk": {
+          "name": "ci_dispatches_company_id_companies_id_fk",
+          "tableFrom": "ci_dispatches",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ci_dispatches_turn_id_turns_id_fk": {
+          "name": "ci_dispatches_turn_id_turns_id_fk",
+          "tableFrom": "ci_dispatches",
+          "tableTo": "turns",
+          "columnsFrom": [
+            "turn_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ci_dispatches_task_id_tasks_id_fk": {
+          "name": "ci_dispatches_task_id_tasks_id_fk",
+          "tableFrom": "ci_dispatches",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ci_dispatches_agent_id_agents_id_fk": {
+          "name": "ci_dispatches_agent_id_agents_id_fk",
+          "tableFrom": "ci_dispatches",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ci_dispatches_release_id_turn_releases_id_fk": {
+          "name": "ci_dispatches_release_id_turn_releases_id_fk",
+          "tableFrom": "ci_dispatches",
+          "tableTo": "turn_releases",
+          "columnsFrom": [
+            "release_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "ci_dispatches_company_commit": {
+          "name": "ci_dispatches_company_commit",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "commit"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "ci_dispatches_commit": {
+          "name": "ci_dispatches_commit",
+          "value": "\"ci_dispatches\".\"commit\" ~ '^[0-9a-f]{40}$'"
+        },
+        "ci_dispatches_state": {
+          "name": "ci_dispatches_state",
+          "value": "\"ci_dispatches\".\"state\" IN ('waiting', 'recorded', 'ended')"
+        },
+        "ci_dispatches_settled": {
+          "name": "ci_dispatches_settled",
+          "value": "(\"ci_dispatches\".\"state\" = 'waiting') = (\"ci_dispatches\".\"settled_at\" IS NULL)"
+        },
+        "ci_dispatches_recorded": {
+          "name": "ci_dispatches_recorded",
+          "value": "(\"ci_dispatches\".\"state\" = 'recorded') = (\"ci_dispatches\".\"release_id\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
     },
     "public.companies": {
       "name": "companies",

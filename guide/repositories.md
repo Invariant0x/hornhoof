@@ -37,7 +37,15 @@ That key then goes to the machines of the department's agents, as any repository
 
 Each agent's turn carries it to the machine that runs the agent. So it lands on the machines of whoever's subscriptions serve the department. Give it a fine-grained token for this one repository.
 
-Test runs take it along too. [Tests and heavy work on free machines](free-machines.md#where-does-the-repository-token-go-during-a-test-run) says where. The server uses it as well, to read from the repository which commit a branch is at.
+Test runs take it along too. [Tests and heavy work on free machines](free-machines.md#where-does-the-repository-token-go-during-a-test-run) says where. The server uses it as well, to read from the repository which commit a branch is at, and to read and start the repository's CI for a release.
+
+## What does a release need from the repository's CI?
+
+A release rests on the repository's GitHub Actions runs of its exact commit, which Hornhoof reads with the repository's token. Every job of every run must have finished with success. A commit status or the check of another app proves nothing, as anyone who can write to the repository can post one. A repository with no workflow file and no check at all releases with no run. A repository on another host than github.com cannot be released, because Hornhoof reads no CI there.
+
+Pushing a turn branch starts no workflow. Where no run is on the commit of a release, `release_turn` starts the repository's release workflow on the turn branch itself, once for each commit: the one workflow that can be started by hand (`workflow_dispatch`) and whose latest run on the default branch was green. With none, or with more than one, the release is refused and says which; a name for the release workflow in the repository's settings is not there yet. The minute round then records the release when CI is green on that exact commit and tells the head.
+
+The token needs **Actions: Read and write** and **Contents: Read** on a fine-grained token, `repo` on a classic one. Without the right to write Actions, the release is refused and says so.
 
 ## Whose name goes on the commits?
 

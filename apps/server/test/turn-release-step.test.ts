@@ -72,10 +72,11 @@ describe('the release step of a turn', () => {
   it("asks in its description for no run: the release relies on the repository's CI for the exact commit", async () => {
     const f = await releasing();
     const tool = (await f.client.listTools()).tools.find(found => found.name === 'release_turn')!;
-    expect(tool.description).toMatch(/The release relies on the repository's CI for that exact commit, which Hornhoof reads from the repository's host, never from your word: green CI records it with no run/);
+    expect(tool.description).toMatch(/The release relies on the repository's CI for that exact commit: the GitHub Actions runs of it, which Hornhoof reads from github\.com, never from your word; commit statuses and the checks of other apps prove nothing\. Green CI, every job of every run finished with success, records it with no run/);
+    expect(tool.description).toMatch(/Where no Actions run is on the commit yet, it starts the repository's release workflow on the turn branch itself, once for each commit, which must be the head of the branch, and answers 'CI started, run N; the release records when it's green'/);
     expect(tool.description).not.toMatch(/whole run|run_tests|nothing reused/);
     expect(tool.inputSchema.properties).not.toHaveProperty('runId');
-    expect(tool.inputSchema.properties?.commit).toMatchObject({ description: "The exact commit of the turn branch the repository's CI checked." });
+    expect(tool.inputSchema.properties?.commit).toMatchObject({ description: "The exact commit of the turn branch: its head, where CI is to start on it, or one the repository's CI checked." });
   });
 
   it('refuses a commit the turn branch does not hold, or a main that already holds it', async () => {

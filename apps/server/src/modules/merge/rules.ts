@@ -73,6 +73,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   autonomous_releases: { kind: 'add', topic: 'protected', task: 'task_id', hereOnly: ['verdict_event_id'] },
   /* The record of a turn's release stands for the approval of its commit, by a person or by the autonomous release log. */
   turn_releases: { kind: 'add', topic: 'protected', task: 'task_id' },
+  /* The release workflow the server started on a commit, once for each commit: one the leader lacks is added, so a commit is never started twice. */
+  ci_dispatches: { kind: 'add', topic: 'work', task: 'task_id' },
 
   agent_events: { kind: 'log', topic: 'work', match: 'id', sequence: 'seq' },
   task_events: { kind: 'log', topic: 'work', match: 'uuid', sequence: 'id', task: 'task_id' },

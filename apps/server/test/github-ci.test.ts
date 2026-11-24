@@ -3,17 +3,19 @@ import { githubCiReader } from '../src/modules/testruns/github-ci.js';
 import { GitHubLimits } from '../src/modules/testruns/github-limit.js';
 
 const COMMIT = 'c'.repeat(40);
+const DEFAULT = 'a'.repeat(40);
 const REPO = { url: 'https://github.com/acme/shop.git', token: 'ghp_synthetic_token_for_tests_only' };
 const RESET_UNIX = 1_795_529_400; // 2026-11-24T14:10:00.000Z
+const RUNS_AT_COMMIT = `actions/runs?head_sha=${COMMIT}&per_page=100&page=1`;
 
 type Answer = { status?: number; body?: unknown; headers?: Record<string, string> };
 type Called = { path: string; init: RequestInit };
 
-/* GitHub as these tests say it is: each request's path after /repos/acme/shop/ goes to one function. */
+/* GitHub as these tests say it is: each request's path after /repos/acme/shop goes to one function. */
 function github(answer: (path: string) => Answer | undefined) {
   const called: Called[] = [];
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
-    const path = new URL(url).pathname.replace('/repos/acme/shop/', '') + new URL(url).search;
+    const path = new URL(url).pathname.replace(/^\/repos\/acme\/shop\/?/, '') + new URL(url).search;
     called.push({ path, init });
     const said = answer(path) ?? { status: 404, body: { message: 'Not Found' } };
     return new Response(JSON.stringify(said.body ?? {}), { status: said.status ?? 200, headers: said.headers });
@@ -21,90 +23,214 @@ function github(answer: (path: string) => Answer | undefined) {
   return called;
 }
 
-const run = (name: string, extra: Record<string, unknown> = {}) => ({ name, head_sha: COMMIT, status: 'completed', conclusion: 'success', html_url: `https://github.com/acme/shop/actions/runs/1/job/${name.length}`, ...extra });
-const runs = (check_runs: unknown[], total = check_runs.length) => ({ total_count: total, check_runs });
-const status = (statuses: unknown[], state = 'success', total = statuses.length) => ({ sha: COMMIT, state, total_count: total, statuses });
-/* A repository where checks and statuses are what is given, and which keeps no workflow file. */
-const checks = (check_runs: unknown[], statuses: unknown[] = []) => (path: string): Answer | undefined => {
-  if (path.startsWith(`commits/${COMMIT}/check-runs`)) return { body: runs(check_runs) };
-  if (path.startsWith(`commits/${COMMIT}/status`)) return { body: status(statuses) };
-  return undefined;
+const run = (id: number, name: string, extra: Record<string, unknown> = {}) => ({
+  id, name, head_sha: COMMIT, status: 'completed', conclusion: 'success', run_attempt: 1,
+  html_url: `https://github.com/acme/shop/actions/runs/${id}`, repository: { full_name: 'acme/shop' }, head_repository: { full_name: 'acme/shop' }, ...extra,
+});
+const job = (id: number, runId: number, name: string, extra: Record<string, unknown> = {}) => ({
+  id, run_id: runId, run_attempt: 1, name, head_sha: COMMIT, status: 'completed', conclusion: 'success',
+  html_url: `https://github.com/acme/shop/actions/runs/${runId}/job/${id}`, ...extra,
+});
+const runsPage = (workflow_runs: unknown[], total = workflow_runs.length) => ({ total_count: total, workflow_runs });
+const jobsPage = (jobs: unknown[], total = jobs.length) => ({ total_count: total, jobs });
+type Listed = { run: ReturnType<typeof run>; jobs?: unknown[] };
+/* A repository whose commit has the workflow runs given, each with the jobs listed for it. */
+const actions = (listed: Listed[]) => (path: string): Answer | undefined => {
+  if (path === RUNS_AT_COMMIT) return { body: runsPage(listed.map(l => l.run)) };
+  const jobs = /^actions\/runs\/(\d+)\/jobs\?filter=latest&per_page=100&page=1$/.exec(path);
+  return jobs ? { body: jobsPage(listed.find(l => l.run.id === Number(jobs[1]))?.jobs ?? []) } : undefined;
 };
+const ci = (name: string, jobs: unknown[], extra: Record<string, unknown> = {}, id = 1) => ({ run: run(id, name, extra), jobs });
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("the repository's CI on one exact commit", () => {
-  it('is green when every check passed, skipped and neutral ones as no fault, and reads the exact commit with the repository token', async () => {
-    const called = github(checks([run('test (1)'), run('test (2)'), run('publish', { conclusion: 'skipped' }), run('lint', { conclusion: 'neutral' })], [{ context: 'hornhoof/tests', state: 'success' }]));
-    expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 5 });
-    expect(called.map(c => c.path)).toEqual([`commits/${COMMIT}/check-runs?filter=latest&per_page=100&page=1`, `commits/${COMMIT}/status?per_page=100&page=1`]);
-    expect(called[0]!.init).toMatchObject({ redirect: 'manual', headers: expect.objectContaining({ authorization: `Bearer ${REPO.token}` }) as unknown });
+  it('is green when every run finished with every job done, skipped and neutral jobs as no fault, and asks only for the Actions runs of the exact commit with the repository token', async () => {
+    const called = github(actions([ci('CI', [job(11, 1, 'test (1)'), job(12, 1, 'test (2)'), job(13, 1, 'publish', { conclusion: 'skipped' }), job(14, 1, 'lint', { conclusion: 'neutral' })])]));
+    expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 2 });
+    expect(called.map(c => c.path)).toEqual([RUNS_AT_COMMIT, 'actions/runs/1/jobs?filter=latest&per_page=100&page=1']);
+    expect(called[0]!.init).toMatchObject({ method: 'GET', redirect: 'manual', headers: expect.objectContaining({ authorization: `Bearer ${REPO.token}` }) as unknown });
   });
 
-  it('is red on the first check that failed, with its name and link, though others are still under way', async () => {
-    github(checks([run('test (1)', { status: 'in_progress', conclusion: null }), run('test (2)', { conclusion: 'failure', html_url: 'https://github.com/acme/shop/actions/runs/9/job/2' })]));
-    expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'red', check: 'test (2)', url: 'https://github.com/acme/shop/actions/runs/9/job/2', outcome: 'failure' });
+  it('counts the jobs of every run: two workflows that both finished are green together', async () => {
+    github(actions([ci('CI', [job(11, 1, 'test')], {}, 1), ci('Images', [job(21, 2, 'build'), job(22, 2, 'scan')], {}, 2)]));
+    expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 3 });
   });
 
-  it.each(['cancelled', 'timed_out', 'action_required', 'stale', 'startup_failure'])('is red on a check that ended %s', async conclusion => {
-    github(checks([run('test (1)'), run('images', { conclusion })]));
+  describe('what only a workflow run proves (B1)', () => {
+    it('is not green on a success status or a success check run of another app, which anyone with write access can post: no Actions run is on the commit', async () => {
+      const called = github(path => path === RUNS_AT_COMMIT ? { body: runsPage([]) } : path === `contents/.github/workflows?ref=${COMMIT}` ? { body: [{ type: 'file', name: 'ci.yml' }] } : path.startsWith(`commits/${COMMIT}/status`)
+        ? { body: { sha: COMMIT, state: 'success', total_count: 1, statuses: [{ context: 'ci/forged', state: 'success' }] } }
+        : path.startsWith(`commits/${COMMIT}/check-runs`) ? { body: { total_count: 1, check_runs: [{ name: 'forged', head_sha: COMMIT, status: 'completed', conclusion: 'success', app: { slug: 'evil' } }] } } : undefined);
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'absent' });
+      expect(called.map(c => c.path).filter(p => p.startsWith(`commits/${COMMIT}`))).toEqual([]);
+    });
+
+    it('does not read a run of a fork, or one whose own repository is another, as the commit\'s', async () => {
+      github(path => path === RUNS_AT_COMMIT
+        ? { body: runsPage([run(7, 'CI', { head_repository: { full_name: 'mallory/shop' } }), run(8, 'CI', { repository: { full_name: 'mallory/shop' } })]) }
+        : path === `contents/.github/workflows?ref=${COMMIT}` ? { body: [{ type: 'file', name: 'ci.yml' }] } : undefined);
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'absent' });
+    });
+
+    it('compares the repository without case, as GitHub names it', async () => {
+      github(actions([ci('CI', [job(11, 1, 'test')], { repository: { full_name: 'ACME/Shop' }, head_repository: { full_name: 'Acme/shop' } })]));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 1 });
+    });
+  });
+
+  describe('CI that is reported in part (B2)', () => {
+    it('is pending while one of two workflows is still under way, though the other finished green', async () => {
+      github(actions([ci('CI', [job(11, 1, 'test')], {}, 1), ci('Images', [], { status: 'in_progress', conclusion: null }, 2)]));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'pending', check: 'Images', url: 'https://github.com/acme/shop/actions/runs/2', outcome: 'in_progress' });
+    });
+
+    it('is pending while a job of a finished run has not finished', async () => {
+      github(actions([ci('CI', [job(11, 1, 'test (1)'), job(12, 1, 'test (2)', { status: 'in_progress', conclusion: null })])]));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'pending', check: 'CI / test (2)', url: 'https://github.com/acme/shop/actions/runs/1/job/12', outcome: 'in_progress' });
+    });
+
+    it('is pending, never green, for a run that finished with no job listed: a job is missing', async () => {
+      github(actions([ci('CI', [])]));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'pending', check: 'CI', url: 'https://github.com/acme/shop/actions/runs/1', outcome: 'no job of it has reported' });
+    });
+
+    it('is unread when the jobs listed are fewer than its total says: a job is missing from the list', async () => {
+      github(path => path === RUNS_AT_COMMIT ? { body: runsPage([run(1, 'CI')]) } : { body: jobsPage(path.endsWith('page=1') ? [job(11, 1, 'test')] : [], 3) });
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
+    });
+
+    it('has run nothing that succeeded where every job was skipped or neutral, or every run was skipped', async () => {
+      github(actions([ci('CI', [job(11, 1, 'publish', { conclusion: 'skipped' }), job(12, 1, 'lint', { conclusion: 'neutral' })])]));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'idle', checks: 2 });
+      github(actions([ci('CI', [], { conclusion: 'skipped' })]));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'idle', checks: 1 });
+    });
+
+    it('does not let a skipped workflow count for a success next to nothing that succeeded', async () => {
+      github(actions([ci('CI', [], { conclusion: 'skipped' }, 1), ci('Images', [], { conclusion: 'neutral' }, 2)]));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'idle' });
+    });
+  });
+
+  it('is red on the first run that failed, with its name and link, though another is still under way', async () => {
+    github(actions([ci('CI', [], { status: 'in_progress', conclusion: null }, 1), ci('Images', [], { conclusion: 'failure', html_url: 'https://github.com/acme/shop/actions/runs/9' }, 2)]));
+    expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'red', check: 'Images', url: 'https://github.com/acme/shop/actions/runs/9', outcome: 'failure' });
+  });
+
+  it.each(['cancelled', 'timed_out', 'action_required', 'stale', 'startup_failure'])('is red on a run that ended %s', async conclusion => {
+    github(actions([ci('CI', [job(11, 1, 'test')], {}, 1), ci('images', [], { conclusion }, 2)]));
     expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'red', check: 'images', outcome: conclusion });
   });
 
-  it('is red on a status that failed or errored, named by its context and target', async () => {
-    github(checks([run('test (1)')], [{ context: 'ci/legacy', state: 'error', target_url: 'https://ci.example.test/builds/4' }]));
-    expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'red', check: 'ci/legacy', url: 'https://ci.example.test/builds/4', outcome: 'error' });
+  it('is red on a job that failed in a run that says success, named with its workflow', async () => {
+    github(actions([ci('CI', [job(11, 1, 'test (1)'), job(12, 1, 'test (2)', { conclusion: 'failure' })])]));
+    expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'red', check: 'CI / test (2)', url: 'https://github.com/acme/shop/actions/runs/1/job/12', outcome: 'failure' });
   });
 
-  it.each(['queued', 'in_progress', 'waiting', 'requested', 'pending'])('is pending on a check that is %s', async state => {
-    github(checks([run('test (1)'), run('test (2)', { status: state, conclusion: null })]));
-    expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'pending', check: 'test (2)', outcome: state });
+  it.each(['queued', 'in_progress', 'waiting', 'requested', 'pending'])('is pending on a run that is %s, and reads no job of it', async state => {
+    const called = github(actions([ci('CI', [job(11, 1, 'test')], { status: state, conclusion: null })]));
+    expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'pending', check: 'CI', outcome: state });
+    expect(called.map(c => c.path)).toEqual([RUNS_AT_COMMIT]);
   });
 
-  it('is pending on a status that is pending', async () => {
-    github(checks([run('test (1)')], [{ context: 'ci/legacy', state: 'pending' }]));
-    expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'pending', check: 'ci/legacy' });
-  });
-
-  it('has run nothing that succeeded where every check was skipped or neutral', async () => {
-    github(checks([run('publish', { conclusion: 'skipped' }), run('lint', { conclusion: 'neutral' })]));
-    expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'idle', checks: 2 });
-  });
-
-  it('puts first a failure over a pending check in a status too, and does not count a pending status as a pass', async () => {
-    github(checks([], [{ context: 'a', state: 'pending' }, { context: 'b', state: 'failure' }]));
+  it('puts first a failure over a pending run', async () => {
+    github(actions([ci('a', [], { status: 'queued', conclusion: null }, 1), ci('b', [], { conclusion: 'failure' }, 2)]));
     expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'red', check: 'b' });
   });
 
-  describe('a commit nothing has reported on', () => {
-    const nothing = (workflows: Answer | undefined) => (path: string) => path.startsWith('contents/.github/workflows') ? workflows : checks([])(path);
+  describe('a commit no workflow run is on', () => {
+    const WORKFLOWS = [{ type: 'file', name: 'images.yml' }];
+    /* A repository whose default branch head is DEFAULT, with what is given at that head; the commit has no run, and keeps the
+       workflow files given for it (none where undefined). */
+    const repository = (own: Answer | undefined, head: { workflows?: Answer; checks?: number; statuses?: number; list?: Answer; info?: Answer } = {}) => (path: string): Answer | undefined => {
+      if (path === RUNS_AT_COMMIT) return { body: runsPage([]) };
+      if (path === '') return head.info ?? { body: { default_branch: 'main' } };
+      if (path === 'commits?per_page=1') return head.list ?? { body: [{ sha: DEFAULT }] };
+      if (path === `contents/.github/workflows?ref=${COMMIT}`) return own;
+      if (path === `contents/.github/workflows?ref=${DEFAULT}`) return head.workflows;
+      if (path === `commits/${DEFAULT}/check-runs?filter=latest&per_page=1`) return { body: { total_count: head.checks ?? 0, check_runs: [] } };
+      if (path === `commits/${DEFAULT}/status?per_page=1`) return { body: { sha: DEFAULT, total_count: head.statuses ?? 0, statuses: [] } };
+      return undefined;
+    };
 
-    it('has no CI when the repository keeps no workflow file at that commit', async () => {
-      const called = github(nothing(undefined));
+    it('is absent where the commit keeps workflow files that have not run on it yet, and asks nothing of the default branch', async () => {
+      const called = github(repository({ body: WORKFLOWS }));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'absent' });
+      expect(called.map(c => c.path)).toEqual([RUNS_AT_COMMIT, `contents/.github/workflows?ref=${COMMIT}`]);
+    });
+
+    it('has no CI when neither the commit nor the default branch keeps a workflow file, and no check or status ever reported on the default branch', async () => {
+      const called = github(repository(undefined));
       expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'none' });
-      expect(called.at(-1)!.path).toBe(`contents/.github/workflows?ref=${COMMIT}`);
+      expect(called.map(c => c.path)).toEqual([
+        RUNS_AT_COMMIT, `contents/.github/workflows?ref=${COMMIT}`, '', 'commits?per_page=1',
+        `contents/.github/workflows?ref=${DEFAULT}`, `commits/${DEFAULT}/check-runs?filter=latest&per_page=1`, `commits/${DEFAULT}/status?per_page=1`,
+      ]);
     });
 
-    it('has no CI where its workflow folder holds no workflow', async () => {
-      github(nothing({ body: [{ type: 'file', name: 'README.md' }, { type: 'dir', name: 'actions.yml' }] }));
+    it('has no CI where the workflow folders hold no workflow', async () => {
+      const files = { body: [{ type: 'file', name: 'README.md' }, { type: 'dir', name: 'actions.yml' }] };
+      github(repository(files, { workflows: files }));
       expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'none' });
     });
 
-    it('is pending where it keeps workflows that have not reported on that commit yet: a release does not outrun its CI', async () => {
-      github(nothing({ body: [{ type: 'file', name: 'images.yml' }] }));
-      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'pending', check: 'the workflows of the repository', url: null, outcome: 'no check of them has reported on this commit' });
+    it('is stripped, never none, for a commit that deleted every workflow file where the default branch keeps them', async () => {
+      github(repository(undefined, { workflows: { body: WORKFLOWS } }));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'stripped', branch: 'main' });
     });
 
-    it('is unread when the workflow folder cannot be read', async () => {
-      github(nothing({ status: 500 }));
+    it.each([
+      ['a check run', { checks: 1 }],
+      ['a status', { statuses: 1 }],
+    ])('is stripped, never none, where the default branch keeps no workflow file but %s was reported on its head', async (_what, head) => {
+      github(repository(undefined, head));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'stripped' });
+    });
+
+    it.each([
+      ['a server error on the default branch', { list: { status: 500 } }],
+      ['a repository with no commits', { list: { status: 409, body: { message: 'Git Repository is empty.' } } }],
+      ['an empty list of commits', { list: { body: [] } }],
+      ['a default branch head that is no commit id', { list: { body: [{ sha: 'main' }] } }],
+      ['a repository that names no default branch', { info: { body: {} } }],
+      ['workflow files of the default branch that cannot be read', { workflows: { status: 500 } }],
+    ])('is unread, never none, for %s', async (_what, head) => {
+      github(repository(undefined, head));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
+    });
+
+    it('is unread when the workflow folder of the commit cannot be read', async () => {
+      github(repository({ status: 500 }));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
+    });
+
+    it('is unread when the checks reported on the default branch head cannot be read', async () => {
+      github(path => (path.startsWith(`commits/${DEFAULT}/status`) ? { status: 502 } : repository(undefined)(path)));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
+      github(path => (path.startsWith(`commits/${DEFAULT}/check-runs`) ? { body: { total_count: 'many' } } : repository(undefined)(path)));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
+      github(path => (path.startsWith(`commits/${DEFAULT}/status`) ? { body: { sha: COMMIT, total_count: 0, statuses: [] } } : repository(undefined)(path)));
       expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
     });
   });
 
-  it('has no CI, and asks nobody, for a repository that is not on github.com', async () => {
-    const called = github(() => ({ status: 500 }));
-    expect(await githubCiReader()({ url: 'https://git.example.test/acme/shop.git', token: 'x' }, COMMIT)).toMatchObject({ state: 'none' });
-    expect(called).toEqual([]);
+  describe('an address the reader cannot place as github.com (B3)', () => {
+    it.each([
+      'https://git.example.test/acme/shop.git',
+      'https://github.com.evil.test/acme/shop',
+      'https://gitlab.com/acme/shop',
+      'http://github.com/acme/shop',
+      'https://user:pw@github.com/acme/shop',
+      'https://github.com/acme',
+      'git@github.com:acme/shop.git',
+      'not an address',
+      '',
+    ])('is unsupported, never no CI, and asks nobody: %s', async url => {
+      const called = github(() => ({ status: 500 }));
+      expect(await githubCiReader()({ url, token: 'x' }, COMMIT)).toMatchObject({ state: 'unsupported' });
+      expect(called).toEqual([]);
+    });
   });
 
   it('reads no commit that is not a full commit id', async () => {
@@ -117,15 +243,21 @@ describe("the repository's CI on one exact commit", () => {
     it.each([
       ['a server error', () => ({ status: 502 })],
       ['a repository it cannot see', () => ({ status: 404 })],
-      ['an answer that is no list of checks', () => ({ body: { total_count: 'many' } })],
-      ['a check run of another commit', () => ({ body: runs([run('test (1)', { head_sha: 'd'.repeat(40) })]) })],
+      ['an answer that is no list of runs', () => ({ body: { total_count: 'many' } })],
+      ['a run of another commit', () => ({ body: runsPage([run(1, 'CI', { head_sha: 'd'.repeat(40) })]) })],
+      ['a list shorter than its total', () => ({ body: runsPage([run(1, 'CI')], 2) })],
+      ['more runs than one page', () => ({ body: runsPage([run(1, 'CI')], 101) })],
     ])('is unread for %s', async (_what, answer) => {
-      github(path => (path.startsWith(`commits/${COMMIT}/check-runs`) ? answer() : { body: status([]) }));
+      github(path => (path === RUNS_AT_COMMIT ? answer() : undefined));
       expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
     });
 
-    it('is unread for a combined status of another commit', async () => {
-      github(path => (path.startsWith(`commits/${COMMIT}/check-runs`) ? { body: runs([run('test (1)')]) } : { body: { ...status([]), sha: 'd'.repeat(40) } }));
+    it.each([
+      ['a job of another run', { run_id: 99 }],
+      ['a job of another commit', { head_sha: 'd'.repeat(40) }],
+      ['a job of another attempt', { run_attempt: 2 }],
+    ])('is unread for %s', async (_what, extra) => {
+      github(actions([ci('CI', [job(11, 1, 'test', extra)])]));
       expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
     });
 
@@ -135,29 +267,30 @@ describe("the repository's CI on one exact commit", () => {
     });
   });
 
-  describe('a long list of checks', () => {
-    const page = (from: number, count: number, total: number) => runs(Array.from({ length: count }, (_v, i) => run(`test (${from + i})`)), total);
+  describe('a long list of jobs', () => {
+    const page = (from: number, count: number, total: number) => jobsPage(Array.from({ length: count }, (_v, i) => job(from + i, 1, `test (${from + i})`)), total);
+    const runs = (path: string): Answer | undefined => (path === RUNS_AT_COMMIT ? { body: runsPage([run(1, 'CI')]) } : undefined);
 
-    it('is read page by page until every check is in', async () => {
+    it('is read page by page until every job is in', async () => {
       const called = github(path => {
-        if (path.includes('check-runs') && path.endsWith('page=1')) return { body: page(1, 100, 150) };
-        if (path.includes('check-runs') && path.endsWith('page=2')) return { body: page(101, 50, 150) };
-        return { body: status([]) };
+        if (path.includes('/jobs') && path.endsWith('page=1')) return { body: page(1, 100, 150) };
+        if (path.includes('/jobs') && path.endsWith('page=2')) return { body: page(101, 50, 150) };
+        return runs(path);
       });
       expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 150 });
-      expect(called.filter(c => c.path.includes('check-runs')).map(c => c.path.slice(-6))).toEqual(['page=1', 'page=2']);
+      expect(called.filter(c => c.path.includes('/jobs')).map(c => c.path.slice(-6))).toEqual(['page=1', 'page=2']);
     });
 
     it('is unread when a page comes back empty or the total changes under it', async () => {
-      github(path => (path.endsWith('page=1') && path.includes('check-runs') ? { body: page(1, 100, 150) } : path.includes('check-runs') ? { body: page(101, 0, 150) } : { body: status([]) }));
+      github(path => (path.includes('/jobs') ? { body: path.endsWith('page=1') ? page(1, 100, 150) : page(101, 0, 150) } : runs(path)));
       expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
-      github(path => (path.endsWith('page=1') && path.includes('check-runs') ? { body: page(1, 100, 150) } : path.includes('check-runs') ? { body: page(101, 50, 151) } : { body: status([]) }));
+      github(path => (path.includes('/jobs') ? { body: path.endsWith('page=1') ? page(1, 100, 150) : page(101, 50, 151) } : runs(path)));
       expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
     });
 
-    it('is unread for a commit with more checks than the pages it reads', async () => {
-      github(path => (path.includes('check-runs') ? { body: page(1, 100, 5000) } : { body: status([]) }));
-      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'unread', why: 'it has more check runs than are read' });
+    it('is unread for a run with more jobs than the pages it reads', async () => {
+      github(path => (path.includes('/jobs') ? { body: page(1, 100, 5000) } : runs(path)));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'unread', why: 'it has more jobs than are read' });
     });
   });
 
@@ -188,13 +321,18 @@ describe("the repository's CI on one exact commit", () => {
   });
 
   describe('what GitHub names that an agent will read', () => {
-    it('keeps a check name to one short line and a link to a plain https address', async () => {
-      github(checks([run('x'.repeat(400), { conclusion: 'failure', html_url: 'javascript:alert(1)' }), run('y', { conclusion: 'failure', html_url: 'http://github.com/a' })]));
+    it('keeps a name to one short line and a link to a plain https address', async () => {
+      github(actions([ci('x'.repeat(400), [], { conclusion: 'failure', html_url: 'javascript:alert(1)' }, 1), ci('y', [], { conclusion: 'failure', html_url: 'http://github.com/a' }, 2)]));
       const red = await githubCiReader()(REPO, COMMIT);
       expect(red).toMatchObject({ state: 'red', url: null });
       expect(red.state === 'red' && red.check).toHaveLength(160);
-      github(checks([run('line one\nline two', { conclusion: 'failure', html_url: `https://user:pw@github.com/a` })]));
+      github(actions([ci('line one\nline two', [], { conclusion: 'failure', html_url: `https://user:pw@github.com/a` })]));
       expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'red', check: 'line one line two', url: null, outcome: 'failure' });
+    });
+
+    it('names a run with no name by its path', async () => {
+      github(actions([ci('', [], { name: null, path: '.github/workflows/ci.yml', conclusion: 'failure' })]));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'red', check: '.github/workflows/ci.yml' });
     });
   });
 });

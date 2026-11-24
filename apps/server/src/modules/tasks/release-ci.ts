@@ -7,7 +7,7 @@ import type { RepoAddress } from '../testruns/refs.js';
 import { refuse, type Task } from './state.js';
 
 /* What a release relies on instead of a run of Hornhoof's machines: the repository's own CI, as its host says it of the exact
-   commit. green names how many checks passed; none is a repository with no CI at all, which records with no run. Nothing here
+   commit. green names how many jobs passed; none is a repository with no CI at all, which records with no run. Nothing here
    takes a caller's word: the answer is the host's, read when the release is recorded. */
 export type CiResult = { state: 'green'; checks: number } | { state: 'none' };
 
@@ -27,20 +27,24 @@ export async function readCiOf(ctx: Reading, repo: RepoAddress, commit: string):
 
 /* A check's link, where the host gave a plain one. */
 const linked = (url: string | null) => (url ? ` (${url})` : '');
-const checksOf = (count: number): string => `${count} ${count === 1 ? 'check' : 'checks'}`;
+const checksOf = (count: number): string => `${count} ${count === 1 ? 'job' : 'jobs'}`;
+
+type Lines = { [S in CiAt['state']]: (ci: Extract<CiAt, { state: S }>) => string };
+const LINES: Lines = {
+  green: ci => `The repository's CI is green on this commit: ${checksOf(ci.checks)} passed.`,
+  none: () => 'The repository has no CI.',
+  red: ci => `The repository's CI is red on this commit: check ${ci.check} ended with ${ci.outcome}${linked(ci.url)}.`,
+  pending: ci => `The repository's CI has not finished on this commit: ${ci.check} is ${ci.outcome}${linked(ci.url)}.`,
+  idle: ci => `The repository's CI ran ${checksOf(ci.checks)} on this commit and none succeeded: every one was skipped or neutral.`,
+  absent: () => 'No GitHub Actions run is on this commit yet.',
+  stripped: ci => `This commit keeps no workflow file, while the repository's default branch ${ci.branch} has CI, so no CI can run on it.`,
+  unsupported: ci => `The repository's CI can't be read: ${ci.why}.`,
+  limited: ci => new GitHubRateLimited(ci.limit).message,
+  unread: ci => `The repository's CI could not be read now: ${ci.why}.`,
+};
 
 /* The answer in a sentence, for an approval card and for whoever is told why a release waits. */
-export function ciLine(ci: CiAt): string {
-  switch (ci.state) {
-    case 'green': return `The repository's CI is green on this commit: ${checksOf(ci.checks)} passed.`;
-    case 'none': return 'The repository has no CI.';
-    case 'red': return `The repository's CI is red on this commit: check ${ci.check} ended with ${ci.outcome}${linked(ci.url)}.`;
-    case 'pending': return `The repository's CI has not finished on this commit: ${ci.check} is ${ci.outcome}${linked(ci.url)}.`;
-    case 'idle': return `The repository's CI ran ${checksOf(ci.checks)} on this commit and none succeeded: every one was skipped or neutral.`;
-    case 'limited': return new GitHubRateLimited(ci.limit).message;
-    case 'unread': return `The repository's CI could not be read now: ${ci.why}.`;
-  }
-}
+export const ciLine = (ci: CiAt): string => (LINES[ci.state] as (ci: CiAt) => string)(ci);
 
 /* The result in a few words, for the log and the note of an approval that went without a card. */
 export const ciWords = (ci: CiResult): string => (ci.state === 'green' ? `the repository's CI was green with ${checksOf(ci.checks)}` : 'the repository has no CI');
@@ -51,11 +55,14 @@ export function ciResult(ci: CiAt): CiResult | null {
   return ci.state === 'none' ? { state: 'none' } : null;
 }
 
-/* The CI of commit as a release records it: green or none, else a refusal that says what stopped it and records nothing. */
-export async function requireCi(ctx: Reading, repo: RepoAddress, commit: string): Promise<CiResult> {
+/* The CI of commit as a release records it: green or none, or absent where the repository has CI but no run of it is on the commit
+   yet, which the caller may start. Else a refusal that says what stopped it and records nothing. */
+export async function requireCi(ctx: Reading, repo: RepoAddress, commit: string): Promise<CiResult | { state: 'absent' }> {
   const ci = await readCiOf(ctx, repo, commit);
+  if (ci.state === 'absent') return ci;
   const result = ciResult(ci);
   if (result) return result;
+  if (ci.state === 'unsupported') throw refuse(409, 'repo_invalid', `${ciLine(ci)} Nothing was recorded for ${commit}.`);
   const unread = ci.state === 'unread' || ci.state === 'limited';
   throw unread
     ? refuse(409, 'repo_invalid', `${ciLine(ci)} Nothing was recorded for ${commit}. Try again.`)
@@ -68,7 +75,7 @@ async function ciSaid(ctx: Said, task: Pick<Task, 'productId' | 'departmentId'>,
   const found = ctx.config ? await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]).catch(() => null) : null;
   if (!found) return undefined;
   const ci = await readCiOf(ctx, found.repo, commit);
-  return { line: ciLine(ci), decisive: ['green', 'red', 'pending', 'idle'].includes(ci.state) };
+  return { line: ciLine(ci), decisive: ['green', 'red', 'pending', 'idle', 'absent', 'stripped', 'unsupported'].includes(ci.state) };
 }
 
 /* What the checks of commit say, for whoever asks for an approval of it, gives it, or releases on it: the repository's CI, and

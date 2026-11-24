@@ -1162,6 +1162,38 @@ export const turnReleases = pgTable(
   ],
 );
 
+/* The release workflow Hornhoof started on a commit of a turn branch for the release its holder asked for: one for each
+   commit, so none is started twice. It waits until the repository's CI says of that commit what a release needs; the minute
+   round then records the release (recorded, with its record) or ends it with why it could not (ended). */
+export const CI_DISPATCH_STATES = ['waiting', 'recorded', 'ended'] as const;
+export const ciDispatches = pgTable(
+  'ci_dispatches',
+  {
+    id: id(),
+    companyId: companyId(),
+    turnId: uuid('turn_id').notNull().references(() => turns.id),
+    taskId: uuid('task_id').notNull().references((): AnyPgColumn => tasks.id),
+    agentId: uuid('agent_id').notNull().references((): AnyPgColumn => agents.id),
+    commit: text('commit').notNull(),
+    branch: text('branch').notNull(),
+    workflow: text('workflow').notNull(),
+    runId: bigint('run_id', { mode: 'number' }),
+    state: text('state').notNull().default('waiting'),
+    note: text('note'),
+    releaseId: uuid('release_id').references((): AnyPgColumn => turnReleases.id),
+    createdAt: createdAt(),
+    settledAt: timestamp('settled_at', { withTimezone: true }),
+  },
+  t => [
+    unique('ci_dispatches_company_commit').on(t.companyId, t.commit),
+    index('ci_dispatches_waiting').on(t.createdAt).where(sql`state = 'waiting'`),
+    check('ci_dispatches_commit', sql`${t.commit} ~ '^[0-9a-f]{40}$'`),
+    check('ci_dispatches_state', sql`${t.state} IN ('waiting', 'recorded', 'ended')`),
+    check('ci_dispatches_settled', sql`(${t.state} = 'waiting') = (${t.settledAt} IS NULL)`),
+    check('ci_dispatches_recorded', sql`(${t.state} = 'recorded') = (${t.releaseId} IS NOT NULL)`),
+  ],
+);
+
 /* A turn's pipeline facts: kept as it closed, or rebuilt from its events for a turn that closed before this was kept. */
 export const TURN_SNAPSHOT_SOURCES = ['closed', 'rebuilt'] as const;
 export const turnSnapshots = pgTable(

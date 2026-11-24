@@ -24,6 +24,7 @@ import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
 import { checkOperatorHealth } from '../program-operator/health.js';
 import { releaseRound } from '../tasks/releases.js';
+import { releaseCiRound } from '../tasks/release-ci-round.js';
 import { closeIdleTurns } from '../tasks/turn-ends.js';
 
 export { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX } from '../templates/load.js';
@@ -131,6 +132,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     retryCallBatches(ctx).catch(failed('recovering one-shot call batches failed')),
     reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
     releaseRound(ctx).catch(failed('closing turns by the tags of their releases failed')),
+    releaseCiRound(ctx).catch(failed('recording the releases that wait for CI failed')),
     closeIdleTurns(ctx).catch(failed('closing turns that hold nothing for a release failed')),
     sendWaiting(ctx).catch(failed('sending waiting turns failed')),
     dropOldFiles(ctx, now).catch(failed('removing the files of old turns failed')),

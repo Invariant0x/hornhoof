@@ -1,7 +1,7 @@
 import { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, autonomousReleases, companies, departments, people, taskEvents, taskRoutes, tasks, turnReleases, turns, type ReleasedTask } from '../../db/schema.js';
+import { agents, autonomousReleases, ciDispatches, companies, departments, people, taskEvents, taskRoutes, tasks, turnReleases, turns, type ReleasedTask } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { note } from './events.js';
@@ -19,6 +19,7 @@ import { openTurnOf } from './turn-department.js';
 import { repoAt } from '../departments/repository.js';
 import { heldLineage } from '../testruns/compare.js';
 import { requireCi, type CiResult } from './release-ci.js';
+import { startCi, type CiStarted } from './release-dispatch.js';
 
 /* A turn is a release of its department. Its holder records the release before main moves: the exact commit R of
    turn-<number>, its head or one the branch went past while R was checked, main under it, what the repository's CI says of R
@@ -31,7 +32,7 @@ import { requireCi, type CiResult } from './release-ci.js';
 
 type Turn = typeof turns.$inferSelect;
 type Release = typeof turnReleases.$inferSelect;
-type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readCi' | 'readTags' | 'readBranches' | 'createBranch' | 'log'>>;
+type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readCi' | 'dispatchCi' | 'readTags' | 'readBranches' | 'createBranch' | 'log'>>;
 type Repo = IntegrationTarget['repo'];
 
 const lockCompany = (tx: Tx, companyId: string) => tx.select(idOnly(companies)).from(companies).where(eq(companies.id, companyId)).for('no key update');
@@ -285,18 +286,38 @@ export type ReleaseInput = { task: number; commit: string };
 /* The CI result as the columns of a record keep it: the number of checks only where it was green. */
 const ciColumns = (ci: CiResult) => ({ ciState: ci.state, ciChecks: ci.state === 'green' ? ci.checks : null });
 
-/* The record of a release, asked by the holder of its release task in the turn's department before main moves. */
-export async function recordRelease(ctx: Reader, agentId: string, companyId: string, input: ReleaseInput) {
-  const task = await taskByRef(ctx, companyId, input.task);
-  if (!task) throw refuse(404, 'task_unknown', `There is no task #${input.task}.`);
+/* The release task the asking holder holds and may record on: a refusal where it is no task of theirs, is closed or paused. */
+async function holderTask(ctx: Reader, agentId: string, companyId: string, ref: number): Promise<Task> {
+  const task = await taskByRef(ctx, companyId, ref);
+  if (!task) throw refuse(404, 'task_unknown', `There is no task #${ref}.`);
   if (task.assigneeAgentId !== agentId) throw refuse(403, 'task_not_yours', `#${task.number} is not yours: only the holder of the release task records the release.`);
   if (task.status === 'done' || task.status === 'cancelled') throw refuse(409, 'task_invalid', `#${task.number} is closed.`);
   if (task.paused) throw refuse(409, 'task_paused', `#${task.number} is paused. It records no release until it is resumed.`);
+  return task;
+}
+
+/* Where the task's department releases its open turn, for the agent of that department: a refusal for any other. */
+async function releaseTarget(ctx: Reader, task: Task, agentId: string): Promise<IntegrationTarget & { turn: Turn }> {
   const [agent] = await ctx.db.select().from(agents).where(eq(agents.id, agentId));
   const target = await integrationTarget(ctx, task);
-  const turn = target?.turn;
-  if (!target || !turn) throw refuse(409, 'repo_invalid', `#${task.number} is of no department that releases turns: its results go to their main line straight.`);
-  if (!agent || agent.departmentId !== turn.departmentId) throw refuse(403, 'task_not_yours', 'Only the department whose turn it is records its release.');
+  if (!target?.turn) throw refuse(409, 'repo_invalid', `#${task.number} is of no department that releases turns: its results go to their main line straight.`);
+  if (!agent || agent.departmentId !== target.turn.departmentId) throw refuse(403, 'task_not_yours', 'Only the department whose turn it is records its release.');
+  return { ...target, turn: target.turn };
+}
+
+/* The record the minute round made of this commit while it waited for CI, which a holder asking again is answered with. */
+async function recordedByRound(ctx: Reader, companyId: string, turnId: string, commit: string): Promise<Release | undefined> {
+  const [round] = await ctx.db.select({ release: ciDispatches.releaseId }).from(ciDispatches).where(and(eq(ciDispatches.companyId, companyId), eq(ciDispatches.commit, commit), eq(ciDispatches.state, 'recorded')));
+  if (!round?.release) return undefined;
+  const [kept] = await ctx.db.select().from(turnReleases).where(and(eq(turnReleases.id, round.release), eq(turnReleases.turnId, turnId)));
+  return kept;
+}
+
+/* The record of a release, asked by the holder of its release task in the turn's department before main moves. */
+export async function recordRelease(ctx: Reader, agentId: string, companyId: string, input: ReleaseInput) {
+  const task = await holderTask(ctx, agentId, companyId, input.task);
+  const target = await releaseTarget(ctx, task, agentId);
+  const turn = target.turn;
   const head = await headOf(ctx, target.repo, target.branch);
   if (!head || !(await branchHolds(ctx, target.repo, head, input.commit))) throw refuse(409, 'task_changed', `${target.branch} does not hold ${input.commit}${head ? `: it is at ${head}` : ', or it could not be read'}. A release is a commit of the turn branch.`);
   const base = await headOf(ctx, target.repo, target.repo.branch);
@@ -307,8 +328,11 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   const released: ReleasedTask[] = held.map(r => ({ taskId: r.task.id, number: r.task.number, commit: r.commit, verdicts: r.verdicts, ...(r.turnkey ? { report: r.turnkey.report } : {}) }));
   const left = results.filter(r => !held.includes(r)).map(r => r.task.number);
   const at: ReleaseAt = { task, turn, repo: target.repo, commit: input.commit, uncovered };
+  const kept = await recordedByRound(ctx, companyId, turn.id, input.commit);
+  if (kept) return releaseView(turn, kept, released, left, await lastVersion(ctx, turn, target.repo));
   await releaseApproval(ctx.db, at);
   const ci = await requireCi(ctx, target.repo, input.commit);
+  if (ci.state === 'absent') return startedView(await startCi(ctx, { task, turnId: turn.id, agentId, repo: target.repo, branch: target.branch, commit: input.commit, head }), turn, input.commit, target.branch);
   const record = await ctx.db.transaction(async tx => {
     await lockCompany(tx, companyId);
     const [open] = await tx.select(idOnly(turns)).from(turns).where(and(eq(turns.id, turn.id), eq(turns.status, 'open')));
@@ -325,6 +349,15 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   });
   return releaseView(turn, record, released, left, await lastVersion(ctx, turn, target.repo));
 }
+
+/* The answer to a release asked for on a commit no CI run is on yet: the server started CI, and nothing is recorded. The minute
+   round records the release when CI is green on that exact commit, and the holder hears of it. */
+const startedView = (started: CiStarted, turn: Turn, commit: string, branch: string) => ({
+  recorded: false, turn: turn.number, commit,
+  ci: { state: 'started', workflow: started.workflow, run: started.run, url: started.url },
+  next: `CI ${started.again ? 'was started on this commit already' : 'started'}${started.run ? `, run ${started.run}` : ''}; the release records when it's green. `
+    + `${started.workflow ? `The workflow is ${started.workflow}, on ${branch} at ${commit}. ` : ''}Nothing is recorded yet: the minute round records the release if CI is green on that exact commit and tells you, or tells you why it did not. Start no run yourself and record nothing by hand.`,
+});
 
 /* The last version tag of the repository's own line, which its next release goes on from: the one the turn started at, or,
    before the round first looked, the newest one the repository has now. Its turn number and any other repository's version
