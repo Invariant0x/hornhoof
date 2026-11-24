@@ -64,5 +64,6 @@ export function egyptArtCatalog(roleLooks: Readonly<Record<string, PackRoleLookS
     ownConstruction: ['statue', 'monument'],
     /* The Nile harbour (#2006, checklist H1 to H6); the land gate is for worlds without a river. */
     harbour: { yards: ['2x2', '3x3', '4x4'] },
+    bridge: true,
   };
 }

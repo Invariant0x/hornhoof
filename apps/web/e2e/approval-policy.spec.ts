@@ -37,6 +37,8 @@ const JOURNAL: AutonomousReleaseEntry[] = [
     baseCommitSha: '1111111111111111111111111111111111111111',
     testRunId: 'tr43',
     testRunNumber: 43,
+    ciState: null,
+    ciChecks: null,
     reviewerAgentId: 'a2',
     reviewerName: 'Rita',
     verdictStage: 'review',

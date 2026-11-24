@@ -191,6 +191,9 @@ export type WorldArtCatalog = Readonly<{
   ownConstruction?: readonly BuildingKind[];
   /* The harbour the tasks arrive at (#2006): its yard sizes, and whether the land gate and caravan have slots too. */
   harbour?: Readonly<{ yards: readonly FootprintKey[]; gate?: boolean }>;
+  /* The bridge over the map's water (bridge-site.ts): its pieces in both directions. Until all of them are in the
+     folder, no street crosses water. */
+  bridge?: boolean;
 }>;
 
 export const STANDARD_BUILDING_PICTURES = [
@@ -296,7 +299,26 @@ export const DIRECTION_ROWS: readonly UniqueRenderAngle5[] = ['N', 'NE', 'E', 'S
 /* The directions a sheet may draw: the west ones too, so a big carried item keeps its hand when the resident turns. */
 const DRAWABLE_DIRECTIONS: readonly Direction8[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
-export type DeclaredArtRole = 'building' | 'module' | 'altar' | 'flag' | 'capstone' | 'person' | 'cloak' | 'loop' | 'harbour';
+export type DeclaredArtRole =
+  | 'building'
+  | 'module'
+  | 'altar'
+  | 'flag'
+  | 'capstone'
+  | 'person'
+  | 'cloak'
+  | 'loop'
+  | 'harbour'
+  | 'bridge';
+
+/* A bridge's pieces along one tile axis: the first over the water, any number of spans, the last (#1985). */
+export const BRIDGE_PIECES = ['start', 'span', 'end'] as const;
+export type BridgePiece = (typeof BRIDGE_PIECES)[number];
+
+/* A bridge piece's picture: one tile of the deck along axis 'u' (down right on screen) or 'v' (down left). */
+export function bridgePicturePath(axis: 'u' | 'v', piece: BridgePiece): string {
+  return `bridge/${axis}_${piece}.png`;
+}
 
 export type DeclaredArtFile = Readonly<{
   path: string;
@@ -494,7 +516,23 @@ export function declaredArtFiles(pack: WorldPackManifest): readonly DeclaredArtF
   }
   if (art.people) out.push({ path: SLEEP_LOOP, role: 'loop', passport: 'sheet', required: false });
   if (art.harbour) out.push(...harbourFiles(art.harbour));
+  out.push(...declaredBridgeFiles(art));
   return out;
+}
+
+/* The bridge's pieces in both directions, when the catalog has a bridge. */
+function declaredBridgeFiles(art: WorldArtCatalog): DeclaredArtFile[] {
+  if (!art.bridge) return [];
+  return (['u', 'v'] as const).flatMap(axis => BRIDGE_PIECES.map(piece => ({ path: bridgePicturePath(axis, piece), role: 'bridge' as const, passport: 'picture' as const, required: true })));
+}
+
+/* The footprint a picture's passport must match: a module's from its folder, a building's from its step, a bridge
+   piece one tile, else the one its slot declares (a harbour yard's); none for the rest. */
+function pictureFootprint(slot: DeclaredArtFile, path: string, footprintOf: ReadonlyMap<string, FootprintKey>): FootprintKey | null {
+  if (slot.role === 'module') return path.split('/')[1] as FootprintKey;
+  if (slot.role === 'building') return footprintOf.get(path.slice(0, path.lastIndexOf('/') + 1)) ?? null;
+  if (slot.role === 'bridge') return '1x1';
+  return slot.footprint ?? null;
 }
 
 export type ArtIndexReport = Readonly<{
@@ -759,11 +797,7 @@ export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtI
       continue;
     }
     if (slot.passport === 'picture') {
-      let fp: FootprintKey | null = null;
-      if (slot.role === 'module') fp = path.split('/')[1] as FootprintKey;
-      else if (slot.role === 'building') fp = footprintOf.get(path.slice(0, path.lastIndexOf('/') + 1)) ?? null;
-      else if (slot.footprint) fp = slot.footprint;
-      checkPicture(pack, path, entry, fp, errors);
+      checkPicture(pack, path, entry, pictureFootprint(slot, path, footprintOf), errors);
     } else if (slot.passport === 'anchor') {
       const a = entry.passport as AnchorPassport | undefined;
       if (!a || !isPoint(a.anchor) || !pointInside(a.anchor, entry.w, entry.h)) {

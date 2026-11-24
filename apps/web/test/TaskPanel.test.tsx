@@ -160,6 +160,26 @@ describe('the simple task card', () => {
     expect(card.getByRole('list', { name: 'Log' })).not.toHaveTextContent(mine.text);
   });
 
+  it("does not address the viewer as 'you' on another person's request opened in the task panel", async () => {
+    const user = userEvent.setup();
+    const task = { ...REQUESTS[0]!.task, id: 't12', number: 12, title: TASK_DETAIL.title };
+    const forMaria = {
+      ...REQUESTS[0]!,
+      id: 'r-maria-choice',
+      kind: 'choice' as const,
+      text: 'Pick a layout for Design.',
+      options: [{ label: 'Compact', image: null }, { label: 'Wide', image: null }],
+      ownerPersonId: 'p2',
+      canAnswer: true,
+      task,
+    };
+    shell({ 'GET /api/requests': [200, decisions([forMaria])], 'GET /api/tasks/t12': [200, { task: TASK_DETAIL }] });
+    const panel = await openTask(user);
+    const header = within(panel).getByRole('article', { name: `#12 ${TASK_DETAIL.title}` }).querySelector('header')!;
+    expect(header).toHaveTextContent('Dana asks for a choice');
+    expect(header).not.toHaveTextContent(/\basks you\b/i);
+  });
+
   /* B2 of #1569: the card a person approves in the task shows no "In more detail", so the list Hornhoof keeps of what a release
      brings that no check covers shows there next to Approve, apart from the plain words. */
   it('shows next to Approve on the card in the task what a release brings that no check covers, under plain words without it', async () => {
