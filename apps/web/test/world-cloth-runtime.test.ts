@@ -1,6 +1,7 @@
 import { Container, MeshSimple, Sprite, Texture } from 'pixi.js';
 import { describe, expect, it } from 'vitest';
 import { ART_CONTRACT_VERSION, type ArtIndex, type BuildingArtLayer } from '../src/world/art';
+import { WorldArtFiles } from '../src/world/art-files';
 import { DisplayRunPool, WorldArtLibrary, type GreyReader } from '../src/world/art-runtime';
 import { placeCloth, placeLayerSprite, swayCloths, type CityArtContext, type ClothLayer } from '../src/world/city-renderer';
 import { CLOTH_COLS, CLOTH_ROWS } from '../src/world/cloth';
@@ -31,7 +32,8 @@ const INDEX: ArtIndex = {
   },
 };
 
-const index = async () => ({ ok: true, json: async () => INDEX });
+/* The art folder answers its index; the masks come through the injected reader. */
+const index = new WorldArtFiles({ packId: 'egypt', baseUrl: '/art/', store: null, fetch: async () => new Response(JSON.stringify(INDEX)) });
 /* The free edge (the lower half) moves, the rest is still. */
 const halfMask: GreyReader = async () => {
   const data = new Uint8ClampedArray(W * H);

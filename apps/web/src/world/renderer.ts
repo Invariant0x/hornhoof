@@ -16,6 +16,7 @@ import {
   type EffectiveZoomBounds,
   type ViewportSize,
 } from './camera';
+import { worldArtFiles } from './art-files';
 import { DisplayRunPool, WorldArtLibrary, type WorldArtStats } from './art-runtime';
 import { residentStandsStill, residentWalkSpeed } from './art';
 import { bakeChunkCanvas, buildTileLookup, type BakedChunk } from './chunk-baker';
@@ -363,10 +364,10 @@ export class IsometricWorldEngine {
       this.useArt(terrainArtFor(this.pack));
       this.app = app;
       const roadArt = this.pack.terrainArt?.roads;
-      const artBase = this.pack.art?.baseUrl;
-      if (roadArt && artBase) {
+      const artFiles = worldArtFiles(this.pack);
+      if (roadArt && artFiles) {
         /* Streets turn painted once every tier's strip is in; until then (or without them) the city draws street tiles. */
-        void this.roadPainter.load(artBase, roadArt).then(ok => {
+        void this.roadPainter.load(path => artFiles.blob(path), roadArt).then(ok => {
           if (ok && !this.destroyed) this.markCityDirty();
         });
       }
@@ -1108,6 +1109,28 @@ export class IsometricWorldEngine {
   }
 
   /* Synchronously finishes baking all currently visible chunks (for deterministic screenshot capture). */
+  /* Bakes the visible ground pieces not baked yet for up to `budgetMs`, at least one per call; how many of the visible
+     pieces are baked now. For a loading screen that counts them (#1947): call it each frame until done equals total,
+     then flushVisibleBakes draws the rest. */
+  bakeVisibleStep(budgetMs: number): { done: number; total: number } {
+    const lod = lodForCamera(this.pack, this.camera.zoom, this.dpr);
+    const visible = cullVisibleChunks(this.chunkGrid, visibleWorldRect(this.camera, this.viewport, this.tileW));
+    const deadline = performance.now() + budgetMs;
+    let done = 0;
+    let bakedNow = 0;
+    for (const chunk of visible) {
+      if (this.chunkCache.get(this.cacheKey(chunk, lod.id))) {
+        done++;
+      } else if (bakedNow === 0 || performance.now() < deadline) {
+        this.ensureChunkBaked(chunk, lod);
+        bakedNow++;
+        done++;
+      }
+    }
+    if (bakedNow > 0) this.dirtyScene = true;
+    return { done, total: visible.length };
+  }
+
   flushVisibleBakes(): void {
     const lod = lodForCamera(this.pack, this.camera.zoom, this.dpr);
     const rect = visibleWorldRect(this.camera, this.viewport, this.tileW);

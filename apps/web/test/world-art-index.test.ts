@@ -78,6 +78,13 @@ describe('Stage 9 art check command: builds art-index.json from an artist folder
     ]);
     expect(index.files['people/egypt-mason/tier_1/walk.png']?.passport).toMatchObject({ anchor: { x: 68, y: 190 } });
     expect(index.files['people/egypt-mason/tier_1/walk.cloak.png']?.passport).toBeUndefined();
+    /* #1947: each file carries its byte size and a hash of its content, so the browser keeps one copy per version. */
+    const shrine = index.files['buildings/department/shrine/complete.png']!;
+    expect(shrine.bytes).toBe(pngHeader(736, 900).length);
+    expect(shrine.hash).toMatch(/^[0-9a-f]{16}$/);
+    expect(index.files['people/egypt-mason/tier_1/walk.cloak.png']!.hash, 'same bytes, same hash').toBe(index.files['people/egypt-mason/tier_1/walk.png']!.hash);
+    put(root, 'buildings/department/shrine/complete.png', pngHeader(736, 901));
+    expect(buildArtIndexFromFolder(root, 'egypt').files['buildings/department/shrine/complete.png']!.hash, 'new bytes, new hash').not.toBe(shrine.hash);
 
     const lines: string[] = [];
     const result = runArtCheck({ folder: root, pack: 'egypt', write: true, list: false, print: l => lines.push(l) });

@@ -13,6 +13,7 @@
    check would stop every image from main. It joins the image build in the change that brings the art
    source (#1944). */
 
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -67,10 +68,16 @@ function walkPngs(root: string, dir = root, out: string[] = []): string[] {
   return out;
 }
 
+/* The version of a file's bytes in art-index.json: the browser keeps one copy per hash (art-files.ts, #1947). */
+export function contentHash(data: Buffer): string {
+  return createHash('sha256').update(data).digest('hex').slice(0, 16);
+}
+
 export function buildArtIndexFromFolder(folder: string, packId: string): ArtIndex {
   const files: Record<string, ArtIndexEntry> = {};
   for (const rel of walkPngs(folder)) {
-    const size = readPngSize(readFileSync(join(folder, rel)));
+    const data = readFileSync(join(folder, rel));
+    const size = readPngSize(data);
     if (!size) continue;
     let passport: ArtPassport | undefined;
     if (!rel.endsWith('.cloak.png')) {
@@ -81,7 +88,8 @@ export function buildArtIndexFromFolder(folder: string, packId: string): ArtInde
         passport = undefined;
       }
     }
-    files[rel] = passport ? { ...size, passport } : size;
+    const file = { ...size, bytes: data.length, hash: contentHash(data) };
+    files[rel] = passport ? { ...file, passport } : file;
   }
   return { contract: ART_CONTRACT_VERSION, pack: packId, files };
 }

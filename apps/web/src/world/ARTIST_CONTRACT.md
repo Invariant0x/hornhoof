@@ -12,8 +12,9 @@ What is specific to one world (which buildings, which looks, its colours and sty
 * A pack's art folder is served at the pack's `art.baseUrl`, for example `/world-art/<pack>/`.
   * Local work and builds: put the folder at `apps/web/public/world-art/<pack>/`. The path is ignored by git; Vite serves it and copies it into the build.
   * A running server: put the folder at `<WEB_DIST>/world-art/<pack>/`.
-* Buildings, people, loops and flags (sections 4 to 8): the folder holds `art-index.json` at its root. The engine reads only that file at start and then downloads each picture the first time it is on screen. Without `art-index.json` they all draw on placeholders. Build and check the index with the art check command (section 10). A file the check rejects is left out of the index and keeps its placeholder; one broken file never breaks the city.
-* Ground and plants (section 9) are loaded straight from the paths the pack's manifest names, without `art-index.json`.
+* Buildings, people, loops and flags (sections 4 to 8): the folder holds `art-index.json` at its root. Without `art-index.json` they all draw on placeholders. Build and check the index with the art check command (section 10). A file the check rejects is left out of the index and keeps its placeholder; one broken file never breaks the city.
+* Ground and plants (section 9) are named by the pack's manifest. The index lists them too.
+* The index gives every file its byte size and a hash of its bytes. On the first visit the map downloads every file the engine draws behind its loading screen and keeps it in the browser. Later visits read the kept copies and download only the files whose hash changed. Deliver the folder with an index the current check wrote; an index without hashes still works, but nothing is kept and each visit downloads the pictures again.
 
 ## 2. Standard sizes
 
@@ -237,7 +238,7 @@ A missing animation falls back to `walk` for moving states and to `idle` for the
 
 ## 9. Ground, roads, decals and plants
 
-The terrain and plant layers load these files straight from the pack's art folder, not through `art-index.json`. The pack names every file in its manifest: `terrainArt` for ground, transitions, roads and liquid, and the `art` list of each plant kind (one entry per drawn variant). A slot whose file is missing keeps its procedural look. The paths below are the usual layout; the manifest is what counts.
+The terrain and plant layers load the files the pack names in its manifest; the index lists them with their hash like every other file. The pack names every file in its manifest: `terrainArt` for ground, transitions, roads and liquid, and the `art` list of each plant kind (one entry per drawn variant). A slot whose file is missing keeps its procedural look. The paths below are the usual layout; the manifest is what counts.
 
 * **Ground:** one texture per ground material id of the pack's terrain recipe, `ground/<material>.png`, 1024 x 1024 px, seamless on both axes, seen from straight above, with no objects and no cast shadows. One map tile is 256 x 256 px of the texture, so one texture covers 4 x 4 tiles: tile (x, y) starts at ((x * 256) mod 1024, (y * 256) mod 1024). The engine projects it onto the 2:1 ground.
 * **Transitions:** `ground/edges/<first>_<second>.png`, 1024 x 256 px, 8-bit grey, one file per pair of material ids the pack declares. Rows run across the border, one tile deep: 255 is the first material, 0 the second. Columns wrap, so the border has no seam along its length.

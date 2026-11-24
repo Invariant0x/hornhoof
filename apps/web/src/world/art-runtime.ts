@@ -1,21 +1,13 @@
-/* Runtime side of the art contract: reads a pack's art-index.json, loads its pictures and
-   sheets on first use, and keeps sprites and placeholder graphics in one depth order.
-   A pack without art, a folder without an index or a file that fails to load all leave
-   the geometric placeholders in place. */
+/* Runtime side of the art contract: reads a pack's art-index.json, decodes its pictures and sheets on first use from
+   the pack's art files (art-files.ts: kept in the browser by content hash), and keeps sprites and placeholder graphics
+   in one depth order. A pack without art, a folder without an index or a file that fails to load all leave the flat
+   placeholders in place. */
 
-import { Assets, Container, Graphics, MeshSimple, Rectangle, RenderLayer, Sprite, Texture } from 'pixi.js';
-import {
-  ART_CONTRACT_VERSION,
-  ART_INDEX_FILE,
-  validateArtIndex,
-  type ArtIndex,
-  type ArtIndexEntry,
-  type ArtRect,
-} from './art';
+import { Container, Graphics, ImageSource, MeshSimple, Rectangle, RenderLayer, Sprite, Texture } from 'pixi.js';
+import { ART_CONTRACT_VERSION, validateArtIndex, type ArtIndex, type ArtIndexEntry, type ArtRect } from './art';
+import { worldArtFiles, type WorldArtFiles } from './art-files';
 import { CLOTH_COLS, CLOTH_ROWS, clothIndices, clothUvs, clothVertexWeights, greyOf } from './cloth';
 import type { WorldPackManifest } from './manifest';
-
-export type ArtFetch = (url: string) => Promise<Pick<Response, 'ok' | 'json'>>;
 
 export type WorldArtStats = {
   indexedFiles: number;
@@ -23,12 +15,6 @@ export type WorldArtStats = {
   buildingsDrawn: number;
   residentsDrawn: number;
 };
-
-function isIndexShape(value: unknown): value is ArtIndex {
-  if (!value || typeof value !== 'object') return false;
-  const v = value as Partial<ArtIndex>;
-  return typeof v.contract === 'number' && typeof v.pack === 'string' && Boolean(v.files) && typeof v.files === 'object';
-}
 
 /* Drops files the contract check rejects, so one broken passport never breaks the whole city. */
 function usableIndex(pack: WorldPackManifest, raw: ArtIndex): ArtIndex | null {
@@ -47,12 +33,21 @@ export type GreyPicture = Readonly<{ data: Uint8ClampedArray; w: number; h: numb
 /* Reads a grey picture (a cloth mask) one byte per pixel; rejects when it cannot. */
 export type GreyReader = (url: string) => Promise<GreyPicture>;
 
-const readGrey: GreyReader = async url => {
-  const bitmap = await createImageBitmap(await (await fetch(url, { cache: 'no-cache' })).blob());
+async function greyOfBlob(blob: Blob | null): Promise<GreyPicture> {
+  if (!blob) throw new Error('no mask');
+  const bitmap = await createImageBitmap(blob);
   const ctx = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d')!;
   ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
   return { data: greyOf(ctx.getImageData(0, 0, bitmap.width, bitmap.height).data), w: bitmap.width, h: bitmap.height };
-};
+}
+
+/* A picture as a texture the way the PixiJS loader makes one: alpha premultiplied on upload, mipmaps for far zooms. */
+async function textureOfBlob(blob: Blob | null): Promise<Texture> {
+  if (!blob) throw new Error('no picture');
+  const bitmap = await createImageBitmap(blob);
+  return new Texture({ source: new ImageSource({ resource: bitmap, alphaMode: 'premultiply-alpha-on-upload', autoGenerateMipmaps: true }) });
+}
 
 export class WorldArtLibrary {
   readonly index: ArtIndex | null;
@@ -65,11 +60,13 @@ export class WorldArtLibrary {
   private destroyed = false;
 
   private readonly grey: GreyReader;
+  private readonly files: WorldArtFiles | null;
 
-  private constructor(baseUrl: string, index: ArtIndex | null, grey: GreyReader = readGrey) {
+  private constructor(baseUrl: string, index: ArtIndex | null, files: WorldArtFiles | null, grey?: GreyReader) {
     this.baseUrl = baseUrl;
     this.index = index;
-    this.grey = grey;
+    this.files = files;
+    this.grey = grey ?? (url => (files ? files.blob(url.slice(baseUrl.length)) : Promise.resolve(null)).then(greyOfBlob));
     this.stats = {
       indexedFiles: index ? Object.keys(index.files).length : 0,
       loadedTextures: 0,
@@ -79,26 +76,20 @@ export class WorldArtLibrary {
   }
 
   static none(): WorldArtLibrary {
-    return new WorldArtLibrary('', null);
+    return new WorldArtLibrary('', null, null);
   }
 
+  /* The pack's index from its art files (one read per page), with the files the contract rejects left out. */
   static async load(
     pack: WorldPackManifest,
-    fetchImpl: ArtFetch = url => fetch(url, { cache: 'no-cache' }),
-    grey: GreyReader = readGrey,
+    files: WorldArtFiles | null = worldArtFiles(pack),
+    grey?: GreyReader,
   ): Promise<WorldArtLibrary> {
     const baseUrl = pack.art?.baseUrl;
-    if (!baseUrl) return WorldArtLibrary.none();
-    try {
-      const res = await fetchImpl(`${baseUrl}${ART_INDEX_FILE}`);
-      if (!res.ok) return WorldArtLibrary.none();
-      const raw: unknown = await res.json();
-      if (!isIndexShape(raw)) return WorldArtLibrary.none();
-      const index = usableIndex(pack, raw);
-      return index ? new WorldArtLibrary(baseUrl, index, grey) : WorldArtLibrary.none();
-    } catch {
-      return WorldArtLibrary.none();
-    }
+    if (!baseUrl || !files) return WorldArtLibrary.none();
+    const raw = await files.index();
+    const index = raw ? usableIndex(pack, raw) : null;
+    return index ? new WorldArtLibrary(baseUrl, index, files, grey) : WorldArtLibrary.none();
   }
 
   onChange(listener: () => void): () => void {
@@ -113,9 +104,12 @@ export class WorldArtLibrary {
     if (known instanceof Texture) return known;
     if (known) return null;
     this.textures.set(path, 'loading');
-    Assets.load<Texture>({ src: `${this.baseUrl}${path}`, data: { autoGenerateMipmaps: true } }).then(
+    (this.files ? this.files.blob(path) : Promise.resolve(null)).then(textureOfBlob).then(
       tex => {
-        if (this.destroyed) return;
+        if (this.destroyed) {
+          tex.destroy(true);
+          return;
+        }
         this.textures.set(path, tex);
         this.stats.loadedTextures++;
         for (const l of this.listeners) l();
@@ -166,8 +160,8 @@ export class WorldArtLibrary {
     this.listeners.clear();
     for (const tex of this.frames.values()) tex.destroy(false);
     this.frames.clear();
-    for (const [path, tex] of this.textures) {
-      if (tex instanceof Texture) void Assets.unload(`${this.baseUrl}${path}`);
+    for (const tex of this.textures.values()) {
+      if (tex instanceof Texture) tex.destroy(true);
     }
     this.textures.clear();
   }

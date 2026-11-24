@@ -134,7 +134,9 @@ export type SheetPassport = Readonly<{
 
 export type ArtPassport = BuildingPicturePassport | AnchorPassport | SheetPassport;
 
-export type ArtIndexEntry = Readonly<{ w: number; h: number; passport?: ArtPassport }>;
+/* `bytes` and `hash` (16 hex of the SHA-256 of the file) let the browser keep one copy of each version of a file and
+   download only the files whose hash changed (art-files.ts, #1947); an index written before them has neither. */
+export type ArtIndexEntry = Readonly<{ w: number; h: number; bytes?: number; hash?: string; passport?: ArtPassport }>;
 
 export type ArtIndex = Readonly<{
   contract: number;
@@ -623,6 +625,39 @@ function stepFootprints(buildings: WorldArtCatalog['buildings']): Map<string, Fo
   for (const [kind, steps] of Object.entries(buildings) as [BuildingKind, readonly ArtBuildingStep[]][]) {
     for (const step of steps) for (const v of variantNumbers(step)) out.set(stepFolder(kind, step, v), step.footprint);
   }
+  return out;
+}
+
+/* The files of an art folder the engine draws (#1947: the loading screen downloads these and leaves the rest): the
+   catalog's slots with the layers and cloth masks their passports name, and the ground, liquid, street and plant files
+   the pack's manifest names. It may name files the folder lacks. */
+export function drawnArtPaths(pack: WorldPackManifest, index: ArtIndex): ReadonlySet<string> {
+  const declared = new Set(declaredArtFiles(pack).map(d => d.path));
+  const out = new Set(declared);
+  for (const [path, entry] of Object.entries(index.files)) {
+    const layers = (entry.passport as BuildingPicturePassport | undefined)?.layers;
+    if (!declared.has(path) || !Array.isArray(layers)) continue;
+    for (const layer of layers) {
+      if (typeof layer?.file !== 'string') continue;
+      const lp = artLayerPath(path, layer.file);
+      out.add(lp);
+      out.add(clothMaskPath(lp));
+    }
+  }
+  const t = pack.terrainArt;
+  const named = [
+    ...Object.values(t?.ground ?? {}),
+    ...Object.values(t?.edges ?? {}),
+    ...Object.values(t?.roads ?? {}),
+    t?.defaultEdge,
+    t?.shoreEdge,
+    t?.liquid?.bed,
+    t?.liquid?.ripples,
+    t?.liquid?.surface,
+    t?.pathStrip,
+    ...(pack.plants ?? []).flatMap(k => (k.art ?? []).flatMap(a => [a.image, a.windMask])),
+  ];
+  for (const f of named) if (f) out.add(f);
   return out;
 }
 

@@ -15,6 +15,7 @@ import { Bar, percent } from '../ui/Bar';
 import { ZoomBar } from '../ui/canvas';
 import { takeEscape } from '../ui/escape';
 import { MapVersion } from '../ui/VersionMark';
+import { worldArtFiles } from '../world/art-files';
 import type { CityBuilding, CityState } from '../world/city-layout';
 import { createConstructionSimulation, type ConstructionSimulation } from '../world/construction';
 import { buildDepartmentFocus, isLinkStrictlyOnRoads, type DepartmentFocusSpec } from '../world/department-focus';
@@ -36,6 +37,7 @@ import { generateWorldTerrain, type GeneratedWorldMap } from '../world/terrain-e
 import { useShellTop } from '../ui/shellBars';
 import { orchestratorStatus, useMapRoom } from './Map';
 import { clock } from './Subscriptions';
+import { WorldLoadingScreen, type WorldLoadProgress } from './WorldLoadingScreen';
 import { WorldSideCards, type WorldSelection } from './WorldSideCards';
 
 export type WorldMapViewProps = Readonly<{
@@ -90,6 +92,9 @@ declare global {
   }
 }
 
+/* How long one frame may bake ground behind the loading screen, so its progress keeps moving. */
+const BAKE_SLICE_MS = 12;
+
 const orchestratorWorks = (o: NonNullable<Org['orchestrator']>, limitAt: string | null) =>
   !!o.planned && !limitAt && !o.alarm && !!o.program && o.program.state !== 'gone';
 
@@ -125,6 +130,8 @@ export function WorldMapView({
   const [confirmRelocate, setConfirmRelocate] = useState<PendingRelocateModal | null>(null);
   const [relocateBusy, setRelocateBusy] = useState(false);
   const [residentsTick, setResidentsTick] = useState(0);
+  /* The loading screen, shown only while the pictures kept in the browser are missing or out of date (#1947). */
+  const [loading, setLoading] = useState<WorldLoadProgress | null>(null);
 
   const boxRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -256,144 +263,191 @@ export function WorldMapView({
     const host = hostRef.current;
     if (!host) return;
     let alive = true;
+    let bakeFrame = 0;
+    /* Whether this mount shows the loading screen: only when some picture has to be downloaded first. */
+    let screened = false;
 
-    const map = generateWorldTerrain(pack, { seed, mapSize: pack.mapSize });
-    mapRef.current = map;
-
-    const synced = syncLiveSnapshotToCity(pack, map, snapshotRef.current);
-    cityRef.current = synced.city;
-    syncRef.current = synced;
-
-    const sim = createResidentSimulation(pack, synced.city, snapshotRef.current);
-    simRef.current = sim;
-    setResidentsTick(n => n + 1);
-
-    const constructionSim = createConstructionSimulation(pack);
-    constructionRef.current = constructionSim;
-
-    void IsometricWorldEngine.create({
-      host,
-      pack,
-      terrainMap: map,
-      showBuildGrid: false,
-      initialZoom: 1.0,
-      initialCenterTile: synced.city.center,
-      onStats: next => {
-        setZoom(prev => (Math.abs(prev - next.zoom) > 0.004 ? next.zoom : prev));
-      },
-      onHover: tile => {
-        const rel = relocatingRef.current;
-        const curCity = cityRef.current;
-        const curMap = mapRef.current;
-        if (!rel || !curCity || !curMap || !tile) {
-          engineRef.current?.setRelocationPreview(null);
+    /* Counts the visible ground pieces as they bake, a slice per frame, then lets the map show. */
+    const bakeBehindScreen = (engine: IsometricWorldEngine) => {
+      const step = () => {
+        if (!alive) return;
+        const { done, total } = engine.bakeVisibleStep(BAKE_SLICE_MS);
+        if (done < total) {
+          setLoading(l => l && { ...l, step: 'bake', bakedChunks: done, totalChunks: total });
+          bakeFrame = requestAnimationFrame(step);
           return;
         }
-        const valid = canRelocateBuildingTo(curCity, curMap, rel.id, tile.col, tile.row);
-        engineRef.current?.setRelocationPreview({
-          col: tile.col,
-          row: tile.row,
-          spanCol: rel.spanCol,
-          spanRow: rel.spanRow,
-          valid,
-        });
-      },
-      onSelectResident: resident => {
-        if (relocatingRef.current) return;
-        if (resident) selectResident(resident);
-      },
-      onSelect: pick => {
-        const rel = relocatingRef.current;
-        const curCity = cityRef.current;
-        const curMap = mapRef.current;
-        if (rel && curCity && curMap && pick) {
-          if (canRelocateBuildingTo(curCity, curMap, rel.id, pick.col, pick.row)) {
-            setConfirmRelocate({ building: rel, toCol: pick.col, toRow: pick.row });
-          }
-          return;
-        }
-        if (pick?.kind === 'object' && curCity) {
-          const building = curCity.buildings.find(b => b.id === pick.object.id);
-          if (building) {
-            selectBuilding(building);
+        engine.flushVisibleBakes();
+        setLoading(null);
+      };
+      setLoading(l => l && { ...l, step: 'bake' });
+      bakeFrame = requestAnimationFrame(step);
+    };
+
+    const mountWorld = () => {
+      const map = generateWorldTerrain(pack, { seed, mapSize: pack.mapSize });
+      mapRef.current = map;
+
+      const synced = syncLiveSnapshotToCity(pack, map, snapshotRef.current);
+      cityRef.current = synced.city;
+      syncRef.current = synced;
+
+      const sim = createResidentSimulation(pack, synced.city, snapshotRef.current);
+      simRef.current = sim;
+      setResidentsTick(n => n + 1);
+
+      const constructionSim = createConstructionSimulation(pack);
+      constructionRef.current = constructionSim;
+
+      void IsometricWorldEngine.create({
+        host,
+        pack,
+        terrainMap: map,
+        showBuildGrid: false,
+        initialZoom: 1.0,
+        initialCenterTile: synced.city.center,
+        onStats: next => {
+          setZoom(prev => (Math.abs(prev - next.zoom) > 0.004 ? next.zoom : prev));
+        },
+        onHover: tile => {
+          const rel = relocatingRef.current;
+          const curCity = cityRef.current;
+          const curMap = mapRef.current;
+          if (!rel || !curCity || !curMap || !tile) {
+            engineRef.current?.setRelocationPreview(null);
             return;
           }
+          const valid = canRelocateBuildingTo(curCity, curMap, rel.id, tile.col, tile.row);
+          engineRef.current?.setRelocationPreview({
+            col: tile.col,
+            row: tile.row,
+            spanCol: rel.spanCol,
+            spanRow: rel.spanRow,
+            valid,
+          });
+        },
+        onSelectResident: resident => {
+          if (relocatingRef.current) return;
+          if (resident) selectResident(resident);
+        },
+        onSelect: pick => {
+          const rel = relocatingRef.current;
+          const curCity = cityRef.current;
+          const curMap = mapRef.current;
+          if (rel && curCity && curMap && pick) {
+            if (canRelocateBuildingTo(curCity, curMap, rel.id, pick.col, pick.row)) {
+              setConfirmRelocate({ building: rel, toCol: pick.col, toRow: pick.row });
+            }
+            return;
+          }
+          if (pick?.kind === 'object' && curCity) {
+            const building = curCity.buildings.find(b => b.id === pick.object.id);
+            if (building) {
+              selectBuilding(building);
+              return;
+            }
+          }
+          clearSelection();
+        },
+      }).then(engine => {
+        if (!alive) {
+          engine.destroy();
+          return;
         }
-        clearSelection();
-      },
-    }).then(engine => {
-      if (!alive) {
-        engine.destroy();
-        return;
-      }
-      engineRef.current = engine;
-      engine.setCityRenderState({
-        city: synced.city,
-        worldMode: synced.worldMode,
-        emptyLotStakes: synced.emptyLotStakes,
-        districtColors: synced.districtColors,
-      });
-      engine.setResidentSimulation(sim);
-      engine.setConstructionSimulation(constructionSim);
-      engine.flushVisibleBakes();
-      setZoom(engine.getStats().zoom);
+        engineRef.current = engine;
+        engine.setCityRenderState({
+          city: synced.city,
+          worldMode: synced.worldMode,
+          emptyLotStakes: synced.emptyLotStakes,
+          districtColors: synced.districtColors,
+        });
+        engine.setResidentSimulation(sim);
+        engine.setConstructionSimulation(constructionSim);
+        if (screened) bakeBehindScreen(engine);
+        else engine.flushVisibleBakes();
+        setZoom(engine.getStats().zoom);
 
-      window.__WORLD_PRODUCT__ = {
-        getPackId: () => pack.id,
-        getStats: () => engineRef.current?.getStats() ?? null,
-        getBuildings: () => cityRef.current?.buildings ?? [],
-        getResidents: () => simRef.current?.residents ?? [],
-        getDepartmentFocus: () => {
-          const f = engineRef.current?.getDepartmentFocus();
-          const city = cityRef.current;
-          if (!f) return null;
-          return {
-            departmentId: f.departmentId,
-            bannerColor: f.bannerColor,
-            highlightedBuildings: f.highlightedBuildingIds.size,
-            highlightedResidents: f.highlightedResidentIds.size,
-            linksCount: f.links.length,
-            linkKinds: [...new Set(f.links.map(l => l.kind))],
-            allLinksOnRoads: Boolean(city) && f.links.every(l => isLinkStrictlyOnRoads(city!, l)),
-            pathTilesTotal: f.links.reduce((acc, l) => acc + l.path.length, 0),
-          };
-        },
-        selectBuildingByKind: (kind, index = 0) => {
-          const matches = (cityRef.current?.buildings ?? []).filter(b => b.kind === kind);
-          const target = matches[index];
-          if (!target) return null;
-          const targetZoom = kind === 'department' ? 0.78 : 1.15;
-          engineRef.current?.centerOnBuilding(target.id, targetZoom);
-          engineRef.current?.flushVisibleBakes();
-          selectBuilding(target);
-          return { id: target.id, label: target.label, kind: target.kind };
-        },
-        selectResidentByRoleClass: roleClass => {
-          const list = simRef.current?.residents ?? [];
-          const found = (roleClass ? list.find(r => r.roleClass === roleClass) : list[0]) ?? list[0];
-          if (!found) return null;
-          engineRef.current?.centerOnResident(found.id, 1.4);
-          engineRef.current?.setSelectedResidentId(found.id);
-          engineRef.current?.flushVisibleBakes();
-          selectResident(found);
-          return { id: found.id, agentId: found.agentId, name: found.name };
-        },
-        clearSelection: () => clearSelection(),
-        centerOnBuilding: (buildingId, nextZoom) => {
-          const ok = engineRef.current?.centerOnBuilding(buildingId, nextZoom) ?? false;
-          if (ok) engineRef.current?.flushVisibleBakes();
-          return ok;
-        },
-        fitToCity: () => {
-          engineRef.current?.fitToCity();
-          engineRef.current?.flushVisibleBakes();
-        },
-        flushVisibleBakes: () => engineRef.current?.flushVisibleBakes(),
-      };
-    });
+        window.__WORLD_PRODUCT__ = {
+          getPackId: () => pack.id,
+          getStats: () => engineRef.current?.getStats() ?? null,
+          getBuildings: () => cityRef.current?.buildings ?? [],
+          getResidents: () => simRef.current?.residents ?? [],
+          getDepartmentFocus: () => {
+            const f = engineRef.current?.getDepartmentFocus();
+            const city = cityRef.current;
+            if (!f) return null;
+            return {
+              departmentId: f.departmentId,
+              bannerColor: f.bannerColor,
+              highlightedBuildings: f.highlightedBuildingIds.size,
+              highlightedResidents: f.highlightedResidentIds.size,
+              linksCount: f.links.length,
+              linkKinds: [...new Set(f.links.map(l => l.kind))],
+              allLinksOnRoads: Boolean(city) && f.links.every(l => isLinkStrictlyOnRoads(city!, l)),
+              pathTilesTotal: f.links.reduce((acc, l) => acc + l.path.length, 0),
+            };
+          },
+          selectBuildingByKind: (kind, index = 0) => {
+            const matches = (cityRef.current?.buildings ?? []).filter(b => b.kind === kind);
+            const target = matches[index];
+            if (!target) return null;
+            const targetZoom = kind === 'department' ? 0.78 : 1.15;
+            engineRef.current?.centerOnBuilding(target.id, targetZoom);
+            engineRef.current?.flushVisibleBakes();
+            selectBuilding(target);
+            return { id: target.id, label: target.label, kind: target.kind };
+          },
+          selectResidentByRoleClass: roleClass => {
+            const list = simRef.current?.residents ?? [];
+            const found = (roleClass ? list.find(r => r.roleClass === roleClass) : list[0]) ?? list[0];
+            if (!found) return null;
+            engineRef.current?.centerOnResident(found.id, 1.4);
+            engineRef.current?.setSelectedResidentId(found.id);
+            engineRef.current?.flushVisibleBakes();
+            selectResident(found);
+            return { id: found.id, agentId: found.agentId, name: found.name };
+          },
+          clearSelection: () => clearSelection(),
+          centerOnBuilding: (buildingId, nextZoom) => {
+            const ok = engineRef.current?.centerOnBuilding(buildingId, nextZoom) ?? false;
+            if (ok) engineRef.current?.flushVisibleBakes();
+            return ok;
+          },
+          fitToCity: () => {
+            engineRef.current?.fitToCity();
+            engineRef.current?.flushVisibleBakes();
+          },
+          flushVisibleBakes: () => engineRef.current?.flushVisibleBakes(),
+        };
+      });
+    };
+
+    void (async () => {
+      const files = worldArtFiles(pack);
+      const missing = files ? await files.missing() : null;
+      if (!alive) return;
+      if (files && missing && missing.paths.length > 0) {
+        screened = true;
+        setLoading({ step: 'art', loadedBytes: 0, totalBytes: missing.bytes, bakedChunks: 0, totalChunks: 0 });
+        await files.fill(p => {
+          if (alive) setLoading(l => l && { ...l, loadedBytes: p.loadedBytes, totalBytes: p.totalBytes });
+        });
+        if (!alive) return;
+        setLoading(l => l && { ...l, step: 'map' });
+        /* Lets the screen paint its map step before laying out the city takes the main thread. */
+        await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+        if (!alive) return;
+      } else {
+        /* Drops the kept copies the index no longer lists. */
+        void files?.fill();
+      }
+      mountWorld();
+    })();
 
     return () => {
       alive = false;
+      cancelAnimationFrame(bakeFrame);
+      setLoading(null);
       delete window.__WORLD_PRODUCT__;
       engineRef.current?.destroy();
       engineRef.current = null;
@@ -516,6 +570,7 @@ export function WorldMapView({
   return (
     <div className="map world-map" ref={boxRef} data-world-canvas={pack.id} inert={inside} aria-hidden={inside || undefined}>
       <div className="world-canvas-host" ref={hostRef} />
+      {loading && <WorldLoadingScreen progress={loading} />}
       <div className="map-room" style={roomStyle}>
         <MapVersion off={inside} />
       </div>

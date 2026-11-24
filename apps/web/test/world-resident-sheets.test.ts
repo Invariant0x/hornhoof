@@ -11,6 +11,7 @@ import {
   type ArtIndexEntry,
   type SheetPassport,
 } from '../src/world/art';
+import { WorldArtFiles } from '../src/world/art-files';
 import { WorldArtLibrary } from '../src/world/art-runtime';
 import type { CityBuilding } from '../src/world/city-layout';
 import { createConstructionSimulation, startBuildingConstruction, startBuildingDemolition, workSlotsForBuilding } from '../src/world/construction';
@@ -256,7 +257,8 @@ describe('Held items keep their hand: sheets drawn in the directions of 4.4 (#19
       `${carry}: carry lacks SW and NW: the accepted set egypt-mason-t1-r1 stays in play until its export in NE, SE, SW and NW replaces it (order v3 4.4)`,
     );
     /* The game, the film and the pilot still draw it: the runtime keeps the sheet. */
-    const lib = await WorldArtLibrary.load(EGYPT_WORLD_PACK, async () => ({ ok: true, json: async () => old }));
+    const folder = new WorldArtFiles({ packId: 'egypt', baseUrl: '/art/', store: null, fetch: async () => new Response(JSON.stringify(old)) });
+    const lib = await WorldArtLibrary.load(EGYPT_WORLD_PACK, folder);
     expect(lib.index?.files[carry]).toBeDefined();
     lib.destroy();
     /* The new export passes with no warning; the grace covers that one file only. */
