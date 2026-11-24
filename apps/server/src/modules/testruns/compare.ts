@@ -2,6 +2,11 @@ import { z } from 'zod';
 import type { RepoAddress } from './refs.js';
 import { bodyWithin } from './bounded.js';
 import { githubName, githubRateLimit, GitHubRateLimited, type GitHubLimits, type RateLimit } from './github-limit.js';
+import { githubCiReader, type CiReader } from './github-ci.js';
+import { githubCiDispatcher, type CiDispatcher } from './github-dispatch.js';
+
+export type { CiAt, CiReader } from './github-ci.js';
+export type { CiDispatcher } from './github-dispatch.js';
 
 /* A file GitHub lists with its counts and shows no patch of, as it does for a large file such as a migration's snapshot. */
 type OmittedPatch = { path: string; additions: number; deletions: number };
@@ -170,14 +175,16 @@ async function treeAt(json: JsonReader, repo: RepoAddress, commitSha: string, ti
 
 const READ_MS = 10_000;
 
-/* A server shares one request limit across every REST reader, including each page of a comparison. */
-export function githubReaders(limits?: GitHubLimits): { readCompare: CompareReader; readMerged: MergeReader; readTree: TreeReader } {
+/* A server shares one request limit across every REST reader, including each page of a comparison or of a commit's checks. */
+export function githubReaders(limits?: GitHubLimits): { readCompare: CompareReader; readMerged: MergeReader; readTree: TreeReader; readCi: CiReader; dispatchCi: CiDispatcher } {
   const json: JsonReader = limits ? (repo, path, timeout) => limits.request(repo, () => githubJson(repo, path, timeout)) : githubJson;
   return {
     readCompare: (repo, refs, timeout = READ_MS) => compareAt(json, repo, refs, timeout),
     readMerged: (repo, refs, timeout = READ_MS) => mergedAt(json, repo, refs, timeout),
     readTree: (repo, commit, timeout = READ_MS) => treeAt(json, repo, commit, timeout),
+    readCi: githubCiReader(limits),
+    dispatchCi: githubCiDispatcher(limits),
   };
 }
 
-export const { readCompare, readMerged, readTree } = githubReaders();
+export const { readCompare, readMerged, readTree, readCi } = githubReaders();

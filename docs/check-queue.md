@@ -10,7 +10,7 @@ Nodes report their tracked check IDs in hello and load frames. The server applie
 
 An agent runs noninteractive checks of its change in its own workspace. Install dependencies from the lockfile once per workspace and again when the lockfile changes. Name one or more regular test files, including browser tests when the browser is installed there. Browser installation is allowed. Types, lint, format, builds, coverage, quality and changed-code mutation also run there.
 
-A whole test suite runs only through `run_tests`, split into groups over free machines, once per release: on the turn's branch or a release branch before main, or on main. A runner given no files, or a selection using a directory, glob, loop or variable, counts as a whole suite. Watch modes and task runners that run everything are refused in the terminal. For local checks, the wrapper uses the same guard as the terminal:
+A whole test suite does not run in a workspace: the repository's own CI runs it for the exact commit of a release, and a release relies on that. `run_tests` runs the checks of a task, split into groups over free machines, on the turn's branch, a release branch or main. A runner given no files, or a selection using a directory, glob, loop or variable, counts as a whole suite. Watch modes and task runners that run everything are refused in the terminal. For local checks, the wrapper uses the same guard as the terminal:
 
 ```sh
 hh-check -- npx vitest run test/a.test.ts test/b.test.ts

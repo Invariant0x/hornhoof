@@ -6,6 +6,7 @@
 import type { WorldRelocationRecord } from '@hornhoof/protocol/world';
 import type { CityBuilding, CityState } from './city-layout';
 import type { LotGroundSpec, WorldPackManifest } from './manifest';
+import type { StreetTile } from './street-field';
 
 export type LotRect = Readonly<{ col: number; row: number; spanCol: number; spanRow: number }>;
 
@@ -16,6 +17,8 @@ export type LotClearing = Readonly<{
   lots: readonly LotRect[];
   /* Width in tiles of the soft edge outside each lot. */
   edge: number;
+  /* The city's street tiles, baked into the same ground under the pack's street strips (street-field.ts, #1985). */
+  streets?: readonly StreetTile[];
 }>;
 
 const HOUR_MS = 3_600_000;
@@ -108,7 +111,21 @@ export function lotClearingNear(
   const lots = clearing.lots.filter(
     l => l.col - e < area.colEnd && l.col + l.spanCol + e > area.colStart && l.row - e < area.rowEnd && l.row + l.spanRow + e > area.rowStart,
   );
-  return lots.length > 0 ? { lots, edge: e } : null;
+  return nearClearing(lots, e, streetsNear(clearing.streets, area));
+}
+
+/* The streets whose joins reach into a tile rectangle: a street's neighbours decide its joins, one tile beyond it. */
+function streetsNear(
+  streets: readonly StreetTile[] | undefined,
+  area: Readonly<{ colStart: number; colEnd: number; rowStart: number; rowEnd: number }>,
+): readonly StreetTile[] {
+  return (streets ?? []).filter(t => t.col + 2 > area.colStart && t.col - 1 < area.colEnd && t.row + 2 > area.rowStart && t.row - 1 < area.rowEnd);
+}
+
+/* A clearing of the lots and streets near a place, or null when neither is. */
+function nearClearing(lots: readonly LotRect[], edge: number, streets: readonly StreetTile[]): LotClearing | null {
+  if (streets.length > 0) return { lots, edge, streets };
+  return lots.length > 0 ? { lots, edge } : null;
 }
 
 /* The lots a chunk's bake needs: those reaching into its tiles or the one-tile margin its pixels overlap. */
@@ -133,7 +150,13 @@ export function surveyedLot(stakes: readonly Readonly<{ col: number; row: number
 /* A short text that changes whenever the lots of a clearing do: part of a baked chunk's cache key. */
 export function lotClearingKey(clearing: LotClearing | null): string {
   if (!clearing) return '';
-  return clearing.lots.map(l => `${l.col},${l.row},${l.spanCol},${l.spanRow}`).join(';');
+  return clearing.lots.map(l => `${l.col},${l.row},${l.spanCol},${l.spanRow}`).join(';') + streetsKey(clearing.streets);
+}
+
+/* The streets' part of a clearing's key: empty without streets, so a clearing of lots alone keeps its key. */
+function streetsKey(streets: readonly StreetTile[] | undefined): string {
+  if (!streets?.length) return '';
+  return `|${streets.map(t => `${t.col},${t.row}${t.tier[0]}${t.bridge ? 'b' : ''}`).join(';')}`;
 }
 
 /* The cache-key part of the cleared lots for each chunk under one clearing, and the last key each chunk was baked under:

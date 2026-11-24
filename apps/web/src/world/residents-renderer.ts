@@ -13,6 +13,7 @@ import {
   type ResidentArt,
 } from './art';
 import { parseArtTint, type DisplayRunPool, type WorldArtLibrary } from './art-runtime';
+import { residentDepthY } from './bridge-site';
 import type { CityBuilding, CityState } from './city-layout';
 import { tileCenterToWorld, tileTopVertexToWorld } from './coords';
 import type { WorldPackManifest } from './manifest';
@@ -214,6 +215,11 @@ function drawAltarArtPixi(ctx: ResidentArtContext, index: ArtIndex, sim: Residen
   return true;
 }
 
+/* The depth a resident's feet stand at: over the deck it walks on where it is on the city's bridge, else its tile's centre. */
+function feetDepth(city: CityState | null, r: Readonly<{ col: number; row: number }>, tileH: number): number {
+  return residentDepthY(city?.bridge ?? null, r.col, r.row, tileH);
+}
+
 const PLACEHOLDER_ALPHA = 0.9;
 
 /* A resident with no art: a small flat diamond at its feet in its cloak colour, the pack's select colour if picked. */
@@ -316,7 +322,7 @@ export function renderResidentsToPixi(
     const selected = r.id === selectedResidentId;
     if (art) {
       /* Through the pool, art or placeholder, at the depth of the feet among buildings and plants. */
-      art.pool.depth = tileCenterToWorld(r.col, r.row, tileW, tileH).y;
+      art.pool.depth = feetDepth(city, r, tileH);
       const resolved = artIndex ? resolveResidentArt(pack, artIndex, r, sim.timeSec) : null;
       if (!resolved || !drawResidentArtPixi(art, resolved, r, pack, tileW, tileH, selected)) {
         drawResidentPlaceholderPixi(art.pool.graphics(), r, pack, tileW, tileH, selected);

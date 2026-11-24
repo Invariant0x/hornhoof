@@ -138,14 +138,13 @@ describe('a release credits turnkey work with only the first-parent line from th
       const f = await releasing();
       await rule(f);
       const work = await shape(f);
-      const run = await f.fullRun({ commit: work.release });
-      const refused = await f.recordRelease({ commit: work.release, runId: run.id });
+      const refused = await f.recordRelease({ commit: work.release });
       expect(refused).toMatchObject({ isError: true });
       expect(refused.text).toContain(`${foreign} came in with no accepted candidate.`);
       const asked = await f.call('ask_person', { task: f.release.number, question: `Release turn ${f.turn.number}: main to ${work.release}.`, commit: work.release });
       expect(asked.isError).toBe(false);
       await answer(f.ctx, { personId: f.claude.ownerPersonId }, (await card(f)).id, { approve: true });
-      const result = await f.recordRelease({ commit: work.release, runId: run.id });
+      const result = await f.recordRelease({ commit: work.release });
       expect(recorded(result.text)).toMatchObject({ autonomousReleaseId: null, covered: false, uncovered: [`${foreign} came in with no accepted candidate.`] });
     });
   });
@@ -156,8 +155,7 @@ describe('a release credits turnkey work with only the first-parent line from th
     const SECOND = '2'.repeat(40);
     lay(f, [{ sha: OWN, parents: [f.R] }, { sha: SECOND, parents: [OWN] }], { [f.branch]: SECOND, [work.branch]: SECOND });
     await work.done({ commit: SECOND, baseCommit: f.R });
-    const run = await f.fullRun({ commit: SECOND });
-    const result = await f.recordRelease({ commit: SECOND, runId: run.id });
+    const result = await f.recordRelease({ commit: SECOND });
     expect(result.isError).toBe(false);
     expect(recorded(result.text)).toMatchObject({ approvalRequestId: null, covered: true, uncovered: [], tasks: expect.arrayContaining([expect.objectContaining({ number: work.task.number, commit: SECOND })]) as unknown });
   });
@@ -167,8 +165,7 @@ describe('a release credits turnkey work with only the first-parent line from th
     const work = await turnkeyTask(f);
     lay(f, [{ sha: OWN, parents: [f.R] }, { sha: FOREIGN, parents: [f.R] }, { sha: JOIN, parents: [FOREIGN, OWN] }], { [f.branch]: JOIN, [work.branch]: OWN });
     await work.done({ commit: OWN, baseCommit: f.R });
-    const run = await f.fullRun({ commit: JOIN });
-    const refused = await f.recordRelease({ commit: JOIN, runId: run.id });
+    const refused = await f.recordRelease({ commit: JOIN });
     expect(refused.text).toContain(`${JOIN} is a merge made outside every checked candidate.`);
     expect(refused.text).toContain(`${FOREIGN} came in with no accepted candidate.`);
   });
@@ -182,8 +179,7 @@ describe('a release credits turnkey work with only the first-parent line from th
     const integration = { ...(closed!.data.integration as Record<string, unknown>) };
     delete integration.start;
     await f.db.update(taskEvents).set({ data: { ...closed!.data, integration } }).where(eq(taskEvents.id, closed!.id));
-    const run = await f.fullRun({ commit: OWN });
-    const refused = await f.recordRelease({ commit: OWN, runId: run.id });
+    const refused = await f.recordRelease({ commit: OWN });
     expect(refused.text).toContain(`#${work.task.number} was closed before turnkey work named the commit its holder checked and where it started, so none of its commits counts as checked.`);
     expect(refused.text).toContain(`${OWN} came in with no accepted candidate.`);
   });
@@ -196,8 +192,7 @@ describe('a release credits turnkey work with only the first-parent line from th
     f.ctx.readCommit = read;
     lay(f, [{ sha: OWN, parents: [f.R] }], { [f.branch]: OWN, [work.branch]: OWN });
     await work.done({ commit: OWN, baseCommit: f.R });
-    const run = await f.fullRun({ commit: OWN });
-    const refused = await f.recordRelease({ commit: OWN, runId: run.id });
+    const refused = await f.recordRelease({ commit: OWN });
     expect(refused).toMatchObject({ isError: true });
     expect(refused.text).toContain(`#${work.task.number}: where this turnkey work started is not on record, so none of its commits counts as checked.`);
     expect(refused.text).toContain(`${OWN} came in with no accepted candidate.`);
@@ -208,10 +203,9 @@ describe('a release credits turnkey work with only the first-parent line from th
 describe('the turn branch of a release', () => {
   it('is read by branch alone: a tag of its name in place of the branch is no release of it', async () => {
     const f = await releasing();
-    const run = await f.fullRun();
     f.repo.tags[f.branch] = f.R;
     delete f.repo.heads[f.branch];
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining(`${f.branch} does not hold ${f.R}, or it could not be read`) as unknown });
+    expect(await f.recordRelease()).toMatchObject({ isError: true, text: expect.stringContaining(`${f.branch} does not hold ${f.R}, or it could not be read`) as unknown });
   });
 });
 
