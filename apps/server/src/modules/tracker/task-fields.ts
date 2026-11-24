@@ -5,7 +5,7 @@ import type { Spot } from '../../auth/access.js';
 import { goals } from '../../db/schema.js';
 import { refuse, type Task } from '../tasks/state.js';
 import { defaultPipelineOf, placeOnPipeline } from './pipelines.js';
-import { placeOwner, requireAnswersFor, requireAsker } from './responsible.js';
+import { askerOf, placeOwner, requireAnswersFor } from './responsible.js';
 
 /* What the tracker keeps of a task beside its work: the goal it serves, who answers for it, why it exists, by when. */
 export type TrackerInput = { goalId?: string | null; responsiblePersonId?: string | null; askedByPersonId?: string | null; why?: string; dueAt?: Date | null; priority?: TaskPriority | null; pipelineId?: string | null; pipelineStageId?: string | null };
@@ -30,7 +30,7 @@ export async function newTrackerFields(ctx: Pick<Ctx, 'db'>, companyId: string, 
   const goal = input.goalId ? await goalFor(ctx, companyId, spot, input.goalId) : null;
   if (input.responsiblePersonId) await requireAnswersFor(ctx, companyId, input.responsiblePersonId, spot);
   const responsiblePersonId = input.responsiblePersonId ?? parent?.responsiblePersonId ?? goal?.responsiblePersonId ?? (await placeOwner(ctx, companyId, spot));
-  const askedByPersonId = parent?.askedByPersonId ?? (input.askedByPersonId ? await requireAsker(ctx, companyId, input.askedByPersonId) : null);
+  const askedByPersonId = await askerOf(ctx, companyId, parent, input.askedByPersonId);
   const pipelineId = input.pipelineId === undefined ? await defaultPipelineOf(ctx.db, companyId, spot) : input.pipelineId;
   const pipeline = pipelineId ? await placeOnPipeline(ctx.db, companyId, spot, holderId, pipelineId, input.pipelineStageId) : { pipelineId: null, pipelineStageId: null };
   return { goalId: goal?.id ?? null, responsiblePersonId, askedByPersonId, why: input.why?.trim() ?? '', dueAt: input.dueAt ?? null, priority: input.priority ?? null, ...pipeline };

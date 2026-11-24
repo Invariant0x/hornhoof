@@ -55,6 +55,11 @@ export async function requireAsker(ctx: Pick<Ctx, 'db'>, companyId: string, pers
   return person.id;
 }
 
+/* Who asked for a new task: whoever asked for the task above it, else the person named, if any. */
+export async function askerOf(ctx: Pick<Ctx, 'db'>, companyId: string, parent: { askedByPersonId: string | null } | null, named: string | null | undefined): Promise<string | null> {
+  return parent?.askedByPersonId ?? (named ? requireAsker(ctx, companyId, named) : null);
+}
+
 /* Whether this person may give work and set the goals and pipelines of a place, by the rule the routes keep, so a screen
    offers only what they take. */
 export async function mayPlan(ctx: Pick<Ctx, 'db'>, me: Person): Promise<(departmentId: string | null) => Promise<boolean>> {

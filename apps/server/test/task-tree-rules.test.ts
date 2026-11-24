@@ -92,6 +92,8 @@ describe('the rules of a new task tree', () => {
     const another = await work({ title: 'Not Bruno\'s', assigneeAgentId: head.id });
     await expect(requireTreeRules(ctx, creator, another, 'parallel_block')).rejects.toMatchObject({ status: 403 });
     await expect(requireTreeRules(ctx, creator, null, undefined)).rejects.toMatchObject({ status: 403 });
+    await expect(requireTreeRules(ctx, { id: 'orchestrator', kind: 'orchestrator', departmentId: null }, own, 'independent_result')).resolves.toBeUndefined();
+    await expect(requireTreeRules(ctx, { id: head.id, kind: 'head', departmentId: own.departmentId }, null, undefined)).resolves.toBeUndefined();
     await expect(requireTreeRules(ctx, { id: sam.id, kind: 'head', departmentId: sam.departmentId }, own, 'other_owner')).rejects.toMatchObject({ status: 403 });
   });
 

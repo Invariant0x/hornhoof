@@ -110,10 +110,11 @@ describe('the filters', () => {
   it('lists for a person only what they asked for and what waits for their decision, never everything they would decide', () => {
     const DECIDED = task({ id: 'd1', number: 600, title: 'Work an agent started', askedBy: null, responsible: SAM });
     const OF_LEO = task({ id: 'd2', number: 601, title: "Leo's request", askedBy: LEO, responsible: SAM });
+    const since = '2026-11-16T09:00:00.000Z';
     const WAITING = task({
       id: 'd3', number: 602, title: 'Waits for Sam', status: 'waiting', askedBy: LEO, responsible: LEO,
-      time: { inStatusSince: '2026-11-16T09:00:00.000Z', workedSeconds: 0, waitsOn: [{ kind: 'person', who: { kind: 'person', id: 'p2', name: 'Sam' }, reason: 'approval', since: '2026-11-16T09:00:00.000Z' }] },
-    } as Partial<TaskLine> & { id: string; number: number });
+      time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind: 'person', who: { kind: 'person', ...SAM }, reason: null, since }] },
+    });
     const own = mine([DECIDED, OF_LEO, WAITING, T312], [], 'p2').tasks;
     expect(ids(own)).toEqual(['d3', 't312']);
     expect(ids(mine([DECIDED, OF_LEO, WAITING, T312], [], 'p3').tasks)).toEqual(['d2', 'd3']);

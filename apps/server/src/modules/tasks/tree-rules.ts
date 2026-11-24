@@ -56,7 +56,7 @@ export async function requireTreeRules(ctx: Pick<Ctx, 'db'>, creator: Creator, p
   if (!reason || !SUBTASK_REASONS.includes(reason)) throw refuse(400, 'tree_rule', `A sub-task needs its reason: subtaskReason ${REASONS_TEXT}. Anything else is a step in the body of #${parent.number}, not a task.`);
   const have = await childrenOf(ctx.db, parent.id);
   if (have >= CHILDREN_UNDER_ANY) throw refuse(400, 'tree_rule', `#${parent.number} already has ${have} sub-tasks, the most any task has. A sixth sibling means a second parent, split by owner: ask your head.`);
-  if (have >= CHILDREN_OF_A_WORKER && creator.kind !== 'head') throw refuse(403, 'tree_rule', `#${parent.number} already has ${have} sub-tasks, the most without the head's approval. Ask the head of the department to make the next one.`);
+  if (have >= CHILDREN_OF_A_WORKER && creator.kind === 'worker') throw refuse(403, 'tree_rule', `#${parent.number} already has ${have} sub-tasks, the most without the head's approval. Ask the head of the department to make the next one.`);
 }
 
 /* The depth and budget a person's route keeps: the same A1 and A4 caps, and no reason asked of them. */

@@ -71,6 +71,11 @@ describe('"asked by" and "decides"', () => {
     const [given] = await db.select().from(tasks).where(eq(tasks.title, 'Refunds'));
     expect(given!.askedByPersonId).toBe(olegId);
     await expect(work({ agentId: head.id }, { askedByPersonId: ivanId })).rejects.toMatchObject({ status: 403 });
+    /* A person names only themselves; the orchestrator, any active person of the company. */
+    const own = { title: 'Mine', brief: 'x', body: '', departmentId: dev.id, assigneeAgentId: head.id, executor: false, resultKind: 'coordination' as const };
+    await expect(createTask(ctx, { personId: olegId }, { ...own, askedByPersonId: ivanId })).rejects.toMatchObject({ status: 403 });
+    expect((await createTask(ctx, { personId: olegId }, { ...own, askedByPersonId: olegId })).task.askedByPersonId).toBe(olegId);
+    expect((await createTask(ctx, { agentId: orchestrator.id }, { ...own, title: 'Named by the orchestrator', askedByPersonId: ivanId })).task.askedByPersonId).toBe(ivanId);
     await expect(giveTasks(ctx, { companyId, agentId: orchestrator.id, jobId: crypto.randomUUID() }, [{ department: dev.id, title: 'Ghost request', brief: 'x', body: '', askedByPersonId: '00000000-0000-4000-8000-000000000000' }])).rejects.toMatchObject({ status: 400 });
   });
 
