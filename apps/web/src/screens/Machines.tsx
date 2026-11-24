@@ -24,7 +24,7 @@ import { MachineConnections } from '../ui/MachineConnections';
 import { ProgramVersions } from '../ui/ProgramVersions';
 import { TickBox } from '../ui/TickBox';
 import { DrainLine, DrainMark } from '../ui/MachineDrain';
-import { DiskParts, gigabytes, LowDisk, type FolderRow } from '../ui/MachineDisk';
+import { diskGigabytes, DiskParts, gigabytes, LowDisk, type FolderRow } from '../ui/MachineDisk';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 import { addablePlans, machinePool, machineRows, type MachineRow } from './machine-rows';
 import { everyVisible } from '../guard';
@@ -51,7 +51,7 @@ const folderRows = (t: Messages, row: MachineRow, subs: SubView[]): FolderRow[] 
 function MachineDisk({ row, subs }: { row: MachineRow; subs: SubView[] }) {
   const t = useT();
   const disk = row.online ? row.load?.disk : undefined;
-  return disk ? <DiskParts disk={disk} replicas={row.replicas ?? null} folders={folderRows(t, row, subs)} /> : null;
+  return disk ? <DiskParts disk={disk} replicas={row.replicas ?? null} folders={folderRows(t, row, subs)} copyNames={row.copyNames} /> : null;
 }
 
 const busyShare = (load: number, cpus: number) => Math.min(100, Math.round((load / Math.max(1, cpus)) * 100));
@@ -169,7 +169,7 @@ function DiskGauge({ load }: { load: NodeLoad }) {
   const { language } = useLanguage();
   if (load.diskFree === undefined || load.diskTotal === undefined) return <Gauge label={t.machines.disk} figure={t.machines.unknown} empty />;
   const used = load.diskTotal > 0 ? 1 - load.diskFree / load.diskTotal : null;
-  return <Gauge label={t.machines.disk} figure={gigabytes(language, load.diskFree)} unit={t.cards.gbFree} used={used} sub={t.cards.ofGb(gigabytes(language, load.diskTotal))} />;
+  return <Gauge label={t.machines.disk} figure={diskGigabytes(language, load.diskFree)} unit={t.cards.gbFree} used={used} sub={t.cards.ofGb(diskGigabytes(language, load.diskTotal))} />;
 }
 
 function Resources({ row }: { row: MachineRow }) {

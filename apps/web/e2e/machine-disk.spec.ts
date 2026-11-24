@@ -11,36 +11,44 @@ test.describe.configure({ timeout: 0 });
 
 const NOW = Date.parse('2026-11-20T12:00:00.000Z');
 const GIB = 1024 ** 3;
+const GB = 1_000_000_000;
+const gb = (n: number) => Math.round(n * GB);
 const HOST = 'studio-workstation.local';
 const OWNER = { id: ME.person.id, name: 'Ivan Korol' };
-const DISK: DiskReport = {
-  total: 926 * GIB,
-  free: 31.5 * GIB,
-  threshold: 46.3 * GIB,
-  docker: { total: 295 * GIB, free: 3.2 * GIB, threshold: 14.8 * GIB },
-  parts: { images: 118.4 * GIB, containers: 6.1 * GIB, volumes: 141.7 * GIB, buildCache: 22.9 * GIB, workingCopies: 17.3 * GIB, recordings: 1.2 * GIB, checkTemp: 0.4 * GIB },
+const DISK = {
+  total: gb(926),
+  free: gb(31.5),
+  threshold: gb(46.3),
+  docker: { total: gb(295), free: gb(3.2), threshold: gb(14.8) },
+  parts: { images: gb(118.4), containers: gb(6.1), volumes: gb(141.7), buildCache: gb(22.9), workingCopies: gb(17.3), recordings: gb(1.2), checkTemp: gb(0.4) },
   low: { since: '2026-11-20T09:40:00.000Z' },
   cleaned: [
-    { part: 'checkTemp', bytes: 12.6 * GIB, at: '2026-11-20T09:39:00.000Z' },
-    { part: 'buildCache', bytes: 8.2 * GIB, at: '2026-11-20T09:39:00.000Z' },
-    { part: 'containers', bytes: 2.4 * GIB, at: '2026-11-20T09:38:00.000Z' },
+    { part: 'checkTemp', bytes: gb(12.6), at: '2026-11-20T09:39:00.000Z' },
+    { part: 'buildCache', bytes: gb(8.2), at: '2026-11-20T09:39:00.000Z' },
+    { part: 'containers', bytes: gb(2.4), at: '2026-11-20T09:38:00.000Z' },
+  ],
+  copies: [
+    { agent: '00000000-0000-4000-8000-0000000000a1', path: 'hornhoof-1750/apps/web', task: 1750, bytes: gb(6.8) },
+    { agent: '00000000-0000-4000-8000-0000000000a1', path: 'hornhoof', task: null, bytes: gb(5.1) },
+    { agent: '00000000-0000-4000-8000-0000000000b2', path: 'scratch/release-check-copy-with-long-branch-name', task: 1802, bytes: gb(1.9) },
   ],
   kept: [
-    { part: 'workingCopies', agent: '00000000-0000-4000-8000-0000000000a1', path: 'hornhoof-1750/apps/web', task: 1750, bytes: 6.8 * GIB, why: 'uncommitted' },
-    { part: 'workingCopies', agent: '00000000-0000-4000-8000-0000000000b2', path: 'scratch/release-check-copy', task: null, bytes: 1.9 * GIB, why: 'unpushed' },
-    { part: 'workingCopies', agent: '00000000-0000-4000-8000-0000000000a1', path: 'shop-7', task: 7, bytes: 1.25 * GIB, why: 'ignored', ignored: ['.env', 'local/data/store-snapshot.sqlite'] },
+    { part: 'workingCopies', agent: '00000000-0000-4000-8000-0000000000a1', path: 'hornhoof-1750/apps/web', task: 1750, bytes: gb(6.8), why: 'uncommitted' },
+    { part: 'workingCopies', agent: '00000000-0000-4000-8000-0000000000b2', path: 'scratch/release-check-copy', task: null, bytes: gb(1.9), why: 'unpushed' },
+    { part: 'workingCopies', agent: '00000000-0000-4000-8000-0000000000a1', path: 'shop-7', task: 7, bytes: gb(1.25), why: 'ignored', ignored: ['.env', 'local/data/store-snapshot.sqlite'] },
   ],
-};
-const MACHINE: MachineView = {
+} as DiskReport;
+const MACHINE = {
   id: 'm1', hostname: HOST, os: 'darwin', arch: 'arm64', owner: OWNER, online: true, lastSeenAt: null,
   plans: [{ id: 's-claude', provider: 'claude', status: 'ready', online: true }, { id: 's-codex', provider: 'codex', status: 'ready', online: true }],
   load: { cpus: 10, load: 1, memFree: 10 * GIB, memTotal: 12 * GIB, jobs: 0, tests: 0, cpuModel: 'Apple M2 Pro', diskFree: DISK.free, diskTotal: DISK.total, disk: DISK },
   lendsTests: true, running: { agents: [], parts: [] },
   /* Two copies of company databases inside the volumes, one of them a company the server serves, with a long name. */
-  replicas: { count: 2, bytes: 38.6 * GIB, companies: [{ name: 'Moonfern Logistics & Cold Chain International', bytes: 21.4 * GIB }] },
+  replicas: { count: 2, bytes: gb(38.6), companies: [{ name: 'Moonfern Logistics & Cold Chain International', bytes: gb(21.4) }] },
   /* The working copies node by node: its two plans' and its own node's, 17.3 GB together. */
-  folders: [{ plan: 's-claude', bytes: 11.9 * GIB }, { plan: 's-codex', bytes: 5.4 * GIB }, { plan: null, bytes: 0 }],
-};
+  folders: [{ plan: 's-claude', bytes: gb(11.9) }, { plan: 's-codex', bytes: gb(5.4) }, { plan: null, bytes: 0 }],
+  copyNames: { '00000000-0000-4000-8000-0000000000a1': 'Theodora Vasilievna-Brightwater' },
+} as MachineView;
 const LOW: MachineLowCard = { id: 'm1', hostname: HOST, owner: OWNER, since: DISK.low!.since, disk: DISK, names: { '00000000-0000-4000-8000-0000000000a1': 'Theodora Vasilievna-Brightwater' } };
 const SUBS: SubView[] = [];
 
@@ -78,6 +86,7 @@ async function diskPart(page: Page, t: Messages): Promise<{ card: Locator; part:
   const part = card.locator('section.part', { has: page.getByRole('heading', { name: t.machines.diskParts.title, exact: true }) });
   /* Every part but the working copies, which stand node by node, and the copies of company databases. */
   await expect(part.locator('.disk-parts li')).toHaveCount(Object.keys(DISK.parts).length - 1 + MACHINE.folders!.length + 1);
+  await expect(part.locator('.disk-copies li')).toHaveCount((DISK as { copies?: unknown[] }).copies?.length ?? 0);
   await page.evaluate(() => document.fonts.ready);
   return { card, part };
 }
@@ -105,12 +114,13 @@ const cutIn = (frame: Locator) => frame.evaluate(root => {
   }
   return found;
 });
-/* The sizes of the parts that run to a second line, read once. */
-const wrappedSizes = (part: Locator) => part.locator('.dp-v').evaluateAll(els => els
+/* The sizes of the parts and copies that run to a second line, read once. */
+const wrappedSizes = (part: Locator) => part.locator('.dp-v, .dc-v').evaluateAll(els => els
   .filter(el => el.getBoundingClientRect().height >= parseFloat(getComputedStyle(el).fontSize) * 2)
   .map(el => el.textContent));
 /* The sizes of the parts as the rows stand, in gigabytes. */
 const sizesInOrder = (part: Locator) => part.locator('.dp-v').evaluateAll(els => els.map(el => Number((el.textContent ?? '').replace(/[^\d.,]/g, '').replace(',', '.'))));
+const copySizesInOrder = (part: Locator) => part.locator('.dc-v').evaluateAll(els => els.map(el => Number((el.textContent ?? '').replace(/[^\d.,]/g, '').replace(',', '.'))));
 /* How far Docker's own disk stands below the line before it, beyond the gap the other lines keep. */
 const dockerApart = (part: Locator) => part.locator('.dp-docker').evaluate(el => {
   const before = el.previousElementSibling!;
@@ -141,6 +151,7 @@ for (const look of FITS) {
     expect(await scrollsSideways(page)).toBe(false);
     expect(await wrappedSizes(part), 'a size on more than one line').toEqual([]);
     expect(await sizesInOrder(part), 'the parts largest first').toEqual([...await sizesInOrder(part)].sort((a, b) => b - a));
+    expect(await copySizesInOrder(part), 'the working copies largest first').toEqual([...await copySizesInOrder(part)].sort((a, b) => b - a));
     expect(await dockerApart(part), "Docker's own disk set apart from the lines above it").toBeGreaterThanOrEqual(12);
   });
 

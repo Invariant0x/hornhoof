@@ -309,6 +309,23 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip placement keys used only for filtering
       parts: parts.filter(runs).map(({ machineId: _, builtin: __, builtinMachine: ____, runBy: ___, ...p }) => p),
     });
+    const builtinLoad = me.scopeKind === 'company' ? together([hub.loadOf(own)]) : null;
+    const statesByMachine = new Map(rows.map(m => [m.id, machineState(hub, on(m.id).map(n => n.id))] as const));
+    const copyAgentIds = [
+      ...new Set(
+        [builtinLoad?.disk, ...[...statesByMachine.values()].map(s => s.load?.disk)]
+          .flatMap(d => d?.copies ?? [])
+          .map(c => c.agent)
+          .filter(id => z.uuid().safeParse(id).success && seesAgentId(sight, id)),
+      ),
+    ];
+    const knownCopyAgents = copyAgentIds.length
+      ? new Map((await db.select({ id: agents.id, name: agents.name }).from(agents).where(and(eq(agents.companyId, me.companyId), inArray(agents.id, copyAgentIds)))).map(r => [r.id, r.name]))
+      : new Map<string, string>();
+    const copyNamesOf = (copies: { agent: string }[] | undefined) => {
+      const entries = (copies ?? []).flatMap(c => (knownCopyAgents.has(c.agent) ? [[c.agent, knownCopyAgents.get(c.agent)!] as const] : []));
+      return entries.length ? { copyNames: Object.fromEntries(entries) } : {};
+    };
     return {
       /* The node that comes with the server runs the company's API keys and test runs too, and names the company's machine
          it runs on, when the server is on one. */
@@ -316,7 +333,8 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         me.scopeKind === 'company'
           ? {
               online: hub.isOnline(own),
-              load: together([hub.loadOf(own)]),
+              load: builtinLoad,
+              ...copyNamesOf(builtinLoad?.disk?.copies),
               replicas: { count: 0, bytes: 0, companies: [] },
               running: running(a => a.builtin && onOwn(a.builtinMachine), p => p.builtin && onOwn(p.builtinMachine)),
               machine: serverMachine,
@@ -329,17 +347,20 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
               access: accessOf(ownRow?.id),
             }
           : null,
-      machines: rows.map(m => ({
-        id: m.id,
-        hostname: m.hostname,
-        os: m.os,
-        arch: m.arch,
-        kind: m.kind,
-        owner: { id: m.ownerId, name: m.ownerName },
-        /* The machine the company was installed on, while the server runs on another: no computer someone joined. */
-        serverInstall: isServerInstall(m.machineKey),
-        ...machineState(hub, on(m.id).map(n => n.id)),
-        ...machineProgramState(hub, on(m.id).map(n => n.id), m.id, programHost, own),
+      machines: rows.map(m => {
+        const state = statesByMachine.get(m.id)!;
+        return {
+          id: m.id,
+          hostname: m.hostname,
+          os: m.os,
+          arch: m.arch,
+          kind: m.kind,
+          owner: { id: m.ownerId, name: m.ownerName },
+          /* The machine the company was installed on, while the server runs on another: no computer someone joined. */
+          serverInstall: isServerInstall(m.machineKey),
+          ...state,
+          ...copyNamesOf(state.load?.disk?.copies),
+          ...machineProgramState(hub, on(m.id).map(n => n.id), m.id, programHost, own),
         otherBuild: otherBuild(hub, on(m.id).map(n => n.id), config.nodeBuild),
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
         plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
@@ -360,7 +381,8 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
           a => (a.builtin && (onOwn(a.builtinMachine) ? serverMachine?.id === m.id : a.builtinMachine === m.networkId)) || on(m.id).some(n => n.id === a.nodeId),
           p => (p.builtin ? (onOwn(p.builtinMachine) ? serverMachine?.id === m.id : p.builtinMachine === m.networkId) : p.machineId === m.id),
         ),
-      })),
+      };
+      }),
       ...(held ? { copies: held.copies } : {}),
       /* Whether this person sees the order the server passes on in. */
       priority: held !== null,

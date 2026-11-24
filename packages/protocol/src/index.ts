@@ -9,7 +9,7 @@ export { OUTSIDE_MATERIAL } from './model-instructions.js';
 export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, approvalNeeded, defaultRule, kindKey, GOING_OUT_CHANNELS, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
 export { MachineDrain, NodeWait } from './machine-drain.js';
-export { DISK_CLEANED_MAX, DISK_IGNORED_MAX, DISK_KEPT_MAX, DISK_PARTS, DiskPart, DiskReport, MachineReplicas, NODE_DISK_PARTS } from './disk-report.js';
+export { DISK_CLEANED_MAX, DISK_COPIES_MAX, DISK_IGNORED_MAX, DISK_KEPT_MAX, DISK_PARTS, DiskPart, DiskReport, MachineReplicas, NODE_DISK_PARTS } from './disk-report.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
 export * from './test-terminals.js';
@@ -629,6 +629,8 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('agent.input_left'), agentKey: Id, jobId: Id.nullable(), text: z.string().max(100_000), typed: z.boolean(), ref: z.string().min(1).max(64) }),
   /* How a restart Hornhoof asked for went: done, or why the node did not do it. */
   z.object({ type: z.literal('agent.restarted'), agentKey: Id, jobId: Id, ok: z.boolean(), reason: z.string().max(300).nullable() }),
+  /* Asks Hornhoof for the company's open, paused, and blocked task numbers before a disk-care pass cleans finished copies. */
+  z.object({ type: z.literal('tasks.read') }),
 ]);
 export type NodeMessage = z.infer<typeof NodeMessage>;
 
@@ -807,6 +809,8 @@ const ServerMessage = z.discriminatedUnion('type', [
   /* The step a check command of a tools.check runs in, open until the node says it ended or Hornhoof stops it with
      job.cancel; or, with none, the words its program gets for why it may not run now. */
   z.object({ type: z.literal('tools.checking'), agentKey: Id, ref: z.string().min(1).max(64), jobId: Id.nullable(), refused: z.string().max(500).optional() }),
+  /* The company's open, paused, and blocked task numbers and the highest task number issued so far, for node disk care. */
+  z.object({ type: z.literal('tasks.open'), tasks: TaskStates.nullable() }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 
