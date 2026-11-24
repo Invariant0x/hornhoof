@@ -1276,6 +1276,76 @@ describe('the maker of a copy', () => {
     expect(stable.kept()).toMatchObject({ attempt: 2, phase: 'detach', given: 1, notBefore: null });
   });
 
+  it('makes a copy that was given up again only when the CEO asks for it by hand', async () => {
+    const s = stand();
+    s.leader.live = true;
+    s.leader.breaks = true;
+    const maker = s.maker();
+    await maker.tick(FIRST);
+    s.loaded();
+    await until(s, maker, 'sync');
+    await run(s, maker, 6 * 3600, () => s.kept().phase === 'parked');
+    expect(s.kept()).toMatchObject({ attempt: 5, phase: 'parked', given: 4 });
+    /* Applies hold again; a copy given up still waits for the word, however long it has stood. */
+    s.leader.breaks = false;
+    s.later(72 * 3600_000);
+    for (let n = 0; n < 5; n++) await maker.tick({ ...ORDER, migrations: s.leader.migrations });
+    expect(s.kept()).toMatchObject({ phase: 'parked' });
+    expect(s.request()).toBeNull();
+    /* The word: the next attempt begins in the empty database, with the count starting over, under the number it was given. */
+    await maker.tick({ ...ORDER, migrations: s.leader.migrations, retry: true });
+    expect(s.kept()).toMatchObject({ attempt: 5, phase: 'schema', given: 0, cuts: 0, parked: null });
+    expect(maker.report()).toMatchObject({ state: 'making', name: 'copy_99bb2233aabbccdd_5' });
+    expect(maker.report()?.gaveUp).toBeUndefined();
+    await run(s, maker, 3 * 3600, () => maker.report()?.state === 'ready');
+    expect(maker.report()).toMatchObject({ state: 'ready', name: 'copy_99bb2233aabbccdd_5' });
+    /* A word that comes again after the copy was made is no word for a copy that is not given up. */
+    await maker.tick({ ...ORDER, migrations: s.leader.migrations, retry: true });
+    expect(maker.report()).toMatchObject({ state: 'ready' });
+  });
+
+  it.each(['slow', 'late'] as const)('makes no copy over a path the leader measured %s for it, and goes on by itself when the path is mended', async weak => {
+    const s = stand();
+    s.leader.live = true;
+    const maker = s.maker();
+    await maker.tick(FIRST);
+    s.loaded();
+    await until(s, maker, 'sync');
+    expect(s.leader.slots.size).toBeGreaterThan(0);
+    /* The slots of what was made go with it, and no attempt is counted given up. */
+    await maker.tick({ ...ORDER, migrations: s.leader.migrations, weak });
+    for (let n = 0; n < 4; n++) await maker.tick({ ...ORDER, migrations: s.leader.migrations, weak });
+    expect(s.kept()).toMatchObject({ attempt: 2, phase: 'parked', given: 0, parked: { why: weak, attempts: 0 } });
+    expect([...s.leader.slots]).toEqual([]);
+    expect(maker.report()).toMatchObject({ state: 'stopped', error: 'apply', gaveUp: { why: weak } });
+    expect(s.request()).toBeNull();
+    /* The path stays weak: nothing is made, however long. */
+    s.later(24 * 3600_000);
+    for (let n = 0; n < 5; n++) await maker.tick({ ...ORDER, migrations: s.leader.migrations, weak });
+    expect(s.kept()).toMatchObject({ phase: 'parked' });
+    expect(s.request()).toBeNull();
+    /* The leader no longer says so: the copy is made. */
+    await maker.tick({ ...ORDER, migrations: s.leader.migrations });
+    expect(s.kept()).toMatchObject({ attempt: 2, phase: 'schema', parked: null, given: 0 });
+    await run(s, maker, 3 * 3600, () => maker.report()?.state === 'ready');
+    expect(maker.report()).toMatchObject({ state: 'ready', name: 'copy_99bb2233aabbccdd_2' });
+  });
+
+  it('keeps a copy that is whole over a path measured weak, and parks one that is being made again beside it', async () => {
+    const s = stand();
+    const maker = await following(s);
+    await maker.tick({ ...ORDER, weak: 'slow' });
+    expect(s.kept()).toMatchObject({ attempt: 1, phase: 'ready', parked: null });
+    expect(maker.report()).toMatchObject({ state: 'ready' });
+    await maker.tick({ ...ORDER, slot: 'lost' });
+    await until(s, maker, 'schema');
+    await maker.tick({ ...ORDER, weak: 'slow' });
+    expect(s.kept()).toMatchObject({ phase: 'drop', parked: { why: 'slow' }, old: { attempt: 1 } });
+    await maker.tick({ ...ORDER, weak: 'slow' });
+    expect(s.kept()).toMatchObject({ phase: 'parked' });
+    expect(maker.mode()).toBe('read');
+  });
+
   it('leaves a copy that is whole and follows alone: no cut, no attempt, no wait', async () => {
     const s = stand();
     const maker = await following(s);
