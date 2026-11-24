@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { roadTierForTraffic, serializeCityLayout, tileKey, type CityState, type RoadTile } from '../src/world/city-layout';
 import { createHornhoofLiveFixture, syncLiveSnapshotToCity } from '../src/world/live-sync';
 import { createResidentSimulation, stepResidentSimulation } from '../src/world/residents';
+import { AVENUE_RUN } from '../src/world/road-traffic';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../src/world/terrain-engine';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
 
@@ -66,16 +67,27 @@ function route(city: CityState, from: { col: number; row: number }, to: { col: n
   return out;
 }
 
-/* The avenues of a city: tiles of the avenue kind grouped by the middle line they share. */
+/* The avenues of a city: tiles of the avenue kind grouped by the middle line they share, a line holding two avenues
+   apart where a step along it has no avenue tile. */
 function avenuesOf(city: CityState): Map<string, RoadTile[]> {
-  const out = new Map<string, RoadTile[]>();
+  const lines = new Map<string, RoadTile[]>();
   for (const r of city.roads.values()) {
     if (r.tier !== 'avenue') continue;
     expect(r.avenue, `${r.col},${r.row} avenue without its line`).toBeDefined();
     const { axis, side } = r.avenue!;
-    const middle = (axis === 'u' ? r.row : r.col) + 0.5 + side / 2;
-    const key = `${axis}|${middle}`;
-    out.set(key, [...(out.get(key) ?? []), r]);
+    const key = `${axis}|${(axis === 'u' ? r.row : r.col) + 0.5 + side / 2}`;
+    lines.set(key, [...(lines.get(key) ?? []), r]);
+  }
+  const out = new Map<string, RoadTile[]>();
+  for (const [line, tiles] of lines) {
+    const along = (r: RoadTile) => (r.avenue!.axis === 'u' ? r.col : r.row);
+    const steps = [...new Set(tiles.map(along))].sort((a, b) => a - b);
+    let from = steps[0]!;
+    steps.forEach((step, i) => {
+      if (steps[i + 1] === step + 1) return;
+      out.set(`${line}|${from}`, tiles.filter(r => along(r) >= from && along(r) <= step));
+      from = steps[i + 1]!;
+    });
   }
   return out;
 }
@@ -139,7 +151,7 @@ describe('roads that grow with real trips', () => {
         const stepsOf = (row: number) => tiles.filter(r => across(r) === row).map(along).sort((x, y) => x - y);
         expect(stepsOf(a!), `${seed} ${line} both lanes run side by side`).toEqual(stepsOf(b!));
         const steps = stepsOf(a!);
-        expect(steps.length, `${seed} ${line} long enough`).toBeGreaterThanOrEqual(4);
+        expect(steps.length, `${seed} ${line} long enough`).toBeGreaterThanOrEqual(AVENUE_RUN);
         expect(steps.at(-1)! - steps[0]!, `${seed} ${line} straight and unbroken`).toBe(steps.length - 1);
         for (const r of tiles) {
           const k = tileKey(r.col, r.row);
