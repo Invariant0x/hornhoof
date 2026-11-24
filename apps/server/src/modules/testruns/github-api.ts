@@ -21,6 +21,7 @@ export const WorkflowRun = z.object({
   path: z.string().nullable().optional(),
   head_sha: Sha,
   event: z.string().optional(),
+  display_title: z.string().nullable().optional(),
   status: z.string().min(1),
   conclusion: z.string().nullable(),
   html_url: z.string().nullable().optional(),

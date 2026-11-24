@@ -11,9 +11,11 @@ const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const FORBIDDEN: { rule: RegExp; says: string }[] = [
   { rule: /\bevery test (?:of a release )?runs? together\b/i, says: 'every test runs together' },
   { rule: /\bonce per (?:release|turn)\b/i, says: 'a whole suite once per release' },
-  { rule: /\bthe turn's whole release run\b|\bwhole release (?:run|suite)\b|\bfull release run\b|\brelease's (?:whole|full) (?:run|suite)\b|\bwhole run of (?:the|its|a) release\b|\bfull run of (?:the|its|a) release\b/i, says: 'a whole run of the release' },
+  { rule: /\bthe turn's whole release run\b|\bwhole release (?:run|suite)\b|\bfull release run\b|\brelease's (?:whole|full) (?:run|suite)\b|\bwhole run of (?:the|its|a) release\b|\bfull run of (?:the|its|a) release\b(?! workflow)/i, says: 'a whole run of the release' },
   { rule: /\brecord run\b|\bpassed whole run\b/i, says: 'a record run' },
   { rule: /\brun_tests\b[^.\n]{0,60}\brelease scope\b|\brelease needs run_tests\b/i, says: 'a release that needs run_tests' },
+  /* A person names the release workflow in the repository settings; no text says the server picks it from a release, a tag or a green run. */
+  { rule: /\bmade the (?:repository's )?latest (?:version )?release\b|\bwhose run made\b|\bcan be started by hand and (?:was|whose)\b/i, says: 'a release workflow that Hornhoof works out' },
 ];
 
 const FILES = {
@@ -50,6 +52,8 @@ describe("no text says a release needs a run of Hornhoof's machines", () => {
     ['templates/skills/dev-testing-policy.md', /the repository's CI runs for the release/],
     ['templates/skills/orch-plan-turn.md', /resting on the repository's own CI for that commit/],
     ['templates/skills/hh-head.md', /on the repository's green CI for that exact commit, or with no run where the repository has no CI/],
+    ['guide/repositories.md', /A person names the release workflow, by the path of its file, in the repository's settings[^\n]*Hornhoof never works it out/],
+    ['templates/skills/dev-ci-release.md', /the workflow a person named in the repository settings \(never one Hornhoof picks/],
     ['guide/free-machines.md', /A release does not use it: it relies on the repository's own CI/],
     ['guide/tasks-and-turns.md', /The repository's own CI must be green on the exact commit of the turn branch[^\n]*a repository with no CI records with no run/],
     ['docs/check-queue.md', /the repository's own CI runs it for the exact commit of a release/],

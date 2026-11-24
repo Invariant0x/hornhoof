@@ -3,7 +3,7 @@ import type { Ctx } from '../../app.js';
 import { ciDispatches, tasks, turnReleases, turns } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { enqueueTurn } from '../conversation/queue.js';
-import { repoAt } from '../departments/repository.js';
+import { ciAddress, repoAt } from '../departments/repository.js';
 import type { CiAt } from '../testruns/github-ci.js';
 import { ciLine, readCiOf } from './release-ci.js';
 import { recordRelease } from './releases.js';
@@ -58,7 +58,7 @@ async function settleOne(ctx: Ctx, row: Row): Promise<void> {
   }
   const found = ctx.config ? await repoAt({ db: ctx.db, config: ctx.config }, [task!.productId, task!.departmentId]) : null;
   if (!found) return;
-  const next = nextOf(await readCiOf(ctx, found.repo, row.commit), row, ctx.clock());
+  const next = nextOf(await readCiOf(ctx, ciAddress(found), row.commit), row, ctx.clock());
   if (next.do === 'record') await recordWaiting(ctx, row, task!);
   else if (next.do === 'end') await end(ctx, row, next.note);
 }

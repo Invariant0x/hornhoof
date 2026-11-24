@@ -25,6 +25,8 @@ export type Repository = {
   /* What the repository's CI says of each commit, by default green with three checks, and the commits the server asked it of. */
   ci?: CiAt | ((commit: string) => CiAt);
   asked?: string[];
+  /* The release workflow the department's settings named, as each read of CI and each start of it was given it. */
+  named?: (string | null)[];
   /* What starting the release workflow answers (started, run 4242, by default), and the branches and commits it was asked on. */
   dispatch?: Dispatched | ((branch: string, commit: string) => Dispatched);
   dispatched?: { branch: string; commit: string }[];
@@ -54,12 +56,14 @@ export function serveEach(ctx: Ctx, repoAt: (url: string) => Repository): void {
   ctx.readCi = async (at, commit) => {
     const repo = repoAt(at.url);
     (repo.asked ??= []).push(commit);
+    (repo.named ??= []).push(at.releaseWorkflow ?? null);
     const said = repo.ci ?? { state: 'green' as const, checks: 3 };
     return typeof said === 'function' ? said(commit) : said;
   };
   ctx.dispatchCi = async (at, branch, commit) => {
     const repo = repoAt(at.url);
     (repo.dispatched ??= []).push({ branch, commit });
+    (repo.named ??= []).push(at.releaseWorkflow ?? null);
     const said = repo.dispatch ?? { state: 'started' as const, workflow: 'Release (.github/workflows/release.yml)', run: 4242, url: 'https://github.com/acme/shop/actions/runs/4242' };
     return typeof said === 'function' ? said(branch, commit) : said;
   };

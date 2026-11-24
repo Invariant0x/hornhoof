@@ -206,7 +206,9 @@ async function openRelease(ctx: Reader, task: Pick<Task, 'companyId' | 'productI
   const found = ctx.config ? await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]) : null;
   if (!found || found.department.parentId) return null;
   const turn = await openTurnOf(ctx.db, task.companyId, found.department.id);
-  return turn ? { repo: found.repo, turn } : null;
+  /* The repository as CI is read and started on it: with the release workflow its settings name. */
+  const repo = { ...found.repo, releaseWorkflow: found.department.repoReleaseWorkflow };
+  return turn ? { repo, turn } : null;
 }
 
 /* Main's head under commit, where commit is a release of the turn branch: the branch holds it, main does not yet, and main can

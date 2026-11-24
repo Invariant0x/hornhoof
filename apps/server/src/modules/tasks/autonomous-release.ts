@@ -4,7 +4,7 @@ import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, autonomousReleases, departments, taskEvents, tasks } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
-import { repoAt } from '../departments/repository.js';
+import { ciAddress, repoAt } from '../departments/repository.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { routeOf, type Route } from './route-records.js';
 import { comment } from './comments.js';
@@ -12,6 +12,7 @@ import { loadTask, mayAsk, type Moved, type Task, type Tx } from './state.js';
 import { refusePaused } from './pause.js';
 import { ciResult, ciWords, readCiOf, type CiResult } from './release-ci.js';
 import { heldLineage } from '../testruns/compare.js';
+import type { RepoAddress } from '../testruns/refs.js';
 
 const RELEASE_BRANCH_RE = /^release-\d+\.\d+\.\d+$/;
 
@@ -94,7 +95,7 @@ function isMainRepository(department: Dept, repo?: Repo): boolean {
 /* Condition (a): the repository's CI is green on that exact commit, or the repository has none. The host says it as the approval
    is asked: no word of the caller counts, and a host that cannot be read now, or CI that is red, under way or ran nothing that
    succeeded, lets nothing go. */
-async function verifiedCi(ctx: Reader, repo: Repo, commit: string): Promise<CiResult | null> {
+async function verifiedCi(ctx: Reader, repo: RepoAddress, commit: string): Promise<CiResult | null> {
   return ciResult(await readCiOf(ctx, repo, commit));
 }
 
@@ -347,7 +348,7 @@ async function verifyAllConditions(ctx: Reader, task: Task, commit: string): Pro
   if (!verdict) return null;
   const baseCommitSha = await verifiedMainLine(ctx, found.repo, verdict.baseCommitSha, commit);
   if (!baseCommitSha) return null;
-  const ci = await verifiedCi(ctx, found.repo, commit);
+  const ci = await verifiedCi(ctx, ciAddress(found), commit);
   return ci ? { department: found.department, repo: found.repo, ci, verdict, baseCommitSha } : null;
 }
 

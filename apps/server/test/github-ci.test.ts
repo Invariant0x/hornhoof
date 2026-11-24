@@ -4,7 +4,8 @@ import { GitHubLimits } from '../src/modules/testruns/github-limit.js';
 
 const COMMIT = 'c'.repeat(40);
 const DEFAULT = 'a'.repeat(40);
-const REPO = { url: 'https://github.com/acme/shop.git', token: 'ghp_synthetic_token_for_tests_only' };
+const WORKFLOW = '.github/workflows/ci.yml';
+const REPO = { url: 'https://github.com/acme/shop.git', token: 'ghp_synthetic_token_for_tests_only', releaseWorkflow: WORKFLOW };
 const RESET_UNIX = 1_795_529_400; // 2026-11-24T14:10:00.000Z
 const RUNS_AT_COMMIT = `actions/runs?head_sha=${COMMIT}&per_page=100&page=1`;
 
@@ -23,8 +24,10 @@ function github(answer: (path: string) => Answer | undefined) {
   return called;
 }
 
+/* A run of the release workflow as the server starts it: by hand with the input full, which the workflow's run-name ends with
+   (full run). A run of any other kind says so in extra. */
 const run = (id: number, name: string, extra: Record<string, unknown> = {}) => ({
-  id, name, workflow_id: 1, head_sha: COMMIT, status: 'completed', conclusion: 'success', run_attempt: 1,
+  id, name, workflow_id: 1, event: 'workflow_dispatch', display_title: `${name} (full run)`, head_sha: COMMIT, status: 'completed', conclusion: 'success', run_attempt: 1,
   html_url: `https://github.com/acme/shop/actions/runs/${id}`, repository: { full_name: 'acme/shop' }, head_repository: { full_name: 'acme/shop' }, ...extra,
 });
 const job = (id: number, runId: number, name: string, extra: Record<string, unknown> = {}) => ({
@@ -35,42 +38,16 @@ const runsPage = (workflow_runs: unknown[], total = workflow_runs.length) => ({ 
 const jobsPage = (jobs: unknown[], total = jobs.length) => ({ total_count: total, jobs });
 type Listed = { run: ReturnType<typeof run>; jobs?: unknown[] };
 
-const BY_HAND = 'name: Release\non:\n  push:\n  workflow_dispatch:\njobs:\n  test:\n    runs-on: ubuntu-latest\n';
-const ON_PUSH = 'name: CI\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n';
-const TAG_COMMIT = 'e'.repeat(40);
-const TAG_OBJECT = 'f'.repeat(40);
-const RELEASED_AT = '2026-11-20T10:00:00Z';
-type Wf = { id: number; name: string; text: string; last: string | null; state: string; path: string };
-const wf = (id: number, name: string, extra: Partial<Wf> = {}): Wf => ({ id, name, text: BY_HAND, last: 'success', state: 'active', path: `.github/workflows/${name.toLowerCase().replace(/ /g, '-')}.yml`, ...extra });
-/* A version release the repository published: its tag, what the tag names, and the runs of the commit that succeeded. */
-type Released = { tag: string; commit?: string; at?: string; draft?: boolean; prerelease?: boolean; annotated?: boolean; gone?: boolean; runs?: unknown[] };
-/* A run of workflow that was going on while the release was published, by default. */
-const during = (workflow_id: number, extra: Record<string, unknown> = {}) =>
-  run(900 + workflow_id, 'release run', { workflow_id, head_sha: TAG_COMMIT, run_started_at: '2026-11-20T09:50:00Z', updated_at: '2026-11-20T10:01:00Z', ...extra });
-type Setup = { workflows?: Wf[]; releases?: Released[] };
+type Wf = { id: number; name: string; path: string; state: string };
+const wf = (id: number, name: string, extra: Partial<Wf> = {}): Wf => ({ id, name, state: 'active', path: `.github/workflows/${name.toLowerCase().replace(/ /g, '-')}.yml`, ...extra });
+type Setup = { workflows?: Wf[] };
 
-/* What GitHub says of which workflow releases: the workflows, the version releases and what made the latest, and the default
-   branch with the runs of each workflow on it. By default one workflow, CI, that was never released. */
+/* What GitHub says of the workflow the repository settings name, asked by its file name: by default one, CI. Nothing else is read
+   to tell which workflow releases, so nothing else is answered. */
 const discovery = (setup: Setup = {}) => (path: string): Answer | undefined => {
-  const workflows = setup.workflows ?? [wf(1, 'CI')];
-  const releases = setup.releases ?? [];
-  if (path === 'actions/workflows?per_page=100') return { body: { total_count: workflows.length, workflows: workflows.map(({ id, name, state, path: p }) => ({ id, name, state, path: p })) } };
-  if (path === 'releases?per_page=30') return { body: releases.map(r => ({ tag_name: r.tag, draft: r.draft ?? false, prerelease: r.prerelease ?? false, published_at: r.at ?? RELEASED_AT })) };
-  for (const r of releases) {
-    const commit = r.commit ?? TAG_COMMIT;
-    if (path === `git/ref/tags/${r.tag}`) return r.gone ? undefined : { body: { object: r.annotated ? { type: 'tag', sha: TAG_OBJECT } : { type: 'commit', sha: commit } } };
-    if (r.annotated && path === `git/tags/${TAG_OBJECT}`) return { body: { object: { type: 'commit', sha: commit } } };
-    if (path === `actions/runs?head_sha=${commit}&status=success&per_page=100&page=1`) return { body: runsPage(r.runs ?? []) };
-  }
-  if (path === '') return { body: { default_branch: 'main' } };
-  if (path === 'commits?per_page=1') return { body: [{ sha: DEFAULT }] };
-  for (const w of workflows) {
-    if (path === `contents/${w.path}?ref=${DEFAULT}`) return { body: { type: 'file', encoding: 'base64', content: Buffer.from(w.text).toString('base64') } };
-    if (path === `actions/workflows/${w.id}/runs?branch=main&status=completed&exclude_pull_requests=true&per_page=1`) {
-      return { body: { total_count: w.last ? 1 : 0, workflow_runs: w.last ? [{ conclusion: w.last, status: 'completed' }] : [] } };
-    }
-  }
-  return undefined;
+  const file = /^actions\/workflows\/([^/?]+)$/.exec(path)?.[1];
+  const found = file ? (setup.workflows ?? [wf(1, 'CI')]).find(w => w.path.endsWith(`/${decodeURIComponent(file)}`)) : undefined;
+  return found ? { body: found } : undefined;
 };
 
 /* A repository whose commit has the workflow runs given, each with the jobs listed for it, and the release workflow its setup says. */
@@ -88,8 +65,7 @@ describe("the repository's CI on one exact commit", () => {
     const called = github(actions([ci('CI', [job(11, 1, 'test (1)'), job(12, 1, 'test (2)'), job(13, 1, 'publish', { conclusion: 'skipped' }), job(14, 1, 'lint', { conclusion: 'neutral' })])]));
     expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 2 });
     expect(called.map(c => c.path)).toEqual([
-      RUNS_AT_COMMIT, 'actions/workflows?per_page=100', 'releases?per_page=30', '', 'commits?per_page=1', `contents/.github/workflows/ci.yml?ref=${DEFAULT}`,
-      'actions/workflows/1/runs?branch=main&status=completed&exclude_pull_requests=true&per_page=1', 'actions/runs/1/jobs?filter=latest&per_page=100&page=1',
+      RUNS_AT_COMMIT, 'actions/workflows/ci.yml', 'actions/runs/1/jobs?filter=latest&per_page=100&page=1',
     ]);
     expect(called[0]!.init).toMatchObject({ method: 'GET', redirect: 'manual', headers: expect.objectContaining({ authorization: `Bearer ${REPO.token}` }) as unknown });
   });
@@ -225,72 +201,88 @@ describe("the repository's CI on one exact commit", () => {
     });
   });
 
-  describe("which workflow is the repository's release workflow (B6)", () => {
+  describe("the release workflow is the one the repository settings name (B6, B7)", () => {
     const images = wf(1, 'Images');
     const site = wf(2, 'Installer site');
-    const made = (workflowId: number, extra: Partial<Released> = {}): Released => ({ tag: 'v0.43.0', runs: [during(workflowId)], ...extra });
     const imagesRun = ci('Images', [job(11, 1, 'mark'), job(12, 1, 'test (1)'), job(13, 1, 'images')], {}, 1);
+    const named = { ...REPO, releaseWorkflow: images.path };
 
-    it('is the workflow that made the latest version release, though another can be started by hand and was green on the default branch too', async () => {
-      github(actions([imagesRun], { workflows: [images, site], releases: [made(1)] }));
-      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 3 });
+    it('is the workflow named by its path, whatever other workflows the repository has or ran', async () => {
+      const called = github(actions([imagesRun, ci('Installer site', [job(21, 2, 'deploy')], { workflow_id: 2 }, 2)], { workflows: [images, site] }));
+      expect(await githubCiReader()(named, COMMIT)).toEqual({ state: 'green', checks: 3 });
+      expect(called.map(c => c.path)).toEqual([RUNS_AT_COMMIT, 'actions/workflows/images.yml', 'actions/runs/1/jobs?filter=latest&per_page=100&page=1']);
     });
 
-    it('does not take the other workflow of that repository for the release: its run alone is absent, and its failure blocks nothing', async () => {
-      github(actions([ci('Installer site', [job(21, 2, 'deploy')], { workflow_id: 2 }, 2)], { workflows: [images, site], releases: [made(1)] }));
+    it('does not take the other workflow for the release: its run alone is absent, and its failure blocks nothing', async () => {
+      github(actions([ci('Installer site', [job(21, 2, 'deploy')], { workflow_id: 2 }, 2)], { workflows: [images, site] }));
+      expect(await githubCiReader()(named, COMMIT)).toEqual({ state: 'absent' });
+      github(actions([imagesRun, ci('Installer site', [], { workflow_id: 2, conclusion: 'failure' }, 2)], { workflows: [images, site] }));
+      expect(await githubCiReader()(named, COMMIT)).toEqual({ state: 'green', checks: 3 });
+    });
+
+    it.each([undefined, null, ''])('is unnamed, and says to name it in the repository settings, where the settings name none (%j), with no run on the commit or one', async releaseWorkflow => {
+      const none = { ...REPO, releaseWorkflow };
+      github(actions([imagesRun], { workflows: [images, site] }));
+      expect(await githubCiReader()(none, COMMIT)).toEqual({ state: 'unnamed', why: 'name the release workflow in the repository settings.' });
+      github(path => path === RUNS_AT_COMMIT ? { body: runsPage([]) } : path === `contents/.github/workflows?ref=${COMMIT}` ? { body: [{ type: 'file', name: 'images.yml' }] } : undefined);
+      expect(await githubCiReader()(none, COMMIT)).toEqual({ state: 'unnamed', why: 'name the release workflow in the repository settings.' });
+    });
+
+    it('is unnamed where the path the settings name is no active workflow of the repository', async () => {
+      github(actions([imagesRun], { workflows: [images, wf(3, 'Old', { state: 'disabled_manually' })] }));
+      for (const path of ['.github/workflows/old.yml', '.github/workflows/gone.yml', 'images.yml', '.github/workflows/IMAGES.yml']) {
+        expect(await githubCiReader()({ ...REPO, releaseWorkflow: path }, COMMIT)).toMatchObject({ state: 'unnamed', why: expect.stringContaining('not an active workflow') as unknown });
+      }
+    });
+
+    it("never reads the repository's releases or tags to tell it: a version release any token can publish (B7) chooses nothing", async () => {
+      const called = github(path => /^releases|^git\/ref|^git\/tags/.test(path)
+        ? { body: [{ tag_name: 'v0.43.1', draft: false, prerelease: false, published_at: '2026-11-24T13:00:00Z' }] }
+        : actions([ci('Media', [job(51, 5, 'build')], { workflow_id: 9 }, 5)], { workflows: [images, wf(9, 'Media')] })(path));
+      expect(await githubCiReader()(named, COMMIT)).toEqual({ state: 'absent' });
+      expect(called.map(c => c.path).filter(p => /release|tag|contents/.test(p))).toEqual([]);
+    });
+
+    it('is unread, never green, where the workflow named cannot be read', async () => {
+      github(path => path === 'actions/workflows/images.yml' ? { status: 502 } : actions([imagesRun])(path));
+      expect(await githubCiReader()(named, COMMIT)).toMatchObject({ state: 'unread' });
+      github(path => path === 'actions/workflows/images.yml' ? { body: { not: 'a workflow' } } : actions([imagesRun])(path));
+      expect(await githubCiReader()(named, COMMIT)).toMatchObject({ state: 'unread' });
+    });
+
+    it('asks for the workflow it names by its file name alone, so a repository with any number of workflows is read', async () => {
+      const many = Array.from({ length: 80 }, (_v, i) => wf(100 + i, `W${i}`));
+      const called = github(actions([imagesRun], { workflows: [images, ...many] }));
+      expect(await githubCiReader()(named, COMMIT)).toMatchObject({ state: 'green' });
+      expect(called.filter(c => c.path.startsWith('actions/workflows'))).toHaveLength(1);
+    });
+  });
+
+  describe('only a full run counts, never one a mark or an earlier commit narrowed (B1)', () => {
+    const jobs = [job(11, 1, 'mark'), job(12, 1, 'test (1)'), job(13, 1, 'images')];
+    const jobsOf8 = [job(21, 8, 'mark'), job(22, 8, 'test (1)'), job(23, 8, 'images')];
+
+    it.each([
+      ['a run on a push, whose title a commit message can write', { event: 'push', display_title: 'Images (full run)' }],
+      ['a run of a pull request, whose title its author writes', { event: 'pull_request', display_title: 'fix (full run)' }],
+      ['a run by hand without the input full', { display_title: 'Images' }],
+      ['a run by hand that says full only in its middle', { display_title: 'Images (full run) of nothing' }],
+      ['a run by hand with no title', { display_title: null }],
+    ])('is absent for %s: it narrowed or proves nothing, so a full run must be started', async (_what, extra) => {
+      github(actions([ci('Images', jobs, extra)]));
       expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'absent' });
-      github(actions([imagesRun, ci('Installer site', [], { workflow_id: 2, conclusion: 'failure' }, 2)], { workflows: [images, site], releases: [made(1)] }));
+    });
+
+    it('leaves a narrowed run neither to prove nor to block, beside a full one', async () => {
+      github(actions([ci('Images', [], { event: 'pull_request', display_title: 'Images', conclusion: 'failure' }, 7), ci('Images', jobsOf8, {}, 8)]));
       expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 3 });
     });
 
-    it('reads the tag of an annotated release to its commit', async () => {
-      github(actions([imagesRun], { workflows: [images, site], releases: [made(1, { annotated: true })] }));
-      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'green' });
-    });
-
-    it('takes the newest published version release, setting aside drafts, pre-releases and tags that are no version', async () => {
-      const newer = [
-        { tag: 'v0.44.0', commit: 'd'.repeat(40), at: '2026-11-23T10:00:00Z', draft: true, runs: [during(2, { head_sha: 'd'.repeat(40) })] },
-        { tag: 'v0.44.0-rc.1', commit: 'b'.repeat(40), at: '2026-11-22T10:00:00Z', prerelease: true, runs: [during(2, { head_sha: 'b'.repeat(40) })] },
-        { tag: 'nightly', commit: '9'.repeat(40), at: '2026-11-21T10:00:00Z', runs: [during(2, { head_sha: '9'.repeat(40) })] },
-      ];
-      github(actions([imagesRun], { workflows: [images, site], releases: [...newer, made(1)] }));
-      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'green' });
-    });
-
-    it('names no workflow, and so is unnamed, where more than one was going on when the release was made', async () => {
-      github(actions([imagesRun], { workflows: [images, site], releases: [made(1, { runs: [during(1), during(2)] })] }));
-      const said = await githubCiReader()(REPO, COMMIT);
-      expect(said).toMatchObject({ state: 'unnamed' });
-      expect(said.state === 'unnamed' && said.why).toContain('Images (.github/workflows/images.yml); Installer site (.github/workflows/installer-site.yml)');
-    });
-
-    it.each([
-      ['no version release at all', {}],
-      ['a release made by hand: no run was going on when it was published', { releases: [made(1, { runs: [during(1, { run_started_at: '2026-11-19T09:00:00Z', updated_at: '2026-11-19T09:30:00Z' })] })] }],
-      ['a release whose tag is gone', { releases: [made(1, { gone: true })] }],
-      ['a release made by a workflow that is not active any more', { workflows: [wf(1, 'CI'), wf(3, 'Old', { state: 'disabled_manually' })], releases: [made(3)] }],
-    ])('falls back to the one workflow that can be started by hand and was green on the default branch, with %s', async (_what, setup) => {
-      github(actions([ci('CI', [job(11, 1, 'test')])], setup));
-      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 1 });
-    });
-
-    it.each([
-      ['two that can be started by hand and were green', [wf(1, 'Images'), wf(2, 'Installer site')]],
-      ['none that can be started by hand', [wf(1, 'CI', { text: ON_PUSH })]],
-      ['none that was green on the default branch', [wf(1, 'CI', { last: 'failure' })]],
-    ])('is unnamed where no release made it and there are %s, and says why', async (_what, workflows) => {
-      github(actions([ci('CI', [job(11, 1, 'test')])], { workflows }));
-      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unnamed', why: expect.stringContaining('release workflow') as unknown });
-    });
-
-    it('is unread, never green, where the list of workflows or of releases cannot be read whole', async () => {
-      github(path => path === 'releases?per_page=30' ? { status: 502 } : actions([imagesRun], { workflows: [images], releases: [] })(path));
-      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
-      github(path => path === 'actions/workflows?per_page=100' ? { body: { total_count: 3, workflows: [] } } : actions([imagesRun])(path));
-      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
-      github(path => path === 'releases?per_page=30' ? { body: { not: 'a list' } } : actions([imagesRun])(path));
-      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
+    it('is red where the full run failed, and pending while it goes on', async () => {
+      github(actions([ci('Images', [], { conclusion: 'failure' })]));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'red', outcome: 'failure' });
+      github(actions([ci('Images', [], { status: 'in_progress', conclusion: null })]));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'pending', outcome: 'in_progress' });
     });
   });
 

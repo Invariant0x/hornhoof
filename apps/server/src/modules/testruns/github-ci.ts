@@ -1,21 +1,23 @@
 import { z } from 'zod';
 import { Absent, PER_PAGE, Sha, Unread, defaultBranchOf, everyPage, jsonOf, linkOf, runsAt, shown, type Json, type Run } from './github-api.js';
-import { releaseWorkflowOf } from './github-workflow.js';
+import { NAME_IT, isFullRun, releaseWorkflowOf } from './github-workflow.js';
 import { githubName, GitHubRateLimited, type GitHubLimits, type RateLimit } from './github-limit.js';
 import type { RepoAddress } from './refs.js';
 
-/* What the repository's own CI says of one exact commit. CI here is the GitHub Actions runs of the repository's release workflow
-   on that sha, read from GitHub's API with the repository's token, and the jobs of each (github-workflow.ts says which
-   workflow that is). Commit statuses, the check runs of other apps and the runs of any other workflow are never read: any token
-   with write access can post a status or start another workflow, so none of them proves a thing. The server decides from this
-   answer, never from a caller's word.
-   green: every run of the release workflow on the commit finished, every job of each finished, no test job was skipped, none
+/* What the repository's own CI says of one exact commit. CI here is the full runs of the repository's release workflow on that sha
+   (github-workflow.ts: the workflow a person named in the repository settings, and what makes a run a full one), read from
+   GitHub's API with the repository's token, and the jobs of each. Commit statuses, the check runs of other apps, the runs of any
+   other workflow and the runs of the release workflow that a mark or an earlier commit may have narrowed are never counted:
+   any token with write access can post a status, start another workflow or a narrowed run, so none of them proves a thing. The
+   server decides from this answer, never from a caller's word.
+   green: every full run of the release workflow on the commit finished, every job of each finished, no test job was skipped, none
    failed and one at least succeeded; checks counts the jobs that succeeded. red and pending name the first run or job that
    stopped it, with its link; a test job that was skipped, as Images does where a status says the tests passed, is red. idle:
-   runs finished and no job succeeded, as all were skipped. absent: no run of the release workflow is on the commit yet.
-   stripped: the commit keeps no workflow file while the default branch has CI, so no run can come. unnamed: the repository's
-   release workflow cannot be told. none: the repository has no CI at all. unsupported: not on github.com, the only host read
-   here. unread: GitHub did not answer, or answered what cannot be trusted. limited: the account's request limit is used up. */
+   runs finished and no job succeeded, as all were skipped. absent: no full run of the release workflow is on the commit yet.
+   stripped: the commit keeps no workflow file while the default branch has CI, so no run can come. unnamed: no release workflow
+   is named in the repository settings, or the one named is not an active workflow. none: the repository has no CI at all.
+   unsupported: not on github.com, the only host read here. unread: GitHub did not answer, or answered what cannot be trusted.
+   limited: the account's request limit is used up. */
 export type CiAt =
   | { state: 'none'; why: string }
   | { state: 'green'; checks: number }
@@ -139,13 +141,20 @@ async function noRunAt(json: Json, repo: RepoAddress, name: string, commit: stri
   return { state: 'none', why: 'no workflow file, no check and no status belongs to this commit or to the default branch' };
 }
 
-/* What the release workflow's runs on a commit say, the runs of every other workflow set aside. */
+/* What the full runs of the release workflow on a commit say. Its other runs, and every run of any other workflow, are set aside:
+   they prove nothing and block nothing, and with none of the release workflow's full runs the commit has no run yet. */
 async function ofReleaseWorkflow(json: Json, repo: RepoAddress, name: string, runs: Run[], timeoutMs: number): Promise<CiAt> {
-  const chosen = await releaseWorkflowOf(json, repo, name, false, timeoutMs);
+  const chosen = await releaseWorkflowOf(json, repo, name, timeoutMs);
   if ('no' in chosen) return { state: 'unnamed', why: chosen.no };
-  const own = runs.filter(run => run.workflow_id === chosen.workflow.id);
+  const own = runs.filter(run => run.workflow_id === chosen.workflow.id && isFullRun(run));
   if (!own.length) return { state: 'absent' };
   return verdict((await Promise.all(own.map(run => settleRun(json, repo, name, run, timeoutMs)))).flat());
+}
+
+/* A commit with no run of the repository's workflows on it is absent only where a release workflow is named, to be started. */
+async function withoutRun(json: Json, repo: RepoAddress, name: string, commit: string, timeoutMs: number): Promise<CiAt> {
+  const at = await noRunAt(json, repo, name, commit, timeoutMs);
+  return at.state === 'absent' && !repo.releaseWorkflow?.trim() ? { state: 'unnamed', why: NAME_IT } : at;
 }
 
 async function ciAt(json: Json, repo: RepoAddress, commit: string, timeoutMs: number): Promise<CiAt> {
@@ -154,7 +163,7 @@ async function ciAt(json: Json, repo: RepoAddress, commit: string, timeoutMs: nu
   if (!name) return { state: 'unsupported', why: 'the repository is not on github.com, the only host whose CI is read' };
   try {
     const runs = await runsAt(json, repo, name, commit, '', timeoutMs);
-    return runs.length ? await ofReleaseWorkflow(json, repo, name, runs, timeoutMs) : await noRunAt(json, repo, name, commit, timeoutMs);
+    return runs.length ? await ofReleaseWorkflow(json, repo, name, runs, timeoutMs) : await withoutRun(json, repo, name, commit, timeoutMs);
   } catch (error) {
     if (error instanceof GitHubRateLimited) return { state: 'limited', limit: error.limit };
     if (error instanceof Unread) return { state: 'unread', why: error.message };

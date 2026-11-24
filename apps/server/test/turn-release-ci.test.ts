@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, approvalPolicies, ciDispatches, jobs, requests, taskEvents, testRuns, turnReleases, turns } from '../src/db/schema.js';
+import { agentEvents, approvalPolicies, ciDispatches, departments, jobs, requests, taskEvents, testRuns, turnReleases, turns } from '../src/db/schema.js';
 import { answer } from '../src/modules/tasks/engine.js';
 import { releaseCiRound } from '../src/modules/tasks/release-ci-round.js';
 import type { CiAt } from '../src/modules/testruns/github-ci.js';
@@ -32,6 +32,17 @@ describe('the release of a turn on the repository\'s CI', () => {
     expect(f.repo.asked).toEqual([f.R]);
   });
 
+  it("reads CI, and starts it, with the release workflow the department's settings name, and with none where they name none (B6, B7)", async () => {
+    const f = await releasing();
+    await f.recordRelease();
+    expect(f.repo.named).toEqual([null]);
+    const g = await releasing();
+    await g.db.update(departments).set({ repoReleaseWorkflow: '.github/workflows/images.yml' }).where(eq(departments.id, g.task.departmentId!));
+    g.repo.ci = { state: 'absent' };
+    await g.recordRelease();
+    expect(g.repo.named).toEqual(['.github/workflows/images.yml', '.github/workflows/images.yml']);
+  });
+
   it('records with no run where the repository has no CI, and says that it had none', async () => {
     const f = await releasing();
     f.repo.ci = { state: 'none', why: 'no check, no status and no workflow file belongs to this commit' };
@@ -46,7 +57,7 @@ describe('the release of a turn on the repository\'s CI', () => {
     ['CI still under way, naming the check that is not done', { state: 'pending', check: 'test (1)', url: RED_LINK, outcome: 'in_progress' }, ['has not finished on this commit', 'test (1) is in_progress', RED_LINK]],
     ['CI that ran jobs and none succeeded', { state: 'idle', checks: 2 }, ['ran 2 jobs', 'none succeeded']],
     ['a commit that took every workflow file away where its default branch has CI', { state: 'stripped', branch: 'main' }, ['keeps no workflow file', 'main has CI', 'no CI can run on it']],
-    ['a repository whose release workflow cannot be told, never as one with no CI', { state: 'unnamed', why: 'More than one workflow was going on when the latest version release was made: Images (a.yml); Installer site (b.yml). Hornhoof does not guess which one releases.' }, ["release workflow can't be told", 'Images (a.yml); Installer site (b.yml)']],
+    ['a repository whose settings name no release workflow, never as one with no CI', { state: 'unnamed', why: 'name the release workflow in the repository settings.' }, ["release workflow can't be told", 'name the release workflow in the repository settings']],
     ['a repository whose host is not read, never as one with no CI', { state: 'unsupported', why: 'the repository is not on github.com, the only host whose CI is read' }, ["CI can't be read", 'not on github.com']],
   ])('refuses %s, and records nothing', async (_what, ci, words) => {
     const f = await releasing();
@@ -187,7 +198,7 @@ describe('CI the server starts for a release', () => {
   it.each<[string, Dispatched, string]>([
     ['no workflow to start', { state: 'refused', why: 'No workflow of the repository can be started by hand (workflow_dispatch) with a latest run that was green.' }, 'No workflow of the repository can be started by hand'],
     ['a token that cannot start workflows', { state: 'refused', why: 'GitHub refused to start the workflow (403: Resource not accessible by integration). The repository token cannot start workflows: it needs the permission actions: write.' }, 'it needs the permission actions: write'],
-    ['more than one workflow to start', { state: 'refused', why: 'More than one workflow can be started by hand and was green on the default branch last: Release (a.yml); Images (b.yml). Hornhoof does not guess which one releases.' }, 'Release (a.yml); Images (b.yml)'],
+    ['no release workflow named in the settings', { state: 'refused', why: 'name the release workflow in the repository settings.' }, 'name the release workflow in the repository settings'],
     ['a host that cannot be read', { state: 'unread', why: 'GitHub answered 502 when reading the checks' }, 'Try again.'],
     ['a used up request limit', { state: 'limited', limit: { remaining: 0, resetAt: Date.UTC(2026, 10, 24, 14, 10) } }, 'until 14:10 UTC'],
     ['a host that is not read', { state: 'unsupported', why: 'the repository is not on github.com' }, "CI can't be read"],
@@ -309,7 +320,7 @@ describe('the minute round for a release that waits for CI', () => {
     ['red', { state: 'red', check: 'Release / test (2)', url: RED_LINK, outcome: 'failure' }, `check Release / test (2) ended with failure (${RED_LINK})`],
     ['run with nothing that succeeded', { state: 'idle', checks: 2 }, 'none succeeded'],
     ['stripped of its workflows', { state: 'stripped', branch: 'main' }, 'keeps no workflow file'],
-    ['without a release workflow Hornhoof can name', { state: 'unnamed', why: 'No workflow of the repository can be started by hand.' }, "release workflow can't be told"],
+    ['without a release workflow named in the settings', { state: 'unnamed', why: 'name the release workflow in the repository settings.' }, "release workflow can't be told"],
   ])('ends the request, records nothing and tells the holder why, where CI is %s', async (_what, ci, words) => {
     const f = await started();
     f.repo.ci = ci;

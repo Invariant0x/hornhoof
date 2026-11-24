@@ -16,7 +16,8 @@ type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit
 type Turn = typeof turns.$inferSelect;
 type Release = typeof turnReleases.$inferSelect;
 type Repo = NonNullable<Awaited<ReturnType<typeof repoAt>>>['repo'];
-export type IntegrationTarget = { repo: Repo; branch: string; turn: Turn | null };
+/* The repository as CI is read and started on it too: with the release workflow its settings name. */
+export type IntegrationTarget = { repo: Repo & { releaseWorkflow: string | null }; branch: string; turn: Turn | null };
 
 const lockCompany = (tx: Tx, companyId: string) => tx.select(idOnly(companies)).from(companies).where(eq(companies.id, companyId)).for('no key update');
 
@@ -26,12 +27,13 @@ export async function integrationTarget(ctx: Reader, task: Pick<Task, 'companyId
   if (!ctx.config) return null;
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]);
   if (!found) return null;
-  if (found.department.parentId) return { repo: found.repo, branch: found.repo.branch, turn: null };
+  const repo = { ...found.repo, releaseWorkflow: found.department.repoReleaseWorkflow };
+  if (found.department.parentId) return { repo, branch: repo.branch, turn: null };
   const turn = await openTurnOf(ctx.db, task.companyId, found.department.id)
     ?? await ctx.db.transaction(async tx => { await lockCompany(tx, task.companyId); return ensureOpenTurn(tx, task.companyId, found.department.id); });
   /* Its repository went away meanwhile. */
   if (!turn) return null;
-  return { repo: found.repo, branch: `turn-${turn.number}`, turn };
+  return { repo, branch: `turn-${turn.number}`, turn };
 }
 
 /* A branch at head holds commit: it is there, or the branch went on from it. GitHub says so by the status of their comparison,

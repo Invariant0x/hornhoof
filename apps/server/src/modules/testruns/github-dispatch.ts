@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { Absent, Refused, Unread, jsonOf, linkOf, sendOf, shown, Sha, type Json, type Send } from './github-api.js';
-import { nameOf, releaseWorkflowOf, type Wf } from './github-workflow.js';
+import { FULL_INPUT, nameOf, releaseWorkflowOf, type Wf } from './github-workflow.js';
 import { githubName, GitHubRateLimited, type GitHubLimits, type RateLimit } from './github-limit.js';
 import type { RepoAddress } from './refs.js';
 
-/* Starting the release workflow of a repository on a commit of a turn branch. GitHub runs a workflow_dispatch workflow on the
-   head of a branch, so the run that comes of it is read again, by the exact commit it ran on, before CI says anything of it.
+/* Starting the release workflow of a repository, the one its settings name, on a commit of a turn branch, with the input full so
+   that it runs every test (github-workflow.ts). GitHub runs a workflow_dispatch workflow on the head of a branch, so the run that
+   comes of it is read again, by the exact commit it ran on, before CI says anything of it.
    started: the request was taken; run is the one that came of it where GitHub listed it already. refused: GitHub or the
    repository said no, and nothing was started. unsure: the request went out and what became of it is not known, so it is not
    sent again. unsupported, unread and limited are as the reader of CI has them, and start nothing. */
@@ -53,7 +54,7 @@ type Reach = { json: Json; send: Send; pause: (ms: number) => Promise<void> };
    says no is a refusal; a failure that leaves it unknown whether it was started is unsure; the request limit is thrown. */
 async function post(at: Reach, repo: RepoAddress, name: string, workflow: Wf, branch: string, timeoutMs: number): Promise<Dispatched | null> {
   try {
-    await at.send(repo, name, `actions/workflows/${workflow.id}/dispatches`, { method: 'POST', body: { ref: branch } }, timeoutMs);
+    await at.send(repo, name, `actions/workflows/${workflow.id}/dispatches`, { method: 'POST', body: { ref: branch, inputs: { [FULL_INPUT]: 'true' } } }, timeoutMs);
     return null;
   } catch (error) {
     if (error instanceof GitHubRateLimited) throw error;
@@ -63,7 +64,7 @@ async function post(at: Reach, repo: RepoAddress, name: string, workflow: Wf, br
 }
 
 async function start(at: Reach, repo: RepoAddress, name: string, branch: string, commit: string, timeoutMs: number): Promise<Dispatched> {
-  const chosen = await releaseWorkflowOf(at.json, repo, name, true, timeoutMs);
+  const chosen = await releaseWorkflowOf(at.json, repo, name, timeoutMs);
   if ('no' in chosen) return { state: 'refused', why: chosen.no };
   const { workflow } = chosen;
   const failed = await post(at, repo, name, workflow, branch, timeoutMs);
@@ -75,7 +76,7 @@ async function start(at: Reach, repo: RepoAddress, name: string, branch: string,
 const later = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 /* The dispatcher of a server: it starts the release workflow of the repository (github-workflow.ts says which) on the branch
-   given, with the repository's token and the server's request limit. */
+   given with the input full, with the repository's token and the server's request limit. */
 export function githubCiDispatcher(limits?: GitHubLimits, pause: (ms: number) => Promise<void> = later): CiDispatcher {
   const at: Reach = { json: jsonOf(limits), send: sendOf(limits), pause };
   return async (repo, branch, commit, timeout = READ_MS) => {

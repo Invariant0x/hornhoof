@@ -3535,6 +3535,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "repo_release_workflow": {
+          "name": "repo_release_workflow",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "owner_person_id": {
           "name": "owner_person_id",
           "type": "uuid",

@@ -1,5 +1,5 @@
 import type { Ctx } from '../../app.js';
-import { repoAt } from '../departments/repository.js';
+import { ciAddress, repoAt } from '../departments/repository.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import type { CiAt } from '../testruns/github-ci.js';
 import { GitHubRateLimited } from '../testruns/github-limit.js';
@@ -75,7 +75,7 @@ export async function requireCi(ctx: Reading, repo: RepoAddress, commit: string)
 async function ciSaid(ctx: Said, task: Pick<Task, 'productId' | 'departmentId'>, commit: string): Promise<{ line: string; decisive: boolean } | undefined> {
   const found = ctx.config ? await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]).catch(() => null) : null;
   if (!found) return undefined;
-  const ci = await readCiOf(ctx, found.repo, commit);
+  const ci = await readCiOf(ctx, ciAddress(found), commit);
   return { line: ciLine(ci), decisive: ['green', 'red', 'pending', 'idle', 'absent', 'stripped', 'unnamed', 'unsupported'].includes(ci.state) };
 }
 

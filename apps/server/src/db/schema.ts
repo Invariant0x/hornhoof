@@ -321,6 +321,9 @@ export const departments = pgTable('departments', {
   repoTestMemoryGb: integer('repo_test_memory_gb'),
   /* The command that runs the repository's whole test suite. Only a passed run of exactly this one lets GitHub skip its own tests. */
   repoFullTestCommand: text('repo_full_test_command'),
+  /* The path of the repository's release workflow, as a person named it in the repository settings: the workflow whose full run on
+     a commit says the commit may be released. Hornhoof never works it out; none named, no release records. */
+  repoReleaseWorkflow: text('repo_release_workflow'),
   /* The person the CEO named to take the department's approvals and set its policy; none means the CEO. Only the CEO sets it,
      and it is never worked out from who has access. It counts only while that person is active and still has access. */
   ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),
