@@ -243,6 +243,23 @@ describe('Department view', () => {
     for (const name of names) expect(screen.getByRole('group', { name })).toHaveClass('frame-calls');
   });
 
+  /* A text a language lacks reads in English: a role whose template has no Russian words still names its frame. */
+  it('names a role frame and tells what the role does in English where the role has no text in the language of the screen', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    const department = DEV_ORG.departments[0]!;
+    const bruno = department.employees.find(e => e.id === 'b1')!;
+    const reviewer = { id: 'DEV-REV', title: { en: 'Code reviewer' }, description: { en: 'Reviews every change.' }, kind: 'member' as const, gate: 1 };
+    const rita = { ...bruno, id: 'b2', name: 'Rita', roleId: 'DEV-REV', title: { en: 'Code reviewer' } };
+    mockApi({});
+    render(<LanguageProvider><DepartmentView me={ME} department={{ ...department, roles: [...department.roles, reviewer], employees: [...department.employees, rita] }}
+      deputies={[]} selected={null} panel={null} onBack={() => {}} onHire={() => {}}
+      onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
+    const frame = await screen.findByRole('group', { name: 'Code reviewer' });
+    expect(frame.querySelector('.fn')).toHaveTextContent('Code reviewer');
+    expect(frame.querySelector('.fa')).toHaveTextContent('Reviews every change.');
+  });
+
   /* A department that keeps no repository, nor any of its products, hands its work in as documents: its call frames read the
      plain stage names its task workflows read, never the names of code. */
   it.each([
