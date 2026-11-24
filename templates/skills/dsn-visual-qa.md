@@ -1,7 +1,5 @@
 ---
 id: dsn-visual-qa
-title: { en: "Visual check of built screens", ru: "Визуальная проверка экранов" }
-description: { en: "Compares built screens with the approved mockups and the design system at several widths and in every language the product supports.", ru: "Сравнивает готовые экраны с утвержденными макетами и дизайн-системой на разной ширине и на всех языках продукта." }
 kind: procedure
 sources: []
 ---

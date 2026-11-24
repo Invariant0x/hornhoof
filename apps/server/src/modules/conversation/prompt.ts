@@ -1,4 +1,4 @@
-import { NOTIFICATION_NAMES } from '@hornhoof/protocol';
+import { localeInfo, NOTIFICATION_NAMES } from '@hornhoof/protocol';
 import type { EventView, ReplyQuote } from '../events/store.js';
 import type { MessageEnvelope, MessageParty } from '../events/parties.js';
 import type { BotLang } from '../telegram/words.js';
@@ -105,7 +105,7 @@ export function whoIs(author: { name: string }, standing: Standing): string {
 
 /* Below a person's message that came through the agent's Telegram bot: who they are, and where the answer goes. */
 export function answerInTelegram(author: { name: string }, standing: Standing, lang: BotLang): string {
-  const language = lang === 'ru' ? 'Russian' : 'English';
+  const language = localeInfo(lang)?.english ?? 'English';
   return [
     `This is ${author.name} writing to you directly in Telegram. ${whoIs(author, standing)}`,
     `Your last message of this turn goes to ${author.name} as your answer. Use the language of their own words. Write it directly to them in ${language} when their message does not establish a language. Keep it short and use plain text. Do not narrate your steps to them.`,

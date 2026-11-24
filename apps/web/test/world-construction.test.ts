@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { CityBuilding } from '../src/world/city-layout';
+import { packText } from '../src/world/pack-text';
+import { loadEveryPackTexts } from '../src/world-packs/pack-text-load';
 import {
   buildingLoopsFor,
   computeStatueAlleyProgress,
@@ -44,6 +46,8 @@ function makeBuilding(overrides: Partial<CityBuilding> = {}): CityBuilding {
   };
 }
 
+loadEveryPackTexts();
+
 describe('Stage 6 construction stages, building animation loops, work slots, 20-stage statues, pyramids and reverse demolition', () => {
   it('reads all 10 construction stages from the active world pack with distinct Egypt and Dungeon packs and neutral engine defaults', () => {
     expect(CONSTRUCTION_STAGE_IDS).toEqual([
@@ -67,8 +71,8 @@ describe('Stage 6 construction stages, building animation loops, work slots, 20-
     expect(dungeonStages.map(s => s.id)).toEqual([...CONSTRUCTION_STAGE_IDS]);
 
     /* Packs customize stage labels/materials independently without changing engine code. */
-    expect(egyptStages[0]!.label.ru).not.toBe(dungeonStages[0]!.label.ru);
-    expect(egyptStages[9]!.label.en).not.toBe(dungeonStages[9]!.label.en);
+    expect(packText(egyptStages[0]!.label, 'ru')).not.toBe(packText(dungeonStages[0]!.label, 'ru'));
+    expect(egyptStages[9]!.label).not.toBe(dungeonStages[9]!.label);
 
     /* Key architectural stage properties required by Stage 6. */
     const openWalls = egyptStages.find(s => s.id === 'low_walls_open')!;
@@ -224,6 +228,8 @@ describe('Stage 6 construction stages, building animation loops, work slots, 20-
       'src/world/construction.ts',
       'src/world/construction-renderer.ts',
       'src/world/city-renderer.ts',
+      'src/world/street-field.ts',
+      'src/world/bridge-site.ts',
     ]) {
       const src = readFileSync(resolve(process.cwd(), relPath), 'utf8');
       expect(forbidden.test(src), `${relPath} must contain zero theme words`).toBe(false);

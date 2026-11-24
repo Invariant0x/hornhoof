@@ -23,8 +23,10 @@ function lineFrom(start, git) {
 /* The nearest commit, from where the event says this one comes from back along its first parents, whose tests passed. A push
    of texts alone builds nothing and leaves no mark, so the commit before it may be the one. A run by hand of main itself starts
    at the commit and stands on the one before it that passed. Whatever this cannot tell, there is no base and the whole suite
-   runs. */
-export async function provedBase({ name, event, sha }, { git, proved }) {
+   runs. A full run, which a release asks for, stands on no commit and reads no mark: a mark is a status, and any token with write
+   access can post one, so a run that narrowed by it would prove less than the whole suite. */
+export async function provedBase({ name, event, sha, full = false }, { git, proved }) {
+  if (full) return { base: null, why: 'A full run was asked for: no commit narrows it.' };
   let start;
   try { start = startOf(name, event, sha, git); } catch { return { base: null, why: 'The commit this one left main at is not in the checkout.' }; }
   if (!start) return { base: null, why: `The ${name} event names no commit this one comes from.` };

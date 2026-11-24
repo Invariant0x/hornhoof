@@ -1,7 +1,5 @@
 ---
 id: dsn-plan-review
-title: { en: "Design review of a plan", ru: "Дизайн-ревью плана" }
-description: { en: "Checks a product or feature plan for design gaps before anyone builds it.", ru: "Проверяет план продукта или функции на пробелы в дизайне до начала разработки." }
 kind: gate
 sources: [garrytan/gstack plan-design-review/SKILL.md.tmpl]
 ---

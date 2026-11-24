@@ -5,6 +5,17 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Added
+
+- Every text people see now comes from a file per language, loaded only for the language that is on: the screens, the words of the world packs, what the server says in its own words, the page shown while the server is away, and the names and descriptions of templates. A language is one line in a registry and one file per kind of text, with no code that names a language. Plurals, dates and numbers follow the language through the browser's own rules, a language that reads right to left mirrors the page, and the letters of a script that the product's fonts do not hold load only when a language in that script is on.
+- Two languages made for tests, a text 40% longer than English and the same text mirrored, are checked on the main screens at phone and desktop widths for cut text and sideways scroll. They never reach a person.
+
+### Changed
+
+- A skin file of your own may name the skin in any language of the registry, with the English name required and the others optional, and the names of a world's employees can be taken in any language of the registry.
+
 ## [0.43.0] - 2026-11-23
 
 ### Fixed
@@ -17,6 +28,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - An employee's open terminal stays connected when idle or on a personal-plan fallback machine: the server sends WebSocket keepalive pings and checks fallback placement consistently, the window keeps the terminal mounted across brief node drops, and unavoidable reconnects or program restarts recover without flashing the loader or losing scrollback history and reading position.
 - An employee's program that waits between turns no longer starts anew when the terminal showing it loses its connection for a moment: the node keeps it for 30 seconds after its last view went, so the view that comes back finds it. A view ended because its person may no longer see the agent holds it no longer, and a program whose agent moved to another plan still goes at once.
 - A merge of a copy's database no longer stops with "No merge rule for public.world_layouts": the company's city and the CEO's orders to move its buildings merge like a person's map, and two cities that differ keep the leading one and go to the orchestrator.
+- On the city map, streets read as one trodden strip at every crossing, T-join and bend, with one soft edge instead of strips laid over each other, and the brown stand-in over the river is gone: until the world's bridge pictures are installed no street crosses the water and no resident walks on it, and with them the bridge stands in one fixed place of the map on every load.
+- A task reaches Failures only for a cause that needs a person: a command Hornhoof refuses before it starts ends as refused, with the refusal told to its agent at once as a hint, and neither it, a stopped run, a turn that retries by itself after an overloaded provider or a usage limit, nor a turn replaced because its task moved on marks a task, the agent card or the map as failed; a stuck agent asking for help and a turn that failed with nothing to take it on now do, each until it is answered or a turn goes well, and the failure card says what to do. Refusals kept as failed runs become refused when the update runs.
 
 ### Added
 

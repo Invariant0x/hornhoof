@@ -1,7 +1,5 @@
 ---
 id: biz-decision-council
-title: { en: "Decision council", ru: "Совет по решению" }
-description: { en: "Examines a costly decision from independent viewpoints.", ru: "Рассматривает дорогое решение с независимых точек зрения." }
 kind: procedure
 sources: [affaan-m/ECC skills/council/SKILL.md]
 ---

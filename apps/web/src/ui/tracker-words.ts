@@ -3,8 +3,9 @@ import type { Language, Messages } from '../i18n';
 import { isClosed, taskWaits, type WaitTask } from '../task-tree';
 import { doerOf, isWaitForPerson } from '../tracker';
 import type { TaskLine, TaskLogLine } from '../types';
+import { formatTagOf } from '@hornhoof/protocol';
 
-export const localeOf = (language: Language) => (language === 'ru' ? 'ru-RU' : 'en-GB');
+export const localeOf = (language: Language) => formatTagOf(language);
 
 /* A stretch of time in the largest whole unit that says it: minutes, hours with minutes, or days. */
 export function spanText(t: Messages, seconds: number): string {
@@ -29,6 +30,9 @@ export function dueText(t: Messages, language: Language, task: Pick<TaskLine, 'd
   const day = new Date(task.dueAt).toLocaleDateString(localeOf(language), { day: 'numeric', month: 'short', timeZone: 'UTC' });
   return { text: late ? t.tracker.late(day) : day, late };
 }
+
+/* What a person does about a failure, in plain words; none for a wait that is no failure. */
+export const failureTodo = (t: Messages, wait: TaskWaitFact): string | null => (wait.failure ? t.tracker.wait.todo[wait.failure] : null);
 
 export const waitClass = (wait: TaskWaitFact) => wait.failure ? 'failure' : isPersonWait(wait) ? 'person' : wait.event === 'time' ? 'scheduled' : 'working';
 

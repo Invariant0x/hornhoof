@@ -27,7 +27,7 @@ import { openTurnOf } from '../tasks/turn-department.js';
 import { taskByRef } from '../tasks/lookup.js';
 import { openGoal, resolveGoal, reviseGoal, type GoalImpact, type GoalRef } from '../tasks/wait-goals.js';
 import { wakeAll } from '../tasks/wake.js';
-import { commitProof, proofLine } from '../testruns/commit-proof.js';
+import { proofSaid } from '../tasks/release-ci.js';
 import type { ToolJob } from './job.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
@@ -131,7 +131,7 @@ async function requestCommitApproval(ctx: Ctx, job: ToolJob, task: Task, commit:
   const unchecked = await uncheckedInRelease(ctx, task, commit);
   const letGo = unchecked?.length ? null : await commitLetGo(ctx, job, task, commit, asked);
   if (letGo) return letGo;
-  const said = proofLine(await commitProof(ctx.db, task, commit));
+  const said = await proofSaid(ctx, task, commit);
   const card = approvalCard({ ...asked, amount: undefined }, 'commit', 'release', `${asked.text}\n\nHornhoof checked as this was asked. ${said}`, commit);
   await askPerson(ctx, job, task, { ...card, ...(unchecked?.length ? { unchecked } : {}) });
   const told = unchecked?.length ? ` Hornhoof names next to Approve what the release brings that no check covers: ${unchecked.length}.` : '';

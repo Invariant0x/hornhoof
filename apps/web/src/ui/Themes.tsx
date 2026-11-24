@@ -1,9 +1,9 @@
+import { isLocaleId, isSourceLocale, say } from '@hornhoof/protocol';
 import type { WorldNameLanguage, WorldRenamePreview, WorldRenameResult, WorldRestoreNamesResult, WorldThemeView } from '@hornhoof/protocol/world';
 import { useEffect, useId, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT, type Language } from '../i18n';
-import { en, type Messages } from '../i18n/en';
-import { ru } from '../i18n/ru';
+import { cachedMessages, errorText, LANGUAGES, loadMessages, useLanguage, useT, type Language } from '../i18n';
+import type { Messages } from '../i18n/en';
 import { COLLECTION_LIMIT, uniqueName, type CustomSkin } from '../skins/collection';
 import { BUILTIN_SKINS, DEFAULT_SKIN, ownLook, type BuiltinSkinId } from '../skins/registry';
 import { declarations, extraDeclarations, type Skin, type SkinLook, type SkinNames } from '../skins/roles';
@@ -19,7 +19,7 @@ import { ThemeShopIcon } from './icons';
 type Problem = SkinError | { code: 'read_failed'; key?: undefined; value?: undefined };
 /* The line under the heading that says what the last action did: a status, an alert, or a file still being read. */
 type Notice = { tone: 'status' | 'alert' | 'busy'; title?: string; text: string; removal?: Removal };
-type Card = { id: string; look: SkinLook; name: string; desc: string; own: boolean; file: () => Skin };
+type Card = { id: string; look: SkinLook; name: string; desc: string; own: boolean; file: () => Skin | Promise<Skin> };
 type StoreFilter = 'all' | 'worlds' | 'classic' | 'custom';
 const STORE_FILTERS: readonly StoreFilter[] = ['all', 'worlds', 'classic', 'custom'];
 
@@ -31,8 +31,19 @@ function matchesFilter(card: Card, filter: StoreFilter): boolean {
   return !card.own && !isWorldCard(card);
 }
 
-const nameIn = (names: SkinNames, language: Language) => (language === 'ru' ? names.ru : names.en);
-const builtinNames = (id: BuiltinSkinId): SkinNames => ({ ru: ru.skins.names[id], en: en.skins.names[id] });
+const nameIn = (names: SkinNames, language: Language) => say(names, language);
+/* A built-in skin's name in English and in every language whose words are loaded: what a name of a person's own must differ from. */
+const loadedNames = (id: BuiltinSkinId): SkinNames => ({
+  en: cachedMessages('en')!.skins.names[id],
+  ...Object.fromEntries(LANGUAGES.flatMap(({ id: language }) => (isSourceLocale(language) ? [] : [[language, cachedMessages(language)?.skins.names[id]] as const])).filter(([, own]) => own !== undefined)),
+});
+
+/* A built-in skin's name in every language Hornhoof speaks: a file of it is for any reader, so the words of each language are
+   brought first, since only the person's own is loaded. */
+async function builtinNames(id: BuiltinSkinId): Promise<SkinNames> {
+  const names = await Promise.all(LANGUAGES.map(async ({ id: language }) => [language, (await loadMessages(language)).skins.names[id]] as const));
+  return Object.fromEntries(names) as SkinNames;
+}
 
 /* The tokens of a skin on its own preview only, so each card shows its skin and world colours in the same drawing. */
 const previewStyle = (look: SkinLook) =>
@@ -217,7 +228,7 @@ function Guide() {
 /* The built-in skins in the order of the registry, then a person's own in the order they were added. */
 function catalogCards(t: Messages, language: Language, custom: readonly CustomSkin[]): Card[] {
   return [
-    ...BUILTIN_SKINS.map(skin => ({ id: skin.id, look: skin, name: t.skins.names[skin.id], desc: t.skins.descs[skin.id], own: false, file: () => builtinFile(skin, builtinNames(skin.id)) })),
+    ...BUILTIN_SKINS.map(skin => ({ id: skin.id, look: skin, name: t.skins.names[skin.id], desc: t.skins.descs[skin.id], own: false, file: async () => builtinFile(skin, await builtinNames(skin.id)) })),
     ...custom.map(({ id, skin }) => ({ id, look: ownLook(skin), name: nameIn(skin.name, language), desc: t.skins.ownDesc, own: true, file: () => skin })),
   ];
 }
@@ -227,7 +238,7 @@ const failure = (t: Messages, text: string): Notice => ({ tone: 'alert', title: 
 /* Keeps a skin read from a file under a name no other card has, and says how it went: added, or why not. */
 function keepRead(t: Messages, language: Language, read: Skin | Problem): Notice {
   if ('code' in read) return failure(t, problemText(t, read));
-  const taken = [...BUILTIN_SKINS.map(builtin => builtinNames(builtin.id)), ...skinsState().custom.map(entry => entry.skin.name)];
+  const taken = [...BUILTIN_SKINS.map(builtin => loadedNames(builtin.id)), ...skinsState().custom.map(entry => entry.skin.name)];
   const named = { ...read, name: uniqueName(read.name, taken) };
   const added = addSkin(named);
   if (added.ok) return { tone: 'status', text: t.skins.added(nameIn(named.name, language)) };
@@ -244,18 +255,19 @@ function removeCard(t: Messages, cards: readonly Card[], card: Card): { notice: 
 }
 
 /* Gives a skin as a file of the format a person can change and add back. */
-function saveFile(card: Card): void {
+async function saveFile(card: Card): Promise<void> {
+  const text = skinText(await card.file());
   const link = document.createElement('a');
-  link.href = `data:application/json;charset=utf-8,${encodeURIComponent(skinText(card.file()))}`;
+  link.href = `data:application/json;charset=utf-8,${encodeURIComponent(text)}`;
   link.download = `hornhoof-skin-${card.id}.json`;
   document.body.append(link);
   link.click();
   link.remove();
 }
 
-function download(t: Messages, card: Card, say: (notice: Notice) => void): void {
+async function download(t: Messages, card: Card, say: (notice: Notice) => void): Promise<void> {
   try {
-    saveFile(card);
+    await saveFile(card);
   } catch {
     say({ tone: 'alert', text: t.skins.downloadFailed(card.name) });
   }
@@ -386,7 +398,7 @@ function WorldEraNamesPanel({
   const wn = t.skins.worldNames;
   const { language } = useLanguage();
   const [preview, setPreview] = useState<WorldRenamePreview | null>(null);
-  const [nameLang, setNameLang] = useState<WorldNameLanguage>(language === 'ru' ? 'ru' : 'en');
+  const [nameLang, setNameLang] = useState<WorldNameLanguage>(isLocaleId(language) ? language : 'en');
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const headingId = useId();
@@ -448,7 +460,7 @@ function WorldEraNamesPanel({
             className="btn small ghost"
             type="button"
             disabled={busy}
-            onClick={() => void openRenamePreview(language === 'ru' ? 'ru' : 'en')}
+            onClick={() => void openRenamePreview(isLocaleId(language) ? language : 'en')}
           >
             {wn.renameBtn}
           </button>
@@ -472,22 +484,17 @@ function WorldEraNamesPanel({
             <p className="muted" style={{ margin: 0 }}>{wn.dialogIntro}</p>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <span className="muted">{wn.langLabel}:</span>
-              <button
-                type="button"
-                className={`btn small ghost${nameLang === 'ru' ? ' on' : ''}`}
-                disabled={busy}
-                onClick={() => void openRenamePreview('ru')}
-              >
-                Русский
-              </button>
-              <button
-                type="button"
-                className={`btn small ghost${nameLang === 'en' ? ' on' : ''}`}
-                disabled={busy}
-                onClick={() => void openRenamePreview('en')}
-              >
-                English
-              </button>
+              {LANGUAGES.map(choice => (
+                <button
+                  key={choice.id}
+                  type="button"
+                  className={`btn small ghost${nameLang === choice.id ? ' on' : ''}`}
+                  disabled={busy}
+                  onClick={() => void openRenamePreview(choice.id)}
+                >
+                  {choice.name}
+                </button>
+              ))}
             </div>
             {preview.items.length === 0 ? (
               <p className="muted" style={{ margin: 0 }}>{wn.previewEmpty}</p>
@@ -632,7 +639,7 @@ export function Themes({ onCompanyTheme }: { onCompanyTheme?: (theme: string) =>
         <AddFromFile say={setNotice} focusOn={focusOn} />
       </div>
       {notice && <NoticeBar notice={notice} onUndo={undo} />}
-      <Catalog cards={cards} active={active} onApply={card => void apply(card)} onDownload={card => download(t, card, setNotice)} onRemove={remove} />
+      <Catalog cards={cards} active={active} onApply={card => void apply(card)} onDownload={card => void download(t, card, setNotice)} onRemove={remove} />
       <WorldEraNamesPanel
         worldActive={Boolean(activeCard && isWorldCard(activeCard))}
         renamedCount={renamedCount}

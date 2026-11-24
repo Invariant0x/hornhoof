@@ -6,10 +6,11 @@ import { agents, departments, people } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { deptName } from '../departments/templates.js';
 
-const LangText = z.object({ en: z.string(), ru: z.string() });
+/* A name in as many languages as it is written in: English always, the rest when a file of that language gives it. */
+const LangText = z.object({ en: z.string() }).catchall(z.string().optional());
 export const PartySchema = z.object({
   kind: z.enum(['person', 'agent', 'hornhoof']), id: z.string().nullable(), name: z.string(),
-  role: LangText.nullable(), department: z.object({ id: z.string(), name: LangText }).nullable(),
+  role: LangText.nullable(), department: z.object({ id: z.string(), name: LangText, templateKey: z.string().nullable().optional() }).nullable(),
   agentKind: z.enum(['orchestrator', 'head', 'worker', 'assistant']).optional(),
 });
 const Party = PartySchema;
@@ -22,13 +23,6 @@ type PartyContext = Pick<Ctx, 'db' | 'templates'>;
 
 export const HORNHOOF: MessageParty = { kind: 'hornhoof', id: null, name: 'Hornhoof', role: null, department: null };
 
-const DEPARTMENT_RU = {
-  operations: 'Операции', development: 'Разработка', marketing: 'Маркетинг', sales: 'Продажи',
-  business_development: 'Развитие бизнеса', design: 'Дизайн', support: 'Поддержка', finance: 'Финансы',
-  home_devices: 'Домашние устройства', household: 'Домашнее хозяйство',
-  video_production: 'Производство видео',
-};
-
 export async function agentParty(ctx: PartyContext, companyId: string, agentId: string): Promise<MessageParty> {
   const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, companyId)));
   if (!agent) throw new Error('The message agent does not exist in this company.');
@@ -36,13 +30,15 @@ export async function agentParty(ctx: PartyContext, companyId: string, agentId: 
 }
 
 export function agentRole(ctx: Pick<PartyContext, 'templates'>, agent: Pick<typeof agents.$inferSelect, 'kind' | 'roleKey'>) {
-  return agent.kind === 'orchestrator' ? { en: 'Orchestrator', ru: 'Оркестратор' } : ctx.templates.roles.get(agent.roleKey ?? '')?.title ?? null;
+  return agent.kind === 'orchestrator' ? { en: 'Orchestrator' } : ctx.templates.roles.get(agent.roleKey ?? '')?.title ?? null;
 }
 
-/* A department as a message names it, in both languages. */
+/* A department as a message names it: a typed name as typed, in every language; a template department by its English name
+   and its template, which the screen names in the reader's language from its own files. */
 export const departmentParty = (dept: typeof departments.$inferSelect): NonNullable<MessageParty['department']> => ({
   id: dept.id,
-  name: { en: deptName(dept), ru: dept.name ?? (dept.templateKey ? DEPARTMENT_RU[dept.templateKey] : '') },
+  name: { en: deptName(dept) },
+  templateKey: dept.name === null ? dept.templateKey : null,
 });
 
 async function agentDepartment(ctx: PartyContext, id: string | null): Promise<MessageParty['department']> {
@@ -54,7 +50,7 @@ async function agentDepartment(ctx: PartyContext, id: string | null): Promise<Me
 export async function personParty(ctx: PartyContext, companyId: string, personId: string): Promise<MessageParty> {
   const [person] = await ctx.db.select().from(people).where(and(eq(people.id, personId), eq(people.companyId, companyId)));
   if (!person) throw new Error('The message person does not exist in this company.');
-  return { kind: 'person', id: person.id, name: person.name, role: person.title ? { en: person.title, ru: person.title } : null, department: null };
+  return { kind: 'person', id: person.id, name: person.name, role: person.title ? { en: person.title } : null, department: null };
 }
 
 const field = (data: unknown, key: string): unknown => data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined;

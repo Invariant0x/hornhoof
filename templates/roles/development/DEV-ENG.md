@@ -2,8 +2,6 @@
 id: DEV-ENG
 department: development
 kind: member
-title: { en: "Developer", ru: "Разработчик" }
-description: { en: "Developer of software features and their behavior.", ru: "Разработчик программных функций и их поведения." }
 tier: standard
 effort: xhigh
 perProduct: false

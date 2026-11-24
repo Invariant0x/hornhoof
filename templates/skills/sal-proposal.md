@@ -1,7 +1,5 @@
 ---
 id: sal-proposal
-title: { en: "Proposal", ru: "Коммерческое предложение" }
-description: { en: "Writes a proposal that fits the buyer's needs and the terms Sales can offer.", ru: "Готовит предложение по потребностям клиента и условиям отдела продаж." }
 kind: procedure
 sources: [msitarzewski/agency-agents sales/sales-proposal-strategist.md, alirezarezvani/claude-skills business-growth/skills/contract-and-proposal-writer/SKILL.md]
 ---

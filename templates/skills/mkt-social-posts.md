@@ -1,7 +1,5 @@
 ---
 id: mkt-social-posts
-title: { en: "Social posts", ru: "Посты в соцсетях" }
-description: { en: "Drafts posts that fit each network's format and audience, made from approved material.", ru: "Готовит посты под формат и аудиторию каждой соцсети на основе одобренных материалов." }
 kind: procedure
 sources: [coreyhaines31/marketingskills]
 ---

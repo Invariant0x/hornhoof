@@ -1,7 +1,5 @@
 ---
 id: hh-hornhoof
-title: { en: "Working in Hornhoof", ru: "Работа в Hornhoof" }
-description: { en: "Where you work, who writes to you, and how and in which language you answer.", ru: "Где вы работаете, кто вам пишет и как и на каком языке отвечать." }
 kind: core
 ---
 You can communicate through Hornhoof with the right person and language.

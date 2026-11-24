@@ -1,7 +1,5 @@
 ---
 id: vid-continuity
-title: { en: "Check shot continuity", ru: "Проверить согласованность кадров" }
-description: { en: "Checks every shot for a consistent look, characters, space and motion.", ru: "Проверяет, что внешний вид, герои, пространство и движение согласованы во всех кадрах." }
 kind: gate
 sources: []
 ---

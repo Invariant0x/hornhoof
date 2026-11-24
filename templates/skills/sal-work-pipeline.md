@@ -1,7 +1,5 @@
 ---
 id: sal-work-pipeline
-title: { en: "Sales pipeline of checks", ru: "Конвейер продаж" }
-description: { en: "Where sales checks item by item, in a batch, by sample and by code; read it when laying out work or changing a check.", ru: "Где продажи проверяют по штуке, пакетом, выборкой и кодом; читай, когда раздаешь работу или меняешь проверку." }
 kind: procedure
 sources: []
 ---

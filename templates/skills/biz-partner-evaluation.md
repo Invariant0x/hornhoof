@@ -1,7 +1,5 @@
 ---
 id: biz-partner-evaluation
-title: { en: "Partner evaluation", ru: "Оценка партнера" }
-description: { en: "Decides whether a partner is worth pursuing and at what level, with a first-phase plan and exit terms.", ru: "Решает, стоит ли работать с партнером и на каком уровне, с планом первого этапа и условиями выхода." }
 kind: procedure
 sources: [alirezarezvani/claude-skills commercial/skills/partnerships-architect/SKILL.md]
 ---
