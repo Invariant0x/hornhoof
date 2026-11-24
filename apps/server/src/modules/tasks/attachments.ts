@@ -23,7 +23,7 @@ import { seesTask } from './visibility.js';
 import { taskByRef } from './lookup.js';
 import { attachmentJobOf, checkAttachmentTask } from './attachment-token.js';
 import type { Kept } from '../files/files.js';
-import { dropLeftOnDisk, oldFileStream } from '../files/legacy.js';
+import { dropLeftOnDisk, hasOldBytes, oldFileStream } from '../files/legacy.js';
 const PER_TURN = 30;
 const NAME_LENGTH = 200;
 /* The files of a turn go this long after it closed. */
@@ -67,7 +67,9 @@ export function pictureType(b: Buffer): 'image/png' | 'image/jpeg' | 'image/webp
 /* Removes the files on the tasks of turns closed 30 days or more before now, on tasks of no turn closed as long ago, the
    logs and files of test and work runs that ended as long ago, and people's pictures sent as long ago or never sent, and
    says how many went. Their bytes go from the store a day after no row names them (modules/files/sweep), and a big file
-   of 0.43 still on this machine's disk goes with its row. */
+   of 0.43 still on this machine's disk goes with its row. While the database still holds bytes of earlier versions only
+   the rules of 0.43 apply: the files the rules of this version let go of wait for the CEO's yes to the move, which clears
+   the bytes and drops the column (modules/files/move). */
 export async function dropOldFiles(ctx: Pick<Ctx, 'db' | 'config'>, now: Date): Promise<number> {
   const { db } = ctx;
   const cutoff = new Date(now.getTime() - KEEP_FILES_MS);
@@ -81,6 +83,7 @@ export async function dropOldFiles(ctx: Pick<Ctx, 'db' | 'config'>, now: Date): 
     .innerJoin(turns, eq(turns.id, tasks.turnId))
     .where(and(eq(turns.status, 'closed'), lt(turns.closedAt, cutoff)));
   const ofTurns = await db.delete(attachments).where(inArray(attachments.taskId, old)).returning({ id: attachments.id });
+  if (await hasOldBytes(db)) return loose.length + ofTurns.length;
   const closed = db.select(idOnly(tasks)).from(tasks).where(and(isNull(tasks.turnId), lt(tasks.closedAt, cutoff)));
   const outside = await db.delete(attachments).where(inArray(attachments.taskId, closed)).returning({ id: attachments.id });
   /* A run's files name their run; a file named like one, which an agent or a person put on the task, is no run's. */
