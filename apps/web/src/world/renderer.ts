@@ -17,7 +17,7 @@ import {
   type ViewportSize,
 } from './camera';
 import { DisplayRunPool, WorldArtLibrary, type WorldArtStats } from './art-runtime';
-import { residentStandsStill, residentWalkSpeed } from './art';
+import { residentStandsStill, residentWalkSpeed, type ArtIndex } from './art';
 import { bakeChunkCanvas, buildTileLookup, type BakedChunk } from './chunk-baker';
 import { buildChunkGrid, ChunkLruCache, cullVisibleChunks, type ChunkCoord, type ChunkGrid } from './chunks';
 import {
@@ -71,7 +71,7 @@ import {
   type ResidentSimulation,
 } from './residents';
 import { renderResidentsFallback2D, renderResidentsToPixi, type ResidentArtContext } from './residents-renderer';
-import { boatCargoMaxOf } from './harbour';
+import { boatCargoMaxOf, type HarbourPlan } from './harbour';
 import { harbourArtReady } from './harbour-renderer';
 import { PlantRenderer, type PlantStats } from './plant-renderer';
 import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas, smoothPixelsToCanvas, startSmoothChunkBake, type SmoothChunkBake } from './smooth-terrain-baker';
@@ -229,6 +229,7 @@ export class IsometricWorldEngine {
   private readonly drawnResidentIds = new Set<string>();
   /* Artist pictures and sheets from the pack's art folder; empty until art-index.json loads. */
   private artLibrary: WorldArtLibrary = WorldArtLibrary.none();
+  private harbourArtCheck: Readonly<{ index: ArtIndex | null; plan: HarbourPlan; ready: boolean }> | null = null;
   private buildingArtPool: DisplayRunPool | null = null;
   private residentArtPool: DisplayRunPool | null = null;
   private loopArtPool: DisplayRunPool | null = null;
@@ -543,6 +544,16 @@ export class IsometricWorldEngine {
   private loopArtContext(): LoopArtContext | null {
     if (!this.loopArtPool) return null;
     return { library: this.artLibrary, pool: this.loopArtPool, variants: this.buildingVariants };
+  }
+
+  /* Whether the art folder holds every file this harbour needs, worked out again only when the index or plan changes. */
+  private harbourArtIn(plan: HarbourPlan): boolean {
+    const index = this.artLibrary.index;
+    const known = this.harbourArtCheck;
+    if (known && known.index === index && known.plan === plan) return known.ready;
+    const ready = harbourArtReady(this.pack, index, plan, boatCargoMaxOf(this.pack));
+    this.harbourArtCheck = { index, plan, ready };
+    return ready;
   }
 
   /* How much of the city is drawn from artist files instead of placeholders. */
@@ -1332,7 +1343,7 @@ export class IsometricWorldEngine {
       this.residentSim.standsStillOf = r => residentStandsStill(this.pack, this.artLibrary.index, r);
       /* The harbour shows, and its carriers walk from the yard, once its art is in (#2006). */
       const harbour = this.residentSim.harbour;
-      if (harbour) harbour.shown = harbourArtReady(this.pack, this.artLibrary.index, harbour.plan, boatCargoMaxOf(this.pack));
+      if (harbour) harbour.shown = this.harbourArtIn(harbour.plan);
       stepResidentSimulation(this.residentSim, dtMs / 1000);
       residentsAnimated = true;
       if (this.pack.art) {
