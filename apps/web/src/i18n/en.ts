@@ -1320,6 +1320,14 @@ export const en = {
     keepsBackups: 'Keeps company backups',
     keepsNoBackups: 'Keeps no company backups',
     backupsHeld: (n: number) => `Backups held: ${n}`,
+    filesArea: 'Company files',
+    filesAreaRoom: 'Room for them',
+    filesAreaLabel: (host: string) => `Room for the company's files on ${host}`,
+    filesAreaDefault: (gb: string) => `Default, ${gb} GB`,
+    filesAreaNone: 'None',
+    filesAreaSize: (gb: string) => `${gb} GB`,
+    filesAreaTake: 'They take',
+    filesAreaFree: 'Free on its disk',
     /* Its nodes are of another build than the one the server's nodes are: here is a list of theirs, or olderBuild for
        nodes from before builds. */
     otherBuild: 'Other build',
