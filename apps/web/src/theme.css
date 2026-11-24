@@ -372,19 +372,13 @@ select:disabled { opacity: .55; }
   background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 16px 40px var(--shadow);
 }
 .dialog:focus { outline: none; }
-/* The layer over the page while the server is away (#1938): the book's dialog on its dimmed layer, above every other layer, since
-   nothing under it works. It lies over the page, so nothing under it moves. The ring turns only while a look is on its way,
-   and stands still as a quarter arc where motion is reduced. */
-.conn-layer { z-index: 60; }
-.dialog.conn { inline-size: min(440px, 100%); }
-.dialog.conn > :is(h2, p) { margin: 0; min-inline-size: 0; overflow-wrap: anywhere; }
-.dialog.conn > h2 { font-size: 18px; }
-.dialog.conn > p { font-size: 14px; }
-.dialog.conn > p.conn-long { font-size: 13px; }
-.conn-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
-.conn-try { flex: 1 1 auto; min-inline-size: 0; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
-.conn-foot > .entry-actions { flex: 0 0 auto; inline-size: auto; margin-inline-start: auto; }
-@media (prefers-reduced-motion: reduce) { .conn-try .spinner { animation: none; } }
+/* The layer over the page while the server is away (#1938, #2049): only the Hornhoof logo and one line, centred on a plain
+   background above every other layer while the page under it stays where it stands. */
+.conn-layer { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: var(--bg); }
+.conn-layer:focus { outline: none; }
+.conn { display: grid; justify-items: center; gap: 16px; max-inline-size: min(100%, 60ch); text-align: center; }
+.conn-mark { display: block; width: 48px; height: 48px; }
+.conn > p { margin: 0; color: var(--muted); font: 400 14px/1.45 var(--f-body); overflow-wrap: anywhere; }
 .dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .first-contact > *, .first-contact h2 { min-inline-size: 0; overflow-wrap: anywhere; }
 .versions-check { display: flex; align-items: center; gap: 10px; font-size: 13px; }
