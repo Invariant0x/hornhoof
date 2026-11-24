@@ -36,7 +36,7 @@ async function openEgyptMap(page: Page, width: number, height: number): Promise<
 }
 
 /* The dark pixel look's tokens put on the page the way the skin store puts on any look, while the world stays: the
-   values Mouse's upload test gives an uploaded theme (#1960), before a theme of its own can carry a world on this turn. */
+   values the upload test of #1960 gives an uploaded theme, before a theme of its own can carry a world on this turn. */
 async function putOnPixelLook(page: Page): Promise<void> {
   const look = builtinSkin('pixel')!;
   const extra = extraDeclarations(look);
