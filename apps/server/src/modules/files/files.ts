@@ -50,7 +50,7 @@ export async function recordFile(tx: Tx, kept: StoredFile, machineId: string | n
    keeps under the company secret. A file this machine lacks is asked of the machines that hold it. Each call names the
    database, or the transaction, it reads and records in. */
 export class Files {
-  private keyRead: Promise<Buffer> | null = null;
+  private keyKnown: { enc: string; key: Buffer } | null = null;
   private ownStore: FileStore | null = null;
   private ownDir: string | null = null;
   private machine: string | null = null;
@@ -68,16 +68,10 @@ export class Files {
     return this.ownStore;
   }
 
-  /* The store key, made once by the first app that needs it: two at once make one, as the second finds the first's. */
-  key(db: Tx): Promise<Buffer> {
-    this.keyRead ??= this.readKey(db).catch(err => {
-      this.keyRead = null;
-      throw err;
-    });
-    return this.keyRead;
-  }
-
-  private async readKey(db: Tx): Promise<Buffer> {
+  /* The store key, made once by the first app that needs it: two at once make one, as the second finds the first's. It
+     is read each time in the database or transaction asked, as one made in a transaction that is rolled back is gone;
+     only the opening of the text found is kept. */
+  async key(db: Tx): Promise<Buffer> {
     const { config } = this;
     const read = async () => rowsOf<{ key_enc: string }>(await db.execute(sql`SELECT key_enc FROM net.file_key`))[0]?.key_enc;
     let enc = await read();
@@ -85,8 +79,10 @@ export class Files {
       await db.execute(sql`INSERT INTO net.file_key (key_enc) VALUES (${encryptSecret(randomBytes(32).toString('base64'), config.secret)}) ON CONFLICT DO NOTHING`);
       enc = await read();
     }
+    if (this.keyKnown?.enc === enc) return this.keyKnown.key;
     const key = Buffer.from(decryptSecret(enc!, config.secret), 'base64');
     if (key.length !== 32) throw new Error('The store key the database keeps is not 32 bytes.');
+    this.keyKnown = { enc: enc!, key };
     return key;
   }
 

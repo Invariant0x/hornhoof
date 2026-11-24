@@ -153,3 +153,21 @@ describe('the files of an installation from before the store', () => {
     expect((await fileBytes(ctx, elsewhere.id)).equals(elsewhere.bytes)).toBe(true);
   });
 });
+
+describe('the store key', () => {
+  it('is never used once the transaction that made it was rolled back', async () => {
+    const db = await createTestDb();
+    const filesDir = folder();
+    const config = { secret: TEST_SECRET, filesDir } as Config;
+    const files = new Files(config);
+    await expect(
+      db.transaction(async tx => {
+        await files.putBytes(tx as unknown as FilesDb, Buffer.from('a file of a rolled back transaction'));
+        throw new Error('rolled back');
+      }),
+    ).rejects.toThrow('rolled back');
+    const kept = await files.putBytes(db, Buffer.from('the bytes'));
+    /* Another app of the same database, as a copy that leads later, opens it with the key the database keeps. */
+    expect((await new Files({ ...config }).bytes(db, kept.sha256)).toString()).toBe('the bytes');
+  });
+});

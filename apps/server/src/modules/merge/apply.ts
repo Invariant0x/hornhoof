@@ -136,7 +136,8 @@ export class UnitWriter {
   /* A file of a source from before the store comes with its bytes, from the source while it is there: the row as it is
      written, its text masked as any, carries them until they go into this side's store. */
   private async withOldBytes(t: TableFacts, unit: Unit, row: Row): Promise<void> {
-    if (t.name !== 'attachments' || row.sha256 != null) {
+    if (t.name !== 'attachments') return;
+    if (row.sha256 != null) {
       delete row.bytes;
       return;
     }
