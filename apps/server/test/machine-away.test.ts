@@ -1,8 +1,14 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agents, jobs, machines, nodeConnections, nodes, people, requests, waitNotices } from '../src/db/schema.js';
+import { encryptSecret } from '../src/crypto/secrets.js';
+import { hashToken } from '../src/crypto/tokens.js';
+import { agents, companies, departments, jobs, machines, nodeConnections, nodes, people, requests, sessions, turns, waitNotices } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { serverStarted } from '../src/modules/nodes/connections.js';
+import { releaseRound, uncheckedInRelease } from '../src/modules/tasks/releases.js';
+import { closeIdleTurns } from '../src/modules/tasks/turn-ends.js';
+import { integrationTarget } from '../src/modules/tasks/turn-integration.js';
+import { GitHubRateLimited } from '../src/modules/testruns/github-limit.js';
 import { aclCompany, type AclCompany } from './agent-view-company.js';
 import { as } from './helpers.js';
 
@@ -19,7 +25,7 @@ type Card = {
   agents: number;
   important: { name: string; kind: string }[];
 };
-type Waiting = { machinesAway?: Card[]; counts: { total: number; byPerson: Record<string, number> } };
+type Waiting = { machinesAway?: Card[]; githubLimits?: { repository: string; resetAt: number | null }[]; counts: { total: number; byPerson: Record<string, number> } };
 
 afterEach(() => { vi.useRealTimers(); });
 const at = (time: Date) => { vi.useFakeTimers({ toFake: ['Date'], now: time }); };
@@ -52,6 +58,135 @@ async function waiting(c: AclCompany, token: string): Promise<Waiting> {
   return answer.json();
 }
 const cardsOf = async (c: AclCompany, token: string) => (await waiting(c, token)).machinesAway ?? [];
+
+it('shows a repeated GitHub limit in Failures to the company owner without creating a person wait', async () => {
+  const c = await world();
+  const repo = { url: 'https://github.com/acme/shop.git', token: 'fixture-token' };
+  await c.db.update(departments).set({ repoUrl: repo.url, repoTokenEnc: encryptSecret(repo.token, c.app.ctx.config.secret) }).where(eq(departments.id, c.dev.id));
+  const limit = { remaining: 0 as const, resetAt: +after(0) };
+  c.app.ctx.githubLimits.refused(repo, limit);
+  expect((await waiting(c, c.tokens.ceo)).githubLimits).toEqual([]);
+  c.app.ctx.githubLimits.refused(repo, limit);
+  const owner = await waiting(c, c.tokens.ceo);
+  expect(owner.githubLimits).toEqual([{ repository: 'acme/shop', resetAt: limit.resetAt }]);
+  expect(owner.counts.total).toBe(0);
+  expect((await waiting(c, c.tokens.bob)).githubLimits).toEqual([]);
+});
+
+it('keeps GitHub limit cards and SSE refreshes isolated per company and repository token', async () => {
+  const c = await world();
+  const repoUrl = 'https://github.com/acme/private-shop.git';
+  await c.db.update(departments).set({ repoUrl, repoTokenEnc: encryptSecret('acme-token', c.app.ctx.config.secret) }).where(eq(departments.id, c.dev.id));
+  const [other] = await c.db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+  const [otherOwner] = await c.db.insert(people).values({ companyId: other!.id, name: 'Rita', email: 'rita@other.com', status: 'active', isOwner: true, scopeKind: 'company' }).returning();
+  const otherToken = 'other-company-owner-session';
+  await c.db.insert(sessions).values({ personId: otherOwner!.id, tokenHash: hashToken(otherToken), expiresAt: after(120 * MINUTE) });
+  await c.db.insert(departments).values([
+    { companyId: other!.id, name: 'Probe With Token', roleCode: 'PRB', position: 1, repoUrl, repoTokenEnc: encryptSecret('other-token', c.app.ctx.config.secret) },
+    { companyId: other!.id, name: 'Probe Public', roleCode: 'PUB', position: 2, repoUrl },
+  ]);
+
+  const published = vi.spyOn(c.app.ctx.bus, 'publish');
+  const limit = { remaining: 0 as const, resetAt: +after(0) };
+  c.app.ctx.githubLimits.refused({ url: repoUrl, token: 'acme-token' }, limit);
+  c.app.ctx.githubLimits.refused({ url: repoUrl, token: 'acme-token' }, limit);
+
+  await vi.waitFor(() => expect(published).toHaveBeenCalledWith(c.companyId, expect.objectContaining({ type: 'requests' })));
+  expect(published.mock.calls.filter(([companyId]) => companyId === other!.id)).toEqual([]);
+  expect((await waiting(c, c.tokens.ceo)).githubLimits).toEqual([{ repository: 'acme/private-shop', resetAt: limit.resetAt }]);
+  expect((await waiting(c, otherToken)).githubLimits).toEqual([]);
+
+  published.mockClear();
+  at(after(60 * MINUTE));
+  c.app.ctx.clock = () => +after(60 * MINUTE);
+  c.app.ctx.githubLimits.expire();
+  await vi.waitFor(() => expect(published).toHaveBeenCalledWith(c.companyId, expect.objectContaining({ type: 'requests' })));
+  expect(published.mock.calls.filter(([companyId]) => companyId === other!.id)).toEqual([]);
+  expect((await waiting(c, c.tokens.ceo)).githubLimits).toEqual([]);
+});
+
+it('isolates tokenless public GitHub repository limit cards and SSE refreshes per company', async () => {
+  const c = await world();
+  const repoUrl = 'https://github.com/acme/public-shop.git';
+  await c.db.update(departments).set({ repoUrl, repoTokenEnc: null }).where(eq(departments.id, c.dev.id));
+  const [other] = await c.db.insert(companies).values({ name: 'Other Public', singleton: false }).returning();
+  const [otherOwner] = await c.db.insert(people).values({ companyId: other!.id, name: 'Nina', email: 'nina@other.com', status: 'active', isOwner: true, scopeKind: 'company' }).returning();
+  const otherToken = 'other-public-owner-session';
+  await c.db.insert(sessions).values({ personId: otherOwner!.id, tokenHash: hashToken(otherToken), expiresAt: after(120 * MINUTE) });
+  await c.db.insert(departments).values([
+    { companyId: other!.id, name: 'Public Mirror', roleCode: 'PUB', position: 1, repoUrl, repoTokenEnc: null },
+  ]);
+
+  const target = await integrationTarget(c.app.ctx, { companyId: c.companyId, productId: null, departmentId: c.dev.id });
+  expect(target).not.toBeNull();
+  const published = vi.spyOn(c.app.ctx.bus, 'publish');
+  const limit = { remaining: 0 as const, resetAt: +after(0) };
+  c.app.ctx.githubLimits.refused(target!.repo, limit);
+  c.app.ctx.githubLimits.refused(target!.repo, limit);
+
+  await vi.waitFor(() => expect(published).toHaveBeenCalledWith(c.companyId, expect.objectContaining({ type: 'requests' })));
+  expect(published.mock.calls.filter(([companyId]) => companyId === other!.id)).toEqual([]);
+  expect((await waiting(c, c.tokens.ceo)).githubLimits).toEqual([{ repository: 'acme/public-shop', resetAt: limit.resetAt }]);
+  expect((await waiting(c, otherToken)).githubLimits).toEqual([]);
+});
+
+it('skips corrupt encrypted repository tokens without failing requests or other companies SSE refreshes', async () => {
+  const c = await world();
+  const repoUrl = 'https://github.com/acme/resilient-shop.git';
+  await c.db.update(departments).set({ repoUrl, repoTokenEnc: encryptSecret('good-token', c.app.ctx.config.secret) }).where(eq(departments.id, c.dev.id));
+  const [other] = await c.db.insert(companies).values({ name: 'Broken Secret Co', singleton: false }).returning();
+  const [otherOwner] = await c.db.insert(people).values({ companyId: other!.id, name: 'Mila', email: 'mila@broken.test', status: 'active', isOwner: true, scopeKind: 'company' }).returning();
+  const otherToken = 'broken-secret-owner-session';
+  await c.db.insert(sessions).values({ personId: otherOwner!.id, tokenHash: hashToken(otherToken), expiresAt: after(120 * MINUTE) });
+  await c.db.insert(departments).values([
+    { companyId: other!.id, name: 'Corrupt Repo', roleCode: 'BAD', position: 1, repoUrl, repoTokenEnc: 'corrupt-ciphertext-fixture' },
+  ]);
+
+  const published = vi.spyOn(c.app.ctx.bus, 'publish');
+  const limit = { remaining: 0 as const, resetAt: +after(0) };
+  c.app.ctx.githubLimits.refused({ url: repoUrl, token: 'good-token' }, limit);
+  c.app.ctx.githubLimits.refused({ url: repoUrl, token: 'good-token' }, limit);
+
+  await vi.waitFor(() => expect(published).toHaveBeenCalledWith(c.companyId, expect.objectContaining({ type: 'requests' })));
+  expect((await waiting(c, c.tokens.ceo)).githubLimits).toEqual([{ repository: 'acme/resilient-shop', resetAt: limit.resetAt }]);
+  expect((await waiting(c, otherToken)).githubLimits).toEqual([]);
+});
+
+it('keeps background turn checks quiet on GitHub rate limits and still logs unexpected errors', async () => {
+  const c = await world();
+  const MAIN = 'a'.repeat(40);
+  const AHEAD = 'b'.repeat(40);
+  await c.db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git', repoBranch: 'main' }).where(eq(departments.id, c.dev.id));
+  const [devTurn] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 7, goal: 'Ship.', status: 'open', openedAt: after(0), baseVersion: 'v1.0.0', baseCommit: MAIN }).returning();
+  const limit = new GitHubRateLimited({ remaining: 0, resetAt: +after(60 * MINUTE) });
+  const errors = vi.spyOn(c.app.ctx.log, 'error');
+  const limited = {
+    ...c.app.ctx,
+    readBranches: async () => ({ heads: { main: MAIN, 'turn-7': AHEAD } }),
+    readTags: async () => ({ tags: { 'v1.1.0': AHEAD } }),
+    readCommit: async (_repo: unknown, ref: { branch: string } | { task: number }) => {
+      const branch = 'branch' in ref ? ref.branch : `task-${ref.task}`;
+      return { branch, commitSha: branch === 'main' ? MAIN : AHEAD };
+    },
+    readMerged: async () => { throw limit; },
+  };
+  await closeIdleTurns(limited);
+  await releaseRound(limited);
+  expect(await uncheckedInRelease(limited, { companyId: c.companyId, productId: null, departmentId: c.dev.id }, AHEAD)).toBeNull();
+  expect(errors).not.toHaveBeenCalled();
+  expect((await c.db.select().from(turns).where(eq(turns.id, devTurn!.id)))[0]).toMatchObject({ status: 'open' });
+
+  await releaseRound({ ...limited, readTags: async () => { throw new Error('tags failed'); } });
+  expect(errors).toHaveBeenCalledTimes(1);
+
+  await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.sales.id, number: 8, goal: 'Close.', status: 'open', openedAt: after(0) });
+  vi.spyOn(c.app.ctx.bus, 'publish').mockImplementationOnce(() => { throw new Error('bus failed'); });
+  await closeIdleTurns(limited);
+  expect(errors).toHaveBeenCalledTimes(2);
+
+  const failingDb = { select: () => { throw new Error('db failed'); } } as unknown as typeof c.db;
+  await expect(uncheckedInRelease({ ...limited, db: failingDb }, { companyId: c.companyId, productId: null, departmentId: c.dev.id }, AHEAD)).rejects.toThrow('db failed');
+});
 
 describe('a machine with agents that has gone away', () => {
   it('shows nothing at 4:59, and at 5:00 one card to its owner and to the CEO, with no agent asked', async () => {

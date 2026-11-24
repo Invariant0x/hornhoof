@@ -12,12 +12,14 @@ import { hideTaskSecret } from './hide-secret.js';
 import { departmentsHad, runsDepartment } from '../../auth/departments.js';
 import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actorOf, requireCompanyScope, requirePerson, viaOrchestrator, type Person } from '../../auth/session.js';
+import { decryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, people, requests, tasks, taskWaits, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { copySchemaFailures } from '../copies/schema-failures.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
 import { deptName } from '../departments/templates.js';
+import { repoScopeOf } from '../testruns/github-limit.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { resolveStuck } from './stuck.js';
 import { answer, cancel, closeTask, createTask } from './engine.js';
@@ -199,6 +201,23 @@ function proposalView({ proposal: p, ownerPersonId, canAnswer, decidedBy }: Deci
 function machineCards(me: Person, person: string | undefined, cards: Decisions['machines']) {
   return cards.filter(card => !person || person === me.id || person === card.owner?.id)
     .map(card => ({ ...card, since: card.since.toISOString(), back: card.back?.toISOString() ?? null }));
+}
+
+async function companyGitHubRepos(ctx: Ctx, companyId: string) {
+  const rows = await ctx.db
+    .select({ url: departments.repoUrl, tokenEnc: departments.repoTokenEnc })
+    .from(departments)
+    .where(and(eq(departments.companyId, companyId), isNotNull(departments.repoUrl)));
+  const decrypt = (enc: string) => decryptSecret(enc, ctx.config.secret);
+  return rows.flatMap(row => {
+    const scoped = repoScopeOf(row, companyId, decrypt);
+    return scoped ? [scoped] : [];
+  });
+}
+
+async function githubLimitCards(me: Person, person: string | undefined, ctx: Ctx) {
+  if (me.via || !me.isOwner || (person && person !== me.id) || !ctx.githubLimits.hasCards()) return [];
+  return ctx.githubLimits.cards(await companyGitHubRepos(ctx, me.companyId));
 }
 
 function requestViews(mine: Decisions['requests'], lines: Awaited<ReturnType<typeof linesFor>>, commits: (string | null)[], pictures: Map<string, string[]>, names: Map<string, string>, explaining: Set<string>, places: Places) {
@@ -533,6 +552,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       machinesAway: machineCards(me, person, decisions.machines),
       copySchemaFailures: await copySchemaFailures(ctx, me, person),
       machinesLow: decisions.low.filter(card => !person || person === me.id || person === card.owner?.id),
+      githubLimits: await githubLimitCards(me, person, ctx),
       counts: decisions.counts,
     };
   });

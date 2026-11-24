@@ -5,7 +5,7 @@ import type { TrackerPlace } from '../routes';
 import { searchTasks } from '../task-search';
 import { placeName, useGoals, usePipelines, useTaskDepartments, useTasks, useWaitCards } from '../tasks';
 import { doerOf, filterTasks, graphPath, graphTree, mine, personWaited, pipelineTree, pruneGoals, shownDecisions, TRACKER_VIEWS, waitingOn, waitingOnPeople, waitsCount, withoutRequestWaits, workingNow, BOARD_STATUSES, boardStatus, type Crumb, type DecisionsOf, type GraphNode, type ShownDecisions, type WorkFilter } from '../tracker';
-import type { Decisions, Department, Me, Org, PersonRef, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard, WaitingRequest } from '../types';
+import type { Decisions, Department, GitHubLimitCard, Me, Org, PersonRef, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard, WaitingRequest } from '../types';
 import { CEO_DECIDES, DecidedByNote } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
@@ -27,6 +27,22 @@ import { cardWords, WaitCards } from '../ui/WaitCards';
 import { WaitingQueue, type WaitQueueEntry } from '../ui/WaitingQueue';
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { sayIf } from '@hornhoof/protocol';
+
+const failureCards = (decisions: Decisions | undefined): GitHubLimitCard[] => decisions?.githubLimits ?? [];
+
+function GitHubLimitCards({ limits }: { limits: readonly GitHubLimitCard[] }) {
+  const t = useT();
+  return (
+    <>
+      {limits.map(({ repository, resetAt }) => (
+        <section className="machine-away" key={repository} aria-label={t.tasks.githubLimit(repository)}>
+          <h3 dir="auto">{t.tasks.githubLimit(repository)}</h3>
+          <p>{resetAt === null ? t.tasks.githubLimitUnknown : t.tasks.githubLimitRetry(new Date(resetAt).toISOString().slice(11, 16))}</p>
+        </section>
+      ))}
+    </>
+  );
+}
 
 type Props = {
   me: Me;
@@ -632,6 +648,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const machinesAway = decisions?.machinesAway ?? [];
   const copySchemaFailures = schemaFailures(decisions);
   const machinesLow = lowMachines(decisions);
+  const githubLimits = failureCards(decisions);
   const pipeline = place.pipeline ? pipelines.find(p => p.id === place.pipeline) ?? null : null;
   /* The department where the person is: its work, or its goals. */
   const departmentId = section.kind === 'department' ? section.id : section.kind === 'goals' ? place.department : undefined;
@@ -773,7 +790,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
         counts={{
           waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf)), waitsOnWho, keptShown(kept, decisionsOf)),
           people: peopleCount(decisions, waitsOnPeople, company),
-          failures: failures.length + machinesAway.filter(machine => !machine.back).length + copySchemaFailures.length + machinesLow.length,
+          failures: failures.length + machinesAway.filter(machine => !machine.back).length + copySchemaFailures.length + machinesLow.length + githubLimits.length,
           mine: own.tasks.length,
           working: working.length,
         }}
@@ -845,6 +862,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
                   <MachineAway machines={machinesAway} />
                   <CopySchemaFailures cards={copySchemaFailures} />
                   <MachineLow machines={machinesLow} />
+                  <GitHubLimitCards limits={githubLimits} />
                 </>
               )}
               {makeHere}

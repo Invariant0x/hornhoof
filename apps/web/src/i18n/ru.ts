@@ -2043,6 +2043,9 @@ export const ru: Messages = {
     machineAwayKinds: { orchestrator: 'оркестратор', head: 'руководитель' },
     machineAwayImportant: (names: string) => `Среди них: ${names}.`,
     machineAwayDo: 'Что сделать: включите ее и поставьте на зарядку, войдите в учетную запись, проверьте, что Docker запустился.',
+    githubLimit: (repository: string) => `Лимит запросов GitHub для ${repository} исчерпан`,
+    githubLimitRetry: (time: string) => `Повторите действие после ${time} UTC.`,
+    githubLimitUnknown: 'GitHub не сообщил время сброса. Повторите действие позже.',
     machineBack: (host: string, at: string) => `Машина ${host} вернулась: ${at}.`,
     machineLow: (host, owner) => (owner ? `На машине ${host} (${owner}) мало места на диске` : `На машине ${host} мало места на диске`),
     machineLowFree: (free, total, need) => `Свободно: ${free} ГБ из ${total} ГБ. Нужно не меньше ${need} ГБ.`,
@@ -3192,6 +3195,10 @@ export const ru: Messages = {
     no_head: 'У этого отдела еще нет руководителя. Сначала наймите его.',
     switched_off: 'Этот сотрудник сейчас выключен. Сначала включите его на схеме отдела.',
     repo_invalid: 'Нужен адрес https без имени и токена внутри, простое имя ветки, а у автора имя в одну строку и полная почта.',
+    github_rate_limited: (time: string | null) => time
+      ? `GitHub не ответил. Лимит запросов аккаунта исчерпан до ${time} UTC. Повторите после этого времени.`
+      : 'GitHub не ответил. Лимит запросов аккаунта исчерпан. Повторите позже.',
+    commit_history_unavailable: 'Репозиторий не подтвердил историю коммитов. Повторите попытку.',
     repo_release_workflow_invalid: 'Назовите релизный workflow по пути к его файлу, например .github/workflows/release.yml.',
     repo_command_invalid: 'Если полная команда тестов называет свою часть через {part}, она должна назвать и число частей через {parts}.',
     repo_folder_taken: 'У другого репозитория этого отдела адрес кончается тем же именем. Агенты держат каждый репозиторий в папке с этим именем, поэтому в одном отделе не может быть обоих.',
