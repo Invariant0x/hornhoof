@@ -24,7 +24,7 @@ describe('message participants', () => {
     const { app, db, companyId, person, orchestrator, head, worker } = await company();
     for (const target of [orchestrator, head, worker]) {
       const event = await appendEvent(app.ctx, { companyId, agentId: target.id, kind: 'message', personId: person.id, data: { text: 'Hornhoof: this is still a person speaking.' } });
-      expect(event.message).toMatchObject({ direction: 'in', from: { kind: 'person', id: person.id, name: 'Ivan', role: { en: 'CEO', ru: 'CEO' } }, to: { kind: 'agent', id: target.id, agentKind: target.kind } });
+      expect(event.message).toMatchObject({ direction: 'in', from: { kind: 'person', id: person.id, name: 'Ivan', role: { en: 'CEO' } }, to: { kind: 'agent', id: target.id, agentKind: target.kind } });
       await db.update(people).set({ name: 'Ivan renamed', title: 'Owner' }).where(eq(people.id, person.id));
       const [loaded] = await listEvents(db, target.id, event.seq - 1);
       expect(loaded!.message).toEqual(event.message);

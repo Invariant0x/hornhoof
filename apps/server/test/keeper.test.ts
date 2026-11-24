@@ -280,7 +280,7 @@ describe('the keeper', () => {
     expect(page.headers['retry-after']).toBe('10');
     expect(page.headers['content-type']).toBe('text/plain; charset=utf-8');
     expect(page.body).toContain('Hornhoof is installing an update. Try again in a few minutes.');
-    expect(page.body).toContain('Hornhoof ставит обновление. Попробуйте через несколько минут.');
+    expect(page.body).not.toContain('ставит обновление');
 
     statusSays(dir, 'done', 'finished');
     await until(() => keeper.mode() === 'lead');

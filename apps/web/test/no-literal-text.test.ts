@@ -54,6 +54,35 @@ describe('no text of a screen outside the language files', () => {
   });
 });
 
+/* Where a language's own words are kept: the language files of every domain. */
+const LANGUAGE_FILES = /^i18n\/|^world\/pack-locales\/|^world-packs\/[^/]+\/locales\/|^world-packs\/viewer-locales\//;
+
+/* A string of code written in a script other than Latin is a text in some language that sits outside its file. */
+function otherScripts(path: string, text: string): string[] {
+  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, path.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const letters = /[\p{Script=Cyrillic}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Arabic}\p{Script=Devanagari}]/u;
+  const found: string[] = [];
+  const visit = (node: ts.Node): void => {
+    const own = ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node) || ts.isJsxText(node) ? node.text : '';
+    if (own && letters.test(own)) found.push(own.trim().slice(0, 60));
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+describe('no word of another script outside the language files', () => {
+  it('finds a string or a text between tags written in Cyrillic', () => {
+    expect(otherScripts('a.tsx', "const a = 'Привет'; const b = <p>Мир</p>; // комментарий")).toEqual(['Привет', 'Мир']);
+    expect(otherScripts('a.ts', 'const a = `x ${1} Тест`;')).toEqual(['Тест']);
+  });
+
+  it('holds in every screen and module, the demo pages aside', () => {
+    const wrong = FILES.filter(file => !LANGUAGE_FILES.test(file.path) && !DEMO_PAGES.includes(file.path)).flatMap(file => otherScripts(file.path, file.text).map(text => `${file.path}: ${text}`));
+    expect(wrong).toEqual([]);
+  });
+});
+
 /* A language is a file and a line of the registry: code that names one, or branches on it, has to be changed to add the next. */
 describe('no code that names a language', () => {
   const ids = [...LOCALES, ...PSEUDO_LOCALES].map(locale => locale.id);

@@ -13,10 +13,9 @@ export const KEEPER_PORTS = { peer: 7070, peerApp: 7071, front: 7080, linkHttp: 
 const MAINTENANCE_JSON = JSON.stringify({
   error: { code: 'unavailable', message: 'Hornhoof is installing an update and takes no changes until it ends.', reason: 'maintenance' },
 });
-const MAINTENANCE_TEXT = 'Hornhoof is installing an update. Try again in a few minutes.\nHornhoof ставит обновление. Попробуйте через несколько минут.\n';
 
 export function maintenanceAnswer(req: http.IncomingMessage): Refusal {
-  return updatingAnswer(req, MAINTENANCE_JSON, MAINTENANCE_TEXT);
+  return updatingAnswer(req, MAINTENANCE_JSON, 'maintenance');
 }
 
 /* The id front stamped a tool call with, when the request has one. */

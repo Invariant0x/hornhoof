@@ -132,7 +132,11 @@ describe('the page of a hop with no server behind it', () => {
       expect(answer.headers['Content-Type']).toBe('text/plain; charset=utf-8');
     }
     expect(startingAnswer(fake({}, '/')).body).toContain('Hornhoof is starting.');
-    expect(maintenanceAnswer(fake({}, '/')).body).toContain('Hornhoof ставит обновление.');
+    expect(maintenanceAnswer(fake({}, '/')).body).toBe('Hornhoof is installing an update. Try again in a few minutes.\n');
+    /* A visitor who asks for another language the product ships reads it under the English. */
+    expect(maintenanceAnswer(fake({ 'accept-language': 'ru-RU,ru;q=0.9' }, '/')).body).toBe('Hornhoof is installing an update. Try again in a few minutes.\nHornhoof ставит обновление. Попробуйте через несколько минут.\n');
+    expect(startingAnswer(fake({ 'accept-language': 'ru' }, '/')).body).toContain('Hornhoof запускается.');
+    expect(heldAnswer(fake({ 'accept-language': 'de' }, '/', 'POST')).body).not.toMatch(/[А-Яа-я]/);
   });
 });
 

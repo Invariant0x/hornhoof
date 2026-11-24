@@ -1,4 +1,4 @@
-import { LOCALES, SOURCE_LOCALE, type Texts } from '@hornhoof/protocol';
+import { LOCALES, localeInfo, SOURCE_LOCALE, type Texts } from '@hornhoof/protocol';
 import type { WorldPackBehaviorSpec, WorldSkillChannelPolicy, WorldSkillKind } from '@hornhoof/protocol/world';
 
 /* What a world pack says in one language, in a file named by the language's id under locales/<pack>/: its name, what its
@@ -6,15 +6,24 @@ import type { WorldPackBehaviorSpec, WorldSkillChannelPolicy, WorldSkillKind } f
    skill gives an agent and the channels its voice may use, stay in the pack's own file and in English. */
 export type PackWords = {
   label: string;
-  skills: Readonly<Record<string, { title: string; description: string; voice?: { sample: string; salutations: readonly string[] } }>>;
+  skills: Readonly<Record<string, { title: string; description: string; voice?: { sample: string; salutations: readonly string[]; example?: string } }>>;
   ruler: string;
   employees: readonly string[];
 };
 
-/* A pack without its words: what a pack is, whatever language it is read in. */
+/* What a voice says in one language, to show an agent how to address a person: the language's name in English, the short
+   form of address, and a longer sentence that begins with it where the pack has one. */
+export type VoiceExample = Readonly<{ language: string; name: string; sample: string; example?: string }>;
+
+/* The examples as a phrase of the rule an agent is given: "Yes, my lord" ("Yes, my lord, ...") in English or ... in Russian. */
+export const inLanguages = (examples: readonly VoiceExample[]): string =>
+  examples.map(own => `"${own.sample}"${own.example ? ` ("${own.example}")` : ''} in ${own.name}`).join(' or ');
+
+/* A pack without its words: what a pack is, whatever language it is read in. The rule a voice skill gives an agent is
+   English, with the examples of each language's words put into it. */
 export type PackBase = Readonly<{
   id: string;
-  skills: readonly Readonly<{ id: string; kind: WorldSkillKind; body: string; channels?: WorldSkillChannelPolicy }>[];
+  skills: readonly Readonly<{ id: string; kind: WorldSkillKind; body: string | ((examples: readonly VoiceExample[]) => string); channels?: WorldSkillChannelPolicy }>[];
 }>;
 
 /* Every language of the registry that has a file for the pack, which `load` brings by the language's id; English must have
@@ -41,6 +50,12 @@ const texts = (of: (words: PackWords) => string | undefined, words: Record<strin
   return out;
 };
 
+const voiceExamples = (skill: string, words: Record<string, PackWords>): VoiceExample[] =>
+  LOCALES.flatMap(({ id }) => {
+    const voice = words[id]?.skills[skill]?.voice;
+    return voice ? [{ language: id, name: localeInfo(id)!.english, sample: voice.sample, ...(voice.example ? { example: voice.example } : {}) }] : [];
+  });
+
 /* The pack as the server and its validators read it: a name in each language, its skills with theirs, and the crew's
    names by language. The words a voice takes in every language make one list, as a person may write in any of them. */
 export function composePack(base: PackBase, words: Record<string, PackWords>): WorldPackBehaviorSpec {
@@ -54,7 +69,7 @@ export function composePack(base: PackBase, words: Record<string, PackWords>): W
       kind: skill.kind,
       title: texts(own => own.skills[skill.id]?.title, words),
       description: texts(own => own.skills[skill.id]?.description, words),
-      body: skill.body,
+      body: typeof skill.body === 'string' ? skill.body : skill.body(voiceExamples(skill.id, words)),
       ...(skill.channels
         ? {
             voice: {

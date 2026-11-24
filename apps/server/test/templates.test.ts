@@ -664,7 +664,7 @@ describe('templates', () => {
       for (const doc of [agentsDoc, contributingDoc]) {
         expect(doc).toContain('templates/skills/dev-frontend-ui.md');
         expect(doc).toContain('(docs/style-book.md)');
-        expect(doc).toContain('apps/web/src/i18n/index.tsx');
+        expect(doc).toContain('packages/protocol/src/locales.ts');
         expect(doc).toMatch(/longest[\s\S]*shortest|shortest[\s\S]*longest/i);
         expect(doc).toMatch(/whole group|one group/i);
         expect(doc).toMatch(/explicit[\s\S]*browser default/i);

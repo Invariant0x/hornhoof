@@ -26,6 +26,14 @@ describe('no server code that names a language', () => {
     expect(wrong).toEqual([]);
   });
 
+  it('keeps every word of another script in a language file: no Russian, Chinese or Arabic text in server code', () => {
+    const letters = /[\p{Script=Cyrillic}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Arabic}\p{Script=Devanagari}]/u;
+    const wrong = FILES.filter(file => !/^locales\/|^modules\/world\/packs\/locales\//.test(file.path))
+      .flatMap(file => file.text.split('\n').map((line, at) => ({ path: file.path, at: at + 1, line })).filter(({ line }) => letters.test(line)))
+      .map(({ path, at, line }) => `${path}:${at}: ${line.trim().slice(0, 80)}`);
+    expect(wrong).toEqual([]);
+  });
+
   it('names no language where a column or a schema takes the languages', () => {
     const wrong = FILES.filter(file => /enum:\s*\[\s*['"]en['"]/.test(file.text) || /z\.enum\(\[\s*['"]en['"]/.test(file.text)).map(file => file.path);
     expect(wrong).toEqual([]);

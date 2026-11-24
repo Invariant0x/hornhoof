@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { LOCALES, SOURCE_LOCALE } from '@hornhoof/protocol';
@@ -23,7 +23,7 @@ const GIVEN = (...dirs: string[]): Set<string> =>
 const PLACES = [
   { name: 'the engine', given: GIVEN('world'), folder: 'world/pack-locales' },
   ...readdirSync(resolve(SRC, 'world-packs'), { withFileTypes: true })
-    .filter(entry => entry.isDirectory())
+    .filter(entry => entry.isDirectory() && existsSync(resolve(SRC, 'world-packs', entry.name, 'locales')))
     .map(entry => ({ name: `the ${entry.name} pack`, given: GIVEN(`world-packs/${entry.name}`), folder: `world-packs/${entry.name}/locales` })),
 ];
 
@@ -57,5 +57,16 @@ describe('the words of the world engine and its packs, a file per language', () 
     expect(packText(key, 'xx')).toBe(key);
     expect(packText('A text no file has', 'ru')).toBe('A text no file has');
     expect(packTextKeys()).toContain(key);
+  });
+
+  it('give the static map viewer every text of its English file in every language of the registry', () => {
+    const viewer = import.meta.glob<{ default: Record<string, string> }>('../src/world-packs/viewer-locales/*.ts', { eager: true });
+    const english = Object.keys(viewer['../src/world-packs/viewer-locales/en.ts']!.default).sort();
+    for (const { id } of LOCALES) {
+      const own = viewer[`../src/world-packs/viewer-locales/${id}.ts`]?.default;
+      expect(own, `viewer-locales/${id}.ts`).toBeDefined();
+      expect(Object.keys(own!).sort()).toEqual(english);
+      expect(Object.values(own!).filter(text => !text.trim())).toEqual([]);
+    }
   });
 });

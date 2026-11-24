@@ -1,7 +1,7 @@
 import http from 'node:http';
 import net from 'node:net';
 import { pipeline, type Duplex } from 'node:stream';
-import { awayEveryS, awayPage, type Away } from './away-page.js';
+import { awayEveryS, awayPage, awayText, type Away, type AwayText } from './away-page.js';
 
 export type Target = { host: string; port: number };
 export type Refusal = { status: number; headers: Record<string, string>; body: string };
@@ -72,10 +72,7 @@ const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'proxy-connection', 'te'
 const FORWARDING = new Set(['x-forwarded-for', 'x-forwarded-proto']);
 const UNDER_API_OR_MCP = /^\/(?:api\/|mcp(?:[/?]|$))/;
 const STARTING_JSON = JSON.stringify({ error: { code: 'unavailable', message: 'Hornhoof is starting.', reason: 'starting' } });
-const STARTING_TEXT =
-  'Hornhoof is starting. Try again in a few seconds.\nHornhoof запускается. Попробуйте еще раз через несколько секунд.\n';
 const HELD_JSON = JSON.stringify({ error: { code: 'unavailable', message: 'Hornhoof did not answer for a minute. Try again in a few seconds.', reason: 'starting' } });
-const HELD_TEXT = 'Hornhoof did not answer for a minute. Try again in a few seconds.\nHornhoof не ответил за минуту. Попробуйте еще раз через несколько секунд.\n';
 
 const ignore = (): void => {};
 
@@ -378,26 +375,26 @@ export function asksFor(req: http.IncomingMessage): Asks {
 /* What a hop answers when no server is behind it, to whoever asks: JSON for a program, the page of away-page.ts for a
    browser, the words for the rest. Never 404: the status says the server is missing, so the app tells it from a page that
    is. */
-export function awayAnswer(req: http.IncomingMessage, answer: { status: number; kind: Away; retryS: number; json: string; text: string }): Refusal {
+export function awayAnswer(req: http.IncomingMessage, answer: { status: number; kind: Away; retryS: number; json: string; text: AwayText }): Refusal {
   const headers = { 'Retry-After': String(answer.retryS) };
   switch (asksFor(req)) {
     case 'data': return { status: answer.status, headers: { ...headers, 'Content-Type': 'application/json' }, body: answer.json };
     case 'page': return { status: answer.status, headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', Vary: 'Accept-Language' }, body: awayPage(answer.kind, String(req.headers['accept-language'] ?? '')) };
-    case 'words': return { status: answer.status, headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }, body: answer.text };
+    case 'words': return { status: answer.status, headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }, body: awayText(answer.text, String(req.headers['accept-language'] ?? '')) };
   }
 }
 
 export function startingAnswer(req: http.IncomingMessage): Refusal {
-  return awayAnswer(req, { status: 502, kind: 'lost', retryS: 5, json: STARTING_JSON, text: STARTING_TEXT });
+  return awayAnswer(req, { status: 502, kind: 'lost', retryS: 5, json: STARTING_JSON, text: 'starting' });
 }
 
 /* What a hop answers once it held a request for as long as it holds one. */
 export function heldAnswer(req: http.IncomingMessage): Refusal {
-  return awayAnswer(req, { status: 503, kind: 'lost', retryS: 5, json: HELD_JSON, text: HELD_TEXT });
+  return awayAnswer(req, { status: 503, kind: 'lost', retryS: 5, json: HELD_JSON, text: 'held' });
 }
 
 /* What the keeper answers while an update installs and takes no changes. */
-export function updatingAnswer(req: http.IncomingMessage, json: string, text: string): Refusal {
+export function updatingAnswer(req: http.IncomingMessage, json: string, text: AwayText): Refusal {
   return awayAnswer(req, { status: 503, kind: 'updating', retryS: awayEveryS('updating'), json, text });
 }
 

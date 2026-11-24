@@ -5,7 +5,7 @@
    no request of its own: no font, no image, no link, nothing but its own text, style and one line of script, which a policy
    of its own lets run and nothing else, so it shows the same with no internet. Its colours are the tokens of the style
    book, light and dark by the visitor's setting. */
-import { directionOf, localeOfHeader, type LocaleId } from '@hornhoof/protocol';
+import { directionOf, isSourceLocale, localeOfHeader, SOURCE_LOCALE, type LocaleId } from '@hornhoof/protocol';
 import { wordsFor } from '../locales/index.js';
 
 export type Away = 'lost' | 'updating';
@@ -35,6 +35,15 @@ button { --cut: 7px; min-block-size: 44px; padding: 8px 18px; border: 0; cursor:
 button:hover { filter: brightness(1.08); }
 button:focus-visible { clip-path: none; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 `;
+
+/* The words of a plain answer, for a client that asks for no page: English, which a program reads, and the language of the
+   visitor under it when it is another. */
+export type AwayText = keyof ReturnType<typeof wordsFor>['away']['text'];
+export function awayText(key: AwayText, acceptLanguage?: string): string {
+  const language = languageOf(acceptLanguage);
+  const english = wordsFor(SOURCE_LOCALE).away.text[key];
+  return `${isSourceLocale(language) ? english : `${english}\n${wordsFor(language).away.text[key]}`}\n`;
+}
 
 export function awayPage(kind: Away, acceptLanguage?: string): string {
   const language = languageOf(acceptLanguage);

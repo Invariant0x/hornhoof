@@ -49,6 +49,24 @@ export const en = {
     updating: ['Server is updating', 'This takes a few minutes. The page opens by itself.'] as [title: string, hint: string],
     checking: (seconds: number) => `Checking every ${seconds}\u00a0s`,
     reload: 'Reload page',
+    /* What a program or a terminal client reads when it asks for no page. */
+    text: {
+      starting: 'Hornhoof is starting. Try again in a few seconds.',
+      held: 'Hornhoof did not answer for a minute. Try again in a few seconds.',
+      maintenance: 'Hornhoof is installing an update. Try again in a few minutes.',
+    },
+  },
+
+  /* How a person wrote the kind of work on the first line of a task's body before tasks carried one: "Kind: bug". Older
+     tasks are read by the words of every language. */
+  taskKind: { label: 'Kind', bug: 'bug', known_behavior: 'known behavior', unknown_path: 'unknown path', legacy_code: 'legacy code' },
+
+  /* The pages a worker machine serves by itself when it cannot reach the company's server. */
+  worker: {
+    noLeader: 'This machine cannot reach the company server. Open the company on a machine that keeps its data:',
+    server: 'the company server',
+    orAt: (url: string) => `or at ${url}.`,
+    disconnected: 'This machine was disconnected from the company. To connect it again, get a new command in Hornhoof under Machines and run it here.',
   },
 
   /* The short line a notice carries beside its source, for the person who reads it in the window of an employee. */
