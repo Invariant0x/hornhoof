@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, departments, jobs, testRuns, turns, waitNotices } from '../src/db/schema.js';
+import { agents, departments, jobs, requests, turns, waitNotices } from '../src/db/schema.js';
 import { answer, ask, createTask } from '../src/modules/tasks/engine.js';
 import { recordRelease, releaseRound } from '../src/modules/tasks/releases.js';
 import { ensureOpenTurn } from '../src/modules/tasks/turn-department.js';
@@ -40,26 +40,22 @@ async function siteDepartment(f: Releasing) {
     title: 'Release the site', brief: 'Release the open turn of the site.', body: 'Fast-forward main to the turn and tag it.',
     departmentId: department!.id, assigneeAgentId: head!.id, executor: false, resultKind: 'coordination', small: true, riskClass: 'none',
   });
-  const [job] = await f.db.insert(jobs).values({ companyId, agentId: head!.id, subscriptionId: f.claude.id, taskId: release.id, kind: 'conversation', prompt: 'Release', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken('site-head-tool-token-0123456789abcdef01234') }).returning();
+  await f.db.insert(jobs).values({ companyId, agentId: head!.id, subscriptionId: f.claude.id, taskId: release.id, kind: 'conversation', prompt: 'Release', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken('site-head-tool-token-0123456789abcdef01234') });
   const repo: Repository = { heads: { main: SITE_MAIN, [`turn-${turn.number}`]: SITE_R }, tags: {}, holds: { [SITE_R]: [SITE_MAIN] }, between: { [`${SITE_MAIN}..${SITE_R}`]: [{ sha: SITE_R, parents: [SITE_MAIN] }] }, cut: new Set() };
-  /* The release of the site's open turn at commit, recorded by its head before main moves: the whole run of it on the turn
-     branch and the CEO's approval of it. */
+  /* The release of the site's open turn at commit, recorded by its head before main moves: the CEO's approval of it, and the
+     repository's CI, which says what the fixture says. */
   const releaseAt = async (commit: string) => {
-    const open = await openOf(f, department!.id);
-    const run = await f.fullRun({ commit, branch: `turn-${open.number}`, of: { departmentId: department!.id, taskId: release.id, agentId: head!.id, jobId: job!.id } });
     const asked = await ask(f.ctx, head!.id, release.id, await approvalCard(f.ctx, release, `Release the site: main to ${commit}.`, commit));
     await answer(f.ctx, { personId: f.claude.ownerPersonId }, asked.request.id, { approve: true });
-    return recordRelease(f.ctx, head!.id, companyId, { task: release.number, commit, runId: run.id });
+    return recordRelease(f.ctx, head!.id, companyId, { task: release.number, commit });
   };
   return { department: department!, head: head!, turn, release, repo, releaseAt };
 }
 
 /* The release of the fixture department's open turn at commit, recorded with release_turn before main moves. */
 async function releaseShopAt(f: Releasing, commit: string) {
-  const open = await openOf(f, f.task.departmentId!);
-  const run = await f.fullRun({ commit, branch: `turn-${open.number}` });
   await f.approve(commit);
-  const recorded = await f.recordRelease({ commit, runId: run.id });
+  const recorded = await f.recordRelease({ commit });
   expect(recorded.isError, recorded.text).toBe(false);
   return recorded;
 }
@@ -160,11 +156,11 @@ describe('each department repository keeps its own line of versions', () => {
     expect(await toldOfTags(f)).toEqual([]);
   });
 
-  it('keeps the turn open on a first tag whose release no longer stands, and tells its head it is the first version tag', async () => {
+  it('keeps the turn open on a first tag whose approval no longer stands, and tells its head it is the first version tag', async () => {
     const f = await releasing();
     await releaseRound(f.ctx);
     await releaseShopAt(f, f.R);
-    await f.db.update(testRuns).set({ status: 'failed' }).where(eq(testRuns.taskId, f.release.id));
+    await f.db.update(requests).set({ status: 'declined' }).where(eq(requests.taskId, f.release.id));
     f.repo.heads.main = f.R;
     f.repo.tags['v1.4.0'] = f.R;
     await releaseRound(f.ctx);

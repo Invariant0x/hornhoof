@@ -65,7 +65,7 @@ async function requireNamed(ctx: Reader, repo: IntegrationTarget['repo'], own: O
    turn open then and turnHead its branch's head, none where it had no turn or its branch was not made yet. */
 export type WorkStart = { turn: number | null; turnHead: string | null; main: string | null };
 
-type Repo = IntegrationTarget['repo'];
+type Repo = NonNullable<Awaited<ReturnType<typeof repoAt>>>['repo'];
 
 /* The head of a branch: null where the repository has no such branch, undefined where it could not say, or said a tag. */
 async function headAt(readCommit: NonNullable<Live['readCommit']>, repo: Repo, branch: string): Promise<string | null | undefined> {

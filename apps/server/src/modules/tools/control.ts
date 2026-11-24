@@ -111,7 +111,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'set_repository',
-    'Connects a department\'s repository. Give its HTTPS address, main branch and commit author. Use vaultEntry by name if the repository needs a credential. Use fullTestCommand for the whole test suite. A run of that command can publish hornhoof/tests on the exact checked commit if the repository permits writing commit statuses.',
+    'Connects a department\'s repository. Give its HTTPS address, main branch and commit author. Use vaultEntry by name if the repository needs a credential. Use releaseWorkflow, by the path of its file (as .github/workflows/release.yml), to name the workflow whose full run lets a release record on the repository\'s CI; none is named by itself. Use fullTestCommand for the whole test suite. A run of that command can publish hornhoof/tests on the exact checked commit if the repository permits writing commit statuses.',
     { department: Id('department'), ...RepoBody.omit({ token: true }).shape, vaultEntry: VaultEntry },
     async ({ department, vaultEntry, ...body }) => {
       const credential = await repositoryCredential(ctx, job.companyId, body.url, vaultEntry);

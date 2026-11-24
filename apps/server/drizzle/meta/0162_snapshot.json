@@ -1,5 +1,5 @@
 {
-  "id": "02ee6e81-0869-450a-aceb-807baa52b344",
+  "id": "353b0a52-fd19-46a7-9dad-df979faa6d40",
   "prevId": "941e2f62-df6d-447c-9415-d0bf0300fc0f",
   "version": "7",
   "dialect": "postgresql",
@@ -5896,6 +5896,18 @@
         "copy_name": {
           "name": "copy_name",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "copy_schema_since": {
+          "name": "copy_schema_since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "copy_schema_attempt": {
+          "name": "copy_schema_attempt",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
