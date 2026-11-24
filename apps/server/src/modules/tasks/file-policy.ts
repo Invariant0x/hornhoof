@@ -4,6 +4,8 @@ import { attachments } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { type RunJob } from '../tools/job.js';
 import { type Task } from './state.js';
+
+const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 /* A screenshot fits comfortably; a turn sends a few dozen at most. */
 export const PICTURE_BYTES = 3 * 1024 * 1024;
 /* A file that comes whole in one request, as a run's file or a long text does, is at most this; one on a task comes as a
@@ -44,8 +46,9 @@ const companyUse = (companyId: string) => sql<string>`(SELECT coalesce(sum(one.s
 
 /* Refuses a person's picture of this size when the company has no room left for it, and returns the room left. */
 export async function checkPictureRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string, size: number): Promise<UploadRoom> {
-  const [used] = await ctx.db.select({ company: companyUse(companyId) }).from(attachments).where(kept(companyId));
-  const inCompany = Number(used!.company);
+  /* One row however many files the company keeps, none among them. */
+  const [used] = rowsOf<{ company: string }>(await ctx.db.execute(sql`SELECT ${companyUse(companyId)} AS company`));
+  const inCompany = Number(used?.company ?? 0);
   const room = companyRoom(inCompany, ctx.config.taskFilesBytes);
   checkUploadRoom(room, size);
   return room;

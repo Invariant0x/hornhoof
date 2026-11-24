@@ -10,7 +10,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { assistants, attachments, agents, companies, departments, jobs, machines, nodes, people, programInstances, programOperatorCases, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { idOnly } from '../src/db/selections.js';
 import { ask, comment, createTask } from '../src/modules/tasks/engine.js';
-import { dropOldFiles, FILE_BYTES, PICTURE_BYTES, TASK_FILES_BYTES } from '../src/modules/tasks/attachments.js';
+import { checkPictureRoom, dropOldFiles, FILE_BYTES, PICTURE_BYTES, TASK_FILES_BYTES } from '../src/modules/tasks/attachments.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { rememberPrivateTurn } from '../src/modules/tools/private-turns.js';
 import { setUpCompany, testApp } from './helpers.js';
@@ -236,6 +236,14 @@ describe('the room for task files', () => {
     expect(over.json().error.message).toMatch(/company's task files .*3 MB/);
     const { app: plain } = await testApp();
     expect(plain.ctx.config.taskFilesBytes).toBe(2 * 1024 * 1024 * 1024);
+  });
+
+  it("gives a person's first picture the company's whole room, and counts each content once", async () => {
+    const { app, companyId, task, counted } = await company({ TASK_FILES_MB: '3' });
+    const limit = 3 * 1024 * 1024;
+    expect((await checkPictureRoom(app.ctx, companyId, 10)).bytes).toBe(limit);
+    await counted(task.id, 1000);
+    expect((await checkPictureRoom(app.ctx, companyId, 10)).bytes).toBe(limit - 1000);
   });
 
   it('lets go of the files of a turn closed 30 days ago, and keeps the rest', async () => {
