@@ -118,7 +118,7 @@ describe('the card of a machine short of disk space', () => {
     expect(await cardsOf(app, carol)).toEqual([]);
   });
 
-  it("names the company's employees whose work the node keeps, and no one it does not know", async () => {
+  it("names the company's employees whose work the node keeps, and no one it does not know, and passes each kept copy on as the node reported it", async () => {
     const { app, db, ceo, node } = await bobsMachine();
     const [employee] = await db.select({ id: agents.id, name: agents.name }).from(agents).limit(1);
     const elsewhere = '00000000-0000-4000-8000-000000000001';
@@ -126,6 +126,7 @@ describe('the card of a machine short of disk space', () => {
       { part: 'workingCopies', agent: employee!.id, path: 'hornhoof', task: 12, bytes: 9 * GB, why: 'uncommitted' },
       { part: 'workingCopies', agent: elsewhere, path: 'copy', task: null, bytes: 2 * GB, why: 'unpushed' },
       { part: 'workingCopies', agent: 'not-an-id', path: 'scratch', task: null, bytes: GB, why: 'unpushed' },
+      { part: 'workingCopies', agent: employee!.id, path: 'shop', task: 7, bytes: GB / 2, why: 'ignored', ignored: ['.env', 'data/local.db'] },
     ];
     await says(app, ceo, node, { ...DISK, kept });
     const [card] = await cardsOf(app, ceo);

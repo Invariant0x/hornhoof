@@ -1,5 +1,5 @@
 import { DISK_PARTS, type DiskPart, type DiskReport } from '@hornhoof/protocol';
-import { useId } from 'react';
+import { Fragment, useId } from 'react';
 import { useLanguage, useT } from '../i18n';
 import type { MachineLowCard } from '../types';
 import { gigabytes, measuredParts } from './MachineDisk';
@@ -17,8 +17,16 @@ function cleanedByPart(card: MachineLowCard): [DiskPart, number][] {
   return DISK_PARTS.flatMap(part => (sums.has(part) ? [[part, sums.get(part)!] as [DiskPart, number]] : [])).toSorted((a, b) => b[1] - a[1]);
 }
 
+/* The files git ignores and no remote has that a pushed copy stays for, by path alone, each read in its own direction.
+   What is in them never comes this far. */
+function IgnoredPaths({ paths }: { paths: string[] | undefined }) {
+  if (!paths?.length) return null;
+  return <>: {paths.map((path, i) => <Fragment key={i}>{i > 0 && ', '}<bdi>{path}</bdi></Fragment>)}</>;
+}
+
 /* The work a machine keeps because it can't be restored, the biggest first: whose it is and where, each read in its own
-   direction, then for which task, how big and why. A folder of no employee the company knows goes by its own name. */
+   direction, then for which task, how big and why, and the ignored files it stays for. A folder of no employee the
+   company knows goes by its own name. */
 function Kept({ card }: { card: MachineLowCard }) {
   const t = useT();
   const { language } = useLanguage();
@@ -31,7 +39,7 @@ function Kept({ card }: { card: MachineLowCard }) {
       <ul className="ml-kept" aria-labelledby={id}>
         {kept.map((k, i) => (
           <li key={i}>
-            <bdi>{card.names?.[k.agent] ?? k.agent}</bdi>, <bdi>{k.path}</bdi>: {t.tasks.machineLowKeptRow(k.task, gigabytes(language, k.bytes), t.tasks.machineLowKeptWhy[k.why])}
+            <bdi>{card.names?.[k.agent] ?? k.agent}</bdi>, <bdi>{k.path}</bdi>: {t.tasks.machineLowKeptRow(k.task, gigabytes(language, k.bytes), t.tasks.machineLowKeptWhy[k.why])}<IgnoredPaths paths={k.ignored} />
           </li>
         ))}
       </ul>

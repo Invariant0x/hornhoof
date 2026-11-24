@@ -42,6 +42,13 @@ const KEEPS: MachineLowCard = {
   },
 };
 
+/* A finished copy of Theo's, pushed in full, that stays for files git ignores and no remote has: a made-up shop's settings
+   and its local data. */
+const IGNORES: MachineLowCard = {
+  ...KEEPS,
+  disk: { ...KEEPS.disk, kept: [{ part: 'workingCopies', agent: THEO, path: 'shop-7', task: 7, bytes: 1.5 * GIB, why: 'ignored', ignored: ['.env', 'data/orders.sqlite'] }] },
+};
+
 const shown = (machines: MachineLowCard[]) => render(<LanguageProvider><MachineLow machines={machines} /></LanguageProvider>);
 
 afterEach(() => {
@@ -114,6 +121,24 @@ describe('a machine short of disk space, as its people read it', () => {
       'Theo, hornhoof-1750: задача 1750, 9 ГБ, изменения не закоммичены',
       `${STRAY}, scratch/copy: 2,5 ГБ, коммиты не отправлены`,
     ]);
+  });
+
+  it('names the files git ignores and no remote has that a pushed copy stays for, each by its path alone', () => {
+    shown([IGNORES]);
+    const kept = screen.getByRole('list', { name: 'Not removed: a person needs to check it' });
+    expect(within(kept).getByRole('listitem').textContent).toBe('Theo, shop-7: task 7, 1.5 GB, ignored files not on a remote: .env, data/orders.sqlite');
+    expect([...kept.querySelectorAll('bdi')].map(piece => piece.textContent)).toEqual(['Theo', 'shop-7', '.env', 'data/orders.sqlite']);
+    cleanup();
+    localStorage.setItem('hh-lang', 'ru');
+    shown([IGNORES]);
+    expect(screen.getByRole('listitem').textContent).toBe('Theo, shop-7: задача 7, 1,5 ГБ, игнорируемые git файлы есть только здесь: .env, data/orders.sqlite');
+  });
+
+  it('gives only the reason when the node named none of the ignored files', () => {
+    const { ignored: _named, ...unnamed } = IGNORES.disk.kept![0]!;
+    shown([{ ...IGNORES, disk: { ...IGNORES.disk, kept: [unnamed] } }]);
+    expect(screen.getByRole('listitem').textContent).toBe('Theo, shop-7: task 7, 1.5 GB, ignored files not on a remote');
+    expect(screen.getByRole('listitem').querySelectorAll('bdi')).toHaveLength(2);
   });
 
   it('lists nothing kept when the machine keeps nothing', () => {

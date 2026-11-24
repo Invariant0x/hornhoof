@@ -1894,7 +1894,7 @@ export const en = {
     machineLowGoesOn: 'It keeps running its turns, but takes no new checks or builds until space is back.',
     machineLowKept: 'Not removed: a person needs to check it',
     machineLowKeptRow: (task: number | null, gb: string, why: string) => `${task === null ? '' : `task ${task}, `}${gb} GB, ${why}`,
-    machineLowKeptWhy: { uncommitted: 'changes not committed', unpushed: 'commits not pushed' },
+    machineLowKeptWhy: { uncommitted: 'changes not committed', unpushed: 'commits not pushed', ignored: 'ignored files not on a remote' },
     machineLowDo: 'What to do: remove files you no longer need from this machine, or give Docker more disk space.',
     someone: 'this person',
     nothingFor: (name: string) => `Nothing waits for a decision from ${name}.`,
