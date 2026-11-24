@@ -36,8 +36,9 @@ test('the live page shows a resident at work on the lot of its building, turned 
         });
     });
   /* Working residents walk their routes and pause at work; in time one does, however slow the frame rate (#59). */
-  await expect.poll(async () => (await atWork()).length).toBeGreaterThan(0);
-  const seen = await atWork();
+  /* The residents checked are the ones the poll found, not a second read after their pause may have ended. */
+  let seen: Awaited<ReturnType<typeof atWork>> = [];
+  await expect.poll(async () => (seen = await atWork()).length).toBeGreaterThan(0);
   for (const r of seen) {
     expect(r.building, `${r.name} knows the building it works at`).not.toBeNull();
     expect(r.onLot, `${r.name} stands on the lot of ${r.building}`).toBe(true);
