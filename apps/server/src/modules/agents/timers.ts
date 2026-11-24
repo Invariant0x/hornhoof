@@ -10,6 +10,7 @@ import { liveSubscription } from '../conversation/placement.js';
 import { onAgent } from '../conversation/line.js';
 import { STOPPED_ON_PURPOSE } from '../conversation/constants.js';
 import { dropOldConnections, serverStarted } from '../nodes/connections.js';
+import { tellOfCopySchemaFailures } from '../copies/schema-failures.js';
 import { tellOfMachinesAway } from '../nodes/machine-away.js';
 import { tellOfMachinesLow } from '../nodes/machine-low.js';
 import { dropOldFiles } from '../tasks/attachments.js';
@@ -26,6 +27,7 @@ import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
 import { checkOperatorHealth } from '../program-operator/health.js';
 import { releaseRound } from '../tasks/releases.js';
+import { releaseCiRound } from '../tasks/release-ci-round.js';
 import { closeIdleTurns } from '../tasks/turn-ends.js';
 
 export { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX } from '../templates/load.js';
@@ -81,7 +83,7 @@ async function queueDueRound(ctx: Ctx, id: string, now: Date): Promise<string | 
     return false;
   }
   const prompt = roundPrompt(agent);
-  const jobId = await insertTurn(ctx, { companyId: agent.companyId, agentId: id, prompt, createdBy: null, message: { personId: null, text: prompt, timer: true, notification: { source: 'timer', tasks: [], detail: { en: agent.name, ru: agent.name } } } });
+  const jobId = await insertTurn(ctx, { companyId: agent.companyId, agentId: id, prompt, createdBy: null, message: { personId: null, text: prompt, timer: true, notification: { source: 'timer', tasks: [], detail: { en: agent.name } } } });
   await db.update(agents).set({ timerAt: now, timerNudgedAt: null }).where(eq(agents.id, id));
   return jobId;
 }
@@ -124,6 +126,7 @@ async function sendWaiting(ctx: Ctx): Promise<void> {
    their agent is free, department turns their release tags close and turns that hold nothing for a release, files of turns closed a month ago, the old history of node connections, test run times, and Codex plans
    to move; and files an older Hornhoof kept in the database, a few at a time, into the store. */
 export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) => (err: unknown) => void): Promise<void> {
+  ctx.githubLimits.expire();
   await checkExternalWaits(ctx, now).catch(failed('ending external task waits failed'));
   await checkWaitHealth(ctx, now).catch(failed('checking task waits failed'));
   await checkOperatorHealth(ctx, now).catch(failed('checking program operator cases failed'));
@@ -133,6 +136,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     retryCallBatches(ctx).catch(failed('recovering one-shot call batches failed')),
     reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
     releaseRound(ctx).catch(failed('closing turns by the tags of their releases failed')),
+    releaseCiRound(ctx).catch(failed('recording the releases that wait for CI failed')),
     closeIdleTurns(ctx).catch(failed('closing turns that hold nothing for a release failed')),
     sendWaiting(ctx).catch(failed('sending waiting turns failed')),
     dropOldFiles(ctx, now).then(() => storeRound(ctx, now)).catch(failed('removing the files of old turns failed')),
@@ -143,6 +147,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     checkTestTimes(ctx).catch(failed('checking test run times failed')),
     harnessRound(ctx, now).catch(failed('getting test harnesses to the machines failed')),
     moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
+    tellOfCopySchemaFailures(ctx, now).catch(failed('telling of copy schema failures failed')),
     tellOfMachinesAway(ctx, now).catch(failed('telling of machines away failed')),
     tellOfMachinesLow(ctx).catch(failed('telling of machines short of disk space failed')),
   ]);

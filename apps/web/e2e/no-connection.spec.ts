@@ -1,31 +1,34 @@
+/// <reference types="node" />
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { serveApi } from './api';
 
-/* A server that cannot be reached must never read as a missing page (#1938). Each way the server can be away answers the
-   page differently, and each must end in the same honest layer, then bring the page back by itself, with no reload:
-   - refused: the process is stopped or restarting, so the browser's own request fails;
-   - relay: a hop that is not Hornhoof answers 404 with a page of its own, as the public link's relay does when no keeper
-     holds the name;
-   - front: the front or the keeper has no live server behind it and answers 502 in Hornhoof's own words;
-   - updating: the keeper answers 503 "maintenance" while an update installs. */
+/* A server that cannot be reached or installs an update shows only the Hornhoof logo and one English line, centred on a plain
+   background over the page, and returns by itself with no reload once the server answers (#1938, #2049). */
 const MODES = ['refused', 'relay', 'front', 'updating'] as const;
 type Mode = (typeof MODES)[number] | 'up';
 
+const SCREENSHOT_DIR = process.env.HH_SCREENSHOT_DIR;
 const RELAY_PAGE = '<!DOCTYPE html><html><head><title>Not Found</title></head><body><h1>The page you requested was not found.</h1></body></html>';
 const STARTING = { error: { code: 'unavailable', message: 'Hornhoof is starting.', reason: 'starting' } };
 const MAINTENANCE = { error: { code: 'unavailable', message: 'Hornhoof is installing an update and takes no changes until it ends.', reason: 'maintenance' } };
+const LINE = { lost: 'No connection', updating: 'Updating' } as const;
 
-/* The server the page talks to, as the test sets it: every /api call, the stream and the build included, is answered the
-   way the mode says until the test brings it up again. */
+async function shot(page: Page, name: string): Promise<void> {
+  if (!SCREENSHOT_DIR) return;
+  mkdirSync(SCREENSHOT_DIR, { recursive: true });
+  await page.screenshot({ path: resolve(SCREENSHOT_DIR, `${name}.png`) });
+}
+
 async function serveServer(page: Page) {
   const server = { mode: 'up' as Mode, org: 0, gate: null as Promise<void> | null };
   await serveApi(page);
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/api/org') server.org++;
-    /* A look at the server that the test holds on its way, to see the page while it looks. */
     if (path === '/api/build' && server.gate && server.mode !== 'up') await server.gate;
     switch (server.mode) {
       case 'up': return route.fallback();
@@ -38,7 +41,6 @@ async function serveServer(page: Page) {
   return server;
 }
 
-/* How many times the document loaded, counted across reloads: it must stay one, since the page comes back by itself. */
 function loads(page: Page) {
   const count = { n: 0 };
   page.on('load', () => count.n++);
@@ -48,8 +50,6 @@ function loads(page: Page) {
 const layer = (page: Page, title: string) => page.getByRole('alertdialog', { name: title, exact: true });
 const tab = (page: Page, name: string) => page.getByRole('navigation').getByRole('button', { name, exact: true });
 
-/* The page's clock moves on while the test waits for the layer to go: each look is one second of the clock, so a probe
-   that backs off comes due. */
 async function until(page: Page, check: () => Promise<boolean>) {
   await expect.poll(async () => {
     await page.clock.runFor(1_000);
@@ -57,13 +57,12 @@ async function until(page: Page, check: () => Promise<boolean>) {
   }).toBe(true);
 }
 
-/* What the page asks every few seconds on its own (the move of the server, the updates), as the clock moves. */
 const NOTICE_MS = 6_000;
 
 for (const mode of MODES) {
-  const title = mode === 'updating' ? en.connection.updating.title : en.connection.lost.title;
+  const title = mode === 'updating' ? LINE.updating : LINE.lost;
 
-  test(`${mode}: an open page says so and comes back by itself`, async ({ page }) => {
+  test(`${mode}: an open page shows only ${title} and comes back by itself`, async ({ page }) => {
     await page.clock.install();
     const server = await serveServer(page);
     const loaded = loads(page);
@@ -81,12 +80,11 @@ for (const mode of MODES) {
     const before = server.org;
     await until(page, async () => (await layer(page, title).count()) === 0);
     await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
-    /* What the screens hold is asked for again, and the page did not reload. */
     await expect.poll(() => server.org).toBeGreaterThan(before);
     expect(loaded.n).toBe(1);
   });
 
-  test(`${mode}: a page opened or reloaded while it lasts says so and comes back by itself`, async ({ page }) => {
+  test(`${mode}: a page opened or reloaded while it lasts shows only ${title} and comes back by itself`, async ({ page }) => {
     await page.clock.install();
     const server = await serveServer(page);
     server.mode = mode;
@@ -137,141 +135,123 @@ test('what the server itself says is missing still reads as missing', async ({ p
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
 });
 
-test('the layer speaks Russian, wraps, and keeps the page where it stands', async ({ page }) => {
+test('keeps the one English line even on a Russian page, hides the retry, holds focus, and keeps the page where it stands', async ({ page }) => {
   await page.clock.install();
   await page.addInitScript(() => localStorage.setItem('hh-lang', 'ru'));
-  await page.setViewportSize({ width: 375, height: 700 });
   const server = await serveServer(page);
   await page.goto('/');
-  await expect(tab(page, ru.shell.tabs.tasks)).toBeVisible();
-  const before = await page.getByRole('navigation').boundingBox();
-  server.mode = 'refused';
-  await page.clock.runFor(NOTICE_MS);
-  const lost = layer(page, ru.connection.lost.title);
-  await expect(lost).toBeVisible();
-  await expect(lost.getByText(ru.connection.lost.hint)).toBeVisible();
-  await expect(lost.getByRole('button', { name: ru.connection.tryNow, exact: true })).toBeVisible();
-  const box = await lost.boundingBox();
-  expect(box!.x).toBeGreaterThanOrEqual(0);
-  expect(box!.x + box!.width).toBeLessThanOrEqual(375);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  /* Over the page, not in its flow: nothing under it moved. */
-  expect(await page.getByRole('navigation').boundingBox()).toEqual(before);
-});
-
-/* The layer is the book's dialog on its dimmed layer: it takes every click, the page under it is inert, it is the dialog the
-   screen reader names by its heading and describes by its hint, and Escape leaves it where it is. The focus goes to its button
-   and comes back to where it was when the server answers. */
-test('the layer takes the focus, holds the page, ignores Escape, and gives the focus back when the server answers', async ({ page }) => {
-  await page.clock.install();
-  const server = await serveServer(page);
-  await page.goto('/');
-  const tasks = tab(page, en.shell.tabs.tasks);
+  const tasks = tab(page, ru.shell.tabs.tasks);
   await expect(tasks).toBeVisible();
+  const before = await page.getByRole('navigation').boundingBox();
   await tasks.focus();
   await expect(tasks).toBeFocused();
 
   server.mode = 'refused';
   await page.clock.runFor(NOTICE_MS);
-  const lost = layer(page, en.connection.lost.title);
+  const lost = layer(page, LINE.lost);
   await expect(lost).toBeVisible();
-  await expect(lost).toHaveAttribute('aria-labelledby', 'conn-title');
-  await expect(lost.getByRole('heading', { name: en.connection.lost.title })).toHaveAttribute('id', 'conn-title');
-  await expect(lost).toHaveAccessibleDescription(en.connection.lost.hint);
-  await expect(lost.getByRole('status')).toBeVisible();
-  await expect(lost.getByRole('button', { name: en.connection.tryNow, exact: true })).toBeFocused();
+  await expect(lost).toBeFocused();
+  expect(await lost.textContent()).toBe(LINE.lost);
+  await expect(lost.locator('button, .spinner, h1, h2')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(lost).toBeVisible();
 
-  /* The standard dimmed layer, which takes the click meant for the page under it, and the page under it is inert. */
+  /* During a probe and after 6 minutes: still only the logo and one English line. */
+  let release!: () => void;
+  server.gate = new Promise<void>(r => (release = r));
+  await page.clock.runFor(10_000);
+  expect(await lost.textContent()).toBe(LINE.lost);
+  await expect(lost.locator('button, .spinner')).toHaveCount(0);
+  release();
+  server.gate = null;
+  await page.clock.runFor(360_000);
+  expect(await lost.textContent()).toBe(LINE.lost);
+
+  /* Plain --bg over the whole window, page underneath inert and unshifted. */
   expect(await page.locator('.conn-layer').evaluate(el => {
     const probe = document.createElement('div');
-    probe.style.background = 'var(--scrim)';
+    probe.style.background = 'var(--bg)';
     document.body.append(probe);
-    const scrim = getComputedStyle(probe).backgroundColor;
+    const bg = getComputedStyle(probe).backgroundColor;
     probe.remove();
-    return getComputedStyle(el).backgroundColor === scrim;
+    return getComputedStyle(el).backgroundColor === bg;
   })).toBe(true);
   expect(await page.evaluate(() => document.elementFromPoint(window.innerWidth / 2, 20)?.closest('.conn-layer') !== null)).toBe(true);
+  expect(await page.evaluate(() => document.elementFromPoint(20, window.innerHeight - 10)?.closest('.conn-layer') !== null)).toBe(true);
   await expect(page.locator('.app-screen')).toHaveAttribute('inert', '');
+  expect(await page.getByRole('navigation').boundingBox()).toEqual(before);
 
   server.mode = 'up';
-  await until(page, async () => (await layer(page, en.connection.lost.title).count()) === 0);
+  await until(page, async () => (await layer(page, LINE.lost).count()) === 0);
   await expect(page.locator('.app-screen')).not.toHaveAttribute('inert', '');
   await expect(tasks).toBeFocused();
 });
 
-/* The ring turns only while a look is on its way. Between looks the layer says when the next one comes, counting down, and
-   once the wait is long it says so under the text: after 2 minutes of no connection, after 5 of an update. */
-test('the ring turns only during a look, the layer counts down to the next, and says when the wait is long', async ({ page }) => {
-  await page.clock.install();
-  const server = await serveServer(page);
-  await page.goto('/');
-  await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
-  server.mode = 'refused';
-  await page.clock.runFor(NOTICE_MS);
-  const lost = layer(page, en.connection.lost.title);
-  await expect(lost).toBeVisible();
+test('centres the overlay logo and one line on a plain token background across schemes and widths', async ({ browser }) => {
+  const skins = [
+    ['light', 'light', 'rgb(230, 235, 240)'],
+    ['dark', 'cyberpunk', 'rgb(20, 26, 34)'],
+  ] as const;
+  for (const [scheme, skin, expectedBg] of skins) {
+    for (const [width, height] of [[1440, 900], [375, 700]] as const) {
+      const context = await browser.newContext({ viewport: { width, height }, colorScheme: scheme });
+      const page = await context.newPage();
+      try {
+        await page.clock.install();
+        await page.addInitScript(s => localStorage.setItem('hh-theme', s), skin);
+        const server = await serveServer(page);
+        await page.goto('/');
+        await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
 
-  /* Between looks: no ring, the seconds to the next. */
-  await expect(lost.getByText(/^Next try in \d+\s?s$/)).toBeVisible();
-  await expect(lost.locator('.spinner')).toHaveCount(0);
+        for (const [state, mode] of [['lost', 'refused'], ['updating', 'updating']] as const) {
+          server.mode = mode;
+          const dialog = layer(page, LINE[state]);
+          await until(page, async () => (await dialog.count()) > 0);
+          await expect(dialog).toBeVisible();
+          const seen = await page.evaluate(() => {
+            const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect().toJSON() as { x: number; y: number; width: number; height: number; bottom: number };
+            const inner = getComputedStyle(document.querySelector('.conn')!);
+            const line = getComputedStyle(document.querySelector('#conn-title')!);
+            return {
+              layerBox: box('.conn-layer'),
+              layerBg: getComputedStyle(document.querySelector('.conn-layer')!).backgroundColor,
+              innerBg: inner.backgroundColor,
+              innerBorder: inner.borderTopWidth,
+              mark: box('.conn-mark'),
+              logoParts: {
+                dome: document.querySelectorAll('.conn-mark .mk-dome').length,
+                base: document.querySelectorAll('.conn-mark .mk-base').length,
+                dot: document.querySelectorAll('.conn-mark .mk-dot').length,
+              },
+              lineBox: box('#conn-title'),
+              lineFont: { size: line.fontSize, weight: line.fontWeight },
+              text: document.querySelector('.conn-layer')!.textContent ?? '',
+              extras: document.querySelectorAll('.conn-layer :is(button, .spinner, h1, h2, h3)').length,
+              fitsWidth: document.documentElement.scrollWidth <= window.innerWidth,
+            };
+          });
+          expect(seen.layerBox).toMatchObject({ x: 0, y: 0, width, height });
+          expect(seen.layerBg).toBe(expectedBg);
+          expect(seen.innerBg).toBe('rgba(0, 0, 0, 0)');
+          expect(seen.innerBorder).toBe('0px');
+          expect(seen.text).toBe(LINE[state]);
+          expect(seen.extras).toBe(0);
+          expect(seen.logoParts).toEqual({ dome: 1, base: 1, dot: 1 });
+          expect(seen.mark).toMatchObject({ width: 48, height: 48 });
+          expect(seen.lineFont).toEqual({ size: '14px', weight: '400' });
+          expect(seen.lineBox.y).toBeGreaterThanOrEqual(seen.mark.bottom);
+          expect(Math.abs(seen.mark.x + seen.mark.width / 2 - width / 2)).toBeLessThanOrEqual(1);
+          expect(Math.abs(seen.lineBox.x + seen.lineBox.width / 2 - width / 2)).toBeLessThanOrEqual(1);
+          expect(Math.abs((seen.mark.y + seen.lineBox.bottom) / 2 - height / 2)).toBeLessThanOrEqual(2);
+          expect(seen.fitsWidth).toBe(true);
+          await shot(page, `overlay-${state}-${width}-${scheme}`);
 
-  /* During a look: the ring and its words, and the countdown gone. */
-  let release!: () => void;
-  server.gate = new Promise<void>(resolve => (release = resolve));
-  await page.clock.runFor(10_000);
-  await expect(lost.locator('.spinner')).toBeVisible();
-  await expect(lost.getByText(en.connection.trying)).toBeVisible();
-  await expect(lost.getByText(/^Next try in/)).toHaveCount(0);
-  release();
-  await expect(lost.getByText(/^Next try in \d+\s?s$/)).toBeVisible();
-  await expect(lost.locator('.spinner')).toHaveCount(0);
-
-  /* Not long yet, then long: the line comes under the text after 2 minutes. */
-  server.gate = null;
-  await expect(lost.getByText(en.connection.lost.long)).toHaveCount(0);
-  await page.clock.runFor(125_000);
-  await expect(lost.getByText(en.connection.lost.long)).toBeVisible();
-  await expect(lost.getByText(en.connection.updating.long)).toHaveCount(0);
-});
-
-test('an update that takes longer than five minutes says so, and not sooner', async ({ page }) => {
-  await page.clock.install();
-  const server = await serveServer(page);
-  await page.goto('/');
-  await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
-  server.mode = 'updating';
-  await page.clock.runFor(NOTICE_MS);
-  const updating = layer(page, en.connection.updating.title);
-  await expect(updating).toBeVisible();
-  await page.clock.runFor(200_000);
-  await expect(updating.getByText(en.connection.updating.long)).toHaveCount(0);
-  await page.clock.runFor(110_000);
-  await expect(updating.getByText(en.connection.updating.long)).toBeVisible();
-  await expect(updating.getByText(en.connection.lost.long)).toHaveCount(0);
-});
-
-test('the ring stands still as a quarter arc where motion is reduced', async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.clock.install();
-  const server = await serveServer(page);
-  await page.goto('/');
-  await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
-  server.mode = 'refused';
-  await page.clock.runFor(NOTICE_MS);
-  const lost = layer(page, en.connection.lost.title);
-  await expect(lost).toBeVisible();
-  let release!: () => void;
-  server.gate = new Promise<void>(resolve => (release = resolve));
-  await page.clock.runFor(10_000);
-  const ring = lost.locator('.spinner');
-  await expect(ring).toBeVisible();
-  expect(await ring.evaluate(el => getComputedStyle(el).animationName)).toBe('none');
-  /* A quarter arc: one side of its border in the accent, the rest in the idle colour. */
-  expect(await ring.evaluate(el => {
-    const style = getComputedStyle(el);
-    return style.borderTopColor !== style.borderRightColor && style.borderRightColor === style.borderBottomColor && style.borderBottomColor === style.borderLeftColor;
-  })).toBe(true);
-  release();
+          server.mode = 'up';
+          await until(page, async () => (await layer(page, LINE[state]).count()) === 0);
+        }
+      } finally {
+        await context.close();
+      }
+    }
+  }
 });

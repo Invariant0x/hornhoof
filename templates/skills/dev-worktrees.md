@@ -1,7 +1,5 @@
 ---
 id: dev-worktrees
-title: { en: "Branches and workspaces", ru: "Ветки и рабочие копии" }
-description: { en: "Gives every task its own branch and clean workspace, and finishes branches tidily.", ru: "Дает каждой задаче свою ветку и чистую рабочую копию и аккуратно завершает ветки." }
 kind: procedure
 sources: [obra/superpowers skills/using-git-worktrees/SKILL.md, obra/superpowers skills/finishing-a-development-branch/SKILL.md]
 ---

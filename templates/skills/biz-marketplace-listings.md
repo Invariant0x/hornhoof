@@ -1,7 +1,5 @@
 ---
 id: biz-marketplace-listings
-title: { en: "Marketplace listings", ru: "Размещение в каталогах" }
-description: { en: "Finds directories and integration marketplaces for the product and submits its listings itself.", ru: "Находит каталоги и маркетплейсы интеграций для продукта и сама размещает его карточки." }
 kind: procedure
 sources: [coreyhaines31/marketingskills skills/directory-submissions/SKILL.md]
 ---

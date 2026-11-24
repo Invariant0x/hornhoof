@@ -1,4 +1,4 @@
-import type { ApiProtocol, TaskPriority } from '@hornhoof/protocol';
+import type { ApiProtocol, TaskPriority, Texts } from '@hornhoof/protocol';
 import type { EchelonFindingsView, EchelonStage } from '@hornhoof/protocol/echelons';
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
@@ -14,7 +14,7 @@ export type { MaterialManifest, MaterialView } from '@hornhoof/protocol';
 export type { FailureKind, Limits, ModelOption, ProgramRetry, ProviderId, TemplateKey, TurnAlarm, TurnRetry, WorkLine };
 
 /* Template text that comes in both languages. */
-export type Lang = { en: string; ru: string };
+export type Lang = Texts;
 
 /* company: the whole company; listed: the departments and teams ticked for the person. */
 export type ScopeKind = 'company' | 'listed';
@@ -265,8 +265,11 @@ export type AutonomousReleaseEntry = {
   agentName: string;
   commitSha: string;
   baseCommitSha?: string;
+  /* An entry from before releases relied on CI names a test run; a later one names what the repository's CI said. */
   testRunId: string | null;
-  testRunNumber: number;
+  testRunNumber: number | null;
+  ciState: 'green' | 'none' | null;
+  ciChecks: number | null;
   reviewerAgentId: string | null;
   reviewerName: string;
   verdictStage: string;
@@ -287,7 +290,7 @@ export type ApprovalPolicyView = {
 };
 
 /* The git repository a department's or product's agents clone; the token never comes back, only its last four. */
-export type Repository = { url: string; branch: string; tokenLast4: string | null; author?: { name: string; email: string } | null; testMemoryGb?: number; fullTestCommand?: string | null };
+export type Repository = { url: string; branch: string; tokenLast4: string | null; author?: { name: string; email: string } | null; testMemoryGb?: number; fullTestCommand?: string | null; releaseWorkflow?: string | null };
 
 /* A GitHub key Hornhoof creates repositories with: the user or organization they go to, and only the key's last four. */
 export type RepoKey = { provider: 'github'; owner: string; tokenLast4: string };
@@ -439,7 +442,8 @@ export type MessageParty = {
   id: string | null;
   name: string;
   role: Lang | null;
-  department: { id: string; name: Lang } | null;
+  /* A typed name reads as typed in every language; a template department names its template, which the screen words in the reader's language. */
+  department: { id: string; name: Lang; templateKey?: string | null } | null;
   agentKind?: 'orchestrator' | 'head' | 'worker' | 'assistant';
 };
 
@@ -732,6 +736,9 @@ export type MachineAwayCard = {
   important: { name: string; kind: 'orchestrator' | 'head' }[];
 };
 
+/* A machine whose database copy is still waiting for its schema. */
+export type CopySchemaFailureCard = { id: string; hostname: string; since: string; attempt: number };
+
 /* A machine short of disk space, whose node takes no new checks or builds since: for its owner and the CEO, gone by itself
    once the node has room again or is off the line. */
 export type MachineLowCard = {
@@ -744,6 +751,8 @@ export type MachineLowCard = {
   names?: Record<string, string>;
 };
 
+export type GitHubLimitCard = { repository: string; resetAt: number | null };
+
 /* Everything that waits for people as /api/requests shows it to this person, and the counts of all of it: per owner, per
    asking agent and in total. */
 export type Decisions = {
@@ -754,8 +763,10 @@ export type Decisions = {
   /* What merges left for the CEO alone. A server from before merges sends none. */
   merges?: MergeDecision[];
   machinesAway?: MachineAwayCard[];
+  copySchemaFailures?: CopySchemaFailureCard[];
   /* A server from before nodes said how full their disk is sends none. */
   machinesLow?: MachineLowCard[];
+  githubLimits?: GitHubLimitCard[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
 
@@ -1005,6 +1016,8 @@ export type RunningAgent = {
   title: Lang | null;
   department: { id: string; name: string } | null;
   provider: ProviderId;
+  /* The model the employee runs on; omitted by older servers. */
+  model?: string;
   since: string | null;
   task: { number: number; title: string } | null;
   withCeo: boolean;

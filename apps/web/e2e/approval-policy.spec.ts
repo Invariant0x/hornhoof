@@ -3,13 +3,13 @@ import { writeFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { LANGUAGES, type Language } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage } from '../src/i18n';
 import type { ApprovalPolicyView, AutonomousReleaseEntry, Org } from '../src/types';
 import { ME, serveApi } from './api';
 import { around, focusRing, offences, sizes } from './owner-screens-look';
 import type { Measured } from './owner-screens-sizes';
 
-const MESSAGES: Record<Language, Messages> = { en, ru };
+const MESSAGES: Record<ShippedLanguage, Messages> = { en, ru };
 
 /* Rank the actual approval words of every shipped language for the narrow and wide checks. */
 const LOCALE_LENGTHS = LANGUAGES.map(({ id }) => {
@@ -37,6 +37,8 @@ const JOURNAL: AutonomousReleaseEntry[] = [
     baseCommitSha: '1111111111111111111111111111111111111111',
     testRunId: 'tr43',
     testRunNumber: 43,
+    ciState: null,
+    ciChecks: null,
     reviewerAgentId: 'a2',
     reviewerName: 'Rita',
     verdictStage: 'review',
@@ -64,7 +66,7 @@ const POLICY: ApprovalPolicyView = {
 
 /* The department's panel as a person meets it, with what the page logs. Every change is answered as the server would.
    A theme is a skin's id; dark, a name no skin has, is Cyberpunk. Right to left as a shipped RTL language would set it. */
-async function open(page: Page, lang: Language, theme: string, width: number, policy = POLICY, dir: 'ltr' | 'rtl' = 'ltr') {
+async function open(page: Page, lang: ShippedLanguage, theme: string, width: number, policy = POLICY, dir: 'ltr' | 'rtl' = 'ltr') {
   await page.setViewportSize({ width, height: 900 });
   await page.addInitScript(({ lang, theme, dir }) => {
     localStorage.setItem('hh-lang', lang);
@@ -221,7 +223,7 @@ for (const lang of CHECKED_LOCALES) {
 
 /* The person who runs the department, not the CEO, in both skins, both languages, at a desk and on a phone, and right to
    left: the switch says its state in a word beside it, Design's rules hold, and the panel is drawn whole for Design. */
-type Look = { lang: Language; skin: 'light' | 'cyberpunk'; width: number; dir: 'ltr' | 'rtl' };
+type Look = { lang: ShippedLanguage; skin: 'light' | 'cyberpunk'; width: number; dir: 'ltr' | 'rtl' };
 const OWNER_LOOKS: Look[] = [
   ...CHECKED_LOCALES.flatMap(lang => (['light', 'cyberpunk'] as const).flatMap(skin => [1440, 375].map(width => ({ lang, skin, width, dir: 'ltr' as const })))),
   { lang: 'en', skin: 'light', width: 1440, dir: 'rtl' },

@@ -1,7 +1,5 @@
 ---
 id: mkt-campaign-plan
-title: { en: "Campaign plan", ru: "План кампании" }
-description: { en: "Turns a marketing goal or a launch into a plan of channels, pieces, owners, dates and measures.", ru: "Превращает маркетинговую цель или запуск в план каналов, материалов, исполнителей, сроков и метрик." }
 kind: procedure
 sources: [coreyhaines31/marketingskills skills/marketing-plan/SKILL.md, coreyhaines31/marketingskills skills/launch/SKILL.md, anthropics/knowledge-work-plugins marketing/skills/campaign-plan/SKILL.md]
 ---

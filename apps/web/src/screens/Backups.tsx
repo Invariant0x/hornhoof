@@ -3,6 +3,7 @@ import { api, ApiFailure } from '../api';
 import { errorText, restoreEnded, useLanguage, useT, type Language, type Messages } from '../i18n';
 import type { BackupBundle, BackupsView, RestoreStatus, RestoreStep, RestoreWarning } from '../types';
 import { Ask } from '../ui/Ask';
+import { formatTagOf, isSourceLocale } from '@hornhoof/protocol';
 
 /* A backup older than this is worth a look at the server's disk. */
 const STALE_MS = 12 * 3_600_000;
@@ -11,7 +12,7 @@ const LOOK_MS = 5000;
 const STEPS: RestoreStep[] = ['fetch', 'check', 'open', 'load', 'swap', 'start'];
 const MB = 1024 * 1024;
 
-export const when = (language: Language, iso: string): string => new Date(iso).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+export const when = (language: Language, iso: string): string => new Date(iso).toLocaleString(formatTagOf(language), { dateStyle: 'medium', timeStyle: 'short' });
 export const sizeOf = (t: Messages, bytes: number): string => (bytes < MB ? t.tasks.fileKb(Math.max(1, Math.ceil(bytes / 1024))) : t.tasks.fileMb(Math.ceil(bytes / MB)));
 
 /* A chosen file as text, read the way every browser has. */
@@ -165,7 +166,7 @@ function KeptDatabase({ kept, asking, onAsk, onLeave, onNo }: { kept: Kept; aski
   const waits = merge?.status === 'pending' || merge?.status === 'applied';
   const state = !merge ? null
     /* The server writes why in English: another language says that it did not go through yet. */
-    : waits ? (merge.error ? (language === 'en' ? t.backups.keptStates.notYet(merge.error) : t.backups.keptStates.notYetPlain) : t.backups.keptStates.bringing)
+    : waits ? (merge.error ? (isSourceLocale(language) ? t.backups.keptStates.notYet(merge.error) : t.backups.keptStates.notYetPlain) : t.backups.keptStates.bringing)
       : merge.status === 'merged' ? t.backups.keptStates.merged(merge.added, merge.conflicts)
         : merge.status === 'removing' ? t.backups.keptStates.removing : null;
   return (

@@ -2,8 +2,6 @@
 id: SUP-HEAD
 department: support
 kind: head
-title: { en: "Head of support", ru: "Руководитель поддержки" }
-description: { en: "Leader for customer support and service quality.", ru: "Руководитель клиентской поддержки и качества обслуживания." }
 tier: standard
 effort: medium
 perProduct: false

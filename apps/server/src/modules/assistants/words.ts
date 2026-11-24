@@ -1,48 +1,25 @@
+import { localeOfHeader, LOCALES } from '@hornhoof/protocol';
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
+import { wordsFor } from '../../locales/index.js';
 import { ApiError, errorAnswer, type ErrorReason } from '../../errors.js';
 import { FILE_BYTES } from '../tasks/file-policy.js';
-import { langOf, type BotLang } from '../telegram/words.js';
 import { LINK_DAYS } from './files.js';
 
 const MB = FILE_BYTES / 1024 / 1024;
 
-/* Why a call was refused, for the assistant's owner, in Russian or English as the program's Accept-Language asks: one
-   neutral phrase that reads after "<file name> did not come: ", so the program puts it after the name of what did not go.
-   The program decides by status and reason, which stay. */
-export const WORDS: Partial<Record<ErrorReason, Record<BotLang, string>>> = {
-  assistant_key_invalid: {
-    en: "the assistant's key does not open Hornhoof, because it is wrong, was replaced or taken back, or the assistant is switched off. A new key is made on the assistant's card in People.",
-    ru: 'ключ помощника не открывает Hornhoof, потому что он неверный, его заменили или отозвали, или помощник выключен. Новый ключ делается на карточке помощника в разделе Люди.',
-  },
-  assistant_owner_inactive: { en: "you are switched off in Hornhoof now, and the company's owner can switch you on again.", ru: 'сейчас вы выключены в Hornhoof, и включить вас может владелец компании.' },
-  assistant_agent_refused: { en: 'in Hornhoof you do not write to this employee.', ru: 'в Hornhoof вы не пишете этому сотруднику.' },
-  agent_unknown: { en: 'there is no such employee in Hornhoof, or they were removed.', ru: 'в Hornhoof нет такого сотрудника, или его убрали.' },
-  agent_not_ready: {
-    en: 'the one it goes to cannot answer right now, for example while they have no plan or machine to work on.',
-    ru: 'адресат сейчас не может ответить, например пока у него нет плана или машины для работы.',
-  },
-  orchestrator_not_ready: { en: 'the orchestrator cannot answer right now.', ru: 'оркестратор сейчас не может ответить.' },
-  request_unknown: { en: 'there is no such request in Hornhoof.', ru: 'в Hornhoof нет такого запроса.' },
-  request_closed: { en: 'this request is answered already.', ru: 'на этот запрос уже ответили.' },
-  decision_not_allowed: { en: 'this decision is not yours to take in Hornhoof.', ru: 'в Hornhoof это решение принимаете не вы.' },
-  task_invalid: { en: 'this answer does not fit the request.', ru: 'такой ответ не подходит к запросу.' },
-  attachment_unknown: { en: 'there is no such file in Hornhoof, it was deleted after its 30 days, or you cannot open it there.', ru: 'такого файла в Hornhoof нет, его удалили через 30 дней, или вам его там не открыть.' },
-  file_empty: { en: 'the file is empty.', ru: 'файл пустой.' },
-  file_too_big: { en: `the file is bigger than ${MB} MB.`, ru: `файл больше ${MB} МБ.` },
-  file_lost: {
-    en: 'this file was kept on one machine before files had a store, and that machine is gone with it.',
-    ru: 'этот файл хранился на одной машине еще до общего хранилища файлов, и эта машина пропала вместе с ним.',
-  },
-  file_away: {
-    en: 'this file is kept on a machine of the company that is away now. Try again once it is back.',
-    ru: 'этот файл хранится на машине компании, которой сейчас нет в сети. Попробуйте еще раз, когда она вернется.',
-  },
-  file_link_expired: { en: `the link to the file worked for ${LINK_DAYS} days, and they are over.`, ru: `ссылка на файл работала ${LINK_DAYS} дней, и они прошли.` },
-  attachment_invalid: { en: "Hornhoof has no room left for the company's files.", ru: 'в Hornhoof закончилось место для файлов компании.' },
-};
+/* Why a call was refused, for the assistant's owner, in the language the program's Accept-Language asks for: one neutral
+   phrase that reads after "<file name> did not come: ", so the program puts it after the name of what did not go. The
+   program decides by status and reason, which stay. The words are in the files of each language (locales/). */
+export function refusalWords(language: string): Partial<Record<ErrorReason, string>> {
+  const { file_too_big, file_link_expired, ...plain } = wordsFor(language).refusals;
+  return { ...plain, file_too_big: file_too_big(MB), file_link_expired: file_link_expired(LINK_DAYS) };
+}
+
+/* The languages an assistant's owner may ask in: the registry's. */
+export const REFUSAL_LANGUAGES = LOCALES.map(locale => locale.id);
 
 /* A refusal of an assistant's call, in its owner's words where there are some. */
 export function inOwnersWords(err: FastifyError | Error, req: FastifyRequest, reply: FastifyReply): FastifyReply {
-  const words = err instanceof ApiError && err.reason ? WORDS[err.reason]?.[langOf(req.headers['accept-language'])] : undefined;
+  const words = err instanceof ApiError && err.reason ? refusalWords(localeOfHeader(req.headers['accept-language']))[err.reason] : undefined;
   return errorAnswer(words && err instanceof ApiError ? new ApiError(err.status, err.code, words, err.reason, err.details) : err, req, reply);
 }

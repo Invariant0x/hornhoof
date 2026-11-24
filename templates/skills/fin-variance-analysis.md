@@ -1,7 +1,5 @@
 ---
 id: fin-variance-analysis
-title: { en: "Variance analysis", ru: "Анализ отклонений" }
-description: { en: "Explains why results differ from the budget and the last period, in numbers and plain words.", ru: "Объясняет, почему результаты отличаются от бюджета и прошлого периода, в цифрах и простыми словами." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins finance, anthropics/financial-services plugins/agent-plugins/month-end-closer/skills/variance-commentary/SKILL.md]
 ---

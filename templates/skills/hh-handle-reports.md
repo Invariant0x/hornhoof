@@ -1,7 +1,5 @@
 ---
 id: hh-handle-reports
-title: { en: "Handle reports", ru: "Разбирать отчеты" }
-description: { en: "Reads each member's report, checks the evidence and decides the next step.", ru: "Читает отчет каждого сотрудника, проверяет доказательства и решает, что дальше." }
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/SKILL.md]
 ---

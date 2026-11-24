@@ -25,7 +25,7 @@ A change the selector answers with the whole fast suite does not run it: `tests`
 
 ## What a change runs
 
-The selection goes by the paths a change touches, and within a package by the import graph. The author's check runs, with coverage, the tests that import a changed file directly, are named after a changed source, or changed in the commit. The rest of the tests the import graph reaches are listed by file in its record as left to the full run of the release. A package none of whose tests reaches the change directly runs all the graph reaches there. The list is `scope.leftToFullRun` of the record and `leftToFullRun` of `TEST_SELECTION`, so a reviewer sees what the author did not run. A test that imports a file of another group runs when that file changes, and nothing else crosses a group. A commit that mixes code with a file of a rule that takes packages whole takes the packages of that code whole too; a rule that names its tests adds only them. A Vitest suite gets its files as on a node, through `HH_TEST_FILES` and `--shard=1/1`, because its config asks for both.
+The selection goes by the paths a change touches, and within a package by the import graph. The author's check runs, with coverage, the tests that import a changed file directly, are named after a changed source, or changed in the commit. The rest of the tests the import graph reaches are listed by file in its record as left to the repository's CI, which checks the release. A package none of whose tests reaches the change directly runs all the graph reaches there. The list is `scope.leftToFullRun` of the record and `leftToFullRun` of `TEST_SELECTION`, so a reviewer sees what the author did not run. A test that imports a file of another group runs when that file changes, and nothing else crosses a group. A commit that mixes code with a file of a rule that takes packages whole takes the packages of that code whole too; a rule that names its tests adds only them. A Vitest suite gets its files as on a node, through `HH_TEST_FILES` and `--shard=1/1`, because its config asks for both.
 
 | Group | Paths | Runs |
 | --- | --- | --- |
@@ -64,7 +64,7 @@ its own receipt. Required Security and Tests still run.
 
 ## Nothing runs on submit
 
-Submitting a task starts no test run. The author runs this command in their own workspace before submitting, and the reviewer runs it in theirs. Every test runs together once per release, through `run_tests` on the turn's branch or a release branch before main, or on main.
+Submitting a task starts no test run. The author runs this command in their own workspace before submitting, and the reviewer runs it in theirs. The whole suite runs in the repository's CI, on the exact commit a release records; `run_tests` is for the checks of a task.
 
 ## On GitHub
 

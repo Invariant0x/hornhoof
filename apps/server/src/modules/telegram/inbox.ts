@@ -11,7 +11,7 @@ import { takenBytes } from '../tasks/attachments.js';
 import { writeToAgent } from '../conversation/routes.js';
 import { TELEGRAM_FILE_BYTES, TelegramError, type TelegramFile, type TelegramMessage, type TelegramUpdate, type TelegramUser } from './api.js';
 import { chatLanguage } from './language.js';
-import { agentName, WORDS, type BotLang } from './words.js';
+import { agentName, botWords, type BotLang } from './words.js';
 
 type Bot = Pick<typeof telegramBots.$inferSelect, 'id' | 'companyId' | 'agentId'>;
 /* Sends a few words of the bot's own to a chat. */
@@ -98,7 +98,7 @@ const megabytes = (bytes: number) => Math.round(bytes / 1024 / 1024);
 
 /* Brings the files over from Telegram and keeps them for the agent, each in turn. One that does not come is named in the
    words the agent reads, and the person hears why. */
-async function bringFiles(ctx: Ctx, me: Person, agentId: string, came: Came, fetchFile: FetchFile, transcribe: Transcribe, chatId: number, say: Say, words: (typeof WORDS)[BotLang]) {
+async function bringFiles(ctx: Ctx, me: Person, agentId: string, came: Came, fetchFile: FetchFile, transcribe: Transcribe, chatId: number, say: Say, words: ReturnType<typeof botWords>) {
   const ids: string[] = [];
   const notes: string[] = [];
   for (const { file, name, voice } of came.files) {
@@ -144,7 +144,7 @@ export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | Tele
   const chatId = message.chat.id;
   const messages = all.map(u => u.message!);
   const lang = await chatLanguage(ctx.db, bot, chatId, messages, message.from.language_code);
-  const words = WORDS[lang];
+  const words = botWords(lang);
   const me = await senderOf(ctx, bot.companyId, message.from);
   if (!me) {
     await say(chatId, words.unknown(message.from.id, message.from.username ? `@${message.from.username}` : null));

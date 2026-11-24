@@ -10,8 +10,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Added
 
 - The CEO, or the orchestrator for him, says yes to clearing the files moved out of the database: `GET /api/files/move` shows each reconciliation of the move (its files, distinct contents and bytes, the files whose bytes are not on the server, the size of the database, and the digest of the list of every file's id, sha256 and size), and `POST /api/files/move/approve` with that digest lets the server clear exactly the files on that list. Nobody else can do either.
-
 - The CEO, or the orchestrator for him, sets in Company settings how many of the company's machines keep each file, two by default and up to five, and sees there how the files stand: how many machines keep files, what the files take on them and what their areas hold, the files kept fewer times than asked, and what waits for room on another machine. `GET /api/company/file-store` and `PATCH /api/company/file-store` with `copies` do the same; nobody else can.
+- Every text people see now comes from a file per language, loaded only for the language that is on: the screens, the words of the world packs, what the server says in its own words, the page shown while the server is away, and the names and descriptions of templates. A language is one line in a registry and one file per kind of text, with no code that names a language. Plurals, dates and numbers follow the language through the browser's own rules, a language that reads right to left mirrors the page, and the letters of a script that the product's fonts do not hold load only when a language in that script is on.
+- Two languages made for tests, a text 40% longer than English and the same text mirrored, are checked on the main screens at phone and desktop widths for cut text and sideways scroll. They never reach a person.
 
 ### Changed
 
@@ -23,6 +24,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A restore of a database backup keeps the key the company's files are sealed with and the copies the CEO set, from the database it replaces: a backup made before the store, or before its first file, no longer leaves every file unreadable. It keeps the area each machine gives the company's files as well, none included, so a restore neither fills a machine whose owner set less nor drops a limit.
 - Backups of the database no longer hold the bytes of files once they are cleared: a file whose row and content were removed comes back from no backup, and the dump made before the update is the only copy of such a file until it is pruned. A company with one machine keeps one copy of each file. An upload is answered after at most 10 seconds even when the machines picked for the file do not keep it yet, and at once when they are away.
 - Files on a task of no turn go 30 days after the task closed, and a test or work run's logs and files 30 days after the run ended, also on a task still open; a file an agent or a person put on a task under a name like a run's, such as `test-3-plan.md`, is no run's and stays. Migration `run_files` names its run on each run's file, and finds the files of earlier runs by their task, name, the turn that started the run and their time. On a server updated from 0.43 these two rules wait for the CEO's yes to the move, as the old column is still there until then.
+- A skin file of your own may name the skin in any language of the registry, with the English name required and the others optional, and the names of a world's employees can be taken in any language of the registry.
 
 ## [0.43.0] - 2026-11-23
 
@@ -36,6 +38,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - An employee's open terminal stays connected when idle or on a personal-plan fallback machine: the server sends WebSocket keepalive pings and checks fallback placement consistently, the window keeps the terminal mounted across brief node drops, and unavoidable reconnects or program restarts recover without flashing the loader or losing scrollback history and reading position.
 - An employee's program that waits between turns no longer starts anew when the terminal showing it loses its connection for a moment: the node keeps it for 30 seconds after its last view went, so the view that comes back finds it. A view ended because its person may no longer see the agent holds it no longer, and a program whose agent moved to another plan still goes at once.
 - A merge of a copy's database no longer stops with "No merge rule for public.world_layouts": the company's city and the CEO's orders to move its buildings merge like a person's map, and two cities that differ keep the leading one and go to the orchestrator.
+- On the city map, streets read as one trodden strip at every crossing, T-join and bend, with one soft edge instead of strips laid over each other, and the brown stand-in over the river is gone: until the world's bridge pictures are installed no street crosses the water and no resident walks on it, and with them the bridge stands in one fixed place of the map on every load.
 
 ### Added
 

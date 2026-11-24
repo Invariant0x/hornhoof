@@ -1,7 +1,5 @@
 ---
 id: orch-interview
-title: { en: "Ask before you lay out", ru: "Спросить, прежде чем раскладывать" }
-description: { en: "Finds out what the CEO wants and why before a turn or a change, with as few questions as it takes.", ru: "Выясняет, чего хочет CEO и зачем, прежде чем раскладывать ход или менять компанию, задавая как можно меньше вопросов." }
 kind: procedure
 sources: [obra/superpowers skills/brainstorming/SKILL.md]
 ---

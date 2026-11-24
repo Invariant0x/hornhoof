@@ -2,8 +2,6 @@
 id: DEV-RED
 department: development
 kind: member
-title: { en: "Red team", ru: "Красная команда" }
-description: { en: "Specialist in adversarial analysis of software behavior.", ru: "Специалист по проверке поведения программ с позиции атакующего." }
 tier: deep
 effort: xhigh
 perProduct: false

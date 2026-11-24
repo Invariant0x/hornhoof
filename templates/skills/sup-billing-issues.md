@@ -1,7 +1,5 @@
 ---
 id: sup-billing-issues
-title: { en: "Billing cases", ru: "Платежные вопросы" }
-description: { en: "Works out what happened with a customer's charge and prepares the case for Finance to decide.", ru: "Выясняет, что произошло с платежом клиента, и готовит случай, по которому решает финансовый отдел." }
 kind: procedure
 sources: [affaan-m/ECC skills/customer-billing-ops/SKILL.md]
 ---

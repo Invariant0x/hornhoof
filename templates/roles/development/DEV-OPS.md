@@ -2,8 +2,6 @@
 id: DEV-OPS
 department: development
 kind: member
-title: { en: "DevOps engineer", ru: "DevOps-инженер" }
-description: { en: "Engineer of build systems, deployment and operational recovery.", ru: "Инженер систем сборки, развертывания и восстановления." }
 tier: standard
 effort: high
 perProduct: false

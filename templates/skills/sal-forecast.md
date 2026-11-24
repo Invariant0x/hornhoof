@@ -1,7 +1,5 @@
 ---
 id: sal-forecast
-title: { en: "Sales forecast", ru: "Прогноз продаж" }
-description: { en: "Estimates what will close this period from evidence in each deal, not from hope.", ru: "Оценивает, что закроется в этом периоде, по фактам в каждой сделке, а не по надеждам." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins]
 ---

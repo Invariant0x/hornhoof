@@ -1,7 +1,5 @@
 ---
 id: dev-performance
-title: { en: "Performance work", ru: "Работа над производительностью" }
-description: { en: "Measures first, fixes the biggest cost, and proves the gain with numbers.", ru: "Сначала измеряет, исправляет самую большую затрату и доказывает выигрыш цифрами." }
 kind: procedure
 sources: [affaan-m/ECC agents/performance-optimizer.md, addyosmani/agent-skills skills/performance-optimization/SKILL.md, garrytan/gstack review/specialists/performance.md]
 ---

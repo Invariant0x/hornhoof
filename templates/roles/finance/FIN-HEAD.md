@@ -2,8 +2,6 @@
 id: FIN-HEAD
 department: finance
 kind: head
-title: { en: "Controller", ru: "Финансовый контролер" }
-description: { en: "Leader for financial reporting, planning and controls.", ru: "Руководитель финансовой отчетности, планирования и контроля." }
 tier: deep
 effort: medium
 perProduct: false

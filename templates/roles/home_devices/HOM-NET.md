@@ -2,8 +2,6 @@
 id: HOM-NET
 department: home_devices
 kind: member
-title: { en: "Home network helper", ru: "Помощник по домашней сети" }
-description: { en: "Specialist in home networks and connectivity.", ru: "Специалист по домашним сетям и подключению устройств." }
 tier: standard
 effort: high
 perProduct: false

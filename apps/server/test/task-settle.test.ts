@@ -8,6 +8,7 @@ import { loadTask, report, submit, verdict } from '../src/modules/tasks/engine.j
 import { setPaused } from '../src/modules/tasks/pause.js';
 import { registerSettleTools } from '../src/modules/tasks/settle.js';
 import type { Grant } from '../src/modules/templates/load.js';
+import { GitHubRateLimited } from '../src/modules/testruns/github-limit.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { listen, mcp } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
@@ -99,6 +100,28 @@ describe('the commit of a task against the releases', () => {
     f.remote({ main: [HEAD], unreadable: true });
     const said = JSON.parse((await (await f.tools(f.watchdog.id)).call('task_released', { task: task.number })).content[0]!.text) as Record<string, unknown>;
     expect(said).toMatchObject({ released: false });
+  });
+
+  it('reports the GitHub rate-limit reset and leaves the task open when commit ancestry hits the limit, and uses git when present', async () => {
+    const f = await watched();
+    const task = await f.shipped();
+    f.remote({ main: [HEAD] });
+    f.ctx.readMerged = async () => {
+      throw new GitHubRateLimited({ remaining: 0, resetAt: Date.UTC(2030, 0, 1, 23, 45) });
+    };
+    const watchdog = await f.tools(f.watchdog.id);
+    const limited = JSON.parse((await watchdog.call('task_released', { task: task.number })).content[0]!.text) as { why: string } & Record<string, unknown>;
+    expect(limited).toMatchObject({ task: task.number, commit: HEAD, source: 'record', inMain: false, release: null, released: false });
+    expect(limited.why).toContain('request limit is used up until 23:45 UTC');
+    expect(limited.why).not.toMatch(/unfinished work/);
+    const refused = await watchdog.call('settle_task', { task: task.number, why: WHY });
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0]!.text).toContain('request limit is used up until 23:45 UTC');
+    expect(refused.content[0]!.text).not.toMatch(/unfinished work/);
+    expect((await f.read(task.id)).status).not.toBe('done');
+    f.ctx.readGitAncestry = async (_repo, head, commit) => (head === HEAD && commit === BASE) || (head === MAIN && commit === HEAD);
+    const proved = JSON.parse((await watchdog.call('task_released', { task: task.number })).content[0]!.text) as Record<string, unknown>;
+    expect(proved).toMatchObject({ task: task.number, commit: HEAD, source: 'record', inMain: true, released: true });
   });
 
   it('does not take the head of the task\'s branch for its work when no hand-in names a commit', async () => {

@@ -1,7 +1,5 @@
 ---
 id: sup-escalation
-title: { en: "Escalations", ru: "Эскалации" }
-description: { en: "Handles urgent and difficult tickets: decides who acts, what the customer is told and when.", ru: "Ведет срочные и сложные обращения: решает, кто действует, что сказать клиенту и когда." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins customer-support/skills/customer-escalation/SKILL.md]
 ---

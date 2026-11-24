@@ -10,6 +10,7 @@ import { logTurnFact } from '../tasks/turn-log.js';
 import { callOperations, type HoldWords } from './hold-watch.js';
 import { sayAgain, tellAgainWentAlong } from './recovery.js';
 import { operatorTransaction } from './transactions.js';
+import { saying } from '../../locales/index.js';
 type Case = typeof programOperatorCases.$inferSelect;
 type Agent = typeof agents.$inferSelect;
 type End = { outcome: string; text: string; actor?: MessageParty };
@@ -28,7 +29,7 @@ export const notStartedWords: HoldWords = {
     (to.kind === 'orchestrator' ? `Neither the program operator nor the head of Operations can take this now: they are off, without a plan or on a hold of their own. ` : '') +
     `Look at the machine with program_screen for employee ${row.agentId} and the machine tools you have, find what broke and repair it. ` +
     `Then release the hold with program_recovery_release, this case and your reason: the waiting turns go on.`,
-  detail: name => ({ en: `${name}: a turn ended before its program started`, ru: `${name}: ход закончился до запуска программы` }),
+  detail: name => saying(words => words.operator.notStarted(name)),
 };
 
 /* The program a case of the agent is about: its last one, or a placeholder for an agent whose program never started. */

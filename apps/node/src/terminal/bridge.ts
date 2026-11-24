@@ -35,11 +35,14 @@ export type OpensCheck = (key: string) => Promise<CheckStep | null>;
 /* The turn a person's words are opening for the agent now, which a tool call waits for; null when none is. */
 export type Opening = (key: string) => Promise<unknown> | null;
 
-/* A short outage of Hornhoof, as its proxy says it: a call that only reads is asked again after these growing pauses. */
+/* A short outage of Hornhoof, as its proxy says it: a call that only reads is asked again after these growing pauses.
+   Hornhoof's /mcp endpoint never answers 404 itself, whereas a reconnecting reverse tunnel answers 404 Not Found. */
 const OUTAGE = new Set([502, 503, 504]);
+const MCP_OUTAGE = new Set([404, 502, 503, 504]);
+const OUTAGE_BY_KIND: Record<'mcp' | 'attach', ReadonlySet<number>> = { mcp: MCP_OUTAGE, attach: OUTAGE };
 const OUTAGE_PAUSES_MS = [1_000, 2_000, 4_000];
 /* Tools that change nothing, so asking one again cannot do anything twice. */
-const READS = new Set(['task', 'tasks', 'test_run', 'work_run', 'briefing', 'company']);
+const READS = new Set(['task', 'tasks', 'test_run', 'work_run', 'briefing', 'company', 'goals', 'inbox']);
 
 const HOOKS = new Set(['start', 'prompt', 'invocation', 'queued', 'stop', 'status', 'tool', 'tooldone', 'toolfail', 'ask', 'interrupt', 'end']);
 /* What the owner check found for a connection: its agent's program, or why not. */
@@ -340,7 +343,7 @@ export class Bridge {
     }
     const target = `${this.hornhoof}${kind === 'mcp' ? '/mcp' : `/api/attachments${event ? `/${event}` : ''}${query ? `?${query}` : ''}`}`;
     const sent = req.method === 'GET' || req.method === 'HEAD' ? {} : kind === 'attach' ? { body: Readable.toWeb(req) as ReadableStream<Uint8Array>, duplex: 'half' } : { body: new Uint8Array(body) };
-    const up = await this.forward(target, { method: req.method, headers, ...sent } as RequestInit, onlyReading(kind, req.method, body));
+    const up = await this.forward(target, { method: req.method, headers, ...sent } as RequestInit, onlyReading(kind, req.method, body), OUTAGE_BY_KIND[kind]);
     const out: Record<string, string> = {};
     for (const h of ['content-type', 'mcp-session-id', 'x-file-name', 'etag']) {
       const v = up.headers.get(h);
@@ -375,10 +378,10 @@ export class Bridge {
 
   /* A call that only reads goes again after a short outage, a few times with growing pauses; a write is never sent twice,
      as it may have gone through. An outage that lasts reaches the program as it came. */
-  private async forward(target: string, init: RequestInit, reads: boolean): Promise<Response> {
+  private async forward(target: string, init: RequestInit, reads: boolean, outage: ReadonlySet<number>): Promise<Response> {
     let up = await fetch(target, init);
     for (const ms of reads ? OUTAGE_PAUSES_MS : []) {
-      if (!OUTAGE.has(up.status)) break;
+      if (!outage.has(up.status)) break;
       await up.body?.cancel();
       await (this.options.pause ?? pause)(ms);
       up = await fetch(target, init);

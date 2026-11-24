@@ -1,7 +1,5 @@
 ---
 id: mkt-crosspost
-title: { en: "Cross-posting", ru: "Публикация в нескольких сетях" }
-description: { en: "Adapts one approved piece for several networks and publishes each version on schedule.", ru: "Адаптирует один одобренный материал для нескольких соцсетей и публикует каждую версию по графику." }
 kind: procedure
 sources: [affaan-m/ECC skills/crosspost/SKILL.md]
 ---

@@ -1,7 +1,5 @@
 ---
 id: ops-work-pipeline
-title: { en: "Operations pipeline", ru: "Конвейер операций" }
-description: { en: "Where operations checks item by item, in a batch, by sample and by code; read it when laying out work or changing a check.", ru: "Где операции проверяют по штуке, пакетом, выборкой и кодом; читай, когда раздаешь работу или меняешь проверку." }
 kind: procedure
 sources: []
 ---

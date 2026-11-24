@@ -1,7 +1,5 @@
 ---
 id: dev-i18n-en-ru
-title: { en: "Languages of the product", ru: "Языки продукта" }
-description: { en: "Keeps every text a user sees in each language the product supports, written well in each.", ru: "Держит каждый текст, который видит пользователь, на всех языках продукта и хорошо написанным на каждом." }
 kind: checklist
 sources: []
 ---

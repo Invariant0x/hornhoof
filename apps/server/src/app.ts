@@ -100,14 +100,19 @@ import { keyRoutes } from './modules/computer/keys.js';
 import { refreshBuild } from './modules/network/follow.js';
 import { questionRoutes } from './modules/network/question-routes.js';
 import { noteSwitch, switchedRoutes } from './modules/network/switched.js';
+import { joinServerMachines } from './modules/network/server-machine.js';
 import { networkRoutes } from './modules/network/routes.js';
 import { overLink } from './auth/tunnel.js';
 import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
 
-import { githubReaders, type CompareReader, type MergeReader, type TreeReader } from './modules/testruns/compare.js';
-import { GitHubLimits, limitRecord } from './modules/testruns/github-limit.js';
+import { githubReaders, type CiDispatcher, type CiReader, type CompareReader, type MergeReader, type TreeReader } from './modules/testruns/compare.js';
+import { readGitAncestry, type GitAncestryReader } from './modules/testruns/git-ancestry.js';
+import { GitHubLimits, limitRecord, repoScopeOf, type ScopedRepo } from './modules/testruns/github-limit.js';
 import { MergedAnswers } from './modules/departments/branches.js';
+import { isNotNull } from 'drizzle-orm';
+import { decryptSecret } from './crypto/secrets.js';
+import { departments } from './db/schema.js';
 import { createOnGitHub } from './modules/departments/github-create.js';
 import { openIssueOnGitHub, type IssueCreator } from './modules/feedback/github-issue.js';
 import { RELEASED, type Released } from './modules/feedback/released.js';
@@ -124,7 +129,7 @@ import { modelsReader, type ModelsReader } from './modules/subscriptions/api-mod
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. templates are read
    from config.templatesDir unless given: a test file reads them once for all its servers. onRoute is called for every
    route before any is added; a test uses it to ask each route what it tells a stranger. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; onRoute?: (route: { method: string | string[]; url: string }) => void; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; readBranches?: BranchReader; createBranch?: BranchCreator; readTags?: TagReader; readMerged?: MergeReader; createRepository?: RepositoryCreator; createSpreadsheet?: SpreadsheetCreator; createIssue?: IssueCreator; readModels?: ModelsReader; clock?: () => number; templates?: Templates; released?: readonly Released[]; worldPacks?: WorldPackRegistry };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; onRoute?: (route: { method: string | string[]; url: string }) => void; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; readCi?: CiReader; dispatchCi?: CiDispatcher; readBranches?: BranchReader; createBranch?: BranchCreator; readTags?: TagReader; readMerged?: MergeReader; readGitAncestry?: GitAncestryReader; createRepository?: RepositoryCreator; createSpreadsheet?: SpreadsheetCreator; createIssue?: IssueCreator; readModels?: ModelsReader; clock?: () => number; templates?: Templates; released?: readonly Released[]; worldPacks?: WorldPackRegistry };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, its ACME answers and
@@ -237,6 +242,63 @@ const RESTORE_RETRY_MS = 10_000;
 /* For how long a connection that has sent nothing is waited for once the app closes. */
 const SILENT_CONNECTION_MS = 1000;
 
+const cardState = (cards: ReturnType<GitHubLimits['cards']>) =>
+  cards.map(card => `${card.repository}\0${card.resetAt ?? ''}`).sort().join('\n');
+
+function reposByCompany(rows: { companyId: string; url: string | null; tokenEnc: string | null }[], secret: Buffer) {
+  const byCompany = new Map<string, ScopedRepo[]>();
+  const decrypt = (enc: string) => decryptSecret(enc, secret);
+  for (const row of rows) {
+    const scoped = repoScopeOf(row, row.companyId, decrypt);
+    if (!scoped) continue;
+    const list = byCompany.get(row.companyId) ?? [];
+    list.push(scoped);
+    byCompany.set(row.companyId, list);
+  }
+  return byCompany;
+}
+
+function publishChangedCards(bus: EventBus, limits: GitHubLimits, byCompany: Map<string, ScopedRepo[]>, last: Map<string, string>): void {
+  for (const id of new Set([...byCompany.keys(), ...last.keys()])) {
+    const next = cardState(limits.cards(byCompany.get(id) ?? []));
+    if ((last.get(id) ?? '') === next) continue;
+    if (next) last.set(id, next); else last.delete(id);
+    bus.publish(id, { type: 'requests', spot: { departmentId: null, parentId: null } });
+  }
+}
+
+async function refreshGitHubLimitCards(deps: Deps, bus: EventBus, log: FastifyBaseLogger, limits: GitHubLimits, last: Map<string, string>): Promise<void> {
+  try {
+    if (!limits.hasCards()) return publishChangedCards(bus, limits, new Map(), last);
+    const rows = await deps.db
+      .select({ companyId: departments.companyId, url: departments.repoUrl, tokenEnc: departments.repoTokenEnc })
+      .from(departments)
+      .where(isNotNull(departments.repoUrl));
+    publishChangedCards(bus, limits, reposByCompany(rows, deps.config.secret), last);
+  } catch (error: unknown) {
+    log.error({ error: loggable(error) }, 'Refreshing GitHub limit cards failed.');
+  }
+}
+
+function githubLimitsFor(deps: Deps, log: FastifyBaseLogger, bus: EventBus, clock: () => number): GitHubLimits {
+  const last = new Map<string, string>();
+  let running = false, dirty = false;
+  const notify = () => {
+    if (running) { dirty = true; return; }
+    running = true;
+    void refreshGitHubLimitCards(deps, bus, log, limits, last).finally(() => {
+      running = false;
+      if (dirty) { dirty = false; notify(); }
+    });
+  };
+  const limits: GitHubLimits = new GitHubLimits(
+    clock,
+    limit => log.warn(limitRecord(limit), 'GitHub REST request limit exhausted.'),
+    notify,
+  );
+  return limits;
+}
+
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger ?? false, logController: new LogController({ disableRequestLogging: true }) });
   const web = hasWebApp(deps.config.webDist);
@@ -247,8 +309,9 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   });
   addSecurityHeaders(app);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
+  const bus = new EventBus();
   /* One request limit for every GitHub REST reader of the server, on the clock the server reads when it asks. */
-  const githubLimits = new GitHubLimits(() => ctx.clock(), limit => app.log.warn(limitRecord(limit), 'GitHub REST request limit exhausted.'));
+  const githubLimits = githubLimitsFor(deps, app.log, bus, () => ctx.clock());
   const ctx = {
     startedAt: new Date(),
     readCommit,
@@ -257,18 +320,19 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     readBranches,
     createBranch,
     readTags,
+    readGitAncestry,
     githubLimits,
     mergedAnswers: new MergedAnswers(),
     createRepository: createOnGitHub(),
     createSpreadsheet: createOnGoogleSheets(deps.config.googleTokenUrl, deps.config.googleSheetsUrl, deps.config.googleDriveUrl),
     createIssue: openIssueOnGitHub(),
     readModels: modelsReader({ allowed: deps.config.apiInternalHosts }),
-    clock: Date.now,
+    clock: () => Date.now(),
     released: RELEASED,
     worldPacks: defaultWorldPacks(),
     ...deps,
     log: app.log,
-    bus: new EventBus(),
+    bus,
     terminals: new TerminalRelay(),
   } as Ctx;
   ctx.conversationEffects = { beforeDispatch: fallbackMove, resumeProgram: resumeOperatorProcess, notifyHold: notifyFailure };
@@ -340,6 +404,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   /* First of what a leader does: the work its one built-in node ran before each machine had its own is named as this
      machine's, before anything else looks at it. A failure is one line, and the next time it leads tries again. */
   ctx.mode.whenLead(() => nameBuiltinWork(ctx).catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, "Could not name the built-in node's earlier work as this machine's.")), () => undefined);
+  ctx.mode.whenLead(() => joinServerMachines(ctx.db, ctx.config).catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, 'Could not join existing server and node machine rows.')), () => undefined);
   ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
   /* The heads' bots listen only while this app leads: a message one takes is written down, and two apps asking
      Telegram for the same bot's messages would take them from each other. A bot stops before the database and the

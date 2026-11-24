@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { eq } from 'drizzle-orm';
 import type { FastifyServerOptions, RouteOptions } from 'fastify';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { attachments, improvements, jobs, machines, tasks, testParts, testRuns, turns, vaultEntries, vaultLog } from '../src/db/schema.js';
+import { attachments, companies, improvements, jobs, machines, tasks, testParts, testRuns, turns, vaultEntries, vaultLog } from '../src/db/schema.js';
 import { addNote, companyBook, departmentBook } from '../src/modules/notebook/book.js';
 import { ask } from '../src/modules/tasks/engine.js';
 import { appFixture, as, testApp } from './helpers.js';
@@ -130,14 +130,15 @@ const CASES: { name: string; viewer: Viewer; agent: Crew; closed: boolean }[] = 
 
 /* Lists, with what each person gets. company: it names every employee and the work of the company, which everyone of it
    sees, and keeps only the words of the agents a person does not open. */
-type Listed = { route: string; url: (c: AclCompany) => string; statuses: Partial<Record<Viewer, number>>; company?: boolean };
+/* theme: the company's theme for the call, for a route that answers only on a theme with a world (#1973). */
+type Listed = { route: string; url: (c: AclCompany) => string; statuses: Partial<Record<Viewer, number>>; company?: boolean; theme?: string };
 const ALL_OK = { ann: 200, olga: 200, wes: 200, clara: 200, ceo: 200 };
 const WHOLE_ONLY = { ann: 403, olga: 403, wes: 200, clara: 200, ceo: 200 };
 /* Ann has App, a product of Development, and not the department itself: for her it does not exist, and its notebook is closed. */
 const DEPARTMENT_ITSELF = { ann: 404, olga: 200, wes: 200, clara: 200, ceo: 200 };
 const LISTS: Listed[] = [
   { route: 'GET /api/org', url: () => '/api/org', statuses: ALL_OK, company: true },
-  { route: 'GET /api/world/state', url: () => '/api/world/state', statuses: ALL_OK, company: true },
+  { route: 'GET /api/world/state', url: () => '/api/world/state', statuses: ALL_OK, company: true, theme: 'egypt' },
   { route: 'GET /api/world/theme', url: () => '/api/world/theme', statuses: ALL_OK, company: true },
   { route: 'GET /api/tasks', url: c => `/api/tasks?status=all&department=${c.dev.id}`, statuses: ALL_OK, company: true },
   { route: 'GET /api/requests', url: () => '/api/requests', statuses: ALL_OK },
@@ -331,8 +332,9 @@ describe('one thing of one agent', () => {
 });
 
 describe('every list', () => {
-  it.each(LISTS)('$route shows each person only what they may see', async ({ route, url, statuses, company }) => {
+  it.each(LISTS)('$route shows each person only what they may see', async ({ route, url, statuses, company, theme }) => {
     const c = await busy();
+    if (theme) await c.db.update(companies).set({ theme }).where(eq(companies.id, c.companyId));
     const got: string[] = [];
     for (const [viewer, status] of Object.entries(statuses) as [Viewer, number][]) {
       const res = await c.get(url(c), c.tokens[viewer]);

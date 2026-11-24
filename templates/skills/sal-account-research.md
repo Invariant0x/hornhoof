@@ -1,7 +1,5 @@
 ---
 id: sal-account-research
-title: { en: "Account research", ru: "Исследование компании" }
-description: { en: "Builds a short, sourced brief on a target company and its people before anyone writes to them.", ru: "Составляет краткую справку с источниками о целевой компании и ее людях до первого контакта." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins]
 ---

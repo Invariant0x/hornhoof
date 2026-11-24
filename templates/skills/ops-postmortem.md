@@ -1,7 +1,5 @@
 ---
 id: ops-postmortem
-title: { en: "Postmortem", ru: "Разбор инцидента" }
-description: { en: "Writes a blameless account of an incident with its cause and the actions that stop it from happening again.", ru: "Пишет разбор инцидента без поиска виноватых, с причиной и мерами, которые не дадут ему повториться." }
 kind: procedure
 sources: [wshobson/agents plugins/incident-response/skills/postmortem-writing/SKILL.md]
 ---

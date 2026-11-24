@@ -1,7 +1,5 @@
 ---
 id: sup-bug-report
-title: { en: "Bug report for development", ru: "Отчет об ошибке для разработки" }
-description: { en: "Writes a bug report that Development can reproduce and prioritise without asking support again.", ru: "Пишет отчет об ошибке, который разработка может воспроизвести и оценить без повторных вопросов к поддержке." }
 kind: procedure
 sources: []
 ---
