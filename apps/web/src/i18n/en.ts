@@ -2049,6 +2049,9 @@ export const en = {
     machineAwayKinds: { orchestrator: 'orchestrator', head: 'head' },
     machineAwayImportant: (names: string) => `Among them: ${names}.`,
     machineAwayDo: 'What to do: switch it on and plug it in, sign in to the account, check that Docker has started.',
+    githubLimit: (repository: string) => `GitHub request limit reached for ${repository}`,
+    githubLimitRetry: (time: string) => `Try the blocked action again after ${time} UTC.`,
+    githubLimitUnknown: 'GitHub gave no reset time. Try the action again later.',
     machineBack: (host: string, at: string) => `Machine ${host} is back: ${at}.`,
     /* A machine short of disk space, whose node takes no new checks or builds until it has room again. */
     machineLow: (host: string, owner: string | null) => (owner ? `Machine ${host} (${owner}) is low on disk space` : `Machine ${host} is low on disk space`),
@@ -3218,6 +3221,10 @@ export const en = {
     no_head: 'This department has no head yet. Hire one first.',
     switched_off: 'This employee is switched off right now. Switch it on on the department schema first.',
     repo_invalid: 'Use an https address with no name or token in it, a plain branch name, and an author name on one line with a full email.',
+    github_rate_limited: (time: string | null) => time
+      ? `GitHub did not answer. The account's request limit is used up until ${time} UTC. Try again after that.`
+      : "GitHub did not answer. The account's request limit is used up. Try again later.",
+    commit_history_unavailable: 'The repository could not confirm the commit history. Try again.',
     repo_release_workflow_invalid: 'Name the release workflow by the path of its file, as .github/workflows/release.yml.',
     repo_command_invalid: 'A full test command that names its part with {part} must also say how many parts there are with {parts}.',
     repo_folder_taken: 'Another repository of this department has an address that ends in the same name. Agents keep each repository in a folder of that name, so one department cannot keep both.',

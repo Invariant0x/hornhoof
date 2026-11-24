@@ -754,6 +754,8 @@ export type MachineLowCard = {
   names?: Record<string, string>;
 };
 
+export type GitHubLimitCard = { repository: string; resetAt: number | null };
+
 /* Everything that waits for people as /api/requests shows it to this person, and the counts of all of it: per owner, per
    asking agent and in total. */
 export type Decisions = {
@@ -767,6 +769,7 @@ export type Decisions = {
   copySchemaFailures?: CopySchemaFailureCard[];
   /* A server from before nodes said how full their disk is sends none. */
   machinesLow?: MachineLowCard[];
+  githubLimits?: GitHubLimitCard[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
 
@@ -1016,6 +1019,8 @@ export type RunningAgent = {
   title: Lang | null;
   department: { id: string; name: string } | null;
   provider: ProviderId;
+  /* The model the employee runs on; omitted by older servers. */
+  model?: string;
   since: string | null;
   task: { number: number; title: string } | null;
   withCeo: boolean;
