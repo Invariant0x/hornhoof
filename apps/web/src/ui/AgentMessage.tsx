@@ -2,6 +2,7 @@ import { useCallback, useLayoutEffect, useState, type RefObject } from 'react';
 import { useLanguage, useT, type Language, type Messages } from '../i18n';
 import type { EventView, MessageParty } from '../types';
 import { isHidden } from './visibility';
+import { sayIf } from '@hornhoof/protocol';
 
 export type AgentMessageView = NonNullable<EventView['message']>;
 /* A message event that names who wrote to whom; older ones without it show as they did. */
@@ -26,13 +27,13 @@ function agentPartyName(t: Messages, language: Language, p: MessageParty): strin
 }
 
 function namedParty(language: Language, p: MessageParty): string {
-  const role = p.role?.[language];
+  const role = sayIf(p.role, language);
   return role && role.toLocaleLowerCase(language) !== p.name.toLocaleLowerCase(language) ? `${p.name} (${role})` : p.name;
 }
 
 function serviceLine(t: Messages, language: Language, m: AgentMessageView, to: string): string {
   const n = m.notification;
-  return t.window.noticeSource(t.notificationSources[n?.source ?? 'service'], n?.tasks.map(t => `#${t.number}`).join(', ') ?? '', n?.detail?.[language] ?? '', to);
+  return t.window.noticeSource(t.notificationSources[n?.source ?? 'service'], n?.tasks.map(t => `#${t.number}`).join(', ') ?? '', sayIf(n?.detail, language) ?? '', to);
 }
 
 /* "Message from … to …" for what came in, "Message to … from …" for what went out, and a notice for what Hornhoof said.

@@ -1,7 +1,5 @@
 ---
 id: hh-fix-loop
-title: { en: "Fix loop", ru: "Цикл исправлений" }
-description: { en: "Sends failed work back with the findings, and changes course when attempts stop producing evidence.", ru: "Возвращает неудачную работу с замечаниями и меняет подход, когда попытки перестают давать новые сведения." }
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/SKILL.md]
 ---

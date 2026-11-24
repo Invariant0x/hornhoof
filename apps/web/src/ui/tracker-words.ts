@@ -3,8 +3,9 @@ import type { Language, Messages } from '../i18n';
 import { isClosed, taskWaits, type WaitTask } from '../task-tree';
 import { doerOf, isWaitForPerson } from '../tracker';
 import type { TaskLine, TaskLogLine } from '../types';
+import { formatTagOf } from '@hornhoof/protocol';
 
-export const localeOf = (language: Language) => (language === 'ru' ? 'ru-RU' : 'en-GB');
+export const localeOf = (language: Language) => formatTagOf(language);
 
 /* A stretch of time in the largest whole unit that says it: minutes, hours with minutes, or days. */
 export function spanText(t: Messages, seconds: number): string {

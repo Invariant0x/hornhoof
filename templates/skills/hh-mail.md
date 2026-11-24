@@ -1,7 +1,5 @@
 ---
 id: hh-mail
-title: { en: "Mail from your machine", ru: "Почта со своей машины" }
-description: { en: "Sends letters with files from the department's mailbox and finds and reads the replies right from your machine, marking each step in the department's git.", ru: "Отправляет письма с файлами из ящика отдела, ищет и читает ответы прямо со своей машины и отмечает каждый шаг в git отдела." }
 kind: procedure
 sources: []
 ---

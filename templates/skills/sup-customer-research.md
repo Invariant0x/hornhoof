@@ -1,7 +1,5 @@
 ---
 id: sup-customer-research
-title: { en: "Case research", ru: "Изучение обращения" }
-description: { en: "Gathers what is known about a customer and their problem before anyone answers.", ru: "Собирает все, что известно о клиенте и его проблеме, прежде чем кто-то ответит." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins customer-support]
 ---

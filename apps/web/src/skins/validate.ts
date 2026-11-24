@@ -1,3 +1,4 @@
+import { LOCALE_IDS, SOURCE_LOCALE } from '@hornhoof/protocol';
 import { readColor, weakPair } from './contrast';
 import { BUILTIN_SKINS, type BuiltinSkin } from './registry';
 import { COLOR_ROLES, CUT_RANGE, FONT_ROLES, GENERIC_FONTS, SCHEMES, type ColorRole, type FontRole, type Scheme, type Skin, type SkinNames } from './roles';
@@ -12,7 +13,9 @@ const SKIN_SCHEMA_VERSION = 2;
 export const SKIN_FILE_LIMIT = 64 * 1024;
 const NAME_LIMIT = 120;
 const FIELDS = ['schema_version', 'base', 'name', 'color_scheme', 'colors', 'fonts', 'cut'];
-const NAME_LANGUAGES = ['ru', 'en'] as const;
+/* A name in any language of the registry; English is the one every skin has, as the others are optional. */
+const NAME_LANGUAGES: readonly string[] = LOCALE_IDS;
+const NAME_REQUIRED: readonly string[] = [SOURCE_LOCALE];
 
 /* The fonts a file may name for each role: the ones Hornhoof ships and the common families behind them. With no repeats
    a list holds at most as many as its role allows, never more than six. */
@@ -83,14 +86,14 @@ function checkEntry<K extends string>(name: string, keys: readonly K[], key: str
 }
 
 /* A group of named values, such as colors: an object with every key, each value passing its own check. */
-function checkGroup<K extends string>(raw: unknown, name: string, keys: readonly K[], check: EntryCheck<K>): SkinError | null {
+function checkGroup<K extends string>(raw: unknown, name: string, keys: readonly K[], check: EntryCheck<K>, required: readonly K[] = keys): SkinError | null {
   if (raw === undefined) return problem('missing', name);
   if (!isObject(raw)) return problem('not_object', name);
   for (const key of Object.keys(raw)) {
     const found = checkEntry(name, keys, key, raw[key], check);
     if (found) return found;
   }
-  const missing = keys.find(key => !(key in raw));
+  const missing = required.find(key => !(key in raw));
   return missing === undefined ? null : problem('missing', `${name}.${missing}`);
 }
 
@@ -127,7 +130,7 @@ const CHECKS: Check[] = [
     return extra === undefined ? null : stranger(extra, extra);
   },
   raw => (raw.base === undefined ? problem('missing', 'base') : isBase(raw.base) ? null : problem('bad_base', 'base')),
-  raw => checkGroup(raw.name, 'name', NAME_LANGUAGES, checkName),
+  raw => checkGroup(raw.name, 'name', NAME_LANGUAGES, checkName, NAME_REQUIRED),
   raw => (raw.color_scheme === undefined ? problem('missing', 'color_scheme') : isScheme(raw.color_scheme) ? null : problem('bad_scheme', 'color_scheme')),
   raw => checkGroup(raw.colors, 'colors', COLOR_ROLES, checkColor),
   raw => checkGroup(raw.fonts, 'fonts', FONT_ROLES, checkFonts),
@@ -147,6 +150,9 @@ function readJson(text: string): unknown {
 /* An object with a value for every key, in the order of the keys. */
 const byKey = <K extends string, V>(keys: readonly K[], value: (key: K) => V) => Object.fromEntries(keys.map(key => [key, value(key)])) as Record<K, V>;
 
+/* The names a skin has, in the order of the registry, each written once. */
+const namesOf = (languages: readonly string[], name: (language: string) => string): Record<string, string> => Object.fromEntries(languages.map(language => [language, name(language)]));
+
 /* The skin of a file that passed every check, built anew in the order of the roles. */
 function skinOf(raw: Raw): Skin {
   const names = raw.name as Record<string, string>;
@@ -154,7 +160,7 @@ function skinOf(raw: Raw): Skin {
   const fonts = raw.fonts as Record<string, string[]>;
   return {
     base: raw.base as string,
-    name: byKey(NAME_LANGUAGES, language => names[language]!.trim()),
+    name: namesOf(NAME_LANGUAGES.filter(language => language in names), language => names[language]!.trim()) as SkinNames,
     scheme: raw.color_scheme as Scheme,
     colors: byKey(COLOR_ROLES, role => colors[role]!),
     fonts: byKey(FONT_ROLES, role => [...fonts[role]!]),
@@ -189,7 +195,7 @@ export function skinObject(skin: Skin): Raw {
   return {
     schema_version: SKIN_SCHEMA_VERSION,
     base: skin.base,
-    name: byKey(NAME_LANGUAGES, language => skin.name[language]),
+    name: namesOf(NAME_LANGUAGES.filter(language => skin.name[language] !== undefined), language => skin.name[language]!),
     color_scheme: skin.scheme,
     colors: byKey(COLOR_ROLES, role => skin.colors[role]),
     fonts: byKey(FONT_ROLES, role => [...skin.fonts[role]]),

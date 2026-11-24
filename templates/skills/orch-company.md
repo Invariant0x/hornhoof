@@ -1,7 +1,5 @@
 ---
 id: orch-company
-title: { en: "Design the company structure", ru: "Строить структуру компании" }
-description: { en: "Turns an authorized company goal into departments, products and accountable owners.", ru: "Превращает согласованную цель компании в отделы, продукты и ответственных за результат." }
 kind: core
 ---
 Read company for its actual people, departments, products and current assignments. Read its notebook and use the department names people see in their screen. Match the intended result with a department that can deliver it. If no department fits, use build_structure with the appropriate stock structure and staff under standing owner authority. Operations is maintained by the system and is not an optional extra. Ask a clear question only when the choice materially changes the result and the person's intent does not settle it.

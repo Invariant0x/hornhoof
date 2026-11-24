@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from 'react';
-import { useLanguage, useT } from '../i18n';
+import { useLanguage, useT, type Language } from '../i18n';
 import type { Department, DepartmentTree, TreeAgent } from '../types';
 import { ProviderMark } from '../ui/icons';
 import { TaskFindings, WorkflowStages } from '../ui/TaskWorkflow';
@@ -72,7 +72,7 @@ function LaneTask({ row, onOpenTask }: { row: Pick<TreeRow, 'line' | 'activity'>
   return <button type="button" className="linkish" onClick={() => onOpenTask(taskId)}>{number !== undefined && `#${number}`} {rowTitle(row, L)}</button>;
 }
 
-function LaneRole({ employee, language }: { employee: Department['employees'][number] | undefined; language: 'en' | 'ru' }) {
+function LaneRole({ employee, language }: { employee: Department['employees'][number] | undefined; language: Language }) {
   const role = employee?.title?.[language];
   return role && role !== employee?.name ? <p className="say">{role}</p> : null;
 }

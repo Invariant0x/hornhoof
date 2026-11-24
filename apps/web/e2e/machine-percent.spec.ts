@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { LANGUAGES, type Language, type Messages } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage, type Messages } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { MachineView, Org, ShownCommand, SubView } from '../src/types';
@@ -22,7 +22,7 @@ const NOW = Date.parse('2026-11-15T12:00:00.000Z');
 const SKINS: readonly BuiltinSkinId[] = ['cyberpunk', 'light'];
 const WIDTHS = [[1440, 900], [375, 2400]] as const;
 /* A language added to the registry fails to compile here until its words are added. */
-const WORDS: Record<Language, Messages> = { en, ru };
+const WORDS: Record<ShippedLanguage, Messages> = { en, ru };
 const LANGS = LANGUAGES.map(language => language.id);
 
 const machine = (id: string, hostname: string, cpus: number, load: number): MachineView => ({
@@ -63,9 +63,9 @@ const COMMANDS: ShownCommand[] = [
 ];
 /* Where what a phrase says first stands: both shipped languages write left to right. A language added to the registry fails
    to compile here until its way is added. */
-const READS: Record<Language, 'left' | 'right'> = { en: 'left', ru: 'left' };
+const READS: Record<ShippedLanguage, 'left' | 'right'> = { en: 'left', ru: 'left' };
 
-async function openScreen(page: Page, language: Language, skin: BuiltinSkinId, width: number, height: number, tab: 'machines' | 'subscriptions', plans: SubView[] = [PLAN], commands: ShownCommand[] = []) {
+async function openScreen(page: Page, language: ShippedLanguage, skin: BuiltinSkinId, width: number, height: number, tab: 'machines' | 'subscriptions', plans: SubView[] = [PLAN], commands: ShownCommand[] = []) {
   await page.setViewportSize({ width, height });
   await page.clock.install({ time: NOW });
   await serveApi(page);

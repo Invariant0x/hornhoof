@@ -618,4 +618,24 @@ describe('cards for the person', () => {
     await user.click(await within(screen.getByRole('region', { name: 'Waiting for you' })).findByRole('button', { name: /Version .* was marked/, expanded: false }));
     expect(await screen.findByRole('region', { name: 'A version was marked without a release' })).toBeInTheDocument();
   });
+
+  it('shows GitHub rate limit cards in Failures with and without a reset time', async () => {
+    const user = userEvent.setup();
+    const resetAt = Date.UTC(2030, 0, 1, 23, 45);
+    shell({
+      'GET /api/requests': [200, {
+        ...decisions([]),
+        githubLimits: [
+          { repository: 'acme/shop', resetAt },
+          { repository: 'acme/docs', resetAt: null },
+        ],
+      }],
+    });
+    await openTasks(user);
+    await goTo(user, /^Failures/);
+    const timed = await screen.findByRole('region', { name: 'GitHub request limit reached for acme/shop' });
+    expect(within(timed).getByText('Try the blocked action again after 23:45 UTC.')).toBeInTheDocument();
+    const untimed = await screen.findByRole('region', { name: 'GitHub request limit reached for acme/docs' });
+    expect(within(untimed).getByText('GitHub gave no reset time. Try the action again later.')).toBeInTheDocument();
+  });
 });

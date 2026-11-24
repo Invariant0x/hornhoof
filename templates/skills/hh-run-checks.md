@@ -1,7 +1,5 @@
 ---
 id: hh-run-checks
-title: { en: "Run change checks", ru: "Проверки изменения" }
-description: { en: "Runs affected checks in the workspace and uses the shared runner for the checks of an assigned task.", ru: "Запускает проверки изменений в рабочей папке, а проверки назначенной задачи передает общему инструменту." }
 kind: core
 ---
 You can choose the checks that prove the assigned result.

@@ -2,8 +2,6 @@
 id: BIZ-HEAD
 department: business_development
 kind: head
-title: { en: "Head of business development", ru: "Руководитель развития бизнеса" }
-description: { en: "Leader for business development and commercial opportunities.", ru: "Руководитель развития бизнеса и коммерческих возможностей." }
 tier: deep
 effort: medium
 perProduct: false
