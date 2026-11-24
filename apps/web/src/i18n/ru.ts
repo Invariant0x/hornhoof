@@ -3051,6 +3051,8 @@ export const ru: Messages = {
       why: 'Зачем',
       facts: 'Факты',
       responsible: 'Ответственный',
+      askedBy: 'Попросил',
+      decides: 'Решает',
       executor: 'Исполнитель',
       pipeline: 'Конвейер',
       pipelineStage: (pipeline: string, stage: string) => `${pipeline} · рубеж «${stage}»`,
