@@ -26,7 +26,7 @@ type Place = { name: string; path: string; tasks: unknown[]; held?: boolean; run
 const shownList = async (page: Page) => { await expect(page.locator('.tr-list:not(.tr-held) .tr-row, .tr-board').first()).toBeVisible(); };
 const shownBlock = async (page: Page) => { await expect(shownEmpty(page).first()).toBeVisible(); };
 const busy = async (page: Page) => { await expect(page.locator('.tr-held .spinner')).toBeVisible(); };
-const said = (kind: string) => async (page: Page) => { await expect(page.locator(`.tr-held-rows > .load-fail${kind}`)).toBeVisible(); };
+const said = (kind: string) => async (page: Page) => { await expect(page.locator(`.tr-held .tr-held-fail > .load-fail${kind}`)).toBeVisible(); };
 
 const PLACES: Place[] = [
   { name: 'mine-empty', path: '/tasks', tasks: ELSEWHERE, shown: shownBlock },

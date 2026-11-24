@@ -127,7 +127,7 @@ for (const look of LOOKS) {
       const before = await boxesOf(parts);
       for (const [ms, block] of [[SLOW_MS - RING_DELAY_MS, '.load-fail.slow'], [FAIL_MS - SLOW_MS, '.load-fail:not(.slow)']] as const) {
         await page.clock.runFor(ms);
-        await expect(page.locator(`.tr-held-rows > ${block}`)).toBeVisible();
+        await expect(page.locator(`.tr-held .tr-held-fail > ${block}`)).toBeVisible();
         expectSameBoxes(await boxesOf(parts), before);
       }
     });

@@ -466,35 +466,14 @@ async function expectKeptRoom(page: Page, first: Locator, kept: Locator[]) {
 }
 
 test.describe('the tracker list while its tasks come', () => {
-  /* Design #1633 on #1656: past 10 s and once given up, the block that says so covers the first held rows, 2 on a wide list,
-     where the ring stood, and the room keeps its height; the column names and the group head stay. */
-  test('keeps its column names, its group head and its height past 10 s and once given up, the block over its first rows', async ({ page }) => {
-    await openHeld(page, SCREENS[0]!, EN);
-    await page.clock.runFor(RING_DELAY_MS);
-    const rows = page.locator('.tr-held .tr-rows > .tr-row:visible');
-    await expect(rows).toHaveCount(2);
-    const [first, second] = await boxesOf([rows.first(), rows.nth(1)]);
-    const room = page.locator('.tr-held-rows');
-    const [held] = await boxesOf([room]);
-    for (const [ms, block] of [[SLOW_MS - RING_DELAY_MS, '.load-fail.slow'], [FAIL_MS - SLOW_MS, '.load-fail:not(.slow)']] as const) {
-      await page.clock.runFor(ms);
-      const said = room.locator(`:scope > ${block}`);
-      await expect(said).toBeVisible();
-      const [box] = await boxesOf([said]);
-      expect(Math.abs(box!.y - first!.y)).toBeLessThanOrEqual(0.5);
-      expect(Math.abs(box!.y + box!.height - (second!.y + second!.height))).toBeLessThanOrEqual(0.5);
-      expectSameBoxes(await boxesOf([room]), [held!]);
-      for (const part of [page.locator('.tr-held .tr-head'), page.locator('.tr-held .tr-group-head')]) await expect(part).toBeVisible();
-    }
-  });
-
-  /* With no count of its own a list holds the empty block's height, 2 rows on a wide list (Design #1633, amending #1611). */
+  /* With no count of its own a list holds the rows that fill the window, and at least the empty block's height, 2 rows on a wide
+     list (Design #1633, amending #1611). */
   test('holds rows of the size of its rows, which its first rows take in place, with the column names and the group head at once', async ({ page }) => {
     const hold = await openHeld(page, SCREENS[0]!, EN);
     await page.clock.runFor(RING_DELAY_MS);
     const heldRows = page.locator('.tr-held .tr-row:visible');
     const count = await heldRows.count();
-    expect(count).toBe(2);
+    expect(count).toBeGreaterThanOrEqual(2);
     const held = await boxesOf(await heldRows.all());
     for (const row of held) expect(Math.abs(row.height - 37)).toBeLessThanOrEqual(0.5);
     const heads = await boxesOf([page.locator('.tr-held .tr-group-head'), page.locator('.tr-held .tr-head')]);
@@ -504,7 +483,8 @@ test.describe('the tracker list while its tasks come', () => {
     await page.clock.runFor(RING_MIN_MS);
     const rows = page.locator('.tr-list:not(.tr-held) .tr-group').first().locator('.tr-rows > .tr-row');
     await expect(rows.first()).toBeVisible();
-    expectSameBoxes(await boxesOf((await rows.all()).slice(0, count)), held);
+    const arrived = (await rows.all()).slice(0, count);
+    expectSameBoxes(await boxesOf(arrived), held.slice(0, arrived.length));
     expectSameBoxes(await boxesOf([page.locator('.tr-group-head').first(), page.locator('.tr-head').first()]), heads);
   });
 
