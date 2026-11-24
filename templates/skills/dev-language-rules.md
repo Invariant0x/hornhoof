@@ -1,7 +1,5 @@
 ---
 id: dev-language-rules
-title: { en: "Rules of each language", ru: "Правила каждого языка" }
-description: { en: "Follows the style, patterns, security and testing rules of every language the code is in.", ru: "Следует правилам стиля, шаблонам, требованиям безопасности и тестирования каждого языка, на котором написан код." }
 kind: procedure
 sources: [affaan-m/ECC rules]
 ---

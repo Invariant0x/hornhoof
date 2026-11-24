@@ -7,6 +7,7 @@ import { BusyLabel } from './BusyLabel';
 import { DecidedByNote, frozenBy, WaitsForNote } from './DecidedBy';
 import { AlertIcon, StaffIcon } from './icons';
 import { ProposalMaterialsSection, useProposalCardPost, useProposalMaterials } from './RequestMaterials';
+import { say } from '@hornhoof/protocol';
 
 type Props = {
   department: { id: string; name: string };
@@ -75,7 +76,7 @@ function rowsOf(roster: Roster, lines: StaffLine[]): Row[] {
 function staffName(r: Row, roster: Roster | null, language: Language): string {
   if (r.line.name) return r.line.name;
   const product = roster?.products.find(p => p.id === r.line.product);
-  return product ? `${r.role.title[language]} (${product.name})` : r.role.title[language];
+  return product ? `${say(r.role.title, language)} (${product.name})` : say(r.role.title, language);
 }
 
 function StaffPersonBadges({ r, language, t }: { r: Row; language: Language; t: Messages }) {
@@ -84,7 +85,7 @@ function StaffPersonBadges({ r, language, t }: { r: Row; language: Language; t: 
     <>
       {kind === 'head' && <span className="badge head">{t.dept.head}</span>}
       {required && <span className="badge required">{t.staff.required}</span>}
-      {r.line.name && <small>{r.role.title[language]}</small>}
+      {r.line.name && <small>{say(r.role.title, language)}</small>}
       {holder && <small>{t.staff.present(holder)}</small>}
     </>
   );

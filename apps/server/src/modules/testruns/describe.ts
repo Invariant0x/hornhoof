@@ -209,6 +209,9 @@ export async function acceptDescription(ctx: Ctx, id: NodeIdentity, message: Tes
     .catch(descriptionError);
   if (problem) await descriptionProblem(ctx, run, message, problem);
 }
+/* A product with no test environment at its commit has nothing to test: the run is refused, a hint and no failure. Any other
+   problem is one a person has to fix. */
+const problemStatus = (problem: EnvironmentProblem): 'refused' | 'failed' => (problem.code === 'environment_missing' ? 'refused' : 'failed');
 async function descriptionFailure(ctx: Ctx, run: Run, problem: EnvironmentProblem): Promise<void> {
   await ctx.db.transaction(async tx => {
     const [locked] = await tx.select().from(testRuns).where(pendingDescription(run.id)).for('update');
@@ -216,7 +219,7 @@ async function descriptionFailure(ctx: Ctx, run: Run, problem: EnvironmentProble
     const [existing] = await tx.select(idOnly(testParts)).from(testParts).where(eq(testParts.runId, run.id));
     if (existing) return;
     await tx.update(testRuns).set({ parts: 1, environmentRequest: { ...locked.environmentRequest!, problem } }).where(eq(testRuns.id, run.id));
-    await tx.insert(testParts).values({ companyId: run.companyId, runId: run.id, part: 1, status: 'failed', error: problem.code, tail: problem.detail, finishedAt: new Date() });
+    await tx.insert(testParts).values({ companyId: run.companyId, runId: run.id, part: 1, status: problemStatus(problem), error: problem.code, tail: problem.detail, finishedAt: new Date() });
   });
 }
 function descriptionEligible(ctx: Ctx, place: Place, target: Target): boolean {

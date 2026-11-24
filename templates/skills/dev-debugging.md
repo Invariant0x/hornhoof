@@ -1,7 +1,5 @@
 ---
 id: dev-debugging
-title: { en: "Systematic debugging", ru: "Систематическая отладка" }
-description: { en: "Finds the root cause of a bug before changing any code.", ru: "Находит первопричину ошибки, прежде чем менять код." }
 kind: procedure
 sources: [obra/superpowers skills/systematic-debugging/SKILL.md]
 ---

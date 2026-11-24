@@ -52,7 +52,7 @@ describe('the simple task card', () => {
   it('shows the path, kind, title, status, why and facts at the top, then the brief, body, subtasks and history', async () => {
     const user = userEvent.setup();
     shell({ 'GET /api/tasks/t12': [200, { task: {
-      ...TASK_DETAIL, why: 'Accept card payments.', responsible: { id: 'p1', name: 'Ivan' }, dueAt: '2099-11-20T00:00:00.000Z',
+      ...TASK_DETAIL, why: 'Accept card payments.', responsible: { id: 'p1', name: 'Ivan' }, askedBy: { id: 'p2', name: 'Oleg' }, dueAt: '2099-11-20T00:00:00.000Z',
       time: { inStatusSince: '2026-11-10T09:00:00.000Z', workSeconds: 0, waitsOn: [] },
     } }] });
     const panel = await openTask(user);
@@ -66,8 +66,11 @@ describe('the simple task card', () => {
     const pill = card.getByText('Review', { selector: '.tr-status-pill' });
     expect(pill).toHaveClass('review');
     const facts = card.getByRole('group', { name: 'Facts' });
-    expect(within(facts).getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Ivan');
-    expect(within(facts).getByRole('definition', { name: 'Responsible' }).querySelector('.tr-avatar')).toBeInTheDocument();
+    /* Whose request it is and who decides are two facts, in this order. */
+    expect(within(facts).getByRole('definition', { name: 'Asked by' })).toHaveTextContent('Oleg');
+    expect(within(facts).getByRole('definition', { name: 'Decides' })).toHaveTextContent('Ivan');
+    expect(within(facts).queryByRole('definition', { name: 'Waits for' })).not.toBeInTheDocument();
+    expect(within(facts).getByRole('definition', { name: 'Decides' }).querySelector('.tr-avatar')).toBeInTheDocument();
     expect(within(facts).getByRole('definition', { name: 'Executor' })).toHaveTextContent('Bruno');
     expect(within(facts).getByRole('definition', { name: 'Due' })).toHaveTextContent(/^20 Nov · Review for/);
     const subtasks = card.getByRole('region', { name: 'Subtasks' });
@@ -81,6 +84,17 @@ describe('the simple task card', () => {
     expect(card.getAllByRole('heading').map(heading => heading.textContent)).toEqual(['Checkout API', 'Subtasks · 0 of 1', 'History']);
     for (const [i, name] of ['Close', '#10 Payments', 'Task actions', 'Graph from here'].entries()) expect(card.getAllByRole('button')[i]).toHaveAccessibleName(name);
     expect(card.getAllByRole('button')).toHaveLength(4);
+  });
+
+  it.each([
+    [1, 'The next turn, after turn 44'],
+    [2, 'The turn after next, after turn 44'],
+    [3, 'The turn 3 turns ahead, after turn 44'],
+  ])('says which turn a queued task waits for, %i turns ahead', async (ahead, text) => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, assignee: null, queue: { ahead, position: ahead, openTurn: 44 } } }] });
+    const facts = within(within(await openTask(user)).getByRole('group', { name: 'Facts' }));
+    expect(facts.getByRole('definition', { name: 'Waits for' })).toHaveTextContent(text);
   });
 
   it('draws the card as the mockup drawer beside the tracker and the full screen on a phone', () => {

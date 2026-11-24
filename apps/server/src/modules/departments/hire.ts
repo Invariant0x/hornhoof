@@ -1,3 +1,4 @@
+import { languageOfText, SOURCE_LOCALE } from '@hornhoof/protocol';
 import { pickNextWorldEraName, type WorldNameLanguage } from '@hornhoof/protocol/world';
 import type { Ctx } from '../../app.js';
 import { and, eq, isNull, ne } from 'drizzle-orm';
@@ -14,13 +15,12 @@ export type Hired = { id: string; name: string; role: string; title: string };
 /* Who a hire is by: a person, the orchestrator for one, or Hornhoof itself, which is neither. */
 export type HiredBy = { personId: string | null; byOrchestrator: boolean; actingAgentId?: string | null };
 
-const CYRILLIC = /[\u0400-\u04FF]/;
 
 /* True when a hire line carries a generated default role title (or numbered/parenthesized variant)
    rather than a custom manual name typed by a person. */
 function isDefaultRoleName(name: string, role: Role): boolean {
   const clean = name.trim().toLowerCase();
-  for (const title of [role.title.en.trim().toLowerCase(), role.title.ru.trim().toLowerCase()]) {
+  for (const title of Object.values(role.title).map(text => (text ?? '').trim().toLowerCase())) {
     if (!title) continue;
     if (clean === title) return true;
     if (clean.startsWith(`${title} (`)) return true;
@@ -47,7 +47,7 @@ async function resolveHireName(
     .from(agents)
     .where(and(eq(agents.companyId, companyId), isNull(agents.removedAt), ne(agents.kind, 'assistant')));
   const existingNames = existing.map(row => row.name);
-  const lang: WorldNameLanguage = CYRILLIC.test(requestedName) || existingNames.some(n => CYRILLIC.test(n)) ? 'ru' : 'en';
+  const lang: WorldNameLanguage = languageOfText(requestedName) ?? languageOfText(existingNames.join(' ')) ?? SOURCE_LOCALE;
   return pickNextWorldEraName(pack, lang, existingNames, role.kind === 'head' ? 'head' : 'worker');
 }
 

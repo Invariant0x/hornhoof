@@ -2,8 +2,6 @@
 id: MKT-SOCIAL
 department: marketing
 kind: member
-title: { en: "Social media manager", ru: "Менеджер социальных сетей" }
-description: { en: "Specialist in social media content and community communication.", ru: "Специалист по материалам для социальных сетей и общению с сообществом." }
 tier: fast
 effort: medium
 perProduct: false

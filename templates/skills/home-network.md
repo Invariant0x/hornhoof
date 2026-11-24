@@ -1,7 +1,5 @@
 ---
 id: home-network
-title: { en: "Home network care", ru: "Уход за домашней сетью" }
-description: { en: "Watches the home Wi-Fi and routers, finds weak spots, and tunes settings when the home needs it.", ru: "Следит за домашним Wi-Fi и роутерами, находит слабые места и при необходимости настраивает сеть." }
 kind: procedure
 ---
 1. **Read the state**: within existing access, read which devices are online, signal strength by room, the internet connection, firmware versions, and any outage or slowdown. Device metadata needs no action approval; it gives no right to camera streams, microphone content or recordings.

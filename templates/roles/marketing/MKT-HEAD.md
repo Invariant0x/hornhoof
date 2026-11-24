@@ -2,8 +2,6 @@
 id: MKT-HEAD
 department: marketing
 kind: head
-title: { en: "Head of marketing", ru: "Руководитель отдела маркетинга" }
-description: { en: "Leader for marketing strategy and communication.", ru: "Руководитель маркетинговой стратегии и коммуникаций." }
 tier: standard
 effort: medium
 perProduct: false

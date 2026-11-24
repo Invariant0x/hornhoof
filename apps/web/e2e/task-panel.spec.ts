@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { LANGUAGES, type Language } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage } from '../src/i18n';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { box, detail, openTaskAction, openTaskCard, serveApi, TASKS, writeToOrchestrator } from './api';
@@ -191,7 +191,7 @@ test.describe('scrolling', () => {
   });
 });
 
-const MESSAGES: Record<Language, Messages> = { en, ru };
+const MESSAGES: Record<ShippedLanguage, Messages> = { en, ru };
 const ranked = LANGUAGES.map(({ id }) => {
   const { tasks, tracker, window } = MESSAGES[id];
   const copy = [window.close, tracker.groups.working, tracker.card.executor, tracker.card.responsible, tracker.card.due, tracker.card.facts,

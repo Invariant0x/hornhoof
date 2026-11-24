@@ -1,7 +1,5 @@
 ---
 id: fin-close-management
-title: { en: "Month-end close", ru: "Закрытие месяца" }
-description: { en: "Runs the monthly close as a checklist, from cut-off to statements the CEO can trust.", ru: "Проводит закрытие месяца по чек-листу, от отсечки до отчетности, которой может доверять CEO." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins finance/skills/close-management/SKILL.md, anthropics/financial-services plugins/agent-plugins/month-end-closer/agents/month-end-closer.md]
 ---

@@ -36,6 +36,7 @@ import { notStep } from '../tools/steps.js';
 import { releaseJobPhones } from '../phones/queue.js';
 import { callEnded, oneShotStageNote } from '../calls/calls.js';
 import { uncheckedLines, type UncheckedItem } from './unchecked.js';
+import { slotsApply } from './slots.js';
 
 type Agent = typeof agents.$inferSelect;
 
@@ -592,6 +593,8 @@ async function freeForQueued(ctx: Ctx, agentId: string, task: Task): Promise<{ i
 
 async function handQueuedToFree(ctx: Ctx, agent: Agent, task: Task, w: Wake): Promise<Moved | null> {
   if (w.why !== 'assigned') return null;
+  /* Work given to a named developer waits for them: where the department runs slots it never drifts to another developer. */
+  if (await slotsApply(ctx.db, task)) return null;
   const [running] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agent.id), eq(jobs.status, 'running'))).limit(1);
   if (!running) return null;
   const other = await freeForQueued(ctx, agent.id, task);

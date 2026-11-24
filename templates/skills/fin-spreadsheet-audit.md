@@ -1,7 +1,5 @@
 ---
 id: fin-spreadsheet-audit
-title: { en: "Spreadsheet audit", ru: "Проверка таблиц" }
-description: { en: "Checks a model or spreadsheet for broken formulas, hidden numbers and wrong links.", ru: "Проверяет модель или таблицу на сломанные формулы, спрятанные числа и неверные ссылки." }
 kind: checklist
 sources: [anthropics/financial-services plugins/agent-plugins/model-builder/skills/audit-xls/SKILL.md]
 ---

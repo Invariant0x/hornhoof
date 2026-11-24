@@ -29,11 +29,11 @@ async function goalsServed(db: Ctx['db'], rows: Pick<Task, 'id'>[]): Promise<Map
 export const goalServed = async (db: Ctx['db'], task: Pick<Task, 'id'>): Promise<string | null> => (await goalsServed(db, [task])).get(task.id) ?? null;
 
 /* What the tracker shows of the tasks, read in one go for all of them. */
-export async function trackerLookups(db: Ctx['db'], rows: (TimedTask & Pick<Task, 'responsiblePersonId'>)[], waits: (t: Pick<Task, 'id'>) => TaskWait[], names: WaitNames): Promise<TrackerLookups> {
+export async function trackerLookups(db: Ctx['db'], rows: (TimedTask & Pick<Task, 'responsiblePersonId' | 'askedByPersonId'>)[], waits: (t: Pick<Task, 'id'>) => TaskWait[], names: WaitNames): Promise<TrackerLookups> {
   const served = rows.length ? await goalsServed(db, rows) : new Map<string, string>();
   const goalIds = [...new Set(served.values())];
   const goalRows = goalIds.length ? await db.select({ id: goals.id, number: goals.number, title: goals.title }).from(goals).where(inArray(goals.id, goalIds)) : [];
-  const personIds = [...new Set(rows.flatMap(t => (t.responsiblePersonId ? [t.responsiblePersonId] : [])))];
+  const personIds = [...new Set(rows.flatMap(t => [t.responsiblePersonId, t.askedByPersonId].filter((id): id is string => Boolean(id))))];
   const personRows = personIds.length ? await db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, personIds)) : [];
   const facts = await timeFacts(db, rows, waits, names);
   return {

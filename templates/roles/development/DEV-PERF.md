@@ -2,8 +2,6 @@
 id: DEV-PERF
 department: development
 kind: member
-title: { en: "Performance engineer", ru: "Инженер по производительности" }
-description: { en: "Engineer of software performance and resource efficiency.", ru: "Инженер производительности программ и эффективности использования ресурсов." }
 tier: standard
 effort: xhigh
 perProduct: false

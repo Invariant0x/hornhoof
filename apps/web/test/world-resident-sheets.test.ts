@@ -37,7 +37,7 @@ function resident(partial: Partial<ResidentEntity>): ResidentEntity {
     roleKey: null,
     roleClass: 'executor',
     archetype: 'architect',
-    look: { id: 'egypt-architect', label: { en: 'A', ru: 'А' }, prop: 'scroll', headgear: 'hood' },
+    look: { id: 'egypt-architect', label: 'A', prop: 'scroll', headgear: 'hood' },
     level: 6,
     outfitTier: 3,
     cloakColor: '#C96A4B',

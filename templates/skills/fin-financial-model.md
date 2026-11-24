@@ -1,7 +1,5 @@
 ---
 id: fin-financial-model
-title: { en: "Financial model", ru: "Финансовая модель" }
-description: { en: "Builds a driver-based model with a linked profit and loss, balance sheet and cash flow.", ru: "Строит модель на драйверах со связанными отчетом о прибылях и убытках, балансом и движением денег." }
 kind: procedure
 sources: [anthropics/financial-services plugins/agent-plugins/model-builder/skills/3-statement-model/SKILL.md, wshobson/agents plugins/startup-business-analyst/skills/startup-financial-modeling/SKILL.md]
 ---

@@ -1,7 +1,5 @@
 ---
 id: dev-e2e-tests
-title: { en: "End-to-end tests", ru: "Сквозные тесты" }
-description: { en: "Pins the most important user flows with tests that drive the real product.", ru: "Закрепляет главные сценарии пользователя тестами, которые управляют настоящим продуктом." }
 kind: procedure
 sources: [affaan-m/ECC skills/e2e-testing/SKILL.md, openai/skills skills/.curated/playwright/SKILL.md, obra/superpowers skills/systematic-debugging/condition-based-waiting.md]
 ---

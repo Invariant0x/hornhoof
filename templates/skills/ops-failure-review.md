@@ -1,7 +1,5 @@
 ---
 id: ops-failure-review
-title: { en: "Collect failures and weak points", ru: "Собирать сбои и слабые места" }
-description: { en: "On each timer round, reads what failed and where agents stumbled since the last one, finds the causes that repeat and proposes what to preinstall, allow, write down or fix.", ru: "На каждом обходе по таймеру читает, что сломалось и где агенты споткнулись с прошлого раза, находит повторяющиеся причины и предлагает, что установить заранее, разрешить, записать или исправить." }
 kind: procedure
 grants: [failures, agents, message_employee, improvements]
 ---
