@@ -175,13 +175,6 @@ export const ru: Messages = {
     notResponding: 'Hornhoof не отвечает',
     tryAgain: 'Попробовать снова',
   },
-  connection: {
-    lost: { title: 'Нет связи с сервером', hint: 'Hornhoof подключится сам, перезагружать страницу не нужно.', long: 'Связи нет уже 2\u00a0мин. Проверьте интернет.' },
-    updating: { title: 'Сервер обновляется', hint: 'Это займет несколько минут. Hornhoof вернется сам, без перезагрузки.', long: 'Обновление идет дольше обычного.' },
-    trying: 'Пробуем снова…',
-    next: (seconds: number) => `Следующая попытка через ${seconds}\u00a0с`,
-    tryNow: 'Попробовать сейчас',
-  },
   login: {
     heading: 'Вход',
     submit: 'Войти',
@@ -1362,7 +1355,7 @@ export const ru: Messages = {
         noCore: host => `здесь Hornhoof работает без Docker; сделайте ${host} полной машиной.`,
         scope: (person, departments) =>
           `данные компании хранятся только на машинах тех, кто видит всю компанию, а ${person} ${
-            departments === undefined ? 'видит не всю' : departments === 0 ? 'не видит ни одного отдела' : departments === 1 ? 'видит один отдел' : `видит ${departments} ${plural('ru', departments, { one: 'отдел', few: 'отдела', many: 'отделов', other: 'отдела' })}`
+            departments === undefined ? 'видит не всю' : departments === 0 ? 'не видит ни одного отдела' : departments < 2 ? 'видит один отдел' : `видит ${departments} ${plural('ru', departments, { one: 'отдел', few: 'отдела', many: 'отделов', other: 'отдела' })}`
           }.`,
         noLink: 'скрытое имя компании на hornhoof.org еще не создано; Hornhoof создаст его, как только hornhoof.org ответит.',
       },
@@ -2228,7 +2221,7 @@ export const ru: Messages = {
   companyTemplates: {
     heading: 'Начните с шаблона',
     hint: 'Шаблон сразу создает свои отделы и их сотрудников. Они начнут работать, как только вы подключите подписку. Все можно изменить позже. Выберите шаблон или начните с пустой компании.',
-    employees: n => `${n} ${n % 100 >= 11 && n % 100 <= 14 ? 'сотрудников' : n % 10 === 1 ? 'сотрудник' : n % 10 >= 2 && n % 10 <= 4 ? 'сотрудника' : 'сотрудников'}`,
+    employees: n => `${n} ${plural('ru', n, { one: 'сотрудник', few: 'сотрудника', many: 'сотрудников', other: 'сотрудника' })}`,
     departments: list => `Отделы: ${list}.`,
     empty: { name: 'Начать с пустой', description: 'Отделов пока нет. Оркестратор расспросит о компании и соберет их вместе с вами.' },
     project: { name: 'Проектная команда', description: 'Несколько человек делают один продукт.' },
@@ -2318,7 +2311,7 @@ export const ru: Messages = {
     riskClasses: { money: 'деньги', access: 'доступ', security: 'безопасность', data: 'данные', none: 'нет' },
     riskLine: (risk: string) => `риск: ${risk}`,
     keep: 'Оставить',
-    words: n => (n === 1 ? 'Исходный текст' : `Исходный текст, ${n} ${plural('ru', n, { one: 'сообщение', few: 'сообщения', many: 'сообщений', other: 'сообщения' })}`),
+    words: n => (n > 1 ? `Исходный текст, ${n} ${plural('ru', n, { one: 'сообщение', few: 'сообщения', many: 'сообщений', other: 'сообщения' })}` : 'Исходный текст'),
     table: {
       task: 'Задача',
     },
@@ -2358,6 +2351,9 @@ export const ru: Messages = {
     machineAwayKinds: { orchestrator: 'оркестратор', head: 'руководитель' },
     machineAwayImportant: (names: string) => `Среди них: ${names}.`,
     machineAwayDo: 'Что сделать: включите ее и поставьте на зарядку, войдите в учетную запись, проверьте, что Docker запустился.',
+    githubLimit: (repository: string) => `Лимит запросов GitHub для ${repository} исчерпан`,
+    githubLimitRetry: (time: string) => `Повторите действие после ${time} UTC.`,
+    githubLimitUnknown: 'GitHub не сообщил время сброса. Повторите действие позже.',
     machineBack: (host: string, at: string) => `Машина ${host} вернулась: ${at}.`,
     machineLow: (host, owner) => (owner ? `На машине ${host} (${owner}) мало места на диске` : `На машине ${host} мало места на диске`),
     machineLowFree: (free, total, need) => `Свободно: ${free} ГБ из ${total} ГБ. Нужно не меньше ${need} ГБ.`,
@@ -3552,6 +3548,10 @@ export const ru: Messages = {
     no_head: 'У этого отдела еще нет руководителя. Сначала наймите его.',
     switched_off: 'Этот сотрудник сейчас выключен. Сначала включите его на схеме отдела.',
     repo_invalid: 'Нужен адрес https без имени и токена внутри, простое имя ветки, а у автора имя в одну строку и полная почта.',
+    github_rate_limited: (time: string | null) => time
+      ? `GitHub не ответил. Лимит запросов аккаунта исчерпан до ${time} UTC. Повторите после этого времени.`
+      : 'GitHub не ответил. Лимит запросов аккаунта исчерпан. Повторите позже.',
+    commit_history_unavailable: 'Репозиторий не подтвердил историю коммитов. Повторите попытку.',
     repo_release_workflow_invalid: 'Назовите релизный workflow по пути к его файлу, например .github/workflows/release.yml.',
     repo_command_invalid: 'Если полная команда тестов называет свою часть через {part}, она должна назвать и число частей через {parts}.',
     repo_folder_taken: 'У другого репозитория этого отдела адрес кончается тем же именем. Агенты держат каждый репозиторий в папке с этим именем, поэтому в одном отделе не может быть обоих.',
@@ -3592,3 +3592,5 @@ export const ru: Messages = {
     telegram_person_taken: 'Этот Telegram уже указан у другого человека.',
   },
 };
+
+export default ru;

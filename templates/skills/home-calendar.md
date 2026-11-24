@@ -1,7 +1,5 @@
 ---
 id: home-calendar
-title: { en: "Family calendar and reminders", ru: "Семейный календарь и напоминания" }
-description: { en: "Keeps the family calendar, chores and reminders, and tells people what is coming.", ru: "Ведет семейный календарь, дела по дому и напоминания и говорит людям, что впереди." }
 kind: procedure
 ---
 1. **Keep the calendar**: events, appointments, who is where and when, and the chores each person has. Adding and sorting entries needs no approval.

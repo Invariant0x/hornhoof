@@ -1,7 +1,5 @@
 ---
 id: fin-controls-testing
-title: { en: "Controls testing", ru: "Проверка контролей" }
-description: { en: "Tests whether finance controls work in practice: approvals, separation of duties and access.", ru: "Проверяет, работают ли финансовые контроли на деле: согласования, разделение обязанностей и доступы." }
 kind: checklist
 sources: [anthropics/knowledge-work-plugins finance/skills/sox-testing/SKILL.md]
 ---

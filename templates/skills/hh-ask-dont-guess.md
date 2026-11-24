@@ -1,7 +1,5 @@
 ---
 id: hh-ask-dont-guess
-title: { en: "Ask instead of guessing", ru: "Спросить, а не угадывать" }
-description: { en: "Stops and asks one clear question when the task leaves a choice that changes the result.", ru: "Останавливается и задает один ясный вопрос, когда задача оставляет выбор, меняющий результат." }
 kind: core
 sources: [obra/superpowers skills/subagent-driven-development/implementer-prompt.md]
 ---

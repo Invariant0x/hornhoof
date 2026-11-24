@@ -4,8 +4,9 @@ import { Phrase, useLanguage, useT } from '../i18n';
 import type { MergeConflict, MergeDecision, MergePicked } from '../types';
 import { useConfirmAction } from './ConfirmAction';
 import { WaitsForNote } from './DecidedBy';
+import { formatTagOf, isSourceLocale } from '@hornhoof/protocol';
 
-const when = (language: string, iso: string): string => new Date(iso).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+const when = (language: string, iso: string): string => new Date(iso).toLocaleString(formatTagOf(language), { dateStyle: 'medium', timeStyle: 'short' });
 
 /* One row that differs: what it is, its columns with the value here and the value there, and the two ways to settle it. */
 function Conflict({ conflict, busy, onPick }: { conflict: MergeConflict; busy: boolean; onPick: (take: 'here' | 'there') => void }) {
@@ -94,7 +95,7 @@ export function MergeCard({ merge, onChange, onFailure, waitsFor }: { merge: Mer
       <p className="t-card-brief">{t.merge.needsYou(conflicts?.length ?? merge.open)}</p>
       {left.length > 0 && (
         /* The server writes why in English; another language says that it happened. */
-        <p className="muted" role="status">{[t.merge.notTaken(left.length), ...(language === 'en' ? [...new Set(left.map(refused => refused.why))] : [])].join(' ')}</p>
+        <p className="muted" role="status">{[t.merge.notTaken(left.length), ...(isSourceLocale(language) ? [...new Set(left.map(refused => refused.why))] : [])].join(' ')}</p>
       )}
       {tables.map(table => {
         const rows = conflicts!.filter(conflict => conflict.table === table);

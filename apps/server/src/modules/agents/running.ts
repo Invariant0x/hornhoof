@@ -50,6 +50,7 @@ export async function runningAgents(ctx: Ctx, viewer: Person) {
         title: (a.roleKey && templates.roles.get(a.roleKey)?.title) || null,
         department: d ? { id: d.id, name: deptName(d) } : null,
         provider: s.provider,
+        model: a.model,
         ...currentWork(current, reach),
       },
     };

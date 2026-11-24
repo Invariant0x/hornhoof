@@ -1,4 +1,4 @@
-import { TASK_PRIORITIES, type TaskPriority } from '@hornhoof/protocol';
+import { TASK_PRIORITIES, type TaskPriority, say, sayIf } from '@hornhoof/protocol';
 import { Fragment, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, Phrase, useLanguage, useT, type Messages } from '../i18n';
@@ -387,7 +387,7 @@ export function PipelineForm({ pipeline, department, onDone, onCancel }: { pipel
                   {p => (
                     <select {...p} value={s.owner} onChange={e => set(i, { owner: e.target.value })}>
                       {!s.owner && <option value="" disabled>{words.chooseOwner}</option>}
-                      <optgroup label={words.roles}>{roles.map(r => <option key={r.id} value={`role:${r.id}`}>{r.title[language]}</option>)}</optgroup>
+                      <optgroup label={words.roles}>{roles.map(r => <option key={r.id} value={`role:${r.id}`}>{say(r.title, language)}</option>)}</optgroup>
                       {employees.length > 0 && <optgroup label={words.employees}>{employees.map(e => <option key={e.id} value={`agent:${e.id}`}>{e.name}</option>)}</optgroup>}
                     </select>
                   )}
@@ -414,5 +414,5 @@ export function TrackerNewTask({ department, pipelineId, onCreated, onCancel, pl
   const { language } = useLanguage();
   const head = department.employees.find(e => e.kind === 'head');
   if (!head) return null;
-  return <NewTask department={department} showPriority pipelineId={pipelineId} head={head.title?.[language] === head.name ? null : head.name} onCreated={onCreated} onCancel={onCancel} place={place} />;
+  return <NewTask department={department} showPriority pipelineId={pipelineId} head={sayIf(head.title, language) === head.name ? null : head.name} onCreated={onCreated} onCancel={onCancel} place={place} />;
 }

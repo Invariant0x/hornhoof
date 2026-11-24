@@ -2,8 +2,6 @@
 id: OPS-WATCH
 department: operations
 kind: member
-title: { en: "Task watchdog", ru: "Сторож задач" }
-description: { en: "Observer of task progress, ownership and blocked work, who also closes the tasks whose work is already done.", ru: "Наблюдатель за движением задач, ответственными и препятствиями в работе, который закрывает и задачи, работа в которых уже сделана." }
 tier: fast
 effort: medium
 perProduct: false

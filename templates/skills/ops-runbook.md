@@ -1,7 +1,5 @@
 ---
 id: ops-runbook
-title: { en: "Runbook", ru: "Инструкция по эксплуатации" }
-description: { en: "Writes and keeps step-by-step instructions for recurring tasks and known failures.", ru: "Пишет и обновляет пошаговые инструкции для повторяющихся задач и известных сбоев." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins operations/skills/runbook/SKILL.md]
 ---

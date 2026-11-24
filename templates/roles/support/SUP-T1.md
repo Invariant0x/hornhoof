@@ -2,8 +2,6 @@
 id: SUP-T1
 department: support
 kind: member
-title: { en: "First-line support", ru: "Первая линия поддержки" }
-description: { en: "Specialist in initial customer support and common service questions.", ru: "Специалист по первичной поддержке клиентов и типовым вопросам обслуживания." }
 tier: fast
 effort: medium
 perProduct: false

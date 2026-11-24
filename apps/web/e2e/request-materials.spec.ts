@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { en } from '../src/i18n/en';
-import { LANGUAGES, type Language } from '../src/i18n/index';
+import { LANGUAGES, type ShippedLanguage } from '../src/i18n/index';
 import { ru } from '../src/i18n/ru';
 import type { Decisions, Me, Org, TaskDepartments, TaskLine, WaitingRequest } from '../src/types';
 import { startServer } from './real-server';
@@ -121,7 +121,7 @@ function collectStrings(value: unknown, out: string[] = []): string[] {
   return out;
 }
 
-async function selectExtremeLocales(page: Page): Promise<Language[]> {
+async function selectExtremeLocales(page: Page): Promise<ShippedLanguage[]> {
   const registered = LANGUAGES.map(l => l.id);
   const samples = Object.fromEntries(registered.map(code => [code, collectStrings(DICTS[code]).join(' ')]));
   const ranked = await page.evaluate(async (byLang: Record<string, string>) => {
@@ -134,8 +134,8 @@ async function selectExtremeLocales(page: Page): Promise<Language[]> {
       .sort((a, b) => a.width - b.width)
       .map(entry => entry.code);
   }, samples);
-  const shortest = (ranked[0] ?? 'en') as Language;
-  const longest = (ranked.at(-1) ?? 'ru') as Language;
+  const shortest = (ranked[0] ?? 'en') as ShippedLanguage;
+  const longest = (ranked.at(-1) ?? 'ru') as ShippedLanguage;
   return shortest === longest ? [shortest] : [shortest, longest];
 }
 

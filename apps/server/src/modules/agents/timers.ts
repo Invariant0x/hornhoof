@@ -81,7 +81,7 @@ async function queueDueRound(ctx: Ctx, id: string, now: Date): Promise<string | 
     return false;
   }
   const prompt = roundPrompt(agent);
-  const jobId = await insertTurn(ctx, { companyId: agent.companyId, agentId: id, prompt, createdBy: null, message: { personId: null, text: prompt, timer: true, notification: { source: 'timer', tasks: [], detail: { en: agent.name, ru: agent.name } } } });
+  const jobId = await insertTurn(ctx, { companyId: agent.companyId, agentId: id, prompt, createdBy: null, message: { personId: null, text: prompt, timer: true, notification: { source: 'timer', tasks: [], detail: { en: agent.name } } } });
   await db.update(agents).set({ timerAt: now, timerNudgedAt: null }).where(eq(agents.id, id));
   return jobId;
 }
@@ -124,6 +124,7 @@ async function sendWaiting(ctx: Ctx): Promise<void> {
    their agent is free, department turns their release tags close and turns that hold nothing for a release, files of turns closed a month ago, the old history of node connections, test run times, and Codex plans
    to move. */
 export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) => (err: unknown) => void): Promise<void> {
+  ctx.githubLimits.expire();
   await checkExternalWaits(ctx, now).catch(failed('ending external task waits failed'));
   await checkWaitHealth(ctx, now).catch(failed('checking task waits failed'));
   await checkOperatorHealth(ctx, now).catch(failed('checking program operator cases failed'));

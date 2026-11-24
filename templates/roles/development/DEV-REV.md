@@ -2,8 +2,6 @@
 id: DEV-REV
 department: development
 kind: member
-title: { en: "Code reviewer", ru: "Ревьюер кода" }
-description: { en: "Specialist in software correctness, maintainability and code risks.", ru: "Специалист по корректности, сопровождаемости и рискам программного кода." }
 tier: deep
 effort: xhigh
 perProduct: false

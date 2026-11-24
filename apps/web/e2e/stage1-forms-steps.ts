@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
-import { LANGUAGES, type Language, type Messages } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage, type Messages } from '../src/i18n';
 import { collectionText } from '../src/skins/collection';
 import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
 import type { Skin } from '../src/skins/roles';
@@ -180,8 +180,8 @@ export const FORMS: Form[] = [
 ];
 
 /* The text the forms show in a language, to rank the shipped languages by how much room they take. */
-async function chooseLanguages(page: Page): Promise<Language[]> {
-  const ranked: { id: Language; characters: number }[] = [];
+async function chooseLanguages(page: Page): Promise<ShippedLanguage[]> {
+  const ranked: { id: ShippedLanguage; characters: number }[] = [];
   for (const { id } of LANGUAGES) {
     const words = await messagesFor(id);
     await page.evaluate(language => localStorage.setItem('hh-lang', language), id);

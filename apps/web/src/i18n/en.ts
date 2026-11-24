@@ -146,15 +146,6 @@ export const en = {
     notResponding: 'Hornhoof is not responding',
     tryAgain: 'Try again',
   },
-  /* The layer over the page while the server cannot be reached, or is installing an update: what happened, what Hornhoof does,
-     when it tries next, a line once the wait is long, and the one button that asks again at once. */
-  connection: {
-    lost: { title: 'No connection to the server', hint: 'Hornhoof reconnects by itself, no need to reload the page.', long: 'No connection for 2\u00a0min. Check your internet.' },
-    updating: { title: 'Server is updating', hint: 'This takes a few minutes. Hornhoof comes back by itself, with no reload.', long: 'The update is taking longer than usual.' },
-    trying: 'Trying again…',
-    next: (seconds: number) => `Next try in ${seconds}\u00a0s`,
-    tryNow: 'Try now',
-  },
   login: {
     heading: 'Log in',
     submit: 'Log in',
@@ -326,7 +317,7 @@ export const en = {
   },
   merge: {
     after: (time: string) => `What came after ${time}`,
-    needsYou: (n: number) => (n === 1 ? '1 change about people, access, plans, machines or protected records needs you.' : `${n} changes about people, access, plans, machines or protected records need you.`),
+    needsYou: (n: number) => (plural('en', n, { one: '1 change about people, access, plans, machines or protected records needs you.', other: `${n} changes about people, access, plans, machines or protected records need you.` })),
     here: 'Here',
     there: 'There',
     nothing: 'nothing',
@@ -335,7 +326,7 @@ export const en = {
     keepAll: 'Keep all here',
     takeAll: 'Take all from there',
     topics: { people: 'People', access: 'Access', plans: 'Plans', machines: 'Machines', protected: 'Protected records', work: 'Work' },
-    notTaken: (n: number) => (n === 1 ? '1 could not be taken and stays as it is here.' : `${n} could not be taken and stay as they are here.`),
+    notTaken: (n: number) => (plural('en', n, { one: '1 could not be taken and stays as it is here.', other: `${n} could not be taken and stay as they are here.` })),
     confirm: {
       title: 'Do you really want to apply this merge decision?',
       keepHere: (what: string, merge: string) => `For ${what} in ${merge}, the current value here will be kept.`,
@@ -934,8 +925,8 @@ export const en = {
     onMacLinux: 'On a Mac or Linux, run this in Terminal:',
     onWindows: 'On Windows, run this in PowerShell:',
     joinOnce: 'The command works once, for 24 hours. The nodes keep running in the background after the terminal is closed.',
-    commandHours: (hours: number) => `Valid for ${hours} more ${hours === 1 ? 'hour' : 'hours'}.`,
-    commandMinutes: (minutes: number) => `Valid for ${minutes} more ${minutes === 1 ? 'minute' : 'minutes'}.`,
+    commandHours: (hours: number) => `Valid for ${hours} more ${plural('en', hours, { one: 'hour', other: 'hours' })}.`,
+    commandMinutes: (minutes: number) => `Valid for ${minutes} more ${plural('en', minutes, { one: 'minute', other: 'minutes' })}.`,
     commandHeading: (name: string) => `Install ${name}`,
     commandBackground: 'The command works once. The nodes keep running in the background after the terminal is closed.',
     joinUntil: (at: string) => `The command works once, until ${at}. The nodes keep running in the background after the terminal is closed.`,
@@ -1173,9 +1164,9 @@ export const en = {
     ownerAccount: 'Owner and account', ownerKey: 'Owner and key', account: 'Account', key: 'Key',
     keyEnds: (last: string) => `ends in ${last}`,
     notKnown: 'Not known while the machine is offline.', offline: 'Offline',
-    ofCores: (n: number) => `of ${n} ${n === 1 ? 'core' : 'cores'}`,
+    ofCores: (n: number) => `of ${n} ${plural('en', n, { one: 'core', other: 'cores' })}`,
     hostCores: (n: number) => `the machine has ${n}`,
-    coresWord: (n: number): string => n === 1 ? 'core' : 'cores',
+    coresWord: (n: number): string => plural('en', n, { one: 'core', other: 'cores' }),
     ofGb: (gb: string) => `of ${gb} GB`, gbFree: 'GB free', used: 'used',
     plansOn: 'Plans on this machine', noPlans: 'No plans on this machine yet', ready: 'ready',
     machinesOf: 'Machines of this plan', builtinSmall: 'comes with the server',
@@ -1242,8 +1233,8 @@ export const en = {
     disk: 'Disk',
     runningNow: 'Running now',
     unknown: 'unknown',
-    cores: (n: number) => `${n} ${n === 1 ? 'core' : 'cores'}`,
-    coresOf: (n: number, all: number) => `${n} of ${all} ${all === 1 ? 'core' : 'cores'}`,
+    cores: (n: number) => `${n} ${plural('en', n, { one: 'core', other: 'cores' })}`,
+    coresOf: (n: number, all: number) => `${n} of ${all} ${plural('en', all, { one: 'core', other: 'cores' })}`,
     gbFree: (free: string, total: string) => `${free} of ${total} GB free`,
     machineHas: (gb: string) => `the machine has ${gb} GB`,
     /* What the node can use is less than its machine has: Docker on a Mac gets only the share its owner gave it. */
@@ -1369,7 +1360,7 @@ export const en = {
         phone: 'it is a phone.',
         noCore: (host: string) => `Hornhoof runs here without Docker; make ${host} a full machine.`,
         scope: (person: string, departments: number | undefined) =>
-          `the company's data stays only on machines of people who see the whole company, and ${person} ${departments === undefined ? 'does not' : departments === 0 ? 'sees no department' : departments === 1 ? 'sees one department' : `sees ${departments} departments`}.`,
+          `the company's data stays only on machines of people who see the whole company, and ${person} ${departments === undefined ? 'does not' : departments === 0 ? 'sees no department' : plural('en', departments, { one: 'sees one department', other: `sees ${departments} departments` })}.`,
         noLink: "the company's hidden name at hornhoof.org is not made yet; Hornhoof makes it once hornhoof.org answers.",
       },
       onlyCopy: (host: string) => `${host} holds the only up-to-date copy; give another machine a place first.`,
@@ -1584,7 +1575,7 @@ export const en = {
     fold: 'Fold letter',
     openOf: (name: string) => `Open the letter from ${name}`,
     foldOf: (name: string) => `Fold the letter from ${name}`,
-    more: (n: number) => `${n} more ${n === 1 ? 'line' : 'lines'}`,
+    more: (n: number) => `${n} more ${plural('en', n, { one: 'line', other: 'lines' })}`,
     markAll: 'Mark all as read',
     markOne: 'Mark as read',
     markOneOf: (name: string) => `Mark the letter from ${name} as read`,
@@ -2236,7 +2227,7 @@ export const en = {
   companyTemplates: {
     heading: 'Start from a template',
     hint: 'A template creates its departments and their employees right away. They start working as soon as you connect a subscription. You can change everything later. Pick one, or start empty.',
-    employees: (n: number) => `${n} ${n === 1 ? 'employee' : 'employees'}`,
+    employees: (n: number) => `${n} ${plural('en', n, { one: 'employee', other: 'employees' })}`,
     departments: (list: string) => `Departments: ${list}.`,
     empty: { name: 'Start empty', description: 'No departments yet. The orchestrator asks about your company and builds them with you.' },
     project: { name: 'Project team', description: 'A few people building one product.' },
@@ -2326,7 +2317,7 @@ export const en = {
     riskClasses: { money: 'money', access: 'access', security: 'security', data: 'data', none: 'none' },
     riskLine: (risk: string) => `risk: ${risk}`,
     keep: 'Keep it',
-    words: (n: number) => (n === 1 ? 'The words it came from' : `The words it came from, ${n} messages`),
+    words: (n: number) => (plural('en', n, { one: 'The words it came from', other: `The words it came from, ${n} messages` })),
     table: {
       task: 'Task',
     },
@@ -2368,6 +2359,9 @@ export const en = {
     machineAwayKinds: { orchestrator: 'orchestrator', head: 'head' },
     machineAwayImportant: (names: string) => `Among them: ${names}.`,
     machineAwayDo: 'What to do: switch it on and plug it in, sign in to the account, check that Docker has started.',
+    githubLimit: (repository: string) => `GitHub request limit reached for ${repository}`,
+    githubLimitRetry: (time: string) => `Try the blocked action again after ${time} UTC.`,
+    githubLimitUnknown: 'GitHub gave no reset time. Try the action again later.',
     machineBack: (host: string, at: string) => `Machine ${host} is back: ${at}.`,
     /* A machine short of disk space, whose node takes no new checks or builds until it has room again. */
     machineLow: (host: string, owner: string | null) => (owner ? `Machine ${host} (${owner}) is low on disk space` : `Machine ${host} is low on disk space`),
@@ -2418,7 +2412,7 @@ export const en = {
     note: 'Note, if any',
     /* On the approval of a release, what it brings that no check covers, as Hornhoof keeps it apart from the words above. */
     unchecked: {
-      heading: (n: number) => `What this release brings that no check covers: ${n} ${n === 1 ? 'item' : 'items'}`,
+      heading: (n: number) => `What this release brings that no check covers: ${n} ${plural('en', n, { one: 'item', other: 'items' })}`,
       accept: 'Approve only if you accept each of these.',
       unread: (base: string, commit: string) => `Hornhoof could not read every commit between main at ${base} and ${commit}.`,
       holderOff: (task: number) => `#${task}: the employee who did and checked this work alone is switched off or removed.`,
@@ -3035,9 +3029,9 @@ export const en = {
       until: (until: string) => `until ${until}`,
     },
     time: {
-      minutes: (n: number) => (n === 1 ? '1 minute' : `${n} minutes`),
-      hours: (h: number, m: number) => `${h === 1 ? '1 hour' : `${h} hours`}${m ? ` ${m} min` : ''}`,
-      days: (n: number) => (n === 1 ? '1 day' : `${n} days`),
+      minutes: (n: number) => (plural('en', n, { one: '1 minute', other: `${n} minutes` })),
+      hours: (h: number, m: number) => `${plural('en', h, { one: '1 hour', other: `${h} hours` })}${m ? ` ${m} min` : ''}`,
+      days: (n: number) => (plural('en', n, { one: '1 day', other: `${n} days` })),
     },
     board: {
       subtasks: (done: number, total: number) => `${done} of ${total}`,
@@ -3050,7 +3044,7 @@ export const en = {
       loose: 'Tasks outside these goals',
       mode: 'Draw',
       modes: { work: 'Goals and tasks', stages: 'Pipeline stages' },
-      count: (n: number) => (n === 1 ? '1 open task' : `${n} open tasks`),
+      count: (n: number) => (plural('en', n, { one: '1 open task', other: `${n} open tasks` })),
       waitsFor: 'waits for',
       neededFor: 'needed for',
       empty: 'Nothing to draw here yet.',
@@ -3288,7 +3282,7 @@ export const en = {
     intro: 'Bugs, improvements and ideas from every Hornhoof installation. Repeats count on one card, the most pressing first.',
     empty: 'Nothing came yet. Reports from installations appear here.',
     priority: { high: 'High priority', normal: 'Normal priority', low: 'Low priority' },
-    signals: (signals: number, installations: number) => `${signals} ${signals === 1 ? 'signal' : 'signals'} from ${installations} ${installations === 1 ? 'installation' : 'installations'}`,
+    signals: (signals: number, installations: number) => `${signals} ${plural('en', signals, { one: 'signal', other: 'signals' })} from ${installations} ${plural('en', installations, { one: 'installation', other: 'installations' })}`,
     versions: (list: string) => `Versions: ${list}`,
     platforms: (list: string) => `Machines: ${list}`,
     errorCode: (code: string) => `Error code: ${code}`,
@@ -3373,7 +3367,7 @@ export const en = {
     missing: 'The updater is not running. Run the install command for this server again to add it.',
     /* An update now would stop the turns that run. */
     cutTitle: 'Update now?',
-    cutText: (n: number) => (n === 1 ? '1 agent turn is running. If you update now, it stops midway, and Hornhoof starts it again after the update.' : `${n} agent turns are running. If you update now, they stop midway, and Hornhoof starts them again after the update.`),
+    cutText: (n: number) => (plural('en', n, { one: '1 agent turn is running. If you update now, it stops midway, and Hornhoof starts it again after the update.', other: `${n} agent turns are running. If you update now, they stop midway, and Hornhoof starts them again after the update.` })),
     cutYes: 'Update now',
     /* Each node on the update screen: what it waits for before it is replaced. */
     nodesTitle: 'Updating the nodes',
@@ -3579,6 +3573,10 @@ export const en = {
     no_head: 'This department has no head yet. Hire one first.',
     switched_off: 'This employee is switched off right now. Switch it on on the department schema first.',
     repo_invalid: 'Use an https address with no name or token in it, a plain branch name, and an author name on one line with a full email.',
+    github_rate_limited: (time: string | null) => time
+      ? `GitHub did not answer. The account's request limit is used up until ${time} UTC. Try again after that.`
+      : "GitHub did not answer. The account's request limit is used up. Try again later.",
+    commit_history_unavailable: 'The repository could not confirm the commit history. Try again.',
     repo_release_workflow_invalid: 'Name the release workflow by the path of its file, as .github/workflows/release.yml.',
     repo_command_invalid: 'A full test command that names its part with {part} must also say how many parts there are with {parts}.',
     repo_folder_taken: 'Another repository of this department has an address that ends in the same name. Agents keep each repository in a folder of that name, so one department cannot keep both.',
@@ -3621,3 +3619,5 @@ export const en = {
 };
 
 export type Messages = typeof en;
+
+export default en;

@@ -5,7 +5,7 @@ These rules are for anyone who changes this repository, people and agents alike.
 ## Language
 
 * Code, comments, commit messages, README and other repository text are in English.
-* Every screen ships in English and Russian. A new string goes into both `apps/web/src/i18n/en.ts` and `apps/web/src/i18n/ru.ts`, in plain words a person outside IT reads without effort.
+* Every screen ships in every language the product ships (today English and Russian). A new string goes into `apps/web/src/i18n/en.ts` and into the file of each shipped language next to it (`ru.ts`), in plain words a person outside IT reads without effort. Texts live in language files only; plurals go through `plural()`, dates and numbers through `Intl`; code never names a language. See "Adding a language" in [`CONTRIBUTING.md`](CONTRIBUTING.md#adding-a-language).
 * No em dashes anywhere, in code, texts or translations. In Russian write "е" instead of "ё".
 
 ## Code
@@ -25,7 +25,7 @@ These rules are for anyone who changes this repository, people and agents alike.
 * Non-visual work (server, data, API, logic, states, live data, behaviour tests and a simple temporary skeleton) runs in parallel without waiting on a mockup; only final visual styling waits for the approved Design reference and visual check.
 * Every panel, card, list item, settings row and table fits its container width with no sideways scroll: long words, identifiers, paths and URLs wrap, and when width is tight, an entry's action buttons wrap below the text as a whole group on one even row with shared edge and spacing across entries. Never hide, drop, clip or truncate text or buttons (`text-overflow: ellipsis` or clipped overflow) to disguise overflow.
 * Reset browser default margins, paddings, borders and backgrounds on interactive controls, and give each component explicit sizing, padding, border, background, font inheritance, centred icons and interactive states instead of relying on browser default geometry. Reserve scrollbar space in scrollable panels without assuming overlay scrollbars, and verify web layout and geometry across Chromium, Firefox and WebKit instead of a single browser engine.
-* Build layouts for 20 to 30 languages (`1.5x` to `2x` text expansion, taller line-heights for CJK and Devanagari, and mirrored RTL layout via logical CSS properties). Verify narrow/phone and desktop widths in light and dark themes on the dynamically longest and shortest actually shipped locales registered in `LANGUAGES` in [`apps/web/src/i18n/index.tsx`](apps/web/src/i18n/index.tsx) (summing the character lengths of the real strings rendered on the touched view across `apps/web/src/i18n/*.ts`), plus one shipped RTL locale once `LANGUAGES` includes one. Never hardcode two locale IDs forever, and never count a pseudo-locale or demo string as a shipped language.
+* Build layouts for 20 to 30 languages (`1.5x` to `2x` text expansion, taller line-heights for CJK and Devanagari, and mirrored RTL layout via logical CSS properties). Verify narrow/phone and desktop widths in light and dark themes on the dynamically longest and shortest actually shipped locales registered in `LOCALES` in [`packages/protocol/src/locales.ts`](packages/protocol/src/locales.ts) (summing the character lengths of the real strings rendered on the touched view across `apps/web/src/i18n/*.ts`), plus one shipped RTL locale once `LOCALES` includes one. Never hardcode two locale IDs forever, and never count a pseudo-locale or demo string as a shipped language.
 
 ## Templates
 

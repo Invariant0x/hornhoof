@@ -1,7 +1,5 @@
 ---
 id: dev-release-improvements
-title: { en: "Release improvement lanes", ru: "Линии улучшений выпуска" }
-description: { en: "For each release measurement or independent improvement work on a released version.", ru: "Для замера каждого выпуска и самостоятельных улучшений выпущенной версии." }
 kind: procedure
 sources: []
 ---

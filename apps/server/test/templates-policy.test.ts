@@ -30,7 +30,7 @@ const PRODUCT_POLICY: Rule[] = [
   { id: 'no superpowers', forbids: [[/superpowers/i, 'Use the superpowers skills.']] },
 ];
 
-const textsOf = (item: Skill | Role): string[] => [item.id, item.title.en, item.title.ru, item.description.en, item.description.ru, item.body];
+const textsOf = (item: Skill | Role): string[] => [item.id, ...Object.values(item.title), ...Object.values(item.description), item.body].filter((text): text is string => text !== undefined);
 
 function policyProblems(templates: Templates): string[] {
   const shipped = [...templates.skills.values(), ...templates.roles.values()];

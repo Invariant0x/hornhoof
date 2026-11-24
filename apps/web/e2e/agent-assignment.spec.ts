@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
-import { LANGUAGES, type Language, type Messages } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage, type Messages } from '../src/i18n';
 import type { AgentCardView, Employee, Org, Part } from '../src/types';
 import { ME, serveApi, streamEndedByPage } from './api';
 
@@ -26,8 +26,8 @@ type FixtureState = {
   resets: number;
   apiRequests: { method: string; path: string }[];
 };
-type LocaleSample = { id: Language; characters: number; strings: string[] };
-type Geometry = { surface: string; locale: Language; measurements: unknown };
+type LocaleSample = { id: ShippedLanguage; characters: number; strings: string[] };
+type Geometry = { surface: string; locale: ShippedLanguage; measurements: unknown };
 
 const EMPLOYEE: Employee = {
   id: EMPLOYEE_ID, name: EMPLOYEE_NAME, roleId: 'DEV-ENG', title: ROLE_TITLE, kind: 'worker', model: '', modelName: null,
@@ -61,7 +61,7 @@ function cardOf(state: FixtureState): AgentCardView {
   };
 }
 
-async function messagesFor(locale: Language): Promise<Messages> {
+async function messagesFor(locale: ShippedLanguage): Promise<Messages> {
   const dictionary = await import(`../src/i18n/${locale}.ts`) as Record<string, Messages>;
   const messages = dictionary[locale];
   if (!messages) throw new Error(`No dictionary export for shipped locale ${locale}`);
@@ -130,7 +130,7 @@ async function mountFixture(page: Page, state: FixtureState, errors: string[]): 
   });
 }
 
-async function openCard(page: Page, locale: Language, words: Messages): Promise<Locator> {
+async function openCard(page: Page, locale: ShippedLanguage, words: Messages): Promise<Locator> {
   await page.goto(`/departments/${DEPARTMENT_ID}?assignment-locale=${locale}`);
   await expect(page.locator('html')).toHaveAttribute('lang', locale);
   await page.getByRole('region', { name: words.dept.members, exact: true }).getByRole('button', { name: new RegExp(EMPLOYEE_NAME) }).click();
@@ -156,7 +156,7 @@ async function renderedStrings(card: Locator): Promise<string[]> {
   });
 }
 
-async function chooseLocales(page: Page, state: FixtureState): Promise<{ ranked: LocaleSample[]; selected: Language[]; rtl: Language[] }> {
+async function chooseLocales(page: Page, state: FixtureState): Promise<{ ranked: LocaleSample[]; selected: ShippedLanguage[]; rtl: ShippedLanguage[] }> {
   const ranked: LocaleSample[] = [];
   for (const { id } of LANGUAGES) {
     const words = await messagesFor(id);

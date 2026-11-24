@@ -1,7 +1,5 @@
 ---
 id: fin-reconciliation
-title: { en: "Account reconciliation", ru: "Сверка счетов" }
-description: { en: "Matches the books with bank and other outside records and traces every difference.", ru: "Сопоставляет учет с банком и другими внешними данными и находит причину каждого расхождения." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins finance/skills/reconciliation/SKILL.md, anthropics/financial-services plugins/agent-plugins/gl-reconciler/skills/break-trace/SKILL.md]
 ---

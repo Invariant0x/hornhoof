@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { ComputerAccessView, MachineView, Org } from '../src/types';
-import { LANGUAGES, type Language, type Messages } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage, type Messages } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { box, ME, serveApi } from './api';
@@ -8,8 +8,8 @@ import { box, ME, serveApi } from './api';
 /* The existing card controls keep their geometry with standing access and no approval steps. */
 test.describe.configure({ timeout: 0 });
 
-type Look = { lang: Language; theme: 'light' | 'dark'; width: 1440 | 375 };
-const messages: Record<Language, Messages> = { en, ru };
+type Look = { lang: ShippedLanguage; theme: 'light' | 'dark'; width: 1440 | 375 };
+const messages: Record<ShippedLanguage, Messages> = { en, ru };
 const rtl = /^(ar|fa|he|ur)(-|$)/;
 const ranked = LANGUAGES.map(({ id }) => {
   const { machines, window } = messages[id];

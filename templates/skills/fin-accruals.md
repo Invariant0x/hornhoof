@@ -1,7 +1,5 @@
 ---
 id: fin-accruals
-title: { en: "Accruals and rollforwards", ru: "Начисления и движение остатков" }
-description: { en: "Calculates month-end accruals, prepaid and deferred amounts, and shows how each balance moved.", ru: "Рассчитывает начисления, расходы будущих периодов и отложенную выручку на конец месяца и показывает движение каждого остатка." }
 kind: procedure
 sources: [anthropics/financial-services plugins/agent-plugins/month-end-closer]
 ---

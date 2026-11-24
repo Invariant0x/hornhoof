@@ -1,7 +1,5 @@
 ---
 id: sal-pipeline-analytics
-title: { en: "Pipeline analytics", ru: "Аналитика воронки" }
-description: { en: "Measures how deals move through the stages and where they stall.", ru: "Измеряет, как сделки проходят по этапам и где застревают." }
 kind: procedure
 sources: [msitarzewski/agency-agents sales/sales-pipeline-analyst.md]
 ---

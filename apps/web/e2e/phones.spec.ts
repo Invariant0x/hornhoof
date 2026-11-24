@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { BUILTIN_SKINS } from '../src/skins/registry';
-import { LANGUAGES, type Language, type Messages } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage, type Messages } from '../src/i18n';
 import type { MachineView } from '../src/types';
 import { openTaskAction, ME, openTaskCard, serveApi } from './api';
 import type { PhoneView } from '../src/ui/Phones';
@@ -22,12 +22,12 @@ const CARD_STATES: CardState[] = [
   { title: 'a phone whose computer is offline', file: 'computer-offline', phone: away, words: t => t.phones.states.offline, ink: '--muted', frame: '--line2', noScreen: t => t.phones.noScreen.computer_offline },
 ];
 
-async function words(language: Language): Promise<Messages> {
+async function words(language: ShippedLanguage): Promise<Messages> {
   const dictionary = await import(`../src/i18n/${language}.ts`) as Record<string, Messages>;
   return dictionary[language]!;
 }
 
-async function setup(page: Page, language: Language, skin: string, listed: PhoneView | null = null) {
+async function setup(page: Page, language: ShippedLanguage, skin: string, listed: PhoneView | null = null) {
   const t = await words(language);
   /* The page's clock runs from the moment it is installed until it is paused, however briefly on a busy machine, and a
      pause cannot go back: it starts a minute before NOW, longer than a test may take, and stands still at NOW. */

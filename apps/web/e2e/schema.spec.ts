@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import type { Department, DeptRole, Employee, Org } from '../src/types';
 import { taskRoute } from '../test/task-route';
 import { ME, serveApi } from './api';
+import { say } from '@hornhoof/protocol';
 
 const role = (id: string, en: string, ru: string, gate: number | null = null, schema?: 'before_work' | 'final_check' | 'observer'): DeptRole => ({
   id,
@@ -46,7 +47,7 @@ const ROLES = [
   role('DEV-PERF', 'Performance engineer', 'Инженер по производительности', null, 'observer'),
 ];
 const PIPELINE = ['DEV-ARCH', 'DEV-ENG', 'DEV-REV', 'DEV-SEC', 'DEV-TEST'];
-const title = (id: string, lang: 'en' | 'ru') => ROLES.find(r => r.id === id)!.title[lang];
+const title = (id: string, lang: 'en' | 'ru') => say(ROLES.find(r => r.id === id)!.title, lang);
 
 const NOW = '2026-11-05T12:00:00.000Z';
 const STAFF: Employee[] = [

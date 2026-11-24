@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { DICTIONARIES, LANGUAGES } from '../src/i18n';
+import { LANGUAGES } from '../src/i18n';
+import { DICTIONARIES } from '../src/i18n/dictionaries';
 import { serveApi } from './api';
 import { watchProblems } from './look-steps';
 
