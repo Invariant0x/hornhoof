@@ -185,17 +185,34 @@ async function failureFacts(ctx: Ctx, job: Job, next: string): Promise<string> {
   return `Hornhoof: ${agent?.name}'s turn ${job.id} failed at ${(job.finishedAt ?? job.createdAt).toISOString()} (${job.failure!.kind}): ${job.failure!.text}. ${task ? `Task #${task.number} "${task.title}" stays with its agent.` : 'This conversation has no task.'} ${next}`;
 }
 
+/* The newest turn that failed for want of a sign-in, of each node that needs one: one probe of jobs_not_logged_in for each of the
+   few nodes in that state, and nothing read of the turn but what tells whether to speak of it. Read whole for every such turn
+   of every node by a pass over all jobs, this took 90 to 130 ms of a 100,000-job table in each minute (#2022). */
+export function signedOutNodes(db: Ctx['db']) {
+  const newest = db
+    .select({ id: jobs.id, planId: jobs.subscriptionId, finishedAt: jobs.finishedAt })
+    .from(jobs)
+    .where(and(eq(jobs.nodeId, nodes.id), eq(jobs.error, 'not_logged_in')))
+    .orderBy(desc(jobs.finishedAt))
+    .limit(1)
+    .as('newest');
+  return db
+    .select({ jobId: newest.id, nodeId: nodes.id, planId: newest.planId, finishedAt: newest.finishedAt, owner: people.name, plan: subscriptions.label })
+    .from(nodes)
+    .innerJoinLateral(newest, sql`true`)
+    .innerJoin(subscriptions, eq(subscriptions.id, newest.planId))
+    .innerJoin(people, eq(people.id, subscriptions.ownerPersonId))
+    .where(eq(nodes.status, 'needs_login'))
+    .orderBy(desc(newest.finishedAt));
+}
+
 /* A sign-in that has not healed while turns wait deserves one message, naming the person who can renew it. */
 export async function checkSignInFailures(ctx: Ctx, now = new Date()): Promise<void> {
-  const failed = await ctx.db.select({ job: jobs, owner: people.name, plan: subscriptions.label })
-    .from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).innerJoin(people, eq(people.id, subscriptions.ownerPersonId))
-    .innerJoin(nodes, eq(nodes.id, jobs.nodeId)).where(and(eq(jobs.error, 'not_logged_in'), eq(nodes.status, 'needs_login'))).orderBy(desc(jobs.finishedAt));
-  const seen = new Set<string>();
-  for (const { job, owner, plan } of failed) {
-    if (!job.nodeId || seen.has(job.nodeId)) continue;
-    seen.add(job.nodeId);
-    if (!job.finishedAt || +now - +job.finishedAt < 3_600_000) continue;
-    if (await waitsForSignIn(ctx, job.subscriptionId)) await notifyFailure(ctx, job, `Hornhoof: plan "${plan}", owned by ${owner}, still needs a sign-in on node ${job.nodeId} since ${job.finishedAt.toISOString()}. Turns have waited for an hour. Ask ${owner} to sign in on that machine.`, `login:${job.id}`, { waitForWatcher: false });
+  for (const { jobId, nodeId, planId, finishedAt, owner, plan } of await signedOutNodes(ctx.db)) {
+    if (!finishedAt || +now - +finishedAt < 3_600_000) continue;
+    if (!await waitsForSignIn(ctx, planId)) continue;
+    const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
+    if (job) await notifyFailure(ctx, job, `Hornhoof: plan "${plan}", owned by ${owner}, still needs a sign-in on node ${nodeId} since ${finishedAt.toISOString()}. Turns have waited for an hour. Ask ${owner} to sign in on that machine.`, `login:${job.id}`, { waitForWatcher: false });
   }
 }
 

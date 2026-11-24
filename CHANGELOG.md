@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- A node saying hello, and the server's check of sign-ins that have not healed each minute, no longer read every job that node ever ran to find the last turn of each employee on it or each turn that failed for want of a sign-in, with every column of it; on 100 000 jobs that took 90 to 270 ms of the database each time and, when every node came back together after a restart, kept it busy long enough for the nodes' own updates and the leadership lease to time out. The server now looks each up in an index, one look per employee or node (about 2 ms), and nothing the node is told or the owner reads changes.
+
 ## [0.43.0] - 2026-11-23
 
 ### Fixed

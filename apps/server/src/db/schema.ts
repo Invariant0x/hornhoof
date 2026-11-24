@@ -870,6 +870,12 @@ export const jobs = pgTable(
   t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status),
     /* What the quiet check of a department asks of its conversations (whether one runs, when the last one ended), answered from the index alone. */
     index('jobs_conversation_activity').on(t.agentId, t.companyId, t.status, t.startedAt, t.finishedAt).where(sql`${t.kind} = 'conversation'`),
+    /* The newest turn of an employee that a node got (one that started, or goes out or runs), which each hello of the node asks
+       for each employee: one probe reads it. The condition is the one of reachedNode in agents/left-programs.ts. */
+    index('jobs_node_agent_conversation').on(t.nodeId, t.agentId, t.createdAt.desc().nullsFirst())
+      .where(sql`${t.kind} = 'conversation' and (${t.startedAt} is not null or ${t.status} in ('queued', 'running'))`),
+    /* The newest turn that failed for want of a sign-in on a node, which the minute check of the nodes that need one asks for: a few turns of all. */
+    index('jobs_not_logged_in').on(t.nodeId, t.finishedAt.desc().nullsFirst()).where(sql`${t.error} = 'not_logged_in'`),
     check('jobs_builtin_machine', sql`builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'`),
   ],
 );

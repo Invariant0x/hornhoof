@@ -1,0 +1,2 @@
+CREATE INDEX IF NOT EXISTS "jobs_node_agent_conversation" ON "jobs" USING btree ("node_id","agent_id","created_at" DESC NULLS FIRST) WHERE "jobs"."kind" = 'conversation' and ("jobs"."started_at" is not null or "jobs"."status" in ('queued', 'running'));--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "jobs_not_logged_in" ON "jobs" USING btree ("node_id","finished_at" DESC NULLS FIRST) WHERE "jobs"."error" = 'not_logged_in';
