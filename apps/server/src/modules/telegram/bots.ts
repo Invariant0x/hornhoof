@@ -185,7 +185,7 @@ class Listener {
   private async sendEventFiles(person: Person, row: ReplyRow, data: unknown): Promise<void> {
     for (const pic of picturesOfEvent(data)) {
       if (wasTelegramFileSent(row.jobId, row.chatId, pic.id)) continue;
-      const file = await attachmentBytesForPerson(this.ctx.db, person, pic.id);
+      const file = await attachmentBytesForPerson(this.ctx, person, pic.id);
       if (!file) continue;
       /* A bot sends no file over 50 MB: a big one goes as its link. */
       if (file.big) await this.say(row.chatId, WORDS[row.lang].bigFile(file.name, fileLink(this.ctx.config.secret, await publicUrl(this.ctx.db, this.ctx.config), file.id)));

@@ -15999,9 +15999,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "bytes": {
-          "name": "bytes",
-          "type": "bytea",
+        "sha256": {
+          "name": "sha256",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -16045,7 +16045,12 @@
       },
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "theme_files_sha256": {
+          "name": "theme_files_sha256",
+          "value": "\"theme_files\".\"sha256\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
       "isRLSEnabled": false
     }
   },

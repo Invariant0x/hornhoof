@@ -44,7 +44,7 @@ const READS = new Set(['task', 'tasks', 'test_run', 'work_run', 'briefing', 'com
 const HOOKS = new Set(['start', 'prompt', 'invocation', 'queued', 'stop', 'status', 'tool', 'tooldone', 'toolfail', 'ask', 'interrupt', 'end']);
 /* What the owner check found for a connection: its agent's program, or why not. */
 type Verdict = { owner: true } | { owner: false; why: string };
-const FORWARD = ['content-type', 'content-length', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
+const FORWARD = ['content-type', 'content-length', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id', 'if-none-match'];
 
 /* Why a call was refused, for the node's log and Hornhoof: a caller that left before its check is said apart from a check
    that found the caller is not the agent's. */
@@ -342,7 +342,7 @@ export class Bridge {
     const sent = req.method === 'GET' || req.method === 'HEAD' ? {} : kind === 'attach' ? { body: Readable.toWeb(req) as ReadableStream<Uint8Array>, duplex: 'half' } : { body: new Uint8Array(body) };
     const up = await this.forward(target, { method: req.method, headers, ...sent } as RequestInit, onlyReading(kind, req.method, body));
     const out: Record<string, string> = {};
-    for (const h of ['content-type', 'mcp-session-id', 'x-file-name']) {
+    for (const h of ['content-type', 'mcp-session-id', 'x-file-name', 'etag']) {
       const v = up.headers.get(h);
       if (v) out[h] = v;
     }

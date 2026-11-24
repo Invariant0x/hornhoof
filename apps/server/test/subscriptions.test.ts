@@ -7,6 +7,7 @@ import { agents, attachments, companies, departments, jobs, nodeCodes, nodes, pe
 import { as, invitePerson, SETUP, setUpCompany, TEST_API_KEY, testApp } from './helpers.js';
 import { createRoute } from '../src/modules/tasks/echelons-store.js';
 import { developmentStages } from './templates-once.js';
+import { stored } from './files-fixture.js';
 
 const COMMAND = /^curl -fsSL http:\/\/localhost:8080\/install\.sh \| bash -s -- --join ([A-Za-z0-9_-]{43})$/;
 const WHOLE = { kind: 'company', id: null, name: 'Whole company' };
@@ -42,7 +43,7 @@ async function programHistory(db: Db, node: typeof nodes.$inferSelect) {
   const [incident] = await db.insert(programOperatorCases).values({ companyId, agentId: agent!.id, jobId: job!.id, nodeId: node.id, instance: instance!.id, deliveryId: delivery!.id, reason: 'assignment_unrecorded', evidenceKey: delivery!.id, capability: randomUUID(), status: 'resolved', deadlineAt: new Date() }).returning();
   const [signal] = await db.insert(programOperatorSignals).values({ companyId, agentId: agent!.id, instance: instance!.id, reason: 'assignment_unrecorded', evidenceKey: delivery!.id, caseId: incident!.id }).returning();
   const screenshot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7ioAAAAASUVORK5CYII=', 'base64');
-  const [picture] = await db.insert(attachments).values({ companyId, agentId: agent!.id, jobId: job!.id, operatorCaseId: incident!.id, mediaType: 'image/png', bytes: screenshot, size: screenshot.length }).returning();
+  const [picture] = await db.insert(attachments).values({ companyId, agentId: agent!.id, jobId: job!.id, operatorCaseId: incident!.id, mediaType: 'image/png', sha256: await stored(db, screenshot), size: screenshot.length }).returning();
   const [shownCase] = await db.update(programOperatorCases).set({ pictureId: picture!.id }).where(eq(programOperatorCases.id, incident!.id)).returning();
   return { agent: agent!, job: job!, instance: instance!, delivery: delivery!, incident: shownCase!, signal: signal!, picture: picture! };
 }

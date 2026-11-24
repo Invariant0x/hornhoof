@@ -4,9 +4,10 @@ CREATE TABLE "theme_files" (
 	"version" text NOT NULL,
 	"path" text NOT NULL,
 	"media_type" text NOT NULL,
-	"bytes" "bytea" NOT NULL,
+	"sha256" text NOT NULL,
 	"size" integer NOT NULL,
-	CONSTRAINT "theme_files_company_id_theme_id_version_path_pk" PRIMARY KEY("company_id","theme_id","version","path")
+	CONSTRAINT "theme_files_company_id_theme_id_version_path_pk" PRIMARY KEY("company_id","theme_id","version","path"),
+	CONSTRAINT "theme_files_sha256" CHECK ("theme_files"."sha256" ~ '^[0-9a-f]{64}$')
 );
 --> statement-breakpoint
 CREATE TABLE "themes" (

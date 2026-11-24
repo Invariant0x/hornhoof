@@ -6,6 +6,7 @@ import { resumeOperatorProcess } from './modules/program-operator/recovery.js';
 import { cancelJob, wakeAll } from './modules/tasks/wake.js';
 import { inboxRoutes } from './modules/conversation/inbox-routes.js';
 import { closeCheckQueue } from './modules/nodes/check-slots.js';
+import { filesFor, type Files } from './modules/files/files.js';
 import type { Socket } from 'node:net';
 import type { ProviderId } from '@hornhoof/protocol';
 import cookie from '@fastify/cookie';
@@ -68,6 +69,7 @@ import { replicationOf, type Replication } from './modules/copies/slots.js';
 import { Merger } from './modules/merge/merger.js';
 import { mergeRoutes } from './modules/merge/routes.js';
 import { backupRoutes } from './modules/backups/routes.js';
+import { fileNetworkRoutes } from './modules/files/network.js';
 import { Computers } from './modules/computer/access.js';
 import { computerRoutes } from './modules/computer/routes.js';
 import { archOf, registry } from './modules/updates/registry.js';
@@ -161,6 +163,8 @@ export type Ctx = Deps & {
   totalLoss: TotalLoss;
   /* The merges of the databases that came back. */
   merger: Merger;
+  /* The company's files: kept by their sha256 in the store of this machine and of the machines that hold them. */
+  files: Files;
   /* The numbering of the machines that may hold the company's data. */
   ranking: Ranking;
   /* The slots of the copies in this server's Postgres. */
@@ -315,6 +319,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     onError: err => app.log.warn({ err }, 'Could not check for newer builds.'),
   });
   ctx.updater = new UpdaterControl(config.controlDir);
+  ctx.files = filesFor(config);
   ctx.restores = new Restores(ctx);
   ctx.totalLoss = new TotalLoss(ctx);
   ctx.merger = new Merger(ctx, keptDatabases(deps.db, deps.config));
@@ -461,6 +466,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   copiesRoutes(app, ctx);
   keyRoutes(app, ctx);
   backupRoutes(app, ctx);
+  fileNetworkRoutes(app, ctx);
   totalLossRoutes(app, ctx);
   mergeRoutes(app, ctx);
   challengeRoutes(app, ctx.challenges);

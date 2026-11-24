@@ -170,17 +170,18 @@ Content-Type: image/heic
 { "file": { "id": "3f0c9a6e-…", "name": "IMG_0042.heic" } }
 ```
 
-* A file of any size goes. One over 50 MB is a big file: see "Big files".
-* Refusals, each with words for the owner in `message`: `400 file_empty` for no bytes, `413 attachment_invalid` when Hornhoof has no room left for the company's files, `413 file_too_big` for more than 50 MB where Hornhoof keeps no big files, and for the agent the same as for a message (`404 agent_unknown`, `403 assistant_agent_refused`, `409 agent_not_ready`).
+* A file of any size goes, while the company has room for it: see "Where files are kept".
+* Refusals, each with words for the owner in `message`: `400 file_empty` for no bytes, `413 attachment_invalid` when Hornhoof has no room left for the company's files, and for the agent the same as for a message (`404 agent_unknown`, `403 assistant_agent_refused`, `409 agent_not_ready`).
 * When a file is refused, tell the owner "<file name> did not come: " and the words of `message`. When the program still sends the rest of the message, add a line to `text` naming the file that did not come and why, so the agent knows of it too.
 * Hornhoof keeps a file 30 days after it was sent, as every file of a message.
 
-### Big files
+### Where files are kept
 
-A big file lives 30 days on one machine and is lost if that machine goes. A file over 50 MB, more than the database carries, is written to the disk of the machine that took it as it comes, never whole in memory. It is in no copy of the database and no backup, and it counts in the company's room for files as any other file. Hornhoof deletes it 30 days after it came, whatever its task.
+Every file, of any size, goes into the company's file store as it comes, never whole in memory. The store keeps it sealed on every machine that keeps the company's data and on the machines picked to keep its backups, so losing one machine loses no file. The database keeps only its name, size and hash.
 
-* While Hornhoof runs on another machine, or when that machine's disk lost it, every download of it, by link too, answers `410 file_lost`.
-* A big file comes in a `reply` with `big: true`. Give the owner its `url` and say: "A big file lives 30 days on one machine and is lost if that machine goes."
+* When the machine Hornhoof runs on lacks a file, it asks the machines that hold it. If none of them answers within 30 seconds, every download of it, by link too, answers `503 file_away`. Try again once the machine is back.
+* A file kept on one machine before the store, whose machine is gone, answers `410 file_lost`.
+* A `reply` of an older Hornhoof may say `big: true` of a file. Nothing else differs: give the owner its `url` as for any file.
 
 ### GET /api/assistant/events?after=&lt;seq&gt;&amp;wait=&lt;seconds&gt;
 

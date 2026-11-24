@@ -12,6 +12,7 @@ import { storeEvent, sweepEvents } from '../src/modules/assistants/events.js';
 import { FILE_BYTES } from '../src/modules/tasks/attachments.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, nextOf, setUpCompany, testApp, until } from './helpers.js';
+import { filesUnder, sha256Of } from './files-fixture.js';
 
 const NODE_KEY = 'k'.repeat(40);
 type Event = { seq: number; kind: string; at: string; data: Record<string, unknown> };
@@ -123,7 +124,7 @@ describe("an assistant's events", () => {
     expect(opened.rawPayload.equals(bytes)).toBe(true);
   });
 
-  it('mark a file over 50 MB as big, and its link downloads it from the disk of the machine that took it', async () => {
+  it("give a file over 50 MB as any other, kept in the company's store, and its link downloads it", async () => {
     const c = await company();
     const dir = mkdtempSync(join(tmpdir(), 'hh-files-'));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
@@ -137,8 +138,9 @@ describe("an assistant's events", () => {
     expect(attached.statusCode).toBe(201);
     c.builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
     await until(async () => (await eventsOf(c, ava.key)).some(e => e.kind === 'reply_end'));
-    const reply = (await eventsOf(c, ava.key))[0]!.data as { files: { id: string; name: string; url: string; big?: true }[] };
-    expect(reply.files).toEqual([{ id: attached.json().id, name: 'archive.zip', url: expect.any(String), big: true }]);
+    const reply = (await eventsOf(c, ava.key))[0]!.data as { files: { id: string; name: string; url: string }[] };
+    expect(reply.files).toEqual([{ id: attached.json().id, name: 'archive.zip', url: expect.any(String) }]);
+    expect(filesUnder(dir)).toEqual([sha256Of(bytes)]);
     const opened = await c.app.inject({ url: new URL(reply.files[0]!.url).pathname });
     expect(opened.headers['content-length']).toBe(String(FILE_BYTES + 1));
     expect(opened.rawPayload.equals(bytes)).toBe(true);

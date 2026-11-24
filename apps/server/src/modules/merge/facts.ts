@@ -6,9 +6,12 @@ export type ForeignKey = { name: string; table: string; columns: string[]; paren
 export type TableFacts = { name: string; columns: { name: string; type: string; nullable: boolean }[]; key: string[]; fks: ForeignKey[]; referencedBy: ForeignKey[] };
 export type Facts = { tables: Map<string, TableFacts>; order: string[] };
 
+/* The bytes an older Hornhoof kept in attachments are no column of its shape: a side still moving them into the store
+   and one done with it are of the same version, and a row's bytes come only whole, to go into the store as it is written. */
 const COLUMNS = `SELECT c.relname AS "table", a.attname AS name, format_type(a.atttypid, a.atttypmod) AS type, NOT a.attnotnull AS nullable
   FROM pg_catalog.pg_class c JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
   WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped
+    AND NOT (c.relname = 'attachments' AND a.attname = 'bytes')
   ORDER BY c.relname, a.attnum`;
 const KEYS = `SELECT c.relname AS "table", a.attname AS name
   FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indrelid

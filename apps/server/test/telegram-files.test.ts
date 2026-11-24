@@ -13,6 +13,7 @@ import { albums } from '../src/modules/telegram/bots.js';
 import { whatCame } from '../src/modules/telegram/inbox.js';
 import { fakeTelegram, type TelegramUser } from './fake-telegram.js';
 import { as, connectNode, listen, mcp, nextOf, setUpCompany, testApp, until } from './helpers.js';
+import { stored } from './files-fixture.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ';
@@ -203,7 +204,7 @@ it('shows typing and carries earlier attachments once with the final answer', as
   const run = await nextOf(builtin, 'job.run');
   const [file] = await db.insert(attachments).values({
     companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: run.jobId,
-    name: 'report.zip', mediaType: 'application/octet-stream', bytes: ZIP, size: ZIP.length,
+    name: 'report.zip', mediaType: 'application/octet-stream', sha256: await stored(db, ZIP, app.ctx.config), size: ZIP.length,
   }).returning();
   const event = { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: run.jobId, kind: 'text' as const };
   const pictures = [{ id: file!.id, name: file!.name }];
@@ -243,8 +244,8 @@ describe('the sender of a Telegram file', () => {
     const [person] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Personal assistant', status: 'active', isAgent: true, assistantOf: c.ceo.id, scopeKind: 'company' }).returning();
     const [assistant] = await c.db.insert(agents).values({ companyId: c.companyId, kind: 'assistant', name: 'Personal assistant', model: '', subscriptionId: c.orchestrator.subscriptionId }).returning();
     await c.db.insert(assistants).values({ personId: person!.id, companyId: c.companyId, program: 'avaclone', agentId: assistant!.id });
-    /* A disk-backed row exercises the link branch without transferring 50 MB through a bot. */
-    const [file] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: assistant!.id, name: 'private.bin', mediaType: 'application/octet-stream', bytes: size === 'big' ? Buffer.alloc(0) : ZIP, size: size === 'big' ? FILE_BYTES + 1 : ZIP.length }).returning();
+    /* A row that says it is over 50 MB exercises the link branch without transferring 50 MB through a bot. */
+    const [file] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: assistant!.id, name: 'private.bin', mediaType: 'application/octet-stream', sha256: await stored(c.db, ZIP, c.app.ctx.config), size: size === 'big' ? FILE_BYTES + 1 : ZIP.length }).returning();
     const read = await c.app.inject({ url: `/api/attachments/file?task=message&file=${file!.id}`, headers: { authorization: `Bearer ${c.token}` } });
     expect(read.statusCode).toBe(404);
     const absent = await c.send('12140000-0000-4000-8000-000000000000');
@@ -261,10 +262,10 @@ describe('the sender of a Telegram file', () => {
     const [person] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Personal assistant', status: 'active', isAgent: true, assistantOf: c.ceo.id, scopeKind: 'company' }).returning();
     const [assistant] = await c.db.insert(agents).values({ companyId: c.companyId, kind: 'assistant', name: 'Personal assistant', model: '', subscriptionId: c.orchestrator.subscriptionId }).returning();
     await c.db.insert(assistants).values({ personId: person!.id, companyId: c.companyId, program: 'avaclone', agentId: assistant!.id });
-    const [theirs] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: assistant!.id, taskId: task.id, name: 'assistant.bin', mediaType: 'application/octet-stream', bytes: ZIP, size: ZIP.length }).returning();
+    const [theirs] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: assistant!.id, taskId: task.id, name: 'assistant.bin', mediaType: 'application/octet-stream', sha256: await stored(c.db, ZIP, c.app.ctx.config), size: ZIP.length }).returning();
     const read = await c.app.inject({ url: `/api/attachments/file?task=${task.number}&file=${theirs!.id}`, headers: { authorization: `Bearer ${c.token}` } });
     expect(read.statusCode).toBe(404);
-    await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.worker.id, taskId: task.id, name: theirs!.id, mediaType: 'application/octet-stream', bytes: Buffer.from('mine'), size: 4 });
+    await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.worker.id, taskId: task.id, name: theirs!.id, mediaType: 'application/octet-stream', sha256: await stored(c.db, Buffer.from('mine'), c.app.ctx.config), size: 4 });
     const absent = await c.send('12140000-0000-4000-8000-000000000000');
     expect(await c.send(theirs!.id)).toEqual(absent);
     expect(c.tg.sentDocuments).toEqual([]);
@@ -273,7 +274,7 @@ describe('the sender of a Telegram file', () => {
   it.each(['small', 'big'] as const)('still shares a %s company task file that the sender may read', async size => {
     const c = await sender();
     const { task } = await createTask(c.app.ctx, { agentId: c.orchestrator.id }, { title: 'Share file', brief: '', body: '', departmentId: null, assigneeAgentId: c.worker.id, executor: true });
-    const [file] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.worker.id, taskId: task.id, name: 'report.bin', mediaType: 'application/octet-stream', bytes: size === 'big' ? Buffer.alloc(0) : ZIP, size: size === 'big' ? FILE_BYTES + 1 : ZIP.length }).returning();
+    const [file] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.worker.id, taskId: task.id, name: 'report.bin', mediaType: 'application/octet-stream', sha256: await stored(c.db, ZIP, c.app.ctx.config), size: size === 'big' ? FILE_BYTES + 1 : ZIP.length }).returning();
     const result = await c.send(file!.id);
     if (size === 'big') {
       expect(result.isError).toBe(true);

@@ -14,11 +14,17 @@ import type { MachineRole } from '../db/schema.js';
 import { openTcp } from './peer-door.js';
 import { UUID, type Target } from './proxy.js';
 
-export const PEER_PATHS = { hello: '/peer/hello', backups: '/peer/backups/', upload: '/peer/upload/', switch: '/peer/switch/', updating: '/peer/updating', beat: '/peer/beat', promise: '/peer/promise', goOn: '/peer/go-on', led: '/peer/led/' } as const;
+export const PEER_PATHS = { hello: '/peer/hello', backups: '/peer/backups/', files: '/peer/files/', upload: '/peer/upload/', switch: '/peer/switch/', updating: '/peer/updating', beat: '/peer/beat', promise: '/peer/promise', goOn: '/peer/go-on', led: '/peer/led/' } as const;
 export const APP_AUTHORITY = 'app:8080';
 export const DB_AUTHORITY = 'db:5432';
 
 export type Peer = { machine: string; role: MachineRole; serial: string; until: Date; address: string };
+/* A sealed file of the store by the sha256 of its plain bytes. */
+export type PeerFiles = {
+  get(peer: Peer, sha256: string): Promise<{ status: 200; length: number; stream(): Readable } | { status: 403 | 404 }>;
+  put(peer: Peer, sha256: string, body: Readable): Promise<number>;
+};
+const FILE_NAME = /^[0-9a-f]{64}$/;
 export type PeerServerOptions = {
   held: () => HeldCertificate | null;
   key: MachineKey;
@@ -34,6 +40,9 @@ export type PeerServerOptions = {
   hello: (peer: Peer) => Record<string, unknown>;
   /* The bundles this machine gives to the machines that hold them, and takes back from one; without it, neither. */
   backups?: PeerBackups;
+  /* The sealed files of the company's store, which a machine that holds them takes from here, and a file this machine
+     asked for, which comes back; without it, neither. */
+  files?: PeerFiles;
   /* What takes the upload of a machine that stopped holding the company's data; without it, none is taken. */
   uploads?: PeerUploads;
   /* What answers the keeper of another data machine: about a planned switch of the server, about an update of the
@@ -51,7 +60,7 @@ export type PeerServerOptions = {
 export type PeerSwitches = { handle(peer: Peer, method: 'GET' | 'POST', path: string, body: unknown): Promise<{ status: number; body: object; after?: () => void }> };
 type Kind = 'peer' | 'app';
 type Route =
-  | { to: 'hello' } | { to: 'app' } | { to: 'db'; db: Target } | { to: 'bundle'; id: string; put: boolean } | { to: 'upload'; id: string; length: number | null }
+  | { to: 'hello' } | { to: 'app' } | { to: 'db'; db: Target } | { to: 'bundle'; id: string; put: boolean } | { to: 'file'; sha256: string; put: boolean } | { to: 'upload'; id: string; length: number | null }
   | { to: 'switch'; method: 'GET' | 'POST'; path: string } | { to: 'led'; id: string } | { to: 'refused'; status: 403 | 404 };
 type Waiting = { port: number; kind: Kind; host: string; resolve: (port: number) => void; reject: (err: Error) => void };
 
@@ -82,6 +91,9 @@ export function routeOf(headers: IncomingHttpHeaders, kind: Kind, role: MachineR
   if (method === 'CONNECT') return routeOfConnect(headers[':authority'], kind, role, db);
   if ((method === 'GET' || method === 'PUT') && path.startsWith(PEER_PATHS.backups) && UUID.test(path.slice(PEER_PATHS.backups.length))) {
     return { to: 'bundle', id: path.slice(PEER_PATHS.backups.length), put: method === 'PUT' };
+  }
+  if ((method === 'GET' || method === 'PUT') && path.startsWith(PEER_PATHS.files) && FILE_NAME.test(path.slice(PEER_PATHS.files.length))) {
+    return { to: 'file', sha256: path.slice(PEER_PATHS.files.length), put: method === 'PUT' };
   }
   if (method === 'PUT' && path.startsWith(PEER_PATHS.upload) && UUID.test(path.slice(PEER_PATHS.upload.length))) {
     const length = /^\d{1,15}$/.test(String(headers['content-length'])) ? Number(headers['content-length']) : null;
@@ -375,6 +387,7 @@ export class PeerServer {
       });
     }
     if (route.to === 'bundle') return route.put ? void this.takeBundle(stream, peer, route.id) : this.giveBundle(stream, peer, route.id);
+    if (route.to === 'file') return void (route.put ? this.takeFile(stream, peer, route.sha256) : this.giveFile(stream, peer, route.sha256));
     if (route.to === 'upload') return void this.takeUpload(stream, peer, route.id, route.length);
     if (route.to === 'switch') return void this.answerSwitch(stream, peer, route.method, route.path);
     if (route.to === 'led') return void this.takeLed(stream, peer, route.id);
@@ -431,6 +444,32 @@ export class PeerServer {
     stream.pipe(body);
     stream.once('close', () => body.destroy());
     const status = this.opts.backups ? await this.opts.backups.put(peer, id, body).catch(() => 400 as const) : 404;
+    stream.unpipe(body);
+    body.destroy();
+    answerEmpty(stream, status);
+    cutOnceAnswered(stream);
+  }
+
+  /* A sealed file goes to a machine that holds the company's files, as a bundle does. */
+  private async giveFile(stream: ServerHttp2Stream, peer: Peer, sha256: string): Promise<void> {
+    const found = (await this.opts.files?.get(peer, sha256).catch(() => null)) ?? { status: 404 as const };
+    if (stream.destroyed) return;
+    if (found.status !== 200) return answerEmpty(stream, found.status);
+    const file = found.stream();
+    file.on('error', () => stream.close(http2.constants.NGHTTP2_INTERNAL_ERROR));
+    stream.once('close', () => file.destroy());
+    stream.respond({ ':status': 200, 'content-type': 'application/octet-stream', 'content-length': found.length });
+    file.on('data', (chunk: Buffer) => this.count(peer, chunk.length));
+    file.pipe(stream);
+  }
+
+  /* A file this machine asked for comes back from one that holds it, taken as a bundle that comes back is. */
+  private async takeFile(stream: ServerHttp2Stream, peer: Peer, sha256: string): Promise<void> {
+    const body = new PassThrough();
+    body.on('error', ignore);
+    stream.pipe(body);
+    stream.once('close', () => body.destroy());
+    const status = this.opts.files ? await this.opts.files.put(peer, sha256, body).catch(() => 400) : 404;
     stream.unpipe(body);
     body.destroy();
     answerEmpty(stream, status);

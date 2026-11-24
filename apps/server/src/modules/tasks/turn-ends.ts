@@ -47,7 +47,7 @@ async function closeIfIdle(ctx: Reader, turn: Turn, department: Department): Pro
     const [open] = await tx.select(idOnly(turns)).from(turns).where(and(eq(turns.id, turn.id), eq(turns.status, 'open')));
     if (!open || (await holdsWork(tx, turn, places))) return null;
     const [done] = await tx.update(turns).set({ status: 'closed', closedAt: new Date(), closedBecause: because }).where(eq(turns.id, turn.id)).returning();
-    await keepSnapshot(tx, done!, ctx.log);
+    await keepSnapshot(tx, done!, ctx.log, ctx.files);
     return done!;
   });
   if (!closed) return;

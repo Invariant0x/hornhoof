@@ -8,6 +8,7 @@ import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { as } from './helpers.js';
 import { operatorCompany } from './program-operator-company.js';
 import { ownPictures } from '../src/modules/conversation/pictures.js';
+import { stored } from './files-fixture.js';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7ioAAAAASUVORK5CYII=', 'base64');
 
@@ -24,7 +25,7 @@ async function fixture() {
   const orchestratorTurn = await turn(orchestrator!.id);
   await c.db.insert(programInstances).values({ id: c.fact.instance, companyId: c.companyId, agentId: c.agent.id, nodeId: c.identity.nodeId });
   const [incident] = await c.db.insert(programOperatorCases).values({ companyId: c.companyId, agentId: c.agent.id, jobId: c.job.id, nodeId: c.identity.nodeId, instance: c.fact.instance, reason: 'assignment_unrecorded', evidenceKey: c.delivery.id, capability: randomUUID(), deadlineAt: new Date(Date.now() + 60000), operatorAgentId: c.operator!.id, operatorJobId: operator.job.id, escalationJobId: head.job.id }).returning();
-  const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.agent.id, jobId: c.job.id, operatorCaseId: incident!.id, mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+  const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.agent.id, jobId: c.job.id, operatorCaseId: incident!.id, mediaType: 'image/png', sha256: await stored(c.db, PNG, c.app.ctx.config), size: PNG.length }).returning();
   await c.db.update(programOperatorCases).set({ pictureId: picture!.id }).where(eq(programOperatorCases.id, incident!.id));
   const fetchPicture = (token: string, file = picture!.id, ref = `operator-case:${incident!.id}`) => c.app.inject({ method: 'GET', url: `/api/attachments/file?task=${encodeURIComponent(ref)}&file=${encodeURIComponent(file)}`, headers: { authorization: `Bearer ${token}` } });
   /* Someone of the whole company, unless more says otherwise. */
