@@ -13,6 +13,7 @@ import { commitProof, type CommitProof } from '../testruns/commit-proof.js';
 import { taskEvidence, type RunEvidence } from '../testruns/evidence.js';
 import type { Lang } from '../templates/load.js';
 import { type Task } from './state.js';
+import { queueFacts, queueOf, type Queued } from './slots.js';
 import { independentViews, type IndependentPartInput, type IndependentRecord } from './independent.js';
 import type { TaskWait } from './wait-state.js';
 import { openWaitsOf, shownWaits } from './wait-views.js';
@@ -50,6 +51,9 @@ export type TaskLine = {
   urgent: boolean;
   priority: TaskPriority;
   small: boolean;
+  /* Where it waits for a turn with a free slot: how many turns ahead (the next is 1), its place in the queue and the open turn it
+     waits behind; none for work given out. */
+  queue: Queued | null;
   /* The goal it serves, through the task at the top of its work; who answers for it; why it exists; by when. */
   goal: GoalRef | null;
   responsible: { id: string; name: string } | null;
@@ -114,6 +118,7 @@ export type TaskDetail = TaskLine & {
 
 type Names = TrackerLookups & {
   route(t: Task): EchelonsSnapshot;
+  queue(t: Pick<Task, 'id'>): Queued | null;
   agent(id: string | null): AgentRef | null;
   isOrchestrator(id: string | null): boolean;
   place(id: string | null): Place;
@@ -143,7 +148,8 @@ async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Task[], sees: (t:
   const lookups = nameLookups(ctx, { agentRows, placeRows, turnRows, afterRows }, independent, waits);
   const seenAfter = new Map(afterRows.filter(t => t.status !== 'done' && sees(t)).map(t => [t.id, t.number]));
   const tracker = await trackerLookups(ctx.db, rows, lookups.waits, { agent: id => lookups.agent(id)?.name, task: id => seenAfter.get(id) });
-  return { ...lookups, ...tracker, route: t => routes.get(t.id)! };
+  const queues = await queueFacts(ctx.db, rows);
+  return { ...lookups, ...tracker, route: t => routes.get(t.id)!, queue: queueOf(queues) };
 }
 
 type NamedRows = {
@@ -153,7 +159,7 @@ type NamedRows = {
   afterRows: Task[];
 };
 
-function nameLookups(ctx: Pick<Ctx, 'templates'>, { agentRows, placeRows, turnRows, afterRows }: NamedRows, independent: Map<string, IndependentRecord>, waits: Map<string, TaskWait[]>): Omit<Names, 'route' | keyof TrackerLookups> {
+function nameLookups(ctx: Pick<Ctx, 'templates'>, { agentRows, placeRows, turnRows, afterRows }: NamedRows, independent: Map<string, IndependentRecord>, waits: Map<string, TaskWait[]>): Omit<Names, 'route' | 'queue' | keyof TrackerLookups> {
   const orchestrators = new Set<string | null>(agentRows.filter(a => a.kind === 'orchestrator').map(a => a.id));
   return {
     isOrchestrator: id => orchestrators.has(id),
@@ -201,6 +207,7 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   urgent: t.urgent,
   priority: t.priority ?? 'normal',
   small: t.small,
+  queue: n.queue(t),
   goal: n.goal(t),
   responsible: n.person(t.responsiblePersonId),
   askedBy: n.person(t.askedByPersonId),

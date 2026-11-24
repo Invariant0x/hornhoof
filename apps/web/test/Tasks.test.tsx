@@ -471,6 +471,30 @@ describe('turns as releases', () => {
   });
 
   it.each([
+    ['en', 'Tasks', 'Turns and releases', 'Every slot of the turn is busy, so these start when a turn opens, in this order.', ['Waiting for the next turn', 'Waiting for the turn after next', 'Waiting 3 turns ahead']],
+    ['ru', 'Задачи', 'Ходы и выпуски', 'Все места хода заняты, поэтому эти задачи начнутся, когда откроется ход, в таком порядке.', ['Ждут следующего хода', 'Ждут хода после следующего', 'Ждут хода через 3 хода']],
+  ])('shows the queue of a department a batch for each turn ahead, in its order (%s)', async (lang, tasks, releases, why, headings) => {
+    localStorage.setItem('hh-lang', lang);
+    try {
+      const user = userEvent.setup();
+      const waiting = (id: string, number: number, ahead: number, position: number) =>
+        ({ ...PLANNED, id, number, title: `Queued ${number}`, assignee: null, queue: { ahead, position, openTurn: 3 } });
+      shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, waiting('q1', 41, 1, 1), waiting('q2', 42, 2, 2), waiting('q3', 43, 3, 3), waiting('q4', 44, 1, 1)].map(t => t) }] });
+      await user.click(await screen.findByRole('button', { name: new RegExp(`^${tasks}`) }));
+      await goTo(user, releases);
+      expect(await screen.findByText(why)).toBeInTheDocument();
+      const regions = headings.map(name => screen.getByRole('region', { name }));
+      expect(within(regions[0]!).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#41 Queued 41', '#44 Queued 44']);
+      expect(within(regions[1]!).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#42 Queued 42']);
+      expect(within(regions[2]!).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#43 Queued 43']);
+      /* The turn getting ready does not count them among its goals. */
+      expect(screen.getAllByRole('listitem', { name: '#41 Queued 41' })).toHaveLength(1);
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it.each([
     ['en', 'Turns and releases', 'Show', 'Outside releases', 'Releases', 'Getting ready: turn 3, the release after v1.2.0'],
     ['ru', 'Ходы и выпуски', 'Показать', 'Задачи вне выпуска', 'Выпуски', 'Готовится: ход 3, выпуск после v1.2.0'],
   ])('shows the work outside every release apart, on its own choice (%s)', async (lang, releases, show, outside, back, preparing) => {
