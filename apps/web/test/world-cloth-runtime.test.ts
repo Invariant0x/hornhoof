@@ -1,5 +1,5 @@
 import { Container, MeshSimple, Sprite, Texture } from 'pixi.js';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ART_CONTRACT_VERSION, type ArtIndex, type BuildingArtLayer } from '../src/world/art';
 import { WorldArtFiles } from '../src/world/art-files';
 import { DisplayRunPool, WorldArtLibrary, type GreyReader } from '../src/world/art-runtime';
@@ -43,6 +43,10 @@ const halfMask: GreyReader = async () => {
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 
 describe('Cloth masks in the art runtime (#1983)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('reads a cloth mask once into the mesh weights and tells the map, null until then', async () => {
     let reads = 0;
     const lib = await WorldArtLibrary.load(PACK, index, async url => {
@@ -62,6 +66,51 @@ describe('Cloth masks in the art runtime (#1983)', () => {
     expect(reads).toBe(1);
     expect(changes).toBe(1);
     expect(lib.clothWeights('buildings/house/mudbrick/v01/missing_w.png')).toBeNull();
+  });
+
+  it('reads a mask from its own picture file in the browser: the size is taken before the bitmap is closed', async () => {
+    /* A closed ImageBitmap reads 0 by 0, as browsers do, and a 0 by 0 read of a canvas throws. */
+    vi.stubGlobal('createImageBitmap', async () => ({
+      width: W,
+      height: H,
+      close() {
+        this.width = 0;
+        this.height = 0;
+      },
+    }));
+    vi.stubGlobal(
+      'OffscreenCanvas',
+      class {
+        constructor(
+          readonly width: number,
+          readonly height: number,
+        ) {}
+        getContext() {
+          return {
+            drawImage: () => undefined,
+            getImageData: (_x: number, _y: number, w: number, h: number) => {
+              if (w <= 0 || h <= 0) throw new RangeError('IndexSizeError');
+              const data = new Uint8ClampedArray(w * h * 4);
+              for (let i = (H / 2) * W * 4; i < data.length; i++) data[i] = 255;
+              return { data };
+            },
+          };
+        }
+      },
+    );
+    const files = new WorldArtFiles({
+      packId: 'egypt',
+      baseUrl: '/art/',
+      store: null,
+      fetch: async url => (url.endsWith('art-index.json') ? new Response(JSON.stringify(INDEX)) : new Response(new Blob([new Uint8Array(4)]))),
+    });
+    const lib = await WorldArtLibrary.load(PACK, files);
+    expect(lib.clothWeights(`${AT}awning_w.png`)).toBeNull();
+    for (let i = 0; i < 10 && !lib.clothWeights(`${AT}awning_w.png`); i++) await settle();
+    const weights = lib.clothWeights(`${AT}awning_w.png`);
+    expect(weights).toHaveLength(CLOTH_COLS * CLOTH_ROWS);
+    expect(weights![0]).toBe(0);
+    expect(weights![weights!.length - 1]).toBe(1);
   });
 
   it('keeps a cloth still when its mask cannot be read, and ignores a mask that comes after the map ended', async () => {
