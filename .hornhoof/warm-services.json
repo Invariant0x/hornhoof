@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "services": [
+    {
+      "id": "postgres",
+      "start": {
+        "program": "node",
+        "args": [
+          "apps/server/test/warm/postgres.mjs",
+          "start",
+          "{state}"
+        ],
+        "cwd": "."
+      },
+      "ready": {
+        "program": "node",
+        "args": [
+          "apps/server/test/warm/postgres.mjs",
+          "ready",
+          "{state}"
+        ],
+        "cwd": "."
+      },
+      "piece": {
+        "create": {
+          "program": "node",
+          "args": [
+            "apps/server/test/warm/postgres.mjs",
+            "create",
+            "{state}",
+            "{piece}"
+          ],
+          "cwd": "."
+        },
+        "drop": {
+          "program": "node",
+          "args": [
+            "apps/server/test/warm/postgres.mjs",
+            "drop",
+            "{state}",
+            "{piece}"
+          ],
+          "cwd": "."
+        },
+        "list": {
+          "program": "node",
+          "args": [
+            "apps/server/test/warm/postgres.mjs",
+            "list",
+            "{state}"
+          ],
+          "cwd": "."
+        },
+        "env": [
+          "TEST_DATABASE_URL",
+          "HH_TEST_PG_PIECE"
+        ]
+      },
+      "uses": {
+        "programs": [
+          "vitest"
+        ],
+        "files": [
+          "apps/server/test/postgres/**/*.pg.spec.ts"
+        ]
+      }
+    }
+  ]
+}
