@@ -7,6 +7,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Fixed
+
+- A machine short of disk space no longer holds every local check for hours: a check of types, lint, format or named test files (tsc, eslint, Vitest and the like) waits only while less than 3 GiB is free (`HORNHOOF_DISK_LIGHT_GB` sets it), and builds, browser runs and other heavy work keep their larger level, a tenth of the disk and at least 20 GiB (`HORNHOOF_DISK_GB`). What a check is refused with now names the level it waits for and the space the machine has, in GiB. Before a check is refused, the machine removes what test runs left in its temporary folder (`hh-test-db-*`, `hh-test-initdb-*`, `hh-installs-*`, `hh-migrations-*`, `drz-*`) when no live process owns or holds it, and the test helpers remove their folders when a run ends, fails or exits.
+
 ### Added
 
 - Every text people see now comes from a file per language, loaded only for the language that is on: the screens, the words of the world packs, what the server says in its own words, the page shown while the server is away, and the names and descriptions of templates. A language is one line in a registry and one file per kind of text, with no code that names a language. Plurals, dates and numbers follow the language through the browser's own rules, a language that reads right to left mirrors the page, and the letters of a script that the product's fonts do not hold load only when a language in that script is on.

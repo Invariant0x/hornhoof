@@ -1039,6 +1039,10 @@ const CHECK_TOOLS = new Map(Object.entries<Category>({
   nodemon: 'watch', watchexec: 'watch', entr: 'watch',
 }));
 
+/* The checks that need little disk beside the files they read: types, lint, format and quality. A build, a coverage run and a
+   mutation run copy or write much more. */
+export const LIGHT_CHECK_TOOLS: ReadonlySet<string> = new Set([...CHECK_TOOLS].filter(([, category]) => ['types', 'lint', 'format', 'quality'].includes(category)).map(([name]) => name));
+
 /* Programs whose first word says what they do. */
 type ToolSpec = {
   install?: readonly string[];

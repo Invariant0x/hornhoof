@@ -435,6 +435,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     return diskTotal ? { total: diskTotal, free: Math.min(diskFree ?? 0, diskTotal) } : null;
   };
   const diskCare = startDiskCare({ dir, owner: { user: credUser, home: credHome }, checking: () => testing.size > 0 || checks.leaseIds().length > 0, log, disk: diskOfMachine });
+  /* A check that meets a refusal for disk first has the care look again, which clears what the test runs left behind. */
+  checks.beforeRefusing = () => diskCare.settle();
   const load = (): NodeLoad => {
     const { oomKills, ...now } = machine();
     const disk = diskCare.report();

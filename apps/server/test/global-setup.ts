@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TestProject } from 'vitest/node';
 import { migratedPgliteDump, readPgliteTemplate, type PgliteTemplateOptions } from './prepare-environment.js';
 import { databaseMetadata, encodeDatabaseMetadata } from './helpers-db-metadata.js';
+import { removeTempFolder, tempFolderSync } from './temp-folder.js';
 
 declare module 'vitest' {
   export interface ProvidedContext {
@@ -31,25 +31,26 @@ async function metadataOf(dump: Buffer): Promise<string> {
 }
 
 /* A new PGlite runs initdb, about two seconds of a processor, and the migrations add half a second more. The run pays for
-   that once, before any test file starts, and keeps the dump in a file the test databases open in a fraction of a second. */
+   that once, before any test file starts, and keeps the dump in a file the test databases open in a fraction of a second. The
+   folder it is kept in goes when the run ends or fails, and names its owner for the machine to clear it if the run is killed. */
 async function writeMigratedCopy(file: string, metadata: string, options: GlobalSetupOptions): Promise<void> {
-  try {
-    const template = options.templatePath ?? process.env.HH_PGLITE_TEMPLATE;
-    const dump = template ? readPgliteTemplate(template, options) : null;
-    const bytes = dump ?? Buffer.from(await (options.dump ?? migratedPgliteDump)());
-    writeFileSync(file, bytes);
-    writeFileSync(metadata, await (options.metadata ?? metadataOf)(bytes));
-  } catch (error) {
-    rmSync(join(file, '..'), { recursive: true, force: true });
-    throw error;
-  }
+  const template = options.templatePath ?? process.env.HH_PGLITE_TEMPLATE;
+  const dump = template ? readPgliteTemplate(template, options) : null;
+  const bytes = dump ?? Buffer.from(await (options.dump ?? migratedPgliteDump)());
+  writeFileSync(file, bytes);
+  writeFileSync(metadata, await (options.metadata ?? metadataOf)(bytes));
 }
 export default async function setup(project: Pick<TestProject, 'provide'>, options: GlobalSetupOptions = {}): Promise<() => void> {
-  const dir = mkdtempSync(join(tmpdir(), 'hh-test-db-'));
+  const dir = tempFolderSync('hh-test-db-');
   const file = join(dir, 'migrated.tar');
   const metadata = join(dir, 'metadata.json');
-  await writeMigratedCopy(file, metadata, options);
-  project.provide('migratedDataDir', file);
-  project.provide('databaseMetadataFile', metadata);
-  return () => rmSync(dir, { recursive: true, force: true });
+  try {
+    await writeMigratedCopy(file, metadata, options);
+    project.provide('migratedDataDir', file);
+    project.provide('databaseMetadataFile', metadata);
+  } catch (error) {
+    removeTempFolder(dir);
+    throw error;
+  }
+  return () => removeTempFolder(dir);
 }

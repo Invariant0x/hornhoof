@@ -7,11 +7,13 @@ let client: CheckClient | null = null;
 const leased = new AsyncLocalStorage<{ lease: CheckLease; active: boolean }>();
 const leases = new Map<string, { lease: CheckLease; agentId: string | undefined; active: boolean; children: Set<Promise<unknown>> }>();
 
-const blocked = new Map<number, string>();
+/* What holds checks back, by who holds them. heavyOnly: only builds, browser runs and the like wait; a light check goes on. */
+const blocked = new Map<number, { reason: string; heavyOnly: boolean }>();
 export function setCheckClient(next: CheckClient | null): void { client = next; if (!next) blocked.clear(); }
-export function suspendCheckSlots(group: number, reason: string | null): void {
-  if (reason) blocked.set(group, reason); else blocked.delete(group);
-  client?.refuse(blocked.values().next().value ?? null);
+export function suspendCheckSlots(group: number, reason: string | null, heavyOnly = false): void {
+  if (reason) blocked.set(group, { reason, heavyOnly }); else blocked.delete(group);
+  const held = [...blocked.values()];
+  client?.refuse(held.find(one => !one.heavyOnly)?.reason ?? null, held[0]?.reason ?? null);
 }
 export function checkQueueOffline(): boolean { return !client?.isOnline(); }
 export function checkSlotWaiting(agentId: string, jobId?: string | null): boolean { return client?.waiting(agentId, jobId) ?? false; }

@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import type { TestProject } from 'vitest/node';
+import { removeTempFolder, tempFolderSync } from './temp-folder.js';
 
 declare module 'vitest' {
   export interface ProvidedContext {
@@ -14,7 +14,7 @@ declare module 'vitest' {
 /* initdb costs a processor several times what opening its dump does. The run pays for it once, before any test file
    starts, instead of the first test of each migration file paying for it within its own time. */
 export default async function setup(project: Pick<TestProject, 'provide'>): Promise<() => void> {
-  const dir = mkdtempSync(join(tmpdir(), 'hh-test-initdb-'));
+  const dir = tempFolderSync('hh-test-initdb-');
   try {
     const client = new PGlite();
     /* A dump asked for before it is ready never comes. */
@@ -25,8 +25,8 @@ export default async function setup(project: Pick<TestProject, 'provide'>): Prom
     writeFileSync(file, Buffer.from(await dump.arrayBuffer()));
     project.provide('initdbDataDir', file);
   } catch (error) {
-    rmSync(dir, { recursive: true, force: true });
+    removeTempFolder(dir);
     throw error;
   }
-  return () => rmSync(dir, { recursive: true, force: true });
+  return () => removeTempFolder(dir);
 }

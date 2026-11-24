@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import type { MigrationConfig } from 'drizzle-orm/migrator';
@@ -10,6 +9,7 @@ import { afterAll, onTestFinished } from 'vitest';
 import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
 import { freshPglite } from './helpers-db.js';
 import { migrationsCut } from './migrations-before.js';
+import { removeTempFolder, tempFolder } from './temp-folder.js';
 
 /* What the migration tests share. They are split by migration number into files that run side by side. */
 
@@ -51,8 +51,8 @@ export async function prepareInstalls(tags: readonly string[]): Promise<void> {
   const unknown = tags.filter(tag => !TAGS.includes(tag));
   if (unknown.length) throw new Error(`No migration is tagged ${unknown.join(', ')}.`);
   const ordered = [...new Set(tags)].sort((a, b) => TAGS.indexOf(a) - TAGS.indexOf(b));
-  const dir = await mkdtemp(join(tmpdir(), 'hh-installs-'));
-  afterAll(() => rm(dir, { recursive: true, force: true }));
+  const dir = await tempFolder('hh-installs-');
+  afterAll(() => removeTempFolder(dir));
   const client = await freshPglite();
   try {
     const db = drizzle(client);
@@ -64,6 +64,10 @@ export async function prepareInstalls(tags: readonly string[]): Promise<void> {
     }
     await migrate(db, { migrationsFolder: MIGRATIONS });
     installed = Promise.resolve(await client.dumpDataDir('none'));
+  } catch (error) {
+    /* A file whose collection fails may not run its afterAll. */
+    removeTempFolder(dir);
+    throw error;
   } finally {
     await client.close();
   }

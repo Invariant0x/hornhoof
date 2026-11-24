@@ -1,9 +1,13 @@
 import { DISK_CLEANED_MAX, DISK_IGNORED_MAX, DISK_KEPT_MAX, DiskReport } from '@hornhoof/protocol';
 import type { Cleaner, Stay } from './clean.js';
 import type { DockerDisk } from './docker.js';
-import { DiskCleaned, DiskLow, diskThreshold, type DiskSettings, type Removal } from './state.js';
+import { DiskCleaned, DiskLow, diskThreshold, lightThreshold, type DiskSettings, type Removal } from './state.js';
 
 export type Disk = { total: number; free: number };
+
+/* The room a light check needs, as the last pass found it: what is free, what such a check needs, and since when the node
+   has been short of it. */
+export type LightRoom = { free: number; threshold: number; low: DiskReport['low'] };
 
 type Options = {
   /* The total and free space of the disk the node's folders are on; null where it cannot be read. */
@@ -32,20 +36,26 @@ function fitted(stay: Stay): Stay | null {
 
 /* A node's care of its disk. Each pass first removes what of Hornhoof's share can come back, part by part, then measures the
    disk and each part, and finds whether the node is low: still under its threshold after the cleaning, so it takes no new
-   checks or builds. A part whose cleaning or measuring fails frees nothing and is left out; the others go on. */
+   heavy work, or under what a light check needs, so it takes no check at all. A part whose cleaning or measuring fails frees
+   nothing and is left out; the others go on. A quick pass runs only what each part can clean in a moment, and reads the disk
+   again, keeping what the last full pass measured. */
 export class DiskKeeper {
   private readonly lowState = new DiskLow();
+  private readonly lightState = new DiskLow();
   private readonly removed = new DiskCleaned();
   private last: DiskReport | null = null;
+  private lastLight: LightRoom | null = null;
+  private dockerCleaned: DiskReport['cleaned'] = [];
 
   constructor(private readonly options: Options) {}
 
-  async pass(): Promise<DiskReport | null> {
+  async pass(quick = false): Promise<DiskReport | null> {
     const { cleaners, settings, now = () => new Date(), log = () => {} } = this.options;
+    const brief = quick && this.last !== null;
     const removals: Removal[] = [];
     for (const cleaner of cleaners) {
       try {
-        const bytes = await cleaner.clean();
+        const bytes = brief ? await (cleaner.quick?.() ?? 0) : await cleaner.clean();
         if (bytes > 0) {
           removals.push({ part: cleaner.part, bytes });
           log(`Removed ${bytes} bytes of ${cleaner.part} that can come back.`);
@@ -57,26 +67,12 @@ export class DiskKeeper {
     const at = now();
     this.removed.add(removals, at);
     const disk = await this.options.disk();
-    if (!disk) return (this.last = null);
-    const docker = this.options.docker
-      ? await Promise.resolve()
-          .then(() => this.options.docker!())
-          .catch((err: unknown) => {
-            log(`Could not read Docker disk figures: ${why(err)}`);
-            return null;
-          })
-      : null;
-    const parts: DiskReport['parts'] = { ...(docker?.parts ?? {}) };
-    for (const cleaner of cleaners) {
-      try {
-        parts[cleaner.part] = await cleaner.size();
-      } catch (err) {
-        log(`Could not measure ${cleaner.part}: ${why(err)}`);
-      }
-    }
-    const free = Math.min(disk.free, disk.total), threshold = diskThreshold(disk.total, settings);
+    if (!disk) { this.lastLight = null; return (this.last = null); }
+    const parts: DiskReport['parts'] = brief ? { ...this.last!.parts } : await this.measured(cleaners);
+    const free = Math.min(disk.free, disk.total), threshold = diskThreshold(disk.total, settings), floor = lightThreshold(disk.total, settings);
     const low = this.lowState.after([{ free, threshold }], at);
-    const cleaned = [...this.removed.list(at), ...(docker?.cleaned ?? [])]
+    this.lastLight = { free, threshold: floor, low: this.lightState.after([{ free, threshold: floor }], at) };
+    const cleaned = [...this.removed.list(at), ...this.dockerCleaned]
       .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
       .slice(0, DISK_CLEANED_MAX);
     const kept = cleaners
@@ -96,9 +92,37 @@ export class DiskKeeper {
     return this.last;
   }
 
+  /* What each part takes, and what Docker holds, as a full pass measures them. */
+  private async measured(cleaners: Cleaner[]): Promise<DiskReport['parts']> {
+    const { log = () => {} } = this.options;
+    const docker = this.options.docker
+      ? await Promise.resolve()
+          .then(() => this.options.docker!())
+          .catch((err: unknown) => {
+            log(`Could not read Docker disk figures: ${why(err)}`);
+            return null;
+          })
+      : null;
+    this.dockerCleaned = docker?.cleaned ?? [];
+    const parts: DiskReport['parts'] = { ...(docker?.parts ?? {}) };
+    for (const cleaner of cleaners) {
+      try {
+        parts[cleaner.part] = await cleaner.size();
+      } catch (err) {
+        log(`Could not measure ${cleaner.part}: ${why(err)}`);
+      }
+    }
+    return parts;
+  }
+
   /* What the last pass found, for the node's load report. */
   get report(): DiskReport | null {
     return this.last;
+  }
+
+  /* The room a light check needs, as the last pass found it; null where the disk could not be read. */
+  get light(): LightRoom | null {
+    return this.lastLight;
   }
 
   /* Whether the node takes no new checks or builds now. */

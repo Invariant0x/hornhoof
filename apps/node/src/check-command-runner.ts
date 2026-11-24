@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { JobUser } from './isolation.js';
 import { checkQueueOffline, currentCheckLease, reuseCheckLease, suspendCheckSlots, withCheckSlot } from './check-queue.js';
 import { assertCheckGroup, checkGroupMembers, cleanCheckGroup, signalCheckGroup, type CheckGroup } from './check-group.js';
+import { lightCheck } from './check-weight.js';
 import { trackCheckProcess } from './check-processes.js';
 import { refusalText, type AgentCommandVerdict, type CommandInput } from './command-guard.js';
 
@@ -99,7 +100,7 @@ const held = (res: ServerResponse, group: CheckGroup, uid: number) => async (sig
 async function admitCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse, jobId: string | undefined): Promise<boolean> {
   const run = input.wait ? held(res, input.group!, user?.uid ?? process.getuid!()) : (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
   if (input.lease) return reuseCheckLease(input.lease, key, signal, run);
-  return withCheckSlot(run, { agentId: key, ...(jobId ? { jobId } : {}), label: basename(input.command[0]).slice(0, 100), signal, onPosition: position => { send(res, { type: 'queued', position }); } });
+  return withCheckSlot(run, { agentId: key, ...(jobId ? { jobId } : {}), label: basename(input.command[0]).slice(0, 100), light: lightCheck(input.command), signal, onPosition: position => { send(res, { type: 'queued', position }); } });
 }
 
 function assertCommandUser(): void {

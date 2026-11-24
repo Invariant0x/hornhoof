@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { CHECK_LEASE_MS, CheckQueueRequest, type CheckOptions, type CheckQueueReply } from '@hornhoof/protocol';
 
-export type SlotOptions = CheckOptions & { label?: string; agentId?: string; jobId?: string };
+/* light: a check of types, style or tests, which needs a few GiB of disk at most; other work is heavy and waits for more. */
+export type SlotOptions = CheckOptions & { label?: string; agentId?: string; jobId?: string; light?: boolean };
 export type CheckLease = { id: string; signal: AbortSignal; release(): void };
 type Pending = { options: SlotOptions; frame: CheckQueueRequest; stop: AbortController; state: 'queued' | 'running'; resolve(lease: CheckLease): void; reject(reason: unknown): void; detach(): void };
 
@@ -9,17 +10,25 @@ type Pending = { options: SlotOptions; frame: CheckQueueRequest; stop: AbortCont
    and are claimed again once the node is back. One away longer loses them, and what runs under them stops. */
 export class CheckClient {
   private connected = false;
+  /* Why no check starts, and why no heavy work does, which has every reason a check has and its own. */
   private refusal: string | null = null;
+  private heavyRefusal: string | null = null;
   refusalChanged: (() => void) | undefined;
+  /* The one that looks after the disk: asked before a check is refused, it may lift the refusal. */
+  beforeRefusing: (() => Promise<void>) | undefined;
   isOnline(): boolean { return this.connected; }
   /* Pending claims can be granted at any time. Aborted holders still own their slot during cleanup. */
   leaseIds(): string[] { return [...this.entries.keys()]; }
-  refused(): string | null { return this.refusal; }
-  refuse(reason: string | null): void {
-    if (reason === this.refusal) return;
-    this.refusal = reason;
-    if (reason) for (const [id, entry] of this.entries) if (entry.state === 'queued') {
-      this.release(id); entry.reject(new Error(reason));
+  /* Why heavy work, or with light a light check, is refused now. */
+  refused(light = false): string | null { return light ? this.refusal : this.heavyRefusal; }
+  /* Refuse every check with all, and heavy work also with heavy, which is all when it is not given. */
+  refuse(all: string | null, heavy: string | null = all): void {
+    const both = heavy ?? all;
+    if (all === this.refusal && both === this.heavyRefusal) return;
+    this.refusal = all; this.heavyRefusal = both;
+    for (const [id, entry] of this.entries) if (entry.state === 'queued') {
+      const reason = this.refused(entry.options.light);
+      if (reason) { this.release(id); entry.reject(new Error(reason)); }
     }
     this.refusalChanged?.();
   }
@@ -55,9 +64,17 @@ export class CheckClient {
     for (const [id, entry] of this.entries) this.lost(id, entry);
   }
 
+  /* Asks the one that looks after the disk to look again, which may lift a refusal. */
+  private async lookAgain(): Promise<void> {
+    await this.beforeRefusing?.().catch(() => {});
+  }
+
   async acquire(options: SlotOptions = {}): Promise<CheckLease> {
     options.signal?.throwIfAborted();
-    if (this.refusal) throw new Error(this.refusal);
+    if (this.refused(options.light)) await this.lookAgain();
+    options.signal?.throwIfAborted();
+    const refusal = this.refused(options.light);
+    if (refusal) throw new Error(refusal);
     if (!this.connected) throw new Error('Machine check queue is offline.');
     const id = randomUUID(), frame = this.request(id, options);
     return new Promise((resolve, reject) => {

@@ -1,8 +1,8 @@
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, expect, onTestFinished, TestRunner } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
+import { removeTempFolder, tempFolder } from './temp-folder.js';
 
 type Entry = { tag: string };
 
@@ -11,8 +11,8 @@ type Entry = { tag: string };
    and copying them twice a test cost a busy machine up to a second each time. The folder goes when the test ends, or,
    cut as the file is collected, once the file's tests have run. */
 export async function migrationsCut(prefix: string, cut: (entries: Entry[]) => Entry[]): Promise<string> {
-  const folder = await mkdtemp(join(tmpdir(), prefix));
-  (TestRunner.getCurrentTest() ? onTestFinished : afterAll)(() => rm(folder, { recursive: true, force: true }));
+  const folder = await tempFolder(prefix);
+  (TestRunner.getCurrentTest() ? onTestFinished : afterAll)(() => removeTempFolder(folder));
   const journal = JSON.parse(await readFile(join(MIGRATIONS, 'meta/_journal.json'), 'utf8')) as { entries: Entry[] };
   journal.entries = cut(journal.entries);
   await mkdir(join(folder, 'meta'));
