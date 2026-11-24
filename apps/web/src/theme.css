@@ -372,6 +372,19 @@ select:disabled { opacity: .55; }
   background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 16px 40px var(--shadow);
 }
 .dialog:focus { outline: none; }
+/* The layer over the page while the server is away (#1938): the book's dialog on its dimmed layer, above every other layer, since
+   nothing under it works. It lies over the page, so nothing under it moves. The ring turns only while a look is on its way,
+   and stands still as a quarter arc where motion is reduced. */
+.conn-layer { z-index: 60; }
+.dialog.conn { inline-size: min(440px, 100%); }
+.dialog.conn > :is(h2, p) { margin: 0; min-inline-size: 0; overflow-wrap: anywhere; }
+.dialog.conn > h2 { font-size: 18px; }
+.dialog.conn > p { font-size: 14px; }
+.dialog.conn > p.conn-long { font-size: 13px; }
+.conn-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.conn-try { flex: 1 1 auto; min-inline-size: 0; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.conn-foot > .entry-actions { flex: 0 0 auto; inline-size: auto; margin-inline-start: auto; }
+@media (prefers-reduced-motion: reduce) { .conn-try .spinner { animation: none; } }
 .dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .first-contact > *, .first-contact h2 { min-inline-size: 0; overflow-wrap: anywhere; }
 .versions-check { display: flex; align-items: center; gap: 10px; font-size: 13px; }
@@ -550,6 +563,9 @@ select:disabled { opacity: .55; }
 .skins-notice .entry-actions { margin-block-start: 4px; justify-content: flex-start; }
 .skins-catalog { display: grid; gap: 12px; min-width: 0; }
 .skins-catalog-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
+.skins-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.skins-filters .btn.on { background: var(--glow); color: var(--cyan-ink); box-shadow: inset 0 0 0 1px var(--cyan); }
+.sp-world-banner { display: block; width: 100%; height: 46px; border: 1px solid var(--line); }
 /* Two columns where the place is wide, one where it is narrow: the place decides, not the window. An odd last card takes
    the whole row, so no card stands alone in half a row. */
 .skin-wrap { container: skins / inline-size; min-width: 0; }
@@ -727,7 +743,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
    every card of the map is as tall as the card whose words need the most, as the map measures them. */
 .dept > .edge { height: 100%; }
 .dept .edge-in { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
-.edge > .corner { position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-left: 2px solid var(--cyan); border-top: 2px solid var(--cyan); pointer-events: none; }
+.edge > .corner { position: absolute; inset-inline-start: 0; inset-block-start: 0; width: 22px; height: 22px; border-inline-start: 2px solid var(--cyan); border-block-start: 2px solid var(--cyan); pointer-events: none; }
 .dept .row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .dept .row2 { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
 .dept .detail { min-width: 0; color: var(--muted); overflow-wrap: break-word; }
@@ -807,7 +823,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .ticker .te { flex: none; font-size: 12px; color: var(--muted); }
 .ticker .tx.in { animation: tin .45s ease-out; }
 @keyframes blink { 50% { opacity: .35; } }
-@media (max-width: 720px) { .ticker { bottom: 72px; max-width: calc(100% - 32px); } }
+@media (max-width: 720px) { .ticker { bottom: 72px; max-width: calc(100% - 32px); } .map > .ticker { flex-wrap: wrap; row-gap: 4px; } }
 /* On a narrow screen the orchestrator's line stands over the zoom, and the way back over that line. */
 @media (max-width: 720px) { .map-arrange { bottom: 124px; } }
 @media (prefers-reduced-motion: reduce) { .ticker .live { animation: none; } }
@@ -1101,6 +1117,15 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .facts dd small { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
 .machine-note { font-size: 12.5px; padding-left: 10px; border-left: 3px solid var(--amber-ink); }
+/* Hornhoof's share of a machine's disk (#1750), a row a part: its name at the start, wrapping between whole words, and its
+   size at the end on one line, with its share of the whole disk under them. */
+.disk-parts { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; }
+.disk-parts li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 4px 12px; min-inline-size: 0; }
+.disk-parts .dp-n { min-inline-size: 0; overflow-wrap: break-word; hyphens: auto; }
+.disk-parts .dp-v { font-weight: 500; font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
+.disk-parts .bar { grid-column: 1 / -1; }
+/* Docker's own disk is another disk than the parts above, so its line stands apart from them. */
+.dp-docker { margin-block-start: 12px; }
 .machine-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 /* Subscriptions & API: every button, field and list is a target of 44px, and a card's actions end at its end edge. */
 .subs .btn { min-height: 44px; }
@@ -1116,6 +1141,8 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .machine-actions .lend { margin-right: 4px; }
 @media (max-width: 760px) {
   .pool-facts { grid-template-rows: repeat(4, auto); grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-columns: auto; }
+  /* While the initial load stalls or fails on a narrow screen, keep the held pool below the held table so the error and Retry stay in view. */
+  .machines:has(.held-table .load-fail) > .held-pool { order: 1; }
 }
 @media (max-width: 420px) {
   .facts { grid-template-columns: 1fr; gap: 0; }
@@ -1318,15 +1345,15 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 /* The live terminal takes the window, wider, in its own colors; cards wait below it. */
 .orch.term { width: min(980px, calc(100vw - 32px)); }
 /* The padding sits on the terminal itself, which is what its fit leaves out when it counts rows. */
-.t-term { position: relative; flex: 1 1 auto; min-height: 156px; min-width: 0; color-scheme: dark; background: #15191F; overflow: hidden; }
+.t-term { position: relative; flex: 1 1 auto; min-height: 156px; min-width: 0; color-scheme: dark; background: var(--term-bg, #15191F); overflow: hidden; }
 .t-xterm { width: 100%; height: 100%; }
 .t-term .xterm { height: 100%; padding: 6px 8px 4px 10px; }
 .t-menu { position: absolute; z-index: 20; padding: 4px; background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 8px 24px var(--shadow); }
 .t-copy { display: block; width: 100%; padding: 6px 12px; border: 0; background: none; color: var(--ink); font-family: var(--f-display); font-size: 13px; font-weight: 600; text-align: left; white-space: nowrap; cursor: pointer; }
 .t-copy:hover:not(:disabled) { color: var(--cyan-ink); background: var(--glow); }
 .t-copy:disabled { color: var(--muted); cursor: default; }
-.t-load { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: #15191F; color: #dcdcdc; font-family: var(--f-body); font-size: 15px; }
-.t-load > .spinner { width: 44px; height: 44px; border-width: 3px; border-color: #2b323b; border-top-color: #dcdcdc; }
+.t-load { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: var(--term-bg, #15191F); color: var(--term-ink, #dcdcdc); font-family: var(--f-body); font-size: 15px; }
+.t-load > .spinner { width: 44px; height: 44px; border-width: 3px; border-color: #2b323b; border-top-color: var(--term-ink, #dcdcdc); }
 /* Why the terminal cannot show now, in place of it. */
 .t-load p { max-width: 60ch; margin: 0; padding: 0 24px; text-align: center; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .t-load > .spinner { animation-duration: 3s; } }
@@ -1786,9 +1813,10 @@ body:has(.dview) .version-mark { display: none; }
    keeps its width and place under it. */
 .body.page ~ .acard, .body.page ~ .orch { bottom: 0; }
 /* A page keeps its own opaque header room, which #1635 leaves as it is: its windows and cards open under that room as before,
-   or under a bar of the shell while one stands, where on the map and in a department they open 8 px under the menu. */
-@media (min-width: 761px) { .body.page ~ :is(.orch, .dv-drawer, .acard, .agent-strips) { top: var(--shell-top, 68px); } }
-@media (max-width: 760px) { .body.page ~ .orch { top: var(--shell-top, 56px); } }
+   or under a bar of the shell while one stands, where on the map and in a department they open 8 px under the menu. A window
+   in full screen has no room to keep: it covers the whole screen, the header too, as it does on the map. */
+@media (min-width: 761px) { .body.page ~ :is(.orch:not(.fullscreen), .dv-drawer, .acard, .agent-strips) { top: var(--shell-top, 68px); } }
+@media (max-width: 760px) { .body.page ~ .orch:not(.fullscreen) { top: var(--shell-top, 56px); } }
 /* The body scrolls with the same 18 px of room at its end for a scrollbar in every browser, so its words are as wide in each:
    --sb is what this browser's scrollbar takes of it (style book section 9). */
 .ac-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-content: start; padding: 16px 18px 20px; padding-inline-end: calc(18px + max(0px, 18px - var(--sb, 0px))); }
@@ -2380,9 +2408,12 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-held .tr-status-dot { border-color: var(--idle); }
 .tr-held .tr-title { display: flex; flex: 1 1 auto; align-items: center; }
 .tr-held .tr-group-toggle { cursor: default; }
-.tr-held .tr-row-line > .load-busy { grid-column: 1 / -1; padding-inline: 8px; }
-/* Past 10 s or once failed, the block that says so stands in the first held row, over the whole width (Design #1656). */
-.tr-held .tr-row-line > .load-fail { grid-column: 1 / -1; margin-block: 6px; }
+.tr-held .tr-rows { align-content: start; }
+.tr-held .tr-row-line > .load-busy { grid-column: 1 / -1; min-block-size: var(--row); padding-inline: 8px; }
+/* Past 10 s or once failed, the block that says so sits over the first held rows from the top edge while row 0 keeps its
+   row height, so the held rows under it never shift (Design #1656, #1844). */
+.tr-held .tr-row-line:has(> .tr-held-fail)::before { content: ''; grid-column: 1 / -1; min-block-size: var(--row); }
+.tr-held .tr-row-line > .tr-held-fail { position: absolute; inset-block-start: 0; inset-inline: 0; z-index: 2; padding: 6px 0; background: var(--bg); border-block-end: 1px solid var(--line); }
 /* A task's card while its details come: a held line of its path, and the details as a tail (ui/TaskPanel.tsx HeldTask). */
 .tp-path-held { min-block-size: var(--tracker-target-fine); }
 .tp-path-held::after { content: none; }
@@ -2619,6 +2650,7 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .machine-away { display: grid; gap: 4px; min-inline-size: 0; padding: 8px 12px; border-inline-start: 2px solid var(--pink); overflow-wrap: anywhere; }
 .machine-away h3 { font-size: 14px; }
 .machine-away p { margin: 0; }
+.machine-away .ml-kept { margin: 0; padding-inline-start: 18px; }
 /* A card kept for the person: a turn that is over in the accent, what needs a look in amber. */
 .wait-card { display: grid; gap: 4px; padding: 8px 12px; border-inline-start: 2px solid var(--amber); min-width: 0; overflow-wrap: anywhere; }
 .wait-card.turn_summary { border-inline-start-color: var(--cyan-ink); }
@@ -3592,8 +3624,12 @@ th.k-prio .sorth { white-space: nowrap; }
    window does, keeps to the corner of the page. */
 /* Guard plate: one line and one button of 44 px on the second surface with the strong line; logical sides, so a
    right-to-left page mirrors them. A plate that floats stands above the bottom row of the map and the department, so it
-   hides none of their controls. */
-.guard-stop, .light-note { display: flex; align-items: center; gap: 12px; padding-block: 8px; padding-inline: 14px 8px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-size: 14px; }
+   hides none of their controls.
+   The fill is the second surface at 99%, on purpose: do not round it up to 100%. Chromium drawing WebGL in software
+   (SwiftShader, on machines without a GPU) leaves undrawn the part of the world map's canvas under a single fully opaque
+   box laid over it, taken upside down, so a solid plate cut a black hole in the map across the page's middle line
+   (#1978). A plate that is not fully opaque keeps the canvas whole and looks the same. */
+.guard-stop, .light-note { display: flex; align-items: center; gap: 12px; padding-block: 8px; padding-inline: 14px 8px; border: 1px solid var(--line2); background: color-mix(in srgb, var(--surface2) 99%, transparent); color: var(--ink); font-size: 14px; }
 .guard-stop p, .light-note p { margin: 0; }
 .guard-stop .btn, .light-note .btn { flex: none; min-block-size: 44px; }
 /* Turning the effects back on is the second choice: a ghost button framed by a border, since the light mode it stands in
@@ -3603,6 +3639,749 @@ th.k-prio .sorth { white-space: nowrap; }
 .guard-stop { max-inline-size: 520px; margin-block: 0 var(--bar-gap); margin-inline: auto; border-inline-start: 3px solid var(--pink-ink); }
 .guard-stop.float { position: fixed; z-index: 30; inset-inline-end: 16px; inset-block-end: 72px; max-inline-size: min(520px, calc(100% - 32px)); margin: 0; }
 .light-note { position: fixed; z-index: 30; inset-inline-start: 16px; inset-block-end: 72px; max-inline-size: min(520px, calc(100% - 32px)); }
+/* Papyrus and carved sandstone surface treatment across every screen when a theme declares data-surface="papyrus".
+   Uses only semantic and world tokens via background-image and inset shadows, keeping layout geometry and contrast intact. */
+:where(:root[data-surface='papyrus']:not([data-grain='off'])) body,
+:where(:root[data-surface='papyrus']:not([data-grain='off'])) .map-bg-grain {
+  background-image:
+    radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--surface) 42%, transparent), transparent 68%),
+    repeating-linear-gradient(90deg, transparent 0 18px, color-mix(in srgb, var(--line) 14%, transparent) 18px 19px),
+    repeating-linear-gradient(0deg, transparent 0 26px, color-mix(in srgb, var(--line) 11%, transparent) 26px 27px);
+}
+:where(:root[data-surface='papyrus'][data-grain='off']) body,
+:where(:root[data-surface='papyrus'][data-grain='off']) .map-bg-grain {
+  background-image: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(:root[data-surface='papyrus']) body,
+  :where(:root[data-surface='papyrus']) .map-bg-grain {
+    background-image: none;
+  }
+}
+:where(:root[data-surface='papyrus']) .edge > .edge-in,
+:where(:root[data-surface='papyrus']) .dialog,
+:where(:root[data-surface='papyrus']) .acard,
+:where(:root[data-surface='papyrus']) .dv-drawer,
+:where(:root[data-surface='papyrus']) .orch,
+:where(:root[data-surface='papyrus']) .side-panel,
+:where(:root[data-surface='papyrus']) .skin-card,
+:where(:root[data-surface='papyrus']) .skins-guide,
+:where(:root[data-surface='papyrus']) .phone-form,
+:where(:root[data-surface='papyrus']) .account-menu,
+:where(:root[data-surface='papyrus']) .tr-side,
+:where(:root[data-surface='papyrus']) .tr-col,
+:where(:root[data-surface='papyrus']) .tr-card,
+:where(:root[data-surface='papyrus']) .wcard,
+:where(:root[data-surface='papyrus']) .ptable,
+:where(:root[data-surface='papyrus']) .dt {
+  background-image:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 55%, transparent), color-mix(in srgb, var(--surface2) 32%, transparent)),
+    repeating-linear-gradient(0deg, transparent 0 14px, color-mix(in srgb, var(--line) 10%, transparent) 14px 15px);
+  box-shadow:
+    inset 0 0 0 3px var(--surface),
+    inset 0 0 0 4px var(--line);
+}
+:where(:root[data-surface='papyrus']) .dialog,
+:where(:root[data-surface='papyrus']) .account-menu,
+:where(:root[data-surface='papyrus']) .orch,
+:where(:root[data-surface='papyrus']) .acard,
+:where(:root[data-surface='papyrus']) .dv-drawer {
+  box-shadow:
+    inset 0 0 0 3px var(--surface),
+    inset 0 0 0 4px var(--line),
+    0 12px 28px var(--shadow);
+}
+:where(:root[data-surface='papyrus']) .dialog > header,
+:where(:root[data-surface='papyrus']) .t-bar,
+:where(:root[data-surface='papyrus']) .dv-drawer-h,
+:where(:root[data-surface='papyrus']) .ac-head,
+:where(:root[data-surface='papyrus']) .tr-top,
+:where(:root[data-surface='papyrus']) .form-head,
+:where(:root[data-surface='papyrus']) .g-head,
+:where(:root[data-surface='papyrus']) .ptable th,
+:where(:root[data-surface='papyrus']) .dt th {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface2) 64%, transparent), transparent);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--cyan) 42%, var(--line));
+}
+:where(:root[data-surface='papyrus']) .tabs.glass,
+:where(:root[data-surface='papyrus']) .tb-brand.glass,
+:where(:root[data-surface='papyrus']) .avatar.glass,
+:where(:root[data-surface='papyrus']) .zoom.glass,
+:where(:root[data-surface='papyrus']) .ticker.glass,
+:where(:root[data-surface='papyrus']) .crumb.glass,
+:where(:root[data-surface='papyrus']) .dv-tools.glass,
+:where(:root[data-surface='papyrus']) .hbtn.glass {
+  background-color: color-mix(in srgb, var(--bg) 82%, var(--surface));
+  background-image:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 74%, transparent), color-mix(in srgb, var(--bg) 62%, transparent)),
+    repeating-linear-gradient(0deg, transparent 0 12px, color-mix(in srgb, var(--line2) 8%, transparent) 12px 13px);
+  border-color: var(--line2);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 92%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--line2) 48%, transparent),
+    inset 0 0 0 2px color-mix(in srgb, var(--surface) 58%, transparent),
+    0 4px 12px var(--shadow);
+}
+:where(:root[data-surface='papyrus']) .tb-brand.glass svg {
+  color: var(--ink);
+  filter: drop-shadow(0 1px 0 color-mix(in srgb, var(--surface) 88%, transparent));
+}
+:where(:root[data-surface='papyrus']) .tabs button.on {
+  box-shadow: inset 0 -2px 0 var(--amber);
+}
+:where(:root[data-surface='papyrus']) .world-map .map-version {
+  text-shadow: 0 0 2px var(--surface), 0 1px 4px var(--surface), 0 0 10px var(--surface);
+}
+:where(:root[data-surface='papyrus']) .orch {
+  border-color: var(--line2);
+  border-top-color: var(--amber);
+  background-color: var(--surface);
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, var(--bg)), var(--surface));
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--surface) 72%, transparent),
+    0 18px 44px var(--shadow);
+}
+:where(:root[data-surface='papyrus']) .orch > .t-bar {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--bg) 68%, var(--surface)), color-mix(in srgb, var(--surface2) 82%, transparent));
+  border-bottom-color: var(--line2);
+}
+:where(:root[data-surface='papyrus']) .world-agent-strip {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface2) 88%, var(--bg)), var(--surface2));
+  border-bottom-color: var(--line);
+}
+:where(:root[data-surface='papyrus']) .world-level-badge {
+  background-color: color-mix(in srgb, var(--amber) 18%, var(--surface));
+  border-color: var(--amber);
+  color: var(--ink);
+}
+:where(:root[data-surface='papyrus']) .world-level-bar i {
+  background-image: linear-gradient(90deg, var(--cyan), var(--amber));
+}
+:where(:root[data-surface='papyrus']) .world-hier-via {
+  background-color: var(--surface);
+  border-color: var(--cyan);
+}
+:where(:root[data-surface='papyrus']) .world-hier-lv {
+  background-color: color-mix(in srgb, var(--amber) 14%, var(--surface));
+  border-color: var(--line2);
+  color: var(--ink);
+}
+:where(:root[data-surface='papyrus']) .world-hier-frame.gate {
+  background-color: color-mix(in srgb, var(--cyan) 52%, var(--line2));
+}
+:where(:root[data-surface='papyrus']) .orch .t-log.chat {
+  background-image: repeating-linear-gradient(0deg, transparent 0 26px, color-mix(in srgb, var(--line2) 7%, transparent) 26px 27px);
+}
+:where(:root[data-surface='papyrus']) .orch .chat-msg.agent .chat-body {
+  background-color: var(--surface2);
+  border-color: var(--line2);
+  border-inline-start-color: var(--amber);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 85%, transparent);
+}
+:where(:root[data-surface='papyrus']) .orch .chat-msg.person .chat-body {
+  background-color: color-mix(in srgb, var(--cyan) 10%, var(--surface));
+  border-color: var(--line2);
+  border-inline-end-color: var(--cyan);
+}
+:where(:root[data-surface='papyrus']) .btn:not(.ghost) {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--on-btn) 14%, transparent), color-mix(in srgb, var(--ink) 16%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-btn) 24%, transparent);
+}
+:where(:root[data-surface='papyrus']) .btn.ghost:not(:hover):not(.on),
+:where(:root[data-surface='papyrus']) .act:not(:hover) {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 50%, transparent), color-mix(in srgb, var(--surface2) 45%, transparent));
+}
+:where(:root[data-surface='papyrus']) .field input,
+:where(:root[data-surface='papyrus']) .field select,
+:where(:root[data-surface='papyrus']) textarea,
+:where(:root[data-surface='papyrus']) .choice,
+:where(:root[data-surface='papyrus']) .kind-card,
+:where(:root[data-surface='papyrus']) .check-card {
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 14%, transparent);
+}
+:where(:root[data-surface='papyrus']) .bar,
+:where(:root[data-surface='papyrus']) .sq-bar.dept-sq,
+:where(:root[data-surface='papyrus']) .strip {
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 18%, transparent);
+}
+:where(:root[data-surface='papyrus']) .bar i,
+:where(:root[data-surface='papyrus']) .sq-bar.dept-sq i.on {
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--amber) 35%, transparent), transparent);
+}
+:where(:root[data-surface='papyrus']) .sum > div,
+:where(:root[data-surface='papyrus']) .spl-r,
+:where(:root[data-surface='papyrus']) .tr-status-pill,
+:where(:root[data-surface='papyrus']) .alert,
+:where(:root[data-surface='papyrus']) .warn-line {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line2) 24%, transparent);
+}
+:where(:root[data-surface='papyrus']) .edge > .corner {
+  border-inline-start-color: var(--cyan);
+  border-block-start-color: var(--cyan);
+}
+:where(:root[data-surface='papyrus']) .edge {
+  background-color: var(--line2);
+}
+:where(:root[data-surface='papyrus']) .tabs svg[data-icon-set='egypt'],
+:where(:root[data-surface='papyrus']) .hbtn.ib svg[data-icon-set='egypt'] {
+  stroke-width: 1.45;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* Arabic, Persian and Hebrew scripts keep zero letter-spacing so cursive glyphs stay joined,
+   and stay in system-ui rather than serif display faces under papyrus themes. */
+:where([dir='rtl'], :lang(ar), :lang(fa), :lang(he)),
+:where([dir='rtl'], :lang(ar), :lang(fa), :lang(he)) :is(h1, h2, h3, h4, h5, h6, button, .btn, .act, .tabs button, .skin-name, .crumb, .dhead, .t-bar, .badge) {
+  letter-spacing: 0;
+}
+:where(:root[data-surface='papyrus']:is([dir='rtl'], :lang(ar), :lang(fa), :lang(he))) :is(body, h1, h2, h3, h4, h5, h6, button, .btn, .act, .tabs button, .skin-name, .dhead, .t-bar) {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+.skins-title-row { display: inline-flex; align-items: center; gap: 8px; }
+.skins-title-row > .ic { inline-size: 18px; block-size: 18px; color: var(--cyan-ink); }
+.skin-perf-note { margin: 6px 0 0; padding: 6px 10px; border: 1px solid var(--line); border-inline-start: 3px solid var(--amber); background: var(--surface2); font-size: 12.5px; color: var(--ink); overflow-wrap: break-word; }
+.skins-grain { padding: 12px 14px; border: 1px solid var(--line); background: var(--surface); display: grid; gap: 2px; }
+.skins-grain > label.check { display: inline-flex; align-items: center; gap: 10px; min-block-size: 44px; cursor: pointer; font-size: 13.5px; font-weight: 500; }
+.skins-grain > label.check input { inline-size: 18px; block-size: 18px; accent-color: var(--cyan-ink); flex: none; }
+.skins-grain-hint { margin: 0; padding-inline-start: 28px; font-size: 12.5px; }
+
+/* Stage 8 interactive world canvas & entity side cards inside MapScreen (pack-agnostic). */
+.world-map::before { display: none; }
+/* World canvas always fills 100% of the viewport; shell banners float above it without shifting the world down. */
+.body:not(.page):has(> :is(.update-banner, .alert, .guard-stop)) > .map.world-map:not([inert]) {
+  position: absolute;
+  inset: 0;
+}
+.world-map > .map-room { pointer-events: none; }
+.world-canvas-host { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
+.world-canvas-host:active { cursor: grabbing; }
+/* A world parked behind another tab (#1947 item 3) takes no room and draws nothing. */
+.world-map[hidden] { display: none; }
+/* The world's loading screen over the map (#1947): one card on the theme's own surface, words that wrap. */
+.world-loading { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; padding: 16px; background: var(--bg); }
+.world-loading-card { inline-size: min(420px, 100%); display: grid; gap: 14px; padding: 20px 22px; color: var(--ink); }
+.world-loading-card h2 { margin: 0; font-family: var(--f-display); font-size: 18px; overflow-wrap: anywhere; }
+.world-loading-card ol { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.world-loading-step { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; font-size: 13.5px; }
+.world-loading-step > .bar { grid-column: 1 / -1; }
+.world-loading-label, .world-loading-value { min-inline-size: 0; overflow-wrap: anywhere; }
+.world-loading-step.waiting { color: var(--muted); }
+.world-loading-card > p { margin: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+.world-ticker-btn { cursor: pointer; }
+.world-relocate-banner {
+  position: fixed;
+  z-index: 26;
+  top: 66px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  max-inline-size: calc(100vw - 32px);
+  font-size: 13px;
+}
+.world-card {
+  position: fixed;
+  z-index: 28;
+  top: 68px;
+  left: auto;
+  inset-inline-start: auto;
+  inset-inline-end: 16px;
+  bottom: 72px;
+  width: auto;
+  inline-size: min(380px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line2);
+  color: var(--ink);
+  overflow: hidden;
+}
+.world-dept-card {
+  inline-size: min(440px, calc(100vw - 24px));
+}
+/* Static Hornhoof-style department hierarchy graph inside DepartmentModeCard (zero animation). */
+.world-hierarchy,
+.world-hierarchy * {
+  animation: none;
+}
+.world-hier-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.world-hier-graph {
+  display: grid;
+  gap: 0;
+}
+.world-hier-root {
+  display: grid;
+  gap: 8px;
+}
+.world-hier-head > .edge-in {
+  padding: 10px 12px;
+  background: var(--surface2);
+}
+.world-hier-head-in {
+  display: grid;
+  gap: 4px;
+}
+.world-hier-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.world-hier-meta-row .sw {
+  margin-inline-start: auto;
+}
+.world-hier-graph .sw {
+  accent-color: var(--btn);
+}
+.world-hier-role {
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.world-hier-title-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-inline-size: 0;
+}
+.world-hier-name-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--ink);
+  font-family: var(--f-display);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
+}
+.world-hier-name-btn:hover {
+  color: var(--cyan-ink);
+  text-decoration: underline;
+}
+.world-hier-sub {
+  font-size: 11.5px;
+  overflow-wrap: break-word;
+}
+.world-hier-dot {
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--muted);
+  animation: none;
+}
+.world-hier-dot.work { background: var(--cyan); }
+.world-hier-dot.wait { background: var(--amber); }
+.world-hier-dot.warn { background: var(--pink-ink); }
+.world-hier-dot.idle { background: var(--muted); opacity: 0.6; }
+.world-hier-lv {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.world-hier-people-branch {
+  position: relative;
+  padding-inline-start: 18px;
+  display: grid;
+  gap: 5px;
+}
+.world-hier-people-branch::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 8px;
+  top: -8px;
+  bottom: 14px;
+  border-inline-start: 1.5px solid var(--line2);
+}
+.world-hier-branch-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.world-hier-people-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.world-hier-people-list > li {
+  position: relative;
+}
+.world-hier-person > .edge-in {
+  padding: 4px 9px;
+  background: var(--surface);
+}
+.world-hier-person-in {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.world-hier-person-in .ic {
+  inline-size: 14px;
+  block-size: 14px;
+  color: var(--cyan-ink);
+  flex: none;
+}
+.world-hier-person-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.world-hier-trunk {
+  position: relative;
+  padding-top: 12px;
+  padding-inline-start: 18px;
+}
+.world-hier-trunk::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 8px;
+  top: 0;
+  bottom: 18px;
+  border-inline-start: 1.5px solid var(--line2);
+}
+.world-hier-via {
+  position: absolute;
+  inset-inline-start: 4.5px;
+  top: 6px;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--cyan);
+  box-sizing: border-box;
+  z-index: 1;
+}
+.world-hier-branches {
+  display: grid;
+  gap: 9px;
+}
+.world-hier-branch-item {
+  position: relative;
+}
+.world-hier-branch-item::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: -10px;
+  top: 16px;
+  inline-size: 10px;
+  border-top: 1.5px solid var(--line2);
+}
+.world-hier-branch-item::after {
+  content: '';
+  position: absolute;
+  inset-inline-start: -13px;
+  top: 13px;
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1.5px solid var(--line2);
+  box-sizing: border-box;
+}
+.world-hier-frame.gate {
+  background: color-mix(in srgb, var(--cyan) 55%, var(--line2));
+}
+.world-hier-frame > .edge-in {
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--surface) 60%, var(--surface2));
+  display: grid;
+  gap: 6px;
+}
+.world-hier-frame-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.world-hier-frame-title {
+  font-family: var(--f-display);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.world-hier-frame-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.world-hier-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.world-hier-subdept-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.world-hier-subdept > .edge-in {
+  padding: 6px 8px;
+  background: var(--surface);
+}
+.world-hier-subdept-in {
+  display: grid;
+  gap: 1px;
+  font-size: 12px;
+}
+.world-hier-subdept-in small {
+  font-size: 10.5px;
+}
+.world-hier-members {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  padding-inline-start: 12px;
+  position: relative;
+  display: grid;
+  gap: 5px;
+}
+.world-hier-members::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 4px;
+  top: 0;
+  bottom: 12px;
+  border-inline-start: 1px solid var(--line2);
+}
+.world-hier-members > li {
+  position: relative;
+}
+.world-hier-members > li::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: -8px;
+  top: 13px;
+  inline-size: 8px;
+  border-top: 1px solid var(--line2);
+}
+.world-hier-member.off {
+  opacity: 0.58;
+}
+.world-hier-member > .edge-in {
+  padding: 5px 8px;
+  background: var(--surface);
+}
+.world-hier-member-in {
+  display: grid;
+  gap: 2px;
+}
+.world-hier-member-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+}
+.world-hier-member-row .world-hier-name-btn {
+  font-size: 12.5px;
+  flex: 1 1 auto;
+}
+.world-hier-member-row .worker-mark svg,
+.world-hier-meta-row .worker-mark svg {
+  inline-size: 13px;
+  block-size: 13px;
+}
+.world-hier-member-task {
+  font-size: 11px;
+  padding-inline-start: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.world-hier-empty {
+  margin: 0;
+  font-size: 12px;
+}
+.world-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.world-card-titles { min-inline-size: 0; flex: 1 1 auto; }
+.world-card-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.world-card-title-row h3 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: break-word; }
+.world-card-sub { margin: 3px 0 0; font-size: 12.5px; }
+.world-banner-dot { inline-size: 10px; block-size: 10px; border-radius: 50%; flex: none; border: 1px solid var(--line2); }
+.world-card-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+.world-card-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.world-card-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.world-card-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+  padding: 8px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+}
+.world-card-grid dt { font-size: 11px; color: var(--muted); }
+.world-card-grid dd { margin: 2px 0 0; font-size: 13px; font-weight: 600; overflow-wrap: break-word; }
+.world-card-section { display: grid; gap: 6px; }
+.world-card-section h4 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.world-metric-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.world-card-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.world-card-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  font-size: 13px;
+}
+.world-link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--cyan-ink);
+  font: inherit;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.world-link-btn:hover { text-decoration: underline; }
+.world-task-pill {
+  background: var(--surface2);
+  border: 1px solid var(--line2);
+  padding: 7px 9px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: start;
+  cursor: pointer;
+  inline-size: 100%;
+  overflow-wrap: break-word;
+}
+.world-task-pill:hover { border-color: var(--cyan); }
+.world-card-notice {
+  margin: 0;
+  padding: 7px 9px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--amber);
+  font-size: 12.5px;
+}
+.world-card-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+.world-legend-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.world-legend-list li { display: flex; align-items: center; gap: 8px; }
+.world-legend-swatch { inline-size: 16px; block-size: 4px; flex: none; border-radius: 2px; }
+.world-legend-swatch.dashed { block-size: 0; border-top: 3px dashed var(--amber); background: none; }
+.world-pipeline-list { display: grid; gap: 8px; }
+.world-pipeline-block { padding: 8px 10px; background: var(--surface2); border: 1px solid var(--line); display: grid; gap: 6px; font-size: 13px; }
+.world-stage-list { margin: 0; padding-inline-start: 18px; display: grid; gap: 4px; font-size: 12.5px; }
+.world-stage-list li { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.world-confirm-dialog { max-inline-size: 440px; inline-size: min(440px, calc(100vw - 24px)); }
+.world-confirm-body { padding: 14px 16px; display: grid; gap: 10px; }
+/* Single compact level strip inside AgentWindow when a game world theme is active (pack-agnostic). */
+.world-agent-strip {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 6px 14px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--f-body);
+  font-size: 12.5px;
+}
+.world-level-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--line2);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: 12px;
+}
+.world-level-bar {
+  flex: 1 1 88px;
+  min-inline-size: 64px;
+  max-inline-size: 150px;
+  block-size: 6px;
+  background: var(--line);
+  overflow: hidden;
+}
+.world-level-bar > i {
+  display: block;
+  block-size: 100%;
+  background: var(--cyan);
+}
+.world-level-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.world-level-dept {
+  color: var(--ink);
+  font-weight: 500;
+}
+@media (max-width: 720px) {
+  .world-card { inset-inline-start: 12px; inset-inline-end: 12px; inline-size: auto; top: 64px; bottom: 118px; }
+}
+
 /* A page the guard turned light draws nothing that costs a frame: no animation, transition, filter, blur or shadow. */
 :root[data-light] *, :root[data-light] *::before, :root[data-light] *::after {
   animation: none !important; transition: none !important;

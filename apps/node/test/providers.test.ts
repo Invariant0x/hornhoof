@@ -13,7 +13,7 @@ import { adapterFor, programFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
 import { codexEvents, codexRateLimits } from '../src/providers/codex.js';
 import { kimiContextSize, kimiEvents, kimiModels } from '../src/providers/kimi.js';
-import { agyModels, agyPlanLimits, agyStream, agyUsageLimits, installAgy } from '../src/providers/antigravity.js';
+import { agyModels, agyPlanLimits, agyStream, agyStreamSession, agyUsageLimits, installAgy } from '../src/providers/antigravity.js';
 import { childEnv, lastUrl } from '../src/providers/process.js';
 import { CODEX_HEAD } from '../src/program-folder.js';
 import { runJob, type RunInput } from '../src/runner.js';
@@ -742,6 +742,35 @@ describe('Antigravity CLI', () => {
     const again = await a.run(input({ sessionId: AGY_NEW, model: 'Gemini 4 Argon', effort: 'high' }));
     expect(lastRun().argv).toEqual(['--print=say ready', ...AGY_FLAGS, '--conversation', AGY_NEW, '--model', 'Gemini 4 Argon', '--effort', 'high']);
     expect(again).toMatchObject({ ok: true, sessionId: AGY_RESUMED, result: 'apple' });
+  });
+
+  it('keeps the main conversation id in print mode when a subagent step reports another conversation id', async () => {
+    process.env.FAKE_MODE = 'subagent';
+    const res = await adapter('antigravity').run(input());
+    expect(res).toMatchObject({ ok: true, sessionId: AGY_NEW, result: 'Done.' });
+
+    /* init wins over later inits, steps and results; without init, result beats requested, and requested beats stray steps. */
+    const withInit = agyStreamSession('requested');
+    withInit.observe({ event: 'init', conversation_id: 'main' });
+    withInit.observe({ event: 'init', conversation_id: 'child-init' });
+    withInit.observe({ event: 'step_update', step_update: { conversation_id: 'sub' } });
+    withInit.observe({ event: 'result', result: { conversation_id: 'other' } });
+    expect(withInit.current()).toBe('main');
+
+    const withRequested = agyStreamSession('requested');
+    withRequested.observe({ event: 'step_update', step_update: { conversation_id: 'sub' } });
+    withRequested.observe({ event: 'result', result: { conversation_id: '' } });
+    withRequested.observe({ event: 'result', result: 'not-a-record' });
+    expect(withRequested.current()).toBe('requested');
+
+    const fromSteps = agyStreamSession(null);
+    fromSteps.observe({ event: 'other', conversation_id: 'first-main' });
+    fromSteps.observe({ event: 'step_update', step_update: { conversation_id: 'sub' } });
+    expect(fromSteps.current()).toBe('first-main');
+
+    const fromResult = agyStreamSession('requested');
+    fromResult.observe({ event: 'result', result: { conversation_id: 'confirmed' } });
+    expect(fromResult.current()).toBe('confirmed');
   });
 
   it('reports a failed run as agent_failed with its error, and a signed-out one as not_logged_in', async () => {

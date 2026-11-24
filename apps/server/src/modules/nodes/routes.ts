@@ -2,7 +2,6 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { MACHINE_KINDS } from '@hornhoof/protocol';
 import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
-import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -22,6 +21,7 @@ import { replicasOf } from '../copies/measured.js';
 import { askMove, cancelMove, moveView } from '../copies/move.js';
 import { setPriority } from '../copies/priority.js';
 import { holding } from '../copies/view.js';
+import { upsertJoinedMachine } from '../network/server-machine.js';
 import { findThisMachine } from '../network/store.js';
 import { machineNodes, machineState, together } from '../testruns/load.js';
 import { pumpTests } from '../testruns/runs.js';
@@ -29,8 +29,9 @@ import { createInstallCommand } from './command.js';
 import { nodeCommandRoutes } from './command-routes.js';
 import { connectionRoutes } from './connection-routes.js';
 import { disconnectMachines, refuseLeader } from './disconnect.js';
-import { nodeIdentity, ownBuiltin, ownMachine as machineOfServer, type NodeHub } from './hub.js';
+import { builtinOf, nodeIdentity, ownBuiltin, ownMachine as machineOfServer, type NodeHub, type NodeIdentity } from './hub.js';
 import { nodeImageOfBuild } from './image.js';
+import { machineFolders } from './machine-disk.js';
 import { builtinMachine, isServerInstall, liveNode, otherBuild, settlePlans, shownMachine } from './nodes.js';
 import { machineProgramNodes, machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
 import { machineDrain, nodeDrain } from '../updates/drain.js';
@@ -55,11 +56,18 @@ const WEB_PORT = 8080;
 type CoreAnswer = { folder: string; ticket: string; port: number; company: string } | { here: true; port: number };
 const coreLine = (core: CoreAnswer): string => ('here' in core ? `core-here ${core.port}\n` : `core ${core.folder} ${core.ticket} ${core.port} ${core.company}\n`);
 
-/* A machine that comes back after a Disconnect is the same row, but has no place in the company's network until its
-   keeper redeems a new ticket: the key it had before is let in by nothing. A machine that was never disconnected keeps
-   its place when a command runs there again. */
-const keptWhileConnected = (column: AnyPgColumn) => sql`CASE WHEN ${machines.revokedAt} IS NULL THEN ${column} END`;
-const NO_PLACE_AFTER_DISCONNECT = { role: keptWhileConnected(machines.role), signKey: keptWhileConnected(machines.signKey), networkId: keptWhileConnected(machines.networkId) };
+/* The built-in node that belongs to a machine's card for someone who sees the whole company: the server's own on the
+   leader's computer, or the replica's own on another cored computer. */
+function cardBuiltin(
+  wholeCompany: boolean,
+  m: { id: string; networkId: string | null },
+  serverMachine: { id: string } | null,
+  own: NodeIdentity,
+): NodeIdentity | null {
+  if (!wholeCompany) return null;
+  if (serverMachine?.id === m.id) return own;
+  return m.networkId ? builtinOf(m.networkId) : null;
+}
 
 /* The three images of the server's build, each by its digest, as the installer pulls them. */
 const buildLine = (image: string, build: LeaderBuild): string => `build ${build.tag} ${image}@${build.digest} ${image}-node@${build.nodeDigest} ${image}-updater@${build.updaterDigest}\n`;
@@ -155,34 +163,35 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (!alone && subs.length === 0) throw codeUsed();
 
       const details = { hostname: body.hostname, os: body.os, arch: body.arch, kind: body.kind };
-      const [machine] = await tx
-        .insert(machines)
-        .values({ companyId: code.companyId, personId: code.personId, machineKey: body.machineId, ...details })
-        .onConflictDoUpdate({ target: [machines.personId, machines.machineKey], set: { ...details, revokedAt: null, ...NO_PLACE_AFTER_DISCONNECT } })
-        .returning({ id: machines.id });
+      const machine = await upsertJoinedMachine(tx, config, {
+        companyId: code.companyId,
+        personId: code.personId,
+        machineKey: body.machineId,
+        ...details,
+      });
 
-      const ticket = wantsCore && !here ? await issueTicket(tx, machine!.id) : null;
+      const ticket = wantsCore && !here ? await issueTicket(tx, machine.id) : null;
       /* A command for the core brings no node: the machine has its nodes, and they move to the core by themselves. */
-      if (code.core) return { machine: { id: machine!.id }, nodes: [], ticket };
+      if (code.core) return { machine: { id: machine.id }, nodes: [], ticket };
 
       /* The machine's own node has no plan: it takes test runs, and the machine its owner's plans later. */
       if (alone) {
         const key = newToken();
-        const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine!.id, subscriptionId: null }, hashToken(key));
+        const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine.id, subscriptionId: null }, hashToken(key));
         if (!nodeId) throw alreadyThere();
-        return { machine: { id: machine!.id }, nodes: [{ nodeId, subscriptionId: null, provider: 'machine' as const, key }], ticket };
+        return { machine: { id: machine.id }, nodes: [{ nodeId, subscriptionId: null, provider: 'machine' as const, key }], ticket };
       }
 
       /* Each plan signs in on this machine by itself, with a key of its own; one that runs here already is left as it is. */
       const made: { nodeId: string; subscriptionId: string | null; provider: Provider | 'machine'; key: string }[] = [];
       for (const sub of subs) {
         const key = newToken();
-        const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine!.id, subscriptionId: sub.id }, hashToken(key));
+        const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine.id, subscriptionId: sub.id }, hashToken(key));
         if (nodeId) made.push({ nodeId, subscriptionId: sub.id, provider: sub.provider, key });
       }
       if (!made.length) throw code.machineId ? alreadyThere() : codeUsed();
       await settlePlans(tx, made.map(n => n.subscriptionId));
-      return { machine: { id: machine!.id }, nodes: made, ticket };
+      return { machine: { id: machine.id }, nodes: made, ticket };
     });
     closeJoined(hub, joined.nodes);
     const core = wantsCore ? await coreFor(joined.ticket, code.companyId) : null;
@@ -337,11 +346,12 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         owner: { id: m.ownerId, name: m.ownerName },
         /* The machine the company was installed on, while the server runs on another: no computer someone joined. */
         serverInstall: isServerInstall(m.machineKey),
-        ...machineState(hub, on(m.id).map(n => n.id)),
-        ...machineProgramState(hub, on(m.id).map(n => n.id), m.id, programHost, own),
+        ...machineState(hub, on(m.id).map(n => n.id), cardBuiltin(held !== null, m, serverMachine, own)),
+        ...machineProgramState(hub, on(m.id).map(n => n.id), m.id, programHost, own, m.networkId),
         otherBuild: otherBuild(hub, on(m.id).map(n => n.id), config.nodeBuild),
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
         plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
+        folders: machineFolders(hub, on(m.id), cardBuiltin(held !== null, m, serverMachine, own)),
         lendsTests: m.lendsTests,
         /* Where the company opens on that machine, and how the machine reaches the server; none without the core. */
         core: m.networkId ? { webPort: m.webPort, path: m.path } : null,
@@ -351,7 +361,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         /* Whether it keeps the company's backups, and how many it holds; none of either without the core. */
         keepsBackups: m.networkId ? m.keepsBackups : null,
         heldBackups: m.networkId ? m.heldBackups.length : null,
-        drain: machineDrain(ctx, machineProgramNodes(on(m.id).map(n => n.id), m.id, programHost, own)),
+        drain: machineDrain(ctx, machineProgramNodes(on(m.id).map(n => n.id), m.id, programHost, own, m.networkId)),
         /* Its plans' nodes, its own built-in node when it keeps a copy of the data, and the server's when the server runs
            on it. */
         running: running(

@@ -42,6 +42,8 @@ import { startOperationsCheck } from './modules/operations/ensure.js';
 import { startTrackerUpgrade } from './modules/tracker/upgrade.js';
 import { orgRoutes } from './modules/org/routes.js';
 import { mapLayoutRoutes } from './modules/org/layout.js';
+import { worldRoutes } from './modules/world/routes.js';
+import { defaultWorldPacks, type WorldPackRegistry } from './modules/world/packs/index.js';
 import { peopleRoutes } from './modules/people/routes.js';
 import { assistantSetupRoutes } from './modules/assistants/setup.js';
 import { assistantMcpRoutes } from './modules/assistants/mcp.js';
@@ -94,6 +96,7 @@ import { keyRoutes } from './modules/computer/keys.js';
 import { refreshBuild } from './modules/network/follow.js';
 import { questionRoutes } from './modules/network/question-routes.js';
 import { noteSwitch, switchedRoutes } from './modules/network/switched.js';
+import { joinServerMachines } from './modules/network/server-machine.js';
 import { networkRoutes } from './modules/network/routes.js';
 import { overLink } from './auth/tunnel.js';
 import type { AgentSql } from './db/agent-sql.js';
@@ -118,7 +121,7 @@ import { modelsReader, type ModelsReader } from './modules/subscriptions/api-mod
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. templates are read
    from config.templatesDir unless given: a test file reads them once for all its servers. onRoute is called for every
    route before any is added; a test uses it to ask each route what it tells a stranger. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; onRoute?: (route: { method: string | string[]; url: string }) => void; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; readBranches?: BranchReader; createBranch?: BranchCreator; readTags?: TagReader; readMerged?: MergeReader; createRepository?: RepositoryCreator; createSpreadsheet?: SpreadsheetCreator; createIssue?: IssueCreator; readModels?: ModelsReader; clock?: () => number; templates?: Templates; released?: readonly Released[] };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; onRoute?: (route: { method: string | string[]; url: string }) => void; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; readBranches?: BranchReader; createBranch?: BranchCreator; readTags?: TagReader; readMerged?: MergeReader; createRepository?: RepositoryCreator; createSpreadsheet?: SpreadsheetCreator; createIssue?: IssueCreator; readModels?: ModelsReader; clock?: () => number; templates?: Templates; released?: readonly Released[]; worldPacks?: WorldPackRegistry };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, its ACME answers and
@@ -182,6 +185,7 @@ export type Ctx = Deps & {
   mode: AppMode;
   telegram: TelegramBots;
   assistants: Assistants;
+  worldPacks: WorldPackRegistry;
 };
 
 declare module 'fastify' {
@@ -256,6 +260,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     readModels: modelsReader({ allowed: deps.config.apiInternalHosts }),
     clock: Date.now,
     released: RELEASED,
+    worldPacks: defaultWorldPacks(),
     ...deps,
     log: app.log,
     bus: new EventBus(),
@@ -329,6 +334,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   /* First of what a leader does: the work its one built-in node ran before each machine had its own is named as this
      machine's, before anything else looks at it. A failure is one line, and the next time it leads tries again. */
   ctx.mode.whenLead(() => nameBuiltinWork(ctx).catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, "Could not name the built-in node's earlier work as this machine's.")), () => undefined);
+  ctx.mode.whenLead(() => joinServerMachines(ctx.db, ctx.config).catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, 'Could not join existing server and node machine rows.')), () => undefined);
   ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
   /* The heads' bots listen only while this app leads: a message one takes is written down, and two apps asking
      Telegram for the same bot's messages would take them from each other. A bot stops before the database and the
@@ -417,6 +423,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   assistantSetupRoutes(app, ctx);
   orgRoutes(app, ctx);
   mapLayoutRoutes(app, ctx);
+  worldRoutes(app, ctx);
   subscriptionRoutes(app, ctx);
   signinRoutes(app, ctx);
   nodeRoutes(app, ctx);

@@ -68,16 +68,20 @@ const fastFiles = () => {
   const fast = new Set(fastSuites(manifest).map(suite => suite.id));
   return [...new Set(ports.listTestUnits(manifest, trackedIn(root)).filter(unit => fast.has(unit.suiteId)).map(unit => unit.file))].sort();
 };
+/* Readers the pattern cannot see: the source tool of the orchestrator reads templates/skills from the disk, as its test checks. */
+const ALSO_READ_TEMPLATES = ['apps/server/test/orchestrator-self.test.ts'];
 const chosen = selection => (selection.packages ?? []).map(item => [item.packageId, item.mode]);
 const filesOf = selection => (selection.packages ?? []).flatMap(item => item.units.map(unit => unit.file)).sort();
 
 test('a change of the templates or the skills runs every test that reads them and no other', { timeout: 60_000 }, async () => {
-  const readers = fastFiles().filter(file => READS_TEMPLATES.test(readFileSync(root + file, 'utf8')));
-  assert.ok(readers.length >= 20, readers.join('\n'));
+  const found = fastFiles().filter(file => READS_TEMPLATES.test(readFileSync(root + file, 'utf8')));
+  assert.ok(found.length >= 20, found.join('\n'));
+  for (const file of ALSO_READ_TEMPLATES) assert.ok(readFileSync(root + file, 'utf8').includes("'templates/"), `${file} no longer reads the templates by a path`);
+  const readers = [...new Set([...found, ...ALSO_READ_TEMPLATES])].sort();
   for (const path of ['templates/roles/operations/OPS-HEAD.md', 'templates/skills/dev-tdd.md']) {
     const selection = await runs(path);
     assert.equal(selection.unavailable, undefined);
-    assert.deepEqual(chosen(selection), [['node', 'related'], ['server', 'related']], path);
+    assert.deepEqual(chosen(selection), [['node', 'related'], ['protocol', 'related'], ['server', 'related']], path);
     assert.deepEqual(filesOf(selection), readers, path);
   }
 });
@@ -100,7 +104,7 @@ test('a document runs the tests that read it by its path, and one no test names 
 test('a change of the templates beside a test runs that test and the readers of the templates, not the whole suite', { timeout: 60_000 }, async () => {
   const test = 'apps/server/test/test-tool-text.test.ts';
   const selection = await select([{ path: 'templates/skills/hh-run-checks.md', kind: 'modified' }, { path: test, kind: 'modified' }]);
-  assert.deepEqual(chosen(selection), [['node', 'related'], ['server', 'related']]);
+  assert.deepEqual(chosen(selection), [['node', 'related'], ['protocol', 'related'], ['server', 'related']]);
   assert.ok(filesOf(selection).includes(test) && filesOf(selection).includes('apps/server/test/templates.test.ts'));
 });
 

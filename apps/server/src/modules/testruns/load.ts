@@ -9,17 +9,19 @@ import { nodes, subscriptions, testRuns } from '../../db/schema.js';
 import { nodeIdentity, type NodeHub, type NodeIdentity, type SaidLoad } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
 import { latestReport } from '../nodes/host-load.js';
+import { machineDisk } from '../nodes/machine-disk.js';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the timestamp from the public load
 const plain = ({ at: _, ...load }: SaidLoad): NodeLoad => load;
 
-/* A machine's load from what its nodes said: they share its processors and memory, of which the newest word counts, and
-   each runs jobs of its own. */
+/* A machine's load from what its nodes said: they share its processors, memory and disk, of which the newest word counts,
+   and each runs jobs of its own and measures its own folder. */
 export function together(loads: (SaidLoad | null)[]): NodeLoad | null {
   const said = loads.filter((l): l is SaidLoad => l !== null);
   if (!said.length) return null;
   const newest = latestReport(said)!;
-  return { ...plain(newest), tests: said.reduce((n, l) => n + l.tests, 0), jobs: said.reduce((n, l) => n + l.jobs, 0) };
+  const disk = machineDisk(said);
+  return { ...plain(newest), tests: said.reduce((n, l) => n + l.tests, 0), jobs: said.reduce((n, l) => n + l.jobs, 0), ...(disk ? { disk } : {}) };
 }
 
 /* A part runs on one node, whose local limits count; jobs and tests still belong to the whole machine. */
@@ -41,8 +43,9 @@ export async function machineNodes(db: Db, companyId: string) {
 
 /* A machine as these nodes of it say: online while one of them is, and how busy it is. The machines screen and the pool
    both show it from here, so they never disagree. */
-export function machineState(hub: NodeHub, ids: string[]): { online: boolean; load: NodeLoad | null } {
-  return { online: ids.some(id => hub.isOnline(nodeIdentity(id))), load: together(ids.map(id => hub.loadOf(nodeIdentity(id)))) };
+export function machineState(hub: NodeHub, ids: string[], builtin: NodeIdentity | null = null): { online: boolean; load: NodeLoad | null } {
+  const all = [...ids.map(nodeIdentity), ...(builtin ? [builtin] : [])];
+  return { online: all.some(id => hub.isOnline(id)), load: together(all.map(id => hub.loadOf(id))) };
 }
 
 type ProductRun = typeof testRuns.$inferSelect;

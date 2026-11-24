@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { useLanguage, useT } from '../i18n';
 import { humanStatus, isClosed, taskWaits, type Asks, type TaskTree } from '../task-tree';
 import { boardColumns, doerOf, layoutTree, listGroups, NODE, type BoardColumn, type Crumb, type GraphNode, type Layout, type ListGroup, type Placed } from '../tracker';
@@ -193,16 +193,79 @@ function rowsToFill(list: HTMLElement | null): number {
   return Math.max(1, Math.min(MAX_HELD_ROWS, Math.ceil((window.innerHeight - top) / row)));
 }
 
+type FailRoom = { band: number | null; rows: number | null };
+const NO_FAIL_ROOM: FailRoom = { band: null, rows: null };
+
+/* How much room the stalled notice needs over the held list: snap to the bottom border of the first held row at or past the
+   notice so no row is sliced in half, or grow the list when it holds fewer rows than the notice needs (Design #1656, #1844). */
+export function snapFailRoom(need: number, bottoms: readonly number[]): FailRoom {
+  if (need <= 0) return NO_FAIL_ROOM;
+  const band = bottoms.find(bottom => bottom >= need - 0.5);
+  return band !== undefined ? { band, rows: null } : { band: null, rows: Math.ceil(need) };
+}
+
+function sameFailRoom(a: FailRoom, b: FailRoom): boolean {
+  return a.band === b.band && a.rows === b.rows;
+}
+
+function failPadding(fail: HTMLElement): number {
+  const style = getComputedStyle(fail);
+  return (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+}
+
+function measureFailRoom(list: HTMLElement | null, fail: HTMLElement | null): FailRoom {
+  const card = fail?.firstElementChild;
+  if (!list || !fail || !(card instanceof HTMLElement)) return NO_FAIL_ROOM;
+  const top = list.getBoundingClientRect().top;
+  const bottoms = [...list.children].map(row => row.getBoundingClientRect().bottom - top);
+  return snapFailRoom(card.getBoundingClientRect().height + failPadding(fail), bottoms);
+}
+
+function observeFailRoom(list: HTMLElement | null, fail: HTMLElement | null, update: () => void): (() => void) | undefined {
+  if (typeof ResizeObserver === 'undefined') return undefined;
+  const observer = new ResizeObserver(update);
+  if (list) observer.observe(list);
+  const card = fail?.firstElementChild;
+  if (card) observer.observe(card);
+  return () => observer.disconnect();
+}
+
+function useFailRoom(list: RefObject<HTMLUListElement | null>, fail: RefObject<HTMLDivElement | null>, active: boolean, key: string): FailRoom {
+  const [room, setRoom] = useState<FailRoom>(NO_FAIL_ROOM);
+  useLayoutEffect(() => {
+    if (!active) {
+      setRoom(prev => (sameFailRoom(prev, NO_FAIL_ROOM) ? prev : NO_FAIL_ROOM));
+      return;
+    }
+    const update = () => {
+      const next = measureFailRoom(list.current, fail.current);
+      setRoom(prev => (sameFailRoom(prev, next) ? prev : next));
+    };
+    update();
+    return observeFailRoom(list.current, fail.current, update);
+  }, [active, key, list, fail]);
+  return active ? room : NO_FAIL_ROOM;
+}
+
+function roomStyle(size: number | null): CSSProperties | undefined {
+  return size ? { minBlockSize: size } : undefined;
+}
+
 /* The list while its tasks come (style book 1.5, section 4): the names of its columns and its first group's head at once, then
    as many held rows as it showed last in this tab, or as fill what is in view, the first with the ring and its words. */
 export function HeldList({ rows, load }: { rows: number | null; load: Load }) {
   const t = useT();
   const list = useRef<HTMLDivElement>(null);
+  const rowsList = useRef<HTMLUListElement>(null);
+  const fail = useRef<HTMLDivElement>(null);
   const [fill, setFill] = useState(rows ?? 1);
   useLayoutEffect(() => {
     if (rows === null) setFill(rowsToFill(list.current));
   }, [rows]);
   const held = rows ?? fill;
+  const stalled = load.phase === 'slow' || load.phase === 'failed';
+  const room = useFailRoom(rowsList, fail, stalled, `${load.phase}:${load.asked}:${held}`);
+  const first = <LoadLine load={load} words={t.load.tasks} />;
   return (
     <div ref={list} className="tr-list tr-held">
       <div className="tr-list-grid">
@@ -210,8 +273,8 @@ export function HeldList({ rows, load }: { rows: number | null; load: Load }) {
           <h2 className="tr-group-head"><span className="tr-group-toggle"><Idle w="9ch" /><span className="tr-count"><Idle w="3ch" /></span></span></h2>
           <ListHead />
           <div>
-            <ul className="tr-rows">
-              <li className="tr-row"><div className="tr-cells tr-row-line"><LoadLine load={load} words={t.load.tasks} /></div></li>
+            <ul ref={rowsList} className="tr-rows" style={roomStyle(room.rows)}>
+              <li className="tr-row"><div className="tr-cells tr-row-line">{stalled ? <div ref={fail} className="tr-held-fail" style={roomStyle(room.band)}>{first}</div> : first}</div></li>
               {Array.from({ length: held - 1 }, (_, i) => <HeldRow key={i} title={HELD_TITLES[i % HELD_TITLES.length]!} />)}
             </ul>
           </div>

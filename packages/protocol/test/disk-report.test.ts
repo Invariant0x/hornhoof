@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DISK_PARTS, DiskReport, MachineReplicas, parseNodeMessage } from '../src/index.js';
+import { DISK_PARTS, DiskReport, MachineReplicas, NODE_DISK_PARTS, parseNodeMessage } from '../src/index.js';
 
 const GB = 1e9;
 const LOAD = { cpus: 8, load: 1.5, memFree: 4 * GB, memTotal: 16 * GB, tests: 0, jobs: 2 };
@@ -19,6 +19,10 @@ describe("a node's disk report", () => {
     expect(DISK_PARTS).toEqual(['images', 'containers', 'volumes', 'buildCache', 'workingCopies', 'recordings', 'checkTemp']);
   });
 
+  it('names the parts each node measures in its own folder, apart from what the whole machine shares', () => {
+    expect(NODE_DISK_PARTS).toEqual(['workingCopies', 'recordings', 'checkTemp']);
+  });
+
   it('comes with the load of a newer node, in its hello and on its own', () => {
     expect(load({ disk: DISK })).toEqual({ type: 'load', ...LOAD, disk: DISK });
     expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.41.0', loggedIn: true, running: [], load: { ...LOAD, disk: DISK } }))).toMatchObject({ load: { ...LOAD, disk: DISK } });
@@ -26,8 +30,9 @@ describe("a node's disk report", () => {
 
   it("names the work it keeps because it can't be restored, biggest first, and leaves the list out where it keeps none", () => {
     const kept = [
-      { part: 'workingCopies', agent: '479e2112-3e30-40a7-89a2-2e6786f56a70', path: 'hornhoof', task: 1750, bytes: 9 * GB, why: 'uncommitted' },
-      { part: 'workingCopies', agent: 'f7863b74-d43d-49db-9d48-774326e62283', path: 'scratch/copy', task: null, bytes: 2 * GB, why: 'unpushed' },
+      { part: 'workingCopies', agent: '11111111-1111-4111-8111-111111111111', path: 'shop', task: 42, bytes: 9 * GB, why: 'uncommitted' },
+      { part: 'workingCopies', agent: '22222222-2222-4222-8222-222222222222', path: 'scratch/copy', task: null, bytes: 2 * GB, why: 'unpushed' },
+      { part: 'workingCopies', agent: 'agent-c', path: 'shop-7', task: 7, bytes: GB, why: 'ignored', ignored: ['.env', 'local/'] },
     ];
     expect(load({ disk: { ...DISK, kept } })).toEqual({ type: 'load', ...LOAD, disk: { ...DISK, kept } });
     expect(DiskReport.parse(DISK).kept).toBeUndefined();
@@ -56,6 +61,8 @@ describe("a node's disk report", () => {
       { ...DISK, kept: [{ part: 'workingCopies', agent: 'a', path: 'x'.repeat(301), task: 1, bytes: GB, why: 'unpushed' }] },
       { ...DISK, kept: [{ part: 'workingCopies', agent: 'a'.repeat(65), path: 'x', task: 1, bytes: GB, why: 'unpushed' }] },
       { ...DISK, kept: [{ part: 'workingCopies', agent: 'a', path: 'x', task: 0, bytes: GB, why: 'unpushed' }] },
+      { ...DISK, kept: [{ part: 'workingCopies', agent: 'a', path: 'x', task: 1, bytes: GB, why: 'ignored', ignored: Array.from({ length: 21 }, (_, i) => `f${i}`) }] },
+      { ...DISK, kept: [{ part: 'workingCopies', agent: 'a', path: 'x', task: 1, bytes: GB, why: 'ignored', ignored: ['x'.repeat(301)] }] },
       { ...DISK, kept: Array.from({ length: 51 }, () => ({ part: 'workingCopies', agent: 'a', path: 'x', task: null, bytes: GB, why: 'unpushed' })) },
       'full',
     ]) {

@@ -431,7 +431,7 @@ describe('signing a plan in from Hornhoof', () => {
     const closed = new Promise<number>(resolve => screen.ws.on('close', code => resolve(code)));
     await app.inject({ method: 'POST', url: '/api/auth/logout', ...as(ceo) });
     expect(await closed).toBe(4403);
-    expect(await nextOf(na, 'term.close')).toEqual({ type: 'term.close', termId: open.termId });
+    expect(await nextOf(na, 'term.close')).toEqual({ type: 'term.close', termId: open.termId, final: true });
   });
 
   it('passes no key of an owner whose session ended with nobody told, and closes', async () => {

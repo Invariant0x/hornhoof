@@ -15,6 +15,14 @@ const FONTS: Record<FontRole, readonly string[]> = {
    it is too narrow for long text, which stays in Onest. */
 const PIXEL_FONTS: Record<FontRole, readonly string[]> = { ...FONTS, display: ['Handjet', 'Onest', 'system-ui', 'sans-serif'] };
 
+/* Alegreya and Golos Text, open fonts with Latin and Cyrillic kept in src/fonts with their OFL licences. Scripts outside
+   their unicode-range (such as Arabic) fall through to system-ui. */
+const EGYPT_FONTS: Record<FontRole, readonly string[]> = {
+  display: ['Alegreya', 'Golos Text', 'Georgia', 'system-ui', 'serif'],
+  body: ['Golos Text', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+  mono: ['ui-monospace', 'SF Mono', 'Menlo', 'Consolas', 'monospace'],
+};
+
 export const BUILTIN_SKINS = [
   /* The native dark look: blue-black panels, a cyan accent, cut corners. */
   {
@@ -30,7 +38,7 @@ export const BUILTIN_SKINS = [
       success: '#5FD08A', danger: '#FF6B6B', on_danger: '#2A0606', idle: '#2C3744', dot: 'rgba(140, 175, 205, .15)', glow: 'rgba(70, 224, 239, .10)',
       button: '#46E0EF', on_button: '#05222A', hud: 'rgba(23, 30, 39, .94)', shadow: 'rgba(0, 0, 0, .45)',
       provider_claude: '#F08A66', provider_kimi: '#5E9BFF', provider_glm: '#8D95FF', provider_antigravity: '#6DD58C',
-      on_attention: '#141A22', scrim: 'rgba(10, 20, 30, .35)', scrollbar_thumb: '#687A8F', scrollbar_track: '#1B232D',
+      on_attention: '#141A22', scrim: 'rgba(4, 8, 12, .64)', scrollbar_thumb: '#687A8F', scrollbar_track: '#1B232D',
     },
   },
   /* Day light with text and lines held to their contrast on every surface. */
@@ -85,10 +93,50 @@ export const BUILTIN_SKINS = [
       on_attention: '#26172C', scrim: 'rgba(8, 8, 18, .64)', scrollbar_thumb: '#9292AD', scrollbar_track: '#202033',
     },
   },
+  /* Sunlit desert sandstone, woven papyrus panels, royal lapis accents and an interactive isometric Egypt map. */
+  {
+    id: 'egypt',
+    scheme: 'light',
+    cut: 1,
+    shape: 'bevel',
+    pulse: .8,
+    world: 'egypt',
+    surface: 'papyrus',
+    fonts: EGYPT_FONTS,
+    colors: {
+      bg: '#E6D9BE', surface: '#FAF4E6', surface2: '#F1E6D2', line: '#D2C2A5', line2: '#806F57', ink: '#221A12', muted: '#554736',
+      accent: '#1A5A8F', accent_ink: '#124270', warning: '#9E6A00', warning_ink: '#6F4900', attention: '#A3245B', attention_ink: '#851B48',
+      success: '#0D6748', danger: '#AD1D14', on_danger: '#FAF4E6', idle: '#CCBFA3', dot: 'rgba(92, 74, 48, .18)', glow: 'rgba(26, 90, 143, .11)',
+      button: '#154B7D', on_button: '#FAF4E6', hud: 'rgba(248, 241, 226, .94)', shadow: 'rgba(42, 31, 18, .18)',
+      provider_claude: '#9C3B1D', provider_kimi: '#1454BF', provider_glm: '#3A40BD', provider_antigravity: '#11652B',
+      on_attention: '#FAF4E6', scrim: 'rgba(34, 26, 18, .38)', scrollbar_thumb: '#806F57', scrollbar_track: '#FAF4E6',
+    },
+    worldColors: {
+      ground: '#E4D1AA',
+      path: '#C6A46D',
+      field: '#7E9A54',
+      water: '#2B6E9B',
+      structure: '#D7BE92',
+      shade: 'rgba(42, 31, 18, .28)',
+    },
+    terminal: {
+      bg: '#17130F',
+      ink: '#EFE4CE',
+      cursor: '#E6B34C',
+      cursorAccent: '#1A130B',
+      selection: '#5CA4E8',
+      selectionInk: '#0E1722',
+      idle: '#332A21',
+      ansi: [
+        '#1D1712', '#F07067', '#5ED69E', '#E6B74C', '#6EB0FA', '#EC83B0', '#56D6D2', '#E5D8C0',
+        '#A69680', '#FF9890', '#8AE8BC', '#FAD375', '#9AC9FF', '#F7A8CB', '#8CE8E5', '#FAF4E6',
+      ],
+    },
+  },
 ] as const satisfies readonly (SkinLook & { id: string })[];
 
-export type BuiltinSkin = (typeof BUILTIN_SKINS)[number];
-export type BuiltinSkinId = BuiltinSkin['id'];
+export type BuiltinSkinId = (typeof BUILTIN_SKINS)[number]['id'];
+export type BuiltinSkin = SkinLook & { readonly id: BuiltinSkinId };
 export const DEFAULT_SKIN: BuiltinSkinId = 'cyberpunk';
 
 /* The built-in skin of this name; a name of anything else, such as a key of every object, finds none. */
@@ -98,4 +146,4 @@ export const builtinSkin = (id: string): BuiltinSkin | undefined => BUILTIN_SKIN
 export const ownLook = ({ scheme, colors, fonts, cut, base }: Skin): SkinLook => ({ scheme, colors, fonts, cut, shape: builtinSkin(base)?.shape ?? 'bevel' });
 
 /* The fonts Hornhoof carries itself; any other font shows only where the device has it. */
-export const SHIPPED_FONTS = ['Onest', 'Tektur', 'Handjet'];
+export const SHIPPED_FONTS = ['Onest', 'Tektur', 'Handjet', 'Alegreya', 'Golos Text'];

@@ -3,11 +3,12 @@ import { BindViewResponse, decodeViewChallenge, encodeViewSignature, isTestViewR
 import '@xterm/xterm/css/xterm.css';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { errorText, useT, type Messages } from '../i18n';
+import { activeLook, subscribeSkins } from '../skins/store';
 import { usePictureDrop } from './MessagePictures';
 import { fitTerminal, measureGlyphsExactly, observeTerminalFit } from './terminal-fit';
 import { isBracketedPaste, TerminalInput, type InputRefusal, type TerminalRights } from './terminal-input';
 import { uploadTerminalPictures } from './terminal-pictures';
-import { attachTerminalScroll, restoreLiveTerminal, writeTerminalData } from './terminal-scroll';
+import { attachTerminalScroll, readingHistoryLine, restoreHistoryLine, restoreLiveTerminal, writeTerminalData } from './terminal-scroll';
 import { isHidden } from './visibility';
 import { WindowFoot, type WindowNote } from './WindowNotes';
 import { disposeTerminal } from './xterm-release';
@@ -16,8 +17,26 @@ import { disposeTerminal } from './xterm-release';
    which a light background would wash out. */
 const ANSI = ['#14191e', '#b43c2a', '#00c200', '#c7c400', '#2744c7', '#c040be', '#00c5c7', '#c7c7c7', '#686868', '#dd7975', '#58e790', '#ece100', '#a7abf2', '#e17ee1', '#60fdff', '#ffffff'];
 const NAMES = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'] as const;
-const COLORS = Object.fromEntries(ANSI.map((c, i) => [i < 8 ? NAMES[i]! : `bright${NAMES[i - 8]![0]!.toUpperCase()}${NAMES[i - 8]!.slice(1)}`, c]));
-const THEME: ITheme = { ...COLORS, background: '#15191f', foreground: '#dcdcdc', cursor: '#ffffff', cursorAccent: '#000000', selectionBackground: '#b3d7ff', selectionForeground: '#000000' };
+const ansiPalette = (list: readonly string[]): Partial<ITheme> =>
+  Object.fromEntries(list.slice(0, 16).map((c, i) => [i < 8 ? NAMES[i]! : `bright${NAMES[i - 8]![0]!.toUpperCase()}${NAMES[i - 8]!.slice(1)}`, c]));
+const THEME: ITheme = { ...ansiPalette(ANSI), background: '#15191f', foreground: '#dcdcdc', cursor: '#ffffff', cursorAccent: '#000000', selectionBackground: '#b3d7ff', selectionForeground: '#000000' };
+
+/* Theme-specific dark terminal surface, ink and ANSI colours when the active theme declares them, else the default dark console. */
+function terminalTheme(): ITheme {
+  const custom = activeLook().terminal;
+  if (!custom) return THEME;
+  const overrides = Object.fromEntries(
+    [
+      ['background', custom.bg],
+      ['foreground', custom.ink],
+      ['cursor', custom.cursor],
+      ['cursorAccent', custom.cursorAccent],
+      ['selectionBackground', custom.selection],
+      ['selectionForeground', custom.selectionInk],
+    ].filter(([, value]) => value !== undefined),
+  );
+  return { ...THEME, ...(custom.ansi ? ansiPalette(custom.ansi) : {}), ...overrides };
+}
 
 const OPTIONS: ITerminalOptions = {
   fontFamily: 'Monaco, Menlo, "DejaVu Sans Mono", monospace',
@@ -42,6 +61,10 @@ const KEPT_KEYS = 256;
 const KEPT_MS = 60_000;
 const RETRY_MS = 500;
 const RETRY_MAX_MS = 10_000;
+const HISTORY_HEAD = '\x1b7\x1b[0m\x1b[1;2r';
+const HISTORY_TAIL = '\x1b[r\x1b8';
+/* How long a reconnected view holds a history-only prefix while waiting for the attached screen redraw. */
+const RECONNECT_HOLD_MS = 100;
 /* How a view ends: the node cannot show one, or the person may no longer reach the agent. */
 const NO_TERMINAL = 4404;
 const NO_ACCESS = 4403;
@@ -88,8 +111,38 @@ export async function createTestTerminalBrowserKey(lease: TestTerminalLease) {
 type Size = { cols: number; rows: number };
 type Frame = { type: string; data?: string; write?: boolean; message?: boolean; running?: boolean; asleep?: boolean; reason?: InputRefusal };
 type Send = (m: unknown) => void;
+type SessionView = { shown: boolean; asleep: boolean; hasData: boolean };
+type ReconnectHold = { waiting: boolean; chunks: string[]; timer: ReturnType<typeof setTimeout> | null };
 /* What one view of the session learned so far. */
-type View = { term: Terminal; send: Send; setUp(up: boolean, asleep?: boolean): void; asked: Size; told: boolean; unconfirmed: Size | null; ready(rights: TerminalRights): void; refused(reason: InputRefusal): void };
+type View = { term: Terminal; send: Send; setUp(up: boolean, asleep?: boolean): void; asked: Size; told: boolean; unconfirmed: Size | null; session: SessionView; hold: ReconnectHold; ready(rights: TerminalRights): void; refused(reason: InputRefusal): void };
+
+const newHold = (): ReconnectHold => ({ waiting: false, chunks: [], timer: null });
+
+function clearHold(hold: ReconnectHold): void {
+  if (hold.timer) clearTimeout(hold.timer);
+  hold.timer = null;
+  hold.waiting = false;
+  hold.chunks = [];
+}
+
+/* History sent by ViewHistory.open starts with a two-row scroll region and ends before tmux draws the live screen. */
+function isHistoryOnly(text: string): boolean {
+  return text.startsWith(HISTORY_HEAD) && (!text.includes(HISTORY_TAIL) || text.endsWith(HISTORY_TAIL));
+}
+
+function applyProgram(session: SessionView, setUp: (up: boolean, asleep?: boolean) => void, running: boolean, asleep: boolean): void {
+  if (running || asleep) {
+    session.shown = true;
+    session.asleep = asleep;
+    setUp(true, asleep);
+    return;
+  }
+  /* Keep existing screen visible across a live program restart; show the loader on first open or waking from sleep. */
+  if (!session.shown || session.asleep) {
+    session.asleep = false;
+    setUp(false, false);
+  }
+}
 
 /* A card that came or went while the view connected changed the terminal's size, and that resize was lost: sent before
    the socket opened, or after the server said ready but before the node held the view. The session's first screen comes
@@ -98,24 +151,30 @@ function confirmSize(term: Terminal, opened: Size | null, send: Send) {
   if (opened && (term.cols !== opened.cols || term.rows !== opened.rows)) send({ type: 'resize', cols: term.cols, rows: term.rows });
 }
 
+function readyCame(view: View, m: Frame): void {
+  const control = Boolean(m.write);
+  const rights = { control, message: m.message ?? control };
+  view.ready(rights);
+  view.told = false;
+  if (view.session.hasData) {
+    view.hold.waiting = true;
+  } else {
+    restoreLiveTerminal(view.term);
+    view.term.reset();
+  }
+  view.term.options.disableStdin = !(rights.control || rights.message);
+  view.unconfirmed = view.asked;
+}
+
 /* The session draws its whole screen for each new view. The server says separately who may control the program and who
    may write a message. A program starts on its first screen if the view says nothing about whether it is running. One that
    sleeps until its next turn shows what it printed, with no loader over it. */
 function received(view: View, m: Frame) {
-  if (m.type === 'ready') {
-    const control = Boolean(m.write);
-    const rights = { control, message: m.message ?? control };
-    view.ready(rights);
-    view.told = false;
-    restoreLiveTerminal(view.term);
-    view.term.reset();
-    view.term.options.disableStdin = !(rights.control || rights.message);
-    view.unconfirmed = view.asked;
-  }
+  if (m.type === 'ready') readyCame(view, m);
   if (m.type === 'refused' && m.reason) view.refused(m.reason);
   if (m.type === 'program') {
     view.told = true;
-    view.setUp(Boolean(m.running || m.asleep), Boolean(m.asleep));
+    applyProgram(view.session, view.setUp, Boolean(m.running), Boolean(m.asleep));
   }
   if (m.type === 'data' && m.data) screenCame(view, m.data);
 }
@@ -138,14 +197,42 @@ function writeKeepingPlace(term: Terminal, data: string) {
     state.reading = null;
     state.history = false;
   }
-  writeTerminalData(term, data, () => {
-    if (term.buffer.active.baseY > 0) term.scrollToLine(Math.min(reading, term.buffer.active.baseY));
-  });
+  writeTerminalData(term, data, () => restoreHistoryLine(term, reading));
+}
+
+function flushReconnect(view: View): void {
+  const combined = view.hold.chunks.join('');
+  clearHold(view.hold);
+  if (!combined) return;
+  const reading = readingHistoryLine(view.term);
+  restoreLiveTerminal(view.term);
+  view.term.reset();
+  if (reading === null) {
+    clearScroll.delete(view.term);
+    writeTerminalData(view.term, combined);
+    return;
+  }
+  if (combined.endsWith(HISTORY_TAIL)) clearScroll.set(view.term, { tail: '', reading, history: true });
+  else clearScroll.delete(view.term);
+  writeTerminalData(view.term, combined, () => restoreHistoryLine(view.term, reading));
 }
 
 function screenCame(view: View, data: string) {
-  if (!view.told) view.setUp(true);
-  writeKeepingPlace(view.term, data);
+  view.session.hasData = true;
+  if (!view.told) {
+    view.session.shown = true;
+    view.setUp(true);
+  }
+  if (view.hold.waiting) {
+    view.hold.chunks.push(data);
+    if (isHistoryOnly(view.hold.chunks.join(''))) {
+      view.hold.timer ??= setTimeout(() => flushReconnect(view), RECONNECT_HOLD_MS);
+    } else {
+      flushReconnect(view);
+    }
+  } else {
+    writeKeepingPlace(view.term, data);
+  }
   /* Forgotten before the resize goes, since the screen it brings may come before send returns. */
   const opened = view.unconfirmed;
   view.unconfirmed = null;
@@ -203,6 +290,8 @@ function sendOrKeep(connection: LiveSocket, m: unknown, kept: KeptKeys, deliverN
 /* The view of the session over a socket, opened again after a machine went away for a moment, until it ends. */
 function connectView(term: Terminal, path: string, setUp: (up: boolean, asleep?: boolean) => void, gone: () => void, overflow: () => void, refused: (reason: InputRefusal) => void, rightsChanged: (rights: TerminalRights) => void) {
   const connection: LiveSocket = { socket: null, open: false, rights: { control: true, message: true } };
+  const session: SessionView = { shown: false, asleep: false, hasData: false };
+  let activeHold: ReconnectHold | null = null;
   let ended = false;
   let retry: ReturnType<typeof setTimeout> | null = null;
   let tries = 0;
@@ -212,6 +301,8 @@ function connectView(term: Terminal, path: string, setUp: (up: boolean, asleep?:
   const send: Send = m => sendOrKeep(connection, m, kept, deliverNow);
   const connect = () => {
     connection.open = false;
+    const hold = newHold();
+    activeHold = hold;
     const ready = (next: TerminalRights) => {
       connection.rights = next;
       connection.open = true;
@@ -219,15 +310,16 @@ function connectView(term: Terminal, path: string, setUp: (up: boolean, asleep?:
       tries = 0;
       kept.go(deliverNow);
     };
-    const view: View = { term, send, setUp, asked: { cols: term.cols, rows: term.rows }, told: false, unconfirmed: null, ready, refused };
+    const view: View = { term, send, setUp, asked: { cols: term.cols, rows: term.rows }, told: false, unconfirmed: null, session, hold, ready, refused };
     const ws = new WebSocket(viewUrl(path, view.asked));
     connection.socket = ws;
     ws.onmessage = e => received(view, JSON.parse(String(e.data)) as Frame);
     ws.onclose = e => {
+      clearHold(hold);
       if (ended || connection.socket !== ws) return;
       connection.open = false;
       rightsChanged({ control: false, message: false });
-      setUp(false);
+      if (!session.shown) setUp(false);
       if (final(e.code)) return gone();
       retry = setTimeout(connect, Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** tries++));
     };
@@ -238,6 +330,7 @@ function connectView(term: Terminal, path: string, setUp: (up: boolean, asleep?:
     end() {
       ended = true;
       if (retry) clearTimeout(retry);
+      if (activeHold) clearHold(activeHold);
       connection.socket?.close();
     },
   };
@@ -266,7 +359,7 @@ class TestViewConnection {
   private view: View;
 
   constructor(private session: TestTerminalSession, term: Terminal, private setUp: (up: boolean) => void, private gone: (reason?: TestTerminalGoneReason) => void) {
-    this.view = { term, send: () => {}, setUp, asked: { cols: term.cols, rows: term.rows }, told: false, unconfirmed: null, ready: () => {}, refused: () => {} };
+    this.view = { term, send: () => {}, setUp, asked: { cols: term.cols, rows: term.rows }, told: false, unconfirmed: null, session: { shown: false, asleep: false, hasData: false }, hold: newHold(), ready: () => {}, refused: () => {} };
   }
 
   start() {
@@ -728,7 +821,10 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
     setDenied(null);
     setPictureState(null);
     setPictureFailure(null);
-    const term = new Terminal(OPTIONS);
+    const term = new Terminal({ ...OPTIONS, theme: terminalTheme() });
+    const stopTheme = subscribeSkins(() => {
+      term.options.theme = terminalTheme();
+    });
     termRef.current = term;
     const container = box.current!;
     term.open(container);
@@ -749,6 +845,7 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
       sendPicture.current = () => {};
       termRef.current = null;
       view.end();
+      stopTheme();
       unfit();
       disposeLater(term);
     };
