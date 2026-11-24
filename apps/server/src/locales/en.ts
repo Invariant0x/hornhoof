@@ -27,6 +27,11 @@ export const en = {
     attachment_invalid: "Hornhoof has no room left for the company's files.",
   },
 
+  /* Why the server does not start, said before it opens the database. */
+  boot: {
+    filesDirMissing: 'FILES_DIR is not set: a server in production keeps its files there, and without it they would be lost at the next restart. Set FILES_DIR to a folder that stays, as compose.yaml does with /files, and start again.',
+  },
+
   /* What a bot can say on its own. */
   bot: {
     orchestrator: 'Orchestrator',

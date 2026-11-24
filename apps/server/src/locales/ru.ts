@@ -23,6 +23,10 @@ export const ru: ServerWords = {
     attachment_invalid: 'в Hornhoof закончилось место для файлов компании.',
   },
 
+  boot: {
+    filesDirMissing: 'FILES_DIR не задан: сервер в работе хранит в нем файлы, а без него они пропали бы при следующем перезапуске. Укажите в FILES_DIR постоянную папку, как compose.yaml указывает /files, и запустите снова.',
+  },
+
   bot: {
     orchestrator: 'Оркестратор',
     unknown: (id, username) =>

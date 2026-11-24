@@ -246,17 +246,6 @@ function limitsOf(set: z.infer<typeof Env>): Pick<Config, 'port' | 'nodePingMs' 
   };
 }
 
-/* A server in production keeps its files in FILES_DIR, and so does one behind a keeper, from where they go to the other
-   machines. With none it would keep them in a folder of one run, which a restart loses, so it does not start, and says why
-   in English and in Russian. Development and tests without a keeper keep that folder. */
-export function filesDirRefusal(env: NodeJS.ProcessEnv, config: Pick<Config, 'filesDir' | 'keeper'>): string | null {
-  if ((env.NODE_ENV !== 'production' && !config.keeper) || config.filesDir) return null;
-  return [
-    'FILES_DIR is not set: a server in production keeps its files there, and without it they would be lost at the next restart. Set FILES_DIR to a folder that stays, as compose.yaml does with /files, and start again.',
-    'FILES_DIR не задан: сервер в работе хранит в нем файлы, а без него они пропали бы при следующем перезапуске. Укажите в FILES_DIR постоянную папку, как compose.yaml указывает /files, и запустите снова.',
-  ].join('\n');
-}
-
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   const secret = secretOf(env);
   const set = checkedEnv(env);

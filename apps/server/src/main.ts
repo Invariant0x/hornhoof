@@ -1,5 +1,6 @@
 import { buildApp } from './app.js';
-import { filesDirRefusal, loadConfig } from './config.js';
+import { loadConfig } from './config.js';
+import { filesDirRefusal } from './files-dir.js';
 import { openAgentSql } from './db/agent-sql.js';
 import { APP_NAME, openDb } from './db/client.js';
 import { loggable } from './errors.js';

@@ -1,19 +1,22 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { filesDirRefusal, loadConfig } from '../src/config.js';
+import { loadConfig } from '../src/config.js';
+import { filesDirRefusal } from '../src/files-dir.js';
+import { wordLanguages } from '../src/locales/index.js';
 import { TEST_SECRET } from './helpers-basic.js';
 
-/* A server in production keeps its files in FILES_DIR; with none it would keep them in a folder of one run, which a
-   restart loses, so it does not start (#2036). Development and tests keep that folder. */
+/* A server in production, or behind a keeper, keeps its files in FILES_DIR; with none it would keep them in a folder of
+   one run, which a restart loses, so it does not start (#2036). Development and tests keep that folder. */
 
 describe('a server in production with no FILES_DIR', () => {
-  it('says why it does not start, in English and in Russian, naming FILES_DIR', () => {
+  it('says why it does not start, a line in each language the server has, English first, each naming FILES_DIR', () => {
     const said = filesDirRefusal({ NODE_ENV: 'production' }, loadConfig({ HORNHOOF_SECRET: TEST_SECRET }));
-    const [english, russian, ...more] = (said ?? '').split('\n');
-    expect(more).toEqual([]);
-    expect(english).toMatch(/^FILES_DIR is not set: /);
-    expect(russian).toMatch(/^FILES_DIR не задан: /);
+    const lines = (said ?? '').split('\n');
+    expect(lines).toHaveLength(wordLanguages().length);
+    expect(lines[0]).toMatch(/^FILES_DIR is not set: /);
+    for (const line of lines) expect(line).toMatch(/^FILES_DIR /);
+    expect(new Set(lines).size).toBe(lines.length);
     expect(said).not.toMatch(/\u0451/);
   });
 
@@ -35,7 +38,6 @@ describe('a server in production with no FILES_DIR', () => {
     });
     await expect(started).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('FILES_DIR is not set: ') });
     const failed: { stderr: string } = await started.catch((err: { stderr: string }) => err);
-    expect(failed.stderr).toContain('FILES_DIR не задан: ');
     expect(failed.stderr).not.toContain('DATABASE_URL');
   });
 });
