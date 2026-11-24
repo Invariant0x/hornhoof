@@ -106,6 +106,24 @@ describe('plant layer layout', () => {
     expect(none).toBeLessThan(field.plants.length / 20);
   });
 
+  it('thins the plants to the share the quality step asks, the same plants every frame (#1947 item 6)', () => {
+    const wide = { minX: anchor.x - 3000, maxX: anchor.x + 3000, minY: anchor.y - 2000, maxY: anchor.y + 2000 };
+    const thin = new PlantLayout({ pack: EGYPT_WORLD_PACK, field, sprites, lighting: EGYPT_WORLD_PACK.lighting });
+    const full = createDrawList();
+    const inView = thin.build(wide, 1, full);
+    thin.density = 0.35;
+    const a = createDrawList();
+    const b = createDrawList();
+    expect(thin.build(wide, 1, a), 'the plants in view are counted whole').toBe(inView);
+    thin.build(wide, 4, b);
+    const drawn = (list: ReturnType<typeof createDrawList>) => list.count - list.shadowCount;
+    const share = drawn(a) / drawn(full);
+    expect(share).toBeGreaterThan(0.25);
+    expect(share).toBeLessThan(0.45);
+    const frames = (list: ReturnType<typeof createDrawList>) => Array.from({ length: list.count }, (_, i) => itemAt(list, i).frame);
+    expect(frames(b), 'the same plants at another moment of the wind').toEqual(frames(a));
+  });
+
   it('draws no shadows for a pack without lighting and nothing for a pack without plants', () => {
     const dark = new PlantLayout({ pack: EGYPT_WORLD_PACK, field, sprites });
     const list = createDrawList();

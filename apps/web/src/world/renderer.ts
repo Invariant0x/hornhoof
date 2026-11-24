@@ -16,9 +16,12 @@ import {
   type EffectiveZoomBounds,
   type ViewportSize,
 } from './camera';
+import { worldArtFiles } from './art-files';
 import { DisplayRunPool, WorldArtLibrary, type WorldArtStats } from './art-runtime';
+import { residentStandsStill, residentWalkSpeed } from './art';
 import { bakeChunkCanvas, buildTileLookup, type BakedChunk } from './chunk-baker';
 import { buildChunkGrid, ChunkLruCache, cullVisibleChunks, type ChunkCoord, type ChunkGrid } from './chunks';
+import { FrameQuality, QUALITY_STEPS, type QualityStep } from './frame-quality';
 import {
   mapWorldBounds,
   pickAtScreen,
@@ -32,14 +35,15 @@ import {
   type PickableObject,
   type PickResult,
   type TileCoord,
+  type WorldRect,
 } from './coords';
 import type { AnimationDetailLevel, LodTierId, LodTierSpec, TileSlotSpec, WorldPackManifest } from './manifest';
 import {
   renderCityFallback2D,
   renderCityToPixi,
-  swayBuildingLayers,
+  swayCloths,
   type CityArtContext,
-  type SwayingLayer,
+  type ClothLayer,
   type CityRenderState,
   type RelocationTargetPreview,
   type TileWindow,
@@ -49,7 +53,6 @@ import {
   type ConstructionSimulation,
 } from './construction';
 import {
-  renderConstructionLoopsFallback2D,
   renderConstructionLoopsToPixi,
   type LoopArtContext,
 } from './construction-renderer';
@@ -84,6 +87,11 @@ export type RendererDebugInfo = Readonly<{
 }>;
 
 export type WorldEngineStats = Readonly<{
+  /* Frames stepped since the map started, and whether it is parked behind another tab (#1947 item 3). */
+  framesDrawn: number;
+  paused: boolean;
+  /* The quality step drawn at, and whether it follows the frame time (#1947 item 6). */
+  quality: QualityStep & { level: number; auto: boolean };
   fps: number;
   frameTimeMs: number;
   cpuStepMs: number;
@@ -103,6 +111,11 @@ export type WorldEngineStats = Readonly<{
   totalChunks: number;
   cachedChunks: number;
   pendingBakes: number;
+  /* Ground pieces around the view, baked ahead of the camera, still to bake (#1947 item 4). */
+  aheadBakes: number;
+  /* Pieces in view drawn coarser than the zoom needs, from a tier baked before (#1947 item 4); a finer stand-in is
+     counted in pendingBakes only, as it loses no detail. */
+  lowDetailChunks: number;
   mapSize: number;
   chunkSize: number;
   rendererKind: RendererKind;
@@ -129,6 +142,9 @@ export type WorldEngineOptions = Readonly<{
   onSelect?: (pick: PickResult | null) => void;
   onSelectResident?: (resident: ResidentEntity | null) => void;
   onHover?: (tile: TileCoord | null) => void;
+  /* 'auto': the quality steps by the frame time measured (#1947 item 6); a number holds that step of QUALITY_STEPS.
+     The product map is auto; the viewer pages hold full quality, so what they show and measure stays the same. */
+  quality?: 'auto' | number;
 }>;
 
 type CachedChunkEntry = {
@@ -138,11 +154,28 @@ type CachedChunkEntry = {
   sprite: Sprite | null;
 };
 
+/* The ground pieces around the view at one detail, with their cache keys, to bake ahead of the camera. */
+type AheadPlan = Readonly<{ sig: string; lod: LodTierSpec; chunks: readonly ChunkCoord[]; keys: readonly string[] }>;
+
 /* Per-frame baking budget (ms) so lazy LOD texture bakes keep interactive pan/zoom near 60 FPS. */
 const BAKE_BUDGET_MS = 7;
 const DRAG_THRESHOLD_PX = 5;
 const KEY_PAN_PX_PER_SEC = 540;
 const CHUNK_CACHE_CAP = 260;
+/* How far beyond the view the ground is baked ahead of the camera, as a share of the view's width and height on each
+   side, so a pan never shows a piece still baking (#1947 item 4). */
+const BAKE_AHEAD_VIEW_SHARE = 0.5;
+/* The pieces ahead bake first where the camera is heading: where its pace puts it this far ahead. */
+const BAKE_AHEAD_LEAD_MS = 600;
+/* The pieces ahead bake right after a frame, in a slice of the time the frame left over: its interval less its own step
+   and a margin, within these bounds. A slow page is never idle, so idle callbacks would rarely come. */
+const AHEAD_SLICE_MIN_MS = 2;
+const AHEAD_SLICE_MAX_MS = 40;
+const AHEAD_SLICE_MARGIN_MS = 6;
+/* A piece in view with no picture at any detail would be a hole in the ground: such pieces bake at once, over the
+   frame's budget, for up to this long a frame; a move past the pieces baked ahead faster than that leaves the rest for
+   the next frames (#1947 item 4). */
+const HOLE_BUDGET_MS = 24;
 const ZOOM_STEP_FACTOR = 1.25;
 /* How a world's Pixi application ends: its canvas leaves the page, and Pixi's pools shared by every application on the page
    stay. Ending with `true` would also empty those pools and break the batches of a map still drawing, as when React's
@@ -219,7 +252,6 @@ export class IsometricWorldEngine {
   private buildGridGraphic: Graphics | null = null;
   private cityGraphic: Graphics | null = null;
   private residentsGraphic: Graphics | null = null;
-  private constructionGraphic: Graphics | null = null;
   private departmentFocusGraphic: Graphics | null = null;
   private borderGraphic: Graphics | null = null;
   private overlayGraphic: Graphics | null = null;
@@ -251,10 +283,27 @@ export class IsometricWorldEngine {
   private artPinned = false;
   private visibleChunkList: ChunkCoord[] = [];
   private pendingBakeCount = 0;
+  private aheadBakeCount = 0;
+  /* The pieces around the view, worked out again when the view's pieces or the detail change (item 4). */
+  private aheadPlan: AheadPlan | null = null;
+  private aheadSlice = 0;
+  /* The quality step (#1947 item 6): followed by frame time when auto, held otherwise. */
+  private readonly frameQuality: FrameQuality | null;
+  private qualityLevel: number;
+  private qualityStep: QualityStep;
+  private frozenWind: number | null = null;
+  private lastScreenBakeAt = -Infinity;
+  private lowDetailCount = 0;
+  /* Where the camera stood at the last scene sync and how fast it moved since, in world px per ms (item 4). */
+  private lastSyncCamera: { x: number; y: number; at: number } | null = null;
+  private cameraPace = { x: 0, y: 0 };
 
   private destroyed = false;
   private dirtyScene = true;
   private rafId = 0;
+  /* Parked behind another tab (#1947 item 3): no frames, no keys, no resizes until shown again. */
+  private paused = false;
+  private framesDrawn = 0;
   private lastFrameTs = 0;
   private fpsSamples: number[] = [];
   private lastFps = 60;
@@ -281,7 +330,7 @@ export class IsometricWorldEngine {
   private buildingVariants: ReadonlyMap<string, number> = new Map();
   private readonly roadPainter = new RoadStripPainter();
   /* Awnings and cloth of the building pictures drawn by the last city pass, moved every frame by the wind. */
-  private readonly swayingLayers: SwayingLayer[] = [];
+  private readonly swayingLayers: ClothLayer[] = [];
   /* A fixed wind clock in seconds for steady shots and video; null follows real time. */
   private windClockSec: number | null = null;
 
@@ -311,6 +360,10 @@ export class IsometricWorldEngine {
       ? tileCenterToWorld(options.initialCenterTile.col, options.initialCenterTile.row, this.tileW, this.tileH)
       : { x: initial.x, y: initial.y };
     this.markerTile = options.markerTile ?? null;
+    const quality = options.quality ?? 0;
+    this.frameQuality = quality === 'auto' ? new FrameQuality() : null;
+    this.qualityLevel = quality === 'auto' ? 0 : clamp(Math.round(quality), 0, QUALITY_STEPS.length - 1);
+    this.qualityStep = QUALITY_STEPS[this.qualityLevel]!;
     this.camera = {
       x: clamp(startCenter.x, this.bounds.minX, this.bounds.maxX),
       y: clamp(startCenter.y, this.bounds.minY, this.bounds.maxY),
@@ -364,10 +417,10 @@ export class IsometricWorldEngine {
       this.useArt(terrainArtFor(this.pack));
       this.app = app;
       const roadArt = this.pack.terrainArt?.roads;
-      const artBase = this.pack.art?.baseUrl;
-      if (roadArt && artBase) {
+      const artFiles = worldArtFiles(this.pack);
+      if (roadArt && artFiles) {
         /* Streets turn painted once every tier's strip is in; until then (or without them) the city draws street tiles. */
-        void this.roadPainter.load(artBase, roadArt).then(ok => {
+        void this.roadPainter.load(path => artFiles.blob(path), roadArt).then(ok => {
           if (ok && !this.destroyed) this.markCityDirty();
         });
       }
@@ -387,7 +440,6 @@ export class IsometricWorldEngine {
       const buildingArtLayer = new Container();
       const residentsGraphic = new Graphics();
       const residentArtLayer = new Container();
-      const constructionGraphic = new Graphics();
       const loopArtLayer = new Container();
       const departmentFocusGraphic = new Graphics();
       const borderGraphic = new Graphics();
@@ -466,7 +518,6 @@ export class IsometricWorldEngine {
       worldContainer.addChild(depthLayer);
       worldContainer.addChild(residentsGraphic);
       worldContainer.addChild(residentArtLayer);
-      worldContainer.addChild(constructionGraphic);
       worldContainer.addChild(loopArtLayer);
       worldContainer.addChild(departmentFocusGraphic);
       worldContainer.addChild(borderGraphic);
@@ -480,7 +531,6 @@ export class IsometricWorldEngine {
       this.buildingArtPool = new DisplayRunPool(buildingArtLayer, depthLayer);
       this.residentsGraphic = residentsGraphic;
       this.residentArtPool = new DisplayRunPool(residentArtLayer, depthLayer);
-      this.constructionGraphic = constructionGraphic;
       this.loopArtPool = new DisplayRunPool(loopArtLayer, depthLayer);
       this.departmentFocusGraphic = departmentFocusGraphic;
       this.borderGraphic = borderGraphic;
@@ -494,10 +544,11 @@ export class IsometricWorldEngine {
       this.mountFallbackCanvas();
     }
 
+    if (this.qualityLevel !== 0) this.applyQuality(this.qualityLevel);
     this.attachEvents();
     this.lastFrameTs = performance.now();
     this.stepFrame(this.lastFrameTs);
-    this.rafId = requestAnimationFrame(this.onAnimationFrame);
+    if (!this.paused) this.rafId = requestAnimationFrame(this.onAnimationFrame);
   }
 
   /* Reads the pack's art index once; every texture that finishes loading redraws the city. */
@@ -693,7 +744,7 @@ export class IsometricWorldEngine {
   }
 
   private readonly handleResize = (): void => {
-    if (this.destroyed) return;
+    if (this.destroyed || this.paused) return;
     const next = this.readHostSize();
     const nextDpr = Math.min(Math.max(1, window.devicePixelRatio || 1), 2);
     if (next.width === this.viewport.width && next.height === this.viewport.height && nextDpr === this.dpr) return;
@@ -705,7 +756,7 @@ export class IsometricWorldEngine {
       zoom: clamp(this.camera.zoom, this.zoomBounds.minZoom, this.zoomBounds.maxZoom),
     };
     if (this.app) {
-      this.app.renderer.resize(next.width, next.height);
+      this.app.renderer.resize(next.width, next.height, this.dpr * this.qualityStep.resolution);
     } else if (this.fallbackCanvas) {
       this.fallbackCanvas.width = Math.round(next.width * this.dpr);
       this.fallbackCanvas.height = Math.round(next.height * this.dpr);
@@ -809,6 +860,7 @@ export class IsometricWorldEngine {
   };
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
+    if (this.paused) return;
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd', 'W', 'A', 'S', 'D'].includes(e.key)) {
       this.pressedKeys.add(e.key.toLowerCase());
     }
@@ -960,7 +1012,6 @@ export class IsometricWorldEngine {
     this.constructionSim = sim;
     this.lastConstructionCityVersion = sim ? sim.dirtyCityVersion : -1;
     if (!sim) {
-      this.constructionGraphic?.clear();
       this.loopArtPool?.clear();
     }
     this.cityDirty = true;
@@ -1113,6 +1164,32 @@ export class IsometricWorldEngine {
   }
 
   /* Synchronously finishes baking all currently visible chunks (for deterministic screenshot capture). */
+  /* Bakes the visible ground pieces not baked yet for up to `budgetMs`, at least one per call; how many of the visible
+     pieces are baked now. For a loading screen that counts them (#1947): call it each frame until done equals total,
+     then flushVisibleBakes draws the rest. */
+  bakeVisibleStep(budgetMs: number): { done: number; total: number } {
+    const lod = lodForCamera(this.pack, this.camera.zoom, this.dpr);
+    const rect = visibleWorldRect(this.camera, this.viewport, this.tileW);
+    const inView = cullVisibleChunks(this.chunkGrid, rect);
+    /* The pieces around the view too, so the first pan after the screen finds them baked (item 4). */
+    const visible = [...inView, ...this.chunksAhead(rect, inView)];
+    const deadline = performance.now() + budgetMs;
+    this.lastScreenBakeAt = performance.now();
+    let done = 0;
+    let bakedNow = 0;
+    for (const chunk of visible) {
+      if (this.chunkCache.get(this.cacheKey(chunk, lod.id))) {
+        done++;
+      } else if (bakedNow === 0 || performance.now() < deadline) {
+        this.ensureChunkBaked(chunk, lod);
+        bakedNow++;
+        done++;
+      }
+    }
+    if (bakedNow > 0) this.dirtyScene = true;
+    return { done, total: visible.length };
+  }
+
   flushVisibleBakes(): void {
     const lod = lodForCamera(this.pack, this.camera.zoom, this.dpr);
     const rect = visibleWorldRect(this.camera, this.viewport, this.tileW);
@@ -1131,33 +1208,46 @@ export class IsometricWorldEngine {
         rect,
         this.tileW,
         this.tileH,
-        animationDetailForZoom(this.camera.zoom),
         this.selectedResidentId,
         this.drawnResidentIds,
         this.residentArtContext(),
       );
     }
     this.redrawDepartmentFocusPixi();
-    if (this.app && this.constructionGraphic && this.constructionSim) {
-      renderConstructionLoopsToPixi(
-        this.constructionGraphic,
-        this.constructionSim,
-        this.cityRenderState?.city ?? null,
-        this.pack,
-        rect,
-        this.tileW,
-        this.tileH,
-        animationDetailForZoom(this.camera.zoom),
-        this.loopArtContext(),
-      );
+    const loopArt = this.loopArtContext();
+    if (this.app && loopArt && this.constructionSim) {
+      renderConstructionLoopsToPixi(this.constructionSim, this.cityRenderState?.city ?? null, this.pack, rect, this.tileW, this.tileH, loopArt);
     }
     this.app?.render();
     this.emitStats(true);
   }
 
+  /* Parks the map while it is hidden behind another tab (#1947 item 3): it keeps everything it holds and draws no frame,
+     reads no key and follows no resize; shown again, it measures its host and draws on from where it stood. */
+  setPaused(paused: boolean): void {
+    if (this.destroyed || paused === this.paused) return;
+    this.paused = paused;
+    this.pressedKeys.clear();
+    if (paused) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = 0;
+      this.cancelAheadBake();
+      return;
+    }
+    this.handleResize();
+    this.cityDirty = true;
+    this.dirtyScene = true;
+    this.lastFrameTs = performance.now();
+    this.frameQuality?.restart(this.lastFrameTs);
+    this.rafId = requestAnimationFrame(this.onAnimationFrame);
+  }
+
   getStats(): WorldEngineStats {
     const lod = lodForCamera(this.pack, this.camera.zoom, this.dpr);
     return {
+      framesDrawn: this.framesDrawn,
+      paused: this.paused,
+      quality: { ...this.qualityStep, level: this.qualityLevel, auto: this.frameQuality !== null },
       fps: Math.round(this.lastFps),
       frameTimeMs: Math.round(this.lastFrameMs * 10) / 10,
       cpuStepMs: Math.round(this.lastCpuStepMs * 100) / 100,
@@ -1177,6 +1267,8 @@ export class IsometricWorldEngine {
       totalChunks: this.chunkGrid.chunks.length,
       cachedChunks: this.chunkCache.size,
       pendingBakes: this.pendingBakeCount,
+      aheadBakes: this.aheadBakeCount,
+      lowDetailChunks: this.lowDetailCount,
       mapSize: this.pack.mapSize,
       chunkSize: this.pack.params.chunkSize,
       rendererKind: this.rendererKind,
@@ -1265,15 +1357,23 @@ export class IsometricWorldEngine {
   }
 
   private readonly onAnimationFrame = (ts: number): void => {
-    if (this.destroyed) return;
+    if (this.destroyed || this.paused) return;
     this.stepFrame(ts);
     this.rafId = requestAnimationFrame(this.onAnimationFrame);
+    this.scheduleAheadBake();
   };
 
   private stepFrame(ts: number): void {
+    this.framesDrawn++;
     const stepStart = performance.now();
-    const dtMs = Math.max(1, Math.min(100, ts - this.lastFrameTs || 16.67));
+    const frameMs = ts - this.lastFrameTs;
+    const dtMs = Math.max(1, Math.min(100, frameMs || 16.67));
     this.lastFrameTs = ts;
+    if (this.frameQuality) {
+      /* The frames of the loading screen's baking measure the baking, not the drawing. */
+      if (ts - this.lastScreenBakeAt < 500) this.frameQuality.restart(ts);
+      else if (this.frameQuality.frame(frameMs, ts) !== this.qualityLevel) this.applyQuality(this.frameQuality.level);
+    }
     this.lastFrameMs = dtMs;
     this.fpsSamples.push(1000 / dtMs);
     if (this.fpsSamples.length > 30) this.fpsSamples.shift();
@@ -1295,10 +1395,10 @@ export class IsometricWorldEngine {
 
     /* Smoothly animate the dedicated liquid layer independently from baked ground chunks. */
     let liquidAnimated = false;
-    if (this.terrainMap && this.pack.liquidLayer) {
+    if (this.terrainMap && this.pack.liquidLayer && this.qualityStep.animation !== 'still') {
       liquidAnimated = true;
       const dtSec = dtMs / 1000;
-      const animDetail = animationDetailForZoom(this.camera.zoom);
+      const animDetail = this.qualityStep.animation === 'full' ? animationDetailForZoom(this.camera.zoom) : 'reduced';
       const speedScale = animDetail === 'reduced' ? 0.55 : 1.0;
       if (this.windClockSec !== null) {
         /* A fixed clock moves the water by the clock, not by how long the frames took. */
@@ -1324,6 +1424,9 @@ export class IsometricWorldEngine {
     /* Advance Stage 5 live resident simulation at smooth real-time cadence. */
     let residentsAnimated = false;
     if (this.residentSim) {
+      /* Residents drawn from a walking sheet walk its stride per cycle; without art the speed stays their own. */
+      this.residentSim.walkSpeedOf = r => residentWalkSpeed(this.pack, this.artLibrary.index, r);
+      this.residentSim.standsStillOf = r => residentStandsStill(this.pack, this.artLibrary.index, r);
       stepResidentSimulation(this.residentSim, dtMs / 1000);
       residentsAnimated = true;
       if (this.pack.art) {
@@ -1358,10 +1461,14 @@ export class IsometricWorldEngine {
     /* Plants sway in the wind, so a map with plants redraws every frame. */
     let plantsAnimated = false;
     if (this.plantRenderer) {
-      plantsAnimated = true;
+      /* At the 'still' step the plants stand in the wind of the moment it began, laid out again only as the view moves. */
+      const still = this.qualityStep.animation === 'still';
+      plantsAnimated = !still;
       if (this.app) {
-        this.plantRenderer.update(visibleWorldRect(this.camera, this.viewport, this.tileW), this.windTime());
-      } else {
+        if (!still || this.dirtyScene || this.pendingBakeCount > 0) {
+          this.plantRenderer.update(visibleWorldRect(this.camera, this.viewport, this.tileW), this.frozenWind ?? this.windTime());
+        }
+      } else if (!still) {
         this.dirtyScene = true;
       }
     }
@@ -1371,15 +1478,14 @@ export class IsometricWorldEngine {
       this.syncScene(BAKE_BUDGET_MS);
     }
     /* Awnings and cloth of the buildings in view move with the wind, after the city pass that placed them. */
-    const swayAnimated = Boolean(this.app) && this.swayingLayers.length > 0;
-    if (swayAnimated) swayBuildingLayers(this.swayingLayers, this.windTime());
+    const swayAnimated = Boolean(this.app) && this.swayingLayers.length > 0 && this.qualityStep.animation === 'full';
+    if (swayAnimated) swayCloths(this.swayingLayers, this.windTime());
     if (
       this.app &&
       ((this.residentsGraphic && this.residentSim && (residentsAnimated || needsSync)) ||
-        (this.constructionGraphic && this.constructionSim && (constructionAnimated || needsSync)))
+        (this.loopArtPool && this.constructionSim && (constructionAnimated || needsSync)))
     ) {
       const visRect = visibleWorldRect(this.camera, this.viewport, this.tileW);
-      const detail = animationDetailForZoom(this.camera.zoom);
       if (this.residentsGraphic && this.residentSim && (residentsAnimated || needsSync)) {
         renderResidentsToPixi(
           this.residentsGraphic,
@@ -1389,7 +1495,6 @@ export class IsometricWorldEngine {
           visRect,
           this.tileW,
           this.tileH,
-          detail,
           this.selectedResidentId,
           this.drawnResidentIds,
           this.residentArtContext(),
@@ -1398,18 +1503,9 @@ export class IsometricWorldEngine {
           this.redrawDepartmentFocusPixi();
         }
       }
-      if (this.constructionGraphic && this.constructionSim && (constructionAnimated || needsSync)) {
-        renderConstructionLoopsToPixi(
-          this.constructionGraphic,
-          this.constructionSim,
-          this.cityRenderState?.city ?? null,
-          this.pack,
-          visRect,
-          this.tileW,
-          this.tileH,
-          detail,
-          this.loopArtContext(),
-        );
+      const loopArt = this.loopArtContext();
+      if (loopArt && this.constructionSim && (constructionAnimated || needsSync)) {
+        renderConstructionLoopsToPixi(this.constructionSim, this.cityRenderState?.city ?? null, this.pack, visRect, this.tileW, this.tileH, loopArt);
       }
     }
     if (this.app && (needsSync || liquidAnimated || residentsAnimated || constructionAnimated || plantsAnimated || swayAnimated)) {
@@ -1423,6 +1519,10 @@ export class IsometricWorldEngine {
     }
   }
 
+  private lodTileW(id: LodTierId): number {
+    return this.pack.projection.lods.find(l => l.id === id)?.tileW ?? 0;
+  }
+
   private findAnyCachedLod(chunk: ChunkCoord): { key: string; entry: CachedChunkEntry } | null {
     const lods = this.pack.projection.lods;
     for (let i = lods.length - 1; i >= 0; i--) {
@@ -1434,16 +1534,87 @@ export class IsometricWorldEngine {
     return this.chunkLotKeys.lastBakedHit(chunk.key, lods.map(l => l.id), k => this.chunkCache.get(k));
   }
 
+  /* The pieces around the view to bake ahead of the camera, nearest first to where the camera is heading; the view's
+     own are left out. */
+  private chunksAhead(view: WorldRect, inView: readonly ChunkCoord[]): ChunkCoord[] {
+    const padX = (view.maxX - view.minX) * BAKE_AHEAD_VIEW_SHARE;
+    const padY = (view.maxY - view.minY) * BAKE_AHEAD_VIEW_SHARE;
+    const around = { minX: view.minX - padX, maxX: view.maxX + padX, minY: view.minY - padY, maxY: view.maxY + padY };
+    const seen = new Set(inView.map(c => c.key));
+    const cx = (view.minX + view.maxX) / 2 + this.cameraPace.x * BAKE_AHEAD_LEAD_MS;
+    const cy = (view.minY + view.maxY) / 2 + this.cameraPace.y * BAKE_AHEAD_LEAD_MS;
+    const away = (c: ChunkCoord) => Math.hypot((c.bounds.minX + c.bounds.maxX) / 2 - cx, (c.bounds.minY + c.bounds.maxY) / 2 - cy);
+    return cullVisibleChunks(this.chunkGrid, around)
+      .filter(c => !seen.has(c.key))
+      .sort((a, b) => away(a) - away(b));
+  }
+
+  /* The pieces ahead for this view and detail, kept while the view's own pieces stay the same. */
+  private aheadFor(lod: LodTierSpec, view: WorldRect, inView: readonly ChunkCoord[]): AheadPlan {
+    const first = inView[0];
+    const last = inView[inView.length - 1];
+    const sig = `${lod.id}|${inView.length}|${first?.key ?? ''}|${last?.key ?? ''}`;
+    if (this.aheadPlan?.sig === sig) return this.aheadPlan;
+    const chunks = this.chunksAhead(view, inView);
+    this.aheadPlan = { sig, lod, chunks, keys: chunks.map(c => this.cacheKey(c, lod.id)) };
+    return this.aheadPlan;
+  }
+
+  /* Bakes the pieces ahead after the frame, nearest to where the camera is heading first (#1947 item 4). */
+  private scheduleAheadBake(): void {
+    if (this.aheadSlice || this.destroyed || this.paused || this.aheadBakeCount === 0) return;
+    this.aheadSlice = window.setTimeout(this.onAheadSlice, 0);
+  }
+
+  private cancelAheadBake(): void {
+    if (this.aheadSlice) clearTimeout(this.aheadSlice);
+    this.aheadSlice = 0;
+  }
+
+  private readonly onAheadSlice = (): void => {
+    this.aheadSlice = 0;
+    const plan = this.aheadPlan;
+    if (this.destroyed || this.paused || !plan) return;
+    const spare = this.lastFrameMs - this.lastCpuStepMs - AHEAD_SLICE_MARGIN_MS;
+    const until = performance.now() + Math.max(AHEAD_SLICE_MIN_MS, Math.min(AHEAD_SLICE_MAX_MS, spare));
+    let left = 0;
+    plan.chunks.forEach((chunk, i) => {
+      if (this.chunkCache.get(plan.keys[i]!)) return;
+      if (performance.now() < until && this.advanceChunkBake(chunk, plan.lod, until)) return;
+      left++;
+    });
+    this.aheadBakeCount = left;
+  };
+
+  /* The camera's pace since the last sync, smoothed, for baking ahead where it is heading. */
+  private followCameraPace(): void {
+    const now = performance.now();
+    const last = this.lastSyncCamera;
+    this.lastSyncCamera = { x: this.camera.x, y: this.camera.y, at: now };
+    if (!last || now - last.at > 250) {
+      this.cameraPace = { x: 0, y: 0 };
+      return;
+    }
+    const dt = Math.max(1, now - last.at);
+    const k = 0.5;
+    this.cameraPace = {
+      x: this.cameraPace.x * (1 - k) + ((this.camera.x - last.x) / dt) * k,
+      y: this.cameraPace.y * (1 - k) + ((this.camera.y - last.y) / dt) * k,
+    };
+  }
+
   private syncScene(bakeBudgetMs: number): void {
     const lod = lodForCamera(this.pack, this.camera.zoom, this.dpr);
     const visibleRect = visibleWorldRect(this.camera, this.viewport, this.tileW);
     const visible = cullVisibleChunks(this.chunkGrid, visibleRect);
     this.visibleChunkList = visible;
+    this.followCameraPace();
 
     const protectedKeys = new Set<string>();
     const drawEntries: CachedChunkEntry[] = [];
     const bakeStart = performance.now();
     let pending = 0;
+    let lowDetail = 0;
 
     for (const chunk of visible) {
       const key = this.cacheKey(chunk, lod.id);
@@ -1453,20 +1624,38 @@ export class IsometricWorldEngine {
         entry = this.advanceChunkBake(chunk, lod, bakeStart + bakeBudgetMs) ?? undefined;
       }
       if (!entry) {
-        pending++;
         const fallback = this.findAnyCachedLod(chunk);
         if (fallback) {
+          pending++;
+          if (this.lodTileW(fallback.entry.baked.lodId) < lod.tileW) lowDetail++;
           protectedKeys.add(fallback.key);
           entry = fallback.entry;
+        } else {
+          /* A hole in the ground: baked now, over the frame's budget, up to the hole budget; a piece that needs longer goes
+             on next frame from where it stopped (#1947 item 4). */
+          const holeDeadline = bakeStart + bakeBudgetMs + HOLE_BUDGET_MS;
+          if (performance.now() < holeDeadline) entry = this.advanceChunkBake(chunk, lod, holeDeadline) ?? undefined;
+          if (!entry) pending++;
         }
       }
       if (entry) drawEntries.push(entry);
+      else lowDetail++;
     }
+
+    /* The pieces around the view stay kept and bake in idle time (#1947 item 4). */
+    const ahead = this.aheadFor(lod, visibleRect, visible);
+    let aheadLeft = 0;
+    ahead.keys.forEach(key => {
+      protectedKeys.add(key);
+      if (!this.chunkCache.has(key)) aheadLeft++;
+    });
+    this.aheadBakeCount = aheadLeft;
 
     for (const key of this.bakeJobs.keys()) {
       if (!protectedKeys.has(key)) this.bakeJobs.delete(key);
     }
     this.pendingBakeCount = pending;
+    this.lowDetailCount = lowDetail;
     this.dirtyScene = pending > 0;
     this.chunkCache.evictIfNeeded(protectedKeys, this.disposeEntry);
 
@@ -1816,18 +2005,6 @@ export class IsometricWorldEngine {
         this.selectedResidentId,
       );
     }
-    if (this.constructionSim) {
-      const rect = visibleWorldRect(this.camera, this.viewport, this.tileW);
-      renderConstructionLoopsFallback2D(
-        ctx,
-        this.constructionSim,
-        this.cityRenderState?.city ?? null,
-        this.pack,
-        rect,
-        this.tileW,
-        this.tileH,
-      );
-    }
     if (this.departmentFocus && this.cityRenderState) {
       renderDepartmentFocusFallback2D(
         ctx,
@@ -1913,6 +2090,18 @@ export class IsometricWorldEngine {
     ctx.restore();
   }
 
+  /* Draws at a quality step from now on: render resolution, plant density and animation (#1947 item 6). */
+  private applyQuality(level: number): void {
+    this.qualityLevel = level;
+    this.qualityStep = QUALITY_STEPS[level]!;
+    this.plantRenderer?.setDensity(this.qualityStep.plants);
+    this.frozenWind = this.qualityStep.animation === 'still' ? this.windTime() : null;
+    if (this.liquidSpriteB && this.qualityStep.animation !== 'full') this.liquidSpriteB.visible = false;
+    if (this.app) this.app.renderer.resize(this.viewport.width, this.viewport.height, this.dpr * this.qualityStep.resolution);
+    this.dirtyScene = true;
+    this.emitStats(true);
+  }
+
   private emitStats(force: boolean): void {
     if (!this.onStats) return;
     if (force) this.lastStatsPushTs = performance.now();
@@ -1922,6 +2111,7 @@ export class IsometricWorldEngine {
   destroy(): void {
     this.destroyed = true;
     if (this.rafId) cancelAnimationFrame(this.rafId);
+    this.cancelAheadBake();
 
     const el = this.canvasElement;
     if (el) {
@@ -1958,7 +2148,6 @@ export class IsometricWorldEngine {
     this.buildGridGraphic = null;
     this.cityGraphic = null;
     this.residentsGraphic = null;
-    this.constructionGraphic = null;
     this.residentSim = null;
     this.constructionSim = null;
 
