@@ -468,14 +468,18 @@ function Stage4LiveWorld() {
         return;
       }
       engineRef.current = engine;
+      /* A snapshot sync may have run while the engine loaded and replaced the city and the residents; the engine
+         takes the newest from the refs, which both effects set before any engine resolves, so it moves the residents
+         the page reads (#1983). */
+      const latest = syncRef.current!;
       engine.setCityRenderState({
-        city: synced.city,
-        worldMode: synced.worldMode,
-        emptyLotStakes: synced.emptyLotStakes,
-        districtColors: synced.districtColors,
+        city: latest.city,
+        worldMode: latest.worldMode,
+        emptyLotStakes: latest.emptyLotStakes,
+        districtColors: latest.districtColors,
       });
-      engine.setResidentSimulation(sim);
-      engine.setConstructionSimulation(constructionSim);
+      engine.setResidentSimulation(simRef.current!);
+      engine.setConstructionSimulation(constructionRef.current!);
       engine.flushVisibleBakes();
       setStats(engine.getStats());
 

@@ -557,6 +557,19 @@ export const ru: Messages = {
       restored: count => `Прежние имена возвращены: ${count}.`,
       restoredOnLeave: count => `Прежние имена агентов возвращены (${count}).`,
     },
+    /* Экран загрузки мира (#1947): три шага и что каждый измеряет. */
+    worldLoad: {
+      title: 'Мир загружается',
+      art: 'Картинки',
+      map: 'Город и карта',
+      bake: 'Земля',
+      megabytes: (loaded: string, total: string) => `${loaded} из ${total} МБ`,
+      chunks: (done: number, total: number) => `${done} из ${total} ${plural('ru', total, { one: 'участка', other: 'участков' })}`,
+      waiting: 'Ждет',
+      now: 'Сейчас',
+      done: 'Готово',
+      note: 'Только при первом входе и после обновления картинок. В следующий раз мир откроется сразу.',
+    },
     worldCard: {
       levelStripAria: 'Уровень и прогресс агента',
       levelStripLevel: level => `Уровень ${level}`,

@@ -99,6 +99,11 @@ export type ResidentEntity = {
 export type ResidentSimulation = {
   packId: string;
   timeSec: number;
+  /* Tiles per second a resident walks so its drawn stride fits one walk cycle, set by the renderer from the sheet it
+     shows; null or unset keeps the resident's own speed. */
+  walkSpeedOf?: (resident: ResidentEntity) => number | null;
+  /* True for a resident drawn from a standing sheet, which then keeps its place instead of strolling (#1983). */
+  standsStillOf?: (resident: ResidentEntity) => boolean;
   altarTile: TileCoord;
   altarLabel: Readonly<{ en: string; ru: string }>;
   residents: ResidentEntity[];
@@ -141,12 +146,26 @@ function hashStr(s: string): number {
   return h >>> 0;
 }
 
-function directionFromDelta(dc: number, dr: number): Direction8 {
+/* Where a step of (dc, dr) tiles points on screen, the way a sheet row is drawn: on the 2:1 diamond a column step runs
+   down right and a row step down left, so a step along a road shows as SE, SW, NE or NW (#1983). */
+function facingOfStep(dc: number, dr: number): Direction8 {
   if (Math.abs(dc) < 1e-4 && Math.abs(dr) < 1e-4) return 'S';
-  const angle = Math.atan2(dr, dc);
+  const angle = Math.atan2((dc + dr) / 2, dc - dr);
   const oct = Math.round((angle / (Math.PI * 2)) * 8 + 8) % 8;
   const order: readonly Direction8[] = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'];
   return order[oct] ?? 'S';
+}
+
+/* Tiles per second a resident walks: what its drawn stride asks for, else its own speed. */
+function walkSpeed(sim: ResidentSimulation, r: ResidentEntity): number {
+  return sim.walkSpeedOf?.(r) ?? r.speedTilesPerSec;
+}
+
+/* A new resident faces its first step on the path (a resident not at work has its focal spot for a path), or the spot it
+   stands round; the camera only with neither. */
+function startFacing(path: readonly TileCoord[], from: number, at: TileCoord, focus: TileCoord): Direction8 {
+  const next = path.slice(from).find(p => Math.hypot(p.col - at.col, p.row - at.row) > 1e-3) ?? focus;
+  return facingOfStep(next.col - at.col, next.row - at.row);
 }
 
 function nearestRoadTile(target: TileCoord, roadTiles: readonly TileCoord[]): TileCoord {
@@ -630,7 +649,7 @@ export function createResidentSimulation(
       talkingToAgentId: agent.talkingToAgentId ?? null,
       col: startPt.col,
       row: startPt.row,
-      facing: 'S',
+      facing: startFacing(initialPath, startIdx, startPt, basePt),
       walkPhase: (hashStr(agent.id) % 628) / 100,
       speedTilesPerSec:
         archetype === 'firefighter' || archetype === 'red_team'
@@ -701,7 +720,7 @@ export function createResidentSimulation(
       talkingToAgentId: null,
       col: pt.col,
       row: pt.row,
-      facing: 'S',
+      facing: startFacing(route, startIdx, pt, dest),
       walkPhase: idx * 1.1,
       speedTilesPerSec: 2.4,
       path: route,
@@ -806,17 +825,36 @@ function applyStaticStatePose(r: ResidentEntity): void {
     return;
   }
   /* Builders, turnkey generalists, road builders and day-laborers carry stones outbound and build! */
-  if (r.leg === 'outbound') {
-    r.carrying = 'stone';
-    r.pose = 'carrying_stone';
-  } else {
-    r.carrying = 'none';
-    r.pose = 'walking';
-  }
+  carrierPose(r);
+}
+
+/* A carrier leaves home with a stone, lays it at the site while it pauses there, and walks back empty (#1983). */
+function carrierPose(r: ResidentEntity): void {
+  const atSite = r.leg === 'inbound';
+  r.carrying = atSite ? 'none' : 'stone';
+  r.pose = !atSite ? 'carrying_stone' : r.actionTimer > 0 ? 'building' : 'walking';
 }
 
 /* Isometric tile distance covered per full walk stride (2*PI radians), preventing foot sliding at any speed. */
 const WALK_STRIDE_TILES = 0.65;
+
+/* An idle resident: drawn from a standing sheet it keeps its place by its house; otherwise a calm stroll round the
+   house, its walkPhase following the actual tile displacement. */
+function stepIdle(sim: ResidentSimulation, r: ResidentEntity, i: number): void {
+  r.pose = 'idle';
+  r.carrying = 'none';
+  if (sim.standsStillOf?.(r)) return;
+  const prevCol = r.col;
+  const prevRow = r.row;
+  const phase = sim.timeSec * 0.7 + i * 0.9;
+  r.col = r.homeTile.col + Math.cos(phase) * 0.45;
+  r.row = r.homeTile.row + Math.sin(phase) * 0.45;
+  const idleMoved = Math.hypot(r.col - prevCol, r.row - prevRow);
+  if (idleMoved > 1e-4) {
+    r.walkPhase += (idleMoved / WALK_STRIDE_TILES) * Math.PI * 2;
+    r.facing = facingOfStep(r.col - prevCol, r.row - prevRow);
+  }
+}
 
 /* Advances all residents smoothly along their road paths and role behavior loops.
    Zero per-frame allocations on the steady path so 150 residents step in < 0.25 ms. */
@@ -839,18 +877,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
     }
 
     if (r.liveState === 'idle') {
-      /* Calm stroll near own house; walkPhase follows actual tile displacement. */
-      const prevCol = r.col;
-      const prevRow = r.row;
-      const phase = sim.timeSec * 0.7 + i * 0.9;
-      r.col = r.homeTile.col + Math.cos(phase) * 0.45;
-      r.row = r.homeTile.row + Math.sin(phase) * 0.45;
-      const idleMoved = Math.hypot(r.col - prevCol, r.row - prevRow);
-      if (idleMoved > 1e-4) {
-        r.walkPhase += (idleMoved / WALK_STRIDE_TILES) * Math.PI * 2;
-      }
-      r.pose = 'idle';
-      r.carrying = 'none';
+      stepIdle(sim, r, i);
       continue;
     }
 
@@ -886,7 +913,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
         r.carrying = 'none';
         r.pose = 'directing';
       } else {
-        r.pose = r.leg === 'outbound' ? 'building' : 'carrying_stone';
+        carrierPose(r);
       }
       continue;
     }
@@ -913,7 +940,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
     const dc = target.col - r.col;
     const dr = target.row - r.row;
     const dist = Math.hypot(dc, dr);
-    const step = r.speedTilesPerSec * dt;
+    const step = walkSpeed(sim, r) * dt;
 
     let movedTiles = 0;
     if (dist <= step) {
@@ -925,7 +952,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
       r.col += (dc / dist) * step;
       r.row += (dr / dist) * step;
       movedTiles = step;
-      r.facing = directionFromDelta(dc, dr);
+      r.facing = facingOfStep(dc, dr);
     }
     if (movedTiles > 1e-4) {
       r.walkPhase += (movedTiles / WALK_STRIDE_TILES) * Math.PI * 2;
