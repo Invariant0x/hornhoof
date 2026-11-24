@@ -915,16 +915,39 @@ function passportLayers(files: ArtIndex['files'], path: string, main: BuildingPi
 }
 
 /* The variant to draw: the wanted one when its finished picture is in the folder, else the next delivered one going
-   round; undefined for a step without variants, null when none is delivered. */
-function deliveredVariant(files: ArtIndex['files'], kind: BuildingKind, step: ArtBuildingStep, wanted: number): number | null | undefined {
+   round; undefined for a step without variants, null when none is delivered. A building under construction first
+   goes round for a variant with every stage drawn (`built`), and takes the wanted one as above when none has. */
+function deliveredVariant(
+  files: ArtIndex['files'],
+  kind: BuildingKind,
+  step: ArtBuildingStep,
+  wanted: number,
+  built: ((at: number | undefined) => boolean) | null,
+): number | null | undefined {
   const count = step.variants;
   if (!count) return undefined;
+  const delivered: (number | undefined)[] = [];
   for (let k = 0; k < count; k++) {
     const at = variantFolder(files, kind, step, (((wanted + k) % count) + count) % count);
-    if (at !== null) return at;
+    if (at !== null) delivered.push(at);
   }
-  return null;
+  if (delivered.length === 0) return null;
+  /* findIndex, not find: the flat step folder is the variant undefined. */
+  const full = built ? delivered.findIndex(at => built(at)) : -1;
+  return delivered[Math.max(0, full)];
 }
+
+/* Whether a variant (undefined: the flat step folder) holds every picture the art check requires of its step: each
+   stage, as its own picture or its stage_NN, and the finished look. Design, 24.11 (company note #107): a variant with
+   stages not drawn yet stands only as a finished building; construction takes one with every stage. */
+function hasEveryStage(pack: WorldPackManifest, files: ArtIndex['files'], kind: BuildingKind, step: ArtBuildingStep, at: number | undefined): boolean {
+  return declaredStepFiles(pack, kind, picture => stepPicturePath(kind, step, picture, at))
+    .filter(file => file.required)
+    .every(file => [file.path, ...(file.alternatives ?? [])].some(path => files[path]));
+}
+
+/* Built in this session: a construction job under way or finished. A demolition keeps the look the building stood in. */
+const isBuildJob = (job: BuildingConstructionState | null): boolean => job?.phase === 'building' || job?.phase === 'complete';
 
 /* Where variant v of a step is delivered: its own folder, the step folder for v01 when the step came with no variant
    folders (order v3), or nowhere (null). */
@@ -935,14 +958,16 @@ function variantFolder(files: ArtIndex['files'], kind: BuildingKind, step: ArtBu
 
 /* The step a building shows and the paths of its pictures in the variant to draw; null without art for it. */
 function shownStep(
-  art: WorldArtCatalog,
+  pack: WorldPackManifest,
   files: ArtIndex['files'],
   building: CityBuilding,
+  job: BuildingConstructionState | null,
   wanted: number | undefined,
 ): { step: ArtBuildingStep; base: (picture: string) => string } | null {
-  const step = pickStep(art.buildings[building.kind], building, building.stage);
+  const step = pickStep(pack.art?.buildings[building.kind], building, building.stage);
   if (!step) return null;
-  const variant = deliveredVariant(files, building.kind, step, wanted ?? 0);
+  const built = isBuildJob(job) ? (at: number | undefined) => hasEveryStage(pack, files, building.kind, step, at) : null;
+  const variant = deliveredVariant(files, building.kind, step, wanted ?? 0, built);
   if (variant === null) return null;
   return { step, base: picture => stepPicturePath(building.kind, step, picture, variant) };
 }
@@ -1061,7 +1086,7 @@ function nearestDrawnArt(
   const art = pack.art;
   if (!art || !index || (job && job.phase === 'cleared')) return null;
   const files = index.files;
-  const shown = shownStep(art, files, building, options.variant);
+  const shown = shownStep(pack, files, building, job, options.variant);
   if (!shown) return null;
   const { names, wanted } = pictureLine(pack, building, job);
   const place = nearestDrawnPlace(names.map(name => hasPicturePassport(files[shown.base(name)])), wanted);
@@ -1091,7 +1116,7 @@ function exactBuildingArt(
   const files = index.files;
   const stage = job ? job.currentStage : building.stage;
   /* Growth steps follow the building's own stage or level; a construction job only walks pictures inside the step. */
-  const shown = shownStep(art, files, building, options.variant);
+  const shown = shownStep(pack, files, building, job, options.variant);
   if (!shown) return null;
   const { step, base } = shown;
 
