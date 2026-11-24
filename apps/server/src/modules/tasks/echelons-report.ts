@@ -14,6 +14,7 @@ import { changeRoute, type Route } from './route-records.js';
 import { giver, refuse, type Moved, type Task, type Tx, type Wake } from './state.js';
 import { move } from './transitions.js';
 import { note } from './events.js';
+import { requireMoreThanOneChild } from './tree-rules.js';
 
 /* Acceptances and aggregates made before checks went local also name test runs, which are left out. */
 const Acceptance = z.object({ candidateId: z.uuid(), commit: z.string().regex(/^[a-f0-9]{40}$/), routeRevision: z.number().int().positive() });
@@ -136,6 +137,7 @@ export async function coordinationReport(ctx: Reader, task: Task, route: Route, 
   if (task.assigneeAgentId !== agentId || route.state.phase !== 'active') throw refuse(403, 'task_not_yours', 'Only the current coordination owner can close its report.');
   if (!summary.trim()) throw refuse(400, 'task_invalid', 'A coordination result needs a checked report.');
   if (route.state.candidateId) throw refuse(409, 'task_invalid', 'This task produced code and needs the executable route.');
+  await requireMoreThanOneChild(ctx, task);
   const where = await requireRecorded(ctx, task, recorded);
   const wakes = giver(task, 'reported', agentId, summary.trim());
   const row = await move(ctx, task, { status: 'done', closedAt: new Date(), assigneeAgentId: null, silent: 0 }, {

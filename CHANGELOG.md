@@ -9,7 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
-- A node saying hello, and the server's check each minute of sign-ins that have not healed, no longer read every job that node ever ran to find the last turn of each employee on it, or every turn that ever failed for want of a sign-in with all its columns: on 120 000 jobs that took 140 to 410 ms of the database each time, and 2 s for the hellos of 12 nodes coming back together after a restart, long enough for the nodes' own updates and the leadership lease to time out. The server now looks each up in an index, one look per employee or node (under 1 ms), and nothing the node is told or the owner reads changes. Migration 0164 adds the indexes `jobs_node_agent_conversation` and `jobs_not_logged_in` (a few seconds on a large database).
+- A node saying hello, and the server's check each minute of sign-ins that have not healed, no longer read every job that node ever ran to find the last turn of each employee on it, or every turn that ever failed for want of a sign-in with all its columns: on 120 000 jobs that took 140 to 410 ms of the database each time, and 2 s for the hellos of 12 nodes coming back together after a restart, long enough for the nodes' own updates and the leadership lease to time out. The server now looks each up in an index, one look per employee or node (under 1 ms), and nothing the node is told or the owner reads changes. Migration 0166 adds the indexes `jobs_node_agent_conversation` and `jobs_not_logged_in` (a few seconds on a large database).
 
 ### Added
 
