@@ -12,6 +12,7 @@ import {
 import { KEPT_NAME, keptSource, sourceUrl } from '../src/modules/merge/source.js';
 import { ownDatabases, TEST_SECRET } from './helpers.js';
 import { asPlan7, twoSides, type Side } from './merge-fixture.js';
+import { sha256Of, stored } from './files-fixture.js';
 
 /* Each test forks its database, which a shared one would not survive. */
 ownDatabases();
@@ -176,7 +177,7 @@ describe('reading both sides of a merge', () => {
 
     const [plan] = await db.insert(subscriptions).values({ companyId: c.acme.id, provider: 'claude', kind: 'personal', label: 'Plan', ownerPersonId: c.owner.id, status: 'ready' }).returning();
     const [ana] = await db.insert(agents).values({ companyId: c.acme.id, subscriptionId: plan!.id, model: '', kind: 'worker', name: 'Ana', departmentId: c.sales.id }).returning();
-    const [picture] = await db.insert(attachments).values({ companyId: c.acme.id, agentId: ana!.id, mediaType: 'image/png', bytes: Buffer.from('diagram'), size: 7 }).returning();
+    const [picture] = await db.insert(attachments).values({ companyId: c.acme.id, agentId: ana!.id, mediaType: 'image/png', sha256: await stored(db, 'diagram'), size: 7 }).returning();
     const fork = await sides.fork();
     await fork.db.update(tasks).set({ title: 'From fork' }).where(eq(tasks.id, c.one.id));
 
@@ -203,9 +204,11 @@ describe('reading both sides of a merge', () => {
     try {
       const result = await runMerge(db, { id: made.rows[0]!.id, label: 'the fork', kept: false, companyId: c.acme.id }, source, { log: () => undefined });
       expect(result.path).toBe('compare');
-      expect([codeReads, readsInTx]).toEqual([3, 0]);
+      /* Once for the restore the leader recorded meanwhile; the picture it lost after that comes back by its hash, whose
+         bytes the store holds, with no more read of the source. */
+      expect([codeReads, readsInTx]).toEqual([2, 0]);
       const [restored] = await db.select().from(attachments).where(eq(attachments.id, picture!.id));
-      expect(Buffer.from(restored!.bytes).toString()).toBe('diagram');
+      expect(restored!.sha256).toBe(sha256Of('diagram'));
     } finally {
       await raw.close();
     }
