@@ -34,6 +34,7 @@ import { registerReleaseTool } from '../program-operator/release.js';
 import { nextSection } from './next-section.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
 import { watchedTasks } from './watch-tasks.js';
+import { HANG_AFTER_MS, suspectedHangs } from '../tasks/suspected-hangs.js';
 
 type Reader = Parameters<typeof agentSeesTask>[0];
 type TaskSight = Parameters<typeof agentSeesTask>[1];
@@ -412,6 +413,25 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           out.push({ ...shownAll(agent, opensTurn(reader, null, { id: a.id, departmentId: a.departmentId })), tasks: holds });
         }
         return json(out);
+      },
+    );
+  }
+
+  /* The only list a round reads to find stuck agents: it holds nobody who shows a sign of work. */
+  if (grants.has('hangs')) {
+    server.registerTool(
+      'suspected_hangs',
+      {
+        description:
+          `The agents whose running turn gave no sign of work for more than ${HANG_AFTER_MS / 60_000} minutes while a task in work is on them, the longest silent first, and nobody else: code alone, the same for every program. ` +
+          'Each entry has the agent, its turn, its task, how long it has been silent and its last sign (an event, the program\'s own sign, a change of its state, the end of a check or a restart). ' +
+          'A task that waits for a person, an outside event or other tasks, or is paused, makes no entry. An entry leaves by itself when the agent shows a sign of life or its turn ends. ' +
+          'A script or a build that runs long is silent too: read the screen with program_screen before you judge. Check only these agents.',
+      },
+      async () => {
+        const reader = await readerOf(ctx, job.agentId);
+        const hangs = await suspectedHangs(ctx, job.companyId);
+        return json(hangs.map(({ sight, ...hang }) => shownAll(hang, opensTask(reader, sight))));
       },
     );
   }
