@@ -444,6 +444,37 @@ describe('the maker of a copy', () => {
     expect([[...s.databases.keys()], s.databases.get('hornhoof')!.led, s.saving.forgot]).toEqual([['hornhoof'], false, 1]);
   });
 
+  it('skips saving immediately when the leader already holds everything, and reports why saving waits', async () => {
+    const s = stand();
+    Object.assign(s.databases.get('hornhoof')!, { tables: true, led: true });
+    const seen: unknown[] = [];
+    const step = { done: false, skipped: false, waiting: 'seal' as const, since: '2026-11-11T01:09:00.000Z' };
+    const maker = new CopyMaker({
+      admin: s.sqlOn('postgres'), db: s.sqlOn, controlDir: s.controlDir, dir: s.dir, networkId: NETWORK_ID, password: PASSWORD,
+      diskFree: () => s.state.diskFree, updating: () => s.state.updating, log: line => s.state.lines.push(line), now: () => s.state.now,
+      saver: {
+        tick: async (applied?: { term: number; lsn: string } | null) => {
+          seen.push(applied ?? null);
+          if (applied?.lsn === '0/4000000') step.done = step.skipped = true;
+        },
+        done: () => step.done,
+        state: () => ({ term: 7, failed: null, ...step }),
+        forget: () => undefined,
+      } as never,
+    });
+    await maker.tick(ORDER);
+    expect(maker.report()).toEqual({
+      state: 'saving', progress: null, error: null, at: null, name: NAME, old: null,
+      saving: { waiting: 'seal', since: '2026-11-11T01:09:00.000Z' },
+    });
+    /* One second later (without waiting the 10-second save interval) the leader's applied LSN arrives and skips the save. */
+    s.later(1000);
+    await maker.tick({ ...ORDER, applied: { term: 7, lsn: '0/4000000' } } as CopyOrder);
+    expect(seen).toEqual([null, { term: 7, lsn: '0/4000000' }]);
+    expect(s.kept()).toMatchObject({ attempt: 2, database: 'hornhoof_next', phase: 'detach', old: { attempt: 1, led: 7 } });
+    expect(maker.mode()).toBe('read');
+  });
+
   it('gives a failed attempt up whole', async () => {
     const s = stand();
     const maker = s.maker();

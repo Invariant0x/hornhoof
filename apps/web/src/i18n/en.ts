@@ -1175,6 +1175,16 @@ export const en = {
       making: (percent: number) => `Copy: being made, ${percent}%`,
       remaking: (percent: number) => `Copy: being made again, ${percent}%`,
       saving: 'Copy: saving what it did while it led',
+      savingDump: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (reading the database, since ${since})` : 'Copy: saving what it did while it led (reading the database)',
+      savingSeal: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (encrypting the backup, since ${since})` : 'Copy: saving what it did while it led (encrypting the backup)',
+      savingServer: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (waiting for the company server, since ${since})` : 'Copy: saving what it did while it led (waiting for the company server)',
+      savingSend: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (sending the backup to the company server, since ${since})` : 'Copy: saving what it did while it led (sending the backup to the company server)',
+      savingRetry: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (retrying after an error, since ${since})` : 'Copy: saving what it did while it led (retrying after an error)',
       ready: 'Copy: up to date',
       behind: (minutes: number) => `Copy: ${minutes} min behind`,
       catchingUp: 'Copy: catching up',

@@ -8,9 +8,10 @@ import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { REPORT_MAX } from '../backups/types.js';
 import { holdsData } from '../copies/holds.js';
-import { noteReplicaBytes } from '../copies/measured.js';
+import { noteReplicaBytes, noteSaving } from '../copies/measured.js';
 import { copyOrder } from '../copies/slots.js';
 import { isPrivate } from '../keeper/addresses.js';
+import { SAVING_WAITS } from '../keeper/led.js';
 import { TABLE_SYNC_SLOT } from '../keeper/slots.js';
 import { UPLOAD_SPARE, type UploadAllowed } from '../keeper/uploads.js';
 import { queryOf } from '../merge/leader.js';
@@ -67,6 +68,8 @@ const ReportBody = z.object({
       old: z.object({ attempt: z.number().int().min(1), led: z.number().int().min(0).optional() }).nullable(),
       /* The leader's slots of its tables whose first copy broke off. */
       left: z.array(z.string().regex(TABLE_SYNC_SLOT)).max(200).optional(),
+      /* What saving waits on and since when, while state is saving. */
+      saving: z.object({ waiting: z.enum(SAVING_WAITS), since: z.iso.datetime() }).optional(),
     })
     .optional(),
   replicaBytes: z.number().int().min(0).optional().catch(undefined),
@@ -103,6 +106,16 @@ const ledOf = (led: number | undefined): number | null => (led !== undefined && 
 /* How a machine's row keeps what its keeper said of its copy; a copy that names no subscription keeps the one the row has. */
 function copyColumns(copy: NonNullable<z.infer<typeof ReportBody>['copy']>, copyName: string | null) {
   return { copyState: copy.state, copyProgress: copy.progress, copyError: copy.error, copyAt: copy.at ? new Date(copy.at) : null, copyName: copy.name ?? copyName ?? null, copyOld: copy.old?.attempt ?? null, copyOldLed: ledOf(copy.old?.led) };
+}
+
+function noteCopySide(ctx: Ctx, machineId: string, copy: NonNullable<z.infer<typeof ReportBody>['copy']>): void {
+  ctx.leftSlots.say(machineId, copy.left);
+  noteSaving(ctx, machineId, copy.state === 'saving' ? (copy.saving ?? null) : null);
+}
+
+function clearMachineSide(ctx: Ctx, machineId: string): void {
+  noteReplicaBytes(ctx, machineId, null);
+  noteSaving(ctx, machineId, null);
 }
 
 /* networkId: the id the machine's keeper runs under, which the slot a new leader made for its copy is named by. */
@@ -241,7 +254,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
       const pinned = pin === undefined ? {} : { ownerPin: pin };
       /* Only a machine the server gave the data says anything of a copy; and never the one that leads. */
       const copied = copy === undefined || who.own || row?.role !== 'data' ? {} : copyColumns(copy, row.copyName);
-      if ('copyState' in copied) ctx.leftSlots.say(machine.id, copy?.left);
+      if ('copyState' in copied) noteCopySide(ctx, machine.id, copy!);
       /* A machine that owed what it held and holds nothing now owes nothing, and its row says nothing of a copy but
          its name: the next copy on that machine starts at the attempt above it, so no name is used twice. */
       const left = wiped && !who.own && row?.role !== 'data' && row?.uploadState ? { uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyOld: null, copyOldLed: null } : {};
@@ -266,7 +279,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
         wiped: 'uploadState' in left,
       };
     });
-    if (installed.wiped) noteReplicaBytes(ctx, machine.id, null);
+    if (installed.wiped) clearMachineSide(ctx, machine.id);
     else if (installed.measured && replicaBytes !== undefined) noteReplicaBytes(ctx, machine.id, replicaBytes);
     if (installed.installed) void releaseHeld(ctx);
     /* The screens load the machine again when its pinned key changes. */

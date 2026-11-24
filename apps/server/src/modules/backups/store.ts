@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { UUID } from '../../net/proxy.js';
@@ -13,16 +13,34 @@ export const IDLE_MS = 30_000;
 /* How far past its signed size a transfer is read before it is seen to be too long. */
 const OVER = 1024 * 1024;
 
+/* Shared across every BundleStore opened on the same folder in this process, so a holder sweep and a saver never step
+   on each other's live .part files or in-flight publishes. */
+type FolderLocks = { writing: Map<string, Promise<unknown>>; parts: Set<string> };
+const folderLocks = new Map<string, FolderLocks>();
+
+function locksFor(dir: string): FolderLocks {
+  const key = resolve(dir);
+  let locks = folderLocks.get(key);
+  if (!locks) {
+    locks = { writing: new Map(), parts: new Set() };
+    folderLocks.set(key, locks);
+  }
+  return locks;
+}
+
 /* The bundles a machine keeps, each as its head and its sealed part. A bundle is there once both files are, and what
    is there is never written again: a take of one that is held answers the one held. */
 export class BundleStore {
-  /* One writer per bundle at a time, in this process. */
-  private readonly writing = new Map<string, Promise<unknown>>();
-  /* The temporary files of takes that still run, which no tidying removes. */
-  private readonly parts = new Set<string>();
+  /* One writer per bundle at a time, across every store on this folder. */
+  private readonly writing: Map<string, Promise<unknown>>;
+  /* The temporary files of takes and seals that still run, which no tidying removes. */
+  private readonly parts: Set<string>;
 
   constructor(private readonly dir: string) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const locks = locksFor(dir);
+    this.writing = locks.writing;
+    this.parts = locks.parts;
   }
 
   private head(id: string): string {
@@ -125,13 +143,7 @@ export class BundleStore {
       if (sha256.size !== manifest.size) throw new BundleRefused('size', 'The bundle is not as long as its head says.');
       if (sha256.hash !== manifest.sha256) throw new BundleRefused('hash', 'The sealed part is not the one its head names.');
       const taken = part;
-      const publish = async () => {
-        const there = this.read(manifest.id);
-        if (there) return there;
-        writeFileSync(this.head(manifest.id), head, { mode: 0o600 });
-        renameSync(taken, this.ageFile(manifest.id));
-        return this.read(manifest.id)!;
-      };
+      const publish = async () => this.publish(manifest.id, head, taken);
       return await (opts.inside === manifest.id ? publish() : this.alone(manifest.id, publish));
     } catch (err) {
       input.destroy();
@@ -193,13 +205,47 @@ export class BundleStore {
     return held;
   }
 
-  /* A bundle this machine sealed itself, by a rename of its sealed part. */
+  /* Puts the sealed part in place before its head appears, so a failed rename never leaves an orphan head behind. */
+  private publish(id: string, head: string, ageFile: string): StoredBundle {
+    const held = this.read(id);
+    if (held) {
+      rmSync(ageFile, { force: true });
+      return held;
+    }
+    const headPart = join(this.dir, `${id}.${randomBytes(6).toString('hex')}.head.part`);
+    this.parts.add(headPart);
+    try {
+      writeFileSync(headPart, head, { mode: 0o600 });
+      renameSync(ageFile, this.ageFile(id));
+      renameSync(headPart, this.head(id));
+      return this.read(id)!;
+    } finally {
+      rmSync(headPart, { force: true });
+      this.parts.delete(headPart);
+    }
+  }
+
+  /* Seals a bundle into a temporary file owned by this attempt alone, protected from tidying, and publishes it once. */
+  async seal(id: string, make: (part: string) => Promise<{ head: string; manifest: Manifest }>): Promise<StoredBundle> {
+    return this.alone(id, async () => {
+      const held = this.read(id);
+      if (held) return held;
+      const part = join(this.dir, `${id}.${randomBytes(6).toString('hex')}.part`);
+      this.parts.add(part);
+      try {
+        const { head, manifest } = await make(part);
+        if (manifest.id !== id) throw new BundleRefused('format', 'This is another bundle than the one asked for.');
+        return this.publish(id, head, part);
+      } finally {
+        rmSync(part, { force: true });
+        this.parts.delete(part);
+      }
+    });
+  }
+
+  /* A bundle this machine sealed itself, by an atomic publish of its sealed part and head. */
   put(head: string, manifest: Manifest, ageFile: string): StoredBundle {
-    if (!this.read(manifest.id)) {
-      writeFileSync(this.head(manifest.id), head, { mode: 0o600 });
-      renameSync(ageFile, this.ageFile(manifest.id));
-    } else rmSync(ageFile, { force: true });
-    return this.read(manifest.id)!;
+    return this.publish(manifest.id, head, ageFile);
   }
 
   remove(id: string): void {
@@ -217,15 +263,23 @@ export class BundleStore {
     this.tidy();
   }
 
-  /* Removes what a take that died left, and a sealed part with no head: a keeper stopped in the middle of a transfer
-     leaves them, and nothing else ever would take them away. A take that still runs keeps its file. */
+  /* Removes what a take or seal that died left, and any half-bundle whose partner is missing while nobody writes it. */
   tidy(): void {
-    for (const name of readdirSync(this.dir)) {
-      const path = join(this.dir, name);
-      const id = name.split('.')[0]!;
-      if (name.endsWith('.part')) {
-        if (!this.parts.has(path)) rmSync(path, { force: true });
-      } else if (name.endsWith('.age') && !existsSync(this.head(id)) && !this.writing.has(id)) rmSync(path, { force: true });
+    for (const name of readdirSync(this.dir)) this.tidyEntry(name);
+  }
+
+  private tidyEntry(name: string): void {
+    const path = join(this.dir, name);
+    if (name.endsWith('.part')) {
+      if (!this.parts.has(path)) rmSync(path, { force: true });
+      return;
     }
+    const id = name.split('.')[0]!;
+    if (!this.writing.has(id) && this.missingPartner(name, id)) rmSync(path, { force: true });
+  }
+
+  private missingPartner(name: string, id: string): boolean {
+    if (name.endsWith('.age')) return !existsSync(this.head(id));
+    return name.endsWith('.head') && UUID.test(id) && !existsSync(this.ageFile(id));
   }
 }

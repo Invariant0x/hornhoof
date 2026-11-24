@@ -449,12 +449,24 @@ function whyText(t: Messages, why: string | null): string | null {
   return often && what ? p.both(often, what) : often ?? null;
 }
 
+const SAVING_LINES = {
+  dump: 'savingDump',
+  seal: 'savingSeal',
+  server: 'savingServer',
+  send: 'savingSend',
+  retry: 'savingRetry',
+} as const;
+
+function savingLineText(c: Messages['machines']['copy'], language: Language, copy: Extract<NonNullable<DataView['copy']>, { line: 'saving' }>): string {
+  return copy.waiting ? c[SAVING_LINES[copy.waiting]](clock(language, copy.since ?? null)) : c.saving;
+}
+
 function copyText(t: Messages, language: Language, copy: NonNullable<DataView['copy']>): string {
   const c = t.machines.copy;
   switch (copy.line) {
     case 'making': return c.making(copy.progress);
     case 'remaking': return c.remaking(copy.progress);
-    case 'saving': return c.saving;
+    case 'saving': return savingLineText(c, language, copy);
     case 'ready': return c.ready;
     case 'catching_up': return c.catchingUp;
     case 'behind': return c.behind(copy.minutes);

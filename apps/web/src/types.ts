@@ -957,10 +957,13 @@ export type Unfit =
   | { why: 'phone' | 'no_core' | 'no_link' }
   | { why: 'scope'; person: string; departments?: number };
 
+export type SavingWait = 'dump' | 'seal' | 'server' | 'send' | 'retry';
+
 /* How a machine's copy of the company's data does. */
 export type CopyLine =
   | { line: 'making' | 'remaking'; progress: number }
-  | { line: 'ready' | 'catching_up' | 'saving' }
+  | { line: 'saving'; waiting?: SavingWait; since?: string | null }
+  | { line: 'ready' | 'catching_up' }
   | { line: 'behind'; minutes: number }
   | { line: 'asleep'; since: string | null }
   | { line: 'stopped'; why: 'disk_full' | 'setup' | null };
