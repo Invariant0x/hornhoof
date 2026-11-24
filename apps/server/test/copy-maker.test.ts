@@ -1121,7 +1121,7 @@ describe('the maker of a copy', () => {
     expect(s.run.filter(line => line.includes('DROP SUBSCRIPTION'))).toHaveLength(2);
   });
 
-  it('gives up an attempt whose subscription stops each time it starts, takes its slots with it and waits longer each time', async () => {
+  it('gives up an attempt whose subscription stops each time it starts, takes its slots with it and waits longer each time, and parks the copy at the fourth', async () => {
     const s = stand();
     s.leader.live = true;
     s.leader.breaks = true;
@@ -1131,29 +1131,131 @@ describe('the maker of a copy', () => {
     await until(s, maker, 'sync');
     /* Every start stops on its first error, which one look still finds it running before. */
     const seen = await run(s, maker, 4 * 3600);
-    expect(seen.asked.map(({ attempt }) => attempt)).toEqual([2, 3, 4, 5]);
-    /* Ten minutes stopped, then the wait before the next request: ten minutes, twice as long each time after, two hours
-       at most. */
-    expect(seen.asked.map(({ at }) => Math.round(at))).toEqual([20, 50, 100, 190]);
+    /* Ten minutes stopped, then the wait before the next request: ten minutes, twice as long each time after. The
+       fourth attempt given up in a row is the last: no fifth is asked for. */
+    expect(seen.asked.map(({ attempt }) => attempt)).toEqual([2, 3, 4]);
+    expect(seen.asked.map(({ at }) => Math.round(at))).toEqual([20, 50, 100]);
     /* An attempt given up takes its slot and those of its tables' first copies with it, so they never pile up. */
     expect(seen.most).toBe(3);
-    expect(s.kept()).toMatchObject({ attempt: 6, phase: 'schema', given: 5 });
+    expect(s.kept()).toMatchObject({ attempt: 5, phase: 'parked', given: 4 });
     expect([...s.leader.slots]).toEqual([]);
-    /* A leader out of reach while one is given up: the subscription goes all the same, and its slots are the leader's
-       own sweep's to drop. */
+    expect([...s.databases.get('hornhoof')!.subs.keys()]).toEqual([]);
+    expect(maker.report()).toMatchObject({ state: 'stopped', error: 'apply', gaveUp: { attempts: 4 } });
+    expect(s.state.lines.filter(line => line.includes('gives up this copy'))).toHaveLength(1);
+    /* A parked copy asks for nothing, however long it stands, and holds no slot of the leader's. */
+    const written = JSON.stringify(s.kept());
+    s.later(48 * 3600_000);
+    for (let n = 0; n < 20; n++) await maker.tick({ ...ORDER, migrations: s.leader.migrations });
+    expect(s.request()).toBeNull();
+    expect(JSON.stringify(s.kept())).toBe(written);
+    expect([...s.leader.slots]).toEqual([]);
+    expect(maker.mode()).toBe('off');
+  });
+
+  it("parks a copy whose leader is out of reach all the same, and leaves its slots to the leader's sweep", async () => {
+    const s = stand();
+    s.leader.live = true;
+    s.leader.breaks = true;
+    const maker = s.maker();
+    await maker.tick(FIRST);
+    s.loaded();
+    await until(s, maker, 'sync');
     s.leader.reachable = false;
-    await run(s, maker, 3 * 3600, () => s.kept().attempt === 7 && s.kept().phase === 'schema');
-    expect(s.kept()).toMatchObject({ attempt: 7, phase: 'schema' });
+    await run(s, maker, 6 * 3600, () => s.kept().phase === 'parked');
+    expect(s.kept()).toMatchObject({ phase: 'parked', given: 4 });
     expect([...s.databases.get('hornhoof')!.subs.keys()]).toEqual([]);
     expect(s.leader.slots.size).toBe(3);
     expect(s.state.lines.filter(line => line.includes('Could not drop'))).toHaveLength(1);
-    s.leader.slots.clear();
-    /* Once applies hold again, the copy is made whole, and the count of attempts given up starts over. */
-    s.leader.reachable = true;
+  });
+
+  it('ends an attempt whose subscription is cut thirty times, however many tables got through between the cuts', async () => {
+    const s = stand();
+    const maker = s.maker();
+    await maker.tick(null);
+    s.loaded();
+    await until(s, maker, 'sync');
+    const sub = s.databases.get('hornhoof')!.subs.get(NAME)!;
+    sub.rels = Array.from({ length: 80 }, () => 'i');
+    for (let minute = 0; minute < 29; minute++) {
+      sub.rels[minute] = 'r';
+      sub.enabled = false;
+      await maker.tick({ ...ORDER });
+      s.later(60_000);
+    }
+    expect(s.kept()).toMatchObject({ attempt: 1, phase: 'sync', given: 0, cuts: 29 });
+    /* The thirtieth cut: a link that cuts each time a table has hardly started, over and over, loads the leader with a
+       new slot and a new snapshot for each, so the attempt is given up with a table gone through now and then. */
+    sub.rels[29] = 'r';
+    sub.enabled = false;
+    await maker.tick({ ...ORDER });
+    s.later(60_000);
+    await maker.tick({ ...ORDER });
+    expect(s.kept()).toMatchObject({ attempt: 2, given: 1, cuts: 0 });
+  });
+
+  it('counts attempts given up in a row until the copy has been whole for an hour', async () => {
+    const s = stand();
+    s.leader.live = true;
+    s.leader.breaks = true;
+    const maker = s.maker();
+    await maker.tick(FIRST);
+    s.loaded();
+    await until(s, maker, 'sync');
+    await run(s, maker, 3 * 3600, () => s.kept().attempt === 4 && s.kept().phase === 'schema');
+    expect(s.kept()).toMatchObject({ attempt: 4, given: 3 });
+    /* Once applies hold again, the copy is made whole. One that broke again at once would count on from three. */
     s.leader.breaks = false;
     await run(s, maker, 3 * 3600, () => maker.report()?.state === 'ready');
-    expect(maker.report()).toMatchObject({ state: 'ready', name: 'copy_99bb2233aabbccdd_7' });
-    expect([...s.leader.slots]).toEqual(['copy_99bb2233aabbccdd_7']);
-    expect(s.kept()).toMatchObject({ given: 0 });
+    expect(maker.report()).toMatchObject({ state: 'ready', name: 'copy_99bb2233aabbccdd_4' });
+    expect(s.kept()).toMatchObject({ given: 3 });
+    s.later(3_600_000 - 5000);
+    await maker.tick({ ...ORDER, migrations: s.leader.migrations });
+    expect(s.kept()).toMatchObject({ given: 3 });
+    s.later(6000);
+    await maker.tick({ ...ORDER, migrations: s.leader.migrations });
+    expect(s.kept()).toMatchObject({ given: 0, phase: 'ready' });
+  });
+
+  it('remakes a copy that broke soon after it was whole, after a wait that grows, and parks it at the limit', async () => {
+    const readyAt = (s: ReturnType<typeof stand>, ago: number) => new Date(s.state.now.getTime() - ago).toISOString();
+    /* Two attempts given up before, whole for ten minutes: the third waits forty. */
+    const once = stand();
+    const kept = await following(once);
+    await kept.stop();
+    writeFileSync(join(once.dir, COPY_STATE), JSON.stringify({ ...once.kept(), given: 2, readyAt: readyAt(once, 600_000) }));
+    const again = once.maker();
+    await again.tick({ ...ORDER, slot: 'lost' });
+    expect(once.kept()).toMatchObject({ attempt: 2, phase: 'detach', given: 3, old: { attempt: 1 } });
+    expect(Date.parse(once.kept().notBefore as string) - once.state.now.getTime()).toBe(2400_000);
+    /* The fourth in a row: the old copy stays read, no new one is made, and none is asked for. */
+    const last = stand();
+    await (await following(last)).stop();
+    writeFileSync(join(last.dir, COPY_STATE), JSON.stringify({ ...last.kept(), given: 3, readyAt: readyAt(last, 600_000) }));
+    const parked = last.maker();
+    await parked.tick({ ...ORDER, slot: 'lost' });
+    for (let n = 0; n < 6; n++) await parked.tick({ ...ORDER });
+    expect(last.kept()).toMatchObject({ phase: 'parked', given: 4, old: { attempt: 1 } });
+    expect(last.request()).toBeNull();
+    expect(parked.mode()).toBe('read');
+    expect(parked.report()).toMatchObject({ state: 'stopped', error: 'apply', gaveUp: { attempts: 4 } });
+    /* One that was whole for an hour first starts the count over, and is remade at once. */
+    const stable = stand();
+    await (await following(stable)).stop();
+    writeFileSync(join(stable.dir, COPY_STATE), JSON.stringify({ ...stable.kept(), given: 3, readyAt: readyAt(stable, 3_700_000) }));
+    const fresh = stable.maker();
+    await fresh.tick({ ...ORDER, slot: 'lost' });
+    expect(stable.kept()).toMatchObject({ attempt: 2, phase: 'detach', given: 1, notBefore: null });
+  });
+
+  it('leaves a copy that is whole and follows alone: no cut, no attempt, no wait', async () => {
+    const s = stand();
+    const maker = await following(s);
+    for (let hour = 0; hour < 30; hour++) {
+      s.later(3_600_000);
+      await maker.tick({ ...ORDER });
+    }
+    expect(s.kept()).toMatchObject({ attempt: 1, phase: 'ready', given: 0, cuts: 0, parked: null });
+    expect(maker.report()).toMatchObject({ state: 'ready', name: NAME });
+    expect(maker.report()?.gaveUp).toBeUndefined();
   });
 });
