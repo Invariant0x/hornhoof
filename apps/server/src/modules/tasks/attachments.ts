@@ -158,8 +158,14 @@ function sentType(found: { name: string | null; mediaType?: string }, forPerson:
 
 /* Sends a task or chat file in pieces, so the server never holds a whole one. */
 export async function sendFile(ctx: Pick<Ctx, 'db' | 'config' | 'files'>, reply: FastifyReply, found: { id: string; name: string | null; length: number; mediaType?: string }, forPerson = false) {
-  const [ordinary] = await ctx.db.select(idOnly(attachments)).from(attachments).where(and(eq(attachments.id, found.id), isNull(attachments.operatorCaseId)));
+  const [ordinary] = await ctx.db.select({ sha256: attachments.sha256 }).from(attachments).where(and(eq(attachments.id, found.id), isNull(attachments.operatorCaseId)));
   if (!ordinary) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
+  /* A file's hash is its version: one who has these bytes already hears so, and gets none. */
+  if (ordinary.sha256) {
+    const etag = `"${ordinary.sha256}"`;
+    reply.header('etag', etag);
+    if (reply.request.headers['if-none-match'] === etag) return reply.header('x-file-name', encodeURIComponent(found.name ?? '')).code(304).send();
+  }
   const bytes = await fileStream(ctx, found.id);
   if (savedByPerson(found, forPerson)) reply.header('content-disposition', `attachment; filename*=UTF-8''${headerName(found.name ?? 'file')}`);
   return reply

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { FENCED, isLeaseRefused, JOURNAL_NEEDS_PUTTING_BACK, type LeaseKind, type LeaseSync } from '../src/db/net.js';
 import { agents, attachments, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { as, createTestDb, ownDatabases, setLease, setUpCompany, testApp } from './helpers.js';
-import { sha256Of, stored } from './files-fixture.js';
+import { stored } from './files-fixture.js';
 
 /* These tests change the lease, the journal's triggers and the tables themselves, which a truncate does not undo. */
 ownDatabases();

@@ -800,6 +800,11 @@ class Merge {
   private async withFile(unit: Unit): Promise<Row | null> {
     const t = this.facts.tables.get(unit.table)!;
     const x = unit.x;
+    /* A file of a source from before the store: its bytes go into this side's store, and the row kept names them. */
+    if (t.name === 'attachments' && x && x.sha256 == null && this.store) {
+      const hex = (await this.src.wholeOf(t, unit.key))?.bytes;
+      if (typeof hex === 'string' && hex.startsWith('\\x') && hex.length > 2) return { ...x, sha256: await this.store(Buffer.from(hex.slice(2), 'hex')) };
+    }
     const files = x ? t.columns.filter(column => column.type === 'bytea' && typeof x[column.name] === 'string' && (x[column.name] as string).startsWith(FILE_HASH)).map(column => column.name) : [];
     if (!x || files.length === 0) return x;
     const whole = await this.src.wholeOf(t, unit.key);

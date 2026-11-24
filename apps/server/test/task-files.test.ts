@@ -255,6 +255,23 @@ describe('the room for task files', () => {
   });
 });
 
+describe('a task file fetched again', () => {
+  it('answers its hash as its version, and 304 with no bytes to one who has them already', async () => {
+    const { app, bruno, sam, task, turn, attach, fetchFile } = await company();
+    const bytes = Buffer.from('a report');
+    expect((await attach(await turn(bruno), `task=${task.number}&name=report.txt`, bytes)).statusCode).toBe(201);
+    const token = await turn(sam);
+    const etag = `"${sha256Of(bytes)}"`;
+    const first = await fetchFile(token, `task=${task.number}&file=report.txt`);
+    expect([first.statusCode, first.headers.etag, first.payload]).toEqual([200, etag, 'a report']);
+    const asked = (tag: string) => app.inject({ method: 'GET', url: `/api/attachments/file?task=${task.number}&file=report.txt`, headers: { authorization: `Bearer ${token}`, 'if-none-match': tag } });
+    const same = await asked(etag);
+    expect([same.statusCode, same.payload, same.headers['x-file-name']]).toEqual([304, '', 'report.txt']);
+    const other = await asked(`"${sha256Of('other bytes')}"`);
+    expect([other.statusCode, other.payload]).toEqual([200, 'a report']);
+  });
+});
+
 describe('a task file over 50 MB', () => {
   it("goes into the company's store as any file does, sealed under its hash, for any agent to fetch, and stays while its task is open", async () => {
     const { app, db, bruno, sam, task, turn, attach, fetchFile } = await company();
