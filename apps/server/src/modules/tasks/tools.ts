@@ -149,7 +149,7 @@ const TurnkeyInput = z.strictObject({
   baseCommit: z.string().regex(/^[0-9a-f]{40}$/).describe(`The ${START_COMMIT}. It holds where the turn branch was as your work started.`),
 });
 
-const TurnItem = z.object({ department: z.uuid().optional().describe('Its department; a head may leave it out.'), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('Marks this work and its child tasks urgent.'), ...TrackerFields });
+const TurnItem = z.object({ department: z.uuid().optional().describe('Its department; a head may leave it out.'), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('Marks this work and its child tasks urgent.'), askedBy: z.uuid().optional().describe('Orchestrator only: the person whose request this work carries out, as company lists people. It is shown as who asked, goes down the whole tree, and puts the work in that person\'s own list. Name it only for a person\'s request; leave it out for work you started yourself.'), ...TrackerFields });
 const Turn = z.number().int().positive().describe('The turn number, like 2.');
 /* The tools an agent gets for tasks, by its kind. Each one checks that the task is the agent's to move. */
 export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
@@ -651,7 +651,7 @@ class TaskTools {
         this.run(async () => {
           const scope = await this.turnScope();
           await this.urgentFromCeo(input.tasks.map(t => ({ ...t, department: t.department ?? scope ?? '' })));
-          const items = await Promise.all(input.tasks.map(async ({ goal, responsible, why, due, pipeline, stage, priority, ...item }) => ({ ...item, ...(await trackerInputOf(this.ctx, this.job.companyId, { goal, responsible, why, due, pipeline, stage, priority })) })));
+          const items = await Promise.all(input.tasks.map(async ({ goal, responsible, why, due, pipeline, stage, priority, askedBy, ...item }) => ({ ...item, askedByPersonId: askedBy, ...(await trackerInputOf(this.ctx, this.job.companyId, { goal, responsible, why, due, pipeline, stage, priority })) })));
           const given = await giveTasks(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, items, input.improvement, input.backlog, scope);
           return { text: given.text, moved: { wakes: given.wakes } };
         }),

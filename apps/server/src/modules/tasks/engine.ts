@@ -171,6 +171,7 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
     urgent: parent.urgent,
     /* A part of the same work answers to the same person and serves its whole's goal. */
     responsiblePersonId: parent.responsiblePersonId,
+    askedByPersonId: parent.askedByPersonId,
     dueAt: parent.dueAt,
     createdByPersonId: actor.personId ?? null,
     createdByAgentId: actor.agentId ?? null,
@@ -226,6 +227,7 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   const declaration = checkIndependent(input.after ?? [], input.independentPart, input.independentNone, null);
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
   await requireNewCleanup(ctx, actor, assignee.companyId, input);
+  await requireNewAsker(ctx, actor, assignee.companyId, input);
   await requireNewReviewer(ctx, assignee, input);
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
@@ -234,6 +236,17 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   const plan = await departmentStages(ctx, input.departmentId, tracker.pipelineId);
   const architect = await resolveArchitect(ctx, assignee, input, plan);
   return { assignee, architect, parent, declaration, plan, tracker };
+}
+
+/* Who asked for work is named by a person for their own request, or by the orchestrator for a person's: never by a head or a worker. */
+async function requireNewAsker(ctx: Ctx, actor: Actor, companyId: string, input: NewTask): Promise<void> {
+  if (!input.askedByPersonId) return;
+  if (actor.personId) {
+    if (input.askedByPersonId !== actor.personId) throw refuse(403, 'task_not_yours', 'A person can name only themselves as the one who asked.');
+    return;
+  }
+  const by = actor.agentId ? await liveAgent(ctx.db, companyId, actor.agentId) : null;
+  if (by?.kind !== 'orchestrator') throw refuse(403, 'task_not_yours', 'Only the orchestrator names the person whose request work carries out.');
 }
 
 async function requireNewCleanup(ctx: Ctx, actor: Actor, companyId: string, input: NewTask): Promise<void> {

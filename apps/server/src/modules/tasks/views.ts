@@ -53,6 +53,8 @@ export type TaskLine = {
   /* The goal it serves, through the task at the top of its work; who answers for it; why it exists; by when. */
   goal: GoalRef | null;
   responsible: { id: string; name: string } | null;
+  /* The person whose request started the tree the task is in; none for work agents started themselves. */
+  askedBy: { id: string; name: string } | null;
   why: string;
   dueAt: string | null;
   time: TimeFacts;
@@ -201,6 +203,7 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   small: t.small,
   goal: n.goal(t),
   responsible: n.person(t.responsiblePersonId),
+  askedBy: n.person(t.askedByPersonId),
   why: t.why,
   dueAt: t.dueAt?.toISOString() ?? null,
   time: n.time(t),

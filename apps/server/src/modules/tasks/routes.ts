@@ -381,7 +381,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const moved = await createTask(ctx, actorOf(me), {
       title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: parent ? undefined : body.urgent,
       parentId: parent?.id ?? null, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id), afterPlans: afterPlansOf(body.afterPlans, after), independentPart: body.independentPart, independentNone: body.independentNone,
-      goalId: body.goal, responsiblePersonId: body.responsible, why: body.why, priority: body.priority, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
+      goalId: body.goal, responsiblePersonId: body.responsible, askedByPersonId: me.id, why: body.why, priority: body.priority, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
     });
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });

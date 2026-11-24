@@ -403,6 +403,7 @@ export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
       assigneeAgentId,
       executor: false,
       small: true,
+      askedByPersonId: me.id,
     });
     await wakeAll(ctx, wakes);
 

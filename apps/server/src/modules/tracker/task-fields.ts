@@ -5,11 +5,11 @@ import type { Spot } from '../../auth/access.js';
 import { goals } from '../../db/schema.js';
 import { refuse, type Task } from '../tasks/state.js';
 import { defaultPipelineOf, placeOnPipeline } from './pipelines.js';
-import { placeOwner, requireAnswersFor } from './responsible.js';
+import { placeOwner, requireAnswersFor, requireAsker } from './responsible.js';
 
 /* What the tracker keeps of a task beside its work: the goal it serves, who answers for it, why it exists, by when. */
-export type TrackerInput = { goalId?: string | null; responsiblePersonId?: string | null; why?: string; dueAt?: Date | null; priority?: TaskPriority | null; pipelineId?: string | null; pipelineStageId?: string | null };
-export type TrackerFields = { goalId: string | null; responsiblePersonId: string; why: string; dueAt: Date | null; priority: TaskPriority | null; pipelineId: string | null; pipelineStageId: string | null };
+export type TrackerInput = { goalId?: string | null; responsiblePersonId?: string | null; askedByPersonId?: string | null; why?: string; dueAt?: Date | null; priority?: TaskPriority | null; pipelineId?: string | null; pipelineStageId?: string | null };
+export type TrackerFields = { goalId: string | null; responsiblePersonId: string; askedByPersonId: string | null; why: string; dueAt: Date | null; priority: TaskPriority | null; pipelineId: string | null; pipelineStageId: string | null };
 
 /* A goal a task in this place may serve: the company's, or one of its department or of the department that holds it. */
 export async function goalFor(ctx: Pick<Ctx, 'db'>, companyId: string, spot: Spot, goalId: string) {
@@ -22,13 +22,16 @@ export async function goalFor(ctx: Pick<Ctx, 'db'>, companyId: string, spot: Spo
 /* The tracker's fields of a new task, one rule for every way a task is made. Only a task with nothing above it serves a goal
    of its own; work under a task serves that task's. Who answers for it: the person named, who must reach its place, else
    the person of the task above it, else the goal's, else whoever takes the place's decisions. On a pipeline it starts on the
-   stage named, else the first one of whoever holds it. */
-export async function newTrackerFields(ctx: Pick<Ctx, 'db'>, companyId: string, spot: Spot, parent: Pick<Task, 'responsiblePersonId'> | null, input: TrackerInput, holderId: string): Promise<TrackerFields> {
+   stage named, else the first one of whoever holds it. Who asked for it is the person whose request started the tree it is in:
+   work under a task is asked for by whoever asked for that task, and a task nobody asked for stays so unless the one who gives it
+   names the person (the orchestrator, for a person's request; a person, for their own). */
+export async function newTrackerFields(ctx: Pick<Ctx, 'db'>, companyId: string, spot: Spot, parent: Pick<Task, 'responsiblePersonId' | 'askedByPersonId'> | null, input: TrackerInput, holderId: string): Promise<TrackerFields> {
   if (parent && input.goalId) throw refuse(400, 'goal_invalid', 'Work under a task serves the goal of the task above it, so it names none of its own.');
   const goal = input.goalId ? await goalFor(ctx, companyId, spot, input.goalId) : null;
   if (input.responsiblePersonId) await requireAnswersFor(ctx, companyId, input.responsiblePersonId, spot);
   const responsiblePersonId = input.responsiblePersonId ?? parent?.responsiblePersonId ?? goal?.responsiblePersonId ?? (await placeOwner(ctx, companyId, spot));
+  const askedByPersonId = parent?.askedByPersonId ?? (input.askedByPersonId ? await requireAsker(ctx, companyId, input.askedByPersonId) : null);
   const pipelineId = input.pipelineId === undefined ? await defaultPipelineOf(ctx.db, companyId, spot) : input.pipelineId;
   const pipeline = pipelineId ? await placeOnPipeline(ctx.db, companyId, spot, holderId, pipelineId, input.pipelineStageId) : { pipelineId: null, pipelineStageId: null };
-  return { goalId: goal?.id ?? null, responsiblePersonId, why: input.why?.trim() ?? '', dueAt: input.dueAt ?? null, priority: input.priority ?? null, ...pipeline };
+  return { goalId: goal?.id ?? null, responsiblePersonId, askedByPersonId, why: input.why?.trim() ?? '', dueAt: input.dueAt ?? null, priority: input.priority ?? null, ...pipeline };
 }
