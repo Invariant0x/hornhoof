@@ -2072,6 +2072,13 @@ export const en = {
     asksApprovalOf: (agent: string) => `${agent} asks you to approve this`,
     stuck: (agent: string) => `${agent} is stuck`,
     asksChoice: (agent: string) => `${agent} asks you to pick one`,
+    /* Headings for a request addressed to someone else, without addressing the viewer as "you". */
+    asksOther: {
+      question: (agent: string) => `${agent} asks`,
+      choice: (agent: string) => `${agent} asks for a choice`,
+      approval: (agent: string) => `${agent} asks for commit approval`,
+      approvalOf: (agent: string) => `${agent} asks for approval`,
+    },
     stuckText: (agent: string, n: number) =>
       `${agent} ended several turns in a row without moving #${n}, so Hornhoof stopped waking it. Write what it needs to go on, or cancel the task if it is not needed anymore.`,
     inDetail: 'In more detail',

@@ -2063,6 +2063,12 @@ export const ru: Messages = {
     asksApprovalOf: agent => `${agent} просит вас это одобрить`,
     stuck: agent => `${agent} застрял`,
     asksChoice: agent => `${agent} просит выбрать`,
+    asksOther: {
+      question: agent => `${agent} спрашивает`,
+      choice: agent => `${agent} просит выбрать`,
+      approval: agent => `${agent} просит одобрить коммит`,
+      approvalOf: agent => `${agent} просит одобрить`,
+    },
     stuckText: (agent, n) =>
       `${agent} несколько ходов подряд не сдвигал задачу #${n}, и Hornhoof перестал его будить. Напишите, что ему нужно, чтобы продолжить, или отмените задачу, если она больше не нужна.`,
     inDetail: 'Подробнее',

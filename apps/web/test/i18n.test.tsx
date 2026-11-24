@@ -401,3 +401,23 @@ describe('the load given up at 30 seconds', () => {
     expect(said).not.toMatch(/\d \p{L}/u);
   });
 });
+
+describe('request headings for another person', () => {
+  it.each(LANGUAGES.map(l => l.id))('never addresses the viewer as you or вас in %s across every request kind', id => {
+    const other = DICTIONARIES[id].tasks.asksOther;
+    expect(Object.keys(other).sort()).toEqual(['approval', 'approvalOf', 'choice', 'question']);
+    for (const [kind, format] of Object.entries(other)) {
+      const text = format('Nadia');
+      expect(text, kind).toContain('Nadia');
+      expect(text, kind).not.toMatch(/\byou\b/i);
+      expect(text, kind).not.toMatch(/(?:^|[^\p{L}])вас(?:$|[^\p{L}])/iu);
+    }
+  });
+
+  it('keeps direct viewer phrasing on viewer-targeted strings', () => {
+    expect(en.tasks.asksChoice('Nadia')).toBe('Nadia asks you to pick one');
+    expect(en.tasks.asksApproval('Dana')).toBe('Dana asks you to approve a commit');
+    expect(en.tasks.asksApprovalOf('Bruno')).toBe('Bruno asks you to approve this');
+    expect(ru.tasks.asksApprovalOf('Bruno')).toBe('Bruno просит вас это одобрить');
+  });
+});
