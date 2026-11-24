@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { CityBuilding } from '../src/world/city-layout';
 import type { ResidentEntity } from '../src/world/residents';
 
-/* #2001, Ivan 23.11: on the live city page a resident who has brought its stone stands on the lot of the building it
+/* #2001, 23.11: on the live city page a resident who has brought its stone stands on the lot of the building it
    works at, turned to it, not on the road beside it. */
 type LiveHandle = {
   getResidents: () => readonly ResidentEntity[];
