@@ -5,6 +5,7 @@
 import { BRIDGE_PIECES, bridgePicturePath, type ArtIndex, type BridgePiece } from './art';
 import type { TileCoord } from './coords';
 import type { WorldPackManifest } from './manifest';
+import { displayedWaterDistance } from './smooth-terrain-baker';
 import type { GeneratedWorldMap } from './terrain-engine';
 
 /* A bridge spans this many water tiles: its first and last piece, and repeated spans between them. */
@@ -16,10 +17,15 @@ const LENGTH_WEIGHT = 0.25;
 
 /* 'u' runs along the column axis (down right on screen), 'v' along the row axis (down left). */
 export type BridgeAxis = 'u' | 'v';
-/* The bridge's first water tile (the far end, up the screen), its axis and how many water tiles it spans. */
-export type BridgeSite = Readonly<{ axis: BridgeAxis; col: number; row: number; length: number }>;
+/* The bridge's first water tile (the far end, up the screen), its axis and how many water tiles it spans. overBank:
+   whether the water as drawn spills over the bank at the far and the near end, so that end's piece stands on the bank
+   tile, where the street meets it, and the deck comes down on drawn land. */
+export type BridgeSite = Readonly<{ axis: BridgeAxis; col: number; row: number; length: number; overBank?: readonly [boolean, boolean] }>;
 
-type BridgeMap = Pick<GeneratedWorldMap, 'isLiquid' | 'isWalkable' | 'startCenter'>;
+type BridgeMap = Pick<GeneratedWorldMap, 'isLiquid' | 'isWalkable' | 'startCenter' | 'cornerFields'>;
+
+/* Drawn water distance from which the ground shows as land (smooth-terrain-baker.ts, displayedWaterDistance). */
+const DRAWN_LAND = 0.08;
 
 const STEP: Readonly<Record<BridgeAxis, readonly [number, number]>> = { u: [1, 0], v: [0, 1] };
 
@@ -64,6 +70,26 @@ function crossingLength(map: BridgeMap, axis: BridgeAxis, col: number, row: numb
   return n >= BRIDGE_LENGTH.min && n <= BRIDGE_LENGTH.max && isBank(map, col + dc * n, row + dr * n) ? n : 0;
 }
 
+/* Whether the middle of the edge `side` tiles out from the water tile `i` of a crossing is drawn as land. */
+function edgeOnLand(map: BridgeMap, site: BridgeSite, i: number, side: number): boolean {
+  const [dc, dr] = STEP[site.axis];
+  const along = i + 0.5 + side / 2;
+  return displayedWaterDistance(map.cornerFields, site.col + dc * along + 0.5 * dr, site.row + dr * along + 0.5 * dc) >= DRAWN_LAND;
+}
+
+/* Where each end's deck comes down: on the water tile's own edge when that is drawn as land, else on the bank tile's
+   outer edge; null when even that is drawn as water. */
+function overBankOf(map: BridgeMap, site: BridgeSite): readonly [boolean, boolean] | null {
+  const ends = [
+    { i: 0, side: -1 },
+    { i: site.length - 1, side: 1 },
+  ].map(({ i, side }) => {
+    if (edgeOnLand(map, site, i, side)) return false;
+    return edgeOnLand(map, site, i + side, side) ? true : null;
+  });
+  return ends[0] === null || ends[1] === null ? null : [ends[0]!, ends[1]!];
+}
+
 /* How far the middle of a crossing lies from the city centre, weighed with its length. */
 function crossingScore(site: BridgeSite, centre: TileCoord): number {
   const [dc, dr] = STEP[site.axis];
@@ -72,9 +98,10 @@ function crossingScore(site: BridgeSite, centre: TileCoord): number {
   return Math.hypot(midCol - centre.col - 0.5, midRow - centre.row - 0.5) + LENGTH_WEIGHT * site.length;
 }
 
-/* The bridge of a map: the straight crossing of 2 to 10 water tiles nearest the city centre, a shorter one first, or
-   null when no water lies within reach. Rows are searched from the top, then columns, then u before v, and only a
-   strictly better crossing replaces the one found, so every load finds the same. */
+/* The bridge of a map: the straight crossing of 2 to 10 water tiles nearest the city centre, a shorter one first, whose
+   deck can come down on drawn land at both ends, or null when no water lies within reach. Rows are searched from the
+   top, then columns, then u before v, and only a strictly better crossing replaces the one found, so every load finds
+   the same. */
 export function bridgeSite(map: BridgeMap): BridgeSite | null {
   const centre = map.startCenter;
   let best: BridgeSite | null = null;
@@ -86,10 +113,11 @@ export function bridgeSite(map: BridgeMap): BridgeSite | null {
         if (!length) continue;
         const site: BridgeSite = { axis, col, row, length };
         const score = crossingScore(site, centre);
-        if (score < bestScore) {
-          best = site;
-          bestScore = score;
-        }
+        if (score >= bestScore) continue;
+        const overBank = overBankOf(map, site);
+        if (!overBank) continue;
+        best = { ...site, overBank };
+        bestScore = score;
       }
     }
   }
@@ -102,10 +130,23 @@ export function hasBridgeArt(pack: WorldPackManifest, index: ArtIndex | null): b
   return (['u', 'v'] as const).every(axis => BRIDGE_PIECES.every(piece => Boolean(index.files[bridgePicturePath(axis, piece)])));
 }
 
-/* The piece a tile of the bridge shows: the first, a span or the last. */
-export function bridgePieceAt(site: BridgeSite, index: number): BridgePiece {
-  if (index === 0) return 'start';
-  return index === site.length - 1 ? 'end' : 'span';
+/* The tiles the bridge's pieces stand on, from the far end to the near end: its water tiles, and the bank tile at an
+   end where the drawn water spills over the bank. */
+export function bridgePieceTiles(site: BridgeSite): TileCoord[] {
+  const [dc, dr] = STEP[site.axis];
+  const [from, to] = drawnSpan(site);
+  return Array.from({ length: to - from + 1 }, (_, k) => ({ col: site.col + dc * (from + k), row: site.row + dr * (from + k) }));
+}
+
+/* The first and last tile a piece stands on, counted from the first water tile. */
+function drawnSpan(site: BridgeSite): readonly [number, number] {
+  return [site.overBank?.[0] ? -1 : 0, site.length - 1 + (site.overBank?.[1] ? 1 : 0)];
+}
+
+/* The piece the k-th of `count` drawn tiles shows: the first, a span or the last. */
+export function bridgePieceAt(count: number, k: number): BridgePiece {
+  if (k === 0) return 'start';
+  return k === count - 1 ? 'end' : 'span';
 }
 
 /* How far over the tile it stands before, a resident on the bridge is drawn: past that piece, short of the next. */
@@ -119,8 +160,8 @@ export function residentDepthY(site: BridgeSite | null, col: number, row: number
   if (!site) return (col + row + 1) * (tileH / 2);
   const [along, across] = site.axis === 'u' ? [col, row] : [row, col];
   const [first, line] = site.axis === 'u' ? [site.col, site.row] : [site.row, site.col];
-  const ahead = Math.ceil(along) - first;
-  const touches = Math.round(across) === line && ahead >= 0 && Math.floor(along) - first < site.length;
+  const [from, to] = drawnSpan(site);
+  const touches = Math.round(across) === line && Math.ceil(along) - first >= from && Math.floor(along) - first <= to;
   if (!touches) return (col + row + 1) * (tileH / 2);
   return (Math.ceil(along) + across + 1 + OVER_PIECE) * (tileH / 2);
 }
@@ -128,5 +169,6 @@ export function residentDepthY(site: BridgeSite | null, col: number, row: number
 /* Two sites are the same bridge. */
 export function sameBridge(a: BridgeSite | null | undefined, b: BridgeSite | null | undefined): boolean {
   if (!a || !b) return !a && !b;
-  return a.axis === b.axis && a.col === b.col && a.row === b.row && a.length === b.length;
+  const banks = (s: BridgeSite) => `${Boolean(s.overBank?.[0])}|${Boolean(s.overBank?.[1])}`;
+  return a.axis === b.axis && a.col === b.col && a.row === b.row && a.length === b.length && banks(a) === banks(b);
 }

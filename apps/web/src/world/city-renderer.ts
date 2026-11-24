@@ -8,7 +8,7 @@ import type { WorldMode } from '@hornhoof/protocol/world';
 import { Matrix, type Graphics, type Sprite } from 'pixi.js';
 import { artFootprintCentre, bridgePicturePath, masterTileW, resolveBuildingArt, type BuildingArt, type BuildingPicturePassport } from './art';
 import { parseArtTint, type DisplayRunPool, type WorldArtLibrary } from './art-runtime';
-import { bridgePieceAt, bridgeTiles } from './bridge-site';
+import { bridgePieceAt, bridgePieceTiles } from './bridge-site';
 import { cityDepthY, type CityBuilding, type CityState, type RoadTier, type RoadTile } from './city-layout';
 import {
   resolveStageSpecForBuilding,
@@ -899,16 +899,17 @@ function drawBuildingArtPixi(
 export type BridgeMark = Readonly<{ road: RoadTile; path: string }>;
 export type RoadMarks = Readonly<{ streets: readonly RoadTile[]; bridge: readonly BridgeMark[] }>;
 
-/* What the city draws of its roads: the street tiles unless the streets are baked into the ground, and on the bridge's
-   own tiles its pieces. A road tile on water off the bridge, which only an older rule could have left, is drawn by
-   nothing, and nothing stands in for a bridge piece (#1985). */
+/* What the city draws of its roads: the street tiles unless the streets are baked into the ground, and the bridge's
+   pieces on its water tiles and on a bank tile the drawn water spills over. A road tile on water off the bridge, which
+   only an older rule could have left, is drawn by nothing, and nothing stands in for a bridge piece (#1985). */
 export function roadMarks(city: Pick<CityState, 'roads' | 'bridge'>, paintedRoads: boolean): RoadMarks {
   const streets = paintedRoads ? [] : [...city.roads.values()].filter(road => !road.bridge);
   const site = city.bridge ?? null;
   if (!site) return { streets, bridge: [] };
-  const bridge = bridgeTiles(site).flatMap((t, i) => {
+  const drawn = bridgePieceTiles(site);
+  const bridge = drawn.flatMap((t, k) => {
     const road = city.roads.get(`${t.col},${t.row}`);
-    return road ? [{ road, path: bridgePicturePath(site.axis, bridgePieceAt(site, i)) }] : [];
+    return road ? [{ road, path: bridgePicturePath(site.axis, bridgePieceAt(drawn.length, k)) }] : [];
   });
   return { streets, bridge };
 }
