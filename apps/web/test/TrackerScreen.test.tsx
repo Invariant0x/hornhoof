@@ -1131,6 +1131,31 @@ it.each([
   expect(within(side).getByRole('button', { name: `${failures} 1` })).toBeInTheDocument();
 });
 
+it.each([
+  ['en', 'Task lists', 'Failures', 'The copy of the company\'s data on home-box was given up', "Making it failed 4 times in a row, and its machine stopped trying", 'press "Try again" on its card in Machines'],
+  ['ru', 'Списки задач', 'Сбои', 'Копия данных компании на машине home-box оставлена', 'Попытки сделать ее подряд не удались (всего 4), и машина перестала пробовать', 'нажмите «Попробовать снова» на ее карточке'],
+])('shows a copy its machine gave up among the failures, with what to do, and counts it there (%s)', async (language, lists, failures, title, why, action) => {
+  localStorage.setItem('hh-lang', language);
+  shell('/tasks?show=failures&view=list', { 'GET /api/requests': [200, { ...decisions([]), copyGaveUp: [{ id: 'm9', hostname: 'home-box', since: '2026-11-24T20:00:00.000Z', attempts: 4, why: 'failed' }] }] });
+  const card = await screen.findByRole('region', { name: title });
+  expect(card).toHaveTextContent(why);
+  expect(card).toHaveTextContent(action);
+  const side = screen.getByRole('navigation', { name: lists });
+  expect(within(side).getByRole('button', { name: `${failures} 1` })).toBeInTheDocument();
+});
+
+it('says in the card that a copy is not made over a path measured too slow or too late, and what follows', async () => {
+  shell('/tasks?show=failures&view=list', {
+    'GET /api/requests': [200, { ...decisions([]), copyGaveUp: [
+      { id: 'm8', hostname: 'slow-box', since: '2026-11-24T20:00:00.000Z', attempts: 0, why: 'slow' },
+      { id: 'm9', hostname: 'late-box', since: '2026-11-24T20:00:00.000Z', attempts: 0, why: 'late' },
+    ] }],
+  });
+  expect(await screen.findByRole('region', { name: "The copy of the company's data on slow-box was given up" })).toHaveTextContent('is too slow to carry a copy, so none is made over it');
+  expect(screen.getByRole('region', { name: "The copy of the company's data on late-box was given up" })).toHaveTextContent('answers too late to carry a copy, so none is made over it');
+  expect(screen.getAllByText('It goes on by itself once the connection is measured fast enough. Until then the machine holds no copy.')).toHaveLength(2);
+});
+
 it('shows no such card and counts none once the machine has room again', async () => {
   shell('/tasks?show=failures&view=list');
   const side = await screen.findByRole('navigation', { name: 'Task lists' });
