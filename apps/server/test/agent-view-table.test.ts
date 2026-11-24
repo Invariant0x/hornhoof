@@ -7,6 +7,7 @@ import { addNote, companyBook, departmentBook } from '../src/modules/notebook/bo
 import { ask } from '../src/modules/tasks/engine.js';
 import { appFixture, as, testApp } from './helpers.js';
 import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
+import { stored } from './files-fixture.js';
 
 const captured = vi.hoisted(() => [] as RouteOptions[]);
 vi.mock('fastify', async importOriginal => {
@@ -61,7 +62,7 @@ const aRepeated = async (c: AclCompany, agent: Crew): Promise<Call> => {
   return { method: 'POST', url: '/api/feedback/repeats', payload: { improvement: finding!.id } };
 };
 const aPicture = async (c: AclCompany, agent: Crew): Promise<Call> => {
-  const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew[agent].id, personId: c.ids.ceo, name: 'p.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+  const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew[agent].id, personId: c.ids.ceo, name: 'p.png', mediaType: 'image/png', sha256: await stored(c.db, PNG, c.app.ctx.config), size: PNG.length }).returning();
   return { method: 'GET', url: `/api/attachments/${picture!.id}` };
 };
 
