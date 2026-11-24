@@ -156,20 +156,34 @@ describe('the owner a helper writes in its folder', () => {
   });
 });
 
+/* The ways a live process holds a folder. */
+const HOLDERS: [string, (dir: string) => Fake][] = [
+  ['works in it', dir => ({ pid: 20, cwd: join(dir, 'inner') })],
+  ['has a file of it open', dir => ({ pid: 20, fds: [join(dir, 'migrated.tar')] })],
+  ['has the folder itself open', dir => ({ pid: 20, fds: [dir] })],
+  ['runs a program from it', dir => ({ pid: 20, exe: join(dir, 'inner', 'x') })],
+  ['names it in its command line', dir => ({ pid: 20, cmdline: ['node', 'run', `--data=${dir}/migrated.tar`] })],
+];
+
 describe('a folder a live process holds', () => {
-  it.each([
-    ['works in it', (dir: string): Fake => ({ pid: 20, cwd: join(dir, 'inner') })],
-    ['has a file of it open', (dir: string): Fake => ({ pid: 20, fds: [join(dir, 'migrated.tar')] })],
-    ['has the folder itself open', (dir: string): Fake => ({ pid: 20, fds: [dir] })],
-    ['runs a program from it', (dir: string): Fake => ({ pid: 20, exe: join(dir, 'inner', 'x') })],
-    ['names it in its command line', (dir: string): Fake => ({ pid: 20, cmdline: ['node', 'run', `--data=${dir}/migrated.tar`] })],
-  ])('stays, as a process that %s', async (_how, make) => {
+  it.each(HOLDERS)('stays, as a process that %s', async (_how, make) => {
     const dir = folder('hh-test-db-AbCd12', HOUR);
     processes({ pid: 10 }, make(dir));
     await cleaner().clean();
     expect(existsSync(dir)).toBe(true);
     rmSync(join(proc, '20'), { recursive: true });
     await cleaner().clean();
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  /* A worker of a test run whose main process was killed still reads the database its main process made. */
+  it.each(HOLDERS)('stays though its owner has gone, as a process that %s', async (_how, make) => {
+    const dir = folder('hh-test-db-AbCd12', HOUR, '4242 777');
+    processes({ pid: 10 }, make(dir));
+    await cleaner({ checking: true }).clean();
+    expect(existsSync(dir)).toBe(true);
+    rmSync(join(proc, '20'), { recursive: true });
+    await cleaner({ checking: true }).clean();
     expect(existsSync(dir)).toBe(false);
   });
 
@@ -209,6 +223,21 @@ describe('a folder with no owner while a test run may be live', () => {
     const dir = folder('hh-test-db-AbCd12', HOUR, '4242 777');
     processes({ pid: 11, cmdline: ['node', 'vitest', 'run'] });
     await cleaner({ checking: true }).clean();
+    expect(existsSync(dir)).toBe(false);
+  });
+});
+
+describe('a folder whose owner has gone while a process of the users cannot be read', () => {
+  it('stays while a run may be live, unless it is very old, and goes once none is', async () => {
+    const dir = folder('hh-test-db-AbCd12', HOUR, '4242 777');
+    const old = folder('hh-test-initdb-AbCd12', LEFTOVER_IDLE_MS + MINUTE, '4242 777');
+    processes({ pid: 10 });
+    /* What it has open cannot be listed, so what it holds is not known. */
+    rmSync(join(proc, '10', 'fd'), { recursive: true });
+    await cleaner({ checking: true }).clean();
+    expect(existsSync(dir)).toBe(true);
+    expect(existsSync(old)).toBe(false);
+    await cleaner({ checking: false }).clean();
     expect(existsSync(dir)).toBe(false);
   });
 });

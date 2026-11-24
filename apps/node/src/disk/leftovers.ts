@@ -131,14 +131,17 @@ async function found({ tmp, owners, now = Date.now }: Options): Promise<Found[]>
   return list;
 }
 
-/* Whether a folder is nobody's any more. It stays where its owner lives, where a process of the machine works in it, has a file
-   of it open or names it, and, with no owner named, while it is young, or while a check or a test runner may be running and it
-   is not very old. */
+/* Whether a folder is nobody's any more. It stays where its owner lives, and where a process of the machine works in it, has a
+   file of it open or names it, whoever made it: the workers of a run whose main process was killed still read what it made.
+   A folder whose owner has gone stays too while a process of the users cannot be read and a check or a test runner may be
+   running, unless it is very old. With no owner named, it stays while it is young, while a process of the users cannot be
+   read, or while a check or a test runner may be running and it is not very old. */
 async function goes(one: Found, seen: Seen, waits: boolean, real: boolean): Promise<boolean> {
   const owner = await ownerOf(one.path);
-  if (owner) return !alive(owner, seen, real);
-  if (seen.blind || one.ageMs < LEFTOVER_GRACE_MS || holds(one.path, seen)) return false;
-  return !waits || one.ageMs >= LEFTOVER_IDLE_MS;
+  if ((owner && alive(owner, seen, real)) || holds(one.path, seen)) return false;
+  const live = waits && one.ageMs < LEFTOVER_IDLE_MS;
+  if (owner) return !(seen.blind && live);
+  return !seen.blind && one.ageMs >= LEFTOVER_GRACE_MS && !live;
 }
 
 /* A node that cannot read the processes takes nothing, as a folder may be held. */
