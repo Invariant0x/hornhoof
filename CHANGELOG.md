@@ -9,6 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- A machine's copy of the company's data no longer tries again without end over a link that keeps cutting it: a subscription stopped by an error and enabled again 30 times in one attempt ends that attempt even when some tables got through, the attempts given up in a row count until the copy has been whole for an hour, a whole copy that breaks soon after is counted too, each wait is twice as long as the one before, and after the fourth attempt given up in a row the keeper parks the copy: its slots on the company server are dropped so the log they held is released, nothing more is made until it is asked for, and the machine's card says it was given up, since when and after how many attempts.
 - A former server machine whose database is being saved before its copy is remade no longer gets stuck in "Saving" when a backup-holder sweep runs during sealing: the keeper keeps one shared record of temporary bundle files in flight, puts the sealed archive in place before its header and clears any leftover header without an archive, skips the save when the current server's copy has already applied the former server's last write, and shows on the machine card what the save is waiting on and since when.
 
 ### Added

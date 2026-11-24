@@ -8,7 +8,7 @@ import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { REPORT_MAX } from '../backups/types.js';
 import { holdsData } from '../copies/holds.js';
-import { noteReplicaBytes, noteSaving } from '../copies/measured.js';
+import { noteGaveUp, noteReplicaBytes, noteSaving } from '../copies/measured.js';
 import { notifySchemaChange, schemaNoticeChanged } from '../copies/schema-failures.js';
 import { copyOrder } from '../copies/slots.js';
 import { isPrivate } from '../keeper/addresses.js';
@@ -73,6 +73,8 @@ const ReportBody = z.object({
       left: z.array(z.string().regex(TABLE_SYNC_SLOT)).max(200).optional(),
       /* What saving waits on and since when, while state is saving. */
       saving: z.object({ waiting: z.enum(SAVING_WAITS), since: z.iso.datetime() }).optional(),
+      /* A copy its keeper gave up for good: since when, and after how many attempts in a row, while state is stopped. */
+      gaveUp: z.object({ since: z.iso.datetime(), attempts: z.number().int().min(1).max(999) }).optional(),
     })
     .optional(),
   replicaBytes: z.number().int().min(0).optional().catch(undefined),
@@ -123,11 +125,13 @@ function copyColumns(copy: NonNullable<z.infer<typeof ReportBody>['copy']>, copy
 function noteCopySide(ctx: Ctx, machineId: string, copy: NonNullable<z.infer<typeof ReportBody>['copy']>): void {
   ctx.leftSlots.say(machineId, copy.left);
   noteSaving(ctx, machineId, copy.state === 'saving' ? (copy.saving ?? null) : null);
+  noteGaveUp(ctx, machineId, copy.state === 'stopped' ? (copy.gaveUp ?? null) : null);
 }
 
 function clearMachineSide(ctx: Ctx, machineId: string): void {
   noteReplicaBytes(ctx, machineId, null);
   noteSaving(ctx, machineId, null);
+  noteGaveUp(ctx, machineId, null);
 }
 
 /* networkId: the id the machine's keeper runs under, which the slot a new leader made for its copy is named by. */
