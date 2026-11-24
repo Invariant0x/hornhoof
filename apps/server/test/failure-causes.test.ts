@@ -70,7 +70,7 @@ describe('a refusal is a hint, never a failure', () => {
     expect(prompt).toMatch(/Part 2 of 2 failed[^\n]*: exit code 1\./);
     expect(JSON.parse((await call('work_run', { run: 1 })).text)).toMatchObject({ parts: [
       { part: 1, status: 'refused', why: 'Hornhoof refused it before it started, so nothing ran', end: REFUSAL },
-      { part: 2, status: 'failed', why: 'exit code 1', end: 'one test failed\n' },
+      { part: 2, status: 'failed', why: 'exit code 1', end: 'one test failed' },
     ] });
   });
 
