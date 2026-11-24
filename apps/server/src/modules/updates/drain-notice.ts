@@ -5,6 +5,7 @@ import { enqueueTurn } from '../conversation/queue.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import type { drainWork } from './drain-work.js';
+import { saying } from '../../locales/index.js';
 
 type Work = Awaited<ReturnType<typeof drainWork>>;
 /* A node as people know it, the company it is of (none for a built-in node) and its machine's short name. */
@@ -44,7 +45,7 @@ const longWaitText = (name: string, holding: string, heldAt: number, until: numb
 export async function tellLongWait(ctx: Ctx, node: NodeIdentity, work: Work, heldAt: number, until: number): Promise<void> {
   const { name, companyId, machine } = await nodeName(ctx, node);
   const companies = new Set([companyId, ...work.turns.map(t => t.companyId), ...work.parts.map(p => p.companyId)].filter(id => id !== null));
-  const detail = { en: `${machine}: update waits`, ru: `${machine}: обновление ждёт` };
+  const detail = saying(words => words.notices.updateWaits(machine));
   for (const company of companies) {
     const orchestrator = await orchestratorOf(ctx, company);
     if (!orchestrator) continue;

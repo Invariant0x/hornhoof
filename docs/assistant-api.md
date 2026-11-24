@@ -127,7 +127,7 @@ The agents the assistant may write to now, in the order they were hired.
 }
 ```
 
-`kind` is `orchestrator`, `head`, `worker` or `assistant`, the own agent of one of the owner's assistants. `role` and `department` are given in English and Russian, or are `null`.
+`kind` is `orchestrator`, `head`, `worker` or `assistant`, the own agent of one of the owner's assistants. `role` and `department` are given in every language the product ships (today English and Russian), always with `en`, or are `null`. Read the language you want and fall back to `en`.
 
 ### POST /api/assistant/messages
 

@@ -1,7 +1,5 @@
 ---
 id: dsn-generic-ui-check
-title: { en: "Generic look check", ru: "Проверка на шаблонность" }
-description: { en: "Checks that an interface has its own character and does not look like a stock template.", ru: "Проверяет, что у интерфейса есть собственный характер и он не похож на готовый шаблон." }
 kind: checklist
 sources: []
 ---

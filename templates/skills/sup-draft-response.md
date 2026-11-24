@@ -1,7 +1,5 @@
 ---
 id: sup-draft-response
-title: { en: "Draft a reply", ru: "Черновик ответа" }
-description: { en: "Writes a clear and kind reply that solves the problem or says honestly what happens next.", ru: "Пишет понятный и вежливый ответ, который решает проблему или честно говорит, что будет дальше." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins customer-support, msitarzewski/agency-agents support/support-support-responder.md]
 ---

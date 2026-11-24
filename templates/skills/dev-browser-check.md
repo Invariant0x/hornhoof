@@ -1,7 +1,5 @@
 ---
 id: dev-browser-check
-title: { en: "Checking the running product", ru: "Проверка запущенного продукта" }
-description: { en: "When a change has something a user meets, runs it that way, walks the flow and keeps evidence; a browser only for a web page.", ru: "Когда у изменения есть то, что встречает пользователь, запускает его так же, проходит сценарий и сохраняет доказательства; браузер только для веб-страницы." }
 kind: procedure
 sources: [openai/skills skills/.curated/playwright/SKILL.md, anthropics/skills skills/webapp-testing/SKILL.md]
 ---

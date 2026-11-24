@@ -18,6 +18,7 @@ import { keptBeforeStart } from '../program-operator/start-holds.js';
 import { keepUnheardWords, operatorHandledFailure, sayAgain, tellAgainWentAlong, unheardWords } from '../program-operator/recovery.js';
 import { repeatWake } from './wake-state.js';
 import { originalPromptOf } from '../conversation/requested-prompt.js';
+import { saying } from '../../locales/index.js';
 const UNHEARD_MAX_MINUTES = 240;
 type TaskTurn = Parameters<typeof turnAgain>[1];
 
@@ -59,7 +60,7 @@ export async function notifyFailure(ctx: Ctx, job: Job, text: string, caseId: st
 }
 
 async function sendFailureMessage(ctx: Ctx, job: Job, agentId: string, text: string, caseId: string): Promise<void> {
-  await enqueueTurn(ctx, { companyId: job.companyId, agentId, prompt: text, createdBy: null, message: { personId: null, text, failureCase: caseId, notification: { source: 'failure', tasks: [], detail: { en: `turn ${job.id}`, ru: `ход ${job.id}` } } } });
+  await enqueueTurn(ctx, { companyId: job.companyId, agentId, prompt: text, createdBy: null, message: { personId: null, text, failureCase: caseId, notification: { source: 'failure', tasks: [], detail: saying(words => words.notices.turn(job.id)) } } });
 }
 
 /* What a retry says of a failure: its first line. A program's screen, which older nodes gave as the reason, says none: a

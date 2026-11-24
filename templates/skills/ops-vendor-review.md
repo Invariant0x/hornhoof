@@ -1,7 +1,5 @@
 ---
 id: ops-vendor-review
-title: { en: "Vendor review", ru: "Проверка поставщика" }
-description: { en: "Checks an outside service for cost, data handling, terms and lock-in before the company signs up.", ru: "Проверяет внешний сервис на стоимость, обращение с данными, условия и риск привязки до регистрации." }
 kind: checklist
 sources: [anthropics/knowledge-work-plugins operations/skills/vendor-review/SKILL.md, anthropics/knowledge-work-plugins legal/skills/vendor-check/SKILL.md]
 ---

@@ -229,7 +229,7 @@ describe('asking a person', () => {
     const asked = await call(await tools(bruno), 'ask_person', { task: task.number, question: 'Which cards do we take?' });
     expect(asked.isError).toBeFalsy();
     const outgoing = (await listEvents(db, bruno.id, 0)).find(e => e.message?.direction === 'out');
-    expect(outgoing).toMatchObject({ kind: 'message', data: { text: 'Which cards do we take?' }, message: { direction: 'out', from: { kind: 'agent', id: bruno.id, agentKind: 'worker' }, to: { kind: 'person', id: ceo.id, name: 'Ivan', role: { en: 'CEO', ru: 'CEO' } } } });
+    expect(outgoing).toMatchObject({ kind: 'message', data: { text: 'Which cards do we take?' }, message: { direction: 'out', from: { kind: 'agent', id: bruno.id, agentKind: 'worker' }, to: { kind: 'person', id: ceo.id, name: 'Ivan', role: { en: 'CEO' } } } });
   });
 
   it('keeps what the question is about, and takes no topic it does not know', async () => {

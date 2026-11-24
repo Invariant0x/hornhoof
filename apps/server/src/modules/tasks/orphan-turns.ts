@@ -17,6 +17,7 @@ import { alreadyAlerted, screenReader } from './silent.js';
 import { logTurnFact } from './turn-log.js';
 import { lastTurnSigns } from './turn-signs.js';
 import { afterJob } from './wake.js';
+import { saying } from '../../locales/index.js';
 
 type Job = typeof jobs.$inferSelect;
 
@@ -324,7 +325,7 @@ async function tellOperations(ctx: Ctx, job: Job, waiting: Job, busy: ReadonlySe
     agentId: to.id,
     prompt: text,
     createdBy: null,
-    message: { personId: null, text, silentJob: caseId, silentReason: 'program_stalled', notification: { source: 'program_alarm', tasks: [], detail: { en: `${agent.name}: queue stands still`, ru: `${agent.name}: очередь стоит` } } },
+    message: { personId: null, text, silentJob: caseId, silentReason: 'program_stalled', notification: { source: 'program_alarm', tasks: [], detail: saying(words => words.notices.queueStill(agent.name)) } },
   });
   await logTurnFact(ctx, job, `${to.name} was told the queue stands still behind this turn.`, { stalledQueue: caseId, to: to.id });
 }

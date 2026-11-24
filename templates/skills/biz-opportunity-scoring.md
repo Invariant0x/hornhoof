@@ -1,7 +1,5 @@
 ---
 id: biz-opportunity-scoring
-title: { en: "Opportunity scoring", ru: "Оценка возможностей" }
-description: { en: "Scores each partner, channel or market idea on one scale so the best ones go first.", ru: "Оценивает каждую идею партнерства, канала или рынка по одной шкале, чтобы лучшие шли первыми." }
 kind: procedure
 sources: []
 ---

@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { useLanguage, useT } from '../i18n';
 import type { AgentCardView, OfflineMachine as Offline, SubView } from '../types';
 import { servingLabel } from './StaffCard';
+import { formatTagOf } from '@hornhoof/protocol';
 
 /* Which machine of the plan is offline and since when, on the card of the employee and of its task. */
 export function OfflineMachine({ offline }: { offline: Offline }) {
   const t = useT();
   const { language } = useLanguage();
-  const at = offline.since ? new Date(offline.since).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' }) : null;
+  const at = offline.since ? new Date(offline.since).toLocaleString(formatTagOf(language), { dateStyle: 'short', timeStyle: 'short' }) : null;
   return <p className="warn-line" role="status">{t.agent.offlineSince(offline.hostname, at)}</p>;
 }
 

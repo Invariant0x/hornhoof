@@ -495,7 +495,7 @@ describe('Stage 4 live read-only world API and God\'s Word relocation', () => {
     expect(deptRel.statusCode).toBe(201);
     const deptBody = deptRel.json();
     expect(deptBody.task.small).toBe(true);
-    expect(deptBody.task.title).toBe('Перестроить Development');
+    expect(deptBody.task.title).toBe('Move Development');
     expect(deptBody.task.assigneeAgentId).toBe(devHead!.id);
     expect(deptBody.task.departmentId).toBe(dev!.id);
     expect(deptBody.relocation.status).toBe('pending');

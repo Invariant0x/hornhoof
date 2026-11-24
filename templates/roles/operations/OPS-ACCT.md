@@ -2,8 +2,6 @@
 id: OPS-ACCT
 department: operations
 kind: member
-title: { en: "Accounts administrator", ru: "Администратор учетных записей" }
-description: { en: "Administrator of service accounts and subscription records.", ru: "Администратор учетных записей сервисов и записей о подписках." }
 tier: standard
 effort: medium
 perProduct: false

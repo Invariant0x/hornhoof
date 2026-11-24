@@ -1,31 +1,22 @@
-import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { isLocaleId, isPseudoLocaleId, LOCALES, localeInfo, matchLocale, say, SOURCE_LOCALE, type Direction, type Texts } from '@hornhoof/protocol';
 import { ApiFailure } from '../api';
 import { en, type Messages } from './en';
-import type { Language } from './plural';
-import { ru } from './ru';
+import type { Language, ShippedLanguage } from './plural';
 
-export { plural, type Language, type PluralForms } from './plural';
+export { plural, type Language, type ShippedLanguage, type PluralForms } from './plural';
 export type { Messages } from './en';
 
-export const LANGUAGES: { id: Language; name: string }[] = [
-  { id: 'en', name: 'English' },
-  { id: 'ru', name: 'Русский' },
-];
-
-/* Every language the product ships, by its id. */
-export const DICTIONARIES: Record<Language, Messages> = { en, ru };
+/* Every language the product ships, each named in its own words, as the registry of the protocol lists them. A language
+   is a line there and a file here named by its id: nothing in the code names one. */
+export const LANGUAGES: { id: ShippedLanguage; name: string }[] = LOCALES.map(({ id, name }) => ({ id, name }));
 const KEY = 'hh-lang';
 
-const isLanguage = (v: string | null | undefined): v is Language => v === 'en' || v === 'ru';
-
-/* The saved choice wins; otherwise the first browser language we speak, otherwise English. */
-export function detectLanguage(saved: string | null, preferred: readonly string[]): Language {
-  if (isLanguage(saved)) return saved;
-  for (const tag of preferred) {
-    const base = tag.toLowerCase().split('-')[0];
-    if (isLanguage(base)) return base;
-  }
-  return 'en';
+/* The saved choice wins; otherwise the first browser language we speak, otherwise English. A test language, which only a
+   build for tests allows, is taken from the saved choice alone. */
+export function detectLanguage(saved: string | null, preferred: readonly string[], pseudo = false): Language {
+  if (isLocaleId(saved) || (pseudo && isPseudoLocaleId(saved))) return saved;
+  return matchLocale(preferred);
 }
 
 function savedLanguage(): string | null {
@@ -36,20 +27,91 @@ function savedLanguage(): string | null {
   }
 }
 
-type LanguageState = { language: Language; setLanguage: (l: Language) => void; t: Messages };
+/* The dictionaries brought so far. English is the source of every other, in the first load, and the one a text a language
+   lacks reads as. */
+const brought = new Map<Language, Messages>([['en', en]]);
+const lacking = new Map<Language, { missing: string[]; extra: string[] }>();
+const arriving = new Map<Language, Promise<Messages>>();
+
+export const cachedMessages = (id: Language): Messages | undefined => brought.get(id);
+
+/* The texts a language lacks, which read as English, and the ones it holds that English does not. */
+export const missingKeysOf = (id: Language): { missing: string[]; extra: string[] } => lacking.get(id) ?? { missing: [], extra: [] };
+
+/* A language's own files, brought when it is first asked for, so the page loads the one it speaks and no other. Where they
+   do not come the page reads in English, and asks again the next time. */
+export function loadMessages(id: Language): Promise<Messages> {
+  const known = brought.get(id);
+  if (known) return Promise.resolve(known);
+  let coming = arriving.get(id);
+  if (!coming) {
+    coming = import('./load')
+      .then(({ loadLocale }) => loadLocale(id, en))
+      .then(loaded => {
+        brought.set(id, loaded.messages);
+        lacking.set(id, { missing: loaded.missing, extra: loaded.extra });
+        return loaded.messages;
+      })
+      .catch((error: unknown) => {
+        console.warn(`The ${id} language did not load; the page reads in English.`, error);
+        return en;
+      })
+      .finally(() => arriving.delete(id));
+    arriving.set(id, coming);
+  }
+  return coming;
+}
+
+/* Every registered language at once, for a test that reads several. */
+export const preloadLanguages = (): Promise<Messages[]> => Promise.all(LANGUAGES.map(({ id }) => loadMessages(id)));
+
+type LanguageState = { language: Language; setLanguage: (l: Language) => void; t: Messages; dir: Direction };
 
 /* English without a provider, so a component renders on its own in tests. */
-const LanguageContext = createContext<LanguageState>({ language: 'en', setLanguage: () => {}, t: en });
+const LanguageContext = createContext<LanguageState>({ language: 'en', setLanguage: () => {}, t: en, dir: 'ltr' });
 
-export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [language, setState] = useState<Language>(() => detectLanguage(savedLanguage(), navigator.languages ?? [navigator.language]));
+type Shown = { wanted: Language; language: Language; t: Messages };
+
+/* The page in a person's language: the one they chose, else the one their browser asks for, else English. The page waits
+   for the language's files rather than show another language first; it names the language and its direction on its root. */
+export function LanguageProvider({ children, pseudo = false }: { children: ReactNode; pseudo?: boolean }) {
+  const [wanted, setWanted] = useState<Language>(() => detectLanguage(savedLanguage(), navigator.languages ?? [navigator.language], pseudo));
+  const [shown, setShown] = useState<Shown | null>(() => {
+    const t = brought.get(wanted);
+    return t ? { wanted, language: wanted, t } : null;
+  });
 
   useEffect(() => {
-    document.documentElement.lang = language;
-  }, [language]);
+    if (shown?.wanted === wanted) return;
+    let current = true;
+    void loadMessages(wanted).then(t => {
+      if (current) setShown({ wanted, language: t === en ? SOURCE_LOCALE : wanted, t });
+    });
+    return () => {
+      current = false;
+    };
+  }, [wanted, shown?.wanted]);
+
+  const language = shown?.language ?? wanted;
+  const dir = localeInfo(language)?.dir ?? 'ltr';
+  const script = localeInfo(language)?.script ?? 'Latn';
+  const applied = useRef<Direction | null>(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.lang = language;
+    /* The page takes the direction of the language when that changes. A page that was already turned right to left before
+       its first draw (a test page does) stays so while the language keeps its direction; an effect that runs again with
+       the same direction, as in development, writes nothing. */
+    if (applied.current !== dir) {
+      if (applied.current !== null || dir === 'rtl' || root.dir !== 'rtl') root.dir = dir;
+      applied.current = dir;
+    }
+    root.dataset.script = script;
+    void import('./load').then(({ loadScriptFonts }) => loadScriptFonts(script));
+  }, [language, dir, script]);
 
   const setLanguage = useCallback((next: Language) => {
-    setState(next);
+    setWanted(next);
     try {
       localStorage.setItem(KEY, next);
     } catch {
@@ -57,8 +119,8 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const value = useMemo(() => ({ language, setLanguage, t: DICTIONARIES[language] }), [language, setLanguage]);
-  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
+  const value = useMemo(() => (shown ? { language: shown.language, setLanguage, t: shown.t, dir } : null), [shown, setLanguage, dir]);
+  return value ? <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider> : null;
 }
 
 export const useT = (): Messages => useContext(LanguageContext).t;
@@ -73,9 +135,9 @@ export function Phrase({ words, values }: { words: (...values: string[]) => stri
   return <>{text.split(/([\ue000-\uf8ff])/).map((part, i) => (i % 2 ? <Fragment key={i}>{values[part.charCodeAt(0) - SLOT]}</Fragment> : part))}</>;
 }
 
-export function useLanguage(): { language: Language; setLanguage: (l: Language) => void } {
-  const { language, setLanguage } = useContext(LanguageContext);
-  return { language, setLanguage };
+export function useLanguage(): { language: Language; setLanguage: (l: Language) => void; dir: Direction } {
+  const { language, setLanguage, dir } = useContext(LanguageContext);
+  return { language, setLanguage, dir };
 }
 
 const hostMessage = (known: unknown, details: Record<string, unknown> | undefined): string | null => {
@@ -110,6 +172,14 @@ export function errorText(t: Messages, err: unknown): string {
 export function restoreEnded(t: Messages, status: { state: 'running' | 'done' | 'failed'; step: keyof Messages['backups']['steps']; line: string }): string {
   if (t === en && status.line) return status.line;
   return status.state === 'done' ? t.backups.done : t.backups.failedAt(t.backups.steps[status.step]);
+}
+
+/* A department as a message names it: a template department by its template's name in the reader's language, a typed
+   one as typed. */
+export function partyDepartment(t: Messages, language: string, d: { name: Texts; templateKey?: string | null } | null | undefined): string | undefined {
+  if (!d) return undefined;
+  const template = d.templateKey ? (t.templates as Record<string, { name: string } | undefined>)[d.templateKey] : undefined;
+  return template?.name ?? say(d.name, language);
 }
 
 /* A typed name as typed; a template department without one by its template's name in the person's language. */

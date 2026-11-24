@@ -2,8 +2,6 @@
 id: FIN-FPA
 department: finance
 kind: member
-title: { en: "Financial planning analyst", ru: "Аналитик финансового планирования" }
-description: { en: "Analyst of financial plans, forecasts and business performance.", ru: "Аналитик финансовых планов, прогнозов и результатов бизнеса." }
 tier: standard
 effort: high
 perProduct: false

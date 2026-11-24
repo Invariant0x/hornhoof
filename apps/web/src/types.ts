@@ -1,4 +1,4 @@
-import type { ApiProtocol, TaskPriority } from '@hornhoof/protocol';
+import type { ApiProtocol, TaskPriority, Texts } from '@hornhoof/protocol';
 import type { EchelonFindingsView, EchelonStage } from '@hornhoof/protocol/echelons';
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
@@ -14,7 +14,7 @@ export type { MaterialManifest, MaterialView } from '@hornhoof/protocol';
 export type { FailureKind, Limits, ModelOption, ProgramRetry, ProviderId, TemplateKey, TurnAlarm, TurnRetry, WorkLine };
 
 /* Template text that comes in both languages. */
-export type Lang = { en: string; ru: string };
+export type Lang = Texts;
 
 /* company: the whole company; listed: the departments and teams ticked for the person. */
 export type ScopeKind = 'company' | 'listed';
@@ -442,7 +442,8 @@ export type MessageParty = {
   id: string | null;
   name: string;
   role: Lang | null;
-  department: { id: string; name: Lang } | null;
+  /* A typed name reads as typed in every language; a template department names its template, which the screen words in the reader's language. */
+  department: { id: string; name: Lang; templateKey?: string | null } | null;
   agentKind?: 'orchestrator' | 'head' | 'worker' | 'assistant';
 };
 

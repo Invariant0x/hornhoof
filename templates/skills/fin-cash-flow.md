@@ -1,7 +1,5 @@
 ---
 id: fin-cash-flow
-title: { en: "Cash position", ru: "Денежная позиция" }
-description: { en: "Shows the cash the company has, what comes in and goes out in the next weeks, and the runway.", ru: "Показывает, сколько у компании денег, что придет и уйдет в ближайшие недели и на сколько их хватит." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins small-business/skills/cash-flow-snapshot/SKILL.md]
 ---
