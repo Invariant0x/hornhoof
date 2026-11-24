@@ -18,7 +18,7 @@ import { STUB_DIAMOND_PACK } from '../src/world/packs/stub-pack';
 import { DUNGEON_WORLD_PACK } from '../src/world-packs/dungeon/pack';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
 
-/* Ivan AI, 24.11, before the egypt-loops-v1 pack: where the artist loop sheets sit on a building drawn from its picture. */
+/* The art order of 24.11, before the egypt-loops-v1 pack: where the artist loop sheets sit on a building drawn from its picture. */
 
 const corners = { top: { x: 240, y: 520 }, right: { x: 480, y: 640 }, bottom: { x: 240, y: 760 }, left: { x: 0, y: 640 } };
 const passport = (extra: Partial<BuildingPicturePassport> = {}): BuildingPicturePassport => ({

@@ -154,7 +154,7 @@ type AddLoop = (kind: BuildingLoopKind, intensity?: number) => void;
 /* The smallest lot side that takes a crane. */
 const CRANE_MIN_SPAN = 3;
 
-/* The one lift over a building site (Ivan AI, 24.11): a lot of 3x3 and up gets the crane, whose sheet draws its own
+/* The one lift over a building site (art order, 24.11): a lot of 3x3 and up gets the crane, whose sheet draws its own
    block, and a smaller lot the hoisted block alone; never both, so one block hangs over a site. */
 function addLift(span: number, add: AddLoop, intensity = 1): void {
   add(span >= CRANE_MIN_SPAN ? 'crane' : 'hoist_block', intensity);

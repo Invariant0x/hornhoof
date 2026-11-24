@@ -61,7 +61,7 @@ export type BuildingPicturePassport = Readonly<{
   wallCutY?: number;
   flagAnchor?: ArtPoint;
   awningAnchor?: ArtPoint;
-  /* The building takes the awning loop sheet at its awningAnchor; without it, no awning loop (a painted awning, Ivan AI 24.11). */
+  /* The building takes the awning loop sheet at its awningAnchor; without it, no awning loop (a painted awning, art order 24.11). */
   awningLoop?: boolean;
   /* Top centre (apex, spire, chimney) where a capstone or a top loop attaches. */
   topAnchor?: ArtPoint;

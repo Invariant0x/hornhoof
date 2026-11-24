@@ -33,13 +33,13 @@ export type LoopArtContext = Readonly<{
 type LoopAnchors = Readonly<Record<LoopAttachPoint, { x: number; y: number }>>;
 
 /* Whether a loop is drawn over a picture with this passport: the awning loop only where the passport asks for it with
-   awningLoop and names its awningAnchor, since a house with its own awning painted in would show two (Ivan AI, 24.11). */
+   awningLoop and names its awningAnchor, since a house with its own awning painted in would show two (art order, 24.11). */
 export function loopDrawsOn(kind: string, p: BuildingPicturePassport): boolean {
   return kind !== 'awning' || (p.awningLoop === true && p.awningAnchor !== undefined);
 }
 
 /* Where the top loops (smoke, celebration, a sleeper's Z) attach on a picture, in its own pixels: its topAnchor; else the
-   foot of its flag pole, since a finished house names neither a top nor a roof line (Ivan AI, 24.11); else its roof line,
+   foot of its flag pole, since a finished house names neither a top nor a roof line (art order, 24.11); else its roof line,
    then its wall top, then the back ground corner of its lot, above the lot centre. */
 export function loopTopPoint(p: BuildingPicturePassport): ArtPoint {
   return p.topAnchor ?? p.flagAnchor ?? { x: p.groundAnchor.x, y: p.roofLine ?? p.wallTopLine ?? p.corners.top.y };
