@@ -100,13 +100,15 @@ export class LeaderFiles {
      which is in use again as it comes back. Either is kept only as long and with the sealed hash the record says. */
   async take(machine: string, sha256: string, body: Readable): Promise<number> {
     const restores = await backsUpStore(this.db, machine, sha256);
-    const [asked] = rowsOf<{ sealed_sha256: string; sealed_size: string }>(
-      await this.db.execute(sql`SELECT f.sealed_sha256, f.sealed_size FROM net.files f WHERE f.sha256 = ${sha256} AND (${restores} OR (f.wanted_at IS NOT NULL
+    const [asked] = rowsOf<{ sealed_sha256: string; sealed_size: string; salt: string }>(
+      await this.db.execute(sql`SELECT f.sealed_sha256, f.sealed_size, f.salt FROM net.files f WHERE f.sha256 = ${sha256} AND (${restores} OR (f.wanted_at IS NOT NULL
         AND EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256 AND c.machine_id = ${machine})))`),
     );
     if (!asked) return this.takeUnrecorded(machine, sha256, body);
     try {
-      await this.store.take(sha256, body, { sealedSha256: asked.sealed_sha256, sealedSize: Number(asked.sealed_size) });
+      /* A copy a holder kept as it was sealed before is sealed again as the record says, where this machine has the key. */
+      const again = this.key ? { key: await this.key(), salt: asked.salt } : undefined;
+      await this.store.take(sha256, body, { sealedSha256: asked.sealed_sha256, sealedSize: Number(asked.sealed_size) }, again);
     } catch (err) {
       if (err instanceof StoreRefused) return 400;
       throw err;

@@ -16,7 +16,9 @@ import { checkOwnCopies, dropDue, storeRound } from '../src/modules/files/sweep.
 import { FILE_PATH, FileHolder, type FileLink } from '../src/modules/keeper/file-holder.js';
 import { LeaderFiles } from '../src/modules/keeper/leader-files.js';
 import { backupCompany, from, MACHINE_ID } from './helpers-backups.js';
-import { plainOf, SEAL_HEAD, sealedSizeOf } from '../src/modules/files/seal.js';
+import { plainOf, seal, SEAL_HEAD, sealedSizeOf } from '../src/modules/files/seal.js';
+import { sha256Of } from './files-fixture.js';
+import { sealV1 } from './seal-v1.js';
 import { checkPictureRoom, TASK_FILES_BYTES } from '../src/modules/tasks/file-policy.js';
 import { as, invitePerson, until } from './helpers.js';
 
@@ -162,6 +164,39 @@ describe('the files of the store between machines', () => {
     expect(s.app.ctx.files.store().has(kept.sha256)).toBe(false);
     expect(await s.leader.take(two, kept.sha256, holder.store.sealed(kept.sha256)!.stream())).toBe(201);
     expect(s.app.ctx.files.store().has(kept.sha256)).toBe(true);
+  });
+
+  it('takes back a copy a holder kept as it was sealed before, in the format before or under another salt, once it opens to its name, and keeps it sealed as its record says', async () => {
+    const s = await stand();
+    const two = await s.worker('two');
+    const bytes = randomBytes(70_000);
+    const { sha256 } = await s.app.ctx.files.putBytes(s.db, bytes);
+    const [record] = rowsOf<{ sealed_sha256: string; sealed_size: string; salt: string }>(await s.db.execute(sql`SELECT sealed_sha256, sealed_size, salt FROM net.files WHERE sha256 = ${sha256}`));
+    const kept = { sha256, sealedSha256: record!.sealed_sha256, sealedSize: Number(record!.sealed_size), salt: record!.salt };
+    const key = await s.app.ctx.files.key(s.db);
+    const store = s.app.ctx.files.store();
+    const askAgain = async () => {
+      await store.remove(kept.sha256);
+      await s.db.execute(sql`UPDATE net.files SET wanted_at = now() WHERE sha256 = ${kept.sha256}`);
+      await s.db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id, verified) VALUES (${kept.sha256}, ${two}, true) ON CONFLICT DO NOTHING`);
+    };
+    const asRecorded = async () => {
+      expect(await store.sealedFacts(kept.sha256)).toEqual({ sealedSha256: kept.sealedSha256, sealedSize: kept.sealedSize, salt: kept.salt });
+      expect((await s.app.ctx.files.bytes(s.db, kept.sha256)).equals(bytes)).toBe(true);
+    };
+    const old = sealV1(key, bytes);
+    expect([old.length, sha256Of(old) === kept.sealedSha256]).toEqual([kept.sealedSize, false]);
+    await askAgain();
+    /* Another file's bytes under this name, sealed the same way and as long, are not this file. */
+    expect(await s.leader.take(two, kept.sha256, Readable.from([sealV1(key, randomBytes(70_000))]))).toBe(400);
+    expect(store.has(kept.sha256)).toBe(false);
+    expect(await s.leader.take(two, kept.sha256, Readable.from([old]))).toBe(201);
+    await asRecorded();
+    /* The format of now, under a salt of its own. */
+    await askAgain();
+    const salted = Readable.from([bytes]).pipe(seal(key, () => kept.sha256, randomBytes(16)));
+    expect(await s.leader.take(two, kept.sha256, salted)).toBe(201);
+    await asRecorded();
   });
 });
 

@@ -258,8 +258,10 @@ export class FileStore {
   }
 
   /* Takes a sealed file from another machine: it must be as long as said and hash to what was said, or nothing is kept.
-     The plain hash is its name, which a holder cannot check without the key; the machine that opens it does. */
-  async take(sha256: string, input: Readable, expect: { sealedSha256: string; sealedSize: number }): Promise<boolean> {
+     The plain hash is its name, which a holder cannot check without the key; the machine that opens it does. With the
+     key and the salt of its record, as the leading machine has them, a copy as long that hashes otherwise, sealed in the
+     format before or under another salt, is kept when it opens to its name, sealed again as the record says. */
+  async take(sha256: string, input: Readable, expect: { sealedSha256: string; sealedSize: number }, again?: { key: Buffer; salt: string }): Promise<boolean> {
     checkName(sha256);
     if (this.has(sha256)) {
       input.destroy();
@@ -270,10 +272,31 @@ export class FileStore {
     const { fresh } = await this.publish(async part => {
       await pipeline(input, guard(room, this.idleMs), count, await intoFile(part));
       if (count.bytes !== expect.sealedSize) throw new StoreRefused('size');
-      if (count.digest() !== expect.sealedSha256) throw new StoreRefused('hash');
+      if (count.digest() === expect.sealedSha256) return sha256;
+      if (!again) throw new StoreRefused('hash');
+      await this.sealAgain(part, sha256, again, expect.sealedSha256);
       return sha256;
     });
     return fresh;
+  }
+
+  /* Seals a part again under the salt of its record, in its place: it must open to bytes of its name, and come to the
+     sealed bytes the record names. */
+  private async sealAgain(part: string, sha256: string, { key, salt }: { key: Buffer; salt: string }, sealedSha256: string): Promise<void> {
+    const sealed = `${part}.again`;
+    this.parts.add(sealed);
+    try {
+      const plain = counter();
+      const count = counter();
+      await pipeline(createReadStream(part), openSealed(key, sha256), plain, seal(key, () => sha256, Buffer.from(salt, 'hex')), count, await intoFile(sealed)).catch((err: unknown) => {
+        throw err instanceof SealRefused ? new StoreRefused('hash') : err;
+      });
+      if (plain.digest() !== sha256 || count.digest() !== sealedSha256) throw new StoreRefused('hash');
+      await rename(sealed, part);
+    } finally {
+      this.parts.delete(sealed);
+      await rm(sealed, { force: true });
+    }
   }
 
   /* Takes a sealed file no record describes, as a merge brings a row that names it: it is kept only when it opens with
