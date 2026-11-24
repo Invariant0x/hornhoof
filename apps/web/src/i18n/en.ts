@@ -448,6 +448,19 @@ export const en = {
       restored: (count: number) => `Restored ${count} original names.`,
       restoredOnLeave: (count: number) => `Original names restored (${count}).`,
     },
+    /* The world's loading screen (#1947): its three steps and what each measures. */
+    worldLoad: {
+      title: 'The world is loading',
+      art: 'Pictures',
+      map: 'City and map',
+      bake: 'Ground',
+      megabytes: (loaded: string, total: string) => `${loaded} of ${total} MB`,
+      chunks: (done: number, total: number) => `${done} of ${total} ${plural('en', total, { one: 'piece', other: 'pieces' })}`,
+      waiting: 'Waiting',
+      now: 'Now',
+      done: 'Done',
+      note: 'Only on the first visit and after the pictures change. Next time the world opens at once.',
+    },
     worldCard: {
       levelStripAria: 'Agent level and progress',
       levelStripLevel: (level: number) => `Level ${level}`,

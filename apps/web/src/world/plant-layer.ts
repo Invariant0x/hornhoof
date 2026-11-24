@@ -59,6 +59,12 @@ export type PlantLayoutOptions = Readonly<{
   lighting?: LightingSpec;
 }>;
 
+/* A share in [0, 1) that stays the plant's own, so a thinned field keeps the same plants from frame to frame. */
+function keepShare(p: Readonly<{ col: number; row: number }>): number {
+  const h = Math.sin(p.col * 127.1 + p.row * 311.7) * 43758.5453;
+  return h - Math.floor(h);
+}
+
 export class PlantLayout {
   private readonly pack: WorldPackManifest;
   private readonly field: PlantField;
@@ -69,6 +75,8 @@ export class PlantLayout {
   /* Lowest and highest lean among the plants laid out by the last build: how differently the grove is moving. */
   leanMin = 0;
   leanMax = 0;
+  /* Share of the plants laid out, the same ones every frame: the world's quality step thins them (#1947 item 6). */
+  density = 1;
 
   constructor(options: PlantLayoutOptions) {
     this.pack = options.pack;
@@ -87,7 +95,9 @@ export class PlantLayout {
   /* Fills `out` for the plants inside `view` at `timeSec`, and `reflections` (when given) with the mirrored plants that
      stand by the water. Returns the number of plants in view. */
   build(view: WorldRect, timeSec: number, out: PlantDrawList, reflections?: PlantDrawList): number {
-    const plants = visiblePlants(this.field, view, this.reach);
+    const inView = visiblePlants(this.field, view, this.reach);
+    const density = this.density;
+    const plants = density >= 1 ? inView : inView.filter(p => keepShare(p) < density);
     const kinds = this.pack.plants ?? [];
     const wind = this.pack.wind;
     const shadows = this.castsShadows;
@@ -227,6 +237,6 @@ export class PlantLayout {
       reflections.shadowCount = 0;
       reflections.count = reflN;
     }
-    return plants.length;
+    return inView.length;
   }
 }
