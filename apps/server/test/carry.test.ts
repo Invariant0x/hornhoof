@@ -3,7 +3,9 @@ import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { certificates, companies, departments, invites, machines, peerSecrets, people, personAccess, publicLinks, recoveryKeys } from '../src/db/schema.js';
+import { applyCarry } from '../src/modules/backups/restore.js';
 import type { Carry } from '../src/modules/backups/types.js';
+import { setCopies } from '../src/modules/files/copies.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
 /* What the updater runs on the database a restore replaces, read from where its image takes it. */
@@ -115,5 +117,28 @@ describe('the carry of a restore', () => {
     /* Each secret with when it was made, so the restored row is the one the database from before holds. */
     const stored = await db.select().from(peerSecrets);
     for (const secret of carry.peerSecrets!) expect(new Date(secret.createdAt!).getTime()).toBe(stored.find(row => row.kind === secret.kind)!.createdAt.getTime());
+  });
+
+  it("carries the key the company's files are sealed with and the copies the CEO asked for, so a database from before the store opens every file", async () => {
+    const { app, db } = await testApp();
+    await setUpCompany(app);
+    const read = async () => Object.values(((await db.execute(sql.raw(CARRY))) as unknown as { rows: Record<string, unknown>[] }).rows[0]!)[0] as Carry;
+    /* Before the first file: no key, and the copies as the default. */
+    expect(await read()).toMatchObject({ fileKeyEnc: null, fileCopies: null });
+
+    const kept = await app.ctx.files.putBytes(db, Buffer.from('a file of the company'));
+    await setCopies(db, 3, 'person:ceo');
+    const carry = await read();
+    const keyEnc = ((await db.execute(sql`SELECT key_enc FROM net.file_key`)) as unknown as { rows: { key_enc: string }[] }).rows[0]!.key_enc;
+    expect(carry).toMatchObject({ fileKeyEnc: keyEnc, fileCopies: { copies: 3, setBy: 'person:ceo' } });
+
+    /* A backup from before the store comes back: the store's key and setting come back with the carry, and the file opens,
+       where a key made anew would open none. */
+    await db.execute(sql`DELETE FROM net.file_key`);
+    await db.execute(sql`DELETE FROM net.file_settings`);
+    await applyCarry(app.ctx, carry);
+    expect((await read()).fileCopies).toEqual({ copies: 3, setBy: 'person:ceo' });
+    expect(((await db.execute(sql`SELECT key_enc FROM net.file_key`)) as unknown as { rows: { key_enc: string }[] }).rows).toEqual([{ key_enc: keyEnc }]);
+    expect((await app.ctx.files.bytes(db, kept.sha256)).toString()).toBe('a file of the company');
   });
 });

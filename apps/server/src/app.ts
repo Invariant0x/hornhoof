@@ -69,6 +69,7 @@ import { Merger } from './modules/merge/merger.js';
 import { mergeRoutes } from './modules/merge/routes.js';
 import { backupRoutes } from './modules/backups/routes.js';
 import { fileNetworkRoutes } from './modules/files/network.js';
+import { fileCopiesRoutes } from './modules/files/copies.js';
 import { fileMoveRoutes } from './modules/files/move.js';
 import { Computers } from './modules/computer/access.js';
 import { computerRoutes } from './modules/computer/routes.js';
@@ -467,6 +468,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   backupRoutes(app, ctx);
   fileNetworkRoutes(app, ctx);
   fileMoveRoutes(app, ctx);
+  fileCopiesRoutes(app, ctx);
   totalLossRoutes(app, ctx);
   mergeRoutes(app, ctx);
   challengeRoutes(app, ctx.challenges);

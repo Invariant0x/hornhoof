@@ -121,6 +121,7 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   await carryRecoveryKeys(db, company.id, carry, known, now);
   await carryAssistantKeys(db, completeKeys ? assistantKeys : []);
   await carryNodeKeys(db, completeKeys ? nodeKeys : []);
+  await carryFileStore(db, carry);
   await db.transaction(async tx => {
     await tx.delete(machineAccess);
     await tx.update(computerRuns).set({ state: 'lost' }).where(inArray(computerRuns.state, ['waiting', 'sent']));
@@ -129,6 +130,16 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   ctx.bus.accessChanged(company.id);
   ctx.bus.publish(company.id, { type: 'org' });
   ctx.bus.publish(company.id, { type: 'computer' });
+}
+
+/* The key the company's files are sealed with, as the old database had it: the files the machines keep are sealed with
+   it, whatever the restored database says, so it is the one kept. And how many machines keep each, as the CEO set it. */
+async function carryFileStore(db: Db, carry: Carry): Promise<void> {
+  if (carry.fileKeyEnc) await db.execute(sql`INSERT INTO net.file_key (key_enc) VALUES (${carry.fileKeyEnc}) ON CONFLICT (one) DO UPDATE SET key_enc = excluded.key_enc`);
+  if (carry.fileCopies) {
+    await db.execute(sql`INSERT INTO net.file_settings (copies, set_by) VALUES (${carry.fileCopies.copies}, ${carry.fileCopies.setBy})
+      ON CONFLICT (one) DO UPDATE SET copies = excluded.copies, set_by = excluded.set_by`);
+  }
 }
 
 /* Whether a machine holds the company's data now, as the old database had it when it closed: an older bundle would

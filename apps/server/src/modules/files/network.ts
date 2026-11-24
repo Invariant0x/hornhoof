@@ -4,11 +4,14 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
-import { pickHolders } from '../backups/holders.js';
 import { keeperAsker } from '../network/via.js';
+import { DEFAULT_AREA_BYTES } from './area.js';
+import { countedNow, keptElsewhere } from './place.js';
+import { SET_ASIDE } from './sweep.js';
 
-/* How the files of the store go between the company's machines, as the leading app keeps it: which machines hold them,
-   what each is to take, give back or let go of, and what each said it keeps. Only keepers ask, through the peer link. */
+/* How the files of the store go between the company's machines, as the leading app keeps it: what each machine is to
+   take, give back or let go of, and what each said it keeps. Which machines keep which file is placed in ./place. Only
+   keepers ask, through the peer link. */
 
 /* A machine is given at most this many files to take in one answer, and as many to let go of or send back. */
 export const VIEW_FILES = 200;
@@ -18,8 +21,6 @@ export const VIEW_WAIT_MS = 5_000;
 const VIEW_LOOK_MS = 500;
 /* A file the leading app missed is asked of the machines that hold it for this long. */
 const WANTED_MS = 600_000;
-/* A machine that is no holder any more lets a file go once this many holders keep it. */
-const KEPT_ELSEWHERE = 2;
 
 const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 type Tx = Pick<Db, 'execute'>;
@@ -36,42 +37,40 @@ const Span = z.strictObject({ after: z.union([z.literal(''), SHA]), through: z.u
 const Report = z.strictObject({ held: z.array(SHA).max(VIEW_FILES * 5), dropped: z.array(SHA).max(VIEW_FILES * 5), span: Span.optional() });
 export type FileReport = z.infer<typeof Report>;
 
-/* The machines that hold the files: every data machine, and those picked as backups are, among the machines that keep
-   none of the data, with room for the store as it is. The ones picked before keep their places while they qualify. */
-export async function refreshFileHolders(db: Db, now = new Date()): Promise<string[]> {
-  const [total] = rowsOf<{ size: string }>(await db.execute(sql`SELECT coalesce(sum(sealed_size), 0) AS size FROM net.files WHERE drop_at IS NULL`));
-  const kept = rowsOf<{ machine_id: string }>(await db.execute(sql`SELECT machine_id FROM net.file_holders ORDER BY since, machine_id`)).map(row => row.machine_id);
-  const picked = await pickHolders(db, { size: Math.max(1, Number(total?.size ?? 0)), keep: kept, now });
-  const gone = kept.filter(id => !picked.includes(id));
-  if (gone.length) await db.execute(sql`DELETE FROM net.file_holders WHERE machine_id = ANY(${listOf(gone)}::uuid[])`);
-  for (const id of picked.filter(id => !kept.includes(id))) await db.execute(sql`INSERT INTO net.file_holders (machine_id) VALUES (${id}) ON CONFLICT DO NOTHING`);
-  return picked;
-}
-
-/* Whether a machine is to hold the files: it keeps the data, or it was picked for them. */
-export async function holdsFiles(db: Tx, machineId: string): Promise<boolean> {
-  const [row] = rowsOf<{ holds: boolean }>(
-    await db.execute(sql`SELECT EXISTS (SELECT 1 FROM machines WHERE id = ${machineId} AND role = 'data' AND revoked_at IS NULL)
-      OR EXISTS (SELECT 1 FROM net.file_holders WHERE machine_id = ${machineId}) AS holds`),
+/* Whether a machine keeps files of the store: it is one of the company's with a keeper and an area more than none. */
+export async function keepsFiles(db: Tx, machineId: string): Promise<boolean> {
+  const [row] = rowsOf<{ keeps: boolean }>(
+    await db.execute(sql`SELECT EXISTS (SELECT 1 FROM machines m JOIN people p ON p.id = m.person_id WHERE m.id = ${machineId} AND m.revoked_at IS NULL
+      AND m.network_id IS NOT NULL AND m.role IN ('data', 'worker') AND p.status = 'active' AND coalesce(m.file_store_limit_bytes, ${DEFAULT_AREA_BYTES}) > 0) AS keeps`),
   );
-  return Boolean(row?.holds);
+  return Boolean(row?.keeps);
 }
 
-/* What a machine is to do with the files now. */
-export async function fileView(db: Tx, machineId: string, now = new Date()): Promise<FileView> {
-  const holds = await holdsFiles(db, machineId);
+/* Whether a machine is picked to keep a file, so the leading keeper gives it. */
+export async function pickedFor(db: Tx, machineId: string, sha256: string): Promise<boolean> {
+  const [row] = rowsOf<{ picked: boolean }>(await db.execute(sql`SELECT EXISTS (SELECT 1 FROM net.file_targets WHERE sha256 = ${sha256} AND machine_id = ${machineId}) AS picked`));
+  return Boolean(row?.picked) && (await keepsFiles(db, machineId));
+}
+
+/* What a machine is to do with the files now: fetch those it is picked for, let go of those whose time came and those
+   it is not picked for that the copies wanted keep elsewhere, and send back those the leading app missed. */
+export async function fileView(db: Tx, machineId: string, now = new Date(), leader: string | null = null): Promise<FileView> {
+  const holds = await keepsFiles(db, machineId);
   const hold = holds
     ? rowsOf<{ sha256: string; sealed_sha256: string; sealed_size: string }>(
-        await db.execute(sql`SELECT f.sha256, f.sealed_sha256, f.sealed_size FROM net.files f WHERE f.drop_at IS NULL
+        await db.execute(sql`SELECT f.sha256, f.sealed_sha256, f.sealed_size FROM net.file_targets t JOIN net.files f ON f.sha256 = t.sha256
+          WHERE t.machine_id = ${machineId} AND f.drop_at IS NULL
           AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256 AND c.machine_id = ${machineId})
-          ORDER BY f.made_at, f.sha256 LIMIT ${VIEW_FILES}`),
+          ORDER BY t.at, f.sha256 LIMIT ${VIEW_FILES}`),
       ).map(row => ({ sha256: row.sha256, sealedSha256: row.sealed_sha256, sealedSize: Number(row.sealed_size) }))
     : [];
-  /* A file goes from a machine once it is to go, or, from one that holds the files no more, once enough others keep it. */
+  const { ids, wanted } = await countedNow(db, leader, now);
+  const due = sql`f.drop_at <= ${now.toISOString()}::timestamptz`;
+  const notPicked = sql`(NOT EXISTS (SELECT 1 FROM net.file_targets t WHERE t.sha256 = c.sha256 AND t.machine_id = ${machineId})
+    AND ${keptElsewhere(sql`c.sha256`, machineId, ids)} >= ${Math.max(1, wanted)})`;
   const drop = rowsOf<{ sha256: string }>(
     await db.execute(sql`SELECT c.sha256 FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256 WHERE c.machine_id = ${machineId}
-      AND (f.drop_at <= ${now.toISOString()}::timestamptz OR (${!holds} AND (SELECT count(*) FROM net.file_copies o WHERE o.sha256 = c.sha256 AND o.machine_id <> ${machineId}) >= ${KEPT_ELSEWHERE}))
-      ORDER BY c.sha256 LIMIT ${VIEW_FILES}`),
+      AND (${due} OR ${notPicked}) ORDER BY c.sha256 LIMIT ${VIEW_FILES}`),
   ).map(row => row.sha256);
   const want = rowsOf<{ sha256: string }>(
     await db.execute(sql`SELECT c.sha256 FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256 WHERE c.machine_id = ${machineId}
@@ -80,36 +79,58 @@ export async function fileView(db: Tx, machineId: string, now = new Date()): Pro
   return { holds, hold, drop, want };
 }
 
+/* The files a machine says it keeps that count as its copies: those it was given, or any for a machine of the data,
+   which keeps the database too. The rest it is to fetch again, so it is given them. */
+async function givenOf(db: Tx, machineId: string, held: string[]): Promise<{ counted: string[]; again: string[] }> {
+  const rows = rowsOf<{ sha256: string; picked: boolean; given: boolean }>(
+    await db.execute(sql`SELECT f.sha256, EXISTS (SELECT 1 FROM net.file_targets t WHERE t.sha256 = f.sha256 AND t.machine_id = ${machineId}) AS picked,
+      (EXISTS (SELECT 1 FROM net.file_gives g WHERE g.sha256 = f.sha256 AND g.machine_id = ${machineId})
+        OR EXISTS (SELECT 1 FROM machines m WHERE m.id = ${machineId} AND m.role = 'data' AND m.revoked_at IS NULL)) AS given
+      FROM net.files f WHERE f.sha256 = ANY(${listOf(held)}::text[])
+      AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256 AND c.machine_id = ${machineId})`),
+  );
+  return { counted: rows.filter(row => row.given).map(row => row.sha256), again: rows.filter(row => row.picked && !row.given).map(row => row.sha256) };
+}
+
 /* What a machine said it keeps now and what it let go of. A file let go of by every machine that kept it, once it is to
    go, is no file of the store any more. The answer names the files it keeps that no record knows, which it lets go of
-   once they are a day old. A machine that holds no files any more is recorded with none it keeps. */
-export async function takeReport(db: Tx, machineId: string, report: FileReport): Promise<{ unknown: string[]; send: string[] }> {
+   once they are a day old; those the leading app lacks, to send; and those it is to fetch again before they count. */
+export async function takeReport(db: Tx, machineId: string, report: FileReport): Promise<{ unknown: string[]; send: string[]; again: string[] }> {
   let unknown: string[] = [];
   let send: string[] = [];
+  let again: string[] = [];
   if (report.span) {
     const { after, through } = report.span;
     await db.execute(sql`DELETE FROM net.file_copies WHERE machine_id = ${machineId} AND sha256 COLLATE "C" > ${after} AND sha256 COLLATE "C" <= ${through}
       AND NOT (sha256 = ANY(${listOf(report.held)}::text[]))`);
   }
   if (report.held.length) {
-    const holds = await holdsFiles(db, machineId);
+    const holds = await keepsFiles(db, machineId);
     const known = rowsOf<{ sha256: string }>(await db.execute(sql`SELECT sha256 FROM net.files WHERE sha256 = ANY(${listOf(report.held)}::text[])`)).map(row => row.sha256);
     if (holds && known.length) {
-      await db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id) SELECT unnest(${listOf(known)}::text[]), ${machineId}::uuid ON CONFLICT DO NOTHING`);
+      const given = await givenOf(db, machineId, known);
+      if (given.counted.length) {
+        await db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id) SELECT unnest(${listOf(given.counted)}::text[]), ${machineId}::uuid ON CONFLICT DO NOTHING`);
+        await db.execute(sql`DELETE FROM net.file_gives WHERE machine_id = ${machineId} AND sha256 = ANY(${listOf(given.counted)}::text[])`);
+      }
+      again = given.again;
     }
     /* A content a row names, as a merge brings it, and no record describes, is no stranger: it is to come here. */
     const strangers = report.held.filter(sha256 => !known.includes(sha256));
     const named = strangers.length
       ? rowsOf<{ sha256: string }>(await db.execute(sql`SELECT DISTINCT sha256 FROM attachments WHERE sha256 = ANY(${listOf(strangers)}::text[])`)).map(row => row.sha256)
       : [];
-    unknown = strangers.filter(sha256 => !named.includes(sha256));
+    /* While a database set aside may be merged back, a file no record here knows may be one its rows name: none is
+       unknown then, so no machine lets it go. */
+    const aside = rowsOf<{ aside: boolean }>(await db.execute(sql`SELECT ${SET_ASIDE} AS aside`))[0]?.aside === true;
+    unknown = aside ? [] : strangers.filter(sha256 => !named.includes(sha256));
     send = holds ? named : [];
   }
   if (report.dropped.length) {
     await db.execute(sql`DELETE FROM net.file_copies WHERE machine_id = ${machineId} AND sha256 = ANY(${listOf(report.dropped)}::text[])`);
     await db.execute(sql`DELETE FROM net.files f WHERE f.sha256 = ANY(${listOf(report.dropped)}::text[]) AND f.drop_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256)`);
   }
-  return { unknown, send };
+  return { unknown, send, again };
 }
 
 const hasWork = (view: FileView): boolean => view.hold.length > 0 || view.drop.length > 0 || view.want.length > 0;
@@ -128,10 +149,11 @@ export function fileNetworkRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/network/files', { logLevel: 'silent' }, async req => {
     const machine = await peerKeeper(req);
     const wait = Ask.parse(req.query).wait === '1';
-    let view = await fileView(db, machine);
+    const leader = await ctx.files.machineId(db);
+    let view = await fileView(db, machine, new Date(), leader);
     for (let waited = 0; wait && !hasWork(view) && waited < VIEW_WAIT_MS; waited += VIEW_LOOK_MS) {
       await new Promise(resolve => setTimeout(resolve, VIEW_LOOK_MS));
-      view = await fileView(db, machine);
+      view = await fileView(db, machine, new Date(), leader);
     }
     return view;
   });

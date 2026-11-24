@@ -1,18 +1,20 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { machines } from '../src/db/schema.js';
+import { orchestratorHeaders } from '../src/auth/internal.js';
+import { agents, machines, people } from '../src/db/schema.js';
 import { Files } from '../src/modules/files/files.js';
-import { refreshFileHolders } from '../src/modules/files/network.js';
-import { checkOwnCopies, dropDue } from '../src/modules/files/sweep.js';
+import { fileStoreState, pooledCapacity, setCopies } from '../src/modules/files/copies.js';
+import { apartFromBackup, type Seat } from '../src/modules/files/place.js';
+import { checkOwnCopies, dropDue, storeRound } from '../src/modules/files/sweep.js';
 import { FILE_PATH, FileHolder, type FileLink } from '../src/modules/keeper/file-holder.js';
 import { LeaderFiles } from '../src/modules/keeper/leader-files.js';
 import { backupCompany, from, MACHINE_ID } from './helpers-backups.js';
-import { until } from './helpers.js';
+import { as, invitePerson, until } from './helpers.js';
 
 /* The files of the store as they go between the company's machines: the leading app and its keeper on one machine, and
    the keepers of the machines that hold the files, which reach them through the peer link. Synthetic bytes only. */
@@ -52,18 +54,20 @@ async function stand() {
   };
   const copiesOf = async (sha256: string) =>
     rowsOf<{ machine_id: string }>(await c.db.execute(sql`SELECT machine_id FROM net.file_copies WHERE sha256 = ${sha256} ORDER BY machine_id`)).map(row => row.machine_id).sort();
-  const holders = async () => rowsOf<{ machine_id: string }>(await c.db.execute(sql`SELECT machine_id FROM net.file_holders`)).map(row => row.machine_id).sort();
-  return { ...c, server: server!, leaderDir, leader, holderOn, copiesOf, holders };
+  const targetsOf = async (sha256: string) =>
+    rowsOf<{ machine_id: string }>(await c.db.execute(sql`SELECT machine_id FROM net.file_targets WHERE sha256 = ${sha256}`)).map(row => row.machine_id).sort();
+  /* The store's round as the leading app runs it each minute. */
+  const round = (now = new Date()) => storeRound(c.app.ctx, now);
+  return { ...c, server: server!, leaderDir, leader, holderOn, copiesOf, targetsOf, round };
 }
 
 describe('the files of the store between machines', () => {
   it('reads a file uploaded through one machine on another, which took it sealed from the first', async () => {
     const s = await stand();
     const two = await s.worker('two');
-    await refreshFileHolders(s.db);
-    expect(await s.holders()).toEqual([two]);
     const bytes = randomBytes(200_000);
     const kept = await s.app.ctx.files.putBytes(s.db, bytes);
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id, two].sort());
     expect(await s.app.ctx.files.settled(s.db, kept.sha256, 0)).toBe(false);
 
     const { dir, holder } = s.holderOn(two);
@@ -77,12 +81,14 @@ describe('the files of the store between machines', () => {
     expect((await there.bytes(s.db, kept.sha256)).equals(bytes)).toBe(true);
   });
 
-  it('gives a file only to a machine named to hold the files, and takes one back only when it was asked for', async () => {
+  it('gives a file only to a machine picked to keep it, and takes one back only when it was asked for', async () => {
     const s = await stand();
-    const stranger = await s.worker('stranger', { keepsBackups: false });
+    const stranger = await s.worker('stranger');
+    await setCopies(s.db, 1, 'person:test');
     const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(1000));
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id]);
     expect((await s.leader.give(stranger, kept.sha256)).status).toBe(403);
-    expect((await s.app.inject({ url: '/api/network/files', ...from(stranger) })).json()).toMatchObject({ holds: false, hold: [] });
+    expect((await s.app.inject({ url: '/api/network/files', ...from(stranger) })).json()).toMatchObject({ holds: true, hold: [] });
     expect(await s.leader.take(stranger, kept.sha256, Readable.from([randomBytes(10)]))).toBe(403);
     /* No asker but another machine's keeper reads the view. */
     expect((await s.app.inject({ url: '/api/network/files' })).statusCode).toBe(403);
@@ -91,49 +97,58 @@ describe('the files of the store between machines', () => {
   it('loses no file with any one machine: the leader gets back what it lost, and a holder that lost its copy is filled again', async () => {
     const s = await stand();
     const [two, three] = [await s.worker('two'), await s.worker('three')];
-    await refreshFileHolders(s.db);
     const bytes = [randomBytes(70_000), randomBytes(130_000)];
     const kept = [await s.app.ctx.files.putBytes(s.db, bytes[0]!), await s.app.ctx.files.putBytes(s.db, bytes[1]!)];
     const [a, b] = [s.holderOn(two), s.holderOn(three)];
     await a.holder.lookOnce();
     await b.holder.lookOnce();
-    for (const file of kept) expect(await s.copiesOf(file.sha256)).toEqual([s.server.id, two, three].sort());
+    /* Two copies of each, as asked: the leader's and one of another machine's. */
+    const holderOf = async (sha256: string) => (await s.targetsOf(sha256)).find(id => id !== s.server.id)!;
+    for (const file of kept) expect(await s.copiesOf(file.sha256)).toEqual([s.server.id, await holderOf(file.sha256)].sort());
+    const of = (id: string) => (id === two ? a : b);
 
-    /* The leader's disk lost a file: a read asks the holders, and one sends it back. */
+    /* The leader's disk lost a file: a read asks the holder, and it sends it back. */
     await s.app.ctx.files.store().remove(kept[0]!.sha256);
     expect(await checkOwnCopies(s.app.ctx)).toBe(1);
     const reading = s.app.ctx.files.bytes(s.db, kept[0]!.sha256);
     await until(async () => rowsOf<{ n: number }>(await s.db.execute(sql`SELECT count(*)::int AS n FROM net.files WHERE wanted_at IS NOT NULL`))[0]!.n === 1);
-    await a.holder.lookOnce();
+    await of(await holderOf(kept[0]!.sha256)).holder.lookOnce();
     expect((await reading).equals(bytes[0]!)).toBe(true);
-    expect(await s.copiesOf(kept[0]!.sha256)).toEqual([s.server.id, two, three].sort());
+    expect(await s.copiesOf(kept[0]!.sha256)).toEqual([s.server.id, await holderOf(kept[0]!.sha256)].sort());
 
     /* A holder's disk lost a file: its census says so, and its next look takes it again. */
-    await a.holder.store.remove(kept[1]!.sha256);
-    await a.holder.census();
-    expect(await s.copiesOf(kept[1]!.sha256)).toEqual([s.server.id, three].sort());
-    await a.holder.lookOnce();
-    expect(a.holder.store.has(kept[1]!.sha256)).toBe(true);
+    const one = of(await holderOf(kept[1]!.sha256));
+    await one.holder.store.remove(kept[1]!.sha256);
+    await one.holder.census();
+    expect(await s.copiesOf(kept[1]!.sha256)).toEqual([s.server.id]);
+    await one.holder.lookOnce();
+    expect(one.holder.store.has(kept[1]!.sha256)).toBe(true);
 
-    /* A holder goes for good: the files are still on two machines, and a new one is filled. */
-    await s.db.update(machines).set({ revokedAt: new Date() }).where(eq(machines.id, three));
-    await refreshFileHolders(s.db);
+    /* A holder goes for good: its files are placed on a new machine, which takes them, and nothing is lost. */
+    const gone = await holderOf(kept[0]!.sha256);
+    await s.db.update(machines).set({ revokedAt: new Date() }).where(eq(machines.id, gone));
     await dropDue(s.app.ctx, new Date());
     const four = await s.worker('four');
-    await refreshFileHolders(s.db);
-    expect(await s.holders()).toEqual([two, four].sort());
+    await s.round();
     const c = s.holderOn(four);
     await c.holder.lookOnce();
+    await a.holder.lookOnce();
+    await b.holder.lookOnce();
+    await s.round();
     for (const [at, file] of kept.entries()) {
-      expect(await s.copiesOf(file.sha256)).toEqual([s.server.id, two, four].sort());
-      expect((await new Files({ ...s.config, filesDir: c.dir }).bytes(s.db, file.sha256)).equals(bytes[at]!)).toBe(true);
+      const copies = await s.copiesOf(file.sha256);
+      expect(copies.includes(gone)).toBe(false);
+      expect(copies.length).toBe(2);
+      expect(copies.includes(s.server.id)).toBe(true);
+      const elsewhere = copies.find(id => id !== s.server.id)!;
+      const dirOf = elsewhere === four ? c.dir : elsewhere === two ? a.dir : b.dir;
+      expect((await new Files({ ...s.config, filesDir: dirOf }).bytes(s.db, file.sha256)).equals(bytes[at]!)).toBe(true);
     }
   });
 
   it('keeps nothing a holder sends back that is not the file on record', async () => {
     const s = await stand();
     const two = await s.worker('two');
-    await refreshFileHolders(s.db);
     const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(5000));
     const { holder } = s.holderOn(two);
     await holder.lookOnce();
@@ -143,5 +158,262 @@ describe('the files of the store between machines', () => {
     expect(s.app.ctx.files.store().has(kept.sha256)).toBe(false);
     expect(await s.leader.take(two, kept.sha256, holder.store.sealed(kept.sha256)!.stream())).toBe(201);
     expect(s.app.ctx.files.store().has(kept.sha256)).toBe(true);
+  });
+});
+
+/* A machine's area, as its owner sets it in its settings: null for the default, 0 for none. */
+const areaOf = (s: Awaited<ReturnType<typeof stand>>, id: string, bytes: number | null) => s.db.execute(sql`UPDATE machines SET file_store_limit_bytes = ${bytes} WHERE id = ${id}`);
+/* A machine whose keeper was last heard from this long ago; 0 for just now. */
+const silentFor = (s: Awaited<ReturnType<typeof stand>>, id: string, ms: number) => s.db.update(machines).set({ reportAt: new Date(Date.now() - ms) }).where(eq(machines.id, id));
+const HOUR = 3_600_000;
+
+describe('where the files of the store are kept', () => {
+  it('keeps a file of a company with one machine on that machine, at once', async () => {
+    const s = await stand();
+    const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(3000));
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id]);
+    expect(await s.app.ctx.files.settled(s.db, kept.sha256, 0)).toBe(true);
+    expect(await s.app.ctx.files.copiesStand(s.db, kept.sha256)).toBe(true);
+  });
+
+  it('keeps each file on as many machines as the CEO asks, one off site first, and lets a copy go only once the others keep it', async () => {
+    const s = await stand();
+    /* The machine at home has more room free; the one off site is picked all the same. */
+    const home = await s.worker('home');
+    const away = await s.worker('away', { path: 'relay', diskFree: 3 * 1024 ** 3 });
+    const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(4000));
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id, away].sort());
+    const [h, a] = [s.holderOn(home), s.holderOn(away)];
+    await a.holder.lookOnce();
+    await h.holder.lookOnce();
+    expect([h.holder.store.has(kept.sha256), await s.copiesOf(kept.sha256)]).toEqual([false, [s.server.id, away].sort()]);
+
+    await setCopies(s.db, 3, 'person:test');
+    await s.round();
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id, home, away].sort());
+    await h.holder.lookOnce();
+    expect(await s.copiesOf(kept.sha256)).toEqual([s.server.id, home, away].sort());
+
+    /* Two again: the copy picked last goes, and only after the two kept keep it. */
+    await setCopies(s.db, 2, 'person:test');
+    await s.round();
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id, away].sort());
+    await h.holder.lookOnce();
+    expect([h.holder.store.has(kept.sha256), await s.copiesOf(kept.sha256)]).toEqual([false, [s.server.id, away].sort()]);
+  });
+
+  it('keeps the files of a leading machine with no area on two others, and lets its own copy go once they keep them, past what it keeps for reads', async () => {
+    const s = await stand();
+    const [two, three] = [await s.worker('two'), await s.worker('three')];
+    await areaOf(s, s.server.id, 0);
+    const bytes = randomBytes(9000);
+    const kept = await s.app.ctx.files.putBytes(s.db, bytes);
+    expect([await s.targetsOf(kept.sha256), await s.copiesOf(kept.sha256)]).toEqual([[two, three].sort(), [s.server.id]]);
+    expect(await s.app.ctx.files.copiesStand(s.db, kept.sha256)).toBe(false);
+    const [b, c] = [s.holderOn(two), s.holderOn(three)];
+    await b.holder.lookOnce();
+    await c.holder.lookOnce();
+    expect(await s.app.ctx.files.copiesStand(s.db, kept.sha256)).toBe(true);
+
+    /* It keeps what fits the room for reads... */
+    s.app.ctx.files.transitBytes = 1024 ** 3;
+    await s.round();
+    expect(s.app.ctx.files.store().has(kept.sha256)).toBe(true);
+    /* ...and lets go of the rest. */
+    s.app.ctx.files.transitBytes = 0;
+    await s.round();
+    expect([s.app.ctx.files.store().has(kept.sha256), await s.copiesOf(kept.sha256)]).toEqual([false, [two, three].sort()]);
+
+    /* A read there takes it from a machine that keeps it. */
+    const reading = s.app.ctx.files.bytes(s.db, kept.sha256);
+    await until(async () => rowsOf<{ n: number }>(await s.db.execute(sql`SELECT count(*)::int AS n FROM net.files WHERE wanted_at IS NOT NULL`))[0]!.n === 1);
+    await b.holder.lookOnce();
+    expect((await reading).equals(bytes)).toBe(true);
+  });
+
+  it('keeps the files of a machine away for less than a day where they are, and gives it the new ones once it is back', async () => {
+    const s = await stand();
+    const two = await s.worker('two');
+    const old = await s.app.ctx.files.putBytes(s.db, randomBytes(2000));
+    const h = s.holderOn(two);
+    await h.holder.lookOnce();
+    await silentFor(s, two, 3 * HOUR);
+    const fresh = await s.app.ctx.files.putBytes(s.db, randomBytes(2500));
+    expect(await s.targetsOf(fresh.sha256)).toEqual([s.server.id]);
+    /* The upload is answered at once, and the file is not moved out of a row while it waits for its second copy. */
+    expect([await s.app.ctx.files.settled(s.db, fresh.sha256, 0), await s.app.ctx.files.copiesStand(s.db, fresh.sha256)]).toEqual([true, false]);
+    await s.round();
+    expect([await s.targetsOf(old.sha256), await s.targetsOf(fresh.sha256)]).toEqual([[s.server.id, two].sort(), [s.server.id]]);
+
+    await silentFor(s, two, 0);
+    await s.round();
+    expect(await s.targetsOf(fresh.sha256)).toEqual([s.server.id, two].sort());
+    await h.holder.lookOnce();
+    expect(await s.app.ctx.files.copiesStand(s.db, fresh.sha256)).toBe(true);
+  });
+
+  it('places the files of a machine away for over a day on another, and that machine lets them go once it is back', async () => {
+    const s = await stand();
+    const ids = [await s.worker('two'), await s.worker('three')];
+    const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(6000));
+    const picked = (await s.targetsOf(kept.sha256)).find(id => id !== s.server.id)!;
+    const spare = ids.find(id => id !== picked)!;
+    const [p, q] = [s.holderOn(picked), s.holderOn(spare)];
+    await p.holder.lookOnce();
+    await q.holder.lookOnce();
+    expect(q.holder.store.has(kept.sha256)).toBe(false);
+
+    await silentFor(s, picked, 25 * HOUR);
+    await s.round();
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id, picked, spare].sort());
+    await q.holder.lookOnce();
+    await s.round();
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id, spare].sort());
+
+    await silentFor(s, picked, 0);
+    await p.holder.lookOnce();
+    expect([p.holder.store.has(kept.sha256), await s.copiesOf(kept.sha256)]).toEqual([false, [s.server.id, spare].sort()]);
+  });
+
+  it('moves the files of a machine whose area was set to nothing elsewhere before it lets them go, and keeps them there while no other has room', async () => {
+    const s = await stand();
+    const ids = [await s.worker('two'), await s.worker('three')];
+    const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(5000));
+    const picked = (await s.targetsOf(kept.sha256)).find(id => id !== s.server.id)!;
+    const other = ids.find(id => id !== picked)!;
+    const [p, q] = [s.holderOn(picked), s.holderOn(other)];
+    await p.holder.lookOnce();
+
+    /* No room on the other machine: the copy stays where it is, and the CEO sees it waits. */
+    await areaOf(s, other, 1);
+    await areaOf(s, picked, 0);
+    await s.round();
+    await p.holder.lookOnce();
+    expect([await s.targetsOf(kept.sha256), p.holder.store.has(kept.sha256)]).toEqual([[s.server.id, picked].sort(), true]);
+    const waiting = await fileStoreState(s.app.ctx);
+    expect([waiting.effectiveCopies, waiting.underCopied, waiting.stuckBytes > 0]).toEqual([2, 1, true]);
+
+    /* Room again: it is copied there first, and only then let go of. */
+    await areaOf(s, other, null);
+    await s.round();
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id, picked, other].sort());
+    await p.holder.lookOnce();
+    expect(p.holder.store.has(kept.sha256)).toBe(true);
+    await q.holder.lookOnce();
+    await s.round();
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id, other].sort());
+    await p.holder.lookOnce();
+    expect([p.holder.store.has(kept.sha256), await s.copiesOf(kept.sha256)]).toEqual([false, [s.server.id, other].sort()]);
+    expect(await fileStoreState(s.app.ctx)).toMatchObject({ underCopied: 0, stuckBytes: 0 });
+  });
+
+  it("counts a machine's word that it keeps a file only for a file it is picked for and was given", async () => {
+    const s = await stand();
+    const [two, three] = [await s.worker('two'), await s.worker('three', { path: 'relay' })];
+    const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(3000));
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id, three].sort());
+    const say = (machine: string) => s.app.inject({ method: 'POST', url: '/api/network/files', payload: { held: [kept.sha256], dropped: [] }, ...from(machine) });
+    /* Picked, but never given it; and not picked at all. */
+    expect((await say(three)).json()).toMatchObject({ again: [kept.sha256] });
+    expect((await say(two)).json()).toMatchObject({ again: [] });
+    expect(await s.copiesOf(kept.sha256)).toEqual([s.server.id]);
+
+    /* A holder that has the file from elsewhere asks for it, and its word counts from then on. */
+    const { holder } = s.holderOn(three);
+    const facts = await s.app.ctx.files.store().sealedFacts(kept.sha256);
+    await holder.store.take(kept.sha256, s.app.ctx.files.store().sealed(kept.sha256)!.stream(), facts);
+    await holder.lookOnce();
+    expect(await s.copiesOf(kept.sha256)).toEqual([s.server.id, three].sort());
+    expect(rowsOf(await s.db.execute(sql`SELECT 1 FROM net.file_gives`)).length).toBe(0);
+  });
+
+  it('seals a file uploaded again, which the leading machine let go of, under the salt its copies elsewhere have', async () => {
+    const s = await stand();
+    const two = await s.worker('two');
+    await areaOf(s, s.server.id, 0);
+    const bytes = randomBytes(150_000);
+    const kept = await s.app.ctx.files.putBytes(s.db, bytes);
+    const { holder } = s.holderOn(two);
+    await holder.lookOnce();
+    s.app.ctx.files.transitBytes = 0;
+    await s.round();
+    expect(s.app.ctx.files.store().has(kept.sha256)).toBe(false);
+    const record = async () => rowsOf<{ sealed_sha256: string; salt: string }>(await s.db.execute(sql`SELECT sealed_sha256, salt FROM net.files WHERE sha256 = ${kept.sha256}`))[0]!;
+    const before = await record();
+
+    await s.app.ctx.files.putBytes(s.db, bytes);
+    expect(await record()).toEqual(before);
+    expect((await s.app.ctx.files.store().sealedFacts(kept.sha256)).sealedSha256).toBe(before.sealed_sha256);
+    expect((await holder.store.sealedFacts(kept.sha256)).sealedSha256).toBe(before.sealed_sha256);
+  });
+
+  it("shows the CEO how the store stands and takes the copies he asks for, from him or the orchestrator for him alone", async () => {
+    const s = await stand();
+    await s.worker('two');
+    const [owner] = await s.db.select().from(people).where(eq(people.isOwner, true));
+    const [orchestrator] = await s.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const zed = await invitePerson(s.app, s.ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
+    const inside = { headers: orchestratorHeaders(owner!.id, orchestrator!.id) };
+    const read = (who: object) => s.app.inject({ url: '/api/company/file-store', ...who });
+    const set = (payload: object, who: object) => s.app.inject({ method: 'PATCH', url: '/api/company/file-store', payload, ...who });
+    await s.app.ctx.files.putBytes(s.db, randomBytes(1000));
+
+    for (const [who, status] of [[as(zed), 403], [{}, 401]] as const) expect([(await read(who)).statusCode, (await set({ copies: 3 }, who)).statusCode]).toEqual([status, status]);
+    expect((await read(as(s.ceo))).json()).toMatchObject({ copies: 2, effectiveCopies: 2, machines: 2, filesBytes: 1000, underCopied: 1, stuckBytes: 0, capacityBytes: 10 * 1024 ** 3 });
+    for (const bad of [{ copies: 0 }, { copies: 6 }, { copies: 2.5 }, { copies: 2, more: 1 }]) expect((await set(bad, as(s.ceo))).statusCode).toBe(400);
+    expect((await set({ copies: 3 }, inside)).json()).toMatchObject({ copies: 3, effectiveCopies: 2 });
+    expect((await set({ copies: 1 }, as(s.ceo))).json()).toMatchObject({ copies: 1, effectiveCopies: 1, underCopied: 0, capacityBytes: 20 * 1024 ** 3 });
+    expect(rowsOf<{ set_by: string }>(await s.db.execute(sql`SELECT set_by FROM net.file_settings`))[0]!.set_by).toBe(`person:${owner!.id}`);
+  });
+
+  it('lets a machine not picked for a file keep its copy while fewer machines picked for it that count keep it than wanted', async () => {
+    const s = await stand();
+    const [two, three] = [await s.worker('two'), await s.worker('three')];
+    await setCopies(s.db, 3, 'person:test');
+    const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(3000));
+    const [b, c] = [s.holderOn(two), s.holderOn(three)];
+    await b.holder.lookOnce();
+    await c.holder.lookOnce();
+    await setCopies(s.db, 2, 'person:test');
+    await s.round();
+    const picked = await s.targetsOf(kept.sha256);
+    expect(picked.length).toBe(2);
+    const spare = picked.includes(two) ? three : two;
+    const other = spare === two ? three : two;
+    /* The other picked machine goes silent for over a day before the one not picked looks: its copy stays. */
+    await silentFor(s, other, 25 * HOUR);
+    const holderOfSpare = spare === two ? b : c;
+    await holderOfSpare.holder.lookOnce();
+    expect(holderOfSpare.holder.store.has(kept.sha256)).toBe(true);
+    /* And it is picked again, as it keeps the file. */
+    await s.round();
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id, spare].sort());
+  });
+
+  it('keeps no live copy on the machine that keeps the store backup while the others are as many as the copies asked for', () => {
+    const seat = (id: string, over: Partial<Seat> = {}): Seat => ({ id, leader: false, fit: true, online: true, lost: false, addresses: [], relayed: false, area: 100, assigned: 0, room: 100, backup: false, ...over });
+    const all = [seat('a', { leader: true }), seat('b'), seat('c')];
+    expect(apartFromBackup(all, ['c'], 2).map(one => [one.id, one.fit, one.backup])).toEqual([['a', true, false], ['b', true, false], ['c', false, true]]);
+    expect(apartFromBackup(all, ['c'], 3).map(one => [one.id, one.fit, one.backup])).toEqual([['a', true, false], ['b', true, false], ['c', true, true]]);
+    expect(apartFromBackup([all[0]!, seat('b', { lost: true }), all[2]!], ['c'], 2).find(one => one.id === 'c')!.fit).toBe(true);
+  });
+
+  it('calls no file a machine keeps unknown while a database set aside may be merged back', async () => {
+    const s = await stand();
+    const two = await s.worker('two');
+    const stranger = createHash('sha256').update(randomBytes(16)).digest('hex');
+    const say = () => s.app.inject({ method: 'POST', url: '/api/network/files', payload: { held: [stranger], dropped: [] }, ...from(two) });
+    expect((await say()).json()).toMatchObject({ unknown: [stranger] });
+    await s.db.execute(sql.raw('CREATE DATABASE hornhoof_before_20261124_090000'));
+    expect((await say()).json()).toMatchObject({ unknown: [] });
+  });
+
+  it('counts what the areas hold of files kept on as many machines', () => {
+    const GIB = 1024 ** 3;
+    expect(pooledCapacity([100 * GIB, 10 * GIB, 10 * GIB], 2)).toBe(20 * GIB);
+    expect(pooledCapacity([100 * GIB, 10 * GIB, 10 * GIB], 1)).toBe(120 * GIB);
+    expect(pooledCapacity([100 * GIB, 10 * GIB, 10 * GIB], 3)).toBe(10 * GIB);
+    expect(pooledCapacity([30, 30, 30], 2)).toBe(45);
+    expect(pooledCapacity([10 * GIB], 2)).toBe(0);
   });
 });

@@ -3,7 +3,9 @@
 -- replaced and no assistant's or node's key that was revoked, cleared or replaced. With it, who holds the company's data
 -- now, and the link as the relay takes it now with the secrets of the peer services, each sealed as it is stored: a
 -- machine that stopped holding the data holds it no more after a restore, and a key or a secret it knew opens nothing.
--- One line of JSON.
+-- And the key the company's files are sealed with, with how many machines keep each: a database from before the store,
+-- or before its first file, has no key, and one made then would open none of the files the machines keep. The store's
+-- tables are read by name, so the carry of a database from before them says none. One line of JSON.
 SELECT jsonb_build_object(
   'people', COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'id', p.id, 'status', p.status, 'passwordHash', p.password_hash, 'scopeKind', p.scope_kind, 'isOwner', p.is_owner, 'isCeoDelegate', p.is_ceo_delegate,
@@ -27,4 +29,9 @@ SELECT jsonb_build_object(
     FROM recovery_keys), '[]'::jsonb),
   'assistantKeys', COALESCE((SELECT jsonb_agg(jsonb_build_object('personId', person_id, 'keyHash', key_hash, 'keyCreatedAt', key_created_at, 'wakeSecretEnc', wake_secret_enc))
     FROM assistants WHERE key_hash IS NOT NULL), '[]'::jsonb),
-  'nodeKeys', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'keyHash', key_hash)) FROM nodes WHERE key_hash IS NOT NULL), '[]'::jsonb));
+  'nodeKeys', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'keyHash', key_hash)) FROM nodes WHERE key_hash IS NOT NULL), '[]'::jsonb),
+  'fileKeyEnc', CASE WHEN to_regclass('net.file_key') IS NOT NULL THEN (SELECT (xpath('/row/key_enc/text()', x))[1]::text
+      FROM query_to_xml('SELECT key_enc FROM net.file_key LIMIT 1', false, true, '') AS x WHERE x::text <> '') END,
+  'fileCopies', CASE WHEN to_regclass('net.file_settings') IS NOT NULL THEN (SELECT jsonb_build_object('copies', (xpath('/row/copies/text()', x))[1]::text::int,
+      'setBy', (xpath('/row/set_by/text()', x))[1]::text) FROM query_to_xml('SELECT copies, set_by FROM net.file_settings LIMIT 1', false, true, '') AS x
+      WHERE x::text <> '') END);

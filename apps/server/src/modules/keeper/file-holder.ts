@@ -22,7 +22,7 @@ const View = z.object({
   want: z.array(SHA),
 });
 export type HeldView = z.infer<typeof View>;
-const Answer = z.object({ unknown: z.array(SHA).default([]), send: z.array(SHA).default([]) });
+const Answer = z.object({ unknown: z.array(SHA).default([]), send: z.array(SHA).default([]), again: z.array(SHA).default([]) });
 
 /* The leader as this keeper reaches it: whether one is in reach, a request to its app, and a stream of its own to the
    leading keeper, which carries a file. */
@@ -41,9 +41,9 @@ type FileHolderOptions = {
   now?: () => number;
 };
 
-/* Holds the company's files on a machine the leading app named for them: a copy of the data, or one picked as backups
-   are. It takes each file it is to hold from the leading keeper, sealed, and keeps it only when it is as long and hashes
-   to what the record says; it cannot open one. It lets a file go only when the leading app says so, sends back a file
+/* Holds the company's files on a machine that gives them an area of its disk: the files the leading app picked it for.
+   It takes each file it is to hold from the leading keeper, sealed, and keeps it only when it is as long and hashes to
+   what the record says; it cannot open one. It lets a file go only when the leading app says so, sends back a file
    the leader lacks, and says what it keeps. With no leader in reach, it keeps everything. */
 export class FileHolder {
   readonly store: FileStore;
@@ -113,8 +113,9 @@ export class FileHolder {
   private async report(held: string[], dropped: string[], span?: { after: string; through: string }): Promise<string[]> {
     const answer = await this.opts.link.request('POST', FILES_VIEW_PATH, { held, dropped, ...(span ? { span } : {}) });
     if (answer.status >= 300) throw new Error(`the company server answered ${answer.status}`);
-    const said = Answer.safeParse(answer.body ?? {}).data ?? { unknown: [], send: [] };
+    const said = Answer.safeParse(answer.body ?? {}).data ?? { unknown: [], send: [], again: [] };
     for (const sha256 of said.send) await this.send(sha256);
+    for (const sha256 of said.again) await this.askAgain(sha256);
     return said.unknown;
   }
 
@@ -147,6 +148,16 @@ export class FileHolder {
       return false;
     } finally {
       body?.destroy();
+    }
+  }
+
+  /* A file this machine keeps already and was not given, as one it kept from before it was picked for it: it asks the
+     leading keeper for it, so its word that it keeps it counts on its next look. */
+  private async askAgain(sha256: string): Promise<void> {
+    try {
+      (await this.opts.link.stream('GET', `${FILE_PATH}${sha256}`)).body.destroy();
+    } catch (err) {
+      this.say('fetch', `Could not fetch a file of the company: ${reasonOf(err)}`);
     }
   }
 

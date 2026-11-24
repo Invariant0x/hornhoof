@@ -72,4 +72,8 @@ export type Carry = {
   assistantKeys?: { personId: string; keyHash: string; keyCreatedAt: string; wakeSecretEnc: string }[];
   /* The nodes' keys that open something now. An empty list means none may be restored. */
   nodeKeys?: { id: string; keyHash: string }[];
+  /* The key the company's files are sealed with, sealed as it is stored, and how many machines keep each file as the CEO
+     set it; none from a database before the store, or before its first file, or before the CEO set it. */
+  fileKeyEnc?: string | null;
+  fileCopies?: { copies: number; setBy: string } | null;
 };

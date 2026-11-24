@@ -57,9 +57,11 @@ function openChunk(key: Buffer, n: number, last: boolean, sealed: Buffer, data: 
 }
 
 /* Seals what passes through, under the name it gives once every byte passed. A chunk goes out once the next byte came,
-   so the last one is known when it is sealed. */
-export function seal(key: Buffer, name: () => string): Transform {
-  const salt = randomBytes(SALT);
+   so the last one is known when it is sealed. The same bytes under the same name, key and salt seal the same, so a
+   machine that seals a file again under the salt its copies elsewhere have keeps the very bytes they keep; no other
+   bytes are ever sealed under that salt, as the name is the sha256 of the bytes. */
+export function seal(key: Buffer, name: () => string, salt: Buffer = randomBytes(SALT)): Transform {
+  if (salt.length !== SALT) throw new Error('A seal\'s salt is 16 bytes.');
   const k = fileKey(key, salt);
   let held: Buffer = Buffer.alloc(0);
   let n = 0;
@@ -85,6 +87,9 @@ export function seal(key: Buffer, name: () => string): Transform {
     },
   });
 }
+
+/* The salt a sealed file's head carries, in hex. */
+export const saltOf = (head: Buffer): string => head.subarray(MAGIC.length, SEAL_HEAD).toString('hex');
 
 /* How a sealed file opens, from its head: the file's key, and what its chunks and its last one are sealed with. */
 type Opening = { k: Buffer; data: Buffer; last: Buffer };

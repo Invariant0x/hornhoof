@@ -13,7 +13,8 @@ import { SealRefused } from './seal.js';
 /* Moves the bytes an older Hornhoof kept in Postgres, and the big files it kept on the disk of the machine that took
    them, into the store, while the app leads and the server goes on serving. The state is in the rows: a row that names no
    content yet is not moved yet. A row is named by its content only in an update that proves its bytes are the bytes the
-   store keeps, and only once a second machine keeps them where the company has one; it keeps its bytes. They are cleared
+   store keeps, and only once they stand on as many of the company's machines as they want (place.ts), whether or not
+   those machines are online this minute; it keeps its bytes. They are cleared
    only once the CEO said yes to the reconciliation that lists the row (move.ts), again only in an update that proves they
    are the bytes stored. A crash or a restart goes on from the next row: what was stored already is found there again.
    Once no row holds a byte, the column goes and the table gives its room back. */
@@ -22,7 +23,7 @@ import { SealRefused } from './seal.js';
 const MOVE_BATCH = 5;
 /* Rows cleared a time. */
 const CLEAR_BATCH = 20;
-/* Files stored and waiting for a second machine at most, before the mover stores more. */
+/* Files stored and waiting for their copies at most, before the mover stores more. */
 const MAX_WAITING = 200;
 /* How long one round moves files at most, so the minute round goes on. */
 export const MOVE_BUDGET_MS = 20_000;
@@ -44,7 +45,7 @@ export type MoveRound = {
 type Mover = Pick<Ctx, 'db' | 'config' | 'files'>;
 type Row = { id: string; size: number; held: number | null };
 
-/* Where the mover stands on this app: files stored that wait for a second machine, by row, the last row it looked at,
+/* Where the mover stands on this app: files stored that wait for their copies, by row, the last row it looked at,
    and whether it said the files stay where they are. */
 type Moved = { sha256: string; size: number; disk: boolean };
 type Place = { waiting: Map<string, Moved>; after: string; told?: boolean };
@@ -198,7 +199,7 @@ export async function finishMove(ctx: Pick<Ctx, 'db'>): Promise<boolean> {
   return true;
 }
 
-/* The contents stored for rows that wait for a second machine are in use, as a row's are, however long that machine is
+/* The contents stored for rows that wait for their copies are in use, as a row's are, however long that machine is
    away: no round of the store lets them go. One the store let go meanwhile is stored again later, as its row still holds
    the bytes. */
 async function keepWaiting(ctx: Mover, place: Place): Promise<void> {
@@ -219,27 +220,27 @@ function staysHere(place: Place, column: boolean): MoveRound {
   return { moved: 0, waiting: 0, finished: !column, ...stays };
 }
 
-/* The rows whose stored files a second machine keeps now are named by them. Says how many were. */
+/* The rows whose stored files stand on their copies now are named by them. Says how many were. */
 async function settleWaiting(ctx: Mover, place: Place, column: boolean): Promise<number> {
   await keepWaiting(ctx, place);
   let moved = 0;
   for (const [id, waiting] of place.waiting) {
-    if (!(await ctx.files.settled(ctx.db, waiting.sha256, 0))) continue;
+    if (!(await ctx.files.copiesStand(ctx.db, waiting.sha256))) continue;
     if (await settle(ctx, id, waiting, column)) moved++;
     place.waiting.delete(id);
   }
   return moved;
 }
 
-/* Stores one row's file, checked by opening it again, and the row is named by it at once, or waits for a second
-   machine. Says whether it was named. */
+/* Stores one row's file, checked by opening it again, and the row is named by it at once, or waits for its copies.
+   Says whether it was named. */
 async function moveRow(ctx: Mover, place: Place, row: Row, column: boolean): Promise<boolean> {
   const source = await sourceOf(ctx, row);
   if (!source) return false;
   const kept = await ctx.files.put(ctx.db, source.input);
   if (!(await opensTo(ctx, kept.sha256)) || (source.disk && kept.size !== row.size)) return false;
   const waiting = { sha256: kept.sha256, size: kept.size, disk: source.disk };
-  if (!(await ctx.files.settled(ctx.db, kept.sha256, 0))) {
+  if (!(await ctx.files.copiesStand(ctx.db, kept.sha256))) {
     place.waiting.set(row.id, waiting);
     return false;
   }
@@ -274,7 +275,7 @@ async function endRound(ctx: Mover, place: Place, column: boolean): Promise<Pick
   return { finished, ...(ready ? { ready } : {}), ...(roomBack ? { roomBack } : {}) };
 }
 
-/* One round of the mover, for at most budgetMs: first the rows whose stored files a second machine keeps now, then more
+/* One round of the mover, for at most budgetMs: first the rows whose stored files stand on their copies now, then more
    rows, then the rows the CEO said yes to clearing, then the reconciliation and the finish. A server with no FILES_DIR
    leaves the files in Postgres. */
 export async function moveOldFiles(ctx: Mover, opts: { budgetMs?: number; now?: () => number } = {}): Promise<MoveRound> {

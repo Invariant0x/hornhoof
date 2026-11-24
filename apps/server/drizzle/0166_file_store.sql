@@ -21,14 +21,15 @@ CREATE TABLE net.file_key (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 --> statement-breakpoint
--- Each file of the store once, by the sha256 of its plain bytes, with the hash and size of the sealed bytes the machines
--- keep. unused_since: when the sweep last found no row naming it; drop_at: from when the machines take it away;
+-- Each file of the store once, by the sha256 of its plain bytes, with the hash, size and salt of the sealed bytes the
+-- machines keep: every copy is sealed under that salt, so every copy is the same bytes. unused_since: when the sweep last found no row naming it; drop_at: from when the machines take it away;
 -- wanted_at: when the leading app last missed it, so a machine that holds it sends it.
 CREATE TABLE net.files (
   sha256 text PRIMARY KEY CHECK (sha256 ~ '^[0-9a-f]{64}$'),
   size bigint NOT NULL CHECK (size >= 0),
   sealed_sha256 text NOT NULL CHECK (sealed_sha256 ~ '^[0-9a-f]{64}$'),
   sealed_size bigint NOT NULL CHECK (sealed_size > 0),
+  salt text NOT NULL CHECK (salt ~ '^[0-9a-f]{32}$'),
   made_at timestamptz NOT NULL DEFAULT now(),
   unused_since timestamptz,
   drop_at timestamptz,
@@ -47,10 +48,33 @@ CREATE TABLE net.file_copies (
 --> statement-breakpoint
 CREATE INDEX file_copies_machine ON net.file_copies (machine_id);
 --> statement-breakpoint
--- The machines that keep no data and were picked to keep the files too, as backups are.
-CREATE TABLE net.file_holders (
-  machine_id uuid PRIMARY KEY,
-  since timestamptz NOT NULL DEFAULT now()
+-- How many of the company's machines keep each file, as the CEO set it: each copy on another machine, as far as there are
+-- machines that keep files. One row; none means the default, two.
+CREATE TABLE net.file_settings (
+  one boolean PRIMARY KEY DEFAULT true CHECK (one),
+  copies integer NOT NULL CHECK (copies BETWEEN 1 AND 5),
+  set_at timestamptz NOT NULL DEFAULT now(),
+  set_by text NOT NULL
+);
+--> statement-breakpoint
+-- The machines picked to keep each file. A machine fetches the files it is picked for, and lets one go only once it is not
+-- picked for it any more and the copies asked for stand on machines that are.
+CREATE TABLE net.file_targets (
+  sha256 text NOT NULL REFERENCES net.files (sha256) ON DELETE CASCADE,
+  machine_id uuid NOT NULL,
+  at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (sha256, machine_id)
+);
+--> statement-breakpoint
+CREATE INDEX file_targets_machine ON net.file_targets (machine_id, at, sha256);
+--> statement-breakpoint
+-- Which machine the leading keeper gave which file to: a machine's word that it keeps a file counts only for one it was
+-- given, so a machine that only says so takes no copy's place.
+CREATE TABLE net.file_gives (
+  sha256 text NOT NULL REFERENCES net.files (sha256) ON DELETE CASCADE,
+  machine_id uuid NOT NULL,
+  at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (sha256, machine_id)
 );
 --> statement-breakpoint
 -- The reconciliations of the move out of the database. Once every row whose bytes are on the machine is copied into the
@@ -99,5 +123,11 @@ DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION net.fence_check();
 CREATE CONSTRAINT TRIGGER net_fence AFTER INSERT OR UPDATE OR DELETE ON net.file_copies
 DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION net.fence_check();
 --> statement-breakpoint
-CREATE CONSTRAINT TRIGGER net_fence AFTER INSERT OR UPDATE OR DELETE ON net.file_holders
+CREATE CONSTRAINT TRIGGER net_fence AFTER INSERT OR UPDATE OR DELETE ON net.file_settings
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION net.fence_check();
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER net_fence AFTER INSERT OR UPDATE OR DELETE ON net.file_targets
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION net.fence_check();
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER net_fence AFTER INSERT OR UPDATE OR DELETE ON net.file_gives
 DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION net.fence_check();

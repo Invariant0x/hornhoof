@@ -1,15 +1,15 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { closeSync, createReadStream, fstatSync, openSync, readSync, statSync } from 'node:fs';
-import { link, mkdir, open, readdir, rm, stat } from 'node:fs/promises';
+import { link, mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable, Transform, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { checkEnds, lastChunkOf, openSealed, SEAL_HEAD, SealRefused, seal } from './seal.js';
+import { checkEnds, lastChunkOf, openSealed, saltOf, SEAL_HEAD, SealRefused, seal } from './seal.js';
 
 /* A file's name in the store: the sha256 of its plain bytes, and nothing else. */
 export const SHA256 = /^[0-9a-f]{64}$/;
 /* What the store knows of a file in it: its plain hash and size, and the hash and size of the sealed bytes it keeps. */
-export type StoredFile = { sha256: string; size: number; sealedSha256: string; sealedSize: number };
+export type StoredFile = { sha256: string; size: number; sealedSha256: string; sealedSize: number; salt: string };
 /* What a put may be at most, in plain bytes, and what it says when it is more. */
 export type StoreRoom = { bytes: number; full: () => Error };
 /* A transfer that moves no byte for this long is cut. */
@@ -170,11 +170,35 @@ export class FileStore {
     return file.pipe(out);
   }
 
-  /* The hash and size of the sealed bytes of a file here. */
-  async sealedFacts(sha256: string): Promise<{ sealedSha256: string; sealedSize: number }> {
+  /* The hash and size of the sealed bytes of a file here, and the salt its head carries. */
+  async sealedFacts(sha256: string): Promise<{ sealedSha256: string; sealedSize: number; salt: string }> {
     const count = counter();
-    await pipeline(createReadStream(this.path(sha256)), count, new Writable({ write: (_chunk, _encoding, done) => done() }));
-    return { sealedSha256: count.digest(), sealedSize: count.bytes };
+    let head: Buffer = Buffer.alloc(0);
+    const look = new Transform({
+      transform(chunk: Buffer, _encoding, done) {
+        if (head.length < SEAL_HEAD) head = Buffer.concat([head, chunk]).subarray(0, SEAL_HEAD);
+        done(null, chunk);
+      },
+    });
+    await pipeline(createReadStream(this.path(sha256)), look, count, new Writable({ write: (_chunk, _encoding, done) => done() }));
+    return { sealedSha256: count.digest(), sealedSize: count.bytes, salt: saltOf(head) };
+  }
+
+  /* Seals a file here again under the salt its record names, so its sealed bytes are those the other machines keep of
+     it, and lays them in its place at once. The file must open to its name first. Says the sealed facts it has now. */
+  async reseal(sha256: string, key: Buffer, salt: string): Promise<{ sealedSha256: string; sealedSize: number; salt: string }> {
+    await mkdir(this.tmp(), { recursive: true, mode: 0o700 });
+    const part = join(this.tmp(), `${randomUUID()}.part`);
+    this.parts.add(part);
+    try {
+      const count = counter();
+      await pipeline(this.open(sha256, key), seal(key, () => sha256, Buffer.from(salt, 'hex')), count, await intoFile(part));
+      await rename(part, this.path(sha256));
+      return { sealedSha256: count.digest(), sealedSize: count.bytes, salt };
+    } finally {
+      this.parts.delete(part);
+      await rm(part, { force: true });
+    }
   }
 
   /* Writes a part, which names itself once written, and links it under that name. True when it was not there yet. */
@@ -203,13 +227,14 @@ export class FileStore {
   async put(input: Readable | AsyncIterable<Buffer>, key: Buffer, room?: StoreRoom): Promise<StoredFile & { fresh: boolean }> {
     const plain = counter();
     const sealedCount = counter();
+    const salt = randomBytes(16);
     const { name, fresh } = await this.publish(async part => {
       /* A stream goes in as it is: one wrapped again could not be closed while it waits for bytes that never come. */
       const source = input instanceof Readable ? input : Readable.from(input);
-      await pipeline(source, guard(room, this.idleMs), plain, seal(key, () => plain.digest()), sealedCount, await intoFile(part));
+      await pipeline(source, guard(room, this.idleMs), plain, seal(key, () => plain.digest(), salt), sealedCount, await intoFile(part));
       return plain.digest();
     });
-    const facts = fresh ? { sealedSha256: sealedCount.digest(), sealedSize: sealedCount.bytes } : await this.sealedFacts(name);
+    const facts = fresh ? { sealedSha256: sealedCount.digest(), sealedSize: sealedCount.bytes, salt: salt.toString('hex') } : await this.sealedFacts(name);
     return { sha256: name, size: plain.bytes, ...facts, fresh };
   }
 

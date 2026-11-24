@@ -9,11 +9,12 @@ import type { Config } from '../../config.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
+import { copiesStand, FRESH_MS, placeFiles } from './place.js';
 import { FileStore, type StoreRoom, type StoredFile } from './store.js';
 
 /* How long a read waits for a machine that holds a file this one lacks to send it. */
 export const WANT_WAIT_MS = 30_000;
-/* How long an upload waits for a second machine to keep its file before it is answered all the same. */
+/* How long an upload waits for the machines picked to keep its file, online now, before it is answered all the same. */
 export const SETTLE_MS = 10_000;
 const WANT_LOOK_MS = 250;
 
@@ -22,28 +23,34 @@ type Tx = Pick<Db, 'execute'>;
 /* The database, or a transaction of it. */
 export type FilesDb = Tx;
 
-/* Whether any machine besides this one is to keep the files: another data machine, or one picked to hold them. */
-async function holdersBesides(db: Tx, mine: string | null): Promise<boolean> {
-  const [row] = rowsOf<{ there: boolean }>(
-    await db.execute(sql`SELECT EXISTS (SELECT 1 FROM machines WHERE role = 'data' AND revoked_at IS NULL AND id IS DISTINCT FROM ${mine})
-      OR EXISTS (SELECT 1 FROM net.file_holders WHERE machine_id IS DISTINCT FROM ${mine}) AS there`),
-  );
-  return Boolean(row?.there);
-}
-
 /* A file as a row names it. */
 export type Kept = { sha256: string; size: number };
 
 export const fileAway = () =>
   new ApiError(503, 'unavailable', 'This file is kept on a machine of the company that is away now. Try again once it is back.', 'file_away');
 
-/* Records a file the store of this machine keeps, and that this machine keeps it. A record there already takes the
-   sealed facts of the copy here, which is the one this machine sends on; a copy another machine holds opens to the same
-   bytes. A file named again is in use again. */
+/* Records a file the store of this machine keeps, and that this machine keeps it. A record there already keeps its
+   sealed facts, which every copy has: the caller sealed this one under its salt (sealedAsRecorded). A file named again
+   is in use again. */
 export async function recordFile(tx: Tx, kept: StoredFile, machineId: string | null): Promise<void> {
-  await tx.execute(sql`INSERT INTO net.files (sha256, size, sealed_sha256, sealed_size) VALUES (${kept.sha256}, ${kept.size}, ${kept.sealedSha256}, ${kept.sealedSize})
-    ON CONFLICT (sha256) DO UPDATE SET sealed_sha256 = excluded.sealed_sha256, sealed_size = excluded.sealed_size, unused_since = NULL, drop_at = NULL, wanted_at = NULL`);
+  await tx.execute(sql`INSERT INTO net.files (sha256, size, sealed_sha256, sealed_size, salt) VALUES (${kept.sha256}, ${kept.size}, ${kept.sealedSha256}, ${kept.sealedSize}, ${kept.salt})
+    ON CONFLICT (sha256) DO UPDATE SET unused_since = NULL, drop_at = NULL, wanted_at = NULL`);
   if (machineId) await tx.execute(sql`INSERT INTO net.file_copies (sha256, machine_id) VALUES (${kept.sha256}, ${machineId}) ON CONFLICT DO NOTHING`);
+}
+
+/* A file this machine sealed, as the record of its content would have it: one the store keeps a record of already, and
+   so copies of elsewhere, is sealed here again under the record's salt, so this copy is the very bytes theirs are and
+   any machine takes it from this one or gives it back to it. */
+export async function sealedAsRecorded(tx: Tx, store: FileStore, kept: StoredFile, key: Buffer): Promise<StoredFile> {
+  const [record] = rowsOf<{ sealed_sha256: string; sealed_size: string; salt: string }>(
+    await tx.execute(sql`SELECT sealed_sha256, sealed_size, salt FROM net.files WHERE sha256 = ${kept.sha256}`),
+  );
+  if (!record || record.sealed_sha256 === kept.sealedSha256) return kept;
+  const again = await store.reseal(kept.sha256, key, record.salt);
+  if (again.sealedSha256 !== record.sealed_sha256 || again.sealedSize !== Number(record.sealed_size)) {
+    throw new Error('A file sealed again under its salt is not the bytes its record names.');
+  }
+  return { ...kept, ...again };
 }
 
 /* The company's files as this app keeps and reads them: in the store of this machine, sealed with the key the database
@@ -56,8 +63,14 @@ export class Files {
   private machine: string | null = null;
   /* How long a read waits for a file this machine lacks; a test waits less. */
   wantWaitMs = WANT_WAIT_MS;
-  /* The last name the store's round checked this machine's copies through; '' to start again from the first. */
+  /* The last name the store's round checked this machine's copies through, placed files through, and looked at their
+     targets through; '' to start again from the first. */
   checkedThrough = '';
+  placedThrough = '';
+  trimmedThrough = '';
+  /* The most this machine keeps of files it is not picked for, as a read or an upload left them, once their copies stand
+     elsewhere: min(2 GiB, a fifth of its free disk) unless set. */
+  transitBytes: number | null = null;
 
   constructor(private readonly config: Config) {}
 
@@ -96,13 +109,17 @@ export class Files {
     return this.machine;
   }
 
-  /* Keeps a file's bytes as they come and records them; the row that names it is the caller's. The record names the
+  /* Keeps a file's bytes as they come, records them and picks the machines that are to keep them; the row that names it
+     is the caller's. The record names the
      content in use again under its lock, so the store's round cannot take it away after this: a content it took away
      just before is not here any more, and the file is to be sent again. */
   async put(db: FilesDb, input: Readable | AsyncIterable<Buffer>, room?: StoreRoom): Promise<Kept> {
     const store = this.store();
-    const kept = await store.put(input, await this.key(db), room);
-    await recordFile(db, kept, await this.machineId(db));
+    const key = await this.key(db);
+    const kept = await sealedAsRecorded(db, store, await store.put(input, key, room), key);
+    const mine = await this.machineId(db);
+    await recordFile(db, kept, mine);
+    await placeFiles(db, mine, { only: [kept.sha256] });
     if (!store.has(kept.sha256)) throw new ApiError(503, 'unavailable', 'The same file was leaving the store as it came. Send it again.', 'file_retry');
     return { sha256: kept.sha256, size: kept.size };
   }
@@ -135,17 +152,26 @@ export class Files {
     return buffer(await this.open(db, sha256));
   }
 
-  /* Waits until a machine besides this one keeps the file, while another machine could, for at most a short while. */
+  /* Whether the file stands on as many machines as it wants, online or not this minute. */
+  async copiesStand(db: FilesDb, sha256: string): Promise<boolean> {
+    return copiesStand(db, await this.machineId(db), sha256);
+  }
+
+  /* Waits until every machine picked for the file that is online now keeps it, for at most a short while: a file of a
+     company with one machine, or whose other machines are away, is kept at once. */
   async settled(db: FilesDb, sha256: string, waitMs = SETTLE_MS): Promise<boolean> {
     const mine = await this.machineId(db);
-    const others = async () =>
-      rowsOf<{ n: number }>(await db.execute(sql`SELECT count(*)::int AS n FROM net.file_copies WHERE sha256 = ${sha256} AND machine_id IS DISTINCT FROM ${mine}`))[0]?.n ?? 0;
-    if (!(await holdersBesides(db, mine))) return true;
+    const waiting = async () =>
+      rowsOf<{ n: number }>(
+        await db.execute(sql`SELECT count(*)::int AS n FROM net.file_targets t JOIN machines m ON m.id = t.machine_id WHERE t.sha256 = ${sha256}
+          AND (t.machine_id = ${mine} OR m.report_at > ${new Date(Date.now() - FRESH_MS).toISOString()}::timestamptz)
+          AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = t.sha256 AND c.machine_id = t.machine_id)`),
+      )[0]?.n ?? 0;
     for (let waited = 0; waited < waitMs; waited += WANT_LOOK_MS) {
-      if ((await others()) > 0) return true;
+      if ((await waiting()) === 0) return true;
       await new Promise(resolve => setTimeout(resolve, WANT_LOOK_MS));
     }
-    return (await others()) > 0;
+    return (await waiting()) === 0;
   }
 }
 

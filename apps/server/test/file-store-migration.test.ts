@@ -95,7 +95,7 @@ describe('the files of an installation from before the store', () => {
 
     /* The app stops right after it stored a file and before its row gave up the bytes. */
     class Stopping extends Files {
-      override async settled(): Promise<boolean> {
+      override async copiesStand(): Promise<boolean> {
         throw new Error('the app stopped');
       }
     }
@@ -106,12 +106,12 @@ describe('the files of an installation from before the store', () => {
     const changed = Buffer.from('changed under the mover');
     let changedOnce = false;
     class Changing extends Files {
-      override async settled(on: FilesDb, sha256: string, waitMs?: number): Promise<boolean> {
+      override async copiesStand(on: FilesDb, sha256: string): Promise<boolean> {
         if (!changedOnce && sha256 === sha(old[6]!.bytes)) {
           changedOnce = true;
           await on.execute(sql`UPDATE attachments SET bytes = ${changed}, size = ${changed.length} WHERE id = ${old[6]!.id}`);
         }
-        return super.settled(on, sha256, waitMs);
+        return super.copiesStand(on, sha256);
       }
     }
     /* Started again, it moves in rounds of a few rows: a clock that moves on with every look ends each round early. */
@@ -173,11 +173,15 @@ describe('the files of an installation from before the store', () => {
 
 const withBytes = async (db: FilesDb) => rowsOf<{ n: number }>(await db.execute(sql`SELECT count(*)::int AS n FROM attachments WHERE bytes IS NOT NULL`))[0]!.n;
 const nameOf = async (db: FilesDb, id: string) => rowsOf<{ sha256: string | null }>(await db.execute(sql`SELECT sha256 FROM attachments WHERE id = ${id}`))[0]!.sha256;
-/* Another machine the company has, picked to keep its files, which keeps none of them yet. */
+/* Another machine the company has, which keeps its files and keeps none of them yet: the store picks it for each file
+   the mover stores. */
 const holder = async (db: FilesDb) => {
-  const machine = randomUUID();
-  await db.execute(sql`INSERT INTO net.file_holders (machine_id) VALUES (${machine})`);
-  return { keeps: (sha256: string) => db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id) VALUES (${sha256}, ${machine})`) };
+  const [person] = rowsOf<{ id: string }>(await db.execute(sql`INSERT INTO people (company_id, name, email, status, scope_kind) VALUES (${COMPANY}, 'Owner', 'owner@example.com', 'active', 'company') RETURNING id`));
+  const [machine] = rowsOf<{ id: string }>(
+    await db.execute(sql`INSERT INTO machines (company_id, person_id, machine_key, hostname, role, network_id, report_at)
+      VALUES (${COMPANY}, ${person!.id}, 'other-key', 'other', 'worker', 'other-net', now()) RETURNING id`),
+  );
+  return { keeps: (sha256: string) => db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id) VALUES (${sha256}, ${machine!.id})`) };
 };
 
 describe('the mover', () => {
@@ -290,7 +294,7 @@ describe('the mover', () => {
     const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
     /* The store's round gives the content its time to go just as the second machine says it keeps it. */
     class Going extends Files {
-      override async settled(on: FilesDb, sha256: string): Promise<boolean> {
+      override async copiesStand(on: FilesDb, sha256: string): Promise<boolean> {
         await on.execute(sql`UPDATE net.files SET drop_at = now() WHERE sha256 = ${sha256}`);
         return true;
       }
@@ -337,6 +341,9 @@ describe('the big files of 0.43 on the disk', () => {
     await dropOldFiles(ctx, new Date());
     expect([goes!.id, young!.id, stays!.id, 'notes.txt'].map(name => existsSync(join(filesDir, name)))).toEqual([false, true, true, true]);
     expect(ctx.files.store().has(kept.sha256)).toBe(true);
+  });
+});
+
 /* What a reconciliation lists: each row whose bytes the store keeps, ordered by id, as "<id> <sha256> <size>" and a newline;
    its digest is the sha256 of that text. */
 const digestOf = (files: Old[]) =>
