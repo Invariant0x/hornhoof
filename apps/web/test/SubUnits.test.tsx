@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import { LanguageProvider, type Language } from '../src/i18n';
+import { LanguageProvider, type ShippedLanguage } from '../src/i18n';
 import { DeptEmployeeList, DeptSubUnits, employeeGroups } from '../src/ui/SubUnits';
 import { DEV_ORG, mockApi } from './api-mock';
 
@@ -88,7 +88,7 @@ describe('SubUnits', () => {
     expect(within(subUnits).queryByLabelText('Sub-unit name')).not.toBeInTheDocument();
   });
 
-  it.each<[Language, string]>([['en', 'Works turnkey'], ['ru', 'Работает под ключ']])('lets a person mark a sub-unit as working turnkey, in %s', async (language, label) => {
+  it.each<[ShippedLanguage, string]>([['en', 'Works turnkey'], ['ru', 'Работает под ключ']])('lets a person mark a sub-unit as working turnkey, in %s', async (language, label) => {
     const user = userEvent.setup();
     const calls = mockApi({ 'PATCH /api/departments/d2/teams/u1': () => [200, { team: { ...urgent, turnkey: true } }] });
     localStorage.setItem('hh-lang', language);

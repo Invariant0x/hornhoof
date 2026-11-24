@@ -1,7 +1,5 @@
 ---
 id: mkt-schema-markup
-title: { en: "Structured data", ru: "Структурированные данные" }
-description: { en: "Adds schema.org markup so search engines understand what each page is about.", ru: "Добавляет разметку schema.org, чтобы поисковики понимали, о чем каждая страница." }
 kind: procedure
 sources: [coreyhaines31/marketingskills skills/schema/SKILL.md]
 ---

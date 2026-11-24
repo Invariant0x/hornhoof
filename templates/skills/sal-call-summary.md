@@ -1,7 +1,5 @@
 ---
 id: sal-call-summary
-title: { en: "Call summary", ru: "Итоги звонка" }
-description: { en: "Turns call notes or a transcript into facts, commitments and a next step in the CRM.", ru: "Превращает заметки или расшифровку звонка в факты, обязательства и следующий шаг в CRM." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins]
 ---

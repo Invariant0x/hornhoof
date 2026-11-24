@@ -6,7 +6,7 @@ import { SidePanelRow, usePanelsCover, useSidePanels, type SidePanel, type Windo
 import { TaskPanel } from '../ui/TaskPanel';
 import { useOpenAgent, WindowTaskContext } from './AgentWindowContext';
 
-type Waiting = { requests: WaitingRequest[]; onRequestsChanged(): void };
+type Waiting = { requests: WaitingRequest[]; onRequestsChanged(): void; viewerId?: string };
 type Props = Waiting & {
   currentTask: AgentCardView['currentTask'] | undefined;
   title: string;
@@ -70,12 +70,12 @@ export function WordButton({ label, icon, onClick, both = false }: { label: stri
 }
 
 /* The agent's task as a panel of its window. Links in it open others in its place. Escape is the panels' own here. */
-function useTaskPanel(currentId: string | null, { requests, onRequestsChanged }: Waiting) {
+function useTaskPanel(currentId: string | null, { requests, onRequestsChanged, viewerId }: Waiting) {
   const openAgent = useOpenAgent();
   const [taskId, setTaskId] = useState<string | null>(null);
   useEffect(() => { setTaskId(null); }, [currentId]);
   const panels: SidePanel[] = taskId
-    ? [{ id: TASK_PANEL, render: close => <TaskPanel key={taskId} taskId={taskId} active={false} onClose={close} onOpen={setTaskId} requests={requests.filter(r => r.task.id === taskId)} onRequestsChanged={onRequestsChanged} onOpenAgent={openAgent} /> }]
+    ? [{ id: TASK_PANEL, render: close => <TaskPanel key={taskId} taskId={taskId} active={false} onClose={close} onOpen={setTaskId} requests={requests.filter(r => r.task.id === taskId)} viewerId={viewerId} onRequestsChanged={onRequestsChanged} onOpenAgent={openAgent} /> }]
     : [];
   return { panels, showCurrent: () => setTaskId(currentId), show: setTaskId };
 }

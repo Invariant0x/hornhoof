@@ -209,7 +209,7 @@ async function tellNoRoom(ctx: Ctx, home: Plan, until: string, from: Agent): Pro
   const stuck = orchestrator ? await stuckOn(ctx, home) : [];
   if (!orchestrator || !stuck.length) return;
   const text = noRoomText({ ...home, ownerName: await ownerName(ctx, home) }, until, stuck, from.model);
-  const turn = { companyId: home.companyId, agentId: orchestrator.id, prompt: text, createdBy: null, message: { personId: null, text, failureCase: caseId, notification: { source: 'limit' as const, tasks: [], detail: { en: home.label, ru: home.label } } } };
+  const turn = { companyId: home.companyId, agentId: orchestrator.id, prompt: text, createdBy: null, message: { personId: null, text, failureCase: caseId, notification: { source: 'limit' as const, tasks: [], detail: { en: home.label } } } };
   /* The orchestrator's own line goes on as it is: it takes the message once the turn it is in goes out. */
   await (orchestrator.id === from.id ? insertTurn(ctx, turn) : enqueueTurn(ctx, turn));
 }

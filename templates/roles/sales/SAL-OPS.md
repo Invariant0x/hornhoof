@@ -2,8 +2,6 @@
 id: SAL-OPS
 department: sales
 kind: member
-title: { en: "Sales operations analyst", ru: "Аналитик продаж" }
-description: { en: "Analyst of sales records, pipeline data and deal outcomes.", ru: "Аналитик записей о продажах, данных воронки и результатов сделок." }
 tier: standard
 effort: medium
 perProduct: false

@@ -1,7 +1,5 @@
 ---
 id: dev-threat-model
-title: { en: "Protection plan", ru: "План защиты" }
-description: { en: "Maps what a feature must protect, where outside input comes in, and which safeguard covers each risk.", ru: "Описывает, что функция должна защищать, где в нее попадает ввод извне и какая защита закрывает каждый риск." }
 kind: procedure
 sources: [openai/skills skills/.curated/security-threat-model/SKILL.md, wshobson/agents plugins/security-scanning/skills/stride-analysis-patterns/SKILL.md, wshobson/agents plugins/security-scanning/skills/attack-tree-construction/SKILL.md]
 ---

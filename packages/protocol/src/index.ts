@@ -1,6 +1,7 @@
 import { AuthorCheckDone, AuthorCheckRun } from './author-check.js';
 export { AuthorCheckDone, AuthorCheckRun, AuthorCheckPin, docsOnly } from './author-check.js';
 export * from './department-mode.js';
+export * from './locales.js';
 export * from './tool-privacy.js';
 export * from './external-operations.js';
 export * from './request-materials.js';

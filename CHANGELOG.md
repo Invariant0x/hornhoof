@@ -11,6 +11,15 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - A node saying hello, and the server's check of sign-ins that have not healed each minute, no longer read every job that node ever ran to find the last turn of each employee on it or each turn that failed for want of a sign-in, with every column of it; on 100 000 jobs that took 90 to 270 ms of the database each time and, when every node came back together after a restart, kept it busy long enough for the nodes' own updates and the leadership lease to time out. The server now looks each up in an index, one look per employee or node (about 2 ms), and nothing the node is told or the owner reads changes.
 
+### Added
+
+- Every text people see now comes from a file per language, loaded only for the language that is on: the screens, the words of the world packs, what the server says in its own words, the page shown while the server is away, and the names and descriptions of templates. A language is one line in a registry and one file per kind of text, with no code that names a language. Plurals, dates and numbers follow the language through the browser's own rules, a language that reads right to left mirrors the page, and the letters of a script that the product's fonts do not hold load only when a language in that script is on.
+- Two languages made for tests, a text 40% longer than English and the same text mirrored, are checked on the main screens at phone and desktop widths for cut text and sideways scroll. They never reach a person.
+
+### Changed
+
+- A skin file of your own may name the skin in any language of the registry, with the English name required and the others optional, and the names of a world's employees can be taken in any language of the registry.
+
 ## [0.43.0] - 2026-11-23
 
 ### Fixed
@@ -23,6 +32,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - An employee's open terminal stays connected when idle or on a personal-plan fallback machine: the server sends WebSocket keepalive pings and checks fallback placement consistently, the window keeps the terminal mounted across brief node drops, and unavoidable reconnects or program restarts recover without flashing the loader or losing scrollback history and reading position.
 - An employee's program that waits between turns no longer starts anew when the terminal showing it loses its connection for a moment: the node keeps it for 30 seconds after its last view went, so the view that comes back finds it. A view ended because its person may no longer see the agent holds it no longer, and a program whose agent moved to another plan still goes at once.
 - A merge of a copy's database no longer stops with "No merge rule for public.world_layouts": the company's city and the CEO's orders to move its buildings merge like a person's map, and two cities that differ keep the leading one and go to the orchestrator.
+- On the city map, streets read as one trodden strip at every crossing, T-join and bend, with one soft edge instead of strips laid over each other, and the brown stand-in over the river is gone: until the world's bridge pictures are installed no street crosses the water and no resident walks on it, and with them the bridge stands in one fixed place of the map on every load.
 
 ### Added
 

@@ -1,7 +1,5 @@
 ---
 id: sup-docs-from-tickets
-title: { en: "Articles from tickets", ru: "Статьи по обращениям" }
-description: { en: "Finds the questions customers keep asking and turns them into knowledge base work.", ru: "Находит вопросы, которые клиенты задают снова и снова, и превращает их в задачи для базы знаний." }
 kind: procedure
 sources: []
 ---

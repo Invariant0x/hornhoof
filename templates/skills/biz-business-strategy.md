@@ -1,7 +1,5 @@
 ---
 id: biz-business-strategy
-title: { en: "Business strategy", ru: "Бизнес-стратегия" }
-description: { en: "Turns the company's goal into a short growth plan: the bets, what they cost and how to tell they work.", ru: "Превращает цель компании в короткий план роста: ставки, их цена и как понять, что они работают." }
 kind: procedure
 sources: [msitarzewski/agency-agents specialized/business-strategist.md]
 ---

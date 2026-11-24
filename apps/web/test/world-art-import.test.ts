@@ -36,7 +36,6 @@ function put(root: string, rel: string, data: Buffer | string): void {
 }
 
 const DOOR = [556.8, 800.6];
-const PIVOT = [[210, 542], [426, 650]];
 
 /* The layout the art pipeline delivered the first building in (a 3x3 workshop growing to 5x5). */
 function delivery(): string {
@@ -44,8 +43,8 @@ function delivery(): string {
   for (let n = 1; n <= 10; n++) put(d, `cut/stage_${String(n).padStart(2, '0')}.png`, pngHeader(720, 960));
   put(d, 'cut/demol_01.png', pngHeader(720, 960));
   put(d, 'cut/demol_02.png', pngHeader(720, 960));
-  for (const f of ['stage_09_base', 'stage_10_base', 'shadow', 'shadow_notable', 'props', 'awning']) put(d, `layers/${f}.png`, pngHeader(720, 960));
-  put(d, 'layers/layers.json', JSON.stringify({ sway_pivot_master: PIVOT, order_stage_09: ['stage_09_base', 'shadow', 'props', 'awning'] }));
+  for (const f of ['stage_09_base', 'stage_10_base', 'shadow', 'shadow_notable', 'props', 'awning', 'awning_w']) put(d, `layers/${f}.png`, pngHeader(720, 960));
+  put(d, 'layers/layers.json', JSON.stringify({ order_stage_09: ['stage_09_base', 'shadow', 'props', 'awning'] }));
   for (const [n, w, h] of [[4, 960, 1200], [5, 1200, 1440]] as const) {
     for (const state of ['1_build', '2_walls', '3_done']) put(d, `growth/g${n}_${state}_cut.png`, pngHeader(w, h));
   }
@@ -101,8 +100,10 @@ describe('Importing a delivered building into the art folder (contract 2)', () =
     expect(complete.layers).toEqual([
       { file: 'shadow.png', blend: 'multiply' },
       { file: 'props.png' },
-      { file: 'awning.png', sway: { pivot: [{ x: 210, y: 542 }, { x: 426, y: 650 }] } },
+      { file: 'awning.png' },
     ]);
+    /* The awning's cloth mask comes along beside it, so the awning sways by it (#1983). */
+    expect(index.files['buildings/district_hub/workshop/awning_w.png']).toMatchObject({ w: 720, h: 960 });
     const upgraded = index.files['buildings/district_hub/workshop/upgraded.png']!.passport as BuildingPicturePassport;
     expect(upgraded.layers?.map(l => l.file)).toEqual(['shadow_notable.png', 'awning.png']);
     /* A larger step keeps the plot's bottom corner, so the old building's door moves with the canvas. */

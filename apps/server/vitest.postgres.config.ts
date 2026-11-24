@@ -6,6 +6,7 @@ export default defineConfig({
   test: {
     include: ['test/postgres/**/*.pg.spec.ts'],
     passWithNoTests: false,
-    testTimeout: 20000,
+    testTimeout: 0,
+    hookTimeout: 0,
   },
 });

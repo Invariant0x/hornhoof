@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, departments, testRuns, turnSnapshots, turns, waitNotices } from '../src/db/schema.js';
+import { agents, departments, testRuns, turnReleases, turnSnapshots, turns, waitNotices } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { loadTask } from '../src/modules/tasks/engine.js';
 import { deliverWaitNotices } from '../src/modules/tasks/wait-notices.js';
@@ -144,15 +144,17 @@ describe('the server closes a turn by the tag of its release', () => {
     expect(cards).toEqual([expect.objectContaining({ about: 'release_tag', taskId: f.task.id, number: f.task.number, turn: { number: f.turn.number, version: null }, tag: { version: 'v1.7.0', why: 'unrecorded' } })]);
   });
 
-  it('tells them too when the full run its record relied on failed since, and keeps the turn open', async () => {
+  /* A record never stands or falls by a run of Hornhoof's machines, or by what the repository's CI says as the tag is read: the host
+     said it of the exact commit as the release was recorded. */
+  it("closes the turn on the tag of a release recorded on green CI, whatever a test run or CI says after it", async () => {
     const f = await released();
-    await f.db.update(testRuns).set({ status: 'failed' }).where(eq(testRuns.id, f.run.id));
+    f.repo.ci = { state: 'red', check: 'test (2)', url: 'https://github.com/o/r/actions/runs/1/job/2', outcome: 'failure' };
+    await f.db.update(testRuns).set({ status: 'failed' }).where(eq(testRuns.taskId, f.release.id));
     await f.round();
-    expect(await f.open()).toMatchObject({ id: f.turn.id });
-    const told = await toldOfTag(f);
-    expect(told).toHaveLength(2);
-    expect(told.find(n => n.agentId)!.message.text).toContain('no longer stands');
-    expect(told.find(n => n.personId)!.guard.tag).toEqual({ version: 'v1.7.0', commit: f.R, why: 'stale' });
+    expect(await f.departmentTurns()).toContainEqual(expect.objectContaining({ id: f.turn.id, status: 'closed', commit: f.R }));
+    expect(await toldOfTag(f)).toEqual([]);
+    const [record] = await f.db.select().from(turnReleases).where(eq(turnReleases.turnId, f.turn.id));
+    expect(record).toMatchObject({ commit: f.R, runId: null, ciState: 'green', ciChecks: 3 });
   });
 
   it('closes the turn on the tag of a release the autonomous release log approved', async () => {
@@ -203,9 +205,8 @@ describe('the server closes a turn by the tag of its release', () => {
     const f = await releasing();
     f.repo.tags['v1.6.0'] = OTHER;
     await minuteRound(f.ctx, new Date(), () => () => undefined);
-    const run = await f.fullRun();
     await f.approve();
-    await f.recordRelease({ runId: run.id });
+    await f.recordRelease();
     f.repo.heads.main = f.R;
     f.repo.tags['v1.7.0'] = f.R;
     await minuteRound(f.ctx, new Date(), () => () => undefined);

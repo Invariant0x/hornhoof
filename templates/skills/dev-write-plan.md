@@ -1,7 +1,5 @@
 ---
 id: dev-write-plan
-title: { en: "Writing a plan", ru: "Написание плана" }
-description: { en: "Turns an approved design into tasks an engineer who knows nothing of the code can follow.", ru: "Превращает утвержденный дизайн в задачи, по которым может работать инженер, не знающий кода." }
 kind: procedure
 sources: [obra/superpowers skills/brainstorming/SKILL.md, obra/superpowers skills/writing-plans/SKILL.md, anthropics/knowledge-work-plugins engineering/skills/system-design/SKILL.md]
 ---
