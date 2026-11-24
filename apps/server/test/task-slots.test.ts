@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, subscriptions, tasks, turns } from '../src/db/schema.js';
-import { createTask } from '../src/modules/tasks/engine.js';
+import { createTask, updateTask } from '../src/modules/tasks/engine.js';
 import { loadQueue, slotsApply } from '../src/modules/tasks/slots.js';
 import { giveTasks, type PlanItem } from '../src/modules/tasks/turns.js';
 import { as, echelonsTurn, setUpCompany, testApp } from './helpers.js';
@@ -136,6 +136,19 @@ describe('turn slots', () => {
     await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.title, 'A'));
     await db.transaction(tx => loadQueue(tx, companyId, dev.id));
     expect(await row('Named')).toMatchObject({ assigneeAgentId: bruno!.id, queuedAt: null });
+  });
+
+  it('takes a queued task out of the queue once its head gives it to an owner, so the next turn hands it to no one else', async () => {
+    const { db, app, row, give, companyId, dev, head } = await company(1);
+    await give({ title: 'A' });
+    await give({ title: 'B' });
+    expect((await row('B')).queuedAt).not.toBeNull();
+    const [bruno] = await db.select().from(agents).where(eq(agents.name, 'Dev1'));
+    await updateTask(app.ctx, head.id, (await row('B')).id, { ownerAgentId: bruno!.id });
+    expect(await row('B')).toMatchObject({ assigneeAgentId: bruno!.id, queuedAt: null });
+    await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.title, 'A'));
+    expect(await db.transaction(tx => loadQueue(tx, companyId, dev.id))).toEqual([]);
+    expect((await row('B')).assigneeAgentId).toBe(bruno!.id);
   });
 
   it('does not hand the unstarted work of a busy developer to another developer in a department that runs slots', async () => {
