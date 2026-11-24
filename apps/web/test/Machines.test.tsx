@@ -716,6 +716,16 @@ describe('Machines', () => {
     }
   });
 
+  it.each([
+    ['en', (attempts: number, since: string) => `Copy: given up after ${attempts} failed attempts in a row (${since}). Nothing more is copied to this machine until it is asked for.`],
+    ['ru', (attempts: number, since: string) => `Копия: оставлена после ${attempts} неудачных попыток подряд (${since}). На эту машину больше ничего не копируется, пока об этом не попросят.`],
+  ] as const)('says a copy was given up, after how many attempts and since when, in %s', async (language, words) => {
+    const iso = '2026-11-24T19:30:00.000Z';
+    shown(language, [{ ...MACHINES[0]!, id: 'g0', hostname: 'given-up', data: held({ number: 2, copy: { line: 'stopped', why: 'gave_up', attempts: 4, since: iso } }) }]);
+    await shownTable();
+    expect(within(card('given-up')).getByText(words(4, clock(language, iso)!))).toBeInTheDocument();
+  });
+
   const names = () => screen.getAllByRole('button', { name: /^Open the card of / }).map(button => button.getAttribute('aria-label')!.replace('Open the card of ', ''));
   const four = (over: object[] = []) => [
     { number: 1, why: 'server' }, { number: 2, why: 'always.best_link' }, { number: 3, why: 'mostly.good_link' }, { number: 4, why: 'next' },

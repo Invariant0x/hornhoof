@@ -1196,6 +1196,8 @@ export const en = {
       stopped: 'Copy: stopped',
       stoppedDiskFull: 'Copy: stopped: disk full',
       stoppedSetup: "Copy: stopped: the company's settings cannot be written here",
+      stoppedGaveUp: (attempts: number, since: string | null) =>
+        `Copy: given up after ${attempts} failed attempts in a row${since ? ` (${since})` : ''}. Nothing more is copied to this machine until it is asked for.`,
       left: (date: string) => `Stopped holding the company's data on ${date}. If it may be in other hands, change the company secret and the API keys.`,
       one: (leader: string, copy: string) => `${leader} leads. ${copy} keeps a copy and takes over if ${leader} stops.`,
       many: (leader: string, copies: string, next: string) => `${leader} leads. ${copies} keep copies; ${next} takes over if ${leader} stops.`,
