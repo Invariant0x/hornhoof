@@ -45,6 +45,7 @@ import { turnRows, type Turn } from './turns.js';
 import { openTurnOf } from './turn-department.js';
 import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
 import { setPaused } from './pause.js';
+import { requirePersonTreeRules } from './tree-rules.js';
 
 const Priority = z.enum(TASK_PRIORITIES).nullable().optional();
 const IdParams = z.object({ id: z.uuid() });
@@ -397,10 +398,11 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const after = body.after?.length ? (await db.select().from(tasks).where(and(eq(tasks.companyId, me.companyId), inArray(tasks.number, body.after)))).filter(t => seesTask(viewer, t)) : [];
     const missing = (body.after ?? []).find(n => !after.some(t => t.number === n));
     if (missing !== undefined) throw refuse(400, 'task_invalid', `There is no task #${missing} to come after.`);
+    await requirePersonTreeRules(ctx, parent);
     const moved = await createTask(ctx, actorOf(me), {
       title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: parent ? undefined : body.urgent,
       parentId: parent?.id ?? null, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id), afterPlans: afterPlansOf(body.afterPlans, after), independentPart: body.independentPart, independentNone: body.independentNone,
-      goalId: body.goal, responsiblePersonId: body.responsible, why: body.why, priority: body.priority, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
+      goalId: body.goal, responsiblePersonId: body.responsible, askedByPersonId: me.id, why: body.why, priority: body.priority, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
     });
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
