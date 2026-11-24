@@ -38,6 +38,7 @@ import { departmentBranches } from './branches.js';
 import { coversEveryPart } from '../testruns/github-status.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
 import { nextRevision } from '../tracker/revision.js';
+import { slotCapOfNew } from '../tasks/slots.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const TeamParams = z.object({ id: z.uuid(), teamId: z.uuid() });
@@ -58,6 +59,8 @@ export const RepoBody = z
     testMemoryGb: z.number().int().min(1).max(512).nullable().optional(),
     /* The command that runs the whole test suite, as run_tests takes it; empty or null takes it away. */
     fullTestCommand: z.string().trim().max(4000).nullable().optional(),
+    /* The release workflow, by the path of its file (a bare file name is taken to be in .github/workflows); empty or null takes it away. */
+    releaseWorkflow: z.string().trim().max(250).nullable().optional(),
   })
   .strict();
 
@@ -69,6 +72,18 @@ function fullCommandPatch(given: string | null | undefined): { repoFullTestComma
   if (given === undefined) return {};
   if (given && !coversEveryPart(given)) throw new ApiError(400, 'validation', 'A full test command that names its part with {part} says how many there are with {parts}.', 'repo_command_invalid');
   return { repoFullTestCommand: given || null };
+}
+
+const WORKFLOW_PATH = /^\.github\/workflows\/[A-Za-z0-9._-]+\.ya?ml$/;
+
+/* What a repository's save says of its release workflow: left out, the saved one stays; empty or null takes it away. A person
+   names it, never an agent's guess: it is the one workflow whose full run lets a release record. */
+export function releaseWorkflowPatch(given: string | null | undefined): { repoReleaseWorkflow?: string | null } {
+  if (given === undefined) return {};
+  if (!given) return { repoReleaseWorkflow: null };
+  const path = given.includes('/') ? given : `.github/workflows/${given}`;
+  if (!WORKFLOW_PATH.test(path)) throw new ApiError(400, 'validation', 'Name the release workflow by the path of its file, as .github/workflows/release.yml.', 'repo_release_workflow_invalid');
+  return { repoReleaseWorkflow: path };
 }
 
 type Created = { id: string; template: TemplateKey | null; name: string | null; products: string[] };
@@ -312,7 +327,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (isNew(item)) {
           const [dept] = await tx
             .insert(departments)
-            .values({ companyId: me.companyId, templateKey: item.template, name: item.name ?? null, roleCode: roleOf(item.template), about: item.note, position: position++ })
+            .values({ companyId: me.companyId, templateKey: item.template, name: item.name ?? null, roleCode: roleOf(item.template), about: item.note, position: position++, slotCap: slotCapOfNew(item.template) })
             .returning();
           await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, me.companyId)).for('no key update');
           await ensureOpenTurn(tx, me.companyId, dept!.id);
@@ -406,7 +421,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const given = checked.data.author;
     const author = given === undefined ? {} : { repoAuthorName: given?.name ?? null, repoAuthorEmail: given?.email ?? null };
     const memory = body.testMemoryGb === undefined ? {} : { repoTestMemoryGb: body.testMemoryGb };
-    return { repoUrl: checked.data.url, repoBranch: checked.data.branch, ...author, ...memory, ...fullCommandPatch(body.fullTestCommand) };
+    return { repoUrl: checked.data.url, repoBranch: checked.data.branch, ...author, ...memory, ...fullCommandPatch(body.fullTestCommand), ...releaseWorkflowPatch(body.releaseWorkflow) };
   }
   const sealed = (token: string) => ({ repoTokenEnc: encryptSecret(token, ctx.config.secret), repoTokenLast4: token.slice(-4) });
 
@@ -475,7 +490,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     await requireDepartmentChanger(db, me, id);
     await db
       .update(departments)
-      .set({ repoUrl: null, repoBranch: null, repoTokenEnc: null, repoTokenLast4: null, repoTokenRevision: sql`${departments.repoTokenRevision} + 1`, repoAuthorName: null, repoAuthorEmail: null, repoTestMemoryGb: null, repoFullTestCommand: null })
+      .set({ repoUrl: null, repoBranch: null, repoTokenEnc: null, repoTokenLast4: null, repoTokenRevision: sql`${departments.repoTokenRevision} + 1`, repoAuthorName: null, repoAuthorEmail: null, repoTestMemoryGb: null, repoFullTestCommand: null, repoReleaseWorkflow: null })
       .where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
     ctx.bus.publish(me.companyId, { type: 'org' });
     return reply.code(204).send();

@@ -257,13 +257,12 @@ case "$1 $2" in
         cat > "$STUB_STATE/copied-$(printf '%s' "$table" | tr -d '"')"
         exit 0 ;;
     esac
-    # The roles the policies of the leader's schema name, one a line: none unless a test says (STUB_POLICY_ROLES,
-    # with | between them).
+    # The hex-encoded names the leader's schema references, one a line.
     case " $* " in
-      *' pg_policies,'*)
+      *' pg_catalog.pg_policy'*)
         [ -z "${PGPASSWORD:-}" ] || printf 'psql had its password\n' >> "$STUB_LOG"
         [ "${STUB_SCHEMA:-ok}" != fail ] || { echo 'psql: error: connection to server failed' >&2; exit 2; }
-        [ -z "${STUB_POLICY_ROLES:-}" ] || printf '%s\n' "$STUB_POLICY_ROLES" | tr '|' '\n'
+        [ -z "${STUB_SCHEMA_ROLES:-}" ] || printf '%s\n' "$STUB_SCHEMA_ROLES"
         exit 0 ;;
     esac
     [ -z "${PGPASSWORD:-}" ] || printf 'pg_dump had its password\n' >> "$STUB_LOG"

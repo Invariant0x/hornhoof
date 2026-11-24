@@ -80,7 +80,7 @@ describe('a new task', () => {
     expect((await c.root({ title: 'URGENT: срочно, critical' }, { agentId: c.head.id })).urgent).toBe(false);
     const parent = await c.root();
     const client = await c.tools(c.head);
-    const res = await call(client, 'create_task', { title: 'URGENT', brief: 'срочно', body: 'urgent', executor: c.robin.id, parent: parent.number, urgent: true });
+    const res = await call(client, 'create_task', { title: 'URGENT', brief: 'срочно', body: 'urgent', executor: c.robin.id, parent: parent.number, subtaskReason: 'other_owner', urgent: true });
     expect(res.isError, text(res)).toBeFalsy();
     const [made] = await c.db.select().from(tasks).where(eq(tasks.title, 'URGENT'));
     expect(made!.urgent).toBe(false);
@@ -483,7 +483,7 @@ describe('work for someone in a team that takes only urgent work', () => {
     it('from a head, with who is free named', async () => {
       const c = await only(true);
       const top = await c.root();
-      const res = await call(await c.tools(c.head), 'create_task', { title: 'Ordinary', brief: '', body: 'x', executor: c.robin.id, parent: top.number });
+      const res = await call(await c.tools(c.head), 'create_task', { title: 'Ordinary', brief: '', body: 'x', executor: c.robin.id, parent: top.number, subtaskReason: 'other_owner' });
       expect(res.isError, text(res)).toBe(true);
       expect(text(res)).toContain('Robin');
       expect(text(res)).toContain('Quick');
@@ -612,7 +612,7 @@ describe('work for someone in a team that takes only urgent work', () => {
       const c = await only();
       const top = await c.root({ urgent: true });
       const client = await c.tools(c.head);
-      const res = await call(client, 'create_task', { title: 'Hot', brief: '', body: 'x', executor: c.robin.id, parent: top.number });
+      const res = await call(client, 'create_task', { title: 'Hot', brief: '', body: 'x', executor: c.robin.id, parent: top.number, subtaskReason: 'other_owner' });
       expect(res.isError, text(res)).toBeFalsy();
       const hot = await made(c, 'Hot');
       expect(hot).toMatchObject({ urgent: true, assigneeAgentId: c.robin.id });

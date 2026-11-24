@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, eq, inArray, isNull, notInArray, or } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, sql, type SQL, type SQLWrapper } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, requests, tasks, testRuns, turns } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
@@ -59,13 +59,35 @@ async function waitingForService(ctx: Ctx, task: Task): Promise<string | null> {
   return test ? 'waiting for a test run' : null;
 }
 
-/* The last thing that says the department was at work. */
-const silentSince = (turn: typeof turns.$inferSelect, work: (typeof tasks.$inferSelect)[], conversations: (typeof jobs.$inferSelect)[]): Date => new Date(Math.max(
+/* The last thing that says the department was at work: lastEnded is when the last conversation that began ended. */
+const silentSince = (turn: typeof turns.$inferSelect, work: (typeof tasks.$inferSelect)[], lastEnded: Date | null): Date => new Date(Math.max(
   (turn.openedAt ?? turn.createdAt).getTime(), ...work.map(t => t.updatedAt.getTime()),
-  ...conversations.flatMap(job => job.startedAt && job.finishedAt ? [job.finishedAt.getTime()] : []),
+  ...(lastEnded ? [lastEnded.getTime()] : []),
   /* A wait that ran out explained the work until then: the silence starts there. */
   ...work.flatMap(t => t.externalWait ? [new Date(t.externalWait.until).getTime()] : []),
 ));
+
+/* What the quiet check asks of the conversations of a department: whether one runs, and when the last one that began ended.
+   The check runs every minute for every department, and a conversation holds its whole prompt, tail and result, so it asks for
+   two figures and no conversation. Two index reads, one for the employees' conversations and one for the work's, each a single
+   aggregate (the index jobs_conversation_activity answers them alone). */
+export type ConversationActivity = { running: boolean; lastEnded: Date | null };
+
+const figures = () => ({
+  running: sql<boolean | null>`bool_or(${jobs.status} = 'running')`,
+  lastEnded: sql<Date | null>`max(${jobs.finishedAt}) filter (where ${jobs.startedAt} is not null)`.mapWith(jobs.finishedAt),
+});
+
+const conversationsOf = (ctx: Pick<Ctx, 'db'>, companyId: string, belonging: SQL) =>
+  ctx.db.select(figures()).from(jobs).where(and(eq(jobs.companyId, companyId), eq(jobs.kind, 'conversation'), belonging));
+
+const lastOf = (...ends: (Date | null)[]): Date | null => ends.reduce<Date | null>((last, end) => (end && (!last || end > last) ? end : last), null);
+
+export async function conversationActivity(ctx: Pick<Ctx, 'db'>, companyId: string, employees: SQLWrapper, taskIds: string[]): Promise<ConversationActivity> {
+  const [ofEmployees] = await conversationsOf(ctx, companyId, inArray(jobs.agentId, employees));
+  const [ofWork] = await conversationsOf(ctx, companyId, inArray(jobs.taskId, taskIds));
+  return { running: Boolean(ofEmployees?.running || ofWork?.running), lastEnded: lastOf(ofEmployees?.lastEnded ?? null, ofWork?.lastEnded ?? null) };
+}
 
 export async function quietDepartment(ctx: Ctx, turnId: string, departmentId: string, now: Date) {
   const [turn] = await ctx.db.select().from(turns).where(and(eq(turns.id, turnId), eq(turns.status, 'open')));
@@ -74,12 +96,12 @@ export async function quietDepartment(ctx: Ctx, turnId: string, departmentId: st
   const work = await ctx.db.select().from(tasks).where(and(workOfOpenTurn(turn.id), inArray(tasks.departmentId, scope), notInArray(tasks.status, [...CLOSED])));
   if (!work.length) return null;
   const employees = ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, turn.companyId), inArray(agents.departmentId, scope)));
-  const conversations = await ctx.db.select().from(jobs).where(and(eq(jobs.companyId, turn.companyId), eq(jobs.kind, 'conversation'), or(inArray(jobs.agentId, employees), inArray(jobs.taskId, work.map(task => task.id)))));
-  if (conversations.some(job => job.status === 'running')) return null;
+  const activity = await conversationActivity(ctx, turn.companyId, employees, work.map(task => task.id));
+  if (activity.running) return null;
   /* A department where all of it waits for something known, in time, has nothing to say. */
   const silent = await unexplained(ctx, work, now);
   if (!silent.length) return null;
-  const since = silentSince(turn, work, conversations);
+  const since = silentSince(turn, work, activity.lastEnded);
   if (now.getTime() - since.getTime() < QUIET_DEPARTMENT_MS) return null;
   const versions = taskVersions(work);
   return { companyId: turn.companyId, work, silent, since, key: waitKey([turn.id, departmentId, versions, since.toISOString()]) };

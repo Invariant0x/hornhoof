@@ -3,6 +3,8 @@ import {
   ART_CONTRACT_VERSION,
   declaredArtFiles,
   resolveBuildingArt,
+  personSheetPath,
+  residentBody,
   resolveResidentArt,
   validateArtIndex,
   type ArtIndex,
@@ -39,6 +41,7 @@ function stepFootprintOf(pack: WorldPackManifest, path: string): FootprintKey | 
 function completeIndex(pack: WorldPackManifest): ArtIndex {
   const files: Record<string, ArtIndexEntry> = {};
   const declared = declaredArtFiles(pack);
+  const held = new Map(declared.filter(d => d.held).map(d => [d.path, d.held!.need]));
   const entryFor = (d: DeclaredArtFile): ArtIndexEntry | null => {
     if (d.passport === 'picture') {
       const fpKey = d.role === 'module' ? (d.path.split('/')[1] as FootprintKey) : (stepFootprintOf(pack, d.path) ?? '1x1');
@@ -65,10 +68,12 @@ function completeIndex(pack: WorldPackManifest): ArtIndex {
     }
     if (d.passport === 'anchor') return { w: 40, h: 100, passport: { anchor: { x: 20, y: 98 } } };
     if (d.passport === 'sheet') {
-      const rows = d.role === 'person' ? 5 : 1;
-      return { w: 8 * 136, h: rows * 200, passport: { frameW: 136, frameH: 200, frames: 8, fps: 10, anchor: { x: 68, y: 190 } } };
+      /* A sheet with a held item draws the directions order v3 4.4 asks of it, any other person's sheet the default 5. */
+      const directions = held.get(d.path);
+      const rows = directions?.length ?? (d.role === 'person' ? 5 : 1);
+      return { w: 8 * 136, h: rows * 200, passport: { frameW: 136, frameH: 200, frames: 8, fps: 10, anchor: { x: 68, y: 190 }, ...(directions ? { directions } : {}) } };
     }
-    return d.role === 'cloak' ? { w: 8 * 136, h: 5 * 200 } : null;
+    return d.role === 'cloak' ? { w: 8 * 136, h: (held.get(d.baseSheet!)?.length ?? 5) * 200 } : null;
   };
   for (const d of declared) {
     const entry = entryFor(d);
@@ -111,9 +116,11 @@ describe('Stage 9 world packs follow the art contract', () => {
     describe(`pack ${pack.id}`, () => {
       it('validates and declares a step for every size the engine grows each building kind to', () => {
         expect(validateWorldPack(pack)).toEqual({ ok: true });
-        for (const [kind, spans] of Object.entries(ENGINE_SPANS)) {
+        for (const [kind, engineSpans] of Object.entries(ENGINE_SPANS)) {
           const steps = pack.art?.buildings[kind as BuildingKind] ?? [];
           const covered = new Set(steps.map(s => Number(s.footprint.split('x')[0])));
+          /* A pack's layout rule replaces the engine's sizes of a kind. */
+          const spans = pack.buildingLayout?.[kind as BuildingKind]?.spans ?? engineSpans;
           for (const span of spans) expect(covered.has(span), `${pack.id} ${kind} ${span}x${span}`).toBe(true);
         }
         expect(pack.art?.altar).toBe(true);
@@ -174,6 +181,7 @@ describe('Stage 9 world packs follow the art contract', () => {
         for (const look of pack.art?.people?.looks ?? []) {
           const r = {
             id: 'r',
+            agentId: 'agent-r',
             look: { id: look },
             roleClass: 'executor',
             outfitTier: 5,
@@ -183,8 +191,11 @@ describe('Stage 9 world packs follow the art contract', () => {
             cloakColor: '#123456',
           } as unknown as ResidentEntity;
           const art = resolveResidentArt(pack, index, r, 1.25);
-          expect(art?.layers.map(l => l.path)).toEqual([`people/${look}/tier_5/carry.png`, `people/${look}/tier_5/carry.cloak.png`]);
-          expect(art?.mirror).toBe(true);
+          /* Every body's sheets are in the complete folder, so the resident gets its own body's. */
+          const body = residentBody('agent-r');
+          expect(art?.layers.map(l => l.path)).toEqual([personSheetPath(look, 5, 'carry', false, body), personSheetPath(look, 5, 'carry', true, body)]);
+          /* A carry draws NE, SE, SW and NW (order v3 4.4): a resident facing W shows a drawn row, never a mirror. */
+          expect(art?.mirror).toBe(false);
         }
       });
     });

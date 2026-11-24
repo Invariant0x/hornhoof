@@ -1,7 +1,5 @@
 ---
 id: dsn-system-governance
-title: { en: "Design system governance", ru: "Управление дизайн-системой" }
-description: { en: "Keeps one design system for all products and decides what enters it.", ru: "Поддерживает одну дизайн-систему для всех продуктов и решает, что в нее входит." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins design/skills/design-system/SKILL.md]
 ---

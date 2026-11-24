@@ -1,7 +1,5 @@
 ---
 id: sal-lead-signals
-title: { en: "Buying signals", ru: "Сигналы готовности к покупке" }
-description: { en: "Watches public sources for signs that a target company may be ready to buy now.", ru: "Отслеживает в открытых источниках признаки того, что компания может быть готова купить сейчас." }
 kind: procedure
 sources: [affaan-m/ECC skills/lead-intelligence/SKILL.md]
 ---

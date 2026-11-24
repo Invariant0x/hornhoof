@@ -1,9 +1,7 @@
 ---
 id: ops-task-watch
-title: { en: "Watch the tasks", ru: "Следить за задачами" }
-description: { en: "On each timer round, goes over every agent, nudges the ones that are stuck, tells their head when a nudge did not help, and tells a head when people of its department stand free while work waits.", ru: "На каждом обходе по таймеру проверяет всех агентов, подталкивает застрявших, сообщает их руководителю, если это не помогло, и сообщает руководителю, когда люди его отдела свободны, а работа ждет." }
 kind: procedure
-grants: [agents, message_employee, restart_program]
+grants: [agents, message_employee, restart_program, settle]
 ---
 Use the company activity and task records to find work that needs help. For each active employee, compare its task, progress signals, current prerequisite and next observation. A quiet screen prompts inspection. Preserve work with reliable signs of progress. If a screen is needed, ask the program operator to inspect it. A scheduled drain or retry is active work when its status and next check are known. Track its receipt and inspect a stalled operation separately. Record task evidence you can read and ask its owner for evidence the current interface cannot open.
 
@@ -12,3 +10,11 @@ Tests, delegated work, another task and scheduled retries stay in progress with 
 When runnable work has an eligible free owner, treat unassigned work as a coordination fault and tell the department head which work and capacity you observed. Close the notice when the assignment changes or the head records why the work cannot start. Leave assignment choices with the head. Escalate if the owner misses the agreed response time or the observed impact warrants earlier help. Use evidence of the work's state instead of unrelated activity.
 
 Read the outcome of any intervention and tell the responsible head what changed. End the round with the actionable observations and recovery owners.
+
+Also look for tasks whose work is done or has lost its point: they must not hang in the tracker. What "done" means depends on the kind of result the task has (its resultKind in task.echelons), and each round applies these rules to every open task, in any department:
+1. Code. Done only when the task's commit is an ancestor of a release tag or of main. Ask task_released: it reads the ancestry from the repository, never the turn number. It judges only a commit the task's own hand-ins name, and only one with work of its own past the base it names. The head of the task's branch is no proof: a branch pushed at main before its first commit is not done work, and task_released says released false for it. A commit that only a turn branch or a branch of its own holds is unfinished work, and is never closed. If the repository cannot be read, or no hand-in names a commit, nothing is proved: leave the task and ask the head.
+2. A document, report, post, registration or other work that is not code. Done when its result is recorded where a colleague will find it: a path in the department's repository, or a file on the task with a report that proves it (a link, a screenshot, figures). Open the recorded place before you close the task. If it is recorded and the task is still open, close it. If it is not recorded, the task is not done.
+3. Coordination, a parent with no result of its own. Done when every subtask is closed and it has no new work. Standing work, such as daily posts, runs as tasks per period, so a parent is never kept open for the next period.
+4. A duplicate of another task, or a task paused so long its point may be gone. Ask the head of its department; never close it blind. Never touch paused work on your own.
+
+Close a clear case of rules 1 to 3 with settle_task and a reason of one sentence: it goes into the task's log as your act and the head of that department is told. The server checks the case itself and refuses one that is not clear: read its answer, never repeat it, and ask the head instead. Close nothing by any other means, and never widen what you may do beyond it.

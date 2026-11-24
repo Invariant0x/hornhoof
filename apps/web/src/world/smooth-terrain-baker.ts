@@ -14,7 +14,9 @@ import type {
   LodTierSpec,
   WorldPackManifest,
 } from './manifest';
+import { chunkLotClearing, lotClearingAt, type LotClearing } from './lot-clearing';
 import { createRng, hash2i, hashSeed, valueNoise2D } from './prng';
+import { paintsEveryStreet, streetField, type StreetField } from './street-field';
 import { terrainArtFor, type ArtPixels, type LoadedTerrainArt } from './terrain-art';
 import type { CornerFieldGrid, GeneratedWorldMap } from './terrain-engine';
 
@@ -635,6 +637,48 @@ function newPlotHit(): PlotHit {
   return { inside: false, cx: 0, cy: 0, edgeU: 0, edgeV: 0, alongV: false, margin: 0, marginEdge: -Infinity, edgeTu: 1, edgeTv: 0 };
 }
 
+/* Moves a pixel's ground weights toward the pack's lot ground by the cleared share; returns the share. */
+function clearLotGround(w: Float32Array, count: number, lot: number, cleared: number): number {
+  if (cleared <= 0) return 0;
+  for (let m = 0; m < count; m++) w[m] = w[m]! * (1 - cleared);
+  w[lot] = w[lot]! + cleared;
+  return cleared;
+}
+
+/* The cleared lots at one pixel: the share of the lot ground moved into its weights, the lots whose edge reaches it (null
+   where none does), and the tilled plots that still show under it (none on a lot). */
+type LotPixel = { share: number; lots: LotClearing | null; plot: PlotLayout | null };
+
+function newLotPixel(): LotPixel {
+  return { share: 0, lots: null, plot: null };
+}
+
+/* The lots a bake mixes in: none when the pack names no lot ground. */
+function lotsFor(look: GroundLook, clearing: LotClearing | null): LotClearing | null {
+  return look.lotGround >= 0 ? clearing : null;
+}
+
+/* Clears the pixel's ground weights by the share of lot ground at (u, v) and says what the pixel shows of the lots. */
+function clearPixel(look: GroundLook, lots: LotClearing | null, w: Float32Array, u: number, v: number, out: LotPixel): LotPixel {
+  out.share = lots ? clearLotGround(w, look.matCount, look.lotGround, lotClearingAt(lots, u, v)) : 0;
+  out.lots = out.share > 0 ? lots : null;
+  out.plot = out.share < 0.5 ? look.plot : null;
+  return out;
+}
+
+/* Weight of ground m at (u, v) with the cleared lots laid over the map's ground. */
+function clearedLayerAt(look: GroundLook, cf: CornerFieldGrid, m: number, u: number, v: number, lots: LotClearing | null): number {
+  const raw = layerAt(cf, cf.layerWeights[m]!, u, v);
+  if (!lots) return raw;
+  const cleared = lotClearingAt(lots, u, v);
+  return raw * (1 - cleared) + (m === look.lotGround ? cleared : 0);
+}
+
+/* Index of the pack's lot ground among the map's grounds; -1 when the pack names none. */
+function lotGroundIndex(cf: CornerFieldGrid, pack: WorldPackManifest): number {
+  return pack.lotGround ? cf.materialIds.indexOf(pack.lotGround.material) : -1;
+}
+
 function layerAt(cf: CornerFieldGrid, arr: Float32Array, u: number, v: number): number {
   const lu = Math.max(0, Math.min(cf.cols - 1.001, u - cf.minCol));
   const lv = Math.max(0, Math.min(cf.rows - 1.001, v - cf.minRow));
@@ -830,6 +874,38 @@ function pathStripAt(p: PathLook, strip: ArtPixels, tpt: number, u: number, v: n
   out[3] = Math.min(1, a / (wu + wv)) * gate;
 }
 
+/* The city's streets a bake paints, under the pack's street strips; null without strips or streets. One field per
+   clearing, so the slices of one chunk's bake share it. */
+/* Nowhere a street: the field of a bake without streets or without every street strip. */
+const NO_STREETS: StreetField = {
+  at: (_u, _v, out) => {
+    out[3] = 0;
+  },
+};
+
+const streetCache = new WeakMap<LotClearing, { art: LoadedTerrainArt; field: StreetField }>();
+function streetsFor(look: GroundLook, clearing: LotClearing | null): StreetField {
+  const art = look.art;
+  if (!clearing?.streets?.length || !art || !paintsEveryStreet(art.roads)) return NO_STREETS;
+  const hit = streetCache.get(clearing);
+  if (hit?.art === art) return hit.field;
+  const field = streetField(clearing.streets, art.roads!, art.texelsPerTile) ?? NO_STREETS;
+  streetCache.set(clearing, { art, field });
+  return field;
+}
+
+/* Lays the street at (u, v) over the ground colour in ground[0..2] (out holds the street's own colour and opacity),
+   and gives back how much of the ground still shows, for the ripples the street has trodden flat. */
+function paintStreet(streets: StreetField, u: number, v: number, ground: number[], out: number[]): number {
+  streets.at(u, v, out);
+  const t = out[3]!;
+  if (t <= 0) return 1;
+  ground[0] = ground[0]! + (out[0]! - ground[0]!) * t;
+  ground[1] = ground[1]! + (out[1]! - ground[1]!) * t;
+  ground[2] = ground[2]! + (out[2]! - ground[2]!) * t;
+  return 1 - t;
+}
+
 /* ---------- chunk baking ---------- */
 
 /* Pure pixel baker for one chunk using smooth bilinear corner fields, painted soil edges, seamless material textures,
@@ -861,9 +937,10 @@ export function bakeSmoothChunkPixels(
   pack: WorldPackManifest,
   lod: LodTierSpec,
   art: LoadedTerrainArt | null = terrainArtFor(pack),
+  clearing: LotClearing | null = null,
 ): SmoothBakedPixels {
   const raster = smoothChunkRaster(chunk, pack, lod);
-  bakeSmoothChunkRows(chunk, map, pack, art, raster, 0, raster.pixelHeight);
+  bakeSmoothChunkRows(chunk, map, pack, art, chunkLotClearing(clearing, chunk), raster, 0, raster.pixelHeight);
   return raster;
 }
 
@@ -883,15 +960,17 @@ export function startSmoothChunkBake(
   pack: WorldPackManifest,
   lod: LodTierSpec,
   art: LoadedTerrainArt | null = terrainArtFor(pack),
+  clearing: LotClearing | null = null,
 ): SmoothChunkBake {
   const pixels = smoothChunkRaster(chunk, pack, lod);
+  const near = chunkLotClearing(clearing, chunk);
   let next = 0;
   return {
     pixels,
     advance: (deadline, now) => {
       while (next < pixels.pixelHeight) {
         const end = Math.min(pixels.pixelHeight, next + BAKE_SLICE_ROWS);
-        bakeSmoothChunkRows(chunk, map, pack, art, pixels, next, end);
+        bakeSmoothChunkRows(chunk, map, pack, art, near, pixels, next, end);
         next = end;
         if (now() >= deadline) break;
       }
@@ -900,13 +979,14 @@ export function startSmoothChunkBake(
   };
 }
 
-/* Bakes the raster's rows pyStart to pyEnd (exclusive). Each row depends only on the map, so any split of the rows
-   gives the same pixels as one pass. */
+/* Bakes the raster's rows pyStart to pyEnd (exclusive). Each row depends only on the map and the cleared lots, so any
+   split of the rows gives the same pixels as one pass. */
 function bakeSmoothChunkRows(
   chunk: ChunkCoord,
   map: GeneratedWorldMap,
   pack: WorldPackManifest,
   art: LoadedTerrainArt | null,
+  clearing: LotClearing | null,
   raster: SmoothBakedPixels,
   pyStart: number,
   pyEnd: number,
@@ -919,6 +999,11 @@ function bakeSmoothChunkRows(
   const cf = map.cornerFields;
   const look = groundLook(map, pack, art);
   const { textures, matCount } = look;
+  const lots = lotsFor(look, clearing);
+  const lotPx = newLotPixel();
+  const streets = streetsFor(look, clearing);
+  const streetPx = [0, 0, 0, 0];
+  const groundPx = [0, 0, 0];
 
   const liquid = pack.liquidLayer;
   const shallowRgb = parseHexRgb(liquid?.shallowTintColor ?? '#489FB5', [72, 159, 181]);
@@ -1042,6 +1127,7 @@ function bakeSmoothChunkRows(
         const arr = layerArrs[m]!;
         wBuf[m] = arr[i00]! * w00 + arr[i10]! * w10 + arr[i01]! * w01 + arr[i11]! * w11;
       }
+      const { plot, lots: lotsHere } = clearPixel(look, lots, wBuf, u, v, lotPx);
 
       let rippleStrength = 0;
       let r = 0;
@@ -1049,10 +1135,10 @@ function bakeSmoothChunkRows(
       let b = 0;
       plotHit.inside = false;
       let fieldHere = 0;
-      if (look.plot) {
-        plotAt(cf, look.plot, u, v, plotHit);
-        fieldHere = wBuf[look.plot.material]!;
-        if (!plotHit.inside) untilledGround(look.plot, wBuf, plotHit.margin);
+      if (plot) {
+        plotAt(cf, plot, u, v, plotHit);
+        fieldHere = wBuf[plot.material]!;
+        if (!plotHit.inside) untilledGround(plot, wBuf, plotHit.margin);
       }
       if (plotHit.inside) {
         plotColor(look, plotHit, u, v, coarse, rgb);
@@ -1062,7 +1148,7 @@ function bakeSmoothChunkRows(
       } else {
         if (painted && marginEdgeMix(look, plotHit, fieldHere, u, v, mix)) {
           /* The painted edge of a plot margin. */
-        } else if (painted) mixGroundArt(look, cf, wBuf, u, v, coarse, mix);
+        } else if (painted) mixGroundArt(look, cf, wBuf, u, v, coarse, mix, lotsHere);
         else mixGround(wBuf, matCount, u, v, coarse, detail, mix);
         sampleTexture(textures[mix.a]!, u, v, rgb);
         r = rgb[0]!;
@@ -1079,7 +1165,7 @@ function bakeSmoothChunkRows(
         }
         if (mix.rim > 0) shade *= 1 - RIM_DARK * mix.rim;
         /* Painted meadow: sunlit patches and a little more colour, so a green stretch is lively, not flat. */
-        const gi = look.grassForPlots;
+        const gi = look.meadow;
         if (painted && gi >= 0) {
           const gs = (mix.a === gi ? mix.shareA : 0) + (mix.b === gi && mix.b !== mix.a ? 1 - mix.shareA : 0);
           if (gs > 0) {
@@ -1126,6 +1212,14 @@ function bakeSmoothChunkRows(
           }
         }
       }
+      /* The city's streets over all of it (#1985). */
+      groundPx[0] = r;
+      groundPx[1] = g;
+      groundPx[2] = b;
+      rippleStrength *= paintStreet(streets, u, v, groundPx, streetPx);
+      r = groundPx[0]!;
+      g = groundPx[1]!;
+      b = groundPx[2]!;
       if (rippleStrength > 0.01 && dWater > 0.45) {
         shade *= rippleShade(u, v, rippleStrength * smoothstep(0.45, 1.3, dWater), coarse, detail);
       }
@@ -1471,6 +1565,10 @@ type GroundLook = Readonly<{
   edges: readonly (EdgeLook | null)[];
   plotEdge: EdgeLook | null;
   grassForPlots: number;
+  /* The meadow ground (grass tufts), painted livelier with sunlit patches; -1 when the pack has none. */
+  meadow: number;
+  /* The ground cleared building lots are drawn with; -1 when the pack names none. */
+  lotGround: number;
   ditch: GroundTex | null;
 }>;
 
@@ -1594,6 +1692,8 @@ function groundLook(map: GeneratedWorldMap, pack: WorldPackManifest, pinned: Loa
     edges,
     plotEdge,
     grassForPlots,
+    meadow: specs.findIndex(sp => sp.pattern === 'grass_tufts'),
+    lotGround: lotGroundIndex(cf, pack),
     ditch: surface ? artTex(surface, tpt) : null,
   };
   lookCache.set(map, { pack, art: pinned, look });
@@ -1632,6 +1732,7 @@ function mixGroundArt(
   v: number,
   coarse: Float32Array,
   out: GroundMix,
+  lots: LotClearing | null = null,
 ): void {
   const count = look.matCount;
   let a = -1;
@@ -1664,11 +1765,10 @@ function mixGroundArt(
     return;
   }
   const e = 0.05;
-  const la = cf.layerWeights[a]!;
-  const lb = cf.layerWeights[b]!;
-  const g0 = layerAt(cf, la, u, v) - layerAt(cf, lb, u, v);
-  const gu = (layerAt(cf, la, u + e, v) - layerAt(cf, lb, u + e, v) - g0) / e;
-  const gv = (layerAt(cf, la, u, v + e) - layerAt(cf, lb, u, v + e) - g0) / e;
+  const gap = (uu: number, vv: number) => clearedLayerAt(look, cf, a, uu, vv, lots) - clearedLayerAt(look, cf, b, uu, vv, lots);
+  const g0 = gap(u, v);
+  const gu = (gap(u + e, v) - g0) / e;
+  const gv = (gap(u, v + e) - g0) / e;
   const grad = Math.max(0.08, Math.hypot(gu, gv));
   /* The weights come from tile corners, so their contour runs along the tile diamonds; a slow meander, the same for
      both sides of the edge (its sign follows the ground order), lets the edge wander off that grid. */
@@ -1682,25 +1782,32 @@ function mixGroundArt(
 
 /* The two grounds and their shares that the baker paints at (u, v): what a soil edge looks like, as numbers. The
    first ground is the one that covers most of the pixel (shareA >= 0.5); the baker's colour is the same blend. */
-export function groundMixAt(map: GeneratedWorldMap, pack: WorldPackManifest, u: number, v: number): GroundMix {
+export function groundMixAt(
+  map: GeneratedWorldMap,
+  pack: WorldPackManifest,
+  u: number,
+  v: number,
+  clearing: LotClearing | null = null,
+): GroundMix {
   const look = groundLook(map, pack);
   const s = sampleCornerFieldBilinear(map.cornerFields, u, v);
   const w = new Float32Array(s.weights);
   const out: GroundMix = { a: 0, b: 0, shareA: 1, rim: 0 };
-  if (look.plot) {
+  const { plot, lots } = clearPixel(look, lotsFor(look, clearing), w, u, v, newLotPixel());
+  if (plot) {
     const hit = newPlotHit();
-    plotAt(map.cornerFields, look.plot, u, v, hit);
+    plotAt(map.cornerFields, plot, u, v, hit);
     if (hit.inside) {
-      out.a = look.plot.material;
-      out.b = look.plot.material;
+      out.a = plot.material;
+      out.b = plot.material;
       return out;
     }
-    const fieldHere = w[look.plot.material]!;
-    untilledGround(look.plot, w, hit.margin);
+    const fieldHere = w[plot.material]!;
+    untilledGround(plot, w, hit.margin);
     if (look.art && marginEdgeMix(look, hit, fieldHere, u, v, out)) return coveringFirst(out);
   }
   const { coarse, detail } = getNoiseLuts();
-  if (look.art) mixGroundArt(look, map.cornerFields, w, u, v, coarse, out);
+  if (look.art) mixGroundArt(look, map.cornerFields, w, u, v, coarse, out, lots);
   else mixGround(w, look.matCount, u, v, coarse, detail, out);
   return coveringFirst(out);
 }
@@ -1721,8 +1828,9 @@ export function bakeSmoothChunkCanvas(
   pack: WorldPackManifest,
   lod: LodTierSpec,
   art: LoadedTerrainArt | null = terrainArtFor(pack),
+  clearing: LotClearing | null = null,
 ): BakedChunk {
-  return smoothPixelsToCanvas(bakeSmoothChunkPixels(chunk, map, pack, lod, art), lod.id);
+  return smoothPixelsToCanvas(bakeSmoothChunkPixels(chunk, map, pack, lod, art, clearing), lod.id);
 }
 
 /* A baked raster on a canvas, ready for upload to the GPU or for drawing in 2D. */

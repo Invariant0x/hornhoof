@@ -10,7 +10,12 @@ const env = process.env;
 /* A pull request from a fork never takes a mark. A fork that is gone counts as one. */
 const fromFork = event => Boolean(event.pull_request) && event.pull_request.head?.repo?.full_name !== event.repository?.full_name;
 
+/* A full run, which a release asks for with the input full, runs every test whatever a mark says: a mark is a status, which any
+   token with write access can post. */
+const fullAsked = () => env.FULL_RUN === 'true';
+
 async function decide() {
+  if (fullAsked()) return { proved: false, why: 'A full run was asked for: it reads no mark.' };
   if (fromFork(JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8')))) return { proved: false, why: 'A pull request from a fork always runs the tests.' };
   return proved(env.GITHUB_SHA);
 }

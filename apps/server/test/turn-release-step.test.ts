@@ -1,10 +1,11 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, approvalPolicies, departments, taskEvents, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { agents, approvalPolicies, departments, taskEvents, tasks } from '../src/db/schema.js';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { ask, closeTask, report } from '../src/modules/tasks/engine.js';
 import { BASE } from './development-echelons-fixture.js';
 import { as } from './helpers.js';
+import { recorded as recordedFile } from './recorded-fixture.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 import { prepareTemplates } from './templates-once.js';
 import { joinedAfterR, releasing, turnkeyAfterR } from './turn-release-fixture.js';
@@ -22,27 +23,22 @@ const requireApproval = (f: Awaited<ReturnType<typeof releasing>>) =>
   f.db.insert(approvalPolicies).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, channel: 'commit', mode: 'every' });
 
 const recorded = (text: string) => JSON.parse(text) as Record<string, unknown>;
-type Part = typeof testParts.$inferSelect;
 
 describe('the release step of a turn', () => {
-  it('records the release of the open turn before main moves: its commit, main under it, its full run, its tasks and the approval', async () => {
+  it('records the release of the open turn before main moves: its commit, main under it, what its CI said, its tasks and the approval', async () => {
     const f = await releasing();
-    const run = await f.fullRun();
     const approval = await f.approve();
-    const result = await f.recordRelease({ runId: run.id });
+    const result = await f.recordRelease();
     expect(result.isError).toBe(false);
     expect(recorded(result.text)).toMatchObject({
-      turn: f.turn.number, commit: f.R, baseCommit: BASE, runId: run.id, approvalRequestId: approval.id,
+      turn: f.turn.number, commit: f.R, baseCommit: BASE, ci: { state: 'green', checks: 3 }, approvalRequestId: approval.id,
       tasks: [expect.objectContaining({ number: f.task.number, verdicts: [expect.any(String)] })], covered: true,
     });
   });
 
   it('records a checked release without approval when the department has no commit rule', async () => {
     const f = await releasing();
-    const wrong = await f.fullRun({ commit: EXTRA });
-    expect(await f.recordRelease({ runId: wrong.id })).toMatchObject({ isError: true, text: expect.stringContaining('whole run') });
-    const run = await f.fullRun();
-    const result = await f.recordRelease({ runId: run.id });
+    const result = await f.recordRelease();
     expect(result.isError).toBe(false);
     expect(recorded(result.text)).toMatchObject({ commit: f.R, approvalRequestId: null, autonomousReleaseId: null });
   });
@@ -50,8 +46,7 @@ describe('the release step of a turn', () => {
   it('does not rely on an autonomous approval when the commit rule needs none', async () => {
     const f = await releasing();
     await f.db.update(departments).set({ autonomousRelease: true }).where(eq(departments.id, f.task.departmentId!));
-    const run = await f.fullRun();
-    const result = await f.recordRelease({ runId: run.id });
+    const result = await f.recordRelease();
     expect(result.isError).toBe(false);
     expect(recorded(result.text)).toMatchObject({ approvalRequestId: null, autonomousReleaseId: null });
   });
@@ -59,10 +54,9 @@ describe('the release step of a turn', () => {
   it('requires the exact commit when the department asks for approval, and accepts the orchestrator for the owner', async () => {
     const f = await releasing();
     await requireApproval(f);
-    const run = await f.fullRun();
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
+    expect(await f.recordRelease()).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
     await f.approve('6'.repeat(40));
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true });
+    expect(await f.recordRelease()).toMatchObject({ isError: true });
     const { request } = await ask(f.ctx, f.head.id, f.release.id, { kind: 'approval', text: 'Approve the release commit.', commit: f.R });
     const [orchestrator] = await f.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const approved = await f.app.inject({
@@ -70,132 +64,39 @@ describe('the release step of a turn', () => {
       headers: orchestratorHeaders(f.claude.ownerPersonId, orchestrator!.id),
     });
     expect(approved.statusCode).toBe(200);
-    const result = await f.recordRelease({ runId: run.id });
+    const result = await f.recordRelease();
     expect(result.isError).toBe(false);
     expect(recorded(result.text)).toMatchObject({ approvalRequestId: request.id });
   });
 
-  /* After the first run of a release, a run of it takes what that release proved and runs what failed or changed. */
-  it('asks in its description for a whole run of the turn branch, which may take what its release proved', async () => {
+  it("asks in its description for no run: the release relies on the repository's CI for the exact commit", async () => {
     const f = await releasing();
     const tool = (await f.client.listTools()).tools.find(found => found.name === 'release_turn')!;
-    expect(tool.description).toMatch(/runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own/);
-    expect(tool.description).not.toMatch(/nothing reused/);
-    expect(tool.inputSchema.properties?.runId).toMatchObject({ description: 'A passed whole run of that commit.' });
-  });
-
-  it('takes a later run of the release that took the green results of its release', async () => {
-    const f = await releasing();
-    const run = await f.fullRun({ reused: 3 });
-    await f.approve();
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: false });
-  });
-
-  it('takes a later run of the release that ran nothing, as every test file kept its green result', async () => {
-    const f = await releasing();
-    const run = await f.fullRun({ reused: 5, parts: 0 });
-    await f.approve();
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: false });
-  });
-
-  it.each([
-    ['a run with no part that took nothing', { parts: 0 }],
-    ['a run that took results from before releases were kept', { reused: 3, ofRelease: false }],
-    ['a run of one suite', { reused: 3, suite: 'server' }],
-    ['a run with a failed part', { failedPart: true }],
-    ['a run of another commit', { commit: EXTRA }],
-    ['a run of another branch', { branch: 'task-1' }],
-    ['a failed run', { status: 'failed' as const }],
-  ])('refuses %s: a release needs a whole run of its own on its exact commit', async (_what, run) => {
-    const f = await releasing();
-    const given = await f.fullRun(run);
-    await f.approve();
-    expect(await f.recordRelease({ runId: given.id })).toMatchObject({ isError: true, text: expect.stringContaining('whole run') as unknown });
-  });
-
-  /* Only a run of the product's tests proves a release: of the full profile its manifest names, with a receipt on the commit of every
-     part. A command of its own proves nothing, however it ended. */
-  it('refuses a passed run of a command of its own, with no product and no receipts, though a person approved the commit', async () => {
-    const f = await releasing();
-    const run = await f.fullRun({ command: 'printf smoke-{part}-{parts}' });
-    /* Any agent of the department with a task may start one on the turn branch at R. */
-    await f.db.update(testRuns).set({ agentId: f.author.id }).where(eq(testRuns.id, run.id));
-    await f.approve();
-    const result = await f.recordRelease({ runId: run.id });
-    expect(result).toMatchObject({ isError: true, text: expect.stringContaining('whole run') as unknown });
-    expect(result.text).toContain("it ran the command printf smoke-{part}-{parts} rather than the product's tests");
-  });
-
-  it.each<[string, (part: Part) => Partial<Part>]>([
-    ['a part with no receipt', () => ({ environmentReceipt: null })],
-    ['a receipt of another commit', part => ({ environmentReceipt: { ...part.environmentReceipt!, commitSha: EXTRA } })],
-    ['a receipt of another profile', part => ({ environmentReceipt: { ...part.environmentReceipt!, profile: 'fast' } as Part['environmentReceipt'] })],
-  ])("refuses a run of the product with %s: a release needs every part's receipt on its commit", async (_what, change) => {
-    const f = await releasing();
-    const run = await f.fullRun();
-    const [part] = await f.db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(testParts.part);
-    await f.db.update(testParts).set(change(part!)).where(eq(testParts.id, part!.id));
-    await f.approve();
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining("it is no run of the product's full profile with a passed receipt of every part on this commit") as unknown });
-  });
-
-  /* What proves a run of the product is the receipts its machines sent for every part, not who asked for it. */
-  it('takes a run of the product that another agent of the department started', async () => {
-    const f = await releasing();
-    const run = await f.fullRun();
-    await f.db.update(testRuns).set({ agentId: f.author.id }).where(eq(testRuns.id, run.id));
-    await f.approve();
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: false });
-  });
-
-  it('refuses a run of the product that an agent of another department started, and takes one the orchestrator started', async () => {
-    const f = await releasing();
-    const run = await f.fullRun();
-    const [other] = await f.db.insert(departments).values({ companyId: f.task.companyId, templateKey: 'sales', roleCode: 'SAL' }).returning();
-    const [outsider] = await f.db.insert(agents).values({ companyId: f.task.companyId, kind: 'worker', name: 'Outsider', roleKey: 'SAL-AE', departmentId: other!.id, model: '', subscriptionId: f.head.subscriptionId! }).returning();
-    await f.db.update(testRuns).set({ agentId: outsider!.id }).where(eq(testRuns.id, run.id));
-    await f.approve();
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('an agent of another department started it') as unknown });
-    const [orchestrator] = await f.db.select().from(agents).where(and(eq(agents.companyId, f.task.companyId), eq(agents.kind, 'orchestrator')));
-    await f.db.update(testRuns).set({ agentId: orchestrator!.id }).where(eq(testRuns.id, run.id));
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: false });
-  });
-
-  it("refuses a run of the product's profile that is not its full run", async () => {
-    const f = await releasing();
-    const run = await f.fullRun();
-    await f.db.update(testRuns).set({ environmentSnapshot: { ...run.environmentSnapshot!, profile: 'fast' } }).where(eq(testRuns.id, run.id));
-    await f.approve();
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining("it is no run of the product's full profile") as unknown });
-  });
-
-  it('refuses a full run when a newer run of the same commit failed', async () => {
-    const f = await releasing();
-    const run = await f.fullRun();
-    await f.fullRun({ status: 'failed' });
-    await f.approve();
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('whole run') as unknown });
+    expect(tool.description).toMatch(/The release relies on the repository's CI for that exact commit: the GitHub Actions runs of it, which Hornhoof reads from github\.com, never from your word; commit statuses and the checks of other apps prove nothing\. Green CI, every job of every full run of the release workflow finished with success and no test job skipped, records it with no run, while a run of any other workflow, and a run of the release workflow that was not started by hand with its input full, counts for nothing;/);
+    expect(tool.description).toMatch(/or a repository whose settings name no release workflow \(a person names it there, by the path of its file; Hornhoof never works it out, and says: name the release workflow in the repository settings\), refuses and says why/);
+    expect(tool.description).toMatch(/Where no full run of the release workflow is on the commit yet, it starts that workflow with the input full set on the turn branch itself, once for each commit, which must be the head of the branch, and answers 'CI started, run N; the release records when it's green'/);
+    expect(tool.description).not.toMatch(/whole run|run_tests|nothing reused/);
+    expect(tool.inputSchema.properties).not.toHaveProperty('runId');
+    expect(tool.inputSchema.properties?.commit).toMatchObject({ description: "The exact commit of the turn branch: its head, where CI is to start on it, or one the repository's CI checked." });
   });
 
   it('refuses a commit the turn branch does not hold, or a main that already holds it', async () => {
     const f = await releasing();
-    const run = await f.fullRun();
     await f.approve();
     f.repo.heads[f.branch] = EXTRA;
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining(f.branch) as unknown });
+    expect(await f.recordRelease()).toMatchObject({ isError: true, text: expect.stringContaining(f.branch) as unknown });
     f.repo.heads[f.branch] = f.R;
     f.repo.heads.main = f.R;
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('main') as unknown });
+    expect(await f.recordRelease()).toMatchObject({ isError: true, text: expect.stringContaining('main') as unknown });
   });
 
-  /* The turn branch never stops for a release: work goes on joining it while the whole run and the approval of R take their
+  /* The turn branch never stops for a release: work goes on joining it while the CI and the approval of R take their
      time, and the release takes only what R holds. */
   it('records a commit the turn branch went past, and leaves the results R does not hold to the next release', async () => {
     const f = await releasing();
-    const run = await f.fullRun();
     await f.approve();
     const late = await lateResult(f, EXTRA);
-    expect(recorded((await f.recordRelease({ runId: run.id })).text)).toMatchObject({
+    expect(recorded((await f.recordRelease()).text)).toMatchObject({
       commit: f.R, tasks: [expect.objectContaining({ number: f.task.number })], left: [late.number],
     });
   });
@@ -215,12 +116,11 @@ describe('the release step while the turn branch goes on', () => {
 
   it('is asked only by the holder of the release task, while it is not paused', async () => {
     const f = await releasing();
-    const run = await f.fullRun();
     await f.approve();
     await f.db.update(tasks).set({ paused: { at: new Date().toISOString(), by: { personId: f.claude.ownerPersonId! } } as never }).where(eq(tasks.id, f.release.id));
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true });
+    expect(await f.recordRelease()).toMatchObject({ isError: true });
     await f.db.update(tasks).set({ paused: null, assigneeAgentId: f.author.id }).where(eq(tasks.id, f.release.id));
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true });
+    expect(await f.recordRelease()).toMatchObject({ isError: true });
   });
 });
 
@@ -228,10 +128,9 @@ describe('whether everything a release brings was checked', () => {
   /* The person approves the release as it stands, on a card that names what it brings that no check covers. */
   const coverage = async (change: (f: Awaited<ReturnType<typeof releasing>>) => Promise<void> | void) => {
     const f = await releasing();
-    const run = await f.fullRun();
     await change(f);
     await f.approve();
-    const result = await f.recordRelease({ runId: run.id });
+    const result = await f.recordRelease();
     expect(result.isError).toBe(false);
     return recorded(result.text);
   };
@@ -273,7 +172,7 @@ describe('whether everything a release brings was checked', () => {
 });
 
 /* Autonomous release, by the switch of the people who run the department: a release whose every commit was checked needs no person to approve it,
-   and its approval is the entry of the autonomous release log, with the full run and the checkers that passed it. */
+   and its approval is the entry of the autonomous release log, with the CI result and the checkers that passed it. */
 describe('the release step with autonomous release on', () => {
   const autonomous = async (f: Awaited<ReturnType<typeof releasing>>, on = true) => {
     await requireApproval(f);
@@ -282,51 +181,47 @@ describe('the release step with autonomous release on', () => {
   const journal = async (f: Awaited<ReturnType<typeof releasing>>) =>
     (await f.app.inject({ method: 'GET', url: '/api/autonomous-releases', ...as(f.ceoToken) })).json().entries as Record<string, unknown>[];
 
-  it('approves a release every commit of which was checked by itself, and logs it with the full run and its checkers', async () => {
+  it('approves a release every commit of which was checked by itself, and logs it with the CI result and its checkers', async () => {
     const f = await releasing();
     await autonomous(f);
-    const run = await f.fullRun();
-    const result = await f.recordRelease({ runId: run.id });
+    const result = await f.recordRelease();
     expect(result.isError).toBe(false);
     const record = recorded(result.text);
-    expect(record).toMatchObject({ turn: f.turn.number, commit: f.R, baseCommit: BASE, runId: run.id, approvalRequestId: null, autonomousReleaseId: expect.any(String), covered: true });
+    expect(record).toMatchObject({ turn: f.turn.number, commit: f.R, baseCommit: BASE, ci: { state: 'green', checks: 3 }, approvalRequestId: null, autonomousReleaseId: expect.any(String), covered: true });
     expect(await journal(f)).toEqual([expect.objectContaining({
       id: record.autonomousReleaseId, taskNumber: f.release.number, agentName: f.head.name, commitSha: f.R, baseCommitSha: BASE,
-      testRunId: run.id, testRunNumber: run.number, reviewerName: f.reviewer.name, verdictStage: 'review',
+      testRunId: null, testRunNumber: null, ciState: 'green', ciChecks: 3, reviewerName: f.reviewer.name, verdictStage: 'review',
     })]);
   });
 
   it('still asks a person for a release that brings a commit nobody checked, and logs nothing', async () => {
     const f = await releasing();
     await autonomous(f);
-    const run = await f.fullRun();
     f.repo.cut.add(`${BASE}..${f.R}`);
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
+    expect(await f.recordRelease()).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
     expect(await journal(f)).toEqual([]);
   });
 
-  it('approves no release on a passed run of a command of its own, and logs nothing', async () => {
+  it('approves no release on red CI, and logs nothing', async () => {
     const f = await releasing();
     await autonomous(f);
-    const run = await f.fullRun({ command: 'printf smoke-{part}-{parts}' });
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('whole run') as unknown });
+    f.repo.ci = { state: 'red', check: 'test (3)', url: 'https://github.com/acme/shop/actions/runs/7/job/9', outcome: 'failure' };
+    expect(await f.recordRelease()).toMatchObject({ isError: true, text: expect.stringContaining('check test (3) ended with failure') as unknown });
     expect(await journal(f)).toEqual([]);
   });
 
   it('still asks a person while autonomous release is off', async () => {
     const f = await releasing();
     await autonomous(f, false);
-    const run = await f.fullRun();
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
+    expect(await f.recordRelease()).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
     expect(await journal(f)).toEqual([]);
   });
 
   it('approves a checked release by itself while unchecked work that joined the turn after it waits for the next one', async () => {
     const f = await releasing();
     await autonomous(f);
-    const run = await f.fullRun();
     const late = await lateResult(f, EXTRA);
-    const result = await f.recordRelease({ runId: run.id });
+    const result = await f.recordRelease();
     expect(result.isError).toBe(false);
     expect(recorded(result.text)).toMatchObject({ approvalRequestId: null, autonomousReleaseId: expect.any(String), covered: true, uncovered: [], left: [late.number] });
   });
@@ -343,14 +238,13 @@ describe('the release step with autonomous release on', () => {
     const f = await releasing();
     await autonomous(f);
     const work = await turnkeyAfterR(f);
-    const run = await f.fullRun({ commit: work.head });
-    const result = await f.recordRelease({ commit: work.head, runId: run.id });
+    const result = await f.recordRelease({ commit: work.head });
     expect(result).toMatchObject({ isError: false });
     expect(recorded(result.text)).toMatchObject({
       commit: work.head, approvalRequestId: null, autonomousReleaseId: expect.any(String), covered: true, uncovered: [], left: [],
       tasks: [expect.objectContaining({ number: f.task.number }), expect.objectContaining({ number: work.task.number, commit: work.own })],
     });
-    expect(await journal(f)).toEqual([expect.objectContaining({ commitSha: work.head, testRunId: run.id, reviewerName: `${f.reviewer.name}, ${work.holder.name}`, verdictStage: 'review, turnkey' })]);
+    expect(await journal(f)).toEqual([expect.objectContaining({ commitSha: work.head, testRunId: null, ciState: 'green', reviewerName: `${f.reviewer.name}, ${work.holder.name}`, verdictStage: 'review, turnkey' })]);
   });
 
   /* A merge made on the turn branch is on no first-parent line of a commit a turnkey holder checked: a person sees it too. */
@@ -361,8 +255,7 @@ describe('the release step with autonomous release on', () => {
     const f = await releasing();
     await autonomous(f);
     const work = await turnkeyAfterR(f, { sha: STRAY, taken });
-    const run = await f.fullRun({ commit: work.head });
-    const result = await f.recordRelease({ commit: work.head, runId: run.id });
+    const result = await f.recordRelease({ commit: work.head });
     expect(result).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
     expect(result.text.split('this one brings what was not: ')[1]).toBe(`${STRAY} came in with no accepted candidate.${join}`);
     expect(await journal(f)).toEqual([]);
@@ -373,8 +266,7 @@ describe('the release step with autonomous release on', () => {
     await autonomous(f);
     const work = await turnkeyAfterR(f);
     await f.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, work.holder.id));
-    const run = await f.fullRun({ commit: work.head });
-    expect(await f.recordRelease({ commit: work.head, runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining(`#${work.task.number}`) as unknown });
+    expect(await f.recordRelease({ commit: work.head })).toMatchObject({ isError: true, text: expect.stringContaining(`#${work.task.number}`) as unknown });
     expect(await journal(f)).toEqual([]);
   });
 
@@ -385,8 +277,7 @@ describe('the release step with autonomous release on', () => {
     const joined = joinedAfterR(f, task.number);
     await f.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null, turnId: f.turn.id }).where(eq(tasks.id, task.id));
     await f.db.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, kind: 'report', agentId: f.author.id, text: 'Done.', data: { done: true, integration: { branch: f.branch, commit: joined.own, from: `task-${task.number}` } } });
-    const run = await f.fullRun({ commit: joined.head });
-    expect(await f.recordRelease({ commit: joined.head, runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining(`#${task.number}`) as unknown });
+    expect(await f.recordRelease({ commit: joined.head })).toMatchObject({ isError: true, text: expect.stringContaining(`#${task.number}`) as unknown });
     expect(await journal(f)).toEqual([]);
   });
 
@@ -402,9 +293,8 @@ describe('the release step with autonomous release on', () => {
       const [orchestrator] = await f.db.select().from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.kind, 'orchestrator')));
       await closeTask(f.ctx, { agentId: orchestrator!.id }, task.id, { status: 'done', why: 'Closed by hand; the work is over.' });
     } else await f.db.update(tasks).set({ status: 'done', closedAt: new Date('2026-11-17T12:00:00.000Z'), turnId: f.turn.id }).where(eq(tasks.id, task.id));
-    expect((await report(f.ctx, f.head.id, group.id, { done: true, summary: 'Closed over the late change.' })).task.status).toBe('done');
-    const run = await f.fullRun({ commit: joined.head });
-    const result = await f.recordRelease({ commit: joined.head, runId: run.id });
+    expect((await report(f.ctx, f.head.id, group.id, { done: true, summary: 'Closed over the late change.', ...(await recordedFile(f.ctx, group.id, f.head.id)) })).task.status).toBe('done');
+    const result = await f.recordRelease({ commit: joined.head });
     expect(result).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
     expect(result.text.split('this one brings what was not: ')[1]).toContain(joined.own);
     expect(await journal(f)).toEqual([]);
@@ -413,9 +303,8 @@ describe('the release step with autonomous release on', () => {
   it("takes a person's approval of the commit where there is one, and logs nothing", async () => {
     const f = await releasing();
     await autonomous(f);
-    const run = await f.fullRun();
     const approval = await f.approve();
-    const result = await f.recordRelease({ runId: run.id });
+    const result = await f.recordRelease();
     expect(recorded(result.text)).toMatchObject({ approvalRequestId: approval.id, autonomousReleaseId: null });
     expect(await journal(f)).toEqual([]);
   });

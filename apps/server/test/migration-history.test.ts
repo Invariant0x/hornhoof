@@ -58,11 +58,15 @@ function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[]
   if (table !== 'tasks') return rows;
   /* Migration 0088 removes the gate columns; the required route replaces them. Migration 0089 adds the pause, empty, and
      the tracker's migration the goal, the responsible person, the why, the due date and the pipeline, all empty, the
-     tracker's first revision of the task, and 0148 no priority. */
+     tracker's first revision of the task, 0148 no priority, and 0164 no asker (these tasks have no person's request on record) and no sub-task reason. */
   const GATE_COLUMNS = ['gates', 'panel', 'stage', 'merging', 'bounces'];
   return rows.map(({ row }) => ({ row: {
     ...Object.fromEntries(Object.entries(row).filter(([column]) => !GATE_COLUMNS.includes(column))), paused: null,
     goal_id: null, responsible_person_id: null, why: '', due_at: null, pipeline_id: null, pipeline_stage_id: null, tracker_revision: 0, priority: null,
+    /* Migration 0164: nobody asked for an old task on record, and no sub-task has a reason. */
+    asked_by_person_id: null, subtask_reason: null,
+    /* Migration 0165: no task waits in a queue before there is one. */
+    queued_at: null,
     ...(row.external_wait ? { external_wait: { ...(row.external_wait as object), operation: expect.stringMatching(/^[0-9a-f-]{36}$/) as string } } : {}),
   } }));
 }

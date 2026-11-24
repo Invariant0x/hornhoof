@@ -6,6 +6,7 @@ import { readCommit } from '../src/modules/testruns/refs.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { as } from './helpers.js';
+import { RECORDED } from './recorded-fixture.js';
 
 /* A department with a team whose members each do a task end to end alone, and the ordinary members of the route. */
 async function turnkeyFixture(turnkey = true) {
@@ -55,7 +56,7 @@ describe('a task of a turnkey team never enters the echelons', () => {
     onTestFinished(() => { fetch.mockRestore(); });
     f.ctx.readCommit = readCommit;
 
-    const closed = await report(f.ctx, f.player.id, task.id, { done: true, summary: 'Checked.' });
+    const closed = await report(f.ctx, f.player.id, task.id, { done: true, summary: 'Checked.', recorded: RECORDED });
     expect(closed.task).toMatchObject({ status: 'done', turnId: null });
   });
 
@@ -82,7 +83,7 @@ describe('a task of a turnkey team never enters the echelons', () => {
     const { task } = await f.give();
     const text = wakePrompt(f.player, task, { agentId: f.player.id, taskId: task.id, why: 'assigned' }, 'turnkey');
     expect(text).toMatch(/end to end[^.]*alone[^.]*report done true/);
-    expect(text).toContain('checking what you touched with local tests, as the full run happens once at release');
+    expect(text).toContain('checking what you touched with local tests, as the repository\'s CI checks the release');
     expect(text).not.toMatch(/tests,\s*merge and release/i);
     expect(text).not.toMatch(/follow task\.echelons|Review|verdict/);
     expect(wakePrompt(f.author, f.task, { agentId: f.author.id, taskId: f.task.id, why: 'assigned' }, 'code')).toMatch(/follow task\.echelons/);

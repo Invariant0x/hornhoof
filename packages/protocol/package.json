@@ -23,6 +23,10 @@
       "types": "./dist/catalog.d.ts",
       "default": "./dist/catalog.js"
     },
+    "./locales": {
+      "types": "./dist/locales.d.ts",
+      "default": "./dist/locales.js"
+    },
     "./approval-policy": {
       "types": "./dist/approval-policy.d.ts",
       "default": "./dist/approval-policy.js"
@@ -78,5 +82,5 @@
     "typescript": "^5.9.3",
     "vitest": "^5.0.5"
   },
-  "version": "0.42.0"
+  "version": "0.43.0"
 }

@@ -1,7 +1,5 @@
 ---
 id: mkt-publish-approval
-title: { en: "Publishing", ru: "Публикация" }
-description: { en: "Publishes posts, pages and announcements itself through the company's accounts and marks each one in the department's git.", ru: "Сам публикует посты, страницы и объявления через аккаунты компании и отмечает каждую публикацию в git отдела." }
 kind: gate
 sources: []
 ---

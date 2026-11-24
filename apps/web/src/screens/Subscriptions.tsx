@@ -31,6 +31,7 @@ import { clock, limitState, planStateOnMachine, shortName, stateOf, subName, TER
 import { PlanSteps } from '../ui/PlanSteps';
 import { keepUnits } from '../ui/units';
 import { replaceSubscription } from './subscription-list';
+import { sayIf } from '@hornhoof/protocol';
 export { clock } from '../ui/subscription';
 
 const POLL_MS = 1000;
@@ -210,7 +211,7 @@ const HELD_PLANS = 3;
 const useHeldPlans = (plans: SubView[] | null): number => useHeldRows('plans', plans ? plans.length : null) ?? HELD_PLANS;
 
 function subscriptionSearch(t: Messages, language: Language, s: SubView): string {
-  return [subName(t, s), s.last4, programName(s), s.owner.name, s.place.kind === 'company' ? t.people.wholeCompany : s.place.name, s.tier, ...s.accounts.map(a => a.email), ...s.machines.map(m => m.hostname), ...(s.agents ?? []).flatMap(a => [a.name, a.title?.[language]])].join(' ');
+  return [subName(t, s), s.last4, programName(s), s.owner.name, s.place.kind === 'company' ? t.people.wholeCompany : s.place.name, s.tier, ...s.accounts.map(a => a.email), ...s.machines.map(m => m.hostname), ...(s.agents ?? []).flatMap(a => [a.name, sayIf(a.title, language)])].join(' ');
 }
 
 function finished(t: Messages, language: Language, sub: SubView, job: JobView): Test {

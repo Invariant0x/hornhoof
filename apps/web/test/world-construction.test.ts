@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { CityBuilding } from '../src/world/city-layout';
+import { packText } from '../src/world/pack-text';
+import { loadEveryPackTexts } from '../src/world-packs/pack-text-load';
 import {
   buildingLoopsFor,
   computeStatueAlleyProgress,
@@ -44,6 +46,8 @@ function makeBuilding(overrides: Partial<CityBuilding> = {}): CityBuilding {
   };
 }
 
+loadEveryPackTexts();
+
 describe('Stage 6 construction stages, building animation loops, work slots, 20-stage statues, pyramids and reverse demolition', () => {
   it('reads all 10 construction stages from the active world pack with distinct Egypt and Dungeon packs and neutral engine defaults', () => {
     expect(CONSTRUCTION_STAGE_IDS).toEqual([
@@ -67,8 +71,8 @@ describe('Stage 6 construction stages, building animation loops, work slots, 20-
     expect(dungeonStages.map(s => s.id)).toEqual([...CONSTRUCTION_STAGE_IDS]);
 
     /* Packs customize stage labels/materials independently without changing engine code. */
-    expect(egyptStages[0]!.label.ru).not.toBe(dungeonStages[0]!.label.ru);
-    expect(egyptStages[9]!.label.en).not.toBe(dungeonStages[9]!.label.en);
+    expect(packText(egyptStages[0]!.label, 'ru')).not.toBe(packText(dungeonStages[0]!.label, 'ru'));
+    expect(egyptStages[9]!.label).not.toBe(dungeonStages[9]!.label);
 
     /* Key architectural stage properties required by Stage 6. */
     const openWalls = egyptStages.find(s => s.id === 'low_walls_open')!;
@@ -97,11 +101,13 @@ describe('Stage 6 construction stages, building animation loops, work slots, 20-
     expect(openLoops.map(l => l.kind)).toContain('dust');
     expect(openSlots.some(s => s.action === 'interior_mason')).toBe(true);
 
-    /* Stage 4 (waist_walls_scaffold): crane, hoist_block, dust + scaffold hammerers, ramp carriers & sled team! */
+    /* Stage 4 (waist_walls_scaffold): dust and the crane, which on a 4x4 lot carries its own block (no hoist_block),
+       + scaffold hammerers, ramp carriers & sled team! */
     openState.currentStage = 4;
     const midLoops = buildingLoopsFor(dept, openState, EGYPT_WORLD_PACK);
     const midSlots = workSlotsForBuilding(dept, openState, EGYPT_WORLD_PACK);
-    expect(midLoops.map(l => l.kind)).toEqual(expect.arrayContaining(['crane', 'hoist_block', 'dust']));
+    expect(midLoops.map(l => l.kind)).toEqual(expect.arrayContaining(['crane', 'dust']));
+    expect(midLoops.map(l => l.kind)).not.toContain('hoist_block');
     expect(midSlots.map(s => s.action)).toEqual(expect.arrayContaining(['hammer_scaffold', 'carry_ramp', 'pull_sled']));
 
     /* Completed department -> fluttering awning + hearth smoke, zero crane. */
@@ -127,7 +133,10 @@ describe('Stage 6 construction stages, building animation loops, work slots, 20-
     });
     const pyrLoopsActive = buildingLoopsFor(buildingPyramid, null, EGYPT_WORLD_PACK);
     const pyrSlotsActive = workSlotsForBuilding(buildingPyramid, null, EGYPT_WORLD_PACK);
-    expect(pyrLoopsActive.map(l => l.kind)).toEqual(expect.arrayContaining(['crane', 'hoist_block', 'dust']));
+    /* Egypt draws its pyramids' ramps and scaffolds into the tiers (#1975): dust, no crane; a pack that does not gets the crane. */
+    expect(pyrLoopsActive.map(l => l.kind)).toEqual(['dust']);
+    const kitPack = { ...EGYPT_WORLD_PACK, art: { ...EGYPT_WORLD_PACK.art!, ownConstruction: undefined } };
+    expect(buildingLoopsFor(buildingPyramid, null, kitPack).map(l => l.kind)).toEqual(['dust', 'crane']);
     expect(pyrLoopsActive.map(l => l.kind)).not.toContain('celebration');
     expect(pyrSlotsActive.some(s => s.action === 'pull_sled')).toBe(true);
 
@@ -219,6 +228,8 @@ describe('Stage 6 construction stages, building animation loops, work slots, 20-
       'src/world/construction.ts',
       'src/world/construction-renderer.ts',
       'src/world/city-renderer.ts',
+      'src/world/street-field.ts',
+      'src/world/bridge-site.ts',
     ]) {
       const src = readFileSync(resolve(process.cwd(), relPath), 'utf8');
       expect(forbidden.test(src), `${relPath} must contain zero theme words`).toBe(false);

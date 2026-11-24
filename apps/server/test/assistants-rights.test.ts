@@ -139,6 +139,6 @@ describe('whom an assistant may write to', () => {
     const c = await aclCompany();
     const { key } = await assistantOf(c, 'olga');
     const head = (await asAssistant(c, key, '/api/assistant/agents')).json().agents.find((a: { id: string }) => a.id === c.crew.head.id);
-    expect(head).toEqual({ id: c.crew.head.id, name: 'Hana', kind: 'head', role: { en: expect.any(String), ru: expect.any(String) }, department: { id: c.dev.id, name: { en: 'Development', ru: 'Разработка' } } });
+    expect(head).toEqual({ id: c.crew.head.id, name: 'Hana', kind: 'head', role: { en: expect.any(String), ru: expect.any(String) }, department: { id: c.dev.id, name: { en: 'Development' }, templateKey: 'development' } });
   });
 });

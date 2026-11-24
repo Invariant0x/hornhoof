@@ -6,6 +6,7 @@ import { agentIdentity, checkerFor } from '../src/modules/tasks/echelons-assign.
 import { answer, ask, createTask, loadTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, listen, mcp } from './helpers.js';
+import { recorded } from './recorded-fixture.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { testsFixture } from './development-echelons-verification.js';
 
@@ -70,7 +71,7 @@ describe('the accepted review fixes', () => {
     const f = await fixture();
     await withoutRepository(f);
     const { task } = await createTask(f.ctx, { agentId: f.head.id }, { title: 'Draw the card', brief: 'A readable card.', body: 'Deliver the drawing.', departmentId: f.task.departmentId, assigneeAgentId: f.author.id, executor: true, small: true, riskClass: 'none' });
-    const result = await report(f.ctx, f.author.id, task.id, { done: true, summary: 'Delivered the drawing and checked its labels.' });
+    const result = await report(f.ctx, f.author.id, task.id, { done: true, summary: 'Delivered the drawing and checked its labels.', ...(await recorded(f.ctx, task.id, f.author.id)) });
     expect(result.task.status).toBe('done');
     expect((await f.detail(task.id)).echelons).toMatchObject({ phase: 'done', candidateId: null });
   });
@@ -81,10 +82,10 @@ describe('the accepted review fixes', () => {
     const f = await fixture();
     const given = (assigneeAgentId: string) => createTask(f.ctx, { agentId: f.head.id }, { title: 'Look into the totals', brief: 'Why they differ.', body: 'Find why.', departmentId: f.task.departmentId, assigneeAgentId, executor: false, resultKind: 'coordination' });
     const held = (await given(f.author.id)).task;
-    await expect(report(f.ctx, f.author.id, held.id, { done: true, summary: 'Fixed the totals.' })).rejects.toMatchObject({ status: 409, message: expect.stringContaining('accepted results of its subtasks') });
+    await expect(report(f.ctx, f.author.id, held.id, { done: true, summary: 'Fixed the totals.', ...(await recorded(f.ctx, held.id, f.author.id)) })).rejects.toMatchObject({ status: 409, message: expect.stringContaining('accepted results of its subtasks') });
     expect((await loadTask(f.db, held.id)).status).not.toBe('done');
     const own = (await given(f.head.id)).task;
-    expect((await report(f.ctx, f.head.id, own.id, { done: true, summary: 'The totals differ by rounding; nothing to change.' })).task.status).toBe('done');
+    expect((await report(f.ctx, f.head.id, own.id, { done: true, summary: 'The totals differ by rounding; nothing to change.', ...(await recorded(f.ctx, own.id, f.head.id)) })).task.status).toBe('done');
   });
 
   /* A code task without paths is made, and then every submit of it is refused as outside the head-approved scope until the head
@@ -138,7 +139,7 @@ describe('the accepted review fixes', () => {
     const wake = moved.wakes.find(each => each.agentId === f.tester.id)!;
     expect(wake).toMatchObject({ taskId: f.task.id, why: 'assigned' });
     const prompt = wakePrompt(f.tester, await loadTask(f.db, f.task.id), wake);
-    expect(prompt).toContain('in Tests check what the change touched with local tests, as the full run happens once at release, and report the exact candidate');
+    expect(prompt).toContain('in Tests check what the change touched with local tests, as the repository\'s CI checks the release, and report the exact candidate');
     expect(prompt).not.toContain('report verified final-candidate runs in Tests');
     expect(prompt).not.toContain('The tests you ran');
   });
@@ -163,7 +164,7 @@ describe('the accepted review fixes', () => {
     const listed = await api.callTool({ name: 'tasks', arguments: {} });
     const rows = JSON.parse((listed.content as { text: string }[])[0]!.text) as { id: string; title: string }[];
     const task = rows.find(row => row.title === 'Draw the card')!;
-    const result = await report(f.ctx, f.author.id, task.id, { done: true, summary: 'Delivered and checked the drawing.' });
+    const result = await report(f.ctx, f.author.id, task.id, { done: true, summary: 'Delivered and checked the drawing.', ...(await recorded(f.ctx, task.id, f.author.id)) });
     expect(result.task.status).toBe('done');
   });
 

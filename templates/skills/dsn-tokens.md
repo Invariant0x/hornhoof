@@ -1,7 +1,5 @@
 ---
 id: dsn-tokens
-title: { en: "Design tokens", ru: "Дизайн-токены" }
-description: { en: "Defines the named colours, type, spacing and other values every product's interface is built from.", ru: "Задает именованные цвета, шрифты, отступы и другие значения, из которых строится интерфейс каждого продукта." }
 kind: procedure
 sources: [nextlevelbuilder/ui-ux-pro-max-skill .claude/skills/design-system/SKILL.md, affaan-m/ECC skills/design-system/SKILL.md]
 ---

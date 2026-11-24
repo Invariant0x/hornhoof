@@ -4,7 +4,7 @@ Role and skill texts are original adaptations of the sources below. The developm
 
 The list at the end names every template, what it learned from and its licence. Hornhoof in the licence column means the text is Hornhoof's own and falls under this repository's licence, MIT. A skill that names no source is a procedure of Hornhoof itself, such as its task flow, an approval step or work in a second language. A role is a short prompt in the shape paperclipai/paperclip uses, and its skills carry the sources of what it does.
 
-The development templates carry Hornhoof's own T1-T11 testing policy and coding cycle with four task kinds. Product environment discovery and ownership are also project-owned procedures, shared by Development and Operations. These project-owned rules govern affected tests, the final whole-suite run, release-scoped mutation testing, deterministic evidence and the Bug, Known behaviour, Unknown path and Legacy code cycles for any company and language.
+The development templates carry Hornhoof's own T1-T11 testing policy and coding cycle with four task kinds. Product environment discovery and ownership are also project-owned procedures, shared by Development and Operations. These project-owned rules govern affected tests, the whole suite in the repository's CI, release-scoped mutation testing, deterministic evidence and the Bug, Known behaviour, Unknown path and Legacy code cycles for any company and language.
 
 The one-shot stage declarations, judge briefs and stage-owner guidance are Hornhoof's own text. They use the procedure in `skills/hh-one-shot-calls.md`.
 

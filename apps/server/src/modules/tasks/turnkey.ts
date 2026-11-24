@@ -4,11 +4,13 @@ import type { Ctx } from '../../app.js';
 import { agents, taskEvents, taskRoutes, teams } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
+import { withRepoCompany } from '../testruns/github-limit.js';
+import { requireRecorded, type Recorded } from './recorded.js';
 import { changeRoute, type Route } from './route-records.js';
 import { giver, refuse, type Live, type Moved, type Task, type Tx } from './state.js';
 import { move } from './transitions.js';
 import { openTurnOf } from './turn-department.js';
-import { branchHolds, integrationTarget, requireInTurn, requireSameTurn, type IntegrationTarget } from './turn-integration.js';
+import { branchHolds, integrationTarget, requireInTurn, requireSameTurn, type BranchProofReader, type IntegrationTarget } from './turn-integration.js';
 
 /* A turnkey team: each member does a task end to end alone on its task branch with local changed-area checks (never
    per-task run_tests), never enters the echelons and calls no other member of the department onto its work. The mark is
@@ -37,7 +39,7 @@ export const throughEchelons = (db: Db | Tx, task: Pick<Task, 'companyId' | 'exe
 export const turnkeyWork = (task: Pick<Task, 'number'>) =>
   refuse(409, 'task_invalid', `#${task.number} is turnkey work: its holder does it end to end alone and closes it with report, so no echelon takes it.`);
 
-type Reader = Parameters<typeof move>[0] & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readMerged'>>;
+type Reader = BranchProofReader & Parameters<typeof move>[0];
 
 /* What the holder of turnkey work names as it closes it: the exact commit it checked and took into the turn branch by
    fast-forward, a commit it made on its own branch, and the commit right under its first own commit, which is another
@@ -64,7 +66,7 @@ async function requireNamed(ctx: Reader, repo: IntegrationTarget['repo'], own: O
    turn open then and turnHead its branch's head, none where it had no turn or its branch was not made yet. */
 export type WorkStart = { turn: number | null; turnHead: string | null; main: string | null };
 
-type Repo = IntegrationTarget['repo'];
+type Repo = NonNullable<Awaited<ReturnType<typeof repoAt>>>['repo'];
 
 /* The head of a branch: null where the repository has no such branch, undefined where it could not say, or said a tag. */
 async function headAt(readCommit: NonNullable<Live['readCommit']>, repo: Repo, branch: string): Promise<string | null | undefined> {
@@ -104,7 +106,7 @@ async function turnkeyRepo(db: Live['db'], config: NonNullable<Live['config']>, 
   if (route?.state.resultKind !== 'turnkey') return null;
   const found = await repoAt({ db, config }, [task.productId, task.departmentId]);
   if (!found || found.department.parentId) return null;
-  return { repo: found.repo, turn: await openTurnOf(db, task.companyId, found.department.id) };
+  return { repo: withRepoCompany(found.repo, task.companyId), turn: await openTurnOf(db, task.companyId, found.department.id) };
 }
 
 /* The heads of the turn branch and main now: none where the turn branch could not be read, or neither is there. */
@@ -160,14 +162,16 @@ async function turnkeyIntegration(ctx: Reader, task: Task, named?: TurnkeyChecke
 }
 
 /* Its holder closes turnkey work alone: nobody checks it after, and whoever gave it hears that it is done. */
-export async function turnkeyReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, named?: TurnkeyChecked): Promise<Moved> {
+export async function turnkeyReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, named?: TurnkeyChecked, recorded?: Recorded): Promise<Moved> {
   if (task.assigneeAgentId !== agentId) throw refuse(403, 'task_not_yours', `#${task.number} is not yours to report.`);
   const text = summary.trim();
   if (!text) throw refuse(400, 'task_invalid', 'Say what was done and how it was checked.');
   const joined = await turnkeyIntegration(ctx, task, named);
+  /* Work that joined no turn changed no code: its result is recorded somewhere a colleague finds it, or it is not done. */
+  const where = joined ? undefined : await requireRecorded(ctx, task, recorded);
   const wakes = giver(task, 'done', agentId, text);
   const row = await move(ctx, task, { status: 'done', closedAt: new Date(), assigneeAgentId: null, silent: 0, ...(joined ? { turnId: joined.turn.id } : {}) }, {
-    kind: 'report', actor: { agentId }, text, data: { done: true, ...(joined ? { integration: joined.integration } : {}) }, returned: true,
+    kind: 'report', actor: { agentId }, text, data: { done: true, ...(joined ? { integration: joined.integration } : {}), ...(where ? { recorded: where } : {}) }, returned: true,
   }, async tx => {
     if (joined) await requireSameTurn(tx, task, joined.turn, joined.integration.commit);
     await changeRoute(tx, route, { ...route.state, phase: 'done' });

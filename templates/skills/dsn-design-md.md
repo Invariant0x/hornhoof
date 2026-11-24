@@ -1,7 +1,5 @@
 ---
 id: dsn-design-md
-title: { en: "Design system document", ru: "Описание дизайн-системы" }
-description: { en: "Keeps the written design system that agents and people read before they design or build a screen.", ru: "Ведет текстовое описание дизайн-системы, которое агенты и люди читают, прежде чем проектировать или верстать экран." }
 kind: procedure
 sources: []
 ---

@@ -30,9 +30,11 @@ import {
   type WorldMode,
   type WorldRelocationRecord,
 } from '@hornhoof/protocol/world';
+import type { BridgeSite } from './bridge-site';
 import {
   acceptRelocation,
   advanceRelocationStep,
+  applyBridgeRule,
   bindCityMap,
   canPlaceFootprint,
   createCity,
@@ -47,6 +49,7 @@ import {
   type CityState,
 } from './city-layout';
 import type { PickableObject, TileCoord } from './coords';
+import { vacatedLotsFromRelocations } from './lot-clearing';
 import type { WorldPackManifest } from './manifest';
 import type { GeneratedWorldMap } from './terrain-engine';
 
@@ -136,13 +139,39 @@ function updateBuildingInPlace(
   }
 }
 
+/* The city a sync works on: the one already shown, else the saved layout, else a new one. */
+function cityToSync(
+  pack: WorldPackManifest,
+  map: GeneratedWorldMap,
+  snapshot: WorldLiveSnapshot,
+  existingCity: CityState | null | undefined,
+  bridge: BridgeSite | null | undefined,
+): CityState {
+  if (existingCity && existingCity.packId === pack.id && existingCity.seed === map.seed) return bindCityMap(existingCity, map);
+  if (isCityLayoutSnapshot(snapshot.savedLayout, pack.id, map.seed)) {
+    return bindCityMap(deserializeCityLayout(snapshot.savedLayout, { buildingLayout: pack.buildingLayout }), map);
+  }
+  return bindCityMap(
+    createCity(map, {
+      orderChaos: pack.params.orderChaosDefault,
+      outerWallMode: pack.outerWallMode ?? 'ring',
+      buildingLayout: pack.buildingLayout,
+      bridge: bridge ?? null,
+    }),
+    map,
+  );
+}
+
 /* Synchronizes any live company snapshot onto a pack-owned procedural terrain map.
-   Existing building coordinates stay frozen unless an explicit relocation task reached status 'applied'. */
+   Existing building coordinates stay frozen unless an explicit relocation task reached status 'applied'.
+   bridge: the map's bridge once the pack's bridge pictures are known to be there (bridge-site.ts); left out, a city
+   keeps the bridge it has, and a new or restored one has none, so no street crosses water. */
 export function syncLiveSnapshotToCity(
   pack: WorldPackManifest,
   map: GeneratedWorldMap,
   snapshot: WorldLiveSnapshot,
   existingCity?: CityState | null,
+  bridge?: BridgeSite | null,
 ): LiveCitySyncResult {
   const worldMode = snapshot.company.worldMode;
   const districtColors = buildDistrictColors(snapshot.machines);
@@ -196,21 +225,8 @@ export function syncLiveSnapshotToCity(
     };
   }
 
-  let city: CityState;
-  if (existingCity && existingCity.packId === pack.id && existingCity.seed === map.seed) {
-    city = bindCityMap(existingCity, map);
-  } else if (isCityLayoutSnapshot(snapshot.savedLayout, pack.id, map.seed)) {
-    city = bindCityMap(deserializeCityLayout(snapshot.savedLayout, { buildingLayout: pack.buildingLayout }), map);
-  } else {
-    city = bindCityMap(
-      createCity(map, {
-        orderChaos: pack.params.orderChaosDefault,
-        outerWallMode: pack.outerWallMode ?? 'ring',
-        buildingLayout: pack.buildingLayout,
-      }),
-      map,
-    );
-  }
+  const synced = cityToSync(pack, map, snapshot, existingCity, bridge);
+  const city = applyBridgeRule(synced, map, bridge === undefined ? (synced.bridge ?? null) : bridge);
 
   const isActive = worldMode === 'active';
   const byId = new Map<string, CityBuilding>(city.buildings.map(b => [b.id, b]));
@@ -566,6 +582,9 @@ export function syncLiveSnapshotToCity(
       }
     }
   }
+
+  /* 8b. The lots moved buildings left stay cleared ground until built on again or grown back (#1958). */
+  city.vacatedLots = vacatedLotsFromRelocations(snapshot.relocations, city.buildings, pack.lotGround, Date.parse(snapshot.generatedAt));
 
   /* 9. Outer wall: respects pack.outerWallMode ('ring' vs 'none'). */
   if (isActive) {

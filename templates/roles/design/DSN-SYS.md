@@ -2,8 +2,6 @@
 id: DSN-SYS
 department: design
 kind: member
-title: { en: "Design system designer", ru: "Дизайнер дизайн-системы" }
-description: { en: "Designer of reusable interface systems and components.", ru: "Дизайнер систем интерфейса и общих компонентов." }
 tier: standard
 effort: high
 perProduct: false

@@ -1,4 +1,4 @@
-# Egypt world: art order v1, with v2 (construction from shared modules)
+# Egypt world: art order v1, with v2 (construction from shared modules) and v3 (variants, monuments, people by body)
 
 For the art pipeline (Design, #1956). Written on 23.11.2026 from the world art contract, version 2 ([`apps/web/src/world/ARTIST_CONTRACT.md`](../apps/web/src/world/ARTIST_CONTRACT.md)), and the Egypt pack's catalog ([`apps/web/src/world-packs/egypt/ART.md`](../apps/web/src/world-packs/egypt/ART.md)). Where this order and the contract differ, the contract wins.
 
@@ -9,8 +9,19 @@ For the art pipeline (Design, #1956). Written on 23.11.2026 from the world art c
 **What v2 changes (23.11.2026, Ivan AI by Ivan's word, agreed by the Head of design):**
 
 * Construction is put together from a shared kit and each building's bare stages, no longer from 10 pictures per building. The kit is drawn once per footprint (3.2); a building keeps only `low_walls_open`, `full_walls`, `roof_beams`, `roof` and `complete`.
-* Houses are not drawn anew: each comes from a crop of reference 01, on a larger lot (3.4).
+* Houses come from crops of reference 01, on a larger lot (3.4). From v3 this holds for each step's first variant, `v01`; the other variants are drawn new.
 * Wave 2 (section 2), items 3.2, 3.4, 3.7 and 3.12, and sections 5 and 6 are rewritten for this. Wave 1 is unchanged.
+
+**What v3 changes (23.11.2026, Ivan's word through Ivan AI and the Orchestrator, for the Head of design's catalogue, now part of `ART-CHECKLIST.md` on #1956):**
+
+* The art grows to about 81 kinds. Deliveries follow the batches of `ART-CHECKLIST.md` (section 2).
+* Houses come in variants inside each step: 15 `hut`, 20 `mudbrick`, 15 `painted`, 10 `villa` (3.4).
+* `painted` and `villa` get their lots; the house lot is the lot of its largest step (3.4).
+* Statues and pyramids are full size with their own stages, scaffolds and ramps painted in; the engine lays no kit over them (3.10). The obelisk waits for Ivan's answer (3.10).
+* People: four body types (4.1); `pray`, `sad_sit` and `sleep` for every look, with a Z-z-z loop over a sleeper (4.3, 3.12); each animation drawn only in the directions its meaning needs, named in the passport field `directions` (4.4).
+* Resident sheets are assembled from layers before delivery; format 4.4 unchanged apart from `directions`.
+* Sections 2, 3.4, 3.10, 3.12, 4.1 to 4.5, 5.2 and 6 change for this.
+* The bridge over the river (3.14, #1985): start, span and end pieces in both directions. Road joins need no pictures: the engine bakes the streets into the ground from the four road strips, with one soft edge at every crossing, T-join and bend.
 
 Contents:
 
@@ -54,6 +65,8 @@ Of the 59 residents:
 * 5 Inspectors, 4 Scribes, 3 Overseers, 3 Water Bearers;
 * every other look has 1 or 2 people.
 
+**From v3 the delivery order is the batch list of `ART-CHECKLIST.md` on #1956** (its order-of-work section, batches 02 to 09): 01 the pilot (accepted), 02 the rest of wave 1, 03 the construction kit and bare stages, 04 the first 25 house variants, 05 statues, 06 pyramids, 07 the next 20 house variants, 08 the flophouse, altar, workshop lines and the last loops, 09 the last 15 house variants. People go in parallel by their own pipeline. The waves below stay as the reason for that order.
+
 **Wave 1: the city stops showing boxes.**
 
 1. House, steps `hut` and `mudbrick`: `complete.png`, then `painted` and `villa` `complete.png` (3.4).
@@ -88,7 +101,9 @@ Every picture of one step uses the **same canvas**, so nothing moves between sta
 * the canvas is as wide as the footprint diamond, with the plot's bottom corner at the bottom centre (`[W/2, H-1]`);
 * the canvas height is the footprint's highest picture, used in full;
 * every picture passport repeats the same `groundAnchor` and `corners`;
-* the shared construction modules of a footprint (3.2) use exactly this canvas and passport too.
+* the shared construction modules of a footprint (3.2) use exactly this canvas and passport too;
+* **no ground behind the wall base** on any picture drawn over `scaffold_back` (`complete`, `upgraded`, `annex` and the bare stages): the engine clears the whole lot itself (#1958), and a ground slab there covers the back scaffold's legs;
+* **3x3: keep `front_clear_strip` free.** Along the front right wall, from the wall's outer face (u 1.95 on the shared 3x3 modules) out to 0.40 tile on v 0.04..2.35, and out to 0.66 tile on v 1.78..1.96 for the ladder's foot. The shared front scaffold and ramp stand there, so no fence, yard wall, prop or awning goes into it. Anything in front of the bay's end (v 2.35..2.45) stays lower on screen than the poles' feet. A 3x3 building whose front right wall is shorter than 2.31 tile along v needs its own placement. Plan coordinates: u runs from the plot's top corner to its right corner, v from the top corner to its left corner, in tiles (modules/README.md of modules r3). The engine sets no worker of its own in the strip either.
 
 | Footprint | Canvas W x H | Door height | `groundAnchor` | `corners.top` | `corners.right` | `corners.bottom` | `corners.left` |
 |---|---|---|---|---|---|---|---|
@@ -135,6 +150,7 @@ Optional fields:
 | `roof.png` | Bare stage: the roof closed, before the finish (no paint, cornice or props yet). |
 
 * A bare stage shows the building alone: no scaffolding, ramp, crane, rope, stakes, rubble or dust. Those come from the kit and the loops.
+* A bare stage, like `complete`, paints no ground behind its wall base (3.1): the back scaffold's legs must reach the cleared ground.
 * Same canvas and passport as the step's `complete.png` (`groundAnchor`, `corners`). `door` and `workSlots` are optional.
 * A bare stage may carry its own cast shadow as a `shadow.png` layer (3.3).
 * A step that already has its own `stage_01.png` to `stage_08.png` and `demol_01.png`, `demol_02.png` (the workshop) keeps them: the engine shows them and no kit. Nothing there is redrawn.
@@ -162,6 +178,7 @@ The files of each set:
 | `rubble.png` | After demolition: a rubble heap and broken blocks on the plot. | yes (read once #1955 wires it, section 6) |
 
 * Scaffolding reaches the wall top of the tallest step of that footprint (3.4 to 3.9).
+* On 3x3 the front scaffold's bay, its ladder and the ramp stand only in `front_clear_strip` (3.1), the same for every 3x3 building.
 * Paint no ground plate under a module: the engine clears every lot to bare ground itself (#1958), and stakes and rubble stand on it.
 * Modules take no layers, so leave cast shadows out of them.
 
@@ -195,32 +212,36 @@ A picture's passport may name layers. A layer is a PNG beside the picture, of ex
 "layers": [
   { "file": "shadow.png", "blend": "multiply" },
   { "file": "props.png" },
-  { "file": "awning.png", "sway": { "pivot": [[210, 542], [426, 650]] } }
+  { "file": "awning.png" }
 ]
 ```
 
 * `shadow.png` with `multiply`: the building's cast shadow, black or tinted with alpha for strength.
 * `props.png`: tables, jars, tools in the yard.
-* `awning.png` with `sway`: the cloth moves in the wind about the line through the two `pivot` points, where it is fixed. `amplitude` is optional: 0.03 by default, at most 0.2.
+* `awning.png`: the cloth of an awning, and nothing wooden. Posts, poles and frames never move, so they go into `complete.png` or `props.png`. A rigid reed mat is no awning either: it goes into the picture and needs no mask.
+* `awning_w.png` (v3), the cloth mask, the plants' format: 8-bit grey beside `awning.png`, the same size, 0 still (the line where the cloth is fastened), 255 moves the most (the free edge). The engine lifts and drops the cloth by the mask, a little; a pixel at 0 never moves. Without `awning_w.png` the awning stays still. `awning.json` may carry `"amplitude"`: how many px the free edge lifts at the strongest wind, 3 by default, at most 8. The `sway` field with a `pivot` line is gone (#1983).
 
 Keep to a layer only what moves or must stay separate.
 
 ### 3.4 House: an agent's home, the most common building
 
-By Ivan's word (23.11): no new houses are drawn. Each house comes from a crop of reference 01, in `egypt-etalon-house-crops.tar.gz` on #1956 (attachment `c234f111-57df-4c14-8a89-7ba2f9620f84`, folder `etcrop/`).
+Reference 01 shows the style, not the limit (Ivan's word, 23.11, in v3): the first variant of each step is a crop of reference 01, in `egypt-etalon-house-crops.tar.gz` on #1956 (attachment `c234f111-57df-4c14-8a89-7ba2f9620f84`, folder `etcrop/`); the other variants are drawn new in the same style.
 
-| Step | Footprint | Shown from | Source |
-|---|---|---|---|
-| `hut` | 2x2 | level 1 | crop `hut_A_square_pyramid_roof.png` |
-| `mudbrick` | 3x3 | level 4 | crop `mud_B_roof_pots.png` |
-| `painted` | pending | level 8 | pending: Design names the crop and measures the lot |
-| `villa` | pending | level 15 | pending, as `painted` |
+| Step | Footprint | Lot | Shown from | Variants | Source (`ART-CHECKLIST.md`, houses) |
+|---|---|---|---|---|---|
+| `hut` | 2x2 | 4x4 | level 1 | 15 | `v01` crop `hut_A_square_pyramid_roof.png` (accepted, pilot 01); crops `hut_B`, `hut_C`, `hut_D`; 11 new |
+| `mudbrick` | 3x3 | 4x4 | level 4 | 20 | `v01` crop `mud_B_roof_pots.png` (accepted, pilot 01); crops `mud_A`, `mud_C`, `mud_D`; 16 new |
+| `painted` | 3x3, confirmed by measure | 4x4 | level 8 | 15 | crop `lime_B`; 14 new |
+| `villa` | 4x4 with its yard (the house alone about 3x3), confirmed by measure | 4x4 | level 15 | 10 | crop `lime_A`; 9 new, pools allowed |
 
-* The other crops, `hut_B_gable_reed.png`, `hut_C_gable_big.png`, `hut_D_round_mud.png`, `mud_A_plain.png`, `mud_C_awning.png` and `mud_D_reed_awning.png`, are variants for `painted`, `villa` and variations.
+**Variants (v3).** Each variant is a full set of the step in its own folder, `buildings/house/<step>/<variant>/`, with variants named `v01`, `v02`, and so on in the order of the table: `complete.png`, the bare stages of 3.2, `shadow.png` and the other layers, each with its passport. Every variant of a step has the step's canvas, `groundAnchor`, `corners`, door row and lot; variants differ in wealth, roof, awning and yard. The accepted pilot pictures are `v01` of `hut` and `mudbrick`.
+
+* The engine gives each agent one variant of its step from the agent's id, so it stays the same across sessions, and next-door houses of the same step never repeat a variant while another is free. A variant not delivered yet is replaced by the next delivered one, so a step works with one variant or several.
+* A step with no variant folders keeps its pictures directly in `buildings/house/<step>/`, as every other kind does.
 * Why the larger lots: with a person at 136 px the reference huts' walls are about 1.6 x 1.6 cells. Squeezed into 1x1, a hut comes out narrow and tall. As with the workshop, the lot follows from the reference at standard scale.
 * Canvas, `groundAnchor` and `corners`: table 3.1 for the step's footprint, unchanged.
 * Door: as in the reference at standard scale, never lower than 100 px: a low door is what poor housing looks like. The 148 to 168 px doors of 3.1 stay for stone and public buildings. Door row 0, on the front right wall.
-* The house lot equals the lot of its largest step. It is pending until Design measures `villa` (4x4 today).
+* The house lot equals the lot of its largest step: 4x4, the `villa` with its yard. A smaller step stands at the lot's front corner, and nothing of any step, its yard or scaffolding goes past the lot.
 * `flagAnchor` on every `complete.png`: the district flag flies from homes.
 
 ### 3.5 Department: a department's temple in the city centre
@@ -290,6 +311,14 @@ Lot 5x5. Door: front right wall, row 2, as delivered.
 * `tier_10.json` needs a `topAnchor`;
 * `capstone.png` is the golden pyramidion placed at that point when the goal is reached. Its passport is `{ "anchor": [x, y] }`, the bottom centre.
 
+**Full size, own stages (v3).** Statues and pyramids are drawn at full size on the canvas of their footprint (3.1), and their construction is in their own stages:
+
+* statue stages run from the rough block through roughing out and polishing to the painted figure; the `colossus` carries its scaffold and ramp painted into the stages while it is carved;
+* pyramid tiers are layers of blocks rising with ramps and scaffolding painted in, then the casing going on;
+* the engine lays no kit modules, crane or hoist over a statue or a pyramid, and shows every stage in order over the real duration of the work.
+
+**Obelisk: waits for Ivan's answer** on what company object it stands for. No slot yet: do not draw it until the order names one.
+
 ### 3.11 Altar and flags
 
 **Altar:** the god's altar where agents wait for a person's answer.
@@ -315,6 +344,9 @@ Lot 5x5. Door: front right wall, row 2, as delivered.
 | `water` | `ground` |
 | `awning` | `awning` |
 | `celebration` | `top` |
+| `sleep_z` (v3) | `head` |
+
+`sleep_z` is the Z-z-z over a sleeping resident, not a building's loop: its `anchor` is the bottom centre of the letters, and the engine puts it at the sleep sheet's `headAnchor` (4.4).
 
 ### 3.13 Night lights (on hold)
 
@@ -325,11 +357,23 @@ Design asked for one warm light in a district whose machine is off: a lit window
 * Deliver it as `night.png` beside `complete.png`, on the same canvas. Leave it **out of the `layers` list**: listed there it would also shine by day.
 * Nothing in the engine waits for it: #1955 does not depend on a night layer. A delivered `night.png` only makes the check warn that the file is not declared.
 
+### 3.14 The bridge (#1985)
+
+The map has one bridge, in a fixed place: the straight crossing of the river nearest the city centre, 2 to 10 water tiles long, the same on every load of a company's map. **Until every piece below is delivered, the city lays no street across the water and no resident crosses it**: each bank keeps its own streets. Nothing stands in for the bridge.
+
+* Six pictures, one map tile of the deck each: `bridge/u_start.png`, `bridge/u_span.png`, `bridge/u_end.png` and `bridge/v_start.png`, `bridge/v_span.png`, `bridge/v_end.png`.
+* `u` runs down and to the right on screen, `v` down and to the left. `start` is the piece at the upper end of the crossing, `end` at the lower end; a crossing of `n` tiles shows `start`, `n - 2` spans and `end`, so a span repeats and must join itself and both ends without a seam.
+* Canvas 320 x 400 px with a picture passport for footprint 1x1 (3.1): the tile's diamond 240 x 120 px in `corners`, `groundAnchor` at its centre. The engine puts `groundAnchor` on the centre of the water tile. Leave the space beside the deck transparent.
+* The deck is one tile wide and meets the street at ground level on each bank: the outer edge of `start` and of `end` lies on the bank's ground, so the street runs onto the deck without a step. The street's own picture stops at the edge of the first water tile, under the deck.
+* Piers, rails and the deck's side stand in the water inside the canvas; no shadow on the water (the engine adds none either). Light from the top left, 5200 K, as every picture (section 1).
+
 ## 4. Residents
 
 ### 4.1 Looks
 
-Folder `people/<look>/tier_<n>/`. One look per kind of role. A role without its own look takes its class's look.
+Folder `people/<look>/tier_<n>/` for the `male_slim` body, as the pilot architect's walk came, and `people/<look>/tier_<n>/<body>/` for the other three bodies. One look per kind of role. A role without its own look takes its class's look.
+
+**Body types (v3).** Four figures: `male_slim`, `female_slim`, `male_heavy`, `female_full`, drawn in that order, each from the body generator's own blank. The engine gives each resident a body from its agent's id, the same in every session. Where that body's sheet is missing it uses the `male_slim` sheet.
 
 | Look | Who (role keys) | Carries | Head | In the demo company |
 |---|---|---|---|---|
@@ -347,7 +391,7 @@ Folder `people/<look>/tier_<n>/`. One look per kind of role. A role without its 
 | `egypt-machine-keeper` | program operator, home devices (OPS-PROGRAM, HOM-NET, HOM-SMART) | tool | cap | 2 |
 | `egypt-day-laborer` | one-off helpers | stone | none | 2 |
 | `egypt-pharaoh` | the orchestrator | staff | crown | 1 |
-| `egypt-architect` | architect (DEV-ARCH) | scroll | circlet | 1 |
+| `egypt-architect` | architect (DEV-ARCH) | scroll | nemes, as the approved tier 3 picture `hd-char-lvl05.png` (the engine's placeholder shows a hood) | 1 |
 | `egypt-canal-builder` | DevOps (DEV-OPS) | tool | none | 1 |
 | `egypt-skirmisher` | red team (DEV-RED) | spear and shield | hood | 1 |
 | `egypt-guard-captain` | head of operations (OPS-HEAD) | staff | helm | 1 |
@@ -365,9 +409,11 @@ Five outfit tiers follow the agent's level:
 | 4 | 10 to 17 | level 7 |
 | 5 | 18 and up | level 10, the richest outfit (`hd-char-lvl10.png`) |
 
+* Resident sheets are assembled from layers before delivery; format 4.4 unchanged. Five tiers, no more for now.
 * A missing higher tier falls back to the next lower one.
 * The role stays readable in every tier: the same carried item and headgear, with richer cloth, collar, belt and gold as the tier rises.
 * **Cloak layer:** `<animation>.cloak.png`, exactly the same size and grid as its sheet, white or light grey where the cloak is and transparent elsewhere. The engine tints it with the colour of the agent's subscription provider, so one drawing serves every provider: Claude `#C96A4B`, Codex `#3FA796`, Antigravity `#4DA167`, Kimi `#4C84D6`, GLM `#766BD6`, API key `#B89B5E`.
+* **First live resident:** the tier 3 `egypt-architect` `walk` arrives first without its cloak layer; the cloak layer comes in a later pass. Until then the engine draws him with no cloak.
 
 ### 4.3 Animations
 
@@ -391,11 +437,30 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 | `extinguish` | putting out a fire | 6, 8 |
 | `guard` | standing guard | 4, 4 |
 | `hold_scroll` | waiting at the altar for a person's answer | 4, 4 |
-| `pray` | lying exhausted and praying by an empty granary | 4, 3 |
+| `pray` | facing the camera, hands raised: out of subscription limit, and by an empty granary | 4, 3 |
+| `sad_sit` (v3) | sitting on the ground, sad: out of subscription limit | 4, 3 |
 | `broken_tool` | sitting with a broken tool (a failed turn) | 4, 3 |
-| `sleep` | sleeping (its machine is off, night in the district) | 4, 2 |
+| `sleep` | lying asleep on the ground: its machine is off, night in the district, or out of subscription limit; the `sleep_z` loop over the head | 4, 2 |
 
 * A missing animation falls back to `walk` for moving states and to `idle` for the rest. So `walk`, `idle`, `carry`, `build` and `sleep` cover most of a city.
+* **Out of limit (v3):** every look gets `pray`, `sad_sit` and `sleep`; when a resident's subscription limit runs out, the engine shows one of the three (the choice from the real limit state comes with #1951).
+
+**Directions drawn (v3).** Each animation is drawn in the directions its meaning needs; the engine mirrors the rest (4.4):
+
+| Animation | Drawn | Mirrored |
+|---|---|---|
+| `carry` (`carry_back` is the same sheet as `carry`), every set | NE, SE, SW, NW | none |
+| `walk` of a look with a large item (staff, banner, spear with shield, water jar, gong, hoe) | NE, SE, SW, NW | none |
+| `walk` of any other look, small prop or empty hands | NE, SE | NW, SW |
+| `idle`: standing by the home, facing the viewer | SE; SE and SW for a look with a large item | SW; none with a large item |
+| `build`: facing the front wall of the building | NE | NW |
+| `sleep`: lying along one axis | SE | SW |
+| `pray`, `sad_sit`: facing the camera | S | none, shown as drawn in every direction |
+| `inspect`, `write`, `carve`, `guard` and the like, later | one | its mirror |
+
+* **Diagonals only (Ivan's word, 23.11):** roads and paths run along the grid axes, so on screen residents walk only along the diagonals NE, SE, SW and NW (#1983); a step straight up, down or sideways is rare and takes the nearest drawn diagonal. Sheets already made with N, E and S rows keep them: the engine shows any drawn row.
+* The god's caravan (Design's checklist G2: animals, drivers and sacks) counts as a large load: its walk is drawn in NE, SE, SW and NW too. The engine has no caravan slot yet; the check takes it with the same rule when its slot comes.
+* A builder always faces a front wall: the engine sets no build place at a back wall, where NE and NW would not fit.
 * Role animations are needed only for the looks that do that work: `inspect` for inspectors, `direct` for overseers, `write` for scribes, and so on.
 
 **New for the daily life of #1951** (Wave 3; the engine draws them after #1951 wires them, and until then the check warns that they are not declared):
@@ -409,8 +474,11 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 
 ### 4.4 Sheet layout and passport
 
-* **Rows, top to bottom:** N, NE, E, SE, S. The engine mirrors SE, E and NE for SW, W and NW, so a person walks in 8 directions from 5 drawn rows. A carried item changes hands in the mirrored rows.
+* **Rows, top to bottom:** the directions named in the passport's `directions`, in that order, chosen from N, NE, E, SE, S, SW, W, NW (v3). Without the field the sheet has 5 rows, N, NE, E, SE, S, as before. For each facing the engine shows its drawn row when there is one; only a direction that is not drawn is mirrored (SE, E and NE for SW, W and NW), and otherwise the nearest drawn direction or its mirror shows, a drawn row winning at the same distance. A mirrored row moves a carried item to the other hand or shoulder, which Ivan does not accept (23.11, replacing the earlier acceptance), so `carry` and the `walk` of a look with a large item are drawn in NE, SE, SW and NW, `"directions": ["NE", "SE", "SW", "NW"]`, and that look's `idle` in SE and SW, `"directions": ["SE", "SW"]`, both shown as drawn. Everything else draws only what it needs and the engine mirrors the rest.
+* **Facing poses** `pray` and `sad_sit` (v3): one row, `"directions": ["S"]`, shown as drawn whatever way the resident faces, never mirrored.
+* **`headAnchor`** (v3, `sleep` only, optional): the point in the frame above the head where `sleep_z` stands, e.g. `[60, 200]` for a figure lying along the ground. Without it the engine uses the standing head, 146 px above the `anchor`.
 * **Frames** run left to right, every frame the same size. The feet sit on the same `anchor` in every frame, so walking does not slide.
+* **`stride`** (v3, `walk` and `carry`, optional): how many px the figure moves on in one cycle, as the E row draws it: twice the distance a planted foot travels back in half a cycle. The engine walks the resident exactly one stride per cycle (`frames` / `fps` seconds), so the feet do not slide, and the same ground in every direction. Without it the engine takes 92 px, measured on the pilot walk sheets (a planted foot travels 46 px in 4 of 8 frames). Example: `"stride": 92`.
 * **Suggested frame:** 192 x 256 px with the feet at `[96, 236]`. The person is 136 px tall and stands from y 100 to y 236; the room above holds a stone on the head, a banner or a raised spear.
 * Rig and bake as the contract says: parts at the 544 px source baked down to 136 px, the cloak as its own baked layer, no ground shadow.
 * **Camera: the one exception to the 30 degrees of section 1.** Residents are drawn with an orthographic camera tilted 19 degrees down (Ivan's word, 23.11.2026): at 30 degrees the shoulders came out 24% wider and a step looked like a hop. Buildings, ground and the construction kit stay at 30 degrees. The sheet format does not change: 5 rows N to S, frame 192 x 256, feet at `[96, 236]`, the person 136 px tall.
@@ -419,12 +487,19 @@ One sheet per animation: `<animation>.png`, plus its `.cloak.png`.
 Passport of an 8-frame walk with that frame (sheet 1536 x 1280):
 
 ```json
-{ "frameW": 192, "frameH": 256, "frames": 8, "fps": 10, "anchor": [96, 236] }
+{ "frameW": 192, "frameH": 256, "frames": 8, "fps": 10, "anchor": [96, 236], "stride": 92 }
+```
+
+An idle drawn facing SE only (sheet 768 x 256), and a sleep lying along the ground with its Z point:
+
+```json
+{ "frameW": 192, "frameH": 256, "frames": 4, "fps": 4, "anchor": [96, 236], "directions": ["SE"] }
+{ "frameW": 192, "frameH": 256, "frames": 4, "fps": 2, "anchor": [96, 236], "directions": ["SE"], "headAnchor": [60, 200] }
 ```
 
 ### 4.5 Sheet passport of a loop
 
-The same fields with one row of frames, the anchor at the attach point, and `attach` from 3.12:
+The same fields with one row of frames, the anchor at the attach point, and `attach` from 3.12 (`head` for `sleep_z`, v3):
 
 ```json
 { "frameW": 128, "frameH": 128, "frames": 8, "fps": 8, "anchor": [64, 120], "attach": "top" }
@@ -462,12 +537,14 @@ A rejected file keeps its placeholder; it never breaks the city.
 * A layer that is missing, or not exactly the size of its picture.
 * A sheet passport without `frameW`, `frameH`, `frames`, `fps` and `anchor`.
 * A sheet whose width is not `frameW * frames`.
-* A person's sheet whose height is not `frameH * 5`.
+* A person's sheet whose height is not `frameH` times the number of its `directions` (5 without the field).
+* A `directions` entry other than N, NE, E, SE, S, SW, W or NW, or one named twice.
+* A `carry` sheet without all 4 diagonals (NE, SE, SW, NW), or the `walk` of a look with a large item without them, or that look's `idle` without SE and SW.
 * An anchor outside one frame.
 * A cloak layer without its base sheet, or of another size.
 * An index for another pack or another contract version.
 
-It **warns**, without rejecting, about a file no slot names: the #1951 animations until they are wired, and a `night.png` (on hold, 3.13).
+It **warns**, without rejecting, about a file no slot names: the #1951 animations until they are wired, and a `night.png` (on hold, 3.13). It also warns, naming the set, about the tier 1 mason `carry` of `egypt-mason-t1-r1`, accepted in 5 rows before the rule above: it stays in play until its export in NE, SE, SW and NW replaces it.
 
 ### 5.3 What the check cannot see
 
@@ -503,4 +580,6 @@ Look at each delivery for these yourself:
 6. **Retina 2K art** (8x). The engine scales the master up at 200% on Retina today; using the 2K set needs wiring later. It is not ordered here.
 7. **The kit at demolition.** The engine runs the steps backwards today; showing `rubble.png` last, and the scaffolds while tearing down, comes with #1955. Until then the check warns that `rubble.png` is not declared.
 8. **Residents at 19 degrees (4.4): nothing to wire.** The engine stands a sheet on its `anchor` at the feet's point on the ground and draws the shadow itself, a flat 2:1 ellipse at 30 degrees. If feet float or sink on the shots, the fix is the sheet's `anchor`; if hands go into a wall in `build`, the fix is that building's `workSlots`.
-9. **House step sizes.** The pack catalog gives `hut` 1x1 and `mudbrick` 2x2 today. The new sizes (3.4) go into the pack's `buildingLayout` as one line per step with its lot when the art lands, and the house lot once Design has measured `villa`. Not built in #1954.
+9. **House step sizes: done in #1958.** `hut` 2x2, `mudbrick` 3x3, `painted` 3x3, `villa` 4x4, in a 4x4 lot, door on the front right wall in row 0.
+10. **v3, wired in #1975:** house variants in `<step>/<variant>/` folders with the per-agent choice; no kit over statues and pyramids; body types; the `directions` field with nearest-or-mirror and the facing poses; `sad_sit`; `sleep_z` at `headAnchor`; no build place at a back wall.
+11. **The bridge (3.14): wired in #1985.** Its place comes from the map; once all six pieces are in the folder the city lays the street over it and residents cross. Streets are baked into the ground from the road strips, so road joins need no art.

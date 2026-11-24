@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, LOCALES, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
@@ -129,7 +129,7 @@ describe('templates', () => {
     expect(head).toMatch(/release_turn[^.]*before main moves/);
     expect(head).toMatch(/tag[^.]*closes the turn by itself/);
     expect(body('orch-plan-turn')).toMatch(/add_tasks[\s\S]*as soon as the brief is clear[\s\S]*departments work in parallel/i);
-    expect(body('dev-ci-release')).toMatch(/later work while testing the frozen candidate/i);
+    expect(body('dev-ci-release')).toMatch(/later work while CI checks the frozen candidate/i);
   });
 
   it('preserves named and urgent-only work and assigns unavailable required checks', () => {
@@ -239,16 +239,16 @@ describe('templates', () => {
   });
 
   /* Task checks clogged the few check machines and slowed releases: a task's check runs only its own tests and its browser
-     files in Chromium alone, as the turn's whole release run checks all three engines and everything else together. */
+     files in Chromium alone, as the repository's CI checks all three engines and everything else together for the release. */
   it("keeps a task's check to its own tests in Chromium, one run of a task at a time, and lets a running run finish", () => {
     const policy = body('dev-testing-policy');
-    expect(policy).toMatch(/Our screens stay\.[^\n]*three engines stay[^\n]*task's check[^\n]*Chromium only[^\n]*Firefox and WebKit run once per turn, in the turn's whole release run/);
+    expect(policy).toMatch(/Our screens stay\.[^\n]*three engines stay[^\n]*task's check[^\n]*Chromium only[^\n]*Firefox and WebKit run in the repository's CI for the exact commit of a release/);
     expect(policy).toMatch(/T2: [^\n]*task's check[^\n]*runs only that task's files and the tests selected for them[^\n]*no whole suite and no extra parts/);
     expect(policy).toMatch(/T12: Let a running run finish\.[^\n]*small fix[^\n]*wait for its result and fix from it[^\n]*Stop a run only when it is broken[^\n]*wrong command[^\n]*wrong commit/);
     expect(policy).toMatch(/T13: [^\n]*at most one run[^\n]*queued or running/);
     expect(templates.skills.get('dev-testing-policy')!.description.en).toContain('T1 to T13');
     expect(body('hh-run-checks')).toMatch(/task's own run holds only its files and their tests[^.]*Chromium only[\s\S]*at most one run of a task queued or running[\s\S]*small fix[\s\S]*Stop only a broken run/);
-    for (const id of ['dev-browser-check', 'dev-frontend-ui', 'dev-e2e-tests']) expect(body(id), id).toMatch(/Chromium only[^.]*Firefox and WebKit[^.]*turn's whole release run/);
+    for (const id of ['dev-browser-check', 'dev-frontend-ui', 'dev-e2e-tests']) expect(body(id), id).toMatch(/Chromium only[^.]*Firefox and WebKit[^.]*repository's CI/);
   });
 
   it('keeps Security and red-team scopes distinct and uses task-assigned review and acceptance', () => {
@@ -434,11 +434,11 @@ describe('templates', () => {
     expect(templates.roles.get('DEV-ENG')!.schema).toBeNull();
   });
 
-  it('has English and Russian titles and descriptions', () => {
+  it('has a title and a description in every language of the registry, from its locale file', () => {
     for (const x of [...roles, ...skills]) {
-      for (const lang of ['en', 'ru'] as const) {
-        expect(x.title[lang].length, `${x.id} title ${lang}`).toBeGreaterThan(1);
-        expect(x.description[lang].length, `${x.id} description ${lang}`).toBeGreaterThan(5);
+      for (const { id: lang } of LOCALES) {
+        expect(x.title[lang]?.length, `${x.id} title ${lang}`).toBeGreaterThan(1);
+        expect(x.description[lang]?.length, `${x.id} description ${lang}`).toBeGreaterThan(5);
       }
       expect(x.title.ru, x.id).toMatch(/[а-я]/i);
     }
@@ -471,9 +471,24 @@ describe('templates', () => {
     expect([watch.timer?.forWork, bugs.timer?.forWork]).toEqual([true, true]);
     expect(watch.skills.find(s => s.id === 'ops-task-watch')?.on).toBe(true);
     expect(bugs.skills.find(s => s.id === 'ops-failure-review')?.on).toBe(true);
-    expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'message_employee', 'restart_program']);
+    expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'message_employee', 'restart_program', 'settle']);
     expect(templates.skills.get('ops-failure-review')!.grants).toEqual(['failures', 'agents', 'message_employee', 'improvements']);
     expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-PM', 'HOM-PM', 'MKT-PM', 'OPS-BUGS', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SUP-PM', 'VID-PM']);
+  });
+
+  it('keeps the done rules for each kind of result in the watchdog skill and its role, in English with names and descriptions in both languages', () => {
+    const skill = templates.skills.get('ops-task-watch')!;
+    expect(skill.body).toMatch(/Code\. Done only when the task's commit is an ancestor of a release tag or of main/);
+    expect(skill.body).toMatch(/task_released[\s\S]*never the turn number/i);
+    expect(skill.body).toMatch(/only a turn branch or a branch of its own holds is unfinished work, and is never closed/);
+    expect(skill.body).toMatch(/recorded where a colleague will find it[\s\S]*a path in the department's repository, or a file on the task/);
+    expect(skill.body).toMatch(/If it is not recorded, the task is not done/);
+    expect(skill.body).toMatch(/Coordination[\s\S]*every subtask is closed and it has no new work/);
+    expect(skill.body).toMatch(/duplicate[\s\S]*Ask the head of its department; never close it blind\. Never touch paused work on your own/);
+    expect(skill.body).toMatch(/settle_task[\s\S]*head of that department is told/);
+    expect(templates.roles.get('OPS-WATCH')!.timer?.order).toMatch(/Close the tasks whose work is done by the rule for their kind of result/);
+    for (const text of [skill.description, templates.roles.get('OPS-WATCH')!.description]) expect(text.ru).toMatch(/[а-я]/i);
+    expect(skill.description.en).toMatch(/closes the tasks whose work is done/);
   });
 
   it('keeps scheduled drains active and checks actual stalls separately', () => {
@@ -649,7 +664,7 @@ describe('templates', () => {
       for (const doc of [agentsDoc, contributingDoc]) {
         expect(doc).toContain('templates/skills/dev-frontend-ui.md');
         expect(doc).toContain('(docs/style-book.md)');
-        expect(doc).toContain('apps/web/src/i18n/index.tsx');
+        expect(doc).toContain('packages/protocol/src/locales.ts');
         expect(doc).toMatch(/longest[\s\S]*shortest|shortest[\s\S]*longest/i);
         expect(doc).toMatch(/whole group|one group/i);
         expect(doc).toMatch(/explicit[\s\S]*browser default/i);
@@ -1157,7 +1172,7 @@ const RUN_CHECKS_CORE_RULES: { id: string; holds: (text: string) => boolean }[] 
 
 const RECONCILED_SKILL_SOURCE_RULES: { id: string; holds: (s: ReconciledCheckSkills) => boolean }[] = [
   { id: 'no-skill-names-hh-run-checks', holds: s => forEvery(Object.values(s), text => !/\bhh-run-checks\b/.test(text)) },
-  { id: 'local-change-checks-and-remote-release-suite', holds: s => !/Run the whole suite locally|Send author checks through run_tests/i.test(Object.values(s).join('\n')) && /whole release suite/i.test(s.ciRelease) && /exact candidate[\s\S]*assigned checks/i.test(s.ciRelease) },
+  { id: 'local-change-checks-and-remote-release-suite', holds: s => !/Run the whole suite locally|Send author checks through run_tests/i.test(Object.values(s).join('\n')) && /relies on the repository's own CI for that exact commit/i.test(s.ciRelease) && /exact candidate[\s\S]*assigned checks/i.test(s.ciRelease) },
   { id: 'browser-suite-remote-light-screenshot-distinct', holds: s => matchesAll(s.browser, [/lightweight screenshot capture/i, /browser binary name alone/i]) && forbids(s.browser, /\btreat\w*\b[^.!?;,]*\bscreenshot capture as a full browser test suite/i) },
 ];
 
@@ -1748,9 +1763,9 @@ describe('identity, defaults and shared instruction delivery', () => {
     const skill = templates.skills.get('hh-tables');
     expect(skill).toBeDefined();
     expect(skill!.title.en.length).toBeGreaterThan(3);
-    expect(skill!.title.ru.length).toBeGreaterThan(3);
+    expect(skill!.title.ru?.length).toBeGreaterThan(3);
     expect(skill!.description.en.length).toBeGreaterThan(10);
-    expect(skill!.description.ru.length).toBeGreaterThan(10);
+    expect(skill!.description.ru?.length).toBeGreaterThan(10);
     expect(skill!.body).toContain('hh-xlsx');
     expect(skill!.body).toContain('hh-attach');
     expect(skill!.body).toContain('send_telegram_file');
@@ -1810,8 +1825,8 @@ const SINGLE_RELEASE_RUN_RULES: { id: string; holds: (s: SingleReleaseRunSkills)
     holds: s => matchesAll(s.devTaskFlow, [/\bbuild\b[\s\S]*\btypes\b[\s\S]*\blint\b/i, /\bhand\w*\s+in\b[\s\S]*\bbranch\b|\bbranch\b[\s\S]*\bhand\w*\s+in\b/i]),
   },
   {
-    id: 'every-test-together-once-per-release',
-    holds: s => /affected tests in your workspace/i.test(s.runChecks) && /whole release suite[\s\S]*applicable scope and fingerprints/i.test(s.devCiRelease),
+    id: 'the-release-relies-on-the-repositorys-ci',
+    holds: s => /affected tests in your workspace|local tests of the files it reaches/i.test(s.runChecks) && /release does not use run_tests: it relies on the repository's own CI/i.test(s.runChecks) && /relies on the repository's own CI for that exact commit[\s\S]*never replace them with a run of your own machines/i.test(s.devCiRelease),
   },
   {
     id: 'lead-tasks-preserves-coordination-and-hold-meaning',
@@ -1828,7 +1843,7 @@ const SINGLE_RELEASE_RUN_RULES: { id: string; holds: (s: SingleReleaseRunSkills)
   },
 ];
 
-/* The conveyor never stops: finished work joins the turn at once, a release takes the commit its whole run checked, and
+/* The conveyor never stops: finished work joins the turn at once, a release takes the commit the repository's CI checked, and
    nothing is committed only to record proof or a note. */
 describe('work joins the turn at once and leaves no record-only commits', () => {
   const skill = (id: string) => templates.skills.get(id)!.body;
@@ -1839,10 +1854,10 @@ describe('work joins the turn at once and leaves no record-only commits', () => 
     expect(skill('dev-task-flow')).toMatch(/A clean merge of the turn branch needs no new checks/);
   });
 
-  it('keeps the turn branch going during checks of a frozen candidate', () => {
+  it('keeps the turn branch going while the repository\'s CI checks a frozen candidate', () => {
     expect(skill('dev-lead')).toMatch(/never tell anyone to hold a finished result/i);
-    expect(skill('dev-ci-release')).toMatch(/keep progressing later work while testing the frozen candidate/i);
-    expect(skill('dev-ci-release')).toMatch(/record the checked release revision and suite result with release_turn/i);
+    expect(skill('dev-ci-release')).toMatch(/keep progressing later work while CI checks the frozen candidate/i);
+    expect(skill('dev-ci-release')).toMatch(/record the checked release revision with release_turn[\s\S]*green CI records the release with no run, red or unfinished CI refuses[\s\S]*a repository with no CI records with no run/i);
   });
 
   it('uses the turnkey holder evidence when the autonomous route accepts it', () => {
@@ -1861,7 +1876,7 @@ describe('work joins the turn at once and leaves no record-only commits', () => 
   });
 });
 
-describe('every test together once per release', () => {
+describe("the release relies on the repository's CI", () => {
   const bundle = (): SingleReleaseRunSkills => ({
     leadTasks: templates.skills.get('hh-lead-tasks')!.body,
     runChecks: templates.skills.get('hh-run-checks')!.body,
@@ -1878,7 +1893,7 @@ describe('every test together once per release', () => {
     orchCompany: templates.skills.get('orch-company')!.body,
   });
 
-  it('checks a change by local tests of what it touched and runs every test together once per release', () => {
+  it("checks a change by local tests of what it touched and leaves the whole suite to the repository's CI for the release", () => {
     expect(failedRuleIds(SINGLE_RELEASE_RUN_RULES, bundle())).toEqual([]);
   });
 

@@ -1,7 +1,5 @@
 ---
 id: hh-ways-of-working
-title: { en: "Ways of working", ru: "Способы работы" }
-description: { en: "Which way a piece of work should go: standing employees, a turnkey member, the department's route of stages, one-shot calls or a chain of them; and when to send a person to their assistant or call on the program operator.", ru: "Как выбрать, кто и как сделает работу: постоянные сотрудники, участник команды под ключ, маршрут этапов отдела, разовые вызовы или их цепочка; и когда отправить человека к его личному помощнику или позвать оператора программ." }
 kind: procedure
 ---
 You can pick, for each piece of work, the way it gets done: who does it, who checks it and what it costs. The same job can take one run or fifty, and be checked by nobody or by three, depending on the way you pick.

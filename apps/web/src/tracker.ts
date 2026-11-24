@@ -113,9 +113,11 @@ export function filterTasks(tasks: TaskLine[], f: WorkFilter, goals: GoalView[],
   });
 }
 
-/* What a person answers for and is not over yet: their goals and their tasks. */
+/* What a person answers for and is not over yet: their goals, and of the tasks only what they asked for and what waits for
+   their decision. Work that merely falls to them to decide, with nobody's request behind it, stays on its department's board. */
 export function mine(tasks: TaskLine[], goals: GoalView[], personId: string): { goals: GoalView[]; tasks: TaskLine[] } {
-  return { goals: goals.filter(g => g.status === 'active' && g.responsible.id === personId), tasks: tasks.filter(t => !isClosed(t) && t.responsible?.id === personId) };
+  const waited = new Set(waitingOn(tasks, personId).map(t => t.id));
+  return { goals: goals.filter(g => g.status === 'active' && g.responsible.id === personId), tasks: tasks.filter(t => !isClosed(t) && (t.askedBy?.id === personId || waited.has(t.id))) };
 }
 
 /* The tasks an employee works on at this moment. */

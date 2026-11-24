@@ -17,6 +17,7 @@ import {
 } from '../src/db/schema.js';
 import { cancel, report } from '../src/modules/tasks/engine.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { recorded } from './recorded-fixture.js';
 
 describe('Stage 4 live read-only world API and God\'s Word relocation', () => {
   it('requires authentication on all world routes', async () => {
@@ -52,9 +53,30 @@ describe('Stage 4 live read-only world API and God\'s Word relocation', () => {
     ).toBe(401);
   });
 
+  /* #1973: a theme is the interface alone or a full world. A company on a theme with no world gets no city: the server
+     answers before it reads any of the company's work. */
+  it('computes no city for a company whose theme has no world', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select({ theme: companies.theme }).from(companies);
+    expect(company!.theme, 'a new company starts on a plain theme').toBe('cyberpunk');
+    const select = vi.spyOn(db, 'select');
+    const res = await app.inject({ url: '/api/world/state', ...as(ceo) });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe('conflict');
+    /* Only the person and the company's theme were read, none of the tables a city is made from. */
+    expect(select.mock.calls.length).toBeLessThanOrEqual(3);
+    select.mockRestore();
+
+    await db.update(companies).set({ theme: 'egypt' });
+    expect((await app.inject({ url: '/api/world/state', ...as(ceo) })).statusCode).toBe(200);
+  });
+
   it('reports empty_lot for a brand-new company without a template and no_subscription for a template without ready plans', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
+    /* The live city is computed for a company on a theme with a world (#1973). */
+    await db.update(companies).set({ theme: 'egypt' });
 
     /* Fresh empty company without template -> empty_lot (stakes, boards, starter tent). */
     const emptyRes = await app.inject({ url: '/api/world/state', ...as(ceo) });
@@ -99,6 +121,8 @@ describe('Stage 4 live read-only world API and God\'s Word relocation', () => {
   it('reads live Hornhoof entities strictly read-only with zero writes to any table, exact formulas, and excludes rework returns', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
+    /* The live city is computed for a company on a theme with a world (#1973). */
+    await db.update(companies).set({ theme: 'egypt' });
     const [company] = await db.select().from(companies);
     const [owner] = await db.select().from(people);
 
@@ -375,6 +399,8 @@ describe('Stage 4 live read-only world API and God\'s Word relocation', () => {
   it('creates real small relocation tasks for department/agent/orchestrator and moves coordinates ONLY when accepted, staying on cancel', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
+    /* The live city is computed for a company on a theme with a world (#1973). */
+    await db.update(companies).set({ theme: 'egypt' });
     const [company] = await db.select().from(companies);
     const [plan] = await db.select().from(subscriptions).where(eq(subscriptions.companyId, company!.id));
     const [dev] = await db
@@ -494,7 +520,7 @@ describe('Stage 4 live read-only world API and God\'s Word relocation', () => {
     expect(deptRel.statusCode).toBe(201);
     const deptBody = deptRel.json();
     expect(deptBody.task.small).toBe(true);
-    expect(deptBody.task.title).toBe('Перестроить Development');
+    expect(deptBody.task.title).toBe('Move Development');
     expect(deptBody.task.assigneeAgentId).toBe(devHead!.id);
     expect(deptBody.task.departmentId).toBe(dev!.id);
     expect(deptBody.relocation.status).toBe('pending');
@@ -550,7 +576,7 @@ describe('Stage 4 live read-only world API and God\'s Word relocation', () => {
     expect(beforeDone.relocations.every((r: { status: string }) => r.status === 'pending')).toBe(true);
 
     /* Accept Tank's house relocation task -> becomes 'applied'; cancel palace relocation task -> becomes 'cancelled'. */
-    await report(app.ctx, devWorker!.id, houseBody.task.id, { summary: 'Order accepted and house relocated.', done: true });
+    await report(app.ctx, devWorker!.id, houseBody.task.id, { summary: 'Order accepted and house relocated.', done: true, ...(await recorded(app.ctx, houseBody.task.id, devWorker!.id)) });
     await cancel(app.ctx, { personId: (await db.select().from(people))[0]!.id }, commonBody.task.id, 'Changed mind');
 
     const afterState = (await app.inject({ url: '/api/world/state', ...as(ceo) })).json();
@@ -568,6 +594,8 @@ describe('Stage 4 live read-only world API and God\'s Word relocation', () => {
   it('projects Stage 5 live resident states (working, waiting_human, turn_failed + dept smoke, machine_offline, turnkey, activeCalls) strictly read-only', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
+    /* The live city is computed for a company on a theme with a world (#1973). */
+    await db.update(companies).set({ theme: 'egypt' });
     const [company] = await db.select().from(companies);
     const [owner] = await db.select().from(people);
     const [plan] = await db.select().from(subscriptions).where(eq(subscriptions.companyId, company!.id));

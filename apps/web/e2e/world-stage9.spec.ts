@@ -3,13 +3,14 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ART_CONTRACT_VERSION,
+  declaredArtFiles,
   personSheetPath,
   type ArtIndexEntry,
   type BuildingPicturePassport,
 } from '../src/world/art';
 import type { WorldArtStats } from '../src/world/art-runtime';
 import type { CityBuilding } from '../src/world/city-layout';
-import type { FootprintKey, WorldPackManifest } from '../src/world/manifest';
+import type { Direction8, FootprintKey, WorldPackManifest } from '../src/world/manifest';
 import type { WorldEngineStats } from '../src/world/renderer';
 import { resolveWorldPack } from '../src/world-packs/registry';
 import { RgbaCanvas } from './fixture-png';
@@ -106,11 +107,13 @@ function boxPicture(pack: WorldPackManifest, footprint: FootprintKey, wallH: num
   return { png: canvas.png(), entry: { w, h, passport } };
 }
 
-/* A small person sheet: 8 frames across, 5 direction rows (N, NE, E, SE, S), feet at (60, 170). */
-function personSheet(cloak: boolean): { png: Buffer; entry: ArtIndexEntry } {
+/* A small person sheet: 8 frames across, one row per drawn direction (5 rows N, NE, E, SE, S without any), feet at
+   (60, 170). */
+function personSheet(cloak: boolean, directions?: readonly string[]): { png: Buffer; entry: ArtIndexEntry } {
   const frameW = 120;
   const frameH = 180;
-  const canvas = new RgbaCanvas(frameW * 8, frameH * 5);
+  const rows = directions?.length ?? 5;
+  const canvas = new RgbaCanvas(frameW * 8, frameH * rows);
   const rowBand: Rgb[] = [
     [230, 80, 80],
     [230, 160, 60],
@@ -118,7 +121,7 @@ function personSheet(cloak: boolean): { png: Buffer; entry: ArtIndexEntry } {
     [70, 150, 230],
     [170, 90, 220],
   ];
-  for (let row = 0; row < 5; row++) {
+  for (let row = 0; row < rows; row++) {
     for (let f = 0; f < 8; f++) {
       const ox = f * frameW;
       const oy = row * frameH;
@@ -131,12 +134,12 @@ function personSheet(cloak: boolean): { png: Buffer; entry: ArtIndexEntry } {
       canvas.polygon([[ox + 62 - stride, oy + 120], [ox + 70 - stride, oy + 120], [ox + 70 - stride, oy + 170], [ox + 62 - stride, oy + 170]], [110, 72, 44, 255]);
       canvas.polygon([[ox + 46, oy + 64], [ox + 74, oy + 64], [ox + 76, oy + 126], [ox + 44, oy + 126]], [240, 232, 214, 255]);
       canvas.polygon([[ox + 48, oy + 34], [ox + 72, oy + 34], [ox + 72, oy + 60], [ox + 48, oy + 60]], [214, 164, 120, 255]);
-      canvas.polygon([[ox + 46, oy + 30], [ox + 74, oy + 30], [ox + 74, oy + 38], [ox + 46, oy + 38]], shade(rowBand[row]!, 1));
+      canvas.polygon([[ox + 46, oy + 30], [ox + 74, oy + 30], [ox + 74, oy + 38], [ox + 46, oy + 38]], shade(rowBand[row % rowBand.length]!, 1));
     }
   }
   const entry: ArtIndexEntry = cloak
     ? { w: canvas.w, h: canvas.h }
-    : { w: canvas.w, h: canvas.h, passport: { frameW, frameH, frames: 8, fps: 8, anchor: { x: 60, y: 170 } } };
+    : { w: canvas.w, h: canvas.h, passport: { frameW, frameH, frames: 8, fps: 8, anchor: { x: 60, y: 170 }, ...(directions ? { directions: directions as Direction8[] } : {}) } };
   return { png: canvas.png(), entry };
 }
 
@@ -171,12 +174,20 @@ function fixtureArt(pack: WorldPackManifest, brokenPath: string): FixtureArt {
   files['buildings/altar/complete.png'] = altar.entry;
   pngs.set('buildings/altar/complete.png', altar.png);
 
-  const base = personSheet(false);
-  const cloak = personSheet(true);
+  /* A sheet with a held item draws the directions order v3 4.4 asks of it (#1983), any other the default 5 rows. */
+  const held = new Map(declaredArtFiles(pack).filter(d => d.held).map(d => [d.path, d.held!.need]));
+  const sheets = new Map<string, ReturnType<typeof personSheet>>();
+  const sheetFor = (cloak: boolean, directions?: readonly string[]) => {
+    const key = `${cloak}:${directions?.join(',') ?? ''}`;
+    if (!sheets.has(key)) sheets.set(key, personSheet(cloak, directions));
+    return sheets.get(key)!;
+  };
   for (const look of pack.art?.people?.looks ?? []) {
     for (const anim of ['walk', 'idle'] as const) {
       const p = personSheetPath(look, 1, anim);
       const c = personSheetPath(look, 1, anim, true);
+      const base = sheetFor(false, held.get(p));
+      const cloak = sheetFor(true, held.get(p));
       files[p] = base.entry;
       files[c] = cloak.entry;
       pngs.set(p, base.png);
@@ -300,12 +311,11 @@ test('Stage 9: the 3x3 workshop draws its own picture at each construction stage
       [hub!.id, stage, phase] as const,
     );
     expect(held).toBe(true);
-    await expect.poll(() => requested.includes(`${base}${picture}.png`), { message: `${picture} asked for`, timeout: 10_000 }).toBe(true);
+    await expect.poll(() => requested.includes(`${base}${picture}.png`), { message: `${picture} asked for` }).toBe(true);
     const served = new Set(requested.filter(rel => art.pngs.has(rel))).size;
     await expect
       .poll(() => page.evaluate(() => (window as unknown as { __WORLD_LIVE__: LiveHandle }).__WORLD_LIVE__.getArtStats()?.loadedTextures ?? 0), {
         message: `${picture}: every picture asked for is loaded`,
-        timeout: 15_000,
       })
       .toBeGreaterThanOrEqual(served);
     await settle(page);

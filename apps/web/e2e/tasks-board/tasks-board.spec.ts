@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { LANGUAGES, type Language, type Messages } from '../../src/i18n';
+import { LANGUAGES, type ShippedLanguage, type Messages } from '../../src/i18n';
 import { en } from '../../src/i18n/en';
 import { ru } from '../../src/i18n/ru';
 import { BUILTIN_SKINS } from '../../src/skins/registry';
@@ -11,13 +11,13 @@ import { DEV, GOAL_NOTE, GOALS, QUESTION, serveGoalHistory, serveOutsideWork, se
 /* The tracker as a person meets it: the left panel of lists, where the person is, views of the same work with their
    filters, the graph on a canvas like the map's, and the card at the end side. 138 tasks, every shipped language, every built-in skin, at a desk and on a phone, also mirrored right to left. Shots go to HH_SCREENSHOT_DIR when it is set. */
 
-const MESSAGES: Record<Language, Messages> = { en, ru };
+const MESSAGES: Record<ShippedLanguage, Messages> = { en, ru };
 const capture = captureWith('tasks-board', process.env.HH_SCREENSHOT_DIR);
 /* One built-in skin of each scheme. */
 const SKINS = (['light', 'dark'] as const).map(scheme => BUILTIN_SKINS.find(skin => skin.scheme === scheme)!.id);
 const LOOKS = LANGUAGES.flatMap(({ id }) => BUILTIN_SKINS.map(skin => ({ lang: id, skin: skin.id })));
 
-async function open(page: Page, lang: Language, width: number, path: string, skin: string = SKINS[1]!) {
+async function open(page: Page, lang: ShippedLanguage, width: number, path: string, skin: string = SKINS[1]!) {
   await page.setViewportSize({ width, height: 900 });
   await page.addInitScript(({ language, skin }) => {
     localStorage.setItem('hh-lang', language);
@@ -602,8 +602,8 @@ for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
 
 /* Design's finding on the pictures of #1329: a goal's history says what changed in words of the person's language, here
    its due date, never the name the code keeps it under; a name it has no words for reads as the goal changed. */
-const DUE_CHANGED: Record<Language, string> = { en: 'Ivan changed the due date', ru: 'Ivan изменил срок' };
-const GOAL_CHANGED: Record<Language, string> = { en: 'Ivan changed the goal', ru: 'Ivan изменил цель' };
+const DUE_CHANGED: Record<ShippedLanguage, string> = { en: 'Ivan changed the due date', ru: 'Ivan изменил срок' };
+const GOAL_CHANGED: Record<ShippedLanguage, string> = { en: 'Ivan changed the goal', ru: 'Ivan изменил цель' };
 const UNNAMED = 'reviewCadence';
 for (const lang of LANGUAGES.map(l => l.id)) {
   test(`says in words what changed in a goal's history: ${lang}`, async ({ page }) => {

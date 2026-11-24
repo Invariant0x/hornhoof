@@ -57,10 +57,14 @@ async function open(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', widt
     if (url.pathname === '/api/updates') return route.fulfill({ json: { current: { version: '0.7.0', commit: 'task-386' }, available: false, latest: null, updater: { status: null, waiting: null } } });
     if (url.pathname === '/api/departments/d2/approval-policy') return route.fulfill({ json: { departmentId: 'd2', owner: null, canSetOwner: false, canChangePolicy: false, candidates: [], rules: [] } });
     if (url.pathname === '/api/departments/d2/repository' && route.request().method() === 'PUT') {
-      const body = route.request().postDataJSON() as { fullTestCommand?: string | null };
+      const body = route.request().postDataJSON() as { fullTestCommand?: string | null; releaseWorkflow?: string | null };
       puts.push(body);
       if (body.fullTestCommand?.includes('{part}/4')) return route.fulfill({ status: 400, json: { error: { code: 'validation', message: en.errors.repo_command_invalid, reason: 'repo_command_invalid' } } });
-      shown = { ...shown, fullTestCommand: body.fullTestCommand === undefined ? shown.fullTestCommand : body.fullTestCommand };
+      shown = {
+        ...shown,
+        fullTestCommand: body.fullTestCommand === undefined ? shown.fullTestCommand : body.fullTestCommand,
+        releaseWorkflow: body.releaseWorkflow === undefined ? shown.releaseWorkflow : body.releaseWorkflow,
+      };
       await route.fulfill({ json: { repository: shown } });
       /* As the server tells every open page. */
       return page.evaluate(() => window.hubTaskEvent('org'));
@@ -211,5 +215,40 @@ for (const lang of ['en', 'ru'] as const) {
         expect(errors).toEqual([]);
       });
     }
+  }
+}
+
+const WORKFLOW = '.github/workflows/continuous-integration-and-release-of-every-version.yml';
+
+for (const lang of ['en', 'ru'] as const) {
+  for (const width of [1440, 375]) {
+    test(`a person names the release workflow and takes it away, in ${lang}, at ${width}px`, async ({ page }, info) => {
+      const t = MESSAGES[lang];
+      const { errors, puts } = await open(page, lang, 'light', width);
+      const part = section(page, t);
+      await expect(part.getByText(t.dept.noReleaseWorkflow)).toBeVisible();
+      await part.getByRole('button', { name: t.dept.change, exact: true }).click();
+      const field = part.getByLabel(t.dept.releaseWorkflow, { exact: true });
+      await expect(field).toHaveValue('');
+      await field.fill(WORKFLOW);
+      await part.screenshot({ path: info.outputPath(`repo-workflow-form-${width}-${lang}.png`) });
+      await fitsTheScreen(page, width);
+      await part.getByRole('button', { name: t.common.save, exact: true }).click();
+      await expect.poll(() => puts.at(-1)).toEqual({ url: REPO.url, branch: 'main', releaseWorkflow: WORKFLOW });
+
+      /* A long path wraps inside the panel. */
+      await expect(part.getByText(t.dept.releaseWorkflowIs(WORKFLOW))).toBeVisible();
+      await expect(part.getByText(t.dept.noReleaseWorkflow)).toHaveCount(0);
+      await fitsTheScreen(page, width);
+      await part.screenshot({ path: info.outputPath(`repo-workflow-named-${width}-${lang}.png`) });
+
+      await part.getByRole('button', { name: t.dept.change, exact: true }).click();
+      await expect(field).toHaveValue(WORKFLOW);
+      await field.fill('');
+      await part.getByRole('button', { name: t.common.save, exact: true }).click();
+      await expect.poll(() => puts.at(-1)).toEqual({ url: REPO.url, branch: 'main', releaseWorkflow: null });
+      await expect(part.getByText(t.dept.noReleaseWorkflow)).toBeVisible();
+      expect(errors).toEqual([]);
+    });
   }
 }

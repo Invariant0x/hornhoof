@@ -7,15 +7,38 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Added
+
+- Every text people see now comes from a file per language, loaded only for the language that is on: the screens, the words of the world packs, what the server says in its own words, the page shown while the server is away, and the names and descriptions of templates. A language is one line in a registry and one file per kind of text, with no code that names a language. Plurals, dates and numbers follow the language through the browser's own rules, a language that reads right to left mirrors the page, and the letters of a script that the product's fonts do not hold load only when a language in that script is on.
+- Two languages made for tests, a text 40% longer than English and the same text mirrored, are checked on the main screens at phone and desktop widths for cut text and sideways scroll. They never reach a person.
+
+### Changed
+
+- A skin file of your own may name the skin in any language of the registry, with the English name required and the others optional, and the names of a world's employees can be taken in any language of the registry.
+
+## [0.43.0] - 2026-11-23
+
 ### Fixed
 
+- The server's minute checks no longer read every conversation of a department whole (all of 25 000 prompts, tails and results) to learn whether one runs and when the last one ended, and no longer scan the 1.5 million events of its agents for unheard words and for waiting Operations notices: the quiet-department check asks for those two figures only, an index lets the quiet check and an index and a statistic let the other two find their rows, and a failure of the wait check after a tool call (`track_work` with an employee, `wait_for`) is logged and tried again the next minute instead of failing the call. Tool calls such as `message_employee` and `track_work` no longer fail at random with "terminating connection due to transaction timeout" in a busy minute. Migration 0161 adds the indexes `jobs_conversation_activity` and `agent_events_operator_fallback` and a statistic on `agent_events` (a few seconds on a large database).
 - When the server cannot be reached, restarts or installs an update, the page no longer shows a missing page, "Insufficient permissions" or "Hornhoof is not responding": a layer over the page says "No connection to the server" or "Server is updating" in the person's language, asks the server again with a growing wait, and once it answers every screen and the live stream come back with no reload, also for a page opened or reloaded during the outage. An answer of a hop in front of the server that is not Hornhoof's, such as a 404 page of the public link's relay, is read as a lost connection; what the server itself says is missing still reads as missing.
 - A browser that opens a page while the front or the keeper has no server behind it gets a plain page in English and Russian that says the same, opens by itself once the server answers and makes no request outside itself, instead of an unstyled line of text. The statuses stay 502 and 503, never 404.
+- A person's message to an agent, in its window, by Telegram, through their assistant or in its terminal, closes one of its open questions only when it is clear which: the only one that person may answer, or the one the message names by its task, a link or a quoted line of the question. With more open, none closes by itself, and the agent records which question the message answers with its new tool record_answer by quoting it: Hornhoof finds that message and records it whole as the person's answer on that card alone, with a link to it.
 - The head of Design, named on a task's tracked work to check a screen's final look, can now read that task and its files and comment on it until the check ends, and the task's holder can message that head about it.
 - An employee's open terminal stays connected when idle or on a personal-plan fallback machine: the server sends WebSocket keepalive pings and checks fallback placement consistently, the window keeps the terminal mounted across brief node drops, and unavoidable reconnects or program restarts recover without flashing the loader or losing scrollback history and reading position.
 - An employee's program that waits between turns no longer starts anew when the terminal showing it loses its connection for a moment: the node keeps it for 30 seconds after its last view went, so the view that comes back finds it. A view ended because its person may no longer see the agent holds it no longer, and a program whose agent moved to another plan still goes at once.
 - A merge of a copy's database no longer stops with "No merge rule for public.world_layouts": the company's city and the CEO's orders to move its buildings merge like a person's map, and two cities that differ keep the leading one and go to the orchestrator.
 - A merge refuses a database that holds more than the one company it merges, or any row of another company, before it writes anything, and a city that PUT /api/world/layout would refuse is never written by a merge or a pick: the leader keeps its own and the orchestrator sees why
+- On the city map, streets read as one trodden strip at every crossing, T-join and bend, with one soft edge instead of strips laid over each other, and the brown stand-in over the river is gone: until the world's bridge pictures are installed no street crosses the water and no resident walks on it, and with them the bridge stands in one fixed place of the map on every load.
+- A task reaches Failures only for a cause that needs a person: a command Hornhoof refuses before it starts ends as refused, with the refusal told to its agent at once as a hint, and neither it, a stopped run, a turn that retries by itself after an overloaded provider or a usage limit, nor a turn replaced because its task moved on marks a task, the agent card or the map as failed; a stuck agent asking for help and a turn that failed with nothing to take it on now do, each until it is answered or a turn goes well, and the failure card says what to do. Refusals kept as failed runs become refused when the update runs.
+
+### Added
+
+- The task watchdog can now see whether a task's commit is in main or a release and close, in any department, the tasks the server proves done, with its reason in the task log and a notice to the head of that department; its role template carries the rules for code, documents and reports, and groups, and never touches paused work.
+
+### Changed
+
+- A hand-in of work that is not code (a document, a group report, turnkey work that joined no turn) must now name where its result is recorded, a path in the department's repository or a file on the task, and is refused without it.
 
 ## [0.42.0] - 2026-11-23
 
