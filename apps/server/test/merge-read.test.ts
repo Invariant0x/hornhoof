@@ -204,7 +204,9 @@ describe('reading both sides of a merge', () => {
     try {
       const result = await runMerge(db, { id: made.rows[0]!.id, label: 'the fork', kept: false, companyId: c.acme.id }, source, { log: () => undefined });
       expect(result.path).toBe('compare');
-      expect([codeReads, readsInTx]).toEqual([3, 0]);
+      /* Once for the restore the leader recorded meanwhile; the picture it lost after that comes back by its hash, whose
+         bytes the store holds, with no more read of the source. */
+      expect([codeReads, readsInTx]).toEqual([2, 0]);
       const [restored] = await db.select().from(attachments).where(eq(attachments.id, picture!.id));
       expect(restored!.sha256).toBe(sha256Of('diagram'));
     } finally {
