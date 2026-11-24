@@ -20,6 +20,7 @@ import { seenAccess } from '../computer/seen.js';
 import { replicasOf } from '../copies/measured.js';
 import { askMove, cancelMove, moveView } from '../copies/move.js';
 import { setPriority } from '../copies/priority.js';
+import { askCopyRetry } from '../copies/retry.js';
 import { holding } from '../copies/view.js';
 import { upsertJoinedMachine } from '../network/server-machine.js';
 import { findThisMachine } from '../network/store.js';
@@ -411,6 +412,17 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { pin } = PriorityBody.parse(req.body);
     await ownMachine(me, id);
     await setPriority(ctx, id, pin);
+    return reply.code(204).send();
+  });
+
+  /* The CEO's request for a new copy on a machine whose keeper gave its copy up. His alone, by himself or through the
+     orchestrator. */
+  app.post('/api/machines/:id/copy/retry', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    if (!me.isOwner || me.viaHead) throw notCeo();
+    const { id } = IdParams.parse(req.params);
+    await ownMachine(me, id);
+    askCopyRetry(ctx, id);
     return reply.code(204).send();
   });
 
