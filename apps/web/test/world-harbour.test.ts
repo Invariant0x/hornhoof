@@ -127,6 +127,24 @@ describe('The harbour where the work comes from (#2006)', () => {
     expect(harbourAt(plan, trips, flow, trip.goneMs + 1).carriers).toEqual([]);
   });
 
+  it('keeps a boat on a steady heading down a winding river, never flicking between two diagonals', () => {
+    for (const live of [createHornhoofLiveFixture(), createStress150LiveFixture()]) {
+      const { map, city } = cityOf(EGYPT_WORLD_PACK, live);
+      const plan = riverPlan(planHarbour(EGYPT_WORLD_PACK, map, city));
+      const flow = { open: 1, arrivals: [new Date(T0).toISOString()] };
+      const trip = scheduleBoats(plan, flow, 4)[0]!;
+      const runs: { facing: string; ms: number }[] = [];
+      for (let at = trip.leaveMs; at < trip.mooredMs; at += 100) {
+        const facing = harbourAt(plan, [trip], flow, at).carriers[0]!.facing;
+        if (runs.at(-1)?.facing === facing) runs.at(-1)!.ms += 100;
+        else runs.push({ facing, ms: 100 });
+      }
+      /* Every heading but the last stretch into the berth is held for a second at least. */
+      for (const run of runs.slice(0, -1)) expect(run.ms, JSON.stringify(runs)).toBeGreaterThanOrEqual(1000);
+      expect(runs.length, JSON.stringify(runs)).toBeLessThanOrEqual(6);
+    }
+  });
+
   it('brings tasks that come together in one boat, never more blocks on a deck than the pack allows', () => {
     const { map, city } = cityOf(EGYPT_WORLD_PACK, createHornhoofLiveFixture());
     const plan = riverPlan(planHarbour(EGYPT_WORLD_PACK, map, city));

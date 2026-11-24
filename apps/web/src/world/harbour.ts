@@ -474,16 +474,63 @@ export function scheduleBoats(plan: HarbourPlan, flow: WorldLiveTaskFlow, cargoM
   return trips;
 }
 
-/* A point a fraction of the way along a route of unit steps, and the way its stretch there points on screen. */
-function alongRoute(route: readonly TileCoord[], fraction: number): Readonly<{ col: number; row: number; facing: Direction8 }> {
+/* Tiles on each side of a stretch that decide which way a carrier heads there, and the fewest stretches a heading
+   is held: a river winds tile by tile, and a boat drawn in only the four diagonals must not flick between two. */
+const HEADING_WINDOW = 3;
+const HEADING_MIN_RUN = 4;
+const OPPOSITE: Readonly<Partial<Record<Direction8, Direction8>>> = { NE: 'SW', SW: 'NE', SE: 'NW', NW: 'SE' };
+const headingsCache = new WeakMap<readonly TileCoord[], readonly Direction8[]>();
+
+/* The diagonal a grid step mostly runs along: a column step is SE or NW on screen, a row step SW or NE; where both
+   are about even the heading stays the one before, if it is one of the two. */
+function diagonalOf(dc: number, dr: number, prev: Direction8 | null): Direction8 {
+  const byCol: Direction8 = dc >= 0 ? 'SE' : 'NW';
+  const byRow: Direction8 = dr >= 0 ? 'SW' : 'NE';
+  const ac = Math.abs(dc);
+  const ar = Math.abs(dr);
+  if (Math.abs(ac - ar) <= 0.25 * Math.max(ac, ar, 1e-6) && (prev === byCol || prev === byRow)) return prev;
+  return ac >= ar ? byCol : byRow;
+}
+
+/* One heading per stretch of a route, from the way it runs over a few tiles each side, with short runs folded into
+   the heading before them. The same route always gives the same headings. */
+function routeHeadings(route: readonly TileCoord[]): readonly Direction8[] {
+  const known = headingsCache.get(route);
+  if (known) return known;
+  const last = route.length - 1;
+  const out: Direction8[] = [];
+  let prev: Direction8 | null = null;
+  for (let i = 0; i < last; i++) {
+    const a = route[Math.max(0, i - HEADING_WINDOW)]!;
+    const b = route[Math.min(last, i + 1 + HEADING_WINDOW)]!;
+    prev = diagonalOf(b.col - a.col, b.row - a.row, prev);
+    out.push(prev);
+  }
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = 0; i < out.length; ) {
+      let j = i;
+      while (j < out.length && out[j] === out[i]) j++;
+      if (i > 0 && j < out.length && j - i < HEADING_MIN_RUN) out.fill(out[i - 1]!, i, j);
+      i = j;
+    }
+  }
+  headingsCache.set(route, out);
+  return out;
+}
+
+/* A point a fraction of the way along a route of unit steps, and the heading of its stretch there; back, the same
+   route from its end with the opposite heading. */
+function alongRoute(route: readonly TileCoord[], fraction: number, back = false): Readonly<{ col: number; row: number; facing: Direction8 }> {
   const last = route.length - 1;
   if (last < 1) return { col: route[0]?.col ?? 0, row: route[0]?.row ?? 0, facing: 'S' };
-  const pos = Math.max(0, Math.min(last, fraction * last));
+  const f = Math.max(0, Math.min(1, fraction));
+  const pos = (back ? 1 - f : f) * last;
   const i = Math.min(last - 1, Math.floor(pos));
   const a = route[i]!;
   const b = route[i + 1]!;
   const t = pos - i;
-  return { col: a.col + (b.col - a.col) * t, row: a.row + (b.row - a.row) * t, facing: facingOfStep(b.col - a.col, b.row - a.row) };
+  const heading = routeHeadings(route)[i] ?? facingOfStep(b.col - a.col, b.row - a.row);
+  return { col: a.col + (b.col - a.col) * t, row: a.row + (b.row - a.row) * t, facing: back ? (OPPOSITE[heading] ?? heading) : heading };
 }
 
 /* The harbour at a moment: every boat (or caravan) under way or at its berth, and the stones waiting in the yard, which
@@ -513,7 +560,7 @@ export function harbourAt(plan: HarbourPlan, trips: readonly CarrierTrip[], flow
       at = atBerth;
       state = nowMs < unloadFrom ? 'moored' : 'unload';
     } else {
-      const back = alongRoute([...route].reverse(), (nowMs - trip.unloadedMs) / sail);
+      const back = alongRoute(route, (nowMs - trip.unloadedMs) / sail, true);
       at = back;
       state = 'sail';
     }
