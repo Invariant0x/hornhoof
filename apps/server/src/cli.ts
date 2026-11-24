@@ -10,6 +10,7 @@ import { APP_NAME, openDb, type Db } from './db/client.js';
 import { companies, people } from './db/schema.js';
 import { idOnly } from './db/selections.js';
 import { ApiError } from './errors.js';
+import { filesFor } from './modules/files/files.js';
 import { linkOf, publicUrl, saveLink, tunnelSettings, writeTunnelSettings } from './modules/link/link.js';
 import { Relay } from './modules/link/relay.js';
 import { reinvite } from './modules/people/routes.js';
@@ -128,7 +129,7 @@ async function themeInstall(args: string[], deps: Deps): Promise<number> {
     return refused(record, `The archive cannot be read: ${(err as NodeJS.ErrnoException).code ?? 'unreadable'}.`);
   }
   try {
-    return await installFrom(handle, { db: deps.db, companyId, ownerId: owner.id, record });
+    return await installFrom(handle, { db: deps.db, config: deps.config, companyId, ownerId: owner.id, record });
   } finally {
     await handle.close();
   }
@@ -166,8 +167,8 @@ async function ownerOf(db: Deps['db'], companyId: string): Promise<{ id: string 
 }
 
 /* Checks the archive open in the handle as an upload is checked, and installs it unless the same version is there. */
-async function installFrom(handle: FileHandle, to: { db: Deps['db']; companyId: string; ownerId: string; record: LogLine }): Promise<number> {
-  const { db, companyId, ownerId, record } = to;
+async function installFrom(handle: FileHandle, to: { db: Deps['db']; config: Config; companyId: string; ownerId: string; record: LogLine }): Promise<number> {
+  const { db, config, companyId, ownerId, record } = to;
   const sha256 = await sha256Of(handle);
   try {
     const theme = await checkThemeArchive(await fileSource(handle), await webThemeCheck(), manifest => themeBase(manifest.id, manifest.version));
@@ -176,7 +177,7 @@ async function installFrom(handle: FileHandle, to: { db: Deps['db']; companyId: 
       await record({ sha256, result: 'refused', problem: { code: 'same_version', path: 'theme.json' }, theme: id, version });
       return 1;
     }
-    await installTheme(db, companyId, ownerId, theme);
+    await installTheme(db, filesFor(config), companyId, ownerId, theme);
     await record({ sha256, result: 'installed', theme: id, version, files: theme.files.length, size: theme.size, installedBy: ownerId, ...(theme.worldLeftOut ? { worldLeftOut: theme.worldLeftOut } : {}) });
     return 0;
   } catch (err) {

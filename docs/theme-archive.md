@@ -288,6 +288,7 @@ Each of these refuses the whole archive. The store names the reason and the file
 * The CEO turns a theme on for the whole company in Settings, Themes. Hornhoof applies the look, loads the fonts, draws the world, and gives agents the world's names.
 * Turning it off means choosing another theme. The look goes back to that theme, the map goes back to that theme's map, and agents get their own names back. Nothing of the theme stays in the interface.
 * Deleting a theme that is on turns it off first, back to Cyberpunk, and then removes all its files.
+* An installed theme's files are kept in the company's file store on its machines, as the files of tasks are, and Postgres keeps only their names, types, sizes and SHA-256. Each version's files have their own address and never change: a browser keeps them, and one that asks again with a file's SHA-256 gets no bytes back. A deleted theme's files leave the store a day after no theme names them.
 
 Without the screen, whoever runs the server installs an archive for one company with the same check and the same install, in the name of that company's owner:
 

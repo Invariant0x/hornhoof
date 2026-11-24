@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { recordFile } from './files.js';
+import { NAMED_CONTENTS } from './named.js';
 import { refreshFileHolders } from './network.js';
 
 /* What the leading app does with the store each minute: picks the machines that hold the files, marks a content no row
@@ -14,8 +15,10 @@ const DROP_BATCH = 500;
 
 const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 
-/* The rows that name a content of the store: files, and a file's row a merge refused and keeps until someone picks it. */
+/* The rows that name a content of the store: files, the files of installed themes, and a file's row a merge refused and
+   keeps until someone picks it. */
 const NAMED = sql`(EXISTS (SELECT 1 FROM public.attachments a WHERE a.sha256 = f.sha256)
+  OR EXISTS (SELECT 1 FROM public.theme_files t WHERE t.sha256 = f.sha256)
   OR EXISTS (SELECT 1 FROM net.merge_conflicts c WHERE c.tbl = 'attachments' AND c.picked IS NULL AND f.sha256 IN (c.here ->> 'sha256', c.there ->> 'sha256')))`;
 
 /* A database a restore set aside, or one made of what a machine uploaded, may be merged back: the files its rows name
@@ -83,8 +86,8 @@ export async function adoptNamed(ctx: Pick<Ctx, 'db' | 'files'>): Promise<number
   const { db, files } = ctx;
   const store = files.store();
   const named = rowsOf<{ sha256: string; size: string }>(
-    await db.execute(sql`SELECT a.sha256, max(a.size) AS size FROM attachments a WHERE a.sha256 IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM net.files f WHERE f.sha256 = a.sha256) GROUP BY a.sha256 LIMIT ${DROP_BATCH}`),
+    await db.execute(sql`SELECT n.sha256, max(n.size) AS size FROM ${NAMED_CONTENTS} n
+      WHERE NOT EXISTS (SELECT 1 FROM net.files f WHERE f.sha256 = n.sha256) GROUP BY n.sha256 LIMIT ${DROP_BATCH}`),
   );
   let adopted = 0;
   for (const { sha256, size } of named) {

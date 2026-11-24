@@ -6,6 +6,7 @@ import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
 import { pickHolders } from '../backups/holders.js';
 import { keeperAsker } from '../network/via.js';
+import { NAMED_CONTENTS } from './named.js';
 
 /* How the files of the store go between the company's machines, as the leading app keeps it: which machines hold them,
    what each is to take, give back or let go of, and what each said it keeps. Only keepers ask, through the peer link. */
@@ -100,7 +101,7 @@ export async function takeReport(db: Tx, machineId: string, report: FileReport):
     /* A content a row names, as a merge brings it, and no record describes, is no stranger: it is to come here. */
     const strangers = report.held.filter(sha256 => !known.includes(sha256));
     const named = strangers.length
-      ? rowsOf<{ sha256: string }>(await db.execute(sql`SELECT DISTINCT sha256 FROM attachments WHERE sha256 = ANY(${listOf(strangers)}::text[])`)).map(row => row.sha256)
+      ? rowsOf<{ sha256: string }>(await db.execute(sql`SELECT DISTINCT n.sha256 FROM ${NAMED_CONTENTS} n WHERE n.sha256 = ANY(${listOf(strangers)}::text[])`)).map(row => row.sha256)
       : [];
     unknown = strangers.filter(sha256 => !named.includes(sha256));
     send = holds ? named : [];

@@ -22,7 +22,7 @@ import { companies } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { requireWorldCeo, setCompanyTheme } from '../world/routes.js';
 import { checkThemeArchive } from './archive.js';
-import { deleteTheme, installedThemeLook, installedThemes, installedVersion, installTheme, themeBase, themeFile } from './store.js';
+import { deleteTheme, installedThemeLook, installedThemes, installedVersion, installTheme, themeBase, themeFile, themeFileBytes } from './store.js';
 import { webThemeCheck } from './web-check.js';
 import { ArchiveRefused, fileSource } from './zip.js';
 
@@ -92,7 +92,7 @@ export function themeRoutes(app: FastifyInstance, ctx: Ctx): void {
           if ((await installedVersion(db, me.companyId, theme.manifest.id)) === theme.manifest.version) {
             throw new ApiError(409, 'conflict', `Version ${theme.manifest.version} of this theme is installed already.`, 'theme_same_version', { problem: { code: 'same_version', path: 'theme.json' } });
           }
-          await installTheme(db, me.companyId, me.id, theme);
+          await installTheme(db, ctx.files, me.companyId, me.id, theme);
         } finally {
           await handle.close();
         }
@@ -109,19 +109,23 @@ export function themeRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /* A theme's file, served only as the type its check gave it, and never as a page: no type sniffing, nothing it may run
-     or load. A version's files never change, so a browser keeps them. */
+     or load. A version's files never change, so a browser keeps them, and one that asks again with the file's hash gets
+     304 and no bytes. */
   app.get('/api/themes/files/:id/:version/*', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id, version, '*': path } = z.object({ id: ThemeId, version: Version, '*': FilePath }).parse(req.params);
     const file = await themeFile(db, me.companyId, id, version, path);
     if (!file) throw new ApiError(404, 'not_found', 'No such file.');
-    return reply
+    const etag = `"${file.sha256}"`;
+    reply
       .header('content-type', file.mediaType)
       .header('x-content-type-options', 'nosniff')
       .header('content-security-policy', "default-src 'none'; sandbox")
       .header('cross-origin-resource-policy', 'same-origin')
       .header('content-disposition', 'inline')
       .header('cache-control', 'private, max-age=31536000, immutable')
-      .send(Buffer.from(file.bytes));
+      .header('etag', etag);
+    if (req.headers['if-none-match'] === etag) return reply.code(304).send();
+    return reply.send(await themeFileBytes(ctx.files, db, file.sha256));
   });
 }

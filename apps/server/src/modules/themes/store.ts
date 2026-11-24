@@ -3,12 +3,14 @@ import type { WorldPackBehaviorSpec } from '@hornhoof/protocol/world';
 import { and, asc, eq, inArray, like, or } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { themeFiles, themes } from '../../db/schema.js';
+import type { Files } from '../files/files.js';
 import type { Tx } from '../tasks/state.js';
 import { defaultWorldPacks, type WorldPackRegistry } from '../world/packs/index.js';
 import type { CheckedTheme } from './archive.js';
 
 /* The themes a company installed from archives (docs/theme-archive.md, 10): stored only as their check built them, each
-   version's files under its own address, so a file once served never changes. */
+   version's files under its own address, so a file once served never changes. The bytes of the files are in the
+   company's file store (modules/files), and their rows name them by their sha256. */
 
 type Reader = Db | Tx;
 /* Files are written a few at a time, so one statement never carries a whole theme. */
@@ -81,8 +83,9 @@ export async function installedVersion(db: Reader, companyId: string, themeId: s
 }
 
 /* Installs a checked theme for the company, in place of any other version of it: the row and every file it serves,
-   read once more from the archive, which checks each file's sum again as it unpacks it. */
-export async function installTheme(db: Db, companyId: string, personId: string, theme: CheckedTheme): Promise<void> {
+   read once more from the archive, which checks each file's sum again as it unpacks it, into the store. A file the store
+   keeps and no row names, of an install that failed, goes with the store's sweep. */
+export async function installTheme(db: Db, files: Pick<Files, 'putBytes'>, companyId: string, personId: string, theme: CheckedTheme): Promise<void> {
   const { manifest } = theme;
   await db.transaction(async tx => {
     await tx.delete(themes).where(and(eq(themes.companyId, companyId), eq(themes.themeId, manifest.id)));
@@ -101,9 +104,11 @@ export async function installTheme(db: Db, companyId: string, personId: string, 
     });
     for (let at = 0; at < theme.files.length; at += FILES_PER_INSERT) {
       const batch = theme.files.slice(at, at + FILES_PER_INSERT);
-      const rows = await Promise.all(batch.map(async file => ({
-        companyId, themeId: manifest.id, version: manifest.version, path: file.path, mediaType: file.mediaType, bytes: await file.read(), size: file.size,
-      })));
+      const rows: (typeof themeFiles.$inferInsert)[] = [];
+      for (const file of batch) {
+        const kept = await files.putBytes(tx, await file.read());
+        rows.push({ companyId, themeId: manifest.id, version: manifest.version, path: file.path, mediaType: file.mediaType, sha256: kept.sha256, size: kept.size });
+      }
       await tx.insert(themeFiles).values(rows);
     }
   });
@@ -115,13 +120,40 @@ export async function deleteTheme(db: Db, companyId: string, themeId: string): P
   return gone.length > 0;
 }
 
-/* One file of an installed theme, only of the company that installed it. */
-export async function themeFile(db: Reader, companyId: string, themeId: string, version: string, path: string): Promise<{ mediaType: string; bytes: Uint8Array } | null> {
+/* One file of an installed theme, only of the company that installed it: its type and the content that holds it. */
+export async function themeFile(db: Reader, companyId: string, themeId: string, version: string, path: string): Promise<{ mediaType: string; sha256: string } | null> {
   const [file] = await db
-    .select({ mediaType: themeFiles.mediaType, bytes: themeFiles.bytes })
+    .select({ mediaType: themeFiles.mediaType, sha256: themeFiles.sha256 })
     .from(themeFiles)
     .where(and(eq(themeFiles.companyId, companyId), eq(themeFiles.themeId, themeId), eq(themeFiles.version, version), eq(themeFiles.path, path)));
   return file ?? null;
+}
+
+/* The theme files opened last, by their sha256, about 64 MB of them: every viewer of a world loads the same art, and a
+   content is the same bytes for good. A file over 8 MB is opened each time. */
+const OPENED_BYTES = 64 * 1024 ** 2;
+const OPENED_FILE_BYTES = 8 * 1024 ** 2;
+const opened = new Map<string, Buffer>();
+let openedBytes = 0;
+
+/* The bytes of a theme's file, by its content: from what the app keeps opened, else from the store. */
+export async function themeFileBytes(files: Pick<Files, 'bytes'>, db: Reader, sha256: string): Promise<Buffer> {
+  const kept = opened.get(sha256);
+  if (kept) {
+    opened.delete(sha256);
+    opened.set(sha256, kept);
+    return kept;
+  }
+  const bytes = await files.bytes(db, sha256);
+  if (bytes.length > OPENED_FILE_BYTES) return bytes;
+  opened.set(sha256, bytes);
+  openedBytes += bytes.length;
+  for (const [name, old] of opened) {
+    if (openedBytes <= OPENED_BYTES) break;
+    opened.delete(name);
+    openedBytes -= old.length;
+  }
+  return bytes;
 }
 
 /* The world packs of one company: the ones Hornhoof ships, and in place of any of them, or beside them, the voice and

@@ -39,10 +39,12 @@ export const companyFull = (inCompany: number, limit: number) =>
 
 export const companyRoom = (used: number, limit: number): UploadRoom => ({ bytes: limit - used, full: () => companyFull(used, limit) });
 
-/* What the store keeps for the company: each content its kept rows name once, however many rows name it, and a row from
-   before the store, which names none, by its own size. */
-const companyUse = (companyId: string) => sql<string>`(SELECT coalesce(sum(one.size), 0) FROM (SELECT max(a.size) AS size FROM attachments a
-  WHERE a.company_id = ${companyId} AND (a.task_id IS NOT NULL OR a.person_id IS NOT NULL OR a.name IS NOT NULL) GROUP BY coalesce(a.sha256, a.id::text)) one)`;
+/* What the store keeps for the company: each content its kept rows and its themes' files name once, however many rows
+   name it, and a row from before the store, which names none, by its own size. */
+const companyUse = (companyId: string) => sql<string>`(SELECT coalesce(sum(one.size), 0) FROM (SELECT max(n.size) AS size FROM (
+  SELECT coalesce(a.sha256, a.id::text) AS name, a.size FROM attachments a
+    WHERE a.company_id = ${companyId} AND (a.task_id IS NOT NULL OR a.person_id IS NOT NULL OR a.name IS NOT NULL)
+  UNION ALL SELECT t.sha256, t.size FROM theme_files t WHERE t.company_id = ${companyId}) n GROUP BY n.name) one)`;
 
 /* Refuses a person's picture of this size when the company has no room left for it, and returns the room left. */
 export async function checkPictureRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string, size: number): Promise<UploadRoom> {

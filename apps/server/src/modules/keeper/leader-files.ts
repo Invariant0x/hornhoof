@@ -2,6 +2,7 @@ import type { Readable } from 'node:stream';
 import { sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { recordFile } from '../files/files.js';
+import { NAMED_CONTENTS } from '../files/named.js';
 import { holdsFiles } from '../files/network.js';
 import { FileStore, StoreRefused } from '../files/store.js';
 
@@ -31,7 +32,7 @@ export class LeaderFiles {
   /* A file a row names and no record describes, from a machine that holds the files: kept once it opens to its name. */
   private async takeUnrecorded(machine: string, sha256: string, body: Readable): Promise<number> {
     const [named] = rowsOf<{ size: string }>(
-      await this.db.execute(sql`SELECT max(a.size) AS size FROM attachments a WHERE a.sha256 = ${sha256} AND NOT EXISTS (SELECT 1 FROM net.files f WHERE f.sha256 = ${sha256}) HAVING count(*) > 0`),
+      await this.db.execute(sql`SELECT max(n.size) AS size FROM ${NAMED_CONTENTS} n WHERE n.sha256 = ${sha256} AND NOT EXISTS (SELECT 1 FROM net.files f WHERE f.sha256 = ${sha256}) HAVING count(*) > 0`),
     );
     if (!named || !this.key || !(await holdsFiles(this.db, machine))) return 403;
     try {

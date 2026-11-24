@@ -1,10 +1,13 @@
 import { DEFAULT_COMPANY_THEME } from '@hornhoof/protocol/world';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, themeFiles, themes } from '../src/db/schema.js';
+import { dropDue, markUnused } from '../src/modules/files/sweep.js';
+import { checkPictureRoom } from '../src/modules/tasks/file-policy.js';
 import { instructionsOf } from '../src/modules/agents/instructions.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { sha256Of } from './files-fixture.js';
 import { archiveOf, completeArt, plainTheme, png, SKILLS, worldOf, worldTheme } from './theme-fixture.js';
 
 /* The themes a company installs from archives (docs/theme-archive.md, 10): the CEO uploads one, everyone of the company
@@ -87,7 +90,7 @@ describe('an uploaded theme', () => {
     const [other] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();
     const person = (await app.inject({ url: '/api/me', ...as(ceo) })).json().person.id as string;
     await db.insert(themes).values({ companyId: other!.id, themeId: 'theirs', version: '1.0.0', manifest: {}, look: {}, size: 4, installedBy: person });
-    await db.insert(themeFiles).values({ companyId: other!.id, themeId: 'theirs', version: '1.0.0', path: 'LICENSE', mediaType: 'text/plain; charset=utf-8', bytes: Buffer.from('mine'), size: 4 });
+    await db.insert(themeFiles).values({ companyId: other!.id, themeId: 'theirs', version: '1.0.0', path: 'LICENSE', mediaType: 'text/plain; charset=utf-8', sha256: (await app.ctx.files.putBytes(db, Buffer.from('mine'))).sha256, size: 4 });
 
     expect((await app.inject({ url: '/api/themes/files/theirs/1.0.0/LICENSE', ...as(ceo) })).statusCode).toBe(404);
     expect((await app.inject({ url: '/api/themes/theirs/look', ...as(ceo) })).statusCode).toBe(404);
@@ -96,6 +99,52 @@ describe('an uploaded theme', () => {
     expect((await app.inject({ method: 'DELETE', url: '/api/themes/theirs', ...as(ceo) })).statusCode).toBe(404);
     expect(await db.select({ companyId: themes.companyId }).from(themes)).toEqual([{ companyId: other!.id }]);
     expect(acme!.id).not.toBe(other!.id);
+  });
+});
+
+describe("an uploaded theme's files", () => {
+  it('are kept in the store under their hash and not in Postgres, and a browser that has one gets 304', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const files = await plainTheme();
+    expect((await upload(app, ceo, archiveOf(files))).statusCode).toBe(201);
+    const cover = files['preview/cover.png'] as Buffer;
+    const [row] = await db.select({ sha256: themeFiles.sha256, size: themeFiles.size }).from(themeFiles).where(eq(themeFiles.path, 'preview/cover.png'));
+    expect(row).toEqual({ sha256: sha256Of(cover), size: cover.length });
+    expect(app.ctx.files.store().has(sha256Of(cover))).toBe(true);
+    const bytea = await db.execute(sql`SELECT column_name FROM information_schema.columns WHERE table_name = 'theme_files' AND data_type = 'bytea'`);
+    expect((bytea as unknown as { rows: unknown[] }).rows).toEqual([]);
+
+    const first = await app.inject({ url: `${BASE}preview/cover.png`, ...as(ceo) });
+    expect(first.rawPayload.equals(cover)).toBe(true);
+    expect(first.headers).toMatchObject({ etag: `"${sha256Of(cover)}"`, 'cache-control': 'private, max-age=31536000, immutable', 'content-type': 'image/png' });
+    const again = await app.inject({ url: `${BASE}preview/cover.png`, headers: { 'if-none-match': `"${sha256Of(cover)}"` }, ...as(ceo) });
+    expect([again.statusCode, again.rawPayload.length]).toEqual([304, 0]);
+    /* Served again from what the app keeps opened, the same bytes. */
+    expect((await app.inject({ url: `${BASE}preview/cover.png`, ...as(ceo) })).rawPayload.equals(cover)).toBe(true);
+  });
+
+  it("stay in the store while the theme is installed, count once in the company's room, and go a day after it is deleted", async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [acme] = await db.select().from(companies);
+    const before = (await checkPictureRoom(app.ctx, acme!.id, 1)).bytes;
+    expect((await upload(app, ceo, archiveOf(await plainTheme()))).statusCode).toBe(201);
+    const rows = await db.select({ sha256: themeFiles.sha256, size: themeFiles.size }).from(themeFiles);
+    const contents = new Map(rows.map(file => [file.sha256, file.size]));
+    expect((await checkPictureRoom(app.ctx, acme!.id, 1)).bytes).toBe(before - [...contents.values()].reduce((sum, size) => sum + size, 0));
+
+    const now = new Date();
+    const later = (days: number) => new Date(now.getTime() + days * 86_400_000);
+    expect(await markUnused(db, now)).toBe(0);
+    expect(await markUnused(db, later(2))).toBe(0);
+    for (const sha256 of contents.keys()) expect(app.ctx.files.store().has(sha256)).toBe(true);
+
+    expect((await app.inject({ method: 'DELETE', url: '/api/themes/night-shift', ...as(ceo) })).statusCode).toBe(200);
+    expect(await markUnused(db, later(2))).toBe(0);
+    expect(await markUnused(db, later(3.1))).toBe(contents.size);
+    await dropDue(app.ctx, later(3.1));
+    for (const sha256 of contents.keys()) expect(app.ctx.files.store().has(sha256)).toBe(false);
   });
 });
 
