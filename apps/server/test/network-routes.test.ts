@@ -511,4 +511,27 @@ describe('the network routes the keeper calls', () => {
     await c.db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, kept) VALUES (gen_random_uuid(), gen_random_uuid(), '2026-11-24T01:00:00.000Z'::timestamptz, 'hornhoof_before_20261124_010000')`);
     expect((await c.peers(from(former.id))).json().copy.applied).toBeNull();
   });
+
+  it('shows a copy its keeper gave up, since when and after how many attempts, until the keeper says anything else', async () => {
+    const c = await company();
+    const parked = await c.joined('data', newKey(), { networkId: 'd0'.repeat(32), serverOrder: 2 });
+    const rowOf = async (id: string) => (await c.db.select().from(machines).where(eq(machines.id, id)))[0]!;
+    const report = (payload: object) => c.app.inject({ method: 'POST', url: '/api/network/report', payload, ...from(parked.id) });
+    const stopped = {
+      state: 'stopped', progress: null, error: 'apply', at: null, name: 'copy_d0d0d0d0d0d0d0d0_5', old: null,
+      gaveUp: { since: '2026-11-24T20:00:00.000Z', attempts: 4 },
+    };
+    expect((await report({ copy: stopped })).statusCode).toBe(204);
+    expect(await rowOf(parked.id)).toMatchObject({ copyState: 'stopped', copyError: 'apply', copyName: 'copy_d0d0d0d0d0d0d0d0_5' });
+    expect((await dataViews(c.app.ctx, new Date())).get(parked.id)?.copy).toEqual({ line: 'stopped', why: 'gave_up', since: '2026-11-24T20:00:00.000Z', attempts: 4 });
+    /* A stop for another reason is no give-up: the word of the keeper decides, and a leader that restarted forgets it. */
+    expect((await report({ copy: { ...stopped, error: 'disk_full', gaveUp: undefined } })).statusCode).toBe(204);
+    expect((await dataViews(c.app.ctx, new Date())).get(parked.id)?.copy).toEqual({ line: 'stopped', why: 'disk_full' });
+    /* A copy that was asked for again is made, and says so. */
+    expect((await report({ copy: stopped })).statusCode).toBe(204);
+    expect((await report({ copy: { ...stopped, state: 'making', progress: 0, error: null, gaveUp: undefined, name: 'copy_d0d0d0d0d0d0d0d0_6' } })).statusCode).toBe(204);
+    expect((await dataViews(c.app.ctx, new Date())).get(parked.id)?.copy).toEqual({ line: 'making', progress: 0 });
+    /* The words of a keeper of a build before, which cannot say it, are refused by none. */
+    expect((await report({ copy: { ...stopped, gaveUp: { since: 'yesterday', attempts: 0 } } })).statusCode).toBe(400);
+  });
 });

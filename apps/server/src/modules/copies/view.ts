@@ -6,7 +6,7 @@ import type { SavingWait } from '../keeper/led.js';
 import { freshState } from '../keeper/state.js';
 import { queryOf } from '../merge/leader.js';
 import { findThisMachine } from '../network/store.js';
-import { savingOf } from './measured.js';
+import { gaveUpOf, savingOf } from './measured.js';
 import { candidates } from './order.js';
 import { REPORT_FRESH_MS, unfit, type Unfit } from './qualify.js';
 
@@ -22,7 +22,8 @@ export type CopyLine =
   | { line: 'catching_up' }
   | { line: 'behind'; minutes: number }
   | { line: 'asleep'; since: string | null }
-  | { line: 'stopped'; why: 'disk_full' | 'setup' | null };
+  /* Its keeper tried again and again and gave the copy up: since when, and after how many attempts in a row. */
+  | { line: 'stopped'; why: 'disk_full' | 'setup' | 'gave_up' | null; since?: string; attempts?: number };
 
 /* A machine's part in holding the company's data. number, why: its place in the order and the key of the words for it,
    as the ranking stored it. pin: the place the CEO gave it by hand, or 'none' when he keeps it from the server. unfit:
@@ -69,12 +70,18 @@ function savingLine(ctx: Ctx, id: string): CopyLine {
   return detail ? { line: 'saving', waiting: detail.waiting, since: detail.since } : { line: 'saving' };
 }
 
+function stoppedLine(ctx: Ctx, row: Row): CopyLine {
+  const gaveUp = gaveUpOf(ctx, row.id);
+  if (gaveUp) return { line: 'stopped', why: 'gave_up', since: gaveUp.since, attempts: gaveUp.attempts };
+  return { line: 'stopped', why: row.copyError === 'disk_full' || row.copyError === 'setup' ? row.copyError : null };
+}
+
 function lineOf(ctx: Ctx, row: Row, o: { now: Date; pulseAt: number | null; reads: boolean; state: 'sync' | 'pace' | 'behind' | 'silent' | null }): CopyLine {
   /* A machine that was given the data and has said nothing of a copy yet is at the start of making one. */
   if (row.copyState === null) return { line: 'making', progress: 0 };
   if (row.copyState === 'making' || row.copyState === 'remaking') return { line: row.copyState, progress: row.copyProgress ?? 0 };
   if (row.copyState === 'saving') return savingLine(ctx, row.id);
-  if (row.copyState === 'stopped') return { line: 'stopped', why: row.copyError === 'disk_full' || row.copyError === 'setup' ? row.copyError : null };
+  if (row.copyState === 'stopped') return stoppedLine(ctx, row);
   const reported = row.reportAt !== null && o.now.getTime() - row.reportAt.getTime() <= REPORT_FRESH_MS;
   if (!o.reads || !reported) return { line: 'asleep', since: row.copyAt?.toISOString() ?? null };
   if (o.state === 'sync' || o.state === 'pace') return { line: 'ready' };
