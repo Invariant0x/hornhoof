@@ -38,9 +38,10 @@ import {
   HumanWakeGate,
   createResidentSimulation,
   type ResidentEntity,
+  type ResidentHarbour,
   type ResidentSimulation,
 } from '../world/residents';
-import { harbourPlanFor } from '../world/harbour';
+import { harbourAt, harbourPlanFor, type HarbourState } from '../world/harbour';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../world/terrain-engine';
 import { registeredWorldPacks, worldPackFromParam } from './registry';
 
@@ -264,6 +265,9 @@ type LiveWorldDebugHandle = {
   setZoom: (zoom: number) => void;
   panByScreen: (dx: number, dy: number) => void;
   flushVisibleBakes: () => void;
+  /* The harbour the stones come to (#2006): where it stands, whether its art shows it, and what it shows now. */
+  getHarbour: () => (ResidentHarbour & { state: HarbourState }) | null;
+  centerOnHarbour: (zoom?: number) => boolean;
   centerOnBuilding: (buildingId: string, zoom?: number) => boolean;
   centerOnResident: (residentId: string, zoom?: number) => boolean;
   getResidentScreenPoint: (residentId: string) => { x: number; y: number } | null;
@@ -504,6 +508,17 @@ function Stage4LiveWorld() {
         setZoom: z => engineRef.current?.setZoom(z),
         panByScreen: (dx, dy) => engineRef.current?.panByScreen(dx, dy),
         flushVisibleBakes: () => engineRef.current?.flushVisibleBakes(),
+        getHarbour: () => {
+          const h = simRef.current?.harbour;
+          return h ? { ...h, state: harbourAt(h.plan, h.trips, h.flow, h.nowMs) } : null;
+        },
+        centerOnHarbour: zoom => {
+          const yard = simRef.current?.harbour?.plan.yard;
+          if (!yard || !engineRef.current) return false;
+          engineRef.current.centerOnTile({ col: yard.col + Math.floor(yard.span / 2), row: yard.row + Math.floor(yard.span / 2) }, zoom);
+          engineRef.current.flushVisibleBakes();
+          return true;
+        },
         centerOnBuilding: (buildingId, zoom) => {
           const b = cityRef.current?.buildings.find(item => item.id === buildingId);
           if (!b || !engineRef.current) return false;
