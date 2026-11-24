@@ -1256,17 +1256,22 @@ describe('the maker of a copy', () => {
     await again.tick({ ...ORDER, slot: 'lost' });
     expect(once.kept()).toMatchObject({ attempt: 2, phase: 'detach', given: 3, old: { attempt: 1 } });
     expect(Date.parse(once.kept().notBefore as string) - once.state.now.getTime()).toBe(2400_000);
-    /* The fourth in a row: the old copy stays read, no new one is made, and none is asked for. */
+    /* The fourth in a row: no new one is made and none is asked for, and the old one, which no longer changes, is read by no one. */
     const last = stand();
     await (await following(last)).stop();
     writeFileSync(join(last.dir, COPY_STATE), JSON.stringify({ ...last.kept(), given: 3, readyAt: readyAt(last, 600_000) }));
     const parked = last.maker();
     await parked.tick({ ...ORDER, slot: 'lost' });
+    /* Off from the moment it is parked, while its slot is still being let go too. */
+    expect(last.kept()).toMatchObject({ phase: 'detach', parked: { attempts: 4 } });
+    expect(parked.mode()).toBe('off');
     for (let n = 0; n < 6; n++) await parked.tick({ ...ORDER });
     expect(last.kept()).toMatchObject({ phase: 'parked', given: 4, old: { attempt: 1 } });
     expect(last.request()).toBeNull();
-    expect(parked.mode()).toBe('read');
+    expect(parked.mode()).toBe('off');
     expect(parked.report()).toMatchObject({ state: 'stopped', error: 'apply', gaveUp: { attempts: 4 } });
+    /* It stays off when its keeper starts again. */
+    expect(last.maker().mode()).toBe('off');
     /* One that was whole for an hour first starts the count over, and is remade at once. */
     const stable = stand();
     await (await following(stable)).stop();
