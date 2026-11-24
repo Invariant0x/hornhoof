@@ -19,13 +19,12 @@ export async function released(options: { approval?: boolean; record?: boolean; 
   /* turnkey: the release also brings turnkey work its holder checked itself, joined to the turn branch after R. */
   const work = options.turnkey ? await turnkeyAfterR(f) : null;
   const commit = work?.head ?? f.R;
-  const run = await f.fullRun({ commit });
   /* With autonomous release on, a release every commit of which was checked is approved by the log, by no person. */
   if (options.autonomous) {
     await f.db.insert(approvalPolicies).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, channel: 'commit', mode: 'every' });
     await f.db.update(departments).set({ autonomousRelease: true }).where(eq(departments.id, f.task.departmentId!));
   } else if (options.approval !== false) await f.approve(commit);
-  if (options.record !== false) expect((await f.recordRelease({ commit, runId: run.id })).isError).toBe(false);
+  if (options.record !== false) expect((await f.recordRelease({ commit })).isError).toBe(false);
   f.repo.heads.main = commit;
   f.repo.tags[options.tag ?? 'v1.7.0'] = options.at ?? commit;
   const departmentTurns = () => f.db.select().from(turns).where(eq(turns.departmentId, f.task.departmentId!)).orderBy(asc(turns.number));
@@ -36,5 +35,5 @@ export async function released(options: { approval?: boolean; record?: boolean; 
     await f.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null, turnId: f.turn.id }).where(eq(tasks.id, task.id));
     return task;
   };
-  return { ...f, round, errors, departmentTurns, open, lateResult, run, work, commit };
+  return { ...f, round, errors, departmentTurns, open, lateResult, work, commit };
 }

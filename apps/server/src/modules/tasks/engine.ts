@@ -39,7 +39,7 @@ import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
 import { checkDelegation, contextMissing, requireDecider, type Delegation } from '../conversation/decision-context.js';
 import { incomingWords } from '../conversation/turn-words.js';
-import { commitProof, proofLine } from '../testruns/commit-proof.js';
+import { proofSaid, type Said } from './release-ci.js';
 import { dropEarlierWakes, keepWakes } from './outbox.js';
 import { handOff } from './pulses.js';
 import { recordCause } from './notification-cause.js';
@@ -1105,12 +1105,12 @@ const approveOrDecline = (r: Pick<Request, 'commit'>) => (r.commit ? 'Approve or
 /* What the note on an answer says it let through: only an approval has one. */
 const answeredWork = (r: Pick<Request, 'kind' | 'commit' | 'approvalChannel' | 'approvalKind'>) => (r.kind === 'approval' ? approvedWhat(r) : r.commit);
 /* The test run that proves an approved commit, as the release rests on that commit. */
-const proofWords = async (db: Db, task: Task, found: Request, a: Answer) => (a.approve && found.commit ? ` ${proofLine(await commitProof(db, task, found.commit))}` : '');
+const proofWords = async (ctx: Said, task: Task, found: Request, a: Answer) => (a.approve && found.commit ? ` ${await proofSaid(ctx, task, found.commit)}` : '');
 
 /* An answer in words, for the one who asked and the log. */
-async function answerWords(db: Db, task: Task, found: Request, a: Answer, text: string, option: RequestOption | undefined): Promise<string> {
+async function answerWords(ctx: Said, task: Task, found: Request, a: Answer, text: string, option: RequestOption | undefined): Promise<string> {
   const more = text ? ` ${text}` : '';
-  if (found.kind === 'approval') return `${a.approve ? 'Approved' : 'Declined'} ${approvedWhat(found)}.${await proofWords(db, task, found, a)}${more}`;
+  if (found.kind === 'approval') return `${a.approve ? 'Approved' : 'Declined'} ${approvedWhat(found)}.${await proofWords(ctx, task, found, a)}${more}`;
   return option ? `Picked ${a.pick! + 1}: ${option.label}.${more}` : text || 'Try again.';
 }
 
@@ -1169,7 +1169,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     status = 'answered';
   }
   const task = await loadTask(ctx.db, found.taskId);
-  const said = await answerWords(ctx.db, task, found, a, text, option);
+  const said = await answerWords(ctx, task, found, a, text, option);
   let wakes: Wake[] = [];
   const row = await ctx.db.transaction(async tx => {
     /* The task first and then its request, in the order a cancel takes them, so the two never wait on each other. As the task
