@@ -102,12 +102,16 @@ describe('Cloth masks in the art runtime (#1983)', () => {
       packId: 'egypt',
       baseUrl: '/art/',
       store: null,
-      fetch: async url => (url.endsWith('art-index.json') ? new Response(JSON.stringify(INDEX)) : new Response(new Blob([new Uint8Array(4)]))),
+      fetch: async url => (url.endsWith('art-index.json') ? new Response(JSON.stringify(INDEX)) : new Response(new Uint8Array(4))),
     });
     const lib = await WorldArtLibrary.load(PACK, files);
     expect(lib.clothWeights(`${AT}awning_w.png`)).toBeNull();
-    for (let i = 0; i < 10 && !lib.clothWeights(`${AT}awning_w.png`); i++) await settle();
-    const weights = lib.clothWeights(`${AT}awning_w.png`);
+    /* The mask comes through the art files' own download, a few ticks away. */
+    const weights = await vi.waitFor(() => {
+      const got = lib.clothWeights(`${AT}awning_w.png`);
+      if (!got) throw new Error('no weights yet');
+      return got;
+    });
     expect(weights).toHaveLength(CLOTH_COLS * CLOTH_ROWS);
     expect(weights![0]).toBe(0);
     expect(weights![weights!.length - 1]).toBe(1);
