@@ -177,9 +177,10 @@ describe("a map's bridge in the pictures", () => {
     const { city } = runFiveYearSimulation(EGYPT_WORLD_PACK, { seed: 'hornhoof', mapSize: EGYPT_WORLD_PACK.mapSize, orderChaos: 0.5, recordSnapshots: false, bridge: site });
     const marks = roadMarks(city, true);
     expect(marks.streets).toEqual([]);
-    const pieces = ['start', ...Array.from({ length: site.length - 2 }, () => 'span'), 'end'].map(p => `bridge/${site.axis}_${p}.png`);
+    const drawn = bridgePieceTiles(site);
+    const pieces = ['start', ...Array.from({ length: drawn.length - 2 }, () => 'span'), 'end'].map(p => `bridge/${site.axis}_${p}.png`);
     expect(marks.bridge.map(m => m.path)).toEqual(pieces);
-    expect(marks.bridge.map(m => `${m.road.col},${m.road.row}`)).toEqual(bridgeTiles(site).map(t => `${t.col},${t.row}`));
+    expect(marks.bridge.map(m => `${m.road.col},${m.road.row}`)).toEqual(drawn.map(t => `${t.col},${t.row}`));
     expect(roadMarks(city, false).streets.length).toBe(city.roads.size - site.length);
   });
 });
