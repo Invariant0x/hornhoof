@@ -370,9 +370,16 @@ function usesYard(sim: Pick<ResidentSimulation, 'harbour'>, r: ResidentEntity): 
   return Boolean(sim.harbour?.shown && r.yardSpot && r.yardTile);
 }
 
-/* The road tile a working resident's walks to work start from and come back to: the yard's, else home. */
+/* The road tile a working resident's walk back from work ends at: the yard's while the harbour is drawn, else home. */
 function baseTileOf(sim: Pick<ResidentSimulation, 'harbour'>, r: ResidentEntity): TileCoord {
   return usesYard(sim, r) ? r.yardTile! : r.homeTile;
+}
+
+/* The road tile a walk to work starts from: the yard's when the resident stands at its yard spot, else home's, so a
+   harbour that starts or stops showing mid-walk never sends it across the city in a straight line. */
+function restTileOf(r: ResidentEntity): TileCoord {
+  const at = r.yardSpot;
+  return at && r.yardTile && Math.hypot(r.col - at.col, r.row - at.row) < 0.5 ? r.yardTile : r.homeTile;
 }
 
 function harbourOf(pack: WorldPackManifest, plan: HarbourPlan, snapshot: WorldLiveSnapshot, shown: boolean): ResidentHarbour {
@@ -1095,7 +1102,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
         }
       }
       const yard = usesYard(sim, r);
-      const nextFrom = r.leg === 'outbound' ? baseTileOf(sim, r) : r.workTile;
+      const nextFrom = r.leg === 'outbound' ? restTileOf(r) : r.workTile;
       const nextTo = r.leg === 'outbound' ? r.workTile : baseTileOf(sim, r);
       const route = findRoadRoute(sim, nextFrom, nextTo);
       r.path = toWorkSpot(route, r.leg === 'outbound' ? r.workSpot : yard ? r.yardSpot : null);

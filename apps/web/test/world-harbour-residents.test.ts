@@ -109,6 +109,33 @@ describe('Residents take the stones at the harbour yard (#2006)', () => {
     }
   });
 
+  it('when the art comes in while a resident walks home, its next walk still starts from where it stands', () => {
+    const live = createHornhoofLiveFixture();
+    const { city, plan } = cityOf(live);
+    const sim = createResidentSimulation(pack, city, live, { harbour: plan });
+    const carriers = new Set(sim.residents.filter(isCarrier).map(r => r.id));
+    let switched = false;
+    const leg = new Map(sim.residents.map(r => [r.id, r.leg]));
+    let checked = 0;
+    for (let tick = 0; tick < 1600; tick++) {
+      if (tick === 300) {
+        sim.harbour!.shown = true;
+        switched = true;
+      }
+      stepResidentSimulation(sim, 0.1);
+      for (const r of sim.residents) {
+        const was = leg.get(r.id);
+        leg.set(r.id, r.leg);
+        if (!switched || !carriers.has(r.id) || was !== 'inbound' || r.leg !== 'outbound') continue;
+        /* The new walk's first step is a road tile next to where the resident stands, never one across the city. */
+        const first = r.path[0]!;
+        expect(Math.hypot(first.col - r.col, first.row - r.row), `${r.name} at ${r.col},${r.row} starts at ${first.col},${first.row}`).toBeLessThan(2.5);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(3);
+  });
+
   it.each([
     ['no harbour', false],
     ['a harbour with no art to draw it', true],
