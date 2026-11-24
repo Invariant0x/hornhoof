@@ -7,6 +7,7 @@ import { drawBridgePieces, roadMarks, type CityArtContext } from '../src/world/c
 import { tileCenterToWorld } from '../src/world/coords';
 import { DEFAULT_ISOMETRIC_PROJECTION } from '../src/world/manifest';
 import { runFiveYearSimulation } from '../src/world/simulator';
+import { createHornhoofLiveFixture, syncLiveSnapshotToCity } from '../src/world/live-sync';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../src/world/terrain-engine';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
 
@@ -104,6 +105,27 @@ describe("a city's roads over water", () => {
       const { city, map } = runFiveYearSimulation(EGYPT_WORLD_PACK, { seed, mapSize: EGYPT_WORLD_PACK.mapSize, orderChaos: 0.5, recordSnapshots: false, bridge: null });
       expect(waterRoads(city, map), seed).toEqual([]);
       expect(city.metrics.bridgeTiles, seed).toBe(0);
+    }
+  });
+
+  /* With no bridge a far bank is out of the streets' reach, so the lot search keeps to the land they reach: every
+     building the records ask for still stands, its door on the one street network. */
+  it('leave no building out while the pack has no bridge pictures: every lot is found on land the streets reach', () => {
+    for (const seed of SEEDS) {
+      const fixture = createHornhoofLiveFixture();
+      const live = { ...fixture, company: { ...fixture.company, seed } };
+      const map = mapOf(seed);
+      const { city } = syncLiveSnapshotToCity(EGYPT_WORLD_PACK, map, live, null);
+      expect(city.bridge ?? null, seed).toBeNull();
+      const count = (kind: string) => city.buildings.filter(b => b.kind === kind).length;
+      expect(count('district_hub'), `${seed} hubs`).toBe(live.machines.length);
+      expect(count('department'), `${seed} departments`).toBe(live.departments.length);
+      expect(count('house'), `${seed} houses`).toBe(live.agents.length);
+      expect(count('supply'), `${seed} supplies`).toBe(live.subscriptions.length);
+      expect(count('monument'), `${seed} monuments`).toBe(live.goals.length);
+      expect(waterRoads(city, map), seed).toEqual([]);
+      const joined = reachable(city);
+      for (const b of city.buildings) expect(joined.has(`${b.door.col},${b.door.row}`), `${seed} ${b.id} door`).toBe(true);
     }
   });
 
