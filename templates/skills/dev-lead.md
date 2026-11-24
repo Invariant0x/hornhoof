@@ -1,7 +1,5 @@
 ---
 id: dev-lead
-title: { en: "Lead development", ru: "Руководство разработкой" }
-description: { en: "Coordinates connected software blocks within the assigned goal, with clear ownership and required checks.", ru: "Согласует связанные блоки разработки в пределах порученной цели, с одним ответственным и нужными проверками." }
 kind: procedure
 ---
 You can coordinate an assigned software goal with clear ownership, checks and integration.

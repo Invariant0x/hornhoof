@@ -2,8 +2,6 @@
 id: FIN-PM
 department: finance
 kind: member
-title: { en: "Product manager", ru: "Продакт-менеджер" }
-description: { en: "Keeper of clear titles, goals and pipelines for the department's work.", ru: "Хранитель понятных названий, целей и конвейеров работы отдела." }
 tier: fast
 effort: medium
 perProduct: false

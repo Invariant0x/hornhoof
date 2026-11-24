@@ -1,7 +1,5 @@
 ---
 id: dev-frontend-ui
-title: { en: "User interface engineering", ru: "Разработка интерфейса" }
-description: { en: "Builds the interface users meet on the design system: every state, every input, every size.", ru: "Делает интерфейс, который встречает пользователь, на дизайн-системе: все состояния, все способы ввода, все размеры." }
 kind: checklist
 sources: [addyosmani/agent-skills skills/frontend-ui-engineering/SKILL.md, anthropics/skills skills/frontend-design/SKILL.md]
 ---
@@ -18,4 +16,4 @@ You can build an interface on the existing design system for every shipped state
 - Layout holds on every size and density the product supports. Respect reduced motion.
 - Keep state where it is used, load once and share, never block the interface on something it can show later. Stay within the platform's frame and response budgets.
 - Test behaviour as a person uses it, through what they see, not internal names.
-- Verify an affected web view on an isolated fixture/stand across Chromium, Firefox and WebKit, narrow/wide widths, all shipped themes and the actually longest/shortest shipped locales plus a shipped RTL locale when available. Run named browser test files in your own workspace and keep screenshots and geometry evidence; browser installation is allowed.
+- Verify an affected web view on an isolated fixture/stand across Chromium, Firefox and WebKit, narrow/wide widths, all shipped themes and the actually longest/shortest shipped locales plus a shipped RTL locale when available: a task's check runs it in Chromium only, and Firefox and WebKit check it in the repository's CI. Run named browser test files in your own workspace and keep screenshots and geometry evidence; browser installation is allowed.

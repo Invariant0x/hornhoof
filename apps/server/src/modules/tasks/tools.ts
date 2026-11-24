@@ -4,7 +4,7 @@ import { earlierWork } from '../departments/branches.js';
 import { agentTaskDetail } from './agent-sight.js';
 import { Verification } from './echelons-tests.js';
 import { AcceptanceInput } from './echelons-accept.js';
-import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
+import { isTexts, RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
 import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
 import { ECHELON_STAGES } from '@hornhoof/protocol/echelons';
 import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
@@ -16,14 +16,16 @@ import { agents, DECISION_TOPICS, departments, people, tasks, type AgentKind, ty
 import { repoAt } from '../departments/repository.js';
 import { ApiError } from '../../errors.js';
 import { commitApprovalRequired } from './commit-approval.js';
-import { ask, blocked, cancel, closeTask, createTask, report, submit, updateTask, verdict } from './engine.js';
+import { ask, blocked, cancel, closeTask, createTask, recordAnswer, report, submit, updateTask, verdict } from './engine.js';
 import { comment } from './comments.js';
 import { CLOSED, listed, mayAsk, openAfter, refuse, taskSpot, type Moved, type Task } from './state.js';
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { tryAutonomousCommitApproval } from './autonomous-release.js';
 import { Text } from './long-text.js';
+import { Recorded } from './recorded.js';
 import { agentSeesTask as sees, taskLines, type TaskDetail } from './views.js';
+import { checksTask } from './look-checker.js';
 import { taskByRef } from './lookup.js';
 import { editTurn, giveTasks, turnName, turnRows, type Scope } from './turns.js';
 import { recordRelease, uncheckedInRelease } from './releases.js';
@@ -40,7 +42,7 @@ import { personParty } from '../events/parties.js';
 import { decisionPerson } from './decision-people.js';
 import { TaskReference as Ref, trackWork } from './external-wait.js';
 import { pipelineReport } from './pipeline-report.js';
-import { commitProof, proofLine } from '../testruns/commit-proof.js';
+import { proofSaid } from './release-ci.js';
 import { ReviewSha, ReviewSubmission } from './review-context.js';
 import { pipelineFindings, reviewDetails } from './review-details.js';
 import { ConfirmationInput, confirmFinding, IssueInput } from './review-findings.js';
@@ -57,7 +59,7 @@ type ToolMoveResult = { text: string; moved?: Pick<Moved, 'wakes'> & { task?: Ta
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 /* Agents read role names in English, the language of their instructions. */
-const english = (_k: string, v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) && 'en' in v && 'ru' in v && Object.keys(v).length === 2 ? (v as { en: string }).en : v);
+const english = (_k: string, v: unknown) => (isTexts(v) ? v.en : v);
 const json = (value: unknown) => say(JSON.stringify(value, english));
 
 /* A task of another department a company watchdog inspects, every word of it with no credential and no private path, as
@@ -107,9 +109,9 @@ const HumanRecipient = z.uuid().describe('The person who can supply the missing 
 /* What people read of a question, and what its asker hears besides: an approval says what test runs say of its commit as it
    is asked, which the answer says again as it comes. What the release of that commit brings that no check covers goes on the
    card apart from these words, and its asker hears how much. */
-async function questionWords(db: Ctx['db'], task: Task, question: string, commit?: string, unchecked?: UncheckedItem[] | null): Promise<{ text: string; told: string }> {
+async function questionWords(ctx: Ctx, task: Task, question: string, commit?: string, unchecked?: UncheckedItem[] | null): Promise<{ text: string; told: string }> {
   if (!commit) return { text: question, told: '' };
-  const said = proofLine(await commitProof(db, task, commit));
+  const said = await proofSaid(ctx, task, commit);
   const told = unchecked?.length ? ` Hornhoof names next to Approve what the release brings that no check covers: ${unchecked.length}.` : '';
   return { text: `${question}\n\nHornhoof checked as this was asked. ${said}`, told: ` ${said}${told}` };
 }
@@ -186,6 +188,7 @@ class TaskTools {
     this.registerComment();
     this.registerReplanWait();
     this.registerAskPerson();
+    this.registerRecordAnswer();
     this.registerReport();
     if (this.job.agentKind !== 'worker') this.registerTurnTools();
     if (this.job.agentKind === 'head') this.registerCreateTask();
@@ -254,12 +257,18 @@ class TaskTools {
 
   private async me(): Promise<Agent> { return (await this.db.select().from(agents).where(eq(agents.id, this.job.agentId)))[0]!; }
 
-  /* A company watchdog can inspect tasks across departments. Task moves keep the normal scope. */
-  private async find(ref: number | string, inspect = false): Promise<{ agent: Agent; task: Task }> {
+  /* A company watchdog can inspect tasks across departments, and the head of Design its holder named on its open wait
+     reads it and comments on it. Task moves keep the normal scope. */
+  private async find(ref: number | string, sight: 'move' | 'read' | 'comment' = 'move'): Promise<{ agent: Agent; task: Task }> {
     const agent = await this.me();
     const task = await taskByRef(this.ctx, this.job.companyId, ref);
-    if (!task || (!sees(agent, task) && !(inspect && await this.canInspect(agent, task)))) throw refuse(404, 'task_unknown', `There is no task ${ref} you can see. Call tasks for yours.`);
+    if (!task || !(sees(agent, task) || await this.seesFor(sight, agent, task))) throw refuse(404, 'task_unknown', `There is no task ${ref} you can see. Call tasks for yours.`);
     return { agent, task };
+  }
+
+  private async seesFor(sight: 'move' | 'read' | 'comment', agent: Agent, task: Task): Promise<boolean> {
+    if (sight === 'move') return false;
+    return (sight === 'read' && await this.canInspect(agent, task)) || checksTask(this.db, agent, task);
   }
 
   private async canInspect(agent: Agent, task: Task): Promise<boolean> {
@@ -407,7 +416,7 @@ class TaskTools {
         inputSchema: { task: Ref },
       },
       async ({ task: ref }) =>
-        this.find(ref, true).then(
+        this.find(ref, 'read').then(
           async ({ agent, task }) => {
             const detail = { ...await agentTaskDetail(this.ctx, agent, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id), ...await earlierWork(this.ctx, agent, task) };
             return say(fitted(sees(agent, task) ? detail : cleaned(detail)));
@@ -436,7 +445,7 @@ class TaskTools {
     this.server.registerTool(
       'track_work',
       {
-        description: 'Records an operation already in progress on a task you hold, such as tests or delegated work. Name the operation and the next time to check it. Name the employee doing the work so they get a notice. You will be woken to check progress or if that employee becomes unavailable. Diagnose and repair a failed operation.',
+        description: 'Records an operation already in progress on a task you hold, such as tests or delegated work. Name the operation and the next time to check it. Name the employee doing the work so they get a notice. The head of Design named so, to check the final look of a screen, reads this task and comments on it until the wait ends, and you can write to that head about it with message_employee naming the task; its comment ends the wait and wakes you. You will be woken to check progress or if that employee becomes unavailable. Diagnose and repair a failed operation.',
         inputSchema: { task: Ref, work: z.string().trim().min(1), nextCheck: z.iso.datetime({ offset: true }), employee: z.uuid().optional() },
       },
       async ({ task: ref, work, nextCheck, employee }) => this.run(async () => {
@@ -461,7 +470,7 @@ class TaskTools {
       },
       async ({ task: ref, text }) =>
         this.run(async () => {
-          const { task } = await this.find(ref);
+          const { task } = await this.find(ref, 'comment');
           this.plain(task, text);
           const moved = (await resolveStuckComment(this.ctx, this.job, task.id, text)) ?? (await comment(this.ctx, { agentId: this.job.agentId }, task.id, text));
           if ('held' in moved && moved.held) return { text: `Noted on #${task.number}. It stays blocked: its executor blocked it again after a comment opened it. Write the answer into the task with update_task, which opens it again, give it to someone else, or cancel it.`, moved };
@@ -498,11 +507,11 @@ class TaskTools {
       'ask_person',
       {
         description:
-          'Asks the people responsible for the task a question, (with commit) for approval of that exact commit under the department\'s rule, or (with options) to pick one of 2 to 4 ways. The task waits; you are woken with the answer. ' +
+          'Asks the people responsible for the task a question, (with commit) for approval of that exact commit under the department\'s rule, or (with options) to pick one of 2 to 4 ways. The task waits; you are woken with the answer. A person\'s message to you that answers one of several open questions without naming it closes none: record which with record_answer. ' +
           "Ask only once every instruction and material the question promises is ready, attached to it instead of a pointer to a task's log, and let one sender ask it once. " +
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
-          'With commit, an unset rule needs no approval, except for a release that brings what no check covers: a person approves it on a card where Hornhoof names exactly that next to Approve, apart from your words. An approval card shows which passed test run checked that commit, or that none did. If its department enabled autonomousRelease and that commit has a green whole run of its release with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
+          'With commit, an unset rule needs no approval, except for a release that brings what no check covers: a person approves it on a card where Hornhoof names exactly that next to Approve, apart from your words. An approval card shows what the repository\'s CI says of that commit, and which test run checked it where one did. If its department enabled autonomousRelease and the repository\'s CI is green on that commit, or the repository has none, with an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
           'Ask a person when their own judgment or information is indispensable. Resolve ordinary work through the responsible department or the orchestrator. Only irreversible deletion needs the CEO\'s yes. Keep credentials out of the question and answer; ask the person to save a missing sign-in in the vault and name the entry.',
         inputSchema: {
           task: Ref,
@@ -535,10 +544,28 @@ class TaskTools {
           }
           const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
           const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
-          const { text, told } = await questionWords(this.db, task, question, commit, unchecked);
+          const { text, told } = await questionWords(this.ctx, task, question, commit, unchecked);
           const moved = await ask(this.ctx, this.job.agentId, task.id, { kind, text, ...(commit ? { commit, approval: { channel: 'commit', kind: 'commit', amount: null } } : {}), ...uncheckedCard(unchecked), images, options: ways, link: link ?? null, topic, ...(recipient ? { recipientPersonId: recipient } : {}), ...(plan ? { plan } : {}) });
           await recordQuestion(this.ctx, this.job, task, { kind, text, topic: commit ? 'release' : topic, ...(recipient ? { recipient } : {}) });
           return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
+        }),
+    );
+  }
+
+  /* A person's words to the agent closed none of its questions by themselves: the agent says which they answer, citing them. */
+  private registerRecordAnswer(): void {
+    this.server.registerTool(
+      'record_answer',
+      {
+        description:
+          "Records which of your open questions to people, or which work you are stuck on for them, a person's message to you answers. Their words close one by themselves only when it is clear which: the only one they may answer, or the one they name by its task, a link or a quoted line. With more open, read their message, and record here each question it answers. " +
+          'request: the id of that question, as task shows it. words: a part of their message, exactly as they wrote it, enough to find that one message, from your window, Telegram, their assistant or your terminal. Hornhoof finds the message, written to you since you asked, and records the whole message as their answer on that card alone, with a link to it. It refuses words no person wrote to you, words more than one message holds, and a person who may not answer it. A choice and an approval keep their own card.',
+        inputSchema: { request: z.uuid(), words: z.string().trim().min(1).max(12_000) },
+      },
+      async ({ request, words }) =>
+        this.run(async () => {
+          const { task, wakes } = await recordAnswer(this.ctx, this.job.agentId, request, words);
+          return { text: `Recorded as their answer on #${task.number}. Your other questions stay open.`, moved: { wakes: wakes.filter(w => w.agentId !== this.job.agentId) } };
         }),
     );
   }
@@ -667,14 +694,14 @@ class TaskTools {
       'release_turn',
       {
         description:
-          "Records the release of your department's open turn before main moves, on the release task you hold: commit is a commit of the turn branch turn-<number>, its head or one the branch went past while it was checked, runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own. The department's commit rule says whether the task needs approval of that exact commit. An unset rule needs no approval, but a release that brings what no check covers is recorded only once a person approved a card naming exactly that, whatever the rule, and autonomous release never approves it. When required, ask_person with commit asks the person responsible, or the orchestrator can answer for the owner. With autonomous release on, proof of each change can satisfy the approval rule and is recorded in its log. It uses an independent checker or, for turnkey work, the holder's own review, security check and tests, which cover only the first-parent line from the commit its holder named down to where its branch started. " +
+          "Records the release of your department's open turn before main moves, on the release task you hold: commit is a commit of the turn branch turn-<number>, its head or one the branch went past while it was checked. The release relies on the repository's CI for that exact commit: the GitHub Actions runs of it, which Hornhoof reads from github.com, never from your word; commit statuses and the checks of other apps prove nothing. Green CI, every job of every full run of the release workflow finished with success and no test job skipped, records it with no run, while a run of any other workflow, and a run of the release workflow that was not started by hand with its input full, counts for nothing; red CI, CI still under way and CI that ran nothing that succeeded refuse, naming the check and its link, so push the fix or let CI finish and record it again; a repository with no CI at all records with no run; a host that cannot be read now, or whose request limit is used up, records nothing and says so, and a repository on another host than github.com is refused as unreadable. Where no full run of the release workflow is on the commit yet, it starts that workflow with the input full set on the turn branch itself, once for each commit, which must be the head of the branch, and answers 'CI started, run N; the release records when it\'s green' with recorded false: the minute round then records the release when CI is green on that exact commit and tells you, or tells you why it did not, so start no run yourself and record nothing by hand. A token that cannot start workflows, or a repository whose settings name no release workflow (a person names it there, by the path of its file; Hornhoof never works it out, and says: name the release workflow in the repository settings), refuses and says why. The department's commit rule says whether the task needs approval of that exact commit. An unset rule needs no approval, but a release that brings what no check covers is recorded only once a person approved a card naming exactly that, whatever the rule, and autonomous release never approves it. When required, ask_person with commit asks the person responsible, or the orchestrator can answer for the owner. With autonomous release on, proof of each change can satisfy the approval rule and is recorded in its log. It uses an independent checker or, for turnkey work, the holder's own review, security check and tests, which cover only the first-parent line from the commit its holder named down to where its branch started. " +
           'It says what the release brings, whether each of its commits was checked, and which results of the turn it leaves out because they joined the branch after the commit. The turn branch never stops for a release: keep taking finished work into it. Then fast-forward main to the commit and tag it vX.Y.Z, the next version of your department\'s repository after its own last version tag, which the answer names, or its first version tag where it has none: the tag closes the turn, and what the release left out goes into the next turn, whose branch you create from the head of this one.',
-        inputSchema: { task: Ref, commit: z.string().regex(/^[a-f0-9]{40}$/).describe('The exact commit of the turn branch that the whole run checked.'), runId: z.uuid().describe('A passed whole run of that commit.') },
+        inputSchema: { task: Ref, commit: z.string().regex(/^[a-f0-9]{40}$/).describe("The exact commit of the turn branch: its head, where CI is to start on it, or one the repository's CI checked.") },
       },
       async input =>
         this.run(async () => {
           const ref = typeof input.task === 'number' ? input.task : Number(String(input.task).replace(/^#/, ''));
-          const recorded = await recordRelease(this.ctx, this.job.agentId, this.job.companyId, { task: ref, commit: input.commit, runId: input.runId });
+          const recorded = await recordRelease(this.ctx, this.job.agentId, this.job.companyId, { task: ref, commit: input.commit });
           return { text: JSON.stringify(recorded) };
         }),
     );
@@ -730,14 +757,15 @@ class TaskTools {
       'report',
       {
         description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision it checked with local tests, and done false returns a source defect to Development when verification.delta describes the repair, or otherwise gives the failure to the head; the accepting head names the ready candidate/revision and observed integration commit, or nothing but the summary where the result is a document. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report. ' +
-          `If you hold turnkey work with a branch of its own, close it with done true and turnkey: commit, the ${CHECKED_COMMIT}, and baseCommit, the ${START_COMMIT}. A release counts as checked only the first-parent line from that commit down to that start, and nothing the turn branch held as the work started: anything else it brings is named for a person to approve.`,
-        inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional(), acceptance: AcceptanceInput.optional(), turnkey: TurnkeyInput.optional() },
+          `If you hold turnkey work with a branch of its own, close it with done true and turnkey: commit, the ${CHECKED_COMMIT}, and baseCommit, the ${START_COMMIT}. A release counts as checked only the first-parent line from that commit down to that start, and nothing the turn branch held as the work started: anything else it brings is named for a person to approve. ` +
+          `A report that closes work that is not code (a group, or turnkey work that joined no turn) names where its result is recorded with recorded: path, a path in the department's repository, or file, the name of a file attached to the task. Without it the report is refused.`,
+        inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional(), acceptance: AcceptanceInput.optional(), turnkey: TurnkeyInput.optional(), recorded: Recorded.optional() },
       },
-      async ({ task: ref, done, summary, verification, acceptance, turnkey }) =>
+      async ({ task: ref, done, summary, verification, acceptance, turnkey, recorded }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, summary, ...(verification?.delta ? [verification.delta] : []));
-          const moved = await report(this.ctx, this.job.agentId, task.id, { done, summary, verification, acceptance, turnkey });
+          const moved = await report(this.ctx, this.job.agentId, task.id, { done, summary, verification, acceptance, turnkey, recorded });
           return { text: `Reported. ${await this.where(moved.task)}`, moved };
         }),
     );
@@ -798,14 +826,14 @@ class TaskTools {
     this.server.registerTool(
       'submit',
       {
-        description: 'Hands the current Development or checking-stage candidate forward. Where task.echelons says document: attach the files to the task, give summary and evidence, and name no review. Review and Security fix findings themselves on the same branch, without returning to the author. At Tests, submit a new test-only repair on the same branch and base: the delta from the current candidate may change only test, tests or e2e directories, or *.test.* and *.spec.* files. Source repairs use report with done false and verification.delta, preserving the task and candidate history. When the candidate\'s own change passed and it only needs the main line, or the open turn branch of its department that went on (the turn takes a candidate only by fast-forward), its owner merges that line into the candidate branch and submits the merge with review.baseCommit naming the commit taken in: the candidate stays at Tests to be checked again, unless its previous Review was skipped on an author receipt. A new commit then needs Review. summary: what you did; evidence: the command you ran and what it printed, the link, the check. review.baseCommit is the commit the change starts from. The server reads the head of the branch named after the task (task-<number> or the only task-<number>-...), or of review.branch when the work is on another branch; a repair stays on the branch of the candidate it repairs. review.commit, when given, must be that head. Without a readable commit the submission is refused with the reason. Check the change before handing it forward. Submitting starts no test run.',
-        inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional(), operationId: z.uuid().optional() },
+        description: 'Hands the current Development or checking-stage candidate forward. Where task.echelons says document: attach the files to the task, give summary and evidence, and name no review. Review and Security fix findings themselves on the same branch, without returning to the author. At Tests, submit a new test-only repair on the same branch and base: the delta from the current candidate may change only test, tests or e2e directories, or *.test.* and *.spec.* files. Source repairs use report with done false and verification.delta, preserving the task and candidate history. When the candidate\'s own change passed and it only needs the main line, or the open turn branch of its department that went on (the turn takes a candidate only by fast-forward), its owner merges that line into the candidate branch and submits the merge with review.baseCommit naming the commit taken in: the candidate stays at Tests to be checked again, unless its previous Review was skipped on an author receipt. A new commit then needs Review. summary: what you did; evidence: the command you ran and what it printed, the link, the check. review.baseCommit is the commit the change starts from. The server reads the head of the branch named after the task (task-<number> or the only task-<number>-...), or of review.branch when the work is on another branch; a repair stays on the branch of the candidate it repairs. review.commit, when given, must be that head. Without a readable commit the submission is refused with the reason. Check the change before handing it forward. Where task.echelons says document, recorded names where the result is recorded (a path in the department\'s repository, or the name of a file attached to the task), and the hand-in is refused without it. Submitting starts no test run.',
+        inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional(), recorded: Recorded.optional(), operationId: z.uuid().optional() },
       },
-      async ({ task: ref, summary, evidence, review, operationId }) =>
+      async ({ task: ref, summary, evidence, review, recorded, operationId }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, summary, evidence);
-          const moved = await submit(this.ctx, this.job.agentId, task.id, { summary, evidence, review, operationId });
+          const moved = await submit(this.ctx, this.job.agentId, task.id, { summary, evidence, review, recorded, operationId });
           return { text: `Submitted. ${await this.where(moved.task)}`, moved };
         }),
     );

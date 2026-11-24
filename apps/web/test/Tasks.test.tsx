@@ -161,15 +161,14 @@ describe('the tracker', () => {
     expect(calls.find(c => c.path === '/api/requests/r2')?.body).toEqual({ approve: true });
   });
 
-  it('shows a commit waiting for approval to people with part of the company, without letting them approve it', async () => {
+  it("leaves a readable approval out of the person's own waits when they cannot approve it", async () => {
     const user = userEvent.setup();
     shell({ 'GET /api/requests': [200, decisions([REQUESTS[0]!, { ...REQUESTS[1]!, canAnswer: false }])] }, { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } });
     await openTasks(user);
-    const approval = within(screen.getByRole('region', { name: 'Waiting for you' })).getByRole('article', { name: /#10/ });
-    expect(approval).toHaveTextContent('a'.repeat(40));
-    expect(approval).toHaveTextContent('Decided by the CEO or the CEO delegate.');
-    expect(within(approval).queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
-    expect(within(approval).queryByRole('button', { name: 'Decline' })).not.toBeInTheDocument();
+    const waiting = within(screen.getByRole('region', { name: 'Waiting for you' }));
+    expect(waiting.getByRole('article', { name: /#9/ })).toBeInTheDocument();
+    expect(waiting.queryByRole('article', { name: /#10/ })).not.toBeInTheDocument();
+    expect(waiting.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
   });
 
   it('fetches the tasks again when one changes', async () => {
@@ -304,7 +303,8 @@ describe('the decisions of one person', () => {
     expect(within(waiting).queryByRole('button', { name: "Show everyone's decisions" })).toBeNull();
     await user.selectOptions(screen.getByRole('combobox', { name: 'View as' }), 'Me, Ivan');
     expect(screen.getByRole('heading', { level: 1, name: 'Waits for me' })).toBeInTheDocument();
-    expect(within(waiting).getAllByRole('article')).toHaveLength(2);
+    expect(within(waiting).getAllByRole('article')).toHaveLength(1);
+    expect(within(waiting).getByRole('button', { expanded: false })).toBeInTheDocument();
   });
 
   it('say plainly when nothing waits for that person, and give way to all of them when Tasks is opened by hand', async () => {
@@ -616,6 +616,7 @@ describe('cards for the person', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Waits for Dan' })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'A version was marked without a release' })).not.toBeInTheDocument();
     await user.selectOptions(screen.getByRole('combobox', { name: 'View as' }), 'Me, Ivan');
+    await user.click(await within(screen.getByRole('region', { name: 'Waiting for you' })).findByRole('button', { name: /Version .* was marked/, expanded: false }));
     expect(await screen.findByRole('region', { name: 'A version was marked without a release' })).toBeInTheDocument();
   });
 });

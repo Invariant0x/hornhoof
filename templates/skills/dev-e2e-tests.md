@@ -1,7 +1,5 @@
 ---
 id: dev-e2e-tests
-title: { en: "End-to-end tests", ru: "Сквозные тесты" }
-description: { en: "Pins the most important user flows with tests that drive the real product.", ru: "Закрепляет главные сценарии пользователя тестами, которые управляют настоящим продуктом." }
 kind: procedure
 sources: [affaan-m/ECC skills/e2e-testing/SKILL.md, openai/skills skills/.curated/playwright/SKILL.md, obra/superpowers skills/systematic-debugging/condition-based-waiting.md]
 ---
@@ -14,4 +12,4 @@ You can pin a few important user flows with reproducible end-to-end tests.
 - Wait for conditions (an element, a response, a line of output), never for a fixed number of seconds.
 - On failure keep what shows what happened: a screenshot, the logs, the requests, the output.
 - When a flow is unstable, establish whether it exposes an intermittent product defect or a faulty check. Preserve proof of the harmful behavior and repair the check that produces an unreliable result.
-- Run named test files of your change in your own workspace when its browser is there; installing that browser is allowed.
+- Run named test files of your change in your own workspace when its browser is there, in Chromium only: Firefox and WebKit run them in the repository's CI. Installing that browser is allowed.

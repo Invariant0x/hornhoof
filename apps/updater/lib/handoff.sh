@@ -96,7 +96,7 @@ load_schema() {
   (
     umask 077
     export PGPASSWORD="$password"
-    policy_roles "$db" "$port" > "$dump" || exit $?
+    schema_roles "$db" "$port" > "$dump" || exit $?
     docker exec -e PGPASSWORD "$db" pg_dump -h keeper -p "$port" -U hornhoof_replica --schema-only --no-owner --no-publications --no-subscriptions --no-privileges hornhoof >> "$dump" 2> /dev/null &&
       docker exec -e PGPASSWORD "$db" pg_dump -h keeper -p "$port" -U hornhoof_replica --data-only --table=drizzle.__drizzle_migrations hornhoof >> "$dump" 2> /dev/null &&
       # The schema comes with no rights, since the leader's roles are not this machine's. A function is open to
@@ -106,7 +106,7 @@ load_schema() {
   ) || status=$?
   if [ "$status" -ne 0 ]; then
     rm -f "$dump"
-    if [ "$status" -eq 2 ]; then printf "The company server's schema names a role that is not a plain name."; else printf "The company server's schema could not be read."; fi
+    if [ "$status" -eq 2 ]; then printf "The company server's schema returned an invalid role name."; else printf "The company server's schema could not be read."; fi
     return 1
   fi
   write_passfile "$db" "$password" || { rm -f "$dump"; printf "The password file of the copy could not be written."; return 1; }
@@ -120,28 +120,34 @@ load_schema() {
   rm -f "$dump"
 }
 
-# policy_roles <db container> <port>: the leader's app gives roles of its own row policies as it runs, and its schema
-# keeps those policies, while a copy's cluster has none of the roles before its own app makes them: the schema would
-# never load whole. So each role a policy of the leader names, asked through the keeper's door with the password in
-# the environment, is made first, with no login and no right, in the same transaction as the schema, and the copy keeps
-# every policy the leader has. It fails with 2 when a name is not a plain role's: such a name stands in no statement.
-policy_roles() {
-  local db=$1 port=$2 roles role
-  roles=$(docker exec -e PGPASSWORD "$db" psql -h keeper -p "$port" -U hornhoof_replica -d hornhoof -At -c "SELECT DISTINCT r FROM pg_policies, unnest(roles) AS r WHERE r <> 'public' ORDER BY 1" 2> /dev/null) || return 1
+# Roles referenced by policies or foreign user mappings still appear in a dump without owners or grants. Encode each
+# name on the leader so newlines and quotes cross the shell as data. The copy creates missing roles without any grants
+# or memberships in the same transaction as the schema.
+schema_roles() {
+  local db=$1 port=$2 roles encoded
+  roles=$(docker exec -e PGPASSWORD "$db" psql -h keeper -p "$port" -U hornhoof_replica -d hornhoof -At -v ON_ERROR_STOP=1 -c "
+    SELECT pg_catalog.encode(pg_catalog.convert_to(r.rolname::text, 'UTF8'), 'hex')
+    FROM pg_catalog.pg_roles r
+    JOIN (
+      SELECT pg_catalog.unnest(polroles) AS oid FROM pg_catalog.pg_policy
+      UNION
+      SELECT umuser FROM pg_catalog.pg_user_mappings
+    ) referenced USING (oid)
+    ORDER BY 1" 2> /dev/null) || return 1
   [ -n "$roles" ] || return 0
-  while IFS= read -r role; do plain_role "$role" || return 2; done <<< "$roles"
-  # shellcheck disable=SC2016 # $roles$ quotes the block for Postgres; the shell expands nothing in it.
-  printf '%s\n' 'DO $roles$ BEGIN'
-  while IFS= read -r role; do
-    printf "IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '%s') THEN CREATE ROLE \"%s\" NOLOGIN; END IF;\n" "$role" "$role"
-  done <<< "$roles"
-  # shellcheck disable=SC2016 # as above
-  printf '%s\n' 'END $roles$;'
-}
-
-# The name of a role as Postgres keeps one made without quotes, and no other.
-plain_role() {
-  [[ "$1" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]
+  while IFS= read -r encoded; do [[ "$encoded" =~ ^([0-9a-f]{2}){1,252}$ ]] || return 2; done <<< "$roles"
+  roles=${roles//$'\n'/,}
+  # shellcheck disable=SC2016 # $roles$ is the SQL block delimiter.
+  printf '%s\n' 'DO $roles$' 'DECLARE encoded text; wanted text;' 'BEGIN'
+  printf "  FOREACH encoded IN ARRAY pg_catalog.string_to_array('%s', ',') LOOP\n" "$roles"
+  cat <<'SQL'
+    wanted := pg_catalog.convert_from(pg_catalog.decode(encoded, 'hex'), 'UTF8');
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = wanted) THEN
+      EXECUTE pg_catalog.format('CREATE ROLE %I NOLOGIN NOINHERIT', wanted);
+    END IF;
+  END LOOP;
+END $roles$;
+SQL
 }
 
 # write_passfile: the password of the role that only reads, into the file the copy's subscription
@@ -299,14 +305,16 @@ upload_request() {
 # members than UPLOAD_MOST, read no further, as each header costs a command.
 UPLOAD_MOST=1000
 tar_members() {
-  local archive=$1 total at=0 count=0 head name size octal kind i pair ch
+  local archive=$1 total at=0 count=0 head padding name size octal kind i pair ch left number byte
   total=$(wc -c < "$archive") || return 1
   while [ "$at" -lt "$total" ]; do
     [ "$((total - at))" -ge 512 ] || return 1
     head=$(od -An -v -tx1 -j "$at" -N 512 -- "$archive" | tr -d ' \n') && [ "${#head}" = 1024 ] || return 1
     if [ "${head:0:2}" = 00 ]; then
-      # A block with no name ends the archive; BusyBox tar reads on past one such block, so only zeros may follow.
-      [ "$(tail -c "+$((at + 1))" -- "$archive" | tr -d '\000' | head -c 1 | wc -c)" -eq 0 ] || return 1
+      # BusyBox tar can read past one end block. Read from that block with dd, whose seek supports large files.
+      # Require the whole check to succeed and produce no nonzero byte.
+      padding=$(dd if="$archive" bs=512 skip="$((at / 512))" 2> /dev/null | tr -d '\000' | head -c 1 | wc -c) || return 1
+      [ "$padding" -eq 0 ] || return 1
       return 0
     fi
     count=$((count + 1))
@@ -322,13 +330,27 @@ tar_members() {
       printf -v ch '%b' "\\x$pair"
       name+=$ch
     done
-    # The size, in octal digits and nothing else before the spaces or zeros that end the field.
+    # The size, in octal digits before the spaces or zeros that end the field. Large sizes use base-256 instead
+    # (GNU tar from 8 GiB, BusyBox tar with GNU extensions from 64 GiB): 0x80, then the number in eleven bytes.
+    # That number is read only while it fits in the bytes after the header, so it can neither run over nor overflow.
     size=${head:248:24}
-    while [ "${size: -2}" = 00 ] || [ "${size: -2}" = 20 ]; do size=${size%??}; done
-    [[ "$size" =~ ^(3[0-7])+$ ]] || return 1
-    octal=''
-    for ((i = 1; i < ${#size}; i += 2)); do octal+=${size:i:1}; done
-    size=$((8#$octal))
+    if [ "${size:0:2}" = 80 ]; then
+      left=$((total - at - 512))
+      number=0
+      for ((i = 2; i < 24; i += 2)); do
+        byte=$((16#${size:i:2}))
+        [ "$number" -le "$(((left - byte) / 256))" ] || return 1
+        number=$((number * 256 + byte))
+        [ "$number" -le "$left" ] || return 1
+      done
+      size=$number
+    else
+      while [ "${size: -2}" = 00 ] || [ "${size: -2}" = 20 ]; do size=${size%??}; done
+      [[ "$size" =~ ^(3[0-7])+$ ]] || return 1
+      octal=''
+      for ((i = 1; i < ${#size}; i += 2)); do octal+=${size:i:1}; done
+      size=$((8#$octal))
+    fi
     # Type 0, no name of a link, and no prefix for the name.
     kind=other
     if [ "${head:312:2}" = 30 ] && [[ "${head:314:200}${head:690:310}" =~ ^(00)+$ ]]; then kind='file'; fi
@@ -590,7 +612,8 @@ wipe_step() {
       ;;
     files)
       WIPE_WHY='could not remove the files of its database'
-      rm -rf "$CONTROL/dumps" "$CONTROL/restore" "$CONTROL/schema" "$CONTROL/uploads" &&
+      # Remove the shared trees by direct names from opened directories on the control mount.
+      remove_folders dumps restore schema uploads &&
         rm -f "$SERVER_DIR"/backups/hornhoof-*.sql.gz "$SERVER_DIR"/backups/hornhoof-*.sql.gz.part "$SERVER_DIR"/backups/hornhoof-*.tunnel.json "$CONTROL/schema.json" "$CONTROL/dump.json" "$CONTROL/upload.json"
       ;;
     env)

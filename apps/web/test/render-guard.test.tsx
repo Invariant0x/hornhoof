@@ -333,7 +333,9 @@ describe('the plates of the guard', () => {
 
   it('stand on the second surface in the strong line colour, the stopped one with a pink stripe at its start, with buttons of 44 px', () => {
     for (const plate of ['.guard-stop', '.light-note']) {
-      expect(decl(plate, 'background'), plate).toBe('var(--surface2)');
+      /* The second surface at 99%, never fully opaque: Chromium drawing WebGL in software leaves a hole in the world
+         map under one opaque plate (#1978, 95b53c554). */
+      expect(decl(plate, 'background'), plate).toBe('color-mix(in srgb, var(--surface2) 99%, transparent)');
       expect(decl(plate, 'border'), plate).toBe('1px solid var(--line2)');
       expect(decl(`${plate} .btn`, 'min-block-size'), plate).toBe('44px');
     }

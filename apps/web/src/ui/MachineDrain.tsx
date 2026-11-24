@@ -1,9 +1,10 @@
 import { useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import type { MachineDrain, NodeWait, ProviderId } from '../types';
+import { formatTagOf } from '@hornhoof/protocol';
 
 /* Since when it waits, on the 24-hour clock, as a task's wait is shown. */
-const clock = (language: Language, iso: string) => new Date(iso).toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
+const clock = (language: Language, iso: string) => new Date(iso).toLocaleTimeString(formatTagOf(language), { hour: '2-digit', minute: '2-digit' });
 
 function drainText(t: Messages, language: Language, drain: MachineDrain): string {
   if (drain.state === 'waiting') return t.machines.drainWaiting(drain.turnsLeft, drain.partsLeft, clock(language, drain.since));

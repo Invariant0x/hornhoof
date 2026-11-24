@@ -5,29 +5,56 @@ import type { Calls } from './tool-calls.js';
 import { contentText, inputText, isoFrom, isRecord, toolName } from '../providers/events.js';
 import { codexFailure } from './failures.js';
 
+/* Where a tail stood as words went in: what it reads on from there, with no failed look since, was written after. */
+export type LogMark = { readonly tail: LineTail; readonly failed: number };
+
 /* Follows a log file a program appends to, a whole line at a time. */
 export class LineTail {
   private offset: number;
   /* The start of a line the program has not ended yet. It waits as bytes, since a read can stop inside a letter. */
   private partial = Buffer.alloc(0);
+  /* Whether its last look found where the file ends. A log followed from its start is known once read, one followed from
+     its end once found; the log of a session that starts now is empty until the program writes it. */
+  private known: boolean;
+  private waitsForFile: boolean;
+  /* Its looks at the file that failed, all told. */
+  private failed = 0;
 
   constructor(
     private readonly file: string,
-    { fromEnd = false }: { fromEnd?: boolean } = {},
+    { fromEnd = false, empty = false }: { fromEnd?: boolean; empty?: boolean } = {},
   ) {
-    this.offset = fromEnd ? sizeOf(file) : 0;
+    const size = fromEnd ? sizeOf(file) : 0;
+    this.offset = typeof size === 'number' ? size : 0;
+    this.waitsForFile = empty;
+    this.known = empty || (fromEnd && typeof size === 'number');
+  }
+
+  /* None while it does not know where the file ends, or the start of a line it read is not ended yet. */
+  mark(): LogMark | null {
+    return this.known && this.partial.length === 0 ? { tail: this, failed: this.failed } : null;
+  }
+
+  holds(mark: LogMark): boolean {
+    return mark.tail === this && mark.failed === this.failed;
   }
 
   read(): string[] {
     const size = sizeOf(this.file);
+    if (typeof size !== 'number') {
+      this.missed(size === 'missing');
+      return [];
+    }
+    this.known = true;
+    this.waitsForFile = false;
     if (size <= this.offset) return [];
     const buf = Buffer.alloc(size - this.offset);
-    const fd = openSync(this.file, 'r');
     let got: number;
     try {
-      got = readSync(fd, buf, 0, buf.length, this.offset);
-    } finally {
-      closeSync(fd);
+      got = readAt(this.file, buf, this.offset);
+    } catch (error) {
+      this.missed();
+      throw error;
     }
     this.offset += got;
     const bytes = Buffer.concat([this.partial, buf.subarray(0, got)]);
@@ -35,19 +62,39 @@ export class LineTail {
     this.partial = Buffer.from(bytes.subarray(end));
     return bytes.subarray(0, end).toString('utf8').split('\n').filter(l => l.trim());
   }
+
+  /* A new session's log that is not there yet keeps its known start; a look that failed otherwise, at a log that may be
+     there for all the node can tell, leaves no known end. */
+  private missed(missing = false): void {
+    if (this.waitsForFile && missing) return;
+    this.known = false;
+    this.failed++;
+  }
 }
 
-function sizeOf(file: string): number {
+function readAt(file: string, buf: Buffer, at: number): number {
+  const fd = openSync(file, 'r');
+  try {
+    return readSync(fd, buf, 0, buf.length, at);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/* The size of a file, or that it is not there, or that it could not be looked at for another reason. */
+function sizeOf(file: string): number | 'missing' | 'unseen' {
   try {
     return statSync(file).size;
-  } catch {
-    return 0;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unseen';
   }
 }
 
 type AgyStep = Calls & { events: AgentEvent[]; answered?: boolean };
+const AGY_TERMINAL_STATUS = new Set(['DONE', 'ERROR', 'FAILED', 'CANCELED', 'CANCELLED']);
 
-/* agy logs each planner response whole. The generic steps after a call are its results, in order. */
+/* agy logs each planner response whole. The generic steps after a call are its results, in order; a next planner response
+   means any backgrounded or missed step from before has already yielded control. */
 export function agySteps(): (line: unknown) => AgyStep {
   const pending: string[] = [];
   const seen = new Set<string>();
@@ -58,6 +105,7 @@ export function agySteps(): (line: unknown) => AgyStep {
     if (!step) return news;
     if (step.type === 'USER_INPUT') news.ended = pending.splice(0);
     if (step.type === 'PLANNER_RESPONSE') {
+      news.ended.push(...pending.splice(0));
       news.events = agyResponse(step);
       news.began = news.events.filter(e => e.kind === 'tool').map((e, i) => ({ id: `${step.step_index}:${i}`, name: e.name }));
       pending.push(...news.began.map(c => c.id));
@@ -90,7 +138,7 @@ function agyUserStep(line: Record<string, unknown>, seen: Set<string>, inputs: S
 
 /* Preserve records without status; an explicit running snapshot cannot finish a tool or publish an answer. */
 function agyStepComplete(line: Record<string, unknown>): boolean {
-  return line.status === undefined || line.status === 'DONE' || line.status === 'ERROR';
+  return line.status === undefined || AGY_TERMINAL_STATUS.has(String(line.status));
 }
 
 function agyResponse(line: Record<string, unknown>): AgentEvent[] {

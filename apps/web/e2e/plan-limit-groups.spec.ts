@@ -1,29 +1,25 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { en } from '../src/i18n/en';
-import { ru } from '../src/i18n/ru';
-import type { Messages } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage } from '../src/i18n';
+import { DICTIONARIES } from '../src/i18n/dictionaries';
+import { BUILTIN_SKINS, type BuiltinSkinId } from '../src/skins/registry';
 import type { Limits, SubView } from '../src/types';
 import { SUB } from './agent-window-api';
 import { serveApi } from './api';
 
 /* The card of a plan that keeps its limits by model group (#1589): Antigravity's Claude and GPT models used their week while
    its Gemini models have most of theirs, so the card shows each group under its own name with what it used and when it
-   resets, and the plan is ready. Made-up numbers; every answer of the server is the test's own. Run in Chromium, Firefox
-   and WebKit by plan-limit-groups.config.ts; Chromium leaves the pictures for Design. */
+   resets, and the plan is ready. Made-up numbers; every answer of the server is the test's own. */
 
-type Lang = 'en' | 'ru';
-type Skin = 'cyberpunk' | 'light';
-type Look = { lang: Lang; skin: Skin; width: number };
-const MESSAGES: Record<Lang, Messages> = { en, ru };
-const lookName = ({ lang, skin, width }: Look) => `${lang}, ${skin}, ${width}px`;
+type Look = { lang: ShippedLanguage; skin: BuiltinSkinId; width: number; dir?: 'rtl' };
+const lookName = ({ lang, skin, width, dir }: Look) => `${lang}, ${skin}, ${width}px${dir ? ', RTL' : ''}`;
 
 const HOUR = 3_600_000;
 /* Resets a fixed time from the moment the page opens, so the words of each reset read the same in every engine. */
 function grouped(now: number): Limits {
   const at = (hours: number) => new Date(now + hours * HOUR).toISOString();
-  const gemini = { name: 'Gemini Models', about: 'Models within this group: Gemini Flash, Gemini Pro', status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0, resetsAt: at(3) }, { name: 'seven_day', utilization: 0.06, resetsAt: at(110) }], complete: true };
+  const gemini = { name: 'Gemini Models', about: 'Models within this group: Gemini Flash, Gemini Pro', status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.1, resetsAt: at(3) }, { name: 'seven_day', utilization: 0.06, resetsAt: at(110) }], complete: true };
   const others = { name: 'Claude and GPT models', about: 'Models within this group: Claude Opus, Claude Sonnet, GPT-OSS', status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: at(4) }, { name: 'seven_day', utilization: 1, resetsAt: at(60) }], complete: true };
   return { status: 'rejected', windows: others.windows, complete: true, groups: [gemini, others] };
 }
@@ -33,35 +29,46 @@ const agy = (now: number): SubView => ({
   machines: [{ id: 'm1', hostname: 'example-node-01', status: 'ready', online: true }], limits: grouped(now), limitsUpdatedAt: new Date(now).toISOString(),
 });
 
-async function opened(page: Page, look: Look): Promise<{ card: Locator; errors: string[] }> {
+async function opened(page: Page, look: Look) {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error' && !m.text().startsWith('Failed to load resource')) errors.push(m.text()); });
   await page.setViewportSize({ width: look.width, height: 900 });
-  await page.addInitScript(({ lang, skin }) => {
+  await page.addInitScript(({ lang, skin, dir }) => {
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', skin);
-  }, { lang: look.lang, skin: look.skin });
+    if (dir) document.addEventListener('DOMContentLoaded', () => { document.documentElement.dir = dir; });
+  }, look);
   await serveApi(page);
   await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: [agy(Date.now())] } }));
   await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands: [] } }));
   await page.goto('/');
-  const t = MESSAGES[look.lang];
+  const t = DICTIONARIES[look.lang];
   await page.getByRole('navigation').getByRole('button', { name: t.shell.tabs.subscriptions, exact: true }).click();
-  await page.getByRole('button', { name: t.tables.openCard('Antigravity') }).click();
+  const row = page.getByRole('row').filter({ has: page.getByRole('button', { name: t.tables.openCard('Antigravity') }) });
+  const cell = row.locator('td').filter({ hasText: 'Gemini Models: 10%' });
+  const weekCell = row.locator('td').filter({ hasText: 'Gemini Models: 6%' });
+  await expect(cell).toBeVisible();
+  await expect(weekCell).toBeVisible();
   await page.evaluate(async () => { await document.fonts.ready; });
+  return { cell, weekCell, errors };
+}
+
+async function openCard(page: Page, look: Look): Promise<Locator> {
+  const t = DICTIONARIES[look.lang];
+  await page.getByRole('button', { name: t.tables.openCard('Antigravity') }).click();
   const card = page.getByRole('article', { name: 'Antigravity, Ivan' });
   await expect(card.getByRole('heading', { name: t.subs.groupLimits('Gemini Models') })).toBeVisible();
-  return { card, errors };
+  return card;
 }
 
 /* What breaks the limits as drawn: a piece out of the card, words cut or ended in dots, a page wider than its window. */
-async function whole(card: Locator): Promise<string[]> {
-  return card.evaluate(root => {
+async function whole(view: Locator, selector: string): Promise<string[]> {
+  return view.evaluate((root, selector) => {
     const out: string[] = [];
     const frame = root.getBoundingClientRect();
     const name = (el: Element) => `${el.tagName.toLowerCase()}.${el.className} "${(el.textContent ?? '').trim().slice(0, 40)}"`;
-    const parts = [...root.querySelectorAll('.part')].filter(p => p.querySelector('.gauges'));
+    const parts = [...root.querySelectorAll(selector)];
     for (const el of parts.flatMap(p => [p, ...p.querySelectorAll('*')])) {
       const r = el.getBoundingClientRect();
       if (r.width && (r.left < frame.left - 0.5 || r.right > frame.right + 0.5)) out.push(`${name(el)} stands out of the card`);
@@ -69,9 +76,16 @@ async function whole(card: Locator): Promise<string[]> {
       if (s.textOverflow === 'ellipsis') out.push(`${name(el)} ends its words in dots`);
       if (el.scrollWidth > el.clientWidth + 1 && s.overflowX !== 'visible') out.push(`${name(el)} is cut: ${el.scrollWidth} in ${el.clientWidth}`);
     }
+    const words = document.createRange();
+    for (const part of parts) {
+      words.selectNodeContents(part);
+      for (const r of words.getClientRects()) {
+        if (r.width && (r.left < frame.left - 0.5 || r.right > frame.right + 0.5)) out.push(`${name(part)} has text outside its frame`);
+      }
+    }
     if (document.documentElement.scrollWidth > innerWidth) out.push(`the page is ${document.documentElement.scrollWidth}px wide in ${innerWidth}`);
     return out;
-  });
+  }, selector);
 }
 
 /* A picture of the card in a window as tall as the page, so none of it scrolls away; the window is given back as it was. */
@@ -84,24 +98,79 @@ async function shoot(page: Page, piece: Locator, path: string): Promise<string> 
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
-const LOOKS: Look[] = (['en', 'ru'] as const).flatMap(lang => (['cyberpunk', 'light'] as const).flatMap(skin => [375, 1440].map(width => ({ lang, skin, width }))));
+const LOOKS: Look[] = [
+  ...LANGUAGES.flatMap(({ id: lang }) => BUILTIN_SKINS.flatMap(({ id: skin }) => [375, 1440].map(width => ({ lang, skin, width })))),
+  ...[375, 1440].map(width => ({ lang: 'en' as const, skin: 'cyberpunk' as const, width, dir: 'rtl' as const })),
+];
 
 for (const look of LOOKS) {
-  test(`shows each model group of the plan with what it used and when it resets, in ${lookName(look)}`, async ({ page, browserName }, info) => {
-    const t = MESSAGES[look.lang];
-    const { card, errors } = await opened(page, look);
+  test(`shows the main model group in the list cell and every group on the card, in ${lookName(look)}`, async ({ page, browserName }, info) => {
+    const t = DICTIONARIES[look.lang];
+    const { cell, weekCell, errors } = await opened(page, look);
+    const suffix = `${look.skin}-${look.dir ?? look.lang}-${look.width}.png`;
+    if (browserName === 'chromium' && look.skin === 'cyberpunk') {
+      const file = `cell-${suffix}`;
+      const sha = await shoot(page, cell, info.outputPath(file));
+      await info.attach(`${file} sha256`, { body: sha });
+    }
+    expect(await whole(cell, '.cell-lim')).toEqual([]);
+    expect(await whole(weekCell, '.cell-lim')).toEqual([]);
+    for (const [target, share] of [[cell, '10%'], [weekCell, '6%']] as const) {
+      await expect(target).toContainText(t.subs.groupShare('Gemini Models', t.subs.usedAndReset(share, t.subs.resetsIn(''))).trim());
+      await expect(target).not.toContainText('Claude and GPT models');
+      await expect(target.getByRole('listitem')).toHaveCount(0);
+      await expect(target.locator('.bar')).toHaveCount(1);
+      await expect(target.locator('.bar.max')).toHaveCount(0);
+      await expect(target.locator('.bar i')).toHaveAttribute('style', `width: ${share};`);
+    }
+    const bar = cell.locator('.bar');
+    await expect(bar).toBeVisible();
+    const [barBox, textBox] = await Promise.all([
+      bar.boundingBox(),
+      cell.locator('.cell-lim > span:last-child').boundingBox(),
+    ]);
+    const stacked = barBox!.y + barBox!.height <= textBox!.y + 1;
+    const beside = look.dir === 'rtl' ? textBox!.x + textBox!.width <= barBox!.x + 1 : barBox!.x + barBox!.width <= textBox!.x + 1;
+    expect(stacked || beside).toBe(true);
+    if (stacked) expect(textBox!.y - (barBox!.y + barBox!.height)).toBeLessThanOrEqual(6);
+    const card = await openCard(page, look);
     await expect(card.getByRole('heading', { name: t.subs.limits, exact: true })).toHaveCount(0);
-    for (const [group, shares] of [['Gemini Models', ['0%', '6%']], ['Claude and GPT models', ['100%', '100%']]] as const) {
+    for (const [group, shares, maxBars] of [['Gemini Models', ['10%', '6%'], 0], ['Claude and GPT models', ['100%', '100%'], 2]] as const) {
       const part = card.locator('.part').filter({ has: page.getByRole('heading', { name: t.subs.groupLimits(group) }) });
       await expect(part.locator('.gauge .g-l')).toHaveText([t.subs.hours(5), t.subs.days(7)]);
       await expect(part.locator('.gauge .g-f b')).toHaveText([...shares]);
       for (const reset of await part.locator('.gauge .g-s').allTextContents()) expect(reset).toMatch(look.lang === 'en' ? /^resets in / : /^до сброса /);
+      await expect(part.locator('.bar')).toHaveCount(2);
+      await expect(part.locator('.bar.max')).toHaveCount(maxBars);
+      for (let i = 0; i < shares.length; i++) {
+        const track = part.locator('.bar').nth(i);
+        const fill = track.locator('i');
+        await expect(fill).toHaveAttribute('style', `width: ${shares[i]};`);
+        expect(await track.evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+        const [trackBox, fillBox] = await Promise.all([track.boundingBox(), fill.boundingBox()]);
+        expect(trackBox!.width).toBeGreaterThan(0);
+        expect(trackBox!.height).toBeGreaterThan(0);
+        if (shares[i] === '100%') {
+          expect(Math.abs(fillBox!.width - trackBox!.width)).toBeLessThanOrEqual(0.5);
+          expect(Math.abs(fillBox!.height - trackBox!.height)).toBeLessThanOrEqual(0.5);
+        }
+      }
     }
+    const geminiPart = card.locator('.part').filter({ has: page.getByRole('heading', { name: t.subs.groupLimits('Gemini Models') }) });
+    const othersPart = card.locator('.part').filter({ has: page.getByRole('heading', { name: t.subs.groupLimits('Claude and GPT models') }) });
+    const [geminiRow, othersRow, geminiFive, othersFive] = await Promise.all([
+      geminiPart.locator('.gauges').boundingBox(),
+      othersPart.locator('.gauges').boundingBox(),
+      geminiPart.locator('.gauge').first().boundingBox(),
+      othersPart.locator('.gauge').first().boundingBox(),
+    ]);
+    expect(Math.abs(othersRow!.height - geminiRow!.height)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(othersFive!.height - geminiFive!.height)).toBeLessThanOrEqual(0.5);
     /* One group at its limit leaves the plan ready: Gemini's turns go on. */
     await expect(card.locator('.status')).toHaveText(t.subs.states.ready);
-    expect(await whole(card)).toEqual([]);
-    if (browserName === 'chromium') {
-      const file = `card-${look.skin}-${look.lang}-${look.width}.png`;
+    expect(await whole(card, '.part:has(.gauges)')).toEqual([]);
+    if (browserName === 'chromium' && look.skin === 'cyberpunk') {
+      const file = `card-${suffix}`;
       const sha = await shoot(page, card, info.outputPath(file));
       await info.attach(`${file} sha256`, { body: sha });
     }
@@ -138,10 +207,11 @@ async function splitPairs(card: Locator): Promise<string[]> {
 
 for (const look of LOOKS.filter(look => look.width === 375)) {
   test(`keeps each number of the card on one line with its unit, and still wraps between them, in ${lookName(look)}`, async ({ page }) => {
-    const { card, errors } = await opened(page, look);
+    const { errors } = await opened(page, look);
+    const card = await openCard(page, look);
     expect(await splitPairs(card)).toEqual([]);
     /* A reset longer than its tile wraps between its pieces, "4 days" over "14 h", and nothing of the card is cut for it. */
-    expect(await whole(card)).toEqual([]);
+    expect(await whole(card, '.part:has(.gauges)')).toEqual([]);
     expect(errors).toEqual([]);
   });
 }

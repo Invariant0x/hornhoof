@@ -1,3 +1,4 @@
+import type { MachineReplicas } from '@hornhoof/protocol';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { machines } from '../../db/schema.js';
@@ -19,4 +20,22 @@ export async function storeThroughput(ctx: Ctx, now = Date.now()): Promise<numbe
     written += 1;
   }
   return written;
+}
+
+/* A keeper names only the bytes of its own databases. The server supplies the company name from its own records. */
+const replicaBytes = new WeakMap<Ctx, Map<string, number>>();
+
+export function noteReplicaBytes(ctx: Ctx, machineId: string, bytes: number | null): void {
+  const known = replicaBytes.get(ctx) ?? new Map<string, number>();
+  if (bytes === null) known.delete(machineId);
+  else known.set(machineId, bytes);
+  replicaBytes.set(ctx, known);
+}
+
+/* A missing measurement is left out. One replica can occupy the space of its current database and an earlier
+   attempt pending merge; both sizes are included. Only this server's company is visible here. */
+export function replicasOf(ctx: Ctx, machineId: string, holdsCopy: boolean, company: string): MachineReplicas | undefined {
+  const bytes = holdsCopy ? replicaBytes.get(ctx)?.get(machineId) : 0;
+  if (bytes === undefined) return undefined;
+  return bytes === 0 ? { count: 0, bytes, companies: [] } : { count: 1, bytes, companies: [{ name: company, bytes }] };
 }

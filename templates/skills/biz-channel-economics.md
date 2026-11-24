@@ -1,7 +1,5 @@
 ---
 id: biz-channel-economics
-title: { en: "Channel economics", ru: "Экономика канала" }
-description: { en: "Works out what a partner or channel earns and costs per customer, and whether it pays.", ru: "Считает, сколько партнер или канал приносит и стоит на одного клиента и окупается ли он." }
 kind: procedure
 sources: [alirezarezvani/claude-skills commercial/skills]
 ---

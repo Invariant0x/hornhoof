@@ -10,6 +10,7 @@ import { refuse, type Tx } from './state.js';
 import { laterBugsOf, pipelineFacts, reportRows, testsShown, type CountedFacts, type FactsInput, type FactsJob, type FactsTask, type LaterBug } from './pipeline-facts.js';
 import { NUDGES, workTree, type AgentTime } from './tree.js';
 import { treeFactsOf } from './tree-facts.js';
+import { wordLanguages, wordsFor } from '../../locales/index.js';
 
 type Reader = Db | Tx;
 type Turn = typeof turns.$inferSelect;
@@ -196,7 +197,7 @@ async function bugsSince(db: Reader, companyId: string, since: Date): Promise<La
   const rows = await db
     .select({ number: tasks.number, title: tasks.title, body: tasks.body, createdAt: tasks.createdAt })
     .from(tasks)
-    .where(and(eq(tasks.companyId, companyId), gte(tasks.createdAt, since), or(eq(tasks.workKind, 'bug'), sql`${tasks.body} like 'Вид: ошибка%'`)));
+    .where(and(eq(tasks.companyId, companyId), gte(tasks.createdAt, since), or(eq(tasks.workKind, 'bug'), ...wordLanguages().map(language => sql`${tasks.body} like ${`${wordsFor(language).taskKind.label}: ${wordsFor(language).taskKind.bug}%`}`))));
   return rows.map(r => ({ number: r.number, createdAt: r.createdAt, text: `${r.title}\n${r.body}` }));
 }
 

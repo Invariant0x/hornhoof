@@ -15,6 +15,7 @@ import { actorOf, requireCompanyScope, requirePerson, viaOrchestrator, type Pers
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, people, requests, tasks, taskWaits, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { copySchemaFailures } from '../copies/schema-failures.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
@@ -530,6 +531,8 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       machineAccess: [],
       merges: decisions.merges.filter(merge => picked(merge.ownerPersonId)).map(({ id, label, after, open, ownerPersonId }) => ({ id, label, after, open, ownerPersonId })),
       machinesAway: machineCards(me, person, decisions.machines),
+      copySchemaFailures: await copySchemaFailures(ctx, me, person),
+      machinesLow: decisions.low.filter(card => !person || person === me.id || person === card.owner?.id),
       counts: decisions.counts,
     };
   });

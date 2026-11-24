@@ -149,7 +149,8 @@ const SCREENS: Screen[] = [
   {
     name: 'waits',
     held: '/api/wait-cards',
-    /* What waits for the person says that nothing does only once its kept cards came too. */
+    /* What waits for the person says that nothing does only once its kept cards came too; the queue of this tab says it in its
+       own words (#1806), the list of another person's page in the others. */
     open: async page => { await page.goto('/tasks?show=waits', { waitUntil: 'domcontentloaded' }); },
     answer: route => route.fulfill({ json: { cards: [], next: null } }),
     shown: (page, lang) => [page.getByRole('navigation').first(), page.locator('h1.tr-where'), page.locator('section.waiting').getByRole('heading', { name: words(lang).tasks.waiting, exact: true })],
@@ -517,6 +518,167 @@ test.describe('the tracker list while its tasks come', () => {
     await page.clock.runFor(RING_DELAY_MS);
     await expect(page.locator('.tr-held .tr-row:visible')).toHaveCount(Math.min(shown, 40));
   });
+
+  const clippedIn = (block: Locator) => block.evaluate(el =>
+    [el, ...el.querySelectorAll<HTMLElement>('*')]
+      .filter(e => !e.closest('.sr') && getComputedStyle(e).display !== 'inline' && e.scrollWidth > e.clientWidth + 1)
+      .map(e => `${e.tagName.toLowerCase()}.${[...e.classList].join('.')} ${e.scrollWidth}>${e.clientWidth}`));
+
+  const SHIFT_LOOKS: Look[] = [
+    { lang: 'en', theme: 'cyberpunk', width: 1440 },
+    { lang: 'ru', theme: 'light', width: 1440, dir: 'rtl' },
+    { lang: 'en', theme: 'light', width: 375, dir: 'rtl' },
+    { lang: 'ru', theme: 'cyberpunk', width: 375 },
+  ];
+
+  /* #1844: "Taking longer than usual" and load error must never push already-rendered skeleton rows down (deltaY === 0). */
+  for (const look of SHIFT_LOOKS) {
+    const label = `${look.lang}-${look.dir ?? 'ltr'}-${look.theme}-${look.width}`;
+    test(`keeps every held row at deltaY === 0 across loading, slow, error, Retry and arrival, ${label}`, async ({ page }) => {
+      const t = words(look.lang);
+      const hold = await openHeld(page, SCREENS[0]!, look);
+      await page.clock.runFor(RING_DELAY_MS);
+      const rows = page.locator('.tr-held .tr-rows > .tr-row');
+      const count = await rows.count();
+      expect(count).toBeGreaterThan(3);
+      await page.evaluate(() => document.fonts.ready);
+      const heads = look.width > 640 ? [page.locator('.tr-held .tr-group-head'), page.locator('.tr-held .tr-head')] : [page.locator('.tr-held .tr-group-head')];
+      const beforeRows = await boxesOf(await rows.all());
+      const beforeHeads = await boxesOf(heads);
+
+      await page.clock.runFor(SLOW_MS - RING_DELAY_MS);
+      const slow = rows.first().locator('.load-fail.slow');
+      await expect(slow).toBeVisible();
+      expect(await clippedIn(slow)).toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      expectSameBoxes(await boxesOf(await rows.all()), beforeRows);
+      expectSameBoxes(await boxesOf(heads), beforeHeads);
+
+      await page.clock.runFor(FAIL_MS - SLOW_MS);
+      const timedOut = rows.first().locator('.load-fail:not(.slow)');
+      await expect(timedOut).toBeVisible();
+      expect(await clippedIn(timedOut)).toEqual([]);
+      expectSameBoxes(await boxesOf(await rows.all()), beforeRows);
+      expectSameBoxes(await boxesOf(heads), beforeHeads);
+
+      /* Retry followed by an immediate 500 server error keeps every held row in place too. */
+      const askedForErr = hold.asked();
+      hold.failing(true);
+      const failed = hold.answered();
+      await timedOut.getByRole('button', { name: t.common.retry, exact: true }).click();
+      await expect.poll(hold.asked).toBeGreaterThan(askedForErr);
+      hold.release();
+      await failed;
+      const serverErr = rows.first().locator('.load-fail:not(.slow)');
+      await expect(serverErr.locator('.lf-t')).toHaveText(t.load.failed.server);
+      expect(await clippedIn(serverErr)).toEqual([]);
+      expectSameBoxes(await boxesOf(await rows.all()), beforeRows);
+      expectSameBoxes(await boxesOf(heads), beforeHeads);
+
+      /* Retry succeeding keeps skeleton rows still until arrival, then places real rows at the same top edge. */
+      const askedForData = hold.asked();
+      hold.failing(false);
+      await serverErr.getByRole('button', { name: t.common.retry, exact: true }).click();
+      await expect.poll(hold.asked).toBeGreaterThan(askedForData);
+      await expect(rows.first().locator('.load-busy:not(.unseen)')).toBeVisible();
+      expectSameBoxes(await boxesOf(await rows.all()), beforeRows);
+      const arrived = hold.answered();
+      hold.release();
+      await arrived;
+      await page.clock.runFor(RING_MIN_MS);
+      const realRows = page.locator('.tr-list:not(.tr-held) .tr-group').first().locator('.tr-rows > .tr-row');
+      await expect(realRows.first()).toBeVisible();
+      const real = await realRows.all();
+      if (look.width > 640) expectSameBoxes(await boxesOf(real.slice(0, Math.min(real.length, count))), beforeRows.slice(0, Math.min(real.length, count)));
+      else expect(Math.abs((await realRows.first().boundingBox())!.y - beforeRows[0]!.y)).toBeLessThanOrEqual(0.5);
+      const realHeads = look.width > 640 ? [page.locator('.tr-group-head').first(), page.locator('.tr-head').first()] : [page.locator('.tr-group-head').first()];
+      expectSameBoxes(await boxesOf(realHeads), beforeHeads);
+    });
+  }
+
+  test('keeps held rows at deltaY === 0 when the list holds only two cached rows and keeps room for the error card', async ({ page }) => {
+    const two: Screen = { ...SCREENS[0]!, answer: route => route.fulfill({ json: { tasks: TASKS.slice(0, 2) } }) };
+    const hold = await openHeld(page, two, EN);
+    hold.release();
+    await expect(two.arrived(page, 'en')).toBeVisible();
+    const askedBefore = hold.asked();
+    hold.failing(false);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect.poll(hold.asked).toBeGreaterThan(askedBefore);
+    const rows = page.locator('.tr-held .tr-rows > .tr-row');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.first().locator('.load-busy')).toBeAttached();
+    await page.clock.runFor(RING_DELAY_MS);
+    await page.evaluate(() => document.fonts.ready);
+    const beforeRows = await boxesOf(await rows.all());
+    for (const [ms, sel] of [[SLOW_MS - RING_DELAY_MS, '.load-fail.slow'], [FAIL_MS - SLOW_MS, '.load-fail:not(.slow)']] as const) {
+      await page.clock.runFor(ms);
+      const notice = rows.first().locator(sel);
+      await expect(notice).toBeVisible();
+      expectSameBoxes(await boxesOf(await rows.all()), beforeRows);
+      const [listBox, noticeBox] = await boxesOf([page.locator('.tr-held .tr-rows'), notice]);
+      expect(listBox.y + listBox.height).toBeGreaterThanOrEqual(noticeBox.y + noticeBox.height - 0.5);
+    }
+  });
+
+  /* Pictures and Y-coordinate proof for Design (#1844), only when HH_TRACKER_SHIFT_SHOTS=1. */
+  const SHIFT_SHOT_DIR = process.env.HH_OUT ?? SHOTS;
+  const SHIFT_WORDS = [{ lang: 'en', dir: 'ltr' }, { lang: 'ru', dir: 'ltr' }, { lang: 'en', dir: 'rtl' }] as const;
+  for (const width of [1440, 375]) {
+    for (const theme of ['cyberpunk', 'light'] as const) {
+      for (const { lang, dir } of SHIFT_WORDS) {
+        const look: Look = { lang, theme, width, ...(dir === 'rtl' ? { dir } : {}) };
+        const name = `${lang}-${dir}-${theme}-${width}`;
+        test(`tracker shift proof pictures, ${name}`, async ({ page }) => {
+          test.skip(!process.env.HH_TRACKER_SHIFT_SHOTS, 'pictures only when asked for');
+          const hold = await openHeld(page, SCREENS[0]!, look);
+          await page.clock.runFor(RING_DELAY_MS);
+          const rows = page.locator('.tr-held .tr-rows > .tr-row');
+          await expect(rows.first().locator('.load-busy:not(.unseen)')).toBeVisible();
+          await page.evaluate(() => document.fonts.ready);
+          const ys = async () => (await boxesOf(await rows.all())).map(b => Number(b.y.toFixed(2)));
+          const inside = async () => expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+          const yLoad = await ys();
+          const maxShift = (after: number[]) => Math.max(...after.map((y, i) => Math.abs(y - yLoad[i]!)));
+          await inside();
+          await page.screenshot({ path: `${SHIFT_SHOT_DIR}/tracker-shift-${name}-loading.png`, animations: 'disabled' });
+
+          await page.clock.runFor(SLOW_MS - RING_DELAY_MS);
+          const slow = rows.first().locator('.load-fail.slow');
+          await expect(slow).toBeVisible();
+          expect(await clippedIn(slow)).toEqual([]);
+          await inside();
+          const ySlow = await ys();
+          expect(maxShift(ySlow)).toBeLessThanOrEqual(0.5);
+          await page.screenshot({ path: `${SHIFT_SHOT_DIR}/tracker-shift-${name}-slow.png`, animations: 'disabled' });
+
+          await page.clock.runFor(FAIL_MS - SLOW_MS);
+          const failed = rows.first().locator('.load-fail:not(.slow)');
+          await expect(failed).toBeVisible();
+          expect(await clippedIn(failed)).toEqual([]);
+          await inside();
+          const yFail = await ys();
+          expect(maxShift(yFail)).toBeLessThanOrEqual(0.5);
+          await page.screenshot({ path: `${SHIFT_SHOT_DIR}/tracker-shift-${name}-failed.png`, animations: 'disabled' });
+
+          const askedForData = hold.asked();
+          hold.failing(false);
+          await failed.getByRole('button', { name: words(look.lang).common.retry, exact: true }).click();
+          await expect.poll(hold.asked).toBeGreaterThan(askedForData);
+          const arrived = hold.answered();
+          hold.release();
+          await arrived;
+          await page.clock.runFor(RING_MIN_MS);
+          const realFirst = page.locator('.tr-list:not(.tr-held) .tr-group').first().locator('.tr-rows > .tr-row').first();
+          await expect(realFirst).toBeVisible();
+          const yArrive0 = Number((await realFirst.boundingBox())!.y.toFixed(2));
+          const deltaArrive0 = Math.abs(yArrive0 - yLoad[0]!);
+          expect(deltaArrive0).toBeLessThanOrEqual(0.5);
+          console.log(`TRACKER_SHIFT ${name} rows=${yLoad.length} yLoad=[${yLoad.slice(0, 6).join(',')}] maxDeltaSlow=${maxShift(ySlow).toFixed(2)} maxDeltaFail=${maxShift(yFail).toFixed(2)} deltaArrive0=${deltaArrive0.toFixed(2)}`);
+        });
+      }
+    }
+  }
 });
 
 test.describe('the plans while they come', () => {

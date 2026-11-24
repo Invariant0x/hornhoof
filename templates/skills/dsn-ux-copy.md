@@ -1,7 +1,5 @@
 ---
 id: dsn-ux-copy
-title: { en: "Interface text", ru: "Тексты интерфейса" }
-description: { en: "Writes clear labels, messages and hints, natural in every language the product supports.", ru: "Пишет понятные надписи, сообщения и подсказки, естественные на каждом языке продукта." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins design/skills/ux-copy/SKILL.md]
 ---

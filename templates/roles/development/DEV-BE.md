@@ -2,8 +2,6 @@
 id: DEV-BE
 department: development
 kind: member
-title: { en: "Backend engineer", ru: "Бэкенд-разработчик" }
-description: { en: "Builds the services that store data and make the product work.", ru: "Создает службы, которые хранят данные и обеспечивают работу продукта." }
 tier: standard
 effort: xhigh
 perProduct: false

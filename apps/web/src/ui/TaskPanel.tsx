@@ -14,7 +14,7 @@ import { Busy, Hold, Idle, LoadState, useLoad, type Load } from './Loading';
 import { TaskEdit } from './TrackerForms';
 import { dueText, sinceSeconds, spanText } from './tracker-words';
 import { FoldedMarkdown, Markdown } from './Markdown';
-import { Requests, wordsAnswer } from './Requests';
+import { namedReadOnly, Requests, wordsAnswer } from './Requests';
 import { PanelFrame } from './SidePanels';
 import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
 import { fullTextOf, LogParagraph, Material, proseErrorText, TaskFiles } from './TaskAttachments';
@@ -26,7 +26,7 @@ import { PersonMark, PriorityWord } from './TrackerMarks';
 import { TaskWorkflow, TaskFindings } from './TaskWorkflow';
 
 /* What waits for the person in this task. */
-type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void };
+type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void; viewerId?: string };
 /* Where the card leads in the tracker: a goal's own card, and the graph grown from this task. */
 type Leads = { onOpenGoal?: (id: string) => void; onGraph?: (root: { task: string }) => void };
 
@@ -39,7 +39,7 @@ function WorkLabels({ task }: { task: TaskDetail }) {
 
 function TaskWaitingSection({ waiting, org, onOpen, onChanged, inline }: { waiting: Waiting; org: Org | null; onOpen: (id: string) => void; onChanged: () => void; inline?: boolean }) {
   const t = useT();
-  const requests = inline ? waiting.requests.filter(request => request.canAnswer) : waiting.requests.map(request => ({ ...request, canAnswer: false }));
+  const requests = inline ? waiting.requests.filter(request => request.canAnswer || namedReadOnly(request)) : waiting.requests.map(request => ({ ...request, canAnswer: false }));
   if (requests.length === 0) return null;
   const heading = inline ? t.tasks.waitingHere : t.tasks.questions;
 
@@ -49,6 +49,7 @@ function TaskWaitingSection({ waiting, org, onOpen, onChanged, inline }: { waiti
       <Requests
         requests={requests}
         inline={inline}
+        viewerId={waiting.viewerId}
         onChanged={() => {
           waiting.onRequestsChanged();
           onChanged();

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { LANGUAGES, type Language } from '../src/i18n';
-import { BUILTIN_SKINS, type BuiltinSkinId } from '../src/skins/registry';
+import { LANGUAGES, type ShippedLanguage } from '../src/i18n';
+import { BUILTIN_SKINS, builtinSkin, type BuiltinSkinId } from '../src/skins/registry';
 import { serveApi } from './api';
 
 /* The map's scale readout fits every percentage from shortest to three digits without clipping, ellipsis or hidden overflow,
@@ -38,7 +38,7 @@ type ZoomCheck = {
   buttons: { width: number; height: number; flexShrink: string }[];
 };
 
-async function openMap(page: Page, language: Language, skin: BuiltinSkinId, dir: 'ltr' | 'rtl', width: number) {
+async function openMap(page: Page, language: ShippedLanguage, skin: BuiltinSkinId, dir: 'ltr' | 'rtl', width: number) {
   await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
   await page.evaluate(({ language, skin }) => {
     localStorage.clear();
@@ -50,6 +50,9 @@ async function openMap(page: Page, language: Language, skin: BuiltinSkinId, dir:
     document.documentElement.dir = d;
   }, dir);
   await expect(page.locator('.map .zoom .zv')).toBeVisible();
+  if (builtinSkin(skin)?.world) {
+    await page.waitForFunction(() => Boolean((window as unknown as { __WORLD_PRODUCT__?: unknown }).__WORLD_PRODUCT__));
+  }
   await page.evaluate(() => document.fonts.ready);
 }
 
@@ -137,7 +140,7 @@ function assertWholeZoom(m: ZoomCheck, context: string) {
   expect(m.textOverflow, `${context}: no ellipsis`).toBe('clip');
   expect(m.whiteSpace, `${context}: single line nowrap`).toBe('nowrap');
   expect(m.flexShrink, `${context}: label does not shrink`).toBe('0');
-  expect(m.fontFamily, `${context}: readable body font token`).toMatch(/\bOnest\b/);
+  expect(m.fontFamily, `${context}: readable body font token`).toMatch(/\b(Onest|Golos Text)\b/);
   expect(m.fontWeight, `${context}: explicit 500 face`).toBe('500');
   expect(m.fontVariantNumeric, `${context}: tabular digits`).toContain('tabular-nums');
   expect(m.paddingLeft, `${context}: token left padding`).toBeGreaterThanOrEqual(8);
@@ -173,7 +176,7 @@ async function setWheelFromMin(page: Page, rootSelector: '.map' | '.dview', canv
   }, { rootSelector, canvasSelector, minK, targetK });
 }
 
-async function sweepScales(page: Page, dir: 'ltr' | 'rtl', context: string, checkButtonsPointer: boolean) {
+async function sweepScales(page: Page, dir: 'ltr' | 'rtl', context: string, checkButtonsPointer: boolean, isWorld = false) {
   const zv = page.locator('.map .zoom .zv');
   const btns = page.locator('.map .zoom .zbtn');
 
@@ -188,6 +191,27 @@ async function sweepScales(page: Page, dir: 'ltr' | 'rtl', context: string, chec
     assertWholeZoom(await measureZoom(page, dir), `${context} pointer zoom-out`);
     await btns.nth(2).click();
     assertWholeZoom(await measureZoom(page, dir), `${context} pointer fit`);
+  }
+
+  if (isWorld) {
+    /* World map clamps zoom strictly to 50%..200% via ZoomBar controls. */
+    await page.evaluate(() => {
+      const zoomBtns = document.querySelectorAll<HTMLButtonElement>('.map .zoom .zbtn');
+      for (let i = 0; i < 12; i++) zoomBtns[0]!.click();
+    });
+    await expect(zv).toHaveText('50%');
+    assertWholeZoom(await measureZoom(page, dir), `${context} (50%)`);
+
+    await page.evaluate(() => {
+      const zoomBtns = document.querySelectorAll<HTMLButtonElement>('.map .zoom .zbtn');
+      for (let i = 0; i < 16; i++) zoomBtns[1]!.click();
+    });
+    await expect(zv).toHaveText('200%');
+    assertWholeZoom(await measureZoom(page, dir), `${context} (200%)`);
+
+    await page.evaluate(() => document.querySelectorAll<HTMLButtonElement>('.map .zoom .zbtn')[2]!.click());
+    assertWholeZoom(await measureZoom(page, dir), `${context} fit`);
+    return;
   }
 
   for (const [k, label] of [[0.3, '30%'], [1, '100%'], [1.15, '115%'], [1.38, '138%'], [2, '200%'], [2.5, '250%']] as const) {
@@ -209,7 +233,7 @@ test('map: scale label fits whole across scales and skins, en and ru ltr, at 144
     for (const skin of SKINS) {
       await openMap(page, id, skin, 'ltr', 1440);
       await expect(page.locator('.map .zoom .zv')).toHaveText('100%');
-      await sweepScales(page, 'ltr', `${id} ltr ${skin} 1440`, skin === 'cyberpunk');
+      await sweepScales(page, 'ltr', `${id} ltr ${skin} 1440`, skin === 'cyberpunk', Boolean(builtinSkin(skin)?.world));
     }
   }
   /* Minimum department scale ("15%") on the shared ZoomBar inside a department canvas. */
@@ -227,7 +251,7 @@ test('map: scale label fits whole across scales and skins, en and ru ltr, at 375
   for (const { id } of LANGUAGES) {
     for (const skin of SKINS) {
       await openMap(page, id, skin, 'ltr', 375);
-      await sweepScales(page, 'ltr', `${id} ltr ${skin} 375`, skin === 'cyberpunk');
+      await sweepScales(page, 'ltr', `${id} ltr ${skin} 375`, skin === 'cyberpunk', Boolean(builtinSkin(skin)?.world));
     }
   }
 });
@@ -238,10 +262,10 @@ test('map: scale label fits whole across scales and skins, right to left, at 144
   for (const { id } of LANGUAGES) {
     for (const skin of SKINS) {
       await openMap(page, id, skin, 'rtl', 1440);
-      await sweepScales(page, 'rtl', `${id} rtl ${skin} 1440`, skin === 'cyberpunk');
+      await sweepScales(page, 'rtl', `${id} rtl ${skin} 1440`, skin === 'cyberpunk', Boolean(builtinSkin(skin)?.world));
       await page.setViewportSize({ width: 375, height: 812 });
       await page.evaluate(() => document.querySelectorAll<HTMLButtonElement>('.map .zoom .zbtn')[2]!.click());
-      await sweepScales(page, 'rtl', `${id} rtl ${skin} 375`, skin === 'light');
+      await sweepScales(page, 'rtl', `${id} rtl ${skin} 375`, skin === 'light', Boolean(builtinSkin(skin)?.world));
     }
   }
 });

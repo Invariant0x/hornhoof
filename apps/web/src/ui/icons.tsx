@@ -1,12 +1,28 @@
 import type { ReactNode } from 'react';
+import { useWorld } from '../skins/use-skin';
 import type { ProviderId, SubView } from '../types';
 
+/* True when the active theme renders the original CC0 Ancient Egypt stroke icon set. */
+const useEgyptIcons = () => useWorld() === 'egypt';
+
+const EGYPT_SVG = { 'data-icon-set': 'egypt' } as const;
+
 export function AgentIcon({ label }: { label?: string }) {
+  const egypt = useEgyptIcons();
   return (
-    <svg className="ic" viewBox="0 0 16 16" role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
-      <rect x="3" y="3" width="10" height="10" rx="1" />
-      <rect x="6" y="6" width="4" height="4" />
-      <path d="M6 1v2M10 1v2M6 13v2M10 13v2M1 6h2M1 10h2M13 6h2M13 10h2" />
+    <svg className="ic" viewBox="0 0 16 16" role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true} {...(egypt ? EGYPT_SVG : {})}>
+      {egypt ? (
+        <>
+          <path d="M8 2l5.2 3v6L8 14l-5.2-3V5z" />
+          <circle cx="8" cy="8" r="2.2" fill="currentColor" />
+        </>
+      ) : (
+        <>
+          <rect x="3" y="3" width="10" height="10" rx="1" />
+          <rect x="6" y="6" width="4" height="4" />
+          <path d="M6 1v2M10 1v2M6 13v2M10 13v2M1 6h2M1 10h2M13 6h2M13 10h2" />
+        </>
+      )}
     </svg>
   );
 }
@@ -20,10 +36,20 @@ export function DiamondMarkIcon() {
 }
 
 export function PersonIcon({ label }: { label?: string }) {
+  const egypt = useEgyptIcons();
   return (
-    <svg className="ic" viewBox="0 0 16 16" role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
-      <circle cx="8" cy="5.2" r="2.9" />
-      <path d="M2.6 14.6c0-3.1 2.4-5.3 5.4-5.3s5.4 2.2 5.4 5.3" />
+    <svg className="ic" viewBox="0 0 16 16" role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true} {...(egypt ? EGYPT_SVG : {})}>
+      {egypt ? (
+        <>
+          <circle cx="8" cy="4.2" r="2" />
+          <path d="M5 6.8h6l1 2.2H4zM3.5 13.5l1.5-4.5h6l1.5 4.5z" />
+        </>
+      ) : (
+        <>
+          <circle cx="8" cy="5.2" r="2.9" />
+          <path d="M2.6 14.6c0-3.1 2.4-5.3 5.4-5.3s5.4 2.2 5.4 5.3" />
+        </>
+      )}
     </svg>
   );
 }
@@ -72,10 +98,17 @@ export function KeyIcon() {
 
 /* A triangle with a mark, at the start of a warning line. */
 export function AlertIcon() {
+  const egypt = useEgyptIcons();
   return (
-    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M8 1.8l6.4 11.6H1.6z" />
-      <path d="M8 6.2v3.4M8 11.4v.2" />
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true" {...(egypt ? EGYPT_SVG : {})}>
+      {egypt ? (
+        <path d="M8 2L14.5 13.5H1.5zM8 5.5l-1 2.5 1.5 1-1 2.2" />
+      ) : (
+        <>
+          <path d="M8 1.8l6.4 11.6H1.6z" />
+          <path d="M8 6.2v3.4M8 11.4v.2" />
+        </>
+      )}
     </svg>
   );
 }
@@ -83,6 +116,25 @@ export function AlertIcon() {
 /* How a connection is paid: arrows going round for a plan's subscription, a stack of coins for an API's tokens. Words
    beside it or the label of what holds it say so. */
 export function PayIcon({ kind }: { kind: SubView['kind'] }) {
+  const egypt = useEgyptIcons();
+  if (egypt) {
+    return (
+      <svg className="sign" viewBox="0 0 16 16" aria-hidden="true" {...EGYPT_SVG}>
+        {kind === 'api_key' ? (
+          <>
+            <circle cx="8" cy="5.5" r="3" />
+            <circle cx="8" cy="10.5" r="3" />
+            <path d="M6.5 5.5h3M6.5 10.5h3" />
+          </>
+        ) : (
+          <>
+            <circle cx="8" cy="8" r="5" />
+            <path d="M8 5.2v5.6M5.8 7.4L8 5.2l2.2 2.2" />
+          </>
+        )}
+      </svg>
+    );
+  }
   return (
     <svg className="sign" viewBox="0 0 24 24" aria-hidden="true">
       {kind === 'api_key'
@@ -113,6 +165,7 @@ const PROGRAM: Record<ProviderId, Program> = {
 const PROTOCOL_PROGRAM: Record<Protocol, Program> = { anthropic: 'claude', openai: 'codex' };
 const PROGRAM_NAMES: Record<Program, string> = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', antigravity: 'Antigravity' };
 export const programOf = (provider: ProviderId, protocol?: Protocol | null): Program => (protocol ? PROTOCOL_PROGRAM[protocol] : PROGRAM[provider]);
+export const programName = (program: Program): string => PROGRAM_NAMES[program];
 const MARKS: Record<Program, ReactNode> = {
   claude: <path d="M8 1.6v3.6M8 10.8v3.6M1.6 8h3.6M10.8 8h3.6M3.5 3.5l2.5 2.5M10 10l2.5 2.5M12.5 3.5 10 6M6 10l-2.5 2.5" />,
   codex: (
@@ -134,11 +187,15 @@ const MARKS: Record<Program, ReactNode> = {
 /* The program an agent works in, next to its name; the name is its label and tooltip. */
 /* protocol: an API connection's, which decides its program. */
 export function ProviderMark({ provider, protocol }: { provider: ProviderId | null; protocol?: Protocol | null }) {
-  if (!provider) return null;
-  const program = programOf(provider, protocol);
+  return provider ? <ProgramMark program={programOf(provider, protocol)} /> : null;
+}
+
+/* The same mark where the program is already known, as the tracker's executor has it; label: its name and tooltip, the
+   program's name by default. */
+export function ProgramMark({ program, label = PROGRAM_NAMES[program] }: { program: Program; label?: string }) {
   return (
-    <svg className={`pm ${program}`} viewBox="0 0 16 16" role="img" aria-label={PROGRAM_NAMES[program]}>
-      <title>{PROGRAM_NAMES[program]}</title>
+    <svg className={`pm ${program}`} viewBox="0 0 16 16" role="img" aria-label={label}>
+      <title>{label}</title>
       {MARKS[program]}
     </svg>
   );
@@ -153,6 +210,14 @@ export function TreeIcon() {
 }
 
 export function MapIcon() {
+  if (useEgyptIcons()) {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true" {...EGYPT_SVG}>
+        <path d="M2 13h12M3.5 10.5h9M5 8h6M6.5 5.5h3M8 3.5l6 9.5H2z" />
+        <circle cx="12.5" cy="3.5" r="1.4" />
+      </svg>
+    );
+  }
   return (<svg viewBox="0 0 24 24" aria-hidden="true"><path className="c" d="M7 2.5h8.5L17 4v4.5H8.5L7 7z"/><path d="M12 8.5V11.5M5.75 15v-1.5l2-2h8.5l2 2V15"/><path d="M2 15h6l1.5 1.5v5H3.5L2 20zM14.5 15h6l1.5 1.5v5h-6L14.5 20z"/></svg>);
 }
 
@@ -163,6 +228,13 @@ export function SpeedIcon() {
 /* Lines of a list, for tasks. The icons below stand for a section or a tool when its words do not fit; their names say what
    they are. */
 export function ListIcon() {
+  if (useEgyptIcons()) {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true" {...EGYPT_SVG}>
+        <path d="M4 3h9a1.5 1.5 0 0 1 0 3H4a1.5 1.5 0 0 1 0-3zM4 6v7.5a1 1 0 0 0 1 1h7V6M6.5 8.5h3.5M6.5 11h3.5" />
+      </svg>
+    );
+  }
   return (<svg viewBox="0 0 24 24" aria-hidden="true"><rect className="cf" x="2.5" y="4.5" width="3" height="3"/><rect className="cf" x="2.5" y="10.5" width="3" height="3"/><rect className="cf" x="2.5" y="16.5" width="3" height="3"/><path d="M9 6H21.5M9 12H21.5M9 18H21.5"/></svg>);
 }
 
@@ -173,16 +245,41 @@ export function InfoIcon() {
 
 /* Two people, one behind the other. */
 export function PeopleIcon() {
+  if (useEgyptIcons()) {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true" {...EGYPT_SVG}>
+        <circle cx="8" cy="4.2" r="2" />
+        <path d="M5 6.8h6l1 2.2H4zM3.5 13.5l1.5-4.5h6l1.5 4.5z" />
+      </svg>
+    );
+  }
   return (<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 4.5h3L12 6v3l-1.5 1.5h-3L6 9V6z"/><path d="M2.5 21v-3.5L5 15h8l2.5 2.5V21"/><path className="c" d="M15 4.5h1.5L18 6v3l-1.5 1.5H15M18 15h1l2.5 2.5V21"/></svg>);
 }
 
 /* A plug, for the subscriptions and keys the company connects. */
 export function PlugIcon() {
+  if (useEgyptIcons()) {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true" {...EGYPT_SVG}>
+        <ellipse cx="8" cy="5.5" rx="3.5" ry="2.2" />
+        <path d="M4.5 6.5C3.5 8 4 12.5 8 12.5s4.5-4.5 3.5-6M6.5 5.5h3" />
+      </svg>
+    );
+  }
   return (<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 2.5V7M15.5 2.5V7"/><path d="M5 7h14v5l-3.5 3.5h-7L5 12z"/><path className="c" d="M12 15.5V21.5"/></svg>);
 }
 
 /* A computer screen on its stand, for machines. */
 export function MachineIcon() {
+  if (useEgyptIcons()) {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true" {...EGYPT_SVG}>
+        <circle cx="8" cy="8" r="5.5" />
+        <circle cx="8" cy="8" r="1.6" />
+        <path d="M8 2.5v3.9M8 9.6v3.9M2.5 8h3.9M9.6 8h3.9M4.1 4.1l2.8 2.8M9.1 9.1l2.8 2.8" />
+      </svg>
+    );
+  }
   return (<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 4H20l1.5 1.5V16h-19z"/><path className="c" d="M12 16V20.5M7 20.5H17"/></svg>);
 }
 
@@ -201,8 +298,148 @@ const TRACKER_ICONS = {
   employees: <><circle cx="8" cy="8" r="6" /><circle cx="8" cy="8" r="2.5" fill="currentColor" /></>,
 };
 
+const EGYPT_TRACKER_ICONS: Partial<Record<keyof typeof TRACKER_ICONS, ReactNode>> = {
+  failure: <path d="M8 2L14.5 13.5H1.5zM8 5.5l-1 2.5 1.5 1-1 2.2" />,
+  waits: <><rect x="2.5" y="4" width="11" height="8" rx="1.5" /><circle cx="8" cy="8" r="1.8" /><path d="M8 9.8v2.7" /></>,
+  mine: <><circle cx="8" cy="8" r="5.5" /><circle cx="8" cy="8" r="2.2" /><path d="M2.5 11.5h11" /></>,
+  dates: <path d="M2 12.5h12M3.5 12.5a4.5 4.5 0 0 1 9 0M8 12.5V5.5l3 3.5M8 2.5v1.2" />,
+  goals: <path d="M6 14l.8-8.5L8 2.5l1.2 3L10 14zM4 14h8M3 4.5l1.5.5M13 4.5l-1.5.5" />,
+  pipeline: <><path d="M12.8 6.5A5.2 5.2 0 0 0 3.5 5M13 3.2v3.3H9.7M3.2 9.5A5.2 5.2 0 0 0 12.5 11M3 12.8V9.5h3.3" /><circle cx="8" cy="8" r="1.5" /></>,
+  list: <path d="M2.5 3.5h11v9h-11zM5 6h6M5 8.5h6M5 11h4" />,
+  board: <path d="M2 5a1.5 1.5 0 0 1 3 0v8H2zM6.5 4a1.5 1.5 0 0 1 3 0v9h-3zM11 5.5a1.5 1.5 0 0 1 3 0V13h-3z" />,
+  branch: <path d="M8 14V8.5M8 8.5L3.5 3.5M8 8.5V3M8 8.5l4.5-5M3 2.5h1M7.5 2h1M12 2.5h1" />,
+  employees: <><path d="M8 2l5.2 3v6L8 14l-5.2-3V5z" /><circle cx="8" cy="8" r="2.2" fill="currentColor" /></>,
+};
+
 export function TrackerIcon({ name, className }: { name: keyof typeof TRACKER_ICONS; className?: string }) {
-  return <svg className={className ? `ic ${className}` : 'ic'} viewBox="0 0 16 16" aria-hidden="true">{TRACKER_ICONS[name]}</svg>;
+  const egypt = useEgyptIcons();
+  const glyph = egypt ? (EGYPT_TRACKER_ICONS[name] ?? TRACKER_ICONS[name]) : TRACKER_ICONS[name];
+  const tagged = egypt && Boolean(EGYPT_TRACKER_ICONS[name]);
+  return <svg className={className ? `ic ${className}` : 'ic'} viewBox="0 0 16 16" aria-hidden="true" {...(tagged ? EGYPT_SVG : {})}>{glyph}</svg>;
+}
+
+/* Carved lotus tile in Ancient Egypt, colour swatch in standard themes, for the Theme store heading. */
+export function ThemeShopIcon() {
+  const egypt = useEgyptIcons();
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true" {...(egypt ? EGYPT_SVG : {})}>
+      {egypt ? (
+        <>
+          <rect x="2.5" y="2.5" width="11" height="11" />
+          <path d="M8 4.5c1.5 2 2.5 3.5 2.5 5.5H5.5c0-2 1-3.5 2.5-5.5zM5 10.5h6" />
+        </>
+      ) : (
+        <>
+          <rect x="2.5" y="2.5" width="5" height="5" />
+          <rect x="8.5" y="2.5" width="5" height="5" />
+          <rect x="2.5" y="8.5" width="5" height="5" />
+          <rect x="8.5" y="8.5" width="5" height="5" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/* Double crown and crook in Ancient Egypt, hub ring in standard themes, for the Orchestrator / Pharaoh. */
+export function OrchestratorIcon() {
+  const egypt = useEgyptIcons();
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true" {...(egypt ? EGYPT_SVG : {})}>
+      {egypt ? (
+        <path d="M4 13h8M5 13V7l3-4.5L11 7v6M6.5 9h3M3.5 8.5l1.5 1M12.5 8.5l-1.5 1" />
+      ) : (
+        <>
+          <circle cx="8" cy="8" r="5.5" strokeDasharray="3 2" />
+          <circle cx="8" cy="8" r="2" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/* Temple portico in Ancient Egypt, building block in standard themes, for departments. */
+export function DepartmentIcon() {
+  const egypt = useEgyptIcons();
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true" {...(egypt ? EGYPT_SVG : {})}>
+      {egypt ? (
+        <path d="M2 5h12L13 3H3zM2 13.5h12M4.5 5v8.5M8 5v8.5M11.5 5v8.5" />
+      ) : (
+        <>
+          <rect x="3" y="3" width="10" height="10" />
+          <path d="M6 3v10" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/* Mason set-square and plumb in Ancient Egypt, cogwheel in standard themes, for Settings. */
+export function SettingsIcon() {
+  const egypt = useEgyptIcons();
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true" {...(egypt ? EGYPT_SVG : {})}>
+      {egypt ? (
+        <>
+          <path d="M3 13V3h2.5v7.5H13V13zM8.5 3.5v6" />
+          <path d="M7.3 9.5h2.4l-1.2 2z" />
+        </>
+      ) : (
+        <>
+          <circle cx="8" cy="8" r="2.5" />
+          <path d="M8 2v2M8 12v2M2 8h2M12 8h2M3.8 3.8l1.4 1.4M10.8 10.8l1.4 1.4M12.2 3.8l-1.4 1.4M5.2 10.8l-1.4 1.4" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/* Speech cartouche in Ancient Egypt, chat bubble in standard themes, for Conversation. */
+export function ConversationIcon() {
+  const egypt = useEgyptIcons();
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true" {...(egypt ? EGYPT_SVG : {})}>
+      {egypt ? (
+        <>
+          <rect x="2.5" y="3.5" width="11" height="7" rx="3.5" />
+          <path d="M4.5 12.5h7M6 7h4" />
+        </>
+      ) : (
+        <path d="M2.5 3.5h11v7.5H7l-3 2.5V11H2.5z" />
+      )}
+    </svg>
+  );
+}
+
+/* Clay tablet and reed stylus in Ancient Egypt, prompt in standard themes, for Terminal. */
+export function TerminalIcon() {
+  const egypt = useEgyptIcons();
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true" {...(egypt ? EGYPT_SVG : {})}>
+      {egypt ? (
+        <path d="M3 3h8l2 2v8H3zM5.5 6.5l2 1.8-2 1.7M8.5 10h2.5" />
+      ) : (
+        <path d="M3 5l3 3-3 3M8 11h5" />
+      )}
+    </svg>
+  );
+}
+
+/* Reed pen and papyrus in Ancient Egypt, notepad in standard themes, for Notebook. */
+export function NotebookIcon() {
+  const egypt = useEgyptIcons();
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true" {...(egypt ? EGYPT_SVG : {})}>
+      {egypt ? (
+        <path d="M3 3h7v10H3zM5 6h3M5 8.5h3M11.5 12.5l2-7.5-1.5-.5-2 7.5z" />
+      ) : (
+        <>
+          <rect x="3" y="2.5" width="10" height="11" />
+          <path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" />
+        </>
+      )}
+    </svg>
+  );
 }
 
 export function PriorityArrow() {

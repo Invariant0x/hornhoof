@@ -2,7 +2,7 @@ import type http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { isAddressOf } from '../../auth/tunnel.js';
 import { DB_DOOR_PORT } from '../../net/db-door.js';
-import { firstForwarded, INVOCATION, socketAddress, startingAnswer, UUID, type Refusal } from '../../net/proxy.js';
+import { firstForwarded, INVOCATION, socketAddress, UUID, updatingAnswer, type Refusal } from '../../net/proxy.js';
 
 /* What every keeper's doors share, the keeper of a machine that keeps data and a worker's alike. */
 
@@ -13,13 +13,9 @@ export const KEEPER_PORTS = { peer: 7070, peerApp: 7071, front: 7080, linkHttp: 
 const MAINTENANCE_JSON = JSON.stringify({
   error: { code: 'unavailable', message: 'Hornhoof is installing an update and takes no changes until it ends.', reason: 'maintenance' },
 });
-const MAINTENANCE_TEXT = 'Hornhoof is installing an update. Try again in a few minutes.\nHornhoof ставит обновление. Попробуйте через несколько минут.\n';
 
-/* startingAnswer already decides who gets JSON and who gets a page, so the two answers cannot split differently. */
 export function maintenanceAnswer(req: http.IncomingMessage): Refusal {
-  const contentType = startingAnswer(req).headers['Content-Type']!;
-  const body = contentType === 'application/json' ? MAINTENANCE_JSON : MAINTENANCE_TEXT;
-  return { status: 503, headers: { 'Content-Type': contentType, 'Retry-After': '10' }, body };
+  return updatingAnswer(req, MAINTENANCE_JSON);
 }
 
 /* The id front stamped a tool call with, when the request has one. */

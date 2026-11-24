@@ -1,0 +1,385 @@
+/* Ancient Egypt world pack manifest: owns its terrain recipe, warm sunlit ground materials,
+   animated Nile liquid layer and discrete tile rules. */
+
+import type { ResidentRoleClass } from '@hornhoof/protocol/world';
+import {
+  DEFAULT_CAMERA_BOUNDS,
+  DEFAULT_CONSTRUCTION_STAGES,
+  DEFAULT_ISOMETRIC_PROJECTION,
+  type ConstructionStageSpec,
+  type GroundMaterialSpec,
+  type PackRoleLookSpec,
+  type WorldPackManifest,
+} from '../../world/manifest';
+import { egyptArtCatalog } from './art';
+import { EGYPT_LIGHTING, EGYPT_PLANTS, EGYPT_WIND } from './plants';
+import { EGYPT_TERRAIN_RECIPE, EGYPT_TILE_KINDS } from './recipe';
+import { text } from '../../world/pack-text';
+
+const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
+  ruler: {
+    id: 'egypt-pharaoh',
+    label: text('Pharaoh'),
+    prop: 'staff',
+    headgear: 'crown',
+    largeItem: true,
+    insignia: true,
+  },
+  head: {
+    id: 'egypt-overseer',
+    label: text('Overseer'),
+    prop: 'staff',
+    headgear: 'circlet',
+    largeItem: true,
+    insignia: true,
+  },
+  guard_captain: {
+    id: 'egypt-guard-captain',
+    label: text('Captain of the Guard'),
+    prop: 'staff',
+    headgear: 'helm',
+    largeItem: true,
+    insignia: true,
+  },
+  architect: {
+    id: 'egypt-architect',
+    label: text('Master Architect'),
+    prop: 'scroll',
+    /* The approved tier 3 architect (hd-char-lvl05) wears a nemes; the hood is the engine's nearest headwear. */
+    headgear: 'hood',
+  },
+  checker: {
+    id: 'egypt-inspector',
+    label: text('Stone Inspector'),
+    prop: 'scroll',
+    headgear: 'cap',
+  },
+  builder: {
+    id: 'egypt-mason',
+    label: text('Stone Mason'),
+    prop: 'stone',
+    headgear: 'none',
+  },
+  scribe: {
+    id: 'egypt-scribe',
+    label: text('Papyrus Scribe'),
+    prop: 'scroll',
+    headgear: 'cap',
+  },
+  artisan: {
+    id: 'egypt-relief-carver',
+    label: text('Relief Carver'),
+    prop: 'chisel',
+    headgear: 'cap',
+  },
+  patrol: {
+    id: 'egypt-medjay',
+    label: text('Medjay Patrol'),
+    prop: 'gong',
+    headgear: 'helm',
+    largeItem: true,
+  },
+  inspector_scout: {
+    id: 'egypt-scout',
+    label: text('Wall Scout'),
+    prop: 'scroll',
+    headgear: 'hood',
+  },
+  firefighter: {
+    id: 'egypt-firefighter',
+    label: text('Water Bearer & Repairer'),
+    prop: 'water_jar',
+    headgear: 'cap',
+    largeItem: true,
+  },
+  caravan_runner: {
+    id: 'egypt-caravan-messenger',
+    label: text('Caravan Messenger'),
+    prop: 'banner',
+    headgear: 'hood',
+    largeItem: true,
+  },
+  keykeeper: {
+    id: 'egypt-keykeeper',
+    label: text('Granary Keykeeper'),
+    prop: 'key',
+    headgear: 'cap',
+  },
+  machine_keeper: {
+    id: 'egypt-machine-keeper',
+    label: text('Workshop Keeper'),
+    prop: 'tool',
+    headgear: 'cap',
+  },
+  gate_guard: {
+    id: 'egypt-gate-guard',
+    label: text('Gate Sentinel'),
+    prop: 'spear_shield',
+    headgear: 'helm',
+    largeItem: true,
+  },
+  red_team: {
+    id: 'egypt-skirmisher',
+    label: text('Wall Tester'),
+    prop: 'spear_shield',
+    headgear: 'hood',
+    largeItem: true,
+  },
+  road_builder: {
+    id: 'egypt-canal-builder',
+    label: text('Canal & Ramp Builder'),
+    prop: 'tool',
+    headgear: 'none',
+    /* Its tool is a hoe, a large item (order v3 4.4). */
+    largeItem: true,
+  },
+  turnkey_specialist: {
+    id: 'egypt-royal-master',
+    label: text('Royal Master Builder'),
+    prop: 'banner',
+    headgear: 'circlet',
+    largeItem: true,
+    insignia: true,
+  },
+  day_laborer: {
+    id: 'egypt-day-laborer',
+    label: text('Day Laborer'),
+    prop: 'stone',
+    headgear: 'none',
+  },
+};
+
+const EGYPT_CLASS_FALLBACKS: Readonly<Record<ResidentRoleClass, PackRoleLookSpec>> = {
+  ruler: EGYPT_ROLE_LOOKS.ruler!,
+  head: EGYPT_ROLE_LOOKS.head!,
+  checker: EGYPT_ROLE_LOOKS.checker!,
+  executor: EGYPT_ROLE_LOOKS.builder!,
+  turnkey: EGYPT_ROLE_LOOKS.turnkey_specialist!,
+  day_laborer: EGYPT_ROLE_LOOKS.day_laborer!,
+};
+
+const EGYPT_MATERIALS: readonly GroundMaterialSpec[] = [
+  {
+    id: 'bank',
+    baseColor: '#D6BC88',
+    secondaryColor: '#BE9F6A',
+    accentColor: '#EAD7AD',
+    pattern: 'fine_grain',
+    contrast: 1.0,
+  },
+  {
+    id: 'grass',
+    baseColor: '#8FA640',
+    secondaryColor: '#6E8A31',
+    accentColor: '#B7C25C',
+    pattern: 'grass_tufts',
+    contrast: 1.15,
+  },
+  {
+    id: 'sand',
+    baseColor: '#E6C07A',
+    secondaryColor: '#CFA05A',
+    accentColor: '#F4DCA6',
+    pattern: 'fine_grain',
+    contrast: 0.9,
+    ripples: 1,
+  },
+  {
+    id: 'dune',
+    baseColor: '#DDAE62',
+    secondaryColor: '#C08A44',
+    accentColor: '#F0CB86',
+    pattern: 'wind_ripples',
+    contrast: 1.1,
+    ripples: 0.8,
+  },
+  {
+    id: 'rock',
+    baseColor: '#B89A72',
+    secondaryColor: '#9A7D58',
+    accentColor: '#D2B890',
+    pattern: 'cracked_rock',
+    contrast: 1.2,
+  },
+  {
+    id: 'quarry',
+    baseColor: '#CDBF9F',
+    secondaryColor: '#B3A383',
+    accentColor: '#E3D8BE',
+    pattern: 'cracked_rock',
+    contrast: 1.1,
+  },
+  {
+    id: 'silt',
+    baseColor: '#7B5F42',
+    secondaryColor: '#5D4730',
+    accentColor: '#A08460',
+    pattern: 'soil_clods',
+    contrast: 1.1,
+  },
+  {
+    id: 'dust',
+    baseColor: '#DDBE86',
+    secondaryColor: '#C4A068',
+    accentColor: '#EED6A6',
+    pattern: 'packed_dust',
+    contrast: 0.95,
+    ripples: 0.3,
+  },
+  /* Trodden earth of a cleared building lot: the packed dust about 9% darker, its ripples walked flat. */
+  {
+    id: 'cleared',
+    baseColor: '#C9AD7A',
+    secondaryColor: '#B2925F',
+    accentColor: '#D9C397',
+    pattern: 'packed_dust',
+    contrast: 0.95,
+    ripples: 0.1,
+  },
+];
+
+const EGYPT_STAGE_LABELS: Readonly<Record<string, string>> = {
+  stakes_and_rope: text('Papyrus Cord and Stakes'),
+  foundation: text('Limestone Foundation Pad'),
+  low_walls_open: text('Mudbrick Courses (Open Rooms)'),
+  waist_walls_scaffold: text('Waist Walls, Cedar Scaffold & Ramp'),
+  full_walls: text('Full Sun-Baked Walls'),
+  roof_beams: text('Palm Timber Roof Beams'),
+  roof: text('Terrace Roof Deck'),
+  finishing: text('Stucco Reliefs & Painted Trim'),
+  complete: text('Completed Nile Building'),
+  upgraded: text('Gilded Courtyard & Upper Terrace'),
+};
+
+const EGYPT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = DEFAULT_CONSTRUCTION_STAGES.map(s => ({
+  ...s,
+  label: EGYPT_STAGE_LABELS[s.id] ?? s.label,
+}));
+
+export const EGYPT_WORLD_PACK: WorldPackManifest = {
+  id: 'egypt',
+  name: text('Ancient Egypt'),
+  engine: 'isometric-2d',
+  mapSize: 150,
+  projection: DEFAULT_ISOMETRIC_PROJECTION,
+  camera: DEFAULT_CAMERA_BOUNDS,
+  defaultTileId: 'plain',
+  showGridByDefault: false,
+  outerWallMode: 'ring',
+  /* As the workshop art draws it (game art: egypt-workshop-3x3): the door on the front-right wall in the row
+     two tiles back from the front corner, the 3x3 house keeping the front corner of a 5x5 lot while a
+     storeroom wing (4x4) and a hall (5x5) grow behind it. */
+  buildingLayout: {
+    district_hub: { door: { wall: 'front_right', fromFront: 2 }, spans: [3, 4, 5] },
+    /* Order v2, 3.4: hut 2x2 from level 1, mudbrick 3x3 from 4, painted 3x3 from 8, villa 4x4 from 15; the lot is the villa's. */
+    house: { door: { wall: 'front_right', fromFront: 0 }, spans: [2, 3, 3, 4] },
+  },
+  altarAnchor: {
+    offsetCol: 3,
+    offsetRow: -2,
+    label: text("God's Altar"),
+  },
+  roleLooks: EGYPT_ROLE_LOOKS,
+  classFallbackLooks: EGYPT_CLASS_FALLBACKS,
+  constructionStages: EGYPT_CONSTRUCTION_STAGES,
+  tiles: EGYPT_TILE_KINDS.map(k => ({
+    id: k.id,
+    fill: k.color,
+    stroke: k.color,
+    buildable: k.buildable,
+    walkable: k.walkable,
+  })),
+  materials: EGYPT_MATERIALS,
+  /* Building lots are trodden dust; a lot nobody took grows back in three days. */
+  lotGround: { material: 'cleared', edgeTiles: 0.45, regrowthHours: 72 },
+  liquidLayer: {
+    baseColor: '#2A89B0',
+    deepColor: '#28648A',
+    highlightColor: '#8CE0F0',
+    shoreFoamColor: '#D6F0F2',
+    shallowTintColor: '#A6D8E0',
+    speedX: 16,
+    speedY: 9,
+    glow: false,
+    depthShade: 0.5,
+  },
+  /* Painted art (the art folder, see TEXTURES.md): every ground, the waterline, the path strip and the water layers. */
+  terrainArt: {
+    texelsPerTile: 256,
+    ground: {
+      sand: 'ground/plain.png',
+      dust: 'ground/plain.png',
+      cleared: 'ground/cleared.png',
+      dune: 'ground/dune.png',
+      bank: 'ground/bank.png',
+      silt: 'ground/bank.png',
+      grass: 'ground/fertile.png',
+      rock: 'ground/ridge.png',
+      quarry: 'ground/quarry.png',
+    },
+    edges: {
+      'sand|bank': 'ground/edges/plain_bank.png',
+      'dust|bank': 'ground/edges/plain_bank.png',
+      'bank|grass': 'ground/edges/bank_fertile.png',
+      'sand|grass': 'ground/edges/bank_fertile.png',
+      'dust|grass': 'ground/edges/bank_fertile.png',
+      'cleared|bank': 'ground/edges/plain_bank.png',
+      'cleared|grass': 'ground/edges/bank_fertile.png',
+      'sand|dune': 'ground/edges/plain_dune.png',
+      'sand|rock': 'ground/edges/plain_ridge.png',
+      'sand|quarry': 'ground/edges/plain_ridge.png',
+      'quarry|rock': 'ground/edges/plain_ridge.png',
+      'dune|rock': 'ground/edges/plain_ridge.png',
+    },
+    defaultEdge: 'ground/edges/plain_bank.png',
+    shoreEdge: 'ground/edges/river_bank.png',
+    liquid: { bed: 'ground/river_bed.png', ripples: 'ground/river_ripples.png', surface: 'ground/river.png', baseColor: '#68A1BA' },
+    pathStrip: 'roads/trail.png',
+    roads: { trail: 'roads/trail.png', dirt: 'roads/dirt.png', brick: 'roads/brick.png', stone: 'roads/stone.png' },
+  },
+  paths: {
+    color: '#D9B57A',
+    rutColor: '#A47C48',
+    widthTiles: 0.4,
+    spacingTiles: 13,
+    materials: ['sand', 'dust', 'bank'],
+  },
+  terrainRecipe: EGYPT_TERRAIN_RECIPE,
+  plants: EGYPT_PLANTS,
+  wind: EGYPT_WIND,
+  lighting: EGYPT_LIGHTING,
+  sprites: [],
+  stageCounts: {
+    house: 10,
+    department: 10,
+    district: 30,
+    residence: 5,
+    statue: 20,
+    monument: 10,
+    flophouse: 6,
+    construction: 10,
+  },
+  palette: {
+    backdrop: '#1A1713',
+    border: '#B89B6A',
+    gridLine: 'rgba(28, 22, 14, 0.34)',
+    chunkLine: 'rgba(28, 22, 14, 0.14)',
+    hoverFill: 'rgba(255, 226, 152, 0.24)',
+    hoverStroke: '#FFE18C',
+    selectFill: 'rgba(255, 202, 88, 0.36)',
+    selectStroke: '#FFD166',
+    providers: {
+      claude: '#C96A4B',
+      codex: '#3FA796',
+      antigravity: '#4DA167',
+      kimi: '#4C84D6',
+      glm: '#766BD6',
+      api_key: '#B89B5E',
+    },
+  },
+  params: {
+    chunkSize: 4,
+    orderChaosDefault: 0.5,
+  },
+  art: egyptArtCatalog(EGYPT_ROLE_LOOKS),
+};

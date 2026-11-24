@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import type { RepoAddress } from './refs.js';
 import { bodyWithin } from './bounded.js';
+import { githubName, githubRateLimit, GitHubRateLimited, type GitHubLimits, type RateLimit } from './github-limit.js';
+import { githubCiReader, type CiReader } from './github-ci.js';
+import { githubCiDispatcher, type CiDispatcher } from './github-dispatch.js';
+
+export type { CiAt, CiReader } from './github-ci.js';
+export type { CiDispatcher } from './github-dispatch.js';
 
 /* A file GitHub lists with its counts and shows no patch of, as it does for a large file such as a migration's snapshot. */
 type OmittedPatch = { path: string; additions: number; deletions: number };
@@ -10,8 +16,9 @@ type ComparedCommit = { sha: string; parents: string[] };
 type Lineage = { baseSha: string; headSha: string; commits?: ComparedCommit[] };
 /* A comparison GitHub could not list whole names no paths. Where its status and commits still prove the line, it keeps that
    lineage, which proves no change of any file. */
-export type CompareResult = { complete: true; baseSha: string; headSha: string; paths: string[]; diff: string; omitted?: OmittedPatch[]; commits?: ComparedCommit[] } | { complete: false; reason: string; lineage?: Lineage };
-export type CompareReader = (repo: RepoAddress, refs: { base: string; head: string }, timeoutMs?: number) => Promise<CompareResult>;
+export type CompareResult = { complete: true; baseSha: string; headSha: string; paths: string[]; diff: string; omitted?: OmittedPatch[]; commits?: ComparedCommit[] } | { complete: false; reason: string; lineage?: Lineage; rateLimit?: RateLimit };
+type CompareRefs = { base: string; head: string };
+export type CompareReader = (repo: RepoAddress, refs: CompareRefs, timeoutMs?: number) => Promise<CompareResult>;
 const Sha = z.string().regex(/^[a-f0-9]{40}$/);
 const File = z.object({ filename: z.string().min(1), previous_filename: z.string().optional(), patch: z.string().optional(), additions: z.number().int().nonnegative(), deletions: z.number().int().nonnegative() });
 const Commit = z.object({ sha: Sha, parents: z.array(z.object({ sha: Sha })).default([]) });
@@ -22,19 +29,6 @@ const MoreCommits = z.object({ commits: z.array(Commit), total_commits: z.number
 /* GitHub lists at most this many commits on a page of a comparison, and the server reads no more pages than this. */
 const COMMITS_PER_PAGE = 250;
 const COMMIT_PAGES = 20;
-
-function trustedHost(at: URL): boolean {
-  return at.protocol === 'https:' && at.host === 'github.com' && !at.username && !at.password && !at.search && !at.hash;
-}
-
-function githubName(url: string): string | null {
-  try {
-    const at = new URL(url);
-    if (!trustedHost(at)) return null;
-    const parts = at.pathname.replace(/^\/|\/$/g, '').replace(/\.git$/, '').split('/');
-    return parts.length === 2 && parts.every(p => /^[a-z0-9][a-z0-9_.-]*$/i.test(p)) ? parts.join('/') : null;
-  } catch { return null; }
-}
 
 /* A patch GitHub shows is whole when it holds every line its counts name. One it shows none of is named, never read as empty. */
 function completePatch(file: z.infer<typeof File>): boolean {
@@ -91,18 +85,25 @@ async function githubJson(repo: RepoAddress, path: string, timeoutMs: number): P
     redirect: 'manual', signal: AbortSignal.timeout(timeoutMs),
     headers: { accept: 'application/vnd.github+json', 'user-agent': 'hornhoof', 'x-github-api-version': '2022-11-28', ...(repo.token ? { authorization: `Bearer ${repo.token}` } : {}) },
   });
-  if (!response.ok) { await response.body?.cancel(); throw new Error('unavailable'); }
+  if (!response.ok) {
+    const limit = githubRateLimit(response);
+    await response.body?.cancel().catch(() => {});
+    if (limit) throw new GitHubRateLimited(limit);
+    throw new Error('unavailable');
+  }
   const body = await bodyWithin(response, GITHUB_MAX_BYTES);
   if (!body) throw new TooLarge('too-large');
   return { body: JSON.parse(body.toString('utf8')) as unknown };
 }
 
+type JsonReader = typeof githubJson;
+
 /* The commits of the pages after the first, as GitHub gives a long comparison: the files come only with the first page. */
-async function laterCommits(repo: RepoAddress, path: string, first: z.infer<typeof Comparison>, timeoutMs: number): Promise<z.infer<typeof Commit>[] | null> {
+async function laterCommits(json: JsonReader, repo: RepoAddress, path: string, first: z.infer<typeof Comparison>, timeoutMs: number): Promise<z.infer<typeof Commit>[] | null> {
   const commits = [...first.commits];
   for (let page = 2; commits.length < first.total_commits; page++) {
     if (page > COMMIT_PAGES) return null;
-    const answer = await githubJson(repo, `${path}&page=${page}`, timeoutMs);
+    const answer = await json(repo, `${path}&page=${page}`, timeoutMs);
     const more = answer ? MoreCommits.safeParse(answer.body) : null;
     if (!more?.success || !more.data.commits.length || more.data.total_commits !== first.total_commits) return null;
     commits.push(...more.data.commits);
@@ -112,22 +113,26 @@ async function laterCommits(repo: RepoAddress, path: string, first: z.infer<type
 
 /* GitHub caps comparisons at 300 files and may omit a large/binary patch. A cap or missing lines mean an unknown change,
    never a clean diff, though the line may still be proved. Every commit between the two is read, page by page. */
-export const readCompare: CompareReader = async (repo, refs, timeoutMs = 10_000) => {
+async function compareAt(json: JsonReader, repo: RepoAddress, refs: CompareRefs, timeoutMs: number): Promise<CompareResult> {
   try {
     const path = `compare/${encodeURIComponent(refs.base)}...${encodeURIComponent(refs.head)}?per_page=${COMMITS_PER_PAGE}`;
-    const answer = await githubJson(repo, path, timeoutMs);
+    const answer = await json(repo, path, timeoutMs);
     if (!answer) return { complete: false, reason: 'unsupported-repository' };
     const first = Comparison.safeParse(answer.body);
     /* Only a full first page has more after it; a short one that counts more is no whole inventory. */
     if (!first.success || first.data.commits.length < COMMITS_PER_PAGE || first.data.total_commits <= first.data.commits.length) return parsedComparison(answer.body);
-    const commits = await laterCommits(repo, path, first.data, timeoutMs);
+    const commits = await laterCommits(json, repo, path, first.data, timeoutMs);
     return commits ? parsedComparison({ ...first.data, commits }) : { complete: false, reason: 'incomplete-comparison' };
-  } catch (error) { return failed(error, 'compare'); }
-};
+  } catch (error) {
+    return error instanceof GitHubRateLimited
+      ? { complete: false, reason: 'github-rate-limit', rateLimit: error.limit }
+      : failed(error, 'compare');
+  }
+}
 
 /* Whether a branch's commit is in the main line: GitHub's compare of the main line with it says behind or identical once every
    commit of it is there. None where GitHub cannot tell or the repository is not on GitHub. */
-export type MergeReader = (repo: RepoAddress, refs: { base: string; head: string }, timeoutMs?: number) => Promise<boolean | null>;
+export type MergeReader = (repo: RepoAddress, refs: CompareRefs, timeoutMs?: number) => Promise<boolean | null>;
 const Status = z.object({ status: z.enum(['ahead', 'behind', 'diverged', 'identical']) });
 
 export function mergedIn(body: unknown): boolean | null {
@@ -135,12 +140,15 @@ export function mergedIn(body: unknown): boolean | null {
   return parsed.success ? parsed.data.status === 'behind' || parsed.data.status === 'identical' : null;
 }
 
-export const readMerged: MergeReader = async (repo, refs, timeoutMs = 10_000) => {
+async function mergedAt(json: JsonReader, repo: RepoAddress, refs: CompareRefs, timeoutMs: number): Promise<boolean | null> {
   try {
-    const answer = await githubJson(repo, `compare/${encodeURIComponent(refs.base)}...${encodeURIComponent(refs.head)}?per_page=1`, timeoutMs);
+    const answer = await json(repo, `compare/${encodeURIComponent(refs.base)}...${encodeURIComponent(refs.head)}?per_page=1`, timeoutMs);
     return answer ? mergedIn(answer.body) : null;
-  } catch { return null; }
-};
+  } catch (error) {
+    if (error instanceof GitHubRateLimited) throw error;
+    return null;
+  }
+}
 
 /* The files of a commit, every one: GitHub cuts a long list short and says so, and a cut list is no list. entries names what
    each file and submodule holds, its mode and content, where GitHub named that for every one. */
@@ -157,10 +165,26 @@ export function treePaths(body: unknown): TreeAt {
   return entries.every((entry): entry is TreeEntry => entry !== null) ? { complete: true, paths, entries } : { complete: true, paths };
 }
 
-export const readTree: TreeReader = async (repo, commitSha, timeoutMs = 10_000) => {
+async function treeAt(json: JsonReader, repo: RepoAddress, commitSha: string, timeoutMs: number): Promise<TreeAt> {
   if (!Sha.safeParse(commitSha).success) return { complete: false, reason: 'incomplete-tree' };
   try {
-    const answer = await githubJson(repo, `git/trees/${commitSha}?recursive=1`, timeoutMs);
+    const answer = await json(repo, `git/trees/${commitSha}?recursive=1`, timeoutMs);
     return answer ? treePaths(answer.body) : { complete: false, reason: 'unsupported-repository' };
   } catch (error) { return failed(error, 'tree'); }
-};
+}
+
+const READ_MS = 10_000;
+
+/* A server shares one request limit across every REST reader, including each page of a comparison or of a commit's checks. */
+export function githubReaders(limits?: GitHubLimits): { readCompare: CompareReader; readMerged: MergeReader; readTree: TreeReader; readCi: CiReader; dispatchCi: CiDispatcher } {
+  const json: JsonReader = limits ? (repo, path, timeout) => limits.request(repo, () => githubJson(repo, path, timeout)) : githubJson;
+  return {
+    readCompare: (repo, refs, timeout = READ_MS) => compareAt(json, repo, refs, timeout),
+    readMerged: (repo, refs, timeout = READ_MS) => mergedAt(json, repo, refs, timeout),
+    readTree: (repo, commit, timeout = READ_MS) => treeAt(json, repo, commit, timeout),
+    readCi: githubCiReader(limits),
+    dispatchCi: githubCiDispatcher(limits),
+  };
+}
+
+export const { readCompare, readMerged, readTree, readCi } = githubReaders();

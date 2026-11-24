@@ -10,6 +10,7 @@ import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine } from './events.js';
 import { childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
+import { CODEX_MCP_START } from './mcp-start.js';
 import { CODEX_NO_AUTO_UPDATE } from './session-updates.js';
 import { addTokens, openaiTokens } from '../turn-tokens.js';
 import { NPM_PACKAGES } from './packages.js';
@@ -196,7 +197,7 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
   async function runCodex(input: RunInput, once: boolean): Promise<RunResult> {
     const model = [...(api ? endpointArgs(api) : []), ...(input.model ? ['-m', input.model] : []), ...(input.effort ? ['-c', `model_reasoning_effort=${JSON.stringify(input.effort)}`] : [])];
     /* Codex reads the token from the env variable the config names, so it never shows in the process list. */
-    const mcp = input.tools ? ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(input.tools.url)}`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"'] : [];
+    const mcp = input.tools ? ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(input.tools.url)}`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"', ...CODEX_MCP_START] : [];
     const told = toldPlace('codex', input);
     const instructions = input.instructions ? told.head + input.instructions + '\n' : '';
     if (instructions) writePrivate(told.file, instructions, user);

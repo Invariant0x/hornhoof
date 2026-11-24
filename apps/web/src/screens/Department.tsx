@@ -1,14 +1,14 @@
 import type { LineState } from '@hornhoof/protocol/map';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { api } from '../api';
-import { deptLabel, errorText, useLanguage, useT } from '../i18n';
+import { deptLabel, errorText, useLanguage, useT, type Language } from '../i18n';
 import { useStream } from '../live';
 import { useDepartmentTree } from '../tasks';
 import { Idle, LoadState, useLoad, type Load } from '../ui/Loading';
 import type { Department, DepartmentTree, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { Bar, percent } from '../ui/Bar';
 import { Chip, agentWorking, doingLine, Listed, modelParts, Switch, STATUS_CLASS } from '../ui/Chip';
-import { CANVAS_NARROW as NARROW, FLOAT_GAP, LEFT_PANEL_COVER, canvasSpace, freeRoom, usePanZoom, ZoomBar, type Edges } from '../ui/canvas';
+import { CANVAS_NARROW as NARROW, FLOAT_GAP, LEFT_PANEL_COVER, canvasSpace, freeRoom, useFitMove, usePanZoom, worldTransition, ZoomBar, type Edges } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, BackIcon, InfoIcon, ListIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
 import { ApprovalPolicy } from '../ui/ApprovalPolicy';
@@ -26,10 +26,12 @@ import { OneShotMarks } from '../ui/TaskWorkflow';
 import { stageName } from '../ui/stage-name';
 import { TreeView } from './TreeView';
 import { useOpenAgent } from './AgentWindowContext';
+import { UNDER_MENU, useShellTop } from '../ui/shellBars';
 import { SpeedPanel } from './SpeedPanel';
 import { arrowD, CH, FW, HH, HW, PH, PW, leadsStage, schemaLayout, stepPaths, type Frame, type Line, type Schema, type Sizes } from './schema';
 import { takeEscape } from '../ui/escape';
 import { guardedResizeObserver, useRenderGuard } from '../guard';
+import { say, sayIf } from '@hornhoof/protocol';
 
 export { employeeGroups };
 
@@ -37,16 +39,16 @@ export { employeeGroups };
    tasks do. */
 const workOf = (d: Pick<Department, 'keepsRepository'>) => ({ resultKind: d.keepsRepository === false ? 'document' as const : 'code' as const });
 
-const frameTitle = (f: Frame, language: 'en' | 'ru', t: ReturnType<typeof useT>, d: Pick<Department, 'keepsRepository'>) =>
+const frameTitle = (f: Frame, language: Language, t: ReturnType<typeof useT>, d: Pick<Department, 'keepsRepository'>) =>
   f.oneShot ? stageName(t, workOf(d), f.oneShot.stage) : f.team ? f.team.name : f.role ? f.role.title[language] : t.dept.others;
 
-function frameDescription(role: NonNullable<Frame['role']>, language: 'en' | 'ru', t: ReturnType<typeof useT>): string {
+function frameDescription(role: NonNullable<Frame['role']>, language: Language, t: ReturnType<typeof useT>): string {
   if (role.schema === 'final_check') return t.dept.finalTurnCheck;
   if (role.schema === 'observer') return t.dept.turnObserver;
   return role.description[language] ?? '';
 }
 
-function FrameHeading({ frame: f, language, canGive, department }: { frame: Frame; language: 'en' | 'ru'; canGive: boolean; department: Pick<Department, 'calls' | 'keepsRepository'> }) {
+function FrameHeading({ frame: f, language, canGive, department }: { frame: Frame; language: Language; canGive: boolean; department: Pick<Department, 'calls' | 'keepsRepository'> }) {
   const t = useT();
   return (
     <Edge cut={14} corner>
@@ -78,8 +80,9 @@ type Props = {
   /* Its Tasks button opens the tracker at this department. */
   onOpenTracker?(departmentId: string): void;
   onOpenDepartment?(id: string): void;
-  /* How wide the department's name stands beside the logo on a wide screen, for the top bar's tabs; 0 when it does not. */
-  onCrumbs?(px: number): void;
+  /* How much room the department's name takes at the top, as tall as it wraps and the 8 px under it, for the cards that
+     open under it (#1639); null once the department closes. */
+  onPlate?(room: number | null): void;
   /* The load of the company, while a department opened at its own address waits for it; the department is then only its id. */
   load?: Load;
 };
@@ -183,7 +186,7 @@ function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { 
         </Edge>
       </div>
     );
-  const role = head.title?.[language];
+  const role = sayIf(head.title, language);
   return (
     <div className={`sslot${head.on ? '' : ' off'}${onSwitch ? ' has-sw' : ''}`} style={style}>
       <button type="button" className={`shead ${STATUS_CLASS[head.status]}${on ? ' on' : ''}${flash ? ' flash' : ''}`} aria-pressed={on} onClick={() => onOpen(head.id)}>
@@ -385,30 +388,23 @@ const ZOOM_ROOM = 212;
 /* A tool shown as its icon keeps its name as its label and tooltip. */
 const named = (icons: boolean, name: string) => (icons ? { 'aria-label': name, title: name } : {});
 
-/* How much wider than its room the department's name is on one line: the top bar gives it that much more room before it wraps. */
-function oneLineOverflow(title: HTMLElement): number {
-  const plaque = title.parentElement!, was = [title.style.whiteSpace, plaque.style.flexWrap];
-  title.style.whiteSpace = 'nowrap';
-  plaque.style.flexWrap = 'nowrap';
-  const over = title.scrollWidth - title.clientWidth;
-  [title.style.whiteSpace, plaque.style.flexWrap] = was as [string, string];
-  return over;
-}
-
 /* Wrapped actions and the words of the line of what happened determine the tree's floor and the ticker's remaining room. On a
    phone the tools show as icons, and on a wide screen too when their words do not fit between the zoom and the edge: what the
-   words need is measured as they are shown, once for each language and set of tools. On a phone the name of the department
-   stands under the top bar; on a wide screen it stands beside the logo, and the top bar is told how wide it is. The tree and
-   drawers start under it on both. */
-function useDepartmentSpace(language: string, panel: Props['panel'], tools: string, onCrumbs?: (px: number) => void) {
+   words need is measured as they are shown, once for each language and set of tools. The name of the department stands 8 px
+   under the menu, or under the last bar of the shell while one stands, on every screen (#1635), and the tree and drawers
+   start 8 px under it. It moves there by transform, which offsetTop does not see: where it stands comes from the shell. */
+function useDepartmentSpace(language: string, panel: Props['panel'], tools: string, onPlate?: (room: number | null) => void) {
   const root = useRef<HTMLDivElement>(null), dock = useRef<HTMLDivElement>(null), actions = useRef<HTMLDivElement>(null), crumbs = useRef<HTMLElement>(null);
-  const [space, setSpace] = useState({ right: 16, bottom: 228, top: 116, tickerHidden: false });
+  /* plate: how tall the department's name stands, as it wraps; 0 until it is measured. */
+  const [space, setSpace] = useState({ right: 16, bottom: 228, plate: 0, tickerHidden: false });
   /* What Show everything leaves free at the bottom: the dock, with the line of what happened as tall as it shows folded. */
   const fitBottom = useRef(76);
   const tickerHidden = space.tickerHidden;
   const [icons, setIcons] = useState(false);
   const need = useRef<{ words: string; px: number } | null>(null);
   const words = `${language}|${tools}`;
+  /* While a bar of the shell stands, the name stands under the bars rather than under the menu. */
+  const shellTop = useShellTop();
   useLayoutEffect(() => {
     const el = root.current, acts = actions.current;
     if (!el || !acts) return;
@@ -430,11 +426,9 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
       const fold = line?.querySelector<HTMLElement>(':scope > .tx-fold.folded');
       const most = fold ? parseFloat(getComputedStyle(fold).maxHeight) : NaN;
       fitBottom.current = bottom + (fold && most > fold.offsetHeight ? most - fold.offsetHeight : 0);
-      const name = crumbs.current, title = name?.querySelector('h2');
-      const top = phone ? (name?.offsetHeight ? name.offsetTop + name.offsetHeight + 8 : 116)
-        : Math.max(68, name?.offsetHeight ? name.offsetTop + name.offsetHeight + 12 : 0);
-      setSpace({ right, bottom, top, tickerHidden: !phone && width - right - ZOOM_ROOM < 220 });
-      onCrumbs?.(phone || !name ? 0 : name.offsetWidth + (title ? oneLineOverflow(title) : 0));
+      const name = crumbs.current;
+      setSpace({ right, bottom, plate: name?.offsetHeight ?? 0, tickerHidden: !phone && width - right - ZOOM_ROOM < 220 });
+      onPlate?.(name?.offsetHeight ? name.getBoundingClientRect().height + 8 : null);
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
@@ -447,10 +441,13 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
     if (line) observer.observe(line);
     if (crumbs.current) observer.observe(crumbs.current);
     return () => observer.disconnect();
-  }, [panel, icons, words, onCrumbs, tickerHidden]);
-  useEffect(() => () => onCrumbs?.(0), [onCrumbs]);
-  const style = { '--ticker-right': `${space.right}px`, '--tree-bottom': `${space.bottom}px`, '--tree-top': `${space.top}px` } as CSSProperties;
-  return { root, dock, actions, crumbs, style, icons, tickerHidden: space.tickerHidden, fitBottom };
+  }, [panel, icons, words, onPlate, tickerHidden, shellTop]);
+  useEffect(() => () => onPlate?.(null), [onPlate]);
+  /* The tree starts 8 px under the name, which stands where the shell says: as a bar comes or goes it moves in the same
+     render as the shell's top, so the schema follows the name at once. */
+  const treeTop = (shellTop ?? UNDER_MENU) + (space.plate || 44) + FLOAT_GAP;
+  const style = { '--ticker-right': `${space.right}px`, '--tree-bottom': `${space.bottom}px`, '--tree-top': `${treeTop}px` } as CSSProperties;
+  return { root, dock, actions, crumbs, style, icons, tickerHidden: space.tickerHidden, fitBottom, treeTop, shellTop };
 }
 
 /* Inside a department: the head above the current task stages and their owners. Tasks, the repository, products and
@@ -462,7 +459,7 @@ export function pruneSwitched(switched: Record<string, boolean>, employees: Empl
   return kept.length === entries.length ? switched : Object.fromEntries(kept);
 }
 
-export function DepartmentView({ me, department: d, deputies, selected, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions, onOpenTracker, onCrumbs, load }: Props) {
+export function DepartmentView({ me, department: d, deputies, selected, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions, onOpenTracker, onPlate, load }: Props) {
   useRenderGuard('department');
   const t = useT();
   const { language } = useLanguage();
@@ -488,7 +485,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   const [drawer, setDrawer] = useState<Drawer | null>(null);
   const { tree: workTree, load: treeLoad } = useTreeLoad(d.id, tree || drawer === 'speed');
   const openAgent = useOpenAgent();
-  const chrome = useDepartmentSpace(language, panel, hire === 'none' ? '' : 'hire', onCrumbs);
+  const chrome = useDepartmentSpace(language, panel, hire === 'none' ? '' : 'hire', onPlate);
   const [zoomSlot, setZoomSlot] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!drawer) return;
@@ -502,6 +499,8 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   /* What the hand scrolls: the schema as it stands, between the bars floating over it. */
   const edges = useRef<() => Edges | null>(() => null);
   const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, `${d.id}:${tree}`, { min: MIN_K, max: MAX_K }, undefined, () => edges.current());
+  const viewNow = useRef(view);
+  viewNow.current = view;
   const far = view.k < FAR_K;
   const { s, world, measured } = useMeasuredSchema(d, reach.length, `${language}|${tree}`);
   const paths = useMemo(() => stepPaths(s), [s]);
@@ -512,16 +511,14 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   }, [s]);
 
   /* The room of the canvas that the department's name, the zoom, the line of what happened and the tools leave free, side px
-     in from the sides of what an open panel leaves. On a phone the canvas itself is cut FLOAT_GAP clear of the name and the
-     dock, so its content may reach the cut. */
+     in from the sides of what an open panel leaves. The canvas runs from the top of the window to its bottom (#1635). */
   const roomOf = useCallback(
     (side?: number) => {
       const el = box.current, root = chrome.root.current;
       if (!el || !el.clientWidth || !root) return null;
       const space = canvasSpace(el.clientWidth, panel === 'window' ? 0 : covered, panel === 'window' ? covered : 0);
       const bars = root.querySelectorAll(':scope > .crumbs, :scope > .dv-dock :is(.zoom, .ticker, .dv-acts)');
-      const cut = el.clientWidth <= NARROW ? { edge: 0 } : {};
-      return { space, room: freeRoom(el, bars, space, { top: TOP_ROOM - el.offsetTop, side, ...cut }) };
+      return { space, room: freeRoom(el, bars, space, { top: TOP_ROOM, side }) };
     },
     [covered, panel, chrome.root],
   );
@@ -531,21 +528,23 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   };
 
   /* Opens at a readable size, from the left or on a phone on the head's card, when the schema does not fit so; Fit shows all of
-     it. On a phone the canvas stands between the department's name and the dock: what Show everything keeps free at the
-     bottom is then only what the line of what happened may still grow by. */
-  const fitBottom = chrome.fitBottom;
+     it. It stands from 8 px under the department's name, where the department says the tree starts, to the dock, and Show
+     everything keeps free at the bottom what the line of what happened may still grow by. When a bar of the shell comes or
+     goes, the name moves and the schema slides after it in the shell's time (#1635). */
+  const { fitBottom, treeTop, shellTop } = chrome;
+  const fitMove = useFitMove(shellTop);
   const place = useCallback(
     (whole: boolean) => {
       const el = box.current, at = roomOf();
       if (!el || !at) return;
       const { left, width } = at.space, phone = el.clientWidth <= NARROW;
-      const below = (el.offsetParent?.clientHeight ?? el.clientHeight) - el.offsetTop - el.clientHeight;
-      const room = phone
-        ? { left, width, height: el.clientHeight, free: at.room.y0, bottom: Math.max(FLOAT_GAP, fitBottom.current - below) }
-        : { left, width, height: el.clientHeight, bottom: fitBottom.current, top: el.offsetTop };
-      setView({ ...schemaView(room, size.current, whole, phone), smooth: true });
+      const room = { left, width, height: el.clientHeight, free: treeTop, bottom: fitBottom.current };
+      const move = fitMove(viewNow.current, schemaView(room, size.current, whole, phone));
+      if (!move) return;
+      viewNow.current = move;
+      setView(move);
     },
-    [setView, fitBottom, roomOf],
+    [setView, fitBottom, roomOf, treeTop, fitMove],
   );
 
   /* The schema is placed again when its frames or their staff change, and once its cards are first measured, not when a card
@@ -680,7 +679,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
     width: s.right,
     height: s.h,
     transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`,
-    transition: still || !view.smooth ? 'none' : 'transform .8s cubic-bezier(.3,.7,.2,1)',
+    transition: worldTransition(view.smooth, still),
     ['--k' as string]: far ? Math.min(2, Math.max(1, 0.72 / view.k)).toFixed(3) : '1',
   } as CSSProperties;
   const drawerName = drawerTitle(t, drawer);
@@ -704,10 +703,10 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
                   type="checkbox"
                   className="sw"
                   checked={f.members.some(m => shown(m.e).on)}
-                  aria-label={t.dept.roleOn(f.role.title[language])}
-                  title={t.dept.roleOn(f.role.title[language])}
+                  aria-label={t.dept.roleOn(say(f.role.title, language))}
+                  title={t.dept.roleOn(say(f.role.title, language))}
                   onPointerDown={ev => ev.stopPropagation()}
-                  onChange={ev => flipRole(f.role!.title[language], f.members.map(m => m.e))(ev.target.checked)}
+                  onChange={ev => flipRole(say(f.role!.title, language), f.members.map(m => m.e))(ev.target.checked)}
                 />
               )}
               <div className="slayer">{f.members.map(m => <Chip key={m.e.id} e={shown(m.e)} x={m.x - f.x} y={m.y - s.ft} h={m.h} on={selected === m.e.id} lead={leadsStage(m.e)} flash={flashing.has(m.e.id)} serverNow={serverNow} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />)}</div>

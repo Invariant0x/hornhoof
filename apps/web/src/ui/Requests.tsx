@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { useT, type Messages } from '../i18n';
 import type { TaskPlace, UncheckedItem, WaitingRequest } from '../types';
@@ -8,6 +8,7 @@ import { Markdown } from './Markdown';
 import { MaterialViewer } from './MaterialViewer';
 import { OptionMaterialItems, RequestMaterialsZone, readMaterialStamp, useRequestMaterials, type MaterialItem, type MaterialManifestView } from './RequestMaterials';
 import { proseErrorText } from './TaskAttachments';
+import { sinceSeconds, spanText } from './tracker-words';
 
 /* Whether this person's words to the agent in its window or terminal answer any of these: a question and a stuck task they
    may take take them, a pick and a commit to approve do not. */
@@ -36,16 +37,20 @@ const defaultPlaceName = (p: TaskPlace) => p?.name ?? '';
 
 /* onOpenAgent opens the asking agent's window, to see in its terminal what it did. */
 /* waitsFor: whom a request waits for, by the person it is for, on lists of more people than one. */
-type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName?: (p: TaskPlace) => string; inline?: boolean; waitsFor?: (personId: string) => string };
+/* viewerId: the signed-in person; headings address them directly only when the request waits for them and they may answer it. */
+type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName?: (p: TaskPlace) => string; inline?: boolean; waitsFor?: (personId: string) => string; viewerId?: string; onDefer?: () => void };
+
+const isAddressedToViewer = (request: WaitingRequest, viewerId?: string): boolean =>
+  request.canAnswer && (viewerId === undefined || request.ownerPersonId === viewerId);
 
 /* An approval names a commit, or under a department's policy the work its words say. */
-const asksToApprove = (t: Messages, request: WaitingRequest) => (request.commit ? t.tasks.asksApproval(request.agent.name) : t.tasks.asksApprovalOf(request.agent.name));
-
-function whoAsked(t: Messages, request: WaitingRequest): string {
-  if (request.kind === 'approval') return asksToApprove(t, request);
+export function whoAsked(t: Messages, request: WaitingRequest, viewerId?: string): string {
   if (request.kind === 'stuck') return t.tasks.stuck(request.agent.name);
-  if (request.kind === 'choice') return t.tasks.asksChoice(request.agent.name);
-  return t.tasks.asks(request.agent.name);
+  const words = isAddressedToViewer(request, viewerId)
+    ? { question: t.tasks.asks, choice: t.tasks.asksChoice, approval: t.tasks.asksApproval, approvalOf: t.tasks.asksApprovalOf }
+    : t.tasks.asksOther;
+  if (request.kind === 'approval') return (request.commit ? words.approval : words.approvalOf)(request.agent.name);
+  return words[request.kind](request.agent.name);
 }
 
 const pickBody = (pick: number, text: string) => (text.trim() ? { pick, answer: text.trim() } : { pick });
@@ -112,16 +117,22 @@ function ReadOnly({
   );
 }
 
-function RequestHeader({ who, request, onOpenTask, onOpenAgent, placeName = defaultPlaceName, waitsFor }: Shared & { who: string; request: WaitingRequest }) {
+function RequestAuthor({ who, request }: { who: string; request: WaitingRequest }) {
+  const t = useT();
+  return <><b><bdi>{who}</bdi></b>{namedReadOnly(request) && <span className="status wait-neutral">{t.tasks.queue.readOnly}</span>}</>;
+}
+
+function RequestHeader({ who, request, onOpenTask, onOpenAgent, placeName = defaultPlaceName, waitsFor, onDefer }: Shared & { who: string; request: WaitingRequest }) {
   const t = useT();
   const { task, agent } = request;
   return (
     <header>
-      <b>{who}</b>
+      <RequestAuthor who={who} request={request} />
       <button className="linkish" type="button" onClick={() => onOpenTask(task.id)}>
-        #{task.number} {task.title}
+        <bdi>#{task.number} {task.title}</bdi>
       </button>
       {task.department && <small>{placeName(task.department)}</small>}
+      {onDefer && <small><bdi>{spanText(t, sinceSeconds(request.at))}</bdi></small>}
       {waitsFor && <small>{waitsFor(request.ownerPersonId)}</small>}
       <button className="btn small ghost req-term" type="button" onClick={() => onOpenAgent(agent.id)}>
         {t.tasks.openTerminal(agent.name)}
@@ -140,14 +151,14 @@ function RequestWords({ request, said, inline }: { request: WaitingRequest; said
         </div>
         {!inline && <details className="req-more">
           <summary>{t.tasks.inDetail}</summary>
-          <p className="req-text">{said}</p>
+          <p className="req-text" dir="auto">{said}</p>
         </details>}
       </>
     );
   }
   return (
     <>
-      <p className="req-text">{said}</p>
+      <p className="req-text" dir="auto">{said}</p>
       {request.explaining && <p className="muted">{t.tasks.explaining}</p>}
     </>
   );
@@ -197,6 +208,7 @@ function PlainChoiceButtons({ options, busy, onPick }: { options: WaitingRequest
 }
 
 type ChoiceProps = {
+  defer?: ReactNode;
   options: WaitingRequest['options'];
   manifest: MaterialManifestView;
   text: string;
@@ -208,7 +220,7 @@ type ChoiceProps = {
 };
 
 /* A choice lets the person inspect materials first, then pick a way with an optional note or send feedback without picking one. */
-function ChoiceForm({ options, manifest, text, busy, onText, onPick, onSubmit, onOpenMaterial }: ChoiceProps) {
+function ChoiceForm({ options, manifest, text, busy, onText, onPick, onSubmit, onOpenMaterial, defer }: ChoiceProps) {
   const t = useT();
   return (
     <form className="req-form" onSubmit={onSubmit}>
@@ -225,6 +237,7 @@ function ChoiceForm({ options, manifest, text, busy, onText, onPick, onSubmit, o
           <button className="btn ghost" type="submit" disabled={busy || !text.trim()}>
             {t.tasks.sendFeedback}
           </button>
+          {defer}
         </div>
       </div>
     </form>
@@ -232,6 +245,7 @@ function ChoiceForm({ options, manifest, text, busy, onText, onPick, onSubmit, o
 }
 
 type QuestionProps = {
+  defer?: ReactNode;
   text: string;
   busy: boolean;
   onText: (value: string) => void;
@@ -239,7 +253,7 @@ type QuestionProps = {
   onCancel?: () => void;
 };
 
-function QuestionForm({ text, busy, onText, onSubmit, onCancel }: QuestionProps) {
+function QuestionForm({ text, busy, onText, onSubmit, onCancel, defer }: QuestionProps) {
   const t = useT();
   return (
     <form className="req-form" onSubmit={onSubmit}>
@@ -255,12 +269,14 @@ function QuestionForm({ text, busy, onText, onSubmit, onCancel }: QuestionProps)
             {t.tasks.cancelTask}
           </button>
         )}
+        {defer}
       </div>
     </form>
   );
 }
 
 type ApprovalProps = {
+  defer?: ReactNode;
   request: WaitingRequest;
   text: string;
   busy: boolean;
@@ -268,7 +284,7 @@ type ApprovalProps = {
   onDecide: (approve: boolean) => void;
 };
 
-function ApprovalForm({ request, text, busy, onText, onDecide }: ApprovalProps) {
+function ApprovalForm({ request, text, busy, onText, onDecide, defer }: ApprovalProps) {
   const t = useT();
   return (
     <div className="req-form">
@@ -282,12 +298,14 @@ function ApprovalForm({ request, text, busy, onText, onDecide }: ApprovalProps) 
         <button className="btn ghost" type="button" disabled={busy} onClick={() => onDecide(false)}>
           {t.tasks.decline}
         </button>
+        {defer}
       </div>
     </div>
   );
 }
 
 type FormActions = {
+  defer?: ReactNode;
   manifest: MaterialManifestView;
   text: string;
   busy: boolean;
@@ -299,7 +317,7 @@ type FormActions = {
   onOpenMaterial: (id: string, opener: HTMLElement | null) => void;
 };
 
-function RequestForm({ request, manifest, text, busy, onText, onAnswer, onPick, onDecide, onCancel, onOpenMaterial }: FormActions & { request: WaitingRequest }) {
+function RequestForm({ request, manifest, text, busy, onText, onAnswer, onPick, onDecide, onCancel, onOpenMaterial, defer }: FormActions & { request: WaitingRequest }) {
   if (!request.canAnswer) return <ReadOnly request={request} manifest={manifest} onOpenMaterial={onOpenMaterial} />;
   if (request.kind === 'choice') {
     return (
@@ -312,11 +330,12 @@ function RequestForm({ request, manifest, text, busy, onText, onAnswer, onPick, 
         onPick={onPick}
         onSubmit={onAnswer}
         onOpenMaterial={onOpenMaterial}
+        defer={defer}
       />
     );
   }
-  if (request.kind === 'approval') return <ApprovalForm request={request} text={text} busy={busy} onText={onText} onDecide={onDecide} />;
-  return <QuestionForm text={text} busy={busy} onText={onText} onSubmit={onAnswer} onCancel={request.kind === 'stuck' ? onCancel : undefined} />;
+  if (request.kind === 'approval') return <ApprovalForm request={request} text={text} busy={busy} onText={onText} onDecide={onDecide} defer={defer} />;
+  return <QuestionForm text={text} busy={busy} onText={onText} onSubmit={onAnswer} onCancel={request.kind === 'stuck' ? onCancel : undefined} defer={defer} />;
 }
 
 function useRequestSend(requestId: string, onDone: () => void) {
@@ -364,7 +383,9 @@ function RequestFeedback({ busy, failure }: { busy: boolean; failure: unknown })
 
 /* One thing an agent waits for: a question to answer, a choice to answer or pick, a commit to approve, or a stuck task.
    Its answers show only to a person the server lets take it; anyone else reads who takes it. */
-function RequestItem({ request, onDone, inline, ...shared }: Shared & { request: WaitingRequest; onDone: () => void }) {
+export const namedReadOnly = (request: WaitingRequest) => !request.canAnswer && request.decidedBy?.kind === 'named_person';
+
+function RequestItem({ request, onDone, inline, onDefer, viewerId, ...shared }: Shared & { request: WaitingRequest; onDone: () => void }) {
   const t = useT();
   const [text, setText] = useState(() => draftsByRequest.get(request.id) ?? '');
   const { busy, failure, send } = useRequestSend(request.id, onDone);
@@ -385,12 +406,12 @@ function RequestItem({ request, onDone, inline, ...shared }: Shared & { request:
 
   /* Hornhoof's own words about a stuck task are said in the person's language. */
   const said = request.kind === 'stuck' ? t.tasks.stuckText(agent.name, task.number) : request.text;
-  const who = whoAsked(t, request);
+  const who = whoAsked(t, request, viewerId);
   return (
     <article className={`req req-${request.kind}`} aria-label={`#${task.number} ${task.title}`} aria-busy={busy}>
-      {inline ? <header><b>{who}</b></header> : <RequestHeader who={who} request={request} {...shared} />}
+      {inline ? <header><RequestAuthor who={who} request={request} /></header> : <RequestHeader who={who} request={request} onDefer={onDefer} {...shared} />}
       <RequestWords request={request} said={said} inline={inline} />
-      <RequestMaterialsZone items={manifest.common} failure={manifestFailure} onOpen={openViewer} />
+      <RequestMaterialsZone items={manifest.common} failure={manifestFailure} onOpen={openViewer} heading={onDefer ? t.tasks.queue.materials : undefined} />
       <RequestForm
         request={request}
         manifest={manifest}
@@ -402,6 +423,7 @@ function RequestItem({ request, onDone, inline, ...shared }: Shared & { request:
         onDecide={approve => reply(approvalBody(approve, text))}
         onCancel={inline ? undefined : () => void send(`/api/tasks/${task.id}/cancel`, {})}
         onOpenMaterial={openViewer}
+        defer={onDefer && <button className="btn ghost" type="button" disabled={busy} onClick={onDefer}>{t.tasks.queue.defer}</button>}
       />
       <RequestFeedback busy={busy} failure={failure} />
       {viewer && <MaterialViewer items={availableItems} activeId={viewer.id} opener={viewer.opener} onSelect={selectViewer} onClose={closeViewer} />}

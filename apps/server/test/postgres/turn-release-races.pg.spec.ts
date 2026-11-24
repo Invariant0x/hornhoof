@@ -7,7 +7,6 @@ import { minuteRound } from '../../src/modules/agents/timers.js';
 import { createTask, loadTask, report, submit } from '../../src/modules/tasks/engine.js';
 import { routeOf } from '../../src/modules/tasks/echelons-store.js';
 import { until } from '../helpers-basic.js';
-import { PRODUCT_FILES, partReceipt, partSelection, productSnapshot } from '../product-run.js';
 import { appContext, backendPid, privatePostgres, type PostgresFixture } from './helpers.js';
 
 const MAIN = 'a'.repeat(40);
@@ -53,25 +52,11 @@ async function released(pg: PostgresFixture) {
   const repo: Repo = { heads: { main: RELEASE, [branch]: RELEASE }, tags: { 'v1.6.0': MAIN, 'v1.7.0': RELEASE }, holds: { [RELEASE]: [MAIN], [OWN]: [MAIN], [LATER]: [OWN, RELEASE, MAIN] } };
   serve(a.ctx, repo);
   serve(b.ctx, repo);
-  /* The release of the turn as the release tool keeps it, recorded before main moved: its release task, the whole run of the
-     product's tests on its commit, in the full profile with a passed receipt of every part, as a release takes only such a
-     run, and the person's approval of it. */
+  /* The release of the turn as the release tool keeps it, recorded before main moved: its release task, what the repository's CI
+     said of its commit (green, with three checks), and the person's approval of it. */
   const [release] = await pg.db.insert(schema.tasks).values({ companyId: company!.id, number: 100, title: 'Release', status: 'open', departmentId: dept!.id, assigneeAgentId: head.id }).returning();
-  const [job] = await pg.db.insert(schema.jobs).values({ companyId: company!.id, subscriptionId: plan!.id, agentId: head.id, taskId: release!.id, kind: 'conversation', prompt: 'Release', timeoutMs: 900000, status: 'running' }).returning();
-  const repositoryScope = { companyId: company!.id, repositoryOwnerId: dept!.id, repoUrlHash: 'a'.repeat(64) };
-  const snapshot = await productSnapshot(repositoryScope, RELEASE);
-  const [run] = await pg.db.insert(schema.testRuns).values({
-    companyId: company!.id, number: 1, taskId: release!.id, agentId: head.id, jobId: job!.id, departmentId: dept!.id, branch, commitSha: RELEASE, command: '', parts: PRODUCT_FILES.length, timeoutMs: 600000, status: 'passed', finishedAt: new Date(),
-    environmentRequest: { version: 1, repositoryScope, requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null },
-    environmentSnapshot: snapshot, environmentHash: snapshot.description.manifestHash,
-    fileCache: { mode: 'full', release: branch, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] },
-  }).returning();
-  await pg.db.insert(schema.testParts).values(PRODUCT_FILES.map((file, index) => {
-    const selection = partSelection(RELEASE, file);
-    return { companyId: company!.id, runId: run!.id, part: index + 1, status: 'passed' as const, commit: RELEASE, exitCode: 0, finishedAt: new Date(), environmentSelection: { selection, after: [] }, environmentReceipt: partReceipt(snapshot, selection, true) };
-  }));
   const [approval] = await pg.db.insert(schema.requests).values({ companyId: company!.id, taskId: release!.id, agentId: head.id, kind: 'approval', text: 'Release turn 1.', commit: RELEASE, status: 'approved', answeredBy: person!.id, answeredAt: new Date() }).returning();
-  await pg.db.insert(schema.turnReleases).values({ companyId: company!.id, turnId: turn!.id, commit: RELEASE, baseCommitSha: MAIN, runId: run!.id, tasks: [], taskId: release!.id, approvalRequestId: approval!.id, requestedByAgentId: head.id, covered: true, uncovered: [] });
+  await pg.db.insert(schema.turnReleases).values({ companyId: company!.id, turnId: turn!.id, commit: RELEASE, baseCommitSha: MAIN, ciState: 'green', ciChecks: 3, tasks: [], taskId: release!.id, approvalRequestId: approval!.id, requestedByAgentId: head.id, covered: true, uncovered: [] });
   const designTask = async () => {
     const { task } = await createTask(a.ctx, { agentId: head.id }, { title: 'Screen', brief: 'Lay out a screen.', body: 'Lay it out.', departmentId: dept!.id, assigneeAgentId: author.id, executor: true, small: false, riskClass: 'none', paths: ['screens/**'] });
     repo.heads[`task-${task.number}`] = OWN;
@@ -123,20 +108,23 @@ describe('closing a turn by its tag races the results that join it', () => {
     const ready = kind === 'echelons' ? await f.designTask() : null;
     const turnkey = kind === 'turnkey' ? await f.turnkeyTask() : null;
     const read = f.b.ctx.readCommit;
-    let joined: Promise<unknown> | null = null;
+    let joined = null as Promise<unknown> | null;
     f.b.ctx.readCommit = async (repo, want) => {
       const at = await read(repo, want);
       if (!joined && 'branch' in want && want.branch === f.branch) {
         f.repo.heads[f.branch] = LATER;
         joined = ready
           ? report(f.a.ctx, f.head.id, ready.task.id, { done: true, summary: 'Fast-forwarded the turn.', acceptance: ready.acceptance })
-          : report(f.a.ctx, f.player.id, turnkey!.id, { done: true, summary: 'Fast-forwarded the turn to task-N.' });
+          : report(f.a.ctx, f.player.id, turnkey!.id, { done: true, summary: 'Fast-forwarded the turn to task-N.', turnkey: { commit: OWN, baseCommit: MAIN } });
         await joined;
       }
       return at;
     };
     await minuteRound(f.b.ctx, new Date(), () => () => undefined);
     expect(joined).not.toBeNull();
+    /* The join happens inside the read of the head, whose failure the release round swallows: a report the server turned
+       down has to say so here, in its own words, and not show up below as a task still open. */
+    await joined;
     const id = (ready?.task ?? turnkey!).id;
     expect(await loadTask(pg.db, id)).toMatchObject({ status: 'done', turnId: f.turn.id });
     expect(await f.openTurn()).toMatchObject({ id: f.turn.id });

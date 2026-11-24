@@ -15,8 +15,10 @@ import { nodeHeld } from '../updates/drain.js';
 import { firstOfRun, outcomeOfOperatorTry } from './failure-run.js';
 import { fromStart } from './not-started.js';
 import { currentOperatorQuestion, liveFailureSignals, qualifyingReasons } from './policy.js';
+import { unavailableOperatorHold } from './recovery-state.js';
 import { operatorTransaction } from './transactions.js';
 import { operatorNotification } from './notifications.js';
+import { saying, wordsFor } from '../../locales/index.js';
 
 type Case = typeof programOperatorCases.$inferSelect;
 /* A case of what a node saw of a program, which that node holds too. */
@@ -25,15 +27,8 @@ const ofProgram = (row: Case): row is ProgramCase => !fromStart(row);
 type Signal = { agentKey: string; jobId: string | null; instance: string; reason: OperatorReason; evidenceKey: string; deliveryId: string | null };
 type Seen = { frame: OperatorEvidence; png: Buffer | null };
 const scope = (row: { agentId: string; instance: string }) => and(eq(programOperatorCases.agentId, row.agentId), eq(programOperatorCases.instance, row.instance));
-const reasonNames: Record<CaseReason, { en: string; ru: string }> = {
-  assignment_unrecorded: { en: 'assignment words not recorded for sixty seconds', ru: 'слова поручения не записаны за минуту' },
-  recorded_no_activity: { en: 'no first own event for five minutes after the receipt', ru: 'после квитанции нет первого своего события пять минут' },
-  live_words_not_taken: { en: 'three consecutive live deliveries not taken', ru: 'три живые доставки подряд не взяты' },
-  startup_exit: { en: 'program exited within a minute of launch', ru: 'программа завершилась в первую минуту запуска' },
-  question_waiting: { en: 'program question waiting for thirty seconds', ru: 'вопрос программы ждет ответа тридцать секунд' },
-  not_started: { en: 'a turn ended before its program started', ru: 'ход закончился до запуска программы' },
-  node_cannot_work: { en: 'the machine cannot write its work folder', ru: 'машина не может писать в свою рабочую папку' },
-};
+/* A case's reason in every language, as its notice carries it; the English reads in the words an agent is given. */
+const reasonNames = (reason: CaseReason) => ({ en: wordsFor('en').operator.cases[reason], named: (name: string) => saying(words => words.operator.named(name, words.operator.cases[reason])) });
 
 /* Called with the agent row locked, inside the same transaction as its new evidence. */
 export async function updateOperatorCases(ctx: Ctx, frame: OperatorEvidence, now: Date, png: Buffer | null = null): Promise<void> {
@@ -58,15 +53,22 @@ async function resolveUnqualifiedCases(ctx: Ctx, frame: OperatorEvidence, qualif
 }
 
 async function instanceFacts(ctx: Ctx, agentId: string, instance: string): Promise<OperatorEvidence[]> {
-  const rows = await ctx.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->'operatorEvidence'->>'instance' = ${instance}`))
-    .orderBy(sql`(${agentEvents.data}->'operatorEvidence'->>'ordinal')::bigint`);
-  return rows.flatMap(({ data }) => {
-    const parsed = OperatorNodeMessage.safeParse((data as { operatorEvidence?: unknown }).operatorEvidence);
-    return parsed.success && 'evidenceId' in parsed.data ? [parsed.data] : [];
-  });
+  const rows = await ctx.db
+    .select(only(agentEvents, 'data'))
+    .from(agentEvents)
+    .where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'operatorEvidenceId' is not null`, sql`${agentEvents.data}->'operatorEvidence'->>'instance' = ${instance}`));
+  return rows
+    .flatMap(({ data }) => {
+      const parsed = OperatorNodeMessage.safeParse((data as { operatorEvidence?: unknown }).operatorEvidence);
+      return parsed.success && 'evidenceId' in parsed.data ? [parsed.data] : [];
+    })
+    .sort((a, b) => a.ordinal - b.ordinal);
 }
 
+const hasQuestionEvidence = (row: Pick<Case, 'evidence'>): boolean => row.evidence.some(evidence => evidence.reason === 'question_waiting');
+
 export async function operatorCaseMode<Row extends Case>(ctx: Ctx, row: Row): Promise<{ reason: Row['reason'] | 'question_waiting'; questionId?: string; question?: OperatorQuestion; readOnly: boolean }> {
+  if (!hasQuestionEvidence(row)) return { reason: row.reason, readOnly: row.readOnly };
   const facts = await instanceFacts(ctx, row.agentId, row.instance);
   const signal = qualifyingReasons(facts).find(signal => signal.reason === 'question_waiting' && row.evidence.some(evidence => evidence.reason === signal.reason && evidence.evidenceKey === signal.evidenceKey));
   if (!signal) return { reason: row.reason, readOnly: row.readOnly };
@@ -169,9 +171,9 @@ async function planCanTakeTurn(ctx: Ctx, sub: typeof subscriptions.$inferSelect)
 
 async function queueNotice(ctx: Ctx, row: Case, to: string, escalated: boolean): Promise<string> {
   const [target] = await ctx.db.select({ name: agents.name, taskId: jobs.taskId }).from(agents).innerJoin(jobs, eq(jobs.id, row.jobId)).where(and(eq(agents.id, row.agentId), eq(jobs.agentId, row.agentId), eq(jobs.companyId, row.companyId)));
-  const name = target?.name ?? row.agentId, reason = reasonNames[row.reason];
+  const name = target?.name ?? row.agentId, reason = reasonNames(row.reason);
   const text = `${noticeText(row, name, reason, escalated)}${inputNote(row)}`;
-  const notification = await operatorNotification(ctx, { companyId: row.companyId, taskId: target?.taskId ?? null }, { en: `${name}: ${reason.en}`, ru: `${name}: ${reason.ru}` });
+  const notification = await operatorNotification(ctx, { companyId: row.companyId, taskId: target?.taskId ?? null }, reason.named(name));
   const message = noticeMessage(row, text, notification);
   return insertTurn(ctx, { companyId: row.companyId, agentId: to, prompt: text, createdBy: null, message });
 }
@@ -183,7 +185,7 @@ function noticeMessage(row: Case, text: string, notification: Notification) {
   return { personId: null, text, notification, ...(actor?.id ? { actor, from: 'agent' as const, by: actor.id, name: actor.name } : {}), ...(row.pictureId ? { pictures: [{ id: row.pictureId, name: 'program-question.png' }] } : {}), operatorQuestion: row.resolution?.question, programOperatorCase: row.id, targetAgentId: row.agentId, targetJobId: row.jobId, programInstanceId: row.instance, operatorReason: row.reason };
 }
 
-function noticeText(row: Case, name: string, reason: { en: string; ru: string }, escalated: boolean): string {
+function noticeText(row: Case, name: string, reason: { en: string }, escalated: boolean): string {
   return escalated ? escalationText(row, name, reason.en) : `Program operator case ${row.id} for ${name}: ${reason.en}. Read program_screen for employee ${row.agentId}. Use program_keys with a fresh snapshot for actions within your authority. Report with tell_orchestrator: cleared once the program works again, needs_owner for personal consent or terms, failed for a failed repair, or denied after denying a permission. Keep private input out of your report.`;
 }
 
@@ -255,7 +257,7 @@ async function latestInstance(ctx: Ctx, agentId: string): Promise<string | null>
   const [current] = await ctx.db.select({ instance: programInstances.id }).from(programInstances)
     .innerJoin(agentEvents, sql`${agentEvents.data}->'operatorEvidence'->>'instance' = ${programInstances.id}::text`)
     .innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
-    .where(and(eq(programInstances.agentId, agentId), eq(agentEvents.agentId, agentId), eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), eq(jobs.nodeId, programInstances.nodeId), eq(jobs.companyId, programInstances.companyId)))
+    .where(and(eq(programInstances.agentId, agentId), eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'operatorEvidenceId' is not null`, eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), eq(jobs.nodeId, programInstances.nodeId), eq(jobs.companyId, programInstances.companyId)))
     .orderBy(desc(programInstances.createdAt)).limit(1);
   if (current) return current.instance;
   const [latest] = await ctx.db.select({ instance: programInstances.id }).from(programInstances).where(eq(programInstances.agentId, agentId)).orderBy(desc(programInstances.createdAt)).limit(1);
@@ -278,7 +280,7 @@ async function resolveLiveBefore(ctx: Ctx, agentId: string, ordinal: number): Pr
 }
 
 export async function queueEscalation(ctx: Ctx, row: Case): Promise<void> {
-  if (row.escalationJobId) return;
+  if (row.escalationJobId || unavailableOperatorHold(row)) return;
   const first = await firstOfRun(ctx, row);
   return first ? shareEscalation(ctx, row, first) : openEscalation(ctx, row);
 }
@@ -308,9 +310,9 @@ async function failedAgent(ctx: Ctx, row: Case) {
 async function tellPeople(ctx: Ctx, row: Case, name: string): Promise<void> {
   const [told] = await ctx.db.select(idOnly(agentEvents)).from(agentEvents).where(and(eq(agentEvents.agentId, row.agentId), sql`${agentEvents.data}->>'operatorEscalation' = ${row.id}`)).limit(1);
   if (told) return;
-  const reason = reasonNames[row.reason];
+  const reason = reasonNames(row.reason);
   const text = `${name}'s program needs a person: ${reason.en}. Recovery ended: ${row.resolution?.outcome}. No turn goes to ${name} about this, and the words it was given wait for its next turn that works. Open its terminal to see what stops it.`;
-  const notification = await operatorNotification(ctx, { companyId: row.companyId, taskId: null }, { en: `${name}: ${reason.en}`, ru: `${name}: ${reason.ru}` });
+  const notification = await operatorNotification(ctx, { companyId: row.companyId, taskId: null }, reason.named(name));
   await appendEvent(ctx, { companyId: row.companyId, agentId: row.agentId, jobId: row.jobId, kind: 'message', data: { text, turnFact: true, notification, operatorEscalation: row.id, ...(row.pictureId ? { pictures: [{ id: row.pictureId, name: 'program-screen.png' }] } : {}) } });
 }
 
@@ -343,8 +345,13 @@ export async function syncOperatorCases(ctx: Ctx, agentId: string, now = new Dat
   }
 }
 
+const caseNoticeIds = (row: Case): Array<string | null | undefined> => [
+  row.operatorJobId, row.escalationJobId, row.continuationJobId,
+  row.resolution?.holdCall?.job, ...Object.values(row.resolution?.holdNoticeJobs ?? {}),
+];
+
 async function pumpCaseNotices(ctx: Ctx, row: Case): Promise<void> {
-  for (const id of [row.operatorJobId, row.escalationJobId, row.continuationJobId, row.resolution?.holdCall?.job]) {
+  for (const id of caseNoticeIds(row)) {
     if (!id) continue;
     const [job] = await ctx.db.select(only(jobs, 'agentId')).from(jobs).where(eq(jobs.id, id));
     if (job?.agentId) await pump(ctx, job.agentId);

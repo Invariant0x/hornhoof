@@ -698,11 +698,105 @@ describe('what waits for people', () => {
     shell('/tasks?show=waits', routes);
     const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
     await within(waiting).findByText('Which header?');
-    expect(articles(waiting)).toEqual(['#23 Refund button', '#24 Fix the login page']);
+    expect(articles(waiting)).toEqual(['#23 Refund button']);
+    expect(within(waiting).getByRole('button', { name: /Which header/, expanded: false })).toBeInTheDocument();
     expect(waiting).not.toHaveTextContent('Which bank for the cards?');
     /* The refund button's question and the login page, which waits for Ivan and asks a question too, once. */
     const side = screen.getByRole('navigation', { name: 'Task lists' });
     expect(within(side).getByRole('button', { name: 'Waits for me 2' })).toBeInTheDocument();
+  });
+
+  it("does not show another person's named question as the CEO's own task wait, even with an older task summary", async () => {
+    const user = userEvent.setup();
+    const oldSummary = { ...PAY, time: LOGIN.time };
+    shell('/tasks?show=waits', {
+      ...routes,
+      'GET /api/tasks?status=all': [200, { tasks: [oldSummary] }],
+      'GET /api/requests': [200, decisions([FOR_THEO])],
+    });
+    const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+    await waitFor(() => expect(waiting).toHaveTextContent(/Nothing is waiting for an answer|Take card payments/));
+    expect(waiting).toHaveTextContent('Nothing is waiting for an answer');
+    expect(waiting).not.toHaveTextContent('Take card payments');
+    const side = screen.getByRole('navigation', { name: 'Task lists' });
+    expect(within(side).getByRole('button', { name: 'Waits for me 0' })).toBeInTheDocument();
+    await user.click(within(side).getByRole('button', { name: 'Waiting for people 1' }));
+    const people = screen.getByRole('region', { name: 'Waiting for people' });
+    const request = within(people).getByRole('article', { name: '#21 Take card payments' });
+    expect(request).toHaveTextContent(/Asked:\s*.*Theo/);
+    expect(request).toHaveTextContent('Only the person asked can answer.');
+    expect(people).not.toHaveTextContent('Waits for Ivan');
+    await user.click(within(request).getByRole('button', { name: /^Open$/ }));
+    const opened = await card('#21 Take card payments');
+    expect(await within(opened).findByText('Read only', { exact: true })).toBeInTheDocument();
+    expect(within(opened).queryByRole('button', { name: 'Send answer' })).not.toBeInTheDocument();
+  });
+
+  it('names the addressee from the task wait when the person is missing from the company map', async () => {
+    const time = LOGIN.time!;
+    const payment = { ...PAY, time: { ...time, waitsOn: [{ ...time.waitsOn[0]!, request: true as const, who: { kind: 'person' as const, ...THEO } }] } };
+    shell('/tasks?show=people', {
+      'GET /api/tasks?status=all': [200, { tasks: [payment] }],
+      'GET /api/requests': [200, decisions([FOR_THEO])],
+    });
+    const request = await screen.findByRole('article', { name: '#21 Take card payments' });
+    expect(request).toHaveTextContent(/Asked:\s*.*Theo/);
+  });
+
+  it('opens one queue card, moves a deferred card to the end, and advances on an accepted answer', async () => {
+    const user = userEvent.setup();
+    const third = asked('r-third', PAY, 'Which currency?', {});
+    const received = [FOR_IVAN, FOR_ANYONE, third];
+    let finishRefresh!: () => void;
+    const refresh = new Promise<void>(resolve => { finishRefresh = resolve; });
+    let answered = false;
+    let failed = false;
+    const calls = shell('/tasks?show=waits', {
+      ...routes,
+      'GET /api/tasks?status=all': [200, { tasks: [] }],
+      'GET /api/requests': async () => {
+        if (answered) await refresh;
+        return [200, decisions(answered ? [FOR_IVAN, third] : received)];
+      },
+      'POST /api/requests/r-any': () => {
+        if (!failed) {
+          failed = true;
+          return [503, { error: { code: 'internal', message: 'Try again.' } }];
+        }
+        answered = true;
+        return [200, { ok: true }];
+      },
+    });
+    const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+    await within(waiting).findByText('How much may a refund be?');
+    expect(articles(waiting)).toEqual(['#23 Refund button']);
+    expect(within(waiting).getByRole('button', { name: /Which header/, expanded: false })).toBeInTheDocument();
+    await user.click(within(waiting).getByRole('button', { name: /Which currency/, expanded: false }));
+    expect(articles(waiting)).toEqual(['#21 Take card payments']);
+    await user.click(within(waiting).getByRole('button', { name: 'Defer' }));
+    expect(articles(waiting)).toEqual(['#23 Refund button']);
+    await user.click(within(waiting).getByRole('button', { name: 'Defer' }));
+    expect(articles(waiting)).toEqual(['#24 Fix the login page']);
+    const strips = within(waiting).getAllByRole('button', { expanded: false });
+    expect(strips[0]).toHaveAccessibleName(/Which currency/);
+    expect(strips[1]).toHaveAccessibleName(/How much may a refund be/);
+    expect(strips[0]).toHaveTextContent('Deferred');
+    await user.type(within(waiting).getByRole('textbox', { name: 'Your answer' }), 'Use the simple header.');
+    await user.click(within(waiting).getByRole('button', { name: 'Send answer' }));
+    expect(await within(waiting).findByRole('alert')).toBeInTheDocument();
+    expect(articles(waiting)).toEqual(['#24 Fix the login page']);
+    expect(within(waiting).getAllByRole('button', { expanded: false })).toHaveLength(2);
+    expect(within(waiting).getByRole('textbox', { name: 'Your answer' })).toHaveValue('Use the simple header.');
+    await user.click(within(waiting).getByRole('button', { name: 'Send answer' }));
+    try {
+      await within(waiting).findByRole('article', { name: '#21 Take card payments' });
+      expect(articles(waiting)).toEqual(['#21 Take card payments']);
+      expect(within(waiting).getByRole('button', { name: /How much may a refund be/, expanded: false })).toBeInTheDocument();
+      expect(within(waiting).queryByText('#24 Fix the login page')).not.toBeInTheDocument();
+      expect(calls).toContainEqual({ method: 'POST', path: '/api/requests/r-any', body: { answer: 'Use the simple header.' } });
+    } finally {
+      finishRefresh();
+    }
   });
 
   it("keeps a question asked of a person by name in that person's filter", async () => {
@@ -725,7 +819,7 @@ describe('what waits for people', () => {
     expect(screen.queryByRole('button', { name: "Show everyone's decisions" })).toBeNull();
     await user.selectOptions(screen.getByRole('combobox', { name: 'View as' }), 'Me, Ivan');
     expect(screen.getByRole('heading', { level: 1, name: 'Waits for me' })).toBeInTheDocument();
-    expect(articles(screen.getByRole('region', { name: 'Waiting for you' }))).toEqual(['#23 Refund button', '#24 Fix the login page']);
+    expect(articles(screen.getByRole('region', { name: 'Waiting for you' }))).toEqual(['#23 Refund button']);
   });
 
   it('names Waiting for people once, in the title of the page', async () => {
@@ -749,14 +843,15 @@ describe('what waits for people', () => {
 
   it('lists everything that waits for people in the company, each card with whom it waits for, and counts it', async () => {
     const user = userEvent.setup();
-    shell('/tasks?show=waits', routes);
+    const external = { ...LOGIN, time: { ...LOGIN.time!, waitsOn: LOGIN.time!.waitsOn.map(wait => ({ ...wait, event: 'ceo' as const })) } };
+    shell('/tasks?show=waits', { ...routes, 'GET /api/tasks?status=all': [200, { tasks: [external, REFUND, FORM, PAY] }] });
     const side = await screen.findByRole('navigation', { name: 'Task lists' });
     await screen.findByText('Which header?');
     await user.click(within(side).getByRole('button', { name: 'Waiting for people 3' }));
     expect(screen.getByRole('heading', { level: 1, name: 'Waiting for people' })).toBeInTheDocument();
     const people = screen.getByRole('region', { name: 'Waiting for people' });
     expect(articles(people)).toEqual(['#21 Take card payments', '#23 Refund button', '#24 Fix the login page']);
-    expect(within(people).getByRole('article', { name: '#21 Take card payments' })).toHaveTextContent('Waiting for: Theo');
+    expect(within(people).getByRole('article', { name: '#21 Take card payments' })).toHaveTextContent(/Asked:\s*.*Theo/);
     expect(within(people).getByRole('article', { name: '#23 Refund button' })).toHaveTextContent('Waiting for: Ivan');
     expect(within(people).getByRole('article', { name: '#24 Fix the login page' })).toHaveTextContent('Waiting for: Maria');
     /* Theo's question shows who answers it instead of a way to answer. */
@@ -801,6 +896,107 @@ describe('what waits for people', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Waits for me' })).toBeInTheDocument();
     expect(within(side).queryByRole('button', { name: /^Waiting for people/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Waiting for people' })).not.toBeInTheDocument();
+  });
+
+  it('does not address the viewer as "you" on another person\'s cards in Waiting for people, while keeping it in Waiting for me', async () => {
+    const options = [{ label: 'Card A', image: null }, { label: 'Card B', image: null }];
+    const commit = 'a'.repeat(40);
+    const mariaChoice = asked('r-m-choice', PAY, 'Pick a card style.', { kind: 'choice', options, ownerPersonId: MARIA.id, canAnswer: true, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+    const mariaCommit = asked('r-m-commit', FORM, 'Approve this commit.', { kind: 'approval', commit, ownerPersonId: MARIA.id, canAnswer: true, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+    const mariaPolicy = asked('r-m-policy', LOGIN, 'Approve the spend.', { kind: 'approval', commit: null, ownerPersonId: MARIA.id, canAnswer: true, decidedBy: { kind: 'owner_and_ceo', department: DEV } });
+    const theoReadOnly = asked('r-t-choice', { ...PAY, id: 't25', number: 25, title: 'Design layout' }, 'Pick a layout.', { kind: 'choice', options, ownerPersonId: THEO.id, canAnswer: false, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+    const ivanChoice = asked('r-i-choice', REFUND, 'Pick a refund policy.', { kind: 'choice', options, ownerPersonId: IVAN.id, canAnswer: true });
+    const allRequests = [mariaChoice, mariaCommit, mariaPolicy, theoReadOnly, ivanChoice];
+    const reqRoutes = { ...routes, 'GET /api/requests': [200, decisions(allRequests)] };
+
+    shell('/tasks?show=people', reqRoutes);
+    const people = await screen.findByRole('region', { name: 'Waiting for people' });
+    await within(people).findByText('Pick a card style.');
+
+    const headerOf = (label: string) => within(people).getByRole('article', { name: label }).querySelector('header')!;
+    expect(headerOf('#21 Take card payments')).toHaveTextContent('Waiting for: Maria');
+    expect(headerOf('#21 Take card payments')).not.toHaveTextContent(/\basks you\b/i);
+    expect(headerOf('#21 Take card payments')).toHaveTextContent('Bruno asks for a choice');
+
+    expect(headerOf('#22 Card form')).toHaveTextContent('Waiting for: Maria');
+    expect(headerOf('#22 Card form')).not.toHaveTextContent(/\basks you\b/i);
+    expect(headerOf('#22 Card form')).toHaveTextContent('Bruno asks for commit approval');
+
+    expect(headerOf('#24 Fix the login page')).toHaveTextContent('Waiting for: Maria');
+    expect(headerOf('#24 Fix the login page')).not.toHaveTextContent(/\basks you\b/i);
+    expect(headerOf('#24 Fix the login page')).toHaveTextContent('Bruno asks for approval');
+
+    expect(headerOf('#25 Design layout')).toHaveTextContent('Waiting for: Theo');
+    expect(headerOf('#25 Design layout')).not.toHaveTextContent(/\basks you\b/i);
+    expect(headerOf('#25 Design layout')).toHaveTextContent('Bruno asks for a choice');
+
+    /* The viewer's own card in Waiting for people is still addressed to the viewer. */
+    expect(headerOf('#23 Refund button')).toHaveTextContent('Waiting for: Ivan');
+    expect(headerOf('#23 Refund button')).toHaveTextContent('Bruno asks you to pick one');
+    cleanup();
+
+    /* Viewing another person's waits does not address the viewer as "you" either. */
+    shell('/tasks?show=waits&person=p2', reqRoutes);
+    const mariaWaiting = await screen.findByRole('region', { name: 'Waiting for you' });
+    await within(mariaWaiting).findByText('Pick a card style.');
+    expect(within(mariaWaiting).getByRole('article', { name: '#21 Take card payments' }).querySelector('header')).not.toHaveTextContent(/\basks you\b/i);
+    expect(within(mariaWaiting).getByRole('article', { name: '#21 Take card payments' }).querySelector('header')).toHaveTextContent('Bruno asks for a choice');
+    cleanup();
+
+    /* In Waiting for me, cards addressed to the viewer keep the direct "asks you" phrasing. */
+    const ivanCommit = asked('r-i-commit', FORM, 'Approve Ivan commit.', { kind: 'approval', commit, ownerPersonId: IVAN.id, canAnswer: true });
+    const ivanPolicy = asked('r-i-policy', LOGIN, 'Approve Ivan spend.', { kind: 'approval', commit: null, ownerPersonId: IVAN.id, canAnswer: true });
+    const ivanQuestion = asked('r-i-q', PAY, 'Which provider?', { kind: 'question', ownerPersonId: IVAN.id, canAnswer: true });
+    for (const [req, expected] of [
+      [ivanChoice, 'Bruno asks you to pick one'],
+      [ivanCommit, 'Bruno asks you to approve a commit'],
+      [ivanPolicy, 'Bruno asks you to approve this'],
+      [ivanQuestion, 'Bruno asks'],
+    ] as const) {
+      shell('/tasks?show=waits', { ...routes, 'GET /api/requests': [200, decisions([req])] });
+      const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+      expect(await within(waiting).findByText(expected)).toBeInTheDocument();
+      cleanup();
+    }
+  });
+
+  it('does not address the viewer as "вас" in Russian on another person\'s cards in Waiting for people, while keeping it in Waiting for me', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      const options = [{ label: 'Вариант 1', image: null }, { label: 'Вариант 2', image: null }];
+      const commit = 'b'.repeat(40);
+      const mariaChoice = asked('r-m-choice', PAY, 'Выберите стиль.', { kind: 'choice', options, ownerPersonId: MARIA.id, canAnswer: true, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+      const mariaCommit = asked('r-m-commit', FORM, 'Одобрите коммит.', { kind: 'approval', commit, ownerPersonId: MARIA.id, canAnswer: true, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+      const mariaPolicy = asked('r-m-policy', LOGIN, 'Одобрите публикацию.', { kind: 'approval', commit: null, ownerPersonId: MARIA.id, canAnswer: true, decidedBy: { kind: 'owner_and_ceo', department: DEV } });
+      const mariaQuestion = asked('r-m-q', { ...PAY, id: 't26', number: 26, title: 'Вопрос про тариф' }, 'Какой тариф выбрать?', { kind: 'question', ownerPersonId: MARIA.id, canAnswer: true, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+      const ivanPolicy = asked('r-i-policy', REFUND, 'Одобрите возврат.', { kind: 'approval', commit: null, ownerPersonId: IVAN.id, canAnswer: true });
+
+      shell('/tasks?show=people', { ...routes, 'GET /api/requests': [200, decisions([mariaChoice, mariaCommit, mariaPolicy, mariaQuestion, ivanPolicy])] });
+      const people = await screen.findByRole('region', { name: 'Ждут людей' });
+      await within(people).findByText('Одобрите публикацию.');
+
+      const headerOf = (label: string) => within(people).getByRole('article', { name: label }).querySelector('header')!;
+      for (const [label, expected] of [
+        ['#21 Take card payments', 'Bruno просит выбрать'],
+        ['#22 Card form', 'Bruno просит одобрить коммит'],
+        ['#24 Fix the login page', 'Bruno просит одобрить'],
+        ['#26 Вопрос про тариф', 'Bruno спрашивает'],
+      ] as const) {
+        const header = headerOf(label);
+        expect(header).toHaveTextContent('Ждет: Maria');
+        expect(header).not.toHaveTextContent(/просит вас/i);
+        expect(header).toHaveTextContent(expected);
+      }
+      expect(headerOf('#23 Refund button')).toHaveTextContent('Bruno просит вас это одобрить');
+      cleanup();
+
+      shell('/tasks?show=waits', { ...routes, 'GET /api/requests': [200, decisions([ivanPolicy])] });
+      const waiting = await screen.findByRole('region', { name: 'Ждут вас' });
+      expect(await within(waiting).findByText('Bruno просит вас это одобрить')).toBeInTheDocument();
+      cleanup();
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
   });
 });
 
@@ -916,6 +1112,34 @@ it.each([
   expect(build).toHaveTextContent('Take card payments');
   expect(build).not.toHaveTextContent('Check the card form');
   expect(within(board).getByRole('region', { name: failures })).toHaveTextContent(phrase);
+});
+
+const GIB = 1024 ** 3;
+/* A made-up machine of Lisa's, short of disk space since this morning. */
+const LOW_MACHINE = {
+  id: 'm1',
+  hostname: 'studio-laptop',
+  owner: { id: 'p1', name: 'Lisa' },
+  since: '2026-11-20T10:00:00.000Z',
+  disk: { total: 500 * GIB, free: 40 * GIB, threshold: 50 * GIB, parts: { images: 60 * GIB }, low: { since: '2026-11-20T10:00:00.000Z' }, cleaned: [] },
+};
+
+it.each([
+  ['en', 'Task lists', 'Failures', 'Machine studio-laptop (Lisa) is low on disk space'],
+  ['ru', 'Списки задач', 'Сбои', 'На машине studio-laptop (Lisa) мало места на диске'],
+])('shows a machine short of disk space among the failures and counts it there (%s)', async (language, lists, failures, title) => {
+  localStorage.setItem('hh-lang', language);
+  shell('/tasks?show=failures&view=list', { 'GET /api/requests': [200, { ...decisions([]), machinesLow: [LOW_MACHINE] }] });
+  expect(await screen.findByRole('region', { name: title })).toBeInTheDocument();
+  const side = screen.getByRole('navigation', { name: lists });
+  expect(within(side).getByRole('button', { name: `${failures} 1` })).toBeInTheDocument();
+});
+
+it('shows no such card and counts none once the machine has room again', async () => {
+  shell('/tasks?show=failures&view=list');
+  const side = await screen.findByRole('navigation', { name: 'Task lists' });
+  expect(await within(side).findByRole('button', { name: 'Failures 0' })).toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: /is low on disk space$/ })).not.toBeInTheDocument();
 });
 
 describe('the left panel and the goals page', () => {

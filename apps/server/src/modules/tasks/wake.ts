@@ -44,7 +44,7 @@ type RouteKind = ReturnType<typeof routeSnapshot>['resultKind'];
 /* What finishes the task for whoever holds it, and what to do when that cannot happen. */
 function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: string; stuck: string } {
   if (task.assigneeAgentId === agentId && kind === 'turnkey') return {
-    finish: 'carry its task scope end to end alone on its task branch, checking what you touched with local tests, as the full run happens once at release; it goes through no echelons and nobody else is called onto it; close it with report done true and the evidence, naming in turnkey the exact commit you checked and fast-forwarded the turn branch to and the commit your branch started from',
+    finish: 'carry its task scope end to end alone on its task branch, checking what you touched with local tests, as the repository\'s CI checks the release; it goes through no echelons and nobody else is called onto it; close it with report done true and the evidence, naming in turnkey the exact commit you checked and fast-forwarded the turn branch to and the commit your branch started from',
     stuck: 'use blocked',
   };
   if (task.assigneeAgentId === agentId && kind === 'document') return {
@@ -52,7 +52,7 @@ function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: stri
     stuck: 'use blocked or escalate a wrong goal to the head',
   };
   if (task.assigneeAgentId === agentId) return {
-    finish: 'follow task.echelons: report the Architecture plan; submit code and evidence from Development; check and fix in the same branch in Review, optional Cleanup or Security, then give verdict on the exact candidate; in Tests check what the change touched with local tests, as the full run happens once at release, and report the exact candidate; integrate only with the head authorization',
+    finish: 'follow task.echelons: report the Architecture plan; submit code and evidence from Development; check and fix in the same branch in Review, optional Cleanup or Security, then give verdict on the exact candidate; in Tests check what the change touched with local tests, as the repository\'s CI checks the release, and report the exact candidate; integrate only with the head authorization',
     stuck: 'use blocked or escalate a wrong goal to the head',
   };
   return { finish: 'assign an eligible current owner with update_task, or report the checked coordination result', stuck: 'report what is missing to the head' };
@@ -69,7 +69,7 @@ export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind
 }
 
 const READ_TASK = 'Read it with the task tool first: its body is the current truth and its log has the rest.';
-const LOCAL_TESTS = 'Check what you touched with local tests; the full run happens once at release.';
+const LOCAL_TESTS = "Check what you touched with local tests; the repository's CI checks the release.";
 
 function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKind): string {
   const ref = `#${task.number} "${task.title}"`;
@@ -863,8 +863,8 @@ async function requestCancellation(ctx: Ctx, jobId: string) {
   return sub ? { job, sub } : null;
 }
 
-/* A person typed into the agent's terminal: the turn opens, and what they typed answers what the agent asked them, out of
-   the agent's line, which the pump of its task's turn waits on. */
+/* A person typed into the agent's terminal: the turn opens, and what they typed answers the one question the agent asked
+   them, when it is clear which, out of the agent's line, which the pump of its task's turn waits on. */
 export async function typedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null, queuedFrom?: string): Promise<{ jobId: string; token: string } | null> {
   const opened = await openTypedTurn(ctx, node, agentId, text, personId, queuedFrom);
   if (!opened) await turnRefused(ctx, node, agentId, text, queuedFrom);

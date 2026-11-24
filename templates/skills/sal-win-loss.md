@@ -1,7 +1,5 @@
 ---
 id: sal-win-loss
-title: { en: "Win-loss analysis", ru: "Анализ итогов сделок" }
-description: { en: "Finds the real reasons deals are won and lost and turns them into changes for sales, marketing and the product.", ru: "Находит настоящие причины выигрыша и проигрыша сделок и превращает их в изменения для продаж, маркетинга и продукта." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins]
 ---

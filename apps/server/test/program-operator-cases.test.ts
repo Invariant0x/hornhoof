@@ -70,17 +70,17 @@ it('resolves on the actual word receipt and revokes the node capability without 
   expect(await c.cases()).toHaveLength(1);
 });
 
-it('escalates immediately without an operator and never poisons the whole node or wakes twice after restart', async () => {
+it('holds immediately without an operator and gives recovery a chance before calling anyone', async () => {
   const c = await fixture(false);
   await c.attempt(); await c.alarm('assignment_unrecorded', 60000);
   const [incident] = await c.cases();
   expect(incident).toMatchObject({ status: 'escalated', recoveryHold: true, resolution: { outcome: 'operator_unavailable' } });
-  expect(incident!.escalationJobId).not.toBeNull();
+  expect(incident!.escalationJobId).toBeNull();
   await expireOperatorCases({ ...c.ctx }, new Date(+c.now + 1200000));
   await c.alarm('assignment_unrecorded', 120000);
   expect(await c.cases()).toHaveLength(1);
-  const notices = await c.db.select().from(jobs).where(eq(jobs.id, incident!.escalationJobId!));
-  expect(notices).toHaveLength(1);
+  const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  expect((await c.turnsOf(orchestrator!.id)).filter(job => job.prompt.includes(incident!.id))).toEqual([]);
   expect((await c.db.select().from(nodes).where(eq(nodes.id, c.identity.nodeId)))[0]!.status).toBe('ready');
 });
 
@@ -179,14 +179,14 @@ it('restores capabilities after reconnect and escalates once if the assigned ope
   await checkOperatorHealth(c.ctx, c.now); await checkOperatorHealth(c.ctx, c.now);
   const [incident] = await c.cases();
   expect(incident).toMatchObject({ status: 'escalated', resolution: { outcome: 'operator_unavailable' } });
-  expect(incident!.escalationJobId).not.toBeNull();
+  expect(incident!.escalationJobId).toBeNull();
   expect(c.sent.mock.calls.filter(([, f]) => f.type === 'job.cancel' && f.jobId === c.job.id)).toEqual([]);
 });
 
 it('keeps a missing escalation recipient pending and sends one notice when its plan becomes available', async () => {
   const c = await fixture(false);
   await c.db.update(agents).set({ subscriptionId: null }).where(eq(agents.kind, 'orchestrator'));
-  await c.attempt(); await c.alarm('assignment_unrecorded', 60000);
+  await c.attempt(); await c.phase('taken', 10); await c.alarm('recorded_no_activity', 300010);
   expect((await c.cases())[0]!.escalationJobId).toBeNull();
   await c.db.update(agents).set({ subscriptionId: c.sub.id }).where(eq(agents.kind, 'orchestrator'));
   await checkOperatorHealth(c.ctx, c.now); await checkOperatorHealth(c.ctx, c.now);

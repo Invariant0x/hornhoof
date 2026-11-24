@@ -48,7 +48,10 @@ describe('POST /api/setup staffs the template', () => {
     ]);
     for (const employee of video.employees) expect(employee).toMatchObject({ model: '', provider: null });
     const head = (await staffOf(app)).find(employee => employee.roleKey === 'VID-HEAD')!;
-    expect((await agentParty(app.ctx, head.companyId, head.id)).department?.name).toEqual({ en: 'Video production', ru: 'Производство видео' });
+    /* A message names a template department by its English name and its template; the screen names it in the reader's language from its own files. */
+    const party = (await agentParty(app.ctx, head.companyId, head.id)).department;
+    expect(party?.name).toEqual({ en: 'Video production' });
+    expect(party?.templateKey).toBe('video_production');
     const route = video.pipelines.find((p: { isDefault: boolean }) => p.isDefault);
     expect(route.catalogKey).toBe('video-production');
     expect(route.stages.map((s: { name: string; ownerRole: string }) => [s.name, s.ownerRole])).toEqual([

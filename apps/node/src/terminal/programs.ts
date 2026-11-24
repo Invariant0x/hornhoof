@@ -35,9 +35,14 @@ export type TermProgram = {
   limits?(home: string, run?: LimitsRun): Promise<Limits | null>;
 };
 
+/* How long a program lets a hook of the node run before it ends it, in milliseconds by event, with '*' for the rest:
+   hh-hook waits less than that for a busy node. */
+export type HookLimits = Record<string, number>;
+
 /* Shared by the programs: the bridge they reach Hornhoof through, and their hooks into hh-hook. */
-export const bridgeEnv = (urls: AgentUrls) => ({
+export const bridgeEnv = (urls: AgentUrls, limits: HookLimits) => ({
   HH_BRIDGE: urls.hookUrl,
+  HH_HOOK_LIMITS: JSON.stringify(limits),
   /* hh-attach sends pictures through the bridge, which adds the turn's token; it only needs something to send. */
   HH_ATTACH_URL: urls.attachUrl,
   HH_ATTACH_PASS: 'bridge',
@@ -47,7 +52,7 @@ export const bridgeEnv = (urls: AgentUrls) => ({
 /* A program that runs a hook command in a shell and gives up on it ends that shell: exec makes the shell the hook, so the hook
    ends with it instead of calling the bridge later as an orphan that no pane holds. */
 export const hookCommand = (event: string) => `exec hh-hook ${event}`;
-export const hook = (event: string) => [{ hooks: [{ type: 'command', command: hookCommand(event) }] }];
+export const hook = (event: string, timeout: number) => [{ hooks: [{ type: 'command', command: hookCommand(event), timeout }] }];
 
 /* A JSON file a program keeps, or nothing when it is missing or not JSON. */
 export function readJson(file: string): Record<string, unknown> {

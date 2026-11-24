@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { builtinSkin } from '../src/skins/registry';
-import { COLOR_ROLES, FONT_ROLES, type Skin } from '../src/skins/roles';
-import { builtinFile, FILE_FONTS, parseSkin, SEE_THROUGH, SKIN_ERROR_CODES, SKIN_FILE_LIMIT, skinText } from '../src/skins/validate';
+import { COLOR_ROLES, type Skin } from '../src/skins/roles';
+import { builtinFile, parseSkin, SEE_THROUGH, SKIN_ERROR_CODES, SKIN_FILE_LIMIT, skinText } from '../src/skins/validate';
 
 /* A whole skin file as a person or an AI writes it from a sample: every value of a built-in skin, names of its own. */
 const SAMPLE: Skin = builtinFile(builtinSkin('pixel')!, { ru: 'Ночная смена', en: 'Night shift' });
@@ -51,11 +51,12 @@ describe('a skin file of version 2', () => {
     /* Glass as thin as a quarter would fade muted text over a white page, so it is see-through as densely as Design sets it. */
     for (const role of SEE_THROUGH) expect(refused(file(raw => (colors(raw)[role] = role === 'hud' ? 'rgba(0, 0, 0, .94)' : 'rgba(0, 0, 0, .25)'))), role).toBeNull();
     expect(SEE_THROUGH).toEqual(['dot', 'glow', 'hud', 'shadow', 'scrim']);
-    /* No repeats, so a list is never longer than its role allows: at most the six names Design set. */
-    for (const role of FONT_ROLES) expect(FILE_FONTS[role].length, role).toBeLessThanOrEqual(6);
+    /* A font list holds at most six names from its role's allowed set. */
+    expect(refused(file(raw => (fonts(raw).display = ['Tektur', 'Handjet', 'Alegreya', 'Onest', 'system-ui', 'sans-serif', 'serif'])))).toEqual({ code: 'font_list', key: 'fonts.display' });
     for (const cut of [0, 0.25, 1, 1.5]) expect(refused(file(raw => (raw.cut = cut))), String(cut)).toBeNull();
-    for (const base of ['cyberpunk', 'light', 'matrix', 'pixel']) expect(refused(file(raw => (raw.base = base))), base).toBeNull();
-    expect(refused(file(raw => (fonts(raw).display = ['Tektur', 'sans-serif'])))).toBeNull();
+    for (const base of ['cyberpunk', 'light', 'matrix', 'pixel', 'egypt']) expect(refused(file(raw => (raw.base = base))), base).toBeNull();
+    expect(refused(file(raw => (fonts(raw).display = ['Alegreya', 'serif'])))).toBeNull();
+    expect(refused(file(raw => (fonts(raw).body = ['Golos Text', 'sans-serif'])))).toBeNull();
   });
 });
 
@@ -99,7 +100,7 @@ describe('the safety check of a skin file', () => {
     expect(refused(file(raw => (fonts(raw).size = ['serif'])))).toEqual({ code: 'layout_locked', key: 'fonts.size' });
     expect(refused(file(raw => (raw.decor = 'none')))).toEqual({ code: 'unknown_key', key: 'decor' });
     expect(refused(file(raw => (colors(raw).background = '#000000')))).toEqual({ code: 'unknown_key', key: 'colors.background' });
-    expect(refused(file(raw => (names(raw).de = 'Nachtschicht')))).toEqual({ code: 'unknown_key', key: 'name.de' });
+    expect(refused(file(raw => (names(raw).xx = 'Nachtschicht')))).toEqual({ code: 'unknown_key', key: 'name.xx' });
   });
 
   it.each([
@@ -177,7 +178,8 @@ describe('the safety check of a skin file', () => {
     for (const key of ['base', 'name', 'color_scheme', 'colors', 'fonts', 'cut']) expect(refused(file(raw => delete raw[key])), key).toEqual({ code: 'missing', key });
     expect(refused(file(raw => delete colors(raw).scrim))).toEqual({ code: 'missing', key: 'colors.scrim' });
     expect(refused(file(raw => delete fonts(raw).mono))).toEqual({ code: 'missing', key: 'fonts.mono' });
-    expect(refused(file(raw => delete names(raw).ru))).toEqual({ code: 'missing', key: 'name.ru' });
+    expect(refused(file(raw => delete names(raw).en))).toEqual({ code: 'missing', key: 'name.en' });
+    expect(refused(file(raw => delete names(raw).ru))).toBeNull();
     expect(refused(file(raw => (raw.colors = ['#000000'])))).toEqual({ code: 'not_object', key: 'colors' });
     expect(refused(file(raw => (raw.fonts = 'sans-serif')))).toEqual({ code: 'not_object', key: 'fonts' });
   });

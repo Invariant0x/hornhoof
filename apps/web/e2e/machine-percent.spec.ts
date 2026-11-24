@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { LANGUAGES, type Language, type Messages } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage, type Messages } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { MachineView, Org, ShownCommand, SubView } from '../src/types';
@@ -22,7 +22,7 @@ const NOW = Date.parse('2026-11-15T12:00:00.000Z');
 const SKINS: readonly BuiltinSkinId[] = ['cyberpunk', 'light'];
 const WIDTHS = [[1440, 900], [375, 2400]] as const;
 /* A language added to the registry fails to compile here until its words are added. */
-const WORDS: Record<Language, Messages> = { en, ru };
+const WORDS: Record<ShippedLanguage, Messages> = { en, ru };
 const LANGS = LANGUAGES.map(language => language.id);
 
 const machine = (id: string, hostname: string, cpus: number, load: number): MachineView => ({
@@ -63,9 +63,9 @@ const COMMANDS: ShownCommand[] = [
 ];
 /* Where what a phrase says first stands: both shipped languages write left to right. A language added to the registry fails
    to compile here until its way is added. */
-const READS: Record<Language, 'left' | 'right'> = { en: 'left', ru: 'left' };
+const READS: Record<ShippedLanguage, 'left' | 'right'> = { en: 'left', ru: 'left' };
 
-async function openScreen(page: Page, language: Language, skin: BuiltinSkinId, width: number, height: number, tab: 'machines' | 'subscriptions', plans: SubView[] = [PLAN], commands: ShownCommand[] = []) {
+async function openScreen(page: Page, language: ShippedLanguage, skin: BuiltinSkinId, width: number, height: number, tab: 'machines' | 'subscriptions', plans: SubView[] = [PLAN], commands: ShownCommand[] = []) {
   await page.setViewportSize({ width, height });
   await page.clock.install({ time: NOW });
   await serveApi(page);
@@ -218,10 +218,16 @@ async function place(el: Locator, first: string, second: string, from: 'first' |
   }, [first, second, from] as const);
 }
 
-/* A number with its unit, as «3 дня»: the number stands to the left of its unit in either direction. */
-async function expectWhole(el: Locator, piece: string) {
+/* A number and its unit as the page keeps them in one piece (#1601): joined by a no-break space, so the two never part on a
+   line. The text is read as it stands, so a plain space in its place is not found. */
+const NBSP = '\u00a0';
+const kept = (piece: string) => piece.replace(' ', NBSP);
+
+/* A number with its unit, as «3 дня»: the number stands to the left of its unit in either direction. A piece the page keeps
+   in one piece, from its dictionary's words, is also joined by a no-break space. */
+async function expectWhole(el: Locator, piece: string, joined = false) {
   const [number, unit] = [piece.slice(0, piece.indexOf(' ')), piece.slice(piece.indexOf(' ') + 1)];
-  expect(`${piece}: ${await place(el, number, unit)}`).toBe(`${piece}: left`);
+  expect(`${piece}: ${await place(el, joined ? number + NBSP : number, unit)}`).toBe(`${piece}: left`);
 }
 
 const noSideScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
@@ -340,20 +346,20 @@ for (const skin of SKINS) for (const language of LANGS) for (const [width, heigh
       const heads = page.locator('th .sorth:visible, .sortbar .sortb:visible');
       for (const name of [five, seven]) await expectWhole(heads.filter({ hasText: name }), name);
       for (const [cell, share, time] of [[cells.nth(0), '40%', soon], [cells.nth(1), '70%', later]] as const) {
-        await expectWhole(cell, time);
+        await expectWhole(cell, time, true);
         expect(await place(cell, share.slice(0, -1), '%')).toBe('left');
         /* The separator follows the share as the phrase reads, and the words of the reset follow it, then their time. */
         expect.soft(`${dir} ${share} ,: ${await place(cell, share, ',')}`).toBe(`${dir} ${share} ,: ${reads}`);
         expect.soft(`${dir} , ${resets}: ${await place(cell, ',', resets)}`).toBe(`${dir} , ${resets}: ${reads}`);
-        expect.soft(`${dir} ${resets} ${time}: ${await place(cell, resets, time)}`).toBe(`${dir} ${resets} ${time}: ${reads}`);
+        expect.soft(`${dir} ${resets} ${time}: ${await place(cell, resets, kept(time))}`).toBe(`${dir} ${resets} ${time}: ${reads}`);
       }
       for (const [meter, name, time] of [[meters.nth(0), five, soon], [meters.nth(1), seven, later], [meters.nth(2), seven, later]] as const) {
-        await expectWhole(meter.locator('.g-l'), name);
-        await expectWhole(meter.locator('.g-s'), time);
-        expect.soft(`${dir} ${resets} ${time}: ${await place(meter.locator('.g-s'), resets, time)}`).toBe(`${dir} ${resets} ${time}: ${reads}`);
+        await expectWhole(meter.locator('.g-l'), name, true);
+        await expectWhole(meter.locator('.g-s'), time, true);
+        expect.soft(`${dir} ${resets} ${time}: ${await place(meter.locator('.g-s'), resets, kept(time))}`).toBe(`${dir} ${resets} ${time}: ${reads}`);
       }
       /* A model's week: its words follow its number with their separator, as the name reads. */
-      expect.soft(`${dir} ${seven} , Opus: ${await place(meters.nth(2).locator('.g-l'), seven, ', Opus')}`).toBe(`${dir} ${seven} , Opus: ${reads}`);
+      expect.soft(`${dir} ${seven} , Opus: ${await place(meters.nth(2).locator('.g-l'), kept(seven), ', Opus')}`).toBe(`${dir} ${seven} , Opus: ${reads}`);
       expect(await noSideScroll(page)).toBe(true);
     }
   });

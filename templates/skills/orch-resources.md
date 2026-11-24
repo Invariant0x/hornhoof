@@ -1,7 +1,5 @@
 ---
 id: orch-resources
-title: { en: "Manage company resources", ru: "Управлять ресурсами компании" }
-description: { en: "Changes subscriptions, machines, repositories and hosted access in any turn, within the limits the company's notebook sets.", ru: "Меняет подписки, машины, репозитории и внешний доступ в любом ходе, в пределах того, что запрещает блокнот компании." }
 kind: procedure
 ---
 You can configure the company's resources.

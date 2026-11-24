@@ -109,9 +109,8 @@ describe('a release still closes its turn by its tag', () => {
     const round = () => minuteRound(f.ctx, new Date(), () => () => undefined);
     f.repo.tags['v1.6.0'] = BASE;
     await round();
-    const run = await f.fullRun();
     await f.approve();
-    expect((await f.recordRelease({ runId: run.id })).isError).toBe(false);
+    expect((await f.recordRelease()).isError).toBe(false);
     f.repo.heads.main = f.R;
     f.repo.tags['v1.7.0'] = f.R;
     await round();

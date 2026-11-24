@@ -2,10 +2,16 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, configure } from '@testing-library/react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, expect, vi } from 'vitest';
+import { connection } from '../src/connection';
 import { leaveLight } from '../src/guard';
+import { preloadLanguages } from '../src/i18n';
 import { forgetOrg } from '../src/org';
 import { forgetRequestDrafts } from '../src/ui/Requests';
 import { keyDefaults, type DeviceKey } from '../src/owner-key-store';
+
+/* Every language is brought before a test starts, so a page opens in the language a test picks at once, as it does for a
+   person whose language is already loaded. */
+await preloadLanguages();
 
 /* Waits for a state look until it comes, however long a loaded machine takes to render it; only the runner's limit for a
    test ends a state that never comes. 2_147_483_647 ms is the longest delay a timer takes. Testing Library's findBy* and
@@ -24,6 +30,8 @@ keyDefaults.iterations = 1000;
 
 afterEach(() => {
   cleanup();
+  /* A test that lost the server leaves no look waiting for the next one. */
+  connection.reset();
   /* Each test starts with no company known from the one before, and no answer typed in it. */
   forgetOrg();
   forgetRequestDrafts();

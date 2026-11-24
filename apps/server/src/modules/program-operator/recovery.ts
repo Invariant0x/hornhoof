@@ -99,7 +99,7 @@ export async function acceptOperatorRecovery(ctx: Ctx, frame: OperatorEvidence):
   const [row] = await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.id, frame.case), eq(programOperatorCases.agentId, frame.agentKey), eq(programOperatorCases.jobId, frame.jobId!), eq(programOperatorCases.instance, frame.instance))).for('update');
   if (!row?.recoveryHold) return;
   if (frame.owner !== false) return continueRecovery(ctx, row, BY_OWNER);
-  if (!await wentOnBefore(ctx, row)) await continueRecovery(ctx, row, AT_PROMPT);
+  await continueOnceAutomatically(ctx, row, 'here');
 }
 
 /* Words go on by themselves once, along every turn they went on in since: one let through by hand between counts too, as
@@ -116,6 +116,10 @@ async function wentOnBefore(ctx: Ctx, row: Case): Promise<boolean> {
   return false;
 }
 
+export async function continueOnceAutomatically(ctx: Ctx, row: Case, program: 'here' | 'gone'): Promise<void> {
+  if (!await wentOnBefore(ctx, row)) await continueRecovery(ctx, row, program === 'gone' ? PROGRAM_GONE : AT_PROMPT);
+}
+
 /* What ends a hold with nobody looking: a stop, a turn that finished after all, or a program that is gone, whose words no
    question or tool of it can stand in the way of. The caller holds the agent row. */
 export async function settleOperatorHold(ctx: Ctx, row: Case): Promise<void> {
@@ -124,7 +128,7 @@ export async function settleOperatorHold(ctx: Ctx, row: Case): Promise<void> {
   if (stoppedOnPurpose(job) || await agentRemoved(ctx, row)) return finishRecovery(ctx, row, null, STOPPED);
   if (job.status === 'done') return finishRecovery(ctx, row, null, FINISHED);
   const delivery = await deliveryOf(ctx, row);
-  if (delivery && programLeft(delivery) && !await wentOnBefore(ctx, row)) await continueRecovery(ctx, row, PROGRAM_GONE);
+  if (delivery && programLeft(delivery)) await continueOnceAutomatically(ctx, row, 'gone');
 }
 
 /* The node says the program of these words ended. */

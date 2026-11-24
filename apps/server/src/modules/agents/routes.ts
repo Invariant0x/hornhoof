@@ -32,6 +32,7 @@ import type { Lang, Role, RoleSkill, Skill } from '../templates/load.js';
 import { companySkill } from '../tools/staff.js';
 import { agentFor, type AgentRow } from './find.js';
 import { instructionsOf, renderInstructions, placeOf, type Part } from './instructions.js';
+import { worldSkillsForTheme } from '../world/packs/index.js';
 import { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX, timerOf } from './timers.js';
 import { currentAgentTask } from './work.js';
 import { releaseLeftProgram } from './left-programs.js';
@@ -262,8 +263,19 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
   const views = new Map((await subViews(db, online, undefined, me)).map(v => [v.id, keyEndFor(me, v)]));
   const [running] = await db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'), notStep)).limit(1);
   /* A head's department notebook has its own window and its own access. */
-  const { parts, raw } = agent.kind === 'orchestrator' ? await instructionsOf(ctx, agent) : renderInstructions(ctx.templates, agent, await placeOf(db, agent));
+  const place = await placeOf(db, agent);
+  const worldSkills = worldSkillsForTheme(ctx.worldPacks, place.theme);
+  const { parts, raw } = agent.kind === 'orchestrator' ? await instructionsOf(ctx, agent) : renderInstructions(ctx.templates, agent, place, worldSkills);
   const offered = offeredSkills(agent, role);
+  const worldCardSkills: AgentCard['skills'] = worldSkills.map(s => ({
+    id: s.id,
+    title: s.title,
+    description: s.description,
+    on: true,
+    locked: true,
+    overridden: false,
+    templateChanged: false,
+  }));
   const actingAgent = alias(agents, 'acting_agent');
   const changes = await db
     .select({ field: agentChanges.field, personName: people.name, actingAgent: { id: actingAgent.id, name: actingAgent.name }, byOrchestrator: agentChanges.byOrchestrator, at: agentChanges.createdAt, before: agentChanges.before, after: agentChanges.after })
@@ -299,7 +311,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
     ...agentProgramState(ctx, running),
     ...await agentFailureState(ctx, agent.id),
     held: planHoldView(await planHeld(ctx, agent, await liveSubscription(ctx, agent.id))),
-    skills: offered.flatMap(s => cardSkill(ctx, agent, s)),
+    skills: [...offered.flatMap(s => cardSkill(ctx, agent, s)), ...worldCardSkills],
     parts,
     raw,
     runsOn: await cardServing(ctx, agent, views),

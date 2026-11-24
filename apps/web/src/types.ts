@@ -1,11 +1,11 @@
-import type { ApiProtocol, TaskPriority } from '@hornhoof/protocol';
+import type { ApiProtocol, TaskPriority, Texts } from '@hornhoof/protocol';
 import type { EchelonFindingsView, EchelonStage } from '@hornhoof/protocol/echelons';
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
 import type { ExternalWait, TaskWaitFact, WaitSourceKind } from '@hornhoof/protocol/waits';
 import type { SigninStep } from '@hornhoof/protocol/signin';
 import type { Notification } from '@hornhoof/protocol';
-import type { ConnectionEnd, DepartmentTurnProgress, FailureKind, Limits, MachineDrain, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { ConnectionEnd, DepartmentTurnProgress, DiskReport, FailureKind, Limits, MachineDrain, MachineReplicas, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { RiskClass, WorkKind } from '@hornhoof/protocol/pipeline-report';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
@@ -14,7 +14,7 @@ export type { MaterialManifest, MaterialView } from '@hornhoof/protocol';
 export type { FailureKind, Limits, ModelOption, ProgramRetry, ProviderId, TemplateKey, TurnAlarm, TurnRetry, WorkLine };
 
 /* Template text that comes in both languages. */
-export type Lang = { en: string; ru: string };
+export type Lang = Texts;
 
 /* company: the whole company; listed: the departments and teams ticked for the person. */
 export type ScopeKind = 'company' | 'listed';
@@ -32,7 +32,7 @@ export type Person = {
   isCeoDelegate?: boolean;
 };
 
-export type Company = { id: string; name: string };
+export type Company = { id: string; name: string; theme?: string };
 
 /* canDecideCompany: this person takes the decisions only the CEO takes, the orchestrator's cards among them. */
 export type Me = { person: Person; company: Company; canDecideCompany?: boolean };
@@ -265,8 +265,11 @@ export type AutonomousReleaseEntry = {
   agentName: string;
   commitSha: string;
   baseCommitSha?: string;
+  /* An entry from before releases relied on CI names a test run; a later one names what the repository's CI said. */
   testRunId: string | null;
-  testRunNumber: number;
+  testRunNumber: number | null;
+  ciState: 'green' | 'none' | null;
+  ciChecks: number | null;
   reviewerAgentId: string | null;
   reviewerName: string;
   verdictStage: string;
@@ -287,7 +290,7 @@ export type ApprovalPolicyView = {
 };
 
 /* The git repository a department's or product's agents clone; the token never comes back, only its last four. */
-export type Repository = { url: string; branch: string; tokenLast4: string | null; author?: { name: string; email: string } | null; testMemoryGb?: number; fullTestCommand?: string | null };
+export type Repository = { url: string; branch: string; tokenLast4: string | null; author?: { name: string; email: string } | null; testMemoryGb?: number; fullTestCommand?: string | null; releaseWorkflow?: string | null };
 
 /* A GitHub key Hornhoof creates repositories with: the user or organization they go to, and only the key's last four. */
 export type RepoKey = { provider: 'github'; owner: string; tokenLast4: string };
@@ -439,7 +442,8 @@ export type MessageParty = {
   id: string | null;
   name: string;
   role: Lang | null;
-  department: { id: string; name: Lang } | null;
+  /* A typed name reads as typed in every language; a template department names its template, which the screen words in the reader's language. */
+  department: { id: string; name: Lang; templateKey?: string | null } | null;
   agentKind?: 'orchestrator' | 'head' | 'worker' | 'assistant';
 };
 
@@ -469,6 +473,7 @@ export type StreamMessage =
   | { type: 'inbox'; agentId: string }
   | { type: 'working'; working: number }
   | { type: 'org' }
+  | { type: 'company_theme'; theme: string }
   | { type: 'notebook'; spot: { departmentId: string | null } }
   | { type: 'pulse'; from: Endpoint; to: Endpoint }
   | { type: 'task'; id: string; spot: { departmentId: string | null; parentId?: string | null } }
@@ -494,7 +499,7 @@ export type TaskPlace = { id: string; name: string } | null;
 export type PersonRef = { id: string; name: string };
 /* What a task's time says, worked out on the server: since when it is in its status, how long its turns ran, and whom it
    waits for since when. */
-export type TimeFacts = { inStatusSince: string; workSeconds: number; waitsOn: TaskWaitFact[] };
+export type TimeFacts = { inStatusSince: string; workSeconds: number; waitsOn: (TaskWaitFact & { request?: true })[] };
 /* A task another one comes after, or that comes after it, and where it stands. */
 export type TaskLink = { id: string; number: number; title: string; status: TaskStatus };
 
@@ -732,6 +737,21 @@ export type MachineAwayCard = {
   important: { name: string; kind: 'orchestrator' | 'head' }[];
 };
 
+/* A machine whose database copy is still waiting for its schema. */
+export type CopySchemaFailureCard = { id: string; hostname: string; since: string; attempt: number };
+
+/* A machine short of disk space, whose node takes no new checks or builds since: for its owner and the CEO, gone by itself
+   once the node has room again or is off the line. */
+export type MachineLowCard = {
+  id: string;
+  hostname: string;
+  owner: { id: string; name: string } | null;
+  since: string;
+  disk: DiskReport;
+  /* The names of the company's employees whose work the machine keeps, by its folder. A server from before sends none. */
+  names?: Record<string, string>;
+};
+
 /* Everything that waits for people as /api/requests shows it to this person, and the counts of all of it: per owner, per
    asking agent and in total. */
 export type Decisions = {
@@ -742,6 +762,9 @@ export type Decisions = {
   /* What merges left for the CEO alone. A server from before merges sends none. */
   merges?: MergeDecision[];
   machinesAway?: MachineAwayCard[];
+  copySchemaFailures?: CopySchemaFailureCard[];
+  /* A server from before nodes said how full their disk is sends none. */
+  machinesLow?: MachineLowCard[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
 
@@ -904,6 +927,11 @@ export type MachineView = {
   plans: { id: string; provider: ProviderId; status: PlanStatus; online: boolean }[];
   /* What its nodes said last about how busy it is; none while no node of it is connected. */
   load: NodeLoad | null;
+  /* The copies of company databases it holds, inside Docker's volumes: none while unmeasured. Older servers omit it. */
+  replicas?: MachineReplicas | null;
+  /* The employees' working folders of each of its nodes, by the plan the node serves (none for the machine's own node), the
+     biggest first: none of a node that says nothing of its disk. Older servers omit it. */
+  folders?: { plan: string | null; bytes: number }[];
   /* Takes the company's test runs when it is the freest machine. */
   lendsTests: boolean;
   running: Running;
@@ -986,6 +1014,8 @@ export type RunningAgent = {
   title: Lang | null;
   department: { id: string; name: string } | null;
   provider: ProviderId;
+  /* The model the employee runs on; omitted by older servers. */
+  model?: string;
   since: string | null;
   task: { number: number; title: string } | null;
   withCeo: boolean;
@@ -1017,7 +1047,7 @@ export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add' | 'co
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
 /* webPort: where the company opens on the server's own machine. refusedBy: the machines on the server's network whose
    connections it did not take. Older servers omit both. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; checkError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null };
+export type BuiltinView = { online: boolean; load: NodeLoad | null; replicas?: MachineReplicas | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; checkError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null };
 
 export type JobView = {
   id: string;

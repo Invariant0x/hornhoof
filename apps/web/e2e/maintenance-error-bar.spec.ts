@@ -1,8 +1,8 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
-import { LANGUAGES, type Language } from '../src/i18n/index';
+import { LANGUAGES, type ShippedLanguage } from '../src/i18n/index';
 import { ru } from '../src/i18n/ru';
-import { BUILTIN_SKINS } from '../src/skins/registry';
+import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
 import type { UpdatesView } from '../src/types';
 import { serveApi } from './api';
 
@@ -13,7 +13,7 @@ import { serveApi } from './api';
    the shortest words of this view, or the longest turned right to left: no shipped language is written that way yet. */
 test.describe.configure({ timeout: 0 });
 
-const DICTS: Record<Language, Messages> = { en, ru };
+const DICTS: Record<ShippedLanguage, Messages> = { en, ru };
 const TABS = ['map', 'tasks', 'people', 'subscriptions', 'machines'] as const;
 const TARGET = { version: '0.34.0', commit: '00e5ff3e' + 'f'.repeat(32) };
 /* How often the updates screen asks while an update runs; the page's clock moves only as the test moves it. */
@@ -58,7 +58,7 @@ async function heldServer(page: Page) {
   return { end: () => { held.on = false; } };
 }
 
-async function look(page: Page, lang: Language, skin: string, width: number) {
+async function look(page: Page, lang: ShippedLanguage, skin: string, width: number) {
   await page.setViewportSize({ width, height: 900 });
   await page.addInitScript(({ lang, skin }) => {
     localStorage.setItem('hh-lang', lang);
@@ -145,6 +145,7 @@ const shot = (page: Page, path: string) => page.screenshot({ path, animations: '
 for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) for (const skin of SKINS) {
   const name = `${lookName} ${skin} ${width}`;
   const pictured = skin === 'cyberpunk';
+  const world = builtinSkin(skin)?.world;
 
   test(`during an update the map draws no bar of a maintenance refusal and comes back after it, ${name}`, async ({ page }, info) => {
     const t = DICTS[lang];
@@ -173,14 +174,23 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     server.end();
     await page.clock.runFor(BUSY_POLL_MS);
     await loaded;
-    await expect(page.getByRole('button', { name: /^Development/ })).toBeVisible();
+    /* The map is back with the company: the plain map shows the department's card, a world map draws its city on a canvas
+       and shows the company's ticker over it. */
+    await expect(world ? page.locator(`.map[data-world-canvas="${world}"] > .ticker[role="button"]`) : page.getByRole('button', { name: /^Development/ })).toBeVisible();
     await expect(panel).toContainText(t.updates.steps.health);
     expect(await page.getByRole('alert').count()).toBe(0);
-    /* The open map starts after the panel, so the panel cannot cover a map control. */
+    /* The open map runs under the header and the panel to the top of the window, and the panel floats over it (#1639): it
+       covers no card, chip, hub or control of the map. */
     expect(rowsHold(await places(page, t), width)).toEqual([]);
     const mapBox = await boxOf(page.locator('.map'), 'the map');
     const panelBox = await boxOf(panel, 'the update panel');
-    expect(mapBox.y).toBeGreaterThanOrEqual(panelBox.y + panelBox.height - 0.5);
+    expect(mapBox.y, 'the map starts at the top of the window').toBeLessThanOrEqual(0.5);
+    const covered: string[] = [];
+    for (const part of await page.locator('.map .world :is(.dept, .hub, .chip), .map > :is(.zoom, .ticker, .map-arrange)').all()) {
+      const b = await part.boundingBox();
+      if (b && b.width > 0 && b.height > 0 && meet(b, panelBox)) covered.push((await part.textContent())?.slice(0, 40) ?? '');
+    }
+    expect(covered, 'the panel covers nothing the map shows').toEqual([]);
     expect(problems).toEqual([]);
   });
 

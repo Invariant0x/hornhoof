@@ -104,7 +104,7 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
           </div>
         </div>
         <Cell name={words.executor} person>
-          {executor ? <ExecutorMark agent={executor} program={rows.programOf?.(executor.id)} turnkey={rows.turnkeyOf?.(executor.id)} /> : t.tracker.nobody}
+          {executor ? <ExecutorMark agent={executor} program={rows.programOf?.(executor.id)} turnkey={rows.turnkeyOf?.(executor.id)} withProgram /> : t.tracker.nobody}
           {ghostStage && <WorkerMark kind="ghost" className="tr-stage-ghost" />}
         </Cell>
         <Cell name={words.responsible} person>{task.responsible ? <PersonMark person={task.responsible} /> : t.tracker.nobody}</Cell>

@@ -4,7 +4,7 @@ import type { Limits, SubView } from '../types';
 import { Bar, percent, Share } from './Bar';
 import { Gauge, Part } from './Cards';
 import { ResetTime, ResetWords, resetDurationAt } from './reset';
-import { currentPlanLimits, limitState, MAIN_WINDOWS, unknownLimitData, windowParts } from './subscription';
+import { currentPlanLimits, limitState, MAIN_WINDOWS, mainLimitGroup, unknownLimitData, windowParts } from './subscription';
 import { keepUnits } from './units';
 
 /* A window's name whole, in the direction of its own words, with its number and unit in one piece that reads left to right,
@@ -72,8 +72,8 @@ function GroupParts({ sub, groups, now }: { sub: SubView; groups: LimitGroup[]; 
    else one for the plan. */
 export function PlanLimitParts({ sub, now }: { sub: SubView; now: number }) {
   const t = useT();
-  const groups = sub.kind === 'api_key' ? [] : groupsOf(currentPlanLimits(sub, now));
-  if (!groups.length) return <Part title={t.subs.limits}><LimitMeters sub={sub} now={now} /></Part>;
+  const groups = sub.kind === 'api_key' ? undefined : currentPlanLimits(sub, now)?.groups;
+  if (!groups?.length) return <Part title={t.subs.limits}><LimitMeters sub={sub} now={now} /></Part>;
   return <GroupParts sub={sub} groups={groups} now={now} />;
 }
 
@@ -91,20 +91,22 @@ function LimitLine({ sub, name, limits, now }: { sub: SubView; name: string; lim
   return <span className="cell-lim"><Bar used={used} /><span><bdi><UsedAndReset used={used} at={at} now={now} /></bdi></span></span>;
 }
 
-/* One window of a group of the plan's models in the list: the group's name, then its used share and reset. */
+/* One window of the plan's main model group in the list: its bar when known, then the group's name, share and reset. */
 function GroupLine({ sub, name, limits, now, group }: { sub: SubView; name: string; limits: Limits; now: number; group: string }) {
   const t = useT();
   const { w, used, at } = windowUse(limits, name);
-  const words = used === null ? <NoShare sub={sub} limits={limits} named={Boolean(w)} /> : <UsedAndReset used={used} at={at} now={now} />;
-  return <span className="cell-lim">{used !== null && <Bar used={used} />}<span><bdi><Phrase words={t.subs.groupShare} values={[<bdi dir="auto">{group}</bdi>, words]} /></bdi></span></span>;
+  if (used === null) {
+    return <span className="cell-na"><bdi><Phrase words={t.subs.groupShare} values={[<bdi dir="auto">{group}</bdi>, <NoShare sub={sub} limits={limits} named={Boolean(w)} />]} /></bdi></span>;
+  }
+  return <span className="cell-lim"><Bar used={used} /><span><bdi><Phrase words={t.subs.groupShare} values={[<bdi dir="auto">{group}</bdi>, <UsedAndReset used={used} at={at} now={now} />]} /></bdi></span></span>;
 }
 
 export function LimitCell({ sub, name, now }: { sub: SubView; name: string; now: number }) {
   const t = useT();
   if (sub.kind === 'api_key') return <span className="cell-na">{t.subs.noPlanLimits}</span>;
   const limits = currentPlanLimits(sub, now);
-  const groups = groupsOf(limits);
-  if (!groups.length) return <LimitLine sub={sub} name={name} limits={limits} now={now} />;
-  return <ul className="where-list">{groups.map(group => <li key={group.name}><GroupLine sub={sub} name={name} limits={groupLimits(group)} now={now} group={group.name} /></li>)}</ul>;
+  const main = mainLimitGroup(sub, limits?.groups);
+  if (!main) return <LimitLine sub={sub} name={name} limits={limits} now={now} />;
+  return <GroupLine sub={sub} name={name} limits={groupLimits(main)} now={now} group={main.name} />;
 }
 

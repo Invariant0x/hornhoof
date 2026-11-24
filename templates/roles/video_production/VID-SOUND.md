@@ -2,8 +2,6 @@
 id: VID-SOUND
 department: video_production
 kind: member
-title: { en: "Sound designer", ru: "Звукорежиссер" }
-description: { en: "Designs the sound and mixes voices, music and other sounds for the whole video.", ru: "Подбирает звуки и сводит голоса, музыку и другие звуки для всего видео." }
 tier: standard
 effort: high
 perProduct: false

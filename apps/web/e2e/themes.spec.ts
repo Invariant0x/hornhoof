@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
-import { LANGUAGES, type Language, type Messages } from '../src/i18n';
+import { say } from '@hornhoof/protocol';
+import { LANGUAGES, type ShippedLanguage, type Messages } from '../src/i18n';
 import { collectionText } from '../src/skins/collection';
 import { BUILTIN_SKINS, builtinSkin, type BuiltinSkinId } from '../src/skins/registry';
 import { COLOR_TOKENS, type Skin } from '../src/skins/roles';
@@ -30,9 +31,9 @@ const fontsOf = (choice: string) => {
   const { fonts } = builtinSkin(choice) ?? OWN;
   return `${fonts.display[0]} ${fonts.body[0]}`;
 };
-const nameOf = (words: Messages, language: Language, choice: string) => (builtinSkin(choice) ? words.skins.names[choice as BuiltinSkinId] : OWN.name[language]);
+const nameOf = (words: Messages, language: ShippedLanguage, choice: string) => (builtinSkin(choice) ? words.skins.names[choice as BuiltinSkinId] : say(OWN.name, language));
 
-async function messagesFor(locale: Language): Promise<Messages> {
+async function messagesFor(locale: ShippedLanguage): Promise<Messages> {
   const dictionary = await import(`../src/i18n/${locale}.ts`) as Record<string, Messages>;
   const messages = dictionary[locale];
   if (!messages) throw new Error(`No dictionary export for shipped locale ${locale}`);
@@ -40,8 +41,10 @@ async function messagesFor(locale: Language): Promise<Messages> {
 }
 
 /* Only the first page of a test starts from these; what the test changes later stays for the next page. */
-async function prepare(page: Page, language: Language, skin: string | null, own = true) {
+async function prepare(page: Page, language: ShippedLanguage, skin: string | null, own = true) {
   await serveApi(page);
+  /* Keep CompanyLink above Themes static so its random-name check timer never shifts geometry mid-switch. */
+  await page.route('**/api/link', route => route.fulfill({ json: { link: { name: 'acme', url: 'https://acme.hornhoof.org' }, domain: 'hornhoof.org' } }));
   await page.addInitScript(({ language, skin, collection }) => {
     if (sessionStorage.getItem('hh-test-seeded')) return;
     sessionStorage.setItem('hh-test-seeded', '1');
@@ -74,9 +77,10 @@ async function openThemes(page: Page, words: Messages): Promise<Locator> {
   await page.getByRole('button', { name: words.shell.account, exact: true }).click();
   await page.getByRole('button', { name: words.settings.menu, exact: true }).click();
   const dialog = page.getByRole('dialog', { name: words.settings.title });
-  /* Settings opens on Profile; the skins stand in the group after it. */
-  await dialog.getByRole('button', { name: words.settings.groups.appearance, exact: true }).click();
-  await expect(dialog.getByRole('button', { name: words.settings.groups.appearance, exact: true })).toHaveAttribute('aria-current', 'page');
+  /* Company theme store lives under Company & access for the CEO. */
+  await dialog.getByRole('button', { name: words.settings.groups.company, exact: true }).click();
+  await expect(dialog.getByRole('button', { name: words.settings.groups.company, exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(dialog.getByRole('link', { name: 'https://acme.hornhoof.org', exact: true })).toBeVisible();
   await expect(dialog.getByRole('region', { name: words.skins.catalog })).toBeVisible();
   await page.evaluate(async () => { await document.fonts.ready; });
   return dialog;
@@ -98,8 +102,8 @@ async function renderedLength(page: Page): Promise<number> {
 }
 
 /* The longest and the shortest shipped language on these screens, and a shipped right-to-left one once there is one. */
-async function chooseLanguages(page: Page): Promise<Language[]> {
-  const ranked: { id: Language; characters: number }[] = [];
+async function chooseLanguages(page: Page): Promise<ShippedLanguage[]> {
+  const ranked: { id: ShippedLanguage; characters: number }[] = [];
   for (const { id } of LANGUAGES) {
     const words = await messagesFor(id);
     await page.evaluate(language => localStorage.setItem('hh-lang', language), id);
@@ -218,7 +222,7 @@ async function lowercaseHeight(page: Page, font: string): Promise<number> {
 const skinCard = (dialog: Locator, name: string) => dialog.locator('.skin-card').filter({ has: dialog.page().getByRole('heading', { name, exact: true }) });
 
 /* Applies a skin with a click on its card and waits until the page, the card's state and the line under the heading say so. */
-async function pick(page: Page, dialog: Locator, words: Messages, language: Language, choice: string) {
+async function pick(page: Page, dialog: Locator, words: Messages, language: ShippedLanguage, choice: string) {
   const name = nameOf(words, language, choice);
   await dialog.getByRole('button', { name: `${words.skins.apply}: ${name}`, exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', choice);
@@ -293,20 +297,33 @@ test('the chosen skin of the collection is on the page before the app starts, an
   const words = await messagesFor('en');
   const dialog = await openThemes(page, words);
   expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(rgb(OWN.colors.bg));
-  /* The colour of the page in each of the next frames after a click: the new skin from the first one, never a mix. */
-  for (const choice of ['matrix', 'light', 'pixel'] as const) {
-    await page.evaluate(() => {
+  /* The colour of the page in each of the next frames once the company theme switches: the new skin from the first one, never a mix. */
+  for (const choice of ['matrix', 'egypt', 'light', 'pixel'] as const) {
+    await page.evaluate(target => {
       const seen: string[] = [];
       (window as unknown as { seen: string[] }).seen = seen;
       const look = (left: number) => requestAnimationFrame(() => {
         seen.push(getComputedStyle(document.body).backgroundColor);
         if (left > 1) look(left - 1);
       });
-      document.addEventListener('click', () => look(3), { once: true, capture: true });
-    });
+      const observer = new MutationObserver(() => {
+        if (document.documentElement.dataset.theme === target) {
+          observer.disconnect();
+          look(3);
+        }
+      });
+      observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    }, choice);
     await dialog.getByRole('button', { name: `${words.skins.apply}: ${words.skins.names[choice]}`, exact: true }).click();
     await page.waitForFunction(() => (window as unknown as { seen: string[] }).seen.length === 3);
     expect(await page.evaluate(() => (window as unknown as { seen: string[] }).seen)).toEqual(Array(3).fill(rgb(builtinSkin(choice)!.colors.bg)));
+    if (choice === 'egypt') {
+      await expect(page.locator('html')).toHaveAttribute('data-world', 'egypt');
+      await expect(page.locator('html')).toHaveAttribute('data-surface', 'papyrus');
+    } else {
+      await expect(page.locator('html')).not.toHaveAttribute('data-world');
+      await expect(page.locator('html')).not.toHaveAttribute('data-surface');
+    }
   }
   expect(problems).toEqual([]);
 });
@@ -330,6 +347,7 @@ test('Pixel writes headings and buttons in Handjet, served by Hornhoof itself in
   expect(await points(dialog.getByRole('button', { name: words.skins.add, exact: true }))).toBe(12);
   expect(await dialog.getByRole('button', { name: `${words.skins.download}: ${words.skins.names.pixel}`, exact: true }).evaluate(element => getComputedStyle(element).clipPath)).toBe('none');
   await dialog.getByRole('button', { name: `${words.skins.apply}: ${words.skins.names.light}`, exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   expect(await points(dialog.getByRole('button', { name: words.skins.add, exact: true }))).toBe(6);
   expect(problems).toEqual([]);
 });
@@ -403,6 +421,6 @@ test('a skin file is added beside the others, a bad one is refused in plain word
   expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(rgb(CYBERPUNK.colors.bg));
   await again.getByRole('button', { name: words.skins.undo, exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'custom-2');
-  await expect(again.getByRole('region', { name: words.skins.catalog }).getByRole('heading', { level: 6 })).toHaveText(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Dusk', 'Dawn']);
+  await expect(again.getByRole('region', { name: words.skins.catalog }).getByRole('heading', { level: 6 })).toHaveText(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Ancient Egypt', 'Dusk', 'Dawn']);
   expect(problems).toEqual([]);
 });
