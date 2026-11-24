@@ -500,7 +500,7 @@ select:disabled { opacity: .55; }
 /* The arrow points down in both directions, so its two strokes are physical sides on purpose. */
 .select-wrap::after {
   content: ''; position: absolute; inset-inline-end: 14px; inset-block-start: 50%; inline-size: 7px; block-size: 7px;
-  border-inline-end: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: translateY(-70%) rotate(45deg); pointer-events: none;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: translateY(-70%) rotate(45deg); pointer-events: none;
 }
 /* Integrations: one record for each outside tool, a line between them: its name and whether it is connected, then what it
    gives, what it holds and its actions. */
