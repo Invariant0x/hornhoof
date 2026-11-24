@@ -1,7 +1,7 @@
 import { PICTURE_BYTES, FILE_BYTES, checkUploadRoom, checkPictureRoom, checkRoom, onTask, type UploadRoom } from './file-policy.js';
 import { Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
-import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, or } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
