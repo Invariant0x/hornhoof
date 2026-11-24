@@ -99,6 +99,15 @@ export function resolveStageSpecForBuilding(
     const idx = Math.max(0, Math.min(stages.length - 1, rawStage - 1));
     return stages[idx]!;
   }
+  /* A job under way walks every stage before the finished one, by how far it is between its first and last stage,
+     whatever the building's own number of stages (#1947 item 7): a 3-step workshop shows all of the pack's construction
+     pictures in order, not 2 of them. */
+  if (state?.phase === 'building') {
+    const finishedAt = stages.findIndex(s => s.id === 'complete' || s.id === 'upgraded');
+    const before = finishedAt > 0 ? finishedAt : stages.length;
+    const along = Math.max(0, Math.min(1, (rawStage - 1 + state.stageProgress) / Math.max(1, maxStage - 1)));
+    return stages[Math.min(before - 1, Math.floor(along * before))]!;
+  }
   const ratio = Math.max(0, Math.min(1, (rawStage - 1) / Math.max(1, maxStage - 1)));
   const idx = Math.max(0, Math.min(stages.length - 1, Math.round(ratio * (stages.length - 1))));
   return stages[idx]!;

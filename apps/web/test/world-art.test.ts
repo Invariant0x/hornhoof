@@ -13,7 +13,7 @@ import {
   type WorldArtCatalog,
 } from '../src/world/art';
 import type { CityBuilding } from '../src/world/city-layout';
-import type { BuildingConstructionState } from '../src/world/construction';
+import { createConstructionSimulation, startBuildingConstruction, stepConstructionSimulation, type BuildingConstructionState } from '../src/world/construction';
 import { validateWorldPack, type FootprintKey, type WorldPackManifest } from '../src/world/manifest';
 import { STUB_DIAMOND_PACK } from '../src/world/packs/stub-pack';
 import type { ResidentEntity } from '../src/world/residents';
@@ -341,6 +341,32 @@ describe('Stage 9 art contract: declared files, index validation and art resolut
       'buildings/department/hall/low_walls_open.png',
     ]);
     expect(resolveBuildingArt(PACK, files, b, job(0, 'cleared'))).toBeNull();
+  });
+
+  it('walks every construction picture of the step in order over a job, whatever the building own number of stages (#1947 item 7)', () => {
+    const pack: WorldPackManifest = {
+      ...PACK,
+      art: { ...CATALOG, buildings: { ...CATALOG.buildings, district_hub: [{ id: 'workshop', footprint: '3x3', label: { en: 'Workshop', ru: 'Мастерская' } }] } },
+    };
+    const at = (name: string) => `buildings/district_hub/workshop/${name}.png`;
+    const steps = ['01', '02', '03', '04', '05', '06', '07', '08'].map(n => at(`stage_${n}`));
+    const files = index(Object.fromEntries([...steps, at('complete'), at('upgraded')].map(path => [path, picture('3x3', 500)])));
+    /* A live district workshop grows in 3 steps, the pack draws 8 construction pictures before the finished one. */
+    const hub = building({ kind: 'district_hub', stage: 1, maxStage: 3 });
+    const sim = createConstructionSimulation(pack);
+    const build = startBuildingConstruction(sim, hub);
+    const shown: string[] = [];
+    const note = () => {
+      const path = resolveBuildingArt(pack, files, build.buildingSnapshot, build)?.layers[0]?.path;
+      if (path && shown[shown.length - 1] !== path) shown.push(path);
+    };
+    note();
+    for (let frame = 0; build.phase === 'building' && frame < 10_000; frame++) {
+      stepConstructionSimulation(sim, 1 / 60);
+      note();
+    }
+    const finished = resolveBuildingArt(pack, files, { ...hub, stage: 3 }, null)!.layers[0]!.path;
+    expect(shown).toEqual([...steps, finished]);
   });
 
   it('picks statue stages, monument tiers with the capstone, and supply fill levels from live values', () => {
