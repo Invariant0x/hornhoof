@@ -31,7 +31,6 @@ async function watch(page: Page, theme: string): Promise<string[]> {
 const webglContexts = (page: Page) => page.evaluate(() => (window as unknown as { __webglContexts: number }).__webglContexts);
 
 test('a plain theme loads no world engine, world code or world data on the map, tasks and people', async ({ page }) => {
-  test.setTimeout(120_000);
   const asked = await watch(page, 'cyberpunk');
   await page.goto('/');
   const nav = page.getByRole('navigation');
@@ -47,7 +46,6 @@ test('a plain theme loads no world engine, world code or world data on the map, 
 
 /* The check sees the world when there is one: the same watch on a world theme catches its code, data and context. */
 test('a world theme loads its engine, code and data, which the plain-theme check would catch', async ({ page }) => {
-  test.setTimeout(120_000);
   const asked = await watch(page, 'egypt');
   await page.goto('/');
   await expect(page.locator('[data-world-canvas="egypt"] canvas').first()).toBeVisible();
