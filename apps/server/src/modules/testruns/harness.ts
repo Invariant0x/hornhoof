@@ -258,8 +258,10 @@ async function sendBundle(ctx: Ctx, node: NodeIdentity, ranged: string | undefin
   if (!build || build.status !== 'ready') throw new ApiError(404, 'not_found', 'This bundle is not ready.');
   const [department] = await ctx.db.select().from(departments).where(eq(departments.id, build.departmentId));
   if (!department || !await nodeMayTake(ctx, node, department)) throw new ApiError(403, 'forbidden', 'This machine takes no tests of this product.');
+  const file = bundleFile(dir, build);
+  if (!await exists(file)) throw new ApiError(404, 'not_found', 'This bundle is not ready.');
   const { start, end } = range(ranged, build.size!);
-  return { start, end, size: build.size!, stream: createReadStream(bundleFile(dir, build), { start, end }) };
+  return { start, end, size: build.size!, stream: createReadStream(file, { start, end }) };
 }
 
 /* A machine's own routes, with its key: what it asks for, what it built, what failed, and the bundles it takes. */

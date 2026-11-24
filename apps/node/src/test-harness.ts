@@ -7,16 +7,17 @@ import { checkCacheContext, fileDigest, type CacheContext, type CacheEntry, type
 
 /* Hornhoof's registry of what is built: one machine builds a unit, every other takes it. */
 type HarnessLease = Pick<Extract<HarnessClaim, { state: 'build' }>, 'companyId' | 'attempt'>;
+export type HarnessProgress = (transferred: number, total: number) => void;
 export type HarnessRemote = {
   claim(unit: HarnessUnit, signal: AbortSignal): Promise<HarnessClaim>;
-  upload(key: string, file: string, digest: string, size: number, partBytes: number, signal: AbortSignal, lease: HarnessLease): Promise<void>;
-  download(key: string, file: string, claim: Extract<HarnessClaim, { state: 'ready' }>, signal: AbortSignal): Promise<void>;
+  upload(key: string, file: string, digest: string, size: number, partBytes: number, signal: AbortSignal, lease: HarnessLease, progress?: HarnessProgress): Promise<void>;
+  download(key: string, file: string, claim: Extract<HarnessClaim, { state: 'ready' }>, signal: AbortSignal, progress?: HarnessProgress): Promise<void>;
   /* error: what failed; none gives the unit back unjudged, for a build that was stopped. */
   failed(key: string, error: string | null, lease: HarnessLease): Promise<void>;
 };
 type UnitInfo = Omit<HarnessUnit, 'key'>;
 /* waitMs: how long a part waits for a unit another machine builds before it builds the unit itself. */
-type ShareOptions = { renewMs?: number; tail?: () => string; waitMs?: number };
+type ShareOptions = { renewMs?: number; tail?: () => string; waitMs?: number; progressMs?: number; transferMs?: number };
 
 /* A claim lasts a few minutes and a build may take longer, so it is said again until it ends. */
 const RENEW_MS = 60_000;
@@ -25,15 +26,30 @@ const PAUSE_MS = 10_000;
 /* Letting a unit go runs while the cache lock and the machine's turn are held, often after the work's own signal has
    stopped, so it never waits long for an answer. A unit left unanswered goes back when its claim runs out. */
 const RELEASE_MS = 10_000;
-/* A request that brings nothing for this long is tried again as a refused one is, so that a part never stands silent on a
-   stalled link until its whole time runs out; one that still moves, however slowly, goes on. A part of a bundle going out
-   shows no progress here, so it has five times as long. */
+/* Each request stops once nothing comes for QUIET_MS, and the whole bundle transfer in or out is bounded by TRANSFER_MS
+   while logging progress every PROGRESS_MS, so a slow or trickling relay link never stalls a test part in silence. */
 const QUIET_MS = 60_000;
 const SENDING_QUIETS = 5;
+const PROGRESS_MS = 60_000;
+const TRANSFER_MS = 5 * 60_000;
 const WAIT_MS = 10 * 60_000;
 
 const span = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Number((ms / 1000).toFixed(2))} s`);
-const sized = (bytes: number) => (bytes >= 1024 ** 2 ? `${Math.round(bytes / 1024 ** 2)} MB` : `${bytes} bytes`);
+const sized = (bytes: number) =>
+  bytes >= 1024 ** 2 ? `${Number((bytes / 1024 ** 2).toFixed(1))} MB` : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} bytes`;
+const percent = (done: number, total: number) => (total > 0 ? Math.min(100, Math.floor((done / total) * 100)) : 100);
+
+async function withinTime<T>(signal: AbortSignal, limitMs: number, onTimeout: () => string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const limit = new AbortController();
+  const timer = setTimeout(() => { limit.abort(); }, limitMs);
+  timer.unref();
+  try {
+    return await run(AbortSignal.any([signal, limit.signal]));
+  } catch (error) {
+    if (limit.signal.aborted && !signal.aborted) throw new Error(onTimeout());
+    throw error;
+  } finally { clearTimeout(timer); }
+}
 
 function sleep(ms: number, context: CacheContext): Promise<void> {
   checkCacheContext(context);
@@ -44,29 +60,58 @@ function sleep(ms: number, context: CacheContext): Promise<void> {
   });
 }
 
-async function fetched(remote: HarnessRemote, unit: HarnessUnit, entry: CacheEntry, claim: Extract<HarnessClaim, { state: 'ready' }>, context: CacheContext): Promise<CacheEntry | null> {
-  const file = bundleName(dirname(entry.path));
-  context.log(`Taking the prepared ${unit.unit} ${entry.key.slice(0, 12)} (${sized(claim.size)}) that another machine built, from Hornhoof.`);
+async function fetched(remote: HarnessRemote, unit: HarnessUnit, entry: CacheEntry, claim: Extract<HarnessClaim, { state: 'ready' }>, context: CacheContext, options: ShareOptions): Promise<CacheEntry | null> {
+  const file = bundleName(dirname(entry.path)), key = entry.key.slice(0, 12);
+  const progressMs = options.progressMs ?? PROGRESS_MS, transferMs = options.transferMs ?? TRANSFER_MS;
+  let received = 0;
+  context.log(`Taking the prepared ${unit.unit} ${key} (${sized(claim.size)}) that another machine built, from Hornhoof.`);
+  const progress = setInterval(() => {
+    context.log(`Transferred ${sized(received)} of ${sized(claim.size)} (${percent(received, claim.size)}%) of the prepared ${unit.unit} ${key} from Hornhoof.`);
+  }, progressMs);
+  progress.unref();
   try {
-    await remote.download(entry.key, file, claim, context.signal);
+    await withinTime(
+      context.signal,
+      transferMs,
+      () => `The bundle transfer from Hornhoof did not finish within ${span(transferMs)} (${sized(received)} of ${sized(claim.size)}, ${percent(received, claim.size)}%).`,
+      bounded => remote.download(entry.key, file, claim, bounded, done => { received = done; }),
+    );
     return { ...entry, hit: true, fetched: true, ready: await unpackBundle(file, entry, context) };
   } catch (error) {
     checkCacheContext(context);
-    context.log(`The prepared ${entry.key.slice(0, 12)} could not be taken from Hornhoof, so it is built here: ${error instanceof Error ? error.message : String(error)}`);
+    context.log(`The prepared ${key} could not be taken from Hornhoof, so it is built here: ${error instanceof Error ? error.message : String(error)}`);
     return null;
-  } finally { await rm(file, { force: true }); }
+  } finally {
+    clearInterval(progress);
+    await rm(file, { force: true });
+  }
 }
 
-async function handedOver(remote: HarnessRemote, entry: CacheEntry, claim: Extract<HarnessClaim, { state: 'build' }>, context: CacheContext): Promise<void> {
-  const file = bundleName(dirname(entry.path));
+async function handedOver(remote: HarnessRemote, unit: HarnessUnit, entry: CacheEntry, claim: Extract<HarnessClaim, { state: 'build' }>, context: CacheContext, options: ShareOptions): Promise<void> {
+  const file = bundleName(dirname(entry.path)), key = entry.key.slice(0, 12);
+  const progressMs = options.progressMs ?? PROGRESS_MS, transferMs = options.transferMs ?? TRANSFER_MS;
+  let progress: ReturnType<typeof setInterval> | undefined;
   try {
     const { digest, size } = await packBundle(entry, file, context);
-    await remote.upload(entry.key, file, digest, size, claim.partBytes, context.signal, claim);
+    let sent = 0;
+    progress = setInterval(() => {
+      context.log(`Sent ${sized(sent)} of ${sized(size)} (${percent(sent, size)}%) of the prepared ${unit.unit} ${key} to Hornhoof.`);
+    }, progressMs);
+    progress.unref();
+    await withinTime(
+      context.signal,
+      transferMs,
+      () => `The bundle upload to Hornhoof did not finish within ${span(transferMs)} (${sized(sent)} of ${sized(size)}, ${percent(sent, size)}%).`,
+      bounded => remote.upload(entry.key, file, digest, size, claim.partBytes, bounded, claim, done => { sent = done; }),
+    );
   } catch (error) {
     await remote.failed(entry.key, null, claim).catch(() => {});
     checkCacheContext(context);
-    context.log(`The prepared ${entry.key.slice(0, 12)} stays on this machine only: ${error instanceof Error ? error.message : String(error)}`);
-  } finally { await rm(file, { force: true }); }
+    context.log(`The prepared ${key} stays on this machine only: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    if (progress) clearInterval(progress);
+    await rm(file, { force: true });
+  }
 }
 
 async function builtHere(remote: HarnessRemote, unit: HarnessUnit, entry: CacheEntry, claim: Extract<HarnessClaim, { state: 'build' }>, context: CacheContext, publish: () => Promise<CacheReady>, options: ShareOptions): Promise<CacheEntry> {
@@ -79,7 +124,7 @@ async function builtHere(remote: HarnessRemote, unit: HarnessUnit, entry: CacheE
       throw error;
     });
     const built = { ...entry, fetched: false, ready };
-    await handedOver(remote, built, claim, context);
+    await handedOver(remote, unit, built, claim, context, options);
     return built;
   } finally { clearInterval(renew); }
 }
@@ -104,7 +149,7 @@ export function harnessShare(remote: HarnessRemote, info: UnitInfo, options: Sha
       const claim = await askedClaim(remote, unit, context);
       switch (claim.state) {
         case 'ready': {
-          const taken = await fetched(remote, unit, entry, claim, context);
+          const taken = await fetched(remote, unit, entry, claim, context, options);
           return taken ?? { ...entry, fetched: false, ready: await publish() };
         }
         case 'build': return builtHere(remote, unit, entry, claim, context, publish, options);
@@ -150,7 +195,8 @@ async function again<T>(signal: AbortSignal, pauseMs: number, run: () => Promise
 async function quietFor<T>(signal: AbortSignal, quietMs: number, run: (signal: AbortSignal, moved: () => void) => Promise<T>): Promise<T> {
   const quiet = new AbortController();
   let timer = setTimeout(() => { quiet.abort(); }, quietMs);
-  const moved = () => { clearTimeout(timer); timer = setTimeout(() => { quiet.abort(); }, quietMs); };
+  timer.unref();
+  const moved = () => { clearTimeout(timer); timer = setTimeout(() => { quiet.abort(); }, quietMs); timer.unref(); };
   try { return await run(AbortSignal.any([signal, quiet.signal]), moved); }
   catch (error) {
     if (quiet.signal.aborted && !signal.aborted) throw new Error(`Hornhoof sent nothing for ${span(quietMs)}.`);
@@ -158,19 +204,44 @@ async function quietFor<T>(signal: AbortSignal, quietMs: number, run: (signal: A
   } finally { clearTimeout(timer); }
 }
 
-async function readAll(response: Response, moved: () => void): Promise<Buffer> {
-  const reader = response.body?.getReader(), chunks: Uint8Array[] = [];
+async function writeRange(
+  response: Response,
+  out: Awaited<ReturnType<typeof open>>,
+  expected: number,
+  total: number,
+  state: { received: number },
+  moved: () => void,
+  progress?: HarnessProgress,
+): Promise<void> {
+  const reader = response.body?.getReader();
+  let partReceived = 0;
   moved();
   for (;;) {
     const read = await reader?.read();
-    if (!read || read.done) return Buffer.concat(chunks);
-    chunks.push(read.value); moved();
+    if (!read || read.done) break;
+    if (read.value.byteLength === 0) continue;
+    if (partReceived + read.value.byteLength > expected) {
+      await reader?.cancel().catch(() => {});
+      throw new Error('Hornhoof sent more bytes than asked for.');
+    }
+    let offset = 0;
+    while (offset < read.value.byteLength) {
+      const { bytesWritten } = await out.write(read.value, offset, read.value.byteLength - offset, state.received);
+      offset += bytesWritten;
+      partReceived += bytesWritten;
+      state.received += bytesWritten;
+    }
+    moved();
+    progress?.(state.received, total);
+  }
+  if (partReceived < expected) {
+    throw new Error(`Hornhoof closed the bundle stream early (${sized(state.received)} of ${sized(total)}).`);
   }
 }
 
 /* The registry over HTTP with the node's key. A bundle goes in parts, each tried again by itself, as a whole one would not
    get through a slow link between a machine and the company's link. */
-export function harnessRemote(server: string, nodeKey: string, pauseMs = PAUSE_MS, releaseMs = RELEASE_MS, quietMs = QUIET_MS, clock = REAL_CLOCK): HarnessRemote {
+export function harnessRemote(server: string, nodeKey: string, pauseMs = PAUSE_MS, releaseMs = RELEASE_MS, quietMs = QUIET_MS, clock = REAL_CLOCK, transferMs = TRANSFER_MS): HarnessRemote {
   const at = (path: string) => `${server}/api/harness${path}`;
   const headers = { authorization: `Bearer ${nodeKey}` };
   const fenced = (lease: HarnessLease) => ({ ...headers, 'x-harness-company': lease.companyId, 'x-harness-attempt': lease.attempt });
@@ -179,27 +250,68 @@ export function harnessRemote(server: string, nodeKey: string, pauseMs = PAUSE_M
     async claim(unit, signal) {
       return HarnessClaim.parse(await quietFor(signal, quietMs, async quiet => (await answered(await fetch(at('/claim'), { ...json({ ...unit, fencing: 1 }), signal: quiet }))).json()));
     },
-    async upload(key, path, digest, size, partBytes, signal, lease) {
-      const file = await open(path, 'r');
-      try {
-        for (let index = 0; index * partBytes < size; index++) {
-          const { buffer, bytesRead } = await file.read(Buffer.alloc(partBytes), 0, partBytes, index * partBytes);
-          const body = new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead);
-          await again(signal, pauseMs, () => quietFor(signal, quietMs * SENDING_QUIETS, async sending => answered(await fetch(at(`/${key}/parts/${index}`), { method: 'PUT', headers: { ...fenced(lease), 'content-type': 'application/octet-stream' }, body, signal: sending }))), clock);
-        }
-      } finally { await file.close(); }
-      await quietFor(signal, quietMs, async quiet => answered(await fetch(at(`/${key}/done`), { ...json({ digest, size }), headers: { ...fenced(lease), 'content-type': 'application/json' }, signal: quiet })));
+    async upload(key, path, digest, size, partBytes, signal, lease, progress) {
+      let sent = 0;
+      await withinTime(
+        signal,
+        transferMs,
+        () => `The bundle upload to Hornhoof did not finish within ${span(transferMs)} (${sized(sent)} of ${sized(size)}, ${percent(sent, size)}%).`,
+        async bounded => {
+          const file = await open(path, 'r');
+          try {
+            for (let index = 0; index * partBytes < size; index++) {
+              const { buffer, bytesRead } = await file.read(Buffer.alloc(partBytes), 0, partBytes, index * partBytes);
+              const body = new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead);
+              await again(
+                bounded,
+                pauseMs,
+                () => quietFor(bounded, quietMs * SENDING_QUIETS, async sending => answered(await fetch(at(`/${key}/parts/${index}`), { method: 'PUT', headers: { ...fenced(lease), 'content-type': 'application/octet-stream' }, body, signal: sending }))),
+                clock,
+              );
+              sent += bytesRead;
+              progress?.(sent, size);
+            }
+          } finally { await file.close(); }
+          await quietFor(bounded, quietMs, async quiet => answered(await fetch(at(`/${key}/done`), { ...json({ digest, size }), headers: { ...fenced(lease), 'content-type': 'application/json' }, signal: quiet })));
+        },
+      );
     },
-    async download(key, path, claim, signal) {
-      const out = await open(path, 'wx', 0o600);
+    async download(key, path, claim, signal, progress) {
+      const out = await open(path, 'wx', 0o600), state = { received: 0 };
+      let ok = false;
       try {
-        for (let start = 0; start < claim.size; start += claim.partBytes) {
-          const range = `bytes=${start}-${Math.min(start + claim.partBytes, claim.size) - 1}`;
-          const part = await again(signal, pauseMs, () => quietFor(signal, quietMs, async (quiet, moved) => readAll(await answered(await fetch(at(`/${key}/bundle`), { headers: { ...fenced(claim), range }, signal: quiet })), moved)), clock);
-          await out.writeFile(part);
-        }
-      } finally { await out.close(); }
-      if (await fileDigest(path, { deadline: Number.POSITIVE_INFINITY, signal }) !== claim.digest) throw new Error('The bundle that came differs from what Hornhoof holds.');
+        await withinTime(
+          signal,
+          transferMs,
+          () => `The bundle transfer from Hornhoof did not finish within ${span(transferMs)} (${sized(state.received)} of ${sized(claim.size)}, ${percent(state.received, claim.size)}%).`,
+          async bounded => {
+            while (state.received < claim.size) {
+              const partEnd = Math.min(state.received + claim.partBytes, claim.size) - 1;
+              await again(
+                bounded,
+                pauseMs,
+                () =>
+                  quietFor(bounded, quietMs, async (quiet, moved) => {
+                    const start = state.received;
+                    if (start > partEnd) return;
+                    const range = `bytes=${start}-${partEnd}`;
+                    const response = await answered(await fetch(at(`/${key}/bundle`), { headers: { ...fenced(claim), range }, signal: quiet }));
+                    await writeRange(response, out, partEnd - start + 1, claim.size, state, moved, progress);
+                  }),
+                clock,
+              );
+            }
+          },
+        );
+        ok = true;
+      } finally {
+        await out.close();
+        if (!ok) await rm(path, { force: true });
+      }
+      if (await fileDigest(path, { deadline: Number.POSITIVE_INFINITY, signal }) !== claim.digest) {
+        await rm(path, { force: true });
+        throw new Error('The bundle that came differs from what Hornhoof holds.');
+      }
     },
     async failed(key, error, lease) {
       await answered(await fetch(at(`/${key}/failed`), { ...json({ error }), headers: { ...fenced(lease), 'content-type': 'application/json' }, signal: clock.timeout(releaseMs) }));
