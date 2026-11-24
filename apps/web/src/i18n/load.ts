@@ -8,6 +8,14 @@ import { pseudoMessages } from './pseudo';
    is a new file and a line in the registry of the protocol. The page brings them one language at a time. */
 const files = import.meta.glob<{ default: unknown }>(['./??.ts', './??-*.ts']);
 
+/* The fonts of a script, brought only when a language written in it is on: Latin and Cyrillic are the product's own fonts
+   and have no file; every other script has one in fonts/scripts/ named by its ISO 15924 code. */
+const scriptFiles = import.meta.glob<unknown>('../fonts/scripts/*.css');
+
+export async function loadScriptFonts(script: string): Promise<void> {
+  await scriptFiles[`../fonts/scripts/${script}.css`]?.();
+}
+
 export type Loaded = { messages: Messages; missing: string[]; extra: string[] };
 
 /* A language laid over English, with what it lacks told, so a text not translated yet shows in English and the one who

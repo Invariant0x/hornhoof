@@ -28,7 +28,7 @@ import { orchestratorStatus } from './Map';
 import { clock } from './Subscriptions';
 import { AgentWindowLayout, WordButton, type WindowPlace } from './AgentWindowLayout';
 import { everyVisible, useRenderGuard } from '../guard';
-import { say, sayIf } from '@hornhoof/protocol';
+import { sayIf } from '@hornhoof/protocol';
 
 /* The most events the server sends at a time. */
 const PAGE = 500;

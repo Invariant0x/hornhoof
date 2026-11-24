@@ -1,0 +1,9 @@
+/* The glyphs of Arabic for the product's families. A skin names the same families whatever the language, so each takes the
+   glyphs of the script from the fonts the system has for it, by unicode-range, and the rest stay as they were. A file of
+   the font itself goes in the same rule (src: url(...)) when a release ships one; this file is brought only when a
+   language written in this script is on, and the page names the script on its root as data-script. */
+@font-face { font-family: 'Onest'; font-weight: 100 900; src: local('Geeza Pro'), local('Noto Sans Arabic'), local('Segoe UI'), local('Tahoma'), local('Arial'); unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF; }
+@font-face { font-family: 'Tektur'; font-weight: 100 900; src: local('Geeza Pro'), local('Noto Sans Arabic'), local('Segoe UI'), local('Tahoma'), local('Arial'); unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF; }
+@font-face { font-family: 'Handjet'; font-weight: 100 900; src: local('Geeza Pro'), local('Noto Sans Arabic'), local('Segoe UI'), local('Tahoma'), local('Arial'); unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF; }
+@font-face { font-family: 'Alegreya'; font-weight: 100 900; src: local('Geeza Pro'), local('Noto Sans Arabic'), local('Segoe UI'), local('Tahoma'), local('Arial'); unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF; }
+@font-face { font-family: 'Golos Text'; font-weight: 100 900; src: local('Geeza Pro'), local('Noto Sans Arabic'), local('Segoe UI'), local('Tahoma'), local('Arial'); unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF; }

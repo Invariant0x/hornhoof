@@ -1,5 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LOCALES, PSEUDO_LOCALES, SOURCE_LOCALE } from '@hornhoof/protocol';
@@ -188,5 +188,22 @@ describe('languages made for tests', () => {
 
   it('are never shipped, and are all the registry names', () => {
     for (const pseudo of PSEUDO_LOCALES) expect(LANGUAGES.map(choice => choice.id)).not.toContain(pseudo.id);
+  });
+});
+
+describe('the script of a language', () => {
+  it('is named on the root, and a script that is not the product\'s own brings its font file', async () => {
+    localStorage.setItem('hh-lang', 'ar-XB');
+    render(<LanguageProvider pseudo><Probe /></LanguageProvider>);
+    await waitFor(() => expect(document.documentElement.dataset.script).toBe('Arab'));
+    act(() => screen.getByRole('button', { name: 'English' }).click());
+    await waitFor(() => expect(document.documentElement.dataset.script).toBe('Latn'));
+  });
+
+  it('has a font file for every script of the registry that is neither Latin nor Cyrillic', () => {
+    const own = new Set(['Latn', 'Cyrl']);
+    const scripts = [...LOCALES, ...PSEUDO_LOCALES].map(locale => locale.script).filter(script => !own.has(script));
+    const files = readdirSync(resolve(process.cwd(), 'src/fonts/scripts'));
+    for (const script of new Set(scripts)) expect(files, script).toContain(`${script}.css`);
   });
 });

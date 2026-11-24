@@ -2,7 +2,7 @@
    Single source of truth shared between server and web; contains zero theme-specific words. */
 
 import { z } from 'zod';
-import { LOCALE_IDS, say, SOURCE_LOCALE, type Texts } from './locales.js';
+import { LOCALE_IDS, say, type Texts } from './locales.js';
 import { currentLimits, type Limits, type ProviderId } from './index.js';
 
 export const MAX_AGENT_LEVEL = 30;

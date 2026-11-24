@@ -1,4 +1,4 @@
-import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { isLocaleId, isPseudoLocaleId, LOCALES, localeInfo, matchLocale, say, SOURCE_LOCALE, type Direction, type Texts } from '@hornhoof/protocol';
 import { ApiFailure } from '../api';
 import { en, type Messages } from './en';
@@ -94,10 +94,18 @@ export function LanguageProvider({ children, pseudo = false }: { children: React
 
   const language = shown?.language ?? wanted;
   const dir = localeInfo(language)?.dir ?? 'ltr';
+  const script = localeInfo(language)?.script ?? 'Latn';
+  const settled = useRef(false);
   useEffect(() => {
-    document.documentElement.lang = language;
-    document.documentElement.dir = dir;
-  }, [language, dir]);
+    const root = document.documentElement;
+    root.lang = language;
+    /* A page that was already turned right to left before its first draw (a test page does) stays so until the language
+       changes; from then on the language decides. */
+    if (settled.current || dir === 'rtl' || root.dir !== 'rtl') root.dir = dir;
+    settled.current = true;
+    root.dataset.script = script;
+    void import('./load').then(({ loadScriptFonts }) => loadScriptFonts(script));
+  }, [language, dir, script]);
 
   const setLanguage = useCallback((next: Language) => {
     setWanted(next);

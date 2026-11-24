@@ -5,7 +5,7 @@ import { useStream } from '../live';
 import { useOpenWindowTask } from '../screens/AgentWindowContext';
 import type { InboxLetter, InboxMode, InboxView, MessageParty } from '../types';
 import { PanelFrame } from './SidePanels';
-import { say, sayIf } from '@hornhoof/protocol';
+import { sayIf } from '@hornhoof/protocol';
 
 type Choice = InboxMode | 'rule';
 const CHOICES: Choice[] = ['rule', 'inbox', 'direct'];
