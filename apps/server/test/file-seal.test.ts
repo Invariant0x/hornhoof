@@ -41,7 +41,7 @@ describe('a file sealed for the store', () => {
     const pieces: Buffer[] = [];
     for (let at = 0, n = 1; at < one.length; at += n, n = (n * 7 + 3) % 70_001 || 1) pieces.push(one.subarray(at, at + n));
     const out: Buffer[] = [];
-    await pipeline(Readable.from(pieces), openSealed(key), async function* (source) {
+    await pipeline(Readable.from(pieces), openSealed(key, NAME), async function* (source) {
       for await (const chunk of source) out.push(chunk as Buffer);
     });
     expect(Buffer.concat(out).equals(plain)).toBe(true);
