@@ -282,9 +282,21 @@ describe('Game layer stage 1: verified achievements catalogue, human-only API, s
       access: { departments: [dev!.id] },
     });
 
-    /* Running worker and orchestrator job tokens and active personal assistant keys are ALL refused (#99 / §4.2). */
+    /* Running worker, assistant, and orchestrator job tokens and active personal assistant keys are ALL refused (#99 / §4.2). */
     const liveAgentToken = 'live-worker-job-token-1994';
+    const liveAssistantJobToken = 'live-assistant-job-token-1994';
     const liveOrchestratorToken = 'live-orchestrator-job-token-1994';
+    const [assistantAgent] = await db
+      .insert(agents)
+      .values({
+        companyId: company!.id,
+        kind: 'assistant',
+        name: 'Leo Assistant Agent',
+        model: 'm',
+        subscriptionId: plan!.id,
+        createdBy: owner!.id,
+      })
+      .returning();
     await db.insert(jobs).values([
       {
         companyId: company!.id,
@@ -295,6 +307,17 @@ describe('Game layer stage 1: verified achievements catalogue, human-only API, s
         timeoutMs: 10_000,
         status: 'running',
         toolTokenHash: sha256Hex(liveAgentToken),
+        startedAt: new Date(),
+      },
+      {
+        companyId: company!.id,
+        subscriptionId: plan!.id,
+        agentId: assistantAgent!.id,
+        kind: 'conversation',
+        prompt: 'assist',
+        timeoutMs: 10_000,
+        status: 'running',
+        toolTokenHash: sha256Hex(liveAssistantJobToken),
         startedAt: new Date(),
       },
       {
@@ -340,17 +363,41 @@ describe('Game layer stage 1: verified achievements catalogue, human-only API, s
       assigneeAgentId: worker!.id,
       executor: true,
     });
+    const [nonAlertJob] = await db
+      .insert(jobs)
+      .values({
+        companyId: company!.id,
+        subscriptionId: plan!.id,
+        agentId: worker!.id,
+        taskId: task.id,
+        kind: 'conversation',
+        prompt: 'gate',
+        timeoutMs: 10_000,
+        status: 'done',
+      })
+      .returning();
+    /* Non-message agent_events carrying silentJob do not match the silent-job partial index or earn gong_heard. */
+    await db.insert(agentEvents).values({
+      companyId: company!.id,
+      agentId: head!.id,
+      kind: 'tool',
+      data: { silentJob: nonAlertJob!.id },
+    });
     await report(app.ctx, worker!.id, task.id, {
       done: true,
       summary: 'Verified locally with passing tests.',
       ...(await recorded(app.ctx, task.id, worker!.id)),
     });
 
-    /* Every non-human caller (worker bearer, assistant bearer, orchestrator bearer, internal orchestrator/head) is refused. */
+    /* Every non-human caller (worker bearer, assistant job bearer, assistant key, orchestrator bearer, internal orchestrator/head/assistant) is refused. */
     for (const url of ['/api/world/rewards', '/api/world/rewards/showcase']) {
       expect(
         (await app.inject({ url, headers: { authorization: `Bearer ${liveAgentToken}` } })).statusCode,
         `worker bearer on ${url}`,
+      ).toBe(401);
+      expect(
+        (await app.inject({ url, headers: { authorization: `Bearer ${liveAssistantJobToken}` } })).statusCode,
+        `assistant job bearer on ${url}`,
       ).toBe(401);
       expect(
         (await app.inject({ url, headers: { authorization: `Bearer ${assistantRawKey}` } })).statusCode,
@@ -368,6 +415,10 @@ describe('Game layer stage 1: verified achievements catalogue, human-only API, s
         (await app.inject({ url, headers: orchestratorHeaders(owner!.id, head!.id) })).statusCode,
         `internal head on ${url}`,
       ).toBe(403);
+      expect(
+        (await app.inject({ url, headers: orchestratorHeaders(owner!.id, assistantAgent!.id) })).statusCode,
+        `internal assistant on ${url}`,
+      ).toBe(401);
     }
 
     /* Agent instructions contain zero references to game achievements (§3.1 #5). */
@@ -381,10 +432,14 @@ describe('Game layer stage 1: verified achievements catalogue, human-only API, s
     const ceoRes1 = await app.inject({ url: '/api/world/rewards', ...as(ceo) });
     const ceoRes2 = await app.inject({ url: '/api/world/rewards', ...as(ceo) });
     const memberRes = await app.inject({ url: '/api/world/rewards', ...as(member) });
+    const ceoShowcaseRes = await app.inject({ url: '/api/world/rewards/showcase', ...as(ceo) });
+    const memberShowcaseRes = await app.inject({ url: '/api/world/rewards/showcase', ...as(member) });
 
-    expect(ceoRes1.statusCode).toBe(200);
-    expect(ceoRes2.statusCode).toBe(200);
-    expect(memberRes.statusCode).toBe(200);
+    for (const res of [ceoRes1, ceoRes2, memberRes, ceoShowcaseRes, memberShowcaseRes]) {
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['cache-control']).toBe('no-store');
+      expect(res.headers['referrer-policy']).toBe('no-referrer');
+    }
 
     expect(insertSpy).not.toHaveBeenCalled();
     expect(updateSpy).not.toHaveBeenCalled();
@@ -398,6 +453,9 @@ describe('Game layer stage 1: verified achievements catalogue, human-only API, s
     const body2 = ceoRes2.json() as RewardsPayload;
     expect(body1).toEqual(body2);
     expect(memberRes.json()).toEqual(body1);
+    expect(ceoShowcaseRes.json()).toEqual(body1.showcase);
+    expect(memberShowcaseRes.json()).toEqual(body1.showcase);
+    expect(body1.earned.map(e => e.id)).not.toContain('gong_heard');
 
     /* Catalogue constraints: <= 30 items, unique ids, neutral tiers, captions from JSON, structured rules, artKey null, no yo or em-dash. */
     expect(body1.catalogue.length).toBeGreaterThanOrEqual(15);
@@ -697,6 +755,33 @@ describe('Game layer stage 1: verified achievements catalogue, human-only API, s
         revision: routeAtAccept.revision,
         integrationCommit: sha40(102),
       },
+    });
+
+    /* Active department smoke suppresses firefighter until the failing agent finishes a clean turn. */
+    await db.insert(jobs).values({
+      companyId: company!.id,
+      subscriptionId: planB!.id,
+      agentId: head!.id,
+      kind: 'conversation',
+      prompt: 'head failed check',
+      timeoutMs: 5_000,
+      status: 'failed',
+      failure: { kind: 'crash', text: 'Exited 1', retryable: false },
+      createdAt: new Date('2026-11-01T09:20:00.000Z'),
+      finishedAt: new Date('2026-11-01T09:21:00.000Z'),
+    });
+    const whileSmoking = (await app.inject({ url: '/api/world/rewards', ...as(ceo) })).json() as RewardsPayload;
+    expect(whileSmoking.earned.map(e => e.id)).not.toContain('firefighter');
+    await db.insert(jobs).values({
+      companyId: company!.id,
+      subscriptionId: planB!.id,
+      agentId: head!.id,
+      kind: 'conversation',
+      prompt: 'head recovered check',
+      timeoutMs: 5_000,
+      status: 'done',
+      createdAt: new Date('2026-11-01T09:22:00.000Z'),
+      finishedAt: new Date('2026-11-01T09:23:00.000Z'),
     });
 
     const afterRich = (await app.inject({ url: '/api/world/rewards', ...as(ceo) })).json() as RewardsPayload;
@@ -1615,12 +1700,20 @@ describe('Game layer stage 1: verified achievements catalogue, human-only API, s
     const showcaseRes = await app.inject({ url: '/api/world/rewards/showcase', ...as(ceo) });
     expect(fullRes.statusCode).toBe(200);
     expect(showcaseRes.statusCode).toBe(200);
+    expect(fullRes.headers['cache-control']).toBe('no-store');
+    expect(showcaseRes.headers['cache-control']).toBe('no-store');
+    expect(fullRes.headers['referrer-policy']).toBe('no-referrer');
+    expect(showcaseRes.headers['referrer-policy']).toBe('no-referrer');
 
     const fullJson = fullRes.json() as RewardsPayload;
     const showcaseBody = showcaseRes.body;
     expect(showcaseRes.json()).toEqual(fullJson.showcase);
+    expect(Object.keys(fullJson.showcase).sort()).toEqual(['catalogue', 'earned', 'theme']);
     expect(fullJson.showcase.theme).toBe('egypt');
     expect(fullJson.showcase.earned.length).toBeGreaterThanOrEqual(3);
+    for (const cat of fullJson.showcase.catalogue) {
+      expect(Object.keys(cat).sort()).toEqual(['artKey', 'captions', 'display', 'id', 'name', 'scope', 'tier']);
+    }
 
     for (const token of sensitiveTokens) {
       expect(showcaseBody).not.toContain(token);
@@ -1628,10 +1721,11 @@ describe('Game layer stage 1: verified achievements catalogue, human-only API, s
       expect(fullRes.body).not.toContain(token);
     }
 
-    /* Showcase carries zero UUIDs, zero commit SHAs, zero ISO timestamps (including date-only stamps), and zero counts! */
+    /* Showcase carries zero UUIDs, zero commit SHAs, zero ISO timestamps (including date-only stamps), and zero digits/counts! */
     expect(showcaseBody).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/i);
     expect(showcaseBody).not.toMatch(/\b[0-9a-f]{40}\b/i);
     expect(showcaseBody).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+    expect(showcaseBody).not.toMatch(/\d/);
 
     for (const card of fullJson.showcase.earned) {
       expect(Object.keys(card).sort()).toEqual([

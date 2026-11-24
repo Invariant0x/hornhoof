@@ -1,8 +1,7 @@
 /* Pure, deterministic Stage 1 company achievement computation.
-   Reads only verified Hornhoof records; zero side effects, zero invented data, zero currency. */
+   Reads only verified Hornhoof scalar records; zero side effects, zero invented data, zero currency. */
 
 import { STATUE_TASKS_PER_STAGE, agentLevelThreshold } from '@hornhoof/protocol/world';
-import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { modelProvider } from '../tasks/echelons-policy.js';
 import {
   ACHIEVEMENT_CATALOGUE,
@@ -45,29 +44,36 @@ export type RawTaskRow = {
 export type RawTaskRouteRow = {
   taskId: string;
   revision: number;
-  state: Omit<EchelonsSnapshot, 'ownerAgentId' | 'revision'>;
+  phase: string | null;
+  resultKind: string | null;
+  candidateId: string | null;
+  stagesComplete: boolean;
 };
 
 export type RawTaskEventRow = {
-  id: number;
   uuid: string;
   taskId: string;
   kind: string;
-  personId: string | null;
   hasText: boolean;
-  data: Record<string, unknown>;
-  createdAt: Date;
+  byOrchestrator: boolean;
+  reportDone: boolean;
+  testsRework: boolean;
+  verdictFailed: boolean;
+  repairCandidate: boolean;
+  acceptedCandidateId: string | null;
+  acceptedCandidateRev: number | null;
+  acceptedDocumentId: string | null;
+  acceptedDocumentRev: number | null;
+  hasRecordedArtifact: boolean;
+  hasIntegrationCommit: boolean;
+  coordinationChildrenOk: boolean;
 };
 
 export type RawRequestRow = {
-  id: string;
   taskId: string;
   kind: string;
-  audience: string;
   status: string;
-  hasAnswer: boolean;
   answeredBy: string | null;
-  answeredAt: Date | null;
 };
 
 export type RawJobRow = {
@@ -115,7 +121,6 @@ export type RawGoalRow = {
   number: number;
   parentGoalId: string | null;
   status: 'active' | 'reached' | 'dropped';
-  targetValue: number | null;
   responsiblePersonId: string;
   createdByPersonId: string | null;
   updatedAt: Date;
@@ -124,9 +129,6 @@ export type RawGoalRow = {
 export type RawGoalEventRow = {
   uuid: string;
   goalId: string;
-  kind: string;
-  personId: string | null;
-  data: Record<string, unknown>;
   createdAt: Date;
 };
 
@@ -182,10 +184,6 @@ type EarnedHit = {
   record: RewardRecordRef;
 };
 
-function isRecordObject(val: unknown): val is Record<string, unknown> {
-  return typeof val === 'object' && val !== null && !Array.isArray(val);
-}
-
 function compareMoments(aMs: number, bMs: number, aNum: number, bNum: number): number {
   const diff = aMs - bMs;
   return diff !== 0 ? diff : aNum - bNum;
@@ -207,49 +205,27 @@ function pushListItem<K, V>(map: Map<K, V[]>, key: K, val: V): void {
   else map.set(key, [val]);
 }
 
-function stagesComplete(state: RawTaskRouteRow['state']): boolean {
-  return state.stages.every(s => s.status === 'complete' || s.status === 'skipped');
-}
-
-function matchesAcceptedArtifact(raw: unknown, route: RawTaskRouteRow): boolean {
-  if (!isRecordObject(raw)) return false;
-  const artifactId = raw.candidateId ?? raw.id;
-  return artifactId === route.state.candidateId && raw.routeRevision === route.revision;
-}
-
-function hasRecordedArtifact(data: Record<string, unknown>): boolean {
-  const rec = data.recorded;
-  if (!isRecordObject(rec)) return false;
-  return typeof rec.path === 'string' || typeof rec.file === 'string';
-}
-
-function hasTurnkeyProof(data: Record<string, unknown>): boolean {
-  const integration = data.integration;
-  if (isRecordObject(integration) && typeof integration.commit === 'string' && integration.commit.length > 0) {
-    return true;
-  }
-  return hasRecordedArtifact(data);
-}
-
-function hasCoordinationProof(data: Record<string, unknown>): boolean {
-  if (!hasRecordedArtifact(data)) return false;
-  const children = data.acceptedChildren;
-  if (!Array.isArray(children) || children.length === 0) return true;
-  return children.some(c => isRecordObject(c) && !c.unaccepted);
+function matchesAcceptedArtifact(
+  artifactId: string | null,
+  artifactRev: number | null,
+  route: RawTaskRouteRow,
+): boolean {
+  return Boolean(artifactId && artifactId === route.candidateId && artifactRev === route.revision);
 }
 
 function isStagedKindAccepted(route: RawTaskRouteRow, report: RawTaskEventRow): boolean {
-  if (!stagesComplete(route.state)) return false;
-  const field = route.state.resultKind === 'code' ? report.data.acceptedCandidate : report.data.acceptedDocument;
-  return matchesAcceptedArtifact(field, route);
+  if (!route.stagesComplete) return false;
+  return route.resultKind === 'code'
+    ? matchesAcceptedArtifact(report.acceptedCandidateId, report.acceptedCandidateRev, route)
+    : matchesAcceptedArtifact(report.acceptedDocumentId, report.acceptedDocumentRev, route);
 }
 
 function isRouteProvedByReport(route: RawTaskRouteRow, report: RawTaskEventRow): boolean {
-  const kind = route.state.resultKind;
+  const kind = route.resultKind;
   if (kind === 'code' || kind === 'document') return isStagedKindAccepted(route, report);
   if (!report.hasText) return false;
-  if (kind === 'turnkey') return hasTurnkeyProof(report.data);
-  return kind === 'coordination' && hasCoordinationProof(report.data);
+  if (kind === 'turnkey') return report.hasIntegrationCommit || report.hasRecordedArtifact;
+  return kind === 'coordination' && report.hasRecordedArtifact && report.coordinationChildrenOk;
 }
 
 function resolveTopDeptId(task: RawTaskRow, topDeptById: ReadonlyMap<string, string>): string | null {
@@ -275,8 +251,8 @@ function indexClosingEvents(events: readonly RawTaskEventRow[]): {
   const bypassedIds = new Set<string>();
   const latestReportByTask = new Map<string, RawTaskEventRow>();
   for (const ev of events) {
-    if (ev.kind === 'done' && ev.data.byOrchestrator === true) bypassedIds.add(ev.taskId);
-    else if (ev.kind === 'report' && ev.data.done === true) latestReportByTask.set(ev.taskId, ev);
+    if (ev.kind === 'done' && ev.byOrchestrator) bypassedIds.add(ev.taskId);
+    else if (ev.kind === 'report' && ev.reportDone) latestReportByTask.set(ev.taskId, ev);
   }
   return { bypassedIds, latestReportByTask };
 }
@@ -287,7 +263,7 @@ function buildVerifiedTask(
   report: RawTaskEventRow | undefined,
   topDeptById: ReadonlyMap<string, string>,
 ): VerifiedTask | null {
-  if (!route || route.state.phase !== 'done' || !report || !isRouteProvedByReport(route, report)) return null;
+  if (!route || route.phase !== 'done' || !report || !isRouteProvedByReport(route, report)) return null;
   return {
     task,
     topDeptId: resolveTopDeptId(task, topDeptById),
@@ -297,8 +273,11 @@ function buildVerifiedTask(
   };
 }
 
-function extractVerifiedTasks(input: RewardsComputeInput, topDeptById: ReadonlyMap<string, string>): VerifiedTask[] {
-  const assistantIds = new Set(input.agents.filter(a => a.kind === 'assistant').map(a => a.id));
+function extractVerifiedTasks(
+  input: RewardsComputeInput,
+  topDeptById: ReadonlyMap<string, string>,
+  assistantIds: ReadonlySet<string>,
+): VerifiedTask[] {
   const routeByTask = new Map(input.routes.map(r => [r.taskId, r]));
   const { bypassedIds, latestReportByTask } = indexClosingEvents(input.taskEvents);
   const verified: VerifiedTask[] = [];
@@ -391,21 +370,8 @@ function extractVerifiedChecks(input: RewardsComputeInput): VerifiedRecordMoment
   return [...byCommit.values()].sort((a, b) => compareMoments(a.atMs, b.atMs, a.record.number, b.record.number));
 }
 
-function isGoalReachedTransition(ev: RawGoalEventRow): boolean {
-  if (ev.kind === 'status') return ev.data.toStatus === 'reached';
-  return ev.kind === 'created' && ev.data.status === 'reached';
-}
-
-function indexReachedGoalEvents(events: readonly RawGoalEventRow[]): Map<string, RawGoalEventRow> {
-  const map = new Map<string, RawGoalEventRow>();
-  for (const ev of events) {
-    if (isGoalReachedTransition(ev)) map.set(ev.goalId, ev);
-  }
-  return map;
-}
-
 function extractVerifiedGoals(input: RewardsComputeInput): VerifiedGoal[] {
-  const latestReachedByGoal = indexReachedGoalEvents(input.goalEvents);
+  const latestReachedByGoal = new Map(input.goalEvents.map(ev => [ev.goalId, ev]));
   const out: VerifiedGoal[] = [];
   for (const goal of input.goals) {
     if (goal.status !== 'reached') continue;
@@ -622,16 +588,21 @@ function evalFirstTierByGoals(
   return best;
 }
 
+function isCountedGoalTask(task: RawTaskRow, assistantIds: ReadonlySet<string>): boolean {
+  return task.status !== 'cancelled' && !taskTouchesAssistant(task, assistantIds);
+}
+
 function indexRootTasksForGoals(
   allTasks: readonly RawTaskRow[],
   activeRoots: ReadonlySet<string>,
   goalById: ReadonlyMap<string, RawGoalRow>,
+  assistantIds: ReadonlySet<string>,
 ): { rootByTask: Map<string, string>; totalsByRoot: Map<string, number> } {
   const taskById = new Map(allTasks.map(t => [t.id, t]));
   const rootByTask = new Map<string, string>();
   const totalsByRoot = new Map<string, number>();
   for (const t of allTasks) {
-    if (t.status === 'cancelled') continue;
+    if (!isCountedGoalTask(t, assistantIds)) continue;
     const gId = traceTaskGoalId(t, taskById);
     const rootId = gId ? traceRootGoalId(gId, goalById) : null;
     if (!rootId || !activeRoots.has(rootId)) continue;
@@ -646,9 +617,10 @@ function evalFirstTierByTasks(
   allTasks: readonly RawTaskRow[],
   acceptedTasks: readonly VerifiedTask[],
   goalById: ReadonlyMap<string, RawGoalRow>,
+  assistantIds: ReadonlySet<string>,
 ): EarnedHit | null {
   const activeRoots = new Set(topGoals.map(g => g.id));
-  const { rootByTask, totalsByRoot } = indexRootTasksForGoals(allTasks, activeRoots, goalById);
+  const { rootByTask, totalsByRoot } = indexRootTasksForGoals(allTasks, activeRoots, goalById, assistantIds);
   const doneByRoot = new Map<string, number>();
 
   for (const item of acceptedTasks) {
@@ -668,11 +640,12 @@ function evalFirstTier(
   verifiedGoals: readonly VerifiedGoal[],
   allTasks: readonly RawTaskRow[],
   acceptedTasks: readonly VerifiedTask[],
+  assistantIds: ReadonlySet<string>,
 ): EarnedHit | null {
   const goalById = new Map(allGoals.map(g => [g.id, g]));
   const topGoals = allGoals.filter(g => g.parentGoalId === null && g.status !== 'dropped');
   const fromGoals = evalFirstTierByGoals(topGoals, allGoals, verifiedGoals, goalById);
-  const fromTasks = evalFirstTierByTasks(topGoals, allTasks, acceptedTasks, goalById);
+  const fromTasks = evalFirstTierByTasks(topGoals, allTasks, acceptedTasks, goalById, assistantIds);
   return pickEarliestHit(fromGoals, fromTasks);
 }
 
@@ -718,22 +691,10 @@ function evalAnswerFromAboveByPerson(
   return firstHitByPersonForTasks(acceptedTasks, item => answerersByTask.get(item.task.id));
 }
 
-function isFailedVerdictEvent(ev: RawTaskEventRow): boolean {
-  return ev.kind === 'verdict' && ev.data.pass === false && ev.hasText;
-}
-
-function isTestsReworkReport(ev: RawTaskEventRow): boolean {
-  if (ev.kind !== 'report' || ev.data.done !== false) return false;
-  return isRecordObject(ev.data.verification) && ev.data.verification.rework === true;
-}
-
-function isRepairCandidateEvent(ev: RawTaskEventRow): boolean {
-  if (ev.kind !== 'submitted') return false;
-  return isRecordObject(ev.data.candidate) && typeof ev.data.candidate.parentId === 'string';
-}
-
 function isReworkEvent(ev: RawTaskEventRow): boolean {
-  return isFailedVerdictEvent(ev) || isTestsReworkReport(ev) || isRepairCandidateEvent(ev);
+  if (ev.kind === 'verdict') return ev.verdictFailed && ev.hasText;
+  if (ev.kind === 'report') return ev.testsRework;
+  return ev.kind === 'submitted' && ev.repairCandidate;
 }
 
 function taskOwnerIds(task: RawTaskRow, ownerIds: readonly string[]): string[] {
@@ -871,6 +832,7 @@ function buildSharedHitsMap(
   acceptedTasks: readonly VerifiedTask[],
   verifiedGoals: readonly VerifiedGoal[],
   activeAgentIds: ReadonlySet<string>,
+  assistantIds: ReadonlySet<string>,
 ): Map<number, EarnedHit | null> {
   const activeAgentKey = (item: VerifiedTask): string | null =>
     item.creditAgentId && activeAgentIds.has(item.creditAgentId) ? item.creditAgentId : null;
@@ -889,7 +851,7 @@ function buildSharedHitsMap(
     [22, evalThresholdByGroup(acceptedTasks, topDeptKey, STATUE_TASKS_PER_STAGE)],
     [23, evalThresholdByGroup(acceptedTasks, topDeptKey, STATUE_ALLEY_TASKS)],
     [24, evalCompanyTaskCount(acceptedTasks, RESIDENCE_STAGE_TWO_TASKS)],
-    [25, evalFirstTier(input.goals, verifiedGoals, input.tasks, acceptedTasks)],
+    [25, evalFirstTier(input.goals, verifiedGoals, input.tasks, acceptedTasks, assistantIds)],
     [26, evalGoldenCapstone(verifiedGoals)],
   ]);
 }
@@ -923,15 +885,16 @@ export function computeCompanyRewards(
   viewerPersonId: string | null,
 ): Omit<WorldRewardsView, 'showcase'> {
   const topDeptById = new Map(input.departments.map(d => [d.id, d.parentId ?? d.id]));
+  const assistantIds = new Set(input.agents.filter(a => a.kind === 'assistant').map(a => a.id));
   const activeAgentIds = new Set(input.agents.filter(a => a.removedAt === null && a.kind !== 'assistant').map(a => a.id));
   const ownerIds = input.people.filter(p => p.isOwner).map(p => p.id);
 
-  const acceptedTasks = extractVerifiedTasks(input, topDeptById);
+  const acceptedTasks = extractVerifiedTasks(input, topDeptById, assistantIds);
   const verifiedTurns = extractVerifiedTurns(input);
   const verifiedChecks = extractVerifiedChecks(input);
   const verifiedGoals = extractVerifiedGoals(input);
 
-  const sharedHits = buildSharedHitsMap(input, acceptedTasks, verifiedGoals, activeAgentIds);
+  const sharedHits = buildSharedHitsMap(input, acceptedTasks, verifiedGoals, activeAgentIds, assistantIds);
   const personalHits = new Map<number, Map<string, EarnedHit>>([
     [5, evalAnswerFromAboveByPerson(acceptedTasks, input.requests)],
     [9, evalSteadyNileByPerson(acceptedTasks, verifiedTurns, verifiedChecks, verifiedGoals, input.requests, input.people)],

@@ -18,18 +18,18 @@ function assertHumanRewardsReader(me: Person): void {
 }
 
 export function registerWorldRewardsRoutes(app: FastifyInstance, ctx: Ctx): void {
-  app.get('/api/world/rewards', async req => {
+  app.get('/api/world/rewards', async (req, reply) => {
     const me = await requirePerson(req, ctx.db);
     assertHumanRewardsReader(me);
     EmptyQuerySchema.parse(req.query);
-    return readCompanyRewards(ctx, me.companyId, me.id);
+    return reply.header('cache-control', 'no-store').send(await readCompanyRewards(ctx, me.companyId, me.id));
   });
 
-  app.get('/api/world/rewards/showcase', async req => {
+  app.get('/api/world/rewards/showcase', async (req, reply) => {
     const me = await requirePerson(req, ctx.db);
     assertHumanRewardsReader(me);
     EmptyQuerySchema.parse(req.query);
     const rewards = await readCompanyRewards(ctx, me.companyId, me.id);
-    return rewards.showcase;
+    return reply.header('cache-control', 'no-store').send(rewards.showcase);
   });
 }
