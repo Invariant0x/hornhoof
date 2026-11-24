@@ -30,6 +30,20 @@ it('resumes the exact launch flags, adding only the known session', async () => 
   expect(resumeCommand('codex', ['codex', '--dangerously-bypass-hook-trust', '-C', '/work', '-c', 'hooks.Stop=[]'], 'known')).toEqual(['codex', 'resume', 'known', '--dangerously-bypass-hook-trust', '-c', 'hooks.Stop=[]']);
   expect(resumeCommand('kimi', ['kimi', '--auto', '-m', 'model'], 'known')).toEqual(['kimi', '--auto', '-m', 'model', '-S', 'known']);
   expect(resumeCommand('kimi', ['kimi', '--auto', '-S', 'old'], 'known')).toEqual(['kimi', '--auto', '-S', 'known']);
+  expect(resumeCommand('antigravity', ['agy', '--model', 'gemini-4-argon', '--dangerously-skip-permissions'], 'known')).toEqual([
+    'agy',
+    '--conversation',
+    'known',
+    '--model',
+    'gemini-4-argon',
+    '--dangerously-skip-permissions',
+  ]);
+  expect(resumeCommand('antigravity', ['agy', '--conversation', 'old', '--dangerously-skip-permissions'], 'known')).toEqual([
+    'agy',
+    '--conversation',
+    'known',
+    '--dangerously-skip-permissions',
+  ]);
 });
 
 it.each(['codex', 'kimi', 'claude'] as const)('keeps the second pending message after %s acknowledges only the first', async kind => {

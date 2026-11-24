@@ -7,7 +7,6 @@ import {
   DEFAULT_CAMERA_BOUNDS,
   DEFAULT_CONSTRUCTION_STAGES,
   DEFAULT_ISOMETRIC_PROJECTION,
-  type ConstructionPaletteSpec,
   type ConstructionStageSpec,
   type GroundMaterialSpec,
   type PackRoleLookSpec,
@@ -20,8 +19,6 @@ const DUNGEON_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   ruler: {
     id: 'dungeon-archmage',
     label: text('Delve Lord'),
-    tunicColor: '#2E2B42',
-    trimColor: '#FFD166',
     prop: 'staff',
     headgear: 'crown',
     insignia: true,
@@ -29,8 +26,6 @@ const DUNGEON_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   head: {
     id: 'dungeon-foreman',
     label: text('Hall Foreman'),
-    tunicColor: '#484D63',
-    trimColor: '#64E3CE',
     prop: 'staff',
     headgear: 'circlet',
     insignia: true,
@@ -38,8 +33,6 @@ const DUNGEON_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   guard_captain: {
     id: 'dungeon-warden',
     label: text('Gate Warden'),
-    tunicColor: '#3B3647',
-    trimColor: '#FF8C42',
     prop: 'staff',
     headgear: 'helm',
     insignia: true,
@@ -47,24 +40,18 @@ const DUNGEON_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   checker: {
     id: 'dungeon-rune-checker',
     label: text('Rune Inspector'),
-    tunicColor: '#525A70',
-    trimColor: '#64E3CE',
     prop: 'scroll',
     headgear: 'hood',
   },
   builder: {
     id: 'dungeon-delver',
     label: text('Stone Delver'),
-    tunicColor: '#6E6962',
-    trimColor: '#D99B52',
     prop: 'stone',
     headgear: 'helm',
   },
   turnkey_specialist: {
     id: 'dungeon-master-delver',
     label: text('Guild Artificer'),
-    tunicColor: '#3B5868',
-    trimColor: '#FFD166',
     prop: 'banner',
     headgear: 'hood',
     insignia: true,
@@ -72,8 +59,6 @@ const DUNGEON_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   day_laborer: {
     id: 'dungeon-drifter',
     label: text('Tunnel Drifter'),
-    tunicColor: '#5C5852',
-    trimColor: '#8B857C',
     prop: 'stone',
     headgear: 'none',
   },
@@ -157,21 +142,6 @@ const DUNGEON_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = DEFAULT_CO
   label: DUNGEON_STAGE_LABELS[s.id] ?? s.label,
 }));
 
-const DUNGEON_CONSTRUCTION_PALETTE: ConstructionPaletteSpec = {
-  scaffoldWood: '#7F756A',
-  rampEarth: '#6D6E7A',
-  dustColor: '#A9ABB8',
-  smokeColor: '#56596A',
-  waterColor: '#64E3CE',
-  awningPrimary: '#5D5696',
-  awningSecondary: '#8FE0D4',
-  capstoneColor: '#64F5DC',
-  celebrationPrimary: '#FFD166',
-  celebrationSecondary: '#64E3CE',
-  statueBaseColor: '#8B8E9E',
-  statueFinishedColor: '#6EE8D6',
-};
-
 export const DUNGEON_WORLD_PACK: WorldPackManifest = {
   id: 'dungeon',
   name: text('Subterranean Dungeon'),
@@ -190,7 +160,6 @@ export const DUNGEON_WORLD_PACK: WorldPackManifest = {
   roleLooks: DUNGEON_ROLE_LOOKS,
   classFallbackLooks: DUNGEON_CLASS_FALLBACKS,
   constructionStages: DUNGEON_CONSTRUCTION_STAGES,
-  constructionPalette: DUNGEON_CONSTRUCTION_PALETTE,
   tiles: DUNGEON_TILE_KINDS.map(k => ({
     id: k.id,
     fill: k.color,

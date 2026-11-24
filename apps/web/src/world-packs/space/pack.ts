@@ -17,13 +17,13 @@ import { SPACE_TERRAIN_RECIPE, SPACE_TILE_KINDS } from './recipe';
 import { text } from '../../world/pack-text';
 
 const SPACE_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
-  ruler: { id: 'space-admiral', label: text('Fleet Admiral'), tunicColor: '#1E2A44', trimColor: '#F2C14E', prop: 'staff', headgear: 'crown', insignia: true },
-  head: { id: 'space-officer', label: text('Deck Officer'), tunicColor: '#2E3F63', trimColor: '#7FD1FF', prop: 'staff', headgear: 'circlet', insignia: true },
-  checker: { id: 'space-inspector', label: text('Systems Inspector'), tunicColor: '#D9DEE8', trimColor: '#3D7BD9', prop: 'scroll', headgear: 'cap' },
-  builder: { id: 'space-engineer', label: text('Module Engineer'), tunicColor: '#E07B39', trimColor: '#3A3F4A', prop: 'tool', headgear: 'helm' },
-  gate_guard: { id: 'space-security', label: text('Security Officer'), tunicColor: '#3B3F4C', trimColor: '#E04F4F', prop: 'spear_shield', headgear: 'helm' },
-  turnkey_specialist: { id: 'space-pilot', label: text('Test Pilot'), tunicColor: '#F2F2F2', trimColor: '#E5B85C', prop: 'banner', headgear: 'helm', insignia: true },
-  day_laborer: { id: 'space-contractor', label: text('Dock Contractor'), tunicColor: '#8C8F99', trimColor: '#5C606B', prop: 'stone', headgear: 'cap' },
+  ruler: { id: 'space-admiral', label: text('Fleet Admiral'), prop: 'staff', headgear: 'crown', insignia: true },
+  head: { id: 'space-officer', label: text('Deck Officer'), prop: 'staff', headgear: 'circlet', insignia: true },
+  checker: { id: 'space-inspector', label: text('Systems Inspector'), prop: 'scroll', headgear: 'cap' },
+  builder: { id: 'space-engineer', label: text('Module Engineer'), prop: 'tool', headgear: 'helm' },
+  gate_guard: { id: 'space-security', label: text('Security Officer'), prop: 'spear_shield', headgear: 'helm' },
+  turnkey_specialist: { id: 'space-pilot', label: text('Test Pilot'), prop: 'banner', headgear: 'helm', insignia: true },
+  day_laborer: { id: 'space-contractor', label: text('Dock Contractor'), prop: 'stone', headgear: 'cap' },
 };
 
 const SPACE_CLASS_FALLBACKS: Readonly<Record<ResidentRoleClass, PackRoleLookSpec>> = {
@@ -125,20 +125,6 @@ export const SPACE_WORLD_PACK: WorldPackManifest = {
   roleLooks: SPACE_ROLE_LOOKS,
   classFallbackLooks: SPACE_CLASS_FALLBACKS,
   constructionStages: SPACE_CONSTRUCTION_STAGES,
-  constructionPalette: {
-    scaffoldWood: '#C9CED8',
-    rampEarth: '#6B7383',
-    dustColor: '#B9C6E0',
-    smokeColor: '#7A8296',
-    waterColor: '#7FD1FF',
-    awningPrimary: '#3D7BD9',
-    awningSecondary: '#E6ECF5',
-    capstoneColor: '#7FD1FF',
-    celebrationPrimary: '#F2C14E',
-    celebrationSecondary: '#7FD1FF',
-    statueBaseColor: '#7D8796',
-    statueFinishedColor: '#B8E4FF',
-  },
   tiles: SPACE_TILE_KINDS.map(k => ({ id: k.id, fill: k.color, stroke: k.color, buildable: k.buildable, walkable: k.walkable })),
   materials: SPACE_MATERIALS,
   /* Building lots are bare deck plate; an empty lot is refitted with the deck around it in two days. */
