@@ -61,7 +61,7 @@ export const PASSFILE_THERE = 'SELECT (pg_stat_file($1, true)).size IS NOT NULL 
 /* old.led: the number of the term the old database led the company under, when it did. left: while the first copy is
    made, the leader's slots of its tables whose first copy broke off, for the leader to drop; none said while there are
    none. */
-export type CopyReport = { state: CopyState; progress: number | null; error: CopyError | null; at: string | null; name: string | null; old: { attempt: number; led?: number } | null; left?: string[] };
+export type CopyReport = { schema?: SchemaAttempt; state: CopyState; progress: number | null; error: CopyError | null; at: string | null; name: string | null; old: { attempt: number; led?: number } | null; left?: string[] };
 /* What the leader says of the copy in its view. slot: its slot there. leaderSize: the size of the leader's database.
    migrations: how many the leader's schema has. old: how far the leader is with reading the copy's old database.
    upload: what a machine that stopped holding the data still owes: what it holds, nothing while the leader reads that, or
@@ -77,6 +77,9 @@ export type CopyOrder = {
 };
 
 type Closable = Sql & { close(): Promise<void> };
+const SchemaAttempt = z.object({ attempt: z.number().int().min(1), since: z.iso.datetime() });
+type SchemaAttempt = z.infer<typeof SchemaAttempt>;
+
 const Kept = z.object({
   attempt: z.number().int().min(1),
   database: z.string().regex(/^[a-z_][a-z0-9_]{0,62}$/),
@@ -91,6 +94,8 @@ const Kept = z.object({
   migrations: z.number().int().nullable().default(null),
   /* No request for a schema before this moment: an attempt failed, and the next one waits. */
   notBefore: z.string().nullable().default(null),
+  /* The first request in a series of attempts, kept until the schema has loaded. */
+  schema: SchemaAttempt.nullable().default(null),
   /* The attempt whose database, the one that is read, waits for the leader to merge it while a new copy is made beside
      it, and the count of migrations that one was made with. */
   old: z.object({ attempt: z.number().int().min(1), migrations: z.number().int().nullable(), led: z.number().int().min(0).optional() }).nullable().default(null),
@@ -170,7 +175,8 @@ export class CopyMaker {
   /* Null before the first attempt has its number: nothing is said of a copy until then, so the row keeps the name of
      the copy the machine kept before. */
   report(): CopyReport | null {
-    return this.fresh ? null : this.said;
+    if (this.fresh) return null;
+    return this.kept.schema ? { ...this.said, schema: this.kept.schema } : this.said;
   }
 
   /* What its app may do: read once the copy holds every table, also while a new copy is made beside it; nothing before
@@ -423,6 +429,14 @@ export class CopyMaker {
     this.keep({ phase: 'ready', slot: null, migrations: order?.migrations ?? this.kept.migrations, seen: false, missing: 0, moved: null, ...(order?.leader === undefined ? {} : { leader: order.leader }) });
   }
 
+  private firstSchema(): SchemaAttempt {
+    return this.kept.schema ?? { attempt: this.kept.attempt, since: new Date(this.now()).toISOString() };
+  }
+
+  private rememberSchema(first: SchemaAttempt): void {
+    if (!this.kept.schema) this.keep({ schema: first });
+  }
+
   /* The updater loads the leader's schema; until it has, the request waits in the control folder. A load that failed
      is one line, and the next attempt asks ten minutes later under the next number. */
   private async schema(sql: Sql): Promise<void> {
@@ -430,16 +444,18 @@ export class CopyMaker {
     const tables = await this.one<{ there: boolean }>(sql, `SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public') AS there`);
     if (tables?.there) {
       const counted = await this.one<{ n: number }>(sql, `SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations`).catch(() => undefined);
-      return this.keep({ phase: 'grant', migrations: counted?.n ?? null, notBefore: null });
+      return this.keep({ phase: 'grant', migrations: counted?.n ?? null, notBefore: null, schema: null });
     }
     const { controlDir } = this.opts;
     const failed = join(controlDir, SCHEMA_DIR, `${this.kept.attempt}.failed`);
+    const first = this.firstSchema();
     if (existsSync(failed)) {
       this.opts.log(`Could not load the company's schema for a copy: ${readFileSync(failed, 'utf8').trim() || 'no reason was given'}`);
-      return this.keep({ attempt: this.kept.attempt + 1, notBefore: new Date(this.now() + RETRY_MS).toISOString() });
+      return this.keep({ attempt: this.kept.attempt + 1, notBefore: new Date(this.now() + RETRY_MS).toISOString(), schema: first });
     }
     if (this.kept.notBefore && this.now() < Date.parse(this.kept.notBefore)) return;
     const request = join(controlDir, SCHEMA_FILE);
+    this.rememberSchema(first);
     if (existsSync(request)) return;
     const { port } = this.publisher();
     writePrivately(request, JSON.stringify({ attempt: this.kept.attempt, database: this.kept.database, port, password: this.opts.password }));

@@ -83,7 +83,7 @@ describe('a task of a turnkey team never enters the echelons', () => {
     const { task } = await f.give();
     const text = wakePrompt(f.player, task, { agentId: f.player.id, taskId: task.id, why: 'assigned' }, 'turnkey');
     expect(text).toMatch(/end to end[^.]*alone[^.]*report done true/);
-    expect(text).toContain('checking what you touched with local tests, as the full run happens once at release');
+    expect(text).toContain('checking what you touched with local tests, as the repository\'s CI checks the release');
     expect(text).not.toMatch(/tests,\s*merge and release/i);
     expect(text).not.toMatch(/follow task\.echelons|Review|verdict/);
     expect(wakePrompt(f.author, f.task, { agentId: f.author.id, taskId: f.task.id, why: 'assigned' }, 'code')).toMatch(/follow task\.echelons/);
