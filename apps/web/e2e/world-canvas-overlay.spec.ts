@@ -110,7 +110,6 @@ async function keepShot(page: Page, info: TestInfo, name: string): Promise<void>
 test.describe('World canvas under an opaque panel (#1978)', () => {
   for (const [width, height] of [[1440, 900], [375, 812]] as const) {
     test(`the pixel look's "Effects are off" note leaves no black block in the map at ${width}`, async ({ page }, info) => {
-      test.setTimeout(180_000);
       await openEgyptMap(page, width, height);
       await putOnPixelLook(page);
       const note = await turnEffectsOff(page);
@@ -125,7 +124,6 @@ test.describe('World canvas under an opaque panel (#1978)', () => {
      being 99% opaque (theme.css). Kept here, skipped, so the case is not forgotten. */
   test('one plain opaque box over the shipped Egypt map leaves no hole at its mirror image', async ({ page }, info) => {
     test.skip(true, 'Known Chromium issue: with WebGL drawn in software (SwiftShader) the canvas under a single fully opaque box is left undrawn, mirrored across the page middle. Needs fix A (#1947); the guard plates avoid it at 99% (#1978).');
-    test.setTimeout(180_000);
     await openEgyptMap(page, 1440, 900);
     const panel: Box = { x: 600, y: 300, width: 300, height: 100 };
     await page.evaluate(box => {
