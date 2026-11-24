@@ -810,7 +810,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const worldDeptName = card?.department?.name ?? (worldAgent?.departmentId ? org.departments.find(d => d.id === worldAgent.departmentId)?.name ?? null : null);
 
   return (
-    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} agentState={card?.state} place={place} requests={requests} onRequestsChanged={onRequestsChanged} panels={sidePanels} toolbar={<WindowToolbar t={t} terminal={terminal} isWorld={isWorld} state={state} stop={stop} onToggle={toggleView} />}>
+    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} agentState={card?.state} place={place} requests={requests} viewerId={me.person.id} onRequestsChanged={onRequestsChanged} panels={sidePanels} toolbar={<WindowToolbar t={t} terminal={terminal} isWorld={isWorld} state={state} stop={stop} onToggle={toggleView} />}>
       {isWorld && !orchestrator && worldAgent && <WorldAgentLevelStrip t={t} agent={worldAgent} departmentName={worldDeptName} />}
       {windowLoad.phase !== 'done' && <WindowWait load={windowLoad} terminal={terminal} program={program} />}
       {opens && hasTerminal && <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={program} onGone={() => setNoTerminal(true)} onNotes={setTermNotes} />}

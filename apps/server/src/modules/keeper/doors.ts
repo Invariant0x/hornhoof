@@ -15,7 +15,7 @@ const MAINTENANCE_JSON = JSON.stringify({
 });
 
 export function maintenanceAnswer(req: http.IncomingMessage): Refusal {
-  return updatingAnswer(req, MAINTENANCE_JSON, 'maintenance');
+  return updatingAnswer(req, MAINTENANCE_JSON);
 }
 
 /* The id front stamped a tool call with, when the request has one. */

@@ -157,6 +157,13 @@ test('the first job chooses the tests only for a commit no mark proved, against 
   assert.deepEqual(rest, []);
 });
 
+test('a run by hand takes the input full, which the release starts it with: its title says so, and the first job reads no mark and chooses no tests for it (B1)', () => {
+  const text = read('images.yml');
+  assert.match(text, /\n {2}workflow_dispatch:\n {4}inputs:\n {6}full:\n[^]*?type: boolean\n {8}default: false\n/);
+  assert.match(text, /\nrun-name: \$\{\{ github\.event_name == 'workflow_dispatch' && format\('\{0\}\{1\}', github\.workflow, inputs\.full && ' \(full run\)' \|\| ''\) \|\| '' \}\}\n/);
+  assert.match(images.mark, /\n {4}env:\n {6}FULL_RUN: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.full \}\}\n/);
+});
+
 test('the tests run in the parts the first job chose, and as the whole suite in four parts when it chose none', () => {
   const test = images.test;
   assert.match(test, /part: \$\{\{ fromJSON\(needs\.mark\.outputs\.parts \|\| '\[1, 2, 3, 4\]'\) \}\}\n/);

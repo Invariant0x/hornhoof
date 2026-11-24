@@ -11,6 +11,7 @@ import { promisify } from 'node:util';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
 import { eventually } from '../../../test-support/eventually.mjs';
+import { awayPage } from '../src/net/away-page.js';
 import {
   firstForwarded,
   heldAnswer,
@@ -24,7 +25,8 @@ import {
 
 const MiB = 1024 * 1024;
 const STARTING_JSON = '{"error":{"code":"unavailable","message":"Hornhoof is starting.","reason":"starting"}}';
-const STARTING_TEXT = 'Hornhoof is starting. Try again in a few seconds.\n';
+const STARTING_TEXT = 'No connection\n';
+const LOST_PAGE = awayPage('lost');
 const UPGRADE =
   'GET /socket HTTP/1.1\r\nHost: hornhoof.test\r\nConnection: Upgrade\r\nUpgrade: x-test\r\nX-Stays: kept\r\n\r\n';
 const EARLY_LIMIT = 64 * 1024;
@@ -921,9 +923,9 @@ describe('a target that is down', () => {
     const page = await send(proxy, { path: '/' });
     expect(page.status).toBe(502);
     expect(page.headers['retry-after']).toBe('5');
-    expect(page.headers['content-type']).toBe('text/plain; charset=utf-8');
-    expect(page.headers['content-length']).toBe(String(Buffer.byteLength(STARTING_TEXT)));
-    expect(page.body).toBe(STARTING_TEXT);
+    expect(page.headers['content-type']).toBe('text/html; charset=utf-8');
+    expect(page.headers['content-length']).toBe(String(Buffer.byteLength(LOST_PAGE)));
+    expect(page.body).toBe(LOST_PAGE);
 
     const socket = new WebSocket(`ws://127.0.0.1:${proxy.port}/`);
     await expect(once(socket, 'open')).rejects.toThrow('Unexpected server response: 502');
@@ -1481,7 +1483,7 @@ describe('what a hop says about a request', () => {
     ['/x/api/y', STARTING_TEXT],
     ['/x/mcp', STARTING_TEXT],
   ])('says it is starting to %s in the words that path reads', (url, body) => {
-    const answer = startingAnswer(asked({ url, headers: {} }));
+    const answer = startingAnswer(asked({ url }));
     expect(answer.status).toBe(502);
     expect(answer.headers['Retry-After']).toBe('5');
     expect(answer.body).toBe(body);
@@ -1490,7 +1492,6 @@ describe('what a hop says about a request', () => {
 
 describe('a request held while the target is down', () => {
   const HELD_JSON = '{"error":{"code":"unavailable","message":"Hornhoof did not answer for a minute. Try again in a few seconds.","reason":"starting"}}';
-  const HELD_TEXT = 'Hornhoof did not answer for a minute. Try again in a few seconds.\n';
 
   /* A port nothing listens on yet, and a way to bring a target up on it. */
   async function targetToCome() {
@@ -1559,8 +1560,8 @@ describe('a request held while the target is down', () => {
     expect(api.body).toBe(HELD_JSON);
     const page = await send(proxy, { path: '/' });
     expect(page.status).toBe(503);
-    expect(page.headers['content-type']).toBe('text/plain; charset=utf-8');
-    expect(page.body).toBe(HELD_TEXT);
+    expect(page.headers['content-type']).toBe('text/html; charset=utf-8');
+    expect(page.body).toBe(LOST_PAGE);
     expect(heldAnswer({ url: '/mcp' } as http.IncomingMessage).body).toBe(HELD_JSON);
   });
 

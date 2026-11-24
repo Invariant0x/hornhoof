@@ -521,8 +521,8 @@ skills:
     title: "Report to your head"
     description: "Ends every piece of work with a short status your head can act on."
   hh-run-checks:
-    title: "Run change checks and whole suites"
-    description: "Runs affected checks in the workspace and uses the shared runner for assigned release checks."
+    title: "Run change checks"
+    description: "Runs affected checks in the workspace and uses the shared runner for the checks of an assigned task."
   hh-status-update:
     title: "Status update"
     description: "Says where the department stands in one line, and only when it matters."

@@ -78,17 +78,26 @@ export const shownMachine = (config: { machineId: string | null }) =>
 /* Whether a row is one a company's install made for its own machine, and no computer someone joined. */
 export const isServerInstall = (machineKey: string): boolean => machineKey.startsWith(SERVER_KEY);
 
-/* The company's machine the server and its built-in node run on: the one whose key hashes to what install.sh gave the
-   server as its host, or as the id its keeper runs under, which is the same hash on an install of today. The pool counts
-   that computer once. None for a server installed before, or on a computer that never joined. */
+function isBuiltinHost(
+  m: { key: string; networkId: string | null },
+  hostId: string | null,
+  networkId: string | null,
+): boolean {
+  if (isServerInstall(m.key)) return false;
+  if (networkId !== null && m.networkId === networkId) return true;
+  return [hostId, networkId].includes(hashToken(`hornhoof-host:${m.key}`));
+}
+
+/* The company's machine the server and its built-in node run on: the joined row that holds the server's network id, or
+   whose key hashes to what install.sh gave the server as its host or keeper id. The pool counts that computer once. */
 export async function builtinMachine(db: Db, hostId: string | null, companyId: string, networkId: string | null = null): Promise<{ id: string; hostname: string } | null> {
   if (!hostId && !networkId) return null;
   const rows = await db
-    .select({ id: machines.id, hostname: machines.hostname, key: machines.machineKey })
+    .select({ id: machines.id, hostname: machines.hostname, key: machines.machineKey, networkId: machines.networkId })
     .from(machines)
     .where(and(eq(machines.companyId, companyId), isNull(machines.revokedAt)))
     .orderBy(asc(machines.createdAt));
-  const same = rows.find(m => [hostId, networkId].includes(hashToken(`hornhoof-host:${m.key}`)));
+  const same = rows.find(m => isBuiltinHost(m, hostId, networkId));
   return same ? { id: same.id, hostname: same.hostname } : null;
 }
 

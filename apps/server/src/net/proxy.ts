@@ -1,7 +1,7 @@
 import http from 'node:http';
 import net from 'node:net';
 import { pipeline, type Duplex } from 'node:stream';
-import { awayEveryS, awayPage, awayText, type Away, type AwayText } from './away-page.js';
+import { awayEveryS, awayPage, awayText, type Away } from './away-page.js';
 
 export type Target = { host: string; port: number };
 export type Refusal = { status: number; headers: Record<string, string>; body: string };
@@ -363,39 +363,38 @@ export function firstForwarded(req: http.IncomingMessage): string {
   return String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
 }
 
-/* Who asks: a program for data under /api or /mcp, a browser for a page, any other client for plain words. A page is only
-   for a browser that says it takes one, so a program that reads the words stays with them. */
+/* Who asks: a program for data under /api or /mcp, a read for the away page, a non-read or upgrade for the one line. */
 export type Asks = 'data' | 'page' | 'words';
 export function asksFor(req: http.IncomingMessage): Asks {
   if (UNDER_API_OR_MCP.test(String(req.url))) return 'data';
   const reads = req.method === 'GET' || req.method === 'HEAD';
-  return reads && String(req.headers.accept ?? '').includes('text/html') ? 'page' : 'words';
+  return reads && !req.headers?.upgrade ? 'page' : 'words';
 }
 
 /* What a hop answers when no server is behind it, to whoever asks: JSON for a program, the page of away-page.ts for a
-   browser, the words for the rest. Never 404: the status says the server is missing, so the app tells it from a page that
-   is. */
-export function awayAnswer(req: http.IncomingMessage, answer: { status: number; kind: Away; retryS: number; json: string; text: AwayText }): Refusal {
+   read, the one English line for the rest. Never 404: the status says the server is missing, so the app tells it from a
+   page that is. */
+export function awayAnswer(req: http.IncomingMessage, answer: { status: number; kind: Away; retryS: number; json: string }): Refusal {
   const headers = { 'Retry-After': String(answer.retryS) };
   switch (asksFor(req)) {
     case 'data': return { status: answer.status, headers: { ...headers, 'Content-Type': 'application/json' }, body: answer.json };
-    case 'page': return { status: answer.status, headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', Vary: 'Accept-Language' }, body: awayPage(answer.kind, String(req.headers['accept-language'] ?? '')) };
-    case 'words': return { status: answer.status, headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }, body: awayText(answer.text, String(req.headers['accept-language'] ?? '')) };
+    case 'page': return { status: answer.status, headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }, body: awayPage(answer.kind) };
+    case 'words': return { status: answer.status, headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }, body: awayText(answer.kind) };
   }
 }
 
 export function startingAnswer(req: http.IncomingMessage): Refusal {
-  return awayAnswer(req, { status: 502, kind: 'lost', retryS: 5, json: STARTING_JSON, text: 'starting' });
+  return awayAnswer(req, { status: 502, kind: 'lost', retryS: awayEveryS('lost'), json: STARTING_JSON });
 }
 
 /* What a hop answers once it held a request for as long as it holds one. */
 export function heldAnswer(req: http.IncomingMessage): Refusal {
-  return awayAnswer(req, { status: 503, kind: 'lost', retryS: 5, json: HELD_JSON, text: 'held' });
+  return awayAnswer(req, { status: 503, kind: 'lost', retryS: awayEveryS('lost'), json: HELD_JSON });
 }
 
 /* What the keeper answers while an update installs and takes no changes. */
-export function updatingAnswer(req: http.IncomingMessage, json: string, text: AwayText): Refusal {
-  return awayAnswer(req, { status: 503, kind: 'updating', retryS: awayEveryS('updating'), json, text });
+export function updatingAnswer(req: http.IncomingMessage, json: string): Refusal {
+  return awayAnswer(req, { status: 503, kind: 'updating', retryS: awayEveryS('updating'), json });
 }
 
 /* Both timeouts are given, since requestTimeout 0 alone also turns headersTimeout off on Node 22. */

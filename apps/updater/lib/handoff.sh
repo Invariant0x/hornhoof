@@ -96,7 +96,7 @@ load_schema() {
   (
     umask 077
     export PGPASSWORD="$password"
-    policy_roles "$db" "$port" > "$dump" || exit $?
+    schema_roles "$db" "$port" > "$dump" || exit $?
     docker exec -e PGPASSWORD "$db" pg_dump -h keeper -p "$port" -U hornhoof_replica --schema-only --no-owner --no-publications --no-subscriptions --no-privileges hornhoof >> "$dump" 2> /dev/null &&
       docker exec -e PGPASSWORD "$db" pg_dump -h keeper -p "$port" -U hornhoof_replica --data-only --table=drizzle.__drizzle_migrations hornhoof >> "$dump" 2> /dev/null &&
       # The schema comes with no rights, since the leader's roles are not this machine's. A function is open to
@@ -106,7 +106,7 @@ load_schema() {
   ) || status=$?
   if [ "$status" -ne 0 ]; then
     rm -f "$dump"
-    if [ "$status" -eq 2 ]; then printf "The company server's schema names a role that is not a plain name."; else printf "The company server's schema could not be read."; fi
+    if [ "$status" -eq 2 ]; then printf "The company server's schema returned an invalid role name."; else printf "The company server's schema could not be read."; fi
     return 1
   fi
   write_passfile "$db" "$password" || { rm -f "$dump"; printf "The password file of the copy could not be written."; return 1; }
@@ -120,28 +120,34 @@ load_schema() {
   rm -f "$dump"
 }
 
-# policy_roles <db container> <port>: the leader's app gives roles of its own row policies as it runs, and its schema
-# keeps those policies, while a copy's cluster has none of the roles before its own app makes them: the schema would
-# never load whole. So each role a policy of the leader names, asked through the keeper's door with the password in
-# the environment, is made first, with no login and no right, in the same transaction as the schema, and the copy keeps
-# every policy the leader has. It fails with 2 when a name is not a plain role's: such a name stands in no statement.
-policy_roles() {
-  local db=$1 port=$2 roles role
-  roles=$(docker exec -e PGPASSWORD "$db" psql -h keeper -p "$port" -U hornhoof_replica -d hornhoof -At -c "SELECT DISTINCT r FROM pg_policies, unnest(roles) AS r WHERE r <> 'public' ORDER BY 1" 2> /dev/null) || return 1
+# Roles referenced by policies or foreign user mappings still appear in a dump without owners or grants. Encode each
+# name on the leader so newlines and quotes cross the shell as data. The copy creates missing roles without any grants
+# or memberships in the same transaction as the schema.
+schema_roles() {
+  local db=$1 port=$2 roles encoded
+  roles=$(docker exec -e PGPASSWORD "$db" psql -h keeper -p "$port" -U hornhoof_replica -d hornhoof -At -v ON_ERROR_STOP=1 -c "
+    SELECT pg_catalog.encode(pg_catalog.convert_to(r.rolname::text, 'UTF8'), 'hex')
+    FROM pg_catalog.pg_roles r
+    JOIN (
+      SELECT pg_catalog.unnest(polroles) AS oid FROM pg_catalog.pg_policy
+      UNION
+      SELECT umuser FROM pg_catalog.pg_user_mappings
+    ) referenced USING (oid)
+    ORDER BY 1" 2> /dev/null) || return 1
   [ -n "$roles" ] || return 0
-  while IFS= read -r role; do plain_role "$role" || return 2; done <<< "$roles"
-  # shellcheck disable=SC2016 # $roles$ quotes the block for Postgres; the shell expands nothing in it.
-  printf '%s\n' 'DO $roles$ BEGIN'
-  while IFS= read -r role; do
-    printf "IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '%s') THEN CREATE ROLE \"%s\" NOLOGIN; END IF;\n" "$role" "$role"
-  done <<< "$roles"
-  # shellcheck disable=SC2016 # as above
-  printf '%s\n' 'END $roles$;'
-}
-
-# The name of a role as Postgres keeps one made without quotes, and no other.
-plain_role() {
-  [[ "$1" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]
+  while IFS= read -r encoded; do [[ "$encoded" =~ ^([0-9a-f]{2}){1,252}$ ]] || return 2; done <<< "$roles"
+  roles=${roles//$'\n'/,}
+  # shellcheck disable=SC2016 # $roles$ is the SQL block delimiter.
+  printf '%s\n' 'DO $roles$' 'DECLARE encoded text; wanted text;' 'BEGIN'
+  printf "  FOREACH encoded IN ARRAY pg_catalog.string_to_array('%s', ',') LOOP\n" "$roles"
+  cat <<'SQL'
+    wanted := pg_catalog.convert_from(pg_catalog.decode(encoded, 'hex'), 'UTF8');
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = wanted) THEN
+      EXECUTE pg_catalog.format('CREATE ROLE %I NOLOGIN NOINHERIT', wanted);
+    END IF;
+  END LOOP;
+END $roles$;
+SQL
 }
 
 # write_passfile: the password of the role that only reads, into the file the copy's subscription

@@ -737,12 +737,13 @@ describe('one run of every test per release', () => {
     }
   });
 
-  it('tells every development role that every test runs together once per release', () => {
+  it("tells every development role that a release relies on the repository's CI and uses no run_tests", () => {
     for (const roleId of ['DEV-HEAD', 'DEV-ENG', 'DEV-REV', 'DEV-TEST'] as const) {
       const whole = wholeOf(renderRole(roleId));
       expect(whole, roleId).not.toMatch(/from code and checks to merge and release|code, checks, your own review and security check, tests, merge and release/i);
       expect(whole, roleId).not.toMatch(/use\s+`?"?run_tests`?"?\s+(?:for\s+one\s+)?(?:only\s+)?when\s+your\s+(?:own\s+)?workspace\s+cannot\s+run\s+it|\bstrictly once\b/i);
-      expect(whole, roleId).toMatch(/Check what you touched with local tests of the files it reaches; every test runs together once per release, on the turn's branch or a release branch before main, or on main\./);
+      expect(whole, roleId).toMatch(/Check what you touched with local tests of the files it reaches\. A task's own run holds only its files and their tests, its browser files in Chromium only\. A release does not use run_tests: it relies on the repository's own CI for its exact commit/);
+      expect(whole, roleId).not.toMatch(/once per release|whole run of the release|record run/i);
     }
   });
 });

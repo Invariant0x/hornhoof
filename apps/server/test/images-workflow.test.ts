@@ -80,13 +80,13 @@ const FROM_BRANCH = { ...PUSH, pull_request: { head: { repo: { full_name: 'acme/
 const FROM_GONE_FORK = { ...PUSH, pull_request: { head: { repo: null } } };
 
 /* The script as the workflow's first job runs it, in a checkout of the commit. A null event: GitHub gave it none to read. */
-async function decide(dir: string, sha: string, api: string, event: unknown = PUSH) {
+async function decide(dir: string, sha: string, api: string, event: unknown = PUSH, extra: Record<string, string> = {}) {
   const place = folder();
   const eventPath = join(place, 'event.json');
   const output = join(place, 'output');
   writeFileSync(output, '');
   if (event !== null) writeFileSync(eventPath, JSON.stringify(event));
-  const { stdout } = await run('node', [SCRIPT], { cwd: dir, env: { ...process.env, GITHUB_SHA: sha, GITHUB_REPOSITORY: 'acme/shop', GITHUB_API_URL: api, GITHUB_TOKEN: 'ghs_workflow', GITHUB_EVENT_PATH: eventPath, GITHUB_OUTPUT: output } });
+  const { stdout } = await run('node', [SCRIPT], { cwd: dir, env: { ...process.env, GITHUB_SHA: sha, GITHUB_REPOSITORY: 'acme/shop', GITHUB_API_URL: api, GITHUB_TOKEN: 'ghs_workflow', GITHUB_EVENT_PATH: eventPath, GITHUB_OUTPUT: output, ...extra } });
   return { out: readFileSync(output, 'utf8'), said: stdout };
 }
 
@@ -115,6 +115,25 @@ describe('whether a mark spares this commit the tests', () => {
     const sha = commit(dir, 'main', 'a.txt');
     const hub = await github({ [sha]: [{ context: 'hornhoof/tests', state }] });
     expect((await decide(dir, sha, hub.api)).out).toBe(NOT_PROVED);
+  });
+
+  describe('a full run, which the release starts with the input full (B1)', () => {
+    it('runs the tests whatever a status says, and asks GitHub nothing: a mark any token with write access can post spares it nothing', async () => {
+      const dir = repository();
+      const sha = commit(dir, 'main', 'a.txt');
+      const hub = await github({ [sha]: MARKED });
+      const decided = await decide(dir, sha, hub.api, PUSH, { FULL_RUN: 'true' });
+      expect(decided.out).toBe(NOT_PROVED);
+      expect(decided.said).toContain('A full run was asked for');
+      expect(hub.asked).toEqual([]);
+    });
+
+    it.each(['false', ''])('takes the mark as before where the input is %j: the run is no full one', async full => {
+      const dir = repository();
+      const sha = commit(dir, 'main', 'a.txt');
+      const hub = await github({ [sha]: MARKED });
+      expect((await decide(dir, sha, hub.api, PUSH, { FULL_RUN: full })).out).toBe(PROVED);
+    });
   });
 
   it("takes no other context's success for the mark", async () => {

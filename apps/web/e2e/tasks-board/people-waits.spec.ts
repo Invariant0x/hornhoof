@@ -4,7 +4,7 @@ import { DICTIONARIES } from '../../src/i18n/dictionaries';
 import { BUILTIN_SKINS, builtinSkin, DEFAULT_SKIN } from '../../src/skins/registry';
 import { ME } from '../api';
 import { captureWith } from '../capture';
-import { MARIA_QUESTION, MAX_QUESTION, QUESTION, servePeopleWaits, serveTasksBoard } from './api';
+import { MARIA_QUESTION, MAX_QUESTION, QUESTION, SALES, servePeopleWaits, serveTasksBoard, TASKS } from './api';
 
 /* What waits for people in the company, as the CEO meets it in the tracker: every decision with whom it waits for, and its
    count beside it, while Waits for me keeps only the CEO's own. The look goes in the default skin and one of the other
@@ -18,7 +18,8 @@ const SKINS = [DEFAULT_SKIN, BUILTIN_SKINS.find(skin => skin.scheme !== builtinS
 const pageWords = (t: Messages) => [
   t.tracker.side.title, t.tracker.side.waits, t.tracker.side.mine, t.tracker.side.working, t.tracker.side.people, t.tracker.side.departments,
   t.tracker.side.allGoals, t.tracker.side.dates, t.tracker.side.failures, t.tracker.side.orchestrator, t.tracker.side.turns, t.tracker.search.results,
-  t.tracker.peopleWaits.title, t.tracker.peopleWaits.waitingFor(''), t.tracker.peopleWaits.tasks, t.tasks.asks(''), t.tasks.decidedByNamedPerson,
+  t.tracker.peopleWaits.title, t.tracker.peopleWaits.waitingFor(''), t.tracker.peopleWaits.tasks, t.tasks.asks(''), t.tasks.asksOther.choice(''),
+  t.tasks.asksOther.approval(''), t.tasks.asksOther.approvalOf(''), t.tasks.decidedByNamedPerson,
   t.tasks.answerElsewhere, t.tasks.openTerminal(''), t.tracker.wait.person('', ''),
 ].join('').length;
 const byLength = [...LANGUAGES].sort((a, b) => pageWords(DICTIONARIES[b.id]) - pageWords(DICTIONARIES[a.id]));
@@ -126,5 +127,73 @@ for (const lang of LOOK_LANGUAGES) for (const width of [1440, 375]) {
     await expect(mine.locator('article.req', { hasText: MAX_QUESTION })).toBeVisible();
     await fitsInside(page, mine);
     if (browserName === 'chromium') await capture(page, info, `filter-${lang}-${DEFAULT_SKIN}-${width}`);
+  });
+}
+
+for (const lang of LOOK_LANGUAGES) for (const width of [1440, 375]) {
+  test(`does not address the viewer as you on another person's cards in Waiting for people while keeping it in Waiting for me: ${lang} ${width}`, async ({ page, browserName }, info) => {
+    const t = DICTIONARIES[lang];
+    await page.setViewportSize({ width, height: 900 });
+    await page.addInitScript(({ language, skin }) => {
+      localStorage.setItem('hh-lang', language);
+      localStorage.setItem('hh-theme', skin);
+    }, { language: lang, skin: DEFAULT_SKIN });
+    await serveTasksBoard(page);
+    const base = await servePeopleWaits(page);
+    const seed = base.requests.find(request => request.text === QUESTION)!;
+    const makeReq = (id: string, title: string, text: string, extra: Partial<typeof seed>) => {
+      const task = TASKS.find(item => item.title === title)!;
+      return { ...seed, id, text, task: { id: task.id, number: task.number, title: task.title, department: task.department }, ...extra };
+    };
+    const options = [{ label: 'Botanical card', image: null }, { label: 'Moisture dial', image: null }];
+    const commit = 'a'.repeat(40);
+    const forMaria = { ownerPersonId: 'p2', canAnswer: true, decidedBy: { kind: 'department_and_ceo' as const, department: SALES } };
+    const requests = [
+      makeReq('r-m-choice', 'Take card payments', 'Pick the default card style.', { ...forMaria, kind: 'choice', options }),
+      makeReq('r-m-commit', 'Refunds on request', 'Approve this release commit.', { ...forMaria, kind: 'approval', commit }),
+      makeReq('r-m-policy', 'Receipts by email', 'Approve sending the launch email.', { ...forMaria, kind: 'approval', commit: null }),
+      makeReq('r-m-question', 'Delivery dates', 'Keep the fallback carrier?', { ...forMaria, kind: 'question' }),
+      makeReq('r-ro-choice', 'Old checkout', 'Pick the archive layout.', { ownerPersonId: 'p-max', canAnswer: false, decidedBy: { kind: 'department_and_ceo' as const, department: SALES }, kind: 'choice', options }),
+      makeReq('r-i-choice', 'Gift cards', 'Pick your gift card wording.', { ownerPersonId: ME.person.id, canAnswer: true, kind: 'choice', options }),
+      makeReq('r-i-commit', 'Rename the shop', 'Approve your release commit.', { ownerPersonId: ME.person.id, canAnswer: true, kind: 'approval', commit }),
+      makeReq('r-i-policy', 'Pay in parts', 'Approve your department spend.', { ownerPersonId: ME.person.id, canAnswer: true, kind: 'approval', commit: null }),
+    ];
+    await page.route('**/api/requests', route => route.fulfill({ json: { ...base, requests, counts: { ...base.counts, total: requests.filter(r => r.canAnswer).length } } }));
+
+    await page.goto('/tasks?show=people');
+    await expect(page.locator('h1.tr-where')).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const people = page.getByRole('region', { name: t.tracker.peopleWaits.title });
+    for (const [text, personName, expected] of [
+      ['Pick the default card style.', 'Maria', t.tasks.asksOther.choice('Hana')],
+      ['Approve this release commit.', 'Maria', t.tasks.asksOther.approval('Hana')],
+      ['Approve sending the launch email.', 'Maria', t.tasks.asksOther.approvalOf('Hana')],
+      ['Keep the fallback carrier?', 'Maria', t.tasks.asksOther.question('Hana')],
+      ['Pick the archive layout.', 'Max', t.tasks.asksOther.choice('Hana')],
+    ] as const) {
+      const header = people.locator('article.req', { hasText: text }).locator('header');
+      await expect(header).toContainText(t.tracker.peopleWaits.waitingFor(personName));
+      await expect(header).toContainText(expected);
+      await expect(header).not.toContainText(/\basks you\b|просит вас/i);
+    }
+    await fitsInside(page, people);
+    if (browserName === 'chromium') await capture(page, info, `headings-people-${lang}-${width}`);
+
+    await page.goto('/tasks?show=waits');
+    await expect(page.locator('h1.tr-where')).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const mine = page.getByRole('region', { name: t.tasks.waiting });
+    const firstHeader = mine.locator('article.req header');
+    await expect(firstHeader).toContainText(t.tasks.asksOther.choice('Hana'));
+    await expect(firstHeader).not.toContainText(/\basks you\b|просит вас/i);
+    /* Viewer's own cards keep direct phrasing in Waiting for me. */
+    await mine.getByRole('button', { name: /Pick your gift card wording/, expanded: false }).click();
+    await expect(firstHeader).toContainText(t.tasks.asksChoice('Hana'));
+    await mine.getByRole('button', { name: /Approve your release commit/, expanded: false }).click();
+    await expect(firstHeader).toContainText(t.tasks.asksApproval('Hana'));
+    await mine.getByRole('button', { name: /Approve your department spend/, expanded: false }).click();
+    await expect(firstHeader).toContainText(t.tasks.asksApprovalOf('Hana'));
+    await fitsInside(page, mine);
+    if (browserName === 'chromium') await capture(page, info, `headings-mine-${lang}-${width}`);
   });
 }
