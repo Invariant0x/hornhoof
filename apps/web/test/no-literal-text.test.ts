@@ -16,9 +16,11 @@ const DEMO_PAGES = ['world/demo/main.tsx', 'world-packs/city-sim.tsx', 'world-pa
 /* Words that are the same in every language: names of products and licences. */
 const NAMES = new Set(['Hornhoof', 'hornhoof.org', 'Anthropic', 'OpenAI', 'MIT']);
 const ATTRIBUTES = new Set(['aria-label', 'title', 'placeholder', 'alt', 'aria-description', 'aria-placeholder', 'aria-roledescription']);
+/* A path to a file, as a field shows one as its example, says the same in every language. */
+const PATH = /^[\w.-]+(?:\/[\w.-]+)+$/;
 const readable = (text: string): boolean => {
   const bare = text.replace(/&\w+;/g, '').trim();
-  return /\p{L}{2,}/u.test(bare) && !NAMES.has(bare) && !/^https?:\/\//.test(bare);
+  return /\p{L}{2,}/u.test(bare) && !NAMES.has(bare) && !/^https?:\/\//.test(bare) && !PATH.test(bare);
 };
 
 /* Every text a person reads that a screen wrote into its own markup instead of taking it from a language file: text
@@ -42,6 +44,8 @@ describe('no text of a screen outside the language files', () => {
     expect(literals('a.tsx', "const a = <p>{'Hello there'}</p>;")).toEqual(['Hello there']);
     expect(literals('a.tsx', 'const a = <p title={t.close}>{t.hello}</p>;')).toEqual([]);
     expect(literals('a.tsx', 'const a = <p>Hornhoof</p>;')).toEqual([]);
+    expect(literals('a.tsx', 'const a = <input placeholder=".github/workflows/release.yml" />;')).toEqual([]);
+    expect(literals('a.tsx', 'const a = <input placeholder="Release workflow" />;')).toEqual(['Release workflow']);
   });
 
   it('holds on every screen: each text comes from the language of the person', () => {

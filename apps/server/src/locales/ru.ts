@@ -38,18 +38,6 @@ export const ru: ServerWords = {
     noAnswer: agent => `${agent}: ответить в этот раз не получилось. Откройте Hornhoof, чтобы узнать почему, или напишите еще раз.`,
   },
 
-  away: {
-    lost: ['Нет связи с сервером', 'Страница откроется сама, когда сервер ответит.'],
-    updating: ['Сервер обновляется', 'Это займет несколько минут. Страница откроется сама.'],
-    checking: seconds => `Проверяем каждые ${seconds}\u00a0с`,
-    reload: 'Обновить страницу',
-    text: {
-      starting: 'Hornhoof запускается. Попробуйте еще раз через несколько секунд.',
-      held: 'Hornhoof не ответил за минуту. Попробуйте еще раз через несколько секунд.',
-      maintenance: 'Hornhoof ставит обновление. Попробуйте через несколько минут.',
-    },
-  },
-
   taskKind: { label: 'Вид', bug: 'ошибка', known_behavior: 'известное поведение', unknown_path: 'неизвестный путь', legacy_code: 'старый код' },
 
   worker: {
@@ -62,6 +50,7 @@ export const ru: ServerWords = {
   notices: {
     marked: { read: 'прочитано', done: 'разобрано' },
     machineNoName: 'машина без имени',
+    releaseCi: 'CI выпуска',
     markedCount: (status, count) => `${status}: ${count}`,
     afterTurn: turn => `после хода ${turn}`,
     turn: turn => `ход ${turn}`,

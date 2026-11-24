@@ -1,5 +1,5 @@
-/* What the server says to a person in its own words: why an assistant's call was refused, what a Telegram bot answers, the
-   page of a server that is away, and the lines the notices carry. English is the source, as in the screens; every other
+/* What the server says to a person in its own words: why an assistant's call was refused, what a Telegram bot answers, and the
+   lines the notices carry. English is the source, as in the screens; every other
    language is a file named by its id that has every text below (index.ts brings them). A text a program reads, such as the
    words an agent is given, is not here: those stay English. */
 export const en = {
@@ -43,20 +43,6 @@ export const en = {
     noAnswer: (agent: string) => `${agent} could not answer this time. Open Hornhoof to see why, or write again.`,
   },
 
-  /* The page a browser gets when the server is away, or an update installs. */
-  away: {
-    lost: ['No connection to the server', 'This page opens by itself when the server answers.'] as [title: string, hint: string],
-    updating: ['Server is updating', 'This takes a few minutes. The page opens by itself.'] as [title: string, hint: string],
-    checking: (seconds: number) => `Checking every ${seconds}\u00a0s`,
-    reload: 'Reload page',
-    /* What a program or a terminal client reads when it asks for no page. */
-    text: {
-      starting: 'Hornhoof is starting. Try again in a few seconds.',
-      held: 'Hornhoof did not answer for a minute. Try again in a few seconds.',
-      maintenance: 'Hornhoof is installing an update. Try again in a few minutes.',
-    },
-  },
-
   /* How a person wrote the kind of work on the first line of a task's body before tasks carried one: "Kind: bug". Older
      tasks are read by the words of every language. */
   taskKind: { label: 'Kind', bug: 'bug', known_behavior: 'known behavior', unknown_path: 'unknown path', legacy_code: 'legacy code' },
@@ -73,6 +59,7 @@ export const en = {
   notices: {
     marked: { read: 'read', done: 'done' },
     machineNoName: 'a machine with no name',
+    releaseCi: 'release CI',
     markedCount: (status: string, count: number) => `${status}: ${count}`,
     afterTurn: (turn: string) => `after turn ${turn}`,
     turn: (turn: string) => `turn ${turn}`,

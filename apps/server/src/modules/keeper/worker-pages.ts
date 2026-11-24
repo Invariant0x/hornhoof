@@ -1,7 +1,6 @@
 import type http from 'node:http';
-import { directionOf, isSourceLocale, SOURCE_LOCALE } from '@hornhoof/protocol';
+import { directionOf, isSourceLocale, localeOfHeader, SOURCE_LOCALE } from '@hornhoof/protocol';
 import { wordsFor } from '../../locales/index.js';
-import { languageOf } from '../../net/away-page.js';
 import { startingAnswer, type Refusal } from '../../net/proxy.js';
 import type { DataMachine } from '../network/join.js';
 
@@ -33,7 +32,7 @@ ${others.map(block => `<div lang="${block.language}" dir="${directionOf(block.la
 
 /* The language of the visitor and English: one when the visitor reads English. */
 const languagesOf = (req: http.IncomingMessage): string[] => {
-  const own = languageOf(String(req.headers['accept-language'] ?? ''));
+  const own = localeOfHeader(String(req.headers['accept-language'] ?? ''));
   return isSourceLocale(own) ? [SOURCE_LOCALE] : [SOURCE_LOCALE, own];
 };
 
