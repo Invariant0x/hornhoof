@@ -33,7 +33,7 @@ export type PackRoleLookSpec = Readonly<{
   headgear: RoleHeadgearKind;
   insignia?: boolean;
   /* Its prop is a large item held in one hand or on one shoulder (a staff, a banner, a jar): a mirrored row would move
-     it to the other side, so its walk is drawn in all 8 directions and its idle in SE and SW (order v3 4.4). */
+     it to the other side, so its walk is drawn in the 4 diagonals NE, SE, SW and NW and its idle in SE and SW (order v3 4.4). */
   largeItem?: boolean;
 }>;
 
