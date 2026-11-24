@@ -12,7 +12,6 @@ type LiveHandle = {
 type Spot = { id: string; col: number; row: number };
 
 test('the live page reads the residents the map moves', async ({ page }) => {
-  test.setTimeout(240_000);
   await page.setViewportSize({ width: 640, height: 360 });
   await page.goto('/world-live.html?pack=egypt&lang=en&mode=hornhoof&zoom=100');
   await page.waitForFunction(() => ((window as unknown as { __WORLD_LIVE__?: LiveHandle }).__WORLD_LIVE__?.getResidents().length ?? 0) > 0);
@@ -25,18 +24,15 @@ test('the live page reads the residents the map moves', async ({ page }) => {
     );
   const before: Spot[] = await spots();
   expect(before.length).toBeGreaterThan(0);
-  /* Working residents walk their routes; a few seconds move some of them whatever the frame rate. */
+  /* Working residents walk their routes; in time some of them move, however slow the frame rate (no limit, #59). */
   await expect
-    .poll(
-      async () => {
-        const now = new Map((await spots()).map(s => [s.id, s]));
-        return before.filter(s => {
-          const n = now.get(s.id);
-          return n && Math.hypot(n.col - s.col, n.row - s.row) > 0.2;
-        }).length;
-      },
-      { timeout: 60_000 },
-    )
+    .poll(async () => {
+      const now = new Map((await spots()).map(s => [s.id, s]));
+      return before.filter(s => {
+        const n = now.get(s.id);
+        return n && Math.hypot(n.col - s.col, n.row - s.row) > 0.2;
+      }).length;
+    })
     .toBeGreaterThan(0);
 
   /* The page's resident is where the map draws it: the camera centred on it puts its screen point in the middle. */
