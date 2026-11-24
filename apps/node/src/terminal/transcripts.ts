@@ -91,8 +91,10 @@ function sizeOf(file: string): number | 'missing' | 'unseen' {
 }
 
 type AgyStep = Calls & { events: AgentEvent[]; answered?: boolean };
+const AGY_TERMINAL_STATUS = new Set(['DONE', 'ERROR', 'FAILED', 'CANCELED', 'CANCELLED']);
 
-/* agy logs each planner response whole. The generic steps after a call are its results, in order. */
+/* agy logs each planner response whole. The generic steps after a call are its results, in order; a next planner response
+   means any backgrounded or missed step from before has already yielded control. */
 export function agySteps(): (line: unknown) => AgyStep {
   const pending: string[] = [];
   const seen = new Set<string>();
@@ -103,6 +105,7 @@ export function agySteps(): (line: unknown) => AgyStep {
     if (!step) return news;
     if (step.type === 'USER_INPUT') news.ended = pending.splice(0);
     if (step.type === 'PLANNER_RESPONSE') {
+      news.ended.push(...pending.splice(0));
       news.events = agyResponse(step);
       news.began = news.events.filter(e => e.kind === 'tool').map((e, i) => ({ id: `${step.step_index}:${i}`, name: e.name }));
       pending.push(...news.began.map(c => c.id));
@@ -135,7 +138,7 @@ function agyUserStep(line: Record<string, unknown>, seen: Set<string>, inputs: S
 
 /* Preserve records without status; an explicit running snapshot cannot finish a tool or publish an answer. */
 function agyStepComplete(line: Record<string, unknown>): boolean {
-  return line.status === undefined || line.status === 'DONE' || line.status === 'ERROR';
+  return line.status === undefined || AGY_TERMINAL_STATUS.has(String(line.status));
 }
 
 function agyResponse(line: Record<string, unknown>): AgentEvent[] {
