@@ -19,7 +19,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Changed
 
-- A copy of the company's data that its keeper gave up can be made again from the machine's card with "Try again", the CEO's alone. The company server gives no data to a machine whose path to it is measured too weak for a copy: under 2 Mbps, a rate at which the whole database would take over six hours, or a round trip over 1.5 seconds. A copy that is not whole on such a path is dropped with its slots on the server and waits, and goes on by itself once the path is no longer measured so; the card says which.
+- A copy of the company's data that its keeper gave up can be made again from the machine's card with "Try again", the CEO's alone. The company server gives no data to a machine whose path to it is measured too weak for a copy: under 2 Mbps, a rate at which the whole database would take over six hours, or a round trip over 1.5 seconds. A copy that is not whole on such a path is dropped with its slots on the server and waits, and goes on by itself once the path is no longer measured so; the machine's card says which, and Failures holds one card for each copy given up, with what to do.
 - A skin file of your own may name the skin in any language of the registry, with the English name required and the others optional, and the names of a world's employees can be taken in any language of the registry.
 - Follower machines that hold company data no longer prune their local backup bundles during worker backup-holder sweeps, keeping their own backups and saved former-leader bundles on disk while still sending any bundle the server asks for.
 
