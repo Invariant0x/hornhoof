@@ -2,6 +2,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { ciDispatches, tasks, turnReleases, turns } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
+import { saying } from '../../locales/index.js';
 import { enqueueTurn } from '../conversation/queue.js';
 import { ciAddress, repoAt } from '../departments/repository.js';
 import type { CiAt } from '../testruns/github-ci.js';
@@ -21,7 +22,7 @@ const NO_RUN_MS = 20 * 60_000;
 /* What the holder is told once, in words and with the task, as a service message of the server. */
 async function tell(ctx: Ctx, row: Row, text: string): Promise<void> {
   const [task] = await ctx.db.select({ id: tasks.id, number: tasks.number }).from(tasks).where(eq(tasks.id, row.taskId));
-  const detail = { en: 'release CI', ru: 'CI выпуска' };
+  const detail = saying(words => words.notices.releaseCi);
   await enqueueTurn(ctx, { companyId: row.companyId, agentId: row.agentId, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'service', tasks: task ? [task] : [], detail } } });
 }
 

@@ -31,6 +31,7 @@ import type { CityBuilding } from '../world/city-layout';
 import type { DepartmentFocusSpec, DepartmentWorkLinkKind } from '../world/department-focus';
 import type { ResidentEntity } from '../world/residents';
 import { clock } from './Subscriptions';
+import { say } from '@hornhoof/protocol';
 
 export type WorldSelection =
   | { kind: 'agent'; agentId: string; resident?: ResidentEntity; building?: CityBuilding }
@@ -775,7 +776,7 @@ function DepartmentHierarchyGraph({
     for (const m of roleMembers) matchedByRole.add(m.id);
     groups.push({
       key: `role:${r.id}`,
-      title: r.title[language],
+      title: say(r.title, language),
       isGate: r.gate !== null || r.schema === 'final_check',
       members: roleMembers,
     });

@@ -64,7 +64,7 @@ async function note(ctx: Ctx, task: typeof tasks.$inferSelect, job: Job, stage: 
   published(ctx, task);
   const to = text === null ? null : await hearerOf(ctx, task, job);
   if (!to || text === null) return;
-  const message = { personId: null, text, notification: { source: 'machine' as const, tasks: [{ id: task.id, number: task.number }], detail: { en: host ?? `#${task.number}`, ru: host ?? `#${task.number}` } } };
+  const message = { personId: null, text, notification: { source: 'machine' as const, tasks: [{ id: task.id, number: task.number }], detail: { en: host ?? `#${task.number}` } } };
   await enqueueTurn(ctx, { companyId: task.companyId, agentId: to, prompt: text, createdBy: null, message }).catch((err: unknown) => {
     if (!(err instanceof NoSubscription)) throw err;
   });

@@ -1,7 +1,5 @@
 ---
 id: hh-work-fast
-title: { en: "Work fast, keep the proof", ru: "Работать быстро, сохраняя проверку" }
-description: { en: "Keeps independent work moving and checks each result before handoff.", ru: "Ведет независимые части работы параллельно и проверяет каждый результат перед передачей." }
 kind: checklist
 sources: [unclebob/ub-mode SKILL.md, addyosmani/agent-skills skills/incremental-implementation/SKILL.md, addyosmani/agent-skills skills/context-engineering/SKILL.md, affaan-m/ECC skills/iterative-retrieval/SKILL.md, affaan-m/ECC skills/search-first/SKILL.md, affaan-m/ECC skills/parallel-execution-optimizer/SKILL.md, affaan-m/ECC skills/agentic-engineering/SKILL.md, obra/superpowers skills/subagent-driven-development/SKILL.md, garrytan/gstack ETHOS.md]
 ---

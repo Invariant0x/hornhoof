@@ -1,7 +1,5 @@
 ---
 id: hh-lead-tasks
-title: { en: "Lead through tasks", ru: "Руководство через задачи" }
-description: { en: "How whoever leads gives each connected result to one owner, splits off only independent parts, keeps the department loaded, wakes people, accepts results by their evidence and keeps work moving through failures.", ru: "Как руководитель отдает связанный результат одному исполнителю, отделяет только независимые части, держит отдел загруженным, будит людей, принимает результат по доказательствам и не дает работе встать при сбоях." }
 kind: core
 ---
 You can coordinate a group around an assigned result with clear ownership and evidence.

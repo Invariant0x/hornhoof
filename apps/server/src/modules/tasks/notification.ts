@@ -2,6 +2,7 @@ import type { Notification } from '@hornhoof/protocol';
 import type { Ctx } from '../../app.js';
 import { agentParty, HORNHOOF, personParty, type MessageParty } from '../events/parties.js';
 import type { Actor, Task, Wake } from './state.js';
+import { saying } from '../../locales/index.js';
 
 async function actorParty(ctx: Ctx, companyId: string, actor?: Actor): Promise<MessageParty> {
   if (actor?.personId) return personParty(ctx, companyId, actor.personId);
@@ -19,7 +20,7 @@ async function waitDetail(ctx: Ctx, task: Task, wake: Wake): Promise<Notificatio
   const wait = wake.cause?.wait;
   if (!wait) return undefined;
   const setter = await agentParty(ctx, task.companyId, wait.setter);
-  return { en: `set by ${setter.name}, until ${wait.until}`, ru: `поставил ${setter.name}, до ${wait.until}` };
+  return saying(words => words.notices.waitSet(setter.name, wait.until));
 }
 
 function actionLine(task: Task, wake: Wake, senders: MessageParty[]): string {

@@ -1,7 +1,5 @@
 ---
 id: fin-independent-recompute
-title: { en: "Independent recompute", ru: "Независимый пересчет" }
-description: { en: "Checks finance work by rebuilding the key numbers from source records, without using the maker's work.", ru: "Проверяет работу финансов, заново считая ключевые числа по исходным данным, не опираясь на работу исполнителя." }
 kind: gate
 sources: [anthropics/financial-services managed-agent-cookbooks/README.md]
 ---

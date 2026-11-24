@@ -1,7 +1,7 @@
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { WorldRelocationStored } from '@hornhoof/protocol/world';
 import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
-import type { QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
+import { LOCALE_IDS, type QuestionAudience, type QuestionClassificationSnapshot } from '@hornhoof/protocol';
 import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, PROVIDER_IDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
@@ -1035,7 +1035,7 @@ export const telegramChatLanguages = pgTable(
   {
     botId: uuid('bot_id').notNull().references(() => telegramBots.id, { onDelete: 'cascade' }),
     chatId: bigint('chat_id', { mode: 'number' }).notNull(),
-    lang: text('lang', { enum: ['en', 'ru'] }).notNull(),
+    lang: text('lang', { enum: LOCALE_IDS }).notNull(),
   },
   t => [primaryKey({ columns: [t.botId, t.chatId] })],
 );
@@ -1051,7 +1051,7 @@ export const telegramReplies = pgTable(
     chatId: bigint('chat_id', { mode: 'number' }).notNull(),
     afterSeq: bigint('after_seq', { mode: 'number' }).notNull(),
     answered: boolean('answered').notNull().default(false),
-    lang: text('lang', { enum: ['en', 'ru'] }).notNull(),
+    lang: text('lang', { enum: LOCALE_IDS }).notNull(),
     createdAt: createdAt(),
   },
   t => [unique('telegram_replies_job_chat').on(t.botId, t.jobId, t.chatId)],

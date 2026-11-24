@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { LanguageProvider } from '../src/i18n';
+import { LanguageProvider, loadMessages } from '../src/i18n';
 import { layoutTree, NODE, type Crumb, type GraphNode } from '../src/tracker';
 import type { GoalView, TaskLine } from '../src/types';
 import { decl } from './css';
@@ -14,7 +14,7 @@ const goal = (id: string, title: string): GoalView => ({
 const node = (id: string, title: string, children: GraphNode[] = []): GraphNode => ({ kind: 'goal', id, goal: goal(id, title), children });
 const rows = { selected: null, onOpenTask: () => {} };
 const graph = (forest: GraphNode[], crumbs: Crumb[], top = 'All goals') => (
-  <LanguageProvider><TrackerGraph forest={forest} crumbs={crumbs} top={top} onCrumb={() => {}} rows={rows} onOpenGoal={() => {}} /></LanguageProvider>
+  <LanguageProvider pseudo><TrackerGraph forest={forest} crumbs={crumbs} top={top} onCrumb={() => {}} rows={rows} onOpenGoal={() => {}} /></LanguageProvider>
 );
 const at = (id: string, title: string): Crumb => ({ kind: 'goal', id, number: 1, title });
 const transform = (container: HTMLElement) => container.querySelector<HTMLElement>('.world')!.style.transform;
@@ -138,7 +138,14 @@ describe('the graph right to left', () => {
   const page = document.documentElement;
   /* The canvas's size, which the page has no layout to give, is set on HTMLElement for a test and taken off after it. */
   const own = { clientWidth: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth'), clientHeight: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight') };
+  /* A page reads right to left in a language that does: the mirrored test language of the registry, with its words brought
+     so the page draws at once. */
+  const turnRtl = async () => {
+    localStorage.setItem('hh-lang', 'ar-XB');
+    await loadMessages('ar-XB');
+  };
   afterEach(() => {
+    localStorage.removeItem('hh-lang');
     page.removeAttribute('dir');
     for (const [name, was] of Object.entries(own)) {
       if (was) Object.defineProperty(HTMLElement.prototype, name, was);
@@ -153,8 +160,8 @@ describe('the graph right to left', () => {
   };
   const numbers = (d: string) => (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
 
-  it('grows from a root at the right, each line leaving a node from the side that faces what is under it', () => {
-    page.dir = 'rtl';
+  it('grows from a root at the right, each line leaving a node from the side that faces what is under it', async () => {
+    await turnRtl();
     const { container } = render(graph(tree(), []));
     const [root, first, second] = ['g1', 't1', 't2'].map(id => place(container, id));
     expect(root!.x).toBeGreaterThan(first!.x + NODE.w);
@@ -167,8 +174,8 @@ describe('the graph right to left', () => {
     }
   });
 
-  it('routes a wait out to a lane left of the tree, back into the node it waits for, and words it next to the waiting node', () => {
-    page.dir = 'rtl';
+  it('routes a wait out to a lane left of the tree, back into the node it waits for, and words it next to the waiting node', async () => {
+    await turnRtl();
     const { container } = render(graph(tree(), []));
     const [root, first, second] = ['g1', 't1', 't2'].map(id => place(container, id));
     const wait = container.querySelector('.tr-wires .wait')!;
@@ -179,7 +186,8 @@ describe('the graph right to left', () => {
     expect(lane, 'its lane left of every node').toBeLessThan(Math.min(root!.x, first!.x, second!.x));
     expect(x2, 'its arrow at the left side of the task it waits for').toBe(first!.x - 2);
     const word = wait.querySelector('text')!;
-    expect(word).toHaveTextContent('← waits for');
+    /* The mirrored test language wraps its words in bidirectional marks. */
+    expect(word).toHaveTextContent(/^← \u202bwaits for\u202c$/);
     expect(word).toHaveAttribute('text-anchor', 'end');
     expect(word).toHaveAttribute('direction', 'ltr');
     expect(Number(word.getAttribute('x'))).toBe(second!.x - 6);
@@ -192,7 +200,7 @@ describe('the graph right to left', () => {
     expect(place(container, 'g1').x).toBeGreaterThan(place(container, 't1').x + NODE.w);
   });
 
-  it('opens a tree wider than the canvas with its root at the start edge: the right, as the mirror of left to right', () => {
+  it('opens a tree wider than the canvas with its root at the start edge: the right, as the mirror of left to right', async () => {
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return (this as HTMLElement).classList.contains('tr-map') ? 300 : 0; } });
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return (this as HTMLElement).classList.contains('tr-map') ? 600 : 0; } });
     const view = (container: HTMLElement) => {
@@ -202,7 +210,7 @@ describe('the graph right to left', () => {
     const ltr = render(graph(tree(), []));
     const before = view(ltr.container);
     ltr.unmount();
-    page.dir = 'rtl';
+    await turnRtl();
     const rtl = render(graph(tree(), []));
     const after = view(rtl.container);
     const [l, r] = [layoutTree(tree()), layoutTree(tree(), undefined, 'rtl')];

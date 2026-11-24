@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { DICTIONARIES, LANGUAGES, type Language, type Messages } from '../../src/i18n';
+import { LANGUAGES, type ShippedLanguage, type Messages } from '../../src/i18n';
+import { DICTIONARIES } from '../../src/i18n/dictionaries';
 import { BUILTIN_SKINS, builtinSkin, DEFAULT_SKIN } from '../../src/skins/registry';
 import { ME } from '../api';
 import { captureWith } from '../capture';
@@ -24,7 +25,7 @@ const pageWords = (t: Messages) => [
 const byLength = [...LANGUAGES].sort((a, b) => pageWords(DICTIONARIES[b.id]) - pageWords(DICTIONARIES[a.id]));
 const LOOK_LANGUAGES = [...new Set([byLength[0]!.id, byLength[byLength.length - 1]!.id])];
 
-async function open(page: Page, lang: Language, width: number, path: string, skin: string = DEFAULT_SKIN) {
+async function open(page: Page, lang: ShippedLanguage, width: number, path: string, skin: string = DEFAULT_SKIN) {
   await page.setViewportSize({ width, height: 900 });
   await page.addInitScript(({ language, skin }) => {
     localStorage.setItem('hh-lang', language);

@@ -1,7 +1,5 @@
 ---
 id: sal-call-prep
-title: { en: "Call preparation", ru: "Подготовка к звонку" }
-description: { en: "Prepares the person taking a sales call with a goal, questions and likely objections.", ru: "Готовит человека, который проводит звонок: цель, вопросы и вероятные возражения." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins, msitarzewski/agency-agents sales/sales-discovery-coach.md]
 ---

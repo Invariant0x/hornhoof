@@ -1,7 +1,5 @@
 ---
 id: dsn-design-critique
-title: { en: "Design critique", ru: "Разбор дизайна" }
-description: { en: "Reviews a design against its goal and the system, and gives findings a designer can act on.", ru: "Оценивает макет относительно его цели и дизайн-системы и дает замечания, по которым дизайнер может действовать." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins design/skills/design-critique/SKILL.md]
 ---

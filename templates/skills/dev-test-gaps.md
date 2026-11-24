@@ -1,7 +1,5 @@
 ---
 id: dev-test-gaps
-title: { en: "Finding test gaps", ru: "Поиск пробелов в тестах" }
-description: { en: "Finds the behaviours a change has that no test would catch breaking.", ru: "Находит поведение изменения, поломку которого не поймает ни один тест." }
 kind: procedure
 sources: [anthropics/claude-plugins-official plugins/pr-review-toolkit/agents/pr-test-analyzer.md, garrytan/gstack review/specialists/testing.md, anthropics/knowledge-work-plugins engineering/skills/testing-strategy/SKILL.md]
 ---

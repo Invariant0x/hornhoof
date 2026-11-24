@@ -14,11 +14,12 @@ import {
 import { egyptArtCatalog } from './art';
 import { EGYPT_LIGHTING, EGYPT_PLANTS, EGYPT_WIND } from './plants';
 import { EGYPT_TERRAIN_RECIPE, EGYPT_TILE_KINDS } from './recipe';
+import { text } from '../../world/pack-text';
 
 const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   ruler: {
     id: 'egypt-pharaoh',
-    label: { en: 'Pharaoh', ru: 'Фараон' },
+    label: text('Pharaoh'),
     prop: 'staff',
     headgear: 'crown',
     largeItem: true,
@@ -26,7 +27,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   head: {
     id: 'egypt-overseer',
-    label: { en: 'Overseer', ru: 'Надсмотрщик' },
+    label: text('Overseer'),
     prop: 'staff',
     headgear: 'circlet',
     largeItem: true,
@@ -34,7 +35,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   guard_captain: {
     id: 'egypt-guard-captain',
-    label: { en: 'Captain of the Guard', ru: 'Начальник стражи' },
+    label: text('Captain of the Guard'),
     prop: 'staff',
     headgear: 'helm',
     largeItem: true,
@@ -42,91 +43,91 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   architect: {
     id: 'egypt-architect',
-    label: { en: 'Master Architect', ru: 'Зодчий со свитком' },
+    label: text('Master Architect'),
     prop: 'scroll',
     /* The approved tier 3 architect (hd-char-lvl05) wears a nemes; the hood is the engine's nearest headwear. */
     headgear: 'hood',
   },
   checker: {
     id: 'egypt-inspector',
-    label: { en: 'Stone Inspector', ru: 'Проверяющий со свитком' },
+    label: text('Stone Inspector'),
     prop: 'scroll',
     headgear: 'cap',
   },
   builder: {
     id: 'egypt-mason',
-    label: { en: 'Stone Mason', ru: 'Каменщик-строитель' },
+    label: text('Stone Mason'),
     prop: 'stone',
     headgear: 'none',
   },
   scribe: {
     id: 'egypt-scribe',
-    label: { en: 'Papyrus Scribe', ru: 'Писец с папирусом' },
+    label: text('Papyrus Scribe'),
     prop: 'scroll',
     headgear: 'cap',
   },
   artisan: {
     id: 'egypt-relief-carver',
-    label: { en: 'Relief Carver', ru: 'Резчик рельефов' },
+    label: text('Relief Carver'),
     prop: 'chisel',
     headgear: 'cap',
   },
   patrol: {
     id: 'egypt-medjay',
-    label: { en: 'Medjay Patrol', ru: 'Патрульный меджай' },
+    label: text('Medjay Patrol'),
     prop: 'gong',
     headgear: 'helm',
     largeItem: true,
   },
   inspector_scout: {
     id: 'egypt-scout',
-    label: { en: 'Wall Scout', ru: 'Дозорный-следопыт' },
+    label: text('Wall Scout'),
     prop: 'scroll',
     headgear: 'hood',
   },
   firefighter: {
     id: 'egypt-firefighter',
-    label: { en: 'Water Bearer & Repairer', ru: 'Пожарный и ремонтник' },
+    label: text('Water Bearer & Repairer'),
     prop: 'water_jar',
     headgear: 'cap',
     largeItem: true,
   },
   caravan_runner: {
     id: 'egypt-caravan-messenger',
-    label: { en: 'Caravan Messenger', ru: 'Гонец и караванщик' },
+    label: text('Caravan Messenger'),
     prop: 'banner',
     headgear: 'hood',
     largeItem: true,
   },
   keykeeper: {
     id: 'egypt-keykeeper',
-    label: { en: 'Granary Keykeeper', ru: 'Ключник амбаров' },
+    label: text('Granary Keykeeper'),
     prop: 'key',
     headgear: 'cap',
   },
   machine_keeper: {
     id: 'egypt-machine-keeper',
-    label: { en: 'Workshop Keeper', ru: 'Смотритель машин' },
+    label: text('Workshop Keeper'),
     prop: 'tool',
     headgear: 'cap',
   },
   gate_guard: {
     id: 'egypt-gate-guard',
-    label: { en: 'Gate Sentinel', ru: 'Стражник у ворот' },
+    label: text('Gate Sentinel'),
     prop: 'spear_shield',
     headgear: 'helm',
     largeItem: true,
   },
   red_team: {
     id: 'egypt-skirmisher',
-    label: { en: 'Wall Tester', ru: 'Лазутчик учений' },
+    label: text('Wall Tester'),
     prop: 'spear_shield',
     headgear: 'hood',
     largeItem: true,
   },
   road_builder: {
     id: 'egypt-canal-builder',
-    label: { en: 'Canal & Ramp Builder', ru: 'Строитель каналов и пандусов' },
+    label: text('Canal & Ramp Builder'),
     prop: 'tool',
     headgear: 'none',
     /* Its tool is a hoe, a large item (order v3 4.4). */
@@ -134,7 +135,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   turnkey_specialist: {
     id: 'egypt-royal-master',
-    label: { en: 'Royal Master Builder', ru: 'Мастер под ключ' },
+    label: text('Royal Master Builder'),
     prop: 'banner',
     headgear: 'circlet',
     largeItem: true,
@@ -142,7 +143,7 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   },
   day_laborer: {
     id: 'egypt-day-laborer',
-    label: { en: 'Day Laborer', ru: 'Поденщик' },
+    label: text('Day Laborer'),
     prop: 'stone',
     headgear: 'none',
   },
@@ -237,17 +238,17 @@ const EGYPT_MATERIALS: readonly GroundMaterialSpec[] = [
   },
 ];
 
-const EGYPT_STAGE_LABELS: Readonly<Record<string, Readonly<{ en: string; ru: string }>>> = {
-  stakes_and_rope: { en: 'Papyrus Cord and Stakes', ru: 'Колышки и веревка' },
-  foundation: { en: 'Limestone Foundation Pad', ru: 'Площадка и каменный фундамент' },
-  low_walls_open: { en: 'Mudbrick Courses (Open Rooms)', ru: 'Первые ряды стен (комнаты сверху)' },
-  waist_walls_scaffold: { en: 'Waist Walls, Cedar Scaffold & Ramp', ru: 'Стены по пояс с лесами и пандусом' },
-  full_walls: { en: 'Full Sun-Baked Walls', ru: 'Стены в полный рост' },
-  roof_beams: { en: 'Palm Timber Roof Beams', ru: 'Пальмовые балки перекрытия' },
-  roof: { en: 'Terrace Roof Deck', ru: 'Плоская крыша-терраса' },
-  finishing: { en: 'Stucco Reliefs & Painted Trim', ru: 'Штукатурка, рельефы и отделка' },
-  complete: { en: 'Completed Nile Building', ru: 'Готовое здание' },
-  upgraded: { en: 'Gilded Courtyard & Upper Terrace', ru: 'Улучшения: двор, галерея и золотой фриз' },
+const EGYPT_STAGE_LABELS: Readonly<Record<string, string>> = {
+  stakes_and_rope: text('Papyrus Cord and Stakes'),
+  foundation: text('Limestone Foundation Pad'),
+  low_walls_open: text('Mudbrick Courses (Open Rooms)'),
+  waist_walls_scaffold: text('Waist Walls, Cedar Scaffold & Ramp'),
+  full_walls: text('Full Sun-Baked Walls'),
+  roof_beams: text('Palm Timber Roof Beams'),
+  roof: text('Terrace Roof Deck'),
+  finishing: text('Stucco Reliefs & Painted Trim'),
+  complete: text('Completed Nile Building'),
+  upgraded: text('Gilded Courtyard & Upper Terrace'),
 };
 
 const EGYPT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = DEFAULT_CONSTRUCTION_STAGES.map(s => ({
@@ -257,7 +258,7 @@ const EGYPT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = DEFAULT_CONS
 
 export const EGYPT_WORLD_PACK: WorldPackManifest = {
   id: 'egypt',
-  name: { en: 'Ancient Egypt', ru: 'Древний Египет' },
+  name: text('Ancient Egypt'),
   engine: 'isometric-2d',
   mapSize: 150,
   projection: DEFAULT_ISOMETRIC_PROJECTION,
@@ -276,7 +277,7 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
   altarAnchor: {
     offsetCol: 3,
     offsetRow: -2,
-    label: { en: "God's Altar", ru: 'Алтарь бога' },
+    label: text("God's Altar"),
   },
   roleLooks: EGYPT_ROLE_LOOKS,
   classFallbackLooks: EGYPT_CLASS_FALLBACKS,

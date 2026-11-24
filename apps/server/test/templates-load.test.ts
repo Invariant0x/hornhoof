@@ -2,7 +2,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { TEMPLATE_KEYS } from '@hornhoof/protocol';
+import { say, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { copyTemplates, loadTemplates } from '../src/modules/templates/load.js';
 
@@ -21,6 +21,60 @@ describe('the template loader', () => {
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
     for (const r of roles) expect(r.hash).toMatch(/^[0-9a-f]{12}$/);
+  });
+
+  describe('the words of the templates, a locale file per language', () => {
+    const copy = () => {
+      const dir = mkdtempSync(join(tmpdir(), 'hornhoof-locales-'));
+      onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+      cpSync(DIR, dir, { recursive: true });
+      return dir;
+    };
+
+    it('read every role, skill and team in English and in each other language that has a file', () => {
+      for (const item of [...roles, ...skills, ...templates.teams.values()]) {
+        expect(item.title.en, item.id).toBeTruthy();
+        expect(item.title.ru, item.id).toBeTruthy();
+        expect(Object.keys(item.title).sort(), item.id).toEqual(Object.keys(item.description).sort());
+      }
+    });
+
+    it('take a language from a file named by its id and nothing in the code, a text it lacks reading as English', () => {
+      const dir = copy();
+      const registry = readFileSync(join(dir, 'locales/ru.yaml'), 'utf8');
+      expect(registry).toMatch(/^roles:/m);
+      rmSync(join(dir, 'locales/ru.yaml'));
+      const loaded = loadTemplates(dir);
+      expect(loaded.roles.get('DEV-HEAD')!.title).toEqual({ en: templates.roles.get('DEV-HEAD')!.title.en });
+      expect(say(loaded.roles.get('DEV-HEAD')!.title, 'ru')).toBe(templates.roles.get('DEV-HEAD')!.title.en);
+    });
+
+    it('refuse a file of a language the registry does not list', () => {
+      const dir = copy();
+      writeFileSync(join(dir, 'locales/xx.yaml'), 'roles: {}\n');
+      expect(() => loadTemplates(dir)).toThrow(/xx\.yaml is a language the registry/);
+    });
+
+    it('refuse a template with no English words, as every language falls back to them', () => {
+      const dir = copy();
+      const file = join(dir, 'locales/en.yaml');
+      writeFileSync(file, readFileSync(file, 'utf8').replace(/ {2}DEV-HEAD:\n {4}title: .*\n {4}description: .*\n/, ''));
+      expect(() => loadTemplates(dir)).toThrow(/DEV-HEAD has no en name and description/);
+    });
+
+    it('refuse words for a template that does not exist', () => {
+      const dir = copy();
+      const file = join(dir, 'locales/ru.yaml');
+      writeFileSync(file, readFileSync(file, 'utf8').replace(/^roles:\n/m, 'roles:\n  DEV-GONE:\n    title: "x"\n    description: "y"\n'));
+      expect(() => loadTemplates(dir)).toThrow(/words for the role DEV-GONE, which does not exist/);
+    });
+
+    it('refuse a text the language file leaves empty', () => {
+      const dir = copy();
+      const file = join(dir, 'locales/ru.yaml');
+      writeFileSync(file, readFileSync(file, 'utf8').replace(/(DEV-HEAD:\n {4}title: )".*"/, '$1""'));
+      expect(() => loadTemplates(dir)).toThrow(/ru\.yaml: roles\.DEV-HEAD\.title/);
+    });
   });
 
   it('rejects an unknown role effort and allows a role to omit it', () => {

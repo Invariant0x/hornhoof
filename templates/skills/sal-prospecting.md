@@ -1,7 +1,5 @@
 ---
 id: sal-prospecting
-title: { en: "Prospecting", ru: "Поиск клиентов" }
-description: { en: "Finds companies and people that fit the ideal customer profile and sorts leads by how well they fit.", ru: "Находит компании и людей под профиль идеального клиента и сортирует лиды по степени соответствия." }
 kind: procedure
 sources: [coreyhaines31/marketingskills skills/prospecting/SKILL.md, anthropics/knowledge-work-plugins]
 ---

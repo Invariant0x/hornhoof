@@ -1,0 +1,839 @@
+# What a person reads of each template, in English, the source of every other language: the names and the short descriptions shown in the department and the staff screens.
+# One file per language, named by its id as the registry of languages (packages/protocol/src/locales.ts) lists it. A text this language lacks reads in English.
+
+roles:
+  BIZ-ANALYST:
+    title: "Business analyst"
+    description: "Analyst of business opportunities and market evidence."
+  BIZ-HEAD:
+    title: "Head of business development"
+    description: "Leader for business development and commercial opportunities."
+  BIZ-PARTNER:
+    title: "Partnerships manager"
+    description: "Specialist in partnerships and commercial relationships."
+  BIZ-PM:
+    title: "Product manager"
+    description: "Keeper of clear titles, goals and pipelines for the department's work."
+  BIZ-REV:
+    title: "Research reviewer"
+    description: "Specialist in checking market research and partner assessments, each number and claim against its source."
+  DEV-ARCH:
+    title: "Architect"
+    description: "Designs the target structure of new features and changes that reshape the architecture: data models, boundaries and interfaces."
+  DEV-BE:
+    title: "Backend engineer"
+    description: "Builds the services that store data and make the product work."
+  DEV-DOCS:
+    title: "Technical writer"
+    description: "Writer of technical guides and product documentation."
+  DEV-ENG:
+    title: "Developer"
+    description: "Developer of software features and their behavior."
+  DEV-FE:
+    title: "Interface developer"
+    description: "Engineer of user interfaces and application interactions."
+  DEV-HEAD:
+    title: "Head of development"
+    description: "Development leader for software goals, engineering coordination and delivery."
+  DEV-OPS:
+    title: "DevOps engineer"
+    description: "Engineer of build systems, deployment and operational recovery."
+  DEV-PERF:
+    title: "Performance engineer"
+    description: "Engineer of software performance and resource efficiency."
+  DEV-PM:
+    title: "Product manager"
+    description: "Keeper of clear titles, goals and pipelines for the department's work."
+  DEV-QA:
+    title: "QA lead"
+    description: "Acceptance specialist for product requirements and user experience."
+  DEV-RED:
+    title: "Red team"
+    description: "Specialist in adversarial analysis of software behavior."
+  DEV-REV:
+    title: "Code reviewer"
+    description: "Specialist in software correctness, maintainability and code risks."
+  DEV-SEC:
+    title: "Security engineer"
+    description: "Engineer of software security and access boundaries."
+  DEV-TEST:
+    title: "Test engineer"
+    description: "Engineer of software behavior verification and test coverage gaps."
+  DSN-HEAD:
+    title: "Head of design"
+    description: "Leader for product design and design quality."
+  DSN-PM:
+    title: "Product manager"
+    description: "Keeper of clear titles, goals and pipelines for the department's work."
+  DSN-QA:
+    title: "Design QA"
+    description: "Specialist in design quality and interface consistency."
+  DSN-SYS:
+    title: "Design system designer"
+    description: "Designer of reusable interface systems and components."
+  DSN-UI:
+    title: "Product UI designer"
+    description: "Designer of product interfaces and user interactions."
+  FIN-AUDIT:
+    title: "Finance auditor"
+    description: "Specialist in financial evidence, controls and audit accuracy."
+  FIN-BOOK:
+    title: "Bookkeeper"
+    description: "Specialist in accounting records and financial reconciliation."
+  FIN-FPA:
+    title: "Financial planning analyst"
+    description: "Analyst of financial plans, forecasts and business performance."
+  FIN-HEAD:
+    title: "Controller"
+    description: "Leader for financial reporting, planning and controls."
+  FIN-PM:
+    title: "Product manager"
+    description: "Keeper of clear titles, goals and pipelines for the department's work."
+  HHD-BILLS:
+    title: "Bills helper"
+    description: "Assistant for household bills and payment records."
+  HHD-CAL:
+    title: "Calendar helper"
+    description: "Assistant for household schedules and shared plans."
+  HHD-HEAD:
+    title: "Head of household"
+    description: "Coordinator of household needs and arrangements."
+  HHD-PM:
+    title: "Product manager"
+    description: "Keeper of clear titles, goals and pipelines for the department's work."
+  HHD-SUPPLY:
+    title: "Supplies helper"
+    description: "Assistant for household supplies and shopping needs."
+  HOM-HEAD:
+    title: "Head of home devices"
+    description: "Coordinator of home devices and their safe operation."
+  HOM-NET:
+    title: "Home network helper"
+    description: "Specialist in home networks and connectivity."
+  HOM-PM:
+    title: "Product manager"
+    description: "Keeper of clear titles, goals and pipelines for the department's work."
+  HOM-SMART:
+    title: "Smart home helper"
+    description: "Specialist in smart home devices and automation."
+  MKT-EDIT:
+    title: "Editor"
+    description: "Specialist in checking marketing texts against their brief, their sources and the brand rules."
+  MKT-HEAD:
+    title: "Head of marketing"
+    description: "Leader for marketing strategy and communication."
+  MKT-PM:
+    title: "Product manager"
+    description: "Keeper of clear titles, goals and pipelines for the department's work."
+  MKT-SEO:
+    title: "Search specialist"
+    description: "Specialist in search visibility and content discovery."
+  MKT-SOCIAL:
+    title: "Social media manager"
+    description: "Specialist in social media content and community communication."
+  MKT-WRITE:
+    title: "Copywriter"
+    description: "Writer of marketing copy and product messages."
+  OPS-ACCT:
+    title: "Accounts administrator"
+    description: "Administrator of service accounts and subscription records."
+  OPS-BUGS:
+    title: "Weak point collector"
+    description: "Analyst of recurring operational failures and weak points."
+  OPS-FIX:
+    title: "Reliability engineer"
+    description: "Engineer of operational reliability and incident recovery."
+  OPS-HEAD:
+    title: "Head of operations"
+    description: "Leader for company operations and operational reliability."
+  OPS-INTEG:
+    title: "Integrations engineer"
+    description: "Engineer of service connections and tool integrations."
+  OPS-PM:
+    title: "Product manager"
+    description: "Keeper of clear titles, goals and pipelines for the department's work."
+  OPS-PROGRAM:
+    title: "Program operator"
+    description: "Operator of employee programs and their interaction screens."
+  OPS-WATCH:
+    title: "Task watchdog"
+    description: "Observer of task progress, ownership and blocked work, who also closes the tasks whose work is already done."
+  SAL-AE:
+    title: "Account executive"
+    description: "Specialist in customer opportunities and sales agreements."
+  SAL-HEAD:
+    title: "Head of sales"
+    description: "Leader for sales opportunities, forecasts and customer relationships."
+  SAL-OPS:
+    title: "Sales operations analyst"
+    description: "Analyst of sales records, pipeline data and deal outcomes."
+  SAL-PM:
+    title: "Product manager"
+    description: "Keeper of clear titles, goals and pipelines for the department's work."
+  SAL-REV:
+    title: "Sales reviewer"
+    description: "Specialist in checking outreach, proposals and deal plans against the customer's record and the approved terms."
+  SAL-SDR:
+    title: "Sales development representative"
+    description: "Specialist in prospective customers and sales opportunities."
+  SUP-HEAD:
+    title: "Head of support"
+    description: "Leader for customer support and service quality."
+  SUP-KB:
+    title: "Knowledge base editor"
+    description: "Editor of support knowledge and customer guidance."
+  SUP-PM:
+    title: "Product manager"
+    description: "Keeper of clear titles, goals and pipelines for the department's work."
+  SUP-QA:
+    title: "Support quality reviewer"
+    description: "Specialist in checking answers and help articles against the customer's case and the support policy."
+  SUP-T1:
+    title: "First-line support"
+    description: "Specialist in initial customer support and common service questions."
+  SUP-T2:
+    title: "Second-line support"
+    description: "Specialist in complex customer issues and technical support."
+  VID-BOARD:
+    title: "Storyboard artist and set builder"
+    description: "Plans shots with the crew, draws boards and designs the spaces in the video."
+  VID-COLOR:
+    title: "Colorist"
+    description: "Makes color, contrast and grain consistent across the whole video."
+  VID-EDIT:
+    title: "Video editor"
+    description: "Shapes the story from accepted takes and prepares the finished video for export."
+  VID-GEN:
+    title: "Shot operator"
+    description: "Makes or captures takes and handles camera and light when assigned."
+  VID-HEAD:
+    title: "Director and head of video production"
+    description: "Takes orders, sets the budget and directs the story, performances, look and final cut."
+  VID-KEEP:
+    title: "Script supervisor and continuity keeper"
+    description: "Keeps continuity records and accepts the exact takes for the editor."
+  VID-PM:
+    title: "Product manager"
+    description: "Keeper of clear titles, goals and pipelines for the department's work."
+  VID-QA:
+    title: "Video quality reviewer"
+    description: "Checks the cut and exported master against the brief and approved references."
+  VID-REF:
+    title: "Shot reference artist"
+    description: "Prepares approved character, set, object and style references for the shots."
+  VID-SOUND:
+    title: "Sound designer"
+    description: "Designs the sound and mixes voices, music and other sounds for the whole video."
+  VID-WRITE:
+    title: "Story and script writer"
+    description: "Develops the story and writes and revises the script with the director."
+
+skills:
+  biz-business-strategy:
+    title: "Business strategy"
+    description: "Turns the company's goal into a short growth plan: the bets, what they cost and how to tell they work."
+  biz-channel-economics:
+    title: "Channel economics"
+    description: "Works out what a partner or channel earns and costs per customer, and whether it pays."
+  biz-competitive-landscape:
+    title: "Competitive landscape"
+    description: "Maps competitors and alternatives, compares them on what customers decide on, and finds the gaps."
+  biz-deal-terms:
+    title: "Deal terms"
+    description: "Drafts a term sheet and gives partner contracts and NDAs a first read for the human who signs."
+  biz-decision-council:
+    title: "Decision council"
+    description: "Examines a costly decision from independent viewpoints."
+  biz-deep-research:
+    title: "Deep research"
+    description: "Answers a research question from several independent sources and says how sure the answer is."
+  biz-market-sizing:
+    title: "Market sizing"
+    description: "Estimates the total, reachable and winnable market from the bottom up, with every input cited."
+  biz-marketplace-listings:
+    title: "Marketplace listings"
+    description: "Finds directories and integration marketplaces for the product and submits its listings itself."
+  biz-opportunity-scoring:
+    title: "Opportunity scoring"
+    description: "Scores each partner, channel or market idea on one scale so the best ones go first."
+  biz-partner-evaluation:
+    title: "Partner evaluation"
+    description: "Decides whether a partner is worth pursuing and at what level, with a first-phase plan and exit terms."
+  biz-sector-overview:
+    title: "Sector overview"
+    description: "Explains how an industry works, who earns the money and what is changing, for a decision on a new market."
+  biz-work-pipeline:
+    title: "Business development pipeline"
+    description: "Where business development checks item by item, in a batch, by sample and by code; read it when laying out work or changing a check."
+  dev-adversarial:
+    title: "Breaking it on purpose"
+    description: "Looks for where a preview build breaks: odd input, broken flows, contradictions in the logic."
+  dev-api-design:
+    title: "API and interface design"
+    description: "Designs routes, messages and module interfaces that are hard to misuse."
+  dev-browser-check:
+    title: "Checking the running product"
+    description: "When a change has something a user meets, runs it that way, walks the flow and keeps evidence; a browser only for a web page."
+  dev-ci-release:
+    title: "Release a version"
+    description: "Prepares an authorized version from its exact candidate, checks, approval and rollback evidence."
+  dev-cleanup:
+    title: "Removing what is not needed"
+    description: "Before work is handed in, takes out what the change added or left behind and no longer needs, and proves nothing else moved."
+  dev-debugging:
+    title: "Systematic debugging"
+    description: "Finds the root cause of a bug before changing any code."
+  dev-deploy-rollback:
+    title: "Deploy and roll back"
+    description: "Ships a build with a backup, a health check and a tested way back."
+  dev-docs:
+    title: "Product documentation"
+    description: "Keeps the README and guides true to what the product does now."
+  dev-e2e-tests:
+    title: "End-to-end tests"
+    description: "Pins the most important user flows with tests that drive the real product."
+  dev-engineering-rules:
+    title: "Engineering rules (ub-mode)"
+    description: "Uncle Bob's ub-mode word for word: first make it work, then make it right, then follow practice. Where it differs from your company's rules, those rules win."
+  dev-frontend-ui:
+    title: "User interface engineering"
+    description: "Builds the interface users meet on the design system: every state, every input, every size."
+  dev-gates:
+    title: "Choose development checks"
+    description: "Chooses checks from the assignment, task and risk, preserving independent approval before protected integration."
+  dev-i18n-en-ru:
+    title: "Languages of the product"
+    description: "Keeps every text a user sees in each language the product supports, written well in each."
+  dev-implement:
+    title: "Implementing a task"
+    description: "Takes a brief from start to a proved, committed result in small increments."
+  dev-language-rules:
+    title: "Rules of each language"
+    description: "Follows the style, patterns, security and testing rules of every language the code is in."
+  dev-lead:
+    title: "Lead development"
+    description: "Coordinates connected software blocks within the assigned goal, with clear ownership and required checks."
+  dev-migrations:
+    title: "Database migrations"
+    description: "Changes the database schema safely, with existing data in mind: a shipped migration is never edited."
+  dev-performance:
+    title: "Performance work"
+    description: "Measures first, fixes the biggest cost, and proves the gain with numbers."
+  dev-plan-review:
+    title: "Design note"
+    description: "Writes a short design note for a new feature or a change that reshapes the architecture. Small or local work needs none."
+  dev-qa-acceptance:
+    title: "Acceptance as a first user"
+    description: "Checks an assigned candidate against its requirements as a new user and reports an evidence-based acceptance verdict."
+  dev-release-improvements:
+    title: "Release improvement lanes"
+    description: "For each release measurement or independent improvement work on a released version."
+  dev-release-notes:
+    title: "Release notes"
+    description: "Writes what a release changes for users as one short list in the repository's language."
+  dev-review-diff:
+    title: "Reviewing a change"
+    description: "Reads a change against its brief and the engineering rules and finds what will break, whether the change is your own or someone else's."
+  dev-review-fix:
+    title: "Repair review findings"
+    description: "Use when the current Review owner must repair a confirmed defect in its assigned candidate."
+  dev-review-verdict:
+    title: "Review verdict"
+    description: "Records exact-candidate findings and keeps repairs with the current checking owner."
+  dev-security-fix:
+    title: "Repair security findings"
+    description: "Use when the current Security owner must repair a confirmed weakness in its assigned candidate."
+  dev-security-review:
+    title: "Security review"
+    description: "Checks that a change protects data, access and secrets, with a fix for each weak spot found, whether the change is your own or someone else's."
+  dev-task-flow:
+    title: "Code work through tasks"
+    description: "What working through tasks adds when the work is code: a branch per task, commits, the evidence of a submission and the small-task check."
+  dev-tdd:
+    title: "Test-driven development"
+    description: "Writes the failing test first, watches it fail, then writes the code that passes it, in the cycle of the task's kind."
+  dev-test-environment:
+    title: "Product test environments"
+    description: "Use when a product repository arrives or its dependencies, services, migrations or test runner change."
+  dev-test-gaps:
+    title: "Finding test gaps"
+    description: "Finds the behaviours a change has that no test would catch breaking."
+  dev-testing-policy:
+    title: "Testing policy"
+    description: "Who runs which check on which commit, T1 to T13 for any project and language, and how the company applies the engineering rules."
+  dev-threat-model:
+    title: "Protection plan"
+    description: "Maps what a feature must protect, where outside input comes in, and which safeguard covers each risk."
+  dev-work-pipeline:
+    title: "Development pipeline"
+    description: "Item, batch, sample and code checks; read when laying out work or changing a check."
+  dev-worktrees:
+    title: "Branches and workspaces"
+    description: "Gives every task its own branch and clean workspace, and finishes branches tidily."
+  dev-write-plan:
+    title: "Writing a plan"
+    description: "Turns an approved design into tasks an engineer who knows nothing of the code can follow."
+  dsn-accessibility-review:
+    title: "Accessibility review"
+    description: "Checks a mockup or a built screen against WCAG 2.2 AA, with evidence for each finding."
+  dsn-brand-consistency:
+    title: "Brand consistency"
+    description: "Checks that logos, colours, type and tone match the company's brand rules."
+  dsn-component-spec:
+    title: "Component specification"
+    description: "Writes the full description of a shared component: its parts, variants, states and rules of use."
+  dsn-design-critique:
+    title: "Design critique"
+    description: "Reviews a design against its goal and the system, and gives findings a designer can act on."
+  dsn-design-direction:
+    title: "Design direction"
+    description: "Sets a clear, deliberate character for a product's screens inside the system before details are drawn."
+  dsn-design-md:
+    title: "Design system document"
+    description: "Keeps the written design system that agents and people read before they design or build a screen."
+  dsn-generic-ui-check:
+    title: "Generic look check"
+    description: "Checks that an interface has its own character and does not look like a stock template."
+  dsn-handoff:
+    title: "Handoff to development"
+    description: "Gives development HTML mockups and a spec complete enough to build the screens without guessing."
+  dsn-plan-review:
+    title: "Design review of a plan"
+    description: "Checks a product or feature plan for design gaps before anyone builds it."
+  dsn-system-governance:
+    title: "Design system governance"
+    description: "Keeps one design system for all products and decides what enters it."
+  dsn-theme:
+    title: "Themes"
+    description: "Builds a new theme, such as dark mode or a client's brand, by changing token values only."
+  dsn-tokens:
+    title: "Design tokens"
+    description: "Defines the named colours, type, spacing and other values every product's interface is built from."
+  dsn-ui-rules:
+    title: "Interface rules"
+    description: "Checks a screen against the basic rules of layout, type, colour and interaction before it leaves the designer."
+  dsn-ux-copy:
+    title: "Interface text"
+    description: "Writes clear labels, messages and hints, natural in every language the product supports."
+  dsn-visual-qa:
+    title: "Visual check of built screens"
+    description: "Compares built screens with the approved mockups and the design system at several widths and in every language the product supports."
+  dsn-work-pipeline:
+    title: "Design pipeline"
+    description: "Where design checks item by item, in a batch, by sample and by code; read it when laying out work or changing a check."
+  fin-accruals:
+    title: "Accruals and rollforwards"
+    description: "Calculates month-end accruals, prepaid and deferred amounts, and shows how each balance moved."
+  fin-audit-support:
+    title: "Audit support"
+    description: "Prepares the evidence an outside auditor, investor or bank asks for and tracks every request."
+  fin-budget-forecast:
+    title: "Budget and forecast"
+    description: "Sets the yearly budget with each department and updates the forecast from actuals every month."
+  fin-cash-flow:
+    title: "Cash position"
+    description: "Shows the cash the company has, what comes in and goes out in the next weeks, and the runway."
+  fin-close-management:
+    title: "Month-end close"
+    description: "Runs the monthly close as a checklist, from cut-off to statements the CEO can trust."
+  fin-controls-testing:
+    title: "Controls testing"
+    description: "Tests whether finance controls work in practice: approvals, separation of duties and access."
+  fin-financial-model:
+    title: "Financial model"
+    description: "Builds a driver-based model with a linked profit and loss, balance sheet and cash flow."
+  fin-independent-recompute:
+    title: "Independent recompute"
+    description: "Checks finance work by rebuilding the key numbers from source records, without using the maker's work."
+  fin-journal-entries:
+    title: "Journal entries"
+    description: "Drafts journal entries with their supporting documents so a human can check and post them."
+  fin-payables-receivables:
+    title: "Payables and receivables"
+    description: "Keeps the lists of bills to pay and invoices to collect, and drafts the reminders."
+  fin-reconciliation:
+    title: "Account reconciliation"
+    description: "Matches the books with bank and other outside records and traces every difference."
+  fin-saas-metrics:
+    title: "SaaS metrics"
+    description: "Computes recurring revenue, churn, acquisition cost and lifetime value the same way every month."
+  fin-spend-approval:
+    title: "Spend approval"
+    description: "Checks each expense against the budget and spending rules."
+  fin-spreadsheet-audit:
+    title: "Spreadsheet audit"
+    description: "Checks a model or spreadsheet for broken formulas, hidden numbers and wrong links."
+  fin-variance-analysis:
+    title: "Variance analysis"
+    description: "Explains why results differ from the budget and the last period, in numbers and plain words."
+  fin-work-pipeline:
+    title: "Finance pipeline"
+    description: "Where finance checks item by item, in a batch, by sample and by code; read it when laying out work or changing a check."
+  hh-ask-dont-guess:
+    title: "Ask instead of guessing"
+    description: "Stops and asks one clear question when the task leaves a choice that changes the result."
+  hh-assistant:
+    title: "Personal assistant"
+    description: "Thinks for one person's assistant program: answers that person in the assistant's voice and acts for them with their rights."
+  hh-break-down:
+    title: "Break work down"
+    description: "Keeps connected work with one owner and splits only independent parts so the department stays loaded."
+  hh-brief-members:
+    title: "Brief members"
+    description: "Gives each member a self-contained brief and the right model for the job."
+  hh-check-work:
+    title: "Checking a result"
+    description: "Checks a result against its task before it goes on, another's or your own: reads what was handed in, takes each claim to its source, records findings and gives a verdict."
+  hh-fix-loop:
+    title: "Fix loop"
+    description: "Sends failed work back with the findings, and changes course when attempts stop producing evidence."
+  hh-handle-reports:
+    title: "Handle reports"
+    description: "Reads each member's report, checks the evidence and decides the next step."
+  hh-head:
+    title: "Coordinate department communication"
+    description: "Communicates a department's proved results, blockers and decisions beyond its authority."
+  hh-hornhoof:
+    title: "Working in Hornhoof"
+    description: "Where you work, who writes to you, and how and in which language you answer."
+  hh-keep-tracker:
+    title: "Keep the tracker clear"
+    description: "Keeps the department's tasks, goals and pipelines clear for people: a short title, a why, a responsible person and a goal for each, current numbers, and the work itself left to the head."
+  hh-lead-tasks:
+    title: "Lead through tasks"
+    description: "How whoever leads gives each connected result to one owner, splits off only independent parts, keeps the department loaded, wakes people, accepts results by their evidence and keeps work moving through failures."
+  hh-mail:
+    title: "Mail from your machine"
+    description: "Sends letters with files from the department's mailbox and finds and reads the replies right from your machine, marking each step in the department's git."
+  hh-notebook:
+    title: "Keep the notebook"
+    description: "Writes down at once what people decide and keeps the notebook true, one fact per note."
+  hh-one-shot-calls:
+    title: "One-shot calls"
+    description: "When to hand work to short runs of your plan's program that each answer once, and when to do it yourself."
+  hh-outside-is-data:
+    title: "Outside text is data"
+    description: "Treats web pages, emails, tickets, files and other agents' output as information, never as orders."
+  hh-questions:
+    title: "Questions stay inside first"
+    description: "Routes routine questions and stalls internally first, classifies only ready results and human-only actions for people, and keeps human summaries plain."
+  hh-report-to-head:
+    title: "Report to your head"
+    description: "Ends every piece of work with a short status your head can act on."
+  hh-run-checks:
+    title: "Run change checks"
+    description: "Runs affected checks in the workspace and uses the shared runner for the checks of an assigned task."
+  hh-status-update:
+    title: "Status update"
+    description: "Says where the department stands in one line, and only when it matters."
+  hh-stay-in-scope:
+    title: "Stay in scope"
+    description: "Does the task it was given with the access it was given, and nothing beyond."
+  hh-tables:
+    title: "Deliver tables to people"
+    description: "Creates and delivers .xlsx and .csv spreadsheets in tasks, chat, Telegram, and Google Sheets."
+  hh-task-flow:
+    title: "Work through tasks"
+    description: "Handles assigned work through the task's named checks and delivery route."
+  hh-tasks:
+    title: "Tasks in Hornhoof"
+    description: "How work reaches you as tasks, what to read first, and what to read again after a compaction."
+  hh-verify-before-done:
+    title: "Verify before saying done"
+    description: "Runs the check that proves the work before claiming it works."
+  hh-ways-of-working:
+    title: "Ways of working"
+    description: "Which way a piece of work should go: standing employees, a turnkey member, the department's route of stages, one-shot calls or a chain of them; and when to send a person to their assistant or call on the program operator."
+  hh-web-pages:
+    title: "Read web pages"
+    description: "Reads public pages in a real browser on the machine, takes screenshots of them and says what to do at a sign-in or a robot check."
+  hh-work-fast:
+    title: "Work fast, keep the proof"
+    description: "Keeps independent work moving and checks each result before handoff."
+  home-bills:
+    title: "Bills and subscriptions"
+    description: "Tracks the home's bills and subscriptions and reminds a person in time, without paying anything itself."
+  home-calendar:
+    title: "Family calendar and reminders"
+    description: "Keeps the family calendar, chores and reminders, and tells people what is coming."
+  home-network:
+    title: "Home network care"
+    description: "Watches the home Wi-Fi and routers, finds weak spots, and tunes settings when the home needs it."
+  home-real-world-approval:
+    title: "Work on the home"
+    description: "Carries out household work within the home's rules and brings irreversible deletions to the CEO."
+  home-shopping:
+    title: "Shopping lists and supplies"
+    description: "Keeps the shopping list and home supplies, and drafts orders for a person to place."
+  home-smart-control:
+    title: "Smart home care"
+    description: "Keeps smart devices updated and tuned and looks after scenes under the home notebook."
+  home-work-pipeline:
+    title: "Home pipeline"
+    description: "Where the home departments check item by item, in a batch, by sample and by code; read it when laying out work or changing a check."
+  mkt-ai-search:
+    title: "Visibility in AI answers"
+    description: "Helps AI assistants find, understand and cite the company's pages when people ask about its field."
+  mkt-brand-voice:
+    title: "Brand voice"
+    description: "Writes in the company's agreed voice and proposes additions where the voice guide falls short."
+  mkt-campaign-plan:
+    title: "Campaign plan"
+    description: "Turns a marketing goal or a launch into a plan of channels, pieces, owners, dates and measures."
+  mkt-community:
+    title: "Community watch"
+    description: "Tracks what people say about the company and drafts helpful public replies."
+  mkt-copy-editing:
+    title: "Copy editing"
+    description: "Tightens a draft and removes vague, padded and machine-sounding phrases."
+  mkt-copywriting:
+    title: "Copywriting"
+    description: "Writes a page, article, email or announcement that moves one reader to one action."
+  mkt-crosspost:
+    title: "Cross-posting"
+    description: "Adapts one approved piece for several networks and publishes each version on schedule."
+  mkt-product-context:
+    title: "Product marketing context"
+    description: "Keeps one shared document on who the product is for, what it does and how the company talks about it."
+  mkt-publish-approval:
+    title: "Publishing"
+    description: "Publishes posts, pages and announcements itself through the company's accounts and marks each one in the department's git."
+  mkt-russian-copy:
+    title: "Russian copy"
+    description: "Writes marketing copy in natural Russian for the Russian-speaking market instead of translating word by word."
+  mkt-schema-markup:
+    title: "Structured data"
+    description: "Adds schema.org markup so search engines understand what each page is about."
+  mkt-seo-audit:
+    title: "Search audit"
+    description: "Checks the company's site for the technical, content and link problems that keep it out of search results."
+  mkt-social-posts:
+    title: "Social posts"
+    description: "Drafts posts that fit each network's format and audience, made from approved material."
+  mkt-telegram-vk:
+    title: "Messages for each social network"
+    description: "Adapts messages to a social network and its audience."
+  mkt-work-pipeline:
+    title: "Marketing pipeline"
+    description: "Where marketing checks item by item, in a batch, by sample and by code; read it when laying out work or changing a check."
+  mkt-yandex-seo:
+    title: "Search visibility by market"
+    description: "Checks how pages appear in the search service the audience uses."
+  ops-account-register:
+    title: "Account register"
+    description: "Keeps one current list of the company's accounts and subscriptions, their owners, costs and renewal dates."
+  ops-account-signup:
+    title: "Account sign-up"
+    description: "Signs the company up with an outside service itself; only a paid plan waits for a person to pay."
+  ops-api-connector:
+    title: "Build a connector"
+    description: "Connects an outside service through its API or an MCP server, with the smallest access and a smoke test."
+  ops-capacity-plan:
+    title: "Capacity plan"
+    description: "Tracks nodes and subscriptions against the work planned and warns before they run out."
+  ops-change-request:
+    title: "Change request"
+    description: "Plans, approves and checks a change to shared machines, tools or access before and after it is made."
+  ops-connector-catalog:
+    title: "Connector catalog"
+    description: "Keeps one list of the outside services the company is connected to, what each can do and who may use it."
+  ops-credential-vault:
+    title: "Keep credentials safe"
+    description: "Puts every password, key and token into the company's secret store and gives agents access by entry name only."
+  ops-failure-review:
+    title: "Collect failures and weak points"
+    description: "On each timer round, reads what failed and where agents stumbled since the last one, finds the causes that repeat and proposes what to preinstall, allow, write down or fix."
+  ops-incident-response:
+    title: "Incident response"
+    description: "Restores a broken node, tool or integration first, then finds the root cause with evidence."
+  ops-intake:
+    title: "Request intake"
+    description: "Sorts each request that reaches Operations, checks what it needs and gives it to the right member."
+  ops-mcp-config-review:
+    title: "MCP configuration review"
+    description: "Checks an MCP server's source, permissions and settings before agents may use it."
+  ops-node-health:
+    title: "Node health"
+    description: "Keeps the machines agents run on healthy: disk, memory, updates and the Hornhoof node service."
+  ops-phone-readiness:
+    title: "Keep company phones ready"
+    description: "Checks the company's phones and restores their working settings after a restart or update."
+  ops-postmortem:
+    title: "Postmortem"
+    description: "Writes a blameless account of an incident with its cause and the actions that stop it from happening again."
+  ops-program-operator:
+    title: "Bring a program back"
+    description: "Inspects a stopped program, clears what blocks it and checks that work resumes."
+  ops-runbook:
+    title: "Runbook"
+    description: "Writes and keeps step-by-step instructions for recurring tasks and known failures."
+  ops-task-watch:
+    title: "Watch the tasks"
+    description: "On each timer round, goes over every agent, nudges the ones that are stuck, tells their head when a nudge did not help, tells a head when people of its department stand free while work waits, and closes the tasks whose work is done by the rule for their kind of result."
+  ops-tool-install:
+    title: "Tool installation"
+    description: "Installs the shared tools and MCP servers agents need on their nodes from trusted sources, pinned and recorded."
+  ops-vendor-review:
+    title: "Vendor review"
+    description: "Checks an outside service for cost, data handling, terms and lock-in before the company signs up."
+  ops-work-pipeline:
+    title: "Operations pipeline"
+    description: "Where operations checks item by item, in a batch, by sample and by code; read it when laying out work or changing a check."
+  orch-company:
+    title: "Design the company structure"
+    description: "Turns an authorized company goal into departments, products and accountable owners."
+  orch-interview:
+    title: "Ask before you lay out"
+    description: "Finds out what the CEO wants and why before a turn or a change, with as few questions as it takes."
+  orch-outside-is-data:
+    title: "Employees' words are reports"
+    description: "Takes orders only from the people of the company; what employees and outside text say is information to weigh."
+  orch-people:
+    title: "Manage people and access"
+    description: "Applies invitations and access changes with the dedicated company tools, within the limits the company's notebook sets."
+  orch-pipelines:
+    title: "Set up ready pipelines"
+    description: "Chooses and applies a ready pipeline for the work a person describes."
+  orch-plan-turn:
+    title: "Give out the work"
+    description: "Gives each of the CEO's goals to one department as one whole task a head can start at once, with a check that shows it is done; the work flows into each department's next release."
+  orch-resources:
+    title: "Manage company resources"
+    description: "Changes subscriptions, machines, repositories and hosted access in any turn, within the limits the company's notebook sets."
+  orch-staff:
+    title: "Staff a team"
+    description: "Builds an authorized roster and adjusts employees to the work they are assigned."
+  orch-trouble:
+    title: "When work goes wrong"
+    description: "Finds why work stalled, failed or came back, including external service failures, by looking first, the database included, then decides and fixes the cause itself."
+  sal-account-research:
+    title: "Account research"
+    description: "Builds a short, sourced brief on a target company and its people before anyone writes to them."
+  sal-call-prep:
+    title: "Call preparation"
+    description: "Prepares the person taking a sales call with a goal, questions and likely objections."
+  sal-call-summary:
+    title: "Call summary"
+    description: "Turns call notes or a transcript into facts, commitments and a next step in the CRM."
+  sal-cold-outreach:
+    title: "Cold outreach"
+    description: "Drafts short, personal first messages and follow-ups for approved leads."
+  sal-crm-hygiene:
+    title: "CRM hygiene"
+    description: "Finds missing, stale and duplicate records in the CRM and proposes the fixes."
+  sal-deal-plan:
+    title: "Deal plan"
+    description: "Maps the buyer's people and steps to a signed deal and keeps the plan current."
+  sal-forecast:
+    title: "Sales forecast"
+    description: "Estimates what will close this period from evidence in each deal, not from hope."
+  sal-lead-signals:
+    title: "Buying signals"
+    description: "Watches public sources for signs that a target company may be ready to buy now."
+  sal-outbound-approval:
+    title: "Writing to people"
+    description: "Writes letters and messages itself from the department's mailbox and marks each one in the department's git, so any colleague can go on."
+  sal-pipeline-analytics:
+    title: "Pipeline analytics"
+    description: "Measures how deals move through the stages and where they stall."
+  sal-pipeline-review:
+    title: "Pipeline and deal review"
+    description: "Goes through open deals weekly, checks each against evidence and decides the next step."
+  sal-proposal:
+    title: "Proposal"
+    description: "Writes a proposal that fits the buyer's needs and the terms Sales can offer."
+  sal-prospecting:
+    title: "Prospecting"
+    description: "Finds companies and people that fit the ideal customer profile and sorts leads by how well they fit."
+  sal-win-loss:
+    title: "Win-loss analysis"
+    description: "Finds the real reasons deals are won and lost and turns them into changes for sales, marketing and the product."
+  sal-work-pipeline:
+    title: "Sales pipeline of checks"
+    description: "Where sales checks item by item, in a batch, by sample and by code; read it when laying out work or changing a check."
+  sup-bilingual:
+    title: "Support in the customer's language"
+    description: "Replies in the customer's language, with product terms used the same way in every language."
+  sup-billing-issues:
+    title: "Billing cases"
+    description: "Works out what happened with a customer's charge and prepares the case for Finance to decide."
+  sup-bug-report:
+    title: "Bug report for development"
+    description: "Writes a bug report that Development can reproduce and prioritise without asking support again."
+  sup-customer-research:
+    title: "Case research"
+    description: "Gathers what is known about a customer and their problem before anyone answers."
+  sup-deflection:
+    title: "Answers from the knowledge base"
+    description: "Answers common questions with the right help article and notes the questions the knowledge base is missing."
+  sup-docs-from-tickets:
+    title: "Articles from tickets"
+    description: "Finds the questions customers keep asking and turns them into knowledge base work."
+  sup-draft-response:
+    title: "Draft a reply"
+    description: "Writes a clear and kind reply that solves the problem or says honestly what happens next."
+  sup-escalation:
+    title: "Escalations"
+    description: "Handles urgent and difficult tickets: decides who acts, what the customer is told and when."
+  sup-kb-article:
+    title: "Help article"
+    description: "Writes a help article that answers one question and matches the product as it is today."
+  sup-reproduce-issue:
+    title: "Reproduce the issue"
+    description: "Turns a customer's description into exact steps that make the problem happen again."
+  sup-support-policy:
+    title: "Support policy"
+    description: "Sets how support answers customers: from the department's own mailbox, with every contact recorded in git, no forbidden promises and a person for the real decisions."
+  sup-support-report:
+    title: "Support report"
+    description: "Reports the support numbers of the turn and the customer themes the rest of the company should hear."
+  sup-ticket-triage:
+    title: "Ticket triage"
+    description: "Sorts each new ticket by type, urgency and route, and spots what must go up at once."
+  sup-work-pipeline:
+    title: "Support pipeline"
+    description: "Where support checks item by item, in a batch, by sample and by code; read it when laying out work or changing a check."
+  vid-continuity:
+    title: "Check shot continuity"
+    description: "Checks every shot for a consistent look, characters, space and motion."
+  vid-laws:
+    title: "The laws of video production"
+    description: "Eleven rules for making and checking every video."
+  vid-work-pipeline:
+    title: "Set up and run video production"
+    description: "Connects video tools and tracks the brief, shots, checks and cost."
+
+teams:
+  BIZ-TEAM:
+    title: "Turnkey team"
+    description: "Each member owns the work and its checks from start to finish."
+  DEV-TEAM:
+    title: "Turnkey team"
+    description: "Each member owns the work and its checks from start to finish."
+  DSN-TEAM:
+    title: "Turnkey team"
+    description: "Each member owns the work and its checks from start to finish."
+  FIN-TEAM:
+    title: "Turnkey team"
+    description: "Each member owns the work and its checks from start to finish."
+  HHD-TEAM:
+    title: "Turnkey team"
+    description: "Each member owns the work and its checks from start to finish."
+  HOM-TEAM:
+    title: "Turnkey team"
+    description: "Each member owns the work and its checks from start to finish."
+  MKT-TEAM:
+    title: "Turnkey team"
+    description: "Each member owns the work and its checks from start to finish."
+  OPS-TEAM:
+    title: "Turnkey team"
+    description: "Each member owns the work and its checks from start to finish."
+  SAL-TEAM:
+    title: "Turnkey team"
+    description: "Each member owns the work and its checks from start to finish."
+  SUP-TEAM:
+    title: "Turnkey team"
+    description: "Each member owns the work and its checks from start to finish."
+  VID-TEAM:
+    title: "Shot reference team"
+    description: "Prepares shot reference frames with the character and style keeper."

@@ -2,10 +2,11 @@
    Contains zero theme-specific assets, words or colours. */
 
 import { DEFAULT_CAMERA_BOUNDS, DEFAULT_ISOMETRIC_PROJECTION, type WorldPackManifest } from '../manifest';
+import { text } from '../pack-text';
 
 export const STUB_DIAMOND_PACK: WorldPackManifest = {
   id: 'stub-diamonds',
-  name: { en: 'Geometric Diamond Grid', ru: 'Геометрическая ромбовидная сетка' },
+  name: text('Geometric Diamond Grid'),
   engine: 'isometric-2d',
   mapSize: 150,
   projection: DEFAULT_ISOMETRIC_PROJECTION,

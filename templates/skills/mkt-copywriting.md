@@ -1,7 +1,5 @@
 ---
 id: mkt-copywriting
-title: { en: "Copywriting", ru: "Написание текстов" }
-description: { en: "Writes a page, article, email or announcement that moves one reader to one action.", ru: "Пишет страницу, статью, письмо или анонс, которые ведут читателя к одному действию." }
 kind: procedure
 sources: [coreyhaines31/marketingskills, anthropics/knowledge-work-plugins marketing/skills/content-creation/SKILL.md]
 ---
