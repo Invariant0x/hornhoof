@@ -1,5 +1,5 @@
 {
-  "id": "f87c021c-57fc-4ab5-a45a-d0c2df4ff675",
+  "id": "353b0a52-fd19-46a7-9dad-df979faa6d40",
   "prevId": "941e2f62-df6d-447c-9415-d0bf0300fc0f",
   "version": "7",
   "dialect": "postgresql",
@@ -2248,19 +2248,7 @@
           "name": "test_run_number",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false
-        },
-        "ci_state": {
-          "name": "ci_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ci_checks": {
-          "name": "ci_checks",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "reviewer_agent_id": {
           "name": "reviewer_agent_id",
@@ -2442,10 +2430,6 @@
         "autonomous_releases_base_commit_sha": {
           "name": "autonomous_releases_base_commit_sha",
           "value": "\"autonomous_releases\".\"base_commit_sha\" ~ '^[0-9a-f]{40}$'"
-        },
-        "autonomous_releases_proof": {
-          "name": "autonomous_releases_proof",
-          "value": "(\"autonomous_releases\".\"test_run_number\" IS NOT NULL AND \"autonomous_releases\".\"ci_state\" IS NULL AND \"autonomous_releases\".\"ci_checks\" IS NULL) OR (\"autonomous_releases\".\"test_run_number\" IS NULL AND ((\"autonomous_releases\".\"ci_state\" = 'green' AND \"autonomous_releases\".\"ci_checks\" > 0) IS TRUE OR (\"autonomous_releases\".\"ci_state\" = 'none' AND \"autonomous_releases\".\"ci_checks\" IS NULL) IS TRUE))"
         }
       },
       "isRLSEnabled": false
@@ -2734,215 +2718,6 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": true
-    },
-    "public.ci_dispatches": {
-      "name": "ci_dispatches",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "turn_id": {
-          "name": "turn_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "task_id": {
-          "name": "task_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "agent_id": {
-          "name": "agent_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "commit": {
-          "name": "commit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "branch": {
-          "name": "branch",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "workflow": {
-          "name": "workflow",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "run_id": {
-          "name": "run_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'waiting'"
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "release_id": {
-          "name": "release_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "settled_at": {
-          "name": "settled_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "ci_dispatches_waiting": {
-          "name": "ci_dispatches_waiting",
-          "columns": [
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "state = 'waiting'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "ci_dispatches_company_id_companies_id_fk": {
-          "name": "ci_dispatches_company_id_companies_id_fk",
-          "tableFrom": "ci_dispatches",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "ci_dispatches_turn_id_turns_id_fk": {
-          "name": "ci_dispatches_turn_id_turns_id_fk",
-          "tableFrom": "ci_dispatches",
-          "tableTo": "turns",
-          "columnsFrom": [
-            "turn_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "ci_dispatches_task_id_tasks_id_fk": {
-          "name": "ci_dispatches_task_id_tasks_id_fk",
-          "tableFrom": "ci_dispatches",
-          "tableTo": "tasks",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "ci_dispatches_agent_id_agents_id_fk": {
-          "name": "ci_dispatches_agent_id_agents_id_fk",
-          "tableFrom": "ci_dispatches",
-          "tableTo": "agents",
-          "columnsFrom": [
-            "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "ci_dispatches_release_id_turn_releases_id_fk": {
-          "name": "ci_dispatches_release_id_turn_releases_id_fk",
-          "tableFrom": "ci_dispatches",
-          "tableTo": "turn_releases",
-          "columnsFrom": [
-            "release_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "ci_dispatches_company_commit": {
-          "name": "ci_dispatches_company_commit",
-          "nullsNotDistinct": false,
-          "columns": [
-            "company_id",
-            "commit"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "ci_dispatches_commit": {
-          "name": "ci_dispatches_commit",
-          "value": "\"ci_dispatches\".\"commit\" ~ '^[0-9a-f]{40}$'"
-        },
-        "ci_dispatches_state": {
-          "name": "ci_dispatches_state",
-          "value": "\"ci_dispatches\".\"state\" IN ('waiting', 'recorded', 'ended')"
-        },
-        "ci_dispatches_settled": {
-          "name": "ci_dispatches_settled",
-          "value": "(\"ci_dispatches\".\"state\" = 'waiting') = (\"ci_dispatches\".\"settled_at\" IS NULL)"
-        },
-        "ci_dispatches_recorded": {
-          "name": "ci_dispatches_recorded",
-          "value": "(\"ci_dispatches\".\"state\" = 'recorded') = (\"ci_dispatches\".\"release_id\" IS NOT NULL)"
-        }
-      },
-      "isRLSEnabled": false
     },
     "public.companies": {
       "name": "companies",
@@ -3531,12 +3306,6 @@
         },
         "repo_full_test_command": {
           "name": "repo_full_test_command",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "repo_release_workflow": {
-          "name": "repo_release_workflow",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -6127,6 +5896,18 @@
         "copy_name": {
           "name": "copy_name",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "copy_schema_since": {
+          "name": "copy_schema_since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "copy_schema_attempt": {
+          "name": "copy_schema_attempt",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -14363,18 +14144,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "ci_state": {
-          "name": "ci_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ci_checks": {
-          "name": "ci_checks",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "tasks": {
           "name": "tasks",
           "type": "jsonb",
@@ -14548,10 +14317,6 @@
         "turn_releases_approved_once": {
           "name": "turn_releases_approved_once",
           "value": "\"turn_releases\".\"approval_request_id\" IS NULL OR \"turn_releases\".\"autonomous_release_id\" IS NULL"
-        },
-        "turn_releases_ci": {
-          "name": "turn_releases_ci",
-          "value": "(\"turn_releases\".\"ci_state\" IS NULL AND \"turn_releases\".\"ci_checks\" IS NULL) OR (\"turn_releases\".\"run_id\" IS NULL AND ((\"turn_releases\".\"ci_state\" = 'green' AND \"turn_releases\".\"ci_checks\" > 0) IS TRUE OR (\"turn_releases\".\"ci_state\" = 'none' AND \"turn_releases\".\"ci_checks\" IS NULL) IS TRUE))"
         }
       },
       "isRLSEnabled": false

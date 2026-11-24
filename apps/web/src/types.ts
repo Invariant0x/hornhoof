@@ -736,6 +736,9 @@ export type MachineAwayCard = {
   important: { name: string; kind: 'orchestrator' | 'head' }[];
 };
 
+/* A machine whose database copy is still waiting for its schema. */
+export type CopySchemaFailureCard = { id: string; hostname: string; since: string; attempt: number };
+
 /* A machine short of disk space, whose node takes no new checks or builds since: for its owner and the CEO, gone by itself
    once the node has room again or is off the line. */
 export type MachineLowCard = {
@@ -758,6 +761,7 @@ export type Decisions = {
   /* What merges left for the CEO alone. A server from before merges sends none. */
   merges?: MergeDecision[];
   machinesAway?: MachineAwayCard[];
+  copySchemaFailures?: CopySchemaFailureCard[];
   /* A server from before nodes said how full their disk is sends none. */
   machinesLow?: MachineLowCard[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
