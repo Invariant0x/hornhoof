@@ -10,6 +10,7 @@ import { liveSubscription } from '../conversation/placement.js';
 import { onAgent } from '../conversation/line.js';
 import { STOPPED_ON_PURPOSE } from '../conversation/constants.js';
 import { dropOldConnections, serverStarted } from '../nodes/connections.js';
+import { tellOfCopySchemaFailures } from '../copies/schema-failures.js';
 import { tellOfMachinesAway } from '../nodes/machine-away.js';
 import { tellOfMachinesLow } from '../nodes/machine-low.js';
 import { dropOldFiles } from '../tasks/attachments.js';
@@ -138,6 +139,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     checkTestTimes(ctx).catch(failed('checking test run times failed')),
     harnessRound(ctx, now).catch(failed('getting test harnesses to the machines failed')),
     moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
+    tellOfCopySchemaFailures(ctx, now).catch(failed('telling of copy schema failures failed')),
     tellOfMachinesAway(ctx, now).catch(failed('telling of machines away failed')),
     tellOfMachinesLow(ctx).catch(failed('telling of machines short of disk space failed')),
   ]);

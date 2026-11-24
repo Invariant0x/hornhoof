@@ -2037,6 +2037,9 @@ export const ru: Messages = {
       late: (n, what) => `Задача #${n} ждет${what ? ` ${what}` : ''} дольше срока, и решение дошло до вас.`,
       waitsFor: { after: 'другой задачи', review: 'проверки', person: 'ответа человека', run: 'прогона тестов', external: 'внешнего события' },
     },
+    copySchemaFailure: (host: string) => `Копия базы на машине ${host} не запустилась`,
+    copySchemaFailureSince: (attempt: number, at: string) => `База не загрузилась с попытки №${attempt} (${at}).`,
+    copySchemaFailureDo: 'Проверьте, что машина на связи и Docker запущен. Если сбой продолжается, попросите администратора проверить журнал обновлений на этой машине.',
     machineAway: (host: string, owner: string | null) => (owner ? `Машина ${host} (${owner}) не на связи` : `Машина ${host} не на связи`),
     machineAwaySince: (at: string, agents: number) => `Не на связи с ${at}. Агентов на ней: ${agents}.`,
     machineAwayKinds: { orchestrator: 'оркестратор', head: 'руководитель' },
@@ -2060,6 +2063,12 @@ export const ru: Messages = {
     asksApprovalOf: agent => `${agent} просит вас это одобрить`,
     stuck: agent => `${agent} застрял`,
     asksChoice: agent => `${agent} просит выбрать`,
+    asksOther: {
+      question: agent => `${agent} спрашивает`,
+      choice: agent => `${agent} просит выбрать`,
+      approval: agent => `${agent} просит одобрить коммит`,
+      approvalOf: agent => `${agent} просит одобрить`,
+    },
     stuckText: (agent, n) =>
       `${agent} несколько ходов подряд не сдвигал задачу #${n}, и Hornhoof перестал его будить. Напишите, что ему нужно, чтобы продолжить, или отмените задачу, если она больше не нужна.`,
     inDetail: 'Подробнее',
