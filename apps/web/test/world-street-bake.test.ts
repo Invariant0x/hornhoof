@@ -32,7 +32,8 @@ function strip(width: number, rgb: readonly [number, number, number] = [CORE, CO
   return { data, width: w, height: h };
 }
 
-const STRIPS: Readonly<Record<RoadTier, ArtPixels>> = { trail: strip(0.4), dirt: strip(0.8), brick: strip(1), stone: strip(1) };
+/* The four strips every painted pack has; the avenue's is optional. */
+const STRIPS: Readonly<Partial<Record<RoadTier, ArtPixels>>> = { trail: strip(0.4), dirt: strip(0.8), brick: strip(1), stone: strip(1) };
 
 const tiles = (tier: RoadTier, cells: ReadonlyArray<readonly [number, number]>): StreetTile[] => cells.map(([col, row]) => ({ col, row, tier }));
 const ARM_U = [[3, 5], [4, 5], [5, 5], [6, 5], [7, 5]] as const;

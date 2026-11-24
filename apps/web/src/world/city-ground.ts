@@ -27,7 +27,7 @@ function hashLots<T extends LotRect>(sum: number, lots: readonly T[], mark: (lot
   return s;
 }
 
-const TIER_MARK: Readonly<Record<StreetTile['tier'], number>> = { trail: 1, dirt: 2, brick: 3, stone: 4 };
+const TIER_MARK: Readonly<Record<StreetTile['tier'], number>> = { trail: 1, dirt: 2, brick: 3, stone: 4, avenue: 5 };
 
 function hashStreets(city: Pick<CityState, 'roads'>): number {
   let s = 0;
@@ -47,7 +47,7 @@ export function cityGroundKey(state: GroundState | null): string {
 
 /* The city's street tiles for the ground's bake. */
 function streetsOf(city: Pick<CityState, 'roads'>): StreetTile[] {
-  return [...city.roads.values()].map(t => ({ col: t.col, row: t.row, tier: t.tier, bridge: t.bridge }));
+  return [...city.roads.values()].map(t => ({ col: t.col, row: t.row, tier: t.tier, bridge: t.bridge, avenue: t.avenue }));
 }
 
 /* A clearing that also carries the city's streets; one with streets alone where the pack clears no lots. */

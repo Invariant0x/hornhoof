@@ -5,12 +5,15 @@
    line, along it by the tile axis, anchored to the world, so a straight street shows no seam; round a bend its ruts
    follow the turn, and where a street ends with nothing meeting it they run straight on and fade out. A lower street
    runs into a higher one's edge, not across its middle, so the higher keeps its look. A street runs into the bridge up
-   to the water's tile edge, under the bridge's first piece. Knows no world: the strips come from the pack. */
+   to the water's tile edge, under the bridge's first piece. An avenue (#2003) is one run along the middle line between
+   its two rows of tiles, in the avenue's strip, its ends round within its first and last tiles; a street meeting it
+   ends at its edge, and a pack with no avenue strip shows its tiles as stone streets. Knows no world: the strips come
+   from the pack. */
 
-import type { RoadTier } from './city-layout';
+import type { AvenueLine, RoadTier } from './city-layout';
 import type { ArtPixels } from './terrain-art';
 
-export type StreetTile = Readonly<{ col: number; row: number; tier: RoadTier; bridge?: boolean }>;
+export type StreetTile = Readonly<{ col: number; row: number; tier: RoadTier; bridge?: boolean; avenue?: AvenueLine }>;
 export type StreetStrips = Readonly<Partial<Record<RoadTier, ArtPixels>>>;
 
 export type StreetField = Readonly<{
@@ -18,8 +21,9 @@ export type StreetField = Readonly<{
   at: (u: number, v: number, out: number[]) => void;
 }>;
 
+/* The tiers every painted pack has; the avenue's strip may be missing. */
 const TIERS: readonly RoadTier[] = ['trail', 'dirt', 'brick', 'stone'];
-const TIER_ORDER: Readonly<Record<RoadTier, number>> = { trail: 0, dirt: 1, brick: 2, stone: 3 };
+const TIER_ORDER: Readonly<Record<RoadTier, number>> = { trail: 0, dirt: 1, brick: 2, stone: 3, avenue: 4 };
 /* Strip columns along the second axis start elsewhere, so crossing streets do not show the same pebble twice. */
 const V_AXIS_TEXEL_OFFSET = 311;
 
@@ -54,23 +58,53 @@ function metFromSide(at: StreetsAt, col: number, row: number, axis: 'u' | 'v'): 
   return at.has(keyOf(col + dc, row + dr)) || at.has(keyOf(col - dc, row - dr));
 }
 
+/* The middle line of the avenue a tile is on, across its axis. */
+const avenueMiddle = (t: StreetTile, line: AvenueLine): number => (line.axis === 'u' ? t.row : t.col) + 0.5 + line.side / 2;
+
+/* Whether two tiles lie on one avenue: along one axis, about one middle line. */
+function sameAvenue(a: StreetTile, b: StreetTile | undefined): boolean {
+  return Boolean(a.avenue && b?.avenue && a.avenue.axis === b.avenue.axis && avenueMiddle(a, a.avenue) === avenueMiddle(b, b.avenue));
+}
+
+/* How far from a tile's centre its street's edge lies toward a neighbour along `axis`: half its width; on an avenue,
+   its outer side across it, or where its round end crosses the tile's line along it. */
+function edgeOf(t: StreetTile, axis: 'u' | 'v', halfOf: (tier: RoadTier) => number): number {
+  if (!t.avenue) return halfOf(t.tier);
+  const half = halfOf('avenue');
+  if (axis !== t.avenue.axis) return half - 0.5;
+  return 0.5 - half + Math.sqrt(Math.max(0, half * half - 0.25));
+}
+
 /* Where the piece from a street tile toward its neighbour starts and ends, in tiles from the tile's centre: centre to
    centre between streets of one tier; at a higher street's edge where it meets one, so the lower street runs into the
    higher one's edge and not across its middle; to the edge of a bridge tile. */
-function pieceSpan(t: StreetTile, next: StreetTile, halfOf: (tier: RoadTier) => number): readonly [number, number] {
+function pieceSpan(t: StreetTile, next: StreetTile, axis: 'u' | 'v', halfOf: (tier: RoadTier) => number): readonly [number, number] {
   if (next.bridge) return [0, 0.5];
   const step = TIER_ORDER[t.tier] - TIER_ORDER[next.tier];
-  if (step > 0) return [halfOf(t.tier), 1];
-  return step < 0 ? [0, 1 - halfOf(next.tier)] : [0, 1];
+  if (step > 0) return [edgeOf(t, axis, halfOf), 1];
+  return step < 0 ? [0, 1 - edgeOf(next, axis, halfOf)] : [0, 1];
 }
 
-/* The piece from a street tile toward its neighbour, under the lower tier of the two. Between two streets only the
-   one on the lower side lays it. */
+/* Whether a street tile lays the piece toward a neighbour: between two streets only the one on the lower side does,
+   and between avenue tiles none, the avenues lay their own; toward the bridge the street always does. */
+function laysPieceToward(t: StreetTile, next: StreetTile, side: number): boolean {
+  if (t.avenue && next.avenue) return false;
+  return Boolean(next.bridge) || side > 0;
+}
+
+/* The tier of the piece between two street tiles: the lower of the two; into the bridge the street's own, an avenue
+   narrowing to stone. */
+function pieceTier(t: StreetTile, next: StreetTile): RoadTier {
+  if (!next.bridge) return lower(t.tier, next.tier);
+  return t.avenue ? 'stone' : t.tier;
+}
+
+/* The piece from a street tile toward its neighbour. */
 function pieceToward(t: StreetTile, next: StreetTile, n: (typeof NEIGHBOURS)[number], halfOf: (tier: RoadTier) => number, at: StreetsAt): TierPiece | null {
-  if (!next.bridge && n.side < 0) return null;
-  const tier = next.bridge ? t.tier : lower(t.tier, next.tier);
+  if (!laysPieceToward(t, next, n.side)) return null;
+  const tier = pieceTier(t, next);
   const [centre, across] = n.axis === 'u' ? [t.col + 0.5, t.row + 0.5] : [t.row + 0.5, t.col + 0.5];
-  const [start, end] = pieceSpan(t, next, halfOf);
+  const [start, end] = pieceSpan(t, next, n.axis, halfOf);
   const along = centre + n.side * start;
   const far = centre + n.side * end;
   const openHere = !metFromSide(at, t.col, t.row, n.axis);
@@ -79,10 +113,23 @@ function pieceToward(t: StreetTile, next: StreetTile, n: (typeof NEIGHBOURS)[num
   return { tier, piece: { axis: n.axis, across, from: Math.min(along, far), to: Math.max(along, far), half: halfOf(tier), openFrom, openTo } };
 }
 
+/* The piece an avenue tile lays along its avenue's middle line: over the whole tile where the avenue goes on, and
+   where it stops, short of the tile's edge by so much that its round end reaches just that edge. */
+function avenuePiece(t: StreetTile, line: AvenueLine, at: StreetsAt, half: number): TierPiece {
+  const [dc, dr] = line.axis === 'u' ? [1, 0] : [0, 1];
+  const centre = (line.axis === 'u' ? t.col : t.row) + 0.5;
+  const back = sameAvenue(t, at.get(keyOf(t.col - dc, t.row - dr)));
+  const on = sameAvenue(t, at.get(keyOf(t.col + dc, t.row + dr)));
+  const from = back ? centre - 0.5 : centre - 0.5 + half;
+  const to = on ? centre + 0.5 : centre + 0.5 - half;
+  const [a, b] = from <= to ? [from, to] : [centre, centre];
+  return { tier: 'avenue', piece: { axis: line.axis, across: avenueMiddle(t, line), from: a, to: b, half, openFrom: !back, openTo: !on } };
+}
+
 /* The pieces one street tile lays; a tile with no neighbour is a round patch of its own. */
 function piecesOfTile(t: StreetTile, at: StreetsAt, halfOf: (tier: RoadTier) => number): TierPiece[] {
-  const out: TierPiece[] = [];
-  let linked = false;
+  const out: TierPiece[] = t.avenue ? [avenuePiece(t, t.avenue, at, halfOf('avenue'))] : [];
+  let linked = Boolean(t.avenue);
   for (const n of NEIGHBOURS) {
     const next = at.get(keyOf(t.col + n.dc, t.row + n.dr));
     if (!next) continue;
@@ -144,10 +191,15 @@ function signedDistance(p: Piece, u: number, v: number): number {
   return Math.sign(side || 1) * Math.hypot(past, side);
 }
 
+/* The tiles as the pack's strips paint them: an avenue's as stone streets when the pack has no avenue strip. */
+function paintedTiles(tiles: readonly StreetTile[], strips: StreetStrips): readonly StreetTile[] {
+  return tiles.map(t => (t.tier === 'avenue' && !(strips.avenue && t.avenue) ? { col: t.col, row: t.row, tier: 'stone', bridge: t.bridge } : t));
+}
+
 /* The runs that have a strip, each with its strip. */
 function fieldPieces(tiles: readonly StreetTile[], strips: StreetStrips, texelsPerTile: number): FieldPiece[] {
   const halfOf = (tier: RoadTier): number => (strips[tier]?.height ?? 0) / texelsPerTile / 2;
-  return piecesOf(tiles, halfOf).flatMap(({ tier, piece }) => {
+  return piecesOf(paintedTiles(tiles, strips), halfOf).flatMap(({ tier, piece }) => {
     const strip = strips[tier];
     return strip ? [{ ...piece, strip }] : [];
   });

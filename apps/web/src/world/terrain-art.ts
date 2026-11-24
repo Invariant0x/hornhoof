@@ -27,7 +27,7 @@ export type LoadedTerrainArt = Readonly<{
   pathStrip: ArtPixels | null;
   /* The city's street strips by tier (terrainArt.roads), baked into the ground (street-field.ts); a tier without one
      keeps its street tiles drawn by the city. */
-  roads?: Readonly<Partial<Record<'trail' | 'dirt' | 'brick' | 'stone', ArtPixels>>>;
+  roads?: Readonly<Partial<Record<'trail' | 'dirt' | 'brick' | 'stone' | 'avenue', ArtPixels>>>;
   /* Plant kind id -> its loaded variants, in the order the pack lists them. */
   plants: ReadonlyMap<string, readonly PlantArtImage[]>;
 }>;
@@ -131,7 +131,7 @@ export function loadTerrainArt(pack: WorldPackManifest): Promise<LoadedTerrainAr
   return job;
 }
 
-type StreetStripPixels = Partial<Record<'trail' | 'dirt' | 'brick' | 'stone', ArtPixels>>;
+type StreetStripPixels = Partial<Record<'trail' | 'dirt' | 'brick' | 'stone' | 'avenue', ArtPixels>>;
 
 /* The street strips the pack names, by tier; a strip that fails to load is left out. */
 export async function loadRoadStrips(

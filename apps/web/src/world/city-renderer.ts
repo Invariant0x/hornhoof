@@ -123,6 +123,7 @@ const ROAD_COLORS: Readonly<Record<RoadTier, { fill: number; stroke: number; alp
   dirt: { fill: 0xc2a376, stroke: 0x92754d, alpha: 0.78 },
   brick: { fill: 0xbd8861, stroke: 0x7f563a, alpha: 0.88 },
   stone: { fill: 0xc8c2b6, stroke: 0x80796d, alpha: 0.93 },
+  avenue: { fill: 0xd8d3c8, stroke: 0x8a8376, alpha: 0.96 },
 };
 
 type IsoQuad = {

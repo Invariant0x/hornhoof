@@ -1,6 +1,6 @@
 /* Stage 3 organic city growth engine: pack-agnostic role-based placement from center,
    standard 1x1..6x6 building footprints with in-place growth by level/stage, Order/Chaos knob,
-   automatic A* road pathfinding with 4-tier traffic upgrades, reserved growth lots,
+   automatic A* road pathfinding with traffic upgrades (trail, dirt, brick, stone, and the 2-tile avenue, road-traffic.ts), reserved growth lots,
    expanding outer city wall rings (old walls convert to ring streets), excavation support for
    subterranean worlds (city growth carves halls and tunnels out of rock), urban densification,
    server-persistable stable snapshots and staged relocation by explicit acceptance.
@@ -28,7 +28,15 @@ export const ALL_BUILDING_KINDS: readonly BuildingKind[] = [
   'flophouse',
 ];
 
-export type RoadTier = 'trail' | 'dirt' | 'brick' | 'stone';
+export type RoadTier = 'trail' | 'dirt' | 'brick' | 'stone' | 'avenue';
+
+/* The rank of each road kind: a road only ever rises to a higher one. */
+export const ROAD_TIER_RANK: Readonly<Record<RoadTier, number>> = { trail: 0, dirt: 1, brick: 2, stone: 3, avenue: 4 };
+
+/* The line an avenue tile lies on (#2003): an avenue is two tiles wide, a run of tiles along `axis` ('u' along col,
+   'v' along row) and its lane beside it, and its middle line runs between them, half a tile toward `side` across the
+   axis from each tile's centre. */
+export type AvenueLine = Readonly<{ axis: 'u' | 'v'; side: -1 | 1 }>;
 
 export type LotRect = Readonly<{
   col: number;
@@ -83,6 +91,8 @@ export type RoadTile = {
   bridge: boolean;
   wasOldWall: boolean;
   grandAvenue: boolean;
+  /* Set on the tiles of an avenue, whose tier is 'avenue'. */
+  avenue?: AvenueLine;
 };
 
 export type RelocationStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
@@ -244,6 +254,11 @@ export function parseTileKey(key: string): TileCoord {
     col: Number.parseInt(key.slice(0, comma), 10),
     row: Number.parseInt(key.slice(comma + 1), 10),
   };
+}
+
+/* Raises a road to a kind when that kind is higher than the one it has. */
+export function raiseRoadTier(road: RoadTile, tier: RoadTier): void {
+  if (ROAD_TIER_RANK[tier] > ROAD_TIER_RANK[road.tier]) road.tier = tier;
 }
 
 export function roadTierForTraffic(traffic: number): RoadTier {
@@ -426,7 +441,7 @@ function clearBuildingOccupancy(city: CityState, b: CityBuilding): void {
   }
 }
 
-function setRoadTile(
+export function setRoadTile(
   city: CityState,
   map: GeneratedWorldMap,
   col: number,
@@ -440,19 +455,16 @@ function setRoadTile(
   const delta = options?.trafficDelta ?? 1;
   if (existing) {
     existing.traffic += delta;
-    const computed = roadTierForTraffic(existing.traffic);
-    const tierOrder: Record<RoadTier, number> = { trail: 0, dirt: 1, brick: 2, stone: 3 };
-    if (tierOrder[computed] > tierOrder[existing.tier]) existing.tier = computed;
-    if (options?.minTier && tierOrder[options.minTier] > tierOrder[existing.tier]) existing.tier = options.minTier;
+    raiseRoadTier(existing, roadTierForTraffic(existing.traffic));
+    if (options?.minTier) raiseRoadTier(existing, options.minTier);
     if (options?.grandAvenue) existing.grandAvenue = true;
     if (options?.wasOldWall) existing.wasOldWall = true;
     return existing;
   }
 
   let tier = roadTierForTraffic(delta);
-  const tierOrder: Record<RoadTier, number> = { trail: 0, dirt: 1, brick: 2, stone: 3 };
-  if (options?.minTier && tierOrder[options.minTier] > tierOrder[tier]) tier = options.minTier;
-  if (options?.grandAvenue && tierOrder.brick > tierOrder[tier]) tier = 'brick';
+  if (options?.minTier && ROAD_TIER_RANK[options.minTier] > ROAD_TIER_RANK[tier]) tier = options.minTier;
+  if (options?.grandAvenue && ROAD_TIER_RANK.brick > ROAD_TIER_RANK[tier]) tier = 'brick';
 
   const tile: RoadTile = {
     col,
@@ -507,7 +519,7 @@ export function canPlaceFootprint(
   return true;
 }
 
-function canWalkRoad(
+export function canWalkRoad(
   city: CityState,
   map: GeneratedWorldMap,
   col: number,
@@ -1483,11 +1495,11 @@ export function recordTrafficRoute(
     const b = city.roads.get(goalKey);
     if (a) {
       a.traffic += weight;
-      a.tier = roadTierForTraffic(a.traffic);
+      raiseRoadTier(a, roadTierForTraffic(a.traffic));
     }
     if (b) {
       b.traffic += weight;
-      b.tier = roadTierForTraffic(b.traffic);
+      raiseRoadTier(b, roadTierForTraffic(b.traffic));
     }
     return 2;
   }
@@ -1498,9 +1510,7 @@ export function recordTrafficRoute(
     const road = city.roads.get(k);
     if (road) {
       road.traffic += weight;
-      const nextTier = roadTierForTraffic(road.traffic);
-      const rank: Record<RoadTier, number> = { trail: 0, dirt: 1, brick: 2, stone: 3 };
-      if (rank[nextTier] > rank[road.tier]) road.tier = nextTier;
+      raiseRoadTier(road, roadTierForTraffic(road.traffic));
       count++;
     }
     const p = parent.get(k);

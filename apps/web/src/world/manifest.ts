@@ -258,8 +258,9 @@ export type TerrainArtSpec = Readonly<{
   /* Strip for worn paths: columns along the path (wrapping), rows across it, transparent at both long edges. */
   pathStrip?: string;
   /* City streets by tier, strips like pathStrip: texelsPerTile columns per tile, a street as wide as the strip is tall.
-     With all four the city paints its streets on the ground instead of drawing street tiles. */
-  roads?: Readonly<Partial<Record<'trail' | 'dirt' | 'brick' | 'stone', string>>>;
+     With the first four the city paints its streets on the ground instead of drawing street tiles; the 2-tile avenue's
+     strip is optional, and without it an avenue shows as two stone streets side by side. */
+  roads?: Readonly<Partial<Record<'trail' | 'dirt' | 'brick' | 'stone' | 'avenue', string>>>;
 }>;
 
 /* Ground under a building's lot: the city clears it from the first construction stage, eases its edge into the land

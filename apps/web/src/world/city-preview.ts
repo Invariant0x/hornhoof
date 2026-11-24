@@ -23,6 +23,7 @@ const ROAD_COLORS: Readonly<Record<RoadTier, string>> = {
   dirt: '#7D6342',
   brick: '#B56B45',
   stone: '#DDE3EB',
+  avenue: '#EEF1F5',
 };
 
 function districtColor(districtId?: string): string {
@@ -74,7 +75,7 @@ export function renderCitySnapshot(
     } else {
       ctx.fillStyle = ROAD_COLORS[road.tier];
       ctx.fillRect(x, y, scale, scale);
-      if (road.grandAvenue || road.tier === 'stone') {
+      if (road.grandAvenue || road.tier === 'stone' || road.tier === 'avenue') {
         ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
         ctx.fillRect(x + scale * 0.2, y + scale * 0.2, scale * 0.6, scale * 0.6);
       }

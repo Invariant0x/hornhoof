@@ -51,6 +51,7 @@ import {
 import type { PickableObject, TileCoord } from './coords';
 import { vacatedLotsFromRelocations } from './lot-clearing';
 import type { WorldPackManifest } from './manifest';
+import { growRoadsWithTraffic, movementTraffic, recordTrips } from './road-traffic';
 import type { GeneratedWorldMap } from './terrain-engine';
 
 export type LiveCitySummary = Readonly<{
@@ -585,6 +586,9 @@ export function syncLiveSnapshotToCity(
 
   /* 8b. The lots moved buildings left stay cleared ground until built on again or grown back (#1958). */
   city.vacatedLots = vacatedLotsFromRelocations(snapshot.relocations, city.buildings, pack.lotGround, Date.parse(snapshot.generatedAt));
+
+  /* 8c. Roads grow with the trips the company's records make, and the busiest stretches widen into avenues (#2003). */
+  growRoadsWithTraffic(city, map, movementTraffic(city, recordTrips(city, snapshot)));
 
   /* 9. Outer wall: respects pack.outerWallMode ('ring' vs 'none'). */
   if (isActive) {

@@ -18,6 +18,7 @@ archives `egypt-ground-painted.tar.gz` and `egypt-veg-painted.tar.gz` attached t
 | Edge masks, 1024 x 256 grey | `ground/edges/plain_bank.png`, `bank_fertile.png`, `plain_dune.png`, `plain_ridge.png`, `river_bank.png` | painted edges between grounds and at the waterline (`terrainArt.edges`, `shoreEdge`) |
 | Water layers | `ground/river_bed.png`, `river_ripples.png`, `river.png` | the animated water (bed relief and two drifting ripple layers over the base colour) and irrigation ditches |
 | Path strip | `roads/trail.png` | worn paths over the sand (`terrainArt.pathStrip`) |
+| Street strips, 1024 long, as tall as the street is wide | `roads/trail.png`, `dirt.png`, `brick.png`, `stone.png`, `avenue.png` | the city's streets by tier, baked into the ground, and the 2-tile avenue the busiest stretches widen into (`terrainArt.roads`, #1985, #2003) |
 | Ground details | `decals/grass_tuft_*.png`, `pebbles_*.png`, `sherds_01.png`, `cracks_*.png` | flat tufts and pebbles (`meadow_tuft`, `sandstone` in `plants.ts`) |
 | Plants with wind weight maps and passports | `veg/<name>.png`, `veg/<name>_w.png`, `veg/<name>.json`: date palms, doum palms, papyrus, reed, green and dry bushes, desert thorn, tamarisk, dry grass, acacia, sycamore | every plant kind in `plants.ts` (`art`) |
 
