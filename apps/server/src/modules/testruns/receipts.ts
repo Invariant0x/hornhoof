@@ -1,5 +1,5 @@
 import { runsInClass, TestExecution, TestEnvironmentReceipt, type EnvironmentSnapshot, type RuntimeCapability } from '@hornhoof/protocol';
-import type { TestEnvironmentSelection, testParts } from '../../db/schema.js';
+import type { TestEnvironmentSelection } from '../../db/schema.js';
 
 function receiptIdentity(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt): boolean {
   return receipt.commitSha === snapshot.description.commitSha && receipt.manifestHash === snapshot.description.manifestHash;

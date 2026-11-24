@@ -27,22 +27,23 @@ export async function readCiOf(ctx: Reading, repo: RepoAddress, commit: string):
 
 /* A check's link, where the host gave a plain one. */
 const linked = (url: string | null) => (url ? ` (${url})` : '');
+const checksOf = (count: number): string => `${count} ${count === 1 ? 'check' : 'checks'}`;
 
 /* The answer in a sentence, for an approval card and for whoever is told why a release waits. */
 export function ciLine(ci: CiAt): string {
   switch (ci.state) {
-    case 'green': return `The repository's CI is green on this commit: ${ci.checks} ${ci.checks === 1 ? 'check' : 'checks'} passed.`;
+    case 'green': return `The repository's CI is green on this commit: ${checksOf(ci.checks)} passed.`;
     case 'none': return 'The repository has no CI.';
     case 'red': return `The repository's CI is red on this commit: check ${ci.check} ended with ${ci.outcome}${linked(ci.url)}.`;
     case 'pending': return `The repository's CI has not finished on this commit: ${ci.check} is ${ci.outcome}${linked(ci.url)}.`;
-    case 'idle': return `The repository's CI ran ${ci.checks} ${ci.checks === 1 ? 'check' : 'checks'} on this commit and none succeeded: every one was skipped or neutral.`;
+    case 'idle': return `The repository's CI ran ${checksOf(ci.checks)} on this commit and none succeeded: every one was skipped or neutral.`;
     case 'limited': return new GitHubRateLimited(ci.limit).message;
     case 'unread': return `The repository's CI could not be read now: ${ci.why}.`;
   }
 }
 
 /* The result in a few words, for the log and the note of an approval that went without a card. */
-export const ciWords = (ci: CiResult): string => (ci.state === 'green' ? `the repository's CI was green with ${ci.checks} ${ci.checks === 1 ? 'check' : 'checks'}` : 'the repository has no CI');
+export const ciWords = (ci: CiResult): string => (ci.state === 'green' ? `the repository's CI was green with ${checksOf(ci.checks)}` : 'the repository has no CI');
 
 /* The result a release or an approval may rest on, or null where the answer lets none. */
 export function ciResult(ci: CiAt): CiResult | null {
