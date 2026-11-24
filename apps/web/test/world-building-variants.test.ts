@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { declaredArtFiles, resolveBuildingArt, validateArtIndex, variantStepOf, type ArtIndex, type ArtIndexEntry } from '../src/world/art';
 import { chooseBuildingVariants, cityBuildingVariants } from '../src/world/building-variants';
 import type { CityBuilding } from '../src/world/city-layout';
+import { createConstructionSimulation, startBuildingConstruction, startBuildingDemolition, type BuildingConstructionState } from '../src/world/construction';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
 
 /* A home on a 4x4 lot at (col, row), its house standing at the lot's front corner. */
@@ -100,7 +101,8 @@ describe('Variant folders in the art (#1975)', () => {
     const hutComplete = files.filter(f => /^buildings\/house\/hut\/v\d\d\/complete\.png$/.test(f.path));
     expect(hutComplete.map(f => f.path)).toHaveLength(15);
     expect(hutComplete.filter(f => f.required).map(f => f.path)).toEqual(['buildings/house/hut/v01/complete.png']);
-    expect(files.some(f => f.path === 'buildings/house/hut/complete.png')).toBe(false);
+    /* The step folder itself stands for v01 (order v3: a step with no variant folders keeps its pictures there). */
+    expect(files.find(f => f.path === 'buildings/house/hut/complete.png')?.required).toBe(false);
     expect(variantStepOf(EGYPT_WORLD_PACK, hut)).toEqual({ key: 'house/hut', count: 15 });
     expect(variantStepOf(EGYPT_WORLD_PACK, { ...hut, kind: 'district_hub', stage: 1 })).toBeNull();
   });
@@ -130,5 +132,94 @@ describe('Variant folders in the art (#1975)', () => {
     expect(path(resolveBuildingArt(EGYPT_WORLD_PACK, index(['v01', 'v03']), hut, null, { variant: 13 }))).toBe('buildings/house/hut/v01/complete.png');
     expect(path(resolveBuildingArt(EGYPT_WORLD_PACK, index(['v01']), hut, null))).toBe('buildings/house/hut/v01/complete.png');
     expect(resolveBuildingArt(EGYPT_WORLD_PACK, index([]), hut, null, { variant: 0 })).toBeNull();
+  });
+
+  /* Order v3: a step with no variant folders keeps its pictures directly in the step folder. Delivered that way, the
+     set is the step's v01, so art delivered before the variants came and any folder laid out flat still draws (#1983). */
+  const flat = (more: Record<string, ArtIndexEntry> = {}): ArtIndex => ({
+    contract: 2,
+    pack: 'egypt',
+    files: { 'buildings/house/hut/complete.png': picture, ...more },
+  });
+
+  it('draws a step delivered flat, with no variant folders, as its v01 for every home', () => {
+    const path = (art: ReturnType<typeof resolveBuildingArt>) => art?.layers[0]?.path ?? null;
+    for (const variant of [0, 4, 14]) {
+      expect(path(resolveBuildingArt(EGYPT_WORLD_PACK, flat(), hut, null, { variant })), `variant ${variant}`).toBe('buildings/house/hut/complete.png');
+    }
+    /* A v01 folder of its own wins over the flat set. */
+    expect(path(resolveBuildingArt(EGYPT_WORLD_PACK, flat({ 'buildings/house/hut/v01/complete.png': picture }), hut, null, { variant: 3 }))).toBe(
+      'buildings/house/hut/v01/complete.png',
+    );
+  });
+
+  /* Design, 24.11 (company note #107): a variant with stages not drawn yet (painted v07, v10, v15, mudbrick v13-v15)
+     stands only as a finished house. A house under construction takes a variant with every stage drawn, and keeps
+     it once built; a house that stood finished keeps its own look while it is torn down. */
+  describe('construction takes only a variant with every stage drawn', () => {
+    const STAGES = ['low_walls_open', 'full_walls', 'roof_beams', 'roof'] as const;
+    const full = (v: string): Record<string, ArtIndexEntry> =>
+      Object.fromEntries(['complete', ...STAGES].map(name => [`buildings/house/hut/${v}/${name}.png`, picture]));
+    const finishedOnly = (v: string): Record<string, ArtIndexEntry> => ({ [`buildings/house/hut/${v}/complete.png`]: picture });
+    const art = (...sets: Record<string, ArtIndexEntry>[]): ArtIndex => ({ contract: 2, pack: 'egypt', files: Object.assign({}, ...sets) });
+    const line = { ...hut, maxStage: EGYPT_WORLD_PACK.stageCounts.construction };
+    const building = (stage: number): BuildingConstructionState =>
+      startBuildingConstruction(createConstructionSimulation(EGYPT_WORLD_PACK), line, line.maxStage, stage);
+    const folderOf = (files: ArtIndex, job: BuildingConstructionState | null, variant: number) =>
+      resolveBuildingArt(EGYPT_WORLD_PACK, files, line, job, { variant })?.layers[0]?.path.split('/').slice(0, 4).join('/') ?? null;
+
+    it('builds in the next variant with every stage, from the one chosen, and keeps it once finished', () => {
+      const files = art(finishedOnly('v01'), full('v02'), finishedOnly('v03'), full('v04'));
+      expect(folderOf(files, null, 0), 'finished, a finished-only variant stands').toBe('buildings/house/hut/v01');
+      expect(folderOf(files, building(5), 0)).toBe('buildings/house/hut/v02');
+      expect(folderOf(files, building(5), 2)).toBe('buildings/house/hut/v04');
+      expect(folderOf(files, building(5), 3), 'a full variant chosen is kept').toBe('buildings/house/hut/v04');
+      expect(resolveBuildingArt(EGYPT_WORLD_PACK, files, line, building(5), { variant: 0 })?.layers[0]?.path).toBe('buildings/house/hut/v02/full_walls.png');
+      const done = building(line.maxStage);
+      expect(done.phase).toBe('complete');
+      expect(folderOf(files, done, 0), 'built, it keeps the variant it was built in').toBe('buildings/house/hut/v02');
+    });
+
+    it('counts a stage drawn as its stage_NN picture, and leaves the optional upgraded and annex out', () => {
+      const numbered = { ...finishedOnly('v02'), ...Object.fromEntries(['03', '05', '06', '07'].map(n => [`buildings/house/hut/v02/stage_${n}.png`, picture])) };
+      expect(folderOf(art(finishedOnly('v01'), numbered), building(5), 0)).toBe('buildings/house/hut/v02');
+      const oneStageShort = { ...full('v02') };
+      delete oneStageShort['buildings/house/hut/v02/roof.png'];
+      expect(folderOf(art(finishedOnly('v01'), oneStageShort, full('v03')), building(5), 0), 'v02 lacks its roof stage').toBe('buildings/house/hut/v03');
+      /* A step delivered flat, with no variant folders, is its v01 and counts the same way. */
+      const flatFull = Object.fromEntries(['complete', ...STAGES].map(name => [`buildings/house/hut/${name}.png`, picture]));
+      expect(resolveBuildingArt(EGYPT_WORLD_PACK, art(flatFull, finishedOnly('v04')), line, building(5), { variant: 3 })?.layers[0]?.path).toBe(
+        'buildings/house/hut/full_walls.png',
+      );
+    });
+
+    it('keeps the look a finished house stood in while it is torn down', () => {
+      const files = art(finishedOnly('v01'), full('v02'));
+      const tearing = startBuildingDemolition(createConstructionSimulation(EGYPT_WORLD_PACK), { ...line, stage: line.maxStage });
+      expect(folderOf(files, tearing, 0)).toBe('buildings/house/hut/v01');
+    });
+
+    it('builds in the chosen variant, nearest drawn picture first, when no variant has every stage', () => {
+      expect(folderOf(art(finishedOnly('v01'), finishedOnly('v02')), building(5), 1)).toBe('buildings/house/hut/v02');
+      expect(resolveBuildingArt(EGYPT_WORLD_PACK, art(finishedOnly('v01')), line, building(5), { variant: 0 })?.layers[0]?.path).toBe(
+        'buildings/house/hut/v01/complete.png',
+      );
+    });
+  });
+
+  it('accepts a flat step folder in the art check as the step’s v01: declared, checked, and v01 not missing', () => {
+    const report = validateArtIndex(EGYPT_WORLD_PACK, flat());
+    expect(report.warnings.filter(w => w.startsWith('buildings/house/hut/'))).toEqual([]);
+    expect(report.missingRequired).not.toContain('buildings/house/hut/v01/complete.png');
+    expect(validateArtIndex(EGYPT_WORLD_PACK, index([])).missingRequired).toContain('buildings/house/hut/v01/complete.png');
+    /* Checked against the step's footprint like the v01 it stands for. */
+    const wide: ArtIndexEntry = {
+      w: 720,
+      h: 760,
+      passport: { groundAnchor: { x: 360, y: 559 }, corners: { top: { x: 360, y: 379 }, right: { x: 720, y: 559 }, bottom: { x: 360, y: 739 }, left: { x: 0, y: 559 } } },
+    };
+    expect(validateArtIndex(EGYPT_WORLD_PACK, { ...flat(), files: { 'buildings/house/hut/complete.png': wide } }).errors).toContain(
+      'buildings/house/hut/complete.png: diamond width 720 px does not match footprint 2x2 (480 px)',
+    );
   });
 });

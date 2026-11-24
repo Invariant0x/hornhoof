@@ -380,6 +380,39 @@ describe('a live program its queue waits behind', () => {
     expect((await c.job(turn)).status).toBe('running');
   });
 
+  it('closes a running turn and starts the next queued turn when two views show an idle empty input line with job=null', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const next = await c.message(c.hana.id, 'The branch is ready.');
+    const screen = screens(c, turn);
+    const lastSign = Date.now();
+    screen.show({ jobId: null, state: 'working', tool: 'call_mcp_tool', input: 'empty' });
+    c.later(2 * MIN);
+    await c.pulse(c.node, turn, 'tool', lastSign, lastSign);
+    await moveStalledQueues(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('running');
+    c.later(2 * MIN);
+    await c.pulse(c.node, turn, 'tool', lastSign, lastSign);
+    await moveStalledQueues(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('done');
+    expect((await c.job(next)).status).toBe('running');
+  });
+
+  it('closes a running turn and starts the next queued turn when two views report no_program', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const next = await c.message(c.hana.id, 'The branch is ready.');
+    const screen = screens(c, turn);
+    screen.show({ result: 'refused', reason: 'no_program', state: 'gone', snapshot: null, instance: null, jobId: null, input: 'unknown' });
+    c.later(2 * MIN);
+    await moveStalledQueues(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('running');
+    c.later(2 * MIN);
+    await moveStalledQueues(c.ctx, new Date());
+    expect(await c.job(turn)).toMatchObject({ status: 'failed', error: 'machine_restarted' });
+    expect((await c.job(next)).status).toBe('running');
+  });
+
   /* The orchestrator's turn its node still runs, whose program has stood idle at its prompt since a minute after it began,
      while Ivan's message waits behind it: the end of that turn never reached Hornhoof. */
   async function idleBehind(c: Awaited<ReturnType<typeof company>>) {
@@ -591,6 +624,40 @@ describe('a turn its node still lists whose program is gone', () => {
     c.later();
     await reconcile(c.ctx, new Date());
     expect(await c.job(turn)).toMatchObject({ status: 'failed', error: 'machine_offline' });
+  });
+
+  it('ends a running turn whose node reports no live program for the employee even without a gone pulse, and starts the next turn', async () => {
+    const c = await company();
+    const start = Date.now();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const next = await c.message(c.hana.id, 'Bruno: the branch is pushed.');
+    c.later(3 * MIN);
+    await c.pulse(c.node, turn, 'tool', start, start);
+    await c.live(c.node, [c.orchestrator.id]);
+    await c.roundHeld(c.node);
+
+    expect(await c.job(turn)).toMatchObject({ status: 'failed', error: 'machine_restarted' });
+    expect((await c.job(next)).status).toBe('running');
+    expect(c.sentRun(next)).toBe(true);
+  });
+
+  it('closes a running turn with no sign of life past the shared turn timeout and starts the next queued turn', async () => {
+    const c = await company();
+    const start = Date.now();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const next = await c.message(c.hana.id, 'Bruno: the branch is pushed.');
+    c.later(TURN_TIMEOUT_MS - MIN);
+    await c.pulse(c.node, turn, 'tool', start, start);
+    await reconcile(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('running');
+    expect((await c.job(next)).status).toBe('queued');
+
+    c.later(MIN);
+    await c.pulse(c.node, turn, 'tool', start, start);
+    await reconcile(c.ctx, new Date());
+    expect(await c.job(turn)).toMatchObject({ status: 'failed', error: 'machine_restarted' });
+    expect((await c.job(next)).status).toBe('running');
+    expect(c.sentRun(next)).toBe(true);
   });
 });
 
