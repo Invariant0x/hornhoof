@@ -7,7 +7,7 @@ import type { Readable } from 'node:stream';
 import { z } from 'zod';
 import type { JobUser } from './isolation.js';
 import { checkQueueOffline, currentCheckLease, reuseCheckLease, suspendCheckSlots, withCheckSlot } from './check-queue.js';
-import { assertCheckGroup, checkGroupMembers, cleanCheckGroup, signalCheckGroup, type CheckGroup } from './check-group.js';
+import { assertCheckGroup, checkGroupMembers, checkGroupProcess, cleanCheckGroup, signalCheckGroup, type CheckGroup } from './check-group.js';
 import { trackCheckProcess } from './check-processes.js';
 import { refusalText, type AgentCommandVerdict, type CommandInput } from './command-guard.js';
 
@@ -77,18 +77,47 @@ async function assertCommandPolicy(key: string, input: Command, signal: AbortSig
 
 const STOP = 'The machine check slot ended.';
 
+/* The waiting groups that hold a slot now, by their leader's PID, with the lease and the agent whose it is (#2063). A check
+   started from inside one of them, as a script's own tsc that lost HH_CHECK_SLOT on the way, runs in that slot: in line it
+   would wait forever for the slot its own ancestor holds. */
+const holding = new Map<number, { lease: string; key: string }>();
+
+/* How far up a caller's parents the node looks for a held group: well past any real nesting of scripts. */
+const ANCESTRY = 64;
+
+/* The lease of the slot a caller already runs in: one held by the agent's own waiting group that the caller, or one of its
+   parents, belongs to by process group or session. None for a caller outside every held group. */
+async function enclosingLease(key: string, caller: number | undefined): Promise<string | undefined> {
+  for (let pid = caller, depth = 0; pid && pid > 1 && depth < ANCESTRY; depth++) {
+    const found = await checkGroupProcess(pid).catch(() => null);
+    if (!found) return undefined;
+    const held = holdingOf(key, found.group) ?? holdingOf(key, found.session);
+    if (held) return held;
+    pid = found.parent;
+  }
+  return undefined;
+}
+
+const holdingOf = (key: string, group: number): string | undefined => {
+  const entry = holding.get(group);
+  return entry?.key === key ? entry.lease : undefined;
+};
+
 /* The caller owns execution; the node owns cleanup. Closing a request is not evidence that its detached group ended. */
-const held = (res: ServerResponse, group: CheckGroup, uid: number) => async (signal: AbortSignal): Promise<boolean> => {
+const held = (res: ServerResponse, group: CheckGroup, uid: number, key: string) => async (signal: AbortSignal): Promise<boolean> => {
+  const lease = currentCheckLease();
+  if (lease) holding.set(group.pid, { lease, key });
   let stop!: () => void;
   const ended = new Promise<void>(resolve => {
     stop = () => { send(res, { type: 'stop', message: STOP }); resolve(); };
     res.once('close', resolve);
     signal.addEventListener('abort', stop, { once: true });
     if (res.destroyed || signal.aborted) resolve();
-    else send(res, { type: 'slot', lease: currentCheckLease() });
+    else send(res, { type: 'slot', lease });
   });
   try { await ended; }
   finally {
+    if (holding.get(group.pid)?.lease === lease) holding.delete(group.pid);
     signal.removeEventListener('abort', stop);
     await cleanCheckGroup(group, uid, { list: checkGroupMembers, kill: (_pid, value) => signalCheckGroup(group, uid, user?.gid ?? process.getgid!(), value), block: reason => suspendCheckSlots(group.pid, reason) });
   }
@@ -96,9 +125,10 @@ const held = (res: ServerResponse, group: CheckGroup, uid: number) => async (sig
 };
 
 /* jobId: the step of the tools Hornhoof opened for a command with no turn running, whose slot it is. */
-async function admitCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse, jobId: string | undefined): Promise<boolean> {
-  const run = input.wait ? held(res, input.group!, user?.uid ?? process.getuid!()) : (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
-  if (input.lease) return reuseCheckLease(input.lease, key, signal, run);
+async function admitCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse, jobId: string | undefined, callerPid: number | undefined): Promise<boolean> {
+  const run = input.wait ? held(res, input.group!, user?.uid ?? process.getuid!(), key) : (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
+  const lease = input.lease ?? await enclosingLease(key, callerPid);
+  if (lease) return reuseCheckLease(lease, key, signal, run);
   return withCheckSlot(run, { agentId: key, ...(jobId ? { jobId } : {}), label: basename(input.command[0]).slice(0, 100), signal, onPosition: position => { send(res, { type: 'queued', position }); } });
 }
 
@@ -125,7 +155,7 @@ export async function serveCheckCommand(key: string, body: Buffer, signal: Abort
       if (!input.group) throw new Error('A waiting check must register its process group.');
       await assertCheckGroup(input.group, user?.uid ?? process.getuid!(), callerPid);
     } else await assertCommandPolicy(key, input, signal);
-    return await admitCommand(key, input, signal, res, jobId);
+    return await admitCommand(key, input, signal, res, jobId, callerPid);
   } catch (error) {
     send(res, { type: 'error', message: error instanceof Error ? error.message : 'Check command stopped.' });
     return false;
