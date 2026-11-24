@@ -56,7 +56,7 @@ export async function slotsApply(db: Db_, task: Pick<Task, 'departmentId'>): Pro
 }
 
 const queuedOf = (db: Db_, departmentId: string) =>
-  db.select().from(tasks).where(and(eq(tasks.departmentId, departmentId), isNotNull(tasks.queuedAt))).orderBy(asc(tasks.queuedAt), asc(tasks.number));
+  db.select().from(tasks).where(and(eq(tasks.departmentId, departmentId), isNotNull(tasks.queuedAt), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.queuedAt), asc(tasks.number));
 
 /* Whether the work given joins a slot now or waits for the next turn. A small addition joins a slot of its product that has
    none yet; anything else takes a free slot, unless others already wait, who go first. */
@@ -112,6 +112,17 @@ async function holderOf(tx: Tx, task: Task): Promise<string | null> {
 
 /* The tasks the turn opened took in, told to everyone who watches. */
 export const publishLoaded = (ctx: Parameters<typeof published>[0], loaded: { task: Task }[]): void => loaded.forEach(l => published(ctx, l.task));
+
+/* Work made urgent while it waits goes past the queue at once: to its named holder or the head, who is woken for it. */
+export async function jumpQueue(tx: Tx, task: Task): Promise<{ task: Task; wakes: Wake[] }> {
+  const holder = task.queuedAt ? await holderOf(tx, task) : null;
+  if (!holder) return { task, wakes: [] };
+  const [row] = await tx.update(tasks).set({ assigneeAgentId: holder, queuedAt: null, updatedAt: new Date() }).where(eq(tasks.id, task.id)).returning();
+  await note(tx, row!, { kind: 'assigned', actor: { agentId: task.createdByAgentId ?? holder }, text: 'It is urgent, so it goes past the queue.', data: { assignee: holder } });
+  const wakes: Wake[] = [{ agentId: holder, taskId: row!.id, why: 'assigned' }];
+  await keepWakes(tx, task.companyId, wakes);
+  return { task: row!, wakes };
+}
 
 /* The turn that opens takes the queue in: in order, as many as the slots hold, each to its named holder or the head, who is
    woken for it. What does not fit, and what has no one to take it, waits for the turn after. */

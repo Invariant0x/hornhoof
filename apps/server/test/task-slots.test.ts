@@ -92,6 +92,19 @@ describe('turn slots', () => {
     expect(res.json().task).toMatchObject({ assignee: null, queue: { ahead: 1, position: 1 } });
   });
 
+  it('leaves the queue when it is cancelled, and when it is made urgent goes past the rest to its head at once', async () => {
+    const { give, row, app, db, head, ceo } = await company(1);
+    await give({ title: 'A' });
+    await give({ title: 'B' }, { title: 'C' }, { title: 'D' });
+    await db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.title, 'B'));
+    const list = async () => (await app.inject({ url: '/api/tasks?status=open', ...as(ceo) })).json().tasks as { title: string; queue: { position: number } | null }[];
+    expect((await list()).find(t => t.title === 'C')!.queue).toMatchObject({ position: 1 });
+    const urgent = await app.inject({ method: 'PUT', url: `/api/tasks/${(await row('D')).id}/urgent`, payload: { urgent: true }, ...as(ceo) });
+    expect(urgent.statusCode, urgent.body).toBeLessThan(300);
+    expect(await row('D')).toMatchObject({ assigneeAgentId: head.id, queuedAt: null, urgent: true });
+    expect((await list()).find(t => t.title === 'C')!.queue).toMatchObject({ position: 1 });
+  });
+
   it('loads the queue into the turn that opens: in order, as many as the slots take, each woken at its head', async () => {
     const { give, row, db, head, companyId, dev } = await company(2);
     await give({ title: 'A' }, { title: 'B' });
