@@ -87,19 +87,18 @@ export class RoadStripPainter {
   private readonly matrix = new Matrix();
   private loaded = false;
 
-  /* Loads the strips the pack names; resolves to whether every street tier has a picture. */
-  async load(baseUrl: string, paths: Readonly<Partial<Record<RoadTier, string>>>): Promise<boolean> {
+  /* Loads the strips the pack names through `read` (the pack's art files); resolves to whether every street tier has
+     a picture. */
+  async load(read: (path: string) => Promise<Blob | null>, paths: Readonly<Partial<Record<RoadTier, string>>>): Promise<boolean> {
     const tiers = Object.keys(TIER_ORDER) as RoadTier[];
     const results = await Promise.all(
       tiers.map(async tier => {
         const path = paths[tier];
         if (!path) return null;
         try {
-          /* A plain image request, like the rest of the ground art: no loader worker started from a blob. */
-          const img = new Image();
-          img.src = `${baseUrl}${path}`;
-          await img.decode();
-          const tex = Texture.from(img);
+          const blob = await read(path);
+          if (!blob) return null;
+          const tex = Texture.from(await createImageBitmap(blob));
           tex.source.style.addressModeU = 'repeat';
           tex.source.style.scaleMode = 'linear';
           return [tier, tex] as const;
