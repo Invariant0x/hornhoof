@@ -171,7 +171,14 @@ describe('Cleared ground under building lots', () => {
       const { map, city } = liveCity(pack);
       const clearing = clearingOf(pack, city);
       const edge = pack.lotGround!.edgeTiles;
-      const b = city.buildings.find(x => x.stage >= 1 && x.spanCol >= 2)!;
+      /* A lot with no other lot beside its front right side for twice the edge, so only its own edge is walked. */
+      const reach = 2 * edge + 1;
+      const alone = (x: CityBuilding) =>
+        ![...city.buildings.filter(o => o !== x), ...city.vacatedLots].some(
+          o => o.col < x.col + x.spanCol + reach && o.col + o.spanCol > x.col + x.spanCol && o.row < x.row + x.spanRow / 2 + reach && o.row + o.spanRow > x.row + x.spanRow / 2 - reach,
+        );
+      const b = city.buildings.find(x => x.stage >= 1 && x.spanCol >= 2 && alone(x))!;
+      expect(b, pack.id).toBeDefined();
       /* Walk out of the lot's middle through its front right side, one screen pixel at a time. */
       const mid = b.row + b.spanRow / 2;
       let prev = 1;
