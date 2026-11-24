@@ -156,3 +156,72 @@ describe('what a cleaning leaves because it cannot come back', () => {
     expect((await keeper.pass())?.kept).toEqual([]);
   });
 });
+
+describe('what a quick look keeps and what it reads again', () => {
+  const part = (calls: string[]) => ({
+    part: 'checkTemp' as const, size: async () => 7, clean: async () => { calls.push('clean'); return 5; }, quick: async () => { calls.push('quick'); return 3; },
+  });
+  const other = (calls: string[]) => ({ part: 'recordings' as const, size: async () => 9, clean: async () => { calls.push('clean-other'); return 1; } });
+
+  it('runs only what a part can clean in a moment, keeps what the last full pass measured, and reads the disk again', async () => {
+    const calls: string[] = [];
+    let free = 2 * MB;
+    const keeper = new DiskKeeper({ disk: async () => ({ total: 10 * MB, free }), settings: NEEDS_3_MB, cleaners: [part(calls), other(calls)], now: () => at });
+    expect((await keeper.pass())?.parts).toEqual({ checkTemp: 7, recordings: 9 });
+    expect(keeper.low).toBe(true);
+    calls.length = 0;
+    free = 6 * MB;
+    const report = await keeper.pass(true);
+    expect(calls).toEqual(['quick']);
+    expect(report?.parts).toEqual({ checkTemp: 7, recordings: 9 });
+    expect(report?.free).toBe(6 * MB);
+    expect(report?.low).toBeNull();
+    expect(report?.cleaned).toContainEqual({ part: 'checkTemp', bytes: 3, at: at.toISOString() });
+  });
+
+  it('is a full pass when none came before it, as it has nothing to keep', async () => {
+    const calls: string[] = [];
+    const keeper = new DiskKeeper({ disk: async () => ({ total: 10 * MB, free: 9 * MB }), settings: NEEDS_3_MB, cleaners: [part(calls), other(calls)], now: () => at });
+    const report = await keeper.pass(true);
+    expect(calls).toEqual(['clean', 'clean-other']);
+    expect(report?.parts).toEqual({ checkTemp: 7, recordings: 9 });
+  });
+});
+
+describe('the room a light check needs', () => {
+  const settings = { share: 0, amount: 8 * MB, light: 3 * MB };
+  const keeperAt = (free: () => number | null) => new DiskKeeper({ disk: async () => (free() === null ? null : { total: 10 * MB, free: free()! }), settings, cleaners: [], now: () => at });
+
+  it('is none before the first pass, and none where the disk cannot be read', async () => {
+    let free: number | null = 2 * MB;
+    const keeper = keeperAt(() => free);
+    expect(keeper.light).toBeNull();
+    await keeper.pass();
+    expect(keeper.light).not.toBeNull();
+    free = null;
+    await keeper.pass();
+    expect(keeper.light).toBeNull();
+  });
+
+  it('is short under its own amount, which is less than what heavy work needs, and is back a tenth above it', async () => {
+    let free = 5 * MB;
+    const keeper = keeperAt(() => free);
+    expect((await keeper.pass())?.low).toEqual({ since: at.toISOString() });
+    expect(keeper.light).toEqual({ free: 5 * MB, threshold: 3 * MB, low: null });
+    free = 2 * MB;
+    await keeper.pass();
+    expect(keeper.light).toEqual({ free: 2 * MB, threshold: 3 * MB, low: { since: at.toISOString() } });
+    free = 3.2 * MB;
+    await keeper.pass();
+    expect(keeper.light?.low).toEqual({ since: at.toISOString() });
+    free = 3.4 * MB;
+    await keeper.pass();
+    expect(keeper.light?.low).toBeNull();
+  });
+
+  it('is never more than what heavy work needs', async () => {
+    const keeper = new DiskKeeper({ disk: async () => ({ total: 10 * MB, free: 5 * MB }), settings: { share: 0, amount: 2 * MB, light: 3 * MB }, cleaners: [], now: () => at });
+    await keeper.pass();
+    expect(keeper.light).toEqual({ free: 5 * MB, threshold: 2 * MB, low: null });
+  });
+});

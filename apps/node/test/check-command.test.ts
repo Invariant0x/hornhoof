@@ -296,7 +296,7 @@ async function guardedCommandFixture() {
     });
     return response.text();
   };
-  return { dir, root, bin, key, bridge, run, acquired: () => acquired, sentinel };
+  return { dir, root, bin, key, bridge, client, run, acquired: () => acquired, sentinel };
 }
 
 describe('command policy boundary', () => {
@@ -338,6 +338,26 @@ describe('command policy boundary', () => {
     expect(text).toContain(Buffer.from('single-file-output').toString('base64'));
     expect(text).toContain('"type":"exit","code":7');
     expect(c.acquired()).toBe(1);
+  });
+
+  it('takes a single-file check while heavy work waits for disk space, and refuses every check only when none starts', async () => {
+    const c = await guardedCommandFixture();
+    const program = join(c.bin, 'vitest'), build = join(c.bin, 'webpack');
+    writeFileSync(program, '#!/bin/sh\nprintf light-output\n'); chmodSync(program, 0o755);
+    writeFileSync(build, '#!/bin/sh\nprintf heavy-output\n'); chmodSync(build, 0o755);
+    writeFileSync(join(c.root, 'one.test.ts'), 'export {};');
+    configureCheckCommands(user, createAgentCommandGuard(c.dir));
+    c.client.refuse(null, 'Builds and browser runs wait for disk space.');
+    const light = await c.run(undefined, ['vitest', 'run', 'one.test.ts']);
+    expect(light).toContain(Buffer.from('light-output').toString('base64'));
+    expect(light).toContain('"type":"exit","code":0');
+    const heavy = await c.run(undefined, ['webpack', '--mode', 'production']);
+    expect(heavy).toContain('"type":"error","message":"Builds and browser runs wait for disk space."');
+    expect(heavy).not.toContain('"type":"exit"');
+    c.client.refuse('This machine is nearly out of disk space.', 'This machine is nearly out of disk space.');
+    const refused = await c.run(undefined, ['vitest', 'run', 'one.test.ts']);
+    expect(refused).toContain('"type":"error","message":"This machine is nearly out of disk space."');
+    expect(refused).not.toContain('"type":"exit"');
   });
 
   it('does not admit a command whose current turn ends while its guard is pending', async () => {

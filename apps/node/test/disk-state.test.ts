@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DiskCleaned, DiskLow, diskSettings, diskThreshold, DISK_SETTINGS } from '../src/disk/state.js';
+import { DiskCleaned, DiskLow, diskSettings, diskThreshold, DISK_SETTINGS, lightThreshold } from '../src/disk/state.js';
 
 const GIB = 1024 ** 3;
 const at = (minutes: number) => new Date(Date.UTC(2026, 10, 20, 12, minutes));
@@ -17,10 +17,28 @@ describe('the free space a node needs for heavy work', () => {
 
   it('comes from the share in percent and the amount in GiB the machine owner set, else the defaults', () => {
     expect(diskSettings({})).toEqual(DISK_SETTINGS);
-    expect(diskSettings({ HORNHOOF_DISK_SHARE: '5', HORNHOOF_DISK_GB: '8' })).toEqual({ share: 0.05, amount: 8 * GIB });
+    expect(diskSettings({ HORNHOOF_DISK_SHARE: '5', HORNHOOF_DISK_GB: '8' })).toEqual({ share: 0.05, amount: 8 * GIB, light: DISK_SETTINGS.light });
     for (const bad of ['', '-1', '1.5', '91', 'ten', '1e3']) expect(diskSettings({ HORNHOOF_DISK_SHARE: bad }).share).toBe(DISK_SETTINGS.share);
     for (const bad of ['', '-2', '0.5', '4097', 'many']) expect(diskSettings({ HORNHOOF_DISK_GB: bad }).amount).toBe(DISK_SETTINGS.amount);
-    expect(diskSettings({ HORNHOOF_DISK_SHARE: '0', HORNHOOF_DISK_GB: '0' })).toEqual({ share: 0, amount: 0 });
+    expect(diskSettings({ HORNHOOF_DISK_SHARE: '0', HORNHOOF_DISK_GB: '0' })).toEqual({ share: 0, amount: 0, light: DISK_SETTINGS.light });
+  });
+});
+
+describe('the free space a node needs for a light check', () => {
+  it('is a few GiB whatever the size of the disk, where heavy work needs a share of it', () => {
+    expect(DISK_SETTINGS.light).toBe(3 * GIB);
+    expect(lightThreshold(135 * GIB, DISK_SETTINGS)).toBe(3 * GIB);
+    expect(lightThreshold(4000 * GIB, DISK_SETTINGS)).toBe(3 * GIB);
+  });
+
+  it('is never more than what heavy work needs, so a disk set to keep little free keeps it for both', () => {
+    expect(lightThreshold(64 * GIB, { share: 0, amount: 2 * GIB, light: 3 * GIB })).toBe(2 * GIB);
+    expect(lightThreshold(64 * GIB, { share: 0, amount: 0, light: 3 * GIB })).toBe(0);
+  });
+
+  it('comes from the GiB the machine owner set, else the default', () => {
+    expect(diskSettings({ HORNHOOF_DISK_LIGHT_GB: '5' }).light).toBe(5 * GIB);
+    for (const bad of ['', '-2', '0.5', '4097', 'few']) expect(diskSettings({ HORNHOOF_DISK_LIGHT_GB: bad }).light).toBe(DISK_SETTINGS.light);
   });
 });
 

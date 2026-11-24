@@ -224,3 +224,91 @@ it('retries a release on reconnect after its send failed and the offline grace e
   ]);
   expect(client.leaseIds()).toEqual([]);
 });
+
+describe('a refusal for one class of check', () => {
+  /* A client whose server grants a slot as soon as it is asked, so a check that is not refused never waits for one. */
+  const granting = () => {
+    const client: CheckClient = new CheckClient(frame => {
+      if (frame.type === 'check.acquire') queueMicrotask(() => client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 }));
+      return true;
+    });
+    client.online(true);
+    return client;
+  };
+  /* What a check came to: the words it was refused with, that it was granted, or that it still waits. */
+  const outcome = (check: Promise<{ release(): void }>) => Promise.race([
+    check.then(lease => { lease.release(); return 'granted'; }, (error: Error) => error.message),
+    new Promise<string>(resolve => setTimeout(() => resolve('waiting'), 100)),
+  ]);
+
+  it('holds heavy work and lets a light check go on, while a refusal of every check holds both', async () => {
+    const client = granting();
+    client.refuse(null, 'Builds wait for disk space.');
+    expect(client.refused()).toBe('Builds wait for disk space.');
+    expect(client.refused(true)).toBeNull();
+    expect(await outcome(client.acquire())).toBe('Builds wait for disk space.');
+    expect(await outcome(client.acquire({ light: false }))).toBe('Builds wait for disk space.');
+    expect(await outcome(client.acquire({ light: true }))).toBe('granted');
+    client.refuse('No check starts now.', 'No check starts now.');
+    expect(client.refused(true)).toBe('No check starts now.');
+    expect(await outcome(client.acquire({ light: true }))).toBe('No check starts now.');
+    expect(await outcome(client.acquire())).toBe('No check starts now.');
+  });
+
+  it('refuses with the same words for both when it is given one', () => {
+    const client = new CheckClient(() => true);
+    client.refuse('Group 7 is alive.');
+    expect(client.refused()).toBe('Group 7 is alive.');
+    expect(client.refused(true)).toBe('Group 7 is alive.');
+  });
+
+  it('rejects queued heavy work when only heavy work is refused, and keeps a queued light check', async () => {
+    const requests: CheckQueueRequest[] = [];
+    const client = new CheckClient(frame => { requests.push(frame); return true; });
+    client.online(true);
+    const heavy = outcome(client.acquire()), light = client.acquire({ light: true });
+    client.refuse(null, 'Builds wait.');
+    expect(await heavy).toBe('Builds wait.');
+    client.receive({ type: 'check.state', id: requests.find(frame => frame.type === 'check.acquire' && frame.id !== requests[0]!.id)!.id, state: 'running', position: 0 });
+    (await light).release();
+  });
+
+  it('tells a change of either refusal, and none when nothing changed', () => {
+    const client = new CheckClient(() => true);
+    const changed = vi.fn(); client.refusalChanged = changed;
+    client.refuse(null, 'Builds wait.');
+    client.refuse(null, 'Builds wait.');
+    client.refuse('Nothing starts.', 'Builds wait.');
+    client.refuse(null, null);
+    expect(changed).toHaveBeenCalledTimes(3);
+  });
+
+  it('asks the one that looks after the disk to look again before it refuses, and goes on when that lifted the refusal', async () => {
+    const client = granting();
+    client.refuse(null, 'Builds wait.');
+    const again = vi.fn(async () => { client.refuse(null, null); });
+    client.beforeRefusing = again;
+    expect(await outcome(client.acquire())).toBe('granted');
+    expect(again).toHaveBeenCalledTimes(1);
+    expect(await outcome(client.acquire())).toBe('granted');
+    expect(again).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not ask it for a check that is not refused', async () => {
+    const client = granting();
+    client.refuse(null, 'Builds wait.');
+    const again = vi.fn(async () => {});
+    client.beforeRefusing = again;
+    expect(await outcome(client.acquire({ light: true }))).toBe('granted');
+    expect(again).not.toHaveBeenCalled();
+  });
+
+  it('still refuses when looking again changed nothing, and when looking again fails', async () => {
+    const client = granting();
+    client.refuse(null, 'Builds wait.');
+    client.beforeRefusing = async () => {};
+    expect(await outcome(client.acquire())).toBe('Builds wait.');
+    client.beforeRefusing = async () => { throw new Error('du failed'); };
+    expect(await outcome(client.acquire())).toBe('Builds wait.');
+  });
+});
